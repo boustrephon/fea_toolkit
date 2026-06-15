@@ -17,7 +17,7 @@ class SectionLibrary:
         - length⁴  : moments of inertia, torsional constant
 
     Usage:
-        lib = SectionLibrary(Path("section_dict.pkl"), target_units='mm')
+        lib = SectionLibrary(Path("section_dict.pkl"), target_units='m')
         lib.enrich_section(my_section)   # my_section must be in target_units
     """
 
@@ -40,6 +40,11 @@ class SectionLibrary:
 
     # Conversion factor from inches to mm (for exponent 1)
     INCH_TO_MM = 25.4
+    INCH_TO_CM = 2.54
+    INCH_TO_M = 0.0254
+    FOOT_TO_MM = 304.8
+    FOOT_TO_CM = 30.48
+    FOOT_TO_M = 0.3048
 
     def __init__(self, db_path: Path, target_units: str = 'mm'):
         """Load the pickle file and set target unit system.
@@ -68,7 +73,7 @@ class SectionLibrary:
             if name in sections_dict:
                 props = sections_dict[name].copy()
                 props['_catalogue'] = cat_name
-                props['_length_units'] = cat_data.get('LENGTH_UNITS', 'mm')
+                props['_length_units'] = cat_data.get('LENGTH_UNITS', 'm')
                 return props
         return None
 
@@ -87,8 +92,12 @@ class SectionLibrary:
         # Determine conversion factor
         if from_units == 'in' and self.target_units == 'mm':
             factor = self.INCH_TO_MM ** exponent
+        elif from_units == 'in' and self.target_units == 'm':
+            factor = self.INCH_TO_M ** exponent
         elif from_units == 'mm' and self.target_units == 'in':
             factor = (1.0 / self.INCH_TO_MM) ** exponent
+        elif from_units == 'm' and self.target_units == 'in':
+            factor = (1.0 / self.INCH_TO_M) ** exponent
         else:
             factor = 1.0  # unknown units, no conversion
         return val * factor
