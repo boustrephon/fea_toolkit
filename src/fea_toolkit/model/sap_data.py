@@ -99,10 +99,11 @@ class SAPModelData:
     frame_assignments: Dict[str, str]      # frame_id -> section_name
     area_assignments: Dict[str, str]       # area_id -> section_name
     groups: Dict[str, Group]
-    frame_auto_mesh: Dict[str, Dict[str, Any]] = field(default_factory=dict)   # frame_id -> auto mesh settings
+    frame_auto_mesh: Dict[str, Dict[str, Any]]   # frame_id -> auto mesh settings
     # Loads (to be expanded later)
     # dist_loads: Dict[str, DistributedLoad]
     # conc_loads: Dict[str, ConcentratedLoad]
-    units: str = "mm"   # length unit used for all coordinates and section properties
+    # Default units used for all coordinates and section properties
+    units: Dict[str, str] = field(default_factory=lambda: {'F': "N", 'L': "m", 'T': "C"})   
     
 
