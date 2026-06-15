@@ -1,13 +1,111 @@
 # fea_toolkit/model/geometry.py
 
+"""Geometric utilities for element orientation, splitting, and intersections."""
+
 import math
 import numpy as np
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Sequence, Tuple, Dict, List, Any, Union # , Optional
 from collections import defaultdict
 
-# ... (keep existing get_SAP_vecxz, rotate_about_axis, point_on_segment) ...
+# ============================================================================
+# Vector and orientation functions (from SAP2OPS_v4.py)
+# ============================================================================
+
+def get_SAP_vecxz(vec_x: Union[Sequence[float], np.ndarray],
+                  angle: float = 0.0) -> np.ndarray:
+    """Generate default vecxz vector for OpenSees geometric transformation.
+
+    Args:
+        vec_x: Vector from node I to node J (local x‑axis).
+        angle: Rotation (degrees) about the local x‑axis from default.
+
+    Returns:
+        Unit vector in the local x‑z plane (vecxz).
+    """
+    if isinstance(vec_x, Sequence):
+        vec_x = np.array(vec_x, dtype=float)
+    v1 = vec_x
+    length = np.linalg.norm(v1)
+    if length < 1e-12:
+        raise ValueError("Vector vec_x has zero length.")
+    v1_norm = v1 / length
+
+    globalY = np.array([0.0, 1.0, 0.0])
+    globalZ = np.array([0.0, 0.0, 1.0])
+
+    # Check if element is vertical (parallel to global Z)
+    cos_sim = np.dot(v1_norm, globalZ)
+    if abs(cos_sim) > 0.9999:
+        return globalY if cos_sim > 0 else -globalY
+
+    # Default vecxz = cross(local_x, global_Z) normalized
+    v3 = np.cross(v1_norm, globalZ)
+    v3_norm = v3 / np.linalg.norm(v3)
+
+    if angle == 0.0:
+        return v3_norm
+    else:
+        theta = math.radians(angle)
+        return rotate_about_axis(v3_norm, v1_norm, theta)
+
+
+def rotate_about_axis(v: np.ndarray, axis: np.ndarray, theta_rad: float) -> np.ndarray:
+    """Rotate a vector about an axis using Rodrigues' formula.
+
+    Args:
+        v: Vector to rotate.
+        axis: Rotation axis (will be normalized).
+        theta_rad: Rotation angle in radians.
+
+    Returns:
+        Rotated unit vector.
+    """
+    k = axis / np.linalg.norm(axis)
+    v_rot = (v * math.cos(theta_rad) +
+             np.cross(k, v) * math.sin(theta_rad) +
+             k * np.dot(k, v) * (1 - math.cos(theta_rad)))
+    return v_rot / np.linalg.norm(v_rot)
+
+
+def point_on_segment(p: Union[Sequence[float], np.ndarray],
+                     a: Union[Sequence[float], np.ndarray],
+                     b: Union[Sequence[float], np.ndarray],
+                     tol: float = 1e-6) -> bool:
+    """Check if point p lies on the closed line segment from a to b.
+
+    Args:
+        p: Point coordinates.
+        a: Start point of segment.
+        b: End point of segment.
+        tol: Tolerance for collinearity and projection.
+
+    Returns:
+        True if p is within the segment (including endpoints).
+    """
+    p = np.asarray(p)
+    a = np.asarray(a)
+    b = np.asarray(b)
+    ab = b - a
+    ap = p - a
+    bp = p - b
+
+    # Collinearity check
+    cross = np.cross(ab, ap)
+    if np.linalg.norm(cross) > tol:
+        return False
+
+    # Check if projection lies between a and b
+    if np.dot(ap, ab) < -tol or np.dot(bp, -ab) < -tol:
+        return False
+    return True
+
+
+# ============================================================================
+# Spatial grid for efficient nearest‑neighbour search
+# ============================================================================
 
 class SpatialGrid:
+    """Simple 3D grid for spatial indexing of points and line segments."""
     def __init__(self, cell_size: float = 1.0):
         self.cell_size = cell_size
         self.grid: Dict[Tuple[int, int, int], List[Tuple[Any, Tuple[float, float, float]]]] = defaultdict(list)
@@ -31,6 +129,11 @@ class SpatialGrid:
                     result.extend(self.grid[(i, j, k)])
         return result
 
+
+# ============================================================================
+# Element splitting at joints (respecting auto‑mesh)
+# ============================================================================
+
 def split_elements_at_joints(nodes: Dict[str, Dict[str, float]],
                              elements: Dict[str, Dict[str, Any]],
                              assignments: Dict[str, Any],
@@ -40,7 +143,7 @@ def split_elements_at_joints(nodes: Dict[str, Dict[str, float]],
                              verbose: bool = False) -> Tuple[Dict[str, Dict], Dict[str, Any], Dict[str, Any]]:
     """Split frame elements at nodes that lie on them, using spatial grid.
     Only splits if auto_mesh[eid].get('AtJoints') is True.
-    Returns new elements, assignments, and dist_loads.
+    Returns new elements, assignments, and dist_loads. (??)
     """
     if not elements:
         return elements, assignments, dist_loads
@@ -58,7 +161,7 @@ def split_elements_at_joints(nodes: Dict[str, Dict[str, float]],
     new_elements = {}
     new_assignments = {}
     new_dist_loads = {}
-    # Determine next element ID (assuming string IDs may contain numbers)
+    # Determine next element ID (assuming numeric IDs)
     existing_ids = [int(e.get('id', 0)) for e in elements.values() if str(e.get('id', '0')).isdigit()]
     next_id = max(existing_ids) + 1 if existing_ids else 1
 
@@ -121,10 +224,16 @@ def split_elements_at_joints(nodes: Dict[str, Dict[str, float]],
         print(f"split_elements_at_joints: {len(elements)} → {len(new_elements)} elements")
     return new_elements, new_assignments, new_dist_loads
 
-def split_elements(nodes: Dict, elements: Dict, assignments: Dict,
-                   dist_loads: Dict, auto_mesh: Dict,
-                   tol: float = 1e-6, verbose: bool = False) -> Tuple[Dict, Dict, Dict]:
-    """Main splitting entry point."""
-    # Currently only splits at joints. Add frame intersections later.
-    return split_elements_at_joints(nodes, elements, assignments, dist_loads, auto_mesh, tol, verbose)
+
+def split_elements(nodes: Dict[str, Dict[str, float]],
+                   elements: Dict[str, Dict[str, Any]],
+                   assignments: Dict[str, Any],
+                   dist_loads: Dict[str, Any],
+                   auto_mesh: Dict[str, Dict[str, Any]],
+                   tol: float = 1e-6,
+                   verbose: bool = False) -> Tuple[Dict[str, Dict], Dict[str, Any], Dict[str, Any]]:
+    """Main entry point for element splitting (currently only at joints)."""
+    return split_elements_at_joints(nodes, elements, assignments, dist_loads,
+                                    auto_mesh, tol, verbose)
+
 
