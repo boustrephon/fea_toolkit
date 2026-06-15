@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=80", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fea_toolkit"
+dynamic = ["version"]
+description = "FEA to OpenSees/Rhino conversion toolkit"
+authors = [{name = "Andrew Mole"}]
+license = "MIT"
+# readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "openseespy",
+    "opstool",
+    "opsvis",
+    ]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Optional: Add a write_to file so you can inspect the generated string
+[tool.setuptools_scm]
+write_to = "src/fea_toolkit/_version.py" 
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = "-v --tb=short"
