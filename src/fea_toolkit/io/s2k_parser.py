@@ -253,8 +253,8 @@ class SAP2000Parser:
             frame_auto_mesh=frame_auto_mesh,
         )
 
-    def get_model_units(self) -> str:
-        """Extract the length unit used in the SAP2000 model.
+    def get_model_units(self) -> Dict[str, str]:
+        """Extract the units used in the SAP2000 model.
 
         The unit string is found in the 'PROGRAM CONTROL' table, e.g. 'N, mm, C'.
         Returns:
@@ -263,32 +263,19 @@ class SAP2000Parser:
         """
         program_control = self._raw_tables.get("PROGRAM CONTROL", [])
         if not program_control:
-            return "mm"  # default
+            return {'F': "N", 'L': "m", 'T': "C"}  # default
 
         # Look for the CurrUnits field
         first_record = program_control[0]
         units_str = first_record.get("CurrUnits", "")
         if not units_str:
-            return "mm"
+            return {'F': "N",'L': "m", 'T': "C"}
 
         # Expected format: "Force, Length, Temperature"
         # Example: "N, mm, C" or "kN, m, C" or "kip, in, F"
-        parts = [p.strip() for p in units_str.split(",")]
-        if len(parts) < 2:
-            return "mm"
-
-        length_unit_raw = parts[1].lower()
-
-        # Map SAP2000 length units to our internal representation
-        unit_map = {
-            "mm": "mm",
-            "cm": "mm",    # convert cm to mm
-            "m": "mm",     # convert m to mm (multiply by 1000 later if needed)
-            "in": "in",
-            "ft": "in",    # convert ft to in (multiply by 12 later)
-            "": "mm",
-        }
-        return unit_map.get(length_unit_raw, "mm")
+        force, length, temp = [p.strip() for p in units_str.split(",")]
+        
+        return {'F': force,'L': length, 'T': temp}
 
     # ---------- Individual extraction methods (adapted from your SAP2OPS_v4.py) ----------
     def _get_all_nodes(self) -> Dict[str, Node]:
