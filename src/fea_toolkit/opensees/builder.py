@@ -532,18 +532,21 @@ class OpenSeesBuilder:
                               f"Wy2={wy_b:.3f}, Wz2={wz_b:.3f}, Wx2={wx_b:.3f} | {ld.frame_id}")
 
                 else:
-                    # dispBeamColumn / nonlinearBeamColumn: decompose trapezoid
-                    # into an equivalent uniform load (average intensity) applied
-                    # over the loaded portion as best approximation.
-                    wy_avg = (wy_a + wy_b) * 0.5
-                    wz_avg = (wz_a + wz_b) * 0.5
-                    wx_avg = (wx_a + wx_b) * 0.5
+                    # dispBeamColumn / nonlinearBeamColumn: only support uniform
+                    # loads over the full element span [0, 1]. To conserve the
+                    # total force resultant, scale the average intensity by the
+                    # fraction of the element that is actually loaded.
+                    span_frac = bOverL - aOverL
+                    wy_avg = (wy_a + wy_b) * 0.5 * span_frac
+                    wz_avg = (wz_a + wz_b) * 0.5 * span_frac
+                    wx_avg = (wx_a + wx_b) * 0.5 * span_frac
                     ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
                                 wy_avg, wz_avg, wx_avg)
                     if self.config['verbose']:
                         print(f"    Trapezoidal load decomposed to uniform ({pat_tag}): "
                               f"element {elem_tag}, Wy_avg={wy_avg:.3f}, "
-                              f"Wz_avg={wz_avg:.3f}, Wx_avg={wx_avg:.3f} | {ld.frame_id}")
+                              f"Wz_avg={wz_avg:.3f}, Wx_avg={wx_avg:.3f}, "
+                              f"span_frac={span_frac:.3f} | {ld.frame_id}")
             elif ld.load_type == 'Moment':
                 # For moment loads, similar but with Mx, My, Mz – not implemented here
                 if self.config['verbose']:
