@@ -2,11 +2,23 @@
 """Example: Parse a SAP2000 .S2K file, enrich sections, and print summary.
 
 Run this script from the project root (where the 'fea_toolkit/' folder lives):
+
+    # Open a file chooser dialog
     $ python examples/basic_usage.py
+
+    # Use the bundled sample file
+    $ python examples/basic_usage.py --sample
+
+    # Use a specific SAP2000 text file
+    $ python examples/basic_usage.py /path/to/model.$2k
+
+    # Parse only (skip OpenSees analysis)
+    $ python examples/basic_usage.py /path/to/model.s2k --no-analysis
 
 """
 
 import sys
+import argparse
 from pathlib import Path
 import platform
 
@@ -17,7 +29,7 @@ from fea_toolkit import __version__, ops_version
 from fea_toolkit.io.s2k_parser import SAP2000Parser
 from fea_toolkit.model.sections import SectionLibrary
 from fea_toolkit.opensees.builder import OpenSeesBuilder
-from fea_toolkit.io.helper import mac_file_chooser
+from fea_toolkit.io.helper import mac_file_chooser, tkinter_file_chooser
 
 # Get Operating System
 os_name = platform.system()
@@ -29,27 +41,49 @@ print(f"Chipset Architecture: {architecture}")
 print(f'FEA Toolkit Version: {__version__}')
 print(f'OpenSees Version: {ops_version()}')
 
+def pick_file() -> Path:
+    """Open a native file chooser dialog appropriate for the platform."""
+    if os_name == "Darwin" and architecture == "arm64":
+        path = mac_file_chooser()
+    else:
+        path = tkinter_file_chooser()
+    if path is None:
+        sys.exit("No file selected.")
+    return Path(path)
+
 def main():
-    ANALYSE = False
-    # Paths relative to project root (assuming script is run from there)
+    parser = argparse.ArgumentParser(
+        description="Parse a SAP2000 .s2k / .e2k file and optionally run an OpenSees analysis.",
+    )
+    parser.add_argument(
+        "s2k_file", nargs="?", default=None,
+        help="Path to the SAP2000 text file (.s2k, .$2k, .e2k).",
+    )
+    parser.add_argument(
+        "--sample", action="store_true",
+        help="Use the bundled sample file instead of a file chooser.",
+    )
+    parser.add_argument(
+        "--no-analysis", action="store_true",
+        help="Skip the OpenSees analysis step (only parse and enrich).",
+    )
+    args = parser.parse_args()
+    ANALYSE = not args.no_analysis
+
     project_root = Path(__file__).parent.parent
-    project_root = Path(__file__).parent.parent
-    
-    # Option 1: Use fixture (development/testing)
-    s2k_file = project_root / "tests" / "fixtures" / "sample.s2k"
-    
-    # Option 2: Use custom path (comment out the line above and uncomment below)
-    s2k_file = Path('/Users/andrew/Library/Mobile Documents/com~apple~CloudDocs/Work/Projects/CLP_BSDG/Chimney/CPB 250m Chimney.$2k')
-    
-    # Fallback to file chooser if configured path doesn't exist
-    if not s2k_file.exists():
-        chosen_file = mac_file_chooser()
-        if chosen_file is not None:
-            s2k_file = Path(chosen_file)
-            print(f'Chosen file: {s2k_file}')
-        else:
-            print('file-chooser failed')
-            return
+
+    # Determine the SAP2000 file path
+    if args.s2k_file:
+        s2k_file = Path(args.s2k_file)
+        if not s2k_file.exists():
+            sys.exit(f"Error: file not found — {s2k_file}")
+    elif args.sample:
+        s2k_file = project_root / "tests" / "fixtures" / "sample.s2k"
+        if not s2k_file.exists():
+            sys.exit(f"Error: sample file not found at {s2k_file}")
+    else:
+        s2k_file = pick_file()
+
     section_db_path = project_root / "data" / "section_dict.pkl"
 
     # Check if files exist
@@ -63,6 +97,7 @@ def main():
         return
 
     # Parse the model
+    print(f"\nParsing SAP2000 file: {s2k_file}")
     parser = SAP2000Parser(s2k_file)
     parser.parse()
     json_file = s2k_file.with_suffix(".json")
@@ -92,84 +127,127 @@ def main():
     else:
         print("Skipping section enrichment (no database)")
 
-
-    # Optionally build OpenSees model
-
+    # ── Build the OpenSees model ──────────────────────────────────────────
     config = {
         'element_type': 'elasticBeamColumn',
-        # 'split_elements': False,
         'split_elements': True,
         'verbose': True,
     }
     builder = OpenSeesBuilder(model_data, config)
     builder.build()
-    
+
+    # Export split model data for inspection
     split_model_path = s2k_file.with_suffix(".split.json")
     builder.export_split_model(split_model_path)
 
+    # Load totals are always computed after build() — print a summary
+    unit_F = model_data.units.get('F', '?')
+    unit_L = model_data.units.get('L', '?')
+    print(f"\n── Applied load totals per pattern ({unit_F}) ──")
+    for pname, totals in builder.load_totals.items():
+        print(f"  {pname}:")
+        print(f"    Forces:  Fx = {totals['fx']:>12.3f}  Fy = {totals['fy']:>12.3f}  Fz = {totals['fz']:>12.3f}")
+        print(f"    Moments: Mx = {totals['mx']:>12.3f}  My = {totals['my']:>12.3f}  Mz = {totals['mz']:>12.3f}")
+
+    # ── Run analysis and compare with reactions ───────────────────────────
     if ANALYSE:
         odb_tag = 0
-        results = builder.run_static_analysis(odb_tag=odb_tag)
-        disp = results.get('nodal_displacements',{})
-        unit_L = model_data.units['L']
+        print('\n', 80*'=')
+        print(f"── Running OpenSees static analysis (all patterns combined) (ODB tag {odb_tag}) ──")
+        results = builder.run_static_analysis(odb_tag=odb_tag, extract_reactions=True)
+        disp = results.get('nodal_displacements', {})
+
+        # Unit scaling for display
         if unit_L == 'm':
             unit_L2, scale = 'mm', 1000.0
         elif unit_L == 'ft':
             unit_L2, scale = 'in', 12.0
         else:
             unit_L2, scale = unit_L, 1.0
-        print("Displacements (first 5 nodes):")
 
-        if disp is None:
-            print("  No displacement data.")
-        elif hasattr(disp, 'iterrows'):  # pandas DataFrame
-            print(f'Data in dataframe, shape: {disp.shape}')
-            for idx, row in disp.iterrows():
-                if idx >= 5: 
+        # ── Displacements ──
+        print(f"\n── Displacements (first 5 nodes, {unit_L2}) ──")
+        if isinstance(disp, dict) and disp:
+            count = 0
+            for node_tag, d in disp.items():
+                if count >= 5:
                     break
-                node_tag = row.get('nodeTag', idx)
-                dx = row.get('dx', 0.0)
-                dy = row.get('dy', 0.0)
-                dz = row.get('dz', 0.0)
-                print(f"  Node {node_tag}: dx={dx:.3f} {unit_L}, dy={dy:.3f} {unit_L}, dz={dz:.3f} {unit_L}")
-        elif odb_tag > 0 and isinstance(disp, dict):
-            print(f'Data in dictionary, items: {len(disp.keys())}; length: {len(disp["data"])}')
-            # _ = [print(f'*** {k} ***: {v}') for i, (k, v) in enumerate(disp.items()) if i < 10]
-            # print()
-            # _ = [print(f'=== {k} ===: {v}') for i, (k, v) in enumerate(disp['coords'].items()) if i < 10]
-            # print()
-            for i, (node_tag, d) in enumerate(zip(disp['coords']['nodeTags']['data'], disp['data'])):
-                if i >= 5: 
-                    break
-                if isinstance(d, dict):
-                    dx = d.get('dx', 0)
-                    dy = d.get('dy', 0)
-                    dz = d.get('dz', 0)
-                elif isinstance(d, (tuple, list)):
-                    dx = d[0] if len(d) > 0 else 0
-                    dy = d[1] if len(d) > 1 else 0
-                    dz = d[2] if len(d) > 2 else 0
-                else:
-                    continue
-                print(f"  Node {node_tag:3d}: dx={dx * scale:6.1f} {unit_L2}, dy={dy * scale:6.1f} {unit_L2}, dz={dz * scale:6.1f} {unit_L2}")
-                # print(f"  Node {node_tag}: dx={dx} | dy={dy} | dz={dz}")
-        elif isinstance(disp, dict):
-            print(f'Data in dictionary, items: {len(disp.keys())}')
-            print("Displacements (first 5 nodes):")
-            for i, (node_tag, (dx, dy, dz)) in enumerate(disp.items()):
-                if i >= 5: 
-                    break
-                print(f"  Node {node_tag:3d}: dx={dx * scale:6.1f} {unit_L2}, dy={dy * scale:6.1f} {unit_L2}, dz={dz * scale:6.1f} {unit_L2}")
+                dx, dy, dz = d[0] * scale, d[1] * scale, d[2] * scale
+                print(f"  Node {node_tag:>4}: dx = {dx:8.3f}  dy = {dy:8.3f}  dz = {dz:8.3f}")
+                count += 1
         else:
-            print(f"  Unexpected displacement format: {type(disp)}")
+            print("  (no displacement data)")
 
-        print("Results keys:", results.keys())
+        # ── Equilibrium check: applied loads vs reactions ──
+        summed_rx = results.get('summed_reactions')
+        if summed_rx and hasattr(builder, 'load_totals'):
+            print(f"\n── Equilibrium check ({unit_F}, {unit_F}·{unit_L}) ──")
+            # Sum all applied loads across all patterns
+            total_applied = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0,
+                             'mx': 0.0, 'my': 0.0, 'mz': 0.0}
+            for totals in builder.load_totals.values():
+                for k in total_applied:
+                    total_applied[k] += totals[k]
+
+            print(f"  {'':>15}  {'Fx':>12}  {'Fy':>12}  {'Fz':>12}")
+            print(f"  {'Applied':>15}  {total_applied['fx']:12.3f}  {total_applied['fy']:12.3f}  {total_applied['fz']:12.3f}")
+            print(f"  {'Reactions':>15}  {summed_rx['fx']:12.3f}  {summed_rx['fy']:12.3f}  {summed_rx['fz']:12.3f}")
+            print(f"  {'Difference':>15}  {total_applied['fx'] - summed_rx['fx']:12.3f}"
+                  f"  {total_applied['fy'] - summed_rx['fy']:12.3f}"
+                  f"  {total_applied['fz'] - summed_rx['fz']:12.3f}")
+
+        # ── Per-pattern equilibrium checks ──
+        if hasattr(builder, 'load_totals') and len(builder.load_totals) > 1:
+            print('\n', 80*'=')
+            print(f"── Per-pattern equilibrium checks ({unit_F}) ──")
+            for pname in builder.load_totals:
+                print('\n', 80*'-')
+                pat_results = builder.run_static_analysis(
+                    extract_reactions=True,
+                    pattern_scales={pname: 1.0},
+                )
+                pat_rx = pat_results.get('summed_reactions', {})
+                pat_app = pat_results.get('load_totals', {}).get(pname, {})
+                if pat_rx:
+                    print(f"  {pname}:")
+                    print(f"    Applied: Fx={pat_app.get('fx',0):12.3f}  "
+                          f"Fy={pat_app.get('fy',0):12.3f}  "
+                          f"Fz={pat_app.get('fz',0):12.3f}")
+                    print(f"    Reactn:  Fx={pat_rx.get('fx',0):12.3f}  "
+                          f"Fy={pat_rx.get('fy',0):12.3f}  "
+                          f"Fz={pat_rx.get('fz',0):12.3f}")
+
+        # ── Load combination example (1.2 DEAD + 1.6 SUPERDEAD) ──
+        if hasattr(builder, 'load_totals') and len(builder.load_totals) > 1:
+            print('\n', 80*'=')
+            print(f"── Load combination: 1.2 DEAD + 1.6 SUPERDEAD ({unit_F}) ──")
+            combo = {"DEAD": 1.2, "SUPERDEAD": 1.6}
+            combo_results = builder.run_static_analysis(
+                extract_reactions=True,
+                pattern_scales=combo,
+            )
+            crx = combo_results.get('summed_reactions', {})
+            ctots = combo_results.get('load_totals', {})
+            total_app = {'fx': 0., 'fy': 0., 'fz': 0.}
+            for t in ctots.values():
+                for k in total_app:
+                    total_app[k] += t.get(k, 0.)
+            if crx:
+                print(f"    Applied: Fx={total_app['fx']:12.3f}  "
+                      f"Fy={total_app['fy']:12.3f}  "
+                      f"Fz={total_app['fz']:12.3f}")
+                print(f"    Reactn:  Fx={crx.get('fx',0):12.3f}  "
+                      f"Fy={crx.get('fy',0):12.3f}  "
+                      f"Fz={crx.get('fz',0):12.3f}")
+
+        print("\nResults keys:", results.keys())
 
 if __name__ == "__main__":
     main()
 
-    import opstool.vis.pyvista as opsvis
-    plotter = opsvis.plot_model(show_node_numbering=True, show_ele_numbering=True)
-    plotter.show()
-    plotter.close()
+    if False:
+        import opstool.vis.pyvista as opsvis
+        plotter = opsvis.plot_model(show_node_numbering=True, show_ele_numbering=True)
+        plotter.show()
+        plotter.close()
 
