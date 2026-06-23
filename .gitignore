@@ -221,3 +221,4 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 /.opstool.output
+tests/fixtures/sample.split.json
