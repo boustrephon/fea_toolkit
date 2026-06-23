@@ -69,18 +69,24 @@ The goal is to create a Python package `fea_toolkit` that:
 
 Not all OpenSees element types support the same `eleLoad -type -beamUniform` argument forms. The builder handles this automatically:
 
-| Element type | 3-arg uniform `(wy, wz, wx)` | 8-arg trapezoidal `(wy1, wz1, wx1, aL, bL, wy2, wz2, wx2)` |
-|---|---|---|
-| **`elasticBeamColumn`** | ✅ Native | ✅ Native — `ElasticBeam3d::addLoad()` handles `Beam3dPartialUniformLoad` |
-| **`forceBeamColumn`** | ✅ Native | ✅ Native — `ForceBeamColumn3d::computeReactions()` handles it |
-| **`dispBeamColumn`** | ✅ Native | ❌ Decomposed to equivalent uniform (average intensity) |
-| **`nonlinearBeamColumn`** | ✅ Native | ❌ Decomposed to equivalent uniform (average intensity) |
+| Element type | 3-arg uniform `(wy, wz, wx)` | 5-arg partial `(wy, wz, wx, aL, bL)` | Trapezoidal / linear varying |
+|---|---|---|---|
+| **`elasticBeamColumn`** | ✅ Native | ✅ Native | ❌ Decomposed to equivalent uniform |
+| **`forceBeamColumn`** | ✅ Native | ✅ Native | ❌ Decomposed to equivalent uniform |
+| **`dispBeamColumn`** | ✅ Native | ✅ Native | ❌ Decomposed to equivalent uniform |
+| **`nonlinearBeamColumn`** | ✅ Native | ✅ Native | ❌ Decomposed to equivalent uniform |
 
-**Note:** `Corotational` geometric transformation does **not** support `eleLoad` in 3D
-(per the [OpenSees documentation](https://opensees.ist.berkeley.edu/wiki/index.php?title=EleLoad_Command)).
-If you use `'geom_transf_type': 'Corotational'`, the builder will emit a warning.
-Use :func:`beam_load_to_nodal_loads` from `fea_toolkit.model.geometry` to convert
-distributed loads into equivalent nodal loads as a workaround.
+**Notes:**
+
+- The 8‑argument trapezoidal form `(wy1, wz1, wx1, aL, bL, wy2, wz2, wx2)` is
+  **broken in OpenSeesPy 3.8.0.0** — the end values (`wy2` etc.) are silently
+  ignored.  The builder therefore decomposes all non‑uniform loads to an
+  equivalent uniform intensity that conserves the total force.
+- `Corotational` geometric transformation does **not** support `eleLoad` in 3D
+  (per the [OpenSees documentation](https://opensees.ist.berkeley.edu/wiki/index.php?title=EleLoad_Command)).
+  If you use `'geom_transf_type': 'Corotational'`, the builder will emit a warning.
+  Use :func:`beam_load_to_nodal_loads` from `fea_toolkit.model.geometry` to convert
+  distributed loads into equivalent nodal loads as a workaround.
 
 ---
 
