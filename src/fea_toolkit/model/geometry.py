@@ -635,3 +635,161 @@ def child_length(child, node_coords):
     b = np.array(node_coords[child.node_j])
     return np.linalg.norm(b - a)
 
+
+# ============================================================================
+# Nodal load conversion (for geomTransf types that don't support eleLoad)
+# ============================================================================
+
+def beam_load_to_nodal_loads(
+    load: FrameDistributedLoad,
+    elem: FrameElement,
+    node_coords: Dict[str, Tuple[float, float, float]],
+    length: float,
+) -> Dict[str, Dict[str, float]]:
+    """Convert a distributed beam load into statically equivalent nodal loads.
+
+    This is a fallback for geometric transformations that do **not** support
+    ``eleLoad`` (notably ``Corotational`` in 3D, per the OpenSees documentation).
+    The load is projected onto the element's local axes and the fixed-end forces
+    are computed assuming a prismatic beam.
+
+    Args:
+        load: The distributed load definition.
+        elem: The frame element the load acts on.
+        node_coords: ``{node_id: (x, y, z)}`` dict for both end nodes.
+        length: Element length (in model length units).
+
+    Returns:
+        A dict ``{"i": {fx, fy, fz, mx, my, mz}, "j": {fx, fy, fz, mx, my, mz}}``
+        with the equivalent nodal forces at each end, expressed in **global**
+        coordinates so they can be applied via :func:`openseespy.opensees.load`.
+    """
+    a = np.array(node_coords[elem.node_i])
+    b = np.array(node_coords[elem.node_j])
+    vec_x = (b - a) / length
+    angle_rad = math.radians(elem.angle)
+
+    # Build local axes
+    vec_x_norm = vec_x
+    vecxz = get_SAP_vecxz(vec_x_norm, elem.angle)
+    vec_z = vecxz / np.linalg.norm(vecxz)
+    vec_y = np.cross(vec_z, vec_x_norm)
+    vec_y = vec_y / np.linalg.norm(vec_y)
+
+    # Determine global direction of the load (SAP2000 convention)
+    if load.direction == 'Gravity':
+        global_dir = np.array([0.0, 0.0, -1.0])
+    elif load.direction == 'X':
+        global_dir = np.array([1.0, 0.0, 0.0])
+    elif load.direction == 'Y':
+        global_dir = np.array([0.0, 1.0, 0.0])
+    elif load.direction == 'Z':
+        global_dir = np.array([0.0, 0.0, 1.0])
+    else:
+        global_dir = np.array([0.0, 0.0, -1.0])
+
+    # Project intensities onto local axes
+    wx_a = load.val_a * float(np.dot(global_dir, vec_x))
+    wy_a = load.val_a * float(np.dot(global_dir, vec_y))
+    wz_a = load.val_a * float(np.dot(global_dir, vec_z))
+    wx_b = load.val_b * float(np.dot(global_dir, vec_x))
+    wy_b = load.val_b * float(np.dot(global_dir, vec_y))
+    wz_b = load.val_b * float(np.dot(global_dir, vec_z))
+
+    # Partial-span parameters (clamped to [0, 1])
+    aL = max(0.0, min(1.0, load.rdist_a))
+    bL = max(0.0, min(1.0, load.rdist_b))
+    span = bL - aL
+    L = length
+
+    # --- Fixed-end forces for a trapezoidal load on a prismatic beam ---
+    # Reference:  Gere & Timoshenko, "Mechanics of Materials"
+    #
+    # Decompose into: uniform(w_avg) + antisymmetric(w_var)
+    #   w_avg = (w_a + w_b) / 2      — constant part
+    #   w_var = (w_b - w_a) / 2      — linearly varying part (triangular)
+    #
+    # For uniform load w_avg over [aL, bL]:
+    #   V_i += w_avg * span * L * (1 - (aL + bL) / 2)
+    #   V_j += w_avg * span * L * (aL + bL) / 2
+    #   M_i += w_avg * (span * L)² / 12
+    #   M_j -= w_avg * (span * L)² / 12
+    #
+    # For triangular load w_var (0 at aL, w_var at bL):
+    #   V_i += w_var * span * L / 2 * (1 - (2*aL + bL) / 3)
+    #   V_j += w_var * span * L / 2 * (2*aL + bL) / 3
+    #   M_i += w_var * (span * L)² / 30
+    #   M_j -= w_var * (span * L)² / 20
+
+    def fixed_end_forces(w_start: float, w_end: float,
+                         a_frac: float, b_frac: float, L_total: float
+                         ) -> Tuple[float, float, float, float]:
+        """Return (V_i, V_j, M_i, M_j) for one load component.
+
+        Decomposes a trapezoid into a uniform part (``w_min``) plus a
+        triangular part (0 → ``w_tri``) and computes fixed-end forces
+        using standard beam formulae.
+        """
+        s = b_frac - a_frac
+        if s < 1e-12 or (abs(w_start) < 1e-12 and abs(w_end) < 1e-12):
+            return (0.0, 0.0, 0.0, 0.0)
+
+        sL = s * L_total          # loaded length
+        centre = (a_frac + b_frac) * 0.5  # mid-point of loaded region
+
+        # --- Uniform part (value closer to zero over full loaded span) ---
+        w_min = w_start if abs(w_start) < abs(w_end) else w_end
+        V_i_uni = w_min * sL * (1.0 - centre)
+        V_j_uni = w_min * sL * centre
+        M_i_uni = w_min * sL * sL / 12.0
+        M_j_uni = -w_min * sL * sL / 12.0
+
+        # --- Triangular part (0 at a_frac, w_tri at b_frac) ---
+        w_tri = w_end - w_start
+        if abs(w_tri) > 1e-12:
+            F_tri = 0.5 * w_tri * sL   # total triangular force
+            # Centroid of triangle from node i: (a_frac + 2*s/3) * L
+            c_tri = (a_frac + 2.0 * s / 3.0)
+            V_i_tri = F_tri * (1.0 - c_tri)
+            V_j_tri = F_tri * c_tri
+            # Fixed-end moment for triangular load on [0, sL]:
+            #   M_i = w_tri * sL^2 / 30
+            #   M_j = -w_tri * sL^2 / 20
+            M_i_tri = w_tri * sL * sL / 30.0
+            M_j_tri = -w_tri * sL * sL / 20.0
+        else:
+            V_i_tri = V_j_tri = M_i_tri = M_j_tri = 0.0
+
+        return (V_i_uni + V_i_tri,
+                V_j_uni + V_j_tri,
+                M_i_uni + M_i_tri,
+                M_j_uni + M_j_tri)
+
+    # Compute local fixed-end forces for each direction.
+    # wy (local y) → shear in y, moment about local z.
+    # wz (local z) → shear in z, moment about local y.
+    # wx (axial)   → axial force, no moment.
+    Viy, Vjy, Miz, Mjz = fixed_end_forces(wy_a, wy_b, aL, bL, L)
+    Viz, Vjz, Miy, Mjy = fixed_end_forces(wz_a, wz_b, aL, bL, L)
+    Vix, Vjx, _, _     = fixed_end_forces(wx_a, wx_b, aL, bL, L)
+
+    # Transform local forces back to global coordinates
+    T = np.column_stack([vec_x, vec_y, vec_z])  # local-to-global transform
+
+    f_i_local = np.array([Vix, Viy, Viz])
+    m_i_local = np.array([0.0, Miy, Miz])   # wx (axial) → no moment
+    f_j_local = np.array([Vjx, Vjy, Vjz])
+    m_j_local = np.array([0.0, Mjy, Mjz])
+
+    f_i_global = T @ f_i_local
+    m_i_global = T @ m_i_local
+    f_j_global = T @ f_j_local
+    m_j_global = T @ m_j_local
+
+    return {
+        "i": {"fx": f_i_global[0], "fy": f_i_global[1], "fz": f_i_global[2],
+              "mx": m_i_global[0], "my": m_i_global[1], "mz": m_i_global[2]},
+        "j": {"fx": f_j_global[0], "fy": f_j_global[1], "fz": f_j_global[2],
+              "mx": m_j_global[0], "my": m_j_global[1], "mz": m_j_global[2]},
+    }
+
