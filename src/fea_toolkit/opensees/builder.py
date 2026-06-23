@@ -552,10 +552,10 @@ class OpenSeesBuilder:
             # Apply eleLoad
             # NOTE: The 8‑argument form (wy1, wz1, wx1, aL, bL, wy2, wz2, wx2)
             # is broken in OpenSeesPy 3.8.0.0 — the end values (wy2 etc.) are
-            # silently ignored.  We therefore decompose all non‑uniform loads
-            # to an equivalent uniform intensity (total force / element length)
-            # applied over the relevant span.  The 5‑argument partial‑span form
-            # (wy, wz, wx, aL, bL) works correctly.
+            # silently ignored.  We therefore decompose non‑uniform loads into
+            # N partial‑span uniform segments using the working 5‑argument form
+            # (wy, wz, wx, aL, bL), which preserves both total force and moment
+            # distribution.
             if ld.load_type == 'Force':
                 is_uniform = abs(ld.val_a - ld.val_b) < 1e-6
                 is_full_span = abs(aOverL) < 1e-12 and abs(bOverL - 1.0) < 1e-12
@@ -568,14 +568,22 @@ class OpenSeesBuilder:
                     ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
                                 wy_a, wz_a, wx_a, aOverL, bOverL)
                 else:
-                    # Trapezoidal/linear → decompose to equivalent uniform
-                    # over the loaded portion (conserves total force).
+                    # Trapezoidal/linear → decompose into N partial‑span
+                    # uniform segments using the working 5‑argument form.
+                    # This preserves both the total force AND the moment
+                    # distribution, unlike a single uniform average.
+                    N = 4  # segments — more = better moment accuracy
                     span_frac = bOverL - aOverL
-                    wy_avg = (wy_a + wy_b) * 0.5 * span_frac
-                    wz_avg = (wz_a + wz_b) * 0.5 * span_frac
-                    wx_avg = (wx_a + wx_b) * 0.5 * span_frac
-                    ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
-                                wy_avg, wz_avg, wx_avg)
+                    for i in range(N):
+                        seg_a = aOverL + i * span_frac / N
+                        seg_b = aOverL + (i + 1) * span_frac / N
+                        # Mid‑point intensity of this segment
+                        xi = (i + 0.5) / N
+                        wy_mid = wy_a + (wy_b - wy_a) * xi
+                        wz_mid = wz_a + (wz_b - wz_a) * xi
+                        wx_mid = wx_a + (wx_b - wx_a) * xi
+                        ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
+                                    wy_mid, wz_mid, wx_mid, seg_a, seg_b)
 
             elif ld.load_type == 'Moment':
                 if self.config['verbose']:
