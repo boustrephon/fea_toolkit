@@ -8,7 +8,8 @@ import numpy as np  # noqa: F401
 
 from ..model.sap_data import (
     SAPModelData, Node, Restraint, Material, Section,
-    FrameElement, AreaElement, Group, LoadCase, LoadPattern, JointLoad, FrameDistributedLoad
+    FrameElement, AreaElement, Group, LoadCase, LoadPattern,
+    MassSource, JointLoad, FrameDistributedLoad
 )
 # from ..model.geometry import get_SAP_vecxz
 
@@ -238,9 +239,9 @@ class SAP2000Parser:
         model_units = self.get_model_units()
         frame_auto_mesh = self._get_frame_auto_mesh()
         load_patterns = self._get_load_patterns()
+        mass_sources = self._get_mass_sources()
         joint_loads = self._get_joint_loads()
         frame_dist_loads = self._get_frame_distributed_loads()
-        # (Loads can be added later)
 
 
         return SAPModelData(
@@ -255,6 +256,7 @@ class SAP2000Parser:
             groups=groups,
             frame_auto_mesh=frame_auto_mesh,
             load_patterns=load_patterns,
+            mass_sources=mass_sources,
             joint_loads=joint_loads,
             frame_dist_loads=frame_dist_loads,
             units=model_units,
@@ -604,6 +606,57 @@ class SAP2000Parser:
                     )
         # Also add default patterns if needed? We'll keep as is.
         return patterns
+
+    def _get_mass_sources(self) -> Dict[str, MassSource]:
+        """Parse MASS SOURCE table — each row defines one MassSource entry.
+
+        SAP2000 MASS SOURCE entries are grouped by the MassSource name (first
+        column).  Each row with the same MassSource name adds another
+        LoadPat + Multiplier pair.  The Elements, Masses, Loads, IsDefault
+        flags come from the *first* row of each group.
+        """
+        mass_sources: Dict[str, MassSource] = {}
+        raw = self._raw_tables.get('MASS SOURCE', [])
+        if not raw:
+            return mass_sources
+
+        # Group rows by MassSource name
+        groups: Dict[str, list] = {}
+        for rec in raw:
+            key = rec.get('MassSource', '')
+            if not key:
+                continue
+            groups.setdefault(key, []).append(rec)
+
+        for name, rows in groups.items():
+            first = rows[0]
+            ms = MassSource(
+                name=str(name),
+                elements=self._to_bool(first.get('Elements', False)),
+                masses=self._to_bool(first.get('Masses', False)),
+                loads=self._to_bool(first.get('Loads', False)),
+                is_default=self._to_bool(first.get('IsDefault', False)),
+            )
+            # Collect all LoadPat + Multiplier pairs — same LoadPat
+            # appearing on multiple rows has its multipliers summed.
+            load_pat = {}
+            for rec in rows:
+                lp = rec.get('LoadPat', '')
+                mult = float(rec.get('Multiplier', 0))
+                if lp:
+                    load_pat[lp] = load_pat.get(lp, 0.0) + mult
+            ms.load_pattern = load_pat
+            mass_sources[name] = ms
+
+        return mass_sources
+
+    @staticmethod
+    def _to_bool(val) -> bool:
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            return val.lower() in ('yes', 'true', '1')
+        return bool(val)
 
     def _get_joint_loads(self) -> List[JointLoad]:
         loads = []

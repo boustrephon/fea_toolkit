@@ -470,7 +470,7 @@ class LoadCombination:
 
 @dataclass
 class MassSource:
-    """SAP2000 mass source."""
+    """SAP2000 mass source definition."""
     name: str
     elements: bool = False
     masses: bool = False
@@ -560,8 +560,8 @@ class SAPModelData:
     load_cases: Dict[str,LoadCase] = field(default_factory=dict)
     load_patterns: Dict[str,LoadPattern] = field(default_factory=dict)
     joint_loads: List[JointLoad] = field(default_factory=list)
-    frame_dist_loads: List[FrameDistributedLoad] = field(default_factory=list)    # dist_loads: Dict[str, DistributedLoad]
-    # conc_loads: Dict[str, ConcentratedLoad]
+    frame_dist_loads: List[FrameDistributedLoad] = field(default_factory=list)
+    mass_sources: Dict[str, MassSource] = field(default_factory=dict)
     # Default units used for all coordinates and section properties
     units: Dict[str, str] = field(default_factory=lambda: {'F': "N", 'L': "m", 'T': "C"})   
     

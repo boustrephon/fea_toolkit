@@ -192,9 +192,9 @@ def main():
             print(f"  {'':>15}  {'Fx':>12}  {'Fy':>12}  {'Fz':>12}")
             print(f"  {'Applied':>15}  {total_applied['fx']:12.3f}  {total_applied['fy']:12.3f}  {total_applied['fz']:12.3f}")
             print(f"  {'Reactions':>15}  {summed_rx['fx']:12.3f}  {summed_rx['fy']:12.3f}  {summed_rx['fz']:12.3f}")
-            print(f"  {'Difference':>15}  {total_applied['fx'] - summed_rx['fx']:12.3f}"
-                  f"  {total_applied['fy'] - summed_rx['fy']:12.3f}"
-                  f"  {total_applied['fz'] - summed_rx['fz']:12.3f}")
+            print(f"  {'Difference':>15}  {total_applied['fx'] + summed_rx['fx']:12.3f}"
+                  f"  {total_applied['fy'] + summed_rx['fy']:12.3f}"
+                  f"  {total_applied['fz'] + summed_rx['fz']:12.3f}")
 
         # ── Per-pattern equilibrium checks ──
         if hasattr(builder, 'load_totals') and len(builder.load_totals) > 1:
@@ -239,6 +239,57 @@ def main():
                 print(f"    Reactn:  Fx={crx.get('fx',0):12.3f}  "
                       f"Fy={crx.get('fy',0):12.3f}  "
                       f"Fz={crx.get('fz',0):12.3f}")
+
+        # ── Modal analysis ──
+        if model_data.mass_sources:
+            print('\n', 80*'=')
+            print("── Modal analysis ──")
+            # Rebuild (the static analysis above may have wiped the model)
+            builder.build()
+            builder.compute_seismic_masses(g=9.81)
+            modal_results = builder.run_modal_analysis(num_modes=15, print_results=True)
+
+            # Build a simple GB50011 spectrum and run response spectrum
+            def gb50011_spectrum(T, A=0.16, Tg=0.35, zeta=0.05):
+                """GB 50011-2010 design spectrum (returns Sa in g)."""
+                if T <= 0.0:
+                    return A
+                gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
+                eta1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
+                eta2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))
+                if T <= 0.1:
+                    beta = 0.45 + (eta2 - 0.45) * 10.0 * T
+                elif T <= Tg:
+                    beta = eta2
+                elif T <= 5.0 * Tg:
+                    beta = eta2 * (Tg / T) ** gamma
+                else:
+                    beta = eta2 * (0.2 ** gamma) - eta1 * (T - 5.0 * Tg)
+                return max(0.0, A * beta)
+
+            periods = modal_results['periods']
+            n = modal_results['num_modes']
+            g = 9.81
+            # Extend spectrum to cover the longest modal period
+            T_max = max(periods[:n]) if periods and n > 0 else 6.0
+            T_curve = [t * 0.1 for t in range(0, int(T_max / 0.1) + 2)]
+            Sa_curve = [gb50011_spectrum(T, A=0.16, Tg=0.4, zeta=0.04) * g
+                        for T in T_curve]
+
+            try:
+                rs_results = builder.run_response_spectrum_analysis(
+                    num_modes=n,
+                    modal_periods=periods[:n],
+                    spectrum_periods=T_curve,
+                    spectrum_accels=Sa_curve,
+                    direction='X',
+                    damping_ratio=0.04,
+                    print_results=True,
+                )
+            except Exception as e:
+                print(f"  Response spectrum analysis skipped: {e}")
+        else:
+            print("\n── No MASS SOURCE defined — skipping modal analysis. ──")
 
         print("\nResults keys:", results.keys())
 
