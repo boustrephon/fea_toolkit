@@ -517,10 +517,9 @@ class OpenSeesBuilder:
             # Compute approximate fixed-end moments for the record
             span = bOverL - aOverL
             if span > 1e-12 and abs(load_l) > 1e-12:
-                w_avg = lambda wa, wb: (wa + wb) * 0.5
                 f_loc['mx'] = 0.0   # axial load → no moment
-                f_loc['my'] = w_avg(wy_a, wy_b) * span * load_l * load_l / 12.0
-                f_loc['mz'] = w_avg(wz_a, wz_b) * span * load_l * load_l / 12.0
+                f_loc['my'] = (wy_a + wy_b) * 0.5 * span * load_l * load_l / 12.0
+                f_loc['mz'] = (wz_a + wz_b) * 0.5 * span * load_l * load_l / 12.0
             else:
                 f_loc['mx'] = f_loc['my'] = f_loc['mz'] = 0.0
 
@@ -602,14 +601,27 @@ class OpenSeesBuilder:
     # -------------------------------------------------------------------------
     def run_static_analysis(self, 
                             odb_tag:int = 0,
-                            # load_combo: Optional[int] = None
+                            extract_reactions: bool = True,
                             ) -> Dict[str, Any]:
         """Run a linear static analysis and return results.
 
+        Args:
+            odb_tag: If > 0 and opstool is installed, also save results via
+                     opstool for richer post‑processing.
+            extract_reactions: If True, compute nodal reactions at restrained
+                               nodes and include them in the returned dict.
+
         Returns:
-            Dictionary with nodal displacements, reaction forces, etc.
+            Dictionary with keys:
+
+            - ``'nodal_displacements'`` — dict of ``{node_tag: (dx, dy, dz)}``
+            - ``'nodal_reactions'`` (if ``extract_reactions``) — dict of
+              ``{node_tag: (fx, fy, fz, mx, my, mz)}``.
+            - ``'load_totals'`` — the applied load totals per pattern (useful
+              for equilibrium checks).
         """
         unit_L = self.units['L']
+        unit_F = self.units.get('F', 'N')
         if self.config['verbose']:
             print("Running analysis...")
 
@@ -629,33 +641,82 @@ class OpenSeesBuilder:
             return {}
 
         # Extract results
-        results = {}
+        results: Dict[str, Any] = {}
+
+        # --- Nodal displacements ---
         if OPSTOOL_AVAILABLE and odb_tag > 0:
-            # Use opstool for easy extraction
             opst.post.CreateODB(odb_tag=1)
             opst.post.save_model_data(odb_tag=1)
             nodes_df = opst.post.get_model_data(data_type='Nodal', odb_tag=1)
             if nodes_df is not None:
                 results['nodal_displacements'] = nodes_df.to_dict()
         else:
-            # Manual extraction: get nodal displacements
             displacements = {}
-            for i, node_id in enumerate(self.model.nodes.keys()):
-                disp_list = []
+            for node_id in self.model.nodes:
                 tag = int(node_id)
-                disp = ops.nodeDisp(tag)
-                if isinstance(disp, np.ndarray):
-                    disp_list = disp.tolist() if hasattr(disp, 'tolist') else disp
-                elif isinstance(disp, list):
-                    disp_list = disp
-                # Ensure 3 components (dx, dy, dz)
-                if self.config['verbose'] and i < 5:
-                    print(f"Displacements ({unit_L}) for node {tag} (type: {type(disp)}): {disp_list}")
-                if len(disp_list) >= 3:
+                try:
+                    disp = ops.nodeDisp(tag)
+                    if isinstance(disp, np.ndarray):
+                        disp_list = disp.tolist()
+                    elif isinstance(disp, (list, tuple)):
+                        disp_list = list(disp)
+                    elif isinstance(disp, (int, float)):
+                        disp_list = [float(disp)]
+                    else:
+                        continue
+                    # Pad to at least 3 components
+                    while len(disp_list) < 3:
+                        disp_list.append(0.0)
                     displacements[tag] = (disp_list[0], disp_list[1], disp_list[2])
-                else:
-                    displacements[tag] = (disp_list[0], disp_list[1] if len(disp_list)>1 else 0.0, 0.0)
+                except Exception:
+                    pass
+            if displacements:
                 results['nodal_displacements'] = displacements
+
+        # --- Nodal reactions ---
+        if extract_reactions:
+            try:
+                ops.reactions()
+                reactions = {}
+                for node_id, restraint in self.model.restraints.items():
+                    tag = int(node_id)
+                    rx = ops.nodeReaction(tag, 1) if restraint.dofs[0] else 0.0
+                    ry = ops.nodeReaction(tag, 2) if restraint.dofs[1] else 0.0
+                    rz = ops.nodeReaction(tag, 3) if restraint.dofs[2] else 0.0
+                    rmx = ops.nodeReaction(tag, 4) if restraint.dofs[3] else 0.0
+                    rmy = ops.nodeReaction(tag, 5) if restraint.dofs[4] else 0.0
+                    rmz = ops.nodeReaction(tag, 6) if restraint.dofs[5] else 0.0
+                    reactions[tag] = (rx, ry, rz, rmx, rmy, rmz)
+
+                if reactions:
+                    results['nodal_reactions'] = reactions
+                    # Also compute summed reactions for equilibrium check
+                    summed = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0,
+                              'mx': 0.0, 'my': 0.0, 'mz': 0.0}
+                    for r in reactions.values():
+                        summed['fx'] += r[0]
+                        summed['fy'] += r[1]
+                        summed['fz'] += r[2]
+                        summed['mx'] += r[3]
+                        summed['my'] += r[4]
+                        summed['mz'] += r[5]
+                    results['summed_reactions'] = summed
+                    if self.config['verbose']:
+                        print(f"\n  Summed reactions ({unit_F}, {unit_F}·{unit_L}):")
+                        print(f"    Fx = {summed['fx']:+.3f}  Fy = {summed['fy']:+.3f}  Fz = {summed['fz']:+.3f}")
+                        print(f"    Mx = {summed['mx']:+.3f}  My = {summed['my']:+.3f}  Mz = {summed['mz']:+.3f}")
+            except Exception as e:
+                if self.config['verbose']:
+                    print(f"  Warning: could not extract reactions: {e}")
+
+        # --- Applied load totals (for comparison) ---
+        if hasattr(self, 'load_totals'):
+            results['load_totals'] = self.load_totals
+            if self.config['verbose']:
+                unit_F = self.units.get('F', 'N')
+                print(f"\n  Applied load totals per pattern ({unit_F}):")
+                for pname, totals in self.load_totals.items():
+                    print(f"    {pname}: Fx={totals['fx']:+.3f}  Fy={totals['fy']:+.3f}  Fz={totals['fz']:+.3f}")
 
         if self.config['verbose']:
             print("Analysis complete.")
