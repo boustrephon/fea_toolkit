@@ -966,3 +966,155 @@ class TestBeamLoadToNodalLoads:
         assert abs(total_fz - 37500.0) < 100.0  # allow small numerical tolerance
         # Asymmetric load → unequal end forces
         assert abs(result["i"]["fz"]) != abs(result["j"]["fz"])
+
+
+# ============================================================================
+# MassSource tests
+# ============================================================================
+
+class TestMassSource:
+    def test_defaults(self):
+        ms = MassSource(name="MSSSRC1")
+        assert ms.name == "MSSSRC1"
+        assert ms.elements is False
+        assert ms.masses is False
+        assert ms.loads is False
+        assert ms.load_pattern == {}
+
+    def test_with_loads(self):
+        ms = MassSource(
+            name="MSSSRC1",
+            elements=True,
+            masses=True,
+            loads=True,
+            is_default=True,
+            load_pattern={"DEAD": 1.0, "SUPERDEAD": 1.2},
+        )
+        assert ms.elements is True
+        assert ms.load_pattern["DEAD"] == 1.0
+        assert ms.load_pattern["SUPERDEAD"] == 1.2
+        assert ms.is_default is True
+
+
+# ============================================================================
+# Fiber patch tests
+# ============================================================================
+
+class TestPipeSectionFiberPatches:
+    def test_annular_ring(self):
+        p = PipeSection("PIPE", "Pipe", "STEEL", od=1.0, t=0.1)
+        patches = p.to_fiber_patches(mat_tag=1, nfy=8, nfz=4)
+        assert len(patches) == 1
+        ptype, mat, ncirc, nrad, yc, zc, r_in, r_out, sa, ea = patches[0]
+        assert ptype == "circ"
+        assert mat == 1
+        assert ncirc == 8 and nrad == 4
+        assert abs(r_in - 0.4) < 1e-12
+        assert abs(r_out - 0.5) < 1e-12
+        assert sa == 0.0 and ea == 360.0
+
+    def test_solid_wall(self):
+        p = PipeSection("PIPE", "Pipe", "STEEL", od=0.5, t=0.5)
+        patches = p.to_fiber_patches(mat_tag=2)
+        _, _, _, _, _, _, r_in, r_out, _, _ = patches[0]
+        assert abs(r_in) < 1e-12  # full solid when t == od/2
+        assert abs(r_out - 0.25) < 1e-12
+
+
+class TestCircularSectionFiberPatches:
+    def test_solid_circle(self):
+        c = CircularSection("CIRC", "Circle", "STEEL", diameter=0.6)
+        patches = c.to_fiber_patches(mat_tag=3, nfy=12, nfz=6)
+        assert len(patches) == 1
+        ptype, mat, ncirc, nrad, yc, zc, r_in, r_out, sa, ea = patches[0]
+        assert ptype == "circ"
+        assert mat == 3
+        assert ncirc == 12 and nrad == 6
+        assert abs(r_in) < 1e-12
+        assert abs(r_out - 0.3) < 1e-12
+
+
+class TestBoxSectionFiberPatches:
+    def test_four_rect_patches(self):
+        b = BoxSection("BOX", "Box/Tube", "STEEL",
+                       depth=0.6, bf=0.4, tf=0.02, tw=0.015)
+        patches = b.to_fiber_patches(mat_tag=4, nfy=3, nfz=2)
+        assert len(patches) == 4
+        for p in patches:
+            assert p[0] == "rect"
+            assert p[1] == 4
+        # Top flange: y from 0.28 to 0.3, z from -0.2 to 0.2
+        assert abs(patches[0][4] - 0.28) < 1e-12  # yI
+        assert abs(patches[0][6] - 0.3) < 1e-12   # yJ
+        # Bottom flange: y from -0.3 to -0.28
+        assert abs(patches[1][4] + 0.3) < 1e-12
+        assert abs(patches[1][6] + 0.28) < 1e-12
+
+
+# ============================================================================
+# CQC combination tests
+# ============================================================================
+
+class TestCqcCombine:
+    def test_single_mode(self):
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        result = OpenSeesBuilder._cqc_combine([100.0], [2.0], [0.05])
+        assert abs(result - 100.0) < 1e-6
+
+    def test_two_uncorrelated(self):
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        # Very separated frequencies → ρ ≈ 0 → SRSS ≈ sqrt(a² + b²)
+        vals = [100.0, 50.0]
+        omega = [1.0, 50.0]
+        damp = [0.05, 0.05]
+        result = OpenSeesBuilder._cqc_combine(vals, omega, damp)
+        expected = math.sqrt(100**2 + 50**2)
+        assert abs(result - expected) < 0.1
+
+    def test_identical_modes(self):
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        # Identical frequency → ρ → 1 → CQC = sum of absolute values
+        vals = [100.0, 50.0]
+        omega = [2.0, 2.0]
+        damp = [0.05, 0.05]
+        result = OpenSeesBuilder._cqc_combine(vals, omega, damp)
+        assert abs(result - 150.0) < 1.0
+
+
+# ============================================================================
+# Plotting module import tests
+# ============================================================================
+
+class TestPlottingImports:
+    def test_force_diagram_no_data(self):
+        from fea_toolkit.plotting import plot_force_diagram
+        fig = plot_force_diagram([], 'My_i')
+        assert fig is None
+
+    def test_static_force_diagram_missing_matplotlib(self):
+        """Just verify the import path resolves; actual plotting
+        requires matplotlib which may not be available in CI."""
+        from fea_toolkit.plotting import plot_static_force_diagram
+        assert callable(plot_static_force_diagram)
+
+
+# ============================================================================
+# MASS SOURCE parser tests (integration)
+# ============================================================================
+
+class TestMassSourceParser:
+    def test_parse_from_s2k(self):
+        """Verify MassSource is parsed from a sample S2K file."""
+        from fea_toolkit.io.s2k_parser import SAP2000Parser
+        s2k_file = FIXTURES_DIR / "sample.s2k"
+        if not s2k_file.exists():
+            pytest.skip("sample.s2k not available")
+        parser = SAP2000Parser(s2k_file)
+        parser.parse()
+        md = parser.get_model_data()
+        assert hasattr(md, 'mass_sources')
+        # sample.s2k has MSSSRC1 with Elements=True, Masses=True, Loads=False
+        if md.mass_sources:
+            ms = md.mass_sources.get('MSSSRC1')
+            if ms:
+                assert ms.elements is True

@@ -160,6 +160,55 @@ def main():
     print(f"  Total base moment My = {rs['base_moment_cqc']:,.2f} (CQC) + "
           f"{missing['M_missing_YY']:,.2f} (rigid) = {M_total:,.2f} kN·m")
 
+    # ── Plotting demo ──
+    try:
+        from fea_toolkit.plotting import plot_force_diagram
+        # Moment diagram
+        fig_m = plot_force_diagram(
+            elem_rs['element_results'], 'My_i',
+            title='My (CQC combined) — UX excitation',
+        )
+        if fig_m:
+            fig_m.savefig('chimney_moment_diagram.png', dpi=150)
+            print(f"\n  Saved moment diagram → chimney_moment_diagram.png")
+
+        # Shear diagram
+        fig_v = plot_force_diagram(
+            elem_rs['element_results'], 'Vz_i',
+            title='Vz (CQC combined) — UX excitation',
+        )
+        if fig_v:
+            fig_v.savefig('chimney_shear_diagram.png', dpi=150)
+            print(f"  Saved shear diagram  → chimney_shear_diagram.png")
+    except Exception as e:
+        print(f"\n  Plotting skipped: {e}")
+
+    # ── RS deformed shape ──
+    try:
+        print(f"\n── RS deformed shape ──")
+        disp = builder.compute_rs_nodal_displacements(
+            num_modes=n,
+            modal_periods=periods[:n],
+            eigenvalues=modal['eigenvalues'],
+            spectrum_func=rs_func,
+            direction='X',
+            damping_ratio=0.04,
+        )
+        top_tag = max(disp.keys(), key=lambda t: disp[t][0])
+        top_dx = disp[top_tag][0]
+        print(f"  Max displacement: node {top_tag} dx = {top_dx:.4f} m")
+
+        from fea_toolkit.plotting import plot_rs_deformed_3d
+        plotter = plot_rs_deformed_3d(
+            builder, disp, scale=max(50, int(0.5 / max(top_dx, 1e-6))),
+            show_original=True,
+        )
+        if plotter is not None:
+            plotter.screenshot('chimney_rs_deformed.png')
+            print(f"  Saved deformed shape → chimney_rs_deformed.png")
+    except Exception as e:
+        print(f"  RS deformed shape skipped: {e}")
+
     print("\nDone.")
 
 
