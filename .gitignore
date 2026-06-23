@@ -222,3 +222,4 @@ __marimo__/
 .streamlit/secrets.toml
 /.opstool.output
 tests/fixtures/sample.split.json
+.vscode/settings.json
