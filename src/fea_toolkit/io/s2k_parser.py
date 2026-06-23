@@ -481,13 +481,21 @@ class SAP2000Parser:
 
     def _get_sections_with_material_properties(self) -> Dict[str, Section]:
         """Combine section geometry from FRAME SECTION PROPERTIES with material data."""
+        from ..model.sap_data import (
+            ISection, ChannelSection, PipeSection, BoxSection,
+            RectangularSection, CircularSection, AngleSection,
+            DoubleAngleSection, TeeSection, GeneralSection,
+            SDSection, ShellSection,
+        )
+
         sections = {}
-        # First collect basic section data
         for sec in self._raw_tables.get('FRAME SECTION PROPERTIES 01 - GENERAL', []):
             name = sec.get('SectionName', 'Unknown')
-            shape = sec.get('Shape', 'Unknown')
+            shape: str = sec.get('Shape', 'Unknown')
             mat_name = sec.get('Material', 'Unknown')
-            sec_data = Section(
+
+            # Common derived properties
+            common = dict(
                 name=name,
                 shape=shape,
                 material=mat_name,
@@ -495,23 +503,69 @@ class SAP2000Parser:
                 I33=float(sec.get('I33', 0)),
                 I22=float(sec.get('I22', 0)),
                 J=float(sec.get('TorsConst', 0)),
-                depth=float(sec.get('t3', 0)),
-                width=float(sec.get('t2', 0)),
-                tw=float(sec.get('tw', 0)),
-                tf=float(sec.get('tf', 0)),
-                thickness=float(sec.get('thickness', 0)) if shape == 'Shell' else 0,
+                Z33=sec.get('Z33', None),
+                Z22=sec.get('Z22', None),
             )
+            if common['Z33'] is not None:
+                common['Z33'] = float(common['Z33'])
+            if common['Z22'] is not None:
+                common['Z22'] = float(common['Z22'])
+
+            # Shape‑specific dimensions (SAP2000 t3 = depth, t2 = width)
+            t3 = float(sec.get('t3', 0))
+            t2 = float(sec.get('t2', 0))
+            tw_val = float(sec.get('tw', 0))
+            tf_val = float(sec.get('tf', 0))
+
+            sec_data: Section
+
+            if shape in ("Shell",):
+                sec_data = ShellSection(
+                    **common, thickness=float(sec.get('thickness', 0))
+                )
+            elif shape in ("I/Wide Flange", "WIDE FLANGE", "Steel I/Wide Flange"):
+                sec_data = ISection(
+                    **common, depth=t3, bf=t2, tf=tf_val, tw=tw_val
+                )
+            elif shape in ("Channel", "CHANNEL", "Steel Channel", "Concrete Channel"):
+                sec_data = ChannelSection(
+                    **common, depth=t3, bf=t2, tf=tf_val, tw=tw_val
+                )
+            elif shape in ("Angle", "Steel Angle", "Concrete Angle"):
+                sec_data = AngleSection(
+                    **common, depth=t3, bf=t2, tf=tf_val, tw=tw_val
+                )
+            elif shape in ("Double Angle", "Steel Double Angle",
+                           "Concrete Double Angle"):
+                sec_data = DoubleAngleSection(
+                    **common, depth=t3, bf=t2, tf=tf_val, tw=tw_val,
+                    dis=float(sec.get('DIS', 0)),
+                )
+            elif shape in ("Tee",):
+                sec_data = TeeSection(
+                    **common, depth=t3, bf=t2, tf=tf_val, tw=tw_val
+                )
+            elif shape in ("Pipe", "PIPE", "Steel Pipe", "Concrete Pipe",
+                           "Filled Steel Pipe"):
+                sec_data = PipeSection(**common, od=t3, t=tw_val)
+            elif shape in ("Box/Tube", "Steel Tube", "Concrete Tube",
+                           "Tube", "TUBE", "Filled Steel Tube"):
+                sec_data = BoxSection(
+                    **common, depth=t3, bf=t2, tf=tf_val, tw=tw_val
+                )
+            elif shape in ("Rectangular", "Rectangle", "RECTANGLE",
+                           "Steel Plate", "Concrete Rectangular"):
+                sec_data = RectangularSection(**common, depth=t3, bf=t2)
+            elif shape in ("Circle", "CIRCLE", "Steel Rod", "Steel Circle",
+                           "Concrete Circle"):
+                sec_data = CircularSection(**common, diameter=t3)
+            elif shape == "SD Section":
+                sec_data = SDSection(**common)
+            else:
+                sec_data = GeneralSection(**common)
+
             sections[name] = sec_data
 
-        # Add material properties (E, G, etc.) from _get_all_materials
-        materials = self._get_all_materials()
-        for sec in sections.values():
-            mat = materials.get(sec.material)
-            if mat:
-                # Store E, G, nu in the section? The Section dataclass currently doesn't have them.
-                # We could add optional fields, or rely on material lookup later.
-                # For now, we leave the section as is; the OpenSees builder will fetch material properties.
-                pass
         return sections
 
     def _get_groups(self) -> Dict[str, Group]:

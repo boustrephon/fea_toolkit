@@ -78,6 +78,33 @@ Not all OpenSees element types support the same `eleLoad -type -beamUniform` arg
 
 ---
 
+#### 5. Section Types and Properties
+
+SAP2000/ETABS models use a variety of cross‑section shapes. The `Section` dataclass in `sap_data.py` has been refactored into a polymorphic hierarchy so that each shape stores only its relevant geometric parameters:
+
+| Class | SAP2000 shape names | Shape‑specific fields | Fiber patches |
+|---|---|---|---|
+| **`Section`** (base) | (generic / unknown) | — | ❌ `NotImplementedError` |
+| **`ISection`** | `I/Wide Flange`, `WIDE FLANGE`, `Steel I/Wide Flange` | `depth`, `bf`, `tf`, `tw` | ✅ 3 rect patches (bot flange → web → top flange) |
+| **`ChannelSection`** | `Channel`, `Steel Channel`, `Concrete Channel` | `depth`, `bf`, `tf`, `tw` | 🚧 Placeholder |
+| **`AngleSection`** | `Angle`, `Steel Angle`, `Concrete Angle` | `depth`, `bf`, `tf`, `tw` | 🚧 Placeholder |
+| **`DoubleAngleSection`** | `Double Angle`, `Steel Double Angle` | `depth`, `bf`, `tf`, `tw`, `dis` | 🚧 Placeholder |
+| **`TeeSection`** | `Tee` | `depth`, `bf`, `tf`, `tw` | 🚧 Placeholder |
+| **`PipeSection`** | `Pipe`, `Steel Pipe`, `Concrete Pipe`, `Filled Steel Pipe` | `od`, `t` | 🚧 Placeholder |
+| **`BoxSection`** | `Box/Tube`, `Steel Tube`, `Concrete Tube`, `Filled Steel Tube` | `depth`, `bf`, `tf`, `tw` | 🚧 Placeholder |
+| **`RectangularSection`** | `Rectangular`, `Rectangle`, `Steel Plate`, `Concrete Rectangular` | `depth`, `bf` | ✅ 1 rect patch |
+| **`CircularSection`** | `Circle`, `Steel Rod`, `Concrete Circle` | `diameter` | 🚧 Placeholder |
+| **`GeneralSection`** | `General`, `NA` | — | ❌ Requires a known shape |
+| **`SDSection`** | `SD Section` | `polygons` (multi‑material) | 🚧 Placeholder (needs meshing) |
+| **`EncasedSection`** | `Concrete Encasement Rectangle/Circle` | `embedded_section`, `encasement_depth/bf` | 🚧 Placeholder |
+| **`ShellSection`** | `Shell` | `thickness` | ❌ Not applicable |
+
+All section classes inherit the common derived properties (`A`, `I33`, `I22`, `J`) directly from the SAP2000 text file, which includes pre‑computed values. The `to_fiber_patches()` method on each class generates OpenSees `patch('rect', …)` definitions for nonlinear fiber‑section analysis.
+
+When the parser encounters a `FRAME SECTION PROPERTIES 01 - GENERAL` table, it dispatches to the correct subclass based on the `Shape` field, extracting SAP2000 dimension keys (`t3` → depth / OD, `t2` → width, `tw`, `tf`) into the appropriate fields.
+
+---
+
 ### What Remains to Be Done (Next Steps)
 
 #### High Priority
