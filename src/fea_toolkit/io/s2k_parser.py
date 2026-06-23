@@ -8,9 +8,9 @@ import numpy as np  # noqa: F401
 
 from ..model.sap_data import (
     SAPModelData, Node, Restraint, Material, Section,
-    FrameElement, AreaElement, Group
+    FrameElement, AreaElement, Group, LoadCase, LoadPattern, JointLoad, FrameDistributedLoad
 )
-
+# from ..model.geometry import get_SAP_vecxz
 
 class SAP2000Parser:
     """Parse SAP2000 .S2K file and convert to SAPModelData.
@@ -226,6 +226,7 @@ class SAP2000Parser:
         """Convert raw parsed tables into SAPModelData."""
         # Call all extraction functions
         nodes = self._get_all_nodes()
+
         restraints = self._get_all_restraints()
         materials = self._get_all_materials()
         sections = self._get_sections_with_material_properties()
@@ -236,6 +237,9 @@ class SAP2000Parser:
         groups = self._get_groups()
         model_units = self.get_model_units()
         frame_auto_mesh = self._get_frame_auto_mesh()
+        load_patterns = self._get_load_patterns()
+        joint_loads = self._get_joint_loads()
+        frame_dist_loads = self._get_frame_distributed_loads()
         # (Loads can be added later)
 
 
@@ -249,8 +253,11 @@ class SAP2000Parser:
             frame_assignments=frame_assignments,
             area_assignments=area_assignments,
             groups=groups,
-            units=model_units,
             frame_auto_mesh=frame_auto_mesh,
+            load_patterns=load_patterns,
+            joint_loads=joint_loads,
+            frame_dist_loads=frame_dist_loads,
+            units=model_units,
         )
 
     def get_model_units(self) -> Dict[str, str]:
@@ -280,18 +287,21 @@ class SAP2000Parser:
     # ---------- Individual extraction methods (adapted from your SAP2OPS_v4.py) ----------
     def _get_all_nodes(self) -> Dict[str, Node]:
         nodes = {}
+        tag = 1
         for joint in self._raw_tables.get('JOINT COORDINATES', []):
-            nid = str(joint['Joint'])
+            nid = str(joint['Joint']) # keep as string
             special = joint.get('SpecialJt', False)
             if isinstance(special, str):
                 special = special.lower() == 'yes'
             nodes[nid] = Node(
-                id=nid,
+                node_id=nid,
+                node_tag=tag,
                 x=float(joint['XorR']),
                 y=float(joint['Y']),
                 z=float(joint['Z']),
                 is_special=bool(special)
             )
+            tag += 1
         return nodes
 
     def _get_all_restraints(self) -> Dict[str, Restraint]:
@@ -404,6 +414,7 @@ class SAP2000Parser:
 
     def _get_frame_elements(self) -> Dict[str, FrameElement]:
         elements = {}
+        tag = 1
         for f in self._raw_tables.get('CONNECTIVITY - FRAME', []):
             eid = str(f['Frame'])
             # Also get angle from FRAME LOCAL AXES table
@@ -412,16 +423,22 @@ class SAP2000Parser:
                 if str(la.get('Frame')) == eid:
                     angle = float(la.get('Angle', 0))
                     break
+            node_i = str(f['JointI'])
+            node_j = str(f['JointJ'])
+            # vecxz = get_SAP_vecxz(np.array([1, 0, 0]), angle)
             elements[eid] = FrameElement(
-                id=eid,
-                node_i=str(f['JointI']),
-                node_j=str(f['JointJ']),
+                elem_id=eid,
+                elem_tag = tag,
+                node_i=node_i,
+                node_j=node_j,
                 angle=angle
             )
+            tag += 1
         return elements
 
     def _get_area_elements(self) -> Dict[str, AreaElement]:
         areas = {}
+        tag = 1
         for a in self._raw_tables.get('CONNECTIVITY - AREA', []):
             aid = str(a.get('Area', 0))
             if not aid:
@@ -437,7 +454,8 @@ class SAP2000Parser:
                 else:
                     break
             if len(node_ids) >= 3:
-                areas[aid] = AreaElement(id=aid, node_ids=node_ids)
+                areas[aid] = AreaElement(area_id=aid, area_tag=tag, node_ids=node_ids)
+            tag += 1
         return areas
 
     def _get_frame_assignments(self) -> Dict[str, str]:
@@ -512,4 +530,62 @@ class SAP2000Parser:
                     groups[gname].objects.append(f"{obj_type}:{obj_label}")
         return groups
 
-print('OK')
+    def get_load_cases(self)-> Dict[str, LoadCase]:
+        loadcases = {}
+        # TODO
+        return loadcases
+
+    def _get_load_patterns(self) -> Dict[str, LoadPattern]:
+        patterns = {}
+        for rec in self._raw_tables.get('LOAD PATTERN DEFINITIONS', []):
+            name = rec.get('LoadPat', '')
+            if name:
+                patterns[name] = LoadPattern(
+                    name = str(name),
+                    pattern_type = rec.get('DesignType', ''),
+                    self_weight_factor = rec.get('SelfWtMult', 0)
+                    )
+        # Also add default patterns if needed? We'll keep as is.
+        return patterns
+
+    def _get_joint_loads(self) -> List[JointLoad]:
+        loads = []
+        for rec in self._raw_tables.get('JOINT LOADS - FORCE', []):
+            loads.append(JointLoad(
+                pattern=rec.get('LoadPat', ''),
+                node_id=str(rec.get('Joint', '')),
+                # node_tag = self.model.nodes[node_id].tag,
+                fx=float(rec.get('F1', 0.0)),
+                fy=float(rec.get('F2', 0.0)),
+                fz=float(rec.get('F3', 0.0)),
+                mx=float(rec.get('M1', 0.0)),
+                my=float(rec.get('M2', 0.0)),
+                mz=float(rec.get('M3', 0.0))
+            ))
+        return loads
+
+    def _get_frame_distributed_loads(self) -> List[FrameDistributedLoad]:
+        loads = []
+        for rec in self._raw_tables.get('FRAME LOADS - DISTRIBUTED', []):
+            shape = 'Uniform'
+            val_a = rec.get('FOverLA', 0.0)
+            val_b = rec.get('FOverLB', 0.0)
+            if val_a != val_b:
+                shape = 'Linear' if (rec.get('RelDistA', 0.0) == 0.0 and rec.get('RelDistB', 0.0) == 1.0) else 'Trapezoidal'
+            loads.append(FrameDistributedLoad(
+                pattern=rec.get('LoadPat', ''),
+                frame_id=str(rec.get('Frame', '')),
+                direction=rec.get('Dir', 'Gravity'),
+                load_type=rec.get('Type', 'Force'),
+                shape=shape,
+                val_a=float(val_a),
+                val_b=float(val_b),
+                rdist_a=float(rec.get('RelDistA', 0.0)),
+                rdist_b=float(rec.get('RelDistB', 0.0)),
+                dist_a=float(rec.get('AbsDistA', 0.0)),
+                dist_b=float(rec.get('AbsDistB', 0.0)),
+                coord_sys=rec.get('CoordSys', 'GLOBAL')
+            ))
+        return loads
+
+print('Loaded S2K Parser')
