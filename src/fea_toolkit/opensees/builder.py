@@ -1,8 +1,12 @@
 # fea_toolkit/opensees/builder.py
 
-"""Build an OpenSees model from SAPModelData."""
+"""Build an OpenSees model from SAPModelData.
 
-from typing import Dict, Any, Optional, Tuple
+    Examples of OpenSeesPy usage:
+    https://github.com/AmirHosseinNamadchi/OpenSeesPy-Examples
+"""
+
+from typing import Dict, Any, Optional, Tuple, List
 from pathlib import Path
 import json
 import numpy as np
@@ -15,8 +19,8 @@ except ImportError:
     OPSTOOL_AVAILABLE = False
 
 from ..model.sap_data import SAPModelData
-from ..model.geometry import get_SAP_vecxz, rotate_about_axis
-from ..model.sap_data import Section
+from ..model.geometry import get_SAP_vecxz, global_to_local_distributed_load, rotate_about_axis
+from ..model.sap_data import Section, FrameElement, FrameDistributedLoad
 # from ..model.geometry import split_elements
 
 
@@ -55,8 +59,9 @@ class OpenSeesBuilder:
         self.units = model_data.units
         self.config = config or {}
         self._set_defaults()
-        self.split_elements: Dict[str, Dict] = {}
-        self.split_assignments: Dict[str, str] = {}
+        self.split_elements: Optional[Dict[str, FrameElement]] = None
+        self.split_assignments: Optional[Dict[str, str]] = None
+        self.split_dist_loads: Optional[List[FrameDistributedLoad]] = None
         # self._transf_tags: Dict[int, int] = {}   # elem_id -> transf_tag
 
     def _set_defaults(self) -> None:
@@ -68,6 +73,7 @@ class OpenSeesBuilder:
             'create_fiber_sections': False,
             'split_elements': True,
             'verbose': False,
+            'simplify_distributed_loads': False,
         }
         for key, default in defaults.items():
             if key not in self.config:
@@ -111,8 +117,8 @@ class OpenSeesBuilder:
         """Create OpenSees nodes from model_data.nodes."""
         if self.config['verbose']:
             print("Creating nodes...")
-        for node_id, node in self.model.nodes.items():
-            ops.node(int(node.id), node.x, node.y, node.z)
+        for node in self.model.nodes.values():
+            ops.node(node.node_tag, node.x, node.y, node.z)
 
     # =========================================================================
     # Boundary conditions
@@ -121,7 +127,8 @@ class OpenSeesBuilder:
         if self.config['verbose']:
             print("Applying restraints...")
         for node_id, restraint in self.model.restraints.items():
-            ops.fix(int(node_id), *restraint.dofs[:6])
+            tag = self.model.nodes[node_id].node_tag
+            ops.fix(tag, *restraint.dofs[:6])
 
     # -------------------------------------------------------------------------
     # Materials (placeholder)
@@ -134,7 +141,7 @@ class OpenSeesBuilder:
             print("Creating materials... (placeholder)")
         # For each material in self.model.materials, create e.g.:
         # ops.uniaxialMaterial('Steel01', matTag, Fy, E, b)
-        # Placeholder: add logic later
+        # TODO: Placeholder: add logic later
         pass
 
     # -------------------------------------------------------------------------
@@ -160,8 +167,10 @@ class OpenSeesBuilder:
             E_mod = 2.1e11   # default steel in Pa
             G_mod = 8.077e10
         else:
-            E_mod = mat.E_mod if hasattr(mat, 'E_mod') else mat.E
-            G_mod = mat.G_mod if hasattr(mat, 'G_mod') else mat.G
+            # E_mod = mat.E_mod if hasattr(mat, 'E_mod') else mat.E
+            # G_mod = mat.G_mod if hasattr(mat, 'G_mod') else mat.G
+            E_mod = mat.E_mod
+            G_mod = mat.G_mod
             if G_mod == 0 and E_mod > 0:
                 nu = mat.nu if mat.nu > 0 else 0.3
                 G_mod = E_mod / (2 * (1 + nu))
@@ -189,40 +198,62 @@ class OpenSeesBuilder:
         """Perform element splitting using geometry.split_elements."""
         from ..model.geometry import split_elements
 
-        # Convert nodes to raw dict format expected by split_elements
-        nodes_raw = {nid: {'x': node.x, 'y': node.y, 'z': node.z}
-                     for nid, node in self.model.nodes.items()}
-        # Convert frame_elements to raw dict
-        elements_raw = {}
-        for fid, fe in self.model.frame_elements.items():
-            elements_raw[fid] = {
-                'id': int(fe.id),
-                'i': fe.node_i,
-                'j': fe.node_j,
-                'angle': fe.angle,
-            }
-        # Use auto_mesh (if present, otherwise empty)
-        auto_mesh = getattr(self.model, 'frame_auto_mesh', {})
-        # Call split_elements (currently only splits at joints)
-        new_elements, new_assignments, _ = split_elements(
-            nodes_raw, elements_raw,
+        # Call split_elements with the model data
+        new_elements, new_assignments, new_dist_loads = split_elements(
+            self.model.nodes,
+            self.model.frame_elements,
             self.model.frame_assignments,
-            {},   # dist_loads not yet implemented
-            auto_mesh,
+            getattr(self.model, 'frame_dist_loads', []),   # pass the list of distributed loads
+            getattr(self.model, 'frame_auto_mesh', {}),
+            tol=1E-6,
             verbose=self.config['verbose']
         )
         self.split_elements = new_elements
         self.split_assignments = new_assignments
+        self.split_dist_loads = new_dist_loads   # store for later use in _create_loads
 
     # -------------------------------------------------------------------------
     # Elements
     # -------------------------------------------------------------------------
+
+    def _get_local_axes(self, elem: FrameElement) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return local y and z unit vectors for a frame element."""
+        #  Could use lookup table - maybe faster
+        if self._node_tag_from_id:
+            coords_i = ops.nodeCoord(self._node_tag_from_id(elem.node_i))
+            coords_j = ops.nodeCoord(self._node_tag_from_id(elem.node_j))
+        else:
+            coords_i = ops.nodeCoord(self.model.nodes[elem.node_i].node_tag)
+            coords_j = ops.nodeCoord(self.model.nodes[elem.node_j].node_tag)
+        vec_x = np.array(coords_j) - np.array(coords_i)
+        length = np.linalg.norm(vec_x)
+        if length < 1e-12:
+            raise ValueError(f"Zero length element {elem.elem_id} (tag {elem.elem_tag}) between nodes {elem.node_i} and {elem.node_j}")
+        vec_x_norm = vec_x / length
+        vecxz = get_SAP_vecxz(vec_x_norm, elem.angle)
+        # local z is vecxz
+        vec_z = vecxz / np.linalg.norm(vecxz)
+        # local y = cross(vec_z, vec_x)  (right‑handed)
+        vec_y = np.cross(vec_z, vec_x_norm)
+        vec_y = vec_y / np.linalg.norm(vec_y)
+        return vec_x, vec_y, vec_z
+
+    def _global_to_local(self, elem: FrameElement, vec: np.ndarray) -> np.ndarray:
+        """Transform a vector from global to local coordinates."""
+        vec_x, vec_y, vec_z = self._get_local_axes(elem)
+        
+        # Create the transformation matrix (3x3)
+        T = np.vstack([vec_x, vec_y, vec_z])
+        
+        # Use matrix multiplication (@ operator) to transform the vector
+        return T @ vec
+
     def _create_elements(self) -> None:
         """Create OpenSees frame elements, using split elements if available."""
         if self.config['verbose']:
             print("Creating elements...")
 
-        # Choose source: split elements or original
+        # Choose source
         if self.split_elements:
             elements = self.split_elements
             assignments = self.split_assignments
@@ -230,26 +261,41 @@ class OpenSeesBuilder:
             elements = self.model.frame_elements
             assignments = self.model.frame_assignments
 
+        # Build frame_tag_map for loads (and for element creation if needed)
+        self.frame_tag_map = {
+            eid: elem.elem_tag
+            for eid, elem in elements.items()
+            if not elem.inactive
+        }
+
         for elem_id, elem in elements.items():
+            if elem.inactive:
+                continue
+            
             # Get section name from assignments
-            sec_name = assignments.get(elem_id)
-            if not sec_name or sec_name not in self.section_tags:
+            sec_name = '' if (assignments is None) else assignments.get(elem_id)
+            if (not sec_name) or (sec_name not in self.section_tags):
                 if self.config['verbose']:
                     print(f"  Skipping element {elem_id}: no valid section")
                 continue
-
-            node_i = int(elem['i'])
-            node_j = int(elem['j'])
-            angle = elem.get('angle', 0.0)
+            if self._node_tag_from_id: 
+                node_i_tag = self._node_tag_from_id(elem.node_i)
+                node_j_tag = self._node_tag_from_id(elem.node_j)
+            else:
+                node_i_tag = self.model.nodes[elem.node_i].node_tag
+                node_j_tag = self.model.nodes[elem.node_j].node_tag
+            angle = elem.angle
             sec_tag = self.section_tags[sec_name]
             # Use element tag from elem['id']
-            elem_tag = int(elem['id'])
+            elem_tag = elem.elem_tag
 
-            self._add_beam_column(node_i, node_j, sec_tag, elem_tag, angle)
+            if (node_i_tag is not None) and (node_j_tag is not None):
+                self._add_beam_column(node_i_tag, node_j_tag, sec_tag, elem_tag, angle)
 
     def _add_beam_column(self, node_i: int, node_j: int, sec_tag: int,
                          elem_tag: int, angle_deg: float) -> None:
         """Create a beam‑column element with geometric transformation."""
+
         coords_i = ops.nodeCoord(node_i)
         coords_j = ops.nodeCoord(node_j)
         vec_x = np.array(coords_j) - np.array(coords_i)
@@ -293,37 +339,198 @@ class OpenSeesBuilder:
             print(f"  Element {elem_tag}: {node_i} -> {node_j}")
 
     # -------------------------------------------------------------------------
-    # Loads (placeholder)
+    # Loads
     # -------------------------------------------------------------------------
+    def _node_tag_from_id(self, node_id: str) -> Optional[int]:
+        """Return numeric tag for a node, or None if not found."""
+        node = self.model.nodes.get(node_id)
+        if node:
+            return node.node_tag
+        return None
+
     def _create_loads(self) -> None:
-        """Create load patterns (currently placeholder)."""
+        """Create load patterns and apply loads (joint and distributed)."""
         if self.config['verbose']:
-            print("Creating loads... (gravity dummy)")
+            print("Creating loads...")
+        joint_load_sums: Dict[int, Dict[str, float]] = {}
+        frame_load_sums: Dict[int, Dict[str, float]] = {}
+
+        # Determine which distributed loads to use (split or original)
+        dist_loads = (self.split_dist_loads if self.split_dist_loads is not None
+                    else self.model.frame_dist_loads)
+
+        # Build pattern tags (one per unique load pattern name)
+        pattern_tags = {}
+        for i, (pattern_name, pattern) in enumerate(self.model.load_patterns.items(), start=1):
+            ops.timeSeries('Linear', i)
+            ops.pattern('Plain', i, i)
+            pattern_tags[pattern_name] = i
+            if self.config['verbose']:
+                print(f"  Pattern '{pattern_name}' (tag={i})")
+
+        # Apply joint loads
+        for jl in self.model.joint_loads:
+            pat_tag = pattern_tags.get(jl.pattern)
+            if pat_tag is None:
+                continue
+            # Convert string node ID to numeric tag
+            node = self._node_tag_from_id(jl.node_id)
+            if node is None:
+                continue
+            ops.load(node, jl.fx, jl.fy, jl.fz, jl.mx, jl.my, jl.mz)
+            
+            if self.config['verbose']:
+                load_sum = joint_load_sums.get(pat_tag,{})
+                for key in ('fx', 'fy', 'fz', 'mx', 'my', 'mz'):
+                    load_sum[key] = load_sum.get(key,0.0) + getattr(jl, key)
+                joint_load_sums[pat_tag] = load_sum
+                print(f"    Joint load ({pat_tag}): node {node}: {jl.fx:,.1f} | {jl.fy:,.1f} | {jl.fz:,.1f} | {jl.mx:,.1f} | {jl.my:,.1f} | {jl.mz:,.1f}")
         
-        unit_L = self.units['L']
-        # unit_M = self.units['M']
-        # unit_F = self.units['F']
+        if self.config['verbose']:
+            for pat_tag, load_sum in joint_load_sums.items():
+                print(f"  Pattern {pat_tag}: {' | '.join([f'{key} = {val:,.1f}' for key, val in load_sum.items()])}")
 
-        ops.timeSeries('Linear', 1)
-        ops.pattern('Plain', 1, 1)
-        # Apply self‑weight (acceleration = 9.81 m/s²) – convert units if needed
-        gravity_dict = {
-            'm': 9.81,    # m/s²
-            'cm': 981.0,  # cm/s²
-            'mm': 9810.0, # mm/s²
-            'in': 32.2,   # in/s²
-            'ft': 386.4   # ft/s²
-        }
-        g = gravity_dict[unit_L]
-        for node_id in self.model.nodes.keys():
-            ops.load(int(node_id), 0, 0, -g, 0, 0, 0)
+        # Helper to resolve string frame ID to numeric tag
 
-        # Later: parse model_data.dist_loads, conc_loads, etc.
-        # Example: create a dummy pattern for gravity
-        # ops.timeSeries('Linear', 1)
-        # ops.pattern('Plain', 1, 1)
-        # ops.load(1, 0, 0, -9.81, 0, 0, 0)   # etc.
-        pass
+        # Build frame_tag_map if not already built (from _create_elements)
+        if not hasattr(self, 'frame_tag_map'):
+            elements = self.split_elements if self.split_elements else self.model.frame_elements
+            self.frame_tag_map = {
+                eid: elem.elem_tag
+                for eid, elem in elements.items()
+                if not elem.inactive
+            }
+
+        # def get_elem_tag(frame_id: str) -> Optional[int]:
+        #     # If split elements exist, use them; else original
+        #     if self.split_elements:
+        #         elem = self.split_elements.get(frame_id)
+        #         if elem and not elem.inactive:
+        #             return elem.elem_tag
+        #     else:
+        #         elem = self.model.frame_elements.get(frame_id)
+        #         if elem:
+        #             return elem.elem_tag
+        #     return None
+
+        def get_elem_tag(frame_id: str) -> Optional[int]:
+            return self.frame_tag_map.get(frame_id)
+
+        # Apply distributed frame loads
+        for ld in dist_loads:
+            pat_tag = pattern_tags.get(ld.pattern)
+            if pat_tag is None:
+                if self.config['verbose']:
+                    print(f"  Warning: pattern '{ld.pattern}' not found for element load")
+                continue
+            elem_tag = get_elem_tag(ld.frame_id)
+            if elem_tag is None:
+                if self.config['verbose']:
+                    print(f"  Warning: element '{ld.frame_id}' not found or inactive")
+                continue
+
+            # Get element object (for local axes)
+            if self.split_elements:
+                elem = self.split_elements.get(ld.frame_id)
+            else:
+                elem = self.model.frame_elements.get(ld.frame_id)
+            if elem is None:
+                continue
+
+            # Compute local axes
+            try:
+                vec_x, vec_y, vec_z = self._get_local_axes(elem)
+            except Exception as e:
+                if self.config['verbose']:
+                    print(f"  Warning: could not compute local axes for element {ld.frame_id}: {e}")
+                continue
+
+            # Determine global load direction vector
+            if ld.direction == 'Gravity':
+                # Global Z downward (force is positive downward in SAP2000)
+                # For gravity, load value is positive downward (negative Z)
+                global_dir = np.array([0.0, 0.0, -1.0])
+            elif ld.direction == 'X':
+                global_dir = np.array([1.0, 0.0, 0.0])
+            elif ld.direction == 'Y':
+                global_dir = np.array([0.0, 1.0, 0.0])
+            elif ld.direction == 'Z':
+                global_dir = np.array([0.0, 0.0, 1.0])
+            else:
+                # Unknown direction – default to gravity
+                global_dir = np.array([0.0, 0.0, -1.0])
+
+            # For uniform/linear loads, the load intensity is force per length along the element.
+            # We need components along local y and z.
+            # The load vector is global_dir * intensity (but intensity is given as val_a, val_b)
+            # We'll compute the components at start and end.
+            # For simplicity, we'll assume the load direction is constant along the element.
+            # So we project global_dir onto local y and z.
+            wx_a = ld.val_a * np.dot(global_dir, vec_x)
+            wy_a = ld.val_a * np.dot(global_dir, vec_y)
+            wz_a = ld.val_a * np.dot(global_dir, vec_z)
+            wx_b = ld.val_b * np.dot(global_dir, vec_x)
+            wy_b = ld.val_b * np.dot(global_dir, vec_y)
+            wz_b = ld.val_b * np.dot(global_dir, vec_z)
+
+            # Normalize the load span (aOverL, bOverL) – for full length loads they are 0 and 1.
+            # The dist_a and dist_b are absolute distances from start, but we need fractions.
+            # We have the element length from the nodes.
+            if self._node_tag_from_id: 
+                coords_i = ops.nodeCoord(self._node_tag_from_id(elem.node_i))
+                coords_j = ops.nodeCoord(self._node_tag_from_id(elem.node_j))
+            else:
+                coords_i = ops.nodeCoord(self.model.nodes[elem.node_i].node_tag)
+                coords_j = ops.nodeCoord(self.model.nodes[elem.node_j].node_tag)
+            length = np.linalg.norm(np.array(coords_j) - np.array(coords_i))
+            if length < 1e-12:
+                continue
+            # aOverL = ld.dist_a / length
+            # bOverL = ld.dist_b / length
+            aOverL = ld.rdist_a
+            bOverL = ld.rdist_b
+            # Clamp to [0,1]
+            aOverL = max(0.0, min(1.0, aOverL))
+            bOverL = max(0.0, min(1.0, bOverL))
+
+            load_l = ld.dist_b - ld.dist_a
+            load_dict = {'X': 0.5 *(wx_a + wx_b) * load_l, 'Y': 0.5 * (wy_a + wy_b) * load_l, 'Z': 0.5 * (wz_a + wz_b) * load_l}
+            
+            if self.config['verbose']:
+                frame_load_ptn_sums = frame_load_sums.get(pat_tag, {})
+                for key, value in load_dict.items():
+                    frame_load_ptn_sums[key] = frame_load_ptn_sums.get(key, 0.0) + value
+                frame_load_sums[pat_tag] = frame_load_ptn_sums
+                
+
+            # Determine load shape and use appropriate eleLoad command
+            # TODO: For 3D beam-column elements, need to replace trapezoid with uniform and triangular
+            if ld.load_type == 'Force':
+                if ld.shape == 'Uniform' or abs(ld.val_a - ld.val_b) < 1e-6:
+                    # Uniform: use 3‑argument form (Wy, Wz, Wx) with Wx=0
+                    ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
+                                wy_a, wz_a, wx_a)
+                    if self.config['verbose']:
+                        print(f"    Uniform load ({pat_tag}): element {elem_tag}, Wy={wy_a:.3f}, Wz={wz_a:.3f}, Wx={wx_a:.3f} | {ld.frame_id}")
+                else:
+                    # Linear or trapezoidal: use 8‑argument form
+                    # Args: Wy1 Wz1 Wx1 aOverL bOverL Wy2 Wz2 Wx2
+                    ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
+                                wy_a, wz_a, wx_a, aOverL, bOverL, wy_b, wz_b, wx_b)
+                    if self.config['verbose']:
+                        print(f"    Linear/Trapezoidal load ({pat_tag}): element {elem_tag}, Wy1={wy_a:.3f}, Wz1={wz_a:.3f}, Wx1={wx_a:.3f}, Wy2={wy_b:.3f}, Wz2={wz_b:.3f}, Wx2={wx_b:.3f} | {ld.frame_id}")
+            elif ld.load_type == 'Moment':
+                # For moment loads, similar but with Mx, My, Mz – not implemented here
+                if self.config['verbose']:
+                    print("  Warning: moment distributed loads not yet supported")
+            else:
+                if self.config['verbose']:
+                    print(f"  Warning: unknown load type '{ld.load_type}'")
+
+        if self.config['verbose']:
+            for pat_tag, load_sum in frame_load_sums.items():
+                print(f"  Pattern {pat_tag}: {' | '.join([f'{key} = {val:,.1f}' for key, val in load_sum.items()])}")
+
 
     # =========================================================================
     # Script writing
@@ -381,9 +588,9 @@ class OpenSeesBuilder:
         results = {}
         if OPSTOOL_AVAILABLE and odb_tag > 0:
             # Use opstool for easy extraction
-            opst.post.CreateODB(odb_tag=1)
-            opst.post.save_model_data(odb_tag=1)
-            nodes_df = opst.post.get_model_data(data_type='Nodal', odb_tag=1)
+            opst.post.CreateODB(odb_tag=1) # type: ignore
+            opst.post.save_model_data(odb_tag=1) # type: ignore
+            nodes_df = opst.post.get_model_data(data_type='Nodal', odb_tag=1) # type: ignore
             if nodes_df is not None:
                 results['nodal_displacements'] = nodes_df.to_dict()
         else:
@@ -416,10 +623,11 @@ class OpenSeesBuilder:
             print("No split elements available. Run build() with split_elements=True first.")
             return
         data = {
-            "nodes": {nid: {"x": node.x, "y": node.y, "z": node.z} for nid, node in self.model.nodes.items()},
+            "nodes": {nid: {"tag": node.node_tag, "x": node.x, "y": node.y, "z": node.z} for nid, node in self.model.nodes.items()},
             "split_elements": self.split_elements,
             "split_assignments": self.split_assignments,
             "original_assignments": self.model.frame_assignments,
+            "split_loads": self.split_dist_loads,
         }
         with open(output_path, "w") as f:
             json.dump(data, f, indent=2, default=str)
