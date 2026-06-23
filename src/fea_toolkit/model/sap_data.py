@@ -231,10 +231,12 @@ class PipeSection(Section):
     def to_fiber_patches(
         self, mat_tag: int, nfy: int = 8, nfz: int = 4
     ) -> List[Tuple]:
-        """Placeholder — CHS patches require an annular mesh."""
-        raise NotImplementedError(
-            "Fiber conversion for PipeSection not yet implemented"
-        )
+        """Annular ring via ``patch circ``."""
+        R = self.od / 2.0
+        return [
+            ("circ", mat_tag, nfy, nfz, 0.0, 0.0,
+             max(0.0, R - self.t), R, 0.0, 360.0),
+        ]
 
 
 @dataclass
@@ -248,10 +250,21 @@ class BoxSection(Section):
     def to_fiber_patches(
         self, mat_tag: int, nfy: int = 8, nfz: int = 4
     ) -> List[Tuple]:
-        """Placeholder — Box patches need inner/outer rectangles."""
-        raise NotImplementedError(
-            "Fiber conversion for BoxSection not yet implemented"
-        )
+        """Four rectangular patches for the flanges and webs."""
+        D, B = self.depth, self.bf
+        tf, tw = self.tf, self.tw
+        half = D / 2.0
+        hb = B / 2.0
+        return [
+            # Top flange
+            ("rect", mat_tag, nfy, nfz, half - tf, -hb, half, hb),
+            # Bottom flange
+            ("rect", mat_tag, nfy, nfz, -half, -hb, -half + tf, hb),
+            # Left web
+            ("rect", mat_tag, nfy, nfz, -half + tf, -hb, half - tf, -hb + tw),
+            # Right web
+            ("rect", mat_tag, nfy, nfz, -half + tf, hb - tw, half - tf, hb),
+        ]
 
 
 @dataclass
@@ -276,10 +289,11 @@ class CircularSection(Section):
     def to_fiber_patches(
         self, mat_tag: int, nfy: int = 8, nfz: int = 4
     ) -> List[Tuple]:
-        """Placeholder — circular patches require a mesh."""
-        raise NotImplementedError(
-            "Fiber conversion for CircularSection not yet implemented"
-        )
+        """Solid circle via ``patch circ`` with zero inner radius."""
+        R = self.diameter / 2.0
+        return [
+            ("circ", mat_tag, nfy, nfz, 0.0, 0.0, 0.0, R, 0.0, 360.0),
+        ]
 
 
 @dataclass
