@@ -12,10 +12,8 @@ The goal is to create a Python package `fea_toolkit` that:
 - Enriches section properties using a manufacturer database.
 - Splits frame elements at joints (and optionally at frame intersections) with parent‑child tracking.
 - Splits distributed loads (uniform, linear, trapezoidal) to match the sub‑elements.
-- Builds OpenSees models with configurable element types (`elasticBeamColumn`, `forceBeamColumn`, etc.), applies loads, and runs analyses (static, modal, pushover, time‑history).
+- Builds OpenSees models with configurable element types (`elasticBeamColumn`, `forceBeamColumn`, etc.), applies loads, and runs linear static analysis (modal, pushover, and time‑history are planned).
 - Exports to Rhino for visualisation (via a separate module).
-
-We have made substantial progress on the core pipeline, with a focus on correctness and extensibility.
 
 ---
 
@@ -30,14 +28,15 @@ We have made substantial progress on the core pipeline, with a focus on correctn
 ├── src/fea_toolkit/
 │   ├── __init__.py
 │   ├── io/
-│   │   └── s2k_parser.py     # SAP2000Parser with string IDs, numeric tags
+│   │   ├── s2k_parser.py     # SAP2000Parser with string IDs, numeric tags
+│   │   └── helper.py         # File‑chooser utilities (tkinter/macOS)
 │   ├── model/
-│   │   ├── sap_data.py       # Dataclasses: Node, FrameElement, LoadPattern, JointLoad, FrameDistributedLoad (with rdist_a/b), SAPModelData
+│   │   ├── sap_data.py       # Dataclasses: Node, FrameElement, LoadPattern, JointLoad, FrameDistributedLoad, SAPModelData, and others
 │   │   ├── sections.py       # SectionLibrary with unit conversion (mm/in)
 │   │   └── geometry.py       # SpatialGrid, point_on_segment, trapezoidal_force_split, split_elements (joint splitting + load redistribution)
 │   ├── opensees/
 │   │   └── builder.py        # OpenSeesBuilder: creates nodes, restraints, sections, splits elements, builds elements, applies loads (using relative positions), runs linear static analysis
-│   └── rhino/                # (placeholder – to be refactored)
+│   └── rhino/                # Rhino visualisation (placeholder – to be refactored)
 ├── tests/                    # pytest suite (test_parser, test_model, test_dummy)
 ├── pyproject.toml
 └── README.md
@@ -48,7 +47,7 @@ We have made substantial progress on the core pipeline, with a focus on correctn
 | Component | Status | Notes |
 | :--- | :--- | :--- |
 | **`SAP2000Parser`** | ✅ Complete | Parses .s2k into raw tables; converts to `SAPModelData` with string IDs; assigns numeric tags; extracts materials, sections, frame connectivity, restraints, load patterns, joint loads, distributed loads, auto‑mesh settings. |
-| **`SAPModelData`** | ✅ Complete | Contains all model data with mutable defaults via `field(default_factory=...)`; includes `units` dict (`{'F','L','T'}`) with default `{'F':'N','L':'mm','T':'C'}`. |
+| **`SAPModelData`** | ✅ Complete | Contains all model data with mutable defaults via `field(default_factory=...)`; includes `units` dict with default `{'F':'N','L':'m','T':'C'}`. |
 | **`SectionLibrary`** | ✅ Complete | Loads section catalogue pickle; converts units to match model (`mm` or `in`); enriches `Section` objects with `Z33`, `Z22`, dimensions, etc. |
 | **`geometry.split_elements`** | ✅ Complete | Splits elements at joints when `AtJoints=True`; marks parent as `inactive`; creates child elements with new numeric tags; redistributes distributed loads using `trapezoidal_force_split`; stores relative positions (`rdist_a`, `rdist_b`) in child loads. |
 | **`OpenSeesBuilder`** | ✅ Complete | Builds OpenSees model: nodes (with numeric tags), restraints, elastic sections, elements (skips inactive), loads (patterns, joint loads, distributed loads with 3‑ or 8‑argument `eleLoad`), linear static analysis; returns nodal displacements. |
@@ -56,7 +55,7 @@ We have made substantial progress on the core pipeline, with a focus on correctn
 | **Parent‑Child Tracking** | ✅ Complete | Each split element stores `parent_id`, `child_ids`, `t_locations`; inactive flag prevents building of parent. |
 | **Unit Conversion** | ✅ Complete | `SectionLibrary` converts lengths, areas, inertias between `in` and `mm` based on catalogue metadata. |
 | **Visualisation (opsvis)** | ✅ Quick test | `basic_usage.py` can show line‑based model; extrusion not implemented. |
-| **Pytest Suite** | ✅ Passing | Basic tests for parser, dummy, and model. |
+| **Pytest Suite** | ✅ Passing | 74 tests: dataclass construction, geometry utilities, section enrichment, parser integration, and edge cases. |
 
 #### 3. Notable Design Decisions
 
@@ -65,6 +64,17 @@ We have made substantial progress on the core pipeline, with a focus on correctn
 - **Spatial Grid** – Efficient nearest‑neighbour search for splitting.
 - **Trapezoidal Splitting** – Exact redistribution of varying loads using your proven `trapezoidal_force_split`.
 - **Configurable Builder** – Element type, integration points, splitting, verbosity can be set via `config` dict.
+
+#### 4. Distributed Load Support by Element Type
+
+Not all OpenSees element types support the same `eleLoad -type -beamUniform` argument forms. The builder handles this automatically:
+
+| Element type | 3-arg uniform `(wy, wz, wx)` | 8-arg trapezoidal `(wy1, wz1, wx1, aL, bL, wy2, wz2, wx2)` |
+|---|---|---|
+| **`elasticBeamColumn`** | ✅ Native | ✅ Native — `ElasticBeam3d::addLoad()` handles `Beam3dPartialUniformLoad` |
+| **`forceBeamColumn`** | ✅ Native | ✅ Native — `ForceBeamColumn3d::computeReactions()` handles it |
+| **`dispBeamColumn`** | ✅ Native | ❌ Decomposed to equivalent uniform (average intensity) |
+| **`nonlinearBeamColumn`** | ✅ Native | ❌ Decomposed to equivalent uniform (average intensity) |
 
 ---
 
@@ -82,9 +92,9 @@ We have made substantial progress on the core pipeline, with a focus on correctn
    - ETABS uses different load nomenclature – adapt accordingly.
 
 3. **Load Combinations and Analysis Types**  
-   - Parse `LOAD CASES` and `LOAD COMBINATIONS` tables.  
-   - In `OpenSeesBuilder`, allow the user to select which load cases/combinations to run.  
-   - Implement combination factors (e.g., `1.2 DL + 1.6 LL`).
+   - `LoadCase`, `LoadCombination`, and `MassSource` dataclasses already defined in `sap_data.py`.  
+   - Complete parsing of `LOAD CASES` and `LOAD COMBINATIONS` tables in the parser.  
+   - In `OpenSeesBuilder`, allow the user to select which load cases/combinations to run with combination factors (e.g., `1.2 DL + 1.6 LL`).
 
 4. **Advanced Analyses**  
    - **Modal Analysis** – implement eigenvalue extraction (`ops.eigen`).  
@@ -97,7 +107,8 @@ We have made substantial progress on the core pipeline, with a focus on correctn
    - Implement `Joint2D` and `beamColumnJoint` elements in `OpenSeesBuilder`.
 
 6. **Rhino Importer Refactoring**  
-   - Move your `sap2000_import_v8.py` into `src/fea_toolkit/rhino/importer.py`.  
+   - The `rhino/` package stub exists at `src/fea_toolkit/rhino/`.  
+   - Move `sap2000_import_v8.py` into `src/fea_toolkit/rhino/importer.py`.  
    - Adapt it to read `SAPModelData` (instead of raw JSON) and use the split data for visualisation.
 
 #### Medium Priority
@@ -116,7 +127,9 @@ We have made substantial progress on the core pipeline, with a focus on correctn
    - Create a user guide (examples, how to run different analyses).
 
 10. **Testing**  
+    - `test_parser.py` covers basic parsing; `test_model.py` is yet to be populated.  
     - Add tests for `split_elements` with trapezoidal loads.  
+    - Add unit tests for `SectionLibrary`, `SAPModelData` dataclasses, and geometry utilities.  
     - Add integration tests for `OpenSeesBuilder` using small test models.
 
 #### Low Priority
@@ -132,3 +145,49 @@ We have made substantial progress on the core pipeline, with a focus on correctn
 The **SAP2000 → OpenSees pipeline** is now **largely functional**. You can parse a model, split elements and loads, build an OpenSees model, and run a linear static analysis. The code is modular, well‑structured, and ready for the next phases: frame‑frame intersections, ETABS support, and advanced analyses.
 
 The project is well on track to meet your original goals. Let me know which of the remaining tasks you would like to tackle next, and I will provide the necessary code and guidance.
+
+---
+
+## Troubleshooting
+
+### Pylance false‑positive squiggles for `openseespy` / `opstool`
+
+`openseespy.opensees` and `opstool` are **C extensions** (compiled `.so` files). Pylance cannot statically inspect C extensions, so it flags every `ops.xxx()` call as `"xxx" is not a known attribute` — even though the calls work fine at runtime.
+
+The fix is to provide **type stubs** that tell Pylance these modules are dynamically typed.
+
+#### Step 1 — Type stubs (already created)
+
+The project ships with detailed type stubs covering every OpenSees and opstool function used in the source code:
+
+**`typings/openseespy/opensees/__init__.pyi`** — 22 functions with named parameters and docstrings:
+
+| Category | Functions |
+|---|---|
+| Domain/model | `wipe()`, `model()`, `node()`, `fix()`, `nodeCoord()`, `nodeDisp()` |
+| Section | `section()` |
+| Geometry | `geomTransf()` |
+| Elements | `element()`, `beamIntegration()`, `eleNodes()`, `eleResponse()` |
+| Loads | `timeSeries()`, `pattern()`, `load()`, `eleLoad()` |
+| Analysis | `constraints()`, `numberer()`, `system()`, `test()`, `algorithm()`, `integrator()`, `analyze()` |
+| Recorder | `recorder()` |
+| Material | `uniaxialMaterial()` |
+
+Plus a `__getattr__` fallback for any undocumented functions.
+
+**`typings/opstool/__init__.pyi`** + **`typings/opstool/post/__init__.pyi`** — `CreateODB()`, `save_model_data()`, `get_model_data()` with typed parameters.
+
+#### Step 2 — Point Pylance at the stubs
+
+In `.vscode/settings.json` (already created):
+```json
+{
+    "python.analysis.stubPath": "typings"
+}
+```
+
+#### Step 3 — Reload the window
+
+Run `Developer: Reload Window` in VS Code so Pylance picks up the changes.
+
+Hovering over `ops.node(...)`, `ops.element(...)`, `ops.analyze(...)`, etc. will now show parameter names, types, and descriptions — and all false‑positive attribute‑access squiggles will disappear.
