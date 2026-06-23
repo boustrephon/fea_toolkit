@@ -488,6 +488,12 @@ class OpenSeesBuilder:
                 global_dir = np.array([0.0, 1.0, 0.0])
             elif ld.direction == 'Z':
                 global_dir = np.array([0.0, 0.0, 1.0])
+            elif ld.direction == 'LocalX':
+                global_dir = vec_x
+            elif ld.direction == 'LocalY':
+                global_dir = vec_y
+            elif ld.direction == 'LocalZ':
+                global_dir = vec_z
             else:
                 global_dir = np.array([0.0, 0.0, -1.0])
 
@@ -843,6 +849,39 @@ class OpenSeesBuilder:
         }
         with open(output_path, "w") as f:
             json.dump(data, f, indent=2, default=str)
+
+    # =========================================================================
+    # Static element forces (after run_static_analysis)
+    # =========================================================================
+    def extract_static_element_forces(self) -> Dict[int, Dict[str, float]]:
+        """Extract element end forces in the **global** coordinate system.
+
+        Must be called **after** :meth:`run_static_analysis`.
+
+        Returns:
+            Dict mapping ``elem_tag`` → dict with keys ``'Fx'``, ``'Fy'``,
+            ``'Fz'``, ``'Mx'``, ``'My'``, ``'Mz'`` (global forces at the
+            I‑end of the element) and ``'Fx_j'``, ``'Fy_j'``, ``'Fz_j'``,
+            ``'Mx_j'``, ``'My_j'``, ``'Mz_j'`` (J‑end).
+        """
+        elements = (self.split_elements if self.split_elements
+                    else self.model.frame_elements)
+        results = {}
+        for eid, elem in elements.items():
+            if getattr(elem, 'inactive', False):
+                continue
+            tag = elem.elem_tag
+            try:
+                f = ops.eleResponse(tag, 'forces')
+            except Exception:
+                continue
+            results[tag] = {
+                'Fx': f[0], 'Fy': f[1], 'Fz': f[2],
+                'Mx': f[3], 'My': f[4], 'Mz': f[5],
+                'Fx_j': f[6], 'Fy_j': f[7], 'Fz_j': f[8],
+                'Mx_j': f[9], 'My_j': f[10], 'Mz_j': f[11],
+            }
+        return results
 
     # =========================================================================
     # Seismic masses (based on MASS SOURCE definition)
@@ -1363,8 +1402,93 @@ class OpenSeesBuilder:
         }
 
     # =========================================================================
-    # Missing mass correction
+    # RS nodal displacements (from mode‑shape combination)
     # =========================================================================
+    def compute_rs_nodal_displacements(
+        self,
+        num_modes: int,
+        modal_periods: List[float],
+        eigenvalues: List[float],
+        spectrum_func,
+        direction: str = 'X',
+        damping_ratio: float = 0.05,
+    ) -> Dict[int, Tuple[float, float, float]]:
+        """Compute CQC‑combined peak nodal displacements from RS analysis.
+
+        Uses mode‑shape superposition rather than re‑running the RS analysis:
+
+            u_m = Γ_m · φ_m · Sa_m / ω²_m
+
+        then CQC across modes.
+
+        Args:
+            num_modes: Number of modes.
+            modal_periods: Natural periods of each mode (s).
+            eigenvalues: Eigenvalues (ω²) from :meth:`run_modal_analysis`.
+            spectrum_func: Callable ``f(T) → Sa`` in **m/s²**.
+            direction: Excitation direction ``'X'``, ``'Y'``, or ``'Z'``.
+            damping_ratio: Damping ratio for CQC correlation.
+
+        Returns:
+            Dict mapping ``node_tag`` → ``(dx, dy, dz)`` in model length units.
+        """
+        dof = {'X': 1, 'Y': 2, 'Z': 3}[direction]
+        dof_idx = dof - 1  # 0‑based for the result tuple
+
+        # Get participation factors from modalProperties
+        try:
+            mp = ops.modalProperties('-return', '-unorm')
+        except Exception:
+            mp = {}
+        gamma_all = mp.get('partiFactorMX' if direction == 'X'
+                           else 'partiFactorMY' if direction == 'Y'
+                           else 'partiFactorMZ',
+                           [0.0] * num_modes)
+
+        omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods]
+        damp = [damping_ratio] * num_modes
+
+        # Collect node tags
+        node_tags = list(ops.getNodeTags())
+
+        # Store per-mode displacement contributions: per_mode[tag][d] = [val_mode0, ...]
+        per_mode = {tag: {d: [] for d in range(3)} for tag in node_tags}
+
+        for m in range(num_modes):
+            if eigenvalues[m] <= 1e-12 or omega[m] <= 1e-12:
+                for tag in node_tags:
+                    for d in range(3):
+                        per_mode[tag][d].append(0.0)
+                continue
+
+            T = modal_periods[m]
+            Sa = spectrum_func(T)           # m/s²
+            factor = gamma_all[m] * Sa / (omega[m] ** 2)
+
+            if abs(factor) < 1e-15:
+                for tag in node_tags:
+                    for d in range(3):
+                        per_mode[tag][d].append(0.0)
+                continue
+
+            for tag in node_tags:
+                phi = ops.nodeEigenvector(tag, m + 1, dof)
+                per_mode[tag][dof_idx].append(phi * factor)
+                # Off‑direction DOFs get zero (unidirectional excitation)
+                for d in range(3):
+                    if d != dof_idx:
+                        per_mode[tag][d].append(0.0)
+
+        # CQC combine per node
+        cqc_result = {}
+        for tag in node_tags:
+            vals = tuple(
+                self._cqc_combine(per_mode[tag][d], omega, damp)
+                for d in range(3)
+            )
+            cqc_result[tag] = vals
+
+        return cqc_result
     def add_missing_mass_correction(
         self,
         rs_results: Dict[str, Any],

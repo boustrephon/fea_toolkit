@@ -610,12 +610,34 @@ class SAP2000Parser:
     def _get_mass_sources(self) -> Dict[str, MassSource]:
         """Parse MASS SOURCE table — each row defines one MassSource entry.
 
-        SAP2000 MASS SOURCE entries are grouped by the MassSource name (first
-        column).  Each row with the same MassSource name adds another
-        LoadPat + Multiplier pair.  The Elements, Masses, Loads, IsDefault
-        flags come from the *first* row of each group.
+        Two table formats are supported:
+
+        1. **Modern** (``MASS SOURCE``) — grouped by MassSource name, each
+           row has Elements/Masses/Loads flags and LoadPat + Multiplier pairs.
+           Multipliers for the same LoadPat within a group are summed.
+
+        2. **Legacy** (``MASSES 1 - MASS SOURCE``) — simple ``MassFrom``
+           field with value ``'Elements'``, ``'Masses'``, or ``'Loads'``.
+           This is converted to a default ``MSSSRC1`` entry.
         """
         mass_sources: Dict[str, MassSource] = {}
+
+        # --- Legacy format: "MASSES 1 - MASS SOURCE" ---
+        legacy = self._raw_tables.get('MASSES 1 - MASS SOURCE', [])
+        if legacy:
+            ms = MassSource(name='MSSSRC1', is_default=True)
+            for rec in legacy:
+                val = str(rec.get('MassFrom', ''))
+                if val.lower() == 'elements':
+                    ms.elements = True
+                elif val.lower() == 'masses':
+                    ms.masses = True
+                elif val.lower() == 'loads':
+                    ms.loads = True
+            mass_sources['MSSSRC1'] = ms
+            return mass_sources
+
+        # --- Modern format: "MASS SOURCE" ---
         raw = self._raw_tables.get('MASS SOURCE', [])
         if not raw:
             return mass_sources
@@ -676,6 +698,7 @@ class SAP2000Parser:
 
     def _get_frame_distributed_loads(self) -> List[FrameDistributedLoad]:
         loads = []
+        # Standard distributed loads
         for rec in self._raw_tables.get('FRAME LOADS - DISTRIBUTED', []):
             shape = 'Uniform'
             val_a = rec.get('FOverLA', 0.0)
@@ -695,6 +718,32 @@ class SAP2000Parser:
                 dist_a=float(rec.get('AbsDistA', 0.0)),
                 dist_b=float(rec.get('AbsDistB', 0.0)),
                 coord_sys=rec.get('CoordSys', 'GLOBAL')
+            ))
+
+        # Open-structure wind loads (local coordinate directions)
+        DIR_MAP = {1: 'LocalX', 2: 'LocalY', 3: 'LocalZ'}
+        for rec in self._raw_tables.get('FRAME LOADS - OPEN STRUCTURE WIND', []):
+            dir_num = int(rec.get('Dir', 2))
+            direction = DIR_MAP.get(dir_num, 'LocalY')
+            shape = 'Uniform'
+            val_a = rec.get('FOverLA', 0.0)
+            val_b = rec.get('FOverLB', 0.0)
+            if val_a != val_b:
+                shape = 'Linear' if (rec.get('RelDistA', 0.0) == 0.0
+                                     and rec.get('RelDistB', 0.0) == 1.0) else 'Trapezoidal'
+            loads.append(FrameDistributedLoad(
+                pattern=rec.get('LoadCase', ''),
+                frame_id=str(rec.get('Frame', '')),
+                direction=direction,
+                load_type=rec.get('Type', 'Force'),
+                shape=shape,
+                val_a=float(val_a),
+                val_b=float(val_b),
+                rdist_a=float(rec.get('RelDistA', 0.0)),
+                rdist_b=float(rec.get('RelDistB', 0.0)),
+                dist_a=float(rec.get('AbsDistA', 0.0)),
+                dist_b=float(rec.get('AbsDistB', 0.0)),
+                coord_sys='Local',
             ))
         return loads
 
