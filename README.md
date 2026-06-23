@@ -80,8 +80,9 @@ Not all OpenSees element types support the same `eleLoad -type -beamUniform` arg
 
 - The 8‑argument trapezoidal form `(wy1, wz1, wx1, aL, bL, wy2, wz2, wx2)` is
   **broken in OpenSeesPy 3.8.0.0** — the end values (`wy2` etc.) are silently
-  ignored.  The builder therefore decomposes all non‑uniform loads to an
-  equivalent uniform intensity that conserves the total force.
+  ignored.  The builder therefore decomposes non‑uniform loads into **4 partial‑
+  span uniform segments** (using the working 5‑argument form), which preserves
+  both the total force and the moment distribution.
 - `Corotational` geometric transformation does **not** support `eleLoad` in 3D
   (per the [OpenSees documentation](https://opensees.ist.berkeley.edu/wiki/index.php?title=EleLoad_Command)).
   If you use `'geom_transf_type': 'Corotational'`, the builder will emit a warning.
