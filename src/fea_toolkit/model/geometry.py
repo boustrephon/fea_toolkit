@@ -4,7 +4,7 @@
 
 import math
 import numpy as np
-from typing import Sequence, Tuple, Dict, List, Any, Union # , Optional
+from typing import Sequence, Tuple, Dict, List, Any, Union, Optional
 from collections import defaultdict
 
 # from ..model.sap_data import FrameElement, FrameDistributedLoad
@@ -168,7 +168,7 @@ def global_to_local_distributed_load(ele_tag, global_force_vector):
     
     return wx, wy,wz
 
-def interp(x:float, x1: float, x2: float, y1: float, y2: float) -> float:
+def interp(x:float, x1: float, x2: float, y1: Optional[float], y2: Optional[float]) -> Optional[float]:
     """Returns an interpolated y-value for a line 
     between two points (x1, y1) and (x2, y2)
     for a given x-value - i.e. linear interpolation 

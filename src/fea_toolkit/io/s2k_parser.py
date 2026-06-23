@@ -363,18 +363,21 @@ class SAP2000Parser:
                 eFc = self._to_float(props.get("eFc", None))
 
                 # Compute G if missing
-                if G_mod == 0 and E_mod > 0 and nu > 0: # pyright: ignore[reportOptionalOperand]
-                    G_mod = E_mod / (2 * (1 + nu)) # pyright: ignore[reportOperatorIssue, reportOptionalOperand]
+                if G_mod == 0 and E_mod > 0 and nu > 0:
+                    G_mod = E_mod / (2 * (1 + nu))
+
+                assert E_mod is not None and G_mod is not None and nu is not None
+                assert unit_weight is not None and unit_mass is not None
 
                 material = Material(
                     name=name,
                     type=mat_type,
                     grade=grade,
-                    E_mod=E_mod, # pyright: ignore[reportArgumentType]
-                    G_mod=G_mod, # pyright: ignore[reportArgumentType]
-                    nu=nu, # pyright: ignore[reportArgumentType]
-                    unit_weight=unit_weight, # pyright: ignore[reportArgumentType]
-                    unit_mass=unit_mass, # pyright: ignore[reportArgumentType]
+                    E_mod=E_mod,
+                    G_mod=G_mod,
+                    nu=nu,
+                    unit_weight=unit_weight,
+                    unit_mass=unit_mass,
                     Fy=Fy,
                     Fu=Fu,
                     Fc=Fc,
