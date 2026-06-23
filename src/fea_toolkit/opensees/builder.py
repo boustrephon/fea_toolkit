@@ -9,6 +9,7 @@
 from typing import Dict, Any, Optional, Tuple, List
 from pathlib import Path
 import json
+import math
 import numpy as np
 
 import openseespy.opensees as ops
@@ -842,3 +843,605 @@ class OpenSeesBuilder:
         }
         with open(output_path, "w") as f:
             json.dump(data, f, indent=2, default=str)
+
+    # =========================================================================
+    # Seismic masses (based on MASS SOURCE definition)
+    # =========================================================================
+    def compute_seismic_masses(self, g: float = 9.81) -> Dict[str, float]:
+        """Compute lumped nodal masses from the model's MASS SOURCE entries.
+
+        The MASS SOURCE table in SAP2000 controls how masses are derived:
+
+        * ``Elements=True``  — element self‑weight is converted to mass.
+        * ``Masses=True``    — any explicit lumped masses are included
+          (not yet supported — no SAP2000 example available).
+        * ``Loads=True``     — loads from the specified load pattern(s) are
+          converted to mass (total force / g).
+
+        All mass contributions are lumped to nodes and assigned via
+        ``ops.mass(node, m, m, m, 0, 0, 0)``.
+
+        Args:
+            g: Gravitational acceleration (m/s²).  Default 9.81.
+
+        Returns:
+            Dictionary mapping node ID → total lumped mass (tonnes).
+        """
+        if self.config['verbose']:
+            print("Computing seismic masses from MASS SOURCE...")
+
+        node_mass: Dict[str, float] = {}
+        all_patterns = self.model.load_patterns
+        all_materials = self.model.materials
+
+        # Determine which elements / assignments to use (split or original)
+        if self.split_elements:
+            elements = self.split_elements
+            assignments = self.split_assignments
+            dist_loads = self.split_dist_loads
+        else:
+            elements = self.model.frame_elements
+            assignments = self.model.frame_assignments
+            dist_loads = self.model.frame_dist_loads
+
+        for ms in self.model.mass_sources.values():
+            # --- Element self‑weight mass ---
+            if ms.elements:
+                for eid, elem in elements.items():
+                    if getattr(elem, 'inactive', False):
+                        continue
+                    sec_name = assignments.get(eid) if assignments else None
+                    if not sec_name or sec_name not in self.model.sections:
+                        continue
+                    sec = self.model.sections[sec_name]
+                    mat = all_materials.get(sec.material)
+                    if mat is None or mat.unit_weight == 0:
+                        continue
+                    ni = self.model.nodes.get(elem.node_i)
+                    nj = self.model.nodes.get(elem.node_j)
+                    if ni is None or nj is None:
+                        continue
+                    L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+                    if L < 1e-12:
+                        continue
+                    # Weight = volume × unit_weight
+                    weight = sec.A * mat.unit_weight * L
+                    mass = weight / g
+                    node_mass[elem.node_i] = node_mass.get(elem.node_i, 0.0) + mass * 0.5
+                    node_mass[elem.node_j] = node_mass.get(elem.node_j, 0.0) + mass * 0.5
+
+            # --- Load‑based mass ---
+            if ms.loads and ms.load_pattern:
+                for lp_name, mult in ms.load_pattern.items():
+                    if abs(mult) < 1e-12:
+                        continue
+                    # Distributed loads in this pattern → mass
+                    for ld in dist_loads or []:
+                        if ld.pattern != lp_name:
+                            continue
+                        elem = elements.get(ld.frame_id)
+                        if elem is None or getattr(elem, 'inactive', False):
+                            continue
+                        ni = self.model.nodes.get(elem.node_i)
+                        nj = self.model.nodes.get(elem.node_j)
+                        if ni is None or nj is None:
+                            continue
+                        L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+                        if L < 1e-12:
+                            continue
+                        # Total load = average intensity × loaded length
+                        load_len = ld.dist_b - ld.dist_a
+                        avg = (ld.val_a + ld.val_b) * 0.5
+                        total_force = avg * load_len * mult
+                        mass = total_force / g
+                        node_mass[elem.node_i] = node_mass.get(elem.node_i, 0.0) + mass * 0.5
+                        node_mass[elem.node_j] = node_mass.get(elem.node_j, 0.0) + mass * 0.5
+
+                    # Joint loads in this pattern → mass
+                    for jl in self.model.joint_loads or []:
+                        if jl.pattern != lp_name:
+                            continue
+                        # Use vertical component (F3) as the load magnitude
+                        total_force = abs(jl.fz) * mult
+                        mass = total_force / g
+                        node_mass[jl.node_id] = node_mass.get(jl.node_id, 0.0) + mass
+
+        # Assign masses to OpenSees nodes
+        for nid, m in node_mass.items():
+            tag = self._node_tag_from_id(nid)
+            if tag is not None:
+                if m > 0:
+                    ops.mass(tag, m, m, m, 0, 0, 0)
+                else:
+                    ops.mass(tag, 1e-6, 1e-6, 1e-6, 0, 0, 0)
+
+        self.node_masses = node_mass
+
+        if self.config['verbose']:
+            total = sum(node_mass.values())
+            print(f"  Total seismic mass: {total:.2f} tonnes")
+            print(f"  Total seismic weight: {total * g / 1000:.2f} MN")
+
+        return node_mass
+
+    # =========================================================================
+    # Modal analysis
+    # =========================================================================
+    def run_modal_analysis(self, num_modes: int = 30,
+                           print_results: bool = True) -> Dict[str, Any]:
+        """Run eigenvalue / modal analysis and return results.
+
+        Requires that seismic masses have been assigned (call
+        :meth:`compute_seismic_masses` first) and the stiffness model has been
+        built (call :meth:`build` first).
+
+        Args:
+            num_modes: Number of eigenvalues to solve for.
+            print_results: If True, print a modal properties table.
+
+        Returns:
+            Dictionary with keys:
+
+            * ``'eigenvalues'`` — list of eigenvalues (ω²).
+            * ``'periods'`` — list of natural periods (s).
+            * ``'frequencies'`` — list of natural frequencies (Hz).
+            * ``'modal_props'`` — the full ``ops.modalProperties()`` dict.
+            * ``'num_modes'`` — number of converged modes.
+        """
+        if self.config['verbose']:
+            print(f"Running modal analysis for {num_modes} modes...")
+
+        # Run eigenvalue analysis
+        eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
+        eigenvals = [ev for ev in eigenvals_all if ev > 1e-12]
+        n_modes = len(eigenvals)
+        if n_modes < num_modes:
+            if self.config['verbose']:
+                print(f"  Warning: only {n_modes} positive eigenvalues out of "
+                      f"{num_modes}.  Proceeding with {n_modes} modes.")
+
+        periods = [2.0 * math.pi / math.sqrt(ev) for ev in eigenvals]
+        frequencies = [math.sqrt(ev) / (2.0 * math.pi) for ev in eigenvals]
+
+        # Get modal properties via built-in command
+        try:
+            modal_props = ops.modalProperties('-return', '-unorm')
+        except Exception:
+            modal_props = {}
+
+        results = {
+            'eigenvalues': eigenvals,
+            'periods': periods,
+            'frequencies': frequencies,
+            'modal_props': modal_props,
+            'num_modes': n_modes,
+        }
+
+        if print_results:
+            print("\n===== MODAL ANALYSIS =====")
+            # Try to get participation info from modalProperties
+            if modal_props:
+                try:
+                    total_mass = modal_props.get('totalFreeMass', [0])[0]
+                    print(f"Total translational mass (free DOFs): {total_mass:.2f} tonnes")
+                    print()
+                    header = (f"{'Mode':>5} {'Freq(Hz)':>10} {'Period(s)':>10} "
+                              f"{'Mx(t)':>12} {'My(t)':>12} {'Mz(t)':>12} "
+                              f"{'%X':>7} {'%Y':>7} {'%Z':>7}")
+                    print(header)
+                    print("-" * len(header))
+                    for i in range(n_modes):
+                        mx = modal_props.get('partiMassMX', [0]*n_modes)[i]
+                        my = modal_props.get('partiMassMY', [0]*n_modes)[i]
+                        mz = modal_props.get('partiMassMZ', [0]*n_modes)[i]
+                        rx = modal_props.get('partiMassRatiosMX', [0]*n_modes)[i]
+                        ry = modal_props.get('partiMassRatiosMY', [0]*n_modes)[i]
+                        rz = modal_props.get('partiMassRatiosMZ', [0]*n_modes)[i]
+                        print(f"{i+1:5d} {frequencies[i]:10.4f} {periods[i]:10.4f} "
+                              f"{mx:12.2f} {my:12.2f} {mz:12.2f} "
+                              f"{rx:6.2f}% {ry:6.2f}% {rz:6.2f}%")
+                except Exception:
+                    # Fallback if modalProperties keys not available
+                    pass
+            else:
+                # Simple fallback
+                print(f"{'Mode':>5} {'Period(s)':>10} {'Freq(Hz)':>10}")
+                print("-" * 30)
+                for i in range(n_modes):
+                    print(f"{i+1:5d} {periods[i]:10.4f} {frequencies[i]:10.4f}")
+
+            if periods:
+                print(f"\nFirst 5 periods (s):")
+                for i, T in enumerate(periods[:5]):
+                    print(f"  Mode {i+1}: T = {T:.4f} s  f = {frequencies[i]:.4f} Hz")
+
+        return results
+
+    # =========================================================================
+    # Response spectrum analysis
+    # =========================================================================
+    def run_response_spectrum_analysis(
+        self,
+        num_modes: int,
+        modal_periods: List[float],
+        spectrum_periods: List[float],
+        spectrum_accels: List[float],
+        direction: str = 'X',
+        damping_ratio: float = 0.05,
+        print_results: bool = True,
+    ) -> Dict[str, Any]:
+        """Run a response‑spectrum analysis using CQC modal combination.
+
+        This performs a mode‑by‑mode response spectrum analysis using
+        OpenSees' ``responseSpectrumAnalysis`` command, then combines
+        results with the Complete Quadratic Combination (CQC) rule.
+
+        Args:
+            num_modes: Number of modes to include.
+            modal_periods: Natural periods of each mode (s) — from
+                           :meth:`run_modal_analysis`.
+            spectrum_periods: Period axis of the response spectrum (s).
+            spectrum_accels: Spectral acceleration values (in **m/s²**)
+                             corresponding to ``spectrum_periods``.
+            direction: Excitation direction — ``'X'``, ``'Y'``, or ``'Z'``.
+            damping_ratio: Damping ratio for CQC correlation (default 0.05).
+            print_results: If True, print a summary table.
+
+        Returns:
+            Dictionary with keys:
+
+            * ``'modal_base_shear'`` — list of base shear per mode (kN).
+            * ``'base_shear_cqc'`` — CQC‑combined base shear (kN).
+            * ``'base_shear_srss'`` — SRSS‑combined base shear (kN).
+            * ``'modal_periods'`` — the input modal periods.
+        """
+        if self.config['verbose']:
+            print(f"Running response spectrum analysis (dir={direction})...")
+
+        omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods]
+        damp_ratios = [damping_ratio] * num_modes
+
+        # Define the spectrum as a time series (use a high tag to avoid
+        # conflicts with load‑pattern time series)
+        SPECTRUM_TS_TAG = 9999
+        ops.timeSeries('Path', SPECTRUM_TS_TAG,
+                       '-time', *spectrum_periods,
+                       '-values', *spectrum_accels)
+
+        # Mode-by-mode analysis — extract base shear from element forces
+        modal_base_shear = []
+        modal_base_moment = []
+        dof = {'X': 1, 'Y': 2, 'Z': 3}[direction]
+
+        # Find base elements — those attached to fully‑fixed nodes
+        fixed_nodes = {nid for nid, r in self.model.restraints.items()
+                       if all(d == 1 for d in r.dofs)}
+
+        # Determine which elements to use (split or original)
+        if self.split_elements:
+            elements = self.split_elements
+        else:
+            elements = self.model.frame_elements
+
+        base_elements = []
+        for eid, elem in elements.items():
+            if getattr(elem, 'inactive', False):
+                continue
+            if elem.node_i in fixed_nodes:
+                base_elements.append((elem.elem_tag, 'i', elem.node_j))
+            elif elem.node_j in fixed_nodes:
+                base_elements.append((elem.elem_tag, 'j', elem.node_i))
+
+        for mode in range(1, num_modes + 1):
+            ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, '-mode', mode)
+
+            # Sum global forces at base element ends
+            v_base = 0.0
+            m_base = 0.0
+            dof_map = {'X': (0, 4), 'Y': (1, 5), 'Z': (2, 3)}
+            f_idx, m_idx = dof_map[direction]
+
+            for eid, end, _ in base_elements:
+                try:
+                    # 'forces' returns global element forces
+                    # [Fx,Fy,Fz,Mx,My,Mz] at I-end then J-end
+                    forces = ops.eleResponse(eid, 'forces')
+                except Exception:
+                    continue
+                if end == 'i':
+                    v_base += forces[f_idx]
+                    m_base += forces[m_idx]
+                else:
+                    v_base += forces[f_idx + 6]
+                    m_base += forces[m_idx + 6]
+
+            modal_base_shear.append(v_base)
+            modal_base_moment.append(m_base)
+
+        # CQC combination
+        base_shear_cqc = self._cqc_combine(modal_base_shear, omega, damp_ratios)
+        base_shear_srss = math.sqrt(sum(v * v for v in modal_base_shear))
+        base_moment_cqc = self._cqc_combine(modal_base_moment, omega, damp_ratios)
+        base_moment_srss = math.sqrt(sum(m * m for m in modal_base_moment))
+
+        result = {
+            'modal_base_shear': modal_base_shear,
+            'modal_base_moment': modal_base_moment,
+            'base_shear_cqc': base_shear_cqc,
+            'base_shear_srss': base_shear_srss,
+            'base_moment_cqc': base_moment_cqc,
+            'base_moment_srss': base_moment_srss,
+            'modal_periods': modal_periods,
+        }
+
+        if print_results:
+            print(f"\n===== RESPONSE SPECTRUM ({direction}) =====")
+            print(f"{'Mode':>5} {'Period(s)':>10} {'Shear (kN)':>14} {'Moment (kN·m)':>16}")
+            print("-" * 48)
+            for i, (T, v, m) in enumerate(zip(modal_periods[:num_modes],
+                                                modal_base_shear,
+                                                modal_base_moment)):
+                print(f"{i+1:5d} {T:10.4f} {v:14.2f} {m:16.2f}")
+            print("-" * 48)
+            print(f"{'CQC':>5} {'':>10} {base_shear_cqc:14.2f} {base_moment_cqc:16.2f}")
+            print(f"{'SRSS':>5} {'':>10} {base_shear_srss:14.2f} {base_moment_srss:16.2f}")
+            print()
+
+        return result
+
+    # -------------------------------------------------------------------------
+    # CQC combination helper
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def _cqc_combine(modal_values: List[float],
+                     omega: List[float],
+                     damp_ratios: List[float]) -> float:
+        """Complete Quadratic Combination of modal results."""
+        n = len(modal_values)
+        if n == 0:
+            return 0.0
+        if n == 1:
+            return abs(modal_values[0])
+        total = 0.0
+        for i in range(n):
+            for j in range(n):
+                di = damp_ratios[i]
+                dj = damp_ratios[j]
+                bij = omega[i] / omega[j] if omega[j] > 0 else 1.0
+                rho = (
+                    8.0 * math.sqrt(di * dj) * (di + bij * dj) * (bij ** 1.5)
+                ) / (
+                    (1.0 - bij ** 2.0) ** 2.0
+                    + 4.0 * di * dj * bij * (1.0 + bij ** 2.0)
+                    + 4.0 * (di ** 2.0 + dj ** 2.0) * bij ** 2.0
+                )
+                total += modal_values[i] * modal_values[j] * rho
+        return math.sqrt(total)
+
+    # =========================================================================
+    # Element-level RS forces (per element, CQC-combined)
+    # =========================================================================
+    def extract_element_rs_forces(
+        self,
+        num_modes: int,
+        modal_periods: List[float],
+        spectrum_periods: List[float],
+        spectrum_accels: List[float],
+        direction: str = 'X',
+        damping_ratio: float = 0.05,
+        print_results: bool = True,
+    ) -> Dict[str, Any]:
+        """Run RS analysis and return CQC‑combined element forces sorted by height.
+
+        For each element this returns the CQC‑combined moments (My_i, My_j,
+        Mz_i, Mz_j) and the corresponding shears derived from the moment
+        gradient (Vy = dMz/dx, Vz = dMy/dx).
+
+        Args:
+            Same as :meth:`run_response_spectrum_analysis`.
+
+        Returns:
+            Dictionary with keys:
+
+            * ``'element_results'`` — list of dicts sorted by elevation, each
+              containing ``elem_id``, ``z_bot``, ``z_mid``, ``Vy_i``, ``Vy_j``,
+              ``Vz_i``, ``Vz_j``, ``My_i``, ``My_j``, ``Mz_i``, ``Mz_j``.
+            * ``'modal_periods'``, ``'omega'`` — for diagnostics.
+        """
+        if self.config['verbose']:
+            print("Extracting element RS forces...")
+
+        omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods]
+        damp_ratios = [damping_ratio] * num_modes
+
+        dof = {'X': 1, 'Y': 2, 'Z': 3}[direction]
+
+        # The spectrum time series must already exist (created by a prior
+        # call to :meth:`run_response_spectrum_analysis`).
+        SPECTRUM_TS_TAG = 9999
+
+        # Determine elements (skip inactive)
+        if self.split_elements:
+            elements_dict = self.split_elements
+        else:
+            elements_dict = self.model.frame_elements
+
+        # Pre-compute element info + storage
+        elem_data = {}  # eid -> {z_bot, z_mid, My_i[], My_j[], Mz_i[], Mz_j[]}
+        for eid, elem in elements_dict.items():
+            if getattr(elem, 'inactive', False):
+                continue
+            ni = self.model.nodes.get(elem.node_i)
+            nj = self.model.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            z_i, z_j = ni.z, nj.z
+            if z_i > z_j:
+                z_i, z_j = z_j, z_i
+            elem_data[eid] = {
+                'tag': elem.elem_tag,
+                'z_bot': z_i,
+                'z_mid': (z_i + z_j) * 0.5,
+                'My_i': [], 'My_j': [], 'Mz_i': [], 'Mz_j': [],
+            }
+
+        # Mode-by-mode extraction
+        for mode in range(1, num_modes + 1):
+            ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, '-mode', mode)
+            for eid, ed in elem_data.items():
+                try:
+                    forces = ops.eleResponse(ed['tag'], 'forces')
+                except Exception:
+                    forces = [0.0] * 12
+                ed['My_i'].append(forces[4])
+                ed['My_j'].append(forces[10])
+                ed['Mz_i'].append(forces[5])
+                ed['Mz_j'].append(forces[11])
+
+        # CQC combine per element and compute shears
+        element_results = []
+        for eid, ed in elem_data.items():
+            ne = len(ed['My_i'])
+            # Only combine as many modes as we have data for
+            n_use = min(ne, num_modes)
+            o_use = omega[:n_use]
+            d_use = damp_ratios[:n_use]
+
+            My_i = self._cqc_combine(ed['My_i'][:n_use], o_use, d_use)
+            My_j = self._cqc_combine(ed['My_j'][:n_use], o_use, d_use)
+            Mz_i = self._cqc_combine(ed['Mz_i'][:n_use], o_use, d_use)
+            Mz_j = self._cqc_combine(ed['Mz_j'][:n_use], o_use, d_use)
+
+            # Element length
+            elem = elements_dict.get(eid)
+            if elem:
+                ni = self.model.nodes.get(elem.node_i)
+                nj = self.model.nodes.get(elem.node_j)
+                if ni and nj:
+                    L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+                else:
+                    L = 1.0
+            else:
+                L = 1.0
+
+            # Shear from moment gradient
+            Vy_i = (Mz_i - Mz_j) / L if L > 1e-12 else 0.0
+            Vy_j = Vy_i
+            Vz_i = (My_i - My_j) / L if L > 1e-12 else 0.0
+            Vz_j = Vz_i
+
+            element_results.append({
+                'elem_id': eid,
+                'z_bot': ed['z_bot'],
+                'z_mid': ed['z_mid'],
+                'Vy_i': Vy_i, 'Vy_j': Vy_j,
+                'Vz_i': Vz_i, 'Vz_j': Vz_j,
+                'My_i': My_i, 'My_j': My_j,
+                'Mz_i': Mz_i, 'Mz_j': Mz_j,
+            })
+
+        # Sort by height
+        element_results.sort(key=lambda r: r['z_mid'])
+
+        if print_results:
+            print(f"\n===== RESPONSE SPECTRUM RESULTS ({direction} only, CQC) FOR ALL ELEMENTS =====")
+            header = (f"{'Elem':>30} {'Z_bot(m)':>10} {'Z_mid(m)':>10} {'End':>5} "
+                      f"{'Vy (kN)':>12} {'Vz (kN)':>12} {'My (kN·m)':>12} {'Mz (kN·m)':>12}")
+            print(header)
+            print("-" * len(header))
+            for r in element_results:
+                eid_str = f"{r['elem_id']:30s}"
+                print(f"{eid_str} {r['z_bot']:10.2f} {r['z_mid']:10.2f} {'I':>5} "
+                      f"{r['Vy_i']:12.2f} {r['Vz_i']:12.2f} {r['My_i']:12.2f} {r['Mz_i']:12.2f}")
+                print(f"{eid_str} {r['z_bot']:10.2f} {r['z_mid']:10.2f} {'J':>5} "
+                      f"{r['Vy_j']:12.2f} {r['Vz_j']:12.2f} {r['My_j']:12.2f} {r['Mz_j']:12.2f}")
+
+        return {
+            'element_results': element_results,
+            'modal_periods': modal_periods,
+            'omega': omega,
+        }
+
+    # =========================================================================
+    # Missing mass correction
+    # =========================================================================
+    def add_missing_mass_correction(
+        self,
+        rs_results: Dict[str, Any],
+        modal_results: Dict[str, Any],
+        spectrum_func,
+        g: float = 9.81,
+        T_short: float = 0.01,
+    ) -> Dict[str, Any]:
+        """Compute missing mass (rigid) contribution to base shear and moment.
+
+        The rigid response captures the portion of the total mass that is not
+        activated by the computed modes (residual mass = total − ΣM_eff).
+
+        Args:
+            rs_results: Output from :meth:`run_response_spectrum_analysis`.
+            modal_results: Output from :meth:`run_modal_analysis`.
+            spectrum_func: Callable ``f(T) → Sa`` in **m/s²** (not g) for
+                           a given period ``T`` (s).
+            g: Gravitational acceleration (m/s²).
+            T_short: Period at which to evaluate the rigid response (s).
+
+        Returns:
+            Dictionary with keys:
+
+            * ``'V_missing_X'`` — missing base shear in X (kN).
+            * ``'V_missing_Y'`` — missing base shear in Y (kN).
+            * ``'M_missing_YY'`` — missing base moment about Y (kN·m).
+            * ``'M_missing_XX'`` — missing base moment about X (kN·m).
+            * ``'residual_mass_X'`` — residual mass in X (t).
+            * ``'residual_mass_Y'`` — residual mass in Y (t).
+            * ``'h_cm'`` — centre of mass height (m).
+            * ``'Sa_short'`` — spectral acceleration at T_short (m/s²).
+        """
+        mp = modal_results.get('modal_props', {})
+        total_free_mass = mp.get('totalFreeMass', [0.0])[0]
+
+        # Sum effective modal masses from modal_props
+        num_modes = modal_results['num_modes']
+        sum_meff_X = sum(mp.get('partiMassMX', [0.0] * num_modes)[:num_modes])
+        sum_meff_Y = sum(mp.get('partiMassMY', [0.0] * num_modes)[:num_modes])
+
+        residual_mass_X = max(0.0, total_free_mass - sum_meff_X)
+        residual_mass_Y = max(0.0, total_free_mass - sum_meff_Y)
+
+        # Spectral acceleration at short period
+        Sa_short = spectrum_func(T_short)
+
+        # Missing base shear
+        V_missing_X = residual_mass_X * Sa_short
+        V_missing_Y = residual_mass_Y * Sa_short
+
+        # Centre of mass height
+        total_mass = 0.0
+        total_mass_z = 0.0
+        try:
+            for node_tag in ops.getNodeTags():
+                mass_x = ops.nodeMass(node_tag)[0]
+                if mass_x > 0:
+                    z = ops.nodeCoord(node_tag)[2]
+                    total_mass += mass_x
+                    total_mass_z += mass_x * z
+        except Exception:
+            pass
+        h_cm = total_mass_z / total_mass if total_mass > 0 else 0.0
+
+        # Missing base moment
+        M_missing_YY = residual_mass_X * Sa_short * h_cm
+        M_missing_XX = residual_mass_Y * Sa_short * h_cm
+
+        return {
+            'V_missing_X': V_missing_X,
+            'V_missing_Y': V_missing_Y,
+            'M_missing_YY': M_missing_YY,
+            'M_missing_XX': M_missing_XX,
+            'residual_mass_X': residual_mass_X,
+            'residual_mass_Y': residual_mass_Y,
+            'h_cm': h_cm,
+            'T_short': T_short,
+            'Sa_short': Sa_short,
+        }
