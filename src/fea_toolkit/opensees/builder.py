@@ -161,14 +161,12 @@ class OpenSeesBuilder:
 
     def _create_single_section(self, sec: Section, tag: int) -> None:
         """Create one OpenSees section (elastic or fiber)."""
-        # Get material properties, using E_mod, G_mod as per user's naming
+        # Get material properties
         mat = self.model.materials.get(sec.material)
         if mat is None:
             E_mod = 2.1e11   # default steel in Pa
             G_mod = 8.077e10
         else:
-            # E_mod = mat.E_mod if hasattr(mat, 'E_mod') else mat.E
-            # G_mod = mat.G_mod if hasattr(mat, 'G_mod') else mat.G
             E_mod = mat.E_mod
             G_mod = mat.G_mod
             if G_mod == 0 and E_mod > 0:
@@ -179,12 +177,19 @@ class OpenSeesBuilder:
             ops.section('Elastic', tag, E_mod, sec.A, sec.I33, sec.I22, G_mod, sec.J)
             if self.config['verbose']:
                 print(f"  Section {tag}: {sec.name} (Elastic)")
-        elif self.config['create_fiber_sections'] and sec.shape in ('Pipe', 'Box/Tube'):
-            # Simplified fiber section placeholder
+
+        elif self.config['create_fiber_sections']:
             ops.section('Fiber', tag, '-GJ', sec.J)
-            # Add fibers (placeholder)
-            if self.config['verbose']:
-                print(f"  Section {tag}: {sec.name} (Fiber) – not fully implemented")
+            try:
+                patches = sec.to_fiber_patches(mat_tag=tag)
+                for patch_args in patches:
+                    ops.patch(*patch_args)
+                if self.config['verbose']:
+                    print(f"  Section {tag}: {sec.name} (Fiber, {len(patches)} patches)")
+            except NotImplementedError as exc:
+                if self.config['verbose']:
+                    print(f"  Section {tag}: {sec.name} — {exc}")
+
         else:
             # Fallback to elastic
             ops.section('Elastic', tag, E_mod, sec.A, sec.I33, sec.I22, G_mod, sec.J)

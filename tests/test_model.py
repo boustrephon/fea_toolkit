@@ -14,6 +14,19 @@ from fea_toolkit.model.sap_data import (
     Restraint,
     Material,
     Section,
+    ISection,
+    GeneralSection,
+    PipeSection,
+    BoxSection,
+    RectangularSection,
+    CircularSection,
+    ChannelSection,
+    AngleSection,
+    DoubleAngleSection,
+    TeeSection,
+    SDSection,
+    EncasedSection,
+    ShellSection,
     FrameElement,
     AreaElement,
     Group,
@@ -281,6 +294,164 @@ class TestGroup:
     def test_with_objects(self):
         g = Group(name="COLUMNS", objects=["Frame:1", "Frame:2"])
         assert len(g.objects) == 2
+
+
+class TestSectionSubclasses:
+    """Tests for the section type hierarchy."""
+
+    def test_isection_creation(self):
+        sec = ISection(
+            name="W200x52", shape="I/Wide Flange", material="Steel",
+            A=0.00665, I33=5.25e-5, I22=1.77e-5, J=1e-6,
+            depth=0.206, bf=0.134, tf=0.0126, tw=0.0072,
+        )
+        assert sec.shape_id == "I"
+        assert sec.depth == 0.206
+        assert sec.bf == 0.134
+
+    def test_isection_fiber_patches(self):
+        sec = ISection(
+            name="W200x52", shape="I/Wide Flange", material="Steel",
+            A=0.00665, I33=5.25e-5, I22=1.77e-5, J=1e-6,
+            depth=0.4, bf=0.2, tf=0.015, tw=0.01,
+        )
+        patches = sec.to_fiber_patches(mat_tag=1)
+        assert len(patches) == 3  # bottom flange, web, top flange
+        # Check bottom flange
+        assert patches[0][0] == "rect"
+        assert patches[0][1] == 1  # mat_tag
+        # Check web
+        assert patches[1][0] == "rect"
+        assert patches[1][3] == 4  # nfz
+        # Verify y-coordinates are ordered
+        _, _, _, _, y1, z1, y2, z2 = patches[2]
+        assert y1 > 0  # top flange is in positive y
+
+    def test_general_section(self):
+        sec = GeneralSection(
+            name="CatalogueSec", shape="General", material="Steel",
+            A=0.01, I33=1e-4, I22=5e-5, J=1e-6,
+        )
+        assert sec.shape_id == "GEN"
+        with pytest.raises(NotImplementedError):
+            sec.to_fiber_patches(mat_tag=1)
+
+    def test_pipe_section(self):
+        sec = PipeSection(
+            name="CHS_273x10", shape="Pipe", material="Steel",
+            A=0.00826, I33=7.1e-5, I22=7.1e-5, J=1.42e-4,
+            od=0.273, t=0.01,
+        )
+        assert sec.od == 0.273
+        assert sec.shape_id == "CHS"
+
+    def test_box_section(self):
+        sec = BoxSection(
+            name="Box_200x100x8", shape="Box/Tube", material="Steel",
+            A=0.00445, I33=2.5e-5, I22=1.2e-5, J=3.0e-5,
+            depth=0.2, bf=0.1, tf=0.008, tw=0.008,
+        )
+        assert sec.shape_id == "RHS"
+
+    def test_rectangular_section(self):
+        sec = RectangularSection(
+            name="R_300x600", shape="Rectangular", material="Concrete",
+            A=0.18, I33=0.0054, I22=0.00135, J=0.0,
+            depth=0.6, bf=0.3,
+        )
+        patches = sec.to_fiber_patches(mat_tag=2)
+        assert len(patches) == 1
+        assert patches[0][1] == 2
+
+    def test_circular_section(self):
+        sec = CircularSection(
+            name="Bar_32", shape="Circle", material="Steel",
+            A=0.000804, I33=5.15e-8, I22=5.15e-8, J=1.03e-7,
+            diameter=0.032,
+        )
+        assert sec.diameter == 0.032
+
+    def test_channel_section(self):
+        sec = ChannelSection(
+            name="C_200x50", shape="Channel", material="Steel",
+            A=0.00215, I33=1.25e-5, I22=4.78e-7, J=4.2e-8,
+            depth=0.2032, bf=0.0508, tf=0.00965, tw=0.00635,
+        )
+        assert sec.shape_id == "CH"
+
+    def test_angle_section(self):
+        sec = AngleSection(
+            name="L_100x100x10", shape="Angle", material="Steel",
+            A=0.00193, I33=1.8e-6, I22=1.8e-6, J=1e-8,
+            depth=0.1, bf=0.1, tf=0.01, tw=0.01,
+        )
+        assert sec.shape_id == "A"
+
+    def test_double_angle_section(self):
+        sec = DoubleAngleSection(
+            name="2L_100x100x10", shape="Double Angle", material="Steel",
+            A=0.00386, I33=3.6e-6, I22=3.6e-6, J=2e-8,
+            depth=0.1, bf=0.21, tf=0.01, tw=0.01, dis=0.01,
+        )
+        assert sec.shape_id == "AA"
+        assert sec.dis == 0.01
+
+    def test_tee_section(self):
+        sec = TeeSection(
+            name="T_150x100x10", shape="Tee", material="Steel",
+            A=0.0024, I33=2.0e-6, I22=1.5e-6, J=5e-9,
+            depth=0.15, bf=0.1, tf=0.01, tw=0.008,
+        )
+        assert sec.shape_id == "T"
+
+    def test_sd_section(self):
+        sec = SDSection(
+            name="SD_Custom", shape="SD Section", material="Steel",
+            A=0.01, I33=1e-4, I22=5e-5, J=0.0,
+        )
+        assert sec.shape_id == "SD"
+
+    def test_encased_section(self):
+        inner = ISection(
+            name="W200x52", shape="I/Wide Flange", material="Steel",
+            A=0.00665, I33=5.25e-5, I22=1.77e-5, J=1e-6,
+            depth=0.206, bf=0.134, tf=0.0126, tw=0.0072,
+        )
+        sec = EncasedSection(
+            name="SRC_400x400", shape="Concrete Encasement Rectangle",
+            material="Steel",
+            A=0.16, I33=0.00213, I22=0.00213, J=2e-5,
+            embedded_section=inner,
+            encasement_material="Concrete_40MPa",
+            encasement_depth=0.4, encasement_bf=0.4,
+        )
+        assert sec.embedded_section is not None
+        assert sec.encasement_material == "Concrete_40MPa"
+
+    def test_shell_section(self):
+        sec = ShellSection(
+            name="Shell_200mm", shape="Shell", material="Concrete",
+            A=0.2, I33=0, I22=0, J=0,
+            thickness=0.2,
+        )
+        assert sec.thickness == 0.2
+        assert sec.shape_id == "GEN"  # Shell is not in SHAPE_NAMES
+
+    def test_shape_id_mapping(self):
+        assert ISection(name="", shape="I/Wide Flange", material="",
+                        A=0,I33=0,I22=0,J=0).shape_id == "I"
+        assert ISection(name="", shape="WIDE FLANGE", material="",
+                        A=0,I33=0,I22=0,J=0).shape_id == "I"
+        assert PipeSection(name="", shape="Pipe", material="",
+                           A=0,I33=0,I22=0,J=0).shape_id == "CHS"
+        assert BoxSection(name="", shape="Box/Tube", material="",
+                          A=0,I33=0,I22=0,J=0).shape_id == "RHS"
+
+    def test_base_section_raises(self):
+        """Base Section.to_fiber_patches() should raise NotImplementedError."""
+        sec = Section(name="", shape="", material="", A=0, I33=0, I22=0, J=0)
+        with pytest.raises(NotImplementedError):
+            sec.to_fiber_patches(mat_tag=1)
 
 
 class TestSAPModelData:
