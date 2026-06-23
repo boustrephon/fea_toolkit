@@ -64,6 +64,70 @@ def nodeDisp(tag: int, *dofs: int) -> Union[float, Tuple[float, ...]]:
     """
     ...
 
+def mass(tag: int, *values: float) -> None:
+    """Assign mass to a node.
+
+    Args:
+        tag: Node tag.
+        *values: Mass values for each DOF (mx, my, mz, mrx, mry, mrz).
+    """
+    ...
+
+def nodeMass(tag: int, *dofs: int) -> Union[float, Tuple[float, ...]]:
+    """Return nodal mass.
+
+    Args:
+        tag: Node tag.
+        *dofs: Optional DOF numbers to query (1‑based). If omitted, all DOFs.
+    Returns:
+        Single mass value if one DOF requested, else tuple.
+    """
+    ...
+
+def nodeReaction(tag: int, *dofs: int) -> Union[float, Tuple[float, ...]]:
+    """Return nodal reaction forces.
+
+    Args:
+        tag: Node tag.
+        *dofs: Optional DOF numbers to query (1‑based). If omitted, all DOFs.
+    Returns:
+        Single reaction if one DOF requested, else tuple.
+    """
+    ...
+
+def nodeResponse(tag: int, dof: int, response_id: int) -> float:
+    """Return a nodal response quantity.
+
+    Args:
+        tag: Node tag.
+        dof: DOF number (1‑based).
+        response_id: Response type (1=disp, 2=vel, 3=accel, 4=eigenvector,
+                     5=unbalanced load, 6=reaction, 7=Rayleigh force).
+    Returns:
+        Requested response value.
+    """
+    ...
+
+def nodeEigenvector(tag: int, mode: int, dof: int) -> float:
+    """Return a component of a mode shape at a node.
+
+    Args:
+        tag: Node tag.
+        mode: Mode number (1‑based).
+        dof: DOF number (1‑based).
+    Returns:
+        Eigenvector component value.
+    """
+    ...
+
+def getNodeTags() -> Tuple[int, ...]:
+    """Return tags of all nodes in the model.
+
+    Returns:
+        Tuple of node tags.
+    """
+    ...
+
 
 # ============================================================================
 # Section commands
@@ -76,6 +140,32 @@ def section(section_type: str, tag: int, *args: Any) -> None:
         section_type: ``'Elastic'``, ``'Fiber'``, etc.
         tag: Section tag.
         *args: Section-specific arguments.
+    """
+    ...
+
+def patch(patch_type: str, mat_tag: int, *args: Any) -> None:
+    """Generate fibers over a cross‑sectional area (inside a Fiber section).
+
+    Three patch types are available:
+
+    **Rectangular patch** — fibers in a rectangle from (yI,zI) to (yJ,zJ)::
+
+        ops.patch('rect', matTag, numSubdivY, numSubdivZ, yI, zI, yJ, zJ)
+
+    **Circular patch** — fibers in a circular ring::
+
+        ops.patch('circ', matTag, numSubdivCirc, numSubdivRad,
+                  yCenter, zCenter, intRad, extRad, startAng, endAng)
+
+    **Quadrilateral patch** — fibers inside a 4‑vertex polygon (CCW order)::
+
+        ops.patch('quad', matTag, numSubdivIJ, numSubdivJK,
+                  yI, zI, yJ, zJ, yK, zK, yL, zL)
+
+    Args:
+        patch_type: ``'rect'``, ``'circ'``, or ``'quad'``.
+        mat_tag: Tag of previously defined material.
+        *args: Patch‑specific arguments as shown above.
     """
     ...
 
@@ -259,6 +349,60 @@ def analyze(num_incr: int, *args: Any) -> int:
         *args: Additional arguments (e.g. ``numSubIncr, dt`` for transient).
     Returns:
         0 if successful, non-zero if failed.
+    """
+    ...
+
+def eigen(*args: Any) -> Tuple[float, ...]:
+    """Solve the eigenvalue problem.
+
+    Usage::
+
+        eigenvalues = ops.eigen('-fullGenLapack', numModes)
+        eigenvalues = ops.eigen('-standard', numModes)
+
+    Args:
+        *args: Solver type and number of modes (e.g. ``'-fullGenLapack', 30``).
+    Returns:
+        Tuple of eigenvalues (ω²).
+    """
+    ...
+
+def reactions() -> None:
+    """Compute nodal reactions for the current load case.
+    Must be called after ``ops.analyze()`` before querying ``nodeReaction``.
+    """
+    ...
+
+def modalProperties(*args: str) -> dict:
+    """Return modal properties (periods, frequencies, participation factors).
+
+    Usage::
+
+        props = ops.modalProperties('-return', '-unorm')
+
+    Args:
+        *args: Options such as ``'-return'`` (return dict instead of printing),
+               ``'-unorm'`` (mass‑normalised eigenvectors).
+    Returns:
+        Dictionary with keys like ``eigenFrequency``, ``eigenPeriod``,
+        ``partiFactorMX``, ``partiMassMX``, ``partiMassRatiosMX``,
+        ``totalFreeMass``, etc.
+    """
+    ...
+
+def responseSpectrumAnalysis(ts_tag: int, dof: int, *args: str) -> None:
+    """Run a response‑spectrum analysis for one mode.
+
+    Usage::
+
+        ops.responseSpectrumAnalysis(tsTag, dof, '-mode', modeNum)
+
+    Must be called after :func:`eigen` and :func:`modalProperties`.
+
+    Args:
+        ts_tag: Tag of a ``Path`` time series defining the spectrum.
+        dof: Excitation direction (1=UX, 2=UY, 3=UZ, 4=RX, 5=RY, 6=RZ).
+        *args: ``'-mode', modeNum``.
     """
     ...
 

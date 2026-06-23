@@ -50,20 +50,27 @@ The goal is to create a Python package `fea_toolkit` that:
 | **`SAPModelData`** | ✅ Complete | Contains all model data with mutable defaults via `field(default_factory=...)`; includes `units` dict with default `{'F':'N','L':'m','T':'C'}`. |
 | **`SectionLibrary`** | ✅ Complete | Loads section catalogue pickle; converts units to match model (`mm` or `in`); enriches `Section` objects with `Z33`, `Z22`, dimensions, etc. |
 | **`geometry.split_elements`** | ✅ Complete | Splits elements at joints when `AtJoints=True`; marks parent as `inactive`; creates child elements with new numeric tags; redistributes distributed loads using `trapezoidal_force_split`; stores relative positions (`rdist_a`, `rdist_b`) in child loads. |
-| **`OpenSeesBuilder`** | ✅ Complete | Builds OpenSees model: nodes (with numeric tags), restraints, elastic sections, elements (skips inactive), loads (patterns, joint loads, distributed loads with 3‑ or 8‑argument `eleLoad`), linear static analysis; returns nodal displacements. |
+| **`OpenSeesBuilder`** | ✅ Complete | Builds OpenSees model: nodes, restraints, elastic sections, elements (skips inactive), loads (patterns, joint loads, distributed loads with N‑segment decomposition), linear static analysis; returns nodal displacements, reactions, load totals.
+| **Modal Analysis** | ✅ Complete | `run_modal_analysis()` — eigenvalue extraction (`ops.eigen`), modal properties table with frequencies, periods, participating masses & ratios.
+| **Response Spectrum** | ✅ Complete | `run_response_spectrum_analysis()` — mode‑by‑mode RS analysis using GB50011 (or user‑supplied) spectrum, CQC/SRSS combination, base shear + moment.
+| **Element‑Level RS Forces** | ✅ Complete | `extract_element_rs_forces()` — CQC‑combined moments/shears per element, sorted by elevation.
+| **Missing Mass Correction** | ✅ Complete | `add_missing_mass_correction()` — rigid response from residual modal mass, adds to CQC base shear/moment.
+| **Seismic Masses** | ✅ Complete | `compute_seismic_masses()` — lumps element self‑weight and load‑based masses per MASS SOURCE (Elements/Loads flags). |
 | **Load Handling** | ✅ Complete | Supports uniform and linear/trapezoidal distributed loads with global direction (gravity, X, Y, Z); projects onto local axes using `get_SAP_vecxz`; handles split loads. |
 | **Parent‑Child Tracking** | ✅ Complete | Each split element stores `parent_id`, `child_ids`, `t_locations`; inactive flag prevents building of parent. |
 | **Unit Conversion** | ✅ Complete | `SectionLibrary` converts lengths, areas, inertias between `in` and `mm` based on catalogue metadata. |
 | **Visualisation (opsvis)** | ✅ Quick test | `basic_usage.py` can show line‑based model; extrusion not implemented. |
-| **Pytest Suite** | ✅ Passing | 74 tests: dataclass construction, geometry utilities, section enrichment, parser integration, and edge cases. |
+| **Pytest Suite** | ✅ Passing | 94 tests: dataclass construction, geometry utilities, section enrichment, modal analysis, parser integration, and edge cases. |
 
 #### 3. Notable Design Decisions
 
 - **String IDs** – Node and frame IDs are kept as strings (SAP2000 labels), with numeric `tag` fields for OpenSees.
 - **Relative Load Positions** – `FrameDistributedLoad` stores `rdist_a` and `rdist_b` (0..1) for child elements, matching OpenSees `aOverL`/`bOverL`.
 - **Spatial Grid** – Efficient nearest‑neighbour search for splitting.
-- **Trapezoidal Splitting** – Exact redistribution of varying loads using your proven `trapezoidal_force_split`.
+- **Trapezoidal Splitting** – Exact redistribution of varying loads using `trapezoidal_force_split`.
 - **Configurable Builder** – Element type, integration points, splitting, verbosity can be set via `config` dict.
+- **MASS SOURCE** – The `MASS SOURCE` table is parsed by `_get_mass_sources()` which groups rows by MassSource name, **accumulates** multipliers when the same LoadPat appears on multiple rows, and stores the result in `SAPModelData.mass_sources`. The builder's `compute_seismic_masses()` then uses this to derive nodal masses (self‑weight from `Elements=True`, load‑based from `Loads=True` + `LoadPat`/`Multiplier` pairs).
+- **Modal & RS Analysis** – `run_modal_analysis()` uses `ops.eigen('-fullGenLapack', …)`. `run_response_spectrum_analysis()` and `extract_element_rs_forces()` call `ops.responseSpectrumAnalysis()` mode‑by‑mode and extract element forces via `ops.eleResponse(eid, 'forces')` (global system). CQC follows Der Kiureghian's formula. `add_missing_mass_correction()` computes the rigid response from residual mass at short‑period spectral acceleration.
 
 #### 4. Distributed Load Support by Element Type
 
@@ -103,10 +110,10 @@ SAP2000/ETABS models use a variety of cross‑section shapes. The `Section` data
 | **`AngleSection`** | `Angle`, `Steel Angle`, `Concrete Angle` | `depth`, `bf`, `tf`, `tw` | 🚧 Placeholder |
 | **`DoubleAngleSection`** | `Double Angle`, `Steel Double Angle` | `depth`, `bf`, `tf`, `tw`, `dis` | 🚧 Placeholder |
 | **`TeeSection`** | `Tee` | `depth`, `bf`, `tf`, `tw` | 🚧 Placeholder |
-| **`PipeSection`** | `Pipe`, `Steel Pipe`, `Concrete Pipe`, `Filled Steel Pipe` | `od`, `t` | 🚧 Placeholder |
-| **`BoxSection`** | `Box/Tube`, `Steel Tube`, `Concrete Tube`, `Filled Steel Tube` | `depth`, `bf`, `tf`, `tw` | 🚧 Placeholder |
-| **`RectangularSection`** | `Rectangular`, `Rectangle`, `Steel Plate`, `Concrete Rectangular` | `depth`, `bf` | ✅ 1 rect patch |
-| **`CircularSection`** | `Circle`, `Steel Rod`, `Concrete Circle` | `diameter` | 🚧 Placeholder |
+| **`PipeSection`** | `Pipe`, `Steel Pipe`, `Concrete Pipe`, `Filled Steel Pipe` | `od`, `t` | ✅ 1 annular `circ` patch |
+| **`BoxSection`** | `Box/Tube`, `Steel Tube`, `Concrete Tube`, `Filled Steel Tube` | `depth`, `bf`, `tf`, `tw` | ✅ 4 `rect` patches (flanges + webs) |
+| **`RectangularSection`** | `Rectangular`, `Rectangle`, `Steel Plate`, `Concrete Rectangular` | `depth`, `bf` | ✅ 1 `rect` patch |
+| **`CircularSection`** | `Circle`, `Steel Rod`, `Concrete Circle` | `diameter` | ✅ 1 solid `circ` patch |
 | **`GeneralSection`** | `General`, `NA` | — | ❌ Requires a known shape |
 | **`SDSection`** | `SD Section` | `polygons` (multi‑material) | 🚧 Placeholder (needs meshing) |
 | **`EncasedSection`** | `Concrete Encasement Rectangle/Circle` | `embedded_section`, `encasement_depth/bf` | 🚧 Placeholder |
@@ -132,13 +139,13 @@ When the parser encounters a `FRAME SECTION PROPERTIES 01 - GENERAL` table, it d
    - ETABS uses different load nomenclature – adapt accordingly.
 
 3. **Load Combinations and Analysis Types**  
-   - `LoadCase`, `LoadCombination`, and `MassSource` dataclasses already defined in `sap_data.py`.  
-   - Complete parsing of `LOAD CASES` and `LOAD COMBINATIONS` tables in the parser.  
+   - ~~`MassSource`~~ ✅ Parsed by `_get_mass_sources()` and stored in `SAPModelData.mass_sources`.  
+   - `LoadCase`, `LoadCombination` dataclasses defined in `sap_data.py` — parsing of `LOAD CASES` and `LOAD COMBINATIONS` tables still needed.  
    - In `OpenSeesBuilder`, allow the user to select which load cases/combinations to run with combination factors (e.g., `1.2 DL + 1.6 LL`).
 
 4. **Advanced Analyses**  
-   - **Modal Analysis** – implement eigenvalue extraction (`ops.eigen`).  
-   - **Response Spectrum** – apply spectral loads using modal combination rules.  
+   - ~~Modal Analysis~~ ✅ `run_modal_analysis()` implemented — eigenvalue extraction with modal properties table.  
+   - ~~Response Spectrum~~ ✅ `run_response_spectrum_analysis()` + `extract_element_rs_forces()` + `add_missing_mass_correction()` implemented.  
    - **Nonlinear Static Pushover** – implement with `forceBeamColumn` and `HingeRadau` integration.  
    - **Nonlinear Time History** – add ground motion input and integration schemes.
 
