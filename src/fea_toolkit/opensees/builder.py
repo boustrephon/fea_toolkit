@@ -34,6 +34,7 @@ class OpenSeesBuilder:
             'use_elastic_sections': True,
             'create_fiber_sections': False,
             'split_elements': True,
+            'geom_transf_type': 'Linear',   # 'Linear', 'PDelta', or 'Corotational'
             'verbose': False,
         }
         builder = OpenSeesBuilder(model_data, config)
@@ -53,6 +54,9 @@ class OpenSeesBuilder:
                 - use_elastic_sections (bool): If True, create elastic sections (default True)
                 - create_fiber_sections (bool): If True, create fiber sections (default False)
                 - split_elements (bool): If True, split elements at intermediate nodes (default True)
+                - geom_transf_type (str): Geometric transformation — 'Linear', 'PDelta', or 'Corotational'
+                  (default 'Linear').  Note: 'Corotational' does NOT support eleLoad in 3D;
+                  use beam_load_to_nodal_loads() in those cases (see fea_toolkit.model.geometry).
                 - verbose (bool): Print progress (default False)
         """
         self.model = model_data
@@ -73,6 +77,8 @@ class OpenSeesBuilder:
             'create_fiber_sections': False,
             'split_elements': True,
             'verbose': False,
+            'geom_transf_type': 'Linear',
+        }
             'simplify_distributed_loads': False,
         }
         for key, default in defaults.items():
@@ -312,9 +318,14 @@ class OpenSeesBuilder:
         vec_x_norm = vec_x / length
         vecxz = get_SAP_vecxz(vec_x_norm, angle_deg)
 
-        # Create geometric transformation (linear or PDelta)
+        # Create geometric transformation
+        transf_type = self.config.get('geom_transf_type', 'Linear')
+        if transf_type == 'Corotational' and self.config['verbose']:
+            print("  Warning: Corotational geomTransf does NOT support eleLoad "
+                  "in 3D. Use beam_load_to_nodal_loads() instead "
+                  "(see fea_toolkit.model.geometry).")
         transf_tag = elem_tag
-        ops.geomTransf('Linear', transf_tag, *vecxz)
+        ops.geomTransf(transf_type, transf_tag, *vecxz)
 
         # Create element based on type
         elem_type = self.config['element_type'].lower()
@@ -354,11 +365,26 @@ class OpenSeesBuilder:
         return None
 
     def _create_loads(self) -> None:
-        """Create load patterns and apply loads (joint and distributed)."""
+        """Create load patterns and apply loads (joint and distributed).
+
+        After this method runs, ``self.load_totals`` is populated with the
+        summed applied loads per pattern, keyed by pattern name::
+
+            {
+                "DEAD":  {"fx": ..., "fy": ..., "fz": ..., "mx": ..., "my": ..., "mz": ...},
+                "WIND":  { ... },
+            }
+
+        Forces are in model force units (N, kN, kip, etc.); moments in
+        moment units (N·m, kN·m, etc.).  These can be compared with the
+        reactions returned by :meth:`run_static_analysis`.
+        """
         if self.config['verbose']:
             print("Creating loads...")
-        joint_load_sums: Dict[int, Dict[str, float]] = {}
-        frame_load_sums: Dict[int, Dict[str, float]] = {}
+
+        # Accumulators keyed by pattern *name* (not tag).
+        joint_load_totals: Dict[str, Dict[str, float]] = {}
+        frame_load_totals: Dict[str, Dict[str, float]] = {}
 
         # Determine which distributed loads to use (split or original)
         dist_loads = (self.split_dist_loads if self.split_dist_loads is not None
@@ -373,30 +399,34 @@ class OpenSeesBuilder:
             if self.config['verbose']:
                 print(f"  Pattern '{pattern_name}' (tag={i})")
 
-        # Apply joint loads
+        # ------------------------------------------------------------------
+        # Joint loads
+        # ------------------------------------------------------------------
         for jl in self.model.joint_loads:
             pat_tag = pattern_tags.get(jl.pattern)
             if pat_tag is None:
                 continue
-            # Convert string node ID to numeric tag
             node = self._node_tag_from_id(jl.node_id)
             if node is None:
                 continue
             ops.load(node, jl.fx, jl.fy, jl.fz, jl.mx, jl.my, jl.mz)
-            
+
+            # Accumulate totals by pattern *name*
+            pname = jl.pattern
+            if pname not in joint_load_totals:
+                joint_load_totals[pname] = {k: 0.0 for k in
+                                            ('fx','fy','fz','mx','my','mz')}
+            for key in ('fx', 'fy', 'fz', 'mx', 'my', 'mz'):
+                joint_load_totals[pname][key] += getattr(jl, key)
+
             if self.config['verbose']:
-                load_sum = joint_load_sums.get(pat_tag,{})
-                for key in ('fx', 'fy', 'fz', 'mx', 'my', 'mz'):
-                    load_sum[key] = load_sum.get(key,0.0) + getattr(jl, key)
-                joint_load_sums[pat_tag] = load_sum
-                print(f"    Joint load ({pat_tag}): node {node}: {jl.fx:,.1f} | {jl.fy:,.1f} | {jl.fz:,.1f} | {jl.mx:,.1f} | {jl.my:,.1f} | {jl.mz:,.1f}")
-        
-        if self.config['verbose']:
-            for pat_tag, load_sum in joint_load_sums.items():
-                print(f"  Pattern {pat_tag}: {' | '.join([f'{key} = {val:,.1f}' for key, val in load_sum.items()])}")
+                print(f"    Joint load ({pat_tag}): node {node}: "
+                      f"{jl.fx:,.1f} | {jl.fy:,.1f} | {jl.fz:,.1f} | "
+                      f"{jl.mx:,.1f} | {jl.my:,.1f} | {jl.mz:,.1f}")
 
-        # Helper to resolve string frame ID to numeric tag
-
+        # ------------------------------------------------------------------
+        # Frame distributed loads
+        # ------------------------------------------------------------------
         # Build frame_tag_map if not already built (from _create_elements)
         if not hasattr(self, 'frame_tag_map'):
             elements = self.split_elements if self.split_elements else self.model.frame_elements
@@ -406,22 +436,9 @@ class OpenSeesBuilder:
                 if not elem.inactive
             }
 
-        # def get_elem_tag(frame_id: str) -> Optional[int]:
-        #     # If split elements exist, use them; else original
-        #     if self.split_elements:
-        #         elem = self.split_elements.get(frame_id)
-        #         if elem and not elem.inactive:
-        #             return elem.elem_tag
-        #     else:
-        #         elem = self.model.frame_elements.get(frame_id)
-        #         if elem:
-        #             return elem.elem_tag
-        #     return None
-
         def get_elem_tag(frame_id: str) -> Optional[int]:
             return self.frame_tag_map.get(frame_id)
 
-        # Apply distributed frame loads
         for ld in dist_loads:
             pat_tag = pattern_tags.get(ld.pattern)
             if pat_tag is None:
@@ -452,8 +469,6 @@ class OpenSeesBuilder:
 
             # Determine global load direction vector
             if ld.direction == 'Gravity':
-                # Global Z downward (force is positive downward in SAP2000)
-                # For gravity, load value is positive downward (negative Z)
                 global_dir = np.array([0.0, 0.0, -1.0])
             elif ld.direction == 'X':
                 global_dir = np.array([1.0, 0.0, 0.0])
@@ -462,15 +477,9 @@ class OpenSeesBuilder:
             elif ld.direction == 'Z':
                 global_dir = np.array([0.0, 0.0, 1.0])
             else:
-                # Unknown direction – default to gravity
                 global_dir = np.array([0.0, 0.0, -1.0])
 
-            # For uniform/linear loads, the load intensity is force per length along the element.
-            # We need components along local y and z.
-            # The load vector is global_dir * intensity (but intensity is given as val_a, val_b)
-            # We'll compute the components at start and end.
-            # For simplicity, we'll assume the load direction is constant along the element.
-            # So we project global_dir onto local y and z.
+            # Project intensities onto local axes
             wx_a = ld.val_a * np.dot(global_dir, vec_x)
             wy_a = ld.val_a * np.dot(global_dir, vec_y)
             wz_a = ld.val_a * np.dot(global_dir, vec_z)
@@ -478,10 +487,8 @@ class OpenSeesBuilder:
             wy_b = ld.val_b * np.dot(global_dir, vec_y)
             wz_b = ld.val_b * np.dot(global_dir, vec_z)
 
-            # Normalize the load span (aOverL, bOverL) – for full length loads they are 0 and 1.
-            # The dist_a and dist_b are absolute distances from start, but we need fractions.
-            # We have the element length from the nodes.
-            if self._node_tag_from_id: 
+            # Element length
+            if self._node_tag_from_id:
                 coords_i = ops.nodeCoord(self._node_tag_from_id(elem.node_i))
                 coords_j = ops.nodeCoord(self._node_tag_from_id(elem.node_j))
             else:
@@ -490,29 +497,42 @@ class OpenSeesBuilder:
             length = np.linalg.norm(np.array(coords_j) - np.array(coords_i))
             if length < 1e-12:
                 continue
-            # aOverL = ld.dist_a / length
-            # bOverL = ld.dist_b / length
-            aOverL = ld.rdist_a
-            bOverL = ld.rdist_b
-            # Clamp to [0,1]
-            aOverL = max(0.0, min(1.0, aOverL))
-            bOverL = max(0.0, min(1.0, bOverL))
 
+            # Relative positions, clamped
+            aOverL = max(0.0, min(1.0, ld.rdist_a))
+            bOverL = max(0.0, min(1.0, ld.rdist_b))
             load_l = ld.dist_b - ld.dist_a
-            load_dict = {'X': 0.5 *(wx_a + wx_b) * load_l, 'Y': 0.5 * (wy_a + wy_b) * load_l, 'Z': 0.5 * (wz_a + wz_b) * load_l}
-            
-            if self.config['verbose']:
-                frame_load_ptn_sums = frame_load_sums.get(pat_tag, {})
-                for key, value in load_dict.items():
-                    frame_load_ptn_sums[key] = frame_load_ptn_sums.get(key, 0.0) + value
-                frame_load_sums[pat_tag] = frame_load_ptn_sums
-                
 
-            # Determine load shape and use appropriate eleLoad command.
-            # elasticBeamColumn and forceBeamColumn support the 8-argument
-            # trapezoidal form (wy1, wz1, wx1, aOverL, bOverL, wy2, wz2, wx2).
-            # dispBeamColumn and nonlinearBeamColumn only support the 3-argument
-            # uniform form (wy, wz, wx), so trapezoidal loads must be decomposed.
+            # Accumulate total force per pattern name (local components)
+            pname = ld.pattern
+            if pname not in frame_load_totals:
+                frame_load_totals[pname] = {k: 0.0 for k in
+                                            ('fx','fy','fz','mx','my','mz')}
+            # Total force resultant in each local direction
+            f_loc = {
+                'fx': 0.5 * (wx_a + wx_b) * load_l,
+                'fy': 0.5 * (wy_a + wy_b) * load_l,
+                'fz': 0.5 * (wz_a + wz_b) * load_l,
+            }
+            # Compute approximate fixed-end moments for the record
+            span = bOverL - aOverL
+            if span > 1e-12 and abs(load_l) > 1e-12:
+                w_avg = lambda wa, wb: (wa + wb) * 0.5
+                f_loc['mx'] = 0.0   # axial load → no moment
+                f_loc['my'] = w_avg(wy_a, wy_b) * span * load_l * load_l / 12.0
+                f_loc['mz'] = w_avg(wz_a, wz_b) * span * load_l * load_l / 12.0
+            else:
+                f_loc['mx'] = f_loc['my'] = f_loc['mz'] = 0.0
+
+            for key, val in f_loc.items():
+                frame_load_totals[pname][key] += val
+
+            if self.config['verbose']:
+                print(f"    Frame load ({pat_tag}): element {elem_tag}, "
+                      f"fx={f_loc['fx']:,.1f}, fy={f_loc['fy']:,.1f}, "
+                      f"fz={f_loc['fz']:,.1f} | {ld.frame_id}")
+
+            # Determine load shape and use appropriate eleLoad command
             elem_type = self.config['element_type'].lower()
             supports_trapezoidal = elem_type in ('elasticbeamcolumn', 'forcebeamcolumn')
 
@@ -520,49 +540,40 @@ class OpenSeesBuilder:
                 is_uniform = ld.shape == 'Uniform' or abs(ld.val_a - ld.val_b) < 1e-6
 
                 if is_uniform:
-                    # Uniform: use 3‑argument form (Wy, Wz, Wx)
                     ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
                                 wy_a, wz_a, wx_a)
-                    if self.config['verbose']:
-                        print(f"    Uniform load ({pat_tag}): element {elem_tag}, Wy={wy_a:.3f}, Wz={wz_a:.3f}, Wx={wx_a:.3f} | {ld.frame_id}")
-
                 elif supports_trapezoidal:
-                    # Linear or trapezoidal: use 8‑argument form
-                    # Args: Wy1 Wz1 Wx1 aOverL bOverL Wy2 Wz2 Wx2
                     ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
                                 wy_a, wz_a, wx_a, aOverL, bOverL, wy_b, wz_b, wx_b)
-                    if self.config['verbose']:
-                        print(f"    Linear/Trapezoidal load ({pat_tag}): element {elem_tag}, "
-                              f"Wy1={wy_a:.3f}, Wz1={wz_a:.3f}, Wx1={wx_a:.3f}, "
-                              f"Wy2={wy_b:.3f}, Wz2={wz_b:.3f}, Wx2={wx_b:.3f} | {ld.frame_id}")
-
                 else:
-                    # dispBeamColumn / nonlinearBeamColumn: only support uniform
-                    # loads over the full element span [0, 1]. To conserve the
-                    # total force resultant, scale the average intensity by the
-                    # fraction of the element that is actually loaded.
                     span_frac = bOverL - aOverL
                     wy_avg = (wy_a + wy_b) * 0.5 * span_frac
                     wz_avg = (wz_a + wz_b) * 0.5 * span_frac
                     wx_avg = (wx_a + wx_b) * 0.5 * span_frac
                     ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
                                 wy_avg, wz_avg, wx_avg)
-                    if self.config['verbose']:
-                        print(f"    Trapezoidal load decomposed to uniform ({pat_tag}): "
-                              f"element {elem_tag}, Wy_avg={wy_avg:.3f}, "
-                              f"Wz_avg={wz_avg:.3f}, Wx_avg={wx_avg:.3f}, "
-                              f"span_frac={span_frac:.3f} | {ld.frame_id}")
+
             elif ld.load_type == 'Moment':
-                # For moment loads, similar but with Mx, My, Mz – not implemented here
                 if self.config['verbose']:
                     print("  Warning: moment distributed loads not yet supported")
-            else:
-                if self.config['verbose']:
-                    print(f"  Warning: unknown load type '{ld.load_type}'")
+
+        # ------------------------------------------------------------------
+        # Merge joint and frame totals into public attribute
+        # ------------------------------------------------------------------
+        all_patterns = set(joint_load_totals) | set(frame_load_totals)
+        self.load_totals: Dict[str, Dict[str, float]] = {}
+        for pname in all_patterns:
+            self.load_totals[pname] = {k: 0.0 for k in
+                                       ('fx','fy','fz','mx','my','mz')}
+            self.load_totals[pname].update(joint_load_totals.get(pname, {}))
+            self.load_totals[pname].update(frame_load_totals.get(pname, {}))
 
         if self.config['verbose']:
-            for pat_tag, load_sum in frame_load_sums.items():
-                print(f"  Pattern {pat_tag}: {' | '.join([f'{key} = {val:,.1f}' for key, val in load_sum.items()])}")
+            print("\n  --- Load totals per pattern ---")
+            for pname, totals in self.load_totals.items():
+                parts = [f"{k} = {v:,.1f}" for k, v in totals.items()]
+                print(f"  {pname}: {' | '.join(parts)}")
+            print()
 
 
     # =========================================================================
