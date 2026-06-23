@@ -78,7 +78,6 @@ class OpenSeesBuilder:
             'split_elements': True,
             'verbose': False,
             'geom_transf_type': 'Linear',
-        }
             'simplify_distributed_loads': False,
         }
         for key, default in defaults.items():
@@ -88,8 +87,15 @@ class OpenSeesBuilder:
     # -------------------------------------------------------------------------
     # Main build method
     # -------------------------------------------------------------------------
-    def build(self) -> None:
-        """Build the complete OpenSees model in memory."""
+    def build(self, pattern_scales: Optional[Dict[str, float]] = None) -> None:
+        """Build the complete OpenSees model in memory.
+
+        Args:
+            pattern_scales: Optional dict mapping pattern name → scale factor.
+                If provided, only these patterns are created with the given
+                scale.  If ``None`` (default), all patterns are applied with
+                factor 1.0.
+        """
         if self.config['verbose']:
             print("Building OpenSees model...")
             print(f"  Element type: {self.config['element_type']}")
@@ -110,7 +116,7 @@ class OpenSeesBuilder:
             
 
         self._create_elements()
-        self._create_loads()   # placeholder
+        self._create_loads(pattern_scales=pattern_scales)
         self._setup_recorders()  # optional
 
         if self.config['verbose']:
@@ -247,7 +253,7 @@ class OpenSeesBuilder:
         # local y = cross(vec_z, vec_x)  (right‑handed)
         vec_y = np.cross(vec_z, vec_x_norm)
         vec_y = vec_y / np.linalg.norm(vec_y)
-        return vec_x, vec_y, vec_z
+        return vec_x_norm, vec_y, vec_z
 
     def _global_to_local(self, elem: FrameElement, vec: np.ndarray) -> np.ndarray:
         """Transform a vector from global to local coordinates."""
@@ -364,27 +370,30 @@ class OpenSeesBuilder:
             return node.node_tag
         return None
 
-    def _create_loads(self) -> None:
+    def _create_loads(self, pattern_scales: Optional[Dict[str, float]] = None) -> None:
         """Create load patterns and apply loads (joint and distributed).
 
-        After this method runs, ``self.load_totals`` is populated with the
-        summed applied loads per pattern, keyed by pattern name::
-
-            {
-                "DEAD":  {"fx": ..., "fy": ..., "fz": ..., "mx": ..., "my": ..., "mz": ...},
-                "WIND":  { ... },
-            }
-
-        Forces are in model force units (N, kN, kip, etc.); moments in
-        moment units (N·m, kN·m, etc.).  These can be compared with the
-        reactions returned by :meth:`run_static_analysis`.
+        Args:
+            pattern_scales: If provided, only create patterns listed in this
+                dict, applying the given scale factor to every load in that
+                pattern.  If ``None`` (default), all patterns are created with
+                factor 1.0.
         """
         if self.config['verbose']:
             print("Creating loads...")
 
-        # Accumulators keyed by pattern *name* (not tag).
+        # Resolve which patterns to activate
+        all_patterns = self.model.load_patterns
+        if pattern_scales is not None:
+            active = {name: pattern_scales.get(name, 0.0)
+                      for name in all_patterns if name in pattern_scales}
+        else:
+            active = {name: 1.0 for name in all_patterns}
+
+        # Accumulators keyed by pattern *name*
         joint_load_totals: Dict[str, Dict[str, float]] = {}
         frame_load_totals: Dict[str, Dict[str, float]] = {}
+        sw_load_totals: Dict[str, Dict[str, float]] = {}
 
         # Determine which distributed loads to use (split or original)
         dist_loads = (self.split_dist_loads if self.split_dist_loads is not None
@@ -392,42 +401,46 @@ class OpenSeesBuilder:
 
         # Build pattern tags (one per unique load pattern name)
         pattern_tags = {}
-        for i, (pattern_name, pattern) in enumerate(self.model.load_patterns.items(), start=1):
+        for i, (pattern_name, scale) in enumerate(active.items(), start=1):
+            if abs(scale) < 1e-12:
+                continue
             ops.timeSeries('Linear', i)
             ops.pattern('Plain', i, i)
             pattern_tags[pattern_name] = i
             if self.config['verbose']:
-                print(f"  Pattern '{pattern_name}' (tag={i})")
+                print(f"  Pattern '{pattern_name}' (tag={i}, scale={scale})")
 
         # ------------------------------------------------------------------
-        # Joint loads
+        # Joint loads (scaled)
         # ------------------------------------------------------------------
         for jl in self.model.joint_loads:
+            scale = active.get(jl.pattern, 0.0)
+            if abs(scale) < 1e-12:
+                continue
             pat_tag = pattern_tags.get(jl.pattern)
             if pat_tag is None:
                 continue
             node = self._node_tag_from_id(jl.node_id)
             if node is None:
                 continue
-            ops.load(node, jl.fx, jl.fy, jl.fz, jl.mx, jl.my, jl.mz)
+            ops.load(node, jl.fx * scale, jl.fy * scale, jl.fz * scale,
+                     jl.mx * scale, jl.my * scale, jl.mz * scale)
 
-            # Accumulate totals by pattern *name*
             pname = jl.pattern
             if pname not in joint_load_totals:
                 joint_load_totals[pname] = {k: 0.0 for k in
                                             ('fx','fy','fz','mx','my','mz')}
             for key in ('fx', 'fy', 'fz', 'mx', 'my', 'mz'):
-                joint_load_totals[pname][key] += getattr(jl, key)
+                joint_load_totals[pname][key] += getattr(jl, key) * scale
 
             if self.config['verbose']:
-                print(f"    Joint load ({pat_tag}): node {node}: "
-                      f"{jl.fx:,.1f} | {jl.fy:,.1f} | {jl.fz:,.1f} | "
-                      f"{jl.mx:,.1f} | {jl.my:,.1f} | {jl.mz:,.1f}")
+                print(f"    Joint load ({pat_tag}): node {node}, scale={scale}: "
+                      f"{jl.fx*scale:,.1f} | {jl.fy*scale:,.1f} | {jl.fz*scale:,.1f} | "
+                      f"{jl.mx*scale:,.1f} | {jl.my*scale:,.1f} | {jl.mz*scale:,.1f}")
 
         # ------------------------------------------------------------------
-        # Frame distributed loads
+        # Frame distributed loads (scaled)
         # ------------------------------------------------------------------
-        # Build frame_tag_map if not already built (from _create_elements)
         if not hasattr(self, 'frame_tag_map'):
             elements = self.split_elements if self.split_elements else self.model.frame_elements
             self.frame_tag_map = {
@@ -440,10 +453,11 @@ class OpenSeesBuilder:
             return self.frame_tag_map.get(frame_id)
 
         for ld in dist_loads:
+            scale = active.get(ld.pattern, 0.0)
+            if abs(scale) < 1e-12:
+                continue
             pat_tag = pattern_tags.get(ld.pattern)
             if pat_tag is None:
-                if self.config['verbose']:
-                    print(f"  Warning: pattern '{ld.pattern}' not found for element load")
                 continue
             elem_tag = get_elem_tag(ld.frame_id)
             if elem_tag is None:
@@ -451,7 +465,6 @@ class OpenSeesBuilder:
                     print(f"  Warning: element '{ld.frame_id}' not found or inactive")
                 continue
 
-            # Get element object (for local axes)
             if self.split_elements:
                 elem = self.split_elements.get(ld.frame_id)
             else:
@@ -459,7 +472,6 @@ class OpenSeesBuilder:
             if elem is None:
                 continue
 
-            # Compute local axes
             try:
                 vec_x, vec_y, vec_z = self._get_local_axes(elem)
             except Exception as e:
@@ -467,7 +479,6 @@ class OpenSeesBuilder:
                     print(f"  Warning: could not compute local axes for element {ld.frame_id}: {e}")
                 continue
 
-            # Determine global load direction vector
             if ld.direction == 'Gravity':
                 global_dir = np.array([0.0, 0.0, -1.0])
             elif ld.direction == 'X':
@@ -479,15 +490,13 @@ class OpenSeesBuilder:
             else:
                 global_dir = np.array([0.0, 0.0, -1.0])
 
-            # Project intensities onto local axes
-            wx_a = ld.val_a * np.dot(global_dir, vec_x)
-            wy_a = ld.val_a * np.dot(global_dir, vec_y)
-            wz_a = ld.val_a * np.dot(global_dir, vec_z)
-            wx_b = ld.val_b * np.dot(global_dir, vec_x)
-            wy_b = ld.val_b * np.dot(global_dir, vec_y)
-            wz_b = ld.val_b * np.dot(global_dir, vec_z)
+            wx_a = ld.val_a * scale * np.dot(global_dir, vec_x)
+            wy_a = ld.val_a * scale * np.dot(global_dir, vec_y)
+            wz_a = ld.val_a * scale * np.dot(global_dir, vec_z)
+            wx_b = ld.val_b * scale * np.dot(global_dir, vec_x)
+            wy_b = ld.val_b * scale * np.dot(global_dir, vec_y)
+            wz_b = ld.val_b * scale * np.dot(global_dir, vec_z)
 
-            # Element length
             if self._node_tag_from_id:
                 coords_i = ops.nodeCoord(self._node_tag_from_id(elem.node_i))
                 coords_j = ops.nodeCoord(self._node_tag_from_id(elem.node_j))
@@ -498,30 +507,39 @@ class OpenSeesBuilder:
             if length < 1e-12:
                 continue
 
-            # Relative positions, clamped
             aOverL = max(0.0, min(1.0, ld.rdist_a))
             bOverL = max(0.0, min(1.0, ld.rdist_b))
             load_l = ld.dist_b - ld.dist_a
 
-            # Accumulate total force per pattern name (local components)
+            # Accumulate totals in GLOBAL coordinates
             pname = ld.pattern
             if pname not in frame_load_totals:
                 frame_load_totals[pname] = {k: 0.0 for k in
                                             ('fx','fy','fz','mx','my','mz')}
-            # Total force resultant in each local direction
+            # Build local-to-global transformation matrix
+            T = np.column_stack([vec_x, vec_y, vec_z])
+            # Total force in local coordinates
+            f_local = np.array([
+                0.5 * (wx_a + wx_b) * load_l,
+                0.5 * (wy_a + wy_b) * load_l,
+                0.5 * (wz_a + wz_b) * load_l,
+            ])
+            f_global = T @ f_local
             f_loc = {
-                'fx': 0.5 * (wx_a + wx_b) * load_l,
-                'fy': 0.5 * (wy_a + wy_b) * load_l,
-                'fz': 0.5 * (wz_a + wz_b) * load_l,
+                'fx': f_global[0], 'fy': f_global[1], 'fz': f_global[2],
             }
-            # Compute approximate fixed-end moments for the record
+            # Approximate fixed-end moments in local coordinates
             span = bOverL - aOverL
             if span > 1e-12 and abs(load_l) > 1e-12:
-                f_loc['mx'] = 0.0   # axial load → no moment
-                f_loc['my'] = (wy_a + wy_b) * 0.5 * span * load_l * load_l / 12.0
-                f_loc['mz'] = (wz_a + wz_b) * 0.5 * span * load_l * load_l / 12.0
+                m_local = np.array([
+                    0.0,
+                    (wy_a + wy_b) * 0.5 * span * load_l * load_l / 12.0,
+                    (wz_a + wz_b) * 0.5 * span * load_l * load_l / 12.0,
+                ])
             else:
-                f_loc['mx'] = f_loc['my'] = f_loc['mz'] = 0.0
+                m_local = np.zeros(3)
+            m_global = T @ m_local
+            f_loc.update({'mx': m_global[0], 'my': m_global[1], 'mz': m_global[2]})
 
             for key, val in f_loc.items():
                 frame_load_totals[pname][key] += val
@@ -531,20 +549,27 @@ class OpenSeesBuilder:
                       f"fx={f_loc['fx']:,.1f}, fy={f_loc['fy']:,.1f}, "
                       f"fz={f_loc['fz']:,.1f} | {ld.frame_id}")
 
-            # Determine load shape and use appropriate eleLoad command
-            elem_type = self.config['element_type'].lower()
-            supports_trapezoidal = elem_type in ('elasticbeamcolumn', 'forcebeamcolumn')
-
+            # Apply eleLoad
+            # NOTE: The 8‑argument form (wy1, wz1, wx1, aL, bL, wy2, wz2, wx2)
+            # is broken in OpenSeesPy 3.8.0.0 — the end values (wy2 etc.) are
+            # silently ignored.  We therefore decompose all non‑uniform loads
+            # to an equivalent uniform intensity (total force / element length)
+            # applied over the relevant span.  The 5‑argument partial‑span form
+            # (wy, wz, wx, aL, bL) works correctly.
             if ld.load_type == 'Force':
-                is_uniform = ld.shape == 'Uniform' or abs(ld.val_a - ld.val_b) < 1e-6
+                is_uniform = abs(ld.val_a - ld.val_b) < 1e-6
+                is_full_span = abs(aOverL) < 1e-12 and abs(bOverL - 1.0) < 1e-12
 
-                if is_uniform:
+                if is_uniform and is_full_span:
                     ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
                                 wy_a, wz_a, wx_a)
-                elif supports_trapezoidal:
+                elif is_uniform:
+                    # Uniform on a partial span → 5‑argument form
                     ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
-                                wy_a, wz_a, wx_a, aOverL, bOverL, wy_b, wz_b, wx_b)
+                                wy_a, wz_a, wx_a, aOverL, bOverL)
                 else:
+                    # Trapezoidal/linear → decompose to equivalent uniform
+                    # over the loaded portion (conserves total force).
                     span_frac = bOverL - aOverL
                     wy_avg = (wy_a + wy_b) * 0.5 * span_frac
                     wz_avg = (wz_a + wz_b) * 0.5 * span_frac
@@ -557,15 +582,76 @@ class OpenSeesBuilder:
                     print("  Warning: moment distributed loads not yet supported")
 
         # ------------------------------------------------------------------
-        # Merge joint and frame totals into public attribute
+        # Self-weight for patterns with SelfWtMult != 0
         # ------------------------------------------------------------------
-        all_patterns = set(joint_load_totals) | set(frame_load_totals)
+        def _add_sw(pname: str, node_tag: int, fz_val: float) -> None:
+            """Apply a nodal load for self-weight and track it."""
+            ops.load(node_tag, 0.0, 0.0, fz_val, 0.0, 0.0, 0.0)
+            if pname not in sw_load_totals:
+                sw_load_totals[pname] = {k: 0.0 for k in
+                                         ('fx','fy','fz','mx','my','mz')}
+            sw_load_totals[pname]['fz'] += fz_val
+
+        for pname, scale in active.items():
+            if abs(scale) < 1e-12:
+                continue
+            pat = all_patterns.get(pname)
+            if pat is None or abs(pat.self_weight_factor) < 1e-12:
+                continue
+            sw_factor = pat.self_weight_factor * scale
+
+            if self.config['verbose']:
+                print(f"  Self-weight for '{pname}' (factor={sw_factor:.4f})")
+
+            elements = (self.split_elements if self.split_elements
+                        else self.model.frame_elements)
+            for eid, elem in elements.items():
+                if elem.inactive:
+                    continue
+                sec_name = self.model.frame_assignments.get(eid)
+                if not sec_name:
+                    continue
+                sec = self.model.sections.get(sec_name)
+                if sec is None:
+                    continue
+                mat = self.model.materials.get(sec.material)
+                if mat is None or abs(mat.unit_weight) < 1e-12:
+                    continue
+
+                # Element length
+                ni = self.model.nodes.get(elem.node_i)
+                nj = self.model.nodes.get(elem.node_j)
+                if ni is None or nj is None:
+                    continue
+                L = np.linalg.norm([
+                    nj.x - ni.x, nj.y - ni.y, nj.z - ni.z
+                ])
+                if L < 1e-12:
+                    continue
+
+                # Weight = volume × unit_weight × self_weight_factor
+                weight = sec.A * mat.unit_weight * L * sw_factor
+
+                # Half to each end node (gravity downward = negative Z)
+                tag_i = self._node_tag_from_id(elem.node_i)
+                tag_j = self._node_tag_from_id(elem.node_j)
+                if tag_i is not None:
+                    _add_sw(pname, tag_i, -weight * 0.5)
+                if tag_j is not None:
+                    _add_sw(pname, tag_j, -weight * 0.5)
+
+        # ------------------------------------------------------------------
+        # Merge all totals into public attribute
+        # ------------------------------------------------------------------
+        all_ptns = set(joint_load_totals) | set(frame_load_totals) | set(sw_load_totals)
         self.load_totals: Dict[str, Dict[str, float]] = {}
-        for pname in all_patterns:
+        for pname in all_ptns:
             self.load_totals[pname] = {k: 0.0 for k in
                                        ('fx','fy','fz','mx','my','mz')}
-            self.load_totals[pname].update(joint_load_totals.get(pname, {}))
-            self.load_totals[pname].update(frame_load_totals.get(pname, {}))
+            for key in self.load_totals[pname]:
+                self.load_totals[pname][key] += joint_load_totals.get(pname, {}).get(key, 0.0)
+                self.load_totals[pname][key] += frame_load_totals.get(pname, {}).get(key, 0.0)
+                self.load_totals[pname][key] += sw_load_totals.get(pname, {}).get(key, 0.0)
 
         if self.config['verbose']:
             print("\n  --- Load totals per pattern ---")
@@ -602,6 +688,7 @@ class OpenSeesBuilder:
     def run_static_analysis(self, 
                             odb_tag:int = 0,
                             extract_reactions: bool = True,
+                            pattern_scales: Optional[Dict[str, float]] = None,
                             ) -> Dict[str, Any]:
         """Run a linear static analysis and return results.
 
@@ -610,6 +697,10 @@ class OpenSeesBuilder:
                      opstool for richer post‑processing.
             extract_reactions: If True, compute nodal reactions at restrained
                                nodes and include them in the returned dict.
+            pattern_scales: Optional dict of ``{pattern_name: scale_factor}``.
+                If provided, the model is rebuilt with only those patterns
+                active at the given scales.  If ``None`` (default), the
+                existing model (as built) is analysed.
 
         Returns:
             Dictionary with keys:
@@ -617,9 +708,13 @@ class OpenSeesBuilder:
             - ``'nodal_displacements'`` — dict of ``{node_tag: (dx, dy, dz)}``
             - ``'nodal_reactions'`` (if ``extract_reactions``) — dict of
               ``{node_tag: (fx, fy, fz, mx, my, mz)}``.
-            - ``'load_totals'`` — the applied load totals per pattern (useful
-              for equilibrium checks).
+            - ``'summed_reactions'`` — single summed force/moment vector
+            - ``'load_totals'`` — the applied load totals per pattern
         """
+        # Rebuild with different patterns if requested
+        if pattern_scales is not None:
+            self.build(pattern_scales=pattern_scales)
+
         unit_L = self.units['L']
         unit_F = self.units.get('F', 'N')
         if self.config['verbose']:
@@ -652,8 +747,8 @@ class OpenSeesBuilder:
                 results['nodal_displacements'] = nodes_df.to_dict()
         else:
             displacements = {}
-            for node_id in self.model.nodes:
-                tag = int(node_id)
+            for node_id, node in self.model.nodes.items():
+                tag = node.node_tag
                 try:
                     disp = ops.nodeDisp(tag)
                     if isinstance(disp, np.ndarray):
@@ -679,7 +774,10 @@ class OpenSeesBuilder:
                 ops.reactions()
                 reactions = {}
                 for node_id, restraint in self.model.restraints.items():
-                    tag = int(node_id)
+                    node = self.model.nodes.get(node_id)
+                    if node is None:
+                        continue
+                    tag = node.node_tag
                     rx = ops.nodeReaction(tag, 1) if restraint.dofs[0] else 0.0
                     ry = ops.nodeReaction(tag, 2) if restraint.dofs[1] else 0.0
                     rz = ops.nodeReaction(tag, 3) if restraint.dofs[2] else 0.0
