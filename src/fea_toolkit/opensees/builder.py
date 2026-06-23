@@ -503,22 +503,47 @@ class OpenSeesBuilder:
                 frame_load_sums[pat_tag] = frame_load_ptn_sums
                 
 
-            # Determine load shape and use appropriate eleLoad command
-            # TODO: For 3D beam-column elements, need to replace trapezoid with uniform and triangular
+            # Determine load shape and use appropriate eleLoad command.
+            # elasticBeamColumn and forceBeamColumn support the 8-argument
+            # trapezoidal form (wy1, wz1, wx1, aOverL, bOverL, wy2, wz2, wx2).
+            # dispBeamColumn and nonlinearBeamColumn only support the 3-argument
+            # uniform form (wy, wz, wx), so trapezoidal loads must be decomposed.
+            elem_type = self.config['element_type'].lower()
+            supports_trapezoidal = elem_type in ('elasticbeamcolumn', 'forcebeamcolumn')
+
             if ld.load_type == 'Force':
-                if ld.shape == 'Uniform' or abs(ld.val_a - ld.val_b) < 1e-6:
-                    # Uniform: use 3‑argument form (Wy, Wz, Wx) with Wx=0
+                is_uniform = ld.shape == 'Uniform' or abs(ld.val_a - ld.val_b) < 1e-6
+
+                if is_uniform:
+                    # Uniform: use 3‑argument form (Wy, Wz, Wx)
                     ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
                                 wy_a, wz_a, wx_a)
                     if self.config['verbose']:
                         print(f"    Uniform load ({pat_tag}): element {elem_tag}, Wy={wy_a:.3f}, Wz={wz_a:.3f}, Wx={wx_a:.3f} | {ld.frame_id}")
-                else:
+
+                elif supports_trapezoidal:
                     # Linear or trapezoidal: use 8‑argument form
                     # Args: Wy1 Wz1 Wx1 aOverL bOverL Wy2 Wz2 Wx2
                     ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
                                 wy_a, wz_a, wx_a, aOverL, bOverL, wy_b, wz_b, wx_b)
                     if self.config['verbose']:
-                        print(f"    Linear/Trapezoidal load ({pat_tag}): element {elem_tag}, Wy1={wy_a:.3f}, Wz1={wz_a:.3f}, Wx1={wx_a:.3f}, Wy2={wy_b:.3f}, Wz2={wz_b:.3f}, Wx2={wx_b:.3f} | {ld.frame_id}")
+                        print(f"    Linear/Trapezoidal load ({pat_tag}): element {elem_tag}, "
+                              f"Wy1={wy_a:.3f}, Wz1={wz_a:.3f}, Wx1={wx_a:.3f}, "
+                              f"Wy2={wy_b:.3f}, Wz2={wz_b:.3f}, Wx2={wx_b:.3f} | {ld.frame_id}")
+
+                else:
+                    # dispBeamColumn / nonlinearBeamColumn: decompose trapezoid
+                    # into an equivalent uniform load (average intensity) applied
+                    # over the loaded portion as best approximation.
+                    wy_avg = (wy_a + wy_b) * 0.5
+                    wz_avg = (wz_a + wz_b) * 0.5
+                    wx_avg = (wx_a + wx_b) * 0.5
+                    ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
+                                wy_avg, wz_avg, wx_avg)
+                    if self.config['verbose']:
+                        print(f"    Trapezoidal load decomposed to uniform ({pat_tag}): "
+                              f"element {elem_tag}, Wy_avg={wy_avg:.3f}, "
+                              f"Wz_avg={wz_avg:.3f}, Wx_avg={wx_avg:.3f} | {ld.frame_id}")
             elif ld.load_type == 'Moment':
                 # For moment loads, similar but with Mx, My, Mz – not implemented here
                 if self.config['verbose']:
@@ -588,9 +613,9 @@ class OpenSeesBuilder:
         results = {}
         if OPSTOOL_AVAILABLE and odb_tag > 0:
             # Use opstool for easy extraction
-            opst.post.CreateODB(odb_tag=1) # type: ignore
-            opst.post.save_model_data(odb_tag=1) # type: ignore
-            nodes_df = opst.post.get_model_data(data_type='Nodal', odb_tag=1) # type: ignore
+            opst.post.CreateODB(odb_tag=1)
+            opst.post.save_model_data(odb_tag=1)
+            nodes_df = opst.post.get_model_data(data_type='Nodal', odb_tag=1)
             if nodes_df is not None:
                 results['nodal_displacements'] = nodes_df.to_dict()
         else:
