@@ -51,6 +51,7 @@ from fea_toolkit.model.geometry import (
     list_interp,
     trapezoidal_force_split,
     SpatialGrid,
+    beam_load_to_nodal_loads,
 )
 
 # ============================================================================
@@ -875,3 +876,93 @@ class TestEdgeCases:
         """Should accept plain Python lists as input."""
         vecxz = get_SAP_vecxz([5.0, 0.0, 0.0])
         assert np.allclose(vecxz, [0.0, -1.0, 0.0], atol=1e-6)
+
+
+class TestBeamLoadToNodalLoads:
+    """Tests for beam_load_to_nodal_loads()."""
+
+    def test_uniform_gravity(self):
+        """Uniform gravity load on a horizontal X element."""
+        load = FrameDistributedLoad(
+            pattern="DEAD", frame_id="1", direction="Gravity",
+            load_type="Force", shape="Uniform",
+            val_a=10000.0, val_b=10000.0,
+            rdist_a=0.0, rdist_b=1.0, dist_a=0.0, dist_b=5.0,
+        )
+        elem = FrameElement(
+            elem_id="1", elem_tag=1, node_i="1", node_j="2", angle=0.0,
+        )
+        node_coords = {"1": (0.0, 0.0, 0.0), "2": (5.0, 0.0, 0.0)}
+        result = beam_load_to_nodal_loads(load, elem, node_coords, length=5.0)
+
+        # Total load = 10000 * 5 = 50000 (downward = negative Z)
+        total_fz = result["i"]["fz"] + result["j"]["fz"]
+        assert abs(total_fz) - 50000.0 < 1.0
+        # Each node gets ~25000 (downward)
+        assert abs(result["i"]["fz"]) - 25000.0 < 1.0
+        assert abs(result["j"]["fz"]) - 25000.0 < 1.0
+        # No y component
+        assert abs(result["i"]["fy"]) < 1.0
+        assert abs(result["j"]["fy"]) < 1.0
+        # Moments should be non-zero (fixed-end moments about local y)
+        assert abs(result["i"]["my"]) > 10000.0
+        assert abs(result["j"]["my"]) > 10000.0
+
+    def test_uniform_x_direction(self):
+        """Uniform load in global X direction."""
+        load = FrameDistributedLoad(
+            pattern="WIND", frame_id="1", direction="X",
+            load_type="Force", shape="Uniform",
+            val_a=5000.0, val_b=5000.0,
+            rdist_a=0.0, rdist_b=1.0, dist_a=0.0, dist_b=5.0,
+        )
+        elem = FrameElement(
+            elem_id="1", elem_tag=1, node_i="1", node_j="2", angle=0.0,
+        )
+        node_coords = {"1": (0.0, 0.0, 0.0), "2": (5.0, 0.0, 0.0)}
+        result = beam_load_to_nodal_loads(load, elem, node_coords, length=5.0)
+
+        # Total load = 5000 * 5 = 25000, split → 12500 per node
+        # For X-direction on an X-axis element: all load is axial
+        total_fx = result["i"]["fx"] + result["j"]["fx"]
+        assert abs(total_fx - 25000.0) < 1.0
+        assert abs(result["i"]["fx"] - 12500.0) < 1.0
+        assert abs(result["j"]["fx"] - 12500.0) < 1.0
+
+    def test_partial_span_uniform(self):
+        """Uniform load on a partial span [0.2, 0.8]."""
+        load = FrameDistributedLoad(
+            pattern="DEAD", frame_id="1", direction="Gravity",
+            load_type="Force", shape="Uniform",
+            val_a=10000.0, val_b=10000.0,
+            rdist_a=0.2, rdist_b=0.8, dist_a=1.0, dist_b=4.0,
+        )
+        elem = FrameElement(
+            elem_id="1", elem_tag=1, node_i="1", node_j="2", angle=0.0,
+        )
+        node_coords = {"1": (0.0, 0.0, 0.0), "2": (5.0, 0.0, 0.0)}
+        result = beam_load_to_nodal_loads(load, elem, node_coords, length=5.0)
+
+        # Total load = 10000 * (4-1) = 30000 on a 5m element
+        total_fz = abs(result["i"]["fz"]) + abs(result["j"]["fz"])
+        assert abs(total_fz - 30000.0) < 1.0
+
+    def test_trapezoidal_load(self):
+        """Trapezoidal load varying from 5000 to 10000."""
+        load = FrameDistributedLoad(
+            pattern="DEAD", frame_id="1", direction="Gravity",
+            load_type="Force", shape="Trapezoidal",
+            val_a=5000.0, val_b=10000.0,
+            rdist_a=0.0, rdist_b=1.0, dist_a=0.0, dist_b=5.0,
+        )
+        elem = FrameElement(
+            elem_id="1", elem_tag=1, node_i="1", node_j="2", angle=0.0,
+        )
+        node_coords = {"1": (0.0, 0.0, 0.0), "2": (5.0, 0.0, 0.0)}
+        result = beam_load_to_nodal_loads(load, elem, node_coords, length=5.0)
+
+        # Total load = (5000+10000)/2 * 5 = 37500
+        total_fz = abs(result["i"]["fz"]) + abs(result["j"]["fz"])
+        assert abs(total_fz - 37500.0) < 100.0  # allow small numerical tolerance
+        # Asymmetric load → unequal end forces
+        assert abs(result["i"]["fz"]) != abs(result["j"]["fz"])

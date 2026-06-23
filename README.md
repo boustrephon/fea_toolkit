@@ -76,6 +76,12 @@ Not all OpenSees element types support the same `eleLoad -type -beamUniform` arg
 | **`dispBeamColumn`** | ✅ Native | ❌ Decomposed to equivalent uniform (average intensity) |
 | **`nonlinearBeamColumn`** | ✅ Native | ❌ Decomposed to equivalent uniform (average intensity) |
 
+**Note:** `Corotational` geometric transformation does **not** support `eleLoad` in 3D
+(per the [OpenSees documentation](https://opensees.ist.berkeley.edu/wiki/index.php?title=EleLoad_Command)).
+If you use `'geom_transf_type': 'Corotational'`, the builder will emit a warning.
+Use :func:`beam_load_to_nodal_loads` from `fea_toolkit.model.geometry` to convert
+distributed loads into equivalent nodal loads as a workaround.
+
 ---
 
 #### 5. Section Types and Properties
