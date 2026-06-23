@@ -502,7 +502,7 @@ TABLE:  "PROGRAM CONTROL"
    ProgramName=SAP2000   Version=25.1.0   CurrUnits="KN, m, C"   SteelCode="AISC 360-16"   ConcCode="ACI 318-19"   AlumCode="AA 2015"   ColdCode=AISI-16   RegenHinge=Yes
  
 TABLE:  "PROJECT INFORMATION"
-   Item="Company Name"   Data=AJAX
+   Item="Company Name"   Data=Dada
    Item="Client Name"
    Item="Project Name"
    Item="Project Number"
