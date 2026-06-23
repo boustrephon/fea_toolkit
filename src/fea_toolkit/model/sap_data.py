@@ -3,11 +3,25 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
+@dataclass
+class CoordSys:
+    """Coordinate system."""
+    name: str
+    coord_type: str    # "Cartesian", "Cylindrical", "Spherical"
+    x: float = 0
+    y: float = 0
+    z: float = 0
+    xx: float = 0
+    yy: float = 0
+    zz: float = 0
+
+default_coord_sys = CoordSys(name="GLOBAL", coord_type="Cartesian")
 
 @dataclass
 class Node:
     """Finite element node."""
-    id: str                     # SAP2000 label (e.g., "1")
+    node_id: str                     # SAP2000 label (e.g., "1")
+    node_tag: int                    # numeric tag for OpenSees etc
     x: float
     y: float
     z: float
@@ -19,6 +33,13 @@ class Restraint:
     """Boundary conditions at a node."""
     dofs: List[int]             # [U1, U2, U3, R1, R2, R3] where 1 = fixed, 0 = free
 
+@dataclass
+class Constraint:
+    """Boundary conditions at a node."""
+    name: str
+    constraint_type: str  # e.g. BODY
+    coord_sys: str = "GLOBAL"
+    constraint_data: Dict[str, Any] = field(default_factory=dict) #
 
 @dataclass
 class Material:
@@ -61,20 +82,24 @@ class Section:
     # Extra
     manufacturer: Optional[str] = None
 
-
 @dataclass
 class FrameElement:
     """1D frame element connectivity."""
-    id: str                     # SAP2000 frame label
+    elem_id: str                     # SAP2000 frame label
+    elem_tag: int                    # numeric tag for OpenSees etc
     node_i: str
     node_j: str
     angle: float = 0.0          # Rotation about local x‑axis (degrees)
-
+    inactive: bool = False
+    parent_id: Optional[str] = None
+    child_ids: List[str] = field(default_factory=list)
+    t_locations: List[float] = field(default_factory=list)   # parametric positions 0..1 where split occurs
 
 @dataclass
 class AreaElement:
     """2D shell/area element connectivity."""
-    id: str
+    area_id: str
+    area_tag: int
     node_ids: List[str]         # ordered corner nodes
     thickness: float = 0.0
 
@@ -86,6 +111,109 @@ class Group:
     color: Optional[str] = None
     objects: List[str] = field(default_factory=list)  # "Frame:123", "Area:456", "Joint:1"
 
+@dataclass
+class LoadCase:
+    """SAP2000 load case."""
+    case_name: str
+    case_type: str
+    design_type_option: str   # "Prog Det"
+    design_type: str          # 'DEAD', 'LIVE', 'SUPERDEAD', 'WIND', 'QUAKE', etc.
+    design_action_option: str # "Prog Det"
+    design_action: str        # 'Non-Composite', 'Long-Term Composite', 'Short-Term Composite', etc.
+    initial_condition: str = 'Zero'
+    modal_case: str = ''
+    run_case: bool = False
+    case_data: Dict[str, Any] = field(default_factory=dict) # "CASE - MODAL ..." or "CASE - RESPONSE SPECTRUM ..." etc
+
+@dataclass
+class LoadPattern:
+    """SAP2000 load pattern."""
+    name: str
+    pattern_type: str          # 'DEAD', 'LIVE', 'SUPERDEAD', 'WIND', 'QUAKE', etc.
+    self_weight_factor: float = 0.0
+
+@dataclass
+class LoadCombination:
+    """SAP2000 load combination."""
+    name: str
+    combo_type: str   # 'DEAD', 'LIVE', 'SUPERDEAD', 'WIND', 'QUAKE', etc.
+    cases: Dict[str, float] = field(default_factory=dict) 
+    design: Dict[str, str] = field(default_factory=dict) 
+
+@dataclass
+class MassSource:
+    """SAP2000 mass source."""
+    name: str
+    elements: bool = False
+    masses: bool = False
+    loads: bool = False
+    is_default: bool = False
+    load_pattern: Dict[str, float] = field(default_factory=dict)
+
+@dataclass
+class JointLoad:
+    """ "JOINT LOADS - FORCE" : Concentrated load at a joint."""
+    pattern: str               # name of the load pattern
+    # coord_sys: CoordSys
+    node_id: str
+    # node_tag: int
+    fx: float = 0.0
+    fy: float = 0.0
+    fz: float = 0.0
+    mx: float = 0.0
+    my: float = 0.0
+    mz: float = 0.0
+    coord_sys: str = "GLOBAL"
+
+
+@dataclass
+class GravityLoad:
+    """ # "FRAME LOADS - GRAVITY" 
+       Frame=5   LoadPat="leg stiffener_1_t=20"   CoordSys=GLOBAL   MultiplierX=0   MultiplierY=0   MultiplierZ=-1.05
+       """
+    pattern: str
+    # coord_sys: CoordSys
+    frame_id: str
+    # frame_tag: int
+    multiplier_x: float = 0.0
+    multiplier_y: float = 0.0
+    multiplier_z: float = 0.0
+    coord_sys: str = "GLOBAL"
+
+@dataclass
+class FramePointLoad:
+    """Concentrated load on a frame element."""
+    pattern: str               # name of the load pattern
+    # coord_sys: CoordSys
+    node_id: str
+    # node_tag: int
+    fx: float = 0.0
+    fy: float = 0.0
+    fz: float = 0.0
+    mx: float = 0.0
+    my: float = 0.0
+    mz: float = 0.0
+    coord_sys: str = "GLOBAL"
+
+@dataclass
+class FrameDistributedLoad:
+    """ "FRAME LOADS - DISTRIBUTED" : Distributed load on a frame element.
+    Frame=5   LoadPat="wind +X"   CoordSys=GLOBAL   Type=Force   Dir=X   DistType=RelDist  RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=5.08   FOverLA=1.65   FOverLB=1.65
+    """
+    pattern: str
+    # coord_sys: CoordSys
+    frame_id: str
+    # frame_tag: int
+    direction: str             # 'Gravity', 'Projected', 'LocalX', etc.
+    load_type: str             # 'Force' or 'Moment'
+    shape: str                 # 'Uniform', 'Linear', 'Trapezoidal'
+    val_a: float               # intensity at start (force/length)
+    val_b: float               # intensity at end
+    rdist_a: float              # relative distance from start
+    rdist_b: float              # relative distance from start
+    dist_a: float              # absolute distance from start (in model units)
+    dist_b: float              # absolute distance from start
+    coord_sys: str = "GLOBAL"
 
 @dataclass
 class SAPModelData:
@@ -101,7 +229,10 @@ class SAPModelData:
     groups: Dict[str, Group]
     frame_auto_mesh: Dict[str, Dict[str, Any]]   # frame_id -> auto mesh settings
     # Loads (to be expanded later)
-    # dist_loads: Dict[str, DistributedLoad]
+    load_cases: Dict[str,LoadCase] = field(default_factory=dict)
+    load_patterns: Dict[str,LoadPattern] = field(default_factory=dict)
+    joint_loads: List[JointLoad] = field(default_factory=list)
+    frame_dist_loads: List[FrameDistributedLoad] = field(default_factory=list)    # dist_loads: Dict[str, DistributedLoad]
     # conc_loads: Dict[str, ConcentratedLoad]
     # Default units used for all coordinates and section properties
     units: Dict[str, str] = field(default_factory=lambda: {'F': "N", 'L': "m", 'T': "C"})   
