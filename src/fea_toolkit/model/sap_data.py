@@ -1,7 +1,8 @@
 """Intermediate data model for SAP2000/ETABS models."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
+
 
 @dataclass
 class CoordSys:
@@ -59,28 +60,355 @@ class Material:
     extra: Dict[str, Any] = field(default_factory=dict)   # all other properties
 
 
+# ============================================================================
+# Section type hierarchy
+# ============================================================================
+
+# Mapping of SAP2000/ETABS shape names to canonical internal identifiers.
+# New names should be added here as needed.
+SHAPE_NAMES = {
+    # I / Wide flange
+    "I/Wide Flange": "I",
+    "WIDE FLANGE": "I",
+    "Steel I/Wide Flange": "I",
+    # Channel
+    "Channel": "CH",
+    "CHANNEL": "CH",
+    "Steel Channel": "CH",
+    "Concrete Channel": "CH",
+    # Single angle
+    "Angle": "A",
+    "Steel Angle": "A",
+    "Concrete Angle": "A",
+    # Double angle
+    "Double Angle": "AA",
+    "Steel Double Angle": "AA",
+    "Concrete Double Angle": "AA",
+    # Tee
+    "Tee": "T",
+    # Rectangular solid
+    "Rectangular": "R",
+    "Rectangle": "R",
+    "RECTANGLE": "R",
+    "Steel Plate": "R",
+    "Concrete Rectangular": "R",
+    # Circular solid
+    "Circle": "C",
+    "CIRCLE": "C",
+    "Steel Rod": "C",
+    "Steel Circle": "C",
+    "Concrete Circle": "C",
+    # Pipe / CHS
+    "Pipe": "CHS",
+    "PIPE": "CHS",
+    "Steel Pipe": "CHS",
+    "Concrete Pipe": "CHS",
+    # Box / RHS
+    "Box/Tube": "RHS",
+    "Tube": "RHS",
+    "TUBE": "RHS",
+    "Steel Tube": "RHS",
+    "Concrete Tube": "RHS",
+    # General / catalogue
+    "General": "GEN",
+    "GENERAL": "GEN",
+    "NA": "GEN",
+    # SD Section
+    "SD Section": "SD",
+    # Nonprismatic
+    "Nonprismatic": "NP",
+    # Encased
+    "Concrete Encasement Rectangle": "ECR",
+    "Concrete Encasement Circle": "ECC",
+    # Deck
+    "Steel Deck": "DK",
+}
+
+
 @dataclass
 class Section:
-    """Frame or shell section properties."""
-    name: str
-    shape: str                  # "I/Wide Flange", "Pipe", "Box/Tube", "SD Section", "Shell"
-    material: str               # material name (reference to Material)
-    A: float                    # Cross-sectional area (m²)
-    I33: float                  # Major axis moment of inertia (m⁴)
-    I22: float                  # Minor axis moment of inertia (m⁴)
-    J: float                    # Torsional constant (m⁴)
-    # Shape-specific (optional)
-    depth: float = 0.0          # Overall depth (m)
-    width: float = 0.0          # Flange width (m)
-    tw: float = 0.0             # Web thickness (m)
-    tf: float = 0.0             # Flange thickness (m)
-    # Plastic moduli (from manufacturer DB)
+    """Base class for all frame section types.
+
+    Stores the derived section properties common to all shapes (area, inertias,
+    torsional constant, plastic moduli) plus shape‑specific dimensions in
+    subclasses.
+
+    Subclasses should override :meth:`to_fiber_patches` to generate OpenSees
+    fiber patch definitions for nonlinear analysis.
+    """
+
+    name: str                     # Section name (SAP2000 label)
+    shape: str                    # Original SAP2000 shape name e.g. "I/Wide Flange"
+    material: str                 # Reference to Material.name
+    A: float = 0.0                # Cross-sectional area
+    I33: float = 0.0              # Major-axis moment of inertia
+    I22: float = 0.0              # Minor-axis moment of inertia
+    J: float = 0.0                # Torsional constant
+    # Plastic moduli (from manufacturer DB where available)
     Z33: Optional[float] = None
     Z22: Optional[float] = None
-    # For shells
-    thickness: float = 0.0
     # Extra
     manufacturer: Optional[str] = None
+
+    @property
+    def shape_id(self) -> str:
+        """Canonical shape identifier (see SHAPE_NAMES)."""
+        return SHAPE_NAMES.get(self.shape, "GEN")
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+    ) -> List[Tuple]:
+        """Generate OpenSees ``patch`` definitions for fiber sections.
+
+        Args:
+            mat_tag: OpenSees material tag.
+            nfy: Number of fibres along the local y direction.
+            nz: Number of fibres along the local z direction.
+
+        Returns:
+            List of ``('rect', mat_tag, nfy, nfz, y1, z1, y2, z2)`` tuples.
+
+        Raises:
+            NotImplementedError: If the section type does not support fiber
+                conversion (e.g. general catalogue sections).
+        """
+        raise NotImplementedError(
+            f"Fiber conversion not implemented for {type(self).__name__}"
+        )
+
+
+# --- Shape‑specific subclasses -------------------------------------------------
+
+
+@dataclass
+class ISection(Section):
+    """I / Wide-flange section with equal flanges.
+
+    OpenSees fiber representation: bottom flange → web → top flange,
+    all as rectangular patches.
+    """
+    depth: float = 0.0    # Overall depth D
+    bf: float = 0.0       # Flange width B
+    tf: float = 0.0       # Flange thickness
+    tw: float = 0.0       # Web thickness
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+    ) -> List[Tuple]:
+        y1 = -self.depth / 2.0
+        y2 = -self.depth / 2.0 + self.tf
+        y3 = self.depth / 2.0 - self.tf
+        y4 = self.depth / 2.0
+        return [
+            ("rect", mat_tag, nfy, nfz, y1, -self.bf / 2, y2, self.bf / 2),
+            ("rect", mat_tag, nfy, nfz, y2, -self.tw / 2, y3, self.tw / 2),
+            ("rect", mat_tag, nfy, nfz, y3, -self.bf / 2, y4, self.bf / 2),
+        ]
+
+
+@dataclass
+class GeneralSection(Section):
+    """Generic section from catalogue or with directly specified properties.
+
+    No shape‑specific dimensions are stored — all derived properties
+    (A, I33, I22, J, etc.) are provided by SAP2000 / the catalogue.
+    """
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+    ) -> List[Tuple]:
+        raise NotImplementedError(
+            "Fiber conversion requires a known shape type "
+            "(I, Pipe, Box, etc.), not a General section"
+        )
+
+
+@dataclass
+class PipeSection(Section):
+    """Circular hollow section / pipe (CHS)."""
+    od: float = 0.0       # Outer diameter
+    t: float = 0.0        # Wall thickness
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+    ) -> List[Tuple]:
+        """Placeholder — CHS patches require an annular mesh."""
+        raise NotImplementedError(
+            "Fiber conversion for PipeSection not yet implemented"
+        )
+
+
+@dataclass
+class BoxSection(Section):
+    """Rectangular hollow section / box / tube (RHS)."""
+    depth: float = 0.0    # D
+    bf: float = 0.0       # B
+    tf: float = 0.0       # Flange (top/bottom) thickness
+    tw: float = 0.0       # Web (left/right) thickness
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+    ) -> List[Tuple]:
+        """Placeholder — Box patches need inner/outer rectangles."""
+        raise NotImplementedError(
+            "Fiber conversion for BoxSection not yet implemented"
+        )
+
+
+@dataclass
+class RectangularSection(Section):
+    """Solid rectangular section."""
+    depth: float = 0.0    # D
+    bf: float = 0.0       # B
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+    ) -> List[Tuple]:
+        y1, y2 = -self.depth / 2, self.depth / 2
+        z1, z2 = -self.bf / 2, self.bf / 2
+        return [("rect", mat_tag, nfy, nfz, y1, z1, y2, z2)]
+
+
+@dataclass
+class CircularSection(Section):
+    """Solid circular section / rod."""
+    diameter: float = 0.0
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+    ) -> List[Tuple]:
+        """Placeholder — circular patches require a mesh."""
+        raise NotImplementedError(
+            "Fiber conversion for CircularSection not yet implemented"
+        )
+
+
+@dataclass
+class ChannelSection(Section):
+    """Channel / C‑section."""
+    depth: float = 0.0    # D
+    bf: float = 0.0       # B
+    tf: float = 0.0       # Flange thickness
+    tw: float = 0.0       # Web thickness
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+    ) -> List[Tuple]:
+        """Placeholder — channel patches not yet implemented."""
+        raise NotImplementedError(
+            "Fiber conversion for ChannelSection not yet implemented"
+        )
+
+
+@dataclass
+class AngleSection(Section):
+    """Single angle section (L)."""
+    depth: float = 0.0    # D
+    bf: float = 0.0       # B
+    tf: float = 0.0       # Flange thickness
+    tw: float = 0.0       # Web thickness
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+    ) -> List[Tuple]:
+        """Placeholder — angle patches not yet implemented."""
+        raise NotImplementedError(
+            "Fiber conversion for AngleSection not yet implemented"
+        )
+
+
+@dataclass
+class DoubleAngleSection(Section):
+    """Double angle section (2L)."""
+    depth: float = 0.0    # D
+    bf: float = 0.0       # B (overall width including gap)
+    tf: float = 0.0       # Flange thickness
+    tw: float = 0.0       # Web thickness
+    dis: float = 0.0      # Gap between angles
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+    ) -> List[Tuple]:
+        """Placeholder — double‑angle patches not yet implemented."""
+        raise NotImplementedError(
+            "Fiber conversion for DoubleAngleSection not yet implemented"
+        )
+
+
+@dataclass
+class TeeSection(Section):
+    """Tee section (T)."""
+    depth: float = 0.0    # D
+    bf: float = 0.0       # B
+    tf: float = 0.0       # Flange thickness
+    tw: float = 0.0       # Web (stem) thickness
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+    ) -> List[Tuple]:
+        """Placeholder — tee patches not yet implemented."""
+        raise NotImplementedError(
+            "Fiber conversion for TeeSection not yet implemented"
+        )
+
+
+@dataclass
+class SDSection(Section):
+    """Section Designer section — may be composite, with multiple materials.
+
+    Each polygon is a closed loop of (y, z) coordinates associated with a
+    material.  For composite sections the list holds contributions from
+    steel, concrete, rebar etc.
+    """
+    polygons: List[Tuple[str, List[Tuple[float, float]]]] = field(
+        default_factory=list
+    )
+    # Each tuple: (material_name, [(y1, z1), (y2, z2), ...])
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+    ) -> List[Tuple]:
+        """Placeholder — SD polygons require triangulation / meshing."""
+        raise NotImplementedError(
+            "Fiber conversion for SD sections requires polygon meshing — "
+            "not yet implemented"
+        )
+
+
+@dataclass
+class EncasedSection(Section):
+    """Composite encased section (e.g. concrete‑encased steel).
+
+    Stores the embedded (steel) section plus the encasement geometry and
+    material.
+    """
+    embedded_section: Optional["Section"] = None
+    encasement_material: str = ""
+    encasement_depth: float = 0.0
+    encasement_bf: float = 0.0
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+    ) -> List[Tuple]:
+        """Placeholder — encased sections need steel + concrete patches."""
+        raise NotImplementedError(
+            "Fiber conversion for EncasedSection not yet implemented"
+        )
+
+
+@dataclass
+class ShellSection(Section):
+    """Shell / area section (2‑D)."""
+    thickness: float = 0.0
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+    ) -> List[Tuple]:
+        raise NotImplementedError(
+            "Fiber conversion is not applicable to ShellSection"
+        )
+
+
+# --- Non‑section dataclasses ---------------------------------------------------
 
 @dataclass
 class FrameElement:
