@@ -1,0 +1,3275 @@
+{
+  "METADATA": [
+    {
+      "FileName": "C:\\Users\\nabjo\\OneDrive\\A054 - B\\03 Working\\02 Calc\\400kV Substation\\Lattice Frame Model.$2k",
+      "DateSaved": ""
+    }
+  ],
+  "ACTIVE DEGREES OF FREEDOM": [
+    {
+      "UX": true,
+      "UY": true,
+      "UZ": true,
+      "RX": true,
+      "RY": true,
+      "RZ": true
+    }
+  ],
+  "ANALYSIS OPTIONS": [
+    {
+      "Solver": "Advanced",
+      "SolverProc": "Auto",
+      "Force32Bit": false,
+      "StiffCase": null,
+      "GeomMod": null,
+      "HingeOpt": "In Elements",
+      "NumAThreads": 0,
+      "MaxFileSize": 0,
+      "NumDThreads": 0,
+      "NumRThreads": 0,
+      "UseMMFiles": "Program Determined",
+      "AllowDiff": false
+    }
+  ],
+  "AUTO WAVE 3 - WAVE CHARACTERISTICS - GENERAL": [
+    {
+      "WaveChar": "Default",
+      "WaveType": "From Theory",
+      "KinFactor": 1,
+      "SWaterDepth": 45,
+      "WaveHeight": 18,
+      "WavePeriod": 12,
+      "WaveTheory": "Linear"
+    }
+  ],
+  "CASE - MODAL 1 - GENERAL": [
+    {
+      "Case": "MODAL",
+      "ModeType": "Eigen",
+      "MaxNumModes": 12,
+      "MinNumModes": 1,
+      "EigenShift": 0,
+      "EigenCutoff": 0,
+      "EigenTol": 1e-09,
+      "AutoShift": true
+    }
+  ],
+  "CASE - STATIC 1 - LOAD ASSIGNMENTS": [
+    {
+      "Case": "DEAD",
+      "LoadType": "Load pattern",
+      "LoadName": "DEAD",
+      "LoadSF": 1
+    }
+  ],
+  "CONNECTIVITY - FRAME": [
+    {
+      "Frame": 2,
+      "JointI": 1,
+      "JointJ": 3,
+      "IsCurved": false,
+      "GUID": "08943756-cbaf-4ac3-9064-43e4ed929dcb"
+    },
+    {
+      "Frame": 3,
+      "JointI": 2,
+      "JointJ": 4,
+      "IsCurved": false,
+      "GUID": "8cc6ccb4-1cc3-4d9d-862f-c7b905f44831"
+    },
+    {
+      "Frame": 25,
+      "JointI": 23,
+      "JointJ": 10,
+      "IsCurved": false,
+      "GUID": "80d74b00-5d06-4832-b403-05386752e585"
+    },
+    {
+      "Frame": 26,
+      "JointI": 10,
+      "JointJ": 26,
+      "IsCurved": false,
+      "GUID": "83f0f740-3a0d-4bb0-a438-4e65d19a7ffd"
+    },
+    {
+      "Frame": 27,
+      "JointI": 26,
+      "JointJ": 27,
+      "IsCurved": false,
+      "GUID": "20ef0a0e-4698-4c37-babb-1b5d4765c244"
+    },
+    {
+      "Frame": 28,
+      "JointI": 27,
+      "JointJ": 28,
+      "IsCurved": false,
+      "GUID": "4559e644-abd9-43a1-9d5c-ec8e8b499857"
+    },
+    {
+      "Frame": 29,
+      "JointI": 28,
+      "JointJ": 29,
+      "IsCurved": false,
+      "GUID": "b5f655ea-d6ee-40fa-ae31-7f035471637c"
+    },
+    {
+      "Frame": 30,
+      "JointI": 29,
+      "JointJ": 30,
+      "IsCurved": false,
+      "GUID": "15b39bc0-7767-475d-999c-48795a4df91a"
+    },
+    {
+      "Frame": 31,
+      "JointI": 30,
+      "JointJ": 4,
+      "IsCurved": false,
+      "GUID": "77bed4f9-718a-4662-934f-f6c3b72ce23d"
+    },
+    {
+      "Frame": 32,
+      "JointI": 23,
+      "JointJ": 31,
+      "IsCurved": false,
+      "GUID": "47d02df3-4a94-4b39-83c2-f7e5d995c6b9"
+    },
+    {
+      "Frame": 33,
+      "JointI": 31,
+      "JointJ": 32,
+      "IsCurved": false,
+      "GUID": "00f32a05-3b1c-4ee3-8970-61ab6a23736b"
+    },
+    {
+      "Frame": 34,
+      "JointI": 32,
+      "JointJ": 33,
+      "IsCurved": false,
+      "GUID": "bc4a9083-b84d-465b-b241-18e51884656e"
+    },
+    {
+      "Frame": 35,
+      "JointI": 33,
+      "JointJ": 34,
+      "IsCurved": false,
+      "GUID": "a7a2d258-3d53-47d7-8ce1-e75745dec95a"
+    },
+    {
+      "Frame": 36,
+      "JointI": 34,
+      "JointJ": 35,
+      "IsCurved": false,
+      "GUID": "be7bb179-a983-4424-a096-3d15970ceaae"
+    },
+    {
+      "Frame": 37,
+      "JointI": 35,
+      "JointJ": 22,
+      "IsCurved": false,
+      "GUID": "44507945-d858-4788-8f01-7243bd5c645d"
+    },
+    {
+      "Frame": 38,
+      "JointI": 31,
+      "JointJ": 26,
+      "IsCurved": false,
+      "GUID": "9b8dde0d-fa05-4f53-ad45-6e2c7feb5006"
+    },
+    {
+      "Frame": 39,
+      "JointI": 32,
+      "JointJ": 27,
+      "IsCurved": false,
+      "GUID": "eee190b5-2f8e-4dfb-a057-30a397f1dbce"
+    },
+    {
+      "Frame": 40,
+      "JointI": 33,
+      "JointJ": 28,
+      "IsCurved": false,
+      "GUID": "185fea6e-8bf3-4f79-a483-08c9cea86158"
+    },
+    {
+      "Frame": 41,
+      "JointI": 34,
+      "JointJ": 29,
+      "IsCurved": false,
+      "GUID": "9b9b0197-27f7-4e44-84d0-697f2fc6bf93"
+    },
+    {
+      "Frame": 42,
+      "JointI": 35,
+      "JointJ": 30,
+      "IsCurved": false,
+      "GUID": "da0ce18c-c59f-4039-b8fe-a5137754ac73"
+    },
+    {
+      "Frame": 43,
+      "JointI": 23,
+      "JointJ": 26,
+      "IsCurved": false,
+      "GUID": "c0012ced-f6a6-4fbf-b8a6-c7133cae0d97"
+    },
+    {
+      "Frame": 44,
+      "JointI": 31,
+      "JointJ": 27,
+      "IsCurved": false,
+      "GUID": "50f69508-29d5-4779-86c8-2684ddc6322e"
+    },
+    {
+      "Frame": 45,
+      "JointI": 32,
+      "JointJ": 28,
+      "IsCurved": false,
+      "GUID": "c4ed4a74-496f-470e-a2c5-425abd2b756c"
+    },
+    {
+      "Frame": 46,
+      "JointI": 33,
+      "JointJ": 29,
+      "IsCurved": false,
+      "GUID": "0f937b58-e98d-4362-aec3-fae8796a6221"
+    },
+    {
+      "Frame": 47,
+      "JointI": 34,
+      "JointJ": 30,
+      "IsCurved": false,
+      "GUID": "e12a1c47-243c-42a2-9041-164fea8b433a"
+    },
+    {
+      "Frame": 48,
+      "JointI": 35,
+      "JointJ": 4,
+      "IsCurved": false,
+      "GUID": "3662a2af-d562-4bad-abb7-7c894a095154"
+    },
+    {
+      "Frame": 49,
+      "JointI": 10,
+      "JointJ": 36,
+      "IsCurved": false,
+      "GUID": "30604f2e-bd73-4683-a2d9-c13ae2151614"
+    },
+    {
+      "Frame": 50,
+      "JointI": 36,
+      "JointJ": 37,
+      "IsCurved": false,
+      "GUID": "f525a8c7-1966-4709-9930-289073d3cf54"
+    },
+    {
+      "Frame": 51,
+      "JointI": 37,
+      "JointJ": 38,
+      "IsCurved": false,
+      "GUID": "419354fb-c864-4a48-b826-9f7c104c7c2f"
+    },
+    {
+      "Frame": 52,
+      "JointI": 38,
+      "JointJ": 39,
+      "IsCurved": false,
+      "GUID": "bc957a50-d1f3-4b0e-850f-8ab63babab64"
+    },
+    {
+      "Frame": 53,
+      "JointI": 39,
+      "JointJ": 40,
+      "IsCurved": false,
+      "GUID": "ed664b74-ec2b-484d-8d87-7d9ae03ffd67"
+    },
+    {
+      "Frame": 54,
+      "JointI": 40,
+      "JointJ": 3,
+      "IsCurved": false,
+      "GUID": "9811e0d4-4e3a-4038-af6e-e00e791f3dbf"
+    },
+    {
+      "Frame": 55,
+      "JointI": 21,
+      "JointJ": 41,
+      "IsCurved": false,
+      "GUID": "019123d8-0ff0-4aad-bf72-16e02ac7a2e7"
+    },
+    {
+      "Frame": 56,
+      "JointI": 41,
+      "JointJ": 42,
+      "IsCurved": false,
+      "GUID": "d3f6dbb7-009c-4b29-8ff3-f625155a81c4"
+    },
+    {
+      "Frame": 57,
+      "JointI": 42,
+      "JointJ": 43,
+      "IsCurved": false,
+      "GUID": "f41c4c6e-80e9-4cd5-b89c-e8fd09a37929"
+    },
+    {
+      "Frame": 58,
+      "JointI": 43,
+      "JointJ": 44,
+      "IsCurved": false,
+      "GUID": "0e61e963-d9cb-4ffd-8f85-6ebc8ba024e3"
+    },
+    {
+      "Frame": 59,
+      "JointI": 44,
+      "JointJ": 45,
+      "IsCurved": false,
+      "GUID": "7a9ff289-6115-4d11-8866-f0f3508a3054"
+    },
+    {
+      "Frame": 60,
+      "JointI": 45,
+      "JointJ": 23,
+      "IsCurved": false,
+      "GUID": "699b173a-ef7e-4788-8e6e-0d30a1f5a49b"
+    },
+    {
+      "Frame": 61,
+      "JointI": 45,
+      "JointJ": 36,
+      "IsCurved": false,
+      "GUID": "f388aa90-5222-4293-a4a1-a36e62ab06a6"
+    },
+    {
+      "Frame": 62,
+      "JointI": 44,
+      "JointJ": 37,
+      "IsCurved": false,
+      "GUID": "98b88d91-8e30-45fb-bc64-04afe7f5708c"
+    },
+    {
+      "Frame": 63,
+      "JointI": 43,
+      "JointJ": 38,
+      "IsCurved": false,
+      "GUID": "4cb2bac0-8526-4a31-a0a8-7b6d1c56e51e"
+    },
+    {
+      "Frame": 64,
+      "JointI": 42,
+      "JointJ": 39,
+      "IsCurved": false,
+      "GUID": "1af2383e-4f49-4915-b650-9cd66c3c2100"
+    },
+    {
+      "Frame": 65,
+      "JointI": 41,
+      "JointJ": 40,
+      "IsCurved": false,
+      "GUID": "fe005ab1-b9b7-4231-9a95-912bc48f69ed"
+    },
+    {
+      "Frame": 66,
+      "JointI": 23,
+      "JointJ": 36,
+      "IsCurved": false,
+      "GUID": "00346ba9-6409-407f-91d1-4c0d6bf8166d"
+    },
+    {
+      "Frame": 67,
+      "JointI": 45,
+      "JointJ": 37,
+      "IsCurved": false,
+      "GUID": "22e522bc-3043-4ed5-97e9-3cd4318dee40"
+    },
+    {
+      "Frame": 68,
+      "JointI": 44,
+      "JointJ": 38,
+      "IsCurved": false,
+      "GUID": "fb355e4a-9a99-4836-a71f-f3a58ed673ea"
+    },
+    {
+      "Frame": 69,
+      "JointI": 43,
+      "JointJ": 39,
+      "IsCurved": false,
+      "GUID": "55b0e5d5-9b11-405d-a6b7-57e9544e62a5"
+    },
+    {
+      "Frame": 70,
+      "JointI": 42,
+      "JointJ": 40,
+      "IsCurved": false,
+      "GUID": "c94880cb-5513-473f-88f7-a7ac7c2145fd"
+    },
+    {
+      "Frame": 71,
+      "JointI": 41,
+      "JointJ": 3,
+      "IsCurved": false,
+      "GUID": "8381ad90-f023-426f-ad7a-18bfa8a5eaa9"
+    }
+  ],
+  "COORDINATE SYSTEMS": [
+    {
+      "Name": "GLOBAL",
+      "Type": "Cartesian",
+      "X": 0,
+      "Y": 0,
+      "Z": 0,
+      "AboutZ": 0,
+      "AboutY": 0,
+      "AboutX": 0
+    }
+  ],
+  "DATABASE FORMAT TYPES": [
+    {
+      "UnitsCurr": true,
+      "OverrideE": false
+    }
+  ],
+  "FRAME AUTO MESH ASSIGNMENTS": [
+    {
+      "Frame": 2,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 3,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 25,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 26,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 27,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 28,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 29,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 30,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 31,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 32,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 33,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 34,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 35,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 36,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 37,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 38,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 39,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 40,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 41,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 42,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 43,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 44,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 45,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 46,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 47,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 48,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 49,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 50,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 51,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 52,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 53,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 54,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 55,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 56,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 57,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 58,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 59,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 60,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 61,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 62,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 63,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 64,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 65,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 66,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 67,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 68,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 69,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 70,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    },
+    {
+      "Frame": 71,
+      "AutoMesh": true,
+      "AtJoints": true,
+      "AtFrames": false,
+      "NumSegments": 0,
+      "MaxLength": 0,
+      "MaxDegrees": 0
+    }
+  ],
+  "FRAME DESIGN PROCEDURES": [
+    {
+      "Frame": 2,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 3,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 25,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 26,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 27,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 28,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 29,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 30,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 31,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 32,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 33,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 34,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 35,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 36,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 37,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 38,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 39,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 40,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 41,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 42,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 43,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 44,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 45,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 46,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 47,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 48,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 49,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 50,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 51,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 52,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 53,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 54,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 55,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 56,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 57,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 58,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 59,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 60,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 61,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 62,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 63,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 64,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 65,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 66,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 67,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 68,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 69,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 70,
+      "DesignProc": "From Material"
+    },
+    {
+      "Frame": 71,
+      "DesignProc": "From Material"
+    }
+  ],
+  "FRAME LOAD TRANSFER OPTIONS": [
+    {
+      "Frame": 2,
+      "Transfer": true
+    },
+    {
+      "Frame": 3,
+      "Transfer": true
+    },
+    {
+      "Frame": 25,
+      "Transfer": true
+    },
+    {
+      "Frame": 26,
+      "Transfer": true
+    },
+    {
+      "Frame": 27,
+      "Transfer": true
+    },
+    {
+      "Frame": 28,
+      "Transfer": true
+    },
+    {
+      "Frame": 29,
+      "Transfer": true
+    },
+    {
+      "Frame": 30,
+      "Transfer": true
+    },
+    {
+      "Frame": 31,
+      "Transfer": true
+    },
+    {
+      "Frame": 32,
+      "Transfer": true
+    },
+    {
+      "Frame": 33,
+      "Transfer": true
+    },
+    {
+      "Frame": 34,
+      "Transfer": true
+    },
+    {
+      "Frame": 35,
+      "Transfer": true
+    },
+    {
+      "Frame": 36,
+      "Transfer": true
+    },
+    {
+      "Frame": 37,
+      "Transfer": true
+    },
+    {
+      "Frame": 38,
+      "Transfer": true
+    },
+    {
+      "Frame": 39,
+      "Transfer": true
+    },
+    {
+      "Frame": 40,
+      "Transfer": true
+    },
+    {
+      "Frame": 41,
+      "Transfer": true
+    },
+    {
+      "Frame": 42,
+      "Transfer": true
+    },
+    {
+      "Frame": 43,
+      "Transfer": true
+    },
+    {
+      "Frame": 44,
+      "Transfer": true
+    },
+    {
+      "Frame": 45,
+      "Transfer": true
+    },
+    {
+      "Frame": 46,
+      "Transfer": true
+    },
+    {
+      "Frame": 47,
+      "Transfer": true
+    },
+    {
+      "Frame": 48,
+      "Transfer": true
+    },
+    {
+      "Frame": 49,
+      "Transfer": true
+    },
+    {
+      "Frame": 50,
+      "Transfer": true
+    },
+    {
+      "Frame": 51,
+      "Transfer": true
+    },
+    {
+      "Frame": 52,
+      "Transfer": true
+    },
+    {
+      "Frame": 53,
+      "Transfer": true
+    },
+    {
+      "Frame": 54,
+      "Transfer": true
+    },
+    {
+      "Frame": 55,
+      "Transfer": true
+    },
+    {
+      "Frame": 56,
+      "Transfer": true
+    },
+    {
+      "Frame": 57,
+      "Transfer": true
+    },
+    {
+      "Frame": 58,
+      "Transfer": true
+    },
+    {
+      "Frame": 59,
+      "Transfer": true
+    },
+    {
+      "Frame": 60,
+      "Transfer": true
+    },
+    {
+      "Frame": 61,
+      "Transfer": true
+    },
+    {
+      "Frame": 62,
+      "Transfer": true
+    },
+    {
+      "Frame": 63,
+      "Transfer": true
+    },
+    {
+      "Frame": 64,
+      "Transfer": true
+    },
+    {
+      "Frame": 65,
+      "Transfer": true
+    },
+    {
+      "Frame": 66,
+      "Transfer": true
+    },
+    {
+      "Frame": 67,
+      "Transfer": true
+    },
+    {
+      "Frame": 68,
+      "Transfer": true
+    },
+    {
+      "Frame": 69,
+      "Transfer": true
+    },
+    {
+      "Frame": 70,
+      "Transfer": true
+    },
+    {
+      "Frame": 71,
+      "Transfer": true
+    }
+  ],
+  "FRAME OUTPUT STATION ASSIGNMENTS": [
+    {
+      "Frame": 2,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 3,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 25,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 26,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 27,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 28,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 29,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 30,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 31,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 32,
+      "StationType": "MaxStaSpcg",
+      "MaxStaSpcg": 0.5,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 33,
+      "StationType": "MaxStaSpcg",
+      "MaxStaSpcg": 0.5,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 34,
+      "StationType": "MaxStaSpcg",
+      "MaxStaSpcg": 0.5,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 35,
+      "StationType": "MaxStaSpcg",
+      "MaxStaSpcg": 0.5,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 36,
+      "StationType": "MaxStaSpcg",
+      "MaxStaSpcg": 0.5,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 37,
+      "StationType": "MaxStaSpcg",
+      "MaxStaSpcg": 0.5,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 38,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 39,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 40,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 41,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 42,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 43,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 44,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 45,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 46,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 47,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 48,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 49,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 50,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 51,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 52,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 53,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 54,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 55,
+      "StationType": "MaxStaSpcg",
+      "MaxStaSpcg": 0.5,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 56,
+      "StationType": "MaxStaSpcg",
+      "MaxStaSpcg": 0.5,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 57,
+      "StationType": "MaxStaSpcg",
+      "MaxStaSpcg": 0.5,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 58,
+      "StationType": "MaxStaSpcg",
+      "MaxStaSpcg": 0.5,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 59,
+      "StationType": "MaxStaSpcg",
+      "MaxStaSpcg": 0.5,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 60,
+      "StationType": "MaxStaSpcg",
+      "MaxStaSpcg": 0.5,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 61,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 62,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 63,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 64,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 65,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 66,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 67,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 68,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 69,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 70,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    },
+    {
+      "Frame": 71,
+      "StationType": "MinNumSta",
+      "MinNumSta": 3,
+      "AddAtElmInt": true,
+      "AddAtPtLoad": true
+    }
+  ],
+  "FRAME SECTION ASSIGNMENTS": [
+    {
+      "Frame": 2,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 3,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 25,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 26,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 27,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 28,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 29,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 30,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 31,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 32,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 33,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 34,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 35,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 36,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 37,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 38,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 39,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 40,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 41,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 42,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 43,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 44,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 45,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 46,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 47,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 48,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 49,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 50,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 51,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 52,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 53,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 54,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 55,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 56,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 57,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 58,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 59,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 60,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 61,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 62,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 63,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 64,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 65,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 66,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 67,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 68,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 69,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 70,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    },
+    {
+      "Frame": 71,
+      "AutoSelect": "N.A.",
+      "AnalSect": "Bottom Chord (355.6 CHS 8)",
+      "MatProp": "Default"
+    }
+  ],
+  "FRAME SECTION PROPERTIES 01 - GENERAL": [
+    {
+      "SectionName": "Bottom Chord (355.6 CHS 8)",
+      "Material": "S355",
+      "Shape": "Channel",
+      "t3": 0.2032,
+      "t2": 0.0508,
+      "tf": 0.009652,
+      "tw": 0.00635,
+      "FilletRadius": 0,
+      "Area": 0.0021483828,
+      "TorsConst": 4.21613782010156e-08,
+      "I33": 1.24823991857582e-05,
+      "I22": 4.78101125591342e-07,
+      "I23": 0,
+      "AS2": 0.00129032,
+      "AS3": 0.0009806432,
+      "S33Top": 0.000122858259702344,
+      "S33Bot": 0.000122858259702344,
+      "S22Left": 3.58941657481818e-05,
+      "S22Right": 1.27560797634724e-05,
+      "Z33": 0.0001485864254072,
+      "Z22": 2.2937331947825e-05,
+      "R33": 0.0762242570800096,
+      "R22": 0.0149177749025434,
+      "CGOffset3": 0.0120802552552553,
+      "CGOffset2": 0,
+      "EccV2": 0.0266169838224147,
+      "EccV3": 0,
+      "Cw": 3.14201086791734e-09,
+      "IncludeSCAn": true,
+      "Color": "Blue",
+      "FromFile": false,
+      "AMod": 1,
+      "A2Mod": 1,
+      "A3Mod": 1,
+      "JMod": 1,
+      "I2Mod": 1,
+      "I3Mod": 1,
+      "MMod": 1,
+      "WMod": 1,
+      "GUID": "f18a651e-7d5c-4f02-80e9-94971dfeb632",
+      "Notes": "Added 17/3/2026 6:19:09 pm"
+    }
+  ],
+  "FRAME SECTION PROPERTIES 13 - TIME DEPENDENT": [
+    {
+      "SectionName": "Bottom Chord (355.6 CHS 8)",
+      "TypeSize": "Auto",
+      "AutoSFSize": 1
+    }
+  ],
+  "FUNCTION - PLOT FUNCTIONS": [
+    {
+      "PlotFunc": "Input Energy",
+      "Type": "Energy",
+      "Component": "Input",
+      "Mode": "All"
+    }
+  ],
+  "FUNCTION - POWER SPECTRAL DENSITY - USER": [
+    {
+      "Name": "UNIFPSD",
+      "Frequency": 0,
+      "Value": 1
+    },
+    {
+      "Name": "UNIFPSD",
+      "Frequency": 1,
+      "Value": 1
+    }
+  ],
+  "FUNCTION - RESPONSE SPECTRUM - USER": [
+    {
+      "Name": "UNIFRS",
+      "Period": 0,
+      "Accel": 1,
+      "FuncDamp": 0.05
+    },
+    {
+      "Name": "UNIFRS",
+      "Period": 1,
+      "Accel": 1
+    }
+  ],
+  "FUNCTION - STEADY STATE - USER": [
+    {
+      "Name": "UNIFSS",
+      "Frequency": 0,
+      "Value": 1
+    },
+    {
+      "Name": "UNIFSS",
+      "Frequency": 1,
+      "Value": 1
+    }
+  ],
+  "FUNCTION - TIME HISTORY - USER": [
+    {
+      "Name": "RAMPTH",
+      "Time": 0,
+      "Value": 0
+    },
+    {
+      "Name": "RAMPTH",
+      "Time": 1,
+      "Value": 1
+    },
+    {
+      "Name": "RAMPTH",
+      "Time": 4,
+      "Value": 1
+    },
+    {
+      "Name": "UNIFTH",
+      "Time": 0,
+      "Value": 1
+    },
+    {
+      "Name": "UNIFTH",
+      "Time": 1,
+      "Value": 1
+    }
+  ],
+  "GRID LINES": [
+    {
+      "CoordSys": "GLOBAL",
+      "AxisDir": "X",
+      "GridID": "A",
+      "XRYZCoord": 0,
+      "LineType": "Primary",
+      "LineColor": "Gray8Dark",
+      "Visible": true,
+      "BubbleLoc": "End",
+      "AllVisible": true,
+      "BubbleSize": 1.25
+    },
+    {
+      "CoordSys": "GLOBAL",
+      "AxisDir": "X",
+      "GridID": "B",
+      "XRYZCoord": 6,
+      "LineType": "Primary",
+      "LineColor": "Gray8Dark",
+      "Visible": true,
+      "BubbleLoc": "End"
+    },
+    {
+      "CoordSys": "GLOBAL",
+      "AxisDir": "Y",
+      "GridID": 1,
+      "XRYZCoord": 0,
+      "LineType": "Primary",
+      "LineColor": "Gray8Dark",
+      "Visible": true,
+      "BubbleLoc": "Start"
+    },
+    {
+      "CoordSys": "GLOBAL",
+      "AxisDir": "Y",
+      "GridID": 2,
+      "XRYZCoord": 6,
+      "LineType": "Primary",
+      "LineColor": "Gray8Dark",
+      "Visible": true,
+      "BubbleLoc": "Start"
+    },
+    {
+      "CoordSys": "GLOBAL",
+      "AxisDir": "Z",
+      "GridID": "Z1",
+      "XRYZCoord": 0,
+      "LineType": "Primary",
+      "LineColor": "Gray8Dark",
+      "Visible": true,
+      "BubbleLoc": "End"
+    },
+    {
+      "CoordSys": "GLOBAL",
+      "AxisDir": "Z",
+      "GridID": "Z2",
+      "XRYZCoord": 3,
+      "LineType": "Primary",
+      "LineColor": "Gray8Dark",
+      "Visible": true,
+      "BubbleLoc": "End"
+    }
+  ],
+  "GROUPS 1 - DEFINITIONS": [
+    {
+      "GroupName": "ALL",
+      "Selection": true,
+      "SectionCut": true,
+      "Steel": true,
+      "Concrete": true,
+      "Aluminum": true,
+      "ColdFormed": true,
+      "Stage": true,
+      "Bridge": true,
+      "AutoSeismic": false,
+      "AutoWind": false,
+      "SelDesSteel": false,
+      "SelDesAlum": false,
+      "SelDesCold": false,
+      "MassWeight": true,
+      "Color": "Red"
+    }
+  ],
+  "JOINT COORDINATES": [
+    {
+      "Joint": 1,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 0,
+      "Y": 0,
+      "Z": 0,
+      "SpecialJt": true,
+      "GUID": "260dc2c8-a5c1-4f27-b5f2-b4cd779f3c4c"
+    },
+    {
+      "Joint": 2,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 40.3,
+      "Y": 0,
+      "Z": 0,
+      "SpecialJt": true,
+      "GUID": "bc928851-cc6f-4d21-9854-53433a01289b"
+    },
+    {
+      "Joint": 3,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 0,
+      "Y": 0,
+      "Z": 25.43,
+      "SpecialJt": true,
+      "GUID": "9668b544-a7ac-4fe2-be8d-968654ddd4e9"
+    },
+    {
+      "Joint": 4,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 40.3,
+      "Y": 0,
+      "Z": 25.43,
+      "SpecialJt": true,
+      "GUID": "88d1eb30-942b-46ac-999c-dd802e377bb9"
+    },
+    {
+      "Joint": 10,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 20.15,
+      "Y": 0,
+      "Z": 29.79,
+      "SpecialJt": true,
+      "GUID": "bea107d3-a06d-428b-9ac3-d0dc217a52dc"
+    },
+    {
+      "Joint": 21,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 0,
+      "Y": 0,
+      "Z": 23.23,
+      "SpecialJt": true,
+      "GUID": "35f6dbe6-ac91-4822-a4c4-206d1cffa4bd"
+    },
+    {
+      "Joint": 22,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 40.3,
+      "Y": 0,
+      "Z": 23.23,
+      "SpecialJt": true,
+      "GUID": "5343604f-4378-4f5a-9323-89faeed20a44"
+    },
+    {
+      "Joint": 23,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 20.15,
+      "Y": 0,
+      "Z": 23.23,
+      "SpecialJt": false,
+      "GUID": "2638a9cd-353b-4308-b699-dde9d9adff00"
+    },
+    {
+      "Joint": 26,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 23.5083333333333,
+      "Y": 0,
+      "Z": 29.0633333333333,
+      "SpecialJt": false,
+      "GUID": "c3ab7de9-a016-4dd0-99d0-081fdd523f5c"
+    },
+    {
+      "Joint": 27,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 26.8666666666667,
+      "Y": 0,
+      "Z": 28.3366666666667,
+      "SpecialJt": false,
+      "GUID": "02709e34-c460-4093-873e-d50fd48b650b"
+    },
+    {
+      "Joint": 28,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 30.225,
+      "Y": 0,
+      "Z": 27.61,
+      "SpecialJt": false,
+      "GUID": "0fda1309-ab97-4a34-8482-51894fc38489"
+    },
+    {
+      "Joint": 29,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 33.5833333333333,
+      "Y": 0,
+      "Z": 26.8833333333333,
+      "SpecialJt": false,
+      "GUID": "3077b314-4a9f-46a6-8887-84bf4318eac7"
+    },
+    {
+      "Joint": 30,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 36.9416666666667,
+      "Y": 0,
+      "Z": 26.1566666666667,
+      "SpecialJt": false,
+      "GUID": "85fce080-3fb5-467e-9752-6c136f28bbb3"
+    },
+    {
+      "Joint": 31,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 23.5083333333333,
+      "Y": 0,
+      "Z": 23.23,
+      "SpecialJt": false,
+      "GUID": "0c8136ab-44ff-48d4-a487-f29af0b5308a"
+    },
+    {
+      "Joint": 32,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 26.8666666666667,
+      "Y": 0,
+      "Z": 23.23,
+      "SpecialJt": false,
+      "GUID": "b2192ad1-c3e4-4ec8-b9ce-e2008aa42dc7"
+    },
+    {
+      "Joint": 33,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 30.225,
+      "Y": 0,
+      "Z": 23.23,
+      "SpecialJt": false,
+      "GUID": "e71d7c4d-e44f-44a7-898a-2bbfe3c25ff4"
+    },
+    {
+      "Joint": 34,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 33.5833333333333,
+      "Y": 0,
+      "Z": 23.23,
+      "SpecialJt": false,
+      "GUID": "1115ea93-7a4d-44b1-b233-a32ccf95173c"
+    },
+    {
+      "Joint": 35,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 36.9416666666667,
+      "Y": 0,
+      "Z": 23.23,
+      "SpecialJt": false,
+      "GUID": "2ea5d71d-c57a-4890-92eb-57e876ef1000"
+    },
+    {
+      "Joint": 36,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 16.7916666666667,
+      "Y": 0,
+      "Z": 29.0633333333333,
+      "SpecialJt": false,
+      "GUID": "7f869962-ec16-4df1-a4d6-a969de02ef3a"
+    },
+    {
+      "Joint": 37,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 13.4333333333333,
+      "Y": 0,
+      "Z": 28.3366666666667,
+      "SpecialJt": false,
+      "GUID": "ea4ca17f-4e5c-4779-94c7-5356bda17e54"
+    },
+    {
+      "Joint": 38,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 10.075,
+      "Y": 0,
+      "Z": 27.61,
+      "SpecialJt": false,
+      "GUID": "78cded9f-c2c1-4368-be5d-a35f202f669c"
+    },
+    {
+      "Joint": 39,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 6.71666666666667,
+      "Y": 0,
+      "Z": 26.8833333333333,
+      "SpecialJt": false,
+      "GUID": "609bdd71-7f8b-4847-97eb-dac1711155f8"
+    },
+    {
+      "Joint": 40,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 3.35833333333333,
+      "Y": 0,
+      "Z": 26.1566666666667,
+      "SpecialJt": false,
+      "GUID": "bb37e20c-abaf-4e13-a48c-d4eda5cfd335"
+    },
+    {
+      "Joint": 41,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 3.35833333333333,
+      "Y": 0,
+      "Z": 23.23,
+      "SpecialJt": false,
+      "GUID": "4598adbc-0886-4c1a-9c09-af141d3b317c"
+    },
+    {
+      "Joint": 42,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 6.71666666666667,
+      "Y": 0,
+      "Z": 23.23,
+      "SpecialJt": false,
+      "GUID": "34f5779a-2a8d-4349-a352-a2531d4c8d28"
+    },
+    {
+      "Joint": 43,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 10.075,
+      "Y": 0,
+      "Z": 23.23,
+      "SpecialJt": false,
+      "GUID": "2485daf0-1ae4-4502-8a84-c547091b96cc"
+    },
+    {
+      "Joint": 44,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 13.4333333333333,
+      "Y": 0,
+      "Z": 23.23,
+      "SpecialJt": false,
+      "GUID": "1b2b9ab5-22ba-431e-a5ae-8c5e7aa3cec7"
+    },
+    {
+      "Joint": 45,
+      "CoordSys": "GLOBAL",
+      "CoordType": "Cartesian",
+      "XorR": 16.7916666666667,
+      "Y": 0,
+      "Z": 23.23,
+      "SpecialJt": false,
+      "GUID": "e8bc811c-a7b9-49d6-9b33-873db74a48ee"
+    }
+  ],
+  "JOINT PATTERN DEFINITIONS": [
+    {
+      "Pattern": "Default"
+    }
+  ],
+  "JOINT RESTRAINT ASSIGNMENTS": [
+    {
+      "Joint": 1,
+      "U1": true,
+      "U2": true,
+      "U3": true,
+      "R1": false,
+      "R2": false,
+      "R3": false
+    },
+    {
+      "Joint": 2,
+      "U1": true,
+      "U2": true,
+      "U3": true,
+      "R1": false,
+      "R2": false,
+      "R3": false
+    }
+  ],
+  "LOAD CASE DEFINITIONS": [
+    {
+      "Case": "DEAD",
+      "Type": "LinStatic",
+      "InitialCond": "Zero",
+      "DesTypeOpt": "Prog Det",
+      "DesignType": "Dead",
+      "DesActOpt": "Prog Det",
+      "DesignAct": "Non-Composite",
+      "AutoType": null,
+      "RunCase": true,
+      "GUID": "3f6e6855-856d-4381-a35c-a4f1b5e89ae3"
+    },
+    {
+      "Case": "MODAL",
+      "Type": "LinModal",
+      "InitialCond": "Zero",
+      "DesTypeOpt": "Prog Det",
+      "DesignType": "Other",
+      "DesActOpt": "Prog Det",
+      "DesignAct": "Other",
+      "AutoType": null,
+      "RunCase": true,
+      "GUID": "8f104cc2-3a94-4580-a533-94c5ce5eeecc"
+    }
+  ],
+  "LOAD PATTERN DEFINITIONS": [
+    {
+      "LoadPat": "DEAD",
+      "DesignType": "Dead",
+      "SelfWtMult": 1,
+      "GUID": "b2b37910-81ed-4450-8288-28dbea0f1412"
+    }
+  ],
+  "MASS SOURCE": [
+    {
+      "MassSource": "MSSSRC1",
+      "Elements": true,
+      "Masses": true,
+      "Loads": false,
+      "IsDefault": true
+    }
+  ],
+  "MATERIAL PROPERTIES 01 - GENERAL": [
+    {
+      "Material": "4000Psi",
+      "Type": "Concrete",
+      "Grade": "f'c 4000 psi",
+      "SymType": "Isotropic",
+      "TempDepend": false,
+      "Color": "Yellow",
+      "GUID": "39fa1846-1db5-49f5-9335-1f539f7006bf",
+      "Notes": "Customary f'c 4000 psi 17/3/2026 5:56:58 pm"
+    },
+    {
+      "Material": "A992Fy50",
+      "Type": "Steel",
+      "Grade": "Grade 50",
+      "SymType": "Isotropic",
+      "TempDepend": false,
+      "Color": "Magenta",
+      "GUID": "be787bbb-c84a-44c6-88b6-0b4841464cfe",
+      "Notes": "ASTM A992 Grade 50 17/3/2026 5:56:58 pm"
+    },
+    {
+      "Material": "S275",
+      "Type": "Steel",
+      "Grade": "S275",
+      "SymType": "Isotropic",
+      "TempDepend": false,
+      "Color": "Magenta",
+      "GUID": "68f12a46-5133-4643-85b6-b77f7cf7a2c8",
+      "Notes": "Europe EN 1993-1-1 per EN 10025-2 S275 added 17/3/2026 7:04:57 pm"
+    },
+    {
+      "Material": "S355",
+      "Type": "Steel",
+      "Grade": "S355",
+      "SymType": "Isotropic",
+      "TempDepend": false,
+      "Color": "Green",
+      "GUID": "a31fb80b-8c0d-4eaa-8f67-4523778c639a",
+      "Notes": "Europe EN 1993-1-1 per EN 10025-2 S355 added 17/3/2026 6:18:49 pm"
+    }
+  ],
+  "MATERIAL PROPERTIES 02 - BASIC MECHANICAL PROPERTIES": [
+    {
+      "Material": "4000Psi",
+      "UnitWeight": 23.5631216161854,
+      "UnitMass": 2.40276960558926,
+      "E1": 24855578.0600518,
+      "G12": 10356490.8583549,
+      "U12": 0.2,
+      "A1": 9.89999952793124e-06
+    },
+    {
+      "Material": "A992Fy50",
+      "UnitWeight": 76.9728639422648,
+      "UnitMass": 7.84904737995992,
+      "E1": 199947978.795958,
+      "G12": 76903068.767676,
+      "U12": 0.3,
+      "A1": 1.16999994421006e-05
+    },
+    {
+      "Material": "S275",
+      "UnitWeight": 76.9728639422648,
+      "UnitMass": 7.84904737995992,
+      "E1": 210000000,
+      "G12": 80769230.7692308,
+      "U12": 0.3,
+      "A1": 1.17e-05
+    },
+    {
+      "Material": "S355",
+      "UnitWeight": 76.9728639422648,
+      "UnitMass": 7.84904737995992,
+      "E1": 210000000,
+      "G12": 80769230.7692308,
+      "U12": 0.3,
+      "A1": 1.17e-05
+    }
+  ],
+  "MATERIAL PROPERTIES 03A - STEEL DATA": [
+    {
+      "Material": "A992Fy50",
+      "Fy": 344737.894475789,
+      "Fu": 448159.262818526,
+      "EffFy": 379211.683923368,
+      "EffFu": 492975.189100378,
+      "SSCurveOpt": "Simple",
+      "SSHysType": "Kinematic",
+      "SHard": 0.015,
+      "SMax": 0.11,
+      "SRup": 0.17,
+      "FinalSlope": -0.1,
+      "CoupModType": "Von Mises"
+    },
+    {
+      "Material": "S275",
+      "Fy": 275000,
+      "Fu": 430000,
+      "EffFy": 302500,
+      "EffFu": 473000,
+      "SSCurveOpt": "Simple",
+      "SSHysType": "Kinematic",
+      "SHard": 0.015,
+      "SMax": 0.11,
+      "SRup": 0.17,
+      "FinalSlope": -0.1,
+      "CoupModType": "Von Mises"
+    },
+    {
+      "Material": "S355",
+      "Fy": 355000,
+      "Fu": 510000,
+      "EffFy": 390500,
+      "EffFu": 561000,
+      "SSCurveOpt": "Simple",
+      "SSHysType": "Kinematic",
+      "SHard": 0.015,
+      "SMax": 0.11,
+      "SRup": 0.17,
+      "FinalSlope": -0.1,
+      "CoupModType": "Von Mises"
+    }
+  ],
+  "MATERIAL PROPERTIES 03B - CONCRETE DATA": [
+    {
+      "Material": "4000Psi",
+      "Fc": 27579.0315580631,
+      "eFc": 27579.0315580631,
+      "LtWtConc": false,
+      "SSCurveOpt": "Mander",
+      "SSHysType": "Takeda",
+      "SFc": 0.00221914,
+      "SCap": 0.005,
+      "FinalSlope": -0.1,
+      "FAngle": 0,
+      "DAngle": 0,
+      "CoupModType": "Modified Darwin-Pecknold"
+    }
+  ],
+  "MATERIAL PROPERTIES 03J - COUPLED NONLINEAR VON MISES DATA": [
+    {
+      "Material": "A992Fy50",
+      "YieldStress": 379211.683923368,
+      "LinIsoHard": false,
+      "LinKinHard": false,
+      "NLIsoSaHard": false
+    },
+    {
+      "Material": "S275",
+      "YieldStress": 302500,
+      "LinIsoHard": false,
+      "LinKinHard": false,
+      "NLIsoSaHard": false
+    },
+    {
+      "Material": "S355",
+      "YieldStress": 390500,
+      "LinIsoHard": false,
+      "LinKinHard": false,
+      "NLIsoSaHard": false
+    }
+  ],
+  "MATERIAL PROPERTIES 06 - DAMPING PARAMETERS": [
+    {
+      "Material": "4000Psi",
+      "ModalRatio": 0,
+      "VisMass": 0,
+      "VisStiff": 0,
+      "HysMass": 0,
+      "HysStiff": 0
+    },
+    {
+      "Material": "A992Fy50",
+      "ModalRatio": 0,
+      "VisMass": 0,
+      "VisStiff": 0,
+      "HysMass": 0,
+      "HysStiff": 0
+    },
+    {
+      "Material": "S275",
+      "ModalRatio": 0,
+      "VisMass": 0,
+      "VisStiff": 0,
+      "HysMass": 0,
+      "HysStiff": 0
+    },
+    {
+      "Material": "S355",
+      "ModalRatio": 0,
+      "VisMass": 0,
+      "VisStiff": 0,
+      "HysMass": 0,
+      "HysStiff": 0
+    }
+  ],
+  "MATERIAL PROPERTIES 09 - ACCEPTANCE CRITERIA": [
+    {
+      "Material": "4000Psi",
+      "IOTens": 0.01,
+      "LSTens": 0.02,
+      "CPTens": 0.05,
+      "IOComp": -0.003,
+      "LSComp": -0.006,
+      "CPComp": -0.015,
+      "IgnoreTens": true
+    },
+    {
+      "Material": "A992Fy50",
+      "IOTens": 0.01,
+      "LSTens": 0.02,
+      "CPTens": 0.05,
+      "IOComp": -0.005,
+      "LSComp": -0.01,
+      "CPComp": -0.02
+    },
+    {
+      "Material": "S275",
+      "IOTens": 0.01,
+      "LSTens": 0.02,
+      "CPTens": 0.05,
+      "IOComp": -0.005,
+      "LSComp": -0.01,
+      "CPComp": -0.02
+    },
+    {
+      "Material": "S355",
+      "IOTens": 0.01,
+      "LSTens": 0.02,
+      "CPTens": 0.05,
+      "IOComp": -0.005,
+      "LSComp": -0.01,
+      "CPComp": -0.02
+    }
+  ],
+  "OPTIONS - COLORS - DISPLAY": [
+    {
+      "DeviceType": "Screen",
+      "Points": "Blue",
+      "LinesFrame": "Blue",
+      "LinesFrmDL": "Blue",
+      "LinesCable": "Green",
+      "LinesTendon": "Green",
+      "SpringLinks": "Green",
+      "Restraints": "Green",
+      "Releases": "Green",
+      "Axes": "Cyan",
+      "Text": "Black",
+      "ShadowLines": "Gray8Dark",
+      "GuideLines": "Gray8Dark",
+      "Highlight": "Red",
+      "Selection": 10504778,
+      "AreaFillBot": "Red",
+      "AreaFillTop": 16744703,
+      "AreaFillSd": "Red",
+      "AreaEdge": "DarkRed",
+      "SolidF1": "Red",
+      "SolidF2": "Blue",
+      "SolidF3": "Green",
+      "SolidF4": "Yellow",
+      "SolidF5": "White",
+      "SolidF6": "Cyan",
+      "SolidEdge": "DarkRed",
+      "Floor": "Gray4",
+      "Background": "White",
+      "BGLowLeft": "White",
+      "BGLowRight": "White",
+      "BGUpRight": "White",
+      "Darkness": 0
+    },
+    {
+      "DeviceType": "Printer",
+      "Points": "Gray8Dark",
+      "LinesFrame": "Black",
+      "LinesFrmDL": "Gray4",
+      "LinesCable": "Black",
+      "LinesTendon": "Black",
+      "SpringLinks": "Gray8Dark",
+      "Restraints": "Gray8Dark",
+      "Releases": "Gray4",
+      "Axes": "Black",
+      "Text": "Black",
+      "ShadowLines": "Gray4",
+      "GuideLines": "Gray4",
+      "Highlight": "Black",
+      "Selection": "Black",
+      "AreaFillBot": "Gray4",
+      "AreaFillTop": "Gray8Dark",
+      "AreaFillSd": "Gray4",
+      "AreaEdge": "Black",
+      "SolidF1": "Gray1Light",
+      "SolidF2": "Gray2",
+      "SolidF3": "Gray3",
+      "SolidF4": "Gray4",
+      "SolidF5": "Gray5",
+      "SolidF6": "Gray6",
+      "SolidEdge": "Black",
+      "Floor": "Gray4",
+      "Background": "White",
+      "BGLowLeft": "White",
+      "BGLowRight": "White",
+      "BGUpRight": "White",
+      "Darkness": 0.5
+    },
+    {
+      "DeviceType": "Color Printer",
+      "Points": "Blue",
+      "LinesFrame": "Blue",
+      "LinesFrmDL": "Blue",
+      "LinesCable": "Green",
+      "LinesTendon": "Green",
+      "SpringLinks": "Green",
+      "Restraints": "Green",
+      "Releases": "Green",
+      "Axes": "Cyan",
+      "Text": "Black",
+      "ShadowLines": "Gray8Dark",
+      "GuideLines": "Gray8Dark",
+      "Highlight": "Red",
+      "Selection": 10504778,
+      "AreaFillBot": "Red",
+      "AreaFillTop": 16744703,
+      "AreaFillSd": "Red",
+      "AreaEdge": "DarkRed",
+      "SolidF1": "Red",
+      "SolidF2": "Blue",
+      "SolidF3": "Green",
+      "SolidF4": "Yellow",
+      "SolidF5": "White",
+      "SolidF6": "Cyan",
+      "SolidEdge": "DarkRed",
+      "Floor": "Gray4",
+      "Background": "White",
+      "BGLowLeft": "White",
+      "BGLowRight": "White",
+      "BGUpRight": "White",
+      "Darkness": 0.5
+    }
+  ],
+  "OPTIONS - COLORS - OUTPUT": [
+    {
+      "DeviceType": "Screen",
+      "Contour1": 13107400,
+      "Contour2": 6553828,
+      "Contour3": "Red",
+      "Contour4": 16639,
+      "Contour5": "Orange",
+      "Contour6": 43775,
+      "Contour7": 54527,
+      "Contour8": "Yellow",
+      "Contour9": 65408,
+      "Contour10": "Green",
+      "Contour11": 8453888,
+      "Contour12": "Cyan",
+      "Contour13": 16755200,
+      "Contour14": 16733440,
+      "Contour15": "Blue",
+      "Transpare": 0,
+      "Ratio1": "Cyan",
+      "Ratio2": "Green",
+      "Ratio3": "Yellow",
+      "Ratio4": "Orange",
+      "Ratio5": "Red",
+      "RatioNotD": "Gray4",
+      "RatioNotC": "Red",
+      "RatioVal1": 0.5,
+      "RatioVal2": 0.7,
+      "RatioVal3": 0.9,
+      "RatioVal4": 1,
+      "DFillPos": "Blue",
+      "DFillNeg": "Red",
+      "DFillRPos": 9498256,
+      "DFillRNeg": 9498256
+    },
+    {
+      "DeviceType": "Printer",
+      "Contour1": "Black",
+      "Contour2": 3158064,
+      "Contour3": 4210752,
+      "Contour4": 5263440,
+      "Contour5": 6316128,
+      "Contour6": 7368816,
+      "Contour7": "Gray8Dark",
+      "Contour8": "Gray7",
+      "Contour9": "Gray6",
+      "Contour10": "Gray5",
+      "Contour11": "Gray4",
+      "Contour12": "Gray3",
+      "Contour13": "Gray2",
+      "Contour14": "Gray1Light",
+      "Contour15": "White",
+      "Transpare": 0,
+      "Ratio1": "Gray2",
+      "Ratio2": "Gray4",
+      "Ratio3": "Gray8Dark",
+      "Ratio4": 4210752,
+      "Ratio5": "Black",
+      "RatioNotD": "Gray4",
+      "RatioNotC": "Black",
+      "RatioVal1": 0.5,
+      "RatioVal2": 0.7,
+      "RatioVal3": 0.9,
+      "RatioVal4": 1,
+      "DFillPos": "Gray8Dark",
+      "DFillNeg": "Gray8Dark",
+      "DFillRPos": 4210752,
+      "DFillRNeg": 4210752
+    },
+    {
+      "DeviceType": "Color Printer",
+      "Contour1": 13107400,
+      "Contour2": 6553828,
+      "Contour3": "Red",
+      "Contour4": 16639,
+      "Contour5": "Orange",
+      "Contour6": 43775,
+      "Contour7": 54527,
+      "Contour8": "Yellow",
+      "Contour9": 65408,
+      "Contour10": "Green",
+      "Contour11": 8453888,
+      "Contour12": "Cyan",
+      "Contour13": 16755200,
+      "Contour14": 16733440,
+      "Contour15": "Blue",
+      "Transpare": 0,
+      "Ratio1": "Cyan",
+      "Ratio2": "Green",
+      "Ratio3": "Yellow",
+      "Ratio4": "Orange",
+      "Ratio5": "Red",
+      "RatioNotD": "Gray4",
+      "RatioNotC": "Red",
+      "RatioVal1": 0.5,
+      "RatioVal2": 0.7,
+      "RatioVal3": 0.9,
+      "RatioVal4": 1,
+      "DFillPos": "Blue",
+      "DFillNeg": "Red",
+      "DFillRPos": 9498256,
+      "DFillRNeg": 9498256
+    }
+  ],
+  "PREFERENCES - ALUMINUM DESIGN - AA 2015": [
+    {
+      "THDesign": "Envelopes",
+      "SRatioLimit": 1,
+      "Provision": "LRFD",
+      "LatFact": 1.33333333333333,
+      "UseLatFact": false,
+      "Bridge": false,
+      "PhiTy": 0.9,
+      "PhiTr": 0.75,
+      "PhiC": 0.9,
+      "PhiBo": 0.9,
+      "PhiBr": 0.75,
+      "PhiVo": 0.9,
+      "PhiVr": 0.75
+    }
+  ],
+  "PREFERENCES - COLD FORMED DESIGN - AISI-16": [
+    {
+      "THDesign": "Envelopes",
+      "FrameType": "Braced Frame",
+      "SRatioLimit": 1,
+      "SOMethod": "General 2nd Order",
+      "Provision": "LRFD",
+      "LatFact": 1.33333333333333,
+      "UseLatFact": false,
+      "PhiTy": 0.9,
+      "PhiTr": 0.75,
+      "PhiC": 0.85,
+      "PhiB": 0.9,
+      "PhiBPipe": 0.95,
+      "PhiV": 0.95
+    }
+  ],
+  "PREFERENCES - CONCRETE DESIGN - ACI 318-19": [
+    {
+      "THDesign": "Envelopes",
+      "NumCurves": 24,
+      "NumPoints": 11,
+      "MinEccen": true,
+      "BCCDesign": true,
+      "IgnoreBPu": true,
+      "CTorsion": true,
+      "PatLLF": 0.75,
+      "UFLimit": 0.95,
+      "SeisCat": "D",
+      "Rho": 1,
+      "Sds": 0.5,
+      "PhiT": 0.9,
+      "PhiCTied": 0.65,
+      "PhiCSpiral": 0.75,
+      "PhiV": 0.75,
+      "PhiVSeismic": 0.6,
+      "PhiVJoint": 0.85,
+      "TanTheta": 1
+    }
+  ],
+  "PREFERENCES - CONCRETE SHELL DESIGN - EUROCODE 2-2004": [
+    {
+      "Country": "CEN Default",
+      "GammaS": 1.15,
+      "GammaC": 1.5,
+      "AlphaCC": 1,
+      "AlphaCT": 1,
+      "CrackCond": "Program Determined",
+      "ShrDesMet": "Method 1",
+      "CotTheta": 1
+    }
+  ],
+  "PREFERENCES - DIMENSIONAL": [
+    {
+      "MergeTol": 0.001,
+      "FineGrid": 0.25,
+      "Nudge": 0.25,
+      "SelectTol": 3,
+      "SnapTol": 12,
+      "SLineThick": 2,
+      "PLineThick": 4,
+      "MaxFont": 12,
+      "MinFont": 6,
+      "AutoZoom": 10,
+      "ShrinkFact": 70,
+      "TextFileLen": 240
+    }
+  ],
+  "PREFERENCES - STEEL DESIGN - AISC 360-16": [
+    {
+      "THDesign": "Envelopes",
+      "FrameType": "SMF",
+      "PatLLF": 0.75,
+      "SRatioLimit": 0.95,
+      "MaxIter": 1,
+      "SDC": "D",
+      "SeisCode": false,
+      "SeisLoad": false,
+      "ImpFactor": 1,
+      "SystemRho": 1,
+      "SystemSds": 0.5,
+      "SystemR": 8,
+      "SystemCd": 5.5,
+      "Omega0": 3,
+      "Provision": "LRFD",
+      "AMethod": "Direct Analysis",
+      "SOMethod": "General 2nd Order",
+      "SRMethod": "Tau-b Fixed",
+      "NLCoeff": 0.002,
+      "PhiB": 0.9,
+      "PhiC": 0.9,
+      "PhiTY": 0.9,
+      "PhiTF": 0.75,
+      "PhiV": 0.9,
+      "PhiVRolledI": 1,
+      "PhiVT": 0.9,
+      "PlugWeld": true,
+      "HSSWelding": "ERW",
+      "HSSReduceT": false,
+      "CheckDefl": false,
+      "DLRat": 120,
+      "SDLAndLLRat": 120,
+      "LLRat": 360,
+      "TotalRat": 240,
+      "NetRat": 240
+    }
+  ],
+  "PROGRAM CONTROL": [
+    {
+      "ProgramName": "SAP2000",
+      "Version": "25.1.0",
+      "CurrUnits": "KN, m, C",
+      "SteelCode": "AISC 360-16",
+      "ConcCode": "ACI 318-19",
+      "AlumCode": "AA 2015",
+      "ColdCode": "AISI-16",
+      "RegenHinge": true
+    }
+  ],
+  "PROJECT INFORMATION": [
+    {
+      "Item": "Company Name",
+      "Data": "Dada"
+    },
+    {
+      "Item": "Client Name"
+    },
+    {
+      "Item": "Project Name"
+    },
+    {
+      "Item": "Project Number"
+    },
+    {
+      "Item": "Model Name"
+    },
+    {
+      "Item": "Model Description"
+    },
+    {
+      "Item": "Revision Number"
+    },
+    {
+      "Item": "Frame Type"
+    },
+    {
+      "Item": "Engineer"
+    },
+    {
+      "Item": "Checker"
+    },
+    {
+      "Item": "Supervisor"
+    },
+    {
+      "Item": "Issue Code"
+    },
+    {
+      "Item": "Design Code"
+    }
+  ],
+  "REBAR SIZES": [
+    {
+      "RebarID": "#2",
+      "Area": 3.2258e-05,
+      "Diameter": 0.00635
+    },
+    {
+      "RebarID": "#3",
+      "Area": 7.09675996154547e-05,
+      "Diameter": 0.009525
+    },
+    {
+      "RebarID": "#4",
+      "Area": 0.000129032001922727,
+      "Diameter": 0.0127
+    },
+    {
+      "RebarID": "#5",
+      "Area": 0.000199999601538181,
+      "Diameter": 0.015875
+    },
+    {
+      "RebarID": "#6",
+      "Area": 0.000283870398461819,
+      "Diameter": 0.01905
+    },
+    {
+      "RebarID": "#7",
+      "Area": 0.000387096015381813,
+      "Diameter": 0.022225
+    },
+    {
+      "RebarID": "#8",
+      "Area": 0.000509676413843632,
+      "Diameter": 0.0254
+    },
+    {
+      "RebarID": "#9",
+      "Area": 0.00064516,
+      "Diameter": 0.0286512005329132
+    },
+    {
+      "RebarID": "#10",
+      "Area": 0.00081935318769455,
+      "Diameter": 0.0322579995155334
+    },
+    {
+      "RebarID": "#11",
+      "Area": 0.00100644956308365,
+      "Diameter": 0.0358139991521835
+    },
+    {
+      "RebarID": "#14",
+      "Area": 0.00145161,
+      "Diameter": 0.0430021989583969
+    },
+    {
+      "RebarID": "#18",
+      "Area": 0.00258064,
+      "Diameter": 0.0573277992248535
+    },
+    {
+      "RebarID": "10M",
+      "Area": 0.000100000002655387,
+      "Diameter": 0.011300000667572
+    },
+    {
+      "RebarID": "15M",
+      "Area": 0.000200000005310774,
+      "Diameter": 0.0159999999403954
+    },
+    {
+      "RebarID": "20M",
+      "Area": 0.000300000017579794,
+      "Diameter": 0.0194999997854233
+    },
+    {
+      "RebarID": "25M",
+      "Area": 0.000500000022890568,
+      "Diameter": 0.0252000016093254
+    },
+    {
+      "RebarID": "30M",
+      "Area": 0.000700000008974075,
+      "Diameter": 0.0299000008821487
+    },
+    {
+      "RebarID": "35M",
+      "Area": 0.00100000004578114,
+      "Diameter": 0.0357000011444092
+    },
+    {
+      "RebarID": "45M",
+      "Area": 0.00150000010712624,
+      "Diameter": 0.0437000003576279
+    },
+    {
+      "RebarID": "55M",
+      "Area": 0.00250000007599831,
+      "Diameter": 0.0564000033855438
+    },
+    {
+      "RebarID": "6d",
+      "Area": 2.83000004149973e-05,
+      "Diameter": 0.006000000166893
+    },
+    {
+      "RebarID": "8d",
+      "Area": 5.02999995571375e-05,
+      "Diameter": 0.00799999997019768
+    },
+    {
+      "RebarID": "10d",
+      "Area": 7.85000013634562e-05,
+      "Diameter": 0.00999999977350235
+    },
+    {
+      "RebarID": "12d",
+      "Area": 0.000113000009249449,
+      "Diameter": 0.012000000333786
+    },
+    {
+      "RebarID": "14d",
+      "Area": 0.000154000010818839,
+      "Diameter": 0.0140000008940697
+    },
+    {
+      "RebarID": "16d",
+      "Area": 0.000201000015431643,
+      "Diameter": 0.0159999999403954
+    },
+    {
+      "RebarID": "20d",
+      "Area": 0.000314000005453825,
+      "Diameter": 0.0199999995470047
+    },
+    {
+      "RebarID": "25d",
+      "Area": 0.000491000008711815,
+      "Diameter": 0.0250000001907349
+    },
+    {
+      "RebarID": "26d",
+      "Area": 0.000531000029001236,
+      "Diameter": 0.0259999997138977
+    },
+    {
+      "RebarID": "28d",
+      "Area": 0.000616000043275356,
+      "Diameter": 0.0280000017881393
+    },
+    {
+      "RebarID": "N12",
+      "Area": 0.000113000009249449,
+      "Diameter": 0.012000000333786
+    },
+    {
+      "RebarID": "N16",
+      "Area": 0.000201000015431643,
+      "Diameter": 0.0159999999403954
+    },
+    {
+      "RebarID": "N20",
+      "Area": 0.000314000005453825,
+      "Diameter": 0.0199999995470047
+    },
+    {
+      "RebarID": "N24",
+      "Area": 0.000452000036997795,
+      "Diameter": 0.024000000667572
+    },
+    {
+      "RebarID": "N28",
+      "Area": 0.000616000043275356,
+      "Diameter": 0.0280000017881393
+    },
+    {
+      "RebarID": "N32",
+      "Area": 0.00080400006172657,
+      "Diameter": 0.0319999998807907
+    },
+    {
+      "RebarID": "N36",
+      "Area": 0.00102000001747131,
+      "Diameter": 0.036000001001358
+    }
+  ]
+}
