@@ -1289,8 +1289,241 @@ class TestSelection:
 
 
 # ============================================================================
-# CQC combination tests
+# Selection filter_model tests
 # ============================================================================
+
+
+class TestSelectionFilterModel:
+    """Tests for :meth:`Selection.filter_model` — self-contained subset creation.
+
+    ``filter_model`` returns a new ``SAPModelData`` containing only the
+    entities needed by the selected elements (nodes, sections, materials,
+    restraints, loads, and pruned groups).  The original model is never
+    modified.
+
+    See ``tests/README.md`` for an overview of the test suite.
+    """
+
+    @pytest.fixture
+    def full_model(self):
+        """A richer model with frames, areas, loads, groups for filter testing."""
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=4, y=0, z=0),
+            "3": Node(node_id="3", node_tag=3, x=0, y=0, z=3),
+            "4": Node(node_id="4", node_tag=4, x=4, y=0, z=3),
+            "5": Node(node_id="5", node_tag=5, x=0, y=4, z=0),
+            "6": Node(node_id="6", node_tag=6, x=4, y=4, z=0),
+            "7": Node(node_id="7", node_tag=7, x=0, y=0, z=6),
+            "8": Node(node_id="8", node_tag=8, x=4, y=0, z=6),
+        }
+        restraints = {
+            "1": Restraint([1, 1, 1, 1, 1, 1]),
+            "2": Restraint([1, 1, 1, 1, 1, 1]),
+        }
+        materials = {
+            "Steel": Material(name="Steel", type="Steel", E_mod=2e11,
+                              unit_weight=77000),
+            "Conc":  Material(name="Conc", type="Concrete", E_mod=3e10,
+                              unit_weight=24000),
+        }
+        sections = {
+            "UB100": Section(name="UB100", shape="I/Wide Flange",
+                             material="Steel", A=0.01, I33=1e-4,
+                             I22=1e-5, J=1e-6),
+            "UB200": Section(name="UB200", shape="I/Wide Flange",
+                             material="Steel", A=0.02, I33=2e-4,
+                             I22=2e-5, J=2e-6),
+            "Slab": ShellSection(name="Slab", shape="Shell",
+                                 material="Conc", A=0, I33=0,
+                                 I22=0, J=0, thickness=0.2),
+        }
+        frames = {
+            "1": FrameElement(elem_id="1", elem_tag=1,
+                              node_i="1", node_j="3"),
+            "2": FrameElement(elem_id="2", elem_tag=2,
+                              node_i="2", node_j="4"),
+            "3": FrameElement(elem_id="3", elem_tag=3,
+                              node_i="3", node_j="7"),
+            "4": FrameElement(elem_id="4", elem_tag=4,
+                              node_i="4", node_j="8"),
+        }
+        areas = {
+            "1": AreaElement(area_id="1", area_tag=1,
+                             node_ids=["1", "2", "5", "6"], thickness=0.2),
+        }
+        groups = {
+            "Cols": Group(name="Cols",
+                          objects=["Frame:1", "Frame:2"]),
+            "Slab": Group(name="Slab",
+                          objects=["Area:1", "Joint:5", "Joint:6"]),
+        }
+        load_patterns = {
+            "DEAD": LoadPattern(name="DEAD", pattern_type="DEAD"),
+            "WIND": LoadPattern(name="WIND", pattern_type="WIND"),
+        }
+        frame_dist_loads = [
+            FrameDistributedLoad(pattern="WIND", frame_id="1",
+                                 direction="X", load_type="Force",
+                                 shape="Uniform", val_a=1000, val_b=1000,
+                                 rdist_a=0, rdist_b=1, dist_a=0, dist_b=3),
+        ]
+        frame_gravity_loads = [
+            GravityLoad(pattern="DEAD", frame_id="2",
+                        multiplier_z=-1.0),
+        ]
+        area_uniform_loads = [
+            AreaUniformLoad(pattern="DEAD", area_id="1",
+                            direction="Gravity", value=5000),
+        ]
+        area_gravity_loads = [
+            AreaGravityLoad(pattern="DEAD", area_id="1",
+                            multiplier_z=-1.0),
+        ]
+        joint_loads = [
+            JointLoad(pattern="DEAD", node_id="3", fz=-5000),
+        ]
+        return SAPModelData(
+            nodes=nodes,
+            restraints=restraints,
+            materials=materials,
+            sections=sections,
+            frame_elements=frames,
+            area_elements=areas,
+            frame_assignments={"1": "UB100", "2": "UB100",
+                               "3": "UB200", "4": "UB200"},
+            area_assignments={"1": "Slab"},
+            groups=groups,
+            frame_auto_mesh={},
+            load_patterns=load_patterns,
+            joint_loads=joint_loads,
+            frame_dist_loads=frame_dist_loads,
+            frame_gravity_loads=frame_gravity_loads,
+            area_uniform_loads=area_uniform_loads,
+            area_gravity_loads=area_gravity_loads,
+        )
+
+    # ── Frame selection ──
+
+    def test_frame_selection_basics(self, full_model):
+        """Select all frames: 4 frames, 0 areas, 6 end-nodes."""
+        sub = Selection(element_types=["Frame"]).filter_model(full_model)
+        assert len(sub.frame_elements) == 4
+        assert len(sub.area_elements) == 0
+        assert len(sub.nodes) == 6          # frame end-nodes: 1,2,3,4,7,8
+        assert sorted(sub.nodes) == ["1", "2", "3", "4", "7", "8"]
+        assert len(sub.restraints) == 2     # nodes 1, 2
+
+    def test_frame_selection_by_group(self, full_model):
+        """Group ``Cols`` → only frames 1 & 2, their 4 end-nodes."""
+        sub = Selection(element_types=["Frame"],
+                        groups=["Cols"]).filter_model(full_model)
+        assert len(sub.frame_elements) == 2
+        assert set(sub.frame_elements) == {"1", "2"}
+        # End-nodes: 1,3 + 2,4 = 4 nodes
+        assert sorted(sub.nodes) == ["1", "2", "3", "4"]
+        # Restraints on nodes 1, 2
+        assert sorted(sub.restraints) == ["1", "2"]
+
+    def test_frame_selection_sections_materials(self, full_model):
+        """Only ``UB100`` section and ``Steel`` material; no Concrete."""
+        sub = Selection(element_types=["Frame"],
+                        groups=["Cols"]).filter_model(full_model)
+        assert sorted(sub.sections) == ["UB100"]
+        assert sorted(sub.materials) == ["Steel"]
+        assert "Conc" not in sub.materials
+
+    def test_frame_selection_loads(self, full_model):
+        """Distributed, gravity, and joint loads on selected frames; no area loads."""
+        sub = Selection(element_types=["Frame"],
+                        groups=["Cols"]).filter_model(full_model)
+        # Only loads on frames 1, 2
+        assert len(sub.frame_dist_loads) == 1    # WIND on frame 1
+        assert sub.frame_dist_loads[0].frame_id == "1"
+        assert len(sub.frame_gravity_loads) == 1  # DEAD on frame 2
+        assert sub.frame_gravity_loads[0].frame_id == "2"
+        # Area loads excluded
+        assert len(sub.area_uniform_loads) == 0
+        assert len(sub.area_gravity_loads) == 0
+        # Joint load on node 3 (end-node of frame 1)
+        assert len(sub.joint_loads) == 1
+        assert sub.joint_loads[0].node_id == "3"
+
+    # ── Area selection ──
+
+    def test_area_selection_basics(self, full_model):
+        """Select all areas: 1 area, 0 frames, 4 corner nodes."""
+        sub = Selection(element_types=["Area"]).filter_model(full_model)
+        assert len(sub.area_elements) == 1
+        assert len(sub.frame_elements) == 0
+        # Corner nodes: 1, 2, 5, 6
+        assert sorted(sub.nodes) == ["1", "2", "5", "6"]
+        assert sorted(sub.restraints) == ["1", "2"]
+
+    def test_area_selection_sections_materials(self, full_model):
+        """Only ``Slab`` section and ``Conc`` material; no Steel."""
+        sub = Selection(element_types=["Area"]).filter_model(full_model)
+        assert sorted(sub.sections) == ["Slab"]
+        assert sorted(sub.materials) == ["Conc"]
+
+    def test_area_selection_loads(self, full_model):
+        """Uniform and gravity area loads; no frame or joint loads."""
+        sub = Selection(element_types=["Area"]).filter_model(full_model)
+        assert len(sub.area_uniform_loads) == 1
+        assert len(sub.area_gravity_loads) == 1
+        assert len(sub.frame_dist_loads) == 0
+        assert len(sub.frame_gravity_loads) == 0
+        assert len(sub.joint_loads) == 0   # joint on node 3, not an area node
+
+    # ── Combined selection ──
+
+    def test_combined_frame_and_area(self, full_model):
+        """Both Frame and Area types: 4 frames + 1 area + 8 unique nodes."""
+        sub = Selection(element_types=["Frame", "Area"]).filter_model(full_model)
+        assert len(sub.frame_elements) == 4
+        assert len(sub.area_elements) == 1
+        # All nodes: frame end-nodes (1,2,3,4,7,8) + area corners (1,2,5,6)
+        assert sorted(sub.nodes) == ["1", "2", "3", "4", "5", "6", "7", "8"]
+        assert len(sub.sections) == 3     # UB100, UB200, Slab
+        assert len(sub.materials) == 2    # Steel, Conc
+
+    # ── Group pruning ──
+
+    def test_group_pruning(self, full_model):
+        """``Cols`` kept with its 2 frame refs; ``Slab`` excluded entirely."""
+        sub = Selection(element_types=["Frame"],
+                        groups=["Cols"]).filter_model(full_model)
+        assert "Cols" in sub.groups
+        assert "Slab" not in sub.groups
+        # Cols group should only have its two Frame references
+        assert sub.groups["Cols"].objects == ["Frame:1", "Frame:2"]
+
+    def test_group_pruning_area(self, full_model):
+        """``Slab`` kept with area + joint refs; ``Cols`` excluded."""
+        sub = Selection(element_types=["Area"]).filter_model(full_model)
+        assert "Slab" in sub.groups
+        assert "Cols" not in sub.groups
+        assert sub.groups["Slab"].objects == ["Area:1", "Joint:5", "Joint:6"]
+
+    # ── Empty / no-match ──
+
+    def test_no_match(self, full_model):
+        """Non-existent section → empty subset (0 frames, 0 nodes)."""
+        sub = Selection(element_types=["Frame"],
+                        sections=["Nonexistent"]).filter_model(full_model)
+        assert len(sub.frame_elements) == 0
+        assert len(sub.nodes) == 0
+        assert len(sub.sections) == 0
+
+    # ── Immutability ──
+
+    def test_immutability(self, full_model):
+        """Original model is never modified after ``filter_model``."""
+        original_count = len(full_model.nodes)
+        _ = Selection(element_types=["Frame"]).filter_model(full_model)
+        assert len(full_model.nodes) == original_count
+        assert len(full_model.frame_elements) == 4
+        assert "Conc" in full_model.materials
 
 class TestCqcCombine:
     def test_single_mode(self):
