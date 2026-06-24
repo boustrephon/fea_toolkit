@@ -509,6 +509,16 @@ class JointLoad:
 
 
 @dataclass
+class AreaUniformLoad:
+    """Uniform pressure load on an area element."""
+    pattern: str               # load pattern name
+    area_id: str               # area element ID
+    coord_sys: str = "GLOBAL"  # 'GLOBAL' or 'Local'
+    direction: str = "Gravity" # 'Gravity', 'X', 'Y', 'Z'
+    value: float = 0.0         # pressure (force/area)
+
+
+@dataclass
 class GravityLoad:
     """ # "FRAME LOADS - GRAVITY" 
        Frame=5   LoadPat="leg stiffener_1_t=20"   CoordSys=GLOBAL   MultiplierX=0   MultiplierY=0   MultiplierZ=-1.05
@@ -517,6 +527,19 @@ class GravityLoad:
     # coord_sys: CoordSys
     frame_id: str
     # frame_tag: int
+    multiplier_x: float = 0.0
+    multiplier_y: float = 0.0
+    multiplier_z: float = 0.0
+    coord_sys: str = "GLOBAL"
+
+@dataclass
+class AreaGravityLoad:
+    """AREA LOADS - GRAVITY table entry.
+
+       Area=1   LoadPat="DEAD"   CoordSys=GLOBAL   MultiplierX=0   MultiplierY=0   MultiplierZ=-1
+    """
+    pattern: str
+    area_id: str
     multiplier_x: float = 0.0
     multiplier_y: float = 0.0
     multiplier_z: float = 0.0
@@ -575,6 +598,9 @@ class SAPModelData:
     load_patterns: Dict[str,LoadPattern] = field(default_factory=dict)
     joint_loads: List[JointLoad] = field(default_factory=list)
     frame_dist_loads: List[FrameDistributedLoad] = field(default_factory=list)
+    area_uniform_loads: List[AreaUniformLoad] = field(default_factory=list)
+    area_gravity_loads: List[AreaGravityLoad] = field(default_factory=list)
+    frame_gravity_loads: List[GravityLoad] = field(default_factory=list)
     mass_sources: Dict[str, MassSource] = field(default_factory=dict)
     # Default units used for all coordinates and section properties
     units: Dict[str, str] = field(default_factory=lambda: {'F': "N", 'L': "m", 'T': "C"})   

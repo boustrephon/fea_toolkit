@@ -22,7 +22,9 @@ except ImportError:
 from ..model.sap_data import SAPModelData
 from ..model.geometry import get_SAP_vecxz, global_to_local_distributed_load, rotate_about_axis
 from ..model.sap_data import Section, FrameElement, FrameDistributedLoad
-# from ..model.geometry import split_elements
+from ..model.sap_data import GravityLoad, AreaGravityLoad
+from ..model.geometry import convert_area_loads_to_edge_loads
+from ..model.selection import Selection
 
 
 class OpenSeesBuilder:
@@ -88,7 +90,10 @@ class OpenSeesBuilder:
     # -------------------------------------------------------------------------
     # Main build method
     # -------------------------------------------------------------------------
-    def build(self, pattern_scales: Optional[Dict[str, float]] = None) -> None:
+    def build(self,
+              pattern_scales: Optional[Dict[str, float]] = None,
+              selection: Optional[Selection] = None,
+              ) -> None:
         """Build the complete OpenSees model in memory.
 
         Args:
@@ -96,7 +101,15 @@ class OpenSeesBuilder:
                 If provided, only these patterns are created with the given
                 scale.  If ``None`` (default), all patterns are applied with
                 factor 1.0.
+            selection: Optional :class:`Selection` to control which area loads
+                are converted to equivalent frame edge loads.  ``None`` means
+                all area loads are converted.
         """
+        # Persist selection so re-builds (e.g. from run_static_analysis)
+        # don't lose it.
+        if selection is not None:
+            self._area_selection = selection
+
         if self.config['verbose']:
             print("Building OpenSees model...")
             print(f"  Element type: {self.config['element_type']}")
@@ -114,7 +127,9 @@ class OpenSeesBuilder:
         # Element splitting (if enabled)
         if self.config['split_elements']:
             self._split_elements()
-            
+        
+        # Convert area uniform loads to equivalent frame edge loads
+        self._convert_area_loads(selection=selection)
 
         self._create_elements()
         self._create_loads(pattern_scales=pattern_scales)
@@ -400,6 +415,11 @@ class OpenSeesBuilder:
         dist_loads = (self.split_dist_loads if self.split_dist_loads is not None
                     else self.model.frame_dist_loads)
 
+        # Merge in edge loads converted from area uniform loads
+        edge_loads = getattr(self, 'edge_loads_from_areas', [])
+        if edge_loads:
+            dist_loads = list(dist_loads) + list(edge_loads)
+
         # Build pattern tags (one per unique load pattern name)
         pattern_tags = {}
         for i, (pattern_name, scale) in enumerate(active.items(), start=1):
@@ -655,6 +675,172 @@ class OpenSeesBuilder:
                 if tag_j is not None:
                     _add_sw(pname, tag_j, -weight * 0.5)
 
+            # ── Area element self-weight ──
+            for aid, area_elem in self.model.area_elements.items():
+                sec_name = self.model.area_assignments.get(aid)
+                if not sec_name:
+                    continue
+                sec = self.model.sections.get(sec_name)
+                if sec is None:
+                    continue
+                mat = self.model.materials.get(sec.material)
+                if mat is None or abs(mat.unit_weight) < 1e-12:
+                    continue
+                thickness = area_elem.thickness
+                if thickness < 1e-12:
+                    continue
+
+                # Polygon area via Newell's method
+                pts = []
+                for nid in area_elem.node_ids:
+                    nd = self.model.nodes.get(nid)
+                    if nd is None:
+                        break
+                    pts.append((nd.x, nd.y, nd.z))
+                if len(pts) < 3:
+                    continue
+                nx = ny = nz = 0.0
+                for i in range(len(pts)):
+                    x1, y1, z1 = pts[i]
+                    x2, y2, z2 = pts[(i + 1) % len(pts)]
+                    nx += (y1 - y2) * (z1 + z2)
+                    ny += (z1 - z2) * (x1 + x2)
+                    nz += (x1 - x2) * (y1 + y2)
+                area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                if area_mag < 1e-12:
+                    continue
+
+                # Self-weight (always downward = negative Z)
+                fz_total = thickness * mat.unit_weight * area_mag * sw_factor
+                n_corners = len(area_elem.node_ids)
+                for nid in area_elem.node_ids:
+                    tag = self._node_tag_from_id(nid)
+                    if tag is not None:
+                        _add_sw(pname, tag, -fz_total / n_corners)
+
+        # ------------------------------------------------------------------
+        # FRAME LOADS - GRAVITY (explicit multipliers on self-weight)
+        # ------------------------------------------------------------------
+        def _add_gravity(pname: str, node_tag: int, fx: float, fy: float, fz: float) -> None:
+            """Apply a nodal force from a gravity load and track it."""
+            ops.load(node_tag, fx, fy, fz, 0.0, 0.0, 0.0)
+            if pname not in sw_load_totals:
+                sw_load_totals[pname] = {k: 0.0 for k in
+                                         ('fx','fy','fz','mx','my','mz')}
+            sw_load_totals[pname]['fx'] += fx
+            sw_load_totals[pname]['fy'] += fy
+            sw_load_totals[pname]['fz'] += fz
+
+        for pname, scale in active.items():
+            if abs(scale) < 1e-12:
+                continue
+            if pname not in all_patterns:
+                continue
+            pat_tag = pattern_tags.get(pname)
+            if pat_tag is None:
+                continue
+
+            # ── Frame gravity loads ──
+            elements = (self.split_elements if self.split_elements
+                        else self.model.frame_elements)
+            for gl in self.model.frame_gravity_loads:
+                if gl.pattern != pname:
+                    continue
+                elem = elements.get(gl.frame_id)
+                if elem is None or elem.inactive:
+                    continue
+                sec_name = self.model.frame_assignments.get(gl.frame_id)
+                if not sec_name:
+                    continue
+                sec = self.model.sections.get(sec_name)
+                if sec is None:
+                    continue
+                mat = self.model.materials.get(sec.material)
+                if mat is None or abs(mat.unit_weight) < 1e-12:
+                    continue
+
+                ni = self.model.nodes.get(elem.node_i)
+                nj = self.model.nodes.get(elem.node_j)
+                if ni is None or nj is None:
+                    continue
+                L = np.linalg.norm([
+                    nj.x - ni.x, nj.y - ni.y, nj.z - ni.z
+                ])
+                if L < 1e-12:
+                    continue
+
+                # Force = volume × unit_weight × multiplier × scale
+                sw_per_len = sec.A * mat.unit_weight
+                fx = sw_per_len * L * gl.multiplier_x * scale * 0.5
+                fy = sw_per_len * L * gl.multiplier_y * scale * 0.5
+                fz = sw_per_len * L * gl.multiplier_z * scale * 0.5
+
+                tag_i = self._node_tag_from_id(elem.node_i)
+                tag_j = self._node_tag_from_id(elem.node_j)
+                if tag_i is not None:
+                    _add_gravity(pname, tag_i, fx, fy, fz)
+                if tag_j is not None:
+                    _add_gravity(pname, tag_j, fx, fy, fz)
+
+            # ── Area gravity loads ──
+            for agl in self.model.area_gravity_loads:
+                if agl.pattern != pname:
+                    continue
+                area_elem = self.model.area_elements.get(agl.area_id)
+                if area_elem is None:
+                    continue
+
+                # Get section + material for density
+                sec_name = self.model.area_assignments.get(agl.area_id)
+                if not sec_name:
+                    continue
+                sec = self.model.sections.get(sec_name)
+                if sec is None:
+                    continue
+                mat = self.model.materials.get(sec.material)
+                if mat is None or abs(mat.unit_weight) < 1e-12:
+                    continue
+                thickness = area_elem.thickness
+                if thickness < 1e-12:
+                    continue
+
+                # Compute polygon area (shoelace formula on XY projection)
+                pts = []
+                for nid in area_elem.node_ids:
+                    nd = self.model.nodes.get(nid)
+                    if nd is None:
+                        break
+                    pts.append((nd.x, nd.y, nd.z))
+                if len(pts) < 3:
+                    continue
+
+                # 3D polygon area via Newell's method
+                nx = ny = nz = 0.0
+                for i in range(len(pts)):
+                    x1, y1, z1 = pts[i]
+                    x2, y2, z2 = pts[(i + 1) % len(pts)]
+                    nx += (y1 - y2) * (z1 + z2)
+                    ny += (z1 - z2) * (x1 + x2)
+                    nz += (x1 - x2) * (y1 + y2)
+                area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                if area_mag < 1e-12:
+                    continue
+
+                # Force = area × thickness × unit_weight × multiplier × scale
+                sw_per_area = thickness * mat.unit_weight
+                total_fx = sw_per_area * area_mag * agl.multiplier_x * scale
+                total_fy = sw_per_area * area_mag * agl.multiplier_y * scale
+                total_fz = sw_per_area * area_mag * agl.multiplier_z * scale
+
+                n_corners = len(area_elem.node_ids)
+                for nid in area_elem.node_ids:
+                    tag = self._node_tag_from_id(nid)
+                    if tag is not None:
+                        _add_gravity(pname, tag,
+                                     total_fx / n_corners,
+                                     total_fy / n_corners,
+                                     total_fz / n_corners)
+
         # ------------------------------------------------------------------
         # Merge all totals into public attribute
         # ------------------------------------------------------------------
@@ -698,6 +884,60 @@ class OpenSeesBuilder:
         # ops.recorder('Node', '-file', 'displacements.out', '-node', 1, '-dof', 1, 2, 3, 'disp')
 
     # -------------------------------------------------------------------------
+    # Area load → edge load conversion
+    # -------------------------------------------------------------------------
+    def _convert_area_loads(self,
+                            selection: Optional[Selection] = None,
+                            ) -> None:
+        """Convert area uniform loads to equivalent frame edge loads.
+
+        Args:
+            selection: Optional :class:`Selection` to restrict which areas
+                are converted.  Only area uniform loads on areas matching
+                the selection will be converted.  ``None`` means all
+                (unless a previous call persisted a selection via
+                :attr:`_area_selection`).
+        """
+        # Fall back to persisted selection if none provided
+        if selection is None:
+            selection = getattr(self, '_area_selection', None)
+
+        if not self.model.area_uniform_loads:
+            self.edge_loads_from_areas = []
+            return
+
+        # Filter by selection if provided
+        area_loads: List = self.model.area_uniform_loads
+        area_elements = self.model.area_elements
+        if selection is not None:
+            sel_area_ids = set(selection.get_area_ids(self.model))
+            area_loads = [ld for ld in area_loads if ld.area_id in sel_area_ids]
+            area_elements = {
+                aid: ae for aid, ae in area_elements.items()
+                if aid in sel_area_ids
+            }
+            if not area_loads:
+                if self.config['verbose']:
+                    print("  No area uniform loads match the selection")
+                self.edge_loads_from_areas = []
+                return
+
+        # Use split elements if available, else originals
+        elements = (self.split_elements if self.split_elements
+                    else self.model.frame_elements)
+
+        edge_loads = convert_area_loads_to_edge_loads(
+            self.model.nodes,
+            area_elements,
+            elements,
+            area_loads,
+        )
+        self.edge_loads_from_areas = edge_loads
+        if self.config['verbose']:
+            print(f"  Converted {len(area_loads)} area loads "
+                  f"into {len(edge_loads)} frame edge loads")
+
+    # -------------------------------------------------------------------------
     # Analysis
     # -------------------------------------------------------------------------
     def run_static_analysis(self, 
@@ -728,7 +968,9 @@ class OpenSeesBuilder:
         """
         # Rebuild with different patterns if requested
         if pattern_scales is not None:
-            self.build(pattern_scales=pattern_scales)
+            # Re-use any persisted selection from the original build
+            sel = getattr(self, '_area_selection', None)
+            self.build(pattern_scales=pattern_scales, selection=sel)
 
         unit_L = self.units['L']
         unit_F = self.units.get('F', 'N')

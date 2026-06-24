@@ -46,6 +46,7 @@ The goal is to create a Python package `fea_toolkit` that:
 
 | Component | Status | Notes |
 | :--- | :--- | :--- |
+| **`Selection`** | ✅ Complete | Flexible element filter: select by type (Frame/Area/Node), section, material, group membership, or ID. AND across criteria, OR within lists. Used to control which area loads are converted to edge loads in the builder. |
 | **`SAP2000Parser`** | ✅ Complete | Parses .s2k into raw tables; converts to `SAPModelData` with string IDs; assigns numeric tags; extracts materials, sections, frame connectivity, restraints, load patterns, joint loads, distributed loads, auto‑mesh settings. |
 | **`SAPModelData`** | ✅ Complete | Contains all model data with mutable defaults via `field(default_factory=...)`; includes `units` dict with default `{'F':'N','L':'m','T':'C'}`. |
 | **`SectionLibrary`** | ✅ Complete | Loads section catalogue pickle; converts units to match model (`mm` or `in`); enriches `Section` objects with `Z33`, `Z22`, dimensions, etc. |
@@ -122,6 +123,56 @@ SAP2000/ETABS models use a variety of cross‑section shapes. The `Section` data
 All section classes inherit the common derived properties (`A`, `I33`, `I22`, `J`) directly from the SAP2000 text file, which includes pre‑computed values. The `to_fiber_patches()` method on each class generates OpenSees `patch('rect', …)` definitions for nonlinear fiber‑section analysis.
 
 When the parser encounters a `FRAME SECTION PROPERTIES 01 - GENERAL` table, it dispatches to the correct subclass based on the `Shape` field, extracting SAP2000 dimension keys (`t3` → depth / OD, `t2` → width, `tw`, `tf`) into the appropriate fields.
+
+---
+
+#### 6. Selection — Filtering Model Elements
+
+The :class:`Selection` class (``src/fea_toolkit/model/selection.py``) provides a
+flexible, composable way to pick subsets of model elements for targeted
+operations.  It is used, for example, to control **which area uniform loads**
+get converted to equivalent frame edge loads during model building.
+
+**Logic rules**
+
+- **AND across criteria** — every non-``None`` field narrows the selection.
+  An element must satisfy *all* of them to be included.
+- **OR within a list** — multiple values in the same field are alternatives;
+  an element matching *any* of them passes that criterion.
+
+**Available criteria**
+
+| Field | Scope | Description |
+|---|---|---|
+| ``element_types`` | All | ``'Frame'``, ``'Area'``, ``'Node'`` (or a list) |
+| ``sections`` | Frame, Area | Section/property name(s) — checked via assignment maps |
+| ``materials`` | Frame, Area | Material name(s) — resolved through the assigned section |
+| ``groups`` | All | Group name(s) — matched against ``Group.objects`` (e.g. ``"Frame:123"``) |
+| ``element_ids`` | All | Specific ID(s) for exact targeting |
+
+**Key methods**
+
+| Method | Returns | Purpose |
+|---|---|---|
+| ``get_frame_ids(model)`` / ``get_area_ids(model)`` / ``get_node_ids(model)`` | ``List[str]`` | Get matching element IDs |
+| ``filter_frames(model)`` / ``filter_areas(model)`` / ``filter_nodes(model)`` | ``Dict[str, Element]`` | Get matching element objects |
+| ``filter_area_uniform_loads(model)`` | ``List[AreaUniformLoad]`` | Uniform loads on selected areas |
+| ``filter_area_gravity_loads(model)`` | ``List[AreaGravityLoad]`` | Gravity loads on selected areas |
+
+**Example — convert only slab area loads**
+
+```python
+from fea_toolkit.model.selection import Selection
+
+sel = Selection(
+    element_types=['Area'],
+    sections=['Slab 200mm', 'Roof 150mm'],
+)
+builder.build(selection=sel)
+```
+
+Only area loads on the two slab sections are converted to frame edge loads;
+all other area loads are ignored.
 
 ---
 
