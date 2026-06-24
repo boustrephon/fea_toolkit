@@ -8,8 +8,9 @@ import numpy as np  # noqa: F401
 
 from ..model.sap_data import (
     SAPModelData, Node, Restraint, Material, Section,
-    FrameElement, AreaElement, Group, LoadCase, LoadPattern,
-    MassSource, JointLoad, FrameDistributedLoad
+    FrameElement, AreaElement, ShellSection, Group, LoadCase, LoadPattern,
+    MassSource, JointLoad, FrameDistributedLoad, AreaUniformLoad, AreaGravityLoad,
+    GravityLoad,
 )
 # from ..model.geometry import get_SAP_vecxz
 
@@ -242,6 +243,16 @@ class SAP2000Parser:
         mass_sources = self._get_mass_sources()
         joint_loads = self._get_joint_loads()
         frame_dist_loads = self._get_frame_distributed_loads()
+        frame_gravity_loads = self._get_frame_gravity_loads()
+        area_uniform_loads, area_gravity_loads = self._get_area_loads()
+
+        # ── Populate area element thickness from assigned sections ──
+        for aid, a_elem in area_elements.items():
+            sec_name = area_assignments.get(aid)
+            if sec_name:
+                sec = sections.get(sec_name)
+                if isinstance(sec, ShellSection):
+                    a_elem.thickness = sec.thickness
 
 
         return SAPModelData(
@@ -259,6 +270,9 @@ class SAP2000Parser:
             mass_sources=mass_sources,
             joint_loads=joint_loads,
             frame_dist_loads=frame_dist_loads,
+            frame_gravity_loads=frame_gravity_loads,
+            area_uniform_loads=area_uniform_loads,
+            area_gravity_loads=area_gravity_loads,
             units=model_units,
         )
 
@@ -481,6 +495,47 @@ class SAP2000Parser:
                 assign[aid] = sec
         return assign
 
+    def _get_area_loads(self):
+        """Parse all AREA LOADS - * tables by dispatching on the suffix.
+
+        Returns:
+            Tuple of (uniform_loads, gravity_loads).
+        """
+        uniform_loads: List[AreaUniformLoad] = []
+        gravity_loads: List[AreaGravityLoad] = []
+
+        for table_name in self._raw_tables:
+            if not table_name.startswith("AREA LOADS - "):
+                continue
+            load_type = table_name[len("AREA LOADS - "):]  # e.g. "UNIFORM", "GRAVITY"
+
+            if load_type == "UNIFORM":
+                for rec in self._raw_tables[table_name]:
+                    uniform_loads.append(AreaUniformLoad(
+                        pattern=str(rec.get('LoadPat', '')),
+                        area_id=str(rec.get('Area', '')),
+                        coord_sys=str(rec.get('CoordSys', 'GLOBAL')),
+                        direction=str(rec.get('Dir', 'Gravity')),
+                        value=float(rec.get('UnifLoad', 0.0)),
+                    ))
+
+            elif load_type == "GRAVITY":
+                for rec in self._raw_tables[table_name]:
+                    gravity_loads.append(AreaGravityLoad(
+                        pattern=str(rec.get('LoadPat', '')),
+                        area_id=str(rec.get('Area', '')),
+                        coord_sys=str(rec.get('CoordSys', 'GLOBAL')),
+                        multiplier_x=float(rec.get('MultiplierX', 0.0)),
+                        multiplier_y=float(rec.get('MultiplierY', 0.0)),
+                        multiplier_z=float(rec.get('MultiplierZ', 0.0)),
+                    ))
+
+            else:
+                # Unknown area load type – silently skip
+                pass
+
+        return uniform_loads, gravity_loads
+
     def _get_sections_with_material_properties(self) -> Dict[str, Section]:
         """Combine section geometry from FRAME SECTION PROPERTIES with material data."""
         from ..model.sap_data import (
@@ -567,6 +622,22 @@ class SAP2000Parser:
                 sec_data = GeneralSection(**common)
 
             sections[name] = sec_data
+
+        # ── AREA SECTION PROPERTIES (shell sections not in frame table) ──
+        for sec in self._raw_tables.get('AREA SECTION PROPERTIES', []):
+            name = sec.get('Section', 'Unknown')
+            if name in sections:
+                continue  # already defined via frame section properties
+            mat_name = sec.get('Material', 'Unknown')
+            thickness = float(sec.get('Thickness', 0))
+
+            sections[name] = ShellSection(
+                name=name,
+                shape='Shell',
+                material=mat_name,
+                A=0.0, I33=0.0, I22=0.0, J=0.0,
+                thickness=thickness,
+            )
 
         return sections
 
@@ -744,6 +815,20 @@ class SAP2000Parser:
                 dist_a=float(rec.get('AbsDistA', 0.0)),
                 dist_b=float(rec.get('AbsDistB', 0.0)),
                 coord_sys='Local',
+            ))
+        return loads
+
+    def _get_frame_gravity_loads(self) -> List[GravityLoad]:
+        """Parse FRAME LOADS - GRAVITY table."""
+        loads = []
+        for rec in self._raw_tables.get('FRAME LOADS - GRAVITY', []):
+            loads.append(GravityLoad(
+                pattern=str(rec.get('LoadPat', '')),
+                frame_id=str(rec.get('Frame', '')),
+                coord_sys=str(rec.get('CoordSys', 'GLOBAL')),
+                multiplier_x=float(rec.get('MultiplierX', 0.0)),
+                multiplier_y=float(rec.get('MultiplierY', 0.0)),
+                multiplier_z=float(rec.get('MultiplierZ', 0.0)),
             ))
         return loads
 

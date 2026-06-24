@@ -10,7 +10,8 @@ from collections import defaultdict
 # from ..model.sap_data import FrameElement, FrameDistributedLoad
 from ..model.sap_data import (
     SAPModelData, Node, Restraint, Material, Section,
-    FrameElement, AreaElement, Group, LoadPattern, JointLoad, FrameDistributedLoad
+    FrameElement, AreaElement, Group, LoadPattern, JointLoad,
+    FrameDistributedLoad, AreaUniformLoad,
 )
 
 # ============================================================================
@@ -792,4 +793,131 @@ def beam_load_to_nodal_loads(
         "j": {"fx": f_j_global[0], "fy": f_j_global[1], "fz": f_j_global[2],
               "mx": m_j_global[0], "my": m_j_global[1], "mz": m_j_global[2]},
     }
+
+
+# ============================================================================
+# Area load → frame edge load conversion
+# ============================================================================
+
+def convert_area_loads_to_edge_loads(
+    nodes: Dict[str, 'Node'],
+    area_elements: Dict[str, AreaElement],
+    frame_elements: Dict[str, FrameElement],
+    area_loads: List[AreaUniformLoad],
+) -> List[FrameDistributedLoad]:
+    """Convert uniform area loads to equivalent frame edge loads.
+
+    For each area element with a uniform pressure load, the total force
+    is distributed to the frame elements forming its edges using the
+    tributary‑width method (force on each edge = pressure × distance
+    from edge to centroid × edge length).
+
+    The resulting distributed loads are returned as
+    :class:`FrameDistributedLoad` instances that can be appended to
+    the existing frame load list.
+
+    Args:
+        nodes: Node dict from ``SAPModelData.nodes``.
+        area_elements: Area element dict from ``SAPModelData.area_elements``.
+        frame_elements: Frame element dict from ``SAPModelData.frame_elements``.
+        area_loads: List of area uniform loads.
+
+    Returns:
+        List of ``FrameDistributedLoad`` objects for the edge frame elements.
+    """
+    from collections import defaultdict
+
+    # Build lookup: pair of node IDs → frame element ID
+    edge_map = {}  # (node_i, node_j) sorted → frame_id
+    for eid, elem in frame_elements.items():
+        if getattr(elem, 'inactive', False):
+            continue
+        key = tuple(sorted((elem.node_i, elem.node_j)))
+        edge_map[key] = eid
+
+    # Also need node coords
+    node_coords = {nid: np.array([n.x, n.y, n.z]) for nid, n in nodes.items()}
+
+    result_loads = []
+
+    for al in area_loads:
+        area = area_elements.get(al.area_id)
+        if area is None:
+            continue
+        nids = area.node_ids
+        if len(nids) < 3:
+            continue
+
+        # Compute area centroid
+        pts = np.array([node_coords[nid] for nid in nids])
+        centroid = pts.mean(axis=0)
+
+        # Compute area (shoelace formula)
+        area_val = 0.0
+        for k in range(len(nids)):
+            i1, i2 = k, (k + 1) % len(nids)
+            cross = np.cross(pts[i1], pts[i2])
+            area_val += cross[2]
+        area_val = abs(area_val) * 0.5
+
+        if area_val < 1e-12:
+            continue
+
+        P = al.value  # pressure
+
+        # For each edge of the area, find the matching frame element
+        for k in range(len(nids)):
+            n_a = nids[k]
+            n_b = nids[(k + 1) % len(nids)]
+            key = tuple(sorted((n_a, n_b)))
+            frame_id = edge_map.get(key)
+            if frame_id is None:
+                continue
+
+            # Midpoint of this edge
+            p_a = node_coords[n_a]
+            p_b = node_coords[n_b]
+            mid = (p_a + p_b) * 0.5
+
+            # Perpendicular distance from centroid to the edge line
+            edge_vec = p_b - p_a
+            edge_len = np.linalg.norm(edge_vec)
+            if edge_len < 1e-12:
+                continue
+            edge_dir = edge_vec / edge_len
+
+            # Vector from midpoint to centroid
+            to_cent = centroid - mid
+            # Perpendicular distance (remove component parallel to edge)
+            perp_vec = to_cent - np.dot(to_cent, edge_dir) * edge_dir
+            perp_dist = np.linalg.norm(perp_vec)
+
+            # Tributary load intensity: w = P × perp_dist (kN/m)
+            w = P * perp_dist
+            if abs(w) < 1e-12:
+                continue
+
+            # Determine load direction from the area load
+            if al.direction == 'Gravity':
+                direction = 'Z'
+            else:
+                direction = al.direction
+
+            # Create the edge load — uniform over the full span
+            result_loads.append(FrameDistributedLoad(
+                pattern=al.pattern,
+                frame_id=frame_id,
+                direction=direction,
+                load_type='Force',
+                shape='Uniform',
+                val_a=w,
+                val_b=w,
+                rdist_a=0.0,
+                rdist_b=1.0,
+                dist_a=0.0,
+                dist_b=edge_len,
+                coord_sys=al.coord_sys,
+            ))
+
+    return result_loads
 
