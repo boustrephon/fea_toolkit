@@ -38,6 +38,8 @@ from fea_toolkit.model.sap_data import (
     GravityLoad,
     FramePointLoad,
     MassSource,
+    AreaGravityLoad,
+    AreaUniformLoad,
     Constraint,
     CoordSys,
     default_coord_sys,
@@ -53,6 +55,7 @@ from fea_toolkit.model.geometry import (
     SpatialGrid,
     beam_load_to_nodal_loads,
 )
+from fea_toolkit.model.selection import Selection
 
 # ============================================================================
 # Fixtures
@@ -241,6 +244,32 @@ class TestGravityLoad:
         )
         assert gl.multiplier_z == -1.0
         assert gl.multiplier_x == 0.0
+
+
+class TestAreaGravityLoad:
+    def test_defaults(self):
+        agl = AreaGravityLoad(
+            pattern="DEAD", area_id="10", multiplier_z=-1.0
+        )
+        assert agl.pattern == "DEAD"
+        assert agl.area_id == "10"
+        assert agl.multiplier_z == -1.0
+        assert agl.multiplier_x == 0.0
+        assert agl.coord_sys == "GLOBAL"
+
+    def test_all_multipliers(self):
+        agl = AreaGravityLoad(
+            pattern="QUAKE",
+            area_id="5",
+            multiplier_x=0.3,
+            multiplier_y=0.3,
+            multiplier_z=-1.0,
+            coord_sys="LOCAL",
+        )
+        assert agl.multiplier_x == 0.3
+        assert agl.multiplier_y == 0.3
+        assert agl.multiplier_z == -1.0
+        assert agl.coord_sys == "LOCAL"
 
 
 class TestMassSource:
@@ -510,6 +539,17 @@ class TestSAPModelData:
             units={"F": "kip", "L": "in", "T": "F"},
         )
         assert m.units == {"F": "kip", "L": "in", "T": "F"}
+
+    def test_new_load_fields_default(self):
+        """Verify recently-added load fields default to empty lists."""
+        m = SAPModelData(
+            nodes={}, restraints={}, materials={}, sections={},
+            frame_elements={}, area_elements={}, frame_assignments={},
+            area_assignments={}, groups={}, frame_auto_mesh={},
+        )
+        assert m.area_gravity_loads == []
+        assert m.frame_gravity_loads == []
+        assert m.area_uniform_loads == []
 
 
 # ============================================================================
@@ -1049,6 +1089,203 @@ class TestBoxSectionFiberPatches:
         # Bottom flange: y from -0.3 to -0.28
         assert abs(patches[1][4] + 0.3) < 1e-12
         assert abs(patches[1][6] + 0.28) < 1e-12
+
+
+# ============================================================================
+# Selection tests
+# ============================================================================
+
+
+class TestSelection:
+    """Tests for the Selection filter class."""
+
+    @pytest.fixture
+    def model(self):
+        """Minimal model with frames, areas, nodes, sections, groups."""
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=5, y=0, z=0),
+            "3": Node(node_id="3", node_tag=3, x=5, y=5, z=0),
+            "4": Node(node_id="4", node_tag=4, x=0, y=5, z=0),
+            "5": Node(node_id="5", node_tag=5, x=0, y=0, z=3),
+        }
+        materials = {
+            "Steel": Material(name="Steel", type="Steel",
+                              E_mod=2e11, unit_weight=77000),
+            "Concrete": Material(name="Concrete", type="Concrete",
+                                 E_mod=3e10, unit_weight=24000),
+        }
+        sections = {
+            "UB100": Section(name="UB100", shape="I/Wide Flange",
+                             material="Steel", A=0.01, I33=1e-4,
+                             I22=1e-5, J=1e-6),
+            "Slab200": ShellSection(name="Slab200", shape="Shell",
+                                    material="Concrete",
+                                    A=0, I33=0, I22=0, J=0,
+                                    thickness=0.2),
+        }
+        frames = {
+            "1": FrameElement(elem_id="1", elem_tag=1,
+                              node_i="1", node_j="2"),
+            "2": FrameElement(elem_id="2", elem_tag=2,
+                              node_i="2", node_j="3"),
+        }
+        areas = {
+            "1": AreaElement(area_id="1", area_tag=1,
+                             node_ids=["1","2","3","4"], thickness=0.2),
+        }
+        groups = {
+            "Moment Frame": Group(
+                name="Moment Frame",
+                objects=["Frame:1", "Frame:2"],
+            ),
+            "Slabs": Group(
+                name="Slabs",
+                objects=["Area:1"],
+            ),
+        }
+        area_uniform = [
+            AreaUniformLoad(pattern="DEAD", area_id="1",
+                            direction="Gravity", value=5000),
+        ]
+        area_gravity = [
+            AreaGravityLoad(pattern="DEAD", area_id="1",
+                            multiplier_z=-1.0),
+        ]
+        return SAPModelData(
+            nodes=nodes,
+            restraints={},
+            materials=materials,
+            sections=sections,
+            frame_elements=frames,
+            area_elements=areas,
+            frame_assignments={"1": "UB100", "2": "UB100"},
+            area_assignments={"1": "Slab200"},
+            groups=groups,
+            frame_auto_mesh={},
+            area_uniform_loads=area_uniform,
+            area_gravity_loads=area_gravity,
+        )
+
+    # ── element_types filter ──
+
+    def test_select_frames_only(self, model):
+        sel = Selection(element_types=["Frame"])
+        assert sel.get_frame_ids(model) == ["1", "2"]
+        assert sel.get_area_ids(model) == []
+        assert sel.get_node_ids(model) == []
+
+    def test_select_areas_only(self, model):
+        sel = Selection(element_types=["Area"])
+        assert sel.get_frame_ids(model) == []
+        assert sel.get_area_ids(model) == ["1"]
+
+    def test_select_multiple_types(self, model):
+        sel = Selection(element_types=["Frame", "Area"])
+        assert set(sel.get_frame_ids(model)) == {"1", "2"}
+        assert sel.get_area_ids(model) == ["1"]
+
+    def test_no_element_type_filter(self, model):
+        """element_types=None matches all types."""
+        sel = Selection()
+        assert len(sel.get_frame_ids(model)) == 2
+        assert len(sel.get_area_ids(model)) == 1
+
+    # ── section filter ──
+
+    def test_select_by_section(self, model):
+        sel = Selection(element_types=["Frame"], sections=["UB100"])
+        assert set(sel.get_frame_ids(model)) == {"1", "2"}
+
+    def test_select_by_section_no_match(self, model):
+        sel = Selection(element_types=["Frame"], sections=["Nonexistent"])
+        assert sel.get_frame_ids(model) == []
+
+    def test_select_area_by_section(self, model):
+        sel = Selection(element_types=["Area"], sections=["Slab200"])
+        assert sel.get_area_ids(model) == ["1"]
+
+    # ── material filter ──
+
+    def test_select_by_material(self, model):
+        sel = Selection(materials=["Concrete"])
+        assert sel.get_area_ids(model) == ["1"]
+        assert sel.get_frame_ids(model) == []
+
+    def test_select_by_material_no_match(self, model):
+        sel = Selection(materials=["Timber"])
+        assert sel.get_area_ids(model) == []
+        assert sel.get_frame_ids(model) == []
+
+    # ── group filter ──
+
+    def test_select_by_group(self, model):
+        sel = Selection(groups=["Moment Frame"])
+        assert set(sel.get_frame_ids(model)) == {"1", "2"}
+        assert sel.get_area_ids(model) == []
+
+    def test_select_by_group_area(self, model):
+        sel = Selection(groups=["Slabs"])
+        assert sel.get_area_ids(model) == ["1"]
+
+    # ── element_ids filter ──
+
+    def test_select_by_element_id(self, model):
+        sel = Selection(element_ids=["1"])
+        assert sel.get_frame_ids(model) == ["1"]
+        assert sel.get_area_ids(model) == ["1"]
+
+    def test_select_by_element_id_multiple(self, model):
+        sel = Selection(element_ids=["1", "2"])
+        assert sel.get_frame_ids(model) == ["1", "2"]
+
+    # ── combined criteria (AND across fields) ──
+
+    def test_and_across_criteria(self, model):
+        """element_types AND groups — both must match."""
+        sel = Selection(element_types=["Frame"], groups=["Moment Frame"])
+        assert set(sel.get_frame_ids(model)) == {"1", "2"}
+
+    def test_and_no_match(self, model):
+        """element_types AND groups — Area + Moment Frame = none."""
+        sel = Selection(element_types=["Area"], groups=["Moment Frame"])
+        assert sel.get_area_ids(model) == []
+
+    # ── dict filter methods ──
+
+    def test_filter_frames(self, model):
+        sel = Selection(element_types=["Frame"])
+        d = sel.filter_frames(model)
+        assert set(d.keys()) == {"1", "2"}
+        assert all(isinstance(v, FrameElement) for v in d.values())
+
+    def test_filter_areas(self, model):
+        sel = Selection(element_types=["Area"])
+        d = sel.filter_areas(model)
+        assert set(d.keys()) == {"1"}
+
+    def test_filter_nodes(self, model):
+        sel = Selection(element_types=["Node"])
+        d = sel.filter_nodes(model)
+        assert set(d.keys()) == {"1", "2", "3", "4", "5"}
+
+    # ── load filter methods ──
+
+    def test_filter_area_uniform(self, model):
+        sel = Selection(element_types=["Area"])
+        loads = sel.filter_area_uniform_loads(model)
+        assert len(loads) == 1
+        assert loads[0].area_id == "1"
+
+    def test_filter_area_uniform_no_match(self, model):
+        sel = Selection(element_types=["Frame"])
+        assert sel.filter_area_uniform_loads(model) == []
+
+    def test_filter_area_gravity(self, model):
+        sel = Selection(element_types=["Area"])
+        loads = sel.filter_area_gravity_loads(model)
+        assert len(loads) == 1
+        assert loads[0].multiplier_z == -1.0
 
 
 # ============================================================================
