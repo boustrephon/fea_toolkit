@@ -9,9 +9,12 @@ All functions gracefully fall back to a warning if the required package
 is not installed.
 """
 
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, TYPE_CHECKING
 import math
 import numpy as np
+
+if TYPE_CHECKING:
+    from ..model.selection import Selection
 
 
 def _set_isometric_view(plotter) -> None:
@@ -39,6 +42,7 @@ def plot_model_3d(
     show_nodes: bool = True,
     show_labels: bool = False,
     color_by_section: bool = True,
+    selection: Optional['Selection'] = None,
     notebook: bool = False,
     **kwargs,
 ) -> Optional[Any]:
@@ -49,6 +53,8 @@ def plot_model_3d(
         show_nodes: If True, draw node markers.
         show_labels: If True, label nodes with their tags.
         color_by_section: If True, colour elements by section name.
+        selection: Optional :class:`~fea_toolkit.model.selection.Selection`
+            to restrict which elements are shown.  ``None`` means all.
         notebook: If True, return a plotter suitable for Jupyter embedding.
         **kwargs: Passed to ``pyvista.Plotter()``.
 
@@ -71,6 +77,10 @@ def plot_model_3d(
     # Collect element lines
     elements = (builder.split_elements if builder.split_elements
                 else builder.model.frame_elements)
+    if selection is not None:
+        sel_ids = set(selection.get_frame_ids(builder.model))
+        elements = {eid: elem for eid, elem in elements.items()
+                    if eid in sel_ids}
     assignments = (builder.split_assignments if builder.split_elements
                    else builder.model.frame_assignments)
 
@@ -146,6 +156,7 @@ def plot_deformed_3d(
     results: Dict[str, Any],
     scale: float = 10.0,
     show_original: bool = True,
+    selection: Optional['Selection'] = None,
     notebook: bool = False,
     **kwargs,
 ) -> Optional[Any]:
@@ -157,6 +168,8 @@ def plot_deformed_3d(
                  ``nodal_displacements``.
         scale: Displacement magnification factor.
         show_original: If True, show the undeformed model in grey.
+        selection: Optional :class:`~fea_toolkit.model.selection.Selection`
+            to restrict which elements are shown.  ``None`` means all.
         notebook: If True, return plotter for Jupyter.
         **kwargs: Passed to ``pyvista.Plotter()``.
 
@@ -179,6 +192,10 @@ def plot_deformed_3d(
 
     elements = (builder.split_elements if builder.split_elements
                 else builder.model.frame_elements)
+    if selection is not None:
+        sel_ids = set(selection.get_frame_ids(builder.model))
+        elements = {eid: elem for eid, elem in elements.items()
+                    if eid in sel_ids}
     assignments = (builder.split_assignments if builder.split_elements
                    else builder.model.frame_assignments)
 
@@ -241,6 +258,7 @@ def plot_rs_deformed_3d(
     rs_displacements: Dict[int, tuple],
     scale: float = 10.0,
     show_original: bool = True,
+    selection: Optional['Selection'] = None,
     notebook: bool = False,
     **kwargs,
 ) -> Optional[Any]:
@@ -253,6 +271,8 @@ def plot_rs_deformed_3d(
             ``node_tag → (dx, dy, dz)``.
         scale: Displacement magnification factor.
         show_original: If True, show the undeformed model in grey.
+        selection: Optional :class:`~fea_toolkit.model.selection.Selection`
+            to restrict which elements are shown.  ``None`` means all.
         notebook: If True, return plotter for Jupyter.
         **kwargs: Passed to ``pyvista.Plotter()``.
 
@@ -273,6 +293,10 @@ def plot_rs_deformed_3d(
 
     elements = (builder.split_elements if builder.split_elements
                 else builder.model.frame_elements)
+    if selection is not None:
+        sel_ids = set(selection.get_frame_ids(builder.model))
+        elements = {eid: elem for eid, elem in elements.items()
+                    if eid in sel_ids}
 
     plotter = pv.Plotter(notebook=notebook, **kwargs)
 
@@ -347,6 +371,7 @@ def plot_static_moment_3d(
     mode: str = 'flag',
     moment_scale: float = None,
     show_original: bool = True,
+    selection: Optional['Selection'] = None,
     notebook: bool = False,
     **kwargs,
 ) -> Optional[Any]:
@@ -378,6 +403,8 @@ def plot_static_moment_3d(
                       If ``None``, auto‑scaled so the largest flag is
                       10 % of the model height.
         show_original: If True, draw the centreline in grey.
+        selection: Optional :class:`~fea_toolkit.model.selection.Selection`
+            to restrict which elements are shown.  ``None`` means all.
         notebook: If True, return plotter for Jupyter.
         **kwargs: Passed to ``pyvista.Plotter()``.
 
@@ -394,6 +421,10 @@ def plot_static_moment_3d(
 
     elements = (builder.split_elements if builder.split_elements
                 else builder.model.frame_elements)
+    if selection is not None:
+        sel_ids = set(selection.get_frame_ids(builder.model))
+        elements = {eid: elem for eid, elem in elements.items()
+                    if eid in sel_ids}
 
     if mode == 'flag':
         return _plot_moment_flags(builder, elements, elem_forces, quantity,
@@ -552,6 +583,7 @@ def plot_static_force_diagram(
     elem_forces: Dict[int, Dict[str, float]],
     quantity: str = 'Fz',
     title: str = None,
+    selection: Optional['Selection'] = None,
     figsize=(6, 8),
     **kwargs,
 ) -> Optional[Any]:
@@ -570,6 +602,8 @@ def plot_static_force_diagram(
         quantity: Global force key — ``'Fx'``, ``'Fy'``, ``'Fz'``,
                   ``'Mx'``, ``'My'``, ``'Mz'``.
         title: Optional title.  Auto‑generated if omitted.
+        selection: Optional :class:`~fea_toolkit.model.selection.Selection`
+            to restrict which elements are shown.  ``None`` means all.
         figsize: Matplotlib figure size ``(width, height)``.
         **kwargs: Passed to ``matplotlib.pyplot.plot()``.
 
@@ -579,6 +613,10 @@ def plot_static_force_diagram(
     # Build a list matching the format expected by plot_force_diagram
     elements = (builder.split_elements if builder.split_elements
                 else builder.model.frame_elements)
+    if selection is not None:
+        sel_ids = set(selection.get_frame_ids(builder.model))
+        elements = {eid: elem for eid, elem in elements.items()
+                    if eid in sel_ids}
     entries = []
     for eid, elem in elements.items():
         if getattr(elem, 'inactive', False):
