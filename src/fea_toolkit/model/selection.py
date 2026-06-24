@@ -260,3 +260,152 @@ class Selection:
             ld for ld in model.area_gravity_loads
             if ld.area_id in selected_ids
         ]
+
+    # ── Self-contained subset ────────────────────────────────────────────────
+
+    def filter_model(self, model: "SAPModelData") -> "SAPModelData":
+        """Create a new, self-contained ``SAPModelData`` for this selection.
+
+        The returned model contains only the entities needed by the selected
+        elements — their nodes, sections, materials, restraints, and loads.
+        The original model is **not** modified.
+
+        This is useful for:
+
+        * **Plotting** — show only a structural subsystem with all its
+          dependencies resolved.
+        * **Export** — create a clean subset for exchange or debugging.
+        * **Verification** — confirm the selection is self-consistent.
+
+        Only **Frame** and **Area** selections are currently supported.
+        A pure **Node** selection (no Frame or Area types) will return an
+        empty model.
+
+        Returns:
+            A new ``SAPModelData`` instance containing only the entities
+            required by this selection.
+        """
+        from .sap_data import SAPModelData
+
+        # 1. Collect element IDs that match
+        frame_ids = set(self.get_frame_ids(model))
+        area_ids = set(self.get_area_ids(model))
+
+        # 2. Collect referenced node IDs
+        node_ids: Set[str] = set()
+        for fid in frame_ids:
+            fe = model.frame_elements.get(fid)
+            if fe is not None:
+                node_ids.add(fe.node_i)
+                node_ids.add(fe.node_j)
+        for aid in area_ids:
+            ae = model.area_elements.get(aid)
+            if ae is not None:
+                node_ids.update(ae.node_ids)
+
+        # 3. Collect section names referenced by selected elements
+        sec_names: Set[str] = set()
+        for fid in frame_ids:
+            s = model.frame_assignments.get(fid)
+            if s:
+                sec_names.add(s)
+        for aid in area_ids:
+            s = model.area_assignments.get(aid)
+            if s:
+                sec_names.add(s)
+
+        # 4. Collect material names from those sections
+        mat_names: Set[str] = set()
+        for sn in sec_names:
+            sec = model.sections.get(sn)
+            if sec is not None:
+                mat_names.add(sec.material)
+
+        # 5. Build filtered dicts
+        subset = SAPModelData(
+            # Nodes
+            nodes={nid: model.nodes[nid] for nid in node_ids
+                   if nid in model.nodes},
+            # Restraints on those nodes
+            restraints={nid: model.restraints[nid] for nid in node_ids
+                        if nid in model.restraints},
+            # Materials used by selected sections
+            materials={mn: model.materials[mn] for mn in mat_names
+                       if mn in model.materials},
+            # Sections used by selected elements
+            sections={sn: model.sections[sn] for sn in sec_names
+                      if sn in model.sections},
+            # Frame & area elements
+            frame_elements={fid: model.frame_elements[fid] for fid in frame_ids
+                            if fid in model.frame_elements},
+            area_elements={aid: model.area_elements[aid] for aid in area_ids
+                           if aid in model.area_elements},
+            # Assignments
+            frame_assignments={fid: model.frame_assignments[fid]
+                               for fid in frame_ids
+                               if fid in model.frame_assignments},
+            area_assignments={aid: model.area_assignments[aid]
+                              for aid in area_ids
+                              if aid in model.area_assignments},
+            # Auto-mesh for selected frames
+            frame_auto_mesh={fid: model.frame_auto_mesh[fid]
+                             for fid in frame_ids
+                             if fid in model.frame_auto_mesh},
+            # Groups — keep those that contain selected elements, with only
+            # the matching references
+            groups=self._filter_groups(model, frame_ids, area_ids, node_ids),
+            # Load definitions — keep all (harmless)
+            load_cases=model.load_cases,
+            load_patterns=model.load_patterns,
+            mass_sources=model.mass_sources,
+            # Loads on selected elements / nodes
+            joint_loads=[jl for jl in model.joint_loads
+                         if jl.node_id in node_ids],
+            frame_dist_loads=[ld for ld in model.frame_dist_loads
+                              if ld.frame_id in frame_ids],
+            frame_gravity_loads=[gl for gl in model.frame_gravity_loads
+                                 if gl.frame_id in frame_ids],
+            area_uniform_loads=self.filter_area_uniform_loads(model),
+            area_gravity_loads=self.filter_area_gravity_loads(model),
+            # Units
+            units=dict(model.units),
+        )
+        return subset
+
+    def _filter_groups(
+        self,
+        model: "SAPModelData",
+        frame_ids: Set[str],
+        area_ids: Set[str],
+        node_ids: Set[str],
+    ) -> Dict[str, "Group"]:
+        """Return groups that have at least one selected element, pruned
+        to only those references."""
+        from .sap_data import Group
+        result: Dict[str, Group] = {}
+        for gname, grp in model.groups.items():
+            kept: List[str] = []
+            for obj in grp.objects:
+                # Object references are "Frame:123", "Area:456", "Joint:1"
+                if obj.startswith("Frame:"):
+                    eid = obj.split(":", 1)[1]
+                    if eid in frame_ids:
+                        kept.append(obj)
+                elif obj.startswith("Area:"):
+                    eid = obj.split(":", 1)[1]
+                    if eid in area_ids:
+                        kept.append(obj)
+                elif obj.startswith("Joint:"):
+                    nid = obj.split(":", 1)[1]
+                    if nid in node_ids:
+                        kept.append(obj)
+                else:
+                    # Unknown type — keep it (conservative)
+                    kept.append(obj)
+            if kept:
+                result[gname] = Group(
+                    name=gname,
+                    color=grp.color,
+                    objects=kept,
+                )
+        return result
