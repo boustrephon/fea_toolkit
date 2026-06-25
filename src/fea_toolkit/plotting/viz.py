@@ -946,8 +946,12 @@ def plot_capacity_spectrum(
     S_d = np.array(capacity_adrs.get('S_d', []))
     S_a = np.array(capacity_adrs.get('S_a', []))
 
-    if len(S_d) < 2 or len(S_a) < 2:
-        print("Insufficient ADRS data to plot.")
+    if len(S_d) < 2 or len(S_a) < 2 or len(S_d) != len(S_a):
+        print("Insufficient or mismatched ADRS data to plot.")
+        return None
+
+    if len(spectrum_periods) != len(spectrum_accels):
+        print("spectrum_periods and spectrum_accels have different lengths.")
         return None
 
     fig, ax = plt.subplots(figsize=figsize)
