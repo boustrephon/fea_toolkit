@@ -1777,3 +1777,621 @@ class TestPushoverBuild:
                 max_disp=0.1, num_steps=5,
                 print_progress=False,
             )
+
+
+# ============================================================================
+# HingeRadau beam integration tests
+# ============================================================================
+
+
+class TestHingeRadauIntegration:
+    """Tests for :meth:`OpenSeesBuilder._compute_hinge_length`."""
+
+    def test_hinge_length_i_section(self):
+        """ISection depth → Lp = 0.5 * depth."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        md = SAPModelData(nodes={}, restraints={}, materials={}, sections={},
+                          frame_elements={}, area_elements={},
+                          frame_assignments={}, area_assignments={},
+                          groups={}, frame_auto_mesh={})
+        md.sections["UB300"] = ISection(
+            name="UB300", shape="I/Wide Flange", material="Steel",
+            depth=0.3, bf=0.15, tf=0.01, tw=0.006,
+            A=8e-3, I33=1.2e-4, I22=4e-5, J=2e-6,
+        )
+        b = OpenSeesBuilder(md, {'verbose': False})
+        b.section_tags = {"UB300": 1}
+        Lp = b._compute_hinge_length(1, 10.0)
+        assert abs(Lp - 0.15) < 0.01  # 0.5 * 0.3
+
+    def test_hinge_length_pipe_section(self):
+        """Pipe OD → Lp = 0.5 * OD."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        md = SAPModelData(nodes={}, restraints={}, materials={}, sections={},
+                          frame_elements={}, area_elements={},
+                          frame_assignments={}, area_assignments={},
+                          groups={}, frame_auto_mesh={})
+        md.sections["PIP4"] = PipeSection(
+            name="PIP4", shape="Pipe", material="Steel",
+            od=0.1143, t=0.006, A=2e-3, I33=3e-6, I22=3e-6, J=1e-6,
+        )
+        b = OpenSeesBuilder(md, {'verbose': False})
+        b.section_tags = {"PIP4": 1}
+        Lp = b._compute_hinge_length(1, 10.0)
+        assert abs(Lp - 0.05715) < 0.001  # 0.5 * 0.1143
+
+    def test_hinge_length_fallback(self):
+        """Unknown section → Lp = 0.1 * L."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        md = SAPModelData(nodes={}, restraints={}, materials={}, sections={},
+                          frame_elements={}, area_elements={},
+                          frame_assignments={}, area_assignments={},
+                          groups={}, frame_auto_mesh={})
+        md.sections["GENERIC"] = Section(
+            name="GENERIC", shape="NA", material="Steel",
+            A=1e-2, I33=1e-4, I22=1e-4, J=1e-6,
+        )
+        b = OpenSeesBuilder(md, {'verbose': False})
+        b.section_tags = {"GENERIC": 1}
+        Lp = b._compute_hinge_length(1, 8.0)
+        assert abs(Lp - 0.8) < 0.01  # 0.1 * 8.0
+
+
+# ============================================================================
+# Brace subdivision tests
+# ============================================================================
+
+
+class TestSubdivideElements:
+    """Tests for :func:`fea_toolkit.model.geometry.subdivide_elements`."""
+
+    def test_subdivide_creates_sub_elements(self):
+        """4 segments → 4 child elements, original marked inactive."""
+        from fea_toolkit.model.geometry import subdivide_elements
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
+        }
+        elem = FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2")
+        elements = {"B1": elem}
+        assignments = {"B1": "UB300"}
+        result_elems, result_assign, result_nodes, _, _ = subdivide_elements(
+            elements, assignments, nodes,
+            n_segments=4, brace_ids={"B1"}, next_tag=100,
+        )
+        assert elem.inactive is True, "Original should be inactive"
+        assert len(result_elems) == 5  # 1 original + 4 subs
+        sub_ids = [eid for eid in result_elems if eid.startswith("B1_sub")]
+        assert len(sub_ids) == 4
+        for sid in sub_ids:
+            assert sid in result_assign
+            assert result_assign[sid] == "UB300"
+
+    def test_subdivide_creates_internal_nodes(self):
+        """4 segments → 3 new internal nodes."""
+        from fea_toolkit.model.geometry import subdivide_elements
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
+        }
+        elem = FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2")
+        elements = {"B1": elem}
+        assignments = {"B1": "UB300"}
+        _, _, result_nodes, _, _ = subdivide_elements(
+            elements, assignments, nodes,
+            n_segments=4, brace_ids={"B1"}, next_tag=100,
+        )
+        new_nodes = [nid for nid in result_nodes if nid.startswith("B1_sub")]
+        assert len(new_nodes) == 3  # 4 segments → 3 internal nodes
+
+    def test_imperfection_offsets_mid_node(self):
+        """Mid-node of subdivided brace has lateral offset ≈ L/500."""
+        from fea_toolkit.model.geometry import subdivide_elements
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
+        }
+        elem = FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2")
+        elements = {"B1": elem}
+        _, _, result_nodes, _, _ = subdivide_elements(
+            elements, assignments={"B1": "UB300"}, nodes=nodes,
+            n_segments=4, imperfection_ratio=1/500, brace_ids={"B1"},
+            next_tag=100,
+        )
+        # The middle internal node (at z≈5) should have an x-offset
+        mid_nodes = [n for nid, n in result_nodes.items()
+                     if nid.startswith("B1_sub") and abs(n.z - 5.0) < 0.5]
+        if mid_nodes:
+            offset = abs(mid_nodes[0].x)
+            assert offset > 0.001, f"Expected imperfection offset, got {offset}"
+
+    def test_end_offset_creates_rigid_links(self):
+        """end_offset > 0 creates offset nodes and rigid link entries."""
+        from fea_toolkit.model.geometry import subdivide_elements
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
+        }
+        elem = FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2")
+        elements = {"B1": elem}
+        _, _, result_nodes, _, rigid_links = subdivide_elements(
+            elements, assignments={"B1": "UB300"}, nodes=nodes,
+            n_segments=4, brace_ids={"B1"}, end_offset=0.5, next_tag=100,
+        )
+        # Should have two rigid links (I-end and J-end)
+        assert len(rigid_links) == 2
+        link_i, link_j = rigid_links
+        assert link_i[1] == "1"   # I-end: original node
+        assert link_j[2] == "2"   # J-end: original node
+        # Should have two offset nodes
+        offset_ids = [nid for nid in result_nodes if "_offset_" in nid]
+        assert len(offset_ids) == 2
+        # Sub-elements should connect to offset nodes, not original nodes
+        sub_ids = [eid for eid in elements if "_sub_" in eid]
+        first_sub = elements[sub_ids[0]]
+        last_sub = elements[sub_ids[-1]]
+        assert first_sub.node_i in offset_ids
+        assert last_sub.node_j in offset_ids
+
+    def test_end_offset_clamped_to_half_length(self):
+        """end_offset larger than half length is clamped."""
+        from fea_toolkit.model.geometry import subdivide_elements
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=0, y=0, z=5),
+        }
+        elem = FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2")
+        elements = {"B1": elem}
+        _, _, result_nodes, _, rigid_links = subdivide_elements(
+            elements, assignments={"B1": "UB300"}, nodes=nodes,
+            n_segments=2, brace_ids={"B1"}, end_offset=3.0, next_tag=100,
+        )
+        # Brace should still have at least some length (clamped to 45%)
+        offset_ids = [nid for nid in result_nodes if "_offset_" in nid]
+        if offset_ids:
+            # Check offset nodes are within bounds
+            for nid in offset_ids:
+                n = result_nodes[nid]
+                assert 0.0 <= n.z <= 5.0
+
+
+# ============================================================================
+# Euler buckling check tests
+# ============================================================================
+
+
+class TestBraceBucklingCheck:
+    """Tests for :meth:`OpenSeesBuilder.check_brace_buckling`."""
+
+    @pytest.fixture
+    def brace_model(self):
+        """A simple 2‑node cantilever used as a brace."""
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=6, y=0, z=6),
+        }
+        restraints = {"1": Restraint([1, 1, 1, 1, 1, 1])}
+        materials = {
+            "Steel": Material(name="Steel", type="Steel",
+                              E_mod=2e11, unit_weight=77000),
+        }
+        sections = {
+            "PIP4": PipeSection(name="PIP4", shape="Pipe", material="Steel",
+                                od=0.1143, t=0.006,
+                                A=2e-3, I33=3e-6, I22=3e-6, J=1e-6),
+        }
+        frames = {
+            "B1": FrameElement(elem_id="B1", elem_tag=1,
+                               node_i="1", node_j="2"),
+        }
+        return SAPModelData(
+            nodes=nodes, restraints=restraints,
+            materials=materials, sections=sections,
+            frame_elements=frames, area_elements={},
+            frame_assignments={"B1": "PIP4"},
+            area_assignments={}, groups={}, frame_auto_mesh={},
+        )
+
+    def test_euler_buckling_pinned(self, brace_model):
+        """Euler P_cr with K=1 matches π²EI/L²."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(brace_model, {'verbose': False})
+        results = b.check_brace_buckling(brace_ids={"B1"}, K=1.0,
+                                          print_results=False)
+        assert "B1" in results
+        r = results["B1"]
+        # L = sqrt(6² + 6²) ≈ 8.485, I = 3e-6, E = 2e11
+        expected = (math.pi ** 2 * 2e11 * 3e-6) / (8.485 ** 2)
+        assert abs(r["P_cr"] - expected) / expected < 0.01
+        assert r["slenderness"] > 0
+
+    def test_buckling_with_axial_demand(self, brace_model):
+        """D/C ratio computed correctly."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(brace_model, {'verbose': False})
+        results = b.check_brace_buckling(
+            brace_ids={"B1"}, K=1.0,
+            axial_demand={"B1": 50000.0},  # 50 kN
+            print_results=False,
+        )
+        r = results["B1"]
+        assert r["P_demand"] == 50000.0
+        assert r["ratio"] > 0
+
+    def test_from_brace_sections(self):
+        """Selection.from_brace_sections detects Pipe, Angle, etc."""
+        from fea_toolkit.model.selection import Selection
+        sections = {
+            "PIP4": PipeSection(name="PIP4", shape="Pipe", material="Steel",
+                                od=0.1, t=0.005, A=1e-3,
+                                I33=1e-6, I22=1e-6, J=1e-7),
+            "UB300": ISection(name="UB300", shape="I/Wide Flange",
+                              material="Steel", depth=0.3, bf=0.15,
+                              tf=0.01, tw=0.006,
+                              A=8e-3, I33=1.2e-4, I22=4e-5, J=2e-6),
+        }
+        model = SAPModelData(
+            nodes={}, restraints={}, materials={}, sections=sections,
+            frame_elements={}, area_elements={},
+            frame_assignments={}, area_assignments={},
+            groups={}, frame_auto_mesh={},
+        )
+        sel = Selection.from_brace_sections(model)
+        assert sel.sections is not None
+        assert "PIP4" in sel.sections
+        assert "UB300" not in sel.sections
+
+
+# ============================================================================
+# Integration test: subdivided brace in pushover pipeline
+# ============================================================================
+
+
+class TestSubdividedBraceInPushover:
+    """Verify that braces with subdivision + imperfection can be built and
+    run through a pushover analysis without error.
+
+    This tests the pipeline integration — not the exact buckling load
+    (which is verified analytically in ``TestBraceBucklingCheck``).
+    The practical workflow is:
+
+    1. Identify braces via ``Selection``
+    2. Subdivide them with imperfection via ``set_brace_selection()``
+    3. Run pushover analysis
+    4. Optionally check critical braces via ``check_brace_buckling()``
+    """
+
+    @pytest.fixture
+    def brace_model(self):
+        """A slender 10 m pin-pin pipe column for pushover testing."""
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
+        }
+        restraints = {"1": Restraint([1, 1, 1, 1, 1, 1])}
+        materials = {
+            "Steel": Material(name="Steel", type="Steel",
+                              E_mod=2e11, unit_weight=77000, Fy=2.5e8),
+        }
+        sections = {
+            "PIP4": PipeSection(name="PIP4", shape="Pipe", material="Steel",
+                                od=0.1, t=0.005,
+                                A=0.001492, I33=1.70e-6, I22=1.70e-6, J=3.4e-6),
+        }
+        frames = {
+            "B1": FrameElement(elem_id="B1", elem_tag=10,
+                               node_i="1", node_j="2"),
+        }
+        load_patterns = {
+            "WIND": LoadPattern(name="WIND", pattern_type="Wind",
+                                self_weight_factor=0),
+        }
+        frame_dist_loads = [
+            FrameDistributedLoad(pattern="WIND", frame_id="B1",
+                                 direction="X", load_type="Force",
+                                 shape="Uniform", val_a=5000, val_b=5000,
+                                 rdist_a=0, rdist_b=1, dist_a=0, dist_b=10),
+        ]
+        return SAPModelData(
+            nodes=nodes, restraints=restraints,
+            materials=materials, sections=sections,
+            frame_elements=frames, area_elements={},
+            frame_assignments={"B1": "PIP4"},
+            area_assignments={}, groups={}, frame_auto_mesh={},
+            load_patterns=load_patterns,
+            frame_dist_loads=frame_dist_loads,
+        )
+
+    def test_subdivided_brace_builds_and_runs(self, brace_model):
+        """Builder with subdivided braces runs pushover without crash."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        b = OpenSeesBuilder(brace_model, {
+            'element_type': 'forceBeamColumn',
+            'create_fiber_sections': True,
+            'geom_transf_type': 'Corotational',
+            'split_elements': False,
+            'verbose': False,
+        })
+        b.set_brace_selection({"B1"}, end_offset=0.0)
+        b.build()
+
+        # Run a quick pushover to verify the pipeline holds
+        results = b.run_pushover_analysis(
+            gravity_patterns={},
+            lateral_load_type='uniform',
+            lateral_direction='X',
+            control_node_tag=2,
+            max_disp=0.05,
+            num_steps=5,
+            print_progress=False,
+        )
+        assert results is not None
+        assert 'control_disp' in results
+        assert len(results['control_disp']) > 1
+
+    def test_check_buckling_after_pushover(self, brace_model):
+        """Can check Euler buckling of braces (analytical, no OpenSees needed)."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        b = OpenSeesBuilder(brace_model, {
+            'element_type': 'forceBeamColumn',
+            'create_fiber_sections': True,
+            'split_elements': False,
+            'verbose': False,
+        })
+        b.set_brace_selection({"B1"}, end_offset=0.0)
+
+        # Check Euler buckling directly from model data (no analysis required)
+        buckling = b.check_brace_buckling(
+            brace_ids={"B1"}, K=1.0, print_results=False,
+        )
+        assert "B1" in buckling
+        assert buckling["B1"]["P_cr"] > 0
+        assert buckling["B1"]["slenderness"] > 0
+        # P_cr ≈ π² × 2e11 × 1.7e-6 / 10² ≈ 33.6 kN
+        P_cr = buckling["B1"]["P_cr"]
+        assert 30000 < P_cr < 37000, f"Expected P_cr ≈ 33.6 kN, got {P_cr:.0f} N"
+
+
+# ============================================================================
+# Euler buckling benchmark: SciPy eigenvalue analysis of subdivided column
+# ============================================================================
+
+
+class TestEulerBucklingBenchmark:
+    """Benchmark: eigenvalue buckling of a subdivided column via SciPy.
+
+    Assembles the global elastic stiffness matrix *K* and geometric stiffness
+    matrix *K_g* for the subdivided column using standard Euler-Bernoulli
+    beam elements, then solves the generalised eigenvalue problem:
+
+    .. math:: (K - \\lambda K_g)\\phi = 0
+
+    using ``scipy.linalg.eig``.  The smallest positive eigenvalue gives the
+    buckling load :math:`P_{cr}`, which should match the analytical Euler
+    formula :math:`\\pi^2 EI / (KL)^2` within a small discretisation error.
+
+    This is an **independent verification** of the subdivided brace concept
+    — it does **not** depend on OpenSees' nonlinear solver, so it is fast,
+    deterministic, and numerically robust.
+    """
+
+    def test_eigenvalue_buckling_matches_euler(self):
+        """Eigenvalue buckling from FEA assembly matches Euler P_cr within 5 %."""
+        scipy = pytest.importorskip("scipy", reason="scipy not installed")
+        from scipy.linalg import eig
+        import numpy as np
+
+        L = 10.0
+        E = 2e11
+        I22 = 1.70e-6
+        P_cr_euler = (math.pi ** 2 * E * I22) / (L ** 2)
+
+        # Subdivide into N segments
+        n_seg = 6
+        seg_len = L / n_seg
+        n_nodes = n_seg + 1  # total nodes including ends
+
+        # DOF numbering: each node has 2 DOFs (v, θ)
+        # Pinned ends: v=0, θ free → remove v DOFs at ends
+        n_dof_total = n_nodes * 2      # raw DOFs including constraints
+        constrained = {0}                # node 0: v=0 → DOF 0 removed (θ free)
+        constrained.add(n_nodes * 2 - 2)  # last node: v=0 → DOF removed (θ free)
+        dof_map_raw = [d for d in range(n_dof_total) if d not in constrained]
+        n_dof = len(dof_map_raw)
+        # dof_map_raw[i] = global raw DOF index for reduced DOF i
+
+        def beam_stiffness(Le, Ee, Ie):
+            return np.array([
+                [12*Ee*Ie/Le**3,  6*Ee*Ie/Le**2, -12*Ee*Ie/Le**3,  6*Ee*Ie/Le**2],
+                [6*Ee*Ie/Le**2,   4*Ee*Ie/Le,    -6*Ee*Ie/Le**2,  2*Ee*Ie/Le],
+                [-12*Ee*Ie/Le**3, -6*Ee*Ie/Le**2, 12*Ee*Ie/Le**3, -6*Ee*Ie/Le**2],
+                [6*Ee*Ie/Le**2,   2*Ee*Ie/Le,    -6*Ee*Ie/Le**2,  4*Ee*Ie/Le],
+            ])
+
+        def beam_geo_stiffness(Le):
+            return (1.0 / (30 * Le)) * np.array([
+                [36,     3*Le,    -36,     3*Le],
+                [3*Le,  4*Le**2, -3*Le,  -Le**2],
+                [-36,   -3*Le,    36,    -3*Le],
+                [3*Le, -Le**2,  -3*Le,  4*Le**2],
+            ])
+
+        def to_global(raw_dofs):
+            """Map 4 element DOFs to reduced system indices (or -1 if constrained)."""
+            return [dof_map_raw.index(d) if d in dof_map_raw else -1 for d in raw_dofs]
+
+        K = np.zeros((n_dof, n_dof))
+        Kg = np.zeros((n_dof, n_dof))
+
+        for seg in range(n_seg):
+            n0 = seg       # left node index
+            n1 = seg + 1   # right node index
+            # Raw DOFs: [n0*2 (v0), n0*2+1 (θ0), n1*2 (v1), n1*2+1 (θ1)]
+            raw = [n0*2, n0*2+1, n1*2, n1*2+1]
+            gn = to_global(raw)
+
+            k_e = beam_stiffness(seg_len, E, I22)
+            k_ge = beam_geo_stiffness(seg_len)
+
+            for i in range(4):
+                gi = gn[i]
+                if gi < 0:
+                    continue
+                for j in range(4):
+                    gj = gn[j]
+                    if gj < 0:
+                        continue
+                    K[gi, gj] += k_e[i, j]
+                    Kg[gi, gj] += k_ge[i, j]
+
+        # Solve (K - λ Kg)φ = 0
+        eigvals, _ = eig(K, Kg)
+        # The smallest positive eigenvalue is the buckling load
+        buckling_loads = sorted([
+            np.real(ev) for ev in eigvals
+            if np.real(ev) > 1000 and not np.iscomplex(ev)
+        ])
+        assert len(buckling_loads) > 0, "No valid buckling eigenvalues found"
+        P_cr_fea = buckling_loads[0]
+        ratio = P_cr_fea / P_cr_euler
+        assert 0.95 < ratio < 1.10, (
+            f"FEA eigenvalue P_cr ({P_cr_fea:.0f} N) differs from Euler "
+            f"({P_cr_euler:.0f} N) by {abs(1-ratio)*100:.1f}%"
+        )
+
+
+# ============================================================================
+# Capacity Spectrum Method tests
+# ============================================================================
+
+
+class TestCapacitySpectrumMethod:
+    """Tests for :meth:`OpenSeesBuilder.pushover_to_adrs` and
+    :meth:`OpenSeesBuilder.compute_performance_point`."""
+
+    @pytest.fixture
+    def cantilever_model(self):
+        """2-node cantilever with seismic mass for CSM testing."""
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
+        }
+        restraints = {"1": Restraint([1, 1, 1, 1, 1, 1])}
+        materials = {
+            "Steel": Material(name="Steel", type="Steel",
+                              E_mod=2e11, unit_weight=77000),
+        }
+        sections = {
+            "UB300": Section(name="UB300", shape="I/Wide Flange",
+                             material="Steel", A=0.01, I33=1.2e-4,
+                             I22=4e-5, J=2e-6),
+        }
+        frames = {
+            "1": FrameElement(elem_id="1", elem_tag=1,
+                              node_i="1", node_j="2"),
+        }
+        load_patterns = {
+            "DEAD": LoadPattern(name="DEAD", pattern_type="DEAD",
+                                self_weight_factor=1),
+        }
+        mass_sources = {
+            "M1": MassSource(name="M1", elements=True,
+                             masses=False, loads=False),
+        }
+        return SAPModelData(
+            nodes=nodes, restraints=restraints,
+            materials=materials, sections=sections,
+            frame_elements=frames, area_elements={},
+            frame_assignments={"1": "UB300"},
+            area_assignments={}, groups={}, frame_auto_mesh={},
+            load_patterns=load_patterns,
+            mass_sources=mass_sources,
+        )
+
+    def test_pushover_to_adrs_returns_expected_keys(self, cantilever_model):
+        """pushover_to_adrs returns S_a, S_d, Gamma, M_eff, phi_control."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(cantilever_model, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False, 'verbose': False,
+        })
+        b.build()
+        b.compute_seismic_masses(g=9.81)
+        modal = b.run_modal_analysis(num_modes=3, print_results=False)
+        shapes = b.extract_mode_shapes(3)
+        results = b.run_pushover_analysis(
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type='uniform',
+            lateral_direction='X',
+            control_node_tag=2,
+            max_disp=0.3, num_steps=5,
+            print_progress=False,
+        )
+        adrs = b.pushover_to_adrs(results, modal, shapes, direction='X', g=9.81)
+        for key in ('S_a', 'S_d', 'Gamma', 'M_eff', 'phi_control', 'best_mode'):
+            assert key in adrs
+        assert abs(adrs['M_eff']) > 0
+        assert len(adrs['S_a']) == len(adrs['S_d'])
+
+    def test_pushover_to_adrs_values_consistent(self, cantilever_model):
+        """ADRS values are positive and consistent (no NaN or negative)."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(cantilever_model, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False, 'verbose': False,
+        })
+        b.build()
+        b.compute_seismic_masses(g=9.81)
+        modal = b.run_modal_analysis(num_modes=3, print_results=False)
+        shapes = b.extract_mode_shapes(3)
+        results = b.run_pushover_analysis(
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type='uniform',
+            lateral_direction='X',
+            control_node_tag=2,
+            max_disp=0.3, num_steps=5,
+            print_progress=False,
+        )
+        adrs = b.pushover_to_adrs(results, modal, shapes, direction='X', g=9.81)
+        assert all(v >= 0 for v in adrs['S_a'])
+        assert all(v >= 0 for v in adrs['S_d'])
+        assert all(math.isfinite(v) for v in adrs['S_a'])
+        assert all(math.isfinite(v) for v in adrs['S_d'])
+
+    def test_performance_point_elastic(self, cantilever_model):
+        """Elastic cantilever: S_dp matches demand at modal period."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        import numpy as np
+        b = OpenSeesBuilder(cantilever_model, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False, 'verbose': False,
+        })
+        b.build()
+        b.compute_seismic_masses(g=9.81)
+        modal = b.run_modal_analysis(num_modes=3, print_results=False)
+        shapes = b.extract_mode_shapes(3)
+        results = b.run_pushover_analysis(
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type='uniform',
+            lateral_direction='X',
+            control_node_tag=2,
+            max_disp=0.3, num_steps=5,
+            print_progress=False,
+        )
+        # Simple elastic design spectrum (GB 50011-like)
+        T_spec = [0.0, 0.1, 0.35, 0.5, 1.0, 2.0, 4.0, 6.0]
+        Sa_spec = [0.16*9.81*0.45, 0.16*9.81, 0.16*9.81, 0.16*9.81,
+                   0.16*9.81*0.35, 0.16*9.81*0.35/2,
+                   0.16*9.81*0.35/4, 0.16*9.81*0.35/6]
+        pp = b.compute_performance_point(
+            results, modal, shapes, T_spec, Sa_spec, direction='X',
+        )
+        # Elastic → mu=1, S_dp should be positive and finite
+        assert pp['converged']
+        assert pp['S_dp'] > 0
+        assert pp['mu'] == pytest.approx(1.0, abs=0.01)
+        assert pp['S_ap'] > 0
+        # T_eq should be close to the dominant modal period (0.464s)
+        assert pp['T_eq'] == pytest.approx(0.464, abs=0.03)

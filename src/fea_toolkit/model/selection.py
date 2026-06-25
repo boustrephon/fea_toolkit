@@ -409,3 +409,38 @@ class Selection:
                     objects=kept,
                 )
         return result
+
+    # ── Brace detection ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def from_brace_sections(model: "SAPModelData") -> "Selection":
+        """Create a ``Selection`` targeting brace‑type sections.
+
+        Identifies frame elements whose section shape is one of the common
+        brace profiles: ``Pipe``, ``Angle``, ``Double Angle``, ``Tee``,
+        or ``Channel``.  This is useful for quickly selecting braces for
+        buckling checking and subdivision.
+
+        Args:
+            model: The parsed ``SAPModelData``.
+
+        Returns:
+            A ``Selection`` with ``element_types=['Frame']`` and
+            ``sections`` populated from the model's brace‑shape sections.
+        """
+        from .sap_data import (
+            PipeSection, AngleSection, DoubleAngleSection,
+            TeeSection, ChannelSection,
+        )
+        brace_shape_types = (
+            PipeSection, AngleSection, DoubleAngleSection,
+            TeeSection, ChannelSection,
+        )
+        brace_sec_names = [
+            name for name, sec in model.sections.items()
+            if isinstance(sec, brace_shape_types)
+        ]
+        return Selection(
+            element_types=['Frame'],
+            sections=brace_sec_names if brace_sec_names else None,
+        )

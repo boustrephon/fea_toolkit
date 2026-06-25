@@ -908,3 +908,112 @@ def plot_pushover_curve(
 
     fig.tight_layout()
     return fig
+
+def plot_capacity_spectrum(
+    capacity_adrs: Dict[str, List[float]],
+    spectrum_periods: List[float],
+    spectrum_accels: List[float],
+    performance_point: Dict[str, Any] = None,
+    title: str = None,
+    figsize=(8, 6),
+) -> Optional[Any]:
+    """Plot the capacity spectrum in ADRS format, overlaid on the demand
+    response spectrum.
+
+    Args:
+        capacity_adrs: ADRS curve from
+            :meth:`OpenSeesBuilder.pushover_to_adrs` (dict with keys
+            ``'S_a'`` and ``'S_d'``).
+        spectrum_periods: Periods (s) defining the elastic demand spectrum.
+        spectrum_accels: Spectral accelerations (m/s²) corresponding to
+            *spectrum_periods*.
+        performance_point: Optional result dict from
+            :meth:`OpenSeesBuilder.compute_performance_point`.  If provided
+            the bilinear yield point and performance point are annotated.
+        title: Optional title.  Auto‑generated if omitted.
+        figsize: Matplotlib figure size ``(width, height)``.
+
+    Returns:
+        The ``matplotlib.figure.Figure``.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("Warning: matplotlib not installed.  "
+              "Install with: pip install matplotlib")
+        return None
+
+    S_d = np.array(capacity_adrs.get('S_d', []))
+    S_a = np.array(capacity_adrs.get('S_a', []))
+
+    if len(S_d) < 2 or len(S_a) < 2:
+        print("Insufficient ADRS data to plot.")
+        return None
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # --- Capacity spectrum ---
+    ax.plot(S_d, S_a, '-o', markersize=3, label='Capacity (pushover)',
+            color='tab:blue', zorder=3)
+
+    # --- Demand spectrum (period lines + curve) ---
+    T_spec = np.array(spectrum_periods)
+    Sa_spec = np.array(spectrum_accels)
+    Sd_spec = Sa_spec * (T_spec / (2.0 * math.pi)) ** 2
+    ax.plot(Sd_spec, Sa_spec, '--', label='Demand (elastic)',
+            color='tab:red', zorder=2)
+
+    # --- Constant-period lines ---
+    T_labels = [0.1, 0.2, 0.5, 1.0, 2.0, 4.0]
+    S_d_max = max(S_d.max(), Sd_spec.max()) * 1.15
+    S_a_max = max(S_a.max(), Sa_spec.max()) * 1.15
+    for T in T_labels:
+        sd_line = np.linspace(0, S_d_max, 50)
+        sa_line = (2.0 * math.pi / T) ** 2 * sd_line
+        ax.plot(sd_line, sa_line, ':', color='grey', linewidth=0.5, alpha=0.4)
+        ax.text(sd_line[-1], sa_line[-1], f'T={T}s', fontsize=7,
+                color='grey', alpha=0.6, va='bottom')
+
+    # --- Performance point ---
+    if performance_point is not None:
+        S_dp = performance_point.get('S_dp')
+        S_ap = performance_point.get('S_ap')
+        S_dy = performance_point.get('S_dy')
+        S_ay = performance_point.get('S_ay')
+
+        # Bilinear yield point
+        if S_dy is not None and S_ay is not None and S_dy > 0:
+            ax.plot(S_dy, S_ay, 's', color='tab:orange', markersize=8,
+                    zorder=5, label=f'Yield ({S_dy:.3f}, {S_ay:.1f})')
+            # Bilinear line
+            sd_bilin = np.linspace(0, S_dy, 20)
+            K_init = S_ay / S_dy
+            ax.plot(sd_bilin, K_init * sd_bilin, '-', color='tab:orange',
+                    linewidth=1.5, alpha=0.7)
+            # Post-yield line
+            if S_dp > S_dy and S_dp > 0:
+                sd_post = np.linspace(S_dy, max(S_dp * 1.2, S_d.max()), 20)
+                K_post = (S_ap - S_ay) / (S_dp - S_dy) if S_dp != S_dy else 0
+                ax.plot(sd_post, S_ay + K_post * (sd_post - S_dy), '-',
+                        color='tab:orange', linewidth=1.5, alpha=0.7)
+
+        # Performance point
+        if S_dp is not None and S_ap is not None and S_dp > 0:
+            ax.plot(S_dp, S_ap, 'D', color='tab:green', markersize=10,
+                    zorder=6, label=f'Perf. Pt. ({S_dp:.3f}, {S_ap:.1f})')
+            # Vertical & horizontal dashed lines
+            ax.axvline(S_dp, color='tab:green', linewidth=0.8, linestyle='--',
+                       alpha=0.5)
+            ax.axhline(S_ap, color='tab:green', linewidth=0.8, linestyle='--',
+                       alpha=0.5)
+
+    ax.set_xlabel('Spectral displacement S$_d$ (m)')
+    ax.set_ylabel('Spectral acceleration S$_a$ (m/s²)')
+    ax.set_title(title or 'Capacity Spectrum Method – ADRS Format')
+    ax.set_xlim(0, S_d_max)
+    ax.set_ylim(0, S_a_max)
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=8)
+
+    fig.tight_layout()
+    return fig
