@@ -1062,21 +1062,20 @@ def subdivide_elements(
         seg_tags = []
 
         for seg in range(n_segments):
-            t0 = seg / n_segments
-            t1 = (seg + 1) / n_segments
-            mid_t = (t0 + t1) / 2.0
-
-            # Mid-point with sinusoidal imperfection
-            imp_amp = imperfection * math.sin(mid_t * math.pi)
-            mid_pt = p_start_arr + effective_vec * mid_t + perp * imp_amp
+            # Node at the END boundary of this segment.
+            # The sinusoidal imperfection is evaluated at each node position,
+            # giving a smooth half-sine shape along the brace length.
+            t_end = (seg + 1) / n_segments
+            imp_amp = imperfection * math.sin(t_end * math.pi)
+            end_pt = p_start_arr + effective_vec * t_end + perp * imp_amp
 
             if seg < n_segments - 1:
-                new_node_id = f"{eid}_sub_{seg}_mid"
+                new_node_id = f"{eid}_sub_{seg}_end"
                 new_tag = next_tag
                 next_tag += 1
                 nodes[new_node_id] = Node(
                     node_id=new_node_id, node_tag=new_tag,
-                    x=float(mid_pt[0]), y=float(mid_pt[1]), z=float(mid_pt[2]),
+                    x=float(end_pt[0]), y=float(end_pt[1]), z=float(end_pt[2]),
                 )
                 j_node_id = new_node_id
             else:

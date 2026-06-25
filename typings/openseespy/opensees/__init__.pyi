@@ -212,6 +212,23 @@ def beamIntegration(integration_type: str, tag: int,
     """
     ...
 
+def beamIntegration(integration_type: str, tag: int,
+                    sec_tag_i: int, lp_i: float,
+                    sec_tag_j: int, lp_j: float,
+                    sec_tag_e: int) -> None:
+    """Create a HingeRadau beam integration (hinge‑end formulation).
+
+    Args:
+        integration_type: ``'HingeRadau'``.
+        tag: Integration tag.
+        sec_tag_i: Section tag at I‑end hinge.
+        lp_i: Plastic hinge length at I‑end.
+        sec_tag_j: Section tag at J‑end hinge.
+        lp_j: Plastic hinge length at J‑end.
+        sec_tag_e: Section tag for interior (elastic) region.
+    """
+    ...
+
 def eleNodes(tag: int) -> Tuple[int, int]:
     """Return the node tags of an element.
 

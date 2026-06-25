@@ -608,8 +608,19 @@ re-run the check with demand:
 results = builder.run_static_analysis(
     pattern_scales={'DEAD': 1.0, 'WIND': 1.0}
 )
-forces = builder.extract_static_element_forces()
-axial = {eid: abs(f['Fz']) for eid, f in forces.items()}
+results = builder.run_static_analysis(
+    pattern_scales={'DEAD': 1.0, 'WIND': 1.0}
+)
+
+# Build axial demand dict keyed by SAP2000 element ID (string),
+# matching what check_brace_buckling() expects.
+# Use the builder's element tag → SAP ID mapping.
+axial = {}
+for eid, elem in builder.model.frame_elements.items():
+    tag = builder.frame_tag_map.get(eid)
+    if tag is not None:
+        fz = results['element_force'].get(tag, {}).get('Fz', 0.0)
+        axial[eid] = abs(fz)
 
 # Buckling check with D/C ratios
 builder.check_brace_buckling(K=1.0, axial_demand=axial)
