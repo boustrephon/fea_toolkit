@@ -1,12 +1,9 @@
 #!/usr/bin/env python
 """Example: Modal + response spectrum analysis from a SAP2000 JSON file.
 
-Usage:
-    # Use the chimney JSON file
-    $ python examples/modal_usage.py /path/to/model.json
+Usage::
 
-    # Use a default path
-    $ python examples/modal_usage.py
+    python examples/modal_usage.py /path/to/model.json
 """
 
 import sys
@@ -26,7 +23,7 @@ def main():
         description="Modal + response spectrum analysis from a SAP2000 JSON file.",
     )
     parser.add_argument(
-        "json_file", nargs="?", default=None,
+        "json_file",
         help="Path to the SAP2000 JSON file.",
     )
     parser.add_argument(
@@ -35,12 +32,7 @@ def main():
     )
     args = parser.parse_args()
 
-    # Default path
-    default_path = Path(
-        "/Users/andrew/Projects/OpenSeesPy/working/CPB 250m Chimney.json"
-    )
-
-    json_path = Path(args.json_file) if args.json_file else default_path
+    json_path = Path(args.json_file)
     if not json_path.exists():
         sys.exit(f"Error: file not found — {json_path}")
 

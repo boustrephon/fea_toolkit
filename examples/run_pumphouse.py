@@ -1,12 +1,13 @@
 #!/usr/bin/env python
-"""Example: Load the BPPS Pumphouse model and run a static analysis.
+"""Example: Load a SAP2000 model and run a static analysis.
 
-Usage:
+Usage::
 
-    python examples/run_pumphouse.py
+    python examples/run_pumphouse.py /path/to/model.s2k
 """
 
 import sys
+import argparse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -17,10 +18,16 @@ from fea_toolkit.opensees.builder import OpenSeesBuilder
 
 
 def main():
-    s2k_path = Path(
-        "/Users/andrew/Library/Mobile Documents/com~apple~CloudDocs/"
-        "Work/Projects/CLP_BSDG/BPPS Pumphouse/BPPS_pump_house.$2k"
+    parser = argparse.ArgumentParser(
+        description="Parse a SAP2000 model and run a linear static analysis.",
     )
+    parser.add_argument(
+        "s2k_file",
+        help="Path to the SAP2000 text file (.s2k, .$2k).",
+    )
+    args = parser.parse_args()
+
+    s2k_path = Path(args.s2k_file)
     if not s2k_path.exists():
         sys.exit(f"Error: file not found — {s2k_path}")
 

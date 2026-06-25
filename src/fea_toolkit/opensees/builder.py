@@ -22,7 +22,7 @@ except ImportError:
 from ..model.sap_data import SAPModelData
 from ..model.geometry import get_SAP_vecxz, global_to_local_distributed_load, rotate_about_axis
 from ..model.sap_data import Section, FrameElement, FrameDistributedLoad
-from ..model.sap_data import GravityLoad, AreaGravityLoad
+from ..model.sap_data import GravityLoad, AreaGravityLoad, ShellSection
 from ..model.geometry import convert_area_loads_to_edge_loads
 from ..model.selection import Selection
 
@@ -162,14 +162,21 @@ class OpenSeesBuilder:
     # Materials (placeholder)
     # -------------------------------------------------------------------------
     def _create_materials(self) -> None:
-        """Create OpenSees materials (steel, concrete) for nonlinear analysis."""
+        """Create OpenSees uniaxial materials for fiber sections.
+
+        For each frame section that will use fiber patches, a ``Steel01``
+        (or ``Concrete01``) material is created with the same tag as the
+        section, so that :meth:`Section.to_fiber_patches` can reference it.
+        """
         if not self.config['create_fiber_sections']:
             return
         if self.config['verbose']:
-            print("Creating materials... (placeholder)")
-        # For each material in self.model.materials, create e.g.:
-        # ops.uniaxialMaterial('Steel01', matTag, Fy, E, b)
-        # TODO: Placeholder: add logic later
+            print("Creating materials for fiber sections...")
+
+        # We need to know which section tags will be created.
+        # The tags start at 1 and increment per section, but only frame
+        # sections are relevant.  We create materials on the fly during
+        # section creation instead — see _create_single_section.
         pass
 
     # -------------------------------------------------------------------------
@@ -207,16 +214,40 @@ class OpenSeesBuilder:
                 print(f"  Section {tag}: {sec.name} (Elastic)")
 
         elif self.config['create_fiber_sections']:
+            # Shell sections can't use fiber patches; create elastic instead
+            if isinstance(sec, ShellSection):
+                ops.section('Elastic', tag, E_mod, sec.A, sec.I33, sec.I22, G_mod, sec.J)
+                if self.config['verbose']:
+                    print(f"  Section {tag}: {sec.name} (Elastic — shell)")
+                return
+
+            # ── Create uniaxial material for fibers ──
+            mat_tag = tag  # same tag as the section for simplicity
+            if mat is not None and mat.type.lower() == 'steel':
+                Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
+                E = mat.E_mod if mat.E_mod > 0 else 2.0e11
+                ops.uniaxialMaterial('Steel01', mat_tag, Fy, E, 0.01)
+            elif mat is not None and mat.type.lower() == 'concrete':
+                Fc = mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7
+                Ec = mat.E_mod if mat.E_mod > 0 else 2.5e10
+                epsc = mat.eFc if mat.eFc and mat.eFc > 0 else -0.002
+                ops.uniaxialMaterial('Concrete01', mat_tag, -Fc, epsc, -0.2 * Fc, -0.006)
+            else:
+                # Fallback: generic steel-like
+                ops.uniaxialMaterial('Steel01', mat_tag, 2.5e8, 2.0e11, 0.01)
+
+            # ── Create fiber section ──
             ops.section('Fiber', tag, '-GJ', sec.J)
             try:
-                patches = sec.to_fiber_patches(mat_tag=tag)
+                patches = sec.to_fiber_patches(mat_tag=mat_tag)
                 for patch_args in patches:
                     ops.patch(*patch_args)
                 if self.config['verbose']:
                     print(f"  Section {tag}: {sec.name} (Fiber, {len(patches)} patches)")
             except NotImplementedError as exc:
                 if self.config['verbose']:
-                    print(f"  Section {tag}: {sec.name} — {exc}")
+                    print(f"  Section {tag}: {sec.name} — {exc}, falling back to elastic")
+                ops.section('Elastic', tag, E_mod, sec.A, sec.I33, sec.I22, G_mod, sec.J)
 
         else:
             # Fallback to elastic
@@ -1126,6 +1157,536 @@ class OpenSeesBuilder:
         return results
 
     # =========================================================================
+    # Pushover analysis
+    #
+    # References:
+    #   - ASCE 41-17 §7.2: Seismic Evaluation and Retrofit of Existing Buildings
+    #   - ATC-40 §2.2: Seismic Evaluation and Retrofit of Concrete Buildings
+    #   - OpenSees RCFramePushOver_v2.py (PEER example):
+    #     docs/references/RCFramePushOver_v2.py
+    #
+    # The two-stage approach (gravity → loadConst → displacement-controlled
+    # lateral push) follows the standard OpenSees pushover workflow from the
+    # PEER example above.
+    # =========================================================================
+    def run_pushover_analysis(
+        self,
+        gravity_patterns: Dict[str, float],
+        lateral_load_type: str = 'uniform',
+        lateral_pattern_name: Optional[str] = None,
+        lateral_direction: str = 'X',
+        control_node_tag: Optional[int] = None,
+        max_disp: float = 0.5,
+        num_steps: int = 100,
+        fundamental_period: Optional[float] = None,
+        mode_shapes: Optional[Dict] = None,
+        mode_index: int = 0,
+        print_progress: bool = True,
+    ) -> Dict[str, Any]:
+        """Run a non‑linear static pushover analysis.
+
+        The model is rebuilt with ``forceBeamColumn`` elements and **fiber
+        sections** (overriding the builder's current ``element_type`` and
+        section config).  The analysis proceeds in two stages:
+
+        1. **Gravity** — load‑controlled with the specified
+           ``gravity_patterns``.
+        2. **Lateral push** — displacement‑controlled on the control node,
+           using the chosen lateral load pattern as the reference
+           distribution shape.
+
+        The lateral load shape is determined by *lateral_load_type*:
+
+        * ``'uniform'`` — mass‑proportional (uniform acceleration).
+          $F_i \\propto m_i$.  Per ASCE 41 / ATC-40 "Uniform" pattern.
+          Requires masses (call ``compute_seismic_masses()`` first or
+          ensure mass data is available).
+        * ``'triangular'`` — $F_i \\propto m_i h_i^k$, where $k$ depends
+          on the fundamental period (ASCE 7 ELF procedure).  Requires
+          masses and optionally *fundamental_period*.
+        * ``'mode1'`` — $F_i \\propto m_i \\phi_{i1}$, proportional to
+          mass × first‑mode eigenvector.  Requires *mode_shapes* from
+          :meth:`extract_mode_shapes`.
+        * ``'pattern'`` — uses the existing SAP2000 load pattern named
+          by *lateral_pattern_name* (distributed loads on frame elements).
+
+        Args:
+            gravity_patterns: Dict mapping load pattern name → scale factor
+                (e.g. ``{'DEAD': 1.0, 'SDL': 0.5}``).
+            lateral_load_type: One of ``'uniform'``, ``'triangular'``,
+                ``'mode1'``, or ``'pattern'``.
+            lateral_pattern_name: Name of the SAP2000 load pattern to use
+                as the lateral load (only used when
+                ``lateral_load_type='pattern'``).
+            lateral_direction: ``'X'``, ``'Y'``, or ``'Z'`` — the DOF at
+                the control node that is displaced.
+            control_node_tag: Node tag for displacement control.  If
+                ``None``, the node with the highest Z coordinate that has
+                a reaction restraint in the push direction is chosen
+                automatically.
+            max_disp: Maximum displacement of the control node (model
+                length units, typically m).
+            num_steps: Number of push increments.
+            fundamental_period: Natural period of the fundamental mode (s).
+                Used to compute the $k$ exponent for ``'triangular'``
+                pattern.  If ``None``, $k = 1.0$ is used.
+            mode_shapes: Output of :meth:`extract_mode_shapes`, required
+                when ``lateral_load_type='mode1'``.
+            mode_index: 0‑based mode index to use for ``'mode1'`` load
+                shape (default 0 = fundamental mode).
+            print_progress: If True, print step summaries.
+
+        Returns:
+            Dictionary with keys:
+
+            * ``'step'`` — list of step numbers (0‑based, 0 = after gravity).
+            * ``'control_disp'`` — list of control node displacements.
+            * ``'base_shear'`` — list of total base shear in the push
+              direction at each step.
+            * ``'status'`` — list of analysis return codes (0 = success).
+            * ``'gravity_displacements'`` — nodal displacements after
+              gravity (before push).
+            * ``'control_node'`` — the control node tag used.
+            * ``'dof'`` — the push DOF (1, 2, or 3).
+            * ``'lateral_load_type'`` — the load type used.
+        """
+        valid_types = {'uniform', 'triangular', 'mode1', 'pattern'}
+        if lateral_load_type not in valid_types:
+            raise ValueError(
+                f"lateral_load_type='{lateral_load_type}' not recognised.  "
+                f"Choose from {sorted(valid_types)}."
+            )
+        if lateral_load_type == 'pattern' and not lateral_pattern_name:
+            raise ValueError(
+                "lateral_pattern_name is required when lateral_load_type='pattern'."
+            )
+
+        if self.config['verbose']:
+            print("\n===== PUSHOVER ANALYSIS =====")
+            print(f"  Gravity: {gravity_patterns}")
+            print(f"  Lateral type: {lateral_load_type}  dir={lateral_direction}")
+            print(f"  Max disp: {max_disp}  Steps: {num_steps}")
+
+        dof_map = {'X': 1, 'Y': 2, 'Z': 3}
+        dof = dof_map.get(lateral_direction.upper(), 1)
+
+        # ── 1. Rebuild with fiber sections + forceBeamColumn ──
+        push_config = dict(self.config)
+        push_config['element_type'] = 'forceBeamColumn'
+        push_config['create_fiber_sections'] = True
+        push_config['use_elastic_sections'] = False
+
+        # Check if all frame sections support fiber patches; fall back to elastic
+        all_support_fiber = True
+        for sec in self.model.sections.values():
+            if isinstance(sec, ShellSection):
+                continue  # shell sections don't need fiber patches
+            try:
+                sec.to_fiber_patches(mat_tag=1)
+            except NotImplementedError:
+                all_support_fiber = False
+                break
+        if not all_support_fiber:
+            push_config['create_fiber_sections'] = False
+            push_config['use_elastic_sections'] = True
+            push_config['element_type'] = 'elasticBeamColumn'
+            if self.config['verbose'] or print_progress:
+                print("  Some sections do not support fiber patches — "
+                      "using elastic sections (linear pushover)")
+
+        self.config = push_config
+
+        ops.wipe()
+        ops.model('basic', '-ndm', 3, '-ndf', 6)
+        self._create_nodes()
+        self._apply_restraints()
+        self._create_materials()
+        self._create_sections()
+        if self.config.get('split_elements', False):
+            self._split_elements()
+        self._create_elements()
+
+        # ── 2. Compute seismic masses (needed for uniform/triangular/mode1) ──
+        node_masses: Dict[str, float] = {}
+        if lateral_load_type in ('uniform', 'triangular', 'mode1'):
+            if self.model.mass_sources:
+                node_masses = self.compute_seismic_masses()
+            else:
+                # Fallback: lump element self-weight to nodes
+                node_masses = self._compute_fallback_masses()
+            if print_progress:
+                total_mass = sum(node_masses.values())
+                print(f"  Seismic mass: {total_mass:.2f} tonnes")
+
+        # ── 3. Apply gravity ──
+        grav_results = self.run_static_analysis(
+            extract_reactions=True,
+            pattern_scales=gravity_patterns,
+        )
+        grav_disp = grav_results.get('nodal_displacements', {})
+
+        # Record base shear from gravity (before lateral loads)
+        base_shear_grav = grav_results.get('summed_reactions', {}).get(
+            'fx' if lateral_direction.upper() == 'X' else
+            'fy' if lateral_direction.upper() == 'Y' else 'fz',
+            0.0
+        )
+
+        if print_progress:
+            sr = grav_results.get('summed_reactions', {})
+            print(f"  Gravity reactions: Fx={sr.get('fx',0):+.3f}  "
+                  f"Fz={sr.get('fz',0):+.3f}  ok=0")
+
+        # ── 4. Choose control node ──
+        if control_node_tag is None:
+            candidates = []
+            for nid, node in self.model.nodes.items():
+                restr = self.model.restraints.get(nid)
+                if restr is None or not restr.dofs[dof - 1]:
+                    candidates.append((node.z, node.node_tag))
+            if not candidates:
+                for nid, node in self.model.nodes.items():
+                    candidates.append((node.z, node.node_tag))
+            candidates.sort(key=lambda x: -x[0])
+            control_node_tag = candidates[0][1]
+
+        if print_progress:
+            print(f"  Control node: {control_node_tag}")
+            print(f"  Push DOF: {dof} ({lateral_direction})")
+
+        # ── 5. Lock gravity loads and create lateral reference pattern ──
+        # Following the standard OpenSees two-stage approach
+        # (see docs/references/RCFramePushOver_v2.py):
+        #   loadConst('-time', 0.0)  → lock gravity, reset domain time
+        #   pattern('Plain', <new tag>, <new time series>) → lateral shape
+        ops.loadConst('-time', 0.0)
+
+        # Count only *active* gravity patterns (non-zero scale) to determine
+        # the next available tag — _create_loads assigns tags 1..N sequentially
+        # for active patterns, so N+1 is guaranteed free.
+        num_active = sum(1 for s in gravity_patterns.values() if abs(s) >= 1e-12)
+        lat_tag = num_active + 1
+        ops.timeSeries('Linear', lat_tag)
+        ops.pattern('Plain', lat_tag, lat_tag)
+
+        if lateral_load_type == 'pattern':
+            # Use existing SAP2000 frame distributed loads
+            for ld in self.model.frame_dist_loads:
+                if ld.pattern != lateral_pattern_name:
+                    continue
+
+                dir_map = {'Gravity': (0,0,-1), 'X': (1,0,0), 'Y': (0,1,0), 'Z': (0,0,1)}
+                gx, gy, gz = dir_map.get(ld.direction, (0, 0, 0))
+
+                elem = (self.split_elements if self.split_elements
+                        else self.model.frame_elements).get(ld.frame_id)
+                if elem is None or getattr(elem, 'inactive', False):
+                    continue
+                elem_tag = self.frame_tag_map.get(ld.frame_id)
+                if elem_tag is None:
+                    continue
+
+                wa, wb = float(ld.val_a), float(ld.val_b)
+                aL, bL = ld.rdist_a, ld.rdist_b
+                try:
+                    vx, vy, vz = self._get_local_axes(elem)
+                except Exception:
+                    continue
+                T = np.column_stack([vx, vy, vz])
+                g_local = np.linalg.solve(T, np.array([gx, gy, gz]))
+                wy_a = g_local[1] * wa; wz_a = g_local[2] * wa; wx_a = g_local[0] * wa
+                wy_b = g_local[1] * wb; wz_b = g_local[2] * wb; wx_b = g_local[0] * wb
+
+                if abs(wa) < 1e-12 and abs(wb) < 1e-12:
+                    continue
+
+                is_uniform = abs(wa - wb) < 1e-12
+                if is_uniform and abs(aL) < 1e-12 and abs(bL - 1.0) < 1e-12:
+                    ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
+                                wy_a, wz_a, wx_a)
+                elif is_uniform:
+                    ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
+                                wy_a, wz_a, wx_a, aL, bL)
+                else:
+                    for i in range(4):
+                        span = bL - aL
+                        seg_a = aL + i * span / 4
+                        seg_b = aL + (i + 1) * span / 4
+                        xi = (i + 0.5) / 4
+                        ops.eleLoad('-ele', elem_tag, '-type', '-beamUniform',
+                                    wy_a + (wy_b - wy_a) * xi,
+                                    wz_a + (wz_b - wz_a) * xi,
+                                    wx_a + (wx_b - wx_a) * xi,
+                                    seg_a, seg_b)
+        else:
+            # Generate nodal loads from mass distribution
+            if lateral_load_type == 'uniform':
+                nodal_loads = self._compute_uniform_lateral_loads(
+                    lateral_direction, node_masses,
+                )
+            elif lateral_load_type == 'triangular':
+                nodal_loads = self._compute_triangular_lateral_loads(
+                    lateral_direction, node_masses, fundamental_period,
+                )
+            elif lateral_load_type == 'mode1':
+                if mode_shapes is None:
+                    raise ValueError(
+                        "mode_shapes is required when lateral_load_type='mode1'.  "
+                        "Call extract_mode_shapes() first."
+                    )
+                nodal_loads = self._compute_mode_shape_lateral_loads(
+                    lateral_direction, node_masses, mode_shapes, mode_index,
+                )
+            else:
+                nodal_loads = {}
+
+            for tag, (fx, fy, fz) in nodal_loads.items():
+                ops.load(tag, fx, fy, fz, 0.0, 0.0, 0.0)
+
+        # ── 6. Lateral push ──
+        ops.wipeAnalysis()
+        disp_inc = max_disp / num_steps
+        ops.constraints('Plain')
+        ops.numberer('RCM')
+        ops.system('BandGeneral')
+        ops.test('NormDispIncr', 1e-4, 20, 0, 2)
+        ops.algorithm('Newton')
+        ops.integrator('DisplacementControl', control_node_tag, dof, disp_inc)
+        ops.analysis('Static')
+
+        grav_ctrl_disp = 0.0
+        try:
+            grav_ctrl_disp = ops.nodeDisp(control_node_tag)[dof - 1]
+        except Exception:
+            pass
+
+        steps = [0]
+        ctrl_disps = [0.0]
+        base_shears = [base_shear_grav]
+        statuses = [0]
+
+        try:
+            ops.reactions()
+            bs = 0.0
+            for nid, rst in self.model.restraints.items():
+                node = self.model.nodes.get(nid)
+                if node is None: continue
+                if rst.dofs[dof - 1]:
+                    bs += ops.nodeReaction(node.node_tag, dof)
+            base_shears[0] = bs
+        except Exception:
+            pass
+
+        for step in range(1, num_steps + 1):
+            ok = ops.analyze(1)
+            statuses.append(ok)
+
+            try:
+                cd_total = ops.nodeDisp(control_node_tag)[dof - 1]
+                cd = cd_total - grav_ctrl_disp   # relative to gravity
+            except Exception:
+                cd = 0.0
+            ctrl_disps.append(cd)
+
+            try:
+                ops.reactions()
+                bs = 0.0
+                for nid, rst in self.model.restraints.items():
+                    node = self.model.nodes.get(nid)
+                    if node is None:
+                        continue
+                    if rst.dofs[dof - 1]:
+                        bs += ops.nodeReaction(node.node_tag, dof)
+            except Exception:
+                bs = 0.0
+            base_shears.append(bs)
+            steps.append(step)
+
+            if print_progress and (step % max(1, num_steps // 10) == 0 or ok != 0):
+                print(f"  Step {step:4d}/{num_steps}: disp={cd:+.6f}  "
+                      f"base_shear={bs:+.3f}  ok={ok}")
+
+            if ok != 0:
+                if print_progress:
+                    print(f"  Pushover stopped at step {step} (non-converged)")
+                break
+
+        results = {
+            'step': steps,
+            'control_disp': ctrl_disps,
+            'base_shear': base_shears,
+            'status': statuses,
+            'gravity_displacements': grav_disp,
+            'control_node': control_node_tag,
+            'dof': dof,
+            'lateral_load_type': lateral_load_type,
+        }
+        if print_progress:
+            fd = ctrl_disps[-1] if ctrl_disps else 0.0
+            fb = base_shears[-1] if base_shears else 0.0
+            print(f"\n  Pushover complete: {len(steps)-1} steps, "
+                  f"max disp = {fd:.4f}, max base shear = {fb:.1f}")
+        return results
+
+    # =========================================================================
+    # Lateral load pattern generators (for pushover)
+    # =========================================================================
+
+    def _compute_fallback_masses(self) -> Dict[str, float]:
+        """Compute nodal masses from element self‑weight when no MASS SOURCE.
+
+        Used as a fallback when the model has no mass source definitions.
+        Masses are used to define the shape of uniform/triangular pushover
+        load patterns.
+        """
+        node_mass: Dict[str, float] = {}
+        g = 9.81
+        elements = (self.split_elements if self.split_elements
+                    else self.model.frame_elements)
+        assignments = (self.split_assignments if self.split_elements
+                       else self.model.frame_assignments)
+
+        for eid, elem in elements.items():
+            if getattr(elem, 'inactive', False):
+                continue
+            sec_name = assignments.get(eid) if assignments else None
+            if not sec_name or sec_name not in self.model.sections:
+                continue
+            sec = self.model.sections[sec_name]
+            mat = self.model.materials.get(sec.material)
+            if mat is None or mat.unit_weight == 0:
+                continue
+            ni = self.model.nodes.get(elem.node_i)
+            nj = self.model.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+            if L < 1e-12:
+                continue
+            weight = sec.A * mat.unit_weight * L
+            mass = weight / g
+            node_mass[elem.node_i] = node_mass.get(elem.node_i, 0.0) + mass * 0.5
+            node_mass[elem.node_j] = node_mass.get(elem.node_j, 0.0) + mass * 0.5
+
+        return node_mass
+
+    def _compute_uniform_lateral_loads(
+        self,
+        direction: str,
+        node_masses: Dict[str, float],
+    ) -> Dict[int, Tuple[float, float, float]]:
+        """Compute mass‑proportional lateral loads (uniform acceleration).
+
+        Per ASCE 41 / ATC‑40 "Uniform" pattern — each node with mass
+        receives a load proportional to its mass in the push direction.
+        The absolute magnitude is irrelevant because ``DisplacementControl``
+        scales the entire pattern to achieve the target displacement.
+
+        Returns:
+            ``{node_tag: (fx, fy, fz)}`` in global coordinates.
+        """
+        dof_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(direction.upper(), 0)
+
+        nodal_loads: Dict[int, Tuple[float, float, float]] = {}
+        for nid, mass in node_masses.items():
+            if mass <= 0:
+                continue
+            node = self.model.nodes.get(nid)
+            if node is None:
+                continue
+            f = [0.0, 0.0, 0.0]
+            f[dof_idx] = mass
+            nodal_loads[node.node_tag] = (f[0], f[1], f[2])
+        return nodal_loads
+
+    def _compute_triangular_lateral_loads(
+        self,
+        direction: str,
+        node_masses: Dict[str, float],
+        fundamental_period: Optional[float] = None,
+    ) -> Dict[int, Tuple[float, float, float]]:
+        """Compute triangular (ELF) lateral loads proportional to $m_i h_i^k$.
+
+        Per ASCE 7 / ASCE 41:
+        * $k = 1.0$ for $T \\le 0.5$ s
+        * $k = 2.0$ for $T \\ge 2.5$ s
+        * Linear interpolation for $0.5 < T < 2.5$ s
+
+        Height $h_i$ is measured relative to the lowest node in the model.
+
+        Returns:
+            ``{node_tag: (fx, fy, fz)}`` in global coordinates.
+        """
+        dof_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(direction.upper(), 0)
+
+        # Find base elevation
+        z_vals = [node.z for node in self.model.nodes.values()]
+        z_min = min(z_vals) if z_vals else 0.0
+
+        # Compute k exponent per ASCE 7
+        if fundamental_period is None:
+            k = 1.0
+        elif fundamental_period <= 0.5:
+            k = 1.0
+        elif fundamental_period >= 2.5:
+            k = 2.0
+        else:
+            k = 1.0 + (fundamental_period - 0.5) / 2.0
+
+        nodal_loads: Dict[int, Tuple[float, float, float]] = {}
+        for nid, mass in node_masses.items():
+            if mass <= 0:
+                continue
+            node = self.model.nodes.get(nid)
+            if node is None:
+                continue
+            h = max(node.z - z_min, 0.0)
+            f_mag = mass * (h ** k)
+            if abs(f_mag) < 1e-12:
+                continue
+            f = [0.0, 0.0, 0.0]
+            f[dof_idx] = f_mag
+            nodal_loads[node.node_tag] = (f[0], f[1], f[2])
+        return nodal_loads
+
+    def _compute_mode_shape_lateral_loads(
+        self,
+        direction: str,
+        node_masses: Dict[str, float],
+        mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
+        mode_index: int = 0,
+    ) -> Dict[int, Tuple[float, float, float]]:
+        """Compute mode‑shape‑proportional lateral loads $F_i = m_i \\phi_i$.
+
+        Each node receives a load proportional to its mass times the
+        eigenvector component in the push direction.
+
+        Returns:
+            ``{node_tag: (fx, fy, fz)}`` in global coordinates.
+        """
+        if mode_index not in mode_shapes:
+            raise ValueError(f"Mode index {mode_index} not found in mode_shapes")
+
+        mode = mode_shapes[mode_index]  # {node_tag: (dx, dy, dz)}
+        dof_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(direction.upper(), 0)
+
+        nodal_loads: Dict[int, Tuple[float, float, float]] = {}
+        for nid, mass in node_masses.items():
+            if mass <= 0:
+                continue
+            node = self.model.nodes.get(nid)
+            if node is None:
+                continue
+            phi = mode.get(node.node_tag, (0.0, 0.0, 0.0))
+            f_mag = mass * phi[dof_idx]
+            if abs(f_mag) < 1e-12:
+                continue
+            f = [0.0, 0.0, 0.0]
+            f[dof_idx] = f_mag
+            nodal_loads[node.node_tag] = (f[0], f[1], f[2])
+        return nodal_loads
+
+    # =========================================================================
     # Seismic masses (based on MASS SOURCE definition)
     # =========================================================================
     def compute_seismic_masses(self, g: float = 9.81) -> Dict[str, float]:
@@ -1337,6 +1898,44 @@ class OpenSeesBuilder:
                     print(f"  Mode {i+1}: T = {T:.4f} s  f = {frequencies[i]:.4f} Hz")
 
         return results
+
+    # =========================================================================
+    # Mode shape extraction
+    # =========================================================================
+    def extract_mode_shapes(
+        self, num_modes: int
+    ) -> Dict[int, Dict[int, Tuple[float, float, float]]]:
+        """Extract mode shape displacements for each node and each mode.
+
+        Must be called **after** :meth:`run_modal_analysis` (the model must
+        be built with masses assigned).
+
+        Args:
+            num_modes: Number of modes to extract (should match the value
+                       used in :meth:`run_modal_analysis`).
+
+        Returns:
+            ``{mode_index: {node_tag: (dx, dy, dz)}}`` where *mode_index* is
+            0‑based and displacements are the **eigenvector** components
+            (not normalised to unit mass — these are the raw values from
+            ``ops.nodeEigenvector``).
+        """
+        node_tags = list(ops.getNodeTags())
+        # dof index 0→1 (X), 1→2 (Y), 2→3 (Z)
+        dof_map = {0: 1, 1: 2, 2: 3}
+
+        shapes: Dict[int, Dict[int, Tuple]] = {}
+        for m in range(num_modes):
+            mode_num = m + 1  # OpenSees is 1‑based
+            per_node: Dict[int, Tuple] = {}
+            for tag in node_tags:
+                dx = ops.nodeEigenvector(tag, mode_num, dof_map[0])
+                dy = ops.nodeEigenvector(tag, mode_num, dof_map[1])
+                dz = ops.nodeEigenvector(tag, mode_num, dof_map[2])
+                per_node[tag] = (dx, dy, dz)
+            shapes[m] = per_node
+
+        return shapes
 
     # =========================================================================
     # Response spectrum analysis
