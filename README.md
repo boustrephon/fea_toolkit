@@ -24,7 +24,7 @@ The goal is to create a Python package `fea_toolkit` that:
 ```
 ~/Projects/fea_toolkit/
 ├── data/                     # (private) section_dict.pkl
-├── examples/                 # basic_usage.py, README
+├── examples/                 # [`examples/README.md`](examples/README.md)
 ├── src/fea_toolkit/
 │   ├── __init__.py
 │   ├── io/
@@ -37,7 +37,7 @@ The goal is to create a Python package `fea_toolkit` that:
 │   ├── opensees/
 │   │   └── builder.py        # OpenSeesBuilder: creates nodes, restraints, sections, splits elements, builds elements, applies loads (using relative positions), runs linear static analysis
 │   └── rhino/                # Rhino visualisation (placeholder – to be refactored)
-├── tests/                    # pytest suite (test_parser, test_model, test_dummy)
+├── tests/                    # pytest suite — [`tests/README.md`](tests/README.md)
 ├── pyproject.toml
 └── README.md
 ```
@@ -61,7 +61,7 @@ The goal is to create a Python package `fea_toolkit` that:
 | **Parent‑Child Tracking** | ✅ Complete | Each split element stores `parent_id`, `child_ids`, `t_locations`; inactive flag prevents building of parent. |
 | **Unit Conversion** | ✅ Complete | `SectionLibrary` converts lengths, areas, inertias between `in` and `mm` based on catalogue metadata. |
 | **Visualisation (opsvis)** | ✅ Quick test | `basic_usage.py` can show line‑based model; extrusion not implemented. |
-| **Pytest Suite** | ✅ Passing | 94 tests: dataclass construction, geometry utilities, section enrichment, modal analysis, parser integration, and edge cases. |
+| **Pytest Suite** | ✅ Passing | [153 tests](tests/README.md): dataclass construction, geometry utilities, section enrichment, modal analysis, pushover, parser integration, and edge cases. |
 
 #### 3. Notable Design Decisions
 
@@ -208,6 +208,10 @@ all other area loads are ignored.
    - The `rhino/` package stub exists at `src/fea_toolkit/rhino/`.  
    - Move `sap2000_import_v8.py` into `src/fea_toolkit/rhino/importer.py`.  
    - Adapt it to read `SAPModelData` (instead of raw JSON) and use the split data for visualisation.
+
+### Getting started
+
+See [`examples/README.md`](examples/README.md) for quick-start examples.
 
 #### Medium Priority
 

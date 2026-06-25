@@ -1,15 +1,23 @@
 #!/usr/bin/env python
-"""Example: Load a SAP2000 model and run a static analysis.
+"""Static analysis with force diagrams from a SAP2000 model.
+
+Parses the model, builds the OpenSees model, runs a load combination,
+extracts element forces, and plots 2D/3D force diagrams.
 
 Usage::
 
-    python examples/run_pumphouse.py /path/to/model.s2k
+    # Use a specific model
+    python examples/static_analysis.py /path/to/model.s2k
+
+    # Use the built‑in cantilever sample (no external file needed)
+    python examples/static_analysis.py --sample
 """
 
 import sys
 import argparse
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent.parent))  # project root
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from fea_toolkit import __version__, ops_version
@@ -19,26 +27,42 @@ from fea_toolkit.opensees.builder import OpenSeesBuilder
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Parse a SAP2000 model and run a linear static analysis.",
+        description="Parse a SAP2000 model, run static analysis, and plot force diagrams.",
     )
     parser.add_argument(
-        "s2k_file",
-        help="Path to the SAP2000 text file (.s2k, .$2k).",
+        "s2k_file", nargs="?",
+        help="Path to the SAP2000 text file (.s2k, .$2k). Omit when using --sample.",
+    )
+    parser.add_argument(
+        "--sample", action="store_true",
+        help="Use the built‑in cantilever sample model (no external file needed).",
     )
     args = parser.parse_args()
 
-    s2k_path = Path(args.s2k_file)
-    if not s2k_path.exists():
-        sys.exit(f"Error: file not found — {s2k_path}")
+    # Determine input source
+    if args.sample:
+        from examples.sample_model import make_sample_model
+        md = make_sample_model()
+        source_name = "built‑in cantilever sample"
+        print(f"FEA Toolkit Version: {__version__}")
+        print(f"OpenSees Version: {ops_version()}")
+        print(f"Using: {source_name}\n")
+    elif args.s2k_file:
+        s2k_path = Path(args.s2k_file)
+        if not s2k_path.exists():
+            sys.exit(f"Error: file not found — {s2k_path}")
+        print(f"FEA Toolkit Version: {__version__}")
+        print(f"OpenSees Version: {ops_version()}")
+        print(f"Loading: {s2k_path}\n")
+        parser_s2k = SAP2000Parser(s2k_path)
+        parser_s2k.parse()
+        md = parser_s2k.get_model_data()
+    else:
+        sys.exit("Provide a .s2k file path or use --sample.")
 
-    print(f"FEA Toolkit Version: {__version__}")
-    print(f"OpenSees Version: {ops_version()}")
-    print(f"Loading: {s2k_path}\n")
-
-    # Parse
-    parser = SAP2000Parser(s2k_path)
-    parser.parse()
-    md = parser.get_model_data()
+    # Output directory for plots
+    out = Path(__file__).parent / "output"
+    out.mkdir(exist_ok=True)
 
     print(f"Model units: {md.units}")
     print(f"Nodes: {len(md.nodes)}")
@@ -60,8 +84,9 @@ def main():
     })
     builder.build()
 
-    # Static analysis: 1.4 DEAD + 1.4 Wind +X
-    combo = {"DEAD": 1.4, "Wind +X": 1.4}
+    # Static analysis: combine available load patterns
+    avail = list(md.load_patterns.keys())
+    combo = {name: 1.0 for name in avail}
     print(f"\n── Static analysis: {combo} ──")
     results = builder.run_static_analysis(
         extract_reactions=True,
@@ -105,29 +130,29 @@ def main():
         # Axial forces (Fz)
         fig_n = plot_static_force_diagram(
             builder, elem_forces, 'Fz',
-            title='Axial Fz (KN) — 1.4 DEAD + 1.4 Wind +X',
+            title=f'Axial force Fz — {combo}',
         )
         if fig_n:
-            fig_n.savefig('pumphouse_axial.png', dpi=150)
-            print("  Saved → pumphouse_axial.png")
+            fig_n.savefig(out / 'static_axial.png', dpi=150)
+            print(f"  Saved → {out / 'static_axial.png'}")
 
         # Shear in X (Fx)
         fig_vx = plot_static_force_diagram(
             builder, elem_forces, 'Fx',
-            title='Shear Fx (KN) — 1.4 DEAD + 1.4 Wind +X',
+            title=f'Shear Fx — {combo}',
         )
         if fig_vx:
-            fig_vx.savefig('pumphouse_shear.png', dpi=150)
-            print("  Saved → pumphouse_shear.png")
+            fig_vx.savefig(out / 'static_shear.png', dpi=150)
+            print(f"  Saved → {out / 'static_shear.png'}")
 
         # Moment about Y (My)
         fig_m = plot_static_force_diagram(
             builder, elem_forces, 'My',
-            title='Moment My (KN·m) — 1.4 DEAD + 1.4 Wind +X',
+            title=f'Moment My — {combo}',
         )
         if fig_m:
-            fig_m.savefig('pumphouse_moment_2d.png', dpi=150)
-            print("  Saved → pumphouse_moment_2d.png")
+            fig_m.savefig(out / 'static_moment_2d.png', dpi=150)
+            print(f"  Saved → {out / 'static_moment_2d.png'}")
 
     except Exception as e:
         print(f"  2D plotting skipped: {e}")
@@ -145,8 +170,8 @@ def main():
             builder, elem_forces, 'My', mode='tube', notebook=True,
         )
         if plotter_tube is not None:
-            plotter_tube.screenshot('pumphouse_moment_3d.png')
-            print("  Saved → pumphouse_moment_3d.png")
+            plotter_tube.screenshot(str(out / 'static_moment_3d.png'))
+            print(f"  Saved → {out / 'static_moment_3d.png'}")
     except Exception as e:
         print(f"  3D plotting skipped: {e}")
 
