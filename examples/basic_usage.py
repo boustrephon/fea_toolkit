@@ -23,6 +23,7 @@ from pathlib import Path
 import platform
 
 # Add project root to Python path so that 'fea_toolkit' can be imported
+sys.path.insert(0, str(Path(__file__).parent.parent))  # project root
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from fea_toolkit import __version__, ops_version
@@ -225,150 +226,11 @@ def main():
             builder.build()
             builder.compute_seismic_masses(g=9.81)
             modal_results = builder.run_modal_analysis(num_modes=15, print_results=True)
-
-            # Build a simple GB50011 spectrum and run response spectrum
-            def gb50011_spectrum(T, A=0.16, Tg=0.35, zeta=0.05):
-                """GB 50011-2010 design spectrum (returns Sa in g)."""
-                if T <= 0.0:
-                    return A
-                gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
-                eta1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
-                eta2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))
-                if T <= 0.1:
-                    beta = 0.45 + (eta2 - 0.45) * 10.0 * T
-                elif T <= Tg:
-                    beta = eta2
-                elif T <= 5.0 * Tg:
-                    beta = eta2 * (Tg / T) ** gamma
-                else:
-                    beta = eta2 * (0.2 ** gamma) - eta1 * (T - 5.0 * Tg)
-                return max(0.0, A * beta)
-
-            periods = modal_results['periods']
-            n = modal_results['num_modes']
-            g = 9.81
-            # Extend spectrum to cover the longest modal period
-            T_max = max(periods[:n]) if periods and n > 0 else 6.0
-            T_curve = [t * 0.1 for t in range(0, int(T_max / 0.1) + 2)]
-            Sa_curve = [gb50011_spectrum(T, A=0.16, Tg=0.4, zeta=0.04) * g
-                        for T in T_curve]
-
-            try:
-                rs_results = builder.run_response_spectrum_analysis(
-                    num_modes=n,
-                    modal_periods=periods[:n],
-                    spectrum_periods=T_curve,
-                    spectrum_accels=Sa_curve,
-                    direction='X',
-                    damping_ratio=0.04,
-                    print_results=True,
-                )
-            except Exception as e:
-                print(f"  Response spectrum analysis skipped: {e}")
         else:
             print("\n── No MASS SOURCE defined — skipping modal analysis. ──")
 
-        # ── Static analysis plotting ──
-        if ANALYSE:
-            try:
-                print('\n', 80*'=')
-                dead_case = 'DEAD'
-                wind_case = 'Wind'
-                comb_str = f"1.4 {dead_case} + 1.4 {wind_case}"
-
-                print(f"── Static force diagrams ({comb_str}) ──")
-                # Rebuild and re-run with the combo loads (model was wiped by
-                # the modal analysis above)
-                combo = {dead_case: 1.4, wind_case: 1.4}
-                static_results = builder.run_static_analysis(
-                    extract_reactions=True,
-                    pattern_scales=combo,
-                )
-
-                crx = static_results.get('summed_reactions', {})
-                ctots = static_results.get('load_totals', {})
-                total_app = {'fx': 0., 'fy': 0., 'fz': 0.}
-                for t in ctots.values():
-                    for k in total_app:
-                        total_app[k] += t.get(k, 0.)
-                if crx:
-                    print(f"    Applied: Fx={total_app['fx']:12.3f}  "
-                        f"Fy={total_app['fy']:12.3f}  "
-                        f"Fz={total_app['fz']:12.3f}")
-                    print(f"    Reactn:  Fx={crx.get('fx',0):12.3f}  "
-                        f"Fy={crx.get('fy',0):12.3f}  "
-                        f"Fz={crx.get('fz',0):12.3f}")
-
-                elem_forces = builder.extract_static_element_forces()
-                print(f"  Extracted forces for {len(elem_forces)} elements")
-
-                from fea_toolkit.plotting import plot_static_force_diagram
-
-                unit_F = model_data.units.get('F', '?')
-
-                # Axial diagram (Fz) — for vertical loads this shows compression
-                fig_n = plot_static_force_diagram(
-                    builder, elem_forces, 'Fz',
-                    title=f'Axial force Fz ({unit_F}) — {comb_str}',
-                )
-                if fig_n:
-                    fig_n.savefig('static_axial.png', dpi=150)
-                    print(f"  Saved → static_axial.png")
-
-                # Moment diagram (My) — from WIND_X lateral load
-                fig_m = plot_static_force_diagram(
-                    builder, elem_forces, 'My',
-                    title=f'Moment My ({unit_F}·{unit_L}) — {comb_str}',
-                )
-                if fig_m:
-                    fig_m.savefig('static_moment.png', dpi=150)
-                    print(f"  Saved → static_moment.png")
-
-                # Shear diagram (Fx) — from WIND_X lateral load
-                fig_vx = plot_static_force_diagram(
-                    builder, elem_forces, 'Fx',
-                    title=f'Shear Fx ({unit_F}) — {comb_str}',
-                )
-                if fig_vx:
-                    fig_vx.savefig('static_shear.png', dpi=150)
-                    print(f"  Saved → static_shear.png")
-
-                # Deformed shape — use large scale since vertical loads
-                # produce only small axial shortening
-                if static_results and 'nodal_displacements' in static_results:
-                    from fea_toolkit.plotting import plot_deformed_3d
-                    try:
-                        import math
-                        max_disp = max(
-                            math.sqrt(d[0]**2 + d[1]**2 + d[2]**2)
-                            for d in static_results['nodal_displacements'].values()
-                        )
-                        scale = max(500, int(5.0 / max(max_disp, 1e-6)))
-                        plotter = plot_deformed_3d(
-                            builder, static_results, scale=scale,
-                        )
-                        if plotter is not None:
-                            plotter.screenshot('static_deformed.png')
-                            print(f"  Saved → static_deformed.png")
-                    except Exception as e2:
-                        print(f"  Deformed shape skipped: {e2}")
-            except Exception as e:
-                print(f"  Static plotting skipped: {e}")
-
-        from fea_toolkit.plotting import plot_static_moment_3d
-
-        # After extracting element forces
-        elem_forces = builder.extract_static_element_forces()
-        plot_static_moment_3d(builder, elem_forces, 'My')
-
-        print("\nResults keys:", results.keys())
+        print("\nDone. See also: examples/modal_rs_analysis.py for response spectrum.")
 
 if __name__ == "__main__":
     main()
-
-    if False:
-        import opstool.vis.pyvista as opsvis
-        plotter = opsvis.plot_model(show_node_numbering=True, show_ele_numbering=True)
-        plotter.show()
-        plotter.close()
 

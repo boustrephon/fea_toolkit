@@ -3,22 +3,27 @@
 
 Produces (both PNG and SVG):
 
-* ``examples/output/pumphouse_pushover_curve.png`` / ``.svg`` — capacity curve.
-* ``examples/output/pumphouse_pushover_deformed.png`` / ``.svg`` — 3D deformed
+* ``examples/output/pushover_curve.png`` / ``.svg`` — capacity curve.
+* ``examples/output/pushover_deformed.png`` / ``.svg`` — 3D deformed
   shape at peak displacement.
-* ``examples/output/pumphouse_pushover_mode0.png`` / ``.svg`` …
-  ``examples/output/pumphouse_pushover_mode2.png`` / ``.svg`` — first three mode
+* ``examples/output/pushover_mode0.png`` / ``.svg`` …
+  ``examples/output/pushover_mode2.png`` / ``.svg`` — first three mode
   shapes.
 
 Usage::
 
-    python examples/run_pumphouse_pushover.py /path/to/model.s2k
+    # Use a specific model
+    python examples/pushover_analysis.py /path/to/model.s2k
+
+    # Use the built‑in cantilever sample (no external file needed)
+    python examples/pushover_analysis.py --sample
 """
 
 import sys
 import argparse
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent.parent))  # project root
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from fea_toolkit import __version__, ops_version
@@ -36,27 +41,39 @@ def main():
         description="Non‑linear pushover analysis using fiber sections.",
     )
     parser.add_argument(
-        "s2k_file",
-        help="Path to the SAP2000 text file (.s2k, .$2k).",
+        "s2k_file", nargs="?",
+        help="Path to the SAP2000 text file (.s2k, .$2k). Omit when using --sample.",
+    )
+    parser.add_argument(
+        "--sample", action="store_true",
+        help="Use the built‑in cantilever sample model (no external file needed).",
     )
     args = parser.parse_args()
 
-    s2k_path = Path(args.s2k_file)
-    if not s2k_path.exists():
-        sys.exit(f"Error: file not found — {s2k_path}")
+    # Determine input source
+    if args.sample:
+        from examples.sample_model import make_sample_model
+        md = make_sample_model()
+        source_name = "built‑in cantilever sample"
+        print(f"FEA Toolkit Version: {__version__}")
+        print(f"OpenSees Version: {ops_version()}")
+        print(f"Using: {source_name}\n")
+    elif args.s2k_file:
+        s2k_path = Path(args.s2k_file)
+        if not s2k_path.exists():
+            sys.exit(f"Error: file not found — {s2k_path}")
+        print(f"FEA Toolkit Version: {__version__}")
+        print(f"OpenSees Version: {ops_version()}")
+        print(f"Loading: {s2k_path}\n")
+        parser_s2k = SAP2000Parser(s2k_path)
+        parser_s2k.parse()
+        md = parser_s2k.get_model_data()
+    else:
+        sys.exit("Provide a .s2k file path or use --sample.")
 
     # Output directory for plots (gitignored)
     out = Path(__file__).parent / "output"
     out.mkdir(exist_ok=True)
-
-    print(f"FEA Toolkit Version: {__version__}")
-    print(f"OpenSees Version: {ops_version()}")
-    print(f"Loading: {s2k_path}\n")
-
-    # ── 1. Parse ─────────────────────────────────────────────────────────────
-    parser = SAP2000Parser(s2k_path)
-    parser.parse()
-    md = parser.get_model_data()
 
     print(f"Model units: {md.units}")
     print(f"Nodes: {len(md.nodes)}")
@@ -100,9 +117,9 @@ def main():
             animate=False, notebook=True,
         )
         if pl_png is not None:
-            pl_png.screenshot(str(out / f"pumphouse_pushover_mode{m}.png"), scale=2)
+            pl_png.screenshot(str(out / f"pushover_mode{m}.png"), scale=2)
             pl_png.close()
-            print(f"  Saved → {out / f'pumphouse_pushover_mode{m}.png'}  (2×, 22pt)")
+            print(f"  Saved → {out / f'pushover_mode{m}.png'}  (2×, 22pt)")
 
         # SVG: large window for high-res output, same font
         pl_svg = plot_mode_3d(
@@ -113,8 +130,8 @@ def main():
         )
         if pl_svg is not None:
             try:
-                pl_svg.save_graphic(str(out / f"pumphouse_pushover_mode{m}.svg"), raster=False)
-                print(f"  Saved → {out / f'pumphouse_pushover_mode{m}.svg'}  (22pt, 3840×2880)")
+                pl_svg.save_graphic(str(out / f"pushover_mode{m}.svg"), raster=False)
+                print(f"  Saved → {out / f'pushover_mode{m}.svg'}  (22pt, 3840×2880)")
             except Exception:
                 print(f"  Note: vector SVG unavailable for mode {m}")
             pl_svg.close()
@@ -142,10 +159,10 @@ def main():
         title='BPPS Pumphouse — Non-linear Pushover (DEAD + SDL + Uniform)',
     )
     if fig is not None:
-        fig.savefig(out / 'pumphouse_pushover_curve.png', dpi=300)
-        print(f"\n  Saved → {out / 'pumphouse_pushover_curve.png'}  (300 dpi)")
-        fig.savefig(out / 'pumphouse_pushover_curve.svg')
-        print(f"  Saved → {out / 'pumphouse_pushover_curve.svg'}")
+        fig.savefig(out / 'pushover_curve.png', dpi=300)
+        print(f"\n  Saved → {out / 'pushover_curve.png'}  (300 dpi)")
+        fig.savefig(out / 'pushover_curve.svg')
+        print(f"  Saved → {out / 'pushover_curve.svg'}")
 
     # Print summary
     bs = [abs(v) for v in results['base_shear']]
@@ -355,17 +372,17 @@ def main():
         # ── PNG: 2× resolution, larger corner text, same label size ──
         p = pv.Plotter(notebook=True, off_screen=True)
         _render_deformed(p, corner_font=22, label_font=22,
-                         png_path=str(out / 'pumphouse_pushover_deformed.png'), png_scale=2)
+                         png_path=str(out / 'pushover_deformed.png'), png_scale=2)
         p.close()
-        print(f"  Saved → {out / 'pumphouse_pushover_deformed.png'}  (2×, 22pt)")
+        print(f"  Saved → {out / 'pushover_deformed.png'}  (2×, 22pt)")
 
         # ── SVG: large window for high-res output, corner text at ⅔ size (15pt) ──
         s = pv.Plotter(notebook=True, off_screen=True,
                        window_size=[3840, 2880])
         _render_deformed(s, corner_font=15, label_font=22,
-                         svg_path=str(out / 'pumphouse_pushover_deformed.svg'))
+                         svg_path=str(out / 'pushover_deformed.svg'))
         s.close()
-        print(f"  Saved → {out / 'pumphouse_pushover_deformed.svg'}  (corner=15pt, labels=22pt, 3840×2880)")
+        print(f"  Saved → {out / 'pushover_deformed.svg'}  (corner=15pt, labels=22pt, 3840×2880)")
 
     except ImportError:
         print("  Skipping 3D deformed shape (pyvista not available)")
