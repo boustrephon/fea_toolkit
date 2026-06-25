@@ -1901,9 +1901,11 @@ class TestSubdivideElements:
         # The middle internal node (at z≈5) should have an x-offset
         mid_nodes = [n for nid, n in result_nodes.items()
                      if nid.startswith("B1_sub") and abs(n.z - 5.0) < 0.5]
-        if mid_nodes:
-            offset = abs(mid_nodes[0].x)
-            assert offset > 0.001, f"Expected imperfection offset, got {offset}"
+        assert len(mid_nodes) > 0, "No midpoint node found — subdivision may have failed"
+        # Imperfection is perpendicular to the brace axis. For a vertical brace
+        # (0,0,0)→(0,0,10) the perpendicular direction is Y.
+        offset = abs(mid_nodes[0].y)
+        assert offset > 0.001, f"Expected imperfection offset, got {offset}"
 
     def test_end_offset_creates_rigid_links(self):
         """end_offset > 0 creates offset nodes and rigid link entries."""

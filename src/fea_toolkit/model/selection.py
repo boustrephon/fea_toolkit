@@ -440,7 +440,13 @@ class Selection:
             name for name, sec in model.sections.items()
             if isinstance(sec, brace_shape_types)
         ]
+        if not brace_sec_names:
+            # Return an empty selection — no braces to find
+            return Selection(
+                element_types=[],
+                sections=[],
+            )
         return Selection(
             element_types=['Frame'],
-            sections=brace_sec_names if brace_sec_names else None,
+            sections=brace_sec_names,
         )

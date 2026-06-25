@@ -334,7 +334,9 @@ class OpenSeesBuilder:
         self._rigid_link_elems: List[tuple] = []
         if self.config.get('subdivide_braces') and hasattr(self, '_brace_selection'):
             nodes = self.model.nodes
-            next_tag = max((e.elem_tag for e in elements.values()), default=0) + 1
+            max_elem_tag = max((e.elem_tag for e in elements.values()), default=0)
+            max_node_tag = max((nd.node_tag for nd in self.model.nodes.values()), default=0)
+            next_tag = max(max_elem_tag, max_node_tag) + 1
             from ..model.geometry import subdivide_elements
             elements, assignments, nodes, next_tag, rigid_links = subdivide_elements(
                 elements, assignments, nodes,
@@ -370,21 +372,41 @@ class OpenSeesBuilder:
             if self.config['verbose']:
                 print(f"  Creating {len(self._rigid_link_elems)} rigid links "
                       f"for brace end offsets...")
+            # Dedicated super‑stiff section for rigid links
+            rigid_sec_tag = max(self.section_tags.values()) + 1 if self.section_tags else 10000
+            rigid_mat_tag = 1  # reuse the first material tag
+            # A × E large enough to be effectively rigid over a short offset
+            rigid_E = 2e14  # 1000× steel E
+            rigid_A = 1.0   # 1 m²
+            rigid_I = 1.0   # 1 m⁴
+            ops.uniaxialMaterial('Elastic', rigid_mat_tag, rigid_E)
+            ops.section('Elastic', rigid_sec_tag, rigid_A, rigid_E, rigid_I, rigid_I, 1.0)
+
             for link_id, nid_i, nid_j, link_tag in self._rigid_link_elems:
                 node_i_tag = self._node_tag_from_id(nid_i)
                 node_j_tag = self._node_tag_from_id(nid_j)
                 if node_i_tag is None or node_j_tag is None:
                     continue
-                # Choose orientation: use the same transf type as the brace
+                # Compute a reasonable vecxz from the link direction
+                try:
+                    xi, yi, zi = ops.nodeCoord(node_i_tag)
+                    xj, yj, zj = ops.nodeCoord(node_j_tag)
+                except Exception:
+                    xi = yi = zi = xj = yj = zj = 0.0
+                dx, dy, dz = xj - xi, yj - yi, zj - zi
+                length = math.hypot(dx, dy, dz)
+                if length < 1e-12:
+                    continue
+                # Choose a reference vector that's not parallel to the link
+                ref_x, ref_y, ref_z = (0.0, 0.0, 1.0)
+                if abs(dz / length) > 0.99:
+                    ref_x, ref_y, ref_z = (1.0, 0.0, 0.0)
                 transf_type = self.config.get('geom_transf_type', 'Linear')
-                transf_tag = link_tag
-                ops.geomTransf(transf_type, transf_tag, 0.0, 0.0, 1.0)
-                # High-stiffness elastic section for the rigid link
-                # (area × E = effectively rigid over a short offset)
+                transf_tag = link_tag * 10  # keep transf tags distinct
+                ops.geomTransf(transf_type, transf_tag, ref_x, ref_y, ref_z)
                 ops.element('elasticBeamColumn', link_tag,
                             node_i_tag, node_j_tag,
-                            sec_tag=1,  # use tag 1 — any section works with high E
-                            transf_tag=transf_tag)
+                            rigid_sec_tag, transf_tag)
 
         for elem_id, elem in elements.items():
             if elem.inactive:
@@ -444,9 +466,15 @@ class OpenSeesBuilder:
             int_tag = elem_tag
             beam_int = self.config.get('beam_integration', 'Lobatto')
             if beam_int == 'HingeRadau':
-                # Plastic hinge length from section geometry
+                # Plastic hinge length from section geometry.
+                # OpenSeesPy signature:
+                #   beamIntegration('HingeRadau', tag, secI, lpI, secJ, lpJ, secE)
+                # secI / secJ  — section at element I / J ends (hinge zones)
+                # lpI / lpJ    — plastic hinge length at each end
+                # secE         — interior (elastic) section
                 Lp = self._compute_hinge_length(sec_tag, length)
-                ops.beamIntegration('HingeRadau', int_tag, sec_tag, Lp)
+                ops.beamIntegration('HingeRadau', int_tag,
+                                    sec_tag, Lp, sec_tag, Lp, sec_tag)
             else:
                 npts = self.config['num_int_pts']
                 ops.beamIntegration('Lobatto', int_tag, sec_tag, npts)
@@ -523,15 +551,17 @@ class OpenSeesBuilder:
             print("No brace IDs provided.")
             return {}
 
-        elements = (self.split_elements if self.split_elements
-                    else self.model.frame_elements)
-        assignments = (self.split_assignments if self.split_elements
-                       else self.model.frame_assignments)
+        # Use the ORIGINAL (pre‑subdivision) model data — after subdivision
+        # the original brace element is marked inactive and its sub‑elements
+        # use different IDs.  The buckling check is an analytical computation
+        # on the original element geometry, so we always read from the source.
+        elements = self.model.frame_elements
+        assignments = self.model.frame_assignments
 
         results: Dict[str, Dict[str, float]] = {}
         for eid in brace_ids:
             elem = elements.get(eid)
-            if elem is None or getattr(elem, 'inactive', False):
+            if elem is None:
                 continue
             sec_name = assignments.get(eid) if assignments else None
             if not sec_name or sec_name not in self.model.sections:
@@ -570,18 +600,21 @@ class OpenSeesBuilder:
             }
 
         if print_results and results:
+            # Use the model's native force unit for display
+            force_unit = self.model.units.get('F', 'N')
+
             print(f"\n── Euler buckling check (K={K}) ──")
             header = (f"  {'ID':>12} {'Section':>20} {'L (m)':>8} "
-                      f"{'λ':>8} {'P_cr (kN)':>10}")
+                      f"{'λ':>8} {'P_cr (' + force_unit + ')':>14}")
             if axial_demand:
-                header += f" {'P_dem (kN)':>10} {'Ratio':>8}"
+                header += f" {'P_dem (' + force_unit + ')':>14} {'Ratio':>8}"
             print(header)
             print("  " + "-" * len(header))
             for eid, r in sorted(results.items()):
                 line = (f"  {eid:>12} {r['section']:>20} {r['length']:8.3f} "
-                        f"{r['slenderness']:8.1f} {r['P_cr']/1000:10.1f}")
+                        f"{r['slenderness']:8.1f} {r['P_cr']:10.1f}")
                 if axial_demand:
-                    line += f" {r['P_demand']/1000:10.1f} {r['ratio']:8.3f}"
+                    line += f" {r['P_demand']:10.1f} {r['ratio']:8.3f}"
                 print(line)
 
             if axial_demand:
@@ -2694,7 +2727,6 @@ class OpenSeesBuilder:
                      else f'partiMassRatiosMY' if direction.upper() == 'Y'
                      else f'partiMassRatiosMZ')
 
-        gamma_list = modal_props.get(gamma_key, [0.0])
         mass_list = modal_props.get(mass_key, [0.0])
         ratio_list = modal_props.get(ratio_key, [0.0])
 
@@ -2832,7 +2864,8 @@ class OpenSeesBuilder:
         # Area under bilinear = 0.5 * S_ay * S_dy + S_ay * (S_d_peak - S_dy)
         #                        + 0.5 * (S_a_peak - S_ay) * (S_d_peak - S_dy)
         # Area under actual = trapezoidal integral
-        area_actual = np.trapezoid(S_a_arr, S_d_arr)
+        # Integrate only up to the peak (not including any descending branch)
+        area_actual = np.trapezoid(S_a_arr[:peak_idx + 1], S_d_arr[:peak_idx + 1])
 
         # Solve for S_dy using the equal-energy principle
         # This is a quadratic: 0.5*K_init*S_dy² - S_a_peak*S_d_peak + ...

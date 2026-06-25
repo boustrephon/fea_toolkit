@@ -5,6 +5,9 @@
 # Private section database
 data/
 
+# Local / private analysis scripts (not committed)
+local/
+
 # Pickled data files (serialised section catalogues, cached models, etc.)
 *.pkl
 
