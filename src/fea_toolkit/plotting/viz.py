@@ -27,7 +27,7 @@ def _set_isometric_view(plotter) -> None:
     cx = (bounds[0] + bounds[1]) * 0.5
     cy = (bounds[2] + bounds[3]) * 0.5
     cz = (bounds[4] + bounds[5]) * 0.5
-    dist = max(horiz, z_range) * 2.0
+    dist = max(horiz, z_range) * 1.5
     plotter.camera.position = (cx + dist, cy + dist, cz + dist * 0.4)
     plotter.camera.focal_point = (cx, cy, cz)
     plotter.camera.view_up = (0.0, 0.0, 1.0)
@@ -350,6 +350,157 @@ def plot_rs_deformed_3d(
         pts = np.linspace(p1, p2, n)
         poly = pv.lines_from_points(pts)
         plotter.add_mesh(poly, color=colour, line_width=4)
+
+    plotter.show_grid()
+    _set_isometric_view(plotter)
+
+    if notebook:
+        return plotter
+    plotter.show()
+    return None
+
+
+# ============================================================================
+# Mode shape 3D view (PyVista) — animated or static
+# ============================================================================
+
+def plot_mode_3d(
+    builder,
+    mode_shapes: Dict[int, Dict[int, tuple]],
+    mode: int = 0,
+    scale: float = 10.0,
+    show_original: bool = True,
+    animate: bool = True,
+    periods: Optional[List[float]] = None,
+    font_size: int = 14,
+    selection: Optional['Selection'] = None,
+    notebook: bool = False,
+    **kwargs,
+) -> Optional[Any]:
+    """Display (and optionally animate) a mode shape in 3D using PyVista.
+
+    For each mode, the eigenvector displacements from
+    :meth:`OpenSeesBuilder.extract_mode_shapes` are applied as a deformed
+    shape, scaled by *scale*.  When *animate* is ``True`` the amplitude
+    oscillates sinusoidally, giving a visual feel for the vibration pattern.
+
+    Args:
+        builder: Built ``OpenSeesBuilder``.
+        mode_shapes: Output of ``builder.extract_mode_shapes(num_modes)``.
+        mode: 0‑based mode index to display.
+        scale: Displacement magnification factor.
+        show_original: If True, show the undeformed model in grey.
+        animate: If True, oscillate the amplitude in a loop.
+        periods: Optional list of modal periods (s).  If provided, the
+            period for the displayed mode is shown in the title.
+        font_size: Font size for the title text (default 14).
+        selection: Optional :class:`~fea_toolkit.model.selection.Selection`
+            to restrict which elements are shown.
+        notebook: If True, return plotter for Jupyter.
+        **kwargs: Passed to ``pyvista.Plotter()``.
+
+    Requires:
+        ``pyvista``.
+    """
+    try:
+        import pyvista as pv
+    except ImportError:
+        print("Warning: pyvista not installed.  Install with: pip install pyvista")
+        return None
+
+    if mode not in mode_shapes or not mode_shapes[mode]:
+        print(f"No mode shape data for mode {mode}.")
+        return None
+
+    pv.set_plot_theme("document")
+
+    disp = mode_shapes[mode]  # {node_tag: (dx, dy, dz)}
+
+    elements = (builder.split_elements if builder.split_elements
+                else builder.model.frame_elements)
+    if selection is not None:
+        sel_ids = set(selection.get_frame_ids(builder.model))
+        elements = {eid: elem for eid, elem in elements.items()
+                    if eid in sel_ids}
+
+    # Build segment data: (p1, p2, di, dj)
+    segments = []
+    for eid, elem in elements.items():
+        if getattr(elem, 'inactive', False):
+            continue
+        ni = builder.model.nodes.get(elem.node_i)
+        nj = builder.model.nodes.get(elem.node_j)
+        if ni is None or nj is None:
+            continue
+        di = disp.get(ni.node_tag, (0, 0, 0))
+        dj = disp.get(nj.node_tag, (0, 0, 0))
+        p1 = np.array([ni.x, ni.y, ni.z])
+        p2 = np.array([nj.x, nj.y, nj.z])
+        segments.append((p1, p2, di, dj))
+
+    if not segments:
+        print("No elements to display.")
+        return None
+
+    plotter = pv.Plotter(notebook=notebook, **kwargs)
+
+    # Undeformed
+    if show_original:
+        for p1, p2, _, _ in segments:
+            n = max(2, int(np.linalg.norm(p2 - p1) * 2))
+            poly = pv.lines_from_points(np.linspace(p1, p2, n))
+            plotter.add_mesh(poly, color='lightgrey', line_width=2, opacity=0.3)
+
+    # Deformed mesh (we'll update it if animating)
+    def make_deformed(amp: float = 1.0):
+        """Build a merged PolyData for the deformed shape at amplitude *amp*."""
+        all_pts = []
+        all_lines = []
+        offset = 0
+        for p1, p2, di, dj in segments:
+            d1 = np.array(di) * scale * amp
+            d2 = np.array(dj) * scale * amp
+            a = p1 + d1
+            b = p2 + d2
+            n = max(2, int(np.linalg.norm(b - a) * 2))
+            pts = np.linspace(a, b, n)
+            all_pts.append(pts)
+            for i in range(n - 1):
+                all_lines.append([2, offset + i, offset + i + 1])
+            offset += n
+        if not all_pts:
+            return pv.PolyData()
+        verts = np.vstack(all_pts)
+        cells = np.array(all_lines, dtype=int)
+        return pv.PolyData(verts, lines=cells)
+
+    deformed_mesh = make_deformed(1.0)
+    actor = plotter.add_mesh(deformed_mesh, color='#c44e52', line_width=4)
+
+    # Build title text with period if available
+    period_str = ""
+    if periods is not None and mode < len(periods):
+        period_str = f"  T = {periods[mode]:.4f} s"
+
+    if animate:
+        import math as _math
+        import time as _time
+
+        mesh_ref = deformed_mesh
+
+        def callback():
+            t = _time.time()
+            amp = _math.sin(t * 2.0)
+            new_mesh = make_deformed(amp)
+            plotter.update_coordinates(new_mesh.points, mesh=mesh_ref)
+            plotter.render()
+
+        plotter.add_callback(callback, 30)
+        plotter.add_text(f"Mode {mode + 1}{period_str}  (oscillating)",
+                         position='upper_edge', font_size=font_size)
+    else:
+        plotter.add_text(f"Mode {mode + 1}{period_str}",
+                         position='upper_edge', font_size=font_size)
 
     plotter.show_grid()
     _set_isometric_view(plotter)
@@ -703,6 +854,56 @@ def plot_force_diagram(
     ax.set_ylabel('Elevation (m)')
     ax.set_title(title or f'{quantity_label} vs Elevation (CQC combined)')
     ax.grid(True, alpha=0.3)
+    ax.axvline(0, color='grey', linewidth=0.5)
+
+    fig.tight_layout()
+    return fig
+
+
+# ============================================================================
+# Pushover capacity curve (Matplotlib)
+# ============================================================================
+
+def plot_pushover_curve(
+    pushover_results: Dict[str, Any],
+    title: str = None,
+    figsize=(8, 6),
+    **kwargs,
+) -> Optional[Any]:
+    """Plot the pushover capacity curve (base shear vs control displacement).
+
+    Args:
+        pushover_results: Output dict from
+            :meth:`OpenSeesBuilder.run_pushover_analysis`.
+        title: Optional title.  Auto‑generated if omitted.
+        figsize: Matplotlib figure size ``(width, height)``.
+        **kwargs: Passed to ``matplotlib.pyplot.plot()``.
+
+    Returns:
+        The ``matplotlib.figure.Figure`` so the caller can ``.savefig()`` or
+        ``.show()``.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("Warning: matplotlib not installed.  "
+              "Install with: pip install matplotlib")
+        return None
+
+    disp = pushover_results.get('control_disp', [])
+    shear = pushover_results.get('base_shear', [])
+
+    if not disp or not shear:
+        print("No pushover data to plot.")
+        return None
+
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.plot(disp, shear, '-o', markersize=3, **kwargs or {})
+    ax.set_xlabel('Control node displacement (m)')
+    ax.set_ylabel('Base shear (kN)')
+    ax.set_title(title or 'Pushover Capacity Curve')
+    ax.grid(True, alpha=0.3)
+    ax.axhline(0, color='grey', linewidth=0.5)
     ax.axvline(0, color='grey', linewidth=0.5)
 
     fig.tight_layout()

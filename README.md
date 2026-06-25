@@ -197,7 +197,7 @@ all other area loads are ignored.
 4. **Advanced Analyses**  
    - ~~Modal Analysis~~ ✅ `run_modal_analysis()` implemented — eigenvalue extraction with modal properties table.  
    - ~~Response Spectrum~~ ✅ `run_response_spectrum_analysis()` + `extract_element_rs_forces()` + `add_missing_mass_correction()` implemented.  
-   - **Nonlinear Static Pushover** – implement with `forceBeamColumn` and `HingeRadau` integration.  
+   - ~~Nonlinear Static Pushover~~ ✅ `run_pushover_analysis()` implemented — see [`docs/pushover_analysis.md`](docs/pushover_analysis.md).  
    - **Nonlinear Time History** – add ground motion input and integration schemes.
 
 5. **Joint Modeling** (for concrete frames)  

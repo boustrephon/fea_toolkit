@@ -245,6 +245,11 @@ def timeSeries(series_type: str, tag: int, *args: Any) -> None:
         series_type: ``'Linear'``, ``'Constant'``, ``'Trig'``, ``'Path'``, etc.
         tag: Time series tag.
         *args: Series-specific arguments.
+
+    **Path time series** (used for response spectrum)::
+
+        ops.timeSeries('Path', tag, '-values', *values, '-dt', dt,
+                       '-factor', factor)
     """
     ...
 
@@ -255,6 +260,21 @@ def pattern(pattern_type: str, tag: int, *args: Any) -> None:
         pattern_type: ``'Plain'``, ``'UniformExcitation'``, etc.
         tag: Pattern tag.
         *args: Pattern-specific arguments.
+    """
+    ...
+
+def loadConst(*args: str) -> None:
+    """Lock existing load patterns at their current load factor.
+
+    Usage::
+
+        ops.loadConst('-time', 0.0)   # lock gravity, reset domain time
+
+    After calling this, new patterns vary independently from the locked ones.
+    Commonly used in multi‑stage analyses (e.g. gravity → pushover).
+
+    Args:
+        *args: Options such as ``'-time', value``.
     """
     ...
 
@@ -284,6 +304,25 @@ def eleLoad(*args: Any) -> None:
 # ============================================================================
 # Analysis commands
 # ============================================================================
+
+def wipeAnalysis() -> None:
+    """Destroy all existing analysis objects (constraints, numberer, system,
+    algorithm, integrator, analysis) while preserving the model
+    (nodes, elements, patterns, loads).
+
+    Used before re‑defining analysis parameters for a new stage without
+    rebuilding the model.
+    """
+    ...
+
+def analysis(analysis_type: str, *args: Any) -> None:
+    """Create the Analysis object.
+
+    Args:
+        analysis_type: ``'Static'``, ``'Transient'``, etc.
+        *args: Additional analysis options.
+    """
+    ...
 
 def constraints(constraint_type: str) -> None:
     """Set the constraint handler.
