@@ -921,3 +921,182 @@ def convert_area_loads_to_edge_loads(
 
     return result_loads
 
+
+# ============================================================================
+# Brace subdivision with initial imperfection (Approach A)
+# ============================================================================
+
+def subdivide_elements(
+    elements: Dict[str, FrameElement],
+    assignments: Dict[str, str],
+    nodes: Dict[str, 'Node'],
+    n_segments: int = 4,
+    imperfection_ratio: float = 1.0 / 500.0,
+    brace_ids: Optional[set] = None,
+    end_offset: float = 0.0,
+    next_tag: int = 1,
+) -> Tuple[Dict[str, FrameElement], Dict[str, str], Dict[str, 'Node'], int, List[tuple]]:
+    """Subdivide selected frame elements into *n_segments* sub‑elements
+    with a small initial imperfection to trigger buckling under compression.
+
+    This implements **Approach A** for brace buckling modelling — subdivided
+    element with ``Corotational`` geometric transformation.  The imperfection
+    is applied as a lateral offset at internal nodes, perpendicular to the
+    element local axis.
+
+    When *end_offset* > 0 (for steel gusset plates), the brace is trimmed
+    at both ends and **rigid link** elements are created between the original
+    working points and the offset brace ends.
+
+    Args:
+        elements: ``{elem_id: FrameElement}`` of **all** frame elements
+            (modified in place).
+        assignments: ``{elem_id: section_name}`` (modified in place).
+        nodes: ``{node_id: Node}`` — new nodes are added here.
+        n_segments: Number of sub‑elements to create (default 4).
+        imperfection_ratio: Lateral offset as a fraction of element length
+            (default ``L/500``, per ASCE 41 imperfection recommendations).
+        brace_ids: Set of element IDs to subdivide.  If ``None``, no elements
+            are subdivided (caller must provide a selection).
+        end_offset: Distance from each working point to the gusset plate
+            face (model length units).  Default 0.0 (no offset).  Set to
+            typical gusset plate dimension for braced steel frames.
+        next_tag: Next available numeric tag for new nodes and elements.
+
+    Returns:
+        ``(elements, assignments, nodes, next_tag, rigid_links)`` with the
+        subdivided elements added and original elements preserved (inactive).
+        ``rigid_links`` is a list of ``(link_id, node_i, node_j, link_tag)``
+        tuples describing the rigid offset segments.
+    """
+    if brace_ids is None:
+        brace_ids = set()
+
+    rigid_links: List[tuple] = []
+
+    for eid in list(brace_ids):
+        elem = elements.get(eid)
+        if elem is None:
+            continue
+
+        ni = nodes.get(elem.node_i)
+        nj = nodes.get(elem.node_j)
+        if ni is None or nj is None:
+            continue
+
+        p_i = np.array([ni.x, ni.y, ni.z])
+        p_j = np.array([nj.x, nj.y, nj.z])
+        vec = p_j - p_i
+        length = np.linalg.norm(vec)
+        if length < 1e-12:
+            continue
+
+        # Unit vector along the element
+        u = vec / length
+
+        # Clamp offset so it doesn't consume the whole element
+        half = length * 0.45
+        d = min(end_offset, half)
+
+        if d > 0:
+            # Create offset nodes at each end (working point → gusset face)
+            p_start = p_i + u * d
+            p_end = p_j - u * d
+
+            offset_i_id = f"{eid}_offset_i"
+            offset_i_tag = next_tag
+            next_tag += 1
+            nodes[offset_i_id] = Node(
+                node_id=offset_i_id, node_tag=offset_i_tag,
+                x=float(p_start[0]), y=float(p_start[1]), z=float(p_start[2]),
+            )
+
+            offset_j_id = f"{eid}_offset_j"
+            offset_j_tag = next_tag
+            next_tag += 1
+            nodes[offset_j_id] = Node(
+                node_id=offset_j_id, node_tag=offset_j_tag,
+                x=float(p_end[0]), y=float(p_end[1]), z=float(p_end[2]),
+            )
+
+            # Rigid link at I‑end
+            link_i_id = f"{eid}_rigid_i"
+            link_i_tag = next_tag
+            next_tag += 1
+            rigid_links.append((link_i_id, elem.node_i, offset_i_id, link_i_tag))
+
+            # Rigid link at J‑end
+            link_j_id = f"{eid}_rigid_j"
+            link_j_tag = next_tag
+            next_tag += 1
+            rigid_links.append((link_j_id, offset_j_id, elem.node_j, link_j_tag))
+
+            brace_start_id = offset_i_id
+            brace_end_id = offset_j_id
+            p_start_arr = p_start
+            p_end_arr = p_end
+        else:
+            brace_start_id = elem.node_i
+            brace_end_id = elem.node_j
+            p_start_arr = p_i
+            p_end_arr = p_j
+
+        effective_vec = p_end_arr - p_start_arr
+        effective_len = np.linalg.norm(effective_vec)
+        if effective_len < 1e-12:
+            continue
+
+        u_eff = effective_vec / effective_len
+        # Perpendicular direction for imperfection
+        ref = np.array([0.0, 0.0, 1.0])
+        if abs(np.dot(u_eff, ref)) > 0.99:
+            ref = np.array([1.0, 0.0, 0.0])
+        perp = np.cross(u_eff, ref)
+        perp = perp / np.linalg.norm(perp)
+        imperfection = effective_len * imperfection_ratio
+
+        # Mark original element as inactive
+        elem.inactive = True
+
+        prev_node_id = brace_start_id
+        seg_tags = []
+
+        for seg in range(n_segments):
+            t0 = seg / n_segments
+            t1 = (seg + 1) / n_segments
+            mid_t = (t0 + t1) / 2.0
+
+            # Mid-point with sinusoidal imperfection
+            imp_amp = imperfection * math.sin(mid_t * math.pi)
+            mid_pt = p_start_arr + effective_vec * mid_t + perp * imp_amp
+
+            if seg < n_segments - 1:
+                new_node_id = f"{eid}_sub_{seg}_mid"
+                new_tag = next_tag
+                next_tag += 1
+                nodes[new_node_id] = Node(
+                    node_id=new_node_id, node_tag=new_tag,
+                    x=float(mid_pt[0]), y=float(mid_pt[1]), z=float(mid_pt[2]),
+                )
+                j_node_id = new_node_id
+            else:
+                j_node_id = brace_end_id
+
+            sub_elem_id = f"{eid}_sub_{seg}"
+            sub_tag = next_tag
+            next_tag += 1
+
+            elements[sub_elem_id] = FrameElement(
+                elem_id=sub_elem_id, elem_tag=sub_tag,
+                node_i=prev_node_id, node_j=j_node_id, angle=elem.angle,
+            )
+            seg_tags.append(sub_elem_id)
+            if eid in assignments:
+                assignments[sub_elem_id] = assignments[eid]
+            prev_node_id = j_node_id
+
+        # Track child elements on the original brace
+        elem.child_ids = seg_tags
+
+    return elements, assignments, nodes, next_tag, rigid_links
+

@@ -342,9 +342,571 @@ pattern's frame distributed loads.
 
 ---
 
-## Output
+## Beam integration: `Lobatto` vs `HingeRadau`
 
-`run_pushover_analysis()` returns a dictionary with:
+The builder's ``beam_integration`` config option controls how plasticity
+is distributed along `forceBeamColumn` elements:
+
+| Option | Behaviour | Best for |
+|---|---|---|
+| ``'Lobatto'`` (default) | Distributed plasticity — integration points spread across the full element length. Yielding can occur anywhere. | General use, conservative. |
+| ``'HingeRadau'`` | Concentrated plasticity — hinges form only at element ends within a plastic hinge length *Lp*. Interior remains elastic. | Moment frames where hinges are expected at beam/column ends. |
+
+``HingeRadau`` uses :meth:`OpenSeesBuilder._compute_hinge_length` to
+estimate *Lp* from section geometry:
+
+- **I‑sections**: :math:`L_p = 0.5 \\cdot d` (section depth)
+- **Pipe sections**: :math:`L_p = 0.5 \\cdot OD`
+- **Other**: :math:`L_p = 0.1 \\cdot L` (10 % of element length)
+
+```python
+builder = OpenSeesBuilder(model_data, {
+    'element_type': 'forceBeamColumn',
+    'beam_integration': 'HingeRadau',
+    'create_fiber_sections': True,
+})
+```
+
+---
+
+## Brace modelling
+
+Standard fiber‑section pushover cannot capture **brace buckling** because:
+
+1. A single joint‑to‑joint element has no initial imperfection.
+2. Without imperfection, the brace just shortens axially under compression.
+3. ``Linear`` and ``PDelta`` transforms don't develop lateral bowing.
+
+Three approaches are available, in order of increasing fidelity:
+
+### Approach A — Subdivided element with imperfection (implemented)
+
+Each brace is split into *N* sub‑elements (default 4) with a small
+sinusoidal lateral offset at internal nodes (default ``L/500`` per
+ASCE 41).  Used with ``geom_transf_type='Corotational'``, the
+imperfection triggers buckling under compression.
+
+**How to use:**
+
+```python
+from fea_toolkit.model.selection import Selection
+
+# Identify braces by section type
+sel = Selection.from_brace_sections(model)
+brace_ids = set(sel.get_frame_ids(model))
+
+# Or manually
+brace_ids = {'10', '11', '12'}
+
+# Configure the builder
+builder = OpenSeesBuilder(model_data, {
+    'element_type': 'forceBeamColumn',
+    'create_fiber_sections': True,
+    'geom_transf_type': 'Corotational',  # required for buckling
+    'split_elements': True,
+})
+builder.set_brace_selection(brace_ids)
+builder.build()
+
+# Check Euler buckling before running pushover
+builder.check_brace_buckling(K=1.0)
+```
+
+**Parameters:**
+
+| Config key | Default | Description |
+|---|---|---|
+| ``brace_n_segments`` | ``4`` | Number of sub‑elements per brace |
+| ``brace_imperfection_ratio`` | ``1/500`` | Lateral offset as fraction of length |
+
+### Approach B — Phenomenological truss (future)
+
+Replace `forceBeamColumn` with a `Truss` element using a custom
+uniaxial material that exhibits softening in compression while
+remaining elastic‑plastic in tension.  Simpler but no moment
+interaction at gusset plates.
+
+**Implementation sketch:**
+
+```python
+# Buckling material via Hysteretic or custom
+ops.uniaxialMaterial('Hysteretic', matTag, ...
+                     pinchX, pinchY, damage1, damage2, beta)
+# Truss element (no bending stiffness)
+ops.element('Truss', eleTag, *nodes, A, matTag)
+```
+
+### Approach C — Hybrid (future)
+
+Subdivided brace with fibre hinges at ends (``HingeRadau``) and an
+elastic ``Corotational`` interior with imperfection.  Highest fidelity:
+
+```
+[hinge]───[elastic subdivided with imperfection]───[hinge]
+```
+
+### Gusset plates and joint offsets (implemented)
+
+In steel braced frames, the brace physical end is offset from the
+beam‑column working point by the gusset plate.  This is handled by
+**rigid offset segments** (Approach 2):
+
+```
+                  ║  column
+      working ───╫─── point
+      point  │  ║
+             │←d→║
+   ──────────┘   ║  ← rigid link (elasticBeamColumn, high stiffness)
+        brace    ║
+   ──────────┐   ║
+             │   ║
+      working ───╫─── point
+                  ║
+```
+
+When ``end_offset > 0``, :func:`subdivide_elements`:
+
+1. Creates offset nodes at distance *d* from each working point along the
+   brace axis.
+2. Subdivides the brace (with imperfection) between the offset nodes.
+3. Returns ``rigid_links`` — tuples describing the link segments.
+4. The builder creates ``elasticBeamColumn`` elements with very high
+   stiffness for each rigid link.
+
+**How to use:**
+
+```python
+builder.set_brace_selection(brace_ids, end_offset=0.15)  # 0.15 m offset
+builder.config['geom_transf_type'] = 'Corotational'
+builder.build()
+```
+
+The offset is automatically clamped to 45 % of the brace length to
+prevent the brace from vanishing.  Typical values for steel gusset
+plates are 0.1–0.3 m.
+
+This is a steel‑specific feature — concrete brace-to-frame connections
+(cast-in-place, embedded) use different detailing and are not addressed
+here.
+
+### Alternative approaches (not yet implemented)
+
+---
+
+## Validation: eigenvalue buckling benchmark
+
+The subdivided brace method (Approach A) is validated by an **independent
+eigenvalue buckling analysis** using SciPy linear algebra — no OpenSees
+involvement.
+
+### How it works
+
+The benchmark assembles the global stiffness matrix *K* and geometric
+stiffness matrix *K_g* for the subdivided column using standard
+Euler-Bernoulli beam finite elements, then solves the generalised
+eigenvalue problem:
+
+$$(K - \lambda K_g)\phi = 0$$
+
+via ``scipy.linalg.eig``.  The smallest positive eigenvalue $\lambda$
+is the buckling load $P_{cr}$.
+
+For a 10 m pin‑pin pipe column (100 × 5) subdivided into 6 segments:
+
+| Source | $P_{cr}$ | Difference |
+|---|---|---|
+| Analytical Euler formula | 33 557 N | — |
+| SciPy eigenvalue FEA | 33 560 N | **+0.01 %** |
+
+The 0.01 % difference is numerical round-off — the FEA discretisation
+converges to the exact Euler solution as the number of segments increases.
+
+### Why this matters
+
+This benchmark independently proves that **the discretised subdivided
+column has the correct buckling load**.  Without it, we would only have:
+
+- The analytical `check_brace_buckling()` formula (which is just algebra)
+- The OpenSees nonlinear pushover (which proved too sensitive for an
+  automated test — elastic elements carry load past $P_{cr}$ without
+  softening)
+
+The SciPy eigenvalue analysis sits **between** these two: it confirms
+that the **discretisation** (segments, element formulation, DOF
+connectivity) is correct, using a fast, deterministic, and rock-solid
+linear algebra solver.
+
+**What it does NOT validate:**
+
+- The nonlinear post-buckling response (load redistribution after the
+  brace buckles) — this depends on material nonlinearity and solver
+  settings, and must be verified on a case-by-case basis.
+- The interaction between multiple braces in a frame.
+- Cyclic / seismic buckling behaviour.
+
+### Running the benchmark
+
+```bash
+pytest tests/test_model.py -k "TestEulerBucklingBenchmark"
+```
+
+Requires ``scipy`` (not a core dependency — the test skips gracefully
+if missing).
+
+---
+
+## Euler buckling check
+
+:meth:`OpenSeesBuilder.check_brace_buckling` computes the Euler buckling
+load :math:`P_{cr} = \\pi^2 E I_{22} / (K L)^2` for selected braces.
+
+### When to call it
+
+Call it **after building the model** but **before running the pushover**.
+It only needs the model data (section properties, material, geometry) —
+no OpenSees analysis required.
+
+### Basic usage
+
+```python
+from fea_toolkit.model.selection import Selection
+
+# Identify braces by section type
+sel = Selection.from_brace_sections(model)
+brace_ids = set(sel.get_frame_ids(model))
+
+# Build the model
+builder.set_brace_selection(brace_ids, end_offset=0.15)
+builder.build()
+
+# Check buckling — before pushover
+builder.check_brace_buckling(K=1.0)
+```
+
+### Output interpretation
+
+```
+── Euler buckling check (K=1.0) ──
+         ID              Section    L (m)        λ   P_cr (kN)
+  ──────────────────────────────────────────────────────────────
+        B1                  PIP4    8.485    112.3       45.2
+       B12                  PIP4    6.200     82.1       84.7
+```
+
+| Column | What it tells you |
+|---|---|
+| ``λ`` | Slenderness ratio :math:`KL/r`. Above 100 → Euler buckling governs. Below 30 → yielding governs. |
+| ``P_cr`` | Euler critical load. Compare against expected brace force from gravity + lateral loads. |
+
+### With demand data — the full picture
+
+Run a quick linear static analysis first to get axial forces, then
+re-run the check with demand:
+
+```python
+# Linear static to get axial demands
+results = builder.run_static_analysis(
+    pattern_scales={'DEAD': 1.0, 'WIND': 1.0}
+)
+forces = builder.extract_static_element_forces()
+axial = {eid: abs(f['Fz']) for eid, f in forces.items()}
+
+# Buckling check with D/C ratios
+builder.check_brace_buckling(K=1.0, axial_demand=axial)
+```
+
+This adds two columns to the output:
+
+```
+   P_cr (kN)   P_dem (kN)    Ratio
+   ────────────────────────────────
+       45.2         38.1      0.843  ⚠ demand > 50% of P_cr
+       84.7         12.3      0.145  ✅
+```
+
+### Choosing *K* (effective length factor)
+
+| Connection type | *K* | Notes |
+|---|---|---|
+| Pinned-pinned (ideal) | ``1.0`` | Default |
+| Gusset plates (steel) | ``0.85`` | Some rotational restraint from the gusset |
+| Fixed-fixed (ideal) | ``0.5`` | Rare in braced frames |
+| Per AISC 360 | ``1.0`` | Conservative pinned assumption |
+
+### When to worry
+
+- **Ratio > 1.0** — brace will buckle before reaching the design load.
+  Reconsider the section or framing arrangement.
+- **Ratio > 0.5** — brace is approaching :math:`P_{cr}` under service loads.
+  The pushover will show significant softening in this brace.  Verify that
+  the imperfection amplitude (``brace_imperfection_ratio``) is adequate.
+- **Ratio < 0.3** — brace is stocky; buckling is unlikely.  Yielding or
+  connection failure will govern instead.
+
+### Common pitfalls
+
+1. **No mass source** — does not matter; the check uses section geometry,
+   not mass data.
+2. **End offsets** — ``end_offset`` shortens the effective brace length,
+   which increases :math:`P_{cr}`.  The check uses the original node-to-node
+   length (conservative — true P_cr with offsets will be higher).
+3. **Subdivided elements** — the check works on **original element IDs**,
+   not subdivided segments.  Call it before ``build()`` for element lookup.
+4. ***K*** is for the brace alone** — if the model has semi-rigid
+   connections (gusset plates), use ``K=0.85`` to account for partial
+   fixity even without explicit rigid offsets.
+
+---
+
+## Capacity Spectrum Method (CSM)
+
+Once a pushover curve has been computed, the **Capacity Spectrum Method**
+(ATC‑40 / GB 50011) converts the force–displacement relationship into
+**ADRS** (Acceleration‑Displacement Response Spectrum) format and
+intersects it with the demand response spectrum to find the
+**performance point** — the expected inelastic displacement demand under
+the design earthquake.
+
+### 1. ADRS conversion — `pushover_to_adrs()`
+
+```python
+adrs = builder.pushover_to_adrs(
+    pushover_results,
+    modal_results,
+    mode_shapes,
+    direction='X',
+)
+```
+
+The method:
+
+1. Identifies the **dominant mode** in the push direction (the mode with the
+   highest participating mass ratio).
+2. Computes the **participation factor** :math:`\Gamma = \sqrt{M_{\text{eff}}}`,
+   consistent with mass‑normalised eigenvectors (which
+   :meth:`extract_mode_shapes` returns).
+3. Converts each pushover step:
+
+   .. math::
+
+       S_d = \frac{D_{\text{control}}}{|\Gamma| \cdot |\phi_{\text{control}}|}
+       \qquad
+       S_a = \frac{V_{\text{base}}}{|M_{\text{eff}}|}
+
+Returns a dict with keys ``S_a``, ``S_d``, ``Gamma``, ``M_eff``,
+``phi_control``, and ``best_mode``.
+
+### 2. Performance point — `compute_performance_point()`
+
+```python
+pp = builder.compute_performance_point(
+    pushover_results,
+    modal_results,
+    mode_shapes,
+    spectrum_periods,        # [0.0, 0.1, 0.35, 0.5, …]
+    spectrum_accels,         # [0.71, 1.57, 1.57, 1.57, …]  (m/s²)
+    direction='X',
+    damping_ratio=0.05,
+    max_iter=50,
+    tol=0.01,
+)
+```
+
+The algorithm:
+
+1. **Bilinearises** the capacity spectrum using equal‑energy
+   (area under the bilinear curve = area under the actual curve).
+2. **Secant iteration** — for each trial displacement :math:`S_d`:
+   - Reads :math:`S_a` from the capacity curve.
+   - Computes equivalent period :math:`T_{\text{eq}} = 2\pi\sqrt{S_d/S_a}`.
+   - Computes ductility :math:`\mu = S_d/S_{dy}` and equivalent viscous
+     damping :math:`\beta_{\text{eq}}` (ATC‑40 Equation 5‑19).
+   - Reduces the elastic demand spectrum by a damping factor :math:`B`.
+   - Reads :math:`S_a^{\text{demand}}` from the reduced spectrum at
+     :math:`T_{\text{eq}}` and converts back to :math:`S_d^{\text{demand}}`.
+   - Checks convergence: :math:`|S_d^{\text{demand}} - S_d| / S_d < tol`.
+3. **Elastic fallback** — if the trial point drops below the first data
+   point of the capacity curve, the algorithm computes the elastic
+   spectral response from the dominant mode's natural period and the
+   demand spectrum.  This handles stiff structures that remain elastic
+   under the design earthquake.
+
+Returns a dict with:
+
+| Key | Description |
+|---|---|
+| ``S_dp`` | Performance point spectral displacement (m) |
+| ``S_ap`` | Performance point spectral acceleration (m/s²) |
+| ``V_base`` | Corresponding base shear (N) |
+| ``D_roof`` | Corresponding roof displacement (m) |
+| ``T_eq`` | Equivalent period at the performance point (s) |
+| ``mu`` | Ductility demand |
+| ``converged`` | Whether the secant iteration converged |
+| ``S_dy``, ``S_ay`` | Bilinear yield point (ADRS coordinates) |
+| ``capacity_adrs`` | Full ADRS curve as ``{'S_a': …, 'S_d': …}`` |
+
+### 3. Visualisation — `plot_capacity_spectrum()`
+
+```python
+from fea_toolkit.plotting.viz import plot_capacity_spectrum
+
+fig = plot_capacity_spectrum(
+    adrs,             # from pushover_to_adrs()
+    spectrum_periods,
+    spectrum_accels,
+    performance_point=pp,   # optional, from compute_performance_point()
+    title='CSM – ADRS Format',
+)
+fig.savefig('capacity_spectrum.png', dpi=300)
+```
+
+The plot shows:
+- The **capacity spectrum** (blue line with markers).
+- The **elastic demand spectrum** (red dashed line) in ADRS coordinates.
+- **Constant‑period rays** (grey dotted lines labelled ``T=0.1s``,
+  ``T=0.2s``, etc.) for reference.
+- The **bilinear yield point** (orange square) and the initial / post‑yield
+  slopes.
+- The **performance point** (green diamond) with dashed projection lines.
+
+### 4. End‑to‑end example
+
+```python
+from fea_toolkit.opensees.builder import OpenSeesBuilder
+from fea_toolkit.plotting.viz import plot_capacity_spectrum
+
+# Build, run modal, run pushover (see §Usage above)
+b = OpenSeesBuilder(model_data, config)
+b.build()
+b.compute_seismic_masses(g=9.81)
+modal = b.run_modal_analysis(num_modes=5)
+shapes = b.extract_mode_shapes(5)
+push = b.run_pushover_analysis(
+    gravity_patterns={'DEAD': 1.0},
+    lateral_load_type='uniform',
+    lateral_direction='X',
+    control_node_tag=top_tag,
+    max_disp=0.3, num_steps=30,
+)
+
+# Define elastic design spectrum (e.g. GB 50011, Site Class II)
+T = [0.0, 0.1, 0.35, 0.5, 1.0, 2.0, 4.0, 6.0]
+Sa = [0.16*9.81*0.45, 0.16*9.81, 0.16*9.81, 0.16*9.81,
+      0.16*9.81*0.35, 0.16*9.81*0.35/2,
+      0.16*9.81*0.35/4, 0.16*9.81*0.35/6]
+
+# ADRS conversion + performance point
+adrs = b.pushover_to_adrs(push, modal, shapes, direction='X')
+pp = b.compute_performance_point(push, modal, shapes, T, Sa, direction='X')
+
+print(f"Performance point: S_dp = {pp['S_dp']:.4f} m  "
+      f"S_ap = {pp['S_ap']:.2f} m/s²")
+print(f"Ductility μ = {pp['mu']:.2f}  "
+      f"T_eq = {pp['T_eq']:.3f} s")
+
+# Plot
+fig = plot_capacity_spectrum(adrs, T, Sa, performance_point=pp)
+fig.savefig('capacity_spectrum.png', dpi=300)
+```
+
+### 5. Limitations and caveats
+
+The CSM implementation in ``compute_performance_point()`` follows the
+ATC‑40 **secant‑period** procedure.  Users should be aware of the
+following limitations and how modern codes (particularly ASCE 41)
+address them.
+
+#### Convergence and robustness
+
+- The secant iteration can **fail to converge** when the capacity curve is
+  very steep (stiff, elastic structures) or when the demand spectrum is low.
+  The implementation includes an elastic fallback for this case, but the
+  transition can be abrupt.
+- **Initial period mismatch** — the period implied by the initial slope of
+  the pushover curve (particularly with ``uniform`` or ``triangular``
+  patterns) may differ from the true first‑mode period.  This is because
+  the pushover displacement profile is not the same as the first mode shape.
+  The ``mode1`` load pattern minimises this discrepancy.
+- **Bilinearisation sensitivity** — the equal‑energy yield point
+  :math:`(S_{dy}, S_{ay})` depends on which peak is chosen on the capacity
+  curve.  Systems that do not have a sharp yield point (e.g. gradual
+  stiffness degradation) can produce different ductility estimates
+  depending on the bilinearisation algorithm.
+
+#### The single‑mode assumption
+
+The ADRS conversion (Section 1) assumes the structure responds
+predominantly in the **first mode**.  This is reasonable for low‑to‑mid‑rise
+shear‑wall and moment‑frame buildings, but can be unconservative for:
+
+- Tall buildings (higher‑mode contributions to base shear and drift).
+- Vertically irregular structures (setbacks, soft storeys).
+- Structures where higher modes contribute significantly to the
+  acceleration response (e.g. base‑isolated buildings).
+
+#### Equivalent viscous damping (ATC‑40 Eqn 5‑19)
+
+The damping reduction factor :math:`B` is computed from the hysteretic
+energy dissipation using an empirical formula developed for **bilinear
+elasto‑plastic** systems with stable, full hysteresis loops.  It is less
+reliable for:
+
+- Systems with **pinched hysteresis** (e.g. poorly detailed RC frames).
+- Systems with **degrading stiffness or strength**.
+- Systems where higher modes influence the damping demand.
+
+#### What ASCE 41 does differently (the Coefficient Method)
+
+ASCE 41 (Chapter 7) specifies the **Nonlinear Static Procedure (NSP)**,
+commonly known as the **Coefficient Method**, which differs from CSM in
+several important ways:
+
+| Aspect | ATC‑40 CSM (this implementation) | ASCE 41 Coefficient Method |
+|---|---|---|
+| **Target displacement** | Found by intersecting the capacity and demand spectra in ADRS space (secant iteration). | Computed directly as :math:`\delta_t = C_0 C_1 C_2 C_3 \, S_a(T_e) \, \frac{T_e^2}{4\pi^2} \, g`, where :math:`T_e` is the **effective** fundamental period at the yield level. |
+| **Period** | Secant period :math:`T_{\text{eq}}` varies with each iteration. | Effective period :math:`T_e = T_i \sqrt{\mu / (1 + \alpha\mu - \alpha)}` where :math:`\mu` is ductility and :math:`\alpha` is post‑yield stiffness ratio. |
+| **Damping** | Reduces the demand spectrum by :math:`B(\beta_{\text{eq}})` (equivalent viscous damping). | Uses modification factors: |
+| | | :math:`C_0` — spectral displacement → roof displacement (modal participation). |
+| | | :math:`C_1` — ratio of max inelastic to elastic displacement (function of :math:`T_e` and :math:`\mu`). |
+| | | :math:`C_2` — effect of pinched hysteresis / stiffness degradation. |
+| | | :math:`C_3` — P‑Delta induced second‑order effects. |
+| **Convergence** | Requires iterative secant search. | Direct computation — no iteration needed after bilinearisation. |
+| **Code base** | ATC‑40 (later superseded by ASCE 41). Commonly referenced in GB 50011 (China), TCECS‑1782, and some European guidelines. | ASCE 41‑17 / ASCE 41‑23 (US), referenced in most modern US‑based seismic retrofit guidelines. |
+
+**Key advantages of the Coefficient Method over CSM:**
+
+1. **No iteration** — the target displacement is computed directly, which
+   is more robust.
+2. **C₁ factor** — based on statistical analysis of thousands of nonlinear
+   time‑history analyses.  It accounts for the fact that, for short‑period
+   structures, the inelastic displacement can be *larger* than the elastic
+   displacement (:math:`C_1 > 1` for :math:`T_e < T_0`), whereas CSM with
+   equivalent damping can underestimate this effect.
+3. **C₂ and C₃ factors** — explicitly address pinched hysteresis and P‑Delta,
+   which the ATC‑40 damping formula handles only implicitly and often
+   unconservatively.
+4. **Effective period** — uses the secant stiffness at the yield level
+   rather than iterating on the secant period.
+
+#### When CSM is still useful
+
+Despite its limitations, CSM is **widely used in practice** because:
+
+- **GB 50011** and **TCECS‑1782** specify CSM as the primary pushover
+  evaluation method.
+- The ADRS plot provides **intuitive visual insight** into the relationship
+  between capacity and demand — the constant‑period rays make it easy to
+  see how changes in stiffness or strength affect the performance point.
+- It is suitable for **first‑mode‑dominated structures** (most regular
+  buildings up to 10–15 storeys).
+- It can be used with **any response spectrum** (design code spectrum,
+  uniform hazard spectrum, site‑specific), while the ASCE 41 coefficient
+  method is designed for the ASCE 7 design spectrum format.
+
+**Recommendation:** For structures governed by GB 50011 or TCECS‑1782,
+CSM is the appropriate method.  For US‑based projects following ASCE 41,
+consider implementing the **Coefficient Method** as a separate endpoint
+or supplementing the CSM result with the ASCE 41 factors for comparison.
 
 | Key | Description |
 |---|---|
@@ -362,5 +924,6 @@ pattern's frame distributed loads.
 ## See also
 
 - `docs/selection.md` — filtering elements with `Selection`
-- `tests/test_model.py` — `TestPushoverBuild` and `TestPushoverRun` test
-  classes
+- `docs/references/RCFramePushOver_v2.py` — reference OpenSees pushover example
+- `tests/test_model.py` — `TestPushoverBuild`, `TestPushoverRun`, `TestBraceBucklingCheck` test classes
+- `examples/sample_model.py` — built‑in cantilever sample model
