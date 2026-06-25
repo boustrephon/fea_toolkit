@@ -1588,3 +1588,192 @@ class TestMassSourceParser:
             ms = md.mass_sources.get('MSSSRC1')
             if ms:
                 assert ms.elements is True
+
+
+# ============================================================================
+# Pushover analysis tests
+# ============================================================================
+
+
+class TestPushoverBuild:
+    """Tests for :meth:`OpenSeesBuilder.run_pushover_analysis`."""
+
+    @pytest.fixture
+    def cantilever_model(self):
+        """A simple 2‑node cantilever for fast pushover testing."""
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=0, y=0, z=5),
+        }
+        restraints = {"1": Restraint([1, 1, 1, 1, 1, 1])}
+        materials = {
+            "Steel": Material(name="Steel", type="Steel",
+                              E_mod=2e11, unit_weight=77000),
+        }
+        sections = {
+            "UB100": Section(name="UB100", shape="I/Wide Flange",
+                             material="Steel", A=0.01, I33=1e-4,
+                             I22=1e-5, J=1e-6),
+        }
+        frames = {
+            "1": FrameElement(elem_id="1", elem_tag=1,
+                              node_i="1", node_j="2"),
+        }
+        load_patterns = {
+            "DEAD": LoadPattern(name="DEAD", pattern_type="DEAD",
+                                self_weight_factor=1),
+            "WIND": LoadPattern(name="WIND", pattern_type="WIND",
+                                self_weight_factor=0),
+        }
+        frame_dist_loads = [
+            FrameDistributedLoad(pattern="WIND", frame_id="1",
+                                 direction="X", load_type="Force",
+                                 shape="Uniform", val_a=1000, val_b=1000,
+                                 rdist_a=0, rdist_b=1, dist_a=0, dist_b=5),
+        ]
+        return SAPModelData(
+            nodes=nodes, restraints=restraints,
+            materials=materials, sections=sections,
+            frame_elements=frames, area_elements={},
+            frame_assignments={"1": "UB100"},
+            area_assignments={}, groups={}, frame_auto_mesh={},
+            load_patterns=load_patterns,
+            frame_dist_loads=frame_dist_loads,
+        )
+
+    def test_returns_expected_keys(self, cantilever_model):
+        """Result dict has all required keys (pattern type)."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(cantilever_model, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False, 'verbose': False,
+        })
+        results = b.run_pushover_analysis(
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type='pattern',
+            lateral_pattern_name="WIND",
+            lateral_direction="X",
+            control_node_tag=2,
+            max_disp=0.1, num_steps=5,
+            print_progress=False,
+        )
+        for key in ('step', 'control_disp', 'base_shear',
+                    'status', 'control_node', 'dof', 'lateral_load_type'):
+            assert key in results
+        assert results['lateral_load_type'] == 'pattern'
+
+    def test_gravity_base_shear_zero(self, cantilever_model):
+        """After gravity alone, lateral base shear ≈ 0."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(cantilever_model, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False, 'verbose': False,
+        })
+        results = b.run_pushover_analysis(
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type='pattern',
+            lateral_pattern_name="WIND",
+            lateral_direction="X",
+            control_node_tag=2,
+            max_disp=0.1, num_steps=5,
+            print_progress=False,
+        )
+        assert abs(results['base_shear'][0]) < 1.0
+
+    def test_cantilever_linear_pushover_pattern(self, cantilever_model):
+        """Cantilever with elastic sections: linear, monotonic (pattern)."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(cantilever_model, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False, 'verbose': False,
+        })
+        results = b.run_pushover_analysis(
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type='pattern',
+            lateral_pattern_name="WIND",
+            lateral_direction="X",
+            control_node_tag=2,
+            max_disp=0.1, num_steps=10,
+            print_progress=False,
+        )
+        assert len(results['control_disp']) == 11
+        assert results['status'][-1] == 0, "Last step failed"
+        shears = [abs(v) for v in results['base_shear']]
+        assert all(shears[i] <= shears[i + 1]
+                   for i in range(len(shears) - 1)), "Not monotonic"
+        assert abs(results['control_disp'][-1] - 0.1) < 0.01
+
+    def test_uniform_pattern_returns_keys(self, cantilever_model):
+        """Uniform pattern returns expected keys."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(cantilever_model, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False, 'verbose': False,
+        })
+        results = b.run_pushover_analysis(
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type='uniform',
+            lateral_direction="X",
+            control_node_tag=2,
+            max_disp=0.1, num_steps=5,
+            print_progress=False,
+        )
+        for key in ('step', 'control_disp', 'base_shear',
+                    'status', 'control_node', 'dof'):
+            assert key in results
+        assert results['lateral_load_type'] == 'uniform'
+
+    def test_triangular_pattern_returns_keys(self, cantilever_model):
+        """Triangular pattern returns expected keys."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(cantilever_model, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False, 'verbose': False,
+        })
+        results = b.run_pushover_analysis(
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type='triangular',
+            lateral_direction="X",
+            control_node_tag=2,
+            max_disp=0.1, num_steps=5,
+            print_progress=False,
+        )
+        for key in ('step', 'control_disp', 'base_shear',
+                    'status', 'control_node', 'dof'):
+            assert key in results
+
+    def test_invalid_lateral_load_type_raises(self, cantilever_model):
+        """Invalid lateral_load_type raises ValueError."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(cantilever_model, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False, 'verbose': False,
+        })
+        import pytest
+        with pytest.raises(ValueError, match="not recognised"):
+            b.run_pushover_analysis(
+                gravity_patterns={"DEAD": 1.0},
+                lateral_load_type='wind',
+                lateral_direction="X",
+                control_node_tag=2,
+                max_disp=0.1, num_steps=5,
+                print_progress=False,
+            )
+
+    def test_pattern_requires_name(self, cantilever_model):
+        """pattern type without lateral_pattern_name raises ValueError."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(cantilever_model, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False, 'verbose': False,
+        })
+        import pytest
+        with pytest.raises(ValueError, match="lateral_pattern_name is required"):
+            b.run_pushover_analysis(
+                gravity_patterns={"DEAD": 1.0},
+                lateral_load_type='pattern',
+                lateral_direction="X",
+                control_node_tag=2,
+                max_disp=0.1, num_steps=5,
+                print_progress=False,
+            )
