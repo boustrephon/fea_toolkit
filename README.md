@@ -61,7 +61,7 @@ The goal is to create a Python package `fea_toolkit` that:
 | **Parent‑Child Tracking** | ✅ Complete | Each split element stores `parent_id`, `child_ids`, `t_locations`; inactive flag prevents building of parent. |
 | **Unit Conversion** | ✅ Complete | `SectionLibrary` converts lengths, areas, inertias between `in` and `mm` based on catalogue metadata. |
 | **Visualisation (opsvis)** | ✅ Quick test | `basic_usage.py` can show line‑based model; extrusion not implemented. |
-| **Pytest Suite** | ✅ Passing | [153 tests](tests/README.md): dataclass construction, geometry utilities, section enrichment, modal analysis, pushover, parser integration, and edge cases. |
+| **Pytest Suite** | ✅ Passing | [170 tests](tests/README.md): dataclass construction, geometry utilities, section enrichment, modal analysis, pushover, CSM performance point, brace buckling, SciPy eigenvalue benchmark, parser integration, and edge cases. |
 
 #### 3. Notable Design Decisions
 
@@ -198,13 +198,23 @@ all other area loads are ignored.
    - ~~Modal Analysis~~ ✅ `run_modal_analysis()` implemented — eigenvalue extraction with modal properties table.  
    - ~~Response Spectrum~~ ✅ `run_response_spectrum_analysis()` + `extract_element_rs_forces()` + `add_missing_mass_correction()` implemented.  
    - ~~Nonlinear Static Pushover~~ ✅ `run_pushover_analysis()` implemented — see [`docs/pushover_analysis.md`](docs/pushover_analysis.md).  
+   - ~~HingeRadau integration~~ ✅ `beam_integration` config option (`'Lobatto'` / `'HingeRadau'`).  
+   - ~~Brace subdivision (Approach A)~~ ✅ `subdivide_elements()` in `geometry.py`, `set_brace_selection()` / `check_brace_buckling()` in builder.  
+   - ~~Brace detection~~ ✅ `Selection.from_brace_sections()`.  
+   - ~~Buckling eigenvalue benchmark~~ ✅ SciPy-based independent validation — subdivided column buckling matches Euler within 0.01 %.  
+   - ~~Capacity Spectrum Method~~ ✅ `pushover_to_adrs()` + `compute_performance_point()` + `plot_capacity_spectrum()` — see [`docs/pushover_analysis.md`](docs/pushover_analysis.md).  
    - **Nonlinear Time History** – add ground motion input and integration schemes.
 
 5. **Joint Modeling** (for concrete frames)  
    - Extend parser to recognise joint elements (if present in SAP2000).  
    - Implement `Joint2D` and `beamColumnJoint` elements in `OpenSeesBuilder`.
 
-6. **Rhino Importer Refactoring**  
+6. **Brace gusset plates / joint offsets**  
+   - Model gusset plate flexibility as rotational springs at brace ends.  
+   - Add rigid offset segments between working point and brace physical end.  
+   - See `docs/pushover_analysis.md` for discussion of approaches.
+
+7. **Rhino Importer Refactoring**  
    - The `rhino/` package stub exists at `src/fea_toolkit/rhino/`.  
    - Move `sap2000_import_v8.py` into `src/fea_toolkit/rhino/importer.py`.  
    - Adapt it to read `SAPModelData` (instead of raw JSON) and use the split data for visualisation.

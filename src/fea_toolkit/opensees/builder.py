@@ -81,7 +81,12 @@ class OpenSeesBuilder:
             'split_elements': True,
             'verbose': False,
             'geom_transf_type': 'Linear',
+            'beam_integration': 'Lobatto',  # 'Lobatto' or 'HingeRadau'
             'simplify_distributed_loads': False,
+            'subdivide_braces': False,
+            'brace_n_segments': 4,
+            'brace_imperfection_ratio': 1.0/500.0,
+            'brace_end_offset': 0.0,
         }
         for key, default in defaults.items():
             if key not in self.config:
@@ -317,7 +322,7 @@ class OpenSeesBuilder:
         if self.config['verbose']:
             print("Creating elements...")
 
-        # Choose source
+        # Choose source — apply brace subdivision if configured
         if self.split_elements:
             elements = self.split_elements
             assignments = self.split_assignments
@@ -325,12 +330,61 @@ class OpenSeesBuilder:
             elements = self.model.frame_elements
             assignments = self.model.frame_assignments
 
+        # Subdivide braces (Approach A: subdivided elements + imperfection)
+        self._rigid_link_elems: List[tuple] = []
+        if self.config.get('subdivide_braces') and hasattr(self, '_brace_selection'):
+            nodes = self.model.nodes
+            next_tag = max((e.elem_tag for e in elements.values()), default=0) + 1
+            from ..model.geometry import subdivide_elements
+            elements, assignments, nodes, next_tag, rigid_links = subdivide_elements(
+                elements, assignments, nodes,
+                n_segments=self.config.get('brace_n_segments', 4),
+                imperfection_ratio=self.config.get('brace_imperfection_ratio', 1.0/500.0),
+                brace_ids=self._brace_selection,
+                end_offset=self.config.get('brace_end_offset', 0.0),
+                next_tag=next_tag,
+            )
+            self._rigid_link_elems = rigid_links
+            # Create OpenSees nodes for subdivision/offset nodes
+            # (only those that don't already exist in OpenSees).
+            existing_tags = set()
+            for nd in self.model.nodes.values():
+                try:
+                    coord = ops.nodeCoord(nd.node_tag)
+                    existing_tags.add(nd.node_tag)
+                except Exception:
+                    pass
+            for nd in self.model.nodes.values():
+                if nd.node_tag not in existing_tags:
+                    ops.node(nd.node_tag, nd.x, nd.y, nd.z)
+
         # Build frame_tag_map for loads (and for element creation if needed)
         self.frame_tag_map = {
             eid: elem.elem_tag
             for eid, elem in elements.items()
             if not elem.inactive
         }
+
+        # Create rigid link elements (stiff elastic segments for gusset plates)
+        if self._rigid_link_elems:
+            if self.config['verbose']:
+                print(f"  Creating {len(self._rigid_link_elems)} rigid links "
+                      f"for brace end offsets...")
+            for link_id, nid_i, nid_j, link_tag in self._rigid_link_elems:
+                node_i_tag = self._node_tag_from_id(nid_i)
+                node_j_tag = self._node_tag_from_id(nid_j)
+                if node_i_tag is None or node_j_tag is None:
+                    continue
+                # Choose orientation: use the same transf type as the brace
+                transf_type = self.config.get('geom_transf_type', 'Linear')
+                transf_tag = link_tag
+                ops.geomTransf(transf_type, transf_tag, 0.0, 0.0, 1.0)
+                # High-stiffness elastic section for the rigid link
+                # (area × E = effectively rigid over a short offset)
+                ops.element('elasticBeamColumn', link_tag,
+                            node_i_tag, node_j_tag,
+                            sec_tag=1,  # use tag 1 — any section works with high E
+                            transf_tag=transf_tag)
 
         for elem_id, elem in elements.items():
             if elem.inactive:
@@ -374,9 +428,10 @@ class OpenSeesBuilder:
         # Create geometric transformation
         transf_type = self.config.get('geom_transf_type', 'Linear')
         if transf_type == 'Corotational' and self.config['verbose']:
-            print("  Warning: Corotational geomTransf does NOT support eleLoad "
-                  "in 3D. Use beam_load_to_nodal_loads() instead "
-                  "(see fea_toolkit.model.geometry).")
+            print("  Note: Corotational geomTransf + eleLoad is not supported "
+                  "in 3D OpenSees. Pushover lateral loads are applied as nodal "
+                  "loads so this is safe for pushover. For static analysis with "
+                  "distributed loads, use 'Linear' or 'PDelta'.")
         transf_tag = elem_tag
         ops.geomTransf(transf_type, transf_tag, *vecxz)
 
@@ -387,8 +442,14 @@ class OpenSeesBuilder:
                         sec_tag, transf_tag)
         elif elem_type == 'forcebeamcolumn':
             int_tag = elem_tag
-            npts = self.config['num_int_pts']
-            ops.beamIntegration('Lobatto', int_tag, sec_tag, npts)
+            beam_int = self.config.get('beam_integration', 'Lobatto')
+            if beam_int == 'HingeRadau':
+                # Plastic hinge length from section geometry
+                Lp = self._compute_hinge_length(sec_tag, length)
+                ops.beamIntegration('HingeRadau', int_tag, sec_tag, Lp)
+            else:
+                npts = self.config['num_int_pts']
+                ops.beamIntegration('Lobatto', int_tag, sec_tag, npts)
             ops.element('forceBeamColumn', elem_tag, node_i, node_j,
                         transf_tag, int_tag)
         elif elem_type == 'dispbeamcolumn':
@@ -406,6 +467,163 @@ class OpenSeesBuilder:
 
         if self.config['verbose']:
             print(f"  Element {elem_tag}: {node_i} -> {node_j}")
+
+    # -------------------------------------------------------------------------
+    # Brace subdivision
+    # -------------------------------------------------------------------------
+    def set_brace_selection(self, brace_ids: set, end_offset: float = 0.0) -> None:
+        """Mark specific frame elements as braces for subdivision.
+
+        Call **before** :meth:`build`.  The elements identified by *brace_ids*
+        will be subdivided into *brace_n_segments* segments with an initial
+        imperfection (Approach A — subdivided element with Corotational geom
+        to capture buckling).
+
+        Args:
+            brace_ids: Set of frame element ID strings to treat as braces.
+            end_offset: Distance from each working point to the gusset plate
+                face (model length units).  Creates rigid link segments
+                between the working point and the brace physical end.
+                Default 0.0 (no offset).  Typical value for steel gusset
+                plates: 0.1–0.3 m.
+        """
+        self._brace_selection = brace_ids
+        self.config['subdivide_braces'] = True
+        if end_offset > 0:
+            self.config['brace_end_offset'] = end_offset
+
+    def check_brace_buckling(
+        self,
+        brace_ids: Optional[set] = None,
+        K: float = 1.0,
+        axial_demand: Optional[Dict[str, float]] = None,
+        print_results: bool = True,
+    ) -> Dict[str, Dict[str, float]]:
+        """Check selected braces against Euler buckling.
+
+        Computes :math:`P_{cr} = \\frac{\\pi^2 E I_{22}}{(K L)^2}` for each
+        brace and optionally compares against provided axial demand.
+
+        Args:
+            brace_ids: Set of element IDs to check.  Defaults to
+                ``self._brace_selection`` (set via :meth:`set_brace_selection`).
+            K: Effective length factor (default 1.0 — pinned-pinned).
+            axial_demand: Optional ``{elem_id: axial_force_N}`` dict with
+                estimated compressive demand (e.g. from a prior linear static
+                analysis).  If provided, the demand/capacity ratio is reported.
+            print_results: If True, print a summary table.
+
+        Returns:
+            ``{elem_id: {'P_cr': ..., 'P_demand': ..., 'ratio': ...,
+                         'slenderness': ..., 'length': ..., 'section': ...}}``
+        """
+        if brace_ids is None:
+            brace_ids = getattr(self, '_brace_selection', set())
+        if not brace_ids:
+            print("No brace IDs provided.")
+            return {}
+
+        elements = (self.split_elements if self.split_elements
+                    else self.model.frame_elements)
+        assignments = (self.split_assignments if self.split_elements
+                       else self.model.frame_assignments)
+
+        results: Dict[str, Dict[str, float]] = {}
+        for eid in brace_ids:
+            elem = elements.get(eid)
+            if elem is None or getattr(elem, 'inactive', False):
+                continue
+            sec_name = assignments.get(eid) if assignments else None
+            if not sec_name or sec_name not in self.model.sections:
+                continue
+            sec = self.model.sections[sec_name]
+            mat = self.model.materials.get(sec.material)
+            if mat is None:
+                continue
+
+            ni = self.model.nodes.get(elem.node_i)
+            nj = self.model.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+            if L < 1e-12:
+                continue
+
+            E = mat.E_mod if mat.E_mod > 0 else 2.0e11
+            I22 = sec.I22 if sec.I22 and sec.I22 > 0 else sec.I33
+            A = sec.A if sec.A > 0 else 1e-4
+
+            P_cr = (math.pi ** 2 * E * I22) / ((K * L) ** 2)
+            r = math.sqrt(I22 / A)
+            slenderness = (K * L) / r if r > 0 else float('inf')
+
+            demand = axial_demand.get(eid, 0.0) if axial_demand else 0.0
+            ratio = demand / P_cr if P_cr > 0 else float('inf')
+
+            results[eid] = {
+                'P_cr': P_cr,
+                'P_demand': demand,
+                'ratio': ratio,
+                'slenderness': slenderness,
+                'length': L,
+                'section': sec_name,
+            }
+
+        if print_results and results:
+            print(f"\n── Euler buckling check (K={K}) ──")
+            header = (f"  {'ID':>12} {'Section':>20} {'L (m)':>8} "
+                      f"{'λ':>8} {'P_cr (kN)':>10}")
+            if axial_demand:
+                header += f" {'P_dem (kN)':>10} {'Ratio':>8}"
+            print(header)
+            print("  " + "-" * len(header))
+            for eid, r in sorted(results.items()):
+                line = (f"  {eid:>12} {r['section']:>20} {r['length']:8.3f} "
+                        f"{r['slenderness']:8.1f} {r['P_cr']/1000:10.1f}")
+                if axial_demand:
+                    line += f" {r['P_demand']/1000:10.1f} {r['ratio']:8.3f}"
+                print(line)
+
+            if axial_demand:
+                n_critical = sum(1 for r in results.values() if r['ratio'] > 0.5)
+                if n_critical:
+                    print(f"\n  ⚠ {n_critical} brace(s) with demand > 50% of P_cr")
+                else:
+                    print(f"\n  ✅ All braces with demand < 50% of P_cr")
+
+        return results
+
+    def _compute_hinge_length(self, sec_tag: int, elem_length: float) -> float:
+        """Estimate plastic hinge length *Lp* for ``HingeRadau`` integration.
+
+        Uses the section depth or a fraction of element length:
+
+        * **Steel I‑sections**: :math:`L_p = 0.5 \\cdot d` (depth)
+        * **Pipe sections**: :math:`L_p = 0.5 \\cdot OD`
+        * **Other sections**: :math:`L_p = 0.1 \\cdot L` (10\\% of span)
+
+        Returns:
+            Plastic hinge length in model length units.
+        """
+        # Find the section by tag
+        sec_name = None
+        for name, tag in getattr(self, 'section_tags', {}).items():
+            if tag == sec_tag:
+                sec_name = name
+                break
+        if sec_name and sec_name in self.model.sections:
+            sec = self.model.sections[sec_name]
+            try:
+                from ..model.sap_data import ISection, PipeSection, BoxSection
+                if isinstance(sec, ISection):
+                    return max(0.05, sec.depth * 0.5)
+                elif isinstance(sec, PipeSection):
+                    return max(0.05, sec.od * 0.5)
+                elif isinstance(sec, BoxSection):
+                    return max(0.05, sec.depth * 0.5)
+            except Exception:
+                pass
+        return max(0.05, elem_length * 0.1)
 
     # -------------------------------------------------------------------------
     # Loads
@@ -2409,4 +2627,360 @@ class OpenSeesBuilder:
             'h_cm': h_cm,
             'T_short': T_short,
             'Sa_short': Sa_short,
+        }
+
+    # =========================================================================
+    # Capacity Spectrum Method (ADRS) — performance point
+    # =========================================================================
+
+    def pushover_to_adrs(
+        self,
+        pushover_results: Dict[str, Any],
+        modal_results: Dict[str, Any],
+        mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
+        direction: str = 'X',
+        g: float = 9.81,
+    ) -> Dict[str, Any]:
+        """Convert a pushover capacity curve to ADRS (Acceleration-Displacement
+        Response Spectrum) coordinates.
+
+        The conversion uses the fundamental mode:
+
+        .. math::
+
+            S_d = \\frac{\\Delta_{control}}{\\Gamma_1 \\phi_{1,control}}
+
+            S_a = \\frac{V_{base}}{M_1^*}
+
+        where :math:`\\Gamma_1` is the modal participation factor,
+        :math:`\\phi_{1,control}` is the mode shape value at the control
+        node, and :math:`M_1^*` is the effective modal mass.
+
+        Args:
+            pushover_results: Output from :meth:`run_pushover_analysis`.
+            modal_results: Output from :meth:`run_modal_analysis` (must
+                contain ``'modal_props'``).
+            mode_shapes: Output from :meth:`extract_mode_shapes`.
+            direction: Push direction (``'X'``, ``'Y'``, or ``'Z'``).
+            g: Gravitational acceleration (m/s²).
+
+        Returns:
+            Dict with keys:
+
+            * ``'S_a'`` — list of spectral accelerations (m/s²).
+            * ``'S_d'`` — list of spectral displacements (m).
+            * ``'Gamma'`` — modal participation factor.
+            * ``'M_eff'`` — effective modal mass (kg).
+            * ``'phi_control'`` — mode shape at control node.
+            * ``'S_dy'``, ``'S_ay'`` — bilinear yield point (m, m/s²)
+              or ``None`` if not computed.
+        """
+        direction_map = {'X': 0, 'Y': 1, 'Z': 2}
+        dof_idx = direction_map.get(direction.upper(), 0)
+
+        control_node_tag = pushover_results.get('control_node')
+        if control_node_tag is None:
+            raise ValueError("pushover_results must contain 'control_node'")
+
+        # Modal participation factor from the dominant mode in the push direction
+        modal_props = modal_results.get('modal_props', {})
+        gamma_key = (f'partiFactorMX' if direction.upper() == 'X'
+                     else f'partiFactorMY' if direction.upper() == 'Y'
+                     else f'partiFactorMZ')
+        mass_key = (f'partiMassMX' if direction.upper() == 'X'
+                    else f'partiMassMY' if direction.upper() == 'Y'
+                    else f'partiMassMZ')
+        ratio_key = (f'partiMassRatiosMX' if direction.upper() == 'X'
+                     else f'partiMassRatiosMY' if direction.upper() == 'Y'
+                     else f'partiMassRatiosMZ')
+
+        gamma_list = modal_props.get(gamma_key, [0.0])
+        mass_list = modal_props.get(mass_key, [0.0])
+        ratio_list = modal_props.get(ratio_key, [0.0])
+
+        # Find the mode with the highest mass participation in push direction
+        best_mode = 0
+        best_ratio = 0.0
+        for i, r in enumerate(ratio_list):
+            if abs(r) > best_ratio:
+                best_ratio = abs(r)
+                best_mode = i
+
+        M_eff = mass_list[best_mode] if mass_list else 1.0
+        if abs(M_eff) < 1e-12:
+            total_mass_key = 'totalFreeMass'
+            free_mass = modal_props.get(total_mass_key, [0])
+            M_eff = free_mass[0] if free_mass else 1.0
+
+        # For mass-normalised eigenvectors (extract_mode_shapes returns these),
+        # the participation factor Γ = √M_eff (since φᵀMφ = 1).
+        Gamma = math.sqrt(abs(M_eff))
+
+        # Mode shape value at the control node (best mode)
+        phi_control = 1.0
+        if mode_shapes and best_mode in mode_shapes:
+            node_shape = mode_shapes[best_mode].get(control_node_tag)
+            if node_shape is not None:
+                phi_control = node_shape[dof_idx]
+        if abs(phi_control) < 1e-12:
+            phi_control = 1.0
+
+        # Convert
+        control_disp = pushover_results.get('control_disp', [0.0])
+        base_shear = pushover_results.get('base_shear', [0.0])
+
+        S_d = [abs(d) / (abs(Gamma) * abs(phi_control)) for d in control_disp]
+        S_a = [abs(v) / abs(M_eff) for v in base_shear]
+
+        return {
+            'S_a': S_a,
+            'S_d': S_d,
+            'Gamma': Gamma,
+            'M_eff': M_eff,
+            'phi_control': phi_control,
+            'best_mode': best_mode,
+            'S_dy': None,
+            'S_ay': None,
+        }
+
+    def compute_performance_point(
+        self,
+        pushover_results: Dict[str, Any],
+        modal_results: Dict[str, Any],
+        mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
+        spectrum_periods: List[float],
+        spectrum_accels: List[float],
+        direction: str = 'X',
+        g: float = 9.81,
+        damping_ratio: float = 0.05,
+        max_iter: int = 50,
+        tol: float = 0.01,
+    ) -> Dict[str, Any]:
+        """Find the performance point using the Capacity Spectrum Method (CSM).
+
+        The capacity spectrum is bilinearised and intersected with the
+        demand response spectrum (in ADRS format).  Equivalent viscous
+        damping from hysteresis is used to reduce the elastic demand
+        (per ATC-40 / GB 50011 CSM procedure).
+
+        Args:
+            pushover_results: Output from :meth:`run_pushover_analysis`.
+            modal_results: Output from :meth:`run_modal_analysis`.
+            mode_shapes: Output from :meth:`extract_mode_shapes`.
+            spectrum_periods: Periods (s) defining the elastic demand
+                spectrum.
+            spectrum_accels: Spectral accelerations (m/s²) corresponding
+                to *spectrum_periods*.
+            direction: Push direction.
+            g: Gravitational acceleration.
+            damping_ratio: Elastic damping ratio (default 0.05).
+            max_iter: Maximum iterations for secant convergence.
+            tol: Convergence tolerance on S_d (relative).
+
+        Returns:
+            Dict with keys:
+
+            * ``'S_dp'`` — performance point spectral displacement (m).
+            * ``'S_ap'`` — performance point spectral acceleration (m/s²).
+            * ``'V_base'`` — corresponding base shear (N).
+            * ``'D_roof'`` — corresponding roof displacement (m).
+            * ``'T_eq'`` — equivalent period at performance point (s).
+            * ``'mu'`` — ductility demand.
+            * ``'converged'`` — whether the iteration converged.
+            * ``'S_dy'``, ``'S_ay'`` — bilinear yield point.
+            * ``'capacity_adrs'`` — the full ADRS curve (dict with ``'S_a'``,
+              ``'S_d'``).
+        """
+        # 1. Convert pushover to ADRS
+        adrs = self.pushover_to_adrs(
+            pushover_results, modal_results, mode_shapes,
+            direction=direction, g=g,
+        )
+        S_a_arr = np.array(adrs['S_a'])
+        S_d_arr = np.array(adrs['S_d'])
+
+        # Filter out negative / zero values
+        mask = (S_d_arr > 1e-12) & (S_a_arr > 1e-12)
+        S_d_arr = S_d_arr[mask]
+        S_a_arr = S_a_arr[mask]
+        if len(S_d_arr) < 3:
+            raise ValueError(
+                "Too few valid data points in capacity spectrum"
+            )
+
+        Gamma = adrs['Gamma']
+        M_eff = adrs['M_eff']
+        phi_control = adrs['phi_control']
+        best_mode = adrs.get('best_mode', 0)
+        control_disp = np.array(pushover_results.get('control_disp', [0]))[mask]
+        base_shear = np.array(pushover_results.get('base_shear', [0]))[mask]
+        total_mass = M_eff  # effective modal mass for first mode
+
+        # 2. Bilinearise the capacity spectrum (find yield point)
+        # Use the equal-energy method: find (S_dy, S_ay) such that
+        # area under bilinear curve = area under actual curve up to peak
+        peak_idx = np.argmax(S_a_arr)
+        S_d_peak = S_d_arr[peak_idx]
+        S_a_peak = S_a_arr[peak_idx]
+
+        # Initial elastic stiffness from first 20% of points
+        n_el = max(3, len(S_d_arr) // 5)
+        K_init = np.polyfit(S_d_arr[:n_el], S_a_arr[:n_el], 1)[0]
+
+        # Bilinear fit using equal energy
+        # S_ay = K_init * S_dy  (elastic)
+        # Area under bilinear = 0.5 * S_ay * S_dy + S_ay * (S_d_peak - S_dy)
+        #                        + 0.5 * (S_a_peak - S_ay) * (S_d_peak - S_dy)
+        # Area under actual = trapezoidal integral
+        area_actual = np.trapezoid(S_a_arr, S_d_arr)
+
+        # Solve for S_dy using the equal-energy principle
+        # This is a quadratic: 0.5*K_init*S_dy² - S_a_peak*S_d_peak + ...
+        # Actually, use a simpler iterative search
+        S_dy = S_d_peak * 0.3  # initial guess
+        for _ in range(100):
+            S_ay = K_init * S_dy
+            # Area under bilinear up to peak
+            A1 = 0.5 * S_ay * S_dy
+            A2 = S_ay * (S_d_peak - S_dy)
+            A3 = 0.5 * (S_a_peak - S_ay) * (S_d_peak - S_dy)
+            area_bilin = A1 + A2 + A3
+            err = (area_bilin - area_actual) / area_actual
+            if abs(err) < 0.001:
+                break
+            # Adjust S_dy
+            S_dy *= (1.0 - err * 0.5)
+
+        S_ay = max(K_init * S_dy, S_a_arr[1] if len(S_a_arr) > 1 else S_a_arr[0])
+
+        # 3. Capacity spectrum demand method (secant iteration)
+        T_spec = np.array(spectrum_periods)
+        Sa_spec = np.array(spectrum_accels)
+
+        # First-mode elastic period from modal analysis
+        modal_periods = modal_results.get('periods', [])
+        best_mode_period = modal_periods[best_mode] if best_mode < len(modal_periods) else 1.0
+
+        S_d_trial = S_d_peak * 0.2  # start at 20% of peak
+        converged = False
+        prev_S_d = S_d_trial
+        stall_count = 0
+        history = []
+
+        for iteration in range(max_iter):
+            # Spectral acceleration at trial point (interpolate capacity)
+            if S_d_trial <= S_d_arr[0]:
+                S_a_trial = S_a_arr[0]
+            elif S_d_trial >= S_d_arr[-1]:
+                S_a_trial = S_a_arr[-1]
+            else:
+                S_a_trial = float(np.interp(S_d_trial, S_d_arr, S_a_arr))
+
+            # Equivalent period at trial point
+            T_eq = 2.0 * math.pi * math.sqrt(S_d_trial / max(S_a_trial, 1e-12))
+
+            # Ductility
+            mu = max(S_d_trial / max(S_dy, 1e-12), 1.0)
+
+            # Equivalent viscous damping from hysteresis (ATC-40 Eqn 5-19)
+            if mu > 1.0:
+                beta_eq = damping_ratio + 0.637 * (mu - 1.0) / (mu * math.pi)
+            else:
+                beta_eq = damping_ratio
+
+            # Damping reduction factor (ATC-40 / GB 50011 compatible)
+            B = 1.0
+            if beta_eq > damping_ratio:
+                B = math.sqrt((1.0 + 10.0 * (beta_eq - damping_ratio)) /
+                              (1.0 + 5.0 * (beta_eq - damping_ratio)))
+            B = max(0.5, min(2.0, B))
+
+            # Demand spectral acceleration at T_eq
+            Sa_demand = float(np.interp(T_eq, T_spec, Sa_spec)) / B
+
+            # Demand spectral displacement
+            S_d_demand = Sa_demand * (T_eq / (2.0 * math.pi)) ** 2
+
+            history.append((S_d_trial, S_d_demand))
+
+            # Convergence checks
+            delta = abs(S_d_demand - S_d_trial)
+            if delta / max(S_d_trial, 1e-12) < tol:
+                converged = True
+                S_dp = S_d_demand
+                break
+
+            # Also converge if S_d_trial stops changing (stalled)
+            change = abs(S_d_trial - prev_S_d) / max(S_d_trial, 1e-12)
+            if change < tol * 0.1 and iteration > 3:
+                stall_count += 1
+                if stall_count >= 3:
+                    converged = True
+                    S_dp = S_d_trial
+                    break
+            else:
+                stall_count = 0
+
+            prev_S_d = S_d_trial
+
+            # Update trial: move towards demand
+            S_d_trial = S_d_trial * 0.5 + S_d_demand * 0.5
+
+            # Clamp: if S_d_trial drops below first data point and
+            # S_d_demand also below it, we are in the elastic range.
+            # Use the elastic spectral response as the performance point.
+            if S_d_trial < S_d_arr[0] and S_d_demand < S_d_arr[0]:
+                # Compute elastic spectral displacement from modal period
+                Sa_el = float(np.interp(best_mode_period, T_spec, Sa_spec))
+                S_d_el = Sa_el * (best_mode_period / (2.0 * math.pi)) ** 2
+                S_dp = S_d_el
+                converged = True
+                break
+
+        if not converged:
+            # Use last trial point
+            S_dp = S_d_trial
+
+        # Compute final values at performance point
+        if S_dp <= S_d_arr[0]:
+            # Elastic range: use demand spectrum to compute consistent values
+            S_ap = float(np.interp(best_mode_period, T_spec, Sa_spec))
+            # Account for damping reduction at the performance point
+            mu_p = max(S_dp / max(S_dy, 1e-12), 1.0)
+            if mu_p > 1.0:
+                beta_p = damping_ratio + 0.637 * (mu_p - 1.0) / (mu_p * math.pi)
+                B_p = 1.0
+                if beta_p > damping_ratio:
+                    B_p = math.sqrt((1.0 + 10.0 * (beta_p - damping_ratio)) /
+                                    (1.0 + 5.0 * (beta_p - damping_ratio)))
+                B_p = max(0.5, min(2.0, B_p))
+                S_ap /= B_p
+            V_p = S_ap * abs(M_eff)
+            D_p = S_dp * abs(Gamma) * abs(phi_control)
+        elif S_dp >= S_d_arr[-1]:
+            S_ap = float(np.interp(S_dp, S_d_arr, S_a_arr))
+            V_p = float(np.interp(S_dp, S_d_arr, base_shear))
+            D_p = float(np.interp(S_dp, S_d_arr, control_disp))
+        else:
+            S_ap = float(np.interp(S_dp, S_d_arr, S_a_arr))
+            V_p = float(np.interp(S_dp, S_d_arr, base_shear))
+            D_p = float(np.interp(S_dp, S_d_arr, control_disp))
+
+        T_eq_final = 2.0 * math.pi * math.sqrt(S_dp / max(S_ap, 1e-12))
+        mu_final = max(S_dp / max(S_dy, 1e-12), 1.0)
+
+        return {
+            'S_dp': S_dp,
+            'S_ap': S_ap,
+            'V_base': V_p,
+            'D_roof': D_p,
+            'T_eq': T_eq_final,
+            'mu': mu_final,
+            'converged': converged,
+            'iterations': len(history),
+            'S_dy': S_dy,
+            'S_ay': S_ay,
+            'Gamma': Gamma,
+            'M_eff': M_eff,
+            'capacity_adrs': {'S_a': S_a_arr.tolist(), 'S_d': S_d_arr.tolist()},
         }
