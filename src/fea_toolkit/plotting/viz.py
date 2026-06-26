@@ -101,10 +101,10 @@ def plot_model_3d(
     # Assign a colour per unique section
     all_secs = sorted({s for _, _, s in lines})
     if color_by_section and len(all_secs) > 1:
-        cmap = pv.ColorCycle(values=[
+        cmap = [
             '#4c72b0', '#dd8452', '#55a868', '#c44e52', '#8172b3',
             '#937860', '#da8bc3', '#8c8c8c', '#ccb974', '#64b5cd',
-        ])
+        ]
         sec_colour = {s: cmap[i % len(cmap)] for i, s in enumerate(all_secs)}
     else:
         sec_colour = {s: '#4c72b0' for s in all_secs}

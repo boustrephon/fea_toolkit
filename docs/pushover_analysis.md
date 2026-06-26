@@ -930,9 +930,164 @@ or supplementing the CSM result with the ASCE 41 factors for comparison.
 | `dof` | The push DOF (1=X, 2=Y, 3=Z) |
 | `lateral_load_type` | The load pattern type used (`'uniform'`, `'triangular'`, `'mode1'`, or `'pattern'`) |
 
+
 ---
 
-## See also
+## Brace buckling modelling
+
+The builder supports two approaches for modelling brace buckling in
+pushover analysis, controlled by the ``brace_type`` parameter in
+:func:`run_pushover_4dir` (or ``'brace_truss'`` config in the builder).
+
+### Brace identification
+
+Braces are identified automatically by their **section shape type**.
+Any frame element assigned a section of one of the following types is
+treated as a brace:
+
+- ``PipeSection`` (CHS)
+- ``AngleSection``
+- ``DoubleAngleSection``
+- ``TeeSection``
+- ``ChannelSection``
+
+This logic mirrors ``Selection.from_brace_sections()``.
+
+### Approach A — Subdivided beam-column elements (default)
+
+Set ``brace_type="beam"`` (the default).
+
+- Braces are subdivided into ``brace_n_segments`` sub-elements with a
+  sinusoidal initial imperfection (amplitude = ``brace_imperfection_ratio × L``).
+- Uses ``forceBeamColumn`` elements with **fiber sections** (``Steel01``
+  material) and ``Corotational`` geometric transformation.
+- Requires working brace subdivision connectivity (see
+  ``subdivide_elements()`` in ``geometry.py``).
+- Gusset plates can be modelled via ``brace_end_offset`` (creates rigid
+  link elements at brace ends).
+
+**Solver settings** (configurable via builder config):
+
+| Key | Default | Description |
+|---|---|---|
+| ``solver_test_tol`` | ``1e-5`` | Convergence tolerance for ``NormDispIncr`` test |
+| ``solver_test_max_iter`` | ``50`` | Maximum iterations per load step |
+| ``solver_algorithm`` | ``'ModifiedNewton'`` | Algorithm (``'Newton'``, ``'ModifiedNewton'``, ``'NewtonLineSearch'``, ``'KrylovNewton'``) |
+| ``gravity_num_substeps`` | ``5`` | Number of sub-steps for gravity application |
+
+### Approach B — Truss elements with Hysteretic material
+
+Set ``brace_type="truss"``.
+
+- Brace elements are replaced by ``Truss`` elements (axial-only, no
+  bending stiffness).
+- Each brace uses a ``Hysteretic`` uniaxial material with **asymmetric
+  tension/compression** to capture buckling phenomenologically.
+- Beams and columns remain as ``elasticBeamColumn`` elements.
+
+#### Hysteretic material parameters
+
+The material is auto-generated from the section and material properties:
+
+| Parameter | Tension | Compression |
+|---|---|---|
+| Elastic modulus | $E$ (from material) | $E$ (from material) |
+| Yield / buckling stress | $F_y$ (yield) | $\sigma_{cr} = P_{cr} / A$ (Euler buckling) |
+| Post-yield / post-buckling | $1.01\,F_y$ at 1% strain | $0.2\,\sigma_{cr}$ at 1% post-buckling strain |
+| Ultimate | $1.02\,F_y$ at 5% strain | $0.1\,\sigma_{cr}$ at 5% post-buckling strain |
+
+Where $P_{cr} = \pi^2 E I_{22} / L^2$ is the Euler buckling load for the
+longest brace of that section, and $A$ is the cross-sectional area.
+
+#### Advantages
+
+- **Numerically robust** — no convergence issues from subdivision or
+  corotational geometry.
+- **Captures directional asymmetry** — braces that buckle in compression
+  show much lower resistance than those in tension, revealing the true
+  structural behaviour under reversed loading.
+- **Fast** — truss elements are computationally cheap.
+
+#### Limitations
+
+- **No bending stiffness** at connections (pinned ends). Gusset plate
+  rotational restraint is not captured.
+- **Phenomenological buckling** — the post-buckling behaviour is defined
+  by the material stress-strain envelope, not by geometric P-δ
+  interaction.
+- Not suitable for cyclic/pseudodynamic analysis without calibrating
+  the Hysteretic pinching and damage parameters.
+
+### Comparison of approaches
+
+| Criterion | Approach A (beam + subdivision) | Approach B (truss + Hysteretic) |
+|---|---|---|
+| **Element type** | ``forceBeamColumn`` (fiber sections) | ``Truss`` (uniaxial material) |
+| **Geometry** | ``Corotational`` | ``Linear`` (buckling is material-defined) |
+| **Buckling mechanism** | Geometric (P-δ via imperfection + corotational) | Phenomenological (Hysteretic compression degradation) |
+| **Bending stiffness** | ✅ Yes (beam-column) | ❌ No (axial only, pinned ends) |
+| **Directional asymmetry** | ✅ Captured if subdivision works | ✅ Captured (tension vs. compression envelope) |
+| **Numerical robustness** | ⚠️ Requires working element connectivity | ✅ Very robust |
+| **Computational cost** | Moderate | Low |
+| **Gusset plate modelling** | ✅ Rigid end offsets available | ❌ Not applicable |
+| **Post-buckling path** | ⚠️ Sensitive to solver settings | ✅ Directly controlled via material params |
+| **Current status** | ⚠️ Connectivity bug in ``subdivide_elements()`` | ✅ Fully working |
+
+### Selecting specific brace sections
+
+By default, braces are identified automatically by their section shape
+(Pipe, Angle, Double Angle, Tee, or Channel).  To override this and
+explicitly list which sections should be treated as braces, use the
+``brace_sections`` config option:
+
+```python
+CONFIG = {
+    "pushover": {
+        "brace_type": "truss",
+        "brace_sections": ["Diagonal Barcing- CHS 193.7x8"],
+    },
+}
+```
+
+When ``brace_sections`` is set to a list of section names, **only** those
+sections are replaced by truss elements.  Sections with brace-type shapes
+that are not in the list are treated as ordinary beam-column elements.
+This is useful when a structure has CHS members that are not braces
+(e.g., CHS columns or chords).
+
+When ``brace_sections`` is ``None`` (the default), the auto-detection by
+shape type is used.
+
+### Usage in the report module
+
+The :func:`run_pushover_4dir` function in ``pumphouse_report.py`` accepts
+a ``brace_type`` parameter:
+
+```python
+from pumphouse_report import run_pushover_4dir
+
+# Approach A (default — subdivided beam-column elements)
+results = run_pushover_4dir(md, modal, shapes, brace_type="beam")
+
+# Approach B (truss elements with Hysteretic material)
+results = run_pushover_4dir(md, modal, shapes, brace_type="truss")
+```
+
+The config-driven workflow uses the same key:
+
+```python
+CONFIG = {
+    "pushover": {
+        "patterns": ["mode1"],
+        "directions": ["+X", "–X", "+Y", "–Y"],
+        "max_disp": 0.30,
+        "num_steps": 50,
+        "brace_type": "truss",   # or "beam" (default)
+    },
+}
+```
+
+---
 
 - `docs/selection.md` — filtering elements with `Selection`
 - `docs/references/RCFramePushOver_v2.py` — reference OpenSees pushover example
