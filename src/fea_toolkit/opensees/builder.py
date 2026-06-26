@@ -87,6 +87,14 @@ class OpenSeesBuilder:
             'brace_n_segments': 4,
             'brace_imperfection_ratio': 1.0/500.0,
             'brace_end_offset': 0.0,
+            'brace_truss': False,          # Replace braces with truss elements (Approach B)
+            'brace_sections': None,        # Optional list of section names to treat as braces
+                                           # (None = auto-detect by shape type)
+            # Solver settings (can be overridden per-call)
+            'solver_test_tol': 1e-6,
+            'solver_test_max_iter': 10,
+            'solver_algorithm': 'Newton',
+            'gravity_num_substeps': 1,
         }
         for key, default in defaults.items():
             if key not in self.config:
@@ -172,17 +180,93 @@ class OpenSeesBuilder:
         For each frame section that will use fiber patches, a ``Steel01``
         (or ``Concrete01``) material is created with the same tag as the
         section, so that :meth:`Section.to_fiber_patches` can reference it.
+
+        When ``brace_truss=True``, also creates ``Hysteretic`` materials
+        for brace sections with asymmetric tension/compression to capture
+        buckling (Approach B).
         """
-        if not self.config['create_fiber_sections']:
+        if not self.config['create_fiber_sections'] and not self.config.get('brace_truss'):
             return
         if self.config['verbose']:
             print("Creating materials for fiber sections...")
 
-        # We need to know which section tags will be created.
-        # The tags start at 1 and increment per section, but only frame
-        # sections are relevant.  We create materials on the fly during
-        # section creation instead — see _create_single_section.
-        pass
+        # ── Truss brace materials (Hysteretic with compression degradation) ──
+        if self.config.get('brace_truss'):
+            from ..model.sap_data import (
+                PipeSection, AngleSection, DoubleAngleSection,
+                TeeSection, ChannelSection,
+            )
+            brace_types = (
+                PipeSection, AngleSection, DoubleAngleSection,
+                TeeSection, ChannelSection,
+            )
+            self._truss_mat_tags: Dict[str, int] = {}  # section_name -> mat_tag
+            self._truss_areas: Dict[str, float] = {}   # section_name -> area
+            # Start material tags after all section tags (which will be created
+            # later in _create_sections).  Use a large offset to avoid collision.
+            n_sec = len(self.model.sections)
+            mat_tag = n_sec + 1
+
+            # Determine which sections to treat as braces:
+            # brace_sections list overrides auto-detection by shape type.
+            explicit = self.config.get('brace_sections')
+            for sec_name, sec in self.model.sections.items():
+                if explicit is not None:
+                    if sec_name not in explicit:
+                        continue
+                elif not isinstance(sec, brace_types):
+                    continue
+                mat_obj = self.model.materials.get(sec.material)
+                if mat_obj is None:
+                    continue
+                A = sec.A if sec.A and sec.A > 0 else 1e-4
+                E = mat_obj.E_mod if mat_obj.E_mod and mat_obj.E_mod > 0 else 2.0e8
+                Fy = mat_obj.Fy if mat_obj.Fy and mat_obj.Fy > 0 else 2.75e5
+
+                # Euler buckling stress for the longest brace of this section
+                # (conservative — use the longest brace as reference)
+                max_L = 0.0
+                for eid, elem in self.model.frame_elements.items():
+                    if self.model.frame_assignments.get(eid) != sec_name:
+                        continue
+                    ni = self.model.nodes.get(elem.node_i)
+                    nj = self.model.nodes.get(elem.node_j)
+                    if ni is None or nj is None:
+                        continue
+                    L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+                    max_L = max(max_L, L)
+
+                I22 = sec.I22 if sec.I22 and sec.I22 > 0 else sec.I33
+                if max_L > 0 and I22 > 0:
+                    P_cr = (math.pi ** 2 * E * I22) / (max_L ** 2)
+                    sig_cr = P_cr / A  # buckling stress
+                else:
+                    sig_cr = Fy * 0.3  # fallback: 30% of yield
+
+                eps_y = Fy / E
+                eps_cr = sig_cr / E if E > 0 else 0.001
+
+                # Hysteretic material: 3 points in tension, 3 in compression
+                # Tension: (0,0) -> yield -> slight hardening
+                s1p, e1p = Fy, eps_y
+                s2p, e2p = Fy * 1.01, eps_y + 0.01
+                s3p, e3p = Fy * 1.02, eps_y + 0.05
+                # Compression: (0,0) -> buckling -> post-buckling residual
+                s1n, e1n = -sig_cr, -eps_cr
+                s2n, e2n = -sig_cr * 0.2, -eps_cr - 0.01
+                s3n, e3n = -sig_cr * 0.1, -eps_cr - 0.05
+
+                ops.uniaxialMaterial('Hysteretic', mat_tag,
+                                     s1p, e1p, s2p, e2p, s3p, e3p,
+                                     s1n, e1n, s2n, e2n, s3n, e3n,
+                                     1.0, 1.0, 0.0, 0.0, 0.0)
+
+                self._truss_mat_tags[sec_name] = mat_tag
+                self._truss_areas[sec_name] = A
+                if self.config['verbose']:
+                    print(f"  Truss brace material {mat_tag}: {sec_name} "
+                          f"(A={A:.6f}, Fy={Fy:.0f}, sig_cr={sig_cr:.0f})")
+                mat_tag += 1
 
     # -------------------------------------------------------------------------
     # Sections
@@ -430,7 +514,18 @@ class OpenSeesBuilder:
             elem_tag = elem.elem_tag
 
             if (node_i_tag is not None) and (node_j_tag is not None):
-                self._add_beam_column(node_i_tag, node_j_tag, sec_tag, elem_tag, angle)
+                # Truss brace elements (Approach B — Hysteretic material)
+                if (self.config.get('brace_truss')
+                        and hasattr(self, '_truss_mat_tags')
+                        and sec_name in self._truss_mat_tags):
+                    mat_tag = self._truss_mat_tags[sec_name]
+                    A = self._truss_areas[sec_name]
+                    ops.element('Truss', elem_tag, node_i_tag, node_j_tag, A, mat_tag)
+                    if self.config['verbose']:
+                        print(f"  Truss {elem_tag}: {elem_id} ({sec_name}) "
+                              f"A={A:.6f}")
+                else:
+                    self._add_beam_column(node_i_tag, node_j_tag, sec_tag, elem_tag, angle)
 
     def _add_beam_column(self, node_i: int, node_j: int, sec_tag: int,
                          elem_tag: int, angle_deg: float) -> None:
@@ -1259,17 +1354,31 @@ class OpenSeesBuilder:
         if self.config['verbose']:
             print("Running analysis...")
 
-        # Define analysis parameters
+        # Define analysis parameters (from config, with fallback defaults)
+        test_type = self.config.get('solver_test_type', 'NormDispIncr')
+        test_tol = self.config.get('solver_test_tol', 1e-6)
+        test_iter = self.config.get('solver_test_max_iter', 10)
+        algo = self.config.get('solver_algorithm', 'Newton')
+        n_sub = self.config.get('gravity_num_substeps', 1)
+
         ops.constraints('Plain')
         ops.numberer('RCM')
         ops.system('BandGeneral')
-        ops.test('NormDispIncr', 1e-6, 10)
-        ops.algorithm('Newton')
-        ops.integrator('LoadControl', 1.0)
+        ops.test(test_type, test_tol, test_iter)
+        # Use ModifiedNewton('-initial') for robustness with imperfect braces
+        if algo == 'ModifiedNewton':
+            ops.algorithm('ModifiedNewton', '-initial')
+        else:
+            ops.algorithm(algo)
+        ops.integrator('LoadControl', 1.0 / n_sub)
         ops.analysis('Static')
 
-        # Perform analysis
-        ok = ops.analyze(1)
+        # Perform analysis — apply gravity in sub-steps if configured
+        ok = 0
+        for _ in range(n_sub):
+            ok = ops.analyze(1)
+            if ok != 0:
+                break
         if ok != 0:
             print("Analysis failed!")
             return {}
@@ -1523,9 +1632,23 @@ class OpenSeesBuilder:
 
         # ── 1. Rebuild with fiber sections + forceBeamColumn ──
         push_config = dict(self.config)
-        push_config['element_type'] = 'forceBeamColumn'
+        # Use configured element type; forceBeamColumn and dispBeamColumn both
+        # support fiber sections.  forceBeamColumn is the default but can be
+        # numerically sensitive with Corotational + subdivision.
         push_config['create_fiber_sections'] = True
         push_config['use_elastic_sections'] = False
+        # Only apply Corotational + robust solver when braces are subdivided
+        has_subdivided_braces = (
+            push_config.get('subdivide_braces')
+            and hasattr(self, '_brace_selection')
+            and self._brace_selection
+        )
+        if has_subdivided_braces:
+            push_config['geom_transf_type'] = 'Corotational'
+            push_config['solver_test_tol'] = 1e-5
+            push_config['solver_test_max_iter'] = 50
+            push_config['solver_algorithm'] = 'ModifiedNewton'
+            push_config['gravity_num_substeps'] = 5
 
         # Check if all frame sections support fiber patches; fall back to elastic
         all_support_fiber = True
@@ -1700,8 +1823,17 @@ class OpenSeesBuilder:
         ops.constraints('Plain')
         ops.numberer('RCM')
         ops.system('BandGeneral')
-        ops.test('NormDispIncr', 1e-4, 20, 0, 2)
-        ops.algorithm('Newton')
+        ops.test('NormDispIncr', self.config.get('solver_test_tol', 1e-4),
+                 self.config.get('solver_test_max_iter', 20), 0, 2)
+        algo = self.config.get('solver_algorithm', 'Newton')
+        if algo == 'ModifiedNewton':
+            ops.algorithm('ModifiedNewton', '-initial')
+        elif algo == 'NewtonLineSearch':
+            ops.algorithm('NewtonLineSearch')
+        elif algo == 'KrylovNewton':
+            ops.algorithm('KrylovNewton')
+        else:
+            ops.algorithm(algo)
         ops.integrator('DisplacementControl', control_node_tag, dof, disp_inc)
         ops.analysis('Static')
 
@@ -2244,9 +2376,14 @@ class OpenSeesBuilder:
         modal_base_moment = []
         dof = {'X': 1, 'Y': 2, 'Z': 3}[direction]
 
-        # Find base elements — those attached to fully‑fixed nodes
-        fixed_nodes = {nid for nid, r in self.model.restraints.items()
-                       if all(d == 1 for d in r.dofs)}
+        # Find base elements — those attached to nodes that are restrained
+        # in the analysis direction (pinned supports have UX/UY/UZ fixed,
+        # but rotations free, so checking all‑6 is too restrictive).
+        dof_idx = {'X': 0, 'Y': 1, 'Z': 2}[direction]
+        base_nodes = {
+            nid for nid, r in self.model.restraints.items()
+            if len(r.dofs) > dof_idx and r.dofs[dof_idx] == 1
+        }
 
         # Determine which elements to use (split or original)
         if self.split_elements:
@@ -2258,9 +2395,9 @@ class OpenSeesBuilder:
         for eid, elem in elements.items():
             if getattr(elem, 'inactive', False):
                 continue
-            if elem.node_i in fixed_nodes:
+            if elem.node_i in base_nodes and elem.node_j not in base_nodes:
                 base_elements.append((elem.elem_tag, 'i', elem.node_j))
-            elif elem.node_j in fixed_nodes:
+            elif elem.node_j in base_nodes and elem.node_i not in base_nodes:
                 base_elements.append((elem.elem_tag, 'j', elem.node_i))
 
         for mode in range(1, num_modes + 1):

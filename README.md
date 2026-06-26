@@ -72,6 +72,8 @@ The goal is to create a Python package `fea_toolkit` that:
 - **Configurable Builder** – Element type, integration points, splitting, verbosity can be set via `config` dict.
 - **MASS SOURCE** – The `MASS SOURCE` table is parsed by `_get_mass_sources()` which groups rows by MassSource name, **accumulates** multipliers when the same LoadPat appears on multiple rows, and stores the result in `SAPModelData.mass_sources`. The builder's `compute_seismic_masses()` then uses this to derive nodal masses (self‑weight from `Elements=True`, load‑based from `Loads=True` + `LoadPat`/`Multiplier` pairs).
 - **Modal & RS Analysis** – `run_modal_analysis()` uses `ops.eigen('-fullGenLapack', …)`. `run_response_spectrum_analysis()` and `extract_element_rs_forces()` call `ops.responseSpectrumAnalysis()` mode‑by‑mode and extract element forces via `ops.eleResponse(eid, 'forces')` (global system). CQC follows Der Kiureghian's formula. `add_missing_mass_correction()` computes the rigid response from residual mass at short‑period spectral acceleration.
+- **Brace buckling — two approaches** – The builder supports two buckling modelling strategies. **Approach A** subdivides braces into segments with a sinusoidal imperfection and uses `Corotational` geometric transformation to capture geometric buckling (requires working element connectivity). **Approach B** replaces braces with `Truss` elements using a `Hysteretic` material with asymmetric tension/compression (yield in tension, buckle in compression). Approach B is more numerically robust and captures directional asymmetry. Controlled via `brace_type="beam"` / `brace_type="truss"`.
+- **Configurable solver settings** – The builder's `run_static_analysis()` and `run_pushover_analysis()` read solver parameters from config: `solver_test_tol`, `solver_test_max_iter`, `solver_algorithm` (`'Newton'`, `'ModifiedNewton'`, `'NewtonLineSearch'`, `'KrylovNewton'`), and `gravity_num_substeps` for gravity load ramping.
 
 #### 4. Distributed Load Support by Element Type
 
@@ -200,6 +202,8 @@ all other area loads are ignored.
    - ~~Nonlinear Static Pushover~~ ✅ `run_pushover_analysis()` implemented — see [`docs/pushover_analysis.md`](docs/pushover_analysis.md).  
    - ~~HingeRadau integration~~ ✅ `beam_integration` config option (`'Lobatto'` / `'HingeRadau'`).  
    - ~~Brace subdivision (Approach A)~~ ✅ `subdivide_elements()` in `geometry.py`, `set_brace_selection()` / `check_brace_buckling()` in builder.  
+   - ~~Brace buckling (Approach B — truss + Hysteretic)~~ ✅ `brace_truss` config option, `Hysteretic` material with asymmetric tension/compression. See [`docs/pushover_analysis.md`](docs/pushover_analysis.md).  
+   - ~~Configurable solver settings~~ ✅ `solver_test_tol`, `solver_test_max_iter`, `solver_algorithm`, `gravity_num_substeps` builder config options.  
    - ~~Brace detection~~ ✅ `Selection.from_brace_sections()`.  
    - ~~Buckling eigenvalue benchmark~~ ✅ SciPy-based independent validation — subdivided column buckling matches Euler within 0.01 %.  
    - ~~Capacity Spectrum Method~~ ✅ `pushover_to_adrs()` + `compute_performance_point()` + `plot_capacity_spectrum()` — see [`docs/pushover_analysis.md`](docs/pushover_analysis.md).  

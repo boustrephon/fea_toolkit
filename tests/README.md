@@ -15,7 +15,7 @@ pytest tests/test_parser.py -q
 
 ---
 
-## `test_model.py` — Model layer tests (166 tests)
+## `test_model.py` — Model layer tests (170 tests)
 
 Tests for dataclasses, geometry utilities, section types, the Selection class,
 CQC combination, pushover analysis, brace subdivision, and plotting imports.
@@ -62,7 +62,8 @@ CQC combination, pushover analysis, brace subdivision, and plotting imports.
 
 | Gap | Why | Practical impact |
 |---|---|---|
-| **Nonlinear buckling in OpenSees** | A subdivided column with ``Corotational`` + ``elasticBeamColumn`` does not show a clear buckling bifurcation — the elastic material carries load far beyond :math:`P_{cr}` without softening.  ``forceBeamColumn`` with fiber sections requires solver parameters that are too sensitive for a deterministic automated test.  However, the **SciPy eigenvalue benchmark** (:func:`TestEulerBucklingBenchmark`) independently verifies that the *discretised* subdivided column has the correct buckling load — only the *nonlinear* pushover verification is missing. | The subdivided imperfection approach follows established PEER OpenSees methodology.  Use ``check_brace_buckling()`` as a pre-pushover sanity check and validate against known examples for critical cases.  The eigenvalue benchmark gives confidence that the discretisation is correct. |
+| **Nonlinear buckling in OpenSees** | A subdivided column with ``Corotational`` + ``elasticBeamColumn`` does not show a clear buckling bifurcation — the elastic material carries load far beyond :math:`P_{cr}` without softening.  ``forceBeamColumn`` with fiber sections requires solver parameters that are too sensitive for a deterministic automated test.  However, the **SciPy eigenvalue benchmark** (:func:`TestEulerBucklingBenchmark`) independently verifies that the *discretised* subdivided column has the correct buckling load — only the *nonlinear* pushover verification is missing.  **Approach B** (truss + ``Hysteretic`` material) does not yet have dedicated unit tests; it is exercised end‑to‑end by the report module's pushover pipeline. | The subdivided imperfection approach follows established PEER OpenSees methodology.  Use ``check_brace_buckling()`` as a pre-pushover sanity check and validate against known examples for critical cases.  The eigenvalue benchmark gives confidence that the discretisation is correct.  For Approach B, validate the Hysteretic material parameters visually from the pushover curve. |
+| **Configurable solver settings** | The new ``solver_test_tol``, ``solver_algorithm``, and ``gravity_num_substeps`` options are exercised by the pushover pipeline but do not yet have dedicated unit tests for each option. | The defaults preserve backward compatibility.  Custom solver settings should be validated per-model. |
 | **Post-buckling softening** | Once a brace buckles, the rate of load redistribution and the residual capacity depend on mesh refinement, integration scheme, and material model — none of which are tested. | For frames where brace-softening governs system behaviour (e.g., concentrically braced frames), run mesh-sensitivity studies manually. |
 | **Multi-brace interaction** | All tests use a single brace in isolation.  Braces in a real frame interact through beams, columns, and gusset plates. | System-level pushover testing with brace softening is outside the scope of unit tests.  Validate on a frame-by-frame basis. |
 | **Cyclic / seismic loading** | The buckling check is static only.  Cyclic degradation (low-cycle fatigue, fracture) is not addressed. | ``check_brace_buckling()`` is a strength check, not a ductility check.  For seismic assessment, use the pushover capacity curve to evaluate ductility demands. |
