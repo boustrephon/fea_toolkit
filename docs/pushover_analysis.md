@@ -1079,7 +1079,7 @@ The config-driven workflow uses the same key:
 CONFIG = {
     "pushover": {
         "patterns": ["mode1"],
-        "directions": ["+X", "–X", "+Y", "–Y"],
+        "directions": ["+X", "-X", "+Y", "-Y"],
         "max_disp": 0.30,
         "num_steps": 50,
         "brace_type": "truss",   # or "beam" (default)
@@ -1089,7 +1089,221 @@ CONFIG = {
 
 ---
 
-- `docs/selection.md` — filtering elements with `Selection`
-- `docs/references/RCFramePushOver_v2.py` — reference OpenSees pushover example
-- `tests/test_model.py` — `TestPushoverBuild`, `TestPushoverRun`, `TestBraceBucklingCheck` test classes
-- `examples/sample_model.py` — built‑in cantilever sample model
+## Creating a seismic evaluation report with Quarto
+
+The ``pumphouse_report.qmd`` file in the ``local/`` directory is a complete
+working example of a pushover-based seismic evaluation report using Quarto
+with a Jupyter kernel.  Below is a guide to setting up your own report.
+
+### 1. Quarto document header
+
+Start with YAML front matter that declares the output formats and enables
+the Jupyter kernel:
+
+```yaml
+---
+title: "My Building — Seismic Evaluation Report"
+format:
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: true
+  pdf:
+    toc: true
+  docx:
+    toc: true
+execute:
+  echo: false
+  warning: false
+jupyter: venv_opensees       # or your kernel name
+---
+```
+
+``code-fold: true`` collapses code cells in the HTML output — the reader
+sees only tables and figures unless they expand the code.
+
+### 2. Setup cell
+
+Import libraries and configure the analysis.  The ``run_all()`` function
+handles the full pipeline: parse the model, run modal analysis, linear
+cases, pushover, and CSM.
+
+```python
+import sys
+from pathlib import Path
+
+_REPO = Path().resolve().parent
+sys.path.insert(0, str(_REPO / "src"))
+sys.path.insert(0, str(_REPO / "local"))
+
+import pandas as pd
+import numpy as np
+from pumphouse_report import (
+    run_all, bounding_box, modal_table_enhanced,
+    format_linear_table, brace_buckling_check,
+)
+
+S2K_PATH = "/path/to/your/model.s2k"
+CONFIG = {
+    "model": {"path": S2K_PATH},
+    "spectrum": {
+        "code": "GB50011",
+        "intensity": 7,
+        "acceleration": 0.10,
+        "site_class": "I1",
+        "design_group": 1,
+        "level": "rare",
+        "damping": 0.05,
+    },
+    "loads": {"auto_detect": True},
+    "pushover": {
+        "patterns": ["mode1"],
+        "directions": ["+X", "-X", "+Y", "-Y"],
+        "max_disp": 0.30,
+        "num_steps": 50,
+        "brace_type": "truss",           # "beam" or "truss"
+        "brace_sections": None,          # or ["Section Name"]
+    },
+    "general": {
+        "n_modes": 12,
+        "out_dir": None,
+        "verbose": False,
+        "force_recompute": False,
+    },
+}
+```
+
+Key config options:
+
+| Key | Purpose |
+|---|---|
+| ``spectrum.damping`` | Elastic damping ratio for the GB 50011 spectrum (default 0.05) |
+| ``pushover.brace_type`` | ``"beam"`` (Approach A — subdivided beam-column) or ``"truss"`` (Approach B — Hysteretic material) |
+| ``pushover.brace_sections`` | Optional list of section names to treat as braces (``None`` = auto-detect by shape) |
+| ``general.force_recompute`` | ``True`` to ignore cached results and re-run all analyses |
+
+### 3. Run the analysis
+
+```python
+#| label: run-all
+#| cache: true
+#| output: false
+results = run_all(CONFIG)
+md = results["md"]
+modal = results["modal"]
+bb = bounding_box(md)
+```
+
+The ``#| cache: true`` directive caches the notebook cell so subsequent
+renders skip re-computation (as long as the code hasn't changed).
+
+### 4. Display results
+
+#### Model overview
+
+````markdown
+Bounding box: `{python} f"{bb['x_span']:.1f} m (X) x {bb['y_span']:.1f} m (Y) x {bb['z_span']:.1f} m (Z)"`
+````
+
+#### Tables
+
+Use ``IPython.display.display`` with ``HTML`` and ``to_html(index=False)``
+to hide the pandas row index:
+
+```python
+from IPython.display import display, HTML
+
+# Load totals
+from pumphouse_report import load_pattern_totals
+display(HTML(load_pattern_totals(md).to_html(index=False)))
+
+# Materials (with bold <strong> tags via escape=False)
+display(HTML(results["df_materials"].to_html(index=False, escape=False)))
+
+# Sections
+display(HTML(results["df_sections"].to_html(index=False)))
+```
+
+#### Pushover curves
+
+```python
+#| label: fig-pushover-overlay
+_po = results["all_out"]["mode1"]
+fig2, ax2 = plt.subplots(figsize=(9, 6))
+clr = {"+X":"#1f77b4", "-X":"#ff7f0e", "+Y":"#2ca02c", "-Y":"#d62728"}
+for lb in ["+X", "-X", "+Y", "-Y"]:
+    r = _po[lb]["results"]
+    ax2.plot(r["control_disp"], r["base_shear"],
+             label=lb, color=clr[lb], lw=1.5)
+    pp = _po[lb]["pp"]
+    if pp["converged"] and pp["D_roof"] != 0:
+        ax2.plot(pp["D_roof"], pp["V_base"], "D", color=clr[lb], ms=10)
+ax2.set_xlabel("Control node displacement (m)")
+ax2.set_ylabel("Base shear (kN)")
+ax2.set_title("Pushover Curves (4 directions)")
+ax2.grid(True, alpha=0.3)
+ax2.legend()
+fig2
+```
+
+Note the signed values — with ``brace_type="truss"``, ``-Y`` shows much
+lower shear than ``+Y`` because all braces buckle in compression, while
+``+Y`` engages braces in tension.
+
+#### Brace buckling check
+
+```python
+from pumphouse_report import brace_buckling_check
+df_buckling = brace_buckling_check(md, n_longest=2, K=1.0)
+display(HTML(df_buckling.to_html(index=False)))
+```
+
+#### CSM 4-panel ADRS plot
+
+```python
+#| label: fig-csm
+results["fig_csm"]
+```
+
+#### Comparison table
+
+```python
+from pumphouse_report import pushover_comparison_table
+df_compare = pushover_comparison_table(
+    results["all_out"]["mode1"], results["df_linear"])
+display(HTML(df_compare.to_html(index=False)))
+```
+
+### 5. Caching and re-computation
+
+Results are cached in two places:
+
+1. **Jupyter cell cache** — controlled by the ``#| cache: true`` cell
+   directive.  Clear it by deleting the ``.ipynb`` file in the output
+   directory, or by changing the cell code.
+2. **Pickle cache** — ``run_all()`` saves results to
+   ``local/output/results.pkl``.  Set ``"force_recompute": True`` in
+   CONFIG to bypass it, or delete the file manually.
+
+When switching between ``brace_type="beam"`` and ``brace_type="truss"``,
+always set ``"force_recompute": True`` (or clear both caches) to ensure
+fresh results.
+
+### 6. Rendering
+
+From the terminal (with the virtual environment activated):
+
+```bash
+cd local/
+quarto render pumphouse_report.qmd --to html
+```
+
+For all formats (HTML, PDF, DOCX):
+
+```bash
+quarto render pumphouse_report.qmd --to all
+```
+
+---
+
+## See also
