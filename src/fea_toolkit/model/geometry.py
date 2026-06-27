@@ -944,6 +944,25 @@ def subdivide_elements(
     is applied as a lateral offset at internal nodes, perpendicular to the
     element local axis.
 
+    .. note::
+       Approach A is **experimental**.  ``Corotational`` geometry with
+       imperfect subdivided elements does **not** converge under gravity
+       loads (known OpenSees limitation).  A two-stage rebuild approach
+       (``Linear`` for gravity → ``Corotational`` for push) would be
+       needed to make this work.  See ``docs/pushover_analysis.md`` for
+       the current status.
+
+    Bug fixes applied:
+
+    *   **Missing ``set_brace_selection()``** — subdivision was never
+        triggered.  Now called in ``run_pushover_4dir``.
+    *   **Double subdivision** — ``run_static_analysis`` rebuilds the
+        model; now skips already-inactive elements.
+    *   **``split_elements`` conflict** — split children overlapped with
+        subdivided elements; ``split_elements=False`` now used.
+    *   **``forceBeamColumn`` element-level failure** — switched to
+        ``dispBeamColumn`` which has no element-level iteration.
+
     When *end_offset* > 0 (for steel gusset plates), the brace is trimmed
     at both ends and **rigid link** elements are created between the original
     working points and the offset brace ends.
@@ -976,7 +995,9 @@ def subdivide_elements(
 
     for eid in list(brace_ids):
         elem = elements.get(eid)
-        if elem is None:
+        # Skip already-inactive elements — prevents double subdivision when
+        # the model is rebuilt (e.g., run_static_analysis with pattern_scales).
+        if elem is None or getattr(elem, 'inactive', False):
             continue
 
         ni = nodes.get(elem.node_i)
