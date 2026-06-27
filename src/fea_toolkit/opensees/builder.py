@@ -90,11 +90,16 @@ class OpenSeesBuilder:
             'brace_truss': False,          # Replace braces with truss elements (Approach B)
             'brace_sections': None,        # Optional list of section names to treat as braces
                                            # (None = auto-detect by shape type)
+            'brace_fatigue': False,         # Wrap Hysteretic with Fatigue material for cyclic degradation
+            'brace_fatigue_E0': 0.095,      # Fatigue Coffin-Manson: strain amplitude at fracture
+            'brace_fatigue_m': -0.3,        # Fatigue Coffin-Manson: exponent
             # Solver settings (can be overridden per-call)
             'solver_test_tol': 1e-6,
             'solver_test_max_iter': 10,
             'solver_algorithm': 'Newton',
             'gravity_num_substeps': 1,
+            'solver_constraints': 'Transformation',
+            'solver_system': 'BandGen',
         }
         for key, default in defaults.items():
             if key not in self.config:
@@ -155,11 +160,15 @@ class OpenSeesBuilder:
     # Node creation
     # -------------------------------------------------------------------------
     def _create_nodes(self) -> None:
-        """Create OpenSees nodes from model_data.nodes."""
+        """Create OpenSees nodes from model_data.nodes.
+        Also records the set of created node tags for subdivision tracking.
+        """
         if self.config['verbose']:
             print("Creating nodes...")
+        self._created_node_tags: set = set()
         for node in self.model.nodes.values():
             ops.node(node.node_tag, node.x, node.y, node.z)
+            self._created_node_tags.add(node.node_tag)
 
     # =========================================================================
     # Boundary conditions
@@ -261,10 +270,25 @@ class OpenSeesBuilder:
                                      s1n, e1n, s2n, e2n, s3n, e3n,
                                      1.0, 1.0, 0.0, 0.0, 0.0)
 
-                self._truss_mat_tags[sec_name] = mat_tag
+                # Optionally wrap with Fatigue for low-cycle degradation
+                if self.config.get('brace_fatigue'):
+                    fatigue_tag = mat_tag + 1
+                    E0 = self.config.get('brace_fatigue_E0', 0.095)
+                    m = self.config.get('brace_fatigue_m', -0.3)
+                    ops.uniaxialMaterial('Fatigue', fatigue_tag, mat_tag,
+                                         '-E0', E0, '-m', m)
+                    use_tag = fatigue_tag
+                    fatigue_note = f" + Fatigue({fatigue_tag})"
+                    mat_tag += 1  # consume an extra tag for Fatigue
+                else:
+                    use_tag = mat_tag
+                    fatigue_note = ""
+
+                self._truss_mat_tags[sec_name] = use_tag
                 self._truss_areas[sec_name] = A
                 if self.config['verbose']:
-                    print(f"  Truss brace material {mat_tag}: {sec_name} "
+                    hysteretic_tag = mat_tag if not self.config.get('brace_fatigue') else mat_tag
+                    print(f"  Truss brace Hysteretic({hysteretic_tag}){fatigue_note}: {sec_name} "
                           f"(A={A:.6f}, Fy={Fy:.0f}, sig_cr={sig_cr:.0f})")
                 mat_tag += 1
 
@@ -431,18 +455,12 @@ class OpenSeesBuilder:
                 next_tag=next_tag,
             )
             self._rigid_link_elems = rigid_links
-            # Create OpenSees nodes for subdivision/offset nodes
-            # (only those that don't already exist in OpenSees).
-            existing_tags = set()
+            # Create OpenSees nodes for subdivision/offset nodes.
+            # Only create nodes that weren't already created by _create_nodes().
             for nd in self.model.nodes.values():
-                try:
-                    coord = ops.nodeCoord(nd.node_tag)
-                    existing_tags.add(nd.node_tag)
-                except Exception:
-                    pass
-            for nd in self.model.nodes.values():
-                if nd.node_tag not in existing_tags:
+                if nd.node_tag not in self._created_node_tags:
                     ops.node(nd.node_tag, nd.x, nd.y, nd.z)
+                    self._created_node_tags.add(nd.node_tag)
 
         # Build frame_tag_map for loads (and for element creation if needed)
         self.frame_tag_map = {
@@ -458,13 +476,12 @@ class OpenSeesBuilder:
                       f"for brace end offsets...")
             # Dedicated super‑stiff section for rigid links
             rigid_sec_tag = max(self.section_tags.values()) + 1 if self.section_tags else 10000
-            rigid_mat_tag = 1  # reuse the first material tag
             # A × E large enough to be effectively rigid over a short offset
             rigid_E = 2e14  # 1000× steel E
             rigid_A = 1.0   # 1 m²
             rigid_I = 1.0   # 1 m⁴
-            ops.uniaxialMaterial('Elastic', rigid_mat_tag, rigid_E)
-            ops.section('Elastic', rigid_sec_tag, rigid_A, rigid_E, rigid_I, rigid_I, 1.0)
+            # section('Elastic', tag, E, A, Iz, Iy, G, J)
+            ops.section('Elastic', rigid_sec_tag, rigid_E, rigid_A, rigid_I, rigid_I, rigid_E / 2.6, rigid_I)
 
             for link_id, nid_i, nid_j, link_tag in self._rigid_link_elems:
                 node_i_tag = self._node_tag_from_id(nid_i)
@@ -1361,9 +1378,9 @@ class OpenSeesBuilder:
         algo = self.config.get('solver_algorithm', 'Newton')
         n_sub = self.config.get('gravity_num_substeps', 1)
 
-        ops.constraints('Plain')
+        ops.constraints(self.config.get('solver_constraints', 'Transformation'))
         ops.numberer('RCM')
-        ops.system('BandGeneral')
+        ops.system(self.config.get('solver_system', 'BandGen'))
         ops.test(test_type, test_tol, test_iter)
         # Use ModifiedNewton('-initial') for robustness with imperfect braces
         if algo == 'ModifiedNewton':
@@ -1632,9 +1649,10 @@ class OpenSeesBuilder:
 
         # ── 1. Rebuild with fiber sections + forceBeamColumn ──
         push_config = dict(self.config)
-        # Use configured element type; forceBeamColumn and dispBeamColumn both
-        # support fiber sections.  forceBeamColumn is the default but can be
-        # numerically sensitive with Corotational + subdivision.
+        # Override element type: forceBeamColumn and dispBeamColumn both
+        # support fiber sections; elasticBeamColumn does NOT — it ignores
+        # fiber definitions and always behaves elastically.
+        push_config['element_type'] = 'dispBeamColumn'
         push_config['create_fiber_sections'] = True
         push_config['use_elastic_sections'] = False
         # Only apply Corotational + robust solver when braces are subdivided
@@ -1644,7 +1662,13 @@ class OpenSeesBuilder:
             and self._brace_selection
         )
         if has_subdivided_braces:
-            push_config['geom_transf_type'] = 'Corotational'
+            # NOTE: Corotational geometry with imperfect subdivided braces
+            # does NOT converge under gravity loads (the large-displacement
+            # formulation is ill-conditioned for the small-displacement
+            # gravity stage).  To make Approach A work, a two-stage rebuild
+            # is needed: Linear geometry → gravity → Corotational → push.
+            # See docs/pushover_analysis.md for details.
+            push_config['geom_transf_type'] = 'PDelta'
             push_config['solver_test_tol'] = 1e-5
             push_config['solver_test_max_iter'] = 50
             push_config['solver_algorithm'] = 'ModifiedNewton'
@@ -1697,16 +1721,16 @@ class OpenSeesBuilder:
             extract_reactions=True,
             pattern_scales=gravity_patterns,
         )
-        grav_disp = grav_results.get('nodal_displacements', {})
+        grav_disp = grav_results.get('nodal_displacements', {}) if grav_results else {}
 
         # Record base shear from gravity (before lateral loads)
         base_shear_grav = grav_results.get('summed_reactions', {}).get(
             'fx' if lateral_direction.upper() == 'X' else
             'fy' if lateral_direction.upper() == 'Y' else 'fz',
             0.0
-        )
+        ) if grav_results else 0.0
 
-        if print_progress:
+        if print_progress and grav_results:
             sr = grav_results.get('summed_reactions', {})
             print(f"  Gravity reactions: Fx={sr.get('fx',0):+.3f}  "
                   f"Fz={sr.get('fz',0):+.3f}  ok=0")
@@ -1820,9 +1844,9 @@ class OpenSeesBuilder:
         # ── 6. Lateral push ──
         ops.wipeAnalysis()
         disp_inc = max_disp / num_steps
-        ops.constraints('Plain')
+        ops.constraints(self.config.get('solver_constraints', 'Transformation'))
         ops.numberer('RCM')
-        ops.system('BandGeneral')
+        ops.system(self.config.get('solver_system', 'BandGen'))
         ops.test('NormDispIncr', self.config.get('solver_test_tol', 1e-4),
                  self.config.get('solver_test_max_iter', 20), 0, 2)
         algo = self.config.get('solver_algorithm', 'Newton')

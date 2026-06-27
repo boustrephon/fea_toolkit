@@ -936,8 +936,15 @@ or supplementing the CSM result with the ASCE 41 factors for comparison.
 ## Brace buckling modelling
 
 The builder supports two approaches for modelling brace buckling in
-pushover analysis, controlled by the ``brace_type`` parameter in
-:func:`run_pushover_4dir` (or ``'brace_truss'`` config in the builder).
+pushover analysis, controlled by the ``brace_type`` parameter.
+
+> **Recommendation:** Use ``brace_type="truss"`` (Approach B) for all
+> practical work.  It is numerically robust, captures directional
+> asymmetry correctly, and is the only approach that is fully tested
+> and working.  Approach A remains **experimental** — ``Corotational``
+> geometry with imperfect subdivided braces fails to converge under
+> gravity loads, which is a known OpenSees limitation.  See the
+> Approach A docstring and ``geometry.py`` for details.
 
 ### Brace identification
 
@@ -952,28 +959,77 @@ treated as a brace:
 - ``ChannelSection``
 
 This logic mirrors ``Selection.from_brace_sections()``.
+To override which sections are treated as braces, use the
+``brace_sections`` config option (see below).
 
-### Approach A — Subdivided beam-column elements (default)
+### Approach A — Subdivided beam-column elements (experimental)
 
-Set ``brace_type="beam"`` (the default).
+Set ``brace_type="beam"``.
 
-- Braces are subdivided into ``brace_n_segments`` sub-elements with a
-  sinusoidal initial imperfection (amplitude = ``brace_imperfection_ratio × L``).
-- Uses ``forceBeamColumn`` elements with **fiber sections** (``Steel01``
-  material) and ``Corotational`` geometric transformation.
-- Requires working brace subdivision connectivity (see
-  ``subdivide_elements()`` in ``geometry.py``).
-- Gusset plates can be modelled via ``brace_end_offset`` (creates rigid
-  link elements at brace ends).
+.. warning::
+   Approach A is **experimental** and not yet production-ready.
+   Known issues:
 
-**Solver settings** (configurable via builder config):
+   1. ✅ **Missing ``set_brace_selection()``** — Fixed.  Subdivision now
+      actually triggers.
+   2. ✅ **Double subdivision on rebuild** — Fixed.  ``subdivide_elements()``
+      now skips already-inactive elements.
+   3. ✅ **``split_elements`` conflict** — Fixed.  Approach A uses
+      ``split_elements=False`` to avoid creating split children that
+      overlap with subdivided elements.
+   4. ✅ **``forceBeamColumn`` element-level failure** — Fixed by switching
+      to ``dispBeamColumn`` (displacement-based formulation has no
+      element-level Newton iteration).
+   5. ✅ **Node creation during rebuild** — Fixed.  ``_create_nodes()`` now
+      tracks created tags; subdivision-only nodes are created separately.
+   6. ✅ **Rigid-link section E/A swap** — Fixed.  ``ops.section('Elastic', ...)``
+      parameter order corrected.
+   7. ❌ **``PDelta`` / ``Corotational`` gravity convergence** — Still open.
+      Even with ``dispBeamColumn``, no imperfection, ``NormUnbalance`` test,
+      ``KrylovNewton`` algorithm, and 100 gravity sub-steps, the model cannot
+      converge under ~7.5 MN of gravity load.  The subdivided elements sharing
+      nodes with existing frame elements appears to create an ill-conditioned
+      system matrix when PDelta or Corotational geometric stiffness is added.
+
+Braces are subdivided into ``brace_n_segments`` sub-elements with a
+sinusoidal initial imperfection (amplitude = ``brace_imperfection_ratio × L``).
+Uses ``forceBeamColumn`` elements with **fiber sections** (``Steel01``
+material) and ``Corotational`` geometric transformation.
+Gusset plates can be modelled via ``brace_end_offset`` (creates rigid
+link elements at brace ends).
+
+**Solver settings** (configurable via builder config).
+
+The following are the **project-wide defaults** and are the recommended
+settings for all analyses.  They were chosen because they are more
+robust than the alternatives — see the notes below for when an
+alternative might be considered.
 
 | Key | Default | Description |
 |---|---|---|
+| ``solver_constraints`` | ``'Transformation'`` | Constraint handler (``'Transformation'``, ``'Plain'``, ``'Penalty'``, ``'Lagrange'``, ``'MP'``). ``'Transformation'`` is recommended for most models; ``'Plain'`` can produce singular stiffness matrices with subdivided elements or complex connectivity. |
+| ``solver_system`` | ``'BandGen'`` | Linear system solver (``'BandGen'``, ``'BandGeneral'``, ``'ProfileSPD'``, ``'SparseGeneral'``, ``'UmfPack'``, ``'Mumps'``). ``'BandGen'`` is robust for most models. Switch to ``'UmfPack'`` or ``'Mumps'`` for large models. |
 | ``solver_test_tol`` | ``1e-5`` | Convergence tolerance for ``NormDispIncr`` test |
 | ``solver_test_max_iter`` | ``50`` | Maximum iterations per load step |
 | ``solver_algorithm`` | ``'ModifiedNewton'`` | Algorithm (``'Newton'``, ``'ModifiedNewton'``, ``'NewtonLineSearch'``, ``'KrylovNewton'``) |
 | ``gravity_num_substeps`` | ``5`` | Number of sub-steps for gravity application |
+
+> **Note on ``solver_constraints``:**
+> ``'Transformation'`` (the default) uses the transformation method to enforce
+> constraints by reducing the system of equations. It is more robust than
+> ``'Plain'`` when elements share intermediate nodes (e.g., subdivided braces).
+> The ``'Plain'`` handler can produce a singular stiffness matrix in such cases.
+> ``'Penalty'`` uses a penalty approach and may be suitable for very large models
+> where transformation becomes expensive, but requires careful selection of the
+> penalty value.
+>
+> **Note on ``solver_system``:**
+> ``'BandGen'`` (the default) is a direct solver suitable for most models.
+> ``'BandGeneral'`` is an alternative banded solver. ``'ProfileSPD'`` is
+> optimized for symmetric positive-definite systems. ``'UmfPack'`` and
+> ``'Mumps'`` are sparse direct solvers that handle larger models more
+> efficiently. Choose ``'UmfPack'`` or ``'Mumps'`` when the model has many
+> degrees of freedom or the banded solvers run out of memory.
 
 ### Approach B — Truss elements with Hysteretic material
 
@@ -1018,20 +1074,31 @@ longest brace of that section, and $A$ is the cross-sectional area.
 - Not suitable for cyclic/pseudodynamic analysis without calibrating
   the Hysteretic pinching and damage parameters.
 
-### Comparison of approaches
+### Comparison and recommendation
 
 | Criterion | Approach A (beam + subdivision) | Approach B (truss + Hysteretic) |
 |---|---|---|
+| **Status** | ⚠️ **Experimental** — element-level convergence issues | ✅ **Recommended** — fully working |
 | **Element type** | ``forceBeamColumn`` (fiber sections) | ``Truss`` (uniaxial material) |
 | **Geometry** | ``Corotational`` | ``Linear`` (buckling is material-defined) |
 | **Buckling mechanism** | Geometric (P-δ via imperfection + corotational) | Phenomenological (Hysteretic compression degradation) |
 | **Bending stiffness** | ✅ Yes (beam-column) | ❌ No (axial only, pinned ends) |
 | **Directional asymmetry** | ✅ Captured if subdivision works | ✅ Captured (tension vs. compression envelope) |
-| **Numerical robustness** | ⚠️ Requires working element connectivity | ✅ Very robust |
+| **Numerical robustness** | ❌ ForceBeamColumn3d::update fails with fibre sections | ✅ Very robust |
 | **Computational cost** | Moderate | Low |
 | **Gusset plate modelling** | ✅ Rigid end offsets available | ❌ Not applicable |
 | **Post-buckling path** | ⚠️ Sensitive to solver settings | ✅ Directly controlled via material params |
-| **Current status** | ⚠️ Connectivity bug in ``subdivide_elements()`` | ✅ Fully working |
+
+**Bottom line:** Use ``brace_type="truss"`` (Approach B) for all practical
+pushover analyses.  It is numerically robust, produces clear directional
+asymmetry, and is fully tested.  Approach A (subdivided beam-column) is
+**not yet functional** — the ``Corotational`` geometry required for
+buckling causes gravity-stage convergence failure with imperfect
+subdivided braces.  ``PDelta`` geometry converges but does not trigger
+local brace buckling.  A two-stage approach (``Linear`` gravity →
+``Corotational`` push) would require a model rebuild between stages,
+which is not currently implemented.  See the test output at
+``tests/test_model.py`` for the current status of Approach A.
 
 ### Selecting specific brace sections
 
@@ -1066,14 +1133,14 @@ a ``brace_type`` parameter:
 ```python
 from project_a_report import run_pushover_4dir
 
-# Approach A (default — subdivided beam-column elements)
-results = run_pushover_4dir(md, modal, shapes, brace_type="beam")
-
-# Approach B (truss elements with Hysteretic material)
+# Approach B (truss elements with Hysteretic material) — recommended
 results = run_pushover_4dir(md, modal, shapes, brace_type="truss")
+
+# Approach A (subdivided beam-column elements) — experimental
+results = run_pushover_4dir(md, modal, shapes, brace_type="beam")
 ```
 
-The config-driven workflow uses the same key:
+The config-driven workflow uses the same key (defaults to ``"truss"``):
 
 ```python
 CONFIG = {
@@ -1082,7 +1149,7 @@ CONFIG = {
         "directions": ["+X", "-X", "+Y", "-Y"],
         "max_disp": 0.30,
         "num_steps": 50,
-        "brace_type": "truss",   # or "beam" (default)
+        "brace_type": "truss",   # <-- default, "beam" is experimental
     },
 }
 ```
@@ -1161,7 +1228,7 @@ CONFIG = {
         "directions": ["+X", "-X", "+Y", "-Y"],
         "max_disp": 0.30,
         "num_steps": 50,
-        "brace_type": "truss",           # "beam" or "truss"
+        "brace_type": "truss",           # "truss" (recommended) or "beam" (experimental)
         "brace_sections": None,          # or ["Section Name"]
     },
     "general": {
@@ -1178,7 +1245,7 @@ Key config options:
 | Key | Purpose |
 |---|---|
 | ``spectrum.damping`` | Elastic damping ratio for the GB 50011 spectrum (default 0.05) |
-| ``pushover.brace_type`` | ``"beam"`` (Approach A — subdivided beam-column) or ``"truss"`` (Approach B — Hysteretic material) |
+| ``pushover.brace_type`` | ``"truss"`` (**recommended**) — Approach B (Hysteretic material) or ``"beam"`` (experimental) — Approach A (subdivided beam-column) |
 | ``pushover.brace_sections`` | Optional list of section names to treat as braces (``None`` = auto-detect by shape) |
 | ``general.force_recompute`` | ``True`` to ignore cached results and re-run all analyses |
 
