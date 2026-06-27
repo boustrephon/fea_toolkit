@@ -2136,6 +2136,7 @@ class OpenSeesBuilder:
         for ms in self.model.mass_sources.values():
             # --- Element self‑weight mass ---
             if ms.elements:
+                # ── Frame elements ──
                 for eid, elem in elements.items():
                     if getattr(elem, 'inactive', False):
                         continue
@@ -2159,12 +2160,52 @@ class OpenSeesBuilder:
                     node_mass[elem.node_i] = node_mass.get(elem.node_i, 0.0) + mass * 0.5
                     node_mass[elem.node_j] = node_mass.get(elem.node_j, 0.0) + mass * 0.5
 
+                # ── Area elements ──
+                for aid, area_elem in self.model.area_elements.items():
+                    sec_name = self.model.area_assignments.get(aid)
+                    if not sec_name:
+                        continue
+                    sec = self.model.sections.get(sec_name)
+                    if sec is None:
+                        continue
+                    mat = all_materials.get(sec.material)
+                    if mat is None or mat.unit_weight == 0:
+                        continue
+                    thickness = area_elem.thickness
+                    if thickness < 1e-12:
+                        continue
+                    # Polygon area via Newell's method
+                    pts = []
+                    for nid in area_elem.node_ids:
+                        nd = self.model.nodes.get(nid)
+                        if nd is None:
+                            break
+                        pts.append((nd.x, nd.y, nd.z))
+                    if len(pts) < 3:
+                        continue
+                    nx = ny = nz = 0.0
+                    for i in range(len(pts)):
+                        x1, y1, z1 = pts[i]
+                        x2, y2, z2 = pts[(i + 1) % len(pts)]
+                        nx += (y1 - y2) * (z1 + z2)
+                        ny += (z1 - z2) * (x1 + x2)
+                        nz += (x1 - x2) * (y1 + y2)
+                    area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                    if area_mag < 1e-12:
+                        continue
+                    # Weight = area × thickness × unit_weight
+                    weight = area_mag * thickness * mat.unit_weight
+                    mass = weight / g
+                    n_corners = len(area_elem.node_ids)
+                    for nid in area_elem.node_ids:
+                        node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_corners
+
             # --- Load‑based mass ---
             if ms.loads and ms.load_pattern:
                 for lp_name, mult in ms.load_pattern.items():
                     if abs(mult) < 1e-12:
                         continue
-                    # Distributed loads in this pattern → mass
+                    # ── Frame distributed loads → mass ──
                     for ld in dist_loads or []:
                         if ld.pattern != lp_name:
                             continue
@@ -2186,7 +2227,7 @@ class OpenSeesBuilder:
                         node_mass[elem.node_i] = node_mass.get(elem.node_i, 0.0) + mass * 0.5
                         node_mass[elem.node_j] = node_mass.get(elem.node_j, 0.0) + mass * 0.5
 
-                    # Joint loads in this pattern → mass
+                    # ── Joint loads → mass ──
                     for jl in self.model.joint_loads or []:
                         if jl.pattern != lp_name:
                             continue
@@ -2194,6 +2235,86 @@ class OpenSeesBuilder:
                         total_force = abs(jl.fz) * mult
                         mass = total_force / g
                         node_mass[jl.node_id] = node_mass.get(jl.node_id, 0.0) + mass
+
+                    # ── Area gravity loads → mass ──
+                    for agl in self.model.area_gravity_loads or []:
+                        if agl.pattern != lp_name:
+                            continue
+                        area_elem = self.model.area_elements.get(agl.area_id)
+                        if area_elem is None:
+                            continue
+                        sec_name = self.model.area_assignments.get(agl.area_id)
+                        if not sec_name:
+                            continue
+                        sec = self.model.sections.get(sec_name)
+                        if sec is None:
+                            continue
+                        mat = all_materials.get(sec.material)
+                        if mat is None or mat.unit_weight == 0:
+                            continue
+                        thickness = area_elem.thickness
+                        if thickness < 1e-12:
+                            continue
+                        # Polygon area
+                        pts = []
+                        for nid in area_elem.node_ids:
+                            nd = self.model.nodes.get(nid)
+                            if nd is None:
+                                break
+                            pts.append((nd.x, nd.y, nd.z))
+                        if len(pts) < 3:
+                            continue
+                        nx = ny = nz = 0.0
+                        for i in range(len(pts)):
+                            x1, y1, z1 = pts[i]
+                            x2, y2, z2 = pts[(i + 1) % len(pts)]
+                            nx += (y1 - y2) * (z1 + z2)
+                            ny += (z1 - z2) * (x1 + x2)
+                            nz += (x1 - x2) * (y1 + y2)
+                        area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                        if area_mag < 1e-12:
+                            continue
+                        # Force = area × thickness × unit_weight × multiplier × mult
+                        sw_per_area = thickness * mat.unit_weight
+                        total_fz = sw_per_area * area_mag * agl.multiplier_z * mult
+                        mass = abs(total_fz) / g
+                        n_corners = len(area_elem.node_ids)
+                        for nid in area_elem.node_ids:
+                            node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_corners
+
+                    # ── Area uniform loads → mass ──
+                    for aul in self.model.area_uniform_loads or []:
+                        if aul.pattern != lp_name:
+                            continue
+                        area_elem = self.model.area_elements.get(aul.area_id)
+                        if area_elem is None:
+                            continue
+                        # Polygon area
+                        pts = []
+                        for nid in area_elem.node_ids:
+                            nd = self.model.nodes.get(nid)
+                            if nd is None:
+                                break
+                            pts.append((nd.x, nd.y, nd.z))
+                        if len(pts) < 3:
+                            continue
+                        nx = ny = nz = 0.0
+                        for i in range(len(pts)):
+                            x1, y1, z1 = pts[i]
+                            x2, y2, z2 = pts[(i + 1) % len(pts)]
+                            nx += (y1 - y2) * (z1 + z2)
+                            ny += (z1 - z2) * (x1 + x2)
+                            nz += (x1 - x2) * (y1 + y2)
+                        area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                        if area_mag < 1e-12:
+                            continue
+                        # Use pressure magnitude in gravity direction
+                        pressure = abs(aul.value)
+                        total_force = pressure * area_mag * mult
+                        mass = total_force / g
+                        n_corners = len(area_elem.node_ids)
+                        for nid in area_elem.node_ids:
+                            node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_corners
 
         # Assign masses to OpenSees nodes
         for nid, m in node_mass.items():

@@ -1074,6 +1074,32 @@ longest brace of that section, and $A$ is the cross-sectional area.
 - Not suitable for cyclic/pseudodynamic analysis without calibrating
   the Hysteretic pinching and damage parameters.
 
+#### Fatigue wrapper for cyclic/dynamic analysis
+
+Set ``brace_fatigue=True`` to wrap the ``Hysteretic`` material with an
+OpenSees ``Fatigue`` material for low-cycle fatigue degradation:
+
+.. code:: python
+
+    config = {
+        "brace_truss": True,
+        "brace_fatigue": True,
+        "brace_fatigue_E0": 0.095,    # Coffin-Manson strain amplitude at fracture
+        "brace_fatigue_m": -0.3,      # Coffin-Manson exponent
+    }
+
+This wraps the ``Hysteretic`` backbone (which provides the asymmetric
+tension/compression buckling) with a ``Fatigue`` material that tracks
+cumulative damage and fractures the element when the Coffin-Manson
+criterion is met.  This is the recommended approach for nonlinear
+dynamic (time-history) analysis, matching the OpenSees Day CBF examples
+(``Workshops/OpenSeesDays/Steel2dModels/``) which use ``Steel02`` +
+``Fatigue`` with subdivided beam-column elements.  For the truss
+approach, ``Hysteretic`` replaces ``Steel02`` to capture the asymmetric
+buckling that would otherwise emerge from fiber-section P-M interaction.
+
+The ``Fatigue`` material is available in OpenSeesPy (tested and verified).
+
 ### Comparison and recommendation
 
 | Criterion | Approach A (beam + subdivision) | Approach B (truss + Hysteretic) |
