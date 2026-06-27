@@ -65,7 +65,7 @@ The goal is to create a Python package `fea_toolkit` that:
 | **Load Cases (SAP2000)** | ✅ Complete | `get_load_cases()` parses LOAD CASE DEFINITIONS, CASE - RESPONSE SPECTRUM (general + load assignments), CASE - MODAL, CASE - STATIC into `LoadCase.case_data`. |
 | **Auto Load Data** | ✅ Complete | AUTO SEISMIC and AUTO WIND tables are parsed and attached to `LoadPattern.auto_data`. |
 | **Material Damping** | ✅ Complete | Damping parameters from MATERIAL PROPERTIES 06 are captured in `Material.extra`. |
-| **Area Element Mass** | ✅ Complete | `compute_seismic_masses()` now includes area element self-weight and area gravity loads. |
+| **Area Element Mass** | ✅ Complete | `compute_seismic_masses()` now includes area element self-weight, area gravity loads (MultiplierZ), and area uniform loads. |
 | **Brace Fatigue** | ✅ Complete | Optional `Fatigue` material wrapper for cyclic degradation (`brace_fatigue` config). |
 
 #### 3. Notable Design Decisions
@@ -82,7 +82,7 @@ The goal is to create a Python package `fea_toolkit` that:
 - **Brace fatigue** – Optional `Fatigue` material wrapper for cyclic degradation, controlled via `brace_fatigue`, `brace_fatigue_E0`, `brace_fatigue_m` config options.
 - **Pushover spectrum override** – The pushover/CSM analysis can use a different spectrum from the response spectrum analysis via `pushover.spectrum` in the CONFIG. Falls back to the top-level `spectrum` if not specified.
 - **Linear case auto-detection** – `run_linear_cases()` now reads LinStatic load cases from the SAP2000 model automatically. Users can override via `linear.cases` in the CONFIG.
-- **Mass computation includes area elements** – `compute_seismic_masses()` now includes area element self-weight and area gravity loads (MultiplierZ values). Previously only frame elements were included.
+- **Mass computation includes area elements** – `compute_seismic_masses()` now includes area element self-weight, area gravity loads (MultiplierZ), and area uniform loads. Previously only frame elements were included.
 - **Spectrum damping fix** – The GB50011 spectrum now applies the damping reduction factor `η₂` to the ascending branch (T ≤ 0.1s) as well as the plateau and descending branch, matching the reference `GB_spectrum()` function.
 - **SAP2000 data extraction** – The parser now extracts: load case definitions, response spectrum case data (general + load assignments), modal case data, AUTO seismic/wind table data, and material damping parameters.
 
@@ -362,18 +362,18 @@ These approaches are documented in the OpenSees literature but have not been imp
 | Approach | Element type | Material | Geometry | Works for static? | Works for dynamic? | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **A — Subdivided beam‑column** | `dispBeamColumn` | Fiber (Steel01) | PDelta / Corotational | ❌ Gravity convergence fails | ❌ Not tested | The subdivided elements + PDelta create an ill‑conditioned stiffness matrix. No imperfection also fails. See `docs/pushover_analysis.md`. |
-| **B — Truss + Hysteretic** (current) | `Truss` | `Hysteretic` | None (axial only) | ✅ Works | ⚠️ Needs material upgrade | Recommended for static. For dynamic, upgrade to Steel02+Fatigue. |
+| **B — Truss + Hysteretic** (current) | `Truss` | `Hysteretic` | None (axial only) | ✅ Works | ⚠️ Needs fatigue wrapper | Recommended for static. For dynamic, enable `brace_fatigue=True` to wrap with `Fatigue` for low-cycle fracture. |
 | **C — `beamWithHinges`** | `beamWithHinges` | Fiber (Steel01) | Corotational | ❓ Not tested | ❓ Not tested | Plastic hinge ends + elastic interior. More stable than full‑length fiber subdivision. Used in some OpenSees examples. |
 | **D — `corotTruss`** | `corotTruss` | `Hysteretic` / `Steel02` | Built‑in corotational | ❓ Not tested | ❓ Not tested | Truss element with corotational formulation. Captures large‑displacement axial response. |
 | **E — `Pinching4` truss** | `Truss` | `Pinching4` | None (axial only) | ✅ Should work | ✅ Should work | Good for braces with pinched hysteresis and cyclic degradation. |
-| **F — Steel02+Fatigue truss** | `Truss` | `Steel02` + `Fatigue` | None (axial only) | ✅ Should work | ✅ **Recommended** | Matches OpenSees Day CBF examples. Steel02 for cyclic plasticity, Fatigue for low‑cycle fracture. |
+| **F — Steel02+Fatigue truss** | `Truss` | `Steel02` + `Fatigue` | None (axial only) | ✅ Should work | ❌ Not suitable | Steel02 is symmetric — cannot capture asymmetric tension/compression buckling. Use `Hysteretic` + `Fatigue` (Approach B) instead. |
 
 **Overall recommendation for brace modelling:**
 
 | Analysis type | Recommended approach |
 | :--- | :--- |
 | Static pushover (current) | **Approach B** (`Truss` + `Hysteretic`) — already working |
-| Nonlinear dynamic (future) | **Approach F** (`Truss` + `Steel02` + `Fatigue`) — needs implementation |
+| Nonlinear dynamic (future) | **Approach B** (`Truss` + `Hysteretic` + `Fatigue`) — already implemented (`brace_fatigue=True`) |
 
 ### Approach A — Remaining Roadblocks (for reference)
 
