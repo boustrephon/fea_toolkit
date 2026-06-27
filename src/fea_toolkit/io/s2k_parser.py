@@ -245,6 +245,7 @@ class SAP2000Parser:
         frame_dist_loads = self._get_frame_distributed_loads()
         frame_gravity_loads = self._get_frame_gravity_loads()
         area_uniform_loads, area_gravity_loads = self._get_area_loads()
+        load_cases = self.get_load_cases()
 
         # ── Populate area element thickness from assigned sections ──
         for aid, a_elem in area_elements.items():
@@ -273,6 +274,7 @@ class SAP2000Parser:
             frame_gravity_loads=frame_gravity_loads,
             area_uniform_loads=area_uniform_loads,
             area_gravity_loads=area_gravity_loads,
+            load_cases=load_cases,
             units=model_units,
         )
 
@@ -660,9 +662,67 @@ class SAP2000Parser:
                     groups[gname].objects.append(f"{obj_type}:{obj_label}")
         return groups
 
-    def get_load_cases(self)-> Dict[str, LoadCase]:
-        loadcases = {}
-        # TODO
+    def get_load_cases(self) -> Dict[str, LoadCase]:
+        """Build load cases from LOAD CASE DEFINITIONS and CASE-* tables."""
+        loadcases: Dict[str, LoadCase] = {}
+
+        # ── 1. Parse LOAD CASE DEFINITIONS ──
+        for rec in self._raw_tables.get('LOAD CASE DEFINITIONS', []):
+            cname = rec.get('Case', '')
+            if not cname:
+                continue
+            loadcases[cname] = LoadCase(
+                case_name=cname,
+                case_type=rec.get('Type', ''),
+                design_type_option=rec.get('DesTypeOpt', 'Prog Det'),
+                design_type=rec.get('DesignType', ''),
+                design_action_option=rec.get('DesActOpt', 'Prog Det'),
+                design_action=rec.get('DesignAct', ''),
+                initial_condition=rec.get('InitialCond', 'Zero'),
+                modal_case=rec.get('ModalCase', ''),
+                run_case=rec.get('RunCase', False) in (True, 'True', 'Yes', 1),
+            )
+
+        # ── 2. Parse CASE - RESPONSE SPECTRUM tables ──
+        rs_general: Dict[str, dict] = {}
+        for rec in self._raw_tables.get('CASE - RESPONSE SPECTRUM 1 - GENERAL', []):
+            cname = rec.get('Case', '')
+            if cname:
+                rs_general[cname] = {k: v for k, v in rec.items() if k != 'Case'}
+
+        rs_loads: Dict[str, list] = {}
+        for rec in self._raw_tables.get('CASE - RESPONSE SPECTRUM 2 - LOAD ASSIGNMENTS', []):
+            cname = rec.get('Case', '')
+            if cname:
+                rs_loads.setdefault(cname, []).append(
+                    {k: v for k, v in rec.items() if k != 'Case'}
+                )
+
+        # Merge response spectrum data into load cases
+        for cname, general in rs_general.items():
+            if cname not in loadcases:
+                continue
+            entry = dict(general)
+            if cname in rs_loads:
+                entry['LoadAssignments'] = rs_loads[cname]
+            loadcases[cname].case_data['CASE - RESPONSE SPECTRUM'] = entry
+
+        # ── 3. Parse all remaining CASE-* tables (MODAL, STATIC, etc.) ──
+        handled_prefixes = ('CASE - RESPONSE SPECTRUM',)
+        for table_name in self._raw_tables:
+            if not table_name.startswith('CASE -'):
+                continue
+            # Skip tables already handled above
+            if any(table_name.startswith(p) for p in handled_prefixes):
+                continue
+            for rec in self._raw_tables[table_name]:
+                cname = rec.get('Case', '')
+                if cname in loadcases:
+                    # Store under the full table name, skipping the Case key
+                    loadcases[cname].case_data[table_name] = {
+                        k: v for k, v in rec.items() if k != 'Case'
+                    }
+
         return loadcases
 
     def _get_load_patterns(self) -> Dict[str, LoadPattern]:
@@ -674,8 +734,19 @@ class SAP2000Parser:
                     name = str(name),
                     pattern_type = rec.get('DesignType', ''),
                     self_weight_factor = rec.get('SelfWtMult', 0)
-                    )
-        # Also add default patterns if needed? We'll keep as is.
+                )
+        # Augment with data from AUTO* tables (e.g. AUTO SEISMIC, AUTO WIND)
+        for table_name, records in self._raw_tables.items():
+            if not table_name.startswith('AUTO'):
+                continue
+            # Skip tables without a LoadPat column (e.g. AUTO WAVE, FRAME AUTO MESH)
+            if not records or 'LoadPat' not in records[0]:
+                continue
+            for rec in records:
+                lp_name = rec.get('LoadPat', '')
+                if lp_name in patterns:
+                    # Store the whole record under the full table name
+                    patterns[lp_name].auto_data[table_name] = dict(rec)
         return patterns
 
     def _get_mass_sources(self) -> Dict[str, MassSource]:

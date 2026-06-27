@@ -473,6 +473,7 @@ class LoadPattern:
     name: str
     pattern_type: str          # 'DEAD', 'LIVE', 'SUPERDEAD', 'WIND', 'QUAKE', etc.
     self_weight_factor: float = 0.0
+    auto_data: Dict[str, Any] = field(default_factory=dict)   # data from AUTO* tables
 
 @dataclass
 class LoadCombination:

@@ -72,7 +72,7 @@ The goal is to create a Python package `fea_toolkit` that:
 - **Configurable Builder** – Element type, integration points, splitting, verbosity can be set via `config` dict.
 - **MASS SOURCE** – The `MASS SOURCE` table is parsed by `_get_mass_sources()` which groups rows by MassSource name, **accumulates** multipliers when the same LoadPat appears on multiple rows, and stores the result in `SAPModelData.mass_sources`. The builder's `compute_seismic_masses()` then uses this to derive nodal masses (self‑weight from `Elements=True`, load‑based from `Loads=True` + `LoadPat`/`Multiplier` pairs).
 - **Modal & RS Analysis** – `run_modal_analysis()` uses `ops.eigen('-fullGenLapack', …)`. `run_response_spectrum_analysis()` and `extract_element_rs_forces()` call `ops.responseSpectrumAnalysis()` mode‑by‑mode and extract element forces via `ops.eleResponse(eid, 'forces')` (global system). CQC follows Der Kiureghian's formula. `add_missing_mass_correction()` computes the rigid response from residual mass at short‑period spectral acceleration.
-- **Brace buckling — two approaches** – The builder supports two buckling modelling strategies. **Approach A** subdivides braces into segments with a sinusoidal imperfection and uses `Corotational` geometric transformation to capture geometric buckling (requires working element connectivity). **Approach B** replaces braces with `Truss` elements using a `Hysteretic` material with asymmetric tension/compression (yield in tension, buckle in compression). Approach B is more numerically robust and captures directional asymmetry. Controlled via `brace_type="beam"` / `brace_type="truss"`.
+- **Brace buckling — two approaches** – The builder supports two buckling modelling strategies. **Approach A** (experimental) subdivides braces into segments with a sinusoidal imperfection and uses `Corotational` geometric transformation — has element-level convergence issues. **Approach B** (recommended) replaces braces with `Truss` elements using a `Hysteretic` material with asymmetric tension/compression. Approach B is numerically robust and captures directional asymmetry correctly. Controlled via `brace_type="truss"` (default) / `brace_type="beam"` (experimental).
 - **Configurable solver settings** – The builder's `run_static_analysis()` and `run_pushover_analysis()` read solver parameters from config: `solver_test_tol`, `solver_test_max_iter`, `solver_algorithm` (`'Newton'`, `'ModifiedNewton'`, `'NewtonLineSearch'`, `'KrylovNewton'`), and `gravity_num_substeps` for gravity load ramping.
 
 #### 4. Distributed Load Support by Element Type
@@ -305,5 +305,76 @@ In `.vscode/settings.json` (already created):
 #### Step 3 — Reload the window
 
 Run `Developer: Reload Window` in VS Code so Pylance picks up the changes.
+
+---
+
+## TODO / Future Work
+
+### Nonlinear Dynamic (Time‑History) Analysis
+
+A `run_time_history_analysis()` method is needed.  Below are the building blocks required, along with recommendations based on published OpenSees practice.
+
+| Item | Detail | Priority |
+| :--- | :--- | :--- |
+| **Transient integrator** | `Newmark` (constant acceleration, $\gamma=0.5,\ \beta=0.25$) is the most robust for seismic analysis. `HHT` ($\alpha=-0.1$) adds numerical damping for higher modes. | High |
+| **Damping** | Rayleigh damping (`ops.rayleigh`) from mass‑ and stiffness‑proportional coefficients ($a_0, a_1$) tuned to the first-mode and a high-mode frequency. | High |
+| **Ground motion input** | `ops.timeSeries('Path', …)` + `ops.pattern('UniformExcitation', …)` for uniform base excitation. Multi‑support excitation requires `ImposedMotion`. | High |
+| **Dynamic recorders** | `ops.recorder('Node', …)` for displacement/velocity/acceleration at control nodes; `ops.recorder('Element', …)` for brace axial forces. | High |
+| **Material improvements** | The `Hysteretic` material in Approach B lacks cyclic degradation. OpenSees offers better alternatives for braces under cyclic loading (see below). | Medium |
+| **Convergence under dynamics** | Transient analysis may require `KrylovNewton` or `NewtonLineSearch` for brace buckling cycles. Test tolerance should be $10^{-4}$–$10^{-5}$. | Medium |
+
+#### Recommended brace materials for dynamic analysis (Approach B evolution)
+
+Based on the OpenSees workshop examples (`Workshops/OpenSeesDays/Steel2dModels/`) and published research:
+
+| Material | Use case | Cyclic degradation? | Fatigue? | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **`Hysteretic`** (current) | Static pushover only | ❌ No | ❌ No | Simple backbone, no cycle‑to‑cycle change. Adequate for monotonic pushover only. |
+| **`Steel02` + `Fatigue`** | Cyclic dynamic | ✅ Yes (Bauschinger) | ✅ Yes (Coffin‑Manson) | **Preferred for dynamic analysis.** `Steel02` has isotropic hardening; wrap with `Fatigue` for low‑cycle fracture. Used in OpenSees Day CBF examples (`CBFbase.tcl`). |
+| **`BraceMaterial`** | Cyclic dynamic | ✅ Yes (damage) | ✅ Yes (energy‑based) | Specialised uniaxial brace model with pinching + damage. A modified version of `Hysteretic` by Filippou. Available in OpenSees source (`SRC/material/uniaxial/BraceMaterial.h`). |
+| **`Pinching4`** | Cyclic dynamic | ✅ Yes (degradation) | ❌ No | Four‑segment backbone with cyclic degradation and pinching. Good for braces where pinched hysteresis is important. |
+
+**Recommendation:** For nonlinear dynamic analysis, replace `Hysteretic` with **`Steel02` + `Fatigue`** (or `BraceMaterial` if available in OpenSeesPy).  The `Truss` element itself is fully dynamic‑capable.
+
+#### Additional solver considerations for dynamics
+
+- Use **`Transformation`** constraints (already the default) — `Plain` is unreliable for large 3D models.
+- Use **`BandGen`** system (already the default) — `ProfileSPD` or `SparseSYM` are alternatives for larger models but slower.
+- Consider a **two‑stage analysis**: `Transient` (ground motion) → `Static` (residual gravity check).  OpenSees `loadConst('-time', 0.0)` separates stages naturally.
+- For gravity + earthquake, apply gravity first with `LoadControl`, then `loadConst('-time', 0.0)` before starting the transient analysis.
+
+### Brace Modelling — Other Approaches Not Yet Investigated
+
+These approaches are documented in the OpenSees literature but have not been implemented in `fea_toolkit`:
+
+| Approach | Element type | Material | Geometry | Works for static? | Works for dynamic? | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **A — Subdivided beam‑column** | `dispBeamColumn` | Fiber (Steel01) | PDelta / Corotational | ❌ Gravity convergence fails | ❌ Not tested | The subdivided elements + PDelta create an ill‑conditioned stiffness matrix. No imperfection also fails. See `docs/pushover_analysis.md`. |
+| **B — Truss + Hysteretic** (current) | `Truss` | `Hysteretic` | None (axial only) | ✅ Works | ⚠️ Needs material upgrade | Recommended for static. For dynamic, upgrade to Steel02+Fatigue. |
+| **C — `beamWithHinges`** | `beamWithHinges` | Fiber (Steel01) | Corotational | ❓ Not tested | ❓ Not tested | Plastic hinge ends + elastic interior. More stable than full‑length fiber subdivision. Used in some OpenSees examples. |
+| **D — `corotTruss`** | `corotTruss` | `Hysteretic` / `Steel02` | Built‑in corotational | ❓ Not tested | ❓ Not tested | Truss element with corotational formulation. Captures large‑displacement axial response. |
+| **E — `Pinching4` truss** | `Truss` | `Pinching4` | None (axial only) | ✅ Should work | ✅ Should work | Good for braces with pinched hysteresis and cyclic degradation. |
+| **F — Steel02+Fatigue truss** | `Truss` | `Steel02` + `Fatigue` | None (axial only) | ✅ Should work | ✅ **Recommended** | Matches OpenSees Day CBF examples. Steel02 for cyclic plasticity, Fatigue for low‑cycle fracture. |
+
+**Overall recommendation for brace modelling:**
+
+| Analysis type | Recommended approach |
+| :--- | :--- |
+| Static pushover (current) | **Approach B** (`Truss` + `Hysteretic`) — already working |
+| Nonlinear dynamic (future) | **Approach F** (`Truss` + `Steel02` + `Fatigue`) — needs implementation |
+
+### Approach A — Remaining Roadblocks (for reference)
+
+The subdivided element approach (subdivided `dispBeamColumn` + fiber sections + PDelta/Corotational) fails at the gravity stage even after fixing:
+
+- ✅ Missing `set_brace_selection()` call
+- ✅ `split_elements` conflict (`split_elements=False` now used)
+- ✅ Double subdivision on rebuild (inactive‑element check)
+- ✅ `forceBeamColumn` → `dispBeamColumn` element‑level fix
+- ✅ Node creation during rebuild (tracked via `_created_node_tags`)
+- ✅ Rigid‑link section parameter order (E/A swapped)
+- ❌ **Gravity convergence still fails** — subdivided `dispBeamColumn` elements with PDelta geometry cannot converge under ~7.5 MN of gravity load, even with 100 sub‑steps, no imperfection, NormUnbalance, and KrylovNewton.
+
+The root cause appears to be the shared‑node connectivity between subdivided braces and existing frame elements — the PDelta geometric stiffness contributions from multiple subdivided elements at the same node create an ill‑conditioned system matrix.
 
 Hovering over `ops.node(...)`, `ops.element(...)`, `ops.analyze(...)`, etc. will now show parameter names, types, and descriptions — and all false‑positive attribute‑access squiggles will disappear.
