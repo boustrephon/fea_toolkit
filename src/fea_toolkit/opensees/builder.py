@@ -2277,7 +2277,7 @@ class OpenSeesBuilder:
                         # Force = area × thickness × unit_weight × multiplier × mult
                         sw_per_area = thickness * mat.unit_weight
                         total_fz = sw_per_area * area_mag * agl.multiplier_z * mult
-                        mass = abs(total_fz) / g
+                        mass = total_fz / g
                         n_corners = len(area_elem.node_ids)
                         for nid in area_elem.node_ids:
                             node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_corners
@@ -3011,6 +3011,7 @@ class OpenSeesBuilder:
 
         mass_list = modal_props.get(mass_key, [0.0])
         ratio_list = modal_props.get(ratio_key, [0.0])
+        gamma_list = modal_props.get(gamma_key, [])
 
         # Find the mode with the highest mass participation in push direction
         best_mode = 0
@@ -3026,9 +3027,13 @@ class OpenSeesBuilder:
             free_mass = modal_props.get(total_mass_key, [0])
             M_eff = free_mass[0] if free_mass else 1.0
 
-        # For mass-normalised eigenvectors (extract_mode_shapes returns these),
-        # the participation factor Γ = √M_eff (since φᵀMφ = 1).
-        Gamma = math.sqrt(abs(M_eff))
+        # Use the actual participation factor from modal_props.
+        # Fall back to sqrt(M_eff) (which assumes mass-normalised eigenvectors)
+        # only when the factor is missing.
+        if gamma_list and best_mode < len(gamma_list) and abs(gamma_list[best_mode]) > 1e-12:
+            Gamma = gamma_list[best_mode]
+        else:
+            Gamma = math.sqrt(abs(M_eff))
 
         # Mode shape value at the control node (best mode)
         phi_control = 1.0
