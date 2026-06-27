@@ -62,6 +62,11 @@ The goal is to create a Python package `fea_toolkit` that:
 | **Unit Conversion** | ✅ Complete | `SectionLibrary` converts lengths, areas, inertias between `in` and `mm` based on catalogue metadata. |
 | **Visualisation (opsvis)** | ✅ Quick test | `basic_usage.py` can show line‑based model; extrusion not implemented. |
 | **Pytest Suite** | ✅ Passing | [170 tests](tests/README.md): dataclass construction, geometry utilities, section enrichment, modal analysis, pushover, CSM performance point, brace buckling, SciPy eigenvalue benchmark, parser integration, and edge cases. |
+| **Load Cases (SAP2000)** | ✅ Complete | `get_load_cases()` parses LOAD CASE DEFINITIONS, CASE - RESPONSE SPECTRUM (general + load assignments), CASE - MODAL, CASE - STATIC into `LoadCase.case_data`. |
+| **Auto Load Data** | ✅ Complete | AUTO SEISMIC and AUTO WIND tables are parsed and attached to `LoadPattern.auto_data`. |
+| **Material Damping** | ✅ Complete | Damping parameters from MATERIAL PROPERTIES 06 are captured in `Material.extra`. |
+| **Area Element Mass** | ✅ Complete | `compute_seismic_masses()` now includes area element self-weight and area gravity loads. |
+| **Brace Fatigue** | ✅ Complete | Optional `Fatigue` material wrapper for cyclic degradation (`brace_fatigue` config). |
 
 #### 3. Notable Design Decisions
 
@@ -74,6 +79,12 @@ The goal is to create a Python package `fea_toolkit` that:
 - **Modal & RS Analysis** – `run_modal_analysis()` uses `ops.eigen('-fullGenLapack', …)`. `run_response_spectrum_analysis()` and `extract_element_rs_forces()` call `ops.responseSpectrumAnalysis()` mode‑by‑mode and extract element forces via `ops.eleResponse(eid, 'forces')` (global system). CQC follows Der Kiureghian's formula. `add_missing_mass_correction()` computes the rigid response from residual mass at short‑period spectral acceleration.
 - **Brace buckling — two approaches** – The builder supports two buckling modelling strategies. **Approach A** (experimental) subdivides braces into segments with a sinusoidal imperfection and uses `Corotational` geometric transformation — has element-level convergence issues. **Approach B** (recommended) replaces braces with `Truss` elements using a `Hysteretic` material with asymmetric tension/compression. Approach B is numerically robust and captures directional asymmetry correctly. Controlled via `brace_type="truss"` (default) / `brace_type="beam"` (experimental).
 - **Configurable solver settings** – The builder's `run_static_analysis()` and `run_pushover_analysis()` read solver parameters from config: `solver_test_tol`, `solver_test_max_iter`, `solver_algorithm` (`'Newton'`, `'ModifiedNewton'`, `'NewtonLineSearch'`, `'KrylovNewton'`), and `gravity_num_substeps` for gravity load ramping.
+- **Brace fatigue** – Optional `Fatigue` material wrapper for cyclic degradation, controlled via `brace_fatigue`, `brace_fatigue_E0`, `brace_fatigue_m` config options.
+- **Pushover spectrum override** – The pushover/CSM analysis can use a different spectrum from the response spectrum analysis via `pushover.spectrum` in the CONFIG. Falls back to the top-level `spectrum` if not specified.
+- **Linear case auto-detection** – `run_linear_cases()` now reads LinStatic load cases from the SAP2000 model automatically. Users can override via `linear.cases` in the CONFIG.
+- **Mass computation includes area elements** – `compute_seismic_masses()` now includes area element self-weight and area gravity loads (MultiplierZ values). Previously only frame elements were included.
+- **Spectrum damping fix** – The GB50011 spectrum now applies the damping reduction factor `η₂` to the ascending branch (T ≤ 0.1s) as well as the plateau and descending branch, matching the reference `GB_spectrum()` function.
+- **SAP2000 data extraction** – The parser now extracts: load case definitions, response spectrum case data (general + load assignments), modal case data, AUTO seismic/wind table data, and material damping parameters.
 
 #### 4. Distributed Load Support by Element Type
 
@@ -330,11 +341,12 @@ Based on the OpenSees workshop examples (`Workshops/OpenSeesDays/Steel2dModels/`
 | Material | Use case | Cyclic degradation? | Fatigue? | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | **`Hysteretic`** (current) | Static pushover only | ❌ No | ❌ No | Simple backbone, no cycle‑to‑cycle change. Adequate for monotonic pushover only. |
-| **`Steel02` + `Fatigue`** | Cyclic dynamic | ✅ Yes (Bauschinger) | ✅ Yes (Coffin‑Manson) | **Preferred for dynamic analysis.** `Steel02` has isotropic hardening; wrap with `Fatigue` for low‑cycle fracture. Used in OpenSees Day CBF examples (`CBFbase.tcl`). |
-| **`BraceMaterial`** | Cyclic dynamic | ✅ Yes (damage) | ✅ Yes (energy‑based) | Specialised uniaxial brace model with pinching + damage. A modified version of `Hysteretic` by Filippou. Available in OpenSees source (`SRC/material/uniaxial/BraceMaterial.h`). |
-| **`Pinching4`** | Cyclic dynamic | ✅ Yes (degradation) | ❌ No | Four‑segment backbone with cyclic degradation and pinching. Good for braces where pinched hysteresis is important. |
+| **`Hysteretic` + `Fatigue`** | Cyclic dynamic | ❌ No (Hysteretic) | ✅ Yes (Coffin‑Manson) | **Implemented.** Wrap `Hysteretic` with `Fatigue` via `brace_fatigue=True`. Asymmetric buckling + low-cycle fracture. Recommended for dynamic analysis. |
+| **`Steel02` + `Fatigue`** | Cyclic dynamic | ✅ Yes (Bauschinger) | ✅ Yes (Coffin‑Manson) | Preferred for subdivided beam-column elements (fiber section buckling). Used in OpenSees Day CBF examples (`CBFbase.tcl`). Not suitable for truss approach (Steel02 is symmetric). |
+| **`BraceMaterial`** | Cyclic dynamic | ✅ Yes (damage) | ✅ Yes (energy‑based) | Specialised uniaxial brace model with pinching + damage. Not available in OpenSeesPy (tested). |
+| **`Pinching4`** | Cyclic dynamic | ✅ Yes (degradation) | ❌ No | Not available in OpenSeesPy with this version. |
 
-**Recommendation:** For nonlinear dynamic analysis, replace `Hysteretic` with **`Steel02` + `Fatigue`** (or `BraceMaterial` if available in OpenSeesPy).  The `Truss` element itself is fully dynamic‑capable.
+**Recommendation:** For nonlinear dynamic analysis with the truss approach, use **`Hysteretic` + `Fatigue`** (`brace_fatigue=True`).  For subdivided beam-column elements (if the convergence issue is resolved), use `Steel02` + `Fatigue`.
 
 #### Additional solver considerations for dynamics
 
