@@ -1,0 +1,64 @@
+{
+  "METADATA": [
+    {
+      "FileName": "area_test_model.$2k",
+      "DateSaved": "2026/06/28 12:00:00"
+    }
+  ],
+  "PROGRAM CONTROL": [
+    {
+      "ProgramName": "SAP2000",
+      "Version": "26.2.0",
+      "CurrUnits": "N, mm, C"
+    }
+  ],
+  "JOINT COORDINATES": [
+    {"Joint": 1, "XorR": 0.0, "Y": 0.0, "Z": 0.0},
+    {"Joint": 2, "XorR": 6000.0, "Y": 0.0, "Z": 0.0},
+    {"Joint": 3, "XorR": 6000.0, "Y": 4000.0, "Z": 0.0},
+    {"Joint": 4, "XorR": 0.0, "Y": 4000.0, "Z": 0.0},
+    {"Joint": 5, "XorR": 0.0, "Y": 0.0, "Z": 3000.0},
+    {"Joint": 6, "XorR": 6000.0, "Y": 0.0, "Z": 3000.0},
+    {"Joint": 7, "XorR": 6000.0, "Y": 4000.0, "Z": 3000.0},
+    {"Joint": 8, "XorR": 0.0, "Y": 4000.0, "Z": 3000.0},
+    {"Joint": 9, "XorR": 2000.0, "Y": 2000.0, "Z": 0.0},
+    {"Joint": 10, "XorR": 4000.0, "Y": 2000.0, "Z": 0.0}
+  ],
+  "JOINT RESTRAINT ASSIGNMENTS": [
+    {"Joint": 1, "U1": true, "U2": true, "U3": true, "R1": false, "R2": false, "R3": false},
+    {"Joint": 2, "U1": true, "U2": true, "U3": true, "R1": false, "R2": false, "R3": false},
+    {"Joint": 3, "U1": true, "U2": true, "U3": true, "R1": false, "R2": false, "R3": false},
+    {"Joint": 4, "U1": true, "U2": true, "U3": true, "R1": false, "R2": false, "R3": false}
+  ],
+  "MATERIAL PROPERTIES 01 - GENERAL": [
+    {"Material": "C30/37", "Type": "Concrete", "Grade": "C30/37"}
+  ],
+  "MATERIAL PROPERTIES 02 - BASIC MECHANICAL PROPERTIES": [
+    {"Material": "C30/37", "E1": 32800.0, "G12": 13667.0, "U12": 0.2, "UnitWeight": 2.5e-5, "UnitMass": 2.549e-9}
+  ],
+  "AREA SECTION PROPERTIES": [
+    {"Section": "Slab200", "Material": "C30/37", "MatAngle": 0, "AreaType": "Shell", "Type": "Shell-Thin", "Thickness": 200.0, "BendThick": 200.0},
+    {"Section": "Wall150", "Material": "C30/37", "MatAngle": 0, "AreaType": "Shell", "Type": "Shell-Thin", "Thickness": 150.0, "BendThick": 150.0}
+  ],
+  "AREA SECTION ASSIGNMENTS": [
+    {"Area": 1, "Section": "Slab200"},
+    {"Area": 2, "Section": "Slab200"},
+    {"Area": 3, "Section": "Wall150"},
+    {"Area": 4, "Section": "Wall150"}
+  ],
+  "CONNECTIVITY - AREA": [
+    {"Area": 1, "Joint1": 1, "Joint2": 2, "Joint3": 3, "Joint4": 4, "NumJoints": 4},
+    {"Area": 2, "Joint1": 5, "Joint2": 6, "Joint3": 7, "Joint4": 8, "NumJoints": 4},
+    {"Area": 3, "Joint1": 1, "Joint2": 5, "Joint3": 6, "Joint4": 2, "NumJoints": 4},
+    {"Area": 4, "Joint1": 1, "Joint2": 5, "Joint3": 8, "Joint4": 4, "NumJoints": 4}
+  ],
+  "CONNECTIVITY - FRAME": [
+    {"Frame": 1, "JointI": 9, "JointJ": 10, "IsCurved": false}
+  ],
+  "FRAME SECTION PROPERTIES 01 - GENERAL": [
+    {"SectionName": "UB300", "Material": "Steel", "Shape": "I/Wide Flange", "t3": 300.0, "t2": 150.0, "tf": 10.0, "tw": 6.0, "Area": 8000.0, "I33": 1.2e8, "I22": 4.0e7, "TorsConst": 2.0e6}
+  ],
+  "FRAME SECTION ASSIGNMENTS": [
+    {"Frame": 1, "AnalSect": "UB300"}
+  ]
+}

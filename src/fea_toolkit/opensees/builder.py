@@ -83,6 +83,9 @@ class OpenSeesBuilder:
             'geom_transf_type': 'Linear',
             'beam_integration': 'Lobatto',  # 'Lobatto' or 'HingeRadau'
             'simplify_distributed_loads': False,
+            'create_shells': False,          # Create shell elements for area elements
+                                             # Areas in the loads selection are still
+                                             # loads-only; all other areas become shells.
             'subdivide_braces': False,
             'brace_n_segments': 4,
             'brace_imperfection_ratio': 1.0/500.0,
@@ -121,18 +124,34 @@ class OpenSeesBuilder:
                 factor 1.0.
             selection: Optional :class:`Selection` to control which area loads
                 are converted to equivalent frame edge loads.  ``None`` means
-                all area loads are converted.
+                all area loads are converted (unless ``create_shells=True``,
+                in which case ``None`` means all areas become shells).
+
+            When ``config['create_shells']`` is ``True``, areas that **do not**
+            match this *selection* are turned into ``ShellMITC4`` elements.
+            Areas that **do** match remain loads‑only (their loads are converted
+            to frame edge loads, as before).
         """
         # Persist selection so re-builds (e.g. from run_static_analysis)
         # don't lose it.
         if selection is not None:
             self._area_selection = selection
 
+        create_shells = self.config.get('create_shells', False)
         if self.config['verbose']:
             print("Building OpenSees model...")
             print(f"  Element type: {self.config['element_type']}")
             # print(f"  Integration points: {self.config['num_int_pts']}")
             print(f"  Split elements: {self.config['split_elements']}")
+            if create_shells:
+                print(f"  Create shells: yes")
+                if selection is not None:
+                    n_sel = len(selection.get_area_ids(self.model))
+                    n_all = len(self.model.area_elements)
+                    print(f"  Area elements: {n_all} total, "
+                          f"{n_sel} loads‑only, {n_all - n_sel} shells")
+                else:
+                    print(f"  Area elements: all {len(self.model.area_elements)} → shells")
 
         ops.wipe()
         ops.model('basic', '-ndm', 3, '-ndf', 6)
@@ -148,6 +167,10 @@ class OpenSeesBuilder:
         
         # Convert area uniform loads to equivalent frame edge loads
         self._convert_area_loads(selection=selection)
+
+        # Create shell elements for areas not in the loads-only selection
+        if create_shells:
+            self._create_shell_elements(loads_only_selection=selection)
 
         self._create_elements()
         self._create_loads(pattern_scales=pattern_scales)
@@ -1289,11 +1312,15 @@ class OpenSeesBuilder:
             selection: Optional :class:`Selection` to restrict which areas
                 are converted.  Only area uniform loads on areas matching
                 the selection will be converted.  ``None`` means all
-                (unless a previous call persisted a selection via
-                :attr:`_area_selection`).
+                (unless ``create_shells=True``, in which case ``None``
+                means no areas are loads‑only — all become shells, so
+                no conversion occurs).
         """
-        # Fall back to persisted selection if none provided
+        # When shell mode is active, None selection → no loads converted
         if selection is None:
+            if self.config.get('create_shells', False):
+                self.edge_loads_from_areas = []
+                return
             selection = getattr(self, '_area_selection', None)
 
         if not self.model.area_uniform_loads:
@@ -1332,6 +1359,119 @@ class OpenSeesBuilder:
                   f"into {len(edge_loads)} frame edge loads")
 
     # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Shell element creation
+    # -------------------------------------------------------------------------
+    def _create_shell_elements(self,
+                               loads_only_selection: Optional[Selection] = None,
+                               ) -> None:
+        """Create ShellMITC4 elements for areas not in the loads-only selection.
+
+        Args:
+            loads_only_selection: Optional :class:`Selection` designating
+                which areas are loads‑only (their loads get converted to
+                frame edge loads).  Areas **not** matching this selection
+                are created as ``ShellMITC4`` elements.
+                ``None`` means **all** areas become shells.
+        """
+        if loads_only_selection is not None:
+            sel_area_ids = set(loads_only_selection.get_area_ids(self.model))
+        else:
+            sel_area_ids = set()
+
+        if self.config['verbose']:
+            print("Creating shell elements...")
+
+        # Track shell section tags (one per unique section name)
+        self._shell_sec_tags: Dict[str, int] = {}
+        next_sec_tag = (max(self.section_tags.values(), default=0) + 1
+                        if self.section_tags else 1)
+
+        shell_count = 0
+        for aid, area in self.model.area_elements.items():
+            # Skip areas in the loads-only selection
+            if aid in sel_area_ids:
+                continue
+
+            nids = area.node_ids
+            if len(nids) < 3:
+                continue
+
+            # Gather node tags
+            node_tags = []
+            skip = False
+            for nid in nids:
+                node = self.model.nodes.get(nid)
+                if node is None:
+                    skip = True
+                    break
+                node_tags.append(node.node_tag)
+            if skip:
+                continue
+
+            # Determine section and material
+            sec_name = self.model.area_assignments.get(aid, '')
+            if not sec_name or sec_name not in self.model.sections:
+                continue
+
+            sec = self.model.sections[sec_name]
+            mat = self.model.materials.get(sec.material)
+            if mat is None:
+                continue
+
+            # Create shell section on first use
+            if sec_name not in self._shell_sec_tags:
+                tag = next_sec_tag
+                next_sec_tag += 1
+                self._shell_sec_tags[sec_name] = tag
+                self._create_single_shell_section(sec, mat, tag)
+
+            sec_tag = self._shell_sec_tags[sec_name]
+
+            # Determine a unique element tag
+            elem_tag = (max(self.frame_tag_map.values(), default=0)
+                        + shell_count + 1)
+
+            # Create ShellMITC4 (quad) or ShellDKGT (tri) element
+            if len(nids) == 4:
+                ops.element('ShellMITC4', elem_tag, *node_tags, sec_tag)
+            elif len(nids) == 3:
+                # Degenerate quad by repeating the last node
+                ops.element('ShellMITC4', elem_tag,
+                            node_tags[0], node_tags[1], node_tags[2],
+                            node_tags[2], sec_tag)
+            else:
+                if self.config['verbose']:
+                    print(f"  Warning: area {aid} has {len(nids)} nodes, "
+                          f"skipping shell creation")
+                continue
+
+            shell_count += 1
+            if self.config['verbose'] and shell_count % 50 == 0:
+                print(f"  ... created {shell_count} shell elements")
+
+        if self.config['verbose']:
+            print(f"  Created {shell_count} shell elements "
+                  f"({len(self._shell_sec_tags)} shell sections)")
+
+    @staticmethod
+    def _create_single_shell_section(sec: Section, mat, tag: int) -> None:
+        """Create an elastic membrane plate section for a shell element.
+
+        Uses ``ops.section('ElasticMembranePlate', ...)`` with the
+        material's Young's modulus, Poisson's ratio, density, and the
+        section's thickness.
+        """
+        E_mod = mat.E_mod if mat.E_mod and mat.E_mod > 0 else 3.0e10
+        nu = mat.nu if mat.nu is not None and mat.nu > 0 else 0.2
+        thickness = getattr(sec, 'thickness', 0.0)
+        rho = mat.unit_mass if mat.unit_mass and mat.unit_mass > 0 else 0.0
+
+        if thickness <= 0.0:
+            thickness = 1.0  # fallback
+
+        ops.section('ElasticMembranePlate', tag, E_mod, nu, thickness, rho)
+
     # Analysis
     # -------------------------------------------------------------------------
     def run_static_analysis(self, 
