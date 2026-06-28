@@ -390,3 +390,38 @@ The subdivided element approach (subdivided `dispBeamColumn` + fiber sections + 
 The root cause appears to be the shared‑node connectivity between subdivided braces and existing frame elements — the PDelta geometric stiffness contributions from multiple subdivided elements at the same node create an ill‑conditioned system matrix.
 
 Hovering over `ops.node(...)`, `ops.element(...)`, `ops.analyze(...)`, etc. will now show parameter names, types, and descriptions — and all false‑positive attribute‑access squiggles will disappear.
+
+---
+
+## Refactoring Roadmap
+
+The following items are the highest-impact improvements identified during a codebase-wide review:
+
+### High Priority
+
+1. **Create `fea_toolkit/spectrum.py`**
+   Extract `_gb50011_spectrum()`, `_build_spectrum()`, `_interp_sa()`, and `plot_seismic_spectrum()` from `local/pumphouse_report.py` into a new reusable module. Then refactor `builder.py` to use these shared functions instead of computing gamma/η₁/η₂ inline in `run_pushover_analysis()` and `pushover_to_adrs()`.
+
+2. **Create `fea_toolkit/io/report.py`**
+   Move the generic SAP2000→pandas summary functions (`summarise_load_cases`, `summarise_load_patterns`, `summarise_mass_sources`, `load_pattern_totals`, `section_summary`, `area_section_summary`, `material_summary`, `modal_table`, `modal_table_enhanced`, `format_linear_table`, `bounding_box`) out of `local/pumphouse_report.py`. This shrinks the 2,177-line report module by ~50 % and makes the utilities importable by any project.
+
+3. **Create `fea_toolkit/utils.py`**
+   Extract `_deep_merge()`, `_infer_loads()`, `_build_gravity_patterns()`, `_pick_wind()`, and `brace_buckling_check()` from `pumphouse_report.py`. The Euler buckling check is an analytical computation independent of OpenSees and should be importable without a builder instance.
+
+### Medium Priority
+
+4. **Create `fea_toolkit/plotting/report.py`**
+   Move `plot_pushover_curves()`, `plot_modal_participation()`, `plot_rs_modal_analysis()`, and `plot_csm_4panel()` from `pumphouse_report.py` into the plotting subpackage alongside the existing `viz.py`.
+
+5. **Split `builder.py` (3,306 lines)**
+   `OpenSeesBuilder` is a single class handling model construction, element creation, loads, pushover, modal analysis, response spectrum, CQC, mass computation, ADRS conversion, and CSM performance points. Extract analysis methods into focused modules:
+   - `opensees/analysis.py` — `run_static_analysis`, `run_pushover_analysis`, `run_modal_analysis`, `run_response_spectrum_analysis`, `extract_element_rs_forces`, etc.
+   - `opensees/csm.py` — `pushover_to_adrs`, `compute_performance_point`
+   - `opensees/builder.py` — keep model construction (`build`, `_create_nodes`, `_create_sections`, `_create_elements`, `_create_loads`, `compute_seismic_masses`)
+
+6. **Add unit tests**
+   Critical paths with zero coverage: `compute_seismic_masses()` area-element paths, truss brace pushover (Approach B), response spectrum CQC combination, ADRS conversion, CSM performance point iteration, and all extracted `spectrum.py` / `io/report.py` functions.
+
+### Completed
+
+- ✅ **Deleted stale files**: `src/fea_toolkit/opensees/builder_ss.py` and `src/fea_toolkit/model/geometry_ss.py` — old versions, never imported anywhere.

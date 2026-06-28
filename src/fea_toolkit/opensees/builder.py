@@ -2275,8 +2275,10 @@ class OpenSeesBuilder:
                         if area_mag < 1e-12:
                             continue
                         # Force = area × thickness × unit_weight × multiplier × mult
+                        # abs(multiplier) on the load direction; sign from mult
+                        # (MASS SOURCE multiplier) decides inclusion/exclusion.
                         sw_per_area = thickness * mat.unit_weight
-                        total_fz = sw_per_area * area_mag * agl.multiplier_z * mult
+                        total_fz = sw_per_area * area_mag * abs(agl.multiplier_z) * mult
                         mass = total_fz / g
                         n_corners = len(area_elem.node_ids)
                         for nid in area_elem.node_ids:
@@ -2809,15 +2811,19 @@ class OpenSeesBuilder:
         dof = {'X': 1, 'Y': 2, 'Z': 3}[direction]
         dof_idx = dof - 1  # 0‑based for the result tuple
 
-        # Get participation factors from modalProperties
+        # Get participation factors from modalProperties.
+        # nodeEigenvector returns mass-normalised eigenvectors (φᵀMφ = 1),
+        # so the correct participation factor is Γ = √M_eff.
+        # partiFactorMX from '-unorm' uses unit-max normalisation and is
+        # incompatible with mass-normalised eigenvectors.
         try:
             mp = ops.modalProperties('-return', '-unorm')
         except Exception:
             mp = {}
-        gamma_all = mp.get('partiFactorMX' if direction == 'X'
-                           else 'partiFactorMY' if direction == 'Y'
-                           else 'partiFactorMZ',
-                           [0.0] * num_modes)
+        mass_key = ('partiMassMX' if direction == 'X'
+                    else 'partiMassMY' if direction == 'Y'
+                    else 'partiMassMZ')
+        eff_masses = mp.get(mass_key, [0.0] * num_modes)
 
         omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods]
         damp = [damping_ratio] * num_modes
@@ -2837,7 +2843,8 @@ class OpenSeesBuilder:
 
             T = modal_periods[m]
             Sa = spectrum_func(T)           # m/s²
-            factor = gamma_all[m] * Sa / (omega[m] ** 2)
+            Gamma = math.sqrt(abs(eff_masses[m])) if eff_masses[m] != 0 else 0.0
+            factor = Gamma * Sa / (omega[m] ** 2)
 
             if abs(factor) < 1e-15:
                 for tag in node_tags:
@@ -3011,7 +3018,9 @@ class OpenSeesBuilder:
 
         mass_list = modal_props.get(mass_key, [0.0])
         ratio_list = modal_props.get(ratio_key, [0.0])
-        gamma_list = modal_props.get(gamma_key, [])
+        gamma_list = modal_props.get(gamma_key, [])  # partiFactor* — from -unorm;
+                                                       # not directly usable with
+                                                       # mass-normalised eigenvectors
 
         # Find the mode with the highest mass participation in push direction
         best_mode = 0
@@ -3027,13 +3036,12 @@ class OpenSeesBuilder:
             free_mass = modal_props.get(total_mass_key, [0])
             M_eff = free_mass[0] if free_mass else 1.0
 
-        # Use the actual participation factor from modal_props.
-        # Fall back to sqrt(M_eff) (which assumes mass-normalised eigenvectors)
-        # only when the factor is missing.
-        if gamma_list and best_mode < len(gamma_list) and abs(gamma_list[best_mode]) > 1e-12:
-            Gamma = gamma_list[best_mode]
-        else:
-            Gamma = math.sqrt(abs(M_eff))
+        # Participation factor for mass-normalised eigenvectors.
+        # nodeEigenvector returns mass-normalised eigenvectors (φᵀMφ = 1),
+        # so the participation factor Γ = √M_eff.
+        # partiFactorMX from modalProperties('-return', '-unorm') uses
+        # unit-max normalisation and cannot be used directly here.
+        Gamma = math.sqrt(abs(M_eff))
 
         # Mode shape value at the control node (best mode)
         phi_control = 1.0
