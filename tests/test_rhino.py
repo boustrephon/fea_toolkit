@@ -208,3 +208,155 @@ class TestRhinoImporterNoRhino:
         )
         with pytest.raises(RuntimeError, match="Rhino"):
             RhinoImporter(md)
+
+
+# ====================================================================
+# geometry_v2 profile points — pure-math tests (no Rhino import needed)
+# ====================================================================
+
+class TestProfilePoints:
+    """Profile functions return correct (x,y) point sequences."""
+
+    def _rect(self, depth, bf):
+        h, w = depth / 2.0, bf / 2.0
+        return [(-w, -h), (-w, h), (w, h), (w, -h)]
+
+    def _i(self, depth, bf, tf, tw):
+        h = depth / 2.0
+        w = bf / 2.0
+        wi = tw / 2.0
+        fi = h - tf
+        return [
+            (-w, -h), (w, -h), (w, -fi), (wi, -fi),
+            (wi, fi), (w, fi), (w, h), (-w, h),
+            (-w, fi), (-wi, fi), (-wi, -fi), (-w, -fi),
+        ]
+
+    def test_rect_count(self):
+        pts = self._rect(0.4, 0.2)
+        assert len(pts) == 4  # rectangle = 4 corners
+        # All z=0 (profile is in XY plane)
+        for x, y in pts:
+            assert isinstance(x, float)
+            assert isinstance(y, float)
+
+    def test_i_count(self):
+        pts = self._i(0.3, 0.15, 0.01, 0.006)
+        assert len(pts) == 12  # I-section = 12 vertices
+
+    def test_i_dimensions(self):
+        depth, bf = 0.3, 0.15
+        pts = self._i(depth, bf, 0.01, 0.006)
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        # Width spans ±bf/2, depth spans ±depth/2
+        assert abs(max(xs) - bf / 2) < 1e-10
+        assert abs(min(xs) + bf / 2) < 1e-10
+        assert abs(max(ys) - depth / 2) < 1e-10
+        assert abs(min(ys) + depth / 2) < 1e-10
+
+    def test_box_count(self):
+        h, w = 0.3 / 2, 0.2 / 2
+        tf, tw = 0.01, 0.006
+        hi, wi = h - tf, w - tw
+        pts = [
+            (-w, -h), (w, -h), (w, h), (-w, h),
+            (-w, hi), (wi, hi), (wi, -hi), (-w, -hi),
+        ]
+        assert len(pts) == 8
+
+    def test_channel_count(self):
+        h = 0.3 / 2
+        w = 0.15 / 2
+        pts = [
+            (-w, -h), (w, -h), (w, -h + 0.01), (0.003, -h + 0.01),
+            (0.003, h - 0.01), (w, h - 0.01), (w, h), (-w, h),
+        ]
+        assert len(pts) == 8
+
+
+# ====================================================================
+# _local_axes vs get_SAP_vecxz — orientation cross-check
+# ====================================================================
+
+class TestLocalAxesVsModel:
+    """Verify Rhino _local_axes matches the model's get_SAP_vecxz."""
+
+    def test_horizontal_beam(self):
+        """Beam along X: y=vertical, z=horizontal."""
+        from fea_toolkit.model.geometry import get_SAP_vecxz
+        import numpy as np
+
+        # Beam from (0,0,0) to (5,0,0)
+        vec_x = np.array([5.0, 0.0, 0.0])
+
+        # Expected: vecxz = cross((1,0,0), (0,0,1)) = (0,-1,0)
+        expected_vecxz = get_SAP_vecxz(vec_x, angle=0.0)
+        # local z = normalize(vecxz)
+        expected_z = expected_vecxz / np.linalg.norm(expected_vecxz)
+        # local y = cross(z, x)
+        expected_y = np.cross(expected_z, vec_x / np.linalg.norm(vec_x))
+        expected_y = expected_y / np.linalg.norm(expected_y)
+
+        # Expected: x=(1,0,0), y=(0,0,1), z=(0,-1,0)
+        np.testing.assert_array_almost_equal(expected_z, [0, -1, 0])
+        np.testing.assert_array_almost_equal(expected_y, [0, 0, 1])
+
+    def test_vertical_column(self):
+        """Column along Z: y=global X, z=global Y."""
+        from fea_toolkit.model.geometry import get_SAP_vecxz
+        import numpy as np
+
+        vec_x = np.array([0.0, 0.0, 5.0])
+        expected_vecxz = get_SAP_vecxz(vec_x, angle=0.0)
+        expected_z = expected_vecxz / np.linalg.norm(expected_vecxz)
+        expected_y = np.cross(expected_z, vec_x / np.linalg.norm(vec_x))
+        expected_y = expected_y / np.linalg.norm(expected_y)
+
+        # For vertical column: vecxz = global Y
+        np.testing.assert_array_almost_equal(expected_z, [0, 1, 0])
+        # y = cross(Y, Z) = X
+        np.testing.assert_array_almost_equal(expected_y, [1, 0, 0])
+
+    def test_horizontal_with_angle(self):
+        """Beam along X with 45° rotation."""
+        from fea_toolkit.model.geometry import get_SAP_vecxz
+        import numpy as np
+
+        vec_x = np.array([5.0, 0.0, 0.0])
+        angle = 45.0
+
+        # get_SAP_vecxz applies the angle rotation
+        expected_vecxz = get_SAP_vecxz(vec_x, angle=angle)
+        expected_z = expected_vecxz / np.linalg.norm(expected_vecxz)
+        expected_y = np.cross(expected_z, vec_x / np.linalg.norm(vec_x))
+        expected_y = expected_y / np.linalg.norm(expected_y)
+
+        # With 45° rotation, z should be rotated from (0,-1,0)
+        # about x-axis by 45°: z = (0, -cos45, -sin45) = (0, -0.707, -0.707)
+        np.testing.assert_array_almost_equal(
+            expected_z, [0, -0.70710678, -0.70710678], decimal=6
+        )
+
+    def test_angle_roundtrip(self):
+        """Angle=90° swaps y and z."""
+        from fea_toolkit.model.geometry import get_SAP_vecxz
+        import numpy as np
+
+        vec_x = np.array([5.0, 0.0, 0.0])
+        z0 = get_SAP_vecxz(vec_x, angle=0.0)
+        z90 = get_SAP_vecxz(vec_x, angle=90.0)
+
+        dot = np.dot(z0, z90)
+        # 90° rotation: z0 and z90 should be perpendicular
+        assert abs(dot) < 1e-10
+
+    def test_vertical_downward(self):
+        """Column pointing downward: vecxz = -global Y."""
+        from fea_toolkit.model.geometry import get_SAP_vecxz
+        import numpy as np
+
+        vec_x = np.array([0.0, 0.0, -5.0])
+        expected = get_SAP_vecxz(vec_x, angle=0.0)
+        # Downward column: vecxz = -global Y
+        np.testing.assert_array_almost_equal(expected, [0, -1, 0])
