@@ -1,19 +1,30 @@
 # fea_toolkit
-A toolkit for importing and exporting FEA information
+
+A toolkit for importing, analysing, and visualising structural
+engineering models.  Parses SAP2000 (`.s2k` / JSON), builds OpenSees
+models for structural analysis, and exports to Rhino 3-D for
+visualisation and Grasshopper workflows.
 
 
-## Project Summary: SAP2000 → OpenSees Converter
+## Project Summary
 
 ### Overview
 
 The goal is to create a Python package `fea_toolkit` that:
 
-- Parses SAP2000 `.s2k` text files (and eventually ETABS) into a common intermediate data model.
+- Parses SAP2000 `.s2k` text files (and JSON exports) into a common
+  intermediate data model (`SAPModelData`).
 - Enriches section properties using a manufacturer database.
-- Splits frame elements at joints (and optionally at frame intersections) with parent‑child tracking.
-- Splits distributed loads (uniform, linear, trapezoidal) to match the sub‑elements.
-- Builds OpenSees models with configurable element types (`elasticBeamColumn`, `forceBeamColumn`, etc.), applies loads, and runs linear static analysis (modal, pushover, and time‑history are planned).
-- Exports to Rhino for visualisation (via a separate module).
+- Splits frame elements at joints (and optionally at frame intersections)
+  with parent‑child tracking.
+- Splits distributed loads (uniform, linear, trapezoidal) to match the
+  sub‑elements.
+- Builds OpenSees models with configurable element types
+  (`elasticBeamColumn`, `forceBeamColumn`, etc.), applies loads, and runs
+  **linear static**, **modal**, **response spectrum**, and **pushover**
+  analysis.
+- **Exports to Rhino 8** for 3-D visualisation with lightweight extrusion
+  solids, section-based layers, and FEA metadata for Grasshopper.
 
 ---
 
@@ -36,7 +47,13 @@ The goal is to create a Python package `fea_toolkit` that:
 │   │   └── geometry.py       # SpatialGrid, point_on_segment, trapezoidal_force_split, split_elements (joint splitting + load redistribution)
 │   ├── opensees/
 │   │   └── builder.py        # OpenSeesBuilder: creates nodes, restraints, sections, splits elements, builds elements, applies loads (using relative positions), runs linear static analysis
-│   └── rhino/                # Rhino visualisation (placeholder – to be refactored)
+│   └── rhino/
+│       ├── __init__.py       # Public API (RhinoImporter)
+│       ├── colors.py         # SAP2000 colour conversion
+│       ├── groups.py         # Rhino group creation
+│       ├── importer.py       # Main RhinoImporter orchestrator
+│       ├── layers.py         # Section-based layer hierarchy
+│       └── geometry.py       # Centreline + extrusion geometry
 ├── tests/                    # pytest suite — [`tests/README.md`](tests/README.md)
 ├── pyproject.toml
 └── README.md
@@ -57,11 +74,20 @@ The goal is to create a Python package `fea_toolkit` that:
 | **Element‑Level RS Forces** | ✅ Complete | `extract_element_rs_forces()` — CQC‑combined moments/shears per element, sorted by elevation.
 | **Missing Mass Correction** | ✅ Complete | `add_missing_mass_correction()` — rigid response from residual modal mass, adds to CQC base shear/moment.
 | **Seismic Masses** | ✅ Complete | `compute_seismic_masses()` — lumps element self‑weight and load‑based masses per MASS SOURCE (Elements/Loads flags). |
+| **Rhino Export** | ✅ Complete | Centreline + lightweight Extrusion geometry with section profiles, section-based layers, UserString metadata, groups. See [`docs/rhino_export.md`](docs/rhino_export.md). |
+| **Frame Member Types (Steel)** | ✅ Complete | All steel section shapes (I, Box, Pipe, Channel, Angle, etc.) with `Steel01` fiber sections or elastic sections. |
+| **Frame Member Types (RC)** | ⚠️ Partial | Concrete materials and section shapes supported; rebar auto-placement and confined concrete planned. See [`docs/pushover_analysis.md`](docs/pushover_analysis.md). |
+| **Brace Buckling (Approach A)** | ✅ Implemented | Subdivided element with imperfection + `Corotational`. |
+| **Brace Buckling (Approach B)** | ✅ Implemented | Truss + `Hysteretic` material — robust for pushover. |
+| **Brace Fatigue** | ✅ Implemented | `Fatigue` material wrapper for cyclic degradation. |
 | **Load Handling** | ✅ Complete | Supports uniform and linear/trapezoidal distributed loads with global direction (gravity, X, Y, Z); projects onto local axes using `get_SAP_vecxz`; handles split loads. |
 | **Parent‑Child Tracking** | ✅ Complete | Each split element stores `parent_id`, `child_ids`, `t_locations`; inactive flag prevents building of parent. |
 | **Unit Conversion** | ✅ Complete | `SectionLibrary` converts lengths, areas, inertias between `in` and `mm` based on catalogue metadata. |
-| **Visualisation (opsvis)** | ✅ Quick test | `basic_usage.py` can show line‑based model; extrusion not implemented. |
-| **Pytest Suite** | ✅ Passing | [170 tests](tests/README.md): dataclass construction, geometry utilities, section enrichment, modal analysis, pushover, CSM performance point, brace buckling, SciPy eigenvalue benchmark, parser integration, and edge cases. |
+| **Rhino 3-D Export** | ✅ Complete | Full Rhino 8 module (`fea_toolkit.rhino`): centreline geometry (points/lines/Breps) and lightweight Extrusion solids (I/Box/Pipe/Channel/Rect/Circular) with section-based layers, FEA metadata (UserStrings), SAP group → Rhino group mapping, and joint colour-coding by restraint. See [`docs/rhino_export.md`](docs/rhino_export.md). |
+| **Brace Buckling (Approach A)** | ✅ Implemented | Subdivided element with sinusoidal imperfection + `Corotational` geometry. Converges for pushover with HingeRadau integration. |
+| **Brace Buckling (Approach B)** | ✅ Implemented | Truss element with `Hysteretic` material (asymmetric tension/compression) — numerically robust. |
+| **Brace Fatigue** | ✅ Implemented | Optional `Fatigue` material wrapper for cyclic degradation. |
+| **Pytest Suite** | ✅ Passing | [211 tests](tests/README.md): dataclass construction, geometry utilities, section enrichment, modal/RS/pushover analysis, CSM, brace buckling (Euler + eigenvalue FEA benchmark), parser, Rhino colour + layer utilities. |
 | **Load Cases (SAP2000)** | ✅ Complete | `get_load_cases()` parses LOAD CASE DEFINITIONS, CASE - RESPONSE SPECTRUM (general + load assignments), CASE - MODAL, CASE - STATIC into `LoadCase.case_data`. |
 | **Auto Load Data** | ✅ Complete | AUTO SEISMIC and AUTO WIND tables are parsed and attached to `LoadPattern.auto_data`. |
 | **Material Damping** | ✅ Complete | Damping parameters from MATERIAL PROPERTIES 06 are captured in `Material.extra`. |
