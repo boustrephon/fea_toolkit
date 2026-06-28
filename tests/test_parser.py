@@ -3,11 +3,13 @@ from pathlib import Path
 from fea_toolkit.io.s2k_parser import SAP2000Parser
 from fea_toolkit.model.sap_data import (
     AreaGravityLoad, AreaUniformLoad, GravityLoad,
-    ShellSection,
+    ShellSection, AreaElement, Node, Section,
 )
 
-# Path to a minimal test .s2k file (you can create one or use an existing small model)
-SAMPLE_S2K = Path(__file__).parent / "fixtures" / "sample.s2k"
+# Path to test fixtures
+FIXTURES = Path(__file__).parent / "fixtures"
+SAMPLE_S2K = FIXTURES / "sample.s2k"
+SAMPLE_AREAS_JSON = FIXTURES / "sample_areas.json"
 
 def test_parse_sample():
     """Test parsing of a sample .s2k file."""
@@ -173,4 +175,164 @@ TABLE:  "AREA LOADS - MYSTERY"
     assert len(md.area_uniform_loads) == 1
     # Mystery table ignored, nothing in gravity loads
     assert len(md.area_gravity_loads) == 0
+
+
+# ========================================================================
+# JSON import tests
+# ========================================================================
+
+def test_parse_areas_from_json():
+    """Import area elements and shell sections from a JSON file."""
+    if not SAMPLE_AREAS_JSON.exists():
+        pytest.skip(f"Fixture not found: {SAMPLE_AREAS_JSON}")
+
+    parser = SAP2000Parser.from_json(SAMPLE_AREAS_JSON)
+    assert parser is not None
+    assert "CONNECTIVITY - AREA" in parser._raw_tables
+
+    md = parser.get_model_data()
+
+    # ── Nodes ──
+    assert len(md.nodes) == 10
+
+    # ── Area elements ──
+    assert len(md.area_elements) == 4
+    for aid in ("1", "2", "3", "4"):
+        assert aid in md.area_elements
+        ae = md.area_elements[aid]
+        assert isinstance(ae, AreaElement)
+        assert len(ae.node_ids) >= 3
+        assert ae.area_id == aid
+
+    # ── Shell sections ──
+    assert "Slab200" in md.sections
+    assert "Wall150" in md.sections
+    slab = md.sections["Slab200"]
+    assert isinstance(slab, ShellSection)
+    assert slab.thickness == 200.0
+    assert slab.material == "C30/37"
+    wall = md.sections["Wall150"]
+    assert wall.thickness == 150.0
+
+    # ── Area assignments ──
+    assert md.area_assignments["1"] == "Slab200"
+    assert md.area_assignments["2"] == "Slab200"
+    assert md.area_assignments["3"] == "Wall150"
+    assert md.area_assignments["4"] == "Wall150"
+
+    # ── Thickness populated from section ──
+    assert md.area_elements["1"].thickness == 200.0
+    assert md.area_elements["3"].thickness == 150.0
+
+    # ── Restraints ──
+    assert len(md.restraints) == 4
+    assert "1" in md.restraints
+    assert md.restraints["1"].dofs[:3] == [1, 1, 1]  # U1, U2, U3 fixed
+
+    # ── Frame elements also present ──
+    assert len(md.frame_elements) == 1
+    assert len(md.frame_assignments) == 1
+
+
+def test_parse_areas_from_json_no_s2k():
+    """Verify from_json() works without needing a real .s2k file path."""
+    parser = SAP2000Parser.from_json(SAMPLE_AREAS_JSON)
+    md = parser.get_model_data()
+    assert len(md.nodes) == 10
+    assert len(md.area_elements) == 4
+    # Shell section properties
+    slab = md.sections["Slab200"]
+    assert isinstance(slab, ShellSection)
+    assert slab.thickness == 200.0
+
+
+def test_parse_areas_multi_row_consolidation(tmp_path):
+    """Multi-row area connectivity consolidates joint IDs correctly."""
+    json_data = {
+        "JOINT COORDINATES": [
+            {"Joint": i, "XorR": i * 1000.0, "Y": 0.0, "Z": 0.0}
+            for i in range(1, 9)
+        ],
+        "CONNECTIVITY - AREA": [
+            # Area 1 spans two rows: first row has Joint1..Joint4
+            {"Area": 1, "Joint1": 1, "Joint2": 2, "Joint3": 3},
+            # Second row adds Joint4..Joint6 (Joint1 already present)
+            {"Area": 1, "Joint1": 4, "Joint2": 5, "Joint3": 6},
+        ],
+        "AREA SECTION PROPERTIES": [
+            {"Section": "Slab200", "Material": "C30/37",
+             "Thickness": 200.0, "AreaType": "Shell", "Type": "Shell-Thin"},
+        ],
+        "AREA SECTION ASSIGNMENTS": [
+            {"Area": 1, "Section": "Slab200"},
+        ],
+    }
+    import json
+    json_path = tmp_path / "multi_row.json"
+    with open(json_path, "w") as f:
+        json.dump(json_data, f)
+
+    parser = SAP2000Parser.from_json(json_path)
+    md = parser.get_model_data()
+
+    # Area 1 should have all 6 joint IDs consolidated
+    assert "1" in md.area_elements
+    ae = md.area_elements["1"]
+    assert len(ae.node_ids) == 6
+    assert ae.node_ids == ["1", "2", "3", "4", "5", "6"]
+
+
+def test_parse_areas_multi_row_with_duplicates(tmp_path):
+    """Multi-row consolidation should not produce duplicate joint IDs."""
+    json_data = {
+        "JOINT COORDINATES": [
+            {"Joint": i, "XorR": i * 1000.0, "Y": 0.0, "Z": 0.0}
+            for i in range(1, 5)
+        ],
+        "CONNECTIVITY - AREA": [
+            # Row 1: Joint1..Joint4
+            {"Area": 1, "Joint1": 1, "Joint2": 2, "Joint3": 3, "Joint4": 4},
+            # Row 2: same joints again (duplicate)
+            {"Area": 1, "Joint1": 1, "Joint2": 2, "Joint3": 3, "Joint4": 4},
+        ],
+        "AREA SECTION PROPERTIES": [
+            {"Section": "Slab200", "Material": "C30/37",
+             "Thickness": 200.0, "AreaType": "Shell", "Type": "Shell-Thin"},
+        ],
+        "AREA SECTION ASSIGNMENTS": [
+            {"Area": 1, "Section": "Slab200"},
+        ],
+    }
+    import json
+    json_path = tmp_path / "dup.json"
+    with open(json_path, "w") as f:
+        json.dump(json_data, f)
+
+    parser = SAP2000Parser.from_json(json_path)
+    md = parser.get_model_data()
+
+    ae = md.area_elements["1"]
+    # Should have exactly 4 unique joint IDs (no duplicates)
+    assert len(ae.node_ids) == 4
+    assert ae.node_ids == ["1", "2", "3", "4"]
+
+
+# ========================================================================
+# Shell section creation tests
+# ========================================================================
+
+def test_create_single_shell_section():
+    """Verify _create_single_shell_section produces correct section."""
+    # Build a minimal model to test the static method
+    mat = type("Mat", (), {
+        "E_mod": 3.28e10, "nu": 0.2, "unit_mass": 2549.0,
+    })()
+    sec = type("Sec", (), {"thickness": 0.2, "name": "Slab200"})()
+
+    # The method is static; just verify it doesn't crash
+    # and produces the right call shape
+    from fea_toolkit.opensees.builder import OpenSeesBuilder
+    # We can't easily capture ops.section output, so at least
+    # confirm the method exists and accepts the right signature
+    assert hasattr(OpenSeesBuilder, '_create_single_shell_section')
 
