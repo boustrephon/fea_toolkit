@@ -598,6 +598,98 @@ builder.check_brace_buckling(K=1.0)
 | ``λ`` | Slenderness ratio :math:`KL/r`. Above 100 → Euler buckling governs. Below 30 → yielding governs. |
 | ``P_cr`` | Euler critical load. Compare against expected brace force from gravity + lateral loads. |
 
+---
+
+## Frame Member Types
+
+The builder treats all frame elements uniformly through the configured
+section and material types.  The behaviour depends on the **element
+type**, **section type**, and **material properties**, not on any
+explicit "beam" / "column" / "brace" flag.
+
+### Steel Members
+
+Steel members are the primary target and are fully supported.
+
+**Section types:**
+
+| Shape | OpenSees section | Notes |
+|---|---|---|
+| I/Wide Flange | `Elastic` or `Fiber` (`Steel01`) | Beam-columns, girders |
+| Box/Tube | `Elastic` or `Fiber` (`Steel01`) | Columns, braces |
+| Pipe (CHS) | `Elastic` or `Fiber` (`Steel01`) | Braces, columns |
+| Channel | `Elastic` or `Fiber` (`Steel01`) | Purlins, girts |
+| Angle / Double Angle | `Elastic` or `Fiber` (`Steel01`) | Braces, bracing |
+| Tee | `Elastic` or `Fiber` (`Steel01`) | Secondary members |
+| Rectangular / Plate | `Elastic` only | Stiffeners, plates |
+
+**Behaviour with fiber sections:**
+- `create_fiber_sections=True` — creates `Steel01` uniaxial material with
+  $F_y$ from `Material.Fy`, $E$ from `Material.E_mod`, and 1 % strain
+  hardening.  Fibre patches are generated via `Section.to_fiber_patches()`.
+- Yielding spreads through the cross-section (I‑section: flanges yield
+  first, then web).
+- HingeRadau integration concentrates plasticity at element ends.
+
+**Buckling (braces):**
+- Steel braces can be modelled with Approach A (subdivided + imperfection)
+  or Approach B (truss + Hysteretic material with compression degradation).
+- See the [Brace Modelling](#brace-modelling) section above.
+
+### Concrete Members (Reinforced) — Planned
+
+Support for reinforced concrete (RC) sections is **planned** but not yet
+fully implemented.  The following describes the intended design and
+current limitations.
+
+**Current status:**
+
+| Capability | Status | Notes |
+|---|---|---|
+| Concrete materials (`Concrete01`) | ✅ Implemented | `Material.type == "Concrete"` triggers `Concrete01` material in fiber sections |
+| RC section shapes (Rect, Circle) | ✅ Implemented | `RectangularSection`, `CircularSection` with `to_fiber_patches()` |
+| RC beam/column fibre sections | ⚠️ Partial | Patches use a single concrete material — rebar layers not yet implemented |
+| Rebar material (`Steel01`) | ✅ Available | `Steel01` can be used for rebar, but automatic rebar placement in sections is not coded |
+| Confined concrete (Mander, etc.) | ❌ Not implemented | Only unconfined `Concrete01` |
+| Nonlinear beam-column behaviour | ✅ Implemented | Via fiber sections with `forceBeamColumn` + `Lobatto` integration |
+| Shear failure modelling | ❌ Not implemented | Not available in standard OpenSees beam-column elements |
+| Bond-slip | ❌ Not implemented | Requires `beamWithHinges` or `bond_sp01` material |
+
+**How RC sections work today:**
+
+```python
+from fea_toolkit.model.sap_data import RectangularSection
+
+# An RC section from SAP2000
+section = RectangularSection(
+    name="C400x400",
+    shape="Concrete Rectangular",
+    material="C30/37",
+    A=0.16, I33=2.13e-3, I22=2.13e-3,
+    depth=0.4, bf=0.4,
+)
+```
+
+When `create_fiber_sections=True`, the builder creates:
+- A `Concrete01` uniaxial material (if `Material.type == "Concrete"`)
+  with `Fc` and `epsc0` from `Material.Fc` and `Material.eFc`.
+- A `Steel01` material for longitudinal rebar *(not yet auto-placed)*.
+
+**Planned enhancements (roadmap):**
+
+1. **Rebar layer placement** — automatic generation of rebar fibres
+   within rectangular and circular sections, with configurable cover
+   and bar diameter.
+2. **Confined concrete** — Mander or Chang-Mander model for core
+   concrete, with unconfined cover concrete.
+3. **PM interaction** — axial‑flexural interaction checks using the
+   fiber section's P‑M diagram.
+4. **Shear springs** — zero‑length shear spring elements at member
+   ends with degrading backbone (ASCE 41).
+
+**Contributions welcome** — see the ``model/sap_data.py`` section
+hierarchy for the extension points.
+
 ### With demand data — the full picture
 
 Run a quick linear static analysis first to get axial forces, then
