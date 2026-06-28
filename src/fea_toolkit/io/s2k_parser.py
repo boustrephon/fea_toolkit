@@ -458,26 +458,50 @@ class SAP2000Parser:
         return elements
 
     def _get_area_elements(self) -> Dict[str, AreaElement]:
-        areas = {}
-        tag = 1
+        """Extract area elements from CONNECTIVITY - AREA table.
+
+        Handles both:
+        - **Single-row format** (newer SAP2000): all joints for an area in one row.
+        - **Multi-row format** (older SAP2000): one area's joints may span
+          multiple rows (e.g. Joint1..Joint4 in row 1, Joint5..Joint8 in row 2).
+          Joint IDs are consolidated across rows, avoiding duplicates.
+        """
+        # Intermediate store: area_id -> {node_ids, tag}
+        _areas: Dict[str, Dict] = {}
+        _next_tag = 1
         for a in self._raw_tables.get('CONNECTIVITY - AREA', []):
             aid = str(a.get('Area', 0))
-            if not aid:
+            if not aid or aid == '0':
                 continue
-            # Collect joint IDs (1-4 or more)
-            node_ids = []
+            # Collect joint IDs from this row
+            row_nodes: List[str] = []
             i = 1
             while True:
                 joint_key = f'Joint{i}'
                 if joint_key in a:
-                    node_ids.append(str(a[joint_key]))
+                    row_nodes.append(str(a[joint_key]))
                     i += 1
                 else:
                     break
-            if len(node_ids) >= 3:
-                areas[aid] = AreaElement(area_id=aid, area_tag=tag, node_ids=node_ids)
-            tag += 1
-        return areas
+            if len(row_nodes) < 3:
+                continue
+            # First time seeing this area_id -> initialise
+            if aid not in _areas:
+                _areas[aid] = {'node_ids': [], 'tag': _next_tag}
+                _next_tag += 1
+            # Append new joint IDs, avoiding duplicates
+            info = _areas[aid]
+            for jid in row_nodes:
+                if jid not in info['node_ids']:
+                    info['node_ids'].append(jid)
+
+        return {
+            aid: AreaElement(
+                area_id=aid, area_tag=info['tag'],
+                node_ids=info['node_ids'],
+            )
+            for aid, info in _areas.items()
+        }
 
     def _get_frame_assignments(self) -> Dict[str, str]:
         assign = {}
