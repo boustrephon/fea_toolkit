@@ -493,6 +493,11 @@ here.
 
 ---
 
+For shell edge constraints (connecting discontinuous slab meshes) see
+`builder_reference.md`.
+
+---
+
 ## Validation: eigenvalue buckling benchmark
 
 The subdivided brace method (Approach A) is validated by an **independent
