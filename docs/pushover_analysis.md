@@ -1491,4 +1491,170 @@ quarto render pumphouse_report.qmd --to all
 
 ---
 
+## 3D Visualisation (PyVista)
+
+The toolkit provides interactive 3D plots of analysis results using
+**PyVista** (install with ``pip install pyvista``).
+
+### Moment diagrams
+
+:func:`~fea_toolkit.plotting.viz.plot_static_moment_3d` draws a 3D
+moment diagram on the structure, with two display modes:
+
+* ``mode='flag'`` — planar quadrilaterals extruded perpendicular to each
+  member on the **tension side** of the bending moment.  Flag height is
+  proportional to the moment magnitude.  Red = positive moment, blue =
+  negative moment.
+* ``mode='tube'`` — colour‑coded tubes along each element (red = +ve,
+  blue = −ve).
+
+**All forces are transformed to local coordinates** via
+:func:`_get_local_end_forces` before plotting, so the moment sign and
+direction are correct regardless of member orientation:
+
+* ``'Mz'`` — major‑axis bending (flags extend in local **y** direction)
+* ``'My'`` — minor‑axis bending (flags extend in local **z** direction)
+
+```python
+from fea_toolkit.plotting.viz import plot_static_moment_3d
+
+forces = builder.extract_static_element_forces()
+
+# Interactive flag diagram — opens a PyVista window
+plot_static_moment_3d(builder, forces, quantity="Mz",
+                      mode="flag", show_original=True)
+
+# With reaction arrows and title
+results = builder.run_static_analysis(extract_reactions=True)
+plot_static_moment_3d(builder, forces, quantity="Mz",
+                      mode="flag", show_original=True,
+                      show_reactions=True, static_results=results,
+                      title="My Model — Mz (Wind +X)")
+
+# Off‑screen screenshot (for batch scripts)
+plotter = plot_static_moment_3d(builder, forces, quantity="Mz",
+                                mode="flag", show_original=True,
+                                off_screen=True)
+if plotter is not None:
+    plotter.screenshot("moment_diagram.png")
+```
+
+### Reaction arrows
+
+When ``show_reactions=True`` and the ``static_results`` dict from
+``run_static_analysis(extract_reactions=True)`` is provided, reaction
+forces at restrained nodes are drawn as arrows:
+
+* **Red arrows** = horizontal resultant (fx, fy)
+* **Green arrows** = vertical (fz)
+
+Arrow length is auto‑scaled to 8 % of the model height for the largest
+force.
+
+### 2D force diagrams (Matplotlib)
+
+:func:`~fea_toolkit.plotting.viz.plot_static_force_diagram` produces a
+2D line plot of any end‑force quantity against elevation:
+
+```python
+from fea_toolkit.plotting.viz import plot_static_force_diagram
+
+# Local Mz (major-axis bending) — default use_local=True
+fig = plot_static_force_diagram(builder, forces, quantity="Mz",
+                                title="Major-axis moment vs elevation")
+fig.savefig("moment.png")
+```
+
+The ``quantity`` parameter refers to **local** coordinates by default
+(``use_local=True``), so the physical meaning is consistent regardless
+of member orientation:
+
+| Quantity | Local meaning |
+|---|---|
+| ``'Fx'`` | Axial force (+ = tension) |
+| ``'Fy'`` | Shear in local y |
+| ``'Fz'`` | Shear in local z |
+| ``'Mx'`` | Torsion |
+| ``'My'`` | Bending about local y (minor) |
+| ``'Mz'`` | Bending about local z (major) |
+
+Pass ``use_local=False`` to plot raw global forces instead.
+
+---
+
 ## See also
+
+- :class:`OpenSeesBuilder` API documentation
+- :meth:`OpenSeesBuilder.run_pushover_analysis`
+- :meth:`OpenSeesBuilder.export_results_to_npz`
+
+---
+
+## Exporting Results to NPZ
+
+After a static or pushover analysis, results can be exported to a
+compressed NumPy ``.npz`` file for visualisation in Rhino or other
+tools.  See [docs/rhino_export.md](rhino_export.md) for the Rhino
+visualisation workflow.
+
+### Basic usage
+
+```python
+# After run_static_analysis():
+results = builder.run_static_analysis()
+builder.export_results_to_npz("static_results.npz", results)
+
+# After run_pushover_analysis():
+push_results = builder.run_pushover_analysis(...)
+builder.export_results_to_npz("pushover_results.npz", push_results)
+```
+
+### Including section and fiber data
+
+For models using fiber sections, pass ``section_responses``:
+
+```python
+builder.export_results_to_npz("results_fiber.npz", results,
+    section_responses={
+        "section_forces": True,   # N, Mz, My, Vz, Vy, T per integration point
+        "fiber_stress": True,     # max/min fiber stress per IP
+        "fiber_strain": True,     # max/min fiber strain per IP
+    })
+```
+
+### What gets saved
+
+| Data | Arrays | Source |
+|---|---|---|
+| **End forces** | ``sub_fx_i`` … ``sub_mz_j`` | ``ops.eleResponse(tag, 'forces')`` |
+| **Section forces** | ``sec_N``, ``sec_Mz``, … | ``ops.eleResponse(tag, 'section', ip, 'force')`` |
+| **Fiber extremes** | ``sec_sig_max``, ``sec_eps_max``, … | ``ops.eleResponse(tag, 'section', ip, 'fiberData')`` |
+| **Displacements** | ``node_dx``, ``node_dy``, ``node_dz`` | ``ops.nodeDisp(tag)`` |
+| **Split map** | ``sub_sap_ids``, ``sub_t_start``, ``sub_t_end`` | ``self.split_elements`` parent/child tracking |
+
+### Loading in Rhino
+
+```python
+import numpy as np
+
+data = np.load("results.npz", allow_pickle=True)
+
+# Element forces: find sub-elements for a given SAP FrameID
+mask = data["sub_sap_ids"] == "42"
+mz_j = data["sub_mz_j"][mask]  # major-axis moment at J-end
+
+# Nodal displacements: find a specific node
+idx = list(data["node_sap_ids"]).index("5")
+dx, dy, dz = data["node_dx"][idx], data["node_dy"][idx], data["node_dz"][idx]
+```
+
+### Notes
+
+- Forces are in **global coordinates** (end forces) or **local coordinates**
+  (section forces — OpenSees order: N, Mz, My, Vz, Vy, T).
+- The ``.npz`` is a compressed ZIP file.  Use ``allow_pickle=True`` when
+  loading because string arrays are stored as Python objects.
+- NumPy ships with Rhino 8 CPython — no additional packages required.
+- For pushover, export the **final step** results.  To export every step,
+  modify the loop in ``run_pushover_analysis()`` to call
+  ``export_results_to_npz()`` with the results from each step.
