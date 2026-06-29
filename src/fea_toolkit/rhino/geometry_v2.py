@@ -69,16 +69,16 @@ def _profile_box(depth: float, bf: float, tf: float, tw: float
 
 def _profile_channel(depth: float, bf: float, tf: float, tw: float
                      ) -> t.List[t.Tuple[float, float]]:
-    """Channel/C-section profile in the XY plane."""
+    """Channel/C-section profile in the XY plane (CW winding)."""
     h = depth / 2.0
     w = bf / 2.0
     fi = h - tf
     wi = tw / 2.0
     return [
-        (-w, -h), (w, -h),
-        (w, -fi), (wi, -fi),
-        (wi, fi), (w, fi),
-        (w, h), (-w, h),
+        (-w, -h), (-w, h),
+        (w, h), (w, fi),
+        (wi, fi), (wi, -fi),
+        (w, -fi), (w, -h),
     ]
 
 
@@ -349,16 +349,27 @@ def create_frame_extrusions(
                 profile_curve = circle.ToNurbsCurve()
                 extrusion = rg.Extrusion.Create(profile_curve, length, True)
             else:
-                # Polyline profile in XY plane — extrude along Z
-                extrusion = rg.Extrusion.Create(profile, length, True)
+                # Polyline profile in XY plane — extrude along Z.
+                # Determine winding direction from signed area to pick
+                # the correct height sign for Extrusion.Create.
+                # CW (area < 0) → plane normal = -Z → use -length
+                # CCW (area > 0) → plane normal = +Z → use +length
+                signed_area = 0.0
+                n = profile.PointCount
+                for j in range(n):
+                    p0 = profile.Point(j)
+                    p1 = profile.Point((j + 1) % n)
+                    signed_area += p0.X * p1.Y - p1.X * p0.Y
+                signed_area *= 0.5
+                if signed_area < 0:
+                    extrusion = rg.Extrusion.Create(profile, -length, True)
+                else:
+                    extrusion = rg.Extrusion.Create(profile, length, True)
 
             if extrusion is None:
                 continue
 
             # Transform: Z→x_axis, X→z_axis, Y→y_axis
-            #   profile X (width/bf)  → z_axis → horizontal for beams
-            #   profile Y (depth/t3)  → y_axis → vertical for beams
-            #   extrusion Z (length)  → x_axis → along member
             xform = rg.Transform.Identity
             xform.M00 = z_axis.X; xform.M01 = y_axis.X; xform.M02 = x_axis.X
             xform.M10 = z_axis.Y; xform.M11 = y_axis.Y; xform.M12 = x_axis.Y
@@ -380,7 +391,6 @@ def create_frame_extrusions(
             obj = doc.Objects.Find(obj_id)
             if obj is None:
                 continue
-
             attrs = obj.Attributes
             attrs.SetUserString("SAP_Type", "FrameExtrusion")
             attrs.SetUserString("SAP_FrameID", str(eid))
