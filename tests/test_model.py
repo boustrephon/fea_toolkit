@@ -43,6 +43,8 @@ from fea_toolkit.model.sap_data import (
     Constraint,
     CoordSys,
     default_coord_sys,
+    FrameEndOffset,
+    AreaMesh,
 )
 from fea_toolkit.model.geometry import (
     get_SAP_vecxz,
@@ -2397,3 +2399,173 @@ class TestCapacitySpectrumMethod:
         assert pp['S_ap'] > 0
         # T_eq should be close to the dominant modal period (0.464s)
         assert pp['T_eq'] == pytest.approx(0.464, abs=0.03)
+
+
+# ============================================================================
+# Builder integration tests: frame end offsets + area meshing
+# ============================================================================
+
+class TestBuilderFrameEndOffsets:
+    """Verify frame end offsets are applied during build()."""
+
+    @pytest.fixture
+    def offset_model(self):
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 6.0, 0.0, 0.0),
+        }
+        mats = {"Steel": Material("Steel", "Steel", E_mod=2e11)}
+        secs = {
+            "UB300": Section("UB300", "I/Wide Flange", "Steel",
+                             A=0.01, I33=1e-4, I22=1e-5, J=1e-6),
+        }
+        frames = {"1": FrameElement("1", 10, "1", "2")}
+        return SAPModelData(
+            nodes=nodes, restraints={"1": Restraint([1,1,1,1,1,1])},
+            materials=mats, sections=secs,
+            frame_elements=frames, area_elements={},
+            frame_assignments={"1": "UB300"},
+            area_assignments={}, groups={}, frame_auto_mesh={},
+            frame_end_offsets={"1": FrameEndOffset(0.3, 0.4)},
+        )
+
+    def test_offset_nodes_created_in_opensees(self, offset_model):
+        """Offset nodes exist in OpenSees after build()."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        import openseespy.opensees as ops
+        b = OpenSeesBuilder(offset_model, {
+            "verbose": False, "use_elastic_sections": True,
+        })
+        b.build()
+        # Look for offset nodes
+        tags = [nd.node_tag for nid, nd in offset_model.nodes.items()
+                if "_off_" in nid]
+        assert len(tags) == 2, "Expected 2 offset nodes"
+        for tag in tags:
+            coords = list(ops.nodeCoord(tag))
+            assert len(coords) == 3
+        ops.wipe()
+
+    def test_rigid_links_recorded(self, offset_model):
+        """_offset_rigid_links contains entries after build()."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(offset_model, {
+            "verbose": False, "use_elastic_sections": True,
+        })
+        b.build()
+        assert len(b._offset_rigid_links) == 2
+        import openseespy.opensees as ops
+        ops.wipe()
+
+    def test_no_offsets_no_links(self):
+        """Zero offsets produce no rigid links."""
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 6.0, 0.0, 0.0),
+        }
+        mats = {"Steel": Material("Steel", "Steel", E_mod=2e11)}
+        secs = {
+            "UB300": Section("UB300", "I/Wide Flange", "Steel",
+                             A=0.01, I33=1e-4, I22=1e-5, J=1e-6),
+        }
+        frames = {"1": FrameElement("1", 10, "1", "2")}
+        md = SAPModelData(
+            nodes=nodes, restraints={}, materials=mats, sections=secs,
+            frame_elements=frames, area_elements={},
+            frame_assignments={"1": "UB300"},
+            area_assignments={}, groups={}, frame_auto_mesh={},
+            frame_end_offsets={"1": FrameEndOffset(0.0, 0.0)},
+        )
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(md, {
+            "verbose": False, "use_elastic_sections": True,
+        })
+        b.build()
+        assert len(b._offset_rigid_links) == 0
+        import openseespy.opensees as ops
+        ops.wipe()
+
+
+class TestBuilderAreaMeshing:
+    """Verify area elements are meshed during build()."""
+
+    @pytest.fixture
+    def mesh_model(self):
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 12.0, 0.0, 0.0),
+            "3": Node("3", 3, 12.0, 8.0, 0.0),
+            "4": Node("4", 4, 0.0, 8.0, 0.0),
+        }
+        mats = {"Concrete": Material("Concrete", "Concrete", E_mod=3e10)}
+        secs = {
+            "Slab200": ShellSection("Slab200", "Shell", "Concrete",
+                                    thickness=0.2),
+        }
+        areas = {"1": AreaElement("1", 10, ["1", "2", "3", "4"])}
+        return SAPModelData(
+            nodes=nodes, restraints={}, materials=mats, sections=secs,
+            frame_elements={}, area_elements=areas,
+            frame_assignments={}, area_assignments={"1": "Slab200"},
+            groups={}, frame_auto_mesh={},
+            area_mesh={"1": AreaMesh(auto_mesh=True, max_size=6.0)},
+        )
+
+    def test_mesh_creates_sub_areas(self, mesh_model):
+        """build() with meshing creates sub-area elements."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(mesh_model, {
+            "verbose": False, "create_shells": True,
+        })
+        b.build()
+        # Original area should be inactive
+        assert mesh_model.area_elements["1"].inactive is True
+        # Sub-areas should exist
+        sub_ids = [aid for aid in mesh_model.area_elements if "_sub_" in aid]
+        assert len(sub_ids) >= 2
+        import openseespy.opensees as ops; ops.wipe()
+
+    def test_mesh_creates_opensees_nodes(self, mesh_model):
+        """Mesh nodes are created in OpenSees memory."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        import openseespy.opensees as ops
+        b = OpenSeesBuilder(mesh_model, {
+            "verbose": False, "create_shells": True,
+        })
+        b.build()
+        # Find mesh node tags
+        mesh_tags = [nd.node_tag for nid, nd in mesh_model.nodes.items()
+                     if "_mesh_" in nid]
+        assert len(mesh_tags) > 0
+        for tag in mesh_tags:
+            coords = list(ops.nodeCoord(tag))
+            assert len(coords) == 3
+        ops.wipe()
+
+    def test_no_mesh_no_change(self):
+        """Without mesh settings, area elements are unchanged."""
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 12.0, 0.0, 0.0),
+            "3": Node("3", 3, 12.0, 8.0, 0.0),
+            "4": Node("4", 4, 0.0, 8.0, 0.0),
+        }
+        mats = {"Concrete": Material("Concrete", "Concrete", E_mod=3e10)}
+        secs = {
+            "Slab200": ShellSection("Slab200", "Shell", "Concrete",
+                                    thickness=0.2),
+        }
+        areas = {"1": AreaElement("1", 10, ["1", "2", "3", "4"])}
+        md = SAPModelData(
+            nodes=nodes, restraints={}, materials=mats, sections=secs,
+            frame_elements={}, area_elements=areas,
+            frame_assignments={}, area_assignments={"1": "Slab200"},
+            groups={}, frame_auto_mesh={},
+        )
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(md, {
+            "verbose": False, "create_shells": True,
+        })
+        b.build()
+        assert md.area_elements["1"].inactive is False
+        import openseespy.opensees as ops; ops.wipe()

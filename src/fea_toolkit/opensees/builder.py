@@ -168,11 +168,17 @@ class OpenSeesBuilder:
         if self.config['split_elements']:
             self._split_elements()
         
+        # Apply frame end offsets (rigid zones at joints)
+        self._offset_rigid_links: List[tuple] = []
+        if self.model.frame_end_offsets:
+            self._apply_frame_end_offsets()
+
         # Convert area uniform loads to equivalent frame edge loads
         self._convert_area_loads(selection=selection)
 
-        # Create shell elements for areas not in the loads-only selection
+        # Mesh area elements and create shell elements
         if create_shells:
+            self._mesh_areas()
             self._create_shell_elements(loads_only_selection=selection)
 
         self._create_elements()
@@ -416,6 +422,93 @@ class OpenSeesBuilder:
         self.split_dist_loads = new_dist_loads   # store for later use in _create_loads
 
     # -------------------------------------------------------------------------
+    # Frame end offsets (rigid zones at joints)
+    # -------------------------------------------------------------------------
+
+    def _apply_frame_end_offsets(self) -> None:
+        """Apply frame end offsets from parsed SAP2000 data.
+
+        Creates offset nodes and records rigid link entries that are
+        later created as stiff beam elements in ``_create_elements``.
+        """
+        from ..model.geometry import apply_frame_end_offsets
+
+        max_elem_tag = max(
+            (e.elem_tag for e in self.model.frame_elements.values()), default=0
+        )
+        max_node_tag = max(
+            (nd.node_tag for nd in self.model.nodes.values()), default=0
+        )
+        next_tag = max(max_elem_tag, max_node_tag) + 1
+
+        elements = self.model.frame_elements
+        assignments = self.model.frame_assignments
+        nodes = self.model.nodes
+
+        elements, assignments, nodes, next_tag, rigid_links = apply_frame_end_offsets(
+            elements, assignments, nodes,
+            self.model.frame_end_offsets,
+            next_tag=next_tag,
+        )
+        self._offset_rigid_links = rigid_links
+
+        # Create OpenSees nodes for the offset nodes
+        for nd in self.model.nodes.values():
+            if nd.node_tag not in self._created_node_tags:
+                ops.node(nd.node_tag, nd.x, nd.y, nd.z)
+                self._created_node_tags.add(nd.node_tag)
+
+        if self.config['verbose'] and rigid_links:
+            print(f"  Created {len(rigid_links)} rigid link(s) "
+                  f"for frame end offsets")
+
+    # -------------------------------------------------------------------------
+    # Area meshing
+    # -------------------------------------------------------------------------
+
+    def _mesh_areas(self) -> None:
+        """Subdivide area elements per parsed AREA MESH ASSIGNMENTS.
+
+        Must be called before ``_create_shell_elements`` so that meshed
+        sub-areas become ``ShellMITC4`` elements instead of the original
+        coarse area.
+        """
+        if not self.model.area_mesh:
+            return
+
+        from ..model.geometry import mesh_area_elements
+
+        max_elem_tag = max(
+            (ae.area_tag for ae in self.model.area_elements.values()), default=0
+        )
+        max_node_tag = max(
+            (nd.node_tag for nd in self.model.nodes.values()), default=0
+        )
+        next_tag = max(max_elem_tag, max_node_tag) + 1
+
+        areas, assignments, nodes, next_tag = mesh_area_elements(
+            self.model.area_elements,
+            self.model.area_assignments,
+            self.model.nodes,
+            self.model.area_mesh,
+            next_tag=next_tag,
+        )
+        # Update model with meshed data
+        self.model.area_elements = areas
+        self.model.area_assignments = assignments
+
+        # Create OpenSees nodes for mesh nodes
+        for nd in self.model.nodes.values():
+            if nd.node_tag not in self._created_node_tags:
+                ops.node(nd.node_tag, nd.x, nd.y, nd.z)
+                self._created_node_tags.add(nd.node_tag)
+
+        if self.config['verbose']:
+            sub_count = sum(1 for aid in areas if "_sub_" in aid)
+            if sub_count:
+                print(f"  Area meshing: {sub_count} sub-elements created")
+
+    # -------------------------------------------------------------------------
     # Elements
     # -------------------------------------------------------------------------
 
@@ -495,11 +588,12 @@ class OpenSeesBuilder:
             if not elem.inactive
         }
 
-        # Create rigid link elements (stiff elastic segments for gusset plates)
-        if self._rigid_link_elems:
+        # Create rigid link elements (stiff elastic segments)
+        all_rigid_links = list(self._rigid_link_elems) + list(self._offset_rigid_links)
+        if all_rigid_links:
             if self.config['verbose']:
-                print(f"  Creating {len(self._rigid_link_elems)} rigid links "
-                      f"for brace end offsets...")
+                print(f"  Creating {len(all_rigid_links)} rigid links "
+                      f"(brace offsets + frame end offsets)...")
             # Dedicated super‑stiff section for rigid links
             rigid_sec_tag = max(self.section_tags.values()) + 1 if self.section_tags else 10000
             # A × E large enough to be effectively rigid over a short offset
@@ -509,7 +603,7 @@ class OpenSeesBuilder:
             # section('Elastic', tag, E, A, Iz, Iy, G, J)
             ops.section('Elastic', rigid_sec_tag, rigid_E, rigid_A, rigid_I, rigid_I, rigid_E / 2.6, rigid_I)
 
-            for link_id, nid_i, nid_j, link_tag in self._rigid_link_elems:
+            for link_id, nid_i, nid_j, link_tag in all_rigid_links:
                 node_i_tag = self._node_tag_from_id(nid_i)
                 node_j_tag = self._node_tag_from_id(nid_j)
                 if node_i_tag is None or node_j_tag is None:
@@ -1722,8 +1816,10 @@ class OpenSeesBuilder:
             sec_tag = self._shell_sec_tags[sec_name]
 
             # Determine a unique element tag
-            elem_tag = (max(self.frame_tag_map.values(), default=0)
-                        + shell_count + 1)
+            max_frame_tag = max(
+                getattr(self, 'frame_tag_map', {}).values(), default=0
+            )
+            elem_tag = max(max_frame_tag, shell_count + 1)
 
             # Create ShellMITC4 (quad) or ShellDKGT (tri) element
             if len(nids) == 4:
