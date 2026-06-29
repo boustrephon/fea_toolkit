@@ -77,22 +77,24 @@ class TestDetectUnconnectedEdges:
         """Nodes 5 and 6 on edge 1-2 should be detected."""
         builder, ops = self._make_builder()
         reports = builder.detect_unconnected_edges(tolerance=1e-4)
-        # Should find nodes 5 and 6 on edge 1-2
-        slave_ids = {r["slave_node"] for r in reports}
-        assert 5 in slave_ids, f"Node 5 not found in {slave_ids}"
-        assert 6 in slave_ids, f"Node 6 not found in {slave_ids}"
-        # Verify interpolation weights
+        # Exactly 2 reports: node 5 and node 6, both on edge 1-2
+        assert len(reports) == 2, f"Expected 2 reports, got {len(reports)}"
+        # Build lookup by slave_node
+        by_slave = {r["slave_node"]: r for r in reports}
+        assert 5 in by_slave, f"Node 5 not found in {list(by_slave)}"
+        assert 6 in by_slave, f"Node 6 not found in {list(by_slave)}"
+        # Both should report the same master edge (1, 2) — deduped & sorted
         for r in reports:
-            if r["slave_node"] == 5:
-                # Node 5 at x=2.0 on edge 1-2 (length 6.0)
-                # N1 = 1 - 2/6 = 0.666..., N2 = 2/6 = 0.333...
-                assert r["N1"] == pytest.approx(2.0/3.0, abs=1e-5)
-                assert r["N2"] == pytest.approx(1.0/3.0, abs=1e-5)
-            if r["slave_node"] == 6:
-                # Node 6 at x=4.0 on edge 1-2 (length 6.0)
-                # N1 = 1 - 4/6 = 0.333..., N2 = 4/6 = 0.666...
-                assert r["N1"] == pytest.approx(1.0/3.0, abs=1e-5)
-                assert r["N2"] == pytest.approx(2.0/3.0, abs=1e-5)
+            assert r["master_node_i"] == 1, f"Expected master_i=1, got {r['master_node_i']}"
+            assert r["master_node_j"] == 2, f"Expected master_j=2, got {r['master_node_j']}"
+        # Verify interpolation weights for node 5
+        r5 = by_slave[5]
+        assert r5["N1"] == pytest.approx(2.0/3.0, abs=1e-5)  # 1 - 2/6
+        assert r5["N2"] == pytest.approx(1.0/3.0, abs=1e-5)  # 2/6
+        # Verify interpolation weights for node 6
+        r6 = by_slave[6]
+        assert r6["N1"] == pytest.approx(1.0/3.0, abs=1e-5)  # 1 - 4/6
+        assert r6["N2"] == pytest.approx(2.0/3.0, abs=1e-5)  # 4/6
         ops.wipe()
 
     def test_detect_returns_empty_for_no_misalignment(self):
@@ -124,15 +126,20 @@ class TestDetectUnconnectedEdges:
         ops.node(1, 0.0, 0.0, 0.0)
         ops.node(2, 6.0, 0.0, 0.0)
         ops.node(7, 2.0, 0.0005, 0.0)  # 0.5 mm off
-        # Add node 7 to area 2 so it's included in shell nodes
+        # Add node 7 to model and area 2 so it's included in shell nodes
+        md.nodes["7"] = Node("7", 7, 2.0, 0.0005, 0.0)
         md.area_elements["2"] = AreaElement("2", 1, ["1", "7", "2"])
 
         reports_tight = builder.detect_unconnected_edges(tolerance=1e-4)
         reports_loose = builder.detect_unconnected_edges(tolerance=1e-3)
-        # Tight tolerance (0.1mm) should miss node 7
-        assert 7 not in {r["slave_node"] for r in reports_tight}
-        # Loose tolerance (1mm) should catch node 7
-        assert 7 in {r["slave_node"] for r in reports_loose}
+        # Tight tolerance (0.1mm) should miss node 7 entirely
+        assert len(reports_tight) == 0, f"Expected 0, got {len(reports_tight)}"
+        # Loose tolerance (1mm) should catch exactly node 7 on edge 1-2
+        assert len(reports_loose) == 1, f"Expected 1, got {len(reports_loose)}"
+        r = reports_loose[0]
+        assert r["slave_node"] == 7
+        assert r["master_node_i"] == 1
+        assert r["master_node_j"] == 2
         ops.wipe()
 
 
@@ -180,7 +187,6 @@ class TestApplyEdgeConstraints:
         assert builder._has_edge_constraints is False
         ops.wipe()
 
-    @pytest.mark.skip(reason="_has_edge_constraints is set to True only on success, but once True it stays True")
     def test_apply_flag_persists(self):
         """_has_edge_constraints stays True after successful apply."""
         builder, ops = self._make_builder()
