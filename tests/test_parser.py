@@ -336,3 +336,160 @@ def test_create_single_shell_section():
     # confirm the method exists and accepts the right signature
     assert hasattr(OpenSeesBuilder, '_create_single_shell_section')
 
+
+# ========================================================================
+# Frame end offsets, area mesh, area edge constraints
+# ========================================================================
+
+def test_frame_end_offsets_parsed(tmp_path):
+    """FRAME END LENGTH OFFSETS table is parsed correctly."""
+    json_data = {
+        "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25"}],
+        "JOINT COORDINATES": [
+            {"Joint": 1, "XorR": 0, "Y": 0, "Z": 0},
+            {"Joint": 2, "XorR": 6, "Y": 0, "Z": 0},
+        ],
+        "CONNECTIVITY - FRAME": [
+            {"Frame": 1, "JointI": 1, "JointJ": 2},
+        ],
+        "FRAME SECTION PROPERTIES 01 - GENERAL": [
+            {"Section": "Col600", "Material": "C30/37", "Shape": "Rectangular",
+             "t3": 0.6, "t2": 0.6, "Area": 0.36, "I33": 0.0108, "I22": 0.0108},
+        ],
+        "FRAME SECTION ASSIGNMENTS": [
+            {"Frame": 1, "Section": "Col600"},
+        ],
+        "FRAME END LENGTH OFFSETS": [
+            {"Frame": 1, "EndI": 0.3, "EndJ": 0.3},
+        ],
+    }
+    import json
+    json_path = tmp_path / "offsets.json"
+    with open(json_path, "w") as f:
+        json.dump(json_data, f)
+
+    parser = SAP2000Parser.from_json(json_path)
+    md = parser.get_model_data()
+
+    assert "1" in md.frame_end_offsets
+    off = md.frame_end_offsets["1"]
+    assert off.end_i == 0.3
+    assert off.end_j == 0.3
+
+
+def test_frame_end_offsets_empty_when_missing(tmp_path):
+    """No FRAME END LENGTH OFFSETS table → empty dict."""
+    json_data = {
+        "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25"}],
+        "JOINT COORDINATES": [
+            {"Joint": 1, "XorR": 0, "Y": 0, "Z": 0},
+            {"Joint": 2, "XorR": 6, "Y": 0, "Z": 0},
+        ],
+    }
+    import json
+    json_path = tmp_path / "no_offsets.json"
+    with open(json_path, "w") as f:
+        json.dump(json_data, f)
+
+    parser = SAP2000Parser.from_json(json_path)
+    md = parser.get_model_data()
+    assert md.frame_end_offsets == {}
+
+
+def test_area_mesh_parsed(tmp_path):
+    """AREA MESH ASSIGNMENTS table is parsed correctly."""
+    json_data = {
+        "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25"}],
+        "JOINT COORDINATES": [
+            {"Joint": i, "XorR": 0.0, "Y": 0.0, "Z": 0.0} for i in range(1, 5)
+        ],
+        "CONNECTIVITY - AREA": [
+            {"Area": 1, "Joint1": 1, "Joint2": 2, "Joint3": 3, "Joint4": 4},
+        ],
+        "AREA SECTION PROPERTIES": [
+            {"Section": "Slab200", "Material": "C30/37",
+             "Thickness": 200.0, "AreaType": "Shell", "Type": "Shell-Thin"},
+        ],
+        "AREA SECTION ASSIGNMENTS": [
+            {"Area": 1, "Section": "Slab200"},
+        ],
+        "AREA MESH ASSIGNMENTS": [
+            {"Area": 1, "AutoMesh": "Yes",
+             "NoAutoMeshAtEdges": "No", "NoSubMesh": "No",
+             "MinSize": 0.5, "MaxSize": 1.0},
+        ],
+    }
+    import json
+    json_path = tmp_path / "mesh.json"
+    with open(json_path, "w") as f:
+        json.dump(json_data, f)
+
+    parser = SAP2000Parser.from_json(json_path)
+    md = parser.get_model_data()
+
+    assert "1" in md.area_mesh
+    m = md.area_mesh["1"]
+    assert m.auto_mesh is True
+    assert m.no_auto_mesh_at_edges is False
+    assert m.min_size == 0.5
+    assert m.max_size == 1.0
+
+
+def test_area_edge_constraints_parsed(tmp_path):
+    """AREA EDGE CONSTRAINT ASSIGNMENTS table is parsed correctly."""
+    json_data = {
+        "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25"}],
+        "JOINT COORDINATES": [
+            {"Joint": i, "XorR": 0.0, "Y": 0.0, "Z": 0.0} for i in range(1, 5)
+        ],
+        "CONNECTIVITY - AREA": [
+            {"Area": 1, "Joint1": 1, "Joint2": 2, "Joint3": 3, "Joint4": 4},
+        ],
+        "AREA SECTION PROPERTIES": [
+            {"Section": "Slab200", "Material": "C30/37",
+             "Thickness": 200.0, "AreaType": "Shell", "Type": "Shell-Thin"},
+        ],
+        "AREA SECTION ASSIGNMENTS": [
+            {"Area": 1, "Section": "Slab200"},
+        ],
+        "AREA EDGE CONSTRAINT ASSIGNMENTS": [
+            {"Area": 1, "Edge": 1, "Constraint": "Default"},
+            {"Area": 1, "Edge": 2, "Constraint": "Default"},
+            {"Area": 1, "Edge": 3, "Constraint": "Default"},
+            {"Area": 1, "Edge": 4, "Constraint": "Default"},
+        ],
+    }
+    import json
+    json_path = tmp_path / "edge_con.json"
+    with open(json_path, "w") as f:
+        json.dump(json_data, f)
+
+    parser = SAP2000Parser.from_json(json_path)
+    md = parser.get_model_data()
+
+    assert "1" in md.area_edge_constraints
+    cons = md.area_edge_constraints["1"]
+    assert len(cons) == 4
+    assert cons[0].edge == 1
+    assert cons[0].constraint == "Default"
+
+
+def test_new_tables_empty_when_missing(tmp_path):
+    """All new tables return empty defaults when no data exists."""
+    json_data = {
+        "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25"}],
+        "JOINT COORDINATES": [
+            {"Joint": 1, "XorR": 0, "Y": 0, "Z": 0},
+        ],
+    }
+    import json
+    json_path = tmp_path / "empty.json"
+    with open(json_path, "w") as f:
+        json.dump(json_data, f)
+
+    parser = SAP2000Parser.from_json(json_path)
+    md = parser.get_model_data()
+    assert md.frame_end_offsets == {}
+    assert md.area_mesh == {}
+    assert md.area_edge_constraints == {}
+

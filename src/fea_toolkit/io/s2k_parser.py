@@ -10,7 +10,7 @@ from ..model.sap_data import (
     SAPModelData, Node, Restraint, Material, Section,
     FrameElement, AreaElement, ShellSection, Group, LoadCase, LoadPattern,
     MassSource, JointLoad, FrameDistributedLoad, AreaUniformLoad, AreaGravityLoad,
-    GravityLoad,
+    GravityLoad, FrameEndOffset, AreaMesh, AreaEdgeConstraint,
 )
 # from ..model.geometry import get_SAP_vecxz
 
@@ -239,6 +239,9 @@ class SAP2000Parser:
         groups = self._get_groups()
         model_units = self.get_model_units()
         frame_auto_mesh = self._get_frame_auto_mesh()
+        frame_end_offsets = self._get_frame_end_offsets()
+        area_mesh = self._get_area_mesh_assignments()
+        area_edge_constraints = self._get_area_edge_constraints()
         load_patterns = self._get_load_patterns()
         mass_sources = self._get_mass_sources()
         joint_loads = self._get_joint_loads()
@@ -267,6 +270,9 @@ class SAP2000Parser:
             area_assignments=area_assignments,
             groups=groups,
             frame_auto_mesh=frame_auto_mesh,
+            frame_end_offsets=frame_end_offsets,
+            area_mesh=area_mesh,
+            area_edge_constraints=area_edge_constraints,
             load_patterns=load_patterns,
             mass_sources=mass_sources,
             joint_loads=joint_loads,
@@ -432,6 +438,68 @@ class SAP2000Parser:
                     'MaxDegrees': rec.get('MaxDegrees', 0),
                 }
         return auto_mesh
+
+    def _get_frame_end_offsets(self) -> Dict[str, FrameEndOffset]:
+        """Parse FRAME END LENGTH OFFSETS table.
+
+        Returns
+        -------
+        Dict[str, FrameEndOffset]
+            Mapping from frame ID to its I-end and J-end rigid offsets.
+        """
+        offsets: Dict[str, FrameEndOffset] = {}
+        for rec in self._raw_tables.get("FRAME END LENGTH OFFSETS", []):
+            fid = str(rec.get("Frame", "0"))
+            if fid == "0":
+                continue
+            offsets[fid] = FrameEndOffset(
+                end_i=float(rec.get("EndI", 0.0)),
+                end_j=float(rec.get("EndJ", 0.0)),
+            )
+        return offsets
+
+    def _get_area_mesh_assignments(self) -> Dict[str, AreaMesh]:
+        """Parse AREA MESH ASSIGNMENTS table.
+
+        Returns
+        -------
+        Dict[str, AreaMesh]
+            Mapping from area ID to its mesh control settings.
+        """
+        meshes: Dict[str, AreaMesh] = {}
+        for rec in self._raw_tables.get("AREA MESH ASSIGNMENTS", []):
+            aid = str(rec.get("Area", "0"))
+            if aid == "0":
+                continue
+            meshes[aid] = AreaMesh(
+                auto_mesh=self._to_bool(rec.get("AutoMesh", False)),
+                no_auto_mesh_at_edges=self._to_bool(rec.get("NoAutoMeshAtEdges", False)),
+                no_sub_mesh=self._to_bool(rec.get("NoSubMesh", False)),
+                min_size=float(rec.get("MinSize", 0.0)),
+                max_size=float(rec.get("MaxSize", 0.0)),
+            )
+        return meshes
+
+    def _get_area_edge_constraints(self) -> Dict[str, List[AreaEdgeConstraint]]:
+        """Parse AREA EDGE CONSTRAINT ASSIGNMENTS table.
+
+        Returns
+        -------
+        Dict[str, List[AreaEdgeConstraint]]
+            Mapping from area ID to a list of its edge constraint assignments.
+        """
+        constraints: Dict[str, List[AreaEdgeConstraint]] = {}
+        for rec in self._raw_tables.get("AREA EDGE CONSTRAINT ASSIGNMENTS", []):
+            aid = str(rec.get("Area", "0"))
+            if aid == "0":
+                continue
+            c = AreaEdgeConstraint(
+                area_id=aid,
+                edge=int(rec.get("Edge", 0)),
+                constraint=str(rec.get("Constraint", "Default")),
+            )
+            constraints.setdefault(aid, []).append(c)
+        return constraints
 
     def _get_frame_elements(self) -> Dict[str, FrameElement]:
         elements = {}
