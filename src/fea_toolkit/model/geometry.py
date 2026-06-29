@@ -12,6 +12,7 @@ from ..model.sap_data import (
     SAPModelData, Node, Restraint, Material, Section,
     FrameElement, AreaElement, Group, LoadPattern, JointLoad,
     FrameDistributedLoad, AreaUniformLoad,
+    FrameEndOffset, AreaMesh,
 )
 
 # ============================================================================
@@ -1119,4 +1120,230 @@ def subdivide_elements(
         elem.child_ids = seg_tags
 
     return elements, assignments, nodes, next_tag, rigid_links
+
+
+# ============================================================================
+# Frame end offsets (rigid zones at joints)
+# ============================================================================
+
+def apply_frame_end_offsets(
+    elements: Dict[str, FrameElement],
+    assignments: Dict[str, str],
+    nodes: Dict[str, 'Node'],
+    offsets: Dict[str, FrameEndOffset],
+    next_tag: int = 1,
+) -> Tuple[Dict[str, FrameElement], Dict[str, str], Dict[str, 'Node'], int, List[tuple]]:
+    """Apply rigid end offsets to frame elements.
+
+    For each frame with a non-zero offset, the elastic portion is shortened
+    and stiff beam elements (rigid links) bridge the gap between the original
+    node and the offset elastic end.
+
+    Args:
+        elements: ``{elem_id: FrameElement}`` (modified in place).
+        assignments: ``{elem_id: section_name}`` (modified in place).
+        nodes: ``{node_id: Node}`` — new offset nodes are added here.
+        offsets: ``{elem_id: FrameEndOffset}`` from parsed s2k data.
+        next_tag: Next available numeric tag for new nodes and elements.
+
+    Returns:
+        ``(elements, assignments, nodes, next_tag, rigid_links)``.
+        ``rigid_links`` is a list of ``(link_id, node_i, node_j, link_tag)``
+        tuples.
+    """
+    rigid_links: List[tuple] = []
+
+    for eid, off in offsets.items():
+        if off.end_i == 0.0 and off.end_j == 0.0:
+            continue
+
+        elem = elements.get(eid)
+        if elem is None or getattr(elem, 'inactive', False):
+            continue
+
+        ni = nodes.get(elem.node_i)
+        nj = nodes.get(elem.node_j)
+        if ni is None or nj is None:
+            continue
+
+        p_i = np.array([ni.x, ni.y, ni.z], dtype=float)
+        p_j = np.array([nj.x, nj.y, nj.z], dtype=float)
+        vec = p_j - p_i
+        length = float(np.linalg.norm(vec))
+        if length < 1e-12:
+            continue
+
+        u = vec / length
+
+        # Clamp offsets so the elastic portion doesn't vanish
+        half = length * 0.45
+        d_i = min(off.end_i, half)
+        d_j = min(off.end_j, half)
+
+        # I‑end offset node
+        offset_i_id = f"{eid}_off_i"
+        offset_i_tag = next_tag
+        next_tag += 1
+        p_start = p_i + u * d_i
+        nodes[offset_i_id] = Node(
+            node_id=offset_i_id, node_tag=offset_i_tag,
+            x=float(p_start[0]), y=float(p_start[1]), z=float(p_start[2]),
+        )
+
+        # J‑end offset node
+        offset_j_id = f"{eid}_off_j"
+        offset_j_tag = next_tag
+        next_tag += 1
+        p_end = p_j - u * d_j
+        nodes[offset_j_id] = Node(
+            node_id=offset_j_id, node_tag=offset_j_tag,
+            x=float(p_end[0]), y=float(p_end[1]), z=float(p_end[2]),
+        )
+
+        # Rigid link at I‑end (original node → offset node)
+        if d_i > 0:
+            rigid_i_id = f"{eid}_rigid_i"
+            rigid_i_tag = next_tag
+            next_tag += 1
+            rigid_links.append((rigid_i_id, elem.node_i, offset_i_id, rigid_i_tag))
+
+        # Rigid link at J‑end (offset node → original node)
+        if d_j > 0:
+            rigid_j_id = f"{eid}_rigid_j"
+            rigid_j_tag = next_tag
+            next_tag += 1
+            rigid_links.append((rigid_j_id, offset_j_id, elem.node_j, rigid_j_tag))
+
+        # Shorten the original element to the offset length
+        elem.node_i = offset_i_id
+        elem.node_j = offset_j_id
+
+    return elements, assignments, nodes, next_tag, rigid_links
+
+
+# ============================================================================
+# Area meshing — subdivide area quads into a grid of smaller shell elements
+# ============================================================================
+
+def mesh_area_elements(
+    area_elements: Dict[str, AreaElement],
+    area_assignments: Dict[str, str],
+    nodes: Dict[str, 'Node'],
+    area_mesh: Dict[str, AreaMesh],
+    next_tag: int = 1,
+) -> Tuple[Dict[str, AreaElement], Dict[str, str], Dict[str, 'Node'], int]:
+    """Subdivide area elements into a grid of smaller shell elements.
+
+    Only areas with ``auto_mesh=True`` and a positive ``max_size`` are
+    subdivided.  The subdivision count along each edge is calculated from
+    ``max_size`` so that no sub-element exceeds that dimension.
+
+    Args:
+        area_elements: ``{area_id: AreaElement}`` (modified in place).
+        area_assignments: ``{area_id: section_name}`` (modified in place).
+        nodes: ``{node_id: Node}`` — new interior nodes are added here.
+        area_mesh: ``{area_id: AreaMesh}`` from parsed s2k data.
+        next_tag: Next available numeric tag for new nodes and elements.
+
+    Returns:
+        ``(area_elements, area_assignments, nodes, next_tag)`` with
+        subdivided areas added and original areas marked inactive.
+    """
+    for aid, mesh in area_mesh.items():
+        if not mesh.auto_mesh or mesh.max_size <= 0.0:
+            continue
+
+        elem = area_elements.get(aid)
+        if elem is None or len(elem.node_ids) != 4:
+            continue  # only quad areas are meshed
+
+        # Gather corner nodes, ensuring we have unique corners (4-node quad)
+        corner_ids = [str(nid) for nid in elem.node_ids]
+        if len(corner_ids) != 4 or len(set(corner_ids)) != 4:
+            continue
+
+        corners = []
+        for nid in corner_ids:
+            nd = nodes.get(nid)
+            if nd is None:
+                break
+            corners.append(np.array([nd.x, nd.y, nd.z], dtype=float))
+        if len(corners) != 4:
+            continue
+
+        # Determine subdivision counts from max_size
+        def _edge_length(a, b):
+            return float(np.linalg.norm(b - a))
+
+        l01 = _edge_length(corners[0], corners[1])
+        l12 = _edge_length(corners[1], corners[2])
+        l23 = _edge_length(corners[2], corners[3])
+        l30 = _edge_length(corners[3], corners[0])
+
+        # Average length along each parametric direction
+        len_u = (l01 + l23) / 2.0   # I→J direction (edge 0-1, 2-3)
+        len_v = (l12 + l30) / 2.0   # orthogonal direction (edge 1-2, 3-0)
+
+        n_u = max(1, round(len_u / mesh.max_size))
+        n_v = max(1, round(len_v / mesh.max_size))
+
+        if n_u == 1 and n_v == 1:
+            continue  # no subdivision needed
+
+        # Bilinear interpolation to create grid points
+        # Parametric coords (0..1) x (0..1) mapped to the quad
+        grid = np.zeros((n_v + 1, n_u + 1, 3))
+        for j in range(n_v + 1):
+            v = j / n_v
+            for i in range(n_u + 1):
+                u = i / n_u
+                # Bilinear: blend corners
+                top = corners[0] * (1 - u) + corners[1] * u
+                bot = corners[3] * (1 - u) + corners[2] * u
+                grid[j, i] = top * (1 - v) + bot * v
+
+        # Create new nodes for interior grid points (skip corners)
+        node_grid = [[None] * (n_u + 1) for _ in range(n_v + 1)]
+        for j in range(n_v + 1):
+            for i in range(n_u + 1):
+                if (i == 0 and j == 0) or (i == n_u and j == 0) \
+                   or (i == n_u and j == n_v) or (i == 0 and j == n_v):
+                    # Corner — use original node ID
+                    idx = (j * (n_u + 1) + i)
+                    orig_corners = [0, 1, 3, 2]  # reorder to match grid
+                    node_grid[j][i] = corner_ids[orig_corners[j * 2 + (i // max(1, n_u))]]
+                    continue
+                new_id = f"{aid}_mesh_{j}_{i}"
+                new_tag = next_tag
+                next_tag += 1
+                pt = grid[j, i]
+                nodes[new_id] = Node(
+                    node_id=new_id, node_tag=new_tag,
+                    x=float(pt[0]), y=float(pt[1]), z=float(pt[2]),
+                )
+                node_grid[j][i] = new_id
+
+        # Mark original area as inactive
+        elem.inactive = True
+
+        # Create sub-area elements (CCW ordering: 0→1→2→3 per sub-quad)
+        sec_name = area_assignments.get(aid, "")
+        for j in range(n_v):
+            for i in range(n_u):
+                sub_id = f"{aid}_sub_{j}_{i}"
+                sub_tag = next_tag
+                next_tag += 1
+                # Quad corners in CCW order
+                n0 = node_grid[j][i]
+                n1 = node_grid[j][i + 1]
+                n2 = node_grid[j + 1][i + 1]
+                n3 = node_grid[j + 1][i]
+                area_elements[sub_id] = AreaElement(
+                    area_id=sub_id, area_tag=sub_tag,
+                    node_ids=[n0, n1, n2, n3],
+                )
+                if sec_name:
+                    area_assignments[sub_id] = sec_name
+
+    return area_elements, area_assignments, nodes, next_tag
 
