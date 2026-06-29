@@ -1751,7 +1751,7 @@ class OpenSeesBuilder:
     def _create_single_shell_section(sec: Section, mat, tag: int) -> None:
         """Create an elastic membrane plate section for a shell element.
 
-        Uses ``ops.section('ElasticMembranePlate', ...)`` with the
+        Uses ``ops.section('ElasticPlateSection', ...)`` with the
         material's Young's modulus, Poisson's ratio, density, and the
         section's thickness.
         """
@@ -1763,7 +1763,7 @@ class OpenSeesBuilder:
         if thickness <= 0.0:
             thickness = 1.0  # fallback
 
-        ops.section('ElasticMembranePlate', tag, E_mod, nu, thickness, rho)
+        ops.section('ElasticPlateSection', tag, E_mod, nu, thickness, rho)
 
     # Analysis
     # -------------------------------------------------------------------------
