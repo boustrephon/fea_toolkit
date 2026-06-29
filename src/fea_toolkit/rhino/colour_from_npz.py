@@ -632,3 +632,115 @@ def create_all_result_flags(
         c = f" [{combo}]" if combo else ""
         print(f"Total{c}: {total} flags across 6 layers")
     return total
+
+
+# ==========================================================================
+# Visualise unconnected shell edges (debug aid)
+# ==========================================================================
+
+_DEBUG_LAYER = "SAP2000/Debug/UnconnectedEdges"
+
+
+def mark_unconnected_edges(
+    reports: list,
+    layer_name: str = _DEBUG_LAYER,
+    mark_slave_nodes: bool = True,
+    verbose: bool = True,
+) -> int:
+    """Draw thick red lines for coarse edges with unconnected slave nodes.
+
+    Use after retrieving detection results from
+    :meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.detect_unconnected_edges`
+    to visualise where slab meshes are discontinuous.
+
+    Parameters
+    ----------
+    reports : list of dict
+        Detection output (each entry has ``master_coords_i``,
+        ``master_coords_j``, ``slave_node``, ``coords``, etc.).
+    layer_name : str
+        Rhino layer for the edge lines (created if needed).
+    mark_slave_nodes : bool
+        Also draw small red dots at each slave node location.
+    verbose : bool
+        Print progress message.
+
+    Returns
+    -------
+    int
+        Number of edge lines created.
+    """
+    import scriptcontext as sc
+    import Rhino
+    import Rhino.Geometry as rg
+    import Rhino.DocObjects as rd
+
+    doc = sc.doc
+
+    # ── Ensure debug layer ──────────────────────────────────────────
+    layer_table = doc.Layers
+    parts = layer_name.split("/")
+    for j in range(1, len(parts) + 1):
+        sub = "/".join(parts[:j])
+        idx = layer_table.Find(sub, True)
+        if idx < 0:
+            new_layer = rd.Layer()
+            new_layer.Name = sub
+            new_layer.Color = Rhino.Display.ColorRGBA(200, 50, 50, 255)
+            if j > 1:
+                parent = layer_table.Find("/".join(parts[:j-1]), True)
+                if parent >= 0:
+                    new_layer.ParentLayerId = layer_table[parent].Id
+            layer_table.Add(new_layer)
+
+    layer_idx = layer_table.Find(layer_name, True)
+    if layer_idx < 0:
+        layer_idx = -1
+
+    # ── Deduplicate edges ───────────────────────────────────────────
+    seen: set = set()
+    unique_edges = []
+    for r in reports:
+        key = (r["master_node_i"], r["master_node_j"])
+        if key not in seen:
+            seen.add(key)
+            unique_edges.append(r)
+
+    # ── Draw lines ──────────────────────────────────────────────────
+    attr = rd.ObjectAttributes()
+    if layer_idx >= 0:
+        attr.LayerIndex = layer_idx
+    attr.ObjectColor = Rhino.Display.ColorRGBA(255, 30, 30, 255)
+    attr.ColorSource = rd.ObjectColorSource.ColorFromObject
+
+    line_count = 0
+    for r in unique_edges:
+        p1 = rg.Point3d(*r["master_coords_i"])
+        p2 = rg.Point3d(*r["master_coords_j"])
+        line = rg.Line(p1, p2)
+        # Thick line via a narrow extrusion / tube is complex; use
+        # a simple Line object (thickness controlled by Rhino display).
+        guid = doc.Objects.AddLine(line, attr)
+        if guid is not None:
+            line_count += 1
+
+    # ── Mark slave nodes ────────────────────────────────────────────
+    if mark_slave_nodes:
+        dot_attr = rd.ObjectAttributes()
+        if layer_idx >= 0:
+            dot_attr.LayerIndex = layer_idx
+        dot_attr.ObjectColor = Rhino.Display.ColorRGBA(255, 30, 30, 255)
+        dot_attr.ColorSource = rd.ObjectColorSource.ColorFromObject
+
+        for r in reports:
+            pt = rg.Point3d(*r["coords"])
+            doc.Objects.AddPoint(pt, dot_attr)
+
+    doc.Views.Redraw()
+
+    if verbose:
+        slave_count = len(reports)
+        print(f"Marked {line_count} edge(s) and {slave_count} slave node(s) "
+              f"on layer '{layer_name}'")
+
+    return line_count
