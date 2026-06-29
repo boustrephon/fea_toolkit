@@ -423,7 +423,7 @@ def create_result_flags(
         sub = "/".join(parts[:j])
         if layer_table.Find(sub, True) < 0:
             new_layer = rd.Layer()
-            new_layer.Name = sub
+            new_layer.Name = parts[j - 1]
             new_layer.Color = Rhino.Display.ColorRGBA(200, 200, 200, 255)
             if j > 1:
                 parent_idx = layer_table.Find("/".join(parts[:j-1]), True)
@@ -685,7 +685,7 @@ def mark_unconnected_edges(
         idx = layer_table.Find(sub, True)
         if idx < 0:
             new_layer = rd.Layer()
-            new_layer.Name = sub
+            new_layer.Name = parts[j - 1]
             new_layer.Color = Rhino.Display.ColorRGBA(200, 50, 50, 255)
             if j > 1:
                 parent = layer_table.Find("/".join(parts[:j-1]), True)

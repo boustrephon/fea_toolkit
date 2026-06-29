@@ -88,9 +88,9 @@ def create_or_get_layer(layer_name: str,
     if layer_index >= 0:
         return layer_index
 
-    # Create new layer
+    # Create new layer — use only the last segment as the layer name
     new_layer = rd.Layer()
-    new_layer.Name = layer_name
+    new_layer.Name = layer_name.split("/")[-1]
     if color is not None:
         new_layer.Color = color
 

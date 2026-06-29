@@ -493,8 +493,8 @@ here.
 
 ---
 
-For shell edge constraints (connecting discontinuous slab meshes) see
-`builder_reference.md`.
+For shell edge constraints (connecting discontinuous slab meshes), see
+[builder_reference.md](builder_reference.md#shell-edge-constraints).
 
 ---
 
