@@ -69,6 +69,7 @@ class OpenSeesBuilder:
         self.split_elements: Optional[Dict[str, FrameElement]] = None
         self.split_assignments: Optional[Dict[str, str]] = None
         self.split_dist_loads: Optional[List[FrameDistributedLoad]] = None
+        self._has_edge_constraints: bool = False
         # self._transf_tags: Dict[int, int] = {}   # elem_id -> transf_tag
 
     def _set_defaults(self) -> None:
@@ -630,6 +631,256 @@ class OpenSeesBuilder:
 
         if self.config['verbose']:
             print(f"  Element {elem_tag}: {node_i} -> {node_j}")
+
+    # -------------------------------------------------------------------------
+    # Shell edge constraints (unconnected mesh edges)
+    # -------------------------------------------------------------------------
+
+    def detect_unconnected_edges(
+        self,
+        tolerance: float = 1e-4,
+        include_frame_connections: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Scan shell elements and report fine-mesh nodes that sit on
+        coarse-mesh edges without being directly connected.
+
+        This is a **diagnostic** tool — it identifies locations where
+        SAP2000 would apply Auto Edge Constraints.  Use its output to
+        build the mapping for :meth:`apply_edge_constraints`.
+
+        Parameters
+        ----------
+        tolerance : float
+            Maximum perpendicular distance from a node to a line segment
+            for it to be considered "on the edge".
+        include_frame_connections : bool
+            Also check whether frame element nodes align with shell edges.
+            Slower but useful when shell elements connect to frame elements
+            at non-nodal points.
+
+        Returns
+        -------
+        List[Dict[str, Any]]
+            Each entry::
+                {
+                    "slave_node": int,
+                    "master_node_i": int,
+                    "master_node_j": int,
+                    "coords": (x, y, z),
+                    "N1": float,   # weight for master_node_i
+                    "N2": float,   # weight for master_node_j
+                    "edge_length": float,
+                    "distance": float,  # perpendicular distance to edge
+                }
+        """
+        reports: List[Dict[str, Any]] = []
+
+        # Collect all shell element edges (deduplicated)
+        edge_set: set = set()
+        for eid, elem in self.model.area_elements.items():
+            if not hasattr(elem, "node_ids") or getattr(elem, "shell_type", "") == "LoadsOnly":
+                continue
+            nodes = elem.node_ids
+            for j in range(len(nodes)):
+                n1 = int(nodes[j])
+                n2 = int(nodes[(j + 1) % len(nodes)])
+                edge_set.add((min(n1, n2), max(n1, n2)))
+        all_edges = list(edge_set)
+
+        if not all_edges:
+            return reports
+
+        # Collect all shell nodes (for slave detection)
+        shell_node_set: set = set()
+        for eid, elem in self.model.area_elements.items():
+            if not hasattr(elem, "node_ids"):
+                continue
+            for n in elem.node_ids:
+                shell_node_set.add(int(n))
+
+        if include_frame_connections:
+            for eid, elem in self.model.frame_elements.items():
+                shell_node_set.add(int(elem.node_i))
+                shell_node_set.add(int(elem.node_j))
+
+        all_slave_nodes = sorted(shell_node_set)
+
+        # For each edge, check each slave node
+        for m1_id, m2_id in all_edges:
+            try:
+                c1 = np.array(ops.nodeCoord(m1_id))
+                c2 = np.array(ops.nodeCoord(m2_id))
+            except Exception:
+                # Node might not be in the OpenSees model yet — skip
+                continue
+
+            edge_vec = c2 - c1
+            edge_len = np.linalg.norm(edge_vec)
+            if edge_len < 1e-12:
+                continue
+
+            for s_id in all_slave_nodes:
+                if s_id == m1_id or s_id == m2_id:
+                    continue
+                try:
+                    cs = np.array(ops.nodeCoord(s_id))
+                except Exception:
+                    continue
+
+                # Perpendicular distance to the line
+                cross_prod = np.cross(cs - c1, cs - c2)
+                distance = np.linalg.norm(cross_prod) / edge_len
+
+                if distance > tolerance:
+                    continue
+
+                # Projection along the edge
+                proj = np.dot(cs - c1, edge_vec) / edge_len
+                if 0.0 < proj < edge_len:
+                    N2 = proj / edge_len
+                    N1 = 1.0 - N2
+                    reports.append({
+                        "slave_node": s_id,
+                        "master_node_i": m1_id,
+                        "master_node_j": m2_id,
+                        "coords": tuple(cs),
+                        "master_coords_i": tuple(c1),
+                        "master_coords_j": tuple(c2),
+                        "N1": round(N1, 6),
+                        "N2": round(N2, 6),
+                        "edge_length": round(edge_len, 6),
+                        "distance": round(distance, 8),
+                    })
+
+        return reports
+
+    def apply_edge_constraints(
+        self,
+        coarse_edges: Optional[List[Tuple[int, int]]] = None,
+        fine_nodes: Optional[List[int]] = None,
+        coarse_elements: Optional[List[int]] = None,
+        tolerance: float = 1e-4,
+        verbose: bool = True,
+    ) -> int:
+        """Apply ETABS-style linear edge constraints between coarse and
+        fine shell meshes.
+
+        Unaligned slave nodes that lie on coarse-mesh edges are tied via
+        ``ops.mpc()`` with interpolation weights based on their position
+        along the edge.  All six DOFs are constrained.
+
+        .. note::
+            After calling this method the solver constraint handler is
+            automatically set to **Penalty** (``1e12, 1e12``) in
+            subsequent analysis runs.  Do **not** set
+            ``solver_constraints`` to ``"Transformation"`` in the config
+            when edge constraints are present.
+
+        Parameters
+        ----------
+        coarse_edges : list of (int, int) or None
+            Explicit master edge node pairs, e.g. ``[(10, 11), (11, 12)]``.
+        fine_nodes : list of int or None
+            Slave node IDs to check.  If ``None``, all shell nodes are
+            candidates.
+        coarse_elements : list of int or None
+            Instead of *coarse_edges*, provide shell element tags to
+            auto-extract their boundary edges.  E.g. ``[1001, 1002]``.
+        tolerance : float
+            Max perpendicular distance to consider a slave node "on the edge".
+        verbose : bool
+            Print progress messages.
+
+        Returns
+        -------
+        int
+            Number of multi-point constraints applied.
+        """
+        # ── Resolve master edges ────────────────────────────────────
+        edge_set: set = set()
+        if coarse_elements is not None:
+            for etag in coarse_elements:
+                try:
+                    nodes = ops.eleNodes(int(etag))
+                except Exception:
+                    continue
+                for j in range(len(nodes)):
+                    n1 = nodes[j]
+                    n2 = nodes[(j + 1) % len(nodes)]
+                    edge_set.add((min(n1, n2), max(n1, n2)))
+        if coarse_edges is not None:
+            for n1, n2 in coarse_edges:
+                edge_set.add((min(n1, n2), max(n1, n2)))
+        if not edge_set:
+            print("No master edges provided — nothing to constrain.")
+            return 0
+
+        # ── Resolve slave nodes ─────────────────────────────────────
+        if fine_nodes is not None:
+            slave_candidates = fine_nodes
+        else:
+            # Default: all shell element nodes
+            all_nodes: set = set()
+            for eid, elem in self.model.area_elements.items():
+                if not hasattr(elem, "node_ids"):
+                    continue
+                for n in elem.node_ids:
+                    all_nodes.add(int(n))
+            slave_candidates = sorted(all_nodes)
+
+        # ── Apply constraints ───────────────────────────────────────
+        count = 0
+        for m1_id, m2_id in edge_set:
+            try:
+                c1 = np.array(ops.nodeCoord(m1_id))
+                c2 = np.array(ops.nodeCoord(m2_id))
+            except Exception:
+                continue
+            edge_vec = c2 - c1
+            edge_len = np.linalg.norm(edge_vec)
+            if edge_len < 1e-12:
+                continue
+
+            for s_id in slave_candidates:
+                if s_id == m1_id or s_id == m2_id:
+                    continue
+                try:
+                    cs = np.array(ops.nodeCoord(s_id))
+                except Exception:
+                    continue
+
+                cross_prod = np.cross(cs - c1, cs - c2)
+                distance = np.linalg.norm(cross_prod) / edge_len
+                if distance > tolerance:
+                    continue
+
+                proj = np.dot(cs - c1, edge_vec) / edge_len
+                if 0.0 < proj < edge_len:
+                    N2 = proj / edge_len
+                    N1 = 1.0 - N2
+                    for dof in range(1, 7):
+                        # equationConstraint: 1.0*U_slave - N1*U_m1 - N2*U_m2 = 0
+                        # Requires Penalty constraint handler.
+                        ops.equationConstraint(
+                            int(s_id), dof, 1.0,
+                            int(m1_id), dof, -N1,
+                            int(m2_id), dof, -N2,
+                        )
+                    count += 1
+                    if verbose:
+                        print(
+                            f"  Edge constraint: node {s_id} → "
+                            f"edge ({m1_id}–{m2_id})  "
+                            f"(N1={N1:.3f}, N2={N2:.3f})"
+                        )
+
+        if count:
+            self._has_edge_constraints = True
+            if verbose:
+                print(f"Applied {count} edge constraint(s). "
+                      f"Solver will use Penalty handler.")
+
+        return count
 
     # -------------------------------------------------------------------------
     # Brace subdivision
@@ -1518,7 +1769,12 @@ class OpenSeesBuilder:
         algo = self.config.get('solver_algorithm', 'Newton')
         n_sub = self.config.get('gravity_num_substeps', 1)
 
-        ops.constraints(self.config.get('solver_constraints', 'Transformation'))
+        cs = self.config.get('solver_constraints', 'Transformation')
+        if self._has_edge_constraints:
+            cs = 'Penalty'
+            ops.constraints('Penalty', 1.0e12, 1.0e12)
+        else:
+            ops.constraints(cs)
         ops.numberer('RCM')
         ops.system(self.config.get('solver_system', 'BandGen'))
         ops.test(test_type, test_tol, test_iter)
@@ -2459,7 +2715,10 @@ class OpenSeesBuilder:
         # ── 6. Lateral push ──
         ops.wipeAnalysis()
         disp_inc = max_disp / num_steps
-        ops.constraints(self.config.get('solver_constraints', 'Transformation'))
+        if self._has_edge_constraints:
+            ops.constraints('Penalty', 1.0e12, 1.0e12)
+        else:
+            ops.constraints(self.config.get('solver_constraints', 'Transformation'))
         ops.numberer('RCM')
         ops.system(self.config.get('solver_system', 'BandGen'))
         ops.test('NormDispIncr', self.config.get('solver_test_tol', 1e-4),
