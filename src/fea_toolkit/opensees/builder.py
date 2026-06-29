@@ -1674,6 +1674,481 @@ class OpenSeesBuilder:
         return results
 
     # =========================================================================
+    # Results export
+    # =========================================================================
+    def export_results_to_npz(self,
+                              filepath: str,
+                              results: Dict[str, Any],
+                              section_responses: Optional[Dict[str, bool]] = None,
+                              other_combos: Optional[Dict[str, Dict[str, Any]]] = None,
+                              ) -> None:
+        """Export analysis results to a compressed NumPy .npz file.
+
+        The file contains flat arrays that can be loaded by Rhino's CPython
+        (``np.load``) and matched to Rhino geometry via SAP UserStrings.
+
+        **Single‑combo export** (default — arrays have no prefix):
+
+        =================  ================================================
+        Array              Description
+        =================  ================================================
+        ``sub_elem_tags``  OpenSees ``elem_tag`` (int)
+        ``sub_sap_ids``    Original SAP FrameID (str), e.g. ``"1"``
+        ``sub_t_start``    Parametric position of I‑end along parent [0,1]
+        ``sub_t_end``      Parametric position of J‑end along parent [0,1]
+        ``sub_node_i_tag`` OpenSees node tag of the I‑end (int)
+        ``sub_node_j_tag`` OpenSees node tag of the J‑end (int)
+        ``fx_i`` … ``mz_i``  I‑end forces in **global** coordinates
+        ``fx_j`` … ``mz_j``  J‑end forces in **global** coordinates
+        ``fx_i_local`` … ``mz_i_local``  I‑end forces in **local** coordinates
+        ``fx_j_local`` … ``mz_j_local``  J‑end forces in **local** coordinates
+        =================  ================================================
+
+        **Nodal data** (one row per model node):
+
+        ================  ================================================
+        Array             Description
+        ================  ================================================
+        ``node_tags``     OpenSees ``node_tag`` (int)
+        ``node_sap_ids``  SAP node ID (str), e.g. ``"1"``
+        ``node_x``        Original X coordinate
+        ``node_y``        Original Y coordinate
+        ``node_z``        Original Z coordinate
+        ``node_dx``       Displacement in X
+        ``node_dy``       Displacement in Y
+        ``node_dz``       Displacement in Z
+        ================  ================================================
+
+        **Section response data** (one row per integration point, only
+        saved when ``section_responses`` is provided):
+
+        =================  ================================================
+        Array              Description
+        =================  ================================================
+        ``sec_ip``         Integration point index (1‑based)
+        ``sec_sub_idx``    Index into the sub‑element arrays above
+        ``sec_N``          Axial force at this IP
+        ``sec_Mz``         Major‑axis moment
+        ``sec_My``         Minor‑axis moment
+        ``sec_Vz``         Shear in local z
+        ``sec_Vy``         Shear in local y
+        ``sec_T``          Torsion
+        ``sec_eps_max``    Maximum fiber strain (tension) at this IP
+        ``sec_sig_max``    Maximum fiber stress (tension) at this IP
+        ``sec_eps_min``    Minimum fiber strain (compression) at this IP
+        ``sec_sig_min``    Minimum fiber stress (compression) at this IP
+        =================  ================================================
+
+        **Metadata**:
+
+        ================  ================================================
+        Array             Description
+        ================  ================================================
+        ``force_unit``    Force unit string (e.g. ``"N"``, ``"kN"``)
+        ``length_unit``   Length unit string (e.g. ``"m"``, ``"mm"``)
+        ``metadata_json`` JSON string with creation timestamp, model
+                          stats, config, and available data flags
+        ================  ================================================
+
+        **Multi‑combo export** — pass *other_combos* to include additional
+        load combinations in the same NPZ file.  Each combo's arrays are
+        prefixed with ``{combo_key}_``, e.g. ``"1.2D+1.5L_sub_fx_i"``.
+        The metadata field ``"combos"`` lists all available combo keys.
+        Shared data (node coordinates, element connectivity, etc.) is
+        stored once without prefix.
+
+        Args:
+            filepath: Path for the output ``.npz`` file.
+            results: Dict returned by :meth:`run_static_analysis`.
+            section_responses: Optional dict of what extra data to save.
+                Keys: ``'section_forces'``, ``'section_defo'``,
+                ``'fiber_stress'``, ``'fiber_strain'``.  Set to ``True``
+                to include that data.  Only has effect when fiber or
+                nonlinear sections are in use.
+            other_combos: Optional dict mapping combo keys to their
+                ``elem_forces`` (from
+                :meth:`extract_static_element_forces`).  Example::
+
+                    other_combos={
+                        "1.2D+1.5L": b.extract_static_element_forces(),
+                        "1.2D+1.5W": b.extract_static_element_forces(),
+                    }
+        """
+        import numpy as np
+
+        def _build_combo_arrays(key: str, combo_forces: Dict, sub_list: List,
+                                n_sub: int, namespace: dict) -> None:
+            """Build prefixed local‑force arrays for a load combination."""
+            for q in ("fx", "fy", "fz", "mx", "my", "mz"):
+                namespace[f"{key}_sub_{q}_i"] = np.full(n_sub, np.nan)
+                namespace[f"{key}_sub_{q}_j"] = np.full(n_sub, np.nan)
+                namespace[f"{key}_sub_{q}_i_local"] = np.full(n_sub, np.nan)
+                namespace[f"{key}_sub_{q}_j_local"] = np.full(n_sub, np.nan)
+            for i, sd in enumerate(sub_list):
+                f = combo_forces.get(sd["elem_tag"])
+                if f is None:
+                    continue
+                tag = sd["elem_tag"]
+                for q, glb, loc_comp in [("fx", "Fx", 0), ("fy", "Fy", 1),
+                                          ("fz", "Fz", 2), ("mx", "Mx", 0),
+                                          ("my", "My", 1), ("mz", "Mz", 2)]:
+                    namespace[f"{key}_sub_{q}_i"][i] = f.get(glb, np.nan)
+                    namespace[f"{key}_sub_{q}_j"][i] = f.get(f"{glb}_j", np.nan)
+                # Local transform
+                elem = sd["elem"]
+                try:
+                    vx, vy, vz = self._get_local_axes(elem)
+                    T = np.vstack([vx, vy, vz])
+                    fi = T @ np.array([f.get("Fx",0), f.get("Fy",0), f.get("Fz",0)])
+                    mi = T @ np.array([f.get("Mx",0), f.get("My",0), f.get("Mz",0)])
+                    fj = T @ np.array([f.get("Fx_j",0), f.get("Fy_j",0), f.get("Fz_j",0)])
+                    mj = T @ np.array([f.get("Mx_j",0), f.get("My_j",0), f.get("Mz_j",0)])
+                    namespace[f"{key}_sub_fx_i_local"][i] = fi[0]
+                    namespace[f"{key}_sub_fy_i_local"][i] = fi[1]
+                    namespace[f"{key}_sub_fz_i_local"][i] = fi[2]
+                    namespace[f"{key}_sub_mx_i_local"][i] = mi[0]
+                    namespace[f"{key}_sub_my_i_local"][i] = mi[1]
+                    namespace[f"{key}_sub_mz_i_local"][i] = mi[2]
+                    namespace[f"{key}_sub_fx_j_local"][i] = fj[0]
+                    namespace[f"{key}_sub_fy_j_local"][i] = fj[1]
+                    namespace[f"{key}_sub_fz_j_local"][i] = fj[2]
+                    namespace[f"{key}_sub_mx_j_local"][i] = mj[0]
+                    namespace[f"{key}_sub_my_j_local"][i] = mj[1]
+                    namespace[f"{key}_sub_mz_j_local"][i] = mj[2]
+                except Exception:
+                    pass
+
+        elements = (self.split_elements if self.split_elements
+                    else self.model.frame_elements)
+
+        # ── 1. Build child‑to‑parent t‑position map ────────────────────
+        parent_breakpoints: Dict[str, List[float]] = {}
+        for eid, elem in elements.items():
+            if elem.inactive and elem.t_locations:
+                pts = [0.0] + sorted(elem.t_locations) + [1.0]
+                parent_breakpoints[eid] = pts
+
+        # ── 2. Gather sub‑element data ─────────────────────────────────
+        sub_list: List[dict] = []
+        for eid, elem in elements.items():
+            if elem.inactive:
+                continue
+            parent_id = elem.parent_id or eid
+            if elem.parent_id and parent_id in parent_breakpoints:
+                pts = parent_breakpoints[parent_id]
+                try:
+                    idx = int(eid.split("-")[-1])
+                except (ValueError, IndexError):
+                    idx = 0
+                t_start = pts[idx] if idx < len(pts) - 1 else 0.0
+                t_end = pts[idx + 1] if idx + 1 < len(pts) else 1.0
+            else:
+                t_start = 0.0
+                t_end = 1.0
+            sub_list.append({
+                "sap_id": parent_id,
+                "elem_tag": elem.elem_tag,
+                "elem": elem,  # keep reference for local axes transform
+                "t_start": t_start,
+                "t_end": t_end,
+            })
+
+        # ── 3. Extract element forces ──────────────────────────────────
+        elem_forces = self.extract_static_element_forces()
+
+        n_sub = len(sub_list)
+        sub_elem_tags = np.empty(n_sub, dtype=np.int32)
+        sub_sap_ids: List[str] = []
+        sub_t_start = np.empty(n_sub, dtype=np.float64)
+        sub_t_end = np.empty(n_sub, dtype=np.float64)
+        sub_node_i_tag = np.empty(n_sub, dtype=np.int32)
+        sub_node_j_tag = np.empty(n_sub, dtype=np.int32)
+        sub_fx_i = np.full(n_sub, np.nan)
+        sub_fy_i = np.full(n_sub, np.nan)
+        sub_fz_i = np.full(n_sub, np.nan)
+        sub_mx_i = np.full(n_sub, np.nan)
+        sub_my_i = np.full(n_sub, np.nan)
+        sub_mz_i = np.full(n_sub, np.nan)
+        sub_fx_j = np.full(n_sub, np.nan)
+        sub_fy_j = np.full(n_sub, np.nan)
+        sub_fz_j = np.full(n_sub, np.nan)
+        sub_mx_j = np.full(n_sub, np.nan)
+        sub_my_j = np.full(n_sub, np.nan)
+        sub_mz_j = np.full(n_sub, np.nan)
+        # Local-coordinate forces (computed from global via rotation matrix)
+        sub_fx_i_local     = np.full(n_sub, np.nan)
+        sub_fy_i_local     = np.full(n_sub, np.nan)
+        sub_fz_i_local     = np.full(n_sub, np.nan)
+        sub_mx_i_local     = np.full(n_sub, np.nan)
+        sub_my_i_local     = np.full(n_sub, np.nan)
+        sub_mz_i_local     = np.full(n_sub, np.nan)
+        sub_fx_j_local     = np.full(n_sub, np.nan)
+        sub_fy_j_local     = np.full(n_sub, np.nan)
+        sub_fz_j_local     = np.full(n_sub, np.nan)
+        sub_mx_j_local     = np.full(n_sub, np.nan)
+        sub_my_j_local     = np.full(n_sub, np.nan)
+        sub_mz_j_local     = np.full(n_sub, np.nan)
+
+        for i, sd in enumerate(sub_list):
+            sub_elem_tags[i] = sd["elem_tag"]
+            sub_sap_ids.append(sd["sap_id"])
+            sub_t_start[i] = sd["t_start"]
+            sub_t_end[i] = sd["t_end"]
+            # Element connectivity for standalone plotting
+            elem = sd["elem"]
+            sub_node_i_tag[i] = self.model.nodes[elem.node_i].node_tag
+            sub_node_j_tag[i] = self.model.nodes[elem.node_j].node_tag
+            f = elem_forces.get(sd["elem_tag"])
+            if f is not None:
+                sub_fx_i[i] = f.get("Fx", np.nan)
+                sub_fy_i[i] = f.get("Fy", np.nan)
+                sub_fz_i[i] = f.get("Fz", np.nan)
+                sub_mx_i[i] = f.get("Mx", np.nan)
+                sub_my_i[i] = f.get("My", np.nan)
+                sub_mz_i[i] = f.get("Mz", np.nan)
+                sub_fx_j[i] = f.get("Fx_j", np.nan)
+                sub_fy_j[i] = f.get("Fy_j", np.nan)
+                sub_fz_j[i] = f.get("Fz_j", np.nan)
+                sub_mx_j[i] = f.get("Mx_j", np.nan)
+                sub_my_j[i] = f.get("My_j", np.nan)
+                sub_mz_j[i] = f.get("Mz_j", np.nan)
+
+                # Local-coordinate transform
+                elem = sd["elem"]
+                try:
+                    vec_x, vec_y, vec_z = self._get_local_axes(elem)
+                    T = np.vstack([vec_x, vec_y, vec_z])  # global→local rotation
+                    fi = T @ np.array([f.get("Fx", 0.0), f.get("Fy", 0.0), f.get("Fz", 0.0)])
+                    mi = T @ np.array([f.get("Mx", 0.0), f.get("My", 0.0), f.get("Mz", 0.0)])
+                    fj = T @ np.array([f.get("Fx_j", 0.0), f.get("Fy_j", 0.0), f.get("Fz_j", 0.0)])
+                    mj = T @ np.array([f.get("Mx_j", 0.0), f.get("My_j", 0.0), f.get("Mz_j", 0.0)])
+                    sub_fx_i_local[i], sub_fy_i_local[i], sub_fz_i_local[i] = fi
+                    sub_mx_i_local[i], sub_my_i_local[i], sub_mz_i_local[i] = mi
+                    sub_fx_j_local[i], sub_fy_j_local[i], sub_fz_j_local[i] = fj
+                    sub_mx_j_local[i], sub_my_j_local[i], sub_mz_j_local[i] = mj
+
+                except Exception:
+                    pass
+
+        # ── 3c. Additional load combinations ──────────────────────────
+        # For each combo we build prefixed force arrays using the same
+        # sub‑element list and local‑axis transform.
+        combo_names: List[str] = []
+        if other_combos:
+            for combo_key, combo_forces in other_combos.items():
+                combo_names.append(combo_key)
+                _build_combo_arrays(combo_key, combo_forces, sub_list,
+                                    n_sub, locals())
+
+        # ── 3b. Section responses (integration-point-level data) ───────
+        save_sec_forces = section_responses and section_responses.get("section_forces")
+        save_sec_defo   = section_responses and section_responses.get("section_defo")
+        save_fiber_stress = section_responses and section_responses.get("fiber_stress")
+        save_fiber_strain = section_responses and section_responses.get("fiber_strain")
+
+        sec_ip_list: List[int] = []
+        sec_sub_idx_list: List[int] = []
+        sec_N_list: List[float] = []
+        sec_Mz_list: List[float] = []
+        sec_My_list: List[float] = []
+        sec_Vz_list: List[float] = []
+        sec_Vy_list: List[float] = []
+        sec_T_list: List[float] = []
+        sec_eps_max_list: List[float] = []
+        sec_sig_max_list: List[float] = []
+        sec_eps_min_list: List[float] = []
+        sec_sig_min_list: List[float] = []
+
+        if save_sec_forces or save_sec_defo or save_fiber_stress or save_fiber_strain:
+            # Determine number of integration points from config
+            beam_int = self.config.get("beam_integration", "Lobatto")
+            if beam_int == "HingeRadau":
+                n_ip = 3  # I‑end hinge, elastic interior, J‑end hinge
+            else:
+                n_ip = self.config.get("num_int_pts", 3)
+
+            for i, sd in enumerate(sub_list):
+                tag = sd["elem_tag"]
+                for ip in range(1, n_ip + 1):
+                    sec_ip_list.append(ip)
+                    sec_sub_idx_list.append(i)
+
+                    # Section forces (OpenSees order: N, Mz, My, Vz, Vy, T)
+                    if save_sec_forces:
+                        try:
+                            sf = ops.eleResponse(tag, "section", ip, "force")
+                            sec_N_list.append(float(sf[0]))
+                            sec_Mz_list.append(float(sf[1]))
+                            sec_My_list.append(float(sf[2]))
+                            sec_Vz_list.append(float(sf[3]))
+                            sec_Vy_list.append(float(sf[4]))
+                            sec_T_list.append(float(sf[5]))
+                        except Exception:
+                            sec_N_list.append(np.nan)
+                            sec_Mz_list.append(np.nan)
+                            sec_My_list.append(np.nan)
+                            sec_Vz_list.append(np.nan)
+                            sec_Vy_list.append(np.nan)
+                            sec_T_list.append(np.nan)
+                    else:
+                        sec_N_list.append(np.nan)
+                        sec_Mz_list.append(np.nan)
+                        sec_My_list.append(np.nan)
+                        sec_Vz_list.append(np.nan)
+                        sec_Vy_list.append(np.nan)
+                        sec_T_list.append(np.nan)
+
+                    # Fiber extremes at this IP
+                    has_fiber = save_fiber_stress or save_fiber_strain
+                    if has_fiber:
+                        try:
+                            fd = ops.eleResponse(tag, "section", ip, "fiberData")
+                            # fiberData returns flat [σ1, ε1, σ2, ε2, ...]
+                            stresses = fd[0::2]
+                            strains  = fd[1::2]
+                            if save_fiber_stress:
+                                sec_sig_max_list.append(float(max(stresses)))
+                                sec_sig_min_list.append(float(min(stresses)))
+                            if save_fiber_strain:
+                                sec_eps_max_list.append(float(max(strains)))
+                                sec_eps_min_list.append(float(min(strains)))
+                        except Exception:
+                            if save_fiber_stress:
+                                sec_sig_max_list.append(np.nan)
+                                sec_sig_min_list.append(np.nan)
+                            if save_fiber_strain:
+                                sec_eps_max_list.append(np.nan)
+                                sec_eps_min_list.append(np.nan)
+                    else:
+                        if save_fiber_stress:
+                            sec_sig_max_list.append(np.nan)
+                            sec_sig_min_list.append(np.nan)
+                        if save_fiber_strain:
+                            sec_eps_max_list.append(np.nan)
+                            sec_eps_min_list.append(np.nan)
+
+        # ── 4. Nodal displacements ─────────────────────────────────────
+        nodal_disp = results.get("nodal_displacements", {})
+        n_nodes = len(self.model.nodes)
+        node_tags = np.empty(n_nodes, dtype=np.int32)
+        node_sap_ids: List[str] = []
+        node_x = np.empty(n_nodes, dtype=np.float64)
+        node_y = np.empty(n_nodes, dtype=np.float64)
+        node_z = np.empty(n_nodes, dtype=np.float64)
+        node_dx = np.full(n_nodes, np.nan)
+        node_dy = np.full(n_nodes, np.nan)
+        node_dz = np.full(n_nodes, np.nan)
+
+        for i, (nid, node) in enumerate(self.model.nodes.items()):
+            node_tags[i] = node.node_tag
+            node_sap_ids.append(nid)
+            node_x[i] = node.x
+            node_y[i] = node.y
+            node_z[i] = node.z
+            disp = nodal_disp.get(node.node_tag)
+            if disp is not None:
+                node_dx[i] = disp[0]
+                node_dy[i] = disp[1]
+                node_dz[i] = disp[2]
+
+        # ── 5. Units & metadata ────────────────────────────────────────
+        force_unit = self.units.get("F", "N")
+        length_unit = self.units.get("L", "m")
+
+        # Build JSON metadata string for self‑describing NPZ
+        import datetime
+        import json
+        elem_type = self.config.get("element_type", "elasticBeamColumn")
+        metadata = {
+            "created": datetime.datetime.now().isoformat(),
+            "toolkit_version": getattr(__import__("fea_toolkit", fromlist=["__version__"]), "__version__", "unknown"),
+            "model_nodes": len(self.model.nodes),
+            "model_frame_elements": len(self.model.frame_elements),
+            "model_area_elements": len(self.model.area_elements),
+            "model_sections": len(self.model.sections),
+            "model_groups": len(self.model.groups),
+            "split_elements": self.config.get("split_elements", False),
+            "element_type": elem_type,
+            "force_unit": force_unit,
+            "length_unit": length_unit,
+            "has_section_responses": bool(sec_ip_list),
+            "has_local_forces": True,
+            "combos": combo_names if combo_names else None,
+        }
+
+        # ── 6. Build the save dict ─────────────────────────────────────
+        # Include combo-prefixed arrays if any
+        combo_arrays = {}
+        if combo_names:
+            for key in combo_names:
+                for q in ("fx", "fy", "fz", "mx", "my", "mz"):
+                    for end in ("i", "j"):
+                        for loc in ("", "_local"):
+                            aname = f"{key}_sub_{q}_{end}{loc}"
+                            val = locals().get(aname)
+                            if val is not None:
+                                combo_arrays[aname] = val
+
+        save_dict = {
+            # Elements
+            "sub_elem_tags": sub_elem_tags,
+            "sub_sap_ids": np.array(sub_sap_ids, dtype=object),
+            "sub_t_start": sub_t_start,
+            "sub_t_end": sub_t_end,
+            "sub_node_i_tag": sub_node_i_tag,
+            "sub_node_j_tag": sub_node_j_tag,
+            "sub_fx_i": sub_fx_i, "sub_fy_i": sub_fy_i, "sub_fz_i": sub_fz_i,
+            "sub_mx_i": sub_mx_i, "sub_my_i": sub_my_i, "sub_mz_i": sub_mz_i,
+            "sub_fx_j": sub_fx_j, "sub_fy_j": sub_fy_j, "sub_fz_j": sub_fz_j,
+            "sub_mx_j": sub_mx_j, "sub_my_j": sub_my_j, "sub_mz_j": sub_mz_j,
+            # Local-coordinate forces
+            "sub_fx_i_local": sub_fx_i_local, "sub_fy_i_local": sub_fy_i_local, "sub_fz_i_local": sub_fz_i_local,
+            "sub_mx_i_local": sub_mx_i_local, "sub_my_i_local": sub_my_i_local, "sub_mz_i_local": sub_mz_i_local,
+            "sub_fx_j_local": sub_fx_j_local, "sub_fy_j_local": sub_fy_j_local, "sub_fz_j_local": sub_fz_j_local,
+            "sub_mx_j_local": sub_mx_j_local, "sub_my_j_local": sub_my_j_local, "sub_mz_j_local": sub_mz_j_local,
+
+            # Nodes
+            "node_tags": node_tags,
+            "node_sap_ids": np.array(node_sap_ids, dtype=object),
+            "node_x": node_x, "node_y": node_y, "node_z": node_z,
+            "node_dx": node_dx, "node_dy": node_dy, "node_dz": node_dz,
+            # Metadata
+            "force_unit": force_unit,
+            "length_unit": length_unit,
+            "metadata_json": np.array(json.dumps(metadata), dtype=object),
+            # Multi‑combo prefixed arrays
+            **combo_arrays,
+        }
+
+        # Section responses (only add if we collected data)
+        if sec_ip_list:
+            save_dict["sec_ip"] = np.array(sec_ip_list, dtype=np.int32)
+            save_dict["sec_sub_idx"] = np.array(sec_sub_idx_list, dtype=np.int32)
+            if save_sec_forces:
+                save_dict["sec_N"] = np.array(sec_N_list)
+                save_dict["sec_Mz"] = np.array(sec_Mz_list)
+                save_dict["sec_My"] = np.array(sec_My_list)
+                save_dict["sec_Vz"] = np.array(sec_Vz_list)
+                save_dict["sec_Vy"] = np.array(sec_Vy_list)
+                save_dict["sec_T"] = np.array(sec_T_list)
+            if save_fiber_stress:
+                save_dict["sec_sig_max"] = np.array(sec_sig_max_list)
+                save_dict["sec_sig_min"] = np.array(sec_sig_min_list)
+            if save_fiber_strain:
+                save_dict["sec_eps_max"] = np.array(sec_eps_max_list)
+                save_dict["sec_eps_min"] = np.array(sec_eps_min_list)
+
+        # ── 6. Write ───────────────────────────────────────────────────
+        np.savez_compressed(filepath, **save_dict)
+
+        if self.config.get("verbose"):
+            print(f"  Exported results to {filepath}")
+            print(f"    {n_sub} sub‑elements, {n_nodes} nodes")
+            if sec_ip_list:
+                n_sec_pts = len(sec_ip_list)
+                print(f"    {n_sec_pts} section integration points")
+
+    # =========================================================================
     # Pushover analysis
     #
     # References:
