@@ -13,6 +13,9 @@ from typing import Dict, List, Optional, Any, Callable, TYPE_CHECKING
 import math
 import numpy as np
 
+from ..model.geometry import get_SAP_vecxz
+from ..utils import compute_flag_parts
+
 if TYPE_CHECKING:
     from ..model.selection import Selection
 
@@ -522,28 +525,39 @@ def plot_static_moment_3d(
     mode: str = 'flag',
     moment_scale: float = None,
     show_original: bool = True,
+    show_reactions: bool = False,
+    static_results: Optional[Dict[str, Any]] = None,
     selection: Optional['Selection'] = None,
     notebook: bool = False,
+    title: str = None,
     **kwargs,
 ) -> Optional[Any]:
-    """Draw a moment diagram in 3D on the structure.
+    """Draw a moment or force diagram in 3D on the structure.
+
+    Supports both moment quantities (``'My'``, ``'Mz'``, ``'Mx'``) and
+    force quantities (``'Fx'``, ``'Fy'``, ``'Fz'``).
 
     Two display modes are available:
 
     * ``mode='flag'`` (default) — planar quadrilaterals extruded
-      perpendicular to each member on the tension side.  The flag height
-      is proportional to the moment magnitude.
+      perpendicular to each member.  The flag height is proportional to
+      the quantity magnitude.
     * ``mode='tube'`` — each element drawn as a coloured tube with a
       diverging red‑white‑blue colour map (blue = −ve, red = +ve).
 
-    For the flag mode:
+    For the flag mode with moment quantities:
 
     * ``'My'`` — flags extend in the local **z** direction (bending about Y).
     * ``'Mz'`` — flags extend in the local **y** direction (bending about Z).
 
-    Forces are extracted in the **global** system, then combined with local
-    axes for the offset direction.  The J‑end moment is negated so that the
-    flag draws consistently on the tension side along the whole element.
+    For force quantities the flags extend in a world‑perpendicular
+    direction (no J‑end sign flip).
+
+    Uses **local** forces via :func:`_get_local_end_forces` so the sign
+    and direction are correct regardless of member orientation.
+
+    When ``show_reactions=True``, reaction forces at restrained nodes are
+    drawn as coloured arrows (red = horizontal, green = vertical).
 
     Args:
         builder: Built ``OpenSeesBuilder``.
@@ -554,9 +568,13 @@ def plot_static_moment_3d(
                       If ``None``, auto‑scaled so the largest flag is
                       10 % of the model height.
         show_original: If True, draw the centreline in grey.
+        show_reactions: If True, draw reaction arrows at restrained nodes.
+        static_results: Dict from ``builder.run_static_analysis()``, required
+                        when ``show_reactions=True``.
         selection: Optional :class:`~fea_toolkit.model.selection.Selection`
             to restrict which elements are shown.  ``None`` means all.
         notebook: If True, return plotter for Jupyter.
+        title: Optional title string displayed at the top of the plot.
         **kwargs: Passed to ``pyvista.Plotter()``.
 
     Requires:
@@ -578,28 +596,156 @@ def plot_static_moment_3d(
                     if eid in sel_ids}
 
     if mode == 'flag':
-        return _plot_moment_flags(builder, elements, elem_forces, quantity,
-                                  moment_scale, show_original, notebook, **kwargs)
+        plotter = _plot_moment_flags(builder, elements, elem_forces, quantity,
+                                     moment_scale, show_original, notebook,
+                                     title=title, **kwargs)
     elif mode == 'tube':
-        return _plot_moment_tubes(builder, elements, elem_forces, quantity,
-                                  show_original, notebook, **kwargs)
+        plotter = _plot_moment_tubes(builder, elements, elem_forces, quantity,
+                                     show_original, notebook,
+                                     title=title, **kwargs)
     else:
         print(f"Unknown mode '{mode}'.  Use 'flag' or 'tube'.")
         return None
 
+    # Add reaction arrows if requested
+    if show_reactions and static_results is not None and plotter is not None:
+        _add_reaction_arrows(plotter, builder, static_results)
 
-def _plot_moment_flags(builder, elements, elem_forces, quantity,
-                       moment_scale, show_original, notebook, **kwargs):
-    """Flag‑based moment diagram (extruded on tension side)."""
+    if plotter is not None and notebook:
+        return plotter
+    return plotter  # the flag/tube function already called show()
+
+
+def _get_local_end_forces(builder, elem, tag, elem_forces):
+    """Transform global end forces to local coordinates for one element.
+
+    Returns dict with local ``Fx``, ``Fy``, ``Fz``, ``Mx``, ``My``, ``Mz``
+    and their ``_j`` counterparts, or ``None`` if axes cannot be computed.
+    """
+    import numpy as np
+    try:
+        vx, vy, vz = builder._get_local_axes(elem)
+    except Exception:
+        return None
+    T = np.vstack([vx, vy, vz])  # (3, 3) local ← global
+    f = elem_forces.get(tag, {})
+    f_i = np.array([f.get('Fx', 0.0), f.get('Fy', 0.0), f.get('Fz', 0.0)])
+    m_i = np.array([f.get('Mx', 0.0), f.get('My', 0.0), f.get('Mz', 0.0)])
+    f_j = np.array([f.get('Fx_j', 0.0), f.get('Fy_j', 0.0), f.get('Fz_j', 0.0)])
+    m_j = np.array([f.get('Mx_j', 0.0), f.get('My_j', 0.0), f.get('Mz_j', 0.0)])
+    f_i_loc = T @ f_i
+    m_i_loc = T @ m_i
+    f_j_loc = T @ f_j
+    m_j_loc = T @ m_j
+    return {
+        'Fx': f_i_loc[0], 'Fy': f_i_loc[1], 'Fz': f_i_loc[2],
+        'Mx': m_i_loc[0], 'My': m_i_loc[1], 'Mz': m_i_loc[2],
+        'Fx_j': f_j_loc[0], 'Fy_j': f_j_loc[1], 'Fz_j': f_j_loc[2],
+        'Mx_j': m_j_loc[0], 'My_j': m_j_loc[1], 'Mz_j': m_j_loc[2],
+    }
+
+
+# Convenience wrappers for shear, axial, and other force diagrams
+def plot_static_shear_3d(builder, elem_forces, quantity='Fz', **kwargs):
+    """3D shear force diagram — convenience wrapper around
+    :func:`plot_static_moment_3d` with ``quantity`` set to a force.
+
+    Parameters
+    ----------
+    quantity : str
+        ``'Fz'`` (default), ``'Fy'``, or ``'Fx'``.
+    **kwargs
+        Passed through to :func:`plot_static_moment_3d`.
+    """
+    return plot_static_moment_3d(builder, elem_forces, quantity=quantity, **kwargs)
+
+
+def plot_static_axial_3d(builder, elem_forces, **kwargs):
+    """3D axial force diagram — convenience wrapper around
+    :func:`plot_static_moment_3d` with ``quantity='Fx'``.
+
+    Parameters
+    ----------
+    **kwargs
+        Passed through to :func:`plot_static_moment_3d`.
+    """
+    return plot_static_moment_3d(builder, elem_forces, quantity='Fx', **kwargs)
+
+
+def _add_reaction_arrows(plotter, builder, static_results):
+    """Add coloured arrows at restrained nodes showing reaction forces.
+
+    Red arrows = horizontal resultant (fx, fy).
+    Green arrows = vertical (fz).
+    Arrow length is proportional to force magnitude, auto-scaled to 10 %
+    of the model height for the largest force.
+    """
+    import numpy as np
     import pyvista as pv
 
-    offset_axis = 'z' if quantity == 'My' else 'y'
-    if quantity not in ('My', 'Mz'):
-        print(f"Unsupported quantity '{quantity}'.  Use 'My' or 'Mz'.")
+    reactions = static_results.get("nodal_reactions", {})
+    if not reactions:
+        return
+
+    # Compute model height from builder nodes
+    z_vals = [n.z for n in builder.model.nodes.values()]
+    z_range = max(z_vals) - min(z_vals) if z_vals else 1.0
+
+    max_horiz = 0.0
+    max_vert = 0.0
+    arrow_data: list = []
+    for nid_tag, r in reactions.items():
+        fx, fy, fz = r[0], r[1], r[2]
+        # Find the node by tag
+        for node in builder.model.nodes.values():
+            if node.node_tag == nid_tag:
+                pos = np.array([node.x, node.y, node.z])
+                break
+        else:
+            continue
+        horiz = math.hypot(fx, fy)
+        vert = abs(fz)
+        if horiz > 1e-6:
+            max_horiz = max(max_horiz, horiz)
+            arrow_data.append(("horiz", pos, np.array([fx, fy, 0.0]), horiz))
+        if vert > 1e-6:
+            max_vert = max(max_vert, vert)
+            arrow_data.append(("vert", pos, np.array([0.0, 0.0, fz]), vert))
+
+    scale_h = (z_range * 0.08) / max(max_horiz, 1.0)
+    scale_v = (z_range * 0.08) / max(max_vert, 1.0)
+
+    for atype, pos, vec, mag in arrow_data:
+        scale = scale_h if atype == "horiz" else scale_v
+        tip = pos + vec * scale
+        arrow = pv.Arrow(start=pos, direction=vec / max(mag, 1e-12),
+                         scale=mag * scale)
+        colour = (0.9, 0.1, 0.1) if atype == "horiz" else (0.1, 0.8, 0.1)
+        plotter.add_mesh(arrow, color=colour, opacity=0.85)
+
+
+def _plot_moment_flags(builder, elements, elem_forces, quantity,
+                       moment_scale, show_original, notebook,
+                       title=None, **kwargs):
+    """Flag‑based force/moment diagram (extruded on tension/sign side).
+
+    Uses **local** forces so the flag always extends perpendicular to the
+    member axis:
+
+    * Moment quantities (``'Mz'``, ``'My'``, ``'Mx'``): flags extend in the
+      corresponding local direction, J‑end negated for bending convention.
+    * Force quantities (``'Fx'``, ``'Fy'``, ``'Fz'``): flags extend in a
+      world‑perpendicular direction, no sign flip.
+    """
+    import pyvista as pv
+
+    is_moment = quantity.startswith("M")
+    if not is_moment and not quantity.startswith("F"):
+        print(f"Unsupported quantity '{quantity}'.  Use 'M*' or 'F*'.")
         return None
 
     model_height = 0.0
-    max_moment = 0.0
+    max_val = 0.0
     flags = []
     for eid, elem in elements.items():
         if getattr(elem, 'inactive', False):
@@ -614,23 +760,45 @@ def _plot_moment_flags(builder, elements, elem_forces, quantity,
         p_i = np.array([ni.x, ni.y, ni.z])
         p_j = np.array([nj.x, nj.y, nj.z])
         model_height = max(model_height, ni.z, nj.z)
+
+        # Use local forces for consistent sign convention
+        loc = _get_local_end_forces(builder, elem, tag, elem_forces)
+        if loc is None:
+            continue
+        v_i = loc.get(quantity, 0.0)
+        v_j = loc.get(quantity + '_j', 0.0)
+
+        # Flag offset direction (vn) based on quantity
+        # Positive Fi → offset in +vn at I-end
+        # Positive Fj → offset in -vn at J-end (baked-in negation)
         try:
-            vx, vy, vz = builder._get_local_axes(elem)
+            vx_e, vy_e, vz_e = builder._get_local_axes(elem)
         except Exception:
             continue
-        offset_dir = vz if offset_axis == 'z' else vy
-        Mi = elem_forces[tag].get(quantity, 0.0)
-        # Negate J-end so the flag draws consistently on the tension side
-        Mj = -elem_forces[tag].get(quantity + '_j', 0.0)
-        max_moment = max(max_moment, abs(Mi), abs(Mj))
-        flags.append((p_i, p_j, offset_dir, Mi, Mj))
+        if quantity == "Fx":
+            vn = np.array(vz_e)
+        elif quantity == "Fy":
+            vn = np.array(vy_e)
+        elif quantity == "Fz":
+            vn = np.array(vz_e)
+        elif quantity == "Mx":
+            vn = np.array(vy_e)
+        elif quantity == "My":
+            vn = -np.array(vz_e)
+        elif quantity == "Mz":
+            vn = np.array(vy_e)
+        else:
+            vn = np.array(vz_e)
+
+        max_val = max(max_val, abs(v_i), abs(v_j))
+        flags.append((p_i, p_j, vn, v_i, v_j))
 
     if not flags:
-        print("No moment data to plot.")
+        print(f"No {quantity} data to plot.")
         return None
 
     if moment_scale is None:
-        moment_scale = (model_height * 0.1) / max(max_moment, 1.0)
+        moment_scale = (model_height * 0.2) / max(max_val, 1.0)
 
     plotter = pv.Plotter(notebook=notebook, **kwargs)
 
@@ -640,24 +808,24 @@ def _plot_moment_flags(builder, elements, elem_forces, quantity,
             poly = pv.lines_from_points(np.linspace(p_i, p_j, n))
             plotter.add_mesh(poly, color='lightgrey', line_width=1, opacity=0.4)
 
-    for p_i, p_j, odir, Mi, Mj in flags:
-        off_i = odir * Mi * moment_scale
-        off_j = odir * Mj * moment_scale
-        pts = np.array([p_i, p_j, p_j + off_j, p_i + off_i])
-        face = np.array([4, 0, 1, 2, 3])
-        surf = pv.PolyData(pts, faces=face)
-        avg = (Mi + Mj) * 0.5
-        if avg >= 0:
-            intensity = min(avg / max(max_moment, 1.0), 1.0)
-            colour = (0.3 + 0.7 * intensity, 0.0, 0.0)
-        else:
-            intensity = min(abs(avg) / max(max_moment, 1.0), 1.0)
-            colour = (0.0, 0.0, 0.3 + 0.7 * intensity)
-        plotter.add_mesh(surf, color=colour, opacity=0.85,
-                         show_edges=False, smooth_shading=True)
+    for p_i, p_j, vn, Fi, Fj in flags:
+        for verts, col_val in compute_flag_parts(p_i, p_j, vn, Fi, Fj, moment_scale):
+            pts_arr = np.array(verts)
+            n = len(verts)
+            surf = pv.PolyData(pts_arr, faces=[n] + list(range(n)))
+            t = min(abs(col_val) / max(max_val, 1.0), 1.0)
+            if col_val >= 0:
+                colour = (0.3 + 0.7 * t, 0.3 - 0.2 * t, 0.3 - 0.3 * t)
+            else:
+                colour = (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
+            plotter.add_mesh(surf, color=colour, opacity=0.85,
+                             show_edges=False, smooth_shading=False, lighting=False)
 
-    plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)",
+    kind = "Moment" if is_moment else "Force"
+    plotter.add_text(f"{quantity} (local)  (red = +ve, blue = −ve)",
                      position='lower_edge', font_size=10)
+    if title:
+        plotter.add_text(title, position='upper_edge', font_size=12)
     _set_isometric_view(plotter)
     if notebook:
         return plotter
@@ -666,11 +834,16 @@ def _plot_moment_flags(builder, elements, elem_forces, quantity,
 
 
 def _plot_moment_tubes(builder, elements, elem_forces, quantity,
-                       show_original, notebook, **kwargs):
-    """Tube‑based moment diagram (colour‑coded along element)."""
+                       show_original, notebook, title=None, **kwargs):
+    """Tube‑based force/moment diagram (colour‑coded along element).
+
+    Uses **local** forces for consistent colour mapping regardless of
+    member orientation.  Works for both moment (``'M*'``) and force
+    (``'F*'``) quantities.
+    """
     import pyvista as pv
 
-    moments = []
+    values = []
     segments = []
     for eid, elem in elements.items():
         if getattr(elem, 'inactive', False):
@@ -682,19 +855,23 @@ def _plot_moment_tubes(builder, elements, elem_forces, quantity,
         nj = builder.model.nodes.get(elem.node_j)
         if ni is None or nj is None:
             continue
-        val = elem_forces[tag].get(quantity, 0.0)
-        moments.append(val)
+        loc = _get_local_end_forces(builder, elem, tag, elem_forces)
+        if loc is None:
+            continue
+        val = loc.get(quantity, 0.0)
+        values.append(val)
         p1 = np.array([ni.x, ni.y, ni.z])
         p2 = np.array([nj.x, nj.y, nj.z])
         segments.append((p1, p2, val))
 
     if not segments:
-        print("No moment data to plot.")
+        print(f"No {quantity} data to plot.")
         return None
 
-    vlim = max(abs(min(moments)), abs(max(moments)), 1.0)
+    vlim = max(abs(min(values)), abs(max(values)), 1.0)
 
     plotter = pv.Plotter(notebook=notebook, **kwargs)
+    plotter.set_background('white')
 
     if show_original:
         for p1, p2, _ in segments:
@@ -706,18 +883,20 @@ def _plot_moment_tubes(builder, elements, elem_forces, quantity,
         n = max(8, int(np.linalg.norm(p2 - p1) * 4))
         poly = pv.lines_from_points(np.linspace(p1, p2, n))
         norm_val = val / vlim
-        if norm_val <= 0:
-            intensity = abs(norm_val)
-            colour = (0.0, 0.0, 0.4 + 0.6 * (1.0 - intensity))
+        t = abs(norm_val)
+        if norm_val >= 0:
+            colour = (0.3 + 0.7 * t, 0.3 - 0.2 * t, 0.3 - 0.3 * t)
         else:
-            intensity = norm_val
-            colour = (0.4 + 0.6 * intensity, 0.0, 0.0)
+            colour = (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
         radius = 0.02 * max(np.linalg.norm(p2 - p1), 0.1)
         tube = poly.tube(radius=radius)
-        plotter.add_mesh(tube, color=colour, smooth_shading=True)
+        plotter.add_mesh(tube, color=colour, smooth_shading=False, lighting=False)
 
+    kind = "Moment" if quantity.startswith("M") else "Force"
     plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)",
                      position='lower_edge', font_size=10)
+    if title:
+        plotter.add_text(title, position='upper_edge', font_size=12)
     _set_isometric_view(plotter)
     if notebook:
         return plotter
@@ -736,39 +915,116 @@ def plot_static_force_diagram(
     title: str = None,
     selection: Optional['Selection'] = None,
     figsize=(6, 8),
+    use_local: bool = True,
     **kwargs,
 ) -> Optional[Any]:
     """Plot a static element force/moment quantity vs elevation.
 
-    The forces are in the **global** coordinate system.  For a vertical
-    structure like a chimney:
+    When ``use_local=True`` (default), forces are transformed from global
+    to **local** coordinates using the element's local axes
+    (:meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder._get_local_axes`).
+    This ensures that the quantity has a consistent physical meaning
+    regardless of member orientation:
 
-    * ``'Fz'`` — axial force (compression), use this for vertical loads.
-    * ``'My'`` — bending moment about Y (from lateral loads in X).
-    * ``'Fx'`` / ``'Fy'`` — shear in X / Y directions.
+    ============  ======================================================
+    Quantity      Local meaning
+    ============  ======================================================
+    ``'Fx'``      Axial force (+ = tension)
+    ``'Fy'``      Shear in local y‑direction
+    ``'Fz'``      Shear in local z‑direction
+    ``'Mx'``      Torsion
+    ``'My'``      Bending about local y‑axis (minor)
+    ``'Mz'``      Bending about local z‑axis (major)
+    ============  ======================================================
+
+    When ``use_local=False``, the raw global forces are plotted.
+
+    For **moment** quantities, the J‑end value is negated so that the
+    line connects I‑end → J‑end in the standard bending‑moment diagram
+    convention (positive = tension on the same face of the member).
+
+    For **force** quantities, both ends are plotted as‑is.
+
+    The vertical axis shows Z‑elevation for all members.  This is most
+    useful for vertical columns and walls.  Horizontal beams will plot
+    their I‑end and J‑end at different elevations, showing the moment
+    variation along their span.
 
     Args:
         builder: Built ``OpenSeesBuilder``.
         elem_forces: Dict from ``builder.extract_static_element_forces()``.
-        quantity: Global force key — ``'Fx'``, ``'Fy'``, ``'Fz'``,
+        quantity: Force key — ``'Fx'``, ``'Fy'``, ``'Fz'``,
                   ``'Mx'``, ``'My'``, ``'Mz'``.
         title: Optional title.  Auto‑generated if omitted.
         selection: Optional :class:`~fea_toolkit.model.selection.Selection`
             to restrict which elements are shown.  ``None`` means all.
         figsize: Matplotlib figure size ``(width, height)``.
+        use_local: If True (default), transform to local coordinates.
         **kwargs: Passed to ``matplotlib.pyplot.plot()``.
 
     Returns:
         The ``matplotlib.figure.Figure``.
     """
-    # Build a list matching the format expected by plot_force_diagram
+    import matplotlib.pyplot as plt
+    import numpy as np
+
     elements = (builder.split_elements if builder.split_elements
                 else builder.model.frame_elements)
     if selection is not None:
         sel_ids = set(selection.get_frame_ids(builder.model))
         elements = {eid: elem for eid, elem in elements.items()
                     if eid in sel_ids}
-    entries = []
+
+    is_moment = quantity.startswith('M')
+    j_key = quantity + '_j' if is_moment else quantity + '_j'
+
+    # ── Helper: get local end forces for one element ──
+    def _local_end_forces(elem, tag) -> dict:
+        """Transform global end forces to local coordinates."""
+        try:
+            vx, vy, vz = builder._get_local_axes(elem)
+        except Exception:
+            return None
+        # Build 3×3 rotation matrix (local ← global)
+        T = np.vstack([vx, vy, vz])  # (3, 3)
+        # Extract global force & moment vectors at I-end
+        f_i_global = np.array([
+            elem_forces[tag].get('Fx', 0.0),
+            elem_forces[tag].get('Fy', 0.0),
+            elem_forces[tag].get('Fz', 0.0),
+        ])
+        m_i_global = np.array([
+            elem_forces[tag].get('Mx', 0.0),
+            elem_forces[tag].get('My', 0.0),
+            elem_forces[tag].get('Mz', 0.0),
+        ])
+        f_j_global = np.array([
+            elem_forces[tag].get('Fx_j', 0.0),
+            elem_forces[tag].get('Fy_j', 0.0),
+            elem_forces[tag].get('Fz_j', 0.0),
+        ])
+        m_j_global = np.array([
+            elem_forces[tag].get('Mx_j', 0.0),
+            elem_forces[tag].get('My_j', 0.0),
+            elem_forces[tag].get('Mz_j', 0.0),
+        ])
+        # Transform: local = T @ global
+        f_i_local = T @ f_i_global
+        m_i_local = T @ m_i_global
+        f_j_local = T @ f_j_global
+        m_j_local = T @ m_j_global
+        return {
+            'Fx': f_i_local[0], 'Fy': f_i_local[1], 'Fz': f_i_local[2],
+            'Mx': m_i_local[0], 'My': m_i_local[1], 'Mz': m_i_local[2],
+            'Fx_j': f_j_local[0], 'Fy_j': f_j_local[1], 'Fz_j': f_j_local[2],
+            'Mx_j': m_j_local[0], 'My_j': m_j_local[1], 'Mz_j': m_j_local[2],
+        }
+
+    # Collect (z, value) pairs — two per element (I‑end and J‑end)
+    z_coords: List[float] = []
+    values: List[float] = []
+    segments: List[List[int]] = []  # each = [idx_i, idx_j]
+
     for eid, elem in elements.items():
         if getattr(elem, 'inactive', False):
             continue
@@ -779,17 +1035,69 @@ def plot_static_force_diagram(
         nj = builder.model.nodes.get(elem.node_j)
         if ni is None or nj is None:
             continue
-        z_mid = (ni.z + nj.z) * 0.5
-        entries.append({
-            'z_mid': z_mid,
-            quantity: elem_forces[tag].get(quantity, 0.0),
-        })
-    if not entries:
+
+        # Get the appropriate force dict (local or global)
+        if use_local:
+            f_local = _local_end_forces(elem, tag)
+            if f_local is None:
+                continue
+            src = f_local
+        else:
+            src = elem_forces[tag]
+
+        val_i = src.get(quantity, 0.0)
+        # Negate J‑end for consistent diagram convention
+        if j_key and j_key in src:
+            val_j = -src.get(j_key, 0.0)
+        else:
+            val_j = val_i
+
+        idx_i = len(z_coords)
+        z_coords.append(ni.z)
+        values.append(val_i)
+
+        idx_j = len(z_coords)
+        z_coords.append(nj.z)
+        values.append(val_j)
+
+        segments.append([idx_i, idx_j])
+
+    if not values:
         print("No element force data to plot.")
         return None
-    return plot_force_diagram(
-        entries, quantity, title=title, figsize=figsize, **kwargs,
-    )
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Plot each element as a solid line segment
+    line_kw = {k: v for k, v in kwargs.items()
+               if k not in ('marker', 'linestyle')}
+
+    for seg in segments:
+        ax.plot([values[seg[0]], values[seg[1]]],
+                [z_coords[seg[0]], z_coords[seg[1]]],
+                **line_kw,
+                )
+
+    # Markers at the data points
+    ax.plot(values, z_coords,
+            **kwargs,
+            linestyle='',
+            )
+
+    # Unit label
+    unit_label = builder.units.get('F', 'N')
+    if is_moment:
+        length_unit = builder.units.get('L', 'm')
+        unit_label = f"{unit_label}·{length_unit}"
+
+    local_tag = " (local)" if use_local else ""
+    ax.axvline(0, color='grey', linewidth=0.8, linestyle='--', alpha=0.5)
+    ax.set_xlabel(f"{quantity}{local_tag} ({unit_label})")
+    ax.set_ylabel("Elevation (m)")
+    ax.set_title(title or f"{quantity}{local_tag} vs elevation")
+    ax.grid(True, alpha=0.25)
+    fig.tight_layout()
+    return fig
 
 
 def plot_force_diagram(
@@ -1021,3 +1329,361 @@ def plot_capacity_spectrum(
 
     fig.tight_layout()
     return fig
+
+
+# =========================================================================
+# Standalone NPZ plotter
+#
+# These functions load a .npz results file (exported by
+# OpenSeesBuilder.export_results_to_npz) and generate plots without
+# needing the original OpenSeesBuilder or model objects.
+# =========================================================================
+
+
+def _load_npz_for_plotting(npz_path: str, combo: str = None) -> dict:
+    """Load an NPZ results file and build element‑centric arrays.
+
+    Parameters
+    ----------
+    npz_path : str
+        Path to the ``.npz`` results file.
+    combo : str or None
+        Load‑combination key (prefix).  ``None`` = primary results.
+
+    Returns a dict with:
+        - elem_data: list of dicts (one per sub‑element) with keys:
+            sap_id, (x|y|z)_i, (x|y|z)_j, mid_z,
+            fx_i, fy_i, fz_i, mx_i, my_i, mz_i,
+            fx_j, fy_j, fz_j, mx_j, my_j, mz_j,
+            and ``_local`` variants
+        - metadata: parsed metadata dict (or ``{}``)
+        - force_unit, length_unit: unit strings
+        - raw_data: the loaded npz dict
+    """
+    data = np.load(npz_path, allow_pickle=True)
+    prefix = f"{combo}_" if combo else ""
+
+    # Metadata
+    metadata_raw = data.get("metadata_json")
+    metadata = {}
+    if metadata_raw is not None:
+        try:
+            metadata = json.loads(str(metadata_raw.item()))
+        except Exception:
+            pass
+
+    def _s(key) -> str:
+        arr = data.get(key)
+        if arr is not None:
+            return str(arr.item())
+        return "?"
+
+    force_unit = _s("force_unit")
+    length_unit = _s("length_unit")
+
+    # Build look‑up: node_tag → (x, y, z)
+    n_tags = data.get("node_tags")
+    n_x = data.get("node_x")
+    n_y = data.get("node_y")
+    n_z = data.get("node_z")
+    node_coords: Dict[int, tuple] = {}
+    if n_tags is not None and n_x is not None:
+        for i in range(len(n_tags)):
+            node_coords[int(n_tags[i])] = (
+                float(n_x[i]),
+                float(n_y[i]),
+                float(n_z[i]),
+            )
+
+    # Build element list
+    has_local = metadata.get("has_local_forces", metadata.get("has_local", False)) or f"{prefix}sub_fx_i_local" in data
+    elem_data: List[dict] = []
+    for i in range(len(data["sub_elem_tags"])):
+        n_i_tag = int(data["sub_node_i_tag"][i])
+        n_j_tag = int(data["sub_node_j_tag"][i])
+        c_i = node_coords.get(n_i_tag, (0, 0, 0))
+        c_j = node_coords.get(n_j_tag, (0, 0, 0))
+        x_i, y_i, z_i = c_i
+        x_j, y_j, z_j = c_j
+        mid_z = (z_i + z_j) / 2.0
+
+        def _g(k: str) -> float:
+            pk = f"{prefix}{k}"
+            arr = data.get(pk)
+            return float(arr[i]) if arr is not None else np.nan
+
+        entry: dict = {
+            "sap_id": str(data["sub_sap_ids"][i]),
+            "x_i": x_i, "y_i": y_i, "z_i": z_i,
+            "x_j": x_j, "y_j": y_j, "z_j": z_j,
+            "mid_z": mid_z,
+            "fx_i": _g("sub_fx_i"), "fy_i": _g("sub_fy_i"), "fz_i": _g("sub_fz_i"),
+            "mx_i": _g("sub_mx_i"), "my_i": _g("sub_my_i"), "mz_i": _g("sub_mz_i"),
+            "fx_j": _g("sub_fx_j"), "fy_j": _g("sub_fy_j"), "fz_j": _g("sub_fz_j"),
+            "mx_j": _g("sub_mx_j"), "my_j": _g("sub_my_j"), "mz_j": _g("sub_mz_j"),
+        }
+        if has_local:
+            for q in ("fx", "fy", "fz", "mx", "my", "mz"):
+                k = f"sub_{q}_i_local"
+                entry[f"{q}_i_local"] = _g(k) if f"{prefix}{k}" in data else _g(f"sub_{q}_i")
+                k = f"sub_{q}_j_local"
+                entry[f"{q}_j_local"] = _g(k) if f"{prefix}{k}" in data else _g(f"sub_{q}_j")
+        elem_data.append(entry)
+
+    return {
+        "elem_data": elem_data,
+        "metadata": metadata,
+        "force_unit": force_unit,
+        "length_unit": length_unit,
+        "raw_data": data,
+    }
+
+
+def plot_npz_force_diagram(
+    npz_path: str,
+    quantity: str = "Mz",
+    use_local: bool = True,
+    combo: str = None,
+    title: Optional[str] = None,
+    figsize: tuple = (8, 6),
+) -> "Figure":
+    """2D diagram of a local force quantity vs elevation from an NPZ file.
+
+    This is a **standalone** function — it does **not** require any
+    ``OpenSeesBuilder`` or model objects.  Just pass the path to a
+    ``.npz`` file created by :meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.export_results_to_npz`.
+
+    Parameters
+    ----------
+    npz_path : str
+        Path to the ``.npz`` results file.
+    quantity : str
+        Force quantity to plot.  Prefix with ``'M'`` for moment or
+        ``'F'`` for axial/shear.  Examples: ``'Mz'``, ``'My'``, ``'Mx'``,
+        ``'Fx'``, ``'Fy'``, ``'Fz'``.
+    use_local : bool
+        If ``True`` (default) use local‑coordinate forces.
+    title : str or None
+        Plot title.  Auto‑generated from the quantity if *None*.
+    figsize : tuple
+        Figure size ``(width, height)`` in inches.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    from matplotlib import pyplot as plt
+
+    info = _load_npz_for_plotting(npz_path, combo=combo)
+    elem_data = info["elem_data"]
+    force_unit = info["force_unit"]
+    length_unit = info["length_unit"]
+
+    suffix = "_local" if use_local else ""
+    q_i = f"{quantity.lower()}_i{suffix}"
+    q_j = f"{quantity.lower()}_j{suffix}"
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    for ed in elem_data:
+        v_i = ed.get(q_i, np.nan)
+        v_j = ed.get(q_j, np.nan)
+        if np.isnan(v_i) or np.isnan(v_j):
+            continue
+        z_i = ed["z_i"]
+        z_j = ed["z_j"]
+        # Negate J‑end for forces only (axial/shear satisfy F_j = –F_i)
+        if not quantity.startswith("M"):
+            v_j = -v_j
+        ax.plot([v_i, v_j], [z_i, z_j], color="tab:blue", lw=1.0, alpha=0.7)
+
+    ax.axvline(0, color="grey", lw=0.5, ls="--")
+    kind = "Bending moment" if quantity.startswith("M") else "Force"
+    ax.set_xlabel(f"{kind} {quantity} [{force_unit}]" + (" (local)" if use_local else ""))
+    ax.set_ylabel(f"Elevation [{length_unit}]")
+    ax.set_title(title or f"{kind} {quantity} vs elevation — standalone NPZ")
+    ax.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_npz_moment_3d(
+    npz_path: str,
+    quantity: str = "Mz",
+    use_local: bool = True,
+    combo: str = None,
+    mode: str = "flag",
+    title: Optional[str] = None,
+    show_scale: bool = True,
+    return_plotter: bool = False,
+) -> Any:
+    """3D force diagram from an NPZ results file using PyVista.
+
+    Standalone function — no ``OpenSeesBuilder`` or model objects needed.
+
+    Parameters
+    ----------
+    npz_path : str
+        Path to the ``.npz`` results file.
+    quantity : str
+        Quantity to plot, e.g. ``'Mz'``, ``'My'``, ``'Fx'``, ``'Fy'``, ``'Fz'``.
+    use_local : bool
+        Use local‑coordinate forces (default ``True``).
+    mode : str
+        ``'flag'`` (default) for thin perpendicular rectangles, ``'tube'``
+        for extruded circles.
+    title : str or None
+        Plot title (auto‑generated if *None*).
+    show_scale : bool
+        Deprecated — ignored.  A text legend is shown instead.
+    return_plotter : bool
+        If ``True`` return the ``pyvista.Plotter`` instead of calling
+        ``plotter.show()``.
+
+    Returns
+    -------
+    pyvista.Plotter or None
+    """
+    try:
+        import pyvista as pv
+    except ImportError:
+        print("pyvista is required.  pip install pyvista")
+        return None
+
+    info = _load_npz_for_plotting(npz_path, combo=combo)
+    elem_data = info["elem_data"]
+
+    suffix = "_local" if use_local else ""
+    q_i = f"{quantity.lower()}_i{suffix}"
+    q_j = f"{quantity.lower()}_j{suffix}"
+
+    # ── Collect non‑NaN values for scaling ─────────────────────────
+    max_abs_val = 0.0
+    for ed in elem_data:
+        v_i = ed.get(q_i, np.nan)
+        v_j = ed.get(q_j, np.nan)
+        if not np.isnan(v_i) and not np.isnan(v_j):
+            max_abs_val = max(max_abs_val, abs(v_i), abs(v_j))
+
+    if max_abs_val < 1e-15:
+        print(f"All {quantity} values are zero — nothing to plot.")
+        return None
+
+    # Compute model height from element coordinates for auto-scaling
+    model_height = max(max(ed["z_i"], ed["z_j"]) for ed in elem_data) - \
+                   min(min(ed["z_i"], ed["z_j"]) for ed in elem_data)
+    model_height = max(model_height, 1.0)
+    # Flag scale: largest flag = 20 % of model height (same as builder version)
+    moment_scale = (model_height * 0.2) / max(max_abs_val, 1.0)
+
+    plotter = pv.Plotter()
+    plotter.set_background('white')
+    plotter.title = title or f"{quantity} 3D — standalone NPZ"
+
+    # ── Draw original structure wireframe ───────────────────────────
+    raw = info["raw_data"]
+    n_tags = raw.get("node_tags")
+    n_x = raw.get("node_x")
+    n_y = raw.get("node_y")
+    n_z = raw.get("node_z")
+    sub_n_i = raw.get("sub_node_i_tag")
+    sub_n_j = raw.get("sub_node_j_tag")
+    if all(a is not None for a in (n_tags, n_x, n_y, n_z, sub_n_i, sub_n_j)):
+        node_map = {int(n_tags[k]): (float(n_x[k]), float(n_y[k]), float(n_z[k]))
+                    for k in range(len(n_tags))}
+        lines = []
+        for k in range(len(sub_n_i)):
+            ci = node_map.get(int(sub_n_i[k]))
+            cj = node_map.get(int(sub_n_j[k]))
+            if ci and cj:
+                lines.append([ci, cj])
+        if lines:
+            first = True
+            for seg in lines:
+                plotter.add_lines(np.array(seg), color="grey", width=1,
+                                  label="Structure" if first else None)
+                first = False
+
+    is_moment = quantity.startswith("M")
+
+    for idx, ed in enumerate(elem_data):
+        v_i = ed.get(q_i, np.nan)
+        v_j = ed.get(q_j, np.nan)
+        if np.isnan(v_i) or np.isnan(v_j):
+            continue
+        p_i = np.array([ed["x_i"], ed["y_i"], ed["z_i"]])
+        p_j = np.array([ed["x_j"], ed["y_j"], ed["z_j"]])
+        p_mid = (p_i + p_j) / 2.0
+        axis = p_j - p_i
+        axis_len = np.linalg.norm(axis)
+        if axis_len < 1e-12:
+            continue
+        axis = axis / axis_len
+
+        # Flag offset direction (vn) based on quantity
+        vecxz = get_SAP_vecxz(axis, 0.0)
+        vec_z = vecxz / np.linalg.norm(vecxz)
+        vec_y = np.cross(vec_z, axis)
+        if np.linalg.norm(vec_y) > 1e-12:
+            vec_y = vec_y / np.linalg.norm(vec_y)
+        else:
+            vec_y = np.array([0.0, 1.0, 0.0])
+        if quantity == "Fx":
+            vn = vec_z
+        elif quantity == "Fy":
+            vn = vec_y
+        elif quantity == "Fz":
+            vn = vec_z
+        elif quantity == "Mx":
+            vn = vec_y
+        elif quantity == "My":
+            vn = -vec_z
+        elif quantity == "Mz":
+            vn = vec_y
+        else:
+            vn = vec_z
+
+        if mode == "flag":
+            for verts, col_val in compute_flag_parts(
+                p_i, p_j, vn, v_i, v_j, moment_scale,
+            ):
+                pts_arr = np.array(verts)
+                n = len(verts)
+                surf = pv.PolyData(pts_arr, faces=[n] + list(range(n)))
+                t = min(abs(col_val) / max_abs_val, 1.0)
+                if col_val >= 0:
+                    c = (0.3 + 0.7 * t, 0.3 - 0.2 * t, 0.3 - 0.3 * t)
+                else:
+                    c = (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
+                plotter.add_mesh(surf, color=c, opacity=0.6, show_edges=False,
+                                 lighting=False)
+        else:
+            # tube mode — colour-coded radius (fixed fraction of element length)
+            avg = (abs(v_i) + abs(v_j)) * 0.5
+            radius = max(axis_len * 0.02, 0.05)
+            if radius < 1e-6:
+                continue
+            cyl = pv.Cylinder(center=p_mid, direction=axis, radius=radius, height=axis_len * 0.9)
+            t = min(avg / max_abs_val, 1.0)
+            if v_i >= 0:
+                c = (0.3 + 0.7 * t, 0.3 - 0.2 * t, 0.3 - 0.3 * t)
+            else:
+                c = (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
+            plotter.add_mesh(cyl, color=c, opacity=0.5, show_edges=False,
+                             lighting=False)
+
+    # Legend (text, not scalar bar — colours are explicit RGB, not a colormap)
+    kind = "Moment" if quantity.startswith("M") else "Force"
+    plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)",
+                     position='lower_edge', font_size=14)
+
+    plotter.add_axes()
+    _set_isometric_view(plotter)
+
+    if return_plotter:
+        return plotter
+    plotter.show()
+    return None
+
+
