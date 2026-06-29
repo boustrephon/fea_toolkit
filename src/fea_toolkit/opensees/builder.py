@@ -155,6 +155,8 @@ class OpenSeesBuilder:
                     print(f"  Area elements: all {len(self.model.area_elements)} → shells")
 
         ops.wipe()
+        # wipe() clears all MPCs — caller must re-apply edge constraints
+        self._has_edge_constraints = False
         ops.model('basic', '-ndm', 3, '-ndf', 6)
 
         self._create_nodes()
@@ -636,6 +638,23 @@ class OpenSeesBuilder:
     # Shell edge constraints (unconnected mesh edges)
     # -------------------------------------------------------------------------
 
+    def _get_shell_area_ids(self) -> set:
+        """Return the set of area element IDs that became actual shell elements.
+
+        Uses the same filtering logic as :meth:`_create_shell_elements`:
+        areas in the loads-only selection are excluded.
+
+        When ``create_shells`` is ``False`` (no shells built), all areas
+        are still returned to support diagnostic detection of unconnected
+        edges before deciding whether to create shells.
+        """
+        sel = getattr(self, '_area_selection', None)
+        if self.config.get('create_shells', False) and sel is not None:
+            loads_only = set(sel.get_area_ids(self.model))
+            return {aid for aid in self.model.area_elements
+                    if aid not in loads_only}
+        return set(self.model.area_elements.keys())
+
     def detect_unconnected_edges(
         self,
         tolerance: float = 1e-4,
@@ -675,43 +694,53 @@ class OpenSeesBuilder:
         """
         reports: List[Dict[str, Any]] = []
 
-        # Collect all shell element edges (deduplicated)
+        # Determine which areas actually became shell elements
+        # (loads-only areas are not created as shells)
+        shell_area_ids = self._get_shell_area_ids()
+        if not shell_area_ids:
+            return reports
+
+        # Collect all shell element edges (deduplicated) from shell areas only.
+        # Map model node IDs → OpenSees node tags for ops calls.
         edge_set: set = set()
-        for eid, elem in self.model.area_elements.items():
-            if not hasattr(elem, "node_ids") or getattr(elem, "shell_type", "") == "LoadsOnly":
-                continue
+        for eid in shell_area_ids:
+            elem = self.model.area_elements[eid]
             nodes = elem.node_ids
             for j in range(len(nodes)):
-                n1 = int(nodes[j])
-                n2 = int(nodes[(j + 1) % len(nodes)])
-                edge_set.add((min(n1, n2), max(n1, n2)))
+                t1 = self._node_tag_from_id(nodes[j])
+                t2 = self._node_tag_from_id(nodes[(j + 1) % len(nodes)])
+                if t1 is None or t2 is None:
+                    continue
+                edge_set.add((min(t1, t2), max(t1, t2)))
         all_edges = list(edge_set)
 
         if not all_edges:
             return reports
 
-        # Collect all shell nodes (for slave detection)
+        # Collect all shell node tags (for slave detection) from shell areas only
         shell_node_set: set = set()
-        for eid, elem in self.model.area_elements.items():
-            if not hasattr(elem, "node_ids"):
-                continue
-            for n in elem.node_ids:
-                shell_node_set.add(int(n))
+        for eid in shell_area_ids:
+            elem = self.model.area_elements[eid]
+            for n_id in elem.node_ids:
+                tag = self._node_tag_from_id(n_id)
+                if tag is not None:
+                    shell_node_set.add(tag)
 
         if include_frame_connections:
             for eid, elem in self.model.frame_elements.items():
-                shell_node_set.add(int(elem.node_i))
-                shell_node_set.add(int(elem.node_j))
+                for n_id in (elem.node_i, elem.node_j):
+                    tag = self._node_tag_from_id(n_id)
+                    if tag is not None:
+                        shell_node_set.add(tag)
 
         all_slave_nodes = sorted(shell_node_set)
 
         # For each edge, check each slave node
-        for m1_id, m2_id in all_edges:
+        for m1_tag, m2_tag in all_edges:
             try:
-                c1 = np.array(ops.nodeCoord(m1_id))
-                c2 = np.array(ops.nodeCoord(m2_id))
+                c1 = np.array(ops.nodeCoord(m1_tag))
+                c2 = np.array(ops.nodeCoord(m2_tag))
             except Exception:
-                # Node might not be in the OpenSees model yet — skip
                 continue
 
             edge_vec = c2 - c1
@@ -719,30 +748,28 @@ class OpenSeesBuilder:
             if edge_len < 1e-12:
                 continue
 
-            for s_id in all_slave_nodes:
-                if s_id == m1_id or s_id == m2_id:
+            for s_tag in all_slave_nodes:
+                if s_tag == m1_tag or s_tag == m2_tag:
                     continue
                 try:
-                    cs = np.array(ops.nodeCoord(s_id))
+                    cs = np.array(ops.nodeCoord(s_tag))
                 except Exception:
                     continue
 
-                # Perpendicular distance to the line
                 cross_prod = np.cross(cs - c1, cs - c2)
                 distance = np.linalg.norm(cross_prod) / edge_len
 
                 if distance > tolerance:
                     continue
 
-                # Projection along the edge
                 proj = np.dot(cs - c1, edge_vec) / edge_len
                 if 0.0 < proj < edge_len:
                     N2 = proj / edge_len
                     N1 = 1.0 - N2
                     reports.append({
-                        "slave_node": s_id,
-                        "master_node_i": m1_id,
-                        "master_node_j": m2_id,
+                        "slave_node": s_tag,
+                        "master_node_i": m1_tag,
+                        "master_node_j": m2_tag,
                         "coords": tuple(cs),
                         "master_coords_i": tuple(c1),
                         "master_coords_j": tuple(c2),
@@ -810,22 +837,37 @@ class OpenSeesBuilder:
                     edge_set.add((min(n1, n2), max(n1, n2)))
         if coarse_edges is not None:
             for n1, n2 in coarse_edges:
-                edge_set.add((min(n1, n2), max(n1, n2)))
+                # Accept both model node IDs (str) and direct OpenSees tags (int)
+                t1 = self._node_tag_from_id(str(n1)) if not isinstance(n1, int) else n1
+                t2 = self._node_tag_from_id(str(n2)) if not isinstance(n2, int) else n2
+                if t1 is None:
+                    t1 = int(n1)
+                if t2 is None:
+                    t2 = int(n2)
+                edge_set.add((min(t1, t2), max(t1, t2)))
         if not edge_set:
             print("No master edges provided — nothing to constrain.")
             return 0
 
         # ── Resolve slave nodes ─────────────────────────────────────
         if fine_nodes is not None:
-            slave_candidates = fine_nodes
+            # Accept both model node IDs (str) and direct OpenSees tags (int)
+            slave_candidates = []
+            for n in fine_nodes:
+                tag = self._node_tag_from_id(str(n)) if not isinstance(n, int) else n
+                if tag is None:
+                    tag = int(n)
+                slave_candidates.append(tag)
         else:
-            # Default: all shell element nodes
+            # Default: nodes from areas that actually became shells
+            shell_area_ids = self._get_shell_area_ids()
             all_nodes: set = set()
-            for eid, elem in self.model.area_elements.items():
-                if not hasattr(elem, "node_ids"):
-                    continue
-                for n in elem.node_ids:
-                    all_nodes.add(int(n))
+            for eid in shell_area_ids:
+                elem = self.model.area_elements[eid]
+                for n_id in elem.node_ids:
+                    tag = self._node_tag_from_id(n_id)
+                    if tag is not None:
+                        all_nodes.add(tag)
             slave_candidates = sorted(all_nodes)
 
         # ── Apply constraints ───────────────────────────────────────
@@ -2566,6 +2608,8 @@ class OpenSeesBuilder:
         self.config = push_config
 
         ops.wipe()
+        # wipe() clears all MPCs — caller must re-apply edge constraints
+        self._has_edge_constraints = False
         ops.model('basic', '-ndm', 3, '-ndf', 6)
         self._create_nodes()
         self._apply_restraints()
