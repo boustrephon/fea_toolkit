@@ -92,3 +92,54 @@ def _build_gravity_patterns(inferred: dict) -> dict:
 
 def _pick_wind(inferred: dict, direction: str) -> dict:
     return pick_wind(inferred, direction)
+
+
+# ── Flag diagram geometry (pure NumPy, no renderer dependency) ────────
+
+def compute_flag_parts(pt1, pt2, vn, Fi, Fj, scale):
+    """Yield ``(vertices, col_val)`` for each part of a flag diagram element.
+
+    Parameters
+    ----------
+    pt1, pt2 : array-like of length 3
+        I-end and J-end node coordinates.
+    vn : array-like of length 3
+        Unit vector for positive flag offset direction.
+    Fi, Fj : float
+        Force/moment values (original, un-negated).
+    scale : float
+        Scale factor (display units per force/moment unit).
+
+    Yields
+    ------
+    vertices : list of ndarray
+        Corner points in perimeter order (4 for a quad, 3 for a triangle).
+    col_val : float
+        Signed value for colour mapping (positive → red, negative → blue).
+    """
+    import numpy as np
+
+    pt1 = np.asarray(pt1, dtype=float)
+    pt2 = np.asarray(pt2, dtype=float)
+    vn = np.asarray(vn, dtype=float)
+
+    if abs(Fi) < 1e-12 and abs(Fj) < 1e-12:
+        return
+
+    off_i = vn * Fi * scale       # I-end: +vn for positive Fi
+    off_j = -vn * Fj * scale      # J-end: -vn for positive Fj (baked-in negation)
+
+    if Fi * Fj < 0.0:
+        # Trapezoid: [pt1, pt2, pt2+off_j, pt1+off_i]
+        col_val = Fi if abs(Fi) >= abs(Fj) else Fj
+        yield [pt1, pt2, pt2 + off_j, pt1 + off_i], col_val
+    else:
+        # Zero-crossing: split at vcp = vx · Fi / (Fi + Fj)
+        if abs(Fi + Fj) < 1e-15:
+            return
+        ratio = Fi / (Fi + Fj)
+        p_zero = pt1 + (pt2 - pt1) * ratio
+        if abs(Fi) > 1e-12:
+            yield [pt1, p_zero, pt1 + off_i], Fi
+        if abs(Fj) > 1e-12:
+            yield [p_zero, pt2, pt2 + off_j], Fj
