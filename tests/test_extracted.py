@@ -129,3 +129,113 @@ def test_pick_wind():
     assert result2 == {"Wind -X": 1.0}
     result3 = pick_wind(inferred, "+Y")
     assert result3 == {"Wind +Y": 1.0}
+
+
+# ── compute_flag_parts tests ──────────────────────────────────────────
+
+from fea_toolkit.utils import compute_flag_parts
+
+
+def test_flag_trapezoid_opposite_signs():
+    """Fi*Fj < 0 → single quad trapezoid."""
+    pt1 = np.array([0.0, 0.0, 0.0])
+    pt2 = np.array([5.0, 0.0, 0.0])
+    vn = np.array([0.0, 0.0, 1.0])
+    parts = list(compute_flag_parts(pt1, pt2, vn, Fi=10.0, Fj=-5.0, scale=0.1))
+    assert len(parts) == 1
+    verts, col_val = parts[0]
+    assert len(verts) == 4
+    np.testing.assert_array_almost_equal(verts[0], pt1)
+    np.testing.assert_array_almost_equal(verts[1], pt2)
+    np.testing.assert_array_almost_equal(verts[2], pt2 + [0, 0, 0.5])
+    np.testing.assert_array_almost_equal(verts[3], pt1 + [0, 0, 1.0])
+    assert col_val == 10.0
+
+
+def test_flag_zero_crossing_same_sign():
+    """Fi*Fj > 0 → two triangles crossing at zero."""
+    pt1 = np.array([0.0, 0.0, 0.0])
+    pt2 = np.array([5.0, 0.0, 0.0])
+    vn = np.array([0.0, 1.0, 0.0])
+    parts = list(compute_flag_parts(pt1, pt2, vn, Fi=10.0, Fj=5.0, scale=0.1))
+    assert len(parts) == 2
+    vcp = np.array([5.0 * 10.0 / 15.0, 0, 0])
+    v1, c1 = parts[0]
+    assert len(v1) == 3
+    np.testing.assert_array_almost_equal(v1[0], pt1)
+    np.testing.assert_array_almost_equal(v1[1], pt1 + vcp)
+    np.testing.assert_array_almost_equal(v1[2], pt1 + [0, 1.0, 0])
+    assert c1 == 10.0
+    v2, c2 = parts[1]
+    assert len(v2) == 3
+    np.testing.assert_array_almost_equal(v2[0], pt1 + vcp)
+    np.testing.assert_array_almost_equal(v2[1], pt2)
+    np.testing.assert_array_almost_equal(v2[2], pt2 + [0, -0.5, 0])
+    assert c2 == 5.0
+
+
+def test_flag_both_negative_zero_crossing():
+    """Both negative → two triangles."""
+    pt1 = np.array([0.0, 0.0, 0.0])
+    pt2 = np.array([4.0, 0.0, 0.0])
+    vn = np.array([0.0, 0.0, 1.0])
+    parts = list(compute_flag_parts(pt1, pt2, vn, Fi=-40.0, Fj=-10.0, scale=0.1))
+    assert len(parts) == 2
+    v1, c1 = parts[0]
+    np.testing.assert_array_almost_equal(v1[2], pt1 + [0, 0, -4])
+    assert c1 == -40.0
+    v2, c2 = parts[1]
+    np.testing.assert_array_almost_equal(v2[2], pt2 + [0, 0, 1])
+    assert c2 == -10.0
+
+
+def test_flag_trapezoid_left_negative_right_positive():
+    """Fi<0, Fj>0 → trapezoid, both offsets in -vn."""
+    pt1 = np.array([0.0, 0.0, 0.0])
+    pt2 = np.array([3.0, 0.0, 0.0])
+    vn = np.array([0.0, 1.0, 0.0])
+    parts = list(compute_flag_parts(pt1, pt2, vn, Fi=-8.0, Fj=4.0, scale=0.5))
+    assert len(parts) == 1
+    verts, col_val = parts[0]
+    assert len(verts) == 4
+    np.testing.assert_array_almost_equal(verts[3], pt1 + [0, -4, 0])
+    np.testing.assert_array_almost_equal(verts[2], pt2 + [0, -2, 0])
+    assert col_val == -8.0
+
+
+def test_flag_zero_at_one_end():
+    """Fi=0, Fj non-zero → single triangle."""
+    pt1 = np.array([0.0, 0.0, 0.0])
+    pt2 = np.array([2.0, 0.0, 0.0])
+    vn = np.array([0.0, 0.0, 1.0])
+    parts = list(compute_flag_parts(pt1, pt2, vn, Fi=0.0, Fj=10.0, scale=0.1))
+    assert len(parts) == 1
+    verts, col_val = parts[0]
+    assert len(verts) == 3
+    np.testing.assert_array_almost_equal(verts[0], pt1)
+    np.testing.assert_array_almost_equal(verts[2], pt2 + [0, 0, -1.0])
+    assert col_val == 10.0
+
+
+def test_flag_zero_at_both_ends():
+    """Fi=0, Fj=0 → no parts yielded."""
+    pt1 = np.array([0.0, 0.0, 0.0])
+    pt2 = np.array([2.0, 0.0, 0.0])
+    vn = np.array([0.0, 1.0, 0.0])
+    parts = list(compute_flag_parts(pt1, pt2, vn, Fi=0.0, Fj=0.0, scale=1.0))
+    assert len(parts) == 0
+
+
+def test_flag_3d_diagonal_member():
+    """Non-axis-aligned member — basic geometry test."""
+    pt1 = np.array([0.0, 0.0, 0.0])
+    pt2 = np.array([3.0, 4.0, 0.0])
+    vn = np.array([0.0, 0.0, 1.0])
+    parts = list(compute_flag_parts(pt1, pt2, vn, Fi=10.0, Fj=-10.0, scale=0.5))
+    assert len(parts) == 1
+    verts, col_val = parts[0]
+    assert len(verts) == 4
+    np.testing.assert_array_almost_equal(verts[0], pt1)
+    np.testing.assert_array_almost_equal(verts[1], pt2)
+    np.testing.assert_array_almost_equal(verts[2], pt2 + [0, 0, 5])
+    np.testing.assert_array_almost_equal(verts[3], pt1 + [0, 0, 5])
