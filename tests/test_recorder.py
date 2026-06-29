@@ -133,26 +133,119 @@ class TestRecordingOpenSees:
         tcl = (tmp_path / "npy.tcl").read_text()
         assert "load 1 -10.5 3 0" in tcl
 
+    def test_args_are_snapshotted(self):
+        """Mutating an argument after the call does not affect recorded command."""
+        import numpy as np
+        rec = RecordingOpenSees(_real)
+        rec.wipe()
+        rec.model("basic", "-ndm", 3, "-ndf", 6)
+
+        # Pass a mutable list, then mutate it
+        coords = [1.0, 2.0, 3.0]
+        rec.node(1, *coords)
+        coords[0] = 99.0  # mutate after the call
+
+        cmd = rec.commands[-1]
+        assert cmd == ("node", (1, 1.0, 2.0, 3.0), {})
+
+    def test_kwargs_are_snapshotted(self):
+        """Mutating a kwarg dict after the call does not affect recorded command.
+
+        This test uses a call that will fail at the C++ layer (unknown kwarg),
+        but the recorder's wrapper records *before* forwarding, so the command
+        is still captured with its original kwargs.
+        """
+        rec = RecordingOpenSees(_real)
+        rec.wipe()
+        d = {"key": "value"}
+        try:
+            rec.model("basic", "-ndm", 3, "-ndf", 6, **d)
+        except Exception:
+            pass
+        d["key"] = "mutated"
+
+        assert len(rec.commands) >= 2  # wipe + model
+        cmd = rec.commands[-1]
+        assert cmd[0] == "model"
+        assert cmd[2] == {"key": "value"}  # snapshot, not "mutated"
+
+    def test_save_as_python_validates_func_name(self, tmp_path):
+        """Non-identifier or keyword func_name raises ValueError."""
+        rec = RecordingOpenSees(_real)
+        rec.wipe()
+
+        out = tmp_path / "m.py"
+        with pytest.raises(ValueError, match="not a valid Python identifier"):
+            rec.save_as_python(str(out), func_name="123bad")
+        with pytest.raises(ValueError, match="not a valid Python identifier"):
+            rec.save_as_python(str(out), func_name="my func")
+        with pytest.raises(ValueError, match="not a valid Python identifier"):
+            rec.save_as_python(str(out), func_name="")
+
+    def test_save_as_python_rejects_keywords(self, tmp_path):
+        """Python keywords are rejected as func_name."""
+        rec = RecordingOpenSees(_real)
+        rec.wipe()
+        out = tmp_path / "m.py"
+        with pytest.raises(ValueError, match="Python keyword"):
+            rec.save_as_python(str(out), func_name="for")
+        with pytest.raises(ValueError, match="Python keyword"):
+            rec.save_as_python(str(out), func_name="class")
+        with pytest.raises(ValueError, match="Python keyword"):
+            rec.save_as_python(str(out), func_name="return")
+
+    def test_save_as_python_valid_names_work(self, tmp_path):
+        """Valid identifiers like 'build_model' and 'run' are accepted."""
+        rec = RecordingOpenSees(_real)
+        rec.wipe()
+        out = tmp_path / "m.py"
+        # Should not raise
+        rec.save_as_python(str(out), func_name="build_model")
+        rec.save_as_python(str(out), func_name="run")
+        rec.save_as_python(str(out), func_name="_helper")
+        rec.save_as_python(str(out), func_name="main")
+
     def test_no_recording_without_swap(self):
         """Builder works normally without recorder (no side effects)."""
         from fea_toolkit.opensees.builder import OpenSeesBuilder
         from fea_toolkit.model.sap_data import (
-            SAPModelData, Node, Material, ShellSection, AreaElement,
+            SAPModelData, Node, Material, Restraint, Section, FrameElement,
         )
         md = SAPModelData(
-            nodes={"1": Node("1", 1, 0, 0, 0), "2": Node("2", 2, 6, 0, 0)},
-            materials={"Concrete": Material("Concrete", "Concrete", E_mod=3e10)},
-            sections={"Slab200": ShellSection("Slab200", "Shell", "Concrete", thickness=0.2)},
-            area_elements={"1": AreaElement("1", 1, ["1", "2"])},
-            area_assignments={"1": "Slab200"},
-            restraints={}, frame_elements={}, frame_assignments={},
+            nodes={
+                "1": Node("1", 1, 0, 0, 0),
+                "2": Node("2", 2, 6, 0, 0),
+            },
+            materials={
+                "Concrete": Material("Concrete", "Concrete", E_mod=3e10),
+            },
+            sections={
+                "Col600": Section(
+                    name="Col600", shape="Rectangular",
+                    material="Concrete", A=0.36, I33=0.0108, I22=0.0108, J=0.018,
+                ),
+            },
+            frame_elements={
+                "1": FrameElement("1", 1, "1", "2"),
+            },
+            frame_assignments={
+                "1": "Col600",
+            },
+            restraints={
+                "1": Restraint([1, 1, 1, 1, 1, 1]),
+            },
+            # Unused empties
+            area_elements={}, area_assignments={},
             groups={}, frame_auto_mesh={},
         )
-        # No recorder swap — normal operation
-        b = OpenSeesBuilder(md, {"verbose": False})
-        # Just verify it creates nodes without crashing
-        _real.wipe()
-        _real.model("basic", "-ndm", 3, "-ndf", 6)
-        for nid, node in md.nodes.items():
-            _real.node(node.node_tag, node.x, node.y, node.z)
-        _real.wipe()
+        # Use elastic sections to avoid needing fiber-patch support.
+        b = OpenSeesBuilder(md, {
+            "verbose": False, "use_elastic_sections": True,
+        })
+        b.build()
+
+        # Verify the builder created nodes in OpenSees memory.
+        import openseespy.opensees as ops
+        assert list(ops.nodeCoord(1)) == [0.0, 0.0, 0.0]
+        assert list(ops.nodeCoord(2)) == [6.0, 0.0, 0.0]
+        ops.wipe()

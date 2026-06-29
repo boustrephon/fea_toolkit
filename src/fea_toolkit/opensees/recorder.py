@@ -25,6 +25,8 @@ Without the swap, the builder works exactly as before — *zero* impact.
 
 from __future__ import annotations
 
+import copy
+import keyword
 import types
 from typing import Any
 
@@ -46,13 +48,30 @@ def _py_val(v: Any) -> str:
     return repr(v)
 
 
-def _tcl_val(v: Any) -> str:
-    """Convert a Python value to a Tcl literal string."""
+def _tcl_parts(v: Any) -> list[str]:
+    """Convert a Python value to one or more Tcl literal tokens.
+
+    Simple scalars return a single-element list.  Iterables (lists, tuples,
+    ndarrays) are flattened recursively so ``[1, 2, 3]`` becomes three
+    tokens.  Strings containing whitespace are braced for Tcl safety.
+    """
     if isinstance(v, (np.floating, float)):
-        return f"{float(v):.15g}"
+        return [f"{float(v):.15g}"]
     if isinstance(v, (np.integer, int, bool)):
-        return str(int(v))
-    return str(v)
+        return [str(int(v))]
+    if isinstance(v, (list, tuple)):
+        result: list[str] = []
+        for item in v:
+            result.extend(_tcl_parts(item))
+        return result
+    if isinstance(v, np.ndarray):
+        return _tcl_parts(list(v.flat))
+    if isinstance(v, str):
+        # Brace strings containing whitespace so Tcl reads them as one token.
+        if " " in v or "\t" in v:
+            return [f"{{{v}}}"]
+        return [v]
+    return [str(v)]
 
 
 class RecordingOpenSees(types.ModuleType):
@@ -94,7 +113,11 @@ class RecordingOpenSees(types.ModuleType):
             return attr
 
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            self._commands.append((name, args, kwargs))
+            # Snapshot args/kwargs at call time so later mutations don't
+            # affect what save_as_python() / save_as_tcl() replay.
+            self._commands.append(
+                (name, copy.deepcopy(args), copy.deepcopy(kwargs))
+            )
             return attr(*args, **kwargs)
 
         return wrapper
@@ -125,7 +148,23 @@ class RecordingOpenSees(types.ModuleType):
             File path to write to.
         func_name:
             Name of the generated function (default ``"build_model"``).
+
+        Raises
+        ------
+        ValueError
+            If *func_name* is not a valid Python identifier or is a
+            reserved keyword.
         """
+        if not isinstance(func_name, str) or not func_name.isidentifier():
+            raise ValueError(
+                f"func_name={func_name!r} is not a valid Python identifier"
+            )
+        if keyword.iskeyword(func_name):
+            raise ValueError(
+                f"func_name={func_name!r} is a Python keyword and cannot "
+                f"be used as a function name"
+            )
+
         lines = [
             '#!/usr/bin/env python',
             '"""Auto-generated OpenSeesPy model -- created by RecordingOpenSees."""',
@@ -172,10 +211,11 @@ class RecordingOpenSees(types.ModuleType):
         ]
         for cmd_name, args, kwargs in self._commands:
             parts = [cmd_name]
-            parts.extend(_tcl_val(a) for a in args)
+            for a in args:
+                parts.extend(_tcl_parts(a))
             for k, v in kwargs.items():
                 parts.append(f"-{k}")
-                parts.append(_tcl_val(v))
+                parts.extend(_tcl_parts(v))
             lines.append(" ".join(parts))
         lines.append("wipe")
 
