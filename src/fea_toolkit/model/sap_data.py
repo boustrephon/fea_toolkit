@@ -43,6 +43,44 @@ class Constraint:
     constraint_data: Dict[str, Any] = field(default_factory=dict) #
 
 @dataclass
+class FrameEndOffset:
+    """Rigid end offset (rigid zone) at each end of a frame element.
+
+    Values are in model length units (typically m or mm), measured from
+    the node toward the element interior.  Zero means no offset (the
+    elastic portion extends all the way to the node).
+    """
+    end_i: float = 0.0    # Offset at I-end
+    end_j: float = 0.0    # Offset at J-end
+
+
+@dataclass
+class AreaMesh:
+    """Auto-mesh settings for an area element (from AREA MESH ASSIGNMENTS).
+
+    Controls how SAP2000 subdivides the area into smaller shell elements
+    for analysis.
+    """
+    auto_mesh: bool = False
+    no_auto_mesh_at_edges: bool = False
+    no_sub_mesh: bool = False
+    min_size: float = 0.0
+    max_size: float = 0.0
+
+
+@dataclass
+class AreaEdgeConstraint:
+    """Edge constraint assignment for a single edge of an area element.
+
+    SAP2000 uses these to enforce connectivity between coarse and fine
+    meshes along shared edges.
+    """
+    area_id: str = ""
+    edge: int = 0
+    constraint: str = "Default"
+
+
+@dataclass
 class Material:
     """Material properties from SAP2000, including all tables."""
     name: str
@@ -594,6 +632,9 @@ class SAPModelData:
     area_assignments: Dict[str, str]       # area_id -> section_name
     groups: Dict[str, Group]
     frame_auto_mesh: Dict[str, Dict[str, Any]]   # frame_id -> auto mesh settings
+    frame_end_offsets: Dict[str, FrameEndOffset] = field(default_factory=dict)
+    area_mesh: Dict[str, AreaMesh] = field(default_factory=dict)
+    area_edge_constraints: Dict[str, List[AreaEdgeConstraint]] = field(default_factory=dict)
     # Loads (to be expanded later)
     load_cases: Dict[str,LoadCase] = field(default_factory=dict)
     load_patterns: Dict[str,LoadPattern] = field(default_factory=dict)
