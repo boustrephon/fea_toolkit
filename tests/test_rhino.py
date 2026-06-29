@@ -215,7 +215,18 @@ class TestRhinoImporterNoRhino:
 # ====================================================================
 
 class TestProfilePoints:
-    """Profile functions return correct (x,y) point sequences."""
+    """Profile functions return correct (x,y) point sequences.
+
+    These are inline copies of the functions in geometry_v2.py to avoid
+    the Rhino import requirement.  Keep them in sync.
+    """
+
+    @staticmethod
+    def _signed_area(pts):
+        """Positive = CCW, negative = CW."""
+        n = len(pts)
+        return sum(pts[i][0]*pts[(i+1)%n][1] - pts[(i+1)%n][0]*pts[i][1]
+                   for i in range(n)) / 2.0
 
     def _rect(self, depth, bf):
         h, w = depth / 2.0, bf / 2.0
@@ -227,52 +238,64 @@ class TestProfilePoints:
         wi = tw / 2.0
         fi = h - tf
         return [
-            (-w, -h), (w, -h), (w, -fi), (wi, -fi),
-            (wi, fi), (w, fi), (w, h), (-w, h),
-            (-w, fi), (-wi, fi), (-wi, -fi), (-w, -fi),
+            (-wi, -h), (-wi, -h+tf), (-w, -h+tf), (-w, h-tf),
+            (-wi, h-tf), (-wi, h), (wi, h), (wi, h-tf),
+            (w, h-tf), (w, -h+tf), (wi, -h+tf), (wi, -h),
+        ]
+
+    def _box(self, depth, bf, tf, tw):
+        h = depth / 2.0
+        w = bf / 2.0
+        wi = tw / 2.0
+        return [(-wi, -h), (-wi, h), (wi, h), (wi, -h)]
+
+    def _channel(self, depth, bf, tf, tw):
+        h = depth / 2.0
+        w = bf / 2.0
+        fi = h - tf
+        wi = tw / 2.0
+        return [
+            (-w, -h), (-w, h), (w, h), (w, fi),
+            (wi, fi), (wi, -fi), (w, -fi), (w, -h),
         ]
 
     def test_rect_count(self):
         pts = self._rect(0.4, 0.2)
-        assert len(pts) == 4  # rectangle = 4 corners
-        # All z=0 (profile is in XY plane)
-        for x, y in pts:
-            assert isinstance(x, float)
-            assert isinstance(y, float)
+        assert len(pts) == 4
+
+    def test_rect_winding_cw(self):
+        assert self._signed_area(self._rect(0.4, 0.2)) < 0
 
     def test_i_count(self):
         pts = self._i(0.3, 0.15, 0.01, 0.006)
-        assert len(pts) == 12  # I-section = 12 vertices
+        assert len(pts) == 12
+
+    def test_i_winding_cw(self):
+        assert self._signed_area(self._i(0.3, 0.15, 0.01, 0.006)) < 0
 
     def test_i_dimensions(self):
         depth, bf = 0.3, 0.15
         pts = self._i(depth, bf, 0.01, 0.006)
         xs = [p[0] for p in pts]
         ys = [p[1] for p in pts]
-        # Width spans ±bf/2, depth spans ±depth/2
         assert abs(max(xs) - bf / 2) < 1e-10
         assert abs(min(xs) + bf / 2) < 1e-10
         assert abs(max(ys) - depth / 2) < 1e-10
         assert abs(min(ys) + depth / 2) < 1e-10
 
     def test_box_count(self):
-        h, w = 0.3 / 2, 0.2 / 2
-        tf, tw = 0.01, 0.006
-        hi, wi = h - tf, w - tw
-        pts = [
-            (-w, -h), (w, -h), (w, h), (-w, h),
-            (-w, hi), (wi, hi), (wi, -hi), (-w, -hi),
-        ]
-        assert len(pts) == 8
+        pts = self._box(0.3, 0.2, 0.01, 0.006)
+        assert len(pts) == 4
+
+    def test_box_winding_cw(self):
+        assert self._signed_area(self._box(0.3, 0.2, 0.01, 0.006)) < 0
 
     def test_channel_count(self):
-        h = 0.3 / 2
-        w = 0.15 / 2
-        pts = [
-            (-w, -h), (w, -h), (w, -h + 0.01), (0.003, -h + 0.01),
-            (0.003, h - 0.01), (w, h - 0.01), (w, h), (-w, h),
-        ]
+        pts = self._channel(0.3, 0.15, 0.01, 0.006)
         assert len(pts) == 8
+
+    def test_channel_winding_cw(self):
+        assert self._signed_area(self._channel(0.3, 0.15, 0.01, 0.006)) < 0
 
 
 # ====================================================================
