@@ -482,6 +482,7 @@ class AreaElement:
     area_tag: int
     node_ids: List[str]         # ordered corner nodes
     thickness: float = 0.0
+    inactive: bool = False      # True when superseded by mesh sub‑elements
 
 
 @dataclass

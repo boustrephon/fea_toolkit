@@ -9,6 +9,7 @@ sys.path.insert(0, str(_REPO / "src"))
 import numpy as np
 from fea_toolkit.spectrum import _gb50011_spectrum, _build_spectrum, _interp_sa
 from fea_toolkit.utils import deep_merge, infer_loads, build_gravity_patterns, pick_wind
+from fea_toolkit.model.sap_data import Node, FrameElement, AreaElement
 
 
 # ── Spectrum tests ─────────────────────────────────────────────────────
@@ -239,3 +240,172 @@ def test_flag_3d_diagonal_member():
     np.testing.assert_array_almost_equal(verts[1], pt2)
     np.testing.assert_array_almost_equal(verts[2], pt2 + [0, 0, 5])
     np.testing.assert_array_almost_equal(verts[3], pt1 + [0, 0, 5])
+
+
+# ============================================================================
+# Frame end offset tests
+# ============================================================================
+
+class TestApplyFrameEndOffsets:
+    """Tests for geometry.apply_frame_end_offsets()."""
+
+    def _make_elements(self):
+        from fea_toolkit.model.sap_data import FrameEndOffset
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 6.0, 0.0, 0.0),
+        }
+        elements = {
+            "1": FrameElement("1", 10, "1", "2"),
+        }
+        assignments = {"1": "Col600"}
+        return elements, assignments, nodes
+
+    def test_no_offsets_does_nothing(self):
+        """Zero offsets → no changes."""
+        from fea_toolkit.model.geometry import apply_frame_end_offsets
+        from fea_toolkit.model.sap_data import FrameEndOffset
+        elems, assign, nodes = self._make_elements()
+        offsets = {"1": FrameEndOffset(0.0, 0.0)}
+        elems, assign, nodes, ntag, links = apply_frame_end_offsets(
+            elems, assign, nodes, offsets
+        )
+        assert len(links) == 0
+        assert elems["1"].node_i == "1"
+        assert elems["1"].node_j == "2"
+
+    def test_i_end_offset_creates_rigid_link(self):
+        """Offset at I-end creates one rigid link and shortens element."""
+        from fea_toolkit.model.geometry import apply_frame_end_offsets
+        from fea_toolkit.model.sap_data import FrameEndOffset
+        elems, assign, nodes = self._make_elements()
+        offsets = {"1": FrameEndOffset(0.3, 0.0)}
+        elems, assign, nodes, ntag, links = apply_frame_end_offsets(
+            elems, assign, nodes, offsets
+        )
+        assert len(links) == 1
+        assert "1_off_i" in nodes
+        assert elems["1"].node_i == "1_off_i"
+        assert links[0][1] == "1"
+        assert links[0][2] == "1_off_i"
+
+    def test_both_ends_offset(self):
+        """Both-end offsets create two rigid links."""
+        from fea_toolkit.model.geometry import apply_frame_end_offsets
+        from fea_toolkit.model.sap_data import FrameEndOffset
+        elems, assign, nodes = self._make_elements()
+        offsets = {"1": FrameEndOffset(0.2, 0.4)}
+        elems, assign, nodes, ntag, links = apply_frame_end_offsets(
+            elems, assign, nodes, offsets
+        )
+        assert len(links) == 2
+        assert "1_off_i" in nodes
+        assert "1_off_j" in nodes
+
+    def test_offset_clamped_to_half_length(self):
+        """Excessive offset is clamped so the elastic portion doesn't vanish."""
+        from fea_toolkit.model.geometry import apply_frame_end_offsets
+        from fea_toolkit.model.sap_data import FrameEndOffset
+        elems, assign, nodes = self._make_elements()
+        offsets = {"1": FrameEndOffset(5.0, 5.0)}
+        elems, assign, nodes, ntag, links = apply_frame_end_offsets(
+            elems, assign, nodes, offsets
+        )
+        assert len(links) == 2
+        ni = nodes[elems["1"].node_i]
+        nj = nodes[elems["1"].node_j]
+        remaining = np.linalg.norm(
+            np.array([nj.x - ni.x, nj.y - ni.y, nj.z - ni.z])
+        )
+        assert remaining > 0.5
+
+    def test_missing_element_skipped(self):
+        """Offset for a non-existent element is silently skipped."""
+        from fea_toolkit.model.geometry import apply_frame_end_offsets
+        from fea_toolkit.model.sap_data import FrameEndOffset
+        elems, assign, nodes = self._make_elements()
+        offsets = {"99": FrameEndOffset(0.3, 0.0)}
+        elems, assign, nodes, ntag, links = apply_frame_end_offsets(
+            elems, assign, nodes, offsets
+        )
+        assert len(links) == 0
+
+
+# ============================================================================
+# Area meshing tests
+# ============================================================================
+
+class TestMeshAreaElements:
+    """Tests for geometry.mesh_area_elements()."""
+
+    def _make_quad_model(self):
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 12.0, 0.0, 0.0),
+            "3": Node("3", 3, 12.0, 8.0, 0.0),
+            "4": Node("4", 4, 0.0, 8.0, 0.0),
+        }
+        areas = {
+            "1": AreaElement("1", 10, ["1", "2", "3", "4"]),
+        }
+        assignments = {"1": "Slab200"}
+        return areas, assignments, nodes
+
+    def test_no_mesh_no_change(self):
+        """No mesh settings → no subdivision."""
+        from fea_toolkit.model.geometry import mesh_area_elements
+        areas, assign, nodes = self._make_quad_model()
+        areas, assign, nodes, ntag = mesh_area_elements(
+            areas, assign, nodes, {}
+        )
+        assert "1" in areas
+        assert areas["1"].node_ids == ["1", "2", "3", "4"]
+
+    def test_mesh_creates_sub_areas(self):
+        """2x2 subdivision produces 4 sub-quads and 1 interior node."""
+        from fea_toolkit.model.geometry import mesh_area_elements
+        from fea_toolkit.model.sap_data import AreaMesh
+        areas, assign, nodes = self._make_quad_model()
+        mesh = {"1": AreaMesh(auto_mesh=True, max_size=6.0)}
+        areas, assign, nodes, ntag = mesh_area_elements(
+            areas, assign, nodes, mesh, next_tag=100
+        )
+        sub_ids = [aid for aid in areas if aid != "1"]
+        assert len(sub_ids) == 2  # 12/6=2 (n_u) × 8/6≈1 (n_v) = 2
+        assert areas["1"].inactive is True
+        assert "1_mesh_0_1" in nodes
+
+    def test_mesh_preserves_section_assignment(self):
+        """Sub-areas inherit the section from the parent."""
+        from fea_toolkit.model.geometry import mesh_area_elements
+        from fea_toolkit.model.sap_data import AreaMesh
+        areas, assign, nodes = self._make_quad_model()
+        mesh = {"1": AreaMesh(auto_mesh=True, max_size=6.0)}
+        areas, assign, nodes, ntag = mesh_area_elements(
+            areas, assign, nodes, mesh, next_tag=100
+        )
+        for aid in areas:
+            if aid != "1":
+                assert assign.get(aid) == "Slab200"
+
+    def test_no_subdivision_if_max_size_too_large(self):
+        """max_size > element dimension → no subdivision."""
+        from fea_toolkit.model.geometry import mesh_area_elements
+        from fea_toolkit.model.sap_data import AreaMesh
+        areas, assign, nodes = self._make_quad_model()
+        mesh = {"1": AreaMesh(auto_mesh=True, max_size=100.0)}
+        areas, assign, nodes, ntag = mesh_area_elements(
+            areas, assign, nodes, mesh, next_tag=100
+        )
+        assert areas["1"].inactive is False
+
+    def test_mesh_auto_mesh_false_skipped(self):
+        """auto_mesh=False → no subdivision."""
+        from fea_toolkit.model.geometry import mesh_area_elements
+        from fea_toolkit.model.sap_data import AreaMesh
+        areas, assign, nodes = self._make_quad_model()
+        mesh = {"1": AreaMesh(auto_mesh=False, max_size=1.0)}
+        areas, assign, nodes, ntag = mesh_area_elements(
+            areas, assign, nodes, mesh, next_tag=100
+        )
+        assert areas["1"].inactive is False
