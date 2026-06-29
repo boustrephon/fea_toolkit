@@ -474,6 +474,62 @@ def test_area_edge_constraints_parsed(tmp_path):
     assert cons[0].constraint == "Default"
 
 
+def test_tolerant_float_parsing_with_empty_cells(tmp_path):
+    """Empty-string float cells default to 0.0 instead of crashing."""
+    json_data = {
+        "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25"}],
+        "JOINT COORDINATES": [
+            {"Joint": i, "XorR": 0.0, "Y": 0.0, "Z": 0.0} for i in range(1, 5)
+        ],
+        "CONNECTIVITY - FRAME": [
+            {"Frame": 1, "JointI": 1, "JointJ": 2},
+        ],
+        "FRAME SECTION PROPERTIES 01 - GENERAL": [
+            {"Section": "Col600", "Material": "C30/37", "Shape": "Rectangular",
+             "t3": 0.6, "t2": 0.6, "Area": 0.36, "I33": 0.0108, "I22": 0.0108},
+        ],
+        "FRAME SECTION ASSIGNMENTS": [
+            {"Frame": 1, "Section": "Col600"},
+        ],
+        # EndI and EndJ are empty strings — the parser must not crash.
+        "FRAME END LENGTH OFFSETS": [
+            {"Frame": 1, "EndI": "", "EndJ": ""},
+        ],
+        "CONNECTIVITY - AREA": [
+            {"Area": 1, "Joint1": 1, "Joint2": 2, "Joint3": 3, "Joint4": 4},
+        ],
+        "AREA SECTION PROPERTIES": [
+            {"Section": "Slab200", "Material": "C30/37",
+             "Thickness": 200.0, "AreaType": "Shell", "Type": "Shell-Thin"},
+        ],
+        "AREA SECTION ASSIGNMENTS": [
+            {"Area": 1, "Section": "Slab200"},
+        ],
+        # MinSize and MaxSize are empty strings.
+        "AREA MESH ASSIGNMENTS": [
+            {"Area": 1, "AutoMesh": "Yes", "MinSize": "", "MaxSize": ""},
+        ],
+    }
+    import json
+    json_path = tmp_path / "empty_cells.json"
+    with open(json_path, "w") as f:
+        json.dump(json_data, f)
+
+    parser = SAP2000Parser.from_json(json_path)
+    md = parser.get_model_data()
+
+    # Offsets should default to 0.0
+    off = md.frame_end_offsets["1"]
+    assert off.end_i == 0.0
+    assert off.end_j == 0.0
+
+    # Mesh sizes should default to 0.0
+    m = md.area_mesh["1"]
+    assert m.auto_mesh is True
+    assert m.min_size == 0.0
+    assert m.max_size == 0.0
+
+
 def test_new_tables_empty_when_missing(tmp_path):
     """All new tables return empty defaults when no data exists."""
     json_data = {

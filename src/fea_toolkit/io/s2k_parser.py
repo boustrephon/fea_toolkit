@@ -453,8 +453,8 @@ class SAP2000Parser:
             if fid == "0":
                 continue
             offsets[fid] = FrameEndOffset(
-                end_i=float(rec.get("EndI", 0.0)),
-                end_j=float(rec.get("EndJ", 0.0)),
+                end_i=self._to_float(rec.get("EndI", 0.0)) or 0.0,
+                end_j=self._to_float(rec.get("EndJ", 0.0)) or 0.0,
             )
         return offsets
 
@@ -475,8 +475,8 @@ class SAP2000Parser:
                 auto_mesh=self._to_bool(rec.get("AutoMesh", False)),
                 no_auto_mesh_at_edges=self._to_bool(rec.get("NoAutoMeshAtEdges", False)),
                 no_sub_mesh=self._to_bool(rec.get("NoSubMesh", False)),
-                min_size=float(rec.get("MinSize", 0.0)),
-                max_size=float(rec.get("MaxSize", 0.0)),
+                min_size=self._to_float(rec.get("MinSize", 0.0)) or 0.0,
+                max_size=self._to_float(rec.get("MaxSize", 0.0)) or 0.0,
             )
         return meshes
 
