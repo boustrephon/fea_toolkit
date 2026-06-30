@@ -1256,6 +1256,8 @@ def mesh_area_elements(
         elem = area_elements.get(aid)
         if elem is None or len(elem.node_ids) != 4:
             continue  # only quad areas are meshed
+        if getattr(elem, 'inactive', False):
+            continue  # already subdivided in a previous build
 
         # Gather corner nodes, ensuring we have unique corners (4-node quad)
         corner_ids = [str(nid) for nid in elem.node_ids]
@@ -1280,9 +1282,10 @@ def mesh_area_elements(
         l23 = _edge_length(corners[2], corners[3])
         l30 = _edge_length(corners[3], corners[0])
 
-        # Average length along each parametric direction
-        len_u = (l01 + l23) / 2.0   # I→J direction (edge 0-1, 2-3)
-        len_v = (l12 + l30) / 2.0   # orthogonal direction (edge 1-2, 3-0)
+        # Use the longest edge in each parametric direction so that
+        # no sub-element exceeds max_size, even on tapered faces.
+        len_u = max(l01, l23)   # I→J direction (edge 0-1, 2-3)
+        len_v = max(l12, l30)   # orthogonal direction (edge 1-2, 3-0)
 
         n_u = max(1, math.ceil(len_u / mesh.max_size))
         n_v = max(1, math.ceil(len_v / mesh.max_size))
@@ -1346,6 +1349,7 @@ def mesh_area_elements(
                 area_elements[sub_id] = AreaElement(
                     area_id=sub_id, area_tag=sub_tag,
                     node_ids=[n0, n1, n2, n3],
+                    thickness=elem.thickness,
                 )
                 if sec_name:
                     area_assignments[sub_id] = sec_name
