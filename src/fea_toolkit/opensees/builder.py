@@ -332,6 +332,25 @@ class OpenSeesBuilder:
                         f"{Fy:g} {E_mod:g} 0.01"
                     )
 
+        # nD materials (for nonlinear shell analysis)
+        _nd_mat_tag: Dict[str, int] = {}
+        if model_data.nd_materials:
+            lines.append("")
+            lines.append("# ── nD materials (nonlinear shells) ──")
+            _nd_base = max(_mat_tag.values()) + 1 if _mat_tag else 1
+            for i, (nd_name, nd_mat) in enumerate(
+                    model_data.nd_materials.items(), start=_nd_base):
+                _nd_mat_tag[nd_name] = i
+                lines.append(nd_mat.to_tcl(i))
+            # Wrap each nD material as PlateFiber for layered shell use
+            for nd_name, nd_mat in model_data.nd_materials.items():
+                tag = _nd_mat_tag[nd_name]
+                if nd_mat.material_type != "ElasticIsotropic":
+                    pf_tag = tag + len(model_data.nd_materials)
+                    lines.append(
+                        f"nDMaterial PlateFromPlaneStress {pf_tag} {tag} 0.0"
+                    )
+
         # Sections
         if model_data.sections:
             lines.append("")
@@ -392,25 +411,34 @@ class OpenSeesBuilder:
             lines.append("")
             lines.append("# ── Shell sections & area elements ──")
 
-            # Emit shell sections once per unique section name, using
-            # tags offset from the frame section range.
+            # Map area section names to a _shell_sec_tag dict; prefer
+            # LayeredShellSection if available, else ElasticMembranePlate.
             _shell_sec_tag: Dict[str, int] = {}
-            _next_shell_tag = (max(_sec_tag.values()) + 1
-                               if _sec_tag else 1000)
+            _next_shell_tag = (
+                max(dict(**_mat_tag, **_sec_tag, **_nd_mat_tag).values())
+                + len(model_data.nd_materials) + 1
+                if (_mat_tag or _sec_tag or _nd_mat_tag) else 1000
+            )
+
+            # Emit layered shell sections from model data
+            for ls_name, ls_sec in (
+                    model_data.layered_shell_sections or {}).items():
+                stag = _next_shell_tag
+                _next_shell_tag += 1
+                _shell_sec_tag[ls_name] = stag
+                lines.append(ls_sec.to_tcl(stag, _nd_mat_tag))
+
+            # Emit ElasticMembranePlate sections for remaining area
+            # sections that don't have a layered definition.
             for aid, elem in model_data.area_elements.items():
                 if getattr(elem, "inactive", False):
                     continue
                 sec_name = model_data.area_assignments.get(aid, "")
-                if sec_name and sec_name not in _shell_sec_tag:
-                    _shell_sec_tag[sec_name] = _next_shell_tag
-                    _next_shell_tag += 1
-
-            # Write unique shell sections
-            for sec_name, stag in _shell_sec_tag.items():
-                lines.append(
-                    "section ElasticMembranePlateSection "
-                    f"{stag} 200e9 0.3 0.2"
-                )
+                if not sec_name or sec_name in _shell_sec_tag:
+                    continue
+                stag = _next_shell_tag
+                _next_shell_tag += 1
+                _shell_sec_tag[sec_name] = stag
 
             # Shell elements
             for aid, elem in model_data.area_elements.items():
@@ -474,6 +502,7 @@ class OpenSeesBuilder:
         lateral_loads: Optional[Dict[int, tuple]] = None,
         gravity_loads: Optional[Dict[int, tuple]] = None,
         gravity_pattern: str = "",
+        adaptive: bool = False,
     ) -> str:
         """Generate a pushover analysis block for Xara/OpenSeesRT Tcl.
 
@@ -492,26 +521,41 @@ class OpenSeesBuilder:
             gravity_pattern: Name for the gravity load pattern
                 (e.g. ``"Gravity"``).  If empty and *gravity_loads*
                 is provided, a plain pattern is used.
+            adaptive: If True, emit an adaptive algorithm fallback
+                chain (Newton → KrylovNewton → ModifiedNewton with
+                automatic step-size reduction) suitable for highly
+                nonlinear pushover analyses.
 
         Returns:
             Tcl commands as a string.
         """
         lines: List[str] = []
 
-        # Gravity step
+        # ── Step A: Gravity ──
         if gravity_loads:
             lines.append("")
-            lines.append("# ── Gravity analysis ──")
+            lines.append("# ── Step A: Gravity analysis ──")
             lines.append(f"pattern Plain 1 \"Linear\" {{")
             for nid, (fx, fy, fz) in gravity_loads.items():
                 lines.append(f"    load {nid} {fx:g} {fy:g} {fz:g} 0 0 0")
             lines.append("}")
-            lines.append('loadConst -time 0.0')
-            lines.append("")
+            lines.extend([
+                "constraints Transformation",
+                "numberer RCM",
+                "system BandGeneral",
+                "test NormDispIncr 1.0e-6 10 0",
+                "algorithm Newton",
+                "integrator LoadControl 0.1",
+                "analysis Static",
+                "analyze 10",
+                'loadConst -time 0.0',
+                'puts "-> Gravity loads locked."',
+            ])
 
-        # Lateral pushover
+        # ── Step B: Lateral pushover ──
         if lateral_loads:
-            lines.append("# ── Pushover analysis ──")
+            lines.append("")
+            lines.append("# ── Step B: Lateral pushover ──")
             lines.append("pattern Plain 2 \"Linear\" {")
             for nid, (fx, fy, fz) in lateral_loads.items():
                 lines.append(f"    load {nid} {fx:g} {fy:g} {fz:g} 0 0 0")
@@ -520,25 +564,106 @@ class OpenSeesBuilder:
         lines.extend([
             "",
             "system BandGeneral",
-            "numberer Plain",
-            "constraints Plain",
-            "test NormDispIncr 1.0e-6 100",
-            "algorithm Newton",
-            f"integrator DisplacementControl {control_node} {dof} "
-            f"[expr {max_disp:.6g} / {num_steps}]",
-            "analysis Static",
+            "numberer RCM",
+            "constraints Transformation",
+        ])
+
+        if adaptive:
+            # Adaptive pushover with algorithm fallback chain
+            dU = f"[expr {max_disp:.6g} / {num_steps}]"
+            lines.extend([
+                "set dU_base " + dU,
+                "set dU $dU_base",
+                f"integrator DisplacementControl {control_node} {dof} $dU",
+                "analysis Static",
+                "",
+                f"set targetDisp {max_disp:.6g}",
+                "set currentDisp 0.0",
+                "set stepCount 0",
+                "",
+                "while {$currentDisp < $targetDisp} {",
+                "",
+                "    test NormDispIncr 1.0e-5 200 0",
+                "    algorithm Newton",
+                "    set ok [analyze 1]",
+                "",
+                "    # Fallback 1: Krylov-Newton",
+                '    if {$ok != 0} {',
+                "        puts \"   Krylov-Newton fallback...\"",
+                "        test NormDispIncr 1.0e-5 500 0",
+                "        algorithm KrylovNewton",
+                "        set ok [analyze 1]",
+                "    }",
+                "",
+                "    # Fallback 2: ModifiedNewton (initial stiffness)",
+                '    if {$ok != 0} {',
+                "        puts \"   ModifiedNewton fallback...\"",
+                "        algorithm ModifiedNewton -initial",
+                "        set ok [analyze 1]",
+                "    }",
+                "",
+                "    # Fallback 3: cut step size",
+                '    if {$ok != 0} {',
+                "        puts \"   Step cut from $dU to [expr $dU * 0.1]\"",
+                "        set dU [expr $dU * 0.1]",
+                f"        integrator DisplacementControl {control_node} {dof} $dU",
+                "        algorithm Newton",
+                "        set ok [analyze 1]",
+                "    }",
+                "",
+                '    if {$ok != 0} {',
+                '        puts "\\n[CRITICAL] Model collapse reached."',
+                "        break",
+                "    }",
+                "",
+                "    # Restore step size when possible",
+                "    if {$dU < $dU_base} {",
+                "        set dU $dU_base",
+                f"        integrator DisplacementControl {control_node} {dof} $dU",
+                "    }",
+                "",
+                "    set currentDisp [nodeDisp $control_node $dof]",
+                "    incr stepCount",
+                '    if {[expr $stepCount % 20] == 0} {',
+                "         puts [format \"   Drift = %.2f mm (step %d)\" $currentDisp $stepCount]",
+                "    }",
+                "}",
+            ])
+        else:
+            # Simple fixed-step pushover
+            lines.extend([
+                "test NormDispIncr 1.0e-6 100",
+                "algorithm Newton",
+                f"integrator DisplacementControl {control_node} {dof} "
+                f"[expr {max_disp:.6g} / {num_steps}]",
+                "analysis Static",
+                "",
+                f"set ok [analyze {num_steps}]",
+                'puts "Pushover: $ok steps"',
+            ])
+
+        # ── Results ──
+        lines.extend([
             "",
-            f"set ok [analyze {num_steps}]",
-            'puts "Pushover analysis: $ok steps completed"',
             f'puts "Control node {control_node} dof {dof}: [nodeDisp {control_node} {dof}]"',
             "",
             "reactions",
-            "# Sum base shear in X direction",
-            "set rx 0",
-            "for {set n 1} {$n <= [llength [getNodeTags]]} {incr n} {",
+            "# Sum base reactions",
+            "set rx 0; set ry 0; set rz 0",
+            "foreach n [getNodeTags] {",
             "    set rx [expr $rx + [nodeReaction $n 1]]",
+            "    set ry [expr $ry + [nodeReaction $n 2]]",
+            "    set rz [expr $rz + [nodeReaction $n 3]]",
             "}",
-            'puts "Base shear Rx = $rx"',
+            'puts "Base reactions: Rx = $rx  Ry = $ry  Rz = $rz"',
+        ])
+
+        # Recorders
+        lines.extend([
+            "",
+            f"recorder Node -file wall_disp.out -time -node {control_node} -dof {dof} disp",
+            "recorder Node -file wall_reaction.out -time -node 1 -dof 1 reaction",
+            "recorder Element -file wall_forces.out -ele 1 force",
         ])
 
         return "\n".join(lines)
