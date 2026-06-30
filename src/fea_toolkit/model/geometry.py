@@ -1249,6 +1249,13 @@ def mesh_area_elements(
         ``(area_elements, area_assignments, nodes, next_tag)`` with
         subdivided areas added and original areas marked inactive.
     """
+    # Coordinate-based node registry so adjacent meshed areas share
+    # edge/interior nodes at the same location (rounded to 1 mm).
+    _coord_key = lambda x, y, z: (round(x, 6), round(y, 6), round(z, 6))
+    _coord_to_id: Dict[tuple, str] = {}
+    for nid, nd in nodes.items():
+        _coord_to_id[_coord_key(nd.x, nd.y, nd.z)] = nid
+
     for aid, mesh in area_mesh.items():
         if not mesh.auto_mesh or mesh.max_size <= 0.0:
             continue
@@ -1322,13 +1329,21 @@ def mesh_area_elements(
                     node_grid[j][i] = corner_ids[3]
                     continue
                 new_id = f"{aid}_mesh_{j}_{i}"
+                pt = grid[j, i]
+                # Reuse existing node at the same coordinates so
+                # adjacent meshed areas share edge/interior nodes.
+                ck = _coord_key(float(pt[0]), float(pt[1]), float(pt[2]))
+                existing = _coord_to_id.get(ck)
+                if existing is not None:
+                    node_grid[j][i] = existing
+                    continue
                 new_tag = next_tag
                 next_tag += 1
-                pt = grid[j, i]
                 nodes[new_id] = Node(
                     node_id=new_id, node_tag=new_tag,
                     x=float(pt[0]), y=float(pt[1]), z=float(pt[2]),
                 )
+                _coord_to_id[ck] = new_id
                 node_grid[j][i] = new_id
 
         # Mark original area as inactive

@@ -73,9 +73,12 @@ class OpenSeesBuilder:
         self._has_edge_constraints: bool = False
         self._offset_rigid_links: List[tuple] = []
         # Snapshot pristine frame data so rebuilds always start from the
-        # original geometry (before any offset/split mutations).
+        # original geometry (before any offset/split/mesh mutations).
         self._original_frame_elements = copy.deepcopy(model_data.frame_elements)
         self._original_frame_assignments = copy.deepcopy(model_data.frame_assignments)
+        self._original_nodes = copy.deepcopy(model_data.nodes)
+        self._original_area_elements = copy.deepcopy(model_data.area_elements)
+        self._original_area_assignments = copy.deepcopy(model_data.area_assignments)
         # self._transf_tags: Dict[int, int] = {}   # elem_id -> transf_tag
 
     def _set_defaults(self) -> None:
@@ -153,10 +156,13 @@ class OpenSeesBuilder:
         self.split_dist_loads = None
         self._offset_rigid_links = []
 
-        # Restore pristine frame data so rebuilds always start from the
-        # original geometry (before any offset/split mutations).
+        # Restore pristine geometry so rebuilds always start from the
+        # original data (before any offset/split/mesh mutations).
         self.model.frame_elements = copy.deepcopy(self._original_frame_elements)
         self.model.frame_assignments = copy.deepcopy(self._original_frame_assignments)
+        self.model.nodes = copy.deepcopy(self._original_nodes)
+        self.model.area_elements = copy.deepcopy(self._original_area_elements)
+        self.model.area_assignments = copy.deepcopy(self._original_area_assignments)
 
         create_shells = self.config.get('create_shells', False)
         if self.config['verbose']:
@@ -197,7 +203,7 @@ class OpenSeesBuilder:
 
         # Mesh area elements and create shell elements
         if create_shells:
-            self._mesh_areas()
+            self._mesh_areas(selection=selection)
             self._create_shell_elements(loads_only_selection=selection)
 
         self._create_elements()
@@ -499,14 +505,33 @@ class OpenSeesBuilder:
     # Area meshing
     # -------------------------------------------------------------------------
 
-    def _mesh_areas(self) -> None:
+    def _mesh_areas(self,
+                    selection: Optional[Selection] = None,
+                    ) -> None:
         """Subdivide area elements per parsed AREA MESH ASSIGNMENTS.
 
         Must be called before ``_create_shell_elements`` so that meshed
         sub-areas become ``ShellMITC4`` elements instead of the original
         coarse area.
+
+        Args:
+            selection: Optional :class:`Selection`.  Areas matching this
+                selection are loads‑only and will **not** be meshed.
         """
         if not self.model.area_mesh:
+            return
+
+        # Exclude loads-only areas from meshing
+        if selection is not None:
+            loads_only = set(selection.get_area_ids(self.model))
+            mesh_filtered = {
+                aid: m for aid, m in self.model.area_mesh.items()
+                if aid not in loads_only
+            }
+        else:
+            mesh_filtered = self.model.area_mesh
+
+        if not mesh_filtered:
             return
 
         from ..model.geometry import mesh_area_elements
@@ -523,7 +548,7 @@ class OpenSeesBuilder:
             self.model.area_elements,
             self.model.area_assignments,
             self.model.nodes,
-            self.model.area_mesh,
+            mesh_filtered,
             next_tag=next_tag,
         )
         # Update model with meshed data
@@ -596,7 +621,13 @@ class OpenSeesBuilder:
             nodes = self.model.nodes
             max_elem_tag = max((e.elem_tag for e in elements.values()), default=0)
             max_node_tag = max((nd.node_tag for nd in self.model.nodes.values()), default=0)
-            next_tag = max(max_elem_tag, max_node_tag) + 1
+            # Account for shell element tags already created in OpenSees so
+            # brace subdivision / rigid link tags don't collide with shells.
+            try:
+                max_ops_tag = max(ops.getEleTags(), default=0)
+            except Exception:
+                max_ops_tag = 0
+            next_tag = max(max_elem_tag, max_node_tag, max_ops_tag) + 1
             from ..model.geometry import subdivide_elements
             elements, assignments, nodes, next_tag, rigid_links = subdivide_elements(
                 elements, assignments, nodes,
@@ -779,8 +810,10 @@ class OpenSeesBuilder:
         if self.config.get('create_shells', False) and sel is not None:
             loads_only = set(sel.get_area_ids(self.model))
             return {aid for aid in self.model.area_elements
-                    if aid not in loads_only}
-        return set(self.model.area_elements.keys())
+                    if aid not in loads_only
+                    and not getattr(self.model.area_elements[aid], 'inactive', False)}
+        return {aid for aid in self.model.area_elements
+                if not getattr(self.model.area_elements[aid], 'inactive', False)}
 
     def detect_unconnected_edges(
         self,
@@ -1514,6 +1547,8 @@ class OpenSeesBuilder:
 
             # ── Area element self-weight ──
             for aid, area_elem in self.model.area_elements.items():
+                if getattr(area_elem, 'inactive', False):
+                    continue
                 sec_name = self.model.area_assignments.get(aid)
                 if not sec_name:
                     continue
@@ -1625,6 +1660,8 @@ class OpenSeesBuilder:
                     continue
                 area_elem = self.model.area_elements.get(agl.area_id)
                 if area_elem is None:
+                    continue
+                if getattr(area_elem, 'inactive', False):
                     continue
 
                 # Get section + material for density
@@ -3228,6 +3265,8 @@ class OpenSeesBuilder:
 
                 # ── Area elements ──
                 for aid, area_elem in self.model.area_elements.items():
+                    if getattr(area_elem, 'inactive', False):
+                        continue
                     sec_name = self.model.area_assignments.get(aid)
                     if not sec_name:
                         continue
