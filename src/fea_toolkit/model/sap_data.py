@@ -565,6 +565,107 @@ class ShellSection(Section):
         )
 
 
+# ── nD material / layered shell classes ──
+
+
+@dataclass
+class NDMaterial:
+    """Multi‑axial (nD) material for nonlinear shell analysis.
+
+    These are used with ``LayeredShellFiberSection`` in Xara/OpenSeesRT.
+
+    Args:
+        name: Unique material name.
+        material_type: ``"ElasticIsotropic"``, ``"J2PlateFibre"``,
+            ``"ConcreteS"``, or ``"PlateFromPlaneStress"``.
+        E: Young's modulus (Pa).
+        nu: Poisson's ratio.
+        fy: Yield stress for J2PlateFibre (Pa).
+        Hiso: Isotropic hardening modulus for J2PlateFibre.
+        Hkin: Kinematic hardening modulus for J2PlateFibre.
+        fc: Compressive strength for ConcreteS (Pa, positive).
+        ft: Tensile strength for ConcreteS (Pa).
+        Es: Steel rebar stiffness for ConcreteS (0 = plain concrete).
+    """
+    name: str
+    material_type: str = "ElasticIsotropic"
+    E: float = 200.0e9
+    nu: float = 0.3
+    fy: float = 400.0e6
+    Hiso: float = 0.0
+    Hkin: float = 0.0
+    fc: float = 30.0e6
+    ft: float = 3.0e6
+    Es: float = 0.0
+
+    def to_tcl(self, tag: int) -> str:
+        """Return the Tcl command to create this nD material in OpenSees."""
+        t = self.material_type
+        if t == "ElasticIsotropic":
+            return f"nDMaterial ElasticIsotropic {tag} {self.E:g} {self.nu:g}"
+        if t == "J2PlateFibre":
+            return (f"nDMaterial J2PlateFibre {tag} {self.E:g} {self.nu:g}"
+                    f" {self.fy:g} {self.Hiso:g} {self.Hkin:g}")
+        if t == "ConcreteS":
+            return (f"nDMaterial ConcreteS {tag} {self.E:g} {self.nu:g}"
+                    f" {self.fc:g} {self.ft:g} {self.Es:g}")
+        if t == "PlateFromPlaneStress":
+            return f"nDMaterial PlateFromPlaneStress {tag} {tag} 0.0"
+        return f"nDMaterial {t} {tag} {self.E:g} {self.nu:g}"
+
+
+@dataclass
+class ShellFiberLayer:
+    """A single layer in a ``LayeredShellFiberSection``.
+
+    Args:
+        thickness: Layer thickness (same units as model).
+        nd_material: Name of the :class:`NDMaterial` for this layer.
+        n_ip: Number of integration points through this layer (default 4).
+    """
+    thickness: float
+    nd_material: str
+    n_ip: int = 4
+
+
+@dataclass
+class LayeredShellSection:
+    """Layered shell section for nonlinear shear wall analysis.
+
+    Corresponds to ``LayeredShellFiberSection`` in Xara/OpenSeesRT.
+    Each layer is a :class:`ShellFiberLayer` with an nD material reference.
+
+    Usage::
+
+        section = LayeredShellSection(
+            name="WallSec",
+            layers=[
+                ShellFiberLayer(0.15, "Concrete"),
+                ShellFiberLayer(0.01, "Rebar"),
+                ShellFiberLayer(0.15, "Concrete"),
+            ],
+        )
+    """
+    name: str
+    layers: List[ShellFiberLayer] = field(default_factory=list)
+
+    def to_tcl(self, tag: int, mat_tags: Dict[str, int]) -> str:
+        """Return the Tcl command to create this layered shell section.
+
+        Args:
+            tag: Integer tag for the section.
+            mat_tags: Dict mapping NDMaterial name → integer tag.
+
+        Returns:
+            Tcl ``section LayeredShell ...`` command string.
+        """
+        parts = [f"section LayeredShell {tag} {len(self.layers)}"]
+        for layer in self.layers:
+            mt = mat_tags.get(layer.nd_material, 1)
+            parts.append(f"{layer.thickness:g} {mt} {layer.n_ip}")
+        return "   ".join(parts)
+
+
 # --- Non‑section dataclasses ---------------------------------------------------
 
 @dataclass
@@ -750,6 +851,10 @@ class SAPModelData:
     area_gravity_loads: List[AreaGravityLoad] = field(default_factory=list)
     frame_gravity_loads: List[GravityLoad] = field(default_factory=list)
     mass_sources: Dict[str, MassSource] = field(default_factory=dict)
+    # Multi-axial (nD) materials for nonlinear shell analysis
+    nd_materials: Dict[str, NDMaterial] = field(default_factory=dict)
+    # Layered shell sections for nonlinear shear walls
+    layered_shell_sections: Dict[str, LayeredShellSection] = field(default_factory=dict)
     # Default units used for all coordinates and section properties
     units: Dict[str, str] = field(default_factory=lambda: {'F': "N", 'L': "m", 'T': "C"})   
     
