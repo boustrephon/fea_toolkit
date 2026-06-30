@@ -459,7 +459,10 @@ class SAP2000Parser:
         return offsets
 
     def _get_area_mesh_assignments(self) -> Dict[str, AreaMesh]:
-        """Parse AREA MESH ASSIGNMENTS table.
+        """Parse area auto-mesh assignments.
+
+        Reads from either ``AREA MESH ASSIGNMENTS`` or
+        ``AREA AUTO MESH ASSIGNMENTS`` (SAP2000 uses the latter).
 
         Returns
         -------
@@ -467,17 +470,32 @@ class SAP2000Parser:
             Mapping from area ID to its mesh control settings.
         """
         meshes: Dict[str, AreaMesh] = {}
-        for rec in self._raw_tables.get("AREA MESH ASSIGNMENTS", []):
-            aid = str(rec.get("Area", "0"))
-            if aid == "0":
-                continue
-            meshes[aid] = AreaMesh(
-                auto_mesh=self._to_bool(rec.get("AutoMesh", False)),
-                no_auto_mesh_at_edges=self._to_bool(rec.get("NoAutoMeshAtEdges", False)),
-                no_sub_mesh=self._to_bool(rec.get("NoSubMesh", False)),
-                min_size=self._to_float(rec.get("MinSize", 0.0)) or 0.0,
-                max_size=self._to_float(rec.get("MaxSize", 0.0)) or 0.0,
-            )
+        # Try both table name variants
+        for table_name in ("AREA AUTO MESH ASSIGNMENTS", "AREA MESH ASSIGNMENTS"):
+            for rec in self._raw_tables.get(table_name, []):
+                aid = str(rec.get("Area", "0"))
+                if aid == "0":
+                    continue
+                # Determine auto_mesh flag: True unless MeshType is "None"
+                mesh_type = str(rec.get("MeshType", "")).lower()
+                use_auto = mesh_type not in ("", "none", "0", "false")
+                if not use_auto:
+                    use_auto = self._to_bool(rec.get("AutoMesh", False))
+
+                # Max1/Max2 define max element size in each direction
+                max_sz = max(
+                    self._to_float(rec.get("Max1", 0.0)) or 0.0,
+                    self._to_float(rec.get("Max2", 0.0)) or 0.0,
+                    self._to_float(rec.get("MaxSize", 0.0)) or 0.0,
+                )
+                meshes[aid] = AreaMesh(
+                    auto_mesh=use_auto,
+                    no_auto_mesh_at_edges=self._to_bool(
+                        rec.get("NoAutoMeshAtEdges", False)),
+                    no_sub_mesh=self._to_bool(rec.get("NoSubMesh", False)),
+                    min_size=self._to_float(rec.get("MinSize", 0.0)) or 0.0,
+                    max_size=max_sz,
+                )
         return meshes
 
     def _get_area_edge_constraints(self) -> Dict[str, List[AreaEdgeConstraint]]:
