@@ -87,10 +87,21 @@ def flatness(
         if len(pts) != 4:
             continue
 
-        # Distance between the two diagonals (midpoints)
-        mid_ac = (pts[0] + pts[2]) * 0.5
-        mid_bd = (pts[1] + pts[3]) * 0.5
-        diag_dist = float(np.linalg.norm(mid_ac - mid_bd))
+        # True non-planarity: for each of the two triangulations of the
+        # quad, compute the perpendicular distance from the third vertex
+        # to the plane of the first three.  Report the larger deviation
+        # normalised by average edge length.
+        def _tet_signed_height(a, b, c, d):
+            """Signed distance from d to plane (a,b,c)."""
+            n = np.cross(b - a, c - a)
+            nn = np.linalg.norm(n)
+            if nn < 1e-12:
+                return 0.0
+            return float(np.dot(d - a, n) / nn)
+
+        h1 = abs(_tet_signed_height(pts[0], pts[1], pts[2], pts[3]))
+        h2 = abs(_tet_signed_height(pts[0], pts[2], pts[3], pts[1]))
+        diag_dist = max(h1, h2)
 
         avg_edge = (
             np.linalg.norm(pts[1] - pts[0])
