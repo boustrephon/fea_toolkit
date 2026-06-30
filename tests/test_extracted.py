@@ -285,9 +285,15 @@ class TestApplyFrameEndOffsets:
         )
         assert len(links) == 1
         assert "1_off_i" in nodes
+        # I-end offset → element rewired to offset node
         assert elems["1"].node_i == "1_off_i"
         assert links[0][1] == "1"
         assert links[0][2] == "1_off_i"
+        # J-end has no offset → keeps original node
+        assert elems["1"].node_j == "2"
+        # No duplicate node at J-end
+        j_off_ids = [nid for nid in nodes if "_off_j" in nid]
+        assert len(j_off_ids) == 0
 
     def test_both_ends_offset(self):
         """Both-end offsets create two rigid links."""
@@ -371,9 +377,9 @@ class TestMeshAreaElements:
             areas, assign, nodes, mesh, next_tag=100
         )
         sub_ids = [aid for aid in areas if aid != "1"]
-        assert len(sub_ids) == 2  # 12/6=2 (n_u) × 8/6≈1 (n_v) = 2
+        assert len(sub_ids) == 4  # ceil(12/6)=2 × ceil(8/6)=2 = 4
         assert areas["1"].inactive is True
-        assert "1_mesh_0_1" in nodes
+        assert "1_mesh_1_1" in nodes  # fully interior node
 
     def test_mesh_preserves_section_assignment(self):
         """Sub-areas inherit the section from the parent."""

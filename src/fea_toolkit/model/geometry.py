@@ -1180,39 +1180,39 @@ def apply_frame_end_offsets(
         d_i = min(off.end_i, half)
         d_j = min(off.end_j, half)
 
-        # I‑end offset node
-        offset_i_id = f"{eid}_off_i"
-        offset_i_tag = next_tag
-        next_tag += 1
-        p_start = p_i + u * d_i
-        nodes[offset_i_id] = Node(
-            node_id=offset_i_id, node_tag=offset_i_tag,
-            x=float(p_start[0]), y=float(p_start[1]), z=float(p_start[2]),
-        )
-
-        # J‑end offset node
-        offset_j_id = f"{eid}_off_j"
-        offset_j_tag = next_tag
-        next_tag += 1
-        p_end = p_j - u * d_j
-        nodes[offset_j_id] = Node(
-            node_id=offset_j_id, node_tag=offset_j_tag,
-            x=float(p_end[0]), y=float(p_end[1]), z=float(p_end[2]),
-        )
-
-        # Rigid link at I‑end (original node → offset node)
+        # I‑end offset: only create a new node if there is a non‑zero offset.
         if d_i > 0:
+            offset_i_id = f"{eid}_off_i"
+            offset_i_tag = next_tag
+            next_tag += 1
+            p_start = p_i + u * d_i
+            nodes[offset_i_id] = Node(
+                node_id=offset_i_id, node_tag=offset_i_tag,
+                x=float(p_start[0]), y=float(p_start[1]), z=float(p_start[2]),
+            )
             rigid_i_id = f"{eid}_rigid_i"
             rigid_i_tag = next_tag
             next_tag += 1
             rigid_links.append((rigid_i_id, elem.node_i, offset_i_id, rigid_i_tag))
+        else:
+            offset_i_id = elem.node_i  # keep original node
 
-        # Rigid link at J‑end (offset node → original node)
+        # J‑end offset: only create a new node if there is a non‑zero offset.
         if d_j > 0:
+            offset_j_id = f"{eid}_off_j"
+            offset_j_tag = next_tag
+            next_tag += 1
+            p_end = p_j - u * d_j
+            nodes[offset_j_id] = Node(
+                node_id=offset_j_id, node_tag=offset_j_tag,
+                x=float(p_end[0]), y=float(p_end[1]), z=float(p_end[2]),
+            )
             rigid_j_id = f"{eid}_rigid_j"
             rigid_j_tag = next_tag
             next_tag += 1
             rigid_links.append((rigid_j_id, offset_j_id, elem.node_j, rigid_j_tag))
+        else:
+            offset_j_id = elem.node_j  # keep original node
 
         # Shorten the original element to the offset length
         elem.node_i = offset_i_id
@@ -1284,8 +1284,8 @@ def mesh_area_elements(
         len_u = (l01 + l23) / 2.0   # I→J direction (edge 0-1, 2-3)
         len_v = (l12 + l30) / 2.0   # orthogonal direction (edge 1-2, 3-0)
 
-        n_u = max(1, round(len_u / mesh.max_size))
-        n_v = max(1, round(len_v / mesh.max_size))
+        n_u = max(1, math.ceil(len_u / mesh.max_size))
+        n_v = max(1, math.ceil(len_v / mesh.max_size))
 
         if n_u == 1 and n_v == 1:
             continue  # no subdivision needed
@@ -1306,12 +1306,17 @@ def mesh_area_elements(
         node_grid = [[None] * (n_u + 1) for _ in range(n_v + 1)]
         for j in range(n_v + 1):
             for i in range(n_u + 1):
-                if (i == 0 and j == 0) or (i == n_u and j == 0) \
-                   or (i == n_u and j == n_v) or (i == 0 and j == n_v):
-                    # Corner — use original node ID
-                    idx = (j * (n_u + 1) + i)
-                    orig_corners = [0, 1, 3, 2]  # reorder to match grid
-                    node_grid[j][i] = corner_ids[orig_corners[j * 2 + (i // max(1, n_u))]]
+                if i == 0 and j == 0:
+                    node_grid[j][i] = corner_ids[0]
+                    continue
+                if i == n_u and j == 0:
+                    node_grid[j][i] = corner_ids[1]
+                    continue
+                if i == n_u and j == n_v:
+                    node_grid[j][i] = corner_ids[2]
+                    continue
+                if i == 0 and j == n_v:
+                    node_grid[j][i] = corner_ids[3]
                     continue
                 new_id = f"{aid}_mesh_{j}_{i}"
                 new_tag = next_tag
