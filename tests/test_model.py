@@ -2436,26 +2436,30 @@ class TestBuilderFrameEndOffsets:
         b = OpenSeesBuilder(offset_model, {
             "verbose": False, "use_elastic_sections": True,
         })
-        b.build()
-        # Look for offset nodes
-        tags = [nd.node_tag for nid, nd in offset_model.nodes.items()
-                if "_off_" in nid]
-        assert len(tags) == 2, "Expected 2 offset nodes"
-        for tag in tags:
-            coords = list(ops.nodeCoord(tag))
-            assert len(coords) == 3
-        ops.wipe()
+        try:
+            b.build()
+            # Look for offset nodes
+            tags = [nd.node_tag for nid, nd in offset_model.nodes.items()
+                    if "_off_" in nid]
+            assert len(tags) == 2, "Expected 2 offset nodes"
+            for tag in tags:
+                coords = list(ops.nodeCoord(tag))
+                assert len(coords) == 3
+        finally:
+            ops.wipe()
 
     def test_rigid_links_recorded(self, offset_model):
         """_offset_rigid_links contains entries after build()."""
         from fea_toolkit.opensees.builder import OpenSeesBuilder
+        import openseespy.opensees as ops
         b = OpenSeesBuilder(offset_model, {
             "verbose": False, "use_elastic_sections": True,
         })
-        b.build()
-        assert len(b._offset_rigid_links) == 2
-        import openseespy.opensees as ops
-        ops.wipe()
+        try:
+            b.build()
+            assert len(b._offset_rigid_links) == 2
+        finally:
+            ops.wipe()
 
     def test_no_offsets_no_links(self):
         """Zero offsets produce no rigid links."""
