@@ -206,8 +206,8 @@ class OpenSeesBuilder:
             self._mesh_areas(selection=selection)
             self._create_shell_elements(loads_only_selection=selection)
 
-        self._create_elements()
         self._create_lumped_hinges()
+        self._create_elements()
         self._create_loads(pattern_scales=pattern_scales)
         self._setup_recorders()  # optional
 
@@ -437,53 +437,55 @@ class OpenSeesBuilder:
 
             if is_concrete:
                 # Concrete section: need 3 materials (unconfined, confined, steel)
-                # mat_tag     → unconfined concrete
-                # mat_tag + 1 → confined concrete
-                # mat_tag + 2 → steel rebar
+                # Use dedicated material tags separate from section tags
+                # to avoid overwriting materials used by other sections.
+                concrete_mat_tag = tag + len(self.model.sections) + 1
                 if mat is not None and mat.type.lower() == 'concrete':
                     Fc = mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7
                     Ec = mat.E_mod if mat.E_mod > 0 else 2.5e10
                     epsc = mat.eFc if mat.eFc and mat.eFc > 0 else -0.002
-                    # Unconfined cover
-                    ops.uniaxialMaterial('Concrete01', mat_tag,
+                    ops.uniaxialMaterial('Concrete01', concrete_mat_tag,
                                          -Fc, epsc, -0.2 * Fc, -0.006)
-                    # Confined core (Mander: fcc ≈ 1.3*Fc, epscc ≈ 0.005)
                     fcc = Fc * 1.3
                     epscc = -0.005
-                    ops.uniaxialMaterial('Concrete01', mat_tag + 1,
+                    ops.uniaxialMaterial('Concrete01', concrete_mat_tag + 1,
                                          -fcc, epscc, -0.2 * fcc, -0.02)
-                    # Steel rebar
                     Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
-                    Es = 2.0e11
-                    ops.uniaxialMaterial('Steel02', mat_tag + 2, Fy, Es, 0.01)
+                    ops.uniaxialMaterial('Steel02', concrete_mat_tag + 2, Fy, 2.0e11, 0.01)
                 else:
-                    # Fallback if material type is missing
-                    ops.uniaxialMaterial('Concrete01', mat_tag, -3.0e7, -0.002,
+                    ops.uniaxialMaterial('Concrete01', concrete_mat_tag, -3.0e7, -0.002,
                                          -6.0e6, -0.006)
-                    ops.uniaxialMaterial('Concrete01', mat_tag + 1,
+                    ops.uniaxialMaterial('Concrete01', concrete_mat_tag + 1,
                                          -3.9e7, -0.005, -7.8e6, -0.02)
-                    ops.uniaxialMaterial('Steel02', mat_tag + 2, 4.0e8, 2.0e11, 0.01)
+                    ops.uniaxialMaterial('Steel02', concrete_mat_tag + 2, 4.0e8, 2.0e11, 0.01)
+                fiber_mat_tag = concrete_mat_tag
             elif mat is not None and mat.type.lower() == 'steel':
                 Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
                 E = mat.E_mod if mat.E_mod > 0 else 2.0e11
                 ops.uniaxialMaterial('Steel01', mat_tag, Fy, E, 0.01)
+                fiber_mat_tag = mat_tag
             elif mat is not None and mat.type.lower() == 'concrete':
                 Fc = mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7
-                Ec = mat.E_mod if Ec > 0 else 2.5e10
                 epsc = mat.eFc if mat.eFc and mat.eFc > 0 else -0.002
                 ops.uniaxialMaterial('Concrete01', mat_tag, -Fc, epsc, -0.2 * Fc, -0.006)
+                fiber_mat_tag = mat_tag
             else:
-                # Fallback: generic steel-like
                 ops.uniaxialMaterial('Steel01', mat_tag, 2.5e8, 2.0e11, 0.01)
+                fiber_mat_tag = mat_tag
 
             # ── Create fiber section ──
             ops.section('Fiber', tag, '-GJ', sec.J)
             try:
-                patches = sec.to_fiber_patches(mat_tag=mat_tag)
-                for patch_args in patches:
-                    ops.patch(*patch_args)
+                entries = sec.to_fiber_patches(mat_tag=fiber_mat_tag)
+                for entry in entries:
+                    if entry[0] in ('rect', 'circ', 'quad'):
+                        ops.patch(*entry)
+                    elif entry[0] == 'straight':
+                        ops.layer('straight', *entry[1:])
+                    elif entry[0] == 'circ_layer':
+                        ops.layer('circ', *entry[1:])
                 if self.config['verbose']:
-                    print(f"  Section {tag}: {sec.name} (Fiber, {len(patches)} patches)")
+                    print(f"  Section {tag}: {sec.name} (Fiber, {len(entries)} entries)")
             except NotImplementedError as exc:
                 if self.config['verbose']:
                     print(f"  Section {tag}: {sec.name} — {exc}, falling back to elastic")
@@ -2172,6 +2174,10 @@ class OpenSeesBuilder:
                 continue
 
             sec_tag = self.section_tags[sec_name]
+            sec = self.model.sections.get(sec_name)
+            if sec is None:
+                new_elements[eid] = elem
+                continue
 
             # --- Create coincident hinge nodes ---
             hinge_i_id = f"{eid}_hinge_i"

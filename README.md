@@ -206,7 +206,7 @@ constrained quadrilateral remeshing.  Neither is imported by the core
 workflow — they must be explicitly imported after a build.
 
 ```python
-# Optional: pip install fea_toolkit[mesh-quality]
+# Mesh quality checks (NumPy only — no extra install needed)
 from fea_toolkit.mesh import checks as mesh_check
 
 # After building with shells:
@@ -217,7 +217,7 @@ if not quality["passed"]:
 ```
 
 ```python
-# Optional: pip install fea_toolkit[mesh-remesh]
+# Constrained remeshing via Gmsh: pip install fea_toolkit[mesh-remesh]
 from fea_toolkit.mesh import remesh
 
 # Build line constraints from frame elements that connect to area edges
@@ -229,11 +229,7 @@ for fid, fe in model.frame_elements.items():
                                   model.nodes, constraints)
 
 # Remesh via Gmsh (replaces built-in structured subdivision)
-areas, assign, nodes, ntag = remesh.remesh_areas(
-    model.area_elements, model.area_assignments, model.nodes,
-    model.area_mesh, line_constraints=constraints,
-    target_length=0.5, recombine=True,
-)
+areas, assign, nodes, ntag = remesh.remesh_areas(...)
 ```
 
 #### 9.1 Mesh Quality Checks (`fea_toolkit.mesh.checks`)
@@ -242,11 +238,11 @@ areas, assign, nodes, ntag = remesh.remesh_areas(
 |---|---|---|
 | `aspect_ratios()` | Longest / shortest edge per quad | > 4.0 |
 | `skew()` | Max deviation from 90° interior angles | > 30° |
-| `flatness()` | Diagonal distance / average edge length | > 0.02 |
+| `flatness()` | True non-planarity (tet height / avg edge) | > 0.02 |
 | `report()` | Combined report with warnings | Configurable |
 
-All functions work with the same `{area_id: AreaElement}` / `{node_id: Node}`
-dicts used throughout the builder.  Powered by **COMPAS** (MIT license).
+All functions work with the same ``{area_id: AreaElement}`` / ``{node_id: Node}``
+dicts used throughout the builder.  No external dependencies (pure NumPy).
 
 #### 9.2 Constrained Remeshing (`fea_toolkit.mesh.remesh`)
 
@@ -258,22 +254,10 @@ dicts used throughout the builder.  Powered by **COMPAS** (MIT license).
 **Line constraints** ensure that frame-element edges crossing an area
 boundary are preserved in the Gmsh mesh — the mesh conforms to those
 lines automatically, eliminating the need for post-process
-``equationConstraint``.  Powered by **Gmsh** (GPL v2+).
+``equationConstraint``.  Powered by the **Gmsh Python API** (GPL v2+).
 
-**Algorithm selection** — Gmsh supports several 2D meshing algorithms
-controlled via ``Model.options.mesh.algorithm`` when using
-``compas_gmsh``, or by setting ``Mesh.Algorithm`` directly:
-
-| Value | Algorithm | Quad quality |
-|---|---|---|
-| 6 | Frontal Delaunay | Good, smooth gradation |
-| 8 | Frontal Delaunay Quads | Direct quad generation |
-| 9 | Packing of Parallelograms | All-quad, blocky |
-
-With ``recombine=True`` (default), Gmsh first triangulates the surface
-then converts triangles to quads using the **Blossom** minimum-cost
-perfect matching algorithm — producing high-quality all-quad meshes that
-respect both the element size constraint and any embedded line constraints.
+Constrained curves are embedded in the OCC model before mesh generation
+so the mesher respects them natively.
 
 **Relation to built-in meshing:**
 

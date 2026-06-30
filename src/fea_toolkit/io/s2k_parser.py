@@ -718,15 +718,17 @@ class SAP2000Parser:
                     top_bar_dia=float(sec.get('topBarDia', 0)),
                     bot_bar_dia=float(sec.get('botBarDia', 0)),
                 )
-            elif shape in ("Circle", "CIRCLE", "Steel Rod", "Steel Circle"):
-                sec_data = CircularSection(**common, diameter=t3)
-            elif shape == "Concrete Circular":
-                sec_data = ConcreteCircularSection(
-                    **common, diameter=t3,
-                    cover=float(sec.get('cover', 0)),
-                    bar_count=int(sec.get('barCount', 0)),
-                    bar_dia=float(sec.get('barDia', 0)),
-                )
+            elif shape in ("Circle", "CIRCLE", "Steel Rod", "Steel Circle",
+                           "Concrete Circular", "Concrete Circle"):
+                if shape in ("Concrete Circular", "Concrete Circle"):
+                    sec_data = ConcreteCircularSection(
+                        **common, diameter=t3,
+                        cover=float(sec.get('cover', 0)),
+                        bar_count=int(sec.get('barCount', 0)),
+                        bar_dia=float(sec.get('barDia', 0)),
+                    )
+                else:
+                    sec_data = CircularSection(**common, diameter=t3)
             elif shape == "SD Section":
                 sec_data = SDSection(**common)
             else:
