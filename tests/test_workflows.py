@@ -150,7 +150,7 @@ class TestStaticAnalysisWorkflow:
         assert 2 in disp
         dx, dy, dz = disp[2]
         # Wind is in X direction — expect X displacement
-        assert abs(dx) > 0, f"top node X displacement is zero under wind (dx={dx})"
+        assert abs(dx) > 1e-6, f"top node X displacement is zero under wind (dx={dx})"
 
     def test_static_element_forces(self, sample_builder):
         """Element end-forces can be extracted after static analysis.
@@ -191,9 +191,11 @@ class TestStaticAnalysisWorkflow:
         assert 'nodal_displacements' in r1
         assert 'nodal_displacements' in r2
         # Wind load should produce larger X displacement at top node
-        d1 = r1['nodal_displacements'].get(2, (0, 0, 0))
-        d2 = r2['nodal_displacements'].get(2, (0, 0, 0))
-        assert abs(d2[0]) >= abs(d1[0]), \
+        assert 2 in r1['nodal_displacements'], "node 2 missing from gravity result"
+        assert 2 in r2['nodal_displacements'], "node 2 missing from gravity+wind result"
+        d1 = r1['nodal_displacements'][2]
+        d2 = r2['nodal_displacements'][2]
+        assert abs(d2[0]) >= abs(d1[0]) - 1e-12, \
             f"X displacement did not increase with wind ({d1[0]} → {d2[0]})"
 
     def test_static_reactions_equilibrium(self, sample_builder):
@@ -210,7 +212,7 @@ class TestStaticAnalysisWorkflow:
         summed = results.get('summed_reactions', {})
         # For a downward gravity load, reactions support from below
         assert summed, "summed_reactions missing or empty"
-        assert abs(summed.get('fz', 0)) > 0, \
+        assert abs(summed.get('fz', 0)) > 1e-6, \
             f"vertical reaction Fz is zero under dead load ({summed})"
 
 
@@ -301,7 +303,7 @@ class TestPushoverWorkflow:
         assert len(results['control_disp']) > 1, "uniform: control_disp empty"
         assert len(results['base_shear']) > 1, "uniform: base_shear empty"
         assert len(results['step']) > 1, "uniform: step empty"
-        assert abs(results['base_shear'][-1]) > 0, "uniform: final base_shear zero"
+        assert abs(results['base_shear'][-1]) > 1e-6, "uniform: final base_shear zero"
 
     def test_pushover_triangular_returns_keys(self, sample_builder):
         """Triangular (ELF) pushover produces a valid capacity curve.
@@ -326,7 +328,7 @@ class TestPushoverWorkflow:
         assert 'step' in results
         assert len(results['control_disp']) > 1, "triangular: control_disp empty"
         assert len(results['base_shear']) > 1, "triangular: base_shear empty"
-        assert abs(results['base_shear'][-1]) > 0, "triangular: final base_shear zero"
+        assert abs(results['base_shear'][-1]) > 1e-6, "triangular: final base_shear zero"
 
     def test_pushover_pattern_returns_keys(self, sample_builder):
         """SAP2000-pattern-based pushover uses existing distributed loads.
@@ -390,8 +392,8 @@ class TestResponseSpectrumWorkflow:
         )
         assert isinstance(results, dict)
         assert 'base_shear_cqc' in results, "base_shear_cqc missing from RS results"
-        assert abs(results['base_shear_cqc']) > 0, \
-            f"base_shear_cqc is zero ({results['base_shear_cqc']})"
+        assert abs(results['base_shear_cqc']) > 1e-6, \
+            f"base_shear_cqc is near zero ({results['base_shear_cqc']})"
 
     def test_element_rs_forces(self, sample_builder, spectrum):
         """Element-level RS forces are available after spectrum analysis.
@@ -427,7 +429,7 @@ class TestResponseSpectrumWorkflow:
         first = er[0]
         for key in ('Vz_i', 'My_i', 'Mz_i'):
             assert key in first, f"{key} missing from RS element result"
-        assert abs(first['Vz_i']) > 0, "Vz_i is zero in RS element result"
+        assert abs(first['Vz_i']) > 1e-6, "Vz_i is zero in RS element result"
 
 
 # ============================================================================
@@ -519,8 +521,8 @@ class TestCSMWorkflow:
         assert 'phi_control' in adrs
         assert len(adrs['S_a']) > 0
         assert len(adrs['S_d']) > 0
-        assert adrs['Gamma'] > 0
-        assert adrs['M_eff'] > 0
+        assert adrs['Gamma'] > 1e-6
+        assert adrs['M_eff'] > 1e-6
 
     def test_compute_performance_point(self, sample_builder, spectrum):
         """CSM performance point can be computed from pushover + spectrum.
@@ -555,8 +557,8 @@ class TestCSMWorkflow:
         assert 'S_ap' in pp
         assert 'V_base' in pp
         assert 'mu' in pp
-        assert pp['S_dp'] > 0
-        assert pp['S_ap'] > 0
+        assert pp['S_dp'] > 1e-6
+        assert pp['S_ap'] > 1e-6
 
 
 # ============================================================================
@@ -593,4 +595,4 @@ class TestBucklingCheckWorkflow:
         assert "1" in result, "brace '1' missing from results"
         r = result["1"]
         assert 'P_cr' in r
-        assert r['P_cr'] > 0
+        assert r['P_cr'] > 1e-6

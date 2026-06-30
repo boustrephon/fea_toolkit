@@ -105,16 +105,20 @@ def remesh_areas(
         gmsh.option.set_number("General.Terminal", 0)
 
     try:
-        gmsh.model.add("fea_toolkit_remesh")
+        # ── Global coordinate registry so adjacent meshed areas share
+        # edge/interior nodes at the same location. ──
+        _coord_key = lambda x, y, z: (round(x, 6), round(y, 6), round(z, 6))
+        _coord_to_id: Dict[tuple, str] = {}
+        for nid, nd in nodes.items():
+            _coord_to_id[_coord_key(nd.x, nd.y, nd.z)] = nid
 
-        node_tag_offset = 0
-        # Collect all existing node tags to allocate fresh ones
+        # Seed next_tag from the highest area tag to avoid collisions.
         existing_tags = {nd.node_tag for nd in nodes.values()}
         next_node_tag = max(existing_tags) + 1 if existing_tags else 1
 
         next_tag = 1
-        if nodes:
-            next_tag = max((nd.node_tag for nd in nodes.values()), default=0) + 1
+        if area_elements:
+            next_tag = max((ae.area_tag for ae in area_elements.values()), default=0) + 1
 
         for aid, mesh in area_mesh.items():
             if not getattr(mesh, "auto_mesh", False):
@@ -142,6 +146,10 @@ def remesh_areas(
                 pts.append((nd.x, nd.y, nd.z))
             if len(pts) != 4:
                 continue
+
+            # Each area gets its own Gmsh model so node tags don't
+            # accumulate across iterations.
+            gmsh.model.add(f"area_{aid}")
 
             # --- Add corner points to Gmsh model ---
             point_tags = []
@@ -190,8 +198,7 @@ def remesh_areas(
             if recombine:
                 gmsh.model.mesh.recombine()
 
-            # --- Extract nodes (all mesh nodes; the model is removed
-            # after each area so there is no cross-contamination) ---
+            # --- Extract mesh nodes ---
             node_tags_local, coords, _ = gmsh.model.mesh.getNodes()
             coord_map = dict(zip(node_tags_local, coords.reshape((-1, 3))))
 
@@ -209,34 +216,28 @@ def remesh_areas(
                     conn = np.array(all_conn[etype_idx]).reshape((-1, 4))
                     quad_conn.extend(conn.tolist())
 
-            # --- Map Gmsh nodes back to fea_toolkit nodes ---
+            # --- Map Gmsh nodes back to fea_toolkit nodes,
+            # reusing any previously-created node at the same coordinate. ---
             sub_node_map: Dict[int, str] = {}  # gmsh_tag → fea_toolkit_id
             for gmsh_tag in node_tags_local:
                 coord = coord_map[gmsh_tag]
                 key = (round(coord[0], 6), round(coord[1], 6), round(coord[2], 6))
-                if key in corner_coords:
-                    # Match to original corner node
-                    for nid, nd in nodes.items():
-                        nk = (round(nd.x, 6), round(nd.y, 6), round(nd.z, 6))
-                        if nk == key:
-                            sub_node_map[gmsh_tag] = nid
-                            break
-                else:
-                    # New interior/edge node
-                    nid = f"{aid}_gmsh_{gmsh_tag}"
-                    ntag = next_node_tag
-                    next_node_tag += 1
-                    # Need Node dataclass — use Node-like creation
-                    from ..model.sap_data import Node  # noqa: E402
-                    nodes[nid] = Node(
-                        node_id=nid,
-                        node_tag=ntag,
-                        x=float(coord[0]),
-                        y=float(coord[1]),
-                        z=float(coord[2]),
-                    )
-                    sub_node_map[gmsh_tag] = nid
-                    next_tag = max(next_tag, ntag + 1)
+                existing = _coord_to_id.get(key)
+                if existing is not None:
+                    sub_node_map[gmsh_tag] = existing
+                    continue
+                # New interior/edge node
+                nid = f"{aid}_gmsh_{gmsh_tag}"
+                ntag = next_node_tag
+                next_node_tag += 1
+                from ..model.sap_data import Node  # noqa: E402
+                nodes[nid] = Node(
+                    node_id=nid, node_tag=ntag,
+                    x=float(coord[0]), y=float(coord[1]), z=float(coord[2]),
+                )
+                _coord_to_id[key] = nid
+                sub_node_map[gmsh_tag] = nid
+                next_tag = max(next_tag, ntag + 1)
 
             # --- Create sub-area elements from Gmsh quads ---
             sec_name = area_assignments.get(aid, "")
@@ -258,10 +259,12 @@ def remesh_areas(
             # Mark original as inactive
             elem.inactive = True
 
-        gmsh.model.remove()
+            # Remove this area's Gmsh model so the next iteration
+            # starts fresh (no node-tag carryover).
+            gmsh.model.remove()
+
     finally:
         gmsh.finalize()
-
     return area_elements, area_assignments, nodes, next_tag
 
 

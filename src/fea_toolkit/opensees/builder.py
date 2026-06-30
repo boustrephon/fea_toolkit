@@ -237,7 +237,7 @@ class OpenSeesBuilder:
         for nid in node_ids:
             nd = nodes.get(nid)
             if nd is None:
-                break
+                return 0.0, []
             pts.append((nd.x, nd.y, nd.z))
         if len(pts) < 3:
             return 0.0, []
