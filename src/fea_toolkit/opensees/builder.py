@@ -22,7 +22,7 @@ except ImportError:
 
 from ..model.sap_data import SAPModelData
 from ..model.geometry import get_SAP_vecxz, global_to_local_distributed_load, rotate_about_axis
-from ..model.sap_data import Section, FrameElement, FrameDistributedLoad
+from ..model.sap_data import Section, FrameElement, FrameDistributedLoad, Node
 from ..model.sap_data import GravityLoad, AreaGravityLoad, ShellSection
 from ..model.geometry import convert_area_loads_to_edge_loads
 from ..model.selection import Selection
