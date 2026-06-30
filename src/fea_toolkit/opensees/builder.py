@@ -106,6 +106,7 @@ class OpenSeesBuilder:
             'brace_fatigue': False,         # Wrap Hysteretic with Fatigue material for cyclic degradation
             'brace_fatigue_E0': 0.095,      # Fatigue Coffin-Manson: strain amplitude at fracture
             'brace_fatigue_m': -0.3,        # Fatigue Coffin-Manson: exponent
+            'hinge_model': 'fiber',         # Distributed plasticity by default
             # Solver settings (can be overridden per-call)
             'solver_test_tol': 1e-6,
             'solver_test_max_iter': 10,
@@ -437,19 +438,21 @@ class OpenSeesBuilder:
 
             if is_concrete:
                 # Concrete section: need 3 materials (unconfined, confined, steel)
-                # Use dedicated material tags separate from section tags
-                # to avoid overwriting materials used by other sections.
-                concrete_mat_tag = tag + len(self.model.sections) + 1
+                # Use a dedicated running counter so no two sections overlap.
+                if not hasattr(self, '_next_concrete_mat_tag'):
+                    self._next_concrete_mat_tag = tag + len(self.model.sections) + 1
+                concrete_mat_tag = self._next_concrete_mat_tag
+                self._next_concrete_mat_tag += 3
                 if mat is not None and mat.type.lower() == 'concrete':
                     Fc = mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7
                     Ec = mat.E_mod if mat.E_mod > 0 else 2.5e10
-                    epsc = mat.eFc if mat.eFc and mat.eFc > 0 else -0.002
+                    epsc = mat.eFc if mat.eFc and mat.eFc > 0 else 0.002
                     ops.uniaxialMaterial('Concrete01', concrete_mat_tag,
-                                         -Fc, epsc, -0.2 * Fc, -0.006)
+                                         -Fc, -abs(epsc), -0.2 * Fc, -0.006)
                     fcc = Fc * 1.3
-                    epscc = -0.005
+                    epscc = 0.005
                     ops.uniaxialMaterial('Concrete01', concrete_mat_tag + 1,
-                                         -fcc, epscc, -0.2 * fcc, -0.02)
+                                         -fcc, -abs(epscc), -0.2 * fcc, -0.02)
                     Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
                     ops.uniaxialMaterial('Steel02', concrete_mat_tag + 2, Fy, 2.0e11, 0.01)
                 else:
@@ -466,8 +469,8 @@ class OpenSeesBuilder:
                 fiber_mat_tag = mat_tag
             elif mat is not None and mat.type.lower() == 'concrete':
                 Fc = mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7
-                epsc = mat.eFc if mat.eFc and mat.eFc > 0 else -0.002
-                ops.uniaxialMaterial('Concrete01', mat_tag, -Fc, epsc, -0.2 * Fc, -0.006)
+                epsc = mat.eFc if mat.eFc and mat.eFc > 0 else 0.002
+                ops.uniaxialMaterial('Concrete01', mat_tag, -Fc, -abs(epsc), -0.2 * Fc, -0.006)
                 fiber_mat_tag = mat_tag
             else:
                 ops.uniaxialMaterial('Steel01', mat_tag, 2.5e8, 2.0e11, 0.01)
@@ -1369,11 +1372,14 @@ class OpenSeesBuilder:
         is_brace = hasattr(sec, 'od') or hasattr(sec, 't')
 
         if is_concrete:
-            Lp = 0.05 * elem_length + 0.1 * db * fy_mpa / (fc_mpa ** 0.5)
+            Lp = (0.05 * elem_length
+                  + 0.1 * db * fy_mpa / (fc_mpa ** 0.5) / 1000.0)
         elif is_brace:
-            Lp = 0.08 * elem_length + 0.015 * db * fy_mpa
+            Lp = (0.08 * elem_length
+                  + 0.015 * db * fy_mpa / 1000.0)
         else:
-            Lp = 0.08 * elem_length + 0.022 * db * fy_mpa
+            Lp = (0.08 * elem_length
+                  + 0.022 * db * fy_mpa / 1000.0)
 
         return min(Lp, 0.33 * elem_length)  # ASCE 41 cap
 
@@ -2148,6 +2154,12 @@ class OpenSeesBuilder:
                             default=0) + 1
         next_tag = max((e.elem_tag for e in elements.values() if not e.inactive),
                        default=0) + 1
+        # Separate counter for hinge section/material tags, seeded high
+        # to avoid collision with existing section/element/material tags.
+        hinge_tag_base = (max((v for v in self.section_tags.values()), default=0)
+                          + len(self.section_tags) + 100)
+        hinge_sec_tag = hinge_tag_base
+        hinge_mat_tag = hinge_tag_base + len(self.section_tags) + 1
 
         new_elements: Dict[str, FrameElement] = {}
         new_assignments: Dict[str, str] = {}
@@ -2206,8 +2218,6 @@ class OpenSeesBuilder:
             ops.equalDOF(nj.node_tag, hinge_j_tag, 1, 2, 3)
 
             # --- Create Hysteretic hinge section ---
-            hinge_sec_tag = next_tag
-            next_tag += 1
             mat = self.model.materials.get(sec.material)
 
             if mat and mat.type and 'concrete' in mat.type.lower():
@@ -2215,41 +2225,72 @@ class OpenSeesBuilder:
                 Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
                 E = mat.E_mod if mat.E_mod > 0 else 2.5e10
                 My = Fy * (sec.Z33 if sec.Z33 else sec.I33 / (L * 0.5))
-                theta_y = My / (E * sec.I33 / L) if E * sec.I33 > 0 else 0.005
-                theta_cap = theta_y * 4.0
+                My_weak = Fy * (sec.Z22 if sec.Z22 else sec.I22 / (L * 0.5))
             else:
                 # Steel: use section yield moment
                 Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
                 E = mat.E_mod if mat.E_mod > 0 else 2.0e11
                 My = Fy * (sec.Z33 if sec.Z33 else sec.I33 / (L * 0.5))
-                theta_y = My / (E * sec.I33 / L) if E * sec.I33 > 0 else 0.002
-                theta_cap = theta_y * 6.0
+                My_weak = Fy * (sec.Z22 if sec.Z22 else sec.I22 / (L * 0.5))
+
+            # ASCE 41 plastic hinge length for yield rotation scaling
+            Lp = self._compute_asce41_hinge_length(0, L, sec_name)
+            # Yield rotation: My * Lp / (6 * E * I) approximates the
+            # rotation over the plastic hinge region.
+            theta_y = (My * Lp) / (max(6.0 * E * sec.I33, 1e-12)) if E * sec.I33 > 0 else 0.005
+            theta_y_weak = (My_weak * Lp) / (max(6.0 * E * sec.I22, 1e-12)) if E * sec.I22 > 0 else 0.005
+            theta_cap = theta_y * 6.0
+            theta_cap_weak = theta_y_weak * 6.0
 
             # Axial material (elastic)
-            ops.uniaxialMaterial('Elastic', hinge_sec_tag,
+            ops.uniaxialMaterial('Elastic', hinge_mat_tag,
                                  sec.A * E / L)
-            # Moment material (Hysteretic backbone matching ASCE 41 shape)
-            mom_tag = hinge_sec_tag + 1
-            ops.uniaxialMaterial('Hysteretic', mom_tag,
+            # Strong-axis moment (Hysteretic backbone)
+            ops.uniaxialMaterial('Hysteretic', hinge_mat_tag + 1,
                                  My, theta_y, My * 1.1, theta_cap,
                                  -My, -theta_y, -My * 1.1, -theta_cap,
                                  1.0, 1.0, 0.0, 0.0, 0.0)
+            # Weak-axis moment
+            ops.uniaxialMaterial('Hysteretic', hinge_mat_tag + 2,
+                                 My_weak, theta_y_weak, My_weak * 1.1, theta_cap_weak,
+                                 -My_weak, -theta_y_weak, -My_weak * 1.1, -theta_cap_weak,
+                                 1.0, 1.0, 0.0, 0.0, 0.0)
+            # Torsion (elastic — no inelastic torsion expected)
+            G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * E
+            ops.uniaxialMaterial('Elastic', hinge_mat_tag + 3,
+                                 G * sec.J / L if sec.J else 1e6)
 
             ops.section('Aggregator', hinge_sec_tag,
-                        hinge_sec_tag, 'P',
-                        mom_tag, 'Mz',
-                        mom_tag, 'My')
+                        hinge_mat_tag, 'P',
+                        hinge_mat_tag + 1, 'Mz',
+                        hinge_mat_tag + 2, 'My',
+                        hinge_mat_tag + 3, 'T')
+            hinge_sec_tag += 1
+            hinge_mat_tag += 4
+
+            # Get local axes for element orientation
+            try:
+                vx, vy, vz = self._get_local_axes(elem)
+                orient_str = (
+                    f" -orient {vx[0]} {vx[1]} {vx[2]}"
+                    f" {vz[0]} {vz[1]} {vz[2]}"
+                )
+            except Exception:
+                orient_str = ""
 
             # --- Create zero-length hinge elements ---
             hinge_i_elem_tag = next_tag
             next_tag += 1
+            cmd = (f"element zeroLengthSection {hinge_i_elem_tag} "
+                   f"{ni.node_tag} {hinge_i_tag} {hinge_sec_tag - 1}"
+                   f"{orient_str}")
             ops.element('zeroLengthSection', hinge_i_elem_tag,
-                        ni.node_tag, hinge_i_tag, hinge_sec_tag)
+                        ni.node_tag, hinge_i_tag, hinge_sec_tag - 1)
 
             hinge_j_elem_tag = next_tag
             next_tag += 1
             ops.element('zeroLengthSection', hinge_j_elem_tag,
-                        hinge_j_tag, nj.node_tag, hinge_sec_tag)
+                        hinge_j_tag, nj.node_tag, hinge_sec_tag - 1)
 
             # --- Shorten original element to span between hinge nodes ---
             elem.node_i = hinge_i_id
