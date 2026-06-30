@@ -1250,7 +1250,7 @@ def mesh_area_elements(
         subdivided areas added and original areas marked inactive.
     """
     # Global coordinate-based node registry so adjacent meshed areas share
-    # edge/interior nodes at the same location (rounded to 1 mm).
+    # edge/interior nodes at the same location (rounded to 1e‑6 model units).
     _coord_key = lambda x, y, z: (round(x, 6), round(y, 6), round(z, 6))
     _coord_to_id: Dict[tuple, str] = {}
     for nid, nd in nodes.items():
@@ -1282,13 +1282,27 @@ def mesh_area_elements(
 
         # Normalise to CCW winding so all sub-cells have consistent
         # shell normals (OpenSees ShellMITC4 expects CCW ordering).
-        # Use the cross product of the quad diagonals to determine the
-        # face orientation, then check whether the vertex order agrees.
+        # Compute the face normal using the cross product of the two
+        # diagonals, then project the quad onto the plane perpendicular
+        # to the dominant normal axis for a reliable 2D winding test.
         diag1 = corners[2] - corners[0]
         diag2 = corners[3] - corners[1]
         n_face = np.cross(diag1, diag2)
-        n_tri = np.cross(corners[1] - corners[0], corners[2] - corners[0])
-        if np.dot(n_tri, n_face) < 0:  # assumed-CCW triangle opposes face → CW
+        abs_n = np.abs(n_face)
+        dom = int(np.argmax(abs_n))  # 0=X, 1=Y, 2=Z
+        # 2D signed area on the projection plane perpendicular to the
+        # dominant normal axis.  Negative → clockwise → reverse.
+        if dom == 0:     # project onto YZ
+            u = [c[1] for c in corners]
+            v = [c[2] for c in corners]
+        elif dom == 1:   # project onto XZ
+            u = [c[0] for c in corners]
+            v = [c[2] for c in corners]
+        else:            # project onto XY (default, matches original)
+            u = [c[0] for c in corners]
+            v = [c[1] for c in corners]
+        signed_2d = (u[1] - u[0]) * (v[2] - v[1]) - (v[1] - v[0]) * (u[2] - u[1])
+        if signed_2d < 0:  # clockwise → reverse
             corner_ids = [corner_ids[0], corner_ids[3], corner_ids[2], corner_ids[1]]
             corners = [corners[0], corners[3], corners[2], corners[1]]
 

@@ -88,7 +88,10 @@ class TestBuildWorkflow:
             'split_elements': True,
             'verbose': False,
         })
-        b.build()
+        try:
+            b.build()
+        finally:
+            ops.wipe()
 
     def test_rebuild_preserves_geometry(self, sample_md):
         """Rebuilding with different pattern scales does not corrupt the model.
@@ -103,9 +106,12 @@ class TestBuildWorkflow:
             'split_elements': False,
             'verbose': False,
         })
-        b.build()
-        # Second build with different scales
-        b.build(pattern_scales={"DEAD": 1.0, "WIND": 0.5})
+        try:
+            b.build()
+            # Second build with different scales
+            b.build(pattern_scales={"DEAD": 1.0, "WIND": 0.5})
+        finally:
+            ops.wipe()
 
 
 # ============================================================================
@@ -402,10 +408,10 @@ class TestExportWorkflow:
         sample_builder.export_results_to_npz(npz_path, results)
         # Verify the file exists and can be loaded
         import numpy as np
-        data = np.load(npz_path, allow_pickle=True)
-        assert 'sub_elem_tags' in data
-        assert 'node_tags' in data
-        assert 'force_unit' in data
+        with np.load(npz_path, allow_pickle=True) as data:
+            assert 'sub_elem_tags' in data
+            assert 'node_tags' in data
+            assert 'force_unit' in data
 
     def test_export_with_section_responses(self, sample_builder, tmp_path):
         """NPZ export accepts optional section-response data.
@@ -421,8 +427,8 @@ class TestExportWorkflow:
         sample_builder.export_results_to_npz(npz_path, results,
             section_responses={"section_forces": True})
         import numpy as np
-        data = np.load(npz_path, allow_pickle=True)
-        assert data is not None
+        with np.load(npz_path, allow_pickle=True) as data:
+            assert data is not None
 
 
 # ============================================================================
