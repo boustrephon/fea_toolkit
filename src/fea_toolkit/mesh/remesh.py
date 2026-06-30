@@ -105,12 +105,12 @@ def remesh_areas(
         gmsh.option.set_number("General.Terminal", 0)
 
     try:
-        # ── Global coordinate registry so adjacent meshed areas share
-        # edge/interior nodes at the same location. ──
+        # ── Coordinate registry populated per-area from corner
+        # nodes only, so adjacent areas' shared edges are still
+        # deduplicated without collapsing intentionally separate
+        # nodes at the same coordinate. ──
         _coord_key = lambda x, y, z: (round(x, 6), round(y, 6), round(z, 6))
         _coord_to_id: Dict[tuple, str] = {}
-        for nid, nd in nodes.items():
-            _coord_to_id[_coord_key(nd.x, nd.y, nd.z)] = nid
 
         # Seed next_tag from the highest area tag to avoid collisions.
         existing_tags = {nd.node_tag for nd in nodes.values()}
@@ -184,7 +184,8 @@ def remesh_areas(
                             ab = np.array(b) - np.array(a)
                             ap = np.array(p) - np.array(a)
                             cross = np.linalg.norm(np.cross(ab, ap))
-                            if cross < tol and 0 <= np.dot(ap, ab) / max(np.dot(ab, ab), 1e-12) <= 1:
+                            edge_len = max(np.linalg.norm(ab), 1e-12)
+                            if cross / edge_len < tol and 0 <= np.dot(ap, ab) / max(np.dot(ab, ab), 1e-12) <= 1:
                                 return True
                         return False
                     if not (_on_boundary(pta, pts) and _on_boundary(ptb, pts)):
@@ -229,6 +230,12 @@ def remesh_areas(
                 if etype == 3:  # 4-node quad
                     conn = np.array(all_conn[etype_idx]).reshape((-1, 4))
                     quad_conn.extend(conn.tolist())
+
+            # This API only supports quad meshes — skip if
+            # no quads were produced (e.g. recombine=False).
+            if not quad_conn:
+                gmsh.model.remove()
+                continue
 
             # --- Map Gmsh nodes back to fea_toolkit nodes,
             # reusing any previously-created node at the same coordinate. ---

@@ -362,7 +362,14 @@ class ConcreteRectangularSection(Section):
         """
         d, b = self.depth, self.bf
         cv = self.cover
+        if cv < 0:
+            raise ValueError(f"Negative cover ({cv}) in section {self.name}")
         half_d, half_b = d / 2.0, b / 2.0
+        if cv >= half_d or cv >= half_b:
+            raise ValueError(
+                f"Cover ({cv}) exceeds half-dimension in section {self.name}: "
+                f"half_d={half_d}, half_b={half_b}"
+            )
         core_y1, core_y2 = -half_d + cv, half_d - cv
         core_z1, core_z2 = -half_b + cv, half_b - cv
 
@@ -410,7 +417,14 @@ class ConcreteCircularSection(Section):
     ) -> List[Tuple]:
         """Fiber patches: confined core ring + unconfined cover + rebar ring."""
         R = self.diameter / 2.0
-        R_core = max(0.0, R - self.cover)
+        cv = self.cover
+        if cv < 0:
+            raise ValueError(f"Negative cover ({cv}) in section {self.name}")
+        if cv >= R:
+            raise ValueError(
+                f"Cover ({cv}) exceeds radius ({R}) in section {self.name}"
+            )
+        R_core = max(0.0, R - cv)
         patches: List[Tuple] = [
             ("circ", mat_tag + 1, nfy, nfz, 0.0, 0.0, 0.0, R_core, 0.0, 360.0),
             ("circ", mat_tag, nfy, nfz, 0.0, 0.0, R_core, R, 0.0, 360.0),

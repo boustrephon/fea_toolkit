@@ -1249,12 +1249,12 @@ def mesh_area_elements(
         ``(area_elements, area_assignments, nodes, next_tag)`` with
         subdivided areas added and original areas marked inactive.
     """
-    # Global coordinate-based node registry so adjacent meshed areas share
-    # edge/interior nodes at the same location (rounded to 1e‑6 model units).
+    # Coordinate-based node registry for subdividing areas.
+    # Populated per-area from corner nodes only, so adjacent areas'
+    # shared edges are still deduplicated without collapsing
+    # intentionally separate nodes at the same coordinate.
     _coord_key = lambda x, y, z: (round(x, 6), round(y, 6), round(z, 6))
     _coord_to_id: Dict[tuple, str] = {}
-    for nid, nd in nodes.items():
-        _coord_to_id[_coord_key(nd.x, nd.y, nd.z)] = nid
 
     for aid, mesh in area_mesh.items():
         if not mesh.auto_mesh or mesh.max_size <= 0.0:
@@ -1265,6 +1265,12 @@ def mesh_area_elements(
             continue  # only quad areas are meshed
         if getattr(elem, 'inactive', False):
             continue  # already subdivided in a previous build
+
+        # Seed registry from this area's corner nodes only
+        for nid in elem.node_ids:
+            nd = nodes.get(nid)
+            if nd is not None:
+                _coord_to_id[_coord_key(nd.x, nd.y, nd.z)] = nid
 
         # Gather corner nodes, ensuring we have unique corners (4-node quad)
         corner_ids = [str(nid) for nid in elem.node_ids]
