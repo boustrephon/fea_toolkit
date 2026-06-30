@@ -1,10 +1,8 @@
-"""Optional mesh quality diagnostics using COMPAS (MIT license).
+"""Optional mesh quality diagnostics (NumPy only — no external dependencies).
 
 All functions are soft-fail: they return diagnostics / warnings and never
 raise hard errors, making them safe to use in optional validation passes
 after ``mesh_area_elements()``.
-
-Requires ``compas`` (``pip install fea_toolkit[mesh-quality]``).
 """
 
 from __future__ import annotations
@@ -12,18 +10,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-
-
-# ── Types (duck-typed: any object with .node_ids and .thickness works) ──
-
-
-def _check_compas() -> bool:
-    """Return True if ``compas`` is available."""
-    try:
-        import compas  # noqa: F401
-        return True
-    except ImportError:
-        return False
 
 
 # ========================================================================

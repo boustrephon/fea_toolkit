@@ -52,15 +52,6 @@ def skewed_quad():
 # ========================================================================
 
 
-def _requires_compas():
-    try:
-        import compas  # noqa: F401
-        return True
-    except ImportError:
-        return False
-
-
-@pytest.mark.skipif(not _requires_compas(), reason="compas not installed")
 class TestMeshChecks:
     """Mesh quality diagnostics (``fea_toolkit.mesh.checks``)."""
 
@@ -129,17 +120,10 @@ class TestMeshChecks:
 
 
 def test_modules_importable_without_compas():
-    """The checks module is importable even without compas."""
-    import importlib
-    import sys
-    saved = sys.modules.pop("fea_toolkit.mesh.checks", None)
-    try:
-        from fea_toolkit.mesh import checks as chk
-        assert hasattr(chk, "aspect_ratios")
-        assert hasattr(chk, "report")
-    finally:
-        if saved is not None:
-            sys.modules["fea_toolkit.mesh.checks"] = saved
+    """The checks module is importable without compas."""
+    from fea_toolkit.mesh import checks as chk
+    assert hasattr(chk, "aspect_ratios")
+    assert hasattr(chk, "report")
 
 
 # ========================================================================
