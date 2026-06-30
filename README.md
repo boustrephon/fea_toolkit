@@ -199,6 +199,92 @@ parsing through analysis to visualisation and reporting.
 | `local/pumphouse_csm.py` | Full pipeline: parse → buckling → modal → RS → pushover 4-dir → CSM → NPZ |
 | `local/detect_edges.py` | Standalone unconnected shell edge detection |
 
+### 9. Optional Mesh Utilities
+
+Two optional subpackages provide mesh quality diagnostics and Gmsh-based
+constrained quadrilateral remeshing.  Neither is imported by the core
+workflow — they must be explicitly imported after a build.
+
+```python
+# Optional: pip install fea_toolkit[mesh-quality]
+from fea_toolkit.mesh import checks as mesh_check
+
+# After building with shells:
+quality = mesh_check.report(builder.model.area_elements, builder.model.nodes)
+if not quality["passed"]:
+    for w in quality["warnings"]:
+        print(w)
+```
+
+```python
+# Optional: pip install fea_toolkit[mesh-remesh]
+from fea_toolkit.mesh import remesh
+
+# Build line constraints from frame elements that connect to area edges
+constraints = {}
+for fid, fe in model.frame_elements.items():
+    for aid, ae in model.area_elements.items():
+        if fe.node_i in ae.node_ids or fe.node_j in ae.node_ids:
+            remesh.constrain_line(aid, fid, fe.node_i, fe.node_j,
+                                  model.nodes, constraints)
+
+# Remesh via Gmsh (replaces built-in structured subdivision)
+areas, assign, nodes, ntag = remesh.remesh_areas(
+    model.area_elements, model.area_assignments, model.nodes,
+    model.area_mesh, line_constraints=constraints,
+    target_length=0.5, recombine=True,
+)
+```
+
+#### 9.1 Mesh Quality Checks (`fea_toolkit.mesh.checks`)
+
+| Function | What it measures | Warning threshold |
+|---|---|---|
+| `aspect_ratios()` | Longest / shortest edge per quad | > 4.0 |
+| `skew()` | Max deviation from 90° interior angles | > 30° |
+| `flatness()` | Diagonal distance / average edge length | > 0.02 |
+| `report()` | Combined report with warnings | Configurable |
+
+All functions work with the same `{area_id: AreaElement}` / `{node_id: Node}`
+dicts used throughout the builder.  Powered by **COMPAS** (MIT license).
+
+#### 9.2 Constrained Remeshing (`fea_toolkit.mesh.remesh`)
+
+| Function | Purpose |
+|---|---|
+| `remesh_areas()` | Replace structured subdivision with Gmsh-generated quads |
+| `constrain_line()` | Register a frame edge as a mesh constraint |
+
+**Line constraints** ensure that frame-element edges crossing an area
+boundary are preserved in the Gmsh mesh — the mesh conforms to those
+lines automatically, eliminating the need for post-process
+``equationConstraint``.  Powered by **Gmsh** (GPL v2+).
+
+**Algorithm selection** — Gmsh supports several 2D meshing algorithms
+controlled via ``Model.options.mesh.algorithm`` when using
+``compas_gmsh``, or by setting ``Mesh.Algorithm`` directly:
+
+| Value | Algorithm | Quad quality |
+|---|---|---|
+| 6 | Frontal Delaunay | Good, smooth gradation |
+| 8 | Frontal Delaunay Quads | Direct quad generation |
+| 9 | Packing of Parallelograms | All-quad, blocky |
+
+With ``recombine=True`` (default), Gmsh first triangulates the surface
+then converts triangles to quads using the **Blossom** minimum-cost
+perfect matching algorithm — producing high-quality all-quad meshes that
+respect both the element size constraint and any embedded line constraints.
+
+**Relation to built-in meshing:**
+
+| Aspect | Built-in ``mesh_area_elements`` | ``remesh_areas()`` |
+|---|---|---|
+| Mesh type | Structured (grid) | Unstructured (Gmsh) |
+| Element size | Uniform ``max_size`` | Graded via characteristic length |
+| Edge constraints | Post-process ``equationConstraint`` | Native via embedded curves |
+| Dependencies | None (pure NumPy) | ``gmsh`` (GPL v2+) |
+| Recommended for | Simple rectangular areas | Warped quads, complex boundaries |
+
 ---
 
 #### 4. Distributed Load Support by Element Type
