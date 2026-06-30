@@ -634,7 +634,9 @@ class SAP2000Parser:
         """Combine section geometry from FRAME SECTION PROPERTIES with material data."""
         from ..model.sap_data import (
             ISection, ChannelSection, PipeSection, BoxSection,
-            RectangularSection, CircularSection, AngleSection,
+            RectangularSection, CircularSection,
+            ConcreteRectangularSection, ConcreteCircularSection,
+            AngleSection,
             DoubleAngleSection, TeeSection, GeneralSection,
             SDSection, ShellSection,
         )
@@ -705,11 +707,26 @@ class SAP2000Parser:
                     **common, depth=t3, bf=t2, tf=tf_val, tw=tw_val
                 )
             elif shape in ("Rectangular", "Rectangle", "RECTANGLE",
-                           "Steel Plate", "Concrete Rectangular"):
+                           "Steel Plate"):
                 sec_data = RectangularSection(**common, depth=t3, bf=t2)
-            elif shape in ("Circle", "CIRCLE", "Steel Rod", "Steel Circle",
-                           "Concrete Circle"):
+            elif shape == "Concrete Rectangular":
+                sec_data = ConcreteRectangularSection(
+                    **common, depth=t3, bf=t2,
+                    cover=float(sec.get('cover', 0)),
+                    top_bars=int(sec.get('topBars', 0)),
+                    bot_bars=int(sec.get('botBars', 0)),
+                    top_bar_dia=float(sec.get('topBarDia', 0)),
+                    bot_bar_dia=float(sec.get('botBarDia', 0)),
+                )
+            elif shape in ("Circle", "CIRCLE", "Steel Rod", "Steel Circle"):
                 sec_data = CircularSection(**common, diameter=t3)
+            elif shape == "Concrete Circular":
+                sec_data = ConcreteCircularSection(
+                    **common, diameter=t3,
+                    cover=float(sec.get('cover', 0)),
+                    bar_count=int(sec.get('barCount', 0)),
+                    bar_dia=float(sec.get('barDia', 0)),
+                )
             elif shape == "SD Section":
                 sec_data = SDSection(**common)
             else:

@@ -130,6 +130,7 @@ SHAPE_NAMES = {
     "RECTANGLE": "R",
     "Steel Plate": "R",
     "Concrete Rectangular": "R",
+    "Concrete Circular": "C",
     # Circular solid
     "Circle": "C",
     "CIRCLE": "C",
@@ -332,6 +333,93 @@ class CircularSection(Section):
         return [
             ("circ", mat_tag, nfy, nfz, 0.0, 0.0, 0.0, R, 0.0, 360.0),
         ]
+
+
+@dataclass
+class ConcreteRectangularSection(Section):
+    """Reinforced concrete rectangular section.
+
+    SAP2000 shape: ``Concrete Rectangular``
+    """
+    depth: float = 0.0       # D (local y direction)
+    bf: float = 0.0          # B (local z direction)
+    cover: float = 0.0       # Clear cover to rebar centreline
+    top_bars: int = 0
+    bot_bars: int = 0
+    top_bar_dia: float = 0.0
+    bot_bar_dia: float = 0.0
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 12, nfz: int = 6
+    ) -> List[Tuple]:
+        """Fiber patches: confined core + unconfined cover + rebar layers.
+
+        Material tag convention:
+            mat_tag     → unconfined concrete (Concrete01)
+            mat_tag + 1 → confined concrete (Concrete01)
+            mat_tag + 2 → steel rebar (Steel02)
+        """
+        d, b = self.depth, self.bf
+        cv = self.cover
+        half_d, half_b = d / 2.0, b / 2.0
+        core_y1, core_y2 = -half_d + cv, half_d - cv
+        core_z1, core_z2 = -half_b + cv, half_b - cv
+
+        patches: List[Tuple] = [
+            ("rect", mat_tag + 1, nfy, nfz, core_y1, core_z1, core_y2, core_z2),
+            ("rect", mat_tag, nfy, 1, core_y2, -half_b, half_d, half_b),
+            ("rect", mat_tag, nfy, 1, -half_d, -half_b, core_y1, half_b),
+        ]
+        if core_y2 > core_y1:
+            patches.append(
+                ("rect", mat_tag, 1, max(1, nfz - 2), core_y1, -half_b, core_y2, core_z1)
+            )
+            patches.append(
+                ("rect", mat_tag, 1, max(1, nfz - 2), core_y1, core_z2, core_y2, half_b)
+            )
+        # Rebar layers
+        if self.top_bars and self.top_bar_dia > 0:
+            patches.append(
+                ("straight", mat_tag + 2, self.top_bars, self.top_bar_dia,
+                 half_d - cv, -half_b + cv, half_d - cv, half_b - cv)
+            )
+        if self.bot_bars and self.bot_bar_dia > 0:
+            patches.append(
+                ("straight", mat_tag + 2, self.bot_bars, self.bot_bar_dia,
+                 -half_d + cv, -half_b + cv, -half_d + cv, half_b - cv)
+            )
+        return patches
+
+
+@dataclass
+class ConcreteCircularSection(Section):
+    """Reinforced concrete circular section.
+
+    SAP2000 shape: ``Concrete Circular``
+    """
+    diameter: float = 0.0
+    cover: float = 0.0
+    bar_count: int = 0
+    bar_dia: float = 0.0
+
+    def to_fiber_patches(
+        self, mat_tag: int, nfy: int = 12, nfz: int = 6
+    ) -> List[Tuple]:
+        """Fiber patches: confined core ring + unconfined cover + rebar ring."""
+        R = self.diameter / 2.0
+        R_core = max(0.0, R - self.cover)
+        patches: List[Tuple] = [
+            ("circ", mat_tag + 1, nfy, nfz, 0.0, 0.0, 0.0, R_core, 0.0, 360.0),
+            ("circ", mat_tag, nfy, nfz, 0.0, 0.0, R_core, R, 0.0, 360.0),
+        ]
+        if self.bar_count and self.bar_dia > 0:
+            R_rebar = R - self.cover
+            patches.append(
+                ("circ", mat_tag + 2, self.bar_count, 1,
+                 0.0, 0.0, R_rebar - self.bar_dia / 2.0,
+                 R_rebar + self.bar_dia / 2.0, 0.0, 360.0)
+            )
+        return patches
 
 
 @dataclass

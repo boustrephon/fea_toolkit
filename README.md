@@ -287,6 +287,112 @@ respect both the element size constraint and any embedded line constraints.
 
 ---
 
+### 10. Pushover Hinge Models
+
+The builder supports two hinge modelling strategies for non-linear pushover
+analysis, controlled by the ``hinge_model`` config option.
+
+#### 10.1 Distributed Plasticity (``hinge_model: 'fiber'`` — default)
+
+Uses ``forceBeamColumn`` elements with **fiber sections**.  Each cross-section
+is discretised into fibres (concrete patches + steel rebar layers for RC,
+flange/web rectangles for steel).  P-M-M interaction is captured implicitly
+as individual fibres yield.
+
+**Steel sections** — the existing ``to_fiber_patches()`` on ``ISection``,
+``PipeSection``, ``BoxSection``, etc. generates rectangular ``patch`` definitions.
+
+**RC sections** — two new section types support concrete fibre modelling:
+
+| Section class | SAP2000 shape | Concrete layering |
+|---|---|---|
+| ``ConcreteRectangularSection`` | ``Concrete Rectangular`` | Confined core + unconfined cover + steel rebar layers |
+| ``ConcreteCircularSection`` | ``Concrete Circular`` | Confined core ring + unconfined cover ring + rebar ring |
+
+Material tags are allocated in groups of three::
+
+    mat_tag     → unconfined concrete (Concrete01)
+    mat_tag + 1 → confined concrete (Concrete01, Mander enhanced)
+    mat_tag + 2 → steel rebar (Steel02)
+
+#### 10.2 Lumped Plasticity (``hinge_model: 'lumped'``)
+
+Uses ``zeroLengthSection`` elements at member ends with an elastic interior.
+This path directly replicates SAP2000's ASCE 41 hinge assignment::
+
+    structural_node_i → hinge_i → elastic_mid → hinge_j → structural_node_j
+
+Key implementation details:
+
+* **Coincident nodes** are created at each element end with the same coordinates.
+* **``equalDOF``** ties translation DOFs (1,2,3) between structural and hinge
+  nodes so only rotations are released across the zero-length hinge.
+* **``Aggregator`` section** couples axial (P) and moment (Mz, My) responses
+  using a ``Hysteretic`` backbone material calibrated from the section's yield
+  moment and ASCE 41 rotation limits.
+* **ASCE 41-17 §10.8 hinge length**: the ``_compute_asce41_hinge_length()``
+  method implements Eq 10-1 / 10-2 / ACI formulas for steel, brace, and RC
+  members.
+
+Configure with::
+
+    config = {
+        'hinge_model': 'lumped',           # default: 'fiber'
+        # ... other builder options ...
+    }
+
+#### 10.3 ASCE 41 Hinge Lengths
+
+The ``_compute_asce41_hinge_length(sec_tag, elem_length, sec_name)`` method
+returns the plastic hinge length per ASCE 41-17:
+
+| Member type | Formula (Lp) | Reference |
+|---|---|---|
+| Steel moment frame | 0.08L + 0.022 · db · fy | ASCE 41 Eq 10-1 |
+| Steel brace | 0.08L + 0.015 · db · fy | ASCE 41 Eq 10-2 |
+| RC beam/column | 0.05L + 0.1 · db · fy / √fc | ACI 318 |
+| Fallback (no data) | max(0.05, 0.1L) | — |
+
+All formulas are capped at 0.33L per ASCE 41.
+
+#### 10.4 Pushover Workflows
+
+**Fiber pushover (steel)**::
+
+    builder = OpenSeesBuilder(md, {
+        'create_fiber_sections': True,
+        'element_type': 'forceBeamColumn',
+        'hinge_model': 'fiber',
+    })
+    builder.build()
+    builder.compute_seismic_masses(g=9.81)
+    modal = builder.run_modal_analysis(num_modes=3)
+    shapes = builder.extract_mode_shapes(3)
+    results = builder.run_pushover_analysis(
+        gravity_patterns={'DEAD': 1.0},
+        lateral_load_type='uniform',
+    )
+
+**Lumped plasticity pushover (steel or RC)**::
+
+    builder = OpenSeesBuilder(md, {
+        'use_elastic_sections': True,
+        'hinge_model': 'lumped',
+    })
+    # ... same analysis pipeline ...
+
+**RC fiber pushover:** parser automatically creates
+``ConcreteRectangularSection`` or ``ConcreteCircularSection`` for
+``Concrete Rectangular`` / ``Concrete Circular`` SAP2000 shapes::
+
+    builder = OpenSeesBuilder(md, {
+        'create_fiber_sections': True,
+        'element_type': 'forceBeamColumn',
+    })
+    builder.build()  # confined/unconfined/steel materials created automatically
+
+---
+
 #### 4. Distributed Load Support by Element Type
 
 Not all OpenSees element types support the same `eleLoad -type -beamUniform` argument forms. The builder handles this automatically:
