@@ -354,6 +354,7 @@ class TestPushoverWorkflow:
         assert 'step' in results
         assert len(results['control_disp']) > 1, "pattern: control_disp empty"
         assert len(results['base_shear']) > 1, "pattern: base_shear empty"
+        assert abs(results['base_shear'][-1]) > 1e-6, "pattern: final base_shear near zero"
 
 
 # ============================================================================
@@ -460,10 +461,11 @@ class TestExportWorkflow:
             assert 'force_unit' in data
 
     def test_export_with_section_responses(self, sample_builder, tmp_path):
-        """NPZ export accepts optional section-response data.
+        """NPZ export includes section-force data when section_responses passed.
 
         Exercises: export_results_to_npz() with section_responses={"section_forces": True}.
-        Verifies the file is created and can be loaded.
+        Verifies ``sec_ip``, ``sec_sub_idx``, and ``sec_N``/``sec_Mz`` arrays
+        are present with the expected number of rows (1 element × 3 IPs).
         """
         sample_builder.build()
         results = sample_builder.run_static_analysis(
@@ -474,7 +476,13 @@ class TestExportWorkflow:
             section_responses={"section_forces": True})
         import numpy as np
         with np.load(npz_path, allow_pickle=True) as data:
-            assert data is not None
+            assert 'sec_ip' in data
+            assert 'sec_sub_idx' in data
+            assert 'sec_N' in data
+            assert 'sec_Mz' in data
+            # 1 frame element × 3 integration points (default Lobatto)
+            assert len(data['sec_ip']) == 3
+            assert len(data['sec_N']) == 3
 
 
 # ============================================================================
