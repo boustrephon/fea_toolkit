@@ -358,14 +358,19 @@ class TestMeshAreaElements:
         return areas, assignments, nodes
 
     def test_no_mesh_no_change(self):
-        """No mesh settings → no subdivision."""
+        """No mesh settings → areas, nodes, assignments are unchanged."""
         from fea_toolkit.model.geometry import mesh_area_elements
         areas, assign, nodes = self._make_quad_model()
+        orig_areas = dict(areas)
+        orig_nodes = dict(nodes)
+        orig_assign = dict(assign)
         areas, assign, nodes, ntag = mesh_area_elements(
             areas, assign, nodes, {}
         )
-        assert "1" in areas
-        assert areas["1"].node_ids == ["1", "2", "3", "4"]
+        assert areas == orig_areas, "areas dict mutated"
+        assert nodes == orig_nodes, "nodes dict mutated"
+        assert assign == orig_assign, "assignments dict mutated"
+        assert ntag == 1, "next_tag should remain default 1"
 
     def test_mesh_creates_sub_areas(self):
         """2x2 subdivision produces 4 sub-quads and 1 interior node."""
@@ -395,23 +400,33 @@ class TestMeshAreaElements:
                 assert assign.get(aid) == "Slab200"
 
     def test_no_subdivision_if_max_size_too_large(self):
-        """max_size > element dimension → no subdivision."""
+        """max_size > element dimension → areas, nodes, assignments unchanged."""
         from fea_toolkit.model.geometry import mesh_area_elements
         from fea_toolkit.model.sap_data import AreaMesh
         areas, assign, nodes = self._make_quad_model()
+        orig_areas = dict(areas)
+        orig_nodes = dict(nodes)
+        orig_assign = dict(assign)
         mesh = {"1": AreaMesh(auto_mesh=True, max_size=100.0)}
         areas, assign, nodes, ntag = mesh_area_elements(
             areas, assign, nodes, mesh, next_tag=100
         )
-        assert areas["1"].inactive is False
+        assert areas == orig_areas, "areas dict mutated"
+        assert nodes == orig_nodes, "nodes dict mutated"
+        assert assign == orig_assign, "assignments dict mutated"
 
     def test_mesh_auto_mesh_false_skipped(self):
-        """auto_mesh=False → no subdivision."""
+        """auto_mesh=False → areas, nodes, assignments unchanged."""
         from fea_toolkit.model.geometry import mesh_area_elements
         from fea_toolkit.model.sap_data import AreaMesh
         areas, assign, nodes = self._make_quad_model()
+        orig_areas = dict(areas)
+        orig_nodes = dict(nodes)
+        orig_assign = dict(assign)
         mesh = {"1": AreaMesh(auto_mesh=False, max_size=1.0)}
         areas, assign, nodes, ntag = mesh_area_elements(
             areas, assign, nodes, mesh, next_tag=100
         )
-        assert areas["1"].inactive is False
+        assert areas == orig_areas, "areas dict mutated"
+        assert nodes == orig_nodes, "nodes dict mutated"
+        assert assign == orig_assign, "assignments dict mutated"
