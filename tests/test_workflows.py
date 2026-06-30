@@ -150,6 +150,7 @@ class TestStaticAnalysisWorkflow:
         assert 2 in disp
         dx, dy, dz = disp[2]
         # Wind is in X direction — expect X displacement
+        assert abs(dx) > 0, f"top node X displacement is zero under wind (dx={dx})"
 
     def test_static_element_forces(self, sample_builder):
         """Element end-forces can be extracted after static analysis.
@@ -185,6 +186,15 @@ class TestStaticAnalysisWorkflow:
             pattern_scales={"DEAD": 1.0, "WIND": 1.0},
         )
         # Both should have results
+        assert isinstance(r1, dict), "gravity-only result is not a dict"
+        assert isinstance(r2, dict), "gravity+wind result is not a dict"
+        assert 'nodal_displacements' in r1
+        assert 'nodal_displacements' in r2
+        # Wind load should produce larger X displacement at top node
+        d1 = r1['nodal_displacements'].get(2, (0, 0, 0))
+        d2 = r2['nodal_displacements'].get(2, (0, 0, 0))
+        assert abs(d2[0]) >= abs(d1[0]), \
+            f"X displacement did not increase with wind ({d1[0]} → {d2[0]})"
 
     def test_static_reactions_equilibrium(self, sample_builder):
         """Reactions at restrained nodes balance applied gravity loads.
@@ -198,8 +208,10 @@ class TestStaticAnalysisWorkflow:
             extract_reactions=True,
         )
         summed = results.get('summed_reactions', {})
-        # For a downward gravity load, vertical reactions should be negative
-        # (supporting downward load), so Fz should be non-zero.
+        # For a downward gravity load, reactions support from below
+        assert summed, "summed_reactions missing or empty"
+        assert abs(summed.get('fz', 0)) > 0, \
+            f"vertical reaction Fz is zero under dead load ({summed})"
 
 
 # ============================================================================
@@ -223,6 +235,9 @@ class TestModalAnalysisWorkflow:
         assert 'periods' in modal
         assert 'eigenvalues' in modal
         assert 'frequencies' in modal
+        assert len(modal['periods']) == 3
+        assert len(modal['eigenvalues']) == 3
+        assert len(modal['frequencies']) == 3
 
     def test_modal_first_period_positive(self, sample_builder):
         """Fundamental period of a 10 m steel cantilever is in a reasonable range.
@@ -235,6 +250,7 @@ class TestModalAnalysisWorkflow:
         modal = sample_builder.run_modal_analysis(num_modes=3)
         T1 = modal['periods'][0]
         # A 10 m steel cantilever typically has T1 ~0.2–2.0 s
+        assert 0.01 < T1 < 10.0, f"T1={T1} outside plausible range"
 
     def test_extract_mode_shapes(self, sample_builder):
         """Mode shapes can be extracted after eigenvalue analysis.
@@ -282,6 +298,10 @@ class TestPushoverWorkflow:
         assert 'control_disp' in results
         assert 'base_shear' in results
         assert 'step' in results
+        assert len(results['control_disp']) > 1, "uniform: control_disp empty"
+        assert len(results['base_shear']) > 1, "uniform: base_shear empty"
+        assert len(results['step']) > 1, "uniform: step empty"
+        assert abs(results['base_shear'][-1]) > 0, "uniform: final base_shear zero"
 
     def test_pushover_triangular_returns_keys(self, sample_builder):
         """Triangular (ELF) pushover produces a valid capacity curve.
@@ -300,6 +320,13 @@ class TestPushoverWorkflow:
             num_steps=5,
             print_progress=False,
         )
+        assert isinstance(results, dict)
+        assert 'control_disp' in results
+        assert 'base_shear' in results
+        assert 'step' in results
+        assert len(results['control_disp']) > 1, "triangular: control_disp empty"
+        assert len(results['base_shear']) > 1, "triangular: base_shear empty"
+        assert abs(results['base_shear'][-1]) > 0, "triangular: final base_shear zero"
 
     def test_pushover_pattern_returns_keys(self, sample_builder):
         """SAP2000-pattern-based pushover uses existing distributed loads.
@@ -319,6 +346,12 @@ class TestPushoverWorkflow:
             num_steps=5,
             print_progress=False,
         )
+        assert isinstance(results, dict)
+        assert 'control_disp' in results
+        assert 'base_shear' in results
+        assert 'step' in results
+        assert len(results['control_disp']) > 1, "pattern: control_disp empty"
+        assert len(results['base_shear']) > 1, "pattern: base_shear empty"
 
 
 # ============================================================================
@@ -356,6 +389,9 @@ class TestResponseSpectrumWorkflow:
             damping_ratio=0.05,
         )
         assert isinstance(results, dict)
+        assert 'base_shear_cqc' in results, "base_shear_cqc missing from RS results"
+        assert abs(results['base_shear_cqc']) > 0, \
+            f"base_shear_cqc is zero ({results['base_shear_cqc']})"
 
     def test_element_rs_forces(self, sample_builder, spectrum):
         """Element-level RS forces are available after spectrum analysis.
@@ -384,6 +420,14 @@ class TestResponseSpectrumWorkflow:
             direction='X',
         )
         assert isinstance(rs_forces, dict)
+        assert 'element_results' in rs_forces, \
+            "element_results missing from RS element forces"
+        er = rs_forces['element_results']
+        assert len(er) > 0, "element_results is empty"
+        first = er[0]
+        for key in ('Vz_i', 'My_i', 'Mz_i'):
+            assert key in first, f"{key} missing from RS element result"
+        assert abs(first['Vz_i']) > 0, "Vz_i is zero in RS element result"
 
 
 # ============================================================================
@@ -470,6 +514,13 @@ class TestCSMWorkflow:
         assert isinstance(adrs, dict)
         assert 'S_a' in adrs
         assert 'S_d' in adrs
+        assert 'Gamma' in adrs
+        assert 'M_eff' in adrs
+        assert 'phi_control' in adrs
+        assert len(adrs['S_a']) > 0
+        assert len(adrs['S_d']) > 0
+        assert adrs['Gamma'] > 0
+        assert adrs['M_eff'] > 0
 
     def test_compute_performance_point(self, sample_builder, spectrum):
         """CSM performance point can be computed from pushover + spectrum.
@@ -501,6 +552,11 @@ class TestCSMWorkflow:
         )
         assert isinstance(pp, dict)
         assert 'S_dp' in pp
+        assert 'S_ap' in pp
+        assert 'V_base' in pp
+        assert 'mu' in pp
+        assert pp['S_dp'] > 0
+        assert pp['S_ap'] > 0
 
 
 # ============================================================================
@@ -520,6 +576,8 @@ class TestBucklingCheckWorkflow:
         result = sample_builder.check_brace_buckling(
             brace_ids=set(), print_results=False,
         )
+        assert isinstance(result, dict)
+        assert len(result) == 0, f"expected empty dict, got {len(result)} entries"
 
     def test_check_brace_buckling_with_ids(self, sample_builder):
         """Euler buckling load is computed for a given frame element.
