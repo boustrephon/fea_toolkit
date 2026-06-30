@@ -375,10 +375,17 @@ class ConcreteRectangularSection(Section):
 
         patches: List[Tuple] = [
             ("rect", mat_tag + 1, nfy, nfz, core_y1, core_z1, core_y2, core_z2),
-            ("rect", mat_tag, nfy, 1, core_y2, -half_b, half_d, half_b),
-            ("rect", mat_tag, nfy, 1, -half_d, -half_b, core_y1, half_b),
         ]
-        if core_y2 > core_y1:
+        # Unconfined cover patches — only emit when cover > 0 to avoid
+        # zero-area degenerate patches.
+        if cv > 0:
+            patches.append(
+                ("rect", mat_tag, nfy, 1, core_y2, -half_b, half_d, half_b),
+            )
+            patches.append(
+                ("rect", mat_tag, nfy, 1, -half_d, -half_b, core_y1, half_b),
+            )
+        if cv > 0 and core_y2 > core_y1:
             patches.append(
                 ("rect", mat_tag, 1, max(1, nfz - 2), core_y1, -half_b, core_y2, core_z1)
             )
@@ -427,8 +434,12 @@ class ConcreteCircularSection(Section):
         R_core = max(0.0, R - cv)
         patches: List[Tuple] = [
             ("circ", mat_tag + 1, nfy, nfz, 0.0, 0.0, 0.0, R_core, 0.0, 360.0),
-            ("circ", mat_tag, nfy, nfz, 0.0, 0.0, R_core, R, 0.0, 360.0),
         ]
+        # Cover ring — only emit when cover > 0 to avoid degenerate zero-area patch.
+        if cv > 0:
+            patches.append(
+                ("circ", mat_tag, nfy, nfz, 0.0, 0.0, R_core, R, 0.0, 360.0),
+            )
         if self.bar_count and self.bar_dia > 0:
             area_bar = math.pi * (self.bar_dia / 2.0) ** 2
             R_rebar = R - self.cover
@@ -598,8 +609,18 @@ class NDMaterial:
     ft: float = 3.0e6
     Es: float = 0.0
 
-    def to_tcl(self, tag: int) -> str:
-        """Return the Tcl command to create this nD material in OpenSees."""
+    def to_tcl(self, tag: int, wrapper_tag: int = 0) -> str:
+        """Return the Tcl command to create this nD material in OpenSees.
+
+        Args:
+            tag: Integer tag for this material.
+            wrapper_tag: For ``PlateFromPlaneStress``, the tag for the
+                wrapper section (distinct from the plane-stress material
+                tag).  Ignored for other types.
+
+        Returns:
+            Tcl command string.
+        """
         t = self.material_type
         if t == "ElasticIsotropic":
             return f"nDMaterial ElasticIsotropic {tag} {self.E:g} {self.nu:g}"
@@ -610,7 +631,8 @@ class NDMaterial:
             return (f"nDMaterial ConcreteS {tag} {self.E:g} {self.nu:g}"
                     f" {self.fc:g} {self.ft:g} {self.Es:g}")
         if t == "PlateFromPlaneStress":
-            return f"nDMaterial PlateFromPlaneStress {tag} {tag} 0.0"
+            src = wrapper_tag if wrapper_tag else tag
+            return f"nDMaterial PlateFromPlaneStress {tag} {src} 0.0"
         return f"nDMaterial {t} {tag} {self.E:g} {self.nu:g}"
 
 
@@ -652,17 +674,25 @@ class LayeredShellSection:
     def to_tcl(self, tag: int, mat_tags: Dict[str, int]) -> str:
         """Return the Tcl command to create this layered shell section.
 
+        Emits ``section LayeredShell <tag> <nLayers>`` followed by
+        ``<matTag> <thickness> <nIP>`` for each layer, matching the
+        OpenSees convention (material tag before thickness).
+
         Args:
             tag: Integer tag for the section.
             mat_tags: Dict mapping NDMaterial name → integer tag.
 
         Returns:
             Tcl ``section LayeredShell ...`` command string.
+
+        Raises:
+            KeyError: If any layer's ``nd_material`` is not in
+                *mat_tags*.
         """
         parts = [f"section LayeredShell {tag} {len(self.layers)}"]
         for layer in self.layers:
-            mt = mat_tags.get(layer.nd_material, 1)
-            parts.append(f"{layer.thickness:g} {mt} {layer.n_ip}")
+            mt = mat_tags[layer.nd_material]  # fail hard on missing material
+            parts.append(f"{mt} {layer.thickness:g} {layer.n_ip}")
         return "   ".join(parts)
 
 
