@@ -216,6 +216,42 @@ class OpenSeesBuilder:
     # -------------------------------------------------------------------------
     # Node creation
     # -------------------------------------------------------------------------
+    # Shared helpers
+    # -------------------------------------------------------------------------
+
+    def _polygon_area(self, node_ids, nodes=None):
+        """Compute the 3D area of a polygon via Newell's method.
+
+        Args:
+            node_ids: Iterable of node ID strings.
+            nodes: Optional node dict (defaults to ``self.model.nodes``).
+
+        Returns:
+            ``(area_mag, pts)`` tuple where *area_mag* is the polygon area
+            (always ≥ 0) and *pts* is the list of ``(x, y, z)`` tuples.
+            Returns ``(0.0, [])`` if fewer than 3 nodes are resolved.
+        """
+        if nodes is None:
+            nodes = self.model.nodes
+        pts = []
+        for nid in node_ids:
+            nd = nodes.get(nid)
+            if nd is None:
+                break
+            pts.append((nd.x, nd.y, nd.z))
+        if len(pts) < 3:
+            return 0.0, []
+        nx = ny = nz = 0.0
+        for i in range(len(pts)):
+            x1, y1, z1 = pts[i]
+            x2, y2, z2 = pts[(i + 1) % len(pts)]
+            nx += (y1 - y2) * (z1 + z2)
+            ny += (z1 - z2) * (x1 + x2)
+            nz += (x1 - x2) * (y1 + y2)
+        area_mag = 0.5 * np.sqrt(nx * nx + ny * ny + nz * nz)
+        return area_mag, pts
+
+    # -------------------------------------------------------------------------
     def _create_nodes(self) -> None:
         """Create OpenSees nodes from model_data.nodes.
         Also records the set of created node tags for subdivision tracking.
@@ -516,8 +552,10 @@ class OpenSeesBuilder:
         if self.split_elements is not None:
             self.split_elements = elements
             self.split_assignments = assignments
-        # else: model.frame_elements / frame_assignments are already mutated
-        #       in-place by apply_frame_end_offsets, no write‑back needed.
+        else:
+            self.model.frame_elements = elements
+            self.model.frame_assignments = assignments
+        self.model.nodes = nodes
 
         # Create OpenSees nodes for the offset nodes
         for nd in self.model.nodes.values():
@@ -582,6 +620,7 @@ class OpenSeesBuilder:
         # Update model with meshed data
         self.model.area_elements = areas
         self.model.area_assignments = assignments
+        self.model.nodes = nodes
 
         # Create OpenSees nodes for mesh nodes
         for nd in self.model.nodes.values():
@@ -670,6 +709,7 @@ class OpenSeesBuilder:
                 next_tag=next_tag,
             )
             self._rigid_link_elems = rigid_links
+            self.model.nodes = nodes
             # Create OpenSees nodes for subdivision/offset nodes.
             # Only create nodes that weren't already created by _create_nodes().
             for nd in self.model.nodes.values():
@@ -1595,22 +1635,7 @@ class OpenSeesBuilder:
                     continue
 
                 # Polygon area via Newell's method
-                pts = []
-                for nid in area_elem.node_ids:
-                    nd = self.model.nodes.get(nid)
-                    if nd is None:
-                        break
-                    pts.append((nd.x, nd.y, nd.z))
-                if len(pts) < 3:
-                    continue
-                nx = ny = nz = 0.0
-                for i in range(len(pts)):
-                    x1, y1, z1 = pts[i]
-                    x2, y2, z2 = pts[(i + 1) % len(pts)]
-                    nx += (y1 - y2) * (z1 + z2)
-                    ny += (z1 - z2) * (x1 + x2)
-                    nz += (x1 - x2) * (y1 + y2)
-                area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                area_mag, _ = self._polygon_area(area_elem.node_ids)
                 if area_mag < 1e-12:
                     continue
 
@@ -1716,22 +1741,7 @@ class OpenSeesBuilder:
                         thickness = sub_elem.thickness
                         if thickness < 1e-12:
                             continue
-                        pts = []
-                        for nid in sub_elem.node_ids:
-                            nd = self.model.nodes.get(nid)
-                            if nd is None:
-                                break
-                            pts.append((nd.x, nd.y, nd.z))
-                        if len(pts) < 3:
-                            continue
-                        nx = ny = nz = 0.0
-                        for i in range(len(pts)):
-                            x1, y1, z1 = pts[i]
-                            x2, y2, z2 = pts[(i + 1) % len(pts)]
-                            nx += (y1 - y2) * (z1 + z2)
-                            ny += (z1 - z2) * (x1 + x2)
-                            nz += (x1 - x2) * (y1 + y2)
-                        area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                        area_mag, _ = self._polygon_area(sub_elem.node_ids)
                         if area_mag < 1e-12:
                             continue
                         sw_per_area = thickness * mat.unit_weight
@@ -1762,25 +1772,8 @@ class OpenSeesBuilder:
                 if thickness < 1e-12:
                     continue
 
-                # Compute polygon area (shoelace formula on XY projection)
-                pts = []
-                for nid in area_elem.node_ids:
-                    nd = self.model.nodes.get(nid)
-                    if nd is None:
-                        break
-                    pts.append((nd.x, nd.y, nd.z))
-                if len(pts) < 3:
-                    continue
-
                 # 3D polygon area via Newell's method
-                nx = ny = nz = 0.0
-                for i in range(len(pts)):
-                    x1, y1, z1 = pts[i]
-                    x2, y2, z2 = pts[(i + 1) % len(pts)]
-                    nx += (y1 - y2) * (z1 + z2)
-                    ny += (z1 - z2) * (x1 + x2)
-                    nz += (x1 - x2) * (y1 + y2)
-                area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                area_mag, _ = self._polygon_area(area_elem.node_ids)
                 if area_mag < 1e-12:
                     continue
 
@@ -3364,22 +3357,7 @@ class OpenSeesBuilder:
                     if thickness < 1e-12:
                         continue
                     # Polygon area via Newell's method
-                    pts = []
-                    for nid in area_elem.node_ids:
-                        nd = self.model.nodes.get(nid)
-                        if nd is None:
-                            break
-                        pts.append((nd.x, nd.y, nd.z))
-                    if len(pts) < 3:
-                        continue
-                    nx = ny = nz = 0.0
-                    for i in range(len(pts)):
-                        x1, y1, z1 = pts[i]
-                        x2, y2, z2 = pts[(i + 1) % len(pts)]
-                        nx += (y1 - y2) * (z1 + z2)
-                        ny += (z1 - z2) * (x1 + x2)
-                        nz += (x1 - x2) * (y1 + y2)
-                    area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                    area_mag, _ = self._polygon_area(area_elem.node_ids)
                     if area_mag < 1e-12:
                         continue
                     # Weight = area × thickness × unit_weight
@@ -3454,22 +3432,7 @@ class OpenSeesBuilder:
                                 thickness = sub_elem.thickness
                                 if thickness < 1e-12:
                                     continue
-                                pts = []
-                                for nid in sub_elem.node_ids:
-                                    nd = self.model.nodes.get(nid)
-                                    if nd is None:
-                                        break
-                                    pts.append((nd.x, nd.y, nd.z))
-                                if len(pts) < 3:
-                                    continue
-                                nx = ny = nz = 0.0
-                                for i in range(len(pts)):
-                                    x1, y1, z1 = pts[i]
-                                    x2, y2, z2 = pts[(i + 1) % len(pts)]
-                                    nx += (y1 - y2) * (z1 + z2)
-                                    ny += (z1 - z2) * (x1 + x2)
-                                    nz += (x1 - x2) * (y1 + y2)
-                                area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                                area_mag, _ = self._polygon_area(sub_elem.node_ids)
                                 if area_mag < 1e-12:
                                     continue
                                 sw_per_area = thickness * mat.unit_weight
@@ -3492,22 +3455,7 @@ class OpenSeesBuilder:
                         if thickness < 1e-12:
                             continue
                         # Polygon area
-                        pts = []
-                        for nid in area_elem.node_ids:
-                            nd = self.model.nodes.get(nid)
-                            if nd is None:
-                                break
-                            pts.append((nd.x, nd.y, nd.z))
-                        if len(pts) < 3:
-                            continue
-                        nx = ny = nz = 0.0
-                        for i in range(len(pts)):
-                            x1, y1, z1 = pts[i]
-                            x2, y2, z2 = pts[(i + 1) % len(pts)]
-                            nx += (y1 - y2) * (z1 + z2)
-                            ny += (z1 - z2) * (x1 + x2)
-                            nz += (x1 - x2) * (y1 + y2)
-                        area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                        area_mag, _ = self._polygon_area(area_elem.node_ids)
                         if area_mag < 1e-12:
                             continue
                         # Force = area × thickness × unit_weight × multiplier × mult
@@ -3537,22 +3485,7 @@ class OpenSeesBuilder:
                                 continue
                             for sub_id in sub_ids:
                                 sub_elem = self.model.area_elements[sub_id]
-                                pts = []
-                                for nid in sub_elem.node_ids:
-                                    nd = self.model.nodes.get(nid)
-                                    if nd is None:
-                                        break
-                                    pts.append((nd.x, nd.y, nd.z))
-                                if len(pts) < 3:
-                                    continue
-                                nx = ny = nz = 0.0
-                                for i in range(len(pts)):
-                                    x1, y1, z1 = pts[i]
-                                    x2, y2, z2 = pts[(i + 1) % len(pts)]
-                                    nx += (y1 - y2) * (z1 + z2)
-                                    ny += (z1 - z2) * (x1 + x2)
-                                    nz += (x1 - x2) * (y1 + y2)
-                                area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                                area_mag, _ = self._polygon_area(sub_elem.node_ids)
                                 if area_mag < 1e-12:
                                     continue
                                 pressure = abs(aul.value)
@@ -3563,22 +3496,7 @@ class OpenSeesBuilder:
                                     node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_corners
                             continue
                         # Polygon area
-                        pts = []
-                        for nid in area_elem.node_ids:
-                            nd = self.model.nodes.get(nid)
-                            if nd is None:
-                                break
-                            pts.append((nd.x, nd.y, nd.z))
-                        if len(pts) < 3:
-                            continue
-                        nx = ny = nz = 0.0
-                        for i in range(len(pts)):
-                            x1, y1, z1 = pts[i]
-                            x2, y2, z2 = pts[(i + 1) % len(pts)]
-                            nx += (y1 - y2) * (z1 + z2)
-                            ny += (z1 - z2) * (x1 + x2)
-                            nz += (x1 - x2) * (y1 + y2)
-                        area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                        area_mag, _ = self._polygon_area(area_elem.node_ids)
                         if area_mag < 1e-12:
                             continue
                         # Use pressure magnitude in gravity direction
