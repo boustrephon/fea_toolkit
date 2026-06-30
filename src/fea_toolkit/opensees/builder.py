@@ -70,6 +70,7 @@ class OpenSeesBuilder:
         self.split_assignments: Optional[Dict[str, str]] = None
         self.split_dist_loads: Optional[List[FrameDistributedLoad]] = None
         self._has_edge_constraints: bool = False
+        self._offset_rigid_links: List[tuple] = []
         # self._transf_tags: Dict[int, int] = {}   # elem_id -> transf_tag
 
     def _set_defaults(self) -> None:
@@ -169,7 +170,6 @@ class OpenSeesBuilder:
             self._split_elements()
         
         # Apply frame end offsets (rigid zones at joints)
-        self._offset_rigid_links: List[tuple] = []
         if self.model.frame_end_offsets:
             self._apply_frame_end_offsets()
 
@@ -433,16 +433,23 @@ class OpenSeesBuilder:
         """
         from ..model.geometry import apply_frame_end_offsets
 
+        # Operate on the same element collection that _create_elements will
+        # consume — split elements if available, otherwise originals.
+        if self.split_elements is not None:
+            elements = self.split_elements
+            assignments = self.split_assignments
+        else:
+            elements = self.model.frame_elements
+            assignments = self.model.frame_assignments
+
         max_elem_tag = max(
-            (e.elem_tag for e in self.model.frame_elements.values()), default=0
+            (e.elem_tag for e in elements.values()), default=0
         )
         max_node_tag = max(
             (nd.node_tag for nd in self.model.nodes.values()), default=0
         )
         next_tag = max(max_elem_tag, max_node_tag) + 1
 
-        elements = self.model.frame_elements
-        assignments = self.model.frame_assignments
         nodes = self.model.nodes
 
         elements, assignments, nodes, next_tag, rigid_links = apply_frame_end_offsets(
@@ -451,6 +458,13 @@ class OpenSeesBuilder:
             next_tag=next_tag,
         )
         self._offset_rigid_links = rigid_links
+
+        # Write back so _create_elements picks up the offset‑adjusted data.
+        if self.split_elements is not None:
+            self.split_elements = elements
+            self.split_assignments = assignments
+        # else: model.frame_elements / frame_assignments are already mutated
+        #       in-place by apply_frame_end_offsets, no write‑back needed.
 
         # Create OpenSees nodes for the offset nodes
         for nd in self.model.nodes.values():
@@ -1815,11 +1829,14 @@ class OpenSeesBuilder:
 
             sec_tag = self._shell_sec_tags[sec_name]
 
-            # Determine a unique element tag
+            # Determine a unique element tag — base on actual frame element
+            # tags so shells never collide with frames.
             max_frame_tag = max(
-                getattr(self, 'frame_tag_map', {}).values(), default=0
+                (e.elem_tag for e in self.model.frame_elements.values()
+                 if not getattr(e, 'inactive', False)),
+                default=0,
             )
-            elem_tag = max(max_frame_tag, shell_count + 1)
+            elem_tag = max_frame_tag + shell_count + 1
 
             # Create ShellMITC4 (quad) or ShellDKGT (tri) element
             if len(nids) == 4:
