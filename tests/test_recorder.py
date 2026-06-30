@@ -103,7 +103,7 @@ class TestRecordingOpenSees:
         content = out.read_text()
 
         assert "wipe" in content
-        assert "model basic -ndm 3 -ndf 6" in content
+        assert "model Basic -ndm 3 -ndf 6" in content
         assert "node 1 0 0 0" in content
 
     def test_save_as_python_custom_func_name(self, tmp_path):
