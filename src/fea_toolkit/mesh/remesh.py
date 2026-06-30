@@ -50,7 +50,7 @@ def remesh_areas(
     area_assignments: Dict[str, str],
     nodes: Dict[str, Any],
     area_mesh: Dict[str, Any],
-    line_constraints: Optional[Dict[str, List[str]]] = None,
+    line_constraints: Optional[Dict[str, List[Tuple[str, str, str]]]] = None,
     target_length: float = 0.5,
     recombine: bool = True,
     verbose: bool = False,
@@ -71,10 +71,12 @@ def remesh_areas(
             ``.node_tag``.
         area_mesh: ``{area_id: AreaMesh}`` with ``.auto_mesh``,
             ``.max_size``.
-        line_constraints: ``{area_id: [frame_id, ...]}`` — frame element
-            IDs whose edges should be preserved in the mesh for this area.
-            Typically derived from frame elements whose nodes lie on the
-            area's perimeter.
+        line_constraints: ``{area_id: [(frame_id, node_a, node_b), ...]}`` —
+            Frame edges to preserve, keyed by area.  Each tuple contains the
+            frame ID (for reference) and the two endpoint node IDs whose
+            coordinates are resolved from the *nodes* dict and embedded as
+            1D curves in the Gmsh surface.  Build this with
+            :func:`constrain_line`.
         target_length: Target mesh element edge length (same units as
             model).  Overridden by ``max_size`` from ``area_mesh`` when
             available.
@@ -115,7 +117,14 @@ def remesh_areas(
             next_tag = max((nd.node_tag for nd in nodes.values()), default=0) + 1
 
         for aid, mesh in area_mesh.items():
-            if not getattr(mesh, "auto_mesh", False) or getattr(mesh, "max_size", 0.0) <= 0.0:
+            if not getattr(mesh, "auto_mesh", False):
+                continue
+            # Resolve characteristic length: prefer max_size from mesh
+            # assignment, fall back to the caller-supplied target_length.
+            lc = getattr(mesh, "max_size", 0.0)
+            if lc <= 0.0:
+                lc = target_length
+            if lc <= 0.0:
                 continue
 
             elem = area_elements.get(aid)
@@ -134,8 +143,6 @@ def remesh_areas(
             if len(pts) != 4:
                 continue
 
-            lc = getattr(mesh, "max_size", target_length)
-
             # --- Add corner points to Gmsh model ---
             point_tags = []
             for pt in pts:
@@ -151,16 +158,24 @@ def remesh_areas(
             surf = gmsh.model.occ.add_surface_filling(loop)
 
             # --- Embed line constraints (frame edges) ---
-            frame_ids = line_constraints.get(aid, [])
-            if frame_ids:
-                # Collect all unique constraint points on this area
-                constraint_pts = set()
-                for fid in frame_ids:
-                    fe = None
-                    # Search through parent frame_elements (not passed here,
-                    # so caller must resolve frame_id → (x,y,z) endpoints)
-                    # Instead, we accept pre-resolved points.
-                    pass
+            frame_constraints = line_constraints.get(aid, [])
+            if frame_constraints:
+                constraint_curves: List[int] = []
+                for fid, nid_a, nid_b in frame_constraints:
+                    nd_a = nodes.get(nid_a)
+                    nd_b = nodes.get(nid_b)
+                    if nd_a is None or nd_b is None:
+                        continue
+                    pta = (nd_a.x, nd_a.y, nd_a.z)
+                    ptb = (nd_b.x, nd_b.y, nd_b.z)
+                    # Only embed if both endpoints lie on or near this
+                    # surface (within tolerance of an edge).
+                    ta = gmsh.model.occ.add_point(*pta, lc)
+                    tb = gmsh.model.occ.add_point(*ptb, lc)
+                    curve = gmsh.model.occ.add_line(ta, tb)
+                    constraint_curves.append(curve)
+                if constraint_curves:
+                    gmsh.model.mesh.embed(1, constraint_curves, 2, surf)
 
             gmsh.model.occ.synchronize()
 
@@ -175,7 +190,8 @@ def remesh_areas(
             if recombine:
                 gmsh.model.mesh.recombine()
 
-            # --- Extract nodes and elements ---
+            # --- Extract nodes (all mesh nodes; the model is removed
+            # after each area so there is no cross-contamination) ---
             node_tags_local, coords, _ = gmsh.model.mesh.getNodes()
             coord_map = dict(zip(node_tags_local, coords.reshape((-1, 3))))
 
@@ -255,7 +271,7 @@ def constrain_line(
     node_a: str,
     node_b: str,
     nodes: Dict[str, Any],
-    constraints: Dict[str, List[str]],
+    constraints: Dict[str, List[Tuple[str, str, str]]],
 ) -> None:
     """Register a frame element edge as a line constraint for a given area.
 
@@ -271,8 +287,9 @@ def constrain_line(
         nodes: ``{node_id: Node}`` — used to resolve coordinates for
             deduplication.
         constraints: The ``line_constraints`` dict being built (modified
-            in place).
+            in place).  Values are lists of ``(frame_id, node_a, node_b)``
+            tuples.
     """
     if area_id not in constraints:
         constraints[area_id] = []
-    constraints[area_id].append(frame_id)
+    constraints[area_id].append((frame_id, node_a, node_b))

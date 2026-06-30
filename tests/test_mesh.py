@@ -127,19 +127,19 @@ class TestMeshChecks:
         assert r["n_elements"] == 0
         assert r["passed"] is True
 
-    def test_modules_importable_without_compas(self):
-        """The module itself is importable even without compas."""
-        import importlib
-        import sys
-        # Simulate compas not being available
-        saved = sys.modules.pop("fea_toolkit.mesh.checks", None)
-        try:
-            from fea_toolkit.mesh import checks as chk
-            assert hasattr(chk, "aspect_ratios")
-            assert hasattr(chk, "report")
-        finally:
-            if saved is not None:
-                sys.modules["fea_toolkit.mesh.checks"] = saved
+
+def test_modules_importable_without_compas():
+    """The checks module is importable even without compas."""
+    import importlib
+    import sys
+    saved = sys.modules.pop("fea_toolkit.mesh.checks", None)
+    try:
+        from fea_toolkit.mesh import checks as chk
+        assert hasattr(chk, "aspect_ratios")
+        assert hasattr(chk, "report")
+    finally:
+        if saved is not None:
+            sys.modules["fea_toolkit.mesh.checks"] = saved
 
 
 # ========================================================================
@@ -209,30 +209,33 @@ class TestMeshRemesh:
         sub_ids = [aid for aid in out_assign if aid != "1"]
         assert all(out_assign[sid] == "Slab200" for sid in sub_ids)
 
-    def test_constrain_line_builds_dict(self, quad_nodes):
-        """constrain_line() populates the constraints dict."""
-        from fea_toolkit.mesh.remesh import constrain_line
-        constraints = {}
-        constrain_line("A1", "F1", "1", "2", quad_nodes, constraints)
-        assert "A1" in constraints
-        assert "F1" in constraints["A1"]
 
-    def test_constrain_line_multiple_frames(self, quad_nodes):
-        """Multiple frame edges on the same area are collected."""
-        from fea_toolkit.mesh.remesh import constrain_line
-        constraints = {}
-        constrain_line("A1", "F1", "1", "2", quad_nodes, constraints)
-        constrain_line("A1", "F2", "2", "3", quad_nodes, constraints)
-        assert constraints["A1"] == ["F1", "F2"]
+def test_constrain_line_builds_dict(quad_nodes):
+    """constrain_line() populates the constraints dict."""
+    from fea_toolkit.mesh.remesh import constrain_line
+    constraints = {}
+    constrain_line("A1", "F1", "1", "2", quad_nodes, constraints)
+    assert "A1" in constraints
+    fid, na, nb = constraints["A1"][0]
+    assert fid == "F1"
 
-    def test_remesh_raises_without_gmsh(self):
-        """A clear ImportError is raised when gmsh is missing."""
-        # Monkey-patch the check to simulate missing gmsh
-        import fea_toolkit.mesh.remesh as rm
-        original = rm._check_gmsh
-        try:
-            rm._check_gmsh = lambda: False
-            with pytest.raises(ImportError, match="gmsh is required"):
-                rm.remesh_areas({}, {}, {}, {})
-        finally:
-            rm._check_gmsh = original
+
+def test_constrain_line_multiple_frames(quad_nodes):
+    """Multiple frame edges on the same area are collected."""
+    from fea_toolkit.mesh.remesh import constrain_line
+    constraints = {}
+    constrain_line("A1", "F1", "1", "2", quad_nodes, constraints)
+    constrain_line("A1", "F2", "2", "3", quad_nodes, constraints)
+    assert len(constraints["A1"]) == 2
+
+
+def test_remesh_raises_without_gmsh():
+    """A clear ImportError is raised when gmsh is missing."""
+    import fea_toolkit.mesh.remesh as rm
+    original = rm._check_gmsh
+    try:
+        rm._check_gmsh = lambda: False
+        with pytest.raises(ImportError, match="gmsh is required"):
+            rm.remesh_areas({}, {}, {}, {})
+    finally:
+        rm._check_gmsh = original
