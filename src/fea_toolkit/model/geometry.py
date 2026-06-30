@@ -1292,16 +1292,21 @@ def mesh_area_elements(
         dom = int(np.argmax(abs_n))  # 0=X, 1=Y, 2=Z
         # 2D signed area on the projection plane perpendicular to the
         # dominant normal axis.  Negative → clockwise → reverse.
-        if dom == 0:     # project onto YZ
+        if dom == 0:     # project onto YZ  (ey × ez = +ex, right-handed)
             u = [c[1] for c in corners]
             v = [c[2] for c in corners]
-        elif dom == 1:   # project onto XZ
-            u = [c[0] for c in corners]
-            v = [c[2] for c in corners]
-        else:            # project onto XY (default, matches original)
+        elif dom == 1:   # project onto ZX  (ez × ex = +ey, right-handed)
+            u = [c[2] for c in corners]
+            v = [c[0] for c in corners]
+        else:            # project onto XY  (ex × ey = +ez, right-handed)
             u = [c[0] for c in corners]
             v = [c[1] for c in corners]
-        signed_2d = (u[1] - u[0]) * (v[2] - v[1]) - (v[1] - v[0]) * (u[2] - u[1])
+        # 2D signed area (shoelace) on the projection plane.
+        # Negative → clockwise → reverse the vertex order.
+        signed_2d = ((u[0] * v[1] - u[1] * v[0])
+                   + (u[1] * v[2] - u[2] * v[1])
+                   + (u[2] * v[3] - u[3] * v[2])
+                   + (u[3] * v[0] - u[0] * v[3])) * 0.5
         if signed_2d < 0:  # clockwise → reverse
             corner_ids = [corner_ids[0], corner_ids[3], corner_ids[2], corner_ids[1]]
             corners = [corners[0], corners[3], corners[2], corners[1]]
