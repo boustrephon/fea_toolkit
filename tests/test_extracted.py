@@ -9,6 +9,8 @@ sys.path.insert(0, str(_REPO / "src"))
 import numpy as np
 from fea_toolkit.spectrum import _gb50011_spectrum, _build_spectrum, _interp_sa
 from fea_toolkit.utils import deep_merge, infer_loads, build_gravity_patterns, pick_wind
+import copy
+import pytest
 from fea_toolkit.model.sap_data import Node, FrameElement, AreaElement
 
 
@@ -266,9 +268,9 @@ class TestApplyFrameEndOffsets:
         from fea_toolkit.model.geometry import apply_frame_end_offsets
         from fea_toolkit.model.sap_data import FrameEndOffset
         elems, assign, nodes = self._make_elements()
-        orig_elems = dict(elems)
-        orig_assign = dict(assign)
-        orig_nodes = dict(nodes)
+        orig_elems = copy.deepcopy(elems)
+        orig_assign = copy.deepcopy(assign)
+        orig_nodes = copy.deepcopy(nodes)
         offsets = {"1": FrameEndOffset(0.0, 0.0)}
         elems, assign, nodes, ntag, links = apply_frame_end_offsets(
             elems, assign, nodes, offsets
@@ -330,7 +332,8 @@ class TestApplyFrameEndOffsets:
         remaining = np.linalg.norm(
             np.array([nj.x - ni.x, nj.y - ni.y, nj.z - ni.z])
         )
-        assert remaining > 0.5
+        # 6 m element – each end clamped to 6 × 0.45 = 2.7 m → 0.6 m left
+        assert remaining == pytest.approx(0.6)
 
     def test_missing_element_skipped(self):
         """Offset for a non-existent element is silently skipped."""
@@ -368,9 +371,9 @@ class TestMeshAreaElements:
         """No mesh settings → areas, nodes, assignments are unchanged."""
         from fea_toolkit.model.geometry import mesh_area_elements
         areas, assign, nodes = self._make_quad_model()
-        orig_areas = dict(areas)
-        orig_nodes = dict(nodes)
-        orig_assign = dict(assign)
+        orig_areas = copy.deepcopy(areas)
+        orig_nodes = copy.deepcopy(nodes)
+        orig_assign = copy.deepcopy(assign)
         areas, assign, nodes, ntag = mesh_area_elements(
             areas, assign, nodes, {}
         )
@@ -411,9 +414,9 @@ class TestMeshAreaElements:
         from fea_toolkit.model.geometry import mesh_area_elements
         from fea_toolkit.model.sap_data import AreaMesh
         areas, assign, nodes = self._make_quad_model()
-        orig_areas = dict(areas)
-        orig_nodes = dict(nodes)
-        orig_assign = dict(assign)
+        orig_areas = copy.deepcopy(areas)
+        orig_nodes = copy.deepcopy(nodes)
+        orig_assign = copy.deepcopy(assign)
         mesh = {"1": AreaMesh(auto_mesh=True, max_size=100.0)}
         areas, assign, nodes, ntag = mesh_area_elements(
             areas, assign, nodes, mesh, next_tag=100
@@ -427,9 +430,9 @@ class TestMeshAreaElements:
         from fea_toolkit.model.geometry import mesh_area_elements
         from fea_toolkit.model.sap_data import AreaMesh
         areas, assign, nodes = self._make_quad_model()
-        orig_areas = dict(areas)
-        orig_nodes = dict(nodes)
-        orig_assign = dict(assign)
+        orig_areas = copy.deepcopy(areas)
+        orig_nodes = copy.deepcopy(nodes)
+        orig_assign = copy.deepcopy(assign)
         mesh = {"1": AreaMesh(auto_mesh=False, max_size=1.0)}
         areas, assign, nodes, ntag = mesh_area_elements(
             areas, assign, nodes, mesh, next_tag=100
