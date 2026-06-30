@@ -14,6 +14,9 @@ import math
 import numpy as np
 
 import openseespy.opensees as ops
+# Module-level reference — can be swapped with a RecordingOpenSees proxy
+# for Tcl export or Xara backend execution without modifying any code
+# below this line.  See OpenSeesBuilder.xara_build() for the swap pattern.
 try:
     import opstool as opst
     OPSTOOL_AVAILABLE = True
@@ -118,6 +121,290 @@ class OpenSeesBuilder:
         for key, default in defaults.items():
             if key not in self.config:
                 self.config[key] = default
+
+    # -------------------------------------------------------------------------
+    # Xara (OpenSeesRT) Tcl backend
+    # -------------------------------------------------------------------------
+
+    @classmethod
+    def xara_build(
+        cls,
+        model_data: "SAPModelData",
+        config: Optional[Dict[str, Any]] = None,
+        *,
+        tcl_path: str = "model.tcl",
+        lib_path: str = "",
+        tclsh_path: str = "",
+        ndm: int = 3,
+        ndf: int = 6,
+        timeout: float = 300.0,
+    ) -> tuple["OpenSeesBuilder", int, str]:
+        """Build and run a model via Xara's standalone ``tclsh8.6``.
+
+        This is a convenience pipeline that:
+
+        1. Records all ``ops.*`` calls via :class:`RecordingOpenSees`
+        2. Saves them as a Xara-compatible Tcl script
+        3. Runs the script via the standalone ``tclsh8.6`` interpreter
+           (bypassing the Tcl 8.6 / Tcl 9 version conflict)
+
+        Usage::
+
+            from fea_toolkit.opensees.builder import OpenSeesBuilder
+            from examples.sample_model import make_sample_model
+
+            md = make_sample_model()
+            builder, ret, stdout = OpenSeesBuilder.xara_build(
+                md, {"verbose": False},
+                tcl_path="/tmp/my_model.tcl",
+            )
+            print(stdout)
+
+        Args:
+            model_data: SAP model data.
+            config: Builder configuration dict.
+            tcl_path: Where to write the generated Tcl script.
+            lib_path: Path to ``libOpenSeesRT.dylib``. Auto-detected
+                if empty.
+            tclsh_path: Path to ``tclsh8.6``.  Auto-detected if empty.
+            ndm: Spatial dimensions (default 3).
+            ndf: DOFs per node (default 6).
+            timeout: Maximum execution time in seconds.
+
+        Returns:
+            ``(builder, exit_code, stdout)``.
+        """
+        from fea_toolkit.opensees.recorder import (
+            RecordingOpenSees, XaraTclRunner,
+        )
+        import fea_toolkit.opensees.builder as _builder_mod
+
+        # Swap module-level ops with recorder proxy
+        _real_ops = _builder_mod.ops
+        recorder = RecordingOpenSees(_real_ops)
+        _builder_mod.ops = recorder
+
+        try:
+            builder = cls(model_data, config)
+            if config is None:
+                config = {}
+            create_shells = config.get("create_shells", False)
+            builder.build(
+                pattern_scales=config.get("pattern_scales"),
+                selection=config.get("selection") if create_shells else None,
+            )
+
+            # Export commands to Tcl
+            recorder.save_as_xara_tcl(
+                tcl_path, lib_path=lib_path, ndm=ndm, ndf=ndf,
+            )
+
+            # Run via standalone tclsh8.6
+            runner = XaraTclRunner(
+                tclsh_path or XaraTclRunner.which_tclsh(),
+            )
+            ret, stdout = runner.run(tcl_path, timeout=timeout)
+        finally:
+            # Restore the real ops module
+            _builder_mod.ops = _real_ops
+
+        return builder, ret, stdout
+
+    @staticmethod
+    def export_model_to_tcl(
+        model_data: "SAPModelData",
+        path: str,
+        lib_path: str = "",
+        ndm: int = 3,
+        ndf: int = 6,
+    ) -> None:
+        """Export a SAP model directly to a Xara-compatible Tcl script.
+
+        This is an alternative to the recording-based approach that
+        translates the structured ``SAPModelData`` directly into Tcl
+        commands, avoiding the scoping issues that arise when replaying
+        flat ``ops.*`` call sequences.
+
+        The generated Tcl file can be run via :class:`XaraTclRunner`::
+
+            from fea_toolkit.opensees.recorder import XaraTclRunner
+
+            OpenSeesBuilder.export_model_to_tcl(md, "model.tcl")
+            runner = XaraTclRunner()
+            ret, stdout = runner.run("model.tcl")
+
+        Args:
+            model_data: SAP model data to export.
+            path: Output ``.tcl`` file path.
+            lib_path: Path to ``libOpenSeesRT.dylib``.
+            ndm: Spatial dimensions (default 3).
+            ndf: DOFs per node (default 6).
+        """
+        if not lib_path:
+            try:
+                import opensees as _xara_ops
+                lib_dir = os.path.dirname(_xara_ops.__file__)
+                for ext in (".dylib", ".so"):
+                    cand = os.path.join(lib_dir, f"libOpenSeesRT{ext}")
+                    if os.path.exists(cand):
+                        lib_path = cand
+                        break
+            except ImportError:
+                lib_path = "libOpenSeesRT.dylib"
+
+        lines = [
+            "# Xara/OpenSeesRT Tcl script -- exported by OpenSeesBuilder",
+            f"load {{{lib_path}}}",
+            f"model Basic -ndm {ndm} -ndf {ndf}",
+            "",
+            "# ── Nodes ──",
+        ]
+
+        # Map SAP string IDs to integer tags for Tcl compatibility
+        _mat_tag: Dict[str, int] = {}
+        _sec_tag: Dict[str, int] = {}
+        for i, mn in enumerate(model_data.materials, start=1):
+            _mat_tag[mn] = i
+        tag_offset = max(len(model_data.materials), 1) + 1
+        for i, sn in enumerate(model_data.sections, start=tag_offset):
+            _sec_tag[sn] = i
+
+        # Nodes
+        for nid, nd in model_data.nodes.items():
+            lines.append(
+                f"node {nd.node_tag} {nd.x:g} {nd.y:g} {nd.z:g}"
+            )
+
+        # Restraints
+        restraints_added = False
+        for nid, r in model_data.restraints.items():
+            if not restraints_added:
+                lines.append("")
+                lines.append("# ── Restraints ──")
+                restraints_added = True
+            nd = model_data.nodes.get(nid)
+            if nd is None:
+                continue
+            tags = " ".join(str(int(x)) for x in r.dofs)
+            lines.append(f"fix {nd.node_tag} {tags}")
+
+        # Materials
+        if model_data.materials:
+            lines.append("")
+            lines.append("# ── Materials ──")
+            for mat_name, mat in model_data.materials.items():
+                tag = _mat_tag[mat_name]
+                if mat.type and "concrete" in mat.type.lower():
+                    Fc = (mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7) / 1.0
+                    epsc = (mat.eFc if mat.eFc and mat.eFc > 0 else 0.002)
+                    Fu = 0.2 * Fc
+                    epsu = 0.006
+                    lines.append(
+                        f"uniaxialMaterial Concrete01 {tag} "
+                        f"{-Fc:g} {-epsc:g} {-Fu:g} {-epsu:g}"
+                    )
+                else:
+                    E_mod = (mat.E_mod if mat.E_mod and mat.E_mod > 0
+                             else 2.0e11)
+                    Fy = (mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8)
+                    lines.append(
+                        f"uniaxialMaterial Steel01 {tag} "
+                        f"{Fy:g} {E_mod:g} 0.01"
+                    )
+
+        # Sections
+        if model_data.sections:
+            lines.append("")
+            lines.append("# ── Frame sections ──")
+            for sec_name, sec in model_data.sections.items():
+                tag = _sec_tag[sec_name]
+                E_mod = 2.0e11
+                mat = model_data.materials.get(sec.material)
+                if mat and mat.E_mod and mat.E_mod > 0:
+                    E_mod = mat.E_mod
+                G = (mat.G_mod if mat and mat.G_mod and mat.G_mod > 0
+                     else 0.4 * E_mod)
+                lines.append(
+                    f"section Elastic {tag} "
+                    f"{E_mod:g} {sec.A:g} {sec.I33:g} {sec.I22:g} "
+                    f"{G:g} {sec.J:g}"
+                )
+
+        # Frame elements
+        if model_data.frame_elements:
+            lines.append("")
+            lines.append("# ── Frame elements ──")
+            transf_added = False
+            for eid, elem in model_data.frame_elements.items():
+                if getattr(elem, "inactive", False):
+                    continue
+                sec_name = model_data.frame_assignments.get(eid, "")
+                if not sec_name:
+                    continue
+                ni = model_data.nodes.get(elem.node_i)
+                nj = model_data.nodes.get(elem.node_j)
+                if ni is None or nj is None:
+                    continue
+                # Geometric transformation
+                dx = nj.x - ni.x
+                dy = nj.y - ni.y
+                dz = nj.z - ni.z
+                if abs(dx) < 1e-12 and abs(dy) < 1e-12:
+                    vecxz = "1 0 0"
+                else:
+                    vecxz = "0 0 1"
+                if not transf_added:
+                    lines.append(
+                        f"geomTransf Linear {eid} {vecxz}"
+                    )
+                    transf_added = True
+                else:
+                    lines.append(
+                        f"geomTransf Linear {eid} {vecxz}"
+                    )
+                lines.append(
+                    f"element elasticBeamColumn {elem.elem_tag} "
+                    f"{ni.node_tag} {nj.node_tag} {_sec_tag.get(sec_name, sec_name)} {eid}"
+                )
+
+        # Area elements (shells)
+        if model_data.area_elements:
+            lines.append("")
+            lines.append("# ── Shell sections & area elements ──")
+            for aid, elem in model_data.area_elements.items():
+                if getattr(elem, "inactive", False):
+                    continue
+                nids = [str(nd.node_tag) for nd_id in elem.node_ids
+                        for nd in [model_data.nodes.get(nd_id)]
+                        if nd is not None]
+                if len(nids) < 3:
+                    continue
+                # Use an elastic plate section
+                sec_name = model_data.area_assignments.get(aid, "1")
+                sec_tag = _sec_tag.get(sec_name, 1)
+                lines.append(
+                    "section ElasticMembranePlateSection "
+                    f"{sec_tag} 200e9 0.3 "
+                    f"{getattr(elem, 'thickness', 0.2):g}"
+                )
+                nn = len(nids)
+                if nn == 4:
+                    lines.append(
+                        f"element ShellMITC4 {elem.area_tag} "
+                        + " ".join(nids) + f" {sec_tag}"
+                    )
+                elif nn == 3:
+                    lines.append(
+                        f"element ShellDKGT {elem.area_tag} "
+                        + " ".join(nids) + f" {sec_tag}"
+                    )
+
+        lines.append("")
+        lines.append("puts \"Model exported successfully.\"")
+        lines.append("wipe")
+
+        with open(path, "w") as f:
+            f.write("\n".join(lines) + "\n")
 
     # -------------------------------------------------------------------------
     # Main build method
