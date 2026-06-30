@@ -217,6 +217,8 @@ class OpenSeesBuilder:
         lib_path: str = "",
         ndm: int = 3,
         ndf: int = 6,
+        tcl_prefix: str = "",
+        tcl_suffix: str = "",
     ) -> None:
         """Export a SAP model directly to a Xara-compatible Tcl script.
 
@@ -233,12 +235,30 @@ class OpenSeesBuilder:
             runner = XaraTclRunner()
             ret, stdout = runner.run("model.tcl")
 
+        To add nonlinear materials, layered shell sections, and
+        analysis commands, use *tcl_prefix* (inserted after the
+        ``model Basic`` preamble) and/or *tcl_suffix* (appended
+        before ``wipe``)::
+
+            tcl = OpenSeesBuilder.pushover_tcl(
+                control_node=8, dof=2, max_disp=0.1,
+                lateral_loads={5: (0,10000,0), 6: (0,10000,0),
+                               7: (0,10000,0), 8: (0,10000,0)},
+            )
+            OpenSeesBuilder.export_model_to_tcl(md, "wall.tcl",
+                tcl_suffix=tcl,
+            )
+
         Args:
             model_data: SAP model data to export.
             path: Output ``.tcl`` file path.
             lib_path: Path to ``libOpenSeesRT.dylib``.
             ndm: Spatial dimensions (default 3).
             ndf: DOFs per node (default 6).
+            tcl_prefix: Tcl commands inserted after the model preamble
+                (e.g. for nDMaterial definitions before sections).
+            tcl_suffix: Tcl commands appended before ``wipe``
+                (e.g. for analysis, recorders, results output).
         """
         if not lib_path:
             try:
@@ -367,10 +387,32 @@ class OpenSeesBuilder:
                     f"{ni.node_tag} {nj.node_tag} {_sec_tag.get(sec_name, sec_name)} {eid}"
                 )
 
-        # Area elements (shells)
+        # Area elements (shells) — unique shell sections only
         if model_data.area_elements:
             lines.append("")
             lines.append("# ── Shell sections & area elements ──")
+
+            # Emit shell sections once per unique section name, using
+            # tags offset from the frame section range.
+            _shell_sec_tag: Dict[str, int] = {}
+            _next_shell_tag = (max(_sec_tag.values()) + 1
+                               if _sec_tag else 1000)
+            for aid, elem in model_data.area_elements.items():
+                if getattr(elem, "inactive", False):
+                    continue
+                sec_name = model_data.area_assignments.get(aid, "")
+                if sec_name and sec_name not in _shell_sec_tag:
+                    _shell_sec_tag[sec_name] = _next_shell_tag
+                    _next_shell_tag += 1
+
+            # Write unique shell sections
+            for sec_name, stag in _shell_sec_tag.items():
+                lines.append(
+                    "section ElasticMembranePlateSection "
+                    f"{stag} 200e9 0.3 0.2"
+                )
+
+            # Shell elements
             for aid, elem in model_data.area_elements.items():
                 if getattr(elem, "inactive", False):
                     continue
@@ -379,25 +421,41 @@ class OpenSeesBuilder:
                         if nd is not None]
                 if len(nids) < 3:
                     continue
-                # Use an elastic plate section
-                sec_name = model_data.area_assignments.get(aid, "1")
-                sec_tag = _sec_tag.get(sec_name, 1)
-                lines.append(
-                    "section ElasticMembranePlateSection "
-                    f"{sec_tag} 200e9 0.3 "
-                    f"{getattr(elem, 'thickness', 0.2):g}"
+                stag = _shell_sec_tag.get(
+                    model_data.area_assignments.get(aid, ""), 1
                 )
                 nn = len(nids)
                 if nn == 4:
                     lines.append(
                         f"element ShellMITC4 {elem.area_tag} "
-                        + " ".join(nids) + f" {sec_tag}"
+                        + " ".join(nids) + f" {stag}"
                     )
                 elif nn == 3:
                     lines.append(
                         f"element ShellDKGT {elem.area_tag} "
-                        + " ".join(nids) + f" {sec_tag}"
+                        + " ".join(nids) + f" {stag}"
                     )
+
+        # Insert tcl_prefix after model preamble, before sections
+        if tcl_prefix:
+            # Find the # ── Nodes ── marker and insert prefix after it
+            # Actually, insert before the first element-related section
+            first_section_idx = None
+            for i, line in enumerate(lines):
+                if line.startswith("# ── Materials") or line.startswith("# ── Frame sections"):
+                    first_section_idx = i
+                    break
+            if first_section_idx is not None:
+                lines.insert(first_section_idx, "")
+                lines.insert(first_section_idx, "# ── User-defined prefix (nD materials, etc.) ──")
+                lines.insert(first_section_idx + 2, tcl_prefix)
+                lines.insert(first_section_idx + 3, "")
+
+        # Append tcl_suffix before final wipe
+        if tcl_suffix:
+            lines.append("")
+            lines.append("# ── User-defined suffix (analysis, recorders) ──")
+            lines.append(tcl_suffix)
 
         lines.append("")
         lines.append("puts \"Model exported successfully.\"")
@@ -406,8 +464,84 @@ class OpenSeesBuilder:
         with open(path, "w") as f:
             f.write("\n".join(lines) + "\n")
 
-    # -------------------------------------------------------------------------
-    # Main build method
+    @staticmethod
+    def pushover_tcl(
+        *,
+        control_node: int,
+        dof: int = 1,
+        max_disp: float = 0.1,
+        num_steps: int = 100,
+        lateral_loads: Optional[Dict[int, tuple]] = None,
+        gravity_loads: Optional[Dict[int, tuple]] = None,
+        gravity_pattern: str = "",
+    ) -> str:
+        """Generate a pushover analysis block for Xara/OpenSeesRT Tcl.
+
+        Returns a Tcl code string suitable for passing as
+        *tcl_suffix* to :meth:`export_model_to_tcl`.
+
+        Args:
+            control_node: Node tag for displacement control.
+            dof: Degree of freedom for control (1=X, 2=Y, 3=Z).
+            max_disp: Target displacement at control node.
+            num_steps: Number of analysis steps.
+            lateral_loads: Dict mapping node_tag -> (fx, fy, fz)
+                for the lateral load pattern.
+            gravity_loads: Dict mapping node_tag -> (fx, fy, fz)
+                for the gravity load pattern (applied first).
+            gravity_pattern: Name for the gravity load pattern
+                (e.g. ``"Gravity"``).  If empty and *gravity_loads*
+                is provided, a plain pattern is used.
+
+        Returns:
+            Tcl commands as a string.
+        """
+        lines: List[str] = []
+
+        # Gravity step
+        if gravity_loads:
+            lines.append("")
+            lines.append("# ── Gravity analysis ──")
+            lines.append(f"pattern Plain 1 \"Linear\" {{")
+            for nid, (fx, fy, fz) in gravity_loads.items():
+                lines.append(f"    load {nid} {fx:g} {fy:g} {fz:g} 0 0 0")
+            lines.append("}")
+            lines.append('loadConst -time 0.0')
+            lines.append("")
+
+        # Lateral pushover
+        if lateral_loads:
+            lines.append("# ── Pushover analysis ──")
+            lines.append("pattern Plain 2 \"Linear\" {")
+            for nid, (fx, fy, fz) in lateral_loads.items():
+                lines.append(f"    load {nid} {fx:g} {fy:g} {fz:g} 0 0 0")
+            lines.append("}")
+
+        lines.extend([
+            "",
+            "system BandGeneral",
+            "numberer Plain",
+            "constraints Plain",
+            "test NormDispIncr 1.0e-6 100",
+            "algorithm Newton",
+            f"integrator DisplacementControl {control_node} {dof} "
+            f"[expr {max_disp:.6g} / {num_steps}]",
+            "analysis Static",
+            "",
+            f"set ok [analyze {num_steps}]",
+            'puts "Pushover analysis: $ok steps completed"',
+            f'puts "Control node {control_node} dof {dof}: [nodeDisp {control_node} {dof}]"',
+            "",
+            "reactions",
+            "# Sum base shear in X direction",
+            "set rx 0",
+            "for {set n 1} {$n <= [llength [getNodeTags]]} {incr n} {",
+            "    set rx [expr $rx + [nodeReaction $n 1]]",
+            "}",
+            'puts "Base shear Rx = $rx"',
+        ])
+
+        return "\n".join(lines)
     # -------------------------------------------------------------------------
     def build(self,
               pattern_scales: Optional[Dict[str, float]] = None,
