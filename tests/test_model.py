@@ -2442,6 +2442,8 @@ class TestBuilderFrameEndOffsets:
             # Element from (0,0,0) → (6,0,0), length 6
             # I-end offset node at: (0 + 0.3, 0, 0) = (0.3, 0, 0)
             # J-end offset node at: (6 - 0.4, 0, 0) = (5.6, 0, 0)
+            assert "1_off_i" in offset_model.nodes, "I-end offset node missing"
+            assert "1_off_j" in offset_model.nodes, "J-end offset node missing"
             for nid, nd in offset_model.nodes.items():
                 if "_off_i" in nid:
                     coords = list(ops.nodeCoord(nd.node_tag))

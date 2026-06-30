@@ -135,7 +135,7 @@ parsing through analysis to visualisation and reporting.
 | **Build with shells** | `build(create_shells=True)` | Also create `ShellMITC4` for area elements (with optional loads-only selection) |
 | **Split elements at joints** | `build()` with `split_elements=True` config | Subdivide frame elements at intermediate nodes (SAP2000 auto-mesh) |
 | **Apply frame end offsets** | `build()` with `frame_end_offsets` data | Rigid zones at joints via stiff link elements |
-| **Mesh area elements** | `_mesh_areas()` (inside build) | Bilinear subdivision of quad areas per SAP2000 auto-mesh settings |
+| **Mesh area elements** | `build()` with `create_shells=True` | Bilinear subdivision of quad areas per SAP2000 auto-mesh settings, triggered automatically during build |
 | **Apply edge constraints** | `apply_edge_constraints()` | Tie fine-mesh nodes to coarse edges via `equationConstraint` |
 | **Detect unconnected edges** | `detect_unconnected_edges()` | Diagnostic: find shell nodes on coarse edges not yet connected |
 | **Record as script** | `RecordingOpenSees` proxy | Capture all `ops.*` calls as standalone Python or Tcl script |
@@ -176,7 +176,7 @@ parsing through analysis to visualisation and reporting.
 
 | Workflow | Entry point | What it does |
 |---|---|---|
-| **Design spectrum** | `_build_spectrum()` | GB 50011 elastic spectrum from intensity, site class, level |
+| **Design spectrum** | `plot_seismic_spectrum()` | GB 50011 elastic spectrum from intensity, site class, level (returns periods, accelerations, and a Matplotlib figure) |
 | **3-level plot** | `plot_seismic_spectrum()` | Frequent / fortification / rare spectra overlay |
 
 ### 7. Reporting
