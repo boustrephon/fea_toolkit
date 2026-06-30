@@ -1,5 +1,6 @@
 """Intermediate data model for SAP2000/ETABS models."""
 
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Tuple
 
@@ -377,15 +378,17 @@ class ConcreteRectangularSection(Section):
             patches.append(
                 ("rect", mat_tag, 1, max(1, nfz - 2), core_y1, core_z2, core_y2, half_b)
             )
-        # Rebar layers
+        # Rebar layers — convert diameter to cross-sectional area
         if self.top_bars and self.top_bar_dia > 0:
+            area_bar = math.pi * (self.top_bar_dia / 2.0) ** 2
             patches.append(
-                ("straight", mat_tag + 2, self.top_bars, self.top_bar_dia,
+                ("straight", mat_tag + 2, self.top_bars, area_bar,
                  half_d - cv, -half_b + cv, half_d - cv, half_b - cv)
             )
         if self.bot_bars and self.bot_bar_dia > 0:
+            area_bar = math.pi * (self.bot_bar_dia / 2.0) ** 2
             patches.append(
-                ("straight", mat_tag + 2, self.bot_bars, self.bot_bar_dia,
+                ("straight", mat_tag + 2, self.bot_bars, area_bar,
                  -half_d + cv, -half_b + cv, -half_d + cv, half_b - cv)
             )
         return patches
@@ -413,11 +416,11 @@ class ConcreteCircularSection(Section):
             ("circ", mat_tag, nfy, nfz, 0.0, 0.0, R_core, R, 0.0, 360.0),
         ]
         if self.bar_count and self.bar_dia > 0:
+            area_bar = math.pi * (self.bar_dia / 2.0) ** 2
             R_rebar = R - self.cover
             patches.append(
-                ("circ", mat_tag + 2, self.bar_count, 1,
-                 0.0, 0.0, R_rebar - self.bar_dia / 2.0,
-                 R_rebar + self.bar_dia / 2.0, 0.0, 360.0)
+                ("circ_layer", mat_tag + 2, self.bar_count, area_bar,
+                 0.0, 0.0, R_rebar, 0.0, 360.0)
             )
         return patches
 
