@@ -139,6 +139,15 @@ class OpenSeesBuilder:
         if selection is not None:
             self._area_selection = selection
 
+        # Reset per-build state so stale values from a previous build()
+        # don't carry over (e.g. split_elements from a prior True→False
+        # config change or _offset_rigid_links after frame_end_offsets
+        # was cleared).
+        self.split_elements = None
+        self.split_assignments = None
+        self.split_dist_loads = None
+        self._offset_rigid_links = []
+
         create_shells = self.config.get('create_shells', False)
         if self.config['verbose']:
             print("Building OpenSees model...")
@@ -1829,10 +1838,16 @@ class OpenSeesBuilder:
 
             sec_tag = self._shell_sec_tags[sec_name]
 
-            # Determine a unique element tag — base on actual frame element
-            # tags so shells never collide with frames.
+            # Determine a unique element tag — base on the same active
+            # frame collection that _create_elements will use (split
+            # children if available, otherwise originals).
+            active_frames = (
+                self.split_elements
+                if self.split_elements is not None
+                else self.model.frame_elements
+            )
             max_frame_tag = max(
-                (e.elem_tag for e in self.model.frame_elements.values()
+                (e.elem_tag for e in active_frames.values()
                  if not getattr(e, 'inactive', False)),
                 default=0,
             )
