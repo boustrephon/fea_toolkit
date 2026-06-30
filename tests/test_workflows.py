@@ -43,26 +43,42 @@ class TestBuildWorkflow:
     """Verify model building completes and produces expected structure."""
 
     def test_build_returns_none(self, sample_builder):
-        """build() should complete without error."""
+        """Builder can construct a complete OpenSees model from SAPModelData.
+
+        Exercises: OpenSeesBuilder.build() with elastic sections, no shells.
+        Verifies the build completes without exceptions.
+        """
         sample_builder.build()
         # If we get here without exception, the build succeeded.
         assert True
 
     def test_build_creates_frame_tag_map(self, sample_builder):
-        """After build, frame_tag_map should have the expected entries."""
+        """Build produces an element-tag mapping for load application.
+
+        Exercises: OpenSeesBuilder.build() → frame_tag_map.
+        Verifies the single frame element is assigned the expected tag.
+        """
         sample_builder.build()
         assert "1" in sample_builder.frame_tag_map
         assert sample_builder.frame_tag_map["1"] == 1
 
     def test_build_sets_load_totals(self, sample_builder):
-        """After build, load_totals should contain applied pattern totals."""
+        """Build accumulates applied load totals per pattern.
+
+        Exercises: OpenSeesBuilder.build() → load_totals.
+        Verifies at least one load pattern was applied and tracked.
+        """
         sample_builder.build()
         assert hasattr(sample_builder, 'load_totals')
         # At least one load pattern should have been applied
         assert len(sample_builder.load_totals) > 0
 
     def test_build_with_split_elements(self, sample_md):
-        """Build with element splitting enabled."""
+        """Build with element splitting at joints.
+
+        Exercises: OpenSeesBuilder.build() with split_elements=True.
+        Verifies split_elements attribute is populated after build.
+        """
         from fea_toolkit.opensees.builder import OpenSeesBuilder
         b = OpenSeesBuilder(sample_md, {
             'element_type': 'elasticBeamColumn',
@@ -76,7 +92,12 @@ class TestBuildWorkflow:
             ops.wipe()
 
     def test_rebuild_preserves_geometry(self, sample_md):
-        """Rebuilding with different pattern_scales should not error."""
+        """Rebuilding with different pattern scales does not corrupt the model.
+
+        Exercises: build() → build(pattern_scales=...) — the second call
+        restores pristine geometry from snapshots before rebuilding.
+        Verifies no exception is raised.
+        """
         from fea_toolkit.opensees.builder import OpenSeesBuilder
         b = OpenSeesBuilder(sample_md, {
             'element_type': 'elasticBeamColumn',
@@ -100,7 +121,11 @@ class TestStaticAnalysisWorkflow:
     """End-to-end linear static analysis."""
 
     def test_static_analysis_returns_dict(self, sample_builder):
-        """run_static_analysis() should return a dict with expected keys."""
+        """Static analysis produces a result dict with nodal data and reactions.
+
+        Exercises: build() → run_static_analysis(extract_reactions=True).
+        Verifies nodal_displacements and summed_reactions keys are present.
+        """
         try:
             sample_builder.build()
             results = sample_builder.run_static_analysis(extract_reactions=True)
@@ -112,7 +137,12 @@ class TestStaticAnalysisWorkflow:
             ops.wipe()
 
     def test_static_analysis_displacements(self, sample_builder):
-        """Displacements should be non-zero for the loaded cantilever."""
+        """Cantilever tip displaces under lateral wind load.
+
+        Exercises: build() → run_static_analysis(pattern_scales={"WIND": 1.0}).
+        Verifies the top node (tag 2) has non-zero X-displacement under
+        a uniform X-direction distributed load.
+        """
         try:
             sample_builder.build()
             results = sample_builder.run_static_analysis(
@@ -129,7 +159,11 @@ class TestStaticAnalysisWorkflow:
             ops.wipe()
 
     def test_static_element_forces(self, sample_builder):
-        """Extracting element forces should work after analysis."""
+        """Element end-forces can be extracted after static analysis.
+
+        Exercises: build() → run_static_analysis() → extract_static_element_forces().
+        Verifies forces dict contains Fx and Mz entries for each element.
+        """
         try:
             sample_builder.build()
             sample_builder.run_static_analysis(
@@ -147,7 +181,11 @@ class TestStaticAnalysisWorkflow:
             ops.wipe()
 
     def test_static_gravity_vs_pattern(self, sample_builder):
-        """Run with gravity only, then with combined patterns."""
+        """Multiple static analyses can be run sequentially with different load sets.
+
+        Exercises: run_static_analysis with gravity only, then with gravity+wind.
+        Verifies both return non-empty results.
+        """
         try:
             sample_builder.build()
             # Gravity only
@@ -164,7 +202,11 @@ class TestStaticAnalysisWorkflow:
             ops.wipe()
 
     def test_static_reactions_equilibrium(self, sample_builder):
-        """Summed reactions should approximately balance applied loads."""
+        """Reactions at restrained nodes balance applied gravity loads.
+
+        Exercises: build() → run_static_analysis(extract_reactions=True).
+        Verifies the summed vertical reaction (Fz) is non-zero under dead load.
+        """
         try:
             sample_builder.build()
             results = sample_builder.run_static_analysis(
@@ -187,7 +229,12 @@ class TestModalAnalysisWorkflow:
     """End-to-end eigenvalue / modal analysis."""
 
     def test_modal_analysis_returns_keys(self, sample_builder):
-        """run_modal_analysis() should return the expected result dict."""
+        """Modal analysis returns periods, eigenvalues, and frequencies.
+
+        Exercises: build() → compute_seismic_masses() → run_modal_analysis().
+        Verifies result dict contains periods, eigenvalues, frequencies arrays
+        with the requested number of modes.
+        """
         try:
             sample_builder.build()
             sample_builder.compute_seismic_masses(g=9.81)
@@ -201,7 +248,11 @@ class TestModalAnalysisWorkflow:
             ops.wipe()
 
     def test_modal_first_period_positive(self, sample_builder):
-        """Fundamental period should be positive and reasonable."""
+        """Fundamental period of a 10 m steel cantilever is in a reasonable range.
+
+        Exercises: run_modal_analysis() → periods[0].
+        Verifies T1 is between 0.01 s and 10.0 s (physically plausible).
+        """
         try:
             sample_builder.build()
             sample_builder.compute_seismic_masses(g=9.81)
@@ -213,7 +264,11 @@ class TestModalAnalysisWorkflow:
             ops.wipe()
 
     def test_extract_mode_shapes(self, sample_builder):
-        """extract_mode_shapes() should return a dict with node displacements."""
+        """Mode shapes can be extracted after eigenvalue analysis.
+
+        Exercises: run_modal_analysis() → extract_mode_shapes().
+        Verifies the result is a non-empty dict keyed by mode index.
+        """
         try:
             sample_builder.build()
             sample_builder.compute_seismic_masses(g=9.81)
@@ -234,7 +289,13 @@ class TestPushoverWorkflow:
     """End-to-end non-linear pushover analysis (truss-brace approach)."""
 
     def test_pushover_uniform_returns_keys(self, sample_builder):
-        """run_pushover_analysis() should return expected keys."""
+        """Uniform-mass-proportional pushover produces a capacity curve.
+
+        Exercises: build() → compute_seismic_masses() → run_pushover_analysis()
+        with lateral_load_type='uniform'.
+        Verifies result dict contains control_disp, base_shear, and step arrays
+        with more than one entry.
+        """
         try:
             sample_builder.build()
             sample_builder.compute_seismic_masses(g=9.81)
@@ -256,7 +317,11 @@ class TestPushoverWorkflow:
             ops.wipe()
 
     def test_pushover_triangular_returns_keys(self, sample_builder):
-        """Triangular lateral pattern produces a valid result."""
+        """Triangular (ELF) pushover produces a valid capacity curve.
+
+        Exercises: run_pushover_analysis() with lateral_load_type='triangular'.
+        Verifies control_disp array has more than one entry.
+        """
         try:
             sample_builder.build()
             sample_builder.compute_seismic_masses(g=9.81)
@@ -274,7 +339,12 @@ class TestPushoverWorkflow:
             ops.wipe()
 
     def test_pushover_pattern_returns_keys(self, sample_builder):
-        """Pattern-based lateral load (SAP2000 WIND) should work."""
+        """SAP2000-pattern-based pushover uses existing distributed loads.
+
+        Exercises: run_pushover_analysis() with lateral_load_type='pattern'
+        referencing the WIND load pattern.
+        Verifies control_disp array has more than one entry.
+        """
         try:
             sample_builder.build()
             results = sample_builder.run_pushover_analysis(
@@ -308,7 +378,12 @@ class TestResponseSpectrumWorkflow:
         return periods, accels
 
     def test_rs_analysis_returns_dict(self, sample_builder, spectrum):
-        """run_response_spectrum_analysis() should complete."""
+        """CQC response-spectrum analysis computes combined base shear.
+
+        Exercises: build() → compute_seismic_masses() → run_modal_analysis() →
+        run_response_spectrum_analysis().
+        Verifies result dict contains base_shear_cqc.
+        """
         try:
             sample_builder.build()
             sample_builder.compute_seismic_masses(g=9.81)
@@ -328,7 +403,12 @@ class TestResponseSpectrumWorkflow:
             ops.wipe()
 
     def test_element_rs_forces(self, sample_builder, spectrum):
-        """extract_element_rs_forces() after RS analysis."""
+        """Element-level RS forces are available after spectrum analysis.
+
+        Exercises: run_response_spectrum_analysis() →
+        extract_element_rs_forces().
+        Verifies result dict contains element_results list.
+        """
         try:
             sample_builder.build()
             sample_builder.compute_seismic_masses(g=9.81)
@@ -363,7 +443,12 @@ class TestExportWorkflow:
     """End-to-end NPZ export."""
 
     def test_export_to_npz(self, sample_builder, tmp_path):
-        """export_results_to_npz() should create a valid .npz file."""
+        """Static results can be exported to compressed NumPy archive.
+
+        Exercises: build() → run_static_analysis() → export_results_to_npz().
+        Verifies the .npz file contains sub_elem_tags, node_tags, and
+        force_unit arrays.
+        """
         try:
             sample_builder.build()
             results = sample_builder.run_static_analysis(
@@ -382,7 +467,11 @@ class TestExportWorkflow:
             ops.wipe()
 
     def test_export_with_section_responses(self, sample_builder, tmp_path):
-        """Export with section_responses flag should not error."""
+        """NPZ export accepts optional section-response data.
+
+        Exercises: export_results_to_npz() with section_responses={"section_forces": True}.
+        Verifies the file is created and can be loaded.
+        """
         try:
             sample_builder.build()
             results = sample_builder.run_static_analysis(
@@ -414,7 +503,11 @@ class TestCSMWorkflow:
         return periods, accels
 
     def test_pushover_to_adrs(self, sample_builder):
-        """pushover_to_adrs() returns ADRS dict with expected keys."""
+        """Pushover curve can be converted to ADRS format.
+
+        Exercises: run_pushover_analysis() → pushover_to_adrs().
+        Verifies the ADRS dict contains S_a, S_d, and Gamma arrays.
+        """
         try:
             sample_builder.build()
             sample_builder.compute_seismic_masses(g=9.81)
@@ -440,7 +533,12 @@ class TestCSMWorkflow:
             ops.wipe()
 
     def test_compute_performance_point(self, sample_builder, spectrum):
-        """compute_performance_point() runs and returns a result dict."""
+        """CSM performance point can be computed from pushover + spectrum.
+
+        Exercises: pushover_to_adrs() → compute_performance_point() with
+        a user-supplied elastic spectrum.
+        Verifies the result dict contains S_dp and S_ap.
+        """
         try:
             sample_builder.build()
             sample_builder.compute_seismic_masses(g=9.81)
@@ -478,7 +576,11 @@ class TestBucklingCheckWorkflow:
     """End-to-end Euler buckling check."""
 
     def test_check_brace_buckling_no_braces(self, sample_builder):
-        """check_brace_buckling() with no brace IDs returns empty dict."""
+        """Buckling check with no brace selection returns empty.
+
+        Exercises: build() → check_brace_buckling(brace_ids=set()).
+        Verifies the result is an empty dict.
+        """
         try:
             sample_builder.build()
             result = sample_builder.check_brace_buckling(
@@ -489,7 +591,11 @@ class TestBucklingCheckWorkflow:
             ops.wipe()
 
     def test_check_brace_buckling_with_ids(self, sample_builder):
-        """Check buckling for the single frame element in the sample."""
+        """Euler buckling load is computed for a given frame element.
+
+        Exercises: build() → check_brace_buckling(brace_ids={"1"}).
+        Verifies P_cr is positive for the sample cantilever.
+        """
         try:
             sample_builder.build()
             result = sample_builder.check_brace_buckling(
