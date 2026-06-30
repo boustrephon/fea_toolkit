@@ -546,7 +546,7 @@ The following items are the highest-impact improvements identified during a code
 ## OpenSees Verification
 
 * [OpenSeesDigital / Portwood](https://openseesdigital.com/verifications/)
-* [ASDEA]()
+* [ASDEA](https://asdea.eu/en/home/) ([Scientific Toolkit for Opensees, STKO](https://asdea.eu/hardware/monstr-stko/))
 
 ## OpenSees Models
 

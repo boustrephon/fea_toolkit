@@ -457,6 +457,7 @@ class OpenSeesBuilder:
         later created as stiff beam elements in ``_create_elements``.
         """
         from ..model.geometry import apply_frame_end_offsets
+        from ..model.sap_data import FrameEndOffset
 
         # Operate on the same element collection that _create_elements will
         # consume — split elements if available, otherwise originals.
@@ -466,6 +467,33 @@ class OpenSeesBuilder:
         else:
             elements = self.model.frame_elements
             assignments = self.model.frame_assignments
+
+        # Resolve offsets keyed by original element IDs onto the active
+        # element collection.  When the original element has been split,
+        # its offset applies only to the first child (I-end) and last
+        # child (J-end); middle children get no offset.
+        resolved_offsets: Dict[str, FrameEndOffset] = {}
+        for eid, off in self.model.frame_end_offsets.items():
+            elem = elements.get(eid)
+            if elem is None:
+                continue
+            if getattr(elem, 'inactive', False) and hasattr(elem, 'child_ids') and elem.child_ids:
+                # Parent was split — apply offsets to end children.
+                child_ids = elem.child_ids
+                # I-end offset → first child
+                first_child = elements.get(child_ids[0])
+                if first_child is not None and off.end_i > 0:
+                    resolved_offsets[child_ids[0]] = FrameEndOffset(
+                        end_i=off.end_i, end_j=0.0,
+                    )
+                # J-end offset → last child
+                last_child = elements.get(child_ids[-1])
+                if last_child is not None and off.end_j > 0:
+                    resolved_offsets[child_ids[-1]] = FrameEndOffset(
+                        end_i=0.0, end_j=off.end_j,
+                    )
+            else:
+                resolved_offsets[eid] = off
 
         max_elem_tag = max(
             (e.elem_tag for e in elements.values()), default=0
@@ -479,7 +507,7 @@ class OpenSeesBuilder:
 
         elements, assignments, nodes, next_tag, rigid_links = apply_frame_end_offsets(
             elements, assignments, nodes,
-            self.model.frame_end_offsets,
+            resolved_offsets,
             next_tag=next_tag,
         )
         self._offset_rigid_links = rigid_links
@@ -627,7 +655,11 @@ class OpenSeesBuilder:
                 max_ops_tag = max(ops.getEleTags(), default=0)
             except Exception:
                 max_ops_tag = 0
-            next_tag = max(max_elem_tag, max_node_tag, max_ops_tag) + 1
+            max_rigid_tag = max(
+                (r[3] for r in self._offset_rigid_links),
+                default=0,
+            )
+            next_tag = max(max_elem_tag, max_node_tag, max_ops_tag, max_rigid_tag) + 1
             from ..model.geometry import subdivide_elements
             elements, assignments, nodes, next_tag, rigid_links = subdivide_elements(
                 elements, assignments, nodes,
@@ -1662,6 +1694,58 @@ class OpenSeesBuilder:
                 if area_elem is None:
                     continue
                 if getattr(area_elem, 'inactive', False):
+                    # Parent was meshed — apply gravity load to each
+                    # sub-element instead so the load is not lost.
+                    sub_ids = sorted(
+                        aid for aid in self.model.area_elements
+                        if aid.startswith(f"{agl.area_id}_sub_")
+                    )
+                    if not sub_ids:
+                        continue
+                    for sub_id in sub_ids:
+                        sub_elem = self.model.area_elements[sub_id]
+                        sec_name = self.model.area_assignments.get(sub_id)
+                        if not sec_name:
+                            continue
+                        sec = self.model.sections.get(sec_name)
+                        if sec is None:
+                            continue
+                        mat = self.model.materials.get(sec.material)
+                        if mat is None or abs(mat.unit_weight) < 1e-12:
+                            continue
+                        thickness = sub_elem.thickness
+                        if thickness < 1e-12:
+                            continue
+                        pts = []
+                        for nid in sub_elem.node_ids:
+                            nd = self.model.nodes.get(nid)
+                            if nd is None:
+                                break
+                            pts.append((nd.x, nd.y, nd.z))
+                        if len(pts) < 3:
+                            continue
+                        nx = ny = nz = 0.0
+                        for i in range(len(pts)):
+                            x1, y1, z1 = pts[i]
+                            x2, y2, z2 = pts[(i + 1) % len(pts)]
+                            nx += (y1 - y2) * (z1 + z2)
+                            ny += (z1 - z2) * (x1 + x2)
+                            nz += (x1 - x2) * (y1 + y2)
+                        area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                        if area_mag < 1e-12:
+                            continue
+                        sw_per_area = thickness * mat.unit_weight
+                        total_fx = sw_per_area * area_mag * agl.multiplier_x * scale
+                        total_fy = sw_per_area * area_mag * agl.multiplier_y * scale
+                        total_fz = sw_per_area * area_mag * agl.multiplier_z * scale
+                        n_corners = len(sub_elem.node_ids)
+                        for nid in sub_elem.node_ids:
+                            tag = self._node_tag_from_id(nid)
+                            if tag is not None:
+                                _add_gravity(pname, tag,
+                                             total_fx / n_corners,
+                                             total_fy / n_corners,
+                                             total_fz / n_corners)
                     continue
 
                 # Get section + material for density
@@ -3348,6 +3432,8 @@ class OpenSeesBuilder:
                         area_elem = self.model.area_elements.get(agl.area_id)
                         if area_elem is None:
                             continue
+                        if getattr(area_elem, 'inactive', False):
+                            continue
                         sec_name = self.model.area_assignments.get(agl.area_id)
                         if not sec_name:
                             continue
@@ -3395,6 +3481,8 @@ class OpenSeesBuilder:
                             continue
                         area_elem = self.model.area_elements.get(aul.area_id)
                         if area_elem is None:
+                            continue
+                        if getattr(area_elem, 'inactive', False):
                             continue
                         # Polygon area
                         pts = []

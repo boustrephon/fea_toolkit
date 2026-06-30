@@ -2484,10 +2484,12 @@ class TestBuilderFrameEndOffsets:
         b = OpenSeesBuilder(md, {
             "verbose": False, "use_elastic_sections": True,
         })
-        b.build()
-        assert len(b._offset_rigid_links) == 0
-        import openseespy.opensees as ops
-        ops.wipe()
+        try:
+            b.build()
+            assert len(b._offset_rigid_links) == 0
+        finally:
+            import openseespy.opensees as ops
+            ops.wipe()
 
 
 class TestBuilderAreaMeshing:
@@ -2521,13 +2523,15 @@ class TestBuilderAreaMeshing:
         b = OpenSeesBuilder(mesh_model, {
             "verbose": False, "create_shells": True,
         })
-        b.build()
-        # Original area should be inactive
-        assert mesh_model.area_elements["1"].inactive is True
-        # Sub-areas should exist
-        sub_ids = [aid for aid in mesh_model.area_elements if "_sub_" in aid]
-        assert len(sub_ids) >= 2
-        import openseespy.opensees as ops; ops.wipe()
+        try:
+            b.build()
+            # Original area should be inactive
+            assert mesh_model.area_elements["1"].inactive is True
+            # Sub-areas should exist
+            sub_ids = [aid for aid in mesh_model.area_elements if "_sub_" in aid]
+            assert len(sub_ids) >= 2
+        finally:
+            import openseespy.opensees as ops; ops.wipe()
 
     def test_mesh_creates_opensees_nodes(self, mesh_model):
         """Mesh nodes are created in OpenSees memory."""
@@ -2536,15 +2540,17 @@ class TestBuilderAreaMeshing:
         b = OpenSeesBuilder(mesh_model, {
             "verbose": False, "create_shells": True,
         })
-        b.build()
-        # Find mesh node tags
-        mesh_tags = [nd.node_tag for nid, nd in mesh_model.nodes.items()
-                     if "_mesh_" in nid]
-        assert len(mesh_tags) > 0
-        for tag in mesh_tags:
-            coords = list(ops.nodeCoord(tag))
-            assert len(coords) == 3
-        ops.wipe()
+        try:
+            b.build()
+            # Find mesh node tags
+            mesh_tags = [nd.node_tag for nid, nd in mesh_model.nodes.items()
+                         if "_mesh_" in nid]
+            assert len(mesh_tags) > 0
+            for tag in mesh_tags:
+                coords = list(ops.nodeCoord(tag))
+                assert len(coords) == 3
+        finally:
+            ops.wipe()
 
     def test_no_mesh_no_change(self):
         """Without mesh settings, area elements are unchanged."""
@@ -2570,6 +2576,8 @@ class TestBuilderAreaMeshing:
         b = OpenSeesBuilder(md, {
             "verbose": False, "create_shells": True,
         })
-        b.build()
-        assert md.area_elements["1"].inactive is False
-        import openseespy.opensees as ops; ops.wipe()
+        try:
+            b.build()
+            assert md.area_elements["1"].inactive is False
+        finally:
+            import openseespy.opensees as ops; ops.wipe()
