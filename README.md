@@ -112,6 +112,95 @@ The goal is to create a Python package `fea_toolkit` that:
 - **Spectrum damping fix** – The GB50011 spectrum now applies the damping reduction factor `η₂` to the ascending branch (T ≤ 0.1s) as well as the plateau and descending branch, matching the reference `GB_spectrum()` function.
 - **SAP2000 data extraction** – The parser now extracts: load case definitions, response spectrum case data (general + load assignments), modal case data, AUTO seismic/wind table data, and material damping parameters.
 
+---
+
+## Available Workflows
+
+The toolkit exposes a set of workflows covering the full pipeline from model
+parsing through analysis to visualisation and reporting.
+
+### 1. Data Ingestion
+
+| Workflow | Entry point | What it does |
+|---|---|---|
+| **Parse SAP2000 `.s2k`** | `SAP2000Parser.parse()` → `get_model_data()` | Read SAP2000 text export into structured model data |
+| **Save/load JSON cache** | `.to_json()` / `.from_json()` | Serialise raw parsed tables for reuse without re-parsing |
+| **Enrich from catalogue** | `SectionLibrary.enrich_section()` | Populate section dimensions from a manufacturer database |
+
+### 2. Model Building
+
+| Workflow | Entry point | What it does |
+|---|---|---|
+| **Build OpenSees model** | `OpenSeesBuilder.build()` | Construct nodes, restraints, materials, sections, elements, loads |
+| **Build with shells** | `build(create_shells=True)` | Also create `ShellMITC4` for area elements (with optional loads-only selection) |
+| **Split elements at joints** | `build()` with `split_elements=True` config | Subdivide frame elements at intermediate nodes (SAP2000 auto-mesh) |
+| **Apply frame end offsets** | `build()` with `frame_end_offsets` data | Rigid zones at joints via stiff link elements |
+| **Mesh area elements** | `_mesh_areas()` (inside build) | Bilinear subdivision of quad areas per SAP2000 auto-mesh settings |
+| **Apply edge constraints** | `apply_edge_constraints()` | Tie fine-mesh nodes to coarse edges via `equationConstraint` |
+| **Detect unconnected edges** | `detect_unconnected_edges()` | Diagnostic: find shell nodes on coarse edges not yet connected |
+| **Record as script** | `RecordingOpenSees` proxy | Capture all `ops.*` calls as standalone Python or Tcl script |
+
+### 3. Analysis Types
+
+| Workflow | Entry point | What it does |
+|---|---|---|
+| **Linear static** | `run_static_analysis()` | Nodal displacements, reactions, element forces |
+| **Modal (eigenvalue)** | `run_modal_analysis()` | Periods, frequencies, mass participation, mode shapes |
+| **Response spectrum (CQC)** | `run_response_spectrum_analysis()` | CQC-combined base shear, moment, element RS forces |
+| **Pushover (non-linear)** | `run_pushover_analysis()` | Gravity → displacement-controlled lateral push with fiber sections |
+| **CSM performance point** | `compute_performance_point()` | ATC-40 capacity spectrum method |
+
+### 4. Pushover Sub-workflows
+
+| Workflow | Entry point | What it does |
+|---|---|---|
+| **Brace buckling check** | `check_brace_buckling()` | Euler $P_{cr}$ + demand/capacity ratios |
+| **Set brace subdivision** | `set_brace_selection()` | Mark braces for imperfection + offset (Approach A) |
+| **ADRS conversion** | `pushover_to_adrs()` | Convert capacity curve to acceleration-displacement format |
+| **Capacity spectrum plot** | `plot_capacity_spectrum()` | ADRS plot with bilinear yield and performance point |
+
+### 5. Export & Visualisation
+
+| Workflow | Entry point | What it does |
+|---|---|---|
+| **Export to NPZ** | `export_results_to_npz()` | Compressed NumPy archive for Rhino consumption |
+| **3D model (PyVista)** | `plot_model_3d()` | Interactive structural model view |
+| **Moment/force flags (PyVista)** | `plot_static_moment_3d()` | Flag or tube diagrams in 3D |
+| **Pushover curves** | `plot_pushover_curves()` | 4-direction capacity curve overlay |
+| **CSM 4-panel** | `plot_csm_4panel()` | 2×2 ADRS plots per push direction |
+| **Rhino import (centreline)** | `RhinoImporter.run(create_centreline=True)` | Joint points, frame lines, shell Breps with SAP metadata |
+| **Rhino import (extrusion)** | `RhinoImporter.run(create_extrusions=True)` | 3D solids by sweeping section profiles |
+| **Rhino colour from NPZ** | `colour_from_npz()` | Colour frame objects by analysis results |
+
+### 6. GB 50011 Seismic Spectrum
+
+| Workflow | Entry point | What it does |
+|---|---|---|
+| **Design spectrum** | `_build_spectrum()` | GB 50011 elastic spectrum from intensity, site class, level |
+| **3-level plot** | `plot_seismic_spectrum()` | Frequent / fortification / rare spectra overlay |
+
+### 7. Reporting
+
+| Workflow | Entry point | What it does |
+|---|---|---|
+| **Model summaries** | `report.py` functions | Bounding box, materials, sections, masses, load totals |
+| **Modal table (6-DOF)** | `modal_table_enhanced()` | Periods + rotational mass participation |
+| **Brace buckling table** | `brace_buckling_check()` | $P_{cr}$, slenderness, D/C ratios |
+| **Full evaluation report** | `local/pumphouse_report.qmd` | Quarto notebook: parse → modal → RS → pushover → CSM |
+
+### 8. End-to-End Scripts
+
+| Script | Purpose |
+|---|---|
+| `examples/basic_usage.py` | File chooser → parse → enrich → build → static analysis |
+| `examples/static_analysis.py` | Parse → build → static → 2D/3D force diagrams |
+| `examples/modal_rs_analysis.py` | Parse → build → masses → modal → GB 50011 RS → element RS forces |
+| `examples/pushover_analysis.py` | Parse → fiber build → pushover → deformed shape plots |
+| `local/pumphouse_csm.py` | Full pipeline: parse → buckling → modal → RS → pushover 4-dir → CSM → NPZ |
+| `local/detect_edges.py` | Standalone unconnected shell edge detection |
+
+---
+
 #### 4. Distributed Load Support by Element Type
 
 Not all OpenSees element types support the same `eleLoad -type -beamUniform` argument forms. The builder handles this automatically:
@@ -451,3 +540,17 @@ The following items are the highest-impact improvements identified during a code
 ### Completed
 
 - ✅ **Deleted stale files**: `src/fea_toolkit/opensees/builder_ss.py` and `src/fea_toolkit/model/geometry_ss.py` — old versions, never imported anywhere.
+
+# Reference Materials
+
+## OpenSees Verification
+
+* [OpenSeesDigital / Portwood](https://openseesdigital.com/verifications/)
+* [ASDEA]()
+
+## OpenSees Models
+
+* [OpenSeesPy Examples](https://openseespydoc.readthedocs.io/en/latest/src/examples.html)
+* [Tutorial](https://github.com/cslotboom/OpenSeesPyTutorials)
+* [AmirHosseinNamadchi - OpenSeesPy-Examples](https://github.com/AmirHosseinNamadchi/OpenSeesPy-Examples)
+* [Brainery Examples (Silvia Mazzoni)](https://github.com/silviamazzoni/OpenSeesPy_ExamplesManual/)
