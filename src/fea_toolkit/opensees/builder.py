@@ -8,6 +8,7 @@
 
 from typing import Dict, Any, Optional, Tuple, List
 from pathlib import Path
+import copy
 import json
 import math
 import numpy as np
@@ -71,6 +72,10 @@ class OpenSeesBuilder:
         self.split_dist_loads: Optional[List[FrameDistributedLoad]] = None
         self._has_edge_constraints: bool = False
         self._offset_rigid_links: List[tuple] = []
+        # Snapshot pristine frame data so rebuilds always start from the
+        # original geometry (before any offset/split mutations).
+        self._original_frame_elements = copy.deepcopy(model_data.frame_elements)
+        self._original_frame_assignments = copy.deepcopy(model_data.frame_assignments)
         # self._transf_tags: Dict[int, int] = {}   # elem_id -> transf_tag
 
     def _set_defaults(self) -> None:
@@ -147,6 +152,11 @@ class OpenSeesBuilder:
         self.split_assignments = None
         self.split_dist_loads = None
         self._offset_rigid_links = []
+
+        # Restore pristine frame data so rebuilds always start from the
+        # original geometry (before any offset/split mutations).
+        self.model.frame_elements = copy.deepcopy(self._original_frame_elements)
+        self.model.frame_assignments = copy.deepcopy(self._original_frame_assignments)
 
         create_shells = self.config.get('create_shells', False)
         if self.config['verbose']:
@@ -1802,6 +1812,10 @@ class OpenSeesBuilder:
             # Skip areas in the loads-only selection
             if aid in sel_area_ids:
                 continue
+            # Skip inactive (meshed) originals — their sub-elements are
+            # already in area_elements and will be processed in the same loop.
+            if getattr(area, 'inactive', False):
+                continue
 
             nids = area.node_ids
             if len(nids) < 3:
@@ -1840,7 +1854,9 @@ class OpenSeesBuilder:
 
             # Determine a unique element tag — base on the same active
             # frame collection that _create_elements will use (split
-            # children if available, otherwise originals).
+            # children if available, otherwise originals), and also
+            # account for reserved rigid-link tags from frame end
+            # offsets (already populated in _offset_rigid_links).
             active_frames = (
                 self.split_elements
                 if self.split_elements is not None
@@ -1851,7 +1867,11 @@ class OpenSeesBuilder:
                  if not getattr(e, 'inactive', False)),
                 default=0,
             )
-            elem_tag = max_frame_tag + shell_count + 1
+            max_rigid_tag = max(
+                (r[3] for r in self._offset_rigid_links),
+                default=0,
+            )
+            elem_tag = max(max_frame_tag, max_rigid_tag) + shell_count + 1
 
             # Create ShellMITC4 (quad) or ShellDKGT (tri) element
             if len(nids) == 4:
