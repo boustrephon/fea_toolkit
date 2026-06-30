@@ -147,6 +147,14 @@ def remesh_areas(
             if len(pts) != 4:
                 continue
 
+            # Seed coordinate registry from this area's corner nodes,
+            # plus any frame-constraint endpoint nodes already in the
+            # registry from previous areas (so shared edges stay connected).
+            for nid in nids:
+                nd = nodes.get(nid)
+                if nd is not None:
+                    _coord_to_id[_coord_key(nd.x, nd.y, nd.z)] = nid
+
             # Each area gets its own Gmsh model so node tags don't
             # accumulate across iterations.
             gmsh.model.add(f"area_{aid}")
