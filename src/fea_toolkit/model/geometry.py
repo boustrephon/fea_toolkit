@@ -1249,13 +1249,6 @@ def mesh_area_elements(
         ``(area_elements, area_assignments, nodes, next_tag)`` with
         subdivided areas added and original areas marked inactive.
     """
-    # Coordinate-based node registry so adjacent meshed areas share
-    # edge/interior nodes at the same location (rounded to 1 mm).
-    _coord_key = lambda x, y, z: (round(x, 6), round(y, 6), round(z, 6))
-    _coord_to_id: Dict[tuple, str] = {}
-    for nid, nd in nodes.items():
-        _coord_to_id[_coord_key(nd.x, nd.y, nd.z)] = nid
-
     for aid, mesh in area_mesh.items():
         if not mesh.auto_mesh or mesh.max_size <= 0.0:
             continue
@@ -1279,6 +1272,25 @@ def mesh_area_elements(
             corners.append(np.array([nd.x, nd.y, nd.z], dtype=float))
         if len(corners) != 4:
             continue
+
+        # Normalise to CCW winding so all sub-cells have consistent
+        # shell normals (OpenSees ShellMITC4 expects CCW ordering).
+        edge01 = corners[1] - corners[0]
+        edge13 = corners[3] - corners[1]
+        signed_z = edge01[0] * edge13[1] - edge01[1] * edge13[0]
+        if signed_z < 0:  # clockwise → reverse
+            corner_ids = [corner_ids[0], corner_ids[3], corner_ids[2], corner_ids[1]]
+            corners = [corners[0], corners[3], corners[2], corners[1]]
+
+        # Mesh-local node registry — only seed with this area's corners
+        # to avoid snapping to disconnected coincident nodes from other
+        # parts of the model.
+        _coord_key = lambda x, y, z: (round(x, 6), round(y, 6), round(z, 6))
+        _coord_to_id: Dict[tuple, str] = {}
+        for nid in corner_ids:
+            nd = nodes.get(nid)
+            if nd is not None:
+                _coord_to_id[_coord_key(nd.x, nd.y, nd.z)] = nid
 
         # Determine subdivision counts from max_size
         def _edge_length(a, b):
