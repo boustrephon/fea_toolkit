@@ -207,6 +207,7 @@ class OpenSeesBuilder:
             self._create_shell_elements(loads_only_selection=selection)
 
         self._create_elements()
+        self._create_lumped_hinges()
         self._create_loads(pattern_scales=pattern_scales)
         self._setup_recorders()  # optional
 
@@ -429,13 +430,46 @@ class OpenSeesBuilder:
 
             # ── Create uniaxial material for fibers ──
             mat_tag = tag  # same tag as the section for simplicity
-            if mat is not None and mat.type.lower() == 'steel':
+            from ..model.sap_data import (
+                ConcreteRectangularSection, ConcreteCircularSection,
+            )
+            is_concrete = isinstance(sec, (ConcreteRectangularSection, ConcreteCircularSection))
+
+            if is_concrete:
+                # Concrete section: need 3 materials (unconfined, confined, steel)
+                # mat_tag     → unconfined concrete
+                # mat_tag + 1 → confined concrete
+                # mat_tag + 2 → steel rebar
+                if mat is not None and mat.type.lower() == 'concrete':
+                    Fc = mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7
+                    Ec = mat.E_mod if mat.E_mod > 0 else 2.5e10
+                    epsc = mat.eFc if mat.eFc and mat.eFc > 0 else -0.002
+                    # Unconfined cover
+                    ops.uniaxialMaterial('Concrete01', mat_tag,
+                                         -Fc, epsc, -0.2 * Fc, -0.006)
+                    # Confined core (Mander: fcc ≈ 1.3*Fc, epscc ≈ 0.005)
+                    fcc = Fc * 1.3
+                    epscc = -0.005
+                    ops.uniaxialMaterial('Concrete01', mat_tag + 1,
+                                         -fcc, epscc, -0.2 * fcc, -0.02)
+                    # Steel rebar
+                    Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
+                    Es = 2.0e11
+                    ops.uniaxialMaterial('Steel02', mat_tag + 2, Fy, Es, 0.01)
+                else:
+                    # Fallback if material type is missing
+                    ops.uniaxialMaterial('Concrete01', mat_tag, -3.0e7, -0.002,
+                                         -6.0e6, -0.006)
+                    ops.uniaxialMaterial('Concrete01', mat_tag + 1,
+                                         -3.9e7, -0.005, -7.8e6, -0.02)
+                    ops.uniaxialMaterial('Steel02', mat_tag + 2, 4.0e8, 2.0e11, 0.01)
+            elif mat is not None and mat.type.lower() == 'steel':
                 Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
                 E = mat.E_mod if mat.E_mod > 0 else 2.0e11
                 ops.uniaxialMaterial('Steel01', mat_tag, Fy, E, 0.01)
             elif mat is not None and mat.type.lower() == 'concrete':
                 Fc = mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7
-                Ec = mat.E_mod if mat.E_mod > 0 else 2.5e10
+                Ec = mat.E_mod if Ec > 0 else 2.5e10
                 epsc = mat.eFc if mat.eFc and mat.eFc > 0 else -0.002
                 ops.uniaxialMaterial('Concrete01', mat_tag, -Fc, epsc, -0.2 * Fc, -0.006)
             else:
@@ -1286,6 +1320,61 @@ class OpenSeesBuilder:
 
         return results
 
+    def _compute_asce41_hinge_length(
+        self, sec_tag: int, elem_length: float, sec_name: str = ""
+    ) -> float:
+        """Plastic hinge length *Lp* per ASCE 41-17 §10.8.
+
+        Steel moment frames:  Lp = 0.08L + 0.022 · db · fy    (Eq 10-1)
+        Steel braces:         Lp = 0.08L + 0.015 · db · fy    (Eq 10-2)
+        RC beams / columns:   Lp = 0.05L + 0.1 · db · fy / √fc
+
+        Falls back to a geometric estimate when section data is unavailable.
+
+        Args:
+            sec_tag: Section tag number.
+            elem_length: Element length (model units).
+            sec_name: Section name (for material lookup).
+
+        Returns:
+            Plastic hinge length in model length units.
+        """
+        if not sec_name or sec_name not in self.model.sections:
+            return max(0.05, elem_length * 0.1)
+
+        sec = self.model.sections[sec_name]
+        mat = self.model.materials.get(sec.material)
+        if mat is None:
+            return max(0.05, elem_length * 0.1)
+
+        fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
+        fy_mpa = fy / 1e6
+        fc_mpa = (mat.Fc / 1e6) if mat.Fc and mat.Fc > 0 else 25.0
+        db = 0.0
+
+        if hasattr(sec, 'top_bar_dia') and getattr(sec, 'top_bar_dia', 0) > 0:
+            db = sec.top_bar_dia * 1000  # m → mm
+        elif hasattr(sec, 'bar_dia') and getattr(sec, 'bar_dia', 0) > 0:
+            db = sec.bar_dia * 1000
+        elif hasattr(sec, 'tf') and sec.tf > 0:
+            db = sec.tf * 1000
+        elif hasattr(sec, 't') and sec.t > 0:
+            db = sec.t * 1000
+        else:
+            db = 20.0  # default bar diameter
+
+        is_concrete = hasattr(sec, 'cover')
+        is_brace = hasattr(sec, 'od') or hasattr(sec, 't')
+
+        if is_concrete:
+            Lp = 0.05 * elem_length + 0.1 * db * fy_mpa / (fc_mpa ** 0.5)
+        elif is_brace:
+            Lp = 0.08 * elem_length + 0.015 * db * fy_mpa
+        else:
+            Lp = 0.08 * elem_length + 0.022 * db * fy_mpa
+
+        return min(Lp, 0.33 * elem_length)  # ASCE 41 cap
+
     def _compute_hinge_length(self, sec_tag: int, elem_length: float) -> float:
         """Estimate plastic hinge length *Lp* for ``HingeRadau`` integration.
 
@@ -2026,6 +2115,149 @@ class OpenSeesBuilder:
             thickness = 1.0  # fallback
 
         ops.section('ElasticPlateSection', tag, E_mod, nu, thickness, rho)
+
+    # -------------------------------------------------------------------------
+    # Lumped plasticity (zeroLengthSection hinges)
+    # -------------------------------------------------------------------------
+
+    def _create_lumped_hinges(self) -> None:
+        """Replace frame elements with lumped plasticity hinges.
+
+        Each frame element is split into::
+
+            structural_node_i → hinge_i → elastic_mid → hinge_j → structural_node_j
+
+        Coincident hinge nodes sit at the same coordinates.  Translation
+        DOFs (1,2,3) are tied with ``equalDOF`` so only rotations (4,5,6)
+        are released across the zero-length hinge elements.
+
+        Hinge backbones use ``Hysteretic`` materials matched to ASCE 41
+        rotation limits.  Activated via ``config['hinge_model'] = 'lumped'``.
+        """
+        if self.config.get('hinge_model') != 'lumped':
+            return
+
+        elements = (self.split_elements if self.split_elements
+                    else self.model.frame_elements)
+        assignments = (self.split_assignments if self.split_assignments
+                       else self.model.frame_assignments)
+
+        next_node_tag = max((nd.node_tag for nd in self.model.nodes.values()),
+                            default=0) + 1
+        next_tag = max((e.elem_tag for e in elements.values() if not e.inactive),
+                       default=0) + 1
+
+        new_elements: Dict[str, FrameElement] = {}
+        new_assignments: Dict[str, str] = {}
+
+        for eid, elem in list(elements.items()):
+            if elem.inactive:
+                new_elements[eid] = elem
+                continue
+
+            sec_name = assignments.get(eid) if assignments else None
+            if not sec_name or sec_name not in self.section_tags:
+                new_elements[eid] = elem
+                continue
+
+            ni = self.model.nodes.get(elem.node_i)
+            nj = self.model.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                new_elements[eid] = elem
+                continue
+
+            L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+            if L < 1e-12:
+                new_elements[eid] = elem
+                continue
+
+            sec_tag = self.section_tags[sec_name]
+
+            # --- Create coincident hinge nodes ---
+            hinge_i_id = f"{eid}_hinge_i"
+            hinge_j_id = f"{eid}_hinge_j"
+            hinge_i_tag = next_node_tag
+            next_node_tag += 1
+            hinge_j_tag = next_node_tag
+            next_node_tag += 1
+
+            self.model.nodes[hinge_i_id] = Node(
+                node_id=hinge_i_id, node_tag=hinge_i_tag,
+                x=ni.x, y=ni.y, z=ni.z,
+            )
+            self.model.nodes[hinge_j_id] = Node(
+                node_id=hinge_j_id, node_tag=hinge_j_tag,
+                x=nj.x, y=nj.y, z=nj.z,
+            )
+
+            # Create OpenSees nodes for coincident hinge nodes
+            ops.node(hinge_i_tag, ni.x, ni.y, ni.z)
+            ops.node(hinge_j_tag, nj.x, nj.y, nj.z)
+            self._created_node_tags.update([hinge_i_tag, hinge_j_tag])
+
+            # Tie translation DOFs between structural and hinge nodes
+            ops.equalDOF(ni.node_tag, hinge_i_tag, 1, 2, 3)
+            ops.equalDOF(nj.node_tag, hinge_j_tag, 1, 2, 3)
+
+            # --- Create Hysteretic hinge section ---
+            hinge_sec_tag = next_tag
+            next_tag += 1
+            mat = self.model.materials.get(sec.material)
+
+            if mat and mat.type and 'concrete' in mat.type.lower():
+                # Concrete: softer hinges
+                Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
+                E = mat.E_mod if mat.E_mod > 0 else 2.5e10
+                My = Fy * (sec.Z33 if sec.Z33 else sec.I33 / (L * 0.5))
+                theta_y = My / (E * sec.I33 / L) if E * sec.I33 > 0 else 0.005
+                theta_cap = theta_y * 4.0
+            else:
+                # Steel: use section yield moment
+                Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
+                E = mat.E_mod if mat.E_mod > 0 else 2.0e11
+                My = Fy * (sec.Z33 if sec.Z33 else sec.I33 / (L * 0.5))
+                theta_y = My / (E * sec.I33 / L) if E * sec.I33 > 0 else 0.002
+                theta_cap = theta_y * 6.0
+
+            # Axial material (elastic)
+            ops.uniaxialMaterial('Elastic', hinge_sec_tag,
+                                 sec.A * E / L)
+            # Moment material (Hysteretic backbone matching ASCE 41 shape)
+            mom_tag = hinge_sec_tag + 1
+            ops.uniaxialMaterial('Hysteretic', mom_tag,
+                                 My, theta_y, My * 1.1, theta_cap,
+                                 -My, -theta_y, -My * 1.1, -theta_cap,
+                                 1.0, 1.0, 0.0, 0.0, 0.0)
+
+            ops.section('Aggregator', hinge_sec_tag,
+                        hinge_sec_tag, 'P',
+                        mom_tag, 'Mz',
+                        mom_tag, 'My')
+
+            # --- Create zero-length hinge elements ---
+            hinge_i_elem_tag = next_tag
+            next_tag += 1
+            ops.element('zeroLengthSection', hinge_i_elem_tag,
+                        ni.node_tag, hinge_i_tag, hinge_sec_tag)
+
+            hinge_j_elem_tag = next_tag
+            next_tag += 1
+            ops.element('zeroLengthSection', hinge_j_elem_tag,
+                        hinge_j_tag, nj.node_tag, hinge_sec_tag)
+
+            # --- Shorten original element to span between hinge nodes ---
+            elem.node_i = hinge_i_id
+            elem.node_j = hinge_j_id
+            new_elements[eid] = elem
+            new_assignments[eid] = sec_name
+
+        # Update collections
+        if self.split_elements is not None:
+            self.split_elements = new_elements
+            self.split_assignments = new_assignments
+        else:
+            self.model.frame_elements = new_elements
+            self.model.frame_assignments = new_assignments
 
     # Analysis
     # -------------------------------------------------------------------------
