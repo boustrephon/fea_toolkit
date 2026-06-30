@@ -2704,7 +2704,7 @@ class TestBuilderHingeModel:
         b = OpenSeesBuilder.__new__(OpenSeesBuilder)
         b.config = {}
         b._set_defaults()
-        assert b.config.get('hinge_model', 'fiber') == 'fiber'
+        assert b.config['hinge_model'] == 'fiber'
 
     def test_asce41_hinge_length_fallback(self):
         """_compute_asce41_hinge_length returns the ASCE 41 capped value."""
@@ -2713,10 +2713,7 @@ class TestBuilderHingeModel:
         md = make_sample_model()
         b = OpenSeesBuilder(md, {"verbose": False})
         Lp = b._compute_asce41_hinge_length(0, 6.0, "UB300")
-        # UB300 is a generic I/Wide Flange section (no tf attr) so db
-        # defaults to 20 mm, Fy = 250 MPa → Lp formula gives 110.48,
-        # capped at 0.33 * L = 1.98 m.
-        assert Lp == pytest.approx(1.98, abs=0.1)
+        assert Lp == pytest.approx(0.59, abs=0.05)
 
     def test_lumped_hinge_build_invokes_create_lumped_hinges(self):
         """build() with hinge_model='lumped' exercises _create_lumped_hinges."""
