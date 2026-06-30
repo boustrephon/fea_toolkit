@@ -262,15 +262,22 @@ class TestApplyFrameEndOffsets:
         return elements, assignments, nodes
 
     def test_no_offsets_does_nothing(self):
-        """Zero offsets → no changes."""
+        """Zero offsets → areas, nodes, assignments unchanged."""
         from fea_toolkit.model.geometry import apply_frame_end_offsets
         from fea_toolkit.model.sap_data import FrameEndOffset
         elems, assign, nodes = self._make_elements()
+        orig_elems = dict(elems)
+        orig_assign = dict(assign)
+        orig_nodes = dict(nodes)
         offsets = {"1": FrameEndOffset(0.0, 0.0)}
         elems, assign, nodes, ntag, links = apply_frame_end_offsets(
             elems, assign, nodes, offsets
         )
         assert len(links) == 0
+        assert ntag == 1, "next_tag should not advance"
+        assert elems == orig_elems, "elements dict mutated"
+        assert assign == orig_assign, "assignments dict mutated"
+        assert nodes == orig_nodes, "nodes dict mutated"
         assert elems["1"].node_i == "1"
         assert elems["1"].node_j == "2"
 
