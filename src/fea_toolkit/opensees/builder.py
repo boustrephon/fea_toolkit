@@ -488,6 +488,7 @@ class OpenSeesBuilder:
         lines.append("")
         lines.append("puts \"Model exported successfully.\"")
         lines.append("wipe")
+        lines.append("exit")
 
         with open(path, "w") as f:
             f.write("\n".join(lines) + "\n")

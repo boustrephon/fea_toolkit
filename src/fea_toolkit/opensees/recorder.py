@@ -257,6 +257,7 @@ class RecordingOpenSees(types.ModuleType):
                 parts.extend(_tcl_parts(v))
             lines.append(" ".join(parts))
         lines.append("wipe")
+        lines.append("exit")
 
         with open(path, "w") as f:
             f.write("\n".join(lines) + "\n")
@@ -330,6 +331,7 @@ class RecordingOpenSees(types.ModuleType):
             lines.append(" ".join(parts))
 
         lines.append("wipe")
+        lines.append("exit")
 
         with open(path, "w") as f:
             f.write("\n".join(lines) + "\n")
