@@ -250,3 +250,4 @@ __marimo__/
 /.opstool.output
 tests/fixtures/sample.split.json
 .vscode/settings.json
+*.out
