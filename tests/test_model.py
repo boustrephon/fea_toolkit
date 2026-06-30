@@ -2430,7 +2430,7 @@ class TestBuilderFrameEndOffsets:
         )
 
     def test_offset_nodes_created_in_opensees(self, offset_model):
-        """Offset nodes exist in OpenSees after build()."""
+        """Offset nodes are created at correct positions."""
         from fea_toolkit.opensees.builder import OpenSeesBuilder
         import openseespy.opensees as ops
         b = OpenSeesBuilder(offset_model, {
@@ -2438,13 +2438,17 @@ class TestBuilderFrameEndOffsets:
         })
         try:
             b.build()
-            # Look for offset nodes
-            tags = [nd.node_tag for nid, nd in offset_model.nodes.items()
-                    if "_off_" in nid]
-            assert len(tags) == 2, "Expected 2 offset nodes"
-            for tag in tags:
-                coords = list(ops.nodeCoord(tag))
-                assert len(coords) == 3
+            # Offset nodes: I-end offset=0.3, J-end offset=0.4
+            # Element from (0,0,0) → (6,0,0), length 6
+            # I-end offset node at: (0 + 0.3, 0, 0) = (0.3, 0, 0)
+            # J-end offset node at: (6 - 0.4, 0, 0) = (5.6, 0, 0)
+            for nid, nd in offset_model.nodes.items():
+                if "_off_i" in nid:
+                    coords = list(ops.nodeCoord(nd.node_tag))
+                    assert coords == pytest.approx([0.3, 0.0, 0.0], abs=1e-9)
+                elif "_off_j" in nid:
+                    coords = list(ops.nodeCoord(nd.node_tag))
+                    assert coords == pytest.approx([5.6, 0.0, 0.0], abs=1e-9)
         finally:
             ops.wipe()
 
