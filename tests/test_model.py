@@ -2609,3 +2609,95 @@ class TestBuilderAreaMeshing:
             assert not any("_mesh_" in nid for nid in md.nodes)
         finally:
             import openseespy.opensees as ops; ops.wipe()
+
+# ============================================================================
+# Concrete section fiber patch tests
+# ============================================================================
+
+class TestConcreteRectangularSectionFiberPatches:
+    """Fiber patch generation for ConcreteRectangularSection."""
+
+    def test_concrete_rect_basic(self):
+        from fea_toolkit.model.sap_data import ConcreteRectangularSection
+        sec = ConcreteRectangularSection(
+            name="CR400", shape="Concrete Rectangular", material="Concrete",
+            A=0.16, I33=0.00213, I22=0.00213, J=0,
+            depth=0.4, bf=0.4, cover=0.04,
+            top_bars=4, bot_bars=4,
+            top_bar_dia=0.02, bot_bar_dia=0.02,
+        )
+        patches = sec.to_fiber_patches(mat_tag=1)
+        # Should have: core, top cover, bottom cover, left cover, right cover,
+        # plus top rebar + bottom rebar layers
+        assert len(patches) >= 5
+        # First patch = confined core (mat_tag + 1 = 2)
+        assert patches[0][0] == "rect"
+        assert patches[0][1] == 2
+        # Top cover = unconfined (mat_tag = 1)
+        assert patches[1][1] == 1
+
+    def test_concrete_rect_no_rebar(self):
+        from fea_toolkit.model.sap_data import ConcreteRectangularSection
+        sec = ConcreteRectangularSection(
+            name="CR400", shape="Concrete Rectangular", material="Concrete",
+            A=0.16, I33=0.00213, I22=0.00213, J=0,
+            depth=0.4, bf=0.4, cover=0.04,
+        )
+        patches = sec.to_fiber_patches(mat_tag=1)
+        for p in patches:
+            assert p[0] in ("rect",)
+        assert len(patches) >= 3  # core + 2 covers
+
+
+class TestConcreteCircularSectionFiberPatches:
+    """Fiber patch generation for ConcreteCircularSection."""
+
+    def test_concrete_circ_basic(self):
+        from fea_toolkit.model.sap_data import ConcreteCircularSection
+        sec = ConcreteCircularSection(
+            name="CC400", shape="Concrete Circular", material="Concrete",
+            A=0.1256, I33=0.00126, I22=0.00126, J=0,
+            diameter=0.4, cover=0.04,
+            bar_count=8, bar_dia=0.02,
+        )
+        patches = sec.to_fiber_patches(mat_tag=1)
+        # Should have: confined core (circ), cover (circ), rebar ring (circ)
+        assert len(patches) >= 2
+        assert patches[0][0] == "circ"
+        assert patches[0][1] == 2  # confined core
+        assert patches[1][1] == 1  # unconfined cover
+
+    def test_concrete_circ_no_rebar(self):
+        from fea_toolkit.model.sap_data import ConcreteCircularSection
+        sec = ConcreteCircularSection(
+            name="CC400", shape="Concrete Circular", material="Concrete",
+            A=0.1256, I33=0.00126, I22=0.00126, J=0,
+            diameter=0.4, cover=0.04,
+        )
+        patches = sec.to_fiber_patches(mat_tag=1)
+        assert len(patches) == 2  # core + cover only, no rebar
+
+
+# ============================================================================
+# Builder hinge type tests
+# ============================================================================
+
+class TestBuilderHingeModel:
+    """Lumped plasticity (hinge_model='lumped') integration."""
+
+    def test_default_hinge_model_is_fiber(self):
+        """Default config uses fiber (distributed plasticity)."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder.__new__(OpenSeesBuilder)
+        b.config = {}
+        b._set_defaults()
+        assert b.config.get('hinge_model', 'fiber') == 'fiber'
+
+    def test_asce41_hinge_length_fallback(self):
+        """_compute_asce41_hinge_length returns a reasonable value."""
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        md = make_sample_model()
+        b = OpenSeesBuilder(md, {"verbose": False})
+        Lp = b._compute_asce41_hinge_length(0, 6.0, "UB300")
+        assert 0.05 < Lp < 2.0

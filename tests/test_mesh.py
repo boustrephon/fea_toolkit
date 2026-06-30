@@ -125,6 +125,37 @@ def test_modules_importable_without_compas():
     assert hasattr(chk, "aspect_ratios")
     assert hasattr(chk, "report")
 
+def test_flatness_planar_rhomboid():
+    """A planar rhomboid must have zero flatness."""
+    from fea_toolkit.model.sap_data import Node, AreaElement
+    from fea_toolkit.mesh.checks import flatness
+    # Rhomboid: (0,0,0) (4,0,0) (6,4,0) (2,4,0) — planar, equal edges
+    nodes = {
+        "1": Node("1", 1, 0, 0, 0),
+        "2": Node("2", 2, 4, 0, 0),
+        "3": Node("3", 3, 6, 4, 0),
+        "4": Node("4", 4, 2, 4, 0),
+    }
+    areas = {"R": AreaElement("R", 10, ["1","2","3","4"], thickness=0.1)}
+    fl = flatness(areas, nodes)
+    assert fl["R"] == 0.0, f"planar rhomboid should be flat, got {fl['R']}"
+
+def test_flatness_non_planar_detected():
+    """A warped (non-coplanar) quad must have non-zero flatness."""
+    from fea_toolkit.model.sap_data import Node, AreaElement
+    from fea_toolkit.mesh.checks import flatness
+    # One corner lifted out of plane
+    nodes = {
+        "1": Node("1", 1, 0, 0, 0),
+        "2": Node("2", 2, 4, 0, 0),
+        "3": Node("3", 3, 4, 4, 0.5),  # lifted
+        "4": Node("4", 4, 0, 4, 0),
+    }
+    areas = {"W": AreaElement("W", 10, ["1","2","3","4"], thickness=0.1)}
+    fl = flatness(areas, nodes)
+    assert fl["W"] > 0, f"warped quad should be non-planar, got {fl['W']}"
+
+
 
 # ========================================================================
 # Gmsh remeshing (Gmsh — optional)
