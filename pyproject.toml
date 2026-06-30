@@ -18,14 +18,8 @@ dependencies = [
     ]
 
 [project.optional-dependencies]
-mesh-quality = [
-    "compas>=1.0",
-    ]
 mesh-remesh = [
     "gmsh>=4.12",
-    ]
-mesh-all = [
-    "fea_toolkit[mesh-quality,mesh-remesh]",
     ]
 
 [tool.setuptools.packages.find]
