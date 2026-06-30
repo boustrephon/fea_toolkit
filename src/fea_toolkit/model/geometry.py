@@ -1300,6 +1300,15 @@ def mesh_area_elements(
         if n_u == 1 and n_v == 1:
             continue  # no subdivision needed
 
+        # Cap subdivision to prevent memory explosion from tiny max_size.
+        MAX_SUBDIVIDE = 100
+        if n_u > MAX_SUBDIVIDE or n_v > MAX_SUBDIVIDE:
+            raise ValueError(
+                f"Area {aid}: subdivision {n_u}×{n_v} exceeds maximum "
+                f"{MAX_SUBDIVIDE} (len_u={len_u:.2f}, len_v={len_v:.2f}, "
+                f"max_size={mesh.max_size}). Increase max_size."
+            )
+
         # Bilinear interpolation to create grid points
         # Parametric coords (0..1) x (0..1) mapped to the quad
         grid = np.zeros((n_v + 1, n_u + 1, 3))
