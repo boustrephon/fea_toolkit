@@ -3433,6 +3433,51 @@ class OpenSeesBuilder:
                         if area_elem is None:
                             continue
                         if getattr(area_elem, 'inactive', False):
+                            # Parent was meshed — redistribute to sub-elements.
+                            sub_ids = sorted(
+                                aid for aid in self.model.area_elements
+                                if aid.startswith(f"{agl.area_id}_sub_")
+                            )
+                            if not sub_ids:
+                                continue
+                            for sub_id in sub_ids:
+                                sub_elem = self.model.area_elements[sub_id]
+                                sec_name = self.model.area_assignments.get(sub_id)
+                                if not sec_name:
+                                    continue
+                                sec = self.model.sections.get(sec_name)
+                                if sec is None:
+                                    continue
+                                mat = all_materials.get(sec.material)
+                                if mat is None or mat.unit_weight == 0:
+                                    continue
+                                thickness = sub_elem.thickness
+                                if thickness < 1e-12:
+                                    continue
+                                pts = []
+                                for nid in sub_elem.node_ids:
+                                    nd = self.model.nodes.get(nid)
+                                    if nd is None:
+                                        break
+                                    pts.append((nd.x, nd.y, nd.z))
+                                if len(pts) < 3:
+                                    continue
+                                nx = ny = nz = 0.0
+                                for i in range(len(pts)):
+                                    x1, y1, z1 = pts[i]
+                                    x2, y2, z2 = pts[(i + 1) % len(pts)]
+                                    nx += (y1 - y2) * (z1 + z2)
+                                    ny += (z1 - z2) * (x1 + x2)
+                                    nz += (x1 - x2) * (y1 + y2)
+                                area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                                if area_mag < 1e-12:
+                                    continue
+                                sw_per_area = thickness * mat.unit_weight
+                                total_fz = sw_per_area * area_mag * abs(agl.multiplier_z) * mult
+                                mass = total_fz / g
+                                n_corners = len(sub_elem.node_ids)
+                                for nid in sub_elem.node_ids:
+                                    node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_corners
                             continue
                         sec_name = self.model.area_assignments.get(agl.area_id)
                         if not sec_name:
@@ -3483,6 +3528,39 @@ class OpenSeesBuilder:
                         if area_elem is None:
                             continue
                         if getattr(area_elem, 'inactive', False):
+                            # Parent was meshed — redistribute to sub-elements.
+                            sub_ids = sorted(
+                                aid for aid in self.model.area_elements
+                                if aid.startswith(f"{aul.area_id}_sub_")
+                            )
+                            if not sub_ids:
+                                continue
+                            for sub_id in sub_ids:
+                                sub_elem = self.model.area_elements[sub_id]
+                                pts = []
+                                for nid in sub_elem.node_ids:
+                                    nd = self.model.nodes.get(nid)
+                                    if nd is None:
+                                        break
+                                    pts.append((nd.x, nd.y, nd.z))
+                                if len(pts) < 3:
+                                    continue
+                                nx = ny = nz = 0.0
+                                for i in range(len(pts)):
+                                    x1, y1, z1 = pts[i]
+                                    x2, y2, z2 = pts[(i + 1) % len(pts)]
+                                    nx += (y1 - y2) * (z1 + z2)
+                                    ny += (z1 - z2) * (x1 + x2)
+                                    nz += (x1 - x2) * (y1 + y2)
+                                area_mag = 0.5 * np.sqrt(nx*nx + ny*ny + nz*nz)
+                                if area_mag < 1e-12:
+                                    continue
+                                pressure = abs(aul.value)
+                                total_force = pressure * area_mag * mult
+                                mass = total_force / g
+                                n_corners = len(sub_elem.node_ids)
+                                for nid in sub_elem.node_ids:
+                                    node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_corners
                             continue
                         # Polygon area
                         pts = []
