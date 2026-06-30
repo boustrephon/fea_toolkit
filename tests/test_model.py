@@ -2522,7 +2522,7 @@ class TestBuilderAreaMeshing:
         )
 
     def test_mesh_creates_sub_areas(self, mesh_model):
-        """build() with meshing creates sub-area elements."""
+        """build() with meshing creates exactly 4 sub-quads (2×2 grid)."""
         from fea_toolkit.opensees.builder import OpenSeesBuilder
         b = OpenSeesBuilder(mesh_model, {
             "verbose": False, "create_shells": True,
@@ -2531,14 +2531,22 @@ class TestBuilderAreaMeshing:
             b.build()
             # Original area should be inactive
             assert mesh_model.area_elements["1"].inactive is True
-            # Sub-areas should exist
-            sub_ids = [aid for aid in mesh_model.area_elements if "_sub_" in aid]
-            assert len(sub_ids) >= 2
+            # 12×8 quad with max_size=6.0 → ceil(12/6)=2 × ceil(8/6)=2 = 4
+            sub_ids = sorted(
+                aid for aid in mesh_model.area_elements if "_sub_" in aid
+            )
+            assert len(sub_ids) == 4
+            # Sub-areas should all be active
+            for sid in sub_ids:
+                assert mesh_model.area_elements[sid].inactive is False
+            # Section assignment inherited
+            for sid in sub_ids:
+                assert mesh_model.area_assignments.get(sid) == "Slab200"
         finally:
             import openseespy.opensees as ops; ops.wipe()
 
     def test_mesh_creates_opensees_nodes(self, mesh_model):
-        """Mesh nodes are created in OpenSees memory."""
+        """Mesh nodes are created at correct grid positions."""
         from fea_toolkit.opensees.builder import OpenSeesBuilder
         import openseespy.opensees as ops
         b = OpenSeesBuilder(mesh_model, {
@@ -2546,13 +2554,22 @@ class TestBuilderAreaMeshing:
         })
         try:
             b.build()
-            # Find mesh node tags
-            mesh_tags = [nd.node_tag for nid, nd in mesh_model.nodes.items()
-                         if "_mesh_" in nid]
-            assert len(mesh_tags) > 0
-            for tag in mesh_tags:
-                coords = list(ops.nodeCoord(tag))
-                assert len(coords) == 3
+            # 2×2 grid → 5 mesh nodes (4 edge midpoints + 1 interior)
+            mesh_nodes = {nid: nd for nid, nd in mesh_model.nodes.items()
+                          if "_mesh_" in nid}
+            assert len(mesh_nodes) == 5
+            # Expected coordinates (12×8 rectangle, bilinear grid)
+            expected = {
+                "1_mesh_0_1": (6.0, 0.0, 0.0),   # edge midpoint
+                "1_mesh_1_0": (0.0, 4.0, 0.0),
+                "1_mesh_1_1": (6.0, 4.0, 0.0),   # fully interior
+                "1_mesh_1_2": (12.0, 4.0, 0.0),
+                "1_mesh_2_1": (6.0, 8.0, 0.0),
+            }
+            for nid, nd in mesh_nodes.items():
+                coords = list(ops.nodeCoord(nd.node_tag))
+                assert coords == pytest.approx(expected[nid], abs=1e-9), \
+                    f"{nid}: expected {expected[nid]}, got {coords}"
         finally:
             ops.wipe()
 
@@ -2582,6 +2599,11 @@ class TestBuilderAreaMeshing:
         })
         try:
             b.build()
+            # No area_mesh config → no subdivision
             assert md.area_elements["1"].inactive is False
+            assert md.area_elements["1"].node_ids == ["1", "2", "3", "4"]
+            # No sub-area or mesh node artifacts
+            assert not any("_sub_" in aid for aid in md.area_elements)
+            assert not any("_mesh_" in nid for nid in md.nodes)
         finally:
             import openseespy.opensees as ops; ops.wipe()
