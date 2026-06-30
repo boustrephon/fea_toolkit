@@ -2627,14 +2627,21 @@ class TestConcreteRectangularSectionFiberPatches:
             top_bar_dia=0.02, bot_bar_dia=0.02,
         )
         patches = sec.to_fiber_patches(mat_tag=1)
-        # Should have: core, top cover, bottom cover, left cover, right cover,
-        # plus top rebar + bottom rebar layers
-        assert len(patches) >= 5
-        # First patch = confined core (mat_tag + 1 = 2)
+        # Concrete patches: core, top cover, bottom cover, left cover, right cover
+        # Rebar layers: top (straight), bottom (straight)
+        assert len(patches) == 7
+        # Concrete patches use mat_tag for unconfined, mat_tag+1 for confined
         assert patches[0][0] == "rect"
-        assert patches[0][1] == 2
-        # Top cover = unconfined (mat_tag = 1)
-        assert patches[1][1] == 1
+        assert patches[0][1] == 2  # confined core (mat_tag + 1)
+        assert patches[1][1] == 1  # top cover (unconfined)
+        # Rebar layers (last two entries): type "straight", mat_tag + 2 = 3
+        assert patches[-2][0] == "straight"
+        assert patches[-2][1] == 3  # top rebar
+        assert patches[-1][0] == "straight"
+        assert patches[-1][1] == 3  # bottom rebar
+        # Rebar uses area (m²), not diameter
+        expected_area = 3.14159 * (0.01) ** 2  # π * (dia/2)²  with dia=0.02
+        assert patches[-2][3] == pytest.approx(expected_area, rel=1e-3)
 
     def test_concrete_rect_no_rebar(self):
         from fea_toolkit.model.sap_data import ConcreteRectangularSection
@@ -2661,11 +2668,17 @@ class TestConcreteCircularSectionFiberPatches:
             bar_count=8, bar_dia=0.02,
         )
         patches = sec.to_fiber_patches(mat_tag=1)
-        # Should have: confined core (circ), cover (circ), rebar ring (circ)
-        assert len(patches) >= 2
+        # Concrete: confined core (circ), unconfined cover (circ)
+        # Rebar: circ_layer with mat_tag + 2 = 3
+        assert len(patches) == 3
         assert patches[0][0] == "circ"
         assert patches[0][1] == 2  # confined core
         assert patches[1][1] == 1  # unconfined cover
+        # Rebar layer
+        assert patches[2][0] == "circ_layer"
+        assert patches[2][1] == 3  # rebar
+        expected_area = 3.14159 * (0.01) ** 2
+        assert patches[2][3] == pytest.approx(expected_area, rel=1e-3)
 
     def test_concrete_circ_no_rebar(self):
         from fea_toolkit.model.sap_data import ConcreteCircularSection
@@ -2694,10 +2707,39 @@ class TestBuilderHingeModel:
         assert b.config.get('hinge_model', 'fiber') == 'fiber'
 
     def test_asce41_hinge_length_fallback(self):
-        """_compute_asce41_hinge_length returns a reasonable value."""
+        """_compute_asce41_hinge_length returns the ASCE 41 capped value."""
         from examples.sample_model import make_sample_model
         from fea_toolkit.opensees.builder import OpenSeesBuilder
         md = make_sample_model()
         b = OpenSeesBuilder(md, {"verbose": False})
         Lp = b._compute_asce41_hinge_length(0, 6.0, "UB300")
-        assert 0.05 < Lp < 2.0
+        # UB300 is a generic I/Wide Flange section (no tf attr) so db
+        # defaults to 20 mm, Fy = 250 MPa → Lp formula gives 110.48,
+        # capped at 0.33 * L = 1.98 m.
+        assert Lp == pytest.approx(1.98, abs=0.1)
+
+    def test_lumped_hinge_build_invokes_create_lumped_hinges(self):
+        """build() with hinge_model='lumped' exercises _create_lumped_hinges."""
+        import openseespy.opensees as ops
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        md = make_sample_model()
+        b = OpenSeesBuilder(md, {
+            'element_type': 'elasticBeamColumn',
+            'hinge_model': 'lumped',
+            'verbose': False,
+        })
+        try:
+            b.build()
+            node_tags = ops.getNodeTags()
+            ele_tags = ops.getEleTags()
+            # Original model has 2 nodes + 1 element.
+            # Lumped hinges add 2 hinge nodes + 2 zero-length elements.
+            assert len(node_tags) >= 4, f"Expected ≥4 nodes, got {node_tags}"
+            assert len(ele_tags) >= 3, f"Expected ≥3 elements, got {ele_tags}"
+            # equalDOF constraints tie translation DOFs
+            # (just verify the model is consistent)
+            coords = [ops.nodeCoord(t) for t in (1, 2)]
+            assert len(coords) == 2
+        finally:
+            ops.wipe()

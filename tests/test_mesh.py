@@ -1,9 +1,11 @@
-"""Optional tests for mesh quality checks and remeshing.
+"""Tests for mesh quality checks and optional Gmsh remeshing.
 
-These tests are **skipped** if the optional dependency (``compas`` / ``gmsh``)
-is not installed.  Run with::
+The checks tests have **no** external dependencies (pure NumPy) and always
+run.  The remeshing tests require ``gmsh`` (``pip install fea_toolkit[mesh-remesh]``)
+and are skipped when it is not installed.
 
-    pip install fea_toolkit[mesh-all]
+Run with::
+
     pytest tests/test_mesh.py -v
 """
 
@@ -70,7 +72,7 @@ class TestMeshChecks:
         from fea_toolkit.mesh.checks import skew
         sk = skew(quad_area, quad_nodes)
         assert "1" in sk
-        assert sk["1"] == 0.0  # perfect rectangle
+        assert sk["1"] == pytest.approx(0.0, abs=1e-12)  # perfect rectangle
 
     def test_skew_warped_quad(self, skewed_quad):
         from fea_toolkit.mesh.checks import skew
@@ -83,7 +85,7 @@ class TestMeshChecks:
         from fea_toolkit.mesh.checks import flatness
         fl = flatness(quad_area, quad_nodes)
         assert "1" in fl
-        assert fl["1"] == 0.0  # perfectly planar
+        assert fl["1"] == pytest.approx(0.0, abs=1e-12)  # perfectly planar
 
     def test_flatness_warped(self, skewed_quad):
         from fea_toolkit.mesh.checks import flatness
@@ -138,7 +140,7 @@ def test_flatness_planar_rhomboid():
     }
     areas = {"R": AreaElement("R", 10, ["1","2","3","4"], thickness=0.1)}
     fl = flatness(areas, nodes)
-    assert fl["R"] == 0.0, f"planar rhomboid should be flat, got {fl['R']}"
+    assert fl["R"] == pytest.approx(0.0, abs=1e-12), f"planar rhomboid should be flat, got {fl['R']}"
 
 def test_flatness_non_planar_detected():
     """A warped (non-coplanar) quad must have non-zero flatness."""
