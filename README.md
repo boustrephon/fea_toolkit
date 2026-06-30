@@ -224,7 +224,7 @@ from fea_toolkit.mesh import remesh
 constraints = {}
 for fid, fe in model.frame_elements.items():
     for aid, ae in model.area_elements.items():
-        if fe.node_i in ae.node_ids or fe.node_j in ae.node_ids:
+        if fe.node_i in ae.node_ids and fe.node_j in ae.node_ids:
             remesh.constrain_line(aid, fid, fe.node_i, fe.node_j,
                                   model.nodes, constraints)
 
