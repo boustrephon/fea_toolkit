@@ -1000,13 +1000,15 @@ class OpenSeesBuilder:
                     ops.uniaxialMaterial('Concrete01', concrete_mat_tag + 1,
                                          -fcc, -abs(epscc), -0.2 * fcc, -0.02)
                     Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
-                    ops.uniaxialMaterial('Steel02', concrete_mat_tag + 2, Fy, 2.0e11, 0.01)
+                    ops.uniaxialMaterial('Steel02', concrete_mat_tag + 2,
+                                         Fy, 2.0e11, 0.01, 18.5, 0.925, 0.15)
                 else:
                     ops.uniaxialMaterial('Concrete01', concrete_mat_tag, -3.0e7, -0.002,
                                          -6.0e6, -0.006)
                     ops.uniaxialMaterial('Concrete01', concrete_mat_tag + 1,
                                          -3.9e7, -0.005, -7.8e6, -0.02)
-                    ops.uniaxialMaterial('Steel02', concrete_mat_tag + 2, 4.0e8, 2.0e11, 0.01)
+                    ops.uniaxialMaterial('Steel02', concrete_mat_tag + 2,
+                                         4.0e8, 2.0e11, 0.01, 18.5, 0.925, 0.15)
                 fiber_mat_tag = concrete_mat_tag
             elif mat is not None and mat.type.lower() == 'steel':
                 Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
@@ -1899,20 +1901,36 @@ class OpenSeesBuilder:
             return max(0.05, elem_length * 0.1)
 
         fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
+        # Determine length-unit conversion: model units → mm.
+        # Default (N, m) → multiply by 1000.
+        lu = self.model.units.get("L", "m")
+        if lu in ("mm", "millimeter", "millimeters"):
+            _to_mm = 1.0
+        elif lu in ("cm", "centimeter", "centimeters"):
+            _to_mm = 10.0
+        elif lu in ("m", "meter", "meters"):
+            _to_mm = 1000.0
+        elif lu in ("in", "inch", "inches"):
+            _to_mm = 25.4
+        elif lu in ("ft", "foot", "feet"):
+            _to_mm = 304.8
+        else:
+            _to_mm = 1000.0  # fallback
+
         fy_mpa = fy / 1e6
         fc_mpa = (mat.Fc / 1e6) if mat.Fc and mat.Fc > 0 else 25.0
         db = 0.0
 
         if hasattr(sec, 'top_bar_dia') and getattr(sec, 'top_bar_dia', 0) > 0:
-            db = sec.top_bar_dia * 1000  # m → mm
+            db = sec.top_bar_dia * _to_mm  # model units → mm
         elif hasattr(sec, 'bar_dia') and getattr(sec, 'bar_dia', 0) > 0:
-            db = sec.bar_dia * 1000
+            db = sec.bar_dia * _to_mm
         elif hasattr(sec, 'tf') and sec.tf > 0:
-            db = sec.tf * 1000
+            db = sec.tf * _to_mm
         elif hasattr(sec, 't') and sec.t > 0:
-            db = sec.t * 1000
+            db = sec.t * _to_mm
         else:
-            db = 20.0  # default bar diameter
+            db = 20.0  # default bar diameter (mm)
 
         is_concrete = hasattr(sec, 'cover')
         is_brace = hasattr(sec, 'od') or hasattr(sec, 't')
@@ -2817,26 +2835,32 @@ class OpenSeesBuilder:
             # Get local axes for element orientation
             try:
                 vx, vy, vz = self._get_local_axes(elem)
-                orient_str = (
-                    f" -orient {vx[0]} {vx[1]} {vx[2]}"
-                    f" {vz[0]} {vz[1]} {vz[2]}"
-                )
+                orient = (vx[0], vx[1], vx[2], vz[0], vz[1], vz[2])
             except Exception:
-                orient_str = ""
+                orient = None
 
             # --- Create zero-length hinge elements ---
             hinge_i_elem_tag = next_tag
             next_tag += 1
-            cmd = (f"element zeroLengthSection {hinge_i_elem_tag} "
-                   f"{ni.node_tag} {hinge_i_tag} {hinge_sec_tag - 1}"
-                   f"{orient_str}")
-            ops.element('zeroLengthSection', hinge_i_elem_tag,
-                        ni.node_tag, hinge_i_tag, hinge_sec_tag - 1)
+            if orient:
+                ops.element('zeroLengthSection', hinge_i_elem_tag,
+                            ni.node_tag, hinge_i_tag, hinge_sec_tag - 1,
+                            '-orient', orient[0], orient[1], orient[2],
+                            orient[3], orient[4], orient[5])
+            else:
+                ops.element('zeroLengthSection', hinge_i_elem_tag,
+                            ni.node_tag, hinge_i_tag, hinge_sec_tag - 1)
 
             hinge_j_elem_tag = next_tag
             next_tag += 1
-            ops.element('zeroLengthSection', hinge_j_elem_tag,
-                        hinge_j_tag, nj.node_tag, hinge_sec_tag - 1)
+            if orient:
+                ops.element('zeroLengthSection', hinge_j_elem_tag,
+                            hinge_j_tag, nj.node_tag, hinge_sec_tag - 1,
+                            '-orient', orient[0], orient[1], orient[2],
+                            orient[3], orient[4], orient[5])
+            else:
+                ops.element('zeroLengthSection', hinge_j_elem_tag,
+                            hinge_j_tag, nj.node_tag, hinge_sec_tag - 1)
 
             # --- Shorten original element to span between hinge nodes ---
             elem.node_i = hinge_i_id
