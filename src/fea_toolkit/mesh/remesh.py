@@ -176,12 +176,26 @@ def remesh_areas(
                         continue
                     pta = (nd_a.x, nd_a.y, nd_a.z)
                     ptb = (nd_b.x, nd_b.y, nd_b.z)
-                    # Only embed if both endpoints lie on or near this
-                    # surface (within tolerance of an edge).
+                    # Skip constraints whose endpoints are not within
+                    # tolerance of the area boundary (1‑mm check).
+                    def _on_boundary(p, corners, tol=1e-3):
+                        for k in range(4):
+                            a, b = corners[k], corners[(k + 1) % 4]
+                            ab = np.array(b) - np.array(a)
+                            ap = np.array(p) - np.array(a)
+                            cross = np.linalg.norm(np.cross(ab, ap))
+                            if cross < tol and 0 <= np.dot(ap, ab) / max(np.dot(ab, ab), 1e-12) <= 1:
+                                return True
+                        return False
+                    if not (_on_boundary(pta, pts) and _on_boundary(ptb, pts)):
+                        continue
                     ta = gmsh.model.occ.add_point(*pta, lc)
                     tb = gmsh.model.occ.add_point(*ptb, lc)
                     curve = gmsh.model.occ.add_line(ta, tb)
                     constraint_curves.append(curve)
+                # Synchronise OCC model BEFORE embedding so the mesh
+                # module sees the newly created points and curves.
+                gmsh.model.occ.synchronize()
                 if constraint_curves:
                     gmsh.model.mesh.embed(1, constraint_curves, 2, surf)
 
@@ -241,6 +255,7 @@ def remesh_areas(
 
             # --- Create sub-area elements from Gmsh quads ---
             sec_name = area_assignments.get(aid, "")
+            sub_count = 0
             for row in quad_conn:
                 sub_id = f"{aid}_gmsh_{len([k for k in area_elements if k.startswith(f'{aid}_gmsh_')])}"
                 sub_tag = next_tag
@@ -255,9 +270,12 @@ def remesh_areas(
                 )
                 if sec_name:
                     area_assignments[sub_id] = sec_name
+                sub_count += 1
 
-            # Mark original as inactive
-            elem.inactive = True
+            # Only mark original as inactive when at least one
+            # 4-node quad element was actually created.
+            if sub_count > 0:
+                elem.inactive = True
 
             # Remove this area's Gmsh model so the next iteration
             # starts fresh (no node-tag carryover).
