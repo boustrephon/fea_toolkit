@@ -1265,9 +1265,19 @@ def plot_pushover_curve_enhanced(
         print("No pushover data to plot.")
         return None
 
-    # Tangent stiffness from adjacent-point differences
-    k0 = (shear[1] - shear[0]) / (disp[1] - disp[0]) if disp[1] > disp[0] else 0.0
-    kf = (shear[-1] - shear[-2]) / (disp[-1] - disp[-2]) if disp[-1] > disp[-2] else 0.0
+    # Robust tangent stiffness via local regression over end segments
+    n = len(disp)
+    window = max(2, n // 20)  # 5 % of data points, at least 2
+    # Initial stiffness: fit slope over first `window` points
+    k0 = 0.0
+    if disp[window - 1] > disp[0]:
+        coeffs = np.polyfit(disp[:window], shear[:window], 1)
+        k0 = coeffs[0]
+    # Final stiffness: fit slope over last `window` points
+    kf = 0.0
+    if disp[-1] > disp[-window]:
+        coeffs = np.polyfit(disp[-window:], shear[-window:], 1)
+        kf = coeffs[0]
     loss_pct = (1 - kf / k0) * 100 if k0 > 0 else 0.0
 
     fig, ax = plt.subplots(figsize=figsize)
