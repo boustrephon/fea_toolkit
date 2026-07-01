@@ -392,8 +392,14 @@ class TestSectionSubclasses:
             depth=0.6, bf=0.3,
         )
         patches = sec.to_fiber_patches(mat_tag=2)
-        assert len(patches) == 1
-        assert patches[0][1] == 2
+        # Now returns: confined core + 4 cover patches + 2 steel layers
+        assert len(patches) == 7
+        # Core uses mat_tag+1 (confined concrete)
+        assert patches[0][1] == 3
+        # Cover uses mat_tag (unconfined concrete)
+        assert patches[1][1] == 2
+        # Steel layers use mat_tag+2
+        assert patches[5][1] == 4
 
     def test_circular_section(self):
         sec = CircularSection(
