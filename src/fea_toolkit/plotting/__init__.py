@@ -13,6 +13,7 @@ from .viz import (
     plot_static_force_diagram,
     plot_force_diagram,
     plot_pushover_curve,
+    plot_pushover_curve_enhanced,
     plot_npz_force_diagram,
     plot_npz_moment_3d,
 )

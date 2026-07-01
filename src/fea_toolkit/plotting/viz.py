@@ -1217,6 +1217,103 @@ def plot_pushover_curve(
     fig.tight_layout()
     return fig
 
+
+def plot_pushover_curve_enhanced(
+    pushover_results: Dict[str, Any],
+    title: str = None,
+    figsize=(10, 6),
+    design_disp: Optional[float] = None,
+    unit_conversion: float = 1.0,
+    **kwargs,
+) -> Optional[Any]:
+    """Enhanced pushover capacity curve with stiffness indicators.
+
+    Plots base shear vs control displacement with:
+    - **Initial and final tangent stiffness** (dashed lines)
+    - **Area fill** under the curve
+    - **Design drift marker** (optional vertical line)
+    - Stiffness loss percentage annotation
+
+    Args:
+        pushover_results: Dict with ``'control_disp'`` and ``'base_shear'``
+            keys (lists or arrays).  The :meth:`OpenSeesBuilder.run_pushover_analysis`
+            output uses kN; Tcl‑based output may use N — use *unit_conversion*.
+        title: Plot title.  Auto‑generated if omitted.
+        figsize: Matplotlib figure size ``(width, height)``.
+        design_disp: Optional design drift displacement (m) to mark with a
+            vertical dotted line.
+        unit_conversion: Multiply base_shear by this factor (e.g. ``1/1000``
+            if Tcl output is in N and desired display is kN).
+        **kwargs: Passed to ``matplotlib.pyplot.plot()`` for the main curve.
+
+    Returns:
+        The ``matplotlib.figure.Figure``.
+    """
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except ImportError:
+        print("Warning: matplotlib not installed.  "
+              "Install with: pip install matplotlib")
+        return None
+
+    disp = np.asarray(pushover_results.get('control_disp', []), dtype=float)
+    shear = np.asarray(pushover_results.get('base_shear', []), dtype=float)
+    shear = shear * unit_conversion
+
+    if len(disp) < 2 or len(shear) < 2:
+        print("No pushover data to plot.")
+        return None
+
+    # Stiffness indicators
+    k0 = shear[0] / disp[0] if disp[0] > 0 else 0.0
+    kf = shear[-1] / disp[-1] if disp[-1] > 0 else 0.0
+    loss_pct = (1 - kf / k0) * 100 if k0 > 0 else 0.0
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Main curve
+    ax.plot(disp, shear, 'b-', linewidth=2, label='Pushover curve', **kwargs)
+
+    # Area fill
+    ax.fill_between(disp, 0, shear, alpha=0.08, color='blue')
+
+    # Initial stiffness line
+    if k0 > 0:
+        ax.plot(disp, k0 * disp, 'r--', linewidth=1, alpha=0.5,
+                label=f'Initial stiffness ({k0:.0f} kN/m)')
+
+    # Final stiffness line
+    if kf > 0:
+        ax.plot(disp, kf * disp, 'g--', linewidth=1, alpha=0.5,
+                label=f'Final stiffness ({kf:.0f} kN/m)')
+
+    # Design drift marker
+    if design_disp is not None:
+        ax.axvline(design_disp, color='orange', linestyle=':', linewidth=1.5,
+                   label=f'Design drift ({design_disp:.3f} m)')
+
+    # Labels & title
+    ax.set_xlabel('Control node displacement (m)')
+    ax.set_ylabel('Base shear (kN)')
+    ax.set_title(title or 'Pushover Capacity Curve')
+    ax.legend(loc='lower right', fontsize=9)
+    ax.grid(True, alpha=0.3)
+    ax.axhline(0, color='grey', linewidth=0.5)
+    ax.axvline(0, color='grey', linewidth=0.5)
+
+    # Stiffness loss annotation
+    ax.annotate(
+        f'Stiffness loss: {loss_pct:.1f}%',
+        xy=(0.97, 0.03), xycoords='axes fraction',
+        ha='right', va='bottom', fontsize=10,
+        bbox=dict(boxstyle='round,pad=0.3', fc='lightyellow', ec='gray', alpha=0.8),
+    )
+
+    fig.tight_layout()
+    return fig
+
+
 def plot_capacity_spectrum(
     capacity_adrs: Dict[str, List[float]],
     spectrum_periods: List[float],
