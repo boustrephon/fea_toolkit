@@ -370,6 +370,15 @@ class OpenSeesBuilder:
         Call **after** :meth:`build()` to verify that self‑weight was
         applied correctly for every frame and area element.
 
+        .. note::
+
+           This method compares against **automatic self-weight** only
+           (the loads generated from ``SelfWtMult`` in load patterns).
+           Explicit gravity loads (``GravityLoad`` with multipliers)
+           are stored separately in ``_gravity_load_totals`` and are
+           **not** included in the comparison — they represent additional
+           applied loads, not structural self-weight.
+
         Args:
             atol: Absolute tolerance for the total‑force comparison, in
                 model force units.  Defaults to 1 % of ``expected``.
@@ -2703,7 +2712,8 @@ class OpenSeesBuilder:
         # Accumulators keyed by pattern *name*
         joint_load_totals: Dict[str, Dict[str, float]] = {}
         frame_load_totals: Dict[str, Dict[str, float]] = {}
-        self._sw_load_totals: Dict[str, Dict[str, float]] = {}
+        self._sw_load_totals: Dict[str, Dict[str, float]] = {}   # automatic self-weight (SelfWtMult)
+        self._gravity_load_totals: Dict[str, Dict[str, float]] = {}  # explicit gravity multipliers
 
         # Determine which distributed loads to use (split or original)
         dist_loads = (self.split_dist_loads if self.split_dist_loads is not None
@@ -3009,12 +3019,12 @@ class OpenSeesBuilder:
         def _add_gravity(pname: str, node_tag: int, fx: float, fy: float, fz: float) -> None:
             """Apply a nodal force from a gravity load and track it."""
             ops.load(node_tag, fx, fy, fz, 0.0, 0.0, 0.0)
-            if pname not in self._sw_load_totals:
-                self._sw_load_totals[pname] = {k: 0.0 for k in
+            if pname not in self._gravity_load_totals:
+                self._gravity_load_totals[pname] = {k: 0.0 for k in
                                          ('fx','fy','fz','mx','my','mz')}
-            self._sw_load_totals[pname]['fx'] += fx
-            self._sw_load_totals[pname]['fy'] += fy
-            self._sw_load_totals[pname]['fz'] += fz
+            self._gravity_load_totals[pname]['fx'] += fx
+            self._gravity_load_totals[pname]['fy'] += fy
+            self._gravity_load_totals[pname]['fz'] += fz
 
         for pname, scale in active.items():
             if abs(scale) < 1e-12:
@@ -3151,7 +3161,7 @@ class OpenSeesBuilder:
         # ------------------------------------------------------------------
         # Merge all totals into public attribute
         # ------------------------------------------------------------------
-        all_ptns = set(joint_load_totals) | set(frame_load_totals) | set(self._sw_load_totals)
+        all_ptns = set(joint_load_totals) | set(frame_load_totals) | set(self._sw_load_totals) | set(self._gravity_load_totals)
         self.load_totals: Dict[str, Dict[str, float]] = {}
         for pname in all_ptns:
             self.load_totals[pname] = {k: 0.0 for k in
@@ -3160,6 +3170,7 @@ class OpenSeesBuilder:
                 self.load_totals[pname][key] += joint_load_totals.get(pname, {}).get(key, 0.0)
                 self.load_totals[pname][key] += frame_load_totals.get(pname, {}).get(key, 0.0)
                 self.load_totals[pname][key] += self._sw_load_totals.get(pname, {}).get(key, 0.0)
+                self.load_totals[pname][key] += self._gravity_load_totals.get(pname, {}).get(key, 0.0)
 
         if self.config['verbose']:
             print("\n  --- Load totals per pattern ---")
