@@ -107,6 +107,9 @@ def main():
     builder = OpenSeesBuilder(md, config)
     builder.build()
 
+    # Self-weight consistency check
+    builder.check_self_weight_consistency()
+
     # ── 3. Seismic masses ────────────────────────────────────────────────────
     print("\n── Computing seismic masses (g=9.81) ──")
     node_masses = builder.compute_seismic_masses(g=9.81)

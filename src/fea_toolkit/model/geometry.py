@@ -1231,6 +1231,7 @@ def mesh_area_elements(
     nodes: Dict[str, 'Node'],
     area_mesh: Dict[str, AreaMesh],
     next_tag: int = 1,
+    groups: Optional[Dict[str, 'Group']] = None,
 ) -> Tuple[Dict[str, AreaElement], Dict[str, str], Dict[str, 'Node'], int]:
     """Subdivide area elements into a grid of smaller shell elements.
 
@@ -1238,12 +1239,20 @@ def mesh_area_elements(
     subdivided.  The subdivision count along each edge is calculated from
     ``max_size`` so that no sub-element exceeds that dimension.
 
+    Sub-elements inherit:
+      * Section assignment from the parent area.
+      * Thickness from the parent area.
+      * Group membership (if *groups* is provided) — each sub-element is
+        added to every group that contained the parent area ID.
+
     Args:
         area_elements: ``{area_id: AreaElement}`` (modified in place).
         area_assignments: ``{area_id: section_name}`` (modified in place).
         nodes: ``{node_id: Node}`` — new interior nodes are added here.
         area_mesh: ``{area_id: AreaMesh}`` from parsed s2k data.
         next_tag: Next available numeric tag for new nodes and elements.
+        groups: Optional ``{group_name: Group}`` — group memberships are
+            propagated to sub-elements.
 
     Returns:
         ``(area_elements, area_assignments, nodes, next_tag)`` with
@@ -1256,6 +1265,17 @@ def mesh_area_elements(
     _coord_key = lambda x, y, z: (round(x, 6), round(y, 6), round(z, 6))
     _coord_to_id: Dict[tuple, str] = {}
 
+    # ── Pre-build vectorised cache of real SAP2000 nodes ──────────
+    # Avoids a full nodes.items() scan inside each area's mesh loop.
+    _cached_ids: List[str] = []
+    _cached_pos: List[np.ndarray] = []
+    for nid, nd in nodes.items():
+        if nd.node_tag > 999999:
+            continue  # internal tag, not a real SAP2000 node
+        _cached_ids.append(nid)
+        _cached_pos.append(np.array([nd.x, nd.y, nd.z], dtype=float))
+    _cached_pos_arr = np.array(_cached_pos)  # shape (N, 3)
+
     for aid, mesh in area_mesh.items():
         if not mesh.auto_mesh or mesh.max_size <= 0.0:
             continue
@@ -1266,11 +1286,45 @@ def mesh_area_elements(
         if getattr(elem, 'inactive', False):
             continue  # already subdivided in a previous build
 
-        # Seed registry from this area's corner nodes only
+        # Seed registry from this area's corner nodes
         for nid in elem.node_ids:
             nd = nodes.get(nid)
             if nd is not None:
                 _coord_to_id[_coord_key(nd.x, nd.y, nd.z)] = nid
+
+        # Compute area bounding box + plane normal for seeding
+        # existing interior / edge nodes.
+        box_corners = []
+        for nid in elem.node_ids:
+            nd = nodes.get(nid)
+            if nd is not None:
+                box_corners.append(np.array([nd.x, nd.y, nd.z]))
+        if len(box_corners) >= 3:
+            box_pts = np.array(box_corners)
+            bbox_min = box_pts.min(axis=0) - 0.01
+            bbox_max = box_pts.max(axis=0) + 0.01
+            # Cross product of two edges gives plane normal
+            v1 = box_pts[1] - box_pts[0]
+            v2 = box_pts[-1] - box_pts[0]
+            n_plane = np.cross(v1, v2)
+            n_len = np.linalg.norm(n_plane)
+            if n_len > 1e-12:
+                n_plane /= n_len
+                # Vectorised bounding-box + plane-distance mask
+                in_bbox = np.all(
+                    (_cached_pos_arr >= bbox_min) & (_cached_pos_arr <= bbox_max),
+                    axis=1,
+                )
+                near_plane = (
+                    np.abs(np.dot(_cached_pos_arr - box_pts[0], n_plane)) < 0.01
+                )
+                for idx in np.flatnonzero(in_bbox & near_plane):
+                    nid = _cached_ids[idx]
+                    if nid in _coord_to_id:
+                        continue  # already seeded
+                    nd = nodes.get(nid)
+                    if nd is not None:
+                        _coord_to_id[_coord_key(nd.x, nd.y, nd.z)] = nid
 
         # Gather corner nodes, ensuring we have unique corners (4-node quad)
         corner_ids = [str(nid) for nid in elem.node_ids]
@@ -1395,6 +1449,14 @@ def mesh_area_elements(
         # Mark original area as inactive
         elem.inactive = True
 
+        # Determine which groups contain the parent area
+        parent_groups: List[str] = []
+        if groups is not None:
+            for gname, g in groups.items():
+                ref = f"Area:{aid}"
+                if ref in g.objects:
+                    parent_groups.append(gname)
+
         # Create sub-area elements (CCW ordering: 0→1→2→3 per sub-quad)
         sec_name = area_assignments.get(aid, "")
         for j in range(n_v):
@@ -1414,6 +1476,11 @@ def mesh_area_elements(
                 )
                 if sec_name:
                     area_assignments[sub_id] = sec_name
+                # Propagate group membership
+                if parent_groups:
+                    sub_ref = f"Area:{sub_id}"
+                    for gname in parent_groups:
+                        groups[gname].objects.append(sub_ref)
 
     return area_elements, area_assignments, nodes, next_tag
 

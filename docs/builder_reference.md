@@ -5,7 +5,20 @@ specific to pushover analysis.
 
 ---
 
-## Shell edge constraints
+## Shell element support
+
+### Section type
+
+Shell elements (``ShellMITC4``) are created with
+``ops.section('ElasticMembranePlateSection', tag, E, nu, thickness)``.
+
+> ⚠️ **Important:** ``ElasticPlateSection`` does **not** work correctly
+> in OpenSeesPy 3.x — it produces a singular stiffness matrix even for
+> a simple fixed‑edge plate with a centre point load.  Always use
+> ``ElasticMembranePlateSection`` instead.  This is handled automatically
+> by the builder since commit 988ef43.
+
+### Shell edge constraints
 
 When two shell meshes of different densities meet along a common edge,
 the finer mesh introduces extra nodes that are not connected to the

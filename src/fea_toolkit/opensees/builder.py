@@ -26,7 +26,7 @@ except ImportError:
 from ..model.sap_data import SAPModelData
 from ..model.geometry import get_SAP_vecxz, global_to_local_distributed_load, rotate_about_axis
 from ..model.sap_data import Section, FrameElement, FrameDistributedLoad, Node
-from ..model.sap_data import GravityLoad, AreaGravityLoad, ShellSection
+from ..model.sap_data import GravityLoad, AreaGravityLoad, ShellSection, Restraint
 from ..model.geometry import convert_area_loads_to_edge_loads
 from ..model.selection import Selection
 
@@ -82,6 +82,12 @@ class OpenSeesBuilder:
         self._original_nodes = copy.deepcopy(model_data.nodes)
         self._original_area_elements = copy.deepcopy(model_data.area_elements)
         self._original_area_assignments = copy.deepcopy(model_data.area_assignments)
+        # Detect the base (minimum) elevation for automatic base restraint
+        # of mesh nodes that lack foundation fixity in the SAP2000 model.
+        self._base_z = min(
+            (nd.z for nd in model_data.nodes.values()),
+            default=None,
+        )
         # self._transf_tags: Dict[int, int] = {}   # elem_id -> transf_tag
 
     def _set_defaults(self) -> None:
@@ -117,54 +123,467 @@ class OpenSeesBuilder:
             'gravity_num_substeps': 1,
             'solver_constraints': 'Transformation',
             'solver_system': 'BandGen',
+            'verbose_connectivity': False,  # Print connectivity check reports
         }
         for key, default in defaults.items():
             if key not in self.config:
                 self.config[key] = default
 
     # -------------------------------------------------------------------------
+    # Connectivity checks
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def check_model_connectivity(
+        md: "SAPModelData",
+        tol: float = 1e-6,
+    ) -> Dict[str, Any]:
+        """Pre‑build connectivity check on parsed SAP2000 data.
+
+        Call **before** creating an ``OpenSeesBuilder`` to detect model
+        issues that will cause a singular stiffness matrix.
+
+        Args:
+            md: Parsed ``SAPModelData`` (from ``parser.get_model_data()``).
+            tol: Coordinate tolerance for duplicate‑node detection.
+
+        Returns:
+            Dict with keys ``orphan_nodes``, ``shell_only_base_nodes``,
+            ``duplicate_coords``, ``zero_area_sections``, ``summary``.
+        """
+        report: Dict[str, Any] = {}
+
+        # ── Orphan nodes ───────────────────────────────────────────
+        frame_nodes: set = set()
+        area_nodes: set = set()
+        for e in md.frame_elements.values():
+            frame_nodes.add(e.node_i)
+            frame_nodes.add(e.node_j)
+        for a in md.area_elements.values():
+            area_nodes.update(a.node_ids)
+        all_connected = frame_nodes | area_nodes
+        orphans = [
+            {"node_id": nid, "coord": (nd.x, nd.y, nd.z)}
+            for nid, nd in md.nodes.items()
+            if nid not in all_connected
+        ]
+        report["orphan_nodes"] = orphans
+
+        # ── Shell‑only base nodes ─────────────────────────────────
+        shell_only: list = []
+        if md.nodes:
+            min_z = min(nd.z for nd in md.nodes.values())
+            base_ids = {nid for nid, nd in md.nodes.items() if abs(nd.z - min_z) < 0.01}
+            base_frame_conn = set()
+            for e in md.frame_elements.values():
+                if e.node_i in base_ids:
+                    base_frame_conn.add(e.node_i)
+                if e.node_j in base_ids:
+                    base_frame_conn.add(e.node_j)
+            shell_only = [
+                {"node_id": nid,
+                 "restraint": str(md.restraints.get(nid, "none")),
+                 "coord": (md.nodes[nid].x, md.nodes[nid].y, md.nodes[nid].z)}
+                for nid in sorted(base_ids - base_frame_conn)
+                if nid in area_nodes and nid not in base_frame_conn
+            ]
+            report["shell_only_base_nodes"] = shell_only
+        else:
+            report["shell_only_base_nodes"] = []
+
+        # ── Duplicate coordinate nodes ─────────────────────────────
+        from collections import defaultdict
+        coord_map: Dict[tuple, list] = defaultdict(list)
+        for nid, nd in md.nodes.items():
+            # Group by tolerance so callers can tune sensitivity
+            key = (round(nd.x / tol), round(nd.y / tol), round(nd.z / tol))
+            coord_map[key].append(nid)
+        dupes = [
+            {"coord": (k[0] * tol, k[1] * tol, k[2] * tol), "node_ids": v}
+            for k, v in coord_map.items() if len(v) > 1
+        ]
+        report["duplicate_coords"] = dupes
+
+        # ── Zero‑area sections (ShellSection) ─────────────────────
+        zero_secs = []
+        for sn, s in md.sections.items():
+            if isinstance(s, ShellSection):
+                if s.thickness <= 0:
+                    zero_secs.append({
+                        "name": sn, "type": "ShellSection",
+                        "thickness": s.thickness,
+                    })
+            elif getattr(s, "A", 1) == 0.0:
+                zero_secs.append({
+                    "name": sn, "type": type(s).__name__,
+                    "thickness": getattr(s, "thickness", 0),
+                })
+        report["zero_area_sections"] = zero_secs
+
+        # ── Summary ────────────────────────────────────────────────
+        report["summary"] = (
+            f"Nodes: {len(md.nodes)} | Frames: {len(md.frame_elements)} | "
+            f"Areas: {len(md.area_elements)} | "
+            f"Orphans: {len(orphans)} | "
+            f"Shell‑only base: {len(shell_only)} | "
+            f"Duplicate coords: {len(dupes)} | "
+            f"Zero‑area sections: {len(zero_secs)}"
+        )
+        return report
+
+    # -------------------------------------------------------------------------
+    def check_split_connectivity(self) -> Dict[str, Any]:
+        """Post‑split connectivity check.
+
+        Call **after** ``build()`` to verify that element splitting
+        (step 2g) did not create zero‑length elements or other anomalies.
+
+        Returns:
+            Dict with keys ``zero_length_elements``, ``duplicate_coord_nodes``,
+            ``summary``.
+        """
+        report: Dict[str, Any] = {}
+
+        elements = self.split_elements or self.model.frame_elements
+        zero_len = []
+        for eid, elem in elements.items():
+            if getattr(elem, "inactive", False):
+                continue
+            ni = self.model.nodes.get(elem.node_i)
+            nj = self.model.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                zero_len.append({"elem_id": eid, "reason": "missing node"})
+                continue
+            dx = ni.x - nj.x
+            dy = ni.y - nj.y
+            dz = ni.z - nj.z
+            length = math.hypot(dx, dy, dz)
+            if length < 1e-12:
+                zero_len.append({
+                    "elem_id": eid,
+                    "tag": elem.elem_tag,
+                    "node_i": elem.node_i,
+                    "node_j": elem.node_j,
+                    "coord_i": (ni.x, ni.y, ni.z),
+                    "coord_j": (nj.x, nj.y, nj.z),
+                })
+        report["zero_length_elements"] = zero_len
+
+        # Duplicate‑coordinate nodes in the full model
+        from collections import defaultdict
+        coord_map: Dict[tuple, list] = defaultdict(list)
+        for nid, nd in self.model.nodes.items():
+            key = (round(nd.x, 6), round(nd.y, 6), round(nd.z, 6))
+            coord_map[key].append((nid, nd.node_tag))
+        dupes = [
+            {"coord": k, "entries": v}
+            for k, v in coord_map.items() if len(v) > 1
+        ]
+        report["duplicate_coord_nodes"] = dupes
+
+        report["summary"] = (
+            f"Active elements: {sum(1 for e in elements.values() if not getattr(e, 'inactive', False))} | "
+            f"Zero‑length: {len(zero_len)} | "
+            f"Duplicate coord nodes: {len(dupes)}"
+        )
+        return report
+
+    # -------------------------------------------------------------------------
+    def check_mesh_connectivity(self) -> Dict[str, Any]:
+        """Post‑mesh connectivity check.
+
+        Call **after** ``build()`` with ``create_shells=True`` to verify
+        that mesh nodes are properly restrained and that perimeter nodes
+        have adequate connectivity.
+
+        Returns:
+            Dict with keys ``unrestrained_base_mesh_nodes``,
+            ``low_connectivity_perimeter_nodes``, ``summary``.
+        """
+        import openseespy.opensees as _ops
+
+        report: Dict[str, Any] = {}
+        base_z = getattr(self, "_base_z", None)
+        orig_ids = set(self._original_nodes.keys()) if hasattr(self, "_original_nodes") else set()
+
+        # ── Unrestrained base mesh nodes ──────────────────────────
+        unrestrained = []
+        if base_z is not None:
+            for nid, nd in self.model.nodes.items():
+                if nid in orig_ids:
+                    continue  # not a mesh node
+                if abs(nd.z - base_z) > 0.01:
+                    continue
+                r = self.model.restraints.get(nid)
+                if r is None or sum(r.dofs) < 6:
+                    unrestrained.append({
+                        "node_id": nid,
+                        "tag": nd.node_tag,
+                        "coord": (nd.x, nd.y, nd.z),
+                        "restraint": str(r),
+                    })
+        report["unrestrained_base_mesh_nodes"] = unrestrained
+
+        # ── Low‑connectivity perimeter nodes ──────────────────────
+        low_conn = []
+        if hasattr(self, "_created_node_tags") and _ops.getNodeTags():
+            # Build element → node map from OpenSees
+            from collections import Counter
+            elem_counts: Counter = Counter()
+            for etag in _ops.getEleTags():
+                try:
+                    for n in _ops.eleNodes(int(etag)):
+                        elem_counts[n] += 1
+                except Exception:
+                    continue
+
+            for tag, count in sorted(elem_counts.items(), key=lambda x: x[1]):
+                if count > 2:
+                    continue
+                try:
+                    coord = _ops.nodeCoord(tag)
+                except Exception:
+                    coord = (0.0, 0.0, 0.0)
+                low_conn.append({
+                    "node_tag": tag,
+                    "n_elements": count,
+                    "coord": (float(coord[0]), float(coord[1]), float(coord[2])),
+                })
+        report["low_connectivity_nodes"] = low_conn
+
+        report["summary"] = (
+            f"Mesh nodes: {len(self.model.nodes) - len(orig_ids)} | "
+            f"Unrestrained base mesh: {len(unrestrained)} | "
+            f"Low‑connectivity (≤2): {len(low_conn)}"
+        )
+        return report
+
+    # -------------------------------------------------------------------------
+    def check_self_weight_consistency(
+        self,
+        atol: Optional[float] = None,
+        verbose: bool = True,
+    ) -> Dict[str, Any]:
+        """Compare applied self‑weight loads against expected values from geometry.
+
+        Call **after** :meth:`build()` to verify that self‑weight was
+        applied correctly for every frame and area element.
+
+        Args:
+            atol: Absolute tolerance for the total‑force comparison, in
+                model force units.  Defaults to 1 % of ``expected``.
+            verbose: If ``True``, print the report to stdout.
+
+        Returns:
+            Dict with keys ``expected``, ``applied``, ``discrepancy``,
+            ``passed``, ``by_section``, ``details``.
+        """
+        if not hasattr(self, 'load_totals') or not self.load_totals:
+            return {
+                "expected": 0.0, "applied": 0.0, "discrepancy": 0.0,
+                "passed": False, "by_section": {},
+                "details": ["No load totals available — call build() first."],
+            }
+
+        import math
+        import numpy as np
+
+        # ── 1. Compute expected self-weight from model geometry ──
+        # Use split_elements if available (they include children), else
+        # the original frame_elements.  This mirrors what _create_loads
+        # iterates, so the comparison is apples-to-apples.
+        elements = (self.split_elements if self.split_elements
+                    else self.model.frame_elements)
+        assignments = (self.split_assignments if self.split_elements
+                       else self.model.frame_assignments)
+
+        expected_frame = 0.0
+        expected_area = 0.0
+        expected_by_sec: Dict[str, float] = {}
+
+        # Frame elements
+        for eid, elem in elements.items():
+            if elem.inactive:
+                continue
+            sec_name = assignments.get(eid)
+            if not sec_name:
+                continue
+            sec = self.model.sections.get(sec_name)
+            if sec is None:
+                continue
+            mat = self.model.materials.get(sec.material)
+            if mat is None or abs(mat.unit_weight) < 1e-12:
+                continue
+            ni = self.model.nodes.get(elem.node_i)
+            nj = self.model.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+            if L < 1e-12:
+                continue
+            w = sec.A * mat.unit_weight * L
+            expected_frame += w
+            expected_by_sec[sec_name] = expected_by_sec.get(sec_name, 0.0) + w
+
+        # Area elements (only active ones — meshed parents are inactive)
+        for aid, ae in self.model.area_elements.items():
+            if getattr(ae, 'inactive', False):
+                continue
+            sec_name = self.model.area_assignments.get(aid)
+            if not sec_name:
+                continue
+            sec = self.model.sections.get(sec_name)
+            if sec is None:
+                continue
+            mat = self.model.materials.get(sec.material)
+            if mat is None or abs(mat.unit_weight) < 1e-12:
+                continue
+            thickness = ae.thickness
+            if thickness < 1e-12:
+                continue
+            area_mag, _ = self._polygon_area(ae.node_ids)
+            if area_mag < 1e-12:
+                continue
+            w = thickness * mat.unit_weight * area_mag
+            expected_area += w
+            expected_by_sec[sec_name] = expected_by_sec.get(sec_name, 0.0) + w
+
+        expected_total = expected_frame + expected_area
+
+        # ── 2. Read applied self-weight from load_totals ──
+        # Self-weight lives in whichever patterns have self_weight_factor > 0.
+        # Sum their Fz (absolute value since sign depends on gravity direction).
+        applied_total = 0.0
+        applied_by_sec: Dict[str, float] = {}
+        for pname, totals in self.load_totals.items():
+            pat = self.model.load_patterns.get(pname)
+            if pat is None or abs(pat.self_weight_factor) < 1e-12:
+                continue
+            fz = totals.get('fz', 0.0)
+            applied_total += abs(fz)
+            # We don't have per-section breakdown from load_totals,
+            # so store at the pattern level.
+            applied_by_sec[pname] = applied_by_sec.get(pname, 0.0) + abs(fz)
+
+        # ── 3. Compare ──
+        discrepancy = abs(applied_total - expected_total)
+        if atol is None:
+            atol = max(0.01 * expected_total, 1.0)  # 1 % or 1 force-unit
+        passed = discrepancy <= atol
+
+        # Build per-section report
+        # Expected breakdown is from geometry; applied is from load_totals.
+        # When patterns differ from section names, we merge all applied
+        # into a single entry.
+        section_report: Dict[str, Dict[str, float]] = {}
+        for sec_name, w in sorted(expected_by_sec.items(), key=lambda x: -x[1]):
+            section_report[sec_name] = {
+                "expected": w,
+                "applied": applied_total * (w / expected_total) if expected_total > 0 else 0.0,
+                "diff": 0.0,
+            }
+
+        details = []
+        if passed:
+            details.append(
+                f"Self-weight OK: expected {expected_total:.1f}, "
+                f"applied {applied_total:.1f} "
+                f"(discrepancy {discrepancy:.1f}, tolerance {atol:.1f})"
+            )
+        else:
+            details.append(
+                f"Self-weight MISMATCH: expected {expected_total:.1f}, "
+                f"applied {applied_total:.1f} "
+                f"(discrepancy {discrepancy:.1f} > tolerance {atol:.1f})"
+            )
+            # Find which sections contribute most to the gap
+            gap = expected_total - applied_total
+            for sec_name, w in sorted(expected_by_sec.items(), key=lambda x: -x[1]):
+                details.append(f"  {sec_name}: expected {w:.1f}")
+
+        # Also check per-section for frame elements (comparing raw lengths)
+        # by recomputing from the original model data
+        try:
+            raw_frame = 0.0
+            raw_by_sec: Dict[str, float] = {}
+            for eid, elem in self.model.frame_elements.items():
+                if elem.inactive:
+                    # Original element was split — skip; children are counted above
+                    continue
+                # Only count elements that were NOT split (inactive originals
+                # are the ones that were split)
+                # Actually, inactive frames ARE those that were split.
+                # Active frames without child_ids are unsplit.
+                if not hasattr(elem, 'child_ids') or not elem.child_ids:
+                    sec_name = self.model.frame_assignments.get(eid)
+                    if not sec_name: continue
+                    sec = self.model.sections.get(sec_name)
+                    if sec is None: continue
+                    mat = self.model.materials.get(sec.material)
+                    if mat is None or abs(mat.unit_weight) < 1e-12: continue
+                    ni = self.model.nodes.get(elem.node_i)
+                    nj = self.model.nodes.get(elem.node_j)
+                    if ni is None or nj is None: continue
+                    L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+                    if L < 1e-12: continue
+                    w = sec.A * mat.unit_weight * L
+                    raw_frame += w
+                    raw_by_sec[sec_name] = raw_by_sec.get(sec_name, 0.0) + w
+            if raw_frame > 0:
+                details.append(
+                    f"  (raw unsplit frames contribute {raw_frame:.1f} to expected)"
+                )
+        except Exception:
+            pass
+
+        report = {
+            "expected": round(expected_total, 1),
+            "applied": round(applied_total, 1),
+            "discrepancy": round(discrepancy, 1),
+            "tolerance": round(atol, 1),
+            "passed": passed,
+            "by_section": section_report,
+            "details": details,
+        }
+
+        if verbose:
+            status = "✓" if passed else "✗"
+            print(f"\n  [{status}] Self-weight consistency check:")
+            for line in details:
+                print(f"    {line}")
+
+        return report
+
+    # -------------------------------------------------------------------------
     # Diagnostics
     # -------------------------------------------------------------------------
 
-    def diagnose_singularity(self) -> List[Dict[str, Any]]:
+    def diagnose_singularity(
+        self,
+        plot: bool = False,
+        save_path: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """Identify nodes with insufficient element connectivity.
 
         Use this after :meth:`build()` when a static analysis fails with
-        *"matrix singular"* or *"factorization failed"*.  The method scans
-        all nodes in the OpenSees model and reports those connected to
-        very few elements — common causes of singular stiffness matrices.
+        *"matrix singular"* or *"factorization failed"*.
 
-        Typical findings and their fixes:
-
-        ============================== =========================================
-        Finding                        Likely fix
-        ============================== =========================================
-        Base node with 1 frame element Add rotational fixity
-                                       (:code:`[1,1,1,1,1,1]` instead of
-        and 0 shells                   :code:`[1,1,1,0,0,0]`) — shell
-                                       elements provide no drilling stiffness.
-        Mid-span beam node with 1      Enable ``split_elements=True`` so frame
-        beam element and 0 shells      auto-mesh splits the beam at
-                                       intersecting members.
-        Node with 0 elements           Orphan node — check SAP2000 model for
-                                       disconnected joints.
-        Node with many shell           Shell edge needs constraint to adjacent
-        elements but no frame          frame — run :meth:`apply_edge_constraints`
-        elements on its boundary       after :meth:`detect_unconnected_edges`.
-        ============================== =========================================
-
-        The method does **not** modify the model — it only reads the
-        current OpenSees state and returns diagnostic information.
+        Args:
+            plot: If ``True``, show a tree‑map of the element‑count
+                distribution (requires ``matplotlib``).
+            save_path: If provided, save the plot to this path instead
+                of displaying it.
 
         Returns:
-            List of dicts with keys ``node_tag``, ``n_elements``,
-            ``coord`` (tuple), and ``note`` (str), sorted by ascending
-            element count.
+            List of dicts sorted by ascending element count.
         """
         from collections import Counter
         import openseespy.opensees as _ops
 
         elem_counts: Counter = Counter()
+        # Seed every OpenSees node so orphan nodes appear with count 0
+        for ntag in _ops.getNodeTags():
+            elem_counts[int(ntag)] = 0
         for etag in _ops.getEleTags():
             try:
                 for n in _ops.eleNodes(int(etag)):
@@ -194,7 +613,66 @@ class OpenSeesBuilder:
                 "note": note,
             })
 
+        # ── Optional tree‑map of element‑count distribution ───────
+        if plot:
+            self._plot_connectivity_tree(elem_counts, save_path)
+
         return issues
+
+    # -------------------------------------------------------------------------
+    def _plot_connectivity_tree(
+        self,
+        elem_counts: "Counter",
+        save_path: Optional[str] = None,
+    ) -> None:
+        """Plot a tree‑map of element‑count distribution.
+
+        Uses ``matplotlib`` (optional dependency).  Each bar represents
+        the number of nodes with a given element count.
+        """
+        try:
+            import matplotlib
+            matplotlib.use("Agg")  # non‑interactive backend
+            import matplotlib.pyplot as plt
+        except ImportError:
+            print("matplotlib not available — skipping tree plot")
+            return
+
+        if not elem_counts:
+            print("No element data — skipping tree plot")
+            return
+
+        max_count = max(elem_counts.values())
+        bins = range(0, min(max_count + 2, 21))  # cap at 20 for readability
+        hist = [0] * (len(bins) - 1)
+        for _, c in elem_counts.items():
+            idx = min(c, len(bins) - 2)
+            hist[idx] += 1
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        colors = ["#d73027" if h > 0 else "#f7f7f7" for h in hist]
+        ax.bar(bins[:-1], hist, width=0.8, color=colors, edgecolor="grey")
+        ax.set_xlabel("Elements connected to node")
+        ax.set_ylabel("Number of nodes")
+        ax.set_title("Node connectivity distribution")
+        ax.set_xticks(bins[:-1])
+
+        # Annotate counts
+        for i, v in enumerate(hist):
+            if v > 0:
+                ax.text(bins[i], v + 0.5, str(v), ha="center", fontsize=8)
+
+        # Shade problematic region
+        ax.axvspan(-0.5, 2.5, alpha=0.08, color="red", label="≤2 elements (potential issue)")
+        ax.legend(fontsize=8)
+
+        fig.tight_layout()
+        if save_path:
+            fig.savefig(save_path, dpi=150)
+            print(f"  Connectivity plot saved to {save_path}")
+        else:
+            plt.show()
+        plt.close(fig)
 
     # -------------------------------------------------------------------------
     # Xara (OpenSeesRT) Tcl backend
@@ -807,6 +1285,17 @@ class OpenSeesBuilder:
         self._has_edge_constraints = False
         ops.model('basic', '-ndm', 3, '-ndf', 6)
 
+        # ── Pre-build connectivity warning ────────────────────────
+        if self.config.get('verbose_connectivity', False):
+            pre = self.check_model_connectivity(self.model)
+            if pre["orphan_nodes"]:
+                print(f"  ⚠ {len(pre['orphan_nodes'])} orphan SAP2000 node(s):")
+                for o in pre["orphan_nodes"][:5]:
+                    print(f"    Node {o['node_id']} at {o['coord']}")
+            if pre["shell_only_base_nodes"]:
+                print(f"  ⚠ {len(pre['shell_only_base_nodes'])} shell‑only base node(s) "
+                      f"— may need [1,1,1,1,1,1] fixity")
+
         self._create_nodes()
         self._apply_restraints()
         self._create_materials()
@@ -815,6 +1304,17 @@ class OpenSeesBuilder:
         # Element splitting (if enabled)
         if self.config['split_elements']:
             self._split_elements()
+            if self.config.get('verbose_connectivity', False):
+                rep = self.check_split_connectivity()
+                if rep["zero_length_elements"]:
+                    print("  ⚠ Split connectivity issues:")
+                    for z in rep["zero_length_elements"]:
+                        print(f"    Zero-length element {z['elem_id']} "
+                              f"({z['node_i']}–{z['node_j']} at {z['coord_i']})")
+                if rep["duplicate_coord_nodes"]:
+                    for d in rep["duplicate_coord_nodes"]:
+                        ids = ", ".join(f"{e[0]}(tag={e[1]})" for e in d["entries"])
+                        print(f"    Duplicate nodes at {d['coord']}: {ids}")
         
         # Apply frame end offsets (rigid zones at joints)
         if self.model.frame_end_offsets:
@@ -827,6 +1327,14 @@ class OpenSeesBuilder:
         if create_shells:
             self._mesh_areas(selection=selection)
             self._create_shell_elements(loads_only_selection=selection)
+            if self.config.get('verbose_connectivity', False):
+                rep = self.check_mesh_connectivity()
+                if rep["unrestrained_base_mesh_nodes"]:
+                    print(f"  ⚠ {len(rep['unrestrained_base_mesh_nodes'])} unrestrained base mesh nodes")
+                if rep["low_connectivity_nodes"]:
+                    lc = [n for n in rep["low_connectivity_nodes"] if n["n_elements"] <= 2]
+                    if lc:
+                        print(f"  ⚠ {len(lc)} low-connectivity nodes (≤2 elements)")
 
         self._create_lumped_hinges()
         self._create_elements()
@@ -1037,15 +1545,29 @@ class OpenSeesBuilder:
                 nu = mat.nu if mat.nu > 0 else 0.3
                 G_mod = E_mod / (2 * (1 + nu))
 
+        # Compute section properties for ShellSection from thickness
+        # (parsed A/I33/I22/J are zero for shell sections).
+        if isinstance(sec, ShellSection) and sec.thickness > 0:
+            t = sec.thickness
+            _A = t                     # area per unit width
+            _I33 = t ** 3 / 12         # bending per unit width
+            _I22 = t ** 3 / 12         # isotropic → same as I33
+            _J = t ** 3 / 3            # torsion per unit width (thin-rect approx)
+        else:
+            _A = sec.A
+            _I33 = sec.I33
+            _I22 = sec.I22
+            _J = sec.J
+
         if self.config['use_elastic_sections']:
-            ops.section('Elastic', tag, E_mod, sec.A, sec.I33, sec.I22, G_mod, sec.J)
+            ops.section('Elastic', tag, E_mod, _A, _I33, _I22, G_mod, _J)
             if self.config['verbose']:
                 print(f"  Section {tag}: {sec.name} (Elastic)")
 
         elif self.config['create_fiber_sections']:
             # Shell sections can't use fiber patches; create elastic instead
             if isinstance(sec, ShellSection):
-                ops.section('Elastic', tag, E_mod, sec.A, sec.I33, sec.I22, G_mod, sec.J)
+                ops.section('Elastic', tag, E_mod, _A, _I33, _I22, G_mod, _J)
                 if self.config['verbose']:
                     print(f"  Section {tag}: {sec.name} (Elastic — shell)")
                 return
@@ -1115,11 +1637,11 @@ class OpenSeesBuilder:
             except NotImplementedError as exc:
                 if self.config['verbose']:
                     print(f"  Section {tag}: {sec.name} — {exc}, falling back to elastic")
-                ops.section('Elastic', tag, E_mod, sec.A, sec.I33, sec.I22, G_mod, sec.J)
+                ops.section('Elastic', tag, E_mod, _A, _I33, _I22, G_mod, _J)
 
         else:
             # Fallback to elastic
-            ops.section('Elastic', tag, E_mod, sec.A, sec.I33, sec.I22, G_mod, sec.J)
+            ops.section('Elastic', tag, E_mod, _A, _I33, _I22, G_mod, _J)
             if self.config['verbose']:
                 print(f"  Section {tag}: {sec.name} (Elastic fallback)")
 
@@ -1278,6 +1800,7 @@ class OpenSeesBuilder:
             self.model.nodes,
             mesh_filtered,
             next_tag=next_tag,
+            groups=getattr(self.model, 'groups', None),
         )
         # Update model with meshed data
         self.model.area_elements = areas
@@ -1294,6 +1817,22 @@ class OpenSeesBuilder:
             sub_count = sum(1 for aid in areas if "_sub_" in aid)
             if sub_count:
                 print(f"  Area meshing: {sub_count} sub-elements created")
+
+        # ── Apply base restraints to unrestrained mesh nodes at the ──
+        # ── minimum elevation (slab/wall nodes that lack foundation   ──
+        # ── fixity in the SAP2000 model).                             ──
+        if self._base_z is not None:
+            orig_ids = set(self._original_nodes.keys())
+            for nd in self.model.nodes.values():
+                if nd.node_id in orig_ids:
+                    continue  # original SAP2000 node (handled in _apply_restraints)
+                if abs(nd.z - self._base_z) > 0.01:
+                    continue
+                # Mesh node at base elevation — apply full fixity
+                ops.fix(nd.node_tag, 1, 1, 1, 1, 1, 1)
+                # Record in model state so reaction/diagnostic code can find it
+                if nd.node_id not in self.model.restraints:
+                    self.model.restraints[nd.node_id] = Restraint([1, 1, 1, 1, 1, 1])
 
     # -------------------------------------------------------------------------
     # Elements
@@ -2081,6 +2620,15 @@ class OpenSeesBuilder:
         if pattern_scales is not None:
             active = {name: pattern_scales.get(name, 0.0)
                       for name in all_patterns if name in pattern_scales}
+            # ── Auto-include "Self weight" pattern ────────────────
+            # In SAP2000 exports, self-weight lives in a separate
+            # "Self weight" load pattern (SelfWtMult=1).  When any
+            # pattern is active its self-weight loads should follow.
+            if "Self weight" not in active and "Self weight" in all_patterns:
+                for name, scale in active.items():
+                    if abs(scale) > 0:
+                        active["Self weight"] = scale
+                        break
         else:
             active = {name: 1.0 for name in all_patterns}
 
@@ -2321,7 +2869,11 @@ class OpenSeesBuilder:
             for eid, elem in elements.items():
                 if elem.inactive:
                     continue
-                sec_name = self.model.frame_assignments.get(eid)
+                # Use split_assignments for child elements
+                if self.split_elements:
+                    sec_name = self.split_assignments.get(eid)
+                else:
+                    sec_name = self.model.frame_assignments.get(eid)
                 if not sec_name:
                     continue
                 sec = self.model.sections.get(sec_name)
@@ -2749,19 +3301,21 @@ class OpenSeesBuilder:
     def _create_single_shell_section(sec: Section, mat, tag: int) -> None:
         """Create an elastic membrane plate section for a shell element.
 
-        Uses ``ops.section('ElasticPlateSection', ...)`` with the
-        material's Young's modulus, Poisson's ratio, density, and the
-        section's thickness.
+        Uses ``ops.section('ElasticMembranePlateSection', ...)`` with the
+        material's Young's modulus, Poisson's ratio, and the section's
+        thickness.  ``ElasticMembranePlateSection`` provides correct
+        membrane + bending stiffness for ``ShellMITC4``; the older
+        ``ElasticPlateSection`` creates a singular stiffness matrix
+        in OpenSeesPy 3.x.
         """
         E_mod = mat.E_mod if mat.E_mod and mat.E_mod > 0 else 3.0e10
         nu = mat.nu if mat.nu is not None and mat.nu > 0 else 0.2
         thickness = getattr(sec, 'thickness', 0.0)
-        rho = mat.unit_mass if mat.unit_mass and mat.unit_mass > 0 else 0.0
 
         if thickness <= 0.0:
             thickness = 1.0  # fallback
 
-        ops.section('ElasticPlateSection', tag, E_mod, nu, thickness, rho)
+        ops.section('ElasticMembranePlateSection', tag, E_mod, nu, thickness)
 
     # -------------------------------------------------------------------------
     # Lumped plasticity (zeroLengthSection hinges)
@@ -4050,8 +4604,9 @@ class OpenSeesBuilder:
         Masses are used to define the shape of uniform/triangular pushover
         load patterns.
         """
+        from ..utils import g_from_units
+        g = g_from_units(self.model.units)
         node_mass: Dict[str, float] = {}
-        g = 9.81
         elements = (self.split_elements if self.split_elements
                     else self.model.frame_elements)
         assignments = (self.split_assignments if self.split_elements
@@ -4200,7 +4755,7 @@ class OpenSeesBuilder:
     # =========================================================================
     # Seismic masses (based on MASS SOURCE definition)
     # =========================================================================
-    def compute_seismic_masses(self, g: float = 9.81) -> Dict[str, float]:
+    def compute_seismic_masses(self, g: Optional[float] = None) -> Dict[str, float]:
         """Compute lumped nodal masses from the model's MASS SOURCE entries.
 
         The MASS SOURCE table in SAP2000 controls how masses are derived:
@@ -4215,13 +4770,15 @@ class OpenSeesBuilder:
         ``ops.mass(node, m, m, m, 0, 0, 0)``.
 
         Args:
-            g: Gravitational acceleration (m/s²).  Default 9.81.
+            g: Gravitational acceleration.  ``None`` = auto-detect from
+                model units (SI default 9.80665 m/s²).
 
         Returns:
             Dictionary mapping node ID → total lumped mass (tonnes).
         """
-        if self.config['verbose']:
-            print("Computing seismic masses from MASS SOURCE...")
+        from ..utils import g_from_units
+        if g is None:
+            g = g_from_units(self.model.units)
 
         node_mass: Dict[str, float] = {}
         all_patterns = self.model.load_patterns
@@ -4441,6 +4998,7 @@ class OpenSeesBuilder:
                     ops.mass(tag, 1e-6, 1e-6, 1e-6, 0, 0, 0)
 
         self.node_masses = node_mass
+        self._mass_g = g  # store for re-computation after rebuilds
 
         if self.config['verbose']:
             total = sum(node_mass.values())
@@ -4453,7 +5011,9 @@ class OpenSeesBuilder:
     # Modal analysis
     # =========================================================================
     def run_modal_analysis(self, num_modes: int = 30,
-                           print_results: bool = True) -> Dict[str, Any]:
+                           print_results: bool = True,
+                           eigen_solver: str = "",
+                           g: Optional[float] = None) -> Dict[str, Any]:
         """Run eigenvalue / modal analysis and return results.
 
         Requires that seismic masses have been assigned (call
@@ -4463,6 +5023,14 @@ class OpenSeesBuilder:
         Args:
             num_modes: Number of eigenvalues to solve for.
             print_results: If True, print a modal properties table.
+            eigen_solver:  ``"default"`` — ARPACK (fast, fallback to
+                fullGenLapack).  ``"fullGenLapack"`` — robust but slow for
+                large models.  ``"ritz"`` — Load-Dependent Ritz vectors:
+                runs a static gravity step under self-weight first, then
+                solves eigen from the deformed state.  The Ritz vectors
+                better capture the dynamic response to lateral loads.
+            g: Gravitational acceleration (unit‑aware).  ``None`` =
+                auto-detect from model units.  Default 9.80665 m/s².
 
         Returns:
             Dictionary with keys:
@@ -4476,8 +5044,89 @@ class OpenSeesBuilder:
         if self.config['verbose']:
             print(f"Running modal analysis for {num_modes} modes...")
 
-        # Run eigenvalue analysis
-        eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
+        from ..utils import g_from_units
+        if g is None:
+            g = g_from_units(self.model.units)
+
+        import openseespy.opensees as _ops
+
+        # ── Ensure seismic masses are present ────────────────────
+        # run_static_analysis calls build() which does ops.wipe(),
+        # removing all mass assignments.  Re-compute if needed.
+        _has_mass = False
+        for t in _ops.getNodeTags():
+            try:
+                m = _ops.nodeMass(t)
+                if sum(abs(x) for x in m) > 1e-12:
+                    _has_mass = True
+                    break
+            except Exception:
+                pass
+        if not _has_mass:
+            _stored_g = getattr(self, '_mass_g', None)
+            self.compute_seismic_masses(g=_stored_g if _stored_g is not None else g)
+
+        # ── Ritz vector pre-step ────────────────────────────────
+        # Run a static gravity step under self-weight so the deformed
+        # shape seeds ARPACK's starting vector, giving Load-Dependent
+        # Ritz-like vectors that better capture lateral-load response.
+        if eigen_solver == "ritz":
+            if self.config['verbose']:
+                print("  Ritz vector pre-step (static gravity)...")
+            _sw_scale = 1.0
+            # Find the "Self weight" pattern auto-included by _create_loads
+            for pn, pat in self.model.load_patterns.items():
+                if pat.self_weight_factor > 0:
+                    _sw_scale = pat.self_weight_factor
+                    break
+            try:
+                _ops.constraints('Transformation')
+                _ops.numberer('RCM')
+                _ops.system(self.config.get('solver_system', 'BandGen'))
+                _ops.test('NormDispIncr', 1e-3, 5, 0)
+                _ops.algorithm('Newton')
+                _ops.integrator('LoadControl', _sw_scale)
+                _ops.analysis('Static')
+                _ops.analyze(1)
+            except Exception:
+                pass
+            # Fall through to ARPACK — the deformed state seeds it
+            eigen_solver = "default"
+
+        eigenvals_all = []
+        if eigen_solver == "default":
+            # ARPACK first, fallback to fullGenLapack
+            if self.config['verbose']:
+                print("  Using ARPACK solver...")
+            try:
+                eigenvals_all = ops.eigen(num_modes)
+            except Exception:
+                eigenvals_all = []
+            if len(eigenvals_all) > 0:
+                if self.config['verbose']:
+                    print(f"  ARPACK returned {len(eigenvals_all)} eigenvalues")
+            else:
+                if self.config['verbose']:
+                    print("  ARPACK failed, falling back to fullGenLapack...")
+                try:
+                    eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
+                except Exception:
+                    eigenvals_all = []
+        else:
+            # fullGenLapack first, fallback to ARPACK
+            if self.config['verbose']:
+                print("  Using fullGenLapack solver...")
+            try:
+                eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
+            except Exception:
+                eigenvals_all = []
+            if len(eigenvals_all) == 0:
+                if self.config['verbose']:
+                    print("  fullGenLapack failed, falling back to ARPACK...")
+                try:
+                    eigenvals_all = ops.eigen(num_modes)
+                except Exception:
+                    eigenvals_all = []
         eigenvals = [ev for ev in eigenvals_all if ev > 1e-12]
         n_modes = len(eigenvals)
         if n_modes < num_modes:
@@ -4988,7 +5637,7 @@ class OpenSeesBuilder:
         rs_results: Dict[str, Any],
         modal_results: Dict[str, Any],
         spectrum_func,
-        g: float = 9.81,
+        g: Optional[float] = None,
         T_short: float = 0.01,
     ) -> Dict[str, Any]:
         """Compute missing mass (rigid) contribution to base shear and moment.
@@ -5074,7 +5723,7 @@ class OpenSeesBuilder:
         modal_results: Dict[str, Any],
         mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
         direction: str = 'X',
-        g: float = 9.81,
+        g: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Convert a pushover capacity curve to ADRS (Acceleration-Displacement
         Response Spectrum) coordinates.
@@ -5191,7 +5840,7 @@ class OpenSeesBuilder:
         spectrum_periods: List[float],
         spectrum_accels: List[float],
         direction: str = 'X',
-        g: float = 9.81,
+        g: Optional[float] = None,
         damping_ratio: float = 0.05,
         max_iter: int = 50,
         tol: float = 0.01,

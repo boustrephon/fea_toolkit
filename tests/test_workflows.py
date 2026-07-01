@@ -215,6 +215,27 @@ class TestStaticAnalysisWorkflow:
         assert abs(summed.get('fz', 0)) > 1e-6, \
             f"vertical reaction Fz is zero under dead load ({summed})"
 
+    def test_static_self_weight_consistency(self, sample_builder):
+        """Applied self-weight loads match expected values from geometry.
+
+        Exercises: build() → check_self_weight_consistency().
+        Verifies the total applied self-weight (from load_totals) equals
+        the sum of A × unit_weight × L for frame elements plus
+        thickness × unit_weight × area for area elements.
+        """
+        sample_builder.build()
+        report = sample_builder.check_self_weight_consistency(verbose=False)
+        assert report["passed"], (
+            f"Self-weight mismatch: expected {report['expected']}, "
+            f"applied {report['applied']} "
+            f"(disc. {report['discrepancy']} > tol. {report['tolerance']})"
+        )
+        # For the sample cantilever: A=8e-3, unit_weight=7.85e4, L=10
+        assert abs(report["expected"] - 6280.0) < 1.0, \
+            f"Unexpected expected value: {report['expected']}"
+        assert report["discrepancy"] < 1.0, \
+            f"Non-zero discrepancy: {report['discrepancy']}"
+
 
 # ============================================================================
 # Workflow: Modal analysis

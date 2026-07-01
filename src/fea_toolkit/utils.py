@@ -7,6 +7,34 @@ from raw SAP2000 table data and merge user config with defaults.
 
 from typing import Dict, Optional
 
+# Gravitational acceleration in m/s²  (SI default)
+_G_SI = 9.80665
+
+
+def g_from_units(units: dict) -> float:
+    """Return gravitational acceleration matching the model length unit.
+
+    SAP2000 analysis always assumes time in seconds.  This function
+    scales g from the SI value (9.80665 m/s²) to the model's length
+    unit.  Falls back to 9.81 if the length unit is unrecognised.
+
+    Args:
+        units: Model units dict, e.g. ``{'L': 'm', 'F': 'KN', 'T': 'C'}``.
+
+    Returns:
+        Gravitational acceleration in the model's length-unit / s².
+    """
+    lu = (units or {}).get('L', 'm')
+    # Scale factor relative to 1 m
+    scale = {
+        'm': 1.0,
+        'cm': 100.0,
+        'mm': 1000.0,
+        'ft': 3.28084,
+        'in': 39.3701,
+    }.get(lu, 1.0)
+    return _G_SI * scale
+
 
 def deep_merge(base: dict, override: dict) -> dict:
     """Merge *override* into *base*.

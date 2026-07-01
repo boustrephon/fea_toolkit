@@ -99,6 +99,7 @@ def main():
         'verbose': False,
     })
     b_elastic.build()
+    b_elastic.check_self_weight_consistency()
     b_elastic.compute_seismic_masses()
     modal = b_elastic.run_modal_analysis(num_modes=6, print_results=True)
     n_modes = modal['num_modes']
