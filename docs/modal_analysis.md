@@ -29,10 +29,10 @@ explicitly, or leave as ``None`` to auto‑detect from the model's length unit:
 
 ```python
 # Auto-detect from model units (SI: 9.80665 m/s²)
-modal = builder.run_modal_analysis(g=None)
+modal = builder.run_modal_analysis(num_modes=6, g=None)
 
 # Explicit value (for mm units: 9806.65 mm/s²)
-modal = builder.run_modal_analysis(g=9806.65)
+modal = builder.run_modal_analysis(num_modes=6, g=9806.65)
 ```
 
 See :func:`~fea_toolkit.utils.g_from_units` for supported units.
