@@ -464,6 +464,10 @@ class SAP2000Parser:
         Reads from either ``AREA MESH ASSIGNMENTS`` or
         ``AREA AUTO MESH ASSIGNMENTS`` (SAP2000 uses the latter).
 
+        When an area ID appears in both tables,
+        ``AREA MESH ASSIGNMENTS`` takes precedence because it is
+        processed last in the loop.
+
         Returns
         -------
         Dict[str, AreaMesh]
@@ -488,6 +492,10 @@ class SAP2000Parser:
                     self._to_float(rec.get("Max2", 0.0)) or 0.0,
                     self._to_float(rec.get("MaxSize", 0.0)) or 0.0,
                 )
+                # Precedence: "AREA MESH ASSIGNMENTS" (second in loop)
+                # overwrites "AREA AUTO MESH ASSIGNMENTS" (first) when
+                # the same area ID appears in both tables.  This matches
+                # SAP2000's own resolution order.
                 meshes[aid] = AreaMesh(
                     auto_mesh=use_auto,
                     no_auto_mesh_at_edges=self._to_bool(

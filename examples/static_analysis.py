@@ -84,6 +84,9 @@ def main():
     })
     builder.build()
 
+    # Self-weight consistency check
+    builder.check_self_weight_consistency()
+
     # Static analysis: combine available load patterns
     avail = list(md.load_patterns.keys())
     combo = {name: 1.0 for name in avail}
