@@ -111,11 +111,16 @@ viewer.export_html("view.html")        # save interactive HTML
 viewer.clear()                         # remove all actors
 ```
 
-All display/overlay methods return ``self`` for chaining:
+The ``show_model()``, ``highlight_elements()``, ``overlay_reactions()``,
+and similar display/overlay methods return ``self`` for chaining:
 
 ```python
 viewer.show_model().highlight_elements(["1"], label="Issue").show()
 ```
+
+Methods that open, export, or clear the plot (``show()``, ``screenshot()``,
+``export_html()``, ``clear()``) do **not** return ``self`` and terminate
+the chain.
 
 ---
 
