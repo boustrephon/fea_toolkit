@@ -353,8 +353,10 @@ class RectangularSection(Section):
             bar_dia = 2.0 * math.sqrt(bar_area / math.pi)
             y_top = -half_d + cv
             y_bot = half_d - cv
-            patches.append(("straight", mat_tag + 2, n_bars // 2, bar_dia, y_top, -half_b + cv, y_top, half_b - cv))
-            patches.append(("straight", mat_tag + 2, n_bars // 2, bar_dia, y_bot, -half_b + cv, y_bot, half_b - cv))
+            top_bars = (n_bars + 1) // 2   # ceil for odd counts
+            bot_bars = n_bars // 2          # floor for odd counts
+            patches.append(("straight", mat_tag + 2, top_bars, bar_dia, y_top, -half_b + cv, y_top, half_b - cv))
+            patches.append(("straight", mat_tag + 2, bot_bars, bar_dia, y_bot, -half_b + cv, y_bot, half_b - cv))
 
         return patches
 
