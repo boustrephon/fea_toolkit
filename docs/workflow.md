@@ -229,8 +229,11 @@ per the `AreaMesh` settings (`max_size`, `MeshType`).
 - Creates mesh nodes at subdivision points (unique tags)
 - Updates `self.model.nodes` with new mesh nodes
 - Creates OpenSees nodes for all mesh nodes
-- **Automatically** applies `ops.fix(1,1,1,1,1,1)` to any mesh‑created
-  node at the base elevation that has no SAP2000 restraint
+- **Supported‑edge restraint propagation**: any mesh‑created node that lies on
+  a base frame edge whose endpoints are fully fixed will inherit
+  ``ops.fix(1,1,1,1,1,1)``.  Interior mesh nodes and nodes on unsupported
+  edges are **not** automatically restrained — they remain free unless
+  explicitly fixed elsewhere.
 
 #### 2k — `_create_shell_elements()`
 
