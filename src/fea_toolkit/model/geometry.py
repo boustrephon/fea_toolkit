@@ -1301,8 +1301,11 @@ def mesh_area_elements(
                 box_corners.append(np.array([nd.x, nd.y, nd.z]))
         if len(box_corners) >= 3:
             box_pts = np.array(box_corners)
-            bbox_min = box_pts.min(axis=0) - 0.01
-            bbox_max = box_pts.max(axis=0) + 0.01
+            # Scale-aware tolerance: fraction of max_size, with a floor
+            # to keep shared-edge detection consistent across unit systems.
+            _tol = max(mesh.max_size * 0.001, 0.001)
+            bbox_min = box_pts.min(axis=0) - _tol
+            bbox_max = box_pts.max(axis=0) + _tol
             # Cross product of two edges gives plane normal
             v1 = box_pts[1] - box_pts[0]
             v2 = box_pts[-1] - box_pts[0]
@@ -1316,7 +1319,7 @@ def mesh_area_elements(
                     axis=1,
                 )
                 near_plane = (
-                    np.abs(np.dot(_cached_pos_arr - box_pts[0], n_plane)) < 0.01
+                    np.abs(np.dot(_cached_pos_arr - box_pts[0], n_plane)) < _tol
                 )
                 for idx in np.flatnonzero(in_bbox & near_plane):
                     nid = _cached_ids[idx]
