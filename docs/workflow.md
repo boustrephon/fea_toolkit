@@ -20,7 +20,7 @@ flowchart TD
     
     P3["<b>Phase 3 — Analyses</b><br/>• Static (run_static_analysis)<br/>• Modal (run_modal_analysis)<br/>• RS (run_response_spectrum)"]
     
-    P4["<b>Phase 4 — Post‑processing</b><br/>• Save to .npz / .csv<br/>• Plot deformed shape / capacity<br/>• Export to Xara Tcl"]
+    P4["<b>Phase 4 — Post‑processing</b><br/>• Save to .npz / .csv<br/>• 3D viewer (ModelViewer)<br/>• Plot deformed shape / capacity<br/>• Export to Xara Tcl"]
     
     CA["<b>Check A</b><br/>check_model_connectivity()<br/>Pre‑build: orphans,<br/>shell‑only base,<br/>duplicate coords"]
     
@@ -365,5 +365,16 @@ For details on each check method and its output, see the
                 │                  │                  │                  │
             raw tables        dataclass tree     OpenSees ops       in‑memory
                                                 commands            analysis
+
+                         ┌──────────────────────────────────────────────────┐
+                         │           ModelViewer (plotting/viewer.py)      │
+                         │  show_model · overlay_deformed · overlay_forces │
+                         │  highlight_elements · highlight_nodes · annotate│
+                         │  screenshot · export_html · show               │
+                         └──────────────────────────────────────────────────┘
 ```
+
+The :doc:`ModelViewer </viewer>` can be pointed at either the
+``SAPModelData`` or the builder to produce interactive 3D views
+for discussion and debugging.  See ``docs/viewer.md`` for the full API.
 

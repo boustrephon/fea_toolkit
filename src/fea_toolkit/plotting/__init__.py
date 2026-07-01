@@ -1,5 +1,7 @@
 """Visualisation helpers for fea_toolkit models and results."""
 
+from .viewer import ModelViewer
+
 from .viz import (
     plot_model_3d,
     plot_deformed_3d,
