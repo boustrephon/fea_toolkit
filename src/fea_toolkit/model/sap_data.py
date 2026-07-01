@@ -94,8 +94,8 @@ class Material:
     unit_mass: float = 0.0        # kg/m³
     Fy: Optional[float] = None    # Yield strength (steel, rebar, tendon) – Pa
     Fu: Optional[float] = None    # Ultimate strength – Pa
-    Fc: Optional[float] = None    # Concrete compressive strength – Pa
-    eFc: Optional[float] = None   # Strain at Fc
+    Fc: Optional[float] = None    # Concrete unconfined compressive strength – Pa
+    eFc: Optional[float] = None   # Confined compressive strength (fcc') – Pa (NOT strain)
     extra: Dict[str, Any] = field(default_factory=dict)   # all other properties
 
 
@@ -314,11 +314,49 @@ class RectangularSection(Section):
     bf: float = 0.0       # B
 
     def to_fiber_patches(
-        self, mat_tag: int, nfy: int = 8, nfz: int = 4
+        self, mat_tag: int, nfy: int = 12, nfz: int = 6
     ) -> List[Tuple]:
-        y1, y2 = -self.depth / 2, self.depth / 2
-        z1, z2 = -self.bf / 2, self.bf / 2
-        return [("rect", mat_tag, nfy, nfz, y1, z1, y2, z2)]
+        """Fiber patches: confined concrete core + steel reinforcement bars.
+
+        Material tag convention:
+            mat_tag     → unconfined concrete (Concrete01)
+            mat_tag + 1 → confined concrete (Concrete01)
+            mat_tag + 2 → steel rebar (Steel02)
+
+        Steel reinforcement is set to 0.6 % of the gross cross-sectional
+        area, distributed equally between top and bottom layers with a
+        cover of 40 mm.
+        """
+        d, b = self.depth, self.bf
+        cv = 0.04  # 40 mm clear cover
+        half_d, half_b = d / 2.0, b / 2.0
+        core_y1, core_y2 = -half_d + cv, half_d - cv
+        core_z1, core_z2 = -half_b + cv, half_b - cv
+
+        patches: List[Tuple] = [
+            ("rect", mat_tag + 1, nfy, nfz, core_y1, core_z1, core_y2, core_z2),
+        ]
+        # Unconfined cover patches (top, bottom, left, right)
+        if cv > 0:
+            patches.extend([
+                ("rect", mat_tag, 1, nfz, -half_d, core_z1, core_y1, core_z2),
+                ("rect", mat_tag, 1, nfz, core_y2, core_z1, half_d, core_z2),
+                ("rect", mat_tag, nfy, 1, core_y1, -half_b, core_y2, core_z1),
+                ("rect", mat_tag, nfy, 1, core_y1, core_z2, core_y2, half_b),
+            ])
+
+        # Steel reinforcement at 0.6 % of gross area
+        total_steel = 0.006 * d * b
+        n_bars = max(4, round(b * 2 / 0.15))  # ≈150 mm spacing
+        bar_area = total_steel / n_bars if n_bars > 0 else 0.0
+        if bar_area > 0:
+            bar_dia = 2.0 * math.sqrt(bar_area / math.pi)
+            y_top = -half_d + cv
+            y_bot = half_d - cv
+            patches.append(("straight", mat_tag + 2, n_bars // 2, bar_dia, y_top, -half_b + cv, y_top, half_b - cv))
+            patches.append(("straight", mat_tag + 2, n_bars // 2, bar_dia, y_bot, -half_b + cv, y_bot, half_b - cv))
+
+        return patches
 
 
 @dataclass

@@ -816,10 +816,11 @@ class OpenSeesBuilder:
         if not lib_path:
             try:
                 import opensees as _xara_ops
-                lib_dir = os.path.dirname(_xara_ops.__file__)
+                import os as _os
+                lib_dir = _os.path.dirname(_xara_ops.__file__)
                 for ext in (".dylib", ".so"):
-                    cand = os.path.join(lib_dir, f"libOpenSeesRT{ext}")
-                    if os.path.exists(cand):
+                    cand = _os.path.join(lib_dir, f"libOpenSeesRT{ext}")
+                    if _os.path.exists(cand):
                         lib_path = cand
                         break
             except ImportError:
@@ -1577,8 +1578,12 @@ class OpenSeesBuilder:
             mat_tag = tag  # same tag as the section for simplicity
             from ..model.sap_data import (
                 ConcreteRectangularSection, ConcreteCircularSection,
+                RectangularSection,
             )
-            is_concrete = isinstance(sec, (ConcreteRectangularSection, ConcreteCircularSection))
+            is_concrete = isinstance(sec, (
+                ConcreteRectangularSection, ConcreteCircularSection,
+                RectangularSection,
+            ))
 
             if is_concrete:
                 # Concrete section: need 3 materials (unconfined, confined, steel)
@@ -1590,11 +1595,17 @@ class OpenSeesBuilder:
                 if mat is not None and mat.type.lower() == 'concrete':
                     Fc = mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7
                     Ec = mat.E_mod if mat.E_mod > 0 else 2.5e10
-                    epsc = mat.eFc if mat.eFc and mat.eFc > 0 else 0.002
+                    # Strain at peak stress: SFc from SAP2000, else default 0.002
+                    epsc = float(mat.extra.get('SFc', 0.002)) if hasattr(mat, 'extra') else 0.002
+                    if epsc > 0.01:   # sanity: should be ~0.002, not in kPa
+                        epsc = 0.002
+                    # Confined strength: eFc from SAP2000 (fcc'), else 1.3×Fc
+                    fcc = mat.eFc if mat.eFc and mat.eFc > 0 else Fc * 1.3
+                    epscc = float(mat.extra.get('SCap', 0.005)) if hasattr(mat, 'extra') else 0.005
+                    if epscc > 0.1:
+                        epscc = 0.005
                     ops.uniaxialMaterial('Concrete01', concrete_mat_tag,
                                          -Fc, -abs(epsc), -0.2 * Fc, -0.006)
-                    fcc = Fc * 1.3
-                    epscc = 0.005
                     ops.uniaxialMaterial('Concrete01', concrete_mat_tag + 1,
                                          -fcc, -abs(epscc), -0.2 * fcc, -0.02)
                     Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
@@ -4477,11 +4488,15 @@ class OpenSeesBuilder:
         #   pattern('Plain', <new tag>, <new time series>) → lateral shape
         ops.loadConst('-time', 0.0)
 
-        # Count only *active* gravity patterns (non-zero scale) to determine
-        # the next available tag — _create_loads assigns tags 1..N sequentially
-        # for active patterns, so N+1 is guaranteed free.
-        num_active = sum(1 for s in gravity_patterns.values() if abs(s) >= 1e-12)
-        lat_tag = num_active + 1
+        # Find a free pattern tag — query OpenSees for the max in-use tag
+        # so we don't collide with patterns created by the build step
+        # (including auto-included patterns like "Self weight").
+        import openseespy.opensees as _ops2
+        try:
+            existing = _ops2.getLoadPatternTags()
+            lat_tag = (max(int(t) for t in existing) + 1) if existing else 1
+        except Exception:
+            lat_tag = 99  # safe fallback
         ops.timeSeries('Linear', lat_tag)
         ops.pattern('Plain', lat_tag, lat_tag)
 
