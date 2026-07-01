@@ -1261,19 +1261,21 @@ def plot_pushover_curve_enhanced(
     shear = np.asarray(pushover_results.get('base_shear', []), dtype=float)
     shear = shear * unit_conversion
 
-    if len(disp) < 2 or len(shear) < 2:
+    if len(disp) < 2 or len(shear) < 2 or len(disp) != len(shear):
         print("No pushover data to plot.")
         return None
 
-    # Stiffness indicators
-    k0 = shear[0] / disp[0] if disp[0] > 0 else 0.0
-    kf = shear[-1] / disp[-1] if disp[-1] > 0 else 0.0
+    # Tangent stiffness from adjacent-point differences
+    k0 = (shear[1] - shear[0]) / (disp[1] - disp[0]) if disp[1] > disp[0] else 0.0
+    kf = (shear[-1] - shear[-2]) / (disp[-1] - disp[-2]) if disp[-1] > disp[-2] else 0.0
     loss_pct = (1 - kf / k0) * 100 if k0 > 0 else 0.0
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Main curve
-    ax.plot(disp, shear, 'b-', linewidth=2, label='Pushover curve', **kwargs)
+    # Main curve — merge caller kwargs with defaults
+    plot_kw = dict(label='Pushover curve', linewidth=2)
+    plot_kw.update(kwargs)
+    ax.plot(disp, shear, 'b-', **plot_kw)
 
     # Area fill
     ax.fill_between(disp, 0, shear, alpha=0.08, color='blue')
