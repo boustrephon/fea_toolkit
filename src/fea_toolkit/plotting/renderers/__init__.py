@@ -6,7 +6,7 @@ that :class:`~fea_toolkit.plotting.viewer.ModelViewer` delegates to.
 Available backends
 ------------------
 * ``pyvista`` — interactive 3D via PyVista (macOS, Windows, Linux).
-* ``rhino`` — Rhino document objects (Windows, requires Rhino).
+  (Rhino support is planned but not yet implemented.)
 """
 
 from .base import (

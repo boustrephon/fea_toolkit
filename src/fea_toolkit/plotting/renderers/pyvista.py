@@ -125,13 +125,9 @@ class PyVistaRenderer(RenderBackend):
 
         for s in shells:
             nv = len(s.vertices)
-            # Triangulate quad → two tris (0,1,2 and 0,2,3)
-            # Works for both triangles (nv=3) and quads (nv=4)
-            if nv == 3:
-                all_faces.append(np.array([3, offset, offset + 1, offset + 2]))
-            elif nv >= 4:
-                all_faces.append(np.array([3, offset, offset + 1, offset + 2]))
-                all_faces.append(np.array([3, offset, offset + 2, offset + 3]))
+            # Fan triangulation for arbitrary polygon (tris, quads, 5+)
+            for i in range(1, nv - 1):
+                all_faces.append(np.array([3, offset, offset + i, offset + i + 1]))
             all_verts.append(s.vertices)
             shell_colors.append(colors.get(s.section, (0.7, 0.7, 0.7)))
             offset += nv
@@ -142,12 +138,12 @@ class PyVistaRenderer(RenderBackend):
         verts = np.vstack(all_verts)
         faces = np.hstack(all_faces) if len(all_faces) > 0 else np.array([], dtype=int)
         mesh = pv.PolyData(verts, faces=faces)
-        # Per-face colours need duplicate vertex entries — use cell scalars
-        # Build cell-by-cell colour array
+        # Per-face colours — build cell-by-cell colour array matching
+        # the actual number of triangles produced per shell
         cell_colors = []
         for s in shells:
             c = colors.get(s.section, (0.7, 0.7, 0.7))
-            n_tris = 2 if len(s.vertices) == 4 else 1
+            n_tris = max(0, len(s.vertices) - 2)
             for _ in range(n_tris):
                 cell_colors.append(c)
         if cell_colors:
@@ -223,6 +219,34 @@ class PyVistaRenderer(RenderBackend):
                 )
                 self._actors.append(actor)
 
+            # ── Highlighted shells ──
+            if h.shells:
+                all_verts = []
+                all_faces = []
+                shell_colors = []
+                offset = 0
+                for s in h.shells:
+                    nv = len(s.vertices)
+                    # Fan triangulation for arbitrary polygon
+                    for i in range(1, nv - 1):
+                        all_faces.append(np.array([3, offset, offset + i, offset + i + 1]))
+                    all_verts.append(s.vertices)
+                    shell_colors.append(h.color)
+                    offset += nv
+                if all_verts:
+                    verts = np.vstack(all_verts)
+                    faces = np.hstack(all_faces)
+                    mesh = pv.PolyData(verts, faces=faces)
+                    n_tris = sum(max(0, len(s.vertices) - 2) for s in h.shells)
+                    cell_colors = [h.color] * n_tris
+                    mesh.cell_data['rgb'] = np.array(cell_colors)
+                    actor = p.add_mesh(
+                        mesh, scalars='rgb', rgb=True, opacity=0.7,
+                        show_edges=True, edge_color='grey',
+                        lighting=True, show_scalar_bar=False,
+                    )
+                    self._actors.append(actor)
+
             # ── Label ──
             if h.label:
                 centroid = np.zeros(3)
@@ -236,6 +260,11 @@ class PyVistaRenderer(RenderBackend):
                     for n in h.nodes:
                         centroid += n.position
                         count += 1
+                if h.shells:
+                    for s in h.shells:
+                        for v in s.vertices:
+                            centroid += v
+                            count += 1
                 if count > 0:
                     centroid /= count
                 else:
