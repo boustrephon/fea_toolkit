@@ -140,8 +140,12 @@ Combines modal results via CQC to estimate seismic demands:
 
 ```python
 from fea_toolkit.spectrum import _gb50011_spectrum
+from fea_toolkit.utils import g_from_units
+
+# Derive g from model units so the workflow is unit‑aware
+g = g_from_units(md) or 9.80665
 T_spec = list(np.linspace(0.01, 6.0, 600))
-Sa_spec = list(_gb50011_spectrum(T_spec, alpha_max=alpha_max, tg=tg, g=9.81))
+Sa_spec = list(_gb50011_spectrum(T_spec, alpha_max=alpha_max, tg=tg, g=g))
 rs = b.run_response_spectrum_analysis(
     num_modes=modal["num_modes"],
     modal_periods=list(modal["periods"]),
@@ -181,7 +185,11 @@ for nid in sorted(base_ids - frame_conn):
     if nid in md.restraints:
         md.restraints[nid] = Restraint([1,1,1,1,1,1])
 
-# All areas loads-only (no shell elements)
+# For the Xara pushover all areas must be loads-only — Xara's
+# OpenSeesRT does not support ``ElasticMembranePlateSection`` so
+# no shell elements can be created.  This differs from the precursor
+# static/modal analyses (Section A) where only brick walls are
+# loads-only and shear walls/slabs become ``ShellMITC4`` elements.
 sel = Selection(element_types=["Area"])
 ```
 
@@ -191,11 +199,13 @@ sel = Selection(element_types=["Area"])
 import openseespy.opensees as _real_ops
 import fea_toolkit.opensees.builder as builder_mod
 
-# First build (real ops) to get seismic masses
+# First build (real ops) to get seismic masses.
+# Although create_shells=True, the selection above marks ALL areas
+# as loads-only, so no shell elements are created in practice.
 b_tmp = OpenSeesBuilder(md, dict(
     element_type="dispBeamColumn",
     split_elements=True,
-    create_shells=True,           # areas loads-only via selection
+    create_shells=True,           # selection overrides → all areas loads-only
     create_fiber_sections=True,
     use_elastic_sections=False,   # required for fiber sections
 ))
