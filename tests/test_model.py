@@ -2732,8 +2732,26 @@ class TestBuilderAreaMeshing:
             # Build succeeded — ops.fix was called without errors.
             # Verify by running a quick static step: the restrained
             # bottom-edge node should have zero displacement.
-            from fea_toolkit.opensees.builder import OpenSeesBuilder as _B
-            # (already built, just run a check)
+            # Check the mesh node at (6,0,0) is fixed in OpenSees
+            mesh_tag = b._node_tag_from_id("1_mesh_0_1")
+            assert mesh_tag is not None
+            fixed = ops.getFixedDOFs(int(mesh_tag))
+            assert len(fixed) == 6, \
+                f"mesh node {mesh_tag} should have 6 fixed DOFs, got {fixed}"
+
+            # Restrained bottom-edge node should report zero displacement
+            ops.system("BandGeneral")
+            ops.numberer("RCM")
+            ops.constraints("Transformation")
+            ops.test("NormDispIncr", 1e-3, 3, 0)
+            ops.algorithm("Newton")
+            ops.integrator("LoadControl", 0.01)
+            ops.analysis("Static")
+            ops.analyze(1)
+            disp = ops.nodeDisp(int(mesh_tag), 1)
+            assert abs(disp) < 1e-10, \
+                f"restrained mesh node should have zero displacement, got {disp}"
+
             assert md.area_elements["1"].inactive, \
                 "original area should be inactive after meshing"
 
