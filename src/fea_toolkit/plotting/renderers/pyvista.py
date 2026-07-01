@@ -223,21 +223,22 @@ class PyVistaRenderer(RenderBackend):
             if h.shells:
                 all_verts = []
                 all_faces = []
-                shell_colors = []
                 offset = 0
                 for s in h.shells:
                     nv = len(s.vertices)
+                    if nv < 3:
+                        offset += nv
+                        continue
                     # Fan triangulation for arbitrary polygon
                     for i in range(1, nv - 1):
                         all_faces.append(np.array([3, offset, offset + i, offset + i + 1]))
                     all_verts.append(s.vertices)
-                    shell_colors.append(h.color)
                     offset += nv
                 if all_verts:
                     verts = np.vstack(all_verts)
-                    faces = np.hstack(all_faces)
+                    faces = np.hstack(all_faces) if all_faces else np.array([], dtype=int)
                     mesh = pv.PolyData(verts, faces=faces)
-                    n_tris = sum(max(0, len(s.vertices) - 2) for s in h.shells)
+                    n_tris = sum(max(0, len(s.vertices) - 2) for s in h.shells if len(s.vertices) >= 3)
                     cell_colors = [h.color] * n_tris
                     mesh.cell_data['rgb'] = np.array(cell_colors)
                     actor = p.add_mesh(
