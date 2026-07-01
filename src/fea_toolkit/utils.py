@@ -25,6 +25,8 @@ def g_from_units(units: dict) -> float:
         Gravitational acceleration in the model's length-unit / s².
     """
     lu = (units or {}).get('L', 'm')
+    if not lu or not isinstance(lu, str):
+        lu = 'm'
     # Normalise aliases before scaling
     _alias = {
         'meter': 'm', 'meters': 'm', 'metre': 'm', 'metres': 'm',
@@ -33,7 +35,7 @@ def g_from_units(units: dict) -> float:
         'foot': 'ft', 'feet': 'ft',
         'inch': 'in', 'inches': 'in',
     }
-    lu = _alias.get(lu.lower(), lu)
+    lu = _alias.get(lu.lower(), lu.lower())
     # Scale factor relative to 1 m
     scale = {
         'm': 1.0,
