@@ -123,6 +123,80 @@ class OpenSeesBuilder:
                 self.config[key] = default
 
     # -------------------------------------------------------------------------
+    # Diagnostics
+    # -------------------------------------------------------------------------
+
+    def diagnose_singularity(self) -> List[Dict[str, Any]]:
+        """Identify nodes with insufficient element connectivity.
+
+        Use this after :meth:`build()` when a static analysis fails with
+        *"matrix singular"* or *"factorization failed"*.  The method scans
+        all nodes in the OpenSees model and reports those connected to
+        very few elements — common causes of singular stiffness matrices.
+
+        Typical findings and their fixes:
+
+        ============================== =========================================
+        Finding                        Likely fix
+        ============================== =========================================
+        Base node with 1 frame element Add rotational fixity
+                                       (:code:`[1,1,1,1,1,1]` instead of
+        and 0 shells                   :code:`[1,1,1,0,0,0]`) — shell
+                                       elements provide no drilling stiffness.
+        Mid-span beam node with 1      Enable ``split_elements=True`` so frame
+        beam element and 0 shells      auto-mesh splits the beam at
+                                       intersecting members.
+        Node with 0 elements           Orphan node — check SAP2000 model for
+                                       disconnected joints.
+        Node with many shell           Shell edge needs constraint to adjacent
+        elements but no frame          frame — run :meth:`apply_edge_constraints`
+        elements on its boundary       after :meth:`detect_unconnected_edges`.
+        ============================== =========================================
+
+        The method does **not** modify the model — it only reads the
+        current OpenSees state and returns diagnostic information.
+
+        Returns:
+            List of dicts with keys ``node_tag``, ``n_elements``,
+            ``coord`` (tuple), and ``note`` (str), sorted by ascending
+            element count.
+        """
+        from collections import Counter
+        import openseespy.opensees as _ops
+
+        elem_counts: Counter = Counter()
+        for etag in _ops.getEleTags():
+            try:
+                for n in _ops.eleNodes(int(etag)):
+                    elem_counts[n] += 1
+            except Exception:
+                continue
+
+        issues: List[Dict[str, Any]] = []
+        for ntag, count in sorted(elem_counts.items(), key=lambda x: x[1]):
+            if count > 2:
+                continue
+            try:
+                coord = _ops.nodeCoord(ntag)
+            except Exception:
+                coord = (0.0, 0.0, 0.0)
+            note = ""
+            if count == 0:
+                note = "orphan node — no elements connected"
+            elif count == 1:
+                note = "single connection — possible insufficient rotational stiffness"
+            else:
+                note = "only 2 connections — check rotational DOFs"
+            issues.append({
+                "node_tag": int(ntag),
+                "n_elements": count,
+                "coord": (float(coord[0]), float(coord[1]), float(coord[2])),
+                "note": note,
+            })
+
+        return issues
+
+    # -------------------------------------------------------------------------
     # Xara (OpenSeesRT) Tcl backend
     # -------------------------------------------------------------------------
 
