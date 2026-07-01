@@ -74,6 +74,7 @@ class OpenSeesBuilder:
         self.split_assignments: Optional[Dict[str, str]] = None
         self.split_dist_loads: Optional[List[FrameDistributedLoad]] = None
         self._has_edge_constraints: bool = False
+        self._saved_edge_constraints: List[tuple] = []
         self._offset_rigid_links: List[tuple] = []
         # Snapshot pristine frame data so rebuilds always start from the
         # original geometry (before any offset/split/mesh mutations).
@@ -1818,21 +1819,77 @@ class OpenSeesBuilder:
             if sub_count:
                 print(f"  Area meshing: {sub_count} sub-elements created")
 
-        # ── Apply base restraints to unrestrained mesh nodes at the ──
-        # ── minimum elevation (slab/wall nodes that lack foundation   ──
-        # ── fixity in the SAP2000 model).                             ──
-        if self._base_z is not None:
-            orig_ids = set(self._original_nodes.keys())
-            for nd in self.model.nodes.values():
-                if nd.node_id in orig_ids:
-                    continue  # original SAP2000 node (handled in _apply_restraints)
-                if abs(nd.z - self._base_z) > 0.01:
+        # ── Propagate edge restraints from original corners to ────
+        # ── intermediate mesh nodes along each edge.  If both ends ──
+        # ── of an edge have restraints, every node on that edge     ──
+        # ── inherits the AND (more-restricted) combination.          ──
+        orig_ids = set(self._original_nodes.keys())
+        for aid, mesh in mesh_filtered.items():
+            if not mesh.auto_mesh or mesh.max_size <= 0.0:
+                continue
+            elem = self.model.area_elements.get(aid)
+            if elem is None or len(elem.node_ids) != 4:
+                continue
+            if not getattr(elem, 'inactive', False):
+                continue  # wasn't actually subdivided
+            corners = list(elem.node_ids)  # 4 corner node IDs
+            # Four edges: (0,1), (1,2), (3,2), (0,3)
+            edges = [(0, 1), (1, 2), (3, 2), (0, 3)]
+            for ci, cj in edges:
+                nid_i = corners[ci]
+                nid_j = corners[cj]
+                ri = self.model.restraints.get(nid_i)
+                rj = self.model.restraints.get(nid_j)
+                if ri is None or rj is None:
                     continue
-                # Mesh node at base elevation — apply full fixity
-                ops.fix(nd.node_tag, 1, 1, 1, 1, 1, 1)
-                # Record in model state so reaction/diagnostic code can find it
-                if nd.node_id not in self.model.restraints:
-                    self.model.restraints[nd.node_id] = Restraint([1, 1, 1, 1, 1, 1])
+                # AND of restraint DOFs (more restricted wins — a node
+                # between a pin and a fixed support inherits the pin).
+                combined = [
+                    min(ri.dofs[d], rj.dofs[d]) for d in range(6)
+                ]
+                if sum(combined) == 0:
+                    continue
+                # Positions of the two corners
+                nd_i = self.model.nodes.get(nid_i)
+                nd_j = self.model.nodes.get(nid_j)
+                if nd_i is None or nd_j is None:
+                    continue
+                p_i = np.array([nd_i.x, nd_i.y, nd_i.z])
+                p_j = np.array([nd_j.x, nd_j.y, nd_j.z])
+                edge_vec = p_j - p_i
+                edge_len_sq = np.dot(edge_vec, edge_vec)
+                if edge_len_sq < 1e-12:
+                    continue
+
+                # Find all mesh nodes on this edge segment.
+                # Only nodes with "_mesh_" in their ID are mesh nodes;
+                # skip offset nodes (_off_i, _off_j) and others.
+                mesh_prefix = f"{aid}_mesh_"
+                for nd in list(self.model.nodes.values()):
+                    if mesh_prefix not in nd.node_id:
+                        continue
+                    p = np.array([nd.x, nd.y, nd.z])
+                    # Project onto edge
+                    t = np.dot(p - p_i, edge_vec) / edge_len_sq
+                    if t < 1e-6 or t > 1 - 1e-6:
+                        continue  # at or beyond the corners
+                    # Distance from line
+                    proj = p_i + t * edge_vec
+                    if np.linalg.norm(p - proj) > 0.01:
+                        continue  # not on this edge
+                    # Apply combined restraint in OpenSees only.
+                    # Do NOT write into self.model.restraints — mesh
+                    # node IDs don't exist in the original model and
+                    # would break rebuilds (e.g. from run_static_analysis).
+                    ops.fix(nd.node_tag, *combined)
+
+        # ── Base elevation mesh nodes ──────────────────────────────
+        # Mesh nodes at the minimum Z that do NOT inherit an edge
+        # restraint from their parent area's corners are left free.
+        # Interior base nodes should not receive blanket fixity — only
+        # edge-propagated restraints apply.  Synthetic base fixities
+        # are NOT written into self.model.restraints so diagnostic
+        # code sees only original SAP2000 restraints.
 
     # -------------------------------------------------------------------------
     # Elements
@@ -2351,6 +2408,12 @@ class OpenSeesBuilder:
 
         if count:
             self._has_edge_constraints = True
+            # Save call args so Ritz rebuild can reapply them
+            if coarse_edges is not None or coarse_elements is not None:
+                self._saved_edge_constraints = [(
+                    coarse_edges, fine_nodes, coarse_elements,
+                    tolerance, verbose,
+                )]
             if verbose:
                 print(f"Applied {count} edge constraint(s). "
                       f"Solver will use Penalty handler.")
@@ -2625,10 +2688,10 @@ class OpenSeesBuilder:
             # "Self weight" load pattern (SelfWtMult=1).  When any
             # pattern is active its self-weight loads should follow.
             if "Self weight" not in active and "Self weight" in all_patterns:
-                for name, scale in active.items():
-                    if abs(scale) > 0:
-                        active["Self weight"] = scale
-                        break
+                # Use a neutral scale of 1.0 — the downstream loop
+                # multiplies by pat.self_weight_factor again, so setting
+                # the factor here would double-apply it.
+                active["Self weight"] = 1.0
         else:
             active = {name: 1.0 for name in all_patterns}
 
@@ -5012,7 +5075,7 @@ class OpenSeesBuilder:
     # =========================================================================
     def run_modal_analysis(self, num_modes: int = 30,
                            print_results: bool = True,
-                           eigen_solver: str = "",
+                           eigen_solver: str = "default",
                            g: Optional[float] = None) -> Dict[str, Any]:
         """Run eigenvalue / modal analysis and return results.
 
@@ -5063,8 +5126,10 @@ class OpenSeesBuilder:
             except Exception:
                 pass
         if not _has_mass:
+            # Prefer the caller-provided g; fall back to stored value
             _stored_g = getattr(self, '_mass_g', None)
-            self.compute_seismic_masses(g=_stored_g if _stored_g is not None else g)
+            _active_g = g if g is not None else _stored_g
+            self.compute_seismic_masses(g=_active_g)
 
         # ── Ritz vector pre-step ────────────────────────────────
         # Run a static gravity step under self-weight so the deformed
@@ -5073,19 +5138,46 @@ class OpenSeesBuilder:
         if eigen_solver == "ritz":
             if self.config['verbose']:
                 print("  Ritz vector pre-step (static gravity)...")
-            _sw_scale = 1.0
-            # Find the "Self weight" pattern auto-included by _create_loads
+            # Isolate to self-weight only: rebuild the model with just
+            # the gravity patterns so the pre-step displacement comes
+            # purely from self-weight, not from other active loads.
+            _sw_patterns = {}
             for pn, pat in self.model.load_patterns.items():
-                if pat.self_weight_factor > 0:
-                    _sw_scale = pat.self_weight_factor
-                    break
+                if abs(pat.self_weight_factor) > 0:
+                    _sw_patterns[pn] = pat.self_weight_factor
+            if not _sw_patterns:
+                # No self-weight patterns exist — skip the Ritz pre-step.
+                # The ARPACK solver below will use whatever initial state
+                # is present (zero displacements → default starting vector).
+                eigen_solver = "default"
+            else:
+                _sel = getattr(self, '_area_selection', None)
+                self.build(pattern_scales=_sw_patterns, selection=_sel)
+                self.compute_seismic_masses(g=g)
+                # Re-apply any edge constraints that were wiped by build()
+                if self._saved_edge_constraints:
+                    for args in self._saved_edge_constraints:
+                        self.apply_edge_constraints(*args)
+                try:
+                    _ops.constraints('Transformation')
+                    _ops.numberer('RCM')
+                    _ops.system(self.config.get('solver_system', 'BandGen'))
+                    _ops.test('NormDispIncr', 1e-3, 5, 0)
+                    _ops.algorithm('Newton')
+                    _ops.integrator('LoadControl', 1.0)
+                    _ops.analysis('Static')
+                    _ops.analyze(1)
+                except Exception:
+                    pass
+                # Fall through to ARPACK — the deformed state seeds it
+                eigen_solver = "default"
             try:
                 _ops.constraints('Transformation')
                 _ops.numberer('RCM')
                 _ops.system(self.config.get('solver_system', 'BandGen'))
                 _ops.test('NormDispIncr', 1e-3, 5, 0)
                 _ops.algorithm('Newton')
-                _ops.integrator('LoadControl', _sw_scale)
+                _ops.integrator('LoadControl', 1.0)
                 _ops.analysis('Static')
                 _ops.analyze(1)
             except Exception:
