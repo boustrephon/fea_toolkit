@@ -299,7 +299,7 @@ class OpenSeesBuilder:
 
         Returns:
             Dict with keys ``unrestrained_base_mesh_nodes``,
-            ``low_connectivity_perimeter_nodes``, ``summary``.
+            ``low_connectivity_nodes``, ``summary``.
         """
         import openseespy.opensees as _ops
 
@@ -451,19 +451,13 @@ class OpenSeesBuilder:
 
         expected_total = expected_frame + expected_area
 
-        # ── 2. Read applied self-weight from load_totals ──
-        # Self-weight lives in whichever patterns have self_weight_factor > 0.
-        # Sum their Fz (absolute value since sign depends on gravity direction).
+        # ── 2. Read applied self-weight from dedicated accumulator ──
         applied_total = 0.0
         applied_by_sec: Dict[str, float] = {}
-        for pname, totals in self.load_totals.items():
-            pat = self.model.load_patterns.get(pname)
-            if pat is None or abs(pat.self_weight_factor) < 1e-12:
-                continue
+        sw_totals = getattr(self, '_sw_load_totals', {})
+        for pname, totals in sw_totals.items():
             fz = totals.get('fz', 0.0)
             applied_total += abs(fz)
-            # We don't have per-section breakdown from load_totals,
-            # so store at the pattern level.
             applied_by_sec[pname] = applied_by_sec.get(pname, 0.0) + abs(fz)
 
         # ── 3. Compare ──
@@ -2709,7 +2703,7 @@ class OpenSeesBuilder:
         # Accumulators keyed by pattern *name*
         joint_load_totals: Dict[str, Dict[str, float]] = {}
         frame_load_totals: Dict[str, Dict[str, float]] = {}
-        sw_load_totals: Dict[str, Dict[str, float]] = {}
+        self._sw_load_totals: Dict[str, Dict[str, float]] = {}
 
         # Determine which distributed loads to use (split or original)
         dist_loads = (self.split_dist_loads if self.split_dist_loads is not None
@@ -2922,10 +2916,10 @@ class OpenSeesBuilder:
         def _add_sw(pname: str, node_tag: int, fz_val: float) -> None:
             """Apply a nodal load for self-weight and track it."""
             ops.load(node_tag, 0.0, 0.0, fz_val, 0.0, 0.0, 0.0)
-            if pname not in sw_load_totals:
-                sw_load_totals[pname] = {k: 0.0 for k in
+            if pname not in self._sw_load_totals:
+                self._sw_load_totals[pname] = {k: 0.0 for k in
                                          ('fx','fy','fz','mx','my','mz')}
-            sw_load_totals[pname]['fz'] += fz_val
+            self._sw_load_totals[pname]['fz'] += fz_val
 
         for pname, scale in active.items():
             if abs(scale) < 1e-12:
@@ -3015,12 +3009,12 @@ class OpenSeesBuilder:
         def _add_gravity(pname: str, node_tag: int, fx: float, fy: float, fz: float) -> None:
             """Apply a nodal force from a gravity load and track it."""
             ops.load(node_tag, fx, fy, fz, 0.0, 0.0, 0.0)
-            if pname not in sw_load_totals:
-                sw_load_totals[pname] = {k: 0.0 for k in
+            if pname not in self._sw_load_totals:
+                self._sw_load_totals[pname] = {k: 0.0 for k in
                                          ('fx','fy','fz','mx','my','mz')}
-            sw_load_totals[pname]['fx'] += fx
-            sw_load_totals[pname]['fy'] += fy
-            sw_load_totals[pname]['fz'] += fz
+            self._sw_load_totals[pname]['fx'] += fx
+            self._sw_load_totals[pname]['fy'] += fy
+            self._sw_load_totals[pname]['fz'] += fz
 
         for pname, scale in active.items():
             if abs(scale) < 1e-12:
@@ -3157,7 +3151,7 @@ class OpenSeesBuilder:
         # ------------------------------------------------------------------
         # Merge all totals into public attribute
         # ------------------------------------------------------------------
-        all_ptns = set(joint_load_totals) | set(frame_load_totals) | set(sw_load_totals)
+        all_ptns = set(joint_load_totals) | set(frame_load_totals) | set(self._sw_load_totals)
         self.load_totals: Dict[str, Dict[str, float]] = {}
         for pname in all_ptns:
             self.load_totals[pname] = {k: 0.0 for k in
@@ -3165,7 +3159,7 @@ class OpenSeesBuilder:
             for key in self.load_totals[pname]:
                 self.load_totals[pname][key] += joint_load_totals.get(pname, {}).get(key, 0.0)
                 self.load_totals[pname][key] += frame_load_totals.get(pname, {}).get(key, 0.0)
-                self.load_totals[pname][key] += sw_load_totals.get(pname, {}).get(key, 0.0)
+                self.load_totals[pname][key] += self._sw_load_totals.get(pname, {}).get(key, 0.0)
 
         if self.config['verbose']:
             print("\n  --- Load totals per pattern ---")
@@ -5186,21 +5180,8 @@ class OpenSeesBuilder:
                     pass
                 # Fall through to ARPACK — the deformed state seeds it
                 eigen_solver = "default"
-            try:
-                _ops.constraints('Transformation')
-                _ops.numberer('RCM')
-                _ops.system(self.config.get('solver_system', 'BandGen'))
-                _ops.test('NormDispIncr', 1e-3, 5, 0)
-                _ops.algorithm('Newton')
-                _ops.integrator('LoadControl', 1.0)
-                _ops.analysis('Static')
-                _ops.analyze(1)
-            except Exception:
-                pass
-            # Fall through to ARPACK — the deformed state seeds it
-            eigen_solver = "default"
 
-        eigenvals_all = []
+            eigenvals_all = []
         if eigen_solver == "default":
             # ARPACK first, fallback to fullGenLapack
             if self.config['verbose']:
