@@ -14,6 +14,7 @@ from .viz import (
     plot_force_diagram,
     plot_pushover_curve,
     plot_pushover_curve_enhanced,
+    plot_capacity_spectrum,
     plot_npz_force_diagram,
     plot_npz_moment_3d,
 )
