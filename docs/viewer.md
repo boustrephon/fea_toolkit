@@ -147,8 +147,15 @@ viewer.export_html("view.html")        # save interactive HTML
 viewer.clear()                         # remove all actors
 ```
 
-The ``show_model()``, ``highlight_elements()``, ``overlay_reactions()``,
-and similar display/overlay methods return ``self`` for chaining:
+The following display, overlay, highlight, and annotation methods
+return ``self`` for chaining:
+
+* ``show_model()``
+* ``overlay_deformed()``
+* ``overlay_forces()``
+* ``highlight_elements()``
+* ``highlight_nodes()``
+* ``annotate()``
 
 ```python
 viewer.show_model().highlight_elements(["1"], label="Issue").show()
