@@ -17,3 +17,5 @@ from .viz import (
     plot_npz_force_diagram,
     plot_npz_moment_3d,
 )
+
+from .interactive_viewer import plot_interactive_viewer

@@ -1,14 +1,54 @@
-# Model Viewer — 3D visualisation & discussion tool
+# Visualisation toolkit
+
+The ``fea_toolkit.plotting`` package provides two complementary
+visualisation stacks:
+
+| Stack | Backend | Purpose |
+|---|---|---|
+| **``ModelViewer``** | PyVista (pluggable) | Backend‑agnostic 3D model viewer — show model, overlay deformed shape / force flags, highlight elements, annotate. |
+| **Standalone 3D plots** (`plot_*_3d`) | PyVista | Direct‑call 3D plots for specific result types — deformed shape, mode shapes, force/moment diagrams, RS deformation. |
+| **Standalone 2D plots** (`plot_*`) | Matplotlib | Elevation‑based force diagrams, pushover capacity curves, ADRS spectra. |
+| **Interactive viewer** (`plot_interactive_viewer`) | PyVista + widgets | Widget‑driven viewer with radio buttons, combo selector, click‑to‑inspect elements. |
+| **NPZ standalone** (`plot_npz_*`) | PyVista / Matplotlib | Plot from a saved ``.npz`` file without needing the original builder. |
+
+---
+
+## Quick reference
+
+| Function | Backend | What it shows | Best for |
+|---|---|---|---|
+| `ModelViewer(builder).show_model()` | PyVista | 3D model, coloured by section | General model inspection, highlighting problem elements |
+| `ModelViewer(...).overlay_deformed()` | PyVista | Deformed shape overlay | Static / modal / RS displacement results |
+| `ModelViewer(...).overlay_forces()` | PyVista | Force/moment flag diagram | Static element forces |
+| `ModelViewer(...).highlight_elements()` | PyVista | Highlighted elements | Marking braces, issues, discussion topics |
+| `ModelViewer(...).annotate()` | PyVista | Text annotation | Labelling features |
+| `plot_model_3d(builder)` | PyVista | 3D model (nodes, labels, section colours) | Quick model preview |
+| `plot_deformed_3d(builder, results)` | PyVista | Deformed + undeformed overlay | Static analysis displacement |
+| `plot_rs_deformed_3d(builder, disp)` | PyVista | RS CQC‑combined deformed shape | Response‑spectrum results |
+| `plot_mode_3d(builder, shapes, mode)` | PyVista | Mode shape (with animation) | Modal analysis |
+| `plot_static_moment_3d(builder, forces)` | PyVista | 3D force/moment flag or tube diagram | Static element forces |
+| `plot_static_shear_3d(builder, forces)` | PyVista | 3D shear force diagram | Shear results |
+| `plot_static_axial_3d(builder, forces)` | PyVista | 3D axial force diagram | Axial results |
+| `plot_static_force_diagram(builder, forces)` | Matplotlib | 2D force vs elevation | Column / wall forces |
+| `plot_force_diagram(elem_results)` | Matplotlib | 2D CQC‑combined force vs elevation | RS element results |
+| `plot_pushover_curve(results)` | Matplotlib | Capacity curve | Pushover summary |
+| `plot_pushover_curve_enhanced(results)` | Matplotlib | Capacity curve + stiffness lines | Detailed pushover review |
+| `plot_capacity_spectrum(adrs, spec, pt)` | Matplotlib | ADRS format capacity + demand + performance point | CSM (ATC‑40) |
+| `plot_interactive_viewer(builder, forces)` | PyVista + widgets | Full interactive viewer | Exploration, demos |
+| `plot_npz_force_diagram(path)` | Matplotlib | 2D force from saved NPZ | Post‑hoc analysis |
+| `plot_npz_moment_3d(path)` | PyVista | 3D force from saved NPZ | Post‑hoc analysis |
+
+---
+
+## 1. ``ModelViewer`` — backend‑agnostic 3D viewer
 
 The :class:`~fea_toolkit.plotting.viewer.ModelViewer` provides a
-backend-agnostic 3D viewer for structural models and analysis results.
+backend‑agnostic 3D viewer for structural models and analysis results.
 It is designed for both interactive exploration and **LLM-assisted
 discussions** — you (or an AI assistant) can call it to display a model,
 overlay results, highlight problem areas, and annotate specific elements.
 
----
-
-## Quick start
+### Quick start
 
 ```python
 from fea_toolkit.plotting import ModelViewer
@@ -23,10 +63,6 @@ viewer = ModelViewer(model_data=md)
 viewer.show_model()
 viewer.show()
 ```
-
----
-
-## API reference
 
 ### Constructor
 
@@ -122,82 +158,7 @@ Methods that open, export, or clear the plot (``show()``, ``screenshot()``,
 ``export_html()``, ``clear()``) do **not** return ``self`` and terminate
 the chain.
 
----
-
-## Use cases for discussion
-
-### 1. Diagnose a singular stiffness matrix
-
-```python
-issues = builder.diagnose_singularity()
-problem_tags = [i["node_tag"] for i in issues if i["n_elements"] == 0]
-
-# Find the node IDs
-problem_ids = [nid for nid, nd in md.nodes.items()
-               if nd.node_tag in problem_tags]
-
-viewer = ModelViewer(builder)
-viewer.show_model(show_nodes=True)
-viewer.highlight_nodes(problem_ids, color=(1, 0, 0), label="Orphan")
-viewer.show()
-```
-
-### 2. Show buckled braces after pushover
-
-```python
-buckling = builder.check_brace_buckling(braces)
-if buckling["buckled"]:
-    viewer = ModelViewer(builder)
-    viewer.show_model()
-    viewer.highlight_elements(
-        buckling["buckled_ids"],
-        color=(1, 0, 0),
-        label=f"{len(buckling['buckled_ids'])} buckled",
-    )
-    viewer.show()
-```
-
-### 3. Self-weight consistency failure — highlight affected sections
-
-```python
-report = builder.check_self_weight_consistency()
-if not report["passed"]:
-    viewer = ModelViewer(builder)
-    viewer.show_model(color_by_section=True)
-    for sec, info in report["by_section"].items():
-        if abs(info["diff"]) > 0.01 * info["expected"]:
-            ids = [f.elem_id for f in viewer._frames
-                   if f.section == sec]
-            viewer.highlight_elements(ids, label=f"{sec}: {info['diff']:.0f}")
-    viewer.show()
-```
-
-### 4. Compare mode shapes
-
-```python
-modal = builder.run_modal_analysis(num_modes=3)
-for m in range(min(3, modal["num_modes"])):
-    shapes = builder.extract_mode_shapes(num_modes=3)
-    viewer = ModelViewer(builder)
-    viewer.show_model(show_nodes=False)
-    viewer.overlay_deformed(displacements=shapes[m], scale=30,
-                            color=(0.3, 0.6, 1.0))
-    viewer.screenshot(f"mode_{m}.png")
-```
-
-### 5. Share a discussion view
-
-```python
-viewer = ModelViewer(builder)
-viewer.show_model()
-viewer.highlight_elements(ids, label="Check these")
-viewer.annotate("Max moment", node_id="47")
-viewer.export_html("discussion_view.html")   # send to colleagues
-```
-
----
-
-## Backend architecture
+### Backend architecture
 
 ```
 ModelViewer (backend-agnostic)
@@ -216,22 +177,347 @@ and register it in ``viewer._resolve_backend()``.
 
 ---
 
-## LLM instructions
+## 2. Standalone 3D plots (PyVista)
 
-When you are an AI assistant helping a user discuss a structural model:
+These are direct‑call functions in :mod:`fea_toolkit.plotting.viz` that
+create a PyVista window (or return a plotter for Jupyter) for a specific
+result type.  All accept a ``notebook=True`` keyword for Jupyter, and
+a ``selection`` keyword to restrict visible elements.
 
-1. **Import the viewer** from ``fea_toolkit.plotting import ModelViewer``.
-2. **Create a viewer** from the builder or model data.
-3. **Show the model** with ``viewer.show_model()``.
-4. **Overlay results** if available (deformed shape, force flags).
-5. **Highlight elements** under discussion using their frame/area/node IDs.
-6. **Annotate** specific locations with explanatory text.
-7. **Export** a screenshot or HTML for sharing.
-
-All methods return ``self``, so calls can be chained:
+### 2a. 3D model view
 
 ```python
-ModelViewer(builder).show_model().highlight_elements(
-    ["1"], label="Issue"
-).annotate("Check this", node_id="2").show()
+from fea_toolkit.plotting import plot_model_3d
+
+plot_model_3d(
+    builder,
+    show_nodes=True,
+    show_labels=False,
+    color_by_section=True,
+    selection=None,       # restrict to a Selection
+    notebook=False,
+)
+```
+
+### 2b. Deformed shape
+
+```python
+from fea_toolkit.plotting import plot_deformed_3d
+
+plot_deformed_3d(
+    builder,
+    results,              # from builder.run_static_analysis()
+    scale=10.0,
+    show_original=True,   # grey undeformed overlay
+    selection=None,
+)
+```
+
+### 2c. RS deformed shape (CQC‑combined)
+
+```python
+from fea_toolkit.plotting import plot_rs_deformed_3d
+
+disp = builder.compute_rs_nodal_displacements(...)
+plot_rs_deformed_3d(builder, disp, scale=10.0)
+```
+
+Coloured by displacement magnitude (blue–white–red scale).
+
+### 2d. Mode shape
+
+```python
+from fea_toolkit.plotting import plot_mode_3d
+
+shapes = builder.extract_mode_shapes(num_modes=6)
+plot_mode_3d(
+    builder, shapes,
+    mode=0,               # 0‑based mode index
+    scale=10.0,
+    animate=True,         # oscillating amplitude
+    periods=modal["periods"],
+)
+```
+
+### 2e. 3D force / moment diagram
+
+```python
+from fea_toolkit.plotting import plot_static_moment_3d
+
+plot_static_moment_3d(
+    builder,
+    elem_forces,          # from builder.extract_static_element_forces()
+    quantity="Mz",        # Mz, My, Mx, Fx, Fy, Fz
+    mode="flag",          # "flag" or "tube"
+    show_original=True,
+    show_reactions=False,
+    static_results=None,  # required for reactions
+)
+```
+
+Convenience wrappers:
+
+```python
+from fea_toolkit.plotting import plot_static_shear_3d, plot_static_axial_3d
+
+plot_static_shear_3d(builder, elem_forces, quantity="Fz")
+plot_static_axial_3d(builder, elem_forces)
+```
+
+---
+
+## 3. Standalone 2D plots (Matplotlib)
+
+These produce publication‑quality 2D figures and return the
+``matplotlib.figure.Figure`` so the caller can ``.savefig()`` or
+``.show()``.
+
+### 3a. Force / moment vs elevation
+
+```python
+from fea_toolkit.plotting import plot_static_force_diagram
+
+fig = plot_static_force_diagram(
+    builder,
+    elem_forces,
+    quantity="Mz",        # Fx, Fy, Fz, Mx, My, Mz
+    use_local=True,       # local or global coordinates
+    selection=None,
+    figsize=(6, 8),
+)
+fig.savefig("moment.png")
+```
+
+For CQC‑combined results:
+
+```python
+from fea_toolkit.plotting import plot_force_diagram
+
+rs_forces = builder.extract_element_rs_forces(...)
+fig = plot_force_diagram(
+    rs_forces["element_results"],
+    quantity="My_i",
+)
+```
+
+### 3b. Pushover capacity curve
+
+```python
+from fea_toolkit.plotting import plot_pushover_curve
+
+fig = plot_pushover_curve(pushover_results)
+```
+
+Enhanced version with stiffness indicators and design drift marker:
+
+```python
+from fea_toolkit.plotting import plot_pushover_curve_enhanced
+
+fig = plot_pushover_curve_enhanced(
+    pushover_results,
+    design_disp=0.15,     # optional vertical marker (m)
+)
+```
+
+### 3c. Capacity spectrum (ADRS)
+
+```python
+from fea_toolkit.plotting import plot_capacity_spectrum
+
+adrs = builder.pushover_to_adrs(...)
+fig = plot_capacity_spectrum(
+    adrs,
+    spectrum_periods,      # from design spectrum
+    spectrum_accels,
+    performance_point=pp,  # optional, from compute_performance_point()
+)
+```
+
+---
+
+## 4. Interactive widget‑driven viewer
+
+:func:`~fea_toolkit.plotting.interactive_viewer.plot_interactive_viewer`
+opens a PyVista window with on‑screen controls for exploring results.
+
+```python
+from fea_toolkit.plotting import plot_interactive_viewer
+
+plot_interactive_viewer(
+    builder,
+    combo_forces={
+        "Dead":  forces_dead,
+        "Live":  forces_live,
+        "Wind":  forces_wind,
+        "RS-X":  forces_rs_x,
+    },
+    combo_results={
+        "Dead":  res_dead,
+        "Live":  res_live,
+        "Wind":  res_wind,
+    },
+    initial_combo="Dead",
+    initial_quantity="Mz",
+)
+```
+
+### Controls
+
+| Widget | Location | Purpose |
+|---|---|---|
+| **Radio buttons** (x6) | Left side | Switch between Mz / My / Mx / Fz / Fy / Fx |
+| **Text slider** | Top centre | Cycle through load combos (Dead → Live → Wind → …) |
+| Checkbox 1 | Left (below radios) | Toggle centreline overlay |
+| Checkbox 2 | Left | Toggle element labels (tag + section name) |
+| Checkbox 3 | Left | Toggle reaction arrows (red = horizontal, green = vertical) |
+| **Click on element** | — | Floating overlay: element tag, SAP ID, section, material |
+| **Click on flag** | — | Floating overlay: numeric force/moment value with unit |
+
+### Data flow
+
+```python
+# 1. Run static analyses
+forces_dead = builder.extract_static_element_forces()
+res_dead    = builder.run_static_analysis()
+
+# 2. Change pattern scales, re-run
+forces_wind = builder.extract_static_element_forces()
+res_wind    = builder.run_static_analysis(pattern_scales={...})
+
+# 3. Launch viewer
+plot_interactive_viewer(
+    builder,
+    combo_forces={"Dead": forces_dead, "Wind": forces_wind},
+    combo_results={"Dead": res_dead, "Wind": res_wind},
+)
+```
+
+---
+
+## 5. NPZ standalone plots
+
+These functions load a ``.npz`` file created by
+:meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.export_results_to_npz`
+and produce plots **without** needing the original ``OpenSeesBuilder``
+or model objects.
+
+```python
+from fea_toolkit.plotting import plot_npz_force_diagram, plot_npz_moment_3d
+
+# 2D force vs elevation (Matplotlib)
+fig = plot_npz_force_diagram(
+    "results.npz",
+    quantity="Mz",
+    use_local=True,
+    combo=None,           # combo prefix, or None for primary
+)
+
+# 3D force diagram (PyVista)
+plot_npz_moment_3d(
+    "results.npz",
+    quantity="Mz",
+    mode="flag",          # "flag" or "tube"
+    use_local=True,
+    combo=None,
+)
+```
+
+These are particularly useful for:
+- Generating views of results exported from a headless / batch run.
+- Sharing visualisations with colleagues who don't have the original model.
+- Quick post‑processing in a separate script.
+
+---
+
+## 6. LLM decision guide
+
+When you are an AI assistant and the user asks about visualising the
+structural model or results, use this guide to choose the right tool:
+
+### "Show me the model"
+→ ``ModelViewer(builder).show_model().show()``
+Best for general inspection, getting a feel for the structure.
+
+### "Show me the model with section colours"
+→ ``plot_model_3d(builder, color_by_section=True)``
+Uses the same colour palette as ``ModelViewer`` but with automatic isometric view.
+
+### "Show me the deformed shape"
+- **Static:** ``plot_deformed_3d(builder, results)`` or
+  ``ModelViewer(builder).overlay_deformed()``
+- **RS/CQC:** ``plot_rs_deformed_3d(builder, rs_displacements)``
+- **Modal:** ``plot_mode_3d(builder, shapes, mode=0, animate=True)``
+
+### "Show me the forces / moments"
+- **3D flags on structure:** ``plot_static_moment_3d(builder, elem_forces, quantity="Mz")``
+- **3D shear:** ``plot_static_shear_3d(builder, elem_forces)``
+- **3D axial:** ``plot_static_axial_3d(builder, elem_forces)``
+- **2D vs elevation (columns):** ``plot_static_force_diagram(builder, elem_forces, quantity="Mz")``
+- **CQC‑combined 2D:** ``plot_force_diagram(rs_results["element_results"], quantity="My_i")``
+
+### "Show me the pushover curve"
+- **Basic:** ``plot_pushover_curve(pushover_results)``
+- **Enhanced (stiffness, drift):** ``plot_pushover_curve_enhanced(pushover_results, design_disp=0.15)``
+
+### "Show me the capacity spectrum"
+→ ``plot_capacity_spectrum(adrs, periods, accels, performance_point=pp)``
+
+### "I want to explore interactively"
+→ ``plot_interactive_viewer(builder, combo_forces={...}, combo_results={...})``
+Best for demos, exploration, and when the user wants to switch between
+quantities / combos themselves.
+
+### "I have a .npz file from an earlier run"
+- **2D:** ``plot_npz_force_diagram("path.npz", quantity="Mz")``
+- **3D:** ``plot_npz_moment_3d("path.npz", quantity="Mz")``
+
+### "Highlight specific elements"
+→ ``ModelViewer(builder).show_model().highlight_elements(
+    frame_ids=["1","5"], label="Braces"
+).show()``
+
+### "Show me reactions"
+→ ``plot_static_moment_3d(builder, forces, show_reactions=True,
+    static_results=results)``
+
+### "Export a view for sharing"
+→ ``ModelViewer(builder).show_model().export_html("view.html")``
+Saves a self‑contained interactive HTML file — viewable in any browser.
+
+---
+
+## Import summary
+
+```python
+# Backend‑agnostic viewer
+from fea_toolkit.plotting import ModelViewer
+
+# Standalone 3D plots (PyVista)
+from fea_toolkit.plotting import (
+    plot_model_3d,
+    plot_deformed_3d,
+    plot_rs_deformed_3d,
+    plot_mode_3d,
+    plot_static_moment_3d,
+    plot_static_shear_3d,
+    plot_static_axial_3d,
+)
+
+# Standalone 2D plots (Matplotlib)
+from fea_toolkit.plotting import (
+    plot_static_force_diagram,
+    plot_force_diagram,
+    plot_pushover_curve,
+    plot_pushover_curve_enhanced,
+    plot_capacity_spectrum,
+)
+
+# Interactive widget viewer (PyVista)
+from fea_toolkit.plotting import plot_interactive_viewer
+
+# NPZ standalone plots
+from fea_toolkit.plotting import (
+    plot_npz_force_diagram,
+    plot_npz_moment_3d,
+)
 ```
