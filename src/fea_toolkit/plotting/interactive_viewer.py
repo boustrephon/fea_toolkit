@@ -118,8 +118,11 @@ def _build_flag_mesh(builder, elements, assignments, elem_forces, quantity,
     scale = (model_height * 0.2) / max(max_val, 1.0)
 
     # Build merged PolyData
+    # compute_flag_parts can return polygons with varying vertex counts
+    # (e.g., quads for flag body, triangles for caps), so we accumulate
+    # faces as a flat buffer instead of a 2D array.
     verts_list = []
-    faces_list = []
+    faces_flat: List[int] = []
     scalars_list = []
     elem_tag_list = []
     offset = 0
@@ -129,7 +132,8 @@ def _build_flag_mesh(builder, elements, assignments, elem_forces, quantity,
             n = len(verts)
             pts_arr = np.array(verts)
             verts_list.append(pts_arr)
-            faces_list.append([n] + list(range(offset, offset + n)))
+            faces_flat.append(n)
+            faces_flat.extend(range(offset, offset + n))
             scalars_list.append(col_val)
             elem_tag_list.append(tag)
             offset += n
@@ -138,7 +142,7 @@ def _build_flag_mesh(builder, elements, assignments, elem_forces, quantity,
         return None, 0.0
 
     vertices = np.vstack(verts_list)
-    faces = np.array(faces_list, dtype=int).ravel()
+    faces = np.array(faces_flat, dtype=int)
     mesh = pv.PolyData(vertices, faces=faces)
     mesh.point_data['col_val'] = np.repeat(scalars_list,
                                             [len(v) for v in verts_list])
@@ -181,12 +185,14 @@ def _build_structure_tubes(builder, elements, assignments, model):
         cyl = pv.Cylinder(center=mid, direction=direction,
                           radius=radius, height=length * 0.95,
                           resolution=8)
+        # Triangulate to handle mixed quad/triangle capped cylinders
+        cyl.triangulate()
         n_pts = cyl.n_points
         n_cells = cyl.n_cells
 
         all_verts.append(cyl.points)
-        # Shift face indices
-        faces = cyl.faces.reshape(-1, cyl.faces[0] + 1)
+        # Shift face indices — now all faces are triangles (4 values each: 3 + 3 indices)
+        faces = cyl.faces.reshape(-1, 4)
         faces[:, 1:] += offset
         all_faces.append(faces.ravel())
         all_elem_tags.append(np.full(n_cells, elem.elem_tag, dtype=int))
@@ -463,6 +469,7 @@ def plot_interactive_viewer(
 
     # -- Reaction arrows (toggleable) --
     reaction_actors: List[Any] = []
+    _reactions_visible = False  # tracks checkbox state; starts hidden
 
     def _build_reactions(combo):
         """Build reaction arrow meshes for *combo*."""
@@ -505,6 +512,8 @@ def plot_interactive_viewer(
             colour = (0.9, 0.1, 0.1) if atype == "h" else (0.1, 0.8, 0.1)
             act = plotter.add_mesh(arrow, color=colour, opacity=0.85,
                                    name=f'reaction_{id(arrow)}')
+            # Apply current visibility state immediately
+            act.SetVisibility(_reactions_visible)
             actors.append(act)
         return actors
 
@@ -696,7 +705,7 @@ def plot_interactive_viewer(
         plotter.add_text_slider_widget(
             _combo_callback,
             data=combo_names,
-            value=current_combo,
+            value=combo_names.index(current_combo),
             pointa=(0.35, 0.95),
             pointb=(0.85, 0.95),
             color='black',
@@ -743,6 +752,8 @@ def plot_interactive_viewer(
 
     class _ToggleReactions:
         def __call__(self, state):
+            nonlocal _reactions_visible
+            _reactions_visible = state
             for act in reaction_actors:
                 try:
                     act.SetVisibility(state)
