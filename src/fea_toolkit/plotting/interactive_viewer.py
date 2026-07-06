@@ -481,20 +481,20 @@ def plot_interactive_viewer(
         reactions = res.get("nodal_reactions", {})
         if not reactions:
             return []
+        # Precompute node_tag → node lookup to avoid O(N×R) nested search
+        node_by_tag = {nd.node_tag: nd for nd in model.nodes.values()}
         actors = []
-        z_vals = [n.z for n in model.nodes.values()]
+        z_vals = [n.z for n in node_by_tag.values()]
         z_rng = max(z_vals) - min(z_vals) if z_vals else 1.0
         max_h = 0.0
         max_v = 0.0
         data = []
         for nid_tag, r in reactions.items():
             fx, fy, fz = r[0], r[1], r[2]
-            for node in model.nodes.values():
-                if node.node_tag == nid_tag:
-                    pos = np.array([node.x, node.y, node.z])
-                    break
-            else:
+            node = node_by_tag.get(nid_tag)
+            if node is None:
                 continue
+            pos = np.array([node.x, node.y, node.z])
             horiz = math.hypot(fx, fy)
             vert = abs(fz)
             if horiz > 1e-6:
