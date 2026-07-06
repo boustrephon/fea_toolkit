@@ -1,7 +1,6 @@
 # fea_toolkit development notes
 
-Copilot-repo-memory snapshot — saved from `.copilot-chat/memory-tool/memories/repo/notes.md`
-to the repository for git/Time Machine backup.
+
 
 ## CSM (Capacity Spectrum Method)
 - `pushover_to_adrs()`: Converts pushover curve to ADRS format.
@@ -10,7 +9,7 @@ to the repository for git/Time Machine backup.
   - Uses abs() on base_shear/control_disp since OpenSees sign convention may give negatives.
 - `compute_performance_point()`: Secant-iteration CSM per ATC-40.
   - Falls back to elastic spectral response when iteration drops below first data point.
-  - Uses `np.trapezoid` (not `np.trapz` which is removed in NumPy 2.x).
+  - Uses `np.trapezoid` (renamed from `np.trapz` in NumPy 2.0; `np.trapz` is deprecated and emits a warning).
 - `plot_capacity_spectrum()` in viz.py for ADRS visualisation.
 
 ## Key patterns
@@ -67,7 +66,7 @@ to the repository for git/Time Machine backup.
 - **Query commands** (`nodeCoord`, `getNodeTags`, etc.) produce errors if nodes don't exist → skip in Tcl output.
 - **Fiber sections**: `section Fiber`, `uniaxialMaterial Concrete01/Steel02`, `patch`, `layer ALL work`.
 - **`ElasticMembranePlateSection`** NOT supported in Xara's OpenSeesRT.
-- **Library**: `/Users/andrew/Projects/Xara/SRC/opensees/libOpenSeesRT.dylib`
+- **Library**: auto-detected by `export_model_to_tcl()`; falls back to `"libOpenSeesRT.dylib"`. Override via `lib_path` argument or set `OPENSEESRT_LIB` environment variable.
 - **Docs**: `docs/rhino_export.md` — quick start, layer structure, geometry types, metadata reference, joint colour coding
 - **Frame member docs**: Added steel + planned RC section documentation to `docs/pushover_analysis.md`
 
