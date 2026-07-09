@@ -4025,6 +4025,11 @@ class OpenSeesBuilder:
                 m_j_global = R @ m_j_local
             except Exception:
                 # Fallback: treat as already global
+                import warnings as _w
+                _w.warn(
+                    f"Cannot rotate element {elem.elem_id} (tag {elem.elem_tag}) "
+                    f"forces to global — using raw local-to-global values."
+                )
                 f_i_global = np.array([f[0], f[1], f[2]])
                 m_i_global = np.array([f[3], f[4], f[5]])
                 f_j_global = np.array([f[6], f[7], f[8]])

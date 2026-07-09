@@ -280,7 +280,7 @@ def plot_csm_4panel(
         max_Sa = max(S_a.max(), Sa_plot.max())
         yield_ok = (
             pp.get("S_dy") and pp["S_dy"] > 0
-            and pp["S_dy"] <= max_Sd and pp["S_ay"] <= max_Sa
+            and pp["S_dy"] <= x_lim and pp["S_ay"] <= max_Sa
         )
         yield_label = (
             f"Yield ({pp['S_dy']:.3f}, {pp['S_ay']:.1f})"
@@ -444,17 +444,21 @@ def plot_storey_forces(
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, sharey=True)
 
-    skip_cols = {"Storey", "Elevation", "Elevation (m)"}
-    num_cols = [c for c in df_shear.columns if c not in skip_cols]
-    mom_cols = [c for c in df_moment.columns if c not in skip_cols]
-    # Only use columns that exist in both (matching cases)
-    common_cols = [c for c in num_cols if c in mom_cols]
-
-    # Resolve elevation column
+    # Resolve elevation column first, then exclude it from data columns
     elev_candidates = [c for c in df_shear.columns if "Elevation" in c]
     if not elev_candidates:
         return None
     elev_col_s = elev_candidates[0]
+    elev_col_m = ([c for c in df_moment.columns if "Elevation" in c]
+                  or [None])[0]
+
+    base_skip = {"Storey", elev_col_s}
+    if elev_col_m and elev_col_m != elev_col_s:
+        base_skip.add(elev_col_m)
+    num_cols = [c for c in df_shear.columns if c not in base_skip]
+    mom_cols = [c for c in df_moment.columns if c not in base_skip]
+    # Only use columns that exist in both (matching cases)
+    common_cols = [c for c in num_cols if c in mom_cols]
     elev = df_shear[elev_col_s].values
     base_elev = elev.min()
     roof_elev = elev.max()
@@ -543,7 +547,7 @@ def plot_storey_displacements(
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, sharey=True)
 
-    # Resolve elevation column (could be "Elevation" or "Elevation (m)")
+    # Resolve elevation column
     elev_col_disp = "Elevation" if "Elevation" in df_disp.columns else (
         [c for c in df_disp.columns if "Elevation" in c][0]
         if any("Elevation" in c for c in df_disp.columns) else None)
@@ -558,8 +562,12 @@ def plot_storey_displacements(
     disp_scale = 1000.0 if disp_unit == "mm" else 1.0
     drift_scale = 1000.0 if drift_unit == "mm/m" else 1.0
 
-    disp_cols = [c for c in df_disp.columns if c not in ("Storey", "Elevation", "Elevation (m)")]
-    drift_cols = [c for c in df_drift.columns if c not in ("Storey", "Elevation", "Elevation (m)")]
+    # Exclude the resolved elevation columns dynamically
+    base_skip = {"Storey"}
+    disp_cols = [c for c in df_disp.columns
+                 if c not in base_skip and c != elev_col_disp]
+    drift_cols = [c for c in df_drift.columns
+                  if c not in base_skip and c != elev_col_drift]
 
     elev_disp = df_disp[elev_col_disp].values
     elev_drift = df_drift[elev_col_drift].values
