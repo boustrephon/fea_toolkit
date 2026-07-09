@@ -612,24 +612,29 @@ def split_elements(
                 node_ids_b = {el_b.node_i, el_b.node_j}
                 if node_ids_a & node_ids_b:
                     continue
-                p, s, t = _segment_intersection_3d(a, b, c, d)
+                p, s, t = _segment_intersection_3d(a, b, c, d, tol=tol)
                 if p is None:
                     continue
-                # Only split an element if intersection is NOT at its endpoint
-                split_a = tol < s < 1 - tol
-                split_b = tol < t < 1 - tol
+                # Convert parametric tol to absolute distance for the longer
+                # segment, so endpoint and reuse checks have consistent scale
+                len_a = float(np.linalg.norm(b - a))
+                len_b = float(np.linalg.norm(d - c))
+                abs_tol = max(tol, tol * max(len_a, len_b))
+
+                split_a = abs_tol < s < 1 - abs_tol
+                split_b = abs_tol < t < 1 - abs_tol
                 if not split_a and not split_b:
                     continue
 
                 # Reuse any existing node at this location (joint or split_n_)
                 used_nid = None
                 for nid_check, nd_check in nodes.items():
-                    d = math.hypot(
+                    dist = math.hypot(
                         nd_check.x - float(p[0]),
                         nd_check.y - float(p[1]),
                         nd_check.z - float(p[2]),
                     )
-                    if d <= tol:
+                    if dist <= abs_tol:
                         used_nid = nid_check
                         break
                 if used_nid is None:
