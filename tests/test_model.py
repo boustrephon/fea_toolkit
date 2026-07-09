@@ -1052,14 +1052,16 @@ class TestSplitElementsAtFrames:
         # Element A: horizontal beam from (0,0,0) to (10,0,0)
         # Two other elements cross it at nearly the same point:
         #   Element B: crosses at (5,0,0) exactly
-        #   Element C: crosses at (5.000001, 0, 0) — 1 micron off
+        #   Element C: crosses at (5.00000001, 0, 0) — 10 nm off
+        # Distance from (5,0,0) to (5.00000001,0,0) = 1e-8 ≤ 1e-6 tol, so
+        # split_n_1 is reused. Cross product over 10m = 10×1e-8 = 1e-7 ≤ tol.
         nodes = {
             "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
             "2": Node(node_id="2", node_tag=2, x=10, y=0, z=0),
             "3": Node(node_id="3", node_tag=3, x=5, y=-5, z=0),
             "4": Node(node_id="4", node_tag=4, x=5, y=5, z=0),
-            "5": Node(node_id="5", node_tag=5, x=5.000001, y=-5, z=0),
-            "6": Node(node_id="6", node_tag=6, x=5.000001, y=5, z=0),
+            "5": Node(node_id="5", node_tag=5, x=5.00000001, y=-5, z=0),
+            "6": Node(node_id="6", node_tag=6, x=5.00000001, y=5, z=0),
         }
         elements = {
             "A": FrameElement(elem_id="A", elem_tag=10, node_i="1", node_j="2"),
@@ -1076,6 +1078,24 @@ class TestSplitElementsAtFrames:
         assert new_elems["A"].inactive
         assert len(new_elems["A"].child_ids) == 2, (
             f"Expected 2 children (dedup), got {len(new_elems['A'].child_ids)}")
+
+        # Exactly one split node should exist (B and C share it)
+        split_nodes = [nid for nid in nodes if nid.startswith("split_n_")]
+        assert len(split_nodes) == 1, (
+            f"Expected 1 split node, got {len(split_nodes)}: {split_nodes}")
+
+        # B and C's children should both reference that same shared node
+        shared_nid = split_nodes[0]
+        b_children = [c for cid in new_elems["B"].child_ids
+                      for c in [new_elems.get(cid)] if c]
+        c_children = [c for cid in new_elems["C"].child_ids
+                      for c in [new_elems.get(cid)] if c]
+        b_refs = {c.node_i for c in b_children} | {c.node_j for c in b_children}
+        c_refs = {c.node_i for c in c_children} | {c.node_j for c in c_children}
+        assert shared_nid in b_refs, (
+            f"Element B children don't reference {shared_nid}")
+        assert shared_nid in c_refs, (
+            f"Element C children don't reference {shared_nid}")
 
 
 class TestEdgeCases:

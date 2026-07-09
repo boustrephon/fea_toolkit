@@ -280,6 +280,31 @@ def list_interp(val: float, list_1: list[float], list_2: list[float],
 # ============================================================================
 
 
+def polygon_area_3d(pts):
+    """Compute the 3D area of a polygon via cross-product summation.
+
+    Uses the vector-area formula :math:`\\mathbf{A} = \\frac12 \\sum \\mathbf{r}_i \\times \\mathbf{r}_{i+1}`
+    which works for any orientation (horizontal, vertical, or inclined).
+
+    Parameters
+    ----------
+    pts : list of (x, y, z) arrays or tuples
+        Polygon vertices in order (at least 3).
+
+    Returns
+    -------
+    float
+        Polygon area (always \u2265 0).  Returns 0.0 if fewer than 3 vertices.
+    """
+    if len(pts) < 3:
+        return 0.0
+    area_vec = np.zeros(3)
+    for k in range(len(pts)):
+        i1, i2 = k, (k + 1) % len(pts)
+        area_vec += np.cross(np.asarray(pts[i1]), np.asarray(pts[i2]))
+    return 0.5 * float(np.linalg.norm(area_vec))
+
+
 def _segment_intersection_3d(a, b, c, d, tol=1e-6):
     """Find intersection point of line segments AB and CD in 3D.
     
@@ -588,23 +613,36 @@ def split_elements(
                 if p is None:
                     continue
                 # Only split an element if intersection is NOT at its endpoint
-                split_a = 1e-6 < s < 1 - 1e-6
-                split_b = 1e-6 < t < 1 - 1e-6
+                split_a = tol < s < 1 - tol
+                split_b = tol < t < 1 - tol
                 if not split_a and not split_b:
                     continue
 
-                # Create a new node at the intersection
-                new_nid = f"split_n_{next_node_num}"
-                next_node_num += 1
-                new_node = Node(
-                    node_id=new_nid,
-                    node_tag=next_node_tag,
-                    x=float(p[0]), y=float(p[1]), z=float(p[2]),
-                )
-                next_node_tag += 1
-                nodes[new_nid] = new_node
-                node_coords[new_nid] = (float(p[0]), float(p[1]), float(p[2]))
-                grid.add_point(new_nid, (float(p[0]), float(p[1]), float(p[2])))
+                # Reuse existing split node at this location if available
+                used_nid = None
+                for nid_check, nd_check in nodes.items():
+                    if nid_check.startswith("split_n_"):
+                        d = math.hypot(
+                            nd_check.x - float(p[0]),
+                            nd_check.y - float(p[1]),
+                            nd_check.z - float(p[2]),
+                        )
+                        if d <= tol:
+                            used_nid = nid_check
+                            break
+                if used_nid is None:
+                    # Create a new node at the intersection
+                    used_nid = f"split_n_{next_node_num}"
+                    next_node_num += 1
+                    new_node = Node(
+                        node_id=used_nid,
+                        node_tag=next_node_tag,
+                        x=float(p[0]), y=float(p[1]), z=float(p[2]),
+                    )
+                    next_node_tag += 1
+                    nodes[used_nid] = new_node
+                    node_coords[used_nid] = (float(p[0]), float(p[1]), float(p[2]))
+                    grid.add_point(used_nid, (float(p[0]), float(p[1]), float(p[2])))
 
                 # If element A needs splitting, record the intermediate node
                 if split_a:
@@ -984,13 +1022,8 @@ def convert_area_loads_to_edge_loads(
         pts = np.array([node_coords[nid] for nid in nids])
         centroid = pts.mean(axis=0)
 
-        # Compute area (3D polygon area via cross product of consecutive
-        # position vectors — works for any orientation, not just horizontal)
-        area_vec = np.zeros(3)
-        for k in range(len(nids)):
-            i1, i2 = k, (k + 1) % len(nids)
-            area_vec += np.cross(pts[i1], pts[i2])
-        area_val = 0.5 * np.linalg.norm(area_vec)
+        # Compute area via shared helper
+        area_val = polygon_area_3d([pts[i] for i in range(len(nids))])
 
         if area_val < 1e-12:
             continue

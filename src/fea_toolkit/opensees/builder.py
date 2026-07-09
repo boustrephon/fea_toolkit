@@ -1356,7 +1356,9 @@ class OpenSeesBuilder:
     # -------------------------------------------------------------------------
 
     def _polygon_area(self, node_ids, nodes=None):
-        """Compute the 3D area of a polygon via Newell's method.
+        """Compute the 3D area of a polygon.
+
+        Delegates to :func:`~fea_toolkit.model.geometry.polygon_area_3d`.
 
         Args:
             node_ids: Iterable of node ID strings.
@@ -1367,6 +1369,7 @@ class OpenSeesBuilder:
             (always ≥ 0) and *pts* is the list of ``(x, y, z)`` tuples.
             Returns ``(0.0, [])`` if fewer than 3 nodes are resolved.
         """
+        from ..model.geometry import polygon_area_3d
         if nodes is None:
             nodes = self.model.nodes
         pts = []
@@ -1377,14 +1380,7 @@ class OpenSeesBuilder:
             pts.append((nd.x, nd.y, nd.z))
         if len(pts) < 3:
             return 0.0, []
-        nx = ny = nz = 0.0
-        for i in range(len(pts)):
-            x1, y1, z1 = pts[i]
-            x2, y2, z2 = pts[(i + 1) % len(pts)]
-            nx += (y1 - y2) * (z1 + z2)
-            ny += (z1 - z2) * (x1 + x2)
-            nz += (x1 - x2) * (y1 + y2)
-        area_mag = 0.5 * np.sqrt(nx * nx + ny * ny + nz * nz)
+        area_mag = polygon_area_3d(pts)
         return area_mag, pts
 
     # -------------------------------------------------------------------------
