@@ -7,7 +7,6 @@ import numpy as np
 from typing import Sequence, Tuple, Dict, List, Any, Union, Optional
 from collections import defaultdict
 
-# from ..model.sap_data import FrameElement, FrameDistributedLoad
 from ..model.sap_data import (
     SAPModelData, Node, Restraint, Material, Section,
     FrameElement, AreaElement, Group, LoadPattern, JointLoad,
@@ -120,7 +119,6 @@ def compute_t_location(point, a, b) -> float:
     t = np.dot(ap, ab) / (length * length)
     return float(np.clip(t, 0.0, 1.0))
 
-import numpy as np
 import openseespy.opensees as ops
 
 def global_to_local_distributed_load(ele_tag, global_force_vector):
@@ -316,18 +314,26 @@ def _segment_intersection_3d(a, b, c, d, tol=1e-6):
     cd = d - c
     ac = c - a
     
+    # Evaluate all three coordinate-pair projections and choose the one
+    # with the largest absolute determinant for best numerical stability.
+    best = None  # (det, i, j)
     for (i, j) in [(0, 1), (0, 2), (1, 2)]:
         det = ab[i] * (-cd[j]) - ab[j] * (-cd[i])
         if abs(det) > tol:
-            s = (ac[i] * (-cd[j]) - ac[j] * (-cd[i])) / det
-            t = (ab[i] * ac[j] - ab[j] * ac[i]) / det
-            k = 3 - i - j
-            residual = (a[k] + s*ab[k]) - (c[k] + t*cd[k])
-            if abs(residual) > tol * max(1.0, abs(a[k]), abs(b[k]), abs(c[k]), abs(d[k])):
-                return None, None, None
-            if -tol <= s <= 1 + tol and -tol <= t <= 1 + tol:
-                p = a + s * ab
-                return p, s, t
+            if best is None or abs(det) > abs(best[0]):
+                best = (det, i, j)
+    if best is None:
+        return None, None, None
+    det, i, j = best
+    s = (ac[i] * (-cd[j]) - ac[j] * (-cd[i])) / det
+    t = (ab[i] * ac[j] - ab[j] * ac[i]) / det
+    k = 3 - i - j
+    residual = (a[k] + s*ab[k]) - (c[k] + t*cd[k])
+    if abs(residual) > tol * max(1.0, abs(a[k]), abs(b[k]), abs(c[k]), abs(d[k])):
+        return None, None, None
+    if -tol <= s <= 1 + tol and -tol <= t <= 1 + tol:
+        p = a + s * ab
+        return p, s, t
     return None, None, None
 
 
@@ -504,7 +510,13 @@ def split_elements_ss(nodes: Dict[str, Dict[str, float]],
                    frame_dist_loads: Dict[str, Any],
                    tol: float = 1e-6,
                    verbose: bool = False) -> Tuple[Dict[str, Dict], Dict[str, Any], Dict[str, Any]]:
-    """Main entry point for element splitting (currently only at joints)."""
+    """Main entry point for element splitting (currently only at joints).
+
+    .. deprecated::
+       Use :func:`split_elements` instead, which handles both AtJoints
+       and AtFrames splitting.  This wrapper will be removed in a future
+       version.
+    """
     return split_elements_at_joints(nodes, elements, assignments, dist_loads,
                         auto_mesh, frame_dist_loads, tol, verbose)
 
@@ -546,25 +558,20 @@ def split_elements(
     is logically separate and would be controlled by a distinct config
     option such as ``split_at_storeys``.
 
-    Returns updated elements (with parent-child tracking) and updated
-    distributed loads.
-
-    nodes = {nid: {'tag': node.node_tag, 'x': node.x, 'y': node.y, 'z': node.z}
-                        for nid, node in self.model.nodes.items()}
-    elements = {
-        fid: {'tag': fe.elem_tag, 'i': fe.node_i, 'j': fe.node_j, 'angle': fe.angle} 
-                for fid, fe in self.model.frame_elements.items()}:
     Args:
-        nodes (_type_): _description_
-        elements (_type_): _description_
-        assignments (_type_): _description_
-        dist_loads (_type_): _description_
-        auto_mesh (_type_): _description_
-        tol (_type_): _description_
-        verbose (_type_): _description_
+        nodes: ``{node_id: Node}`` — may be extended with new
+            ``split_n_*`` nodes created at frame-frame intersections.
+        elements: ``{elem_id: FrameElement}`` — inactive parents and
+            new children returned.
+        assignments: ``{elem_id: section_name}``.
+        dist_loads: Distributed loads to redistribute across children.
+        auto_mesh: ``{elem_id: {AtJoints: bool, AtFrames: bool}}``.
+        tol: Geometric tolerance for intersection and proximity checks.
+        verbose: Print progress.
 
     Returns:
-        _type_: _description_
+        ``(new_elements, new_assignments, new_dist_loads)`` with parent-
+        child tracking and redistributed loads.
     """
     # Build node coords dict
 
@@ -621,18 +628,24 @@ def split_elements(
                 len_b = float(np.linalg.norm(d - c))
                 abs_tol = max(tol, tol * max(len_a, len_b))
 
-                split_a = abs_tol < s < 1 - abs_tol
-                split_b = abs_tol < t < 1 - abs_tol
+                # Parametric tolerance (dimensionless fraction) for s/t
+                # endpoint checks — distinct from abs_tol (physical distance)
+                # used later for coordinate-based node reuse.
+                param_tol = tol
+                split_a = param_tol < s < 1 - param_tol
+                split_b = param_tol < t < 1 - param_tol
                 if not split_a and not split_b:
                     continue
 
                 # Reuse any existing node at this location (joint or split_n_)
                 used_nid = None
-                for nid_check, nd_check in nodes.items():
+                mins = (float(p[0]) - abs_tol, float(p[1]) - abs_tol, float(p[2]) - abs_tol)
+                maxs = (float(p[0]) + abs_tol, float(p[1]) + abs_tol, float(p[2]) + abs_tol)
+                for nid_check, coord in grid.points_in_bbox(mins, maxs):
                     dist = math.hypot(
-                        nd_check.x - float(p[0]),
-                        nd_check.y - float(p[1]),
-                        nd_check.z - float(p[2]),
+                        coord[0] - float(p[0]),
+                        coord[1] - float(p[1]),
+                        coord[2] - float(p[2]),
                     )
                     if dist <= abs_tol:
                         used_nid = nid_check
@@ -653,10 +666,28 @@ def split_elements(
                 at_frames_nodes.add(used_nid)
 
                 # If element A needs splitting, record the intermediate node
+                # Record t-location with tolerance-based dedup
+                # (set() only catches exact duplicates)
                 if split_a:
-                    el_a.t_locations = sorted(set(el_a.t_locations + [s]))
+                    merged = list(el_a.t_locations) + [s]
+                    merged.sort()
+                    deduped = []
+                    prev = None
+                    for val in merged:
+                        if prev is None or abs(val - prev) > tol:
+                            deduped.append(val)
+                        prev = val
+                    el_a.t_locations = deduped
                 if split_b:
-                    el_b.t_locations = sorted(set(el_b.t_locations + [t]))
+                    merged = list(el_b.t_locations) + [t]
+                    merged.sort()
+                    deduped = []
+                    prev = None
+                    for val in merged:
+                        if prev is None or abs(val - prev) > tol:
+                            deduped.append(val)
+                        prev = val
+                    el_b.t_locations = deduped
 
     new_elements = {}
     new_assignments = {}
