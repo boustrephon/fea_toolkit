@@ -279,6 +279,33 @@ def list_interp(val: float, list_1: list[float], list_2: list[float],
 # Spatial grid for efficient nearest‑neighbour search
 # ============================================================================
 
+
+def _segment_intersection_3d(a, b, c, d, tol=1e-6):
+    """Find intersection point of line segments AB and CD in 3D.
+    
+    Returns (intersect_point, s, t) or (None, None, None) if no intersection.
+    s = parametric position along AB (0=a, 1=b)
+    t = parametric position along CD (0=c, 1=d)
+    """
+    ab = b - a
+    cd = d - c
+    ac = c - a
+    
+    for (i, j) in [(0, 1), (0, 2), (1, 2)]:
+        det = ab[i] * (-cd[j]) - ab[j] * (-cd[i])
+        if abs(det) > tol:
+            s = (ac[i] * (-cd[j]) - ac[j] * (-cd[i])) / det
+            t = (ab[i] * ac[j] - ab[j] * ac[i]) / det
+            k = 3 - i - j
+            residual = (a[k] + s*ab[k]) - (c[k] + t*cd[k])
+            if abs(residual) > tol * max(1.0, abs(a[k]), abs(b[k]), abs(c[k]), abs(d[k])):
+                return None, None, None
+            if -tol <= s <= 1 + tol and -tol <= t <= 1 + tol:
+                p = a + s * ab
+                return p, s, t
+    return None, None, None
+
+
 class SpatialGrid:
     """Simple 3D grid for spatial indexing of points and line segments."""
     def __init__(self, cell_size: float = 1.0):
@@ -465,8 +492,36 @@ def split_elements(
         tol: float = 1e-6,
         verbose: bool = False
         )-> Tuple[Dict[str, FrameElement], Dict[str, str], List[FrameDistributedLoad]]:
-    """Split elements at joints (if AtJoints=True) and redistribute distributed loads.
-    Returns updated elements (with parent-child tracking) and updated distributed loads.
+    """Split elements at joints (if AtJoints=True) and/or frame-frame
+    intersections (if AtFrames=True), then redistribute distributed loads.
+
+    The two flags are **independent** — see the truth table:
+
+    ========== ========== ==============================================
+    AtJoints   AtFrames   Splits at
+    ========== ========== ==============================================
+    ``True``   ``False``  Existing joint nodes on the element
+    ``False``  ``True``   Frame-frame intersections (new ``split_n_*``
+                          nodes created)
+    ``True``   ``True``   Both — joints AND frame intersections
+    ``False``  ``False``  No splitting
+    ========== ========== ==============================================
+
+    When *AtJoints* is ``False`` and *AtFrames* is ``True``, only nodes
+    whose ``node_id`` starts with ``split_n_`` are accepted as split
+    points — existing joint nodes are ignored.
+
+    New ``Node`` objects created at frame-frame intersections use unique
+    ``node_id`` (``split_n_N``) and ``node_tag`` values.  These are added
+    to the *nodes* dict in-place.  Callers must ensure corresponding
+    ``ops.node()`` calls are made in the OpenSees model.
+
+    Storey-level splitting (splitting at identified storey elevations)
+    is logically separate and would be controlled by a distinct config
+    option such as ``split_at_storeys``.
+
+    Returns updated elements (with parent-child tracking) and updated
+    distributed loads.
 
     nodes = {nid: {'tag': node.node_tag, 'x': node.x, 'y': node.y, 'z': node.z}
                         for nid, node in self.model.nodes.items()}
@@ -494,14 +549,77 @@ def split_elements(
     for nid, coord in node_coords.items():
         grid.add_point(nid, coord)
 
+    # ---- AtFrames: find frame-frame intersections and create new nodes ----
+    # Collect elements that want frame-frame splitting
+    at_frames_ids = [
+        eid for eid, el in elements.items()
+        if auto_mesh.get(eid, {}).get('AtFrames', False)
+    ]
+
+    if at_frames_ids:
+        # Determine next node ID and tag for new split nodes
+        existing_ids = set(nodes.keys())
+        next_node_tag = max((nd.node_tag for nd in nodes.values()), default=0) + 1
+        next_node_num = 1
+        while f"split_n_{next_node_num}" in existing_ids:
+            next_node_num += 1
+
+        # Build array of endpoints for all AtFrames elements
+        at_frames_elems = [(eid, el) for eid, el in elements.items() if eid in at_frames_ids]
+
+        for i in range(len(at_frames_elems)):
+            eid_a, el_a = at_frames_elems[i]
+            a = np.array(node_coords[el_a.node_i])
+            b = np.array(node_coords[el_a.node_j])
+            if np.linalg.norm(b - a) < 1e-12:
+                continue
+            for j in range(i + 1, len(at_frames_elems)):
+                eid_b, el_b = at_frames_elems[j]
+                c = np.array(node_coords[el_b.node_i])
+                d = np.array(node_coords[el_b.node_j])
+                if np.linalg.norm(d - c) < 1e-12:
+                    continue
+                # Skip if they share a node (already joined)
+                node_ids_a = {el_a.node_i, el_a.node_j}
+                node_ids_b = {el_b.node_i, el_b.node_j}
+                if node_ids_a & node_ids_b:
+                    continue
+                p, s, t = _segment_intersection_3d(a, b, c, d)
+                if p is None:
+                    continue
+                # Only split an element if intersection is NOT at its endpoint
+                split_a = 1e-6 < s < 1 - 1e-6
+                split_b = 1e-6 < t < 1 - 1e-6
+                if not split_a and not split_b:
+                    continue
+
+                # Create a new node at the intersection
+                new_nid = f"split_n_{next_node_num}"
+                next_node_num += 1
+                new_node = Node(
+                    node_id=new_nid,
+                    node_tag=next_node_tag,
+                    x=float(p[0]), y=float(p[1]), z=float(p[2]),
+                )
+                next_node_tag += 1
+                nodes[new_nid] = new_node
+                node_coords[new_nid] = (float(p[0]), float(p[1]), float(p[2]))
+                grid.add_point(new_nid, (float(p[0]), float(p[1]), float(p[2])))
+
+                # If element A needs splitting, record the intermediate node
+                if split_a:
+                    el_a.t_locations = sorted(set(el_a.t_locations + [s]))
+                if split_b:
+                    el_b.t_locations = sorted(set(el_b.t_locations + [t]))
+
     new_elements = {}
     new_assignments = {}
     new_dist_loads = []   # will hold new loads for child elements
     next_tag = max((elem.elem_tag for elem in elements.values()), default=0) + 1
 
     for eid, el in elements.items():
-        # Check if auto-mesh and AtJoints is True
-        mesh_flag = auto_mesh.get(eid, {}).get('AtJoints', False)
+        # Check if auto-mesh and AtJoints is True, or has AtFrames t_locations
+        mesh_flag = auto_mesh.get(eid, {}).get('AtJoints', False) or bool(el.t_locations)
         if not mesh_flag:
             # No splitting
             new_elements[eid] = el
@@ -529,10 +647,14 @@ def split_elements(
         maxs = np.maximum(a, b) + tol
         candidates = grid.points_in_bbox(tuple(mins), tuple(maxs))
         intermediate = []
+        at_joints = auto_mesh.get(eid, {}).get('AtJoints', False)
         for nid, coord in candidates:
             if nid == el.node_i or nid == el.node_j:
                 continue
             if point_on_segment(coord, a, b, tol):
+                # If AtJoints is False, only split at AtFrames-created nodes
+                if not at_joints and not nid.startswith("split_n_"):
+                    continue
                 t = compute_t_location(coord, a, b)
                 intermediate.append((nid, t))
         if not intermediate:
@@ -545,8 +667,17 @@ def split_elements(
                     new_dist_loads.append(ld)
             continue
 
-        # Sort intermediate by t
+        # Sort intermediate by t, then deduplicate by t within tolerance
         intermediate.sort(key=lambda x: x[1])
+        deduped = []
+        prev_t = None
+        for nid, t in intermediate:
+            if prev_t is not None and abs(t - prev_t) <= tol:
+                continue  # skip — already have a node at this t
+            deduped.append((nid, t))
+            prev_t = t
+        intermediate = deduped
+
         t_locs = [t for _, t in intermediate]
         node_list = [el.node_i] + [nid for nid, _ in intermediate] + [el.node_j]
 
@@ -853,13 +984,13 @@ def convert_area_loads_to_edge_loads(
         pts = np.array([node_coords[nid] for nid in nids])
         centroid = pts.mean(axis=0)
 
-        # Compute area (shoelace formula)
-        area_val = 0.0
+        # Compute area (3D polygon area via cross product of consecutive
+        # position vectors — works for any orientation, not just horizontal)
+        area_vec = np.zeros(3)
         for k in range(len(nids)):
             i1, i2 = k, (k + 1) % len(nids)
-            cross = np.cross(pts[i1], pts[i2])
-            area_val += cross[2]
-        area_val = abs(area_val) * 0.5
+            area_vec += np.cross(pts[i1], pts[i2])
+        area_val = 0.5 * np.linalg.norm(area_vec)
 
         if area_val < 1e-12:
             continue

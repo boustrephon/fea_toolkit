@@ -1667,19 +1667,29 @@ class OpenSeesBuilder:
         """Perform element splitting using geometry.split_elements."""
         from ..model.geometry import split_elements
 
-        # Call split_elements with the model data
+        # Snapshot node count before splitting so we can identify new nodes
+        pre_split_node_count = len(self.model.nodes)
+
         new_elements, new_assignments, new_dist_loads = split_elements(
             self.model.nodes,
             self.model.frame_elements,
             self.model.frame_assignments,
-            getattr(self.model, 'frame_dist_loads', []),   # pass the list of distributed loads
+            getattr(self.model, 'frame_dist_loads', []),
             getattr(self.model, 'frame_auto_mesh', {}),
             tol=1E-6,
             verbose=self.config['verbose']
         )
         self.split_elements = new_elements
         self.split_assignments = new_assignments
-        self.split_dist_loads = new_dist_loads   # store for later use in _create_loads
+        self.split_dist_loads = new_dist_loads
+
+        # Create OpenSees nodes for any new nodes added during splitting
+        # (e.g., from AtFrames frame-frame intersections).
+        if len(self.model.nodes) > pre_split_node_count:
+            for nd in list(self.model.nodes.values()):
+                if nd.node_tag not in self._created_node_tags:
+                    ops.node(nd.node_tag, nd.x, nd.y, nd.z)
+                    self._created_node_tags.add(nd.node_tag)
 
     # -------------------------------------------------------------------------
     # Frame end offsets (rigid zones at joints)
@@ -3710,16 +3720,44 @@ class OpenSeesBuilder:
 
                 if reactions:
                     results['nodal_reactions'] = reactions
-                    # Also compute summed reactions for equilibrium check
+                    # Compute summed reactions for equilibrium check.
+                    # Overturning moments are computed about the centroid
+                    # of the model bounding box (gives intuitive moments
+                    # for both wind and seismic — the building centre).
+                    xs = [nd.x for nd in self.model.nodes.values()]
+                    ys = [nd.y for nd in self.model.nodes.values()]
+                    zs = [nd.z for nd in self.model.nodes.values()]
+                    cx = (min(xs) + max(xs)) * 0.5
+                    cy = (min(ys) + max(ys)) * 0.5
+                    cz = (min(zs) + max(zs)) * 0.5
+
                     summed = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0,
                               'mx': 0.0, 'my': 0.0, 'mz': 0.0}
-                    for r in reactions.values():
-                        summed['fx'] += r[0]
-                        summed['fy'] += r[1]
-                        summed['fz'] += r[2]
-                        summed['mx'] += r[3]
-                        summed['my'] += r[4]
-                        summed['mz'] += r[5]
+                    for node_id, restraint in self.model.restraints.items():
+                        node = self.model.nodes.get(node_id)
+                        if node is None:
+                            continue
+                        tag = node.node_tag
+                        r = reactions.get(tag)
+                        if r is None:
+                            continue
+                        fx, fy, fz, mx, my, mz = r
+                        # Sum forces
+                        summed['fx'] += fx
+                        summed['fy'] += fy
+                        summed['fz'] += fz
+                        # Direct nodal moment reactions (zero for pinned)
+                        summed['mx'] += mx
+                        summed['my'] += my
+                        summed['mz'] += mz
+                        # Overturning moment from force × lever‑arm
+                        # about the base geometric centre
+                        dx = node.x - cx
+                        dy = node.y - cy
+                        dz = node.z - cz
+                        summed['mx'] += fz * dy - fy * dz
+                        summed['my'] += fx * dz - fz * dx
+                        summed['mz'] += fy * dx - fx * dy
                     results['summed_reactions'] = summed
                     if self.config['verbose']:
                         print(f"\n  Summed reactions ({unit_F}, {unit_F}·{unit_L}):")
@@ -3782,11 +3820,33 @@ class OpenSeesBuilder:
                 f = ops.eleResponse(tag, 'forces')
             except Exception:
                 continue
+            # eleResponse returns local forces [P, V2, V3, T, M2, M3]
+            # at I-end then J-end.  Rotate to global coordinates.
+            try:
+                vx, vy, vz = self._get_local_axes(elem)
+                # Rotation matrix local→global: columns = local axes
+                # Global = R @ Local  where R = [vx, vy, vz]
+                f_i_local = np.array([f[0], f[1], f[2]])
+                m_i_local = np.array([f[3], f[4], f[5]])
+                f_j_local = np.array([f[6], f[7], f[8]])
+                m_j_local = np.array([f[9], f[10], f[11]])
+                R = np.column_stack([vx, vy, vz])
+                f_i_global = R @ f_i_local
+                m_i_global = R @ m_i_local
+                f_j_global = R @ f_j_local
+                m_j_global = R @ m_j_local
+            except Exception:
+                # Fallback: treat as already global
+                f_i_global = np.array([f[0], f[1], f[2]])
+                m_i_global = np.array([f[3], f[4], f[5]])
+                f_j_global = np.array([f[6], f[7], f[8]])
+                m_j_global = np.array([f[9], f[10], f[11]])
+
             results[tag] = {
-                'Fx': f[0], 'Fy': f[1], 'Fz': f[2],
-                'Mx': f[3], 'My': f[4], 'Mz': f[5],
-                'Fx_j': f[6], 'Fy_j': f[7], 'Fz_j': f[8],
-                'Mx_j': f[9], 'My_j': f[10], 'Mz_j': f[11],
+                'Fx': f_i_global[0], 'Fy': f_i_global[1], 'Fz': f_i_global[2],
+                'Mx': m_i_global[0], 'My': m_i_global[1], 'Mz': m_i_global[2],
+                'Fx_j': f_j_global[0], 'Fy_j': f_j_global[1], 'Fz_j': f_j_global[2],
+                'Mx_j': m_j_global[0], 'My_j': m_j_global[1], 'Mz_j': m_j_global[2],
             }
         return results
 
