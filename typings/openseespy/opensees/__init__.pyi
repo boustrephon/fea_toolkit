@@ -130,104 +130,8 @@ def getNodeTags() -> Tuple[int, ...]:
 
 
 # ============================================================================
-# Section commands
-# ============================================================================
-
-def section(section_type: str, tag: int, *args: Any) -> None:
-    """Create a section object.
-
-    Args:
-        section_type: ``'Elastic'``, ``'Fiber'``, etc.
-        tag: Section tag.
-        *args: Section-specific arguments.
-    """
-    ...
-
-def patch(patch_type: str, mat_tag: int, *args: Any) -> None:
-    """Generate fibers over a cross‑sectional area (inside a Fiber section).
-
-    Three patch types are available:
-
-    **Rectangular patch** — fibers in a rectangle from (yI,zI) to (yJ,zJ)::
-
-        ops.patch('rect', matTag, numSubdivY, numSubdivZ, yI, zI, yJ, zJ)
-
-    **Circular patch** — fibers in a circular ring::
-
-        ops.patch('circ', matTag, numSubdivCirc, numSubdivRad,
-                  yCenter, zCenter, intRad, extRad, startAng, endAng)
-
-    **Quadrilateral patch** — fibers inside a 4‑vertex polygon (CCW order)::
-
-        ops.patch('quad', matTag, numSubdivIJ, numSubdivJK,
-                  yI, zI, yJ, zJ, yK, zK, yL, zL)
-
-    Args:
-        patch_type: ``'rect'``, ``'circ'``, or ``'quad'``.
-        mat_tag: Tag of previously defined material.
-        *args: Patch‑specific arguments as shown above.
-    """
-    ...
-
-
-# ============================================================================
-# Geometric transformation commands
-# ============================================================================
-
-def geomTransf(transform_type: str, tag: int, *vecxz: float) -> None:
-    """Create a geometric transformation object.
-
-    Args:
-        transform_type: ``'Linear'``, ``'PDelta'``, ``'Corotational'``.
-        tag: Transformation tag.
-        *vecxz: Vector components defining the local x-z plane (3 values for 3D).
-    """
-    ...
-
-
-# ============================================================================
 # Element commands
 # ============================================================================
-
-def element(element_type: str, tag: int, *args: Any) -> None:
-    """Create an element.
-
-    Args:
-        element_type: ``'elasticBeamColumn'``, ``'forceBeamColumn'``,
-                      ``'dispBeamColumn'``, ``'nonlinearBeamColumn'``, etc.
-        tag: Element tag.
-        *args: Element-specific arguments.
-    """
-    ...
-
-def beamIntegration(integration_type: str, tag: int,
-                    sec_tag: int, num_pts: int) -> None:
-    """Create a beam integration object.
-
-    Args:
-        integration_type: ``'Lobatto'``, ``'Legendre'``, ``'NewtonCotes'``, etc.
-        tag: Integration tag.
-        sec_tag: Section tag.
-        num_pts: Number of integration points.
-    """
-    ...
-
-def beamIntegration(integration_type: str, tag: int,
-                    sec_tag_i: int, lp_i: float,
-                    sec_tag_j: int, lp_j: float,
-                    sec_tag_e: int) -> None:
-    """Create a HingeRadau beam integration (hinge‑end formulation).
-
-    Args:
-        integration_type: ``'HingeRadau'``.
-        tag: Integration tag.
-        sec_tag_i: Section tag at I‑end hinge.
-        lp_i: Plastic hinge length at I‑end.
-        sec_tag_j: Section tag at J‑end hinge.
-        lp_j: Plastic hinge length at J‑end.
-        sec_tag_e: Section tag for interior (elastic) region.
-    """
-    ...
 
 def eleNodes(tag: int) -> Tuple[int, int]:
     """Return the node tags of an element.
@@ -341,62 +245,6 @@ def analysis(analysis_type: str, *args: Any) -> None:
     """
     ...
 
-def constraints(constraint_type: str) -> None:
-    """Set the constraint handler.
-
-    Args:
-        constraint_type: ``'Plain'``, ``'Lagrange'``, ``'Penalty'``,
-                         ``'Transformation'``.
-    """
-    ...
-
-def numberer(numberer_type: str) -> None:
-    """Set the DOF numberer.
-
-    Args:
-        numberer_type: ``'RCM'``, ``'Plain'``, ``'AMD'``.
-    """
-    ...
-
-def system(system_type: str) -> None:
-    """Set the system of equations solver.
-
-    Args:
-        system_type: ``'BandGeneral'``, ``'BandSPD'``, ``'ProfileSPD'``,
-                     ``'UmfPack'``, ``'SparseGeneral'``, ``'Mumps'``, etc.
-    """
-    ...
-
-def test(test_type: str, *args: Any) -> None:
-    """Set the convergence test.
-
-    Args:
-        test_type: ``'NormDispIncr'``, ``'NormUnbalance'``,
-                   ``'EnergyIncr'``, ``'RelativeNormDispIncr'``, etc.
-        *args: Test-specific parameters (tol, maxIter, etc.).
-    """
-    ...
-
-def algorithm(algorithm_type: str, *args: Any) -> None:
-    """Set the solution algorithm.
-
-    Args:
-        algorithm_type: ``'Newton'``, ``'ModifiedNewton'``, ``'KrylovNewton'``,
-                        ``'BFGS'``, ``'NewtonLineSearch'``, etc.
-        *args: Algorithm-specific arguments.
-    """
-    ...
-
-def integrator(integrator_type: str, *args: Any) -> None:
-    """Set the integrator.
-
-    Args:
-        integrator_type: ``'LoadControl'``, ``'DisplacementControl'``,
-                         ``'ArcLength'``, ``'Newmark'``, ``'HHT'``, etc.
-        *args: Integrator-specific arguments.
-    """
-    ...
-
 def analyze(num_incr: int, *args: Any) -> int:
     """Perform an analysis.
 
@@ -408,20 +256,7 @@ def analyze(num_incr: int, *args: Any) -> int:
     """
     ...
 
-def eigen(*args: Any) -> Tuple[float, ...]:
-    """Solve the eigenvalue problem.
 
-    Usage::
-
-        eigenvalues = ops.eigen('-fullGenLapack', numModes)
-        eigenvalues = ops.eigen('-standard', numModes)
-
-    Args:
-        *args: Solver type and number of modes (e.g. ``'-fullGenLapack', 30``).
-    Returns:
-        Tuple of eigenvalues (ω²).
-    """
-    ...
 
 def reactions() -> None:
     """Compute nodal reactions for the current load case.
@@ -446,21 +281,7 @@ def modalProperties(*args: str) -> dict:
     """
     ...
 
-def responseSpectrumAnalysis(ts_tag: int, dof: int, *args: str) -> None:
-    """Run a response‑spectrum analysis for one mode.
 
-    Usage::
-
-        ops.responseSpectrumAnalysis(tsTag, dof, '-mode', modeNum)
-
-    Must be called after :func:`eigen` and :func:`modalProperties`.
-
-    Args:
-        ts_tag: Tag of a ``Path`` time series defining the spectrum.
-        dof: Excitation direction (1=UX, 2=UY, 3=UZ, 4=RX, 5=RY, 6=RZ).
-        *args: ``'-mode', modeNum``.
-    """
-    ...
 
 
 # ============================================================================
@@ -483,10 +304,375 @@ def recorder(*args: Any) -> None:
 def uniaxialMaterial(mat_type: str, tag: int, *args: Any) -> None:
     """Create a uniaxial material.
 
+    Common concrete arguments::
+
+        # Concrete01 (no tension): fc, epsc0, fcU, epsU
+        uniaxialMaterial('Concrete01', tag, -30e6, -0.002, -6e6, -0.006)
+
+        # Steel01 (bilinear): Fy, E, b (strain-hardening ratio)
+        uniaxialMaterial('Steel01', tag, 250e6, 200e9, 0.01)
+
+        # Steel02 (Menegotto-Pinto): Fy, E, b, R0, cR1, cR2
+        uniaxialMaterial('Steel02', tag, 400e6, 200e9, 0.01, 18.5, 0.925, 0.15)
+
     Args:
         mat_type: ``'Steel01'``, ``'Concrete01'``, ``'Elastic'``, etc.
         tag: Material tag.
-        *args: Material-specific arguments.
+        *args: Material-specific arguments (see OpenSees command manual).
+    """
+    ...
+
+def section(sec_type: str, tag: int, *args: Any) -> None:
+    """Create a section.
+
+    Common forms::
+
+        # Elastic section (for linear analysis)
+        section('Elastic', tag, E, A, Iz, Iy, G, J)
+
+        # Fiber section (for nonlinear RC)
+        section('Fiber', tag, '-GJ', J)
+        #   ... followed by patch / layer commands
+
+        # ElasticMembranePlateSection (for shells)
+        section('ElasticMembranePlateSection', tag, E, nu, thickness)
+
+    Args:
+        sec_type: ``'Elastic'``, ``'Fiber'``, ``'ElasticMembranePlateSection'``.
+        tag: Section tag.
+        *args: Section-specific arguments.
+    """
+    ...
+
+def patch(patch_type: str, mat_tag: int, n_y: int, n_z: int,
+          *coords: float) -> None:
+    """Define a fiber patch within a fiber section.
+
+    Called between ``section('Fiber', ...)`` and ``section('Fiber', '-end')``::
+
+        # Rectangular patch
+        patch('rect', mat_tag, n_y, n_z, yI, zI, yJ, zJ)
+
+        # Circular patch (annular ring)
+        patch('circ', mat_tag, n_y, n_z, y_c, z_c, inner_r, outer_r)
+
+        # Quadrilateral patch (4 corner points in order)
+        patch('quad', mat_tag, n_y, n_z, y1, z1, y2, z2, y3, z3, y4, z4)
+
+    Args:
+        patch_type: ``'rect'``, ``'circ'``, or ``'quad'``.
+        mat_tag: Material tag for this patch.
+        n_y: Number of subdivisions in the y-direction.
+        n_z: Number of subdivisions in the z-direction.
+        *coords: Patch geometry coordinates.
+    """
+    ...
+
+def layer(layer_type: str, mat_tag: int, n_bars: int, area: float,
+          *coords: float) -> None:
+    """Define a reinforcement layer within a fiber section.
+
+    Called between ``section('Fiber', ...)`` and ``section('Fiber', '-end')``::
+
+        # Straight layer (rebar along a line)
+        layer('straight', mat_tag, n_bars, bar_area, y1, z1, y2, z2)
+
+        # Circular layer (rebar on a circle)
+        layer('circ', mat_tag, n_bars, bar_area, y_c, z_c, radius, startAng, endAng)
+
+    Args:
+        layer_type: ``'straight'`` or ``'circ'``.
+        mat_tag: Material tag (usually Steel02 for rebar).
+        n_bars: Number of bars.
+        area: Cross-sectional area of each bar.
+        *coords: Layer geometry.
+    """
+    ...
+
+
+# ============================================================================
+# Material commands (nD)
+# ============================================================================
+
+def nDMaterial(mat_type: str, tag: int, *args: Any) -> None:
+    """Create an n‑dimensional material (for continuum/shell elements).
+
+    Common types::
+
+        nDMaterial('ElasticIsotropic', tag, E, nu)
+        nDMaterial('J2PlateFibre', tag, E, nu, Fy, H)
+        nDMaterial('ConcreteS', tag, fc, ft, Es)
+        nDMaterial('PlateFromPlaneStress', tag, inner_tag, thickness)
+
+    Args:
+        mat_type: Material type name.
+        tag: Material tag.
+        *args: Material-specific parameters.
+    """
+    ...
+
+
+# ============================================================================
+# Element commands
+# ============================================================================
+
+def element(elem_type: str, tag: int, *args: Any) -> None:
+    """Create an element.
+
+    Common forms::
+
+        # Elastic beam-column
+        element('elasticBeamColumn', tag, iNode, jNode, secTag, transfTag)
+
+        # Force-based beam-column (distributed plasticity)
+        element('forceBeamColumn', tag, iNode, jNode, transfTag, integrationTag)
+
+        # Displacement-based beam-column
+        element('dispBeamColumn', tag, iNode, jNode, numIntPts, secTag, transfTag)
+
+        # Nonlinear beam-column (simplified, npts integration points)
+        element('nonlinearBeamColumn', tag, iNode, jNode, numIntPts, secTag, transfTag)
+
+        # Truss (axial only)
+        element('Truss', tag, iNode, jNode, area, matTag)
+
+        # Shell (4-node quadrilateral)
+        element('ShellMITC4', tag, n1, n2, n3, n4, secTag)
+
+        # Shell (3-node triangular)
+        element('ShellDKGT', tag, n1, n2, n3, secTag)
+
+        # Zero-length (spring between coincident nodes)
+        element('zeroLength', tag, iNode, jNode, '-mat', m1, ..., '-dir', d1, ...)
+
+        # Zero-length with section (for lumped plasticity)
+        element('zeroLengthSection', tag, iNode, jNode, secTag)
+
+    Args:
+        elem_type: Element type string.
+        tag: Element tag.
+        *args: Element-specific arguments.
+    """
+    ...
+
+
+# ============================================================================
+# Geometric transformation commands
+# ============================================================================
+
+def geomTransf(transf_type: str, tag: int, *args: Any) -> None:
+    """Define a geometric transformation for frame elements.
+
+    Common forms::
+
+        # Linear (small displacements, no P-Delta)
+        geomTransf('Linear', tag, vecXx, vecXy, vecXz)
+
+        # P-Delta (second-order effects via geometric stiffness)
+        geomTransf('PDelta', tag, vecXx, vecXy, vecXz)
+
+        # Corotational (large displacements, for buckling/braces)
+        geomTransf('Corotational', tag, vecXx, vecXy, vecXz)
+
+        # With joint offsets (rigid end zones)
+        geomTransf('Linear', tag, vecXx, vecXy, vecXz,
+                   '-jntOffset', dXi, dYi, dZi, dXj, dYj, dZj)
+
+    Args:
+        transf_type: ``'Linear'``, ``'PDelta'``, or ``'Corotational'``.
+        tag: Transformation tag.
+        *args: Vector components or options.
+    """
+    ...
+
+
+# ============================================================================
+# Beam integration commands
+# ============================================================================
+
+def beamIntegration(integration_type: str, tag: int, *args: Any) -> None:
+    """Define beam integration (for forceBeamColumn elements).
+
+    Common forms::
+
+        # Lobatto (Gauss-Lobatto, points concentrated at element ends)
+        beamIntegration('Lobatto', tag, sec_tag_1, sec_tag_2, ..., sec_tag_N)
+
+        # HingeRadau (plastic hinge at ends + elastic interior)
+        beamIntegration('HingeRadau', tag, sec_tag_i, lp_i, sec_tag_j, lp_j,
+                        sec_tag_e, '-lLengthTag', type)
+
+        # Newton-Cotes (evenly spaced)
+        beamIntegration('NewtonCotes', tag, sec_tag_1, ...)
+
+    Args:
+        integration_type: ``'Lobatto'``, ``'HingeRadau'``, etc.
+        tag: Integration tag.
+        *args: Section tags and parameters.
+    """
+    ...
+
+
+# ============================================================================
+# Constraint commands
+# ============================================================================
+
+def equalDOF(node_r: int, node_c: int, *dofs: int) -> None:
+    """Tie selected DOFs between two nodes (master-slave constraint).
+
+    Args:
+        node_r: Retained (master) node tag.
+        node_c: Constrained (slave) node tag.
+        *dofs: DOF numbers to tie (1‑based).
+    """
+    ...
+
+def rigidLink(link_type: str, node_r: int, node_c: int) -> None:
+    """Create a rigid link between two nodes.
+
+    Args:
+        link_type: ``'bar'`` (translations only) or ``'beam'`` (all 6 DOFs).
+        node_r: Retained (master) node tag.
+        node_c: Constrained (slave) node tag.
+    """
+    ...
+
+def rigidDiaphragm(perp_dof: int, master_tag: int, *slave_tags: int) -> None:
+    """Impose a rigid diaphragm constraint.
+
+    All slave nodes in the diaphragm are constrained to move as a rigid
+    body in the plane perpendicular to *perp_dof*.
+
+    Args:
+        perp_dof: DOF perpendicular to the diaphragm (3=Z).
+        master_tag: Master node tag.
+        *slave_tags: Slave node tags.
+    """
+    ...
+
+def equationConstraint(*args: Any) -> None:
+    """Define a general multi-point constraint equation.
+
+    See the OpenSees manual for equation syntax.
+    """
+    ...
+
+
+# ============================================================================
+# Analysis component commands
+# ============================================================================
+
+def constraints(constraint_type: str) -> None:
+    """Set the constraint handler.
+
+    Args:
+        constraint_type: ``'Transformation'``, ``'Penalty'``, ``'Lagrange'``.
+    """
+    ...
+
+def numberer(numberer_type: str) -> None:
+    """Set the equation numberer.
+
+    ``'RCM'`` (Reverse Cuthill-McKee) reduces matrix bandwidth for
+    large models.  ``'Plain'`` numbers by node tag order.
+
+    Args:
+        numberer_type: ``'Plain'`` or ``'RCM'``.
+    """
+    ...
+
+def system(system_type: str) -> None:
+    """Set the system of equations solver.
+
+    Args:
+        system_type: ``'BandGeneral'``, ``'ProfileSPD'``, ``'UmfPack'``, etc.
+    """
+    ...
+
+def test(test_type: str, *args: Any) -> None:
+    """Set the convergence test.
+
+    Args:
+        test_type: ``'NormDispIncr'``, ``'NormUnbalance'``, ``'EnergyIncr'``,
+                   ``'FixedNumIter'``, etc.
+        *args: Test-specific parameters (tol, max_iter for NormDispIncr;
+               iteration count for FixedNumIter).
+    """
+    ...
+
+def algorithm(algo_type: str, *args: Any) -> None:
+    """Set the solution algorithm.
+
+    Common values::
+
+        algorithm('Newton')
+        algorithm('NewtonLineSearch')
+        algorithm('ModifiedNewton')
+        algorithm('KrylovNewton')
+
+    Args:
+        algo_type: Algorithm name.
+        *args: Algorithm-specific parameters.
+    """
+    ...
+
+def integrator(integ_type: str, *args: Any) -> None:
+    """Set the integrator for the analysis.
+
+    Common forms::
+
+        # Static load control
+        integrator('LoadControl', delta_lambda)
+
+        # Static displacement control (pushover)
+        integrator('DisplacementControl', node_tag, dof, delta_disp)
+
+        # Transient (Newmark)
+        integrator('Newmark', gamma, beta)
+
+        # Transient (Hilber-Hughes-Taylor)
+        integrator('HHT', alpha)
+
+    Args:
+        integ_type: ``'LoadControl'``, ``'DisplacementControl'``, etc.
+        *args: Integrator parameters.
+    """
+    ...
+
+def eigen(*args: Any) -> Tuple[float, ...]:
+    """Compute eigenvalues (natural frequencies squared).
+
+    Supports both forms::
+
+        eigenvalues = ops.eigen('-fullGenLapack', numModes)
+        eigenvalues = ops.eigen(numModes)
+
+    Args:
+        *args: Optional solver string (e.g. ``'-fullGenLapack'``) followed
+               by the number of eigenvalues to compute.
+    Returns:
+        Tuple of eigenvalues ω², sorted ascending.
+    """
+    ...
+
+
+# ============================================================================
+# Sensitivity commands
+# ============================================================================
+
+def responseSpectrumAnalysis(ts_tag: int, dof: int, *args: str) -> None:
+    """Run a response‑spectrum analysis for one mode.
+
+    Usage::
+
+        ops.responseSpectrumAnalysis(tsTag, dof, '-mode', modeNum)
+
+    Must be called after :func:`eigen` and :func:`modalProperties`.
+
+    Args:
+        ts_tag: Tag of a ``Path`` time series defining the spectrum.
+        dof: Excitation direction (1=UX, 2=UY, 3=UZ, 4=RX, 5=RY, 6=RZ).
+        *args: ``'-mode', modeNum``.
     """
     ...
 
