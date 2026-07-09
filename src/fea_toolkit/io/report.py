@@ -636,9 +636,12 @@ def brace_buckling_check(md, n_longest: int = 2, K: float = 1.0) -> pd.DataFrame
 
     Returns:
         DataFrame with columns: ``Element`` (SAP2000 frame ID),
-        ``Section``, ``Shape``, ``Material``, ``Length``,
-        ``A`` (cross-section area), ``I22`` (minor-axis second moment),
-        ``Slenderness`` (λ = KL/r), and ``P_cr`` (Euler buckling load).
+        ``Section``, ``Shape``, ``Material``,
+        ``Length ({lu})`` (with the model's length unit),
+        ``A ({lu}²)`` (cross-section area),
+        ``I22 ({lu}⁴)`` (minor-axis second moment),
+        ``Slenderness`` (λ = KL/r), and
+        ``P_cr ({fu})`` (Euler buckling load, in force units).
     """
     from ..model.sap_data import (
         PipeSection, AngleSection, DoubleAngleSection, TeeSection, ChannelSection,

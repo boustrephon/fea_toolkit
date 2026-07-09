@@ -386,36 +386,46 @@ def _angle_from_vertical(normal: np.ndarray) -> float:
 def _cluster_z(data, z_tolerance: float):
     """Cluster (z, weight) pairs by z-proximity.
 
+    Uses the first value in each cluster as the fixed anchor, so the
+    cluster boundary does not drift as points are added (avoids the
+    chain-merging problem of a shifting mean).
+
     Returns list of (weighted_avg_z, total_weight, indices_in_cluster).
     """
     # Sort by Z
     sorted_data = sorted(enumerate(data), key=lambda x: x[1][0])
-    clusters = []  # each: (z_sum, weight_sum, indices)
+    clusters = []  # each: (anchor_z, z_sum, weight_sum, indices)
     for idx, (z, w) in sorted_data:
         if not clusters:
-            clusters.append((z * w, w, [idx]))
+            clusters.append((z, z * w, w, [idx]))
         else:
-            prev_z_sum, prev_w, prev_idxs = clusters[-1]
-            prev_avg = prev_z_sum / prev_w if prev_w > 0 else 0
-            if abs(z - prev_avg) <= z_tolerance:
-                clusters[-1] = (prev_z_sum + z * w, prev_w + w, prev_idxs + [idx])
+            anchor, prev_z_sum, prev_w, prev_idxs = clusters[-1]
+            if abs(z - anchor) <= z_tolerance:
+                clusters[-1] = (anchor, prev_z_sum + z * w, prev_w + w,
+                                prev_idxs + [idx])
             else:
-                clusters.append((z * w, w, [idx]))
+                clusters.append((z, z * w, w, [idx]))
     return [
         (z_sum / w_sum, w_sum, indices)
-        for z_sum, w_sum, indices in clusters
+        for _, z_sum, w_sum, indices in clusters
     ]
 
 
 def _cluster_1d(values: np.ndarray, tolerance: float) -> List[float]:
-    """Simple 1D greedy clustering. Returns list of cluster centroids."""
+    """Simple 1D greedy clustering with fixed anchor.
+
+    Each new value is compared to the **first** value in the current
+    cluster (not the shifting mean), preventing chain-merging.
+
+    Returns list of cluster centroids (mean of each cluster).
+    """
     sorted_vals = np.sort(values)
     clusters = []
     for v in sorted_vals:
         if not clusters:
             clusters.append([v])
         else:
-            if abs(v - np.mean(clusters[-1])) <= tolerance:
+            if abs(v - clusters[-1][0]) <= tolerance:
                 clusters[-1].append(v)
             else:
                 clusters.append([v])
@@ -529,21 +539,28 @@ def plot_stories(
     if not stories:
         return None
 
+    # Save and restore OFF_SCREEN to avoid permanently mutating PyVista
+    # global state for the caller.
+    _prev_off_screen = pv.OFF_SCREEN
     pv.OFF_SCREEN = off_screen
-
-    # Build a lightweight elastic model for visualisation
     try:
+        # Build a lightweight elastic model for visualisation
         b = OpenSeesBuilder(md, {
             "element_type": "elasticBeamColumn",
             "split_elements": True,
             "verbose": False,
         })
         b.build()
-    except Exception:
+    except Exception as exc:
+        pv.OFF_SCREEN = _prev_off_screen
+        import logging
+        logging.getLogger(__name__).warning(
+            "Could not build visualisation model: %s", exc)
         return None
 
     pl = plot_model_3d(b, notebook=True, window_size=window_size)
     if pl is None:
+        pv.OFF_SCREEN = _prev_off_screen
         return None
 
     # Determine global bounding box for plane extents
@@ -551,6 +568,7 @@ def plot_stories(
     ys = [n.y for n in md.nodes.values()]
     zs = [n.z for n in md.nodes.values()]
     if not xs:
+        pv.OFF_SCREEN = _prev_off_screen
         return None
 
     global_xmin, global_xmax = min(xs), max(xs)
@@ -594,4 +612,5 @@ def plot_stories(
     ax.imshow(img)
     ax.axis("off")
     fig.tight_layout()
+    pv.OFF_SCREEN = _prev_off_screen
     return fig
