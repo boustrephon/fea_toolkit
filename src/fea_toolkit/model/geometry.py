@@ -526,15 +526,16 @@ def split_elements(
     AtJoints   AtFrames   Splits at
     ========== ========== ==============================================
     ``True``   ``False``  Existing joint nodes on the element
-    ``False``  ``True``   Frame-frame intersections (new ``split_n_*``
-                          nodes created)
+    ``False``  ``True``   Frame-frame intersections (new or reused
+                          ``split_n_*`` / joint nodes)
     ``True``   ``True``   Both — joints AND frame intersections
     ``False``  ``False``  No splitting
     ========== ========== ==============================================
 
     When *AtJoints* is ``False`` and *AtFrames* is ``True``, only nodes
-    whose ``node_id`` starts with ``split_n_`` are accepted as split
-    points — existing joint nodes are ignored.
+    whose ``node_id`` is in the tracked AtFrames set (either newly created
+    ``split_n_*`` nodes **or** existing joint nodes whose coordinates
+    coincide with an AtFrames intersection) are accepted as split points.
 
     New ``Node`` objects created at frame-frame intersections use unique
     ``node_id`` (``split_n_N``) and ``node_tag`` values.  These are added
@@ -580,6 +581,8 @@ def split_elements(
         eid for eid, el in elements.items()
         if auto_mesh.get(eid, {}).get('AtFrames', False)
     ]
+    # Track all node IDs involved in AtFrames (created or reused)
+    at_frames_nodes: set = set()
 
     if at_frames_ids:
         # Determine next node ID and tag for new split nodes
@@ -618,18 +621,17 @@ def split_elements(
                 if not split_a and not split_b:
                     continue
 
-                # Reuse existing split node at this location if available
+                # Reuse any existing node at this location (joint or split_n_)
                 used_nid = None
                 for nid_check, nd_check in nodes.items():
-                    if nid_check.startswith("split_n_"):
-                        d = math.hypot(
-                            nd_check.x - float(p[0]),
-                            nd_check.y - float(p[1]),
-                            nd_check.z - float(p[2]),
-                        )
-                        if d <= tol:
-                            used_nid = nid_check
-                            break
+                    d = math.hypot(
+                        nd_check.x - float(p[0]),
+                        nd_check.y - float(p[1]),
+                        nd_check.z - float(p[2]),
+                    )
+                    if d <= tol:
+                        used_nid = nid_check
+                        break
                 if used_nid is None:
                     # Create a new node at the intersection
                     used_nid = f"split_n_{next_node_num}"
@@ -643,6 +645,7 @@ def split_elements(
                     nodes[used_nid] = new_node
                     node_coords[used_nid] = (float(p[0]), float(p[1]), float(p[2]))
                     grid.add_point(used_nid, (float(p[0]), float(p[1]), float(p[2])))
+                at_frames_nodes.add(used_nid)
 
                 # If element A needs splitting, record the intermediate node
                 if split_a:
@@ -690,8 +693,8 @@ def split_elements(
             if nid == el.node_i or nid == el.node_j:
                 continue
             if point_on_segment(coord, a, b, tol):
-                # If AtJoints is False, only split at AtFrames-created nodes
-                if not at_joints and not nid.startswith("split_n_"):
+                # If AtJoints is False, only split at AtFrames-tracked nodes
+                if not at_joints and nid not in at_frames_nodes:
                     continue
                 t = compute_t_location(coord, a, b)
                 intermediate.append((nid, t))

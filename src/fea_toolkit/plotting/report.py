@@ -124,8 +124,8 @@ def plot_modal_participation(df_modal: Any) -> Optional[Any]:
     )
 
     # ── Bottom: rotational DOFs ──
-    rot_dofs = ["Rx (%)", "Ry (%)", "Rz (%)"]
-    rot_max = data[rot_dofs].values.max()
+    rot_dofs = [d for d in ["Rx (%)", "Ry (%)", "Rz (%)"] if d in data.columns]
+    rot_max = data[rot_dofs].values.max() if rot_dofs else 0
     _plot_panel(
         ax2,
         rot_dofs,
@@ -451,12 +451,16 @@ def plot_storey_forces(
     common_cols = [c for c in num_cols if c in mom_cols]
 
     # Resolve elevation column
-    elev_col_s = ("Elevation" if "Elevation" in df_shear.columns
-                  else [c for c in df_shear.columns if "Elevation" in c][0])
+    elev_candidates = [c for c in df_shear.columns if "Elevation" in c]
+    if not elev_candidates:
+        return None
+    elev_col_s = elev_candidates[0]
     elev = df_shear[elev_col_s].values
     base_elev = elev.min()
     roof_elev = elev.max()
     H = roof_elev - base_elev
+    if H < 1e-12:
+        return None
 
     def _trapezoidal_curves(V_base, M_base):
         """Return (z_pts, V_pts, M_pts) for smooth V(z), M(z) curves
