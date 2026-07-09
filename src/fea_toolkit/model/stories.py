@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -103,7 +103,7 @@ def identify_stories(
         # Try strategies in priority order
         stories = _try_s2k_table(md, raw_tables)
         if stories:
-            return stories
+            return _sort_and_name(stories)
 
         stories = _try_diaphragms(md, raw_tables)
         if stories:
@@ -228,7 +228,6 @@ def _try_diaphragms(md, raw_tables) -> List[StoryLevel]:
         ))
 
     return stories
-    return stories
 
 
 # ========================================================================
@@ -338,7 +337,7 @@ def _get_area_vertices(md, ae):
     for nid in ae.node_ids:
         nd = md.nodes.get(nid)
         if nd is None:
-            break
+            return []
         pts.append((nid, nd.x, nd.y, nd.z))
     return pts
 

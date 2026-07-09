@@ -635,8 +635,10 @@ def brace_buckling_check(md, n_longest: int = 2, K: float = 1.0) -> pd.DataFrame
         K: Effective length factor (default 1.0 \u2014 pinned-pinned).
 
     Returns:
-        DataFrame with one row per brace, containing section name, length,
-        slenderness ratio, and Euler buckling load.
+        DataFrame with columns: ``Element`` (SAP2000 frame ID),
+        ``Section``, ``Shape``, ``Material``, ``Length``,
+        ``A`` (cross-section area), ``I22`` (minor-axis second moment),
+        ``Slenderness`` (λ = KL/r), and ``P_cr`` (Euler buckling load).
     """
     from ..model.sap_data import (
         PipeSection, AngleSection, DoubleAngleSection, TeeSection, ChannelSection,
@@ -680,6 +682,7 @@ def brace_buckling_check(md, n_longest: int = 2, K: float = 1.0) -> pd.DataFrame
         slenderness = (K * L) / r_val if r_val > 0 else float('inf')
 
         rows.append({
+            "Element": eid,
             "Section": sec_name,
             "Shape": type(sec).__name__.replace("Section", ""),
             "Material": sec.material,
