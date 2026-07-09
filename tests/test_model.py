@@ -1,9 +1,7 @@
 """Tests for the model layer: dataclasses, geometry utilities, and sections."""
 
 import math
-import pickle
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 import numpy as np
 import pytest
@@ -36,12 +34,10 @@ from fea_toolkit.model.sap_data import (
     JointLoad,
     FrameDistributedLoad,
     GravityLoad,
-    FramePointLoad,
     MassSource,
     AreaGravityLoad,
     AreaUniformLoad,
     Constraint,
-    CoordSys,
     default_coord_sys,
     FrameEndOffset,
     AreaMesh,
@@ -1055,9 +1051,20 @@ class TestSplitElementsAtFrames:
         assert len(at_frames_nodes) == 1
 
     def test_at_frames_dedup_near_duplicate_t(self):
-        """Two intermediate nodes at nearly the same t should be deduplicated."""
-        from fea_toolkit.model.geometry import split_elements, _segment_intersection_3d
-        import numpy as np
+        """Two intersections that create separate nodes via node-reuse.
+
+        Elements B and C cross A at positions close enough (1e-8 m apart)
+        that the 3D node-reuse check (abs_tol ≈ 1e-5) creates only one
+        shared split_n_ node.  This exercises the coordinate-based node
+        reuse path.
+
+        The secondary t-based dedup (in the main splitting loop) cannot
+        currently be triggered by AtFrames-only splits because the node-
+        reuse threshold (abs_tol ≈ tol × L) equals the t-dedup threshold
+        (tol × L) for equal-length segments.  It guards against future
+        cross-source merging (e.g., storey-level + AtFrames).
+        """
+        from fea_toolkit.model.geometry import split_elements
 
         # Element A: horizontal beam from (0,0,0) to (10,0,0)
         # Two other elements cross it at nearly the same point:
@@ -1094,6 +1101,11 @@ class TestSplitElementsAtFrames:
         assert len(split_nodes) == 1, (
             f"Expected 1 split node, got {len(split_nodes)}: {split_nodes}")
 
+        # A's breakpoint metadata should also reflect the dedup: only one
+        # t-location kept (0.5), not both near-identical s entries
+        assert len(new_elems["A"].t_locations) == 1, (
+            f"Expected 1 t-location (deduped), got {new_elems['A'].t_locations}")
+
         # B and C's children should both reference that same shared node
         shared_nid = split_nodes[0]
         b_children = [c for cid in new_elems["B"].child_ids
@@ -1106,6 +1118,76 @@ class TestSplitElementsAtFrames:
             f"Element B children don't reference {shared_nid}")
         assert shared_nid in c_refs, (
             f"Element C children don't reference {shared_nid}")
+
+    def test_at_frames_t_dedup_direct(self):
+        """Integration test: t-based dedup via split_elements().
+
+        Two existing model nodes at nearly the same parametric location
+        on element A (AtJoints=True) produce intermediate (nid, t) pairs
+        with |t₁ - t₂| ≤ tol.  The main loop's t-dedup drops the second
+        node, leaving a single split → 2 children instead of 3.
+
+        AtFrames-only splits cannot trigger this path because the node-
+        reuse threshold (abs_tol = tol × L) equals the t-dedup threshold
+        (tol × L), so node-reuse always catches near-coincident points
+        first in the AtFrames double-loop.  AtJoints nodes bypass that
+        check and feed directly into the intermediate list.
+        """
+        from fea_toolkit.model.geometry import split_elements
+
+        # Element A: horizontal beam from (0,0,0) to (10,0,0)
+        # Node 3 lies on A at (5,0,0)          → t = 0.5
+        # Node 5 lies on A at (5.000006,0,0)   → t = 0.5000006
+        # |t₃ − t₅| = 6e-7 < tol (1e-6) → t-dedup merges them
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=10, y=0, z=0),
+            "3": Node(node_id="3", node_tag=3, x=5, y=0, z=0),
+            "5": Node(node_id="5", node_tag=5, x=5.000006, y=0, z=0),
+        }
+        elements = {
+            "A": FrameElement(elem_id="A", elem_tag=10, node_i="1", node_j="2"),
+        }
+        auto_mesh = {"A": {"AtJoints": True, "AtFrames": False}}
+        result = split_elements(nodes=nodes, elements=elements,
+                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        new_elems, _, _ = result
+
+        # Element A should have 2 children (one split, the second
+        # candidate was deduped away)
+        assert new_elems["A"].inactive
+        assert len(new_elems["A"].child_ids) == 2, (
+            f"Expected 2 children (t-dedup), got {len(new_elems['A'].child_ids)}")
+
+        # The intermediate children reference existing node IDs (no
+        # split_n_ nodes are created for AtJoints).  Verify that node 5
+        # was deduped away: children span (1→3) and (3→2).
+        children = [new_elems[cid] for cid in new_elems["A"].child_ids]
+        node_pairs = {(c.node_i, c.node_j) for c in children}
+        assert ("1", "3") in node_pairs, (
+            f"Expected child 1→3, got {node_pairs}")
+        assert ("3", "2") in node_pairs, (
+            f"Expected child 3→2, got {node_pairs}")
+        assert ("5") not in str(node_pairs), (
+            "Node 5 should have been deduped")
+
+        # Distinct t values → all kept (sanity: no accidental dedup)
+        # Node 6 at (3,0,0) → t=0.3, Node 7 at (7,0,0) → t=0.7
+        nodes2 = {
+            "1": Node("1", 1, 0, 0, 0),
+            "2": Node("2", 2, 10, 0, 0),
+            "6": Node("6", 6, 3, 0, 0),
+            "7": Node("7", 7, 7, 0, 0),
+        }
+        elements2 = {"B": FrameElement("B", 20, "1", "2")}
+        auto_mesh2 = {"B": {"AtJoints": True, "AtFrames": False}}
+        result2 = split_elements(nodes=nodes2, elements=elements2,
+                                 assignments={}, dist_loads=[], auto_mesh=auto_mesh2)
+        new_elems2, _, _ = result2
+        assert new_elems2["B"].inactive
+        assert len(new_elems2["B"].child_ids) == 3, (
+            f"Expected 3 children (2 splits, no dedup), "
+            f"got {len(new_elems2['B'].child_ids)}")
 
 
 class TestEdgeCases:
@@ -1815,9 +1897,8 @@ class TestPlottingImports:
 
     def test_model_viewer_import_and_types(self):
         """ModelViewer and its data types import correctly."""
-        from fea_toolkit.plotting import ModelViewer
         from fea_toolkit.plotting.renderers import (
-            RenderBackend, FrameGeom, ShellGeom, NodeGeom,
+            FrameGeom, ShellGeom, NodeGeom,
             HighlightDef, AnnotationDef,
         )
         import numpy as np
@@ -1845,7 +1926,6 @@ class TestPlottingImports:
         """ModelViewer extracts geometry from sample model data."""
         from examples.sample_model import make_sample_model
         from fea_toolkit.plotting import ModelViewer
-        import numpy as np
 
         md = make_sample_model()
         viewer = ModelViewer(model_data=md, backend='pyvista',
@@ -1866,7 +1946,8 @@ class TestPlottingImports:
         viewer.annotate('Hi', node_id='2', color=(1, 1, 0))
 
         # Test screenshot
-        import tempfile, os
+        import tempfile
+        import os
         tmp = tempfile.mktemp(suffix='.png')
         viewer.screenshot(tmp)
         assert os.path.getsize(tmp) > 0
@@ -2672,7 +2753,6 @@ class TestCapacitySpectrumMethod:
     def test_performance_point_elastic(self, cantilever_model):
         """Elastic cantilever: S_dp matches demand at modal period."""
         from fea_toolkit.opensees.builder import OpenSeesBuilder
-        import numpy as np
         b = OpenSeesBuilder(cantilever_model, {
             'element_type': 'elasticBeamColumn',
             'split_elements': False, 'verbose': False,
