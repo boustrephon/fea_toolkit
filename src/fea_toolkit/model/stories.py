@@ -150,7 +150,9 @@ def _try_s2k_table(md, raw_tables) -> List[StoryLevel]:
     stories = []
     for rec in story_table:
         name = rec.get("Name") or rec.get("Story") or ""
-        elev = _safe_float(rec.get("Z") or rec.get("Elevation"))
+        elev = _safe_float(rec.get("Z"))
+        if elev is None:
+            elev = _safe_float(rec.get("Elevation"))
         if elev is None:
             continue
         stories.append(StoryLevel(
@@ -189,7 +191,7 @@ def _try_diaphragms(md, raw_tables) -> List[StoryLevel]:
     diaph_names: List[str] = []
     for rec in diaph_defs:
         name = rec.get("Name", "")
-        axis = rec.get("Axis", "")
+        axis = (rec.get("Axis") or "")
         if name and axis.upper() == "Z":
             diaph_names.append(name)
 

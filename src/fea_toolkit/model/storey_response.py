@@ -297,9 +297,11 @@ def rigid_body_fit(
 
     n_outliers = n - int(mask.sum())
 
+    n_inliers = int(mask.sum())
+
     # Pass 2: fit inliers only
-    if n_outliers > 0 and mask.sum() >= 2:
-        n2 = int(mask.sum())
+    if n_outliers > 0 and n_inliers >= 2:
+        n2 = n_inliers
         A2 = np.zeros((2 * n2, 3))
         b2 = np.zeros(2 * n2)
         idx = np.where(mask)[0]
@@ -317,10 +319,13 @@ def rigid_body_fit(
         res2 = np.sqrt((ux[mask] - ux_pred2)**2 + (uy[mask] - uy_pred2)**2)
         rms = float(np.sqrt(np.mean(res2**2)))
     else:
+        # Fall back to Pass-1 fit using ALL nodes; reset counts accordingly
         Ux, Uy, Rz = Ux1, Uy1, Rz1
         rms = float(np.sqrt(np.mean(res**2)))
+        n_inliers = n
+        n_outliers = 0
 
-    return Ux, Uy, Rz, rms, int(mask.sum()), n_outliers, mask
+    return Ux, Uy, Rz, rms, n_inliers, n_outliers, mask
 
 
 # ========================================================================
@@ -530,6 +535,7 @@ def modal_storey_drifts(
     z_tolerance: float = 0.5,
     spectrum_periods: Optional[List[float]] = None,
     spectrum_accels: Optional[List[float]] = None,
+    node_masses: Optional[Dict[str, float]] = None,
 ) -> pd.DataFrame:
     """Compute CQC-combined storey drifts from modal analysis.
 
@@ -555,6 +561,10 @@ def modal_storey_drifts(
     spectrum_accels : list[float], optional
         Spectral acceleration values (m/s²) corresponding to
         *spectrum_periods*.
+    node_masses : dict, optional
+        ``{node_id: mass}``.  Passed to :func:`storey_displacements`
+        so the rigid-body fit uses the mass centroid.  ``None`` →
+        geometric centroid (equal weight per node).
 
     Returns
     -------
@@ -600,6 +610,7 @@ def modal_storey_drifts(
         df_m = storey_displacements(
             md, stories, node_ux, node_uy,
             z_tolerance=z_tolerance,
+            node_masses=node_masses,
         )
         mode_dfs.append(df_m)
 
