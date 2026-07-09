@@ -870,6 +870,214 @@ class TestParserModelIntegration:
 # ============================================================================
 
 
+class TestSplitElementsAtFrames:
+    """Tests for the AtFrames frame-frame intersection splitting."""
+
+    def test_at_frames_no_intersection_no_split(self):
+        """Elements with AtFrames=True that don't intersect should not split."""
+        from fea_toolkit.model.geometry import split_elements
+
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=10, y=0, z=0),
+            "3": Node(node_id="3", node_tag=3, x=0, y=10, z=0),
+            "4": Node(node_id="4", node_tag=4, x=10, y=10, z=0),
+        }
+        elements = {
+            "A": FrameElement(elem_id="A", elem_tag=10, node_i="1", node_j="2"),
+            "B": FrameElement(elem_id="B", elem_tag=11, node_i="3", node_j="4"),
+        }
+        auto_mesh = {"A": {"AtFrames": True}, "B": {"AtFrames": True}}
+        result = split_elements(nodes=nodes, elements=elements,
+                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        new_elems, _, _ = result
+        assert len(new_elems) == 2
+        assert "A" in new_elems and "B" in new_elems
+        assert not new_elems["A"].inactive
+        assert not new_elems["B"].inactive
+
+    def test_at_frames_crossing_split(self):
+        """Two perpendicular frames crossing should split at intersection."""
+        from fea_toolkit.model.geometry import split_elements
+
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=10, y=0, z=0),
+            "3": Node(node_id="3", node_tag=3, x=5, y=-5, z=0),
+            "4": Node(node_id="4", node_tag=4, x=5, y=5, z=0),
+        }
+        elements = {
+            "A": FrameElement(elem_id="A", elem_tag=10, node_i="1", node_j="2"),
+            "B": FrameElement(elem_id="B", elem_tag=11, node_i="3", node_j="4"),
+        }
+        auto_mesh = {"A": {"AtFrames": True}, "B": {"AtFrames": True}}
+        # Pass nodes directly (not a copy) so we can check new nodes
+        result = split_elements(nodes=nodes, elements=elements,
+                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        new_elems, _, _ = result
+        # Both elements should be split → 2 children each + 2 inactive parents
+        assert "A" in new_elems
+        assert new_elems["A"].inactive
+        assert len(new_elems["A"].child_ids) == 2
+        assert "B" in new_elems
+        assert new_elems["B"].inactive
+        assert len(new_elems["B"].child_ids) == 2
+        # Check a new node was created at (5, 0, 0) in the nodes dict
+        split_node = None
+        for nid, nd in nodes.items():
+            if nid.startswith("split_n_"):
+                split_node = nd
+                break
+        assert split_node is not None, "No split node created"
+        assert abs(split_node.x - 5) < 1e-6
+        assert abs(split_node.y - 0) < 1e-6
+        assert abs(split_node.z - 0) < 1e-6
+        assert split_node.node_tag > 0
+
+    def test_at_frames_skips_shared_joint(self):
+        """Elements already sharing a joint should not be split."""
+        from fea_toolkit.model.geometry import split_elements
+
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=10, y=0, z=0),
+            "3": Node(node_id="3", node_tag=3, x=10, y=5, z=0),
+        }
+        elements = {
+            "A": FrameElement(elem_id="A", elem_tag=10, node_i="1", node_j="2"),
+            "B": FrameElement(elem_id="B", elem_tag=11, node_i="2", node_j="3"),
+        }
+        auto_mesh = {"A": {"AtFrames": True}, "B": {"AtFrames": True}}
+        # Should not crash — they share node "2"
+        result = split_elements(nodes=nodes, elements=elements,
+                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        new_elems, _, _ = result
+        # Should not crash — they share node "2"
+        assert len(new_elems) == 2
+        assert not new_elems["A"].inactive
+        assert not new_elems["B"].inactive
+
+    def test_at_frames_3d_crossing(self):
+        """Elements crossing at different elevations (3D)."""
+        from fea_toolkit.model.geometry import split_elements
+
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=10, y=0, z=0),
+            "3": Node(node_id="3", node_tag=3, x=5, y=-5, z=5),
+            "4": Node(node_id="4", node_tag=4, x=5, y=5, z=5),
+        }
+        elements = {
+            "A": FrameElement(elem_id="A", elem_tag=10, node_i="1", node_j="2"),
+            "B": FrameElement(elem_id="B", elem_tag=11, node_i="3", node_j="4"),
+        }
+        auto_mesh = {"A": {"AtFrames": True}, "B": {"AtFrames": True}}
+        result = split_elements(nodes=nodes, elements=elements,
+                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        new_elems, _, _ = result
+        # Non-coplanar → no intersection → no split
+        assert not new_elems["A"].inactive
+        assert not new_elems["B"].inactive
+
+    def test_at_frames_no_joints_but_frames(self):
+        """Element with AtFrames=True but AtJoints=False should still split."""
+        from fea_toolkit.model.geometry import split_elements
+
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=10, y=0, z=0),
+            "3": Node(node_id="3", node_tag=3, x=5, y=-5, z=0),
+            "4": Node(node_id="4", node_tag=4, x=5, y=5, z=0),
+        }
+        elements = {
+            "A": FrameElement(elem_id="A", elem_tag=10, node_i="1", node_j="2"),
+            "B": FrameElement(elem_id="B", elem_tag=11, node_i="3", node_j="4"),
+        }
+        # Only AtFrames, no AtJoints
+        auto_mesh = {"A": {"AtJoints": False, "AtFrames": True},
+                     "B": {"AtJoints": False, "AtFrames": True}}
+        result = split_elements(nodes=nodes, elements=elements,
+                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        new_elems, _, _ = result
+        assert new_elems["A"].inactive
+        assert len(new_elems["A"].child_ids) == 2
+        assert new_elems["B"].inactive
+        assert len(new_elems["B"].child_ids) == 2
+
+    def test_at_frames_skips_existing_joint_when_no_atjoints(self):
+        """An existing joint on an element should NOT split it when
+        AtJoints=False, even if AtFrames is True and creates a split."""
+        from fea_toolkit.model.geometry import split_elements
+
+        # Elements A (0→10) and C (3→7) intersect at (3,0,0) — existing joint.
+        # Element B crosses at (5,0,0) — AtFrames intersection.
+        # With AtJoints=False, only the AtFrames intersection should split.
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=10, y=0, z=0),
+            "3": Node(node_id="3", node_tag=3, x=3, y=0, z=0),
+            "4": Node(node_id="4", node_tag=4, x=7, y=0, z=0),
+            # Element B crosses at (5,0,0)
+            "5": Node(node_id="5", node_tag=5, x=5, y=-5, z=0),
+            "6": Node(node_id="6", node_tag=6, x=5, y=5, z=0),
+        }
+        elements = {
+            "A": FrameElement(elem_id="A", elem_tag=10, node_i="1", node_j="2"),
+            "B": FrameElement(elem_id="B", elem_tag=11, node_i="5", node_j="6"),
+            "C": FrameElement(elem_id="C", elem_tag=12, node_i="3", node_j="4"),
+        }
+        auto_mesh = {"A": {"AtJoints": False, "AtFrames": True},
+                     "B": {"AtJoints": False, "AtFrames": True},
+                     "C": {"AtJoints": False, "AtFrames": False}}
+        result = split_elements(nodes=nodes, elements=elements,
+                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        new_elems, _, _ = result
+        # Element A should be split only at the AtFrames node (5,0,0),
+        # NOT at the existing joint node 3 (3,0,0).
+        # So it should have 2 children (split at t=0.5).
+        assert new_elems["A"].inactive
+        assert len(new_elems["A"].child_ids) == 2, (
+            f"Expected 2 children, got {len(new_elems['A'].child_ids)}")
+        # Element C (no AtFrames, no AtJoints) should not be split
+        assert not new_elems["C"].inactive
+        # Only one new node should exist (the AtFrames intersection)
+        at_frames_nodes = [nid for nid in nodes if nid.startswith("split_n_")]
+        assert len(at_frames_nodes) == 1
+
+    def test_at_frames_dedup_near_duplicate_t(self):
+        """Two intermediate nodes at nearly the same t should be deduplicated."""
+        from fea_toolkit.model.geometry import split_elements, _segment_intersection_3d
+        import numpy as np
+
+        # Element A: horizontal beam from (0,0,0) to (10,0,0)
+        # Two other elements cross it at nearly the same point:
+        #   Element B: crosses at (5,0,0) exactly
+        #   Element C: crosses at (5.000001, 0, 0) — 1 micron off
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=10, y=0, z=0),
+            "3": Node(node_id="3", node_tag=3, x=5, y=-5, z=0),
+            "4": Node(node_id="4", node_tag=4, x=5, y=5, z=0),
+            "5": Node(node_id="5", node_tag=5, x=5.000001, y=-5, z=0),
+            "6": Node(node_id="6", node_tag=6, x=5.000001, y=5, z=0),
+        }
+        elements = {
+            "A": FrameElement(elem_id="A", elem_tag=10, node_i="1", node_j="2"),
+            "B": FrameElement(elem_id="B", elem_tag=11, node_i="3", node_j="4"),
+            "C": FrameElement(elem_id="C", elem_tag=12, node_i="5", node_j="6"),
+        }
+        auto_mesh = {"A": {"AtJoints": False, "AtFrames": True},
+                     "B": {"AtJoints": False, "AtFrames": True},
+                     "C": {"AtJoints": False, "AtFrames": True}}
+        result = split_elements(nodes=nodes, elements=elements,
+                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        new_elems, _, _ = result
+        # Element A should have 2 children (split once, not twice)
+        assert new_elems["A"].inactive
+        assert len(new_elems["A"].child_ids) == 2, (
+            f"Expected 2 children (dedup), got {len(new_elems['A'].child_ids)}")
+
+
 class TestEdgeCases:
     def test_empty_model(self):
         """SAPModelData with no data should not crash."""
