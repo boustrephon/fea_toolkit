@@ -52,6 +52,17 @@ TABLE:  "JOINT COORDINATES"
     assert "JOINT COORDINATES" in parser._raw_tables
     assert len(parser._raw_tables["JOINT COORDINATES"]) == 2
 
+    # Verify ID (str) vs Tag (int) assignment
+    model = parser.get_model_data()
+    node1 = model.nodes.get("1")
+    assert node1 is not None
+    assert node1.node_id == "1"       # string SAP2000 label
+    assert node1.node_tag == 1         # integer OpenSees tag
+    node2 = model.nodes.get("2")
+    assert node2 is not None
+    assert node2.node_id == "2"
+    assert node2.node_tag == 2
+
 
 def test_parse_area_gravity_loads(tmp_path):
     """Parse AREA LOADS - GRAVITY table."""
