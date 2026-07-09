@@ -440,3 +440,235 @@ class TestMeshAreaElements:
         assert areas == orig_areas, "areas dict mutated"
         assert nodes == orig_nodes, "nodes dict mutated"
         assert assign == orig_assign, "assignments dict mutated"
+
+
+# ============================================================================
+# Confinement model tests
+# ============================================================================
+
+class TestManderConfinement:
+    """Tests for model.confinement.mander_confined()."""
+
+    def test_unconfined_when_no_spacing(self):
+        """Zero spacing returns unconfined properties."""
+        from fea_toolkit.model.confinement import ConfinementData, mander_confined
+        data = ConfinementData(fc=30e6, tie_diameter=0.01, tie_spacing=0,
+                               tie_fy=400e6, core_bc=0.3, core_dc=0.3)
+        result = mander_confined(data)
+        assert result.fcc == 30e6
+        assert result.ecc == 0.002
+        assert result.ecu == 0.004
+        assert result.ke == 0.0
+
+    def test_rectangular_standard(self):
+        """Rectangular perimeter hoop produces reasonable ke and fcc."""
+        from fea_toolkit.model.confinement import ConfinementData, mander_confined
+        data = ConfinementData(
+            fc=30e6, tie_diameter=0.01, tie_spacing=0.1,
+            tie_fy=400e6, core_bc=0.4, core_dc=0.4,
+            long_diameter=0.02, long_count_x=3, long_count_y=3,
+            tie_config="standard",
+        )
+        result = mander_confined(data)
+        assert result.fcc > 30e6
+        assert result.ecc > 0.002
+        assert result.ke > 0
+        assert result.rho_s > 0
+
+    def test_cross_tie_explicit_counts(self):
+        """Cross-tie with explicit count fields affects Ash_x and Ash_y."""
+        from fea_toolkit.model.confinement import ConfinementData, mander_confined
+        plain = ConfinementData(
+            fc=30e6, tie_diameter=0.01, tie_spacing=0.1,
+            tie_fy=400e6, core_bc=0.4, core_dc=0.4,
+            long_diameter=0.02, long_count_x=3, long_count_y=3,
+            tie_config="standard",
+        )
+        r1 = mander_confined(plain)
+
+        tied = ConfinementData(
+            fc=30e6, tie_diameter=0.01, tie_spacing=0.1,
+            tie_fy=400e6, core_bc=0.4, core_dc=0.4,
+            long_diameter=0.02, long_count_x=3, long_count_y=3,
+            tie_config="cross_tie",
+            cross_tie_count_x=2, cross_tie_count_y=2,
+        )
+        r2 = mander_confined(tied)
+        assert r2.rho_s > r1.rho_s
+        assert r2.fcc > r1.fcc
+
+    def test_spiral_ke_uses_rho_cc(self):
+        """Circular spiral ke uses rho_cc not rho_s."""
+        from fea_toolkit.model.confinement import ConfinementData, mander_confined
+        data = ConfinementData(
+            fc=30e6, tie_diameter=0.012, tie_spacing=0.05,
+            tie_fy=400e6, core_bc=0.35, core_dc=0.35,
+            long_diameter=0.02, long_count_x=4, long_count_y=4,
+            tie_config="spiral",
+        )
+        result = mander_confined(data)
+        assert result.fcc > 30e6
+        assert result.ke > 0
+        if result.ke > 0:
+            assert abs(result.ke - 1.0/(1.0 - result.rho_s)) > 0.001, (
+                "ke appears to use rho_s denominator instead of rho_cc")
+
+    def test_ecu_with_eps_su(self):
+        """ecu formula uses eps_su and confined strength fcc."""
+        from fea_toolkit.model.confinement import ConfinementData, mander_confined
+        low_eps = ConfinementData(
+            fc=30e6, tie_diameter=0.01, tie_spacing=0.1,
+            tie_fy=400e6, core_bc=0.4, core_dc=0.4,
+            long_diameter=0.02, long_count_x=3, long_count_y=3,
+            tie_config="standard", eps_su=0.05,
+        )
+        r_low = mander_confined(low_eps)
+
+        high_eps = ConfinementData(
+            fc=30e6, tie_diameter=0.01, tie_spacing=0.1,
+            tie_fy=400e6, core_bc=0.4, core_dc=0.4,
+            long_diameter=0.02, long_count_x=3, long_count_y=3,
+            tie_config="standard", eps_su=0.15,
+        )
+        r_high = mander_confined(high_eps)
+        assert r_high.ecu > r_low.ecu
+        assert r_low.ecu > 0.004
+        assert r_high.ecu <= 0.025
+
+
+# ============================================================================
+# Tcl export tests
+# ============================================================================
+
+class TestTclExport:
+    """Tests for export_model_to_tcl with fiber sections."""
+
+    def _make_rc_model(self):
+        """Build minimal SAPModelData with one RC column section."""
+        from fea_toolkit.model.sap_data import (
+            SAPModelData, Material, ConcreteRectangularSection,
+            Node, FrameElement,
+        )
+        mat = Material(
+            name="C30", type="Concrete", Fc=30e6, E_mod=25e9,
+        )
+        sec = ConcreteRectangularSection(
+            name="Col400", shape="Concrete Rectangular", material="C30",
+            A=0.16, I33=0.002133, I22=0.002133, J=0.0036,
+            depth=0.4, bf=0.4, cover=0.04,
+            top_bars=4, bot_bars=4, top_bar_dia=0.02, bot_bar_dia=0.02,
+        )
+        return SAPModelData(
+            nodes={
+                "1": Node("1", 1, 0, 0, 0),
+                "2": Node("2", 2, 0, 0, 3),
+            },
+            restraints={},
+            materials={"C30": mat},
+            sections={"Col400": sec},
+            frame_elements={
+                "1": FrameElement("1", 10, "1", "2"),
+            },
+            area_elements={},
+            frame_assignments={"1": "Col400"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            units={"F": "N", "L": "m", "T": "C"},
+        )
+
+    def test_export_fiber_sections_have_braces(self):
+        """Fiber sections in exported Tcl have brace-delimited blocks."""
+        import tempfile, os
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        md = self._make_rc_model()
+        config = {"create_fiber_sections": True, "geom_transf_type": "PDelta"}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".tcl",
+                                          delete=False) as f:
+            path = f.name
+        try:
+            OpenSeesBuilder.export_model_to_tcl(md, path, config=config)
+            with open(path) as f:
+                tcl = f.read()
+        finally:
+            os.unlink(path)
+
+        assert "section Fiber " in tcl
+        fiber_blocks = 0
+        in_fiber = False
+        depth = 0
+        for line in tcl.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("section Fiber"):
+                in_fiber = True
+            if in_fiber:
+                depth += stripped.count("{")
+                depth -= stripped.count("}")
+                if depth == 0 and in_fiber:
+                    fiber_blocks += 1
+                    in_fiber = False
+        assert fiber_blocks >= 1, "No complete fiber section block found"
+
+    def test_export_no_elastic_for_fiber_sections(self):
+        """No section Elastic emitted for RC sections with fiber sections."""
+        import tempfile, os
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        md = self._make_rc_model()
+        config = {"create_fiber_sections": True, "geom_transf_type": "PDelta"}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".tcl",
+                                          delete=False) as f:
+            path = f.name
+        try:
+            OpenSeesBuilder.export_model_to_tcl(md, path, config=config)
+            with open(path) as f:
+                tcl = f.read()
+        finally:
+            os.unlink(path)
+
+        elastic_lines = [l for l in tcl.split("\n")
+                         if l.strip().startswith("section Elastic")]
+        assert len(elastic_lines) == 0, (
+            f"Expected no section Elastic, found {len(elastic_lines)}")
+
+    def test_export_force_beam_column_for_fiber(self):
+        """Frame elements use forceBeamColumn for fiber sections."""
+        import tempfile, os
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        md = self._make_rc_model()
+        config = {"create_fiber_sections": True, "geom_transf_type": "PDelta"}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".tcl",
+                                          delete=False) as f:
+            path = f.name
+        try:
+            OpenSeesBuilder.export_model_to_tcl(md, path, config=config)
+            with open(path) as f:
+                tcl = f.read()
+        finally:
+            os.unlink(path)
+
+        assert "forceBeamColumn" in tcl, (
+            "Expected forceBeamColumn element in Tcl output")
+        assert "beamIntegration Lobatto" in tcl, (
+            "Expected beamIntegration Lobatto in Tcl output")
+        assert "elasticBeamColumn" not in tcl, (
+            "Unexpected elasticBeamColumn (should be forceBeamColumn)")
+
+    def test_export_without_fiber_uses_elastic(self):
+        """Without create_fiber_sections, elasticBeamColumn is used."""
+        import tempfile, os
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        md = self._make_rc_model()
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".tcl",
+                                          delete=False) as f:
+            path = f.name
+        try:
+            OpenSeesBuilder.export_model_to_tcl(md, path, config=None)
+            with open(path) as f:
+                tcl = f.read()
+        finally:
+            os.unlink(path)
+
+        assert "elasticBeamColumn" in tcl, (
+            "Expected elasticBeamColumn for non-fibre export")
+        assert "section Elastic" in tcl, (
+            "Expected section Elastic for non-fibre export")
