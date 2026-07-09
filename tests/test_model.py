@@ -932,7 +932,9 @@ class TestSplitElementsAtFrames:
         assert abs(split_node.x - 5) < 1e-6
         assert abs(split_node.y - 0) < 1e-6
         assert abs(split_node.z - 0) < 1e-6
-        assert split_node.node_tag > 0
+        assert split_node.node_tag == 5, (
+            f"Expected next tag 5, got {split_node.node_tag}")
+        assert split_node.node_id == "split_n_1"
 
     def test_at_frames_skips_shared_joint(self):
         """Elements already sharing a joint should not be split."""
@@ -958,7 +960,7 @@ class TestSplitElementsAtFrames:
         assert not new_elems["B"].inactive
 
     def test_at_frames_3d_crossing(self):
-        """Elements crossing at different elevations (3D)."""
+        """Elements crossing at different elevations (3D) — no split."""
         from fea_toolkit.model.geometry import split_elements
 
         nodes = {
@@ -1003,6 +1005,10 @@ class TestSplitElementsAtFrames:
         assert len(new_elems["A"].child_ids) == 2
         assert new_elems["B"].inactive
         assert len(new_elems["B"].child_ids) == 2
+        # Verify split node got correct sequential tag (5 after 1..4)
+        split_nid = next(nid for nid in nodes if nid.startswith("split_n_"))
+        assert nodes[split_nid].node_tag == 5
+        assert nodes[split_nid].node_id == "split_n_1"
 
     def test_at_frames_skips_existing_joint_when_no_atjoints(self):
         """An existing joint on an element should NOT split it when
@@ -1038,6 +1044,10 @@ class TestSplitElementsAtFrames:
         assert new_elems["A"].inactive
         assert len(new_elems["A"].child_ids) == 2, (
             f"Expected 2 children, got {len(new_elems['A'].child_ids)}")
+        # The AtFrames node should get the next sequential tag (7 after 1..6)
+        split_nid = next(nid for nid in nodes if nid.startswith("split_n_"))
+        assert nodes[split_nid].node_tag == 7, (
+            f"Expected tag 7, got {nodes[split_nid].node_tag}")
         # Element C (no AtFrames, no AtJoints) should not be split
         assert not new_elems["C"].inactive
         # Only one new node should exist (the AtFrames intersection)
