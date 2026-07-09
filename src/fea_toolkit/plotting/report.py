@@ -62,8 +62,8 @@ def plot_modal_participation(df_modal: Any) -> Optional[Any]:
     """Two-panel bar chart of mass participation by mode — translational and rotational DOFs.
 
     Each bar shows the mode's contribution (solid) with the cumulative sum
-    (hatched, same colour) stacked on top.  A dashed line marks the 90 %
-    threshold.
+    (semi-transparent, same colour) stacked on top.  A dashed line marks
+    the 90 % threshold.
 
     Parameters
     ----------
@@ -88,6 +88,8 @@ def plot_modal_participation(df_modal: Any) -> Optional[Any]:
             data[col] = pd.to_numeric(data[col], errors="coerce").fillna(0)
 
     n_modes = len(data)
+    if n_modes == 0:
+        return None
     fig, (ax1, ax2) = plt.subplots(
         2, 1, figsize=(max(8, n_modes * 0.55), 6),
         sharex=True,
@@ -278,6 +280,7 @@ def plot_csm_4panel(
         # Determine bounds — if yield exceeds the visible range, report NA
         max_Sd = max(S_d.max(), Sd_plot.max())
         max_Sa = max(S_a.max(), Sa_plot.max())
+        x_lim = 0.30
         yield_ok = (
             pp.get("S_dy") and pp["S_dy"] > 0
             and pp["S_dy"] <= x_lim and pp["S_ay"] <= max_Sa
@@ -301,7 +304,6 @@ def plot_csm_4panel(
         ax.plot(Sd_plot, Sa_plot, "--", color="tab:red", linewidth=1.5,
                 label="Demand (rare)", zorder=2)
 
-        x_lim = 0.30
         y_lim = max(S_a.max(), Sa_plot.max()) * 1.15
         for T in [0.1, 0.2, 0.5, 1.0, 2.0, 4.0]:
             sd_test = np.linspace(0, x_lim, 200)
@@ -516,6 +518,7 @@ def plot_storey_displacements(
     *,
     disp_unit: str = "mm",
     drift_unit: str = "mm/m",
+    source_length_unit: str = "m",
     figsize: tuple = (8, 6),
 ) -> Optional[Any]:
     """Side-by-side storey displacement and drift profiles.
@@ -533,6 +536,10 @@ def plot_storey_displacements(
         ``Drift_X``, ``Drift_Y``).
     disp_unit, drift_unit : str
         Axis labels.
+    source_length_unit : str
+        Length unit of the raw data (``"m"``, ``"mm"``, etc.).  Defaults
+        to ``"m"`` (SI).  Use ``md.units.get("L", "m")`` from the model
+        metadata to derive the correct value.
     figsize : tuple
         Figure dimensions.
 
@@ -558,8 +565,25 @@ def plot_storey_displacements(
     if elev_col_disp is None or elev_col_drift is None:
         return None
 
-    # Unit conversion: raw data is in m, display in disp_unit / drift_unit
-    disp_scale = 1000.0 if disp_unit == "mm" else 1.0
+    # Unit conversion: raw data is in source_length_unit, display in disp_unit / drift_unit
+    # Map source unit → conversion factor to "m" (internal reference)
+    _to_m = {"m": 1.0, "mm": 0.001, "cm": 0.01, "ft": 0.3048, "in": 0.0254}
+    source_to_m = _to_m.get(source_length_unit, 1.0)
+    # disp_scale: from source unit → display unit (e.g. source=m, display=mm → 1000)
+    if disp_unit == "mm":
+        disp_scale = 1000.0 / source_to_m
+    elif disp_unit == "cm":
+        disp_scale = 100.0 / source_to_m
+    elif disp_unit == "m":
+        disp_scale = 1.0 / source_to_m
+    elif disp_unit == "ft":
+        disp_scale = 3.28084 / source_to_m
+    elif disp_unit == "in":
+        disp_scale = 39.3701 / source_to_m
+    else:
+        disp_scale = 1.0
+
+    # drift_scale: drift values are disp/length ratios; mm/m = 0.001, others = 1
     drift_scale = 1000.0 if drift_unit == "mm/m" else 1.0
 
     # Exclude the resolved elevation columns dynamically
