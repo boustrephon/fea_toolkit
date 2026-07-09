@@ -77,6 +77,16 @@ The goal is to create a Python package `fea_toolkit` that:
 | **Rhino Export** | ✅ Complete | Centreline + lightweight Extrusion geometry with section profiles, section-based layers, UserString metadata, groups. See [`docs/rhino_export.md`](docs/rhino_export.md). |
 | **Frame Member Types (Steel)** | ✅ Complete | All steel section shapes (I, Box, Pipe, Channel, Angle, etc.) with `Steel01` fiber sections or elastic sections. |
 | **Frame Member Types (RC)** | ⚠️ Partial | Concrete materials and section shapes supported; rebar auto-placement and confined concrete planned. See [`docs/pushover_analysis.md`](docs/pushover_analysis.md). |
+| **Storey Identification** | ✅ Complete | `identify_stories()` — 4 strategies: S2K story table → diaphragm constraints → horizontal area elements → node Z clustering. Returns sorted `StoryLevel` list with confidence ratings. See [`docs/storey_response.md`](docs/storey_response.md). |
+| **Storey Response Analysis** | ✅ Complete | `storey_displacements()` (rigid-body fit with outlier rejection), `storey_drifts()` (inter-storey drift ratios), `storey_shears()` (summed element-end forces), `modal_storey_drifts()` (CQC-combined modal drifts). |
+| **Connectivity Diagnostics** | ✅ Complete | `check_model_connectivity()` (orphan nodes, shell-only base), `check_split_connectivity()` (zero-length elements), `check_mesh_connectivity()` (unrestrained mesh), `diagnose_singularity()` (tree-plot distribution). |
+| **Self-Weight Consistency** | ✅ Complete | `check_self_weight_consistency()` — compares analytical self-weight (element volumes × material unit weight) against applied load-pattern multipliers. |
+| **Model Export to Tcl** | ✅ Complete | `export_model_to_tcl()` — direct SAPModelData → Tcl script for standalone OpenSees execution; `RecordingOpenSees` proxy captures all `ops.*` calls as Python/Tcl; `xara_build()` classmethod for Xara/OpenSeesRT workflow. |
+| **Mesh Quality Checks** | ✅ Complete | `mesh/checks.py` — aspect ratios, skew, flatness diagnostics for quad shell elements. |
+| **Constrained Remeshing** | ✅ Complete | `mesh/remesh.py` — Gmsh-based constrained quadrilateral remeshing with line constraints from frame edges. |
+| **NDMaterial / LayeredShell** | ✅ Complete | Data model for nonlinear shear walls: `NDMaterial` (uniaxial/multiaxial), `LayeredShellSection`, `ShellFiberLayer` — parsed from SAP2000 area sections. |
+| **Backend-Agnostic Viewer** | ✅ Complete | `ModelViewer` + `RenderBackend` abstraction — renders via PyVista or exports to standalone HTML. `plot_interactive_viewer()` adds radio buttons, sliders, click-to-inspect. |
+| **NPZ-based Rhino Colouring** | ✅ Complete | `colour_from_npz()`, `colour_frame_by_npz_ratio()`, `create_result_flags()` — colour Rhino objects by analysis results from NPZ archives. |
 | **Brace Buckling (Approach A)** | ✅ Implemented | Subdivided element with imperfection + `Corotational`. |
 | **Brace Buckling (Approach B)** | ✅ Implemented | Truss + `Hysteretic` material — robust for pushover. |
 | **Brace Fatigue** | ✅ Implemented | `Fatigue` material wrapper for cyclic degradation. |
@@ -139,6 +149,13 @@ parsing through analysis to visualisation and reporting.
 | **Apply edge constraints** | `apply_edge_constraints()` | Tie fine-mesh nodes to coarse edges via `equationConstraint` |
 | **Detect unconnected edges** | `detect_unconnected_edges()` | Diagnostic: find shell nodes on coarse edges not yet connected |
 | **Record as script** | `RecordingOpenSees` proxy | Capture all `ops.*` calls as standalone Python or Tcl script |
+| **Detect storeys** | `identify_stories()` | 4 strategies to find storey elevations (S2K table → diaphragm → area elements → node clustering) |
+| **Model connectivity check** | `check_model_connectivity()` | Pre-build scan for orphan nodes, shell-only base fixity, duplicate coordinates |
+| **Split connectivity check** | `check_split_connectivity()` | After splitting: zero-length elements, duplicate nodes |
+| **Mesh connectivity check** | `check_mesh_connectivity()` | After meshing: unrestrained base mesh, low-connectivity nodes |
+| **Singularity diagnosis** | `diagnose_singularity()` | After build: scan OpenSees node DOF, tree-plot distribution |
+| **Self-weight consistency** | `check_self_weight_consistency()` | Compare analytical vs applied weight per section |
+| **Export to Tcl** | `export_model_to_tcl()` | Direct SAPModelData → standalone OpenSees Tcl script |
 
 ### 3. Analysis Types
 
@@ -149,6 +166,10 @@ parsing through analysis to visualisation and reporting.
 | **Response spectrum (CQC)** | `run_response_spectrum_analysis()` | CQC-combined base shear, moment, element RS forces |
 | **Pushover (non-linear)** | `run_pushover_analysis()` | Gravity → displacement-controlled lateral push with fiber sections |
 | **CSM performance point** | `compute_performance_point()` | ATC-40 capacity spectrum method |
+| **Storey displacement** | `storey_displacements()` | Rigid-body fit (Ux, Uy, Rz) per storey with outlier rejection |
+| **Storey drifts** | `storey_drifts()` | Inter-storey drift ratios from rigid-body displacements |
+| **Modal storey drifts (CQC)** | `modal_storey_drifts()` | CQC-combined modal drifts using spectral displacement scaling |
+| **Storey shears/moments** | `storey_shears()` | Summed element-end forces per storey level |
 
 ### 4. Pushover Sub-workflows
 
@@ -163,14 +184,19 @@ parsing through analysis to visualisation and reporting.
 
 | Workflow | Entry point | What it does |
 |---|---|---|
-| **Export to NPZ** | `export_results_to_npz()` | Compressed NumPy archive for Rhino consumption |
+| **Export to NPZ** | `export_results_to_npz()` | Compressed NumPy archive for Rhino/post-processing |
 | **3D model (PyVista)** | `plot_model_3d()` | Interactive structural model view |
+| **Deformed shape (PyVista)** | `plot_deformed_3d()` | Displaced shape with colour-mapped displacements |
+| **Mode shape (PyVista)** | `plot_mode_3d()` | Animate eigenvector displacements per mode |
 | **Moment/force flags (PyVista)** | `plot_static_moment_3d()` | Flag or tube diagrams in 3D |
 | **Pushover curves** | `plot_pushover_curves()` | 4-direction capacity curve overlay |
 | **CSM 4-panel** | `plot_csm_4panel()` | 2×2 ADRS plots per push direction |
 | **Rhino import (centreline)** | `RhinoImporter.run(create_centreline=True)` | Joint points, frame lines, shell Breps with SAP metadata |
-| **Rhino import (extrusion)** | `RhinoImporter.run(create_extrusions=True)` | 3D solids by sweeping section profiles |
-| **Rhino colour from NPZ** | `colour_from_npz()` | Colour frame objects by analysis results |
+| **Rhino import (extrusion)** | `RhinoImporterV2.run()` | Lightweight Extrusion solids (I/Box/Pipe/Channel/Rect/Circular) |
+| **Rhino colour from NPZ** | `colour_from_npz()` | Colour frame objects by analysis results from NPZ archives |
+| **Rhino result flags** | `create_result_flags()` | 3D flag annotations for peak response values |
+| **Interactive 3D viewer** | `plot_interactive_viewer()` | Radio buttons, sliders, click-to-inspect in browser |
+| **Backend-agnostic HTML export** | `ModelViewer.export_html()` | Self-contained HTML with 3D scene |
 
 ### 6. GB 50011 Seismic Spectrum
 
@@ -186,7 +212,13 @@ parsing through analysis to visualisation and reporting.
 | **Model summaries** | `report.py` functions | Bounding box, materials, sections, masses, load totals |
 | **Modal table (6-DOF)** | `modal_table_enhanced()` | Periods + rotational mass participation |
 | **Brace buckling table** | `brace_buckling_check()` | $P_{cr}$, slenderness, D/C ratios |
-| **Full evaluation report** | `local/pumphouse_report.qmd` | Quarto notebook: parse → modal → RS → pushover → CSM |
+| **Storey force plots** | `plot_storey_forces()` | Shear/moment profiles with analytical trapezoidal curves |
+| **Storey displacement plots** | `plot_storey_displacements()` | Storey displacement & drift side-by-side |
+| **Modal participation plot** | `plot_modal_participation()` | Bar chart of mass participation ratios |
+| **RS modal analysis plot** | `plot_rs_modal_analysis()` | Periods, base shear, storey forces combined |
+| **CSM 4-panel plot** | `plot_csm_4panel()` | 2×2 ADRS plots per push direction |
+| **Seismic spectrum plot** | `plot_seismic_spectrum()` | GB 50011 elastic spectrum (1- or 3-level) |
+| **Storey story plot (3D)** | `plot_stories()` | PyVista render with semi-transparent storey planes |
 
 ### 8. End-to-End Scripts
 
@@ -199,7 +231,16 @@ parsing through analysis to visualisation and reporting.
 | `local/pumphouse_csm.py` | Full pipeline: parse → buckling → modal → RS → pushover 4-dir → CSM → NPZ |
 | `local/detect_edges.py` | Standalone unconnected shell edge detection |
 
-### 9. Optional Mesh Utilities
+### 9. Report Generation Architecture (Proposed)
+
+**Coming:** A `generate_report()` function driven by a YAML config file
+that orchestrates the entire analysis pipeline, stores results in HDF5, and
+produces a self-contained report. See `docs/report_generation.md` for the
+detailed design.
+
+---
+
+### 10. Optional Mesh Utilities
 
 Two optional subpackages provide mesh quality diagnostics and Gmsh-based
 constrained quadrilateral remeshing.  Neither is imported by the core

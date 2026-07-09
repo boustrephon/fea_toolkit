@@ -202,17 +202,22 @@ intersection.
 1. All elements with `AtFrames=True` are collected.
 2. **Every pair** of AtFrames elements is tested for 3D line-segment
    intersection using `_segment_intersection_3d()`.
-3. If the intersection is interior to both elements (not at an endpoint), a
-   new `Node` with a unique `node_id` and `node_tag` is created at the
-   intersection point.
-4. The node is added to the model `nodes` dict and the spatial grid — both
-   elements now reference the **same** shared node.
+3. If the intersection is interior to **at least one** element (i.e. not at
+   an endpoint for that element), a new `Node` with a unique `node_id` and
+   `node_tag` is created at the intersection point.  The other element may
+   have the intersection at its endpoint (T-junction) — no `t_location` is
+   recorded for that element, but the node is still created so the crossing
+   element can split.
+4. The node is added to the model `nodes` dict and the spatial grid.  If
+   either element needs splitting, both elements reference the **same**
+   shared node.
 5. The `t_locations` attribute of each crossing element records the parametric
    position.
 6. During the main splitting pass, intermediate nodes are filtered:
    - If `AtJoints=True`: all intermediate nodes (joints + AtFrames) are accepted.
-   - If `AtJoints=False`: only AtFrames-created nodes (`split_n_*` IDs) are
-     accepted — existing joints are ignored.
+   - If `AtJoints=False`: only AtFrames-tracked nodes (newly created
+     `split_n_*` nodes or reused joint nodes at intersection locations)
+     are accepted — other existing joints are ignored.
 7. The element is split at all accepted locations.
 
 **  Pairing rule**: Only elements that both have `AtFrames=True` are paired.
@@ -221,9 +226,15 @@ If element *A* has `AtFrames=True` but intersecting element *B* has
 neither element is split at that crossing.  Both must opt in for either
 to be split.
 
-**Node ID/tag management**: New nodes get IDs like `split_n_1`, `split_n_2`,
-etc. — auto-incrementing beyond any existing node IDs.  Tags start from
-`max(existing_tag) + 1`.
+**Node ID/tag management**: New nodes get string IDs like ``split_n_1``,
+``split_n_2``, etc., avoiding conflicts with existing node IDs.  Each new
+node also receives a unique numeric ``node_tag`` for OpenSees.  The
+node‑reuse check searches all existing nodes by coordinate proximity
+(within tolerance), not just ``split_n_*`` IDs — if an intersection
+coincides with an existing joint node, that joint node's ID is tracked**
+for the splitting pass rather than creating a duplicate.  Both elements
+then reference the same ID regardless of whether it was newly created or
+reused.
 
 **Builder integration**: In `OpenSeesBuilder._split_elements()`, after calling
 `geometry.split_elements()`, any new nodes are registered in OpenSees via
