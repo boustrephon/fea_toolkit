@@ -775,6 +775,7 @@ class OpenSeesBuilder:
         ndf: int = 6,
         tcl_prefix: str = "",
         tcl_suffix: str = "",
+        config: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Export a SAP model directly to a Xara-compatible Tcl script.
 
@@ -782,6 +783,11 @@ class OpenSeesBuilder:
         translates the structured ``SAPModelData`` directly into Tcl
         commands, avoiding the scoping issues that arise when replaying
         flat ``ops.*`` call sequences.
+
+        When *config* is provided with ``create_fiber_sections=True``,
+        nonlinear materials and fiber sections are automatically
+        generated as part of the Tcl output (placed at the end of the
+        preamble, before any user-supplied *tcl_prefix*).
 
         The generated Tcl file can be run via :class:`XaraTclRunner`::
 
@@ -791,10 +797,8 @@ class OpenSeesBuilder:
             runner = XaraTclRunner()
             ret, stdout = runner.run("model.tcl")
 
-        To add nonlinear materials, layered shell sections, and
-        analysis commands, use *tcl_prefix* (inserted after the
-        ``model Basic`` preamble) and/or *tcl_suffix* (appended
-        before ``wipe``)::
+        To add analysis commands, use *tcl_suffix* (appended before
+        ``wipe``)::
 
             tcl = OpenSeesBuilder.pushover_tcl(
                 control_node=8, dof=2, max_disp=0.1,
@@ -815,6 +819,12 @@ class OpenSeesBuilder:
                 (e.g. for nDMaterial definitions before sections).
             tcl_suffix: Tcl commands appended before ``wipe``
                 (e.g. for analysis, recorders, results output).
+            config: Builder config dict.  When provided with
+                ``create_fiber_sections=True``, nonlinear materials
+                and fiber sections are auto-generated.  When
+                ``geom_transf_type`` is ``"PDelta"`` or
+                ``"Corotational"``, the corresponding geometric
+                transformation is used for frame elements.
         """
         if not lib_path:
             try:
@@ -949,14 +959,18 @@ class OpenSeesBuilder:
                     vecxz = "1 0 0"
                 else:
                     vecxz = "0 0 1"
+                # Use config-driven geometric transformation
+                transf_type = "Linear"
+                if config:
+                    transf_type = config.get("geom_transf_type", "Linear")
                 if not transf_added:
                     lines.append(
-                        f"geomTransf Linear {eid} {vecxz}"
+                        f"geomTransf {transf_type} {eid} {vecxz}"
                     )
                     transf_added = True
                 else:
                     lines.append(
-                        f"geomTransf Linear {eid} {vecxz}"
+                        f"geomTransf {transf_type} {eid} {vecxz}"
                     )
                 lines.append(
                     f"element elasticBeamColumn {elem.elem_tag} "
@@ -1021,10 +1035,22 @@ class OpenSeesBuilder:
                         + " ".join(nids) + f" {stag}"
                     )
 
-        # Insert tcl_prefix after model preamble, before sections
+        # Auto-generate nonlinear materials and fiber sections from config
+        nonlinear_tcl = OpenSeesBuilder._tcl_materials_and_sections(
+            model_data, config)
+
+        # Insert auto-generated nonlinear Tcl before the sections block
+        first_section_idx = None
+        for i, line in enumerate(lines):
+            if line.startswith("# ── Frame sections"):
+                first_section_idx = i
+                break
+        if first_section_idx is not None and nonlinear_tcl:
+            lines.insert(first_section_idx, "")
+            lines.insert(first_section_idx, nonlinear_tcl)
+
+        # Insert user-provided tcl_prefix (same location)
         if tcl_prefix:
-            # Find the # ── Nodes ── marker and insert prefix after it
-            # Actually, insert before the first element-related section
             first_section_idx = None
             for i, line in enumerate(lines):
                 if line.startswith("# ── Materials") or line.startswith("# ── Frame sections"):
@@ -1049,6 +1075,172 @@ class OpenSeesBuilder:
 
         with open(path, "w") as f:
             f.write("\n".join(lines) + "\n")
+
+    @staticmethod
+    def _tcl_materials_and_sections(
+        model_data: "SAPModelData",
+        config: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Generate Tcl code for nonlinear materials and fiber sections.
+
+        Produces the ``uniaxialMaterial`` and ``section Fiber`` commands
+        needed for pushover or dynamic analysis, using the same logic as
+        ``_create_single_section`` but emitting Tcl strings instead of
+        calling ``ops.*``.  Returns an empty string if
+        ``create_fiber_sections`` is not enabled in *config*.
+
+        Args:
+            model_data: SAP model data with sections and materials.
+            config: Builder config dict (or ``None`` to skip).
+
+        Returns:
+            Tcl commands as a string, ready to use as ``tcl_prefix``.
+        """
+        if config is None:
+            return ""
+        if not config.get("create_fiber_sections", False):
+            return ""
+
+        lines: List[str] = [
+            "",
+            "# ── Nonlinear materials and fiber sections ──",
+            "# (generated by OpenSeesBuilder._tcl_materials_and_sections)",
+        ]
+
+        # Tag numbering scheme:
+        #   materials: 1..M  (same as export_model_to_tcl)
+        #   sections:  M+1 .. M+S  (same)
+        #   concrete mat tags for RC: start after all section tags
+        mat_count = len(model_data.materials)
+        sec_count = len(model_data.sections)
+        next_concrete_tag = mat_count + sec_count + 1
+
+        # Map section name → tag
+        _sec_tag: Dict[str, int] = {}
+        for i, sn in enumerate(model_data.sections, start=mat_count + 1):
+            _sec_tag[sn] = i
+
+        for sec_name, sec in model_data.sections.items():
+            sec_tag = _sec_tag[sec_name]
+            mat = model_data.materials.get(sec.material)
+
+            from ..model.sap_data import (
+                ConcreteRectangularSection,
+                ConcreteCircularSection,
+                RectangularSection,
+                ShellSection,
+                Section as BaseSection,
+            )
+
+            # Shell sections → elastic only (no fiber)
+            if isinstance(sec, ShellSection):
+                continue
+
+            is_rc = isinstance(sec, (
+                ConcreteRectangularSection,
+                ConcreteCircularSection,
+                RectangularSection,
+            ))
+
+            if is_rc:
+                # ── RC fiber section: unconfined, confined, rebar ──
+                concrete_mat_tag = next_concrete_tag
+                next_concrete_tag += 3
+
+                if mat is not None:
+                    Fc = mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7
+                    epsc = (float(mat.extra.get("SFc", 0.002))
+                            if hasattr(mat, "extra") else 0.002)
+                    if epsc > 0.01:
+                        epsc = 0.002
+
+                    # Confined strength: use eFc from SAP2000, else 1.3×Fc
+                    fcc = mat.eFc if mat.eFc and mat.eFc > 0 else Fc * 1.3
+                    epscc = (float(mat.extra.get("SCap", 0.005))
+                             if hasattr(mat, "extra") else 0.005)
+                    if epscc > 0.1:
+                        epscc = 0.005
+
+                    lines.append(
+                        f"uniaxialMaterial Concrete01 {concrete_mat_tag} "
+                        f"{-Fc:g} {-abs(epsc):g} {-0.2*Fc:g} {-0.006:g}"
+                    )
+                    lines.append(
+                        f"uniaxialMaterial Concrete01 {concrete_mat_tag + 1} "
+                        f"{-fcc:g} {-abs(epscc):g} {-0.2*fcc:g} {-0.02:g}"
+                    )
+                    Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
+                    lines.append(
+                        f"uniaxialMaterial Steel02 {concrete_mat_tag + 2} "
+                        f"{Fy:g} {2.0e11:g} {0.01:g} {18.5:g} {0.925:g} {0.15:g}"
+                    )
+                else:
+                    lines.append(
+                        f"uniaxialMaterial Concrete01 {concrete_mat_tag} "
+                        f"{-3.0e7:g} {-0.002:g} {-6.0e6:g} {-0.006:g}"
+                    )
+                    lines.append(
+                        f"uniaxialMaterial Concrete01 {concrete_mat_tag + 1} "
+                        f"{-3.9e7:g} {-0.005:g} {-7.8e6:g} {-0.02:g}"
+                    )
+                    lines.append(
+                        f"uniaxialMaterial Steel02 {concrete_mat_tag + 2} "
+                        f"{4.0e8:g} {2.0e11:g} {0.01:g} {18.5:g} {0.925:g} {0.15:g}"
+                    )
+
+                fiber_mat_tag = concrete_mat_tag
+
+            else:
+                # ── Steel fiber section: Steel01 ──
+                if mat is not None and mat.type.lower() == "steel":
+                    Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
+                    E_mod = mat.E_mod if mat.E_mod > 0 else 2.0e11
+                else:
+                    Fy = 2.5e8
+                    E_mod = 2.0e11
+                fiber_mat_tag = sec_tag
+                lines.append(
+                    f"uniaxialMaterial Steel01 {fiber_mat_tag} "
+                    f"{Fy:g} {E_mod:g} {0.01:g}"
+                )
+
+            # ── Fiber section ──
+            lines.append(f"section Fiber {sec_tag} -GJ {sec.J:g}")
+            try:
+                entries = sec.to_fiber_patches(mat_tag=fiber_mat_tag)
+            except NotImplementedError:
+                # No fiber patches — skip this section
+                continue
+
+            for entry in entries:
+                if entry[0] == "rect":
+                    # patch rect $matTag $numSubdivY $numSubdivZ $yI $zI $yJ $zJ
+                    lines.append(
+                        f"  patch rect {entry[1]} {entry[2]} {entry[3]} "
+                        f"{entry[4]:g} {entry[5]:g} {entry[6]:g} {entry[7]:g}"
+                    )
+                elif entry[0] == "circ":
+                    lines.append(
+                        f"  patch circ {entry[1]} {entry[2]} {entry[3]} "
+                        f"{entry[4]:g} {entry[5]:g} {entry[6]:g} {entry[7]:g}"
+                    )
+                elif entry[0] == "quad":
+                    lines.append(
+                        f"  patch quad {entry[1]} {entry[2]} {entry[3]} "
+                        f"{entry[4]:g} {entry[5]:g} {entry[6]:g} {entry[7]:g} "
+                        f"{entry[8]:g} {entry[9]:g} {entry[10]:g} {entry[11]:g}"
+                    )
+                elif entry[0] == "straight":
+                    # layer straight $matTag $numBars $area $yStart $zStart $yEnd $zEnd
+                    parts = [str(x) for x in entry[1:]]
+                    lines.append(f"  layer straight {' '.join(parts)}")
+                elif entry[0] == "circ_layer":
+                    parts = [str(x) for x in entry[1:]]
+                    lines.append(f"  layer circ {' '.join(parts)}")
+
+        if len(lines) > 3:
+            return "\n".join(lines) + "\n"
+        return ""
 
     @staticmethod
     def pushover_tcl(
