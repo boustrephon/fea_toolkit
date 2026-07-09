@@ -474,7 +474,7 @@ def area_section_summary(md) -> pd.DataFrame:
     total_area = df[f"Area ({length_unit}\u00b2)"].sum()
     total_w = df[f"Weight ({force_unit})"].sum()
     total_row = {
-        "Section": "**Total**",
+        "Section": "<strong>Total</strong>",
         "Count": "",
         "Thickness": "",
         f"Total area ({length_unit}\u00b2)": round(total_area, 3),
@@ -680,14 +680,13 @@ def brace_buckling_check(md, n_longest: int = 2, K: float = 1.0) -> pd.DataFrame
         slenderness = (K * L) / r_val if r_val > 0 else float('inf')
 
         rows.append({
-            "elem_id": eid,
-            "section": sec_name,
-            "shape": type(sec).__name__.replace("Section", ""),
-            "material": sec.material,
-            f"length ({lu})": round(L, 3),
+            "Section": sec_name,
+            "Shape": type(sec).__name__.replace("Section", ""),
+            "Material": sec.material,
+            f"Length ({lu})": round(L, 3),
             f"A ({lu}\u00b2)": round(A, 6),
-            f"I22 ({lu})\u2074": round(I22, 8),
-            "\u03bb (slenderness)": round(slenderness, 1),
+            f"I22 ({lu}\u2074)": round(I22, 8),
+            "Slenderness": round(slenderness, 1),
             f"P_cr ({fu})": round(P_cr, 0),
         })
 
@@ -695,5 +694,5 @@ def brace_buckling_check(md, n_longest: int = 2, K: float = 1.0) -> pd.DataFrame
         return pd.DataFrame({"Note": ["No brace sections found in model."]})
 
     df = pd.DataFrame(rows)
-    df = df.sort_values(f"length ({lu})", ascending=False).head(n_longest).reset_index(drop=True)
+    df = df.sort_values(f"Length ({lu})", ascending=False).head(n_longest).reset_index(drop=True)
     return df
