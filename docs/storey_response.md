@@ -122,18 +122,20 @@ transmitted through the storey.
 
 ## 8. Flexible Diaphragm Detection
 
-The RMS residual from the rigid-body fit serves as a **flexible
-diaphragm indicator**:
+The `RMS_residual` column returned by :func:`storey_displacements`
+serves as a flexible diaphragm indicator.  To interpret it, compare
+against `Peak_disp` from the same row:
 
-| RMS residual / avg displacement | Interpretation |
+| `RMS_residual / Peak_disp` | Interpretation |
 |---|---|
 | < 0.1 | Rigid diaphragm — fit is excellent |
 | 0.1 – 0.3 | Some in-plane flexibility |
 | > 0.3 | Likely flexible diaphragm — consider reporting both rigid-body and average displacement |
 
-If the rigid-body fit is poor, the functions still return results but
-the `RMS_residual` column flags the issue.  The engineer can then
-choose to use simple average displacement instead.
+The function does not compute this normalised ratio directly — the
+engineer can derive it as ``RMS_residual / Peak_disp`` from the
+returned DataFrame.  If the rigid-body fit is poor, consider using
+peak nodal displacement instead of the fitted rigid-body values.
 
 ## References
 
