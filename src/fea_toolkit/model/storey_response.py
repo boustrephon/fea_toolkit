@@ -84,7 +84,8 @@ References
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+import warnings
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -141,6 +142,10 @@ class StoreyRigidBody:
 def assign_nodes_to_storeys(md, stories, z_tolerance: float = 0.5):
     """Group node IDs by storey based on Z proximity.
 
+    Each node is assigned to the **nearest** storey whose elevation is
+    within ``z_tolerance/2``.  A node is never assigned to more than
+    one storey.
+
     Parameters
     ----------
     md : SAPModelData
@@ -156,14 +161,18 @@ def assign_nodes_to_storeys(md, stories, z_tolerance: float = 0.5):
     """
     if not hasattr(md, "nodes"):
         return {}
-    assignments: Dict[str, List[str]] = {}
-    for s in stories:
-        assignments[s.name] = []
-        z_low = s.elevation - z_tolerance / 2
-        z_high = s.elevation + z_tolerance / 2
-        for nid, nd in md.nodes.items():
-            if z_low <= nd.z <= z_high:
-                assignments[s.name].append(nid)
+    assignments: Dict[str, List[str]] = {s.name: [] for s in stories}
+    half_band = z_tolerance / 2
+    for nid, nd in md.nodes.items():
+        best = None
+        best_dist = float("inf")
+        for s in stories:
+            dist = abs(nd.z - s.elevation)
+            if dist <= half_band and dist < best_dist:
+                best = s.name
+                best_dist = dist
+        if best is not None:
+            assignments[best].append(nid)
     return assignments
 
 
@@ -171,7 +180,8 @@ def assign_nodes_to_storeys(md, stories, z_tolerance: float = 0.5):
 # Centre of mass per storey
 # ========================================================================
 
-def storey_centroids(md, stories, node_masses: Optional[Dict[str, float]] = None):
+def storey_centroids(md, stories, node_masses: Optional[Dict[str, float]] = None,
+                    z_tolerance: float = 0.5):
     """Compute centre of mass for each storey.
 
     Parameters
@@ -181,13 +191,16 @@ def storey_centroids(md, stories, node_masses: Optional[Dict[str, float]] = None
     node_masses : dict, optional
         ``{node_id: mass}``.  If ``None``, geometric centroid
         (equal weight per node) is used.
+    z_tolerance : float
+        Passed to :func:`assign_nodes_to_storeys` to ensure the same
+        node-to-storey assignment as used elsewhere.
 
     Returns
     -------
     dict[str, tuple[float, float]]
         ``{storey_name: (x_cm, y_cm)}``
     """
-    assign = assign_nodes_to_storeys(md, stories)
+    assign = assign_nodes_to_storeys(md, stories, z_tolerance)
     centroids: Dict[str, Tuple[float, float]] = {}
     for s in stories:
         nids = assign.get(s.name, [])
@@ -367,10 +380,10 @@ def storey_displacements(
     -------
     pd.DataFrame
         Columns: Storey, Elevation, X_cm, Y_cm,
-        Ux, Uy, Rz, Peak_disp, RMS_residual, N_nodes, N_outliers.
+        Ux, Uy, Rz, Peak_disp, RMS_residual, R_max, N_nodes, N_outliers.
     """
     assign = assign_nodes_to_storeys(md, stories, z_tolerance)
-    cm = storey_centroids(md, stories, node_masses)
+    cm = storey_centroids(md, stories, node_masses, z_tolerance=z_tolerance)
 
     rows = []
     for s in stories:
@@ -407,6 +420,8 @@ def storey_displacements(
             ux_arr, uy_arr, x_arr, y_arr, xc, yc, outlier_threshold,
         )
         peak = peak_displacement(x_arr, y_arr, xc, yc, Ux, Uy, Rz)
+        # R_max = farthest node-to-CM distance (actual storey geometry)
+        r_max = float(np.max(np.sqrt((x_arr - xc)**2 + (y_arr - yc)**2)))
 
         rows.append({
             "Storey": s.name,
@@ -418,6 +433,7 @@ def storey_displacements(
             "Rz": round(Rz, 8),
             "Peak_disp": round(peak, 6),
             "RMS_residual": round(rms, 6),
+            "R_max": round(r_max, 3),
             "N_nodes": n_used,
             "N_outliers": n_out,
         })
@@ -431,7 +447,7 @@ def _empty_row(s):
         "Elevation": s.elevation,
         "X_cm": 0.0, "Y_cm": 0.0,
         "Ux": 0.0, "Uy": 0.0, "Rz": 0.0,
-        "Peak_disp": 0.0, "RMS_residual": 0.0,
+        "Peak_disp": 0.0, "RMS_residual": 0.0, "R_max": 0.0,
         "N_nodes": 0, "N_outliers": 0,
     }
 
@@ -472,16 +488,10 @@ def storey_drifts(
         drift_x = (curr["Ux"] - prev["Ux"]) / h
         drift_y = (curr["Uy"] - prev["Uy"]) / h
         drift_rz = (curr["Rz"] - prev["Rz"]) / h
-        # Peak drift: evaluate the drift field at the worst node
-        # (use the upper storey's centroid as reference)
-        xc = curr["X_cm"]
-        yc = curr["Y_cm"]
-        # Get the max node coordinates for the upper storey to evaluate peak
-        # For a conservative bound, compute at extreme of storey bounding box
-        # (this approximates the worst-node drift without node data)
-        peak_drift = math.sqrt(drift_x**2 + drift_y**2) + abs(drift_rz) * (
-            math.sqrt(xc**2 + yc**2) + 1.0
-        )
+        # Peak drift: triangle-inequality bound using the upper storey's
+        # actual farthest node-to-CM distance (R_max).
+        r_max = curr["R_max"]
+        peak_drift = math.sqrt(drift_x**2 + drift_y**2) + abs(drift_rz) * r_max
         rows.append({
             "Storey": curr["Storey"],
             "Elevation (m)": curr["Elevation"],
@@ -662,6 +672,8 @@ def storey_shears(
                  "Mx": 0.0, "My": 0.0, "Mz": 0.0}
         for s in stories
     }
+    dropped_i: int = 0
+    dropped_j: int = 0
 
     for eid, edata in element_forces.items():
         f_i = edata.get("F_i", edata.get("F", [0.0] * 6))
@@ -678,6 +690,8 @@ def storey_shears(
                 acc["Mx"] += f_i[3]
                 acc["My"] += f_i[4]
                 acc["Mz"] += f_i[5]
+            else:
+                dropped_i += 1
         # J-end forces at node_j
         nid_j = edata.get("node_j")
         if nid_j is not None:
@@ -690,8 +704,16 @@ def storey_shears(
                 acc["Mx"] += f_j[3]
                 acc["My"] += f_j[4]
                 acc["Mz"] += f_j[5]
+            else:
+                dropped_j += 1
 
     rows = []
+    total_dropped = dropped_i + dropped_j
+    if total_dropped:
+        warnings.warn(
+            f"{total_dropped} element-end contribution(s) dropped — "
+            f"node has no storey assignment ({dropped_i} I-end, {dropped_j} J-end)"
+        )
     for s in stories:
         f = storey_forces[s.name]
         rows.append({
