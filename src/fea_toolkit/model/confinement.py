@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 
 @dataclass
@@ -64,6 +64,15 @@ class ConfinementData:
     overall_h : float, optional
         Overall section depth (m).  Used with *cover* to derive
         ``core_dc``.
+    cross_tie_count_x : int, optional
+        Number of cross-tie legs in the x-direction (perimeter hoop
+        excluded).  Used to compute ``Ash_x`` and ``rho_x``.
+    cross_tie_count_y : int, optional
+        Number of cross-tie legs in the y-direction (perimeter hoop
+        excluded).  Used to compute ``Ash_y`` and ``rho_y``.
+    eps_su : float, optional
+        Ultimate strain of the transverse steel (default 0.1 for
+        ASTM A706).  Used in the spalling/ultimate strain formula.
     """
     fc: float
     tie_diameter: float
@@ -74,10 +83,14 @@ class ConfinementData:
     long_diameter: float = 0.0
     long_count_x: int = 0
     long_count_y: int = 0
+    cross_tie_count_x: int = 0
+    cross_tie_count_y: int = 0
     tie_config: str = "standard"
     cover: float = 0.0
     overall_b: float = 0.0
     overall_h: float = 0.0
+    eps_su: float = 0.1
+    """Ultimate strain of transverse steel (default 0.1 for ASTM A706)."""
 
     def __post_init__(self) -> None:
         # Derive core dimensions from overall + cover if not given directly
@@ -85,6 +98,21 @@ class ConfinementData:
             self.core_bc = self.overall_b - 2 * self.cover - self.tie_diameter
         if self.core_dc <= 0 and self.overall_h > 0:
             self.core_dc = self.overall_h - 2 * self.cover - self.tie_diameter
+        # Validate derived dimensions
+        if self.core_bc <= 0:
+            raise ValueError(
+                f"core_bc ≤ 0 ({self.core_bc:.3f}) after derivation — "
+                f"check cover ({self.cover:.3f}), tie_diameter "
+                f"({self.tie_diameter:.3f}), and overall_b "
+                f"({self.overall_b:.3f})"
+            )
+        if self.core_dc <= 0:
+            raise ValueError(
+                f"core_dc ≤ 0 ({self.core_dc:.3f}) after derivation — "
+                f"check cover ({self.cover:.3f}), tie_diameter "
+                f"({self.tie_diameter:.3f}), and overall_h "
+                f"({self.overall_h:.3f})"
+            )
 
 
 @dataclass
@@ -160,8 +188,17 @@ def mander_confined(data: ConfinementData) -> ConfinementResult:
         # Effective lateral confining stress
         f_l = 0.5 * rho_s * fyh
         # Effective confinement coefficient for circular
+        # Mander Eq. 5-8: ke = (1 - s'/(2*Ds))^2 / (1 - rho_cc)
+        # where rho_cc = Al / Ac (longitudinal / core area)
         s_prime = s - db  # clear spacing
-        ke = (1.0 - s_prime / (2.0 * Ds)) / (1.0 - rho_s) if Ds > 0 else 0.0
+        rho_cc = 0.0
+        if data.long_diameter > 0 and data.long_count_x > 0 and data.long_count_y > 0:
+            Al = math.pi * data.long_diameter**2 / 4.0
+            n_longs = data.long_count_x * data.long_count_y
+            Ac = math.pi * Ds**2 / 4.0
+            rho_cc = (n_longs * Al) / Ac if Ac > 0 else 0.0
+        ke = ((1.0 - s_prime / (2.0 * Ds))**2 /
+              (1.0 - rho_cc)) if Ds > 0 else 0.0
     else:
         # Rectangular section: perimeter hoop ± cross-ties
         # Volumetric ratio of transverse steel
@@ -170,7 +207,8 @@ def mander_confined(data: ConfinementData) -> ConfinementResult:
         Ash_y = 2.0 * Ab  # two legs in y-direction
         # Add cross-ties if specified
         if data.tie_config == "cross_tie":
-            Ash_x += data.long_count_x * Ab
+            Ash_x += data.cross_tie_count_x * Ab
+            Ash_y += data.cross_tie_count_y * Ab
         # Volumetric ratios per direction
         rho_x = Ash_x / (s * dc) if dc > 0 else 0.0
         rho_y = Ash_y / (s * bc) if bc > 0 else 0.0
@@ -208,9 +246,14 @@ def mander_confined(data: ConfinementData) -> ConfinementResult:
         term3 = 1.0 - s_prime / (2.0 * dc) if dc > 0 else 0.0
         ke = term1 * term2 * term3 / (1.0 - rho_cc)
 
-        # Effective lateral confining stress (Mander Eq. 2)
-        # For rectangular, use the minimum of the two direction stresses
-        # as the effective confining stress is governed by the weaker direction
+        # Effective lateral confining stress
+        # For rectangular sections with unequal confinement in x and y,
+        # Mander's full solution requires iterating on the triaxial failure
+        # surface (Mander Eq. 2 with the biaxial interaction).  A common
+        # conservative simplification (used by Priestley, Calvi & Kowalsky,
+        # "Displacement-Based Seismic Design of Structures", 2007) takes
+        # the minimum of the two direction stresses, since the weaker
+        # direction governs the confined strength:
         f_l = ke * min(f_lx, f_ly) if ke > 0 else 0.0
 
     if ke <= 0:
@@ -230,9 +273,9 @@ def mander_confined(data: ConfinementData) -> ConfinementResult:
     ecc = 0.002 * (1.0 + 5.0 * (fcc / fc - 1.0)) if fc > 0 else 0.002
 
     # Ultimate confined strain (spalling)
-    # Mander proposes ecu based on energy balance, but a common
-    # simplified form is used here:
-    ecu = 0.004 + 0.5 * rho_s * fyh / fc if fc > 0 else 0.004
+    # Priestley et al. (1996) simplified form using confined strength:
+    #   ecu = 0.004 + 1.4 * rho_s * fyh * eps_su / f'cc
+    ecu = 0.004 + 1.4 * rho_s * fyh * data.eps_su / fcc if fcc > 0 else 0.004
     ecu = min(ecu, 0.025)  # cap at 2.5%
 
     return ConfinementResult(
