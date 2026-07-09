@@ -96,10 +96,12 @@ For each mode *m*:
 1. Extract nodal eigenvector displacements (uxᵢ, uyᵢ) from the mode
    shape.
 2. Fit rigid-body per storey → (Uxₘ, Uyₘ, Rzₘ) per storey.
-3. Compute per-mode inter-storey drift.
+3. Compute per-mode inter-storey **peak drift** via the same
+   ``Drift_peak`` formula used for static load cases
+   (``Drift_peak = sqrt(Drift_X² + Drift_Y²) + |Drift_Rz| · r_max``).
 
-Combine across modes using the Complete Quadratic Combination (CQC)
-formula (Der Kiureghian, 1981):
+The per-mode peak drifts are then combined across modes using the
+Complete Quadratic Combination (CQC) formula (Der Kiureghian, 1981):
 
 ```
 Drift_total = sqrt( Σᵢ Σⱼ ρᵢⱼ · Driftᵢ · Driftⱼ )

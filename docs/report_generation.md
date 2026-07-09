@@ -27,16 +27,46 @@ Instead of manually specifying element types and solver settings, the
 config selects an **analysis mode** at the top level.  The system maps
 this to sensible defaults:
 
-| Mode | Element type | Section model | Geometric | Damping | Solver | Brace strategy |
-|---|---|---|---|---|---|---|
-| `linear_static` | `elasticBeamColumn` | Elastic (E, A, I) | Linear | None | Newton · 1e-8 · RCM | `beam` (elastic) |
-| `modal` | `elasticBeamColumn` | Elastic (E, A, I) | Linear | None | Eigen (lapack) | `beam` (elastic) |
-| `response_spectrum` | `elasticBeamColumn` | Elastic (E, A, I) | Linear | CQC (inherent) | Eigen + CQC | `beam` (elastic) |
-| `pushover` | `nonlinearBeamColumn` | Fiber (`Steel01`, `Concrete01`) | PDelta | Rayleigh (2%) | NewtonLineSearch · 1e-6 · RCM · auto-fallback | `truss` + `Hysteretic` |
-| `nonlinear_dynamic` (future) | `nonlinearBeamColumn` | Fiber (`Steel01`, `Concrete01`) | PDelta | Rayleigh (2%) | Newmark · HHT · RCM | `truss` + `Hysteretic` |
+| Mode | Element type | Section model | Geometric | Damping | Solver | Brace strategy | Execution |
+|---|---|---|---|---|---|---|---|
+| `linear_static` | `elasticBeamColumn` | Elastic (E, A, I) | Linear | None | Newton · 1e-8 · RCM | `beam` (elastic) | ✅ OpenSeesPy |
+| `modal` | `elasticBeamColumn` | Elastic (E, A, I) | Linear | None | Eigen (lapack) | `beam` (elastic) | ✅ OpenSeesPy |
+| `response_spectrum` | `elasticBeamColumn` | Elastic (E, A, I) | Linear | CQC (inherent) | Eigen + CQC | `beam` (elastic) | ✅ OpenSeesPy |
+| `pushover` (steel) | `nonlinearBeamColumn` | Fiber (`Steel01`) | PDelta | Rayleigh (2%) | NewtonLineSearch · 1e-6 · RCM · auto-fallback | `truss` + `Hysteretic` | ⚠️ OpenSeesPy (steel OK) |
+| `pushover` (RC) | `forceBeamColumn` | Fiber (`Concrete01`, `Steel02`) | PDelta | Rayleigh (2%) | Same | `beam` (elastic) | ❌ OpenSeesPy → **Tcl export** |
+| `nonlinear_dynamic` | `forceBeamColumn` | Fiber (any) | PDelta | Rayleigh (2%) | Newmark · HHT · RCM | `truss` + `Hysteretic` | ❌ OpenSeesPy → **Tcl export** |
 
 Individual overrides in the ``builder`` section take precedence over
 these defaults.
+
+> **Important: OpenSeesPy limitation for nonlinear RC analysis.**
+> Nonlinear RC analysis (fiber sections with ``Concrete01/02``,
+> ``Steel02``, or ``forceBeamColumn`` with ``HingeRadau``) is **not
+> supported in OpenSeesPy** builds.  Any analysis requiring nonlinear
+> materials — pushover with RC fiber sections, nonlinear dynamic, or
+> brace buckling with ``Hysteretic`` materials — must be **exported to
+> Tcl** and executed via the standalone OpenSees build bundled with
+> Xara (``tclsh8.6``).  The toolkit provides two export paths:
+>
+> - ``RecordingOpenSees`` — records all ``ops.*`` calls during a
+>   Python build, then saves them as a Tcl script.  This only works for
+>   **elastic** builds in Python (nonlinear sections cannot be created).
+> - ``export_model_to_tcl()`` — translates ``SAPModelData`` directly to
+>   Tcl commands, skipping the Python build entirely.  Accepts
+>   ``tcl_prefix`` and ``tcl_suffix`` to inject nonlinear material
+>   definitions, fiber sections, and custom analysis commands.
+>
+> The practical pipeline for nonlinear analyses is therefore:
+>
+> ```
+> SAPModelData  ──→  export_model_to_tcl()  ──→  model.tcl
+>                                                     │
+>                   User-provided Tcl snippets ───────┤
+>                   (fiber sections, materials,        │
+>                    analysis commands)                │
+>                                                     ▼
+>                                           XaraTclRunner.run()
+>                                           (standalone tclsh8.6)
 
 ### Full Config Schema
 
@@ -251,6 +281,16 @@ and Pandas DataFrames needed for post-processing and plotting.
     ├── storey_forces              # DataFrame: case, storey, Fx, Fy, Fz, Mx, My, Mz
     ├── storey_displacements       # DataFrame: case, storey, Ux, Uy, Rz, Peak_disp
     └── storey_drifts              # DataFrame: case, storey, Drift_X, Drift_Y, Drift_peak
+
+# Future:
+# ├── dynamic/                     # Nonlinear dynamic analysis results
+# │   ├── GM1/                    # one group per ground-motion record
+# │   │   ├── time                # 1-D array (time axis)
+# │   │   ├── acceleration        # 1-D array (input accelerogram)
+# │   │   ├── displacements       # DataFrame: step -> node displacements
+# │   │   ├── forces              # DataFrame: step -> element forces
+# │   │   └── storey_response     # DataFrame: storey displacement/drift/shear
+# │   └── ...
 ```
 
 ### Python class for HDF5 storage
@@ -595,14 +635,14 @@ dependency on other items.
 | **P7** | Modal pushover pattern | 3.7 | Small (workflow change) | Third pattern option: `load = mass × eigenvector`. Required by ASCE 41. |
 | **P8** | Equation numbering (RCM) | 3.7 | Small (builder change) | `numberer RCM` gives 2–10× speedup for >1000 nodes. Single flag change. |
 | **P9** | Damping for dynamic analysis | 3.7 | Medium (when dynamic is added) | Rayleigh coefficients from target ζ at two frequencies. Not needed until `nonlinear_dynamic` mode is implemented. |
-| **P0-dyn** | Nonlinear dynamic analysis | — | Large (new module) | Ground-motion input, Newmark/HHT integrator, time-history output. The largest missing capability. |
-| **P1-dyn** | Ground-motion `FUNCTION` tables | §7 | Medium (parser) | Parse `FUNCTION - TIME HISTORY` tables from .s2k for embedded accelerograms. |
+| **P0-dyn** | Tcl export for nonlinear RC | — | Medium | Nonlinear RC analysis cannot run in OpenSeesPy. ``export_model_to_tcl()`` exists but needs to emit fiber sections, ``Concrete01/02``, ``Steel02``, and analysis commands. |
+| **P1-dyn** | Nonlinear dynamic analysis | — | Large | Ground-motion input, Newmark/HHT integrator, time-history output. Requires P0-dyn first. |
 | **P2-dyn** | Validation suite | 3.6 | Ongoing | Collect PEER reports, OpenSees verification suite, Perform3D benchmarks as regression tests. |
 
 ### Damping-specific note
 
 Damping is deliberately **not a priority** until nonlinear dynamic
-analysis (P0-dyn) is started, because:
+analysis (P0-dyn or P1-dyn) is started, because:
 - Static and pushover analyses are unaffected by damping.
 - Modal analysis computes undamped eigenvalues — damping is irrelevant.
 - Response spectrum analysis handles damping parametrically via CQC
@@ -685,9 +725,12 @@ def generate_report(config_path: str):
         if analysis_name == "static":
             results = run_linear_cases(builder, cfg)
             store_static_results(store, results)
-            if cfg["storey_response"]["enabled"]:
-                sr = compute_linear_storey_responses(builder, stories, ...)
-                store.write_dataframe("static", "storey_response", sr)
+            if cfg["storey_response"]["enabled"] and results:
+                for case_name, case_data in results.items():
+                    sr = compute_linear_storey_responses(
+                        builder, stories, case_data, ...)
+                    store.write_dataframe(
+                        f"static/{case_name}", "storey_response", sr)
 
         elif analysis_name == "modal":
             modal = builder.run_modal_analysis(
