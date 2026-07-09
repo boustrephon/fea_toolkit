@@ -11,6 +11,7 @@ See also :mod:`fea_toolkit.plotting.viz` for PyVista 3D views.
 from typing import Dict, List, Optional, Any
 import math
 import numpy as np
+import pandas as pd
 
 
 def plot_pushover_curves(
@@ -58,7 +59,11 @@ def plot_pushover_curves(
 
 
 def plot_modal_participation(df_modal: Any) -> Optional[Any]:
-    """Side-by-side bar chart of mass participation by mode, coloured by DOF.
+    """Two-panel bar chart of mass participation by mode — translational and rotational DOFs.
+
+    Each bar shows the mode's contribution (solid) with the cumulative sum
+    (hatched, same colour) stacked on top.  A dashed line marks the 90 %
+    threshold.
 
     Parameters
     ----------
@@ -77,23 +82,63 @@ def plot_modal_participation(df_modal: Any) -> Optional[Any]:
         return None
 
     data = df_modal[df_modal["Mode"] != "<strong>SUM</strong>"].copy()
-    dofs = ["Mx (%)", "My (%)", "Mz (%)", "Rx (%)", "Ry (%)", "Rz (%)"]
-    colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+    # Convert string percentages back to float
+    for col in data.columns:
+        if col not in ("Mode", "Period (s)"):
+            data[col] = pd.to_numeric(data[col], errors="coerce").fillna(0)
+
     n_modes = len(data)
-    fig, ax = plt.subplots(figsize=(max(8, n_modes * 0.6), 5))
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1, figsize=(max(8, n_modes * 0.55), 6),
+        sharex=True,
+    )
     x = np.arange(n_modes)
-    width = 0.12
-    for i, dof in enumerate(dofs):
-        vals = data[dof].values if dof in data.columns else [0] * n_modes
-        ax.bar(x + i * width, vals, width, label=dof, color=colors[i])
-    ax.set_xlabel("Mode")
-    ax.set_ylabel("Mass participation (%)")
-    ax.set_title("Modal Mass Participation by Degree of Freedom")
-    ax.set_xticks(x + width * 2.5)
-    ax.set_xticklabels([str(m) for m in data["Mode"]])
-    ax.set_ylim(0, 105)
-    ax.legend(fontsize=7, ncol=2)
-    ax.grid(True, alpha=0.3, axis="y")
+    w = 0.22
+
+    def _plot_panel(ax, dofs, colors, title, y_lim):
+        for i, dof in enumerate(dofs):
+            vals = data[dof].values if dof in data.columns else np.zeros(n_modes)
+            cum = np.cumsum(vals)
+            # Bottom solid bar: the mode contribution itself
+            ax.bar(x + (i - 1) * w, vals, w,
+                   label=dof, color=colors[i], zorder=3)
+            # Top shaded bar: cumulative (excluding current mode) → total = cum
+            ax.bar(x + (i - 1) * w, cum - vals, w,
+                   bottom=vals,
+                   color=colors[i], alpha=0.10, zorder=3)
+        ax.axhline(90, color="grey", linewidth=0.8, linestyle="--", zorder=2)
+        ax.text(x[-1] + 1, 91, "90 %", fontsize=7, color="grey", va="bottom")
+        ax.set_ylabel("Mass participation (%)")
+        ax.set_title(title, fontsize=10)
+        ax.set_ylim(0, y_lim)
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3, axis="y")
+
+    # ── Top: translational DOFs ──
+    _plot_panel(
+        ax1,
+        ["Mx (%)", "My (%)", "Mz (%)"],
+        ["#1f77b4", "#ff7f0e", "#2ca02c"],
+        "Translational DOFs",
+        105,
+    )
+
+    # ── Bottom: rotational DOFs ──
+    rot_dofs = ["Rx (%)", "Ry (%)", "Rz (%)"]
+    rot_max = data[rot_dofs].values.max()
+    _plot_panel(
+        ax2,
+        rot_dofs,
+        ["#d62728", "#9467bd", "#8c564b"],
+        "Rotational DOFs",
+        max(105, rot_max * 1.2),
+    )
+    ax2.set_xlabel("Mode")
+    ax2.set_xticks(x)
+    ax2.set_xticklabels([str(m) for m in data["Mode"]])
+
+    fig.suptitle("Modal Mass Participation by Degree of Freedom",
+                 fontsize=11, fontweight="bold")
     fig.tight_layout()
     return fig
 
@@ -150,8 +195,10 @@ def plot_rs_modal_analysis(modal_props: dict,
     sx = _pad(modal_base_shear_x, n)
     sy = _pad(modal_base_shear_y, n)
 
-    ax2.bar(x - w / 2, sx, w, label="RS-X", color="#1f77b4")
-    ax2.bar(x + w / 2, sy, w, label="RS-Y", color="#ff7f0e")
+    ax2.bar(x - w, sx, w, label="RS-X", color="#1f77b4")
+    ax2.bar(x,     sy, w, label="RS-Y", color="#ff7f0e")
+    # Empty placeholder bar at the RZ position so bars align with the top panel
+    ax2.bar(x + w, [0] * n, w, label="RS-RZ", color="none", edgecolor="none")
     ax2.set_xlabel("Mode")
     ax2.set_ylabel("Base shear (kN)")
     ax2.set_title("Modal Base Shear \u2014 Response Spectrum Analysis")
@@ -228,9 +275,25 @@ def plot_csm_4panel(
         S_d = np.array(adrs["S_d"])
         S_a = np.array(adrs["S_a"])
 
+        # Determine bounds — if yield exceeds the visible range, report NA
+        max_Sd = max(S_d.max(), Sd_plot.max())
+        max_Sa = max(S_a.max(), Sa_plot.max())
+        yield_ok = (
+            pp.get("S_dy") and pp["S_dy"] > 0
+            and pp["S_dy"] <= max_Sd and pp["S_ay"] <= max_Sa
+        )
+        yield_label = (
+            f"Yield ({pp['S_dy']:.3f}, {pp['S_ay']:.1f})"
+            if yield_ok else "Yield (NA, NA)"
+        )
+        pp_label = (
+            f"Perf. Pt. ({pp['S_dp']:.3f}, {pp['S_ap']:.1f})"
+            if pp["converged"] and pp["S_dp"] > 0 else ""
+        )
+
         title_text = (
-            f"{label}   \u03bc={pp['mu']:.2f}  "
-            f"$S_{{dp}}$=({pp['S_dp']:.3f}m, {pp['S_ap']:.1f}m/s\u00b2)"
+            f"{label}   μ={pp['mu']:.2f}  "
+            f"$S_{{dp}}$=({pp['S_dp']:.3f}m, {pp['S_ap']:.1f}m/s²)"
         )
 
         ax.plot(S_d, S_a, "-o", markersize=2.5, linewidth=1.5,
@@ -253,7 +316,7 @@ def plot_csm_4panel(
 
         if pp["converged"] and pp["S_dp"] > 0:
             ax.plot(pp["S_dp"], pp["S_ap"], "D", color="tab:green",
-                    markersize=10, zorder=6)
+                    markersize=10, zorder=6, label=pp_label)
             ax.axvline(pp["S_dp"], color="tab:green", linewidth=0.8,
                        linestyle="--", alpha=0.5)
             ax.axhline(pp["S_ap"], color="tab:green", linewidth=0.8,
@@ -261,8 +324,7 @@ def plot_csm_4panel(
 
         if pp.get("S_dy") and pp["S_dy"] > 0:
             ax.plot(pp["S_dy"], pp["S_ay"], "s", color="tab:orange",
-                    markersize=7, zorder=5,
-                    label=f"Yield ({pp['S_dy']:.3f}, {pp['S_ay']:.1f})")
+                    markersize=7, zorder=5, label=yield_label)
 
         ax.set_title(title_text, fontsize=10, fontweight="bold")
         ax.set_xlabel("S$_d$ (m)", fontsize=9)
@@ -285,4 +347,242 @@ def plot_csm_4panel(
         p = Path(out_dir) / "csm_4panel.png"
         fig.savefig(p, dpi=200, bbox_inches="tight")
 
+    return fig
+
+
+# ========================================================================
+# Storey force and displacement profile plots
+# ========================================================================
+
+def plot_storey_forces(
+    df_shear: pd.DataFrame,
+    df_moment: pd.DataFrame,
+    *,
+    force_unit: str = "kN",
+    moment_unit: str = "kN·m",
+    figsize: tuple = (8, 6),
+    n_points: int = 100,
+) -> Optional[Any]:
+    """Side-by-side storey shear and moment profiles (smooth curves).
+
+    **Principle**
+    The base shear *V*:sub:`base` and base moment *M*:sub:`base` (taken
+    from the first row of each DataFrame, assumed to be the **Base** row)
+    are used to reconstruct an **equivalent trapezoidal distributed load**
+    :math:`w(z) = w_0 + (w_1 - w_0)\\,z/H` that satisfies:
+
+    .. math::
+
+        V_{\\mathrm{base}} = \\frac{w_0 + w_1}{2}\\,H \\qquad
+        M_{\\mathrm{base}} = \\frac{2w_1 + w_0}{6}\\,H^{2}
+
+    From :math:`w_0, w_1` the shear and moment at any elevation
+    :math:`z` above the base are obtained by closed-form integration:
+
+    .. math::
+
+        V(z) = V_{\\mathrm{base}} - w_0 z - \\frac{w_1-w_0}{2H}\\,z^{2} \\\\
+        M(z) = M_{\\mathrm{base}} - V_{\\mathrm{base}} z
+               + \\frac{w_0}{2}\\,z^{2}
+               + \\frac{w_1-w_0}{6H}\\,z^{3}
+
+    The curves are evaluated at *n_points* elevations and plotted as
+    smooth continuous lines, automatically satisfying
+    :math:`V = dM/dz`.
+
+    **Shortcomings**
+
+    * The load is assumed to vary **linearly** with height (trapezoidal).
+      Actual wind or seismic load distributions may be more complex
+      (e.g. power-law wind profiles, multi-modal seismic distributions).
+    * The reconstruction uses only **two integral quantities** (*V*:sub:`base`,
+      *M*:sub:`base`).  Any number of distributed-load shapes can produce
+      the same base shear and moment — the trapezoidal shape is a
+      convenient choice, not a unique solution.
+    * Local force concentrations (e.g. point loads, stiff element
+      connections) are smeared into the smooth distribution.
+    * The plotted curves **do not** reflect element-level force
+      variations — they are an *equivalent* smeared representation.
+
+    **Contraindications**
+
+    * **Do not use** for gravity (vertical) load cases — the trapezoidal
+      model assumes horizontal loading only.
+    * **Do not use** when the storey-level DataFrames lack a Base row
+      (first row with the base reaction value) and a Roof row (last row
+      with the roof value).
+    * **Do not use** for drift / displacement profiles — those are
+      computed directly from nodal displacements and have nothing to do
+      with the equivalent load distribution.
+    * For element-level force verification use
+      :func:`~fea_toolkit.opensees.builder.OpenSeesBuilder.extract_static_element_forces`
+      together with :func:`~fea_toolkit.model.storey_response.storey_shears`
+      (Option B / nodal summation approach).
+
+    Parameters
+    ----------
+    df_shear : pd.DataFrame
+        Columns ``Storey``, ``Elevation``, plus one column per load case.
+        First row must be the **Base** row (with base shear value).
+    df_moment : pd.DataFrame
+        Same structure for moment.
+    force_unit, moment_unit : str
+        Axis labels.
+    figsize : tuple
+        Figure dimensions.
+    n_points : int
+        Number of evaluation points along the height.
+
+    Returns
+    -------
+    matplotlib.figure.Figure or None
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, sharey=True)
+
+    skip_cols = {"Storey", "Elevation", "Elevation (m)"}
+    num_cols = [c for c in df_shear.columns if c not in skip_cols]
+    mom_cols = [c for c in df_moment.columns if c not in skip_cols]
+    # Only use columns that exist in both (matching cases)
+    common_cols = [c for c in num_cols if c in mom_cols]
+
+    # Resolve elevation column
+    elev_col_s = ("Elevation" if "Elevation" in df_shear.columns
+                  else [c for c in df_shear.columns if "Elevation" in c][0])
+    elev = df_shear[elev_col_s].values
+    base_elev = elev.min()
+    roof_elev = elev.max()
+    H = roof_elev - base_elev
+
+    def _trapezoidal_curves(V_base, M_base):
+        """Return (z_pts, V_pts, M_pts) for smooth V(z), M(z) curves
+        reconstructed from the equivalent trapezoidal load.
+        """
+        if abs(V_base) < 1e-6:
+            return np.array([]), np.array([]), np.array([])
+        # Solve for trapezoidal load coefficients w0 (base), w1 (roof)
+        w_sum = 2.0 * V_base / H
+        w1_plus_w0 = 6.0 * M_base / H**2 if abs(M_base) > 1e-6 else w_sum
+        w1 = w1_plus_w0 - w_sum
+        w0 = w_sum - w1
+        # Evaluate at n_points
+        z_pts = np.linspace(0, H, n_points)
+        V_pts = V_base - w0*z_pts - (w1 - w0) * z_pts**2 / (2.0 * H)
+        M_pts = (M_base - V_base*z_pts + w0*z_pts**2/2.0
+                 + (w1 - w0) * z_pts**3 / (6.0 * H))
+        elev_pts = base_elev + z_pts
+        return elev_pts, V_pts, M_pts
+
+    for col in common_cols:
+        V_base = abs(df_shear[col].values[0])
+        M_base = abs(df_moment[col].values[0])
+        z_pts, V_pts, M_pts = _trapezoidal_curves(V_base, M_base)
+        if len(z_pts) == 0:
+            continue
+        ax1.plot(V_pts, z_pts, label=col)
+        ax2.plot(M_pts, z_pts, label=col)
+
+    ax1.set_xlabel(f"Storey shear ({force_unit})")
+    ax1.set_ylabel("Elevation")
+    ax1.set_title("Storey Shear")
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(fontsize=7)
+
+    ax2.set_xlabel(f"Storey moment ({moment_unit})")
+    ax2.set_title("Storey Moment")
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(fontsize=7)
+
+    fig.suptitle("Storey Forces & Moments", fontsize=11, fontweight="bold")
+    fig.tight_layout()
+    return fig
+
+
+def plot_storey_displacements(
+    df_disp: pd.DataFrame,
+    df_drift: pd.DataFrame,
+    *,
+    disp_unit: str = "mm",
+    drift_unit: str = "mm/m",
+    figsize: tuple = (8, 6),
+) -> Optional[Any]:
+    """Side-by-side storey displacement and drift profiles.
+
+    Displacement and drift values are absolute.  Elevation on the y-axis,
+    displacement/drift on the x-axis.
+
+    Parameters
+    ----------
+    df_disp : pd.DataFrame
+        Columns ``Storey``, ``Elevation``, ``Peak_disp`` (and optionally
+        ``Ux``, ``Uy``).  Peak displacement is the worst-node resultant.
+    df_drift : pd.DataFrame
+        Columns ``Storey``, ``Elevation``, ``Drift_peak`` (and optionally
+        ``Drift_X``, ``Drift_Y``).
+    disp_unit, drift_unit : str
+        Axis labels.
+    figsize : tuple
+        Figure dimensions.
+
+    Returns
+    -------
+    matplotlib.figure.Figure or None
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, sharey=True)
+
+    # Resolve elevation column (could be "Elevation" or "Elevation (m)")
+    elev_col_disp = "Elevation" if "Elevation" in df_disp.columns else (
+        [c for c in df_disp.columns if "Elevation" in c][0]
+        if any("Elevation" in c for c in df_disp.columns) else None)
+    elev_col_drift = "Elevation" if "Elevation" in df_drift.columns else (
+        [c for c in df_drift.columns if "Elevation" in c][0]
+        if any("Elevation" in c for c in df_drift.columns) else None)
+
+    if elev_col_disp is None or elev_col_drift is None:
+        return None
+
+    # Unit conversion: raw data is in m, display in disp_unit / drift_unit
+    disp_scale = 1000.0 if disp_unit == "mm" else 1.0
+    drift_scale = 1000.0 if drift_unit == "mm/m" else 1.0
+
+    disp_cols = [c for c in df_disp.columns if c not in ("Storey", "Elevation", "Elevation (m)")]
+    drift_cols = [c for c in df_drift.columns if c not in ("Storey", "Elevation", "Elevation (m)")]
+
+    elev_disp = df_disp[elev_col_disp].values
+    elev_drift = df_drift[elev_col_drift].values
+    base_elev = min(elev_disp.min(), elev_drift.min())
+
+    for col in disp_cols:
+        vals = df_disp[col].values * disp_scale
+        # Prepend zero at base elevation for a continuous profile
+        x_plot = np.concatenate([[0.0], vals])
+        y_plot = np.concatenate([[base_elev], elev_disp])
+        ax1.plot(x_plot, y_plot, "o-", label=col)
+    ax1.set_xlabel(f"Displacement ({disp_unit})")
+    ax1.set_ylabel("Elevation")
+    ax1.set_title("Storey Displacement")
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(fontsize=7)
+
+    for col in drift_cols:
+        vals = df_drift[col].values * drift_scale
+        x_plot = np.concatenate([[0.0], vals])
+        y_plot = np.concatenate([[base_elev], elev_drift])
+        ax2.plot(x_plot, y_plot, "s-", label=col)
+    ax2.set_xlabel(f"Drift ({drift_unit})")
+    ax2.set_title("Storey Drift")
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(fontsize=7)
+
+    fig.suptitle("Storey Displacement & Drift", fontsize=11, fontweight="bold")
+    fig.tight_layout()
     return fig
