@@ -24,9 +24,9 @@ except ImportError:
     OPSTOOL_AVAILABLE = False
 
 from ..model.sap_data import SAPModelData
-from ..model.geometry import get_SAP_vecxz, global_to_local_distributed_load, rotate_about_axis
+from ..model.geometry import get_SAP_vecxz, global_to_local_distributed_load
 from ..model.sap_data import Section, FrameElement, FrameDistributedLoad, Node
-from ..model.sap_data import GravityLoad, AreaGravityLoad, ShellSection, Restraint
+from ..model.sap_data import ShellSection, Restraint
 from ..model.geometry import convert_area_loads_to_edge_loads
 from ..model.selection import Selection
 
@@ -922,8 +922,26 @@ class OpenSeesBuilder:
         if model_data.sections:
             lines.append("")
             lines.append("# ── Frame sections ──")
+
+            # Import section types for RC detection
+            from ..model.sap_data import (
+                ConcreteRectangularSection,
+                ConcreteCircularSection,
+                RectangularSection,
+            )
+            fiber_sec_names: set = set()
+            if config and config.get("create_fiber_sections", False):
+                # Collect names of sections that have fiber patches
+                for sec_name, sec in model_data.sections.items():
+                    if isinstance(sec, (ConcreteRectangularSection,
+                                        ConcreteCircularSection,
+                                        RectangularSection)):
+                        fiber_sec_names.add(sec_name)
             for sec_name, sec in model_data.sections.items():
                 tag = _sec_tag[sec_name]
+                # Skip Elastic if this section will be emitted as fiber
+                if sec_name in fiber_sec_names:
+                    continue
                 E_mod = 2.0e11
                 mat = model_data.materials.get(sec.material)
                 if mat and mat.E_mod and mat.E_mod > 0:
@@ -940,7 +958,6 @@ class OpenSeesBuilder:
         if model_data.frame_elements:
             lines.append("")
             lines.append("# ── Frame elements ──")
-            transf_added = False
             for eid, elem in model_data.frame_elements.items():
                 if getattr(elem, "inactive", False):
                     continue
@@ -963,19 +980,26 @@ class OpenSeesBuilder:
                 transf_type = "Linear"
                 if config:
                     transf_type = config.get("geom_transf_type", "Linear")
-                if not transf_added:
+                lines.append(
+                    f"geomTransf {transf_type} {eid} {vecxz}"
+                )
+                sec_tag = _sec_tag.get(sec_name, sec_name)
+                if config and config.get("create_fiber_sections", False) and sec_name in fiber_sec_names:
+                    # Nonlinear beam-column with fibre section
+                    int_tag = 10000 + elem.elem_tag
+                    n_int_pts = config.get("num_int_pts", 5)
                     lines.append(
-                        f"geomTransf {transf_type} {eid} {vecxz}"
+                        f"beamIntegration Lobatto {int_tag} {" ".join(str(sec_tag) for _ in range(n_int_pts))}"
                     )
-                    transf_added = True
+                    lines.append(
+                        f"element forceBeamColumn {elem.elem_tag} "
+                        f"{ni.node_tag} {nj.node_tag} {eid} {int_tag}"
+                    )
                 else:
                     lines.append(
-                        f"geomTransf {transf_type} {eid} {vecxz}"
+                        f"element elasticBeamColumn {elem.elem_tag} "
+                        f"{ni.node_tag} {nj.node_tag} {sec_tag} {eid}"
                     )
-                lines.append(
-                    f"element elasticBeamColumn {elem.elem_tag} "
-                    f"{ni.node_tag} {nj.node_tag} {_sec_tag.get(sec_name, sec_name)} {eid}"
-                )
 
         # Area elements (shells) — unique shell sections only
         if model_data.area_elements:
@@ -1205,11 +1229,12 @@ class OpenSeesBuilder:
                 )
 
             # ── Fiber section ──
-            lines.append(f"section Fiber {sec_tag} -GJ {sec.J:g}")
+            lines.append(f"section Fiber {sec_tag} -GJ {sec.J:g} {{")
             try:
                 entries = sec.to_fiber_patches(mat_tag=fiber_mat_tag)
             except NotImplementedError:
-                # No fiber patches — skip this section
+                # No fiber patches — skip this section, remove the header
+                lines.pop()
                 continue
 
             for entry in entries:
@@ -1237,6 +1262,7 @@ class OpenSeesBuilder:
                 elif entry[0] == "circ_layer":
                     parts = [str(x) for x in entry[1:]]
                     lines.append(f"  layer circ {' '.join(parts)}")
+            lines.append("}")
 
         if len(lines) > 3:
             return "\n".join(lines) + "\n"
@@ -3909,15 +3935,16 @@ class OpenSeesBuilder:
                 if reactions:
                     results['nodal_reactions'] = reactions
                     # Compute summed reactions for equilibrium check.
-                    # Overturning moments are computed about the centroid
-                    # of the model bounding box (gives intuitive moments
-                    # for both wind and seismic — the building centre).
+                    # Overturning moments are computed about the base
+                    # elevation (min z) at the plan centroid — the
+                    # conventional reference for foundation-level
+                    # overturning in structural engineering.
                     xs = [nd.x for nd in self.model.nodes.values()]
                     ys = [nd.y for nd in self.model.nodes.values()]
                     zs = [nd.z for nd in self.model.nodes.values()]
                     cx = (min(xs) + max(xs)) * 0.5
                     cy = (min(ys) + max(ys)) * 0.5
-                    cz = (min(zs) + max(zs)) * 0.5
+                    z_base = min(zs)
 
                     summed = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0,
                               'mx': 0.0, 'my': 0.0, 'mz': 0.0}
@@ -3939,10 +3966,11 @@ class OpenSeesBuilder:
                         summed['my'] += my
                         summed['mz'] += mz
                         # Overturning moment from force × lever‑arm
-                        # about the base geometric centre
+                        # about the base elevation (z_base) at the
+                        # plan centroid (cx, cy)
                         dx = node.x - cx
                         dy = node.y - cy
-                        dz = node.z - cz
+                        dz = node.z - z_base
                         summed['mx'] += fz * dy - fy * dz
                         summed['my'] += fx * dz - fz * dx
                         summed['mz'] += fy * dx - fx * dy
@@ -4427,7 +4455,6 @@ class OpenSeesBuilder:
 
         # Build JSON metadata string for self‑describing NPZ
         import datetime
-        import json
         elem_type = self.config.get("element_type", "elasticBeamColumn")
         metadata = {
             "created": datetime.datetime.now().isoformat(),
