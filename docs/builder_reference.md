@@ -231,7 +231,7 @@ to be split.
 node also receives a unique numeric ``node_tag`` for OpenSees.  The
 node‑reuse check searches all existing nodes by coordinate proximity
 (within tolerance), not just ``split_n_*`` IDs — if an intersection
-coincides with an existing joint node, that joint node's ID is tracked**
+coincides with an existing joint node, that joint node's ID is tracked
 for the splitting pass rather than creating a duplicate.  Both elements
 then reference the same ID regardless of whether it was newly created or
 reused.
@@ -257,3 +257,171 @@ reused.
   at ``t=0.5`` and a storey node at ``t=0.5000001``) are merged into a single
   split point.  The deduplication uses ``abs(t_i - t_{i-1}) <= tol``.  Only
   the first node at each ``t`` is kept.
+
+---
+
+## Tcl Export for Nonlinear Analysis
+
+### Background
+
+Nonlinear RC analysis (fiber sections with ``Concrete01/02``,
+``Steel02``, or ``forceBeamColumn`` with ``HingeRadau``) **does not
+work in OpenSeesPy** builds.  Any analysis requiring nonlinear materials
+must be exported to Tcl and run via the standalone OpenSees bundled with
+Xara (``tclsh8.6``).
+
+The builder provides two export paths:
+
+| Path | Method | How it works |
+|---|---|---|
+| Recording | ``RecordingOpenSees`` proxy | Records all ``ops.*`` calls during a Python build, saves as Tcl. Only for **elastic** builds (nonlinear sections can't be created in Python). |
+| Direct | ``export_model_to_tcl()`` | Translates ``SAPModelData`` directly to Tcl commands, skipping the Python build. Can inject nonlinear materials/sections via ``config``. |
+
+### Direct Tcl export (recommended)
+
+```python
+from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+# Step 1: Define the nonlinear config
+config = {
+    "create_fiber_sections": True,        # emit Concrete01/Steel02 + fiber sections
+    "geom_transf_type": "PDelta",         # or "Corotational" for braces
+}
+
+# Step 2: Generate analysis commands (tcl_suffix)
+gravity_loads = {node_tag: (0, -weight, 0) for node_tag, weight in ...}
+lateral_loads = {node_tag: (mode_force_x, 0, 0) for node_tag, ...}
+
+tcl_suffix = OpenSeesBuilder.pushover_tcl(
+    control_node=top_node_tag,
+    dof=1,                                 # 1=X, 2=Y
+    max_disp=0.15,
+    lateral_loads=lateral_loads,
+    gravity_loads=gravity_loads,
+    adaptive=True,                         # auto-fallback algorithm chain
+)
+
+# Step 3: Export complete Tcl file
+OpenSeesBuilder.export_model_to_tcl(
+    md, "rc_pushover.tcl",
+    config=config,
+    tcl_suffix=tcl_suffix,
+)
+
+# Step 4: Run via Xara's standalone tclsh
+from fea_toolkit.opensees.recorder import XaraTclRunner
+runner = XaraTclRunner()
+ret, output = runner.run("rc_pushover.tcl")
+```
+
+### What the Tcl export generates
+
+With ``create_fiber_sections=True``, ``export_model_to_tcl()``
+automatically appends:
+
+1. **Nonlinear materials** — ``Concrete01`` (unconfined cover),
+   ``Concrete01`` (confined core via ``eFc`` or 1.3×Fc), ``Steel02``
+   (rebar), or ``Steel01`` (steel fiber sections).
+2. **Fiber sections** — ``section Fiber`` with ``patch rect/circ/quad``
+   and ``layer straight/circ`` commands from each section's
+   ``to_fiber_patches()`` method, wrapped in brace-delimited blocks.
+3. **Config-driven ``geomTransf``** — ``Linear``, ``PDelta``, or
+   ``Corotational`` as specified in the config.
+
+> **⚠️ Current limitations**
+>
+> - **Section tag collision** — The ``section Elastic`` block is still
+>   emitted before the nonlinear materials block.  As of the current
+>   implementation, ``export_model_to_tcl()`` skips the Elastic section
+>   for RC fibre-capable types when ``create_fiber_sections=True``, but
+>   mixed-type section groups (e.g. steel beams using Elastic + RC
+>   columns using fibre) share the same tag range.  Verify tags when
+>   combining elastic and fibre sections in the same model.
+>
+> - **Element type** — ``export_model_to_tcl()`` emits
+>   ``forceBeamColumn`` elements with ``beamIntegration Lobatto`` for
+>   sections that have fibre patches, but only when
+>   ``create_fiber_sections=True``.  All other elements still use
+>   ``elasticBeamColumn``.  This mixed formulation is suitable for
+>   pushover analysis where only RC members are expected to yield.
+>
+> These limitations are resolved incrementally in the builder code;
+> check the ``_tcl_materials_and_sections()`` and the frame-element
+> emission section of ``export_model_to_tcl()`` for the current
+> behaviour before relying on the full nonlinear workflow.
+
+### Pushover analysis Tcl
+
+The ``pushover_tcl()`` static method returns a string suitable for
+``tcl_suffix``:
+
+```python
+tcl_suffix = OpenSeesBuilder.pushover_tcl(
+    control_node=42,        # node tag for displacement control
+    dof=1,                  # X-direction
+    max_disp=0.15,          # target displacement (m)
+    num_steps=100,
+    lateral_loads={
+        5: (10000, 0, 0),   # node_tag: (Fx, Fy, Fz)
+        6: (20000, 0, 0),
+    },
+    gravity_loads={          # optional — applied first, then locked
+        5: (0, -50000, 0),
+    },
+    adaptive=True,           # Newton → KrylovNewton → ModifiedNewton fallback
+)
+```
+
+The generated Tcl includes:
+
+- **Gravity step** (if ``gravity_loads`` provided) — ramped over 10
+  sub-steps, then ``loadConst -time 0.0`` to lock.
+- **Lateral pushover** — ``DisplacementControl`` integrator with
+  ``numberer RCM``, auto-fallback algorithm chain when not converging.
+
+### Confinement from stirrup data
+
+The ``model/confinement.py`` module implements the **Mander et al.
+(1988)** model to compute confined concrete properties from transverse
+reinforcement:
+
+```python
+from fea_toolkit.model.confinement import ConfinementData, mander_confined
+
+data = ConfinementData(
+    fc=32e6,                    # unconfined strength (Pa)
+    tie_diameter=0.012,         # stirrup bar diameter (m)
+    tie_spacing=0.150,          # centre-to-centre spacing (m)
+    tie_fy=500e6,               # stirrup yield stress (Pa)
+    overall_b=0.600,            # section width (m)
+    overall_h=0.600,            # section depth (m)
+    cover=0.040,                # clear cover (m)
+    long_diameter=0.032,        # longitudinal bar diameter (m)
+    long_count_x=3,             # bars along x
+    long_count_y=3,             # bars along y
+    tie_config="cross_tie",     # "standard" | "cross_tie" | "spiral"
+)
+result = mander_confined(data)
+
+print(f"f'cc = {result.fcc/1e6:.1f} MPa")
+print(f"εcc = {result.ecc:.4f}")
+print(f"ecu = {result.ecu:.4f}")
+print(f"ke  = {result.ke:.3f}")     # effective confinement coefficient
+print(f"ρs  = {result.rho_s:.4f}")  # volumetric ratio
+```
+
+The result can be used to set ``Material.eFc`` and ``Material.extra['SCap']``
+on the concrete material before export, or to verify the confinement
+parameters read from SAP2000.
+
+### Important notes
+
+- **Nonlinear shell sections** are not yet supported in the Tcl export.
+  Slabs and walls remain elastic (``ElasticMembranePlateSection``).
+- **Modal pushover pattern**: Run modal analysis in Python (elastic),
+  extract eigenvectors, compute ``load = mass × eigenvector``, and pass
+  as ``lateral_loads`` to ``pushover_tcl()``.  Modal analysis is
+  unaffected by the nonlinear material issue since it uses initial
+  stiffness.
+- **`numberer RCM`** is used in ``pushover_tcl()`` for better solver
+  performance on large models.
