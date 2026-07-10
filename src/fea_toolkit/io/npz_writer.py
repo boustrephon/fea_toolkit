@@ -31,13 +31,16 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
 
     # Nodes
     node_tags = []
+    node_sap_ids = []
     node_x, node_y, node_z = [], [], []
     for nid, nd in md.nodes.items():
         node_tags.append(nd.node_tag)
+        node_sap_ids.append(str(nid))
         node_x.append(nd.x)
         node_y.append(nd.y)
         node_z.append(nd.z)
     arrays["node_tag"] = np.array(node_tags, dtype=int)
+    arrays["node_sap_id"] = np.array(node_sap_ids, dtype=str)
     arrays["node_x"] = np.array(node_x, dtype=float)
     arrays["node_y"] = np.array(node_y, dtype=float)
     arrays["node_z"] = np.array(node_z, dtype=float)
