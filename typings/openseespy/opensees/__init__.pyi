@@ -264,12 +264,17 @@ def reactions() -> None:
     """
     ...
 
-def modalProperties(*args: str) -> dict:
+def modalProperties(*args: str) -> Optional[dict]:
     """Return modal properties (periods, frequencies, participation factors).
 
-    Usage::
+    Only returns a dict when ``'-return'`` is passed.  Without it,
+    properties are printed to stdout and ``None`` is returned::
 
+        # Returns dict
         props = ops.modalProperties('-return', '-unorm')
+
+        # Prints to stdout, returns None
+        ops.modalProperties('-unorm')
 
     Args:
         *args: Options such as ``'-return'`` (return dict instead of printing),
@@ -277,7 +282,7 @@ def modalProperties(*args: str) -> dict:
     Returns:
         Dictionary with keys like ``eigenFrequency``, ``eigenPeriod``,
         ``partiFactorMX``, ``partiMassMX``, ``partiMassRatiosMX``,
-        ``totalFreeMass``, etc.
+        ``totalFreeMass``, etc., or ``None`` if ``-return`` is not passed.
     """
     ...
 
@@ -499,6 +504,9 @@ def beamIntegration(integration_type: str, tag: int, *args: Any) -> None:
         beamIntegration('Lobatto', tag, sec_tag_1, sec_tag_2, ..., sec_tag_N)
 
         # HingeRadau (plastic hinge at ends + elastic interior)
+        beamIntegration('HingeRadau', tag, sec_tag_i, lp_i, sec_tag_j, lp_j,
+                        sec_tag_e)
+        # With hinge-length type flag:
         beamIntegration('HingeRadau', tag, sec_tag_i, lp_i, sec_tag_j, lp_j,
                         sec_tag_e, '-lLengthTag', type)
 
