@@ -2578,7 +2578,7 @@ class OpenSeesBuilder:
         :meth:`_apply_penalty_edge_constraints` based on
         ``self.config['constraint_method']``.
 
-        * ``"spring"`` (default) — creates ``zeroLength`` spring elements.
+        * ``"spring"`` (default) — creates ``twoNodeLink`` spring elements.
           Works with every solver, constraint handler, and Tcl export.
           The connection is flexible (controlled by *penalty_stiffness*).
 
@@ -2765,7 +2765,7 @@ class OpenSeesBuilder:
 
         This method is the **modal‑safe** alternative to
         :meth:`apply_edge_constraints`.  It creates physical
-        ``zeroLength`` elements with ``Elastic`` uniaxial materials,
+        ``twoNodeLink`` elements with ``Elastic`` uniaxial materials,
         which contribute directly to the global stiffness matrix **K**
         and are therefore visible to ``ops.eigen()`` during modal
         analysis.  By contrast, :meth:`apply_edge_constraints` uses
@@ -2803,7 +2803,7 @@ class OpenSeesBuilder:
         Returns
         -------
         int
-            Number of zeroLength elements created (2 per slave‑edge pair).
+            Number of twoNodeLink elements created (2 per slave‑edge pair).
         """
         # ── Resolve master edges ──────────────────────────────────
         edge_set: set = set()
@@ -2905,7 +2905,7 @@ class OpenSeesBuilder:
                         continue
                     k = penalty_stiffness * weight
                     ops.uniaxialMaterial('Elastic', mat_tag, k)
-                    ops.element('zeroLength', ele_tag, int(s_id), int(master),
+                    ops.element('twoNodeLink', ele_tag, int(s_id), int(master),
                                 '-mat', mat_tag, mat_tag, mat_tag,
                                 mat_tag, mat_tag, mat_tag,
                                 '-dir', 1, 2, 3, 4, 5, 6)

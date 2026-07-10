@@ -137,7 +137,19 @@ def plot_modal_participation(df_modal: Any) -> Optional[Any]:
     )
     ax2.set_xlabel("Mode")
     ax2.set_xticks(x)
-    ax2.set_xticklabels([str(m) for m in data["Mode"]])
+
+    # X-axis labels: mode number above, period below
+    if "Period (s)" in data.columns:
+        periods = pd.to_numeric(data["Period (s)"], errors="coerce")
+        labels = []
+        for m, p in zip(data["Mode"], periods):
+            if pd.notna(p):
+                labels.append(f"{m}\nT={p:.2f}s")
+            else:
+                labels.append(str(m))
+    else:
+        labels = [str(m) for m in data["Mode"]]
+    ax2.set_xticklabels(labels, fontsize=7)
 
     fig.suptitle("Modal Mass Participation by Degree of Freedom",
                  fontsize=11, fontweight="bold")
@@ -147,7 +159,8 @@ def plot_modal_participation(df_modal: Any) -> Optional[Any]:
 
 def plot_rs_modal_analysis(modal_props: dict,
                            modal_base_shear_x: list,
-                           modal_base_shear_y: list) -> Optional[Any]:
+                           modal_base_shear_y: list,
+                           periods: Optional[List[float]] = None) -> Optional[Any]:
     """Two-panel figure: mass participation (top) + modal base shear (bottom).
 
     Parameters
@@ -158,6 +171,9 @@ def plot_rs_modal_analysis(modal_props: dict,
         Per-mode base shear values from RS analysis in X (kN).
     modal_base_shear_y : list
         Per-mode base shear values from RS analysis in Y (kN).
+    periods : list of float, optional
+        Modal periods in seconds.  If provided, shown on the x-axis
+        beneath each mode number.  ``None`` = mode numbers only.
 
     Returns
     -------
@@ -205,7 +221,11 @@ def plot_rs_modal_analysis(modal_props: dict,
     ax2.set_ylabel("Base shear (kN)")
     ax2.set_title("Modal Base Shear \u2014 Response Spectrum Analysis")
     ax2.set_xticks(x)
-    ax2.set_xticklabels([str(i + 1) for i in range(n)])
+    if periods is not None and len(periods) >= n:
+        labels = [f"{i + 1}\nT={p:.2f}s" for i, p in enumerate(periods[:n])]
+    else:
+        labels = [str(i + 1) for i in range(n)]
+    ax2.set_xticklabels(labels, fontsize=7)
     ax2.legend(fontsize=8)
     ax2.grid(True, alpha=0.3, axis="y")
 

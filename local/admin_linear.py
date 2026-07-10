@@ -1364,7 +1364,8 @@ def plot_results(modal_result: Dict[str, Any],
     sx = (rs_x.get("modal_base_shear", []) if rs_x else [])
     sy = (rs_y.get("modal_base_shear", []) if rs_y else [])
     fig = plot_rs_modal_analysis(
-        modal_result.get("modal_props", {}), sx, sy)
+        modal_result.get("modal_props", {}), sx, sy,
+        periods=modal_result.get("periods"))
     if fig:
         path = out / "rs_modal_analysis.png"
         fig.savefig(path, dpi=150, bbox_inches="tight")
