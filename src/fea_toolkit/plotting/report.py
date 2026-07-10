@@ -369,8 +369,8 @@ def plot_storey_forces(
 
     **Principle**
     The base shear *V*:sub:`base` and base moment *M*:sub:`base` (taken
-    from the first row of each DataFrame, assumed to be the **Base** row)
-    are used to reconstruct an **equivalent trapezoidal distributed load**
+    from the row with the lowest elevation, i.e. the **Base** row) are
+    used to reconstruct an **equivalent trapezoidal distributed load**
     :math:`w(z) = w_0 + (w_1 - w_0)\\,z/H` that satisfies:
 
     .. math::
@@ -390,7 +390,8 @@ def plot_storey_forces(
 
     The curves are evaluated at *n_points* elevations and plotted as
     smooth continuous lines, automatically satisfying
-    :math:`V = dM/dz`.
+    :math:`dM/dz = -V(z)` (equilibrium for the free-body diagram of the
+    portion **above** elevation *z*).
 
     **Shortcomings**
 
@@ -500,8 +501,13 @@ def plot_storey_forces(
         return elev_pts, V_pts, M_pts
 
     for col in common_cols:
-        V_base = abs(df_shear[col].values[0])
-        M_base = abs(df_moment[col].values[0])
+        # Identify Base row by minimum elevation (first row may not be Base)
+        base_idx_s = int(df_shear[elev_col_s].idxmin())
+        base_idx_m = int(df_moment[elev_col_m].idxmin()) if elev_col_m else base_idx_s
+        V_base = abs(df_shear[col].iloc[base_idx_s])
+        M_base = abs(df_moment[col].iloc[base_idx_m])
+        if V_base < 1e-12:
+            continue
         z_pts, V_pts, M_pts = _trapezoidal_curves(V_base, M_base)
         if len(z_pts) == 0:
             continue
