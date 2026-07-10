@@ -50,7 +50,8 @@ These arrays describe the meshed model topology — stored once per `.npz` file.
 | Array | Shape | dtype | Description |
 |---|---|---|---|
 | `frame_eid` | `(N_frame,)` | `int` | Element index (0‑based) |
-| `frame_sap_id` | `(N_frame,)` | `str` | Original SAP2000 FrameID, e.g. ``"1"`` |
+| `frame_sap_id` | `(N_frame,)` | `str` | Original SAP2000 FrameID, e.g. ``"1"`` or ``"1-0"`` for split children |
+| `frame_parent_sap_id` | `(N_frame,)` | `str` | Parent SAP2000 ID for split children, empty string for originals |
 | `frame_sec_name` | `(N_frame,)` | `str` | Section name, e.g. ``"UB300"`` |
 | `frame_node_i` | `(N_frame,)` | `int` | I‑end node tag |
 | `frame_node_j` | `(N_frame,)` | `int` | J‑end node tag |

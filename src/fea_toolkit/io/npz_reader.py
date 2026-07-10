@@ -224,9 +224,6 @@ def npz_to_rhino_colour_data(
 def npz_build_id_tag_map(data: Dict[str, Any]) -> Dict[str, int]:
     """Build a mapping from SAP2000 string node ID → OpenSees node tag.
 
-    Useful when matching geometry created by the Rhino importer (which
-    stores SAP_NodeID UserStrings) with result arrays (which use node_tag).
-
     Returns {sap_node_id: node_tag}, e.g. ``{"1": 1, "2": 2, ...}``.
     """
     sap_ids = data.get("node_sap_id")
@@ -234,3 +231,39 @@ def npz_build_id_tag_map(data: Dict[str, Any]) -> Dict[str, int]:
     if sap_ids is None or tags is None:
         return {}
     return {str(sap_ids[i]): int(tags[i]) for i in range(len(sap_ids))}
+
+
+def npz_build_child_map(data: Dict[str, Any]) -> Dict[str, list]:
+    """Build a mapping from parent SAP ID → list of child SAP IDs.
+
+    Useful when the Rhino model has original (un-split) geometry and
+    results come from the meshed model.  For each parent, the map gives
+    all children that replaced it after splitting.
+
+    Returns {parent_sap_id: [child_sap_id, ...]}, e.g.
+    ``{"1": ["1-0", "1-1"], "2": ["2-0"], ...}``.
+    """
+    child_ids = data.get("frame_sap_id")
+    parent_ids = data.get("frame_parent_sap_id")
+    if child_ids is None or parent_ids is None:
+        return {}
+    result: Dict[str, list] = {}
+    for i in range(len(child_ids)):
+        pid = str(parent_ids[i])
+        if pid:
+            result.setdefault(pid, []).append(str(child_ids[i]))
+    return result
+
+
+def npz_build_parent_map(data: Dict[str, Any]) -> Dict[str, str]:
+    """Build a reverse mapping from child SAP ID → parent SAP ID.
+
+    Returns {child_sap_id: parent_sap_id}, e.g.
+    ``{"1-0": "1", "1-1": "1", "2-0": "2", ...}``.
+    """
+    child_ids = data.get("frame_sap_id")
+    parent_ids = data.get("frame_parent_sap_id")
+    if child_ids is None or parent_ids is None:
+        return {}
+    return {str(child_ids[i]): str(parent_ids[i])
+            for i in range(len(child_ids)) if str(parent_ids[i])}
