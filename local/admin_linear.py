@@ -775,8 +775,7 @@ def _save_mode_gif(builder, mode_shapes, mode_idx, periods, scale, out_dir):
 # ═══════════════════════════════════════════════════════════════════
 
 CACHE_DIR = Path("output")
-CACHE_PKL = CACHE_DIR / "modal_results.pkl"
-CACHE_NPZ = CACHE_DIR / "mode_shapes.npz"
+CACHE_NPZ = CACHE_DIR / "results.npz"
 
 
 def _build_cache_data(modal_result: Dict[str, Any],
@@ -840,65 +839,118 @@ def _build_cache_data(modal_result: Dict[str, Any],
 
 
 def save_cache(modal_result: Dict[str, Any],
-               md: SAPModelData) -> None:
-    """Save modal results + mode shapes + mesh data to cache files."""
+               md: SAPModelData,
+               static_results: Optional[Dict] = None,
+               rs_x: Optional[Dict] = None,
+               rs_y: Optional[Dict] = None,
+               ) -> None:
+    """Save modal results + mode shapes + mesh data to a unified NPZ cache."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    data = _build_cache_data(modal_result, md)
 
-    # Pickle for modal results and mesh connectivity
-    pkl_data = {k: v for k, v in data.items() if k != "mode_shapes"}
-    import pickle
-    with open(CACHE_PKL, "wb") as f:
-        pickle.dump(pkl_data, f)
-
-    # NPZ for mode shapes (flat arrays, faster to load)
-    shapes = data.get("mode_shapes", {})
-    if shapes:
-        # Find max displacement for normalisation hint
-        npz_data = {}
-        for mode_idx, node_vals in shapes.items():
-            tags = sorted(node_vals.keys())
-            arr = np.array([node_vals[t] for t in tags])
-            npz_data[f"mode_{mode_idx}"] = arr
-            npz_data[f"mode_{mode_idx}_tags"] = np.array(tags)
-        np.savez_compressed(CACHE_NPZ, **npz_data)
-
-    print(f"  Cached to {CACHE_PKL} + {CACHE_NPZ}")
+    from fea_toolkit.io.npz_writer import write_results_npz
+    rs_results = {"rs_x": rs_x, "rs_y": rs_y} if rs_x or rs_y else None
+    path = write_results_npz(
+        str(CACHE_NPZ),
+        md=md,
+        static_results=static_results,
+        modal_result=modal_result,
+        mode_shapes=modal_result.get("mode_shapes"),
+        rs_results=rs_results,
+    )
+    print(f"  Cached to {path}")
 
 
 def load_cache() -> Optional[Dict[str, Any]]:
-    """Load cached modal results for visualisation (no OpenSees needed)."""
-    if not CACHE_PKL.exists():
+    """Load cached results for visualisation from unified NPZ file."""
+    if not CACHE_NPZ.exists():
+        # Fallback: old pickle format
+        old_pkl = CACHE_DIR / "modal_results.pkl"
+        if old_pkl.exists():
+            import pickle as _pickle
+            with open(old_pkl, "rb") as f:
+                data = _pickle.load(f)
+            old_npz = CACHE_DIR / "mode_shapes.npz"
+            if old_npz.exists():
+                npz_obj = np.load(old_npz)
+                shapes = {}
+                for key in npz_obj:
+                    if key.endswith("_tags"):
+                        continue
+                    midx = int(key.replace("mode_", ""))
+                    t_key = f"{key}_tags"
+                    tags = npz_obj[t_key]
+                    arr = npz_obj[key]
+                    sv = {int(t): tuple(arr[j]) for j, t in enumerate(tags)}
+                    shapes[midx] = sv
+                data["mode_shapes"] = shapes
+                npz_obj.close()
+            return data
         print("  No cache found — run with --cache first")
         return None
 
-    import pickle
-    with open(CACHE_PKL, "rb") as f:
-        data = pickle.load(f)
+    from fea_toolkit.io.npz_reader import read_results_npz
+    data = read_results_npz(str(CACHE_NPZ))
 
-    # Load mode shapes from NPZ
-    if CACHE_NPZ.exists():
-        npz = np.load(CACHE_NPZ)
-        shapes = {}
-        for key in npz:
-            if key.endswith("_tags"):
-                continue
-            mode_idx = int(key.replace("mode_", ""))
-            tags_key = f"{key}_tags"
-            tags = npz[tags_key]
-            arr = npz[key]
+    n_modes = len(data.get("modal/period", []))
+    n_nodes = len(data.get("node_tag", []))
+    n_frames = len(data.get("frame_eid", []))
+    n_shells = len(data.get("shell_eid", []))
+    print(f"  Loaded cache: {n_modes} modes"
+          f"  |  {n_nodes} nodes  |  {n_frames} frames"
+          f"  |  {n_shells} shells")
+
+    # Backward-compat keys for visualize_from_cache etc.
+    nid = data.get("node_tag", np.array([])).tolist()
+    mode_dx = data.get("modal/mode_dx")
+    mode_shapes = {}
+    if mode_dx is not None and hasattr(mode_dx, 'shape') and mode_dx.ndim > 1:
+        for midx in range(mode_dx.shape[1]):
             node_vals = {}
-            for j, tag in enumerate(tags):
-                node_vals[int(tag)] = tuple(arr[j])
-            shapes[mode_idx] = node_vals
-        data["mode_shapes"] = shapes
-        npz.close()
+            for j, tag in enumerate(nid):
+                node_vals[int(tag)] = (
+                    float(mode_dx[j, midx]),
+                    float(data["modal/mode_dy"][j, midx]),
+                    float(data["modal/mode_dz"][j, midx]),
+                )
+            mode_shapes[midx] = node_vals
+    data["mode_shapes"] = mode_shapes
 
-    print(f"  Loaded cache: {data.get('num_modes', '?')} modes"
-          f"  |  {len(data.get('mode_shapes', {}))} shape sets"
-          f"  |  {len(data.get('node_coords', {}))} nodes"
-          f"  |  {len(data.get('frame_conn', []))} frames"
-          f"  |  {len(data.get('shell_quads', []))} shells")
+    data["node_coords"] = {
+        int(tag): (float(data["node_x"][j]), float(data["node_y"][j]),
+                   float(data["node_z"][j]))
+        for j, tag in enumerate(nid)
+    }
+    fi = data.get("frame_node_i", [])
+    fj = data.get("frame_node_j", [])
+    data["frame_conn"] = [(int(fi[j]), int(fj[j])) for j in range(len(fi))]
+
+    shell_quads = []
+    for j in range(len(data.get("shell_eid", []))):
+        shell_quads.append((
+            int(data["shell_node_1"][j]), int(data["shell_node_2"][j]),
+            int(data["shell_node_3"][j]), int(data["shell_node_4"][j]),
+        ))
+    data["shell_quads"] = shell_quads
+
+    data["periods"] = data.get("modal/period", []).tolist()
+    data["frequencies"] = data.get("modal/frequency", []).tolist()
+    data["num_modes"] = n_modes
+
+    mp = {}
+    for key, npz_key in [
+        ("partiMassRatiosMX", "modal/mx_ratio"),
+        ("partiMassRatiosMY", "modal/my_ratio"),
+        ("partiMassRatiosMZ", "modal/mz_ratio"),
+        ("partiMassMX", "modal/mx_eff"),
+        ("partiMassMY", "modal/my_eff"),
+        ("partiMassMZ", "modal/mz_eff"),
+    ]:
+        arr = data.get(npz_key)
+        if arr is not None:
+            mp[key] = arr.tolist()
+    data["modal_props"] = mp
+
+    return data
 
     return data
 
