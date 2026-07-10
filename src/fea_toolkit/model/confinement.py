@@ -93,6 +93,15 @@ class ConfinementData:
     """Ultimate strain of transverse steel (default 0.1 for ASTM A706)."""
 
     def __post_init__(self) -> None:
+        # Validate fundamental material/geometry parameters
+        if self.fc <= 0:
+            raise ValueError(f"fc must be > 0, got {self.fc}")
+        if self.tie_fy <= 0:
+            raise ValueError(f"tie_fy must be > 0, got {self.tie_fy}")
+        if self.tie_diameter <= 0:
+            raise ValueError(f"tie_diameter must be > 0, got {self.tie_diameter}")
+        if self.tie_spacing < 0:
+            raise ValueError(f"tie_spacing must be >= 0, got {self.tie_spacing}")
         # Derive core dimensions from overall + cover if not given directly
         if self.core_bc <= 0 and self.overall_b > 0:
             self.core_bc = self.overall_b - 2 * self.cover - self.tie_diameter
