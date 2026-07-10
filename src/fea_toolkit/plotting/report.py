@@ -160,7 +160,10 @@ def plot_modal_participation(df_modal: Any) -> Optional[Any]:
 def plot_rs_modal_analysis(modal_props: dict,
                            modal_base_shear_x: list,
                            modal_base_shear_y: list,
-                           periods: Optional[List[float]] = None) -> Optional[Any]:
+                           periods: Optional[List[float]] = None,
+                           base_shear_rigid_x: float = 0.0,
+                           base_shear_rigid_y: float = 0.0,
+                           T_rigid: Optional[float] = None) -> Optional[Any]:
     """Two-panel figure: mass participation (top) + modal base shear (bottom).
 
     Parameters
@@ -226,6 +229,19 @@ def plot_rs_modal_analysis(modal_props: dict,
     else:
         labels = [str(i + 1) for i in range(n)]
     ax2.set_xticklabels(labels, fontsize=7)
+    # ── Rigid cut-off (horizontal dashed line) ──
+    if T_rigid is not None and (base_shear_rigid_x > 0 or base_shear_rigid_y > 0):
+        label = f"Rigid (T\u2264{T_rigid:.3f}s)"
+        if base_shear_rigid_x > 0:
+            ax2.axhline(base_shear_rigid_x, color="#1f77b4", linewidth=1.0,
+                        linestyle="--", alpha=0.7)
+            ax2.text(n - 0.5, base_shear_rigid_x * 1.02, label,
+                     color="#1f77b4", fontsize=6, ha="right", va="bottom")
+        if base_shear_rigid_y > 0:
+            ax2.axhline(base_shear_rigid_y, color="#ff7f0e", linewidth=1.0,
+                        linestyle=":", alpha=0.7)
+            ax2.text(n - 0.5, base_shear_rigid_y * 1.02, "",
+                     color="#ff7f0e", fontsize=6, ha="right", va="bottom")
     ax2.legend(fontsize=8)
     ax2.grid(True, alpha=0.3, axis="y")
 

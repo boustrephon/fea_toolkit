@@ -478,12 +478,17 @@ def run_modal(md: SAPModelData, num_modes: int = 12,
 def run_rs(md: SAPModelData,
            modal_result: Dict[str, Any],
            direction: str = "X",
+           T_rigid: Optional[float] = None,
            ) -> Optional[Dict[str, Any]]:
     """Compute CQC-combined response spectrum base shear from modal results.
 
     Post-processes modal participation factors against a GB 50011 spectrum.
     No OpenSees analysis is needed — this is purely arithmetic on the
     modal properties returned by :meth:`OpenSeesBuilder.run_modal_analysis`.
+
+    When *T_rigid* is provided, modes with periods shorter than *T_rigid*
+    are treated as rigid (response taken at Sa(0)) and combined via SRSS
+    with the flexible CQC result.
     """
     import math
     mp = modal_result.get("modal_props", {})
@@ -510,7 +515,6 @@ def run_rs(md: SAPModelData,
     eff_masses = mp.get(mass_key, [0.0] * n_modes)[:n_modes]
 
     # Per-mode base shear: V_n = S_a(T_n) × M_eff_n
-    # (effective mass is in consistent model mass units; S_a in m/s²)
     modal_shear = [Sa[i] * abs(eff_masses[i]) for i in range(n_modes)]
 
     # CQC combination using Der Kiureghian (1980) correlation formula
@@ -525,24 +529,44 @@ def run_rs(md: SAPModelData,
     rho = [[_cqc_coeff(periods[i], periods[j]) for j in range(n_modes)]
            for i in range(n_modes)]
 
-    V_cqc = math.sqrt(sum(
-        rho[i][j] * modal_shear[i] * modal_shear[j]
-        for i in range(n_modes) for j in range(n_modes)
-    ))
+    # ── Rigid cut-off for very short modes ────────────────────────
+    # Modes with T < T_rigid are treated as rigid: force scaled to
+    # Sa(T=0), combined via SRSS, then SRSS-combined with the CQC result
+    # from the remaining flexible modes.
+    Sa_0 = float(np.interp(0.0, T_spec, Sa_spec, left=Sa_spec[0], right=Sa_spec[-1]))
+    rigid_indices = {i for i in range(n_modes)
+                     } if T_rigid and T_rigid > 0 else set()
+    if T_rigid and T_rigid > 0:
+        rigid_indices = {i for i, T in enumerate(periods) if T < T_rigid}
+    flexible_indices = [i for i in range(n_modes) if i not in rigid_indices]
+
+    # CQC on flexible modes only
+    if flexible_indices:
+        V_cqc = math.sqrt(sum(
+            rho[i][j] * modal_shear[i] * modal_shear[j]
+            for i in flexible_indices for j in flexible_indices
+        ))
+    else:
+        V_cqc = 0.0
+
     V_srss = math.sqrt(sum(v**2 for v in modal_shear))
 
-    # Missing-mass (rigid) correction for modes not captured
+    # Rigid part: SRSS of rigid-mode shears scaled to Sa(0)
+    V_rigid = 0.0
+    if rigid_indices:
+        for i in rigid_indices:
+            ratio = Sa_0 / Sa[i] if abs(Sa[i]) > 1e-12 else 1.0
+            V_rigid += (modal_shear[i] * ratio) ** 2
+        V_rigid = math.sqrt(V_rigid)
+
+    # Missing-mass (rigid) correction for modes not captured at all
     total_mass = mp.get("totalFreeMass", [0.0])[0]
-    sum_meff = sum(eff_masses)
-    residual_mass = max(0.0, total_mass - sum_meff)
+    sum_meff_captured = sum(abs(eff_masses[i]) for i in range(n_modes))
+    residual_mass = max(0.0, total_mass - sum_meff_captured)
+    V_missing = Sa_0 * residual_mass
 
-    # Use spectral acceleration at the shortest computed period for the
-    # rigid component (conservative).
-    Sa_rigid = max(Sa) if len(Sa) > 0 else 0.0
-    V_rigid = Sa_rigid * residual_mass
-
-    # SRSS combine CQC (modal) + rigid (missing mass)
-    V_total = math.sqrt(V_cqc**2 + V_rigid**2)
+    # Combine: CQC (flexible) + rigid cut-off + missing mass, all via SRSS
+    V_total = math.sqrt(V_cqc**2 + V_rigid**2 + V_missing**2)
 
     result = {
         "modal_base_shear": modal_shear,
@@ -551,19 +575,23 @@ def run_rs(md: SAPModelData,
         "base_shear_rigid": V_rigid,
         "base_shear_total": V_total,
         "total_mass": total_mass,
-        "captured_mass": sum_meff,
+        "captured_mass": sum_meff_captured,
         "residual_mass": residual_mass,
-        "participation_ratio": sum_meff / total_mass if total_mass > 0 else 0.0,
+        "base_shear_rigid": V_rigid + V_missing,
+        "participation_ratio": sum_meff_captured / total_mass if total_mass > 0 else 0.0,
         "modal_periods": periods,
         "spectral_accels": Sa.tolist(),
         "effective_masses": eff_masses,
         "direction": direction,
+        "T_rigid": T_rigid,
+        "n_modes_flexible": len(flexible_indices),
+        "n_modes_rigid": len(rigid_indices),
     }
 
-    print(f"  RS-{direction}: V_cqc={V_cqc:.1f}  V_rigid={V_rigid:.1f}  "
-          f"V_total={V_total:.1f} kN  "
-          f"(ΣM_eff/M_total={sum_meff:.0f}/{total_mass:.0f} t = "
-          f"{sum_meff/max(total_mass, 1):.1%})")
+    print(f"  RS-{direction}: V_cqc={V_cqc:.1f}  V_rigid_cutoff={V_rigid:.1f}  "
+          f"V_missing={V_missing:.1f}  V_total={V_total:.1f} kN  "
+          f"(ΣM_eff/M_total={sum_meff_captured:.0f}/{total_mass:.0f} t = "
+          f"{sum_meff_captured/max(total_mass, 1):.1%})")
     return result
 
 
@@ -1365,7 +1393,10 @@ def plot_results(modal_result: Dict[str, Any],
     sy = (rs_y.get("modal_base_shear", []) if rs_y else [])
     fig = plot_rs_modal_analysis(
         modal_result.get("modal_props", {}), sx, sy,
-        periods=modal_result.get("periods"))
+        periods=modal_result.get("periods"),
+        base_shear_rigid_x=rs_x.get("base_shear_rigid", 0) if rs_x else 0,
+        base_shear_rigid_y=rs_y.get("base_shear_rigid", 0) if rs_y else 0,
+        T_rigid=rs_x.get("T_rigid") if rs_x else None)
     if fig:
         path = out / "rs_modal_analysis.png"
         fig.savefig(path, dpi=150, bbox_inches="tight")

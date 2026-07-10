@@ -4137,20 +4137,41 @@ class OpenSeesBuilder:
         ops.numberer('RCM')
         ops.system(self.config.get('solver_system', 'BandGen'))
         ops.test(test_type, test_tol, test_iter)
-        # Use ModifiedNewton('-initial') for robustness with imperfect braces
-        if algo == 'ModifiedNewton':
-            ops.algorithm('ModifiedNewton', '-initial')
-        else:
-            ops.algorithm(algo)
-        ops.integrator('LoadControl', 1.0 / n_sub)
-        ops.analysis('Static')
 
-        # Perform analysis — apply gravity in sub-steps if configured
-        ok = 0
-        for _ in range(n_sub):
-            ok = ops.analyze(1)
-            if ok != 0:
+        # Algorithm auto-retry chain: if the primary solver fails, fall
+        # back through more robust algorithms.  This prevents analysis
+        # failure on marginally nonlinear models (P7).
+        _algo_chain = [algo]
+        if algo != 'NewtonLineSearch':
+            _algo_chain.append('NewtonLineSearch')
+        if algo != 'ModifiedNewton':
+            _algo_chain.append(('ModifiedNewton', '-initial'))
+        else:
+            _algo_chain.append(('ModifiedNewton', '-initial'))
+        if algo != 'KrylovNewton':
+            _algo_chain.append('KrylovNewton')
+
+        ok = -1
+        for attempt in _algo_chain:
+            if isinstance(attempt, tuple):
+                ops.algorithm(*attempt)
+            else:
+                if attempt == 'ModifiedNewton':
+                    ops.algorithm('ModifiedNewton', '-initial')
+                else:
+                    ops.algorithm(attempt)
+            if attempt != algo and self.config.get('verbose', False):
+                print(f"  Retrying with {attempt}...")
+            ops.integrator('LoadControl', 1.0 / n_sub)
+            ops.analysis('Static')
+            ok = 0
+            for _ in range(n_sub):
+                ok = ops.analyze(1)
+                if ok != 0:
+                    break
+            if ok == 0:
                 break
+
         if ok != 0:
             print("Analysis failed!")
             return {}
@@ -5162,7 +5183,28 @@ class OpenSeesBuilder:
             pass
 
         for step in range(1, num_steps + 1):
-            ok = ops.analyze(1)
+            # Auto-retry chain: if the primary algorithm fails, fall back
+            # through NewtonLineSearch → ModifiedNewton → KrylovNewton.
+            _algo_chain = [algo]
+            if algo != 'NewtonLineSearch':
+                _algo_chain.append('NewtonLineSearch')
+            if algo != 'ModifiedNewton':
+                _algo_chain.append(('ModifiedNewton', '-initial'))
+            if algo != 'KrylovNewton':
+                _algo_chain.append('KrylovNewton')
+
+            ok = -1
+            for attempt in _algo_chain:
+                if isinstance(attempt, tuple):
+                    ops.algorithm(*attempt)
+                else:
+                    if attempt == 'ModifiedNewton':
+                        ops.algorithm('ModifiedNewton', '-initial')
+                    else:
+                        ops.algorithm(attempt)
+                ok = ops.analyze(1)
+                if ok == 0:
+                    break
             statuses.append(ok)
 
             try:
@@ -5915,13 +5957,21 @@ class OpenSeesBuilder:
         spectrum_accels: List[float],
         direction: str = 'X',
         damping_ratio: float = 0.05,
+        T_rigid: Optional[float] = None,
         print_results: bool = True,
     ) -> Dict[str, Any]:
-        """Run a response‑spectrum analysis using CQC modal combination.
+        """Run a response‑spectrum analysis using CQC modal combination,
+        with an optional rigid cut-off for short‑period modes.
 
         This performs a mode‑by‑mode response spectrum analysis using
         OpenSees' ``responseSpectrumAnalysis`` command, then combines
         results with the Complete Quadratic Combination (CQC) rule.
+
+        When *T_rigid* is provided, modes with periods shorter than
+        *T_rigid* are treated as **rigid** — their response is taken
+        at the zero‑period spectral acceleration Sa(0).  Rigid modes
+        are combined via SRSS and then combined with the flexible CQC
+        result: ``V_total = √(V_cqc² + V_rigid²)``.
 
         Args:
             num_modes: Number of modes to include.
@@ -5932,6 +5982,8 @@ class OpenSeesBuilder:
                              corresponding to ``spectrum_periods``.
             direction: Excitation direction — ``'X'``, ``'Y'``, or ``'Z'``.
             damping_ratio: Damping ratio for CQC correlation (default 0.05).
+            T_rigid: Rigid cut-off period (s).  Modes with ``T < T_rigid``
+                are treated as rigid.  ``None`` (default) = no cut-off.
             print_results: If True, print a summary table.
 
         Returns:
