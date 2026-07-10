@@ -2070,12 +2070,17 @@ def warn_frame_overlaps(
 ) -> None:
     """Warn about overlapping or collinear frame elements.
 
-    Applies the same edge-registry comparison used by
-    :func:`find_constraint_edges` but **only** to frame elements.  Any
-    pair of frame elements whose geometric edges share a node and are
-    collinear but have incompatible lengths indicates a duplicate or
-    overlapping member — a modelling error that should be fixed in the
-    source model.
+    Builds a frame-only edge registry and checks for:
+    * identical overlaps (same end nodes),
+    * partial overlaps (collinear edges sharing a node).
+
+    Overlapping duplicate members should be fixed in the source model.
+
+    Note:
+        This uses a lightweight check rather than the full sweep-line
+        algorithm from :func:`find_constraint_edges` because simple
+        sub-segment overlaps (e.g. a beam spanning half a longer beam)
+        don't create chain junctions for the sweep to detect.
 
     Args:
         frame_elements: ``{frame_id: FrameElement}``.
@@ -2102,14 +2107,15 @@ def warn_frame_overlaps(
         nd = nodes[nid]
         return (nd.x, nd.y, nd.z, nid)
 
+    def _cos_match(d1, d2):
+        return float(np.dot(d1, d2)) > COSINE_TOL
+
     def _chain_dir(key, from_node):
+        """Unit vector from from_node toward the other end of key."""
         other = key[1] if key[0] == from_node else key[0]
         vec = _node_arr[other] - _node_arr[from_node]
         nrm = float(np.linalg.norm(vec))
         return vec / nrm if nrm > 1e-12 else None
-
-    def _cos_match(d1, d2):
-        return float(np.dot(d1, d2)) > COSINE_TOL
 
     # Build frame-only edge registry
     frame_reg: Dict[Tuple[str, str], List[str]] = defaultdict(list)
@@ -2136,8 +2142,7 @@ def warn_frame_overlaps(
             )
 
     # ── 2. Partial overlaps (different keys, collinear, share
-    #      a node, incompatible lengths) ─────────────────────────
-    # Group edges by node, then check collinear pairs.
+    #      a node, different lengths) ────────────────────────────
     node_edges: Dict[str, List[tuple]] = defaultdict(list)
     for (nA, nB), fids in frame_reg.items():
         fid = fids[0]
@@ -2164,7 +2169,6 @@ def warn_frame_overlaps(
                     continue
                 if not _cos_match(d_i, d_j):
                     continue
-                # Collinear edges of different lengths → overlap
                 if abs(leni - lenj) > 1e-9:
                     ni = assign.get(fidi, '?')
                     nj = assign.get(fidj, '?')
