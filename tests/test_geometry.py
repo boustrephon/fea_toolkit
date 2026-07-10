@@ -16,7 +16,7 @@ pytest.importorskip("openseespy")
 
 import openseespy.opensees as ops
 from fea_toolkit.opensees.builder import OpenSeesBuilder
-from fea_toolkit.model.geometry import find_constraint_edges
+from fea_toolkit.model.geometry import find_constraint_edges, warn_frame_overlaps
 from fea_toolkit.model.sap_data import (
     SAPModelData,
     Node,
