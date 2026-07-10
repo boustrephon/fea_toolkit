@@ -168,13 +168,19 @@ def assign_nodes_to_storeys(md, stories, z_tolerance: float = 0.5):
         return {}
     assignments: Dict[str, List[str]] = {s.name: [] for s in stories}
     half_band = z_tolerance / 2
+    # Precompute sets for O(1) membership checks
+    node_id_sets: Dict[str, set] = {}
+    for s in stories:
+        if s.node_ids is not None:
+            node_id_sets[s.name] = set(s.node_ids)
     for nid, nd in md.nodes.items():
         best = None
         best_dist = float("inf")
         for s in stories:
             # Use stored membership when available
-            if s.node_ids is not None:
-                if nid in s.node_ids:
+            nset = node_id_sets.get(s.name)
+            if nset is not None:
+                if nid in nset:
                     assignments[s.name].append(nid)
                     best = None  # skip distance fallback
                     break
