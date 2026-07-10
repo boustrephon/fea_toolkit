@@ -1471,11 +1471,8 @@ def _load_npz_for_plotting(npz_path: str, combo: str = None) -> dict:
         - force_unit, length_unit: unit strings
         - raw_data: the loaded npz dict
     """
-    data = np.load(npz_path, allow_pickle=True)
-    d = dict(data)  # convert to plain dict for easier access
-
-    # Detect format: unified has analysis_types, legacy has sub_elem_tags
-    is_unified = "analysis_types" in d or "frame_eid" in d
+    from ..io.npz_reader import read_results_npz, _get_static_cases
+    d = read_results_npz(npz_path)
 
     metadata = {}
     force_unit = "?"
