@@ -2088,7 +2088,9 @@ def find_constraint_edges(
     identical sorted tuple.
 
     Non-structural element types (e.g. brick infill walls used as load
-    panels) are excluded via ``exclude_types``.
+    panels) are excluded via ``exclude_types`` using case-insensitive
+    substring matching (e.g. ``{'brick wall'}`` matches ``'Brick Wall'``,
+    ``'BRICK WALL'``, ``'BrickInfill'``, etc.).
 
     Args:
         area_elements: ``{area_id: AreaElement}`` — all area elements.
@@ -2098,7 +2100,8 @@ def find_constraint_edges(
             elements.  Pass post-split elements (e.g. ``builder.split_elements``)
             for best results.
         frame_assignments: Optional ``{frame_id: section_name}``.
-        exclude_types: Set of section names to skip.
+        exclude_types: Set of section name patterns to skip.  Each entry
+            is matched as a case-insensitive substring.
 
     Returns:
         List of ``(node_ids_along_edge, type_a, type_b)``.
@@ -2109,6 +2112,14 @@ def find_constraint_edges(
 
     COSINE_TOL = 0.9999
     Z_BAND_TOL = 0.2
+
+    # ── Helper: case-insensitive substring matching ─────────────
+    # SAP2000 section names vary in case (e.g. "Brick Wall",
+    # "BRICK WALL", "BrickInfill").  Each entry in exclude_types is
+    # matched as a case-insensitive substring of the section name.
+    def _is_excluded(name: str) -> bool:
+        name_lower = name.lower()
+        return any(excl.lower() in name_lower for excl in exclude_types)
 
     # ── 0. Node arrays & position sort key ──────────────────────
     _node_arr: Dict[str, np.ndarray] = {}
@@ -2128,7 +2139,7 @@ def find_constraint_edges(
         if (getattr(elem, 'inactive', False) or elem is None
                 or len(elem.node_ids) < 3):
             continue
-        if area_assignments.get(aid, '') in exclude_types:
+        if _is_excluded(area_assignments.get(aid, '')):
             continue
         nids = list(elem.node_ids)
         n = len(nids)
@@ -2146,7 +2157,7 @@ def find_constraint_edges(
         for fid, felem in frame_elements.items():
             if getattr(felem, 'inactive', False) or felem is None:
                 continue
-            if assign.get(fid, '') in exclude_types:
+            if _is_excluded(assign.get(fid, '')):
                 continue
             nA, nB = felem.node_i, felem.node_j
             if nA == nB:
