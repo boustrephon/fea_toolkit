@@ -254,3 +254,51 @@ class TestFindConstraintEdges:
             assert len(edges) >= 1
         finally:
             ops.wipe()
+
+    def test_frame_slab_tear_via_helper(self, materials, sections):
+        """Frame-element edge path exercised through inline helper."""
+        # 6 m × 6 m slab, meshed at max_size=3 m → creates intermediate
+        # nodes along all four edges.  A beam along the bottom edge
+        # (1→2) only has the corner nodes, so intermediate mesh nodes
+        # on that edge must be picked up by the frame-edge registry.
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 6.0, 0.0, 0.0),
+            "3": Node("3", 3, 6.0, 6.0, 0.0),
+            "4": Node("4", 4, 0.0, 6.0, 0.0),
+        }
+        areas = {
+            "1": AreaElement("1", 10, ["1", "2", "3", "4"]),
+        }
+        frames = {
+            "B1": FrameElement("B1", 100, node_i="1", node_j="2"),
+        }
+        md = SAPModelData(
+            nodes=nodes, restraints={}, materials=materials,
+            sections=sections,
+            frame_elements=frames, area_elements=areas,
+            frame_assignments={"B1": "Slab200"},
+            area_assignments={"1": "Slab200"},
+            groups={}, frame_auto_mesh={},
+            area_mesh={"1": AreaMesh(auto_mesh=True, max_size=3.0)},
+        )
+        b = OpenSeesBuilder(md, {"verbose": False, "create_shells": True})
+        try:
+            b.build()
+            edges = find_constraint_edges(
+                b.model.area_elements,
+                b.model.area_assignments,
+                b.model.nodes,
+                frame_elements=b.model.frame_elements,
+                frame_assignments=b.model.frame_assignments,
+            )
+            # At least one tear with the 1→2 edge direction
+            assert len(edges) >= 1
+            # Each constraint edge must contain at least 3 nodes
+            # (corner + intermediate from mesh)
+            for nids, type_a, type_b in edges:
+                assert len(nids) >= 3
+                assert type_a == "Slab200"
+                assert type_b == "Slab200"
+        finally:
+            ops.wipe()
