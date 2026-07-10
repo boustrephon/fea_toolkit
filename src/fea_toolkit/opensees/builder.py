@@ -989,7 +989,8 @@ class OpenSeesBuilder:
                     int_tag = 10000 + elem.elem_tag
                     n_int_pts = config.get("num_int_pts", 5)
                     lines.append(
-                        f"beamIntegration Lobatto {int_tag} {" ".join(str(sec_tag) for _ in range(n_int_pts))}"
+                        "beamIntegration Lobatto {} {} {}".format(
+                            int_tag, sec_tag, n_int_pts)
                     )
                     lines.append(
                         f"element forceBeamColumn {elem.elem_tag} "
@@ -1779,6 +1780,15 @@ class OpenSeesBuilder:
             _J = sec.J
 
         if self.config['use_elastic_sections']:
+            # Apply stiffness modifiers for elastic builds only
+            # (skipped when create_fiber_sections=True — nonlinear material
+            #  and element formulations already model cracking directly).
+            mods = sec.modifiers
+            if mods and not self.config.get('create_fiber_sections', False):
+                _A *= float(mods.get('AMod', 1.0))
+                _I33 *= float(mods.get('I3Mod', 1.0))
+                _I22 *= float(mods.get('I2Mod', 1.0))
+                _J *= float(mods.get('JMod', 1.0))
             ops.section('Elastic', tag, E_mod, _A, _I33, _I22, G_mod, _J)
             if self.config['verbose']:
                 print(f"  Section {tag}: {sec.name} (Elastic)")
@@ -2056,6 +2066,35 @@ class OpenSeesBuilder:
             sub_count = sum(1 for aid in areas if "_sub_" in aid)
             if sub_count:
                 print(f"  Area meshing: {sub_count} sub-elements created")
+
+        # ── AtFrames for areas: subdivide areas where frame nodes ──
+        # ── lie on area edges but not at corners.                   ──
+        from ..model.geometry import split_areas_at_frame_edges
+
+        # Use both original and split frame elements for edge detection
+        fe_source = self.split_elements if self.split_elements else self.model.frame_elements
+        areas2, assign2, nodes2, next_tag2 = split_areas_at_frame_edges(
+            self.model.area_elements,
+            self.model.area_assignments,
+            self.model.nodes,
+            fe_source,
+            next_tag=next_tag,
+            groups=getattr(self.model, 'groups', None),
+        )
+        self.model.area_elements = areas2
+        self.model.area_assignments = assign2
+        self.model.nodes = nodes2
+
+        # Create OpenSees nodes for any new AtFrames mesh nodes
+        for nd in self.model.nodes.values():
+            if nd.node_tag not in self._created_node_tags:
+                ops.node(nd.node_tag, nd.x, nd.y, nd.z)
+                self._created_node_tags.add(nd.node_tag)
+
+        if self.config['verbose']:
+            af_count = sum(1 for aid in areas2 if "_af_" in aid)
+            if af_count:
+                print(f"  AtFrames area splitting: {af_count} sub-elements created")
 
         # ── Propagate edge restraints from original corners to ────
         # ── intermediate mesh nodes along each edge.  If both ends ──
@@ -4036,8 +4075,9 @@ class OpenSeesBuilder:
                 f = ops.eleResponse(tag, 'forces')
             except Exception:
                 continue
-            # eleResponse returns local forces [P, V2, V3, T, M2, M3]
-            # at I-end then J-end.  Rotate to global coordinates.
+            # eleResponse('forces') returns element basic (local) forces
+            # [P, V2, V3, T, M2, M3] at I-end then J-end.
+            # Rotate to global coordinates for a consistent output frame.
             try:
                 vx, vy, vz = self._get_local_axes(elem)
                 # Rotation matrix local→global: columns = local axes

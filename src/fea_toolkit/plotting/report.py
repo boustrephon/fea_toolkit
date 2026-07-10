@@ -200,7 +200,7 @@ def plot_rs_modal_analysis(modal_props: dict,
     ax2.bar(x - w, sx, w, label="RS-X", color="#1f77b4")
     ax2.bar(x,     sy, w, label="RS-Y", color="#ff7f0e")
     # Empty placeholder bar at the RZ position so bars align with the top panel
-    ax2.bar(x + w, [0] * n, w, label="RS-RZ", color="none", edgecolor="none")
+    ax2.bar(x + w, [0] * n, w, label="_RS-RZ", color="none", edgecolor="none")
     ax2.set_xlabel("Mode")
     ax2.set_ylabel("Base shear (kN)")
     ax2.set_title("Modal Base Shear \u2014 Response Spectrum Analysis")
@@ -461,6 +461,18 @@ def plot_storey_forces(
     mom_cols = [c for c in df_moment.columns if c not in base_skip]
     # Only use columns that exist in both (matching cases)
     common_cols = [c for c in num_cols if c in mom_cols]
+    dropped_shear = [c for c in num_cols if c not in common_cols]
+    dropped_moment = [c for c in mom_cols if c not in common_cols]
+    if dropped_shear or dropped_moment:
+        import warnings
+        if dropped_shear:
+            warnings.warn(
+                f"Columns in shear DataFrame not found in moment DataFrame: "
+                f"{dropped_shear}")
+        if dropped_moment:
+            warnings.warn(
+                f"Columns in moment DataFrame not found in shear DataFrame: "
+                f"{dropped_moment}")
     elev = df_shear[elev_col_s].values
     base_elev = elev.min()
     roof_elev = elev.max()
@@ -569,19 +581,11 @@ def plot_storey_displacements(
     # Map source unit → conversion factor to "m" (internal reference)
     _to_m = {"m": 1.0, "mm": 0.001, "cm": 0.01, "ft": 0.3048, "in": 0.0254}
     source_to_m = _to_m.get(source_length_unit, 1.0)
-    # disp_scale: from source unit → display unit (e.g. source=m, display=mm → 1000)
-    if disp_unit == "mm":
-        disp_scale = 1000.0 / source_to_m
-    elif disp_unit == "cm":
-        disp_scale = 100.0 / source_to_m
-    elif disp_unit == "m":
-        disp_scale = 1.0 / source_to_m
-    elif disp_unit == "ft":
-        disp_scale = 3.28084 / source_to_m
-    elif disp_unit == "in":
-        disp_scale = 39.3701 / source_to_m
-    else:
-        disp_scale = 1.0
+    # disp_scale: from source unit → display unit
+    _target_to_m = {"mm": 0.001, "cm": 0.01, "m": 1.0,
+                    "ft": 0.3048, "in": 0.0254}
+    target_to_m = _target_to_m.get(disp_unit, 1.0)
+    disp_scale = target_to_m / source_to_m if source_to_m > 0 else 1.0
 
     # drift_scale: drift values are disp/length ratios; mm/m = 0.001, others = 1
     drift_scale = 1000.0 if drift_unit == "mm/m" else 1.0
