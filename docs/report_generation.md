@@ -696,7 +696,7 @@ dependency on other items.
 | **P3** | Joint modelling — Level 2 | 3.4 | Medium (builder change) | Enables semi-rigid connection modelling. Level 1 (rigid offset) exists; Level 2 replaces stiff links with calibrated zero-length springs (flexibility %). | ❌ Pending |
 | **P4** | Effective stiffness modifiers | 3.7 | Small | ASCE 41 cracked sections: 0.35EI beams, 0.70EI columns. AMod/I3Mod/I2Mod/JMod parsed from section properties; applied in builder for elastic builds only (skipped for nonlinear fiber sections). | ✅ Done |
 | **P5** | Rigid diaphragms | 3.7 | Medium (builder change) | Lateral load distribution differs from SAP2000. Parser stores constraint data, builder never calls `ops.rigidDiaphragm()`. | ❌ Pending |
-| **P6** | P-Delta geom. transformation | 3.7 | Small | Pushover already uses `geomTransf PDelta` via `push_config['geom_transf_type'] = 'PDelta'` at line 4685. | ✅ Done |
+| **P6** | P-Delta geom. transformation | 3.7 | Small | Pushover already uses `geomTransf PDelta` via `push_config['geom_transf_type'] = 'PDelta'`. | ✅ Done |
 | **P7** | Convergence fallback | 3.7 | Medium (builder change) | Auto-retry chain (Newton → LineSearch → ModifiedNewton → KrylovNewton). Prevents analysis failure on marginally nonlinear models. | ❌ Pending |
 | **P8** | Concrete confinement | 3.7 | Medium (builder change) | Fiber sections overestimate column ductility without unconfined cover layer. Mander confinement formula fixed: effective lateral stress `f_l` now factored by confinement effectiveness coefficient `ke`. | ✅ Done |
 | **P9** | Modal pushover pattern | 3.7 | Small | Implemented as `lateral_load_type='mode1'` with `_compute_mode_shape_lateral_loads()`. | ✅ Done |
