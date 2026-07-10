@@ -2111,7 +2111,7 @@ def find_constraint_edges(
     from typing import Dict, List, Tuple
 
     COSINE_TOL = 0.9999
-    Z_BAND_TOL = 0.2
+    Z_BAND_TOL = 0.2  # max Z-span for an edge to be considered near-horizontal
 
     # ── Helper: case-insensitive substring matching ─────────────
     # SAP2000 section names vary in case (e.g. "Brick Wall",
@@ -2148,6 +2148,10 @@ def find_constraint_edges(
             nA, nB = nids[i], nids[j]
             if nA == nB:
                 continue
+            # Skip edges with large Z-span (not near-horizontal)
+            ndA, ndB = _node_arr[nA], _node_arr[nB]
+            if abs(ndA[2] - ndB[2]) >= Z_BAND_TOL:
+                continue
             key = (nA, nB) if _pos_key(nA) <= _pos_key(nB) else (nB, nA)
             edge_reg[key].append(aid)
 
@@ -2161,6 +2165,10 @@ def find_constraint_edges(
                 continue
             nA, nB = felem.node_i, felem.node_j
             if nA == nB:
+                continue
+            # Skip edges with large Z-span (not near-horizontal)
+            ndA, ndB = _node_arr[nA], _node_arr[nB]
+            if abs(ndA[2] - ndB[2]) >= Z_BAND_TOL:
                 continue
             key = (nA, nB) if _pos_key(nA) <= _pos_key(nB) else (nB, nA)
             edge_reg[key].append(fid)
