@@ -14,6 +14,7 @@ import pytest
 from fea_toolkit.model.sap_data import Node, FrameElement, AreaElement, FrameEndOffset
 from fea_toolkit.model.sap_data import ISection, PipeSection, BoxSection, RectangularSection
 from fea_toolkit.model.sap_data import CircularSection, ChannelSection
+from fea_toolkit.model.sap_data import ConcreteRectangularSection, ConcreteCircularSection
 from fea_toolkit.io.s2k_parser import SAP2000Parser
 
 
@@ -962,6 +963,27 @@ class TestSectionDepthWidth:
 
     def test_circular_section(self):
         sec = CircularSection("C500", "Circle", "Steel", diameter=0.5)
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert D == pytest.approx(0.5)
+        assert B == pytest.approx(0.5)
+
+    def test_concrete_rectangular_section(self):
+        sec = ConcreteRectangularSection(
+            "CR400", "Concrete Rectangular", "C30",
+            A=0.16, I33=0.002133, I22=0.002133, J=0.0036,
+            depth=0.4, bf=0.3, cover=0.04,
+            top_bars=4, bot_bars=4, top_bar_dia=0.02, bot_bar_dia=0.02,
+        )
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert D == pytest.approx(0.4)
+        assert B == pytest.approx(0.3)
+
+    def test_concrete_circular_section(self):
+        sec = ConcreteCircularSection(
+            "CC500", "Concrete Circular", "C30",
+            A=0.196, I33=0.00307, I22=0.00307, J=0.00613,
+            diameter=0.5, cover=0.04, bar_count=8, bar_dia=0.02,
+        )
         D, B = SAP2000Parser._get_section_depth_width(sec)
         assert D == pytest.approx(0.5)
         assert B == pytest.approx(0.5)
