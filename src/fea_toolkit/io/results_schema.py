@@ -19,6 +19,7 @@ GEOMETRY_ARRAYS: Dict[str, Tuple] = {
     "node_z": ("N_node", "float"),
     "frame_eid": ("N_frame", "int"),
     "frame_sap_id": ("N_frame", "str"),
+    "frame_parent_sap_id": ("N_frame", "str"),
     "frame_sec_name": ("N_frame", "str"),
     "frame_node_i": ("N_frame", "int"),
     "frame_node_j": ("N_frame", "int"),

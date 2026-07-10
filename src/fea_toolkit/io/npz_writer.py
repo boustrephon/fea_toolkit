@@ -45,16 +45,19 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
     arrays["node_y"] = np.array(node_y, dtype=float)
     arrays["node_z"] = np.array(node_z, dtype=float)
 
-    # Frame elements
-    frame_eid, frame_sap_id, frame_sec_name = [], [], []
+    # Frame elements — active only (skip inactive parents)
+    frame_eid, frame_sap_id, frame_parent_sap_id, frame_sec_name = [], [], [], []
     frame_ni, frame_nj = [], []
     for eid, elem in md.frame_elements.items():
+        if getattr(elem, 'inactive', False):
+            continue
         ni = md.nodes.get(elem.node_i)
         nj = md.nodes.get(elem.node_j)
         if ni is None or nj is None:
             continue
         frame_eid.append(len(frame_eid))
         frame_sap_id.append(str(eid))
+        frame_parent_sap_id.append(str(elem.parent_id) if elem.parent_id else "")
         sec = md.frame_assignments.get(eid, "")
         frame_sec_name.append(sec)
         frame_ni.append(ni.node_tag)
@@ -62,6 +65,7 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
 
     arrays["frame_eid"] = np.array(frame_eid, dtype=int)
     arrays["frame_sap_id"] = np.array(frame_sap_id, dtype=str)
+    arrays["frame_parent_sap_id"] = np.array(frame_parent_sap_id, dtype=str)
     arrays["frame_sec_name"] = np.array(frame_sec_name, dtype=str)
     arrays["frame_node_i"] = np.array(frame_ni, dtype=int)
     arrays["frame_node_j"] = np.array(frame_nj, dtype=int)

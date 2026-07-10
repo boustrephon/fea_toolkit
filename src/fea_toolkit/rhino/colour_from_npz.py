@@ -398,33 +398,54 @@ def create_result_flags(
     import Rhino
     import Rhino.Geometry as rg
     import Rhino.DocObjects as rd
-    # ── Load NPZ data ──────────────────────────────────────────────
-    data = np.load(npz_path, allow_pickle=True)
-    prefix = f"{combo}_" if combo else ""
-    suffix = "_local" if use_local else ""
-    key_i = f"{prefix}sub_{quantity.lower()}_i{suffix}"
-    key_j = f"{prefix}sub_{quantity.lower()}_j{suffix}"
+    # ── Load NPZ data (auto-detect format) ─────────────────────────
+    raw = np.load(npz_path, allow_pickle=True)
+    is_unified = "analysis_types" in raw or "frame_eid" in raw
 
-    # Fall back to global if local not available
-    if use_local and key_i not in data:
-        key_i = f"{prefix}sub_{quantity.lower()}_i"
-        key_j = f"{prefix}sub_{quantity.lower()}_j"
+    if is_unified:
+        from ..io.npz_reader import read_results_npz, _get_static_cases
+        data = read_results_npz(npz_path)
+        cases = _get_static_cases(data)
+        case = combo if combo and combo in cases else (cases[0] if cases else None)
+        pre = f"static/{case}/" if case else ""
+        q = quantity.lower()
 
-    sub_sap_ids = data.get("sub_sap_ids")
-    sub_n_i = data.get("sub_node_i_tag")
-    sub_n_j = data.get("sub_node_j_tag")
-    n_tags = data.get("node_tags")
-    n_x = data.get("node_x")
-    n_y = data.get("node_y")
-    n_z = data.get("node_z")
-    val_i_arr = data.get(key_i)
-    val_j_arr = data.get(key_j)
+        sub_sap_ids = data.get("frame_sap_id")
+        sub_n_i = data.get("frame_node_i")
+        sub_n_j = data.get("frame_node_j")
+        n_tags = data.get("node_tag")
+        n_x = data.get("node_x")
+        n_y = data.get("node_y")
+        n_z = data.get("node_z")
 
-    if any(a is None for a in (sub_sap_ids, sub_n_i, sub_n_j,
-                                n_tags, n_x, n_y, n_z,
-                                val_i_arr, val_j_arr)):
-        print("Required NPZ arrays not found")
-        return 0
+        key_i = f"{pre}{q}_i"
+        key_j = f"{pre}{q}_j"
+        if use_local:
+            loc_i = f"{pre}{q}_i_local"
+            if loc_i in data:
+                key_i = loc_i
+                key_j = f"{pre}{q}_j_local"
+        val_i_arr = data.get(key_i)
+        val_j_arr = data.get(key_j)
+    else:
+        # Legacy format
+        data = raw
+        prefix = f"{combo}_" if combo else ""
+        suffix = "_local" if use_local else ""
+        key_i = f"{prefix}sub_{quantity.lower()}_i{suffix}"
+        key_j = f"{prefix}sub_{quantity.lower()}_j{suffix}"
+        if use_local and key_i not in data:
+            key_i = f"{prefix}sub_{quantity.lower()}_i"
+            key_j = f"{prefix}sub_{quantity.lower()}_j"
+        sub_sap_ids = data.get("sub_sap_ids")
+        sub_n_i = data.get("sub_node_i_tag")
+        sub_n_j = data.get("sub_node_j_tag")
+        n_tags = data.get("node_tags")
+        n_x = data.get("node_x")
+        n_y = data.get("node_y")
+        n_z = data.get("node_z")
+        val_i_arr = data.get(key_i)
+        val_j_arr = data.get(key_j)
 
     # ── Build node coordinate lookup ───────────────────────────────
     node_coords: Dict[int, rg.Point3d] = {}
