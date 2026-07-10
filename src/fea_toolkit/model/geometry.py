@@ -603,14 +603,32 @@ def split_elements(
         # Build array of endpoints for all AtFrames elements
         at_frames_elems = [(eid, el) for eid, el in elements.items() if eid in at_frames_ids]
 
+        # Precompute 3D bounding boxes for broad-phase filtering
+        _elem_bbox: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
+        for eid, el in at_frames_elems:
+            pa = node_coords[el.node_i]
+            pb = node_coords[el.node_j]
+            _elem_bbox[eid] = (
+                np.array([min(pa[0], pb[0]), min(pa[1], pb[1]), min(pa[2], pb[2])]),
+                np.array([max(pa[0], pb[0]), max(pa[1], pb[1]), max(pa[2], pb[2])]),
+            )
+
+        _bbox_tol = tol  # expand bounding boxes slightly for robustness
+
         for i in range(len(at_frames_elems)):
             eid_a, el_a = at_frames_elems[i]
             a = np.array(node_coords[el_a.node_i])
             b = np.array(node_coords[el_a.node_j])
             if np.linalg.norm(b - a) < 1e-12:
                 continue
+            bbox_a_min, bbox_a_max = _elem_bbox[eid_a]
             for j in range(i + 1, len(at_frames_elems)):
                 eid_b, el_b = at_frames_elems[j]
+                # Broad-phase: skip if bounding boxes do not overlap
+                bbox_b_min, bbox_b_max = _elem_bbox[eid_b]
+                if np.any(bbox_a_max + _bbox_tol < bbox_b_min - _bbox_tol) or \
+                   np.any(bbox_b_max + _bbox_tol < bbox_a_min - _bbox_tol):
+                    continue
                 c = np.array(node_coords[el_b.node_i])
                 d = np.array(node_coords[el_b.node_j])
                 if np.linalg.norm(d - c) < 1e-12:
