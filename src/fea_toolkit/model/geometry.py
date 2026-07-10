@@ -2,6 +2,8 @@
 
 """Geometric utilities for element orientation, splitting, and intersections."""
 
+from __future__ import annotations
+
 import math
 import warnings
 import numpy as np
@@ -120,11 +122,9 @@ def compute_t_location(point, a, b) -> float:
     t = np.dot(ap, ab) / (length * length)
     return float(np.clip(t, 0.0, 1.0))
 
-import openseespy.opensees as ops
 
 def global_to_local_distributed_load(ele_tag, global_force_vector):
-    """
-    Transforms a global distributed load vector into OpenSees local coordinates
+    """Transform a global distributed load vector into OpenSees local coordinates
     and applies it to a 3D beam element.
     
     global_force_vector: list/array [Wx, Wy, Wz] (Force per unit true length)
@@ -132,6 +132,7 @@ def global_to_local_distributed_load(ele_tag, global_force_vector):
     Apply to OpenSees 3D beam (Format: wy, wz, wx)
         ops.eleLoad('-ele', ele_tag, '-type', '-beamUniform', wy, wz, wx)
     """
+    import openseespy.opensees as ops
     # 1. Fetch node coordinates for the element
     node_tags = ops.eleNodes(ele_tag)
     i_node, j_node = node_tags[0], node_tags[1]

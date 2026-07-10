@@ -103,18 +103,26 @@ def create_or_get_layer(layer_name: str,
 
 # ── Top-level layer structure ────────────────────────────────────────────
 
-def create_root_layer() -> int:
-    """Create the ``SAP2000`` root layer.
+def create_root_layer(name: str = "SAP2000",
+                      parent: t.Optional[int] = None) -> int:
+    """Create a root layer (default: ``SAP2000``).
+
+    When *parent* is provided, the layer is created as a sub‑layer of that
+    parent (used for the ``SAP2000/Meshed`` tree).
+
+    Args:
+        name: Layer name (default ``'SAP2000'``).
+        parent: Optional parent layer index.
 
     Returns:
-        Layer index of the root layer.
+        Layer index of the created layer.
     """
     try:
         from System.Drawing import Color
     except ImportError:
         Color = None
     root_color = Color.LightGray if Color else None
-    return create_or_get_layer("SAP2000", parent_layer_index=None,
+    return create_or_get_layer(name, parent_layer_index=parent,
                                color=root_color)
 
 
@@ -201,36 +209,43 @@ class FrameLayerSet:
 
 
 def create_frame_layers(root_layer_index: int,
-                        frame_sections: t.Dict[str, dict]) -> FrameLayerSet:
+                        frame_sections: t.Dict[str, dict],
+                        prefix: str = "") -> FrameLayerSet:
     """Create the frame layer tree.
 
     Layout::
 
-        SAP2000/Frames/Centreline/{Section}
-        SAP2000/Frames/Extrusion/{Section}
+        {prefix}SAP2000/Frames/Centreline/{Section}
+        {prefix}SAP2000/Frames/Extrusion/{Section}
+
+    When *prefix* is ``'Meshed/'`` the layers become::
+
+        SAP2000/Meshed/Frames/Centreline/{Section}
 
     Args:
-        root_layer_index: Index of the ``SAP2000`` root layer.
+        root_layer_index: Index of the root layer.
         frame_sections: Dict of ``{section_name: props_dict}``.
+        prefix: Optional path prefix (e.g. ``'Meshed/'``).
 
     Returns:
         A :class:`FrameLayerSet` with centreline and extrusion dicts.
     """
-    frames_parent = create_or_get_layer("SAP2000/Frames",
+    base = prefix + "SAP2000"
+    frames_parent = create_or_get_layer(f"{base}/Frames",
                                         parent_layer_index=root_layer_index)
 
-    cl_parent = create_or_get_layer("SAP2000/Frames/Centreline",
+    cl_parent = create_or_get_layer(f"{base}/Frames/Centreline",
                                     parent_layer_index=frames_parent)
     cl_layers = _create_section_layers(
-        "SAP2000/Frames/Centreline", cl_parent,
+        f"{base}/Frames/Centreline", cl_parent,
         sorted(frame_sections) if frame_sections else [],
         FRAME_PALETTE, frame_sections,
     )
 
-    ex_parent = create_or_get_layer("SAP2000/Frames/Extrusion",
+    ex_parent = create_or_get_layer(f"{base}/Frames/Extrusion",
                                     parent_layer_index=frames_parent)
     ex_layers = _create_section_layers(
-        "SAP2000/Frames/Extrusion", ex_parent,
+        f"{base}/Frames/Extrusion", ex_parent,
         sorted(frame_sections) if frame_sections else [],
         FRAME_PALETTE, frame_sections,
     )
@@ -256,33 +271,40 @@ class ShellLayerSet:
 
 
 def create_shell_layers(root_layer_index: int,
-                        shell_sections: t.Dict[str, dict]) -> ShellLayerSet:
+                        shell_sections: t.Dict[str, dict],
+                        prefix: str = "") -> ShellLayerSet:
     """Create the shell layer tree.
 
     Layout::
 
-        SAP2000/Shells/Centreline/{Section}
-        SAP2000/Shells/Extrusion/{Section}
+        {prefix}SAP2000/Shells/Centreline/{Section}
+        {prefix}SAP2000/Shells/Extrusion/{Section}
+
+    When *prefix* is ``'Meshed/'`` the layers become::
+
+        SAP2000/Meshed/Shells/Centreline/{Section}
 
     Args:
-        root_layer_index: Index of the ``SAP2000`` root layer.
+        root_layer_index: Index of the root layer.
         shell_sections: Dict of ``{section_name: props_dict}``.
+        prefix: Optional path prefix (e.g. ``'Meshed/'``).
 
     Returns:
         A :class:`ShellLayerSet` with centreline and extrusion dicts.
     """
-    shells_parent = create_or_get_layer("SAP2000/Shells",
+    base = prefix + "SAP2000"
+    shells_parent = create_or_get_layer(f"{base}/Shells",
                                         parent_layer_index=root_layer_index)
 
-    cl_parent = create_or_get_layer("SAP2000/Shells/Centreline",
+    cl_parent = create_or_get_layer(f"{base}/Shells/Centreline",
                                     parent_layer_index=shells_parent)
     cl_layers = _create_section_layers(
-        "SAP2000/Shells/Centreline", cl_parent,
+        f"{base}/Shells/Centreline", cl_parent,
         sorted(shell_sections) if shell_sections else [],
         SHELL_PALETTE, shell_sections,
     )
 
-    ex_parent = create_or_get_layer("SAP2000/Shells/Extrusion",
+    ex_parent = create_or_get_layer(f"{base}/Shells/Extrusion",
                                     parent_layer_index=shells_parent)
     ex_layers = _create_section_layers(
         "SAP2000/Shells/Extrusion", ex_parent,
