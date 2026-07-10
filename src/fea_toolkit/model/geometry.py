@@ -2057,9 +2057,124 @@ def split_areas_at_frame_edges(
 # is a free node that needs tying to the other side.
 # ═══════════════════════════════════════════════════════════════════════
 
+# ── Frame-overlap detection ───────────────────────────────────────────
 
 
+def warn_frame_overlaps(
+    frame_elements: Dict[str, 'FrameElement'],
+    frame_assignments: Optional[Dict[str, str]],
+    nodes: Dict[str, 'Node'],
+    *,
+    prefix: str = '',
+    exclude_types: set = frozenset({'brick wall'}),
+) -> None:
+    """Warn about overlapping or collinear frame elements.
 
+    Applies the same edge-registry comparison used by
+    :func:`find_constraint_edges` but **only** to frame elements.  Any
+    pair of frame elements whose geometric edges share a node and are
+    collinear but have incompatible lengths indicates a duplicate or
+    overlapping member — a modelling error that should be fixed in the
+    source model.
+
+    Args:
+        frame_elements: ``{frame_id: FrameElement}``.
+        frame_assignments: ``{frame_id: section_name}`` or ``None``.
+        nodes: ``{node_id: Node}``.
+        prefix: Optional prefix for warning messages.
+        exclude_types: Section name patterns to skip (case-insensitive
+            substring match).
+    """
+    from collections import defaultdict
+    import numpy as np
+
+    COSINE_TOL = 0.9999
+
+    assign = frame_assignments or {}
+    _node_arr = {nid: np.array([nd.x, nd.y, nd.z], dtype=float)
+                 for nid, nd in nodes.items()}
+
+    def _is_excluded(name: str) -> bool:
+        name_lower = name.lower()
+        return any(excl.lower() in name_lower for excl in exclude_types)
+
+    def _pos_key(nid: str) -> tuple:
+        nd = nodes[nid]
+        return (nd.x, nd.y, nd.z, nid)
+
+    def _chain_dir(key, from_node):
+        other = key[1] if key[0] == from_node else key[0]
+        vec = _node_arr[other] - _node_arr[from_node]
+        nrm = float(np.linalg.norm(vec))
+        return vec / nrm if nrm > 1e-12 else None
+
+    def _cos_match(d1, d2):
+        return float(np.dot(d1, d2)) > COSINE_TOL
+
+    # Build frame-only edge registry
+    frame_reg: Dict[Tuple[str, str], List[str]] = defaultdict(list)
+    for fid, felem in frame_elements.items():
+        if getattr(felem, 'inactive', False) or felem is None:
+            continue
+        if _is_excluded(assign.get(fid, '')):
+            continue
+        nA, nB = felem.node_i, felem.node_j
+        if nA == nB:
+            continue
+        key = (nA, nB) if _pos_key(nA) <= _pos_key(nB) else (nB, nA)
+        frame_reg[key].append(fid)
+
+    # ── 1. Identical overlaps (same key, 2+ frame elements) ────
+    for key, fids in frame_reg.items():
+        if len(fids) >= 2:
+            names = {fid: assign.get(fid, '?') for fid in fids}
+            warnings.warn(
+                f"{prefix}Overlapping frame elements on edge "
+                f"{key[0]}\u2192{key[1]}: {names}.  "
+                f"Consolidate in the source model.",
+                stacklevel=2,
+            )
+
+    # ── 2. Partial overlaps (different keys, collinear, share
+    #      a node, incompatible lengths) ─────────────────────────
+    # Group edges by node, then check collinear pairs.
+    node_edges: Dict[str, List[tuple]] = defaultdict(list)
+    for (nA, nB), fids in frame_reg.items():
+        fid = fids[0]
+        ndA, ndB = _node_arr[nA], _node_arr[nB]
+        length = float(np.linalg.norm(ndB - ndA))
+        node_edges[nA].append(((nA, nB), fid, length))
+        node_edges[nB].append(((nA, nB), fid, length))
+
+    checked: set = set()
+    for _node, incident in node_edges.items():
+        if len(incident) < 2:
+            continue
+        for i in range(len(incident)):
+            ki, fidi, leni = incident[i]
+            for j in range(i + 1, len(incident)):
+                kj, fidj, lenj = incident[j]
+                pair = frozenset({(ki, fidi), (kj, fidj)})
+                if pair in checked:
+                    continue
+                checked.add(pair)
+                d_i = _chain_dir(ki, _node)
+                d_j = _chain_dir(kj, _node)
+                if d_i is None or d_j is None:
+                    continue
+                if not _cos_match(d_i, d_j):
+                    continue
+                # Collinear edges of different lengths → overlap
+                if abs(leni - lenj) > 1e-9:
+                    ni = assign.get(fidi, '?')
+                    nj = assign.get(fidj, '?')
+                    warnings.warn(
+                        f"{prefix}Overlapping collinear frame elements: "
+                        f"{fidi} ({ni}) on {ki[0]}\u2192{ki[1]} "
+                        f"and {fidj} ({nj}) on {kj[0]}\u2192{kj[1]}.  "
+                        f"Consolidate in the source model.",
+                        stacklevel=2,
+                    )
 
 
 def find_constraint_edges(
@@ -2080,6 +2195,13 @@ def find_constraint_edges(
     A beam running along a meshed slab edge will be detected: the slab's
     sub-elements create intermediate mesh nodes on the shared edge while
     the single beam element spans the full length.
+
+    .. note::
+       Frame-element edges are only compared against area-element edges.
+       Frame-vs-frame overlaps are **skipped** — they indicate modelling
+       errors (duplicate/collinear members) and should be resolved in the
+       source model rather than patched with constraints.  Use
+       :func:`warn_frame_overlaps` to detect them separately.
 
     Uses a sorted-tuple edge registry where each key ``(nA, nB)`` is
     ordered by node position (X → Y → Z), making the direction implicit:
@@ -2133,7 +2255,12 @@ def find_constraint_edges(
     # ── 1. Build sorted-tuple edge registry ─────────────────────
     # {(nA, nB): [elem_id, ...]}  where nA ≤ nB by position (X→Y→Z).
     # Direction from nA→nB is the positive direction.
+    # Separate sets track which keys came from area vs frame elements
+    # so the sweep can skip frame-vs-frame comparisons (those should
+    # be resolved as modeling errors, not constraints).
     edge_reg: Dict[Tuple[str, str], List[str]] = defaultdict(list)
+    area_keys: set = set()   # keys contributed by area elements
+    frame_keys: set = set()  # keys contributed by frame elements
 
     for aid, elem in area_elements.items():
         if (getattr(elem, 'inactive', False) or elem is None
@@ -2154,6 +2281,7 @@ def find_constraint_edges(
                 continue
             key = (nA, nB) if _pos_key(nA) <= _pos_key(nB) else (nB, nA)
             edge_reg[key].append(aid)
+            area_keys.add(key)
 
     # ── 1b. Add frame element edges to the registry ─────────────
     if frame_elements is not None:
@@ -2172,6 +2300,7 @@ def find_constraint_edges(
                 continue
             key = (nA, nB) if _pos_key(nA) <= _pos_key(nB) else (nB, nA)
             edge_reg[key].append(fid)
+            frame_keys.add(key)
 
     # ── 2. Build node→keys index for chain following ────────────
     # Derived directly from the registry — not a separate data model.
@@ -2282,6 +2411,11 @@ def find_constraint_edges(
                 if d1 is None or d2 is None:
                     continue
                 if not _cos_match(d1, d2):
+                    continue
+                # Skip frame-vs-frame comparisons — overlapping frame
+                # elements should be fixed in the source model, not
+                # patched with constraints.  Frame-vs-area IS wanted.
+                if (nA, nB) not in area_keys and k not in area_keys:
                     continue
                 c1 = _follow(sn, (nA, nB))
                 c2 = _follow(sn, k)
