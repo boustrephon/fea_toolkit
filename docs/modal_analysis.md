@@ -1,13 +1,36 @@
 ### Modal analysis options
 
 The method :meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.run_modal_analysis`
-supports three ``eigen_solver`` modes:
+supports the following ``eigen_solver`` modes:
 
 | Value | Solver | Speed | Notes |
 |---|---|---|---|
 | ``"default"`` | ARPACK (implicitly restarted Lanczos) | Fast (~seconds) | Uses ARPACK's iterative Lanczos method. May fail with ``info=-9`` ("Starting vector is zero") when all DOFs are exactly zero. The builder automatically falls back to ``fullGenLapack``. |
-| ``"fullGenLapack"`` | LAPACK full eigenvalue solve | Very slow (~minutes–hours) | Computes **all** eigenvalues of the system via LAPACK's dense solver. Robust but impractical for models with > 10 000 DOFs. Used as a fallback when ARPACK fails. |
-| ``"ritz"`` | Load‑Dependent Ritz vectors + ARPACK | Fast (~seconds) | Runs a static gravity step under self‑weight **before** the eigen solve. The deformed shape seeds ARPACK's starting vector, giving vectors that better capture the dynamic response to lateral loads. Same eigenvalue accuracy as ``"default"`` but with a Ritz‑type starting vector. |
+| ``"genBandArpack"`` | ARPACK (generalised banded) | Fast (~seconds) | The **default** solver in OpenSees. More efficient than plain ARPACK for banded stiffness matrices. **Requires a non‑zero starting vector** — the builder applies a Ritz gravity pre‑step (static gravity) before calling the solver. This is the recommended solver for most models. |
+| ``"symmBandLapack"`` | Symmetric banded LAPACK | Fast | ❌ **Not suitable** — only solves standard eigenproblems (Aφ = λφ), not the generalised problem (Kφ = λMφ) needed for structural dynamics. Falls back to ARPACK → fullGenLapack. |
+| ``"fullGenLapack"`` | LAPACK full eigenvalue solve | Very slow (~minutes–hours) | Computes **all** eigenvalues via LAPACK's dense solver. Robust but impractical for models with > 10 000 DOFs. Used as a fallback when ARPACK fails. |
+| ``"ritz"`` | Gravity pre‑step + ARPACK | Fast (~seconds) | Runs a static gravity step under self‑weight **before** the eigen solve. The deformed shape seeds ARPACK's starting vector, giving vectors that better capture lateral‑load response. Same eigenvalue accuracy as ``"default"`` but with a Ritz‑type starting vector. |
+
+#### OpenSees Ritz vector support
+
+OpenSees does **not** have a native ``ritz`` command in the standard distribution (it was never added to the Tcl interpreter). The ``"ritz"`` mode above is the closest approximation — it applies the static gravity displacement as ARPACK's starting vector, which biases convergence toward modes that participate in the gravity response.
+
+True Load-Dependent Ritz vectors (Krylov subspace: K⁻¹M applied repeatedly to a starting load pattern) can be generated manually by:
+1. Applying a load pattern and solving static equilibrium
+2. Forming the mass‑proportional load from the resulting displacements
+3. Solving static equilibrium again for the next vector
+4. Orthogonalising and iterating
+
+This requires extracting system matrices (not directly available in OpenSeesPy) or running a sequence of static analyses with computed load vectors.
+
+#### Built-in eigen solver options
+
+OpenSees' ``eigen`` command accepts two solver flags (per the official documentation at `<https://opensees.berkeley.edu/wiki/index.php?title=Eigen_Command>`_):
+
+- ``-genBandArpack`` — generalised banded ARPACK (default, fast, recommended)
+- ``-fullGenLapack`` — dense LAPACK (robust, very slow for large models)
+
+No ``-load`` or Ritz-specific option exists in the standard distribution.
 
 #### Usage
 
@@ -15,11 +38,17 @@ supports three ``eigen_solver`` modes:
 # Standard ARPACK (default)
 modal = builder.run_modal_analysis(num_modes=6, eigen_solver="default")
 
+# Generalised banded ARPACK (recommended, with Ritz pre-step)
+modal = builder.run_modal_analysis(num_modes=6, eigen_solver="genBandArpack")
+
 # Full LAPACK (robust, slow)
 modal = builder.run_modal_analysis(num_modes=6, eigen_solver="fullGenLapack")
 
 # Ritz vectors (gravity pre‑step)
 modal = builder.run_modal_analysis(num_modes=6, eigen_solver="ritz")
+
+# Symmetric banded LAPACK (standard eigenproblem only — not recommended)
+modal = builder.run_modal_analysis(num_modes=6, eigen_solver="symmBandLapack")
 ```
 
 #### Gravitational acceleration
