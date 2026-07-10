@@ -74,6 +74,7 @@ class OpenSeesBuilder:
         self.split_assignments: Optional[Dict[str, str]] = None
         self.split_dist_loads: Optional[List[FrameDistributedLoad]] = None
         self._has_edge_constraints: bool = False
+        self._has_spring_constraints: bool = False
         self._saved_edge_constraints: List[tuple] = []
         self._offset_rigid_links: List[tuple] = []
         # Snapshot pristine frame data so rebuilds always start from the
@@ -2918,7 +2919,7 @@ class OpenSeesBuilder:
                     count += 1
 
         if count:
-            self._has_edge_constraints = True
+            self._has_spring_constraints = True
             # Save call args so Ritz rebuild can reapply them
             # (ops.wipe() destroys all elements including springs)
             if coarse_edges is not None or coarse_elements is not None:

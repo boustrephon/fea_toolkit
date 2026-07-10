@@ -100,39 +100,52 @@ plane). A single Z-band sweep suffices — there are no true vertical
 
 ### Solver Compatibility
 
-The constraints produced from these tears are implemented as
-``equationConstraint`` MPCs with the **Penalty** constraint handler
-(``ops.constraints('Penalty', 1e12, 1e12)``).  This works because
-``equationConstraint`` defines a *multi‑point constraint* that the
-Penalty handler enforces by adding large penalty stiffness terms to the
-global stiffness matrix **K**.
+Two methods are available, controlled by the ``constraint_method`` config:
+
+| Method | Config value | Mechanism | Handler needed | Tcl‑safe |
+|---|---|---|---|---|
+| **Spring elements** (default) | ``"spring"`` | ``zeroLength`` + ``Elastic`` material | Any (none needed) | ✅ |
+| **Penalty MPC** | ``"penalty"`` | ``equationConstraint`` + Penalty handler | ``Penalty`` only | ✅ |
+
+#### Spring‑element method (default)
+
+Creates two ``zeroLength`` spring elements per slave node (one to each
+master edge end), with stiffness weighted by interpolation factors.
+These are physical elements in the domain — they contribute directly to
+the global stiffness matrix **K** and are visible to every solver
+(static, modal, eigen, pushover, time‑history) without any constraint
+handler dependency.
 
 Analysis types that work:
 
 | Analysis | How it works | Status |
 |---|---|---|
-| **Linear static** | ``ops.analyze()`` invokes the constraint handler → penalty terms added to K → constraint enforced | ✅ |
-| **Non-linear pushover** | Same as static, at each converged step | ✅ |
-| **Modal / eigen** | ``ops.eigen()`` calls ``ConstraintHandler::handle()`` → penalty terms added to K → eigen solver sees modified K | ✅ |
-| **Response spectrum** | Post‑processed from modal results → inherits modal correctness | ✅ |
+| **Linear static** | Springs in K → constraint enforced at each iteration | ✅ |
+| **Non-linear pushover** | Springs in K → consistent stiffness throughout | ✅ |
+| **Modal / eigen** | Springs in K → eigen solver sees connection directly | ✅ |
+| **Response spectrum** | Post‑processed from modal → inherits modal correctness | ✅ |
+
+The spring stiffness is controlled by *penalty_stiffness* (default:
+``1e12 × EA/L`` for near‑rigid behaviour).  Lower values produce a
+physically flexible connection — useful when modelling actual joint
+flexibility rather than an abstract penalty.
+
+#### Penalty MPC method (``constraint_method: "penalty"``)
+
+Uses ``equationConstraint`` to define interpolation‑weighted MPCs,
+enforced by the **Penalty** constraint handler
+(``ops.constraints('Penalty', 1e12, 1e12)``).
 
 .. warning::
-   The constraint handler **must** be ``Penalty`` when ``equationConstraint``
-   MPCs are present.  The ``Transformation`` handler cannot process general
-   MPC equations — it only handles ``equalDOF`` and ``rigidDiaphragm``.
-   If ``Transformation`` is used, the constraints are silently ignored and
-   the slave nodes remain free, producing visible "tears" in mode shapes.
+   The ``Transformation`` handler **cannot** process ``equationConstraint``
+   MPCs — it only handles ``equalDOF`` and ``rigidDiaphragm``.  Using
+   ``Transformation`` silently ignores the constraints, producing visible
+   "tears" in mode shapes.
 
-   The builder's ``run_modal_analysis()`` method sets the handler to
-   ``Penalty`` when edge constraints are present.  Ensure that any custom
-   analysis code does not override this with ``Transformation``.
-
-**Alternative: spring elements.**  For cases where you want a physically‑
-interpretable connection stiffness (rather than an arbitrary penalty
-factor), use ``apply_spring_edge_constraints()`` instead.  This creates
-``zeroLength`` spring elements that contribute to **K** directly and are
-visible to all solvers including ``eigen``, without relying on a
-constraint handler at all.
+   The builder's ``run_modal_analysis()`` and ``run_static_analysis()``
+   methods automatically use ``Penalty`` when edge constraints are
+   present.  Do **not** set ``solver_constraints`` to ``"Transformation"``
+   in the config when using this method.
 
 **Shell element DOFs**: ``ShellMITC4`` has 6 DOFs per node (UX, UY, UZ, RX, RY, RZ).
 Constraining all 6 DOFs along incompatible edges is correct for both

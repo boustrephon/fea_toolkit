@@ -206,12 +206,15 @@ def preprocess_model(md: SAPModelData) -> Dict[str, Any]:
         if raw_edges:
             print(f"  → {len(raw_edges)} constraint edge(s) detected")
             # Convert (node_ids, type_a, type_b) → [(tag_i, tag_j), ...]
+            # Use first and last node of each chain as master-edge endpoints.
+            # Intermediate nodes become slaves constrained to the full span.
             coarse_pairs = []
-            for nids, _, _ in raw_edges:
-                for i in range(len(nids) - 1):
-                    t1 = b.model.nodes[nids[i]].node_tag
-                    t2 = b.model.nodes[nids[i + 1]].node_tag
-                    coarse_pairs.append((t1, t2))
+            for nids, *_ in raw_edges:
+                if len(nids) >= 2:
+                    t1 = b.model.nodes[nids[0]].node_tag
+                    t2 = b.model.nodes[nids[-1]].node_tag
+                    if t1 is not None and t2 is not None and t1 != t2:
+                        coarse_pairs.append((t1, t2))
             b.apply_edge_constraints(coarse_edges=coarse_pairs)
         stats["constraints_applied"] = bool(raw_edges)
     except Exception as exc:
@@ -393,11 +396,12 @@ def _build_and_constrain(md: SAPModelData) -> OpenSeesBuilder:
     )
     if raw_edges:
         coarse_pairs = []
-        for nids, _, _ in raw_edges:
-            for i in range(len(nids) - 1):
-                t1 = b.model.nodes[nids[i]].node_tag
-                t2 = b.model.nodes[nids[i + 1]].node_tag
-                coarse_pairs.append((t1, t2))
+        for nids, *_ in raw_edges:
+            if len(nids) >= 2:
+                t1 = b.model.nodes[nids[0]].node_tag
+                t2 = b.model.nodes[nids[-1]].node_tag
+                if t1 is not None and t2 is not None and t1 != t2:
+                    coarse_pairs.append((t1, t2))
         b.apply_edge_constraints(coarse_edges=coarse_pairs)
     return b
 
