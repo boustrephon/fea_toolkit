@@ -3,7 +3,7 @@
 import json
 import re
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Union  # noqa: F401
+from typing import Dict, List, Any, Optional, Union, Tuple  # noqa: F401
 import numpy as np  # noqa: F401
 
 from ..model.sap_data import (
@@ -31,6 +31,17 @@ class SAP2000Parser:
         """Initialise parser with path to .S2K file."""
         self.file_path = Path(file_path)
         self._raw_tables: Dict[str, List[Dict[str, Any]]] = {}
+
+    @property
+    def raw_tables(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Public accessor for the raw parsed table data.
+
+        Returns a dict mapping table names (e.g. ``"STORY DATA"``,
+        ``"JOINT COORDINATES"``) to lists of row dicts.  Used by
+        :func:`~fea_toolkit.model.stories.identify_stories` for
+        storey detection and by downstream diagnostic tools.
+        """
+        return self._raw_tables
 
     # -------------------------------------------------------------------------
     # Parsing (adapted from your parse_sap2000_table_file / parse_file)
@@ -258,6 +269,17 @@ class SAP2000Parser:
                 if isinstance(sec, ShellSection):
                     a_elem.thickness = sec.thickness
 
+        # ── Apply cardinal points to frame elements ──
+        frame_cardinal = self._get_frame_cardinal_points()
+        for eid, fe in frame_elements.items():
+            cp = frame_cardinal.get(eid)
+            if cp is not None:
+                fe.cardinal_point = cp
+
+        # ── Compute combined offsets (longitudinal + cardinal point) ──
+        frame_end_offsets = self._merge_cardinal_into_offsets(
+            frame_elements, sections, frame_assignments, frame_end_offsets,
+        )
 
         return SAPModelData(
             nodes=nodes,
@@ -606,6 +628,164 @@ class SAP2000Parser:
                 assign[eid] = sec
         return assign
 
+    def _get_frame_cardinal_points(self) -> Dict[str, int]:
+        """Extract cardinal point (insertion point) from FRAME SECTION ASSIGNMENTS.
+
+        Looks for columns named ``CardinalPoint``, ``Cardinal``, ``CARDINALPT``,
+        or ``InsertPoint`` in the FRAME SECTION ASSIGNMENTS table.
+
+        Cardinal point numbering (1–11):
+
+        =====  ===============
+        Value  Position
+        =====  ===============
+        1      Bottom left
+        2      Bottom centre
+        3      Bottom right
+        4      Middle left
+        5      Middle centre
+        6      Middle right
+        7      Top left
+        8      Top centre
+        9      Top right
+        10     Centroid (default)
+        11     Shear centre
+        =====  ===============
+
+        Returns
+        -------
+        Dict[str, int]
+            Mapping from frame ID to its cardinal point integer (1–11).
+            An empty dict is returned when no cardinal point column is present.
+        """
+        result: Dict[str, int] = {}
+        col_names = ('CardinalPoint', 'Cardinal', 'CARDINALPT', 'InsertPoint')
+        table = self._raw_tables.get('FRAME SECTION ASSIGNMENTS', [])
+        if not table:
+            return result
+        # Detect which column name is present (if any)
+        col = None
+        for c in col_names:
+            if c in table[0]:
+                col = c
+                break
+        if col is None:
+            return result
+        for a in table:
+            eid = str(a.get('Frame', '0'))
+            if eid == '0':
+                continue
+            raw = a.get(col)
+            if raw is not None:
+                try:
+                    result[eid] = int(raw)
+                except (ValueError, TypeError):
+                    pass
+        return result
+
+    @staticmethod
+    def _cardinal_point_offset(num: int, D: float, B: float) -> Tuple[float, float]:
+        """Compute (off_y, off_z) from a cardinal point and section dimensions.
+
+        Per SAP2000/ETABS convention (matching E2K_utilities):
+
+        =====  ===============  ==================================
+        Value  Position         Offset (y, z) relative to centroid
+        =====  ===============  ==================================
+        1      Bottom left      (\u00bdB,  \u00bdD)
+        2      Bottom centre    (0,      \u00bdD)
+        3      Bottom right     (-\u00bdB, \u00bdD)
+        4      Middle left      (\u00bdB,  0)
+        5      Middle centre    (0,      0)
+        6      Middle right     (-\u00bdB, 0)
+        7      Top left         (\u00bdB, -\u00bdD)
+        8      Top centre       (0,     -\u00bdD)
+        9      Top right        (-\u00bdB,-\u00bdD)
+        10     Centroid         (0,      0)
+        11     Shear centre     (0,      0)
+        =====  ===============  ==================================
+
+        Offsets are relative to the section centroid in the local y-z plane.
+        D = depth (local-3 direction), B = width (local-2 direction).
+        For circular sections (B = 0), D is used in place of B.
+        """
+        b = D if B == 0 else B  # circular sections: use D for both
+        return {
+            1: ( 0.5 * b,  0.5 * D),   # Bottom left
+            2: ( 0.0,      0.5 * D),   # Bottom centre
+            3: (-0.5 * b,  0.5 * D),   # Bottom right
+            4: ( 0.5 * b,  0.0),       # Middle left
+            5: ( 0.0,      0.0),       # Middle centre (centroid of bbox)
+            6: (-0.5 * b,  0.0),       # Middle right
+            7: ( 0.5 * b, -0.5 * D),   # Top left
+            8: ( 0.0,     -0.5 * D),   # Top centre
+            9: (-0.5 * b, -0.5 * D),   # Top right
+           10: ( 0.0,      0.0),       # Centroid
+           11: ( 0.0,      0.0),       # Shear centre
+        }.get(num, (0.0, 0.0))
+
+    @staticmethod
+    def _get_section_depth_width(sec: 'Section') -> Tuple[float, float]:
+        """Extract section depth D (local-3) and width B (local-2).
+
+        Returns (0, 0) for sections with no explicit dimensions.
+        """
+        from ..model.sap_data import (
+            ISection, ChannelSection, PipeSection, BoxSection,
+            RectangularSection, CircularSection, AngleSection,
+            DoubleAngleSection, TeeSection, GeneralSection,
+        )
+        if isinstance(sec, (ISection, ChannelSection, BoxSection,
+                            AngleSection, DoubleAngleSection, TeeSection)):
+            return sec.depth, sec.bf
+        elif isinstance(sec, PipeSection):
+            return sec.od, sec.od   # circular: D = B = od
+        elif isinstance(sec, (RectangularSection,)):
+            return sec.depth, sec.bf
+        elif isinstance(sec, (CircularSection,)):
+            return sec.diameter, sec.diameter
+        return 0.0, 0.0
+
+    def _merge_cardinal_into_offsets(
+        self,
+        frame_elements: Dict[str, 'FrameElement'],
+        sections: Dict[str, 'Section'],
+        frame_assignments: Dict[str, str],
+        existing_offsets: Dict[str, FrameEndOffset],
+    ) -> Dict[str, FrameEndOffset]:
+        """Merge cardinal point offsets into FrameEndOffset records.
+
+        For each frame element whose cardinal point is not the centroid (10),
+        computes the (y, z) offset from the section dimensions and stores it
+        in the frame's end offset record.  If no offset record exists yet,
+        one is created.
+        """
+        merged = dict(existing_offsets)  # shallow copy
+        for eid, fe in frame_elements.items():
+            cp = fe.cardinal_point
+            if cp == 10:   # centroid — no offset needed
+                continue
+            sec_name = frame_assignments.get(eid)
+            if not sec_name:
+                continue
+            sec = sections.get(sec_name)
+            if sec is None:
+                continue
+            D, B = self._get_section_depth_width(sec)
+            if D == 0.0 and B == 0.0:
+                continue
+            off_y, off_z = self._cardinal_point_offset(cp, D, B)
+            if off_y == 0.0 and off_z == 0.0:
+                continue
+            # Merge into existing offset or create new
+            extant = merged.get(eid, FrameEndOffset())
+            extant.off_y_i = off_y
+            extant.off_z_i = off_z
+            extant.off_y_j = off_y
+            extant.off_z_j = off_z
+            merged[eid] = extant
+        return merged
+
     def _get_area_assignments(self) -> Dict[str, str]:
         assign = {}
         for a in self._raw_tables.get('AREA SECTION ASSIGNMENTS', []):
@@ -689,6 +869,18 @@ class SAP2000Parser:
                 common['Z33'] = float(common['Z33'])
             if common['Z22'] is not None:
                 common['Z22'] = float(common['Z22'])
+
+            # Stiffness modifiers from FRAME SECTION PROPERTIES 01 - GENERAL
+            # (default = 1.0 meaning no modification; used for elastic builds)
+            modifiers = {}
+            for mk in ('AMod', 'A2Mod', 'A3Mod', 'JMod', 'I2Mod', 'I3Mod'):
+                mv = sec.get(mk)
+                if mv is not None:
+                    try:
+                        modifiers[mk] = float(mv)
+                    except (ValueError, TypeError):
+                        pass
+            common['modifiers'] = modifiers
 
             # Shape‑specific dimensions (SAP2000 t3 = depth, t2 = width)
             t3 = float(sec.get('t3', 0))

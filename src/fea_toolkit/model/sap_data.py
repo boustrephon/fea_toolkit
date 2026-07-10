@@ -47,12 +47,23 @@ class Constraint:
 class FrameEndOffset:
     """Rigid end offset (rigid zone) at each end of a frame element.
 
-    Values are in model length units (typically m or mm), measured from
-    the node toward the element interior.  Zero means no offset (the
-    elastic portion extends all the way to the node).
+    Values are in model length units (typically m or mm).
+    ``end_i`` / ``end_j`` are longitudinal offsets measured from the node
+    toward the element interior (zero = elastic portion extends to the
+    node).
+
+    ``off_y_i`` / ``off_z_i`` / ``off_y_j`` / ``off_z_j`` are lateral
+    offsets in the local y/z plane, typically derived from cardinal point
+    (insertion point) settings.  These shift the section position relative
+    to the reference line.  See :class:`FrameElement` for the cardinal
+    point numbering scheme (1–11).
     """
-    end_i: float = 0.0    # Offset at I-end
-    end_j: float = 0.0    # Offset at J-end
+    end_i: float = 0.0      # Longitudinal offset at I-end
+    end_j: float = 0.0      # Longitudinal offset at J-end
+    off_y_i: float = 0.0    # Lateral y-offset at I-end (from cardinal pt)
+    off_z_i: float = 0.0    # Lateral z-offset at I-end (from cardinal pt)
+    off_y_j: float = 0.0    # Lateral y-offset at J-end (from cardinal pt)
+    off_z_j: float = 0.0    # Lateral z-offset at J-end (from cardinal pt)
 
 
 @dataclass
@@ -189,6 +200,9 @@ class Section:
     Z22: Optional[float] = None
     # Extra
     manufacturer: Optional[str] = None
+    # Stiffness modifiers from FRAME SECTION PROPERTIES 01 - GENERAL
+    # (AMod, A2Mod, A3Mod, JMod, I2Mod, I3Mod — 1.0 = no modification)
+    modifiers: Dict[str, float] = field(default_factory=dict)
 
     @property
     def shape_id(self) -> str:
@@ -740,7 +754,26 @@ class LayeredShellSection:
 
 @dataclass
 class FrameElement:
-    """1D frame element connectivity."""
+    """1D frame element connectivity.
+
+    ``cardinal_point`` is the SAP2000/ETABS insertion point (1–11):
+
+    =====  ===============
+    Value  Position
+    =====  ===============
+    1      Bottom left
+    2      Bottom centre
+    3      Bottom right
+    4      Middle left
+    5      Middle centre
+    6      Middle right
+    7      Top left
+    8      Top centre
+    9      Top right
+    10     Centroid (default)
+    11     Shear centre
+    =====  ===============
+    """
     elem_id: str                     # SAP2000 frame label
     elem_tag: int                    # numeric tag for OpenSees etc
     node_i: str
@@ -750,15 +783,27 @@ class FrameElement:
     parent_id: Optional[str] = None
     child_ids: List[str] = field(default_factory=list)
     t_locations: List[float] = field(default_factory=list)   # parametric positions 0..1 where split occurs
+    cardinal_point: int = 10    # Insertion point per SAP2000/ETABS (1-11; 10=centroid, 5=middle center)
 
 @dataclass
 class AreaElement:
-    """2D shell/area element connectivity."""
+    """2D shell/area element connectivity.
+
+    ``inactive`` is set to ``True`` when the super-element has been
+    subdivided into mesh sub-elements.
+
+    ``parent_id`` / ``child_ids`` track the subdivision hierarchy
+    (mirroring :class:`FrameElement`).  The parent is the original
+    super-element; children are the mesh sub-elements created by
+    :func:`~fea_toolkit.model.geometry.mesh_area_elements`.
+    """
     area_id: str
     area_tag: int
     node_ids: List[str]         # ordered corner nodes
     thickness: float = 0.0
     inactive: bool = False      # True when superseded by mesh sub‑elements
+    parent_id: Optional[str] = None
+    child_ids: List[str] = field(default_factory=list)
 
 
 @dataclass
