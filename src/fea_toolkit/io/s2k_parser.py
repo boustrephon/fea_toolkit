@@ -663,11 +663,15 @@ class SAP2000Parser:
         table = self._raw_tables.get('FRAME SECTION ASSIGNMENTS', [])
         if not table:
             return result
-        # Detect which column name is present (if any)
+        # Scan ALL rows for the first available column among candidates.
+        # This handles tables where column header names vary by row.
         col = None
-        for c in col_names:
-            if c in table[0]:
-                col = c
+        for a in table:
+            for c in col_names:
+                if c in a:
+                    col = c
+                    break
+            if col is not None:
                 break
         if col is None:
             return result
@@ -734,15 +738,16 @@ class SAP2000Parser:
             ISection, ChannelSection, PipeSection, BoxSection,
             RectangularSection, CircularSection, AngleSection,
             DoubleAngleSection, TeeSection, GeneralSection,
+            ConcreteRectangularSection, ConcreteCircularSection,
         )
         if isinstance(sec, (ISection, ChannelSection, BoxSection,
                             AngleSection, DoubleAngleSection, TeeSection)):
             return sec.depth, sec.bf
         elif isinstance(sec, PipeSection):
             return sec.od, sec.od   # circular: D = B = od
-        elif isinstance(sec, (RectangularSection,)):
+        elif isinstance(sec, (RectangularSection, ConcreteRectangularSection)):
             return sec.depth, sec.bf
-        elif isinstance(sec, (CircularSection,)):
+        elif isinstance(sec, (CircularSection, ConcreteCircularSection)):
             return sec.diameter, sec.diameter
         return 0.0, 0.0
 
