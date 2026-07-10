@@ -25,6 +25,7 @@ Inside Rhino::
 """
 
 import typing as t
+import copy
 
 from ..model.sap_data import SAPModelData
 from .colors import RESTRAINT_COLORS, get_sap2000_color
@@ -70,6 +71,7 @@ class RhinoImporterV2:
         create_extrusions: bool = True,
         color_code_joints: bool = True,
         create_groups: bool = True,
+        create_meshed: bool = False,
         verbose: bool = True,
     ) -> t.Dict[str, t.Any]:
         """Execute the full import sequence.
@@ -79,6 +81,9 @@ class RhinoImporterV2:
             create_extrusions: Lightweight ``Extrusion`` solids.
             color_code_joints: Colour joints by restraint type.
             create_groups: Rhino groups from SAP groups.
+            create_meshed: If True, also import meshed geometry (areas
+                sub‑divided, frames split at joints) under a
+                ``SAP2000/Meshed`` layer tree.
             verbose: Print progress.
 
         Returns:
@@ -91,6 +96,10 @@ class RhinoImporterV2:
             "frame_extrusions": 0,
             "shell_extrusions": 0,
             "sap_groups": 0,
+            "meshed_frame_centrelines": 0,
+            "meshed_shell_centrelines": 0,
+            "meshed_frame_extrusions": 0,
+            "meshed_shell_extrusions": 0,
         }
 
         # 1. Layer tree
@@ -152,7 +161,102 @@ class RhinoImporterV2:
                     self.md, shell_layers.extrusion
                 )
 
-        # 5. Groups
+        # 5. Meshed geometry (areas sub‑divided, frames split)
+        if create_meshed:
+            if verbose:
+                print("Pre-processing meshed model...")
+
+            try:
+                from ..model.geometry import (
+                    mesh_area_elements,
+                    split_elements,
+                    split_areas_at_frame_edges,
+                )
+
+                md_mesh = copy.deepcopy(self.md)
+
+                max_tag = 0
+                for nd in md_mesh.nodes.values():
+                    max_tag = max(max_tag, nd.node_tag)
+                next_tag = max_tag + 1
+
+                dist_loads = getattr(md_mesh, 'frame_dist_loads', [])
+                frame_auto_mesh = getattr(md_mesh, 'frame_auto_mesh', {})
+                area_mesh = getattr(md_mesh, 'area_mesh', {})
+
+                md_mesh.area_elements, md_mesh.area_assignments, \
+                    md_mesh.nodes, next_tag = mesh_area_elements(
+                    md_mesh.area_elements, md_mesh.area_assignments,
+                    md_mesh.nodes, area_mesh, next_tag=next_tag,
+                )
+
+                md_mesh.frame_elements, md_mesh.frame_assignments, _ = (
+                    split_elements(
+                        md_mesh.nodes, md_mesh.frame_elements,
+                        md_mesh.frame_assignments,
+                        dist_loads, frame_auto_mesh,
+                    )
+                )
+
+                md_mesh.area_elements, md_mesh.area_assignments, \
+                    md_mesh.nodes, next_tag = split_areas_at_frame_edges(
+                    md_mesh.area_elements, md_mesh.area_assignments,
+                    md_mesh.nodes, md_mesh.frame_elements,
+                    next_tag=next_tag,
+                )
+
+                if verbose:
+                    print(f"  Meshed: {len(md_mesh.area_elements)} shells, "
+                          f"{len(md_mesh.frame_elements)} frames")
+
+            except Exception as exc:
+                if verbose:
+                    print(f"  Meshing skipped ({exc})")
+                md_mesh = None
+
+            if md_mesh is not None:
+                meshed_root = create_root_layer(name="Meshed",
+                                                 parent=root_idx)
+                meshed_frame_layers = create_frame_layers(
+                    meshed_root, frame_section_props, prefix="Meshed/"
+                )
+                meshed_shell_layers = create_shell_layers(
+                    meshed_root, shell_section_props, prefix="Meshed/"
+                )
+
+                if create_centreline:
+                    if md_mesh.frame_elements:
+                        if verbose:
+                            print("Creating meshed frame centreline lines...")
+                        results["meshed_frame_centrelines"] = \
+                            create_frame_lines(
+                                md_mesh, meshed_frame_layers.centreline
+                            )
+                    if md_mesh.area_elements:
+                        if verbose:
+                            print("Creating meshed shell centreline Breps...")
+                        results["meshed_shell_centrelines"] = \
+                            create_shell_breps(
+                                md_mesh, meshed_shell_layers.centreline
+                            )
+
+                if create_extrusions:
+                    if md_mesh.frame_elements:
+                        if verbose:
+                            print("Creating meshed frame extrusions...")
+                        results["meshed_frame_extrusions"] = \
+                            create_frame_extrusions(
+                                md_mesh, meshed_frame_layers.extrusion
+                            )
+                    if md_mesh.area_elements:
+                        if verbose:
+                            print("Creating meshed shell extrusions...")
+                        results["meshed_shell_extrusions"] = \
+                            create_shell_extrusions(
+                                md_mesh, meshed_shell_layers.extrusion
+                            )
+
+        # 6. Groups
         if create_groups:
             if verbose:
                 print("Creating selection groups...")
@@ -164,7 +268,7 @@ class RhinoImporterV2:
                     self.md, joint_obj_ids, frame_obj_ids, shell_obj_ids
                 )
 
-        # 6. Joint colour coding
+        # 7. Joint colour coding
         if color_code_joints and joint_obj_ids:
             if verbose:
                 print("Color-coding joints by restraint type...")

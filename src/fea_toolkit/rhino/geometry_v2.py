@@ -238,29 +238,78 @@ def create_joint_points(
 # Frame element geometry — lightweight Extrusion
 # ========================================================================
 
+def _get_frame_points(md: SAPModelData, eid: str, elem):
+    """Compute node I/J positions adjusted for frame end offsets.
+
+    Returns ``(p_i, p_j, x_axis, y_axis, z_axis, length,
+               elastic_i, elastic_j,
+               off_y_i, off_z_i, off_y_j, off_z_j)``
+    or ``None`` if the element has invalid nodes.
+    """
+    ni = md.nodes.get(elem.node_i)
+    nj = md.nodes.get(elem.node_j)
+    if ni is None or nj is None:
+        return None
+
+    p_i = rg.Point3d(ni.x, ni.y, ni.z)
+    p_j = rg.Point3d(nj.x, nj.y, nj.z)
+    dx = nj.x - ni.x
+    dy = nj.y - ni.y
+    dz = nj.z - ni.z
+    length = math.hypot(dx, dy, dz)
+    if length < 1e-12:
+        return None
+
+    axes = _local_axes(p_i, p_j, elem.angle)
+    if axes is None:
+        return None
+    x_axis, y_axis, z_axis = axes
+
+    # Longitudinal rigid offsets
+    offs = md.frame_end_offsets.get(eid)
+    end_i = offs.end_i if offs else 0.0
+    end_j = offs.end_j if offs else 0.0
+    off_y_i = offs.off_y_i if offs else 0.0
+    off_z_i = offs.off_z_i if offs else 0.0
+    off_y_j = offs.off_y_j if offs else 0.0
+    off_z_j = offs.off_z_j if offs else 0.0
+
+    total_offset = end_i + end_j
+    if total_offset > length * 0.99:
+        scale = length * 0.99 / max(total_offset, 1e-12)
+        end_i *= scale
+        end_j *= scale
+
+    xi = rg.Vector3d(x_axis.X * end_i, x_axis.Y * end_i, x_axis.Z * end_i)
+    xj = rg.Vector3d(x_axis.X * end_j, x_axis.Y * end_j, x_axis.Z * end_j)
+    elastic_i = rg.Point3d(p_i.X + xi.X, p_i.Y + xi.Y, p_i.Z + xi.Z)
+    elastic_j = rg.Point3d(p_j.X - xj.X, p_j.Y - xj.Y, p_j.Z - xj.Z)
+
+    return (p_i, p_j, x_axis, y_axis, z_axis, length,
+            elastic_i, elastic_j,
+            off_y_i, off_z_i, off_y_j, off_z_j)
+
+
 def create_frame_lines(
     md: SAPModelData,
     frame_section_layers: t.Dict[str, int],
 ) -> int:
-    """Create line objects for frame centrelines."""
+    """Create line objects for frame centrelines (elastic portion)."""
     doc = sc.doc
     count = 0
     default_layer = frame_section_layers.get("Default", 0)
 
     for eid, elem in md.frame_elements.items():
         try:
-            ni = md.nodes.get(elem.node_i)
-            nj = md.nodes.get(elem.node_j)
-            if ni is None or nj is None:
+            pts = _get_frame_points(md, eid, elem)
+            if pts is None:
                 continue
+            _, _, _, _, _, _, ei, ej, *_ = pts
 
             sec_name = md.frame_assignments.get(eid, "")
             layer_index = frame_section_layers.get(sec_name, default_layer)
 
-            p_i = rg.Point3d(ni.x, ni.y, ni.z)
-            p_j = rg.Point3d(nj.x, nj.y, nj.z)
-            line = rg.Line(p_i, p_j)
-
+            line = rg.Line(ei, ej)
             attr = rd.ObjectAttributes()
             attr.LayerIndex = layer_index
             attr.Name = "SAP_Frame_{}".format(eid)
@@ -301,8 +350,9 @@ def create_frame_extrusions(
 ) -> int:
     """Create lightweight ``Extrusion`` objects for frame elements.
 
-    Uses ``rg.Extrusion.Create()`` which produces true lightweight
-    Extrusion objects (not Brep polysurfaces).
+    Accounts for longitudinal rigid offsets and lateral cardinal‑point
+    offsets.  Uses ``rg.Extrusion.Create()`` which produces true
+    lightweight Extrusion objects.
     """
     doc = sc.doc
     count = 0
@@ -310,10 +360,12 @@ def create_frame_extrusions(
 
     for eid, elem in md.frame_elements.items():
         try:
-            ni = md.nodes.get(elem.node_i)
-            nj = md.nodes.get(elem.node_j)
-            if ni is None or nj is None:
+            pts = _get_frame_points(md, eid, elem)
+            if pts is None:
                 continue
+            (p_i, p_j, x_axis, y_axis, z_axis, length,
+             ei, ej,
+             off_y_i, off_z_i, off_y_j, off_z_j) = pts
 
             sec_name = md.frame_assignments.get(eid, "")
             layer_index = frame_extrusion_layers.get(sec_name, default_layer)
@@ -321,39 +373,25 @@ def create_frame_extrusions(
                 continue
 
             sec = md.sections[sec_name]
-            p_i = rg.Point3d(ni.x, ni.y, ni.z)
-            p_j = rg.Point3d(nj.x, nj.y, nj.z)
-
-            axes = _local_axes(p_i, p_j, elem.angle)
-            if axes is None:
-                continue
-            x_axis, y_axis, z_axis = axes
-
-            dx = nj.x - ni.x
-            dy = nj.y - ni.y
-            dz = nj.z - ni.z
-            length = math.hypot(dx, dy, dz)
 
             # Build profile
             profile = _build_profile_curve(sec)
             if profile is None:
                 continue
 
+            # Interpolate lateral offset at I-end
+            oy_i = off_y_i
+            oz_i = off_z_i
+
             extrusion = None
 
             if isinstance(profile, tuple) and profile[0] == "circle":
                 r = profile[1]
-                # Circle at origin in the XY plane
                 plane = rg.Plane(rg.Point3d(0, 0, 0), rg.Vector3d(0, 0, 1))
                 circle = rg.Circle(plane, r)
                 profile_curve = circle.ToNurbsCurve()
                 extrusion = rg.Extrusion.Create(profile_curve, length, True)
             else:
-                # Polyline profile in XY plane — extrude along Z.
-                # Determine winding direction from signed area to pick
-                # the correct height sign for Extrusion.Create.
-                # CW (area < 0) → plane normal = -Z → use -length
-                # CCW (area > 0) → plane normal = +Z → use +length
                 signed_area = 0.0
                 n = profile.PointCount
                 for j in range(n):
@@ -369,14 +407,21 @@ def create_frame_extrusions(
             if extrusion is None:
                 continue
 
-            # Transform: Z→x_axis, X→z_axis, Y→y_axis
+            # Transform: apply lateral offset then position at elastic_i
+            # The extrusion is built along local Z.  We need to map
+            # (X_local, Y_local, Z_local) → (Z_axis, Y_axis, X_axis).
+            # The lateral offset shifts the profile in the Y–Z plane.
+            origin_x = ei.X + y_axis.X * oy_i + z_axis.X * oz_i
+            origin_y = ei.Y + y_axis.Y * oy_i + z_axis.Y * oz_i
+            origin_z = ei.Z + y_axis.Z * oy_i + z_axis.Z * oz_i
+
             xform = rg.Transform.Identity
             xform.M00 = z_axis.X; xform.M01 = y_axis.X; xform.M02 = x_axis.X
             xform.M10 = z_axis.Y; xform.M11 = y_axis.Y; xform.M12 = x_axis.Y
             xform.M20 = z_axis.Z; xform.M21 = y_axis.Z; xform.M22 = x_axis.Z
-            xform.M03 = p_i.X
-            xform.M13 = p_i.Y
-            xform.M23 = p_i.Z
+            xform.M03 = origin_x
+            xform.M13 = origin_y
+            xform.M23 = origin_z
             xform.M33 = 1.0
             extrusion.Transform(xform)
 

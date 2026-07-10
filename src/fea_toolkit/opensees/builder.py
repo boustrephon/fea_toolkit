@@ -5416,12 +5416,23 @@ class OpenSeesBuilder:
         Args:
             num_modes: Number of eigenvalues to solve for.
             print_results: If True, print a modal properties table.
-            eigen_solver:  ``"default"`` — ARPACK (fast, fallback to
-                fullGenLapack).  ``"fullGenLapack"`` — robust but slow for
-                large models.  ``"ritz"`` — Load-Dependent Ritz vectors:
-                runs a static gravity step under self-weight first, then
-                solves eigen from the deformed state.  The Ritz vectors
-                better capture the dynamic response to lateral loads.
+            eigen_solver: Solver strategy.
+
+                ``"default"``
+                    ARPACK (fast), fallback to fullGenLapack.
+                ``"fullGenLapack"``
+                    Robust but slow for large models.
+                ``"genBandArpack"``
+                    Generalized banded ARPACK.  Requires a static pre‑step
+                    (Ritz nudge) to provide a non‑zero starting vector.
+                ``"symmBandLapack"``
+                    Symmetric banded Lapack solver — fast when the stiffness
+                    matrix is banded (typical for frame/shell models).
+                ``"ritz"``
+                    Load‑Dependent Ritz vectors: runs a static gravity step
+                    under self‑weight first, then solves eigen from the
+                    deformed state via ARPACK.  The Ritz vectors better
+                    capture dynamic response to lateral loads.
             g: Gravitational acceleration (unit‑aware).  ``None`` =
                 auto-detect from model units.  Default 9.80665 m/s².
 
@@ -5461,50 +5472,90 @@ class OpenSeesBuilder:
             _active_g = g if g is not None else _stored_g
             self.compute_seismic_masses(g=_active_g)
 
-        # ── Ritz vector pre-step ────────────────────────────────
-        # Run a static gravity step under self-weight so the deformed
-        # shape seeds ARPACK's starting vector, giving Load-Dependent
-        # Ritz-like vectors that better capture lateral-load response.
-        if eigen_solver == "ritz":
+        # ── Ritz / pre-load nudge ────────────────────────────────
+        # Run a static gravity step so the deformed shape seeds
+        # the solver's starting vector.  Needed for -genBandArpack
+        # (which requires a non‑zero starting point) and beneficial
+        # for ARPACK in stiff models where zero initial vector can
+        # cause convergence issues.
+        _needs_nudge = eigen_solver in ("genBandArpack", "ritz")
+        if _needs_nudge:
             if self.config['verbose']:
-                print("  Ritz vector pre-step (static gravity)...")
-            # Isolate to self-weight only: rebuild the model with just
-            # the gravity patterns so the pre-step displacement comes
-            # purely from self-weight, not from other active loads.
+                print("  Ritz pre-step (static gravity)...")
             _sw_patterns = {}
             for pn, pat in self.model.load_patterns.items():
                 if abs(pat.self_weight_factor) > 0:
                     _sw_patterns[pn] = pat.self_weight_factor
             if not _sw_patterns:
-                # No self-weight patterns exist — skip the Ritz pre-step.
-                # The ARPACK solver below will use whatever initial state
-                # is present (zero displacements → default starting vector).
-                eigen_solver = "default"
+                if self.config['verbose']:
+                    print("  No self-weight patterns — applying 1 kN/m³ dummy load")
+                # Apply a tiny dummy gravity load to create non‑zero state
+                for tag in ops.getNodeTags():
+                    ops.load(tag, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0)
+                _sw_patterns = None  # signal: dummy load applied directly
             else:
                 _sel = getattr(self, '_area_selection', None)
                 self.build(pattern_scales=_sw_patterns, selection=_sel)
                 self.compute_seismic_masses(g=g)
-                # Re-apply any edge constraints that were wiped by build()
                 if self._saved_edge_constraints:
                     for args in self._saved_edge_constraints:
                         self.apply_edge_constraints(*args)
+            if _sw_patterns is not None:
                 try:
-                    _ops.constraints('Transformation')
-                    _ops.numberer('RCM')
-                    _ops.system(self.config.get('solver_system', 'BandGen'))
-                    _ops.test('NormDispIncr', 1e-3, 5, 0)
-                    _ops.algorithm('Newton')
-                    _ops.integrator('LoadControl', 1.0)
-                    _ops.analysis('Static')
-                    _ops.analyze(1)
+                    ops.constraints('Transformation')
+                    ops.numberer('RCM')
+                    ops.system(self.config.get('solver_system', 'BandGen'))
+                    ops.test('NormDispIncr', 1e-3, 5, 0)
+                    ops.algorithm('Newton')
+                    ops.integrator('LoadControl', 1.0)
+                    ops.analysis('Static')
+                    ops.analyze(1)
                 except Exception:
                     pass
-                # Fall through to ARPACK — the deformed state seeds it
-                eigen_solver = "default"
+            # If dummy load was applied, remove it before eigen
+            if _sw_patterns is None:
+                for tag in ops.getNodeTags():
+                    ops.load(tag, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
-            eigenvals_all = []
-        if eigen_solver == "default":
-            # ARPACK first, fallback to fullGenLapack
+        # ── Eigenvalue solver ────────────────────────────────────
+        eigenvals_all = []
+        _solver_map = {
+            "genBandArpack": "-genBandArpack",
+            "symmBandLapack": "-symmBandLapack",
+            "fullGenLapack": "-fullGenLapack",
+            "default": None,       # will use plain ops.eigen() below
+        }
+
+        solver_flag = _solver_map.get(eigen_solver)
+        if solver_flag is not None:
+            # Specific solver requested
+            if self.config['verbose']:
+                print(f"  Using {solver_flag}...")
+            try:
+                eigenvals_all = ops.eigen(solver_flag, num_modes)
+            except Exception as exc:
+                if self.config['verbose']:
+                    print(f"  {solver_flag} failed: {exc}")
+                eigenvals_all = []
+            # Some solvers (e.g. -symmBandLapack) only handle standard
+            # eigenproblems and return empty.  Fall back to ARPACK.
+            if not eigenvals_all:
+                if self.config['verbose']:
+                    print(f"  {solver_flag} returned no eigenvalues, "
+                          "falling back to ARPACK...")
+                try:
+                    eigenvals_all = ops.eigen(num_modes)
+                except Exception:
+                    eigenvals_all = []
+                if not eigenvals_all:
+                    if self.config['verbose']:
+                        print("  ARPACK also failed, trying fullGenLapack...")
+                    try:
+                        eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
+                    except Exception:
+                        eigenvals_all = []
+        else:
+            # "default" — ARPACK first, fallback to fullGenLapack
             if self.config['verbose']:
                 print("  Using ARPACK solver...")
             try:
@@ -5521,21 +5572,7 @@ class OpenSeesBuilder:
                     eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
                 except Exception:
                     eigenvals_all = []
-        else:
-            # fullGenLapack first, fallback to ARPACK
-            if self.config['verbose']:
-                print("  Using fullGenLapack solver...")
-            try:
-                eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
-            except Exception:
-                eigenvals_all = []
-            if len(eigenvals_all) == 0:
-                if self.config['verbose']:
-                    print("  fullGenLapack failed, falling back to ARPACK...")
-                try:
-                    eigenvals_all = ops.eigen(num_modes)
-                except Exception:
-                    eigenvals_all = []
+
         eigenvals = [ev for ev in eigenvals_all if ev > 1e-12]
         n_modes = len(eigenvals)
         if n_modes < num_modes:

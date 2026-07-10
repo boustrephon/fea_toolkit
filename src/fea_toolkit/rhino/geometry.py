@@ -193,11 +193,81 @@ def create_joint_points(
 # Frame element geometry
 # ========================================================================
 
+def _get_frame_points(md: SAPModelData, eid: str, elem):
+    """Compute node I/J positions adjusted for frame end offsets.
+
+    Returns ``(p_i, p_j, x_axis, y_axis, z_axis, length, elastic_i, elastic_j)``
+    where:
+
+    * ``p_i``, ``p_j`` — original node positions (``Point3d``).
+    * ``x_axis``, ``y_axis``, ``z_axis`` — local unit vectors.
+    * ``length`` — centreline distance between nodes.
+    * ``elastic_i``, ``elastic_j`` — start/end of the elastic portion
+      (``Point3d``), accounting for longitudinal rigid offsets.
+
+    If the element has no valid nodes, returns ``None``.
+    """
+    (Rhino, sc, rd,
+     Point3d, Brep, Line, Polyline, Mesh,
+     Vector3d, Plane, Arc, Circle, Interval,
+     PolylineCurve, Curve, Extrusion, Transform) = _ensure_rhino()
+
+    ni = md.nodes.get(elem.node_i)
+    nj = md.nodes.get(elem.node_j)
+    if ni is None or nj is None:
+        return None
+
+    p_i = Point3d(ni.x, ni.y, ni.z)
+    p_j = Point3d(nj.x, nj.y, nj.z)
+    dx = nj.x - ni.x
+    dy = nj.y - ni.y
+    dz = nj.z - ni.z
+    length = math.hypot(dx, dy, dz)
+    if length < 1e-12:
+        return None
+
+    # Local axes
+    axes = _local_axes(p_i, p_j, elem.angle)
+    if axes is None:
+        return None
+    x_axis, y_axis, z_axis = axes
+
+    # Longitudinal rigid offsets
+    offs = md.frame_end_offsets.get(eid)
+    end_i = offs.end_i if offs else 0.0
+    end_j = offs.end_j if offs else 0.0
+    off_y_i = offs.off_y_i if offs else 0.0
+    off_z_i = offs.off_z_i if offs else 0.0
+    off_y_j = offs.off_y_j if offs else 0.0
+    off_z_j = offs.off_z_j if offs else 0.0
+
+    # Clamp longitudinal offsets so they don't exceed element length
+    total_offset = end_i + end_j
+    if total_offset > length * 0.99:
+        scale = length * 0.99 / max(total_offset, 1e-12)
+        end_i *= scale
+        end_j *= scale
+
+    # Elastic portion start/end (node + offset along local x)
+    xi = Vector3d(x_axis.X * end_i, x_axis.Y * end_i, x_axis.Z * end_i)
+    xj = Vector3d(x_axis.X * end_j, x_axis.Y * end_j, x_axis.Z * end_j)
+    elastic_i = Point3d(p_i.X + xi.X, p_i.Y + xi.Y, p_i.Z + xi.Z)
+    elastic_j = Point3d(p_j.X - xj.X, p_j.Y - xj.Y, p_j.Z - xj.Z)
+
+    return (p_i, p_j, x_axis, y_axis, z_axis, length,
+            elastic_i, elastic_j,
+            off_y_i, off_z_i, off_y_j, off_z_j)
+
+
 def create_frame_lines(
     md: SAPModelData,
     frame_section_layers: t.Dict[str, int],
 ) -> int:
     """Create Rhino line objects for frame elements.
+
+    Lines represent the **elastic portion** of each member (node‑to‑node
+    centreline shortened by rigid end offsets).  Lateral cardinal‑point
+    offsets do not affect the centreline representation.
 
     Each line stores:
         ``SAP_Type``, ``SAP_FrameID``, ``SAP_Section``,
@@ -222,20 +292,15 @@ def create_frame_lines(
 
     for eid, elem in md.frame_elements.items():
         try:
-            ni = md.nodes.get(elem.node_i)
-            nj = md.nodes.get(elem.node_j)
-            if ni is None or nj is None:
+            pts = _get_frame_points(md, eid, elem)
+            if pts is None:
                 continue
+            p_i, p_j, _, _, _, _, ei, ej, *_ = pts
 
-            # Determine layer from section assignment
             sec_name = md.frame_assignments.get(eid, "")
             layer_index = frame_section_layers.get(sec_name, default_layer)
 
-            # Create line
-            p_i = Point3d(ni.x, ni.y, ni.z)
-            p_j = Point3d(nj.x, nj.y, nj.z)
-            line = Line(p_i, p_j)
-
+            line = Line(ei, ej)
             attr = rd.ObjectAttributes()
             attr.LayerIndex = layer_index
             attr.Name = "SAP_Frame_{}".format(eid)
@@ -262,7 +327,6 @@ def create_frame_lines(
                 attrs.SetUserString("SAP_Material", sec.material)
                 attrs.SetUserString("SAP_Shape", sec.shape)
                 attrs.SetUserString("SAP_Area", str(sec.A))
-            attrs.SetUserString("SAP_Angle", str(elem.angle))
 
             obj.CommitChanges()
         except Exception:
@@ -592,10 +656,12 @@ def create_frame_extrusions(
 
     for eid, elem in md.frame_elements.items():
         try:
-            ni = md.nodes.get(elem.node_i)
-            nj = md.nodes.get(elem.node_j)
-            if ni is None or nj is None:
+            pts = _get_frame_points(md, eid, elem)
+            if pts is None:
                 continue
+            (p_i, p_j, x_axis, y_axis, z_axis, length,
+             ei, ej,
+             off_y_i, off_z_i, off_y_j, off_z_j) = pts
 
             sec_name = md.frame_assignments.get(eid, "")
             layer_index = frame_extrusion_layers.get(sec_name, default_layer)
@@ -603,23 +669,8 @@ def create_frame_extrusions(
                 continue
 
             sec = md.sections[sec_name]
-            p_i = Point3d(ni.x, ni.y, ni.z)
-            p_j = Point3d(nj.x, nj.y, nj.z)
-            axes = _local_axes(p_i, p_j, elem.angle)
-            if axes is None:
-                continue
-            x_axis, y_axis, z_axis = axes
 
-            # ── Debug: draw local axes at element start ──────────────
-            if _debug_axes and count < 5:
-                _draw_axis_arrow(doc, p_i, x_axis, (255, 0, 0))    # red = X
-                _draw_axis_arrow(doc, p_i, y_axis, (0, 255, 0))    # green = Y
-                _draw_axis_arrow(doc, p_i, z_axis, (0, 0, 255))    # blue = Z
-            dx = nj.x - ni.x
-            dy = nj.y - ni.y
-            dz = nj.z - ni.z
-            length = math.hypot(dx, dy, dz)
-
+            # Build profile
             profile = _build_section_profile(sec, sec.shape_id)
             if profile is None or profile["curve"] is None:
                 continue
@@ -627,36 +678,59 @@ def create_frame_extrusions(
             pts_2d = profile["pts_2d"]
             is_circ = profile["is_circular"]
 
-            # Build profile curve directly at p_i in element's local axes
+            # ── Debug: draw local axes at element start ──────────────
+            if _debug_axes and count < 5:
+                _draw_axis_arrow(doc, p_i, x_axis, (255, 0, 0))
+                _draw_axis_arrow(doc, p_i, y_axis, (0, 255, 0))
+                _draw_axis_arrow(doc, p_i, z_axis, (0, 0, 255))
+
+            # Interpolate lateral offsets along the element length
+            # (linear transition from I-end to J-end offsets)
+            def _lateral_offset(t):
+                """Lateral offset at normalised position t (0→1)."""
+                oy = off_y_i + (off_y_j - off_y_i) * t
+                oz = off_z_i + (off_z_j - off_z_i) * t
+                return oy, oz
+
+            # Build profile curve at the I-end elastic point, shifted
+            # by the lateral cardinal-point offset.
+            oy_i, oz_i = _lateral_offset(0.0)
+            origin_i = Point3d(
+                ei.X + y_axis.X * oy_i + z_axis.X * oz_i,
+                ei.Y + y_axis.Y * oy_i + z_axis.Y * oz_i,
+                ei.Z + y_axis.Z * oy_i + z_axis.Z * oz_i,
+            )
+
+            oy_j, oz_j = _lateral_offset(1.0)
+            origin_j = Point3d(
+                ej.X + y_axis.X * oy_j + z_axis.X * oz_j,
+                ej.Y + y_axis.Y * oy_j + z_axis.Y * oz_j,
+                ej.Z + y_axis.Z * oy_j + z_axis.Z * oz_j,
+            )
+
             if is_circ:
                 r = profile["radius"]
-                # Circle in the Y-Z plane (perpendicular to element direction)
-                plane = Plane(p_i, y_axis, z_axis)
+                plane = Plane(origin_i, y_axis, z_axis)
                 circle = Circle(plane, r)
                 profile_curve = circle.ToNurbsCurve()
             else:
                 pts_3d = []
                 for y_comp, z_comp in pts_2d:
                     pt = Point3d(
-                        p_i.X + y_axis.X * y_comp + z_axis.X * z_comp,
-                        p_i.Y + y_axis.Y * y_comp + z_axis.Y * z_comp,
-                        p_i.Z + y_axis.Z * y_comp + z_axis.Z * z_comp,
+                        origin_i.X + y_axis.X * y_comp + z_axis.X * z_comp,
+                        origin_i.Y + y_axis.Y * y_comp + z_axis.Y * z_comp,
+                        origin_i.Z + y_axis.Z * y_comp + z_axis.Z * z_comp,
                     )
                     pts_3d.append(pt)
                 pl = Polyline(pts_3d)
                 pl.Add(pts_3d[0])
                 profile_curve = PolylineCurve(pl)
 
-            rail = Line(p_i, p_j).ToNurbsCurve()
+            rail = Line(origin_i, origin_j).ToNurbsCurve()
             swept = Brep.CreateFromSweep(rail, profile_curve, True, 0.001)
             if not swept or len(swept) == 0:
                 continue
             brep_solid = swept[0]
-
-            attr = rd.ObjectAttributes()
-            attr.LayerIndex = layer_index
-            attr.Name = "SAP_FrameExt_{}".format(eid)
-            obj_id = doc.Objects.AddBrep(brep_solid, attr)
 
             attr = rd.ObjectAttributes()
             attr.LayerIndex = layer_index

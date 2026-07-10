@@ -487,18 +487,16 @@ def plot_mode_3d(
 
     if animate:
         import math as _math
-        import time as _time
 
         mesh_ref = deformed_mesh
 
-        def callback():
-            t = _time.time()
-            amp = _math.sin(t * 2.0)
+        def callback(step):
+            amp = _math.sin(2.0 * _math.pi * step / 60.0)
             new_mesh = make_deformed(amp)
-            plotter.update_coordinates(new_mesh.points, mesh=mesh_ref)
+            mesh_ref.points = new_mesh.points
             plotter.render()
 
-        plotter.add_callback(callback, 30)
+        plotter.add_timer_event(600, 30, callback)
         plotter.add_text(f"Mode {mode + 1}{period_str}  (oscillating)",
                          position='upper_edge', font_size=font_size)
     else:
