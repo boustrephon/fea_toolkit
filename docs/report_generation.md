@@ -333,6 +333,9 @@ class HDF5Store:
     def write_json(self, group: str, key: str, data: dict):
         """Store a JSON-serialisable dict."""
 
+    def read_json(self, group: str, key: str) -> dict:
+        """Restore a JSON-serialised dict from ``/group/key``."""
+
     def list_groups(self) -> List[str]:
         """List all top-level groups."""
 ```
