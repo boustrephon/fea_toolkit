@@ -258,27 +258,39 @@ def analyze(num_incr: int, *args: Any) -> int:
 
 
 
-def reactions() -> None:
+def reactions(*args: str) -> None:
     """Compute nodal reactions for the current load case.
     Must be called after ``ops.analyze()`` before querying ``nodeReaction``.
+
+    Usage::
+
+        ops.reactions()                          # static reactions
+        ops.reactions('-dynamic', '-rayleigh')   # include dynamic/rayleigh
+
+    Args:
+        *args: Optional flags such as ``'-dynamic'``, ``'-rayleigh'``.
     """
     ...
 
 def modalProperties(*args: str) -> Optional[dict]:
     """Return modal properties (periods, frequencies, participation factors).
 
-    Only returns a dict when ``'-return'`` is passed.  Without it,
-    properties are printed to stdout and ``None`` is returned::
+    The report is printed to stdout **only** when ``'-print'`` is supplied.
+    ``'-return'`` controls whether a dictionary is returned::
 
-        # Returns dict
+        # Returns dict (no console output)
         props = ops.modalProperties('-return', '-unorm')
 
         # Prints to stdout, returns None
+        ops.modalProperties('-print', '-unorm')
+
+        # Neither -return nor -print: returns None, no console output
         ops.modalProperties('-unorm')
 
     Args:
-        *args: Options such as ``'-return'`` (return dict instead of printing),
-               ``'-unorm'`` (mass‑normalised eigenvectors).
+        *args: Options such as ``'-return'`` (return dict), ``'-print'``
+               (print to console), ``'-unorm'`` (mass‑normalised eigenvectors),
+               ``'-file', path`` (write to file).
     Returns:
         Dictionary with keys like ``eigenFrequency``, ``eigenPeriod``,
         ``partiFactorMX``, ``partiMassMX``, ``partiMassRatiosMX``,
@@ -293,11 +305,13 @@ def modalProperties(*args: str) -> Optional[dict]:
 # Recorder commands
 # ============================================================================
 
-def recorder(*args: Any) -> None:
+def recorder(*args: Any) -> int:
     """Create a recorder to monitor analysis results.
 
     Args:
         *args: Recorder arguments per the OpenSees recorder command.
+    Returns:
+        Recorder handle (integer), or -1 on failure.
     """
     ...
 
@@ -501,7 +515,7 @@ def beamIntegration(integration_type: str, tag: int, *args: Any) -> None:
     Common forms::
 
         # Lobatto (Gauss-Lobatto, points concentrated at element ends)
-        beamIntegration('Lobatto', tag, sec_tag_1, sec_tag_2, ..., sec_tag_N)
+        beamIntegration('Lobatto', tag, secTag, N)
 
         # HingeRadau (plastic hinge at ends + elastic interior)
         beamIntegration('HingeRadau', tag, sec_tag_i, lp_i, sec_tag_j, lp_j,
@@ -511,12 +525,13 @@ def beamIntegration(integration_type: str, tag: int, *args: Any) -> None:
                         sec_tag_e, '-lLengthTag', type)
 
         # Newton-Cotes (evenly spaced)
-        beamIntegration('NewtonCotes', tag, sec_tag_1, ...)
+        beamIntegration('NewtonCotes', tag, secTag, N)
 
     Args:
         integration_type: ``'Lobatto'``, ``'HingeRadau'``, etc.
         tag: Integration tag.
-        *args: Section tags and parameters.
+        *args: Section tag and number of integration points (Lobatto/NewtonCotes)
+               or hinge parameters (HingeRadau).
     """
     ...
 
@@ -570,15 +585,22 @@ def equationConstraint(*args: Any) -> None:
 # Analysis component commands
 # ============================================================================
 
-def constraints(constraint_type: str) -> None:
+def constraints(constraint_type: str, *args: Any) -> None:
     """Set the constraint handler.
+
+    Usage::
+
+        constraints('Transformation')
+        constraints('Penalty', 1e6, 1e6)
+        constraints('Lagrange', 1e3)
 
     Args:
         constraint_type: ``'Transformation'``, ``'Penalty'``, ``'Lagrange'``.
+        *args: Optional penalty factors (alphaS, alphaM) for Penalty/Lagrange.
     """
     ...
 
-def numberer(numberer_type: str) -> None:
+def numberer(numberer_type: str, *args: str) -> None:
     """Set the equation numberer.
 
     ``'RCM'`` (Reverse Cuthill-McKee) reduces matrix bandwidth for
@@ -586,14 +608,22 @@ def numberer(numberer_type: str) -> None:
 
     Args:
         numberer_type: ``'Plain'`` or ``'RCM'``.
+        *args: Optional options (currently unused in OpenSees).
     """
     ...
 
-def system(system_type: str) -> None:
+def system(system_type: str, *args: str) -> None:
     """Set the system of equations solver.
+
+    Usage::
+
+        system('BandGeneral')
+        system('UmfPack')
+        system('UmfPack', '-useLongIndices')
 
     Args:
         system_type: ``'BandGeneral'``, ``'ProfileSPD'``, ``'UmfPack'``, etc.
+        *args: Optional solver-specific options.
     """
     ...
 
@@ -647,7 +677,7 @@ def integrator(integ_type: str, *args: Any) -> None:
     """
     ...
 
-def eigen(*args: Any) -> Tuple[float, ...]:
+def eigen(*args: Any) -> List[float]:
     """Compute eigenvalues (natural frequencies squared).
 
     Supports both forms::
@@ -659,7 +689,7 @@ def eigen(*args: Any) -> Tuple[float, ...]:
         *args: Optional solver string (e.g. ``'-fullGenLapack'``) followed
                by the number of eigenvalues to compute.
     Returns:
-        Tuple of eigenvalues ω², sorted ascending.
+        List of eigenvalues ω², sorted ascending.
     """
     ...
 
@@ -668,19 +698,21 @@ def eigen(*args: Any) -> Tuple[float, ...]:
 # Sensitivity commands
 # ============================================================================
 
-def responseSpectrumAnalysis(ts_tag: int, dof: int, *args: str) -> None:
+def responseSpectrumAnalysis(ts_tag: int, dof: int, *args: Any) -> None:
     """Run a response‑spectrum analysis for one mode.
 
     Usage::
 
         ops.responseSpectrumAnalysis(tsTag, dof, '-mode', modeNum)
+        ops.responseSpectrumAnalysis(tsTag, dof, '-mode', modeNum,
+                                     '-Tn', Tn_override, '-Sa', Sa_override)
 
     Must be called after :func:`eigen` and :func:`modalProperties`.
 
     Args:
         ts_tag: Tag of a ``Path`` time series defining the spectrum.
         dof: Excitation direction (1=UX, 2=UY, 3=UZ, 4=RX, 5=RY, 6=RZ).
-        *args: ``'-mode', modeNum``.
+        *args: ``'-mode', modeNum`` and optional overrides.
     """
     ...
 
