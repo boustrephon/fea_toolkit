@@ -44,6 +44,9 @@ class StoryLevel:
     bbox : tuple[float, float, float, float] or None
         Estimated horizontal extent ``(x_min, x_max, y_min, y_max)``
         of elements belonging to this storey, or ``None`` if unknown.
+    node_ids : list[str] or None
+        Node IDs belonging to this storey, as determined during
+        detection.  ``None`` if not available (e.g. s2k_table method).
     """
     name: str
     elevation: float
@@ -51,6 +54,7 @@ class StoryLevel:
     confidence: str = "low"
     bbox: Optional[Tuple[float, float, float, float]] = None
     total_area: float = 0.0         # total plan area of horizontal elements at this level
+    node_ids: Optional[List[str]] = None
 
     def __repr__(self) -> str:
         return (
@@ -227,6 +231,7 @@ def _try_diaphragms(md, raw_tables) -> List[StoryLevel]:
             method="diaphragm",
             confidence="high",
             bbox=bbox,
+            node_ids=joint_ids,
         ))
 
     return stories
@@ -284,6 +289,7 @@ def _try_area_elements(md, z_tolerance: float) -> List[StoryLevel]:
             confidence="medium",
             bbox=bbox,
             total_area=area_sum,
+            node_ids=list(set(cluster_nodes)),
         ))
 
     return stories
@@ -324,6 +330,7 @@ def _try_node_clustering(md, z_tolerance: float) -> List[StoryLevel]:
             method="node_clustering",
             confidence="low",
             bbox=bbox,
+            node_ids=node_ids,
         ))
 
     return stories

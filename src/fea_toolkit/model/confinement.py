@@ -185,8 +185,6 @@ def mander_confined(data: ConfinementData) -> ConfinementResult:
         Ds = bc  # core diameter
         # Volumetric ratio for spirals: rho_s = 4 * Ab / (s * Ds)
         rho_s = 4.0 * Ab / (s * Ds)
-        # Effective lateral confining stress
-        f_l = 0.5 * rho_s * fyh
         # Effective confinement coefficient for circular
         # Mander Eq. 5-8: ke = (1 - s'/(2*Ds))^2 / (1 - rho_cc)
         # where rho_cc = Al / Ac (longitudinal / core area)
@@ -199,6 +197,8 @@ def mander_confined(data: ConfinementData) -> ConfinementResult:
             rho_cc = (n_longs * Al) / Ac if Ac > 0 else 0.0
         ke = ((1.0 - s_prime / (2.0 * Ds))**2 /
               (1.0 - rho_cc)) if Ds > 0 else 0.0
+        # Effective lateral confining stress (factored by ke)
+        f_l = ke * 0.5 * rho_s * fyh
     else:
         # Rectangular section: perimeter hoop ± cross-ties
         # Volumetric ratio of transverse steel
