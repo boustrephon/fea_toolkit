@@ -1946,43 +1946,38 @@ def split_areas_at_frame_edges(
                 bot = corner_coords[3] * (1 - u) + corner_coords[2] * u
                 grid[j, i] = top * (1 - v) + bot * v
 
+        # Build spatial coordinate cache once (reuse across grid points)
+        _pos_cache_np: Dict[str, np.ndarray] = {
+            nid: np.array([nd.x, nd.y, nd.z], dtype=float)
+            for nid, nd in nodes.items()
+        }
+        # Merge frame node coords into cache
+        for nid, npos in frame_node_coords.items():
+            _pos_cache_np[nid] = npos
         # Create nodes for grid points (reusing frame nodes at same coords)
         node_grid = [[None] * (n_u + 1) for _ in range(n_v + 1)]
         for j in range(n_v + 1):
             for i in range(n_u + 1):
                 pt = grid[j, i]
-                # Check if any existing node (especially a frame node) is here
+                # Check spatial cache for existing node at this position
                 found = None
-                for nid, npos in frame_node_coords.items():
+                for nid, npos in _pos_cache_np.items():
                     if np.linalg.norm(npos - pt) < 1e-4:
                         found = nid
                         break
                 if found is not None:
                     node_grid[j][i] = found
                     continue
-                # Check area corner nodes
-                for ci, cid in enumerate(corners):
-                    if np.linalg.norm(corner_coords[ci] - pt) < 1e-4:
-                        node_grid[j][i] = cid
-                        break
-                if node_grid[j][i] is not None:
-                    continue
-                # Check existing area-interior mesh nodes (from prior auto-mesh)
-                for nid, nd in nodes.items():
-                    ck = np.array([nd.x, nd.y, nd.z], dtype=float)
-                    if np.linalg.norm(ck - pt) < 1e-4:
-                        node_grid[j][i] = nid
-                        break
-                if node_grid[j][i] is not None:
-                    continue
                 # Create new node
                 new_id = f"{aid}_af_{j}_{i}"
                 new_tag = next_tag
                 next_tag += 1
-                nodes[new_id] = _Node(
+                nd = _Node(
                     node_id=new_id, node_tag=new_tag,
                     x=float(pt[0]), y=float(pt[1]), z=float(pt[2]),
                 )
+                nodes[new_id] = nd
+                _pos_cache_np[new_id] = np.array([pt[0], pt[1], pt[2]], dtype=float)
                 node_grid[j][i] = new_id
 
         # Mark original as inactive and record parent-child
@@ -2053,13 +2048,20 @@ def find_constraint_edges(
     area_elements: Dict[str, 'AreaElement'],
     area_assignments: Dict[str, str],
     nodes: Dict[str, 'Node'],
+    frame_elements: Optional[Dict[str, 'FrameElement']] = None,
+    frame_assignments: Optional[Dict[str, str]] = None,
     exclude_types: set = frozenset({'brick wall'}),
 ) -> List[Tuple[List[str], str, str]]:
     """Find tears in the final mesh via sweep-line chain following.
 
-    Detects locations where two (or more) adjacent area elements share a
+    Detects locations where two (or more) adjacent elements share a
     geometric edge but have incompatible meshes — one chain has intermediate
     nodes the other doesn't.  These need line/edge constraints in OpenSees.
+
+    Supports both area elements (2D shells) and frame elements (1D beams).
+    A beam running along a meshed slab edge will be detected: the slab's
+    sub-elements create intermediate mesh nodes on the shared edge while
+    the single beam element spans the full length.
 
     Uses a sorted-tuple edge registry where each key ``(nA, nB)`` is
     ordered by node position (X → Y → Z), making the direction implicit:
@@ -2071,9 +2073,13 @@ def find_constraint_edges(
     panels) are excluded via ``exclude_types``.
 
     Args:
-        area_elements: ``{area_id: AreaElement}`` — all elements.
+        area_elements: ``{area_id: AreaElement}`` — all area elements.
         area_assignments: ``{area_id: section_name}``.
         nodes: ``{node_id: Node}`` — all nodes.
+        frame_elements: Optional ``{frame_id: FrameElement}`` — frame
+            elements.  Pass post-split elements (e.g. ``builder.split_elements``)
+            for best results.
+        frame_assignments: Optional ``{frame_id: section_name}``.
         exclude_types: Set of section names to skip.
 
     Returns:
@@ -2115,6 +2121,20 @@ def find_constraint_edges(
                 continue
             key = (nA, nB) if _pos_key(nA) <= _pos_key(nB) else (nB, nA)
             edge_reg[key].append(aid)
+
+    # ── 1b. Add frame element edges to the registry ─────────────
+    if frame_elements is not None:
+        assign = frame_assignments or {}
+        for fid, felem in frame_elements.items():
+            if getattr(felem, 'inactive', False) or felem is None:
+                continue
+            if assign.get(fid, '') in exclude_types:
+                continue
+            nA, nB = felem.node_i, felem.node_j
+            if nA == nB:
+                continue
+            key = (nA, nB) if _pos_key(nA) <= _pos_key(nB) else (nB, nA)
+            edge_reg[key].append(fid)
 
     # ── 2. Build node→keys index for chain following ────────────
     # Derived directly from the registry — not a separate data model.
@@ -2239,6 +2259,15 @@ def find_constraint_edges(
 
             active.append((nA, nB))
 
+    # ── Helper: resolve element ID to type name ─────────────────
+    # Checks area_assignments first, then frame_assignments.
+    fa = frame_assignments or {}
+
+    def _elem_type(eid: str) -> str:
+        return (area_assignments.get(eid)
+                or fa.get(eid)
+                or 'unknown')
+
     # ── 4. Merge overlapping tears ──────────────────────────────
     # Two tears overlap if they share ≥1 node and are colinear
     # (absolute cosine of endpoint vectors > COSINE_TOL).
@@ -2251,8 +2280,7 @@ def find_constraint_edges(
             continue
         nids_i, ea_i, eb_i = tears[i]
         group_nids = [nids_i]
-        group_types = {area_assignments.get(ea_i, 'unknown'),
-                       area_assignments.get(eb_i, 'unknown')}
+        group_types = {_elem_type(ea_i), _elem_type(eb_i)}
         used[i] = True
         # Direction from first tear's endpoints
         fa_i = _node_arr[nids_i[0]]
@@ -2282,8 +2310,7 @@ def find_constraint_edges(
             if abs(float(np.dot(d_i, d_j))) <= COSINE_TOL:
                 continue
             group_nids.append(nids_j)
-            group_types.update([area_assignments.get(ea_j, 'unknown'),
-                                area_assignments.get(eb_j, 'unknown')])
+            group_types.update([_elem_type(ea_j), _elem_type(eb_j)])
             used[j] = True
 
         all_nodes: set = set()
