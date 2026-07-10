@@ -2187,7 +2187,7 @@ def find_constraint_edges(
     nodes: Dict[str, 'Node'],
     frame_elements: Optional[Dict[str, 'FrameElement']] = None,
     frame_assignments: Optional[Dict[str, str]] = None,
-    exclude_types: set = frozenset({'brick wall'}),
+    exclude_types: set = frozenset({'brick'}),
 ) -> List[Tuple[List[str], str, str]]:
     """Find tears in the final mesh via sweep-line chain following.
 
@@ -2215,8 +2215,8 @@ def find_constraint_edges(
 
     Non-structural element types (e.g. brick infill walls used as load
     panels) are excluded via ``exclude_types`` using case-insensitive
-    substring matching (e.g. ``{'brick wall'}`` matches ``'Brick Wall'``,
-    ``'BRICK WALL'``, ``'BrickInfill'``, etc.).
+    substring matching (e.g. ``{'brick'}`` matches ``'Brick'``,
+    ``'Brick Wall'``, ``'BRICK WALL'``, ``'BrickInfill'``, etc.).
 
     Args:
         area_elements: ``{area_id: AreaElement}`` — all area elements.
@@ -2237,7 +2237,6 @@ def find_constraint_edges(
     from typing import Dict, List, Tuple
 
     COSINE_TOL = 0.9999
-    Z_BAND_TOL = 0.2  # max Z-span for an edge to be considered near-horizontal
 
     # ── Helper: case-insensitive substring matching ─────────────
     # SAP2000 section names vary in case (e.g. "Brick Wall",
@@ -2279,10 +2278,6 @@ def find_constraint_edges(
             nA, nB = nids[i], nids[j]
             if nA == nB:
                 continue
-            # Skip edges with large Z-span (not near-horizontal)
-            ndA, ndB = _node_arr[nA], _node_arr[nB]
-            if abs(ndA[2] - ndB[2]) >= Z_BAND_TOL:
-                continue
             key = (nA, nB) if _pos_key(nA) <= _pos_key(nB) else (nB, nA)
             edge_reg[key].append(aid)
             area_keys.add(key)
@@ -2297,10 +2292,6 @@ def find_constraint_edges(
                 continue
             nA, nB = felem.node_i, felem.node_j
             if nA == nB:
-                continue
-            # Skip edges with large Z-span (not near-horizontal)
-            ndA, ndB = _node_arr[nA], _node_arr[nB]
-            if abs(ndA[2] - ndB[2]) >= Z_BAND_TOL:
                 continue
             key = (nA, nB) if _pos_key(nA) <= _pos_key(nB) else (nB, nA)
             edge_reg[key].append(fid)

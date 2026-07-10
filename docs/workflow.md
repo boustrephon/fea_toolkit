@@ -69,12 +69,13 @@ Converts each raw table into dataclass instances:
 | `"OBJECT GEOMETRY"` | `Node` |
 | `"JOINT RESTRAINTS"` | `Restraint` |
 | `"MATERIAL PROPERTIES"` | `Material` |
-| `"FRAME SECTION PROPERTIES"` | `RectangularSection`, `ISection`, … (also carries ``modifiers`` dict: AMod, I3Mod, I2Mod, JMod) |
+| `"FRAME SECTION PROPERTIES 01 - GENERAL"` | `RectangularSection`, `ISection`, … (also carries ``modifiers`` dict: AMod, I3Mod, I2Mod, JMod) |
 | `"AREA SECTION PROPERTIES"` | `ShellSection` (stores `thickness`; `A=I33=I22=J=0`) |
-| `"FRAME ASSIGNMENTS"` | `FrameElement` + `cardinal_point` (1–11, default 10 = centroid) |
-| `"AREA ASSIGNMENTS"` | `AreaElement` + `AreaAssignments` |
+| `"CONNECTIVITY - FRAME"` | `FrameElement` |
+| `"FRAME SECTION ASSIGNMENTS"` | ``{frame_id: section_name}`` mapping + `cardinal_point` (1–11, default 10 = centroid) |
+| `"AREA ASSIGNMENTS"` | `AreaElement` + ``{area_id: section_name}`` |
 | `"AREA MESH ASSIGNMENTS"` | `AreaMesh` |
-| `"FRAME END OFFSETS"` | `FrameEndOffset` (``end_i``/``end_j`` + ``off_y_i``/``off_z_i``/``off_y_j``/``off_z_j`` from cardinal pt) |
+| `"FRAME END LENGTH OFFSETS"` | `FrameEndOffset` (``end_i``/``end_j`` + ``off_y_i``/``off_z_i``/``off_y_j``/``off_z_j`` from cardinal pt) |
 | `"JOINT LOADS"` | `JointLoad` |
 | `"FRAME DISTRIBUTED LOADS"` | `FrameDistributedLoad` |
 | `"AREA UNIFORM LOADS"` | `AreaUniformLoad` |
