@@ -605,11 +605,18 @@ def test_cardinal_points_extracted(tmp_path):
     # Offsets should include cardinal point contribution
     off1 = md.frame_end_offsets.get("1")
     assert off1 is not None
-    # Depth = 400 mm = 0.4 m (assuming mm units); top centre = z = -0.5*0.4 = -0.2
-    # Note: section dims in mm, model units in m → need unit-aware
-    # The parser reads t3=400 as mm, but the model units claim "m"
-    # Just verify the offset is populated (sign depends on unit handling)
-    assert off1.off_z_i != 0.0 or off1.off_z_j != 0.0
+    # B400 section: t3=400 (depth), t2=200 (width), model units = "N, mm, C"
+    # Cardinal point 8 (top centre) → off_y = 0, off_z = -0.5 × 400 = -200
+    assert off1.off_y_i == pytest.approx(0.0)
+    assert off1.off_z_i == pytest.approx(-200.0)
+    assert off1.off_y_j == pytest.approx(0.0)
+    assert off1.off_z_j == pytest.approx(-200.0)
+
+    off2 = md.frame_end_offsets.get("2")
+    assert off2 is not None
+    # Cardinal point 2 (bottom centre) → off_y = 0, off_z = +0.5 × 400 = +200
+    assert off2.off_y_i == pytest.approx(0.0)
+    assert off2.off_z_i == pytest.approx(200.0)
 
 
 def test_cardinal_points_alternative_column_names(tmp_path):

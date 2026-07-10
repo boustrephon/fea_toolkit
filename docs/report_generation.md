@@ -40,23 +40,29 @@ Individual overrides in the ``builder`` section take precedence over
 these defaults.
 
 > **Important: OpenSeesPy limitation for nonlinear RC analysis.**
-> Nonlinear RC analysis (fiber sections with ``Concrete01/02``,
-> ``Steel02``, or ``forceBeamColumn`` with ``HingeRadau``) is **not
-> supported in OpenSeesPy** builds.  Any analysis requiring nonlinear
-> materials — pushover with RC fiber sections, nonlinear dynamic, or
-> brace buckling with ``Hysteretic`` materials — must be **exported to
-> Tcl** and executed via the standalone OpenSees build bundled with
-> Xara (``tclsh8.6``).  The toolkit provides two export paths:
+> Nonlinear RC analysis with fiber sections (``Concrete01``, ``Steel02``,
+> ``forceBeamColumn`` with ``Lobatto`` integration) is supported only
+> when using the **pinned OpenSeesPy build** bundled with the toolkit.
+> The stock ``pip install openseespy`` distribution does not include
+> these nonlinear material formulations.  Users must ensure the pinned
+> build is active in their environment.
 >
-> - ``RecordingOpenSees`` — records all ``ops.*`` calls during a
->   Python build, then saves them as a Tcl script.  This only works for
->   **elastic** builds in Python (nonlinear sections cannot be created).
+> Analysis requiring nonlinear materials — pushover with RC fiber
+> sections, nonlinear dynamic, or brace buckling — can be executed
+> either directly in Python (with the pinned build) or via **Tcl export**
+> to a standalone OpenSees executable.  The toolkit provides two export
+> paths:
+>
 > - ``export_model_to_tcl()`` — translates ``SAPModelData`` directly to
->   Tcl commands, skipping the Python build entirely.  Accepts
->   ``tcl_prefix`` and ``tcl_suffix`` to inject nonlinear material
->   definitions, fiber sections, and custom analysis commands.
+>   Tcl commands, accepting ``tcl_prefix`` and ``tcl_suffix`` to inject
+>   nonlinear material definitions, fiber sections, and custom analysis
+>   commands.
+> - ``RecordingOpenSees`` — records all ``ops.*`` calls during a Python
+>   build, then saves them as a Tcl script.  For elastic builds only
+>   (fiber sections cannot be created in Python then recorded, as the
+>   pinned build is required for simulation).
 >
-> The practical pipeline for nonlinear analyses is therefore:
+> The practical pipeline for nonlinear analyses via Tcl is:
 >
 > ```
 > SAPModelData  ──→  export_model_to_tcl()  ──→  model.tcl
@@ -66,7 +72,8 @@ these defaults.
 >                    analysis commands)                │
 >                                                     ▼
 >                                           XaraTclRunner.run()
->                                           (standalone tclsh8.6)
+>                                           (standalone OpenSees)
+> ```
 
 ### Full Config Schema
 
@@ -409,9 +416,11 @@ challenges are:
 - **Line constraints between meshes**: Where floor slabs meet walls or
   where two super-elements of different mesh density meet (e.g. a
   finely-meshed core wall adjacent to a coarsely-meshed floor slab),
-  edge nodes must be tied via ``equationConstraint`` so the mesh can
-  remain rectangular on each zone independently.  The builder's
-  ``apply_edge_constraints()`` addresses this.  Future work (P2) could
+  edge nodes must be tied via ``equalDOF`` constraints.  The builder's
+  :func:`~fea_toolkit.model.geometry.find_constraint_edges` detects
+  incompatible edge meshes and
+  :func:`~fea_toolkit.opensees.builder.OpenSeesBuilder.apply_edge_constraints`
+  emits the corresponding ``equalDOF`` commands.  Future work (P2) could
   store edge-constraint references directly on ``AreaElement``
   (e.g. ``edge_constraint_ids``) for easier lookup.
 - **Gmsh-based remeshing**: The optional ``mesh/remesh.py`` module
@@ -424,11 +433,14 @@ challenges are:
 Frame elements bring concentrated stiffness to the nodes of distributed
 shell elements, which creates two difficulties:
 
-- **Drilling moment (Rz) compatibility**: ``ShellMITC4`` has no drilling
-  DOF stiffness — it constrains only 5 DOFs (ux, uy, uz, rx, ry).
+- **Drilling moment (Rz) compatibility**: ``ShellMITC4`` has 6 DOFs
+  per node (UX, UY, UZ, RX, RY, RZ), but the drilling rotation (Rz)
+  carries **zero stiffness** in the element's constitutive matrix.
   Where a frame element delivers a torsional moment to a shell node,
   the missing rotational stiffness causes local singularities or
-  unrealistic force distributions.
+  unrealistic force distributions.  Constraining all 6 DOFs via
+  ``equalDOF`` is still correct — the constraint enforces kinematic
+  compatibility without adding spurious stiffness.
 - **SAP2000 workarounds** (not yet implemented):
   - **Embedded beam**: Extend the frame member one element-depth into
     the shell mesh, distributing the connection over several nodes.
@@ -874,7 +886,7 @@ subprocess.run([
     "-P", f"hdf5_path={hdf5_path}",
     "-P", "sections=model_summary,modal_results",
     "--to", "html",
-])
+], check=True)
 ```
 
 This can be wrapped into `render_report()`.

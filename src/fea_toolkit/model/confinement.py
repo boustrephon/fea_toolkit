@@ -102,6 +102,39 @@ class ConfinementData:
             raise ValueError(f"tie_diameter must be > 0, got {self.tie_diameter}")
         if self.tie_spacing < 0:
             raise ValueError(f"tie_spacing must be >= 0, got {self.tie_spacing}")
+        if 0 < self.tie_spacing < self.tie_diameter:
+            raise ValueError(
+                f"tie_spacing ({self.tie_spacing:.4f}) is positive but smaller "
+                f"than tie_diameter ({self.tie_diameter:.4f})"
+            )
+        # Validate tie_config
+        valid_configs = {"standard", "cross_tie", "spiral"}
+        if self.tie_config not in valid_configs:
+            raise ValueError(
+                f"Unsupported tie_config={self.tie_config!r}. "
+                f"Must be one of {sorted(valid_configs)}"
+            )
+        # Validate cross-tie counts
+        if self.cross_tie_count_x < 0:
+            raise ValueError(
+                f"cross_tie_count_x must be >= 0, got {self.cross_tie_count_x}"
+            )
+        if self.cross_tie_count_y < 0:
+            raise ValueError(
+                f"cross_tie_count_y must be >= 0, got {self.cross_tie_count_y}"
+            )
+        # Validate eps_su
+        if self.eps_su <= 0:
+            raise ValueError(
+                f"eps_su must be > 0, got {self.eps_su}"
+            )
+        # For spiral, require compatible core dimensions
+        if self.tie_config == "spiral":
+            if self.core_bc <= 0 and self.core_dc <= 0:
+                raise ValueError(
+                    f"Spiral tie_config requires positive core_bc and core_dc; "
+                    f"got core_bc={self.core_bc}, core_dc={self.core_dc}"
+                )
         # Derive core dimensions from overall + cover if not given directly
         if self.core_bc <= 0 and self.overall_b > 0:
             self.core_bc = self.overall_b - 2 * self.cover - self.tie_diameter

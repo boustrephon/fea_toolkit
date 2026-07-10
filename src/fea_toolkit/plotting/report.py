@@ -504,8 +504,8 @@ def plot_storey_forces(
         # Identify Base row by minimum elevation (first row may not be Base)
         base_idx_s = int(df_shear[elev_col_s].idxmin())
         base_idx_m = int(df_moment[elev_col_m].idxmin()) if elev_col_m else base_idx_s
-        V_base = abs(df_shear[col].iloc[base_idx_s])
-        M_base = abs(df_moment[col].iloc[base_idx_m])
+        V_base = abs(df_shear[col].loc[base_idx_s])
+        M_base = abs(df_moment[col].loc[base_idx_m])
         if V_base < 1e-12:
             continue
         z_pts, V_pts, M_pts = _trapezoidal_curves(V_base, M_base)
@@ -597,7 +597,7 @@ def plot_storey_displacements(
         )
     source_to_m = _LENGTH_TO_METRE[source_length_unit]
     target_to_m = _LENGTH_TO_METRE[disp_unit]
-    disp_scale = target_to_m / source_to_m
+    disp_scale = source_to_m / target_to_m
 
     # drift_scale: drift values are dimensionless ratios (m/m).
     # Parse the display unit to get the multiplier.
