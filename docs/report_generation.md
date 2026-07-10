@@ -82,7 +82,6 @@ model:
 # The analysis mode drives default choices for element types, material
 # models, solver settings, and brace modelling strategy.
 #
-#   "linear_static"      - elasticBeamColumn, elastic sections, fast
 #   "modal"              - same as linear_static (mass + stiffness only)
 #   "response_spectrum"  - elastic (same as linear_static, plus CQC)
 #   "pushover"           - nonlinearBeamColumn, fiber sections,
@@ -92,18 +91,17 @@ model:
 #                          Newmark integrator,
 #                          ground-motion input (future)
 #
-# Individual overrides can be specified in ``builder`` below.
-analysis_mode: "pushover"
+# Analysis-specific defaults are derived inside each per-analysis
+# loop, not from a global analysis_mode.  Individual overrides can
+# still be specified in ``builder`` below.
+# analysis_mode: "pushover"       (removed — see analyses.*.builder)
 
 # ── Builder Overrides ───────────────────────────────────────────────
-# These override the analysis-mode defaults.  Omit any key to accept
-# the default for the chosen analysis_mode.
+# These override the default for the entire model.  Analysis-specific
+# overrides go in the corresponding ``analyses.*.builder`` block.
 builder:
-  element_type: null           # null = auto based on analysis_mode
   create_shells: true
-  brace_type: null             # null = auto: "truss" for pushover,
-                               #         "beam" for linear
-  solver: null                 # null = auto based on analysis_mode
+  solver: null             # null = auto based on analysis block
 
 # ── Storey Detection ─────────────────────────────────────────────────
 storeys:
@@ -115,10 +113,16 @@ analyses:
   static:
     enabled: true
     cases: null                 # null = auto-detect from model; or ["DEAD", "LIVE", "WIND+X"]
+    builder:                    # analysis-specific builder overrides
+      element_type: "elasticBeamColumn"
+      use_elastic_sections: true
 
   modal:
     enabled: true
     n_modes: 12
+    builder:
+      element_type: "elasticBeamColumn"
+      use_elastic_sections: true
 
   response_spectrum:
     enabled: true
@@ -156,6 +160,9 @@ analyses:
     damping: 0.05
     combination: "CQC"          # "CQC" | "SRSS"
     missing_mass: true
+    builder:
+      element_type: "elasticBeamColumn"
+      use_elastic_sections: true
 
   pushover:
     enabled: false
@@ -164,6 +171,10 @@ analyses:
     max_drift: 0.05
     n_steps: 100
     spectrum: null              # optional override for CSM
+    builder:
+      element_type: "forceBeamColumn"
+      create_fiber_sections: true
+      use_elastic_sections: false
 
   # Future:
   # dynamic:
@@ -211,7 +222,7 @@ hierarchical structure.  Each group contains the raw NumPy arrays
 and Pandas DataFrames needed for post-processing and plotting.
 
 ```
-/results.h5
+/
 ├── meta/                           # Model metadata
 │   ├── bounding_box               # JSON-serialised dict
 │   ├── units                      # JSON-serialised dict
@@ -384,13 +395,19 @@ challenges are:
   regular mesh that connects to frame-element nodes and other shell
   edges.  The builder's ``_mesh_areas()`` performs bilinear quad
   subdivision, but complex floor plates with cut-outs or non-rectangular
-  geometry need more robust handling.
+  geometry need more robust handling.  The subdivision maintains a
+  parent-child hierarchy: the original ``AreaElement`` is marked
+  ``inactive`` and populated with ``child_ids``, while each sub-element
+  carries a ``parent_id`` back to the original super-element.  This
+  mirrors the same pattern used by ``FrameElement`` for frame splitting.
 - **Line constraints between meshes**: Where floor slabs meet walls or
   where two super-elements of different mesh density meet (e.g. a
   finely-meshed core wall adjacent to a coarsely-meshed floor slab),
   edge nodes must be tied via ``equationConstraint`` so the mesh can
   remain rectangular on each zone independently.  The builder's
-  ``apply_edge_constraints()`` addresses this.
+  ``apply_edge_constraints()`` addresses this.  Future work (P2) could
+  store edge-constraint references directly on ``AreaElement``
+  (e.g. ``edge_constraint_ids``) for easier lookup.
 - **Gmsh-based remeshing**: The optional ``mesh/remesh.py`` module
   provides constrained quadrilateral remeshing for non-rectilinear
   geometries, but integration into the automated workflow is not yet
@@ -437,7 +454,7 @@ ideally support all of them:
 
 | Level | Description | Toolkit status |
 |---|---|---|
-| **0 — Simple point** | Members meet at a node, flex from that point. Vertical offsets (storey-level) may apply. | ✅ Implemented via ``FrameElement.offset_a`` / ``offset_b`` |
+| **0 — Simple point** | Members meet at a node, flex from that point. Vertical offsets (storey-level) may apply. | ✅ Implemented via ``FrameEndOffset.end_i`` / ``end_j`` (longitudinal) + ``off_y_i`` / ``off_z_i`` / ``off_y_j`` / ``off_z_j`` (lateral from cardinal point) |
 | **1 — Rigid offset** | Rigid link from node to column face; flexure starts at face. | ⚠️ Partially — ``frame_end_offsets`` create stiff elastic links |
 | **2 — Spring offset** | Zero-length spring at the joint adds back some flexibility (% rigidity). | ❌ Not implemented |
 | **3 — Joint element** | Explicit joint element allowing for cracking, reinforcement slip, or steel connection flexibility. | ❌ Not implemented |
@@ -451,12 +468,30 @@ zero-length springs of calibrated stiffness.
 ### 3.5 Cardinal Points and Section Insertion
 
 SAP2000 uses **cardinal points** to position a section relative to its
-reference line.  Common settings:
+reference line.  The numbering follows a 3×3 grid (bottom→top, left→right)
+plus centroid and shear centre:
 
-- **RC beams**: cardinal point 5 (top‑centre) — the beam's top face
-  aligns with the storey level (which is typically at the top-of-slab).
-- **RC columns**: cardinal point 5 (top‑centre) or 11 (centroid).
-- **Steel beams**: cardinal point 4 (bottom‑centre) or 10 (centroid).
+| Value | Position | Description | Offset (y, z) |
+|---|---|---|---|
+| 1 | Bottom left | Lower-left corner | (½B, ½D) |
+| 2 | Bottom centre | Bottom edge midpoint | (0, ½D) |
+| 3 | Bottom right | Lower-right corner | (−½B, ½D) |
+| 4 | Middle left | Left edge midpoint | (½B, 0) |
+| 5 | Middle centre | Bounding-box centroid | (0, 0) |
+| 6 | Middle right | Right edge midpoint | (−½B, 0) |
+| 7 | Top left | Upper-left corner | (½B, −½D) |
+| 8 | Top centre | Top edge midpoint | (0, −½D) |
+| 9 | Top right | Upper-right corner | (−½B, −½D) |
+| 10 | Centroid | Section centroid (default) | (0, 0) |
+| 11 | Shear centre | Section shear centre | (0, 0) |
+
+*D* = section depth (local-3), *B* = section width (local-2).
+
+Common settings:
+
+- **RC beams**: cardinal point 8 (top‑centre) — the beam's top face aligns with the storey level (which is typically at the top-of-slab).
+- **RC columns**: cardinal point 10 (centroid) or 11 (shear centre).
+- **Steel beams**: cardinal point 2 (bottom‑centre) or 10 (centroid).
 
 The insertion point combined with the section depth defines the
 **offset** from the reference line to the member's extreme fibre.
@@ -468,10 +503,7 @@ These offsets affect:
 - **Clash detection** in visualisation — cardinal points determine
   where sections appear in 3D views.
 
-**Current status**: ``FrameElement`` has ``offset_a`` / ``offset_b``
-fields (parsed from the `FRAME END OFFSETS` table), but cardinal point
-data is not yet extracted from the `FRAME SECTION PROPERTIES` /
-`FRAME ASSIGNMENTS` tables.  This needs to be addressed.
+**Current status**: ``FrameElement`` now has a ``cardinal_point`` field (default 10 = centroid).  The parser extracts cardinal point values from the ``FRAME SECTION ASSIGNMENTS`` table (columns ``CardinalPoint``, ``Cardinal``, ``CARDINALPT``, or ``InsertPoint``) and computes lateral (y, z) offsets from section dimensions.  These are merged into ``FrameEndOffset`` records at parse time, matching the E2K/ETABS approach.  ``FrameEndOffset`` has been expanded with ``off_y_i``, ``off_z_i``, ``off_y_j``, ``off_z_j`` fields for the lateral components.
 
 ### 3.6 Model Validation
 
@@ -496,6 +528,26 @@ natural benchmark (it shares a common lineage with SAP2000/ETABS).
 
 A validation workflow would run the same model through both SAP2000 and
 OpenSees and report discrepancies in a standardised format.
+
+#### Key Validation Benchmarks & References
+
+| Source | Type | What it covers |
+|---|---|---|
+| **OpenSees verification suite** (`EXAMPLES/verification/`) | Regression tests | ``PlanarTruss.tcl`` (truss forces), ``PortalFrame2d.tcl`` (elastic frame), ``EigenFrame.tcl`` / ``EigenFrame.Extra.tcl`` (modal vs Lapack/Arpack), ``AISC25.tcl`` (25 P-Delta buckling examples per AISC), ``PinchedCylinder.tcl`` (shell elements vs exact solution), ``PlanarShearWall.tcl`` (continuum elements), ``sdofTransient.tcl`` / ``NewmarkIntegrator.tcl`` (transient dynamics vs Chopra), ``SmallEigen.tcl`` (small eigenvalue problem). |
+| **OpenSees Example Library** (`EXAMPLES/ExampleScripts/`) | Workflow examples | ``RCFrame5.tcl`` (RC frame with fiber sections, validated pushover), ``RCFrame3D_ASDA.tcl`` (3D RC frame), steel and brace models. |
+| **Portwood Digital** (`openseesdigital.com/verifications/`) | Blog + examples | Michael H. Scott's verified models: brace buckling, P-Delta columns, steel moment frames, soil-structure interaction. Includes convergence studies and solver recommendations. |
+| **PEER Center reports** (`peer.berkeley.edu`) | Research reports | Structural performance database, column calibration, wall validation. **PEER 2017/03**: direct Perform3D vs OpenSees comparison for RC frames (pushover + ground motion). **PEER 2015/01**: DRAIN-3D, Perform3D, and OpenSees modelling comparison. |
+| **NHERI SimCenter** (`simcenter.designsafe-ci.org`) | Cross-platform validation | EE-UQ and PBE applications use both OpenSees and SAP2000 as backend solvers — maintained cross-platform validation test sets internally. Also hosts experimental datasets (NEEShub/DesignSafe) for validating fiber-section RC column behaviour. |
+| **Scott & Fenves (2006)** — "Plastic Hinge Integration Methods for Force-Based Beam-Column Elements" | Journal paper | Validates `forceBeamColumn` with `HingeRadau` integration against experimental data. ASCE JSE 132(2), DOI `10.1061/(ASCE)0733-9445(2006)132:2(244)`. |
+| **Scott & Ryan (2013)** — "Moment-Rotation Behavior of Force-Based Plastic Hinge Elements" | Journal paper | Extends validation to cyclic loading, compares with experimental column tests. Earthquake Spectra 29(2), DOI `10.1193/1.4000136`. |
+| **Neuenhofer & Filippou (1998)** — "Geometrically Nonlinear Flexibility-Based Frame Finite Element" | Journal paper | Foundational validation of force-based frame elements. ASCE JSE 124(6). |
+| **Schellenberg et al.** — "OpenSees-Software Framework for Nonlinear Analysis" | Framework paper | Various validation examples distributed with OpenSees source. |
+| **Haselton & Deierlein (2007)** — PEER Report 2007/03 | Research report | RC column calibration for nonlinear models — standard reference for fiber-section column parameters. |
+| **Ibarra & Krawinkler (2005)** — "Global Collapse of Frame Structures under Seismic Excitations" | Research report (+ PEER 2005/06) | Deterioration models for steel and RC components. Foundation for collapse assessment methodology. |
+| **Lignos & Krawinkler (2011)** — "Deterioration Modeling of Steel Components in Support of Collapse Prediction" | Journal paper | Steel component deterioration models validated against experimental database. Earthquake Spectra 27(3), DOI `10.1193/1.3602826`. |
+| **SAC Steel Project** (FEMA 355 / SAC/BD-00) | Benchmark frames | 3-, 9-, and 20-story steel moment frame models extensively validated against nonlinear dynamic analysis. Standard benchmark for steel frame assessment. |
+| **FEMA P695** | Ground-motion sets | Far-field (44 records) and near-field (28 records) sets for IDA. Standard input for collapse assessment. |
+| **OpenSeesDays workshops** (`WORKSHOPS/`) | Tutorial models | Steel2dModels (CBF1–CBF4: diagonal, X-brace, V-brace, inverted-V) — used in this project for brace buckling modelling. |
 
 ### 3.7 Other Common Modelling Gaps (from Literature)
 
@@ -528,27 +580,22 @@ higher mode, e.g. ω₁ and ω₃).
 
 #### P-Delta Effects
 
-The builder currently uses `geomTransf Linear` for all frame elements,
-meaning **no P-Delta effects** are captured.  SAP2000 offers P-Delta as
-a configurable analysis-case option.
-
-- `geomTransf PDelta` — captures second-order (P-Δ) effects via
-  geometric stiffness (recommended for most pushover analyses).
-- `geomTransf Corotational` — large-displacement formulation (needed
-  for buckling or highly flexible structures).
-
-The ``analysis_mode`` auto-config should select `PDelta` for pushover
-and `Corotational` for brace buckling.
+The builder already uses `geomTransf PDelta` for pushover analysis (``push_config['geom_transf_type'] = 'PDelta'``).  The default for other analysis types remains ``'Linear'``, configurable via the ``geom_transf_type`` config key.
 
 #### Effective Stiffness Modifiers (ASCE 41)
 
-SAP2000 stores stiffness modifiers in `FRAME ASSIGNMENTS`:
+SAP2000 stores stiffness modifiers in `FRAME SECTION PROPERTIES 01 - GENERAL`:
+- AMod (axial), I3Mod (major bending), I2Mod (minor bending), JMod (torsion)
 - Cracked beams: `0.35EI` (ASCE 41 Table 10-5)
 - Cracked columns: `0.70EI` (depending on axial load)
 - Cracked walls: `0.50EI`
 
-The `.s2k` parser extracts `FrameAssignments.modifiers` but the builder
-**does not apply them** — all sections use full elastic stiffness.
+The parser now extracts modifiers from the section properties table and stores them
+on each ``Section.modifiers`` dict.  The builder applies them for elastic builds
+(``use_elastic_sections=True``) by scaling ``A``, ``I33``, ``I22``, and ``J`` before
+calling ``ops.section('Elastic', ...)``.  Modifiers are **skipped** for nonlinear
+analyses (``create_fiber_sections=True``) since material/element formulations model
+cracking directly.
 
 #### Rigid Diaphragms
 
@@ -582,19 +629,10 @@ The ``analysis_mode`` config should include an optional
 
 #### Modal Pushover Load Pattern
 
-The toolkit currently supports `uniform` and `triangular` pushover
-patterns.  SAP2000 and ASCE 41 also recommend a **modal** pattern
-proportional to the fundamental mode shape times mass.
-
-In OpenSees this is done via:
-```
-pattern Plain 2 1 {
-    load $nodeTag [expr $mass * $eigenvector_x]
-    load $nodeTag [expr $mass * $eigenvector_y]
-}
-```
-
-This should be added as a third pushover pattern option.
+The toolkit supports ``'uniform'``, ``'triangular'``, and ``'mode1'``
+pushover patterns.  The ``'mode1'`` pattern applies loads proportional
+to mass × eigenvector, implemented via ``_compute_mode_shape_lateral_loads()``.
+This is the ASCE 41 recommended modal pattern.
 
 #### Concrete Confinement (Cover vs. Core)
 
@@ -610,10 +648,31 @@ do this, which overestimates column ductility.
 
 Michael H. Scott's OpenSees blog (Portwood Digital) emphasises that
 equation numbering order can significantly impact solver performance.
-The builder uses `numberer Plain` (sequential by node tag).  For large
-models, `numberer RCM` (Reverse Cuthill-McKee) reduces matrix bandwidth
-and can improve solver speed by 2–10×.  The ``analysis_mode`` config
-should auto-select `RCM` for models with >1000 nodes.
+The builder uses ``numberer RCM`` (Reverse Cuthill-McKee) throughout —
+no ``numberer Plain`` usage remains in the codebase.
+
+## 3.8 Storey Force Reconstruction (Implemented)
+
+A general section-cut approach was designed but the toolkit currently implements
+two complementary methods for storey-level force and moment profiles:
+
+**Method 1 — Nodal summation (`storey_shears` in `storey_response.py`)**
+Groups element-end nodes by storey (via `assign_nodes_to_storeys`) and sums
+element-end forces at all nodes belonging to each level.  This is essentially
+**Option B** — the free-body diagram of the portion above each storey.
+Implemented and used for per-load-case force profiles.
+
+**Method 2 — Trapezoidal reconstruction (`plot_storey_forces` in `plotting/report.py`)**
+Reconstructs an equivalent distributed load from base shear and base moment,
+then evaluates V(z) and M(z) analytically at 100 interior points for smooth
+continuous curves.  This is **Option C** — fast, no additional analysis pass,
+and automatically satisfies V = dM/dz.
+
+**Not implemented** — Option A (element-end force interpolation at an arbitrary
+cut elevation) was explored but not needed because Method 2 provides
+sufficient accuracy for global reporting.  If element-level verification at a
+specific elevation is required, use `extract_static_element_forces()` +
+`storey_shears()` directly.
 
 ---
 
@@ -623,21 +682,24 @@ The issues identified in sections 3.1–3.7 are prioritised below.  The
 priority reflects impact on correctness, frequency of occurrence, and
 dependency on other items.
 
-| Priority | Issue | Section | Effort | Why now / later |
-|---|---|---|---|---|
-| **P0** | Cardinal point parsing | 3.5 | Small (parser only) | Sections positioned incorrectly for RC beams; affects loads, spans, visualisation. Data already in .s2k, just not read. |
-| **P1** | Frame-to-shell drilling DOF | 3.2 | Medium (builder change) | Causes stiffness singularities in combined frame-shell models. Multiple well-known workarounds exist. |
-| **P2** | Effective stiffness modifiers | 3.7 | Small (builder change) | ASCE 41 cracked sections: 0.35EI beams, 0.70EI columns. Parser has the data, builder ignores it. |
-| **P3** | Rigid diaphragms | 3.7 | Medium (builder change) | Lateral load distribution differs from SAP2000. Parser stores constraint data, builder never calls `ops.rigidDiaphragm()`. |
-| **P4** | P-Delta geometric transformation | 3.7 | Small (config change) | Pushover and buckling need `PDelta`/`Corotational`. Currently only `Linear` is used. |
-| **P5** | Convergence fallback | 3.7 | Medium (builder change) | Auto-retry chain (Newton → LineSearch → ModifiedNewton → KrylovNewton). Prevents analysis failure on marginally nonlinear models. |
-| **P6** | Concrete confinement (cover vs. core) | 3.7 | Medium (builder change) | Fiber sections overestimate column ductility without unconfined cover layer. |
-| **P7** | Modal pushover pattern | 3.7 | Small (workflow change) | Third pattern option: `load = mass × eigenvector`. Required by ASCE 41. |
-| **P8** | Equation numbering (RCM) | 3.7 | Small (builder change) | `numberer RCM` gives 2–10× speedup for >1000 nodes. Single flag change. |
-| **P9** | Damping for dynamic analysis | 3.7 | Medium (when dynamic is added) | Rayleigh coefficients from target ζ at two frequencies. Not needed until `nonlinear_dynamic` mode is implemented. |
-| **P0-dyn** | Tcl export for nonlinear RC | — | Medium | Nonlinear RC analysis cannot run in OpenSeesPy. ``export_model_to_tcl()`` exists but needs to emit fiber sections, ``Concrete01/02``, ``Steel02``, and analysis commands. |
-| **P1-dyn** | Nonlinear dynamic analysis | — | Large | Ground-motion input, Newmark/HHT integrator, time-history output. Requires P0-dyn first. |
-| **P2-dyn** | Validation suite | 3.6 | Ongoing | Collect PEER reports, OpenSees verification suite, Perform3D benchmarks as regression tests. |
+| Priority | Issue | Section | Effort | Why now / later | Status |
+|----------|-------|---------|--------|-----------------|--------|
+| **P0** | Cardinal point + offset merging | 3.5, 3.4 | Small | Sections positioned incorrectly for RC beams; affects loads, spans, visualisation. Cardinal point parsed from FRAME SECTION ASSIGNMENTS; offsets combined with longitudinal end offsets at parse time per E2K approach. | ✅ Done |
+| **P1** | Frame-to-shell drilling DOF | 3.2 | Medium (builder change) | Causes stiffness singularities in combined frame-shell models. Multiple well-known workarounds exist. | ❌ Pending |
+| **P2** | Auto edge constraints | 3.1/3.2 | Medium (builder change) | Mesh-density transitions (wall ↔ slab) need automatic detection and MPC application. Currently manual; an `auto_edge_constraints()` pass would catch all transitions. | ❌ Pending |
+| **P3** | Joint modelling — Level 2 | 3.4 | Medium (builder change) | Enables semi-rigid connection modelling. Level 1 (rigid offset) exists; Level 2 replaces stiff links with calibrated zero-length springs (flexibility %). | ❌ Pending |
+| **P4** | Effective stiffness modifiers | 3.7 | Small | ASCE 41 cracked sections: 0.35EI beams, 0.70EI columns. AMod/I3Mod/I2Mod/JMod parsed from section properties; applied in builder for elastic builds only (skipped for nonlinear fiber sections). | ✅ Done |
+| **P5** | Rigid diaphragms | 3.7 | Medium (builder change) | Lateral load distribution differs from SAP2000. Parser stores constraint data, builder never calls `ops.rigidDiaphragm()`. | ❌ Pending |
+| **P6** | P-Delta geom. transformation | 3.7 | Small | Pushover already uses `geomTransf PDelta` via `push_config['geom_transf_type'] = 'PDelta'` at line 4685. | ✅ Done |
+| **P7** | Convergence fallback | 3.7 | Medium (builder change) | Auto-retry chain (Newton → LineSearch → ModifiedNewton → KrylovNewton). Prevents analysis failure on marginally nonlinear models. | ❌ Pending |
+| **P8** | Concrete confinement | 3.7 | Medium (builder change) | Fiber sections overestimate column ductility without unconfined cover layer. | ❌ Pending |
+| **P9** | Modal pushover pattern | 3.7 | Small | Implemented as `lateral_load_type='mode1'` with `_compute_mode_shape_lateral_loads()`. | ✅ Done |
+| **P10** | Equation numbering (RCM) | 3.7 | Small | `ops.numberer('RCM')` used throughout — no `numberer Plain` remaining. | ✅ Done |
+| **P11** | Damping for dynamic | 3.7 | Medium (when added) | Rayleigh coefficients from target ζ at two frequencies. Not needed until `nonlinear_dynamic`. | ❌ Pending |
+| **—** | CI pipeline (verification suite) | 3.6 | Medium (CI setup) | Run `runVerificationSuite.tcl` automatically to catch regressions from toolkit changes. | ❌ Pending |
+| **P0-dyn** | Tcl export for nonlinear RC | — | Medium | Nonlinear RC cannot run in OpenSeesPy. `export_model_to_tcl()` emits fiber sections + analysis commands. | ⚠️ Partial |
+| **P1-dyn** | Nonlinear dynamic analysis | — | Large | Ground-motion input, Newmark/HHT integrator, time-history output. Requires P0-dyn. | ❌ Pending |
+| **P2-dyn** | Validation suite | 3.6 | Ongoing | Collect PEER 2017/03, PEER 2015/01, Scott & Fenves (2006), SAC Steel benchmarks as regression tests. | ❌ Pending |
 
 ### Damping-specific note
 
@@ -706,7 +768,7 @@ def generate_report(config_path: str):
     # here or at the builder boundary.
 
     # ── Phase 1: Storeys ──────────────────────────────────────────
-    stories = identify_stories(md, raw_tables=parser._raw_tables,
+    stories = identify_stories(md, raw_tables=parser.raw_tables,
                                method=cfg["storeys"]["method"],
                                z_tolerance=cfg["storeys"]["z_tolerance"])
     store.write_dataframe("storeys", "summary", stories_dataframe(stories))
