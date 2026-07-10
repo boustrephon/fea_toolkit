@@ -852,8 +852,9 @@ class OpenSeesBuilder:
         _sec_tag: Dict[str, int] = {}
         for i, mn in enumerate(model_data.materials, start=1):
             _mat_tag[mn] = i
-        tag_offset = max(len(model_data.materials), 1) + 1
-        for i, sn in enumerate(model_data.sections, start=tag_offset):
+        mat_count = max(len(model_data.materials), 1)
+        sec_tag_offset = mat_count + 1
+        for i, sn in enumerate(model_data.sections, start=sec_tag_offset):
             _sec_tag[sn] = i
 
         # Nodes
@@ -1136,13 +1137,14 @@ class OpenSeesBuilder:
         #   materials: 1..M  (same as export_model_to_tcl)
         #   sections:  M+1 .. M+S  (same)
         #   concrete mat tags for RC: start after all section tags
-        mat_count = len(model_data.materials)
+        mat_count = max(len(model_data.materials), 1)
         sec_count = len(model_data.sections)
-        next_concrete_tag = mat_count + sec_count + 1
+        sec_tag_offset = mat_count + 1
+        next_concrete_tag = sec_tag_offset + sec_count
 
         # Map section name → tag
         _sec_tag: Dict[str, int] = {}
-        for i, sn in enumerate(model_data.sections, start=mat_count + 1):
+        for i, sn in enumerate(model_data.sections, start=sec_tag_offset):
             _sec_tag[sn] = i
 
         for sec_name, sec in model_data.sections.items():
