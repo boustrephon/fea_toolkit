@@ -584,17 +584,37 @@ def plot_storey_displacements(
         return None
 
     # Unit conversion: raw data is in source_length_unit, display in disp_unit / drift_unit
-    # Map source unit → conversion factor to "m" (internal reference)
-    _to_m = {"m": 1.0, "mm": 0.001, "cm": 0.01, "ft": 0.3048, "in": 0.0254}
-    source_to_m = _to_m.get(source_length_unit, 1.0)
-    # disp_scale: from source unit → display unit
-    _target_to_m = {"mm": 0.001, "cm": 0.01, "m": 1.0,
-                    "ft": 0.3048, "in": 0.0254}
-    target_to_m = _target_to_m.get(disp_unit, 1.0)
-    disp_scale = target_to_m / source_to_m if source_to_m > 0 else 1.0
+    _LENGTH_TO_METRE = {"m": 1.0, "mm": 0.001, "cm": 0.01, "ft": 0.3048, "in": 0.0254}
+    if source_length_unit not in _LENGTH_TO_METRE:
+        raise ValueError(
+            f"Unsupported source_length_unit={source_length_unit!r}. "
+            f"Supported: {list(_LENGTH_TO_METRE)}"
+        )
+    if disp_unit not in _LENGTH_TO_METRE:
+        raise ValueError(
+            f"Unsupported disp_unit={disp_unit!r}. "
+            f"Supported: {list(_LENGTH_TO_METRE)}"
+        )
+    source_to_m = _LENGTH_TO_METRE[source_length_unit]
+    target_to_m = _LENGTH_TO_METRE[disp_unit]
+    disp_scale = target_to_m / source_to_m
 
-    # drift_scale: drift values are disp/length ratios; mm/m = 0.001, others = 1
-    drift_scale = 1000.0 if drift_unit == "mm/m" else 1.0
+    # drift_scale: drift values are dimensionless ratios (m/m).
+    # Parse the display unit to get the multiplier.
+    _DRIFT_SCALES = {
+        "mm/m": 1000.0,
+        "cm/m": 100.0,
+        "%": 100.0,
+        "m/m": 1.0,
+        "rad": 1.0,
+        "radians": 1.0,
+    }
+    if drift_unit not in _DRIFT_SCALES:
+        raise ValueError(
+            f"Unsupported drift_unit={drift_unit!r}. "
+            f"Supported: {list(_DRIFT_SCALES)}"
+        )
+    drift_scale = _DRIFT_SCALES[drift_unit]
 
     # Exclude the resolved elevation columns dynamically
     base_skip = {"Storey"}
