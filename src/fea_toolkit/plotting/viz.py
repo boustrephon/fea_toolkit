@@ -1450,12 +1450,16 @@ def plot_capacity_spectrum(
 def _load_npz_for_plotting(npz_path: str, combo: str = None) -> dict:
     """Load an NPZ results file and build element‑centric arrays.
 
+    Supports both the legacy ``*_forces.npz`` format and the unified
+    ``results.npz`` schema (auto‑detected from array keys).
+
     Parameters
     ----------
     npz_path : str
         Path to the ``.npz`` results file.
     combo : str or None
-        Load‑combination key (prefix).  ``None`` = primary results.
+        Load‑combination key (prefix for legacy format) or case name
+        for the unified schema.  ``None`` = primary results / first case.
 
     Returns a dict with:
         - elem_data: list of dicts (one per sub‑element) with keys:
@@ -1468,74 +1472,128 @@ def _load_npz_for_plotting(npz_path: str, combo: str = None) -> dict:
         - raw_data: the loaded npz dict
     """
     data = np.load(npz_path, allow_pickle=True)
-    prefix = f"{combo}_" if combo else ""
+    d = dict(data)  # convert to plain dict for easier access
 
-    # Metadata
-    metadata_raw = data.get("metadata_json")
+    # Detect format: unified has analysis_types, legacy has sub_elem_tags
+    is_unified = "analysis_types" in d or "frame_eid" in d
+
     metadata = {}
-    if metadata_raw is not None:
-        try:
-            metadata = json.loads(str(metadata_raw.item()))
-        except Exception:
-            pass
-
-    def _s(key) -> str:
-        arr = data.get(key)
-        if arr is not None:
-            return str(arr.item())
-        return "?"
-
-    force_unit = _s("force_unit")
-    length_unit = _s("length_unit")
-
-    # Build look‑up: node_tag → (x, y, z)
-    n_tags = data.get("node_tags")
-    n_x = data.get("node_x")
-    n_y = data.get("node_y")
-    n_z = data.get("node_z")
-    node_coords: Dict[int, tuple] = {}
-    if n_tags is not None and n_x is not None:
-        for i in range(len(n_tags)):
-            node_coords[int(n_tags[i])] = (
-                float(n_x[i]),
-                float(n_y[i]),
-                float(n_z[i]),
-            )
-
-    # Build element list
-    has_local = metadata.get("has_local_forces", metadata.get("has_local", False)) or f"{prefix}sub_fx_i_local" in data
+    force_unit = "?"
+    length_unit = "?"
     elem_data: List[dict] = []
-    for i in range(len(data["sub_elem_tags"])):
-        n_i_tag = int(data["sub_node_i_tag"][i])
-        n_j_tag = int(data["sub_node_j_tag"][i])
-        c_i = node_coords.get(n_i_tag, (0, 0, 0))
-        c_j = node_coords.get(n_j_tag, (0, 0, 0))
-        x_i, y_i, z_i = c_i
-        x_j, y_j, z_j = c_j
-        mid_z = (z_i + z_j) / 2.0
 
-        def _g(k: str) -> float:
-            pk = f"{prefix}{k}"
-            arr = data.get(pk)
-            return float(arr[i]) if arr is not None else np.nan
+    if is_unified:
+        # ── Unified schema ─────────────────────────────────────────
+        from ..io.npz_reader import read_results_npz, _get_static_cases
+        d = read_results_npz(npz_path)
 
-        entry: dict = {
-            "sap_id": str(data["sub_sap_ids"][i]),
-            "x_i": x_i, "y_i": y_i, "z_i": z_i,
-            "x_j": x_j, "y_j": y_j, "z_j": z_j,
-            "mid_z": mid_z,
-            "fx_i": _g("sub_fx_i"), "fy_i": _g("sub_fy_i"), "fz_i": _g("sub_fz_i"),
-            "mx_i": _g("sub_mx_i"), "my_i": _g("sub_my_i"), "mz_i": _g("sub_mz_i"),
-            "fx_j": _g("sub_fx_j"), "fy_j": _g("sub_fy_j"), "fz_j": _g("sub_fz_j"),
-            "mx_j": _g("sub_mx_j"), "my_j": _g("sub_my_j"), "mz_j": _g("sub_mz_j"),
-        }
-        if has_local:
+        cases = _get_static_cases(d)
+        case = combo if combo and combo in cases else (cases[0] if cases else None)
+
+        fu = d.get("force_unit")
+        force_unit = str(fu[0]) if fu is not None and len(fu) else "?"
+        lu = d.get("length_unit")
+        length_unit = str(lu[0]) if lu is not None and len(lu) else "?"
+
+        # Node coords lookup
+        nid = d.get("node_tag", np.array([]))
+        nx = d.get("node_x", np.array([]))
+        ny = d.get("node_y", np.array([]))
+        nz = d.get("node_z", np.array([]))
+        node_coords = {}
+        for i in range(len(nid)):
+            node_coords[int(nid[i])] = (float(nx[i]), float(ny[i]), float(nz[i]))
+
+        # Frame elements
+        fi = d.get("frame_node_i", np.array([]))
+        fj = d.get("frame_node_j", np.array([]))
+        sap_ids = d.get("frame_sap_id", np.array([]))
+        pre = f"static/{case}/" if case else ""
+
+        for i in range(len(fi)):
+            c_i = node_coords.get(int(fi[i]), (0, 0, 0))
+            c_j = node_coords.get(int(fj[i]), (0, 0, 0))
+            mid_z = (c_i[2] + c_j[2]) / 2.0
+
+            def _g(k):
+                arr = d.get(f"{pre}{k}")
+                return float(arr[i]) if arr is not None else 0.0
+
+            entry = {
+                "sap_id": str(sap_ids[i]),
+                "x_i": c_i[0], "y_i": c_i[1], "z_i": c_i[2],
+                "x_j": c_j[0], "y_j": c_j[1], "z_j": c_j[2],
+                "mid_z": mid_z,
+                "fx_i": _g("fx_i"), "fy_i": _g("fy_i"), "fz_i": _g("fz_i"),
+                "mx_i": _g("mx_i"), "my_i": _g("my_i"), "mz_i": _g("mz_i"),
+                "fx_j": _g("fx_j"), "fy_j": _g("fy_j"), "fz_j": _g("fz_j"),
+                "mx_j": _g("mx_j"), "my_j": _g("my_j"), "mz_j": _g("mz_j"),
+            }
+            # Local forces (optional)
             for q in ("fx", "fy", "fz", "mx", "my", "mz"):
-                k = f"sub_{q}_i_local"
-                entry[f"{q}_i_local"] = _g(k) if f"{prefix}{k}" in data else _g(f"sub_{q}_i")
-                k = f"sub_{q}_j_local"
-                entry[f"{q}_j_local"] = _g(k) if f"{prefix}{k}" in data else _g(f"sub_{q}_j")
-        elem_data.append(entry)
+                loc_i = f"{pre}{q}_i_local"
+                loc_j = f"{pre}{q}_j_local"
+                entry[f"{q}_i_local"] = _g(f"{q}_i_local") if loc_i in d else _g(f"{q}_i")
+                entry[f"{q}_j_local"] = _g(f"{q}_j_local") if loc_j in d else _g(f"{q}_j")
+            elem_data.append(entry)
+
+    else:
+        # ── Legacy format ──────────────────────────────────────────
+        prefix = f"{combo}_" if combo else ""
+
+        metadata_raw = data.get("metadata_json")
+        if metadata_raw is not None:
+            try:
+                metadata = json.loads(str(metadata_raw.item()))
+            except Exception:
+                pass
+
+        def _s(key) -> str:
+            arr = data.get(key)
+            return str(arr.item()) if arr is not None else "?"
+        force_unit = _s("force_unit")
+        length_unit = _s("length_unit")
+
+        # Node coords lookup
+        n_tags = data.get("node_tags")
+        n_x = data.get("node_x")
+        n_y = data.get("node_y")
+        n_z = data.get("node_z")
+        node_coords = {}
+        if n_tags is not None and n_x is not None:
+            for i in range(len(n_tags)):
+                node_coords[int(n_tags[i])] = (float(n_x[i]), float(n_y[i]), float(n_z[i]))
+
+        has_local = metadata.get("has_local_forces", metadata.get("has_local", False)) or f"{prefix}sub_fx_i_local" in data
+        for i in range(len(data["sub_elem_tags"])):
+            n_i_tag = int(data["sub_node_i_tag"][i])
+            n_j_tag = int(data["sub_node_j_tag"][i])
+            c_i = node_coords.get(n_i_tag, (0, 0, 0))
+            c_j = node_coords.get(n_j_tag, (0, 0, 0))
+            mid_z = (c_i[2] + c_j[2]) / 2.0
+
+            def _g(k: str) -> float:
+                pk = f"{prefix}{k}"
+                arr = data.get(pk)
+                return float(arr[i]) if arr is not None else np.nan
+
+            entry = {
+                "sap_id": str(data["sub_sap_ids"][i]),
+                "x_i": c_i[0], "y_i": c_i[1], "z_i": c_i[2],
+                "x_j": c_j[0], "y_j": c_j[1], "z_j": c_j[2],
+                "mid_z": mid_z,
+                "fx_i": _g("sub_fx_i"), "fy_i": _g("sub_fy_i"), "fz_i": _g("sub_fz_i"),
+                "mx_i": _g("sub_mx_i"), "my_i": _g("sub_my_i"), "mz_i": _g("sub_mz_i"),
+                "fx_j": _g("sub_fx_j"), "fy_j": _g("sub_fy_j"), "fz_j": _g("sub_fz_j"),
+                "mx_j": _g("sub_mx_j"), "my_j": _g("sub_my_j"), "mz_j": _g("sub_mz_j"),
+            }
+            if has_local:
+                for q in ("fx", "fy", "fz", "mx", "my", "mz"):
+                    k = f"sub_{q}_i_local"
+                    entry[f"{q}_i_local"] = _g(k) if f"{prefix}{k}" in data else _g(f"sub_{q}_i")
+                    k = f"sub_{q}_j_local"
+                    entry[f"{q}_j_local"] = _g(k) if f"{prefix}{k}" in data else _g(f"sub_{q}_j")
+            elem_data.append(entry)
 
     return {
         "elem_data": elem_data,

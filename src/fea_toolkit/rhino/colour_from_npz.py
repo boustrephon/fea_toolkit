@@ -61,6 +61,9 @@ def _load_npz_quantities(npz_path: str, quantity: str, use_local: bool = True,
                           combo: str = None):
     """Load an NPZ and return a dict ``{sap_id: value}``.
 
+    Supports both the legacy ``*_forces.npz`` format and the unified
+    ``results.npz`` schema (auto‑detected).
+
     The value is the **I‑end** force/moment for that element (in local
     coordinates if *use_local* is ``True``).
 
@@ -73,7 +76,7 @@ def _load_npz_quantities(npz_path: str, quantity: str, use_local: bool = True,
     use_local : bool
         Use local‑coordinate forces.
     combo : str or None
-        Load‑combination key (prefix).  ``None`` = primary results.
+        Load‑combination key (prefix for legacy) or case name (unified).
 
     Returns
     -------
@@ -85,37 +88,72 @@ def _load_npz_quantities(npz_path: str, quantity: str, use_local: bool = True,
         Parsed metadata dict
     """
     data = np.load(npz_path, allow_pickle=True)
-
-    # Parse metadata
-    meta = {}
-    meta_raw = data.get("metadata_json")
-    if meta_raw is not None:
-        try:
-            import json
-            meta = json.loads(str(meta_raw.item()))
-        except Exception:
-            pass
-
-    prefix = f"{combo}_" if combo else ""
-    suffix = "_local" if use_local else ""
-    key_i = f"{prefix}sub_{quantity.lower()}_i{suffix}"
-
-    # Fall back to global if local not available
-    if use_local and key_i not in data:
-        key_i = f"{prefix}sub_{quantity.lower()}_i"
+    is_unified = "analysis_types" in data or "frame_eid" in data
 
     values: dict = {}
     vmin, vmax = 0.0, 0.0
-    arr = data.get(key_i)
-    sap_ids = data.get("sub_sap_ids")
-    if arr is not None and sap_ids is not None:
-        for i in range(len(arr)):
-            sid = str(sap_ids[i])
-            v = float(arr[i])
-            if not np.isnan(v):
-                values[sid] = v
-                vmin = min(vmin, v)
-                vmax = max(vmax, v)
+    meta = {}
+
+    if is_unified:
+        from ..io.npz_reader import read_results_npz, _get_static_cases
+        d = read_results_npz(npz_path)
+        cases = _get_static_cases(d)
+        case = combo if combo and combo in cases else (cases[0] if cases else None)
+        pre = f"static/{case}/" if case else ""
+
+        q = quantity.lower()
+        key_i = f"{pre}{q}_i"
+        if use_local:
+            loc_key = f"{pre}{q}_i_local"
+            if loc_key in d:
+                key_i = loc_key
+
+        arr = d.get(key_i)
+        sap_ids = d.get("frame_sap_id")
+        if arr is not None and sap_ids is not None:
+            for i in range(len(arr)):
+                sid = str(sap_ids[i])
+                v = float(arr[i])
+                if not np.isnan(v):
+                    values[sid] = v
+                    vmin = min(vmin, v)
+                    vmax = max(vmax, v)
+
+        # Metadata
+        meta_raw = d.get("metadata_json")
+        if meta_raw is not None:
+            try:
+                import json
+                meta = json.loads(str(meta_raw.item()))
+            except Exception:
+                pass
+
+    else:
+        # ── Legacy format ──────────────────────────────────────────
+        meta_raw = data.get("metadata_json")
+        if meta_raw is not None:
+            try:
+                import json
+                meta = json.loads(str(meta_raw.item()))
+            except Exception:
+                pass
+
+        prefix = f"{combo}_" if combo else ""
+        suffix = "_local" if use_local else ""
+        key_i = f"{prefix}sub_{quantity.lower()}_i{suffix}"
+        if use_local and key_i not in data:
+            key_i = f"{prefix}sub_{quantity.lower()}_i"
+
+        arr = data.get(key_i)
+        sap_ids = data.get("sub_sap_ids")
+        if arr is not None and sap_ids is not None:
+            for i in range(len(arr)):
+                sid = str(sap_ids[i])
+                v = float(arr[i])
+                if not np.isnan(v):
+                    values[sid] = v
+                    vmin = min(vmin, v)
+                    vmax = max(vmax, v)
 
     return values, (vmin, vmax), meta
 
