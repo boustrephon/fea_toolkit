@@ -210,6 +210,9 @@ output:
       - static_results
       - pushover_results
       - csm_performance
+      - storey_forces           # plot_storey_forces()
+      - storey_displacements    # plot_storey_displacements()
+      - storey_drifts           # per-storey drift profiles
       - conclusions
 ```
 
