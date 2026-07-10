@@ -171,7 +171,7 @@ class TestApplyEdgeConstraints:
         # Spring method creates 2 elements per slave (one to each master),
         # so 2 slaves × 2 masters = 4 elements (vs 2 MPCs with penalty)
         assert n == 4, f"Expected 4 spring elements, got {n}"
-        assert builder._has_edge_constraints is True
+        assert builder._has_spring_constraints is True
         ops.wipe()
         ops.wipe()
 
@@ -186,20 +186,20 @@ class TestApplyEdgeConstraints:
             verbose=False,
         )
         assert n == 0, f"Expected 0 constraints, got {n}"
-        assert builder._has_edge_constraints is False
+        assert builder._has_spring_constraints is False
         ops.wipe()
 
     def test_apply_flag_persists(self):
-        """_has_edge_constraints stays True after successful apply."""
+        """_has_spring_constraints stays True after successful apply."""
         builder, ops = self._make_builder()
-        assert builder._has_edge_constraints is False
+        assert builder._has_spring_constraints is False
         builder.apply_edge_constraints(
             coarse_edges=[(1, 2)],
             fine_nodes=[5, 6],
             tolerance=1e-4,
             verbose=False,
         )
-        assert builder._has_edge_constraints is True
+        assert builder._has_spring_constraints is True
         # Running again should keep it True
         builder.apply_edge_constraints(
             coarse_edges=[(2, 3)],
@@ -207,7 +207,7 @@ class TestApplyEdgeConstraints:
             tolerance=1e-4,
             verbose=False,
         )
-        assert builder._has_edge_constraints is True
+        assert builder._has_spring_constraints is True
         ops.wipe()
 
     def test_apply_with_no_edges_returns_zero(self):

@@ -2231,7 +2231,16 @@ def find_constraint_edges(
             is matched as a case-insensitive substring.
 
     Returns:
-        List of ``(node_ids_along_edge, type_a, type_b)``.
+        List of tuples.  Each tuple has:
+        - ``merged_nodes`` — all unique nodes along the shared edge,
+          sorted by position.
+        - ``per_type_chains`` — list of ``(chain_with_t, type_name)``,
+          one per distinct element type involved.  Each entry in the
+          chain is a ``(node_id, t_param)`` pair where ``t`` is the
+          parametric position along the edge [0, 1].  Chains are
+          sorted by length (fewest nodes first = coarsest mesh).
+        - ``type_a``, ``type_b`` — the two most common section names
+          (for backward compatibility).
     """
     from collections import defaultdict
     import numpy as np
@@ -2377,7 +2386,7 @@ def find_constraint_edges(
         zk = round((_node_arr[nA][2] + _node_arr[nB][2]) * 0.5, 1)
         z_groups[zk].append((nA, nB))
 
-    tears: List[tuple] = []  # each: (node_ids, elem_a, elem_b)
+    tears: List[tuple] = []  # each: (merged_nodes, [(chain, elem_id), ...])
 
     for zk, group in z_groups.items():
         if len(group) < 2:
@@ -2422,7 +2431,7 @@ def find_constraint_edges(
                         # Store the element IDs from the two starting keys
                         ea = edge_reg[(nA, nB)][0]
                         eb = edge_reg[k][0]
-                        tears.append((ordered, ea, eb))
+                        tears.append((ordered, [(trunc[0], ea), (trunc[1], eb)]))
 
             active.append((nA, nB))
 
@@ -2438,16 +2447,24 @@ def find_constraint_edges(
     # ── 4. Merge overlapping tears ──────────────────────────────
     # Two tears overlap if they share ≥1 node and are colinear
     # (absolute cosine of endpoint vectors > COSINE_TOL).
-    # Each merged tear carries the set of ALL element types involved.
-    merged: List[Tuple[List[str], set]] = []  # (node_ids, type_set)
+    # Each tear carries the per-element node chains for ALL elements
+    # sharing the edge — there can be 2, 3, or more.
+    merged: List[Tuple[List[str], List[tuple], str, str]] = []
+    # (merged_nodes, [(chain_with_t, type), ...], type_a, type_b)
     used = [False] * len(tears)
+    from collections import defaultdict
 
     for i in range(len(tears)):
         if used[i]:
             continue
-        nids_i, ea_i, eb_i = tears[i]
+        nids_i, chains_i = tears[i]
         group_nids = [nids_i]
-        group_types = {_elem_type(ea_i), _elem_type(eb_i)}
+        # elem_id → set_of_nodes for each participating element
+        elem_chains: Dict[str, set] = {}
+        for chain, eid in chains_i:
+            elem_chains[eid] = set(chain)
+        types_by_elem: Dict[str, str] = {eid: _elem_type(eid)
+                                          for chain, eid in chains_i}
         used[i] = True
         # Direction from first tear's endpoints
         fa_i = _node_arr[nids_i[0]]
@@ -2462,7 +2479,7 @@ def find_constraint_edges(
         for j in range(i + 1, len(tears)):
             if used[j]:
                 continue
-            nids_j, ea_j, eb_j = tears[j]
+            nids_j, chains_j = tears[j]
             shared = set(nids_i) & set(nids_j)
             if not shared:
                 continue
@@ -2477,7 +2494,12 @@ def find_constraint_edges(
             if abs(float(np.dot(d_i, d_j))) <= COSINE_TOL:
                 continue
             group_nids.append(nids_j)
-            group_types.update([_elem_type(ea_j), _elem_type(eb_j)])
+            for chain, eid in chains_j:
+                if eid in elem_chains:
+                    elem_chains[eid].update(chain)
+                else:
+                    elem_chains[eid] = set(chain)
+                    types_by_elem[eid] = _elem_type(eid)
             used[j] = True
 
         all_nodes: set = set()
@@ -2489,13 +2511,46 @@ def find_constraint_edges(
             key=lambda nid: float(np.dot(_node_arr[nid] - _node_arr[ref_node], d_i)),
         )
         if len(ordered) >= 3:
-            type_a = sorted(group_types)[0] if group_types else 'unknown'
-            type_b = sorted(group_types)[-1] if len(group_types) > 1 else type_a
-            merged.append((ordered, type_a, type_b))
+            # Compute t-parameters along the edge
+            span_vec = _node_arr[ordered[-1]] - _node_arr[ordered[0]]
+            span_len = float(np.linalg.norm(span_vec))
+            span_dir = span_vec / span_len if span_len > 1e-12 else np.array([1.0, 0.0, 0.0])
+            ref_pt = _node_arr[ordered[0]]
+
+            def _chain_with_t(nodes: set) -> List[tuple]:
+                items = [(nid, float(np.dot(_node_arr[nid] - ref_pt, span_dir)) / span_len)
+                         for nid in nodes if nid in _node_arr]
+                items.sort(key=lambda x: x[1])
+                return items
+
+            # Build per-element chains with t-values, deduplicated by type
+            seen_types: set = set()
+            type_chains: List[tuple] = []
+            for eid, nodes in elem_chains.items():
+                t = types_by_elem[eid]
+                if t in seen_types:
+                    # Merge chains of the same type
+                    for idx, (existing_nodes, existing_type) in enumerate(type_chains):
+                        if existing_type == t:
+                            combined = set(nid for nid, _ in existing_nodes)
+                            combined.update(nodes)
+                            type_chains[idx] = (_chain_with_t(combined), t)
+                            break
+                else:
+                    seen_types.add(t)
+                    type_chains.append((_chain_with_t(nodes), t))
+
+            # Sort chains by length (fewest nodes first = coarsest)
+            type_chains.sort(key=lambda x: len(x[0]))
+            type_names = sorted({t for _, t in type_chains})
+            type_a = type_names[0] if type_names else 'unknown'
+            type_b = type_names[-1] if len(type_names) > 1 else type_a
+            merged.append((ordered, type_chains, type_a, type_b))
 
     # ── 5. Format results ───────────────────────────────────────
-    results: List[Tuple[List[str], str, str]] = []
-    for nids, ta, tb in merged:
-        results.append((nids, ta, tb))
+    # Returns: [(merged_nodes, [(chain_with_t, type), ...], type_a, type_b)]
+    results: List[Tuple[List[str], List[tuple], str, str]] = []
+    for nids, type_chains, ta, tb in merged:
+        results.append((nids, type_chains, ta, tb))
 
     return results
