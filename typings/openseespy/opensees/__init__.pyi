@@ -289,7 +289,8 @@ def modalProperties(*args: str) -> Optional[dict]:
 
     Args:
         *args: Options such as ``'-return'`` (return dict), ``'-print'``
-               (print to console), ``'-unorm'`` (mass‑normalised eigenvectors),
+               (print to console), ``'-unorm'`` (displacement‑normalised
+               eigenvectors — default ARPACK result is mass‑normalised),
                ``'-file', path`` (write to file).
     Returns:
         Dictionary with keys like ``eigenFrequency``, ``eigenPeriod``,

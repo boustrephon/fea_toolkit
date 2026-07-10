@@ -148,7 +148,11 @@ class TestFindConstraintEdges:
         assert edges == []
 
     def test_exclude_type_filters_brick_wall(self, materials, sections):
-        """Areas with an excluded type do not produce tears."""
+        """Areas with an excluded type do not produce tears.
+
+        The default exclude_types={'brick'} matches 'Brick' via
+        case-insensitive substring matching.
+        """
         nodes = {
             "1": Node("1", 1, 0.0, 0.0, 0.0),
             "2": Node("2", 2, 6.0, 0.0, 0.0),
@@ -169,21 +173,10 @@ class TestFindConstraintEdges:
             groups={}, frame_auto_mesh={},
             area_mesh={"1": AreaMesh(auto_mesh=True, max_size=3.0)},
         )
-        # Default exclude_types={'brick wall'} — "Brick" is not excluded
-        # because the exclude check uses the string 'brick wall' which
-        # doesn't match 'Brick'.  Override exclude_types to filter it.
-        b = OpenSeesBuilder(md, {"verbose": False, "create_shells": True})
-        try:
-            b.build()
-            edges = find_constraint_edges(
-                b.model.area_elements,
-                b.model.area_assignments,
-                b.model.nodes,
-                exclude_types={"Brick"},
-            )
-            assert len(edges) == 0
-        finally:
-            ops.wipe()
+        # Default exclude_types={'brick'} now matches 'Brick' via
+        # case-insensitive substring matching — no manual override needed.
+        edges = _run_builder(md)
+        assert len(edges) == 0
 
     def test_output_contains_type_info(self, materials, sections):
         """Merged tears report element type names."""

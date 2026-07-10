@@ -504,6 +504,7 @@ class TestManderConfinement:
     def test_spiral_ke_uses_rho_cc(self):
         """Circular spiral ke uses rho_cc not rho_s."""
         from fea_toolkit.model.confinement import ConfinementData, mander_confined
+        import math
         data = ConfinementData(
             fc=30e6, tie_diameter=0.012, tie_spacing=0.05,
             tie_fy=400e6, core_bc=0.35, core_dc=0.35,
@@ -513,9 +514,21 @@ class TestManderConfinement:
         result = mander_confined(data)
         assert result.fcc > 30e6
         assert result.ke > 0
-        if result.ke > 0:
-            assert abs(result.ke - 1.0/(1.0 - result.rho_s)) > 0.001, (
-                "ke appears to use rho_s denominator instead of rho_cc")
+        # Compute expected ke from Mander Eq. 5-8:
+        #   ke = (1 - s'/(2·Ds))² / (1 - ρ_cc)
+        db = data.tie_diameter
+        s = data.tie_spacing
+        Ds = data.core_bc  # core diameter to centreline
+        s_prime = s - db
+        Al = math.pi * data.long_diameter**2 / 4.0
+        n_longs = data.long_count_x * data.long_count_y
+        Ac = math.pi * Ds**2 / 4.0
+        rho_cc = (n_longs * Al) / Ac if Ac > 0 else 0.0
+        expected_ke = ((1.0 - s_prime / (2.0 * Ds))**2 /
+                       (1.0 - rho_cc)) if Ds > 0 else 0.0
+        assert result.ke == pytest.approx(expected_ke, rel=1e-6), (
+            f"ke={result.ke:.6f}, expected {expected_ke:.6f} "
+            f"(rho_cc={rho_cc:.6f})")
 
     def test_ecu_with_eps_su(self):
         """ecu formula uses eps_su and confined strength fcc."""

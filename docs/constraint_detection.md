@@ -123,4 +123,6 @@ translational and rotational continuity.
 - **Accumulated chain direction** — robust against slight edge-angle variation.
 - **Junction truncation + merge** — clean short tears that recombine naturally.
 - **Type tracking** — each merged tear carries the set of element types involved.
-- **O(n log n)** sweep complexity.
+- **O(n²)** sweep complexity — each key may be compared against all
+  active keys in its Z-band, and chain following scans neighbouring
+  nodes per comparison.

@@ -569,6 +569,7 @@ def plot_stories(
             "Could not build visualisation model: %s", exc)
         return None
     finally:
+        ops.wipe()
         pv.OFF_SCREEN = _prev_off_screen
 
     pl = plot_model_3d(b, notebook=True, window_size=window_size)

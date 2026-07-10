@@ -924,20 +924,18 @@ class OpenSeesBuilder:
             lines.append("")
             lines.append("# ── Frame sections ──")
 
-            # Import section types for RC detection
-            from ..model.sap_data import (
-                ConcreteRectangularSection,
-                ConcreteCircularSection,
-                RectangularSection,
-            )
             fiber_sec_names: set = set()
             if config and config.get("create_fiber_sections", False):
                 # Collect names of sections that have fiber patches
+                # by attempting to_fiber_patches() — catches any section
+                # type that supports fiber conversion, not just a
+                # hardcoded isinstance list.
                 for sec_name, sec in model_data.sections.items():
-                    if isinstance(sec, (ConcreteRectangularSection,
-                                        ConcreteCircularSection,
-                                        RectangularSection)):
+                    try:
+                        sec.to_fiber_patches(mat_tag=1)
                         fiber_sec_names.add(sec_name)
+                    except NotImplementedError:
+                        pass
             for sec_name, sec in model_data.sections.items():
                 tag = _sec_tag[sec_name]
                 # Skip Elastic if this section will be emitted as fiber
@@ -978,11 +976,13 @@ class OpenSeesBuilder:
                 else:
                     vecxz = "0 0 1"
                 # Use config-driven geometric transformation
+                # Use a deterministic integer tag for the transformation
+                transf_tag = 20000 + elem.elem_tag
                 transf_type = "Linear"
                 if config:
                     transf_type = config.get("geom_transf_type", "Linear")
                 lines.append(
-                    f"geomTransf {transf_type} {eid} {vecxz}"
+                    f"geomTransf {transf_type} {transf_tag} {vecxz}"
                 )
                 sec_tag = _sec_tag.get(sec_name, sec_name)
                 if config and config.get("create_fiber_sections", False) and sec_name in fiber_sec_names:
@@ -995,12 +995,12 @@ class OpenSeesBuilder:
                     )
                     lines.append(
                         f"element forceBeamColumn {elem.elem_tag} "
-                        f"{ni.node_tag} {nj.node_tag} {eid} {int_tag}"
+                        f"{ni.node_tag} {nj.node_tag} {transf_tag} {int_tag}"
                     )
                 else:
                     lines.append(
                         f"element elasticBeamColumn {elem.elem_tag} "
-                        f"{ni.node_tag} {nj.node_tag} {sec_tag} {eid}"
+                        f"{ni.node_tag} {nj.node_tag} {sec_tag} {transf_tag}"
                     )
 
         # Area elements (shells) — unique shell sections only
@@ -1231,8 +1231,15 @@ class OpenSeesBuilder:
                     f"{Fy:g} {E_mod:g} {0.01:g}"
                 )
 
+            # Compute shear modulus for GJ torsional rigidity
+            _E = (mat.E_mod if mat and mat.E_mod and mat.E_mod > 0
+                  else 2.0e11) if mat else 2.0e11
+            _G = (mat.G_mod if mat and mat.G_mod and mat.G_mod > 0
+                  else 0.4 * _E) if mat else 0.4 * _E
+
             # ── Fiber section ──
-            lines.append(f"section Fiber {sec_tag} -GJ {sec.J:g} {{")
+            gj = _G * sec.J
+            lines.append(f"section Fiber {sec_tag} -GJ {gj:g} {{")
             try:
                 entries = sec.to_fiber_patches(mat_tag=fiber_mat_tag)
             except NotImplementedError:
@@ -4077,33 +4084,14 @@ class OpenSeesBuilder:
                 f = ops.eleResponse(tag, 'forces')
             except Exception:
                 continue
-            # eleResponse('forces') returns element basic (local) forces
-            # [P, V2, V3, T, M2, M3] at I-end then J-end.
-            # Rotate to global coordinates for a consistent output frame.
-            try:
-                vx, vy, vz = self._get_local_axes(elem)
-                # Rotation matrix local→global: columns = local axes
-                # Global = R @ Local  where R = [vx, vy, vz]
-                f_i_local = np.array([f[0], f[1], f[2]])
-                m_i_local = np.array([f[3], f[4], f[5]])
-                f_j_local = np.array([f[6], f[7], f[8]])
-                m_j_local = np.array([f[9], f[10], f[11]])
-                R = np.column_stack([vx, vy, vz])
-                f_i_global = R @ f_i_local
-                m_i_global = R @ m_i_local
-                f_j_global = R @ f_j_local
-                m_j_global = R @ m_j_local
-            except Exception:
-                # Fallback: treat as already global
-                import warnings as _w
-                _w.warn(
-                    f"Cannot rotate element {elem.elem_id} (tag {elem.elem_tag}) "
-                    f"forces to global — using raw local-to-global values."
-                )
-                f_i_global = np.array([f[0], f[1], f[2]])
-                m_i_global = np.array([f[3], f[4], f[5]])
-                f_j_global = np.array([f[6], f[7], f[8]])
-                m_j_global = np.array([f[9], f[10], f[11]])
+            # eleResponse('forces') returns element basic forces
+            # [P, V2, V3, T, M2, M3] at I-end then J-end in the global
+            # coordinate system for elasticBeamColumn/forceBeamColumn.
+            # No rotation needed — values are already global.
+            f_i_global = np.array([f[0], f[1], f[2]])
+            m_i_global = np.array([f[3], f[4], f[5]])
+            f_j_global = np.array([f[6], f[7], f[8]])
+            m_j_global = np.array([f[9], f[10], f[11]])
 
             results[tag] = {
                 'Fx': f_i_global[0], 'Fy': f_i_global[1], 'Fz': f_i_global[2],
