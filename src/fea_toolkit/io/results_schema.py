@@ -13,6 +13,7 @@ import numpy as np
 
 GEOMETRY_ARRAYS: Dict[str, Tuple] = {
     "node_tag": ("N_node", "int"),
+    "node_sap_id": ("N_node", "str"),
     "node_x": ("N_node", "float"),
     "node_y": ("N_node", "float"),
     "node_z": ("N_node", "float"),

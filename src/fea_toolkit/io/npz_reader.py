@@ -56,21 +56,22 @@ def npz_to_pyvista_frame_mesh(
     data: Dict[str, Any],
     deformed_case: Optional[str] = None,
     scale: float = 1.0,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Build frame line vertices and connectivity for PyVista.
 
-    Returns ``(points, lines, displacements)`` where:
+    Returns ``(points, lines, displacements, sap_ids)`` where:
 
     * ``points`` — ``(N_frame*2, 3)`` float array of node I/J coordinates.
     * ``lines`` — ``(N_frame, 3)`` int array ``[2, i, j]`` for PyVista.
     * ``displacements`` — ``(N_frame*2, 3)`` float array, zero if undeformed.
+    * ``sap_ids`` — ``(N_frame,)`` str array of SAP2000 FrameIDs.
 
     When *deformed_case* is provided, ``points`` are shifted by the
     nodal displacements for that case times *scale*.
     """
     nid = data.get("node_tag")
     if nid is None:
-        return np.empty((0, 3)), np.empty((0, 3)), np.empty((0, 3))
+        return np.empty((0, 3)), np.empty((0, 3)), np.empty((0, 3)), np.empty((0,), dtype=str)
 
     coords = np.column_stack([
         data.get("node_x", []),
@@ -82,14 +83,14 @@ def npz_to_pyvista_frame_mesh(
     n_frame = len(ni)
 
     if n_frame == 0:
-        return np.empty((0, 3)), np.empty((0, 3)), np.empty((0, 3))
+        return np.empty((0, 3)), np.empty((0, 3)), np.empty((0, 3)), np.empty((0,), dtype=str)
 
-    # Build lookup: node_tag → index in coords array
     tag_to_idx = {int(t): i for i, t in enumerate(nid)}
 
     points = np.zeros((n_frame * 2, 3))
     lines = np.zeros((n_frame, 3), dtype=int)
     disp = np.zeros((n_frame * 2, 3))
+    sap_ids = np.array(data.get("frame_sap_id", []), dtype=str)
 
     for ei in range(n_frame):
         i_idx = tag_to_idx.get(int(ni[ei]))
@@ -110,7 +111,7 @@ def npz_to_pyvista_frame_mesh(
             disp[ei * 2 + 1] = [dx[j_idx] * scale, dy[j_idx] * scale,
                                 dz[j_idx] * scale]
 
-    return points, lines, disp
+    return points, lines, disp, sap_ids
 
 
 def npz_to_pyvista_shell_mesh(
@@ -120,8 +121,7 @@ def npz_to_pyvista_shell_mesh(
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build shell quad vertices and face connectivity for PyVista.
 
-    Returns ``(points, faces, displacements)`` matching the frame mesh
-    helper above.
+    Returns ``(points, faces, displacements)``.
     """
     s1 = data.get("shell_node_1", [])
     n_shell = len(s1)
@@ -179,7 +179,7 @@ def npz_to_pyvista_modal_mesh(
     def _shift(coords_in):
         return coords_in + np.column_stack([dx * scale, dy * scale, dz * scale])
 
-    f_pts, f_lines, _ = npz_to_pyvista_frame_mesh(data)
+    f_pts, f_lines, _, _ = npz_to_pyvista_frame_mesh(data)
     if len(f_pts) > 0:
         f_pts = _shift(f_pts)
 
@@ -196,7 +196,7 @@ def npz_to_rhino_colour_data(
     data: Dict[str, Any],
     quantity: str = "fx_i",
     case: Optional[str] = None,
-) -> Dict[int, float]:
+) -> Dict[str, float]:
     """Extract per-element scalar data for Rhino colouring.
 
     Returns ``{sap_frame_id: value}`` dict matching SAP_FrameID UserStrings.
@@ -219,3 +219,18 @@ def npz_to_rhino_colour_data(
     if vals is None or sap_ids is None:
         return {}
     return {str(sap_ids[i]): float(vals[i]) for i in range(len(vals))}
+
+
+def npz_build_id_tag_map(data: Dict[str, Any]) -> Dict[str, int]:
+    """Build a mapping from SAP2000 string node ID → OpenSees node tag.
+
+    Useful when matching geometry created by the Rhino importer (which
+    stores SAP_NodeID UserStrings) with result arrays (which use node_tag).
+
+    Returns {sap_node_id: node_tag}, e.g. ``{"1": 1, "2": 2, ...}``.
+    """
+    sap_ids = data.get("node_sap_id")
+    tags = data.get("node_tag")
+    if sap_ids is None or tags is None:
+        return {}
+    return {str(sap_ids[i]): int(tags[i]) for i in range(len(sap_ids))}
