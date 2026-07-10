@@ -314,15 +314,13 @@ def _try_node_clustering(md, z_tolerance: float) -> List[StoryLevel]:
 
     # 1D clustering of Z values
     z_array = np.array(z_vals)
+    node_list = list(md.nodes.values())
     clusters = _cluster_1d(z_array, z_tolerance)
 
     stories = []
-    for cz in sorted(clusters):
-        # Find node IDs near this Z for bounding box
-        node_ids = [
-            nid for nid, n in md.nodes.items()
-            if abs(n.z - cz) < z_tolerance / 2
-        ]
+    for cz, member_idx in sorted(clusters, key=lambda x: x[0]):
+        # Use cluster member indices directly (avoids recomputing membership)
+        node_ids = [node_list[i].node_id for i in member_idx]
         bbox = _bbox_for_nodes(md, node_ids)
         stories.append(StoryLevel(
             name="",
@@ -418,25 +416,32 @@ def _cluster_z(data, z_tolerance: float):
     ]
 
 
-def _cluster_1d(values: np.ndarray, tolerance: float) -> List[float]:
+def _cluster_1d(values: np.ndarray, tolerance: float) -> List[Tuple[float, List[int]]]:
     """Simple 1D greedy clustering with fixed anchor.
 
     Each new value is compared to the **first** value in the current
     cluster (not the shifting mean), preventing chain-merging.
 
-    Returns list of cluster centroids (mean of each cluster).
+    Returns list of ``(centroid, indices)`` tuples, where *indices* are
+    the positions in the **original** (unsorted) *values* array belonging
+    to each cluster.
     """
-    sorted_vals = np.sort(values)
-    clusters = []
-    for v in sorted_vals:
+    # Sort by value, carrying original indices
+    idx_sorted = np.argsort(values)
+    sorted_vals = values[idx_sorted]
+    clusters = []  # each: (anchor, [original_indices])
+    for orig_idx, v in zip(idx_sorted, sorted_vals):
         if not clusters:
-            clusters.append([v])
+            clusters.append((v, [orig_idx]))
         else:
             if abs(v - clusters[-1][0]) <= tolerance:
-                clusters[-1].append(v)
+                clusters[-1][1].append(orig_idx)
             else:
-                clusters.append([v])
-    return [float(np.mean(c)) for c in clusters]
+                clusters.append((v, [orig_idx]))
+    return [
+        (float(np.mean(values[member_idx])), member_idx)
+        for _, member_idx in clusters
+    ]
 
 
 def _sort_and_name(stories: List[StoryLevel]) -> List[StoryLevel]:
@@ -559,15 +564,15 @@ def plot_stories(
         })
         b.build()
     except Exception as exc:
-        pv.OFF_SCREEN = _prev_off_screen
         import logging
         logging.getLogger(__name__).warning(
             "Could not build visualisation model: %s", exc)
         return None
+    finally:
+        pv.OFF_SCREEN = _prev_off_screen
 
     pl = plot_model_3d(b, notebook=True, window_size=window_size)
     if pl is None:
-        pv.OFF_SCREEN = _prev_off_screen
         return None
 
     # Determine global bounding box for plane extents
@@ -575,7 +580,6 @@ def plot_stories(
     ys = [n.y for n in md.nodes.values()]
     zs = [n.z for n in md.nodes.values()]
     if not xs:
-        pv.OFF_SCREEN = _prev_off_screen
         return None
 
     global_xmin, global_xmax = min(xs), max(xs)
@@ -619,5 +623,4 @@ def plot_stories(
     ax.imshow(img)
     ax.axis("off")
     fig.tight_layout()
-    pv.OFF_SCREEN = _prev_off_screen
     return fig
