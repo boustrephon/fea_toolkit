@@ -686,7 +686,7 @@ dependency on other items.
 |----------|-------|---------|--------|-----------------|--------|
 | **P0** | Cardinal point + offset merging | 3.5, 3.4 | Small | Sections positioned incorrectly for RC beams; affects loads, spans, visualisation. Cardinal point parsed from FRAME SECTION ASSIGNMENTS; offsets combined with longitudinal end offsets at parse time per E2K approach. | ✅ Done |
 | **P1** | Frame-to-shell drilling DOF | 3.2 | Medium (builder change) | Causes stiffness singularities in combined frame-shell models. Multiple well-known workarounds exist. | ❌ Pending |
-| **P2** | Auto edge constraints | 3.1/3.2 | Medium (builder change) | Mesh-density transitions (wall ↔ slab) need automatic detection and MPC application. Implemented as `find_constraint_edges()` — sorted-tuple edge registry + sweep-line chain following. Returns 46 edges for the Admin Building. | ✅ Done |
+| **P2** | Auto line constraints | 3.1/3.2 | Medium (builder change) | Mesh-density transitions (wall ↔ slab, frame ↔ slab) need automatic detection and MPC application. Implemented as `find_constraint_edges()` — sorted-tuple edge registry + sweep-line chain following. Returns 46 edges for the Admin Building. | ✅ Done |
 | **P3** | Joint modelling — Level 2 | 3.4 | Medium (builder change) | Enables semi-rigid connection modelling. Level 1 (rigid offset) exists; Level 2 replaces stiff links with calibrated zero-length springs (flexibility %). | ❌ Pending |
 | **P4** | Effective stiffness modifiers | 3.7 | Small | ASCE 41 cracked sections: 0.35EI beams, 0.70EI columns. AMod/I3Mod/I2Mod/JMod parsed from section properties; applied in builder for elastic builds only (skipped for nonlinear fiber sections). | ✅ Done |
 | **P5** | Rigid diaphragms | 3.7 | Medium (builder change) | Lateral load distribution differs from SAP2000. Parser stores constraint data, builder never calls `ops.rigidDiaphragm()`. | ❌ Pending |
@@ -774,14 +774,17 @@ def generate_report(config_path: str):
     store.write_dataframe("storeys", "summary", stories_dataframe(stories))
 
     # ── Phase 2: Analyses ─────────────────────────────────────────
-    analysis_mode = cfg.get("analysis_mode", "linear_static")
-    builder_cfg = build_builder_config(analysis_mode, cfg.get("builder", {}))
+    # Global builder defaults (applied to every analysis unless overridden)
+    global_builder = cfg.get("builder", {})
 
     for analysis_name, analysis_cfg in cfg["analyses"].items():
         if not analysis_cfg.get("enabled", False):
             continue
 
-        builder = OpenSeesBuilder(md, builder_cfg)
+        # Merge per-analysis builder overrides on top of global defaults
+        analysis_builder = dict(global_builder)
+        analysis_builder.update(analysis_cfg.get("builder", {}))
+        builder = OpenSeesBuilder(md, analysis_builder)
         builder.build()
 
         if analysis_name == "static":

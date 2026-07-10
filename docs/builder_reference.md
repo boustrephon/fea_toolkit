@@ -330,12 +330,12 @@ automatically appends:
 
 > **⚠️ Current limitations**
 >
-> - **Section tag collision** — The ``section Elastic`` block is still
->   emitted before the nonlinear materials block.  As of the current
->   implementation, ``export_model_to_tcl()`` skips the Elastic section
->   for RC fibre-capable types when ``create_fiber_sections=True``, but
->   mixed-type section groups (e.g. steel beams using Elastic + RC
->   columns using fibre) share the same tag range.  Verify tags when
+- **Section tag collision** — Nonlinear materials and fiber sections
+   (``section Fiber`` with ``patch``/``layer`` commands) are emitted
+   **before** the ``section Elastic`` block, matching
+   ``export_model_to_tcl()`` and ``_tcl_materials_and_sections()``.
+   However, mixed-type section groups (e.g. steel beams using Elastic +
+   RC columns using fibre) share the same tag range.  Verify tags when
 >   combining elastic and fibre sections in the same model.
 >
 > - **Element type** — ``export_model_to_tcl()`` emits
