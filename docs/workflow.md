@@ -49,8 +49,8 @@ File: `src/fea_toolkit/io/s2k_parser.py`
 
 ```python
 parser = SAP2000Parser("model.s2k")
-parser.parse()                         # raw table data → _raw_tables
-md = parser.get_model_data()           # _raw_tables → SAPModelData
+parser.parse()                         # raw table data → raw_tables
+md = parser.get_model_data()           # raw_tables → SAPModelData
 ```
 
 ### What `parse()` does
@@ -69,12 +69,12 @@ Converts each raw table into dataclass instances:
 | `"OBJECT GEOMETRY"` | `Node` |
 | `"JOINT RESTRAINTS"` | `Restraint` |
 | `"MATERIAL PROPERTIES"` | `Material` |
-| `"FRAME SECTION PROPERTIES"` | `RectangularSection`, `ISection`, … |
+| `"FRAME SECTION PROPERTIES"` | `RectangularSection`, `ISection`, … (also carries ``modifiers`` dict: AMod, I3Mod, I2Mod, JMod) |
 | `"AREA SECTION PROPERTIES"` | `ShellSection` (stores `thickness`; `A=I33=I22=J=0`) |
-| `"FRAME ASSIGNMENTS"` | `FrameElement` + `FrameAssignments` |
+| `"FRAME ASSIGNMENTS"` | `FrameElement` + `cardinal_point` (1–11, default 10 = centroid) |
 | `"AREA ASSIGNMENTS"` | `AreaElement` + `AreaAssignments` |
 | `"AREA MESH ASSIGNMENTS"` | `AreaMesh` |
-| `"FRAME END OFFSETS"` | `FrameEndOffset` |
+| `"FRAME END OFFSETS"` | `FrameEndOffset` (``end_i``/``end_j`` + ``off_y_i``/``off_z_i``/``off_y_j``/``off_z_j`` from cardinal pt) |
 | `"JOINT LOADS"` | `JointLoad` |
 | `"FRAME DISTRIBUTED LOADS"` | `FrameDistributedLoad` |
 | `"AREA UNIFORM LOADS"` | `AreaUniformLoad` |
