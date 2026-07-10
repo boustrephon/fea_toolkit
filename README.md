@@ -124,6 +124,90 @@ The goal is to create a Python package `fea_toolkit` that:
 
 ---
 
+## Pipeline Overview
+
+A typical analysis flows through four stages.  Each stage produces or
+consumes a well-defined data structure, making it easy to pick up at
+any point (e.g. load a cached NPZ and jump straight to visualisation).
+
+```
+SAP2000 .s2k / .json
+       │
+       ▼  ┌──────────────────────┐
+       │  │  SAP2000Parser       │  Stage 1 — Data Ingestion
+       │  │  → SAPModelData      │
+       │  └──────────────────────┘
+       │
+       ▼  ┌──────────────────────┐
+       │  │  OpenSeesBuilder     │  Stage 2 — Analysis
+       │  │  → static results    │
+       │  │  → modal results     │
+       │  │  → RS results        │
+       │  │  → pushover results  │
+       │  └──────────────────────┘
+       │
+       ▼  ┌──────────────────────┐
+       │  │  write_results_npz() │  Stage 3 — Storage
+       │  │  → results.npz       │  (unified NPZ schema)
+       │  └──────────────────────┘
+       │
+       ├──┬──────────────────────┐
+       │  │  read_results_npz()  │  Stage 4 — Visualisation
+       │  │  → npz_to_pyvista_*  │     (PyVista 3D plots)
+       │  │  → npz_to_rhino_*    │     (Rhino colouring)
+       │  │  → plot_npz_*        │     (force diagrams, moments)
+       │  └──────────────────────┘
+       │
+       └──┬──────────────────────┐
+          │  local/              │  Real‑world scripts
+          │  admin_linear.py     │  Full pipeline: parse → analyse
+          │  admin_report.py     │  → NPZ → plots → reports
+          └──────────────────────┘
+```
+
+**Key data structures across the pipeline:**
+
+| Stage | Data structure | Location |
+|---|---|---|
+| 1 — Parsed model | `SAPModelData` (dataclass tree) | `fea_toolkit.model.sap_data` |
+| 2 — Analysis output | `dict` with `nodal_displacements`, `periods`, etc. | Returned by `OpenSeesBuilder` methods |
+| 3 — NPZ archive | `Dict[str, np.ndarray]` (keyed by schema) | `fea_toolkit.io.results_schema` |
+| 4 — Visualisation | `pyvista.Plotter` / Rhino objects | `fea_toolkit.plotting` / `fea_toolkit.rhino` |
+
+The unified NPZ schema (Stage 3) is the **canonical exchange format** —
+it is what the visualisers consume.  You can save it once and reuse
+for PyVista animations, Rhino colouring, and report plots without
+re-running the analysis.
+
+```python
+# Minimal end-to-end pipeline
+from fea_toolkit.io.s2k_parser import SAP2000Parser
+from fea_toolkit.opensees.builder import OpenSeesBuilder
+from fea_toolkit.io.npz_writer import write_results_npz
+from fea_toolkit.io.npz_reader import read_results_npz, npz_to_pyvista_frame_mesh
+from fea_toolkit.plotting.viz import plot_deformed_3d, plot_npz_force_diagram
+
+# 1. Parse
+md = SAP2000Parser("model.s2k").parse().get_model_data()
+
+# 2. Analyse
+b = OpenSeesBuilder(md, {"element_type": "elasticBeamColumn"})
+b.build()
+static = b.run_static_analysis(pattern_scales={"DEAD": 1.0, "WIND": 1.0})
+
+# 3. Save to NPZ
+write_results_npz("results.npz", md, static_results=static)
+
+# 4. Visualise from NPZ
+data = read_results_npz("results.npz")
+plot_npz_force_diagram(data, quantity="fx_i", case="DEAD")  # axial force diagram
+```
+
+See also:
+- `local/admin_linear.py` — full end‑to‑end workflow (parse → mesh → split →
+  static → modal → RS → plots → animate)
+- `src/fea_toolkit/io/README.md` — NPZ schema reference
+
 ## Available Workflows
 
 The toolkit exposes a set of workflows covering the full pipeline from model

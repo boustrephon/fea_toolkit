@@ -108,12 +108,33 @@ SAP2000Parser ──→ SAPModelData
                                 (matching by frame_sap_id or parent_id)
 ```
 
-## Backward Compatibility
+## Usage (end‑to‑end)
 
-The readers auto-detect the format:
+```python
+from fea_toolkit.io.s2k_parser import SAP2000Parser
+from fea_toolkit.opensees.builder import OpenSeesBuilder
+from fea_toolkit.io.npz_writer import write_results_npz
+from fea_toolkit.io.npz_reader import read_results_npz, npz_to_pyvista_frame_mesh
 
-- **Legacy**: `sub_sap_ids`, `sub_fx_i`, `node_tags`, `metadata_json` keys
-- **Unified**: `frame_sap_id`, `static/{case}/fx_i`, `node_tag`, `analysis_types` keys
+# 1. Parse
+md = SAP2000Parser("model.s2k").parse().get_model_data()
 
-Both `_load_npz_for_plotting()` (PyVista) and `_load_npz_quantities()` (Rhino)
-handle either format transparently.
+# 2. Analyse
+builder = OpenSeesBuilder(md, {"element_type": "elasticBeamColumn"})
+builder.build()
+static = builder.run_static_analysis(pattern_scales={"DEAD": 1.0, "WIND": 1.0})
+modal = builder.run_modal_analysis(num_modes=6)
+shapes = builder.extract_mode_shapes(6)
+
+# 3. Save to unified NPZ
+write_results_npz("results.npz", md, static_results=static,
+                   modal_result=modal, mode_shapes=shapes)
+
+# 4. Load and visualise
+data = read_results_npz("results.npz")
+points, lines, disp, sap_ids = npz_to_pyvista_frame_mesh(
+    data, deformed_case="DEAD", scale=20.0)
+```
+
+See also the `local/admin_linear.py` script for a complete workflow
+(parse → mesh → analyse → save → plot → animate).
