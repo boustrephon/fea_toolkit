@@ -9,6 +9,8 @@ so they don't break when new features are added.
 import pytest
 import openseespy.opensees as ops
 
+import numpy as np
+
 from examples.sample_model import make_sample_model
 
 
@@ -504,6 +506,326 @@ class TestExportWorkflow:
             # 1 frame element × 3 integration points (default Lobatto)
             assert len(data['sec_ip']) == 3
             assert len(data['sec_N']) == 3
+
+
+# ============================================================================
+# Workflow: Unified NPZ pipeline (write → read → adapters)
+# ============================================================================
+
+class TestUnifiedNpzPipeline:
+    """End-to-end unified NPZ pipeline: analyse → write → read → visualise.
+
+    Exercises the full data path that users would follow when saving results
+    to a NPZ archive and then loading them for plotting or colouring.
+
+    Pipeline::
+
+        OpenSeesBuilder.run_static_analysis()
+        OpenSeesBuilder.run_modal_analysis()
+        OpenSeesBuilder.extract_mode_shapes()
+            │
+            ▼
+        write_results_npz()  ──→  results.npz
+            │
+            ▼
+        read_results_npz()   ──→  data dict
+            │
+            ├── npz_to_pyvista_frame_mesh()   → PyVista lines
+            ├── npz_to_pyvista_shell_mesh()   → PyVista quads
+            ├── npz_to_pyvista_modal_mesh()   → mode shape mesh
+            ├── npz_to_rhino_colour_data()   → {sap_id: value}
+            ├── npz_build_id_tag_map()        → {sap_id: tag}
+            ├── npz_build_child_map()         → {parent: [children]}
+            └── npz_build_parent_map()        → {child: parent}
+    """
+
+    @pytest.fixture
+    def analysed_builder(self, sample_md):
+        """Build, run static + modal analysis."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(sample_md, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False,
+            'verbose': False,
+            'create_shells': False,
+        })
+        b.build()
+        b.compute_seismic_masses(g=9.81)
+        yield b
+        ops.wipe()
+
+    def test_write_and_read_static(self, analysed_builder, tmp_path):
+        """Static analysis results can be written to NPZ and read back.
+
+        Exercises:
+            run_static_analysis() →
+            write_results_npz() →
+            read_results_npz() →
+            npz_to_pyvista_frame_mesh()
+        """
+        md = analysed_builder.model
+        # Run static
+        static_result = analysed_builder.run_static_analysis(
+            pattern_scales={"DEAD": 1.0},
+        )
+        # Convert element_forces from per-element dict to per-array format
+        # that _collect_static() expects: {"fx_i": [...], "fy_i": [...], ...}
+        ef_by_tag = analysed_builder.extract_static_element_forces()
+        if ef_by_tag:
+            elem_forces_arr: dict = {}
+            force_keys_lower = [
+                "fx_i", "fy_i", "fz_i", "mx_i", "my_i", "mz_i",
+                "fx_j", "fy_j", "fz_j", "mx_j", "my_j", "mz_j",
+            ]
+            upper_to_lower = {
+                "Fx": "fx_i", "Fy": "fy_i", "Fz": "fz_i",
+                "Mx": "mx_i", "My": "my_i", "Mz": "mz_i",
+                "Fx_j": "fx_j", "Fy_j": "fy_j", "Fz_j": "fz_j",
+                "Mx_j": "mx_j", "My_j": "my_j", "Mz_j": "mz_j",
+            }
+            for key in force_keys_lower:
+                elem_forces_arr[key] = []
+            for tag, fdict in ef_by_tag.items():
+                for upper_key, lower_key in upper_to_lower.items():
+                    elem_forces_arr[lower_key].append(fdict.get(upper_key, 0.0))
+            static_result["element_forces"] = elem_forces_arr
+        # Package as {case_name: result_dict}
+        static_results = {"DEAD": static_result}
+
+        from fea_toolkit.io.npz_writer import write_results_npz
+        from fea_toolkit.io.npz_reader import (
+            read_results_npz,
+            npz_to_pyvista_frame_mesh,
+            _get_static_cases,
+        )
+
+        npz_path = str(tmp_path / "test_unified_static.npz")
+        write_results_npz(npz_path, md, static_results=static_results)
+
+        # Read back
+        data = read_results_npz(npz_path)
+        assert "node_tag" in data
+        assert "frame_sap_id" in data
+        assert "static_case_labels" in data
+
+        cases = _get_static_cases(data)
+        assert "DEAD" in cases
+
+        # Verify geometry arrays
+        n_node = len(data["node_tag"])
+        assert n_node > 0
+        assert len(data["node_x"]) == n_node
+        assert len(data["node_y"]) == n_node
+        assert len(data["node_z"]) == n_node
+
+        # Verify static force arrays exist
+        assert "static/DEAD/fx_i" in data
+        assert "static/DEAD/fy_i" in data
+        assert "static/DEAD/fz_i" in data
+        assert "static/DEAD/mz_i" in data
+
+        # Verify nodal displacement arrays
+        assert "static/DEAD/node_dx" in data
+        assert "static/DEAD/node_dy" in data
+        assert "static/DEAD/node_dz" in data
+
+        # --- Adapter: PyVista frame mesh ---
+        points, lines, disp, sap_ids = npz_to_pyvista_frame_mesh(
+            data, deformed_case="DEAD", scale=10.0,
+        )
+        assert points.shape[0] > 0
+        assert lines.shape[0] > 0
+        assert points.shape == disp.shape
+        assert len(sap_ids) == lines.shape[0]
+        # Displacements should be non-zero under DEAD load
+        assert np.any(np.abs(disp) > 1e-12)
+
+    def test_write_and_read_modal(self, analysed_builder, tmp_path):
+        """Modal results can be written to NPZ, read back, and used for
+        mode-shape visualisation.
+
+        Exercises:
+            run_modal_analysis() →
+            extract_mode_shapes() →
+            write_results_npz() →
+            read_results_npz() →
+            npz_to_pyvista_modal_mesh()
+        """
+        md = analysed_builder.model
+        modal_result = analysed_builder.run_modal_analysis(num_modes=3)
+        mode_shapes = analysed_builder.extract_mode_shapes(num_modes=3)
+
+        from fea_toolkit.io.npz_writer import write_results_npz
+        from fea_toolkit.io.npz_reader import (
+            read_results_npz,
+            npz_to_pyvista_modal_mesh,
+        )
+
+        npz_path = str(tmp_path / "test_unified_modal.npz")
+        write_results_npz(npz_path, md,
+                          modal_result=modal_result,
+                          mode_shapes=mode_shapes)
+
+        data = read_results_npz(npz_path)
+        assert "modal/period" in data
+        assert len(data["modal/period"]) == 3
+        assert "modal/mode_dx" in data
+        assert "modal/mode_dy" in data
+        assert "modal/mode_dz" in data
+        assert "modal/mx_ratio" in data
+        assert "modal/my_ratio" in data
+        assert "modal/mz_ratio" in data
+
+        # --- Adapter: PyVista modal mesh ---
+        f_pts, f_lines, s_pts, s_faces = npz_to_pyvista_modal_mesh(
+            data, mode_idx=0, scale=10.0,
+        )
+        assert f_pts.shape[0] > 0
+        assert f_lines.shape[0] > 0
+
+    def test_write_and_read_static_with_split(self, sample_md, tmp_path):
+        """Unified NPZ pipeline works with split elements.
+        Builds with split_elements=True so children get parent tracking,
+        then verifies the NPZ stores frame_parent_sap_id correctly.
+
+        Exercises:
+            build(split_elements=True) →
+            write_results_npz() →
+            read_results_npz() →
+            npz_build_child_map() / npz_build_parent_map()
+        """
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.io.npz_writer import write_results_npz
+        from fea_toolkit.io.npz_reader import (
+            read_results_npz,
+            npz_build_child_map,
+            npz_build_parent_map,
+        )
+
+        # Build with splitting — the sample cantilever has no intermediate
+        # nodes so no actual splitting occurs, but the writer still emits
+        # frame_parent_sap_id (empty string for unsplit elements).
+        b = OpenSeesBuilder(sample_md, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': True,
+            'verbose': False,
+        })
+        b.build()
+        try:
+            static_result = b.run_static_analysis()
+        finally:
+            ops.wipe()
+
+        npz_path = str(tmp_path / "test_unified_split.npz")
+        write_results_npz(npz_path, sample_md,
+                          static_results={"Static": static_result})
+
+        data = read_results_npz(npz_path)
+        assert "frame_parent_sap_id" in data
+        # frame_parent_sap_id is always present (empty string = unsplit)
+        assert len(data["frame_parent_sap_id"]) == len(data["frame_sap_id"])
+
+        # --- Adapter: parent-child maps (work even with no split) ---
+        child_map = npz_build_child_map(data)
+        parent_map = npz_build_parent_map(data)
+        # With no split, maps are empty — that's correct behaviour
+        assert isinstance(child_map, dict)
+        assert isinstance(parent_map, dict)
+
+    def test_read_rhino_colour_adapter(self, analysed_builder, tmp_path):
+        """Rhino colour data adapter works from unified NPZ.
+
+        Exercises:
+            write_results_npz() →
+            read_results_npz() →
+            npz_to_rhino_colour_data()
+        """
+        md = analysed_builder.model
+        static_result = analysed_builder.run_static_analysis(
+            pattern_scales={"DEAD": 1.0},
+        )
+        # Convert element_forces from per-element dict to per-array format
+        # that _collect_static() expects: {"fx_i": [...], "fy_i": [...], ...}
+        ef_by_tag = analysed_builder.extract_static_element_forces()
+        if ef_by_tag:
+            elem_forces_arr: dict = {}
+            force_keys_lower = [
+                "fx_i", "fy_i", "fz_i", "mx_i", "my_i", "mz_i",
+                "fx_j", "fy_j", "fz_j", "mx_j", "my_j", "mz_j",
+            ]
+            upper_to_lower = {
+                "Fx": "fx_i", "Fy": "fy_i", "Fz": "fz_i",
+                "Mx": "mx_i", "My": "my_i", "Mz": "mz_i",
+                "Fx_j": "fx_j", "Fy_j": "fy_j", "Fz_j": "fz_j",
+                "Mx_j": "mx_j", "My_j": "my_j", "Mz_j": "mz_j",
+            }
+            for key in force_keys_lower:
+                elem_forces_arr[key] = []
+            for tag, fdict in ef_by_tag.items():
+                for upper_key, lower_key in upper_to_lower.items():
+                    elem_forces_arr[lower_key].append(fdict.get(upper_key, 0.0))
+            static_result["element_forces"] = elem_forces_arr
+        from fea_toolkit.io.npz_writer import write_results_npz
+        from fea_toolkit.io.npz_reader import (
+            read_results_npz,
+            npz_to_rhino_colour_data,
+        )
+
+        npz_path = str(tmp_path / "test_rhino_colour.npz")
+        write_results_npz(npz_path, md,
+                          static_results={"DEAD": static_result})
+
+        data = read_results_npz(npz_path)
+        colour_data = npz_to_rhino_colour_data(data, quantity="fx_i", case="DEAD")
+        assert isinstance(colour_data, dict)
+        assert len(colour_data) > 0
+        # Values should be floats
+        for sap_id, val in colour_data.items():
+            assert isinstance(sap_id, str)
+            assert isinstance(val, float)
+
+    def test_read_id_tag_map(self, analysed_builder, tmp_path):
+        """ID-to-tag mapping adapter works from unified NPZ."""
+        md = analysed_builder.model
+        from fea_toolkit.io.npz_writer import write_results_npz
+        from fea_toolkit.io.npz_reader import (
+            read_results_npz,
+            npz_build_id_tag_map,
+        )
+
+        npz_path = str(tmp_path / "test_id_map.npz")
+        write_results_npz(npz_path, md)
+        data = read_results_npz(npz_path)
+        id_map = npz_build_id_tag_map(data)
+        assert isinstance(id_map, dict)
+        assert len(id_map) > 0
+        # Keys are strings, values are ints
+        for sid, tag in id_map.items():
+            assert isinstance(sid, str)
+            assert isinstance(tag, int)
+
+    def test_metadata_arrays(self, analysed_builder, tmp_path):
+        """Metadata (analysis_types, force_unit, length_unit, created)
+        are present in the NPZ archive.
+        """
+        md = analysed_builder.model
+        static_result = analysed_builder.run_static_analysis(
+            pattern_scales={"DEAD": 1.0},
+        )
+        from fea_toolkit.io.npz_writer import write_results_npz
+        from fea_toolkit.io.npz_reader import read_results_npz
+
+        npz_path = str(tmp_path / "test_meta.npz")
+        write_results_npz(npz_path, md,
+                          static_results={"DEAD": static_result})
+
+        data = read_results_npz(npz_path)
+        assert "analysis_types" in data
+        assert "static" in [str(t) for t in data["analysis_types"]]
+        assert "force_unit" in data
+        assert "length_unit" in data
+        assert "created" in data
+        assert len(str(data["created"])) > 0
 
 
 # ============================================================================
