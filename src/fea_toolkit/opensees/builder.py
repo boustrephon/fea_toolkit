@@ -2566,18 +2566,27 @@ class OpenSeesBuilder:
         verbose: bool = True,
     ) -> int:
         """Apply ETABS-style linear edge constraints between coarse and
-        fine shell meshes.
+        fine shell meshes using ``equationConstraint`` MPCs.
 
         Unaligned slave nodes that lie on coarse-mesh edges are tied via
-        ``ops.mpc()`` with interpolation weights based on their position
-        along the edge.  All six DOFs are constrained.
+        ``ops.equationConstraint()`` with interpolation weights based on
+        their position along the edge.  All six DOFs are constrained.
+
+        The **Penalty** constraint handler is required — these MPCs cannot
+        be processed by the ``Transformation`` handler.  The method
+        automatically switches to ``Penalty`` and subsequent analysis runs
+        use it.  Do **not** set ``solver_constraints`` to ``"Transformation"``
+        in the config when edge constraints are present.
 
         .. note::
-            After calling this method the solver constraint handler is
-            automatically set to **Penalty** (``1e12, 1e12``) in
-            subsequent analysis runs.  Do **not** set
-            ``solver_constraints`` to ``"Transformation"`` in the config
-            when edge constraints are present.
+            ``equationConstraint`` + Penalty works for **all** analysis types
+            including modal / eigen, because ``ops.eigen()`` calls
+            ``ConstraintHandler::handle()`` which adds penalty stiffness to
+            the global stiffness matrix **K** before solving the eigenvalue
+            problem.  See ``docs/constraint_detection.md`` for details.
+
+        For modal-safe alternative using physical spring elements, see
+        :meth:`apply_spring_edge_constraints`.
 
         Parameters
         ----------
@@ -2703,6 +2712,180 @@ class OpenSeesBuilder:
             if verbose:
                 print(f"Applied {count} edge constraint(s). "
                       f"Solver will use Penalty handler.")
+
+        return count
+
+    def apply_spring_edge_constraints(
+        self,
+        coarse_edges: Optional[List[Tuple[int, int]]] = None,
+        fine_nodes: Optional[List[int]] = None,
+        coarse_elements: Optional[List[int]] = None,
+        tolerance: float = 1e-4,
+        penalty_stiffness: Optional[float] = None,
+        verbose: bool = True,
+    ) -> int:
+        """Tie slave nodes to master edges using stiff zero-length spring
+        elements instead of ``equationConstraint`` MPCs.
+
+        This method is the **modal‑safe** alternative to
+        :meth:`apply_edge_constraints`.  It creates physical
+        ``zeroLength`` elements with ``Elastic`` uniaxial materials,
+        which contribute directly to the global stiffness matrix **K**
+        and are therefore visible to ``ops.eigen()`` during modal
+        analysis.  By contrast, :meth:`apply_edge_constraints` uses
+        ``equationConstraint`` + Penalty handler, which only works
+        during ``ops.analyze()`` — the ``eigen`` command bypasses the
+        constraint handler entirely.
+
+        Each slave node is tied to both ends of its nearest master edge
+        via two spring elements with stiffness weighted by the
+        interpolation factors N₁, N₂ (proximity along the edge).
+
+        .. warning::
+
+            Spring elements create a **flexible** connection — the
+            stiffness is finite, controlled by *penalty_stiffness*.
+            Use a high value (≥ 1e12 × typical element stiffness) for
+            near‑rigid behaviour.
+
+        Parameters
+        ----------
+        coarse_edges : list of (int, int) or None
+            Master edge node pairs, same as :meth:`apply_edge_constraints`.
+        fine_nodes : list of int or None
+            Slave node candidates.  ``None`` = auto-detect from shell areas.
+        coarse_elements : list of int or None
+            Auto-extract master edges from these element tags.
+        tolerance : float
+            Max perpendicular distance for a slave node to be "on the edge".
+        penalty_stiffness : float or None
+            Spring stiffness per DOF (same units as EA/L for the model).
+            ``None`` = auto‑compute as ``1e12 × typical_EA_over_L``.
+        verbose : bool
+            Print progress.
+
+        Returns
+        -------
+        int
+            Number of zeroLength elements created (2 per slave‑edge pair).
+        """
+        # ── Resolve master edges ──────────────────────────────────
+        edge_set: set = set()
+        if coarse_elements is not None:
+            for etag in coarse_elements:
+                try:
+                    nodes = ops.eleNodes(int(etag))
+                except Exception:
+                    continue
+                for j in range(len(nodes)):
+                    n1, n2 = nodes[j], nodes[(j + 1) % len(nodes)]
+                    edge_set.add((min(n1, n2), max(n1, n2)))
+        if coarse_edges is not None:
+            for n1, n2 in coarse_edges:
+                t1 = self._node_tag_from_id(str(n1)) if not isinstance(n1, int) else n1
+                t2 = self._node_tag_from_id(str(n2)) if not isinstance(n2, int) else n2
+                if t1 is None:
+                    t1 = int(n1)
+                if t2 is None:
+                    t2 = int(n2)
+                edge_set.add((min(t1, t2), max(t1, t2)))
+        if not edge_set:
+            if verbose:
+                print("No master edges — nothing to constrain.")
+            return 0
+
+        # ── Resolve slave nodes ───────────────────────────────────
+        if fine_nodes is not None:
+            slave_candidates = []
+            for n in fine_nodes:
+                tag = self._node_tag_from_id(str(n)) if not isinstance(n, int) else n
+                slave_candidates.append(tag if tag is not None else int(n))
+        else:
+            shell_ids = self._get_shell_area_ids()
+            all_nodes: set = set()
+            for eid in shell_ids:
+                for n_id in self.model.area_elements[eid].node_ids:
+                    tag = self._node_tag_from_id(n_id)
+                    if tag is not None:
+                        all_nodes.add(tag)
+            slave_candidates = sorted(all_nodes)
+
+        # ── Auto stiffness ────────────────────────────────────────
+        if penalty_stiffness is None:
+            # Estimate typical axial stiffness: E × A / L
+            _E = 2e11  # Pa (steel default)
+            _A = 0.01  # m² (typical member)
+            _L = 5.0   # m (typical span)
+            typical_ka = _E * _A / _L  # ~4e8 N/m
+            penalty_stiffness = 1e12 * typical_ka
+
+        # ── Find tags ─────────────────────────────────────────────
+        max_elem = max(
+            (e.elem_tag for e in self.model.frame_elements.values()
+             if hasattr(e, 'elem_tag') and e.elem_tag is not None),
+            default=0,
+        )
+        try:
+            active = ops.getEleTags()
+            if active:
+                max_elem = max(max_elem, max(active))
+        except Exception:
+            pass
+        ele_tag = max_elem + 100_000  # offset to avoid collisions
+        mat_tag = ele_tag + 50_000
+
+        # ── Apply springs ─────────────────────────────────────────
+        count = 0
+        for m1_id, m2_id in edge_set:
+            try:
+                c1 = np.array(ops.nodeCoord(m1_id))
+                c2 = np.array(ops.nodeCoord(m2_id))
+            except Exception:
+                continue
+            edge_vec = c2 - c1
+            edge_len = float(np.linalg.norm(edge_vec))
+            if edge_len < 1e-12:
+                continue
+
+            for s_id in slave_candidates:
+                if s_id in (m1_id, m2_id):
+                    continue
+                try:
+                    cs = np.array(ops.nodeCoord(s_id))
+                except Exception:
+                    continue
+                cross = float(np.linalg.norm(np.cross(cs - c1, cs - c2)))
+                if cross / max(edge_len, 1e-12) > tolerance:
+                    continue
+                proj = float(np.dot(cs - c1, edge_vec)) / edge_len
+                if proj <= 0.0 or proj >= edge_len:
+                    continue
+                N2 = proj / edge_len
+                N1 = 1.0 - N2
+
+                # Two spring elements: slave↔m1 with weight N1, slave↔m2 with weight N2
+                for master, weight in ((m1_id, N1), (m2_id, N2)):
+                    if weight < 1e-12:
+                        continue
+                    k = penalty_stiffness * weight
+                    ops.uniaxialMaterial('Elastic', mat_tag, k)
+                    ops.element('zeroLength', ele_tag, int(s_id), int(master),
+                                '-mat', mat_tag, mat_tag, mat_tag,
+                                mat_tag, mat_tag, mat_tag,
+                                '-dir', 1, 2, 3, 4, 5, 6)
+                    if verbose:
+                        print(
+                            f"  Spring constraint: node {s_id} → "
+                            f"master {master}  (k={k:.2e}, w={weight:.3f})"
+                        )
+                    ele_tag += 1
+                    mat_tag += 1
+                    count += 1
+
+        if count:
+            self._has_edge_constraints = True
+            if verbose:
+                print(f"Applied {count} spring element(s).")
 
         return count
 
@@ -5502,7 +5685,10 @@ class OpenSeesBuilder:
                         self.apply_edge_constraints(*args)
             if _sw_patterns is not None:
                 try:
-                    ops.constraints('Transformation')
+                    if self._has_edge_constraints:
+                        ops.constraints('Penalty', 1.0e12, 1.0e12)
+                    else:
+                        ops.constraints('Transformation')
                     ops.numberer('RCM')
                     ops.system(self.config.get('solver_system', 'BandGen'))
                     ops.test('NormDispIncr', 1e-3, 5, 0)
