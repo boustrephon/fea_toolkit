@@ -597,8 +597,16 @@ def modal_storey_drifts(
         import numpy as np
         spec_p = np.array(spectrum_periods)
         spec_a = np.array(spectrum_accels)
+        T_min = float(spec_p.min())
+        T_max = float(spec_p.max())
         for m in range(n_avail):
             T_m = periods[m]
+            if T_m < T_min or T_m > T_max:
+                import warnings
+                warnings.warn(
+                    f"Mode {m+1} period T={T_m:.4f}s outside spectrum range "
+                    f"[{T_min:.4f}, {T_max:.4f}] — clamping to nearest boundary"
+                )
             omega_m = 2.0 * math.pi / max(T_m, 1e-12)
             # Interpolate Sa at T_m
             Sa_m = float(np.interp(T_m, spec_p, spec_a))
