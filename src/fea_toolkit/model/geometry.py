@@ -3,6 +3,7 @@
 """Geometric utilities for element orientation, splitting, and intersections."""
 
 import math
+import warnings
 import numpy as np
 from typing import Sequence, Tuple, Dict, List, Any, Union, Optional
 from collections import defaultdict
@@ -1679,7 +1680,9 @@ def mesh_area_elements(
                     area_id=sub_id, area_tag=sub_tag,
                     node_ids=[n0, n1, n2, n3],
                     thickness=elem.thickness,
+                    parent_id=aid,
                 )
+                elem.child_ids.append(sub_id)
                 if sec_name:
                     area_assignments[sub_id] = sec_name
                 # Propagate group membership
@@ -1690,3 +1693,615 @@ def mesh_area_elements(
 
     return area_elements, area_assignments, nodes, next_tag
 
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# AtFrames for areas — subdivide shell elements at frame edge nodes
+# ═══════════════════════════════════════════════════════════════════════
+
+def split_areas_at_frame_edges(
+    area_elements: Dict[str, 'AreaElement'],
+    area_assignments: Dict[str, str],
+    nodes: Dict[str, 'Node'],
+    frame_elements: Dict[str, 'FrameElement'],
+    next_tag: int = 1,
+    groups: Optional[Dict[str, 'Group']] = None,
+) -> Tuple[Dict[str, 'AreaElement'], Dict[str, str], Dict[str, 'Node'], int]:
+    """Subdivide areas at frame-element edge nodes not at area corners.
+
+    For each area that is not already subdivided (``inactive=False``),
+    finds all frame element nodes that lie on the area's perimeter edges.
+    The area is then subdivided into a grid that passes through those
+    intermediate edge nodes, creating sub-elements whose corner nodes
+    include the frame connection points.
+
+    This mirrors the ``AtFrames`` splitting applied to frame elements \u2014
+    it ensures that frame elements terminating on an area edge are
+    connected to the shell mesh.
+
+    Sub-elements inherit:
+      * Section assignment from the parent area.
+      * Thickness from the parent area.
+      * Parent-child relationship (``parent_id`` / ``child_ids``).
+
+    Args:
+        area_elements: ``{area_id: AreaElement}`` (modified in place).
+        area_assignments: ``{area_id: section_name}`` (modified in place).
+        nodes: ``{node_id: Node}`` \u2014 new interior nodes are added here.
+        frame_elements: ``{frame_id: FrameElement}`` \u2014 used to find frame
+            node locations that should connect to area edges.
+        next_tag: Next available numeric tag for new nodes and elements.
+        groups: Optional ``{group_name: Group}`` \u2014 group memberships are
+            propagated to sub-elements.
+
+    Returns:
+        ``(area_elements, area_assignments, nodes, next_tag)`` with
+        subdivided areas added and original areas marked inactive.
+    """
+    from .sap_data import Node as _Node, AreaElement as _AreaElement
+
+    # Collect all frame node IDs
+    frame_node_ids: set = set()
+    for fe in frame_elements.values():
+        frame_node_ids.add(fe.node_i)
+        frame_node_ids.add(fe.node_j)
+
+    # Coordinates of frame nodes (for collinearity tests)
+    frame_node_coords: Dict[str, np.ndarray] = {}
+    # \u2500\u2500 Spatial indices for frame nodes \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    # Z-band index \u2014 groups nodes by integer Z-band (efficient for
+    # slabs).  Uses int(z / tol) for robust bucket keys \u2014 avoids
+    # round() pitfalls where nearby values can land in different buckets.
+    z_band_tol = 0.1  # 100\u202fmm band width
+    frame_nodes_by_z: Dict[int, List[str]] = {}
+    # XY spatial grid \u2014 groups nodes by integer XY cell (efficient
+    # for walls).  Cell size should be large enough that a wall\u2019s
+    # bounding box overlaps at least one cell, small enough that the
+    # number of candidate nodes per cell stays manageable.
+    xy_grid_size = 0.5  # 500\u202fmm cell size
+    frame_nodes_xy: Dict[Tuple[int, int], List[str]] = {}
+    for nid in frame_node_ids:
+        nd = nodes.get(nid)
+        if nd is not None:
+            arr = np.array([nd.x, nd.y, nd.z], dtype=float)
+            frame_node_coords[nid] = arr
+            z_key = int(nd.z / z_band_tol)
+            frame_nodes_by_z.setdefault(z_key, []).append(nid)
+            x_key = int(round(nd.x / xy_grid_size))
+            y_key = int(round(nd.y / xy_grid_size))
+            frame_nodes_xy.setdefault((x_key, y_key), []).append(nid)
+
+    if not frame_node_coords:
+        return area_elements, area_assignments, nodes, next_tag
+
+    for aid, elem in list(area_elements.items()):
+        if getattr(elem, 'inactive', False):
+            continue
+        if elem is None or len(elem.node_ids) != 4:
+            continue
+
+        corners = list(elem.node_ids)
+        corner_coords = [
+            np.array([nodes[c].x, nodes[c].y, nodes[c].z], dtype=float)
+            if c in nodes else None
+            for c in corners
+        ]
+        if any(c is None for c in corner_coords):
+            continue
+
+        # Ensure CCW ordering (same convention as mesh_area_elements)
+        c0, c1, c2, c3 = corner_coords
+        u = c1 - c0
+        v = c3 - c0
+        normal = np.cross(u, v)
+        signed = float(np.dot(normal, np.cross(c2 - c0, c3 - c0)))
+        if signed < 0:
+            corners = [corners[0], corners[3], corners[2], corners[1]]
+            corner_coords = [corner_coords[0], corner_coords[3],
+                             corner_coords[2], corner_coords[1]]
+
+        # Four edges: (0\u21921), (1\u21922), (2\u21923), (3\u21920)
+        edges = [
+            (0, 1, 'u'),  # edge 0\u21921, u-direction
+            (1, 2, 'v'),  # edge 1\u21922, v-direction
+            (2, 3, 'u'),  # edge 2\u21923, u-direction (reverse)
+            (3, 0, 'v'),  # edge 3\u21920, v-direction (reverse)
+        ]
+
+        # Choose spatial filter based on orientation
+        normal_len = float(np.linalg.norm(normal))
+        nz_abs = abs(normal[2]) / normal_len if normal_len > 0 else 0.0
+        # Warn if a vertical area (|nz|\u22480) has a slab-like section name
+        sec_name = area_assignments.get(aid, '')
+        if nz_abs < 0.1 and 'slab' in sec_name.lower():
+            warnings.warn(
+                f"Area {aid}: section \"{sec_name}\" assigned to a vertical "
+                f"element (|nz|={nz_abs:.3f}) \u2014 likely mis-classified in "
+                f"the source model.",
+                UserWarning,
+                stacklevel=2,
+            )
+        local_frame_ids: set = set()
+
+        if nz_abs > 0.707:
+            # \u2500\u2500 Slab (near-horizontal): Z-band filter \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+            # Slabs span a single Z level, so only 1\u20132 bands need
+            # checking \u2014 very efficient.
+            az_min = float(min(c[2] for c in corner_coords))
+            az_max = float(max(c[2] for c in corner_coords))
+            z0 = int(az_min / z_band_tol)
+            z1 = int(az_max / z_band_tol)
+            for zb in range(z0, z1 + 1):
+                local_frame_ids.update(frame_nodes_by_z.get(zb, []))
+        else:
+            # \u2500\u2500 Wall (near-vertical): XY spatial grid filter \u2500\u2500\u2500\u2500
+            # Walls span multiple Z levels but occupy a narrow XY
+            # footprint.  The XY grid limits candidate nodes to those
+            # in the area\u2019s XY bounding box.
+            xs = [float(c[0]) for c in corner_coords]
+            ys = [float(c[1]) for c in corner_coords]
+            margin = max(xy_grid_size * 1.5, 0.5)  # at least 500\u202fmm margin
+            ix_min = int(round((min(xs) - margin) / xy_grid_size))
+            ix_max = int(round((max(xs) + margin) / xy_grid_size))
+            iy_min = int(round((min(ys) - margin) / xy_grid_size))
+            iy_max = int(round((max(ys) + margin) / xy_grid_size))
+            for ix in range(ix_min, ix_max + 1):
+                for iy in range(iy_min, iy_max + 1):
+                    local_frame_ids.update(frame_nodes_xy.get((ix, iy), []))
+
+        edge_node_lists: Dict[str, list] = {'u': [], 'v': []}
+        for ei, ej, direction in edges:
+            p_i = corner_coords[ei]
+            p_j = corner_coords[ej]
+            edge_vec = p_j - p_i
+            edge_len_sq = float(np.dot(edge_vec, edge_vec))
+            if edge_len_sq < 1e-12:
+                continue
+            edge_len = float(np.sqrt(edge_len_sq))
+            edge_dir = edge_vec / edge_len
+
+            for nid in local_frame_ids:
+                if nid in corners:
+                    continue  # skip area corner nodes
+                npos = frame_node_coords[nid]
+                vec_ip = npos - p_i
+                # Collinearity: cross product near zero
+                cross_len = float(np.linalg.norm(np.cross(edge_vec, vec_ip)))
+                if cross_len / edge_len > 1e-4:
+                    continue
+                # Within segment: projection t between -tol and 1+tol
+                t = float(np.dot(vec_ip, edge_dir)) / edge_len
+                if t < -1e-6 or t > 1 + 1e-6:
+                    continue
+                # Store with adjustment for reversed edges
+                if direction == 'u':
+                    if ei == 0:  # edge 0\u21921: t as-is
+                        edge_node_lists['u'].append(t)
+                    else:  # edge 2\u21923: reverse \u2192 1-t
+                        edge_node_lists['u'].append(1.0 - t)
+                else:  # 'v'
+                    if ei == 1:  # edge 1\u21922: t as-is
+                        edge_node_lists['v'].append(t)
+                    else:  # edge 3\u21920: reverse \u2192 1-t
+                        edge_node_lists['v'].append(1.0 - t)
+
+        # Deduplicate and sort t-values (add 0 and 1 as implicit boundaries)
+        u_vals = sorted(set([0.0, 1.0] + edge_node_lists['u']))
+        v_vals = sorted(set([0.0, 1.0] + edge_node_lists['v']))
+
+        # Only subdivide if there\u2019s at least one intermediate node
+        if len(u_vals) <= 2 and len(v_vals) <= 2:
+            continue
+
+        # Ensure minimum spacing between t-values (merge near-duplicates)
+        _tol = 1e-6
+        u_vals = [u_vals[0]] + [
+            u for u in u_vals[1:]
+            if u - u_vals[u_vals.index(u) - 1] > _tol
+        ]
+        v_vals = [v_vals[0]] + [
+            v for v in v_vals[1:]
+            if v - v_vals[v_vals.index(v) - 1] > _tol
+        ]
+
+        n_u = len(u_vals) - 1  # number of sub-divisions in u-direction
+        n_v = len(v_vals) - 1
+
+        # Ensure reasonable aspect ratio \u2014 if one direction has far fewer
+        # divisions than the other, subdivide the coarser direction so
+        # element aspect ratios stay below max_aspect_ratio.
+        max_aspect = 4.0
+        if n_u > 0 and n_v > 0:
+            # Estimate element sizes from edge lengths
+            len_u = max(
+                float(np.linalg.norm(corner_coords[1] - corner_coords[0])),
+                float(np.linalg.norm(corner_coords[2] - corner_coords[3])),
+            )
+            len_v = max(
+                float(np.linalg.norm(corner_coords[2] - corner_coords[1])),
+                float(np.linalg.norm(corner_coords[3] - corner_coords[0])),
+            )
+            elem_u = len_u / n_u
+            elem_v = len_v / n_v
+            if elem_u > elem_v * max_aspect and elem_u > 0:
+                # u-direction too coarse \u2014 subdivide u_vals more
+                extra = int(math.ceil(elem_u / (elem_v * max_aspect))) - 1
+                for k in range(1, extra + 1):
+                    u_vals.append(k / (extra + 1))
+                u_vals = sorted(set(u_vals))
+            elif elem_v > elem_u * max_aspect and elem_v > 0:
+                # v-direction too coarse \u2014 subdivide v_vals more
+                extra = int(math.ceil(elem_v / (elem_u * max_aspect))) - 1
+                for k in range(1, extra + 1):
+                    v_vals.append(k / (extra + 1))
+                v_vals = sorted(set(v_vals))
+            n_u = len(u_vals) - 1
+            n_v = len(v_vals) - 1
+
+        # Bilinear grid at parametric positions
+        grid = np.zeros((n_v + 1, n_u + 1, 3))
+        for j, v in enumerate(v_vals):
+            for i, u in enumerate(u_vals):
+                top = corner_coords[0] * (1 - u) + corner_coords[1] * u
+                bot = corner_coords[3] * (1 - u) + corner_coords[2] * u
+                grid[j, i] = top * (1 - v) + bot * v
+
+        # Create nodes for grid points (reusing frame nodes at same coords)
+        node_grid = [[None] * (n_u + 1) for _ in range(n_v + 1)]
+        for j in range(n_v + 1):
+            for i in range(n_u + 1):
+                pt = grid[j, i]
+                # Check if any existing node (especially a frame node) is here
+                found = None
+                for nid, npos in frame_node_coords.items():
+                    if np.linalg.norm(npos - pt) < 1e-4:
+                        found = nid
+                        break
+                if found is not None:
+                    node_grid[j][i] = found
+                    continue
+                # Check area corner nodes
+                for ci, cid in enumerate(corners):
+                    if np.linalg.norm(corner_coords[ci] - pt) < 1e-4:
+                        node_grid[j][i] = cid
+                        break
+                if node_grid[j][i] is not None:
+                    continue
+                # Check existing area-interior mesh nodes (from prior auto-mesh)
+                for nid, nd in nodes.items():
+                    ck = np.array([nd.x, nd.y, nd.z], dtype=float)
+                    if np.linalg.norm(ck - pt) < 1e-4:
+                        node_grid[j][i] = nid
+                        break
+                if node_grid[j][i] is not None:
+                    continue
+                # Create new node
+                new_id = f"{aid}_af_{j}_{i}"
+                new_tag = next_tag
+                next_tag += 1
+                nodes[new_id] = _Node(
+                    node_id=new_id, node_tag=new_tag,
+                    x=float(pt[0]), y=float(pt[1]), z=float(pt[2]),
+                )
+                node_grid[j][i] = new_id
+
+        # Mark original as inactive and record parent-child
+        elem.inactive = True
+        elem.child_ids = []
+
+        # Determine parent groups
+        parent_groups: List[str] = []
+        if groups is not None:
+            for gname, g in groups.items():
+                ref = f"Area:{aid}"
+                if ref in g.objects:
+                    parent_groups.append(gname)
+
+        sec_name = area_assignments.get(aid, "")
+        for j in range(n_v):
+            for i in range(n_u):
+                sub_id = f"{aid}_af_{j}_{i}"
+                sub_tag = next_tag
+                next_tag += 1
+                n0 = node_grid[j][i]
+                n1 = node_grid[j][i + 1]
+                n2 = node_grid[j + 1][i + 1]
+                n3 = node_grid[j + 1][i]
+                # Deduplicate collinear collapse
+                deduped = []
+                for n in (n0, n1, n2, n3):
+                    if not deduped or n != deduped[-1]:
+                        deduped.append(n)
+                if len(deduped) < 3:
+                    continue
+                area_elements[sub_id] = _AreaElement(
+                    area_id=sub_id, area_tag=sub_tag,
+                    node_ids=deduped,
+                    thickness=getattr(elem, 'thickness', 0.0),
+                    inactive=False,
+                    parent_id=aid,
+                )
+                elem.child_ids.append(sub_id)
+                if sec_name:
+                    area_assignments[sub_id] = sec_name
+                if parent_groups:
+                    sub_ref = f"Area:{sub_id}"
+                    for gname in parent_groups:
+                        groups[gname].objects.append(sub_ref)
+
+    return area_elements, area_assignments, nodes, next_tag
+
+# ═══════════════════════════════════════════════════════════════════════
+# Constraint-edge detection for slab-wall and misaligned slab interfaces
+# ═══════════════════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Constraint-edge detection — finds mesh nodes that are on only one
+# side of an edge (these need constraints to "heal" incompatible meshes).
+# Uses coordinate-based matching: a node on a slab perimeter that has
+# no twin node at the same coordinate on the adjacent area's perimeter
+# is a free node that needs tying to the other side.
+# ═══════════════════════════════════════════════════════════════════════
+
+
+
+
+
+
+def find_constraint_edges(
+    area_elements: Dict[str, 'AreaElement'],
+    area_assignments: Dict[str, str],
+    nodes: Dict[str, 'Node'],
+    exclude_types: set = frozenset({'brick wall'}),
+) -> List[Tuple[List[str], str, str]]:
+    """Find tears in the final mesh via sweep-line chain following.
+
+    Detects locations where two (or more) adjacent area elements share a
+    geometric edge but have incompatible meshes — one chain has intermediate
+    nodes the other doesn't.  These need line/edge constraints in OpenSees.
+
+    Uses a sorted-tuple edge registry where each key ``(nA, nB)`` is
+    ordered by node position (X → Y → Z), making the direction implicit:
+    nA → nB is the positive direction.  Compatible edges (same key with
+    2+ elements) are identified automatically because they produce the
+    identical sorted tuple.
+
+    Non-structural element types (e.g. brick infill walls used as load
+    panels) are excluded via ``exclude_types``.
+
+    Args:
+        area_elements: ``{area_id: AreaElement}`` — all elements.
+        area_assignments: ``{area_id: section_name}``.
+        nodes: ``{node_id: Node}`` — all nodes.
+        exclude_types: Set of section names to skip.
+
+    Returns:
+        List of ``(node_ids_along_edge, type_a, type_b)``.
+    """
+    from collections import defaultdict
+    import numpy as np
+    from typing import Dict, List, Tuple
+
+    COSINE_TOL = 0.9999
+    Z_BAND_TOL = 0.2
+
+    # ── 0. Node arrays & position sort key ──────────────────────
+    _node_arr: Dict[str, np.ndarray] = {}
+    for nid, nd in nodes.items():
+        _node_arr[nid] = np.array([nd.x, nd.y, nd.z], dtype=float)
+
+    def _pos_key(nid: str) -> tuple:
+        nd = nodes[nid]
+        return (nd.x, nd.y, nd.z, nid)
+
+    # ── 1. Build sorted-tuple edge registry ─────────────────────
+    # {(nA, nB): [elem_id, ...]}  where nA ≤ nB by position (X→Y→Z).
+    # Direction from nA→nB is the positive direction.
+    edge_reg: Dict[Tuple[str, str], List[str]] = defaultdict(list)
+
+    for aid, elem in area_elements.items():
+        if (getattr(elem, 'inactive', False) or elem is None
+                or len(elem.node_ids) < 3):
+            continue
+        if area_assignments.get(aid, '') in exclude_types:
+            continue
+        nids = list(elem.node_ids)
+        n = len(nids)
+        for i in range(n):
+            j = (i + 1) % n
+            nA, nB = nids[i], nids[j]
+            if nA == nB:
+                continue
+            key = (nA, nB) if _pos_key(nA) <= _pos_key(nB) else (nB, nA)
+            edge_reg[key].append(aid)
+
+    # ── 2. Build node→keys index for chain following ────────────
+    # Derived directly from the registry — not a separate data model.
+    node_keys: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+    for nA, nB in edge_reg:
+        node_keys[nA].append((nA, nB))
+        node_keys[nB].append((nA, nB))
+
+    # ── Helpers ─────────────────────────────────────────────────
+    def _cos_match(d1: np.ndarray, d2: np.ndarray) -> bool:
+        return float(np.dot(d1, d2)) > COSINE_TOL
+
+    def _chain_dir(key: tuple, from_node: str) -> np.ndarray:
+        """Unit vector from from_node to the other end of the key."""
+        other = key[1] if key[0] == from_node else key[0]
+        vec = _node_arr[other] - _node_arr[from_node]
+        nrm = float(np.linalg.norm(vec))
+        return vec / nrm if nrm > 1e-12 else None
+
+    def _follow(start_node: str, key: tuple) -> List[str]:
+        """Follow a single chain from start_node through key."""
+        other = key[1] if key[0] == start_node else key[0]
+        chain = [start_node, other]
+        cur = other
+        acc_dir = _node_arr[cur] - _node_arr[start_node]
+        nrm = float(np.linalg.norm(acc_dir))
+        if nrm > 1e-12:
+            acc_dir /= nrm
+        else:
+            return chain
+        visited = {start_node, cur}
+        while cur in node_keys:
+            found = None
+            for k in node_keys[cur]:
+                d = _chain_dir(k, cur)
+                if d is not None and _cos_match(d, acc_dir):
+                    found = k
+                    break
+            if found is None:
+                break
+            nxt = found[1] if found[0] == cur else found[0]
+            if nxt in visited:
+                break
+            visited.add(nxt)
+            chain.append(nxt)
+            vec = _node_arr[nxt] - _node_arr[start_node]
+            nrm = float(np.linalg.norm(vec))
+            if nrm > 1e-12:
+                acc_dir = vec / nrm
+            cur = nxt
+        return chain
+
+    def _truncate_at_junction(c1: List[str], c2: List[str]):
+        """Truncate both chains at the first common node after start.
+        Returns (truncated_c1, truncated_c2) or None if no junction."""
+        set2 = set(c2[1:])
+        for i, nid in enumerate(c1[1:], 1):
+            if nid in set2:
+                j = c2.index(nid)
+                return c1[:i+1], c2[:j+1]
+        return None
+
+    def _collect(chains: List[List[str]], d: np.ndarray) -> List[str]:
+        nodes_set: set = set()
+        for ch in chains:
+            nodes_set.update(ch)
+        ref = _node_arr[chains[0][0]]
+        return sorted(
+            nodes_set,
+            key=lambda nid: float(np.dot(_node_arr[nid] - ref, d)),
+        )
+
+    # ── 3. Single pass: horizontal edges (by Z-band) ────────────
+    # All edges in this model are at constant Z — there are no true
+    # vertical (Z-changing) tears.  A single Z-band sweep suffices.
+    z_groups: Dict[float, List[tuple]] = defaultdict(list)
+    for nA, nB in edge_reg:
+        zk = round((_node_arr[nA][2] + _node_arr[nB][2]) * 0.5, 1)
+        z_groups[zk].append((nA, nB))
+
+    tears: List[tuple] = []  # each: (node_ids, elem_a, elem_b)
+
+    for zk, group in z_groups.items():
+        if len(group) < 2:
+            continue
+        # Sort by min-X then min-Y of the two nodes
+        group.sort(key=lambda k: (min(_node_arr[k[0]][0], _node_arr[k[1]][0]),
+                                  min(_node_arr[k[0]][1], _node_arr[k[1]][1])))
+        active: List[tuple] = []  # list of (nA, nB)
+
+        for nA, nB in group:
+            x_min = min(_node_arr[nA][0], _node_arr[nB][0])
+
+            # Retire keys whose max X < sweep position
+            active = [k for k in active
+                      if max(_node_arr[k[0]][0], _node_arr[k[1]][0]) >= x_min - 1e-6]
+
+            # Check both nA and nB against the active set
+            for k in active:
+                if k == (nA, nB):
+                    continue  # same key → compatible edge, skip
+                shared = {nA, nB} & set(k)
+                if not shared:
+                    continue
+                sn = next(iter(shared))
+                d1 = _chain_dir((nA, nB), sn)
+                d2 = _chain_dir(k, sn)
+                if d1 is None or d2 is None:
+                    continue
+                if not _cos_match(d1, d2):
+                    continue
+                c1 = _follow(sn, (nA, nB))
+                c2 = _follow(sn, k)
+                trunc = _truncate_at_junction(c1, c2)
+                if trunc is not None:
+                    ordered = _collect([trunc[0], trunc[1]], d1)
+                    if len(ordered) >= 3:
+                        # Store the element IDs from the two starting keys
+                        ea = edge_reg[(nA, nB)][0]
+                        eb = edge_reg[k][0]
+                        tears.append((ordered, ea, eb))
+
+            active.append((nA, nB))
+
+    # ── 4. Merge overlapping tears ──────────────────────────────
+    # Two tears overlap if they share ≥1 node and are colinear
+    # (absolute cosine of endpoint vectors > COSINE_TOL).
+    # Each merged tear carries the set of ALL element types involved.
+    merged: List[Tuple[List[str], set]] = []  # (node_ids, type_set)
+    used = [False] * len(tears)
+
+    for i in range(len(tears)):
+        if used[i]:
+            continue
+        nids_i, ea_i, eb_i = tears[i]
+        group_nids = [nids_i]
+        group_types = {area_assignments.get(ea_i, 'unknown'),
+                       area_assignments.get(eb_i, 'unknown')}
+        used[i] = True
+        # Direction from first tear's endpoints
+        fa_i = _node_arr[nids_i[0]]
+        la_i = _node_arr[nids_i[-1]]
+        d_i = la_i - fa_i
+        dni = float(np.linalg.norm(d_i))
+        if dni > 1e-12:
+            d_i /= dni
+        else:
+            d_i = np.array([1.0, 0.0, 0.0])
+
+        for j in range(i + 1, len(tears)):
+            if used[j]:
+                continue
+            nids_j, ea_j, eb_j = tears[j]
+            shared = set(nids_i) & set(nids_j)
+            if not shared:
+                continue
+            fa_j = _node_arr[nids_j[0]]
+            la_j = _node_arr[nids_j[-1]]
+            d_j = la_j - fa_j
+            dnj = float(np.linalg.norm(d_j))
+            if dnj > 1e-12:
+                d_j /= dnj
+            else:
+                d_j = np.array([1.0, 0.0, 0.0])
+            if abs(float(np.dot(d_i, d_j))) <= COSINE_TOL:
+                continue
+            group_nids.append(nids_j)
+            group_types.update([area_assignments.get(ea_j, 'unknown'),
+                                area_assignments.get(eb_j, 'unknown')])
+            used[j] = True
+
+        all_nodes: set = set()
+        ref_node = group_nids[0][0]
+        for t in group_nids:
+            all_nodes.update(t)
+        ordered = sorted(
+            all_nodes,
+            key=lambda nid: float(np.dot(_node_arr[nid] - _node_arr[ref_node], d_i)),
+        )
+        if len(ordered) >= 3:
+            type_a = sorted(group_types)[0] if group_types else 'unknown'
+            type_b = sorted(group_types)[-1] if len(group_types) > 1 else type_a
+            merged.append((ordered, type_a, type_b))
+
+    # ── 5. Format results ───────────────────────────────────────
+    results: List[Tuple[List[str], str, str]] = []
+    for nids, ta, tb in merged:
+        results.append((nids, ta, tb))
+
+    return results
