@@ -316,7 +316,10 @@ class RecordingOpenSees(types.ModuleType):
             "responseSpectrumAnalysis",
             "eigen", "analyze",
             # Analysis/solver setup (emitted separately by exported analysis)
-            "system", "numberer", "constraints", "integrator",
+            # Note: "constraints" is NOT skipped because equationConstraint
+            # MPCs require a specific handler (Penalty).  Without it, the
+            # Tcl defaults to Transformation and MPCs are silently ignored.
+            "system", "numberer", "integrator",
             "algorithm", "test", "analysis", "recorder",
         }
         for cmd_name, args, kwargs in self._commands:

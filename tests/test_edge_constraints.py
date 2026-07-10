@@ -168,7 +168,9 @@ class TestApplyEdgeConstraints:
             tolerance=1e-4,
             verbose=False,
         )
-        assert n == 2, f"Expected 2 constraints, got {n}"
+        # Spring method creates 2 elements per slave (one to each master),
+        # so 2 slaves × 2 masters = 4 elements (vs 2 MPCs with penalty)
+        assert n == 4, f"Expected 4 spring elements, got {n}"
         assert builder._has_edge_constraints is True
         ops.wipe()
         ops.wipe()

@@ -124,6 +124,11 @@ class OpenSeesBuilder:
             'gravity_num_substeps': 1,
             'solver_constraints': 'Transformation',
             'solver_system': 'BandGen',
+            # Edge constraint method: 'spring' (zeroLength elements) or
+            # 'penalty' (equationConstraint MPCs).  Springs are handler-
+            # agnostic and survive wipe/rebuild; penalty requires the
+            # Penalty constraint handler.
+            'constraint_method': 'spring',
             'verbose_connectivity': False,  # Print connectivity check reports
         }
         for key, default in defaults.items():
@@ -2563,41 +2568,71 @@ class OpenSeesBuilder:
         fine_nodes: Optional[List[int]] = None,
         coarse_elements: Optional[List[int]] = None,
         tolerance: float = 1e-4,
+        penalty_stiffness: Optional[float] = None,
         verbose: bool = True,
     ) -> int:
-        """Apply ETABS-style linear edge constraints between coarse and
-        fine shell meshes using ``equationConstraint`` MPCs.
+        """Apply edge constraints using the configured ``constraint_method``.
+
+        Delegates to :meth:`apply_spring_edge_constraints` or
+        :meth:`_apply_penalty_edge_constraints` based on
+        ``self.config['constraint_method']``.
+
+        * ``"spring"`` (default) — creates ``zeroLength`` spring elements.
+          Works with every solver, constraint handler, and Tcl export.
+          The connection is flexible (controlled by *penalty_stiffness*).
+
+        * ``"penalty"`` — uses ``equationConstraint`` MPCs + Penalty
+          handler.  Requires ``ops.constraints('Penalty', ...)`` — the
+          ``Transformation`` handler silently ignores these MPCs.
+
+        See :meth:`apply_spring_edge_constraints` and
+        :meth:`_apply_penalty_edge_constraints` for full parameter docs.
+        """
+        method = self.config.get('constraint_method', 'spring')
+        if method == 'spring':
+            return self.apply_spring_edge_constraints(
+                coarse_edges=coarse_edges,
+                fine_nodes=fine_nodes,
+                coarse_elements=coarse_elements,
+                tolerance=tolerance,
+                penalty_stiffness=penalty_stiffness,
+                verbose=verbose,
+            )
+        return self._apply_penalty_edge_constraints(
+            coarse_edges=coarse_edges,
+            fine_nodes=fine_nodes,
+            coarse_elements=coarse_elements,
+            tolerance=tolerance,
+            verbose=verbose,
+        )
+
+    def _apply_penalty_edge_constraints(
+        self,
+        coarse_edges: Optional[List[Tuple[int, int]]] = None,
+        fine_nodes: Optional[List[int]] = None,
+        coarse_elements: Optional[List[int]] = None,
+        tolerance: float = 1e-4,
+        verbose: bool = True,
+    ) -> int:
+        """Apply edge constraints using ``equationConstraint`` MPCs with
+        the Penalty constraint handler.
 
         Unaligned slave nodes that lie on coarse-mesh edges are tied via
         ``ops.equationConstraint()`` with interpolation weights based on
         their position along the edge.  All six DOFs are constrained.
 
-        The **Penalty** constraint handler is required — these MPCs cannot
-        be processed by the ``Transformation`` handler.  The method
-        automatically switches to ``Penalty`` and subsequent analysis runs
-        use it.  Do **not** set ``solver_constraints`` to ``"Transformation"``
-        in the config when edge constraints are present.
-
-        .. note::
-            ``equationConstraint`` + Penalty works for **all** analysis types
-            including modal / eigen, because ``ops.eigen()`` calls
-            ``ConstraintHandler::handle()`` which adds penalty stiffness to
-            the global stiffness matrix **K** before solving the eigenvalue
-            problem.  See ``docs/constraint_detection.md`` for details.
-
-        For modal-safe alternative using physical spring elements, see
-        :meth:`apply_spring_edge_constraints`.
+        The Penalty handler is required — ``Transformation`` cannot
+        process ``equationConstraint`` MPCs.  Do **not** set
+        ``solver_constraints`` to ``"Transformation"`` when using this.
 
         Parameters
         ----------
         coarse_edges : list of (int, int) or None
-            Explicit master edge node pairs, e.g. ``[(10, 11), (11, 12)]``.
+            Explicit master edge node pairs.
         fine_nodes : list of int or None
-            Slave node IDs to check.  If ``None``, all shell nodes are
-            candidates.
+            Slave node IDs.  ``None`` = all shell nodes.
         coarse_elements : list of int or None
-            Instead of *coarse_edges*, provide shell element tags to
-            auto-extract their boundary edges.  E.g. ``[1001, 1002]``.
+            Auto-extract master edges from these element tags.
         tolerance : float
             Max perpendicular distance to consider a slave node "on the edge".
         verbose : bool
@@ -2707,7 +2742,7 @@ class OpenSeesBuilder:
             if coarse_edges is not None or coarse_elements is not None:
                 self._saved_edge_constraints = [(
                     coarse_edges, fine_nodes, coarse_elements,
-                    tolerance, verbose,
+                    tolerance, None, verbose,
                 )]
             if verbose:
                 print(f"Applied {count} edge constraint(s). "
@@ -2884,6 +2919,13 @@ class OpenSeesBuilder:
 
         if count:
             self._has_edge_constraints = True
+            # Save call args so Ritz rebuild can reapply them
+            # (ops.wipe() destroys all elements including springs)
+            if coarse_edges is not None or coarse_elements is not None:
+                self._saved_edge_constraints = [(
+                    coarse_edges, fine_nodes, coarse_elements,
+                    tolerance, penalty_stiffness, verbose,
+                )]
             if verbose:
                 print(f"Applied {count} spring element(s).")
 
