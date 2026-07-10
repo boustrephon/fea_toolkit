@@ -103,7 +103,7 @@ class TestFindConstraintEdges:
 
         # Should detect at least the shared-edge tear (B→C with intermediate)
         assert len(edges) >= 1
-        for nids, ta, tb in edges:
+        for nids, _, ta, tb in edges:
             assert len(nids) >= 3
             assert ta != "unknown"
             assert tb != "unknown"
@@ -202,7 +202,7 @@ class TestFindConstraintEdges:
         )
         edges = _run_builder(md)
         assert len(edges) >= 1
-        for _, ta, tb in edges:
+        for _, _, ta, tb in edges:
             # Both types should be valid section names
             assert ta in ("Slab200", "Wall200")
             assert tb in ("Slab200", "Wall200")
@@ -289,7 +289,7 @@ class TestFindConstraintEdges:
             assert len(edges) >= 1
             # Each constraint edge must contain at least 3 nodes
             # (corner + intermediate from mesh)
-            for nids, type_a, type_b in edges:
+            for nids, _, type_a, type_b in edges:
                 assert len(nids) >= 3
                 assert type_a == "Slab200"
                 assert type_b == "Slab200"
