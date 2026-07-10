@@ -22,6 +22,7 @@ from fea_toolkit.model.sap_data import (
     Node,
     Material,
     ShellSection,
+    FrameElement,
     AreaElement,
     AreaMesh,
 )
@@ -212,3 +213,44 @@ class TestFindConstraintEdges:
             # Both types should be valid section names
             assert ta in ("Slab200", "Wall200")
             assert tb in ("Slab200", "Wall200")
+
+    def test_frame_slab_tear(self, materials, sections):
+        """A beam along a meshed slab edge produces a tear."""
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 12.0, 0.0, 0.0),
+            "3": Node("3", 3, 12.0, 6.0, 0.0),
+            "4": Node("4", 4, 0.0, 6.0, 0.0),
+        }
+        areas = {
+            "1": AreaElement("1", 10, ["1", "2", "3", "4"]),
+        }
+        # A beam along edge 2→3 (same edge the slab has)
+        frames = {
+            "B1": FrameElement("B1", 100, node_i="2", node_j="3"),
+        }
+        md = SAPModelData(
+            nodes=nodes, restraints={}, materials=materials,
+            sections=sections,
+            frame_elements=frames, area_elements=areas,
+            frame_assignments={"B1": "Slab200"},
+            area_assignments={"1": "Slab200"},
+            groups={}, frame_auto_mesh={},
+            area_mesh={"1": AreaMesh(auto_mesh=True, max_size=4.0)},
+        )
+        b = OpenSeesBuilder(md, {"verbose": False, "create_shells": True})
+        try:
+            b.build()
+            edges = find_constraint_edges(
+                b.model.area_elements,
+                b.model.area_assignments,
+                b.model.nodes,
+                frame_elements=b.model.frame_elements,
+                frame_assignments=b.model.frame_assignments,
+            )
+            # The slab mesh creates sub-elements with intermediate nodes
+            # on the 2→3 edge — the beam has only 2→3 directly.
+            # Should detect at least one tear.
+            assert len(edges) >= 1
+        finally:
+            ops.wipe()
