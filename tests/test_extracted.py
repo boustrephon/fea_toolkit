@@ -11,7 +11,10 @@ from fea_toolkit.spectrum import _gb50011_spectrum, _build_spectrum, _interp_sa
 from fea_toolkit.utils import deep_merge, infer_loads, build_gravity_patterns, pick_wind
 import copy
 import pytest
-from fea_toolkit.model.sap_data import Node, FrameElement, AreaElement
+from fea_toolkit.model.sap_data import Node, FrameElement, AreaElement, FrameEndOffset
+from fea_toolkit.model.sap_data import ISection, PipeSection, BoxSection, RectangularSection
+from fea_toolkit.model.sap_data import CircularSection, ChannelSection
+from fea_toolkit.io.s2k_parser import SAP2000Parser
 
 
 # ── Spectrum tests ─────────────────────────────────────────────────────
@@ -650,6 +653,20 @@ class TestTclExport:
             "Expected forceBeamColumn element in Tcl output")
         assert "beamIntegration Lobatto" in tcl, (
             "Expected beamIntegration Lobatto in Tcl output")
+        # Verify the full token sequence: tag, sec_tag, n_int_pts
+        for line in tcl.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("beamIntegration Lobatto"):
+                tokens = stripped.split()
+                assert len(tokens) == 5, (
+                    f"Expected 5 tokens in beamIntegration line, "
+                    f"got {len(tokens)}: {tokens}")
+                int_tag = tokens[2]
+                sec_tag = tokens[3]
+                npts = tokens[4]
+                assert npts == "5", (
+                    f"Expected 5 integration points, got {npts}")
+                break
         assert "elasticBeamColumn" not in tcl, (
             "Unexpected elasticBeamColumn (should be forceBeamColumn)")
 
@@ -672,3 +689,425 @@ class TestTclExport:
             "Expected elasticBeamColumn for non-fibre export")
         assert "section Elastic" in tcl, (
             "Expected section Elastic for non-fibre export")
+
+
+# ============================================================================
+# Storey response tests
+# ============================================================================
+
+class TestRigidBodyFit:
+    """Tests for model.storey_response.rigid_body_fit."""
+
+    def test_perfect_rigid_body_translation(self):
+        """Pure translation (Ux=0.01, Uy=-0.005, Rz=0) recovers exactly."""
+        from fea_toolkit.model.storey_response import rigid_body_fit
+        np = __import__("numpy")
+        x = np.array([0.0, 5.0, 5.0, 0.0])
+        y = np.array([0.0, 0.0, 4.0, 4.0])
+        x_cm, y_cm = 2.5, 2.0
+        Ux_true, Uy_true, Rz_true = 0.01, -0.005, 0.0
+        ux = Ux_true - Rz_true * (y - y_cm)
+        uy = Uy_true + Rz_true * (x - x_cm)
+
+        Ux, Uy, Rz, rms, n_used, n_out, _ = rigid_body_fit(
+            ux, uy, x, y, x_cm, y_cm)
+        assert abs(Ux - Ux_true) < 1e-12
+        assert abs(Uy - Uy_true) < 1e-12
+        assert abs(Rz - Rz_true) < 1e-12
+        assert rms < 1e-12
+        assert n_out == 0
+
+    def test_rigid_body_translation_and_rotation(self):
+        """Combined translation + rotation recovers exactly."""
+        from fea_toolkit.model.storey_response import rigid_body_fit
+        np = __import__("numpy")
+        x = np.array([0.0, 6.0, 6.0, 0.0])
+        y = np.array([0.0, 0.0, 5.0, 5.0])
+        x_cm, y_cm = 3.0, 2.5
+        Ux_true, Uy_true, Rz_true = 0.02, 0.01, 0.005
+        ux = Ux_true - Rz_true * (y - y_cm)
+        uy = Uy_true + Rz_true * (x - x_cm)
+
+        Ux, Uy, Rz, rms, n_used, n_out, _ = rigid_body_fit(
+            ux, uy, x, y, x_cm, y_cm)
+        assert abs(Ux - Ux_true) < 1e-12
+        assert abs(Uy - Uy_true) < 1e-12
+        assert abs(Rz - Rz_true) < 1e-12
+        assert rms < 1e-12
+        assert n_out == 0
+
+    def test_outlier_rejected(self):
+        """One synthetic outlier is rejected; fit matches remaining nodes."""
+        from fea_toolkit.model.storey_response import rigid_body_fit
+        np = __import__("numpy")
+        # 5 nodes in a cross pattern — all follow the same rigid-body field
+        x = np.array([0.0, 6.0, 3.0, 3.0, 3.0])
+        y = np.array([0.0, 0.0, -3.0, 3.0, 0.0])
+        x_cm, y_cm = 3.0, 0.0
+        Ux_true, Uy_true, Rz_true = 0.01, -0.005, 0.003
+
+        # Clean displacements
+        ux = Ux_true - Rz_true * (y - y_cm)
+        uy = Uy_true + Rz_true * (x - x_cm)
+
+        # Corrupt the last node (at CM) with a large offset
+        ux[-1] += 0.10
+        uy[-1] += -0.08
+
+        Ux, Uy, Rz, rms, n_used, n_out, mask = rigid_body_fit(
+            ux, uy, x, y, x_cm, y_cm, outlier_threshold=3.0)
+
+        # The outlier should be rejected
+        assert n_out == 1, f"Expected 1 outlier, got {n_out}"
+        assert n_used == 4
+        assert not mask[-1], "Corrupted node should be masked as outlier"
+
+        # Fit should be close to the true value (not biased by outlier)
+        assert abs(Ux - Ux_true) < 1e-6
+        assert abs(Uy - Uy_true) < 1e-6
+        assert abs(Rz - Rz_true) < 1e-8
+
+
+class TestCQC:
+    """Tests for CQC correlation coefficient and combined drift."""
+
+    def test_cqc_coeff_identical_modes(self):
+        """Identical frequencies → ρ = 1.0 (fully correlated)."""
+        from fea_toolkit.model.storey_response import _cqc_coeff
+        rho = _cqc_coeff(2.0, 2.0, zeta=0.05)
+        assert abs(rho - 1.0) < 1e-12, f"ρ(identical) = {rho}, expected 1.0"
+
+    def test_cqc_coeff_well_separated(self):
+        """Well-separated frequencies → ρ ≈ 0 (uncorrelated)."""
+        from fea_toolkit.model.storey_response import _cqc_coeff
+        rho = _cqc_coeff(10.0, 0.5, zeta=0.05)
+        # r = 20, denominator ≈ (1-400)^2 = 159201, numerator ≈ 8*.05^2*21*20^1.5
+        # Very small ≈ 0.0003
+        assert abs(rho) < 0.001, f"ρ(well-separated) = {rho}, expected near 0"
+
+    def test_cqc_coeff_known_pair(self):
+        """Known pair (r=0.8, ζ=0.05) gives ρ ≈ 0.166 per Der Kiureghian."""
+        from fea_toolkit.model.storey_response import _cqc_coeff
+        # r = f_i/f_j = 4.0/5.0 = 0.8
+        rho = _cqc_coeff(4.0, 5.0, zeta=0.05)
+        expected = 0.166  # Der Kiureghian (1981) Table 1, ζ=0.05, r=0.8
+        assert abs(rho - expected) < 0.005, (
+            f"ρ(0.8, 0.05) = {rho:.4f}, expected {expected:.3f}")
+
+    def test_cqc_combined_drift_two_modes(self):
+        """Two-mode CQC drift verifies the einsum path.
+
+        ρ = [[1.0, ρ₁₂], [ρ₁₂, 1.0]]
+        drifts = [0.010, 0.005]
+        combined = sqrt(ρ₁₁·d₁² + 2·ρ₁₂·d₁·d₂ + ρ₂₂·d₂²)
+        """
+        from fea_toolkit.model.storey_response import _cqc_coeff
+        np = __import__("numpy")
+
+        rho_12 = _cqc_coeff(3.0, 5.0, zeta=0.05)
+        rho = np.array([[1.0, rho_12], [rho_12, 1.0]])
+        di = np.array([[0.010, 0.005]])  # shape (1 gap, 2 modes)
+
+        combined = float(np.sqrt(np.abs(
+            np.einsum("sm, mn, sn -> s", di, rho, di))[0]))
+        expected = math.sqrt(
+            1.0*0.010**2 + 2*rho_12*0.010*0.005 + 1.0*0.005**2
+        )
+        assert abs(combined - expected) < 1e-12, (
+            f"CQC combined = {combined:.8f}, expected {expected:.8f}")
+
+
+class TestStoreyDrifts:
+    """Tests for storey_drifts()."""
+
+    def test_basic_two_storey_drift(self):
+        """Two storeys with known Ux difference gives expected drift."""
+        from fea_toolkit.model.storey_response import storey_drifts
+        from fea_toolkit.model.stories import StoryLevel
+        np = __import__("numpy")
+        pd = __import__("pandas")
+
+        stories = [
+            StoryLevel("Base", 0.0),
+            StoryLevel("Storey 1", 3.0),
+        ]
+        df_disp = pd.DataFrame([
+            {"Storey": "Base", "Elevation": 0.0,
+             "Ux": 0.0, "Uy": 0.0, "Rz": 0.0, "R_max": 5.0},
+            {"Storey": "Storey 1", "Elevation": 3.0,
+             "Ux": 0.015, "Uy": 0.0, "Rz": 0.001, "R_max": 5.0},
+        ])
+        df = storey_drifts(df_disp, stories)
+        assert len(df) == 1
+        row = df.iloc[0]
+        # Drift_X = 0.015 / 3.0 = 0.005
+        assert abs(row["Drift_X"] - 0.005) < 1e-8
+        # Drift_Rz = 0.001 / 3.0 ≈ 0.000333
+        assert abs(row["Drift_Rz"] - 0.001/3.0) < 1e-8
+        # Peak drift = sqrt(0.005² + 0²) + |0.000333| * 5.0
+        expected_peak = 0.005 + (0.001/3.0) * 5.0  # ≈ 0.006667
+        assert abs(row["Drift_peak"] - expected_peak) < 5e-5
+        assert abs(row["h (m)"] - 3.0) < 1e-8
+
+
+# ============================================================================
+# P0 — Cardinal point offset tests
+# ============================================================================
+
+class TestCardinalPointOffsets:
+    """Tests for SAP2000Parser._cardinal_point_offset()."""
+
+    def _offset(self, num, D=0.4, B=0.3):
+        return SAP2000Parser._cardinal_point_offset(num, D, B)
+
+    def test_centroid_is_zero(self):
+        """Cardinal point 10 (centroid) → (0, 0)."""
+        assert self._offset(10) == (0.0, 0.0)
+
+    def test_shear_center_is_zero(self):
+        """Cardinal point 11 (shear centre) → (0, 0)."""
+        assert self._offset(11) == (0.0, 0.0)
+
+    def test_bottom_left(self):
+        """Cardinal point 1 (bottom left)."""
+        off_y, off_z = self._offset(1, D=0.4, B=0.3)
+        assert off_y == pytest.approx(0.15)   # 0.5 * 0.3
+        assert off_z == pytest.approx(0.2)    # 0.5 * 0.4
+
+    def test_bottom_center(self):
+        """Cardinal point 2 (bottom centre) → y=0, z=+half-depth."""
+        off_y, off_z = self._offset(2, D=0.4, B=0.3)
+        assert off_y == pytest.approx(0.0)
+        assert off_z == pytest.approx(0.2)
+
+    def test_bottom_right(self):
+        """Cardinal point 3 (bottom right) → y=-half-width, z=+half-depth."""
+        off_y, off_z = self._offset(3, D=0.4, B=0.3)
+        assert off_y == pytest.approx(-0.15)
+        assert off_z == pytest.approx(0.2)
+
+    def test_middle_left(self):
+        """Cardinal point 4 (middle left) → y=+half-width, z=0."""
+        off_y, off_z = self._offset(4, D=0.4, B=0.3)
+        assert off_y == pytest.approx(0.15)
+        assert off_z == pytest.approx(0.0)
+
+    def test_middle_center(self):
+        """Cardinal point 5 (middle centre) → (0, 0)."""
+        assert self._offset(5) == (0.0, 0.0)
+
+    def test_middle_right(self):
+        """Cardinal point 6 (middle right) → y=-half-width, z=0."""
+        off_y, off_z = self._offset(6, D=0.4, B=0.3)
+        assert off_y == pytest.approx(-0.15)
+        assert off_z == pytest.approx(0.0)
+
+    def test_top_left(self):
+        """Cardinal point 7 (top left) → y=+half-width, z=-half-depth."""
+        off_y, off_z = self._offset(7, D=0.4, B=0.3)
+        assert off_y == pytest.approx(0.15)
+        assert off_z == pytest.approx(-0.2)
+
+    def test_top_center(self):
+        """Cardinal point 8 (top centre) → y=0, z=-half-depth."""
+        off_y, off_z = self._offset(8, D=0.4, B=0.3)
+        assert off_y == pytest.approx(0.0)
+        assert off_z == pytest.approx(-0.2)
+
+    def test_top_right(self):
+        """Cardinal point 9 (top right) → y=-half-width, z=-half-depth."""
+        off_y, off_z = self._offset(9, D=0.4, B=0.3)
+        assert off_y == pytest.approx(-0.15)
+        assert off_z == pytest.approx(-0.2)
+
+    def test_circular_section_uses_depth_for_both(self):
+        """For circular sections, B is 0 so D is used for both axes."""
+        off_y, off_z = self._offset(1, D=0.5, B=0.0)  # circular
+        assert off_y == pytest.approx(0.25)  # 0.5 * 0.5
+        assert off_z == pytest.approx(0.25)  # 0.5 * 0.5
+
+    def test_invalid_cardinal_point_returns_zero(self):
+        """Cardinal point outside 1–11 → (0, 0)."""
+        assert self._offset(99) == (0.0, 0.0)
+        assert self._offset(0) == (0.0, 0.0)
+
+
+class TestSectionDepthWidth:
+    """Tests for SAP2000Parser._get_section_depth_width()."""
+
+    def test_isection(self):
+        sec = ISection("W360", "I/Wide Flange", "Steel", depth=0.36, bf=0.17)
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert D == pytest.approx(0.36)
+        assert B == pytest.approx(0.17)
+
+    def test_pipe_section(self):
+        sec = PipeSection("P200", "Pipe", "Steel", od=0.219)
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert D == pytest.approx(0.219)
+        assert B == pytest.approx(0.219)
+
+    def test_box_section(self):
+        sec = BoxSection("B300", "Box/Tube", "Steel", depth=0.3, bf=0.2)
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert D == pytest.approx(0.3)
+        assert B == pytest.approx(0.2)
+
+    def test_rectangular_section(self):
+        sec = RectangularSection("R400", "Rectangular", "Concrete",
+                                 depth=0.4, bf=0.3)
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert D == pytest.approx(0.4)
+        assert B == pytest.approx(0.3)
+
+    def test_circular_section(self):
+        sec = CircularSection("C500", "Circle", "Steel", diameter=0.5)
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert D == pytest.approx(0.5)
+        assert B == pytest.approx(0.5)
+
+    def test_general_section_returns_zero(self):
+        sec = type("GenSection", (), {"depth": 0, "bf": 0})()
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert D == 0.0
+        assert B == 0.0
+
+
+class TestMergeCardinalIntoOffsets:
+    """Tests for SAP2000Parser._merge_cardinal_into_offsets()."""
+
+    def _make_parser(self):
+        return SAP2000Parser.__new__(SAP2000Parser)
+
+    def test_centroid_no_offset(self):
+        """Cardinal point 10 (centroid) → no change to offsets."""
+        parser = self._make_parser()
+        elements = {"1": FrameElement("1", 1, "N1", "N2", cardinal_point=10)}
+        sections = {}
+        assignments = {}
+        offsets = {"1": FrameEndOffset(end_i=0.1, end_j=0.1)}
+        result = parser._merge_cardinal_into_offsets(
+            elements, sections, assignments, offsets)
+        assert result["1"].off_y_i == 0.0
+        assert result["1"].off_z_i == 0.0
+
+    def test_top_center_adds_offset(self):
+        """Cardinal point 8 (top centre) on a 0.4 m deep I-section."""
+        parser = self._make_parser()
+        elements = {"B1": FrameElement("B1", 10, "N1", "N2", cardinal_point=8)}
+        sections = {"Sec1": ISection("Sec1", "I/Wide Flange", "Steel",
+                                      depth=0.4, bf=0.2, A=0.01, I33=1e-4, I22=1e-5, J=1e-6)}
+        assignments = {"B1": "Sec1"}
+        offsets = {}
+        result = parser._merge_cardinal_into_offsets(
+            elements, sections, assignments, offsets)
+        assert result["B1"].off_z_i == pytest.approx(-0.2)
+        assert result["B1"].off_z_j == pytest.approx(-0.2)
+        assert result["B1"].off_y_i == 0.0
+        assert result["B1"].off_y_j == 0.0
+
+    def test_bottom_center_adds_offset(self):
+        """Cardinal point 2 (bottom centre) on a 300 mm deep section."""
+        parser = self._make_parser()
+        elements = {"C1": FrameElement("C1", 5, "N1", "N2", cardinal_point=2)}
+        sections = {"Sec2": RectangularSection("Sec2", "Rectangular", "Concrete",
+                                                 depth=0.3, bf=0.3, A=0.09, I33=1e-3, I22=1e-3, J=1e-4)}
+        assignments = {"C1": "Sec2"}
+        offsets = {"C1": FrameEndOffset(end_i=0.05, end_j=0.05)}
+        result = parser._merge_cardinal_into_offsets(
+            elements, sections, assignments, offsets)
+        # Longitudinal offsets preserved
+        assert result["C1"].end_i == pytest.approx(0.05)
+        assert result["C1"].end_j == pytest.approx(0.05)
+        # Cardinal offset added
+        assert result["C1"].off_z_i == pytest.approx(0.15)  # 0.5 * 0.3
+        assert result["C1"].off_z_j == pytest.approx(0.15)
+
+    def test_unknown_section_skipped(self):
+        """Frame with no matching section → no offset added."""
+        parser = self._make_parser()
+        elements = {"X1": FrameElement("X1", 1, "N1", "N2", cardinal_point=8)}
+        sections = {}
+        assignments = {"X1": "MissingSec"}
+        offsets = {}
+        result = parser._merge_cardinal_into_offsets(
+            elements, sections, assignments, offsets)
+        assert "X1" not in result
+
+
+# ============================================================================
+# P4 — Stiffness modifier tests
+# ============================================================================
+
+class TestStiffnessModifiers:
+    """Tests for section stiffness modifier parsing and application."""
+
+    def test_modifiers_parsed_from_section_table(self, tmp_path):
+        """AMod/I3Mod/I2Mod/JMod parsed from FRAME SECTION PROPERTIES."""
+        import json
+        data = {
+            "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25",
+                                  "CurrUnits": "N, mm, C"}],
+            "JOINT COORDINATES": [
+                {"Joint": 1, "XorR": 0, "Y": 0, "Z": 0},
+                {"Joint": 2, "XorR": 6, "Y": 0, "Z": 0},
+            ],
+            "FRAME SECTION PROPERTIES 01 - GENERAL": [{
+                "SectionName": "CrackedBeam",
+                "Material": "CONC",
+                "Shape": "Rectangular",
+                "t3": 400, "t2": 200,
+                "Area": 80000, "I33": 1.067e9, "I22": 2.667e8,
+                "TorsConst": 1.0,
+                "AMod": 1.0, "I3Mod": 0.35, "I2Mod": 0.35, "JMod": 0.35,
+            }],
+            "FRAME SECTION ASSIGNMENTS": [
+                {"Frame": 1, "AnalSect": "CrackedBeam"},
+            ],
+            "CONNECTIVITY - FRAME": [
+                {"Frame": 1, "JointI": 1, "JointJ": 2},
+            ],
+        }
+        json_path = tmp_path / "modifiers.json"
+        with open(json_path, "w") as f:
+            json.dump(data, f)
+        parser = SAP2000Parser.from_json(json_path)
+        md = parser.get_model_data()
+        sec = md.sections["CrackedBeam"]
+        assert sec.modifiers.get("AMod") == 1.0
+        assert sec.modifiers.get("I3Mod") == 0.35
+        assert sec.modifiers.get("I2Mod") == 0.35
+        assert sec.modifiers.get("JMod") == 0.35
+
+    def test_default_modifiers_when_missing(self, tmp_path):
+        """Sections without modifier columns get empty modifiers dict."""
+        import json
+        data = {
+            "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25",
+                                  "CurrUnits": "N, mm, C"}],
+            "JOINT COORDINATES": [
+                {"Joint": 1, "XorR": 0, "Y": 0, "Z": 0},
+                {"Joint": 2, "XorR": 6, "Y": 0, "Z": 0},
+            ],
+            "FRAME SECTION PROPERTIES 01 - GENERAL": [{
+                "SectionName": "PlainBeam",
+                "Material": "CONC",
+                "Shape": "Rectangular",
+                "t3": 400, "t2": 200,
+                "Area": 80000, "I33": 1.067e9, "I22": 2.667e8,
+                "TorsConst": 1.0,
+                # No modifier columns
+            }],
+            "FRAME SECTION ASSIGNMENTS": [
+                {"Frame": 1, "AnalSect": "PlainBeam"},
+            ],
+            "CONNECTIVITY - FRAME": [
+                {"Frame": 1, "JointI": 1, "JointJ": 2},
+            ],
+        }
+        json_path = tmp_path / "no_modifiers.json"
+        with open(json_path, "w") as f:
+            json.dump(data, f)
+        parser = SAP2000Parser.from_json(json_path)
+        md = parser.get_model_data()
+        assert md.sections["PlainBeam"].modifiers == {}

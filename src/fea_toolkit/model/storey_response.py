@@ -140,7 +140,12 @@ class StoreyRigidBody:
 # ========================================================================
 
 def assign_nodes_to_storeys(md, stories, z_tolerance: float = 0.5):
-    """Group node IDs by storey based on Z proximity.
+    """Group node IDs by storey based on Z proximity or stored membership.
+
+    If a :class:`StoryLevel` has ``node_ids`` populated (from area-element
+    or node-clustering detection), those IDs are used directly for that
+    storey.  Otherwise (e.g. ``s2k_table``-derived stories), distance-based
+    matching is used as a fallback.
 
     Each node is assigned to the **nearest** storey whose elevation is
     within ``z_tolerance/2``.  A node is never assigned to more than
@@ -167,10 +172,17 @@ def assign_nodes_to_storeys(md, stories, z_tolerance: float = 0.5):
         best = None
         best_dist = float("inf")
         for s in stories:
-            dist = abs(nd.z - s.elevation)
-            if dist <= half_band and dist < best_dist:
-                best = s.name
-                best_dist = dist
+            # Use stored membership when available
+            if s.node_ids is not None:
+                if nid in s.node_ids:
+                    assignments[s.name].append(nid)
+                    best = None  # skip distance fallback
+                    break
+            else:
+                dist = abs(nd.z - s.elevation)
+                if dist <= half_band and dist < best_dist:
+                    best = s.name
+                    best_dist = dist
         if best is not None:
             assignments[best].append(nid)
     return assignments
