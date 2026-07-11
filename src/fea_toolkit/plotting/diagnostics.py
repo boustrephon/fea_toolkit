@@ -169,6 +169,10 @@ def plot_disconnected_nodes(
 
     Returns:
         ``pyvista.Plotter`` or ``None`` if PyVista is not installed.
+
+    .. todo::
+        Add ``plotter.add_plane_clipper(widget_color=\"red\", normal=\"+z\")``
+        for an interactive clipping plane.  Requires PyVista ≥ 0.50.
     """
     if not report:
         print("No disconnected nodes to plot.")
