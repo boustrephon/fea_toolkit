@@ -19,4 +19,10 @@ from .viz import (
     plot_npz_moment_3d,
 )
 
+from .diagnostics import (
+    find_disconnected_nodes,
+    print_disconnect_report,
+    plot_disconnected_nodes,
+)
+
 from .interactive_viewer import plot_interactive_viewer
