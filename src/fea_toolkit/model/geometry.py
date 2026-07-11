@@ -2234,13 +2234,18 @@ def find_constraint_edges(
         List of tuples.  Each tuple has:
         - ``merged_nodes`` — all unique nodes along the shared edge,
           sorted by position.
-        - ``per_type_chains`` — list of ``(chain_with_t, type_name)``,
-          one per distinct element type involved.  Each entry in the
-          chain is a ``(node_id, t_param)`` pair where ``t`` is the
-          parametric position along the edge [0, 1].  Chains are
-          sorted by length (fewest nodes first = coarsest mesh).
+        - ``master_chain`` — ``[(node_id, t_param), ...]`` — the nodes
+          belonging to the coarsest element along the edge.  These
+          define the master edge for constraint application.
+        - ``slave_nodes`` — ``[(node_id, t_param), ...]`` — all
+          remaining nodes from finer-meshed elements, sorted by
+          t-parameter.  These need to be constrained to the master
+          edge.
         - ``type_a``, ``type_b`` — the two most common section names
           (for backward compatibility).
+
+        The t-parameters are in the range [0, 1] along the edge from
+        the first merged node to the last.
     """
     from collections import defaultdict
     import numpy as np
@@ -2523,34 +2528,63 @@ def find_constraint_edges(
                 items.sort(key=lambda x: x[1])
                 return items
 
-            # Build per-element chains with t-values, deduplicated by type
-            seen_types: set = set()
-            type_chains: List[tuple] = []
+            # Build per-element chains with t-values, WITHOUT merging by type
+            # (merging by type mixes coarse and fine nodes from different
+            # elements of the same section — we need to keep them separate
+            # to correctly identify which chain is the coarsest master).
+            all_chains: List[tuple] = []  # [(chain_with_t, type, elem_id), ...]
             for eid, nodes in elem_chains.items():
                 t = types_by_elem[eid]
-                if t in seen_types:
-                    # Merge chains of the same type
-                    for idx, (existing_nodes, existing_type) in enumerate(type_chains):
-                        if existing_type == t:
-                            combined = set(nid for nid, _ in existing_nodes)
-                            combined.update(nodes)
-                            type_chains[idx] = (_chain_with_t(combined), t)
-                            break
-                else:
-                    seen_types.add(t)
-                    type_chains.append((_chain_with_t(nodes), t))
+                all_chains.append((_chain_with_t(nodes), t, eid))
 
-            # Sort chains by length (fewest nodes first = coarsest)
-            type_chains.sort(key=lambda x: len(x[0]))
-            type_names = sorted({t for _, t in type_chains})
+            # Sort by chain length (fewest nodes = coarsest mesh = master)
+            all_chains.sort(key=lambda x: len(x[0]))
+
+            # The shortest chain defines the master edge
+            master_chain = all_chains[0][0] if all_chains else []
+            # All other chains are slaves
+            slave_chains = [c for c, _, _ in all_chains[1:]] if len(all_chains) > 1 else []
+
+            # Collect all slave nodes (excluding master nodes)
+            master_nodes = {nid for nid, _ in master_chain}
+            slave_nodes: List[tuple] = []
+            for sc in slave_chains:
+                for nid, tval in sc:
+                    if nid not in master_nodes:
+                        slave_nodes.append((nid, tval))
+            slave_nodes.sort(key=lambda x: x[1])
+
+            # Verify master chain integrity: all master nodes should be
+            # colinear and in order along the span direction
+            if len(master_chain) >= 2:
+                m0 = _node_arr[master_chain[0][0]]
+                m1 = _node_arr[master_chain[-1][0]]
+                span_dir = m1 - m0
+                span_len = float(np.linalg.norm(span_dir))
+                if span_len > 1e-12:
+                    span_dir /= span_len
+                    # Check each intermediate master node is on the span line
+                    for nid, tval in master_chain[1:-1]:
+                        pt = _node_arr[nid]
+                        proj = float(np.dot(pt - m0, span_dir))
+                        off = float(np.linalg.norm(pt - (m0 + proj * span_dir)))
+                        if off > 0.01 * span_len:
+                            # Master node is off the span line — add to slaves
+                            slave_nodes.append((nid, tval))
+                            master_chain = [(m0_n, m0_t) for m0_n, m0_t in master_chain
+                                            if m0_n != nid]
+
+            type_names = sorted({t for _, t, _ in all_chains})
             type_a = type_names[0] if type_names else 'unknown'
             type_b = type_names[-1] if len(type_names) > 1 else type_a
-            merged.append((ordered, type_chains, type_a, type_b))
+            merged.append((ordered, master_chain, slave_nodes, type_a, type_b))
 
     # ── 5. Format results ───────────────────────────────────────
-    # Returns: [(merged_nodes, [(chain_with_t, type), ...], type_a, type_b)]
-    results: List[Tuple[List[str], List[tuple], str, str]] = []
-    for nids, type_chains, ta, tb in merged:
-        results.append((nids, type_chains, ta, tb))
+    # Returns: [(merged_nodes, master_chain, slave_nodes, type_a, type_b)]
+    # master_chain: [(node_id, t), ...] — coarsest element's nodes (master edge)
+    # slave_nodes:  [(node_id, t), ...] — all non-master nodes in order
+    results: List[Tuple[List[str], List[tuple], List[tuple], str, str]] = []
+    for nids, master, slaves, ta, tb in merged:
+        results.append((nids, master, slaves, ta, tb))
 
     return results

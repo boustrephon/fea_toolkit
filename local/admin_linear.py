@@ -205,17 +205,22 @@ def preprocess_model(md: SAPModelData) -> Dict[str, Any]:
         stats["constraint_edges"] = len(raw_edges)
         if raw_edges:
             print(f"  → {len(raw_edges)} constraint edge(s) detected")
-            # Convert (node_ids, type_a, type_b) → [(tag_i, tag_j), ...]
-            # Use first and last node of each chain as master-edge endpoints.
-            # Intermediate nodes become slaves constrained to the full span.
+            # Use master_chain (coarsest element) for master edge endpoints
+            # and slave_nodes for explicit fine-node pass-through.
             coarse_pairs = []
-            for nids, *_ in raw_edges:
-                if len(nids) >= 2:
-                    t1 = b.model.nodes[nids[0]].node_tag
-                    t2 = b.model.nodes[nids[-1]].node_tag
-                    if t1 is not None and t2 is not None and t1 != t2:
-                        coarse_pairs.append((t1, t2))
-            b.apply_edge_constraints(coarse_edges=coarse_pairs)
+            fine_nodes = []
+            for nids, master_chain, slave_nodes, *_ in raw_edges:
+                if len(master_chain) >= 2:
+                    m1 = b.model.nodes[master_chain[0][0]].node_tag
+                    m2 = b.model.nodes[master_chain[-1][0]].node_tag
+                    if m1 is not None and m2 is not None and m1 != m2:
+                        coarse_pairs.append((m1, m2))
+                for nid, _ in slave_nodes:
+                    tag = b.model.nodes[nid].node_tag
+                    if tag is not None:
+                        fine_nodes.append(tag)
+            b.apply_edge_constraints(coarse_edges=coarse_pairs,
+                                      fine_nodes=fine_nodes or None)
         stats["constraints_applied"] = bool(raw_edges)
     except Exception as exc:
         warnings.warn(f"Constraint detection failed: {exc}")
@@ -396,13 +401,21 @@ def _build_and_constrain(md: SAPModelData) -> OpenSeesBuilder:
     )
     if raw_edges:
         coarse_pairs = []
-        for nids, *_ in raw_edges:
-            if len(nids) >= 2:
-                t1 = b.model.nodes[nids[0]].node_tag
-                t2 = b.model.nodes[nids[-1]].node_tag
-                if t1 is not None and t2 is not None and t1 != t2:
-                    coarse_pairs.append((t1, t2))
-        b.apply_edge_constraints(coarse_edges=coarse_pairs)
+        fine_nodes = []
+        for nids, master_chain, slave_nodes, *_ in raw_edges:
+            # Master edge = first and last node of the coarsest chain
+            if len(master_chain) >= 2:
+                m1 = b.model.nodes[master_chain[0][0]].node_tag
+                m2 = b.model.nodes[master_chain[-1][0]].node_tag
+                if m1 is not None and m2 is not None and m1 != m2:
+                    coarse_pairs.append((m1, m2))
+            # Slave nodes = all non-master nodes
+            for nid, _ in slave_nodes:
+                tag = b.model.nodes[nid].node_tag
+                if tag is not None:
+                    fine_nodes.append(tag)
+        b.apply_edge_constraints(coarse_edges=coarse_pairs,
+                                  fine_nodes=fine_nodes or None)
     return b
 
 
