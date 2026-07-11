@@ -26,6 +26,8 @@ Usage from cached NPZ::
 from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
 
+from .viz import _set_isometric_view
+
 
 def find_disconnected_nodes(
     data: Dict[str, np.ndarray],
@@ -248,20 +250,9 @@ def plot_disconnected_nodes(
                 [label], font_size=8, point_size=0, shape_opacity=0.6,
             )
 
-    plotter.add_plane_clipper(widget_color="red", normal="+z")
     plotter.show_grid()
-    # Terrain interaction keeps Z up during rotation
+    # Use the same isometric view as all other visualisations in this
+    # codebase.  Terrain interaction style keeps Z up during rotation.
     plotter.enable_terrain_style()
-    # Isometric view
-    bounds = plotter.bounds
-    cx = (bounds[0] + bounds[1]) * 0.5
-    cy = (bounds[2] + bounds[3]) * 0.5
-    cz = (bounds[4] + bounds[5]) * 0.5
-    horiz = max(bounds[1] - bounds[0], bounds[3] - bounds[2], 0.1)
-    z_range = max(bounds[5] - bounds[4], 1.0)
-    dist = max(horiz, z_range) * 1.5
-    plotter.camera.position = (cx + dist, cy + dist, cz + dist * 0.4)
-    plotter.camera.focal_point = (cx, cy, cz)
-    plotter.camera.view_up = (0.0, 0.0, 1.0)
-    plotter.camera.roll = 0.0
+    _set_isometric_view(plotter)
     return plotter
