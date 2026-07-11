@@ -209,17 +209,13 @@ def plot_disconnected_nodes(
 
     # Grey wireframe for context
     if wire.n_points > 0:
-        plotter.add_mesh(wire, color="lightgrey", line_width=1, opacity=0.4)
+        plotter.add_mesh(wire, color="lightgrey", line_width=1, opacity=0.7)
 
-    # Flagged nodes — red spheres sized by suspicion score.
-    # Base radius = 1.5 % of model span, scaled up to 3x for worst offenders.
-    bounds = plotter.bounds if wire.n_points > 0 else [0, 1, 0, 1, 0, 1]
-    model_span = max(bounds[1] - bounds[0], bounds[3] - bounds[2],
-                      bounds[5] - bounds[4], 1.0)
-    base_radius = model_span * 0.015
+    # Flagged nodes — red spheres ~0.5 m radius, slightly larger for
+    # high-score nodes.
     max_score = max(r["score"] for r in report)
     for r in report:
-        radius = base_radius + base_radius * 2.0 * (r["score"] / max(max_score, 1e-12))
+        radius = 0.3 + 0.4 * (r["score"] / max(max_score, 1e-12))
         sphere = pv.Sphere(radius=radius, center=(r["x"], r["y"], r["z"]))
         plotter.add_mesh(sphere, color="red", opacity=0.7)
         if show_labels:
@@ -232,6 +228,7 @@ def plot_disconnected_nodes(
 
     plotter.show_grid()
     # Isometric view with Z-up (keeps vertical lines vertical)
+    bounds = plotter.bounds
     cx = (bounds[0] + bounds[1]) * 0.5
     cy = (bounds[2] + bounds[3]) * 0.5
     cz = (bounds[4] + bounds[5]) * 0.5
