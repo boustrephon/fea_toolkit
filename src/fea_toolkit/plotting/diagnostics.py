@@ -180,15 +180,15 @@ def plot_disconnected_nodes(
 
     pv.set_plot_theme("document")
 
-    # Build frame wireframe
-    ni = data.get("frame_node_i", [])
-    nj = data.get("frame_node_j", [])
     nid = data.get("node_tag", [])
     coords = np.column_stack([
         data.get("node_x", []), data.get("node_y", []), data.get("node_z", []),
     ])
     tag_to_idx = {int(t): i for i, t in enumerate(nid)}
 
+    # ── Frame wireframe ──
+    ni = data.get("frame_node_i", [])
+    nj = data.get("frame_node_j", [])
     n_frame = len(ni)
     if n_frame > 0:
         pts = np.zeros((n_frame * 2, 3))
@@ -201,18 +201,41 @@ def plot_disconnected_nodes(
             pts[ei * 2] = coords[i_idx]
             pts[ei * 2 + 1] = coords[j_idx]
             lines[ei] = [2, ei * 2, ei * 2 + 1]
-        wire = pv.PolyData(pts, lines=lines)
+        frame_mesh = pv.PolyData(pts, lines=lines)
     else:
-        wire = pv.PolyData()
+        frame_mesh = pv.PolyData()
+
+    # ── Shell quads ──
+    s1 = data.get("shell_node_1", [])
+    s2 = data.get("shell_node_2", [])
+    s3 = data.get("shell_node_3", [])
+    s4 = data.get("shell_node_4", [])
+    n_shell = len(s1)
+    if n_shell > 0:
+        quad_pts = np.zeros((n_shell * 4, 3))
+        faces = np.zeros((n_shell, 5), dtype=int)
+        for ei in range(n_shell):
+            for k, sn in enumerate([s1, s2, s3, s4]):
+                idx = tag_to_idx.get(int(sn[ei]))
+                if idx is not None:
+                    quad_pts[ei * 4 + k] = coords[idx]
+            faces[ei] = [4, ei * 4, ei * 4 + 1, ei * 4 + 2, ei * 4 + 3]
+        shell_mesh = pv.PolyData(quad_pts, faces=faces)
+    else:
+        shell_mesh = pv.PolyData()
 
     plotter = pv.Plotter()
 
-    # Grey wireframe for context
-    if wire.n_points > 0:
-        plotter.add_mesh(wire, color="lightgrey", line_width=1, opacity=0.7)
+    # Semi-transparent shell surfaces
+    if shell_mesh.n_points > 0:
+        plotter.add_mesh(shell_mesh, color="lightblue", opacity=0.15,
+                         show_edges=False, lighting=False)
 
-    # Flagged nodes — red spheres ~0.5 m radius, slightly larger for
-    # high-score nodes.
+    # Frame wireframe (slightly darker than shells)
+    if frame_mesh.n_points > 0:
+        plotter.add_mesh(frame_mesh, color="#555555", line_width=2, opacity=0.8)
+
+    # Flagged nodes — red spheres ~0.5 m radius
     max_score = max(r["score"] for r in report)
     for r in report:
         radius = 0.3 + 0.4 * (r["score"] / max(max_score, 1e-12))
@@ -222,12 +245,14 @@ def plot_disconnected_nodes(
             label = f"Node {r['node_tag']} (score={r['score']:.2f})"
             plotter.add_point_labels(
                 np.array([[r["x"], r["y"], r["z"]]]),
-                [label],
-                font_size=8, point_size=0, shape_opacity=0.6,
+                [label], font_size=8, point_size=0, shape_opacity=0.6,
             )
 
+    plotter.add_plane_clipper(widget_color="red", normal="+z")
     plotter.show_grid()
-    # Isometric view with Z-up (keeps vertical lines vertical)
+    # Terrain interaction keeps Z up during rotation
+    plotter.enable_terrain_style()
+    # Isometric view
     bounds = plotter.bounds
     cx = (bounds[0] + bounds[1]) * 0.5
     cy = (bounds[2] + bounds[3]) * 0.5
@@ -238,4 +263,5 @@ def plot_disconnected_nodes(
     plotter.camera.position = (cx + dist, cy + dist, cz + dist * 0.4)
     plotter.camera.focal_point = (cx, cy, cz)
     plotter.camera.view_up = (0.0, 0.0, 1.0)
+    plotter.camera.roll = 0.0
     return plotter
