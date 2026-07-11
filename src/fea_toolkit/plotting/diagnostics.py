@@ -237,17 +237,17 @@ def plot_disconnected_nodes(
     if frame_mesh.n_points > 0:
         plotter.add_mesh(frame_mesh, color="#555555", line_width=2, opacity=0.8)
 
-    # Flagged nodes — red spheres ~0.5 m radius
+    # Flagged nodes — red spheres ~0.15-0.35 m radius
     max_score = max(r["score"] for r in report)
     for r in report:
-        radius = 0.3 + 0.4 * (r["score"] / max(max_score, 1e-12))
+        radius = 0.15 + 0.2 * (r["score"] / max(max_score, 1e-12))
         sphere = pv.Sphere(radius=radius, center=(r["x"], r["y"], r["z"]))
         plotter.add_mesh(sphere, color="red", opacity=0.7)
         if show_labels:
             label = f"Node {r['node_tag']} (score={r['score']:.2f})"
             plotter.add_point_labels(
                 np.array([[r["x"], r["y"], r["z"]]]),
-                [label], font_size=8, point_size=0, shape_opacity=0.6,
+                [label], font_size=12, point_size=0, shape_opacity=0.6,
             )
 
     plotter.show_grid()
