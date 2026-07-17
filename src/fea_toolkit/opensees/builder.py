@@ -73,10 +73,15 @@ class OpenSeesBuilder:
         self.split_elements: Optional[Dict[str, FrameElement]] = None
         self.split_assignments: Optional[Dict[str, str]] = None
         self.split_dist_loads: Optional[List[FrameDistributedLoad]] = None
-        self._has_edge_constraints: bool = False
-        self._has_spring_constraints: bool = False
+        self._edge_constraint_method: Optional[str] = None  # None | 'spring' | 'penalty'
         self._saved_edge_constraints: List[tuple] = []
         self._offset_rigid_links: List[tuple] = []
+        # Model diagnostics — populated during build()
+        self._model_diagnostics: Dict[str, Any] = {
+            "wall_slab_intersections": [],
+            "wall_slab_split_applied": False,
+        }
+        self._model_log: Optional["ModelLog"] = None
         # Snapshot pristine frame data so rebuilds always start from the
         # original geometry (before any offset/split/mesh mutations).
         self._original_frame_elements = copy.deepcopy(model_data.frame_elements)
@@ -84,6 +89,10 @@ class OpenSeesBuilder:
         self._original_nodes = copy.deepcopy(model_data.nodes)
         self._original_area_elements = copy.deepcopy(model_data.area_elements)
         self._original_area_assignments = copy.deepcopy(model_data.area_assignments)
+        # SAP2000 material data keyed by string name — deepcopy so the
+        # originals are preserved across rebuilds (stiffness factors are
+        # applied at the section level, not by mutating materials).
+        self._original_materials = copy.deepcopy(model_data.materials)
         # Detect the base (minimum) elevation for automatic base restraint
         # of mesh nodes that lack foundation fixity in the SAP2000 model.
         self._base_z = min(
@@ -131,6 +140,52 @@ class OpenSeesBuilder:
             # Penalty constraint handler.
             'constraint_method': 'spring',
             'verbose_connectivity': False,  # Print connectivity check reports
+            # Wall-slab intersection diagnostics
+            'detect_wall_slab_intersections': True,  # Warn when wall nodes
+                                                     # fall inside slab areas
+            'split_slabs_at_walls': False,  # Auto-split slab areas at wall
+                                            # intersection lines before meshing
+            # Shell subdivision — subdivide each coarse shell into an N×N grid
+            # before creating ShellMITC4 elements.  Set to 2 for 2×2 (4 shells
+            # per area), 3 for 3×3 (9 shells), etc.  0 = no subdivision.
+            # Subdividing reduces local wall bending modes and shifts global
+            # modes earlier in the eigen solution.
+            'subdivide_shells': 0,
+            # Rigid diaphragm constraints at storey levels.
+            # True = auto-detect from slab/floor area Z-levels.
+            # False (default) = no diaphragms.
+            # List[float] = explicit Z-levels, e.g. [4.42, 8.85].
+            # Rigid diaphragms tie all nodes at a floor together in X, Y,
+            # and Rz — enforcing the rigid-floor assumption.  This eliminates
+            # local slab bending modes and makes global building modes appear
+            # much earlier in the eigen solution.
+            'rigid_diaphragms': False,
+            # Per-element-type stiffness reduction factors for elastic
+            # analysis (ACI 318-19 Table 6.6.3.1.1(a)).
+            #
+            # Keys are structural types: 'beam', 'column', 'brace',
+            # 'wall', 'slab'.  Values < 1.0 reduce the Young's modulus
+            # (and shear modulus) for that type, simulating cracked-
+            # section stiffness.  Typical RC values:
+            #
+            #   beams:   0.35
+            #   columns: 0.70
+            #   braces:  0.50  (no ACI guidance — conservative)
+            #   walls:   0.70
+            #   slabs:   0.25
+            #
+            # Set to ``None`` or an empty dict to use gross (uncracked)
+            # stiffness for all types.
+            #
+            # Classification logic
+            # --------------------
+            # * Frame elements: **column** if vertical span > 4× horizontal
+            #   resultant; **brace** if diagonal (neither beam nor column);
+            #   **beam** otherwise.  *Frame stiffness modifiers* from
+            #   SAP2000 (I2Mod, I3Mod, …) are **still applied** on top.
+            # * Area elements: **slab** if all corner nodes lie within
+            #   ``z_tol`` of the mean Z; **wall** otherwise.
+            'stiffness_factors': None,
         }
         for key, default in defaults.items():
             if key not in self.config:
@@ -683,6 +738,154 @@ class OpenSeesBuilder:
         else:
             plt.show()
         plt.close(fig)
+
+    # -------------------------------------------------------------------------
+    # Diagnostics logging
+    # -------------------------------------------------------------------------
+
+    def get_model_log(self) -> "ModelLog":
+        """Get or create the :class:`~fea_toolkit.io.log.ModelLog` for this
+        build.  Diagnostics are accumulated during :meth:`build` and can be
+        saved with :meth:`save_model_log`.
+
+        Returns:
+            The :class:`~fea_toolkit.io.log.ModelLog` instance.
+        """
+        if self._model_log is None:
+            from ..io.log import ModelLog
+            self._model_log = ModelLog(
+                model_name=getattr(self.model, 'name', 'model'),
+                output_dir="output",
+                build_config=self.config,
+            )
+        return self._model_log
+
+    def save_model_log(self, filepath: Optional[str] = None) -> str:
+        """Save the model diagnostics log to a ``.log.json`` file.
+
+        Args:
+            filepath: Full path for the output file.  If ``None``,
+                generates ``output/{model_name}.log.json`` with spaces
+                replaced by underscores.
+
+        Returns:
+            The path the file was written to.
+        """
+        log = self.get_model_log()
+        return log.save(filepath=filepath)
+
+    def save_model_log_script(self) -> Optional[str]:
+        """Generate a self-contained ``.log.py`` diagnostic visualisation
+        script alongside the ``.log.json`` file.
+
+        The generated script can be run standalone::
+
+            python output/{model_name}.log.py
+
+        Returns:
+            The path to the generated script, or ``None`` if no
+            diagnostics were recorded.
+        """
+        if self._model_log is None or not self._model_log.diagnostics:
+            return None
+        return self._model_log.to_script()
+
+    # -------------------------------------------------------------------------
+    # Rigid diaphragms
+    # -------------------------------------------------------------------------
+
+    def _detect_diaphragm_levels(self) -> List[float]:
+        """Detect storey Z-levels from horizontal (slab) area elements.
+
+        Returns sorted list of Z-levels suitable for rigid diaphragm
+        constraints.  Only returns levels that have 3+ nodes.
+        """
+        from collections import Counter
+        _z_nodes: Counter = Counter()
+        for ae in self.model.area_elements.values():
+            if getattr(ae, 'inactive', False):
+                continue
+            nds = [self.model.nodes[n] for n in ae.node_ids if n in self.model.nodes]
+            nds = [n for n in nds if n is not None]
+            if len(nds) < 3:
+                continue
+            zs = [n.z for n in nds]
+            z_span = max(zs) - min(zs)
+            if z_span > 0.5:
+                continue  # vertical area — skip
+            avg_z = round(sum(zs) / len(zs), 4)
+            for n in nds:
+                _z_nodes[avg_z] += 1
+        levels = sorted(z for z, cnt in _z_nodes.items() if cnt >= 3)
+        return levels
+
+    def _apply_rigid_diaphragms(self) -> int:
+        """Apply rigid diaphragm constraints at each storey level.
+
+        At each Z-level, all nodes with that elevation are tied together
+        in X, Y, and Rz using ``ops.rigidDiaphragm()``.  The master node
+        is chosen as the node nearest to the centroid of that level.
+
+        Rigid diaphragms enforce the rigid-floor assumption and
+        eliminate local slab bending modes, allowing global building
+        modes to appear much earlier in the eigen solution.
+
+        Returns:
+            Number of diaphragm constraints applied (one per level).
+        """
+        config_val = self.config.get('rigid_diaphragms', False)
+        if not config_val:
+            return 0
+
+        if isinstance(config_val, list):
+            levels = sorted(float(z) for z in config_val)
+        else:
+            levels = self._detect_diaphragm_levels()
+
+        if not levels:
+            return 0
+
+        import openseespy.opensees as _ops
+        applied = 0
+        for z in levels:
+            # Collect all OpenSees node tags at this Z level
+            tags_at_z = []
+            for nid, nd in self.model.nodes.items():
+                if abs(nd.z - float(z)) > 0.01:
+                    continue
+                tag = nd.node_tag
+                # Skip if node wasn't actually created in Ops domain
+                try:
+                    _ops.nodeCoord(tag)
+                    tags_at_z.append(tag)
+                except Exception:
+                    continue
+
+            if len(tags_at_z) < 2:
+                continue
+
+            # Pick master: node nearest centroid
+            xs = [float(_ops.nodeCoord(t)[0]) for t in tags_at_z]
+            ys = [float(_ops.nodeCoord(t)[1]) for t in tags_at_z]
+            cx = sum(xs) / len(xs)
+            cy = sum(ys) / len(ys)
+            master = min(tags_at_z,
+                         key=lambda t: (float(_ops.nodeCoord(t)[0]) - cx)**2
+                                      + (float(_ops.nodeCoord(t)[1]) - cy)**2)
+            slaves = [t for t in tags_at_z if t != master]
+
+            try:
+                _ops.rigidDiaphragm(3, master, *slaves)
+                applied += 1
+            except Exception as exc:
+                if self.config.get('verbose', False):
+                    print(f"  ⚠ rigidDiaphragm failed at Z={z}: {exc}")
+                continue
+
+        if self.config.get('verbose', False) and applied:
+            print(f"  Applied {applied} rigid diaphragm(s) at "
+                  f"{', '.join(f'Z={z:.2f}' for z in levels)}")
+        return applied
 
     # -------------------------------------------------------------------------
     # Xara (OpenSeesRT) Tcl backend
@@ -1459,6 +1662,201 @@ class OpenSeesBuilder:
         ])
 
         return "\n".join(lines)
+
+    # -------------------------------------------------------------------------
+    # Per-type stiffness factors (ACI 318 cracked section simulation)
+    # -------------------------------------------------------------------------
+
+    def _classify_element_type(self, elem, is_area: bool = False) -> str:
+        """Classify a frame or area element into a structural type.
+
+        Used by the ``stiffness_factors`` feature to apply ACI 318-19
+        Table 6.6.3.1.1(a) cracked-section stiffness modifiers per element
+        category.
+
+        Classification rules
+        --------------------
+        * **Area elements** — ``'slab'`` if all corner node Z coordinates
+          lie within 0.02 length units (horizontal); ``'wall'`` otherwise.
+        * **Frame elements** — ``'column'`` if the vertical span (|Δz|)
+          exceeds 4× the resultant horizontal span (√(Δx²+Δy²)); ``'brace'``
+          if the element is diagonal (both Δh > 0.01 and Δz > 0.01);
+          ``'beam'`` otherwise.
+
+        Returns
+        -------
+        str
+            ``'beam'`` | ``'column'`` | ``'brace'`` | ``'slab'`` |
+            ``'wall'`` | ``'unknown'``
+        """
+        if is_area:
+            # Area element: slab if all corner nodes are at the same Z
+            zs = []
+            for nid in elem.node_ids:
+                nd = self.model.nodes.get(nid)
+                if nd is None:
+                    return 'unknown'
+                zs.append(nd.z)
+            if max(zs) - min(zs) < 0.02:  # horizontal
+                return 'slab'
+            return 'wall'
+
+        # Frame element
+        ni = self.model.nodes.get(elem.node_i)
+        nj = self.model.nodes.get(elem.node_j)
+        if ni is None or nj is None:
+            return 'unknown'
+
+        dz = abs(ni.z - nj.z)
+        dx = abs(ni.x - nj.x)
+        dy = abs(ni.y - nj.y)
+        dh = (dx**2 + dy**2)**0.5
+
+        if dz > 4.0 * max(dh, 0.01):
+            return 'column'
+        if dh > 0.01 and dz > 0.01:
+            return 'brace'
+        return 'beam'
+
+    def _get_type_factor(self, etype: str) -> float:
+        """Return the stiffness reduction factor for a structural type.
+
+        Reads from ``self.config['stiffness_factors']`` (a dict mapping
+        type names to reduction factors).  If the config key is ``None``,
+        empty, or the type is not present, 1.0 (gross/uncracked) is returned.
+
+        Parameters
+        ----------
+        etype : str
+            One of ``'beam'``, ``'column'``, ``'brace'``, ``'slab'``,
+            ``'wall'``.
+
+        Returns
+        -------
+        float
+            Stiffness multiplier (≤ 1.0).  Default 1.0.
+        """
+        factors = self.config.get('stiffness_factors')
+        if not factors:  # None or empty
+            return 1.0
+        return factors.get(etype, 1.0)
+
+    # -------------------------------------------------------------------------
+    # Modified section creation with type-aware variants
+    # -------------------------------------------------------------------------
+
+    def _create_section_variant(
+        self,
+        sec: Section,
+        base_tag: int,
+        etype: str,
+    ) -> int:
+        """Create an elastic OpenSees section with a type-specific E_mod.
+
+        Used by the ``stiffness_factors`` feature to create a separate
+        section definition (with a unique tag) for each
+        ``(section_name, element_type)`` pair.  This is necessary because
+        the same SAP2000 section (e.g. ``400*500``) may be used for both
+        beams and columns, which should receive different ACI 318 cracked-
+        section modifiers.
+
+        The variant's Young's modulus and shear modulus are scaled by
+        ``self._get_type_factor(etype)``.  SAP2000 section modifiers
+        (I2Mod, I3Mod, etc.) are applied on top of the scaled E_mod.
+
+        **Material-type filtering** — the factor is only applied to
+        sections whose material type is ``'Concrete'``.  Steel, rebar,
+        tendon, and other materials are left at gross stiffness
+        regardless of their element type classification, matching the
+        intent of ACI 318 cracked-section provisions.
+
+        If the factor is 1.0 (gross section) or the type is ``'unknown'``,
+        the *base_tag* is returned unchanged and no duplicate section is
+        created — the caller reuses the original section.
+
+        Parameters
+        ----------
+        sec : Section
+            The SAP2000 section definition.
+        base_tag : int
+            The original OpenSees tag for this section (unused when a
+            variant is actually created, but returned as-is for factor=1.0).
+        etype : str
+            Element type classification (``'beam'``, ``'column'``, etc.).
+
+        Returns
+        -------
+        int
+            OpenSees section tag to use (either *base_tag* or a new
+            variant tag).
+        """
+        factor = self._get_type_factor(etype)
+        if factor == 1.0 or etype == 'unknown':
+            return base_tag
+
+        mat = self.model.materials.get(sec.material)
+
+        # Only apply stiffness reduction to concrete sections (ACI 318
+        # cracked-section provisions are for RC, not steel).
+        if mat is None or mat.type.lower() != 'concrete':
+            return base_tag
+        if mat is None:
+            E_mod = 2.1e11
+            G_mod = 8.077e10
+        else:
+            E_mod = mat.E_mod
+            G_mod = mat.G_mod
+            if G_mod == 0 and E_mod > 0:
+                nu = mat.nu if mat.nu > 0 else 0.3
+                G_mod = E_mod / (2 * (1 + nu))
+
+        E_mod *= factor
+        G_mod *= factor
+
+        # Section properties (same as _create_single_section)
+        if isinstance(sec, ShellSection) and sec.thickness > 0:
+            t = sec.thickness
+            _A = t
+            _I33 = t**3 / 12
+            _I22 = _I33
+            _J = t**3 / 3
+        else:
+            _A = sec.A
+            _I33 = sec.I33
+            _I22 = sec.I22
+            _J = sec.J
+
+        mods = sec.modifiers
+        if mods and not self.config.get('create_fiber_sections', False):
+            _A *= float(mods.get('AMod', 1.0))
+            _I33 *= float(mods.get('I3Mod', 1.0))
+            _I22 *= float(mods.get('I2Mod', 1.0))
+            _J *= float(mods.get('JMod', 1.0))
+
+        # Assign a fresh tag — use a monotonically increasing counter
+        if not hasattr(self, '_next_variant_tag'):
+            all_tags = list(self.section_tags.values())
+            if hasattr(self, '_shell_sec_tags'):
+                all_tags.extend(self._shell_sec_tags.values())
+            if hasattr(self, '_shell_sec_variants'):
+                all_tags.extend(self._shell_sec_variants.values())
+            self._next_variant_tag = (max(all_tags, default=0) + 1)
+        variant_tag = self._next_variant_tag
+        self._next_variant_tag += 1
+
+        if isinstance(sec, ShellSection):
+            nu_val = mat.nu if mat is not None and mat.nu > 0 else 0.2
+            thickness = getattr(sec, 'thickness', 0.0) or 1.0
+            ops.section('ElasticMembranePlateSection', variant_tag,
+                        E_mod, nu_val, thickness)
+        else:
+            ops.section('Elastic', variant_tag, E_mod, _A, _I33, _I22, G_mod, _J)
+
+        if self.config.get('verbose', False):
+            print(f"  Section {variant_tag}: {sec.name} ({etype}, factor={factor})")
+
+        return variant_tag
+
     # -------------------------------------------------------------------------
     def build(self,
               pattern_scales: Optional[Dict[str, float]] = None,
@@ -1502,6 +1900,9 @@ class OpenSeesBuilder:
         self.model.nodes = copy.deepcopy(self._original_nodes)
         self.model.area_elements = copy.deepcopy(self._original_area_elements)
         self.model.area_assignments = copy.deepcopy(self._original_area_assignments)
+        # SAP2000 materials dict (keyed by string name) restored from pristine
+        # copy so concrete_stiffness_factor never accumulates across rebuilds.
+        self.model.materials = copy.deepcopy(self._original_materials)
 
         create_shells = self.config.get('create_shells', False)
         if self.config['verbose']:
@@ -1521,7 +1922,7 @@ class OpenSeesBuilder:
 
         ops.wipe()
         # wipe() clears all MPCs — caller must re-apply edge constraints
-        self._has_edge_constraints = False
+        self._edge_constraint_method = None
         ops.model('basic', '-ndm', 3, '-ndf', 6)
 
         # ── Pre-build connectivity warning ────────────────────────
@@ -1539,6 +1940,32 @@ class OpenSeesBuilder:
         self._apply_restraints()
         self._create_materials()
         self._create_sections()
+
+        # ── Create type-specific section variants for stiffness factors ──
+        # Frame elements are classified here (before meshing, since frames
+        # are not affected by area meshing).  Area elements are classified
+        # later, after _mesh_areas() creates split sub-elements, so that
+        # the new sub-area IDs are included in _area_element_types.
+        self._frame_element_types: Dict[str, str] = {}  # elem_id → type
+        self._area_element_types: Dict[str, str] = {}   # area_id → type
+        factors = self.config.get('stiffness_factors')
+        if factors:
+            # Classify frames and create per-type section variants
+            for eid, elem in self.model.frame_elements.items():
+                if getattr(elem, 'inactive', False):
+                    continue
+                etype = self._classify_element_type(elem, is_area=False)
+                self._frame_element_types[eid] = etype
+                if etype in ('unknown',):
+                    continue
+                sec_name = self.model.frame_assignments.get(eid, '')
+                if not sec_name or sec_name not in self.section_tags:
+                    continue
+                base_tag = self.section_tags[sec_name]
+                if self._get_type_factor(etype) != 1.0:
+                    variant_tag = self._create_section_variant(
+                        self.model.sections[sec_name], base_tag, etype)
+                    self.section_tags[f"{sec_name}__{etype}"] = variant_tag
 
         # Element splitting (if enabled)
         if self.config['split_elements']:
@@ -1565,6 +1992,17 @@ class OpenSeesBuilder:
         # Mesh area elements and create shell elements
         if create_shells:
             self._mesh_areas(selection=selection)
+            self._merge_coincident_nodes()
+
+            # Classify area elements AFTER meshing so that split sub-
+            # areas (from split_slabs_at_walls etc.) are included.
+            if factors:
+                for aid, area in self.model.area_elements.items():
+                    if getattr(area, 'inactive', False):
+                        continue
+                    etype = self._classify_element_type(area, is_area=True)
+                    self._area_element_types[aid] = etype
+
             self._create_shell_elements(loads_only_selection=selection)
             if self.config.get('verbose_connectivity', False):
                 rep = self.check_mesh_connectivity()
@@ -1578,6 +2016,7 @@ class OpenSeesBuilder:
         self._create_lumped_hinges()
         self._create_elements()
         self._create_loads(pattern_scales=pattern_scales)
+        self._apply_rigid_diaphragms()
         self._setup_recorders()  # optional
 
         if self.config['verbose']:
@@ -2032,6 +2471,70 @@ class OpenSeesBuilder:
             selection: Optional :class:`Selection`.  Areas matching this
                 selection are loads‑only and will **not** be meshed.
         """
+        # ── Wall-slab intersection diagnostics (always runs when ──
+        # ── create_shells is True, even for unmeshed slabs)      ──
+        if self.config.get('detect_wall_slab_intersections', True):
+            from ..model.geometry import (
+                find_wall_nodes_inside_slabs,
+                split_slabs_at_wall_intersections,
+                print_wall_inside_slab_report,
+            )
+            ws_findings = find_wall_nodes_inside_slabs(
+                self.model.area_elements,
+                self.model.area_assignments,
+                self.model.nodes,
+            )
+            if ws_findings:
+                print("  ⚠ Wall–slab intersection(s) detected:")
+                print_wall_inside_slab_report(ws_findings)
+                from ..io.log import ModelLog
+                if self._model_log is None:
+                    self._model_log = ModelLog(
+                        model_name=getattr(self.model, 'name', 'model'),
+                        output_dir="output",
+                        build_config=self.config,
+                    )
+                for f in ws_findings:
+                    self._model_log.add_diagnostic(
+                        type="wall_slab_intersection",
+                        severity="warning",
+                        message=(
+                            f"Wall {f['wall_id']} ({f['section']}) "
+                            f"inside slab {f['slab_id']}"
+                        ),
+                        details=f,
+                        fix_applied=False,
+                        visualisation_hint="pyvista_3d",
+                    )
+
+                # Optional auto-split (before regular meshing)
+                if self.config.get('split_slabs_at_walls', False):
+                    max_elem_tag = max(
+                        (ae.area_tag for ae in self.model.area_elements.values()),
+                        default=0,
+                    )
+                    max_node_tag = max(
+                        (nd.node_tag for nd in self.model.nodes.values()),
+                        default=0,
+                    )
+                    next_tag_ws = max(max_elem_tag, max_node_tag) + 1
+                    areas_ws, assign_ws, nodes_ws, _ = split_slabs_at_wall_intersections(
+                        self.model.area_elements,
+                        self.model.area_assignments,
+                        self.model.nodes,
+                        next_tag=next_tag_ws,
+                        groups=getattr(self.model, 'groups', None),
+                    )
+                    self.model.area_elements = areas_ws
+                    self.model.area_assignments = assign_ws
+                    self.model.nodes = nodes_ws
+                    for diag in self._model_log.diagnostics:
+                        if diag["type"] == "wall_slab_intersection":
+                            diag["fix_applied"] = True
+                    self._model_diagnostics["wall_slab_split_applied"] = True
+                    print(f"    → Split {len(ws_findings)} slab(s) at wall "
+                          f"intersections")
+
         if not self.model.area_mesh:
             return
 
@@ -2070,6 +2573,9 @@ class OpenSeesBuilder:
         self.model.area_elements = areas
         self.model.area_assignments = assignments
         self.model.nodes = nodes
+        # Clear area_mesh so subsequent rebuilds (e.g. Ritz pre-step)
+        # don't re-mesh already-subdivided areas.
+        self.model.area_mesh = {}
 
         # Create OpenSees nodes for mesh nodes
         for nd in self.model.nodes.values():
@@ -2182,6 +2688,114 @@ class OpenSeesBuilder:
         # edge-propagated restraints apply.  Synthetic base fixities
         # are NOT written into self.model.restraints so diagnostic
         # code sees only original SAP2000 restraints.
+
+    def _merge_coincident_nodes(self) -> None:
+        """Merge mesh‑created model nodes that sit at the same coordinates.
+
+        After :meth:`_mesh_areas`, each area element creates its own
+        independent mesh nodes.  Adjacent area elements from different
+        structural elements (e.g. a wall and a slab) generate separate
+        node IDs at the same geometric position along their shared edge.
+        These need to be merged so the eventual shell elements share
+        nodes and form a conforming mesh.
+
+        **Safety**: only mesh‑created nodes (IDs containing ``_mesh_``)
+        are candidates for merging.  Original SAP2000 nodes, frame
+        element nodes, and nodes used by rigid links / zero‑length
+        elements are never touched.
+
+        The algorithm:
+        1. Collect all mesh‑created nodes grouped by rounded coordinates.
+        2. For each group with multiple node IDs, pick the first as
+           the survivor and remap area‑element node references from
+           the duplicates to the survivor.
+        3. Remove duplicate entries from ``self.model.nodes`` and
+           the corresponding OpenSees domain nodes.
+        """
+        from collections import defaultdict
+        import openseespy.opensees as _ops
+
+        # Only merge mesh-created nodes
+        mesh_nodes = {nid: nd for nid, nd in self.model.nodes.items()
+                      if "_mesh_" in nid}
+        if not mesh_nodes:
+            return
+
+        # Build set of nodes referenced by non-area elements (frames,
+        # rigid links, etc.) — these must never be merged.
+        protected: set = set()
+        for fid, fe in self.model.frame_elements.items():
+            if not getattr(fe, 'inactive', False):
+                protected.add(fe.node_i)
+                protected.add(fe.node_j)
+        # Also protect original (non-mesh) nodes in area elements
+        for ae in self.model.area_elements.values():
+            for nid in ae.node_ids:
+                if "_mesh_" not in nid:
+                    protected.add(nid)
+        # Protect any node that might be in frame end offsets
+        for eid, offset in self.model.frame_end_offsets.items():
+            if hasattr(offset, 'node_i') and offset.node_i:
+                protected.add(offset.node_i)
+            if hasattr(offset, 'node_j') and offset.node_j:
+                protected.add(offset.node_j)
+
+        # 1. Group mesh nodes by rounded coordinates
+        coord_map: Dict[str, List[str]] = defaultdict(list)
+        for nid, nd in mesh_nodes.items():
+            key = f"{nd.x:.4f}_{nd.y:.4f}_{nd.z:.4f}"
+            coord_map[key].append(nid)
+
+        # 2. Build remapping: duplicate → survivor
+        remap: Dict[str, str] = {}
+        removed_tags: set = set()
+        for key, ids in coord_map.items():
+            if len(ids) < 2:
+                continue
+            # Keep the first non-protected node as survivor, or the first
+            # one if all are protected
+            survivor = None
+            for nid in ids:
+                if nid not in protected:
+                    survivor = nid
+                    break
+            if survivor is None:
+                survivor = ids[0]
+            for dup in ids:
+                if dup == survivor:
+                    continue
+                if dup in protected:
+                    # Can't merge a protected node — skip this group
+                    break
+            else:
+                # All duplicates are non-protected — safe to merge
+                for dup in ids:
+                    if dup == survivor:
+                        continue
+                    remap[dup] = survivor
+                    removed_tags.add(self.model.nodes[dup].node_tag)
+
+        if not remap:
+            return
+
+        if self.config.get('verbose', False):
+            print(f"  Merged {len(remap)} coincident mesh node(s)")
+
+        # 3. Remap area element node references
+        for ae in self.model.area_elements.values():
+            ae.node_ids = [remap.get(nid, nid) for nid in ae.node_ids]
+
+        # 4. Remove duplicates from model.nodes
+        for dup in remap:
+            if dup in self.model.nodes:
+                del self.model.nodes[dup]
+
+        # 5. Remove duplicate OpenSees nodes
+        for tag in removed_tags:
+            try:
+                _ops.remove('node', tag)
+            except Exception:
+                pass
 
     # -------------------------------------------------------------------------
     # Elements
@@ -2332,7 +2946,16 @@ class OpenSeesBuilder:
                 node_i_tag = self.model.nodes[elem.node_i].node_tag
                 node_j_tag = self.model.nodes[elem.node_j].node_tag
             angle = elem.angle
-            sec_tag = self.section_tags[sec_name]
+            # Look up type-specific section tag if stiffness_factors active
+            if hasattr(self, '_frame_element_types'):
+                etype = self._frame_element_types.get(elem_id)
+                type_key = f"{sec_name}__{etype}" if etype else None
+                if type_key and type_key in self.section_tags:
+                    sec_tag = self.section_tags[type_key]
+                else:
+                    sec_tag = self.section_tags[sec_name]
+            else:
+                sec_tag = self.section_tags[sec_name]
             # Use element tag from elem['id']
             elem_tag = elem.elem_tag
 
@@ -2626,6 +3249,11 @@ class OpenSeesBuilder:
         process ``equationConstraint`` MPCs.  Do **not** set
         ``solver_constraints`` to ``"Transformation"`` when using this.
 
+        To use: set ``constraint_method: 'penalty'`` in the builder
+        config.  The builder automatically forces ``Penalty`` when
+        this method is active, so ``solver_constraints`` does not need
+        manual adjustment.
+
         Parameters
         ----------
         coarse_edges : list of (int, int) or None
@@ -2738,7 +3366,7 @@ class OpenSeesBuilder:
                         )
 
         if count:
-            self._has_edge_constraints = True
+            self._edge_constraint_method = 'penalty'
             # Save call args so Ritz rebuild can reapply them
             if coarse_edges is not None or coarse_elements is not None:
                 self._saved_edge_constraints = [(
@@ -2781,8 +3409,10 @@ class OpenSeesBuilder:
 
             Spring elements create a **flexible** connection — the
             stiffness is finite, controlled by *penalty_stiffness*.
-            Use a high value (≥ 1e12 × typical element stiffness) for
-            near‑rigid behaviour.
+            The auto‑computed value (default) targets a spring stiffness
+            ~100 × the shell in‑plane stiffness (E·t) of the adjacent
+            elements — stiff enough for near‑rigid constraint without
+            ill‑conditioning.
 
         Parameters
         ----------
@@ -2795,8 +3425,11 @@ class OpenSeesBuilder:
         tolerance : float
             Max perpendicular distance for a slave node to be "on the edge".
         penalty_stiffness : float or None
-            Spring stiffness per DOF (same units as EA/L for the model).
-            ``None`` = auto‑compute as ``1e12 × typical_EA_over_L``.
+            Spring stiffness per DOF (same units as model stiffness).
+            ``None`` (default) = auto‑compute from actual shell sections:
+            scans all area elements, averages E·t, and uses
+            ``k = 100 × avg(E·t)``.  Falls back to a hardcoded estimate
+            if no shell section data is available.
         verbose : bool
             Print progress.
 
@@ -2848,12 +3481,47 @@ class OpenSeesBuilder:
 
         # ── Auto stiffness ────────────────────────────────────────
         if penalty_stiffness is None:
-            # Estimate typical axial stiffness: E × A / L
-            _E = 2e11  # Pa (steel default)
-            _A = 0.01  # m² (typical member)
-            _L = 5.0   # m (typical span)
-            typical_ka = _E * _A / _L  # ~4e8 N/m
-            penalty_stiffness = 1e12 * typical_ka
+            # Estimate spring stiffness from actual shell sections
+            # in the model.  The in-plane stiffness of a shell element
+            # per unit width is E·t / (1−ν²) ≈ E·t.  For a slave node
+            # on a tear, the spring replaces roughly 1 m of continuous
+            # connection, so a multiplier of 100× E·t gives a spring
+            # ~100× stiffer than the adjacent shell — stiff enough for
+            # near-rigid constraint without ill-conditioning.
+            # Loads-only areas (matched by the builder's selection)
+            # are skipped — they contribute no stiffness to the model.
+            _loads_only: set = set()
+            if hasattr(self, '_area_selection') and self._area_selection is not None:
+                _loads_only = set(self._area_selection.get_area_ids(self.model))
+            avg_Et = 0.0
+            _count = 0
+            for _aid in self.model.area_elements:
+                if _aid in _loads_only:
+                    continue
+                _sec_name = self.model.area_assignments.get(_aid)
+                if _sec_name:
+                    _sec = self.model.sections.get(_sec_name)
+                    if _sec and hasattr(_sec, 'thickness') and _sec.thickness > 0:
+                        _mat = self.model.materials.get(_sec.material)
+                        if _mat and _mat.E_mod > 0:
+                            avg_Et += _mat.E_mod * _sec.thickness
+                            _count += 1
+            if _count > 0:
+                avg_Et /= _count
+                # α = 100 → k_spring ≈ 100 × E·t (shell stiffness)
+                penalty_stiffness = 100.0 * avg_Et
+                if verbose:
+                    print(f"  Spring stiffness auto: E·t_avg = {avg_Et:.3e}, "
+                          f"k = {penalty_stiffness:.3e}  "
+                          f"(scanned {_count} shell element(s))")
+            else:
+                # Fallback: hardcoded estimate in model units
+                _E = 2e8   # KN/m² (200 GPa steel)
+                _t = 0.15  # m (typical slab)
+                penalty_stiffness = 100.0 * _E * _t
+                if verbose:
+                    print(f"  Spring stiffness auto: using fallback "
+                          f"k = {penalty_stiffness:.3e}")
 
         # ── Find tags ─────────────────────────────────────────────
         max_elem = max(
@@ -2919,7 +3587,7 @@ class OpenSeesBuilder:
                     count += 1
 
         if count:
-            self._has_spring_constraints = True
+            self._edge_constraint_method = 'spring'
             # Save call args so Ritz rebuild can reapply them
             # (ops.wipe() destroys all elements including springs)
             if coarse_edges is not None or coarse_elements is not None:
@@ -3783,6 +4451,7 @@ class OpenSeesBuilder:
 
         # Track shell section tags (one per unique section name)
         self._shell_sec_tags: Dict[str, int] = {}
+        self._shell_sec_variants: Dict[str, int] = {}
         next_sec_tag = (max(self.section_tags.values(), default=0) + 1
                         if self.section_tags else 1)
 
@@ -3822,14 +4491,27 @@ class OpenSeesBuilder:
             if mat is None:
                 continue
 
-            # Create shell section on first use
-            if sec_name not in self._shell_sec_tags:
-                tag = next_sec_tag
-                next_sec_tag += 1
-                self._shell_sec_tags[sec_name] = tag
-                self._create_single_shell_section(sec, mat, tag)
-
-            sec_tag = self._shell_sec_tags[sec_name]
+            # Determine area element type for stiffness factor application
+            area_etype = (self._area_element_types.get(aid)
+                          if hasattr(self, '_area_element_types') else None)
+            # Create shell section on first use (type-specific if factors active)
+            if area_etype and self._get_type_factor(area_etype) != 1.0:
+                # Create one variant per (sec_name, type) — store in a separate dict
+                variant_key = f"{sec_name}__{area_etype}"
+                if variant_key not in self._shell_sec_variants:
+                    tag = next_sec_tag
+                    next_sec_tag += 1
+                    self._shell_sec_variants[variant_key] = tag
+                    self._create_single_shell_section(sec, mat, tag,
+                                                      etype=area_etype)
+                sec_tag = self._shell_sec_variants[variant_key]
+            else:
+                if sec_name not in self._shell_sec_tags:
+                    tag = next_sec_tag
+                    next_sec_tag += 1
+                    self._shell_sec_tags[sec_name] = tag
+                    self._create_single_shell_section(sec, mat, tag)
+                sec_tag = self._shell_sec_tags[sec_name]
 
             # Determine a unique element tag — base on the same active
             # frame collection that _create_elements will use (split
@@ -3852,21 +4534,57 @@ class OpenSeesBuilder:
             )
             elem_tag = max(max_frame_tag, max_rigid_tag) + shell_count + 1
 
-            # Create ShellMITC4 (quad) or ShellDKGT (tri) element
-            if len(nids) == 4:
+            # ── Shell subdivision: subdivide each coarse quad into ──
+            # ── an N×N grid of smaller ShellMITC4 elements.        ──
+            n_sub = self.config.get('subdivide_shells', 0)
+            if n_sub > 1 and len(nids) == 4:
+                import openseespy.opensees as _ops
+                _sub_count = 0
+                _c = [np.array(_ops.nodeCoord(t)) for t in node_tags]
+                _grid = [[None] * (n_sub + 1) for _ in range(n_sub + 1)]
+                _next_tag = max(_ops.getNodeTags()) + 1000
+                for j in range(n_sub + 1):
+                    v = j / n_sub
+                    for i in range(n_sub + 1):
+                        u = i / n_sub
+                        if i == 0 and j == 0:
+                            _grid[j][i] = node_tags[0]; continue
+                        if i == n_sub and j == 0:
+                            _grid[j][i] = node_tags[1]; continue
+                        if i == n_sub and j == n_sub:
+                            _grid[j][i] = node_tags[2]; continue
+                        if i == 0 and j == n_sub:
+                            _grid[j][i] = node_tags[3]; continue
+                        top = _c[0] * (1 - u) + _c[1] * u
+                        bot = _c[3] * (1 - u) + _c[2] * u
+                        pt = top * (1 - v) + bot * v
+                        _ntag = _next_tag + _sub_count
+                        _sub_count += 1
+                        _ops.node(_ntag, float(pt[0]), float(pt[1]), float(pt[2]))
+                        self._created_node_tags.add(_ntag)
+                        _grid[j][i] = _ntag
+                for j in range(n_sub):
+                    for i in range(n_sub):
+                        _etag = _next_tag + 5000 + j * n_sub + i
+                        _ops.element('ShellMITC4', _etag,
+                                     _grid[j][i], _grid[j][i + 1],
+                                     _grid[j + 1][i + 1], _grid[j + 1][i],
+                                     sec_tag)
+                        shell_count += 1
+            elif len(nids) == 4:
                 ops.element('ShellMITC4', elem_tag, *node_tags, sec_tag)
+                shell_count += 1
             elif len(nids) == 3:
-                # Degenerate quad by repeating the last node
                 ops.element('ShellMITC4', elem_tag,
                             node_tags[0], node_tags[1], node_tags[2],
                             node_tags[2], sec_tag)
+                shell_count += 1
             else:
                 if self.config['verbose']:
                     print(f"  Warning: area {aid} has {len(nids)} nodes, "
                           f"skipping shell creation")
                 continue
 
-            shell_count += 1
             if self.config['verbose'] and shell_count % 50 == 0:
                 print(f"  ... created {shell_count} shell elements")
 
@@ -3874,8 +4592,9 @@ class OpenSeesBuilder:
             print(f"  Created {shell_count} shell elements "
                   f"({len(self._shell_sec_tags)} shell sections)")
 
-    @staticmethod
-    def _create_single_shell_section(sec: Section, mat, tag: int) -> None:
+    def _create_single_shell_section(self, sec: Section, mat, tag: int,
+                                     etype: Optional[str] = None,
+                                     ) -> None:
         """Create an elastic membrane plate section for a shell element.
 
         Uses ``ops.section('ElasticMembranePlateSection', ...)`` with the
@@ -3884,6 +4603,10 @@ class OpenSeesBuilder:
         membrane + bending stiffness for ``ShellMITC4``; the older
         ``ElasticPlateSection`` creates a singular stiffness matrix
         in OpenSeesPy 3.x.
+
+        If *etype* is provided (``'slab'`` or ``'wall'``), the section's
+        Young's modulus is scaled by the corresponding factor from
+        ``stiffness_factors`` (ACI 318 cracked-section simulation).
         """
         E_mod = mat.E_mod if mat.E_mod and mat.E_mod > 0 else 3.0e10
         nu = mat.nu if mat.nu is not None and mat.nu > 0 else 0.2
@@ -3891,6 +4614,11 @@ class OpenSeesBuilder:
 
         if thickness <= 0.0:
             thickness = 1.0  # fallback
+
+        if etype and mat is not None and mat.type.lower() == 'concrete':
+            factor = self._get_type_factor(etype)
+            if factor != 1.0:
+                E_mod *= factor
 
         ops.section('ElasticMembranePlateSection', tag, E_mod, nu, thickness)
 
@@ -3955,7 +4683,16 @@ class OpenSeesBuilder:
                 new_elements[eid] = elem
                 continue
 
-            sec_tag = self.section_tags[sec_name]
+            # Type-specific section tag lookup
+            if hasattr(self, '_frame_element_types'):
+                etype = self._frame_element_types.get(eid)
+                type_key = f"{sec_name}__{etype}" if etype else None
+                if type_key and type_key in self.section_tags:
+                    sec_tag = self.section_tags[type_key]
+                else:
+                    sec_tag = self.section_tags[sec_name]
+            else:
+                sec_tag = self.section_tags[sec_name]
             sec = self.model.sections.get(sec_name)
             if sec is None:
                 new_elements[eid] = elem
@@ -4129,7 +4866,7 @@ class OpenSeesBuilder:
         n_sub = self.config.get('gravity_num_substeps', 1)
 
         cs = self.config.get('solver_constraints', 'Transformation')
-        if self._has_edge_constraints:
+        if self._edge_constraint_method == 'penalty':
             cs = 'Penalty'
             ops.constraints('Penalty', 1.0e12, 1.0e12)
         else:
@@ -4985,7 +5722,7 @@ class OpenSeesBuilder:
 
         ops.wipe()
         # wipe() clears all MPCs — caller must re-apply edge constraints
-        self._has_edge_constraints = False
+        self._edge_constraint_method = None
         ops.model('basic', '-ndm', 3, '-ndf', 6)
         self._create_nodes()
         self._apply_restraints()
@@ -5139,7 +5876,7 @@ class OpenSeesBuilder:
         # ── 6. Lateral push ──
         ops.wipeAnalysis()
         disp_inc = max_disp / num_steps
-        if self._has_edge_constraints:
+        if self._edge_constraint_method == 'penalty':
             ops.constraints('Penalty', 1.0e12, 1.0e12)
         else:
             ops.constraints(self.config.get('solver_constraints', 'Transformation'))
@@ -5770,23 +6507,70 @@ class OpenSeesBuilder:
                         self.apply_edge_constraints(*args)
             if _sw_patterns is not None:
                 try:
-                    if self._has_edge_constraints:
+                    if self._edge_constraint_method == 'penalty':
                         ops.constraints('Penalty', 1.0e12, 1.0e12)
                     else:
                         ops.constraints('Transformation')
                     ops.numberer('RCM')
                     ops.system(self.config.get('solver_system', 'BandGen'))
                     ops.test('NormDispIncr', 1e-3, 5, 0)
-                    ops.algorithm('Newton')
-                    ops.integrator('LoadControl', 1.0)
-                    ops.analysis('Static')
-                    ops.analyze(1)
+                    # Auto-retry chain: Newton → NewtonLineSearch →
+                    # ModifiedNewton → KrylovNewton
+                    _algorithms = ['Newton', 'NewtonLineSearch',
+                                   'ModifiedNewton', 'KrylovNewton']
+                    _ok = -1
+                    for _alg in _algorithms:
+                        try:
+                            ops.algorithm(_alg)
+                        except Exception:
+                            continue
+                        ops.integrator('LoadControl', 1.0)
+                        ops.analysis('Static')
+                        _ok = ops.analyze(1)
+                        if _ok == 0:
+                            break
+                    if _ok != 0:
+                        raise RuntimeError(
+                            f"Ritz pre-step failed with all algorithms: "
+                            f"{_algorithms}")
                 except Exception:
-                    pass
+                    _ritz_msg = (
+                        "Ritz pre-step (static gravity) failed — "
+                        "ARPACK solver may converge to local spring "
+                        "modes instead of global building modes. "
+                        "Use eigen_solver='default' as fallback."
+                    )
+                    if self.config.get('verbose', False):
+                        print(f"  ⚠ {_ritz_msg}")
+                    if self._model_log is not None:
+                        self._model_log.add_diagnostic(
+                            type="ritz_pre_step_failure",
+                            severity="warning",
+                            message=_ritz_msg,
+                            details={"eigen_solver": eigen_solver},
+                            fix_applied=False,
+                            visualisation_hint="",
+                        )
             # If dummy load was applied, remove it before eigen
             if _sw_patterns is None:
                 for tag in ops.getNodeTags():
                     ops.load(tag, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+        # ── Set constraint handler for eigen analysis ────────────
+        # Must be done before ops.eigen(), regardless of whether a
+        # Ritz pre-step was performed.  Penalty handler is required
+        # when equationConstraint MPCs exist (constraint_method='penalty');
+        # Transformation is the default for spring constraints.
+        # Also set numberer and system so the eigen SOE is available.
+        try:
+            if self._edge_constraint_method == 'penalty':
+                ops.constraints('Penalty', 1.0e12, 1.0e12)
+            else:
+                ops.constraints(self.config.get('solver_constraints', 'Transformation'))
+            ops.numberer('RCM')
+            ops.system(self.config.get('solver_system', 'BandGen'))
+        except Exception:
+            pass
 
         # ── Eigenvalue solver ────────────────────────────────────
         eigenvals_all = []
