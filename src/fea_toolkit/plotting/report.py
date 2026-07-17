@@ -58,7 +58,10 @@ def plot_pushover_curves(
     return fig
 
 
-def plot_modal_participation(df_modal: Any) -> Optional[Any]:
+def plot_modal_participation(
+    df_modal: Any,
+    min_participation: float = 0.0,
+) -> Optional[Any]:
     """Two-panel bar chart of mass participation by mode — translational and rotational DOFs.
 
     Each bar shows the mode's contribution (solid) with the cumulative sum
@@ -71,6 +74,11 @@ def plot_modal_participation(df_modal: Any) -> Optional[Any]:
         DataFrame with columns ``Mode``, ``Mx (%)``, ``My (%)``, ``Mz (%)``,
         ``Rx (%)``, ``Ry (%)``, ``Rz (%)`` — as produced by
         :func:`fea_toolkit.io.report.modal_table_enhanced`.
+    min_participation : float
+        Minimum participation percentage (e.g. ``1.0``) — modes where ALL
+        translational DOFs are below this threshold are aggregated into a
+        single \"low modes\" bar.  The cumulative sums at the end of the
+        chart still include their contribution.  ``0.0`` = show all modes.
 
     Returns
     -------
@@ -81,35 +89,78 @@ def plot_modal_participation(df_modal: Any) -> Optional[Any]:
     except ImportError:
         return None
 
-    data = df_modal[df_modal["Mode"] != "<strong>SUM</strong>"].copy()
-    # Convert string percentages back to float
-    for col in data.columns:
+    data_all = df_modal[df_modal["Mode"] != "<strong>SUM</strong>"].copy()
+    for col in data_all.columns:
         if col not in ("Mode", "Period (s)"):
-            data[col] = pd.to_numeric(data[col], errors="coerce").fillna(0)
+            data_all[col] = pd.to_numeric(data_all[col], errors="coerce").fillna(0)
 
-    n_modes = len(data)
-    if n_modes == 0:
+    n_all = len(data_all)
+    if n_all == 0:
         return None
+
+    # ── Filter modes by min_participation ─────────────────────────
+    if min_participation > 0:
+        transl_dofs = ["Mx (%)", "My (%)", "Mz (%)"]
+        max_transl = data_all[transl_dofs].abs().max(axis=1)
+        significant = data_all[max_transl >= min_participation].copy()
+        n_hidden = n_all - len(significant)
+        # Keep cumulative sums from ALL modes
+        full_cum = {}
+        for col in data_all.columns:
+            if col not in ("Mode", "Period (s)"):
+                full_cum[col] = data_all[col].sum()
+    else:
+        significant = data_all
+        n_hidden = 0
+
+    data = significant
+    n_modes = len(data)
+
+    # ── Stacked cumulative bar for hidden low-participation modes ──
+    _hidden_bar = None
+    _hidden_cum = {}
+    if n_hidden > 0 and n_modes > 0:
+        _hidden_bar = {
+            "Mode": f"<{min_participation}%",
+        }
+        for col in data_all.columns:
+            if col not in ("Mode", "Period (s)"):
+                _hidden_bar[col] = data_all[~data_all.index.isin(data.index)][col].sum()
+
     fig, (ax1, ax2) = plt.subplots(
-        2, 1, figsize=(max(8, n_modes * 0.55), 6),
+        2, 1, figsize=(max(8, n_modes * 0.55 + 2), 6),
         sharex=True,
     )
-    x = np.arange(n_modes)
-    w = 0.22
 
+    # ── Helper: plot one panel ────────────────────────────────────
     def _plot_panel(ax, dofs, colors, title, y_lim):
+        x = np.arange(n_modes + (1 if _hidden_bar else 0))
+        w = 0.22
         for i, dof in enumerate(dofs):
             vals = data[dof].values if dof in data.columns else np.zeros(n_modes)
             cum = np.cumsum(vals)
-            # Bottom solid bar: the mode contribution itself
-            ax.bar(x + (i - 1) * w, vals, w,
+            # Significant modes
+            ax.bar(x[:n_modes] + (i - 1) * w, vals, w,
                    label=dof, color=colors[i], zorder=3)
-            # Top shaded bar: cumulative (excluding current mode) → total = cum
-            ax.bar(x + (i - 1) * w, cum - vals, w,
-                   bottom=vals,
-                   color=colors[i], alpha=0.10, zorder=3)
+            ax.bar(x[:n_modes] + (i - 1) * w, cum - vals, w,
+                   bottom=vals, color=colors[i], alpha=0.10, zorder=3)
+            # Hidden low-participation modes (aggregated)
+            if _hidden_bar:
+                h_val = _hidden_bar.get(dof, 0.0)
+                hx = n_modes
+                ax.bar(hx + (i - 1) * w, h_val, w,
+                       color=colors[i], alpha=0.35, zorder=3,
+                       hatch="//")
+                # Cumulative marker at end
+                total = full_cum.get(dof, cum[-1] + h_val)
+                ax.annotate(f"{total:.0f}%",
+                            xy=(hx + (i - 1) * w, total),
+                            fontsize=6, color=colors[i],
+                            ha="center", va="bottom",
+                            fontweight="bold")
         ax.axhline(90, color="grey", linewidth=0.8, linestyle="--", zorder=2)
-        ax.text(x[-1] + 1, 91, "90 %", fontsize=7, color="grey", va="bottom")
+        ax.text(n_modes + 1.5 + (1 if _hidden_bar else 0), 91, "90 %",
+                fontsize=7, color="grey", va="bottom")
         ax.set_ylabel("Mass participation (%)")
         ax.set_title(title, fontsize=10)
         ax.set_ylim(0, y_lim)
@@ -136,6 +187,8 @@ def plot_modal_participation(df_modal: Any) -> Optional[Any]:
         max(105, rot_max * 1.2),
     )
     ax2.set_xlabel("Mode")
+    n_ticks = n_modes + (1 if _hidden_bar else 0)
+    x = np.arange(n_ticks)
     ax2.set_xticks(x)
 
     # X-axis labels: mode number above, period below
@@ -149,6 +202,8 @@ def plot_modal_participation(df_modal: Any) -> Optional[Any]:
                 labels.append(str(m))
     else:
         labels = [str(m) for m in data["Mode"]]
+    if _hidden_bar:
+        labels.append(f"Low\n({n_hidden} modes)")
     ax2.set_xticklabels(labels, fontsize=7)
 
     fig.suptitle("Modal Mass Participation by Degree of Freedom",
