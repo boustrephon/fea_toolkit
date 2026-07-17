@@ -362,6 +362,34 @@ For details on each check method and its output, see the
 
 ---
 
+## Investigating Model Issues (Diagnostic Workflow)
+
+When mode shapes, forces, or displacements show unexpected behaviour, the
+following investigative pattern has proven effective:
+
+1. **Quantitative detection** — Run automated diagnostics like
+   `find_disconnected_nodes()` (Z-score outlier detection on eigenvectors) or
+   `find_constraint_edges()` (report shared-edge tears).
+2. **Probe with code** — Write a short Python script querying `ops.nodeCoord()`,
+   element tags, and area assignments around the anomaly to gather raw data.
+3. **Visualise** — Generate a PyVista colour-coded 3D scene (e.g. wall nodes in
+   red, slab nodes in blue) to make geometric misalignments visible.
+4. **Confirm with the user** — Share the visual explanation so the root cause is
+   agreed before coding a fix.
+5. **Decide on fix scope** — Generic fix, case-specific fix, or accepted limitation.
+
+> **Concrete example**: The Z=13.28 wall-slab misalignment in the Admin
+> Building was found this way. Mode shapes showed "tears" despite node merging.
+> `find_constraint_edges()` showed no tear at X=55. A probe revealed slab mesh
+> nodes at X=54,56,58,60 — the wall at X=55 had no slab-side counterpart because
+> the slab's `max_size=2.0` mesh happened to fall on even X coordinates. The
+> visual confirmed the issue before implementing a geometric coincidence scan.
+
+Related memory for LLMs working on this codebase: see `Diagnostic workflow pattern`
+in repository memory (`/memories/repo/notes.md`).
+
+---
+
 ## Data flow summary
 
 ```
