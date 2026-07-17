@@ -21,7 +21,11 @@ if TYPE_CHECKING:
 
 
 def _set_isometric_view(plotter) -> None:
-    """Set an isometric view that works for any model (including 1D columns)."""
+    """Set an isometric view that works for any model (including 1D columns).
+
+    Also enables terrain-style interaction so Z stays vertical when the
+    user rotates the view with the mouse.
+    """
     bounds = plotter.bounds
     z_range = max(bounds[5] - bounds[4], 1.0)
     x_range = max(bounds[1] - bounds[0], 0.1)
@@ -31,9 +35,12 @@ def _set_isometric_view(plotter) -> None:
     cy = (bounds[2] + bounds[3]) * 0.5
     cz = (bounds[4] + bounds[5]) * 0.5
     dist = max(horiz, z_range) * 1.5
-    plotter.camera.position = (cx + dist, cy + dist, cz + dist * 0.4)
-    plotter.camera.focal_point = (cx, cy, cz)
-    plotter.camera.view_up = (0.0, 0.0, 1.0)
+    plotter.camera_position = [
+        (cx + dist, cy + dist, cz + dist * 0.4),
+        (cx, cy, cz),
+        (0.0, 0.0, 1.0),
+    ]
+    plotter.enable_terrain_style(mouse_wheel_zooms=True, shift_pans=True)
 
 
 # ============================================================================
@@ -419,6 +426,7 @@ def plot_mode_3d(
 
     disp = mode_shapes[mode]  # {node_tag: (dx, dy, dz)}
 
+    # ── Collect frame segments ──
     elements = (builder.split_elements if builder.split_elements
                 else builder.model.frame_elements)
     if selection is not None:
@@ -426,7 +434,6 @@ def plot_mode_3d(
         elements = {eid: elem for eid, elem in elements.items()
                     if eid in sel_ids}
 
-    # Build segment data: (p1, p2, di, dj)
     segments = []
     for eid, elem in elements.items():
         if getattr(elem, 'inactive', False):
@@ -441,44 +448,197 @@ def plot_mode_3d(
         p2 = np.array([nj.x, nj.y, nj.z])
         segments.append((p1, p2, di, dj))
 
-    if not segments:
+    # ── Collect shell quads from area elements, grouped by section ──
+    from collections import defaultdict
+    shell_groups: Dict[str, list] = defaultdict(list)
+    # section_name -> (p1, p2, p3, p4, d1, d2, d3, d4)
+    for aid, area in builder.model.area_elements.items():
+        if getattr(area, 'inactive', False):
+            continue
+        if len(area.node_ids) < 3:
+            continue
+        sec_name = builder.model.area_assignments.get(aid, 'unknown')
+        nids = area.node_ids[:4]  # at most 4 for a quad
+        pts = []
+        ds = []
+        for nid in nids:
+            nd = builder.model.nodes.get(nid)
+            if nd is None:
+                break
+            tag = nd.node_tag
+            pts.append(np.array([nd.x, nd.y, nd.z]))
+            ds.append(np.array(disp.get(tag, (0, 0, 0))))
+        if len(pts) == 4:
+            shell_groups[sec_name].append(pts + ds)
+
+    if not segments and not shell_groups:
         print("No elements to display.")
         return None
 
     plotter = pv.Plotter(notebook=notebook, **kwargs)
 
-    # Undeformed
+    # ── Colour palette for shell section groups ──
+    _SECTION_COLORS = [
+        '#4c72b0', '#dd8452', '#55a868', '#c44e52', '#8172b3',
+        '#937860', '#da8bc3', '#8c8c8c', '#ccb974', '#64b5cd',
+    ]
+    _sec_names_sorted = sorted(shell_groups.keys())
+    _sec_colors = {name: _SECTION_COLORS[i % len(_SECTION_COLORS)]
+                   for i, name in enumerate(_sec_names_sorted)}
+
+    # ── Helper: triangulate a quad into two triangles ──
+    def _tri_quad(v0, v1, v2, v3):
+        """Return two triangle faces [v0,v1,v2] and [v0,v2,v3]."""
+        return [3, v0, v1, v2], [3, v0, v2, v3]
+
+    # Undeformed (grey)
     if show_original:
         for p1, p2, _, _ in segments:
             n = max(2, int(np.linalg.norm(p2 - p1) * 2))
             poly = pv.lines_from_points(np.linspace(p1, p2, n))
             plotter.add_mesh(poly, color='lightgrey', line_width=2, opacity=0.3)
+        # Undeformed shells — triangulate each quad for robustness
+        for sec_name, quads in shell_groups.items():
+            for quad in quads:
+                p1, p2, p3, p4 = quad[:4]
+                t1, t2 = _tri_quad(0, 1, 2, 3)
+                face = pv.PolyData([p1, p2, p3, p4], faces=t1 + t2)
+                plotter.add_mesh(face, color='lightgrey', opacity=0.12,
+                                 show_edges=True, edge_color='grey', line_width=0.5)
 
-    # Deformed mesh (we'll update it if animating)
+    # ── Helper: build deformed mesh (used by both animate and static paths) ──
+    # Pre-compute the UNDEFORMED length of each frame segment so the number
+    # of interpolation points stays constant across animation amplitudes.
+    _seg_npoints = []
+    for p1, p2, _, _ in segments:
+        n = max(2, int(np.linalg.norm(p2 - p1) * 2))
+        _seg_npoints.append(n)
+    # Pre-compute triangle faces for each shell quad, grouped by section.
+    # _group_tris[sec_name] = list of (t1, t2) pairs for that group's quads
+    _group_tris: Dict[str, List[tuple]] = {}
+    for sec_name, quads in shell_groups.items():
+        tris = []
+        for quad in quads:
+            tris.append(_tri_quad(0, 1, 2, 3))
+        _group_tris[sec_name] = tris
+    # Build a flat list for the animation path, with section index per quad
+    _all_quads_flat: List[list] = []
+    _all_tris_flat: List[tuple] = []
+    _all_sec_idxs: List[int] = []        # section index for each quad (used for per-face coloring)
+    _sec_names_list = _sec_names_sorted  # index → name
+    _sec_name_to_idx = {name: i for i, name in enumerate(_sec_names_list)}
+    for sec_name, quads in shell_groups.items():
+        sidx = _sec_name_to_idx[sec_name]
+        for idx, quad in enumerate(quads):
+            _all_quads_flat.append(quad)
+            _all_tris_flat.append(_group_tris[sec_name][idx])
+            _all_sec_idxs.append(sidx)
+
     def make_deformed(amp: float = 1.0):
-        """Build a merged PolyData for the deformed shape at amplitude *amp*."""
+        """Build merged PolyData for the deformed shape at amplitude *amp*.
+        Point count is invariant w.r.t. *amp* — safe for animation updates.
+
+        Shell triangles carry a ``section_idx`` cell scalar so they can be
+        coloured by section when rendered.
+        """
         all_pts = []
         all_lines = []
+        all_faces = []
+        all_cell_data = []  # section_idx per face (applies to each triangle)
         offset = 0
-        for p1, p2, di, dj in segments:
+        # Frame lines (fixed subdivision count from undeformed length)
+        for (p1, p2, di, dj), n in zip(segments, _seg_npoints):
             d1 = np.array(di) * scale * amp
             d2 = np.array(dj) * scale * amp
             a = p1 + d1
             b = p2 + d2
-            n = max(2, int(np.linalg.norm(b - a) * 2))
             pts = np.linspace(a, b, n)
             all_pts.append(pts)
             for i in range(n - 1):
                 all_lines.append([2, offset + i, offset + i + 1])
             offset += n
+        # Shell quads — triangulated, with per-face section index
+        for quad, (t1, t2), sidx in zip(_all_quads_flat, _all_tris_flat, _all_sec_idxs):
+            p1, p2, p3, p4, d1, d2, d3, d4 = quad
+            a1 = p1 + d1 * scale * amp
+            a2 = p2 + d2 * scale * amp
+            a3 = p3 + d3 * scale * amp
+            a4 = p4 + d4 * scale * amp
+            all_pts.extend([a1, a2, a3, a4])
+            all_faces.append([3, offset + t1[1], offset + t1[2], offset + t1[3]])
+            all_faces.append([3, offset + t2[1], offset + t2[2], offset + t2[3]])
+            all_cell_data.extend([sidx, sidx])  # both triangles get same section index
+            offset += 4
         if not all_pts:
             return pv.PolyData()
         verts = np.vstack(all_pts)
-        cells = np.array(all_lines, dtype=int)
-        return pv.PolyData(verts, lines=cells)
+        cells = np.array(all_lines, dtype=int) if all_lines else np.empty((0, 3), dtype=int)
+        faces = np.array(all_faces, dtype=int) if all_faces else np.empty((0, 4), dtype=int)
+        mesh = pv.PolyData(verts)
+        if len(cells) > 0:
+            mesh.lines = cells
+        if len(faces) > 0:
+            mesh.faces = faces
+        if len(all_cell_data) > 0:
+            mesh.cell_data['section_idx'] = np.array(all_cell_data, dtype=int)
+        return mesh
 
-    deformed_mesh = make_deformed(1.0)
-    actor = plotter.add_mesh(deformed_mesh, color='#c44e52', line_width=4)
+    if animate:
+        # Animated mode: single mesh with cell scalars for section coloring
+        deformed_mesh = make_deformed(1.0)
+        n_sections = len(_sec_names_list)
+        if n_sections > 0:
+            plotter.add_mesh(
+                deformed_mesh,
+                scalars='section_idx',
+                cmap=_SECTION_COLORS[:n_sections],
+                line_width=4, show_edges=True, edge_color='#a03030',
+                opacity=0.85,
+                clim=[-0.5, n_sections - 0.5],
+            )
+        else:
+            plotter.add_mesh(deformed_mesh, color='#c44e52',
+                             line_width=4, show_edges=True,
+                             edge_color='#a03030', opacity=0.85)
+    else:
+        # Static mode: render each shell section group in its own colour
+        for sec_name, quads in shell_groups.items():
+            color = _sec_colors[sec_name]
+            tris = _group_tris[sec_name]
+            all_pts, all_faces = [], []
+            offset = 0
+            for quad, (t1, t2) in zip(quads, tris):
+                p1, p2, p3, p4, d1, d2, d3, d4 = quad
+                a1 = p1 + d1 * scale
+                a2 = p2 + d2 * scale
+                a3 = p3 + d3 * scale
+                a4 = p4 + d4 * scale
+                all_pts.extend([a1, a2, a3, a4])
+                all_faces.append([3, offset + t1[1], offset + t1[2], offset + t1[3]])
+                all_faces.append([3, offset + t2[1], offset + t2[2], offset + t2[3]])
+                offset += 4
+            if all_pts:
+                verts = np.vstack(all_pts)
+                faces = np.array(all_faces, dtype=int)
+                group_mesh = pv.PolyData(verts, faces=faces)
+                plotter.add_mesh(group_mesh, color=color,
+                                 show_edges=True, edge_color='#333333',
+                                 line_width=0.8, opacity=0.85)
+        # Also draw frame lines on top in a neutral colour
+        if segments:
+            frame_mesh = make_deformed(1.0)
+            plotter.add_mesh(frame_mesh, color='#555555', line_width=3,
+                             opacity=0.8)
+        # Legend for shell section colours
+        if len(shell_groups) > 1:
+            legend_entries = [(name, pv.Color(_sec_colors[name]))
+                              for name in _sec_names_sorted]
+            label_size = max(8, 14 - len(shell_groups))
+            plotter.add_legend(
+                legend_entries, border=True, size=[0.2, 0.12],
+                loc='lower_right', face='white',
+                label_size=label_size,
+            )
 
     # Build title text with period if available
     period_str = ""
