@@ -260,3 +260,272 @@ def plot_disconnected_nodes(
     plotter.enable_terrain_style()
     _set_isometric_view(plotter)
     return plotter
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Wall-in-slab intersection visualisation
+# ═══════════════════════════════════════════════════════════════════════
+
+def plot_wall_slab_intersections(
+    area_elements: Dict[str, Any],
+    area_assignments: Dict[str, str],
+    nodes: Dict[str, Any],
+    findings: List[Dict[str, Any]],
+    slab_id: Optional[str] = None,
+    context_radius: float = 4.0,
+    show_labels: bool = True,
+) -> Optional[Any]:
+    """PyVista 3D view of wall-edge nodes inside slab areas.
+
+    For each wall‑slab intersection (or a specific slab), renders:
+
+    * The slab area as a translucent blue quad with labelled corner nodes.
+    * The intersecting wall node(s) as red spheres with labels.
+    * The intersecting wall element outline(s) as thick red edge lines.
+    * Adjacent wall elements that share an edge with the slab (continue
+      above or below) as orange wireframes.
+    * Nearby slab areas within *context_radius* for spatial reference.
+
+    Args:
+        area_elements: ``{area_id: AreaElement}`` from the model.
+        area_assignments: ``{area_id: section_name}``.
+        nodes: ``{node_id: Node}`` with ``.x``, ``.y``, ``.z``, ``.node_tag``.
+        findings: Output from :func:`~fea_toolkit.model.geometry.find_wall_nodes_inside_slabs`.
+        slab_id: If given, only render intersections for this slab.
+            If ``None``, render all findings.
+        context_radius: Include other slab areas within this distance
+            of the target slab's bounding box (same units as model).
+        show_labels: If True, label slab corner nodes and wall nodes.
+
+    Returns:
+        ``pyvista.Plotter`` or ``None`` if PyVista is not installed.
+
+    Usage::
+
+        from fea_toolkit.model.geometry import find_wall_nodes_inside_slabs
+        from fea_toolkit.plotting.diagnostics import plot_wall_slab_intersections
+
+        findings = find_wall_nodes_inside_slabs(
+            md.area_elements, md.area_assignments, md.nodes)
+        plotter = plot_wall_slab_intersections(
+            md.area_elements, md.area_assignments, md.nodes, findings,
+            slab_id="335",  # optional — show one slab
+        )
+        plotter.show()
+    """
+    if not findings:
+        print("No wall‑slab intersections to plot.")
+        return None
+
+    try:
+        import pyvista as pv
+    except ImportError:
+        print("pyvista not installed.")
+        return None
+
+    pv.set_plot_theme("document")
+    plotter = pv.Plotter()
+
+    # ── Filter findings ──────────────────────────────────────────
+    if slab_id is not None:
+        relevant = [f for f in findings if f["slab_id"] == slab_id]
+        if not relevant:
+            print(f"Slab {slab_id} not found in findings.")
+            return None
+    else:
+        relevant = findings
+
+    # Collect all unique slab IDs involved
+    target_slab_ids: set = {f["slab_id"] for f in relevant}
+
+    # ── Determine the bounding box to zoom to ────────────────────
+    all_x, all_y, all_z = [], [], []
+    for f in relevant:
+        all_x.extend(f["slab_X"])
+        all_y.extend(f["slab_Y"])
+        all_z.append(f["slab_Z"])
+        for wn in f["nodes"]:
+            all_x.append(wn["x"])
+            all_y.append(wn["y"])
+            all_z.append(wn["z"])
+
+    if not all_x:
+        return None
+
+    zoom_x = (min(all_x), max(all_x))
+    zoom_y = (min(all_y), max(all_y))
+    zoom_z = (min(all_z), max(all_z))
+
+    # ── Context slabs — other slab areas near the target ─────────
+    # Extend bbox by context_radius for context query
+    ctx_x_min = zoom_x[0] - context_radius
+    ctx_x_max = zoom_x[1] + context_radius
+    ctx_y_min = zoom_y[0] - context_radius
+    ctx_y_max = zoom_y[1] + context_radius
+    ctx_z_min = zoom_z[0] - context_radius
+    ctx_z_max = zoom_z[1] + context_radius
+
+    context_slabs = set()
+    for aid, ae in area_elements.items():
+        if getattr(ae, 'inactive', False):
+            continue
+        nds = [nodes.get(n) for n in ae.node_ids if n in nodes]
+        nds = [n for n in nds if n is not None]
+        if len(nds) < 4:
+            continue
+        xs = [n.x for n in nds]
+        ys = [n.y for n in nds]
+        zs = [n.z for n in nds]
+        z_span = max(zs) - min(zs)
+        if z_span > 0.5:
+            continue  # vertical area, not slab
+        avg_z = sum(zs) / len(zs)
+        if not (ctx_z_min <= avg_z <= ctx_z_max):
+            continue
+        ax_min, ax_max = min(xs), max(xs)
+        ay_min, ay_max = min(ys), max(ys)
+        # Check overlap with extended bbox
+        if (ax_max < ctx_x_min or ax_min > ctx_x_max or
+            ay_max < ctx_y_min or ay_min > ctx_y_max):
+            continue
+        context_slabs.add(aid)
+
+    # Also include the wall areas themselves
+    wall_ids: set = {f["wall_id"] for f in relevant}
+
+    # ── Helper: build area quad ──────────────────────────────────
+    def _area_quad(aid: str, color: str, opacity: float,
+                   edge_color: str, label: bool = False) -> None:
+        ae = area_elements.get(aid)
+        if ae is None:
+            return
+        nds = [nodes.get(n) for n in ae.node_ids if n in nodes]
+        nds = [n for n in nds if n is not None]
+        if len(nds) < 4:
+            return
+        pts = np.array([[n.x, n.y, n.z] for n in nds[:4]])
+        face = np.array([[4, 0, 1, 2, 3]])
+        mesh = pv.PolyData(pts, faces=face)
+        plotter.add_mesh(mesh, color=color, opacity=opacity,
+                         show_edges=True, edge_color=edge_color,
+                         line_width=1, lighting=False)
+        if label:
+            labels = [f"{aid}\\n{n.node_id}(t={n.node_tag})" for n in nds[:4]]
+            plotter.add_point_labels(pts, labels, font_size=8,
+                                     point_size=4, shape_opacity=0.5)
+
+    # ── 1. Context slabs (light grey, low opacity) ───────────────
+    for aid in context_slabs - target_slab_ids:
+        _area_quad(aid, "lightgrey", 0.1, "grey")
+
+    # ── 2. Target slab(s) (blue, labelled corners) ────────────────
+    for sid in target_slab_ids:
+        _area_quad(sid, "lightblue", 0.3, "blue", label=show_labels)
+
+    # ── 3. Walls with edges on this slab (orange, below/above) ──
+    # Find all wall areas that share a Z-level edge with the target
+    # slab — these are the walls that continue above or below.
+    slab_z_levels: set = {round(f["slab_Z"], 4) for f in relevant}
+    adjacent_wall_ids: set = set()
+    for sid in target_slab_ids:
+        ae = area_elements.get(sid)
+        if ae is None:
+            continue
+        slab_nds = [nodes.get(n) for n in ae.node_ids if n in nodes]
+        slab_nds = [n for n in slab_nds if n is not None]
+        if len(slab_nds) < 4:
+            continue
+        sx_min = min(n.x for n in slab_nds)
+        sx_max = max(n.x for n in slab_nds)
+        sy_min = min(n.y for n in slab_nds)
+        sy_max = max(n.y for n in slab_nds)
+        slab_z = round(sum(n.z for n in slab_nds) / len(slab_nds), 4)
+
+        for wid, wae in area_elements.items():
+            if getattr(wae, 'inactive', False):
+                continue
+            if wid in wall_ids:
+                continue  # already shown as intersecting wall
+            if wid in target_slab_ids:
+                continue  # not a wall
+            wnds = [nodes.get(n) for n in wae.node_ids if n in nodes]
+            wnds = [n for n in wnds if n is not None]
+            if len(wnds) < 4:
+                continue
+            # Check if this wall has any node at the slab's Z level
+            # AND within the slab's XY bounds
+            for wn in wnds:
+                if abs(wn.z - slab_z) > 0.01:
+                    continue
+                if not (sx_min - 0.01 <= wn.x <= sx_max + 0.01):
+                    continue
+                if not (sy_min - 0.01 <= wn.y <= sy_max + 0.01):
+                    continue
+                adjacent_wall_ids.add(wid)
+                break
+
+    for wid in adjacent_wall_ids:
+        ae = area_elements.get(wid)
+        if ae is None:
+            continue
+        nds = [nodes.get(n) for n in ae.node_ids if n in nodes]
+        nds = [n for n in nds if n is not None]
+        if len(nds) < 4:
+            continue
+        pts = np.array([[n.x, n.y, n.z] for n in nds[:4]])
+        line_pts = np.vstack([pts, pts[0]])
+        n_seg = len(line_pts) - 1
+        lines = np.array([[2, i, i + 1] for i in range(n_seg)], dtype=int)
+        wall_mesh = pv.PolyData(line_pts, lines=lines)
+        assign = area_assignments.get(wid, "")
+        plotter.add_mesh(wall_mesh, color="orange", line_width=2,
+                         opacity=0.5, label=f"Adj. wall {wid} ({assign})")
+
+    # ── 4. Intersecting wall outlines (red edges) ────────────────
+    for wid in wall_ids:
+        ae = area_elements.get(wid)
+        if ae is None:
+            continue
+        nds = [nodes.get(n) for n in ae.node_ids if n in nodes]
+        nds = [n for n in nds if n is not None]
+        if len(nds) < 4:
+            continue
+        pts = np.array([[n.x, n.y, n.z] for n in nds[:4]])
+        line_pts = np.vstack([pts, pts[0]])  # close the loop
+        n_seg = len(line_pts) - 1
+        lines = np.array([[2, i, i + 1] for i in range(n_seg)], dtype=int)
+        wall_mesh = pv.PolyData(line_pts, lines=lines)
+        assign = area_assignments.get(wid, "")
+        plotter.add_mesh(wall_mesh, color="red", line_width=3,
+                         opacity=0.9, label=f"Wall {wid} ({assign})")
+
+    # ── 5. Wall nodes inside slab (red spheres, labelled) ─────────
+    for f in relevant:
+        for wn in f["nodes"]:
+            center = (wn["x"], wn["y"], wn["z"])
+            sphere = pv.Sphere(radius=0.25, center=center)
+            plotter.add_mesh(sphere, color="red", opacity=0.9)
+            if show_labels:
+                label = f"{wn['node_id']}(t={wn['node_tag']})"
+                plotter.add_point_labels(
+                    np.array([center]),
+                    [label], font_size=10, point_size=0,
+                    shape_opacity=0.6, text_color="red",
+                )
+
+    # ── 6. Legend ───────────────────────────────────────────────
+    plotter.add_legend(border=True, size=(0.28, 0.18))
+
+    # ── Camera ──────────────────────────────────────────────────
+    plotter.show_grid()
+    plotter.enable_terrain_style()
+    cx = (zoom_x[0] + zoom_x[1]) * 0.5
+    cy = (zoom_y[0] + zoom_y[1]) * 0.5
+    cz = (zoom_z[0] + zoom_z[1]) * 0.5
+    d = max(zoom_x[1] - zoom_x[0], zoom_y[1] - zoom_y[0],
+            zoom_z[1] - zoom_z[0], 1.0) * 1.8
+    plotter.camera.position = (cx + d, cy + d * 0.6, cz + d * 0.4)
+    plotter.camera.focal_point = (cx, cy, cz)
+    plotter.camera.up = (0, 0, 1)
+
+    return plotter
