@@ -65,3 +65,57 @@ modal = builder.run_modal_analysis(num_modes=6, g=9806.65)
 ```
 
 See :func:`~fea_toolkit.utils.g_from_units` for supported units.
+
+
+### Mode shape visualisation
+
+Mode shapes can be viewed interactively or saved as GIFs using the
+``admin_linear.py`` workflow script:
+
+```bash
+# Interactive PyVista window (runs modal analysis, fast if model cache exists)
+python3 local/admin_linear.py --cache --shapes --animate --mode-index 4
+
+# Same, but cycle through all 32 modes (no --mode-index)
+python3 local/admin_linear.py --cache --shapes --animate
+
+# Load from previously cached results (no analysis) — interactive window
+python3 local/admin_linear.py --from-cache --mode-index 4
+
+# Save animated GIFs from cache (no analysis, no window)
+python3 local/admin_linear.py --from-cache --gif --mode-index 4
+```
+
+The mode index is **0‑based** (``--mode-index 4`` displays the 5th mode).
+
+Requirements:
+- ``pyvista`` — ``pip install pyvista`` (for interactive viewing)
+- ``imageio`` — ``pip install imageio`` (for GIF export)
+
+#### Usage from code
+
+```python
+# After running modal analysis with extract_shapes=True
+shapes = builder.extract_mode_shapes(num_modes)
+
+from fea_toolkit.plotting import plot_mode_3d
+
+# Animate mode 4 (0‑based) interactively
+plot_mode_3d(
+    builder, shapes, mode=4,
+    scale=50.0, animate=True, periods=modal_result["periods"],
+)
+
+# Static (non‑animated) display with section‑coloured shells
+plot_mode_3d(
+    builder, shapes, mode=4,
+    scale=50.0, animate=False, periods=modal_result["periods"],
+)
+```
+
+The ``admin_linear.py`` pipeline also supports a ``--solver`` flag for
+selecting the eigenvalue solver used during modal analysis:
+
+```bash
+python3 local/admin_linear.py --cache --shapes --animate --solver fullGenLapack
+```

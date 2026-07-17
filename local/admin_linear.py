@@ -33,6 +33,7 @@ from fea_toolkit.model.geometry import (
     mesh_area_elements,
     split_elements,
     split_areas_at_frame_edges,
+    split_slabs_at_wall_intersections,
     find_constraint_edges,
     warn_frame_overlaps,
 )
@@ -186,48 +187,58 @@ def preprocess_model(md: SAPModelData) -> Dict[str, Any]:
             prefix="[Preprocess] ",
         )
 
-    # ── Constraint edges — requires builder for split elements ────
-    # We build once to get the post-split element data, detect
-    # constraint edges, then wipe.  The actual analysis build
-    # (with constraints applied) happens per analysis case.
-    ops.wipe()
-    try:
-        b = OpenSeesBuilder(md, {"verbose": False, "create_shells": True,
-                                  "split_elements": False})  # already split
-        b.build()
-        raw_edges = find_constraint_edges(
-            b.model.area_elements,
-            b.model.area_assignments,
-            b.model.nodes,
-            frame_elements=b.model.frame_elements,
-            frame_assignments=b.model.frame_assignments,
-        )
-        stats["constraint_edges"] = len(raw_edges)
-        if raw_edges:
-            print(f"  → {len(raw_edges)} constraint edge(s) detected")
-            # Use master_chain (coarsest element) for master edge endpoints
-            # and slave_nodes for explicit fine-node pass-through.
-            coarse_pairs = []
-            fine_nodes = []
-            for nids, master_chain, slave_nodes, *_ in raw_edges:
-                if len(master_chain) >= 2:
-                    m1 = b.model.nodes[master_chain[0][0]].node_tag
-                    m2 = b.model.nodes[master_chain[-1][0]].node_tag
-                    if m1 is not None and m2 is not None and m1 != m2:
-                        coarse_pairs.append((m1, m2))
-                for nid, _ in slave_nodes:
-                    tag = b.model.nodes[nid].node_tag
-                    if tag is not None:
-                        fine_nodes.append(tag)
-            b.apply_edge_constraints(coarse_edges=coarse_pairs,
-                                      fine_nodes=fine_nodes or None)
-        stats["constraints_applied"] = bool(raw_edges)
-    except Exception as exc:
-        warnings.warn(f"Constraint detection failed: {exc}")
-        stats["constraint_edges"] = 0
-        stats["constraints_applied"] = False
-    finally:
-        ops.wipe()
+    # ── Split slabs at wall intersections ──────────────────────────
+    # Splits slab areas along wall edge lines so wall and slab mesh
+    # nodes coincide at the interface.  Currently disabled — the
+    # builder-side split_slabs_at_walls option was removed because
+    # it created duplicate meshing.  The correct place is here,
+    # between area-splitting and constraint detection.
+    # if False:
+    #     md.area_elements, md.area_assignments, md.nodes, next_tag = (
+    #         split_slabs_at_wall_intersections(
+    #             md.area_elements, md.area_assignments, md.nodes,
+    #             next_tag=next_tag,
+    #         )
+    #     )
+    #     stats["split_slabs_at_walls"] = True
+
+    # ── Split frames at frame intersections ────────────────────────
+    # Splits frame elements where they cross other frame elements
+    # without sharing a node.  The split_elements() function already
+    # supports this via the AtFrames per-element flag in auto_mesh.
+    # Currently disabled — enable by setting AtFrames=True on the
+    # relevant frame elements in md.frame_auto_mesh.
+    # if False:
+    #     md.frame_elements, md.frame_assignments, md.frame_dist_loads = (
+    #         split_elements(
+    #             md.nodes, md.frame_elements, md.frame_assignments,
+    #             md.frame_dist_loads, md.frame_auto_mesh,
+    #             # Requires AtFrames=True set per-element in
+    #             # md.frame_auto_mesh — modify before calling:
+    #             # for v in md.frame_auto_mesh.values():
+    #             #     v['AtFrames'] = True
+    #         )
+    #     )
+    #     stats["split_frames_at_frames"] = True
+
+    # ── Constraint edges — detect edges from post-split data ─────
+    # No builder/build needed — find_constraint_edges operates on the
+    # model data directly.  The actual build + constraint application
+    # happens per analysis call in _build_and_constrain.
+    raw_edges = find_constraint_edges(
+        md.area_elements, md.area_assignments, md.nodes,
+        frame_elements=md.frame_elements,
+        frame_assignments=md.frame_assignments,
+    )
+    stats["constraint_edges"] = len(raw_edges)
+    if raw_edges:
+        print(f"  → {len(raw_edges)} constraint edge(s) detected")
+    else:
+        print("  (no constraint edges detected)")
+
+    # Clear area_mesh so builder's _mesh_areas() doesn't re-mesh
+    # already-subdivided areas.
+    md.area_mesh = {}
 
     return stats
 
@@ -392,8 +403,30 @@ def _build_and_constrain(md: SAPModelData) -> OpenSeesBuilder:
         "split_elements": False,  # already split in preprocess
         "element_type": "elasticBeamColumn",
         "use_elastic_sections": True,
+        # Detect wall nodes inside slab areas (warns during _mesh_areas)
+        "detect_wall_slab_intersections": True,
+        # Slab-wall splitting is handled in preprocess_model() (as a
+        # commented-out option at position 4) — don't re-split here.
+        # "split_slabs_at_walls": True,
+        "solver_test_max_iter": 30,
+        "gravity_num_substeps": 5,
+        # Per-type stiffness factors (ACI 318-19 cracked-section)
+        "stiffness_factors": {
+            "beam": 0.35,
+            "column": 0.70,
+            "brace": 0.50,
+            "wall": 0.70,
+            "slab": 0.25,
+        },
     })
     b.build()
+    # Save diagnostics log alongside model output
+    try:
+        log_path = b.save_model_log()
+        script_path = b.save_model_log_script()
+    except Exception:
+        pass  # non-fatal — diagnostics are informational
+
     raw_edges = find_constraint_edges(
         b.model.area_elements, b.model.area_assignments, b.model.nodes,
         frame_elements=b.model.frame_elements,
@@ -1029,7 +1062,7 @@ def _make_plotter_from_cache(data: Dict[str, Any], mode_idx: int, scale: float):
             np.array(di), np.array(dj),
         ))
 
-    # Shell quads
+    # Shell quads (triangulated for robustness — no bowties)
     quads = []
     for tags in shell_quads:
         pts = []
@@ -1045,13 +1078,18 @@ def _make_plotter_from_cache(data: Dict[str, Any], mode_idx: int, scale: float):
         if ok and len(pts) == 4:
             quads.append(pts + ds)
 
+    # Pre-compute stable frame line point counts from undeformed length
+    _seg_npoints = []
+    for p1, p2, _, _ in segments:
+        n = max(2, int(np.linalg.norm(p2 - p1) * 2))
+        _seg_npoints.append(n)
+
     def _make_frame_mesh(amp):
         all_pts, all_lines = [], []
         offset = 0
-        for p1, p2, di, dj in segments:
+        for (p1, p2, di, dj), n in zip(segments, _seg_npoints):
             a = p1 + di * scale * amp
             b = p2 + dj * scale * amp
-            n = max(2, int(np.linalg.norm(b - a) * 2))
             pts = np.linspace(a, b, n)
             all_pts.append(pts)
             for i in range(n - 1):
@@ -1071,7 +1109,9 @@ def _make_plotter_from_cache(data: Dict[str, Any], mode_idx: int, scale: float):
             a3 = p3 + d3 * scale * amp
             a4 = p4 + d4 * scale * amp
             all_pts.extend([a1, a2, a3, a4])
-            all_faces.append([4, offset, offset + 1, offset + 2, offset + 3])
+            # Triangulate: [v0,v1,v2] and [v0,v2,v3]
+            all_faces.append([3, offset, offset + 1, offset + 2])
+            all_faces.append([3, offset, offset + 2, offset + 3])
             offset += 4
         if not all_pts:
             return pv.PolyData()
@@ -1181,10 +1221,9 @@ def visualize_from_cache(
             def _fm(amp):
                 all_pts, all_lines = [], []
                 offset = 0
-                for p1, p2, di, dj in segments:
+                for (p1, p2, di, dj), n in zip(segments, _seg_npoints):
                     a = p1 + di * scale * amp
                     b = p2 + dj * scale * amp
-                    n = max(2, int(np.linalg.norm(b - a) * 2))
                     pts = np.linspace(a, b, n)
                     all_pts.append(pts)
                     for i in range(n - 1):
@@ -1204,11 +1243,18 @@ def visualize_from_cache(
                     a3 = p3 + d3 * scale * amp
                     a4 = p4 + d4 * scale * amp
                     all_pts.extend([a1, a2, a3, a4])
-                    all_faces.append([4, offset, offset+1, offset+2, offset+3])
+                    all_faces.append([3, offset, offset + 1, offset + 2])
+                    all_faces.append([3, offset, offset + 2, offset + 3])
                     offset += 4
                 if not all_pts:
                     return pv.PolyData()
                 return pv.PolyData(np.vstack(all_pts), np.array(all_faces, dtype=int))
+
+            # Pre-compute stable frame line point counts
+            _seg_npoints = []
+            for p1, p2, _, _ in segments:
+                n = max(2, int(np.linalg.norm(p2 - p1) * 2))
+                _seg_npoints.append(n)
 
             if not segments and not quads:
                 print(f"  Mode {idx + 1}: no matching geometry to render")
@@ -1521,6 +1567,19 @@ def run_all(s2k_path: str,
     # ── Pre-processing ────────────────────────────────────────────
     print("\n--- Pre-processing (mesh, split, constraints) ---")
     pp = preprocess_model(md)
+
+    # Re-check for floating nodes — meshing marks original areas as
+    # inactive, leaving their corner nodes orphaned.  These nodes have
+    # mass (from mass source) but no stiffness, causing a singular
+    # stiffness matrix.
+    floated2 = remove_floating_nodes(md)
+    if len(floated2) > 0:
+        results.setdefault("floating_nodes", pd.DataFrame())
+        results["floating_nodes"] = pd.concat(
+            [results["floating_nodes"], floated2], ignore_index=True)
+        print(f"  ⚠ {len(floated2)} post-mesh floating node(s) removed:")
+        for _, row in floated2.iterrows():
+            print(f"    Node {row['node_id']} → {row['nearest_node']}")
     results["preprocessing"] = pp
     print(f"  Areas: {pp['area_elements']['before']} → {pp['area_elements']['after']}")
     print(f"  Frames: {pp['frame_elements']['before']} → {pp['frame_elements']['after']}")
@@ -1687,6 +1746,10 @@ def main():
                      "CLP_BSDG_Latest_Models/Admin_Building/"
                      "Admin_0.7E_short term.s2k")
 
+    # Auto-enable cache when animation is requested, so subsequent
+    # --from-cache calls can re-animate without re-running the analysis.
+    auto_cache = args.cache or args.animate or args.gif
+
     results = run_all(
         s2k_path,
         num_modes=args.num_modes,
@@ -1696,7 +1759,7 @@ def main():
                          else (True if args.animate or args.gif else False),
         save_gif=args.gif,
         eigen_solver=args.solver,
-        cache=args.cache,
+        cache=auto_cache,
     )
 
     # ── Summary printout ──────────────────────────────────────────
