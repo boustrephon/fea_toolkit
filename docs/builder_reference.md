@@ -155,6 +155,100 @@ manual config change is needed.
 
 ---
 
+---
+
+## Per-type stiffness factors (ACI 318 cracked-section simulation)
+
+The ``stiffness_factors`` config option lets you apply different
+Young's modulus reduction factors to different structural element
+types, simulating cracked-section stiffness per **ACI 318-19
+Table 6.6.3.1.1(a)**.
+
+### Usage
+
+```python
+config = {
+    'stiffness_factors': {
+        'beam':   0.35,  # flexural members
+        'column': 0.70,  # compression members
+        'brace':  0.50,  # diagonal braces (no ACI guidance — conservative)
+        'wall':   0.70,  # structural walls
+        'slab':   0.25,  # two-way slabs
+    },
+}
+```
+
+Set to ``None`` (default) or an empty dict for gross (uncracked)
+stiffness on all elements.
+
+### What it does
+
+1. **Classifies** every frame element as ``beam``, ``column``, or ``brace``
+   based on its end-node geometry (see below).
+2. **Classifies** every area element as ``slab`` or ``wall`` based on
+   whether all corner nodes share the same Z coordinate.
+3. **Creates separate OpenSees section definitions** for each
+   ``(section_name, element_type)`` pair, with ``E_mod`` scaled by the
+   type's factor.  This means the same SAP2000 section (e.g. ``400*500``)
+   used for both beams and columns gets two different OpenSees section
+   tags with different ``E_mod`` values.
+
+   * For **frame sections**, the SAP2000 section modifiers (I2Mod, I3Mod,
+     etc.) are applied **on top** of the scaled E_mod.
+   * For **shell sections**, the factor is applied when creating the
+     ``ElasticMembranePlateSection``.
+
+### Interaction with SAP2000 stiffness modifiers
+
+SAP2000 section-level modifiers (I3Mod, I2Mod, AMod, JMod) scale the
+section's geometric properties **independently** of the material E_mod.
+The two effects stack multiplicatively:
+
+$$EI_{\text{effective}} = E_{\text{gross}} \times \underbrace{\text{ACI factor}}_{\text{stiffness\_factors}} \times I_{\text{gross}} \times \underbrace{\text{I3Mod}}_{\text{SAP2000 modifier}}$$
+
+| Component | Source | Example |
+|-----------|--------|---------|
+| $E_{\text{gross}}$ | Material property (C30 → 30 GPa) | 30 GPa |
+| ACI factor | ``stiffness_factors`` dict | 0.35 (beam) |
+| $I_{\text{gross}}$ | Section property (400×500 → 4.17e9 mm⁴) | 4.17e9 |
+| I3Mod | SAP2000 FRAME SECTION PROPERTIES 01 table | 0.50 |
+
+For a concrete beam with I3Mod = 0.5 and ``beam: 0.35``:
+
+$$EI_{\text{effective}} = 30\,\text{GPa} \times 0.35 \times I_{\text{gross}} \times 0.50
+= 5.25\,\text{GPa} \cdot I_{\text{gross}}$$
+
+Each OpenSees section variant is an independent ``ops.section()`` call
+with its own tag — there is **no double-counting**.  The base section
+(gross stiffness) and the variant (reduced stiffness) are separate
+definitions; elements reference one or the other.
+
+**Material-type filtering** — the ACI factor is applied **only** to
+sections whose material type is ``'Concrete'``.  Steel, rebar, tendon,
+and brick elements retain their gross stiffness regardless of the
+``stiffness_factors`` dict.  This matches the intent of ACI 318
+cracked-section provisions, which apply to reinforced concrete members
+only.
+
+### Classification rules
+
+| Type | Criterion |
+|------|-----------|
+| **Column** | Frame where vertical span > 4× the resultant horizontal span: \\|Δz\\| > 4 · √(Δx² + Δy²) |
+| **Brace** | Diagonal frame that is neither beam nor column (both Δh > 0.01 and Δz > 0.01) |
+| **Beam** | Any other frame element |
+| **Slab** | Area element whose *all* corner nodes lie within 0.02 length units of the mean Z |
+| **Wall** | Any other area element |
+
+### Typical ACI 318-19 factors
+
+| Type | Factor | Notes |
+|------|--------|-------|
+| Beams | 0.35 | Table 6.6.3.1.1(a) — beams |
+| Columns | 0.70 | Table 6.6.3.1.1(a) — columns |
+| Walls (cracked) | 0.70 | Table 6.6.3.1.1(a) — walls; some practitioners use 0.50 |
+| Slabs (two-way) | 0.25 | Table 6.6.3.1.1(a) — flat plates / slabs |
+
 ### 5. Solver requirements
 
 The ``equationConstraint`` command requires the **Penalty** (or
