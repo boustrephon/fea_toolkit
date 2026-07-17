@@ -14,6 +14,7 @@ opstool ODB.
 | `s2k_parser.py` | SAP2000 `.s2k` / JSON model parser |
 | `report.py` | Tabular report formatting (modal table, linear results, etc.) |
 | `helper.py` | Misc I/O utilities |
+| `log.py` | ``ModelLog`` — structured diagnostic logging to ``.log.json`` files and optional ``.log.py`` visualisation scripts |
 | `npz_parent_map.md` | Parent-child hierarchy docs |
 
 ## The NPZ Schema (`results.npz`)
