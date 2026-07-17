@@ -1448,6 +1448,41 @@ def apply_frame_end_offsets(
 # Area meshing — subdivide area quads into a grid of smaller shell elements
 # ============================================================================
 
+
+def _point_uv_on_quad(
+    pt: np.ndarray,
+    corners: List[np.ndarray],
+) -> Tuple[float, float]:
+    """Estimate parametric (u, v) of *pt* on a bilinear quad.
+
+    Uses Newton iteration on the bilinear surface
+    ``p(u,v) = (1-v)[(1-u)c0 + u*c1] + v[(1-u)c3 + u*c2]``.
+
+    Returns:
+        ``(u, v)`` clamped to ``[0, 1]``.
+    """
+    c0, c1, c2, c3 = corners
+    u, v = 0.5, 0.5
+    for _ in range(20):
+        top = c0 * (1.0 - u) + c1 * u
+        bot = c3 * (1.0 - u) + c2 * u
+        p = top * (1.0 - v) + bot * v
+        dp_du = (c1 - c0) * (1.0 - v) + (c2 - c3) * v
+        dp_dv = bot - top
+        r = p - pt
+        J = np.column_stack([dp_du, dp_dv])  # (3, 2)
+        JTJ = J.T @ J
+        try:
+            delta = np.linalg.solve(JTJ, -J.T @ r)
+        except np.linalg.LinAlgError:
+            break
+        u = float(np.clip(u + delta[0], 0.0, 1.0))
+        v = float(np.clip(v + delta[1], 0.0, 1.0))
+        if float(np.linalg.norm(delta)) < 1e-8:
+            break
+    return u, v
+
+
 def mesh_area_elements(
     area_elements: Dict[str, AreaElement],
     area_assignments: Dict[str, str],
@@ -1626,17 +1661,82 @@ def mesh_area_elements(
                 f"max_size={mesh.max_size}). Increase max_size."
             )
 
+        # ── Check for interior seed nodes (e.g. wall edge nodes that ──
+        # ── lie inside this slab area).  When found, switch to an    ──
+        # ── irregular subdivision so the mesh passes through them.   ──
+        interior_seeds: List[Tuple[float, float]] = []  # (u, v)
+        _corner_set = set(corner_ids)
+        # Reverse map from _coord_to_id to check seeded nodes
+        seeded_ids = set(_coord_to_id.values())
+        for nid in seeded_ids:
+            if nid in _corner_set:
+                continue
+            nd_ref = nodes.get(nid)
+            if nd_ref is None:
+                continue
+            pos = np.array([nd_ref.x, nd_ref.y, nd_ref.z], dtype=float)
+            u, v = _point_uv_on_quad(pos, corners)
+            # Classify position: corner / perimeter / interior
+            at_corner = (u <= 1e-6 or u >= 1.0 - 1e-6) and (v <= 1e-6 or v >= 1.0 - 1e-6)
+            on_perimeter = (not at_corner) and (
+                (v <= 1e-6 or v >= 1.0 - 1e-6) or (u <= 1e-6 or u >= 1.0 - 1e-6)
+            )
+            if at_corner:
+                continue
+            interior_seeds.append((u, v))
+
+        # Fold interior seeds into the division lists
+        if interior_seeds:
+            # Merge near-duplicates and sort
+            _tol_uv = 1e-6
+            u_vals = sorted(set(
+                [0.0, 1.0]
+                + [round(i / n_u, 8) for i in range(n_u + 1)]
+                + [s[0] for s in interior_seeds]
+            ))
+            v_vals = sorted(set(
+                [0.0, 1.0]
+                + [round(j / n_v, 8) for j in range(n_v + 1)]
+                + [s[1] for s in interior_seeds]
+            ))
+            # Deduplicate near-equal values
+            u_vals = [u_vals[0]] + [
+                u for u in u_vals[1:] if u - u_vals[u_vals.index(u) - 1] > _tol_uv
+            ]
+            v_vals = [v_vals[0]] + [
+                v for v in v_vals[1:] if v - v_vals[v_vals.index(v) - 1] > _tol_uv
+            ]
+            n_u = len(u_vals) - 1
+            n_v = len(v_vals) - 1
+            # Cap check
+            if n_u > MAX_SUBDIVIDE or n_v > MAX_SUBDIVIDE:
+                raise ValueError(
+                    f"Area {aid}: irregular subdivision {n_u}×{n_v} exceeds "
+                    f"maximum {MAX_SUBDIVIDE}. Reduce max_size or remove "
+                    f"interior seed nodes."
+                )
+            use_irregular = True
+        else:
+            u_vals = [i / n_u for i in range(n_u + 1)]
+            v_vals = [j / n_v for j in range(n_v + 1)]
+            use_irregular = False
+
         # Bilinear interpolation to create grid points
-        # Parametric coords (0..1) x (0..1) mapped to the quad
         grid = np.zeros((n_v + 1, n_u + 1, 3))
-        for j in range(n_v + 1):
-            v = j / n_v
-            for i in range(n_u + 1):
-                u = i / n_u
-                # Bilinear: blend corners
-                top = corners[0] * (1 - u) + corners[1] * u
-                bot = corners[3] * (1 - u) + corners[2] * u
-                grid[j, i] = top * (1 - v) + bot * v
+        if use_irregular:
+            for j, v in enumerate(v_vals):
+                for i, u in enumerate(u_vals):
+                    top = corners[0] * (1.0 - u) + corners[1] * u
+                    bot = corners[3] * (1.0 - u) + corners[2] * u
+                    grid[j, i] = top * (1.0 - v) + bot * v
+        else:
+            for j in range(n_v + 1):
+                v = j / n_v
+                for i in range(n_u + 1):
+                    u = i / n_u
+                    top = corners[0] * (1.0 - u) + corners[1] * u
+                    bot = corners[3] * (1.0 - u) + corners[2] * u
+                    grid[j, i] = top * (1.0 - v) + bot * v
 
         # Create new nodes for interior grid points (skip corners)
         node_grid = [[None] * (n_u + 1) for _ in range(n_v + 1)]
@@ -2588,3 +2688,364 @@ def find_constraint_edges(
         results.append((nids, master, slaves, ta, tb))
 
     return results
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Wall-slab intersection diagnostics and splitting
+# ═══════════════════════════════════════════════════════════════════════
+
+def find_wall_nodes_inside_slabs(
+    area_elements: Dict[str, 'AreaElement'],
+    area_assignments: Dict[str, str],
+    nodes: Dict[str, 'Node'],
+    z_tol: float = 0.5,
+) -> List[Dict[str, Any]]:
+    """Identify wall-area nodes that lie inside slab areas.
+
+    A *wall* is any area whose corners span more than *z_tol* in Z
+    (vertical orientation).  A *slab* is any area whose corners are all
+    within *z_tol* (horizontal orientation).
+
+    For each slab, this function finds all wall nodes that are on the
+    slab's Z plane and within the slab's XY bounding box but NOT at a
+    slab corner.  These are wall-to-slab connections that the regular
+    meshing pipeline may miss.
+
+    Args:
+        area_elements: ``{area_id: AreaElement}``.
+        area_assignments: ``{area_id: section_name}``.
+        nodes: ``{node_id: Node}``.
+        z_tol: Z-span threshold (same units as model) — areas with
+            Z-span ≤ *z_tol* are considered horizontal (slabs), those
+            with Z-span > *z_tol* are vertical (walls).
+
+    Returns:
+        List of dicts, one per wall-in-slab finding::
+
+            {
+                "slab_id": str,         # slab area ID
+                "wall_id": str,         # wall area ID
+                "nodes": [              # wall nodes inside the slab
+                    {
+                        "node_id": str,
+                        "node_tag": int,
+                        "x": float, "y": float, "z": float,
+                    }
+                ],
+                "slab_X": (float, float),   # slab X range
+                "slab_Y": (float, float),   # slab Y range
+                "slab_Z": float,             # slab Z level
+                "section": str,              # wall section name
+            }
+    """
+    # ── Classify areas ──────────────────────────────────────────
+    slab_ids: set = set()
+    wall_ids: set = set()
+    for aid, ae in area_elements.items():
+        if getattr(ae, 'inactive', False):
+            continue
+        nds = [nodes.get(n) for n in ae.node_ids]
+        nds = [n for n in nds if n is not None]
+        if len(nds) < 4:
+            continue
+        zs = [n.z for n in nds]
+        z_span = max(zs) - min(zs)
+        if z_span <= z_tol:
+            slab_ids.add(aid)
+        else:
+            wall_ids.add(aid)
+
+    if not slab_ids or not wall_ids:
+        return []
+
+    # ── Gather wall node coordinates ────────────────────────────
+    # Wall nodes that are at each wall's bottom Z (typically a slab level)
+    wall_nodes_at_z: Dict[float, List[Dict]] = defaultdict(list)
+    for wid in wall_ids:
+        ae = area_elements[wid]
+        for nid in ae.node_ids:
+            nd = nodes.get(nid)
+            if nd is None:
+                continue
+            wall_nodes_at_z[round(nd.z, 4)].append({
+                "node_id": nid,
+                "node_tag": nd.node_tag,
+                "x": nd.x, "y": nd.y, "z": nd.z,
+                "wall_id": wid,
+                "section": area_assignments.get(wid, ""),
+            })
+
+    if not wall_nodes_at_z:
+        return []
+
+    # ── Check each slab for interior wall nodes ─────────────────
+    findings: List[Dict[str, Any]] = []
+    for sid in slab_ids:
+        ae = area_elements[sid]
+        corner_nds = [nodes.get(n) for n in ae.node_ids if n in nodes]
+        corner_nds = [n for n in corner_nds if n is not None]
+        if len(corner_nds) < 4:
+            continue
+
+        xs = [n.x for n in corner_nds]
+        ys = [n.y for n in corner_nds]
+        zs = [n.z for n in corner_nds]
+        slab_z = round(sum(zs) / len(zs), 4)
+        x_min, x_max = min(xs), max(xs)
+        y_min, y_max = min(ys), max(ys)
+        margin = max((x_max - x_min), (y_max - y_min)) * 0.001
+
+        wall_node_set = wall_nodes_at_z.get(slab_z, [])
+        if not wall_node_set:
+            continue
+
+        interior: List[Dict] = []
+        seen_walls: set = set()
+        for wn in wall_node_set:
+            # Inside slab XY projection (not at corners)
+            if not (x_min - margin <= wn["x"] <= x_max + margin):
+                continue
+            if not (y_min - margin <= wn["y"] <= y_max + margin):
+                continue
+            # Skip slab corner nodes
+            is_corner = any(
+                abs(wn["x"] - cn.x) < margin and abs(wn["y"] - cn.y) < margin
+                for cn in corner_nds
+            )
+            if is_corner:
+                continue
+            interior.append(wn)
+            seen_walls.add(wn["wall_id"])
+
+        if not interior:
+            continue
+
+        for wid in sorted(seen_walls):
+            wall_nodes = [wn for wn in interior if wn["wall_id"] == wid]
+            findings.append({
+                "slab_id": sid,
+                "wall_id": wid,
+                "nodes": wall_nodes,
+                "slab_X": (x_min, x_max),
+                "slab_Y": (y_min, y_max),
+                "slab_Z": float(np.mean(zs)),
+                "section": wall_nodes[0]["section"],
+            })
+
+    return findings
+
+
+def print_wall_inside_slab_report(
+    findings: List[Dict[str, Any]],
+    file=None,
+) -> None:
+    """Print a human-readable report of wall-in-slab findings.
+
+    Args:
+        findings: Output from :func:`find_wall_nodes_inside_slabs`.
+        file: Output stream (default ``sys.stdout``).
+    """
+    n = len(findings)
+    if n == 0:
+        print("  No wall nodes found inside slab areas.", file=file)
+        return
+    print(f"  ⚠ {n} wall–slab intersection(s) detected:", file=file)
+    for f in findings:
+        sec = f["section"]
+        coords = "; ".join(
+            f"{wn['node_id']}({wn['x']:.1f},{wn['y']:.1f},{wn['z']:.2f})"
+            for wn in f["nodes"]
+        )
+        print(
+            f"    Wall {f['wall_id']:>4} ({sec}) inside slab {f['slab_id']:>4}\n"
+            f"      Nodes: {coords}\n"
+            f"      Slab bounds: X∈{f['slab_X']} Y∈{f['slab_Y']} Z={f['slab_Z']:.2f}",
+            file=file,
+        )
+
+
+def split_slabs_at_wall_intersections(
+    area_elements: Dict[str, 'AreaElement'],
+    area_assignments: Dict[str, str],
+    nodes: Dict[str, 'Node'],
+    next_tag: int = 1,
+    groups: Optional[Dict[str, 'Group']] = None,
+    z_tol: float = 0.5,
+) -> Tuple[Dict[str, 'AreaElement'], Dict[str, str], Dict[str, 'Node'], int]:
+    """Subdivide slab areas at wall-edge intersection lines.
+
+    Before the regular max_size-based meshing, this function detects
+    wall areas whose edge nodes fall inside slab areas and splits the
+    slab along those intersection lines.  The resulting sub-areas then
+    mesh naturally to share nodes with the wall at the interface.
+
+    This mirrors the pattern of :func:`split_areas_at_frame_edges` but
+    for wall-slab pairs instead of frame-slab pairs.
+
+    Args:
+        area_elements: ``{area_id: AreaElement}`` (modified in place).
+        area_assignments: ``{area_id: section_name}`` (modified in place).
+        nodes: ``{node_id: Node}`` — new interior nodes are added here.
+        next_tag: Next available numeric tag for new nodes.
+        groups: Optional ``{group_name: Group}`` — group memberships
+            propagated to sub-elements.
+        z_tol: Z-span threshold for wall vs slab classification.
+
+    Returns:
+        ``(area_elements, area_assignments, nodes, next_tag)`` with
+        subdivided slab areas added.
+    """
+    from .sap_data import Node as _Node, AreaElement as _AreaElement
+
+    # ── 1. Find intersections ───────────────────────────────────
+    findings = find_wall_nodes_inside_slabs(
+        area_elements, area_assignments, nodes, z_tol=z_tol,
+    )
+    if not findings:
+        return area_elements, area_assignments, nodes, next_tag
+
+    # ── 2. Group findings by slab ───────────────────────────────
+    # Each group: (slab_id, [(wall_id, wall_nodes), ...])
+    slab_groups: Dict[str, List[Tuple[str, List[Dict]]]] = defaultdict(list)
+    for f in findings:
+        slab_groups[f["slab_id"]].append((f["wall_id"], f["nodes"]))
+
+    # ── 3. For each slab, collect parametric split positions ────
+    for sid, wall_list in slab_groups.items():
+        elem = area_elements.get(sid)
+        if elem is None or getattr(elem, 'inactive', False):
+            continue
+        if len(elem.node_ids) != 4:
+            continue
+
+        # Slab corner coordinates (CCW)
+        corners_list = [nodes.get(n) for n in elem.node_ids if n in nodes]
+        if len(corners_list) != 4:
+            continue
+        # Ensure CCW ordering matching mesh_area_elements convention
+        c0 = np.array([corners_list[0].x, corners_list[0].y, corners_list[0].z])
+        c1 = np.array([corners_list[1].x, corners_list[1].y, corners_list[1].z])
+        c2 = np.array([corners_list[2].x, corners_list[2].y, corners_list[2].z])
+        c3 = np.array([corners_list[3].x, corners_list[3].y, corners_list[3].z])
+        corners_arr = [c0, c1, c2, c3]
+
+        # Get wall interior nodes as numpy arrays
+        interior_pts: List[np.ndarray] = []
+        for wid, wall_nodes in wall_list:
+            for wn in wall_nodes:
+                interior_pts.append(np.array([wn["x"], wn["y"], wn["z"]]))
+
+        if not interior_pts:
+            continue
+
+        # Compute parametric (u, v) for each interior point
+        u_vals: set = {0.0, 1.0}
+        v_vals: set = {0.0, 1.0}
+        for pt in interior_pts:
+            u, v = _point_uv_on_quad(pt, corners_arr)
+            if 1e-6 < u < 1.0 - 1e-6:
+                u_vals.add(round(u, 8))
+            if 1e-6 < v < 1.0 - 1e-6:
+                v_vals.add(round(v, 8))
+
+        if len(u_vals) <= 2 and len(v_vals) <= 2:
+            continue  # no interior splits needed
+
+        # Sort and deduplicate
+        u_list = sorted(u_vals)
+        v_list = sorted(v_vals)
+        _tol = 1e-6
+        u_list = [u_list[0]] + [u for u in u_list[1:] if u - u_list[u_list.index(u) - 1] > _tol]
+        v_list = [v_list[0]] + [v for v in v_list[1:] if v - v_list[v_list.index(v) - 1] > _tol]
+
+        n_u = len(u_list) - 1
+        n_v = len(v_list) - 1
+
+        # Bilinear grid at parametric positions
+        grid = np.zeros((n_v + 1, n_u + 1, 3))
+        for j, v in enumerate(v_list):
+            for i, u in enumerate(u_list):
+                top = c0 * (1.0 - u) + c1 * u
+                bot = c3 * (1.0 - u) + c2 * u
+                grid[j, i] = top * (1.0 - v) + bot * v
+
+        # Build coordinate cache
+        _pos_cache: Dict[str, np.ndarray] = {}
+        for nid, nd in nodes.items():
+            _pos_cache[nid] = np.array([nd.x, nd.y, nd.z])
+        for pt in interior_pts:
+            pass  # already in nodes
+
+        # Create grid nodes (reuse existing)
+        node_grid = [[None] * (n_u + 1) for _ in range(n_v + 1)]
+        corner_ids = list(elem.node_ids)
+        for j in range(n_v + 1):
+            for i in range(n_u + 1):
+                if i == 0 and j == 0:
+                    node_grid[j][i] = corner_ids[0]
+                    continue
+                if i == n_u and j == 0:
+                    node_grid[j][i] = corner_ids[1]
+                    continue
+                if i == n_u and j == n_v:
+                    node_grid[j][i] = corner_ids[2]
+                    continue
+                if i == 0 and j == n_v:
+                    node_grid[j][i] = corner_ids[3]
+                    continue
+                pt = grid[j, i]
+                # Reuse existing node within tolerance
+                found = None
+                for nid, npos in _pos_cache.items():
+                    if np.linalg.norm(npos - pt) < 1e-4:
+                        found = nid
+                        break
+                if found is not None:
+                    node_grid[j][i] = found
+                    continue
+                new_id = f"{sid}_wi_{j}_{i}"
+                new_tag = next_tag
+                next_tag += 1
+                nodes[new_id] = _Node(
+                    node_id=new_id, node_tag=new_tag,
+                    x=float(pt[0]), y=float(pt[1]), z=float(pt[2]),
+                )
+                _pos_cache[new_id] = np.array([pt[0], pt[1], pt[2]])
+                node_grid[j][i] = new_id
+
+        # Mark original slab inactive
+        elem.inactive = True
+
+        # Determine parent groups
+        parent_groups: List[str] = []
+        if groups is not None:
+            for gname, g in groups.items():
+                if f"Area:{sid}" in g.objects:
+                    parent_groups.append(gname)
+
+        # Create sub-areas (CCW ordering)
+        sec_name = area_assignments.get(sid, "")
+        for j in range(n_v):
+            for i in range(n_u):
+                sub_id = f"{sid}_wi_sub_{j}_{i}"
+                sub_tag = next_tag
+                next_tag += 1
+                n0 = node_grid[j][i]
+                n1 = node_grid[j][i + 1]
+                n2 = node_grid[j + 1][i + 1]
+                n3 = node_grid[j + 1][i]
+                area_elements[sub_id] = _AreaElement(
+                    area_id=sub_id, area_tag=sub_tag,
+                    node_ids=[n0, n1, n2, n3],
+                    thickness=elem.thickness,
+                    parent_id=sid,
+                )
+                elem.child_ids.append(sub_id)
+                if sec_name:
+                    area_assignments[sub_id] = sec_name
+                if parent_groups:
+                    sub_ref = f"Area:{sub_id}"
+                    for gname in parent_groups:
+                        groups[gname].objects.append(sub_ref)
+
+    return area_elements, area_assignments, nodes, next_tag
