@@ -615,6 +615,180 @@ def format_linear_table(df_linear: pd.DataFrame, units: dict) -> pd.DataFrame:
 
 
 # ========================================================================
+# Storey level summary
+# ========================================================================
+
+def storey_level_summary(md, z_tol: float = 0.01,
+                         print_results: bool = True) -> pd.DataFrame:
+    """Report storey (floor) levels inferred from the model's node Z‑coordinates.
+
+    Nodes are clustered by their Z coordinate.  For each level the
+    following is reported:
+
+    * **Level** – auto‑assigned label (Roof, Level N, Base / Ground).
+    * **Z** – elevation in model length units.
+    * **Nodes** – number of distinct nodes at that level.
+    * **Restrained** – nodes with at least one fixed DOF.
+    * **Diaph nodes** – nodes that would participate in a rigid floor
+      diaphragm (all *unrestrained* nodes at the level).
+    * **Horiz frames** – frame elements whose I‑node *and* J‑node lie at
+      this level (i.e. horizontal beams).
+    * **Horiz areas** – area elements whose *all* corner nodes lie at
+      this level (i.e. slabs / floors).
+
+    The printed table is a fixed‑width formatted view of the DataFrame.
+    Each row corresponds to one detected storey level, sorted top‑to‑bottom.
+    ``Horizontal`` means the element's nodes all lie at the same Z within
+    the grouping tolerance — frames spanning between levels (columns,
+    walls) are excluded, as are vertical or tilted area elements.  The
+    ``Diaph nodes`` column shows how many nodes would be tied together by
+    a rigid diaphragm at that level, which equals all unrestrained nodes
+    (restrained nodes are typically at the base and excluded from the
+    diaphragm).  A low frame or area count at a level may indicate a
+    mezzanine or partial floor; a zero count at the base is expected
+    since base nodes are individually restrained rather than
+    diaphragm‑connected.
+
+    This is useful whenever storey levels are inferred rather than
+    explicitly provided by the analysis model.
+
+    Args:
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
+        z_tol: Tolerance (in model length units) for grouping Z
+            coordinates (default 0.01).
+        print_results: If True (default), print the table to stdout.
+
+    Returns:
+        A :class:`pandas.DataFrame` sorted top‑to‑bottom.
+    """
+    from collections import Counter
+
+    # ── 1. Cluster nodes by Z ──────────────────────────────────────────
+    z_levels = {}
+    for nid, nd in md.nodes.items():
+        zkey = round(nd.z / z_tol) * z_tol  # snap to grid
+        z_levels.setdefault(zkey, []).append(nid)
+
+    # Sort descending (roof first)
+    sorted_zs = sorted(z_levels, reverse=True)
+
+    # ── 2. Assign level labels ─────────────────────────────────────────
+    # We try to give reasonable labels based on position in sorted list.
+    n_levels = len(sorted_zs)
+    level_labels = {}
+    for i, z in enumerate(sorted_zs):
+        if i == 0:
+            level_labels[z] = "Roof"
+        elif i == n_levels - 1:
+            level_labels[z] = "Base / Ground"
+        else:
+            level_labels[z] = f"Level {n_levels - i - 1}"
+
+    # ── 3. Pre‑compute restrained node set ─────────────────────────────
+    restrained_set = set()
+    for nid, r in md.restraints.items():
+        if any(d == 1 for d in r.dofs):
+            restrained_set.add(nid)
+
+    # ── 4. Classify horizontal frames (beams) ──────────────────────────
+    # A frame is "horizontal" if |Z_i - Z_j| < z_tol.  Assign it to the
+    # Z level that matches both endpoints.
+    level_horiz_frames = {z: set() for z in sorted_zs}
+    for eid, elem in md.frame_elements.items():
+        ni = md.nodes.get(elem.node_i)
+        nj = md.nodes.get(elem.node_j)
+        if ni is None or nj is None:
+            continue
+        if abs(ni.z - nj.z) >= z_tol:
+            continue  # not horizontal
+        zkey = round(ni.z / z_tol) * z_tol
+        if zkey in level_horiz_frames:
+            level_horiz_frames[zkey].add(eid)
+        else:
+            # fallback: assign to nearest level
+            nearest = min(sorted_zs, key=lambda z: abs(z - zkey))
+            level_horiz_frames[nearest].add(eid)
+
+    # ── 5. Classify horizontal areas (slabs) ───────────────────────────
+    # An area is "horizontal" if all its corner nodes span ≤ z_tol in Z.
+    level_horiz_areas = {z: set() for z in sorted_zs}
+    for aid, area in md.area_elements.items():
+        zs = []
+        for nid in area.node_ids:
+            nd = md.nodes.get(nid)
+            if nd is None:
+                break
+            zs.append(nd.z)
+        if len(zs) < 3:
+            continue  # requires at least 3 nodes
+        if max(zs) - min(zs) >= z_tol:
+            continue  # not horizontal
+        zkey = round(sum(zs) / len(zs) / z_tol) * z_tol
+        if zkey in level_horiz_areas:
+            level_horiz_areas[zkey].add(aid)
+        else:
+            nearest = min(sorted_zs, key=lambda z: abs(z - zkey))
+            level_horiz_areas[nearest].add(aid)
+
+    # ── 6. Assemble table ──────────────────────────────────────────────
+    rows = []
+    for z in sorted_zs:
+        node_ids = z_levels[z]
+        n_nodes = len(node_ids)
+        n_restrained = sum(1 for nid in node_ids if nid in restrained_set)
+        n_horiz_frames = len(level_horiz_frames[z])
+        n_horiz_areas = len(level_horiz_areas[z])
+        # Diaphragm nodes = all unrestrained nodes at this level
+        diaph_nodes = [nid for nid in node_ids if nid not in restrained_set]
+        n_diaph = len(diaph_nodes)
+
+        rows.append({
+            "Level": level_labels[z],
+            "Z": round(z, 3),
+            "Nodes": n_nodes,
+            "Restrained": n_restrained,
+            "Diaph nodes": n_diaph,
+            "Horiz frames": n_horiz_frames,
+            "Horiz areas": n_horiz_areas,
+        })
+
+    df = pd.DataFrame(rows)
+
+    if print_results:
+        # Use a clean formatted print
+        col_widths = {
+            "Level": max(len("Level"), *(len(str(r["Level"])) for r in rows)),
+            "Z": 8,
+            "Nodes": 6,
+            "Restrained": 11,
+            "Diaph nodes": 12,
+            "Horiz frames": 13,
+            "Horiz areas": 12,
+        }
+        sep = "  ".join("=" * w for w in col_widths.values())
+        header = "  ".join(f"{k:<{col_widths[k]}}" for k in col_widths)
+        print(sep)
+        print(header)
+        print(sep)
+        for r in rows:
+            row = (
+                f"{r['Level']:<{col_widths['Level']}}  "
+                f"{r['Z']:>8.3f}  "
+                f"{r['Nodes']:>6}  "
+                f"{r['Restrained']:>11}  "
+                f"{r['Diaph nodes']:>12}  "
+                f"{r['Horiz frames']:>13}  "
+                f"{r['Horiz areas']:>12}"
+            )
+            print(row)
+        print(sep)
+        print(f"\n{len(sorted_zs)} storey levels detected "
+              f"(Z tolerance = {z_tol}).")
+
+    return df
+
+
+# ========================================================================
 # Euler buckling check for braces
 # ========================================================================
 
