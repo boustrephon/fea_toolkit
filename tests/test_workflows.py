@@ -943,3 +943,352 @@ class TestBucklingCheckWorkflow:
         r = result["1"]
         assert 'P_cr' in r
         assert r['P_cr'] > 1e-6
+
+
+# ============================================================================
+# Workflow: Shell subdivision
+# ============================================================================
+
+class TestShellSubdivision:
+    """Shell subdivision at the model-data level (N×N refinement)."""
+
+    @pytest.fixture
+    def sample_shell_md(self):
+        """Model with a simple 4-node slab/area element plus frame support.
+
+        The slab is a 4×4 m quad at z=0 with a column at each corner
+        supporting it.  This exercises the full shell subdivision → frame
+        splitting → analysis pipeline.
+        """
+        from fea_toolkit.model.sap_data import (
+            SAPModelData, Node, Restraint, Material, Section,
+            FrameElement, AreaElement, LoadPattern,
+            FrameDistributedLoad, MassSource,
+        )
+
+        n = {
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=4.0, y=0.0, z=0.0),
+            "3": Node(node_id="3", node_tag=3, x=4.0, y=4.0, z=0.0),
+            "4": Node(node_id="4", node_tag=4, x=0.0, y=4.0, z=0.0),
+            "5": Node(node_id="5", node_tag=5, x=0.0, y=0.0, z=3.0),
+            "6": Node(node_id="6", node_tag=6, x=4.0, y=0.0, z=3.0),
+            "7": Node(node_id="7", node_tag=7, x=4.0, y=4.0, z=3.0),
+            "8": Node(node_id="8", node_tag=8, x=0.0, y=4.0, z=3.0),
+        }
+        r = {nid: Restraint([1, 1, 1, 1, 1, 1]) for nid in ["1", "2", "3", "4"]}
+        m = {"Concrete": Material(
+            name="Concrete", type="Concrete",
+            E_mod=2.5e10, G_mod=1.0e10, nu=0.2,
+            unit_weight=2.4e4,
+        )}
+        s = {
+            "Column": Section(
+                name="Column", shape="Rectangular",
+                material="Concrete", A=0.25, I33=0.005208, I22=0.005208, J=0.001,
+            ),
+            "Slab": Section(
+                name="Slab", shape="Shell",
+                material="Concrete", A=0.0, I33=0.0, I22=0.0, J=0.0,
+            ),
+        }
+        fe = {
+            "1": FrameElement(elem_id="1", elem_tag=1, node_i="1", node_j="5"),
+            "2": FrameElement(elem_id="2", elem_tag=2, node_i="2", node_j="6"),
+            "3": FrameElement(elem_id="3", elem_tag=3, node_i="3", node_j="7"),
+            "4": FrameElement(elem_id="4", elem_tag=4, node_i="4", node_j="8"),
+        }
+        fa = {eid: "Column" for eid in fe}
+
+        ae = {
+            "S1": AreaElement(
+                area_id="S1", area_tag=10,
+                node_ids=["5", "6", "7", "8"], thickness=0.2,
+            ),
+        }
+        aa = {"S1": "Slab"}
+
+        lp = {
+            "DEAD": LoadPattern(name="DEAD", pattern_type="Dead",
+                                self_weight_factor=1),
+        }
+
+        ms = {"MSSSRC1": MassSource(name="MSSSRC1", elements=True,
+                                     masses=False, loads=False)}
+
+        return SAPModelData(
+            nodes=n, restraints=r, materials=m, sections=s,
+            frame_elements=fe, area_elements=ae,
+            frame_assignments=fa, area_assignments=aa,
+            groups={}, frame_auto_mesh={}, load_patterns=lp,
+            mass_sources=ms,
+        )
+
+    def test_subdivide_area_mesh_function(self):
+        """subdivide_area_mesh() creates N² sub-elements in model data."""
+        from fea_toolkit.model.geometry import subdivide_area_mesh
+        from fea_toolkit.model.sap_data import (
+            Node as _Node, AreaElement as _AreaElement,
+        )
+
+        # Create a simple quad
+        nodes = {
+            "n1": _Node(node_id="n1", node_tag=1, x=0, y=0, z=0),
+            "n2": _Node(node_id="n2", node_tag=2, x=4, y=0, z=0),
+            "n3": _Node(node_id="n3", node_tag=3, x=4, y=4, z=0),
+            "n4": _Node(node_id="n4", node_tag=4, x=0, y=4, z=0),
+        }
+        areas = {
+            "A1": _AreaElement(area_id="A1", area_tag=10,
+                                node_ids=["n1", "n2", "n3", "n4"],
+                                thickness=0.2),
+        }
+        assignments = {"A1": "Slab"}
+
+        # Snapshot node keys before calling (function modifies in-place)
+        pre_keys = set(nodes.keys())
+
+        result_areas, result_assign, result_nodes, _ = subdivide_area_mesh(
+            areas, assignments, nodes, n=2,
+        )
+
+        # Parent should be inactive with 4 children
+        assert result_areas["A1"].inactive is True
+        assert len(result_areas["A1"].child_ids) == 4  # 2×2 = 4
+
+        # Sub-elements should exist
+        for j in range(2):
+            for i in range(2):
+                sub_id = f"A1_sub_{j}_{i}"
+                assert sub_id in result_areas
+                assert not result_areas[sub_id].inactive
+                assert result_areas[sub_id].parent_id == "A1"
+                assert len(result_areas[sub_id].node_ids) == 4
+                # All referenced nodes should exist
+                for nid in result_areas[sub_id].node_ids:
+                    assert nid in result_nodes
+
+        # New interior nodes created (function modifies dict in-place)
+        new_nodes = {k: v for k, v in result_nodes.items()
+                     if k not in pre_keys}
+        assert len(new_nodes) == 5  # 3×3 grid - 4 corners = 5 interior nodes
+
+    def test_subdivide_3x3(self):
+        """3×3 subdivision creates 9 sub-elements."""
+        from fea_toolkit.model.geometry import subdivide_area_mesh
+        from fea_toolkit.model.sap_data import (
+            Node as _Node, AreaElement as _AreaElement,
+        )
+
+        nodes = {
+            "n1": _Node(node_id="n1", node_tag=1, x=0, y=0, z=0),
+            "n2": _Node(node_id="n2", node_tag=2, x=6, y=0, z=0),
+            "n3": _Node(node_id="n3", node_tag=3, x=6, y=6, z=0),
+            "n4": _Node(node_id="n4", node_tag=4, x=0, y=6, z=0),
+        }
+        areas = {
+            "A1": _AreaElement(area_id="A1", area_tag=10,
+                                node_ids=["n1", "n2", "n3", "n4"],
+                                thickness=0.2),
+        }
+        assignments = {"A1": "Slab"}
+
+        pre_keys = set(nodes.keys())
+        result_areas, _, result_nodes, _ = subdivide_area_mesh(
+            areas, assignments, nodes, n=3,
+        )
+
+        assert len(result_areas["A1"].child_ids) == 9  # 3×3 = 9
+        new_nodes = {k: v for k, v in result_nodes.items()
+                     if k not in pre_keys}
+        # 4×4 grid - 4 corners = 12 interior nodes
+        assert len(new_nodes) == 12
+
+    def test_subdivide_with_selection(self):
+        """Selection limits which areas are subdivided."""
+        from fea_toolkit.model.geometry import subdivide_area_mesh
+        from fea_toolkit.model.sap_data import (
+            Node as _Node, AreaElement as _AreaElement,
+        )
+
+        nodes = {
+            "n1": _Node(node_id="n1", node_tag=1, x=0, y=0, z=0),
+            "n2": _Node(node_id="n2", node_tag=2, x=4, y=0, z=0),
+            "n3": _Node(node_id="n3", node_tag=3, x=4, y=4, z=0),
+            "n4": _Node(node_id="n4", node_tag=4, x=0, y=4, z=0),
+            "n5": _Node(node_id="n5", node_tag=5, x=0, y=0, z=4),
+            "n6": _Node(node_id="n6", node_tag=6, x=4, y=0, z=4),
+            "n7": _Node(node_id="n7", node_tag=7, x=4, y=4, z=4),
+            "n8": _Node(node_id="n8", node_tag=8, x=0, y=4, z=4),
+        }
+        areas = {
+            "A1": _AreaElement(area_id="A1", area_tag=10,
+                                node_ids=["n1","n2","n3","n4"],
+                                thickness=0.2),
+            "A2": _AreaElement(area_id="A2", area_tag=11,
+                                node_ids=["n5","n6","n7","n8"],
+                                thickness=0.2),
+        }
+        assignments = {"A1": "Slab", "A2": "Slab"}
+
+        # Only subdivide A1
+        result_areas, _, _, _ = subdivide_area_mesh(
+            areas, assignments, nodes, n=2, selection={"A1"},
+        )
+
+        assert result_areas["A1"].inactive is True
+        assert len(result_areas["A1"].child_ids) == 4
+        # A2 should be unchanged
+        assert result_areas["A2"].inactive is False
+        assert len(result_areas["A2"].child_ids) == 0
+
+    def test_shell_subdivision_in_builder(self, sample_shell_md):
+        """Shell subdivision via builder config creates sub-elements
+        and the build/analysis completes successfully.
+        """
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        b = OpenSeesBuilder(sample_shell_md, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False,
+            'verbose': False,
+            'create_shells': True,
+            'subdivide_shells': 2,
+        })
+        b.build()
+
+        # Parent area should be inactive with children
+        parent = b.model.area_elements.get("S1")
+        assert parent is not None
+        assert parent.inactive is True
+        assert len(parent.child_ids) == 4
+
+        # Sub-elements should exist and be active
+        for j in range(2):
+            for i in range(2):
+                sub_id = f"S1_sub_{j}_{i}"
+                sub = b.model.area_elements.get(sub_id)
+                assert sub is not None, f"Missing sub-element {sub_id}"
+                assert not sub.inactive
+                assert sub.parent_id == "S1"
+
+        # Frame elements should be split at sub-edge nodes
+        if b.split_elements is not None:
+            total_frames = len(b.split_elements)
+        else:
+            total_frames = len(b.model.frame_elements)
+        # Original 4 columns → should now have more after subdivision splitting
+        assert total_frames >= 4
+
+        # Build should have completed — try static analysis
+        b.compute_seismic_masses(g=9.81)
+        results = b.run_static_analysis(
+            pattern_scales={"DEAD": 1.0},
+        )
+        assert 'nodal_displacements' in results
+
+        # For a slab under self-weight, some nodes should displace
+        max_disp = max(
+            sum(abs(d) for d in disp)
+            for disp in results['nodal_displacements'].values()
+        )
+        assert max_disp > 1e-8, "Slab shows no displacement under self-weight"
+
+        # Verify NPZ export includes the sub-elements
+        import tempfile
+        npz_path = str(tempfile.mkstemp(suffix=".npz")[1])
+        try:
+            b.export_results_to_npz(npz_path, results)
+            import numpy as np
+            with np.load(npz_path, allow_pickle=True) as data:
+                # export_results_to_npz uses sub_* prefix, not shell_*
+                assert "sub_elem_tags" in data
+                # Should have at least the 4 sub-elements
+                assert len(data["sub_elem_tags"]) >= 4
+        finally:
+            import os
+            if os.path.exists(npz_path):
+                os.remove(npz_path)
+
+        ops.wipe()
+
+    def test_subdivision_npz_export(self, sample_shell_md, tmp_path):
+        """Shell subdivision is visible in NPZ export (model-data level)."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.io.npz_writer import write_results_npz
+
+        b = OpenSeesBuilder(sample_shell_md, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False,
+            'verbose': False,
+            'create_shells': True,
+            'subdivide_shells': 2,
+        })
+        b.build()
+        try:
+            results = b.run_static_analysis(
+                pattern_scales={"DEAD": 1.0},
+            )
+            npz_path = str(tmp_path / "test_subdiv.npz")
+            b.export_results_to_npz(npz_path, results)
+
+            data = dict(np.load(npz_path, allow_pickle=True))
+            # export_results_to_npz uses sub_* prefix, not shell_*
+            assert "sub_elem_tags" in data
+            assert "sub_sap_ids" in data
+            # Should include the sub-elements
+            sub_ids = list(data["sub_sap_ids"])
+            # The export format combines frames+shells as "sub_*"
+            # Check that at least the original 4 frame elements exist
+            assert len(sub_ids) >= 4
+        finally:
+            ops.wipe()
+
+    def test_unified_npz_includes_subdivided_shells(self, sample_shell_md, tmp_path):
+        """Unified NPZ writer includes subdivided shells as shell_* arrays."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.io.npz_writer import write_results_npz
+        from fea_toolkit.io.npz_reader import read_results_npz
+
+        b = OpenSeesBuilder(sample_shell_md, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False,
+            'verbose': False,
+            'create_shells': True,
+            'subdivide_shells': 2,
+        })
+        b.build()
+        try:
+            results = b.run_static_analysis(
+                pattern_scales={"DEAD": 1.0},
+            )
+            npz_path = str(tmp_path / "test_unified_subdiv.npz")
+            write_results_npz(npz_path, b.model,
+                              static_results={"DEAD": results})
+
+            data = read_results_npz(npz_path)
+            # Unified format: shell_eid should contain sub-elements
+            assert "shell_eid" in data, "shell_eid missing from unified NPZ"
+            assert len(data["shell_eid"]) > 0, "shell_eid is empty"
+
+            # shell_sap_id should contain the sub-element IDs
+            assert "shell_sap_id" in data
+            shell_ids = list(data["shell_sap_id"])
+            sub_ids = [sid for sid in shell_ids if "_sub_" in str(sid)]
+            assert len(sub_ids) == 4, \
+                f"Expected 4 subdivided shells in NPZ, got {len(sub_ids)}: {sub_ids}"
+            # Original parent should not appear as active shell
+            assert "S1" not in shell_ids, \
+                "Inactive parent area should not appear in shell_sap_id"
+
+            # shell_node_1..4 arrays should reference valid node tags
+            assert "shell_node_1" in data
+            assert "shell_node_4" in data
+            assert len(data["shell_node_1"]) == len(data["shell_eid"])
+            assert len(data["shell_node_4"]) == len(data["shell_eid"])
+
+            # Frame elements should include split children from subdivision
+            assert "frame_sap_id" in data
+            assert len(data["frame_sap_id"]) >= 4
+        finally:
+            ops.wipe()

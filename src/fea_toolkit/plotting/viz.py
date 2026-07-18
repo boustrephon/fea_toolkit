@@ -236,6 +236,67 @@ def plot_model_3d(
     if color_by_section and len(all_secs) > 1:
         plotter.add_legend()
 
+    # ── Shell / area elements ────────────────────────────────────
+    # Active (sub-)elements: solid with section colours.
+    # Inactive parents: grey wireframe (original SAP data overlay).
+    if builder.model.area_elements:
+        # Collect active and inactive areas
+        active_quads: Dict[str, list] = {}   # sec_name → [quad points]
+        inactive_quads: list = []             # parent quads (grey overlay)
+
+        for aid, area in builder.model.area_elements.items():
+            if len(area.node_ids) < 3:
+                continue
+            nids = area.node_ids[:4]
+            pts = []
+            for nid in nids:
+                nd = builder.model.nodes.get(nid)
+                if nd is None:
+                    break
+                pts.append([nd.x, nd.y, nd.z])
+            if len(pts) < 3:
+                continue
+            # Pad triangle to quad
+            while len(pts) < 4:
+                pts.append(pts[-1])
+
+            is_inactive = getattr(area, 'inactive', False)
+            if is_inactive:
+                inactive_quads.append(np.array(pts))
+            else:
+                sec_name = builder.model.area_assignments.get(aid, 'unknown')
+                active_quads.setdefault(sec_name, []).append(np.array(pts))
+
+        # Render inactive (parent) quads as grey wireframe — Approach B
+        if inactive_quads:
+            for quad_pts in inactive_quads:
+                face = pv.PolyData(quad_pts, faces=[4, 0, 1, 2, 3])
+                plotter.add_mesh(face, color='lightgrey', opacity=0.15,
+                                 show_edges=True, edge_color='grey',
+                                 line_width=0.5)
+
+        # Render active (sub-element) quads with section colours
+        if active_quads:
+            _shell_secs = sorted(active_quads.keys())
+            _shell_cmap = [
+                '#4c72b0', '#dd8452', '#55a868', '#c44e52', '#8172b3',
+                '#937860', '#da8bc3', '#8c8c8c', '#ccb974', '#64b5cd',
+            ]
+            _shell_colour = {s: _shell_cmap[i % len(_shell_cmap)]
+                            for i, s in enumerate(_shell_secs)}
+
+            for sec_name, quads in active_quads.items():
+                colour = _shell_colour.get(sec_name, '#4c72b0')
+                for quad_pts in quads:
+                    # Triangulate quad for robust rendering
+                    t1 = [3, 0, 1, 2]
+                    t2 = [3, 0, 2, 3]
+                    face = pv.PolyData(quad_pts, faces=t1 + t2)
+                    plotter.add_mesh(face, color=colour, opacity=0.6,
+                                     show_edges=True, edge_color=colour,
+                                     line_width=1.0,
+                                     label=sec_name if color_by_section else None)
+
     # Add nodes
     if show_nodes:
         node_pts = np.array([
@@ -552,11 +613,11 @@ def plot_mode_3d(
     from collections import defaultdict
     shell_groups: Dict[str, list] = defaultdict(list)
     # section_name -> (p1, p2, p3, p4, d1, d2, d3, d4)
+    inactive_shell_quads: List[list] = []  # parent quads for grey overlay
     for aid, area in builder.model.area_elements.items():
-        if getattr(area, 'inactive', False):
-            continue
         if len(area.node_ids) < 3:
             continue
+        is_inactive = getattr(area, 'inactive', False)
         sec_name = builder.model.area_assignments.get(aid, 'unknown')
         nids = area.node_ids[:4]  # at most 4 for a quad
         pts = []
@@ -569,7 +630,10 @@ def plot_mode_3d(
             pts.append(np.array([nd.x, nd.y, nd.z]))
             ds.append(np.array(disp.get(tag, (0, 0, 0))))
         if len(pts) == 4:
-            shell_groups[sec_name].append(pts + ds)
+            if is_inactive:
+                inactive_shell_quads.append(pts)  # no displacements for parents
+            else:
+                shell_groups[sec_name].append(pts + ds)
 
     if not segments and not shell_groups:
         print("No elements to display.")
@@ -597,14 +661,12 @@ def plot_mode_3d(
             n = max(2, int(np.linalg.norm(p2 - p1) * 2))
             poly = pv.lines_from_points(np.linspace(p1, p2, n))
             plotter.add_mesh(poly, color='lightgrey', line_width=2, opacity=0.3)
-        # Undeformed shells — triangulate each quad for robustness
-        for sec_name, quads in shell_groups.items():
-            for quad in quads:
-                p1, p2, p3, p4 = quad[:4]
-                t1, t2 = _tri_quad(0, 1, 2, 3)
-                face = pv.PolyData([p1, p2, p3, p4], faces=t1 + t2)
-                plotter.add_mesh(face, color='lightgrey', opacity=0.12,
-                                 show_edges=True, edge_color='grey', line_width=0.5)
+        # Undeformed shells — inactive parents (coarse mesh) as grey overlay
+        for quad_pts in inactive_shell_quads:
+            t1, t2 = _tri_quad(0, 1, 2, 3)
+            face = pv.PolyData(quad_pts, faces=t1 + t2)
+            plotter.add_mesh(face, color='lightgrey', opacity=0.12,
+                             show_edges=True, edge_color='grey', line_width=0.5)
 
     # ── Helper: build deformed mesh (used by both animate and static paths) ──
     # Pre-compute the UNDEFORMED length of each frame segment so the number

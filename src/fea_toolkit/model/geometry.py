@@ -7,7 +7,7 @@ from __future__ import annotations
 import math
 import warnings
 import numpy as np
-from typing import Sequence, Tuple, Dict, List, Any, Union, Optional
+from typing import Sequence, Set, Tuple, Dict, List, Any, Union, Optional
 from collections import defaultdict
 
 from ..model.sap_data import (
@@ -1817,6 +1817,153 @@ def mesh_area_elements(
 
     return area_elements, area_assignments, nodes, next_tag
 
+
+# ═══════════════════════════════════════════════════════════════════════
+# N×N shell subdivision — subdivide each coarse quad into an N×N
+# grid of smaller shell elements at the model-data level.
+# ═══════════════════════════════════════════════════════════════════════
+
+def subdivide_area_mesh(
+    area_elements: Dict[str, AreaElement],
+    area_assignments: Dict[str, str],
+    nodes: Dict[str, 'Node'],
+    n: int,
+    selection: Optional[Set[str]] = None,
+    next_tag: int = 1,
+    groups: Optional[Dict[str, 'Group']] = None,
+) -> Tuple[Dict[str, AreaElement], Dict[str, str], Dict[str, 'Node'], int]:
+    """Subdivide each coarse shell quad into an N×N grid of sub-elements.
+
+    Operates on model data (``AreaElement`` / ``Node`` dataclasses) so the
+    refined mesh is visible to NPZ export, PyVista, Rhino, and diagnostics.
+
+    Each parent area is marked ``inactive=True`` and linked to its children
+    via ``parent_id`` / ``child_ids``.  Sub-elements inherit the parent's
+    section assignment, thickness, and group membership.
+
+    New interior nodes are created with coordinate-based deduplication so
+    adjacent subdivided areas share edge nodes.
+
+    Args:
+        area_elements: ``{area_id: AreaElement}`` (modified in place).
+        area_assignments: ``{area_id: section_name}`` (modified in place).
+        nodes: ``{node_id: Node}`` — new interior nodes are added here.
+        n: Subdivision count (2 = 2×2 grid, 3 = 3×3, etc.).  Must be ≥ 2.
+        selection: Optional set of area IDs to subdivide.  ``None`` = all.
+        next_tag: Next available numeric tag for new nodes and elements.
+        groups: Optional ``{group_name: Group}`` — group memberships are
+            propagated to sub-elements.
+
+    Returns:
+        ``(area_elements, area_assignments, nodes, next_tag)``.
+    """
+    if n < 2:
+        return area_elements, area_assignments, nodes, next_tag
+
+    def _coord_key(x, y, z):
+        return (round(x, 6), round(y, 6), round(z, 6))
+
+    # Seed coordinate registry from all existing nodes so we can deduplicate
+    _coord_to_id: Dict[tuple, str] = {}
+    for nid, nd in nodes.items():
+        _coord_to_id[_coord_key(nd.x, nd.y, nd.z)] = nid
+
+    for aid, elem in list(area_elements.items()):
+        if selection is not None and aid not in selection:
+            continue
+        if getattr(elem, 'inactive', False):
+            continue
+        if len(elem.node_ids) != 4:
+            continue
+
+        # Gather corner coordinates
+        corners = []
+        corner_ids = list(elem.node_ids)
+        for nid in corner_ids:
+            nd = nodes.get(nid)
+            if nd is None:
+                break
+            corners.append(np.array([nd.x, nd.y, nd.z], dtype=float))
+        if len(corners) != 4:
+            continue
+
+        # Bilinear interpolation to create (n+1)² grid points
+        grid = np.zeros((n + 1, n + 1, 3))
+        for j in range(n + 1):
+            v = j / n
+            for i in range(n + 1):
+                u = i / n
+                top = corners[0] * (1.0 - u) + corners[1] * u
+                bot = corners[3] * (1.0 - u) + corners[2] * u
+                grid[j, i] = top * (1.0 - v) + bot * v
+
+        # Create node grid — reuse existing nodes at corners, create new
+        # interior nodes with coordinate dedup
+        node_grid = [[None] * (n + 1) for _ in range(n + 1)]
+        for j in range(n + 1):
+            for i in range(n + 1):
+                if i == 0 and j == 0:
+                    node_grid[j][i] = corner_ids[0]; continue
+                if i == n and j == 0:
+                    node_grid[j][i] = corner_ids[1]; continue
+                if i == n and j == n:
+                    node_grid[j][i] = corner_ids[2]; continue
+                if i == 0 and j == n:
+                    node_grid[j][i] = corner_ids[3]; continue
+                pt = grid[j, i]
+                ck = _coord_key(float(pt[0]), float(pt[1]), float(pt[2]))
+                existing = _coord_to_id.get(ck)
+                if existing is not None:
+                    node_grid[j][i] = existing
+                    continue
+                new_id = f"{aid}_sub_{j}_{i}"
+                new_tag = next_tag
+                next_tag += 1
+                nodes[new_id] = Node(
+                    node_id=new_id, node_tag=new_tag,
+                    x=float(pt[0]), y=float(pt[1]), z=float(pt[2]),
+                )
+                _coord_to_id[ck] = new_id
+                node_grid[j][i] = new_id
+
+        # Determine which groups contain the parent area
+        parent_groups: List[str] = []
+        if groups is not None:
+            for gname, g in groups.items():
+                ref = f"Area:{aid}"
+                if ref in g.objects:
+                    parent_groups.append(gname)
+
+        # Mark parent inactive
+        elem.inactive = True
+
+        # Create n² sub-elements
+        sec_name = area_assignments.get(aid, "")
+        for j in range(n):
+            for i in range(n):
+                sub_id = f"{aid}_sub_{j}_{i}"
+                sub_tag = next_tag
+                next_tag += 1
+                n0 = node_grid[j][i]
+                n1 = node_grid[j][i + 1]
+                n2 = node_grid[j + 1][i + 1]
+                n3 = node_grid[j + 1][i]
+                area_elements[sub_id] = AreaElement(
+                    area_id=sub_id, area_tag=sub_tag,
+                    node_ids=[n0, n1, n2, n3],
+                    thickness=elem.thickness,
+                    parent_id=aid,
+                )
+                elem.child_ids.append(sub_id)
+                if sec_name:
+                    area_assignments[sub_id] = sec_name
+                # Propagate group membership
+                if parent_groups:
+                    sub_ref = f"Area:{sub_id}"
+                    for gname in parent_groups:
+                        groups[gname].objects.append(sub_ref)
+
+    return area_elements, area_assignments, nodes, next_tag
 
 
 # ═══════════════════════════════════════════════════════════════════════
