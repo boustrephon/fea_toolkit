@@ -11,8 +11,8 @@ from typing import Sequence, Tuple, Dict, List, Any, Union, Optional
 from collections import defaultdict
 
 from ..model.sap_data import (
-    SAPModelData, Node, Restraint, Material, Section,
-    FrameElement, AreaElement, Group, LoadPattern, JointLoad,
+    Node, Material, Section,
+    FrameElement, AreaElement, Group,
     FrameDistributedLoad, AreaUniformLoad,
     FrameEndOffset, AreaMesh,
 )
@@ -897,8 +897,6 @@ def beam_load_to_nodal_loads(
     a = np.array(node_coords[elem.node_i])
     b = np.array(node_coords[elem.node_j])
     vec_x = (b - a) / length
-    angle_rad = math.radians(elem.angle)
-
     # Build local axes
     vec_x_norm = vec_x
     vecxz = get_SAP_vecxz(vec_x_norm, elem.angle)
@@ -929,7 +927,6 @@ def beam_load_to_nodal_loads(
     # Partial-span parameters (clamped to [0, 1])
     aL = max(0.0, min(1.0, load.rdist_a))
     bL = max(0.0, min(1.0, load.rdist_b))
-    span = bL - aL
     L = length
 
     # --- Fixed-end forces for a trapezoidal load on a prismatic beam ---
@@ -1054,8 +1051,6 @@ def convert_area_loads_to_edge_loads(
     Returns:
         List of ``FrameDistributedLoad`` objects for the edge frame elements.
     """
-    from collections import defaultdict
-
     # Build lookup: pair of node IDs → frame element ID
     edge_map = {}  # (node_i, node_j) sorted → frame_id
     for eid, elem in frame_elements.items():
@@ -1452,16 +1447,19 @@ def apply_frame_end_offsets(
 def _point_uv_on_quad(
     pt: np.ndarray,
     corners: List[np.ndarray],
-) -> Tuple[float, float]:
+) -> Optional[Tuple[float, float]]:
     """Estimate parametric (u, v) of *pt* on a bilinear quad.
 
     Uses Newton iteration on the bilinear surface
     ``p(u,v) = (1-v)[(1-u)c0 + u*c1] + v[(1-u)c3 + u*c2]``.
 
     Returns:
-        ``(u, v)`` clamped to ``[0, 1]``.
+        ``(u, v)`` clamped to ``[0, 1]``, or ``None`` if the point is
+        not on the quad (residual exceeds 1 % of the quad diagonal).
     """
     c0, c1, c2, c3 = corners
+    diag = float(np.linalg.norm(c2 - c0))
+    tol = max(1e-8, 0.01 * diag)
     u, v = 0.5, 0.5
     for _ in range(20):
         top = c0 * (1.0 - u) + c1 * u
@@ -1480,6 +1478,12 @@ def _point_uv_on_quad(
         v = float(np.clip(v + delta[1], 0.0, 1.0))
         if float(np.linalg.norm(delta)) < 1e-8:
             break
+    # Residual check: reject points that aren't actually on the quad
+    top = c0 * (1.0 - u) + c1 * u
+    bot = c3 * (1.0 - u) + c2 * u
+    p_final = top * (1.0 - v) + bot * v
+    if float(np.linalg.norm(p_final - pt)) > tol:
+        return None
     return u, v
 
 
@@ -1520,7 +1524,8 @@ def mesh_area_elements(
     # Populated per-area from corner nodes only, so adjacent areas'
     # shared edges are still deduplicated without collapsing
     # intentionally separate nodes at the same coordinate.
-    _coord_key = lambda x, y, z: (round(x, 6), round(y, 6), round(z, 6))
+    def _coord_key(x, y, z):
+        return (round(x, 6), round(y, 6), round(z, 6))
     _coord_to_id: Dict[tuple, str] = {}
 
     # ── Pre-build vectorised cache of real SAP2000 nodes ──────────
@@ -1675,12 +1680,12 @@ def mesh_area_elements(
             if nd_ref is None:
                 continue
             pos = np.array([nd_ref.x, nd_ref.y, nd_ref.z], dtype=float)
-            u, v = _point_uv_on_quad(pos, corners)
+            uv = _point_uv_on_quad(pos, corners)
+            if uv is None:
+                continue
+            u, v = uv
             # Classify position: corner / perimeter / interior
             at_corner = (u <= 1e-6 or u >= 1.0 - 1e-6) and (v <= 1e-6 or v >= 1.0 - 1e-6)
-            on_perimeter = (not at_corner) and (
-                (v <= 1e-6 or v >= 1.0 - 1e-6) or (u <= 1e-6 or u >= 1.0 - 1e-6)
-            )
             if at_corner:
                 continue
             interior_seeds.append((u, v))
@@ -2167,7 +2172,7 @@ def warn_frame_overlaps(
     nodes: Dict[str, 'Node'],
     *,
     prefix: str = '',
-    exclude_types: set = frozenset({'brick wall'}),
+    exclude_types: frozenset = frozenset({'brick wall'}),
 ) -> None:
     """Warn about overlapping or collinear frame elements.
 
@@ -2288,8 +2293,8 @@ def find_constraint_edges(
     nodes: Dict[str, 'Node'],
     frame_elements: Optional[Dict[str, 'FrameElement']] = None,
     frame_assignments: Optional[Dict[str, str]] = None,
-    exclude_types: set = frozenset({'brick'}),
-) -> List[Tuple[List[str], str, str]]:
+    exclude_types: frozenset = frozenset({'brick'}),
+) -> List[Tuple[List[str], List[tuple], List[tuple], str, str]]:
     """Find tears in the final mesh via sweep-line chain following.
 
     Detects locations where two (or more) adjacent elements share a
@@ -2349,8 +2354,6 @@ def find_constraint_edges(
     """
     from collections import defaultdict
     import numpy as np
-    from typing import Dict, List, Tuple
-
     COSINE_TOL = 0.9999
 
     # ── Helper: case-insensitive substring matching ─────────────
@@ -2642,6 +2645,16 @@ def find_constraint_edges(
 
             # The shortest chain defines the master edge
             master_chain = all_chains[0][0] if all_chains else []
+
+            # Warn if master chain doesn't span the full tear (t=0 to t=1)
+            if len(master_chain) >= 2:
+                t_start = master_chain[0][1]
+                t_end = master_chain[-1][1]
+                if t_start > 0.01 or t_end < 0.99:
+                    print(f"  ⚠ Master chain t-range [{t_start:.3f}, {t_end:.3f}] "
+                          f"does not span full tear — slave nodes outside this "
+                          f"range will use extrapolated interpolation")
+
             # All other chains are slaves
             slave_chains = [c for c, _, _ in all_chains[1:]] if len(all_chains) > 1 else []
 
@@ -2791,6 +2804,21 @@ def find_wall_nodes_inside_slabs(
         ys = [n.y for n in corner_nds]
         zs = [n.z for n in corner_nds]
         slab_z = round(sum(zs) / len(zs), 4)
+
+        # Warn if slab is rotated off axis — bounding-box containment
+        # may produce false positives for non-orthogonal slabs.
+        _slab_rotated = False
+        for k in range(len(corner_nds)):
+            n1 = corner_nds[k]
+            n2 = corner_nds[(k + 1) % len(corner_nds)]
+            if abs(n1.x - n2.x) > 1e-6 and abs(n1.y - n2.y) > 1e-6:
+                _slab_rotated = True
+                break
+        if _slab_rotated:
+            print(f"  ⚠ Slab {sid} is rotated — wall-node containment "
+                  f"uses axis-aligned bounding box, may have false "
+                  f"positives")
+
         x_min, x_max = min(xs), max(xs)
         y_min, y_max = min(ys), max(ys)
         margin = max((x_max - x_min), (y_max - y_min)) * 0.001
@@ -2942,7 +2970,10 @@ def split_slabs_at_wall_intersections(
         u_vals: set = {0.0, 1.0}
         v_vals: set = {0.0, 1.0}
         for pt in interior_pts:
-            u, v = _point_uv_on_quad(pt, corners_arr)
+            uv = _point_uv_on_quad(pt, corners_arr)
+            if uv is None:
+                continue
+            u, v = uv
             if 1e-6 < u < 1.0 - 1e-6:
                 u_vals.add(round(u, 8))
             if 1e-6 < v < 1.0 - 1e-6:
