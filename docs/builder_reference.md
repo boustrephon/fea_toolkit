@@ -149,9 +149,10 @@ for its Auto Edge Constraint feature.
 
 All six DOFs (Ux, Uy, Uz, Rx, Ry, Rz) are constrained.
 
-The analysis methods automatically switch the constraint handler to
-**Penalty** (1.0e12, 1.0e12) when edge constraints are present — no
-manual config change is needed.
+The default ``"spring"`` method creates physical ``twoNodeLink`` elements
+that are visible to every solver, so no constraint-handler change is
+needed.  When ``constraint_method: "penalty"`` is used, the builder
+automatically switches the constraint handler to **Penalty** (1.0e12, 1.0e12).
 
 ---
 
@@ -244,9 +245,9 @@ only.
 | Type | Criterion |
 |------|-----------|
 | **Column** | Frame where vertical span > 4× the resultant horizontal span: \\|Δz\\| > 4 · √(Δx² + Δy²) |
-| **Brace** | Diagonal frame that is neither beam nor column (both Δh > 1‰ of max(model_extents) and Δz > 1‰ of max(model_extents)) |
+| **Brace** | Diagonal frame that is neither beam nor column (both Δh > 0.01 m and Δz > 0.01 m in model units) |
 | **Beam** | Any other frame element |
-| **Slab** | Area element whose *all* corner nodes lie within 2‰ of max(model_extents) of the mean Z |
+| **Slab** | Area element whose *all* corner nodes lie within 0.02 m of the mean Z (model units) |
 | **Wall** | Any other area element |
 
 ### Typical ACI 318-19 factors

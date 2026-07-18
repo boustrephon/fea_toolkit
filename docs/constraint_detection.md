@@ -109,7 +109,7 @@ Two methods are available, controlled by the ``constraint_method`` config:
 
 #### Spring‑element method (default)
 
-Creates two ``zeroLength`` spring elements per slave node (one to each
+Creates two ``twoNodeLink`` spring elements per slave node (one to each
 master edge end), with stiffness weighted by interpolation factors.
 These are physical elements in the domain — they contribute directly to
 the global stiffness matrix **K** and are visible to every solver
