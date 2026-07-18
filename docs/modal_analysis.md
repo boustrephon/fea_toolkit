@@ -6,14 +6,14 @@ supports the following ``eigen_solver`` modes:
 | Value | Solver | Speed | Notes |
 |---|---|---|---|
 | ``"default"`` | ARPACK (implicitly restarted Lanczos) | Fast (~seconds) | Uses ARPACK's iterative Lanczos method. May fail with ``info=-9`` ("Starting vector is zero") when all DOFs are exactly zero. The builder automatically falls back to ``fullGenLapack``. |
-| ``"genBandArpack"`` | ARPACK (generalised banded) | Fast (~seconds) | The **default** solver in OpenSees. More efficient than plain ARPACK for banded stiffness matrices. **Requires a non‑zero starting vector** — the builder applies a Ritz gravity pre‑step (static gravity) before calling the solver. This is the recommended solver for most models. |
+| ``"genBandArpack"`` | ARPACK (generalised banded) | Fast (~seconds) | The **default** solver in OpenSees. More efficient than plain ARPACK for banded stiffness matrices. The builder applies a static gravity pre‑step that changes the current tangent stiffness before the eigen analysis. This is the recommended solver for most models. |
 | ``"symmBandLapack"`` | Symmetric banded LAPACK | Fast | ❌ **Not suitable** — only solves standard eigenproblems (Aφ = λφ), not the generalised problem (Kφ = λMφ) needed for structural dynamics. Falls back to ARPACK → fullGenLapack. |
 | ``"fullGenLapack"`` | LAPACK full eigenvalue solve | Very slow (~minutes–hours) | Computes **all** eigenvalues via LAPACK's dense solver. Robust but impractical for models with > 10 000 DOFs. Used as a fallback when ARPACK fails. |
-| ``"ritz"`` | Gravity pre‑step + ARPACK | Fast (~seconds) | Runs a static gravity step under self‑weight **before** the eigen solve. The deformed shape seeds ARPACK's starting vector, giving vectors that better capture lateral‑load response. Same eigenvalue accuracy as ``"default"`` but with a Ritz‑type starting vector. |
+| ``"ritz"`` | Gravity pre‑step + ARPACK | Fast (~seconds) | Runs a static gravity step under self‑weight **before** the eigen solve. This changes the current tangent stiffness (P‑delta effect from gravity) before the eigen analysis. Not true load‑dependent Ritz vectors — see note below. |
 
 #### OpenSees Ritz vector support
 
-OpenSees does **not** have a native ``ritz`` command in the standard distribution (it was never added to the Tcl interpreter). The ``"ritz"`` mode above is the closest approximation — it applies the static gravity displacement as ARPACK's starting vector, which biases convergence toward modes that participate in the gravity response.
+OpenSees does **not** have a native ``ritz`` command in the standard distribution (it was never added to the Tcl interpreter). The ``"ritz"`` mode above applies a static gravity pre‑step that changes the current tangent stiffness (P‑delta effect from gravity) before the eigen solve via ARPACK. This is **not** a load‑dependent Ritz vector method — it simply runs the eigen analysis on the gravity‑loaded stiffness matrix rather than the unloaded one.
 
 True Load-Dependent Ritz vectors (Krylov subspace: K⁻¹M applied repeatedly to a starting load pattern) can be generated manually by:
 1. Applying a load pattern and solving static equilibrium
@@ -25,9 +25,10 @@ This requires extracting system matrices (not directly available in OpenSeesPy) 
 
 #### Built-in eigen solver options
 
-OpenSees' ``eigen`` command accepts two solver flags (per the official documentation at `<https://opensees.berkeley.edu/wiki/index.php?title=Eigen_Command>`_):
+OpenSees' ``eigen`` command accepts the following solver flags (per the official documentation at `<https://opensees.berkeley.edu/wiki/index.php?title=Eigen_Command>`_):
 
 - ``-genBandArpack`` — generalised banded ARPACK (default, fast, recommended)
+- ``-symmBandLapack`` — symmetric banded LAPACK (fast, but restricted to standard eigenproblems Aφ = λφ, not the generalised Kφ = λMφ needed for structural dynamics)
 - ``-fullGenLapack`` — dense LAPACK (robust, very slow for large models)
 
 No ``-load`` or Ritz-specific option exists in the standard distribution.
