@@ -4,24 +4,25 @@ Rhino geometry creation — ``rg``-based lightweight Extrusion version.
 Uses ``import Rhino.Geometry as rg`` throughout (the standard CPython
 convention for Rhino 8) and ``rg.Extrusion.Create()`` to produce true
 lightweight Extrusion objects.
-
-All functions have the same signatures as their counterparts in
-``geometry.py`` so they can be swapped via the importer.
 """
+
+from __future__ import annotations
 
 import typing as t
 import math
-import sys
 
-import Rhino  # noqa: F401
-import scriptcontext as sc
-import Rhino.DocObjects as rd
-import Rhino.Geometry as rg
+try:
+    import Rhino  # pyright: ignore[reportMissingImports] # noqa: F401
+    import scriptcontext as sc  # pyright: ignore[reportMissingImports]
+    import Rhino.DocObjects as rd  # pyright: ignore[reportMissingImports]
+    import Rhino.Geometry as rg  # pyright: ignore[reportMissingImports]
+except ImportError:
+    Rhino = sc = rd = rg = None  # type: ignore
 
 from ..model.sap_data import SAPModelData
 from ..model.sap_data import (
     ISection, PipeSection, BoxSection, ChannelSection,
-    RectangularSection, CircularSection, GeneralSection, ShellSection,
+    RectangularSection, CircularSection,
 )
 
 
@@ -393,10 +394,10 @@ def create_frame_extrusions(
                 extrusion = rg.Extrusion.Create(profile_curve, length, True)
             else:
                 signed_area = 0.0
-                n = profile.PointCount
+                n = profile.PointCount # pyright: ignore[reportAttributeAccessIssue]
                 for j in range(n):
-                    p0 = profile.Point(j)
-                    p1 = profile.Point((j + 1) % n)
+                    p0 = profile.Point(j)     # pyright: ignore[reportAttributeAccessIssue]
+                    p1 = profile.Point((j + 1) % n)    # pyright: ignore[reportAttributeAccessIssue]
                     signed_area += p0.X * p1.Y - p1.X * p0.Y
                 signed_area *= 0.5
                 if signed_area < 0:
@@ -407,18 +408,88 @@ def create_frame_extrusions(
             if extrusion is None:
                 continue
 
-            # Transform: apply lateral offset then position at elastic_i
-            # The extrusion is built along local Z.  We need to map
-            # (X_local, Y_local, Z_local) → (Z_axis, Y_axis, X_axis).
-            # The lateral offset shifts the profile in the Y–Z plane.
+            # Check if J-end offsets differ from I-end
+            off_diff = abs(oy_i - off_y_j) > 1e-6 or abs(oz_i - off_z_j) > 1e-6
+
+            if off_diff:
+                # Different lateral offsets at ends — can't use lightweight
+                # Extrusion. Fall back to swept Brep between shifted endpoints.
+                origin_i = rg.Point3d(
+                    ei.X + y_axis.X * oy_i + z_axis.X * oz_i,
+                    ei.Y + y_axis.Y * oy_i + z_axis.Y * oz_i,
+                    ei.Z + y_axis.Z * oy_i + z_axis.Z * oz_i)
+                origin_j = rg.Point3d(
+                    ej.X + y_axis.X * off_y_j + z_axis.X * off_z_j,
+                    ej.Y + y_axis.Y * off_y_j + z_axis.Y * off_z_j,
+                    ej.Z + y_axis.Z * off_y_j + z_axis.Z * off_z_j)
+
+                # Create a extrusion at I-end then morph to J-end
+                xform_i = rg.Transform.Identity
+                xform_i.M00 = z_axis.X
+                xform_i.M01 = y_axis.X
+                xform_i.M02 = x_axis.X
+                xform_i.M10 = z_axis.Y
+                xform_i.M11 = y_axis.Y
+                xform_i.M12 = x_axis.Y
+                xform_i.M20 = z_axis.Z
+                xform_i.M21 = y_axis.Z
+                xform_i.M22 = x_axis.Z
+                xform_i.M03 = origin_i.X
+                xform_i.M13 = origin_i.Y
+                xform_i.M23 = origin_i.Z
+                xform_i.M33 = 1.0
+                extrusion.Transform(xform_i)
+
+                path_vec = rg.Vector3d(
+                    origin_j.X - origin_i.X,
+                    origin_j.Y - origin_i.Y,
+                    origin_j.Z - origin_i.Z)
+                if path_vec.Length > 1e-6:
+                    cap0 = extrusion.PathBottom.Copy()
+                    cap1 = extrusion.PathTop.Copy()
+                    if cap0 and cap1:
+                        cap1.Translate(path_vec)
+                        brep = rg.Brep.CreateFromSweep(
+                            rg.Line(origin_i, origin_j).ToNurbsCurve(),
+                            cap0, True, 0.001)
+                        if brep:
+                            extrusion.Dispose()
+                            # Store as extrusion-compatible (use a mesh representation)
+                            mesh = rg.Mesh.CreateFromBrep(brep, rg.MeshingParameters.Default)
+                            if mesh and len(mesh) > 0:
+                                attr_local = rd.ObjectAttributes()
+                                attr_local.LayerIndex = layer_index
+                                attr_local.Name = f"SAP_FrameExt_{eid}"
+                                obj_id = doc.Objects.AddMesh(mesh[0], attr_local)
+                                if obj_id:
+                                    count += 1
+                                    obj = doc.Objects.Find(obj_id)
+                                    if obj:
+                                        attrs = obj.Attributes
+                                        attrs.SetUserString("SAP_Type", "FrameExtrusion")
+                                        attrs.SetUserString("SAP_FrameID", str(eid))
+                                        attrs.SetUserString("SAP_Section", sec_name)
+                                        attrs.SetUserString("SAP_JointI", str(elem.node_i))
+                                        attrs.SetUserString("SAP_JointJ", str(elem.node_j))
+                                        attrs.SetUserString("SAP_Material", sec.material)
+                                        attrs.SetUserString("SAP_Shape", sec.shape)
+                                        attrs.SetUserString("SAP_Angle", str(elem.angle))
+                                        obj.CommitChanges()
+                            continue
+
+            # Use I-end offsets (or common offsets if no difference)
             origin_x = ei.X + y_axis.X * oy_i + z_axis.X * oz_i
             origin_y = ei.Y + y_axis.Y * oy_i + z_axis.Y * oz_i
             origin_z = ei.Z + y_axis.Z * oy_i + z_axis.Z * oz_i
 
             xform = rg.Transform.Identity
-            xform.M00 = z_axis.X; xform.M01 = y_axis.X; xform.M02 = x_axis.X
-            xform.M10 = z_axis.Y; xform.M11 = y_axis.Y; xform.M12 = x_axis.Y
-            xform.M20 = z_axis.Z; xform.M21 = y_axis.Z; xform.M22 = x_axis.Z
+            xform.M00, xform.M01, xform.M02 = z_axis.X, y_axis.X, x_axis.X
+            xform.M10 = z_axis.Y
+            xform.M11 = y_axis.Y
+            xform.M12 = x_axis.Y
+            xform.M20 = z_axis.Z
+            xform.M21 = y_axis.Z
+            xform.M22 = x_axis.Z
             xform.M03 = origin_x
             xform.M13 = origin_y
             xform.M23 = origin_z
@@ -499,11 +570,11 @@ def _create_brep_from_points(points, area_id: str, layer_index: int, doc):
 
     # Mesh fallback
     try:
-        import System.Collections.Generic as NetList
+        from System.Collections.Generic import List # pyright: ignore[reportMissingImports]
         mesh = rg.Mesh()
         for pt in points:
             mesh.Vertices.Add(pt)
-        face_verts = NetList[int]()
+        face_verts = List[int]()
         for idx in range(n):
             face_verts.Add(idx)
         mesh.Faces.AddFace(face_verts)
