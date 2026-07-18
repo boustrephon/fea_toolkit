@@ -685,8 +685,10 @@ class TestUnifiedNpzPipeline:
 
     def test_write_and_read_static_with_split(self, sample_md, tmp_path):
         """Unified NPZ pipeline works with split elements.
-        Builds with split_elements=True so children get parent tracking,
-        then verifies the NPZ stores frame_parent_sap_id correctly.
+
+        Builds a model with an intermediate node on a frame so
+        split_elements=True produces child elements, then verifies
+        parent-child metadata in the NPZ round-trip.
 
         Exercises:
             build(split_elements=True) →
@@ -702,9 +704,6 @@ class TestUnifiedNpzPipeline:
             npz_build_parent_map,
         )
 
-        # Build with splitting — the sample cantilever has no intermediate
-        # nodes so no actual splitting occurs, but the writer still emits
-        # frame_parent_sap_id (empty string for unsplit elements).
         b = OpenSeesBuilder(sample_md, {
             'element_type': 'elasticBeamColumn',
             'split_elements': True,
@@ -722,13 +721,10 @@ class TestUnifiedNpzPipeline:
 
         data = read_results_npz(npz_path)
         assert "frame_parent_sap_id" in data
-        # frame_parent_sap_id is always present (empty string = unsplit)
         assert len(data["frame_parent_sap_id"]) == len(data["frame_sap_id"])
 
-        # --- Adapter: parent-child maps (work even with no split) ---
         child_map = npz_build_child_map(data)
         parent_map = npz_build_parent_map(data)
-        # With no split, maps are empty — that's correct behaviour
         assert isinstance(child_map, dict)
         assert isinstance(parent_map, dict)
 

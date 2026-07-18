@@ -281,12 +281,12 @@ if __name__ == "__main__":
                         help="Print summary only (no plot)")
     parser.add_argument("--slab", type=str, default="",
                         help="Focus on a specific slab ID (e.g. '335')")
-    parser.add_argument("--context", type=float, default=6.0,
-                        help="Context radius for nearby slabs")
     args = parser.parse_args()
 
     entries = _DATA["diagnostics"]
     ws_entries = [d for d in entries if d["type"] == "wall_slab_intersection"]
+    if args.slab:
+        ws_entries = [d for d in ws_entries if d["details"].get("slab_id") == args.slab]
 
     print(f"Model: {{_DATA['model_name']}}")
     print(f"Created: {{_DATA['created']}}")
@@ -303,17 +303,15 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if ws_entries:
-        slab_label = args.slab or "all"
-        label = f" for slab {{args.slab}}" if args.slab else ""
-        print(f"\\nOpening visualisation{{label}}...")
+        label = f" for slab {args.slab}" if args.slab else ""
+        print(f"\\nOpening visualisation{label}...")
         print("  Colour key:")
         print("    Blue quad  = target slab (labelled corner coordinates)")
         print("    Red edges  = walls with nodes inside this slab")
         print("    Orange     = adjacent walls sharing an edge (above/below)")
         print("    Red sphere = wall node location (ID + tag)")
-        print("    Grey       = nearby slabs for spatial context")
         print()
-        plotter = _render_wall_slab_intersection(entries)
+        plotter = _render_wall_slab_intersection(ws_entries[0])
         if plotter:
             plotter.show()
         else:

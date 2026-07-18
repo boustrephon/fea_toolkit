@@ -220,3 +220,80 @@ class TestApplyEdgeConstraints:
         )
         assert n == 0
         ops.wipe()
+
+
+class TestApplyEdgeConstraintsPenalty:
+    """Tests for OpenSeesBuilder.apply_edge_constraints() with penalty method."""
+
+    def _make_builder(self):
+        """Create builder with penalty method and OpenSees model with nodes."""
+        import openseespy.opensees as ops
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        md = _build_test_model()
+        builder = OpenSeesBuilder(md, {"verbose": False,
+                                       "constraint_method": "penalty"})
+        ops.wipe()
+        ops.model('basic', '-ndm', 3, '-ndf', 6)
+        for nid, node in md.nodes.items():
+            ops.node(int(nid), node.x, node.y, node.z)
+        return builder, ops
+
+    def test_penalty_apply_by_explicit_edges(self):
+        """Explicit (coarse_edges, fine_nodes) creates MPCs with penalty."""
+        builder, ops = self._make_builder()
+        n = builder.apply_edge_constraints(
+            coarse_edges=[(1, 2)],
+            fine_nodes=[5, 6],
+            tolerance=1e-4,
+            verbose=False,
+        )
+        # Penalty creates 1 equationConstraint per slave → 2 for 2 slaves
+        assert n == 2, f"Expected 2 penalty constraints, got {n}"
+        assert builder._edge_constraint_method == 'penalty'
+        ops.wipe()
+
+    def test_penalty_no_match_returns_zero(self):
+        """No matching slave nodes → zero constraints applied."""
+        builder, ops = self._make_builder()
+        n = builder.apply_edge_constraints(
+            coarse_edges=[(3, 4)],
+            fine_nodes=[5, 6],
+            tolerance=1e-4,
+            verbose=False,
+        )
+        assert n == 0, f"Expected 0 constraints, got {n}"
+        assert builder._edge_constraint_method is None
+        ops.wipe()
+
+    def test_penalty_flag_persists(self):
+        """_edge_constraint_method stays 'penalty' after successful apply."""
+        builder, ops = self._make_builder()
+        assert builder._edge_constraint_method is None
+        builder.apply_edge_constraints(
+            coarse_edges=[(1, 2)],
+            fine_nodes=[5, 6],
+            tolerance=1e-4,
+            verbose=False,
+        )
+        assert builder._edge_constraint_method == 'penalty'
+        # Second call with no matches should keep 'penalty'
+        builder.apply_edge_constraints(
+            coarse_edges=[(2, 3)],
+            fine_nodes=[],
+            tolerance=1e-4,
+            verbose=False,
+        )
+        assert builder._edge_constraint_method == 'penalty'
+        ops.wipe()
+
+    def test_penalty_with_no_edges_returns_zero(self):
+        """No edges provided → 0 constraints, no crash."""
+        builder, ops = self._make_builder()
+        n = builder.apply_edge_constraints(
+            coarse_edges=[],
+            fine_nodes=[5, 6],
+            verbose=False,
+        )
+        assert n == 0
+        ops.wipe()
