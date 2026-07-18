@@ -42,15 +42,34 @@ __all__ = ["RhinoImporter"]
 
 
 class RhinoImporter:
-    """Export ``SAPModelData`` into Rhino using lightweight Extrusions.
+    """Export ``SAPModelData`` or ``MeshModel`` into Rhino using lightweight Extrusions.
 
     Args:
-        model_data: A ``SAPModelData`` instance.
+        model_data: A ``SAPModelData`` or ``MeshModel`` instance.
     """
 
-    def __init__(self, model_data: SAPModelData):
+    def __init__(self, model_data):
         self.md = model_data
         self._ensure_rhino()
+
+    @classmethod
+    def from_mesh_model(cls, mesh_model):
+        """Create a RhinoImporter from a :class:`~fea_toolkit.model.mesh_model.MeshModel`.
+
+        The MeshModel's prepared topology (split frames, meshed shells,
+        subdivided areas) is used directly — no need to build an
+        ``OpenSeesBuilder`` first.
+
+        Usage::
+
+            from fea_toolkit.model.mesh_model import MeshModel
+            from fea_toolkit.rhino import RhinoImporter
+
+            mesh = MeshModel(...)  # or from Preprocessor.run()
+            importer = RhinoImporter.from_mesh_model(mesh)
+            importer.run()
+        """
+        return cls(mesh_model)
 
     @staticmethod
     def _ensure_rhino():
