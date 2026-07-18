@@ -16,28 +16,22 @@ flowchart TD
     
     P1["<b>Phase 1 — Post‑processing</b><br/>script‑level (see examples/)<br/>• Fix base restraints<br/>• Compute supplemental masses<br/>• Define loads‑only selection"]
     
-    P2["<b>Phase 2 — OpenSees Builder</b><br/>OpenSeesBuilder(md, config)<br/>builder.build(selection=sel)<br/><br/>2a Restore snapshots<br/>2b ops.wipe()<br/>2c _create_nodes()<br/>2d _apply_restraints()<br/>2e _create_materials()<br/>2f _create_sections()<br/>2g _split_elements()<br/>2h _apply_frame_end_offsets()<br/>2i _convert_area_loads()<br/>2j _mesh_areas()<br/>2k _create_shell_elements()<br/>2l _create_lumped_hinges()<br/>2m _create_elements()<br/>2n _create_loads()<br/>2o _setup_recorders()"]
+    P2A["<b>Phase 2a — Preprocessor</b><br/>Preprocessor(config).run(md)<br/><br/>• Detect diaphragm levels<br/>• Split frames at joints<br/>• Apply frame end offsets<br/>• Mesh area elements<br/>• Subdivide shells (N×N)<br/>• Merge coincident nodes<br/>• Detect constraint edges<br/>• Convert area loads to edges<br/><i>Pure data — no ops.* calls</i>"]
+    
+    P2B["<b>Phase 2b — AnalysisBuilder</b><br/>AnalysisBuilder(mesh_model, config)<br/>builder.build_domain()<br/>builder.create_loads()<br/><br/>• Create nodes (ops.node)<br/>• Apply restraints<br/>• Create materials + sections<br/>• Create shell elements<br/>• Create frame elements<br/>• Apply loads + diaphragms<br/><i>Consumes frozen topology</i>"]
     
     P3["<b>Phase 3 — Analyses</b><br/>• Static (run_static_analysis)<br/>• Modal (run_modal_analysis)<br/>• RS (run_response_spectrum)"]
     
     P4["<b>Phase 4 — Post‑processing</b><br/>• Save to .npz / .csv<br/>• 3D viewer (ModelViewer)<br/>• Plot deformed shape / capacity<br/>• Export to Xara Tcl"]
     
-    CA["<b>Check A</b><br/>check_model_connectivity()<br/>Pre‑build: orphans,<br/>shell‑only base,<br/>duplicate coords"]
-    
-    CB["<b>Check B</b><br/>check_split_connectivity()<br/>After splitting:<br/>zero‑length elements,<br/>duplicate nodes"]
-    
-    CC["<b>Check C</b><br/>check_mesh_connectivity()<br/>After meshing:<br/>unrestrained base mesh,<br/>low‑connectivity nodes"]
-    
-    CE["<b>Check E</b><br/>diagnose_singularity()<br/>After build:<br/>scan OpenSees nodes,<br/>tree‑plot distribution"]
+    MM["<b>MeshModel</b><br/>(frozen, serialisable topology)"]
     
     S2K --> P0
     P0 -->|SAPModelData| P1
-    P1 -.-> CA
-    P1 -->|Modified SAPModelData| P2
-    P2 -.-> CB
-    P2 -.-> CC
-    P2 -->|OpenSees model| P3
-    P3 -.-> CE
+    P1 -->|Modified SAPModelData| P2A
+    P2A --> MM
+    MM --> P2B
+    P2B -->|OpenSees model| P3
     P3 -->|Results dicts| P4
 ```
 
@@ -119,21 +113,132 @@ sel = Selection(sections=["brick wall"], element_types=["Area"])
 
 ---
 
-## Phase 2 — OpenSees Build (`OpenSeesBuilder.build()`)
+## Phase 2a — Preprocessor (`Preprocessor.run()`)
+
+File: `src/fea_toolkit/opensees/preprocessor.py`
+
+The Preprocessor performs **all topology mutations** as pure data operations
+— no ``ops.*`` calls.  It consumes a ``SAPModelData`` and returns a frozen,
+serialisable ``MeshModel``.
+
+```python
+from fea_toolkit.opensees.preprocessor import Preprocessor
+
+preprocessor = Preprocessor(config)
+mesh_model = preprocessor.run(md, selection=sel)
+```
+
+### What the Preprocessor does
+
+| Step | Method | Description |
+|------|--------|-------------|
+| 1 | `_detect_diaphragm_levels()` | Identifies horizontal area Z‑levels for rigid diaphragms |
+| 2 | `_classify_element_type()` | Classifies frames (beam/column/brace) and areas (slab/wall) |
+| 3 | `_split_elements()` | Splits frames at intermediate joints; redistributes distributed loads |
+| 4 | `_apply_frame_end_offsets()` | Creates offset nodes and rigid‑link records |
+| 5 | `_convert_area_loads()` | Converts area uniform loads to equivalent frame edge loads |
+| 6 | `_mesh_areas()` | Subdivides coarse areas per SAP2000 mesh assignments |
+| 7 | `_merge_coincident_nodes()` | Deduplicates mesh‑created nodes at identical coordinates |
+| 8 | `_subdivide_shells_in_model_data()` | N×N refinement of shell elements (if `subdivide_shells` config set) |
+| 9 | `_split_frames_at_shell_subdiv()` | Splits frames at shell sub‑division edge nodes |
+| 10 | `_detect_constraint_edges()` | Finds coarse‑fine mesh interfaces for edge constraints |
+
+All methods operate on the data model only.  No OpenSees domain objects
+are created.  The original ``SAPModelData`` is deep‑copied so it remains
+untouched.
+
+### MeshModel
+
+File: `src/fea_toolkit/model/mesh_model.py`
+
+A ``MeshModel`` is a frozen dataclass containing the fully prepared topology:
+
+```python
+@dataclass
+class MeshModel:
+    nodes: Dict[str, Node]                  # all nodes (original + mesh + split)
+    frame_elements: Dict[str, FrameElement]  # split + offset children
+    frame_assignments: Dict[str, str]
+    area_elements: Dict[str, AreaElement]    # meshed + subdivided
+    area_assignments: Dict[str, str]
+    frame_dist_loads: List[FrameDistributedLoad]  # redistributed to children
+    edge_loads_from_areas: List              # converted area loads
+    edge_constraint_pairs: List[tuple]       # detected coarse‑fine pairs
+    diaphragm_levels: List[float]            # detected storey Z‑levels
+    offset_rigid_links: List[tuple]          # from frame end offsets
+    frame_element_types: Dict[str, str]      # elem_id → beam/column/brace/…
+    area_element_types: Dict[str, str]       # area_id → slab/wall
+    materials: Dict[str, Material]
+    sections: Dict[str, Section]
+    groups: Dict[str, Group]
+    restraints: Dict[str, Restraint]
+    frame_tag_map: Dict[str, int]            # SAP ID → OpenSees tag
+    material_tags: Dict[str, int]            # material name → Ops tag
+    section_tags: Dict[str, int]
+    shell_sec_tags: Dict[str, int]
+    saved_edge_constraints: List[tuple]      # for pushover re‑apply
+    units: Dict[str, str]
+    base_z: Optional[float]
+```
+
+The MeshModel is serialisable (pickle or NPZ+JSON) and can be cached between
+sessions, eliminating the need to re-run the Preprocessor.
+
+---
+
+## Phase 2b — Analysis Builder (`AnalysisBuilder`)
+
+File: `src/fea_toolkit/opensees/analysis_builder.py`
+
+The AnalysisBuilder consumes a ``MeshModel`` and creates the OpenSees domain.
+No topology mutations occur here — only ``ops.*`` calls.
+
+```python
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+builder = AnalysisBuilder(mesh_model, config)
+builder.build_domain()           # create nodes, elements, sections
+builder.create_loads({"DEAD": 1.0})  # apply load patterns
+results = builder.run_static_analysis()
+```
+
+### What the AnalysisBuilder does
+
+| Step | Method | Description |
+|------|--------|-------------|
+| 1 | `_create_nodes()` | ``ops.node()`` for all MeshModel nodes |
+| 2 | `_apply_restraints()` | ``ops.fix()`` for boundary conditions |
+| 3 | `_create_materials()` | ``ops.uniaxialMaterial()`` — elastic + fiber + brace truss |
+| 4 | `_create_sections()` | ``ops.section('Elastic', …)`` — auto‑assigns tags |
+| 5 | `_create_shell_elements()` | ``ops.element('ShellMITC4', …)`` |
+| 6 | `_create_lumped_hinges()` | Zero‑length hinge elements |
+| 7 | `_create_elements()` | ``ops.element('elasticBeamColumn', …)`` with geom transforms |
+| 8 | `_create_loads()` | ``ops.pattern()`` + ``ops.eleLoad()`` / ``ops.load()`` |
+| 9 | `_apply_rigid_diaphragms()` | ``ops.rigidDiaphragm()`` at detected levels |
+
+Analysis methods (``run_static_analysis()``, ``run_modal_analysis()``, etc.)
+are identical to the legacy single‑stage builder.
+
+---
+
+## Phase 2 — Legacy Single‑Stage Build (`OpenSeesBuilder.build()`)
 
 File: `src/fea_toolkit/opensees/builder.py`
 
+The original single‑stage path bundles the Preprocessor and AnalysisBuilder
+into one call.  It is the default (``use_preprocessor=False``) for backward
+compatibility.  The new two‑stage path is activated by setting
+``use_preprocessor: True`` in the config dict.
+
 ```python
 b = OpenSeesBuilder(md, config)
-b.build(selection=sel)
+b.build(selection=sel)                       # legacy (default)
+# or
+b2 = OpenSeesBuilder(md, {"use_preprocessor": True, …})
+b2.build(selection=sel)                      # two‑stage
 ```
 
-The `build()` method follows this **exact order**:
-
-```
- Step │ Method                   │ OpenSees commands                │ Notes
-──────┼──────────────────────────┼──────────────────────────────────┼────────────
-  2a  │ Restore snapshots        │ —                               │ deep‑copy originals
+### Legacy build order
   2b  │ ops.wipe()               │ ops.wipe()                      │
       │                          │ ops.model('basic','-ndm',3,'-ndf',6)
   2c  │ _create_nodes()          │ ops.node(tag, x, y, z)          │ SAP2000 nodes only
@@ -392,10 +497,10 @@ The diagnostic workflow pattern is documented above in this section.
 ## Data flow summary
 
 ```
-  .s2k ──→ SAP2000Parser ──→ SAPModelData ──→ OpenSeesBuilder ──→ OpenSees model
-                │                  │                  │                  │
-            raw tables        dataclass tree     OpenSees ops       in‑memory
-                                                commands            analysis
+  .s2k ──→ SAP2000Parser ──→ SAPModelData ──→ Preprocessor ──→ MeshModel ──→ AnalysisBuilder ──→ OpenSees model
+                │                  │                  │              │                │                  │
+            raw tables        dataclass tree     pure data ops   frozen,         Ops domain        in‑memory
+                                                  (no Ops)      serialisable    creation          analysis
 
                          ┌──────────────────────────────────────────────────┐
                          │           ModelViewer (plotting/viewer.py)      │

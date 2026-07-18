@@ -5,6 +5,54 @@ specific to pushover analysis.
 
 ---
 
+## Two-stage build (``use_preprocessor``)
+
+The builder supports two execution modes controlled by the
+``use_preprocessor`` config flag (default ``False`` for backward
+compatibility):
+
+### Legacy single-stage (default)
+
+``OpenSeesBuilder.build()`` bundles topology preparation and OpenSees
+domain creation into a single call.  Every rebuild repeats splitting,
+meshing, and constraint detection — see the detailed step list in
+``docs/workflow.md``.
+
+### Two-stage (``use_preprocessor: True``)
+
+Splits the build into a **Preprocessor** (pure data, no ``ops.*``) and
+an **AnalysisBuilder** (creates the OpenSees domain from a prepared
+``MeshModel``).  The topology is prepared once and reused across
+analyses.
+
+```
+SAPModelData ──→ Preprocessor ──→ MeshModel ──→ AnalysisBuilder ──→ Results
+                    (once)         (frozen)       (per analysis)
+```
+
+| Component | File | Role |
+|-----------|------|------|
+| ``MeshModel`` | ``model/mesh_model.py`` | Frozen dataclass with fully prepared topology |
+| ``Preprocessor`` | ``opensees/preprocessor.py`` | Topology mutations — splitting, meshing, subdividing, constraint detection |
+| ``AnalysisBuilder`` | ``opensees/analysis_builder.py`` | OpenSees domain creation, load application, analysis execution |
+
+Usage:
+
+```python
+b = OpenSeesBuilder(md, {"use_preprocessor": True, …})
+b.build(selection=sel)        # → runs Preprocessor internally,
+                              #   then builds Ops domain from MeshModel
+```
+
+The facade copies all state (``frame_tag_map``, ``section_tags``,
+``material_tags``, ``split_elements``, etc.) back to the builder so
+existing code that reads these attributes continues to work unchanged.
+
+See ``docs/workflow.md`` for the full pipeline description and component
+details.
+
+---
+
 ## Shell element support
 
 ### Section type
