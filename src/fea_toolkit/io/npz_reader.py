@@ -29,10 +29,10 @@ def read_results_npz(path: str) -> Dict[str, Any]:
     The dict preserves the schema key names so consumers can access
     results by ``data["static/DEAD/fx_i"]``, ``data["modal/period"]``, etc.
 
-    Object arrays (``str`` dtype) are loaded with ``allow_pickle=True``.
+    String arrays are loaded safely with ``allow_pickle=False``.
     """
     path = str(Path(path).resolve())
-    return dict(np.load(path, allow_pickle=True))
+    return dict(np.load(path, allow_pickle=False))
 
 
 def _get_static_cases(data: Dict[str, Any]) -> List[str]:
@@ -176,16 +176,58 @@ def npz_to_pyvista_modal_mesh(
     dy = data.get("modal/mode_dy", np.zeros((len(nid), 1)))[:, mode_idx]
     dz = data.get("modal/mode_dz", np.zeros((len(nid), 1)))[:, mode_idx]
 
-    def _shift(coords_in):
-        return coords_in + np.column_stack([dx * scale, dy * scale, dz * scale])
+    def _shift_frame(pts, node_i, node_j):
+        """Shift frame line endpoints by modal displacement.
 
+        ``pts`` is ``(N_frame * 2, 3)`` — consecutive I/J endpoint pairs.
+        ``node_i`` / ``node_j`` are ``(N_frame,)`` node tags.
+        """
+        shifted = pts.copy()
+        n_frames = len(node_i)
+        for ei in range(n_frames):
+            i_idx = tag_to_idx.get(int(node_i[ei]))
+            j_idx = tag_to_idx.get(int(node_j[ei]))
+            if i_idx is not None:
+                shifted[ei * 2, 0] += dx[i_idx] * scale
+                shifted[ei * 2, 1] += dy[i_idx] * scale
+                shifted[ei * 2, 2] += dz[i_idx] * scale
+            if j_idx is not None:
+                shifted[ei * 2 + 1, 0] += dx[j_idx] * scale
+                shifted[ei * 2 + 1, 1] += dy[j_idx] * scale
+                shifted[ei * 2 + 1, 2] += dz[j_idx] * scale
+        return shifted
+
+    def _shift_shell(pts, n1, n2, n3, n4):
+        """Shift shell corner points by modal displacement.
+
+        ``pts`` is ``(N_shell * 4, 3)`` — consecutive corner triples.
+        """
+        shifted = pts.copy()
+        n_shells = len(n1)
+        for si in range(n_shells):
+            for k, arr in enumerate([n1, n2, n3, n4]):
+                idx = tag_to_idx.get(int(arr[si]))
+                if idx is not None:
+                    shifted[si * 4 + k, 0] += dx[idx] * scale
+                    shifted[si * 4 + k, 1] += dy[idx] * scale
+                    shifted[si * 4 + k, 2] += dz[idx] * scale
+        return shifted
+
+    f_n1 = data.get("frame_node_i", np.array([]))
+    f_n2 = data.get("frame_node_j", np.array([]))
     f_pts, f_lines, _, _ = npz_to_pyvista_frame_mesh(data)
-    if len(f_pts) > 0:
-        f_pts = _shift(f_pts)
+    if len(f_pts) > 0 and len(f_n1) > 0:
+        f_pts = _shift_frame(f_pts, f_n1, f_n2)
 
+    s_n1 = data.get("shell_node_1", np.array([]))
+    s_n2 = data.get("shell_node_2", np.array([]))
+    s_n3 = data.get("shell_node_3", np.array([]))
+    s_n4 = data.get("shell_node_4", np.array([]))
     s_pts, s_faces, _ = npz_to_pyvista_shell_mesh(data)
-    if len(s_pts) > 0:
-        s_pts = _shift(s_pts)
+    if len(s_pts) > 0 and len(s_n1) > 0:
+        s_pts = _shift_shell(s_pts, s_n1, s_n2, s_n3, s_n4)
+
+    return f_pts, f_lines, s_pts, s_faces
 
     return f_pts, f_lines, s_pts, s_faces
 

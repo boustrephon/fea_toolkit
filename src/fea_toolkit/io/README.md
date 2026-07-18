@@ -20,8 +20,7 @@ opstool ODB.
 ## The NPZ Schema (`results.npz`)
 
 A single compressed NumPy archive holding model geometry plus all
-analysis results.  Format auto-detection allows both legacy
-`*_forces.npz` files and the new unified format.
+analysis results.
 
 ### Geometry arrays
 
@@ -35,6 +34,8 @@ analysis results.  Format auto-detection allows both legacy
 | `frame_parent_sap_id` | `(N_frame,)` | `str` | Parent SAP ID (empty if unsplit) |
 | `frame_sec_name` | `(N_frame,)` | `str` | Section name |
 | `frame_node_i` / `j` | `(N_frame,)` | `int` | I/J node tags |
+| `frame_t_start` | `(N_frame,)` | `float` | Parametric start along parent [0,1] — optional |
+| `frame_t_end` | `(N_frame,)` | `float` | Parametric end along parent [0,1] — optional |
 | `shell_eid` | `(N_shell,)` | `int` | Shell element index |
 | `shell_sap_id` | `(N_shell,)` | `str` | SAP2000 AreaID |
 | `shell_node_1..4` | `(N_shell,)` | `int` | Corner node tags |

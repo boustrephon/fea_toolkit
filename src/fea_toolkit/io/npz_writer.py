@@ -48,6 +48,16 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
     # Frame elements — active only (skip inactive parents)
     frame_eid, frame_sap_id, frame_parent_sap_id, frame_sec_name = [], [], [], []
     frame_ni, frame_nj = [], []
+    frame_t_start, frame_t_end = [], []
+
+    # Build parent-index lookup for t_start/t_end computation
+    parent_lookup: Dict[str, tuple] = {}  # parent_id -> (t_locations, child_ids)
+    for eid, elem in md.frame_elements.items():
+        if getattr(elem, 'inactive', False):
+            continue
+        if elem.t_locations and elem.child_ids:
+            parent_lookup[eid] = (elem.t_locations, elem.child_ids)
+
     for eid, elem in md.frame_elements.items():
         if getattr(elem, 'inactive', False):
             continue
@@ -63,12 +73,30 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
         frame_ni.append(ni.node_tag)
         frame_nj.append(nj.node_tag)
 
+        # Compute parametric position along parent
+        if elem.parent_id and elem.parent_id in parent_lookup:
+            t_locs, children = parent_lookup[elem.parent_id]
+            try:
+                idx = children.index(eid)
+                ts = t_locs[idx - 1] if idx > 0 else 0.0
+                te = t_locs[idx] if idx < len(t_locs) else 1.0
+                frame_t_start.append(ts)
+                frame_t_end.append(te)
+            except ValueError:
+                frame_t_start.append(0.0)
+                frame_t_end.append(1.0)
+        else:
+            frame_t_start.append(0.0)
+            frame_t_end.append(1.0)
+
     arrays["frame_eid"] = np.array(frame_eid, dtype=int)
     arrays["frame_sap_id"] = np.array(frame_sap_id, dtype=str)
     arrays["frame_parent_sap_id"] = np.array(frame_parent_sap_id, dtype=str)
     arrays["frame_sec_name"] = np.array(frame_sec_name, dtype=str)
     arrays["frame_node_i"] = np.array(frame_ni, dtype=int)
     arrays["frame_node_j"] = np.array(frame_nj, dtype=int)
+    arrays["frame_t_start"] = np.array(frame_t_start, dtype=float)
+    arrays["frame_t_end"] = np.array(frame_t_end, dtype=float)
 
     # Shell elements (quad only)
     shell_eid, shell_sap_id, shell_sec_name = [], [], []
@@ -191,24 +219,21 @@ def _collect_modal(modal_result: Dict[str, Any],
 
 def _collect_rs(rs_x: Optional[Dict] = None,
                 rs_y: Optional[Dict] = None) -> Dict[str, np.ndarray]:
-    """Extract response-spectrum arrays."""
+    """Extract response-spectrum arrays with directional keys."""
     arrays: Dict[str, np.ndarray] = {}
-    for direction, prefix in [("X", "rs/"), ("Y", "rs/")]:
+    for direction, d_key in [("X", "x"), ("Y", "y")]:
         rs = rs_x if direction == "X" else rs_y
         if rs is None:
             continue
-        p = prefix.rstrip("/")
         n = len(rs.get("modal_periods", []))
-        arrays[f"{p}/period"] = np.array(
-            rs.get("modal_periods", []), dtype=float)
-        arrays[f"{p}/sa"] = np.array(
+        arrays[f"rs/sa_{d_key}"] = np.array(
             rs.get("spectral_accels", []), dtype=float)
-        arrays[f"{p}/eff_mass"] = np.array(
+        arrays[f"rs/eff_mass_{d_key}"] = np.array(
             rs.get("effective_masses", []), dtype=float)
-        arrays[f"{p}/v_base"] = np.array(
+        arrays[f"rs/v_base_{d_key}"] = np.array(
             rs.get("modal_base_shear", []), dtype=float)
-        arrays[f"{p}/v_cqc"] = np.array([rs.get("base_shear_cqc", 0.0)])
-        arrays[f"{p}/v_total"] = np.array([rs.get("base_shear_total", 0.0)])
+        arrays[f"rs/v_cqc_{d_key}"] = np.array([rs.get("base_shear_cqc", 0.0)])
+        arrays[f"rs/v_total_{d_key}"] = np.array([rs.get("base_shear_total", 0.0)])
     return arrays
 
 
