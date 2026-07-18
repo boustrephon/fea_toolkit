@@ -3437,3 +3437,135 @@ class TestModalParticipationDf:
     def test_empty(self):
         from fea_toolkit.io.report import modal_participation_df
         assert modal_participation_df({"periods": [], "modal_props": {}}) is None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Two-stage build (Preprocessor + AnalysisBuilder)
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestTwoStageBuild:
+    """Tests for the ``use_preprocessor=True`` two-stage build path."""
+
+    def test_mesh_model_creation(self):
+        """Preprocessor produces a MeshModel with correct topology."""
+        from fea_toolkit.model.mesh_model import MeshModel
+        from fea_toolkit.model.sap_data import (
+            SAPModelData, Node, FrameElement, AreaElement,
+            Section, Material,
+        )
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+                "2": Node(node_id="2", node_tag=2, x=6, y=0, z=0),
+                "3": Node(node_id="3", node_tag=3, x=6, y=4, z=0),
+            },
+            restraints={},
+            materials={"C40": Material(name="C40", type="Concrete", E_mod=3e7)},
+            sections={"SEC1": Section(
+                name="SEC1", material="C40", shape="Rectangular", A=0.16)},
+            frame_elements={
+                "F1": FrameElement(elem_id="F1", elem_tag=10,
+                                    node_i="1", node_j="2"),
+                "F2": FrameElement(elem_id="F2", elem_tag=20,
+                                    node_i="2", node_j="3"),
+            },
+            area_elements={},
+            frame_assignments={"F1": "SEC1", "F2": "SEC1"},
+            area_assignments={},
+            groups={}, frame_auto_mesh={},
+        )
+        from fea_toolkit.opensees.preprocessor import Preprocessor
+        pp = Preprocessor({"split_elements": True, "verbose": False})
+        mesh = pp.run(md)
+        assert isinstance(mesh, MeshModel)
+        assert mesh.num_nodes == 3
+        assert mesh.num_frames == 2
+        assert mesh.summary()["Frames"] == 2
+
+    def test_analysis_builder_domain(self):
+        """AnalysisBuilder creates OpenSees domain from MeshModel."""
+        import openseespy.opensees as ops
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.preprocessor import Preprocessor
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+        md = make_sample_model()
+        pp = Preprocessor({"split_elements": True, "create_shells": False,
+                            "verbose": False})
+        mesh = pp.run(md)
+        builder = AnalysisBuilder(mesh, {"verbose": False})
+        try:
+            builder.build_domain()
+            node_tags = ops.getNodeTags()
+            ele_tags = ops.getEleTags()
+            assert len(node_tags) > 0
+            assert len(ele_tags) > 0
+        finally:
+            ops.wipe()
+
+    def test_facade_two_stage_build(self):
+        """OpenSeesBuilder with use_preprocessor=True builds correctly."""
+        import openseespy.opensees as ops
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        md = make_sample_model()
+        b = OpenSeesBuilder(md, {
+            "use_preprocessor": True,
+            "split_elements": True,
+            "create_shells": False,
+            "verbose": False,
+        })
+        try:
+            b.build()
+            assert b._mesh_model is not None
+            assert len(b.frame_tag_map) > 0
+            node_tags = ops.getNodeTags()
+            assert len(node_tags) > 0
+        finally:
+            ops.wipe()
+
+    def test_facade_preserves_split_state(self):
+        """Facade copies split state back to builder for compat."""
+        import openseespy.opensees as ops
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        md = make_sample_model()
+        b = OpenSeesBuilder(md, {
+            "use_preprocessor": True,
+            "split_elements": True,
+            "create_shells": False,
+            "verbose": False,
+        })
+        try:
+            b.build()
+            # These attributes are expected by existing callers
+            assert b.split_elements is not None
+            assert b.split_assignments is not None
+            assert hasattr(b, 'frame_tag_map')
+            assert len(b.frame_tag_map) > 0
+        finally:
+            ops.wipe()
+
+    def test_legacy_path_unchanged(self):
+        """use_preprocessor=False (default) works identically to before."""
+        import openseespy.opensees as ops
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        md = make_sample_model()
+        b = OpenSeesBuilder(md, {
+            "split_elements": True,
+            "create_shells": False,
+            "verbose": False,
+        })
+        try:
+            b.build()
+            # Legacy path produces the same state
+            assert len(b.frame_tag_map) > 0
+            node_tags = ops.getNodeTags()
+            assert len(node_tags) > 0
+        finally:
+            ops.wipe()
