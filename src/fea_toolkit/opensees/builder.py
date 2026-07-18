@@ -150,10 +150,17 @@ class OpenSeesBuilder:
             'recompute_edge_constraints': False,  # Re-detect edge constraints
                                                    # during pushover rebuild
             # Shell subdivision — subdivide each coarse shell into an N×N grid
-            # before creating ShellMITC4 elements.  Set to 2 for 2×2 (4 shells
-            # per area), 3 for 3×3 (9 shells), etc.  0 = no subdivision.
+            # at the model-data level (visible to NPZ, PyVista, Rhino, etc.).
+            #
+            #   int:     2 for 2×2 (4 shells per area), 3 for 3×3 (9 shells),
+            #            etc.  0 (default) = no subdivision.
+            #   dict:    {'n': 3, 'selection': Selection(...)} — subdivide only
+            #            areas matching the Selection (e.g. only slabs or walls).
+            #
             # Subdividing reduces local wall bending modes and shifts global
-            # modes earlier in the eigen solution.
+            # modes earlier in the eigen solution.  When active, frame elements
+            # connected to subdivided shell edges are automatically split at the
+            # new sub-nodes to maintain connectivity.
             'subdivide_shells': 0,
             # Rigid diaphragm constraints at storey levels.
             # True = auto-detect from slab/floor area Z-levels.
@@ -2006,6 +2013,19 @@ class OpenSeesBuilder:
             self._mesh_areas(selection=selection)
             self._merge_coincident_nodes()
 
+            # Shell subdivision — N×N refinement at model-data level.
+            # Runs after mesh_areas / merge_coincident so the subdivided
+            # topology is fully visible downstream.
+            self._subdivide_shells_in_model_data()
+
+            # Split frame elements at shell subdivision edge nodes so
+            # frame-slab interfaces remain connected after refinement.
+            self._split_frames_at_shell_subdiv()
+
+            # Re-merge coincident nodes created by frame splitting at
+            # sub-nodes (they share coordinates with sub-edge nodes).
+            self._merge_coincident_nodes()
+
             # Classify area elements AFTER meshing so that split sub-
             # areas (from split_slabs_at_walls etc.) are included.
             if factors:
@@ -2700,6 +2720,248 @@ class OpenSeesBuilder:
         # edge-propagated restraints apply.  Synthetic base fixities
         # are NOT written into self.model.restraints so diagnostic
         # code sees only original SAP2000 restraints.
+
+    # -------------------------------------------------------------------------
+    # Shell subdivision — N×N refinement at the model-data level
+    # -------------------------------------------------------------------------
+
+    def _subdivide_shells_in_model_data(self) -> None:
+        """Subdivide coarse shell quads into an N×N grid in model data.
+
+        Operates after :meth:`_mesh_areas` and
+        :meth:`split_areas_at_frame_edges` so the existing mesh topology
+        is further refined.  New nodes and sub-elements are added to
+        ``self.model``, making them visible to NPZ, PyVista, Rhino, etc.
+
+        Config::
+
+            'subdivide_shells': 0          → disabled (default)
+            'subdivide_shells': 3          → 3×3 on every shell
+            'subdivide_shells': {'n': 2,
+                                 'selection': Selection(...)}  → 2×2 on selection
+        """
+        cfg = self.config.get('subdivide_shells', 0)
+        if not cfg:
+            return
+
+        if isinstance(cfg, dict):
+            n = cfg.get('n', 0)
+            sel_criteria = cfg.get('selection', None)
+            sel_area_ids = (set(sel_criteria.get_area_ids(self.model))
+                            if sel_criteria is not None else None)
+            selection = sel_area_ids
+        elif isinstance(cfg, int):
+            n = cfg
+            selection = None  # all areas
+        else:
+            return
+
+        if n < 2:
+            return
+
+        if self.config['verbose']:
+            n_areas = len(self.model.area_elements)
+            n_active = sum(1 for ae in self.model.area_elements.values()
+                           if not getattr(ae, 'inactive', False))
+            print(f"  Shell subdivision: {n}×{n} on "
+                  f"{'all' if selection is None else len(selection)} area(s)"
+                  f" ({n_active} active of {n_areas} total)")
+
+        from ..model.geometry import subdivide_area_mesh
+
+        max_elem_tag = max(
+            (ae.area_tag for ae in self.model.area_elements.values()), default=0
+        )
+        max_node_tag = max(
+            (nd.node_tag for nd in self.model.nodes.values()), default=0
+        )
+        next_tag = max(max_elem_tag, max_node_tag) + 1
+
+        areas, assignments, nodes, next_tag = subdivide_area_mesh(
+            self.model.area_elements,
+            self.model.area_assignments,
+            self.model.nodes,
+            n=n,
+            selection=selection,
+            next_tag=next_tag,
+            groups=getattr(self.model, 'groups', None),
+        )
+        self.model.area_elements = areas
+        self.model.area_assignments = assignments
+        self.model.nodes = nodes
+
+        # Create OpenSees nodes for the new sub-nodes
+        for nd in self.model.nodes.values():
+            if nd.node_tag not in self._created_node_tags:
+                ops.node(nd.node_tag, nd.x, nd.y, nd.z)
+                self._created_node_tags.add(nd.node_tag)
+
+        if self.config['verbose']:
+            sub_count = sum(1 for aid in areas if "_sub_" in aid
+                           and not getattr(areas[aid], 'inactive', False))
+            if sub_count:
+                print(f"  Shell subdivision: {sub_count} sub-elements created")
+
+    # -------------------------------------------------------------------------
+    # Frame splitting at shell subdivision edge nodes
+    # -------------------------------------------------------------------------
+
+    def _split_frames_at_shell_subdiv(self) -> None:
+        """Split frame elements at shell subdivision edge nodes.
+
+        After :meth:`_subdivide_shells_in_model_data` creates intermediate
+        nodes on area perimeters, frame elements that terminate on those
+        perimeter edges need to connect to the new sub-nodes.  This method
+        finds all ``_sub_`` nodes that lie on frame element segments and
+        splits the corresponding frames at those parametric positions.
+
+        Operates on ``self.split_elements`` if available (post
+        :meth:`_split_elements`), otherwise on
+        ``self.model.frame_elements``.
+        """
+        from ..model.geometry import point_on_segment, compute_t_location
+        import copy
+
+        # Collect all sub-nodes from shell subdivision
+        sub_nodes: Dict[str, float] = {}  # node_id -> coord tuple
+        for nid, nd in self.model.nodes.items():
+            if "_sub_" not in nid:
+                continue
+            sub_nodes[nid] = (nd.x, nd.y, nd.z)
+
+        if not sub_nodes:
+            return
+
+        elements = (self.split_elements if self.split_elements is not None
+                    else self.model.frame_elements)
+        assignments = (self.split_assignments if self.split_elements is not None
+                       else self.model.frame_assignments)
+
+        active_elements = {
+            eid: elem for eid, elem in elements.items()
+            if not getattr(elem, 'inactive', False)
+        }
+
+        if not active_elements:
+            return
+
+        # For each active frame element, find which sub-nodes lie on it
+        next_tag = max((elem.elem_tag for elem in elements.values()), default=0) + 1
+
+        new_elements: Dict[str, FrameElement] = {}
+        new_assignments: Dict[str, str] = {}
+        tol = 1e-6
+
+        for eid, elem in active_elements.items():
+            ni = self.model.nodes.get(elem.node_i)
+            nj = self.model.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                new_elements[eid] = elem
+                new_assignments[eid] = assignments.get(eid, "")
+                continue
+
+            a = np.array([ni.x, ni.y, ni.z], dtype=float)
+            b = np.array([nj.x, nj.y, nj.z], dtype=float)
+            length = float(np.linalg.norm(b - a))
+            if length < 1e-12:
+                new_elements[eid] = elem
+                new_assignments[eid] = assignments.get(eid, "")
+                continue
+
+            # Find sub-nodes on this segment
+            intermediates: List[tuple] = []  # (node_id, t)
+            for snid, scoord in sub_nodes.items():
+                if snid == elem.node_i or snid == elem.node_j:
+                    continue
+                if point_on_segment(scoord, a, b, tol):
+                    t = compute_t_location(scoord, a, b)
+                    intermediates.append((snid, t))
+
+            if not intermediates:
+                new_elements[eid] = elem
+                new_assignments[eid] = assignments.get(eid, "")
+                continue
+
+            # Sort by parametric position
+            intermediates.sort(key=lambda x: x[1])
+
+            # Deduplicate by t within tolerance
+            deduped = []
+            prev_t = None
+            for snid, t in intermediates:
+                if prev_t is not None and abs(t - prev_t) <= tol:
+                    continue
+                deduped.append((snid, t))
+                prev_t = t
+            intermediates = deduped
+
+            t_locs = [t for _, t in intermediates]
+            node_list = [elem.node_i] + [snid for snid, _ in intermediates] + [elem.node_j]
+
+            # Mark original as inactive, record children
+            elem.inactive = True
+            elem.t_locations = list(t_locs)
+            elem.child_ids = []
+            new_elements[eid] = elem
+            sec_name = assignments.get(eid, "")
+            new_assignments[eid] = sec_name
+
+            # Create child elements
+            for k in range(len(node_list) - 1):
+                child_id = f"{eid}_subdiv_{k}"
+                child_tag = next_tag
+                next_tag += 1
+                child = FrameElement(
+                    elem_id=child_id,
+                    elem_tag=child_tag,
+                    node_i=node_list[k],
+                    node_j=node_list[k + 1],
+                    angle=elem.angle,
+                    parent_id=eid,
+                    cardinal_point=elem.cardinal_point,
+                )
+                elem.child_ids.append(child_id)
+                new_elements[child_id] = child
+                new_assignments[child_id] = sec_name
+
+            # Redistribute distributed loads (weight by child length)
+            for ld in self.model.frame_dist_loads:
+                if ld.frame_id == eid:
+                    child_lengths = []
+                    total_len = 0.0
+                    for k in range(len(node_list) - 1):
+                        n_a = self.model.nodes.get(node_list[k])
+                        n_b = self.model.nodes.get(node_list[k + 1])
+                        if n_a and n_b:
+                            cl = np.linalg.norm([
+                                n_b.x - n_a.x, n_b.y - n_a.y, n_b.z - n_a.z
+                            ])
+                        else:
+                            cl = 0.0
+                        child_lengths.append(cl)
+                        total_len += cl
+                    if total_len > 1e-12:
+                        for k, child_id in enumerate(elem.child_ids):
+                            ratio = child_lengths[k] / total_len
+                            new_ld = copy.copy(ld)
+                            new_ld.frame_id = child_id
+                            new_ld.w = ld.w * ratio
+                            self.model.frame_dist_loads.append(new_ld)
+
+        # Write back
+        if self.split_elements is not None:
+            # Merge with existing split_elements
+            merged = {}
+            merged.update(self.split_elements)
+            merged.update(new_elements)
+            self.split_elements = merged
+            merged_assign = {}
+            merged_assign.update(self.split_assignments)
+            merged_assign.update(new_assignments)
+            self.split_assignments = merged_assign
+        else:
+            self.model.frame_elements = new_elements
+            self.model.frame_assignments = new_assignments
 
     def _merge_coincident_nodes(self) -> None:
         """Merge mesh‑created model nodes that sit at the same coordinates.
@@ -4550,44 +4812,11 @@ class OpenSeesBuilder:
             )
             elem_tag = max(max_frame_tag, max_rigid_tag) + shell_count + 1
 
-            # ── Shell subdivision: subdivide each coarse quad into ──
-            # ── an N×N grid of smaller ShellMITC4 elements.        ──
-            n_sub = self.config.get('subdivide_shells', 0)
-            if n_sub > 1 and len(nids) == 4:
-                import openseespy.opensees as _ops
-                _sub_count = 0
-                _c = [np.array(_ops.nodeCoord(t)) for t in node_tags]
-                _grid = [[None] * (n_sub + 1) for _ in range(n_sub + 1)]
-                _next_tag = max(_ops.getNodeTags()) + 1000
-                for j in range(n_sub + 1):
-                    v = j / n_sub
-                    for i in range(n_sub + 1):
-                        u = i / n_sub
-                        if i == 0 and j == 0:
-                            _grid[j][i] = node_tags[0]; continue
-                        if i == n_sub and j == 0:
-                            _grid[j][i] = node_tags[1]; continue
-                        if i == n_sub and j == n_sub:
-                            _grid[j][i] = node_tags[2]; continue
-                        if i == 0 and j == n_sub:
-                            _grid[j][i] = node_tags[3]; continue
-                        top = _c[0] * (1 - u) + _c[1] * u
-                        bot = _c[3] * (1 - u) + _c[2] * u
-                        pt = top * (1 - v) + bot * v
-                        _ntag = _next_tag + _sub_count
-                        _sub_count += 1
-                        _ops.node(_ntag, float(pt[0]), float(pt[1]), float(pt[2]))
-                        self._created_node_tags.add(_ntag)
-                        _grid[j][i] = _ntag
-                for j in range(n_sub):
-                    for i in range(n_sub):
-                        _etag = _next_tag + 5000 + j * n_sub + i
-                        _ops.element('ShellMITC4', _etag,
-                                     _grid[j][i], _grid[j][i + 1],
-                                     _grid[j + 1][i + 1], _grid[j + 1][i],
-                                     sec_tag)
-                        shell_count += 1
-            elif len(nids) == 4:
+            # Shell subdivision is handled at the model-data level
+            # by _subdivide_shells_in_model_data() before this method
+            # is called.  Sub-elements appear as regular area elements
+            # in the loop and are created as individual ShellMITC4.
+            if len(nids) == 4:
                 ops.element('ShellMITC4', elem_tag, *node_tags, sec_tag)
                 shell_count += 1
             elif len(nids) == 3:
@@ -4904,6 +5133,14 @@ class OpenSeesBuilder:
         if algo != 'KrylovNewton':
             _algo_chain.append('KrylovNewton')
 
+        # ── Set up analysis ONCE (outside the retry chain) ─────
+        # Integrator + analysis objects persist across algorithm swaps,
+        # so a fallback algorithm resumes from the failed substep
+        # instead of restarting from substep 1.
+        ops.integrator('LoadControl', 1.0 / n_sub)
+        ops.analysis('Static')
+
+        converged = 0  # number of substeps that have converged so far
         ok = -1
         for attempt in _algo_chain:
             if isinstance(attempt, tuple):
@@ -4915,13 +5152,17 @@ class OpenSeesBuilder:
                     ops.algorithm(attempt)
             if attempt != algo and self.config.get('verbose', False):
                 print(f"  Retrying with {attempt}...")
-            ops.integrator('LoadControl', 1.0 / n_sub)
-            ops.analysis('Static')
+
+            # Resume from the last converged substep.  ops.analyze(1)
+            # increments the LoadControl load factor by 1/n_sub on
+            # success; on failure the factor is unchanged, so the next
+            # algorithm naturally retries the same failed substep.
             ok = 0
-            for _ in range(n_sub):
+            for s in range(converged, n_sub):
                 ok = ops.analyze(1)
                 if ok != 0:
                     break
+                converged = s + 1
             if ok == 0:
                 break
 
