@@ -385,8 +385,7 @@ following investigative pattern has proven effective:
 > the slab's `max_size=2.0` mesh happened to fall on even X coordinates. The
 > visual confirmed the issue before implementing a geometric coincidence scan.
 
-Related memory for LLMs working on this codebase: see `Diagnostic workflow pattern`
-in repository memory (`/memories/repo/notes.md`).
+The diagnostic workflow pattern is documented above in this section.
 
 ---
 
