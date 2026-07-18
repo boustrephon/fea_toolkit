@@ -51,13 +51,15 @@ def _build_deformed_mesh(
     segments: list,
     seg_npoints: list,
     all_quads: list,
-    all_tris: list,
     sec_idxs: list,
     scale: float,
     amp: float,
-) -> "tuple[pv.PolyData, Optional[pv.PolyData]]":
+) -> "tuple[Any, Optional[Any]]":
     """Build a single merged ``PolyData`` from frame-segment and shell-quad
     geometry, displaced by ``scale * amp`` along each element's eigenvector.
+
+    Shell quads become ``[4, i, j, k, l]`` faces (not triangulated), so
+    each quad maps to exactly one face — no cell‑count mismatch.
 
     Parameters
     ----------
@@ -69,10 +71,9 @@ def _build_deformed_mesh(
         length, so point count is invariant w.r.t. *amp*).
     all_quads : list of (p1, p2, p3, p4, d1, d2, d3, d4) tuples
         Shell quad data — four corners and their displacement vectors.
-    all_tris : list of (n, i, j, k) tuples
-        Triangle indices that subdivide each quad (shared winding).
     sec_idxs : list of int
-        Per-quad section index (one per entry in *all_quads*).
+        Per-quad section index (one per entry in *all_quads*).  Used to
+        assign a ``section_idx`` cell scalar on the shell mesh.
     scale : float
         Base scale factor from the eigenvector normalisation.
     amp : float
@@ -82,14 +83,14 @@ def _build_deformed_mesh(
     -------
     tuple[pv.PolyData, pv.PolyData | None]
         ``(frame_mesh, shell_mesh)`` — frame mesh contains ``lines`` only;
-        shell mesh contains triangulated ``faces`` with a ``section_idx``
-        cell scalar for per-section colouring.  *shell_mesh* is ``None``
-        when there are no shell elements.
+        shell mesh contains quad ``faces`` with a ``section_idx`` cell
+        scalar.  *shell_mesh* is ``None`` when there are no shell elements.
     """
+    import pyvista as pv
+
     all_pts: list = []
     all_lines: list = []
     all_faces: list = []
-    all_cell_data: list = []
     offset = 0
 
     # Frame lines
@@ -106,18 +107,21 @@ def _build_deformed_mesh(
 
     n_frame_pts = offset
 
-    # Shell quads — triangulated, with per-face section index
-    for quad, (t1, t2), sidx in zip(all_quads, all_tris, sec_idxs):
+    # Shell quads — all faces are [4, i, j, k, l].  Use a shell-local
+    # vertex offset (starting at 0) since the shell mesh will be created
+    # from ``verts[n_frame_pts:]`` with its own 0‑based indexing.
+    shell_offset = 0
+    for quad in all_quads:
         p1, p2, p3, p4, d1, d2, d3, d4 = quad
         a1 = p1 + d1 * scale * amp
         a2 = p2 + d2 * scale * amp
         a3 = p3 + d3 * scale * amp
         a4 = p4 + d4 * scale * amp
         all_pts.extend([a1, a2, a3, a4])
-        all_faces.append([3, offset + t1[1], offset + t1[2], offset + t1[3]])
-        all_faces.append([3, offset + t2[1], offset + t2[2], offset + t2[3]])
-        all_cell_data.extend([sidx, sidx])
-        offset += 4
+        all_faces.append([4, shell_offset, shell_offset + 1,
+                          shell_offset + 2, shell_offset + 3])
+        shell_offset += 4
+        offset += 4  # still track global offset for verts partitioning
 
     if not all_pts:
         return pv.PolyData(), None
@@ -137,11 +141,15 @@ def _build_deformed_mesh(
     # ── Shell mesh ──
     shell_mesh: Optional[pv.PolyData] = None
     if all_faces:
+        # Build (N, 5) array — set faces BEFORE points so PyVista 0.48
+        # correctly interprets the face structure.
         faces = np.array(all_faces, dtype=int)
-        sm = pv.PolyData(verts[n_frame_pts:])
+        sm = pv.PolyData()
         sm.faces = faces
-        if len(all_cell_data) > 0:
-            sm.cell_data['section_idx'] = np.array(all_cell_data, dtype=int)
+        sm.points = verts[n_frame_pts:]
+        if sec_idxs:
+            # Each quad → 1 face → 1 cell_data entry (no mismatch)
+            sm.cell_data['section_idx'] = np.array(sec_idxs, dtype=int)
         shell_mesh = sm
 
     return frame_mesh, shell_mesh
@@ -240,11 +248,18 @@ def plot_model_3d(
     # Active (sub-)elements: solid with section colours.
     # Inactive parents: grey wireframe (original SAP data overlay).
     if builder.model.area_elements:
+        # Resolve selection for area filtering (if provided)
+        sel_area_ids: Optional[Set[str]] = None
+        if selection is not None:
+            sel_area_ids = set(selection.get_area_ids(builder.model))
+
         # Collect active and inactive areas
         active_quads: Dict[str, list] = {}   # sec_name → [quad points]
         inactive_quads: list = []             # parent quads (grey overlay)
 
         for aid, area in builder.model.area_elements.items():
+            if sel_area_ids is not None and aid not in sel_area_ids:
+                continue
             if len(area.node_ids) < 3:
                 continue
             nids = area.node_ids[:4]
@@ -275,7 +290,7 @@ def plot_model_3d(
                                  show_edges=True, edge_color='grey',
                                  line_width=0.5)
 
-        # Render active (sub-element) quads with section colours
+        # Render active (sub-element) quads
         if active_quads:
             _shell_secs = sorted(active_quads.keys())
             _shell_cmap = [
@@ -286,12 +301,17 @@ def plot_model_3d(
                             for i, s in enumerate(_shell_secs)}
 
             for sec_name, quads in active_quads.items():
-                colour = _shell_colour.get(sec_name, '#4c72b0')
+                if color_by_section:
+                    colour = _shell_colour.get(sec_name, '#4c72b0')
+                else:
+                    colour = '#4c72b0'  # neutral blue, matching frame default
                 for quad_pts in quads:
-                    # Triangulate quad for robust rendering
-                    t1 = [3, 0, 1, 2]
-                    t2 = [3, 0, 2, 3]
-                    face = pv.PolyData(quad_pts, faces=t1 + t2)
+                    pts = np.array(quad_pts)
+                    is_tri = np.allclose(pts[2], pts[3])
+                    if is_tri:
+                        face = pv.PolyData(pts[:3], faces=[3, 0, 1, 2])
+                    else:
+                        face = pv.PolyData(pts, faces=[4, 0, 1, 2, 3])
                     plotter.add_mesh(face, color=colour, opacity=0.6,
                                      show_edges=True, edge_color=colour,
                                      line_width=1.0,
@@ -546,6 +566,8 @@ def plot_mode_3d(
     font_size: int = 14,
     selection: Optional['Selection'] = None,
     notebook: bool = False,
+    anim_speed: float = 1.0,
+    anim_amplitude: float = 1.0,
     **kwargs,
 ) -> Optional[Any]:
     """Display (and optionally animate) a mode shape in 3D using PyVista.
@@ -568,6 +590,9 @@ def plot_mode_3d(
         selection: Optional :class:`~fea_toolkit.model.selection.Selection`
             to restrict which elements are shown.
         notebook: If True, return plotter for Jupyter.
+        anim_speed: Animation speed multiplier (1.0 = default, 2.0 = 2×).
+        anim_amplitude: Amplitude range multiplier (1.0 = ±100% of scale,
+            1.5 = ±150%, etc.).
         **kwargs: Passed to ``pyvista.Plotter()``.
 
     Requires:
@@ -650,11 +675,6 @@ def plot_mode_3d(
     _sec_colors = {name: _SECTION_COLORS[i % len(_SECTION_COLORS)]
                    for i, name in enumerate(_sec_names_sorted)}
 
-    # ── Helper: triangulate a quad into two triangles ──
-    def _tri_quad(v0, v1, v2, v3):
-        """Return two triangle faces [v0,v1,v2] and [v0,v2,v3]."""
-        return [3, v0, v1, v2], [3, v0, v2, v3]
-
     # Undeformed (grey)
     if show_original:
         for p1, p2, _, _ in segments:
@@ -663,8 +683,7 @@ def plot_mode_3d(
             plotter.add_mesh(poly, color='lightgrey', line_width=2, opacity=0.3)
         # Undeformed shells — inactive parents (coarse mesh) as grey overlay
         for quad_pts in inactive_shell_quads:
-            t1, t2 = _tri_quad(0, 1, 2, 3)
-            face = pv.PolyData(quad_pts, faces=t1 + t2)
+            face = pv.PolyData(quad_pts, faces=[4, 0, 1, 2, 3])
             plotter.add_mesh(face, color='lightgrey', opacity=0.12,
                              show_edges=True, edge_color='grey', line_width=0.5)
 
@@ -675,37 +694,26 @@ def plot_mode_3d(
     for p1, p2, _, _ in segments:
         n = max(2, int(np.linalg.norm(p2 - p1) * 2))
         _seg_npoints.append(n)
-    # Pre-compute triangle faces for each shell quad, grouped by section.
-    # _group_tris[sec_name] = list of (t1, t2) pairs for that group's quads
-    _group_tris: Dict[str, List[tuple]] = {}
-    for sec_name, quads in shell_groups.items():
-        tris = []
-        for quad in quads:
-            tris.append(_tri_quad(0, 1, 2, 3))
-        _group_tris[sec_name] = tris
-    # Build a flat list for the animation path, with section index per quad
+    # Build flat lists for the animation path, with per-quad section index
     _all_quads_flat: List[list] = []
-    _all_tris_flat: List[tuple] = []
-    _all_sec_idxs: List[int] = []        # section index for each quad (used for per-face coloring)
-    _sec_names_list = _sec_names_sorted  # index → name
-    _sec_name_to_idx = {name: i for i, name in enumerate(_sec_names_list)}
+    _all_sec_idxs: List[int] = []
+    _sec_name_to_idx = {name: i for i, name in enumerate(_sec_names_sorted)}
     for sec_name, quads in shell_groups.items():
         sidx = _sec_name_to_idx[sec_name]
-        for idx, quad in enumerate(quads):
+        for quad in quads:
             _all_quads_flat.append(quad)
-            _all_tris_flat.append(_group_tris[sec_name][idx])
             _all_sec_idxs.append(sidx)
 
     def make_deformed(amp: float = 1.0):
         """Build merged PolyData for the deformed shape at amplitude *amp*.
         Point count is invariant w.r.t. *amp* — safe for animation updates.
 
-        Shell triangles carry a ``section_idx`` cell scalar so they can be
-        coloured by section when rendered.
+        The shell mesh carries a ``section_idx`` cell scalar for per-section
+        colouring (one entry per quad face, 1:1 mapping).
         """
         return _build_deformed_mesh(
             segments, _seg_npoints,
-            _all_quads_flat, _all_tris_flat, _all_sec_idxs,
+            _all_quads_flat, _all_sec_idxs,
             scale, amp,
         )
 
@@ -716,24 +724,25 @@ def plot_mode_3d(
 
         # Render frames as coloured lines
         if frame_mesh is not None and frame_mesh.n_points:
-            plotter.add_mesh(frame_mesh, color='#c44e52',
+            plotter.add_mesh(frame_mesh, color='#555555',
                              line_width=4, opacity=0.85)
 
-        # Render shells with per-section colours via cell scalars
-        n_sections = len(_sec_names_list)
+        # Render shells with per-section colours via cell scalars.
+        # Each quad is a single face, so cell_data maps 1:1 to faces.
+        n_sections = len(_sec_names_sorted)
         if shell_mesh is not None and shell_mesh.n_points:
             if n_sections > 0:
                 plotter.add_mesh(
                     shell_mesh,
                     scalars='section_idx',
                     cmap=_SECTION_COLORS[:n_sections],
-                    show_edges=True, edge_color='#a03030',
+                    show_edges=True, edge_color='#333333',
                     opacity=0.85,
                     clim=[-0.5, n_sections - 0.5],
                 )
             else:
-                plotter.add_mesh(shell_mesh, color='#c44e52',
-                                 show_edges=True, edge_color='#a03030',
+                plotter.add_mesh(shell_mesh, color='#4c72b0',
+                                 show_edges=True, edge_color='#333333',
                                  opacity=0.85)
 
         # ── Slider / animation callback ──
@@ -747,18 +756,16 @@ def plot_mode_3d(
         # Static mode: render each shell section group in its own colour
         for sec_name, quads in shell_groups.items():
             color = _sec_colors[sec_name]
-            tris = _group_tris[sec_name]
             all_pts, all_faces = [], []
             offset = 0
-            for quad, (t1, t2) in zip(quads, tris):
+            for quad in quads:
                 p1, p2, p3, p4, d1, d2, d3, d4 = quad
                 a1 = p1 + d1 * scale
                 a2 = p2 + d2 * scale
                 a3 = p3 + d3 * scale
                 a4 = p4 + d4 * scale
                 all_pts.extend([a1, a2, a3, a4])
-                all_faces.append([3, offset + t1[1], offset + t1[2], offset + t1[3]])
-                all_faces.append([3, offset + t2[1], offset + t2[2], offset + t2[3]])
+                all_faces.append([4, offset, offset + 1, offset + 2, offset + 3])
                 offset += 4
             if all_pts:
                 verts = np.vstack(all_pts)
@@ -793,7 +800,8 @@ def plot_mode_3d(
         import math as _math
 
         def callback(step):
-            amp = _math.sin(2.0 * _math.pi * step / 60.0)
+            amp = anim_amplitude * _math.sin(
+                2.0 * _math.pi * step * anim_speed / 60.0)
             nfm, nsm = make_deformed(amp)
             if frame_mesh is not None and nfm is not None:
                 frame_mesh.points = nfm.points
@@ -801,7 +809,8 @@ def plot_mode_3d(
                 shell_mesh.points = nsm.points
             plotter.render()
 
-        plotter.add_timer_event(600, 30, callback)
+        n_iter = max(30, int(30 * anim_speed))
+        plotter.add_timer_event(600, n_iter, callback)
         plotter.add_text(f"Mode {mode + 1}{period_str}  (oscillating)",
                          position='upper_edge', font_size=font_size)
     else:
