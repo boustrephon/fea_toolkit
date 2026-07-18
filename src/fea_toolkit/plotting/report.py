@@ -119,7 +119,7 @@ def plot_modal_participation(
     # ── Stacked cumulative bar for hidden low-participation modes ──
     _hidden_bar = None
     _hidden_cum = {}
-    if n_hidden > 0 and n_modes > 0:
+    if n_hidden > 0:
         _hidden_bar = {
             "Mode": f"<{min_participation}%",
         }
@@ -293,9 +293,10 @@ def plot_rs_modal_analysis(modal_props: dict,
             ax2.text(n - 0.5, base_shear_rigid_x * 1.02, label,
                      color="#1f77b4", fontsize=6, ha="right", va="bottom")
         if base_shear_rigid_y > 0:
+            label_y = f"Rigid Y (T≤{T_rigid:.3f}s)"
             ax2.axhline(base_shear_rigid_y, color="#ff7f0e", linewidth=1.0,
                         linestyle=":", alpha=0.7)
-            ax2.text(n - 0.5, base_shear_rigid_y * 1.02, "",
+            ax2.text(n - 0.5, base_shear_rigid_y * 1.02, label_y,
                      color="#ff7f0e", fontsize=6, ha="right", va="bottom")
     ax2.legend(fontsize=8)
     ax2.grid(True, alpha=0.3, axis="y")
@@ -369,7 +370,6 @@ def plot_csm_4panel(
         S_a = np.array(adrs["S_a"])
 
         # Determine bounds — if yield exceeds the visible range, report NA
-        max_Sd = max(S_d.max(), Sd_plot.max())
         max_Sa = max(S_a.max(), Sa_plot.max())
         x_lim = 0.30
         yield_ok = (

@@ -455,7 +455,7 @@ def _build_and_constrain(md: SAPModelData) -> OpenSeesBuilder:
 def run_linear_cases(md: SAPModelData,
                      cases: Optional[List[str]] = None,
                      ) -> Dict[str, Any]:
-    """Run static analysis for each load case via the builder.
+    """Run static analysis for each load case individually via the builder.
 
     Returns a dict keyed by case name, each with displacements,
     reactions, element_forces, and load_totals.
@@ -466,16 +466,23 @@ def run_linear_cases(md: SAPModelData,
         print("  (no static load cases found)")
         return {}
 
-    b = _build_and_constrain(md)
-    try:
-        # Run with all patterns at default scale 1.0.
-        # Per-case pattern_scales can be added later by mapping
-        # each load case's case_data to pattern→scale entries.
-        results = b.run_static_analysis()
-        return results
-    finally:
-        import openseespy.opensees as ops
-        ops.wipe()
+    results: Dict[str, Any] = {}
+    for case in cases:
+        b = _build_and_constrain(md)
+        try:
+            # Derive pattern→scale mapping from case_data if available
+            pattern_scales = {"DEAD": 1.0}
+            if hasattr(md, 'load_cases') and md.load_cases:
+                lc = md.load_cases.get(case) if isinstance(md.load_cases, dict) else None
+                if lc and hasattr(lc, 'case_data') and lc.case_data:
+                    pattern_scales = {
+                        k: float(v) for k, v in lc.case_data.items()
+                    } if isinstance(lc.case_data, dict) else {"DEAD": 1.0}
+            results[case] = b.run_static_analysis(pattern_scales=pattern_scales)
+        finally:
+            import openseespy.opensees as ops
+            ops.wipe()
+    return results
 
 
 def run_modal(md: SAPModelData, num_modes: int = 12,
@@ -618,12 +625,13 @@ def run_rs(md: SAPModelData,
         "modal_base_shear": modal_shear,
         "base_shear_cqc": V_cqc,
         "base_shear_srss": V_srss,
-        "base_shear_rigid": V_rigid,
+        "base_shear_rigid_cutoff": V_rigid,
+        "base_shear_missing_mass": V_missing,
+        "base_shear_rigid": V_rigid + V_missing,
         "base_shear_total": V_total,
         "total_mass": total_mass,
         "captured_mass": sum_meff_captured,
         "residual_mass": residual_mass,
-        "base_shear_rigid": V_rigid + V_missing,
         "participation_ratio": sum_meff_captured / total_mass if total_mass > 0 else 0.0,
         "modal_periods": periods,
         "spectral_accels": Sa.tolist(),
@@ -758,71 +766,58 @@ def _save_mode_gif(builder, mode_shapes, mode_idx, periods, scale, out_dir):
             np.array(di), np.array(dj),
         ))
 
-    def _make_frame_mesh(amp):
-        """Merged PolyData of frame lines at amplitude *amp*."""
-        all_pts, all_lines = [], []
-        offset = 0
-        for p1, p2, di, dj in segments:
-            a = p1 + di * scale * amp
-            b = p2 + dj * scale * amp
-            n = max(2, int(np.linalg.norm(b - a) * 2))
-            pts = np.linspace(a, b, n)
-            all_pts.append(pts)
-            for i in range(n - 1):
-                all_lines.append([2, offset + i, offset + i + 1])
-            offset += n
-        if not all_pts:
-            return pv.PolyData()
-        return pv.PolyData(np.vstack(all_pts), np.array(all_lines, dtype=int))
+    # Pre-compute stable frame point counts from undeformed length
+    _seg_npoints = [max(2, int(np.linalg.norm(p2 - p1) * 2))
+                    for p1, p2, _, _ in segments]
 
-    def _make_shell_mesh(amp):
-        """Merged PolyData of shell quads at amplitude *amp*."""
-        all_pts, all_faces = [], []
-        offset = 0
-        for quad in shell_quads:
-            p1, p2, p3, p4, d1, d2, d3, d4 = quad
-            a1 = p1 + d1 * scale * amp
-            a2 = p2 + d2 * scale * amp
-            a3 = p3 + d3 * scale * amp
-            a4 = p4 + d4 * scale * amp
-            all_pts.extend([a1, a2, a3, a4])
-            all_faces.append([4, offset, offset + 1, offset + 2, offset + 3])
-            offset += 4
-        if not all_pts:
-            return pv.PolyData()
-        cells = np.array(all_faces, dtype=int)
-        # Pad faces array with leading count per face
-        return pv.PolyData(np.vstack(all_pts), cells)
+    # Pre-compute triangulation for each shell quad
+    _shell_tris = [([3, 0, 1, 2], [3, 0, 2, 3]) for _ in shell_quads]
+    _shell_sec_idxs = [0] * len(shell_quads)  # uniform — no section coloring
 
-    period_str = (f"T = {periods[mode_idx]:.4f} s"
-                  if mode_idx < len(periods) else "")
-
-    from fea_toolkit.plotting.viz import _set_isometric_view
+    from fea_toolkit.plotting.viz import _build_deformed_mesh, _set_isometric_view
 
     plotter = pv.Plotter(off_screen=True, window_size=[1200, 800])
 
     # Undeformed shells (light grey, translucent)
     if shell_quads:
-        undeformed_shells = _make_shell_mesh(0.0)
-        plotter.add_mesh(undeformed_shells, color='lightgrey',
-                         opacity=0.3, show_edges=True, line_width=1)
+        _, undeformed_shells = _build_deformed_mesh(
+            segments, _seg_npoints,
+            shell_quads, _shell_tris, _shell_sec_idxs,
+            scale, 0.0,
+        )
+        if undeformed_shells is not None and undeformed_shells.n_points:
+            plotter.add_mesh(undeformed_shells, color='lightgrey',
+                             opacity=0.3, show_edges=True, line_width=1)
 
-    # Undeformed frames (grey lines)
+    # Undeformed frames (grey lines) — individual segments
     for p1, p2, _, _ in segments:
         n = max(2, int(np.linalg.norm(p2 - p1) * 2))
         poly = pv.lines_from_points(np.linspace(p1, p2, n))
         plotter.add_mesh(poly, color='#999999', line_width=1, opacity=0.5)
 
     # Deformed shell (red, translucent)
-    shell_mesh = _make_shell_mesh(0.0) if shell_quads else pv.PolyData()
+    shell_mesh = pv.PolyData()
     if shell_quads:
-        plotter.add_mesh(shell_mesh, color='#c44e52',
-                         opacity=0.5, show_edges=True, line_width=1)
+        _, shell_mesh = _build_deformed_mesh(
+            segments, _seg_npoints,
+            shell_quads, _shell_tris, _shell_sec_idxs,
+            scale, 0.0,
+        )
+        if shell_mesh.n_points:
+            plotter.add_mesh(shell_mesh, color='#c44e52',
+                             opacity=0.5, show_edges=True, line_width=1)
 
     # Deformed frames (red lines)
-    frame_mesh = _make_frame_mesh(0.0)
-    plotter.add_mesh(frame_mesh, color='#c44e52', line_width=2)
+    frame_mesh, _ = _build_deformed_mesh(
+        segments, _seg_npoints,
+        shell_quads, _shell_tris, _shell_sec_idxs,
+        scale, 0.0,
+    )
+    if frame_mesh.n_points:
+        plotter.add_mesh(frame_mesh, color='#c44e52', line_width=2)
 
+    period_str = (f"T = {periods[mode_idx]:.4f} s"
+                  if mode_idx < len(periods) else "")
     plotter.add_text(f"Mode {mode_idx + 1}  {period_str}",
                      position='upper_edge', font_size=16)
     plotter.show_grid()
@@ -834,13 +829,15 @@ def _save_mode_gif(builder, mode_shapes, mode_idx, periods, scale, out_dir):
     with imageio.get_writer(gif_path, mode='I', duration=1000/15, loop=0) as writer:
         for i in range(n_frames):
             amp = _math.sin(2.0 * _math.pi * i / n_frames)
-            # Update frames
-            new_frame = _make_frame_mesh(amp)
-            frame_mesh.points = new_frame.points
-            # Update shells
-            if shell_quads:
-                new_shell = _make_shell_mesh(amp)
-                shell_mesh.points = new_shell.points
+            nfm, nsm = _build_deformed_mesh(
+                segments, _seg_npoints,
+                shell_quads, _shell_tris, _shell_sec_idxs,
+                scale, amp,
+            )
+            if nfm is not None and nfm.n_points:
+                frame_mesh.points = nfm.points
+            if shell_quads and nsm is not None and nsm.n_points:
+                shell_mesh.points = nsm.points
             plotter.render()
             img = plotter.screenshot(return_img=True)
             writer.append_data(img)
@@ -889,6 +886,7 @@ def _build_cache_data(modal_result: Dict[str, Any],
                 frame_conn.append((ni.node_tag, nj.node_tag))
 
     shell_quads = []
+    shell_sections = []
     for aid, area in md.area_elements.items():
         if getattr(area, 'inactive', False):
             continue
@@ -902,6 +900,8 @@ def _build_cache_data(modal_result: Dict[str, Any],
             tags.append(nd.node_tag)
         if len(tags) == 4:
             shell_quads.append(tuple(tags))
+            sec_name = md.area_assignments.get(aid, 'unknown')
+            shell_sections.append(sec_name)
 
     return {
         "periods": modal_result.get("periods", []),
@@ -912,6 +912,7 @@ def _build_cache_data(modal_result: Dict[str, Any],
         "node_coords": node_coords,
         "frame_conn": frame_conn,
         "shell_quads": shell_quads,
+        "shell_sections": shell_sections,
         "mode_shapes": shapes,
     }
 
@@ -1030,7 +1031,12 @@ def load_cache() -> Optional[Dict[str, Any]]:
 
     return data
 
-    return data
+
+# Colour palette for shell section groups (matches viz.py)
+_SECTION_COLORS_CACHE = [
+    '#4c72b0', '#dd8452', '#55a868', '#c44e52', '#8172b3',
+    '#937860', '#da8bc3', '#8c8c8c', '#ccb974', '#64b5cd',
+]
 
 
 def _make_plotter_from_cache(data: Dict[str, Any], mode_idx: int, scale: float):
@@ -1043,6 +1049,7 @@ def _make_plotter_from_cache(data: Dict[str, Any], mode_idx: int, scale: float):
     coords = data.get("node_coords", {})
     frame_conn = data.get("frame_conn", [])
     shell_quads = data.get("shell_quads", [])
+    shell_sections = data.get("shell_sections", [])
 
     periods = data.get("periods", [])
     period_str = (f"T = {periods[mode_idx]:.4f} s"
@@ -1062,9 +1069,10 @@ def _make_plotter_from_cache(data: Dict[str, Any], mode_idx: int, scale: float):
             np.array(di), np.array(dj),
         ))
 
-    # Shell quads (triangulated for robustness — no bowties)
-    quads = []
-    for tags in shell_quads:
+    # Group shell quads by section name
+    # quads_by_sec[sec_name] = [(p1,p2,p3,p4,d1,d2,d3,d4), ...]
+    quads_by_sec: Dict[str, list] = {}
+    for idx, tags in enumerate(shell_quads):
         pts = []
         ds = []
         ok = True
@@ -1076,7 +1084,11 @@ def _make_plotter_from_cache(data: Dict[str, Any], mode_idx: int, scale: float):
             pts.append(np.array(c))
             ds.append(np.array(disp.get(tag, (0, 0, 0))))
         if ok and len(pts) == 4:
-            quads.append(pts + ds)
+            sec = shell_sections[idx] if idx < len(shell_sections) else 'unknown'
+            quads_by_sec.setdefault(sec, []).append(pts + ds)
+    _sec_names = sorted(quads_by_sec.keys())
+    _sec_colors = {name: _SECTION_COLORS_CACHE[i % len(_SECTION_COLORS_CACHE)]
+                   for i, name in enumerate(_sec_names)}
 
     # Pre-compute stable frame line point counts from undeformed length
     _seg_npoints = []
@@ -1084,63 +1096,82 @@ def _make_plotter_from_cache(data: Dict[str, Any], mode_idx: int, scale: float):
         n = max(2, int(np.linalg.norm(p2 - p1) * 2))
         _seg_npoints.append(n)
 
-    def _make_frame_mesh(amp):
-        all_pts, all_lines = [], []
-        offset = 0
-        for (p1, p2, di, dj), n in zip(segments, _seg_npoints):
-            a = p1 + di * scale * amp
-            b = p2 + dj * scale * amp
-            pts = np.linspace(a, b, n)
-            all_pts.append(pts)
-            for i in range(n - 1):
-                all_lines.append([2, offset + i, offset + i + 1])
-            offset += n
-        if not all_pts:
-            return pv.PolyData()
-        return pv.PolyData(np.vstack(all_pts), np.array(all_lines, dtype=int))
+    # Per-section shell mesh builders (used for animation)
+    _shell_fn_by_sec: Dict[str, callable] = {}
+    _shell_mesh_by_sec: Dict[str, pv.PolyData] = {}
+    for sec_name, quads in quads_by_sec.items():
+        def _make_sec_shell(amp, qs=quads):
+            all_pts, all_faces = [], []
+            offset = 0
+            for q in qs:
+                p1, p2, p3, p4, d1, d2, d3, d4 = q
+                a1 = p1 + d1 * scale * amp
+                a2 = p2 + d2 * scale * amp
+                a3 = p3 + d3 * scale * amp
+                a4 = p4 + d4 * scale * amp
+                all_pts.extend([a1, a2, a3, a4])
+                all_faces.append([3, offset, offset + 1, offset + 2])
+                all_faces.append([3, offset, offset + 2, offset + 3])
+                offset += 4
+            if not all_pts:
+                return pv.PolyData()
+            return pv.PolyData(np.vstack(all_pts), np.array(all_faces, dtype=int))
+        _shell_fn_by_sec[sec_name] = _make_sec_shell
+        _shell_mesh_by_sec[sec_name] = _make_sec_shell(0.0)
 
-    def _make_shell_mesh(amp):
-        all_pts, all_faces = [], []
-        offset = 0
-        for q in quads:
-            p1, p2, p3, p4, d1, d2, d3, d4 = q
-            a1 = p1 + d1 * scale * amp
-            a2 = p2 + d2 * scale * amp
-            a3 = p3 + d3 * scale * amp
-            a4 = p4 + d4 * scale * amp
-            all_pts.extend([a1, a2, a3, a4])
-            # Triangulate: [v0,v1,v2] and [v0,v2,v3]
-            all_faces.append([3, offset, offset + 1, offset + 2])
-            all_faces.append([3, offset, offset + 2, offset + 3])
-            offset += 4
-        if not all_pts:
-            return pv.PolyData()
-        return pv.PolyData(np.vstack(all_pts), np.array(all_faces, dtype=int))
-
-    from fea_toolkit.plotting.viz import _set_isometric_view
+    from fea_toolkit.plotting.viz import _build_deformed_mesh, _set_isometric_view
     plotter = pv.Plotter(off_screen=False, window_size=[1200, 800])
 
-    if quads:
-        undeformed = _make_shell_mesh(0.0)
+    # Undeformed shells (light grey, translucent)
+    for sec_name, quads in quads_by_sec.items():
+        undeformed = _shell_fn_by_sec[sec_name](0.0)
         plotter.add_mesh(undeformed, color='lightgrey',
                          opacity=0.3, show_edges=True, line_width=1)
+
+    # Undeformed frames (grey lines)
     for p1, p2, _, _ in segments:
         n = max(2, int(np.linalg.norm(p2 - p1) * 2))
         poly = pv.lines_from_points(np.linspace(p1, p2, n))
         plotter.add_mesh(poly, color='#999999', line_width=1, opacity=0.5)
 
-    shell_mesh = _make_shell_mesh(0.0) if quads else pv.PolyData()
-    if quads:
-        plotter.add_mesh(shell_mesh, color='#c44e52', opacity=0.5,
+    # Deformed shells — per-section colour
+    has_shells = bool(quads_by_sec)
+    for sec_name in _sec_names:
+        color = _sec_colors[sec_name]
+        sm = _shell_mesh_by_sec[sec_name]
+        plotter.add_mesh(sm, color=color, opacity=0.5,
                          show_edges=True, line_width=1)
-    frame_mesh = _make_frame_mesh(0.0)
-    plotter.add_mesh(frame_mesh, color='#c44e52', line_width=2)
+
+    # Deformed frames (red lines) — use shared helper
+    fm, _ = _build_deformed_mesh(
+        segments, _seg_npoints, [], [], [], scale, 0.0,
+    )
+    if fm is not None and fm.n_points:
+        plotter.add_mesh(fm, color='#c44e52', line_width=2)
+
+    # Legend for shell section colours
+    if len(_sec_names) > 1:
+        from pyvista import Color as pvColor
+        legend_entries = [(name, pvColor(_sec_colors[name]))
+                          for name in _sec_names]
+        plotter.add_legend(
+            legend_entries, border=True, size=[0.2, 0.12],
+            loc='lower_right', face='white',
+        )
 
     plotter.add_text(f"Mode {mode_idx + 1}  {period_str}",
                      position='upper_edge', font_size=16)
     plotter.show_grid()
     _set_isometric_view(plotter)
-    return plotter, frame_mesh, shell_mesh, _make_frame_mesh, _make_shell_mesh, quads
+
+    # Closure for frame mesh animation (invariant point count)
+    _segments = segments
+    __seg_npoints = _seg_npoints
+    def _frame_fn(amp, _s=scale, _seg=_segments, _sn=__seg_npoints):
+        fm, _ = _build_deformed_mesh(_seg, _sn, [], [], [], _s, amp)
+        return fm
+
+    return plotter, fm, _shell_mesh_by_sec, _frame_fn, _shell_fn_by_sec, has_shells
 
 
 def visualize_from_cache(
@@ -1175,8 +1206,7 @@ def visualize_from_cache(
             continue
 
         if save_gif:
-            # Reuse _save_mode_gif's logic via a temporary builder-like data
-            from fea_toolkit.plotting.viz import _set_isometric_view
+            from fea_toolkit.plotting.viz import _build_deformed_mesh, _set_isometric_view
             import math as _math, imageio
             pv.set_plot_theme("document")
 
@@ -1218,43 +1248,11 @@ def visualize_from_cache(
                 if ok and len(pts) == 4:
                     quads.append(pts + ds)
 
-            def _fm(amp):
-                all_pts, all_lines = [], []
-                offset = 0
-                for (p1, p2, di, dj), n in zip(segments, _seg_npoints):
-                    a = p1 + di * scale * amp
-                    b = p2 + dj * scale * amp
-                    pts = np.linspace(a, b, n)
-                    all_pts.append(pts)
-                    for i in range(n - 1):
-                        all_lines.append([2, offset + i, offset + i + 1])
-                    offset += n
-                if not all_pts:
-                    return pv.PolyData()
-                return pv.PolyData(np.vstack(all_pts), np.array(all_lines, dtype=int))
-
-            def _sm(amp):
-                all_pts, all_faces = [], []
-                offset = 0
-                for q in quads:
-                    p1, p2, p3, p4, d1, d2, d3, d4 = q
-                    a1 = p1 + d1 * scale * amp
-                    a2 = p2 + d2 * scale * amp
-                    a3 = p3 + d3 * scale * amp
-                    a4 = p4 + d4 * scale * amp
-                    all_pts.extend([a1, a2, a3, a4])
-                    all_faces.append([3, offset, offset + 1, offset + 2])
-                    all_faces.append([3, offset, offset + 2, offset + 3])
-                    offset += 4
-                if not all_pts:
-                    return pv.PolyData()
-                return pv.PolyData(np.vstack(all_pts), np.array(all_faces, dtype=int))
-
-            # Pre-compute stable frame line point counts
-            _seg_npoints = []
-            for p1, p2, _, _ in segments:
-                n = max(2, int(np.linalg.norm(p2 - p1) * 2))
-                _seg_npoints.append(n)
+            # Pre-compute stable geometry
+            _seg_npoints = [max(2, int(np.linalg.norm(p2 - p1) * 2))
+                            for p1, p2, _, _ in segments]
+            _shell_tris = [([3, 0, 1, 2], [3, 0, 2, 3]) for _ in quads]
+            _shell_sec_idxs = [0] * len(quads)
 
             if not segments and not quads:
                 print(f"  Mode {idx + 1}: no matching geometry to render")
@@ -1262,17 +1260,30 @@ def visualize_from_cache(
 
             p = pv.Plotter(off_screen=True, window_size=[1200, 800])
             if quads:
-                p.add_mesh(_sm(0.0), color='lightgrey', opacity=0.3, show_edges=True, line_width=1)
+                _, us = _build_deformed_mesh(
+                    segments, _seg_npoints, quads, _shell_tris, _shell_sec_idxs,
+                    scale, 0.0,
+                )
+                if us is not None and us.n_points:
+                    p.add_mesh(us, color='lightgrey', opacity=0.3,
+                               show_edges=True, line_width=1)
             for p1, p2, _, _ in segments:
                 n = max(2, int(np.linalg.norm(p2 - p1) * 2))
                 p.add_mesh(pv.lines_from_points(np.linspace(p1, p2, n)),
                            color='#999999', line_width=1, opacity=0.5)
-            sm = _sm(0.0) if quads else pv.PolyData()
-            if quads:
-                p.add_mesh(sm, color='#c44e52', opacity=0.5, show_edges=True, line_width=1)
-            fm = _fm(0.0)
-            p.add_mesh(fm, color='#c44e52', line_width=2)
-            p.add_text(f"Mode {idx + 1}  {period_str}", position='upper_edge', font_size=16)
+
+            fm, sm = _build_deformed_mesh(
+                segments, _seg_npoints, quads, _shell_tris, _shell_sec_idxs,
+                scale, 0.0,
+            )
+            if sm is not None and sm.n_points:
+                p.add_mesh(sm, color='#c44e52', opacity=0.5,
+                           show_edges=True, line_width=1)
+            if fm is not None and fm.n_points:
+                p.add_mesh(fm, color='#c44e52', line_width=2)
+
+            p.add_text(f"Mode {idx + 1}  {period_str}",
+                       position='upper_edge', font_size=16)
             p.show_grid()
             _set_isometric_view(p)
             p.render()
@@ -1281,15 +1292,20 @@ def visualize_from_cache(
             with imageio.get_writer(gif_path, mode='I', duration=1000/15, loop=0) as w:
                 for i in range(n_frames):
                     amp = _math.sin(2.0 * _math.pi * i / n_frames)
-                    fm.points = _fm(amp).points
-                    if quads:
-                        sm.points = _sm(amp).points
+                    nfm, nsm = _build_deformed_mesh(
+                        segments, _seg_npoints, quads, _shell_tris, _shell_sec_idxs,
+                        scale, amp,
+                    )
+                    if nfm is not None and nfm.n_points:
+                        fm.points = nfm.points
+                    if nsm is not None and nsm.n_points:
+                        sm.points = nsm.points
                     p.render()
                     w.append_data(p.screenshot(return_img=True))
             p.close()
             print(f"  Saved {gif_path}")
         else:
-            plotter, fm, sm, fm_fn, sm_fn, has_quads = \
+            plotter, fm, sm_by_sec, fm_fn, sm_fn_by_sec, has_shells = \
                 _make_plotter_from_cache(data, idx, scale)
 
             import math as _math
@@ -1298,8 +1314,9 @@ def visualize_from_cache(
                 step_counter[0] = step
                 amp = _math.sin(2.0 * _math.pi * step / 60.0)
                 fm.points = fm_fn(amp).points
-                if has_quads:
-                    sm.points = sm_fn(amp).points
+                if has_shells:
+                    for sec_name, sm in sm_by_sec.items():
+                        sm.points = sm_fn_by_sec[sec_name](amp).points
                 plotter.render()
             plotter.add_timer_event(600, 30, callback)
             plotter.show()
@@ -1656,9 +1673,12 @@ def run_all(s2k_path: str,
         ops.wipe()
 
     # ── Cache results for fast reload ─────────────────────────────
-    if cache and extract_shapes:
+    if cache:
         try:
-            save_cache(modal, md)
+            save_cache(modal, md,
+                       static_results=results.get("static"),
+                       rs_x=results.get("rs_x"),
+                       rs_y=results.get("rs_y"))
         except Exception as exc:
             warnings.warn(f"Cache save failed: {exc}")
 
@@ -1735,7 +1755,15 @@ def main():
         from examples.sample_model import make_sample_model
         md = make_sample_model()
         print("Using built‑in sample model (no .s2k file needed)")
-        results = run_all.__wrapped__(None, skip_analysis=False)
+        results = run_all(
+            s2k_path=None,
+            md=md,
+            skip_analysis=args.no_analysis,
+            num_modes=args.num_modes,
+            extract_shapes=False,
+            eigen_solver=args.solver,
+            cache=False,
+        )
         return
     elif args.s2k_file:
         s2k_path = args.s2k_file
