@@ -50,11 +50,10 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
     frame_ni, frame_nj = [], []
     frame_t_start, frame_t_end = [], []
 
-    # Build parent-index lookup for t_start/t_end computation
+    # Build parent-index lookup for t_start/t_end computation.
+    # Include inactive parents so split children reference the actual interval.
     parent_lookup: Dict[str, tuple] = {}  # parent_id -> (t_locations, child_ids)
     for eid, elem in md.frame_elements.items():
-        if getattr(elem, 'inactive', False):
-            continue
         if elem.t_locations and elem.child_ids:
             parent_lookup[eid] = (elem.t_locations, elem.child_ids)
 
@@ -212,7 +211,6 @@ def _collect_modal(modal_result: Dict[str, Any],
                         if idx is not None:
                             arr[idx, midx] = disp[dof_idx]
                 arrays[npz_key] = arr
-            arrays["node_tag"] = np.array(node_tags, dtype=int)
 
     return arrays
 

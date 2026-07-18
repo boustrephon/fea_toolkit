@@ -98,7 +98,7 @@ def validate_npz(path: str) -> List[str]:
     """
     messages: List[str] = []
     try:
-        data = np.load(path, allow_pickle=True)
+        data = np.load(path, allow_pickle=False)
     except Exception as exc:
         return [f"Cannot load: {exc}"]
 
@@ -136,12 +136,17 @@ def validate_npz(path: str) -> List[str]:
             # Resolve dimension names (N_node, N_frame, etc.)
             parts = expected.split()
             resolved_parts = []
+            unresolved: List[str] = []
             for p in parts:
                 p = p.strip()
                 if p.startswith("N_") and p in dims:
                     resolved_parts.append(str(dims[p]))
+                elif p.startswith("N_"):
+                    unresolved.append(p)
                 else:
                     resolved_parts.append(p)
+            for u in unresolved:
+                messages.append(f"  Missing dimension {u} for array {arr_name}")
             expected_shape = tuple(
                 int(x) for x in resolved_parts if x
             )
