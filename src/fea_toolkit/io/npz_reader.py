@@ -160,7 +160,7 @@ def npz_to_pyvista_shell_mesh(
 
 def npz_to_pyvista_modal_mesh(
     data: Dict[str, Any], mode_idx: int, scale: float = 1.0,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Build a deformed mesh for a given mode index.
 
     Returns ``(frame_points, frame_lines, shell_points, shell_faces)``
