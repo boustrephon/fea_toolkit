@@ -49,6 +49,7 @@ class AnalysisBuilder:
 
         # Domain state (built during build_domain)
         self.frame_tag_map: Dict[str, int] = {}
+        self.material_tags: Dict[str, int] = dict(mesh_model.material_tags)
         self.section_tags: Dict[str, int] = dict(mesh_model.section_tags)
         self._shell_sec_tags: Dict[str, int] = dict(mesh_model.shell_sec_tags)
         self._shell_sec_variants: Dict[str, int] = dict(mesh_model.shell_sec_variants)
@@ -163,24 +164,61 @@ class AnalysisBuilder:
     # ── Materials ────────────────────────────────────────────────
 
     def _create_materials(self) -> None:
-        """Create OpenSees materials (fiber sections, brace trusses)."""
-        if not self.config['create_fiber_sections'] and not self.config.get('brace_truss'):
-            return
+        """Create OpenSees materials.
 
-        from ..model.sap_data import (
-            PipeSection, AngleSection, DoubleAngleSection,
-            TeeSection, ChannelSection,
-        )
-        brace_types = (
-            PipeSection, AngleSection, DoubleAngleSection,
-            TeeSection, ChannelSection,
-        )
+        Assigns material tags sequentially if not already populated in
+        ``self.material_tags``.  Creates elastic materials for all
+        referenced materials (needed for section creation), plus
+        nonlinear materials for fiber sections and brace trusses.
+        """
+        # Auto-assign material tags
+        next_tag = max(self.material_tags.values(), default=0) + 1 if self.material_tags else 1
+        for mat_name, mat in self.mesh_model.materials.items():
+            if mat_name not in self.material_tags:
+                self.material_tags[mat_name] = next_tag
+                next_tag += 1
 
+        # Create elastic materials for all materials
+        for mat_name, mat in self.mesh_model.materials.items():
+            tag = self.material_tags.get(mat_name)
+            if tag is None:
+                continue
+            E_mod = mat.E_mod or 200e9
+            if not self.config.get('brace_truss') or mat_name not in getattr(self, '_truss_mat_tags', {}):
+                try:
+                    ops.uniaxialMaterial('Elastic', tag, E_mod)
+                except Exception:
+                    pass  # may already exist
+
+        # Fiber section materials
+        if self.config.get('create_fiber_sections'):
+            from ..model.sap_data import (
+                PipeSection, AngleSection, DoubleAngleSection,
+                TeeSection, ChannelSection,
+            )
+            for sec_name, sec in self.mesh_model.sections.items():
+                mat_name = sec.material
+                mat_tag = self.material_tags.get(mat_name)
+                if mat_tag is None:
+                    continue
+                # Section-specific nonlinear materials created by
+                # sec.to_fiber_patches(mat_tag, ...) in _create_single_section
+
+        # Brace truss materials
         if self.config.get('brace_truss'):
+            from ..model.sap_data import (
+                PipeSection, AngleSection, DoubleAngleSection,
+                TeeSection, ChannelSection,
+            )
+            brace_types = (
+                PipeSection, AngleSection, DoubleAngleSection,
+                TeeSection, ChannelSection,
+            )
             self._truss_mat_tags: Dict[str, int] = {}
             self._truss_areas: Dict[str, float] = {}
-            n_sec = len(self.mesh_model.sections)
-            mat_tag = n_sec + 1
+            # Use tags beyond material count
+            n_mat = max(self.material_tags.values(), default=0) + 1 if self.material_tags else 1
+            truss_tag = n_mat
 
             explicit = self.config.get('brace_sections')
             for sec_name, sec in self.mesh_model.sections.items():
@@ -189,23 +227,22 @@ class AnalysisBuilder:
                         continue
                 elif not isinstance(sec, brace_types):
                     continue
-
                 area = getattr(sec, 'A', 0.0) or 0.0
                 if area < 1e-12:
                     continue
-
                 mat = self.mesh_model.materials.get(sec.material)
                 E_sec = mat.E_mod if mat else 200e9
                 Fy = getattr(sec, 'Fy', None) or getattr(mat, 'Fy', 250e6) if mat else 250e6
 
-                self._truss_mat_tags[sec_name] = mat_tag
+                self._truss_mat_tags[sec_name] = truss_tag
                 self._truss_areas[sec_name] = area
-                ops.uniaxialMaterial('Hysteretic', mat_tag,
-                                     1.1 * Fy, 0.007 * E_sec / Fy,  # tension envelope
-                                     0.3 * Fy, 0.004 * E_sec / Fy,  # compression (buckling)
-                                     1.1 * Fy, 0.007 * E_sec / Fy,  # reloading
+                ops.uniaxialMaterial('Hysteretic', truss_tag,
+                                     1.1 * Fy, 0.007 * E_sec / Fy,
+                                     0.3 * Fy, 0.004 * E_sec / Fy,
+                                     1.1 * Fy, 0.007 * E_sec / Fy,
                                      1.0, 0.0, 0.0, 0.0)
-                mat_tag += 1
+                self.material_tags[f"{sec_name}__truss"] = truss_tag
+                truss_tag += 1
 
     # ── Sections ─────────────────────────────────────────────────
 
