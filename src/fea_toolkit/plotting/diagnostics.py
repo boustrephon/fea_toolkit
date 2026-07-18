@@ -112,6 +112,8 @@ def find_disconnected_nodes(
                     worst_m = mi
 
         score = outlier_count / max(n_modes, 1)
+        if score == 0:
+            continue
         results.append({
             "node_tag": int(node_tags[ni]),
             "x": float(coords[ni, 0]),
@@ -128,12 +130,14 @@ def find_disconnected_nodes(
 
 
 def print_disconnect_report(report: List[Dict[str, Any]],
-                              n_modes: int) -> None:
+                              n_modes: int,
+                              z_score_threshold: float = 3.0) -> None:
     """Print a formatted table of disconnected-node findings.
 
     Args:
         report: Output from :func:`find_disconnected_nodes`.
         n_modes: Total number of modes analysed (for column headings).
+        z_score_threshold: Z-score threshold used for detection.
     """
     if not report:
         print("No disconnected nodes detected.")
@@ -142,7 +146,7 @@ def print_disconnect_report(report: List[Dict[str, Any]],
     print(f"\n{'=' * 70}")
     print("  MODAL DISCONNECT DETECTION")
     print(f"{'=' * 70}")
-    print(f"  Analysed {n_modes} mode(s), Z > 3.0 = outlier")
+    print(f"  Analysed {n_modes} mode(s), Z > {z_score_threshold} = outlier")
     print()
     print(f"  {'Node':>8} {'Score':>7} {'Worst':>5} {'Coords (x, y, z)':>30}")
     print(f"  {'':>8} {'':>7} {'Mode':>5} {'':>30}")

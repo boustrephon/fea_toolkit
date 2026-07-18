@@ -3,6 +3,7 @@
 from .viewer import ModelViewer
 
 from .viz import (
+    _build_deformed_mesh,
     plot_model_3d,
     plot_deformed_3d,
     plot_rs_deformed_3d,

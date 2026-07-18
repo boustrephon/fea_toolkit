@@ -9,7 +9,7 @@ All functions gracefully fall back to a warning if the required package
 is not installed.
 """
 
-from typing import Dict, List, Optional, Any, Callable, TYPE_CHECKING
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 import math
 import numpy as np
 
@@ -41,6 +41,110 @@ def _set_isometric_view(plotter) -> None:
         (0.0, 0.0, 1.0),
     ]
     plotter.enable_terrain_style(mouse_wheel_zooms=True, shift_pans=True)
+
+
+# ============================================================================
+# Shared mesh-construction helpers
+# ============================================================================
+
+def _build_deformed_mesh(
+    segments: list,
+    seg_npoints: list,
+    all_quads: list,
+    all_tris: list,
+    sec_idxs: list,
+    scale: float,
+    amp: float,
+) -> "tuple[pv.PolyData, Optional[pv.PolyData]]":
+    """Build a single merged ``PolyData`` from frame-segment and shell-quad
+    geometry, displaced by ``scale * amp`` along each element's eigenvector.
+
+    Parameters
+    ----------
+    segments : list of (p1, p2, di, dj) tuples
+        Frame segment data — each entry holds the two endpoints and their
+        displacement vectors.
+    seg_npoints : list of int
+        Number of subdivision points per segment (fixed from undeformed
+        length, so point count is invariant w.r.t. *amp*).
+    all_quads : list of (p1, p2, p3, p4, d1, d2, d3, d4) tuples
+        Shell quad data — four corners and their displacement vectors.
+    all_tris : list of (n, i, j, k) tuples
+        Triangle indices that subdivide each quad (shared winding).
+    sec_idxs : list of int
+        Per-quad section index (one per entry in *all_quads*).
+    scale : float
+        Base scale factor from the eigenvector normalisation.
+    amp : float
+        Amplitude multiplier for the current frame.
+
+    Returns
+    -------
+    tuple[pv.PolyData, pv.PolyData | None]
+        ``(frame_mesh, shell_mesh)`` — frame mesh contains ``lines`` only;
+        shell mesh contains triangulated ``faces`` with a ``section_idx``
+        cell scalar for per-section colouring.  *shell_mesh* is ``None``
+        when there are no shell elements.
+    """
+    all_pts: list = []
+    all_lines: list = []
+    all_faces: list = []
+    all_cell_data: list = []
+    offset = 0
+
+    # Frame lines
+    for (p1, p2, di, dj), n in zip(segments, seg_npoints):
+        d1 = np.array(di) * scale * amp
+        d2 = np.array(dj) * scale * amp
+        a = p1 + d1
+        b = p2 + d2
+        pts = np.linspace(a, b, n)
+        all_pts.append(pts)
+        for i in range(n - 1):
+            all_lines.append([2, offset + i, offset + i + 1])
+        offset += n
+
+    n_frame_pts = offset
+
+    # Shell quads — triangulated, with per-face section index
+    for quad, (t1, t2), sidx in zip(all_quads, all_tris, sec_idxs):
+        p1, p2, p3, p4, d1, d2, d3, d4 = quad
+        a1 = p1 + d1 * scale * amp
+        a2 = p2 + d2 * scale * amp
+        a3 = p3 + d3 * scale * amp
+        a4 = p4 + d4 * scale * amp
+        all_pts.extend([a1, a2, a3, a4])
+        all_faces.append([3, offset + t1[1], offset + t1[2], offset + t1[3]])
+        all_faces.append([3, offset + t2[1], offset + t2[2], offset + t2[3]])
+        all_cell_data.extend([sidx, sidx])
+        offset += 4
+
+    if not all_pts:
+        return pv.PolyData(), None
+
+    verts = np.vstack(all_pts)
+
+    # ── Frame mesh ──
+    frame_mesh = pv.PolyData()
+    if n_frame_pts > 0:
+        cells = (np.array(all_lines, dtype=int) if all_lines
+                 else np.empty((0, 3), dtype=int))
+        fm = pv.PolyData(verts[:n_frame_pts])
+        if len(cells) > 0:
+            fm.lines = cells
+        frame_mesh = fm
+
+    # ── Shell mesh ──
+    shell_mesh: Optional[pv.PolyData] = None
+    if all_faces:
+        faces = np.array(all_faces, dtype=int)
+        sm = pv.PolyData(verts[n_frame_pts:])
+        sm.faces = faces
+        if len(all_cell_data) > 0:
+            sm.cell_data['section_idx'] = np.array(all_cell_data, dtype=int)
+        shell_mesh = sm
+
+    return frame_mesh, shell_mesh
 
 
 # ============================================================================
@@ -91,11 +195,10 @@ def plot_model_3d(
         sel_ids = set(selection.get_frame_ids(builder.model))
         elements = {eid: elem for eid, elem in elements.items()
                     if eid in sel_ids}
-    assignments = (builder.split_assignments if builder.split_elements
-                   else builder.model.frame_assignments)
-
     lines = []
-    labels_section = {}
+    _assignments = (builder.split_assignments if builder.split_elements
+                    else builder.model.frame_assignments)
+
     for eid, elem in elements.items():
         if getattr(elem, 'inactive', False):
             continue
@@ -103,7 +206,7 @@ def plot_model_3d(
         nj = builder.model.nodes.get(elem.node_j)
         if ni is None or nj is None:
             continue
-        sec = (assignments or {}).get(eid, '?')
+        sec = (_assignments or {}).get(eid, '?')
         p1 = np.array([ni.x, ni.y, ni.z])
         p2 = np.array([nj.x, nj.y, nj.z])
         lines.append((p1, p2, sec))
@@ -206,9 +309,6 @@ def plot_deformed_3d(
         sel_ids = set(selection.get_frame_ids(builder.model))
         elements = {eid: elem for eid, elem in elements.items()
                     if eid in sel_ids}
-    assignments = (builder.split_assignments if builder.split_elements
-                   else builder.model.frame_assignments)
-
     plotter = pv.Plotter(notebook=notebook, **kwargs)
 
     # Undeformed (greyed out)
@@ -541,65 +641,46 @@ def plot_mode_3d(
         Shell triangles carry a ``section_idx`` cell scalar so they can be
         coloured by section when rendered.
         """
-        all_pts = []
-        all_lines = []
-        all_faces = []
-        all_cell_data = []  # section_idx per face (applies to each triangle)
-        offset = 0
-        # Frame lines (fixed subdivision count from undeformed length)
-        for (p1, p2, di, dj), n in zip(segments, _seg_npoints):
-            d1 = np.array(di) * scale * amp
-            d2 = np.array(dj) * scale * amp
-            a = p1 + d1
-            b = p2 + d2
-            pts = np.linspace(a, b, n)
-            all_pts.append(pts)
-            for i in range(n - 1):
-                all_lines.append([2, offset + i, offset + i + 1])
-            offset += n
-        # Shell quads — triangulated, with per-face section index
-        for quad, (t1, t2), sidx in zip(_all_quads_flat, _all_tris_flat, _all_sec_idxs):
-            p1, p2, p3, p4, d1, d2, d3, d4 = quad
-            a1 = p1 + d1 * scale * amp
-            a2 = p2 + d2 * scale * amp
-            a3 = p3 + d3 * scale * amp
-            a4 = p4 + d4 * scale * amp
-            all_pts.extend([a1, a2, a3, a4])
-            all_faces.append([3, offset + t1[1], offset + t1[2], offset + t1[3]])
-            all_faces.append([3, offset + t2[1], offset + t2[2], offset + t2[3]])
-            all_cell_data.extend([sidx, sidx])  # both triangles get same section index
-            offset += 4
-        if not all_pts:
-            return pv.PolyData()
-        verts = np.vstack(all_pts)
-        cells = np.array(all_lines, dtype=int) if all_lines else np.empty((0, 3), dtype=int)
-        faces = np.array(all_faces, dtype=int) if all_faces else np.empty((0, 4), dtype=int)
-        mesh = pv.PolyData(verts)
-        if len(cells) > 0:
-            mesh.lines = cells
-        if len(faces) > 0:
-            mesh.faces = faces
-        if len(all_cell_data) > 0:
-            mesh.cell_data['section_idx'] = np.array(all_cell_data, dtype=int)
-        return mesh
+        return _build_deformed_mesh(
+            segments, _seg_npoints,
+            _all_quads_flat, _all_tris_flat, _all_sec_idxs,
+            scale, amp,
+        )
 
     if animate:
-        # Animated mode: single mesh with cell scalars for section coloring
-        deformed_mesh = make_deformed(1.0)
+        # Animated mode: separate meshes for frames (lines) and shells (faces).
+        # We keep references so we can update .points per frame.
+        frame_mesh, shell_mesh = make_deformed(1.0)
+
+        # Render frames as coloured lines
+        if frame_mesh is not None and frame_mesh.n_points:
+            plotter.add_mesh(frame_mesh, color='#c44e52',
+                             line_width=4, opacity=0.85)
+
+        # Render shells with per-section colours via cell scalars
         n_sections = len(_sec_names_list)
-        if n_sections > 0:
-            plotter.add_mesh(
-                deformed_mesh,
-                scalars='section_idx',
-                cmap=_SECTION_COLORS[:n_sections],
-                line_width=4, show_edges=True, edge_color='#a03030',
-                opacity=0.85,
-                clim=[-0.5, n_sections - 0.5],
-            )
-        else:
-            plotter.add_mesh(deformed_mesh, color='#c44e52',
-                             line_width=4, show_edges=True,
-                             edge_color='#a03030', opacity=0.85)
+        if shell_mesh is not None and shell_mesh.n_points:
+            if n_sections > 0:
+                plotter.add_mesh(
+                    shell_mesh,
+                    scalars='section_idx',
+                    cmap=_SECTION_COLORS[:n_sections],
+                    show_edges=True, edge_color='#a03030',
+                    opacity=0.85,
+                    clim=[-0.5, n_sections - 0.5],
+                )
+            else:
+                plotter.add_mesh(shell_mesh, color='#c44e52',
+                                 show_edges=True, edge_color='#a03030',
+                                 opacity=0.85)
+
+        # ── Slider / animation callback ──
+        def _on_animation(amp_val: float, fm=frame_mesh, sm=shell_mesh):
+            nfm, nsm = make_deformed(amp_val)
+            if fm is not None and nfm is not None:
+                fm.points = nfm.points
+            if sm is not None and nsm is not None:
+                sm.points = nsm.points
     else:
         # Static mode: render each shell section group in its own colour
         for sec_name, quads in shell_groups.items():
@@ -626,9 +707,10 @@ def plot_mode_3d(
                                  line_width=0.8, opacity=0.85)
         # Also draw frame lines on top in a neutral colour
         if segments:
-            frame_mesh = make_deformed(1.0)
-            plotter.add_mesh(frame_mesh, color='#555555', line_width=3,
-                             opacity=0.8)
+            fm, _ = make_deformed(1.0)
+            if fm is not None and fm.n_points:
+                plotter.add_mesh(fm, color='#555555', line_width=3,
+                                 opacity=0.8)
         # Legend for shell section colours
         if len(shell_groups) > 1:
             legend_entries = [(name, pv.Color(_sec_colors[name]))
@@ -648,12 +730,13 @@ def plot_mode_3d(
     if animate:
         import math as _math
 
-        mesh_ref = deformed_mesh
-
         def callback(step):
             amp = _math.sin(2.0 * _math.pi * step / 60.0)
-            new_mesh = make_deformed(amp)
-            mesh_ref.points = new_mesh.points
+            nfm, nsm = make_deformed(amp)
+            if frame_mesh is not None and nfm is not None:
+                frame_mesh.points = nfm.points
+            if shell_mesh is not None and nsm is not None:
+                shell_mesh.points = nsm.points
             plotter.render()
 
         plotter.add_timer_event(600, 30, callback)
@@ -875,7 +958,6 @@ def _add_reaction_arrows(plotter, builder, static_results):
 
     for atype, pos, vec, mag in arrow_data:
         scale = scale_h if atype == "horiz" else scale_v
-        tip = pos + vec * scale
         arrow = pv.Arrow(start=pos, direction=vec / max(mag, 1e-12),
                          scale=mag * scale)
         colour = (0.9, 0.1, 0.1) if atype == "horiz" else (0.1, 0.8, 0.1)
@@ -1608,18 +1690,14 @@ def plot_capacity_spectrum(
 
 
 def _load_npz_for_plotting(npz_path: str, combo: str = None) -> dict:
-    """Load an NPZ results file and build element‑centric arrays.
-
-    Supports both the legacy ``*_forces.npz`` format and the unified
-    ``results.npz`` schema (auto‑detected from array keys).
+    """Load a unified-format NPZ results file and build element‑centric arrays.
 
     Parameters
     ----------
     npz_path : str
         Path to the ``.npz`` results file.
     combo : str or None
-        Load‑combination key (prefix for legacy format) or case name
-        for the unified schema.  ``None`` = primary results / first case.
+        Static case name.  ``None`` = first available case.
 
     Returns a dict with:
         - elem_data: list of dicts (one per sub‑element) with keys:
@@ -1627,137 +1705,77 @@ def _load_npz_for_plotting(npz_path: str, combo: str = None) -> dict:
             fx_i, fy_i, fz_i, mx_i, my_i, mz_i,
             fx_j, fy_j, fz_j, mx_j, my_j, mz_j,
             and ``_local`` variants
-        - metadata: parsed metadata dict (or ``{}``)
+        - metadata: always ``{}`` (reserved for future use)
         - force_unit, length_unit: unit strings
         - raw_data: the loaded npz dict
     """
     from ..io.npz_reader import read_results_npz, _get_static_cases
     d = read_results_npz(npz_path)
 
-    metadata = {}
     force_unit = "?"
     length_unit = "?"
     elem_data: List[dict] = []
 
-    if is_unified:
-        # ── Unified schema ─────────────────────────────────────────
-        from ..io.npz_reader import read_results_npz, _get_static_cases
-        d = read_results_npz(npz_path)
+    # ── Unified schema ────────────────────────────────────────────
+    cases = _get_static_cases(d)
+    if combo is not None and combo not in cases:
+        raise ValueError(
+            f"Case '{combo}' not found in NPZ. Available: {cases}")
+    case = combo if combo and combo in cases else (cases[0] if cases else None)
 
-        cases = _get_static_cases(d)
-        case = combo if combo and combo in cases else (cases[0] if cases else None)
+    fu = d.get("force_unit")
+    force_unit = str(fu[0]) if fu is not None and len(fu) else "?"
+    lu = d.get("length_unit")
+    length_unit = str(lu[0]) if lu is not None and len(lu) else "?"
 
-        fu = d.get("force_unit")
-        force_unit = str(fu[0]) if fu is not None and len(fu) else "?"
-        lu = d.get("length_unit")
-        length_unit = str(lu[0]) if lu is not None and len(lu) else "?"
+    # Node coords lookup
+    nid = d.get("node_tag", np.array([]))
+    nx = d.get("node_x", np.array([]))
+    ny = d.get("node_y", np.array([]))
+    nz = d.get("node_z", np.array([]))
+    node_coords = {}
+    for i in range(len(nid)):
+        node_coords[int(nid[i])] = (float(nx[i]), float(ny[i]), float(nz[i]))
 
-        # Node coords lookup
-        nid = d.get("node_tag", np.array([]))
-        nx = d.get("node_x", np.array([]))
-        ny = d.get("node_y", np.array([]))
-        nz = d.get("node_z", np.array([]))
-        node_coords = {}
-        for i in range(len(nid)):
-            node_coords[int(nid[i])] = (float(nx[i]), float(ny[i]), float(nz[i]))
+    # Frame elements
+    fi = d.get("frame_node_i", np.array([]))
+    fj = d.get("frame_node_j", np.array([]))
+    sap_ids = d.get("frame_sap_id", np.array([]))
+    pre = f"static/{case}/" if case else ""
 
-        # Frame elements
-        fi = d.get("frame_node_i", np.array([]))
-        fj = d.get("frame_node_j", np.array([]))
-        sap_ids = d.get("frame_sap_id", np.array([]))
-        pre = f"static/{case}/" if case else ""
+    for i in range(len(fi)):
+        c_i = node_coords.get(int(fi[i]), (0, 0, 0))
+        c_j = node_coords.get(int(fj[i]), (0, 0, 0))
+        mid_z = (c_i[2] + c_j[2]) / 2.0
 
-        for i in range(len(fi)):
-            c_i = node_coords.get(int(fi[i]), (0, 0, 0))
-            c_j = node_coords.get(int(fj[i]), (0, 0, 0))
-            mid_z = (c_i[2] + c_j[2]) / 2.0
+        def _g(k):
+            arr = d.get(f"{pre}{k}")
+            return float(arr[i]) if arr is not None else 0.0
 
-            def _g(k):
-                arr = d.get(f"{pre}{k}")
-                return float(arr[i]) if arr is not None else 0.0
-
-            entry = {
-                "sap_id": str(sap_ids[i]),
-                "x_i": c_i[0], "y_i": c_i[1], "z_i": c_i[2],
-                "x_j": c_j[0], "y_j": c_j[1], "z_j": c_j[2],
-                "mid_z": mid_z,
-                "fx_i": _g("fx_i"), "fy_i": _g("fy_i"), "fz_i": _g("fz_i"),
-                "mx_i": _g("mx_i"), "my_i": _g("my_i"), "mz_i": _g("mz_i"),
-                "fx_j": _g("fx_j"), "fy_j": _g("fy_j"), "fz_j": _g("fz_j"),
-                "mx_j": _g("mx_j"), "my_j": _g("my_j"), "mz_j": _g("mz_j"),
-            }
-            # Local forces (optional)
-            for q in ("fx", "fy", "fz", "mx", "my", "mz"):
-                loc_i = f"{pre}{q}_i_local"
-                loc_j = f"{pre}{q}_j_local"
-                entry[f"{q}_i_local"] = _g(f"{q}_i_local") if loc_i in d else _g(f"{q}_i")
-                entry[f"{q}_j_local"] = _g(f"{q}_j_local") if loc_j in d else _g(f"{q}_j")
-            elem_data.append(entry)
-
-    else:
-        # ── Legacy format ──────────────────────────────────────────
-        prefix = f"{combo}_" if combo else ""
-
-        metadata_raw = data.get("metadata_json")
-        if metadata_raw is not None:
-            try:
-                metadata = json.loads(str(metadata_raw.item()))
-            except Exception:
-                pass
-
-        def _s(key) -> str:
-            arr = data.get(key)
-            return str(arr.item()) if arr is not None else "?"
-        force_unit = _s("force_unit")
-        length_unit = _s("length_unit")
-
-        # Node coords lookup
-        n_tags = data.get("node_tags")
-        n_x = data.get("node_x")
-        n_y = data.get("node_y")
-        n_z = data.get("node_z")
-        node_coords = {}
-        if n_tags is not None and n_x is not None:
-            for i in range(len(n_tags)):
-                node_coords[int(n_tags[i])] = (float(n_x[i]), float(n_y[i]), float(n_z[i]))
-
-        has_local = metadata.get("has_local_forces", metadata.get("has_local", False)) or f"{prefix}sub_fx_i_local" in data
-        for i in range(len(data["sub_elem_tags"])):
-            n_i_tag = int(data["sub_node_i_tag"][i])
-            n_j_tag = int(data["sub_node_j_tag"][i])
-            c_i = node_coords.get(n_i_tag, (0, 0, 0))
-            c_j = node_coords.get(n_j_tag, (0, 0, 0))
-            mid_z = (c_i[2] + c_j[2]) / 2.0
-
-            def _g(k: str) -> float:
-                pk = f"{prefix}{k}"
-                arr = data.get(pk)
-                return float(arr[i]) if arr is not None else np.nan
-
-            entry = {
-                "sap_id": str(data["sub_sap_ids"][i]),
-                "x_i": c_i[0], "y_i": c_i[1], "z_i": c_i[2],
-                "x_j": c_j[0], "y_j": c_j[1], "z_j": c_j[2],
-                "mid_z": mid_z,
-                "fx_i": _g("sub_fx_i"), "fy_i": _g("sub_fy_i"), "fz_i": _g("sub_fz_i"),
-                "mx_i": _g("sub_mx_i"), "my_i": _g("sub_my_i"), "mz_i": _g("sub_mz_i"),
-                "fx_j": _g("sub_fx_j"), "fy_j": _g("sub_fy_j"), "fz_j": _g("sub_fz_j"),
-                "mx_j": _g("sub_mx_j"), "my_j": _g("sub_my_j"), "mz_j": _g("sub_mz_j"),
-            }
-            if has_local:
-                for q in ("fx", "fy", "fz", "mx", "my", "mz"):
-                    k = f"sub_{q}_i_local"
-                    entry[f"{q}_i_local"] = _g(k) if f"{prefix}{k}" in data else _g(f"sub_{q}_i")
-                    k = f"sub_{q}_j_local"
-                    entry[f"{q}_j_local"] = _g(k) if f"{prefix}{k}" in data else _g(f"sub_{q}_j")
-            elem_data.append(entry)
+        entry = {
+            "sap_id": str(sap_ids[i]),
+            "x_i": c_i[0], "y_i": c_i[1], "z_i": c_i[2],
+            "x_j": c_j[0], "y_j": c_j[1], "z_j": c_j[2],
+            "mid_z": mid_z,
+            "fx_i": _g("fx_i"), "fy_i": _g("fy_i"), "fz_i": _g("fz_i"),
+            "mx_i": _g("mx_i"), "my_i": _g("my_i"), "mz_i": _g("mz_i"),
+            "fx_j": _g("fx_j"), "fy_j": _g("fy_j"), "fz_j": _g("fz_j"),
+            "mx_j": _g("mx_j"), "my_j": _g("my_j"), "mz_j": _g("mz_j"),
+        }
+        # Local forces (optional) — set NaN when missing
+        for q in ("fx", "fy", "fz", "mx", "my", "mz"):
+            loc_i = f"{pre}{q}_i_local"
+            loc_j = f"{pre}{q}_j_local"
+            entry[f"{q}_i_local"] = float(d[loc_i][i]) if loc_i in d else np.nan
+            entry[f"{q}_j_local"] = float(d[loc_j][i]) if loc_j in d else np.nan
+        elem_data.append(entry)
 
     return {
         "elem_data": elem_data,
-        "metadata": metadata,
+        "metadata": {},
         "force_unit": force_unit,
         "length_unit": length_unit,
-        "raw_data": data,
+        "raw_data": d,
     }
 
 
