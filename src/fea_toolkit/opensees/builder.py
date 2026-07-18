@@ -2020,11 +2020,14 @@ class OpenSeesBuilder:
 
             # Split frame elements at shell subdivision edge nodes so
             # frame-slab interfaces remain connected after refinement.
-            self._split_frames_at_shell_subdiv()
+            # Only runs when explicit N×N shell subdivision is enabled.
+            if self.config.get('subdivide_shells', 0):
+                self._split_frames_at_shell_subdiv()
 
             # Re-merge coincident nodes created by frame splitting at
             # sub-nodes (they share coordinates with sub-edge nodes).
-            self._merge_coincident_nodes()
+            if self.config.get('subdivide_shells', 0):
+                self._merge_coincident_nodes()
 
             # Classify area elements AFTER meshing so that split sub-
             # areas (from split_slabs_at_walls etc.) are included.
@@ -2767,6 +2770,20 @@ class OpenSeesBuilder:
                   f"{'all' if selection is None else len(selection)} area(s)"
                   f" ({n_active} active of {n_areas} total)")
 
+        # Exclude loads-only areas from subdivision — their loads are
+        # converted to frame edge loads and they should not become shells.
+        loads_only_ids: Set[str] = set()
+        if hasattr(self, '_area_selection') and self._area_selection is not None:
+            loads_only_ids = set(
+                self._area_selection.get_area_ids(self.model))
+        if selection is not None:
+            selection = selection - loads_only_ids
+        else:
+            all_ids = set(self.model.area_elements.keys())
+            selection = all_ids - loads_only_ids
+        if not selection:
+            return
+
         from ..model.geometry import subdivide_area_mesh
 
         max_elem_tag = max(
@@ -2822,12 +2839,22 @@ class OpenSeesBuilder:
         from ..model.geometry import point_on_segment, compute_t_location
         import copy
 
-        # Collect all sub-nodes from shell subdivision
-        sub_nodes: Dict[str, float] = {}  # node_id -> coord tuple
-        for nid, nd in self.model.nodes.items():
-            if "_sub_" not in nid:
+        # Collect all sub-nodes from shell subdivision by traversing
+        # inactive parent area elements and their active child elements.
+        # This avoids relying on a naming convention like ``_sub_``.
+        sub_nodes: Dict[str, tuple] = {}  # node_id -> (x, y, z)
+        for aid, area in self.model.area_elements.items():
+            if not getattr(area, 'inactive', False):
                 continue
-            sub_nodes[nid] = (nd.x, nd.y, nd.z)
+            # Collect nodes from all child sub-elements
+            for cid in getattr(area, 'child_ids', []):
+                child = self.model.area_elements.get(cid)
+                if child is None:
+                    continue
+                for nid in child.node_ids:
+                    nd = self.model.nodes.get(nid)
+                    if nd is not None:
+                        sub_nodes[nid] = (nd.x, nd.y, nd.z)
 
         if not sub_nodes:
             return
@@ -2923,8 +2950,13 @@ class OpenSeesBuilder:
                 elem.child_ids.append(child_id)
                 new_elements[child_id] = child
                 new_assignments[child_id] = sec_name
+                # Propagate stiffness-factor classification to child
+                if hasattr(self, '_frame_element_types') and eid in self._frame_element_types:
+                    self._frame_element_types[child_id] = self._frame_element_types[eid]
 
-            # Redistribute distributed loads (weight by child length)
+            # Redistribute distributed loads atomically — build a
+            # replacement list rather than appending while iterating.
+            new_loads: List[FrameDistributedLoad] = []
             for ld in self.model.frame_dist_loads:
                 if ld.frame_id == eid:
                     child_lengths = []
@@ -2941,12 +2973,18 @@ class OpenSeesBuilder:
                         child_lengths.append(cl)
                         total_len += cl
                     if total_len > 1e-12:
+                        cumul = 0.0
                         for k, child_id in enumerate(elem.child_ids):
-                            ratio = child_lengths[k] / total_len
+                            cl = child_lengths[k]
+                            ratio = cl / total_len
                             new_ld = copy.copy(ld)
                             new_ld.frame_id = child_id
                             new_ld.w = ld.w * ratio
-                            self.model.frame_dist_loads.append(new_ld)
+                            cumul += cl
+                            new_loads.append(new_ld)
+                else:
+                    new_loads.append(ld)
+            self.model.frame_dist_loads = new_loads  # atomic swap
 
         # Write back
         if self.split_elements is not None:
@@ -5506,7 +5544,14 @@ class OpenSeesBuilder:
             if elem.parent_id and parent_id in parent_breakpoints:
                 pts = parent_breakpoints[parent_id]
                 try:
-                    idx = int(eid.split("-")[-1])
+                    # Format from geometry.split_elements: "{eid}-{k}"
+                    if "-" in eid:
+                        idx = int(eid.split("-")[-1])
+                    # Format from _split_frames_at_shell_subdiv: "{eid}_subdiv_{k}"
+                    elif "_subdiv_" in eid:
+                        idx = int(eid.split("_subdiv_")[-1])
+                    else:
+                        idx = 0
                 except (ValueError, IndexError):
                     idx = 0
                 t_start = pts[idx] if idx < len(pts) - 1 else 0.0
@@ -7066,12 +7111,23 @@ class OpenSeesBuilder:
         if self.config['verbose']:
             print(f"Running response spectrum analysis (dir={direction})...")
 
+        # Clamp to available modal periods
+        num_modes = min(num_modes, len(modal_periods))
+        if num_modes == 0:
+            raise ValueError("No modal periods available for RS analysis")
+
         omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods]
         damp_ratios = [damping_ratio] * num_modes
 
         # Define the spectrum as a time series (use a high tag to avoid
-        # conflicts with load‑pattern time series)
+        # conflicts with load‑pattern time series).  Remove any existing
+        # instance first so the method can be called multiple times
+        # (e.g. RS-X followed by RS-Y) without tag collision.
         SPECTRUM_TS_TAG = 9999
+        try:
+            ops.remove('timeSeries', SPECTRUM_TS_TAG)
+        except Exception:
+            pass
         ops.timeSeries('Path', SPECTRUM_TS_TAG,
                        '-time', *spectrum_periods,
                        '-values', *spectrum_accels)
