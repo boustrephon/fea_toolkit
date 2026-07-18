@@ -572,11 +572,8 @@ class AnalysisBuilder:
                 aL = ld.rdist_a
                 bL = ld.rdist_b
 
-                vx, vy, vz = get_SAP_vecxz(
-                    np.array([nj.x - ni.x, nj.y - ni.y, nj.z - ni.z]),
-                    getattr(elem, 'angle', 0.0),
-                )
-                T = np.column_stack([vx, vy, vz])
+                vx, vy, vz = self.get_local_axes(elem)
+                T = np.vstack([vx, vy, vz])
                 dir_map = {'Gravity': (0, 0, -1), 'X': (1, 0, 0), 'Y': (0, 1, 0), 'Z': (0, 0, 1)}
                 gx, gy, gz = dir_map.get(ld.direction, (0, 0, 0))
                 g_local = np.linalg.solve(T, np.array([gx, gy, gz]))
@@ -775,26 +772,19 @@ class AnalysisBuilder:
     # ═══════════════════════════════════════════════════════════════
 
     def get_local_axes(self, elem: FrameElement) -> Tuple[np.ndarray, ...]:
-        """Compute local axes for a frame element."""
+        """Compute local x, y, z unit vectors for a frame element."""
         ni = self.mesh_model.nodes.get(elem.node_i)
         nj = self.mesh_model.nodes.get(elem.node_j)
         if ni is None or nj is None:
-            return np.eye(3), np.eye(3), np.eye(3)
+            raise ValueError(f"Cannot resolve nodes for {elem.elem_id}")
         vx = np.array([nj.x - ni.x, nj.y - ni.y, nj.z - ni.z])
-        vx = vx / np.linalg.norm(vx)
-        angle_rad = math.radians(getattr(elem, 'angle', 0.0))
-        if abs(vx[2]) < 0.999:
-            vz = np.array([-vx[0] * vx[2], -vx[1] * vx[2], 1.0 - vx[2]**2])
-        else:
-            vz = np.array([0.0, 0.0, 1.0])
-        vz = vz / np.linalg.norm(vz)
-        vy = np.cross(vz, vx)
-        vy = vy / np.linalg.norm(vy)
-        # Apply section rotation
-        if abs(angle_rad) > 1e-6:
-            c = math.cos(angle_rad)
-            s = math.sin(angle_rad)
-            vy2 = c * vy + s * vz
-            vz2 = -s * vy + c * vz
-            vy, vz = vy2, vz2
-        return vx, vy, vz
+        length = np.linalg.norm(vx)
+        if length < 1e-12:
+            raise ValueError(f"Zero-length element {elem.elem_id}")
+        vx_norm = vx / length
+        # Use get_SAP_vecxz for the reference vector
+        vecxz = get_SAP_vecxz(vx_norm, getattr(elem, 'angle', 0.0))
+        vz = vecxz / np.linalg.norm(vecxz)
+        vy = np.cross(vz, vx_norm)
+        vy_norm = vy / np.linalg.norm(vy)
+        return vx_norm, vy_norm, vz
