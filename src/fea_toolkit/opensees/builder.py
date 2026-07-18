@@ -145,6 +145,10 @@ class OpenSeesBuilder:
                                                      # fall inside slab areas
             'split_slabs_at_walls': False,  # Auto-split slab areas at wall
                                             # intersection lines before meshing
+            'pushover_spring_scale': 1.0,    # Scale factor for spring stiffness
+                                             # during pushover rebuild (0 = no springs)
+            'recompute_edge_constraints': False,  # Re-detect edge constraints
+                                                   # during pushover rebuild
             # Shell subdivision — subdivide each coarse shell into an N×N grid
             # before creating ShellMITC4 elements.  Set to 2 for 2×2 (4 shells
             # per area), 3 for 3×3 (9 shells), etc.  0 = no subdivision.
@@ -1981,7 +1985,15 @@ class OpenSeesBuilder:
                     for d in rep["duplicate_coord_nodes"]:
                         ids = ", ".join(f"{e[0]}(tag={e[1]})" for e in d["entries"])
                         print(f"    Duplicate nodes at {d['coord']}: {ids}")
-        
+
+            # Propagate element-type classification to split children so
+            # they inherit the parent's stiffness-factor variant section tag.
+            if self.split_elements and hasattr(self, '_frame_element_types'):
+                for child_id, child_elem in self.split_elements.items():
+                    parent_id = getattr(child_elem, 'parent_id', None)
+                    if parent_id and parent_id in self._frame_element_types:
+                        self._frame_element_types[child_id] = self._frame_element_types[parent_id]
+
         # Apply frame end offsets (rigid zones at joints)
         if self.model.frame_end_offsets:
             self._apply_frame_end_offsets()
@@ -3222,13 +3234,17 @@ class OpenSeesBuilder:
                 penalty_stiffness=penalty_stiffness,
                 verbose=verbose,
             )
-        return self._apply_penalty_edge_constraints(
-            coarse_edges=coarse_edges,
-            fine_nodes=fine_nodes,
-            coarse_elements=coarse_elements,
-            tolerance=tolerance,
-            verbose=verbose,
-        )
+        if method == 'penalty':
+            return self._apply_penalty_edge_constraints(
+                coarse_edges=coarse_edges,
+                fine_nodes=fine_nodes,
+                coarse_elements=coarse_elements,
+                tolerance=tolerance,
+                verbose=verbose,
+            )
+        raise ValueError(
+            f"Unknown constraint_method '{method}'. "
+            f"Choose 'spring' or 'penalty'.")
 
     def _apply_penalty_edge_constraints(
         self,
@@ -5639,6 +5655,17 @@ class OpenSeesBuilder:
                 shape (default 0 = fundamental mode).
             print_progress: If True, print step summaries.
 
+        Other config keys respected during pushover:
+
+        * ``pushover_spring_scale`` (float, default 1.0) — scale factor for
+          edge‑constraint spring stiffness during the pushover rebuild.
+          Set to 0 to disable springs entirely; values between 0 and 1
+          soften the connection (may improve convergence at the cost of
+          looser coupling).
+        * ``recompute_edge_constraints`` (bool, default False) — if True,
+          re‑run edge‑constraint detection on the rebuilt model instead of
+          using the cached constraints from :meth:`build`.
+
         Returns:
             Dictionary with keys:
 
@@ -5721,7 +5748,6 @@ class OpenSeesBuilder:
         self.config = push_config
 
         ops.wipe()
-        # wipe() clears all MPCs — caller must re-apply edge constraints
         self._edge_constraint_method = None
         ops.model('basic', '-ndm', 3, '-ndf', 6)
         self._create_nodes()
@@ -5731,6 +5757,19 @@ class OpenSeesBuilder:
         if self.config.get('split_elements', False):
             self._split_elements()
         self._create_elements()
+
+        # ── 1b. Re-apply edge constraints ──
+        # After wipe() the MPCs / spring elements are gone.  Re-apply
+        # from the saved data (computed during build()) so the pushover
+        # model has the same connectivity as the elastic model.
+        _spring_scale = float(self.config.get('pushover_spring_scale', 1.0))
+        if self._saved_edge_constraints and _spring_scale > 0:
+            for args in self._saved_edge_constraints:
+                self.apply_edge_constraints(*args)
+            if self.config.get('verbose', False) or print_progress:
+                n = len(self._saved_edge_constraints)
+                print(f"  Re-applied edge constraints from {n} tear(s) "
+                      f"(spring scale={_spring_scale})")
 
         # ── 2. Compute seismic masses (needed for uniform/triangular/mode1) ──
         node_masses: Dict[str, float] = {}
@@ -6434,10 +6473,15 @@ class OpenSeesBuilder:
                     Symmetric banded Lapack solver — fast when the stiffness
                     matrix is banded (typical for frame/shell models).
                 ``"ritz"``
-                    Load‑Dependent Ritz vectors: runs a static gravity step
-                    under self‑weight first, then solves eigen from the
-                    deformed state via ARPACK.  The Ritz vectors better
-                    capture dynamic response to lateral loads.
+                    Gravity pre‑step: runs a static gravity load under
+                    self‑weight, then solves eigen from the deformed
+                    state via ARPACK.  The pre‑step changes the current
+                    tangent stiffness (P‑delta effect from gravity)
+                    before the eigen solve, which can improve starting-
+                    vector quality for stiff models.  This is **not**
+                    a load‑dependent Ritz vector method — OpenSees has
+                    no native Ritz command.  See
+                    :doc:`/docs/modal_analysis` for details.
             g: Gravitational acceleration (unit‑aware).  ``None`` =
                 auto-detect from model units.  Default 9.80665 m/s².
 
@@ -6847,6 +6891,15 @@ class OpenSeesBuilder:
             modal_base_moment.append(m_base)
 
         # CQC combination
+        # TODO: Implement T_rigid rigid cutoff.
+        # When T_rigid is set, modes with T < T_rigid should be classified
+        # as rigid, evaluated at Sa(0) (zero-period spectral acceleration),
+        # combined via SRSS among themselves, then the rigid SRSS result
+        # combined with the flexible CQC result:
+        #   V_total = sqrt(V_cqc² + V_rigid²)
+        # The per-mode base shear values in modal_base_shear should remain
+        # as-is (mode-by-mode from OpenSees) — only the combination logic
+        # below needs the rigid/flexible split.
         base_shear_cqc = self._cqc_combine(modal_base_shear, omega, damp_ratios)
         base_shear_srss = math.sqrt(sum(v * v for v in modal_base_shear))
         base_moment_cqc = self._cqc_combine(modal_base_moment, omega, damp_ratios)
