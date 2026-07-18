@@ -175,7 +175,7 @@ ds_modal = xr.Dataset(
     coords={"nid": data["node_tag"], "mid": np.arange(len(data["modal/period"]))},
     data_vars={
         "period": ("mid", data["modal/period"]),
-        "mode_dx": ("mid", "nid"),  # would need transpose
+        "mode_dx": ("nid", "mid"),
         ...
     },
 )
