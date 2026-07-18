@@ -1,46 +1,26 @@
 """
-Main ``RhinoImporter`` — orchestrates the export of ``SAPModelData``
-into the Rhino document.
+``RhinoImporterV2`` — lightweight Extrusion version using ``rg``.
 
-The importer creates two geometry representations:
-
-* **Centreline** — points for joints, lines for frames, planar Breps for shells.
-* **Extrusion** — lightweight ``Extrusion`` solids using section profiles
-  (frames) or thickness offset (shells).
-
-Both are organised in a hierarchical layer tree under ``SAP2000``:
-
-.. code::
-
-    SAP2000
-    ├── Joints
-    ├── Frames
-    │   ├── Centreline / {Section}
-    │   └── Extrusion / {Section}
-    └── Shells
-        ├── Centreline / {Section}
-        └── Extrusion / {Section}
+Same public API as ``RhinoImporter`` but uses ``geometry_v2`` which
+creates true lightweight ``Extrusion`` objects (via
+``rg.Extrusion.Create()``) instead of Brep polysurfaces.
 
 Usage
 -----
-
-Inside Rhino (IronPython)::
+Inside Rhino::
 
     import sys
     sys.path.append(r'/path/to/fea_toolkit/src')
-    from fea_toolkit.io.s2k_parser import SAP2000Parser
-    from fea_toolkit.rhino.importer import RhinoImporter
 
-    parser = SAP2000Parser.from_json('model.json')
+    from fea_toolkit.io.s2k_parser import SAP2000Parser
+    from fea_toolkit.rhino.importer_v2 import RhinoImporterV2
+
+    parser = SAP2000Parser('/path/to/model.s2k')
+    parser.parse()
     md = parser.get_model_data()
 
-    importer = RhinoImporter(md)
-    report = importer.run(
-        create_centreline=True,
-        create_extrusions=True,
-        color_code_joints=True,
-        create_groups=True,
-    )
+    importer = RhinoImporterV2(md)
+    report = importer.run()
     print(report)
 """
 
@@ -54,46 +34,37 @@ from .layers import (
     create_frame_layers, create_shell_layers,
     FrameLayerSet, ShellLayerSet,
 )
-from .geometry import (
+from .geometry_v2 import (
     create_joint_points, create_frame_lines, create_shell_breps,
     create_frame_extrusions, create_shell_extrusions,
 )
 from .groups import create_sap_groups, create_selection_groups
-from ..io.s2k_parser import SAP2000Parser
 
 
-# ── Re-export for convenience ────────────────────────────────────────────
-__all__ = ["RhinoImporter"]
+__all__ = ["RhinoImporterV2"]
 
 
-class RhinoImporter:
-    """Export a parsed SAP2000 model into the active Rhino document.
+class RhinoImporterV2:
+    """Export ``SAPModelData`` into Rhino using lightweight Extrusions.
 
     Args:
-        model_data: A ``SAPModelData`` instance (from ``SAP2000Parser``).
+        model_data: A ``SAPModelData`` instance.
     """
 
     def __init__(self, model_data: SAPModelData):
         self.md = model_data
         self._ensure_rhino()
 
-    # -----------------------------------------------------------------
-    # Helpers
-    # -----------------------------------------------------------------
     @staticmethod
     def _ensure_rhino():
-        """Check that we are running inside Rhino."""
         try:
             import scriptcontext as sc  # noqa: F401
         except ImportError:
             raise RuntimeError(
-                "RhinoImporter requires Rhino 8 (IronPython). "
+                "RhinoImporterV2 requires Rhino 8. "
                 "The Rhino API is not available in standard Python."
             )
 
-    # -----------------------------------------------------------------
-    # Main entry point
-    # -----------------------------------------------------------------
     def run(
         self,
         create_centreline: bool = True,
@@ -106,18 +77,17 @@ class RhinoImporter:
         """Execute the full import sequence.
 
         Args:
-            create_centreline: Create points / lines / planar Breps.
-            create_extrusions: Create 3‑D extrusion solids.
-            color_code_joints: Colour joint points by restraint type.
-            create_groups: Create Rhino groups from SAP2000 groups
-                plus selection groups (All Frames / All Shells / All Joints).
-            create_meshed: If True, also import a meshed version of the
-                model (areas subdivided, frames split at joints) under a
+            create_centreline: Points / lines / planar Breps.
+            create_extrusions: Lightweight ``Extrusion`` solids.
+            color_code_joints: Colour joints by restraint type.
+            create_groups: Rhino groups from SAP groups.
+            create_meshed: If True, also import meshed geometry (areas
+                sub‑divided, frames split at joints) under a
                 ``SAP2000/Meshed`` layer tree.
-            verbose: Print progress to the Rhino command line.
+            verbose: Print progress.
 
         Returns:
-            Dict with keys for both original and (if requested) meshed geometry.
+            Dict with counts per geometry type.
         """
         results: t.Dict[str, t.Any] = {
             "joints": 0,
@@ -132,14 +102,12 @@ class RhinoImporter:
             "meshed_shell_extrusions": 0,
         }
 
-        # ── 1. Create layer tree ──────────────────────────────────────
+        # 1. Layer tree
         if verbose:
             print("Creating layer structure...")
-
         root_idx = create_root_layer()
         joint_layer = create_joints_layer(root_idx)
 
-        # Collect section names with their raw props for colour info.
         frame_section_props: t.Dict[str, dict] = {}
         shell_section_props: t.Dict[str, dict] = {}
         for sname, sec in self.md.sections.items():
@@ -153,18 +121,17 @@ class RhinoImporter:
         frame_layers = create_frame_layers(root_idx, frame_section_props)
         shell_layers = create_shell_layers(root_idx, shell_section_props)
 
-        # Collect object IDs for groups later
         joint_obj_ids: t.List[str] = []
         frame_obj_ids: t.List[str] = []
         shell_obj_ids: t.List[str] = []
 
-        # ── 2. Joints (always created) ───────────────────────────────
+        # 2. Joints
         if verbose:
             print("Creating joint points...")
         n_joints, joint_obj_ids = create_joint_points(self.md, joint_layer)
         results["joints"] = n_joints
 
-        # ── 3. Centreline geometry ───────────────────────────────────
+        # 3. Centreline
         if create_centreline:
             if self.md.frame_elements:
                 if verbose:
@@ -172,17 +139,14 @@ class RhinoImporter:
                 results["frame_centrelines"] = create_frame_lines(
                     self.md, frame_layers.centreline
                 )
-
             if self.md.area_elements:
                 if verbose:
                     print("Creating shell centreline Breps...")
-                # Capture shell obj IDs during centreline creation
-                # (create_shell_breps returns count, we need IDs)
                 results["shell_centrelines"] = create_shell_breps(
                     self.md, shell_layers.centreline
                 )
 
-        # ── 4. Extrusion geometry ────────────────────────────────────
+        # 4. Extrusions (lightweight Extrusion objects)
         if create_extrusions:
             if self.md.frame_elements:
                 if verbose:
@@ -190,7 +154,6 @@ class RhinoImporter:
                 results["frame_extrusions"] = create_frame_extrusions(
                     self.md, frame_layers.extrusion
                 )
-
             if self.md.area_elements:
                 if verbose:
                     print("Creating shell extrusion solids...")
@@ -198,13 +161,12 @@ class RhinoImporter:
                     self.md, shell_layers.extrusion
                 )
 
-        # ── 5. Meshed geometry (areas sub‑divided, frames split) ────
+        # 5. Meshed geometry (areas sub‑divided, frames split)
         if create_meshed:
             if verbose:
                 print("Pre-processing meshed model...")
 
             try:
-                from ..opensees.builder import OpenSeesBuilder
                 from ..model.geometry import (
                     mesh_area_elements,
                     split_elements,
@@ -213,13 +175,11 @@ class RhinoImporter:
 
                 md_mesh = copy.deepcopy(self.md)
 
-                # Compute max existing node tag for offset
                 max_tag = 0
                 for nd in md_mesh.nodes.values():
                     max_tag = max(max_tag, nd.node_tag)
                 next_tag = max_tag + 1
 
-                # Mesh areas
                 dist_loads = getattr(md_mesh, 'frame_dist_loads', [])
                 frame_auto_mesh = getattr(md_mesh, 'frame_auto_mesh', {})
                 area_mesh = getattr(md_mesh, 'area_mesh', {})
@@ -230,7 +190,6 @@ class RhinoImporter:
                     md_mesh.nodes, area_mesh, next_tag=next_tag,
                 )
 
-                # Split frames at joints
                 md_mesh.frame_elements, md_mesh.frame_assignments, _ = (
                     split_elements(
                         md_mesh.nodes, md_mesh.frame_elements,
@@ -239,7 +198,6 @@ class RhinoImporter:
                     )
                 )
 
-                # Split areas at frame edges
                 md_mesh.area_elements, md_mesh.area_assignments, \
                     md_mesh.nodes, next_tag = split_areas_at_frame_edges(
                     md_mesh.area_elements, md_mesh.area_assignments,
@@ -257,7 +215,6 @@ class RhinoImporter:
                 md_mesh = None
 
             if md_mesh is not None:
-                # Create meshed layer tree under SAP2000/Meshed
                 meshed_root = create_root_layer(name="Meshed",
                                                  parent=root_idx)
                 meshed_frame_layers = create_frame_layers(
@@ -299,15 +256,11 @@ class RhinoImporter:
                                 md_mesh, meshed_shell_layers.extrusion
                             )
 
-        # ── 6. Groups ────────────────────────────────────────────────
+        # 6. Groups
         if create_groups:
-            # Selection groups (SAP_All_Frames / Shells / Joints) always
-            # created when there are objects in the document.
             if verbose:
                 print("Creating selection groups...")
             create_selection_groups()
-
-            # SAP2000 groups only if the model has definitions
             if self.md.groups:
                 if verbose:
                     print("Creating SAP2000 groups...")
@@ -315,13 +268,12 @@ class RhinoImporter:
                     self.md, joint_obj_ids, frame_obj_ids, shell_obj_ids
                 )
 
-        # ── 6. Color-code joints ────────────────────────────────────
+        # 7. Joint colour coding
         if color_code_joints and joint_obj_ids:
             if verbose:
                 print("Color-coding joints by restraint type...")
             self._color_code_joints(joint_obj_ids)
 
-        # ── 7. Finalise ──────────────────────────────────────────────
         if verbose:
             print("\nImport complete.")
             for key, val in results.items():
@@ -329,22 +281,10 @@ class RhinoImporter:
 
         return results
 
-    # -----------------------------------------------------------------
-    # Joint colour coding
-    # -----------------------------------------------------------------
     def _color_code_joints(self, joint_object_ids: t.List[str]) -> None:
-        """Colour joint points by restraint type.
-
-        Colours are defined in ``RESTRAINT_COLORS``:
-            fully_fixed → Red
-            pinned      → Blue
-            roller      → Green
-            free        → LightGray
-            constrained → Purple
-        """
+        """Colour joints by restraint type."""
         import scriptcontext as sc
         import Rhino.DocObjects as rd
-
         doc = sc.doc
 
         for obj_id in joint_object_ids:
@@ -372,7 +312,6 @@ class RhinoImporter:
                 joint_color = RESTRAINT_COLORS.get(color_key)
                 if joint_color is None:
                     continue
-
                 attrs.ObjectColor = joint_color
                 attrs.ColorSource = rd.ObjectColorSource.ColorFromObject
                 obj.CommitChanges()
