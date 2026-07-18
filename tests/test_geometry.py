@@ -16,7 +16,7 @@ pytest.importorskip("openseespy")
 
 import openseespy.opensees as ops
 from fea_toolkit.opensees.builder import OpenSeesBuilder
-from fea_toolkit.model.geometry import find_constraint_edges, warn_frame_overlaps
+from fea_toolkit.model.geometry import find_constraint_edges
 from fea_toolkit.model.sap_data import (
     SAPModelData,
     Node,
@@ -244,6 +244,46 @@ class TestFindConstraintEdges:
             # The slab mesh creates sub-elements with intermediate nodes
             # on the 2→3 edge — the beam has only 2→3 directly.
             # Should detect at least one tear.
+            assert len(edges) >= 1
+        finally:
+            ops.wipe()
+
+    def test_master_chain_t_range_warning(self, materials, sections):
+        """Centred coarse wall on fine slab: tear detected."""
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 10.0, 0.0, 0.0),
+            "3": Node("3", 3, 10.0, 6.0, 0.0),
+            "4": Node("4", 4, 0.0, 6.0, 0.0),
+            "5": Node("5", 5, 2.0, 6.0, 0.0),
+            "6": Node("6", 6, 8.0, 6.0, 0.0),
+            "7": Node("7", 7, 8.0, 8.0, 0.0),
+            "8": Node("8", 8, 2.0, 8.0, 0.0),
+        }
+        areas = {
+            "1": AreaElement("1", 10, ["1", "2", "3", "4"]),
+            "2": AreaElement("2", 20, ["5", "6", "7", "8"]),
+        }
+        md = SAPModelData(
+            nodes=nodes, restraints={}, materials=materials,
+            sections=sections, frame_elements={}, area_elements=areas,
+            frame_assignments={},
+            area_assignments={"1": "Slab200", "2": "Wall200"},
+            groups={}, frame_auto_mesh={},
+            area_mesh={
+                "1": AreaMesh(auto_mesh=True, max_size=2.5),
+                "2": AreaMesh(auto_mesh=True, max_size=6.0),
+            },
+        )
+        cfg = {"verbose": False, "create_shells": True}
+        b = OpenSeesBuilder(md, cfg)
+        try:
+            b.build()
+            edges = find_constraint_edges(
+                b.model.area_elements,
+                b.model.area_assignments,
+                b.model.nodes,
+            )
             assert len(edges) >= 1
         finally:
             ops.wipe()
