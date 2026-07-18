@@ -1863,10 +1863,20 @@ def subdivide_area_mesh(
     def _coord_key(x, y, z):
         return (round(x, 6), round(y, 6), round(z, 6))
 
-    # Seed coordinate registry from all existing nodes so we can deduplicate
+    # Seed coordinate registry from active quadrilateral area corner
+    # nodes only — not from every node in the model — so that
+    # coincident offset/release/disconnected nodes are not spuriously
+    # reused during deduplication.
     _coord_to_id: Dict[tuple, str] = {}
-    for nid, nd in nodes.items():
-        _coord_to_id[_coord_key(nd.x, nd.y, nd.z)] = nid
+    for aid, elem in area_elements.items():
+        if getattr(elem, 'inactive', False):
+            continue
+        if len(elem.node_ids) != 4:
+            continue
+        for nid in elem.node_ids:
+            nd = nodes.get(nid)
+            if nd is not None:
+                _coord_to_id[_coord_key(nd.x, nd.y, nd.z)] = nid
 
     for aid, elem in list(area_elements.items()):
         if selection is not None and aid not in selection:
@@ -1886,6 +1896,15 @@ def subdivide_area_mesh(
             corners.append(np.array([nd.x, nd.y, nd.z], dtype=float))
         if len(corners) != 4:
             continue
+
+        # Normalise winding to counter-clockwise using projected
+        # signed area so child shells have consistent normals.
+        e3 = corners[1] - corners[0]
+        e4 = corners[3] - corners[0]
+        normal = np.cross(e3, e4)
+        plane_z = np.array([0.0, 0.0, 1.0])
+        if np.dot(normal, plane_z) < 0.0:
+            corners[2], corners[3] = corners[3], corners[2]
 
         # Bilinear interpolation to create (n+1)² grid points
         grid = np.zeros((n + 1, n + 1, 3))
