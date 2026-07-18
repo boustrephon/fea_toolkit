@@ -1194,17 +1194,22 @@ class TestShellSubdivision:
         )
         assert max_disp > 1e-8, "Slab shows no displacement under self-weight"
 
-        # Verify NPZ export includes the sub-elements
+        # Verify NPZ export includes the frame elements (4 columns).
+        # In this test model columns meet the slab only at endpoints,
+        # so no frame splitting at sub-nodes occurs.
         import tempfile
         npz_path = str(tempfile.mkstemp(suffix=".npz")[1])
         try:
             b.export_results_to_npz(npz_path, results)
             import numpy as np
             with np.load(npz_path, allow_pickle=True) as data:
-                # export_results_to_npz uses sub_* prefix, not shell_*
+                # export_results_to_npz uses sub_* prefix for frame elements
                 assert "sub_elem_tags" in data
-                # Should have at least the 4 sub-elements
-                assert len(data["sub_elem_tags"]) >= 4
+                assert "sub_sap_ids" in data
+                sap_ids = list(data["sub_sap_ids"])
+                # All 4 original columns should be present
+                assert len(sap_ids) >= 4, \
+                    f"Expected ≥4 frame elements in NPZ, got {len(sap_ids)}"
         finally:
             import os
             if os.path.exists(npz_path):
