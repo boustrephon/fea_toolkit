@@ -211,15 +211,19 @@ class AnalysisBuilder:
 
     def _create_sections(self) -> None:
         """Create OpenSees sections from MeshModel sections.
-        Tag map is pre-populated from MeshModel.section_tags.
+
+        Assigns section tags sequentially if they are not already
+        populated in ``self.section_tags`` (from MeshModel).
         """
         if self.config['verbose']:
             print("Creating sections...")
 
+        next_tag = max(self.section_tags.values(), default=0) + 1 if self.section_tags else 1
         for sec_name, sec in self.mesh_model.sections.items():
-            tag = self.section_tags.get(sec_name)
-            if tag is None:
-                continue
+            if sec_name not in self.section_tags:
+                self.section_tags[sec_name] = next_tag
+                next_tag += 1
+            tag = self.section_tags[sec_name]
             self._create_single_section(sec, tag)
 
     def _create_single_section(self, sec, tag: int) -> None:
@@ -279,8 +283,8 @@ class AnalysisBuilder:
         if self.config['verbose']:
             print("Creating shell elements...")
 
-        self._shell_sec_tags = dict(self.mesh_model.shell_sec_tags)
-        self._shell_sec_variants = dict(self.mesh_model.shell_sec_variants)
+        self._shell_sec_tags = dict(self.mesh_model.shell_sec_tags) if self.mesh_model.shell_sec_tags else {}
+        self._shell_sec_variants = dict(self.mesh_model.shell_sec_variants) if self.mesh_model.shell_sec_variants else {}
         next_sec_tag = (max(self.section_tags.values(), default=0) + 1
                         if self.section_tags else 1)
 
@@ -772,7 +776,24 @@ class AnalysisBuilder:
     # ═══════════════════════════════════════════════════════════════
 
     def get_local_axes(self, elem: FrameElement) -> Tuple[np.ndarray, ...]:
-        """Compute local x, y, z unit vectors for a frame element."""
+        """Compute local x, y, z unit vectors for a frame element.
+
+        Uses ``get_SAP_vecxz`` from the geometry module (which handles
+        the SAP2000 vecxz convention) combined with the element's
+        section rotation angle.
+
+        Args:
+            elem: Frame element with ``node_i``, ``node_j``, and
+                ``angle`` attributes.
+
+        Returns:
+            ``(vx, vy, vz)`` tuple of three unit vectors forming a
+            right‑handed local coordinate system.
+
+        Raises:
+            ValueError: If either node cannot be resolved, or the
+                element has zero length.
+        """
         ni = self.mesh_model.nodes.get(elem.node_i)
         nj = self.mesh_model.nodes.get(elem.node_j)
         if ni is None or nj is None:
