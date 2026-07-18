@@ -663,13 +663,21 @@ def storey_level_summary(md, z_tol: float = 0.01,
     """
     from collections import Counter
 
-    # ── 1. Cluster nodes by Z ──────────────────────────────────────────
+    # ── 1. Cluster nodes by Z (tolerance-based) ────────────────────────
     z_levels = {}
-    for nid, nd in md.nodes.items():
-        zkey = round(nd.z / z_tol) * z_tol  # snap to grid
-        z_levels.setdefault(zkey, []).append(nid)
+    sorted_nodes = sorted(md.nodes.items(), key=lambda x: x[1].z, reverse=True)
+    cluster_reps = []
+    for nid, nd in sorted_nodes:
+        assigned = False
+        for rep_z in cluster_reps:
+            if abs(nd.z - rep_z) <= z_tol:
+                z_levels.setdefault(rep_z, []).append(nid)
+                assigned = True
+                break
+        if not assigned:
+            cluster_reps.append(nd.z)
+            z_levels.setdefault(nd.z, []).append(nid)
 
-    # Sort descending (roof first)
     sorted_zs = sorted(z_levels, reverse=True)
 
     # ── 2. Assign level labels ─────────────────────────────────────────
