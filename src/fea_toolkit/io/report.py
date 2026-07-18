@@ -572,6 +572,104 @@ def modal_table_enhanced(md, n_modes: int = 12, print_results: bool = False):
 
 
 # ========================================================================
+# Modal participation DataFrame from existing results (no re-analysis)
+# ========================================================================
+
+
+def modal_participation_df(modal_result: Dict[str, Any]) -> Optional[pd.DataFrame]:
+    """Build a modal participation DataFrame from existing modal results.
+
+    Uses the modal_props dict returned by
+    :meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.run_modal_analysis`.
+    Does **not** re-run the analysis.
+
+    Columns: ``Mode``, ``Period (s)``, ``Mx (%)``, ``My (%)``, ``Mz (%)``,
+    ``Rx (%)``, ``Ry (%)``, ``Rz (%)`` with a SUM row.
+
+    Returns ``None`` when *modal_result* contains no period data.
+    """
+    mp = modal_result.get("modal_props", {})
+    periods = list(modal_result.get("periods", []))
+    n = len(periods)
+    if n == 0:
+        return None
+
+    ratio_keys = [
+        "partiMassRatiosMX", "partiMassRatiosMY", "partiMassRatiosMZ",
+        "partiMassRatiosRMX", "partiMassRatiosRMY", "partiMassRatiosRMZ",
+    ]
+    col_names = [
+        "Mx (%)", "My (%)", "Mz (%)",
+        "Rx (%)", "Ry (%)", "Rz (%)",
+    ]
+
+    rows = []
+    for i in range(n):
+        row = {"Mode": i + 1, "Period (s)": round(periods[i], 4)}
+        for key, col in zip(ratio_keys, col_names):
+            vals = mp.get(key, [])
+            row[col] = f"{round(vals[i], 2) if i < len(vals) else 0.0:.2f}"
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    sum_row = {"Mode": "<strong>SUM</strong>", "Period (s)": "\u2014"}
+    for col in col_names:
+        sum_row[col] = f"{df[col].astype(float).sum():.2f}"
+    df = pd.concat([df, pd.DataFrame([sum_row])], ignore_index=True)
+    return df
+
+
+def save_modal_participation_html(modal_result: Dict[str, Any],
+                                  out_dir: str = "output",
+                                  ) -> Optional[str]:
+    """Build an HTML modal‑participation table from existing results and save.
+
+    Also prints a clean text summary to the console.
+
+    Returns the path to the saved HTML file, or ``None``.
+    """
+    from pathlib import Path
+    df = modal_participation_df(modal_result)
+    if df is None:
+        return None
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "modal_table.html"
+
+    # HTML — bold SUM row, minimal styling
+    html = df.to_html(index=False, escape=False)
+    html = html.replace(
+        '<table border="1" class="dataframe">',
+        '<table style="font-size:0.85em;border-collapse:collapse">',
+    )
+    with open(path, "w") as f:
+        f.write(html)
+    print(f"  Saved {path}")
+
+    # Text summary
+    print(f"\n  Modal participation summary ({len(df) - 1} modes):")
+    header = f"  {'Mode':>5} {'Period':>8}  {'Mx%':>7} {'My%':>7} {'Mz%':>7}"
+    print(header)
+    print("  " + "-" * len(header))
+    for _, row in df.iterrows():
+        if row["Mode"] == "<strong>SUM</strong>":
+            print("  " + "-" * len(header))
+            m = "SUM"
+            p = "\u2014"
+        else:
+            m = str(int(row["Mode"]))
+            p = f"{row['Period (s)']:.4f}"
+        mx = row.get("Mx (%)", "\u2014")
+        my = row.get("My (%)", "\u2014")
+        mz = row.get("Mz (%)", "\u2014")
+        print(f"  {m:>5} {p:>8}  {mx:>7} {my:>7} {mz:>7}")
+    print()
+
+    return str(path)
+
+
+# ========================================================================
 # Linear analysis table formatting
 # ========================================================================
 

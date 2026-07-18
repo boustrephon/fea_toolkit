@@ -3194,3 +3194,246 @@ class TestBuilderHingeModel:
             assert len(coords) == 2
         finally:
             ops.wipe()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# SAPModelData utility methods
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestSAPModelDataMethods:
+    """Tests for the utility methods added to SAPModelData."""
+
+    @pytest.fixture
+    def sample_md(self):
+        nodes = {
+            "1": Node(node_id="1", node_tag=10, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=20, x=6, y=0, z=0),
+            "3": Node(node_id="3", node_tag=30, x=6, y=8, z=0),
+        }
+        frames = {
+            "F1": FrameElement(elem_id="F1", elem_tag=1,
+                                node_i="1", node_j="2"),
+        }
+        areas = {
+            "A1": AreaElement(area_id="A1", area_tag=2,
+                               node_ids=["1", "2", "3"]),
+        }
+        materials = {"C40": Material(name="C40", type="Concrete", E_mod=3e7)}
+        sections = {"SEC1": Section(
+            name="SEC1", material="C40", shape="Rectangular", A=0.16)}
+        return SAPModelData(
+            nodes=nodes, restraints={},
+            materials=materials, sections=sections,
+            frame_elements=frames, area_elements=areas,
+            frame_assignments={"F1": "SEC1"},
+            area_assignments={"A1": "SEC1"},
+            groups={},
+            frame_auto_mesh={},
+        )
+
+    def test_max_node_tag(self, sample_md):
+        assert sample_md.max_node_tag() == 30
+
+    def test_max_node_tag_empty(self):
+        md = SAPModelData(nodes={}, restraints={},
+                          materials={}, sections={},
+                          frame_elements={}, area_elements={},
+                          frame_assignments={}, area_assignments={},
+                          groups={}, frame_auto_mesh={})
+        assert md.max_node_tag() == 0
+
+    def test_auto_detect_static_cases(self):
+        from fea_toolkit.model.sap_data import LoadCase
+        md = SAPModelData(
+            nodes={}, restraints={},
+            materials={}, sections={},
+            frame_elements={}, area_elements={},
+            frame_assignments={}, area_assignments={},
+            groups={}, frame_auto_mesh={},
+            load_cases={
+                "DEAD": LoadCase(case_name="DEAD", case_type="LinStatic",
+                                  design_type_option="Prog Det",
+                                  design_type="Dead",
+                                  design_action_option="Prog Det",
+                                  design_action="Non-Composite"),
+                "MODAL": LoadCase(case_name="MODAL", case_type="LinModal",
+                                   design_type_option="Prog Det",
+                                   design_type="Other",
+                                   design_action_option="Prog Det",
+                                   design_action="Other"),
+            },
+        )
+        cases = md.auto_detect_static_cases()
+        assert cases == ["DEAD"]
+
+    def test_summary_dict(self, sample_md):
+        s = sample_md.summary_dict()
+        assert s["Nodes"] == 3
+        assert s["Frames"] == 1
+        assert s["Areas"] == 1
+        assert s["Materials"] == 1
+        assert s["Sections"] == 1
+        assert s["X span (m)"] == 6.0
+        assert s["Y span (m)"] == 8.0
+        assert s["Z span (m)"] == 0.0
+
+    def test_remove_floating_nodes(self):
+        """remove_floating_nodes eliminates unreferenced nodes."""
+        from fea_toolkit.model.geometry import remove_floating_nodes
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+                "2": Node(node_id="2", node_tag=2, x=6, y=0, z=0),
+                "3": Node(node_id="3", node_tag=3, x=3, y=4, z=0),  # floating
+            },
+            restraints={},
+            materials={}, sections={},
+            frame_elements={
+                "F1": FrameElement(elem_id="F1", elem_tag=10,
+                                    node_i="1", node_j="2"),
+            },
+            area_elements={},
+            frame_assignments={"F1": "SEC1"},
+            area_assignments={},
+            groups={}, frame_auto_mesh={},
+        )
+        rows = remove_floating_nodes(md)
+        # Inert node is removed silently (no mass/loads/restraint to redistribute)
+        assert len(rows) == 0
+        assert "3" not in md.nodes
+
+    def test_remove_floating_nodes_with_restraint(self):
+        """Floating node with restraint transfers it to nearest neighbour."""
+        from fea_toolkit.model.geometry import remove_floating_nodes
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+                "2": Node(node_id="2", node_tag=2, x=6, y=0, z=0),
+                "3": Node(node_id="3", node_tag=3, x=3, y=0, z=0),  # floating
+            },
+            restraints={"3": Restraint([1, 1, 1, 1, 1, 1])},
+            materials={}, sections={},
+            frame_elements={
+                "F1": FrameElement(elem_id="F1", elem_tag=10,
+                                    node_i="1", node_j="2"),
+            },
+            area_elements={},
+            frame_assignments={"F1": "SEC1"},
+            area_assignments={},
+            groups={}, frame_auto_mesh={},
+        )
+        rows = remove_floating_nodes(md)
+        assert len(rows) == 1
+        assert rows[0]["restrained"] is True
+        # Restraint should have transferred
+        assert "1" in md.restraints or "2" in md.restraints
+
+
+# ═══════════════════════════════════════════════════════════════════
+# CQC combination engine
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestCqcCombine:
+    """Tests for :func:`fea_toolkit.spectrum.cqc_combine`."""
+
+    def test_single_mode(self):
+        """Single mode → CQC == SRSS == modal_shear."""
+        from fea_toolkit.spectrum import cqc_combine
+
+        def _sa(T):
+            return 9.81  # constant 1g
+        result = cqc_combine(
+            eff_masses=[100.0],
+            periods=[1.0],
+            spectrum_fn=_sa,
+            damping=0.05,
+        )
+        assert result is not None
+        assert abs(result["base_shear_cqc"] - 981.0) < 1e-6
+        assert abs(result["base_shear_srss"] - 981.0) < 1e-6
+
+    def test_two_modes_srss(self):
+        """Two uncorrelated modes → SRSS equals CQC (rho ≈ 0)."""
+        from fea_toolkit.spectrum import cqc_combine
+
+        def _sa(T):
+            return 9.81
+        result = cqc_combine(
+            eff_masses=[100.0, 60.0],
+            periods=[1.0, 0.01],  # very separated → rho ≈ 0
+            spectrum_fn=_sa,
+            damping=0.05,
+        )
+        expected_srss = math.sqrt((100 * 9.81)**2 + (60 * 9.81)**2)
+        assert abs(result["base_shear_srss"] - expected_srss) < 1e-6
+
+    def test_total_mass_missing(self):
+        """Missing-mass correction is proportional to residual mass × Sa(0)."""
+        from fea_toolkit.spectrum import cqc_combine
+        calls = []
+
+        def _sa(T):
+            calls.append(T)
+            return 9.81 if T == 0 else 9.81
+        result = cqc_combine(
+            eff_masses=[100.0],
+            periods=[1.0],
+            spectrum_fn=_sa,
+            total_mass=150.0,
+        )
+        assert result["residual_mass"] == 50.0  # 150 - 100
+        assert abs(result["base_shear_missing_mass"] - 50.0 * 9.81) < 1e-6
+
+    def test_rigid_cutoff(self):
+        """Modes below T_rigid are treated as rigid (Sa(0) scaling)."""
+        from fea_toolkit.spectrum import cqc_combine
+
+        def _sa(T):
+            return 9.81 if T < 0.05 else 9.81 * 2.0  # 1g rigid, 2g flexible
+        result = cqc_combine(
+            eff_masses=[100.0, 60.0],
+            periods=[0.02, 1.0],  # first mode is rigid
+            spectrum_fn=_sa,
+            T_rigid=0.05,
+        )
+        assert result["n_modes_rigid"] == 1
+        assert result["n_modes_flexible"] == 1
+
+    def test_empty_input(self):
+        """Empty inputs return empty dict."""
+        from fea_toolkit.spectrum import cqc_combine
+        result = cqc_combine(eff_masses=[], periods=[], spectrum_fn=lambda T: 0)
+        assert result == {}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Modal participation DataFrame
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestModalParticipationDf:
+    """Tests for :func:`fea_toolkit.io.report.modal_participation_df`."""
+
+    def test_basic(self):
+        from fea_toolkit.io.report import modal_participation_df
+        modal_result = {
+            "periods": [0.5, 0.2],
+            "modal_props": {
+                "partiMassRatiosMX": [60.0, 30.0],
+                "partiMassRatiosMY": [5.0, 40.0],
+                "partiMassRatiosMZ": [0.0, 0.0],
+                "partiMassRatiosRMX": [0.0, 0.0],
+                "partiMassRatiosRMY": [0.0, 0.0],
+                "partiMassRatiosRMZ": [10.0, 20.0],
+            },
+        }
+        df = modal_participation_df(modal_result)
+        assert df is not None
+        assert len(df) == 3  # 2 modes + SUM
+        assert float(df.iloc[2]["Mx (%)"]) == 90.0  # 60 + 30
+
+    def test_empty(self):
+        from fea_toolkit.io.report import modal_participation_df
+        assert modal_participation_df({"periods": [], "modal_props": {}}) is None
