@@ -29,6 +29,9 @@ from ..model.sap_data import Section, FrameElement, FrameDistributedLoad, Node
 from ..model.sap_data import ShellSection, Restraint
 from ..model.geometry import convert_area_loads_to_edge_loads
 from ..model.selection import Selection
+from ..model.mesh_model import MeshModel
+from .preprocessor import Preprocessor
+from .analysis_builder import AnalysisBuilder
 
 
 class OpenSeesBuilder:
@@ -110,6 +113,7 @@ class OpenSeesBuilder:
             'create_fiber_sections': False,
             'split_elements': True,
             'verbose': False,
+            'use_preprocessor': False,  # NEW: two-stage build path
             'geom_transf_type': 'Linear',
             'beam_integration': 'Lobatto',  # 'Lobatto' or 'HingeRadau'
             'simplify_distributed_loads': False,
@@ -1890,6 +1894,32 @@ class OpenSeesBuilder:
             Areas that **do** match remain loads‑only (their loads are converted
             to frame edge loads, as before).
         """
+        # ── Two-stage build path (use_preprocessor=True) ─────────
+        if self.config.get('use_preprocessor', False):
+            preprocessor = Preprocessor(self.config)
+            mesh_model = preprocessor.run(self.model, selection=selection)
+            self._mesh_model = mesh_model
+
+            analysis = AnalysisBuilder(mesh_model, self.config)
+            analysis.build_domain()
+            analysis.create_loads(pattern_scales=pattern_scales)
+
+            # Copy key state back to self for backward compatibility
+            self.split_elements = mesh_model.frame_elements
+            self.split_assignments = mesh_model.frame_assignments
+            self.split_dist_loads = mesh_model.frame_dist_loads
+            self.frame_tag_map = analysis.frame_tag_map
+            self.section_tags = analysis.section_tags
+            self._edge_constraint_method = analysis._edge_constraint_method
+            self._saved_edge_constraints = analysis._saved_edge_constraints
+            self._frame_element_types = analysis._frame_element_types
+            self._area_element_types = analysis._area_element_types
+            self._shell_sec_tags = analysis._shell_sec_tags
+            self._shell_sec_variants = analysis._shell_sec_variants
+            self.edge_loads_from_areas = analysis.edge_loads_from_areas
+            return
+
+        # ── Legacy single-stage path ─────────────────────────────
         # Persist selection so re-builds (e.g. from run_static_analysis)
         # don't lose it.
         if selection is not None:
