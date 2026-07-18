@@ -1909,6 +1909,7 @@ class OpenSeesBuilder:
             self.split_assignments = mesh_model.frame_assignments
             self.split_dist_loads = mesh_model.frame_dist_loads
             self.frame_tag_map = analysis.frame_tag_map
+            self.material_tags = analysis.material_tags
             self.section_tags = analysis.section_tags
             self._edge_constraint_method = analysis._edge_constraint_method
             self._saved_edge_constraints = analysis._saved_edge_constraints
