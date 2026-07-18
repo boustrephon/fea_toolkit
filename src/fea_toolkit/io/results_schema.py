@@ -97,110 +97,112 @@ def validate_npz(path: str) -> List[str]:
     Returns a list of error/warning messages (empty = fully valid).
     """
     messages: List[str] = []
+    data = None
     try:
         data = np.load(path, allow_pickle=False)
     except Exception as exc:
         return [f"Cannot load: {exc}"]
 
-    # ── Resolve dimensions from present arrays ────────────────────
-    dims: Dict[str, int] = {}
-    tag_arr = data.get("node_tag")
-    if tag_arr is not None:
-        dims["N_node"] = len(tag_arr)
-    for key in ("frame_eid", "frame_sap_id"):
-        arr = data.get(key)
-        if arr is not None:
-            dims["N_frame"] = len(arr)
-            break
-    for key in ("shell_eid", "shell_sap_id"):
-        arr = data.get(key)
-        if arr is not None:
-            dims["N_shell"] = len(arr)
-            break
-    for key in ("modal/period", "modal/frequency"):
-        arr = data.get(key)
-        if arr is not None:
-            dims["N_mode"] = len(arr)
-            break
-    at = data.get("analysis_types")
-    if at is not None:
-        dims["N_analysis"] = len(at)
+    try:
+        # ── Resolve dimensions from present arrays ────────────────
+        dims: Dict[str, int] = {}
+        tag_arr = data.get("node_tag")
+        if tag_arr is not None:
+            dims["N_node"] = len(tag_arr)
+        for key in ("frame_eid", "frame_sap_id"):
+            arr = data.get(key)
+            if arr is not None:
+                dims["N_frame"] = len(arr)
+                break
+        for key in ("shell_eid", "shell_sap_id"):
+            arr = data.get(key)
+            if arr is not None:
+                dims["N_shell"] = len(arr)
+                break
+        for key in ("modal/period", "modal/frequency"):
+            arr = data.get(key)
+            if arr is not None:
+                dims["N_mode"] = len(arr)
+                break
+        at = data.get("analysis_types")
+        if at is not None:
+            dims["N_analysis"] = len(at)
 
-    def _check_shape(arr_name: str, arr, shape_desc: str, dtype_str: str):
-        """Validate shape and dtype of a single array."""
-        if arr is None:
-            return
-        expected = shape_desc.strip()
-        actual_shape = arr.shape
-        if expected:
-            # Resolve dimension names (N_node, N_frame, etc.)
-            parts = expected.split()
-            resolved_parts = []
-            unresolved: List[str] = []
-            for p in parts:
-                p = p.strip()
-                if p.startswith("N_") and p in dims:
-                    resolved_parts.append(str(dims[p]))
-                elif p.startswith("N_"):
-                    unresolved.append(p)
+        def _check_shape(arr_name: str, arr, shape_desc: str, dtype_str: str):
+            """Validate shape and dtype of a single array."""
+            if arr is None:
+                return
+            expected = shape_desc.strip()
+            actual_shape = arr.shape
+            if expected:
+                parts = expected.split()
+                resolved_parts = []
+                unresolved: List[str] = []
+                for p in parts:
+                    p = p.strip()
+                    if p.startswith("N_") and p in dims:
+                        resolved_parts.append(str(dims[p]))
+                    elif p.startswith("N_"):
+                        unresolved.append(p)
+                    else:
+                        resolved_parts.append(p)
+                for u in unresolved:
+                    messages.append(f"  Missing dimension {u} for array {arr_name}")
+                if unresolved:
+                    return
+                expected_shape = tuple(
+                    int(x) for x in resolved_parts if x
+                )
+                if len(expected_shape) == 1:
+                    if expected_shape[0] != actual_shape[0] and \
+                       not (expected_shape[0] == 0 and len(actual_shape) == 1):
+                        if dims.get(expected.split()[0].strip()):
+                            messages.append(
+                                f"  Shape mismatch for {arr_name}: "
+                                f"expected {expected_shape}, got {actual_shape}")
+                elif expected_shape != actual_shape:
+                    messages.append(
+                        f"  Shape mismatch for {arr_name}: "
+                        f"expected {expected_shape}, got {actual_shape}")
+
+        # ── Check geometry ────────────────────────────────────────
+        optional_geo = {"frame_t_start", "frame_t_end"}
+        for key, (shape_desc, dtype_str) in GEOMETRY_ARRAYS.items():
+            arr = data.get(key)
+            if arr is None:
+                if key not in optional_geo:
+                    messages.append(f"Missing geometry array: {key}")
+                continue
+            _check_shape(key, arr, shape_desc, dtype_str)
+
+        # ── Check analysis types discriminator ────────────────────
+        analysis_types = data.get("analysis_types")
+        if analysis_types is None:
+            messages.append("Missing metadata array: analysis_types")
+        else:
+            types = list(analysis_types)
+            if "static" in types:
+                case_labels = data.get("static_case_labels")
+                if case_labels is None:
+                    messages.append(
+                        "analysis_types declares 'static' but "
+                        "static_case_labels is missing")
                 else:
-                    resolved_parts.append(p)
-            for u in unresolved:
-                messages.append(f"  Missing dimension {u} for array {arr_name}")
-            expected_shape = tuple(
-                int(x) for x in resolved_parts if x
-            )
-            # For (N_mode,) arrays, allow 0-length if no modes
-            if len(expected_shape) == 1:
-                if expected_shape[0] != actual_shape[0] and \
-                   not (expected_shape[0] == 0 and len(actual_shape) == 1):
-                    if dims.get(expected.split()[0].strip()):
-                        messages.append(
-                            f"  Shape mismatch for {arr_name}: "
-                            f"expected {expected_shape}, got {actual_shape}")
-            elif expected_shape != actual_shape:
-                messages.append(
-                    f"  Shape mismatch for {arr_name}: "
-                    f"expected {expected_shape}, got {actual_shape}")
-
-    # ── Check geometry ────────────────────────────────────────────
-    optional_geo = {"frame_t_start", "frame_t_end"}
-    for key, (shape_desc, dtype_str) in GEOMETRY_ARRAYS.items():
-        arr = data.get(key)
-        if arr is None:
-            if key not in optional_geo:
-                messages.append(f"Missing geometry array: {key}")
-            continue
-        _check_shape(key, arr, shape_desc, dtype_str)
-
-    # ── Check analysis types discriminator ────────────────────────
-    analysis_types = data.get("analysis_types")
-    if analysis_types is None:
-        messages.append("Missing metadata array: analysis_types")
-    else:
-        types = list(analysis_types)
-        if "static" in types:
-            case_labels = data.get("static_case_labels")
-            if case_labels is None:
-                messages.append(
-                    "analysis_types declares 'static' but "
-                    "static_case_labels is missing")
-            else:
-                for case in case_labels:
-                    for arr_name in STATIC_ARRAYS:
-                        key = make_static_key(str(case), arr_name)
-                        arr = data.get(key)
-                        if arr is None:
-                            messages.append(f"Missing static array: {key}")
-                        else:
-                            _check_shape(key, arr, "N_frame", "float")
-        if "modal" in types:
-            for key, (shape_desc, dtype_str) in MODAL_ARRAYS.items():
-                arr = data.get(key)
-                if arr is None:
-                    messages.append(f"Missing modal array: {key}")
-                    continue
-                _check_shape(key, arr, shape_desc, dtype_str)
+                    for case in case_labels:
+                        for arr_name in STATIC_ARRAYS:
+                            key = make_static_key(str(case), arr_name)
+                            arr = data.get(key)
+                            if arr is None:
+                                messages.append(f"Missing static array: {key}")
+                            else:
+                                _check_shape(key, arr, "N_frame", "float")
+            if "modal" in types:
+                for key, (shape_desc, dtype_str) in MODAL_ARRAYS.items():
+                    arr = data.get(key)
+                    if arr is None:
+                        messages.append(f"Missing modal array: {key}")
+                        continue
+                    _check_shape(key, arr, shape_desc, dtype_str)
         if "rs" in types:
             for key, (shape_desc, dtype_str) in RS_ARRAYS.items():
                 arr = data.get(key)
@@ -209,5 +211,9 @@ def validate_npz(path: str) -> List[str]:
                     continue
                 _check_shape(key, arr, shape_desc, dtype_str)
 
-    data.close()
+    except Exception as exc:
+        messages.append(f"Error accessing NPZ data: {exc}")
+    finally:
+        if data is not None:
+            data.close()
     return messages

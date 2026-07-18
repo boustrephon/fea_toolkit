@@ -475,8 +475,12 @@ def run_linear_cases(md: SAPModelData,
             if hasattr(md, 'load_cases') and md.load_cases:
                 lc = md.load_cases.get(case) if isinstance(md.load_cases, dict) else None
                 if lc and hasattr(lc, 'case_data') and lc.case_data:
+                    # Only include entries whose values are directly
+                    # convertible to float — structured data (modal/RS
+                    # case definitions with nested dicts) is skipped.
                     pattern_scales = {
                         k: float(v) for k, v in lc.case_data.items()
+                        if isinstance(v, (str, int, float))
                     } if isinstance(lc.case_data, dict) else {"DEAD": 1.0}
             results[case] = b.run_static_analysis(pattern_scales=pattern_scales)
         finally:
