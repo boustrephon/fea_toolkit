@@ -151,6 +151,141 @@ def _interp_sa(T_query, T_spec, Sa_spec):
     return np.interp(np.asarray(T_query), np.asarray(T_spec), np.asarray(Sa_spec))
 
 
+def cqc_combine(
+    eff_masses: List[float],
+    periods: List[float],
+    spectrum_fn: Any,
+    damping: float = 0.05,
+    T_rigid: Optional[float] = None,
+    total_mass: Optional[float] = None,
+) -> Dict[str, Any]:
+    """CQC‑combine modal base shears from a response spectrum.
+
+    Uses the Der Kiureghian (1980) correlation formula for CQC combination,
+    with optional rigid cut‑off and missing‑mass correction.
+
+    Parameters
+    ----------
+    eff_masses : list of float
+        Effective modal masses for the direction of interest (e.g.
+        from ``modal_props["partiMassMX"]``).
+    periods : list of float
+        Modal periods (s).  Must be the same length as *eff_masses*.
+    spectrum_fn : callable
+        ``spectrum_fn(T)`` → spectral acceleration Sa(T) in **model units**
+        (e.g. m/s²).  Called once per mode plus once at T=0 for the
+        rigid cut‑off and missing‑mass correction.
+    damping : float
+        Damping ratio (default 0.05).
+    T_rigid : float, optional
+        Period threshold (s) — modes with *T < T_rigid* are treated as
+        rigid (response taken at Sa(0)) and combined via SRSS with the
+        flexible CQC result.  ``None`` means no rigid cut‑off.
+    total_mass : float, optional
+        Total mass of the structure for missing‑mass correction.  When
+        omitted, no missing‑mass correction is applied.
+
+    Returns
+    -------
+    dict
+        ``modal_base_shear``: Per‑mode base shear before combination.
+        ``base_shear_cqc``: CQC combination of flexible modes.
+        ``base_shear_srss``: SRSS combination of all modes.
+        ``base_shear_rigid_cutoff``: Rigid cut‑off contribution.
+        ``base_shear_missing_mass``: Missing‑mass correction.
+        ``base_shear_total``: SRSS of CQC + rigid + missing.
+        ``total_mass``, ``captured_mass``, ``residual_mass``,
+        ``participation_ratio``: Mass statistics.
+        ``modal_periods``, ``spectral_accels``, ``effective_masses``:
+        Per‑mode data.
+        ``direction``, ``T_rigid``: Pass‑through metadata.
+        ``n_modes_flexible``, ``n_modes_rigid``: Mode counts.
+    """
+    import math
+
+    n_modes = len(periods)
+    if n_modes == 0 or not eff_masses:
+        return {}
+
+    # Spectral acceleration at each modal period
+    Sa = np.array([spectrum_fn(T) for T in periods])
+    Sa_0 = spectrum_fn(0.0)
+
+    # Per-mode base shear: V_n = S_a(T_n) × M_eff_n
+    modal_shear = [Sa[i] * abs(eff_masses[i]) for i in range(n_modes)]
+
+    # CQC correlation coefficients (Der Kiureghian 1980)
+    zeta = damping
+
+    def _cqc_coeff(T_i, T_j):
+        if T_i <= 0 or T_j <= 0:
+            return 0.0
+        r = T_i / T_j if T_j >= T_i else T_j / T_i
+        return (8.0 * zeta**2 * (1.0 + r) * r**1.5
+                / ((1.0 - r**2)**2 + 4.0 * zeta**2 * r * (1.0 + r)**2))
+
+    rho = [[_cqc_coeff(periods[i], periods[j]) for j in range(n_modes)]
+           for i in range(n_modes)]
+
+    # Rigid cut-off
+    rigid_indices: set = set()
+    if T_rigid and T_rigid > 0:
+        rigid_indices = {i for i, T in enumerate(periods) if T < T_rigid}
+    flexible_indices = [i for i in range(n_modes) if i not in rigid_indices]
+
+    # CQC on flexible modes only
+    if flexible_indices:
+        V_cqc = math.sqrt(sum(
+            rho[i][j] * modal_shear[i] * modal_shear[j]
+            for i in flexible_indices for j in flexible_indices
+        ))
+    else:
+        V_cqc = 0.0
+
+    V_srss = math.sqrt(sum(v**2 for v in modal_shear))
+
+    # Rigid part
+    V_rigid = 0.0
+    if rigid_indices:
+        for i in rigid_indices:
+            ratio = Sa_0 / Sa[i] if abs(Sa[i]) > 1e-12 else 1.0
+            V_rigid += (modal_shear[i] * ratio) ** 2
+        V_rigid = math.sqrt(V_rigid)
+
+    # Missing-mass correction
+    sum_meff_captured = sum(abs(eff_masses[i]) for i in range(n_modes))
+    V_missing = 0.0
+    if total_mass is not None and total_mass > 0:
+        residual_mass = max(0.0, total_mass - sum_meff_captured)
+        V_missing = Sa_0 * residual_mass
+    else:
+        residual_mass = 0.0
+
+    # Total: SRSS of CQC + rigid + missing
+    V_total = math.sqrt(V_cqc**2 + V_rigid**2 + V_missing**2)
+
+    return {
+        "modal_base_shear": modal_shear,
+        "base_shear_cqc": V_cqc,
+        "base_shear_srss": V_srss,
+        "base_shear_rigid_cutoff": V_rigid,
+        "base_shear_missing_mass": V_missing,
+        "base_shear_rigid": V_rigid + V_missing,
+        "base_shear_total": V_total,
+        "total_mass": total_mass or 0.0,
+        "captured_mass": sum_meff_captured,
+        "residual_mass": residual_mass,
+        "participation_ratio": (sum_meff_captured / total_mass
+                                if total_mass and total_mass > 0 else 0.0),
+        "modal_periods": periods,
+        "spectral_accels": Sa.tolist(),
+        "effective_masses": eff_masses,
+        "T_rigid": T_rigid,
+        "n_modes_flexible": len(flexible_indices),
+        "n_modes_rigid": len(rigid_indices),
+    }
+
+
 def plot_seismic_spectrum(
     spec: dict,
     modal: Optional[Dict] = None,

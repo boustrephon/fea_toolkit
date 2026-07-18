@@ -36,9 +36,9 @@ from fea_toolkit.model.geometry import (
     split_slabs_at_wall_intersections,
     find_constraint_edges,
     warn_frame_overlaps,
+    remove_floating_nodes,
 )
 from fea_toolkit.io.report import (
-    bounding_box,
     summarise_mass_sources,
     summarise_load_cases,
     summarise_load_patterns,
@@ -60,11 +60,6 @@ from fea_toolkit.model.sap_data import (
     ShellSection,
 )
 from fea_toolkit.spectrum import _build_spectrum
-
-
-def _max_tag(md: SAPModelData) -> int:
-    """Return the maximum node_tag in the model, or 0 if empty."""
-    return max((n.node_tag for n in md.nodes.values()), default=0)
 
 # ═══════════════════════════════════════════════════════════════════
 # 1. Model loading
@@ -93,45 +88,10 @@ def plot_building_views(md: SAPModelData,
                         ) -> Any:
     """Return a 2×2 matplotlib figure with plan, two elevations, isometric.
 
-    Falls back to a basic wireframe if PyVista is unavailable.
+    Delegates to :func:`fea_toolkit.plotting.viz.plot_building_views`.
     """
-    try:
-        import matplotlib.pyplot as plt
-        from fea_toolkit.plotting import plot_model_3d
-    except ImportError:
-        return None
-
-    try:
-        # Plan view (looking down Z)
-        ax_plan = plot_model_3d(md, window_size=window_size,
-                                 view_up=(0, 1, 0), view_vector=(0, 0, -1))
-        # Elevation X (looking along Y)
-        ax_elev_x = plot_model_3d(md, window_size=window_size,
-                                   view_up=(0, 0, 1), view_vector=(0, -1, 0))
-        # Elevation Y (looking along X)
-        ax_elev_y = plot_model_3d(md, window_size=window_size,
-                                   view_up=(0, 0, 1), view_vector=(-1, 0, 0))
-        # Isometric
-        ax_iso = plot_model_3d(md, window_size=window_size,
-                                view_up=(0, 0, 1),
-                                view_vector=(-1, -1, 0.5))
-
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
-        for ax, img, title in [
-            (ax1, ax_plan, "Plan"),
-            (ax2, ax_elev_x, "Elevation X"),
-            (ax3, ax_elev_y, "Elevation Y"),
-            (ax4, ax_iso, "Isometric"),
-        ]:
-            if img is not None:
-                ax.imshow(img)
-            ax.set_title(title, fontsize=10, fontweight="bold")
-            ax.axis("off")
-        fig.tight_layout()
-        return fig
-    except Exception as exc:
-        warnings.warn(f"Could not generate building views: {exc}")
-        return None
+    from fea_toolkit.plotting.viz import plot_building_views as _lib_views
+    return _lib_views(md, window_size=window_size)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -149,7 +109,7 @@ def preprocess_model(md: SAPModelData) -> Dict[str, Any]:
 
     # ── Mesh area elements (use tags past max existing) ───────────
     n_area_before = len(md.area_elements)
-    next_tag = _max_tag(md) + 1
+    next_tag = md.max_node_tag() + 1
     md.area_elements, md.area_assignments, md.nodes, next_tag = mesh_area_elements(
         md.area_elements, md.area_assignments, md.nodes,
         md.area_mesh, next_tag=next_tag,
@@ -253,127 +213,13 @@ def remove_floating_nodes(md: SAPModelData,
                           ) -> pd.DataFrame:
     """Remove nodes not connected to any element, redistributing loads and mass.
 
-    SAP2000 can define nodes that are not referenced by any frame or
-    area element but still carry mass (from mass source) or loads
-    (joint loads).  These cause singularities in OpenSees.
-
-    For each floating node:
-      1. Accumulate its mass and joint loads.
-      2. Find the nearest connected node at the same elevation band.
-      3. Add mass/loads to that node.
-      4. Remove the floating node from ``md.nodes``.
+    Delegates to :func:`fea_toolkit.model.geometry.remove_floating_nodes`
+    and wraps the result in a DataFrame for backward compatibility.
 
     Returns a DataFrame documenting what was moved.
     """
-    # Build set of node IDs referenced by elements
-    connected: set = set()
-    for fe in md.frame_elements.values():
-        if not getattr(fe, 'inactive', False):
-            connected.add(fe.node_i)
-            connected.add(fe.node_j)
-    for ae in md.area_elements.values():
-        if not getattr(ae, 'inactive', False):
-            connected.update(ae.node_ids)
-
-    # Collect joint loads: {node_id: [Fx, Fy, Fz, Mx, My, Mz]}
-    joint_loads: Dict[str, List[float]] = {}
-    for jl in getattr(md, 'joint_loads', []):
-        nid = getattr(jl, 'node_id', '') or getattr(jl, 'node', '')
-        if not nid:
-            continue
-        if nid not in joint_loads:
-            joint_loads[nid] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        joint_loads[nid][0] += getattr(jl, 'fx', 0.0) or 0.0
-        joint_loads[nid][1] += getattr(jl, 'fy', 0.0) or 0.0
-        joint_loads[nid][2] += getattr(jl, 'fz', 0.0) or 0.0
-        joint_loads[nid][3] += getattr(jl, 'mx', 0.0) or 0.0
-        joint_loads[nid][4] += getattr(jl, 'my', 0.0) or 0.0
-        joint_loads[nid][5] += getattr(jl, 'mz', 0.0) or 0.0
-
-    # Mass source flags — if masses=True, mass is assigned to all joints.
-    # We can't enumerate per-node mass from the mass source directly;
-    # instead flag nodes that might carry mass based on the mass source.
-    ms_has_masses = any(
-        getattr(src, 'masses', False) for src in
-        getattr(md, 'mass_sources', {}).values()
-    )
-
-    # Remove restraints for floating nodes too
-    restraints = getattr(md, 'restraints', {})
-
-    # Identify floating nodes
-    floating: List[str] = [nid for nid in md.nodes if nid not in connected]
-    if not floating:
-        return pd.DataFrame()
-
-    rows = []
-    removed_nodes: List[str] = []
-
-    for nid in floating:
-        nd = md.nodes[nid]
-        loads = joint_loads.get(nid, [0.0] * 6)
-        has_loads = any(abs(v) > 1e-12 for v in loads)
-        has_restraint = nid in restraints
-        # Nodes may carry mass if mass source has masses=True flag
-        has_mass = ms_has_masses
-
-        if not (has_mass or has_loads or has_restraint):
-            # Truly inert node — just remove it, nothing to redistribute
-            removed_nodes.append(nid)
-            continue
-
-        # Find nearest connected node at similar elevation
-        best_dist = float("inf")
-        best_nid = None
-        for cnid in connected:
-            cnd = md.nodes[cnid]
-            if abs(cnd.z - nd.z) > z_tolerance:
-                continue
-            d = np.linalg.norm([cnd.x - nd.x, cnd.y - nd.y, cnd.z - nd.z])
-            if d < best_dist:
-                best_dist = d
-                best_nid = cnid
-
-        if best_nid is None:
-            # Fallback: nearest connected node regardless of elevation
-            for cnid in connected:
-                cnd = md.nodes[cnid]
-                d = np.linalg.norm([cnd.x - nd.x, cnd.y - nd.y, cnd.z - nd.z])
-                if d < best_dist:
-                    best_dist = d
-                    best_nid = cnid
-
-        # Redistribute joint loads (append new JointLoad)
-        if has_loads and best_nid:
-            from fea_toolkit.model.sap_data import JointLoad
-            if not hasattr(md, 'joint_loads') or md.joint_loads is None:
-                md.joint_loads = []
-            md.joint_loads.append(JointLoad(
-                node=best_nid, pattern="", fx=loads[0], fy=loads[1], fz=loads[2],
-                mx=loads[3], my=loads[4], mz=loads[5],
-            ))
-
-        # Transfer restraint if floating node was restrained
-        if has_restraint and best_nid and best_nid not in restraints:
-            restraints[best_nid] = restraints.pop(nid)
-
-        rows.append({
-            "node_id": nid,
-            "x": nd.x, "y": nd.y, "z": nd.z,
-            "mass_source": ms_has_masses,
-            "loads": f"({loads[0]:.1f}, {loads[1]:.1f}, {loads[2]:.1f}, "
-                     f"{loads[3]:.1f}, {loads[4]:.1f}, {loads[5]:.1f})",
-            "restrained": has_restraint,
-            "nearest_node": best_nid,
-            "distance": best_dist,
-        })
-        removed_nodes.append(nid)
-
-    # Remove floating nodes from the model
-    for nid in removed_nodes:
-        md.nodes.pop(nid, None)
-        restraints.pop(nid, None)
-
+    from fea_toolkit.model.geometry import remove_floating_nodes as _lib_remove
+    rows = _lib_remove(md, z_tolerance=z_tolerance)
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 
@@ -383,15 +229,11 @@ def remove_floating_nodes(md: SAPModelData,
 
 
 def _auto_detect_cases(md: SAPModelData) -> List[str]:
-    """Auto-detect static load cases from the SAP2000 model."""
-    if not hasattr(md, 'load_cases'):
-        return []
-    cases = []
-    for lc in (md.load_cases.values() if isinstance(md.load_cases, dict)
-               else md.load_cases):
-        if getattr(lc, 'case_type', '').lower() in ('linstatic', 'static'):
-            cases.append(getattr(lc, 'case_name', str(lc)))
-    return cases
+    """Auto-detect static load cases from the SAP2000 model.
+
+    Delegates to :meth:`SAPModelData.auto_detect_static_cases`.
+    """
+    return md.auto_detect_static_cases()
 
 
 def _build_and_constrain(md: SAPModelData) -> OpenSeesBuilder:
@@ -539,15 +381,13 @@ def run_rs(md: SAPModelData,
            ) -> Optional[Dict[str, Any]]:
     """Compute CQC-combined response spectrum base shear from modal results.
 
-    Post-processes modal participation factors against a GB 50011 spectrum.
-    No OpenSees analysis is needed — this is purely arithmetic on the
-    modal properties returned by :meth:`OpenSeesBuilder.run_modal_analysis`.
-
-    When *T_rigid* is provided, modes with periods shorter than *T_rigid*
-    are treated as rigid (response taken at Sa(0)) and combined via SRSS
-    with the flexible CQC result.
+    Post-processes modal participation factors against a GB 50011 spectrum
+    via :func:`fea_toolkit.spectrum.cqc_combine`.  No OpenSees analysis
+    is needed — this is purely arithmetic on the modal properties returned
+    by :meth:`OpenSeesBuilder.run_modal_analysis`.
     """
-    import math
+    from fea_toolkit.spectrum import cqc_combine as _cqc
+
     mp = modal_result.get("modal_props", {})
     if not mp:
         return None
@@ -557,99 +397,38 @@ def run_rs(md: SAPModelData,
     if n_modes == 0:
         return None
 
-    # Build spectrum
+    # Build spectrum and interpolation helper
     spec_cfg = {
         "intensity": 7, "acceleration": 0.10,
         "site_class": "I1", "level": "rare", "damping": 0.05,
     }
     T_spec, Sa_spec, _, _, _, _ = _build_spectrum(spec_cfg)
 
-    # Interpolate spectral acceleration at each modal period
-    Sa = np.interp(periods, T_spec, Sa_spec, left=Sa_spec[0], right=Sa_spec[-1])
+    def _sa_fn(T: float) -> float:
+        return float(np.interp([T], T_spec, Sa_spec,
+                                left=Sa_spec[0], right=Sa_spec[-1])[0])
 
-    # Effective modal mass key for direction
     mass_key = f"partiMassM{direction}"
     eff_masses = mp.get(mass_key, [0.0] * n_modes)[:n_modes]
-
-    # Per-mode base shear: V_n = S_a(T_n) × M_eff_n
-    modal_shear = [Sa[i] * abs(eff_masses[i]) for i in range(n_modes)]
-
-    # CQC combination using Der Kiureghian (1980) correlation formula
-    zeta = 0.05
-    def _cqc_coeff(T_i, T_j):
-        if T_i <= 0 or T_j <= 0:
-            return 0.0
-        r = T_i / T_j if T_j >= T_i else T_j / T_i
-        return (8.0 * zeta**2 * (1.0 + r) * r**1.5
-                / ((1.0 - r**2)**2 + 4.0 * zeta**2 * r * (1.0 + r)**2))
-
-    rho = [[_cqc_coeff(periods[i], periods[j]) for j in range(n_modes)]
-           for i in range(n_modes)]
-
-    # ── Rigid cut-off for very short modes ────────────────────────
-    # Modes with T < T_rigid are treated as rigid: force scaled to
-    # Sa(T=0), combined via SRSS, then SRSS-combined with the CQC result
-    # from the remaining flexible modes.
-    Sa_0 = float(np.interp(0.0, T_spec, Sa_spec, left=Sa_spec[0], right=Sa_spec[-1]))
-    rigid_indices = {i for i in range(n_modes)
-                     } if T_rigid and T_rigid > 0 else set()
-    if T_rigid and T_rigid > 0:
-        rigid_indices = {i for i, T in enumerate(periods) if T < T_rigid}
-    flexible_indices = [i for i in range(n_modes) if i not in rigid_indices]
-
-    # CQC on flexible modes only
-    if flexible_indices:
-        V_cqc = math.sqrt(sum(
-            rho[i][j] * modal_shear[i] * modal_shear[j]
-            for i in flexible_indices for j in flexible_indices
-        ))
-    else:
-        V_cqc = 0.0
-
-    V_srss = math.sqrt(sum(v**2 for v in modal_shear))
-
-    # Rigid part: SRSS of rigid-mode shears scaled to Sa(0)
-    V_rigid = 0.0
-    if rigid_indices:
-        for i in rigid_indices:
-            ratio = Sa_0 / Sa[i] if abs(Sa[i]) > 1e-12 else 1.0
-            V_rigid += (modal_shear[i] * ratio) ** 2
-        V_rigid = math.sqrt(V_rigid)
-
-    # Missing-mass (rigid) correction for modes not captured at all
     total_mass = mp.get("totalFreeMass", [0.0])[0]
-    sum_meff_captured = sum(abs(eff_masses[i]) for i in range(n_modes))
-    residual_mass = max(0.0, total_mass - sum_meff_captured)
-    V_missing = Sa_0 * residual_mass
 
-    # Combine: CQC (flexible) + rigid cut-off + missing mass, all via SRSS
-    V_total = math.sqrt(V_cqc**2 + V_rigid**2 + V_missing**2)
-
-    result = {
-        "modal_base_shear": modal_shear,
-        "base_shear_cqc": V_cqc,
-        "base_shear_srss": V_srss,
-        "base_shear_rigid_cutoff": V_rigid,
-        "base_shear_missing_mass": V_missing,
-        "base_shear_rigid": V_rigid + V_missing,
-        "base_shear_total": V_total,
-        "total_mass": total_mass,
-        "captured_mass": sum_meff_captured,
-        "residual_mass": residual_mass,
-        "participation_ratio": sum_meff_captured / total_mass if total_mass > 0 else 0.0,
-        "modal_periods": periods,
-        "spectral_accels": Sa.tolist(),
-        "effective_masses": eff_masses,
-        "direction": direction,
-        "T_rigid": T_rigid,
-        "n_modes_flexible": len(flexible_indices),
-        "n_modes_rigid": len(rigid_indices),
-    }
-
-    print(f"  RS-{direction}: V_cqc={V_cqc:.1f}  V_rigid_cutoff={V_rigid:.1f}  "
-          f"V_missing={V_missing:.1f}  V_total={V_total:.1f} kN  "
-          f"(ΣM_eff/M_total={sum_meff_captured:.0f}/{total_mass:.0f} t = "
-          f"{sum_meff_captured/max(total_mass, 1):.1%})")
+    result = _cqc(
+        eff_masses=eff_masses,
+        periods=periods,
+        spectrum_fn=_sa_fn,
+        damping=0.05,
+        T_rigid=T_rigid,
+        total_mass=total_mass,
+    )
+    if result:
+        result["direction"] = direction
+        v = result
+        print(f"  RS-{direction}: V_cqc={v['base_shear_cqc']:.1f}  "
+              f"V_rigid_cutoff={v['base_shear_rigid_cutoff']:.1f}  "
+              f"V_missing={v['base_shear_missing_mass']:.1f}  "
+              f"V_total={v['base_shear_total']:.1f} kN  "
+              f"(ΣM_eff/M_total={v['captured_mass']:.0f}/"
+              f"{v['total_mass']:.0f} t = {v['participation_ratio']:.1%})")
     return result
 
 
@@ -1339,40 +1118,10 @@ SPECTRUM_CFG = {
 def _df_modal_from_results(modal_result: Dict[str, Any]) -> Optional[pd.DataFrame]:
     """Build a modal participation DataFrame from existing analysis results.
 
-    Returns columns ``Mode``, ``Period (s)``, ``Mx (%)``, ..., ``Rz (%)``
-    with a SUM row, matching the format expected by
-    :func:`plot_modal_participation`.
+    Delegates to :func:`fea_toolkit.io.report.modal_participation_df`.
     """
-    mp = modal_result.get("modal_props", {})
-    periods = list(modal_result.get("periods", []))
-    n = len(periods)
-    if n == 0:
-        return None
-
-    ratio_keys = [
-        "partiMassRatiosMX", "partiMassRatiosMY", "partiMassRatiosMZ",
-        "partiMassRatiosRMX", "partiMassRatiosRMY", "partiMassRatiosRMZ",
-    ]
-    col_names = [
-        "Mx (%)", "My (%)", "Mz (%)",
-        "Rx (%)", "Ry (%)", "Rz (%)",
-    ]
-
-    rows = []
-    for i in range(n):
-        row = {"Mode": i + 1, "Period (s)": round(periods[i], 4)}
-        for key, col in zip(ratio_keys, col_names):
-            vals = mp.get(key, [])
-            row[col] = f"{round(vals[i], 2) if i < len(vals) else 0.0:.2f}"
-        rows.append(row)
-
-    df = pd.DataFrame(rows)
-    # SUM row
-    sum_row = {"Mode": "<strong>SUM</strong>", "Period (s)": "\u2014"}
-    for col in col_names:
-        sum_row[col] = f"{df[col].astype(float).sum():.2f}"
-    df = pd.concat([df, pd.DataFrame([sum_row])], ignore_index=True)
-    return df
+    from fea_toolkit.io.report import modal_participation_df as _lib_df
+    return _lib_df(modal_result)
 
 
 def save_modal_table(modal_result: Dict[str, Any],
@@ -1380,48 +1129,10 @@ def save_modal_table(modal_result: Dict[str, Any],
                      ) -> Optional[str]:
     """Build an HTML modal-participation table from existing results and save it.
 
-    Also prints a clean text summary to the console.
-
-    Returns the path to the saved HTML file, or ``None``.
+    Delegates to :func:`fea_toolkit.io.report.save_modal_participation_html`.
     """
-    df = _df_modal_from_results(modal_result)
-    if df is None:
-        return None
-
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    path = out / "modal_table.html"
-
-    # HTML — bold SUM row, minimal styling
-    html = df.to_html(index=False, escape=False)
-    html = html.replace(
-        '<table border="1" class="dataframe">',
-        '<table style="font-size:0.85em;border-collapse:collapse">',
-    )
-    with open(path, "w") as f:
-        f.write(html)
-    print(f"  Saved {path}")
-
-    # Text summary
-    print(f"\n  Modal participation summary ({len(df) - 1} modes):")
-    header = f"  {'Mode':>5} {'Period':>8}  {'Mx%':>7} {'My%':>7} {'Mz%':>7}"
-    print(header)
-    print("  " + "-" * len(header))
-    for _, row in df.iterrows():
-        if row["Mode"] == "<strong>SUM</strong>":
-            print("  " + "-" * len(header))
-            m = "SUM"
-            p = "—"
-        else:
-            m = str(int(row["Mode"]))
-            p = f"{row['Period (s)']:.4f}"
-        mx = row.get("Mx (%)", "—")
-        my = row.get("My (%)", "—")
-        mz = row.get("Mz (%)", "—")
-        print(f"  {m:>5} {p:>8}  {mx:>7} {my:>7} {mz:>7}")
-    print()
-
-    return str(path)
+    from fea_toolkit.io.report import save_modal_participation_html as _lib_save
+    return _lib_save(modal_result, out_dir=out_dir)
 
 
 def plot_results(modal_result: Dict[str, Any],
@@ -1493,22 +1204,11 @@ def plot_results(modal_result: Dict[str, Any],
 
 
 def model_summary(md: SAPModelData) -> pd.DataFrame:
-    """Return a one-row summary DataFrame of the model."""
-    bb = bounding_box(md)
-    xs = [n.x for n in md.nodes.values()]
-    ys = [n.y for n in md.nodes.values()]
-    zs = [n.z for n in md.nodes.values()]
-    return pd.DataFrame([{
-        "Nodes": len(md.nodes),
-        "Frames": len(md.frame_elements),
-        "Areas": len(md.area_elements),
-        "Materials": len(md.materials),
-        "Sections": len(md.sections),
-        "X span (m)": max(xs) - min(xs) if xs else 0,
-        "Y span (m)": max(ys) - min(ys) if ys else 0,
-        "Z span (m)": max(zs) - min(zs) if zs else 0,
-        "Units": str(md.units),
-    }])
+    """Return a one-row summary DataFrame of the model.
+
+    Delegates to :meth:`SAPModelData.summary_dict`.
+    """
+    return pd.DataFrame([md.summary_dict()])
 
 
 def run_all(s2k_path: str,

@@ -12,9 +12,9 @@ from collections import defaultdict
 
 from ..model.sap_data import (
     Node, Material, Section,
-    FrameElement, AreaElement, Group,
+    FrameElement, AreaElement, Group, SAPModelData,
     FrameDistributedLoad, AreaUniformLoad,
-    FrameEndOffset, AreaMesh,
+    FrameEndOffset, AreaMesh, JointLoad, Restraint,
 )
 
 # ============================================================================
@@ -3246,3 +3246,134 @@ def split_slabs_at_wall_intersections(
                         groups[gname].objects.append(sub_ref)
 
     return area_elements, area_assignments, nodes, next_tag
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Floating node removal
+# ═══════════════════════════════════════════════════════════════════
+
+
+def remove_floating_nodes(md: 'SAPModelData',
+                          z_tolerance: float = 0.5,
+                          ) -> List[Dict[str, Any]]:
+    """Remove nodes not connected to any element, redistributing loads and mass.
+
+    SAP2000 can define nodes that are not referenced by any frame or
+    area element but still carry mass (from mass source) or loads
+    (joint loads).  These cause singularities in OpenSees.
+
+    For each floating node:
+      1. Accumulate its mass and joint loads.
+      2. Find the nearest connected node at the same elevation band.
+      3. Add mass/loads to that node.
+      4. Remove the floating node from ``md.nodes``.
+
+    Modifies *md* in‑place (removes nodes, transfers restraints and
+    joint loads to the nearest connected neighbour).
+
+    Args:
+        md: Model data to scan and clean.
+        z_tolerance: Elevation tolerance for matching nodes (same units
+            as model coordinates).
+
+    Returns:
+        List of dicts documenting each removed node, with keys:
+        ``node_id``, ``x``, ``y``, ``z``, ``mass_source``, ``loads``,
+        ``restrained``, ``nearest_node``, ``distance``.
+    """
+    connected: set = set()
+    for fe in md.frame_elements.values():
+        if not getattr(fe, 'inactive', False):
+            connected.add(fe.node_i)
+            connected.add(fe.node_j)
+    for ae in md.area_elements.values():
+        if not getattr(ae, 'inactive', False):
+            connected.update(ae.node_ids)
+
+    joint_loads: Dict[str, List[float]] = {}
+    for jl in getattr(md, 'joint_loads', []):
+        nid = getattr(jl, 'node_id', '') or getattr(jl, 'node', '')
+        if not nid:
+            continue
+        if nid not in joint_loads:
+            joint_loads[nid] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        joint_loads[nid][0] += getattr(jl, 'fx', 0.0) or 0.0
+        joint_loads[nid][1] += getattr(jl, 'fy', 0.0) or 0.0
+        joint_loads[nid][2] += getattr(jl, 'fz', 0.0) or 0.0
+        joint_loads[nid][3] += getattr(jl, 'mx', 0.0) or 0.0
+        joint_loads[nid][4] += getattr(jl, 'my', 0.0) or 0.0
+        joint_loads[nid][5] += getattr(jl, 'mz', 0.0) or 0.0
+
+    ms_has_masses = any(
+        getattr(src, 'masses', False) for src in
+        getattr(md, 'mass_sources', {}).values()
+    )
+
+    restraints = getattr(md, 'restraints', {})
+
+    floating: List[str] = [nid for nid in md.nodes if nid not in connected]
+    if not floating:
+        return []
+
+    rows: List[Dict[str, Any]] = []
+    removed_nodes: List[str] = []
+
+    for nid in floating:
+        nd = md.nodes[nid]
+        loads = joint_loads.get(nid, [0.0] * 6)
+        has_loads = any(abs(v) > 1e-12 for v in loads)
+        has_restraint = nid in restraints
+        has_mass = ms_has_masses
+
+        if not (has_mass or has_loads or has_restraint):
+            removed_nodes.append(nid)
+            continue
+
+        best_dist = float("inf")
+        best_nid = None
+        for cnid in connected:
+            cnd = md.nodes[cnid]
+            if abs(cnd.z - nd.z) > z_tolerance:
+                continue
+            d = np.linalg.norm([cnd.x - nd.x, cnd.y - nd.y, cnd.z - nd.z])
+            if d < best_dist:
+                best_dist = d
+                best_nid = cnid
+
+        if best_nid is None:
+            for cnid in connected:
+                cnd = md.nodes[cnid]
+                d = np.linalg.norm([cnd.x - nd.x, cnd.y - nd.y, cnd.z - nd.z])
+                if d < best_dist:
+                    best_dist = d
+                    best_nid = cnid
+
+        if has_loads and best_nid:
+            if not hasattr(md, 'joint_loads') or md.joint_loads is None:
+                md.joint_loads = []
+            md.joint_loads.append(JointLoad(
+                node=best_nid,
+                fx=loads[0], fy=loads[1], fz=loads[2],
+                mx=loads[3], my=loads[4], mz=loads[5],
+            ))
+
+        if has_restraint and best_nid and best_nid not in restraints:
+            restraints[best_nid] = restraints.pop(nid)
+
+        rows.append({
+            "node_id": nid,
+            "x": nd.x, "y": nd.y, "z": nd.z,
+            "mass_source": ms_has_masses,
+            "loads": (f"({loads[0]:.1f}, {loads[1]:.1f}, {loads[2]:.1f}, "
+                      f"{loads[3]:.1f}, {loads[4]:.1f}, {loads[5]:.1f})"),
+            "restrained": has_restraint,
+            "nearest_node": best_nid,
+            "distance": best_dist,
+        })
+        removed_nodes.append(nid)
+
+    for nid in removed_nodes:
+        md.nodes.pop(nid, None)
+        restraints.pop(nid, None)
+
+    return rows

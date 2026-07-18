@@ -971,6 +971,41 @@ class SAPModelData:
     # Layered shell sections for nonlinear shear walls
     layered_shell_sections: Dict[str, LayeredShellSection] = field(default_factory=dict)
     # Default units used for all coordinates and section properties
-    units: Dict[str, str] = field(default_factory=lambda: {'F': "N", 'L': "m", 'T': "C"})   
+    units: Dict[str, str] = field(default_factory=lambda: {'F': "N", 'L': "m", 'T': "C"})
+
+    # ── Utility methods ──────────────────────────────────────────
+
+    def max_node_tag(self) -> int:
+        """Return the maximum ``node_tag`` in the model, or 0 if empty."""
+        return max((n.node_tag for n in self.nodes.values()), default=0)
+
+    def auto_detect_static_cases(self) -> List[str]:
+        """Return names of static (LinStatic) load cases from the model."""
+        if not self.load_cases:
+            return []
+        cases = []
+        for lc in (self.load_cases.values()
+                    if isinstance(self.load_cases, dict)
+                    else self.load_cases):
+            if getattr(lc, 'case_type', '').lower() in ('linstatic', 'static'):
+                cases.append(getattr(lc, 'case_name', str(lc)))
+        return cases
+
+    def summary_dict(self) -> Dict[str, Any]:
+        """Return a one‑row dict of model statistics."""
+        xs = [n.x for n in self.nodes.values()]
+        ys = [n.y for n in self.nodes.values()]
+        zs = [n.z for n in self.nodes.values()]
+        return {
+            "Nodes": len(self.nodes),
+            "Frames": len(self.frame_elements),
+            "Areas": len(self.area_elements),
+            "Materials": len(self.materials),
+            "Sections": len(self.sections),
+            "X span (m)": max(xs) - min(xs) if xs else 0,
+            "Y span (m)": max(ys) - min(ys) if ys else 0,
+            "Z span (m)": max(zs) - min(zs) if zs else 0,
+            "Units": str(self.units),
+        }
     
 
