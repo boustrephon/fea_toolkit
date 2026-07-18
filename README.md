@@ -191,13 +191,17 @@ from fea_toolkit.plotting.viz import plot_deformed_3d, plot_npz_force_diagram
 # 1. Parse
 md = SAP2000Parser("model.s2k").parse().get_model_data()
 
-# 2. Analyse
+# 2. Analyse — run each static case separately
 b = OpenSeesBuilder(md, {"element_type": "elasticBeamColumn"})
 b.build()
-static = b.run_static_analysis(pattern_scales={"DEAD": 1.0, "WIND": 1.0})
+static_dead = b.run_static_analysis(pattern_scales={"DEAD": 1.0})
+b.wipe()
+b.build()
+static_wind = b.run_static_analysis(pattern_scales={"WIND": 1.0})
 
-# 3. Save to NPZ
-write_results_npz("results.npz", md, static_results=static)
+# 3. Save to NPZ as case-keyed mapping
+cases = {"DEAD": static_dead, "WIND": static_wind}
+write_results_npz("results.npz", md, static_results=cases)
 
 # 4. Visualise from NPZ
 data = read_results_npz("results.npz")
