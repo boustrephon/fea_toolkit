@@ -63,7 +63,10 @@ class MeshModel:
     # ── Tag maps (pre-computed for deterministic Ops recreation) ──
     frame_tag_map: Dict[str, int] = field(default_factory=dict)
     #   elem_id → OpenSees element tag
+    material_tags: Dict[str, int] = field(default_factory=dict)
+    #   material name → OpenSees material tag
     section_tags: Dict[str, int] = field(default_factory=dict)
+    #   section name → OpenSees section tag
     shell_sec_tags: Dict[str, int] = field(default_factory=dict)
     shell_sec_variants: Dict[str, int] = field(default_factory=dict)
 
@@ -97,6 +100,7 @@ class MeshModel:
             "Areas": self.num_areas,
             "Materials": len(self.materials),
             "Sections": len(self.sections),
+            "Material tags": len(self.material_tags),
             "Constraint pairs": len(self.edge_constraint_pairs),
             "Diaphragm levels": len(self.diaphragm_levels),
             "Distributed loads": len(self.frame_dist_loads),
