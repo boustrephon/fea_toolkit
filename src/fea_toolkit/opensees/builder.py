@@ -1918,6 +1918,14 @@ class OpenSeesBuilder:
             self._shell_sec_tags = analysis._shell_sec_tags
             self._shell_sec_variants = analysis._shell_sec_variants
             self.edge_loads_from_areas = analysis.edge_loads_from_areas
+            # Sync model data with MeshModel so existing callers that read
+            # builder.model.nodes, builder.model.frame_elements, etc. see
+            # the prepared topology (including split/mesh-created nodes).
+            self.model.nodes = mesh_model.nodes
+            self.model.frame_elements = mesh_model.frame_elements
+            self.model.frame_assignments = mesh_model.frame_assignments
+            self.model.area_elements = mesh_model.area_elements
+            self.model.area_assignments = mesh_model.area_assignments
             return
 
         # ── Legacy single-stage path ─────────────────────────────
