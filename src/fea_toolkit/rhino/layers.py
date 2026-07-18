@@ -230,7 +230,7 @@ def create_frame_layers(root_layer_index: int,
     Returns:
         A :class:`FrameLayerSet` with centreline and extrusion dicts.
     """
-    base = prefix + "SAP2000"
+    base = "SAP2000" + ("/" + prefix.rstrip("/") if prefix else "")
     frames_parent = create_or_get_layer(f"{base}/Frames",
                                         parent_layer_index=root_layer_index)
 
@@ -292,7 +292,7 @@ def create_shell_layers(root_layer_index: int,
     Returns:
         A :class:`ShellLayerSet` with centreline and extrusion dicts.
     """
-    base = prefix + "SAP2000"
+    base = "SAP2000" + ("/" + prefix.rstrip("/") if prefix else "")
     shells_parent = create_or_get_layer(f"{base}/Shells",
                                         parent_layer_index=root_layer_index)
 
@@ -307,7 +307,7 @@ def create_shell_layers(root_layer_index: int,
     ex_parent = create_or_get_layer(f"{base}/Shells/Extrusion",
                                     parent_layer_index=shells_parent)
     ex_layers = _create_section_layers(
-        "SAP2000/Shells/Extrusion", ex_parent,
+        f"{base}/Shells/Extrusion", ex_parent,
         sorted(shell_sections) if shell_sections else [],
         SHELL_PALETTE, shell_sections,
     )

@@ -1,8 +1,6 @@
-"""
-``RhinoImporterV2`` — lightweight Extrusion version using ``rg``.
+"""Rhino import — lightweight Extrusion version using ``rg``.
 
-Same public API as ``RhinoImporter`` but uses ``geometry_v2`` which
-creates true lightweight ``Extrusion`` objects (via
+Creates true lightweight ``Extrusion`` objects (via
 ``rg.Extrusion.Create()``) instead of Brep polysurfaces.
 
 Usage
@@ -13,13 +11,13 @@ Inside Rhino::
     sys.path.append(r'/path/to/fea_toolkit/src')
 
     from fea_toolkit.io.s2k_parser import SAP2000Parser
-    from fea_toolkit.rhino.importer_v2 import RhinoImporterV2
+    from fea_toolkit.rhino.importer import RhinoImporter
 
     parser = SAP2000Parser('/path/to/model.s2k')
     parser.parse()
     md = parser.get_model_data()
 
-    importer = RhinoImporterV2(md)
+    importer = RhinoImporter(md)
     report = importer.run()
     print(report)
 """
@@ -28,23 +26,22 @@ import typing as t
 import copy
 
 from ..model.sap_data import SAPModelData
-from .colors import RESTRAINT_COLORS, get_sap2000_color
+from .colors import RESTRAINT_COLORS
 from .layers import (
     create_root_layer, create_joints_layer,
     create_frame_layers, create_shell_layers,
-    FrameLayerSet, ShellLayerSet,
 )
-from .geometry_v2 import (
+from .geometry import (
     create_joint_points, create_frame_lines, create_shell_breps,
     create_frame_extrusions, create_shell_extrusions,
 )
 from .groups import create_sap_groups, create_selection_groups
 
 
-__all__ = ["RhinoImporterV2"]
+__all__ = ["RhinoImporter"]
 
 
-class RhinoImporterV2:
+class RhinoImporter:
     """Export ``SAPModelData`` into Rhino using lightweight Extrusions.
 
     Args:
@@ -61,7 +58,7 @@ class RhinoImporterV2:
             import scriptcontext as sc  # noqa: F401
         except ImportError:
             raise RuntimeError(
-                "RhinoImporterV2 requires Rhino 8. "
+                "RhinoImporter requires Rhino 8. "
                 "The Rhino API is not available in standard Python."
             )
 
@@ -113,7 +110,7 @@ class RhinoImporterV2:
         for sname, sec in self.md.sections.items():
             props = {"Material": sec.material, "Shape": sec.shape}
             if hasattr(sec, "thickness"):
-                props["Thickness"] = getattr(sec, "thickness", 0)
+                props["Thickness"] = str(getattr(sec, "thickness", 0))
                 shell_section_props[sname] = props
             else:
                 frame_section_props[sname] = props
@@ -197,6 +194,27 @@ class RhinoImporterV2:
                         dist_loads, frame_auto_mesh,
                     )
                 )
+
+                # Remap frame_end_offsets to split children
+                if hasattr(md_mesh, 'frame_end_offsets') and md_mesh.frame_end_offsets:
+                    new_offsets = {}
+                    for eid, elem in md_mesh.frame_elements.items():
+                        if getattr(elem, 'inactive', False):
+                            continue
+                        parent = getattr(elem, 'parent_id', None)
+                        if parent and parent in md_mesh.frame_end_offsets:
+                            parent_elem = md_mesh.frame_elements.get(parent)
+                            if parent_elem and getattr(parent_elem, 'child_ids', None):
+                                children = parent_elem.child_ids
+                                orig = md_mesh.frame_end_offsets[parent]
+                                if eid == children[0]:
+                                    new_offsets[eid] = orig
+                                elif eid == children[-1]:
+                                    new_offsets[eid] = orig
+                        else:
+                            if eid in md_mesh.frame_end_offsets:
+                                new_offsets[eid] = md_mesh.frame_end_offsets[eid]
+                    md_mesh.frame_end_offsets = new_offsets
 
                 md_mesh.area_elements, md_mesh.area_assignments, \
                     md_mesh.nodes, next_tag = split_areas_at_frame_edges(

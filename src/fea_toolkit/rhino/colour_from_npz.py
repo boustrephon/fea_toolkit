@@ -63,8 +63,13 @@ def _load_npz_quantities(npz_path: str, quantity: str, use_local: bool = True,
     from ..io.npz_reader import read_results_npz, _get_static_cases
     d = read_results_npz(npz_path)
     cases = _get_static_cases(d)
+    if case is not None and case not in cases:
+        raise ValueError(
+            f"Case '{case}' not found in NPZ. Available: {cases}")
     case_name = case if case and case in cases else (cases[0] if cases else None)
-    pre = f"static/{case_name}/" if case_name else ""
+    if case_name is None:
+        return {}, (0.0, 0.0), {}
+    pre = f"static/{case_name}/"
 
     q = quantity.lower()
     key_i = f"{pre}{q}_i"
@@ -72,15 +77,21 @@ def _load_npz_quantities(npz_path: str, quantity: str, use_local: bool = True,
         loc_key = f"{pre}{q}_i_local"
         if loc_key in d:
             key_i = loc_key
+    key_j = q.replace("_i", "_j") if "_i" in q else f"{q}_j"
+    key_j = f"{pre}{key_j}"
+
+    arr_i = d.get(key_i)
+    arr_j = d.get(key_j)
+    if arr_i is None or arr_j is None:
+        raise ValueError(f"Quantity arrays '{key_i}' not found in NPZ")
 
     values = {}
     vmin, vmax = 0.0, 0.0
-    arr = d.get(key_i)
     sap_ids = d.get("frame_sap_id")
-    if arr is not None and sap_ids is not None:
-        for i in range(len(arr)):
+    if sap_ids is not None:
+        for i in range(len(arr_i)):
             sid = str(sap_ids[i])
-            v = float(arr[i])
+            v = float(arr_i[i])
             if not np.isnan(v):
                 values[sid] = v
                 vmin = min(vmin, v)
