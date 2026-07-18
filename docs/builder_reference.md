@@ -172,7 +172,7 @@ config = {
         'beam':   0.35,  # flexural members
         'column': 0.70,  # compression members
         'brace':  0.50,  # diagonal braces (no ACI guidance — conservative)
-        'wall':   0.70,  # structural walls
+        'wall':   0.35,  # cracked structural walls (use 0.70 for uncracked)
         'slab':   0.25,  # two-way slabs
     },
 }
@@ -223,7 +223,16 @@ with its own tag — there is **no double-counting**.  The base section
 (gross stiffness) and the variant (reduced stiffness) are separate
 definitions; elements reference one or the other.
 
-**Material-type filtering** — the ACI factor is applied **only** to
+.. note::
+   Scaling ``E_mod`` is a **broad stiffness approximation**, not a true
+   implementation of ACI 318 cracked-section provisions.  ACI-style
+   behaviour requires **component-specific section modifiers** that
+   reduce flexural inertia (I3Mod, I2Mod) while retaining gross axial
+   (AMod) and shear (JMod) areas.  The ``stiffness_factors`` dict
+   applies a uniform E_mod reduction to all properties of the selected
+   element type, which over‑softens axial and shear response.
+
+**Material-type filtering** — the factor is applied **only** to
 sections whose material type is ``'Concrete'``.  Steel, rebar, tendon,
 and brick elements retain their gross stiffness regardless of the
 ``stiffness_factors`` dict.  This matches the intent of ACI 318
@@ -235,9 +244,9 @@ only.
 | Type | Criterion |
 |------|-----------|
 | **Column** | Frame where vertical span > 4× the resultant horizontal span: \\|Δz\\| > 4 · √(Δx² + Δy²) |
-| **Brace** | Diagonal frame that is neither beam nor column (both Δh > 0.01 and Δz > 0.01) |
+| **Brace** | Diagonal frame that is neither beam nor column (both Δh > 1‰ of max(model_extents) and Δz > 1‰ of max(model_extents)) |
 | **Beam** | Any other frame element |
-| **Slab** | Area element whose *all* corner nodes lie within 0.02 length units of the mean Z |
+| **Slab** | Area element whose *all* corner nodes lie within 2‰ of max(model_extents) of the mean Z |
 | **Wall** | Any other area element |
 
 ### Typical ACI 318-19 factors
@@ -246,7 +255,8 @@ only.
 |------|--------|-------|
 | Beams | 0.35 | Table 6.6.3.1.1(a) — beams |
 | Columns | 0.70 | Table 6.6.3.1.1(a) — columns |
-| Walls (cracked) | 0.70 | Table 6.6.3.1.1(a) — walls; some practitioners use 0.50 |
+| Walls (cracked) | 0.35 | Table 6.6.3.1.1(a) — walls (cracked); some practitioners use 0.50 |
+| Walls (uncracked) | 0.70 | Table 6.6.3.1.1(a) — walls (uncracked) |
 | Slabs (two-way) | 0.25 | Table 6.6.3.1.1(a) — flat plates / slabs |
 
 ### 5. Solver requirements

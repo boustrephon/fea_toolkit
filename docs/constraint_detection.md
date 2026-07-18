@@ -104,7 +104,7 @@ Two methods are available, controlled by the ``constraint_method`` config:
 
 | Method | Config value | Mechanism | Handler needed | Tcl‑safe |
 |---|---|---|---|---|
-| **Spring elements** (default) | ``"spring"`` | ``zeroLength`` + ``Elastic`` material | Any (none needed) | ✅ |
+| **Spring elements** (default) | ``"spring"`` | ``twoNodeLink`` + ``Elastic`` uniaxial material | Any (none needed) | ✅ |
 | **Penalty MPC** | ``"penalty"`` | ``equationConstraint`` + Penalty handler | ``Penalty`` only | ✅ |
 
 #### Spring‑element method (default)
@@ -125,10 +125,12 @@ Analysis types that work:
 | **Modal / eigen** | Springs in K → eigen solver sees connection directly | ✅ |
 | **Response spectrum** | Post‑processed from modal → inherits modal correctness | ✅ |
 
-The spring stiffness is controlled by *penalty_stiffness* (default:
-``1e12 × EA/L`` for near‑rigid behaviour).  Lower values produce a
-physically flexible connection — useful when modelling actual joint
-flexibility rather than an abstract penalty.
+The spring stiffness is auto-calculated as **100 × average(E·t)** across
+all shell elements in the model, where *E* is the elastic modulus and
+*t* is the shell thickness.  This targets approximately 100 times the
+in-plane stiffness of the adjacent shells for a near-rigid connection.
+Lower values produce a physically flexible connection — useful when
+modelling actual joint flexibility rather than an abstract penalty.
 
 #### Penalty MPC method (``constraint_method: "penalty"``)
 
@@ -142,10 +144,9 @@ enforced by the **Penalty** constraint handler
    ``Transformation`` silently ignores the constraints, producing visible
    "tears" in mode shapes.
 
-   The builder's ``run_modal_analysis()`` and ``run_static_analysis()``
-   methods automatically use ``Penalty`` when edge constraints are
-   present.  Do **not** set ``solver_constraints`` to ``"Transformation"``
-   in the config when using this method.
+   The builder automatically selects ``Penalty`` when
+   ``_edge_constraint_method == 'penalty'``, so this warning applies
+   only when manually overriding ``solver_constraints`` in the config.
 
 **Shell element DOFs**: ``ShellMITC4`` has 6 DOFs per node (UX, UY, UZ, RX, RY, RZ).
 Constraining all 6 DOFs along incompatible edges is correct for both

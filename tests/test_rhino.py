@@ -211,13 +211,13 @@ class TestRhinoImporterNoRhino:
 
 
 # ====================================================================
-# geometry_v2 profile points — pure-math tests (no Rhino import needed)
+# geometry profile points — pure-math tests (no Rhino import needed)
 # ====================================================================
 
 class TestProfilePoints:
     """Profile functions return correct (x,y) point sequences.
 
-    These are inline copies of the functions in geometry_v2.py to avoid
+    These are inline copies of the functions in geometry.py to avoid
     the Rhino import requirement.  Keep them in sync.
     """
 
