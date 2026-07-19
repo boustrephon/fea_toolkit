@@ -1315,6 +1315,172 @@ def plot_mode_3d(
 
 
 # ============================================================================
+# Mode shape animation (builder or NPZ data)
+# ============================================================================
+
+def plot_mode_animation(source, mode_shapes, mode=0, *,
+                        scale=30.0, show_original=True,
+                        animate=True, periods=None,
+                        font_size=14, anim_speed=1.0, anim_amplitude=1.0,
+                        selection=None, notebook=False, **kwargs):
+    """Display / animate a mode shape from a builder or NPZ data.
+
+    Works with either:
+
+    * An ``OpenSeesBuilder`` or ``AnalysisBuilder`` (built) + mode shapes
+      from ``extract_mode_shapes()``.
+    * An NPZ data dict (from ``np.load()``) + mode shapes from the
+      ``modal/mode_dx``, ``modal/mode_dy``, ``modal/mode_dz`` arrays.
+
+    Args:
+        source: Builder or NPZ dict.
+        mode_shapes: Dict ``{mode_idx: {node_tag: (dx, dy, dz)}}`` from
+            ``extract_mode_shapes()``, OR ``None`` to extract from NPZ.
+        mode: 0‑based mode index.
+        scale: Displacement magnification factor.
+        show_original: Show undeformed model in grey.
+        animate: Oscillate amplitude sinusoidally.
+        periods: List of modal periods (s).  The period for *mode* is shown.
+        font_size, anim_speed, anim_amplitude: Display tuning.
+        selection: Optional Selection to filter elements (builder only).
+        notebook: Return plotter for Jupyter.
+        **kwargs: Passed to ``pyvista.Plotter()``.
+
+    Returns:
+        ``pv.Plotter`` if *notebook*, else ``None``.
+    """
+    import numpy as np
+    try:
+        import pyvista as pv
+    except ImportError:
+        print("pyvista not installed — install with: pip install pyvista")
+        return None
+
+    # Resolve mode shape displacements for this mode
+    if isinstance(source, dict) and mode_shapes is None:
+        # NPZ data — extract mode shapes from arrays
+        dx = source.get("modal/mode_dx")
+        dy = source.get("modal/mode_dy")
+        dz = source.get("modal/mode_dz")
+        if dx is None or mode >= dx.shape[1]:
+            print(f"No mode shape data for mode {mode} in NPZ.")
+            return None
+        tags = list(source.get("node_tag", []))
+        mode_shapes = {mode: {int(tags[i]): (float(dx[i, mode]),
+                                              float(dy[i, mode]),
+                                              float(dz[i, mode]))
+                              for i in range(len(tags))}}
+    elif isinstance(source, dict):
+        # NPZ data with pre-extracted mode_shapes — resolve tags
+        pass
+
+    if mode not in mode_shapes or not mode_shapes.get(mode):
+        print(f"No mode shape data for mode {mode}.")
+        return None
+
+    disp = mode_shapes[mode]
+
+    # Resolve mesh geometry into common format
+    data = _resolve_mesh_data(source)
+
+    # Build frame segments
+    segments = []
+    seg_npoints = []
+    for fr in data["frames"]:
+        if "ni_id" in fr:
+            ni = data["nodes"].get(fr["ni_id"])
+            nj = data["nodes"].get(fr["nj_id"])
+        else:
+            ni = next((n for n in data["nodes"].values()
+                       if n["tag"] == fr["ni_tag"]), None)
+            nj = next((n for n in data["nodes"].values()
+                       if n["tag"] == fr["nj_tag"]), None)
+        if ni is None or nj is None:
+            continue
+        p1 = np.array([ni["x"], ni["y"], ni["z"]])
+        p2 = np.array([nj["x"], nj["y"], nj["z"]])
+        di = np.array(disp.get(ni["tag"], (0, 0, 0)))
+        dj = np.array(disp.get(nj["tag"], (0, 0, 0)))
+        segments.append((p1, p2, di, dj))
+        seg_npoints.append(max(2, int(np.linalg.norm(p2 - p1) * 2)))
+
+    # Build shell quads
+    all_quads = []
+    for sh in data["shells"]:
+        npts = []
+        ds = []
+        for ref in (sh.get("node_ids") or []):
+            nd = data["nodes"].get(ref)
+            if nd is None:
+                break
+            npts.append(np.array([nd["x"], nd["y"], nd["z"]]))
+            ds.append(np.array(disp.get(nd["tag"], (0, 0, 0))))
+        if len(npts) == 4:
+            all_quads.append(tuple(npts) + tuple(ds))
+
+    pv.set_plot_theme("document")
+    plotter = pv.Plotter(notebook=notebook, **kwargs)
+
+    # Undeformed shells
+    shell_mesh = pv.PolyData()
+    if show_original and all_quads:
+        _, und_shells = _build_deformed_mesh(
+            segments, seg_npoints, all_quads,
+            [0] * len(all_quads), scale, 0.0)
+        if und_shells is not None and und_shells.n_points:
+            plotter.add_mesh(und_shells, color='lightgrey',
+                             opacity=0.3, show_edges=True, line_width=1)
+
+    # Undeformed frames
+    if show_original:
+        for p1, p2, _, _ in segments:
+            n = max(2, int(np.linalg.norm(p2 - p1) * 2))
+            poly = pv.lines_from_points(np.linspace(p1, p2, n))
+            plotter.add_mesh(poly, color='#999999', line_width=1, opacity=0.5)
+
+    # Deformed mesh
+    frame_mesh, shell_mesh = _build_deformed_mesh(
+        segments, seg_npoints, all_quads, [0] * len(all_quads),
+        scale, 0.0)
+    if shell_mesh and shell_mesh.n_points:
+        plotter.add_mesh(shell_mesh, color='#c44e52', opacity=0.5,
+                         show_edges=True, line_width=1)
+    if frame_mesh and frame_mesh.n_points:
+        plotter.add_mesh(frame_mesh, color='#c44e52', line_width=2)
+
+    # Title
+    period_str = ""
+    if periods is not None and mode < len(periods):
+        period_str = f"  T = {periods[mode]:.4f} s"
+    plotter.add_text(f"Mode {mode + 1}  {period_str}",
+                     position='upper_edge', font_size=font_size)
+    plotter.show_grid()
+    _set_isometric_view(plotter)
+
+    if animate:
+        import math as _math
+
+        def callback(step):
+            amp = _math.sin(2.0 * _math.pi * step / 60.0) * anim_amplitude
+            nfm, nsm = _build_deformed_mesh(
+                segments, seg_npoints, all_quads,
+                [0] * len(all_quads), scale, amp)
+            if nfm is not None and nfm.n_points and frame_mesh.n_points:
+                frame_mesh.points = nfm.points
+            if shell_mesh is not None and nsm is not None and nsm.n_points:
+                shell_mesh.points = nsm.points
+
+        plotter.add_timer_callback(1, 60, callback)
+        plotter.show(auto_close=False)
+    else:
+        plotter.show()
+
+    if notebook:
+        return plotter
+    return None
+
+
+# ============================================================================
 # 3D moment diagram (PyVista) — extruded flags on the tension side
 # ============================================================================
 
