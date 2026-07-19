@@ -317,9 +317,22 @@ def _build_metadata(model, static_results=None, modal_result=None,
                           if not getattr(a, 'inactive', False)]),
     }
     if static_results:
-        meta["static_cases"] = list(static_results.keys())
-        meta["has_local_forces"] = any(
-            "fx_i" in r for r in static_results.values())
+        # Use same nested/flat detection as collect_static_arrays
+        has_nested_cases = any(
+            isinstance(v, dict) and ("nodal_displacements" in v or "element_forces" in v)
+            for v in static_results.values()
+        )
+        if has_nested_cases:
+            meta["static_cases"] = list(static_results.keys())
+            meta["has_local_forces"] = any(
+                "fx_i" in r for r in static_results.values())
+        else:
+            meta["static_cases"] = ["1"]
+            meta["has_local_forces"] = (
+                "fx_i" in static_results or
+                any("fx_i" in v for v in static_results.values()
+                    if isinstance(v, dict))
+            )
     if modal_result:
         meta["num_modes"] = len(modal_result.get("periods", []))
     if config:
@@ -460,10 +473,12 @@ def write_results(
         _build_metadata(src, static_results, modal_result, config)
     ])
 
-    # Write
+    # Write — validate fmt explicitly
     if fmt == "h5":
         _write_h5(path, arrays)
-    else:
+    elif fmt == "npz":
         _write_npz(path, arrays)
+    else:
+        raise ValueError(f"Unsupported format '{fmt}'; expected 'npz' or 'h5'")
 
     return str(Path(path).resolve())
