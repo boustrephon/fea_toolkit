@@ -2107,6 +2107,8 @@ class AnalysisBuilder:
                       modal_result: Optional[Dict[str, Any]] = None,
                       mode_shapes: Optional[Dict] = None,
                       rs_results: Optional[Dict[str, Dict]] = None,
+                      rs_element_forces: Optional[Dict[str, Any]] = None,
+                      rs_nodal_displacements: Optional[Dict[int, tuple]] = None,
                       fmt: str = "npz",
                       ) -> str:
         """Export model geometry and analysis results to a unified file.
@@ -2117,9 +2119,13 @@ class AnalysisBuilder:
         Args:
             filepath: Output file path (``.npz`` or ``.h5``).
             static_results: Dict from :meth:`run_static_analysis`.
-            modal_result: Dict from :meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.run_modal_analysis`.
+            modal_result: Dict from
+                :meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.run_modal_analysis`.
             mode_shapes: Mode shape eigenvectors ``{mode_idx: {tag: (dx,dy,dz)}}``.
             rs_results: Response-spectrum results dict.
+            rs_element_forces: Dict from :meth:`extract_element_rs_forces`.
+            rs_nodal_displacements: Dict from
+                :meth:`compute_rs_nodal_displacements`.
             fmt: ``"npz"`` (default) or ``"h5"``.
 
         Returns:
@@ -2134,6 +2140,8 @@ class AnalysisBuilder:
             modal_result=modal_result,
             mode_shapes=mode_shapes,
             rs_results=rs_results,
+            rs_element_forces=rs_element_forces,
+            rs_nodal_displacements=rs_nodal_displacements,
             fmt=fmt,
             config=self.config,
         )

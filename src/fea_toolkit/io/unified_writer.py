@@ -287,7 +287,7 @@ def collect_modal_arrays(modal_result: Dict[str, Any],
 
 def collect_rs_arrays(rs_x: Optional[Dict] = None,
                        rs_y: Optional[Dict] = None) -> Dict[str, np.ndarray]:
-    """Extract response-spectrum arrays."""
+    """Extract response-spectrum base shear arrays."""
     arrays: Dict[str, np.ndarray] = {}
     for direction, d_key in [("X", "x"), ("Y", "y")]:
         rs = rs_x if direction == "X" else rs_y
@@ -297,6 +297,74 @@ def collect_rs_arrays(rs_x: Optional[Dict] = None,
             rs.get("modal_base_shear", []), dtype=float)
         arrays[f"rs/v_cqc_{d_key}"] = np.array([rs.get("base_shear_cqc", 0.0)])
         arrays[f"rs/v_srss_{d_key}"] = np.array([rs.get("base_shear_srss", 0.0)])
+    return arrays
+
+
+def collect_rs_element_force_arrays(
+    rs_element_forces: Optional[Dict[str, Any]] = None,
+) -> Dict[str, np.ndarray]:
+    """Extract element-level RS force arrays (CQC-combined).
+
+    Expects *rs_element_forces* to have the structure returned by
+    ``extract_element_rs_forces()``::
+
+        {
+            "element_results": [
+                {"elem_id": "1", "z_bot": 0.0, "z_mid": 5.0,
+                 "Vy_i": 10.0, "Vy_j": -10.0, ...},
+                ...
+            ],
+            ...
+        }
+
+    Writes ``rs/elem_sap_id``, ``rs/elem_z_bot``, ``rs/elem_z_mid``,
+    ``rs/elem_Vy_i`` … ``rs/elem_Mz_j`` (one row per element).
+    """
+    arrays: Dict[str, np.ndarray] = {}
+    if not rs_element_forces:
+        return arrays
+
+    results = rs_element_forces.get("element_results", [])
+    if not results:
+        return arrays
+
+    n = len(results)
+    arrays["rs/elem_sap_id"] = np.array([r["elem_id"] for r in results], dtype=str)
+    arrays["rs/elem_z_bot"] = np.array([r["z_bot"] for r in results], dtype=float)
+    arrays["rs/elem_z_mid"] = np.array([r["z_mid"] for r in results], dtype=float)
+
+    for qty in ("Vy_i", "Vy_j", "Vz_i", "Vz_j",
+                 "My_i", "My_j", "Mz_i", "Mz_j"):
+        key = f"rs/elem_{qty}"
+        arrays[key] = np.array([r.get(qty, 0.0) for r in results], dtype=float)
+
+    return arrays
+
+
+def collect_rs_nodal_displacement_arrays(
+    rs_nodal_displacements: Optional[Dict[int, tuple]] = None,
+) -> Dict[str, np.ndarray]:
+    """Extract RS nodal displacement arrays (CQC-combined).
+
+    Expects *rs_nodal_displacements* to have the structure returned by
+    ``compute_rs_nodal_displacements()``::
+
+        {node_tag: (dx, dy, dz), ...}
+
+    Writes ``rs/node_tag`` and ``rs/node_dx``, ``rs/node_dy``,
+    ``rs/node_dz`` arrays sorted by node tag.
+    """
+    arrays: Dict[str, np.ndarray] = {}
+    if not rs_nodal_displacements:
+        return arrays
+
+    tags = sorted(rs_nodal_displacements.keys())
+    arrays["rs/node_tag"] = np.array(tags, dtype=int)
+    for i, dof in enumerate(["dx", "dy", "dz"]):
+        key = f"rs/node_{dof}"
+        arrays[key] = np.array(
+            [rs_nodal_displacements[t][i] for t in tags], dtype=float)
+
     return arrays
 
 
@@ -414,6 +482,8 @@ def write_results(
     modal_result: Optional[Dict[str, Any]] = None,
     mode_shapes: Optional[Dict] = None,
     rs_results: Optional[Dict[str, Dict]] = None,
+    rs_element_forces: Optional[Dict[str, Any]] = None,
+    rs_nodal_displacements: Optional[Dict[int, tuple]] = None,
     fmt: str = "npz",
     config: Optional[Dict] = None,
 ) -> str:
@@ -462,6 +532,14 @@ def write_results(
             rs_x=rs_results.get("rs_x"),
             rs_y=rs_results.get("rs_y"),
         ))
+
+    # RS element forces
+    if rs_element_forces:
+        arrays.update(collect_rs_element_force_arrays(rs_element_forces))
+
+    # RS nodal displacements
+    if rs_nodal_displacements:
+        arrays.update(collect_rs_nodal_displacement_arrays(rs_nodal_displacements))
 
     # Metadata
     arrays["metadata_json"] = np.array([

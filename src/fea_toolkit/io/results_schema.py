@@ -71,6 +71,23 @@ RS_ARRAYS: Dict[str, Tuple] = {
     "rs/v_cqc_y": ("", "float"),
     "rs/v_total_x": ("", "float"),
     "rs/v_total_y": ("", "float"),
+    # Element-level CQC-combined forces (N_frame)
+    "rs/elem_sap_id": ("N_frame", "str"),
+    "rs/elem_z_bot": ("N_frame", "float"),
+    "rs/elem_z_mid": ("N_frame", "float"),
+    "rs/elem_Vy_i": ("N_frame", "float"),
+    "rs/elem_Vy_j": ("N_frame", "float"),
+    "rs/elem_Vz_i": ("N_frame", "float"),
+    "rs/elem_Vz_j": ("N_frame", "float"),
+    "rs/elem_My_i": ("N_frame", "float"),
+    "rs/elem_My_j": ("N_frame", "float"),
+    "rs/elem_Mz_i": ("N_frame", "float"),
+    "rs/elem_Mz_j": ("N_frame", "float"),
+    # Nodal CQC-combined displacements (N_node)
+    "rs/node_tag": ("N_node", "int"),
+    "rs/node_dx": ("N_node", "float"),
+    "rs/node_dy": ("N_node", "float"),
+    "rs/node_dz": ("N_node", "float"),
 }
 
 META_ARRAYS: Dict[str, Tuple] = {

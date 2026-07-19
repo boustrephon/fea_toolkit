@@ -5481,6 +5481,8 @@ class OpenSeesBuilder:
                       modal_result: Optional[Dict[str, Any]] = None,
                       mode_shapes: Optional[Dict] = None,
                       rs_results: Optional[Dict[str, Dict]] = None,
+                      rs_element_forces: Optional[Dict[str, Any]] = None,
+                      rs_nodal_displacements: Optional[Dict[int, tuple]] = None,
                       fmt: str = "npz",
                       ) -> str:
         """Export model geometry and analysis results to a unified file.
@@ -5495,6 +5497,9 @@ class OpenSeesBuilder:
             modal_result: Dict from :meth:`run_modal_analysis`.
             mode_shapes: Mode shape eigenvectors.
             rs_results: Dict with keys ``rs_x``, ``rs_y``.
+            rs_element_forces: Dict from :meth:`extract_element_rs_forces`.
+            rs_nodal_displacements: Dict from
+                :meth:`compute_rs_nodal_displacements`.
             fmt: ``"npz"`` (default) or ``"h5"``.
 
         Returns:
@@ -5509,6 +5514,8 @@ class OpenSeesBuilder:
                 modal_result=modal_result,
                 mode_shapes=mode_shapes,
                 rs_results=rs_results,
+                rs_element_forces=rs_element_forces,
+                rs_nodal_displacements=rs_nodal_displacements,
                 fmt=fmt,
             )
         from ..io.unified_writer import write_results
@@ -5523,6 +5530,8 @@ class OpenSeesBuilder:
             modal_result=modal_result,
             mode_shapes=mode_shapes,
             rs_results=rs_results,
+            rs_element_forces=rs_element_forces,
+            rs_nodal_displacements=rs_nodal_displacements,
             fmt=fmt,
             config=self.config,
         )
