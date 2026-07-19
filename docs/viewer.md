@@ -22,14 +22,17 @@ visualisation stacks:
 | `ModelViewer(...).overlay_forces()` | PyVista | Force/moment flag diagram | Static element forces |
 | `ModelViewer(...).highlight_elements()` | PyVista | Highlighted elements | Marking braces, issues, discussion topics |
 | `ModelViewer(...).annotate()` | PyVista | Text annotation | Labelling features |
-| `plot_model_3d(builder)` | PyVista | 3D model (nodes, labels, section colours) | Quick model preview |
-| `plot_deformed_3d(builder, results)` | PyVista | Deformed + undeformed overlay | Static analysis displacement |
-| `plot_rs_deformed_3d(builder, disp)` | PyVista | RS CQC‑combined deformed shape | Response‑spectrum results |
-| `plot_mode_3d(builder, shapes, mode)` | PyVista | Mode shape (with animation) | Modal analysis |
-| `plot_static_moment_3d(builder, forces)` | PyVista | 3D force/moment flag or tube diagram | Static element forces |
-| `plot_static_shear_3d(builder, forces)` | PyVista | 3D shear force diagram | Shear results |
-| `plot_static_axial_3d(builder, forces)` | PyVista | 3D axial force diagram | Axial results |
-| `plot_static_force_diagram(builder, forces)` | Matplotlib | 2D force vs elevation | Column / wall forces |
+| `plot_model_3d(builder)` | PyVista | 3D model (nodes, labels, section colours) — *deprecated, use plot_mesh* | Quick model preview |
+| `plot_mesh(source)` | PyVista | 3D mesh from builder **or** NPZ dict | Unified mesh viewing |
+| `plot_deformed_3d(builder, results)` | PyVista | Deformed + undeformed overlay — *deprecated* | Static analysis displacement |
+| `plot_rs_deformed_3d(builder, disp)` | PyVista | RS CQC‑combined deformed shape — *deprecated* | Response‑spectrum results |
+| `plot_mode_3d(builder, shapes, mode)` | PyVista | Mode shape (with animation) — *deprecated, use plot_mode_animation* | Modal analysis |
+| `plot_mode_animation(source, shapes, mode)` | PyVista | Mode shape animation from builder **or** NPZ | Unified modal viz |
+| `plot_static_moment_3d(builder, forces)` | PyVista | 3D force/moment flag or tube diagram — *deprecated, use plot_force_diagram_3d* | Static element forces |
+| `plot_force_diagram_3d(source, forces)` | PyVista | 3D force/moment diagram from builder **or** NPZ | Unified force viz |
+| `plot_static_shear_3d(builder, forces)` | PyVista | 3D shear force diagram — *deprecated* | Shear results |
+| `plot_static_axial_3d(builder, forces)` | PyVista | 3D axial force diagram — *deprecated* | Axial results |
+| `plot_static_force_diagram(builder, forces)` | Matplotlib | 2D force vs elevation — *deprecated* | Column / wall forces |
 | `plot_force_diagram(elem_results)` | Matplotlib | 2D CQC‑combined force vs elevation | RS element results |
 | `plot_pushover_curve(results)` | Matplotlib | Capacity curve | Pushover summary |
 | `plot_pushover_curve_enhanced(results)` | Matplotlib | Capacity curve + stiffness lines | Detailed pushover review |
@@ -37,6 +40,7 @@ visualisation stacks:
 | `plot_interactive_viewer(builder, forces)` | PyVista + widgets | Full interactive viewer | Exploration, demos |
 | `plot_npz_force_diagram(path)` | Matplotlib | 2D force from saved NPZ | Post‑hoc analysis |
 | `plot_npz_moment_3d(path)` | PyVista | 3D force from saved NPZ | Post‑hoc analysis |
+| `compare_meshes(a, b)` | PyVista | Side‑by‑side mesh comparison | Model diffing |
 
 ---
 
@@ -442,12 +446,12 @@ When you are an AI assistant and the user asks about visualising the
 structural model or results, use this guide to choose the right tool:
 
 ### "Show me the model"
-→ ``ModelViewer(builder).show_model().show()``
+→ ``plot_mesh(builder)`` (or ``ModelViewer(builder).show_model().show()``)
 Best for general inspection, getting a feel for the structure.
+*Unified:* pass an NPZ data dict instead of a builder to view cached geometry.
 
 ### "Show me the model with section colours"
-→ ``plot_model_3d(builder, color_by_section=True)``
-Uses the same colour palette as ``ModelViewer`` but with automatic isometric view.
+→ ``plot_model_3d(builder, color_by_section=True)`` — *deprecated, use* ``plot_mesh``
 
 ### "Show me the deformed shape"
 - **Static:** ``plot_deformed_3d(builder, results)`` or
@@ -456,7 +460,8 @@ Uses the same colour palette as ``ModelViewer`` but with automatic isometric vie
 - **Modal:** ``plot_mode_3d(builder, shapes, mode=0, animate=True)``
 
 ### "Show me the forces / moments"
-- **3D flags on structure:** ``plot_static_moment_3d(builder, elem_forces, quantity="Mz")``
+- **Unified (builder or NPZ):** ``plot_force_diagram_3d(source, force_data, quantity="Mz")``
+- **3D flags on structure (builder only, deprecated):** ``plot_static_moment_3d(builder, elem_forces, quantity="Mz")``
 - **3D shear:** ``plot_static_shear_3d(builder, elem_forces)``
 - **3D axial:** ``plot_static_axial_3d(builder, elem_forces)``
 - **2D vs elevation (columns):** ``plot_static_force_diagram(builder, elem_forces, quantity="Mz")``
@@ -475,8 +480,15 @@ Best for demos, exploration, and when the user wants to switch between
 quantities / combos themselves.
 
 ### "I have a .npz file from an earlier run"
-- **2D:** ``plot_npz_force_diagram("path.npz", quantity="Mz")``
-- **3D:** ``plot_npz_moment_3d("path.npz", quantity="Mz")``
+- **Mesh:** ``plot_mesh(np.load("path.npz"))``
+- **Mode shapes:** ``plot_mode_animation(np.load("path.npz"), None, mode=0)``
+- **Forces:** ``plot_force_diagram_3d(np.load("path.npz"), combo="DEAD", quantity="Mz")``
+- **2D force:** ``plot_npz_force_diagram("path.npz", quantity="Mz")``
+- **3D force (legacy):** ``plot_npz_moment_3d("path.npz", quantity="Mz")``
+
+### "Compare two models"
+→ ``compare_meshes(builder_a, builder_b)`` or ``compare_meshes(npz_a, npz_b)``
+Shows a side‑by‑side view of two meshes (builders or NPZ data).
 
 ### "Highlight specific elements"
 → ``ModelViewer(builder).show_model().highlight_elements(
@@ -502,10 +514,14 @@ from fea_toolkit.plotting import ModelViewer
 # Standalone 3D plots (PyVista)
 from fea_toolkit.plotting import (
     plot_model_3d,
+    plot_mesh,              # unified (builder or NPZ)
+    compare_meshes,         # side-by-side comparison
     plot_deformed_3d,
     plot_rs_deformed_3d,
     plot_mode_3d,
+    plot_mode_animation,    # unified (builder or NPZ)
     plot_static_moment_3d,
+    plot_force_diagram_3d,  # unified (builder or NPZ)
     plot_static_shear_3d,
     plot_static_axial_3d,
 )

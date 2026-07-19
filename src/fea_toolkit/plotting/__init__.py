@@ -18,6 +18,11 @@ from .viz import (
     plot_capacity_spectrum,
     plot_npz_force_diagram,
     plot_npz_moment_3d,
+    # Unified functions (builder or NPZ data)
+    plot_mesh,
+    compare_meshes,
+    plot_mode_animation,
+    plot_force_diagram_3d,
 )
 
 from .diagnostics import (
