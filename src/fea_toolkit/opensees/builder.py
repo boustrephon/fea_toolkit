@@ -6853,6 +6853,9 @@ class OpenSeesBuilder:
         :meth:`compute_seismic_masses` first) and the stiffness model has been
         built (call :meth:`build` first).
 
+        When ``use_preprocessor=True``, delegates to the AnalysisBuilder's
+        :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_modal_analysis`.
+
         Args:
             num_modes: Number of eigenvalues to solve for.
             print_results: If True, print a modal properties table.
@@ -6890,6 +6893,15 @@ class OpenSeesBuilder:
             * ``'modal_props'`` — the full ``ops.modalProperties()`` dict.
             * ``'num_modes'`` — number of converged modes.
         """
+        # Delegate to AnalysisBuilder when available (two-stage path)
+        _analysis = getattr(self, '_analysis', None)
+        if _analysis is not None:
+            return _analysis.run_modal_analysis(
+                num_modes=num_modes,
+                print_results=print_results,
+                eigen_solver=eigen_solver,
+                g=g,
+            )
         if self.config['verbose']:
             print(f"Running modal analysis for {num_modes} modes...")
 
@@ -7218,6 +7230,19 @@ class OpenSeesBuilder:
             * ``'base_shear_srss'`` — SRSS‑combined base shear (kN).
             * ``'modal_periods'`` — the input modal periods.
         """
+        # Delegate to AnalysisBuilder when available (two-stage path)
+        _analysis = getattr(self, '_analysis', None)
+        if _analysis is not None:
+            return _analysis.run_response_spectrum_analysis(
+                num_modes=num_modes,
+                modal_periods=modal_periods,
+                spectrum_periods=spectrum_periods,
+                spectrum_accels=spectrum_accels,
+                direction=direction,
+                damping_ratio=damping_ratio,
+                T_rigid=T_rigid,
+                print_results=print_results,
+            )
         if self.config['verbose']:
             print(f"Running response spectrum analysis (dir={direction})...")
 
