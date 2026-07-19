@@ -18,8 +18,8 @@ from ..model.sap_data import (
     Node, FrameElement, AreaElement,
     ShellSection, Restraint,
 )
-from ..model.geometry import get_SAP_vecxz
-from ..model.geometry import convert_area_loads_to_edge_loads, polygon_area_3d
+from ..model.geometry import get_SAP_vecxz, get_local_axes
+from ..model.geometry import polygon_area_3d
 from ..model.tree_utils import collect_descendants
 from ..model.selection import Selection
 from ..utils import g_from_units, cqc_combine
@@ -2646,6 +2646,416 @@ class AnalysisBuilder:
             fmt=fmt,
             config=self.config,
         )
+
+    # ═══════════════════════════════════════════════════════════════
+    # Pushover analysis
+    # ═══════════════════════════════════════════════════════════════
+
+    def run_pushover_analysis(
+        self,
+        gravity_patterns: Dict[str, float],
+        lateral_load_type: str = 'uniform',
+        lateral_pattern_name: Optional[str] = None,
+        lateral_direction: str = 'X',
+        control_node_tag: Optional[int] = None,
+        max_disp: float = 0.5,
+        num_steps: int = 100,
+        fundamental_period: Optional[float] = None,
+        mode_shapes: Optional[Dict] = None,
+        mode_index: int = 0,
+        print_progress: bool = True,
+    ) -> Dict[str, Any]:
+        """Run a displacement‑controlled pushover analysis.
+
+        **Two‑stage process:**
+
+        1. **Gravity** — apply the specified gravity patterns via
+           :meth:`run_static_analysis` with ``extract_reactions=True``.
+        2. **Lateral push** — lock gravity, apply lateral loads, then
+           push a control node in increments using
+           ``DisplacementControl`` integration.
+
+        Four lateral load types are supported:
+
+        * ``'uniform'`` — mass‑proportional acceleration (uniform
+          acceleration of the structure).
+        * ``'triangular'`` — load proportional to :math:`m_i h_i^k`
+          per ASCE 7 equivalent lateral force.
+        * ``'mode1'`` — load proportional to the fundamental
+          eigenvector :math:`\\mathbf{M} \\boldsymbol{\\phi}_1`
+          (modal pushover).
+        * ``'pattern'`` — read an existing SAP2000 load pattern
+          (frame distributed loads) from the model data.
+
+        Args:
+            gravity_patterns: Dict mapping load pattern name → scale
+                factor for gravity loads, e.g. ``{"DEAD": 1.0}``.
+            lateral_load_type: ``'uniform'``, ``'triangular'``,
+                ``'mode1'``, or ``'pattern'``.
+            lateral_pattern_name: SAP2000 load pattern name (required
+                when *lateral_load_type* is ``'pattern'``).
+            lateral_direction: Push direction — ``'X'``, ``'Y'``, or
+                ``'Z'``.
+            control_node_tag: OpenSees node tag for displacement
+                control.  ``None`` = auto‑select (highest unrestrained
+                node in the push direction).
+            max_disp: Target displacement at the control node (m).
+            num_steps: Number of push steps.
+            fundamental_period: Fundamental period (s) for
+                ``'triangular'`` load exponent ``k``.  ``None`` uses
+                the period of the first mode from the model.
+            mode_shapes: Dict ``{mode_idx: {node_tag: (dx, dy, dz)}}``
+                from :meth:`extract_mode_shapes`; required for
+                ``'mode1'``.
+            mode_index: Mode index (0‑based) for ``'mode1'``.
+            print_progress: Print a progress line per step.
+
+        Returns:
+            Dict with keys ``step``, ``control_disp``, ``base_shear``,
+            ``status``, ``gravity_displacements``, ``control_node``,
+            ``dof``, ``lateral_load_type``.
+        """
+        valid_types = {'uniform', 'triangular', 'mode1', 'pattern'}
+        if lateral_load_type not in valid_types:
+            raise ValueError(
+                f"Unknown lateral_load_type '{lateral_load_type}'. "
+                f"Choose from {valid_types}."
+            )
+        if lateral_load_type == 'pattern' and not lateral_pattern_name:
+            raise ValueError(
+                "lateral_pattern_name is required when "
+                "lateral_load_type='pattern'"
+            )
+
+        if self.config.get('verbose') or print_progress:
+            print(f"Running pushover: {lateral_load_type} in "
+                  f"{lateral_direction}, {num_steps} steps, "
+                  f"max disp = {max_disp:.3f} m")
+
+        dof = {'X': 1, 'Y': 2, 'Z': 3}[lateral_direction]
+
+        # ── Rebuild with fiber sections ──────────────────────────
+        # Check whether any section overrides the base to_fiber_patches
+        # (the base class raises NotImplementedError)
+        from ..model.sap_data import Section as _BaseSection
+        _has_any_fiber = any(
+            type(sec).to_fiber_patches is not _BaseSection.to_fiber_patches
+            for sec in self.mesh_model.sections.values()
+        )
+        if not _has_any_fiber:
+            overrides: Dict[str, Any] = {
+                'element_type': 'elasticBeamColumn',
+                'create_fiber_sections': False,
+                'use_elastic_sections': True,
+            }
+            self.build_domain(config_overrides=overrides)
+        else:
+            self.rebuild_with_fiber_sections(
+                brace_selection=self._brace_selection,
+            )
+
+        # ── Re-apply edge constraints ────────────────────────────
+        _spring_scale = float(self.config.get('pushover_spring_scale', 1.0))
+        if self._saved_edge_constraints and _spring_scale > 0:
+            for args in self._saved_edge_constraints:
+                coarse_edges, fine_nodes, coarse_elems, tolerance, k, verbose = args
+                if _spring_scale != 1.0 and k is not None:
+                    k = k * _spring_scale
+                self.apply_edge_constraints(
+                    coarse_edges=coarse_edges,
+                    fine_nodes=fine_nodes,
+                    coarse_elements=coarse_elems,
+                    tolerance=tolerance,
+                    penalty_stiffness=k,
+                    verbose=verbose or self.config.get('verbose', False),
+                )
+            if self.config.get('verbose', False) or print_progress:
+                n = len(self._saved_edge_constraints)
+                print(f"  Re-applied edge constraints from {n} tear(s)")
+
+        # ── Seismic masses (for lateral load shape) ──────────────
+        try:
+            self.compute_seismic_masses()
+        except Exception:
+            if self.config.get('verbose'):
+                print("  compute_seismic_masses failed, using fallback masses")
+            self._compute_fallback_masses()
+
+        # ── Gravity analysis ─────────────────────────────────────
+        grav_results = self.run_static_analysis(
+            extract_reactions=True,
+            pattern_scales=gravity_patterns,
+        )
+        grav_disp = (
+            grav_results.get('nodal_displacements', {})
+            if grav_results else {}
+        )
+
+        # ── Control node auto‑select ─────────────────────────────
+        if control_node_tag is None:
+            candidate = None
+            max_z = -1e12
+            for nid, nd in self.mesh_model.nodes.items():
+                restraint = self.mesh_model.restraints.get(nid)
+                if restraint and len(restraint.dofs) > dof - 1:
+                    if restraint.dofs[dof - 1] == 1:
+                        continue  # restrained in push direction
+                try:
+                    z = ops.nodeCoord(nd.node_tag)[2]
+                except Exception:
+                    continue
+                if z > max_z:
+                    max_z = z
+                    candidate = nd.node_tag
+            if candidate is not None:
+                control_node_tag = candidate
+            else:
+                raise RuntimeError(
+                    "Could not auto-select control node — "
+                    "no unrestrained nodes found"
+                )
+
+        if print_progress:
+            print(f"  Control node = {control_node_tag}")
+
+        # ── Record gravity control displacement ──────────────────
+        try:
+            grav_ctrl_disp = ops.nodeDisp(int(control_node_tag))[dof - 1]
+        except Exception:
+            grav_ctrl_disp = 0.0
+
+        # ── Lock gravity ─────────────────────────────────────────
+        ops.loadConst('-time', 0.0)
+
+        # Find a free pattern tag
+        _pat_tag = 1001
+        try:
+            existing = ops.getLoadPatternTags()
+            if existing:
+                _pat_tag = max(existing) + 1
+        except Exception:
+            pass
+
+        # ── Apply lateral loads ──────────────────────────────────
+        if lateral_load_type == 'pattern':
+            # Use existing SAP2000 frame distributed loads projected
+            # onto the push direction.
+            dir_map = {'Gravity': (0,0,-1), 'X': (1,0,0),
+                       'Y': (0,1,0), 'Z': (0,0,1)}
+
+            for ld in self.mesh_model.frame_dist_loads:
+                if ld.pattern != lateral_pattern_name:
+                    continue
+
+                gx, gy, gz = dir_map.get(ld.direction, (0, 0, 0))
+                elem = self.mesh_model.frame_elements.get(ld.frame_id)
+                if elem is None or getattr(elem, 'inactive', False):
+                    continue
+                ops_tag = self.frame_tag_map.get(ld.frame_id, elem.elem_tag)
+
+                wa, wb = float(ld.val_a), float(ld.val_b)
+                aL, bL = ld.rdist_a, ld.rdist_b
+
+                nd_i = self.mesh_model.nodes.get(elem.node_i)
+                nd_j = self.mesh_model.nodes.get(elem.node_j)
+                if nd_i is None or nd_j is None:
+                    continue
+                axis = np.array([nd_j.x - nd_i.x, nd_j.y - nd_i.y, nd_j.z - nd_i.z])
+                try:
+                    vx, vy, vz = get_local_axes(axis, getattr(elem, 'angle', 0.0))
+                except Exception:
+                    continue
+
+                T = np.column_stack([vx, vy, vz])
+                g_local = np.linalg.solve(T, np.array([gx, gy, gz]))
+                wy_a = g_local[1] * wa
+                wz_a = g_local[2] * wa
+                wx_a = g_local[0] * wa
+                wy_b = g_local[1] * wb
+                wz_b = g_local[2] * wb
+                wx_b = g_local[0] * wb
+
+                if abs(wa) < 1e-12 and abs(wb) < 1e-12:
+                    continue
+
+                is_uniform = abs(wa - wb) < 1e-12
+                if is_uniform and abs(aL) < 1e-12 and abs(bL - 1.0) < 1e-12:
+                    ops.eleLoad('-ele', ops_tag, '-type', '-beamUniform',
+                                wy_a, wz_a, wx_a)
+                elif is_uniform:
+                    ops.eleLoad('-ele', ops_tag, '-type', '-beamUniform',
+                                wy_a, wz_a, wx_a, aL, bL)
+                else:
+                    for i in range(4):
+                        span = bL - aL
+                        seg_a = aL + i * span / 4
+                        seg_b = aL + (i + 1) * span / 4
+                        xi = (i + 0.5) / 4
+                        ops.eleLoad('-ele', ops_tag, '-type', '-beamUniform',
+                                    wy_a + (wy_b - wy_a) * xi,
+                                    wz_a + (wz_b - wz_a) * xi,
+                                    wx_a + (wx_b - wx_a) * xi,
+                                    seg_a, seg_b)
+
+            if print_progress:
+                n = sum(1 for ld in self.mesh_model.frame_dist_loads
+                        if ld.pattern == lateral_pattern_name)
+                print(f"  Applied lateral loads from pattern "
+                      f"'{lateral_pattern_name}' ({n} load(s))")
+        else:
+            ops.timeSeries('Linear', _pat_tag)
+            ops.pattern('Plain', _pat_tag, _pat_tag)
+
+            if lateral_load_type == 'uniform':
+                node_loads = self._compute_uniform_lateral_loads(
+                    direction=lateral_direction,
+                    node_masses=self.node_masses,
+                )
+            elif lateral_load_type == 'triangular':
+                node_loads = self._compute_triangular_lateral_loads(
+                    direction=lateral_direction,
+                    node_masses=self.node_masses,
+                    fundamental_period=fundamental_period,
+                )
+            elif lateral_load_type == 'mode1':
+                if mode_shapes is None:
+                    raise ValueError(
+                        "mode_shapes is required when "
+                        "lateral_load_type='mode1'"
+                    )
+                node_loads = self._compute_mode_shape_lateral_loads(
+                    direction=lateral_direction,
+                    node_masses=self.node_masses,
+                    mode_shapes=mode_shapes,
+                    mode_index=mode_index,
+                )
+            else:
+                node_loads = {}
+
+            for tag, (fx, fy, fz) in node_loads.items():
+                ops.load(int(tag), fx, fy, fz, 0.0, 0.0, 0.0)
+
+            n_loaded = len(node_loads)
+            if print_progress:
+                print(f"  Applied lateral loads ({lateral_load_type}) "
+                      f"to {n_loaded} node(s)")
+
+        # ── Displacement‑controlled push analysis setup ──────────
+        disp_inc = max_disp / max(num_steps, 1)
+
+        _algo = self.config.get('solver_algorithm', 'Newton')
+        _test_type = self.config.get('solver_test_type', 'NormDispIncr')
+        _test_tol = self.config.get('solver_test_tol', 1e-6)
+        _test_iter = self.config.get('solver_test_max_iter', 10)
+        _system = self.config.get('solver_system', 'BandGen')
+
+        ops.wipeAnalysis()
+        _cs = self.config.get('solver_constraints', 'Transformation')
+        if self._edge_constraint_method == 'penalty':
+            _cs = 'Penalty'
+            ops.constraints('Penalty', 1.0e12, 1.0e12)
+        else:
+            ops.constraints(_cs)
+        ops.numberer('RCM')
+        ops.system(_system)
+        ops.test(_test_type, _test_tol, _test_iter)
+
+        ops.integrator('DisplacementControl',
+                       int(control_node_tag), dof, disp_inc)
+        ops.analysis('Static')
+
+        # ── Gravity state (step 0) ───────────────────────────────
+        steps: List[int] = [0]
+        ctrl_disps: List[float] = [0.0]
+        base_shears: List[float] = [0.0]
+        statuses: List[int] = [0]
+
+        try:
+            ops.reactions()
+            bs0 = 0.0
+            for nid, nd in self.mesh_model.nodes.items():
+                r = self.mesh_model.restraints.get(nid)
+                if r and len(r.dofs) > dof - 1 and r.dofs[dof - 1] == 1:
+                    try:
+                        rxn = ops.nodeReaction(nd.node_tag, dof)
+                        if isinstance(rxn, (list, tuple)):
+                            rxn = rxn[0] if rxn else 0.0
+                        bs0 += float(rxn)
+                    except Exception:
+                        pass
+            base_shears[0] = bs0
+        except Exception:
+            pass
+
+        # ── Push loop with algorithm fallback chain ──────────────
+        for step in range(1, num_steps + 1):
+            _algo_chain: List = [_algo]
+            if _algo != 'NewtonLineSearch':
+                _algo_chain.append('NewtonLineSearch')
+            if _algo != 'ModifiedNewton':
+                _algo_chain.append(('ModifiedNewton', '-initial'))
+            _algo_chain.append('KrylovNewton')
+
+            ok = -1
+            for attempt in _algo_chain:
+                if isinstance(attempt, tuple):
+                    ops.algorithm(attempt[0], attempt[1])
+                else:
+                    ops.algorithm(attempt)
+                ok = ops.analyze(1)
+                if ok == 0:
+                    break
+
+            statuses.append(ok)
+
+            # Record control node displacement (relative to gravity)
+            try:
+                cd_total = ops.nodeDisp(int(control_node_tag))[dof - 1]
+                cd = cd_total - grav_ctrl_disp
+            except Exception:
+                cd = 0.0
+            ctrl_disps.append(cd)
+
+            # Calculate base shear
+            try:
+                ops.reactions()
+                bs = 0.0
+                for nid, nd in self.mesh_model.nodes.items():
+                    r = self.mesh_model.restraints.get(nid)
+                    if r and len(r.dofs) > dof - 1 and r.dofs[dof - 1] == 1:
+                        try:
+                            rxn = ops.nodeReaction(nd.node_tag, dof)
+                            if isinstance(rxn, (list, tuple)):
+                                rxn = rxn[0] if rxn else 0.0
+                            bs += float(rxn)
+                        except Exception:
+                            pass
+            except Exception:
+                bs = 0.0
+            base_shears.append(bs)
+            steps.append(step)
+
+            if print_progress:
+                s = '✓' if ok == 0 else '✗'
+                print(f"    Step {step:4d}/{num_steps}: "
+                      f"u={cd:.6f} m  V={bs:.2f} kN  {s}")
+
+            if ok != 0:
+                if print_progress:
+                    print("    Push stopped — non-converged step "
+                          f"(last algorithm: {_algo_chain[-1]})")
+                break
+
+        return {
+            'step': steps,
+            'control_disp': ctrl_disps,
+            'base_shear': base_shears,
+            'status': statuses,
+            'gravity_displacements': grav_disp,
+            'control_node': control_node_tag,
+            'dof': dof,
+            'lateral_load_type': lateral_load_type,
+        }
 
     # ═══════════════════════════════════════════════════════════════
     # Pushover helpers
