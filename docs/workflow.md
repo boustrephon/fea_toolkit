@@ -220,9 +220,13 @@ results = builder.run_static_analysis()
 | 7 | `_create_elements()` | ``ops.element('elasticBeamColumn', …)`` with geom transforms |
 | 8 | `_create_loads()` | ``ops.pattern()`` + ``ops.eleLoad()`` / ``ops.load()`` |
 | 9 | `_apply_rigid_diaphragms()` | ``ops.rigidDiaphragm()`` at detected levels |
+| — | `compute_seismic_masses()` | Lumped mass from element self-weight + load patterns |
+| — | `run_modal_analysis()` | Eigenvalue solve (4 solver strategies, Ritz pre-step) |
+| — | `run_response_spectrum_analysis()` | Mode-by-mode RS with CQC/SRSS combination |
+| — | `run_static_analysis()` | Static solver with auto-retry algorithm chain |
 
-Analysis methods (``run_static_analysis()``, ``run_modal_analysis()``, etc.)
-are identical to the legacy single‑stage builder.
+These analysis methods are also exposed on the ``OpenSeesBuilder`` facade and
+are **identical** in behaviour to the legacy single‑stage builder.
 
 ---
 
