@@ -1650,10 +1650,13 @@ class AnalysisBuilder:
             nd_j = self.mesh_model.nodes.get(elem.node_j)
             if nd_i is None or nd_j is None:
                 continue
+            # Use the actual OpenSees tag from the frame_tag_map so that
+            # split-frame children are addressed by their correct tag.
+            ops_tag = self.frame_tag_map.get(eid, elem.elem_tag)
             if elem.node_i in base_nodes and elem.node_j not in base_nodes:
-                base_elements.append((elem.elem_tag, 'i'))
+                base_elements.append((ops_tag, 'i'))
             elif elem.node_j in base_nodes and elem.node_i not in base_nodes:
-                base_elements.append((elem.elem_tag, 'j'))
+                base_elements.append((ops_tag, 'j'))
 
         for mode in range(1, num_modes + 1):
             ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, '-mode', mode)

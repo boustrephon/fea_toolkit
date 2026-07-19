@@ -127,34 +127,50 @@ Sorted by SAP node ID (see ID conventions above).
 ### Modal analysis results
 
 | Array | Shape | dtype | Description |
+### Modal analysis results
+
+| Array | Shape | dtype | Description |
 |---|---|---|---|
-| `modal/period` | `(N_mode,)` | `float` | Natural period (s) |
-| `modal/frequency` | `(N_mode,)` | `float` | Natural frequency (Hz) |
-| `modal/omega` | `(N_mode,)` | `float` | Circular frequency (rad/s) |
-| `modal/mx_ratio` | `(N_mode,)` | `float` | X‑mass participation ratio |
-| `modal/my_ratio` | `(N_mode,)` | `float` | Y‑mass participation ratio |
-| `modal/mz_ratio` | `(N_mode,)` | `float` | Z‑mass participation ratio |
-| `modal/mx_eff` | `(N_mode,)` | `float` | X effective modal mass (tonnes) |
-| `modal/my_eff` | `(N_mode,)` | `float` | Y effective modal mass |
-| `modal/mz_eff` | `(N_mode,)` | `float` | Z effective modal mass |
-| `modal/mode_dx` | `(N_node, N_mode)` | `float` | Eigenvector X component |
-| `modal/mode_dy` | `(N_node, N_mode)` | `float` | Eigenvector Y component |
-| `modal/mode_dz` | `(N_node, N_mode)` | `float` | Eigenvector Z component |
+| `modal/period` | `(N_mode,)` | `float` | Natural period per mode (s) |
+| `modal/frequency` | `(N_mode,)` | `float` | Natural frequency per mode (Hz) |
+| `modal/omega` | `(N_mode,)` | `float` | Circular frequency per mode (rad/s) |
+| `modal/mx_ratio` | `(N_mode,)` | `float` | Modal participating mass ratio — X (%) |
+| `modal/my_ratio` | `(N_mode,)` | `float` | Modal participating mass ratio — Y (%) |
+| `modal/mz_ratio` | `(N_mode,)` | `float` | Modal participating mass ratio — Z (%) |
+| `modal/mx_eff` | `(N_mode,)` | `float` | Effective modal mass — X (tonnes) |
+| `modal/my_eff` | `(N_mode,)` | `float` | Effective modal mass — Y (tonnes) |
+| `modal/mz_eff` | `(N_mode,)` | `float` | Effective modal mass — Z (tonnes) |
+| `modal/mode_dx` | `(N_node, N_mode)` | `float` | Eigenvector X component per node × mode |
+| `modal/mode_dy` | `(N_node, N_mode)` | `float` | Eigenvector Y component per node × mode |
+| `modal/mode_dz` | `(N_node, N_mode)` | `float` | Eigenvector Z component per node × mode |
+
+Mode shape arrays (``modal/mode_d{x,y,z}``) are stored as 2D matrices where
+column *j* is the eigenvector for mode *j* (0‑based) and row *i* matches
+``node_tag[i]``.  This layout is compatible with PyVista::
+
+    import pyvista as pv
+    import numpy as np
+
+    # Load
+    data = np.load("results.npz")
+    nodes = np.column_stack([data["node_x"], data["node_y"], data["node_z"]])
+    mesh = pv.PolyData(nodes)
+
+    # Animate mode 0
+    for phase in np.linspace(0, 2*np.pi, 60):
+        deformed = nodes + data["modal/mode_dx"][:, 0:1] * np.sin(phase) * scale
+        mesh.points = deformed
 
 ### Response-spectrum results
 
 | Array | Shape | dtype | Description |
 |---|---|---|---|
-| `rs/sa_x` | `(N_mode,)` | `float` | Spectral acceleration at each period — X direction (m/s²) |
-| `rs/sa_y` | `(N_mode,)` | `float` | Spectral acceleration at each period — Y direction (m/s²) |
-| `rs/eff_mass_x` | `(N_mode,)` | `float` | Effective modal mass in X |
-| `rs/eff_mass_y` | `(N_mode,)` | `float` | Effective modal mass in Y |
 | `rs/v_base_x` | `(N_mode,)` | `float` | Per‑mode base shear in X (kN) |
 | `rs/v_base_y` | `(N_mode,)` | `float` | Per‑mode base shear in Y (kN) |
 | `rs/v_cqc_x` | `()` | `float` | CQC‑combined base shear X (kN) |
 | `rs/v_cqc_y` | `()` | `float` | CQC‑combined base shear Y (kN) |
-| `rs/v_total_x` | `()` | `float` | Total base shear X incl. missing mass (kN) |
-| `rs/v_total_y` | `()` | `float` | Total base shear Y incl. missing mass (kN) |
+| `rs/v_srss_x` | `()` | `float` | SRSS‑combined base shear X (kN) |
+| `rs/v_srss_y` | `()` | `float` | SRSS‑combined base shear Y (kN) |
 
 ### Metadata
 

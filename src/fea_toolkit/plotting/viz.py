@@ -639,8 +639,8 @@ def _render_scene(plotter, data, *,
                             color='lightgrey', opacity=0.12,
                             show_edges=True, edge_color='grey', line_width=0.5)
 
-        for sec_name, quads in active_shells.items():
-            c = section_colors.get(sec_name) if section_colors else cmap[len(active_shells)]
+        for i, (sec_name, quads) in enumerate(active_shells.items()):
+            c = section_colors.get(sec_name) if section_colors else cmap[i % len(cmap)]
             for quad_pts in quads:
                 pts = _shrink_quad(np.array(quad_pts), shrink) if shrink else np.array(quad_pts)
                 is_tri = np.allclose(pts[2], pts[3])
@@ -1482,10 +1482,12 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
             poly = pv.lines_from_points(np.linspace(p1, p2, n))
             plotter.add_mesh(poly, color='#999999', line_width=1, opacity=0.5)
 
-    # Deformed mesh
+    # Deformed mesh — use amp=1.0 so non-animated mode shows the
+    # mode shape at full scale.  The animation callback below overrides
+    # the points dynamically when animate=True.
     frame_mesh, shell_mesh = _build_deformed_mesh(
         segments, seg_npoints, all_quads, [0] * len(all_quads),
-        scale, 0.0)
+        scale, 1.0)
     if shell_mesh and shell_mesh.n_points:
         plotter.add_mesh(shell_mesh, color='#c44e52', opacity=0.5,
                          show_edges=True, line_width=1)
