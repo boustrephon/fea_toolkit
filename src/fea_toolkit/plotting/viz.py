@@ -405,6 +405,434 @@ def plot_model_3d(
     return None
 
 
+# ============================================================================
+# Unified mesh visualisation (builder or NPZ data)
+# ============================================================================
+
+def _resolve_mesh_data(source):
+    """Extract mesh geometry arrays from a builder or NPZ data dict.
+
+    Returns a dict with keys: nodes, node_coords, frames, shells,
+    sec_names, orphan_nodes, edge_constraints, mesh_node_ids.
+    """
+    import numpy as np
+
+    data = {"nodes": {}, "frames": [], "shells": [], "orphan_nodes": {},
+            "edge_constraints": [], "mesh_node_ids": set()}
+
+    if isinstance(source, dict):
+        # NPZ / HDF5 data dict
+        n = len(source.get("node_tag", []))
+        for i in range(n):
+            tag = source["node_tag"][i]
+            sid = str(source.get("node_sap_id", [""]*n)[i])
+            data["nodes"][sid] = {
+                "tag": int(tag), "x": float(source["node_x"][i]),
+                "y": float(source["node_y"][i]), "z": float(source["node_z"][i]),
+            }
+            if "_mesh_" in sid:
+                data["mesh_node_ids"].add(sid)
+
+        nf = len(source.get("frame_eid", []))
+        for i in range(nf):
+            data["frames"].append({
+                "id": str(source["frame_sap_id"][i]),
+                "ni_tag": int(source["frame_node_i"][i]),
+                "nj_tag": int(source["frame_node_j"][i]),
+                "sec": str(source["frame_sec_name"][i]),
+                "parent": str(source.get("frame_parent_sap_id", [""]*nf)[i]),
+            })
+
+        ns = len(source.get("shell_eid", []))
+        for i in range(ns):
+            data["shells"].append({
+                "id": str(source["shell_sap_id"][i]),
+                "sec": str(source["shell_sec_name"][i]),
+                "node_tags": [int(source[f"shell_node_{k}"][i]) for k in (1,2,3,4)],
+            })
+    else:
+        # Builder / AnalysisBuilder object
+        builder = source
+        model = builder.model if hasattr(builder, 'model') else builder.mesh_model
+        elements = (builder.split_elements if hasattr(builder, 'split_elements')
+                    and builder.split_elements else model.frame_elements)
+        assignments = (builder.split_assignments if hasattr(builder, 'split_assignments')
+                       and builder.split_assignments else model.frame_assignments)
+
+        # Nodes
+        for nid, nd in model.nodes.items():
+            data["nodes"][nid] = {
+                "tag": nd.node_tag, "x": nd.x, "y": nd.y, "z": nd.z,
+            }
+            if "_mesh_" in nid:
+                data["mesh_node_ids"].add(nid)
+
+        # Orphan nodes
+        mm = getattr(builder, '_mesh_model', None) if hasattr(builder, '_mesh_model') else None
+        if mm is None:
+            mm = getattr(builder, 'mesh_model', None)
+        if mm is not None and hasattr(mm, 'orphan_nodes'):
+            for nid, nd in mm.orphan_nodes.items():
+                data["orphan_nodes"][nid] = {
+                    "tag": nd.node_tag, "x": nd.x, "y": nd.y, "z": nd.z,
+                }
+
+        # Frames
+        for eid, elem in elements.items():
+            if getattr(elem, 'inactive', False):
+                continue
+            data["frames"].append({
+                "id": eid, "ni_id": elem.node_i, "nj_id": elem.node_j,
+                "sec": (assignments or {}).get(eid, '?'),
+                "parent": getattr(elem, 'parent_id', None),
+            })
+
+        # Shells
+        for aid, area in model.area_elements.items():
+            if getattr(area, 'inactive', False):
+                continue
+            data["shells"].append({
+                "id": aid, "sec": model.area_assignments.get(aid, 'unknown'),
+                "node_ids": area.node_ids[:4],
+                "inactive": getattr(area, 'inactive', False),
+            })
+
+        # Edge constraints
+        if mm is not None and hasattr(mm, 'edge_constraint_pairs'):
+            data["edge_constraints"] = list(mm.edge_constraint_pairs)
+        elif hasattr(builder, '_saved_edge_constraints'):
+            data["edge_constraints"] = list(builder._saved_edge_constraints)
+
+    return data
+
+
+def _render_scene(plotter, data, *,
+                  shrink=0.0, xlim=None, ylim=None, zlim=None,
+                  show_nodes=True, show_orphan_nodes=False,
+                  show_mesh_nodes=False, show_frames=True, show_shells=True,
+                  show_constraints=False, show_frame_labels=False,
+                  show_node_labels=False, show_area_labels=False,
+                  node_label_offset=0.4, tag_font=16,
+                  section_colors=None):
+    """Render mesh geometry from resolved data into a PyVista plotter.
+
+    Parameters
+    ----------
+    plotter : pv.Plotter
+        The plotter to render into.
+    data : dict
+        Mesh data dict from :func:`_resolve_mesh_data`.
+    shrink : float
+        Fraction to shrink quads/lines toward centroid.
+    xlim, ylim, zlim : tuple or None
+        (lo, hi) bounding-box filters.
+    show_nodes, show_orphan_nodes, show_mesh_nodes : bool
+        Toggle node groups.
+    show_frames, show_shells : bool
+        Toggle element groups.
+    show_constraints : bool
+        Draw edge constraint lines.
+    show_frame_labels, show_node_labels, show_area_labels : bool
+        Toggle text labels.
+    """
+    import numpy as np
+    import pyvista as pv
+
+    def _in_limits(pt):
+        for lim, val in [(xlim, pt[0]), (ylim, pt[1]), (zlim, pt[2])]:
+            if lim is None:
+                continue
+            lo, hi = lim
+            if lo is not None and val < lo:
+                return False
+            if hi is not None and val > hi:
+                return False
+        return True
+
+    def _shrink_quad(pts, factor):
+        c = np.mean(pts, axis=0)
+        return pts + (c - pts) * factor
+
+    nodes = data["nodes"]
+    cmap = ['#4c72b0', '#dd8452', '#55a868', '#c44e52', '#8172b3',
+            '#937860', '#da8bc3', '#8c8c8c', '#ccb974', '#64b5cd']
+    if section_colors is None:
+        section_colors = {}
+
+    # ── Frames ──────────────────────────────────────────────────
+    if show_frames:
+        frame_lines = []
+        for fr in data["frames"]:
+            if "ni_id" in fr:
+                ni = nodes.get(fr["ni_id"])
+                nj = nodes.get(fr["nj_id"])
+            else:
+                ni = next((n for n in nodes.values() if n["tag"] == fr["ni_tag"]), None)
+                nj = next((n for n in nodes.values() if n["tag"] == fr["nj_tag"]), None)
+            if ni is None or nj is None:
+                continue
+            mid = [(ni["x"] + nj["x"]) / 2, (ni["y"] + nj["y"]) / 2, (ni["z"] + nj["z"]) / 2]
+            if not _in_limits(mid):
+                continue
+            p1 = np.array([ni["x"], ni["y"], ni["z"]])
+            p2 = np.array([nj["x"], nj["y"], nj["z"]])
+            if shrink:
+                m = (p1 + p2) / 2
+                p1 = p1 + (m - p1) * shrink
+                p2 = p2 + (m - p2) * shrink
+            sec = fr.get("sec", '?')
+            frame_lines.append((p1, p2, sec))
+
+        all_secs = sorted({s for _, _, s in frame_lines})
+        sec_col = section_colors or {s: cmap[i % len(cmap)]
+                                      for i, s in enumerate(all_secs)}
+
+        for p1, p2, sec in frame_lines:
+            n = max(2, int(np.linalg.norm(p2 - p1) * 2))
+            pts = np.linspace(p1, p2, n)
+            poly = pv.lines_from_points(pts)
+            plotter.add_mesh(poly, color=sec_col.get(sec, '#4c72b0'),
+                             line_width=4, opacity=0.7)
+
+    # ── Shells ──────────────────────────────────────────────────
+    if show_shells:
+        active_shells = {}
+        inactive_shells = []
+        for sh in data["shells"]:
+            pts = []
+            for ref in (sh.get("node_ids") or []):
+                nd = nodes.get(ref)
+                if nd is None:
+                    break
+                pts.append([nd["x"], nd["y"], nd["z"]])
+            if len(pts) < 3:
+                continue
+            centroid = np.mean(pts, axis=0)
+            if not _in_limits(centroid):
+                continue
+            while len(pts) < 4:
+                pts.append(pts[-1])
+            if sh.get("inactive"):
+                inactive_shells.append(np.array(pts))
+            else:
+                sec = sh.get("sec", 'unknown')
+                active_shells.setdefault(sec, []).append(np.array(pts))
+
+        for quad_pts in inactive_shells:
+            qp = _shrink_quad(np.array(quad_pts), shrink) if shrink else np.array(quad_pts)
+            plotter.add_mesh(pv.PolyData(qp, faces=[4, 0, 1, 2, 3]),
+                            color='lightgrey', opacity=0.12,
+                            show_edges=True, edge_color='grey', line_width=0.5)
+
+        for sec_name, quads in active_shells.items():
+            c = section_colors.get(sec_name) if section_colors else cmap[len(active_shells)]
+            for quad_pts in quads:
+                pts = _shrink_quad(np.array(quad_pts), shrink) if shrink else np.array(quad_pts)
+                is_tri = np.allclose(pts[2], pts[3])
+                face = pv.PolyData(pts[:3], faces=[3, 0, 1, 2]) if is_tri else \
+                       pv.PolyData(pts, faces=[4, 0, 1, 2, 3])
+                plotter.add_mesh(face, color=c, opacity=0.35,
+                                 show_edges=True, edge_color=c, line_width=0.8)
+
+    # ── Nodes ───────────────────────────────────────────────────
+    if show_nodes:
+        npts = np.array([[n["x"], n["y"], n["z"]]
+                         for n in nodes.values() if _in_limits([n["x"], n["y"], n["z"]])])
+        if len(npts):
+            plotter.add_mesh(pv.PolyData(npts), color='black',
+                             point_size=6, render_points_as_spheres=True)
+
+    # ── Orphan nodes ────────────────────────────────────────────
+    if show_orphan_nodes and data["orphan_nodes"]:
+        opts = np.array([[n["x"], n["y"], n["z"]]
+                         for n in data["orphan_nodes"].values()
+                         if _in_limits([n["x"], n["y"], n["z"]])])
+        if len(opts):
+            plotter.add_mesh(pv.PolyData(opts), color='darkorange',
+                             point_size=8, render_points_as_spheres=True)
+
+    # ── Mesh-created nodes ──────────────────────────────────────
+    if show_mesh_nodes:
+        mpts = np.array([[nodes[nid]["x"], nodes[nid]["y"], nodes[nid]["z"]]
+                         for nid in data["mesh_node_ids"] if nid in nodes
+                         and _in_limits([nodes[nid]["x"], nodes[nid]["y"], nodes[nid]["z"]])])
+        if len(mpts):
+            plotter.add_mesh(pv.PolyData(mpts), color='lime',
+                             point_size=10, render_points_as_spheres=True)
+
+    # ── Edge constraints ────────────────────────────────────────
+    if show_constraints and data["edge_constraints"]:
+        segs = []
+        for entry in data["edge_constraints"]:
+            if not isinstance(entry, tuple) or len(entry) < 3:
+                continue
+            masters = entry[1] if len(entry) > 1 else []
+            slaves = entry[2] if len(entry) > 2 else []
+            for mn in masters:
+                nid = mn[0] if isinstance(mn, (list, tuple)) else str(mn)
+                cn = nodes.get(nid)
+                if cn is None:
+                    continue
+                for sn in slaves:
+                    sid = sn[0] if isinstance(sn, (list, tuple)) else str(sn)
+                    fn = nodes.get(sid)
+                    if fn is None:
+                        continue
+                    mid = [(cn["x"] + fn["x"]) / 2, (cn["y"] + fn["y"]) / 2,
+                           (cn["z"] + fn["z"]) / 2]
+                    if not _in_limits(mid):
+                        continue
+                    segs.append([cn["x"], cn["y"], cn["z"], fn["x"], fn["y"], fn["z"]])
+        if segs:
+            pts = np.array(segs).reshape(-1, 3)
+            n_s = len(segs)
+            conn = np.column_stack([
+                np.full(n_s, 2, dtype=int),
+                np.arange(0, 2 * n_s, 2, dtype=int),
+                np.arange(1, 2 * n_s + 1, 2, dtype=int),
+            ]).ravel()
+            plotter.add_mesh(pv.PolyData(pts, lines=conn),
+                             color='yellow', opacity=0.25, line_width=12)
+
+    # ── Labels ──────────────────────────────────────────────────
+    if show_node_labels:
+        pts, tags = [], []
+        for nid, n in nodes.items():
+            if _in_limits([n["x"], n["y"], n["z"]]):
+                pts.append([n["x"] + node_label_offset, n["y"] + node_label_offset, n["z"]])
+                tags.append(f"N{nid}")
+        if pts:
+            plotter.add_point_labels(np.array(pts), tags, font_size=tag_font,
+                                     point_size=0, shape=None)
+
+    if show_frame_labels:
+        pts, tags = [], []
+        for fr in data["frames"]:
+            if "ni_id" in fr:
+                ni = nodes.get(fr["ni_id"])
+                nj = nodes.get(fr["nj_id"])
+            else:
+                ni = next((n for n in nodes.values() if n["tag"] == fr["ni_tag"]), None)
+                nj = next((n for n in nodes.values() if n["tag"] == fr["nj_tag"]), None)
+            if ni is None or nj is None:
+                continue
+            mid = [(ni["x"] + nj["x"]) / 2 - node_label_offset,
+                   (ni["y"] + nj["y"]) / 2 - node_label_offset,
+                   (ni["z"] + nj["z"]) / 2]
+            if not _in_limits(mid):
+                continue
+            pts.append(mid)
+            tags.append(f"F{fr['id']}")
+        if pts:
+            plotter.add_point_labels(np.array(pts), tags, font_size=tag_font,
+                                     point_size=0, shape=None)
+
+    if show_area_labels:
+        pts, tags = [], []
+        for sh in data["shells"]:
+            npts = []
+            for ref in (sh.get("node_ids") or []):
+                nd = nodes.get(ref)
+                if nd:
+                    npts.append([nd["x"], nd["y"], nd["z"]])
+            if len(npts) < 3:
+                continue
+            centroid = np.mean(npts, axis=0)
+            if not _in_limits(centroid):
+                continue
+            pts.append([centroid[0], centroid[1], centroid[2] + node_label_offset])
+            tags.append(f"A{sh['id']}")
+        if pts:
+            plotter.add_point_labels(np.array(pts), tags, font_size=tag_font,
+                                     point_size=0, shape=None)
+
+    plotter.show_grid()
+
+
+def plot_mesh(source, *,
+              show_nodes=True, show_frames=True, show_shells=True,
+              show_mesh_nodes=False, show_constraints=False,
+              show_orphan_nodes=False, shrink=0.0,
+              xlim=None, ylim=None, zlim=None,
+              show_node_labels=False, show_frame_labels=False,
+              show_area_labels=False, notebook=False, **kwargs):
+    """Display a mesh in 3D from a builder or NPZ data dict.
+
+    Single‑model viewer — accepts either:
+
+    * An ``OpenSeesBuilder`` or ``AnalysisBuilder`` instance (built).
+    * A dict loaded from a unified NPZ file (via ``np.load()``).
+
+    Args:
+        source: Builder instance or NPZ data dict.
+        show_nodes: Draw node markers.
+        show_frames: Draw frame elements.
+        show_shells: Draw shell elements.
+        show_mesh_nodes: Highlight mesh‑created nodes (green).
+        show_constraints: Draw edge constraint lines (yellow).
+        show_orphan_nodes: Show orphan nodes (darkorange).
+        shrink: Fraction to shrink quads/lines toward centroid.
+        xlim, ylim, zlim: ``(lo, hi)`` bounding‑box filters.
+        show_node_labels, show_frame_labels, show_area_labels: Add labels.
+        notebook: Return plotter for Jupyter embedding.
+        **kwargs: Passed to ``pyvista.Plotter()``.
+
+    Returns:
+        ``pv.Plotter`` if *notebook* is True, otherwise ``None``.
+    """
+    import pyvista as pv
+
+    data = _resolve_mesh_data(source)
+    pv.set_plot_theme("document")
+    plotter = pv.Plotter(notebook=notebook, **kwargs)
+    _render_scene(plotter, data,
+                  show_nodes=show_nodes, show_frames=show_frames,
+                  show_shells=show_shells, show_mesh_nodes=show_mesh_nodes,
+                  show_constraints=show_constraints,
+                  show_orphan_nodes=show_orphan_nodes, shrink=shrink,
+                  xlim=xlim, ylim=ylim, zlim=zlim,
+                  show_node_labels=show_node_labels,
+                  show_frame_labels=show_frame_labels,
+                  show_area_labels=show_area_labels)
+    _set_isometric_view(plotter)
+    if notebook:
+        return plotter
+    plotter.show()
+    return None
+
+
+def compare_meshes(source_a, source_b, *,
+                   labels=("Model A", "Model B"), **kwargs):
+    """Side‑by‑side mesh comparison from two builders or NPZ data dicts.
+
+    Shows two PyVista subplots (left = source_a, right = source_b).
+
+    Args:
+        source_a: First model (builder or NPZ dict).
+        source_b: Second model (builder or NPZ dict).
+        labels: Pair of titles for the subplots.
+        **kwargs: Passed to :func:`_render_scene` (show_*, shrink, xlim, etc.).
+
+    Returns:
+        ``pv.Plotter`` for the side‑by‑side layout.
+    """
+    import pyvista as pv
+
+    pv.set_plot_theme("document")
+    plotter = pv.Plotter(shape=(1, 2), window_size=[2000, 900],
+                         title=f"Mesh comparison: {labels[0]} (left) vs {labels[1]} (right)")
+
+    for i, (src, label) in enumerate([(source_a, labels[0]), (source_b, labels[1])]):
+        data = _resolve_mesh_data(src)
+        plotter.subplot(0, i)
+        plotter.add_text(label, position='upper_edge', font_size=28)
+        _render_scene(plotter, data, **kwargs)
+        _set_isometric_view(plotter)
+
+    plotter.show()
+    return plotter
+
+
 def plot_deformed_3d(
     builder,
     results: Dict[str, Any],
