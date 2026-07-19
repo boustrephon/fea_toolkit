@@ -4587,6 +4587,108 @@ class TestTwoStageBuild:
         finally:
             ops.wipe()
 
+    def test_rs_export_via_two_stage_path(self):
+        """RS element forces + nodal displacements are written to NPZ.
+
+        Builds through the two-stage path, runs RS analysis, extracts
+        element forces and nodal displacements, then exports them
+        and verifies the RS arrays exist in the NPZ file.
+        """
+        import openseespy.opensees as ops
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        md = make_sample_model()
+        b = OpenSeesBuilder(md, {
+            "use_preprocessor": True,
+            "split_elements": False,
+            "create_shells": False,
+            "verbose": False,
+        })
+        try:
+            b.build()
+            b.compute_seismic_masses(g=9.81)
+            modal = b.run_modal_analysis(num_modes=3, print_results=False)
+            periods = modal["periods"]
+            eigenvalues = modal["eigenvalues"]
+
+            T_sp = [0.0, 0.1, 0.2, 0.5, 1.0, 2.0, 3.0]
+            Sa_sp = [3.0, 3.0, 3.0, 1.5, 0.8, 0.4, 0.2]
+
+            rs_x = b.run_response_spectrum_analysis(
+                num_modes=3,
+                modal_periods=periods,
+                spectrum_periods=T_sp,
+                spectrum_accels=Sa_sp,
+                direction="X",
+                damping_ratio=0.05,
+                print_results=False,
+            )
+
+            # Get RS element forces
+            b.run_response_spectrum_analysis(
+                num_modes=3,
+                modal_periods=periods,
+                spectrum_periods=T_sp,
+                spectrum_accels=Sa_sp,
+                direction="X",
+                damping_ratio=0.05,
+                print_results=False,
+            )
+            rs_forces = b.extract_element_rs_forces(
+                num_modes=3,
+                modal_periods=periods,
+                spectrum_periods=T_sp,
+                spectrum_accels=Sa_sp,
+                direction="X",
+            )
+
+            # Get RS nodal displacements
+            def _sa(T):
+                return 3.0 if T <= 0.2 else 1.5 / max(T, 0.01)
+            rs_disp = b.compute_rs_nodal_displacements(
+                num_modes=3,
+                modal_periods=periods,
+                eigenvalues=eigenvalues,
+                spectrum_func=_sa,
+                direction="X",
+                damping_ratio=0.05,
+            )
+
+            # Export to NPZ
+            import tempfile, os
+            with tempfile.TemporaryDirectory() as tmp:
+                out = os.path.join(tmp, "rs_test.npz")
+                b.export_results(
+                    filepath=out,
+                    rs_results={"rs_x": rs_x},
+                    rs_element_forces=rs_forces,
+                    rs_nodal_displacements=rs_disp,
+                )
+                data = dict(np.load(out, allow_pickle=False))
+
+                # Verify RS element force arrays
+                assert "rs/elem_sap_id" in data
+                assert "rs/elem_z_bot" in data
+                assert "rs/elem_z_mid" in data
+                assert "rs/elem_Vy_i" in data
+                assert "rs/elem_Vz_i" in data
+                assert "rs/elem_My_i" in data
+                assert "rs/elem_Mz_i" in data
+                assert len(data["rs/elem_sap_id"]) > 0
+                assert abs(data["rs/elem_Vz_i"][0]) > 1e-6
+
+                # Verify RS nodal displacement arrays
+                assert "rs/node_tag" in data
+                assert "rs/node_dx" in data
+                assert "rs/node_dy" in data
+                assert "rs/node_dz" in data
+                assert len(data["rs/node_tag"]) > 0
+                assert abs(data["rs/node_dx"][0]) > 1e-8 or \
+                       abs(data["rs/node_dx"][-1]) > 1e-8
+        finally:
+            ops.wipe()
+
     def test_response_spectrum_via_two_stage_path(self):
         """run_response_spectrum_analysis works through two-stage facade.
 
