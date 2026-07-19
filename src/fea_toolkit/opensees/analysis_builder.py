@@ -1370,6 +1370,361 @@ class AnalysisBuilder:
                 node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_c
 
     # ═══════════════════════════════════════════════════════════════
+    # Modal and response-spectrum analysis
+    # ═══════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def _cqc_combine(modal_values: List[float],
+                     omega: List[float],
+                     damp_ratios: List[float]) -> float:
+        """Complete Quadratic Combination of modal results."""
+        n = len(modal_values)
+        if n == 0:
+            return 0.0
+        if n == 1:
+            return abs(modal_values[0])
+        total = 0.0
+        for i in range(n):
+            for j in range(n):
+                r = damp_ratios[i] if i < len(damp_ratios) else 0.05
+                s = damp_ratios[j] if j < len(damp_ratios) else 0.05
+                rho = (8.0 * math.sqrt(r * s) * (r + s) * math.pow(omega[i] * omega[j], 1.5)) / \
+                      ((1.0 - (omega[i] / omega[j]) ** 2) ** 2 +
+                       4.0 * r * s * omega[i] * omega[j] / (omega[i] + omega[j]) ** 2 *
+                       (1.0 + (omega[i] / omega[j]) ** 2))
+                total += modal_values[i] * modal_values[j] * rho
+        return math.sqrt(max(total, 0.0))
+
+    def run_modal_analysis(self, num_modes: int = 30,
+                           print_results: bool = True,
+                           eigen_solver: str = "default",
+                           g: Optional[float] = None) -> Dict[str, Any]:
+        """Run eigenvalue / modal analysis and return results.
+
+        Requires that seismic masses have been assigned (call
+        :meth:`compute_seismic_masses` first) and the domain has been
+        built via :meth:`build_domain`.
+
+        Args:
+            num_modes: Number of eigenvalues to solve for.
+            print_results: If True, print a modal properties table.
+            eigen_solver: Solver strategy.
+
+                ``"default"``
+                    ARPACK (fast), fallback to fullGenLapack.
+                ``"fullGenLapack"``
+                    Robust but slow for large models.
+                ``"genBandArpack"``
+                    Generalized banded ARPACK — requires a Ritz pre-step.
+                ``"symmBandLapack"``
+                    Symmetric banded Lapack solver.
+                ``"ritz"``
+                    Gravity pre-step then ARPACK.
+            g: Gravitational acceleration.  ``None`` = auto-detect.
+
+        Returns:
+            Dictionary with keys:
+
+            * ``'eigenvalues'`` — list of eigenvalues (omega^2).
+            * ``'periods'`` — list of natural periods (s).
+            * ``'frequencies'`` — list of natural frequencies (Hz).
+            * ``'modal_props'`` — the full ``ops.modalProperties()`` dict.
+            * ``'num_modes'`` — number of converged modes.
+        """
+        if self.config.get('verbose'):
+            print(f"Running modal analysis for {num_modes} modes...")
+
+        from ..utils import g_from_units
+        if g is None:
+            g = g_from_units(self.mesh_model.units)
+
+        # ── Ensure seismic masses are present ────────────────────
+        _has_mass = False
+        for t in ops.getNodeTags():
+            try:
+                m = ops.nodeMass(t)
+                if sum(abs(x) for x in m) > 1e-12:
+                    _has_mass = True
+                    break
+            except Exception:
+                pass
+        if not _has_mass:
+            _stored_g = getattr(self, '_mass_g', None)
+            _active_g = g if g is not None else _stored_g
+            self.compute_seismic_masses(g=_active_g)
+
+        # ── Ritz / pre-load nudge ────────────────────────────────
+        _needs_nudge = eigen_solver in ("genBandArpack", "ritz")
+        if _needs_nudge:
+            if self.config.get('verbose'):
+                print("  Ritz pre-step (static gravity)...")
+            _sw_patterns = {}
+            # Check for self-weight patterns in the mesh model
+            _sw_patterns['Self weight'] = 1.0
+            # Run a gravity load step
+            self.create_loads(pattern_scales=_sw_patterns)
+            try:
+                if self._edge_constraint_method == 'penalty':
+                    ops.constraints('Penalty', 1.0e12, 1.0e12)
+                else:
+                    ops.constraints('Transformation')
+                ops.numberer('RCM')
+                ops.system(self.config.get('solver_system', 'BandGen'))
+                ops.test('NormDispIncr', 1e-3, 5, 0)
+                _algorithms = ['Newton', 'NewtonLineSearch',
+                               'ModifiedNewton', 'KrylovNewton']
+                _ok = -1
+                for _alg in _algorithms:
+                    try:
+                        ops.algorithm(_alg)
+                    except Exception:
+                        continue
+                    ops.integrator('LoadControl', 1.0)
+                    ops.analysis('Static')
+                    _ok = ops.analyze(1)
+                    if _ok == 0:
+                        break
+                if _ok != 0 and self.config.get('verbose'):
+                    print("  ⚠ Ritz pre-step did not converge — "
+                          "continuing with zero initial state")
+            except Exception:
+                if self.config.get('verbose'):
+                    print("  ⚠ Ritz pre-step failed — continuing")
+
+        # ── Set constraint handler for eigen analysis ────────────
+        try:
+            if self._edge_constraint_method == 'penalty':
+                ops.constraints('Penalty', 1.0e12, 1.0e12)
+            else:
+                ops.constraints(self.config.get('solver_constraints',
+                                                'Transformation'))
+            ops.numberer('RCM')
+            ops.system(self.config.get('solver_system', 'BandGen'))
+        except Exception:
+            pass
+
+        # ── Eigenvalue solver ────────────────────────────────────
+        eigenvals_all = []
+        _solver_map = {
+            "genBandArpack": "-genBandArpack",
+            "symmBandLapack": "-symmBandLapack",
+            "fullGenLapack": "-fullGenLapack",
+            "default": None,
+        }
+        solver_flag = _solver_map.get(eigen_solver)
+        if solver_flag is not None:
+            try:
+                eigenvals_all = ops.eigen(solver_flag, num_modes)
+            except Exception:
+                eigenvals_all = []
+            if not eigenvals_all:
+                try:
+                    eigenvals_all = ops.eigen(num_modes)
+                except Exception:
+                    eigenvals_all = []
+                if not eigenvals_all:
+                    try:
+                        eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
+                    except Exception:
+                        eigenvals_all = []
+        else:
+            try:
+                eigenvals_all = ops.eigen(num_modes)
+            except Exception:
+                eigenvals_all = []
+            if not eigenvals_all:
+                try:
+                    eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
+                except Exception:
+                    eigenvals_all = []
+
+        eigenvals = [ev for ev in eigenvals_all if ev > 1e-12]
+        n_modes = len(eigenvals)
+        if n_modes < num_modes and self.config.get('verbose'):
+            print(f"  Warning: only {n_modes} positive eigenvalues out of "
+                  f"{num_modes}.  Proceeding with {n_modes} modes.")
+
+        periods = [2.0 * math.pi / math.sqrt(ev) for ev in eigenvals]
+        frequencies = [math.sqrt(ev) / (2.0 * math.pi) for ev in eigenvals]
+
+        try:
+            modal_props = ops.modalProperties('-return', '-unorm')
+        except Exception:
+            modal_props = {}
+
+        results = {
+            'eigenvalues': eigenvals,
+            'periods': periods,
+            'frequencies': frequencies,
+            'modal_props': modal_props,
+            'num_modes': n_modes,
+        }
+
+        if print_results:
+            print("\n===== MODAL ANALYSIS =====")
+            if modal_props:
+                try:
+                    total_mass = modal_props.get('totalFreeMass', [0])[0]
+                    print(f"Total translational mass (free DOFs): "
+                          f"{total_mass:.2f} tonnes\n")
+                    header = (f"{'Mode':>5} {'Freq(Hz)':>10} {'Period(s)':>10} "
+                              f"{'Mx(t)':>12} {'My(t)':>12} {'Mz(t)':>12} "
+                              f"{'%X':>7} {'%Y':>7} {'%Z':>7}")
+                    print(header)
+                    print("-" * len(header))
+                    for i in range(n_modes):
+                        mx = modal_props.get('partiMassMX', [0]*n_modes)[i]
+                        my = modal_props.get('partiMassMY', [0]*n_modes)[i]
+                        mz = modal_props.get('partiMassMZ', [0]*n_modes)[i]
+                        rx = modal_props.get('partiMassRatiosMX', [0]*n_modes)[i]
+                        ry = modal_props.get('partiMassRatiosMY', [0]*n_modes)[i]
+                        rz = modal_props.get('partiMassRatiosMZ', [0]*n_modes)[i]
+                        print(f"{i+1:5d} {frequencies[i]:10.4f} "
+                              f"{periods[i]:10.4f} {mx:12.2f} {my:12.2f} "
+                              f"{mz:12.2f} {rx:6.2f}% {ry:6.2f}% {rz:6.2f}%")
+                except Exception:
+                    pass
+            else:
+                print(f"{'Mode':>5} {'Period(s)':>10} {'Freq(Hz)':>10}")
+                print("-" * 30)
+                for i in range(n_modes):
+                    print(f"{i+1:5d} {periods[i]:10.4f} {frequencies[i]:10.4f}")
+
+        return results
+
+    def run_response_spectrum_analysis(
+        self,
+        num_modes: int,
+        modal_periods: List[float],
+        spectrum_periods: List[float],
+        spectrum_accels: List[float],
+        direction: str = 'X',
+        damping_ratio: float = 0.05,
+        T_rigid: Optional[float] = None,
+        print_results: bool = True,
+    ) -> Dict[str, Any]:
+        """Run a response‑spectrum analysis using CQC modal combination.
+
+        Performs mode‑by‑mode RS analysis using OpenSees'
+        ``responseSpectrumAnalysis``, then combines with CQC.
+
+        Args:
+            num_modes: Number of modes to include.
+            modal_periods: Natural periods of each mode (s).
+            spectrum_periods: Period axis of the response spectrum (s).
+            spectrum_accels: Spectral acceleration values (m/s^2).
+            direction: Excitation direction — ``'X'``, ``'Y'``, or ``'Z'``.
+            damping_ratio: Damping ratio for CQC correlation.
+            T_rigid: Rigid cut-off period (s). ``None`` = no cut-off.
+            print_results: If True, print a summary table.
+
+        Returns:
+            Dictionary with ``modal_base_shear``, ``modal_base_moment``,
+            ``base_shear_cqc``, ``base_shear_srss``, ``base_moment_cqc``,
+            ``base_moment_srss``, ``modal_periods``.
+        """
+        if self.config.get('verbose'):
+            print(f"Running response spectrum analysis (dir={direction})...")
+
+        num_modes = min(num_modes, len(modal_periods))
+        if num_modes == 0:
+            raise ValueError("No modal periods available for RS analysis")
+
+        omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods]
+        damp_ratios = [damping_ratio] * num_modes
+
+        SPECTRUM_TS_TAG = 9999
+        try:
+            ops.remove('timeSeries', SPECTRUM_TS_TAG)
+        except Exception:
+            pass
+        ops.timeSeries('Path', SPECTRUM_TS_TAG,
+                       '-time', *spectrum_periods,
+                       '-values', *spectrum_accels)
+
+        modal_base_shear = []
+        modal_base_moment = []
+        dof = {'X': 1, 'Y': 2, 'Z': 3}[direction]
+
+        dof_idx = {'X': 0, 'Y': 1, 'Z': 2}[direction]
+        base_nodes = {
+            nid for nid, r in self.mesh_model.restraints.items()
+            if len(r.dofs) > dof_idx and r.dofs[dof_idx] == 1
+        }
+
+        elements = self.mesh_model.frame_elements
+        base_elements = []
+        for eid, elem in elements.items():
+            if getattr(elem, 'inactive', False):
+                continue
+            nd_i = self.mesh_model.nodes.get(elem.node_i)
+            nd_j = self.mesh_model.nodes.get(elem.node_j)
+            if nd_i is None or nd_j is None:
+                continue
+            if elem.node_i in base_nodes and elem.node_j not in base_nodes:
+                base_elements.append((elem.elem_tag if elem.elem_tag else
+                                      self.frame_tag_map.get(eid, 0), 'i'))
+            elif elem.node_j in base_nodes and elem.node_i not in base_nodes:
+                base_elements.append((elem.elem_tag if elem.elem_tag else
+                                      self.frame_tag_map.get(eid, 0), 'j'))
+
+        for mode in range(1, num_modes + 1):
+            ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, '-mode', mode)
+
+            v_base = 0.0
+            m_base = 0.0
+            dof_map = {'X': (0, 4), 'Y': (1, 5), 'Z': (2, 3)}
+            f_idx, m_idx = dof_map[direction]
+
+            for eid, end in base_elements:
+                try:
+                    forces = ops.eleResponse(eid, 'forces')
+                except Exception:
+                    continue
+                if end == 'i':
+                    v_base += forces[f_idx]
+                    m_base += forces[m_idx]
+                else:
+                    v_base += forces[f_idx + 6]
+                    m_base += forces[m_idx + 6]
+
+            modal_base_shear.append(v_base)
+            modal_base_moment.append(m_base)
+
+        base_shear_cqc = self._cqc_combine(modal_base_shear, omega, damp_ratios)
+        base_shear_srss = math.sqrt(sum(v * v for v in modal_base_shear))
+        base_moment_cqc = self._cqc_combine(modal_base_moment, omega, damp_ratios)
+        base_moment_srss = math.sqrt(sum(m * m for m in modal_base_moment))
+
+        result = {
+            'modal_base_shear': modal_base_shear,
+            'modal_base_moment': modal_base_moment,
+            'base_shear_cqc': base_shear_cqc,
+            'base_shear_srss': base_shear_srss,
+            'base_moment_cqc': base_moment_cqc,
+            'base_moment_srss': base_moment_srss,
+            'modal_periods': modal_periods,
+        }
+
+        if print_results:
+            print(f"\n===== RESPONSE SPECTRUM ({direction}) =====")
+            print(f"{'Mode':>5} {'Period(s)':>10} {'Shear (kN)':>14} "
+                  f"{'Moment (kN-m)':>16}")
+            print("-" * 48)
+            for i, (T, v, m) in enumerate(zip(modal_periods[:num_modes],
+                                                modal_base_shear,
+                                                modal_base_moment)):
+                print(f"{i+1:5d} {T:10.4f} {v:14.2f} {m:16.2f}")
+            print("-" * 48)
+            print(f"{'CQC':>5} {'':>10} {base_shear_cqc:14.2f} "
+                  f"{base_moment_cqc:16.2f}")
+            print(f"{'SRSS':>5} {'':>10} {base_shear_srss:14.2f} "
+                  f"{base_moment_srss:16.2f}")
+            print()
+
+        return result
+
+    # ═══════════════════════════════════════════════════════════════
     # Utilities
     # ═══════════════════════════════════════════════════════════════
 
