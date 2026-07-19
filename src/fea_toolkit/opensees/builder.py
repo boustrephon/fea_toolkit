@@ -6119,6 +6119,23 @@ class OpenSeesBuilder:
             * ``'dof'`` — the push DOF (1, 2, or 3).
             * ``'lateral_load_type'`` — the load type used.
         """
+        # Delegate to AnalysisBuilder when available (two-stage path)
+        _analysis = getattr(self, '_analysis', None)
+        if _analysis is not None:
+            return _analysis.run_pushover_analysis(
+                gravity_patterns=gravity_patterns,
+                lateral_load_type=lateral_load_type,
+                lateral_pattern_name=lateral_pattern_name,
+                lateral_direction=lateral_direction,
+                control_node_tag=control_node_tag,
+                max_disp=max_disp,
+                num_steps=num_steps,
+                fundamental_period=fundamental_period,
+                mode_shapes=mode_shapes,
+                mode_index=mode_index,
+                print_progress=print_progress,
+            )
+
         valid_types = {'uniform', 'triangular', 'mode1', 'pattern'}
         if lateral_load_type not in valid_types:
             raise ValueError(
