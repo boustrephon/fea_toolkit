@@ -7,10 +7,9 @@ specific to pushover analysis.
 
 ## Two-stage build (``use_preprocessor``)
 
-The builder supports two execution modes controlled by the
-``use_preprocessor`` config flag (default ``False`` for backward
-compatibility).  See ``docs/workflow.md`` for the full pipeline
-description.
+The builder uses a two-stage architecture by default, controlled by the
+``use_preprocessor`` config flag (default ``True``).  See
+``docs/workflow.md`` for the full pipeline description.
 
 ```
 SAPModelData ──→ Preprocessor ──→ MeshModel ──→ AnalysisBuilder ──→ Results

@@ -137,11 +137,14 @@ mesh_model = preprocessor.run(md, selection=sel)
 | 3 | `_split_elements()` | Splits frames at intermediate joints; redistributes distributed loads |
 | 4 | `_apply_frame_end_offsets()` | Creates offset nodes and rigid‑link records |
 | 5 | `_convert_area_loads()` | Converts area uniform loads to equivalent frame edge loads |
-| 6 | `_mesh_areas()` | Subdivides coarse areas per SAP2000 mesh assignments |
+| 6a | `_mesh_areas()` — wall‑slab detection | Finds wall‑edge nodes that lie inside slab areas — controlled by ``detect_wall_slab_intersections`` (default ``True``) |
+| 6b | `_mesh_areas()` — wall‑slab split | Subdivides slabs at wall intersection lines so shell meshes share nodes — controlled by ``split_slabs_at_walls`` (default ``False``) |
+| 6c | `_mesh_areas()` — regular meshing | Subdivides coarse areas per SAP2000 mesh assignments |
 | 7 | `_merge_coincident_nodes()` | Deduplicates mesh‑created nodes at identical coordinates |
 | 8 | `_subdivide_shells_in_model_data()` | N×N refinement of shell elements (if `subdivide_shells` config set) |
 | 9 | `_split_frames_at_shell_subdiv()` | Splits frames at shell sub‑division edge nodes |
 | 10 | `_detect_constraint_edges()` | Finds coarse‑fine mesh interfaces for edge constraints |
+| 11 | orphan removal | Nodes only referenced by loads‑only areas moved to ``orphan_nodes`` (visualisation, not OpenSees) |
 
 All methods operate on the data model only.  No OpenSees domain objects
 are created.  The original ``SAPModelData`` is deep‑copied so it remains
@@ -179,6 +182,8 @@ class MeshModel:
     saved_edge_constraints: List[tuple]      # for pushover re‑apply
     units: Dict[str, str]
     base_z: Optional[float]
+    loads_only_area_ids: Set[str]            # areas excluded from shell creation
+    orphan_nodes: Dict[str, Node]            # kept for visualisation, not in OpenSees
 ```
 
 The MeshModel is serialisable (pickle or NPZ+JSON) and can be cached between
@@ -226,14 +231,14 @@ are identical to the legacy single‑stage builder.
 File: `src/fea_toolkit/opensees/builder.py`
 
 The original single‑stage path bundles the Preprocessor and AnalysisBuilder
-into one call.  It is the default (``use_preprocessor=False``) for backward
-compatibility.  The new two‑stage path is activated by setting
-``use_preprocessor: True`` in the config dict.
+into one call.  The two‑stage path is the default (``use_preprocessor=True``).
+The legacy path (``use_preprocessor=False``) is **deprecated** and will be
+removed in a future release.
 
 ```python
 b = OpenSeesBuilder(md, config)
-b.build(selection=sel)                       # legacy (default)
-# or
+b.build(selection=sel)                       # two‑stage (default)
+# or explicitly
 b2 = OpenSeesBuilder(md, {"use_preprocessor": True, …})
 b2.build(selection=sel)                      # two‑stage
 ```

@@ -122,6 +122,9 @@ class AnalysisBuilder:
         self._edge_constraint_method = None
         ops.model('basic', '-ndm', 3, '-ndf', 6)
 
+        # Pre-compute frame tag map so shell elements can avoid clashing
+        self._build_frame_tag_map()
+
         self._create_nodes()
         self._apply_restraints()
         self._create_materials()
@@ -266,20 +269,57 @@ class AnalysisBuilder:
     def _create_single_section(self, sec, tag: int) -> None:
         """Create a single OpenSees section."""
         mods = getattr(sec, 'modifiers', {}) or {}
-        if self.config['create_fiber_sections']:
-            # Fiber section path
-            mat_name = sec.material
-            mat_tag = tag  # material has the same tag as section
-            if not self.config.get('brace_truss') or sec_name not in (
-                    self._truss_mat_tags if hasattr(self, '_truss_mat_tags') else {}):
-                E = self.mesh_model.materials.get(mat_name).E_mod if mat_name in self.mesh_model.materials else 200e9
-                ops.uniaxialMaterial('Elastic', tag, E)
+        if self.config.get('create_fiber_sections'):
+            # ── Fiber section path ───────────────────────────────
+            mat = self.mesh_model.materials.get(sec.material)
+            if mat is None:
+                E_mod = 200e9
+                G_mod = 80e9
+            else:
+                E_mod = mat.E_mod or 200e9
+                G_mod = mat.G_mod or (E_mod / 2.6)
 
-            from ..model.sap_data import Concrete01Material, Steel01Material
-            cover = 0.04
-            sec.to_fiber_patches(mat_tag, cover=cover, nfy=8, nfz=4)
+            _A = getattr(sec, 'A', 0.0) or 0.0
+            _I33 = getattr(sec, 'I33', 0.0) or 0.0
+            _I22 = getattr(sec, 'I22', 0.0) or 0.0
+            _J = getattr(sec, 'J', 0.0) or 0.0
+
+            # Create material appropriate for the section type
+            mat_tag = tag  # material tag = section tag
+            if mat is not None and mat.type.lower() == 'concrete':
+                Fc = getattr(mat, 'Fc', 0.0) or 3.0e7
+                epsc = getattr(mat, 'eFc', 0.0) or 0.002
+                ops.uniaxialMaterial('Concrete01', mat_tag,
+                                     -Fc, -abs(epsc), -0.2 * Fc, -0.006)
+            else:
+                Fy = getattr(mat, 'Fy', 0.0) or 2.5e8
+                ops.uniaxialMaterial('Steel01', mat_tag, Fy, E_mod, 0.01)
+
+            # Create fiber section
+            ops.section('Fiber', tag, '-GJ', _J)
+            try:
+                entries = sec.to_fiber_patches(mat_tag=mat_tag, nfy=8, nfz=4)
+            except NotImplementedError:
+                # Fall back to elastic
+                if self.config.get('verbose', False):
+                    print(f"  Section {tag} ({sec.name}): fiber not supported, "
+                          f"falling back to elastic")
+                ops.section('Elastic', tag, E_mod, _A, _I33, _I22, G_mod, _J)
+                return
+
+            for entry in entries:
+                if entry[0] in ('rect', 'circ', 'quad'):
+                    ops.patch(*entry)
+                elif entry[0] == 'straight':
+                    ops.layer('straight', *entry[1:])
+                elif entry[0] == 'circ_layer':
+                    ops.layer('circ', *entry[1:])
+
+            if self.config.get('verbose', False):
+                print(f"  Section {tag}: {sec.name} (Fiber, {len(entries)} patches)")
+
         else:
-            # Elastic section path
+            # ── Elastic section path ──────────────────────────────
             mat = self.mesh_model.materials.get(sec.material)
             if mat is None:
                 if self.config.get('verbose', False):
@@ -326,7 +366,11 @@ class AnalysisBuilder:
                         if self.section_tags else 1)
 
         shell_count = 0
+        loads_only = self.mesh_model.loads_only_area_ids
         for aid, area in self.mesh_model.area_elements.items():
+            # Skip loads-only areas — they contribute mass but not stiffness
+            if aid in loads_only:
+                continue
             if getattr(area, 'inactive', False):
                 continue
 
@@ -373,17 +417,14 @@ class AnalysisBuilder:
                     self._create_single_shell_section(sec, mat, tag)
                 sec_tag = self._shell_sec_tags[sec_name]
 
-            # Determine element tag
-            max_frame_tag = max(
-                (e.elem_tag for e in self.mesh_model.frame_elements.values()
-                 if not getattr(e, 'inactive', False)),
-                default=0,
-            )
+            # Determine element tag — avoid clashing with frame elements
+            max_frame_tag = max(self.frame_tag_map.values(), default=0)
             max_rigid_tag = max(
                 (r[3] for r in self._offset_rigid_links),
                 default=0,
             )
-            elem_tag = max(max_frame_tag, max_rigid_tag, shell_count) + 1
+            next_shell_tag = max(max_frame_tag, max_rigid_tag) + 1 + shell_count
+            elem_tag = next_shell_tag
 
             if len(node_tags) == 3:
                 ops.element('ShellMITC4', elem_tag, *node_tags, sec_tag)
@@ -411,18 +452,13 @@ class AnalysisBuilder:
 
     # ── Frame elements ───────────────────────────────────────────
 
-    def _create_elements(self) -> None:
-        """Create OpenSees frame elements from MeshModel."""
-        from ..model.geometry import subdivide_elements
+    def _build_frame_tag_map(self) -> None:
+        """Pre-compute frame element tags before creating elements.
 
-        if self.config['verbose']:
-            print("Creating frame elements...")
-
+        Ensures shell element tag assignment can avoid clashing with
+        frame element tags.
+        """
         elements = self.mesh_model.frame_elements
-        assignments = self.mesh_model.frame_assignments
-        dist_loads = self.mesh_model.frame_dist_loads
-
-        # Build the element tag map from MeshModel
         next_tag = 1
         self.frame_tag_map = {}
         for eid, elem in elements.items():
@@ -435,6 +471,17 @@ class AnalysisBuilder:
                 tag = elem.elem_tag if elem.elem_tag > 0 else next_tag
                 next_tag = max(next_tag, tag + 1)
             self.frame_tag_map[eid] = tag
+
+    def _create_elements(self) -> None:
+        """Create OpenSees frame elements from MeshModel."""
+        from ..model.geometry import subdivide_elements
+
+        if self.config['verbose']:
+            print("Creating frame elements...")
+
+        elements = self.mesh_model.frame_elements
+        assignments = self.mesh_model.frame_assignments
+        dist_loads = self.mesh_model.frame_dist_loads
 
         for eid, elem in elements.items():
             if getattr(elem, 'inactive', False):
@@ -520,7 +567,7 @@ class AnalysisBuilder:
                 ops.beamIntegration('Lobatto', int_tag, sec_tag, n_ip)
             else:
                 ops.beamIntegration('HingeRadau', int_tag, sec_tag, n_ip)
-            ops.element(elem_type, tag, *[ni.node_tag, nj.node_tag], n_ip, int_tag, transf_tag)
+            ops.element(elem_type, tag, *[ni.node_tag, nj.node_tag], transf_tag, int_tag)
 
     # ── Lumped hinges ────────────────────────────────────────────
 
@@ -546,14 +593,12 @@ class AnalysisBuilder:
         self._sw_load_totals = {}
         self._gravity_load_totals = {}
 
-        # Self-weight
+        # Self-weight computation (applied downstream when pattern activated)
+        _sw_frame_loads: Dict[str, list] = {}  # pname → [(node_tag, fz), ...]
         sw_factor = self.config.get('self_weight_factor', 1.0)
         if sw_factor > 0:
             for eid, elem in elements.items():
                 if getattr(elem, 'inactive', False):
-                    continue
-                tag = self.frame_tag_map.get(eid)
-                if tag is None:
                     continue
                 sec_name = assignments.get(eid, '')
                 sec = self.mesh_model.sections.get(sec_name)
@@ -571,7 +616,15 @@ class AnalysisBuilder:
                     continue
                 L = math.sqrt((nj.x - ni.x)**2 + (nj.y - ni.y)**2 + (nj.z - ni.z)**2)
                 w = _A * mat.unit_weight * sw_factor
-                self._sw_load_totals[eid] = w * L
+                total_w = w * L
+                self._sw_load_totals[eid] = total_w
+                # Half-weight to each end node (use node tags, not element tags)
+                nd_i = self.mesh_model.nodes.get(elem.node_i)
+                nd_j = self.mesh_model.nodes.get(elem.node_j)
+                if nd_i is not None:
+                    _sw_frame_loads.setdefault('Self weight', []).append((nd_i.node_tag, -total_w * 0.5))
+                if nd_j is not None:
+                    _sw_frame_loads.setdefault('Self weight', []).append((nd_j.node_tag, -total_w * 0.5))
 
         # Pattern loop
         all_patterns = set()
@@ -674,6 +727,28 @@ class AnalysisBuilder:
             if nd is None:
                 continue
             ops.load(nd.node_tag, jl.fx, jl.fy, jl.fz, jl.mx, jl.my, jl.mz)
+
+        # ── Self-weight (auto-included when any pattern is active) ──
+        if _sw_frame_loads and pattern_scales is not None:
+            # Auto-include "Self weight" pattern (matches legacy builder).
+            # If the caller already specified it, use that scale.
+            sw_pname = 'Self weight'
+            if sw_pname in pattern_scales:
+                scale = pattern_scales[sw_pname]
+            else:
+                scale = 1.0  # auto-include with default factor
+                if abs(scale) > 1e-12:
+                    ts_tag = hash(sw_pname) % 9000 + 1000
+                    ptag = hash(sw_pname) % 9000 + 100
+                    if sw_pname not in patterns_created:
+                        ops.timeSeries('Linear', ts_tag)
+                        ops.pattern('Plain', ptag, ts_tag)
+                        patterns_created.add(sw_pname)
+                    sw_total = 0.0
+                    for node_tag, fz in _sw_frame_loads.get(sw_pname, []):
+                        ops.load(node_tag, 0.0, 0.0, fz * scale, 0.0, 0.0, 0.0)
+                        sw_total += abs(fz * scale)
+                    self.load_totals[sw_pname] = sw_total
 
     # ── Rigid diaphragms ─────────────────────────────────────────
 
@@ -846,3 +921,44 @@ class AnalysisBuilder:
         vy = np.cross(vz, vx_norm)
         vy_norm = vy / np.linalg.norm(vy)
         return vx_norm, vy_norm, vz
+
+    # ═══════════════════════════════════════════════════════════════
+    # Export
+    # ═══════════════════════════════════════════════════════════════
+
+    def export_results(self,
+                      filepath: str,
+                      static_results: Optional[Dict[str, Any]] = None,
+                      modal_result: Optional[Dict[str, Any]] = None,
+                      mode_shapes: Optional[Dict] = None,
+                      rs_results: Optional[Dict[str, Dict]] = None,
+                      fmt: str = "npz",
+                      ) -> str:
+        """Export model geometry and analysis results to a unified file.
+
+        Delegates to :func:`~fea_toolkit.io.unified_writer.write_results`
+        using the builder's ``mesh_model`` and the provided results.
+
+        Args:
+            filepath: Output file path (``.npz`` or ``.h5``).
+            static_results: Dict from :meth:`run_static_analysis`.
+            modal_result: Dict from :meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.run_modal_analysis`.
+            mode_shapes: Mode shape eigenvectors ``{mode_idx: {tag: (dx,dy,dz)}}``.
+            rs_results: Response-spectrum results dict.
+            fmt: ``"npz"`` (default) or ``"h5"``.
+
+        Returns:
+            Absolute path to the written file.
+        """
+        from ..io.unified_writer import write_results
+
+        return write_results(
+            path=filepath,
+            mesh_model=self.mesh_model,
+            static_results=static_results,
+            modal_result=modal_result,
+            mode_shapes=mode_shapes,
+            rs_results=rs_results,
+            fmt=fmt,
+            config=self.config,
+        )
