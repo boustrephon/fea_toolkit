@@ -1779,6 +1779,231 @@ class AnalysisBuilder:
 
         return result
 
+    # =========================================================================
+    # RS element forces (after run_response_spectrum_analysis)
+    # =========================================================================
+    def extract_element_rs_forces(
+        self,
+        num_modes: int,
+        modal_periods: List[float],
+        spectrum_periods: List[float],
+        spectrum_accels: List[float],
+        direction: str = 'X',
+        damping_ratio: float = 0.05,
+        print_results: bool = True,
+    ) -> Dict[str, Any]:
+        """Run RS analysis and return CQC‑combined element forces sorted by height.
+
+        For each element this returns the CQC‑combined moments (My_i, My_j,
+        Mz_i, Mz_j) and the corresponding shears derived from the moment
+        gradient (Vy = dMz/dx, Vz = dMy/dx).
+
+        Args:
+            Same as :meth:`run_response_spectrum_analysis`.
+
+        Returns:
+            Dictionary with keys:
+
+            * ``'element_results'`` — list of dicts sorted by elevation, each
+              containing ``elem_id``, ``z_bot``, ``z_mid``, ``Vy_i``, ``Vy_j``,
+              ``Vz_i``, ``Vz_j``, ``My_i``, ``My_j``, ``Mz_i``, ``Mz_j``.
+            * ``'modal_periods'``, ``'omega'`` — for diagnostics.
+        """
+        if self.config.get('verbose'):
+            print("Extracting element RS forces...")
+
+        omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods]
+        damp_ratios = [damping_ratio] * num_modes
+
+        dof = {'X': 1, 'Y': 2, 'Z': 3}[direction]
+
+        SPECTRUM_TS_TAG = 9999
+
+        elements = self.mesh_model.frame_elements
+
+        # Pre-compute element info + storage
+        elem_data = {}
+        for eid, elem in elements.items():
+            if getattr(elem, 'inactive', False):
+                continue
+            ni = self.mesh_model.nodes.get(elem.node_i)
+            nj = self.mesh_model.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            z_i, z_j = ni.z, nj.z
+            if z_i > z_j:
+                z_i, z_j = z_j, z_i
+            ops_tag = self.frame_tag_map.get(eid, elem.elem_tag)
+            elem_data[eid] = {
+                'tag': ops_tag,
+                'elem_id': eid,
+                'z_bot': z_i,
+                'z_mid': (z_i + z_j) * 0.5,
+                'My_i': [], 'My_j': [], 'Mz_i': [], 'Mz_j': [],
+            }
+
+        # Mode-by-mode extraction
+        for mode in range(1, num_modes + 1):
+            ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, '-mode', mode)
+            for eid, ed in elem_data.items():
+                try:
+                    forces = ops.eleResponse(ed['tag'], 'forces')
+                except Exception:
+                    forces = [0.0] * 12
+                ed['My_i'].append(forces[4])
+                ed['My_j'].append(forces[10])
+                ed['Mz_i'].append(forces[5])
+                ed['Mz_j'].append(forces[11])
+
+        # CQC combine per element and compute shears
+        element_results = []
+        for eid, ed in elem_data.items():
+            ne = len(ed['My_i'])
+            n_use = min(ne, num_modes)
+            o_use = omega[:n_use]
+            d_use = damp_ratios[:n_use]
+
+            My_i = cqc_combine(ed['My_i'][:n_use], o_use, d_use)
+            My_j = cqc_combine(ed['My_j'][:n_use], o_use, d_use)
+            Mz_i = cqc_combine(ed['Mz_i'][:n_use], o_use, d_use)
+            Mz_j = cqc_combine(ed['Mz_j'][:n_use], o_use, d_use)
+
+            # Element length
+            elem = elements.get(eid)
+            if elem:
+                ni = self.mesh_model.nodes.get(elem.node_i)
+                nj = self.mesh_model.nodes.get(elem.node_j)
+                if ni and nj:
+                    L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+                else:
+                    L = 1.0
+            else:
+                L = 1.0
+
+            # Shear from moment gradient
+            Vy_i = (Mz_i - Mz_j) / L if L > 1e-12 else 0.0
+            Vy_j = Vy_i
+            Vz_i = (My_i - My_j) / L if L > 1e-12 else 0.0
+            Vz_j = Vz_i
+
+            element_results.append({
+                'elem_id': ed['elem_id'],
+                'z_bot': ed['z_bot'],
+                'z_mid': ed['z_mid'],
+                'Vy_i': Vy_i, 'Vy_j': Vy_j,
+                'Vz_i': Vz_i, 'Vz_j': Vz_j,
+                'My_i': My_i, 'My_j': My_j,
+                'Mz_i': Mz_i, 'Mz_j': Mz_j,
+            })
+
+        # Sort by height
+        element_results.sort(key=lambda r: r['z_mid'])
+
+        if print_results:
+            print(f"\n===== RESPONSE SPECTRUM RESULTS ({direction} only, CQC) FOR ALL ELEMENTS =====")
+            header = (f"{'Elem':>30} {'Z_bot(m)':>10} {'Z_mid(m)':>10} {'End':>5} "
+                      f"{'Vy (kN)':>12} {'Vz (kN)':>12} {'My (kN-m)':>12} {'Mz (kN-m)':>12}")
+            print(header)
+            print("-" * len(header))
+            for r in element_results:
+                eid_str = f"{r['elem_id']:30s}"
+                print(f"{eid_str} {r['z_bot']:10.2f} {r['z_mid']:10.2f} {'I':>5} "
+                      f"{r['Vy_i']:12.2f} {r['Vz_i']:12.2f} {r['My_i']:12.2f} {r['Mz_i']:12.2f}")
+                print(f"{eid_str} {r['z_bot']:10.2f} {r['z_mid']:10.2f} {'J':>5} "
+                      f"{r['Vy_j']:12.2f} {r['Vz_j']:12.2f} {r['My_j']:12.2f} {r['Mz_j']:12.2f}")
+
+        return {
+            'element_results': element_results,
+            'modal_periods': modal_periods,
+            'omega': omega,
+        }
+
+    # =========================================================================
+    # RS nodal displacements (from mode‑shape combination)
+    # =========================================================================
+    def compute_rs_nodal_displacements(
+        self,
+        num_modes: int,
+        modal_periods: List[float],
+        eigenvalues: List[float],
+        spectrum_func,
+        direction: str = 'X',
+        damping_ratio: float = 0.05,
+    ) -> Dict[int, Tuple[float, float, float]]:
+        """Compute CQC‑combined peak nodal displacements from RS analysis.
+
+        Uses mode‑shape superposition rather than re‑running the RS analysis:
+
+            u_m = Γ_m · φ_m · Sa_m / ω²_m
+
+        then CQC across modes.
+
+        Args:
+            num_modes: Number of modes.
+            modal_periods: Natural periods of each mode (s).
+            eigenvalues: Eigenvalues (ω²) from :meth:`run_modal_analysis`.
+            spectrum_func: Callable ``f(T) → Sa`` in **m/s²**.
+            direction: Excitation direction ``'X'``, ``'Y'``, or ``'Z'``.
+            damping_ratio: Damping ratio for CQC correlation.
+
+        Returns:
+            Dict mapping ``node_tag`` → ``(dx, dy, dz)`` in model length units.
+        """
+        dof = {'X': 1, 'Y': 2, 'Z': 3}[direction]
+        dof_idx = dof - 1
+
+        # Get participation factors from modalProperties
+        try:
+            mp = ops.modalProperties('-return', '-unorm')
+        except Exception:
+            mp = {}
+        mass_key = ('partiMassMX' if direction == 'X'
+                    else 'partiMassMY' if direction == 'Y'
+                    else 'partiMassMZ')
+        eff_masses = mp.get(mass_key, [0.0] * num_modes)
+
+        omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods]
+        damp = [damping_ratio] * num_modes
+
+        node_tags = list(ops.getNodeTags())
+
+        per_mode = {tag: {d: [] for d in range(3)} for tag in node_tags}
+
+        for m in range(num_modes):
+            if eigenvalues[m] <= 1e-12 or omega[m] <= 1e-12:
+                for tag in node_tags:
+                    for d in range(3):
+                        per_mode[tag][d].append(0.0)
+                continue
+
+            T = modal_periods[m]
+            Sa = spectrum_func(T)
+            Gamma = math.sqrt(abs(eff_masses[m])) if eff_masses[m] != 0 else 0.0
+            factor = Gamma * Sa / (omega[m] ** 2)
+
+            if abs(factor) < 1e-15:
+                for tag in node_tags:
+                    for d in range(3):
+                        per_mode[tag][d].append(0.0)
+                continue
+
+            for tag in node_tags:
+                phi = ops.nodeEigenvector(tag, m + 1, dof)
+                per_mode[tag][dof_idx].append(phi * factor)
+                for d in range(3):
+                    if d != dof_idx:
+                        per_mode[tag][d].append(0.0)
+
+        cqc_result = {}
+        for tag in node_tags:
+            vals = tuple(
+                cqc_combine(per_mode[tag][d], omega, damp)
+                for d in range(3)
+            )
+            cqc_result[tag] = vals
+
+        return cqc_result
+
     def extract_mode_shapes(
         self, num_modes: int
     ) -> Dict[int, Dict[int, Tuple[float, float, float]]]:
