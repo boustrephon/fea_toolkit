@@ -4115,6 +4115,12 @@ class TestTwoStageBuild:
             assert "DEAD" in b._gravity_load_totals, (
                 f"No DEAD gravity totals: {b._gravity_load_totals}"
             )
+            # The DEAD fz total should be non-zero (gravity applied)
+            dead_totals = b._gravity_load_totals["DEAD"]
+            assert abs(dead_totals.get('fz', 0)) > 0, (
+                f"Expected non-zero DEAD gravity total fz, "
+                f"got {dead_totals}"
+            )
 
             # Displacements should be non-zero
             nd = result.get("nodal_displacements", {})
@@ -4181,39 +4187,46 @@ class TestTwoStageBuild:
             groups={},
         )
 
+        import openseespy.opensees as ops
         b = OpenSeesBuilder(md, {
             "use_preprocessor": True,
             "split_elements": False,
             "verbose": False,
             "stiffness_factors": {"beam": 0.5, "column": 0.7},
         })
-        b.build()
-        mm = b._mesh_model
+        try:
+            b.build()
+            mm = b._mesh_model
 
-        # At least one variant section should exist
-        variant_keys = [k for k in mm.sections if "__" in k]
-        assert len(variant_keys) > 0, (
-            f"Expected variant sections, got none. Keys: {list(mm.sections.keys())}"
-        )
-
-        # Each variant should have a section_tags entry
-        for vk in variant_keys:
-            assert vk in mm.section_tags, (
-                f"Variant '{vk}' missing from section_tags"
+            # Both __beam and __column variants should exist
+            variant_keys = [k for k in mm.sections if "__" in k]
+            assert "SEC1__beam" in variant_keys, (
+                f"Missing 'SEC1__beam'. Keys: {variant_keys}"
+            )
+            assert "SEC1__column" in variant_keys, (
+                f"Missing 'SEC1__column'. Keys: {variant_keys}"
             )
 
-        # The variant material should have scaled E_mod
-        for vk in variant_keys:
-            sec = mm.sections[vk]
-            mat = mm.materials.get(sec.material)
-            assert mat is not None, (
-                f"Variant section '{vk}' references missing material '{sec.material}'"
-            )
-            if "__beam" in vk:
-                expected_e = 3.0e10 * 0.5  # beam factor 0.5
-                assert abs(mat.E_mod - expected_e) < 1.0, (
-                    f"Beam variant E_mod={mat.E_mod}, expected ~{expected_e}"
+            # Each variant should have a section_tags entry
+            for vk in ("SEC1__beam", "SEC1__column"):
+                assert vk in mm.section_tags, (
+                    f"Variant '{vk}' missing from section_tags"
                 )
+
+            # Beam variant should use 0.5 factor, column variant 0.7
+            for vk, expected_factor in [("SEC1__beam", 0.5), ("SEC1__column", 0.7)]:
+                sec = mm.sections[vk]
+                mat = mm.materials.get(sec.material)
+                assert mat is not None, (
+                    f"Variant '{vk}' references missing material '{sec.material}'"
+                )
+                expected_e = 3.0e10 * expected_factor
+                assert abs(mat.E_mod - expected_e) < 1.0, (
+                    f"{vk} E_mod={mat.E_mod}, expected ~{expected_e} "
+                    f"(factor={expected_factor})"
+                )
+        finally:
+            ops.wipe()
 
     def test_compute_seismic_masses_via_analysis_builder(self):
         """AnalysisBuilder.compute_seismic_masses produces non-zero masses.
@@ -4260,12 +4273,9 @@ class TestTwoStageBuild:
                 nd = md.nodes.get(nid)
                 if nd is None:
                     continue
-                try:
-                    om = ops.nodeMass(nd.node_tag)
-                    assert abs(sum(om[:3])) > 0, (
-                        f"Node {nd.node_tag} has zero mass in domain"
-                    )
-                except Exception:
-                    pass  # node may not exist — skip
+                om = ops.nodeMass(nd.node_tag)
+                assert abs(sum(om[:3])) > 0, (
+                    f"Node {nd.node_tag} has zero mass in domain"
+                )
         finally:
             ops.wipe()

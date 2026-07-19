@@ -249,9 +249,16 @@ class Preprocessor:
                     if variant_sec_name in section_tags:
                         continue
                     # Clone the material with scaled E_mod
+                    # Per ACI 318, cracked-section stiffness factors only
+                    # apply to concrete materials.  Composite/steel sections
+                    # are left at full gross stiffness.
                     base_mat_name = base_sec.material
                     base_mat = md.materials.get(base_mat_name)
                     if base_mat is None or base_mat.type.lower() != 'concrete':
+                        if self.config.get('verbose', False):
+                            print(f"  ⚠ Section '{sec_name}' material "
+                                  f"'{base_mat_name}' is not concrete — "
+                                  f"skipping stiffness factor for {etype}")
                         continue
                     variant_mat_name = f"{base_mat_name}__{etype}"
                     if variant_mat_name not in material_tags:

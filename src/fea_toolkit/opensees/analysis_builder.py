@@ -6,7 +6,7 @@ and creates the OpenSees domain objects.  It handles all analysis execution
 and result extraction — no topology mutations occur here.
 """
 
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Set
 import copy
 import math
 import numpy as np
@@ -18,7 +18,7 @@ from ..model.sap_data import (
     Node, FrameElement, AreaElement,
     ShellSection, Restraint,
 )
-from ..model.geometry import get_SAP_vecxz, global_to_local_distributed_load
+from ..model.geometry import get_SAP_vecxz
 from ..model.geometry import convert_area_loads_to_edge_loads, polygon_area_3d
 from ..model.tree_utils import collect_descendants
 from ..model.selection import Selection
@@ -59,6 +59,7 @@ class AnalysisBuilder:
         self._offset_rigid_links: List[tuple] = list(mesh_model.offset_rigid_links)
         self._edge_constraint_method: Optional[str] = None
         self._saved_edge_constraints: List[tuple] = list(mesh_model.saved_edge_constraints)
+        self._rigid_link_elems: Dict[str, int] = {}
         self.edge_loads_from_areas: list = list(mesh_model.edge_loads_from_areas)
         self._base_z = mesh_model.base_z
 
@@ -121,6 +122,7 @@ class AnalysisBuilder:
         """
         ops.wipe()
         self._edge_constraint_method = None
+        self._rigid_link_elems = {}
         ops.model('basic', '-ndm', 3, '-ndf', 6)
 
         # Pre-compute frame tag map so shell elements can avoid clashing
@@ -488,15 +490,17 @@ class AnalysisBuilder:
         elements = self.mesh_model.frame_elements
         next_tag = 1
         self.frame_tag_map = {}
+        used_tags: Set[int] = set()
         for eid, elem in elements.items():
             if getattr(elem, 'inactive', False):
                 continue
-            if elem.elem_tag in self.frame_tag_map.values():
+            if elem.elem_tag in used_tags:
                 tag = next_tag
                 next_tag += 1
             else:
                 tag = elem.elem_tag if elem.elem_tag > 0 else next_tag
                 next_tag = max(next_tag, tag + 1)
+            used_tags.add(tag)
             self.frame_tag_map[eid] = tag
 
     def _create_elements(self) -> None:
@@ -530,18 +534,34 @@ class AnalysisBuilder:
         # Rigid links from frame end offsets
         # The Preprocessor returns (link_id, node_i, node_j, link_tag) tuples.
         # node_i and node_j are string node IDs — resolve to numeric tags.
-        for _link_id, _node_i_id, _node_j_id, link_tag in self._offset_rigid_links:
-            nd_i = self.mesh_model.nodes.get(_node_i_id)
-            nd_j = self.mesh_model.nodes.get(_node_j_id)
-            if nd_i is None or nd_j is None:
-                continue
-            ni_tag = nd_i.node_tag
-            nj_tag = nd_j.node_tag
-            # Use a generic stiff section for the rigid link
-            ops.geomTransf('Linear', link_tag)
-            ops.element('elasticBeamColumn', link_tag, ni_tag, nj_tag, link_tag,
-                        link_tag, '-mass', 0.0)
-            self._rigid_link_elems[_link_id] = link_tag
+        if self._offset_rigid_links:
+            # Pick a tag beyond ALL section tags (frame + shell variant)
+            all_sec_tags = set(self.section_tags.values())
+            all_sec_tags.update(self._shell_sec_tags.values())
+            all_sec_tags.update(self._shell_sec_variants.values())
+            rigid_section_tag = max(all_sec_tags, default=0) + 1
+            rigid_E = 2.0e14
+            rigid_A = 1.0
+            rigid_I = 1.0
+            ops.section('Elastic', rigid_section_tag, rigid_E, rigid_A,
+                        rigid_I, rigid_I, rigid_E / 2.6, rigid_I)
+            for _link_id, _node_i_id, _node_j_id, link_tag in self._offset_rigid_links:
+                nd_i = self.mesh_model.nodes.get(_node_i_id)
+                nd_j = self.mesh_model.nodes.get(_node_j_id)
+                if nd_i is None or nd_j is None:
+                    continue
+                ni_tag = nd_i.node_tag
+                nj_tag = nd_j.node_tag
+                # Compute vecxz for vertical/horizontal links (same convention as _add_beam_column)
+                dx = float(nd_j.x - nd_i.x)
+                dy = float(nd_j.y - nd_i.y)
+                dz = float(nd_j.z - nd_i.z)
+                from ..model.geometry import get_SAP_vecxz
+                vecxz = get_SAP_vecxz(np.array([dx, dy, dz]), 0.0)
+                ops.geomTransf('Linear', link_tag, *vecxz)
+                ops.element('elasticBeamColumn', link_tag, ni_tag, nj_tag,
+                            rigid_section_tag, link_tag, '-mass', 0.0)
+                self._rigid_link_elems[_link_id] = link_tag
 
         if self.config['verbose']:
             n = len([e for e in elements.values() if not getattr(e, 'inactive', False)])
@@ -555,8 +575,6 @@ class AnalysisBuilder:
             return
 
         sec_name = assignments.get(elem.elem_id, '')
-        if not sec_name:
-            sec_name = assignments.get(elem.elem_id, '')
 
         # Determine section tag (check type-specific variant first)
         etype = self._frame_element_types.get(elem.elem_id)
@@ -605,7 +623,6 @@ class AnalysisBuilder:
                       pattern_scales: Optional[Dict[str, float]] = None,
                       ) -> None:
         """Create OpenSees load patterns from MeshModel data."""
-        from ..model.geometry import global_to_local_distributed_load
 
         elements = self.mesh_model.frame_elements
         assignments = self.mesh_model.frame_assignments
@@ -730,7 +747,7 @@ class AnalysisBuilder:
                                     wx_a + (wx_b - wx_a) * xi,
                                     seg_a, seg_b)
 
-                load_total += abs(wa) * abs(bL - aL)
+                load_total += abs(wa + wb) * 0.5 * abs(bL - aL)
 
             # Edge loads (from area-to-frame conversion)
             for ld in edge_loads:
@@ -763,12 +780,16 @@ class AnalysisBuilder:
             ops.load(nd.node_tag, jl.fx, jl.fy, jl.fz, jl.mx, jl.my, jl.mz)
 
         # ── Self-weight (auto-included when any pattern is active) ──
-        if _sw_frame_loads and pattern_scales is not None:
+        if _sw_frame_loads:
             sw_pname = 'Self weight'
-            if sw_pname in pattern_scales:
-                scale = pattern_scales[sw_pname]
+            if pattern_scales is not None:
+                if sw_pname in pattern_scales:
+                    scale = pattern_scales[sw_pname]
+                else:
+                    scale = 1.0  # auto-include with default factor
             else:
-                scale = 1.0  # auto-include with default factor
+                # pattern_scales=None means apply all patterns with factor 1.0
+                scale = 1.0
             sw_scale = abs(scale)
             if sw_scale > 1e-12:
                 # Create pattern if not yet created
@@ -820,12 +841,8 @@ class AnalysisBuilder:
             fx = sw_per_len * L * gl.multiplier_x * scale * 0.5
             fy = sw_per_len * L * gl.multiplier_y * scale * 0.5
             fz = sw_per_len * L * gl.multiplier_z * scale * 0.5
-            nd_i = self.mesh_model.nodes.get(elem.node_i)
-            nd_j = self.mesh_model.nodes.get(elem.node_j)
-            if nd_i is not None:
-                ops.load(nd_i.node_tag, fx, fy, fz, 0.0, 0.0, 0.0)
-            if nd_j is not None:
-                ops.load(nd_j.node_tag, fx, fy, fz, 0.0, 0.0, 0.0)
+            ops.load(ni.node_tag, fx, fy, fz, 0.0, 0.0, 0.0)
+            ops.load(nj.node_tag, fx, fy, fz, 0.0, 0.0, 0.0)
             if pname not in self._gravity_load_totals:
                 self._gravity_load_totals[pname] = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0,
                                                      'mx': 0.0, 'my': 0.0, 'mz': 0.0}
@@ -1088,28 +1105,26 @@ class AnalysisBuilder:
 
         node_mass: Dict[str, float] = {}
 
-        for ms in getattr(mm, 'mass_sources', {}).values():
-            mass_sources = getattr(mm, 'mass_sources', {})
-            # mass_sources may be empty if not populated from parser
-            if not mass_sources:
-                # Fallback: use element self-weight + DEAD load pattern
-                self._mass_from_elements(mm, elements, assignments, node_mass, g)
-                self._mass_from_dist_loads(mm, elements, dist_loads, node_mass, g,
-                                           ["DEAD"])
-                continue
+        mass_sources = getattr(mm, 'mass_sources', {})
+        if not mass_sources:
+            # No MASS SOURCE definitions — fallback: element self-weight + DEAD
+            self._mass_from_elements(mm, elements, assignments, node_mass, g)
+            self._mass_from_dist_loads(mm, elements, dist_loads, node_mass, g,
+                                       ["DEAD"])
+        else:
+            for ms in mass_sources.values():
+                if ms.elements:
+                    self._mass_from_elements(mm, elements, assignments, node_mass, g)
 
-            if ms.elements:
-                self._mass_from_elements(mm, elements, assignments, node_mass, g)
-
-            if ms.loads and ms.load_pattern:
-                for lp_name, mult in ms.load_pattern.items():
-                    if abs(mult) < 1e-12:
-                        continue
-                    self._mass_from_dist_loads(mm, elements, dist_loads,
-                                               node_mass, g, [lp_name], mult)
-                    self._mass_from_joint_loads(mm, node_mass, g, lp_name, mult)
-                    self._mass_from_area_gravity(mm, node_mass, g, lp_name, mult)
-                    self._mass_from_area_uniform(mm, node_mass, g, lp_name, mult)
+                if ms.loads and ms.load_pattern:
+                    for lp_name, mult in ms.load_pattern.items():
+                        if abs(mult) < 1e-12:
+                            continue
+                        self._mass_from_dist_loads(mm, elements, dist_loads,
+                                                   node_mass, g, [lp_name], mult)
+                        self._mass_from_joint_loads(mm, node_mass, g, lp_name, mult)
+                        self._mass_from_area_gravity(mm, node_mass, g, lp_name, mult)
+                        self._mass_from_area_uniform(mm, node_mass, g, lp_name, mult)
 
         # Assign masses to OpenSees nodes
         for nid, m in node_mass.items():
