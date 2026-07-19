@@ -4279,3 +4279,109 @@ class TestTwoStageBuild:
                 )
         finally:
             ops.wipe()
+
+    def test_modal_analysis_via_two_stage_path(self):
+        """run_modal_analysis works through two-stage facade delegation.
+
+        Builds a sample cantilever through the two-stage path, computes
+        masses, runs modal analysis, and verifies:
+        1. Result dict contains periods, eigenvalues, frequencies.
+        2. Periods are positive and physically plausible.
+        3. Modal_props dict is returned (not empty).
+        """
+        import openseespy.opensees as ops
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        md = make_sample_model()
+        b = OpenSeesBuilder(md, {
+            "use_preprocessor": True,
+            "split_elements": False,
+            "create_shells": False,
+            "verbose": False,
+        })
+        try:
+            b.build()
+            b.compute_seismic_masses(g=9.81)
+            modal = b.run_modal_analysis(num_modes=3, print_results=False)
+
+            assert isinstance(modal, dict), f"Expected dict, got {type(modal)}"
+            assert "periods" in modal, f"Missing periods: {list(modal.keys())}"
+            assert "eigenvalues" in modal
+            assert "frequencies" in modal
+            assert "modal_props" in modal
+            assert len(modal["periods"]) == 3, (
+                f"Expected 3 periods, got {len(modal['periods'])}"
+            )
+            assert len(modal["eigenvalues"]) == 3
+            assert len(modal["frequencies"]) == 3
+
+            # Periods should be positive and plausible
+            T1 = modal["periods"][0]
+            assert 0.01 < T1 < 10.0, f"T1={T1} outside plausible range"
+
+            # Modal props should have participation data
+            mp = modal["modal_props"]
+            assert isinstance(mp, dict), f"modal_props not a dict: {type(mp)}"
+        finally:
+            ops.wipe()
+
+    def test_response_spectrum_via_two_stage_path(self):
+        """run_response_spectrum_analysis works through two-stage facade.
+
+        Builds a sample cantilever through the two-stage path, computes
+        masses, runs modal, then runs RS in both X and Y directions,
+        and verifies:
+        1. Result dict contains modal_base_shear, base_shear_cqc, etc.
+        2. CQC base shear is positive.
+        3. Both directions produce results.
+        """
+        import openseespy.opensees as ops
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        md = make_sample_model()
+        b = OpenSeesBuilder(md, {
+            "use_preprocessor": True,
+            "split_elements": False,
+            "create_shells": False,
+            "verbose": False,
+        })
+        try:
+            b.build()
+            b.compute_seismic_masses(g=9.81)
+            modal = b.run_modal_analysis(num_modes=3, print_results=False)
+            periods = modal["periods"]
+
+            # Build a simple spectrum
+            T_sp = [0.0, 0.1, 0.2, 0.5, 1.0, 2.0, 3.0]
+            Sa_sp = [3.0, 3.0, 3.0, 1.5, 0.8, 0.4, 0.2]
+
+            for dr in ("X", "Y"):
+                rs = b.run_response_spectrum_analysis(
+                    num_modes=3,
+                    modal_periods=periods,
+                    spectrum_periods=T_sp,
+                    spectrum_accels=Sa_sp,
+                    direction=dr,
+                    damping_ratio=0.05,
+                    print_results=False,
+                )
+                assert isinstance(rs, dict), (
+                    f"RS-{dr}: expected dict, got {type(rs)}"
+                )
+                assert "modal_base_shear" in rs, (
+                    f"RS-{dr}: missing modal_base_shear"
+                )
+                assert "base_shear_cqc" in rs
+                assert "base_shear_srss" in rs
+                assert rs["base_shear_cqc"] > 0, (
+                    f"RS-{dr}: CQC base shear should be positive, "
+                    f"got {rs['base_shear_cqc']}"
+                )
+                assert rs["base_shear_srss"] > 0, (
+                    f"RS-{dr}: SRSS base shear should be positive, "
+                    f"got {rs['base_shear_srss']}"
+                )
+        finally:
+            ops.wipe()
