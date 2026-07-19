@@ -3183,8 +3183,8 @@ class OpenSeesBuilder:
     # -------------------------------------------------------------------------
 
     def _get_local_axes(self, elem: FrameElement) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Return local y and z unit vectors for a frame element."""
-        #  Could use lookup table - maybe faster
+        """Return local (vx, vy, vz) unit vectors for a frame element."""
+        from ..model.geometry import get_local_axes
         if self._node_tag_from_id:
             coords_i = ops.nodeCoord(self._node_tag_from_id(elem.node_i))
             coords_j = ops.nodeCoord(self._node_tag_from_id(elem.node_j))
@@ -3192,17 +3192,7 @@ class OpenSeesBuilder:
             coords_i = ops.nodeCoord(self.model.nodes[elem.node_i].node_tag)
             coords_j = ops.nodeCoord(self.model.nodes[elem.node_j].node_tag)
         vec_x = np.array(coords_j) - np.array(coords_i)
-        length = np.linalg.norm(vec_x)
-        if length < 1e-12:
-            raise ValueError(f"Zero length element {elem.elem_id} (tag {elem.elem_tag}) between nodes {elem.node_i} and {elem.node_j}")
-        vec_x_norm = vec_x / length
-        vecxz = get_SAP_vecxz(vec_x_norm, elem.angle)
-        # local z is vecxz
-        vec_z = vecxz / np.linalg.norm(vecxz)
-        # local y = cross(vec_z, vec_x)  (right‑handed)
-        vec_y = np.cross(vec_z, vec_x_norm)
-        vec_y = vec_y / np.linalg.norm(vec_y)
-        return vec_x_norm, vec_y, vec_z
+        return get_local_axes(vec_x, getattr(elem, 'angle', 0.0))
 
     def _global_to_local(self, elem: FrameElement, vec: np.ndarray) -> np.ndarray:
         """Transform a vector from global to local coordinates."""
@@ -4638,14 +4628,14 @@ class OpenSeesBuilder:
                 if getattr(area_elem, 'inactive', False):
                     # Parent was meshed — apply gravity load to each
                     # sub-element instead so the load is not lost.
-                    sub_ids = sorted(
-                        aid for aid in self.model.area_elements
-                        if aid.startswith(f"{agl.area_id}_sub_")
-                    )
+                    from ..model.tree_utils import collect_descendants
+                    sub_ids = collect_descendants(agl.area_id, self.model.area_elements)
                     if not sub_ids:
                         continue
                     for sub_id in sub_ids:
                         sub_elem = self.model.area_elements[sub_id]
+                        if sub_elem is None:
+                            continue
                         sec_name = self.model.area_assignments.get(sub_id)
                         if not sec_name:
                             continue
@@ -6726,14 +6716,14 @@ class OpenSeesBuilder:
                             continue
                         if getattr(area_elem, 'inactive', False):
                             # Parent was meshed — redistribute to sub-elements.
-                            sub_ids = sorted(
-                                aid for aid in self.model.area_elements
-                                if aid.startswith(f"{agl.area_id}_sub_")
-                            )
+                            from ..model.tree_utils import collect_descendants
+                            sub_ids = collect_descendants(agl.area_id, self.model.area_elements)
                             if not sub_ids:
                                 continue
                             for sub_id in sub_ids:
-                                sub_elem = self.model.area_elements[sub_id]
+                                sub_elem = self.model.area_elements.get(sub_id)
+                                if sub_elem is None:
+                                    continue
                                 sec_name = self.model.area_assignments.get(sub_id)
                                 if not sec_name:
                                     continue
@@ -6791,14 +6781,14 @@ class OpenSeesBuilder:
                             continue
                         if getattr(area_elem, 'inactive', False):
                             # Parent was meshed — redistribute to sub-elements.
-                            sub_ids = sorted(
-                                aid for aid in self.model.area_elements
-                                if aid.startswith(f"{aul.area_id}_sub_")
-                            )
+                            from ..model.tree_utils import collect_descendants
+                            sub_ids = collect_descendants(aul.area_id, self.model.area_elements)
                             if not sub_ids:
                                 continue
                             for sub_id in sub_ids:
-                                sub_elem = self.model.area_elements[sub_id]
+                                sub_elem = self.model.area_elements.get(sub_id)
+                                if sub_elem is None:
+                                    continue
                                 area_mag, _ = self._polygon_area(sub_elem.node_ids)
                                 if area_mag < 1e-12:
                                     continue
