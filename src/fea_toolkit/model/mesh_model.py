@@ -7,7 +7,7 @@ subdivided areas, detected constraints — with no OpenSees domain objects.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Set
 
 from .sap_data import (
     Node, Restraint, Material, Section,
@@ -79,6 +79,17 @@ class MeshModel:
     # ── Saved edge constraint arguments (for pushover re-apply) ──
     # Each entry is a tuple of positional args for apply_edge_constraints
     saved_edge_constraints: List[tuple] = field(default_factory=list)
+
+    # ── Loads-only area IDs (stiffness-free, mass-contributing) ──
+    # Areas matching a loads-only selection are NOT created as shell
+    # elements in OpenSees, but remain in the model for mass calc.
+    loads_only_area_ids: Set[str] = field(default_factory=set)
+
+    # ── Orphan nodes (kept for visualisation only) ───────────────
+    # Nodes that were removed from the main model because they are
+    # only referenced by loads-only areas.  They exist purely for
+    # rendering / visualisation and are NOT created in OpenSees.
+    orphan_nodes: Dict[str, Node] = field(default_factory=dict)
 
     @property
     def num_nodes(self) -> int:
