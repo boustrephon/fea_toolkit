@@ -43,6 +43,129 @@ Three input modes are supported — see the ``apply_edge_constraints()``
 docstring for ``coarse_edges``, ``coarse_elements``, and
 ``detect_unconnected_edges`` output variants.
 
+## Wall‑slab intersection handling
+
+When a wall (vertical area — Z‑span > 0.5) and a slab (horizontal area —
+all Z within 0.5) intersect at the same storey level, the wall's edge
+nodes land *inside* the slab's area but are not connected to the slab's
+mesh.  This is a common source of singular stiffness matrices.
+
+### Detection
+
+``find_wall_nodes_inside_slabs()`` identifies wall nodes that lie within each
+slab's XY bounding box and at the slab's Z level:
+
+```python
+from fea_toolkit.model.geometry import find_wall_nodes_inside_slabs
+
+findings = find_wall_nodes_inside_slabs(
+    area_elements, area_assignments, nodes,
+)
+```
+
+Returns a list of findings, each containing the slab ID, wall ID, the
+offending nodes and their coordinates, and the slab bounding box.
+
+### Splitting
+
+``split_slabs_at_wall_intersections()`` subdivides each affected slab along
+the wall's intersection lines, creating new sub-areas that share nodes
+with the wall:
+
+```python
+from fea_toolkit.model.geometry import split_slabs_at_wall_intersections
+
+areas, assigns, nodes, next_tag = split_slabs_at_wall_intersections(
+    area_elements, area_assignments, nodes,
+    groups=groups,
+)
+```
+
+The algorithm:
+1. Groups findings by slab ID.
+2. For each slab with wall nodes, computes parametric ``(u, v)``
+   coordinates of the interior wall edge nodes.
+3. Creates a bilinear grid of new sub-areas along the split lines.
+4. Marks the original slab area as ``inactive`` and adds child sub-areas.
+5. Propagates section assignments and group memberships to children.
+
+### Controlling in the builder
+
+Both detection and automatic splitting are controlled by builder config
+flags:
+
+```python
+b = OpenSeesBuilder(md, {
+    ...,
+    detect_wall_slab_intersections=True,   # detect & report (default True)
+    split_slabs_at_walls=True,              # auto-split (default False)
+})
+```
+
+---
+
+## Wall‑slab intersection handling
+
+When a wall (vertical area — Z‑span > 0.5) and a slab (horizontal area —
+all Z within 0.5) intersect at the same storey level, the wall's edge
+nodes land *inside* the slab's area but are not connected to the slab's
+mesh.  This is a common source of singular stiffness matrices.
+
+### Detection
+
+``find_wall_nodes_inside_slabs()`` identifies wall nodes that lie within each
+slab's XY bounding box and at the slab's Z level:
+
+```python
+from fea_toolkit.model.geometry import find_wall_nodes_inside_slabs
+
+findings = find_wall_nodes_inside_slabs(
+    area_elements, area_assignments, nodes,
+)
+```
+
+Returns a list of findings, each containing the slab ID, wall ID, the
+offending nodes and their coordinates, and the slab bounding box.
+
+### Splitting
+
+``split_slabs_at_wall_intersections()`` subdivides each affected slab along
+the wall's intersection lines, creating new sub-areas that share nodes
+with the wall:
+
+```python
+from fea_toolkit.model.geometry import split_slabs_at_wall_intersections
+
+areas, assigns, nodes, next_tag = split_slabs_at_wall_intersections(
+    area_elements, area_assignments, nodes,
+    groups=groups,
+)
+```
+
+The algorithm:
+
+1. Groups findings by slab ID.
+2. For each slab with wall nodes, computes parametric ``(u, v)``
+   coordinates of the interior wall edge nodes.
+3. Creates a bilinear grid of new sub-areas along the split lines.
+4. Marks the original slab area as ``inactive`` and adds child sub-areas.
+5. Propagates section assignments and group memberships to children.
+
+### Controlling in the builder
+
+Both detection and automatic splitting are controlled by builder config
+flags:
+
+```python
+b = OpenSeesBuilder(md, {
+    ...,
+    detect_wall_slab_intersections=True,   # detect & report (default True)
+    split_slabs_at_walls=True,              # auto-split (default False)
+})
+```
+
+---
+
 ### Visualising discontinuities in Rhino
 
 Save detection results to JSON outside Rhino, then load and render inside
