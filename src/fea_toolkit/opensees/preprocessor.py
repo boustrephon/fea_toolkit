@@ -224,6 +224,56 @@ class Preprocessor:
         for i, sec_name in enumerate(md.sections.keys(), start=len(material_tags) + 1):
             section_tags[sec_name] = i
 
+        # ── 8b. Create type-specific section variants (stiffness factors) ──
+        # For each (section, element_type) pair where the type factor != 1.0,
+        # create a variant section in md.sections with a modified material E_mod.
+        # The AnalysisBuilder._add_beam_column looks for variant_key in section_tags.
+        _sf = self.config.get('stiffness_factors')
+        if _sf and frame_element_types:
+            # Determine which types have non-unity factors
+            variant_types = {etype for etype in ('beam', 'column', 'brace', 'wall', 'slab')
+                             if _sf.get(etype, 1.0) != 1.0}
+            # Collect which sections need which variant
+            _needed: Dict[str, set] = {}  # sec_name → set of etypes
+            for eid, etype in frame_element_types.items():
+                if etype in variant_types:
+                    sec_name = new_assigns.get(eid, '')
+                    if sec_name and sec_name in md.sections:
+                        _needed.setdefault(sec_name, set()).add(etype)
+            next_mat_tag = max(material_tags.values(), default=0) + 1
+            next_sec_tag = max(section_tags.values(), default=0) + 1
+            for sec_name, etypes in _needed.items():
+                base_sec = md.sections[sec_name]
+                for etype in sorted(etypes):
+                    variant_sec_name = f"{sec_name}__{etype}"
+                    if variant_sec_name in section_tags:
+                        continue
+                    # Clone the material with scaled E_mod
+                    base_mat_name = base_sec.material
+                    base_mat = md.materials.get(base_mat_name)
+                    if base_mat is None or base_mat.type.lower() != 'concrete':
+                        continue
+                    variant_mat_name = f"{base_mat_name}__{etype}"
+                    if variant_mat_name not in material_tags:
+                        factor = _sf.get(etype, 1.0)
+                        from copy import deepcopy
+                        var_mat = deepcopy(base_mat)
+                        if var_mat.E_mod:
+                            var_mat.E_mod *= factor
+                        if var_mat.G_mod:
+                            var_mat.G_mod *= factor
+                        md.materials[variant_mat_name] = var_mat
+                        material_tags[variant_mat_name] = next_mat_tag
+                        next_mat_tag += 1
+                    # Clone the section pointing to the modified material
+                    from copy import deepcopy
+                    var_sec = deepcopy(base_sec)
+                    var_sec.material = variant_mat_name
+                    var_sec.name = variant_sec_name
+                    md.sections[variant_sec_name] = var_sec
+                    section_tags[variant_sec_name] = next_sec_tag
+                    next_sec_tag += 1
+
         # ── 9. Remove orphan nodes (not referenced by any element) ──
         referenced: Set[str] = set()
         for fe in new_elems.values():
@@ -272,6 +322,7 @@ class Preprocessor:
             frame_gravity_loads=getattr(md, 'frame_gravity_loads', []),
             area_gravity_loads=getattr(md, 'area_gravity_loads', []),
             area_uniform_loads=getattr(md, 'area_uniform_loads', []),
+            mass_sources=getattr(md, 'mass_sources', {}),
         )
 
         return mesh_model
@@ -327,10 +378,19 @@ class Preprocessor:
         if not area_loads:
             return []
 
+        # When selection is provided, only include matching areas;
+        # otherwise include all area elements referenced by the loads.
+        load_area_ids = set(ld.area_id for ld in area_loads)
+        if selection is not None:
+            area_filter = {aid: ae for aid, ae in md.area_elements.items()
+                           if aid in sel_area_ids}
+        else:
+            area_filter = {aid: ae for aid, ae in md.area_elements.items()
+                           if aid in load_area_ids}
+
         return convert_area_loads_to_edge_loads(
             md.nodes,
-            {aid: ae for aid, ae in md.area_elements.items()
-             if aid in sel_area_ids},
+            area_filter,
             frame_elements,
             area_loads,
         )
@@ -497,7 +557,7 @@ class Preprocessor:
             if sel is not None:
                 area_ids = set(sel.get_area_ids(md))
 
-        for sid in sorted(area_ids, key=lambda x: int(x) if x.isdigit() else x):
+        for sid in sorted(area_ids, key=lambda x: (0, int(x)) if x.isdigit() else (1, x)):
             ae = md.area_elements.get(sid)
             if ae is None or getattr(ae, 'inactive', False):
                 continue

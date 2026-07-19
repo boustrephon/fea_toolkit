@@ -2963,6 +2963,7 @@ def find_wall_nodes_inside_slabs(
     area_assignments: Dict[str, str],
     nodes: Dict[str, 'Node'],
     z_tol: float = 0.5,
+    verbose: bool = False,
 ) -> List[Dict[str, Any]]:
     """Identify wall-area nodes that lie inside slab areas.
 

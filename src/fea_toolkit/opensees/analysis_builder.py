@@ -19,7 +19,8 @@ from ..model.sap_data import (
     ShellSection, Restraint,
 )
 from ..model.geometry import get_SAP_vecxz, global_to_local_distributed_load
-from ..model.geometry import convert_area_loads_to_edge_loads
+from ..model.geometry import convert_area_loads_to_edge_loads, polygon_area_3d
+from ..model.tree_utils import collect_descendants
 from ..model.selection import Selection
 
 
@@ -182,16 +183,39 @@ class AnalysisBuilder:
                 next_tag += 1
 
         # Create elastic materials for all materials
+        # Determine which material names are used by brace-truss sections so
+        # we can skip Elastic creation for them (the Hysteretic material
+        # replaces the Elastic at a distinct tag, but creating both is wasteful).
+        _brace_mat_names: set = set()
+        if self.config.get('brace_truss'):
+            from ..model.sap_data import (
+                PipeSection, AngleSection, DoubleAngleSection,
+                TeeSection, ChannelSection,
+            )
+            brace_sec_types = (
+                PipeSection, AngleSection, DoubleAngleSection,
+                TeeSection, ChannelSection,
+            )
+            explicit = self.config.get('brace_sections')
+            for sec_name, sec in self.mesh_model.sections.items():
+                if explicit is not None:
+                    if sec_name not in explicit:
+                        continue
+                elif not isinstance(sec, brace_sec_types):
+                    continue
+                _brace_mat_names.add(sec.material)
+
         for mat_name, mat in self.mesh_model.materials.items():
             tag = self.material_tags.get(mat_name)
             if tag is None:
                 continue
             E_mod = mat.E_mod or 200e9
-            if not self.config.get('brace_truss') or mat_name not in getattr(self, '_truss_mat_tags', {}):
-                try:
-                    ops.uniaxialMaterial('Elastic', tag, E_mod)
-                except Exception:
-                    pass  # may already exist
+            if mat_name in _brace_mat_names:
+                continue  # will be created as Hysteretic in brace-truss section
+            try:
+                ops.uniaxialMaterial('Elastic', tag, E_mod)
+            except Exception:
+                pass  # may already exist
 
         # Fiber section materials
         if self.config.get('create_fiber_sections'):
@@ -422,12 +446,15 @@ class AnalysisBuilder:
             max_rigid_tag = max(
                 (r[3] for r in self._offset_rigid_links),
                 default=0,
-            )
+            ) if self._offset_rigid_links else 0
             next_shell_tag = max(max_frame_tag, max_rigid_tag) + 1 + shell_count
             elem_tag = next_shell_tag
 
             if len(node_tags) == 3:
-                ops.element('ShellMITC4', elem_tag, *node_tags, sec_tag)
+                # Repeat last node tag for the 4th corner (Collapsed quad)
+                ops.element('ShellMITC4', elem_tag,
+                            node_tags[0], node_tags[1], node_tags[2],
+                            node_tags[2], sec_tag)
             else:
                 ops.element('ShellMITC4', elem_tag, *node_tags[:4], sec_tag)
             shell_count += 1
@@ -501,23 +528,20 @@ class AnalysisBuilder:
                                n_segments=n_seg, imperfection_ratio=imperf)
 
         # Rigid links from frame end offsets
-        for ni_tag, nj_tag, sec_name, elem_tag in self._offset_rigid_links:
-            sec = self.mesh_model.sections.get(sec_name)
-            if sec is None:
+        # The Preprocessor returns (link_id, node_i, node_j, link_tag) tuples.
+        # node_i and node_j are string node IDs — resolve to numeric tags.
+        for _link_id, _node_i_id, _node_j_id, link_tag in self._offset_rigid_links:
+            nd_i = self.mesh_model.nodes.get(_node_i_id)
+            nd_j = self.mesh_model.nodes.get(_node_j_id)
+            if nd_i is None or nd_j is None:
                 continue
-            if sec_name not in self.section_tags:
-                mat = self.mesh_model.materials.get(sec.material)
-                mat_tag = 9999
-                ops.uniaxialMaterial('Elastic', mat_tag, 200e9)
-                from ..model.sap_data import Section as SecCls
-                ops.section('Elastic', elem_tag, 200e9, getattr(sec, 'A', 1e9),
-                            getattr(sec, 'I33', 1e9), getattr(sec, 'I22', 1e9),
-                            80e9, getattr(sec, 'J', 1e9))
-                self.section_tags[sec_name] = elem_tag
-            ops.geomTransf('Linear', elem_tag)
-            ops.element('elasticBeamColumn', elem_tag, ni_tag, nj_tag, elem_tag,
-                        elem_tag, '-mass', 0.0)
-            self._rigid_link_elems[sec_name] = elem_tag
+            ni_tag = nd_i.node_tag
+            nj_tag = nd_j.node_tag
+            # Use a generic stiff section for the rigid link
+            ops.geomTransf('Linear', link_tag)
+            ops.element('elasticBeamColumn', link_tag, ni_tag, nj_tag, link_tag,
+                        link_tag, '-mass', 0.0)
+            self._rigid_link_elems[_link_id] = link_tag
 
         if self.config['verbose']:
             n = len([e for e in elements.values() if not getattr(e, 'inactive', False)])
@@ -634,6 +658,10 @@ class AnalysisBuilder:
             all_patterns.add(ld.pattern)
         for jl in getattr(self.mesh_model, 'joint_loads', []):
             all_patterns.add(jl.pattern)
+        for gl in getattr(self.mesh_model, 'frame_gravity_loads', []):
+            all_patterns.add(gl.pattern)
+        for agl in getattr(self.mesh_model, 'area_gravity_loads', []):
+            all_patterns.add(agl.pattern)
         all_patterns.add('Self weight')
         # Assign deterministic tags based on sorted pattern names
         _pat_tags = {
@@ -754,6 +782,149 @@ class AnalysisBuilder:
                     ops.load(node_tag, 0.0, 0.0, fz * scale, 0.0, 0.0, 0.0)
                     sw_total += abs(fz * scale)
                 self.load_totals[sw_pname] = sw_total
+
+        # ── Frame gravity loads (explicit multipliers on self-weight) ──
+        for gl in getattr(self.mesh_model, 'frame_gravity_loads', []):
+            pname = gl.pattern
+            if pattern_scales is not None and pname not in pattern_scales:
+                continue
+            scale = pattern_scales.get(pname, 1.0) if pattern_scales else 1.0
+            if abs(scale) < 1e-12:
+                continue
+            # Create pattern if needed
+            if pname not in patterns_created:
+                ts_tag, ptag = _pat_tags.get(pname, (1000, 100))
+                ops.timeSeries('Linear', ts_tag)
+                ops.pattern('Plain', ptag, ts_tag)
+                patterns_created.add(pname)
+            elem = elements.get(gl.frame_id)
+            if elem is None or getattr(elem, 'inactive', False):
+                continue
+            sec_name = assignments.get(gl.frame_id, '')
+            if not sec_name:
+                continue
+            sec = self.mesh_model.sections.get(sec_name)
+            if sec is None:
+                continue
+            mat = self.mesh_model.materials.get(sec.material)
+            if mat is None or abs(mat.unit_weight) < 1e-12:
+                continue
+            ni = self.mesh_model.nodes.get(elem.node_i)
+            nj = self.mesh_model.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            L = math.sqrt((nj.x - ni.x)**2 + (nj.y - ni.y)**2 + (nj.z - ni.z)**2)
+            if L < 1e-12:
+                continue
+            sw_per_len = getattr(sec, 'A', 0.0) * mat.unit_weight
+            fx = sw_per_len * L * gl.multiplier_x * scale * 0.5
+            fy = sw_per_len * L * gl.multiplier_y * scale * 0.5
+            fz = sw_per_len * L * gl.multiplier_z * scale * 0.5
+            nd_i = self.mesh_model.nodes.get(elem.node_i)
+            nd_j = self.mesh_model.nodes.get(elem.node_j)
+            if nd_i is not None:
+                ops.load(nd_i.node_tag, fx, fy, fz, 0.0, 0.0, 0.0)
+            if nd_j is not None:
+                ops.load(nd_j.node_tag, fx, fy, fz, 0.0, 0.0, 0.0)
+            if pname not in self._gravity_load_totals:
+                self._gravity_load_totals[pname] = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0,
+                                                     'mx': 0.0, 'my': 0.0, 'mz': 0.0}
+            self._gravity_load_totals[pname]['fx'] += fx * 2
+            self._gravity_load_totals[pname]['fy'] += fy * 2
+            self._gravity_load_totals[pname]['fz'] += fz * 2
+
+        # ── Area gravity loads (explicit multipliers) ────────────
+        for agl in getattr(self.mesh_model, 'area_gravity_loads', []):
+            pname = agl.pattern
+            if pattern_scales is not None and pname not in pattern_scales:
+                continue
+            scale = pattern_scales.get(pname, 1.0) if pattern_scales else 1.0
+            if abs(scale) < 1e-12:
+                continue
+            if pname not in patterns_created:
+                ts_tag, ptag = _pat_tags.get(pname, (1000, 100))
+                ops.timeSeries('Linear', ts_tag)
+                ops.pattern('Plain', ptag, ts_tag)
+                patterns_created.add(pname)
+            area_elem = self.mesh_model.area_elements.get(agl.area_id)
+            if area_elem is None:
+                continue
+            if getattr(area_elem, 'inactive', False):
+                # Parent was split/meshed — apply to all leaf descendants
+                sub_ids = collect_descendants(
+                    agl.area_id, self.mesh_model.area_elements)
+                if not sub_ids:
+                    continue
+                for sub_id in sub_ids:
+                    sub_elem = self.mesh_model.area_elements[sub_id]
+                    sec_name = self.mesh_model.area_assignments.get(sub_id, '')
+                    if not sec_name:
+                        continue
+                    sec = self.mesh_model.sections.get(sec_name)
+                    if sec is None:
+                        continue
+                    mat = self.mesh_model.materials.get(sec.material)
+                    if mat is None or abs(mat.unit_weight) < 1e-12:
+                        continue
+                    thickness = getattr(sub_elem, 'thickness', 0.0) or 0.0
+                    if thickness < 1e-12:
+                        continue
+                    corner_pts = []
+                    for nid in sub_elem.node_ids:
+                        nd = self.mesh_model.nodes.get(nid)
+                        if nd is None:
+                            break
+                        corner_pts.append((nd.x, nd.y, nd.z))
+                    if len(corner_pts) < 3:
+                        continue
+                    area_mag = polygon_area_3d(corner_pts)
+                    if area_mag < 1e-12:
+                        continue
+                    sw_per_area = thickness * mat.unit_weight
+                    tfx = sw_per_area * area_mag * agl.multiplier_x * scale
+                    tfy = sw_per_area * area_mag * agl.multiplier_y * scale
+                    tfz = sw_per_area * area_mag * agl.multiplier_z * scale
+                    n_c = len(sub_elem.node_ids)
+                    for nid in sub_elem.node_ids:
+                        nd = self.mesh_model.nodes.get(nid)
+                        if nd is not None:
+                            ops.load(nd.node_tag, tfx / n_c, tfy / n_c, tfz / n_c,
+                                     0.0, 0.0, 0.0)
+                continue
+            # Active (unmeshed) area element
+            sec_name = self.mesh_model.area_assignments.get(agl.area_id, '')
+            if not sec_name:
+                continue
+            sec = self.mesh_model.sections.get(sec_name)
+            if sec is None:
+                continue
+            mat = self.mesh_model.materials.get(sec.material)
+            if mat is None or abs(mat.unit_weight) < 1e-12:
+                continue
+            thickness = getattr(area_elem, 'thickness', 0.0) or 0.0
+            if thickness < 1e-12:
+                continue
+            corner_pts = []
+            for nid in area_elem.node_ids:
+                nd = self.mesh_model.nodes.get(nid)
+                if nd is None:
+                    break
+                corner_pts.append((nd.x, nd.y, nd.z))
+            if len(corner_pts) < 3:
+                continue
+            area_mag = polygon_area_3d(corner_pts)
+            if area_mag < 1e-12:
+                continue
+            sw_per_area = thickness * mat.unit_weight
+            tfx = sw_per_area * area_mag * agl.multiplier_x * scale
+            tfy = sw_per_area * area_mag * agl.multiplier_y * scale
+            tfz = sw_per_area * area_mag * agl.multiplier_z * scale
+            n_c = len(area_elem.node_ids)
+            for nid in area_elem.node_ids:
+                nd = self.mesh_model.nodes.get(nid)
+                if nd is not None:
+                    ops.load(nd.node_tag, tfx / n_c, tfy / n_c, tfz / n_c,
+                             0.0, 0.0, 0.0)
 
     # ── Rigid diaphragms ─────────────────────────────────────────
 
@@ -888,6 +1059,300 @@ class AnalysisBuilder:
                     continue
 
         return result
+
+    # ═══════════════════════════════════════════════════════════════
+    # Mass
+    # ═══════════════════════════════════════════════════════════════
+
+    def compute_seismic_masses(self, g: Optional[float] = None) -> Dict[str, float]:
+        """Compute lumped nodal masses from the model's MASS SOURCE entries.
+
+        All mass contributions are lumped to nodes and assigned via
+        ``ops.mass(node, m, m, m, 0, 0, 0)``.
+
+        Args:
+            g: Gravitational acceleration.  ``None`` = auto-detect from
+                model units (SI default 9.80665 m/s²).
+
+        Returns:
+            Dictionary mapping node ID → total lumped mass (tonnes).
+        """
+        from ..utils import g_from_units
+        if g is None:
+            g = g_from_units(self.mesh_model.units)
+
+        mm = self.mesh_model
+        elements = mm.frame_elements
+        assignments = mm.frame_assignments
+        dist_loads = mm.frame_dist_loads
+
+        node_mass: Dict[str, float] = {}
+
+        for ms in getattr(mm, 'mass_sources', {}).values():
+            mass_sources = getattr(mm, 'mass_sources', {})
+            # mass_sources may be empty if not populated from parser
+            if not mass_sources:
+                # Fallback: use element self-weight + DEAD load pattern
+                self._mass_from_elements(mm, elements, assignments, node_mass, g)
+                self._mass_from_dist_loads(mm, elements, dist_loads, node_mass, g,
+                                           ["DEAD"])
+                continue
+
+            if ms.elements:
+                self._mass_from_elements(mm, elements, assignments, node_mass, g)
+
+            if ms.loads and ms.load_pattern:
+                for lp_name, mult in ms.load_pattern.items():
+                    if abs(mult) < 1e-12:
+                        continue
+                    self._mass_from_dist_loads(mm, elements, dist_loads,
+                                               node_mass, g, [lp_name], mult)
+                    self._mass_from_joint_loads(mm, node_mass, g, lp_name, mult)
+                    self._mass_from_area_gravity(mm, node_mass, g, lp_name, mult)
+                    self._mass_from_area_uniform(mm, node_mass, g, lp_name, mult)
+
+        # Assign masses to OpenSees nodes
+        for nid, m in node_mass.items():
+            nd = mm.nodes.get(nid)
+            if nd is None:
+                continue
+            tag = nd.node_tag
+            if m > 0:
+                ops.mass(tag, m, m, m, 0, 0, 0)
+            else:
+                ops.mass(tag, 1e-6, 1e-6, 1e-6, 0, 0, 0)
+
+        self.node_masses = node_mass
+        self._mass_g = g
+
+        if self.config.get('verbose'):
+            total = sum(node_mass.values())
+            print(f"  Total seismic mass: {total:.2f} tonnes")
+            print(f"  Total seismic weight: {total * g / 1000:.2f} MN")
+
+        return node_mass
+
+    def _mass_from_elements(self, mm, elements, assignments,
+                             node_mass, g):
+        """Add mass from element self-weight."""
+        for eid, elem in elements.items():
+            if getattr(elem, 'inactive', False):
+                continue
+            sec_name = assignments.get(eid, '')
+            if not sec_name:
+                continue
+            sec = mm.sections.get(sec_name)
+            if sec is None:
+                continue
+            mat = mm.materials.get(sec.material)
+            if mat is None or abs(mat.unit_weight) < 1e-12:
+                continue
+            ni = mm.nodes.get(elem.node_i)
+            nj = mm.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+            if L < 1e-12:
+                continue
+            weight = getattr(sec, 'A', 0.0) * mat.unit_weight * L
+            mass = weight / g
+            node_mass[elem.node_i] = node_mass.get(elem.node_i, 0.0) + mass * 0.5
+            node_mass[elem.node_j] = node_mass.get(elem.node_j, 0.0) + mass * 0.5
+
+        # Area elements
+        for aid, ae in mm.area_elements.items():
+            if getattr(ae, 'inactive', False):
+                continue
+            sec_name = mm.area_assignments.get(aid, '')
+            if not sec_name:
+                continue
+            sec = mm.sections.get(sec_name)
+            if sec is None:
+                continue
+            mat = mm.materials.get(sec.material)
+            if mat is None or abs(mat.unit_weight) < 1e-12:
+                continue
+            thickness = getattr(ae, 'thickness', 0.0) or 0.0
+            if thickness < 1e-12:
+                continue
+            corner_pts = []
+            for nid in ae.node_ids:
+                nd = mm.nodes.get(nid)
+                if nd is None:
+                    break
+                corner_pts.append((nd.x, nd.y, nd.z))
+            if len(corner_pts) < 3:
+                continue
+            area_mag = polygon_area_3d(corner_pts)
+            if area_mag < 1e-12:
+                continue
+            weight = area_mag * thickness * mat.unit_weight
+            mass = weight / g
+            n_c = len(ae.node_ids)
+            for nid in ae.node_ids:
+                node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_c
+
+    def _mass_from_dist_loads(self, mm, elements, dist_loads,
+                               node_mass, g, pattern_names, mult=1.0):
+        """Add mass from frame distributed loads in given patterns."""
+        for ld in dist_loads or []:
+            if ld.pattern not in pattern_names:
+                continue
+            elem = elements.get(ld.frame_id)
+            if elem is None or getattr(elem, 'inactive', False):
+                continue
+            ni = mm.nodes.get(elem.node_i)
+            nj = mm.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+            if L < 1e-12:
+                continue
+            load_len = ld.dist_b - ld.dist_a
+            avg = (ld.val_a + ld.val_b) * 0.5
+            total_force = avg * load_len * mult
+            mass = total_force / g
+            node_mass[elem.node_i] = node_mass.get(elem.node_i, 0.0) + mass * 0.5
+            node_mass[elem.node_j] = node_mass.get(elem.node_j, 0.0) + mass * 0.5
+
+    def _mass_from_joint_loads(self, mm, node_mass, g, lp_name, mult):
+        """Add mass from joint loads in the given pattern."""
+        for jl in getattr(mm, 'joint_loads', []):
+            if jl.pattern != lp_name:
+                continue
+            total_force = abs(jl.fz) * mult
+            mass = total_force / g
+            node_mass[jl.node_id] = node_mass.get(jl.node_id, 0.0) + mass
+
+    def _mass_from_area_gravity(self, mm, node_mass, g, lp_name, mult):
+        """Add mass from area gravity loads in the given pattern."""
+        from ..model.tree_utils import collect_descendants
+        for agl in getattr(mm, 'area_gravity_loads', []):
+            if agl.pattern != lp_name:
+                continue
+            ae = mm.area_elements.get(agl.area_id)
+            if ae is None:
+                continue
+            if getattr(ae, 'inactive', False):
+                sub_ids = collect_descendants(agl.area_id, mm.area_elements)
+                if not sub_ids:
+                    continue
+                for sub_id in sub_ids:
+                    sub_elem = mm.area_elements.get(sub_id)
+                    if sub_elem is None:
+                        continue
+                    sec_name = mm.area_assignments.get(sub_id, '')
+                    if not sec_name:
+                        continue
+                    sec = mm.sections.get(sec_name)
+                    if sec is None:
+                        continue
+                    mat = mm.materials.get(sec.material)
+                    if mat is None or abs(mat.unit_weight) < 1e-12:
+                        continue
+                    thickness = getattr(sub_elem, 'thickness', 0.0) or 0.0
+                    if thickness < 1e-12:
+                        continue
+                    corner_pts = []
+                    for nid in sub_elem.node_ids:
+                        nd = mm.nodes.get(nid)
+                        if nd is None:
+                            break
+                        corner_pts.append((nd.x, nd.y, nd.z))
+                    if len(corner_pts) < 3:
+                        continue
+                    area_mag = polygon_area_3d(corner_pts)
+                    if area_mag < 1e-12:
+                        continue
+                    sw_per_area = thickness * mat.unit_weight
+                    total_fz = sw_per_area * area_mag * abs(agl.multiplier_z) * mult
+                    mass = total_fz / g
+                    n_c = len(sub_elem.node_ids)
+                    for nid in sub_elem.node_ids:
+                        node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_c
+                continue
+            sec_name = mm.area_assignments.get(agl.area_id, '')
+            if not sec_name:
+                continue
+            sec = mm.sections.get(sec_name)
+            if sec is None:
+                continue
+            mat = mm.materials.get(sec.material)
+            if mat is None or abs(mat.unit_weight) < 1e-12:
+                continue
+            thickness = getattr(ae, 'thickness', 0.0) or 0.0
+            if thickness < 1e-12:
+                continue
+            corner_pts = []
+            for nid in ae.node_ids:
+                nd = mm.nodes.get(nid)
+                if nd is None:
+                    break
+                corner_pts.append((nd.x, nd.y, nd.z))
+            if len(corner_pts) < 3:
+                continue
+            area_mag = polygon_area_3d(corner_pts)
+            if area_mag < 1e-12:
+                continue
+            sw_per_area = thickness * mat.unit_weight
+            total_fz = sw_per_area * area_mag * abs(agl.multiplier_z) * mult
+            mass = total_fz / g
+            n_c = len(ae.node_ids)
+            for nid in ae.node_ids:
+                node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_c
+
+    def _mass_from_area_uniform(self, mm, node_mass, g, lp_name, mult):
+        """Add mass from area uniform loads in the given pattern."""
+        from ..model.tree_utils import collect_descendants
+        for aul in getattr(mm, 'area_uniform_loads', []):
+            if aul.pattern != lp_name:
+                continue
+            ae = mm.area_elements.get(aul.area_id)
+            if ae is None:
+                continue
+            if getattr(ae, 'inactive', False):
+                sub_ids = collect_descendants(aul.area_id, mm.area_elements)
+                if not sub_ids:
+                    continue
+                for sub_id in sub_ids:
+                    sub_elem = mm.area_elements.get(sub_id)
+                    if sub_elem is None:
+                        continue
+                    corner_pts = []
+                    for nid in sub_elem.node_ids:
+                        nd = mm.nodes.get(nid)
+                        if nd is None:
+                            break
+                        corner_pts.append((nd.x, nd.y, nd.z))
+                    if len(corner_pts) < 3:
+                        continue
+                    area_mag = polygon_area_3d(corner_pts)
+                    if area_mag < 1e-12:
+                        continue
+                    pressure = abs(aul.value)
+                    total_force = pressure * area_mag * mult
+                    mass = total_force / g
+                    n_c = len(sub_elem.node_ids)
+                    for nid in sub_elem.node_ids:
+                        node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_c
+                continue
+            corner_pts = []
+            for nid in ae.node_ids:
+                nd = mm.nodes.get(nid)
+                if nd is None:
+                    break
+                corner_pts.append((nd.x, nd.y, nd.z))
+            if len(corner_pts) < 3:
+                continue
+            area_mag = polygon_area_3d(corner_pts)
+            if area_mag < 1e-12:
+                continue
+            pressure = abs(aul.value)
+            total_force = pressure * area_mag * mult
+            mass = total_force / g
+            n_c = len(ae.node_ids)
+            for nid in ae.node_ids:
+                node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_c
 
     # ═══════════════════════════════════════════════════════════════
     # Utilities

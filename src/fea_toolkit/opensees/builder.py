@@ -1937,7 +1937,10 @@ class OpenSeesBuilder:
             self.load_totals = analysis.load_totals
             self._sw_load_totals = analysis._sw_load_totals
             self._gravity_load_totals = analysis._gravity_load_totals
+            self._created_node_tags = analysis._created_node_tags
             self._base_z = analysis._base_z
+            self.node_masses = analysis.node_masses
+            self._analysis = analysis
             # Sync model data with MeshModel so existing callers that read
             # builder.model.nodes, builder.model.frame_elements, etc. see
             # the prepared topology (including split/mesh-created nodes).

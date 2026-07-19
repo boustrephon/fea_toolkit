@@ -13,7 +13,7 @@ from .sap_data import (
     Node, Restraint, Material, Section,
     FrameElement, AreaElement, Group,
     FrameDistributedLoad, JointLoad, GravityLoad,
-    AreaGravityLoad, AreaUniformLoad,
+    AreaGravityLoad, AreaUniformLoad, MassSource,
 )
 
 
@@ -44,10 +44,13 @@ class MeshModel:
     frame_gravity_loads: List[GravityLoad] = field(default_factory=list)
     area_gravity_loads: List[AreaGravityLoad] = field(default_factory=list)
     area_uniform_loads: List[AreaUniformLoad] = field(default_factory=list)
+    mass_sources: Dict[str, MassSource] = field(default_factory=dict)
 
     # ── Constraints (detected, not yet applied to OpenSees) ───────
     edge_constraint_pairs: List[tuple] = field(default_factory=list)
-    #   [(master_tag, slave_tag), ...]  — coarse→fine constraints
+    #   [(merged_nodes, master_chain, slave_nodes, type_a, type_b), ...]
+    #   — from find_constraint_edges: merged node dict, master chain,
+    #     slave nodes, and the two constraint type labels
     diaphragm_levels: List[float] = field(default_factory=list)
 
     # ── Rigid links from frame end offsets ────────────────────────
