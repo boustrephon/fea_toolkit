@@ -470,8 +470,8 @@ def create_result_flags(
 
         # Compute local axes (SAP2000 convention, angle=0 default)
         try:
-            from ..model.geometry import get_SAP_vecxz
-            vecxz = get_SAP_vecxz(axis_u, 0.0)
+            from ..model.geometry import get_local_axes
+            _, vec_y, vec_z = get_local_axes(axis_u, 0.0)
         except (ImportError, ModuleNotFoundError):
             _gz = np.array([0.0, 0.0, 1.0])
             if abs(np.dot(axis_u, _gz)) > 0.9999:
@@ -480,9 +480,9 @@ def create_result_flags(
             else:
                 vecxz = np.cross(axis_u, _gz)
                 vecxz = vecxz / np.linalg.norm(vecxz)
-        vec_z = vecxz / np.linalg.norm(vecxz)
-        vec_y = np.cross(vec_z, axis_u)
-        vec_y = vec_y / np.linalg.norm(vec_y)
+            vec_z = vecxz / np.linalg.norm(vecxz)
+            vec_y = np.cross(vec_z, axis_u)
+            vec_y = vec_y / np.linalg.norm(vec_y)
 
         # Flag offset direction (vn) based on quantity
         # Positive Fi → offset in +vn at I-end
