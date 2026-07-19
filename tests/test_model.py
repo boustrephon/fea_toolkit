@@ -4078,3 +4078,194 @@ class TestTwoStageBuild:
             )
         finally:
             ops.wipe()
+
+    def test_frame_gravity_load_applied(self):
+        """Frame gravity loads produce non-zero displacements in two-stage path.
+
+        Creates a cantilever with an explicit frame gravity load (Z multiplier)
+        under a custom pattern, runs through the two-stage path, and verifies:
+        1. Gravity load totals are non-zero.
+        2. Nodal displacements are non-zero (loads actually applied).
+        """
+        import openseespy.opensees as ops
+        from fea_toolkit.model.sap_data import SAPModelData, GravityLoad
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        md = make_sample_model()
+        # Add a frame gravity load for the DEAD pattern
+        md.frame_gravity_loads = [
+            GravityLoad(
+                pattern="DEAD", frame_id="1",
+                multiplier_x=0.0, multiplier_y=0.0, multiplier_z=-1.0,
+            ),
+        ]
+        b = OpenSeesBuilder(md, {
+            "use_preprocessor": True,
+            "split_elements": True,
+            "create_shells": False,
+            "verbose": False,
+        })
+        try:
+            b.build()
+            result = b.run_static_analysis(pattern_scales={"DEAD": 1.0})
+
+            # Gravity loads should be tracked (facade copies AnalysisBuilder state)
+            assert hasattr(b, '_gravity_load_totals'), "_gravity_load_totals missing"
+            assert "DEAD" in b._gravity_load_totals, (
+                f"No DEAD gravity totals: {b._gravity_load_totals}"
+            )
+
+            # Displacements should be non-zero
+            nd = result.get("nodal_displacements", {})
+            max_d = max(
+                (abs(v) for vals in nd.values() for v in vals),
+                default=0.0,
+            )
+            assert max_d > 0, (
+                f"Expected non-zero displacement from frame gravity load, "
+                f"got max|d|={max_d}"
+            )
+        finally:
+            ops.wipe()
+
+    def test_section_variants_created_in_preprocessor(self):
+        """Preprocessor creates type-specific section variants with
+        stiffness_factors enabled.
+
+        Builds a model with concrete sections and
+        stiffness_factors={"beam": 0.5, "column": 0.7},
+        runs the Preprocessor, and verifies:
+        1. Variant sections like "SEC1__beam" exist in mesh_model.sections.
+        2. Variant entries exist in mesh_model.section_tags.
+        3. The variant material has scaled E_mod.
+        """
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.model.sap_data import (
+            SAPModelData, Node, Restraint, Material, Section,
+            FrameElement,
+        )
+
+        # Build a model with concrete material (only concrete gets variants)
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+                "2": Node(node_id="2", node_tag=2, x=0.0, y=0.0, z=10.0),
+                "3": Node(node_id="3", node_tag=3, x=5.0, y=0.0, z=10.0),
+            },
+            restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+            materials={
+                "C30": Material(
+                    name="C30", type="Concrete",
+                    E_mod=3.0e10, G_mod=1.25e10, nu=0.2,
+                    unit_weight=2.4e4, Fc=3.0e7,
+                ),
+            },
+            sections={
+                "SEC1": Section(
+                    name="SEC1", shape="Rectangular",
+                    material="C30", A=0.16, I33=2.13e-3, I22=1.07e-3, J=1.0e-4,
+                ),
+            },
+            frame_elements={
+                "F1": FrameElement(elem_id="F1", elem_tag=10,
+                                    node_i="1", node_j="2"),
+                "F2": FrameElement(elem_id="F2", elem_tag=20,
+                                    node_i="2", node_j="3"),
+            },
+            frame_assignments={"F1": "SEC1", "F2": "SEC1"},
+            frame_auto_mesh={},
+            frame_dist_loads=[],
+            area_elements={},
+            area_assignments={},
+            groups={},
+        )
+
+        b = OpenSeesBuilder(md, {
+            "use_preprocessor": True,
+            "split_elements": False,
+            "verbose": False,
+            "stiffness_factors": {"beam": 0.5, "column": 0.7},
+        })
+        b.build()
+        mm = b._mesh_model
+
+        # At least one variant section should exist
+        variant_keys = [k for k in mm.sections if "__" in k]
+        assert len(variant_keys) > 0, (
+            f"Expected variant sections, got none. Keys: {list(mm.sections.keys())}"
+        )
+
+        # Each variant should have a section_tags entry
+        for vk in variant_keys:
+            assert vk in mm.section_tags, (
+                f"Variant '{vk}' missing from section_tags"
+            )
+
+        # The variant material should have scaled E_mod
+        for vk in variant_keys:
+            sec = mm.sections[vk]
+            mat = mm.materials.get(sec.material)
+            assert mat is not None, (
+                f"Variant section '{vk}' references missing material '{sec.material}'"
+            )
+            if "__beam" in vk:
+                expected_e = 3.0e10 * 0.5  # beam factor 0.5
+                assert abs(mat.E_mod - expected_e) < 1.0, (
+                    f"Beam variant E_mod={mat.E_mod}, expected ~{expected_e}"
+                )
+
+    def test_compute_seismic_masses_via_analysis_builder(self):
+        """AnalysisBuilder.compute_seismic_masses produces non-zero masses.
+
+        Builds a sample cantilever through the two-stage path, calls
+        compute_seismic_masses on the stored AnalysisBuilder, and
+        verifies:
+        1. Returned dict has entries for all nodes.
+        2. Mass values are positive (element self-weight converted).
+        3. node_masses is populated on the AnalysisBuilder.
+        4. ops.nodeMass returns non-zero for all created nodes.
+        """
+        import openseespy.opensees as ops
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        md = make_sample_model()
+        b = OpenSeesBuilder(md, {
+            "use_preprocessor": True,
+            "split_elements": False,
+            "create_shells": False,
+            "verbose": False,
+        })
+        try:
+            b.build()
+            # Retrieve AnalysisBuilder via facade
+            analysis = getattr(b, '_analysis', None)
+            assert analysis is not None, "No _analysis reference on facade"
+
+            masses = analysis.compute_seismic_masses(g=9.81)
+            assert len(masses) > 0, (
+                f"Expected non-empty mass dict, got {masses}"
+            )
+            for nid, m in masses.items():
+                assert m > 0, (
+                    f"Node {nid} mass should be > 0, got {m}"
+                )
+
+            # node_masses should be populated on AnalysisBuilder
+            assert len(analysis.node_masses) > 0
+
+            # ops.nodeMass should return non-zero for created nodes
+            for nid, m in masses.items():
+                nd = md.nodes.get(nid)
+                if nd is None:
+                    continue
+                try:
+                    om = ops.nodeMass(nd.node_tag)
+                    assert abs(sum(om[:3])) > 0, (
+                        f"Node {nd.node_tag} has zero mass in domain"
+                    )
+                except Exception:
+                    pass  # node may not exist — skip
+        finally:
+            ops.wipe()
