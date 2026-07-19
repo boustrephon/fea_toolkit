@@ -706,6 +706,8 @@ class TestTrapezoidalForceSplit:
 
 
 class TestSpatialGrid:
+    """Unit tests for SpatialGrid — spatial indexing utility."""
+
     def test_add_and_query(self):
         grid = SpatialGrid(cell_size=1.0)
         grid.add_point("A", (0.5, 0.5, 0.5))
@@ -717,6 +719,81 @@ class TestSpatialGrid:
         grid = SpatialGrid(cell_size=1.0)
         results = grid.points_in_bbox((10, 10, 10), (11, 11, 11))
         assert len(results) == 0
+
+    def test_cell_boundary_negative_coords(self):
+        """Points with negative coordinates map to correct cells.
+
+        Note: SpatialGrid does cell-level pre-filtering, so a query
+        returns all points from cells overlapping the bbox, even if
+        the point itself is outside the bbox.  This test verifies
+        the cell mapping is correct.
+        """
+        grid = SpatialGrid(cell_size=1.0)
+        grid.add_point("N1", (-0.5, -0.5, -0.5))   # → cell (-1,-1,-1)
+        grid.add_point("N2", (-1.5, -1.5, -1.5))   # → cell (-2,-2,-2)
+        # Query covering cells (-1,-1,-1): includes N1 + possibly N2
+        r1 = grid.points_in_bbox((-1, -1, -1), (0, 0, 0))
+        ids_1 = {p[0] for p in r1}
+        assert "N1" in ids_1  # N1 is in overlapping cell (-1,-1,-1)
+        # Query covering cells (-2,-2,-2): includes N2
+        r2 = grid.points_in_bbox((-2, -2, -2), (-1, -1, -1))
+        ids_2 = {p[0] for p in r2}
+        assert "N2" in ids_2  # N2 is in overlapping cell (-2,-2,-2)
+
+    def test_multi_cell_query(self):
+        """Bbox spanning multiple cells returns points from all touched cells."""
+        grid = SpatialGrid(cell_size=2.0)  # 2m cells
+        grid.add_point("A", (0, 0, 0))      # cell (0,0,0)
+        grid.add_point("B", (2.1, 2.1, 2.1))  # cell (1,1,1) — just over boundary
+        grid.add_point("C", (10, 10, 10))     # cell (5,5,5) — far away
+        results = grid.points_in_bbox((-1, -1, -1), (5, 5, 5))
+        assert len(results) == 2
+        ids = {r[0] for r in results}
+        assert ids == {"A", "B"}
+
+    def test_cell_size_consistency(self):
+        """Cell boundary at multiples of cell_size is deterministic.
+
+        SpatialGrid is a cell-level pre-filter — a query returns all
+        points from overlapping cells, even if the point itself lies
+        outside the query bbox.  The caller (e.g. point_on_segment)
+        is responsible for exact filtering.
+        """
+        grid = SpatialGrid(cell_size=0.5)
+        # Exactly on cell boundaries
+        grid.add_point("X", (0.0, 0.0, 0.0))   # → cell (0,0,0)
+        grid.add_point("Y", (0.5, 0.5, 0.5))   # → cell (1,1,1)
+        grid.add_point("Z", (1.0, 1.0, 1.0))   # → cell (2,2,2)
+        # All three should be in distinct cells
+        r_all = grid.points_in_bbox((-0.1, -0.1, -0.1), (1.1, 1.1, 1.1))
+        assert len(r_all) == 3
+        # Query covering cells (0,0,0) and (1,1,1) — returns X and Y
+        # (X is outside the bbox but in an overlapping cell)
+        r_xy = grid.points_in_bbox((0.25, 0.25, 0.25), (0.75, 0.75, 0.75))
+        ids = {p[0] for p in r_xy}
+        assert "Y" in ids  # Y is inside the bbox
+
+    def test_default_cell_size(self):
+        """Default cell_size is 1.0."""
+        grid = SpatialGrid()
+        assert grid.cell_size == 1.0
+
+    def test_custom_cell_size(self):
+        """Custom cell_size is stored and affects cell mapping."""
+        grid = SpatialGrid(cell_size=5.0)
+        grid.add_point("P", (12.0, 12.0, 12.0))  # cell (2,2,2)
+        results = grid.points_in_bbox((10, 10, 10), (15, 15, 15))
+        assert len(results) == 1
+        assert results[0][0] == "P"
+
+    def test_large_model_extent(self):
+        """Grid with large cell_size still works (simulating large model)."""
+        grid = SpatialGrid(cell_size=10.0)
+        for i in range(5):
+            grid.add_point(f"N{i}", (i * 10.0, 0, 0))
+        # Query that spans all cells
+        results = grid.points_in_bbox((-1, -1, -1), (50, 1, 1))
+        assert len(results) == 5
 
 
 # ============================================================================
@@ -3031,6 +3108,7 @@ class TestBuilderAreaMeshing:
         try:
             b = OpenSeesBuilder(md, {
                 "verbose": False, "create_shells": True,
+                "use_preprocessor": False,
             })
             b.build()
 
@@ -3179,6 +3257,7 @@ class TestBuilderHingeModel:
             'element_type': 'elasticBeamColumn',
             'hinge_model': 'lumped',
             'verbose': False,
+            'use_preprocessor': False,
         })
         try:
             b.build()
@@ -3550,22 +3629,419 @@ class TestTwoStageBuild:
             ops.wipe()
 
     def test_legacy_path_unchanged(self):
-        """use_preprocessor=False (default) works identically to before."""
+        """use_preprocessor=False (deprecated) still works."""
         import openseespy.opensees as ops
         from examples.sample_model import make_sample_model
         from fea_toolkit.opensees.builder import OpenSeesBuilder
 
         md = make_sample_model()
         b = OpenSeesBuilder(md, {
+            "use_preprocessor": False,
+            "split_elements": True,
+            "create_shells": False,
+            "verbose": False,
+        })
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            try:
+                b.build()
+                # Legacy path produces the same state
+                assert len(b.frame_tag_map) > 0
+                node_tags = ops.getNodeTags()
+                assert len(node_tags) > 0
+            finally:
+                ops.wipe()
+            ops.wipe()
+
+
+    def test_split_frames_at_shell_subdiv_direct(self):
+        """_split_frames_at_shell_subdiv splits frames at shell mesh nodes.
+
+        Creates a model with a frame that passes through a shell area.
+        After area meshing, the frame should be split at the shell mesh
+        edge nodes that lie on it.  This exercises the SpatialGrid
+        broad-phase pre-filter used inside the method.
+        """
+        from fea_toolkit.opensees.preprocessor import Preprocessor
+        from fea_toolkit.model.sap_data import (
+            SAPModelData, Node, Restraint, Material, Section,
+            FrameElement, AreaElement, AreaMesh,
+        )
+
+        # Frame along X-axis from (0,2,0) to (6,2,0)
+        # Shell area at z=0 spanning x=2..4, y=0..4
+        # The frame passes through the shell's mesh edge.
+        # Use float coordinates to avoid numpy int/float casting
+        # issues in mesh_area_elements.
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0.0, y=2.0, z=0.0),
+                "2": Node(node_id="2", node_tag=2, x=6.0, y=2.0, z=0.0),
+                "3": Node(node_id="3", node_tag=3, x=2.0, y=0.0, z=0.0),
+                "4": Node(node_id="4", node_tag=4, x=4.0, y=0.0, z=0.0),
+                "5": Node(node_id="5", node_tag=5, x=4.0, y=4.0, z=0.0),
+                "6": Node(node_id="6", node_tag=6, x=2.0, y=4.0, z=0.0),
+            },
+            restraints={},
+            materials={"C40": Material(name="C40", type="Concrete", E_mod=3e7)},
+            sections={
+                "BM": Section(name="BM", material="C40", shape="Rectangular",
+                              A=0.16, I33=0.002, I22=0.002, J=0.001),
+                "SLAB": Section(name="SLAB", material="C40", shape="Shell",
+                                A=0, I33=0, I22=0, J=0),
+            },
+            frame_elements={
+                "F1": FrameElement(elem_id="F1", elem_tag=10,
+                                    node_i="1", node_j="2"),
+            },
+            area_elements={
+                "A1": AreaElement(area_id="A1", area_tag=20,
+                                   node_ids=["3", "4", "5", "6"],
+                                   thickness=0.15),
+            },
+            frame_assignments={"F1": "BM"},
+            area_assignments={"A1": "SLAB"},
+            groups={},
+            frame_auto_mesh={
+                "F1": {"AtJoints": True, "AtFrames": False},
+            },
+        )
+
+        # Set up area meshing: 2×2 subdivision (max_size=2.0 on this 2×4 area
+        # yields n_u=1, n_v=2, creating a mesh node at (3, 2, 0) on the frame path).
+        md.area_mesh = {
+            "A1": AreaMesh(auto_mesh=True, max_size=2.0),
+        }
+
+        pp = Preprocessor({
+            "split_elements": False,
+            "create_shells": True,
+            "verbose": False,
+        })
+
+        # Manually run the relevant steps: mesh areas then split
+        pp._mesh_areas(md, selection=None)
+        pp._merge_coincident_nodes(md)
+
+        # Collect frame data
+        frame_elements = dict(md.frame_elements)
+        frame_assignments = dict(md.frame_assignments)
+        dist_loads = []
+        frame_element_types = {}
+
+        new_elems, new_assigns, new_loads, new_types, new_edge_loads = (
+            pp._split_frames_at_shell_subdiv(
+                md, frame_elements, frame_assignments,
+                dist_loads, frame_element_types,
+            )
+        )
+
+        # The frame (x=0..6, y=2) passes through the shell at x=2 and x=4.
+        # After subdivision (default 2x2), shell mesh nodes at
+        # x=3, y=2 (mid-edge) should split the frame into at least 3 segments.
+        assert len(new_elems) >= 3,             f"Expected >=3 split frame elements, got {len(new_elems)}"
+
+        # Check no inactive elements: _split_frames_at_shell_subdiv
+        # returns new elements directly (caller handles deactivation)
+        all_active = all(
+            not getattr(el, 'inactive', False)
+            for el in new_elems.values()
+        )
+        assert all_active, "All returned elements should be active"
+
+        # Check that child elements reference existing nodes
+        all_node_ids = set(md.nodes.keys())
+        for el in new_elems.values():
+            assert el.node_i in all_node_ids,                 f"Child node_i {el.node_i} not in model nodes"
+            assert el.node_j in all_node_ids,                 f"Child node_j {el.node_j} not in model nodes"
+
+
+    def test_orphan_nodes_removed_from_loads_only_areas(self):
+        """Nodes only referenced by loads‑only areas move to orphan_nodes.
+
+        Creates a model with a frame element, an active shell area, and a
+        loads‑only (brick wall) area.  After the Preprocessor runs:
+
+          * Nodes shared between loads‑only areas and active elements
+            (frames / non‑loads‑only areas) remain in the main model.
+          * Nodes referenced ONLY by loads‑only areas are moved to
+            ``MeshModel.orphan_nodes`` and are absent from
+            ``MeshModel.nodes``.
+        """
+        from fea_toolkit.model.mesh_model import MeshModel
+        from fea_toolkit.model.selection import Selection
+        from fea_toolkit.model.sap_data import (
+            SAPModelData, Node, Material, Section,
+            FrameElement, AreaElement,
+        )
+        from fea_toolkit.opensees.preprocessor import Preprocessor
+
+        # ── Model layout (plan view at z=0) ──────────────────────
+        #   Frame:   1──────2
+        #   Slab:    1──3    (active area, nodes 1,3,4,2)
+        #            │  │
+        #            4──2
+        #   Brick:   3──7    (loads‑only area, nodes 3,7,8,4)
+        #            │  │
+        #            8──4
+        #
+        # Nodes:
+        #   1 (0,0,0) — frame, slab                → NOT orphan
+        #   2 (4,0,0) — frame, slab                → NOT orphan
+        #   3 (0,4,0) — slab, brick                → NOT orphan (shared)
+        #   4 (4,4,0) — slab, brick                → NOT orphan (shared)
+        #   7 (0,8,0) — brick ONLY                 → ORPHAN
+        #   8 (4,8,0) — brick ONLY                 → ORPHAN
+
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+                "2": Node(node_id="2", node_tag=2, x=4, y=0, z=0),
+                "3": Node(node_id="3", node_tag=3, x=0, y=4, z=0),
+                "4": Node(node_id="4", node_tag=4, x=4, y=4, z=0),
+                "7": Node(node_id="7", node_tag=7, x=0, y=8, z=0),
+                "8": Node(node_id="8", node_tag=8, x=4, y=8, z=0),
+            },
+            restraints={},
+            materials={
+                "C40": Material(name="C40", type="Concrete", E_mod=3e7),
+            },
+            sections={
+                "BM": Section(name="BM", material="C40", shape="Rectangular",
+                              A=0.16, I33=0.002, I22=0.002, J=0.001),
+                "SLAB": Section(name="SLAB", material="C40", shape="Shell",
+                                A=0, I33=0, I22=0, J=0),
+                "BRICK": Section(name="BRICK", material="C40", shape="Shell",
+                                 A=0, I33=0, I22=0, J=0),
+            },
+            frame_elements={
+                "F1": FrameElement(elem_id="F1", elem_tag=10,
+                                    node_i="1", node_j="2"),
+            },
+            area_elements={
+                "A1": AreaElement(area_id="A1", area_tag=20,
+                                   node_ids=["1", "3", "4", "2"],
+                                   thickness=0.15),   # active slab
+                "A2": AreaElement(area_id="A2", area_tag=30,
+                                   node_ids=["3", "7", "8", "4"],
+                                   thickness=0.10),   # loads‑only brick
+            },
+            frame_assignments={"F1": "BM"},
+            area_assignments={"A1": "SLAB", "A2": "BRICK"},
+            groups={},
+            frame_auto_mesh={},
+        )
+
+        sel = Selection(sections=["BRICK"], element_types=["Area"])
+
+        pp = Preprocessor({
+            "split_elements": True,
+            "create_shells": True,
+            "verbose": False,
+        })
+        mesh = pp.run(md, selection=sel)
+
+        assert isinstance(mesh, MeshModel)
+
+        # ── Shared nodes stay in the main model ──────────────────
+        for nid in ("1", "2", "3", "4"):
+            assert nid in mesh.nodes,                     f"Shared node {nid} should be in model nodes"
+            assert nid not in mesh.orphan_nodes,           f"Shared node {nid} should NOT be orphan"
+
+        # ── Brick-only nodes move to orphan_nodes ────────────────
+        for nid in ("7", "8"):
+            assert nid in mesh.orphan_nodes,               f"Brick-only node {nid} should be orphan"
+            assert nid not in mesh.nodes,                  f"Brick-only node {nid} should NOT be in model nodes"
+
+        # ── Orphan nodes preserve coordinate data ────────────────
+        assert mesh.orphan_nodes["7"].x == 0
+        assert mesh.orphan_nodes["7"].y == 8
+        assert mesh.orphan_nodes["8"].x == 4
+        assert mesh.orphan_nodes["8"].y == 8
+
+        # ── Non‑orphan node count ────────────────────────────────
+        assert mesh.num_nodes == 4, f"Expected 4 model nodes, got {mesh.num_nodes}"
+        assert len(mesh.orphan_nodes) == 2,                     f"Expected 2 orphan nodes, got {len(mesh.orphan_nodes)}"
+
+        # ── No orphan node is accidentally in both ───────────────
+        overlap = set(mesh.nodes.keys()) & set(mesh.orphan_nodes.keys())
+        assert not overlap, f"Nodes in both model and orphan: {overlap}"
+
+
+    def test_loads_reference_valid_frame_ids_after_splitting(self):
+        """All loads reference frame IDs that exist after splitting.
+
+        Creates a model with a frame that passes through a shell area.
+        After area meshing the frame is split at shell mesh nodes.
+        An edge load (simulating area-to-frame conversion) is placed
+        on the original frame ID *before* the split.  After
+        ``_split_frames_at_shell_subdiv``, the edge load must be
+        redistributed to one of the child IDs — every load's
+        ``frame_id`` must exist in the output frame elements.
+        """
+        from fea_toolkit.model.sap_data import (
+            SAPModelData, Node, Material, Section,
+            FrameElement, AreaElement, AreaMesh,
+            FrameDistributedLoad,
+        )
+        from fea_toolkit.opensees.preprocessor import Preprocessor
+
+        # Frame along X-axis from (0,2,0) to (6,2,0).
+        # Shell area at z=0 spanning x=2..4, y=0..4.
+        # The frame passes through the shell's mesh edge.
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0.0, y=2.0, z=0.0),
+                "2": Node(node_id="2", node_tag=2, x=6.0, y=2.0, z=0.0),
+                "3": Node(node_id="3", node_tag=3, x=2.0, y=0.0, z=0.0),
+                "4": Node(node_id="4", node_tag=4, x=4.0, y=0.0, z=0.0),
+                "5": Node(node_id="5", node_tag=5, x=4.0, y=4.0, z=0.0),
+                "6": Node(node_id="6", node_tag=6, x=2.0, y=4.0, z=0.0),
+            },
+            restraints={},
+            materials={"C40": Material(name="C40", type="Concrete", E_mod=3e7)},
+            sections={
+                "BM": Section(name="BM", material="C40", shape="Rectangular",
+                              A=0.16, I33=0.002, I22=0.002, J=0.001),
+                "SLAB": Section(name="SLAB", material="C40", shape="Shell",
+                                A=0, I33=0, I22=0, J=0),
+            },
+            frame_elements={
+                "F1": FrameElement(elem_id="F1", elem_tag=10,
+                                    node_i="1", node_j="2"),
+            },
+            area_elements={
+                "A1": AreaElement(area_id="A1", area_tag=20,
+                                   node_ids=["3", "4", "5", "6"],
+                                   thickness=0.15),
+            },
+            frame_assignments={"F1": "BM"},
+            area_assignments={"A1": "SLAB"},
+            groups={},
+            frame_auto_mesh={
+                "F1": {"AtJoints": True, "AtFrames": False},
+            },
+            area_mesh={
+                "A1": AreaMesh(auto_mesh=True, max_size=2.0),
+            },
+        )
+
+        pp = Preprocessor({
+            "split_elements": False,
+            "create_shells": True,
+            "verbose": False,
+        })
+
+        # Manually run mesh + merge steps (same pattern as
+        # test_split_frames_at_shell_subdiv_direct)
+        pp._mesh_areas(md, selection=None)
+        pp._merge_coincident_nodes(md)
+
+        # An edge load on the original frame ID (simulating a load
+        # that was converted from an area uniform load).
+        edge_loads = [
+            FrameDistributedLoad(
+                frame_id="F1", pattern="DEAD",
+                direction="Gravity",
+                load_type="Force", shape="Uniform",
+                val_a=-5.0, val_b=-5.0,
+                rdist_a=0.0, rdist_b=1.0, dist_a=0.0, dist_b=6.0,
+                coord_sys="GLOBAL",
+            ),
+        ]
+
+        frame_elements = dict(md.frame_elements)
+        frame_assignments = dict(md.frame_assignments)
+        dist_loads: list = []
+        frame_element_types: dict = {}
+
+        new_elems, new_assigns, new_loads, new_types, new_edge_loads = (
+            pp._split_frames_at_shell_subdiv(
+                md, frame_elements, frame_assignments,
+                dist_loads, frame_element_types,
+                edge_loads=edge_loads,
+            )
+        )
+
+        # ── Collect valid frame IDs from the output ──────────────
+        valid_frame_ids: set = {
+            eid for eid, el in new_elems.items()
+            if not getattr(el, 'inactive', False)
+        }
+        assert len(valid_frame_ids) > 0, "No active frame elements"
+
+        # ── The original F1 should no longer be active ───────────
+        assert "F1" not in valid_frame_ids, (
+            "Original F1 should be replaced by children"
+        )
+
+        # ── All edge loads must reference valid frame IDs ────────
+        for ld in new_edge_loads:
+            assert ld.frame_id in valid_frame_ids, (
+                f"Edge load references missing frame "
+                f"'{ld.frame_id}' (pattern={ld.pattern})"
+            )
+
+        # ── Edge loads should have been redistributed ────────────
+        # At least one edge load should reference a child like F1-0
+        child_refs = [ld for ld in new_edge_loads
+                      if ld.frame_id.startswith("F1-")]
+        assert len(child_refs) > 0, (
+            "Expected edge loads redistributed to child frames, "
+            f"got {len(new_edge_loads)} loads on IDs: "
+            f"{set(ld.frame_id for ld in new_edge_loads)}"
+        )
+
+
+    def test_self_weight_applied_in_static_analysis(self):
+        """Self-weight produces non-zero displacements in two-stage path.
+
+        Builds a sample cantilever through the two-stage path, runs a
+        static analysis with just a ``"DEAD"`` pattern (which has no
+        explicit loads), and verifies that:
+
+        1. Self-weight load totals are non-zero (auto-included).
+        2. Nodal displacements are non-zero (loads actually applied).
+        """
+        import openseespy.opensees as ops
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        md = make_sample_model()
+        b = OpenSeesBuilder(md, {
+            "use_preprocessor": True,
             "split_elements": True,
             "create_shells": False,
             "verbose": False,
         })
         try:
             b.build()
-            # Legacy path produces the same state
-            assert len(b.frame_tag_map) > 0
-            node_tags = ops.getNodeTags()
-            assert len(node_tags) > 0
+            b.compute_seismic_masses(g=9.81)
+
+            # DEAD pattern — has no explicit loads in the sample model,
+            # but "Self weight" should be auto-included by the builder.
+            result = b.run_static_analysis(pattern_scales={"DEAD": 1.0})
+
+            # ── Self-weight should be tracked ────────────────────
+            assert "Self weight" in b.load_totals, (
+                f"Expected 'Self weight' in load_totals, "
+                f"got {list(b.load_totals.keys())}"
+            )
+            sw_total = b.load_totals["Self weight"]
+            assert sw_total > 0, (
+                f"Self-weight total should be > 0, got {sw_total}"
+            )
+
+            # ── Displacements should be non-zero ─────────────────
+            nd = result.get("nodal_displacements", {})
+            max_d = max(
+                (abs(v) for vals in nd.values() for v in vals),
+                default=0.0,
+            )
+            assert max_d > 0, (
+                f"Expected non-zero displacement from self-weight, "
+                f"got max|d|={max_d}"
+            )
         finally:
             ops.wipe()
