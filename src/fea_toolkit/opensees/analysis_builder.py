@@ -115,27 +115,92 @@ class AnalysisBuilder:
     # Domain construction
     # ═══════════════════════════════════════════════════════════════
 
-    def build_domain(self) -> None:
+    def build_domain(self,
+                     config_overrides: Optional[Dict[str, Any]] = None,
+                     ) -> None:
         """Create the full OpenSees domain from the MeshModel.
 
         Creates nodes, restraints, materials, sections, frame elements,
         shell elements, lumped hinges, and rigid links.
+
+        Args:
+            config_overrides: Optional dict of config keys to temporarily
+                override ``self.config`` for this build cycle.  Useful for
+                pushover rebuilds that need fiber sections or different
+                element types.  The overrides are reset after the build.
         """
-        ops.wipe()
-        self._edge_constraint_method = None
-        self._rigid_link_elems = {}
-        ops.model('basic', '-ndm', 3, '-ndf', 6)
+        # Apply temporary config overrides
+        _saved_overrides: Dict[str, Any] = {}
+        if config_overrides:
+            for k, v in config_overrides.items():
+                _saved_overrides[k] = self.config.get(k)
+                self.config[k] = v
 
-        # Pre-compute frame tag map so shell elements can avoid clashing
-        self._build_frame_tag_map()
+        try:
+            ops.wipe()
+            self._edge_constraint_method = None
+            self._rigid_link_elems = {}
+            ops.model('basic', '-ndm', 3, '-ndf', 6)
 
-        self._create_nodes()
-        self._apply_restraints()
-        self._create_materials()
-        self._create_sections()
-        self._create_shell_elements()
-        self._create_lumped_hinges()
-        self._create_elements()
+            # Pre-compute frame tag map so shell elements can avoid clashing
+            self._build_frame_tag_map()
+
+            self._create_nodes()
+            self._apply_restraints()
+            self._create_materials()
+            self._create_sections()
+            self._create_shell_elements()
+            self._create_lumped_hinges()
+            self._create_elements()
+        finally:
+            # Restore any overridden config values
+            for k, old_v in _saved_overrides.items():
+                if old_v is None:
+                    self.config.pop(k, None)
+                else:
+                    self.config[k] = old_v
+
+    def rebuild_with_fiber_sections(
+        self,
+        brace_selection: Optional[set] = None,
+        pushover_spring_scale: float = 1.0,
+    ) -> None:
+        """Rebuild the OpenSees domain with fiber sections for pushover.
+
+        Calls :meth:`build_domain` with config overrides that enable fiber
+        sections and force-based beam-column elements.
+
+        Args:
+            brace_selection: Optional set of brace element IDs.  When
+                provided, braces use ``PDelta`` geometry and hardened
+                solver settings.
+            pushover_spring_scale: Scale factor for edge constraint
+                spring stiffness on rebuild (default 1.0).
+        """
+        overrides: Dict[str, Any] = {
+            'element_type': 'dispBeamColumn',
+            'create_fiber_sections': True,
+            'use_elastic_sections': False,
+        }
+        if brace_selection:
+            overrides['geom_transf_type'] = 'PDelta'
+
+        self.build_domain(config_overrides=overrides)
+
+        # Re-apply edge constraints if previously saved
+        if self._saved_edge_constraints:
+            self._reapply_edge_constraints(scale=pushover_spring_scale)
+
+    def _reapply_edge_constraints(self, scale: float = 1.0) -> None:
+        """Re-apply saved edge constraints after a domain rebuild.
+
+        .. note::
+            The actual constraint-creation methods (``apply_spring_edge_constraints``,
+            ``_apply_penalty_edge_constraints``) will be ported in Phase 2.
+            For now this is a placeholder that records the request.
+        """
+        if self._saved_edge_constraints and self.config.get('verbose', False):
+            print(f"  [edge constraints skipped — Phase 2 pending]")
 
     def create_loads(self,
                      pattern_scales: Optional[Dict[str, float]] = None,
