@@ -422,8 +422,13 @@ def plot_model_3d(
 def _resolve_mesh_data(source):
     """Extract mesh geometry arrays from a builder or NPZ data dict.
 
-    Returns a dict with keys: nodes, node_coords, frames, shells,
-    sec_names, orphan_nodes, edge_constraints, mesh_node_ids.
+    Returns a dict with keys:
+        nodes          – ``{node_id: {tag, x, y, z}}``
+        frames         – ``[{id, ni_tag/ni_id, nj_tag/nj_id, sec, parent}]``
+        shells         – ``[{id, sec, node_ids/node_tags, inactive}]``
+        orphan_nodes   – ``{node_id: {tag, x, y, z}}``
+        edge_constraints – list of constraint tuples
+        mesh_node_ids  – ``set`` of node IDs containing ``_mesh_``
     """
     import numpy as np
 
@@ -1955,6 +1960,10 @@ def plot_static_moment_3d(
 ) -> Optional[Any]:
     """Draw a moment or force diagram in 3D on the structure.
 
+    .. deprecated::
+       Use :func:`plot_force_diagram_3d` instead — it works with both
+       builder and NPZ/HDF5 data.
+
     Supports both moment quantities (``'My'``, ``'Mz'``, ``'Mx'``) and
     force quantities (``'Fx'``, ``'Fy'``, ``'Fz'``).
 
@@ -2001,6 +2010,11 @@ def plot_static_moment_3d(
     Requires:
         ``pyvista``.
     """
+    warnings.warn(
+        "plot_static_moment_3d is deprecated — use plot_force_diagram_3d() "
+        "instead (works with builder or NPZ data)",
+        DeprecationWarning, stacklevel=2,
+    )
     try:
         import pyvista as pv
     except ImportError:
@@ -2393,6 +2407,12 @@ def plot_static_force_diagram(
     Returns:
         The ``matplotlib.figure.Figure``.
     """
+    warnings.warn(
+        "plot_static_force_diagram is deprecated — use "
+        "plot_npz_force_diagram() instead for standalone NPZ data, "
+        "or plot_force_diagram_3d() for unified builder/NPZ support.",
+        DeprecationWarning, stacklevel=2,
+    )
     import matplotlib.pyplot as plt
     import numpy as np
 
