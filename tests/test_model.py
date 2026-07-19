@@ -4533,3 +4533,124 @@ class TestTwoStageBuild:
                 )
         finally:
             ops.wipe()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CSM module tests (standalone, no OpenSees required)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestCsmModule:
+    """Test the standalone CSM utility functions in model/csm.py."""
+
+    def test_pushover_to_adrs_basic(self):
+        """ADRS conversion works with valid pushover + modal results."""
+        from fea_toolkit.model.csm import pushover_to_adrs
+
+        pushover = {
+            "control_node": 1,
+            "control_disp": [0.0, 0.01, 0.02, 0.03, 0.04],
+            "base_shear": [0.0, 100.0, 180.0, 240.0, 280.0],
+        }
+        modal = {
+            "modal_props": {
+                "partiMassRatiosMX": [0.8, 0.1],
+                "partiMassMX": [800.0, 100.0],
+            },
+            "periods": [0.5, 0.1],
+        }
+        shapes = {0: {1: (1.0, 0.0, 0.0)}, 1: {1: (0.0, 1.0, 0.0)}}
+
+        adrs = pushover_to_adrs(pushover, modal, shapes, direction="X")
+        assert isinstance(adrs, dict)
+        assert set(adrs) >= {"S_a", "S_d", "Gamma", "M_eff", "phi_control", "best_mode"}
+        assert len(adrs["S_a"]) == len(pushover["control_disp"])
+        assert len(adrs["S_d"]) == len(pushover["control_disp"])
+        assert adrs["Gamma"] > 0
+        assert adrs["M_eff"] > 0
+        assert adrs["phi_control"] > 0
+        assert adrs["best_mode"] == 0  # mode 0 has 80% ratio
+
+    def test_pushover_to_adrs_missing_control_node(self):
+        """Raises ValueError when control_node is missing."""
+        from fea_toolkit.model.csm import pushover_to_adrs
+        with pytest.raises(ValueError, match="control_node"):
+            pushover_to_adrs({"control_disp": [0]}, {}, {}, "X")
+
+    def test_compute_performance_point_basic(self):
+        """Performance point computation runs with valid data."""
+        from fea_toolkit.model.csm import compute_performance_point
+
+        pushover = {
+            "control_node": 1,
+            "control_disp": [0.0, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05],
+            "base_shear": [0.0, 50.0, 100.0, 180.0, 240.0, 280.0, 300.0],
+        }
+        modal = {
+            "modal_props": {
+                "partiMassRatiosMX": [0.8, 0.15],
+                "partiMassMX": [800.0, 150.0],
+            },
+            "periods": [0.5, 0.12],
+        }
+        shapes = {0: {1: (1.0, 0.0, 0.0)}, 1: {1: (0.0, 1.0, 0.0)}}
+        periods = [0.0, 0.1, 0.2, 0.5, 1.0, 2.0, 3.0]
+        accels = [3.0, 3.0, 3.0, 1.5, 0.8, 0.4, 0.2]
+
+        pp = compute_performance_point(
+            pushover, modal, shapes, periods, accels,
+            direction="X", damping_ratio=0.05, max_iter=20, tol=0.05,
+        )
+        assert isinstance(pp, dict)
+        assert set(pp) >= {"S_dp", "S_ap", "V_base", "D_roof", "T_eq", "mu",
+                          "converged", "S_dy", "S_ay"}
+        assert pp["S_dp"] > 1e-6
+        assert pp["S_ap"] > 1e-6
+        assert pp["V_base"] > 1e-6
+        assert isinstance(pp["converged"], bool)
+
+    def test_compute_performance_point_too_few_points(self):
+        """Raises ValueError with fewer than 3 valid data points."""
+        from fea_toolkit.model.csm import compute_performance_point
+
+        pushover = {
+            "control_node": 1,
+            "control_disp": [0.0, 0.01],
+            "base_shear": [0.0, 100.0],
+        }
+        modal = {
+            "modal_props": {
+                "partiMassRatiosMX": [0.8],
+                "partiMassMX": [800.0],
+            },
+            "periods": [0.5],
+        }
+        shapes = {0: {1: (1.0, 0.0, 0.0)}}
+        with pytest.raises(ValueError, match="too few|Too few"):
+            compute_performance_point(
+                pushover, modal, shapes,
+                [0.1, 0.5], [3.0, 1.5],
+            )
+
+    def test_pushover_to_adrs_y_direction(self):
+        """ADRS conversion in Y direction picks correct mass data."""
+        from fea_toolkit.model.csm import pushover_to_adrs
+
+        pushover = {
+            "control_node": 1,
+            "control_disp": [0.0, 0.01],
+            "base_shear": [0.0, 100.0],
+        }
+        modal = {
+            "modal_props": {
+                "partiMassRatiosMX": [0.2],
+                "partiMassMX": [200.0],
+                "partiMassRatiosMY": [0.7],
+                "partiMassMY": [700.0],
+            },
+            "periods": [0.5],
+        }
+        shapes = {0: {1: (0.0, 1.0, 0.0)}}
+
+        adrs = pushover_to_adrs(pushover, modal, shapes, direction="Y")
+        assert adrs["M_eff"] == 700.0
+        assert adrs["Gamma"] == math.sqrt(700.0)

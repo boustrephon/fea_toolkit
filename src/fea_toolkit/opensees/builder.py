@@ -5189,6 +5189,34 @@ class OpenSeesBuilder:
             - ``'summed_reactions'`` — single summed force/moment vector
             - ``'load_totals'`` — the applied load totals per pattern
         """
+        # Delegate to AnalysisBuilder when available (two-stage path)
+        _analysis = getattr(self, '_analysis', None)
+        if _analysis is not None:
+            results = _analysis.run_static_analysis(
+                extract_reactions=extract_reactions,
+                pattern_scales=pattern_scales,
+            )
+            # Recompute summed_reactions (Builder-specific post-processing)
+            if extract_reactions and results and 'nodal_reactions' in results and results['nodal_reactions']:
+                cx = sum(node.x for node in self.model.nodes.values()) / len(self.model.nodes)
+                cy = sum(node.y for node in self.model.nodes.values()) / len(self.model.nodes)
+                z_base = min(node.z for node in self.model.nodes.values())
+                summed = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0, 'mx': 0.0, 'my': 0.0, 'mz': 0.0}
+                for nid, r in results['nodal_reactions'].items():
+                    node = self.model.nodes[nid]
+                    fx, fy, fz, mx, my, mz = r
+                    summed['fx'] += fx; summed['fy'] += fy; summed['fz'] += fz
+                    summed['mx'] += mx; summed['my'] += my; summed['mz'] += mz
+                    dx = node.x - cx; dy = node.y - cy; dz = node.z - z_base
+                    summed['mx'] += fz * dy - fy * dz
+                    summed['my'] += fx * dz - fz * dx
+                    summed['mz'] += fy * dx - fx * dy
+                results['summed_reactions'] = summed
+            # opstool export
+            if OPSTOOL_AVAILABLE and odb_tag > 0:
+                opst.post.CreateODB(odb_tag=1)
+                opst.post.save_model_data(odb_tag=1)
+            return results
         # Rebuild with different patterns if requested
         if pattern_scales is not None:
             # Re-use any persisted selection from the original build
@@ -5411,6 +5439,10 @@ class OpenSeesBuilder:
             I‑end of the element) and ``'Fx_j'``, ``'Fy_j'``, ``'Fz_j'``,
             ``'Mx_j'``, ``'My_j'``, ``'Mz_j'`` (J‑end).
         """
+        # Delegate to AnalysisBuilder when available (two-stage path)
+        _analysis = getattr(self, '_analysis', None)
+        if _analysis is not None:
+            return _analysis.extract_static_element_forces()
         elements = (self.split_elements if self.split_elements
                     else self.model.frame_elements)
         results = {}
@@ -5467,6 +5499,17 @@ class OpenSeesBuilder:
         Returns:
             Absolute path to the written file.
         """
+        # Delegate to AnalysisBuilder when available (two-stage path)
+        _analysis = getattr(self, '_analysis', None)
+        if _analysis is not None:
+            return _analysis.export_results(
+                filepath=filepath,
+                static_results=static_results,
+                modal_result=modal_result,
+                mode_shapes=mode_shapes,
+                rs_results=rs_results,
+                fmt=fmt,
+            )
         from ..io.unified_writer import write_results
 
         # Use MeshModel if available (two-stage build), else SAPModelData
@@ -6170,10 +6213,15 @@ class OpenSeesBuilder:
                 print(f"  Seismic mass: {total_mass:.2f} tonnes")
 
         # ── 3. Apply gravity ──
+        # Bypass delegation — pushover uses its own fiber-section domain
+        _saved_analysis = getattr(self, '_analysis', None)
+        self._analysis = None  # type: ignore[assignment]
         grav_results = self.run_static_analysis(
             extract_reactions=True,
             pattern_scales=gravity_patterns,
         )
+        if _saved_analysis is not None:
+            self._analysis = _saved_analysis
         grav_disp = grav_results.get('nodal_displacements', {}) if grav_results else {}
 
         # Record base shear from gravity (before lateral loads)
@@ -6599,6 +6647,10 @@ class OpenSeesBuilder:
         Returns:
             Dictionary mapping node ID → total lumped mass (tonnes).
         """
+        # Delegate to AnalysisBuilder when available (two-stage path)
+        _analysis = getattr(self, '_analysis', None)
+        if _analysis is not None:
+            return _analysis.compute_seismic_masses(g=g)
         from ..utils import g_from_units
         if g is None:
             g = g_from_units(self.model.units)
@@ -7149,6 +7201,10 @@ class OpenSeesBuilder:
             (not normalised to unit mass — these are the raw values from
             ``ops.nodeEigenvector``).
         """
+        # Delegate to AnalysisBuilder when available (two-stage path)
+        _analysis = getattr(self, '_analysis', None)
+        if _analysis is not None:
+            return _analysis.extract_mode_shapes(num_modes=num_modes)
         node_tags = list(ops.getNodeTags())
         # dof index 0→1 (X), 1→2 (Y), 2→3 (Z)
         dof_map = {0: 1, 1: 2, 2: 3}
@@ -7724,6 +7780,16 @@ class OpenSeesBuilder:
             * ``'S_dy'``, ``'S_ay'`` — bilinear yield point (m, m/s²)
               or ``None`` if not computed.
         """
+        # Delegate to AnalysisBuilder when available (two-stage path)
+        _analysis = getattr(self, '_analysis', None)
+        if _analysis is not None:
+            return _analysis.pushover_to_adrs(
+                pushover_results=pushover_results,
+                modal_results=modal_results,
+                mode_shapes=mode_shapes,
+                direction=direction,
+                g=g,
+            )
         direction_map = {'X': 0, 'Y': 1, 'Z': 2}
         dof_idx = direction_map.get(direction.upper(), 0)
 
@@ -7845,6 +7911,21 @@ class OpenSeesBuilder:
             * ``'capacity_adrs'`` — the full ADRS curve (dict with ``'S_a'``,
               ``'S_d'``).
         """
+        # Delegate to AnalysisBuilder when available (two-stage path)
+        _analysis = getattr(self, '_analysis', None)
+        if _analysis is not None:
+            return _analysis.compute_performance_point(
+                pushover_results=pushover_results,
+                modal_results=modal_results,
+                mode_shapes=mode_shapes,
+                spectrum_periods=spectrum_periods,
+                spectrum_accels=spectrum_accels,
+                direction=direction,
+                g=g,
+                damping_ratio=damping_ratio,
+                max_iter=max_iter,
+                tol=tol,
+            )
         # 1. Convert pushover to ADRS
         adrs = self.pushover_to_adrs(
             pushover_results, modal_results, mode_shapes,
