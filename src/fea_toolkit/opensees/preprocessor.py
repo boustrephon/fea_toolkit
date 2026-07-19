@@ -267,6 +267,11 @@ class Preprocessor:
             section_tags=section_tags,
             loads_only_area_ids=loads_only_area_ids,
             orphan_nodes=orphan_nodes,
+            # Pass through load collections for AnalysisBuilder consumption
+            joint_loads=getattr(md, 'joint_loads', []),
+            frame_gravity_loads=getattr(md, 'frame_gravity_loads', []),
+            area_gravity_loads=getattr(md, 'area_gravity_loads', []),
+            area_uniform_loads=getattr(md, 'area_uniform_loads', []),
         )
 
         return mesh_model
@@ -707,14 +712,16 @@ class Preprocessor:
             if eid in updated_types:
                 updated_types[child_id] = updated_types[eid]
 
+            # Compute per-child parametric boundaries from split-node positions
+            boundaries = [0.0] + [t for t, _ in t_values] + [1.0]
+
             # Redistribute distributed loads
             elem_loads = [ld for ld in dist_loads if ld.frame_id == eid]
             for ld in elem_loads:
                 load_span = ld.rdist_b - ld.rdist_a
                 for i, cid in enumerate(child_ids):
-                    seg_len = 1.0 / len(child_ids)
-                    a_local = i * seg_len
-                    b_local = (i + 1) * seg_len
+                    a_local = boundaries[i]
+                    b_local = boundaries[i + 1]
                     new_ld = FrameDistributedLoad(
                         frame_id=cid,
                         pattern=ld.pattern,
@@ -736,9 +743,8 @@ class Preprocessor:
             for ld in elem_edge_loads:
                 load_span = ld.rdist_b - ld.rdist_a
                 for i, cid in enumerate(child_ids):
-                    seg_len = 1.0 / len(child_ids)
-                    a_local = i * seg_len
-                    b_local = (i + 1) * seg_len
+                    a_local = boundaries[i]
+                    b_local = boundaries[i + 1]
                     new_el = FrameDistributedLoad(
                         frame_id=cid,
                         pattern=ld.pattern,
