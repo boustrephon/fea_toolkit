@@ -7369,27 +7369,12 @@ class OpenSeesBuilder:
     def _cqc_combine(modal_values: List[float],
                      omega: List[float],
                      damp_ratios: List[float]) -> float:
-        """Complete Quadratic Combination of modal results."""
-        n = len(modal_values)
-        if n == 0:
-            return 0.0
-        if n == 1:
-            return abs(modal_values[0])
-        total = 0.0
-        for i in range(n):
-            for j in range(n):
-                di = damp_ratios[i]
-                dj = damp_ratios[j]
-                bij = omega[i] / omega[j] if omega[j] > 0 else 1.0
-                rho = (
-                    8.0 * math.sqrt(di * dj) * (di + bij * dj) * (bij ** 1.5)
-                ) / (
-                    (1.0 - bij ** 2.0) ** 2.0
-                    + 4.0 * di * dj * bij * (1.0 + bij ** 2.0)
-                    + 4.0 * (di ** 2.0 + dj ** 2.0) * bij ** 2.0
-                )
-                total += modal_values[i] * modal_values[j] * rho
-        return math.sqrt(total)
+        """Complete Quadratic Combination of modal results.
+
+        Delegates to :func:`~fea_toolkit.utils.cqc_combine`.
+        """
+        from ..utils import cqc_combine as _cqc
+        return _cqc(modal_values, omega, damp_ratios)
 
     # =========================================================================
     # Element-level RS forces (per element, CQC-combined)

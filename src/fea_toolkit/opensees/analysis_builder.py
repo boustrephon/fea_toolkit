@@ -22,6 +22,7 @@ from ..model.geometry import get_SAP_vecxz
 from ..model.geometry import convert_area_loads_to_edge_loads, polygon_area_3d
 from ..model.tree_utils import collect_descendants
 from ..model.selection import Selection
+from ..utils import g_from_units, cqc_combine
 
 
 class AnalysisBuilder:
@@ -1373,28 +1374,6 @@ class AnalysisBuilder:
     # Modal and response-spectrum analysis
     # ═══════════════════════════════════════════════════════════════
 
-    @staticmethod
-    def _cqc_combine(modal_values: List[float],
-                     omega: List[float],
-                     damp_ratios: List[float]) -> float:
-        """Complete Quadratic Combination of modal results."""
-        n = len(modal_values)
-        if n == 0:
-            return 0.0
-        if n == 1:
-            return abs(modal_values[0])
-        total = 0.0
-        for i in range(n):
-            for j in range(n):
-                r = damp_ratios[i] if i < len(damp_ratios) else 0.05
-                s = damp_ratios[j] if j < len(damp_ratios) else 0.05
-                rho = (8.0 * math.sqrt(r * s) * (r + s) * math.pow(omega[i] * omega[j], 1.5)) / \
-                      ((1.0 - (omega[i] / omega[j]) ** 2) ** 2 +
-                       4.0 * r * s * omega[i] * omega[j] / (omega[i] + omega[j]) ** 2 *
-                       (1.0 + (omega[i] / omega[j]) ** 2))
-                total += modal_values[i] * modal_values[j] * rho
-        return math.sqrt(max(total, 0.0))
-
     def run_modal_analysis(self, num_modes: int = 30,
                            print_results: bool = True,
                            eigen_solver: str = "default",
@@ -1686,9 +1665,9 @@ class AnalysisBuilder:
             modal_base_shear.append(v_base)
             modal_base_moment.append(m_base)
 
-        base_shear_cqc = self._cqc_combine(modal_base_shear, omega, damp_ratios)
+        base_shear_cqc = cqc_combine(modal_base_shear, omega, damp_ratios)
         base_shear_srss = math.sqrt(sum(v * v for v in modal_base_shear))
-        base_moment_cqc = self._cqc_combine(modal_base_moment, omega, damp_ratios)
+        base_moment_cqc = cqc_combine(modal_base_moment, omega, damp_ratios)
         base_moment_srss = math.sqrt(sum(m * m for m in modal_base_moment))
 
         result = {
