@@ -21,6 +21,7 @@ def collect_descendants(
     elem_id: str,
     frame_elements: Dict[str, FrameElement],
     cache: Optional[Dict[str, List[str]]] = None,
+    _visited: Optional[Set[str]] = None,
 ) -> List[str]:
     """Return all **active leaf** descendants of a root frame element.
 
@@ -51,6 +52,13 @@ def collect_descendants(
     if cache is not None and elem_id in cache:
         return cache[elem_id]
 
+    # Cycle guard: skip already-visited nodes
+    if _visited is None:
+        _visited = set()
+    if elem_id in _visited:
+        return []
+    _visited.add(elem_id)
+
     elem = frame_elements.get(elem_id)
     if elem is None:
         return []
@@ -59,7 +67,7 @@ def collect_descendants(
     else:
         result = []
         for cid in elem.child_ids:
-            result.extend(collect_descendants(cid, frame_elements, cache))
+            result.extend(collect_descendants(cid, frame_elements, cache, _visited))
     if cache is not None:
         cache[elem_id] = result
     return result

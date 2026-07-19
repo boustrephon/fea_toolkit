@@ -4003,6 +4003,7 @@ class TestTwoStageBuild:
 
         1. Self-weight load totals are non-zero (auto-included).
         2. Nodal displacements are non-zero (loads actually applied).
+        3. Explicit "Self weight" in pattern_scales also works.
         """
         import openseespy.opensees as ops
         from examples.sample_model import make_sample_model
@@ -4019,11 +4020,10 @@ class TestTwoStageBuild:
             b.build()
             b.compute_seismic_masses(g=9.81)
 
-            # DEAD pattern — has no explicit loads in the sample model,
-            # but "Self weight" should be auto-included by the builder.
+            # ── Test 1: auto-included "Self weight" via DEAD-only ─
             result = b.run_static_analysis(pattern_scales={"DEAD": 1.0})
 
-            # ── Self-weight should be tracked ────────────────────
+            # Self-weight should be tracked
             assert "Self weight" in b.load_totals, (
                 f"Expected 'Self weight' in load_totals, "
                 f"got {list(b.load_totals.keys())}"
@@ -4033,7 +4033,7 @@ class TestTwoStageBuild:
                 f"Self-weight total should be > 0, got {sw_total}"
             )
 
-            # ── Displacements should be non-zero ─────────────────
+            # Displacements should be non-zero
             nd = result.get("nodal_displacements", {})
             max_d = max(
                 (abs(v) for vals in nd.values() for v in vals),
@@ -4042,6 +4042,39 @@ class TestTwoStageBuild:
             assert max_d > 0, (
                 f"Expected non-zero displacement from self-weight, "
                 f"got max|d|={max_d}"
+            )
+
+            # ── Test 2: explicit-only "Self weight" in pattern_scales ──
+            ops.wipe()
+            b2 = OpenSeesBuilder(md, {
+                "use_preprocessor": True,
+                "split_elements": True,
+                "create_shells": False,
+                "verbose": False,
+            })
+            b2.build()
+            b2.compute_seismic_masses(g=9.81)
+            result2 = b2.run_static_analysis(
+                pattern_scales={"Self weight": 1.0}
+            )
+
+            assert "Self weight" in b2.load_totals, (
+                f"Expected 'Self weight' in load_totals with "
+                f"explicit pattern, got {list(b2.load_totals.keys())}"
+            )
+            sw_total2 = b2.load_totals["Self weight"]
+            assert sw_total2 > 0, (
+                f"Self-weight total with explicit pattern should "
+                f"be > 0, got {sw_total2}"
+            )
+            nd2 = result2.get("nodal_displacements", {})
+            max_d2 = max(
+                (abs(v) for vals in nd2.values() for v in vals),
+                default=0.0,
+            )
+            assert max_d2 > 0, (
+                f"Expected non-zero displacement with explicit "
+                f"self-weight, got max|d|={max_d2}"
             )
         finally:
             ops.wipe()
