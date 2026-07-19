@@ -1742,6 +1742,40 @@ class AnalysisBuilder:
             shapes[m] = per_node
         return shapes
 
+    def extract_static_element_forces(self) -> Dict[int, Dict[str, float]]:
+        """Extract element end forces in the **global** coordinate system.
+
+        Must be called **after** :meth:`run_static_analysis`.
+
+        Returns:
+            Dict mapping ``elem_tag`` → dict with keys ``'Fx'``, ``'Fy'``,
+            ``'Fz'``, ``'Mx'``, ``'My'``, ``'Mz'`` (global forces at the
+            I‑end of the element) and ``'Fx_j'``, ``'Fy_j'``, ``'Fz_j'``,
+            ``'Mx_j'``, ``'My_j'``, ``'Mz_j'`` (J‑end).
+        """
+        elements = self.mesh_model.frame_elements
+        results = {}
+        for eid, elem in elements.items():
+            if getattr(elem, 'inactive', False):
+                continue
+            tag = elem.elem_tag
+            try:
+                f = ops.eleResponse(tag, 'forces')
+            except Exception:
+                continue
+            f_i_global = np.array([f[0], f[1], f[2]])
+            m_i_global = np.array([f[3], f[4], f[5]])
+            f_j_global = np.array([f[6], f[7], f[8]])
+            m_j_global = np.array([f[9], f[10], f[11]])
+
+            results[tag] = {
+                'Fx': f_i_global[0], 'Fy': f_i_global[1], 'Fz': f_i_global[2],
+                'Mx': m_i_global[0], 'My': m_i_global[1], 'Mz': m_i_global[2],
+                'Fx_j': f_j_global[0], 'Fy_j': f_j_global[1], 'Fz_j': f_j_global[2],
+                'Mx_j': m_j_global[0], 'My_j': m_j_global[1], 'Mz_j': m_j_global[2],
+            }
+        return results
+
     # ═══════════════════════════════════════════════════════════════
     # Utilities
     # ═══════════════════════════════════════════════════════════════
@@ -1812,4 +1846,88 @@ class AnalysisBuilder:
             rs_results=rs_results,
             fmt=fmt,
             config=self.config,
+        )
+
+    # ═══════════════════════════════════════════════════════════════
+    # Capacity Spectrum Method (CSM)
+    # ═══════════════════════════════════════════════════════════════
+
+    def pushover_to_adrs(
+        self,
+        pushover_results: Dict[str, Any],
+        modal_results: Dict[str, Any],
+        mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
+        direction: str = 'X',
+        g: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Convert a pushover capacity curve to ADRS coordinates.
+
+        Delegates to :func:`~fea_toolkit.model.csm.pushover_to_adrs`.
+
+        Args:
+            pushover_results: Output from :meth:`run_pushover_analysis`.
+            modal_results: Output from :meth:`run_modal_analysis`.
+            mode_shapes: Output from :meth:`extract_mode_shapes`.
+            direction: Push direction (``'X'``, ``'Y'``, or ``'Z'``).
+            g: Gravitational acceleration (m/s²).
+
+        Returns:
+            Dict with ``'S_a'``, ``'S_d'``, ``'Gamma'``, ``'M_eff'``,
+            ``'phi_control'`` — see :func:`~fea_toolkit.model.csm.pushover_to_adrs`.
+        """
+        from ..model.csm import pushover_to_adrs as _csm_pushover_to_adrs
+        return _csm_pushover_to_adrs(
+            pushover_results=pushover_results,
+            modal_results=modal_results,
+            mode_shapes=mode_shapes,
+            direction=direction,
+            g=g,
+        )
+
+    def compute_performance_point(
+        self,
+        pushover_results: Dict[str, Any],
+        modal_results: Dict[str, Any],
+        mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
+        spectrum_periods: List[float],
+        spectrum_accels: List[float],
+        direction: str = 'X',
+        g: Optional[float] = None,
+        damping_ratio: float = 0.05,
+        max_iter: int = 50,
+        tol: float = 0.01,
+    ) -> Dict[str, Any]:
+        """Find the performance point using the Capacity Spectrum Method.
+
+        Delegates to :func:`~fea_toolkit.model.csm.compute_performance_point`.
+
+        Args:
+            pushover_results: Output from :meth:`run_pushover_analysis`.
+            modal_results: Output from :meth:`run_modal_analysis`.
+            mode_shapes: Output from :meth:`extract_mode_shapes`.
+            spectrum_periods: Periods (s) defining the elastic demand spectrum.
+            spectrum_accels: Spectral accelerations (m/s²).
+            direction: Push direction.
+            g: Gravitational acceleration.
+            damping_ratio: Elastic damping ratio (default 0.05).
+            max_iter: Maximum iterations (default 50).
+            tol: Convergence tolerance on S_d (default 0.01).
+
+        Returns:
+            Dict with ``'S_dp'``, ``'S_ap'``, ``'V_base'``, ``'D_roof'``,
+            ``'T_eq'``, ``'mu'``, ``'converged'`` — see
+            :func:`~fea_toolkit.model.csm.compute_performance_point`.
+        """
+        from ..model.csm import compute_performance_point as _csm_compute
+        return _csm_compute(
+            pushover_results=pushover_results,
+            modal_results=modal_results,
+            mode_shapes=mode_shapes,
+            spectrum_periods=spectrum_periods,
+            spectrum_accels=spectrum_accels,
+            direction=direction,
+            g=g,
+            damping_ratio=damping_ratio,
+            max_iter=max_iter,
+            tol=tol,
         )
