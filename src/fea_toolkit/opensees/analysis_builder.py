@@ -1711,6 +1711,34 @@ class AnalysisBuilder:
 
         return result
 
+    def extract_mode_shapes(
+        self, num_modes: int
+    ) -> Dict[int, Dict[int, Tuple[float, float, float]]]:
+        """Extract mode shape displacements for each node and each mode.
+
+        Must be called **after** :meth:`run_modal_analysis`.
+
+        Args:
+            num_modes: Number of modes to extract.
+
+        Returns:
+            ``{mode_index: {node_tag: (dx, dy, dz)}}`` where *mode_index*
+            is 0‑based and displacements are raw eigenvector components.
+        """
+        node_tags = list(ops.getNodeTags())
+        dof_map = {0: 1, 1: 2, 2: 3}
+        shapes: Dict[int, Dict[int, Tuple]] = {}
+        for m in range(num_modes):
+            mode_num = m + 1
+            per_node: Dict[int, Tuple] = {}
+            for tag in node_tags:
+                dx = ops.nodeEigenvector(tag, mode_num, dof_map[0])
+                dy = ops.nodeEigenvector(tag, mode_num, dof_map[1])
+                dz = ops.nodeEigenvector(tag, mode_num, dof_map[2])
+                per_node[tag] = (dx, dy, dz)
+            shapes[m] = per_node
+        return shapes
+
     # ═══════════════════════════════════════════════════════════════
     # Utilities
     # ═══════════════════════════════════════════════════════════════
