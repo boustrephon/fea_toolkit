@@ -1520,6 +1520,422 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
 
 
 # ============================================================================
+# Unified force/moment diagram (builder or NPZ data)
+# ============================================================================
+
+def plot_force_diagram_3d(source, force_data=None, *,
+                          quantity='My', mode='flag',
+                          moment_scale=None, show_original=True,
+                          combo=None, notebook=False, title=None,
+                          **kwargs):
+    """Draw a 3D force/moment diagram from a builder or NPZ/HDF5 data.
+
+    Works with either:
+
+    * An ``OpenSeesBuilder`` / ``AnalysisBuilder`` (built) + a force dict
+      from ``extract_static_element_forces()``.
+    * An NPZ data dict (from ``np.load()``) — forces are read from the
+      ``static/{combo}/`` arrays automatically.
+
+    Geometry is resolved from *source* via :func:`_resolve_mesh_data`:
+    the NPZ file already caches node coordinates and element connectivity,
+    so no separate model file is needed.
+
+    Args:
+        source: Builder instance or NPZ data dict.
+        force_data:
+            *Builder path:* dict ``{elem_tag: {Fx, Fy, Fz, Mx, My, Mz,
+            Fx_j, ...}}`` from ``extract_static_element_forces()``.
+            *NPZ path:* ``None`` (forces extracted automatically), or a
+            string naming the static combo (e.g. ``"DEAD"``) — equivalent
+            to passing via the *combo* parameter.
+        quantity: ``'My'``, ``'Mz'``, ``'Mx'``, ``'Fx'``, ``'Fy'``, ``'Fz'``.
+        mode: ``'flag'`` (planar quadrilaterals) or ``'tube'`` (coloured
+            cylinders).
+        moment_scale: Extrusion length per unit quantity.  ``None`` =
+            auto‑scale so the largest flag is 20 % of model height.
+        show_original: Draw the centreline in grey.
+        combo: For NPZ source, the static case name (e.g. ``"DEAD"``).
+            ``None`` = first available case.
+        notebook: Return plotter for Jupyter.
+        title: Optional plot title.
+        **kwargs: Passed to ``pyvista.Plotter()``.
+
+    Returns:
+        ``pv.Plotter`` if *notebook* else ``None``.
+    """
+    import numpy as np
+    try:
+        import pyvista as pv
+    except ImportError:
+        print("pyvista is required.  pip install pyvista")
+        return None
+
+    is_moment = quantity.startswith("M")
+    if not is_moment and not quantity.startswith("F"):
+        print(f"Unsupported quantity '{quantity}'.  Use 'M*' or 'F*'.")
+        return None
+
+    # ── Resolve geometry ──────────────────────────────────────────
+    data = _resolve_mesh_data(source)
+    nodes = data["nodes"]
+    frames = data["frames"]
+
+    # ── Resolve force data ────────────────────────────────────────
+    # force_map: {(ni_tag, nj_tag, idx): {Fx, Fy, Fz, Mx, My, Mz,
+    #                                      Fx_j, Fy_j, Fz_j, Mx_j, My_j, Mz_j}}
+    # The idx is the frame index in the resolved data for traceability.
+    is_npz = isinstance(source, dict)
+
+    if is_npz:
+        # Extract static case name
+        _combo = force_data if isinstance(force_data, str) else combo
+        case_prefix = _resolve_npz_static_case(source, _combo)
+        force_map = _extract_npz_frame_forces(source, case_prefix, frames)
+    else:
+        # Builder path — use provided force_data
+        if force_data is None:
+            print("force_data is required when source is a builder.")
+            return None
+        force_map = {}
+        for idx, fr in enumerate(frames):
+            # Need to map frame to elem_tag — for builders we use the
+            # node tags to look up the element in the builder
+            builder = source
+            model = (builder.model if hasattr(builder, 'model')
+                     else builder.mesh_model)
+            elements = (builder.split_elements if hasattr(builder, 'split_elements')
+                        and builder.split_elements else model.frame_elements)
+            # Find element by node_i/node_j
+            ni_tag = fr.get("ni_tag")
+            nj_tag = fr.get("nj_tag")
+            if ni_tag is None:
+                # Builder path uses ni_id/nj_id (string ids)
+                nid_i = fr["ni_id"]
+                nid_j = fr["nj_id"]
+                nd_i = model.nodes.get(nid_i)
+                nd_j = model.nodes.get(nid_j)
+                if nd_i is None or nd_j is None:
+                    continue
+                ni_tag = nd_i.node_tag
+                nj_tag = nd_j.node_tag
+
+            # Find element by node tags
+            target_tag = None
+            for eid, elem in elements.items():
+                if getattr(elem, 'inactive', False):
+                    continue
+                eni = model.nodes.get(elem.node_i)
+                enj = model.nodes.get(elem.node_j)
+                if eni is None or enj is None:
+                    continue
+                if eni.node_tag == ni_tag and enj.node_tag == nj_tag:
+                    target_tag = elem.elem_tag
+                    break
+
+            if target_tag is not None and target_tag in force_data:
+                force_map[idx] = force_data[target_tag]
+
+    if not force_map:
+        print(f"No {quantity} data to plot.")
+        return None
+
+    # ── Build flag/tube segments ──────────────────────────────────
+    # Each segment: (p_i, p_j, vn, v_i, v_j)  for flags
+    #               (p_i, p_j, val)            for tubes
+    model_height = 0.0
+    max_abs_val = 0.0
+    segments = []
+    values = []  # for tube mode
+
+    for idx, fr in enumerate(frames):
+        if idx not in force_map:
+            continue
+        f_local = _compute_local_forces(source, fr, nodes, force_map[idx],
+                                        quantity)
+        if f_local is None:
+            continue
+
+        # Node coordinates
+        if "ni_id" in fr:
+            ni = nodes.get(fr["ni_id"])
+            nj = nodes.get(fr["nj_id"])
+        else:
+            ni = next((n for n in nodes.values()
+                       if n["tag"] == fr["ni_tag"]), None)
+            nj = next((n for n in nodes.values()
+                       if n["tag"] == fr["nj_tag"]), None)
+        if ni is None or nj is None:
+            continue
+
+        p_i = np.array([ni["x"], ni["y"], ni["z"]])
+        p_j = np.array([nj["x"], nj["y"], nj["z"]])
+        model_height = max(model_height, ni["z"], nj["z"])
+
+        v_i = f_local.get(quantity, 0.0)
+        v_j = f_local.get(quantity + '_j', 0.0)
+        max_abs_val = max(max_abs_val, abs(v_i), abs(v_j))
+
+        if mode == "flag":
+            vn = _compute_flag_direction(f_local, fr, nodes, quantity)
+            segments.append((p_i, p_j, vn, v_i, v_j))
+        else:
+            values.append((p_i, p_j, (v_i + v_j) * 0.5))
+
+    if not segments and not values:
+        print(f"No {quantity} data to plot.")
+        return None
+
+    # ── Auto-scale ────────────────────────────────────────────────
+    if mode == "flag" and moment_scale is None:
+        moment_scale = (model_height * 0.2) / max(max_abs_val, 1.0)
+
+    # ── Render ────────────────────────────────────────────────────
+    pv.set_plot_theme("document")
+    plotter = pv.Plotter(notebook=notebook, **kwargs)
+
+    if show_original:
+        for p_i, p_j, *_ in segments if mode == "flag" else \
+                [(p_i, p_j) for p_i, p_j, _ in values]:
+            n = max(2, int(np.linalg.norm(p_j - p_i) * 2))
+            poly = pv.lines_from_points(np.linspace(p_i, p_j, n))
+            plotter.add_mesh(poly, color='lightgrey', line_width=1,
+                             opacity=0.4)
+
+    if mode == "flag":
+        for p_i, p_j, vn, Fi, Fj in segments:
+            for verts, col_val in compute_flag_parts(
+                p_i, p_j, vn, Fi, Fj, moment_scale,
+            ):
+                _add_coloured_poly(plotter, verts, col_val, max_abs_val)
+    else:
+        for p_i, p_j, val in values:
+            _add_coloured_tube(plotter, p_i, p_j, val, max_abs_val)
+
+    kind = "Moment" if is_moment else "Force"
+    plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)",
+                     position='lower_edge', font_size=10)
+    if title:
+        plotter.add_text(title, position='upper_edge', font_size=12)
+    _set_isometric_view(plotter)
+
+    if notebook:
+        return plotter
+    plotter.show()
+    return None
+
+
+# ── Internal helpers for unified force diagram ────────────────────────────
+
+def _resolve_npz_static_case(source: dict, combo: str = None) -> str:
+    """Determine the NPZ static case prefix (e.g. ``'static/DEAD/'``)."""
+    from ..io.npz_reader import _get_static_cases
+    cases = _get_static_cases(source)
+    if not cases:
+        raise ValueError("No static cases found in NPZ data.")
+    name = combo if combo and combo in cases else cases[0]
+    return f"static/{name}/"
+
+
+def _extract_npz_frame_forces(source, case_prefix, frames):
+    """Build force_map from NPZ arrays for the given static case.
+
+    Returns ``{idx: {Fx, Fy, Fz, Mx, My, Mz, Fx_j, ..., local variants}}``.
+    """
+    import numpy as np
+    force_map = {}
+    qty_list = ['fx', 'fy', 'fz', 'mx', 'my', 'mz']
+    for idx in range(len(frames)):
+        entry = {}
+        for q in qty_list:
+            key_i = f"{case_prefix}{q}_i"
+            key_j = f"{case_prefix}{q}_j"
+            arr_i = source.get(key_i)
+            arr_j = source.get(key_j)
+            if arr_i is not None and idx < len(arr_i):
+                entry[q.upper()] = float(arr_i[idx])
+            if arr_j is not None and idx < len(arr_j):
+                entry[f"{q.upper()}_j"] = float(arr_j[idx])
+            # Local variants
+            loc_i = f"{case_prefix}{q}_i_local"
+            loc_j = f"{case_prefix}{q}_j_local"
+            if loc_i in source:
+                entry[f"{q.upper()}_i_local"] = float(source[loc_i][idx])
+            if loc_j in source:
+                entry[f"{q.upper()}_j_local"] = float(source[loc_j][idx])
+        if entry:
+            force_map[idx] = entry
+    return force_map
+
+
+def _compute_local_forces(source, fr, nodes, force_entry, quantity):
+    """Transform global forces to local for one frame element.
+
+    For the builder path uses ``builder._get_local_axes()``;
+    for NPZ data uses ``get_SAP_vecxz`` from the element geometry
+    and prefers pre-computed local arrays when available.
+    """
+    import numpy as np
+
+    # If pre-computed local values exist in the entry, use them directly
+    q_upper = quantity.upper()
+    loc_key = f"{q_upper}_i_local"
+    loc_key_j = f"{q_upper}_j_local"
+    if loc_key in force_entry and loc_key_j in force_entry:
+        return {
+            quantity: force_entry[loc_key],
+            f"{quantity}_j": force_entry[loc_key_j],
+        }
+
+    # Otherwise compute from global forces
+    # Get node coordinates for element axis
+    if "ni_id" in fr:
+        ni = nodes.get(fr["ni_id"])
+        nj = nodes.get(fr["nj_id"])
+    else:
+        ni = next((n for n in nodes.values()
+                   if n["tag"] == fr["ni_tag"]), None)
+        nj = next((n for n in nodes.values()
+                   if n["tag"] == fr["nj_tag"]), None)
+    if ni is None or nj is None:
+        return None
+
+    axis = np.array([nj["x"] - ni["x"], nj["y"] - ni["y"],
+                     nj["z"] - ni["z"]])
+    axis_len = np.linalg.norm(axis)
+    if axis_len < 1e-12:
+        return None
+    axis = axis / axis_len
+
+    # Compute local axes
+    try:
+        vecxz = get_SAP_vecxz(axis, 0.0)
+        vx = axis
+        vz = vecxz / np.linalg.norm(vecxz)
+        vy = np.cross(vz, vx)
+        if np.linalg.norm(vy) > 1e-12:
+            vy = vy / np.linalg.norm(vy)
+        else:
+            vy = np.array([0.0, 1.0, 0.0])
+            vz = np.cross(vx, vy)
+            vz = vz / np.linalg.norm(vz)
+    except Exception:
+        return None
+
+    T = np.vstack([vx, vy, vz])  # (3, 3) local ← global
+
+    # Extract global forces
+    def _g(q):
+        return force_entry.get(q, force_entry.get(q.lower(), 0.0))
+
+    f_i = np.array([_g('FX'), _g('FY'), _g('FZ')])
+    m_i = np.array([_g('MX'), _g('MY'), _g('MZ')])
+    f_j = np.array([_g('FX_j'), _g('FY_j'), _g('FZ_j')])
+    m_j = np.array([_g('MX_j'), _g('MY_j'), _g('MZ_j')])
+
+    f_i_loc = T @ f_i
+    m_i_loc = T @ m_i
+    f_j_loc = T @ f_j
+    m_j_loc = T @ m_j
+
+    return {
+        'Fx': f_i_loc[0], 'Fy': f_i_loc[1], 'Fz': f_i_loc[2],
+        'Mx': m_i_loc[0], 'My': m_i_loc[1], 'Mz': m_i_loc[2],
+        'Fx_j': f_j_loc[0], 'Fy_j': f_j_loc[1], 'Fz_j': f_j_loc[2],
+        'Mx_j': m_j_loc[0], 'My_j': m_j_loc[1], 'Mz_j': m_j_loc[2],
+    }
+
+
+def _compute_flag_direction(f_local, fr, nodes, quantity):
+    """Determine the flag extrusion direction (vn) for a frame element."""
+    import numpy as np
+    axis = _get_element_axis(fr, nodes)
+    if axis is None:
+        return np.array([0.0, 1.0, 0.0])
+    try:
+        vecxz = get_SAP_vecxz(axis, 0.0)
+        vz = vecxz / np.linalg.norm(vecxz)
+        vy = np.cross(vz, axis)
+        vy = vy / np.linalg.norm(vy) if np.linalg.norm(vy) > 1e-12 else \
+             np.array([0.0, 1.0, 0.0])
+    except Exception:
+        vy = np.array([0.0, 1.0, 0.0])
+        vz = np.array([0.0, 0.0, 1.0])
+
+    if quantity == "Fx":
+        return vz.copy()
+    elif quantity == "Fy":
+        return vy.copy()
+    elif quantity == "Fz":
+        return vz.copy()
+    elif quantity == "Mx":
+        return vy.copy()
+    elif quantity == "My":
+        return -vz.copy()
+    elif quantity == "Mz":
+        return vy.copy()
+    else:
+        return vz.copy()
+
+
+def _get_element_axis(fr, nodes):
+    """Return unit vector along a frame element from resolved data."""
+    import numpy as np
+    if "ni_id" in fr:
+        ni = nodes.get(fr["ni_id"])
+        nj = nodes.get(fr["nj_id"])
+    else:
+        ni = next((n for n in nodes.values()
+                   if n["tag"] == fr["ni_tag"]), None)
+        nj = next((n for n in nodes.values()
+                   if n["tag"] == fr["nj_tag"]), None)
+    if ni is None or nj is None:
+        return None
+    d = np.array([nj["x"] - ni["x"], nj["y"] - ni["y"],
+                  nj["z"] - ni["z"]])
+    norm = np.linalg.norm(d)
+    return d / norm if norm > 1e-12 else None
+
+
+def _add_coloured_poly(plotter, verts, col_val, max_abs_val):
+    """Add a coloured polygon to the plotter (flag mode)."""
+    import numpy as np
+    import pyvista as pv
+    pts_arr = np.array(verts)
+    n = len(verts)
+    surf = pv.PolyData(pts_arr, faces=[n] + list(range(n)))
+    t = min(abs(col_val) / max(max_abs_val, 1.0), 1.0)
+    if col_val >= 0:
+        colour = (0.3 + 0.7 * t, 0.3 - 0.2 * t, 0.3 - 0.3 * t)
+    else:
+        colour = (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
+    plotter.add_mesh(surf, color=colour, opacity=0.85,
+                     show_edges=False, smooth_shading=False, lighting=False)
+
+
+def _add_coloured_tube(plotter, p_i, p_j, val, max_abs_val):
+    """Add a coloured cylinder to the plotter (tube mode)."""
+    import numpy as np
+    import pyvista as pv
+    axis = p_j - p_i
+    axis_len = np.linalg.norm(axis)
+    if axis_len < 1e-12:
+        return
+    p_mid = (p_i + p_j) / 2.0
+    direction = axis / axis_len
+    t = min(abs(val) / max(max_abs_val, 1.0), 1.0)
+    radius = max(axis_len * 0.02, 0.05)
+    if val >= 0:
+        colour = (0.3 + 0.7 * t, 0.3 - 0.2 * t, 0.3 - 0.3 * t)
+    else:
+        colour = (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
+    cyl = pv.Cylinder(center=p_mid, direction=direction, radius=radius,
+                      height=axis_len * 0.9)
+    plotter.add_mesh(cyl, color=colour, opacity=0.5, show_edges=False,
+                     lighting=False)
+
+
+# ============================================================================
 # 3D moment diagram (PyVista) — extruded flags on the tension side
 # ============================================================================
 
