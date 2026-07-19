@@ -1972,6 +1972,51 @@ class TestPlottingImports:
         from fea_toolkit.plotting import plot_static_force_diagram
         assert callable(plot_static_force_diagram)
 
+    def test_force_diagram_3d_import(self):
+        """plot_force_diagram_3d is callable from the plotting package."""
+        from fea_toolkit.plotting import plot_force_diagram_3d
+        assert callable(plot_force_diagram_3d)
+
+    def test_force_diagram_3d_invalid_quantity(self):
+        """Invalid quantity returns None."""
+        from fea_toolkit.plotting import plot_force_diagram_3d
+        result = plot_force_diagram_3d({}, quantity='ZZ')
+        assert result is None
+
+    def test_force_diagram_3d_no_data_builder(self):
+        """Builder without force_data returns None."""
+        from fea_toolkit.plotting import plot_force_diagram_3d
+        # Use a minimal mock that satisfies _resolve_mesh_data
+        class MockModel:
+            nodes = {}
+            frame_elements = {}
+            area_elements = {}
+            frame_assignments = {}
+            area_assignments = {}
+        class MockBuilder:
+            model = MockModel()
+            split_elements = {}
+            split_assignments = {}
+            _mesh_model = None
+        result = plot_force_diagram_3d(MockBuilder())
+        assert result is None
+
+    def test_force_diagram_3d_npz_no_static(self):
+        """NPZ dict without static cases raises ValueError."""
+        from fea_toolkit.plotting import plot_force_diagram_3d
+        import pytest
+        with pytest.raises(ValueError, match="No static cases found"):
+            plot_force_diagram_3d({}, quantity='Mz')
+
+    def test_unified_functions_import(self):
+        """All unified functions are importable from the plotting package."""
+        from fea_toolkit.plotting import (
+            plot_mesh, compare_meshes, plot_mode_animation,
+        )
+        assert callable(plot_mesh)
+        assert callable(compare_meshes)
+        assert callable(plot_mode_animation)
+
     def test_model_viewer_import_and_types(self):
         """ModelViewer and its data types import correctly."""
         from fea_toolkit.plotting.renderers import (
