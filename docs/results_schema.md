@@ -36,11 +36,34 @@ This means every NPZ array can be mapped 1:1 to an xarray DataArray.
 
 These arrays describe the meshed model topology — stored once per `.npz` file.
 
+**ID conventions:**
+
+The NPZ schema uses a **mixed ID format** that reflects the two-stage
+pipeline (SAP2000 parsing → OpenSees domain):
+
+| ID type | Used for | Format | Example |
+|---------|----------|--------|---------|
+| **OpenSees node tag** (`node_tag`) | Node identity, connectivity | `int` | `1`, `2` |
+| **SAP2000 string ID** (`*_sap_id`) | Element identity, traceability | `str` | `"1"`, `"1-0"`, `"5_af_0_1"` |
+| **Element index** (`*_eid`) | Array position (0‑based) | `int` | `0`, `1` |
+
+Node connectivity in frame and shell arrays always uses OpenSees tags
+(the `frame_node_i/j` and `shell_node_1–4` fields).  This ensures
+consistent cross-referencing: ``node_tag[idx]`` gives the same tag that
+appears in ``frame_node_i``.
+
+Static result arrays are ordered by **sorted SAP node ID** to preserve
+traceability to the original SAP2000 model.  The sort key handles both
+numeric IDs (``"1"``, ``"2"`` → numeric order) and non-numeric IDs
+(``"5_af_0_1"`` → string order), so any valid SAP2000 node ID is
+supported.
+
 **Nodes:**
 
 | Array | Shape | dtype | Description |
 |---|---|---|---|
-| `node_tag` | `(N_node,)` | `int` | OpenSees node tag |
+| `node_tag` | `(N_node,)` | `int` | OpenSees node tag (unique numeric id) |
+| `node_sap_id` | `(N_node,)` | `str` | SAP2000 string node ID, e.g. ``"1"`` or ``"5_af_0_1"`` |
 | `node_x` | `(N_node,)` | `float` | X coordinate (model units) |
 | `node_y` | `(N_node,)` | `float` | Y coordinate |
 | `node_z` | `(N_node,)` | `float` | Z coordinate |
@@ -53,8 +76,8 @@ These arrays describe the meshed model topology — stored once per `.npz` file.
 | `frame_sap_id` | `(N_frame,)` | `str` | Original SAP2000 FrameID, e.g. ``"1"`` or ``"1-0"`` for split children |
 | `frame_parent_sap_id` | `(N_frame,)` | `str` | Parent SAP2000 ID for split children, empty string for originals |
 | `frame_sec_name` | `(N_frame,)` | `str` | Section name, e.g. ``"UB300"`` |
-| `frame_node_i` | `(N_frame,)` | `int` | I‑end node tag |
-| `frame_node_j` | `(N_frame,)` | `int` | J‑end node tag |
+| `frame_node_i` | `(N_frame,)` | `int` | I‑end node **tag** (OpenSees, matches ``node_tag``) |
+| `frame_node_j` | `(N_frame,)` | `int` | J‑end node **tag** (OpenSees, matches ``node_tag``) |
 | `frame_t_start` | `(N_frame,)` | `float` | Parametric start along parent [0,1] — optional, present for split children |
 | `frame_t_end` | `(N_frame,)` | `float` | Parametric end along parent [0,1] — optional, present for split children |
 
@@ -65,16 +88,17 @@ These arrays describe the meshed model topology — stored once per `.npz` file.
 | `shell_eid` | `(N_shell,)` | `int` | Element index (0‑based) |
 | `shell_sap_id` | `(N_shell,)` | `str` | Original SAP2000 AreaID |
 | `shell_sec_name` | `(N_shell,)` | `str` | Section name |
-| `shell_node_1` | `(N_shell,)` | `int` | Corner node 1 tag |
-| `shell_node_2` | `(N_shell,)` | `int` | Corner node 2 tag |
-| `shell_node_3` | `(N_shell,)` | `int` | Corner node 3 tag |
-| `shell_node_4` | `(N_shell,)` | `int` | Corner node 4 tag |
+| `shell_node_1` | `(N_shell,)` | `int` | Corner node 1 **tag** (OpenSees, matches ``node_tag``) |
+| `shell_node_2` | `(N_shell,)` | `int` | Corner node 2 **tag** |
+| `shell_node_3` | `(N_shell,)` | `int` | Corner node 3 **tag** |
+| `shell_node_4` | `(N_shell,)` | `int` | Corner node 4 **tag** |
 
 ### Static analysis results (per load case)
 
 Each static case gets a group of arrays keyed by case name.
 
 **Nodal displacements:**
+Sorted by SAP node ID (see ID conventions above).
 
 | Array | Shape | dtype | Description |
 |---|---|---|---|

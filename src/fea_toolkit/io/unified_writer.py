@@ -225,7 +225,12 @@ def _collect_case_displacements(arrays: Dict[str, np.ndarray], case: str,
     disp = data.get("nodal_displacements", {})
     if not disp:
         return
-    tags = sorted(disp.keys(), key=int)
+    def _disp_sort_key(k: str):
+        try:
+            return (0, int(k), k)
+        except ValueError:
+            return (1, 0, k)
+    tags = sorted(disp.keys(), key=_disp_sort_key)
     for i, dof in enumerate(["dx", "dy", "dz"]):
         arr = np.array([disp[t][i] for t in tags], dtype=float)
         arrays[make_static_key(case, f"node_{dof}")] = arr
