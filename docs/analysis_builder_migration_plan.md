@@ -26,9 +26,9 @@ All functional features have been ported. The two-stage build path now supports
 the full workflow: static, modal, response-spectrum, pushover, edge constraints,
 CSM, and result export.
 
-### Phase 4: Cleanup / Deprecation (P2)
-| Task | Reason |
+### Phase 4: Cleanup / Deprecation (P2) — Complete
+| Task | Status |
 |------|--------|
-| Remove pushover guard (`save/restore _analysis` in Builder) | No longer needed — AnalysisBuilder handles pushover directly |
-| Remove FutureWarning for `use_preprocessor=False` | Legacy path will be removed |
-| Deprecate `OpenSeesBuilder._rs_base_shear()` | Moved to `spectrum.py` |
+| Remove pushover guard (`save/restore _analysis` in Builder) | ✅ Removed |
+| Remove FutureWarning for `use_preprocessor=False` | ✅ Removed (legacy path still functions) |
+| Deprecate `OpenSeesBuilder._rs_base_shear()` | ✅ Already removed (functionality in `spectrum.py`) |

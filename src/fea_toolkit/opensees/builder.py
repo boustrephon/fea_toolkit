@@ -1952,15 +1952,7 @@ class OpenSeesBuilder:
             self.model.area_assignments = self._mesh_model.area_assignments
             return
 
-        # ── Legacy single-stage path (DEPRECATED) ────────────────
-        warnings.warn(
-            "The legacy single-stage build path (use_preprocessor=False) is "
-            "deprecated and will be removed in a future release.  Remove the "
-            "'use_preprocessor' config flag (or set it to True) to use the "
-            "new two-stage build path (Preprocessor + AnalysisBuilder).",
-            FutureWarning,
-            stacklevel=2,
-        )
+        # ── Legacy single-stage path (maintained for backward compatibility) ──
         # Persist selection so re-builds (e.g. from run_static_analysis)
         # don't lose it.
         if selection is not None:
@@ -6240,15 +6232,10 @@ class OpenSeesBuilder:
                 print(f"  Seismic mass: {total_mass:.2f} tonnes")
 
         # ── 3. Apply gravity ──
-        # Bypass delegation — pushover uses its own fiber-section domain
-        _saved_analysis = getattr(self, '_analysis', None)
-        self._analysis = None  # type: ignore[assignment]
         grav_results = self.run_static_analysis(
             extract_reactions=True,
             pattern_scales=gravity_patterns,
         )
-        if _saved_analysis is not None:
-            self._analysis = _saved_analysis
         grav_disp = grav_results.get('nodal_displacements', {}) if grav_results else {}
 
         # Record base shear from gravity (before lateral loads)
