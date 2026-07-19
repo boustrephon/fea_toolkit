@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Any, TYPE_CHECKING
 import math
 import numpy as np
 
-from ..model.geometry import get_SAP_vecxz
+from ..model.geometry import get_SAP_vecxz, get_local_axes
 from ..utils import compute_flag_parts
 
 if TYPE_CHECKING:
@@ -1821,16 +1821,7 @@ def _compute_local_forces(source, fr, nodes, force_entry, quantity):
 
     # Compute local axes
     try:
-        vecxz = get_SAP_vecxz(axis, 0.0)
-        vx = axis
-        vz = vecxz / np.linalg.norm(vecxz)
-        vy = np.cross(vz, vx)
-        if np.linalg.norm(vy) > 1e-12:
-            vy = vy / np.linalg.norm(vy)
-        else:
-            vy = np.array([0.0, 1.0, 0.0])
-            vz = np.cross(vx, vy)
-            vz = vz / np.linalg.norm(vz)
+        vx, vy, vz = get_local_axes(axis)
     except Exception:
         return None
 
@@ -1865,11 +1856,7 @@ def _compute_flag_direction(f_local, fr, nodes, quantity):
     if axis is None:
         return np.array([0.0, 1.0, 0.0])
     try:
-        vecxz = get_SAP_vecxz(axis, 0.0)
-        vz = vecxz / np.linalg.norm(vecxz)
-        vy = np.cross(vz, axis)
-        vy = vy / np.linalg.norm(vy) if np.linalg.norm(vy) > 1e-12 else \
-             np.array([0.0, 1.0, 0.0])
+        _, vy, vz = get_local_axes(axis)
     except Exception:
         vy = np.array([0.0, 1.0, 0.0])
         vz = np.array([0.0, 0.0, 1.0])
@@ -3177,13 +3164,7 @@ def plot_npz_moment_3d(
         axis = axis / axis_len
 
         # Flag offset direction (vn) based on quantity
-        vecxz = get_SAP_vecxz(axis, 0.0)
-        vec_z = vecxz / np.linalg.norm(vecxz)
-        vec_y = np.cross(vec_z, axis)
-        if np.linalg.norm(vec_y) > 1e-12:
-            vec_y = vec_y / np.linalg.norm(vec_y)
-        else:
-            vec_y = np.array([0.0, 1.0, 0.0])
+        _, vec_y, vec_z = get_local_axes(axis)
         if quantity == "Fx":
             vn = vec_z
         elif quantity == "Fy":
