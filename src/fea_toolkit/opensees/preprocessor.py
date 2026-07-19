@@ -23,6 +23,9 @@ from ..model.geometry import (
     find_constraint_edges,
     warn_frame_overlaps,
     convert_area_loads_to_edge_loads,
+    find_wall_nodes_inside_slabs,
+    split_slabs_at_wall_intersections,
+    print_wall_inside_slab_report,
 )
 from ..model.selection import Selection
 from ..model.mesh_model import MeshModel
@@ -58,7 +61,10 @@ class Preprocessor:
         Args:
             model_data: Parsed SAP2000 model data.
             selection: Optional :class:`Selection` designating loads‑only
-                areas (no shell elements created for them).
+                areas (no shell elements created for them).  Nodes
+                referenced only by such areas are moved to
+                ``MeshModel.orphan_nodes`` — they are kept for
+                visualisation but not created in OpenSees.
 
         Returns:
             A fully prepared :class:`~fea_toolkit.model.mesh_model.MeshModel`.
@@ -100,20 +106,44 @@ class Preprocessor:
         offset_rigid_links: List[tuple] = []
         if md.frame_end_offsets:
             from ..model.geometry import apply_frame_end_offsets
-            new_elems, new_assigns, md.nodes, offset_rigid_links = (
+            max_node_tag = max((n.node_tag for n in md.nodes.values()), default=0)
+            new_elems, new_assigns, md.nodes, _next_tag, offset_rigid_links = (
                 apply_frame_end_offsets(
-                    md.nodes, new_elems, new_assigns,
+                    new_elems, new_assigns, md.nodes,
                     md.frame_end_offsets,
+                    next_tag=max_node_tag + 1,
+                )
+            )
+
+        # ── 3b. Split areas at frame edges ────────────────────────
+        # Ensures slab mesh nodes coincide with frame split points.
+        # Enabled by default to prevent false-positive constraint edges.
+        if self.config.get('split_areas_at_frame_edges', True):
+            from ..model.geometry import split_areas_at_frame_edges
+            max_tag = max(
+                (ae.area_tag for ae in md.area_elements.values()), default=0
+            )
+            max_ntag = max(
+                (nd.node_tag for nd in md.nodes.values()), default=0
+            )
+            md.area_elements, md.area_assignments, md.nodes, _ = (
+                split_areas_at_frame_edges(
+                    md.area_elements, md.area_assignments, md.nodes,
+                    new_elems,
+                    next_tag=max(max_tag, max_ntag) + 1,
+                    groups=getattr(md, 'groups', None),
                 )
             )
 
         # ── 4. Convert area loads to frame edge loads ────────────
         edge_loads_from_areas: list = []
+        loads_only_area_ids: Set[str] = set()
         create_shells = self.config.get('create_shells', False)
         if selection is not None:
             edge_loads_from_areas = self._convert_area_loads(
                 md, selection, new_elems,
             )
+            loads_only_area_ids = set(selection.get_area_ids(md))
         elif not create_shells:
             # No shell mode + no selection → convert all area loads
             edge_loads_from_areas = self._convert_area_loads(
@@ -127,15 +157,37 @@ class Preprocessor:
             self._mesh_areas(md, selection=selection)
             self._merge_coincident_nodes(md)
 
-            # N×N shell subdivision
-            self._subdivide_shells_in_model_data(md)
-
-            # Split frames at shell sub-division nodes
-            if self.config.get('subdivide_shells', 0):
-                new_elems, new_assigns, split_dist_loads, frame_element_types = (
+            # Split frames at shell mesh nodes.
+            # Only splits frames whose root parent has AtJoints=True
+            # in the original SAP2000 auto-mesh data.
+            if self.config.get('split_frames_at_shell_nodes', True):
+                _before = len(new_elems)
+                new_elems, new_assigns, split_dist_loads, frame_element_types, edge_loads_from_areas = (
                     self._split_frames_at_shell_subdiv(
                         md, new_elems, new_assigns, split_dist_loads,
                         frame_element_types,
+                        edge_loads=edge_loads_from_areas,
+                        exclude_area_ids=loads_only_area_ids,
+                    )
+                )
+                _after = len(new_elems)
+                if _after > _before:
+                    print(f"    _split_frames_at_shell_subdiv: "
+                          f"split {_after - _before} new frame(s) "
+                          f"({_before} → {_after})")
+                self._merge_coincident_nodes(md)
+
+            # N×N shell subdivision (opt-in, additional refinement)
+            self._subdivide_shells_in_model_data(md)
+
+            if self.config.get('subdivide_shells', 0):
+                # Second round of frame splitting for sub-division nodes
+                new_elems, new_assigns, split_dist_loads, frame_element_types, edge_loads_from_areas = (
+                    self._split_frames_at_shell_subdiv(
+                        md, new_elems, new_assigns, split_dist_loads,
+                        frame_element_types,
+                        edge_loads=edge_loads_from_areas,
+                        exclude_area_ids=loads_only_area_ids,
                     )
                 )
                 self._merge_coincident_nodes(md)
@@ -151,14 +203,45 @@ class Preprocessor:
         else:
             area_element_types = {}
 
-        # ── 6. Detect constraint edges ───────────────────────────
-        raw_edges = self._detect_constraint_edges(md, new_elems, new_assigns)
+        # ── 6. Detect constraint edges (opt-in diagnostic) ──────
+        raw_edges = []
+        if self.config.get('detect_constraint_edges', False):
+            raw_edges = self._detect_constraint_edges(md, new_elems, new_assigns)
 
         # ── 7. Detect diaphragm levels ───────────────────────────
         diaphragm_levels = self._detect_diaphragm_levels(md)
 
         # ── 8. Build MeshModel ───────────────────────────────────
         base_z = min((nd.z for nd in md.nodes.values()), default=None)
+
+        # Pre-assign material and section tags so AnalysisBuilder
+        # does not need to auto-assign them (deterministic recreation).
+        material_tags: Dict[str, int] = {}
+        for i, mat_name in enumerate(md.materials.keys(), start=1):
+            material_tags[mat_name] = i
+
+        section_tags: Dict[str, int] = {}
+        for i, sec_name in enumerate(md.sections.keys(), start=len(material_tags) + 1):
+            section_tags[sec_name] = i
+
+        # ── 9. Remove orphan nodes (not referenced by any element) ──
+        referenced: Set[str] = set()
+        for fe in new_elems.values():
+            if not getattr(fe, 'inactive', False):
+                referenced.add(fe.node_i)
+                referenced.add(fe.node_j)
+        for aid, ae in md.area_elements.items():
+            if getattr(ae, 'inactive', False):
+                continue
+            if aid in loads_only_area_ids:
+                continue  # these areas have no shells, skip their nodes
+            referenced.update(ae.node_ids)
+        orphan_nodes: Dict[str, Node] = {}
+        for nid in list(md.nodes.keys()):
+            if nid not in referenced:
+                orphan_nodes[nid] = md.nodes.pop(nid)
+        if orphan_nodes:
+            pass  # kept for visualisation
 
         mesh_model = MeshModel(
             nodes=md.nodes,
@@ -180,6 +263,10 @@ class Preprocessor:
             base_z=base_z,
             units=md.units,
             model_name=getattr(md, 'name', ''),
+            material_tags=material_tags,
+            section_tags=section_tags,
+            loads_only_area_ids=loads_only_area_ids,
+            orphan_nodes=orphan_nodes,
         )
 
         return mesh_model
@@ -246,8 +333,40 @@ class Preprocessor:
     def _mesh_areas(self, md, selection=None):
         """Subdivide area elements per AREA MESH ASSIGNMENTS.
 
-        Pure data operation — no OpenSees calls.
+        Also handles wall-slab intersection detection and optional
+        splitting (mirrors the legacy builder's behaviour).
         """
+        # ── Wall-slab intersection detection ─────────────────────
+        if self.config.get('detect_wall_slab_intersections', True):
+            ws_findings = find_wall_nodes_inside_slabs(
+                md.area_elements, md.area_assignments, md.nodes,
+            )
+            if ws_findings:
+                print_wall_inside_slab_report(ws_findings)
+
+                # Optional auto-split
+                if self.config.get('split_slabs_at_walls', False):
+                    max_tag = max(
+                        (ae.area_tag for ae in md.area_elements.values()),
+                        default=0,
+                    )
+                    max_ntag = max(
+                        (nd.node_tag for nd in md.nodes.values()), default=0,
+                    )
+                    next_tag = max(max_tag, max_ntag) + 1
+                    areas_ws, assign_ws, nodes_ws, _ = (
+                        split_slabs_at_wall_intersections(
+                            md.area_elements, md.area_assignments,
+                            md.nodes, next_tag=next_tag,
+                            groups=getattr(md, 'groups', None),
+                        )
+                    )
+                    md.area_elements = areas_ws
+                    md.area_assignments = assign_ws
+                    md.nodes = nodes_ws
+                    print(f"    → Split at {len(ws_findings)} wall intersection(s)")
+
+        # ── Area meshing ─────────────────────────────────────────
         area_mesh = getattr(md, 'area_mesh', {})
         if not area_mesh:
             return
@@ -285,6 +404,10 @@ class Preprocessor:
         """Merge mesh-created nodes at the same coordinates.
 
         Pure data operation — no OpenSees calls.
+
+        Merges mesh nodes into existing protected (original SAP / frame)
+        nodes at the same coordinates, as well as deduplicating mesh
+        nodes among themselves.
         """
         from collections import defaultdict
 
@@ -309,9 +432,9 @@ class Preprocessor:
             if hasattr(offset, 'node_j') and offset.node_j:
                 protected.add(offset.node_j)
 
-        # Group mesh nodes by rounded coordinates
+        # Group ALL nodes by rounded coordinates (not just mesh nodes)
         coord_map: Dict[str, List[str]] = defaultdict(list)
-        for nid, nd in mesh_nodes.items():
+        for nid, nd in md.nodes.items():
             key = f"{nd.x:.4f}_{nd.y:.4f}_{nd.z:.4f}"
             coord_map[key].append(nid)
 
@@ -319,18 +442,26 @@ class Preprocessor:
         for key, ids in coord_map.items():
             if len(ids) < 2:
                 continue
+            # Prefer a protected node as survivor so mesh nodes
+            # merge into original SAP / frame element nodes.
             survivor = None
             for nid in ids:
-                if nid not in protected:
+                if nid in protected:
                     survivor = nid
                     break
+            if survivor is None:
+                # No protected node — pick first unprotected
+                for nid in ids:
+                    if nid not in protected:
+                        survivor = nid
+                        break
             if survivor is None:
                 survivor = ids[0]
             for dup in ids:
                 if dup == survivor:
                     continue
                 if dup in protected:
-                    continue
+                    continue  # never remap a protected node
                 remap[dup] = survivor
 
         if not remap:
@@ -377,44 +508,126 @@ class Preprocessor:
                 {sid: ae},
                 {sid: md.area_assignments.get(sid, '')},
                 md.nodes,
-                md.groups if hasattr(md, 'groups') else {},
-                n_u=n, n_v=n,
+                n=n,
                 next_tag=next_tag,
+                groups=md.groups if hasattr(md, 'groups') else {},
             )
             md.area_elements.update(sub_areas)
             md.area_assignments.update(sub_assigns)
             md.nodes.update(sub_nodes)
 
     def _split_frames_at_shell_subdiv(self, md, frame_elements, frame_assignments,
-                                       dist_loads, frame_element_types):
-        """Split frame elements at shell subdivision edge nodes."""
-        from ..model.geometry import point_on_segment, compute_t_location
+                                       dist_loads, frame_element_types,
+                                       edge_loads=None,
+                                       exclude_area_ids=None):
+        """Split frame elements at shell subdivision edge nodes.
 
-        # Collect all sub-node coordinates from subdivided areas
+        For each frame element whose root parent has ``AtJoints=True``
+        in the original SAP2000 ``frame_auto_mesh`` data, checks whether
+        any shell mesh node lies on the frame segment.  If so, the frame
+        is split into sub-segments.
+
+        Uses a :class:`~fea_toolkit.model.geometry.SpatialGrid` (cell
+        size auto-sized to about 1 percent of model extent) for fast broad-phase
+        pre-filtering — only candidates whose cell overlaps the frame's
+        bounding box are passed to the ``point_on_segment`` check.
+
+        Args:
+            md : ModelData
+                Model data container with ``area_elements``, ``nodes``.
+            frame_elements : dict
+                ``{elem_id: FrameElement}`` — may be extended with new
+                child elements.
+            frame_assignments : dict
+                ``{elem_id: section_name}``.
+            dist_loads : list
+                Distributed loads to redistribute.
+            frame_element_types : dict
+                ``{elem_id: element_type_str}``.
+            edge_loads : list, optional
+                Edge loads (from area-to-frame conversion) to redistribute
+                to split children.  If ``None``, treated as empty list.
+            exclude_area_ids : set, optional
+                Set of area IDs whose nodes should be excluded from
+                frame-splitting consideration.  Typically loads-only
+                areas (e.g. brick walls) that won't produce shell
+                elements in OpenSees — splitting frames at their
+                sub-nodes would create unnecessary intermediate nodes
+                with no shell connection.
+
+        Returns
+        -------
+        tuple
+            ``(new_elements, new_assignments, new_dist_loads,
+            frame_element_types, new_edge_loads)``.
+        """
+        from ..model.geometry import point_on_segment, compute_t_location, SpatialGrid
+        from collections import defaultdict
+
+        # Build a lookup of root parent → AtJoints flag
+        auto_mesh = getattr(md, 'frame_auto_mesh', {})
+        _at_joints: Dict[str, bool] = {}
+        for eid in frame_elements:
+            # Root parent is the original SAP ID (before any "-" suffixes)
+            root_id = eid.split("-")[0]
+            if root_id not in _at_joints:
+                am = auto_mesh.get(root_id, {})
+                _at_joints[root_id] = am.get('AtJoints', False) if isinstance(am, dict) else False
+
+        # Collect all sub-node coordinates from active area elements,
+        # excluding loads-only areas that won't produce shells.
+        exclude_ids = exclude_area_ids or set()
         sub_nodes: Dict[str, Node] = {}
         for ae in md.area_elements.values():
-            if not getattr(ae, 'inactive', False):
-                for nid in ae.node_ids:
-                    nd = md.nodes.get(nid)
-                    if nd is not None:
-                        sub_nodes[nid] = nd
+            if getattr(ae, 'inactive', False):
+                continue
+            if ae.area_id in exclude_ids:
+                continue
+            for nid in ae.node_ids:
+                nd = md.nodes.get(nid)
+                if nd is not None:
+                    sub_nodes[nid] = nd
 
         if not sub_nodes:
-            return frame_elements, frame_assignments, dist_loads, frame_element_types
+            return frame_elements, frame_assignments, dist_loads, frame_element_types, (edge_loads or [])
 
-        # Build spatial index of sub-nodes
+        # Build spatial grid of sub-nodes
         sub_coords: Dict[str, tuple] = {
             nid: (nd.x, nd.y, nd.z) for nid, nd in sub_nodes.items()
         }
+        # Estimate grid cell size as 1% of model extent
+        xs = [c[0] for c in sub_coords.values()]
+        ys = [c[1] for c in sub_coords.values()]
+        zs = [c[2] for c in sub_coords.values()]
+        extent_x = max(xs) - min(xs)
+        extent_y = max(ys) - min(ys)
+        extent_z = max(zs) - min(zs)
+        cell_size = max(1.0, (extent_x + extent_y + extent_z) / 300.0)
+        grid = SpatialGrid(cell_size)
+        for snid, scoord in sub_coords.items():
+            grid.add_point(snid, scoord)
 
         new_frames: Dict[str, FrameElement] = {}
         new_assigns: Dict[str, str] = {}
         new_loads: list = []
+        new_edge_loads: list = []
+        _edge_loads_in = edge_loads or []
+        # Track which frame IDs were split (to exclude original loads)
+        _split_frame_ids: set = set()
         # Track new child types
         updated_types: Dict[str, str] = dict(frame_element_types)
 
+        _split_count = 0
+        _at_joints_count = sum(1 for v in _at_joints.values() if v)
+
         for eid, elem in frame_elements.items():
             if getattr(elem, 'inactive', False):
+                continue
+            # Skip frames whose root parent doesn't have AtJoints=True
+            root_id = eid.split("-")[0]
+            if not _at_joints.get(root_id, False):
+                new_frames[eid] = elem
+                new_assigns[eid] = frame_assignments.get(eid, '')
                 continue
 
             ni = md.nodes.get(elem.node_i)
@@ -427,11 +640,22 @@ class Preprocessor:
             p1 = (ni.x, ni.y, ni.z)
             p2 = (nj.x, nj.y, nj.z)
 
-            # Find sub-nodes on this segment
+            # Find sub-nodes on this segment using spatial grid pre-filter
+            tol = 1e-4
+            mins = (min(p1[0], p2[0]) - tol,
+                    min(p1[1], p2[1]) - tol,
+                    min(p1[2], p2[2]) - tol)
+            maxs = (max(p1[0], p2[0]) + tol,
+                    max(p1[1], p2[1]) + tol,
+                    max(p1[2], p2[2]) + tol)
+            candidates = grid.points_in_bbox(mins, maxs)
+
             t_values: List[float] = []
-            for snid, scoord in sub_coords.items():
-                if point_on_segment(p1, p2, scoord, tol=1e-4):
-                    t = compute_t_location(p1, p2, scoord)
+            for snid, scoord in candidates:
+                if snid == elem.node_i or snid == elem.node_j:
+                    continue
+                if point_on_segment(scoord, p1, p2, tol=tol):
+                    t = compute_t_location(scoord, p1, p2)
                     if 0 < t < 1:
                         t_values.append((t, snid))
 
@@ -440,13 +664,17 @@ class Preprocessor:
                 new_assigns[eid] = frame_assignments.get(eid, '')
                 continue
 
+            _split_count += 1
+
             t_values.sort(key=lambda x: x[0])
 
-            # Collect child element IDs
+            # Collect child element IDs (sequential numbering)
             child_ids: List[str] = []
             prev_nid = elem.node_i
+            seg_idx = 0
             for t, snid in t_values:
-                child_id = f"{eid}_{snid}"
+                child_id = f"{eid}-{seg_idx}"
+                seg_idx += 1
                 child_ids.append(child_id)
                 new_frames[child_id] = FrameElement(
                     elem_id=child_id,
@@ -463,7 +691,7 @@ class Preprocessor:
                 prev_nid = snid
 
             # Last segment → original end node
-            child_id = f"{eid}_last"
+            child_id = f"{eid}-{seg_idx}"
             child_ids.append(child_id)
             new_frames[child_id] = FrameElement(
                 elem_id=child_id,
@@ -482,9 +710,8 @@ class Preprocessor:
             # Redistribute distributed loads
             elem_loads = [ld for ld in dist_loads if ld.frame_id == eid]
             for ld in elem_loads:
-                span = ld.rdist_b - ld.rdist_a
+                load_span = ld.rdist_b - ld.rdist_a
                 for i, cid in enumerate(child_ids):
-                    child = new_frames[cid]
                     seg_len = 1.0 / len(child_ids)
                     a_local = i * seg_len
                     b_local = (i + 1) * seg_len
@@ -492,16 +719,45 @@ class Preprocessor:
                         frame_id=cid,
                         pattern=ld.pattern,
                         direction=ld.direction,
+                        load_type=ld.load_type,
+                        shape=ld.shape,
                         val_a=ld.val_a,
                         val_b=ld.val_b,
-                        rdist_a=max(0.0, ld.rdist_a + a_local * span),
-                        rdist_b=min(1.0, ld.rdist_a + b_local * span),
+                        rdist_a=max(0.0, ld.rdist_a + a_local * load_span),
+                        rdist_b=min(1.0, ld.rdist_a + b_local * load_span),
+                        dist_a=0.0,
+                        dist_b=0.0,
                         coord_sys=ld.coord_sys,
                     )
                     new_loads.append(new_ld)
 
+            # Redistribute edge loads (from area-to-frame conversion)
+            elem_edge_loads = [ld for ld in _edge_loads_in if ld.frame_id == eid]
+            for ld in elem_edge_loads:
+                load_span = ld.rdist_b - ld.rdist_a
+                for i, cid in enumerate(child_ids):
+                    seg_len = 1.0 / len(child_ids)
+                    a_local = i * seg_len
+                    b_local = (i + 1) * seg_len
+                    new_el = FrameDistributedLoad(
+                        frame_id=cid,
+                        pattern=ld.pattern,
+                        direction=ld.direction,
+                        load_type=ld.load_type,
+                        shape=ld.shape,
+                        val_a=ld.val_a,
+                        val_b=ld.val_b,
+                        rdist_a=max(0.0, ld.rdist_a + a_local * load_span),
+                        rdist_b=min(1.0, ld.rdist_a + b_local * load_span),
+                        dist_a=0.0,
+                        dist_b=0.0,
+                        coord_sys=ld.coord_sys,
+                    )
+                    new_edge_loads.append(new_el)
+
             # Mark original as inactive
             elem.inactive = True
+            _split_frame_ids.add(eid)
 
         # Include non-split frames and remaining loads
         for eid, elem in frame_elements.items():
@@ -509,20 +765,34 @@ class Preprocessor:
                 new_frames[eid] = elem
                 new_assigns[eid] = frame_assignments.get(eid, '')
         for ld in dist_loads:
+            if ld.frame_id in _split_frame_ids:
+                continue  # already redistributed to children
             if ld.frame_id not in {l.frame_id for l in new_loads}:
                 new_loads.append(ld)
+        for ld in _edge_loads_in:
+            if ld.frame_id in _split_frame_ids:
+                continue  # already redistributed to children
+            if ld.frame_id not in {l.frame_id for l in new_edge_loads}:
+                new_edge_loads.append(ld)
 
-        return new_frames, new_assigns, new_loads, updated_types
+        _mesh_ids = len([n for n in sub_nodes if '_mesh_' in n])
+        print(f"    [_split_frames_at_shell_subdiv] "
+              f"{len(sub_nodes)} total sub-nodes ({_mesh_ids} mesh-created), "
+              f"{_at_joints_count} frames with AtJoints=True, "
+              f"{_split_count} frames split into children",
+              flush=True)
+        return new_frames, new_assigns, new_loads, updated_types, new_edge_loads
 
     def _detect_constraint_edges(self, md, frame_elements, frame_assignments) -> list:
-        """Detect constraint edges where coarse and fine meshes meet.
-
-        Returns a list of raw edge findings from ``find_constraint_edges()``.
-        """
+        """Detect constraint edges where coarse and fine meshes meet."""
+        verbose = self.config.get('verbose', False)
+        exclude_types = self.config.get('exclude_types', frozenset({'brick'}))
         raw_edges = find_constraint_edges(
             md.area_elements, md.area_assignments, md.nodes,
             frame_elements=frame_elements,
             frame_assignments=frame_assignments,
+            exclude_types=exclude_types,
+            verbose=verbose,
         )
         return raw_edges
 

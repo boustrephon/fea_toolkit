@@ -55,7 +55,7 @@ Full parameter details are in the ``pushover_tcl()`` docstring.
 
 ## Two-stage build integration
 
-With ``use_preprocessor: True``, the Preprocessor produces a ``MeshModel``
+With ``use_preprocessor: True`` (the default), the Preprocessor produces a ``MeshModel``
 with fully prepared topology.  ``export_model_to_tcl()`` can accept the
 MeshModel's data directly — the topology is already split and meshed,
 eliminating the need for the caller to prepare it manually.
