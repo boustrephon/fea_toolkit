@@ -2033,29 +2033,31 @@ class TestSelectionFilterModel:
         assert len(full_model.frame_elements) == 4
         assert "Conc" in full_model.materials
 
-class TestCqcCombine:
+class TestCqcCombineUtils:
+    """Tests for :func:`fea_toolkit.utils.cqc_combine`."""
+
     def test_single_mode(self):
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
-        result = OpenSeesBuilder._cqc_combine([100.0], [2.0], [0.05])
+        from fea_toolkit.utils import cqc_combine
+        result = cqc_combine([100.0], [2.0], [0.05])
         assert abs(result - 100.0) < 1e-6
 
     def test_two_uncorrelated(self):
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.utils import cqc_combine
         # Very separated frequencies → ρ ≈ 0 → SRSS ≈ sqrt(a² + b²)
         vals = [100.0, 50.0]
         omega = [1.0, 50.0]
         damp = [0.05, 0.05]
-        result = OpenSeesBuilder._cqc_combine(vals, omega, damp)
+        result = cqc_combine(vals, omega, damp)
         expected = math.sqrt(100**2 + 50**2)
         assert abs(result - expected) < 0.1
 
     def test_identical_modes(self):
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.utils import cqc_combine
         # Identical frequency → ρ → 1 → CQC = sum of absolute values
         vals = [100.0, 50.0]
         omega = [2.0, 2.0]
         damp = [0.05, 0.05]
-        result = OpenSeesBuilder._cqc_combine(vals, omega, damp)
+        result = cqc_combine(vals, omega, damp)
         assert abs(result - 150.0) < 1.0
 
 
@@ -4471,6 +4473,117 @@ class TestTwoStageBuild:
             # Modal props should have participation data
             mp = modal["modal_props"]
             assert isinstance(mp, dict), f"modal_props not a dict: {type(mp)}"
+        finally:
+            ops.wipe()
+
+    def test_element_rs_forces_via_two_stage_path(self):
+        """extract_element_rs_forces works through two-stage facade.
+
+        Builds through the two-stage path, runs RS analysis, then
+        extracts element-level RS forces and verifies:
+        1. Result dict contains element_results list.
+        2. Each element result has the expected keys (My_i, Vz_i, etc.).
+        3. Forces are non-zero.
+        """
+        import openseespy.opensees as ops
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        md = make_sample_model()
+        b = OpenSeesBuilder(md, {
+            "use_preprocessor": True,
+            "split_elements": False,
+            "create_shells": False,
+            "verbose": False,
+        })
+        try:
+            b.build()
+            b.compute_seismic_masses(g=9.81)
+            modal = b.run_modal_analysis(num_modes=3, print_results=False)
+            periods = modal["periods"]
+
+            T_sp = [0.0, 0.1, 0.2, 0.5, 1.0, 2.0, 3.0]
+            Sa_sp = [3.0, 3.0, 3.0, 1.5, 0.8, 0.4, 0.2]
+
+            b.run_response_spectrum_analysis(
+                num_modes=3,
+                modal_periods=periods,
+                spectrum_periods=T_sp,
+                spectrum_accels=Sa_sp,
+                direction="X",
+                damping_ratio=0.05,
+                print_results=False,
+            )
+            rs_forces = b.extract_element_rs_forces(
+                num_modes=3,
+                modal_periods=periods,
+                spectrum_periods=T_sp,
+                spectrum_accels=Sa_sp,
+                direction="X",
+            )
+            assert isinstance(rs_forces, dict), (
+                f"Expected dict, got {type(rs_forces)}"
+            )
+            assert "element_results" in rs_forces
+            er = rs_forces["element_results"]
+            assert len(er) > 0, "element_results is empty"
+            first = er[0]
+            for key in ("My_i", "My_j", "Mz_i", "Mz_j", "Vz_i", "Vy_i"):
+                assert key in first, f"{key} missing from RS element result"
+            # At least one force component should be positive
+            max_f = max(abs(first[k]) for k in ("My_i", "My_j", "Mz_i", "Vz_i"))
+            assert max_f > 1e-6, "All RS element forces are near zero"
+        finally:
+            ops.wipe()
+
+    def test_rs_nodal_displacements_via_two_stage_path(self):
+        """compute_rs_nodal_displacements works through two-stage facade.
+
+        Builds through the two-stage path, runs modal analysis, then
+        computes RS nodal displacements and verifies:
+        1. Result is a dict mapping node_tag → (dx, dy, dz).
+        2. Displacement in the excitation direction is non-zero.
+        """
+        import openseespy.opensees as ops
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        md = make_sample_model()
+        b = OpenSeesBuilder(md, {
+            "use_preprocessor": True,
+            "split_elements": False,
+            "create_shells": False,
+            "verbose": False,
+        })
+        try:
+            b.build()
+            b.compute_seismic_masses(g=9.81)
+            # Run modal with enough modes and request shapes via
+            # a separate call to extract_mode_shapes.
+            modal = b.run_modal_analysis(num_modes=3, print_results=False)
+            periods = modal["periods"]
+            eigenvalues = modal["eigenvalues"]
+
+            def _sa(T: float) -> float:
+                return 3.0 if T <= 0.2 else 1.5 / max(T, 0.01)
+
+            rs_disp = b.compute_rs_nodal_displacements(
+                num_modes=3,
+                modal_periods=periods,
+                eigenvalues=eigenvalues,
+                spectrum_func=_sa,
+                direction="X",
+                damping_ratio=0.05,
+            )
+            assert isinstance(rs_disp, dict), (
+                f"Expected dict, got {type(rs_disp)}"
+            )
+            assert len(rs_disp) > 0, "RS displacements dict is empty"
+            # Check X-displacement is non-zero for some node
+            max_dx = max(abs(v[0]) for v in rs_disp.values())
+            assert max_dx > 1e-8, (
+                f"All RS X-displacements are near zero (max|dx|={max_dx})"
+            )
         finally:
             ops.wipe()
 

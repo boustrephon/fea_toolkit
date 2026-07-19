@@ -31,6 +31,7 @@ from ..model.sap_data import ShellSection, Restraint
 from ..model.geometry import convert_area_loads_to_edge_loads
 from ..model.selection import Selection
 from ..model.mesh_model import MeshModel
+from ..utils import cqc_combine
 from .preprocessor import Preprocessor
 from .analysis_builder import AnalysisBuilder
 
@@ -7372,9 +7373,9 @@ class OpenSeesBuilder:
         # The per-mode base shear values in modal_base_shear should remain
         # as-is (mode-by-mode from OpenSees) — only the combination logic
         # below needs the rigid/flexible split.
-        base_shear_cqc = self._cqc_combine(modal_base_shear, omega, damp_ratios)
+        base_shear_cqc = cqc_combine(modal_base_shear, omega, damp_ratios)
         base_shear_srss = math.sqrt(sum(v * v for v in modal_base_shear))
-        base_moment_cqc = self._cqc_combine(modal_base_moment, omega, damp_ratios)
+        base_moment_cqc = cqc_combine(modal_base_moment, omega, damp_ratios)
         base_moment_srss = math.sqrt(sum(m * m for m in modal_base_moment))
 
         result = {
@@ -7401,20 +7402,6 @@ class OpenSeesBuilder:
             print()
 
         return result
-
-    # -------------------------------------------------------------------------
-    # CQC combination helper
-    # -------------------------------------------------------------------------
-    @staticmethod
-    def _cqc_combine(modal_values: List[float],
-                     omega: List[float],
-                     damp_ratios: List[float]) -> float:
-        """Complete Quadratic Combination of modal results.
-
-        Delegates to :func:`~fea_toolkit.utils.cqc_combine`.
-        """
-        from ..utils import cqc_combine as _cqc
-        return _cqc(modal_values, omega, damp_ratios)
 
     # =========================================================================
     # Element-level RS forces (per element, CQC-combined)
@@ -7446,6 +7433,19 @@ class OpenSeesBuilder:
               ``Vz_i``, ``Vz_j``, ``My_i``, ``My_j``, ``Mz_i``, ``Mz_j``.
             * ``'modal_periods'``, ``'omega'`` — for diagnostics.
         """
+        # Delegate to AnalysisBuilder when available (two-stage path)
+        _analysis = getattr(self, '_analysis', None)
+        if _analysis is not None:
+            return _analysis.extract_element_rs_forces(
+                num_modes=num_modes,
+                modal_periods=modal_periods,
+                spectrum_periods=spectrum_periods,
+                spectrum_accels=spectrum_accels,
+                direction=direction,
+                damping_ratio=damping_ratio,
+                print_results=print_results,
+            )
+
         if self.config['verbose']:
             print("Extracting element RS forces...")
 
@@ -7505,10 +7505,10 @@ class OpenSeesBuilder:
             o_use = omega[:n_use]
             d_use = damp_ratios[:n_use]
 
-            My_i = self._cqc_combine(ed['My_i'][:n_use], o_use, d_use)
-            My_j = self._cqc_combine(ed['My_j'][:n_use], o_use, d_use)
-            Mz_i = self._cqc_combine(ed['Mz_i'][:n_use], o_use, d_use)
-            Mz_j = self._cqc_combine(ed['Mz_j'][:n_use], o_use, d_use)
+            My_i = cqc_combine(ed['My_i'][:n_use], o_use, d_use)
+            My_j = cqc_combine(ed['My_j'][:n_use], o_use, d_use)
+            Mz_i = cqc_combine(ed['Mz_i'][:n_use], o_use, d_use)
+            Mz_j = cqc_combine(ed['Mz_j'][:n_use], o_use, d_use)
 
             # Element length
             elem = elements_dict.get(eid)
@@ -7591,6 +7591,18 @@ class OpenSeesBuilder:
         Returns:
             Dict mapping ``node_tag`` → ``(dx, dy, dz)`` in model length units.
         """
+        # Delegate to AnalysisBuilder when available (two-stage path)
+        _analysis = getattr(self, '_analysis', None)
+        if _analysis is not None:
+            return _analysis.compute_rs_nodal_displacements(
+                num_modes=num_modes,
+                modal_periods=modal_periods,
+                eigenvalues=eigenvalues,
+                spectrum_func=spectrum_func,
+                direction=direction,
+                damping_ratio=damping_ratio,
+            )
+
         dof = {'X': 1, 'Y': 2, 'Z': 3}[direction]
         dof_idx = dof - 1  # 0‑based for the result tuple
 
@@ -7647,7 +7659,7 @@ class OpenSeesBuilder:
         cqc_result = {}
         for tag in node_tags:
             vals = tuple(
-                self._cqc_combine(per_mode[tag][d], omega, damp)
+                cqc_combine(per_mode[tag][d], omega, damp)
                 for d in range(3)
             )
             cqc_result[tag] = vals
