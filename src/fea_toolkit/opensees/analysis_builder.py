@@ -995,9 +995,19 @@ class AnalysisBuilder:
                             ) -> Dict[str, Any]:
         """Run static analysis on the current OpenSees domain.
 
+        When *pattern_scales* is provided, the domain is rebuilt with
+        only those load patterns active (matching the facade's behaviour).
+        When *pattern_scales* is ``None`` (default), the existing domain
+        is analysed as-is.
+
         Returns a dict with nodal_displacements, reactions, element_forces,
         and load_totals.
         """
+        # Rebuild domain with new pattern scales if requested
+        if pattern_scales is not None:
+            self.build_domain()
+            self.create_loads(pattern_scales=pattern_scales)
+
         test_type = self.config.get('solver_test_type', 'NormDispIncr')
         test_tol = self.config.get('solver_test_tol', 1e-6)
         test_iter = self.config.get('solver_test_max_iter', 10)
