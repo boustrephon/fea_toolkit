@@ -9,6 +9,7 @@ All functions gracefully fall back to a warning if the required package
 is not installed.
 """
 
+import warnings
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
 import math
 import numpy as np
@@ -172,6 +173,10 @@ def plot_model_3d(
 ) -> Optional[Any]:
     """Display the model in an interactive 3D view using PyVista.
 
+    .. deprecated::
+       Use :func:`plot_mesh` instead — it works with both builder
+       and NPZ data and supports all features of this function.
+
     Args:
         builder: An ``OpenSeesBuilder`` instance that has been built.
         show_nodes: If True, draw node markers.
@@ -193,6 +198,11 @@ def plot_model_3d(
     Requires:
         ``pyvista`` — install via ``pip install pyvista``.
     """
+    warnings.warn(
+        "plot_model_3d is deprecated — use plot_mesh() instead "
+        "(works with builder or NPZ data)",
+        DeprecationWarning, stacklevel=2,
+    )
     try:
         import pyvista as pv
     except ImportError:
@@ -844,6 +854,11 @@ def plot_deformed_3d(
 ) -> Optional[Any]:
     """Overlay the deformed shape on the original model.
 
+    .. deprecated::
+       This function is builder‑only.  A unified version that works
+       with both builder and NPZ data will replace it in a future
+       release.
+
     Args:
         builder: Built ``OpenSeesBuilder``.
         results: Output dict from ``builder.run_static_analysis()`` containing
@@ -858,6 +873,11 @@ def plot_deformed_3d(
     Requires:
         ``pyvista``.
     """
+    warnings.warn(
+        "plot_deformed_3d is deprecated and will be replaced by a "
+        "unified version in a future release.",
+        DeprecationWarning, stacklevel=2,
+    )
     try:
         import pyvista as pv
     except ImportError:
@@ -943,6 +963,11 @@ def plot_rs_deformed_3d(
 ) -> Optional[Any]:
     """Display the RS CQC‑combined deformed shape using PyVista.
 
+    .. deprecated::
+       This function is builder‑only.  A unified version that works
+       with both builder and NPZ data will replace it in a future
+       release.
+
     Args:
         builder: Built ``OpenSeesBuilder``.
         rs_displacements: Dict from
@@ -958,6 +983,11 @@ def plot_rs_deformed_3d(
     Requires:
         ``pyvista``.
     """
+    warnings.warn(
+        "plot_rs_deformed_3d is deprecated and will be replaced by a "
+        "unified version in a future release.",
+        DeprecationWarning, stacklevel=2,
+    )
     try:
         import pyvista as pv
     except ImportError:
@@ -1054,11 +1084,15 @@ def plot_mode_3d(
     font_size: int = 14,
     selection: Optional['Selection'] = None,
     notebook: bool = False,
-    anim_speed: float = 1.0,
-    anim_amplitude: float = 1.0,
+    anim_speed: float = 2.0,
+    anim_amplitude: float = 1.5,
     **kwargs,
 ) -> Optional[Any]:
     """Display (and optionally animate) a mode shape in 3D using PyVista.
+
+    .. deprecated::
+       Use :func:`plot_mode_animation` instead — it works with both
+       builder and NPZ data and supports all features of this function.
 
     For each mode, the eigenvector displacements from
     :meth:`OpenSeesBuilder.extract_mode_shapes` are applied as a deformed
@@ -1078,14 +1112,19 @@ def plot_mode_3d(
         selection: Optional :class:`~fea_toolkit.model.selection.Selection`
             to restrict which elements are shown.
         notebook: If True, return plotter for Jupyter.
-        anim_speed: Animation speed multiplier (1.0 = default, 2.0 = 2×).
-        anim_amplitude: Amplitude range multiplier (1.0 = ±100% of scale,
-            1.5 = ±150%, etc.).
+        anim_speed: Animation speed multiplier (2.0 = default, 4.0 = 2×).
+        anim_amplitude: Amplitude range multiplier (1.5 = default, 1.0 = ±100% of scale,
+            2.0 = ±200%, etc.).
         **kwargs: Passed to ``pyvista.Plotter()``.
 
     Requires:
         ``pyvista``.
     """
+    warnings.warn(
+        "plot_mode_3d is deprecated — use plot_mode_animation() instead "
+        "(works with builder or NPZ data)",
+        DeprecationWarning, stacklevel=2,
+    )
     try:
         import pyvista as pv
     except ImportError:
@@ -1321,7 +1360,7 @@ def plot_mode_3d(
 def plot_mode_animation(source, mode_shapes, mode=0, *,
                         scale=30.0, show_original=True,
                         animate=True, periods=None,
-                        font_size=14, anim_speed=1.0, anim_amplitude=1.0,
+                        font_size=14, anim_speed=2.0, anim_amplitude=1.5,
                         selection=None, notebook=False, **kwargs):
     """Display / animate a mode shape from a builder or NPZ data.
 
@@ -1461,7 +1500,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
         import math as _math
 
         def callback(step):
-            amp = _math.sin(2.0 * _math.pi * step / 60.0) * anim_amplitude
+            amp = _math.sin(anim_speed * 2.0 * _math.pi * step / 60.0) * anim_amplitude
             nfm, nsm = _build_deformed_mesh(
                 segments, seg_npoints, all_quads,
                 [0] * len(all_quads), scale, amp)
@@ -1613,8 +1652,10 @@ def _get_local_end_forces(builder, elem, tag, elem_forces):
 
 # Convenience wrappers for shear, axial, and other force diagrams
 def plot_static_shear_3d(builder, elem_forces, quantity='Fz', **kwargs):
-    """3D shear force diagram — convenience wrapper around
-    :func:`plot_static_moment_3d` with ``quantity`` set to a force.
+    """3D shear force diagram — convenience wrapper.
+
+    .. deprecated::
+       Deprecated together with :func:`plot_static_moment_3d`.
 
     Parameters
     ----------
@@ -1627,8 +1668,10 @@ def plot_static_shear_3d(builder, elem_forces, quantity='Fz', **kwargs):
 
 
 def plot_static_axial_3d(builder, elem_forces, **kwargs):
-    """3D axial force diagram — convenience wrapper around
-    :func:`plot_static_moment_3d` with ``quantity='Fx'``.
+    """3D axial force diagram — convenience wrapper.
+
+    .. deprecated::
+       Deprecated together with :func:`plot_static_moment_3d`.
 
     Parameters
     ----------
@@ -1884,6 +1927,10 @@ def plot_static_force_diagram(
     **kwargs,
 ) -> Optional[Any]:
     """Plot a static element force/moment quantity vs elevation.
+
+    .. deprecated::
+       Use :func:`plot_npz_force_diagram` instead for standalone NPZ
+       data.  The builder‑only path will be replaced in a future release.
 
     When ``use_local=True`` (default), forces are transformed from global
     to **local** coordinates using the element's local axes
