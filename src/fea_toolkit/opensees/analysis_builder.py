@@ -626,20 +626,27 @@ class AnalysisBuilder:
                 if nd_j is not None:
                     _sw_frame_loads.setdefault('Self weight', []).append((nd_j.node_tag, -total_w * 0.5))
 
-        # Pattern loop
+        # Pattern loop — deterministic tag generation
         all_patterns = set()
         for ld in dist_loads:
             all_patterns.add(ld.pattern)
         for ld in edge_loads:
             all_patterns.add(ld.pattern)
+        for jl in getattr(self.mesh_model, 'joint_loads', []):
+            all_patterns.add(jl.pattern)
+        all_patterns.add('Self weight')
+        # Assign deterministic tags based on sorted pattern names
+        _pat_tags = {
+            pname: (1000 + i, 100 + i)
+            for i, pname in enumerate(sorted(all_patterns))
+        }
 
         for pname in sorted(all_patterns):
             if pattern_scales is not None and pname not in pattern_scales:
                 continue
             scale = pattern_scales.get(pname, 1.0) if pattern_scales else 1.0
 
-            ts_tag = hash(pname) % 9000 + 1000
-            ptag = hash(pname) % 9000 + 100
+            ts_tag, ptag = _pat_tags.get(pname, (1000, 100))
             ops.timeSeries('Linear', ts_tag)
             ops.pattern('Plain', ptag, ts_tag)
             patterns_created.add(pname)
@@ -718,8 +725,7 @@ class AnalysisBuilder:
                 continue
             if pname not in patterns_created:
                 scale = pattern_scales.get(pname, 1.0) if pattern_scales else 1.0
-                ts_tag = hash(pname) % 9000 + 1000
-                ptag = hash(pname) % 9000 + 100
+                ts_tag, ptag = _pat_tags.get(pname, (1000, 100))
                 ops.timeSeries('Linear', ts_tag)
                 ops.pattern('Plain', ptag, ts_tag)
                 patterns_created.add(pname)
@@ -730,25 +736,24 @@ class AnalysisBuilder:
 
         # ── Self-weight (auto-included when any pattern is active) ──
         if _sw_frame_loads and pattern_scales is not None:
-            # Auto-include "Self weight" pattern (matches legacy builder).
-            # If the caller already specified it, use that scale.
             sw_pname = 'Self weight'
             if sw_pname in pattern_scales:
                 scale = pattern_scales[sw_pname]
             else:
                 scale = 1.0  # auto-include with default factor
-                if abs(scale) > 1e-12:
-                    ts_tag = hash(sw_pname) % 9000 + 1000
-                    ptag = hash(sw_pname) % 9000 + 100
-                    if sw_pname not in patterns_created:
-                        ops.timeSeries('Linear', ts_tag)
-                        ops.pattern('Plain', ptag, ts_tag)
-                        patterns_created.add(sw_pname)
-                    sw_total = 0.0
-                    for node_tag, fz in _sw_frame_loads.get(sw_pname, []):
-                        ops.load(node_tag, 0.0, 0.0, fz * scale, 0.0, 0.0, 0.0)
-                        sw_total += abs(fz * scale)
-                    self.load_totals[sw_pname] = sw_total
+            sw_scale = abs(scale)
+            if sw_scale > 1e-12:
+                # Create pattern if not yet created
+                if sw_pname not in patterns_created:
+                    ts_tag, ptag = _pat_tags.get(sw_pname, (1000, 100))
+                    ops.timeSeries('Linear', ts_tag)
+                    ops.pattern('Plain', ptag, ts_tag)
+                    patterns_created.add(sw_pname)
+                sw_total = 0.0
+                for node_tag, fz in _sw_frame_loads.get(sw_pname, []):
+                    ops.load(node_tag, 0.0, 0.0, fz * scale, 0.0, 0.0, 0.0)
+                    sw_total += abs(fz * scale)
+                self.load_totals[sw_pname] = sw_total
 
     # ── Rigid diaphragms ─────────────────────────────────────────
 
@@ -867,6 +872,7 @@ class AnalysisBuilder:
 
         # Reactions
         if extract_reactions:
+            ops.reactions()
             result['reactions'] = {}
             for nid, restraint in self.mesh_model.restraints.items():
                 nd = self.mesh_model.nodes.get(nid)
