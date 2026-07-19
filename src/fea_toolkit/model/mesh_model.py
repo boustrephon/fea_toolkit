@@ -12,7 +12,8 @@ from typing import Dict, List, Optional, Any, Tuple, Set
 from .sap_data import (
     Node, Restraint, Material, Section,
     FrameElement, AreaElement, Group,
-    FrameDistributedLoad,
+    FrameDistributedLoad, JointLoad, GravityLoad,
+    AreaGravityLoad, AreaUniformLoad,
 )
 
 
@@ -39,6 +40,10 @@ class MeshModel:
     frame_dist_loads: List[FrameDistributedLoad]
     edge_loads_from_areas: List = field(default_factory=list)
     # (list of tuples — exact format matches builder's edge_loads_from_areas)
+    joint_loads: List[JointLoad] = field(default_factory=list)
+    frame_gravity_loads: List[GravityLoad] = field(default_factory=list)
+    area_gravity_loads: List[AreaGravityLoad] = field(default_factory=list)
+    area_uniform_loads: List[AreaUniformLoad] = field(default_factory=list)
 
     # ── Constraints (detected, not yet applied to OpenSees) ───────
     edge_constraint_pairs: List[tuple] = field(default_factory=list)
