@@ -44,6 +44,7 @@ from fea_toolkit.model.sap_data import (
 )
 from fea_toolkit.model.geometry import (
     get_SAP_vecxz,
+    get_local_axes,
     rotate_about_axis,
     point_on_segment,
     compute_t_location,
@@ -590,6 +591,108 @@ class TestGetSAPVecxz:
         vec_x = np.array([0.0, 0.0, 0.0])
         with pytest.raises(ValueError, match="zero length"):
             get_SAP_vecxz(vec_x)
+
+
+class TestGetLocalAxes:
+    """Direct tests for get_local_axes(axis, angle) → (vx, vy, vz)."""
+
+    def test_horizontal_beam(self):
+        """Beam along X: vx=(1,0,0), vy=(0,0,1), vz=(0,-1,0)."""
+        vx, vy, vz = get_local_axes(np.array([5.0, 0.0, 0.0]))
+        np.testing.assert_array_almost_equal(vx, [1, 0, 0])
+        np.testing.assert_array_almost_equal(vy, [0, 0, 1])
+        np.testing.assert_array_almost_equal(vz, [0, -1, 0])
+
+    def test_vertical_column(self):
+        """Column along +Z: vx=(0,0,1), vy=(1,0,0), vz=(0,1,0)."""
+        vx, vy, vz = get_local_axes(np.array([0.0, 0.0, 5.0]))
+        np.testing.assert_array_almost_equal(vx, [0, 0, 1])
+        np.testing.assert_array_almost_equal(vy, [1, 0, 0])
+        np.testing.assert_array_almost_equal(vz, [0, 1, 0])
+
+    def test_vertical_downward(self):
+        """Column along -Z: vx=(0,0,-1), vy=(1,0,0), vz=(0,-1,0)."""
+        vx, vy, vz = get_local_axes(np.array([0.0, 0.0, -5.0]))
+        np.testing.assert_array_almost_equal(vx, [0, 0, -1])
+        np.testing.assert_array_almost_equal(vy, [1, 0, 0])
+        np.testing.assert_array_almost_equal(vz, [0, -1, 0])
+
+    def test_with_angle(self):
+        """Beam along X with 45° rotation: vy rotated from (0,0,1) about x."""
+        vx, vy, vz = get_local_axes(np.array([5.0, 0.0, 0.0]), angle=45.0)
+        np.testing.assert_array_almost_equal(vx, [1, 0, 0])
+        np.testing.assert_array_almost_equal(
+            vy, [0, -0.70710678, 0.70710678], decimal=6
+        )
+        np.testing.assert_array_almost_equal(
+            vz, [0, -0.70710678, -0.70710678], decimal=6
+        )
+
+    def test_90_degree_swap(self):
+        """Angle=90°: vy_90 = vz_0, vz_90 = -vy_0."""
+        vx0, vy0, vz0 = get_local_axes(np.array([5.0, 0.0, 0.0]), angle=0.0)
+        vx, vy, vz = get_local_axes(np.array([5.0, 0.0, 0.0]), angle=90.0)
+        np.testing.assert_array_almost_equal(vx, [1, 0, 0])
+        np.testing.assert_array_almost_equal(vy, vz0)
+        np.testing.assert_array_almost_equal(vz, -vy0)
+
+    def test_orthonormal(self):
+        """vx, vy, vz are always orthonormal (unit-length + orthogonal)."""
+        vectors = [
+            np.array([5.0, 0.0, 0.0]),
+            np.array([0.0, 0.0, 10.0]),
+            np.array([3.0, 4.0, 0.0]),
+            np.array([1.0, 2.0, 3.0]),
+            np.array([0.0, -5.0, 0.0]),
+        ]
+        for axis in vectors:
+            for angle in (0.0, 30.0, -45.0, 90.0):
+                vx, vy, vz = get_local_axes(axis, angle=angle)
+                for name, v in [("vx", vx), ("vy", vy), ("vz", vz)]:
+                    assert abs(np.linalg.norm(v) - 1.0) < 1e-10, \
+                        f"{name} not unit for axis={axis}, angle={angle}"
+                assert abs(np.dot(vx, vy)) < 1e-10, \
+                    f"vx·vy not zero for axis={axis}, angle={angle}"
+                assert abs(np.dot(vx, vz)) < 1e-10, \
+                    f"vx·vz not zero for axis={axis}, angle={angle}"
+                assert abs(np.dot(vy, vz)) < 1e-10, \
+                    f"vy·vz not zero for axis={axis}, angle={angle}"
+
+    def test_zero_length_raises(self):
+        with pytest.raises(ValueError, match="zero length"):
+            get_local_axes(np.array([0.0, 0.0, 0.0]))
+
+    def test_beam_along_y(self):
+        """Beam along Y: vx=(0,1,0), vy=(0,0,1), vz=(1,0,0)."""
+        vx, vy, vz = get_local_axes(np.array([0.0, 4.0, 0.0]))
+        np.testing.assert_array_almost_equal(vx, [0, 1, 0])
+        np.testing.assert_array_almost_equal(vy, [0, 0, 1])
+        np.testing.assert_array_almost_equal(vz, [1, 0, 0])
+
+    def test_beam_diagonal_xy(self):
+        """Diagonal in XY: vx=(0.707,0.707,0), vy=(0,0,1), vz=(0.707,-0.707,0)."""
+        vx, vy, vz = get_local_axes(np.array([1.0, 1.0, 0.0]))
+        np.testing.assert_array_almost_equal(
+            vx, [0.70710678, 0.70710678, 0], decimal=6
+        )
+        np.testing.assert_array_almost_equal(vy, [0, 0, 1])
+        np.testing.assert_array_almost_equal(
+            vz, [0.70710678, -0.70710678, 0], decimal=6
+        )
+
+    def test_returns_numpy_arrays(self):
+        """Result components are numpy arrays, not lists."""
+        vx, vy, vz = get_local_axes([3.0, 0.0, 0.0])
+        assert isinstance(vx, np.ndarray)
+        assert isinstance(vy, np.ndarray)
+        assert isinstance(vz, np.ndarray)
+
+    def test_accepts_list_input(self):
+        """Should accept plain Python lists."""
+        vx, vy, vz = get_local_axes([5.0, 0.0, 0.0])
+        np.testing.assert_array_almost_equal(vx, [1, 0, 0])
+        np.testing.assert_array_almost_equal(vy, [0, 0, 1])
+        np.testing.assert_array_almost_equal(vz, [0, -1, 0])
 
 
 class TestRotateAboutAxis:
