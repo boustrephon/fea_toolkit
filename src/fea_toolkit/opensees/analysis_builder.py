@@ -1765,21 +1765,13 @@ class AnalysisBuilder:
             ValueError: If either node cannot be resolved, or the
                 element has zero length.
         """
+        from ..model.geometry import get_local_axes
         ni = self.mesh_model.nodes.get(elem.node_i)
         nj = self.mesh_model.nodes.get(elem.node_j)
         if ni is None or nj is None:
             raise ValueError(f"Cannot resolve nodes for {elem.elem_id}")
         vx = np.array([nj.x - ni.x, nj.y - ni.y, nj.z - ni.z])
-        length = np.linalg.norm(vx)
-        if length < 1e-12:
-            raise ValueError(f"Zero-length element {elem.elem_id}")
-        vx_norm = vx / length
-        # Use get_SAP_vecxz for the reference vector
-        vecxz = get_SAP_vecxz(vx_norm, getattr(elem, 'angle', 0.0))
-        vz = vecxz / np.linalg.norm(vecxz)
-        vy = np.cross(vz, vx_norm)
-        vy_norm = vy / np.linalg.norm(vy)
-        return vx_norm, vy_norm, vz
+        return get_local_axes(vx, getattr(elem, 'angle', 0.0))
 
     # ═══════════════════════════════════════════════════════════════
     # Export

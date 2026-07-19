@@ -59,7 +59,7 @@ def get_SAP_vecxz(vec_x: Union[Sequence[float], np.ndarray],
         return rotate_about_axis(v3_norm, v1_norm, theta)
 
 
-def get_local_axes(axis: np.ndarray) -> "tuple[np.ndarray, np.ndarray, np.ndarray]":
+def get_local_axes(axis: np.ndarray, angle: float = 0.0) -> "tuple[np.ndarray, np.ndarray, np.ndarray]":
     """Compute the full local coordinate system for a frame element.
 
     Given the element axis (I→J vector), returns the orthonormal
@@ -74,9 +74,12 @@ def get_local_axes(axis: np.ndarray) -> "tuple[np.ndarray, np.ndarray, np.ndarra
 
     Args:
         axis: Element axis vector (I→J).  Does not need to be unit length.
+        angle: Rotation (degrees) about the local x‑axis (SAP2000 convention).
+            Defaults to 0.0.
 
     Returns:
-        ``(vx, vy, vz)`` — each a unit ``np.ndarray`` of length 3.
+        ``(vx, vy, vz)`` — each a **unit** ``np.ndarray`` of length 3 (all
+        orthonormal to machine precision).
     """
     import numpy as np
 
@@ -86,7 +89,7 @@ def get_local_axes(axis: np.ndarray) -> "tuple[np.ndarray, np.ndarray, np.ndarra
         raise ValueError("axis has zero length")
     vx = vx / norm
 
-    vecxz = get_SAP_vecxz(vx, 0.0)
+    vecxz = get_SAP_vecxz(vx, angle)
     vz = vecxz / np.linalg.norm(vecxz)
     vy = np.cross(vz, vx)
     if np.linalg.norm(vy) > 1e-12:
@@ -96,6 +99,16 @@ def get_local_axes(axis: np.ndarray) -> "tuple[np.ndarray, np.ndarray, np.ndarra
         vy = np.array([0.0, 1.0, 0.0])
         vz = np.cross(vx, vy)
         vz = vz / np.linalg.norm(vz)
+
+    # Runtime sanity checks — all returned vectors must be unit length
+    eps = 1e-10
+    assert abs(np.linalg.norm(vx) - 1.0) < eps, f"vx not unit: {np.linalg.norm(vx)}"
+    assert abs(np.linalg.norm(vy) - 1.0) < eps, f"vy not unit: {np.linalg.norm(vy)}"
+    assert abs(np.linalg.norm(vz) - 1.0) < eps, f"vz not unit: {np.linalg.norm(vz)}"
+    assert abs(np.dot(vx, vy)) < eps, f"vx·vy not zero: {np.dot(vx, vy)}"
+    assert abs(np.dot(vx, vz)) < eps, f"vx·vz not zero: {np.dot(vx, vz)}"
+    assert abs(np.dot(vy, vz)) < eps, f"vy·vz not zero: {np.dot(vy, vz)}"
+
     return vx, vy, vz
 
 
