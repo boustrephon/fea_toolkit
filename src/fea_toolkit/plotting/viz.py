@@ -640,7 +640,10 @@ def _render_scene(plotter, data, *,
                             show_edges=True, edge_color='grey', line_width=0.5)
 
         for i, (sec_name, quads) in enumerate(active_shells.items()):
-            c = section_colors.get(sec_name) if section_colors else cmap[i % len(cmap)]
+            if section_colors:
+                c = section_colors.get(sec_name) or cmap[i % len(cmap)]
+            else:
+                c = cmap[i % len(cmap)]
             for quad_pts in quads:
                 pts = _shrink_quad(np.array(quad_pts), shrink) if shrink else np.array(quad_pts)
                 is_tri = np.allclose(pts[2], pts[3])
@@ -1778,9 +1781,11 @@ def _extract_npz_frame_forces(source, case_prefix, frames):
 def _compute_local_forces(source, fr, nodes, force_entry, quantity):
     """Transform global forces to local for one frame element.
 
-    For the builder path uses ``builder._get_local_axes()``;
-    for NPZ data uses ``get_SAP_vecxz`` from the element geometry
-    and prefers pre-computed local arrays when available.
+    Local axes are computed from the element geometry via
+    ``get_SAP_vecxz``, so the result is the same regardless of
+    whether *source* is a builder or NPZ dict.  When pre-computed
+    local arrays exist in the NPZ (``*_i_local`` / ``*_j_local``)
+    those are used directly.
     """
     import numpy as np
 
