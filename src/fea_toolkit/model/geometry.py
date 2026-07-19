@@ -340,21 +340,72 @@ def _segment_intersection_3d(a, b, c, d, tol=1e-6):
 
 
 class SpatialGrid:
-    """Simple 3D grid for spatial indexing of points and line segments."""
+    """Simple 3D uniform grid for spatial indexing of points.
+
+    Partitions 3D space into cubic cells of size *cell_size*.
+    Points are mapped to cells via :meth:`add_point`; later,
+    :meth:`points_in_bbox` returns only points in cells that
+    overlap the query bounding box.  This provides a fast
+    broad-phase pre-filter for proximity and point-on-segment
+    tests.
+
+    The class has **no external dependencies** (pure Python +
+    ``math``) and is used in three places:
+
+    * ``split_elements_at_joints`` — find joints on frame segments
+    * ``split_elements`` (AtFrames) — find frame-frame intersections
+    * ``_split_frames_at_shell_subdiv`` — find shell mesh nodes
+      on frame segments
+
+    Parameters
+    ----------
+    cell_size : float, optional
+        Side length of each cubic cell (default 1.0).  Should be
+        roughly the same order of magnitude as typical node spacing
+        or query extent.  Auto-sized to about 1 percent of model extent in most
+        callers.
+    """
     def __init__(self, cell_size: float = 1.0):
         self.cell_size = cell_size
         self.grid: Dict[Tuple[int, int, int], List[Tuple[Any, Tuple[float, float, float]]]] = defaultdict(list)
 
     def _cell(self, x: float, y: float, z: float) -> Tuple[int, int, int]:
+        """Return the (i, j, k) cell index for a given coordinate."""
         return (int(math.floor(x / self.cell_size)),
                 int(math.floor(y / self.cell_size)),
                 int(math.floor(z / self.cell_size)))
 
     def add_point(self, point_id: Any, coords: Tuple[float, float, float]) -> None:
+        """Store *point_id* at *coords* in the grid.
+
+        Parameters
+        ----------
+        point_id : Any
+            Identifier for the point (e.g. node ID string).
+        coords : tuple of float
+            (x, y, z) coordinate.
+        """
         self.grid[self._cell(*coords)].append((point_id, coords))
 
     def points_in_bbox(self, mins: Tuple[float, float, float],
                        maxs: Tuple[float, float, float]) -> List[Tuple[Any, Tuple[float, float, float]]]:
+        """Return all points whose cell overlaps the axis-aligned bounding box.
+
+        Parameters
+        ----------
+        mins : tuple of float
+            (x_min, y_min, z_min) of the query box.
+        maxs : tuple of float
+            (x_max, y_max, z_max) of the query box.
+
+        Returns
+        -------
+        list of (point_id, (x, y, z))
+            Points in cells that intersect the bounding box.
+            The caller should filter further (e.g. with
+            point-on-segment) since the grid only provides
+            cell-level precision.
+        """
         min_cell = self._cell(mins[0], mins[1], mins[2])
         max_cell = self._cell(maxs[0], maxs[1], maxs[2])
         result = []
@@ -378,8 +429,35 @@ def split_elements_at_joints(nodes: Dict[str, Dict[str, float]],
                              tol: float = 1e-6,
                              verbose: bool = False) -> Tuple[Dict[str, Dict], Dict[str, Any], Dict[str, Any]]:
     """Split frame elements at nodes that lie on them, using spatial grid.
-    Only splits if auto_mesh[eid].get('AtJoints') is True.
-    Returns new elements, assignments, and dist_loads. (??)
+
+    Only splits if ``auto_mesh[eid].get('AtJoints')`` is True.
+    Uses a :class:`SpatialGrid` with cell size auto-sized to about 1 %
+    of model extent for fast bounding-box pre-filtering.
+
+    Parameters
+    ----------
+    nodes : dict
+        ``{node_id: {x, y, z}}``.
+    elements : dict
+        ``{elem_id: {i, j, id, ...}}``.
+    assignments : dict
+        ``{elem_id: section_name}`` — propagated to children.
+    dist_loads : dict
+        Distributed loads — split proportionally across children.
+    auto_mesh : dict
+        ``{elem_id: {AtJoints: bool}}``.
+    frame_dist_loads : dict
+        Legacy parameter (unused, kept for signature compat).
+    tol : float
+        Geometric tolerance (default 1e-6).
+    verbose : bool
+        Print progress if True.
+
+    Returns
+    -------
+    tuple
+        ``(new_elements, new_assignments, new_dist_loads)`` with
+        parent-child tracking and redistributed loads.
     """
     if not elements:
         return elements, assignments, dist_loads
@@ -534,6 +612,9 @@ def split_elements(
     """Split elements at joints (if AtJoints=True) and/or frame-frame
     intersections (if AtFrames=True), then redistribute distributed loads.
 
+    Uses a :class:`SpatialGrid` (default cell_size=1.0) for fast
+    broad-phase filtering of candidate nodes during the AtJoints pass.
+
     The two flags are **independent** — see the truth table:
 
     ========== ========== ==============================================
@@ -579,7 +660,10 @@ def split_elements(
 
 
     node_coords = {nid: (node.x, node.y, node.z) for nid, node in nodes.items()}
-    # Create spatial grid (not shown for brevity, use previous implementation)
+    # Create spatial grid (default cell_size=1.0) for fast broad-phase
+    # pre-filtering of candidate nodes.  Auto-sizing based on model
+    # extent could be added here for very large models (see
+    # split_elements_at_joints for the pattern).
     grid = SpatialGrid()
     for nid, coord in node_coords.items():
         grid.add_point(nid, coord)
@@ -2460,6 +2544,7 @@ def find_constraint_edges(
     frame_elements: Optional[Dict[str, 'FrameElement']] = None,
     frame_assignments: Optional[Dict[str, str]] = None,
     exclude_types: frozenset = frozenset({'brick'}),
+    verbose: bool = True,
 ) -> List[Tuple[List[str], List[tuple], List[tuple], str, str]]:
     """Find tears in the final mesh via sweep-line chain following.
 
@@ -2813,7 +2898,7 @@ def find_constraint_edges(
             master_chain = all_chains[0][0] if all_chains else []
 
             # Warn if master chain doesn't span the full tear (t=0 to t=1)
-            if len(master_chain) >= 2:
+            if verbose and len(master_chain) >= 2:
                 t_start = master_chain[0][1]
                 t_end = master_chain[-1][1]
                 if t_start > 0.01 or t_end < 0.99:
@@ -2980,7 +3065,7 @@ def find_wall_nodes_inside_slabs(
             if abs(n1.x - n2.x) > 1e-6 and abs(n1.y - n2.y) > 1e-6:
                 _slab_rotated = True
                 break
-        if _slab_rotated:
+        if _slab_rotated and verbose:
             print(f"  ⚠ Slab {sid} is rotated — wall-node containment "
                   f"uses axis-aligned bounding box, may have false "
                   f"positives")
@@ -3032,30 +3117,34 @@ def find_wall_nodes_inside_slabs(
 def print_wall_inside_slab_report(
     findings: List[Dict[str, Any]],
     file=None,
+    verbose: bool = False,
 ) -> None:
-    """Print a human-readable report of wall-in-slab findings.
+    """Print a summary report of wall-in-slab findings.
 
     Args:
         findings: Output from :func:`find_wall_nodes_inside_slabs`.
         file: Output stream (default ``sys.stdout``).
+        verbose: If True, also print individual wall–slab details
+            (node coordinates, slab bounds).  Default is False.
     """
     n = len(findings)
     if n == 0:
         print("  No wall nodes found inside slab areas.", file=file)
         return
-    print(f"  ⚠ {n} wall–slab intersection(s) detected:", file=file)
-    for f in findings:
-        sec = f["section"]
-        coords = "; ".join(
-            f"{wn['node_id']}({wn['x']:.1f},{wn['y']:.1f},{wn['z']:.2f})"
-            for wn in f["nodes"]
-        )
-        print(
-            f"    Wall {f['wall_id']:>4} ({sec}) inside slab {f['slab_id']:>4}\n"
-            f"      Nodes: {coords}\n"
-            f"      Slab bounds: X∈{f['slab_X']} Y∈{f['slab_Y']} Z={f['slab_Z']:.2f}",
-            file=file,
-        )
+    print(f"  ⚠ {n} wall–slab intersection(s) detected", file=file)
+    if verbose:
+        for f in findings:
+            sec = f["section"]
+            coords = "; ".join(
+                f"{wn['node_id']}({wn['x']:.1f},{wn['y']:.1f},{wn['z']:.2f})"
+                for wn in f["nodes"]
+            )
+            print(
+                f"    Wall {f['wall_id']:>4} ({sec}) inside slab {f['slab_id']:>4}\n"
+                f"      Nodes: {coords}\n"
+                f"      Slab bounds: X∈{f['slab_X']} Y∈{f['slab_Y']} Z={f['slab_Z']:.2f}",
+                file=file,
+            )
 
 
 def split_slabs_at_wall_intersections(
