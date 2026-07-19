@@ -1849,6 +1849,161 @@ class AnalysisBuilder:
         )
 
     # ═══════════════════════════════════════════════════════════════
+    # Pushover helpers
+    # ═══════════════════════════════════════════════════════════════
+
+    def _compute_fallback_masses(self) -> Dict[str, float]:
+        """Compute nodal masses from element self‑weight when no MASS SOURCE.
+
+        Used as a fallback when the model has no mass source definitions.
+        Masses are used to define the shape of uniform/triangular pushover
+        load patterns.
+        """
+        from ..utils import g_from_units
+        g = g_from_units(self.mesh_model.units)
+        node_mass: Dict[str, float] = {}
+
+        for eid, elem in self.mesh_model.frame_elements.items():
+            if getattr(elem, 'inactive', False):
+                continue
+            sec_name = self.mesh_model.frame_assignments.get(eid)
+            if not sec_name or sec_name not in self.mesh_model.sections:
+                continue
+            sec = self.mesh_model.sections[sec_name]
+            mat = self.mesh_model.materials.get(sec.material)
+            if mat is None or mat.unit_weight == 0:
+                continue
+            ni = self.mesh_model.nodes.get(elem.node_i)
+            nj = self.mesh_model.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+            if L < 1e-12:
+                continue
+            weight = sec.A * mat.unit_weight * L
+            mass = weight / g
+            node_mass[elem.node_i] = node_mass.get(elem.node_i, 0.0) + mass * 0.5
+            node_mass[elem.node_j] = node_mass.get(elem.node_j, 0.0) + mass * 0.5
+
+        return node_mass
+
+    def _compute_uniform_lateral_loads(
+        self,
+        direction: str,
+        node_masses: Dict[str, float],
+    ) -> Dict[int, Tuple[float, float, float]]:
+        """Compute mass‑proportional lateral loads (uniform acceleration).
+
+        Per ASCE 41 / ATC‑40 \"Uniform\" pattern — each node with mass
+        receives a load proportional to its mass in the push direction.
+        The absolute magnitude is irrelevant because ``DisplacementControl``
+        scales the entire pattern to achieve the target displacement.
+
+        Returns:
+            ``{node_tag: (fx, fy, fz)}`` in global coordinates.
+        """
+        dof_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(direction.upper(), 0)
+
+        nodal_loads: Dict[int, Tuple[float, float, float]] = {}
+        for nid, mass in node_masses.items():
+            if mass <= 0:
+                continue
+            node = self.mesh_model.nodes.get(nid)
+            if node is None:
+                continue
+            f = [0.0, 0.0, 0.0]
+            f[dof_idx] = mass
+            nodal_loads[node.node_tag] = (f[0], f[1], f[2])
+        return nodal_loads
+
+    def _compute_triangular_lateral_loads(
+        self,
+        direction: str,
+        node_masses: Dict[str, float],
+        fundamental_period: Optional[float] = None,
+    ) -> Dict[int, Tuple[float, float, float]]:
+        """Compute triangular (ELF) lateral loads proportional to $m_i h_i^k$.
+
+        Per ASCE 7 / ASCE 41:
+        * $k = 1.0$ for $T \\le 0.5$ s
+        * $k = 2.0$ for $T \\ge 2.5$ s
+        * Linear interpolation for $0.5 < T < 2.5$ s
+
+        Height $h_i$ is measured relative to the lowest node in the model.
+
+        Returns:
+            ``{node_tag: (fx, fy, fz)}`` in global coordinates.
+        """
+        dof_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(direction.upper(), 0)
+
+        # Find base elevation
+        z_vals = [node.z for node in self.mesh_model.nodes.values()]
+        z_min = min(z_vals) if z_vals else 0.0
+
+        # Compute k exponent per ASCE 7
+        if fundamental_period is None:
+            k = 1.0
+        elif fundamental_period <= 0.5:
+            k = 1.0
+        elif fundamental_period >= 2.5:
+            k = 2.0
+        else:
+            k = 1.0 + (fundamental_period - 0.5) / 2.0
+
+        nodal_loads: Dict[int, Tuple[float, float, float]] = {}
+        for nid, mass in node_masses.items():
+            if mass <= 0:
+                continue
+            node = self.mesh_model.nodes.get(nid)
+            if node is None:
+                continue
+            h = max(node.z - z_min, 0.0)
+            f_mag = mass * (h ** k)
+            if abs(f_mag) < 1e-12:
+                continue
+            f = [0.0, 0.0, 0.0]
+            f[dof_idx] = f_mag
+            nodal_loads[node.node_tag] = (f[0], f[1], f[2])
+        return nodal_loads
+
+    def _compute_mode_shape_lateral_loads(
+        self,
+        direction: str,
+        node_masses: Dict[str, float],
+        mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
+        mode_index: int = 0,
+    ) -> Dict[int, Tuple[float, float, float]]:
+        """Compute mode‑shape‑proportional lateral loads $F_i = m_i \\phi_i$.
+
+        Each node receives a load proportional to its mass times the
+        eigenvector component in the push direction.
+
+        Returns:
+            ``{node_tag: (fx, fy, fz)}`` in global coordinates.
+        """
+        if mode_index not in mode_shapes:
+            raise ValueError(f"Mode index {mode_index} not found in mode_shapes")
+
+        mode = mode_shapes[mode_index]
+        dof_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(direction.upper(), 0)
+
+        nodal_loads: Dict[int, Tuple[float, float, float]] = {}
+        for nid, mass in node_masses.items():
+            if mass <= 0:
+                continue
+            node = self.mesh_model.nodes.get(nid)
+            if node is None:
+                continue
+            phi = mode.get(node.node_tag, (0.0, 0.0, 0.0))
+            f_mag = mass * phi[dof_idx]
+            if abs(f_mag) < 1e-12:
+                continue
+            f = [0.0, 0.0, 0.0]
+            f[dof_idx] = f_mag
+            nodal_loads[node.node_tag] = (f[0], f[1], f[2])
+        return nodal_loads
+
+    # ═══════════════════════════════════════════════════════════════
     # Capacity Spectrum Method (CSM)
     # ═══════════════════════════════════════════════════════════════
 
