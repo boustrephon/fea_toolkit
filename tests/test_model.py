@@ -4749,6 +4749,198 @@ class TestTwoStageBuild:
         finally:
             ops.wipe()
 
+    def test_edge_constraint_spring_via_two_stage_path(self):
+        """Spring edge constraints can be applied through two-stage facade.
+
+        Creates a model with two shell areas at different mesh densities
+        meeting at a shared edge, builds through the two-stage path, and
+        verifies:
+        1. detect_unconnected_edges() finds slave nodes on the coarse edge.
+        2. apply_edge_constraints() creates spring elements.
+        3. The spring element count is > 0.
+        """
+        import openseespy.opensees as ops
+        from fea_toolkit.model.sap_data import (
+            SAPModelData, Node, Restraint, Material, Section,
+            ShellSection, FrameElement, AreaElement, AreaMesh,
+        )
+
+        # Two adjacent shell areas: left (dense) and right (coarse).
+        # Left area: 0,0,0 → 3,0,0 → 3,3,0 → 0,3,0  (meshed 3×3)
+        # Right area: 3,0,0 → 6,0,0 → 6,3,0 → 3,3,0  (meshed 1×1)
+        # The left area's right-edge fine nodes should be detected as
+        # slaves on the right area's coarse edge.
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+                "2": Node(node_id="2", node_tag=2, x=3.0, y=0.0, z=0.0),
+                "3": Node(node_id="3", node_tag=3, x=6.0, y=0.0, z=0.0),
+                "4": Node(node_id="4", node_tag=4, x=0.0, y=3.0, z=0.0),
+                "5": Node(node_id="5", node_tag=5, x=3.0, y=3.0, z=0.0),
+                "6": Node(node_id="6", node_tag=6, x=6.0, y=3.0, z=0.0),
+            },
+            restraints={"1": Restraint([1, 1, 1, 1, 1, 1]),
+                        "3": Restraint([1, 1, 1, 1, 1, 1]),
+                        "4": Restraint([1, 1, 1, 1, 1, 1]),
+                        "6": Restraint([1, 1, 1, 1, 1, 1])},
+            materials={
+                "C30": Material(name="C30", type="Concrete",
+                                E_mod=3.0e10, G_mod=1.25e10, nu=0.2,
+                                unit_weight=2.4e4, Fc=3.0e7),
+            },
+            sections={
+                "SLAB": ShellSection(name="SLAB", shape="Shell", material="C30", thickness=0.15),
+            },
+            frame_elements={},
+            area_elements={
+                "A1": AreaElement(area_id="A1", area_tag=10, node_ids=["1", "2", "5", "4"]),
+                "A2": AreaElement(area_id="A2", area_tag=20, node_ids=["2", "3", "6", "5"]),
+            },
+            area_mesh={
+                "A1": AreaMesh(auto_mesh=True, max_size=1.0),
+                "A2": AreaMesh(auto_mesh=True, max_size=3.0),
+            },
+            frame_assignments={},
+            area_assignments={"A1": "SLAB", "A2": "SLAB"},
+            groups={}, frame_auto_mesh={},
+        )
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        b = OpenSeesBuilder(md, {
+            "use_preprocessor": True,
+            "create_shells": True,
+            "split_elements": False,
+            "verbose": False,
+        })
+        try:
+            b.build()
+
+            # Detect unconnected edges
+            reports = b.detect_unconnected_edges(tolerance=0.1)
+            assert len(reports) > 0, (
+                "Expected to find unconnected edges between "
+                "dense and coarse shell meshes"
+            )
+
+            # Apply spring edge constraints using detected edges
+            edge_pairs = [(r["master_node_i"], r["master_node_j"])
+                          for r in reports]
+            slave_nodes = [r["slave_node"] for r in reports]
+
+            n = b.apply_edge_constraints(
+                coarse_edges=edge_pairs,
+                fine_nodes=slave_nodes,
+                tolerance=0.1,
+                verbose=False,
+            )
+            assert n > 0, (
+                f"Expected at least 1 spring element, got {n}"
+            )
+            # Each slave on an edge gets 2 springs (one per master end)
+            assert n >= len(reports) * 2, (
+                f"Expected at least {len(reports) * 2} springs, got {n}"
+            )
+
+            # Verify the constraint method was recorded
+            assert b._edge_constraint_method == 'spring', (
+                f"Expected 'spring', got {b._edge_constraint_method}"
+            )
+        finally:
+            ops.wipe()
+
+    def test_edge_constraint_penalty_via_two_stage_path(self):
+        """Penalty edge constraints work through two-stage facade."""
+        import openseespy.opensees as ops
+        from fea_toolkit.model.sap_data import (
+            SAPModelData, Node, Restraint, Material, Section,
+            ShellSection, AreaElement, AreaMesh,
+        )
+
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+                "2": Node(node_id="2", node_tag=2, x=3.0, y=0.0, z=0.0),
+                "3": Node(node_id="3", node_tag=3, x=6.0, y=0.0, z=0.0),
+                "4": Node(node_id="4", node_tag=4, x=0.0, y=3.0, z=0.0),
+                "5": Node(node_id="5", node_tag=5, x=3.0, y=3.0, z=0.0),
+                "6": Node(node_id="6", node_tag=6, x=6.0, y=3.0, z=0.0),
+            },
+            restraints={"1": Restraint([1, 1, 1, 1, 1, 1]),
+                        "3": Restraint([1, 1, 1, 1, 1, 1]),
+                        "4": Restraint([1, 1, 1, 1, 1, 1]),
+                        "6": Restraint([1, 1, 1, 1, 1, 1])},
+            materials={
+                "C30": Material(name="C30", type="Concrete",
+                                E_mod=3.0e10, G_mod=1.25e10, nu=0.2,
+                                unit_weight=2.4e4, Fc=3.0e7),
+            },
+            sections={
+                "SLAB": ShellSection(name="SLAB", shape="Shell", material="C30", thickness=0.15),
+            },
+            frame_elements={},
+            area_elements={
+                "A1": AreaElement(area_id="A1", area_tag=10, node_ids=["1", "2", "5", "4"]),
+                "A2": AreaElement(area_id="A2", area_tag=20, node_ids=["2", "3", "6", "5"]),
+            },
+            area_mesh={
+                "A1": AreaMesh(auto_mesh=True, max_size=1.0),
+                "A2": AreaMesh(auto_mesh=True, max_size=3.0),
+            },
+            frame_assignments={},
+            area_assignments={"A1": "SLAB", "A2": "SLAB"},
+            groups={}, frame_auto_mesh={},
+        )
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        b = OpenSeesBuilder(md, {
+            "use_preprocessor": True,
+            "create_shells": True,
+            "split_elements": False,
+            "verbose": False,
+            "constraint_method": "penalty",
+        })
+        try:
+            b.build()
+
+            reports = b.detect_unconnected_edges(tolerance=0.1)
+            assert len(reports) > 0
+
+            edge_pairs = [(r["master_node_i"], r["master_node_j"])
+                          for r in reports]
+            slave_nodes = [r["slave_node"] for r in reports]
+
+            n = b.apply_edge_constraints(
+                coarse_edges=edge_pairs,
+                fine_nodes=slave_nodes,
+                tolerance=0.1,
+                verbose=False,
+            )
+            assert n > 0, f"Expected penalty constraints, got {n}"
+            assert b._edge_constraint_method == 'penalty'
+        finally:
+            ops.wipe()
+
+    def test_get_shell_area_ids_via_two_stage_path(self):
+        """_get_shell_area_ids returns shell area IDs through facade."""
+        import openseespy.opensees as ops
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+        md = make_sample_model()
+        b = OpenSeesBuilder(md, {
+            "use_preprocessor": True,
+            "create_shells": False,
+            "split_elements": False,
+            "verbose": False,
+        })
+        try:
+            b.build()
+            # No shells in sample model
+            ids = b._get_shell_area_ids()
+            assert isinstance(ids, set)
+        finally:
+            ops.wipe()
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # CSM module tests (standalone, no OpenSees required)
