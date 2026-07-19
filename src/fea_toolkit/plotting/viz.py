@@ -165,6 +165,8 @@ def plot_model_3d(
     show_labels: bool = False,
     color_by_section: bool = True,
     selection: Optional['Selection'] = None,
+    show_constraints: bool = False,
+    show_mesh_nodes: bool = False,
     notebook: bool = False,
     **kwargs,
 ) -> Optional[Any]:
@@ -177,6 +179,10 @@ def plot_model_3d(
         color_by_section: If True, colour elements by section name.
         selection: Optional :class:`~fea_toolkit.model.selection.Selection`
             to restrict which elements are shown.  ``None`` means all.
+        show_constraints: If True, draw edge constraint lines as wide
+            transparent yellow lines between master and slave nodes.
+        show_mesh_nodes: If True, highlight mesh-created nodes (IDs
+            containing ``_mesh_``) as green spheres.
         notebook: If True, return a plotter suitable for Jupyter embedding.
         **kwargs: Passed to ``pyvista.Plotter()``.
 
@@ -326,6 +332,60 @@ def plot_model_3d(
             cloud = pv.PolyData(node_pts)
             plotter.add_mesh(cloud, color='black', point_size=8,
                              render_points_as_spheres=True)
+
+    # ── Mesh-created nodes (green spheres) ──────────────────────
+    if show_mesh_nodes:
+        mesh_pts = np.array([
+            [n.x, n.y, n.z] for nid, n in builder.model.nodes.items()
+            if "_mesh_" in nid
+        ])
+        if len(mesh_pts):
+            cloud = pv.PolyData(mesh_pts)
+            plotter.add_mesh(cloud, color='green', point_size=12,
+                             render_points_as_spheres=True)
+
+    # ── Edge constraint lines (wide transparent yellow) ─────────
+    if show_constraints:
+        # Try MeshModel edge_constraint_pairs first (preprocessor path)
+        raw_pairs = []
+        mesh_model = getattr(builder, '_mesh_model', None)
+        if mesh_model is not None:
+            raw_pairs = getattr(mesh_model, 'edge_constraint_pairs', [])
+        # Fall back to builder's _saved_edge_constraints (legacy path)
+        if not raw_pairs:
+            raw_pairs = getattr(builder, '_saved_edge_constraints', [])
+        if raw_pairs:
+            lines_poly = []
+            for entry in raw_pairs:
+                if not isinstance(entry, tuple) or len(entry) < 2:
+                    continue
+                # find_constraint_edges returns (nids, master_chain, slave_nodes, ...)
+                # master_chain = [(node_id, t), ...], slave_nodes = [(node_id, t), ...]
+                master_nodes = entry[1] if len(entry) > 1 else []
+                slave_nodes = entry[2] if len(entry) > 2 else []
+                for mn in master_nodes:
+                    nid = mn[0] if isinstance(mn, (list, tuple)) else mn
+                    cnode = builder.model.nodes.get(nid) if isinstance(nid, str) else None
+                    if cnode is None:
+                        continue
+                    for sn in slave_nodes:
+                        sid = sn[0] if isinstance(sn, (list, tuple)) else sn
+                        fnode = builder.model.nodes.get(sid) if isinstance(sid, str) else None
+                        if fnode is None:
+                            continue
+                        lines_poly.append([cnode.x, cnode.y, cnode.z,
+                                           fnode.x, fnode.y, fnode.z])
+            if lines_poly:
+                pts = np.array(lines_poly).reshape(-1, 3)
+                n_lines = len(lines_poly)
+                connectivity = np.column_stack([
+                    np.full(n_lines, 2, dtype=int),
+                    np.arange(0, 2 * n_lines, 2, dtype=int),
+                    np.arange(1, 2 * n_lines + 1, 2, dtype=int),
+                ]).ravel()
+                poly = pv.PolyData(pts, lines=connectivity)
+                plotter.add_mesh(poly, color='yellow', opacity=0.6,
+                                 line_width=10)
 
     # Labels
     if show_labels:

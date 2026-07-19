@@ -35,6 +35,7 @@ def sample_builder(sample_md):
         'split_elements': False,
         'verbose': False,
         'create_shells': False,
+        'use_preprocessor': False,
     })
     yield b
     ops.wipe()
@@ -548,6 +549,7 @@ class TestUnifiedNpzPipeline:
             'split_elements': False,
             'verbose': False,
             'create_shells': False,
+            'use_preprocessor': False,
         })
         b.build()
         b.compute_seismic_masses(g=9.81)
@@ -1154,6 +1156,7 @@ class TestShellSubdivision:
             'verbose': False,
             'create_shells': True,
             'subdivide_shells': 2,
+            'use_preprocessor': False,
         })
         b.build()
 
@@ -1228,6 +1231,7 @@ class TestShellSubdivision:
             'verbose': False,
             'create_shells': True,
             'subdivide_shells': 2,
+            'use_preprocessor': False,
         })
         b.build()
         try:
@@ -1261,6 +1265,7 @@ class TestShellSubdivision:
             'verbose': False,
             'create_shells': True,
             'subdivide_shells': 2,
+            'use_preprocessor': False,
         })
         b.build()
         try:
