@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional, Tuple, List
 from pathlib import Path
 import copy
 import json
+import warnings
 import math
 import numpy as np
 
@@ -113,7 +114,7 @@ class OpenSeesBuilder:
             'create_fiber_sections': False,
             'split_elements': True,
             'verbose': False,
-            'use_preprocessor': False,  # NEW: two-stage build path
+            'use_preprocessor': True,  # Two-stage build (Preprocessor + AnalysisBuilder)
             'geom_transf_type': 'Linear',
             'beam_integration': 'Lobatto',  # 'Lobatto' or 'HingeRadau'
             'simplify_distributed_loads': False,
@@ -1895,19 +1896,32 @@ class OpenSeesBuilder:
             to frame edge loads, as before).
         """
         # ── Two-stage build path (use_preprocessor=True) ─────────
-        if self.config.get('use_preprocessor', False):
-            preprocessor = Preprocessor(self.config)
-            mesh_model = preprocessor.run(self.model, selection=selection)
-            self._mesh_model = mesh_model
+        if self.config.get('use_preprocessor', True):
+            # Phase 1: Preprocessor runs ONCE (expensive topology work)
+            if not hasattr(self, '_mesh_model') or self._mesh_model is None:
+                # Restore pristine geometry for the first Preprocessor run
+                self.model.frame_elements = copy.deepcopy(self._original_frame_elements)
+                self.model.frame_assignments = copy.deepcopy(self._original_frame_assignments)
+                self.model.nodes = copy.deepcopy(self._original_nodes)
+                self.model.area_elements = copy.deepcopy(self._original_area_elements)
+                self.model.area_assignments = copy.deepcopy(self._original_area_assignments)
+                self.model.materials = copy.deepcopy(self._original_materials)
 
-            analysis = AnalysisBuilder(mesh_model, self.config)
+                preprocessor = Preprocessor(self.config)
+                self._mesh_model = preprocessor.run(self.model, selection=selection)
+                # Also persist the selection so rebuilds can re-apply it
+                self._persisted_selection = selection
+
+            # Phase 2: AnalysisBuilder creates OpenSees domain (fast)
+            # Always re-build the domain so different pattern_scales take effect
+            analysis = AnalysisBuilder(self._mesh_model, self.config)
             analysis.build_domain()
             analysis.create_loads(pattern_scales=pattern_scales)
 
             # Copy key state back to self for backward compatibility
-            self.split_elements = mesh_model.frame_elements
-            self.split_assignments = mesh_model.frame_assignments
-            self.split_dist_loads = mesh_model.frame_dist_loads
+            self.split_elements = self._mesh_model.frame_elements
+            self.split_assignments = self._mesh_model.frame_assignments
+            self.split_dist_loads = self._mesh_model.frame_dist_loads
             self.frame_tag_map = analysis.frame_tag_map
             self.material_tags = analysis.material_tags
             self.section_tags = analysis.section_tags
@@ -1918,17 +1932,31 @@ class OpenSeesBuilder:
             self._shell_sec_tags = analysis._shell_sec_tags
             self._shell_sec_variants = analysis._shell_sec_variants
             self.edge_loads_from_areas = analysis.edge_loads_from_areas
+            self._offset_rigid_links = analysis._offset_rigid_links
+            self._rigid_link_elems = analysis._rigid_link_elems
+            self.load_totals = analysis.load_totals
+            self._sw_load_totals = analysis._sw_load_totals
+            self._gravity_load_totals = analysis._gravity_load_totals
+            self._base_z = analysis._base_z
             # Sync model data with MeshModel so existing callers that read
             # builder.model.nodes, builder.model.frame_elements, etc. see
             # the prepared topology (including split/mesh-created nodes).
-            self.model.nodes = mesh_model.nodes
-            self.model.frame_elements = mesh_model.frame_elements
-            self.model.frame_assignments = mesh_model.frame_assignments
-            self.model.area_elements = mesh_model.area_elements
-            self.model.area_assignments = mesh_model.area_assignments
+            self.model.nodes = self._mesh_model.nodes
+            self.model.frame_elements = self._mesh_model.frame_elements
+            self.model.frame_assignments = self._mesh_model.frame_assignments
+            self.model.area_elements = self._mesh_model.area_elements
+            self.model.area_assignments = self._mesh_model.area_assignments
             return
 
-        # ── Legacy single-stage path ─────────────────────────────
+        # ── Legacy single-stage path (DEPRECATED) ────────────────
+        warnings.warn(
+            "The legacy single-stage build path (use_preprocessor=False) is "
+            "deprecated and will be removed in a future release.  Remove the "
+            "'use_preprocessor' config flag (or set it to True) to use the "
+            "new two-stage build path (Preprocessor + AnalysisBuilder).",
+            FutureWarning,
+            stacklevel=2,
+        )
         # Persist selection so re-builds (e.g. from run_static_analysis)
         # don't lose it.
         if selection is not None:
@@ -2559,7 +2587,6 @@ class OpenSeesBuilder:
                 self.model.nodes,
             )
             if ws_findings:
-                print("  ⚠ Wall–slab intersection(s) detected:")
                 print_wall_inside_slab_report(ws_findings)
                 from ..io.log import ModelLog
                 if self._model_log is None:
@@ -5422,6 +5449,47 @@ class OpenSeesBuilder:
     # =========================================================================
     # Results export
     # =========================================================================
+    def export_results(self,
+                      filepath: str,
+                      static_results: Optional[Dict[str, Any]] = None,
+                      modal_result: Optional[Dict[str, Any]] = None,
+                      mode_shapes: Optional[Dict] = None,
+                      rs_results: Optional[Dict[str, Dict]] = None,
+                      fmt: str = "npz",
+                      ) -> str:
+        """Export model geometry and analysis results to a unified file.
+
+        Delegates to :func:`~fea_toolkit.io.unified_writer.write_results`.
+        Uses the :class:`MeshModel` from the two‑stage build when available,
+        falling back to the legacy ``SAPModelData`` (``self.model``).
+
+        Args:
+            filepath: Output file path (``.npz`` or ``.h5``).
+            static_results: Dict of static results keyed by case name.
+            modal_result: Dict from :meth:`run_modal_analysis`.
+            mode_shapes: Mode shape eigenvectors.
+            rs_results: Dict with keys ``rs_x``, ``rs_y``.
+            fmt: ``"npz"`` (default) or ``"h5"``.
+
+        Returns:
+            Absolute path to the written file.
+        """
+        from ..io.unified_writer import write_results
+
+        # Use MeshModel if available (two-stage build), else SAPModelData
+        model_src = getattr(self, '_mesh_model', None) or self.model
+
+        return write_results(
+            path=filepath,
+            model=model_src,
+            static_results=static_results,
+            modal_result=modal_result,
+            mode_shapes=mode_shapes,
+            rs_results=rs_results,
+            fmt=fmt,
+            config=self.config,
+        )
+
     def export_results_to_npz(self,
                               filepath: str,
                               results: Dict[str, Any],
