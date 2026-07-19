@@ -303,38 +303,26 @@ class TestProfilePoints:
 # ====================================================================
 
 class TestLocalAxesVsModel:
-    """Verify Rhino _local_axes matches the model's get_SAP_vecxz."""
+    """Verify Rhino _local_axes matches the model's get_local_axes."""
 
     def test_horizontal_beam(self):
         """Beam along X: y=vertical, z=horizontal."""
-        from fea_toolkit.model.geometry import get_SAP_vecxz
+        from fea_toolkit.model.geometry import get_local_axes
         import numpy as np
 
         # Beam from (0,0,0) to (5,0,0)
-        vec_x = np.array([5.0, 0.0, 0.0])
+        _, expected_y, expected_z = get_local_axes(np.array([5.0, 0.0, 0.0]))
 
-        # Expected: vecxz = cross((1,0,0), (0,0,1)) = (0,-1,0)
-        expected_vecxz = get_SAP_vecxz(vec_x, angle=0.0)
-        # local z = normalize(vecxz)
-        expected_z = expected_vecxz / np.linalg.norm(expected_vecxz)
-        # local y = cross(z, x)
-        expected_y = np.cross(expected_z, vec_x / np.linalg.norm(vec_x))
-        expected_y = expected_y / np.linalg.norm(expected_y)
-
-        # Expected: x=(1,0,0), y=(0,0,1), z=(0,-1,0)
+        # Expected: z=(0,-1,0), y=(0,0,1)
         np.testing.assert_array_almost_equal(expected_z, [0, -1, 0])
         np.testing.assert_array_almost_equal(expected_y, [0, 0, 1])
 
     def test_vertical_column(self):
         """Column along Z: y=global X, z=global Y."""
-        from fea_toolkit.model.geometry import get_SAP_vecxz
+        from fea_toolkit.model.geometry import get_local_axes
         import numpy as np
 
-        vec_x = np.array([0.0, 0.0, 5.0])
-        expected_vecxz = get_SAP_vecxz(vec_x, angle=0.0)
-        expected_z = expected_vecxz / np.linalg.norm(expected_vecxz)
-        expected_y = np.cross(expected_z, vec_x / np.linalg.norm(vec_x))
-        expected_y = expected_y / np.linalg.norm(expected_y)
+        _, expected_y, expected_z = get_local_axes(np.array([0.0, 0.0, 5.0]))
 
         # For vertical column: vecxz = global Y
         np.testing.assert_array_almost_equal(expected_z, [0, 1, 0])
@@ -343,32 +331,27 @@ class TestLocalAxesVsModel:
 
     def test_horizontal_with_angle(self):
         """Beam along X with 45° rotation."""
-        from fea_toolkit.model.geometry import get_SAP_vecxz
+        from fea_toolkit.model.geometry import get_local_axes
         import numpy as np
 
-        vec_x = np.array([5.0, 0.0, 0.0])
-        angle = 45.0
+        _, expected_y, expected_z = get_local_axes(np.array([5.0, 0.0, 0.0]),
+                                                    angle=45.0)
 
-        # get_SAP_vecxz applies the angle rotation
-        expected_vecxz = get_SAP_vecxz(vec_x, angle=angle)
-        expected_z = expected_vecxz / np.linalg.norm(expected_vecxz)
-        expected_y = np.cross(expected_z, vec_x / np.linalg.norm(vec_x))
-        expected_y = expected_y / np.linalg.norm(expected_y)
-
-        # With 45° rotation, z should be rotated from (0,-1,0)
-        # about x-axis by 45°: z = (0, -cos45, -sin45) = (0, -0.707, -0.707)
+        # With 45° rotation, y rotates from (0,0,1) about x by 45°
+        np.testing.assert_array_almost_equal(
+            expected_y, [0, -0.70710678, 0.70710678], decimal=6
+        )
         np.testing.assert_array_almost_equal(
             expected_z, [0, -0.70710678, -0.70710678], decimal=6
         )
 
     def test_angle_roundtrip(self):
         """Angle=90° swaps y and z."""
-        from fea_toolkit.model.geometry import get_SAP_vecxz
+        from fea_toolkit.model.geometry import get_local_axes
         import numpy as np
 
-        vec_x = np.array([5.0, 0.0, 0.0])
-        z0 = get_SAP_vecxz(vec_x, angle=0.0)
-        z90 = get_SAP_vecxz(vec_x, angle=90.0)
+        _, _, z0 = get_local_axes(np.array([5.0, 0.0, 0.0]), angle=0.0)
+        _, _, z90 = get_local_axes(np.array([5.0, 0.0, 0.0]), angle=90.0)
 
         dot = np.dot(z0, z90)
         # 90° rotation: z0 and z90 should be perpendicular
@@ -376,10 +359,9 @@ class TestLocalAxesVsModel:
 
     def test_vertical_downward(self):
         """Column pointing downward: vecxz = -global Y."""
-        from fea_toolkit.model.geometry import get_SAP_vecxz
+        from fea_toolkit.model.geometry import get_local_axes
         import numpy as np
 
-        vec_x = np.array([0.0, 0.0, -5.0])
-        expected = get_SAP_vecxz(vec_x, angle=0.0)
-        # Downward column: vecxz = -global Y
-        np.testing.assert_array_almost_equal(expected, [0, -1, 0])
+        _, _, vz = get_local_axes(np.array([0.0, 0.0, -5.0]))
+        # Downward column: vz = -global Y
+        np.testing.assert_array_almost_equal(vz, [0, -1, 0])
