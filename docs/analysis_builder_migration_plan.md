@@ -1,8 +1,8 @@
 # AnalysisBuilder Migration Plan
 
-**Status:** Phase 1 ✅, 3a ✅, 3b ✅, CQC ✅, **P2 RS Methods ✅**  
+**Status:** Phase 1 ✅, 3a ✅, 3b ✅, CQC ✅, P2 RS Methods ✅, **RS Export ✅**  
 **Last updated:** 2026-07-20  
-**Total test count:** 495
+**Total test count:** 496
 
 ## Overview
 
@@ -82,7 +82,8 @@ The two-stage path (`use_preprocessor=True`) is the default.
 |---------|---------------|---------------|
 | `extract_element_rs_forces` | L1792 | delegates |
 | `compute_rs_nodal_displacements` | L1900 | delegates |
-| Tests (`TestTwoStageBuild`) | `test_element_rs_forces_via_two_stage_path` + `test_rs_nodal_displacements_via_two_stage_path` | 2 tests |
+| **RS export** — `rs/elem_*` + `rs/node_*` arrays | unified_writer | passed through |
+| Tests (`TestTwoStageBuild`) | 3 tests (forces, displacements, export) |  |
 
 ## ❌ Remaining
 
