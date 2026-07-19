@@ -2393,6 +2393,63 @@ class TestPushoverBuild:
                 print_progress=False,
             )
 
+    def test_pushover_via_two_stage_path(self, cantilever_model):
+        """Pushover returns correct keys through the two-stage path."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(cantilever_model, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False, 'verbose': False,
+        })
+        b.build()
+        b.compute_seismic_masses(g=9.81)
+        modal = b.run_modal_analysis(num_modes=3, print_results=False)
+        shapes = b.extract_mode_shapes(3)
+        results = b.run_pushover_analysis(
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type='uniform',
+            lateral_direction='X',
+            control_node_tag=2,
+            max_disp=0.3, num_steps=5,
+            print_progress=False,
+        )
+        for key in ('step', 'control_disp', 'base_shear', 'status',
+                    'gravity_displacements', 'control_node', 'dof',
+                    'lateral_load_type'):
+            assert key in results, f"Missing key: {key}"
+        assert len(results['step']) == len(results['control_disp']) == \
+            len(results['base_shear']) == len(results['status'])
+        assert results['step'][0] == 0  # gravity step recorded
+        assert results['control_node'] == 2
+        assert results['dof'] == 1  # X direction
+
+    def test_pushover_uniform_via_two_stage(self, cantilever_model):
+        """Uniform pushover produces non-zero base shear through two-stage."""
+        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        b = OpenSeesBuilder(cantilever_model, {
+            'element_type': 'elasticBeamColumn',
+            'split_elements': False, 'verbose': False,
+        })
+        b.build()
+        b.compute_seismic_masses(g=9.81)
+        modal = b.run_modal_analysis(num_modes=3, print_results=False)
+        shapes = b.extract_mode_shapes(3)
+        results = b.run_pushover_analysis(
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type='uniform',
+            lateral_direction='X',
+            control_node_tag=2,
+            max_disp=0.3, num_steps=5,
+            print_progress=False,
+        )
+        # Base shears should be non-zero (cantilever fixed at base, push at top)
+        assert any(abs(v) > 0 for v in results['base_shear']), \
+            "Expected non-zero base shear in at least one step"
+        # Displacement should increase monotonically
+        assert all(
+            results['control_disp'][i] <= results['control_disp'][i + 1]
+            for i in range(len(results['control_disp']) - 1)
+        ), "Control displacement should be monotonic"
+
 
 # ============================================================================
 # HingeRadau beam integration tests
