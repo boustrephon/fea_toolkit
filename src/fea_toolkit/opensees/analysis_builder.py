@@ -1494,11 +1494,13 @@ class AnalysisBuilder:
             except Exception:
                 eigenvals_all = []
             if not eigenvals_all:
+                print(f"  ⚠ {eigen_solver} solver failed — falling back to ARPACK")
                 try:
                     eigenvals_all = ops.eigen(num_modes)
                 except Exception:
                     eigenvals_all = []
                 if not eigenvals_all:
+                    print("  ⚠ ARPACK also failed — falling back to fullGenLapack")
                     try:
                         eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
                     except Exception:
@@ -1509,6 +1511,7 @@ class AnalysisBuilder:
             except Exception:
                 eigenvals_all = []
             if not eigenvals_all:
+                print("  ⚠ ARPACK solver failed — falling back to fullGenLapack")
                 try:
                     eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
                 except Exception:

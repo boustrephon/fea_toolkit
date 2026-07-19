@@ -7047,34 +7047,28 @@ class OpenSeesBuilder:
             # Some solvers (e.g. -symmBandLapack) only handle standard
             # eigenproblems and return empty.  Fall back to ARPACK.
             if not eigenvals_all:
-                if self.config['verbose']:
-                    print(f"  {solver_flag} returned no eigenvalues, "
-                          "falling back to ARPACK...")
+                print(f"  ⚠ {solver_flag} failed — falling back to ARPACK")
                 try:
                     eigenvals_all = ops.eigen(num_modes)
                 except Exception:
                     eigenvals_all = []
                 if not eigenvals_all:
-                    if self.config['verbose']:
-                        print("  ARPACK also failed, trying fullGenLapack...")
+                    print("  ⚠ ARPACK also failed — falling back to fullGenLapack")
                     try:
                         eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
                     except Exception:
                         eigenvals_all = []
         else:
             # "default" — ARPACK first, fallback to fullGenLapack
-            if self.config['verbose']:
-                print("  Using ARPACK solver...")
             try:
                 eigenvals_all = ops.eigen(num_modes)
             except Exception:
                 eigenvals_all = []
             if len(eigenvals_all) > 0:
-                if self.config['verbose']:
+                if self.config.get('verbose'):
                     print(f"  ARPACK returned {len(eigenvals_all)} eigenvalues")
             else:
-                if self.config['verbose']:
-                    print("  ARPACK failed, falling back to fullGenLapack...")
+                print("  ⚠ ARPACK solver failed — falling back to fullGenLapack")
                 try:
                     eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
                 except Exception:
