@@ -288,14 +288,10 @@ def collect_rs_arrays(rs_x: Optional[Dict] = None,
         rs = rs_x if direction == "X" else rs_y
         if rs is None:
             continue
-        arrays[f"rs/sa_{d_key}"] = np.array(
-            rs.get("spectral_accels", []), dtype=float)
-        arrays[f"rs/eff_mass_{d_key}"] = np.array(
-            rs.get("effective_masses", []), dtype=float)
         arrays[f"rs/v_base_{d_key}"] = np.array(
             rs.get("modal_base_shear", []), dtype=float)
         arrays[f"rs/v_cqc_{d_key}"] = np.array([rs.get("base_shear_cqc", 0.0)])
-        arrays[f"rs/v_total_{d_key}"] = np.array([rs.get("base_shear_total", 0.0)])
+        arrays[f"rs/v_srss_{d_key}"] = np.array([rs.get("base_shear_srss", 0.0)])
     return arrays
 
 
@@ -435,16 +431,10 @@ def write_results(
     Returns:
         Absolute path to the written file.
     """
-    # Resolve model source
+    # Resolve model source (MeshModel or SAPModelData — both have .nodes)
     src = mesh_model or model
     if src is None:
         raise ValueError("Either mesh_model or model must be provided")
-    # Ensure MeshModel compatibility — accept SAPModelData too
-    if hasattr(src, 'model_name'):
-        pass  # already a MeshModel or compatible
-    elif hasattr(src, 'nodes'):
-        # SAPModelData — wrap geometry collectors work with both
-        pass
 
     # Collect all arrays
     arrays: Dict[str, np.ndarray] = {}

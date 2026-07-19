@@ -685,8 +685,13 @@ class TestUnifiedNpzPipeline:
         assert f_pts.shape[0] > 0
         assert f_lines.shape[0] > 0
 
-    def test_write_and_read_static_with_split(self, sample_md, tmp_path):
+    @pytest.mark.parametrize("use_preprocessor", [False, True])
+    def test_write_and_read_static_with_split(self, sample_md, tmp_path,
+                                               use_preprocessor):
         """Unified NPZ pipeline works with split elements.
+
+        Exercises both legacy (use_preprocessor=False) and two-stage
+        (use_preprocessor=True) build paths.
 
         Builds a model with an intermediate node on a frame so
         split_elements=True produces child elements, then verifies
@@ -710,6 +715,7 @@ class TestUnifiedNpzPipeline:
             'element_type': 'elasticBeamColumn',
             'split_elements': True,
             'verbose': False,
+            'use_preprocessor': use_preprocessor,
         })
         b.build()
         try:
