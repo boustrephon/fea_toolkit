@@ -59,6 +59,46 @@ def get_SAP_vecxz(vec_x: Union[Sequence[float], np.ndarray],
         return rotate_about_axis(v3_norm, v1_norm, theta)
 
 
+def get_local_axes(axis: np.ndarray) -> "tuple[np.ndarray, np.ndarray, np.ndarray]":
+    """Compute the full local coordinate system for a frame element.
+
+    Given the element axis (I→J vector), returns the orthonormal
+    ``(vx, vy, vz)`` triplet following SAP2000 conventions.
+
+    * ``vx`` = unit vector along the element axis.
+    * ``vz`` = vecxz (SAP2000 local z) normalised, perpendicular to *vx*.
+    * ``vy`` = ``vz × vx``, completing the right-handed system.
+
+    When *vx* is vertical (parallel to global Z), the default fallback
+    uses global Y as the reference for vecxz.
+
+    Args:
+        axis: Element axis vector (I→J).  Does not need to be unit length.
+
+    Returns:
+        ``(vx, vy, vz)`` — each a unit ``np.ndarray`` of length 3.
+    """
+    import numpy as np
+
+    vx = np.asarray(axis, dtype=float)
+    norm = np.linalg.norm(vx)
+    if norm < 1e-12:
+        raise ValueError("axis has zero length")
+    vx = vx / norm
+
+    vecxz = get_SAP_vecxz(vx, 0.0)
+    vz = vecxz / np.linalg.norm(vecxz)
+    vy = np.cross(vz, vx)
+    if np.linalg.norm(vy) > 1e-12:
+        vy = vy / np.linalg.norm(vy)
+    else:
+        # Fallback: vertical or near-vertical element
+        vy = np.array([0.0, 1.0, 0.0])
+        vz = np.cross(vx, vy)
+        vz = vz / np.linalg.norm(vz)
+    return vx, vy, vz
+
+
 def rotate_about_axis(v: np.ndarray, axis: np.ndarray, theta_rad: float) -> np.ndarray:
     """Rotate a vector about an axis using Rodrigues' formula.
 
