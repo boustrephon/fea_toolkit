@@ -17,6 +17,8 @@ fortification, rare) on a single figure.
 from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
 
+from .utils import cqc_combine as _cqc_combine_modal
+
 
 def _gb50011_spectrum(
     T_values: List[float],
@@ -214,31 +216,20 @@ def cqc_combine(
     # Per-mode base shear: V_n = S_a(T_n) × M_eff_n
     modal_shear = [Sa[i] * abs(eff_masses[i]) for i in range(n_modes)]
 
-    # CQC correlation coefficients (Der Kiureghian 1980)
-    zeta = damping
+    # CQC on flexible modes only (via utils.cqc_combine)
+    omega = [2.0 * math.pi / T if T > 0 else 1e12 for T in periods]
+    damp_list = [damping] * n_modes
 
-    def _cqc_coeff(T_i, T_j):
-        if T_i <= 0 or T_j <= 0:
-            return 0.0
-        r = T_i / T_j if T_j >= T_i else T_j / T_i
-        return (8.0 * zeta**2 * (1.0 + r) * r**1.5
-                / ((1.0 - r**2)**2 + 4.0 * zeta**2 * r * (1.0 + r)**2))
-
-    rho = [[_cqc_coeff(periods[i], periods[j]) for j in range(n_modes)]
-           for i in range(n_modes)]
-
-    # Rigid cut-off
     rigid_indices: set = set()
     if T_rigid and T_rigid > 0:
         rigid_indices = {i for i, T in enumerate(periods) if T < T_rigid}
     flexible_indices = [i for i in range(n_modes) if i not in rigid_indices]
 
-    # CQC on flexible modes only
     if flexible_indices:
-        V_cqc = math.sqrt(sum(
-            rho[i][j] * modal_shear[i] * modal_shear[j]
-            for i in flexible_indices for j in flexible_indices
-        ))
+        flex_shear = [modal_shear[i] for i in flexible_indices]
+        flex_omega = [omega[i] for i in flexible_indices]
+        flex_damp = [damp_list[i] for i in flexible_indices]
+        V_cqc = _cqc_combine_modal(flex_shear, flex_omega, flex_damp)
     else:
         V_cqc = 0.0
 
