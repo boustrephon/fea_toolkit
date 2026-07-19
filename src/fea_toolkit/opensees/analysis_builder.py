@@ -1458,11 +1458,8 @@ class AnalysisBuilder:
         if _needs_nudge:
             if self.config.get('verbose'):
                 print("  Ritz pre-step (static gravity)...")
-            _sw_patterns = {}
-            # Check for self-weight patterns in the mesh model
-            _sw_patterns['Self weight'] = 1.0
-            # Run a gravity load step
-            self.create_loads(pattern_scales=_sw_patterns)
+            # Run a self-weight gravity load step
+            self.create_loads(pattern_scales={"Self weight": 1.0})
             try:
                 if self._edge_constraint_method == 'penalty':
                     ops.constraints('Penalty', 1.0e12, 1.0e12)
@@ -1662,11 +1659,9 @@ class AnalysisBuilder:
             if nd_i is None or nd_j is None:
                 continue
             if elem.node_i in base_nodes and elem.node_j not in base_nodes:
-                base_elements.append((elem.elem_tag if elem.elem_tag else
-                                      self.frame_tag_map.get(eid, 0), 'i'))
+                base_elements.append((elem.elem_tag, 'i'))
             elif elem.node_j in base_nodes and elem.node_i not in base_nodes:
-                base_elements.append((elem.elem_tag if elem.elem_tag else
-                                      self.frame_tag_map.get(eid, 0), 'j'))
+                base_elements.append((elem.elem_tag, 'j'))
 
         for mode in range(1, num_modes + 1):
             ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, '-mode', mode)
