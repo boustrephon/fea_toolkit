@@ -5,7 +5,8 @@ These are used primarily by ``run_all()`` to auto-detect load patterns
 from raw SAP2000 table data and merge user config with defaults.
 """
 
-from typing import Dict, Optional
+import math
+from typing import Dict, List, Optional
 
 # Gravitational acceleration in m/s²  (SI default)
 _G_SI = 9.80665
@@ -182,3 +183,47 @@ def compute_flag_parts(pt1, pt2, vn, Fi, Fj, scale):
             yield [pt1, p_zero, pt1 + off_i], Fi
         if abs(Fj) > 1e-12:
             yield [p_zero, pt2, pt2 + off_j], Fj
+
+
+def cqc_combine(modal_values: List[float],
+                omega: List[float],
+                damp_ratios: List[float]) -> float:
+    """Complete Quadratic Combination of modal results (Der Kiureghian 1980).
+
+    Uses the standard CQC correlation coefficient formula:
+
+    .. math::
+
+        \\rho_{ij} = \\frac{8 \\sqrt{\\zeta_i \\zeta_j} (\\zeta_i + r \\zeta_j) r^{3/2}}
+                           {(1 - r^2)^2 + 4 \\zeta_i \\zeta_j r (1 + r^2) + 4 (\\zeta_i^2 + \\zeta_j^2) r^2}
+
+    where :math:`r = \\omega_i / \\omega_j` and :math:`\\zeta` is the damping ratio.
+
+    Args:
+        modal_values: Per-mode response quantities (shear, moment, etc.).
+        omega: Circular frequencies of each mode (rad/s).
+        damp_ratios: Damping ratio for each mode.
+
+    Returns:
+        CQC-combined scalar value.
+    """
+    n = len(modal_values)
+    if n == 0:
+        return 0.0
+    if n == 1:
+        return abs(modal_values[0])
+    total = 0.0
+    for i in range(n):
+        for j in range(n):
+            di = damp_ratios[i] if i < len(damp_ratios) else 0.05
+            dj = damp_ratios[j] if j < len(damp_ratios) else 0.05
+            bij = omega[i] / omega[j] if omega[j] > 0 else 1.0
+            rho = (
+                8.0 * math.sqrt(di * dj) * (di + bij * dj) * (bij ** 1.5)
+            ) / (
+                (1.0 - bij ** 2.0) ** 2.0
+                + 4.0 * di * dj * bij * (1.0 + bij ** 2.0)
+                + 4.0 * (di ** 2.0 + dj ** 2.0) * bij ** 2.0
+            )
+            total += modal_values[i] * modal_values[j] * rho
+    return math.sqrt(max(total, 0.0))
