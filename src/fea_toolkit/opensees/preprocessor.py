@@ -117,8 +117,12 @@ class Preprocessor:
 
         # ── 3b. Split areas at frame edges ────────────────────────
         # Ensures slab mesh nodes coincide with frame split points.
-        # Enabled by default to prevent false-positive constraint edges.
-        if self.config.get('split_areas_at_frame_edges', True):
+        # Only needed when shells are created — when create_shells=False
+        # the areas are loads-only and their loads are converted to frame
+        # edge loads in step 4.  Unconditional splitting would create
+        # orphan _af_ nodes with no element connectivity → singular matrix.
+        create_shells = self.config.get('create_shells', False)
+        if create_shells and self.config.get('split_areas_at_frame_edges', True):
             from ..model.geometry import split_areas_at_frame_edges
             max_tag = max(
                 (ae.area_tag for ae in md.area_elements.values()), default=0
@@ -138,7 +142,7 @@ class Preprocessor:
         # ── 4. Convert area loads to frame edge loads ────────────
         edge_loads_from_areas: list = []
         loads_only_area_ids: Set[str] = set()
-        create_shells = self.config.get('create_shells', False)
+        # create_shells already fetched at step 3b, reuse
         if selection is not None:
             edge_loads_from_areas = self._convert_area_loads(
                 md, selection, new_elems,
