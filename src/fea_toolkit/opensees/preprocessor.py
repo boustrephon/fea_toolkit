@@ -344,10 +344,39 @@ class Preprocessor:
                                 nodes: Optional[Dict[str, Node]] = None) -> str:
         """Classify a frame or area element into a structural type.
 
-        * Area elements: ``'slab'`` if horizontal (all corner Z within
-          0.02 units), ``'wall'`` otherwise.
-        * Frame elements: ``'column'`` if vertical span exceeds 4× the
-          horizontal span; ``'brace'`` if diagonal; ``'beam'`` otherwise.
+        This is the **geometry signal** for element classification.
+        The companion **section-type signal** is
+        ``Selection.from_brace_sections()``.  Both are documented in
+        ``docs/element_classification.md``.
+
+        Classification rules
+        --------------------
+        **Area elements:**
+          ``'slab'`` if all corner Z-coordinates are within 0.02 length
+          units of each other (horizontal); ``'wall'`` otherwise.
+
+        **Frame elements (geometry-based):**
+          * ``'column'`` if the vertical span (dz) exceeds 4\u00d7 the
+            horizontal span (\u221a(dx\u00b2 + dy\u00b2)).  Near-vertical.
+          * ``'brace'`` if BOTH horizontal span and vertical span exceed
+            0.01 length units (diagonal).
+          * ``'beam'`` otherwise (horizontal or near-horizontal).
+
+        The geometry-only ``'brace'`` label is a **hint** \u2014 the final
+        brace decision for pushover also requires the section to be a
+        recognised brace shape (Pipe, Angle, etc.).  This two-signal
+        approach avoids false positives (e.g. a horizontal pipe handrail
+        classified as a brace).
+
+        Args:
+            elem: A ``FrameElement`` or ``AreaElement``.
+            is_area: ``True`` for area elements, ``False`` for frames.
+            nodes: Node dict (required for frame elements to resolve
+                element node IDs to coordinates).
+
+        Returns:
+            One of ``'beam'``, ``'column'``, ``'brace'``, ``'slab'``,
+            ``'wall'``, or ``'unknown'``.
         """
         if nodes is None:
             nodes = {}
