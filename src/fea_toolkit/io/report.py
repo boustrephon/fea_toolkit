@@ -44,6 +44,11 @@ def bounding_box(md) -> Dict[str, float]:
 def summarise_mass_sources(md, g: float = 9.81) -> pd.DataFrame:
     """Return a DataFrame summarising all mass sources.
 
+    .. deprecated::
+       This function builds an ``OpenSeesBuilder`` via the legacy single-stage
+       path.  For new code, compute masses using the two-stage
+       ``Preprocessor → AnalysisBuilder`` workflow instead.
+
     Builds the model to compute total seismic mass and weight for each source.
     """
     from ..opensees.builder import OpenSeesBuilder
@@ -68,6 +73,7 @@ def summarise_mass_sources(md, g: float = 9.81) -> pd.DataFrame:
         b = OpenSeesBuilder(md, {
             "element_type": "elasticBeamColumn",
             "split_elements": True,
+            "use_preprocessor": False,
             "verbose": False,
         })
         b.build()
@@ -192,6 +198,13 @@ def summarise_load_patterns(md) -> pd.DataFrame:
 def load_pattern_totals(md) -> pd.DataFrame:
     """Build the model and return a DataFrame of total applied load per pattern.
 
+    .. deprecated::
+       This function builds an ``OpenSeesBuilder`` via the legacy single-stage
+       path.  Load totals under the two-stage ``AnalysisBuilder`` are stored
+       as scalar magnitudes rather than per-component dicts; prefer
+       ``AnalysisBuilder.check_load_equilibrium()`` or direct access to
+       ``builder.load_totals`` for new workflows.
+
     Sums all joint loads, frame distributed loads, and self-weight for each
     load pattern defined in the model (as computed by the builder's
     ``load_totals`` attribute).
@@ -200,6 +213,7 @@ def load_pattern_totals(md) -> pd.DataFrame:
     b = OpenSeesBuilder(md, {
         "element_type": "elasticBeamColumn",
         "split_elements": True,
+        "use_preprocessor": False,
         "verbose": False,
     })
     b.build()
@@ -208,12 +222,21 @@ def load_pattern_totals(md) -> pd.DataFrame:
     fu = md.units.get("F", "?")
     for pname in sorted(lt, key=str.casefold):
         t = lt[pname]
-        rows.append({
-            "Load Pattern": pname,
-            f"Fx ({fu})": round(t.get("fx", 0), 2),
-            f"Fy ({fu})": round(t.get("fy", 0), 2),
-            f"Fz ({fu})": round(t.get("fz", 0), 2),
-        })
+        if isinstance(t, dict):
+            rows.append({
+                "Load Pattern": pname,
+                f"Fx ({fu})": round(t.get("fx", 0), 2),
+                f"Fy ({fu})": round(t.get("fy", 0), 2),
+                f"Fz ({fu})": round(t.get("fz", 0), 2),
+            })
+        else:
+            # Scalar magnitude from AnalysisBuilder path
+            rows.append({
+                "Load Pattern": pname,
+                f"Fx ({fu})": round(float(t), 2),
+                f"Fy ({fu})": 0.0,
+                f"Fz ({fu})": 0.0,
+            })
     return pd.DataFrame(rows)
 
 
@@ -491,12 +514,18 @@ def area_section_summary(md) -> pd.DataFrame:
 def modal_table(md, n_modes: int = 12, print_results: bool = False) -> pd.DataFrame:
     """Run elastic modal analysis and return a DataFrame of mode properties.
 
+    .. deprecated::
+       This function builds an ``OpenSeesBuilder`` via the legacy single-stage
+       path.  For new code, run modal analysis on an ``AnalysisBuilder`` and
+       build the DataFrame from its result dict directly.
+
     Columns: Mode, Period (s), Freq (Hz), Mx (%), My (%), Mz (%).
     """
     from ..opensees.builder import OpenSeesBuilder
     b = OpenSeesBuilder(md, {
         "element_type": "elasticBeamColumn",
         "split_elements": True,
+        "use_preprocessor": False,
         "verbose": False,
     })
     b.build()
@@ -523,12 +552,18 @@ def modal_table(md, n_modes: int = 12, print_results: bool = False) -> pd.DataFr
 def modal_table_enhanced(md, n_modes: int = 12, print_results: bool = False):
     """Run elastic modal analysis and return a DataFrame with 6 DOF participation.
 
+    .. deprecated::
+       This function builds an ``OpenSeesBuilder`` via the legacy single-stage
+       path.  For new code, run modal analysis on an ``AnalysisBuilder`` and
+       build the DataFrame from its result dict directly.
+
     Columns: Mode, Period, Mx%, My%, Mz%, Rx%, Ry%, Rz%  + a SUM row.
     """
     from ..opensees.builder import OpenSeesBuilder
     b = OpenSeesBuilder(md, {
         "element_type": "elasticBeamColumn",
         "split_elements": True,
+        "use_preprocessor": False,
         "verbose": False,
     })
     b.build()
