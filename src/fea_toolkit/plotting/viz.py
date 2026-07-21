@@ -615,8 +615,12 @@ def _render_scene(plotter, data, *,
         inactive_shells = []
         for sh in data["shells"]:
             pts = []
-            for ref in (sh.get("node_ids") or []):
+            refs = sh.get("node_ids") or sh.get("node_tags") or []
+            for ref in refs:
                 nd = nodes.get(ref)
+                if nd is None:
+                    # Try converting int tag to string key
+                    nd = nodes.get(str(ref))
                 if nd is None:
                     break
                 pts.append([nd["x"], nd["y"], nd["z"]])
@@ -1519,7 +1523,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
             if shell_mesh is not None and nsm is not None and nsm.n_points:
                 shell_mesh.points = nsm.points
 
-        plotter.add_timer_callback(1, 60, callback)
+        plotter.add_timer_event(60, 16, callback)
         plotter.show(auto_close=False)
     else:
         plotter.show()

@@ -223,7 +223,9 @@ def cqc_combine(
     rigid_indices: set = set()
     if T_rigid and T_rigid > 0:
         rigid_indices = {i for i, T in enumerate(periods) if T < T_rigid}
-    flexible_indices = [i for i in range(n_modes) if i not in rigid_indices]
+    # Always exclude modes with non-positive periods (invalid for CQC)
+    flexible_indices = [i for i in range(n_modes)
+                        if i not in rigid_indices and periods[i] > 0]
 
     if flexible_indices:
         flex_shear = [modal_shear[i] for i in flexible_indices]
