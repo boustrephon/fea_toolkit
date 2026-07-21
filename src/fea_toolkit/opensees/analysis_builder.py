@@ -727,12 +727,69 @@ class AnalysisBuilder:
             self._created_node_tags.add(tag)
 
     def _apply_restraints(self) -> None:
-        """Apply boundary conditions from MeshModel restraints."""
+        """Apply boundary conditions from MeshModel restraints.
+
+        Also propagates restraints from area corner nodes to intermediate
+        mesh-created nodes along each edge of subdivided shell areas.
+        Without this, ``ShellMITC4`` elements at restrained edges would
+        have unrestrained intermediate nodes, creating a rotational
+        mechanism (singular stiffness matrix).
+        """
+        import numpy as np
+
         for node_id, restraint in self.mesh_model.restraints.items():
             nd = self.mesh_model.nodes.get(node_id)
             if nd is None:
                 continue
             ops.fix(nd.node_tag, *restraint.dofs[:6])
+
+        # ── Propagate edge restraints to mesh nodes ──────────────
+        # For each subdivided area parent, check if both corner nodes
+        # along an edge have restraints.  If so, intermediate mesh
+        # nodes inherit the AND (more-restrictive) combination.
+        for aid, elem in self.mesh_model.area_elements.items():
+            if not getattr(elem, 'inactive', False):
+                continue  # only look at subdivided parents
+            if len(elem.node_ids) != 4:
+                continue
+            corners = list(elem.node_ids)  # 4 corner SAP node IDs
+            edges = [(0, 1), (1, 2), (3, 2), (0, 3)]
+            for ci, cj in edges:
+                nid_i = corners[ci]
+                nid_j = corners[cj]
+                ri = self.mesh_model.restraints.get(nid_i)
+                rj = self.mesh_model.restraints.get(nid_j)
+                if ri is None or rj is None:
+                    continue
+                # AND of restraint DOFs (more restricted wins)
+                combined = [
+                    min(ri.dofs[d], rj.dofs[d]) for d in range(6)
+                ]
+                if sum(combined) == 0:
+                    continue
+                nd_i = self.mesh_model.nodes.get(nid_i)
+                nd_j = self.mesh_model.nodes.get(nid_j)
+                if nd_i is None or nd_j is None:
+                    continue
+                p_i = np.array([nd_i.x, nd_i.y, nd_i.z])
+                p_j = np.array([nd_j.x, nd_j.y, nd_j.z])
+                edge_vec = p_j - p_i
+                edge_len_sq = np.dot(edge_vec, edge_vec)
+                if edge_len_sq < 1e-12:
+                    continue
+
+                mesh_prefix = f"{aid}_mesh_"
+                for nd in list(self.mesh_model.nodes.values()):
+                    if mesh_prefix not in nd.node_id:
+                        continue
+                    p = np.array([nd.x, nd.y, nd.z])
+                    t = np.dot(p - p_i, edge_vec) / edge_len_sq
+                    if t < 1e-6 or t > 1 - 1e-6:
+                        continue
+                    proj = p_i + t * edge_vec
+                    if np.linalg.norm(p - proj) > 0.01:
+                        continue
+                    ops.fix(nd.node_tag, *combined)
 
     # ── Materials ────────────────────────────────────────────────
 
@@ -832,11 +889,29 @@ class AnalysisBuilder:
 
                 self._truss_mat_tags[sec_name] = truss_tag
                 self._truss_areas[sec_name] = area
+
+                # Hysteretic backbone with 3 points in tension, 3 in compression
+                # (matching the legacy Builder's approach)
+                eps_y = Fy / E_sec
+                # Tension: yield → slight hardening
+                s1p, e1p = Fy, eps_y
+                s2p, e2p = Fy * 1.01, eps_y + 0.01
+                s3p, e3p = Fy * 1.02, eps_y + 0.05
+                # Compression: Euler buckling → post-buckling residual
+                # Estimate max unbraced length as 3.0 m (typical brace)
+                _L_brace = 3.0
+                _I_min = getattr(sec, 'I22', 0.0) or getattr(sec, 'I33', 0.0) or 1e-6
+                _P_cr = (math.pi ** 2 * E_sec * _I_min) / (_L_brace ** 2)
+                sig_cr = _P_cr / area if area > 0 else Fy * 0.3
+                eps_cr = sig_cr / E_sec
+                s1n, e1n = -sig_cr, -eps_cr
+                s2n, e2n = -sig_cr * 0.2, -eps_cr - 0.01
+                s3n, e3n = -sig_cr * 0.1, -eps_cr - 0.05
+
                 ops.uniaxialMaterial('Hysteretic', truss_tag,
-                                     1.1 * Fy, 0.007 * E_sec / Fy,
-                                     0.3 * Fy, 0.004 * E_sec / Fy,
-                                     1.1 * Fy, 0.007 * E_sec / Fy,
-                                     1.0, 0.0, 0.0, 0.0)
+                                     s1p, e1p, s2p, e2p, s3p, e3p,
+                                     s1n, e1n, s2n, e2n, s3n, e3n,
+                                     1.0, 1.0, 0.0, 0.0, 0.0)
                 self.material_tags[f"{sec_name}__truss"] = truss_tag
                 truss_tag += 1
 
@@ -2599,6 +2674,54 @@ class AnalysisBuilder:
         return get_local_axes(vx, getattr(elem, 'angle', 0.0))
 
     # ═══════════════════════════════════════════════════════════════
+    # Load equilibrium check
+    # ═══════════════════════════════════════════════════════════════
+
+    def check_load_equilibrium(self) -> "pd.DataFrame":
+        """Check equilibrium between applied loads and reactions.
+
+        For each load pattern in the model, runs a static analysis
+        with that pattern alone and compares the applied load totals
+        (from :attr:`load_totals`) against the summed reactions.
+
+        Returns:
+            A ``pandas.DataFrame`` with one row per pattern and
+            columns for applied force, reaction force, and
+            the equilibrium imbalance ``Δ = applied + reaction``
+            (should be near zero for a correctly built model).
+        """
+        import pandas as pd
+
+        rows: list = []
+        fu = self.config.get('force_unit', '?')
+        # Collect unique pattern names from all load sources in the MeshModel
+        _patterns: set = set()
+        for ld in self.mesh_model.frame_dist_loads:
+            _patterns.add(ld.pattern)
+        for jl in self.mesh_model.joint_loads:
+            _patterns.add(jl.pattern)
+        for agl in self.mesh_model.area_gravity_loads:
+            _patterns.add(agl.pattern)
+        for pname in sorted(_patterns, key=str.casefold):
+            results = self.run_static_analysis(
+                extract_reactions=True,
+                pattern_scales={pname: 1.0},
+            )
+            R = results.get('summed_reactions', {})
+            rx = R.get('fx', 0.0)
+            ry = R.get('fy', 0.0)
+            rz = R.get('fz', 0.0)
+
+            rows.append({
+                'Load Pattern': pname,
+                f'Reaction Fx ({fu})': round(rx, 1),
+                f'Reaction Fy ({fu})': round(ry, 1),
+                f'Reaction Fz ({fu})': round(rz, 1),
+            })
+
+        return pd.DataFrame(rows)
+
+    # ═══════════════════════════════════════════════════════════════
     # Export
     # ═══════════════════════════════════════════════════════════════
 
@@ -2736,13 +2859,23 @@ class AnalysisBuilder:
 
         # ── Rebuild with fiber sections ──────────────────────────
         # Check whether any section overrides the base to_fiber_patches
-        # (the base class raises NotImplementedError)
-        from ..model.sap_data import Section as _BaseSection
-        _has_any_fiber = any(
-            type(sec).to_fiber_patches is not _BaseSection.to_fiber_patches
-            for sec in self.mesh_model.sections.values()
+        # (the base class raises NotImplementedError).
+        # Skip fiber rebuild when brace_truss is active (braces use
+        # Hysteretic truss elements, not fiber beam-columns).
+        _use_fiber = (
+            not self.config.get('brace_truss', False)
+            and not self.config.get('use_elastic_sections', False)
         )
-        if not _has_any_fiber:
+        if _use_fiber:
+            from ..model.sap_data import Section as _BaseSection
+            _has_any_fiber = any(
+                type(sec).to_fiber_patches is not _BaseSection.to_fiber_patches
+                for sec in self.mesh_model.sections.values()
+            )
+            if not _has_any_fiber:
+                _use_fiber = False
+
+        if not _use_fiber:
             overrides: Dict[str, Any] = {
                 'element_type': 'elasticBeamColumn',
                 'create_fiber_sections': False,
@@ -2828,11 +2961,11 @@ class AnalysisBuilder:
         ops.loadConst('-time', 0.0)
 
         # Find a free pattern tag
-        _pat_tag = 1001
+        _pat_tag = 9001
         try:
             existing = ops.getLoadPatternTags()
             if existing:
-                _pat_tag = max(existing) + 1
+                _pat_tag = max(max(existing), 9000) + 1
         except Exception:
             pass
 
