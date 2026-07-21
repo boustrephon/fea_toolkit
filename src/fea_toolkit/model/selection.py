@@ -418,15 +418,35 @@ class Selection:
 
         Identifies frame elements whose section shape is one of the common
         brace profiles: ``Pipe``, ``Angle``, ``Double Angle``, ``Tee``,
-        or ``Channel``.  This is useful for quickly selecting braces for
-        buckling checking and subdivision.
+        or ``Channel``.  This is the **section-type** signal used in
+        element classification (see ``docs/element_classification.md``).
+
+        The classification combines two independent signals:
+
+        **1. Section type (this method)**
+           Checks the Python dataclass type of each section in the model.
+           Brace-shaped sections (Pipe, Angle, Double Angle, Tee, Channel)
+           are candidates regardless of their orientation.
+
+        **2. Geometry**
+           A frame element whose chord angle from vertical exceeds ~20\u00b0
+           is geometrically diagonal.  Handled by
+           ``Preprocessor._classify_element_type()``.
+
+        **Merge rule**
+           A frame element is treated as a brace for pushover (Truss +
+           Hysteretic) only if **both** conditions hold: its section is a
+           brace shape AND it is geometrically diagonal.  This prevents
+           horizontal pipes (e.g. handrails) or vertical tees from being
+           misclassified as braces.
 
         Args:
             model: The parsed ``SAPModelData``.
 
         Returns:
             A ``Selection`` with ``element_types=['Frame']`` and
-            ``sections`` populated from the model's brace‑shape sections.
+            ``sections`` populated from the model's brace-shape sections.
+            Returns an empty Selection if no brace-shaped sections exist.
         """
         from .sap_data import (
             PipeSection, AngleSection, DoubleAngleSection,
