@@ -226,9 +226,6 @@ class AnalysisBuilder:
         are still returned to support diagnostic detection of unconnected
         edges before deciding whether to create shells.
         """
-        if self.config.get('create_shells', False):
-            return {aid for aid in self.mesh_model.area_elements
-                    if not getattr(self.mesh_model.area_elements[aid], 'inactive', False)}
         return {aid for aid in self.mesh_model.area_elements
                 if not getattr(self.mesh_model.area_elements[aid], 'inactive', False)}
 
@@ -869,9 +866,14 @@ class AnalysisBuilder:
             )
             self._truss_mat_tags: Dict[str, int] = {}
             self._truss_areas: Dict[str, float] = {}
-            # Use tags beyond material count
-            n_mat = max(self.material_tags.values(), default=0) + 1 if self.material_tags else 1
-            truss_tag = n_mat
+            # Use tags beyond both material AND section tags to avoid clashes
+            # with fiber-section materials created in _create_single_section
+            # (which use mat_tag = section_tag).
+            _existing = max(
+                max(self.material_tags.values(), default=0),
+                max(self.section_tags.values(), default=0),
+            )
+            truss_tag = _existing + 1
 
             explicit = self.config.get('brace_sections')
             for sec_name, sec in self.mesh_model.sections.items():
@@ -937,86 +939,88 @@ class AnalysisBuilder:
     def _create_single_section(self, sec, tag: int) -> None:
         """Create a single OpenSees section."""
         mods = getattr(sec, 'modifiers', {}) or {}
+        # ── Fiber section path (frame sections only) ────────────
         if self.config.get('create_fiber_sections'):
-            # ── Fiber section path ───────────────────────────────
-            mat = self.mesh_model.materials.get(sec.material)
-            if mat is None:
-                E_mod = 200e9
-                G_mod = 80e9
-            else:
-                E_mod = mat.E_mod or 200e9
-                G_mod = mat.G_mod or (E_mod / 2.6)
-
-            _A = getattr(sec, 'A', 0.0) or 0.0
-            _I33 = getattr(sec, 'I33', 0.0) or 0.0
-            _I22 = getattr(sec, 'I22', 0.0) or 0.0
-            _J = getattr(sec, 'J', 0.0) or 0.0
-
-            # Create material appropriate for the section type
-            mat_tag = tag  # material tag = section tag
-            if mat is not None and mat.type.lower() == 'concrete':
-                Fc = getattr(mat, 'Fc', 0.0) or 3.0e7
-                epsc = getattr(mat, 'eFc', 0.0) or 0.002
-                ops.uniaxialMaterial('Concrete01', mat_tag,
-                                     -Fc, -abs(epsc), -0.2 * Fc, -0.006)
-            else:
-                Fy = getattr(mat, 'Fy', 0.0) or 2.5e8
-                ops.uniaxialMaterial('Steel01', mat_tag, Fy, E_mod, 0.01)
-
-            # Create fiber section
-            ops.section('Fiber', tag, '-GJ', _J)
-            try:
-                entries = sec.to_fiber_patches(mat_tag=mat_tag, nfy=8, nfz=4)
-            except NotImplementedError:
-                # Fall back to elastic
-                if self.config.get('verbose', False):
-                    print(f"  Section {tag} ({sec.name}): fiber not supported, "
-                          f"falling back to elastic")
-                ops.section('Elastic', tag, E_mod, _A, _I33, _I22, G_mod, _J)
-                return
-
-            for entry in entries:
-                if entry[0] in ('rect', 'circ', 'quad'):
-                    ops.patch(*entry)
-                elif entry[0] == 'straight':
-                    ops.layer('straight', *entry[1:])
-                elif entry[0] == 'circ_layer':
-                    ops.layer('circ', *entry[1:])
-
-            if self.config.get('verbose', False):
-                print(f"  Section {tag}: {sec.name} (Fiber, {len(entries)} patches)")
-
-        else:
-            # ── Elastic section path ──────────────────────────────
-            mat = self.mesh_model.materials.get(sec.material)
-            if mat is None:
-                if self.config.get('verbose', False):
-                    print(f"  ⚠ Section {sec.name}: material '{sec.material}' not found, using defaults")
-                E_mod = 200e9
-                G_mod = 80e9
-                nu_val = 0.3
-            else:
-                E_mod = mat.E_mod
-                if mat.G_mod and mat.G_mod > 0:
-                    G_mod = mat.G_mod
+            from ..model.sap_data import ShellSection as _ShellSec
+            if not isinstance(sec, _ShellSec):
+                mat = self.mesh_model.materials.get(sec.material)
+                if mat is None:
+                    E_mod = 200e9
+                    G_mod = 80e9
                 else:
-                    G_mod = E_mod / (2 * (1 + mat.nu)) if mat.nu else E_mod / 2.6
-                nu_val = mat.nu
+                    E_mod = mat.E_mod or 200e9
+                    G_mod = mat.G_mod or (E_mod / 2.6)
 
-            _A = getattr(sec, 'A', 0.0) or 0.0
-            _I33 = getattr(sec, 'I33', 0.0) or 0.0
-            _I22 = getattr(sec, 'I22', 0.0) or 0.0
-            _J = getattr(sec, 'J', 0.0) or 0.0
+                _A = getattr(sec, 'A', 0.0) or 0.0
+                _I33 = getattr(sec, 'I33', 0.0) or 0.0
+                _I22 = getattr(sec, 'I22', 0.0) or 0.0
+                _J = getattr(sec, 'J', 0.0) or 0.0
 
-            # Stiffness modifiers
-            amod = mods.get('AMod', 1.0)
-            i33mod = mods.get('I3Mod', 1.0)
-            i22mod = mods.get('I2Mod', 1.0)
-            jmod = mods.get('JMod', 1.0)
+                # Create material appropriate for the section type
+                mat_tag = tag  # material tag = section tag
+                if mat is not None and mat.type.lower() == 'concrete':
+                    Fc = getattr(mat, 'Fc', 0.0) or 3.0e7
+                    epsc = getattr(mat, 'eFc', 0.0) or 0.002
+                    ops.uniaxialMaterial('Concrete01', mat_tag,
+                                         -Fc, -abs(epsc), -0.2 * Fc, -0.006)
+                else:
+                    Fy = getattr(mat, 'Fy', 0.0) or 2.5e8
+                    ops.uniaxialMaterial('Steel01', mat_tag, Fy, E_mod, 0.01)
 
-            if self.config.get('use_elastic_sections', True):
-                ops.section('Elastic', tag, E_mod, _A * amod,
-                            _I33 * i33mod, _I22 * i22mod, G_mod, _J * jmod)
+                # Create fiber section
+                ops.section('Fiber', tag, '-GJ', _J)
+                try:
+                    entries = sec.to_fiber_patches(mat_tag=mat_tag, nfy=8, nfz=4)
+                except NotImplementedError:
+                    # Fall back to elastic
+                    if self.config.get('verbose', False):
+                        print(f"  Section {tag} ({sec.name}): fiber not supported, "
+                              f"falling back to elastic")
+                    ops.section('Elastic', tag, E_mod, _A, _I33, _I22, G_mod, _J)
+                    return
+
+                for entry in entries:
+                    if entry[0] in ('rect', 'circ', 'quad'):
+                        ops.patch(*entry)
+                    elif entry[0] == 'straight':
+                        ops.layer('straight', *entry[1:])
+                    elif entry[0] == 'circ_layer':
+                        ops.layer('circ', *entry[1:])
+
+                if self.config.get('verbose', False):
+                    print(f"  Section {tag}: {sec.name} (Fiber, {len(entries)} patches)")
+                return  # fiber path done
+
+        # ── Elastic section path (including ShellSections) ──────
+        mat = self.mesh_model.materials.get(sec.material)
+        if mat is None:
+            if self.config.get('verbose', False):
+                print(f"  ⚠ Section {sec.name}: material '{sec.material}' not found, using defaults")
+            E_mod = 200e9
+            G_mod = 80e9
+            nu_val = 0.3
+        else:
+            E_mod = mat.E_mod
+            if mat.G_mod and mat.G_mod > 0:
+                G_mod = mat.G_mod
+            else:
+                G_mod = E_mod / (2 * (1 + mat.nu)) if mat.nu else E_mod / 2.6
+            nu_val = mat.nu
+
+        _A = getattr(sec, 'A', 0.0) or 0.0
+        _I33 = getattr(sec, 'I33', 0.0) or 0.0
+        _I22 = getattr(sec, 'I22', 0.0) or 0.0
+        _J = getattr(sec, 'J', 0.0) or 0.0
+
+        # Stiffness modifiers
+        amod = mods.get('AMod', 1.0)
+        i33mod = mods.get('I3Mod', 1.0)
+        i22mod = mods.get('I2Mod', 1.0)
+        jmod = mods.get('JMod', 1.0)
+
+        if self.config.get('use_elastic_sections', True):
+            ops.section('Elastic', tag, E_mod, _A * amod,
+                        _I33 * i33mod, _I22 * i22mod, G_mod, _J * jmod)
 
     # ── Shell elements ───────────────────────────────────────────
 
@@ -1230,6 +1234,18 @@ class AnalysisBuilder:
             sec_tag = self.section_tags.get(sec_name, -1)
 
         if sec_tag < 0:
+            return
+
+        # ── Brace truss elements ────────────────────────────────
+        # When brace_truss is active, sections matching _truss_mat_tags
+        # become Truss elements with Hysteretic material instead of
+        # beam-column elements (matching the legacy Builder behaviour).
+        if (self.config.get('brace_truss')
+                and hasattr(self, '_truss_mat_tags')
+                and sec_name in self._truss_mat_tags):
+            mat_tag = self._truss_mat_tags[sec_name]
+            A = self._truss_areas[sec_name]
+            ops.element('Truss', tag, ni.node_tag, nj.node_tag, A, mat_tag)
             return
 
         # Geometric transformation
@@ -2624,7 +2640,10 @@ class AnalysisBuilder:
         for eid, elem in elements.items():
             if getattr(elem, 'inactive', False):
                 continue
-            tag = elem.elem_tag
+            # Resolve the OpenSees element tag — may differ from elem.elem_tag
+            # when the Preprocessor creates frame elements with deterministic
+            # tags stored in frame_tag_map.
+            tag = self.frame_tag_map.get(eid, elem.elem_tag)
             try:
                 f = ops.eleResponse(tag, 'forces')
             except Exception:
@@ -2703,14 +2722,14 @@ class AnalysisBuilder:
         for agl in self.mesh_model.area_gravity_loads:
             _patterns.add(agl.pattern)
         for pname in sorted(_patterns, key=str.casefold):
-            results = self.run_static_analysis(
+            result = self.run_static_analysis(
                 extract_reactions=True,
                 pattern_scales={pname: 1.0},
             )
-            R = results.get('summed_reactions', {})
-            rx = R.get('fx', 0.0)
-            ry = R.get('fy', 0.0)
-            rz = R.get('fz', 0.0)
+            rxn = result.get('reactions', {})
+            rx = sum(v['fx'] for v in rxn.values())
+            ry = sum(v['fy'] for v in rxn.values())
+            rz = sum(v['fz'] for v in rxn.values())
 
             rows.append({
                 'Load Pattern': pname,
@@ -2858,22 +2877,21 @@ class AnalysisBuilder:
         dof = {'X': 1, 'Y': 2, 'Z': 3}[lateral_direction]
 
         # ── Rebuild with fiber sections ──────────────────────────
-        # Check whether any section overrides the base to_fiber_patches
-        # (the base class raises NotImplementedError).
-        # Skip fiber rebuild when brace_truss is active (braces use
-        # Hysteretic truss elements, not fiber beam-columns).
-        _use_fiber = (
-            not self.config.get('brace_truss', False)
-            and not self.config.get('use_elastic_sections', False)
-        )
-        if _use_fiber:
-            from ..model.sap_data import Section as _BaseSection
-            _has_any_fiber = any(
-                type(sec).to_fiber_patches is not _BaseSection.to_fiber_patches
-                for sec in self.mesh_model.sections.values()
-            )
-            if not _has_any_fiber:
+        # Pushover always attempts fiber sections (nonlinear).  Check
+        # whether any section overrides the base to_fiber_patches —
+        # if none do, fall back to elastic sections.
+        # Note: brace_truss is orthogonal — braces use Hysteretic truss
+        # elements while beams/columns can still use fiber sections.
+        _use_fiber = True
+        from ..model.sap_data import Section as _BaseSection, ShellSection
+        for sec in self.mesh_model.sections.values():
+            if isinstance(sec, ShellSection):
+                continue
+            try:
+                sec.to_fiber_patches(mat_tag=1)
+            except NotImplementedError:
                 _use_fiber = False
+                break
 
         if not _use_fiber:
             overrides: Dict[str, Any] = {
@@ -2915,9 +2933,14 @@ class AnalysisBuilder:
             self._compute_fallback_masses()
 
         # ── Gravity analysis ─────────────────────────────────────
+        # Create loads directly (domain was just rebuilt by
+        # rebuild_with_fiber_sections above).  Avoid passing
+        # pattern_scales to run_static_analysis, which would trigger
+        # a second build_domain() without fiber overrides, replacing
+        # dispBeamColumn elements with elasticBeamColumn.
+        self.create_loads(pattern_scales=gravity_patterns)
         grav_results = self.run_static_analysis(
             extract_reactions=True,
-            pattern_scales=gravity_patterns,
         )
         grav_disp = (
             grav_results.get('nodal_displacements', {})
