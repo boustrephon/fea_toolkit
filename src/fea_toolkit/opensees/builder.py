@@ -5465,6 +5465,48 @@ class OpenSeesBuilder:
         return results
 
     # =========================================================================
+    # Load equilibrium check
+    # =========================================================================
+
+    def check_load_equilibrium(self) -> "pd.DataFrame":
+        """Check equilibrium between applied loads and reactions.
+
+        Delegates to :meth:`AnalysisBuilder.check_load_equilibrium`
+        when the two-stage path is active.  Falls back to a manual
+        equilibrium check in the legacy path.
+
+        Returns:
+            ``pandas.DataFrame`` with one row per load pattern.
+        """
+        _analysis = getattr(self, '_analysis', None)
+        if _analysis is not None:
+            return _analysis.check_load_equilibrium()
+
+        # Legacy fallback
+        import pandas as pd
+        rows = []
+        fu = self.config.get('force_unit', '?')
+        for pname in sorted(self.model.load_patterns, key=str.casefold):
+            try:
+                results = self.run_static_analysis(
+                    extract_reactions=True,
+                    pattern_scales={pname: 1.0},
+                )
+                R = results.get('summed_reactions', {})
+            except Exception:
+                R = {}
+            rx = R.get('fx', 0.0)
+            ry = R.get('fy', 0.0)
+            rz = R.get('fz', 0.0)
+            rows.append({
+                'Load Pattern': pname,
+                f'Reaction Fx ({fu})': round(rx, 1),
+                f'Reaction Fy ({fu})': round(ry, 1),
+                f'Reaction Fz ({fu})': round(rz, 1),
+            })
+        return pd.DataFrame(rows)
+
+    # =========================================================================
     # Results export
     # =========================================================================
     def export_results(self,
