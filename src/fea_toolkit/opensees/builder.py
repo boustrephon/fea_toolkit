@@ -5190,14 +5190,15 @@ class OpenSeesBuilder:
                 pattern_scales=pattern_scales,
             )
             # Recompute summed_reactions (Builder-specific post-processing)
-            if extract_reactions and results and 'nodal_reactions' in results and results['nodal_reactions']:
+            if extract_reactions and results and 'reactions' in results and results['reactions']:
                 cx = sum(node.x for node in self.model.nodes.values()) / len(self.model.nodes)
                 cy = sum(node.y for node in self.model.nodes.values()) / len(self.model.nodes)
                 z_base = min(node.z for node in self.model.nodes.values())
                 summed = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0, 'mx': 0.0, 'my': 0.0, 'mz': 0.0}
-                for nid, r in results['nodal_reactions'].items():
+                for nid, r in results['reactions'].items():
                     node = self.model.nodes[nid]
-                    fx, fy, fz, mx, my, mz = r
+                    fx = r.get('fx', 0.0); fy = r.get('fy', 0.0); fz = r.get('fz', 0.0)
+                    mx = r.get('mx', 0.0); my = r.get('my', 0.0); mz = r.get('mz', 0.0)
                     summed['fx'] += fx; summed['fy'] += fy; summed['fz'] += fz
                     summed['mx'] += mx; summed['my'] += my; summed['mz'] += mz
                     dx = node.x - cx; dy = node.y - cy; dz = node.z - z_base

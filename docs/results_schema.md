@@ -127,9 +127,6 @@ Sorted by SAP node ID (see ID conventions above).
 ### Modal analysis results
 
 | Array | Shape | dtype | Description |
-### Modal analysis results
-
-| Array | Shape | dtype | Description |
 |---|---|---|---|
 | `modal/period` | `(N_mode,)` | `float` | Natural period per mode (s) |
 | `modal/frequency` | `(N_mode,)` | `float` | Natural frequency per mode (Hz) |
@@ -171,6 +168,21 @@ column *j* is the eigenvector for mode *j* (0‑based) and row *i* matches
 | `rs/v_cqc_y` | `()` | `float` | CQC‑combined base shear Y (kN) |
 | `rs/v_srss_x` | `()` | `float` | SRSS‑combined base shear X (kN) |
 | `rs/v_srss_y` | `()` | `float` | SRSS‑combined base shear Y (kN) |
+| `rs/elem_sap_id` | `(N_elem,)` | `str` | SAP2000 frame element ID |
+| `rs/elem_z_bot` | `(N_elem,)` | `float` | Z‑coordinate of element bottom node (m) |
+| `rs/elem_z_mid` | `(N_elem,)` | `float` | Z‑coordinate of element mid‑height (m) |
+| `rs/elem_Vy_i` | `(N_elem,)` | `float` | J‑end local Vy (kN) |
+| `rs/elem_Vz_i` | `(N_elem,)` | `float` | I‑end local Vz (kN) |
+| `rs/elem_My_i` | `(N_elem,)` | `float` | I‑end local My (kN·m) |
+| `rs/elem_Mz_i` | `(N_elem,)` | `float` | I‑end local Mz (kN·m) |
+| `rs/elem_Vy_j` | `(N_elem,)` | `float` | J‑end local Vy (kN) |
+| `rs/elem_Vz_j` | `(N_elem,)` | `float` | J‑end local Vz (kN) |
+| `rs/elem_My_j` | `(N_elem,)` | `float` | J‑end local My (kN·m) |
+| `rs/elem_Mz_j` | `(N_elem,)` | `float` | J‑end local Mz (kN·m) |
+| `rs/node_tag` | `(N_node,)` | `int` | SAP2000 node tag |
+| `rs/node_dx` | `(N_node,)` | `float` | CQC‑combined nodal displacement X (m) |
+| `rs/node_dy` | `(N_node,)` | `float` | CQC‑combined nodal displacement Y (m) |
+| `rs/node_dz` | `(N_node,)` | `float` | CQC‑combined nodal displacement Z (m) |
 
 ### Metadata
 
