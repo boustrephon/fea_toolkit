@@ -1296,6 +1296,7 @@ class AnalysisBuilder:
         _sw_frame_loads: Dict[str, list] = {}  # pname → [(node_tag, fz), ...]
         sw_factor = self.config.get('self_weight_factor', 1.0)
         if sw_factor > 0:
+            # ── Frame element self-weight ────────────────────────
             for eid, elem in elements.items():
                 if getattr(elem, 'inactive', False):
                     continue
@@ -1317,13 +1318,45 @@ class AnalysisBuilder:
                 w = _A * mat.unit_weight * sw_factor
                 total_w = w * L
                 self._sw_load_totals[eid] = total_w
-                # Half-weight to each end node (use node tags, not element tags)
+                # Half-weight to each end node
                 nd_i = self.mesh_model.nodes.get(elem.node_i)
                 nd_j = self.mesh_model.nodes.get(elem.node_j)
                 if nd_i is not None:
                     _sw_frame_loads.setdefault('Self weight', []).append((nd_i.node_tag, -total_w * 0.5))
                 if nd_j is not None:
                     _sw_frame_loads.setdefault('Self weight', []).append((nd_j.node_tag, -total_w * 0.5))
+
+            # ── Area element self-weight ─────────────────────────
+            from ..model.sap_data import ShellSection as _ShellSec
+            for aid, area in self.mesh_model.area_elements.items():
+                if getattr(area, 'inactive', False):
+                    continue
+                sec_name = self.mesh_model.area_assignments.get(aid, '')
+                sec = self.mesh_model.sections.get(sec_name)
+                if sec is None or not isinstance(sec, _ShellSec):
+                    continue
+                mat = self.mesh_model.materials.get(sec.material)
+                if mat is None or mat.unit_weight == 0:
+                    continue
+                t = getattr(sec, 'thickness', 0.0)
+                if t <= 0:
+                    continue
+                # Compute polygon area in 3D via triangle fan
+                poly = [self.mesh_model.nodes.get(nid) for nid in area.node_ids]
+                poly = [nd for nd in poly if nd is not None]
+                if len(poly) < 3:
+                    continue
+                area_3d = 0.0
+                v0 = np.array([poly[0].x, poly[0].y, poly[0].z])
+                for k in range(1, len(poly) - 1):
+                    v1 = np.array([poly[k].x, poly[k].y, poly[k].z])
+                    v2 = np.array([poly[k + 1].x, poly[k + 1].y, poly[k + 1].z])
+                    area_3d += 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0))
+                total_w = area_3d * t * mat.unit_weight * sw_factor
+                n_corners = len(poly)
+                for nd in poly:
+                    _sw_frame_loads.setdefault('Self weight', []).append(
+                        (nd.node_tag, -total_w / n_corners))
 
         # Pattern loop — deterministic tag generation
         all_patterns = set()
