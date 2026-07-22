@@ -4227,17 +4227,15 @@ class TestTwoStageBuild:
             b.build()
             b.compute_seismic_masses(g=9.81)
 
-            # ── Test 1: auto-included "Self weight" via DEAD-only ─
+            # ── Test 1: DEAD pattern (swf=1) includes self-weight ─
             result = b.run_static_analysis(pattern_scales={"DEAD": 1.0})
 
-            # Self-weight should be tracked
-            assert "Self weight" in b.load_totals, (
-                f"Expected 'Self weight' in load_totals, "
-                f"got {list(b.load_totals.keys())}"
-            )
-            sw_total = b.load_totals["Self weight"]
-            assert sw_total > 0, (
-                f"Self-weight total should be > 0, got {sw_total}"
+            # Self-weight applied under DEAD — check result load_totals
+            rs_lt = getattr(b._analysis, 'load_totals', {}) if hasattr(b, '_analysis') else {}
+            dead_total = rs_lt.get("DEAD", 0.0)
+            assert abs(dead_total) > 0, (
+                f"DEAD total should be > 0 (includes self-weight), "
+                f"got {dead_total}, keys={list(rs_lt.keys())}"
             )
 
             # Displacements should be non-zero
@@ -4251,8 +4249,11 @@ class TestTwoStageBuild:
                 f"got max|d|={max_d}"
             )
 
-            # ── Test 2: explicit-only "Self weight" in pattern_scales ──
+            # ── Test 2: pattern without swf ÔåÆ zero self-weight ──
             ops.wipe()
+            from fea_toolkit.model.sap_data import LoadPattern
+            md.load_patterns["LL"] = LoadPattern(
+                name="LL", pattern_type="Live", self_weight_factor=0)
             b2 = OpenSeesBuilder(md, {
                 "use_preprocessor": True,
                 "split_elements": True,
@@ -4262,26 +4263,17 @@ class TestTwoStageBuild:
             b2.build()
             b2.compute_seismic_masses(g=9.81)
             result2 = b2.run_static_analysis(
-                pattern_scales={"Self weight": 1.0}
+                pattern_scales={"LL": 1.0}
             )
 
-            assert "Self weight" in b2.load_totals, (
-                f"Expected 'Self weight' in load_totals with "
-                f"explicit pattern, got {list(b2.load_totals.keys())}"
-            )
-            sw_total2 = b2.load_totals["Self weight"]
-            assert sw_total2 > 0, (
-                f"Self-weight total with explicit pattern should "
-                f"be > 0, got {sw_total2}"
-            )
             nd2 = result2.get("nodal_displacements", {})
             max_d2 = max(
                 (abs(v) for vals in nd2.values() for v in vals),
                 default=0.0,
             )
-            assert max_d2 > 0, (
-                f"Expected non-zero displacement with explicit "
-                f"self-weight, got max|d|={max_d2}"
+            assert max_d2 == 0, (
+                f"Expected zero displacement from pattern with swf=0, "
+                f"got max|d|={max_d2}"
             )
         finally:
             ops.wipe()
