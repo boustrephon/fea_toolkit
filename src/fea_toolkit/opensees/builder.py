@@ -5208,8 +5208,8 @@ class OpenSeesBuilder:
                 results['summed_reactions'] = summed
             # opstool export
             if OPSTOOL_AVAILABLE and odb_tag > 0:
-                opst.post.CreateODB(odb_tag=1)
-                opst.post.save_model_data(odb_tag=1)
+                opst.post.CreateODB(odb_tag=odb_tag)
+                opst.post.save_model_data(odb_tag=odb_tag)
             return results
         # Rebuild with different patterns if requested
         if pattern_scales is not None:
@@ -5294,9 +5294,9 @@ class OpenSeesBuilder:
 
         # --- Nodal displacements ---
         if OPSTOOL_AVAILABLE and odb_tag > 0:
-            opst.post.CreateODB(odb_tag=1)
-            opst.post.save_model_data(odb_tag=1)
-            nodes_df = opst.post.get_model_data(data_type='Nodal', odb_tag=1)
+            opst.post.CreateODB(odb_tag=odb_tag)
+            opst.post.save_model_data(odb_tag=odb_tag)
+            nodes_df = opst.post.get_model_data(data_type='Nodal', odb_tag=odb_tag)
             if nodes_df is not None:
                 results['nodal_displacements'] = nodes_df.to_dict()
         else:

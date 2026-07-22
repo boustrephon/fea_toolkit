@@ -967,18 +967,19 @@ class AnalysisBuilder:
                     Fy = getattr(mat, 'Fy', 0.0) or 2.5e8
                     ops.uniaxialMaterial('Steel01', mat_tag, Fy, E_mod, 0.01)
 
-                # Create fiber section
-                ops.section('Fiber', tag, '-GJ', _J)
+                # Create fiber section (after to_fiber_patches succeeds)
                 try:
                     entries = sec.to_fiber_patches(mat_tag=mat_tag, nfy=8, nfz=4)
                 except NotImplementedError:
-                    # Fall back to elastic
+                    # Fall back to elastic — no Fiber section was created,
+                    # so no tag collision with the Elastic replacement.
                     if self.config.get('verbose', False):
                         print(f"  Section {tag} ({sec.name}): fiber not supported, "
                               f"falling back to elastic")
                     ops.section('Elastic', tag, E_mod, _A, _I33, _I22, G_mod, _J)
                     return
 
+                ops.section('Fiber', tag, '-GJ', _J)
                 for entry in entries:
                     if entry[0] in ('rect', 'circ', 'quad'):
                         ops.patch(*entry)
