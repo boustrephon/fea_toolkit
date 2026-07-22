@@ -171,7 +171,7 @@ column *j* is the eigenvector for mode *j* (0‑based) and row *i* matches
 | `rs/elem_sap_id` | `(N_elem,)` | `str` | SAP2000 frame element ID |
 | `rs/elem_z_bot` | `(N_elem,)` | `float` | Z‑coordinate of element bottom node (m) |
 | `rs/elem_z_mid` | `(N_elem,)` | `float` | Z‑coordinate of element mid‑height (m) |
-| `rs/elem_Vy_i` | `(N_elem,)` | `float` | J‑end local Vy (kN) |
+| `rs/elem_Vy_i` | `(N_elem,)` | `float` | I‑end local Vy (kN) |
 | `rs/elem_Vz_i` | `(N_elem,)` | `float` | I‑end local Vz (kN) |
 | `rs/elem_My_i` | `(N_elem,)` | `float` | I‑end local My (kN·m) |
 | `rs/elem_Mz_i` | `(N_elem,)` | `float` | I‑end local Mz (kN·m) |
@@ -179,7 +179,7 @@ column *j* is the eigenvector for mode *j* (0‑based) and row *i* matches
 | `rs/elem_Vz_j` | `(N_elem,)` | `float` | J‑end local Vz (kN) |
 | `rs/elem_My_j` | `(N_elem,)` | `float` | J‑end local My (kN·m) |
 | `rs/elem_Mz_j` | `(N_elem,)` | `float` | J‑end local Mz (kN·m) |
-| `rs/node_tag` | `(N_node,)` | `int` | SAP2000 node tag |
+| `rs/node_tag` | `(N_node,)` | `int` | OpenSees node tag (see ID conventions) |
 | `rs/node_dx` | `(N_node,)` | `float` | CQC‑combined nodal displacement X (m) |
 | `rs/node_dy` | `(N_node,)` | `float` | CQC‑combined nodal displacement Y (m) |
 | `rs/node_dz` | `(N_node,)` | `float` | CQC‑combined nodal displacement Z (m) |
