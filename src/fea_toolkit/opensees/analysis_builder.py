@@ -1292,71 +1292,66 @@ class AnalysisBuilder:
         self._sw_load_totals = {}
         self._gravity_load_totals = {}
 
-        # Self-weight computation (applied downstream when pattern activated)
-        _sw_frame_loads: Dict[str, list] = {}  # pname → [(node_tag, fz), ...]
-        sw_factor = self.config.get('self_weight_factor', 1.0)
-        if sw_factor > 0:
-            # ── Frame element self-weight ────────────────────────
-            for eid, elem in elements.items():
-                if getattr(elem, 'inactive', False):
-                    continue
-                sec_name = assignments.get(eid, '')
-                sec = self.mesh_model.sections.get(sec_name)
-                if sec is None:
-                    continue
-                mat = self.mesh_model.materials.get(sec.material)
-                if mat is None or mat.unit_weight == 0:
-                    continue
-                _A = getattr(sec, 'A', 0.0)
-                if _A <= 0:
-                    continue
-                ni = self.mesh_model.nodes.get(elem.node_i)
-                nj = self.mesh_model.nodes.get(elem.node_j)
-                if ni is None or nj is None:
-                    continue
-                L = math.sqrt((nj.x - ni.x)**2 + (nj.y - ni.y)**2 + (nj.z - ni.z)**2)
-                w = _A * mat.unit_weight * sw_factor
-                total_w = w * L
-                self._sw_load_totals[eid] = total_w
-                # Half-weight to each end node
-                nd_i = self.mesh_model.nodes.get(elem.node_i)
-                nd_j = self.mesh_model.nodes.get(elem.node_j)
-                if nd_i is not None:
-                    _sw_frame_loads.setdefault('Self weight', []).append((nd_i.node_tag, -total_w * 0.5))
-                if nd_j is not None:
-                    _sw_frame_loads.setdefault('Self weight', []).append((nd_j.node_tag, -total_w * 0.5))
+        # ── Pre-compute frame + area self-weight per-node ────────
+        # Stored as a list of (node_tag, fz) tuples; applied per-pattern
+        # during the pattern loop below if the pattern's swf > 0.
+        _sw_node_loads: List[Tuple[int, float]] = []
+        for eid, elem in elements.items():
+            if getattr(elem, 'inactive', False):
+                continue
+            sec_name = assignments.get(eid, '')
+            sec = self.mesh_model.sections.get(sec_name)
+            if sec is None:
+                continue
+            mat = self.mesh_model.materials.get(sec.material)
+            if mat is None or mat.unit_weight == 0:
+                continue
+            _A = getattr(sec, 'A', 0.0)
+            if _A <= 0:
+                continue
+            ni = self.mesh_model.nodes.get(elem.node_i)
+            nj = self.mesh_model.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            L = math.sqrt((nj.x - ni.x)**2 + (nj.y - ni.y)**2 + (nj.z - ni.z)**2)
+            total_w = _A * mat.unit_weight * L
+            self._sw_load_totals[eid] = total_w
+            nd_i = self.mesh_model.nodes.get(elem.node_i)
+            nd_j = self.mesh_model.nodes.get(elem.node_j)
+            if nd_i is not None:
+                _sw_node_loads.append((nd_i.node_tag, -total_w * 0.5))
+            if nd_j is not None:
+                _sw_node_loads.append((nd_j.node_tag, -total_w * 0.5))
 
-            # ── Area element self-weight ─────────────────────────
-            from ..model.sap_data import ShellSection as _ShellSec
-            for aid, area in self.mesh_model.area_elements.items():
-                if getattr(area, 'inactive', False):
-                    continue
-                sec_name = self.mesh_model.area_assignments.get(aid, '')
-                sec = self.mesh_model.sections.get(sec_name)
-                if sec is None or not isinstance(sec, _ShellSec):
-                    continue
-                mat = self.mesh_model.materials.get(sec.material)
-                if mat is None or mat.unit_weight == 0:
-                    continue
-                t = getattr(sec, 'thickness', 0.0)
-                if t <= 0:
-                    continue
-                # Compute polygon area in 3D via triangle fan
-                poly = [self.mesh_model.nodes.get(nid) for nid in area.node_ids]
-                poly = [nd for nd in poly if nd is not None]
-                if len(poly) < 3:
-                    continue
-                area_3d = 0.0
-                v0 = np.array([poly[0].x, poly[0].y, poly[0].z])
-                for k in range(1, len(poly) - 1):
-                    v1 = np.array([poly[k].x, poly[k].y, poly[k].z])
-                    v2 = np.array([poly[k + 1].x, poly[k + 1].y, poly[k + 1].z])
-                    area_3d += 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0))
-                total_w = area_3d * t * mat.unit_weight * sw_factor
-                n_corners = len(poly)
-                for nd in poly:
-                    _sw_frame_loads.setdefault('Self weight', []).append(
-                        (nd.node_tag, -total_w / n_corners))
+        # ── Area element self-weight ─────────────────────────────
+        from ..model.sap_data import ShellSection as _ShellSec
+        for aid, area in self.mesh_model.area_elements.items():
+            if getattr(area, 'inactive', False):
+                continue
+            sec_name = self.mesh_model.area_assignments.get(aid, '')
+            sec = self.mesh_model.sections.get(sec_name)
+            if sec is None or not isinstance(sec, _ShellSec):
+                continue
+            mat = self.mesh_model.materials.get(sec.material)
+            if mat is None or mat.unit_weight == 0:
+                continue
+            t = getattr(sec, 'thickness', 0.0)
+            if t <= 0:
+                continue
+            poly = [self.mesh_model.nodes.get(nid) for nid in area.node_ids]
+            poly = [nd for nd in poly if nd is not None]
+            if len(poly) < 3:
+                continue
+            area_3d = 0.0
+            v0 = np.array([poly[0].x, poly[0].y, poly[0].z])
+            for k in range(1, len(poly) - 1):
+                v1 = np.array([poly[k].x, poly[k].y, poly[k].z])
+                v2 = np.array([poly[k + 1].x, poly[k + 1].y, poly[k + 1].z])
+                area_3d += 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0))
+            total_w = area_3d * t * mat.unit_weight
+            n_corners = len(poly)
+            for nd in poly:
+                _sw_node_loads.append((nd.node_tag, -total_w / n_corners))
 
         # Pattern loop — deterministic tag generation
         all_patterns = set()
@@ -1370,7 +1365,11 @@ class AnalysisBuilder:
             all_patterns.add(gl.pattern)
         for agl in getattr(self.mesh_model, 'area_gravity_loads', []):
             all_patterns.add(agl.pattern)
-        all_patterns.add('Self weight')
+        # Include patterns with self_weight_factor > 0 so their self-weight
+        # can be activated even when they have no explicit load entries.
+        for pn, lp in self.mesh_model.load_patterns.items():
+            if abs(getattr(lp, 'self_weight_factor', 0.0)) > 1e-12:
+                all_patterns.add(pn)
         # Assign deterministic tags based on sorted pattern names
         _pat_tags = {
             pname: (1000 + i, 100 + i)
@@ -1447,53 +1446,84 @@ class AnalysisBuilder:
                 tag = self.frame_tag_map.get(ld.frame_id)
                 if tag is None:
                     continue
+                # Look up the unsplit (original) frame element to get
+                # its local axes for projecting the global direction.
+                elem = self.mesh_model.frame_elements.get(ld.frame_id)
+                if elem is None or getattr(elem, 'inactive', False):
+                    continue
+                try:
+                    vx, vy, vz = self.get_local_axes(elem)
+                except Exception:
+                    continue
+                # Determine the global direction vector
+                if ld.direction == 'Gravity':
+                    gdir = np.array([0.0, 0.0, -1.0])
+                elif ld.direction == 'X':
+                    gdir = np.array([1.0, 0.0, 0.0])
+                elif ld.direction == 'Y':
+                    gdir = np.array([0.0, 1.0, 0.0])
+                elif ld.direction == 'Z':
+                    gdir = np.array([0.0, 0.0, 1.0])
+                elif ld.direction == 'LocalX':
+                    gdir = vx
+                elif ld.direction == 'LocalY':
+                    gdir = vy
+                elif ld.direction == 'LocalZ':
+                    gdir = vz
+                else:
+                    gdir = np.array([0.0, 0.0, -1.0])
                 wa = ld.val_a * scale
                 wb = ld.val_b * scale
-                ops.eleLoad('-ele', tag, '-type', '-beamUniform', 0.0, -wa, 0.0, ld.rdist_a, ld.rdist_b)
-                load_total += abs(wa) * abs(ld.rdist_b - ld.rdist_a)
+                a_overL = max(0.0, min(1.0, ld.rdist_a))
+                b_overL = max(0.0, min(1.0, ld.rdist_b))
+                # Project global direction onto local axes
+                wx_a = wa * np.dot(gdir, vx)
+                wy_a = wa * np.dot(gdir, vy)
+                wz_a = wa * np.dot(gdir, vz)
+                wx_b = wb * np.dot(gdir, vx)
+                wy_b = wb * np.dot(gdir, vy)
+                wz_b = wb * np.dot(gdir, vz)
+                # Apply using the same approach as the legacy Builder
+                is_uniform = abs(wa - wb) < 1e-6
+                is_full_span = abs(a_overL) < 1e-12 and abs(b_overL - 1.0) < 1e-12
+                if is_uniform and is_full_span:
+                    ops.eleLoad('-ele', tag, '-type', '-beamUniform',
+                                wy_a, wz_a, wx_a)
+                elif is_uniform:
+                    ops.eleLoad('-ele', tag, '-type', '-beamUniform',
+                                wy_a, wz_a, wx_a, a_overL, b_overL)
+                else:
+                    # Non-uniform → decompose into partial-span segments
+                    N = 4
+                    span_frac = b_overL - a_overL
+                    for i in range(N):
+                        seg_a = a_overL + i * span_frac / N
+                        seg_b = a_overL + (i + 1) * span_frac / N
+                        xi = (i + 0.5) / N
+                        wy_mid = wy_a + (wy_b - wy_a) * xi
+                        wz_mid = wz_a + (wz_b - wz_a) * xi
+                        wx_mid = wx_a + (wx_b - wx_a) * xi
+                        ops.eleLoad('-ele', tag, '-type', '-beamUniform',
+                                    wy_mid, wz_mid, wx_mid, seg_a, seg_b)
+                load_total += abs(wa) * abs(b_overL - a_overL)
+
+            # ── Self-weight for this pattern ────────────────────────
+            # Apply if the pattern has self_weight_factor > 0 (e.g. DEAD swf=1).
+            # Look up the pattern's swf from MeshModel load_patterns (passed
+            # through from SAP2000 by the Preprocessor).
+            _lp = self.mesh_model.load_patterns.get(pname)
+            swf = getattr(_lp, 'self_weight_factor', 0.0) if _lp else 0.0
+            if abs(swf) > 1e-12:
+                sw_scale = swf * scale
+                sw_total = 0.0
+                _sw_fz_total = 0.0
+                for node_tag, fz in _sw_node_loads:
+                    ops.load(node_tag, 0.0, 0.0, fz * sw_scale, 0.0, 0.0, 0.0)
+                    sw_total += abs(fz * sw_scale)
+                    _sw_fz_total += fz * sw_scale
+                load_total += sw_total
 
             self.load_totals[pname] = load_total
-
-        # Joint loads
-        for jl in getattr(self.mesh_model, 'joint_loads', []):
-            pname = jl.pattern
-            if pattern_scales is not None and pname not in pattern_scales:
-                continue
-            if pname not in patterns_created:
-                scale = pattern_scales.get(pname, 1.0) if pattern_scales else 1.0
-                ts_tag, ptag = _pat_tags.get(pname, (1000, 100))
-                ops.timeSeries('Linear', ts_tag)
-                ops.pattern('Plain', ptag, ts_tag)
-                patterns_created.add(pname)
-            nd = self.mesh_model.nodes.get(jl.node_id)
-            if nd is None:
-                continue
-            ops.load(nd.node_tag, jl.fx, jl.fy, jl.fz, jl.mx, jl.my, jl.mz)
-
-        # ── Self-weight (auto-included when any pattern is active) ──
-        if _sw_frame_loads:
-            sw_pname = 'Self weight'
-            if pattern_scales is not None:
-                if sw_pname in pattern_scales:
-                    scale = pattern_scales[sw_pname]
-                else:
-                    scale = 1.0  # auto-include with default factor
-            else:
-                # pattern_scales=None means apply all patterns with factor 1.0
-                scale = 1.0
-            sw_scale = abs(scale)
-            if sw_scale > 1e-12:
-                # Create pattern if not yet created
-                if sw_pname not in patterns_created:
-                    ts_tag, ptag = _pat_tags.get(sw_pname, (1000, 100))
-                    ops.timeSeries('Linear', ts_tag)
-                    ops.pattern('Plain', ptag, ts_tag)
-                    patterns_created.add(sw_pname)
-                sw_total = 0.0
-                for node_tag, fz in _sw_frame_loads.get(sw_pname, []):
-                    ops.load(node_tag, 0.0, 0.0, fz * scale, 0.0, 0.0, 0.0)
-                    sw_total += abs(fz * scale)
-                self.load_totals[sw_pname] = sw_total
 
         # ── Frame gravity loads (explicit multipliers on self-weight) ──
         for gl in getattr(self.mesh_model, 'frame_gravity_loads', []):
@@ -1540,7 +1570,6 @@ class AnalysisBuilder:
             self._gravity_load_totals[pname]['fx'] += fx * 2
             self._gravity_load_totals[pname]['fy'] += fy * 2
             self._gravity_load_totals[pname]['fz'] += fz * 2
-
         # ── Area gravity loads (explicit multipliers) ────────────
         for agl in getattr(self.mesh_model, 'area_gravity_loads', []):
             pname = agl.pattern
@@ -2288,6 +2317,38 @@ class AnalysisBuilder:
         Performs mode‑by‑mode RS analysis using OpenSees'
         ``responseSpectrumAnalysis``, then combines with CQC.
 
+        **How base reactions are computed**
+
+        ``ops.responseSpectrumAnalysis(... '-mode', mode)`` sets the
+        modal displacement field for a single mode on the domain (via
+        ``node->setTrialDisp()``).  After ``commitDomain()``, element
+        internal forces are consistent with those displacements.  We then
+        query ``ops.eleResponse(eid, 'forces')`` which returns **global
+        element‑end forces** ``[Fx, Fy, Fz, Mx, My, Mz]`` at the I-end
+        then J-end.
+
+        For each base-connected element we extract the base-end forces
+        and accumulate into a per-mode 6-DoF reaction vector.  The
+        element-end moments include column bending directly, but the
+        **axial force lever‑arm** (Fz from one column × distance to the
+        centroid of another) is a structural‑level effect not present in
+        individual element stiffness outputs.  We add it here:
+
+        ``mx += Mx_direct + Fz·dy − Fy·dz``
+        ``my += My_direct + Fx·dz − Fz·dx``
+
+        using the **fixed geometric centroid** (bounding-box midpoint
+        ``(min+max)/2`` of all nodes).  This fixed reference is the same
+        as :func:`~fea_toolkit.utils.sum_reactions_with_overturning`
+        uses for static lateral loads — ensuring consistent moment
+        origins across all analysis types.
+
+        .. note::
+           A fixed reference point is **required** for CQC combination:
+           if each mode used its own Fz-weighted centroid, the per-mode
+           moments would reference different points and CQC would be
+           physically invalid.
+
         Args:
             num_modes: Number of modes to include.
             modal_periods: Natural periods of each mode (s).
@@ -2299,9 +2360,15 @@ class AnalysisBuilder:
             print_results: If True, print a summary table.
 
         Returns:
-            Dictionary with ``modal_base_shear``, ``modal_base_moment``,
-            ``base_shear_cqc``, ``base_shear_srss``, ``base_moment_cqc``,
-            ``base_moment_srss``, ``modal_periods``.
+            Dictionary with:
+            - ``modal_base_shear`` / ``modal_base_moment`` (scalar, backward compat)
+            - ``base_shear_cqc`` / ``base_shear_srss`` / ``base_moment_cqc`` / ``base_moment_srss``
+            - ``modal_periods``
+            - ``modal_base_reactions`` (list of 6-DoF dicts per mode)
+            - ``base_reactions_cqc`` / ``base_reactions_srss`` (6-DoF combined)
+              where Mx/My include overturning from Fz × lever-arm about
+              the fixed geometric centroid (bounding-box midpoint).
+              This fixed reference ensures CQC validity across modes.
         """
         if self.config.get('verbose'):
             print(f"Running response spectrum analysis (dir={direction})...")
@@ -2349,33 +2416,89 @@ class AnalysisBuilder:
             elif elem.node_j in base_nodes and elem.node_i not in base_nodes:
                 base_elements.append((ops_tag, 'j'))
 
+        # ── Pre-compute fixed reference point for overturning moment ──
+        # Compute from base (support) nodes only — the centre of the base
+        # footprint. This ensures a consistent reference across all modes
+        # for valid CQC combination.  Same approach as
+        # sum_reactions_with_overturning in utils.py.
+        _base_nds = [self.mesh_model.nodes[nid] for nid in base_nodes
+                     if nid in self.mesh_model.nodes]
+        if _base_nds:
+            _xs = [n.x for n in _base_nds]
+            _ys = [n.y for n in _base_nds]
+            _cx = (min(_xs) + max(_xs)) * 0.5
+            _cy = (min(_ys) + max(_ys)) * 0.5
+            _z_base = sum(n.z for n in _base_nds) / len(_base_nds)
+        else:
+            _cx = _cy = _z_base = 0.0
+
+        # Pre-compute base-element node coordinates for lever-arm
+        _base_elem_coords = []
+        for eid, end in base_elements:
+            elem = elements.get(eid)
+            if elem is None:
+                # Resolve by tag
+                for _e in elements.values():
+                    if _e.elem_tag == eid:
+                        elem = _e
+                        break
+            if elem is None:
+                continue
+            nid = elem.node_i if end == 'i' else elem.node_j
+            nd = self.mesh_model.nodes.get(nid)
+            if nd is None:
+                continue
+            _base_elem_coords.append((eid, end, nd.x, nd.y, nd.z))
+
+        modal_base_reactions = []
         for mode in range(1, num_modes + 1):
             ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, '-mode', mode)
 
-            v_base = 0.0
-            m_base = 0.0
-            dof_map = {'X': (0, 4), 'Y': (1, 5), 'Z': (2, 3)}
-            f_idx, m_idx = dof_map[direction]
-
-            for eid, end in base_elements:
+            rxn = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0,
+                   'mx': 0.0, 'my': 0.0, 'mz': 0.0}
+            for eid, end, nx, ny, nz in _base_elem_coords:
                 try:
                     forces = ops.eleResponse(eid, 'forces')
                 except Exception:
                     continue
                 if end == 'i':
-                    v_base += forces[f_idx]
-                    m_base += forces[m_idx]
+                    fx, fy, fz, mx, my, mz = forces[0], forces[1], forces[2], forces[3], forces[4], forces[5]
                 else:
-                    v_base += forces[f_idx + 6]
-                    m_base += forces[m_idx + 6]
+                    fx, fy, fz, mx, my, mz = forces[6], forces[7], forces[8], forces[9], forces[10], forces[11]
 
-            modal_base_shear.append(v_base)
-            modal_base_moment.append(m_base)
+                rxn['fx'] += fx
+                rxn['fy'] += fy
+                rxn['fz'] += fz
+                # Overturning: direct moment + force × lever-arm about fixed reference
+                dx = nx - _cx
+                dy = ny - _cy
+                dz = nz - _z_base
+                rxn['mx'] += mx + fz * dy - fy * dz
+                rxn['my'] += my + fx * dz - fz * dx
+                rxn['mz'] += mz + fy * dx - fx * dy
 
-        base_shear_cqc = cqc_combine(modal_base_shear, omega, damp_ratios)
-        base_shear_srss = math.sqrt(sum(v * v for v in modal_base_shear))
-        base_moment_cqc = cqc_combine(modal_base_moment, omega, damp_ratios)
-        base_moment_srss = math.sqrt(sum(m * m for m in modal_base_moment))
+            modal_base_reactions.append(rxn)
+
+        # ── CQC / SRSS per component ───────────────────────────
+        dof_map = {'X': (0, 4), 'Y': (1, 5), 'Z': (2, 3)}
+        f_idx, m_idx = dof_map[direction]
+        comp_order = ['fx', 'fy', 'fz', 'mx', 'my', 'mz']
+
+        # Keep scalar arrays for backward compat
+        modal_base_shear = [r[comp_order[f_idx]] for r in modal_base_reactions]
+        modal_base_moment = [r[comp_order[m_idx]] for r in modal_base_reactions]
+
+        base_reactions_cqc = {}
+        base_reactions_srss = {}
+        for comp in comp_order:
+            vals = [r[comp] for r in modal_base_reactions]
+            base_reactions_cqc[comp] = cqc_combine(vals, omega, damp_ratios)
+            base_reactions_srss[comp] = math.sqrt(sum(v * v for v in vals))
+
+        base_shear_cqc = base_reactions_cqc[comp_order[f_idx]]
+        base_shear_srss = base_reactions_srss[comp_order[f_idx]]
+        base_moment_cqc = base_reactions_cqc[comp_order[m_idx]]
+        base_moment_srss = base_reactions_srss[comp_order[m_idx]]
 
         result = {
             'modal_base_shear': modal_base_shear,
@@ -2385,6 +2508,10 @@ class AnalysisBuilder:
             'base_moment_cqc': base_moment_cqc,
             'base_moment_srss': base_moment_srss,
             'modal_periods': modal_periods,
+            # New: full 6-DoF base reactions per-mode and combined
+            'modal_base_reactions': modal_base_reactions,
+            'base_reactions_cqc': base_reactions_cqc,
+            'base_reactions_srss': base_reactions_srss,
         }
 
         if print_results:
@@ -2737,6 +2864,12 @@ class AnalysisBuilder:
         with that pattern alone and compares the applied load totals
         (from :attr:`load_totals`) against the summed reactions.
 
+        Reaction moments include the force × lever‑arm overturning
+        contribution via
+        :func:`~fea_toolkit.utils.sum_reactions_with_overturning`
+        (same fixed centroid approach used for RS analysis in
+        :meth:`run_response_spectrum_analysis`).
+
         Returns:
             A ``pandas.DataFrame`` with one row per pattern and
             columns for applied force, reaction force, and
@@ -2746,15 +2879,22 @@ class AnalysisBuilder:
         import pandas as pd
 
         rows: list = []
-        fu = self.config.get('force_unit', '?')
-        # Collect unique pattern names from all load sources in the MeshModel
-        _patterns: set = set()
-        for ld in self.mesh_model.frame_dist_loads:
-            _patterns.add(ld.pattern)
-        for jl in self.mesh_model.joint_loads:
-            _patterns.add(jl.pattern)
-        for agl in self.mesh_model.area_gravity_loads:
-            _patterns.add(agl.pattern)
+        fu = self.mesh_model.units.get('F', '?')
+        # Collect pattern names from the MeshModel's load_patterns dict
+        # (matching the legacy Builder which iterates self.model.load_patterns).
+        # Skip patterns with zero applied loads (e.g. SLX, SLY).
+        _patterns = set()
+        for pname, lp in self.mesh_model.load_patterns.items():
+            # Check for any loads associated with this pattern
+            has_loads = (
+                lp.self_weight_factor > 0
+                or any(ld.pattern == pname for ld in self.mesh_model.frame_dist_loads)
+                or any(ld.pattern == pname for ld in self.mesh_model.joint_loads)
+                or any(ld.pattern == pname for ld in self.mesh_model.area_gravity_loads)
+                or any(ld.pattern == pname for ld in self.mesh_model.edge_loads_from_areas)
+            )
+            if has_loads:
+                _patterns.add(pname)
         for pname in sorted(_patterns, key=str.casefold):
             result = self.run_static_analysis(
                 extract_reactions=True,
