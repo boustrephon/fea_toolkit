@@ -60,7 +60,6 @@ class AnalysisBuilder:
         self._offset_rigid_links: List[tuple] = list(mesh_model.offset_rigid_links)
         self._edge_constraint_method: Optional[str] = None
         self._saved_edge_constraints: List[tuple] = list(mesh_model.saved_edge_constraints)
-        self._rigid_link_elems: Dict[str, int] = {}
         self.edge_loads_from_areas: list = list(mesh_model.edge_loads_from_areas)
         self._base_z = mesh_model.base_z
 
@@ -1664,6 +1663,7 @@ class AnalysisBuilder:
         # Rebuild domain with new pattern scales if requested
         if pattern_scales is not None:
             self.build_domain()
+            self._reapply_edge_constraints()
             self.create_loads(pattern_scales=pattern_scales)
 
         test_type = self.config.get('solver_test_type', 'NormDispIncr')
