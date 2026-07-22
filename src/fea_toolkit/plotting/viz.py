@@ -1611,16 +1611,25 @@ def plot_force_diagram_3d(source, force_data=None, *,
         if force_data is None:
             print("force_data is required when source is a builder.")
             return None
+        # Hoist invariant builder/model/elements resolution
+        builder = source
+        model = (builder.model if hasattr(builder, 'model')
+                 else builder.mesh_model)
+        elements = (builder.split_elements if hasattr(builder, 'split_elements')
+                    and builder.split_elements else model.frame_elements)
+        # Build a {(ni_tag, nj_tag): elem_tag} lookup once
+        elem_by_node_pair: Dict[Tuple[int, int], int] = {}
+        for eid, elem in elements.items():
+            if getattr(elem, 'inactive', False):
+                continue
+            eni = model.nodes.get(elem.node_i)
+            enj = model.nodes.get(elem.node_j)
+            if eni is None or enj is None:
+                continue
+            elem_by_node_pair[(eni.node_tag, enj.node_tag)] = elem.elem_tag
+
         force_map = {}
         for idx, fr in enumerate(frames):
-            # Need to map frame to elem_tag — for builders we use the
-            # node tags to look up the element in the builder
-            builder = source
-            model = (builder.model if hasattr(builder, 'model')
-                     else builder.mesh_model)
-            elements = (builder.split_elements if hasattr(builder, 'split_elements')
-                        and builder.split_elements else model.frame_elements)
-            # Find element by node_i/node_j
             ni_tag = fr.get("ni_tag")
             nj_tag = fr.get("nj_tag")
             if ni_tag is None:
@@ -1634,19 +1643,7 @@ def plot_force_diagram_3d(source, force_data=None, *,
                 ni_tag = nd_i.node_tag
                 nj_tag = nd_j.node_tag
 
-            # Find element by node tags
-            target_tag = None
-            for eid, elem in elements.items():
-                if getattr(elem, 'inactive', False):
-                    continue
-                eni = model.nodes.get(elem.node_i)
-                enj = model.nodes.get(elem.node_j)
-                if eni is None or enj is None:
-                    continue
-                if eni.node_tag == ni_tag and enj.node_tag == nj_tag:
-                    target_tag = elem.elem_tag
-                    break
-
+            target_tag = elem_by_node_pair.get((ni_tag, nj_tag))
             if target_tag is not None and target_tag in force_data:
                 force_map[idx] = force_data[target_tag]
 
