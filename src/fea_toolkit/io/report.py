@@ -218,25 +218,43 @@ def load_pattern_totals(md) -> pd.DataFrame:
     })
     b.build()
     lt = getattr(b, "load_totals", {})
+
+    # Determine which patterns are referenced by LinStatic load cases
+    linstatic_patterns: set = set()
+    for cname, lc in md.load_cases.items():
+        if lc.case_type != "LinStatic":
+            continue
+        sd = lc.case_data.get("CASE - STATIC 1 - LOAD ASSIGNMENTS", [])
+        if isinstance(sd, list):
+            for ass in sd:
+                if "LoadName" in ass:
+                    linstatic_patterns.add(ass["LoadName"])
+        elif isinstance(sd, dict) and "LoadName" in sd:
+            linstatic_patterns.add(sd["LoadName"])
+
     rows = []
     fu = md.units.get("F", "?")
     for pname in sorted(lt, key=str.casefold):
+        if pname not in linstatic_patterns:
+            continue
         t = lt[pname]
         if isinstance(t, dict):
-            rows.append({
-                "Load Pattern": pname,
-                f"Fx ({fu})": round(t.get("fx", 0), 2),
-                f"Fy ({fu})": round(t.get("fy", 0), 2),
-                f"Fz ({fu})": round(t.get("fz", 0), 2),
-            })
+            fx = round(t.get("fx", 0), 2)
+            fy = round(t.get("fy", 0), 2)
+            fz = round(t.get("fz", 0), 2)
         else:
-            # Scalar magnitude from AnalysisBuilder path
-            rows.append({
-                "Load Pattern": pname,
-                f"Fx ({fu})": round(float(t), 2),
-                f"Fy ({fu})": 0.0,
-                f"Fz ({fu})": 0.0,
-            })
+            fx = round(float(t), 2)
+            fy = 0.0
+            fz = 0.0
+        # Skip patterns with zero load in all directions
+        if fx == 0.0 and fy == 0.0 and fz == 0.0:
+            continue
+        rows.append({
+            "Load Pattern": pname,
+            f"Fx ({fu})": fx,
+            f"Fy ({fu})": fy,
+            f"Fz ({fu})": fz,
+        })
     return pd.DataFrame(rows)
 
 
