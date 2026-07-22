@@ -4992,6 +4992,128 @@ class TestTwoStageBuild:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# sum_reactions_with_overturning tests
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestSumReactionsWithOverturning:
+    """Test the centralized overturning-moment utility."""
+
+    def test_single_node_no_overturning(self):
+        """Single node at centroid → forces pass through directly."""
+        from fea_toolkit.utils import sum_reactions_with_overturning
+        from fea_toolkit.model.sap_data import Node
+
+        nodes = {"B1": Node(node_id="B1", node_tag=1, x=5, y=5, z=0)}
+        reactions = {1: {"fx": 100.0, "fy": 0.0, "fz": 0.0,
+                          "mx": 0.0, "my": 0.0, "mz": 0.0}}
+        result = sum_reactions_with_overturning(reactions, nodes)
+        assert result["fx"] == 100.0
+        assert result["mx"] == 0.0  # at centroid → no lever arm
+
+    def test_two_node_overturning(self):
+        """Two base nodes with vertical reactions → My from Fz·dx."""
+        from fea_toolkit.utils import sum_reactions_with_overturning
+        from fea_toolkit.model.sap_data import Node
+
+        nodes = {
+            "A": Node(node_id="A", node_tag=10, x=0, y=0, z=0),
+            "B": Node(node_id="B", node_tag=20, x=10, y=0, z=0),
+        }
+        reactions = {
+            10: {"fx": 0.0, "fy": 0.0, "fz": 100.0,
+                  "mx": 0.0, "my": 0.0, "mz": 0.0},
+            20: {"fx": 0.0, "fy": 0.0, "fz": -100.0,
+                  "mx": 0.0, "my": 0.0, "mz": 0.0},
+        }
+        result = sum_reactions_with_overturning(reactions, nodes)
+        assert abs(result["fz"]) < 1e-10  # equal and opposite
+        # My = Fz_A * (0-5) + Fz_B * (10-5) = 100*(-5) + (-100)*5 = -1000
+        assert abs(result["my"] - 1000.0) < 1e-10
+
+    def test_empty_reactions(self):
+        """Empty reactions → all zero."""
+        from fea_toolkit.utils import sum_reactions_with_overturning
+        result = sum_reactions_with_overturning({}, {"N1": type("N", (), {"x": 0, "y": 0, "z": 0})()})
+        for k in ["fx", "fy", "fz", "mx", "my", "mz"]:
+            assert result[k] == 0.0
+
+    def test_empty_nodes(self):
+        """Empty nodes → all zero."""
+        from fea_toolkit.utils import sum_reactions_with_overturning
+        result = sum_reactions_with_overturning({1: {"fx": 1.0, "fy": 0, "fz": 0, "mx": 0, "my": 0, "mz": 0}}, {})
+        for k in ["fx", "fy", "fz", "mx", "my", "mz"]:
+            assert result[k] == 0.0
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# RS base_reactions_cqc (two-stage path)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestRSBaseReactionsTwoStage:
+    """Test that RS analysis returns full 6-DoF base reactions."""
+
+    def test_base_reactions_cqc_keys(self):
+        """run_response_spectrum_analysis returns base_reactions_cqc."""
+        import openseespy.opensees as ops
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.preprocessor import Preprocessor
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+        md = make_sample_model()
+        pp = Preprocessor({"split_elements": True, "create_shells": False,
+                           "verbose": False})
+        mesh = pp.run(md)
+        ab = AnalysisBuilder(mesh, {"verbose": False,
+                                     "element_type": "elasticBeamColumn"})
+        ab.build_domain()
+        ab.compute_seismic_masses()
+
+        spec_cfg = {
+            "code": "GB50011", "intensity": 7, "acceleration": 0.10,
+            "site_class": "I1", "design_group": 1, "level": "rare",
+            "damping": 0.05,
+        }
+        from fea_toolkit.spectrum import _build_spectrum
+        T_spec, Sa_spec, _, _, _, _ = _build_spectrum(spec_cfg)
+
+        modal = ab.run_modal_analysis(num_modes=2, print_results=False)
+        rs = ab.run_response_spectrum_analysis(
+            num_modes=min(2, modal["num_modes"]),
+            modal_periods=modal["periods"],
+            spectrum_periods=T_spec, spectrum_accels=Sa_spec,
+            direction="X", damping_ratio=0.05, print_results=False,
+        )
+
+        # New full 6-DoF results
+        assert "base_reactions_cqc" in rs
+        r = rs["base_reactions_cqc"]
+        for comp in ["fx", "fy", "fz", "mx", "my", "mz"]:
+            assert comp in r, f"Missing {comp} in base_reactions_cqc"
+        # X-direction excitation should produce non-zero Fx and My
+        assert abs(r["fx"]) > 0, "Expected non-zero base shear in X"
+        assert abs(r["my"]) > 0, "Expected non-zero overturning moment My"
+
+        # modal_base_reactions should have one entry per mode
+        assert len(rs["modal_base_reactions"]) == modal["num_modes"]
+
+    def test_check_load_equilibrium_has_correct_units(self):
+        """check_load_equilibrium uses mesh_model.units, not '?'."""
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.preprocessor import Preprocessor
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+        md = make_sample_model()
+        pp = Preprocessor({"split_elements": True, "verbose": False})
+        mesh = pp.run(md)
+        ab = AnalysisBuilder(mesh, {"verbose": False})
+        df = ab.check_load_equilibrium()
+        assert not df.empty
+        # Column headers should contain the force unit, not '?'
+        for col in df.columns:
+            assert "?" not in col, f"Column '{col}' contains '?'"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # CSM module tests (standalone, no OpenSees required)
 # ═════════════════════════════════════════════════════════════════════════════
 
