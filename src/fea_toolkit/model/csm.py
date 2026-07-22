@@ -88,7 +88,8 @@ def pushover_to_adrs(
     if abs(M_eff) < 1e-12:
         total_mass_key = 'totalFreeMass'
         free_mass = modal_props.get(total_mass_key, [0])
-        M_eff = free_mass[0] if free_mass else 1.0
+        free_val = free_mass[0] if free_mass else 0.0
+        M_eff = free_val if abs(free_val) > 1e-12 else 1.0
 
     # Participation factor for mass-normalised eigenvectors.
     # nodeEigenvector returns mass-normalised eigenvectors (φᵀMφ = 1),
@@ -220,6 +221,8 @@ def compute_performance_point(
         if abs(err) < 0.001:
             break
         S_dy *= (1.0 - err * 0.5)
+        # Clamp to [S_d_arr[0], S_d_peak] to prevent runaway correction
+        S_dy = max(S_d_arr[0], min(S_dy, S_d_peak))
 
     S_ay = max(K_init * S_dy, S_a_arr[1] if len(S_a_arr) > 1 else S_a_arr[0])
 
