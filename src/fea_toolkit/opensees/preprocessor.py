@@ -332,6 +332,7 @@ class Preprocessor:
             frame_gravity_loads=getattr(md, 'frame_gravity_loads', []),
             area_gravity_loads=getattr(md, 'area_gravity_loads', []),
             area_uniform_loads=getattr(md, 'area_uniform_loads', []),
+            load_patterns=getattr(md, 'load_patterns', {}),
             mass_sources=getattr(md, 'mass_sources', {}),
         )
 

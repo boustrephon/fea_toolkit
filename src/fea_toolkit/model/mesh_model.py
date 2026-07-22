@@ -13,7 +13,7 @@ from .sap_data import (
     Node, Restraint, Material, Section,
     FrameElement, AreaElement, Group,
     FrameDistributedLoad, JointLoad, GravityLoad,
-    AreaGravityLoad, AreaUniformLoad, MassSource,
+    AreaGravityLoad, AreaUniformLoad, MassSource, LoadPattern,
 )
 
 
@@ -44,6 +44,7 @@ class MeshModel:
     frame_gravity_loads: List[GravityLoad] = field(default_factory=list)
     area_gravity_loads: List[AreaGravityLoad] = field(default_factory=list)
     area_uniform_loads: List[AreaUniformLoad] = field(default_factory=list)
+    load_patterns: Dict[str, "LoadPattern"] = field(default_factory=dict)
     mass_sources: Dict[str, MassSource] = field(default_factory=dict)
 
     # ── Constraints (detected, not yet applied to OpenSees) ───────
