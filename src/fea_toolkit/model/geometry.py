@@ -101,13 +101,20 @@ def get_local_axes(axis: np.ndarray, angle: float = 0.0) -> "tuple[np.ndarray, n
         vz = vz / np.linalg.norm(vz)
 
     # Runtime sanity checks — all returned vectors must be unit length
+    # (explicit checks, not assert, so they remain active under python -O)
     eps = 1e-10
-    assert abs(np.linalg.norm(vx) - 1.0) < eps, f"vx not unit: {np.linalg.norm(vx)}"
-    assert abs(np.linalg.norm(vy) - 1.0) < eps, f"vy not unit: {np.linalg.norm(vy)}"
-    assert abs(np.linalg.norm(vz) - 1.0) < eps, f"vz not unit: {np.linalg.norm(vz)}"
-    assert abs(np.dot(vx, vy)) < eps, f"vx·vy not zero: {np.dot(vx, vy)}"
-    assert abs(np.dot(vx, vz)) < eps, f"vx·vz not zero: {np.dot(vx, vz)}"
-    assert abs(np.dot(vy, vz)) < eps, f"vy·vz not zero: {np.dot(vy, vz)}"
+    if abs(np.linalg.norm(vx) - 1.0) >= eps:
+        raise ValueError(f"vx not unit: {np.linalg.norm(vx)}")
+    if abs(np.linalg.norm(vy) - 1.0) >= eps:
+        raise ValueError(f"vy not unit: {np.linalg.norm(vy)}")
+    if abs(np.linalg.norm(vz) - 1.0) >= eps:
+        raise ValueError(f"vz not unit: {np.linalg.norm(vz)}")
+    if abs(np.dot(vx, vy)) >= eps:
+        raise ValueError(f"vx·vy not zero: {np.dot(vx, vy)}")
+    if abs(np.dot(vx, vz)) >= eps:
+        raise ValueError(f"vx·vz not zero: {np.dot(vx, vz)}")
+    if abs(np.dot(vy, vz)) >= eps:
+        raise ValueError(f"vy·vz not zero: {np.dot(vy, vz)}")
 
     return vx, vy, vz
 
