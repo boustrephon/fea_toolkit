@@ -217,7 +217,9 @@ def cqc_combine(modal_values: List[float],
         for j in range(n):
             di = damp_ratios[i] if i < len(damp_ratios) else 0.05
             dj = damp_ratios[j] if j < len(damp_ratios) else 0.05
-            bij = omega[i] / omega[j] if omega[j] > 0 else 1.0
+            om_i = omega[i] if i < len(omega) else 1.0
+            om_j = omega[j] if j < len(omega) else 1.0
+            bij = om_i / om_j if om_j > 0 else 1.0
             rho = (
                 8.0 * math.sqrt(di * dj) * (di + bij * dj) * (bij ** 1.5)
             ) / (
