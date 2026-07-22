@@ -287,8 +287,16 @@ def collect_modal_arrays(modal_result: Dict[str, Any],
 
 def collect_rs_arrays(rs_x: Optional[Dict] = None,
                        rs_y: Optional[Dict] = None) -> Dict[str, np.ndarray]:
-    """Extract response-spectrum base shear arrays."""
+    """Extract response-spectrum base shear arrays.
+
+    ``rs/period`` is taken from the first available result dict
+    (same periods apply to both X and Y directions).
+    """
     arrays: Dict[str, np.ndarray] = {}
+    first = rs_x or rs_y
+    if first is not None:
+        periods = first.get("modal_periods", [])
+        arrays["rs/period"] = np.array(periods, dtype=float)
     for direction, d_key in [("X", "x"), ("Y", "y")]:
         rs = rs_x if direction == "X" else rs_y
         if rs is None:
@@ -328,7 +336,6 @@ def collect_rs_element_force_arrays(
     if not results:
         return arrays
 
-    n = len(results)
     arrays["rs/elem_sap_id"] = np.array([r["elem_id"] for r in results], dtype=str)
     arrays["rs/elem_z_bot"] = np.array([r["z_bot"] for r in results], dtype=float)
     arrays["rs/elem_z_mid"] = np.array([r["z_mid"] for r in results], dtype=float)
@@ -336,7 +343,7 @@ def collect_rs_element_force_arrays(
     for qty in ("Vy_i", "Vy_j", "Vz_i", "Vz_j",
                  "My_i", "My_j", "Mz_i", "Mz_j"):
         key = f"rs/elem_{qty}"
-        arrays[key] = np.array([r.get(qty, 0.0) for r in results], dtype=float)
+        arrays[key] = np.array([r[qty] for r in results], dtype=float)
 
     return arrays
 
