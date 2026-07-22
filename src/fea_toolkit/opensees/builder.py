@@ -5189,23 +5189,11 @@ class OpenSeesBuilder:
                 extract_reactions=extract_reactions,
                 pattern_scales=pattern_scales,
             )
-            # Recompute summed_reactions (Builder-specific post-processing)
+            # Recompute summed_reactions with overturning moment
             if extract_reactions and results and 'reactions' in results and results['reactions']:
-                cx = sum(node.x for node in self.model.nodes.values()) / len(self.model.nodes)
-                cy = sum(node.y for node in self.model.nodes.values()) / len(self.model.nodes)
-                z_base = min(node.z for node in self.model.nodes.values())
-                summed = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0, 'mx': 0.0, 'my': 0.0, 'mz': 0.0}
-                for nid, r in results['reactions'].items():
-                    node = self.model.nodes[nid]
-                    fx = r.get('fx', 0.0); fy = r.get('fy', 0.0); fz = r.get('fz', 0.0)
-                    mx = r.get('mx', 0.0); my = r.get('my', 0.0); mz = r.get('mz', 0.0)
-                    summed['fx'] += fx; summed['fy'] += fy; summed['fz'] += fz
-                    summed['mx'] += mx; summed['my'] += my; summed['mz'] += mz
-                    dx = node.x - cx; dy = node.y - cy; dz = node.z - z_base
-                    summed['mx'] += fz * dy - fy * dz
-                    summed['my'] += fx * dz - fz * dx
-                    summed['mz'] += fy * dx - fx * dy
-                results['summed_reactions'] = summed
+                from ..utils import sum_reactions_with_overturning
+                results['summed_reactions'] = sum_reactions_with_overturning(
+                    results['reactions'], self.model.nodes)
             # opstool export
             if OPSTOOL_AVAILABLE and odb_tag > 0:
                 opst.post.CreateODB(odb_tag=odb_tag)
@@ -5377,6 +5365,9 @@ class OpenSeesBuilder:
                         # about the base elevation (z_base) at the
                         # plan centroid (cx, cy)
                         dx = node.x - cx
+                        # DEPRECATED: overturning moment from force×lever‑arm.
+                        # Use sum_reactions_with_overturning() from utils.py
+                        # for new code — this inline version kept for v1 compat.
                         dy = node.y - cy
                         dz = node.z - z_base
                         summed['mx'] += fz * dy - fy * dz
