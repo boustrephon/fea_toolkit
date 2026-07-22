@@ -61,16 +61,12 @@ MODAL_ARRAYS: Dict[str, Tuple] = {
 
 RS_ARRAYS: Dict[str, Tuple] = {
     "rs/period": ("N_mode", "float"),
-    "rs/sa_x": ("N_mode", "float"),
-    "rs/sa_y": ("N_mode", "float"),
-    "rs/eff_mass_x": ("N_mode", "float"),
-    "rs/eff_mass_y": ("N_mode", "float"),
     "rs/v_base_x": ("N_mode", "float"),
     "rs/v_base_y": ("N_mode", "float"),
     "rs/v_cqc_x": ("", "float"),
     "rs/v_cqc_y": ("", "float"),
-    "rs/v_total_x": ("", "float"),
-    "rs/v_total_y": ("", "float"),
+    "rs/v_srss_x": ("", "float"),
+    "rs/v_srss_y": ("", "float"),
     # Element-level CQC-combined forces (N_frame)
     "rs/elem_sap_id": ("N_frame", "str"),
     "rs/elem_z_bot": ("N_frame", "float"),
