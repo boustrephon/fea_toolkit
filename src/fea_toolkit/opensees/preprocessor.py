@@ -277,7 +277,6 @@ class Preprocessor:
                         material_tags[variant_mat_name] = next_mat_tag
                         next_mat_tag += 1
                     # Clone the section pointing to the modified material
-                    from copy import deepcopy
                     var_sec = deepcopy(base_sec)
                     var_sec.material = variant_mat_name
                     var_sec.name = variant_sec_name
