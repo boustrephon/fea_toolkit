@@ -544,7 +544,7 @@ def plot_stories(
         import pyvista as pv
         import matplotlib.pyplot as plt
         from fea_toolkit.opensees.builder import OpenSeesBuilder
-        from fea_toolkit.plotting.viz import plot_model_3d
+        from fea_toolkit.plotting.viz import plot_mesh
     except ImportError:
         return None
 
@@ -569,10 +569,13 @@ def plot_stories(
             "Could not build visualisation model: %s", exc)
         return None
     finally:
-        ops.wipe()
+        try:
+            ops.wipe()
+        except NameError:
+            pass
         pv.OFF_SCREEN = _prev_off_screen
 
-    pl = plot_model_3d(b, notebook=True, window_size=window_size)
+    pl = plot_mesh(b, notebook=True, window_size=window_size)
     if pl is None:
         return None
 

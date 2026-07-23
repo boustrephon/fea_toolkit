@@ -618,6 +618,7 @@ def plot_storey_forces(
 
     fig.suptitle("Storey Forces & Moments", fontsize=11, fontweight="bold")
     fig.tight_layout()
+    fig.canvas.draw()
     return fig
 
 
@@ -742,4 +743,5 @@ def plot_storey_displacements(
 
     fig.suptitle("Storey Displacement & Drift", fontsize=11, fontweight="bold")
     fig.tight_layout()
+    fig.canvas.draw()
     return fig
