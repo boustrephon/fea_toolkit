@@ -454,7 +454,36 @@ rs = b.run_response_spectrum_analysis(
 ```
 
 - CQC modal combination
-- Returns base shear, base moment, drift ratios
+- Returns shear, moment, drift ratios (CQC/SRSS combined)
+
+### 3d — Pushover analysis
+
+```python
+push = b.run_pushover_analysis(
+    gravity_patterns={"DEAD": 1.0},
+    lateral_load_type="uniform",   # "uniform", "triangular", or "mode1"
+    lateral_direction="X",
+    mode_shapes=shapes,            # required for "mode1"
+    mode_index=0,
+    max_disp=0.3, num_steps=50,
+)
+```
+
+Three lateral load patterns (config `pushover.patterns`):
+
+| Pattern | Formula | Description |
+|---------|---------|-------------|
+| `uniform` | `Fᵢ = mᵢ` | Mass-proportional (uniform acceleration) |
+| `triangular` | `Fᵢ = mᵢ · hᵢᵏ` | ASCE 7 ELF, k from period |
+| `mode1` | `Fᵢ = mᵢ · \|φᵢ\|` | Modal (absolute mode shape) |
+
+Solver settings (v1-compatible): 1e-4 tolerance, 20 iterations, energy
+norm.  Yield detection uses **stiffness-change** (primary: secant k < 50%
+of initial or max relative drop ≥ 30%) with **equal-energy** fallback.
+
+The mode for `mode1` pushover is auto-selected as the one with highest
+mass participation.  An optional RS-based check warns when the mass-based
+mode differs from the RS-dominant mode.
 
 ---
 
