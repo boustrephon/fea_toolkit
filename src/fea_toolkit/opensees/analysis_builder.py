@@ -115,6 +115,7 @@ class AnalysisBuilder:
             'beam_integration': 'Lobatto',
             'simplify_distributed_loads': False,
             'constraint_method': 'spring',
+            'hinge_model': 'fiber',         # Distributed plasticity by default
         }
         # Merge solver defaults from the class constant
         defaults.update(self.PUSHOVER_SOLVER_DEFAULTS)

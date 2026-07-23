@@ -427,7 +427,22 @@ def compute_asce41_hinge_length(
 
     fy_mpa = fy / 1e6
     fc_mpa = (mat.Fc / 1e6) if mat.Fc and mat.Fc > 0 else 25.0
-    db = getattr(sec, 'tf', getattr(sec, 't', 20.0)) * _to_mm
+    # ASCE 41 d_b: beam depth for steel moment frames, section depth
+    # for RC, bar diameter for braces.  Priority: depth → bar_dia → tf → t.
+    if hasattr(sec, 'depth') and getattr(sec, 'depth', 0) > 0:
+        db = sec.depth * _to_mm        # ISection, RectangularSection, etc.
+    elif hasattr(sec, 'top_bar_dia') and getattr(sec, 'top_bar_dia', 0) > 0:
+        db = sec.top_bar_dia * _to_mm  # RC top reinforcement
+    elif hasattr(sec, 'bar_dia') and getattr(sec, 'bar_dia', 0) > 0:
+        db = sec.bar_dia * _to_mm      # RC general rebar
+    elif hasattr(sec, 'od') and getattr(sec, 'od', 0) > 0:
+        db = sec.od * _to_mm           # Pipe/brace outer diameter
+    elif hasattr(sec, 'tf') and getattr(sec, 'tf', 0) > 0:
+        db = sec.tf * _to_mm           # Flange thickness (I-section)
+    elif hasattr(sec, 't') and getattr(sec, 't', 0) > 0:
+        db = sec.t * _to_mm            # Generic thickness
+    else:
+        db = 20.0  # fallback bar diameter in mm (no unit conversion needed)
 
     is_concrete = hasattr(sec, 'cover')
     is_brace = hasattr(sec, 'od') or hasattr(sec, 't')

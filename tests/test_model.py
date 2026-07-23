@@ -3379,20 +3379,43 @@ class TestBuilderHingeModel:
 
     def test_default_hinge_model_is_fiber(self):
         """Default config uses fiber (distributed plasticity)."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
-        b = OpenSeesBuilder.__new__(OpenSeesBuilder)
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.model.sap_data import SAPModelData
+        md = SAPModelData(nodes={}, restraints={}, materials={}, sections={},
+                          frame_elements={}, area_elements={},
+                          frame_assignments={}, area_assignments={},
+                          groups={}, frame_auto_mesh={})
+        b = AnalysisBuilder.__new__(AnalysisBuilder)
         b.config = {}
         b._set_defaults()
         assert b.config['hinge_model'] == 'fiber'
 
-    def test_asce41_hinge_length_fallback(self):
-        """_compute_asce41_hinge_length returns the ASCE 41 capped value."""
-        from examples.sample_model import make_sample_model
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
-        md = make_sample_model()
-        b = OpenSeesBuilder(md, {"verbose": False})
-        Lp = b._compute_asce41_hinge_length(0, 6.0, "UB300")
-        assert Lp == pytest.approx(0.59, abs=0.05)
+    def test_asce41_hinge_length_steel_beam(self):
+        """Steel I-section with depth uses d_b = depth per ASCE 41-17 Eq 10-1.
+
+        An ISection with depth=0.3 m (UB300) gives:
+          Lp = 0.08·6.0 + 0.022·300·250/1000 = 2.13 → capped at 0.33·6.0 = 1.98
+        """
+        from fea_toolkit.model.sap_data import (
+            SAPModelData, ISection, Material, Node, Restraint,
+        )
+        from fea_toolkit.model.checks import compute_asce41_hinge_length
+        nodes = {"1": Node("1", 1, 0, 0, 0), "2": Node("2", 2, 6, 0, 0)}
+        mats = {"Steel": Material("Steel", "Steel", E_mod=2e11, Fy=2.5e8)}
+        secs = {
+            "UB300": ISection(
+                name="UB300", shape="I/Wide Flange", material="Steel",
+                depth=0.3, bf=0.15, tf=0.01, tw=0.006,
+                A=8e-3, I33=1.2e-4, I22=4e-5, J=2e-6,
+            ),
+        }
+        md = SAPModelData(nodes=nodes, restraints={}, materials=mats,
+                          sections=secs, frame_elements={}, area_elements={},
+                          frame_assignments={}, area_assignments={},
+                          groups={}, frame_auto_mesh={})
+        Lp = compute_asce41_hinge_length(md, "UB300", 6.0)
+        # Capped at 0.33 * L = 1.98
+        assert Lp == pytest.approx(1.98, abs=0.01)
 
     def test_lumped_hinge_build_invokes_create_lumped_hinges(self):
         """build() with hinge_model='lumped' exercises _create_lumped_hinges."""
