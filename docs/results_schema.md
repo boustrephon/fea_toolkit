@@ -162,6 +162,7 @@ column *j* is the eigenvector for mode *j* (0‑based) and row *i* matches
 
 | Array | Shape | dtype | Description |
 |---|---|---|---|
+| `rs/period` | `(N_mode,)` | `float` | Modal periods used for RS analysis (s) |
 | `rs/v_base_x` | `(N_mode,)` | `float` | Per‑mode base shear in X (kN) |
 | `rs/v_base_y` | `(N_mode,)` | `float` | Per‑mode base shear in Y (kN) |
 | `rs/v_cqc_x` | `()` | `float` | CQC‑combined base shear X (kN) |
