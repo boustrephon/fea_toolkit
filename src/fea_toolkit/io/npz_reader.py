@@ -1,12 +1,14 @@
 """
-Unified NPZ reader — loads ``.npz`` files written by ``npz_writer.py``
-and returns numpy arrays compatible with Rhino, PyVista, and opstool.
+Unified NPZ / HDF5 reader — loads ``.npz`` or ``.h5`` files written by
+``unified_writer.py`` and returns numpy arrays compatible with Rhino,
+PyVista, and opstool.
 
 Usage::
 
-    from fea_toolkit.io.npz_reader import read_results_npz
+    from fea_toolkit.io.npz_reader import read_results
 
-    data = read_results_npz("results.npz")
+    data = read_results("results.npz")
+    data = read_results("results.h5")
     print(data["node_tag"])       # array of node tags
     print(data["static/DEAD/fx_i"])  # element forces for DEAD case
 
@@ -23,6 +25,24 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 
+def read_results(path: str) -> Dict[str, Any]:
+    """Load a unified results file (NPZ or HDF5) and return a dict of arrays.
+
+    Format is auto-detected from the file extension:
+    - ``.npz`` → :func:`read_results_npz`
+    - ``.h5``, ``.hdf5`` → :func:`read_results_hdf5`
+
+    The returned dict uses flat keys like ``"static/DEAD/fx_i"``,
+    ``"modal/period"``, ``"node_tag"`` — matching the NPZ schema — so
+    all unified plotting functions can consume it directly.
+    """
+    p = Path(path)
+    ext = p.suffix.lower()
+    if ext in (".h5", ".hdf5"):
+        return read_results_hdf5(str(p))
+    return read_results_npz(str(p))
+
+
 def read_results_npz(path: str) -> Dict[str, Any]:
     """Load a unified NPZ file and return a dict of numpy arrays.
 
@@ -33,6 +53,64 @@ def read_results_npz(path: str) -> Dict[str, Any]:
     """
     path = str(Path(path).resolve())
     return dict(np.load(path, allow_pickle=False))
+
+
+def _decode_hdf5_array(arr: np.ndarray) -> np.ndarray:
+    """Decode byte-string arrays from h5py back to Unicode.
+
+    h5py stores variable-length strings as ``bytes``; NPZ stores them
+    as ``str``.  This helper normalises HDF5 output to match NPZ.
+    """
+    if arr.dtype.kind == 'O' or arr.dtype.kind == 'S':
+        # Object or byte-string dtype — decode each element
+        decoded = np.vectorize(
+            lambda x: x.decode('utf-8') if isinstance(x, bytes) else str(x),
+            otypes=[object],
+        )(arr)
+        # Ensure consistent str dtype
+        return decoded.astype(str)
+    return arr
+
+
+def read_results_hdf5(path: str) -> Dict[str, Any]:
+    """Load a unified HDF5 results file and return a flat dict of arrays.
+
+    Reads HDF5 files written by :func:`~fea_toolkit.io.unified_writer._write_h5`.
+    The output dict uses the same flat key schema as :func:`read_results_npz`,
+    so it can be passed directly to any unified plotting function.
+
+    Args:
+        path: Path to the ``.h5`` file.
+
+    Returns:
+        Dict mapping flat keys (``"node_tag"``, ``"static/DEAD/fx_i"``, …)
+        to ``numpy.ndarray`` values.
+
+    Requires:
+        ``h5py`` — install with ``pip install h5py``.
+    """
+    try:
+        import h5py
+    except ImportError:
+        raise ImportError(
+            "Reading HDF5 files requires h5py. Install with: pip install h5py")
+
+    path = str(Path(path).resolve())
+    result: Dict[str, Any] = {}
+
+    def _walk(group: h5py.Group, prefix: str = "") -> None:
+        for key, item in group.items():
+            full_key = f"{prefix}/{key}" if prefix else key
+            if isinstance(item, h5py.Dataset):
+                arr = np.array(item)
+                result[full_key] = _decode_hdf5_array(arr)
+            elif isinstance(item, h5py.Group):
+                _walk(item, full_key)
+
+    with h5py.File(path, "r") as f:
+        _walk(f)
+
+    return result
 
 
 def _get_static_cases(data: Dict[str, Any]) -> List[str]:
