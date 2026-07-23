@@ -1205,6 +1205,11 @@ def plot_deformed_displacement_3d(
         nid_j = fr.get("nj_id") or str(fr.get("nj_tag", ""))
         ni = nodes.get(nid_i) or nodes.get(str(fr.get("ni_tag", "")))
         nj = nodes.get(nid_j) or nodes.get(str(fr.get("nj_tag", "")))
+        # Fallback: search by tag when key-based lookup fails (NPZ dicts)
+        if ni is None:
+            ni = next((n for n in nodes.values() if n["tag"] == fr.get("ni_tag")), None)
+        if nj is None:
+            nj = next((n for n in nodes.values() if n["tag"] == fr.get("nj_tag")), None)
         if ni is None or nj is None:
             continue
         di = displacements.get(ni["tag"], (0, 0, 0))
@@ -3603,18 +3608,19 @@ def plot_model_comparison(
     if LOADS_ONLY is None:
         LOADS_ONLY = set()
 
+    md_copy = copy.deepcopy(md)
+
     # Fix shell-only base nodes
-    min_z = min(nd.z for nd in md.nodes.values())
-    base_ids = {nd.node_id for nd in md.nodes.values() if nd.z == min_z}
+    min_z = min(nd.z for nd in md_copy.nodes.values())
+    base_ids = {nd.node_id for nd in md_copy.nodes.values() if nd.z == min_z}
     frame_conn: set = set()
-    for e in md.frame_elements.values():
+    for e in md_copy.frame_elements.values():
         if e.node_i in base_ids: frame_conn.add(e.node_i)
         if e.node_j in base_ids: frame_conn.add(e.node_j)
     for nid in sorted(base_ids - frame_conn):
-        if nid in md.restraints:
-            md.restraints[nid] = Restraint([1, 1, 1, 1, 1, 1])
+        if nid in md_copy.restraints:
+            md_copy.restraints[nid] = Restraint([1, 1, 1, 1, 1, 1])
 
-    md_copy = copy.deepcopy(md)
     for sn in LOADS_ONLY:
         if sn in md_copy.sections:
             s = md_copy.sections[sn]
