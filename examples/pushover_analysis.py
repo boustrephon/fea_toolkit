@@ -31,8 +31,7 @@ from fea_toolkit.io.s2k_parser import SAP2000Parser
 from fea_toolkit.opensees.builder import OpenSeesBuilder
 from fea_toolkit.plotting import (
     plot_pushover_curve,
-    plot_mode_3d,
-    plot_model_3d,
+    plot_mode_animation,
 )
 
 
@@ -112,7 +111,7 @@ def main():
         pv.OFF_SCREEN = True
 
         # PNG: consistent font at 2× resolution
-        pl_png = plot_mode_3d(
+        pl_png = plot_mode_animation(
             b_elastic, shapes, mode=m, scale=15.0,
             periods=modal['periods'], font_size=22,
             animate=False, notebook=True,
@@ -123,7 +122,7 @@ def main():
             print(f"  Saved → {out / f'pushover_mode{m}.png'}  (2×, 22pt)")
 
         # SVG: large window for high-res output, same font
-        pl_svg = plot_mode_3d(
+        pl_svg = plot_mode_animation(
             b_elastic, shapes, mode=m, scale=15.0,
             periods=modal['periods'], font_size=22,
             animate=False, notebook=True,

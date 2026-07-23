@@ -162,15 +162,15 @@ def main():
 
     # ── 3D moment diagram (flags) ──
     try:
-        from fea_toolkit.plotting import plot_static_moment_3d
+        from fea_toolkit.plotting import plot_force_diagram_3d
 
         print("\n── 3D moment diagram (flags) ──")
-        plot_static_moment_3d(
-            builder, elem_forces, 'My', mode='flag',
+        plot_force_diagram_3d(
+            builder, elem_forces, quantity='My', mode='flag',
         )
         # Also save a tube‑mode screenshot
-        plotter_tube = plot_static_moment_3d(
-            builder, elem_forces, 'My', mode='tube', notebook=True,
+        plotter_tube = plot_force_diagram_3d(
+            builder, elem_forces, quantity='My', mode='tube', notebook=True,
         )
         if plotter_tube is not None:
             plotter_tube.screenshot(str(out / 'static_moment_3d.png'))

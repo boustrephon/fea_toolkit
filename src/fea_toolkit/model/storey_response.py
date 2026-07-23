@@ -916,6 +916,7 @@ def compute_linear_storey_responses(
 
     # (resultant_shear, resultant_moment, build_storey_table
     #  imported from fea_toolkit.model.storey_response)
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
     # --- Static cases -------------------------------------------------
     for cname, pats in lateral_static:
