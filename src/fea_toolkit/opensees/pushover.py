@@ -95,6 +95,11 @@ def run_pushover_4dir(
     T_spec = np.linspace(0.0, 6.0, 200).tolist()
     Sa_spec = _gb50011_spectrum(T_spec, alpha_max_rare, tg, gamma=gamma,
                                  eta1=eta_1, eta2=eta_2, g=g).tolist()
+    roof_tag = roof_node.node_tag
+
+    T_spec = np.linspace(0.0, 6.0, 200).tolist()
+    Sa_spec = _gb50011_spectrum(T_spec, alpha_max_rare, tg, gamma=gamma,
+                                 eta1=eta_1, eta2=eta_2, g=g).tolist()
 
     if brace_type == "truss":
         builder_cfg = {
@@ -155,17 +160,13 @@ def run_pushover_4dir(
             direction=cfg["dir"], g=g,
         )
 
-        # For modal pushover, validate mode selection against RS
+        # Validate mode selection against RS
         rs_warning = None
         if lateral_load_type == "mode1" and rs_modal_base_shear is not None:
             rs_list = rs_modal_base_shear.get(cfg["dir"])
             if rs_list:
-                mp = modal.get("modal_props", {})
-                dir_key = ("partiMassRatiosMX" if cfg["dir"] == "X"
-                           else "partiMassRatiosMY")
-                ratios = mp.get(dir_key, [])
                 _, rs_dom, rs_warning = check_modal_pushover_mode(
-                    cfg["dir"], ratios, rs_list,
+                    cfg["dir"], ratios if ratios else [], rs_list,
                 )
                 if rs_warning and verbose:
                     print(f"    {rs_warning}")
