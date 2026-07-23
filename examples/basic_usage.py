@@ -29,7 +29,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from fea_toolkit import __version__, ops_version
 from fea_toolkit.io.s2k_parser import SAP2000Parser
 from fea_toolkit.model.sections import SectionLibrary
-from fea_toolkit.opensees.builder import OpenSeesBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.io.helper import mac_file_chooser, tkinter_file_chooser
 
 # Get Operating System
@@ -128,20 +129,17 @@ def main():
     else:
         print("Skipping section enrichment (no database)")
 
-    # ── Build the OpenSees model ──────────────────────────────────────────
+    # ── Build the OpenSees model (two-stage) ──────────────────────────────
     config = {
         'element_type': 'elasticBeamColumn',
         'split_elements': True,
         'verbose': True,
     }
-    builder = OpenSeesBuilder(model_data, config)
-    builder.build()
+    mesh_model = preprocess_model(model_data, config)
+    builder = AnalysisBuilder(mesh_model, config)
+    builder.build_domain()
 
-    # Export split model data for inspection
-    split_model_path = s2k_file.with_suffix(".split.json")
-    builder.export_split_model(split_model_path)
-
-    # Load totals are always computed after build() — print a summary
+    # Load totals are always computed after build_domain() — print a summary
     unit_F = model_data.units.get('F', '?')
     unit_L = model_data.units.get('L', '?')
     print(f"\n── Applied load totals per pattern ({unit_F}) ──")

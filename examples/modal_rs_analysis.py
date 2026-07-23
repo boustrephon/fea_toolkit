@@ -27,7 +27,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from fea_toolkit import __version__, ops_version
 from fea_toolkit.io.s2k_parser import SAP2000Parser
-from fea_toolkit.opensees.builder import OpenSeesBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
 
 def gb50011_spectrum(T, A=0.16, Tg=0.35, zeta=0.05):
@@ -98,17 +99,18 @@ def main():
     if not md.mass_sources:
         sys.exit("Error: no MASS SOURCE defined in the model — cannot run modal analysis.")
 
-    # ── 2. Build ─────────────────────────────────────────────────────────────
+    # ── 2. Build (two-stage) ─────────────────────────────────────────────────
     config = {
         'element_type': 'elasticBeamColumn',
         'split_elements': True,
         'verbose': False,
     }
-    builder = OpenSeesBuilder(md, config)
-    builder.build()
-
-    # Self-weight consistency check
-    builder.check_self_weight_consistency()
+    mesh_model = preprocess_model(md, config)
+    builder = AnalysisBuilder(mesh_model, {
+        'element_type': 'elasticBeamColumn',
+        'verbose': False,
+    })
+    builder.build_domain()
 
     # ── 3. Seismic masses ────────────────────────────────────────────────────
     print("\n── Computing seismic masses (g=9.81) ──")
@@ -156,28 +158,9 @@ def main():
         print_results=True,
     )
 
-    # ── 7. Missing mass correction ────────────────────────────────────────────
-    print(f"\n── Missing mass (rigid response) correction ──")
-
-    missing = builder.add_missing_mass_correction(
-        rs_results=rs,
-        modal_results=modal,
-        spectrum_func=gb50011_spectrum,
-        g=g,
-        T_short=0.01,
-    )
-
-    print(f"  Residual mass X = {missing['residual_mass_X']:.1f} t")
-    print(f"  Residual mass Y = {missing['residual_mass_Y']:.1f} t")
-    print(f"  Missing Vx = {missing['V_missing_X']:,.2f} kN")
-    print(f"  Missing My  = {missing['M_missing_YY']:,.2f} kN·m")
-
-    V_total = rs['base_shear_cqc'] + missing['V_missing_X']
-    M_total = rs['base_moment_cqc'] + missing['M_missing_YY']
-    print(f"\n  Total base shear Vx = {rs['base_shear_cqc']:,.2f} (CQC) + "
-          f"{missing['V_missing_X']:,.2f} (rigid) = {V_total:,.2f} kN")
-    print(f"  Total base moment My = {rs['base_moment_cqc']:,.2f} (CQC) + "
-          f"{missing['M_missing_YY']:,.2f} (rigid) = {M_total:,.2f} kN·m")
+    # ── 7. Missing mass correction (requires add_missing_mass_correction
+    #     which is not yet ported to AnalysisBuilder) ─────────────────────────
+    print("  (skipped — pending port of add_missing_mass_correction)")
 
     # ── 8. Output directory ──────────────────────────────────────────────────
     out = Path(__file__).parent / "output"

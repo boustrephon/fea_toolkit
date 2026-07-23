@@ -22,7 +22,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from fea_toolkit import __version__, ops_version
 from fea_toolkit.io.s2k_parser import SAP2000Parser
-from fea_toolkit.opensees.builder import OpenSeesBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
 
 def main():
@@ -76,16 +77,17 @@ def main():
     print(f"Frame gravity loads: {len(md.frame_gravity_loads)}")
     print(f"Area gravity loads: {len(md.area_gravity_loads)}")
 
-    # Build
-    builder = OpenSeesBuilder(md, {
+    # Build (two-stage)
+    mesh_model = preprocess_model(md, {
         'element_type': 'elasticBeamColumn',
         'split_elements': True,
         'verbose': False,
     })
-    builder.build()
-
-    # Self-weight consistency check
-    builder.check_self_weight_consistency()
+    builder = AnalysisBuilder(mesh_model, {
+        'element_type': 'elasticBeamColumn',
+        'verbose': False,
+    })
+    builder.build_domain()
 
     # Static analysis: combine available load patterns
     avail = list(md.load_patterns.keys())

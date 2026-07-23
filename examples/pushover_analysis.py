@@ -28,7 +28,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from fea_toolkit import __version__, ops_version
 from fea_toolkit.io.s2k_parser import SAP2000Parser
-from fea_toolkit.opensees.builder import OpenSeesBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.plotting import (
     plot_pushover_curve,
     plot_mode_animation,
@@ -90,15 +91,14 @@ def main():
         print(f"    {name}: {type(sec).__name__}  {dims}")
     print(f"Load patterns: {list(md.load_patterns.keys())}")
 
-    # ── 2. Modal analysis (elastic) ──────────────────────────────────────────
+    # ── 2. Modal analysis (elastic, two-stage) ──────────────────────────────
     print("\n── Modal analysis ──")
-    b_elastic = OpenSeesBuilder(md, {
-        'element_type': 'elasticBeamColumn',
-        'split_elements': True,
-        'verbose': False,
-    })
-    b_elastic.build()
-    b_elastic.check_self_weight_consistency()
+    cfg = {'element_type': 'elasticBeamColumn', 'split_elements': True,
+           'verbose': False}
+    mm = preprocess_model(md, cfg)
+    b_elastic = AnalysisBuilder(mm, {'element_type': 'elasticBeamColumn',
+                                     'verbose': False})
+    b_elastic.build_domain()
     b_elastic.compute_seismic_masses()
     modal = b_elastic.run_modal_analysis(num_modes=6, print_results=True)
     n_modes = modal['num_modes']
@@ -138,11 +138,11 @@ def main():
 
     # ── 3. Non‑linear pushover ───────────────────────────────────────────────
     print("\n── Pushover analysis (fiber sections, forceBeamColumn) ──")
-    b_push = OpenSeesBuilder(md, {
-        'element_type': 'elasticBeamColumn',
-        'split_elements': True,
-        'verbose': False,
-    })
+    mm_push = preprocess_model(md, {'element_type': 'elasticBeamColumn',
+                                    'split_elements': True, 'verbose': False})
+    b_push = AnalysisBuilder(mm_push, {'element_type': 'elasticBeamColumn',
+                                       'verbose': False})
+    b_push.build_domain()
 
     results = b_push.run_pushover_analysis(
         gravity_patterns={'DEAD': 1.0, 'DEAD SDL': 1.0, 'LL': 1.0},
@@ -194,11 +194,11 @@ def main():
 
         # Extract nodal displacements at the last push step
         # Re-run and capture via ops.nodeDisp after the final step
-        b_viz = OpenSeesBuilder(md, {
-            'element_type': 'elasticBeamColumn',
-            'split_elements': True,
-            'verbose': False,
-        })
+        mm_viz = preprocess_model(md, {'element_type': 'elasticBeamColumn',
+                                       'split_elements': True, 'verbose': False})
+        b_viz = AnalysisBuilder(mm_viz, {'element_type': 'elasticBeamColumn',
+                                        'verbose': False})
+        b_viz.build_domain()
         b_viz.run_pushover_analysis(
             gravity_patterns={'DEAD': 1.0, 'DEAD SDL': 1.0, 'LL': 1.0},
             lateral_load_type='uniform',
@@ -211,19 +211,19 @@ def main():
         import openseespy.opensees as ops
 
         # Model extents for annotation placement
-        all_z = [n.z for n in b_viz.model.nodes.values()]
+        all_z = [n.z for n in b_viz.mesh_model.nodes.values()]
         z_min, z_max = min(all_z), max(all_z)
         z_mid = (z_min + z_max) * 0.5
 
         # Build deformed mesh
-        elements = (b_viz.split_elements if b_viz.split_elements
+        elements = (b_viz.mesh_model.frame_elements if b_viz.mesh_model.frame_elements
                     else b_viz.model.frame_elements)
         segments = []
         for eid, elem in elements.items():
             if getattr(elem, 'inactive', False):
                 continue
-            ni = b_viz.model.nodes.get(elem.node_i)
-            nj = b_viz.model.nodes.get(elem.node_j)
+            ni = b_viz.mesh_model.nodes.get(elem.node_i)
+            nj = b_viz.mesh_model.nodes.get(elem.node_j)
             if ni is None or nj is None:
                 continue
             try:
@@ -241,7 +241,7 @@ def main():
             if getattr(elem, 'inactive', False):
                 continue
             for nid in (elem.node_i, elem.node_j):
-                nd = b_viz.model.nodes.get(nid)
+                nd = b_viz.mesh_model.nodes.get(nid)
                 if nd is None:
                     continue
                 try:
@@ -253,8 +253,8 @@ def main():
                     pass
 
         # ── Compute annotation positions (model‑relative) ──
-        all_x = [n.x for n in b_viz.model.nodes.values()]
-        all_y = [n.y for n in b_viz.model.nodes.values()]
+        all_x = [n.x for n in b_viz.mesh_model.nodes.values()]
+        all_y = [n.y for n in b_viz.mesh_model.nodes.values()]
         cx = (min(all_x) + max(all_x)) * 0.5
         cy = (min(all_y) + max(all_y)) * 0.5
         z_top = z_max
@@ -274,7 +274,7 @@ def main():
         push_geo = None  # (start, dir, shaft_r, tip_r, tip_l, label_pos)
         try:
             cn_tag = results['control_node']
-            cn_node = [n for n in b_viz.model.nodes.values() if n.node_tag == cn_tag][0]
+            cn_node = [n for n in b_viz.mesh_model.nodes.values() if n.node_tag == cn_tag][0]
             cn_info = ([cn_node.x, cn_node.y, cn_node.z], cn_tag)
             ps = [cn_node.x - model_width * 0.2, cn_node.y, cn_node.z]
             pd = [model_width * 1.05, 0, 0]
@@ -294,8 +294,8 @@ def main():
             for eid, elem in elements.items():
                 if getattr(elem, 'inactive', False):
                     continue
-                ni = b_viz.model.nodes.get(elem.node_i)
-                nj = b_viz.model.nodes.get(elem.node_j)
+                ni = b_viz.mesh_model.nodes.get(elem.node_i)
+                nj = b_viz.mesh_model.nodes.get(elem.node_j)
                 if ni is None or nj is None:
                     continue
                 p1 = np.array([ni.x, ni.y, ni.z])
