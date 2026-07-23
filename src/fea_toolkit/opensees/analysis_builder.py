@@ -41,6 +41,17 @@ class AnalysisBuilder:
             :class:`~fea_toolkit.opensees.builder.OpenSeesBuilder`).
     """
 
+    # ── Solver defaults for pushover / nonlinear analysis ────────────
+    PUSHOVER_SOLVER_DEFAULTS: dict = {
+        "solver_test_type": "NormDispIncr",
+        "solver_test_tol": 1e-6,
+        "solver_test_max_iter": 10,
+        "solver_algorithm": "Newton",
+        "solver_constraints": "Transformation",
+        "solver_system": "BandGen",
+        "gravity_num_substeps": 1,
+    }
+
     def __init__(self,
                  mesh_model: MeshModel,
                  config: Optional[Dict[str, Any]] = None):
@@ -103,14 +114,10 @@ class AnalysisBuilder:
             'geom_transf_type': 'Linear',
             'beam_integration': 'Lobatto',
             'simplify_distributed_loads': False,
-            'solver_test_tol': 1e-6,
-            'solver_test_max_iter': 10,
-            'solver_algorithm': 'Newton',
-            'gravity_num_substeps': 1,
-            'solver_constraints': 'Transformation',
-            'solver_system': 'BandGen',
             'constraint_method': 'spring',
         }
+        # Merge solver defaults from the class constant
+        defaults.update(self.PUSHOVER_SOLVER_DEFAULTS)
         for k, v in defaults.items():
             self.config.setdefault(k, v)
 
@@ -1768,20 +1775,22 @@ class AnalysisBuilder:
             self._reapply_edge_constraints()
             self.create_loads(pattern_scales=pattern_scales)
 
-        test_type = self.config.get('solver_test_type', 'NormDispIncr')
-        test_tol = self.config.get('solver_test_tol', 1e-6)
-        test_iter = self.config.get('solver_test_max_iter', 10)
-        algo = self.config.get('solver_algorithm', 'Newton')
-        n_sub = self.config.get('gravity_num_substeps', 1)
+        sol_cfg = self.config
+        sd = self.PUSHOVER_SOLVER_DEFAULTS
+        test_type = sol_cfg.get('solver_test_type', sd['solver_test_type'])
+        test_tol = sol_cfg.get('solver_test_tol', sd['solver_test_tol'])
+        test_iter = sol_cfg.get('solver_test_max_iter', sd['solver_test_max_iter'])
+        algo = sol_cfg.get('solver_algorithm', sd['solver_algorithm'])
+        n_sub = sol_cfg.get('gravity_num_substeps', sd['gravity_num_substeps'])
 
-        cs = self.config.get('solver_constraints', 'Transformation')
+        cs = sol_cfg.get('solver_constraints', sd['solver_constraints'])
         if self._edge_constraint_method == 'penalty':
             cs = 'Penalty'
             ops.constraints('Penalty', 1.0e12, 1.0e12)
         else:
             ops.constraints(cs)
         ops.numberer('RCM')
-        ops.system(self.config.get('solver_system', 'BandGen'))
+        ops.system(sol_cfg.get('solver_system', sd['solver_system']))
         ops.test(test_type, test_tol, test_iter)
 
         _algo_chain = [algo]
