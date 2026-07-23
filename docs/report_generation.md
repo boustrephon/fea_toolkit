@@ -4,22 +4,29 @@
 
 The goal is a **configuration-driven** report pipeline that:
 
-1. Reads a YAML config specifying which analyses to run and how
-2. Runs the full pipeline (parse → enrich → build → analyse)
-3. Stores all results in a single **HDF5** archive
+1. Reads a Python dict config specifying which analyses to run and how
+2. Runs the Preprocessor once, then creates lightweight AnalysisBuilder
+   instances for each analysis case (two-stage pipeline)
+3. Stores all results in a single NPZ or HDF5 archive
 4. Generates a self-contained report (HTML or PDF) from a **Quarto template**
 
 This separates **computation** (analysis execution + data storage) from
 **presentation** (report rendering), so you can re-render a report from
 cached results without re-running analyses.
 
+The architecture has evolved significantly from the original proposal —
+see §3.9 for the two-stage pipeline and §2 for the simplified HDF5
+approach.
+
 ---
 
-## 1. Configuration File (`config.yaml`)
+## 1. Configuration (Python dict)
 
 The config defines the model source, **analysis mode** (which drives
 default element/material/solver choices), analysis-specific parameters,
-and report layout.  It can be edited directly or generated interactively.
+and report layout.  It is a Python dict (``_DEFAULT_CONFIG`` in each
+report script) that can be overridden at the call site — no YAML parser
+needed.
 
 ### Auto-Configuration by Analysis Mode
 
@@ -314,77 +321,80 @@ and Pandas DataFrames needed for post-processing and plotting.
 # │   └── ...
 ```
 
-### Python class for HDF5 storage
+### Python class for HDF5 storage — implemented (simplified)
 
-```python
-# src/fea_toolkit/io/hdf5_store.py  (proposed)
+The proposed ``HDF5Store`` class was not implemented.  Instead, the
+toolkit uses a **flat dict-of-arrays** approach that is format-agnostic:
 
-class HDF5Store:
-    """Read/write analysis results to a hierarchical HDF5 archive."""
+- **Writing**: ``unified_writer._write_h5(path, arrays)`` writes a flat
+  dict of NumPy arrays to HDF5 with the same key schema as NPZ.
+- **Reading**: ``npz_reader.read_results_hdf5(path)`` reads HDF5 and
+  returns a plain ``dict[str, ndarray]``.
+- **Dispatcher**: ``npz_reader.read_results(path)`` auto-detects format
+  from the file extension (``.npz`` or ``.h5``) and calls the appropriate
+  reader.
 
-    def __init__(self, path: str):
-        self.path = path
+This is simpler than the proposed class-based design because:
 
-    def write_dataframe(self, group: str, key: str, df: pd.DataFrame):
-        """Store a DataFrame under ``/group/key``."""
+* The same flat-key schema works for both NPZ and HDF5 — no separate
+  schema translation needed.
+* The reading side is just ``dict(np.load(...))`` or recursively walking
+  HDF5 groups; no ``DataFrame``/``JSON`` convenience methods were needed
+  in practice.
+* All unified plotting functions (``plot_mesh``, ``plot_force_diagram_3d``,
+  etc.) check ``isinstance(source, dict)``, so they consume HDF5-read
+  dicts without any changes.
 
-    def read_dataframe(self, group: str, key: str) -> pd.DataFrame:
-        """Restore a DataFrame from ``/group/key``."""
+No ``hdf5_to_npz()`` converter was needed — the unified plotting
+functions read dicts directly, regardless of source format.
 
-    def write_array(self, group: str, key: str, arr: np.ndarray):
-        """Store a NumPy array."""
+**Opstool interoperability**: Opstool uses **Zarr** (default) or
+**NetCDF** for its ODB format, not HDF5.  It is built on ``xarray`` for
+labeled N-dimensional arrays.  Our flat-dict HDF5 is unrelated to
+opstool's format.  If future interop is needed, a converter from our
+schema to ``xarray.Dataset → Zarr`` could be added, but there is no
+current demand.
 
-    def read_array(self, group: str, key: str) -> np.ndarray:
-        """Restore a NumPy array."""
+### HDF5 ↔ Visualisation Tools — NPZ/dict path now unified
 
-    def write_json(self, group: str, key: str, data: dict):
-        """Store a JSON-serialisable dict."""
-
-    def read_json(self, group: str, key: str) -> dict:
-        """Restore a JSON-serialised dict from ``/group/key``."""
-
-    def list_groups(self) -> List[str]:
-        """List all top-level groups."""
-```
-
-Implementation uses `h5py` or `pandas.HDFStore` under the hood, with
-JSON serialisation for dicts via `json.dumps` as string attributes.
-
-### HDF5 ↔ Visualisation Tools
-
-The HDF5 archive is **not intended as a direct input to visualisation
-tools**.  Instead, it sits in the middle of the pipeline:
+The HDF5 archive is **not a direct input to visualisation tools**.
+Instead, visualisation tools consume dicts (from either NPZ or HDF5):
 
 ```
-                          ┌──────────────────┐
-                          │   HDF5 Archive   │  ← single source of truth
-                          │   (results.h5)   │
-                          └────────┬─────────┘
-                                   │
-                   ┌───────────────┼────────────────┐
-                   │               │                │
-                   ▼               ▼                ▼
-           ┌───────────────┐ ┌──────────┐ ┌──────────────┐
-           │   NPZ Export  │ │  Report  │ │  Adapters    │
-           │ (Rhino/PyVista│ │  Gen.    │ │ (XDMF, ODB,  │
-           │  exchange)    │ │ (Quarto) │ │  future)     │
-           └───────┬───────┘ └──────────┘ └──────────────┘
+                          ┌──────────────────────┐
+                          │  NPZ / HDF5 results  │
+                          │  (flat dict of arrays)│
+                          └──────────┬───────────┘
+                                     │
+                   ┌─────────────────┼─────────────────┐
+                   │                 │                 │
+                   ▼                 ▼                 ▼
+           ┌───────────────┐ ┌─────────────┐ ┌──────────────┐
+           │  Unified 3D   │ │   Report    │ │  Rhino       │
+           │  plots        │ │  Gen.       │ │  colouring   │
+           │  (PyVista)    │ │  (Quarto)   │ │  (NPZ path)  │
+           │               │ │             │ │              │
+           │ plot_mesh      │ │ pd.DataFrame│ │ colour_from_ │
+           │ plot_deformed_ │ │ from reader │ │ npz()        │
+           │ displacement_3d│ │ or builder  │ │ (NPZ only)   │
+           │ plot_force_    │ │             │ │              │
+           │ diagram_3d     │ │             │ │              │
+           └───────┬───────┘ └─────────────┘ └──────────────┘
                    │
                    ▼
            ┌───────────────┐
-           │  plot_model_3d│  ← unchanged — still reads NPZ
-           │  colour_from_ │
-           │  npz()        │
+           │  read_results │  ← auto-detects NPZ or HDF5
+           │  (dispatcher) │     by file extension
            └───────────────┘
 ```
 
-| Visualisation path | Current format | HDF5 relationship |
+| Visualisation path | Current input | Unified? |
 |---|---|---|
-| **PyVista 3D** (`plot_model_3d`, `plot_deformed_3d`, etc.) | NPZ (via `_load_npz_for_plotting`) | A lightweight `hdf5_to_npz()` converter exports HDF5 → NPZ for the existing plotting functions. No plotting code changes needed. |
-| **Rhino colouring** (`colour_from_npz`) | NPZ | Same converter path. Rhino's CPython doesn't bundle `h5py`, so NPZ remains the Rhino exchange format. |
-| **Matplotlib report plots** (`plot_storey_forces`, `plot_modal_participation`, etc.) | Pandas DataFrames | The `HDF5Store.read_dataframe()` method returns the same structures — report plotting functions work unchanged. |
-| **Opstool / opsVis** | Custom ODB format | Not directly compatible. A future `export_to_opstool_odb()` could convert if needed. |
-| **ParaView** | VTK / XDMF + HDF5 | A future `export_to_xdmf()` could write an XDMF descriptor pointing to the HDF5 arrays. |
+| **PyVista 3D** (``plot_mesh``, ``plot_deformed_displacement_3d``, etc.) | Builder, AnalysisBuilder, **or** dict from ``read_results()`` | ✅ Yes — accepts any source |
+| **Rhino colouring** (``colour_from_npz``) | File path (NPZ) | ⚠️ File-path only; reads NPZ/HDF5 internally via ``read_results()`` |
+| **Matplotlib report plots** (``plot_storey_forces``, ``plot_modal_participation``, etc.) | Pandas DataFrames from builder or reader | ✅ Works unchanged |
+| **Opstool / opsVis** | Custom ODB format (Zarr/NetCDF) | ❌ Not directly compatible — future converter if needed |
+| **ParaView** | VTK / XDMF + HDF5 | ❌ Future work
 
 This layered approach avoids coupling the analysis storage format to any
 specific visualisation tool while keeping the existing NPZ → PyVista/Rhino
@@ -694,6 +704,72 @@ specific elevation is required, use `extract_static_element_forces()` +
 
 ---
 
+## 3.9 Two-Stage Pipeline (Preprocessor + AnalysisBuilder)
+
+This is the single most significant architectural decision **not captured
+in the original proposal**.  It was implemented in Phase C of the toolkit
+development.
+
+### Motivation
+
+The original ``OpenSeesBuilder`` (legacy single-stage path) did all
+topology work (frame splitting, area meshing, node merging, edge
+detection) **every time** a builder was created.  Each analysis case
+(static, modal, pushover) repeated the same expensive operations.
+
+The two-stage pipeline splits this:
+
+```
+Stage 1 — Preprocessor (runs ONCE):
+    SAPModelData ──→ Preprocessor ──→ MeshModel
+                          │
+                          ├── split_elements
+                          ├── mesh_area_elements
+                          ├── merge_coincident_nodes
+                          ├── split_frames_at_shell_nodes
+                          ├── subdivide_shells
+                          └── detect_constraint_edges (opt-in)
+
+Stage 2 — AnalysisBuilder (runs per analysis case):
+    MeshModel ──→ AnalysisBuilder ──→ OpenSees domain
+                          │
+                          ├── build_domain()   ← lightweight, fast
+                          ├── run_static_analysis()
+                          ├── run_modal_analysis()
+                          ├── run_pushover_analysis()
+                          └── run_response_spectrum_analysis()
+```
+
+### Key design points
+
+- **``MeshModel``** is a frozen, serialisable dataclass holding all
+  topology, materials, sections, loads, and results metadata.  It is
+  created once by the Preprocessor and reused by every AnalysisBuilder.
+- **``AnalysisBuilder``** assumes the MeshModel is fully pre-processed.
+  It reads ``split_elements``, ``create_shells``, etc. from config but
+  only to control which subsets of the MeshModel to realise in OpenSees
+  — it never repeats topology work.
+- **``build_domain()``** calls ``ops.wipe()`` then recreates all nodes,
+  elements, materials, and sections from the MeshModel.  Each
+  AnalysisBuilder owns its own OpenSees domain; multiple builders can
+  exist concurrently with different configs (e.g. elastic vs. fiber).
+- **The legacy ``OpenSeesBuilder``** is still present for backward
+  compatibility but is deprecated for new development.
+
+### Current status
+
+| Component | Location | Status |
+|---|---|---|
+| ``Preprocessor`` | ``opensees/preprocessor.py`` | ✅ Complete |
+| ``MeshModel`` | ``model/mesh_model.py`` | ✅ Complete |
+| ``AnalysisBuilder`` | ``opensees/analysis_builder.py`` | ✅ Complete |
+| ``run_modal()`` (standalone) | ``opensees/analysis_builder.py`` | ✅ Complete |
+| ``run_pushover_4dir()`` | ``opensees/pushover.py`` | ✅ Complete |
+| ``run_linear_cases()`` | ``io/report.py`` | ✅ Complete |
+| ``run_all()`` (example orchestration) | ``local/…/pumphouse_report_v2.py`` | ⚠️ Project-specific, not generalised |
+
+---
+
 ## 4. Implementation Roadmap
 
 The issues identified in sections 3.1–3.7 are prioritised below.  The
@@ -708,13 +784,16 @@ dependency on other items.
 | **P3** | Joint modelling — Level 2 | 3.4 | Medium (builder change) | Enables semi-rigid connection modelling. Level 1 (rigid offset) exists; Level 2 replaces stiff links with calibrated zero-length springs (flexibility %). | ❌ Pending |
 | **P4** | Effective stiffness modifiers | 3.7 | Small | ASCE 41 cracked sections: 0.35EI beams, 0.70EI columns. AMod/I3Mod/I2Mod/JMod parsed from section properties; applied in builder for elastic builds only (skipped for nonlinear fiber sections). | ✅ Done |
 | **P5** | Rigid diaphragms | 3.7 | Medium (builder change) | Lateral load distribution differs from SAP2000. Parser stores constraint data, builder never calls `ops.rigidDiaphragm()`. | ❌ Pending |
-| **P6** | P-Delta geom. transformation | 3.7 | Small | Pushover already uses `geomTransf PDelta` via `push_config['geom_transf_type'] = 'PDelta'`. | ✅ Done |
+| **P6** | P-Delta geom. transformation | 3.7 | Small | Pushover config sets `geom_transf_type = 'PDelta'` via `rebuild_with_fiber_sections()`, but the `brace_selection` argument is never wired from `run_pushover_4dir`.  The code path is **dormant** — see docstring in `analysis_builder.py` for details. | ⚠️ Dormant |
 | **P7** | Convergence fallback | 3.7 | Medium (builder change) | Auto-retry chain (Newton → LineSearch → ModifiedNewton → KrylovNewton). Prevents analysis failure on marginally nonlinear models. | ❌ Pending |
 | **P8** | Concrete confinement | 3.7 | Medium (builder change) | Fiber sections overestimate column ductility without unconfined cover layer. Mander confinement formula fixed: effective lateral stress `f_l` now factored by confinement effectiveness coefficient `ke`. | ✅ Done |
 | **P9** | Modal pushover pattern | 3.7 | Small | Implemented as `lateral_load_type='mode1'` with `_compute_mode_shape_lateral_loads()`. | ✅ Done |
 | **P10** | Equation numbering (RCM) | 3.7 | Small | `ops.numberer('RCM')` used throughout — no `numberer Plain` remaining. | ✅ Done |
 | **P11** | Damping for dynamic | 3.7 | Medium (when added) | Rayleigh coefficients from target ζ at two frequencies. Not needed until `nonlinear_dynamic`. | ❌ Pending |
 | **—** | CI pipeline (verification suite) | 3.6 | Medium (CI setup) | Run `runVerificationSuite.tcl` automatically to catch regressions from toolkit changes. | ❌ Pending |
+| **R1** | Generalised orchestrator `generate_report()` | 5 | Medium | Extract pipeline orchestration from `pumphouse_report_v2.run_all()` into `fea_toolkit/report.py`.  Create `generate_report(md, mesh_model, config) → dict` that runs all stages and returns a standardised result dict.  `pumphouse_report_v2.run_all()` becomes a thin wrapper. | ❌ Pending |
+| **R2** | Tcl export from MeshModel | 8 | Medium | `export_model_to_tcl()` currently works from `SAPModelData` (legacy builder).  Add a MeshModel-aware path that emits topology + fiber sections for Xara / OpenSeesMP submission. | ❌ Pending |
+| **R3** | HPC job submission + result ingest | — | Large | Helper to submit Tcl to Xara (OpenSeesMP), wait for completion, parse output back into the unified NPZ/HDF5 schema.  Required for `admin_nonlinear.py`. | ❌ Pending |
 | **P0-dyn** | Tcl export for nonlinear RC | — | Medium | Nonlinear RC cannot run in OpenSeesPy. `export_model_to_tcl()` emits fiber sections + analysis commands. | ⚠️ Partial |
 | **P1-dyn** | Nonlinear dynamic analysis | — | Large | Ground-motion input, Newmark/HHT integrator, time-history output. Requires P0-dyn. | ❌ Pending |
 | **P2-dyn** | Validation suite | 3.6 | Ongoing | Collect PEER 2017/03, PEER 2015/01, Scott & Fenves (2006), SAC Steel benchmarks as regression tests. | ❌ Pending |
@@ -895,18 +974,19 @@ This can be wrapped into `render_report()`.
 
 ## 7. Migration Path from Current QMD Prototype
 
-The existing `local/` reports (e.g. `admin_report.qmd`, `pumphouse_report.qmd`)
+The existing `local/` reports (e.g. `admin_report.qmd`, `pumphouse_report_v2.qmd`)
 contain inline Python cells that combine computation and presentation.
 The migration strategy:
 
-| Step | What changes |
-|---|---|
-| **1. Separate config** | Extract model path, analysis options, and report settings into a standalone `config.yaml` |
-| **2. Add HDF5 storage** | Write a lightweight `HDF5Store` class; save results after each analysis |
-| **3. Refactor QMD** | Replace inline computation cells with HDF5 read + plot/table cells |
-| **4. Parametrise template** | Add `params` block to QMD header; make it read `params.hdf5_path` |
-| **5. Build orchestrator** | Create `generate_report()` that calls YAML → parse → analyse → store → render |
-| **6. CLI entry point** | Add `fea-toolkit report config.yaml` console script |
+| Step | What changes | Status |
+|---|---|---|
+| **1. Adopt Python-dict config** | The proposed YAML config was replaced by a Python ``_DEFAULT_CONFIG`` dict in each report script.  This is more flexible for programmatic use and avoids a YAML dependency. | ✅ Done (see ``pumphouse_report_v2.py``) |
+| **2. Add HDF5 storage** | ``unified_writer._write_h5()`` + ``npz_reader.read_results_hdf5()`` implemented.  Uses flat dict-of-arrays (same schema as NPZ). | ✅ Done |
+| **3. Generalise orchestration** | Extract pipeline orchestration from ``pumphouse_report_v2.run_all()`` into ``fea_toolkit/report.py`` as ``generate_report()``. | ❌ Pending (R1) |
+| **4. Refactor QMD** | Replace inline computation cells with HDF5 read + plot/table cells. | ⚠️ Partially done (``pumphouse_report_v2.qmd`` reads cached results) |
+| **5. Parametrise template** | Add ``params`` block to QMD header; make it read ``params.hdf5_path``. | ❌ Pending |
+| **6. Build orchestrator** | Create ``generate_report()`` that calls parse → preprocess → analyse → store → render. | ❌ Pending (R1) |
+| **7. CLI entry point** | Add ``fea-toolkit report config.yaml`` console script. | ❌ Pending |
 
 ---
 
