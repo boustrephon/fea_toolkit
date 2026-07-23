@@ -1054,23 +1054,21 @@ class TestShellSubdivision:
         assert len(result_areas["A2"].child_ids) == 0
 
     def test_shell_subdivision_in_builder(self, sample_shell_md):
-        """Shell subdivision via builder config creates sub-elements
+        """Shell subdivision via Preprocessor creates sub-elements
         and the build/analysis completes successfully.
         """
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
-        b = OpenSeesBuilder(sample_shell_md, {
-            'element_type': 'elasticBeamColumn',
-            'split_elements': False,
-            'verbose': False,
-            'create_shells': True,
-            'subdivide_shells': 2,
-            'use_preprocessor': False,
-        })
-        b.build()
+        cfg = {'element_type': 'elasticBeamColumn',
+               'split_elements': False, 'verbose': False,
+               'create_shells': True, 'subdivide_shells': 2}
+        mm = preprocess_model(sample_shell_md, cfg)
+        b = AnalysisBuilder(mm, cfg)
+        b.build_domain()
 
         # Parent area should be inactive with children
-        parent = b.model.area_elements.get("S1")
+        parent = mm.area_elements.get("S1")
         assert parent is not None
         assert parent.inactive is True
         assert len(parent.child_ids) == 4
@@ -1079,16 +1077,13 @@ class TestShellSubdivision:
         for j in range(2):
             for i in range(2):
                 sub_id = f"S1_sub_{j}_{i}"
-                sub = b.model.area_elements.get(sub_id)
+                sub = mm.area_elements.get(sub_id)
                 assert sub is not None, f"Missing sub-element {sub_id}"
                 assert not sub.inactive
                 assert sub.parent_id == "S1"
 
-        # Frame elements should be split at sub-edge nodes
-        if b.split_elements is not None:
-            total_frames = len(b.split_elements)
-        else:
-            total_frames = len(b.model.frame_elements)
+        # Frame elements (stored in MeshModel)
+        total_frames = len(mm.frame_elements)
         # Original 4 columns → should now have more after subdivision splitting
         assert total_frames >= 4
 
@@ -1106,19 +1101,19 @@ class TestShellSubdivision:
         )
         assert max_disp > 1e-8, "Slab shows no displacement under self-weight"
 
-        # Verify NPZ export includes the frame elements (4 columns).
+        # Verify export includes the frame elements (4 columns).
         # In this test model columns meet the slab only at endpoints,
         # so no frame splitting at sub-nodes occurs.
         import tempfile
         npz_path = str(tempfile.mkstemp(suffix=".npz")[1])
         try:
-            b.export_results_to_npz(npz_path, results)
+            b.export_results(npz_path, static_results={"DEAD": results})
             import numpy as np
             with np.load(npz_path, allow_pickle=True) as data:
-                # export_results_to_npz uses sub_* prefix for frame elements
-                assert "sub_elem_tags" in data
-                assert "sub_sap_ids" in data
-                sap_ids = list(data["sub_sap_ids"])
+                # Unified export uses frame_sap_id
+                assert "frame_sap_id" in data, \
+                    f"Keys: {list(data.keys())}"
+                sap_ids = list(data["frame_sap_id"])
                 # All 4 original columns should be present
                 assert len(sap_ids) >= 4, \
                     f"Expected ≥4 frame elements in NPZ, got {len(sap_ids)}"
@@ -1130,64 +1125,56 @@ class TestShellSubdivision:
         ops.wipe()
 
     def test_subdivision_npz_export(self, sample_shell_md, tmp_path):
-        """Shell subdivision is visible in NPZ export (model-data level)."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
-        from fea_toolkit.io.npz_writer import write_results_npz
+        """Shell subdivision is visible via export (model-data level)."""
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
-        b = OpenSeesBuilder(sample_shell_md, {
-            'element_type': 'elasticBeamColumn',
-            'split_elements': False,
-            'verbose': False,
-            'create_shells': True,
-            'subdivide_shells': 2,
-            'use_preprocessor': False,
-        })
-        b.build()
+        cfg = {'element_type': 'elasticBeamColumn',
+               'split_elements': False, 'verbose': False,
+               'create_shells': True, 'subdivide_shells': 2}
+        mm = preprocess_model(sample_shell_md, cfg)
+        b = AnalysisBuilder(mm, cfg)
+        b.build_domain()
         try:
             results = b.run_static_analysis(
                 pattern_scales={"DEAD": 1.0},
             )
             npz_path = str(tmp_path / "test_subdiv.npz")
-            b.export_results_to_npz(npz_path, results)
+            b.export_results(npz_path, static_results={"DEAD": results})
 
             data = dict(np.load(npz_path, allow_pickle=True))
-            # export_results_to_npz uses sub_* prefix, not shell_*
-            assert "sub_elem_tags" in data
-            assert "sub_sap_ids" in data
-            # Should include the sub-elements
-            sub_ids = list(data["sub_sap_ids"])
-            # The export format combines frames+shells as "sub_*"
-            # Check that at least the original 4 frame elements exist
-            assert len(sub_ids) >= 4
+            # Unified export uses frame_sap_id / shell_* arrays
+            assert "frame_sap_id" in data, \
+                f"Expected frame_sap_id, got keys: {list(data.keys())}"
+            assert "shell_sap_id" in data or "shell_eid" in data, \
+                f"Missing shell arrays. Keys: {list(data.keys())}"
+            # At least the original 4 frame elements exist
+            assert len(data["frame_sap_id"]) >= 4
         finally:
             ops.wipe()
 
     def test_unified_npz_includes_subdivided_shells(self, sample_shell_md, tmp_path):
-        """Unified NPZ writer includes subdivided shells as shell_* arrays."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
-        from fea_toolkit.io.npz_writer import write_results_npz
-        from fea_toolkit.io.npz_reader import read_results_npz
+        """Unified NPZ export includes subdivided shells as shell_* arrays."""
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
-        b = OpenSeesBuilder(sample_shell_md, {
-            'element_type': 'elasticBeamColumn',
-            'split_elements': False,
-            'verbose': False,
-            'create_shells': True,
-            'subdivide_shells': 2,
-            'use_preprocessor': False,
-        })
-        b.build()
+        cfg = {'element_type': 'elasticBeamColumn',
+               'split_elements': False, 'verbose': False,
+               'create_shells': True, 'subdivide_shells': 2}
+        mm = preprocess_model(sample_shell_md, cfg)
+        b = AnalysisBuilder(mm, cfg)
+        b.build_domain()
         try:
             results = b.run_static_analysis(
                 pattern_scales={"DEAD": 1.0},
             )
             npz_path = str(tmp_path / "test_unified_subdiv.npz")
-            write_results_npz(npz_path, b.model,
-                              static_results={"DEAD": results})
+            b.export_results(npz_path, static_results={"DEAD": results})
 
-            data = read_results_npz(npz_path)
+            import numpy as np
+            data = dict(np.load(npz_path, allow_pickle=True))
             # Unified format: shell_eid should contain sub-elements
-            assert "shell_eid" in data, "shell_eid missing from unified NPZ"
+            assert "shell_eid" in data, f"shell_eid missing. Keys: {list(data.keys())}"
             assert len(data["shell_eid"]) > 0, "shell_eid is empty"
 
             # shell_sap_id should contain the sub-element IDs
