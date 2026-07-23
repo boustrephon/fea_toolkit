@@ -2745,10 +2745,12 @@ class TestSubdividedBraceInPushover:
         )
 
     def test_subdivided_brace_builds_and_runs(self, brace_model):
-        """Builder with subdivided braces runs pushover without crash."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        """AnalysisBuilder with subdivided braces runs pushover without crash."""
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
-        b = OpenSeesBuilder(brace_model, {
+        mm = preprocess_model(brace_model, {'split_elements': False})
+        b = AnalysisBuilder(mm, {
             'element_type': 'forceBeamColumn',
             'create_fiber_sections': True,
             'geom_transf_type': 'Corotational',
@@ -2756,7 +2758,6 @@ class TestSubdividedBraceInPushover:
             'verbose': False,
         })
         b.set_brace_selection({"B1"}, end_offset=0.0)
-        b.build()
 
         # Run a quick pushover to verify the pipeline holds
         results = b.run_pushover_analysis(
@@ -2774,9 +2775,11 @@ class TestSubdividedBraceInPushover:
 
     def test_check_buckling_after_pushover(self, brace_model):
         """Can check Euler buckling of braces (analytical, no OpenSees needed)."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
-        b = OpenSeesBuilder(brace_model, {
+        mm = preprocess_model(brace_model, {'split_elements': False})
+        b = AnalysisBuilder(mm, {
             'element_type': 'forceBeamColumn',
             'create_fiber_sections': True,
             'split_elements': False,
@@ -3418,19 +3421,20 @@ class TestBuilderHingeModel:
         assert Lp == pytest.approx(1.98, abs=0.01)
 
     def test_lumped_hinge_build_invokes_create_lumped_hinges(self):
-        """build() with hinge_model='lumped' exercises _create_lumped_hinges."""
+        """build_domain() with hinge_model='lumped' exercises _create_lumped_hinges."""
         import openseespy.opensees as ops
         from examples.sample_model import make_sample_model
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         md = make_sample_model()
-        b = OpenSeesBuilder(md, {
+        mm = preprocess_model(md, {'split_elements': False})
+        b = AnalysisBuilder(mm, {
             'element_type': 'elasticBeamColumn',
             'hinge_model': 'lumped',
             'verbose': False,
-            'use_preprocessor': False,
         })
         try:
-            b.build()
+            b.build_domain()
             node_tags = ops.getNodeTags()
             ele_tags = ops.getEleTags()
             # Original model has 2 nodes + 1 element.

@@ -179,28 +179,25 @@ class AnalysisBuilder:
         """Rebuild the OpenSees domain with fiber sections for pushover.
 
         Calls :meth:`build_domain` with config overrides that enable fiber
-        sections and force-based beam-column elements.
+        sections and dispBeamColumn elements.
 
         Args:
-            brace_selection: Optional set of brace element IDs.  When
-                provided, braces use ``PDelta`` geometry and hardened
-                solver settings.
+            brace_selection: Optional set of brace element IDs to
+                subdivide with initial imperfection (Approach A).
+                When provided, the builder stores the selection and
+                enables ``subdivide_braces`` so that
+                :meth:`_create_elements` will subdivide each brace
+                into *brace_n_segments* segments with an initial
+                sinusoidal imperfection.
             pushover_spring_scale: Scale factor for edge constraint
                 spring stiffness on rebuild (default 1.0).
 
         Note:
-            The ``PDelta`` path via *brace_selection* is dormant — the
-            field is never populated from the calling code
-            (``run_pushover_4dir`` in ``pushover.py``).  There were
-            concerns about compatibility between ``PDelta`` geometric
-            transformation and brace elements created as ``Truss``
-            (which don't accept a ``geomTransf`` at all).  The
-            ``brace_truss`` path uses 2-node truss elements with
-            ``Hysteretic`` material where PDelta is irrelevant; the
-            ``subdivide_braces`` path uses ``dispBeamColumn`` elements
-            where PDelta could apply, but it was never wired up.
-            The block is preserved for future use once a safe wiring
-            path is established.
+            Braces are subdivided at domain creation time (in
+            :meth:`_create_elements`), not deferred to analysis.
+            The subdivided elements use ``PDelta`` geometric
+            transformation by default, which is required for
+            buckling to develop under compression.
         """
         overrides: Dict[str, Any] = {
             'element_type': 'dispBeamColumn',
@@ -209,6 +206,8 @@ class AnalysisBuilder:
         }
         if brace_selection:
             overrides['geom_transf_type'] = 'PDelta'
+            overrides['subdivide_braces'] = True
+            self._brace_selection = brace_selection
 
         self.build_domain(config_overrides=overrides)
 
@@ -1232,12 +1231,63 @@ class AnalysisBuilder:
 
             self._add_beam_column(elem, tag, elements, assignments)
 
-        # Brace subdivision
-        if self.config.get('subdivide_braces', False):
+        # Brace subdivision (Approach A: subdivided elements + imperfection)
+        if self.config.get('subdivide_braces') and self._brace_selection:
             n_seg = self.config.get('brace_n_segments', 4)
             imperf = self.config.get('brace_imperfection_ratio', 1.0 / 500.0)
-            subdivide_elements(self, elements, assignments,
-                               n_segments=n_seg, imperfection_ratio=imperf)
+            end_off = self.config.get('brace_end_offset', 0.0)
+            nodes = self.mesh_model.nodes
+            max_elem_tag = max((e.elem_tag for e in elements.values()), default=0)
+            max_node_tag = max((nd.node_tag for nd in nodes.values()), default=0)
+            try:
+                max_ops_tag = max(ops.getEleTags(), default=0)
+            except Exception:
+                max_ops_tag = 0
+            max_rigid_tag = max((r[3] for r in self._offset_rigid_links), default=0)
+            next_tag = max(max_elem_tag, max_node_tag, max_ops_tag, max_rigid_tag) + 1
+            elements, assignments, nodes, next_tag, rigid_links = subdivide_elements(
+                elements, assignments, nodes,
+                n_segments=n_seg,
+                imperfection_ratio=imperf,
+                brace_ids=self._brace_selection,
+                end_offset=end_off,
+                next_tag=next_tag,
+            )
+            # Update mesh model references with subdivided topology
+            self.mesh_model.frame_elements = elements
+            self.mesh_model.frame_assignments = assignments
+            self.mesh_model.nodes = nodes
+            # Create OpenSees nodes for subdivision / offset nodes
+            for nd in nodes.values():
+                if nd.node_tag not in self._created_node_tags:
+                    ops.node(nd.node_tag, nd.x, nd.y, nd.z)
+                    self._created_node_tags.add(nd.node_tag)
+            # Create rigid link elements (same pattern as offset rigid links)
+            if rigid_links:
+                all_sec_tags = set(self.section_tags.values())
+                all_sec_tags.update(self._shell_sec_tags.values())
+                all_sec_tags.update(self._shell_sec_variants.values())
+                rigid_section_tag = max(all_sec_tags, default=0) + 1
+                rigid_E = 2.0e14
+                rigid_A = 1.0
+                rigid_I = 1.0
+                ops.section('Elastic', rigid_section_tag, rigid_E, rigid_A,
+                            rigid_I, rigid_I, rigid_E / 2.6, rigid_I)
+                for _link_id, _node_i_id, _node_j_id, link_tag in rigid_links:
+                    nd_i = nodes.get(_node_i_id)
+                    nd_j = nodes.get(_node_j_id)
+                    if nd_i is None or nd_j is None:
+                        continue
+                    ni_tag = nd_i.node_tag
+                    nj_tag = nd_j.node_tag
+                    dx = float(nd_j.x - nd_i.x)
+                    dy = float(nd_j.y - nd_i.y)
+                    dz = float(nd_j.z - nd_i.z)
+                    vecxz = get_SAP_vecxz(np.array([dx, dy, dz]), 0.0)
+                    ops.geomTransf('Linear', link_tag, *vecxz)
+                    ops.element('elasticBeamColumn', link_tag, ni_tag, nj_tag,
+                                rigid_section_tag, link_tag, '-mass', 0.0)
+                    self._rigid_link_elems[_link_id] = link_tag
 
         # Rigid links from frame end offsets
         # The Preprocessor returns (link_id, node_i, node_j, link_tag) tuples.
@@ -1365,11 +1415,239 @@ class AnalysisBuilder:
                 ops.beamIntegration('HingeRadau', int_tag, sec_tag, Lp, sec_tag, Lp, sec_tag)
             ops.element(elem_type, tag, *[ni.node_tag, nj.node_tag], transf_tag, int_tag)
 
+    # ── Brace selection (Approach A) ─────────────────────────────
+
+    def set_brace_selection(self, brace_ids: set, end_offset: float = 0.0) -> None:
+        """Mark specific frame elements as braces for subdivision.
+
+        Call **before** :meth:`build_domain` or
+        :meth:`rebuild_with_fiber_sections`.  The elements identified by
+        *brace_ids* will be subdivided into *brace_n_segments* segments
+        with an initial imperfection (Approach A — subdivided element
+        with initial geometric imperfection to capture buckling).
+
+        Args:
+            brace_ids: Set of frame element ID strings to treat as braces.
+            end_offset: Distance from each working point to the gusset
+                plate face (model length units).  Creates rigid link
+                segments between the working point and the brace
+                physical end.  Default 0.0 (no offset).
+        """
+        self._brace_selection = brace_ids
+        self.config['subdivide_braces'] = True
+        if end_offset > 0:
+            self.config['brace_end_offset'] = end_offset
+
+    def check_brace_buckling(
+        self,
+        brace_ids: Optional[set] = None,
+        K: float = 1.0,
+        axial_demand: Optional[Dict[str, float]] = None,
+        print_results: bool = True,
+    ) -> Dict[str, Dict[str, float]]:
+        """Check selected braces against Euler buckling.
+
+        Delegates to :func:`fea_toolkit.model.checks.check_brace_buckling`.
+
+        Args:
+            brace_ids: Set of element IDs to check.  Defaults to
+                the stored ``_brace_selection``.
+            K: Effective length factor (default 1.0).
+            axial_demand: Optional ``{elem_id: axial_force_N}`` dict.
+            print_results: If True, print a summary table.
+
+        Returns:
+            Dict of ``{elem_id: {P_cr, P_demand, ratio, slenderness, ...}}``.
+        """
+        from ..model.checks import check_brace_buckling as _check_buckling
+        if brace_ids is None:
+            brace_ids = self._brace_selection or set()
+        return _check_buckling(self.mesh_model, brace_ids, K, axial_demand, print_results)
+
     # ── Lumped hinges ────────────────────────────────────────────
 
     def _create_lumped_hinges(self) -> None:
-        """Create zero-length hinge elements (stub — extended by subclasses)."""
-        pass
+        """Replace frame elements with lumped plasticity hinges.
+
+        Activated via ``config['hinge_model'] = 'lumped'``.
+
+        Each frame element is split into::
+
+            structural_node_i → hinge_i → elastic_mid → hinge_j → structural_node_j
+
+        Coincident hinge nodes sit at the same coordinates.  Translation
+        DOFs (1,2,3) are tied with ``equalDOF`` so only rotations (4,5,6)
+        are released across the zero-length hinge elements.
+
+        Hinge backbones use ``Hysteretic`` materials matched to ASCE 41
+        rotation limits.
+        """
+        if self.config.get('hinge_model') != 'lumped':
+            return
+
+        elements = self.mesh_model.frame_elements
+        assignments = self.mesh_model.frame_assignments
+
+        next_node_tag = max((nd.node_tag for nd in self.mesh_model.nodes.values()),
+                            default=0) + 1
+        next_tag = max((e.elem_tag for e in elements.values() if not e.inactive),
+                       default=0) + 1
+        # Separate counter for hinge section/material tags, seeded high
+        # to avoid collision with existing tags.
+        hinge_tag_base = (max((v for v in self.section_tags.values()), default=0)
+                          + len(self.section_tags) + 100)
+        hinge_sec_tag = hinge_tag_base
+        hinge_mat_tag = hinge_tag_base + len(self.section_tags) + 1
+
+        new_elements: Dict[str, FrameElement] = {}
+        new_assignments: Dict[str, str] = {}
+
+        for eid, elem in list(elements.items()):
+            if elem.inactive:
+                new_elements[eid] = elem
+                continue
+
+            sec_name = assignments.get(eid) if assignments else None
+            if not sec_name or sec_name not in self.section_tags:
+                new_elements[eid] = elem
+                continue
+
+            ni = self.mesh_model.nodes.get(elem.node_i)
+            nj = self.mesh_model.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                new_elements[eid] = elem
+                continue
+
+            L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+            if L < 1e-12:
+                new_elements[eid] = elem
+                continue
+
+            # Type-specific section tag lookup
+            etype = self._frame_element_types.get(eid)
+            type_key = f"{sec_name}__{etype}" if etype else None
+            if type_key and type_key in self.section_tags:
+                sec_tag = self.section_tags[type_key]
+            else:
+                sec_tag = self.section_tags[sec_name]
+            sec = self.mesh_model.sections.get(sec_name)
+            if sec is None:
+                new_elements[eid] = elem
+                continue
+
+            # --- Create coincident hinge nodes ---
+            hinge_i_id = f"{eid}_hinge_i"
+            hinge_j_id = f"{eid}_hinge_j"
+            hinge_i_tag = next_node_tag
+            next_node_tag += 1
+            hinge_j_tag = next_node_tag
+            next_node_tag += 1
+
+            self.mesh_model.nodes[hinge_i_id] = Node(
+                node_id=hinge_i_id, node_tag=hinge_i_tag,
+                x=ni.x, y=ni.y, z=ni.z,
+            )
+            self.mesh_model.nodes[hinge_j_id] = Node(
+                node_id=hinge_j_id, node_tag=hinge_j_tag,
+                x=nj.x, y=nj.y, z=nj.z,
+            )
+
+            # Create OpenSees nodes for coincident hinge nodes
+            ops.node(hinge_i_tag, ni.x, ni.y, ni.z)
+            ops.node(hinge_j_tag, nj.x, nj.y, nj.z)
+            self._created_node_tags.update([hinge_i_tag, hinge_j_tag])
+
+            # Tie translation DOFs between structural and hinge nodes
+            ops.equalDOF(ni.node_tag, hinge_i_tag, 1, 2, 3)
+            ops.equalDOF(nj.node_tag, hinge_j_tag, 1, 2, 3)
+
+            # --- Create Hysteretic hinge section ---
+            mat = self.mesh_model.materials.get(sec.material)
+
+            if mat and mat.type and 'concrete' in mat.type.lower():
+                Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
+                E = mat.E_mod if mat.E_mod > 0 else 2.5e10
+                My = Fy * (sec.Z33 if sec.Z33 else sec.I33 / (L * 0.5))
+                My_weak = Fy * (sec.Z22 if sec.Z22 else sec.I22 / (L * 0.5))
+            else:
+                # Steel: use section yield moment
+                Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
+                E = mat.E_mod if mat.E_mod > 0 else 2.0e11
+                My = Fy * (sec.Z33 if sec.Z33 else sec.I33 / (L * 0.5))
+                My_weak = Fy * (sec.Z22 if sec.Z22 else sec.I22 / (L * 0.5))
+
+            # ASCE 41 plastic hinge length for yield rotation scaling
+            from ..model.checks import compute_asce41_hinge_length
+            Lp = compute_asce41_hinge_length(self.mesh_model, sec_name, L)
+            theta_y = (My * Lp) / (max(6.0 * E * sec.I33, 1e-12)) if E * sec.I33 > 0 else 0.005
+            theta_y_weak = (My_weak * Lp) / (max(6.0 * E * sec.I22, 1e-12)) if E * sec.I22 > 0 else 0.005
+            theta_cap = theta_y * 6.0
+            theta_cap_weak = theta_y_weak * 6.0
+
+            # Axial material (elastic)
+            ops.uniaxialMaterial('Elastic', hinge_mat_tag, sec.A * E / L)
+            # Strong-axis moment (Hysteretic backbone)
+            ops.uniaxialMaterial('Hysteretic', hinge_mat_tag + 1,
+                                 My, theta_y, My * 1.1, theta_cap,
+                                 -My, -theta_y, -My * 1.1, -theta_cap,
+                                 1.0, 1.0, 0.0, 0.0, 0.0)
+            # Weak-axis moment
+            ops.uniaxialMaterial('Hysteretic', hinge_mat_tag + 2,
+                                 My_weak, theta_y_weak, My_weak * 1.1, theta_cap_weak,
+                                 -My_weak, -theta_y_weak, -My_weak * 1.1, -theta_cap_weak,
+                                 1.0, 1.0, 0.0, 0.0, 0.0)
+            # Torsion (elastic — no inelastic torsion expected)
+            G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * E
+            ops.uniaxialMaterial('Elastic', hinge_mat_tag + 3,
+                                 G * sec.J / L if sec.J else 1e6)
+
+            ops.section('Aggregator', hinge_sec_tag,
+                        hinge_mat_tag, 'P',
+                        hinge_mat_tag + 1, 'Mz',
+                        hinge_mat_tag + 2, 'My',
+                        hinge_mat_tag + 3, 'T')
+            hinge_sec_tag += 1
+            hinge_mat_tag += 4
+
+            # Get local axes for element orientation
+            try:
+                vx, vy, vz = self._get_local_axes(elem)
+                orient = (vx[0], vx[1], vx[2], vz[0], vz[1], vz[2])
+            except Exception:
+                orient = None
+
+            # --- Create zero-length hinge elements ---
+            hinge_i_elem_tag = next_tag
+            next_tag += 1
+            if orient:
+                ops.element('zeroLengthSection', hinge_i_elem_tag,
+                            ni.node_tag, hinge_i_tag, hinge_sec_tag - 1,
+                            '-orient', orient[0], orient[1], orient[2],
+                            orient[3], orient[4], orient[5])
+            else:
+                ops.element('zeroLengthSection', hinge_i_elem_tag,
+                            ni.node_tag, hinge_i_tag, hinge_sec_tag - 1)
+
+            hinge_j_elem_tag = next_tag
+            next_tag += 1
+            if orient:
+                ops.element('zeroLengthSection', hinge_j_elem_tag,
+                            hinge_j_tag, nj.node_tag, hinge_sec_tag - 1,
+                            '-orient', orient[0], orient[1], orient[2],
+                            orient[3], orient[4], orient[5])
+            else:
+                ops.element('zeroLengthSection', hinge_j_elem_tag,
+                            hinge_j_tag, nj.node_tag, hinge_sec_tag - 1)
+
+            # --- Shorten original element to span between hinge nodes ---
+            elem.node_i = hinge_i_id
+            elem.node_j = hinge_j_id
+            new_elements[eid] = elem
+            new_assignments[eid] = sec_name
+
+        # Update collections
+        self.mesh_model.frame_elements = new_elements
+        self.mesh_model.frame_assignments = new_assignments
 
     # ── Loads ────────────────────────────────────────────────────
 
