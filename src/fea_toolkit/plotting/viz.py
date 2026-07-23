@@ -3582,14 +3582,15 @@ def plot_model_comparison(
     the original model geometry with the split/meshed model.
 
     When *mesh_model* is provided, uses it directly (no re-build needed).
-    Otherwise falls back to the builder path.
+    Otherwise falls back to the two-stage build path.
     """
     import copy
     from pathlib import Path
     import pyvista as pv
     from fea_toolkit.model.sap_data import Restraint
     from fea_toolkit.model.selection import Selection
-    from fea_toolkit.opensees.builder import OpenSeesBuilder
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
     if LOADS_ONLY is None:
         LOADS_ONLY = set()
@@ -3614,33 +3615,37 @@ def plot_model_comparison(
                 setattr(s, attr, getattr(s, attr) * 0.01)
 
     if mesh_model is not None:
-        builder = OpenSeesBuilder(md_copy, {
+        _mm = mesh_model
+        # Build domain from existing MeshModel
+        builder = AnalysisBuilder(_mm, {
             "element_type": "elasticBeamColumn",
-            "split_elements": True,
-            "create_shells": True,
             "verbose": False,
         })
-        # Wire the existing MeshModel into the builder so it skips the Preprocessor
-        builder._mesh_model = mesh_model
-        builder.build()
+        builder.build_domain()
     else:
         sel = Selection(sections=list(LOADS_ONLY), element_types=["Area"])
-        builder = OpenSeesBuilder(md_copy, {
+        _mm = preprocess_model(md_copy, {
             "element_type": "elasticBeamColumn",
             "split_elements": True,
             "create_shells": True,
             "verbose": False,
         })
-        builder.build(selection=sel)
+        builder = AnalysisBuilder(_mm, {
+            "element_type": "elasticBeamColumn",
+            "verbose": False,
+        })
+        builder.build_domain()
 
     import openseespy.opensees as ops
     ops.wipe()
 
+    mm = getattr(builder, 'mesh_model', None)
     if off_screen:
-        return _save_comparison_images(md, builder, LOADS_ONLY, out_dir)
-    _run_interactive_viewer(md, builder, LOADS_ONLY)
+        return _save_comparison_images(md, builder, LOADS_ONLY, out_dir,
+                                       mesh_model=mm)
+    _run_interactive_viewer(md, builder, LOADS_ONLY, mesh_model=mm)
 
-def _save_comparison_images(md, builder, LOADS_ONLY, out_dir):
+def _save_comparison_images(md, builder, LOADS_ONLY, out_dir, mesh_model=None):
     """Save PNG screenshots of original and meshed views."""
     from pathlib import Path
     import pyvista as pv
@@ -3660,7 +3665,8 @@ def _save_comparison_images(md, builder, LOADS_ONLY, out_dir):
     plotter.close()
 
     plotter = pv.Plotter(off_screen=True, window_size=[1400, 900])
-    _add_meshed_geometry(plotter, md, builder, LOADS_ONLY)
+    _add_meshed_geometry(plotter, md, builder, LOADS_ONLY,
+                          mesh_model=getattr(builder, 'mesh_model', None))
     plotter.view_isometric()
     plotter.show(auto_close=False)
     plotter.screenshot(mesh_png)
@@ -3726,12 +3732,18 @@ def _add_original_geometry(plotter, md):
                      point_size=12, style='points',
                      render_points_as_spheres=True)
 
-def _add_meshed_geometry(plotter, md, builder, LOADS_ONLY):
+def _add_meshed_geometry(plotter, md, builder, LOADS_ONLY, mesh_model=None):
     """Add meshed (split frames + shells) geometry actors to a plotter."""
     import pyvista as pv
-    mesh_frames = builder.split_elements or builder.model.frame_elements
-    mesh_assign = builder.split_assignments or builder.model.frame_assignments
-    mesh_coords = {nid: (nd.x, nd.y, nd.z) for nid, nd in builder.model.nodes.items()}
+    mm = mesh_model or getattr(builder, 'mesh_model', None)
+    if mm is not None:
+        mesh_frames = mm.frame_elements
+        mesh_assign = mm.frame_assignments
+        mesh_coords = {nid: (nd.x, nd.y, nd.z) for nid, nd in mm.nodes.items()}
+    else:
+        mesh_frames = builder.split_elements or builder.model.frame_elements
+        mesh_assign = builder.split_assignments or builder.model.frame_assignments
+        mesh_coords = {nid: (nd.x, nd.y, nd.z) for nid, nd in builder.model.nodes.items()}
 
     FRAME_SHRINK = 0.9
 
@@ -3760,9 +3772,11 @@ def _add_meshed_geometry(plotter, md, builder, LOADS_ONLY):
 
     all_verts, all_faces, cell_cols = [], [], []
     off = 0
-    for aid, area in builder.model.area_elements.items():
+    _area_elems = mm.area_elements if mm is not None else builder.model.area_elements
+    _area_asgn = mm.area_assignments if mm is not None else builder.model.area_assignments
+    for aid, area in _area_elems.items():
         if getattr(area, 'inactive', False): continue
-        sec_name = builder.model.area_assignments.get(aid, '')
+        sec_name = _area_asgn.get(aid, '')
         if sec_name in LOADS_ONLY: continue
         if len(area.node_ids) < 3: continue
         verts = []
@@ -3800,13 +3814,14 @@ def _add_meshed_geometry(plotter, md, builder, LOADS_ONLY):
                              point_size=20, style='points',
                              render_points_as_spheres=True)
 
-def _run_interactive_viewer(md, builder, LOADS_ONLY):
+def _run_interactive_viewer(md, builder, LOADS_ONLY, mesh_model=None):
     """Open an interactive PyVista window with original/meshed toggle."""
     import pyvista as pv
     pv.set_plot_theme("document")
     plotter = pv.Plotter(window_size=[1400, 900])
     _add_original_geometry(plotter, md)
-    _add_meshed_geometry(plotter, md, builder, LOADS_ONLY)
+    _add_meshed_geometry(plotter, md, builder, LOADS_ONLY,
+                          mesh_model=mesh_model)
     plotter.set_background('white')
     plotter.view_isometric()
     plotter.show()
