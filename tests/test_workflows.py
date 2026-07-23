@@ -94,9 +94,8 @@ class TestBuildWorkflow:
     def test_rebuild_preserves_geometry(self, sample_md):
         """Rebuilding with different pattern scales does not corrupt the model.
 
-        Uses Preprocessor + AnalysisBuilder.  Multiple calls to
-        run_static_analysis with different pattern_scales internally
-        rebuilds the domain each time.
+        Captures node coordinates and element tags after the first
+        rebuild, then asserts they are unchanged after the second rebuild.
         """
         from fea_toolkit.opensees.preprocessor import preprocess_model
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
@@ -107,9 +106,22 @@ class TestBuildWorkflow:
         try:
             b.build_domain()
             r1 = b.run_static_analysis(pattern_scales={"DEAD": 1.0})
+            # Capture geometry after first rebuild
+            node_tags_1 = sorted(ops.getNodeTags())
+            coords_1 = {t: tuple(ops.nodeCoord(t)) for t in node_tags_1}
+            ele_tags_1 = sorted(ops.getEleTags())
+
             r2 = b.run_static_analysis(pattern_scales={"DEAD": 1.0, "WIND": 0.5})
+            # Capture geometry after second rebuild
+            node_tags_2 = sorted(ops.getNodeTags())
+            coords_2 = {t: tuple(ops.nodeCoord(t)) for t in node_tags_2}
+            ele_tags_2 = sorted(ops.getEleTags())
+
             assert r1 is not None
             assert r2 is not None
+            assert node_tags_1 == node_tags_2, "Node tags changed on rebuild"
+            assert coords_1 == coords_2, "Node coordinates changed on rebuild"
+            assert ele_tags_1 == ele_tags_2, "Element tags changed on rebuild"
         finally:
             ops.wipe()
 
