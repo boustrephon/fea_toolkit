@@ -134,9 +134,6 @@ def generate_report(
     out_dir : str, optional
         Output directory for cached results and exported figures.
         Defaults to ``./output``.
-    run_via_manager : bool
-        Deprecated and ignored.  The :class:`AnalysisManager` path is
-        always used.  Kept for backward compatibility.
     **overrides
         Flat override keys using ``__`` as a nesting separator,
         e.g. ``general__n_modes=6``.  Applied after *config*.
