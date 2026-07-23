@@ -58,7 +58,7 @@ class RhinoImporter:
 
         The MeshModel's prepared topology (split frames, meshed shells,
         subdivided areas) is used directly — no need to build an
-        ``OpenSeesBuilder`` first.
+        ``AnalysisBuilder`` first.
 
         Usage::
 

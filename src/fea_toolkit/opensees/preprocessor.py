@@ -42,7 +42,7 @@ class Preprocessor:
 
     Args:
         config: Builder configuration dict (same keys as
-            :class:`~fea_toolkit.opensees.builder.OpenSeesBuilder`).
+            :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder`).
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):

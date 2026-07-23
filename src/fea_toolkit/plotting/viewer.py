@@ -62,7 +62,7 @@ class ModelViewer:
     rendering to a pluggable backend (PyVista, Rhino, etc.).
 
     Args:
-        builder: An ``OpenSeesBuilder`` instance that has been built.
+        builder: An ``AnalysisBuilder`` instance that has been built.
             If ``None``, provide *model_data* instead.
         model_data: A ``SAPModelData`` instance.  Ignored if *builder*
             is provided.

@@ -179,7 +179,7 @@ def plot_model_3d(
        and NPZ data and supports all features of this function.
 
     Args:
-        builder: An ``OpenSeesBuilder`` instance that has been built.
+        builder: An ``AnalysisBuilder`` instance that has been built.
         show_nodes: If True, draw node markers.
         show_labels: If True, label nodes with their tags.
         color_by_section: If True, colour elements by section name.
@@ -797,7 +797,7 @@ def plot_mesh(source, *,
 
     Single‑model viewer — accepts either:
 
-    * An ``OpenSeesBuilder`` or ``AnalysisBuilder`` instance (built).
+    * An ``AnalysisBuilder`` instance (built).
     * A dict loaded from a unified NPZ file (via ``np.load()``).
 
     Args:
@@ -887,7 +887,7 @@ def plot_deformed_3d(
        by displacement magnitude and value labels.
 
     Args:
-        builder: Built ``OpenSeesBuilder``.
+        builder: Built ``AnalysisBuilder``.
         results: Output dict from ``builder.run_static_analysis()`` containing
                  ``nodal_displacements``.
         scale: Displacement magnification factor.
@@ -996,7 +996,7 @@ def plot_rs_deformed_3d(
        by displacement magnitude and value labels.
 
     Args:
-        builder: Built ``OpenSeesBuilder``.
+        builder: Built ``AnalysisBuilder``.
         rs_displacements: Dict from
             ``builder.compute_rs_nodal_displacements()`` mapping
             ``node_tag → (dx, dy, dz)``.
@@ -1127,7 +1127,7 @@ def plot_deformed_displacement_3d(
     Works with any data source (builder, AnalysisBuilder, or NPZ dict).
 
     Args:
-        source: ``OpenSeesBuilder``, ``AnalysisBuilder``, or NPZ data dict.
+        source: ``AnalysisBuilder``, or NPZ data dict.
         displacements: Dict mapping ``node_tag`` → ``(dx, dy, dz)`` in model
             length units (e.g. metres).  For static analyses, pass the
             ``nodal_displacements`` dict from ``run_static_analysis()``.
@@ -1161,7 +1161,7 @@ def plot_deformed_displacement_3d(
     Example::
 
         # Static analysis
-        b = OpenSeesBuilder(md, ...)
+        b = AnalysisBuilder(mm, ...)
         b.build()
         results = b.run_static_analysis(pattern_scales={"Wind +X": 1.0})
         plot_deformed_displacement_3d(b, results["nodal_displacements"],
@@ -1347,12 +1347,12 @@ def plot_mode_3d(
        builder and NPZ data and supports all features of this function.
 
     For each mode, the eigenvector displacements from
-    :meth:`OpenSeesBuilder.extract_mode_shapes` are applied as a deformed
+    :meth:`AnalysisBuilder.extract_mode_shapes` are applied as a deformed
     shape, scaled by *scale*.  When *animate* is ``True`` the amplitude
     oscillates sinusoidally, giving a visual feel for the vibration pattern.
 
     Args:
-        builder: Built ``OpenSeesBuilder``.
+        builder: Built ``AnalysisBuilder``.
         mode_shapes: Output of ``builder.extract_mode_shapes(num_modes)``.
         mode: 0‑based mode index to display.
         scale: Displacement magnification factor.
@@ -1619,7 +1619,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
 
     Works with either:
 
-    * An ``OpenSeesBuilder`` or ``AnalysisBuilder`` (built) + mode shapes
+    * An ``AnalysisBuilder`` (built) + mode shapes
       from ``extract_mode_shapes()``.
     * An NPZ data dict (from ``np.load()``) + mode shapes from the
       ``modal/mode_dx``, ``modal/mode_dy``, ``modal/mode_dz`` arrays.
@@ -1787,7 +1787,7 @@ def plot_force_diagram_3d(source, force_data=None, *,
 
     Works with either:
 
-    * An ``OpenSeesBuilder`` / ``AnalysisBuilder`` (built) + a force dict
+    * An ``AnalysisBuilder`` (built) + a force dict
       from ``extract_static_element_forces()``.
     * An NPZ data dict (from ``np.load()``) — forces are read from the
       ``static/{combo}/`` arrays automatically.
@@ -2208,7 +2208,7 @@ def plot_static_moment_3d(
     drawn as coloured arrows (red = horizontal, green = vertical).
 
     Args:
-        builder: Built ``OpenSeesBuilder``.
+        builder: Built ``AnalysisBuilder``.
         elem_forces: Dict from ``builder.extract_static_element_forces()``.
         quantity: ``'My'`` or ``'Mz'``.
         mode: ``'flag'`` (extruded flags) or ``'tube'`` (colour‑coded tubes).
@@ -2582,7 +2582,7 @@ def plot_static_force_diagram(
 
     When ``use_local=True`` (default), forces are transformed from global
     to **local** coordinates using the element's local axes
-    (:meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder._get_local_axes`).
+    (:meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder._get_local_axes`).
     This ensures that the quantity has a consistent physical meaning
     regardless of member orientation:
 
@@ -2611,7 +2611,7 @@ def plot_static_force_diagram(
     variation along their span.
 
     Args:
-        builder: Built ``OpenSeesBuilder``.
+        builder: Built ``AnalysisBuilder``.
         elem_forces: Dict from ``builder.extract_static_element_forces()``.
         quantity: Force key — ``'Fx'``, ``'Fy'``, ``'Fz'``,
                   ``'Mx'``, ``'My'``, ``'Mz'``.
@@ -2848,7 +2848,7 @@ def plot_pushover_curve(
 
     Args:
         pushover_results: Output dict from
-            :meth:`OpenSeesBuilder.run_pushover_analysis`.
+            :meth:`AnalysisBuilder.run_pushover_analysis`.
         title: Optional title.  Auto‑generated if omitted.
         figsize: Matplotlib figure size ``(width, height)``.
         **kwargs: Passed to ``matplotlib.pyplot.plot()``.
@@ -2902,7 +2902,7 @@ def plot_pushover_curve_enhanced(
 
     Args:
         pushover_results: Dict with ``'control_disp'`` and ``'base_shear'``
-            keys (lists or arrays).  The :meth:`OpenSeesBuilder.run_pushover_analysis`
+            keys (lists or arrays).  The :meth:`AnalysisBuilder.run_pushover_analysis`
             output uses kN; Tcl‑based output may use N — use *unit_conversion*.
         title: Plot title.  Auto‑generated if omitted.
         figsize: Matplotlib figure size ``(width, height)``.
@@ -3005,13 +3005,13 @@ def plot_capacity_spectrum(
 
     Args:
         capacity_adrs: ADRS curve from
-            :meth:`OpenSeesBuilder.pushover_to_adrs` (dict with keys
+            :meth:`AnalysisBuilder.pushover_to_adrs` (dict with keys
             ``'S_a'`` and ``'S_d'``).
         spectrum_periods: Periods (s) defining the elastic demand spectrum.
         spectrum_accels: Spectral accelerations (m/s²) corresponding to
             *spectrum_periods*.
         performance_point: Optional result dict from
-            :meth:`OpenSeesBuilder.compute_performance_point`.  If provided
+            :meth:`AnalysisBuilder.compute_performance_point`.  If provided
             the bilinear yield point and performance point are annotated.
         title: Optional title.  Auto‑generated if omitted.
         figsize: Matplotlib figure size ``(width, height)``.
@@ -3110,8 +3110,8 @@ def plot_capacity_spectrum(
 # Standalone NPZ plotter
 #
 # These functions load a .npz results file (exported by
-# OpenSeesBuilder.export_results_to_npz) and generate plots without
-# needing the original OpenSeesBuilder or model objects.
+# AnalysisBuilder.export_results_to_npz) and generate plots without
+# needing the original AnalysisBuilder or model objects.
 # =========================================================================
 
 
@@ -3216,8 +3216,8 @@ def plot_npz_force_diagram(
     """2D diagram of a local force quantity vs elevation from an NPZ file.
 
     This is a **standalone** function — it does **not** require any
-    ``OpenSeesBuilder`` or model objects.  Just pass the path to a
-    ``.npz`` file created by :meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.export_results_to_npz`.
+    ``AnalysisBuilder`` or model objects.  Just pass the path to a
+    ``.npz`` file created by :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.export_results_to_npz`.
 
     Parameters
     ----------
@@ -3286,7 +3286,7 @@ def plot_npz_moment_3d(
 ) -> Any:
     """3D force diagram from an NPZ results file using PyVista.
 
-    Standalone function — no ``OpenSeesBuilder`` or model objects needed.
+    Standalone function — no ``AnalysisBuilder`` or model objects needed.
 
     Parameters
     ----------

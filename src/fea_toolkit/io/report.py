@@ -621,7 +621,7 @@ def modal_participation_df(modal_result: Dict[str, Any]) -> Optional[pd.DataFram
     """Build a modal participation DataFrame from existing modal results.
 
     Uses the modal_props dict returned by
-    :meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.run_modal_analysis`.
+    :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_modal_analysis`.
     Does **not** re-run the analysis.
 
     Columns: ``Mode``, ``Period (s)``, ``Mx (%)``, ``My (%)``, ``Mz (%)``,

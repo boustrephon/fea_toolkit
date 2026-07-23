@@ -452,7 +452,7 @@ def export_mesh_model_to_tcl(
     """Export a ``MeshModel`` directly to a standalone Tcl script.
 
     This is a MeshModel-aware alternative to
-    :func:`OpenSeesBuilder.export_model_to_tcl` that works with the
+    :func:`export_model_to_tcl` that works with the
     two-stage pipeline's pre-computed ``MeshModel``.  Unlike the
     SAPModelData path, the topology is already split, merged, and
     tagged — no Preprocessor re-run is needed.
