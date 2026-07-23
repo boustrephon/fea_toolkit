@@ -208,7 +208,8 @@ class TestRecordingOpenSees:
 
     def test_no_recording_without_swap(self):
         """Builder works normally without recorder (no side effects)."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         from fea_toolkit.model.sap_data import (
             SAPModelData, Node, Material, Restraint, Section, FrameElement,
         )
@@ -235,17 +236,14 @@ class TestRecordingOpenSees:
             restraints={
                 "1": Restraint([1, 1, 1, 1, 1, 1]),
             },
-            # Unused empties
             area_elements={}, area_assignments={},
             groups={}, frame_auto_mesh={},
         )
-        # Use elastic sections to avoid needing fiber-patch support.
-        b = OpenSeesBuilder(md, {
-            "verbose": False, "use_elastic_sections": True,
-        })
-        b.build()
+        cfg = {"verbose": False, "use_elastic_sections": True}
+        mesh_model = preprocess_model(md, cfg)
+        ab = AnalysisBuilder(mesh_model, cfg)
+        ab.build_domain()
 
-        # Verify the builder created nodes in OpenSees memory.
         import openseespy.opensees as ops
         assert list(ops.nodeCoord(1)) == [0.0, 0.0, 0.0]
         assert list(ops.nodeCoord(2)) == [6.0, 0.0, 0.0]
