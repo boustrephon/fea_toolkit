@@ -222,10 +222,10 @@ def main():
         top_dx = disp[top_tag][0]
         print(f"  Max displacement: node {top_tag} dx = {top_dx:.4f} m")
 
-        from fea_toolkit.plotting import plot_rs_deformed_3d
-        plotter = plot_rs_deformed_3d(
+        from fea_toolkit.plotting import plot_deformed_displacement_3d
+        plotter = plot_deformed_displacement_3d(
             builder, disp, scale=max(50, int(0.5 / max(top_dx, 1e-6))),
-            show_original=True,
+            show_undeformed=True,
         )
         if plotter is not None:
             plotter.screenshot(str(out / 'rs_deformed.png'), scale=2)
