@@ -343,7 +343,7 @@ def collect_rs_element_force_arrays(
     for qty in ("Vy_i", "Vy_j", "Vz_i", "Vz_j",
                  "My_i", "My_j", "Mz_i", "Mz_j"):
         key = f"rs/elem_{qty}"
-        arrays[key] = np.array([r[qty] for r in results], dtype=float)
+        arrays[key] = np.array([r.get(qty, 0.0) for r in results], dtype=float)
 
     return arrays
 

@@ -1248,6 +1248,50 @@ This is useful when a structure has CHS members that are not braces
 When ``brace_sections`` is ``None`` (the default), the auto-detection by
 shape type is used.
 
+### Config keys for the two-stage pipeline
+
+In the two-stage ``Preprocessor → AnalysisBuilder`` workflow (used by
+``pumphouse_report_v2.py``), brace modelling is controlled by two config
+keys passed to ``AnalysisBuilder`` via the builder config dict:
+
+``brace_truss`` (``bool``, default ``False``)
+    When ``True``, sections identified as braces (by shape type or
+    ``brace_sections`` list) are created as 2-node ``Truss`` elements
+    with ``Hysteretic`` material instead of beam-column elements.
+
+    Each brace gets a **per-element** ``Hysteretic`` backbone computed
+    from its actual length and section properties:
+
+    - Tension envelope: yield at ``Fy``, plateau at ``1.01 Fy``, ultimate
+      at ``1.02 Fy``.
+    - Compression envelope: buckle at ``Pcr = π²EI / L²``, post-buckling
+      residual at ``0.2 Pcr``, ultimate at ``0.1 Pcr``.
+
+    ``Truss`` elements have only axial DOF — they don't accept a
+    ``geomTransf``, so the ``PDelta`` / ``Corotational`` transformation
+    settings are irrelevant for braces under this mode.
+
+    Set via ``brace_type="truss"`` in the pushover config.
+
+``subdivide_braces`` (``bool``, default ``False``)
+    When ``True``, each brace is subdivided into ``brace_n_segments``
+    (default 4) ``dispBeamColumn`` sub-elements with a sinusoidal
+    initial geometric imperfection (amplitude = ``brace_imperfection_ratio
+    × L``, default ``L/500``).  Each sub-element uses fiber sections
+    (``Steel01`` material) — buckling emerges naturally from P-M
+    interaction when axial compression acts on the imperfect geometry.
+
+    These **are** beam-column elements with rotational DOFs, so they
+    use the ``geomTransf`` set in the config (``Linear`` by default).
+    ``PDelta`` could theoretically apply but is not wired up (see the
+    note in ``rebuild_with_fiber_sections``).
+
+    Set via ``brace_type="beam"`` in the pushover config.  This path is
+    **experimental** and not recommended for production use.
+
+Both keys are mutually exclusive — the ``brace_type`` parameter in
+``run_pushover_4dir`` picks which one is set in the builder config.
+
 ### Usage in the report module
 
 The :func:`run_pushover_4dir` function in ``pumphouse_report.py`` accepts

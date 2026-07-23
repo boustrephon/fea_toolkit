@@ -21,6 +21,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+import openseespy.opensees as ops
+
 
 # ========================================================================
 # StoryLevel dataclass
@@ -569,10 +571,7 @@ def plot_stories(
             "Could not build visualisation model: %s", exc)
         return None
     finally:
-        try:
-            ops.wipe()
-        except NameError:
-            pass
+        ops.wipe()
         pv.OFF_SCREEN = _prev_off_screen
 
     pl = plot_mesh(b, notebook=True, window_size=window_size)
