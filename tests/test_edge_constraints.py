@@ -54,21 +54,22 @@ def _build_test_model():
 # ── Tests ─────────────────────────────────────────────────────────────
 
 class TestDetectUnconnectedEdges:
-    """Tests for OpenSeesBuilder.detect_unconnected_edges()."""
+    """Tests for AnalysisBuilder.detect_unconnected_edges()."""
 
     def _make_builder(self):
         """Create a builder with a minimal model and OpenSees nodes."""
         import openseespy.opensees as ops
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
         md = _build_test_model()
-        builder = OpenSeesBuilder(md, {"verbose": False})
-        builder.model = md  # ensure model is set
+        mm = preprocess_model(md, {"verbose": False, "create_shells": True})
+        builder = AnalysisBuilder(mm, {"verbose": False})
 
-        # Create nodes in OpenSees memory (no build needed for detection)
+        # Create nodes in OpenSees memory (no full build_domain needed)
         ops.wipe()
         ops.model('basic', '-ndm', 3, '-ndf', 6)
-        for nid, node in md.nodes.items():
+        for nid, node in mm.nodes.items():
             ops.node(int(nid), node.x, node.y, node.z)
 
         return builder, ops
@@ -101,25 +102,21 @@ class TestDetectUnconnectedEdges:
         """Two shells sharing all edge nodes → no unconnected edges."""
         builder, ops = self._make_builder()
         # For this test we replace area 2 with one that shares nodes 1 and 2 directly
-        md = builder.model
-        md.area_elements["2"] = AreaElement("2", 1, ["1", "2", "3", "4"])
-        # Remove the extra nodes 5, 6 from the model (they're still in OpenSees
-        # but the detection only checks area element nodes)
+        mm = builder.mesh_model
+        mm.area_elements["2"] = AreaElement("2", 1, ["1", "2", "3", "4"])
         reports = builder.detect_unconnected_edges(tolerance=1e-4)
         assert len(reports) == 0, f"Expected no reports, got {len(reports)}"
         ops.wipe()
 
     def test_detect_respects_tolerance(self):
-        """A node just beyond tolerance should not be detected.
-
-        Create a node 0.5 mm off the edge — tight tolerance (0.1 mm)
-        should miss it, loose tolerance (1 mm) should catch it.
-        """
+        """A node just beyond tolerance should not be detected."""
         import openseespy.opensees as ops
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
         md = _build_test_model()
-        builder = OpenSeesBuilder(md, {"verbose": False})
+        mm = preprocess_model(md, {"verbose": False, "create_shells": True})
+        builder = AnalysisBuilder(mm, {"verbose": False})
         ops.wipe()
         ops.model('basic', '-ndm', 3, '-ndf', 6)
         # Node 7 sits 0.5 mm off the edge 1-2 (very close but not on it)
@@ -127,8 +124,8 @@ class TestDetectUnconnectedEdges:
         ops.node(2, 6.0, 0.0, 0.0)
         ops.node(7, 2.0, 0.0005, 0.0)  # 0.5 mm off
         # Add node 7 to model and area 2 so it's included in shell nodes
-        md.nodes["7"] = Node("7", 7, 2.0, 0.0005, 0.0)
-        md.area_elements["2"] = AreaElement("2", 1, ["1", "7", "2"])
+        mm.nodes["7"] = Node("7", 7, 2.0, 0.0005, 0.0)
+        mm.area_elements["2"] = AreaElement("2", 1, ["1", "7", "2"])
 
         reports_tight = builder.detect_unconnected_edges(tolerance=1e-4)
         reports_loose = builder.detect_unconnected_edges(tolerance=1e-3)
@@ -144,15 +141,17 @@ class TestDetectUnconnectedEdges:
 
 
 class TestApplyEdgeConstraints:
-    """Tests for OpenSeesBuilder.apply_edge_constraints()."""
+    """Tests for AnalysisBuilder.apply_edge_constraints()."""
 
     def _make_builder(self):
         """Create builder and OpenSees model with nodes."""
         import openseespy.opensees as ops
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
         md = _build_test_model()
-        builder = OpenSeesBuilder(md, {"verbose": False})
+        mm = preprocess_model(md, {"verbose": False, "create_shells": True})
+        builder = AnalysisBuilder(mm, {"verbose": False})
         ops.wipe()
         ops.model('basic', '-ndm', 3, '-ndf', 6)
         for nid, node in md.nodes.items():
@@ -223,15 +222,18 @@ class TestApplyEdgeConstraints:
 
 
 class TestApplyEdgeConstraintsPenalty:
-    """Tests for OpenSeesBuilder.apply_edge_constraints() with penalty method."""
+    """Tests for AnalysisBuilder.apply_edge_constraints() with penalty method."""
 
     def _make_builder(self):
         """Create builder with penalty method and OpenSees model with nodes."""
         import openseespy.opensees as ops
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
         md = _build_test_model()
-        builder = OpenSeesBuilder(md, {"verbose": False,
+        mm = preprocess_model(md, {"verbose": False, "create_shells": True,
+                                       "constraint_method": "penalty"})
+        builder = AnalysisBuilder(mm, {"verbose": False,
                                        "constraint_method": "penalty"})
         ops.wipe()
         ops.model('basic', '-ndm', 3, '-ndf', 6)
