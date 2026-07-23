@@ -268,7 +268,7 @@ class TestWallSlabPreprocessor:
             sections=sections, frame_elements={},
             area_elements={
                 "Slab": AreaElement("Slab", 10, ["1", "2", "3", "4"]),
-                "Wall": AreaElement("Wall", 20, ["5", "6", "7", "8"]),
+                "Wall": AreaElement("Wall", 20, ["5", "6", "8", "7"]),
             },
             frame_assignments={},
             area_assignments={"Slab": "Slab200", "Wall": "Wall300"},
@@ -315,7 +315,7 @@ class TestWallSlabPreprocessor:
             sections=sections, frame_elements={},
             area_elements={
                 "Slab": AreaElement("Slab", 10, ["1", "2", "3", "4"]),
-                "Wall": AreaElement("Wall", 20, ["5", "6", "7", "8"]),
+                "Wall": AreaElement("Wall", 20, ["5", "6", "8", "7"]),
             },
             frame_assignments={},
             area_assignments={"Slab": "Slab200", "Wall": "Wall300"},
