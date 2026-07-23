@@ -21,6 +21,9 @@ executed via Xara's standalone `tclsh8.6` interpreter.  The pipeline:
 | OpenSeesRT library | `libOpenSeesRT.dylib` (auto-detected from Xara/OpenSees install) |
 | Builder module | `src/fea_toolkit/opensees/builder.py` |
 | Recorder module | `src/fea_toolkit/opensees/recorder.py` |
+| Standalone Tcl export | `fea_toolkit.opensees.builder.export_model_to_tcl` |
+| Standalone pushover Tcl | `fea_toolkit.opensees.builder.pushover_tcl` |
+| Nonlinear fiber Tcl | `fea_toolkit.opensees.builder.tcl_materials_and_sections` |
 
 ## Precursor Analyses
 
@@ -82,9 +85,14 @@ from the SAP2000 mass source (`MassSource`).  This is needed for both
 the response-spectrum analysis and the mass-proportional lateral loads:
 
 ```python
-b = OpenSeesBuilder(md, dict(...))
-b.build(selection=sel)
-masses = b.compute_seismic_masses()
+from fea_toolkit.opensees.preprocessor import Preprocessor
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+pp = Preprocessor(md, dict(split_elements=True, create_shells=True))
+mm = pp.run()
+builder = AnalysisBuilder(md, mm, dict(split_elements=True, create_shells=True))
+builder.build_domain()
+masses = builder.compute_seismic_masses()
 total_mass = sum(masses.values())
 ```
 
@@ -93,14 +101,23 @@ total_mass = sum(masses.values())
 Establishes baseline displacements, reactions, and self-weight consistency:
 
 ```python
-b = OpenSeesBuilder(md, dict(
+from fea_toolkit.opensees.preprocessor import Preprocessor
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+pp = Preprocessor(md, dict(
     element_type="elasticBeamColumn",
     split_elements=True,
     create_shells=True,
 ))
-b.build()
-sw = b.check_self_weight_consistency(verbose=False)
-res = b.run_static_analysis(
+mm = pp.run()
+builder = AnalysisBuilder(md, mm, dict(
+    element_type="elasticBeamColumn",
+    split_elements=True,
+    create_shells=True,
+))
+builder.build_domain()
+sw = builder.check_self_weight_consistency(verbose=False)
+res = builder.run_static_analysis(
     pattern_scales={"DEAD": 1.0},
     extract_reactions=True,
 )
@@ -118,9 +135,9 @@ Extracts natural periods and mode shapes for spectral analysis and
 pushover load distribution:
 
 ```python
-b.compute_seismic_masses()
-modal = b.run_modal_analysis(num_modes=12, print_results=False)
-df = modal_table_enhanced(b, n_modes=12)
+builder.compute_seismic_masses()
+modal = builder.run_modal_analysis(num_modes=12, print_results=False)
+df = modal_table_enhanced(builder, n_modes=12)
 ```
 
 **Admin building modal results** (12 modes):
@@ -146,7 +163,7 @@ from fea_toolkit.utils import g_from_units
 g = g_from_units(md) or 9.80665
 T_spec = list(np.linspace(0.01, 6.0, 600))
 Sa_spec = list(_gb50011_spectrum(T_spec, alpha_max=alpha_max, tg=tg, g=g))
-rs = b.run_response_spectrum_analysis(
+rs = builder.run_response_spectrum_analysis(
     num_modes=modal["num_modes"],
     modal_periods=list(modal["periods"]),
     spectrum_periods=T_spec,
@@ -159,7 +176,8 @@ rs = b.run_response_spectrum_analysis(
 After every build, verify that the total self-weight matches SAP2000:
 
 ```python
-totals = b.check_self_weight_consistency()
+from fea_toolkit.model.checks import check_self_weight_consistency
+totals = check_self_weight_consistency(md, pp, dict(split_elements=True))
 assert abs(totals["total_model_weight"] - 51818.5) < 100, \
     f"Self-weight mismatch: {totals['total_model_weight']}"
 ```
@@ -202,14 +220,20 @@ import fea_toolkit.opensees.builder as builder_mod
 # First build (real ops) to get seismic masses.
 # Although create_shells=True, the selection above marks ALL areas
 # as loads-only, so no shell elements are created in practice.
-b_tmp = OpenSeesBuilder(md, dict(
+pp = Preprocessor(md, dict(
     element_type="dispBeamColumn",
     split_elements=True,
     create_shells=True,           # selection overrides → all areas loads-only
+))
+mm = pp.run()
+b_tmp = AnalysisBuilder(md, mm, dict(
+    element_type="dispBeamColumn",
+    split_elements=True,
+    create_shells=True,
     create_fiber_sections=True,
     use_elastic_sections=False,   # required for fiber sections
 ))
-b_tmp.build(selection=sel)
+b_tmp.build_domain()
 masses = b_tmp.compute_seismic_masses()
 total_mass = sum(masses.values())
 _real_ops.wipe()
@@ -218,10 +242,15 @@ _real_ops.wipe()
 from fea_toolkit.opensees.recorder import RecordingOpenSees
 
 rec = RecordingOpenSees(_real_ops)
-builder_mod.ops = rec
-b = OpenSeesBuilder(md, dict(...))
-b.build(selection=sel)
-builder_mod.ops = _real_ops
+# Patch module-level ops - works for both legacy and new pipeline
+import fea_toolkit.opensees.analysis_builder as ab_mod
+ab_mod.ops = rec
+
+pp = Preprocessor(md, dict(...))
+mm = pp.run()
+b = AnalysisBuilder(md, mm, dict(...))
+b.build_domain()
+ab_mod.ops = _real_ops
 ```
 
 ### 3. Post-process recorded commands
