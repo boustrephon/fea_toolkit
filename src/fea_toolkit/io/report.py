@@ -1222,3 +1222,191 @@ def static_load_verification(md, mesh_model, config: dict = None):
         })
 
     return pd.DataFrame(rows)
+
+
+def run_linear_cases(
+    md: "SAPModelData",
+    mesh_model,
+    spec_cfg: Optional[dict] = None,
+    linear_cfg: Optional[dict] = None,
+) -> pd.DataFrame:
+    """Run linear analysis cases and return a summary table.
+
+    The Preprocessor work is done once (via *mesh_model*).  Each
+    analysis case creates a lightweight ``AnalysisBuilder``.
+
+    Auto-detects static load cases from the SAP2000 model, or uses
+    the ``linear_cfg["cases"]`` list.
+    """
+    rows = []
+    config = {"element_type": "elasticBeamColumn", "verbose": False}
+
+    # ── Static cases: auto-detect LinStatic, then merge user overrides ──
+    # Always auto-detect all LinStatic cases from the model
+    static_cases: Dict[str, Dict[str, float]] = {}
+    for cname, lc in md.load_cases.items():
+        if lc.case_type != "LinStatic":
+            continue
+        sd = lc.case_data.get("CASE - STATIC 1 - LOAD ASSIGNMENTS", [])
+        if isinstance(sd, list):
+            pats = {a["LoadName"]: a["LoadSF"]
+                   for a in sd if "LoadName" in a}
+        elif isinstance(sd, dict):
+            pats = {sd["LoadName"]: sd["LoadSF"]}
+        else:
+            pats = {}
+        if pats:
+            static_cases[cname] = pats
+
+    # User-specified cases override or supplement auto-detected ones
+    if linear_cfg and "cases" in linear_cfg:
+        for entry in linear_cfg["cases"]:
+            if isinstance(entry, str):
+                lc = md.load_cases.get(entry)
+                if lc is None:
+                    print(f"  Warning: load case '{entry}' not found, skipping")
+                    continue
+                sd = lc.case_data.get("CASE - STATIC 1 - LOAD ASSIGNMENTS", [])
+                if isinstance(sd, list):
+                    pats = {a["LoadName"]: a["LoadSF"]
+                           for a in sd if "LoadName" in a}
+                elif isinstance(sd, dict):
+                    pats = {sd["LoadName"]: sd["LoadSF"]}
+                else:
+                    pats = {}
+                if pats:
+                    static_cases[entry] = pats
+            elif isinstance(entry, dict):
+                for cname, pat_dict in entry.items():
+                    static_cases[cname] = pat_dict
+
+    # ── Filter out cases whose constituent patterns have zero loads ──
+    def _pattern_has_loads(m: MeshModel, pname: str) -> bool:
+        lp = m.load_patterns.get(pname)
+        if lp is not None and lp.self_weight_factor > 0:
+            return True
+        return any(ld.pattern == pname for ld in m.frame_dist_loads) \
+            or any(ld.pattern == pname for ld in m.joint_loads) \
+            or any(ld.pattern == pname for ld in m.area_gravity_loads) \
+            or any(ld.pattern == pname for ld in m.edge_loads_from_areas)
+
+    static_cases = {cname: pats for cname, pats in static_cases.items()
+                    if any(_pattern_has_loads(mesh_model, p) for p in pats)}
+
+    from fea_toolkit.utils import sum_reactions_with_overturning
+
+    for case_name, patterns in static_cases.items():
+        ab = AnalysisBuilder(mesh_model, config)
+        try:
+            results = ab.run_static_analysis(pattern_scales=patterns,
+                                            extract_reactions=True)
+            # Use centralized overturning-moment computation (v1 match)
+            rxn = results.get("reactions", {})
+            summed = sum_reactions_with_overturning(rxn, mesh_model.nodes)
+            fx = summed["fx"]; fy = summed["fy"]; fz = summed["fz"]
+            mx = summed["mx"]; my = summed["my"]; mz = summed["mz"]
+            disp = results.get("nodal_displacements", {})
+            max_roof_disp = 0.0
+            if disp:
+                roof_id = max(mesh_model.nodes.values(), key=lambda n: n.z).node_id
+                if roof_id in disp:
+                    d = disp[roof_id]
+                    max_roof_disp = math.hypot(d[0], d[1], d[2])
+        except Exception as e:
+            fx = fy = fz = mx = my = mz = max_roof_disp = 0.0
+            print(f"  Warning: {case_name} failed — {e}")
+
+        rows.append({
+            "Case": case_name,
+            "Type": "Static",
+            "Fx": fx, "Fy": fy, "Fz": fz,
+            "Mx": mx, "My": my, "Mz": mz,
+            "Roof disp": max_roof_disp if "Wind" in case_name else None,
+        })
+
+    # ── Response spectrum cases ─────────────────────────────────
+    if spec_cfg:
+        T_spec_built, Sa_spec_built, alpha_max, tg, zeta_eff, _ = _build_spectrum(spec_cfg)
+        T_spec = T_spec_built
+        Sa_spec = Sa_spec_built
+    else:
+        # Fallback: rare spectrum with 5% damping
+        zeta = 0.05
+        gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
+        eta_1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
+        eta_2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))
+        lu = md.units.get("L", "m")
+        gravity = {"m": 9.81, "cm": 981.0, "mm": 9810.0,
+                   "ft": 32.2, "in": 386.4}.get(lu, 9.81)
+        tg = 0.25
+        alpha_max = 0.50
+        T_spec = np.linspace(0.0, 6.0, 300).tolist()
+        Sa_spec = _gb50011_spectrum(
+            T_spec, alpha_max, tg, gamma=gamma, eta1=eta_1, eta2=eta_2, g=gravity
+        ).tolist()
+
+    for rs_dir in ["X", "Y"]:
+        ab = AnalysisBuilder(mesh_model, config)
+        ab.build_domain()
+        ab.compute_seismic_masses()
+        try:
+            modal = ab.run_modal_analysis(num_modes=12, print_results=False)
+
+            def spectrum_func(T):
+                return float(np.interp(T, T_spec, Sa_spec))
+
+            rs = ab.run_response_spectrum_analysis(
+                num_modes=12,
+                modal_periods=modal["periods"],
+                spectrum_periods=T_spec,
+                spectrum_accels=Sa_spec,
+                direction=rs_dir,
+                damping_ratio=0.05,
+                print_results=False,
+            )
+            v_base = rs.get("base_shear_cqc", 0.0)
+            m_base = rs.get("base_moment_cqc", 0.0)
+            v_srss = rs.get("base_shear_srss", 0.0)
+            m_srss = rs.get("base_moment_srss", 0.0)
+            # Full 6-DoF reactions with overturning (from new centralized
+            # per-mode lever-arm computation in run_response_spectrum_analysis)
+            r_cqc = rs.get("base_reactions_cqc", {})
+
+            rs_disp_cqc, rs_disp_srss = ab.compute_rs_nodal_displacements(
+                num_modes=12,
+                modal_periods=modal["periods"],
+                eigenvalues=modal["eigenvalues"],
+                spectrum_func=spectrum_func,
+                direction=rs_dir,
+                damping_ratio=0.05,
+                return_srss=True,
+            )
+            roof_tag = max(md.nodes.values(), key=lambda n: n.z).node_tag
+            if roof_tag in rs_disp_cqc:
+                d = rs_disp_cqc[roof_tag]
+                roof_disp_rs = math.hypot(d[0], d[1], d[2])
+                d_s = rs_disp_srss[roof_tag]
+                roof_disp_srss = math.hypot(d_s[0], d_s[1], d_s[2])
+            else:
+                roof_disp_rs = roof_disp_srss = 0.0
+        except Exception as e:
+            v_base = m_base = v_srss = m_srss = roof_disp_rs = roof_disp_srss = 0.0
+            r_cqc = {}
+            print(f"  Warning: RS-{rs_dir} failed — {e}")
+
+        rows.append({
+            "Case": f"RS-{rs_dir}",
+            "Type": "Response Spectrum",
+            "Fx": r_cqc.get("fx", 0.0),
+            "Fy": r_cqc.get("fy", 0.0),
+            "Fz": r_cqc.get("fz", 0.0),
+            "Mx": r_cqc.get("mx", 0.0),
+            "My": r_cqc.get("my", 0.0),
+            "Mz": r_cqc.get("mz", 0.0),
+            "Roof disp": roof_disp_rs,
+            "Roof disp SRSS": roof_disp_srss,
+            "V_srss": v_srss,
+            "M_srss": m_srss,
+        })
+
+    return pd.DataFrame(rows)
