@@ -255,11 +255,13 @@ Where $T_1$ is the fundamental period from modal analysis.  If
 ### Basic — mass‑proportional (uniform) pattern
 
 ```python
-from fea_toolkit.opensees.builder import OpenSeesBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.plotting import plot_pushover_curve
 
-builder = OpenSeesBuilder(model_data, config)
-builder.build()
+mm = preprocess_model(model_data)
+builder = AnalysisBuilder(mm, config)
+builder.build_domain()
 builder.compute_seismic_masses()
 modal = builder.run_modal_analysis(num_modes=3)
 
@@ -352,7 +354,7 @@ is distributed along `forceBeamColumn` elements:
 | ``'Lobatto'`` (default) | Distributed plasticity — integration points spread across the full element length. Yielding can occur anywhere. | General use, conservative. |
 | ``'HingeRadau'`` | Concentrated plasticity — hinges form only at element ends within a plastic hinge length *Lp*. Interior remains elastic. | Moment frames where hinges are expected at beam/column ends. |
 
-``HingeRadau`` uses :meth:`OpenSeesBuilder._compute_hinge_length` to
+``HingeRadau`` uses :func:`fea_toolkit.model.checks.compute_hinge_length` to
 estimate *Lp* from section geometry:
 
 - **I‑sections**: :math:`L_p = 0.5 \\cdot d` (section depth)
@@ -360,11 +362,16 @@ estimate *Lp* from section geometry:
 - **Other**: :math:`L_p = 0.1 \\cdot L` (10 % of element length)
 
 ```python
-builder = OpenSeesBuilder(model_data, {
+from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+mm = preprocess_model(model_data)
+builder = AnalysisBuilder(mm, {
     'element_type': 'forceBeamColumn',
     'beam_integration': 'HingeRadau',
     'create_fiber_sections': True,
 })
+builder.build_domain()
 ```
 
 ---
@@ -399,16 +406,19 @@ brace_ids = set(sel.get_frame_ids(model))
 brace_ids = {'10', '11', '12'}
 
 # Configure the builder
-builder = OpenSeesBuilder(model_data, {
-    'element_type': 'forceBeamColumn',
+from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+mm = preprocess_model(model_data)
+builder = AnalysisBuilder(mm, {
+    'element_type': 'dispBeamColumn',
     'create_fiber_sections': True,
     'geom_transf_type': 'Corotational',  # required for buckling
     'split_elements': True,
 })
 builder.set_brace_selection(brace_ids)
-builder.build()
 
-# Check Euler buckling before running pushover
+# Check Euler buckling before running pushover (analytical, no Ops needed)
 builder.check_brace_buckling(K=1.0)
 ```
 
@@ -478,7 +488,7 @@ When ``end_offset > 0``, :func:`subdivide_elements`:
 ```python
 builder.set_brace_selection(brace_ids, end_offset=0.15)  # 0.15 m offset
 builder.config['geom_transf_type'] = 'Corotational'
-builder.build()
+builder.build_domain()
 ```
 
 The offset is automatically clamped to 45 % of the brace length to
@@ -562,7 +572,7 @@ if missing).
 
 ## Euler buckling check
 
-:meth:`OpenSeesBuilder.check_brace_buckling` computes the Euler buckling
+:meth:`AnalysisBuilder.check_brace_buckling` computes the Euler buckling
 load :math:`P_{cr} = \\pi^2 E I_{22} / (K L)^2` for selected braces.
 
 ### When to call it
@@ -582,7 +592,7 @@ brace_ids = set(sel.get_frame_ids(model))
 
 # Build the model
 builder.set_brace_selection(brace_ids, end_offset=0.15)
-builder.build()
+builder.build_domain()
 
 # Check buckling — before pushover
 builder.check_brace_buckling(K=1.0)
@@ -880,12 +890,14 @@ The plot shows:
 ### 4. End‑to‑end example
 
 ```python
-from fea_toolkit.opensees.builder import OpenSeesBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.plotting.viz import plot_capacity_spectrum
 
 # Build, run modal, run pushover (see §Usage above)
-b = OpenSeesBuilder(model_data, config)
-b.build()
+mm = preprocess_model(model_data)
+b = AnalysisBuilder(mm, config)
+b.build_domain()
 b.compute_seismic_masses(g=9.81)
 modal = b.run_modal_analysis(num_modes=5)
 shapes = b.extract_mode_shapes(5)

@@ -27,8 +27,8 @@ Set to ``None`` (default) or ``{}`` for gross (uncracked) stiffness.
 2. **Classifies** every area element as ``slab`` or ``wall`` by Z-span.
 3. **Creates separate OpenSees section definitions** for each
    ``(section_name, element_type)`` pair, with ``E_mod`` scaled by the
-   factor.  Classification details are in the ``Preprocessor._classify_element_type()``
-   and ``OpenSeesBuilder._classify_element_type()`` docstrings.
+   factor.  Classification details are in the
+   ``Preprocessor._classify_element_type()`` docstring.
 
 ## Typical ACI 318-19 factors
 
