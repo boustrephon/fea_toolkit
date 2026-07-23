@@ -242,12 +242,27 @@ plot_deformed_displacement_3d(
     scale=10.0,
 )
 
-# From saved NPZ results
-import numpy as np
-data = np.load("results.npz", allow_pickle=True)
+# From saved NPZ or HDF5 results
+from fea_toolkit.io.npz_reader import read_results, _get_static_cases
+
+data = read_results("results.npz")   # or "results.h5"
+
+# Reconstruct displacement dict from flat arrays
+# (keys like "static/DEAD/node_dx", "static/DEAD/node_dy", "static/DEAD/node_dz")
+cases = _get_static_cases(data)
+case = cases[0] if cases else None
+disp = {}
+if case is not None:
+    tags = data["node_tag"]
+    dx = data.get(f"static/{case}/node_dx", np.zeros(len(tags)))
+    dy = data.get(f"static/{case}/node_dy", np.zeros(len(tags)))
+    dz = data.get(f"static/{case}/node_dz", np.zeros(len(tags)))
+    for i, t in enumerate(tags):
+        disp[int(t)] = (float(dx[i]), float(dy[i]), float(dz[i]))
+
 plot_deformed_displacement_3d(
     data,
-    displacements=[...],     # displacement magnitude array
+    disp,
     scale=10.0,
     color_nodes=True,
     show_labels=True,
@@ -697,9 +712,9 @@ from fea_toolkit.plotting import (
     plot_deformed_displacement_3d,      # unified (builder, AnalysisBuilder, or NPZ)
     plot_deformed_3d,                   # deprecated → use plot_deformed_displacement_3d
     plot_rs_deformed_3d,                # deprecated → use plot_deformed_displacement_3d
-    plot_mode_3d,
+    plot_mode_3d,                       # deprecated → use plot_mode_animation
     plot_mode_animation,                # unified (builder or NPZ)
-    plot_static_moment_3d,
+    plot_static_moment_3d,              # deprecated → use plot_force_diagram_3d
     plot_force_diagram_3d,              # unified (builder or NPZ)
     plot_static_shear_3d,
     plot_static_axial_3d,
