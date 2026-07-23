@@ -2441,11 +2441,11 @@ class TestPushoverBuild:
 
 
 class TestHingeRadauIntegration:
-    """Tests for :meth:`OpenSeesBuilder._compute_hinge_length`."""
+    """Tests for :func:`compute_hinge_length`."""
 
     def test_hinge_length_i_section(self):
         """ISection depth → Lp = 0.5 * depth."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.model.checks import compute_hinge_length
         md = SAPModelData(nodes={}, restraints={}, materials={}, sections={},
                           frame_elements={}, area_elements={},
                           frame_assignments={}, area_assignments={},
@@ -2455,14 +2455,12 @@ class TestHingeRadauIntegration:
             depth=0.3, bf=0.15, tf=0.01, tw=0.006,
             A=8e-3, I33=1.2e-4, I22=4e-5, J=2e-6,
         )
-        b = OpenSeesBuilder(md, {'verbose': False})
-        b.section_tags = {"UB300": 1}
-        Lp = b._compute_hinge_length(1, 10.0)
+        Lp = compute_hinge_length(md.sections["UB300"], 10.0)
         assert abs(Lp - 0.15) < 0.01  # 0.5 * 0.3
 
     def test_hinge_length_pipe_section(self):
         """Pipe OD → Lp = 0.5 * OD."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.model.checks import compute_hinge_length
         md = SAPModelData(nodes={}, restraints={}, materials={}, sections={},
                           frame_elements={}, area_elements={},
                           frame_assignments={}, area_assignments={},
@@ -2471,14 +2469,12 @@ class TestHingeRadauIntegration:
             name="PIP4", shape="Pipe", material="Steel",
             od=0.1143, t=0.006, A=2e-3, I33=3e-6, I22=3e-6, J=1e-6,
         )
-        b = OpenSeesBuilder(md, {'verbose': False})
-        b.section_tags = {"PIP4": 1}
-        Lp = b._compute_hinge_length(1, 10.0)
+        Lp = compute_hinge_length(md.sections["PIP4"], 10.0)
         assert abs(Lp - 0.05715) < 0.001  # 0.5 * 0.1143
 
     def test_hinge_length_fallback(self):
         """Unknown section → Lp = 0.1 * L."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.model.checks import compute_hinge_length
         md = SAPModelData(nodes={}, restraints={}, materials={}, sections={},
                           frame_elements={}, area_elements={},
                           frame_assignments={}, area_assignments={},
@@ -2487,9 +2483,7 @@ class TestHingeRadauIntegration:
             name="GENERIC", shape="NA", material="Steel",
             A=1e-2, I33=1e-4, I22=1e-4, J=1e-6,
         )
-        b = OpenSeesBuilder(md, {'verbose': False})
-        b.section_tags = {"GENERIC": 1}
-        Lp = b._compute_hinge_length(1, 8.0)
+        Lp = compute_hinge_length(md.sections["GENERIC"], 8.0)
         assert abs(Lp - 0.8) < 0.01  # 0.1 * 8.0
 
 
@@ -2652,10 +2646,9 @@ class TestBraceBucklingCheck:
 
     def test_euler_buckling_pinned(self, brace_model):
         """Euler P_cr with K=1 matches π²EI/L²."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
-        b = OpenSeesBuilder(brace_model, {'verbose': False})
-        results = b.check_brace_buckling(brace_ids={"B1"}, K=1.0,
-                                          print_results=False)
+        from fea_toolkit.model.checks import check_brace_buckling
+        results = check_brace_buckling(brace_model, brace_ids={"B1"}, K=1.0,
+                                        print_results=False)
         assert "B1" in results
         r = results["B1"]
         # L = sqrt(6² + 6²) ≈ 8.485, I = 3e-6, E = 2e11
@@ -2665,10 +2658,9 @@ class TestBraceBucklingCheck:
 
     def test_buckling_with_axial_demand(self, brace_model):
         """D/C ratio computed correctly."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
-        b = OpenSeesBuilder(brace_model, {'verbose': False})
-        results = b.check_brace_buckling(
-            brace_ids={"B1"}, K=1.0,
+        from fea_toolkit.model.checks import check_brace_buckling
+        results = check_brace_buckling(
+            brace_model, brace_ids={"B1"}, K=1.0,
             axial_demand={"B1": 50000.0},  # 50 kN
             print_results=False,
         )
