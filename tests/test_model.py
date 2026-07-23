@@ -4150,28 +4150,25 @@ class TestTwoStageBuild:
         """
         import openseespy.opensees as ops
         from examples.sample_model import make_sample_model
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
         md = make_sample_model()
-        b = OpenSeesBuilder(md, {
-            "use_preprocessor": True,
-            "split_elements": True,
-            "create_shells": False,
-            "verbose": False,
-        })
+        cfg = {"split_elements": True, "create_shells": False, "verbose": False}
+        mm = preprocess_model(md, cfg)
+        b = AnalysisBuilder(mm, cfg)
         try:
-            b.build()
+            b.build_domain()
             b.compute_seismic_masses(g=9.81)
 
             # ── Test 1: DEAD pattern (swf=1) includes self-weight ─
             result = b.run_static_analysis(pattern_scales={"DEAD": 1.0})
 
             # Self-weight applied under DEAD — check result load_totals
-            rs_lt = getattr(b._analysis, 'load_totals', {}) if hasattr(b, '_analysis') else {}
-            dead_total = rs_lt.get("DEAD", 0.0)
+            dead_total = b.load_totals.get("DEAD", 0.0)
             assert abs(dead_total) > 0, (
                 f"DEAD total should be > 0 (includes self-weight), "
-                f"got {dead_total}, keys={list(rs_lt.keys())}"
+                f"got {dead_total}, keys={list(b.load_totals.keys())}"
             )
 
             # Displacements should be non-zero
@@ -4190,13 +4187,9 @@ class TestTwoStageBuild:
             from fea_toolkit.model.sap_data import LoadPattern
             md.load_patterns["LL"] = LoadPattern(
                 name="LL", pattern_type="Live", self_weight_factor=0)
-            b2 = OpenSeesBuilder(md, {
-                "use_preprocessor": True,
-                "split_elements": True,
-                "create_shells": False,
-                "verbose": False,
-            })
-            b2.build()
+            mm2 = preprocess_model(md, cfg)
+            b2 = AnalysisBuilder(mm2, cfg)
+            b2.build_domain()
             b2.compute_seismic_masses(g=9.81)
             result2 = b2.run_static_analysis(
                 pattern_scales={"LL": 1.0}
@@ -4235,14 +4228,11 @@ class TestTwoStageBuild:
                 multiplier_x=0.0, multiplier_y=0.0, multiplier_z=-1.0,
             ),
         ]
-        b = OpenSeesBuilder(md, {
-            "use_preprocessor": True,
-            "split_elements": True,
-            "create_shells": False,
-            "verbose": False,
-        })
+        cfg = {"split_elements": True, "create_shells": False, "verbose": False}
+        mm = preprocess_model(md, cfg)
+        b = AnalysisBuilder(mm, cfg)
         try:
-            b.build()
+            b.build_domain()
             result = b.run_static_analysis(pattern_scales={"DEAD": 1.0})
 
             # Gravity loads should be tracked (facade copies AnalysisBuilder state)
