@@ -78,7 +78,7 @@ class AnalysisBuilder:
 
         # Load totals
         self.load_totals: Dict[str, float] = {}
-        self._sw_load_totals: Dict[str, float] = {}
+        self._sw_load_totals: Dict[str, Dict[str, float]] = {}
         self._gravity_load_totals: Dict[str, float] = {}
 
         # Model log
@@ -175,6 +175,20 @@ class AnalysisBuilder:
                 solver settings.
             pushover_spring_scale: Scale factor for edge constraint
                 spring stiffness on rebuild (default 1.0).
+
+        Note:
+            The ``PDelta`` path via *brace_selection* is dormant — the
+            field is never populated from the calling code
+            (``run_pushover_4dir`` in ``pushover.py``).  There were
+            concerns about compatibility between ``PDelta`` geometric
+            transformation and brace elements created as ``Truss``
+            (which don't accept a ``geomTransf`` at all).  The
+            ``brace_truss`` path uses 2-node truss elements with
+            ``Hysteretic`` material where PDelta is irrelevant; the
+            ``subdivide_braces`` path uses ``dispBeamColumn`` elements
+            where PDelta could apply, but it was never wired up.
+            The block is preserved for future use once a safe wiring
+            path is established.
         """
         overrides: Dict[str, Any] = {
             'element_type': 'dispBeamColumn',
@@ -1323,7 +1337,6 @@ class AnalysisBuilder:
                 continue
             L = math.sqrt((nj.x - ni.x)**2 + (nj.y - ni.y)**2 + (nj.z - ni.z)**2)
             total_w = _A * mat.unit_weight * L
-            self._sw_load_totals[eid] = total_w
             nd_i = self.mesh_model.nodes.get(elem.node_i)
             nd_j = self.mesh_model.nodes.get(elem.node_j)
             if nd_i is not None:
@@ -1529,6 +1542,11 @@ class AnalysisBuilder:
                     ops.load(node_tag, 0.0, 0.0, fz * sw_scale, 0.0, 0.0, 0.0)
                     sw_total += abs(fz * sw_scale)
                     _sw_fz_total += fz * sw_scale
+                # Store per-pattern for check_self_weight_consistency
+                if pname not in self._sw_load_totals:
+                    self._sw_load_totals[pname] = {k: 0.0 for k in
+                                             ('fx','fy','fz','mx','my','mz')}
+                self._sw_load_totals[pname]['fz'] += _sw_fz_total
                 load_total += sw_total
 
             self.load_totals[pname] = load_total
@@ -2441,15 +2459,14 @@ class AnalysisBuilder:
             _cx = _cy = _z_base = 0.0
 
         # Pre-compute base-element node coordinates for lever-arm
+        # Build a one-time tag-to-element index (ops tag → element)
+        _elem_by_tag: Dict = {}
+        for _e in elements.values():
+            _elem_by_tag[_e.elem_tag] = _e
+
         _base_elem_coords = []
         for eid, end in base_elements:
-            elem = elements.get(eid)
-            if elem is None:
-                # Resolve by tag
-                for _e in elements.values():
-                    if _e.elem_tag == eid:
-                        elem = _e
-                        break
+            elem = elements.get(str(eid)) or _elem_by_tag.get(eid)
             if elem is None:
                 continue
             nid = elem.node_i if end == 'i' else elem.node_j
