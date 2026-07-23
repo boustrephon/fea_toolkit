@@ -109,7 +109,7 @@ def run_pushover_4dir(
         builder_cfg = {
             "element_type": "dispBeamColumn",
             "beam_integration": "Lobatto",
-            "num_integration_points": 3,
+            "num_int_pts": 3,
             "split_elements": False,
             "subdivide_braces": True,
             "brace_n_segments": 4,
@@ -135,9 +135,6 @@ def run_pushover_4dir(
             pass
 
         ab = AnalysisBuilder(mesh_model, builder_cfg)
-        ab.build_domain()
-        ab.create_loads(pattern_scales=gravity_patterns)
-        ab.compute_seismic_masses(g=g)
 
         results = ab.run_pushover_analysis(
             gravity_patterns=gravity_patterns,

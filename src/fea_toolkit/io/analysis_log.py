@@ -14,8 +14,13 @@ Usage::
 """
 
 import json
-from datetime import datetime
+import time
 from typing import List, Dict, Optional
+
+
+def _escape_md_cell(text: str) -> str:
+    """Escape pipe characters and normalize newlines for markdown table cells."""
+    return text.replace("|", "\\|").replace("\n", " ").replace("\r", "")
 
 
 class AnalysisLog:
@@ -23,7 +28,7 @@ class AnalysisLog:
 
     def __init__(self):
         self._entries: List[Dict] = []
-        self._start = datetime.now()
+        self._start = time.monotonic()
 
     def info(self, step: str, msg: str) -> None:
         """Record an informational message."""
@@ -31,7 +36,7 @@ class AnalysisLog:
             "level": "INFO",
             "step": step,
             "msg": msg,
-            "time": (datetime.now() - self._start).total_seconds(),
+            "time": time.monotonic(),
         })
 
     def warn(self, step: str, msg: str) -> None:
@@ -40,7 +45,7 @@ class AnalysisLog:
             "level": "WARN",
             "step": step,
             "msg": msg,
-            "time": (datetime.now() - self._start).total_seconds(),
+            "time": time.monotonic(),
         })
 
     def error(self, step: str, msg: str) -> None:
@@ -49,7 +54,7 @@ class AnalysisLog:
             "level": "ERROR",
             "step": step,
             "msg": msg,
-            "time": (datetime.now() - self._start).total_seconds(),
+            "time": time.monotonic(),
         })
 
     @property
@@ -72,12 +77,18 @@ class AnalysisLog:
         return "\n".join(lines)
 
     def to_json(self, path: str) -> None:
-        """Write log entries to a JSON file."""
+        """Write log entries to a JSON file with elapsed-time keys."""
+        import datetime
         with open(path, "w") as f:
             json.dump({
-                "generated": self._start.isoformat(),
+                "generated": datetime.datetime.now().isoformat(),
                 "n_entries": len(self._entries),
-                "entries": self._entries,
+                "entries": [{
+                    "level": e["level"],
+                    "step": e["step"],
+                    "msg": e["msg"],
+                    "time_s": e["time"] - self._start,
+                } for e in self._entries],
             }, f, indent=2)
 
     def markdown(self) -> str:
@@ -92,13 +103,14 @@ class AnalysisLog:
             "| Level | Step | Message | Time (s) | Dur. (s) |",
             "|-------|------|---------|----------|----------|",
         ]
-        prev_t = self._entries[0]["time"] if self._entries else 0.0
-        for e in self._entries:
+        prev_t = self._start
+        for idx, e in enumerate(self._entries):
             icon = {"INFO": "ℹ", "WARN": "⚠", "ERROR": "✗"}[e["level"]]
-            dur = e["time"] - prev_t
+            t = e["time"] - self._start
+            dur = 0.0 if idx == 0 else t - (prev_t - self._start)
             lines.append(
-                f"| {icon} {e['level']} | {e['step']} | "
-                f"{e['msg']} | {e['time']:.1f} | {dur:.1f} |"
+                f"| {icon} {e['level']} | {_escape_md_cell(e['step'])} | "
+                f"{_escape_md_cell(e['msg'])} | {t:.1f} | {dur:.1f} |"
             )
             prev_t = e["time"]
         lines.append("</details>")
