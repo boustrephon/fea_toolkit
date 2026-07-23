@@ -1,7 +1,11 @@
-"""Tests for the plotting/viz module — mesh construction helpers.
+"""Tests for the plotting/viz module — mesh construction and displaced shape.
 
-These tests exercise :func:`_build_deformed_mesh` which is the core
-helper behind mode-shape animation and deformed-shape rendering.
+Exercises:
+    - :func:`_build_deformed_mesh` — helper behind mode-shape animation
+      and deformed-shape rendering.
+    - :func:`_resolve_mesh_data` — mesh-geometry extraction for builders
+      and NPZ dicts.
+    - :func:`plot_deformed_displacement_3d` — unified displaced-shape viewer.
 """
 
 import numpy as np
@@ -12,6 +16,38 @@ try:
     _has_pyvista = True
 except ImportError:
     _has_pyvista = False
+
+
+# ============================================================================
+# Fixtures — synthetic NPZ-like data dict
+# ============================================================================
+
+@pytest.fixture
+def sample_npz_data():
+    """Minimal dict mimicking an NPZ results file (simple 2-element frame)."""
+    return {
+        "node_tag": np.array([1, 2, 3]),
+        "node_sap_id": np.array(["1", "2", "3"]),
+        "node_x": np.array([0.0, 4.0, 4.0]),
+        "node_y": np.array([0.0, 0.0, 0.0]),
+        "node_z": np.array([0.0, 0.0, 3.0]),
+        "frame_eid": np.array([1, 2]),
+        "frame_sap_id": np.array(["1", "2"]),
+        "frame_node_i": np.array([1, 2]),
+        "frame_node_j": np.array([2, 3]),
+        "frame_sec_name": np.array(["COL", "BEAM"]),
+        "frame_parent_sap_id": np.array(["", ""]),
+    }
+
+
+@pytest.fixture
+def sample_displacements():
+    """Small static displacements for the 3-node model."""
+    return {
+        1: (0.0, 0.0, 0.0),
+        2: (0.05, 0.0, 0.0),
+        3: (0.08, 0.02, 0.0),
+    }
 
 
 # ============================================================================
@@ -210,3 +246,196 @@ class TestBuildDeformedMesh:
             counts.append(fm.n_points + sm.n_points)
         assert counts[0] == counts[1] == counts[2], (
             f"Point count changed with amp: {counts}")
+
+
+# ============================================================================
+# _resolve_mesh_data
+# ============================================================================
+
+class TestResolveMeshData:
+    """Verify the mesh-data resolver works for dict (NPZ) sources."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_no_pyvista(self):
+        if not _has_pyvista:
+            pytest.skip("pyvista not installed")
+
+    def test_dict_source_nodes(self, sample_npz_data):
+        """Resolving an NPZ-like dict produces correct node entries."""
+        from fea_toolkit.plotting.viz import _resolve_mesh_data
+        data = _resolve_mesh_data(sample_npz_data)
+        assert len(data["nodes"]) == 3
+        assert data["nodes"]["1"]["tag"] == 1
+        assert data["nodes"]["1"]["x"] == 0.0
+        assert data["nodes"]["2"]["x"] == 4.0
+        assert data["nodes"]["3"]["z"] == 3.0
+
+    def test_dict_source_frames(self, sample_npz_data):
+        """Resolving an NPZ-like dict produces correct frame entries."""
+        from fea_toolkit.plotting.viz import _resolve_mesh_data
+        data = _resolve_mesh_data(sample_npz_data)
+        assert len(data["frames"]) == 2
+        # First frame: nodes 1→2 (column)
+        fr0 = data["frames"][0]
+        assert fr0["ni_tag"] == 1
+        assert fr0["nj_tag"] == 2
+        assert fr0["sec"] == "COL"
+        # Second frame: nodes 2→3 (beam)
+        fr1 = data["frames"][1]
+        assert fr1["ni_tag"] == 2
+        assert fr1["nj_tag"] == 3
+        assert fr1["sec"] == "BEAM"
+
+    def test_dict_source_orphan_nodes(self, sample_npz_data):
+        """Dict source with no mesh model has empty orphan_nodes."""
+        from fea_toolkit.plotting.viz import _resolve_mesh_data
+        data = _resolve_mesh_data(sample_npz_data)
+        assert data["orphan_nodes"] == {}
+        assert data["edge_constraints"] == []
+        assert data["mesh_node_ids"] == set()
+
+
+# ============================================================================
+# plot_deformed_displacement_3d — unified displaced shape
+# ============================================================================
+
+class TestPlotDeformedDisplacement3d:
+    """Smoke tests for the unified displaced-shape viewer."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_no_pyvista(self):
+        if not _has_pyvista:
+            pytest.skip("pyvista not installed")
+
+    def test_import(self):
+        """Verify function is exposed and callable."""
+        from fea_toolkit.plotting import plot_deformed_displacement_3d
+        assert callable(plot_deformed_displacement_3d)
+
+    def test_no_displacements_returns_none(self, sample_npz_data):
+        """Empty displacement dict should print and return None."""
+        from fea_toolkit.plotting.viz import plot_deformed_displacement_3d
+        result = plot_deformed_displacement_3d(
+            sample_npz_data, {},
+            notebook=False,
+        )
+        assert result is None
+
+    def test_dict_source_notebook(self, sample_npz_data,
+                                   sample_displacements):
+        """Rendering with notebook=True does not open a window."""
+        from fea_toolkit.plotting.viz import plot_deformed_displacement_3d
+        pl = plot_deformed_displacement_3d(
+            sample_npz_data, sample_displacements,
+            scale=10.0, color_nodes=True, show_labels=True,
+            show_bounds=False,
+            notebook=True,
+        )
+        assert pl is not None
+        pl.close()
+
+    def test_selection_on_dict_source_ignored(self, sample_npz_data,
+                                               sample_displacements):
+        """Selection on a dict source prints a warning but does not crash."""
+        from fea_toolkit.plotting.viz import plot_deformed_displacement_3d
+        # Passing selection to a dict source — should warn and ignore
+        pl = plot_deformed_displacement_3d(
+            sample_npz_data, sample_displacements,
+            scale=10.0, color_nodes=False, show_labels=False,
+            show_bounds=False,
+            selection="dummy",  # not a real Selection, but dict source ignores it
+            notebook=True,
+        )
+        assert pl is not None
+        pl.close()
+
+    def test_screenshot_export(self, sample_npz_data, sample_displacements,
+                                tmp_path):
+        """Saving a screenshot to a temp path does not crash."""
+        from fea_toolkit.plotting.viz import plot_deformed_displacement_3d
+        png_path = str(tmp_path / "test_disp.png")
+        pl = plot_deformed_displacement_3d(
+            sample_npz_data, sample_displacements,
+            scale=10.0, color_nodes=True, show_labels=False,
+            show_bounds=False,
+            save_screenshot=png_path,
+            notebook=True,
+        )
+        assert pl is not None
+        pl.close()
+
+    def test_notebook_mode_returns_plotter(self, sample_npz_data,
+                                            sample_displacements):
+        """With notebook=True, the plotter object is returned."""
+        from fea_toolkit.plotting.viz import plot_deformed_displacement_3d
+        result = plot_deformed_displacement_3d(
+            sample_npz_data, sample_displacements,
+            scale=10.0, color_nodes=False, show_labels=False,
+            show_bounds=False,
+            notebook=True,
+        )
+        # Notebook mode returns a pv.Plotter when pyvista is available
+        import pyvista as pv
+        assert isinstance(result, pv.Plotter)
+        result.close()
+
+
+# ============================================================================
+# shrink parameter — frame/shell element gap
+# ============================================================================
+
+class TestShrinkParameter:
+    """Verify ``shrink`` parameter works in all functions that support it."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_no_pyvista(self):
+        if not _has_pyvista:
+            pytest.skip("pyvista not installed")
+
+    def test_plot_mesh_shrink(self, sample_npz_data):
+        """plot_mesh accepts shrink and returns a plotter."""
+        from fea_toolkit.plotting import plot_mesh
+        pl = plot_mesh(sample_npz_data, shrink=0.1, notebook=True)
+        assert pl is not None
+        pl.close()
+
+    def test_deformed_displacement_shrink(self, sample_npz_data,
+                                           sample_displacements):
+        """plot_deformed_displacement_3d accepts shrink on deformed lines."""
+        from fea_toolkit.plotting import plot_deformed_displacement_3d
+        pl = plot_deformed_displacement_3d(
+            sample_npz_data, sample_displacements,
+            scale=10.0, shrink=0.1, show_undeformed=True,
+            color_nodes=False, show_labels=False, show_bounds=False,
+            notebook=True,
+        )
+        assert pl is not None
+        pl.close()
+
+    def test_mode_animation_shrink(self, sample_npz_data):
+        """plot_mode_animation accepts shrink on segment endpoints.
+
+        Uses fixture data (no real mode shapes) — only checks the
+        shrink parameter is accepted without error.
+        """
+        from fea_toolkit.plotting import plot_mode_animation
+        # Minimal mode shape data matching the 3-node fixture
+        disp = {1: (0.0, 0.0, 0.0), 2: (0.1, 0.0, 0.0), 3: (0.2, 0.0, 0.0)}
+        shapes = {0: disp}
+        pl = plot_mode_animation(
+            sample_npz_data, shapes, mode=0,
+            scale=10.0, shrink=0.1, animate=False,
+            notebook=True,
+        )
+        assert pl is not None
+        pl.close()
+
+    def test_force_diagram_no_shrink(self, sample_npz_data):
+        """plot_force_diagram_3d does not accept shrink (flags unaffected).
+
+        Confirms the function signature has no ``shrink`` parameter.
+        """
+        import inspect
+        from fea_toolkit.plotting import plot_force_diagram_3d
+        sig = inspect.signature(plot_force_diagram_3d)
+        assert 'shrink' not in sig.parameters
