@@ -545,7 +545,8 @@ def plot_stories(
     try:
         import pyvista as pv
         import matplotlib.pyplot as plt
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         from fea_toolkit.plotting.viz import plot_mesh
     except ImportError:
         return None
@@ -558,13 +559,12 @@ def plot_stories(
     _prev_off_screen = pv.OFF_SCREEN
     pv.OFF_SCREEN = off_screen
     try:
-        # Build a lightweight elastic model for visualisation
-        b = OpenSeesBuilder(md, {
-            "element_type": "elasticBeamColumn",
-            "split_elements": True,
-            "verbose": False,
-        })
-        b.build()
+        # Build a lightweight elastic model for visualisation (two-stage)
+        _mm = preprocess_model(md, {"element_type": "elasticBeamColumn",
+                                    "split_elements": True, "verbose": False})
+        b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn",
+                                 "verbose": False})
+        b.build_domain()
     except Exception as exc:
         import logging
         logging.getLogger(__name__).warning(
