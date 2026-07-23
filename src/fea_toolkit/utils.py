@@ -284,15 +284,28 @@ def sum_reactions_with_overturning(
         return {'fx': 0.0, 'fy': 0.0, 'fz': 0.0,
                 'mx': 0.0, 'my': 0.0, 'mz': 0.0}
 
+    # Build a one-time tag-to-node index for efficient lookups.
+    # Reaction keys may be string IDs or integer node_tags; build both.
+    tag_to_node: Dict = {}
+    for nd in nodes.values():
+        t = getattr(nd, 'node_tag', None)
+        if t is not None:
+            tag_to_node[t] = nd
+
+    def _resolve_node(nid):
+        """Look up a node by string key or integer tag."""
+        if isinstance(nid, str):
+            nd = nodes.get(nid)
+            if nd is not None:
+                return nd
+        return tag_to_node.get(nid)
+
     # Identify the base (support) nodes — those that appear in reactions.
     # The centroid is computed from these nodes only, so that the
     # overturning moment reference is at the centre of the base footprint.
     _base_nds = []
     for nid in reactions:
-        nd = nodes.get(nid) if isinstance(nid, str) else None
-        if nd is None:
-            nd = next((nd_ for nd_ in nodes.values()
-                       if getattr(nd_, 'node_tag', None) == nid), None)
+        nd = _resolve_node(nid)
         if nd is not None:
             _base_nds.append(nd)
 
@@ -313,11 +326,7 @@ def sum_reactions_with_overturning(
     summed = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0,
               'mx': 0.0, 'my': 0.0, 'mz': 0.0}
     for nid, r in reactions.items():
-        node = nodes.get(nid) if isinstance(nid, str) else None
-        if node is None:
-            # Try matching by node_tag attribute
-            node = next((nd for nd in nodes.values()
-                         if getattr(nd, 'node_tag', None) == nid), None)
+        node = _resolve_node(nid)
         if node is None:
             continue
         fx = r.get('fx', 0.0); fy = r.get('fy', 0.0); fz = r.get('fz', 0.0)

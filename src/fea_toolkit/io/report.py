@@ -1120,7 +1120,6 @@ def wind_sanity_check(md, df_linear,
     str
         Markdown paragraph with bounding-box summary and wind-pressure table.
     """
-    from fea_toolkit.io.report import bounding_box
     bb = bounding_box(md)
     x_face = bb["y_span"] * bb["z_span"]
     y_face = bb["x_span"] * bb["z_span"]
@@ -1145,13 +1144,13 @@ def wind_sanity_check(md, df_linear,
         "",
         "**Wind load sanity check:**",
         "",
-        f"| Face | Area (m²) | Total {fu} | Pressure ({fu}/m²) |",
+        f"| Face | Area ({lu}²) | Total {fu} | Pressure ({fu}/{lu}²) |",
         f"|---|---|---|---|",
         f"| Wind +{wind_case_x[-1]} (Y‑Z face) | {x_face:.0f} | {fx:,.0f} | {p_x:.2f} |",
         f"| Wind +{wind_case_y[-1]} (X‑Z face) | {y_face:.0f} | {fy:,.0f} | {p_y:.2f} |",
     ]
 
-    if abs(p_x - p_y) / max(p_x, p_y, 0.01) < 0.1:
+    if max(p_x, p_y) > 0 and abs(p_x - p_y) / max(p_x, p_y) < 0.1:
         lines.append("")
         lines.append("✅ Pressures are within 10 % — wind loads are consistent "
                      "with the bounding box face areas.")
@@ -1186,7 +1185,7 @@ def static_load_verification(md, mesh_model, config: dict = None):
         config = {"verbose": False}
 
     df_applied = load_pattern_totals(md)
-    fu = md.units.get("F", "N")
+    fu = md.units.get("F", "?")
 
     ab = AnalysisBuilder(mesh_model, config)
     df_rxn = ab.check_load_equilibrium()
@@ -1295,8 +1294,6 @@ def run_linear_cases(
 
     static_cases = {cname: pats for cname, pats in static_cases.items()
                     if any(_pattern_has_loads(mesh_model, p) for p in pats)}
-
-    from fea_toolkit.utils import sum_reactions_with_overturning
 
     from fea_toolkit.utils import sum_reactions_with_overturning
 

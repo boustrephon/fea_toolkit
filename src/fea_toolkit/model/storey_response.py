@@ -1039,6 +1039,8 @@ def compute_linear_storey_responses(
 
     # --- Shear / moment from trapezoidal load -------------------------
     H = total_height
+    if H <= 0:
+        return all_shear, all_moment, all_drift
     lateral_keys = {"Wind", "RS-", "RS_"}
     for key, br in base_rxns.items():
         if not any(kw in key for kw in lateral_keys):
