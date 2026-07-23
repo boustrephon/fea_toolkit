@@ -6,7 +6,7 @@ visualisation stacks:
 | Stack | Backend | Purpose |
 |---|---|---|
 | **``ModelViewer``** | PyVista (pluggable) | Backend‑agnostic 3D model viewer — show model, overlay deformed shape / force flags, highlight elements, annotate. |
-| **Standalone 3D plots** (`plot_*_3d`) | PyVista | Direct‑call 3D plots for specific result types — deformed shape, mode shapes, force/moment diagrams, RS deformation. |
+| **Standalone 3D plots** (`plot_*_3d`) | PyVista | Direct‑call 3D plots — deformed shape (unified), mode shapes, force/moment diagrams. |
 | **Standalone 2D plots** (`plot_*`) | Matplotlib | Elevation‑based force diagrams, pushover capacity curves, ADRS spectra. |
 | **Interactive viewer** (`plot_interactive_viewer`) | PyVista + widgets | Widget‑driven viewer with radio buttons, combo selector, click‑to‑inspect elements. |
 | **NPZ standalone** (`plot_npz_*`) | PyVista / Matplotlib | Plot from a saved ``.npz`` file without needing the original builder. |
@@ -24,8 +24,9 @@ visualisation stacks:
 | `ModelViewer(...).annotate()` | PyVista | Text annotation | Labelling features |
 | `plot_model_3d(builder)` | PyVista | 3D model (nodes, labels, section colours) — *deprecated, use plot_mesh* | Quick model preview |
 | `plot_mesh(source)` | PyVista | 3D mesh from builder **or** NPZ dict | Unified mesh viewing |
-| `plot_deformed_3d(builder, results)` | PyVista | Deformed + undeformed overlay — *deprecated* | Static analysis displacement |
-| `plot_rs_deformed_3d(builder, disp)` | PyVista | RS CQC‑combined deformed shape — *deprecated* | Response‑spectrum results |
+| `plot_deformed_displacement_3d(source, disp)` | PyVista | Displaced shape with node colouring and value labels — unified replacement | Static / RS / modal displacement |
+| `plot_deformed_3d(builder, results)` | PyVista | Deformed + undeformed overlay — *deprecated, use plot_deformed_displacement_3d* | Static analysis displacement |
+| `plot_rs_deformed_3d(builder, disp)` | PyVista | RS CQC‑combined deformed shape — *deprecated, use plot_deformed_displacement_3d* | Response‑spectrum results |
 | `plot_mode_3d(builder, shapes, mode)` | PyVista | Mode shape (with animation) — *deprecated, use plot_mode_animation* | Modal analysis |
 | `plot_mode_animation(source, shapes, mode)` | PyVista | Mode shape animation from builder **or** NPZ | Unified modal viz |
 | `plot_static_moment_3d(builder, forces)` | PyVista | 3D force/moment flag or tube diagram — *deprecated, use plot_force_diagram_3d* | Static element forces |
@@ -210,24 +211,60 @@ plot_model_3d(
 )
 ```
 
-### 2b. Deformed shape
+### 2b. Deformed shape (unified)
+
+The unified function accepts a **builder**, **AnalysisBuilder**, or **NPZ data dict**
+and supports node colouring by displacement magnitude, value labels, and screenshot
+export at multiple camera angles.
 
 ```python
-from fea_toolkit.plotting import plot_deformed_3d
+from fea_toolkit.plotting import plot_deformed_displacement_3d
 
-plot_deformed_3d(
+# From a builder (static analysis)
+plot_deformed_displacement_3d(
     builder,
-    results,              # from builder.run_static_analysis()
+    results,                 # from builder.run_static_analysis()
     scale=10.0,
-    show_original=True,   # grey undeformed overlay
-    selection=None,
+    shrink=0.05,             # shrink frame lines toward midpoint
+    color_nodes=True,        # colour nodes by displacement magnitude
+    colormap="plasma",       # colour scheme
+    show_labels=True,        # show displacement value labels
+    max_labels=10,           # limit to top N nodes
+    label_threshold=0.05,    # minimum displacement ratio to label
+    label_unit="m",          # unit suffix on labels
+    selection=sel,           # optional Selection to restrict elements
 )
+
+# From an AnalysisBuilder (v2 pipeline)
+plot_deformed_displacement_3d(
+    analysis_builder,
+    displacements,           # nodal displacement dict
+    scale=10.0,
+)
+
+# From saved NPZ results
+import numpy as np
+data = np.load("results.npz", allow_pickle=True)
+plot_deformed_displacement_3d(
+    data,
+    displacements=[...],     # displacement magnitude array
+    scale=10.0,
+    color_nodes=True,
+    show_labels=True,
+)
+```
+
+**Legacy (builder only — deprecated):**
+
+```python
+from fea_toolkit.plotting import plot_deformed_3d   # → use plot_deformed_displacement_3d
+plot_deformed_3d(builder, results, scale=10.0)
 ```
 
 ### 2c. RS deformed shape (CQC‑combined)
 
 ```python
-from fea_toolkit.plotting import plot_rs_deformed_3d
+from fea_toolkit.plotting import plot_rs_deformed_3d  # deprecated → use plot_deformed_displacement_3d
 
 disp = builder.compute_rs_nodal_displacements(...)
 plot_rs_deformed_3d(builder, disp, scale=10.0)
@@ -238,7 +275,7 @@ Coloured by displacement magnitude (blue–white–red scale).
 ### 2d. Mode shape
 
 ```python
-from fea_toolkit.plotting import plot_mode_3d
+from fea_toolkit.plotting import plot_mode_3d  # deprecated, use plot_mode_animation
 
 shapes = builder.extract_mode_shapes(num_modes=6)
 plot_mode_3d(
@@ -247,6 +284,20 @@ plot_mode_3d(
     scale=10.0,
     animate=True,         # oscillating amplitude
     periods=modal["periods"],
+)```
+
+Use the unified ``plot_mode_animation`` instead — it supports builder,
+AnalysisBuilder, and NPZ dicts, plus ``shrink``:
+
+```python
+from fea_toolkit.plotting import plot_mode_animation
+
+pl = plot_mode_animation(
+    builder, shapes, mode=0,
+    scale=10.0,
+    shrink=0.05,           # gap between frame elements
+    animate=True,
+    notebook=True,
 )
 ```
 
@@ -443,33 +494,131 @@ These are particularly useful for:
 ## 6. LLM decision guide
 
 When you are an AI assistant and the user asks about visualising the
-structural model or results, use this guide to choose the right tool:
+structural model or results, use this guide to choose the right tool.
+
+### General principles
+
+**Use `selection` to focus discussion.** All unified 3D functions
+that accept a builder source also accept a
+``selection=Selection(...)`` keyword.  Pass a ``Selection`` to
+isolate critical elements (e.g. braces in a buckling check, columns
+in a drift review) or to hide distracting detail.  This works for
+mesh viewing, deformed shape, mode animation, and force diagrams.
+
+**Prefer unified functions.** Functions named ``plot_*_3d`` without
+a ``source`` parameter are builder-only and deprecated.  Use the
+``plot_*_3d(source, ...)`` variants instead — they accept a builder,
+AnalysisBuilder, **or** a data dict loaded from a results file.
+
+**Load results from NPZ or HDF5.** Results can be saved and loaded
+independently of the builder, which is useful for headless/batch runs
+and sharing with colleagues who don't have the original model.
+
+```python
+from fea_toolkit.io.npz_reader import read_results, read_results_hdf5
+
+# Auto-detect format from extension
+data = read_results("results.npz")   # or "results.h5"
+
+# The returned dict uses flat keys following the unified schema:
+data["node_tag"]                      # (N,) int — OpenSees node tags
+data["node_x"], data["node_y"], data["node_z"]  # (N,) float — coordinates
+data["frame_sap_id"]                  # (N,) str — element IDs
+data["frame_node_i"], data["frame_node_j"]  # (N,) int — connectivity
+data["frame_sec_name"]                # (N,) str — section assignments
+
+# Static results use grouped keys:
+data["static/DEAD/fx_i"]              # element forces at I-end, local X
+data["static/DEAD/node_dx"]           # nodal displacements in X
+data["static_case_labels"]            # list of available cases
+
+# Modal results use "modal/" prefix:
+data["modal/period"]                  # (N,) float — periods per mode
+data["modal/mode_dx"]                 # (N_nodes × N_modes) — mode shapes
+data["modal/mx_ratio"]                # mass participation ratios
+
+# RS results use "rs/" prefix:
+data["rs/period"]                     # modal periods for RS analysis
+data["rs/v_base_x"], data["rs/v_cqc_x"]  # base shears
+```
+
+To explore what's available in a loaded file:
+```python
+# List all available keys
+sorted(data.keys())
+
+# See which static cases exist
+from fea_toolkit.io.npz_reader import _get_static_cases
+cases = _get_static_cases(data)
+```
+
+---
 
 ### "Show me the model"
-→ ``plot_mesh(builder)`` (or ``ModelViewer(builder).show_model().show()``)
+→ ``plot_mesh(source)`` (or ``ModelViewer(builder).show_model().show()``)
 Best for general inspection, getting a feel for the structure.
-*Unified:* pass an NPZ data dict instead of a builder to view cached geometry.
+*Unified:* pass a builder, AnalysisBuilder, or a data dict (NPZ/HDF5).
+Use ``selection=Selection(...)`` to view only specific frame elements
+(builder source only).  Use ``shrink=0.05`` to create gaps at joints.
 
 ### "Show me the model with section colours"
-→ ``plot_model_3d(builder, color_by_section=True)`` — *deprecated, use* ``plot_mesh``
+→ ``plot_mesh(source, color_by_section=True)``
+Elements are coloured by their section name by default.
+Use ``selection=Selection(sections=['COL', 'BEAM'])`` to isolate
+specific section types.
 
 ### "Show me the deformed shape"
-- **Static:** ``plot_deformed_3d(builder, results)`` or
+- **Unified (builder, AnalysisBuilder, or NPZ/HDF5 dict):**
+  ``plot_deformed_displacement_3d(source, disp, ...)``
+  — displaced frame + node colouring + value labels + screenshot export.
+  Use ``selection=Selection(...)`` to restrict to specific elements
+  (builder source only).  Use ``shrink=0.05`` to create gaps between
+  connected frame elements.
+- **Static (builder only, deprecated):** ``plot_deformed_3d(builder, results)`` or
   ``ModelViewer(builder).overlay_deformed()``
-- **RS/CQC:** ``plot_rs_deformed_3d(builder, rs_displacements)``
-- **Modal:** ``plot_mode_3d(builder, shapes, mode=0, animate=True)``
+- **RS/CQC (builder only, deprecated):** ``plot_rs_deformed_3d(builder, rs_displacements)``
+- **Modal:** ``plot_mode_animation(source, shapes, mode, ...)``
+
+When loading from a results file, nodal displacements live at
+``data["static/{case}/node_dx"]`` etc.  Reconstruct the displacement
+dict as ``{tag: (dx, dy, dz)}`` by iterating over nodes and their
+displacement arrays.
 
 ### "Show me the forces / moments"
-- **Unified (builder or NPZ):** ``plot_force_diagram_3d(source, force_data, quantity="Mz")``
-- **3D flags on structure (builder only, deprecated):** ``plot_static_moment_3d(builder, elem_forces, quantity="Mz")``
+- **Unified (builder, AnalysisBuilder, or NPZ/HDF5 dict):**
+  ``plot_force_diagram_3d(source, force_data, quantity="Mz")``
+  — 3D flag or tube diagram on the structure.
+  Use ``selection=Selection(...)`` to isolate specific elements.
+- **3D flags on structure (builder only, deprecated):**
+  ``plot_static_moment_3d(builder, elem_forces, quantity="Mz")``
 - **3D shear:** ``plot_static_shear_3d(builder, elem_forces)``
 - **3D axial:** ``plot_static_axial_3d(builder, elem_forces)``
-- **2D vs elevation (columns):** ``plot_static_force_diagram(builder, elem_forces, quantity="Mz")``
-- **CQC‑combined 2D:** ``plot_force_diagram(rs_results["element_results"], quantity="My_i")``
+- **2D vs elevation (columns):**
+  ``plot_static_force_diagram(builder, elem_forces, quantity="Mz")``
+- **CQC‑combined 2D:**
+  ``plot_force_diagram(rs_results["element_results"], quantity="My_i")``
+
+When loading from a results file, element forces are accessed per
+static case: ``data["static/{case}/fx_i"]``, ``data["static/{case}/my_j"]``,
+etc.  Pass the loaded dict directly as *source* and set
+``force_data=None`` — forces are read automatically.
+
+### "Show me the mode shapes"
+- **Unified (builder, AnalysisBuilder, or NPZ/HDF5 dict):**
+  ``plot_mode_animation(source, shapes, mode=0, ...)``
+  — animated or static mode shape.
+  Use ``selection=Selection(...)`` to focus on elements of interest.
+  Use ``shrink=0.05`` to visualise element connections.
+- **Builder only, deprecated:** ``plot_mode_3d(builder, shapes, mode=0, ...)``
+
+When loading from a results file, pass ``mode_shapes=None`` — the
+shapes are extracted automatically from the ``modal/mode_dx``,
+``modal/mode_dy``, ``modal/mode_dz`` arrays.
 
 ### "Show me the pushover curve"
 - **Basic:** ``plot_pushover_curve(pushover_results)``
-- **Enhanced (stiffness, drift):** ``plot_pushover_curve_enhanced(pushover_results, design_disp=0.15)``
+- **Enhanced (stiffness, drift):**
+  ``plot_pushover_curve_enhanced(pushover_results, design_disp=0.15)``
 
 ### "Show me the capacity spectrum"
 → ``plot_capacity_spectrum(adrs, periods, accels, performance_point=pp)``
@@ -477,31 +626,60 @@ Best for general inspection, getting a feel for the structure.
 ### "I want to explore interactively"
 → ``plot_interactive_viewer(builder, combo_forces={...}, combo_results={...})``
 Best for demos, exploration, and when the user wants to switch between
-quantities / combos themselves.
+quantities / combos themselves — widget‑driven: radio buttons for
+quantity, slider for load case.
 
-### "I have a .npz file from an earlier run"
-- **Mesh:** ``plot_mesh(np.load("path.npz"))``
-- **Mode shapes:** ``plot_mode_animation(np.load("path.npz"), None, mode=0)``
-- **Forces:** ``plot_force_diagram_3d(np.load("path.npz"), combo="DEAD", quantity="Mz")``
-- **2D force:** ``plot_npz_force_diagram("path.npz", quantity="Mz")``
+### "I have a results file from an earlier run"
+Uses the unified ``read_results()`` dispatcher (auto-detects NPZ or HDF5):
+
+```python
+from fea_toolkit.io.npz_reader import read_results
+
+data = read_results("results.npz")   # or "results.h5"
+```
+
+- **Mesh:** ``plot_mesh(data)``
+- **Deformed shape:** ``plot_deformed_displacement_3d(data, displacements_dict)``
+- **Mode shapes:** ``plot_mode_animation(data, None, mode=0)``
+- **Forces:** ``plot_force_diagram_3d(data, combo="DEAD", quantity="Mz")``
+- **2D force (matplotlib):** ``plot_npz_force_diagram("path.npz", quantity="Mz")``
 - **3D force (legacy):** ``plot_npz_moment_3d("path.npz", quantity="Mz")``
 
 ### "Compare two models"
-→ ``compare_meshes(builder_a, builder_b)`` or ``compare_meshes(npz_a, npz_b)``
-Shows a side‑by‑side view of two meshes (builders or NPZ data).
+→ ``compare_meshes(source_a, source_b)``
+Shows a side‑by‑side view of two meshes.  Each source can be a builder,
+AnalysisBuilder, or NPZ/HDF5 data dict.  Useful for comparing original
+vs. subdivided meshes, or two design iterations.
 
 ### "Highlight specific elements"
 → ``ModelViewer(builder).show_model().highlight_elements(
     frame_ids=["1","5"], label="Braces"
 ).show()``
 
+The ``ModelViewer`` also supports ``highlight_nodes()`` and
+``annotate()`` for marking discussion points directly on the model.
+
 ### "Show me reactions"
-→ ``plot_static_moment_3d(builder, forces, show_reactions=True,
-    static_results=results)``
+→ ``ModelViewer(builder).overlay_forces(..., show_reactions=True)``
+or ``plot_static_moment_3d(builder, forces, show_reactions=True,
+   static_results=results)``
+
+### "Check element connectivity / mesh quality"
+→ ``plot_mesh(source, show_nodes=True, shrink=0.05)``
+To see mesh subdivisions, add ``show_mesh_nodes=True`` (highlights
+mesh‑created nodes in green).  Use ``selection=Selection(element_ids=['1'])``
+to zoom in on a specific element and its neighbours.
+
+### "What elements are connected to this one?"
+→ Use the ``npz_build_child_map()`` / ``npz_build_parent_map()`` helpers
+from ``fea_toolkit.io.npz_reader`` to explore parent-child relationships
+(subdivided elements).  Then feed the resulting element IDs into
+``selection=Selection(element_ids=[...])`` for visual inspection.
 
 ### "Export a view for sharing"
 → ``ModelViewer(builder).show_model().export_html("view.html")``
-Saves a self‑contained interactive HTML file — viewable in any browser.
+Saves a self‑contained interactive HTML file — viewable in any browser
+without Python or PyVista.
 
 ---
 
@@ -514,14 +692,15 @@ from fea_toolkit.plotting import ModelViewer
 # Standalone 3D plots (PyVista)
 from fea_toolkit.plotting import (
     plot_model_3d,
-    plot_mesh,              # unified (builder or NPZ)
-    compare_meshes,         # side-by-side comparison
-    plot_deformed_3d,
-    plot_rs_deformed_3d,
+    plot_mesh,                          # unified (builder or NPZ)
+    compare_meshes,                     # side-by-side comparison
+    plot_deformed_displacement_3d,      # unified (builder, AnalysisBuilder, or NPZ)
+    plot_deformed_3d,                   # deprecated → use plot_deformed_displacement_3d
+    plot_rs_deformed_3d,                # deprecated → use plot_deformed_displacement_3d
     plot_mode_3d,
-    plot_mode_animation,    # unified (builder or NPZ)
+    plot_mode_animation,                # unified (builder or NPZ)
     plot_static_moment_3d,
-    plot_force_diagram_3d,  # unified (builder or NPZ)
+    plot_force_diagram_3d,              # unified (builder or NPZ)
     plot_static_shear_3d,
     plot_static_axial_3d,
 )
