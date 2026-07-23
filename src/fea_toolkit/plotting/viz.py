@@ -10,6 +10,7 @@ is not installed.
 """
 
 import warnings
+from pathlib import Path
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
 import math
 import numpy as np
@@ -867,9 +868,9 @@ def plot_deformed_3d(
     """Overlay the deformed shape on the original model.
 
     .. deprecated::
-       This function is builder‑only.  A unified version that works
-       with both builder and NPZ data will replace it in a future
-       release.
+       Use :func:`plot_deformed_displacement_3d` instead — it supports
+       builder, AnalysisBuilder, and NPZ data, plus node colouring
+       by displacement magnitude and value labels.
 
     Args:
         builder: Built ``OpenSeesBuilder``.
@@ -976,9 +977,9 @@ def plot_rs_deformed_3d(
     """Display the RS CQC‑combined deformed shape using PyVista.
 
     .. deprecated::
-       This function is builder‑only.  A unified version that works
-       with both builder and NPZ data will replace it in a future
-       release.
+       Use :func:`plot_deformed_displacement_3d` instead — it supports
+       builder, AnalysisBuilder, and NPZ data, plus node colouring
+       by displacement magnitude and value labels.
 
     Args:
         builder: Built ``OpenSeesBuilder``.
@@ -1078,6 +1079,233 @@ def plot_rs_deformed_3d(
     if notebook:
         return plotter
     plotter.show()
+    return None
+
+
+# ============================================================================
+# Displaced shape 3D (PyVista) — unified static/RS displacement viewer
+# ============================================================================
+
+def plot_deformed_displacement_3d(
+    source,
+    displacements: Dict,
+    *,
+    scale: float = 10.0,
+    show_undeformed: bool = True,
+    shrink: float = 0.0,
+    color_nodes: bool = True,
+    colormap: str = "plasma",
+    show_labels: bool = False,
+    max_labels: int = 30,
+    label_threshold: float = 0.01,
+    label_unit: str = "mm",
+    show_bounds: bool = True,
+    camera: str = "iso",
+    selection: Optional['Selection'] = None,
+    save_screenshot: Optional[str] = None,
+    screenshot_views: Optional[list] = None,
+    notebook: bool = False,
+    **kwargs,
+) -> Optional[Any]:
+    """Display a displaced shape with node-colouring by displacement magnitude.
+
+    Unified replacement for ``plot_deformed_3d`` and ``plot_rs_deformed_3d``.
+    Works with any data source (builder, AnalysisBuilder, or NPZ dict).
+
+    Args:
+        source: ``OpenSeesBuilder``, ``AnalysisBuilder``, or NPZ data dict.
+        displacements: Dict mapping ``node_tag`` → ``(dx, dy, dz)`` in model
+            length units (e.g. metres).  For static analyses, pass the
+            ``nodal_displacements`` dict from ``run_static_analysis()``.
+            For RS, pass the CQC-combined dict from
+            ``compute_rs_nodal_displacements()``.
+        scale: Displacement magnification factor.
+        show_undeformed: Show the undeformed mesh in grey.
+        shrink: Fraction to shrink frame lines toward their midpoint
+            (0.0 = full length, 0.1 = 10 percent gap at each end).
+        color_nodes: If True, colour node markers by resultant displacement.
+        colormap: PyVista colormap name for node colouring.
+        show_labels: If True, overlay displacement value labels on nodes.
+        max_labels: Max number of labelled nodes (highest displacements).
+        label_threshold: Minimum displacement (m) for a node to be labelled.
+        label_unit: Display unit for labels (``"mm"`` or ``"m"``).
+        show_bounds: Show axis bounds grid.
+        camera: Camera position (``"iso"``, ``"xy"``, ``"xz"``, ``"yz"``).
+        selection: Optional :class:`~fea_toolkit.model.selection.Selection`
+            to restrict which frame elements are shown.  Only supported
+            when *source* is a builder/AnalysisBuilder (requires a model
+            object to resolve selection criteria).  ``None`` means all.
+        save_screenshot: Path to save a screenshot (PNG).
+        screenshot_views: List of camera positions for multiple screenshots,
+            e.g. ``["iso", "xy"]``.  ``None`` means just *camera*.
+        notebook: Return plotter for Jupyter embedding.
+        **kwargs: Passed to ``pyvista.Plotter()``.
+
+    Returns:
+        ``pv.Plotter`` if *notebook*, else ``None``.
+
+    Example::
+
+        # Static analysis
+        b = OpenSeesBuilder(md, ...)
+        b.build()
+        results = b.run_static_analysis(pattern_scales={"Wind +X": 1.0})
+        plot_deformed_displacement_3d(b, results["nodal_displacements"],
+                                       scale=20.0, show_labels=True)
+
+        # RS analysis with selection
+        sel = Selection(element_types=['Frame'], groups=['Moment Frame'])
+        plot_deformed_displacement_3d(b, results["nodal_displacements"],
+                                       scale=20.0, selection=sel)
+
+        # RS analysis
+        rs_disp = ab.compute_rs_nodal_displacements(...)
+        plot_deformed_displacement_3d(ab, rs_disp, scale=50.0)
+    """
+    import math
+    import numpy as np
+    try:
+        import pyvista as pv
+    except ImportError:
+        print("pyvista not installed — install with: pip install pyvista")
+        return None
+
+    # ── Resolve mesh data ──────────────────────────────────────────
+    data = _resolve_mesh_data(source)
+    nodes = data["nodes"]
+    frames = data["frames"]
+
+    # ── Apply selection filter (builder sources only) ─────────────
+    if selection is not None and not isinstance(source, dict):
+        try:
+            sel_ids = set(selection.get_frame_ids(source.model))
+            frames = [fr for fr in frames if fr.get("id") in sel_ids
+                      or str(fr.get("id")) in sel_ids]
+            data["frames"] = frames   # also used by _render_scene
+        except AttributeError:
+            print("Warning: selection requires a builder/analysis-builder "
+                  "source with a .model attribute — ignoring selection.")
+
+    if not displacements:
+        print("No displacement data provided.")
+        return None
+
+    pv.set_plot_theme("document")
+    plotter = pv.Plotter(notebook=notebook, **kwargs)
+
+    # ── Undeformed mesh (greyed out) ──────────────────────────────
+    if show_undeformed:
+        _render_scene(plotter, data, show_nodes=False, show_shells=True,
+                      show_frames=True, show_constraints=False,
+                      shrink=shrink)
+
+    # ── Deformed frame lines (warm red) ───────────────────────────
+    for fr in frames:
+        nid_i = fr.get("ni_id") or str(fr.get("ni_tag", ""))
+        nid_j = fr.get("nj_id") or str(fr.get("nj_tag", ""))
+        ni = nodes.get(nid_i) or nodes.get(str(fr.get("ni_tag", "")))
+        nj = nodes.get(nid_j) or nodes.get(str(fr.get("nj_tag", "")))
+        if ni is None or nj is None:
+            continue
+        di = displacements.get(ni["tag"], (0, 0, 0))
+        dj = displacements.get(nj["tag"], (0, 0, 0))
+        p1 = np.array([ni["x"] + di[0]*scale, ni["y"] + di[1]*scale, ni["z"] + di[2]*scale])
+        p2 = np.array([nj["x"] + dj[0]*scale, nj["y"] + dj[1]*scale, nj["z"] + dj[2]*scale])
+        if shrink:
+            m = (p1 + p2) / 2
+            p1 = p1 + (m - p1) * shrink
+            p2 = p2 + (m - p2) * shrink
+        n_pts = max(2, int(np.linalg.norm(p2 - p1) * 2))
+        pts = np.linspace(p1, p2, n_pts)
+        poly = pv.lines_from_points(pts)
+        plotter.add_mesh(poly, color="#c44e52", line_width=3)
+
+    # ── Node colouring by displacement magnitude ──────────────────
+    if color_nodes:
+        node_pts = []
+        node_disp = []
+        for nid, nd in nodes.items():
+            d = displacements.get(nd["tag"], (0.0, 0.0, 0.0))
+            mag = math.hypot(d[0], d[1], d[2])
+            node_pts.append([nd["x"], nd["y"], nd["z"]])
+            node_disp.append(mag)
+        if node_pts:
+            pts_arr = np.array(node_pts)
+            disp_arr = np.array(node_disp)
+            cloud = pv.PolyData(pts_arr)
+            cloud["displacement (m)"] = disp_arr
+            plotter.add_mesh(
+                cloud,
+                scalars="displacement (m)",
+                cmap=colormap,
+                point_size=10,
+                render_points_as_spheres=True,
+                scalar_bar_args={
+                    "title": "Resultant\nDisplacement (m)",
+                    "title_font_size": 12,
+                    "label_font_size": 10,
+                },
+                clim=[0, max(disp_arr) * 1.1] if max(disp_arr) > 0 else None,
+            )
+
+    # ── Displacement labels ────────────────────────────────────────
+    if show_labels:
+        label_scale = 1000.0 if label_unit == "mm" else 1.0
+        label_suffix = label_unit
+        labeled = []
+        for nid, nd in nodes.items():
+            d = displacements.get(nd["tag"], (0.0, 0.0, 0.0))
+            mag = math.hypot(d[0], d[1], d[2])
+            if mag > label_threshold:
+                labeled.append((nd["x"], nd["y"], nd["z"], mag))
+        labeled.sort(key=lambda t: -t[3])
+        labeled = labeled[:max_labels]
+        for x, y, z, d in labeled:
+            val = round(d * label_scale)
+            plotter.add_point_labels(
+                np.array([[x, y, z]]),
+                [f"{val}{label_suffix}"],
+                point_size=0, font_size=10, text_color="black",
+                shape="rounded_rect", shape_color="white",
+                shape_opacity=0.8, always_visible=True,
+            )
+
+    # ── Axes, bounds, camera ──────────────────────────────────────
+    if show_bounds:
+        plotter.show_bounds(grid="back", location="outer", font_size=8, color="grey")
+    plotter.add_axes(interactive=True, line_width=2, labels_off=False)
+
+    _set_isometric_view(plotter)
+    cam_map = {"iso": "iso", "xy": "xy", "xz": "xz", "yz": "yz"}
+    cam_pos = cam_map.get(camera, "iso")
+    if cam_pos == "iso":
+        plotter.camera_position = "iso"
+    else:
+        plotter.camera_position = cam_pos
+    plotter.camera.zoom(0.8)
+
+    # ── Screenshot export ──────────────────────────────────────────
+    views_to_capture = screenshot_views or ([camera] if save_screenshot else [])
+    for v in views_to_capture:
+        vcam = cam_map.get(v, "iso")
+        if vcam == "iso":
+            plotter.camera_position = "iso"
+        else:
+            plotter.camera_position = vcam
+        plotter.camera.zoom(0.8)
+        if save_screenshot:
+            path = str(Path(save_screenshot))
+            if len(views_to_capture) > 1:
+                stem = Path(path).stem
+                parent = Path(path).parent
+                path = str(parent / f"{stem}_{v}.png")
+            plotter.show(screenshot=path, auto_close=False)
+
+    if notebook:
+        return plotter
+    if not save_screenshot:
+        plotter.show()
+    plotter.close()
     return None
 
 
@@ -1371,6 +1599,7 @@ def plot_mode_3d(
 
 def plot_mode_animation(source, mode_shapes, mode=0, *,
                         scale=30.0, show_original=True,
+                        shrink=0.0,
                         animate=True, periods=None,
                         font_size=14, anim_speed=2.0, anim_amplitude=1.5,
                         selection=None, notebook=False, **kwargs):
@@ -1390,6 +1619,8 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
         mode: 0‑based mode index.
         scale: Displacement magnification factor.
         show_original: Show undeformed model in grey.
+        shrink: Fraction to shrink frame lines toward their midpoint
+            (0.0 = full length, 0.1 = 10 percent gap at each end).
         animate: Oscillate amplitude sinusoidally.
         periods: List of modal periods (s).  The period for *mode* is shown.
         font_size, anim_speed, anim_amplitude: Display tuning.
@@ -1450,6 +1681,10 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
             continue
         p1 = np.array([ni["x"], ni["y"], ni["z"]])
         p2 = np.array([nj["x"], nj["y"], nj["z"]])
+        if shrink:
+            m = (p1 + p2) / 2
+            p1 = p1 + (m - p1) * shrink
+            p2 = p2 + (m - p2) * shrink
         di = np.array(disp.get(ni["tag"], (0, 0, 0)))
         dj = np.array(disp.get(nj["tag"], (0, 0, 0)))
         segments.append((p1, p2, di, dj))
@@ -2912,8 +3147,8 @@ def _load_npz_for_plotting(npz_path: str, combo: str = None) -> dict:
         - force_unit, length_unit: unit strings
         - raw_data: the loaded npz dict
     """
-    from ..io.npz_reader import read_results_npz, _get_static_cases
-    d = read_results_npz(npz_path)
+    from ..io.npz_reader import read_results, _get_static_cases
+    d = read_results(npz_path)
 
     force_unit = "?"
     length_unit = "?"
