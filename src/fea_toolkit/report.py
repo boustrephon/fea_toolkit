@@ -35,7 +35,6 @@ from fea_toolkit.io.report import (
     bounding_box,
     material_summary,
     pushover_comparison_table,
-    run_linear_cases,
     section_summary,
     static_load_verification,
     wind_sanity_check,
@@ -52,9 +51,7 @@ from fea_toolkit.analysis import (
     ResponseSpectrumAnalysis,
     StaticAnalysis,
 )
-from fea_toolkit.opensees.analysis_builder import AnalysisBuilder, run_modal
 from fea_toolkit.opensees.preprocessor import preprocess_model
-from fea_toolkit.opensees.pushover import run_pushover_4dir
 from fea_toolkit.plotting.report import (
     plot_csm_4panel,
     plot_storey_forces,
@@ -116,7 +113,6 @@ def generate_report(
     mesh_model: Optional[MeshModel] = None,
     config: Optional[dict] = None,
     out_dir: Optional[str] = None,
-    run_via_manager: bool = True,
     **overrides,
 ) -> dict:
     """Run the full two-stage analysis pipeline and return all results.
@@ -139,9 +135,8 @@ def generate_report(
         Output directory for cached results and exported figures.
         Defaults to ``./output``.
     run_via_manager : bool
-        When ``True`` (default), use :class:`AnalysisManager` to execute
-        core analyses (modal, static, RS, pushover) instead of inline
-        code.  The manager is created internally based on *config*.
+        Deprecated and ignored.  The :class:`AnalysisManager` path is
+        always used.  Kept for backward compatibility.
     **overrides
         Flat override keys using ``__`` as a nesting separator,
         e.g. ``general__n_modes=6``.  Applied after *config*.
@@ -344,270 +339,134 @@ def generate_report(
         push_alpha_max, push_tg, push_zeta = alpha_max, tg, zeta
 
     # ── Core analyses (modal, linear, RS, pushover) ──────────────
-    if run_via_manager:
-        if verbose:
-            print("Running analyses via AnalysisManager...")
+    if verbose:
+        print("Running analyses via AnalysisManager...")
 
-        mgr = AnalysisManager(mesh_model)
+    mgr = AnalysisManager(mesh_model)
 
-        # Modal
+    # Modal
+    mgr.add(
+        ModalAnalysis(mesh_model, n_modes=n_modes, name="ModalAnalysis",
+                      config={"verbose": verbose})
+    )
+
+    # Static linear (if enabled)
+    if cfg.get("linear", {}).get("run", True):
         mgr.add(
-            ModalAnalysis(mesh_model, n_modes=n_modes, name="ModalAnalysis",
-                          config={"verbose": verbose})
+            StaticAnalysis(mesh_model, spec_cfg=spec_cfg,
+                           linear_cfg=cfg.get("linear"),
+                           name="StaticAnalysis")
+            .bind_md(md)
         )
 
-        # Static linear (if enabled)
-        if cfg.get("linear", {}).get("run", True):
+    # Response spectrum (one per direction)
+    if T_spec and Sa_spec:
+        for rs_dir in ("X", "Y"):
             mgr.add(
-                StaticAnalysis(mesh_model, spec_cfg=spec_cfg,
-                               linear_cfg=cfg.get("linear"),
-                               name="StaticAnalysis")
-                .bind_md(md)
+                ResponseSpectrumAnalysis(
+                    mesh_model, modal_result=None,
+                    direction=rs_dir, T_spec=T_spec, Sa_spec=Sa_spec,
+                    damping=0.05, n_modes=n_modes,
+                    name=f"RS-{rs_dir}",
+                )
             )
 
-        # Response spectrum (one per direction)
-        if T_spec and Sa_spec:
-            for rs_dir in ("X", "Y"):
-                mgr.add(
-                    ResponseSpectrumAnalysis(
-                        mesh_model, modal_result=None,
-                        direction=rs_dir, T_spec=T_spec, Sa_spec=Sa_spec,
-                        damping=0.05, n_modes=n_modes,
-                        name=f"RS-{rs_dir}",
-                    )
-                )
-
-        # Pushover (one per pattern)
-        # Note: rs_modal_base_shear is not available until after
-        # run_all(), so it's omitted here.  The mode1 pattern
-        # diagnostic warning is skipped in the manager path.
-        if (cfg.get("pushover") and push_cfg.get("patterns")
-                and push_cfg.get("directions")):
-            for pattern in push_cfg["patterns"]:
-                mgr.add(
-                    PushoverAnalysis(
-                        mesh_model, modal_result=None,
-                        gravity_patterns=load_cfg["gravity"],
-                        lateral_load_type=pattern,
-                        max_disp_val=push_cfg["max_disp"],
-                        num_steps=push_cfg["num_steps"],
-                        brace_type=push_cfg.get("brace_type", "beam"),
-                        brace_sections=push_cfg.get("brace_sections"),
-                        name=f"Pushover-{pattern}",
-                    )
-                )
-
-        # Run all
-        _man_results = mgr.run_all()
-        if log:
-            log.info("manager", f"ran {len(_man_results)} analyses")
-
-        # ── Extract results ──────────────────────────────────────
-        modal_result = _man_results["ModalAnalysis"].data
-        modal = modal_result["modal"]
-        modal_shapes = modal_result["shapes"]
-        if log:
-            log.info("modal", f"{n_modes} modes, T1={modal['periods'][0]:.3f}s")
-
-        # Build participation DataFrame (same format as inline path)
-        mp = modal["modal_props"]
-        pct_cols = ["Mx (%)", "My (%)", "Mz (%)", "Rx (%)", "Ry (%)", "Rz (%)"]
-        _mp_keys = {
-            "Mx (%)": "partiMassRatiosMX", "My (%)": "partiMassRatiosMY",
-            "Mz (%)": "partiMassRatiosMZ", "Rx (%)": "partiMassRatiosRMX",
-            "Ry (%)": "partiMassRatiosRMY", "Rz (%)": "partiMassRatiosRMZ",
-        }
-        modal_rows = []
-        for i in range(modal["num_modes"]):
-            row = {"Mode": i + 1, "Period (s)": round(modal["periods"][i], 4),
-                   "Freq (Hz)": round(modal["frequencies"][i], 4)}
-            for col, key in _mp_keys.items():
-                row[col] = round(mp.get(key, [0])[i], 2)
-            modal_rows.append(row)
-        df_modal = pd.DataFrame(modal_rows)
-        for c in pct_cols:
-            df_modal[c] = df_modal[c].apply(lambda v: f"{v:.2f}")
-        sum_row = {"Mode": "<strong>SUM</strong>", "Period (s)": "\u2014",
-                   "Freq (Hz)": "\u2014"}
-        for col in pct_cols:
-            sum_row[col] = f"{df_modal[col].astype(float).sum():.2f}"
-        df_modal = pd.concat([df_modal, pd.DataFrame([sum_row])], ignore_index=True)
-
-        # Static linear
-        _static_ar = _man_results.get("StaticAnalysis")
-        df_linear = _static_ar.data.get("df_linear", pd.DataFrame()) if _static_ar else pd.DataFrame()
-
-        # RS per-mode base shear
-        rs_modal_x = _man_results["RS-X"].data.get("modal_base_shear", []) if "RS-X" in _man_results else []
-        rs_modal_y = _man_results["RS-Y"].data.get("modal_base_shear", []) if "RS-Y" in _man_results else []
-
-        # Pushover
-        all_out = {}
-        for _name, _ar in _man_results.items():
-            if _name.startswith("Pushover-"):
-                all_out[_name.split("-", 1)[1]] = _ar.data
-
-        # CSM plots + comparison table
-        fig_csm_plots: dict = {}
-        df_compare = pd.DataFrame()
-        if all_out:
-            if log:
-                log.info("pushover", "done")
-            if verbose:
-                print("Generating CSM plots...")
-            for pat in push_cfg.get("patterns", []):
-                if pat in all_out:
-                    if log:
-                        log.info("csm_plot", f"{pat} — generating")
-                    fig_csm_plots[pat] = plot_csm_4panel(
-                        all_out[pat], modal, tg=push_tg, zeta=push_zeta,
-                        alpha_max_rare=push_alpha_max, out_dir=str(resolved_out),
-                    )
-                    if log:
-                        log.info("csm_plot", f"{pat} — done")
-            df_compare = pushover_comparison_table(
-                all_out, df_linear, patterns=push_cfg.get("patterns", [])
-            )
-        else:
-            if verbose:
-                print("Pushover: skipped (no manager results)")
-            if log:
-                log.info("pushover", "skipped")
-
-    else:
-        import warnings
-        warnings.warn(
-            "run_via_manager=False uses the deprecated inline analysis path. "
-            "Set run_via_manager=True (default) to use the new AnalysisManager path.",
-            DeprecationWarning, stacklevel=2,
-        )
-        # ── Existing inline path (deprecated) ────────────────────
-        if verbose:
-            print("Running modal analysis...")
-        modal_result = run_modal(mesh_model, n_modes=n_modes)
-        modal = modal_result["modal"]
-        modal_shapes = modal_result["shapes"]
-        if log:
-            log.info("modal", f"{n_modes} modes, T1={modal['periods'][0]:.3f}s")
-
-        mp = modal["modal_props"]
-        pct_cols = [
-            "Mx (%)", "My (%)", "Mz (%)", "Rx (%)", "Ry (%)", "Rz (%)",
-        ]
-        _mp_keys = {
-            "Mx (%)": "partiMassRatiosMX",
-            "My (%)": "partiMassRatiosMY",
-            "Mz (%)": "partiMassRatiosMZ",
-            "Rx (%)": "partiMassRatiosRMX",
-            "Ry (%)": "partiMassRatiosRMY",
-            "Rz (%)": "partiMassRatiosRMZ",
-        }
-        modal_rows = []
-        for i in range(modal["num_modes"]):
-            row = {
-                "Mode": i + 1,
-                "Period (s)": round(modal["periods"][i], 4),
-                "Freq (Hz)": round(modal["frequencies"][i], 4),
-            }
-            for col, key in _mp_keys.items():
-                row[col] = round(mp.get(key, [0])[i], 2)
-            modal_rows.append(row)
-        df_modal = pd.DataFrame(modal_rows)
-        for c in pct_cols:
-            df_modal[c] = df_modal[c].apply(lambda v: f"{v:.2f}")
-        sum_row = {
-            "Mode": "<strong>SUM</strong>",
-            "Period (s)": "\u2014",
-            "Freq (Hz)": "\u2014",
-        }
-        for col in pct_cols:
-            sum_row[col] = f"{df_modal[col].astype(float).sum():.2f}"
-        df_modal = pd.concat([df_modal, pd.DataFrame([sum_row])], ignore_index=True)
-
-        # ── Linear cases ─────────────────────────────────────────
-        df_linear = pd.DataFrame()
-        rs_modal_x: list = []
-        rs_modal_y: list = []
-        if cfg.get("linear", {}).get("run", True):
-            if verbose:
-                print("Running linear analyses (two-stage)...")
-            if log:
-                log.info("linear", "start")
-            df_linear = run_linear_cases(
-                md, mesh_model, spec_cfg=spec_cfg, linear_cfg=cfg.get("linear")
-            )
-
-            # Per-mode base shear for the RS figure
-            if T_spec and Sa_spec:
-                _ab_config = {"element_type": "elasticBeamColumn", "verbose": False}
-                for rs_dir, store in [("X", rs_modal_x), ("Y", rs_modal_y)]:
-                    ab = AnalysisBuilder(mesh_model, _ab_config)
-                    ab.build_domain()
-                    ab.compute_seismic_masses()
-                    _ = ab.run_modal_analysis(
-                        num_modes=n_modes, print_results=False
-                    )
-                    rs_r = ab.run_response_spectrum_analysis(
-                        n_modes, modal["periods"], T_spec, Sa_spec,
-                        rs_dir, 0.05, print_results=False,
-                    )
-                    store.extend(rs_r.get("modal_base_shear", []))
-
-        # ── Pushover + CSM ───────────────────────────────────────
-        all_out = {}
-        fig_csm_plots: dict = {}
-        df_compare = pd.DataFrame()
-        if (cfg.get("pushover") and push_cfg.get("patterns")
-                and push_cfg.get("directions")):
-            if log:
-                log.info("pushover", "start")
-            if verbose:
-                print(
-                    f"Running pushover ({len(push_cfg['directions'])} directions, "
-                    f"patterns={push_cfg['patterns']})..."
-                )
-            for pattern in push_cfg["patterns"]:
-                rs_store = {
-                    "X": rs_modal_x if rs_modal_x else None,
-                    "Y": rs_modal_y if rs_modal_y else None,
-                }
-                out = run_pushover_4dir(
-                    mesh_model, modal_result,
+    # Pushover (one per pattern)
+    # Note: rs_modal_base_shear is not available until after
+    # run_all(), so it's omitted here.  The mode1 pattern
+    # diagnostic warning is skipped in the manager path.
+    if (cfg.get("pushover") and push_cfg.get("patterns")
+            and push_cfg.get("directions")):
+        for pattern in push_cfg["patterns"]:
+            mgr.add(
+                PushoverAnalysis(
+                    mesh_model, modal_result=None,
                     gravity_patterns=load_cfg["gravity"],
                     lateral_load_type=pattern,
                     max_disp_val=push_cfg["max_disp"],
                     num_steps=push_cfg["num_steps"],
-                    tg=push_tg, alpha_max_rare=push_alpha_max,
-                    g=9.81, zeta=push_zeta, verbose=verbose,
                     brace_type=push_cfg.get("brace_type", "beam"),
                     brace_sections=push_cfg.get("brace_sections"),
-                    rs_modal_base_shear=rs_store,
+                    name=f"Pushover-{pattern}",
                 )
-                all_out[pattern] = out
-
-            if log:
-                log.info("pushover", "done")
-            if verbose:
-                print("Generating CSM plots...")
-            for pat in push_cfg["patterns"]:
-                if pat in all_out:
-                    if log:
-                        log.info("csm_plot", f"{pat} — generating")
-                    fig_csm_plots[pat] = plot_csm_4panel(
-                        all_out[pat], modal, tg=push_tg,
-                        zeta=push_zeta, alpha_max_rare=push_alpha_max,
-                        out_dir=str(resolved_out),
-                    )
-                    if log:
-                        log.info("csm_plot", f"{pat} — done")
-            df_compare = pushover_comparison_table(
-                all_out, df_linear, patterns=push_cfg["patterns"]
             )
-        else:
-            if verbose:
-                print("Pushover: skipped")
-            if log:
-                log.info("pushover", "skipped")
+
+    # Run all
+    _man_results = mgr.run_all()
+    if log:
+        log.info("manager", f"ran {len(_man_results)} analyses")
+
+    # ── Extract results ──────────────────────────────────────
+    modal_result = _man_results["ModalAnalysis"].data
+    modal = modal_result["modal"]
+    modal_shapes = modal_result["shapes"]
+    if log:
+        log.info("modal", f"{n_modes} modes, T1={modal['periods'][0]:.3f}s")
+
+    # Build participation DataFrame (same format as inline path)
+    mp = modal["modal_props"]
+    pct_cols = ["Mx (%)", "My (%)", "Mz (%)", "Rx (%)", "Ry (%)", "Rz (%)"]
+    _mp_keys = {
+        "Mx (%)": "partiMassRatiosMX", "My (%)": "partiMassRatiosMY",
+        "Mz (%)": "partiMassRatiosMZ", "Rx (%)": "partiMassRatiosRMX",
+        "Ry (%)": "partiMassRatiosRMY", "Rz (%)": "partiMassRatiosRMZ",
+    }
+    modal_rows = []
+    for i in range(modal["num_modes"]):
+        row = {"Mode": i + 1, "Period (s)": round(modal["periods"][i], 4),
+               "Freq (Hz)": round(modal["frequencies"][i], 4)}
+        for col, key in _mp_keys.items():
+            row[col] = round(mp.get(key, [0])[i], 2)
+        modal_rows.append(row)
+    df_modal = pd.DataFrame(modal_rows)
+    for c in pct_cols:
+        df_modal[c] = df_modal[c].apply(lambda v: f"{v:.2f}")
+    sum_row = {"Mode": "<strong>SUM</strong>", "Period (s)": "\u2014",
+               "Freq (Hz)": "\u2014"}
+    for col in pct_cols:
+        sum_row[col] = f"{df_modal[col].astype(float).sum():.2f}"
+    df_modal = pd.concat([df_modal, pd.DataFrame([sum_row])], ignore_index=True)
+
+    # Static linear
+    _static_ar = _man_results.get("StaticAnalysis")
+    df_linear = _static_ar.data.get("df_linear", pd.DataFrame()) if _static_ar else pd.DataFrame()
+
+    # RS per-mode base shear
+    rs_modal_x = _man_results["RS-X"].data.get("modal_base_shear", []) if "RS-X" in _man_results else []
+    rs_modal_y = _man_results["RS-Y"].data.get("modal_base_shear", []) if "RS-Y" in _man_results else []
+
+    # Pushover
+    all_out = {}
+    for _name, _ar in _man_results.items():
+        if _name.startswith("Pushover-"):
+            all_out[_name.split("-", 1)[1]] = _ar.data
+
+    # CSM plots + comparison table
+    fig_csm_plots: dict = {}
+    df_compare = pd.DataFrame()
+    if all_out:
+        if log:
+            log.info("pushover", "done")
+        if verbose:
+            print("Generating CSM plots...")
+        for pat in push_cfg.get("patterns", []):
+            if pat in all_out:
+                if log:
+                    log.info("csm_plot", f"{pat} — generating")
+                fig_csm_plots[pat] = plot_csm_4panel(
+                    all_out[pat], modal, tg=push_tg, zeta=push_zeta,
+                    alpha_max_rare=push_alpha_max, out_dir=str(resolved_out),
+                )
+                if log:
+                    log.info("csm_plot", f"{pat} — done")
+        df_compare = pushover_comparison_table(
+            all_out, df_linear, patterns=push_cfg.get("patterns", [])
+        )
+    else:
+        if verbose:
+            print("Pushover: skipped (no manager results)")
+        if log:
+            log.info("pushover", "skipped")
 
     # ── Summary tables (common) ──────────────────────────────────
     df_sections = section_summary(md)

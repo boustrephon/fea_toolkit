@@ -279,17 +279,16 @@ class TestAnalysisSignatures:
 
 
 class TestGenerateReportManagerPath:
-    """Verify that generate_report accepts run_via_manager without error."""
+    """Verify that generate_report always uses the AnalysisManager path."""
 
-    def test_run_via_manager_parameter_accepted(self):
+    def test_run_via_manager_param_removed(self):
         from fea_toolkit.report import generate_report
         import inspect
         sig = inspect.signature(generate_report)
-        assert "run_via_manager" in sig.parameters
-        assert sig.parameters["run_via_manager"].default is True
+        # run_via_manager param has been removed (always uses manager path)
+        assert "run_via_manager" not in sig.parameters
 
     def test_inline_path_still_default(self):
-        from fea_toolkit.report import generate_report
         from fea_toolkit.report import _DEFAULT_CONFIG
         # The default config should not include run_via_manager
         # (it's a function parameter, not a config key)
