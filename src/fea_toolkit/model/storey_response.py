@@ -851,3 +851,249 @@ def build_storey_table(elev_col: str, data_dict: dict,
                 base_row[c] = 0.0
     df = pd.concat([pd.DataFrame([base_row]), df], ignore_index=True)
     return df.sort_values(elev_col).reset_index(drop=True)
+def compute_linear_storey_responses(
+    md, mesh_model, stories, linear_cfg, df_linear, modal_result, T_spec, Sa_spec,
+    n_modes=12,
+    rigid_body_fit_threshold: float = 0.05,
+) -> Dict[str, pd.DataFrame]:
+    """Compute storey-level displacements, drifts, shears, and moments.
+
+    See :func:`pumphouse_report.compute_linear_storey_responses` for
+    full documentation — the logic is identical but uses the shared
+    *mesh_model* instead of creating new builders per case.
+    """
+    config = {"element_type": "elasticBeamColumn", "verbose": False}
+    modal = modal_result["modal"]
+    modal_shapes = modal_result["shapes"]
+
+    all_disp: Dict[str, pd.DataFrame] = {}
+    all_drift: Dict[str, pd.DataFrame] = {}
+    all_shear: Dict[str, pd.DataFrame] = {}
+    all_moment: Dict[str, pd.DataFrame] = {}
+
+    lateral_static = []
+    wind_keys = ("Wind", "QUAKE", "Quake", "quake")
+    for entry in linear_cfg.get("cases", []):
+        pats = {}
+        cname = ""
+        if isinstance(entry, str):
+            cname = entry
+            lc = md.load_cases.get(cname)
+            if lc is None:
+                continue
+            sd = lc.case_data.get("CASE - STATIC 1 - LOAD ASSIGNMENTS", [])
+            if isinstance(sd, list):
+                pats = {a["LoadName"]: a["LoadSF"] for a in sd if "LoadName" in a}
+            elif isinstance(sd, dict):
+                pats = {sd["LoadName"]: sd["LoadSF"]}
+        elif isinstance(entry, dict):
+            cname = list(entry.keys())[0]
+            pats = entry[cname]
+        if not any(kw in cname for kw in wind_keys):
+            continue
+        lateral_static.append((cname, pats))
+
+    min_z = min(nd.z for nd in md.nodes.values())
+    max_z = max(nd.z for nd in md.nodes.values())
+    total_height = max_z - min_z
+
+    base_rxns: Dict[str, dict] = {}
+    if df_linear is not None and not df_linear.empty:
+        for _, row in df_linear.iterrows():
+            cname = row["Case"]
+            key = cname.replace(" ", "_")
+            base_rxns[key] = {
+                "Fx": row.get("Fx", 0) or 0,
+                "Fy": row.get("Fy", 0) or 0,
+                "Fz": row.get("Fz", 0) or 0,
+                "Mx": row.get("Mx", 0) or 0,
+                "My": row.get("My", 0) or 0,
+                "Mz": row.get("Mz", 0) or 0,
+            }
+
+    all_zs = [nd.z for nd in md.nodes.values()]
+    cz = (min(all_zs) + max(all_zs)) * 0.5
+
+    # (resultant_shear, resultant_moment, build_storey_table
+    #  imported from fea_toolkit.model.storey_response)
+
+    # --- Static cases -------------------------------------------------
+    for cname, pats in lateral_static:
+        key = cname.replace(" ", "_")
+        ab = AnalysisBuilder(mesh_model, config)
+        try:
+            results = ab.run_static_analysis(pattern_scales=pats,
+                                            extract_reactions=True)
+            ndisp = results.get("nodal_displacements", {})
+
+            node_ux = {nid: ndisp.get(nid, (0, 0, 0))[0]
+                       for nid, nd in md.nodes.items()}
+            node_uy = {nid: ndisp.get(nid, (0, 0, 0))[1]
+                       for nid, nd in md.nodes.items()}
+
+            df_rb = storey_displacements(md, stories, node_ux, node_uy)
+            assign = assign_nodes_to_storeys(md, stories, 0.5)
+            peak_per_storey = {}
+            for s in stories:
+                nids = assign.get(s.name, [])
+                hyps = []
+                for nid in nids:
+                    nd = md.nodes.get(nid)
+                    if nd is None:
+                        continue
+                    d = ndisp.get(nid)
+                    if d is None:
+                        continue
+                    hyps.append(math.hypot(d[0], d[1]))
+                peak_per_storey[s.name] = max(hyps) if hyps else 0.0
+
+            disp_rows = []
+            drift_rows = []
+            for _, row in df_rb.iterrows():
+                peak = peak_per_storey.get(row["Storey"], 0.0)
+                if peak > 1e-12 and row["RMS_residual"] > rigid_body_fit_threshold * peak:
+                    storey_disp = peak
+                else:
+                    storey_disp = row["Peak_disp"]
+                disp_rows.append({
+                    "Storey": row["Storey"],
+                    "Elevation": row["Elevation"],
+                    key: round(storey_disp, 4),
+                })
+                h = row["Elevation"] - min_z
+                if h > 1e-12:
+                    drift_rows.append({
+                        "Storey": row["Storey"],
+                        "Elevation (m)": row["Elevation"],
+                        key: round(abs(storey_disp) / h, 6),
+                    })
+
+            if disp_rows:
+                all_disp[key] = pd.DataFrame(disp_rows)
+            if drift_rows:
+                all_drift[key] = pd.DataFrame(drift_rows)
+        except Exception as e:
+            print(f"  Storey response for {cname} failed: {e}")
+
+    # --- RS cases via modal shapes -----------------------------------
+    if T_spec and Sa_spec and len(T_spec) > 1:
+        def _spectrum_func(T):
+            return float(np.interp(T, T_spec, Sa_spec))
+
+        periods = modal.get("periods", [])
+        eigenvalues = modal.get("eigenvalues", [])
+        n_avail = min(n_modes, len(periods))
+
+        for rs_dir in ["X", "Y"]:
+            key = "RS-" + rs_dir
+            ab = AnalysisBuilder(mesh_model, config)
+            ab.build_domain()
+            ab.compute_seismic_masses()
+            try:
+                modal_rs = ab.run_modal_analysis(num_modes=n_avail,
+                                                 print_results=False)
+                rs_disp = ab.compute_rs_nodal_displacements(
+                    num_modes=n_avail,
+                    modal_periods=periods,
+                    eigenvalues=eigenvalues,
+                    spectrum_func=_spectrum_func,
+                    direction=rs_dir,
+                    damping_ratio=0.05,
+                )
+                if rs_disp:
+                    assign = assign_nodes_to_storeys(md, stories, 0.5)
+                    d_rows = []
+                    dr_rows = []
+                    for s in stories:
+                        nids = assign.get(s.name, [])
+                        hyps = []
+                        for nid in nids:
+                            nd = md.nodes.get(nid)
+                            if nd is None:
+                                continue
+                            d = rs_disp.get(nd.node_tag)
+                            if d is None:
+                                continue
+                            hyps.append(math.hypot(d[0], d[1]))
+                        if hyps:
+                            peak_disp = max(hyps)
+                            d_rows.append({
+                                "Storey": s.name,
+                                "Elevation": s.elevation,
+                                key: round(peak_disp, 4),
+                            })
+                            h = s.elevation - min_z
+                            if h > 1e-12:
+                                dr_rows.append({
+                                    "Storey": s.name,
+                                    "Elevation (m)": s.elevation,
+                                    key: round(abs(peak_disp) / h, 6),
+                                })
+                    if d_rows:
+                        all_disp[key] = pd.DataFrame(d_rows)
+                    if dr_rows:
+                        all_drift[key] = pd.DataFrame(dr_rows)
+            except Exception as e:
+                print(f"  Storey response for {key} failed: {e}")
+
+    # --- Shear / moment from trapezoidal load -------------------------
+    H = total_height
+    lateral_keys = {"Wind", "RS-", "RS_"}
+    for key, br in base_rxns.items():
+        if not any(kw in key for kw in lateral_keys):
+            continue
+        br_shear = resultant_shear(br)
+        fx = br.get("Fx", 0) or 0
+        fy = br.get("Fy", 0) or 0
+        br_moment = resultant_moment(br, shear_fx=fx, shear_fy=fy,
+                                     cz=cz, min_z=min_z)
+        if br_shear < 1e-6 and br_moment < 1e-6:
+            continue
+        if br_moment < 1e-3 and br_shear >= 1e-3:
+            br_moment = br_shear * 0.7 * H
+
+        w_sum = 2.0 * br_shear / H
+        w1_plus_w0 = 6.0 * br_moment / H**2
+        w1 = w1_plus_w0 - w_sum
+        w0 = w_sum - w1
+
+        sh_rows = []
+        mo_rows = []
+        for s in stories:
+            z = s.elevation - min_z
+            Vz = br_shear - w0*z - (w1 - w0) * z**2 / (2.0 * H)
+            Mz = (br_moment - br_shear*z + w0*z**2/2.0
+                  + (w1 - w0) * z**3 / (6.0 * H))
+            sh_rows.append({"Storey": s.name, "Elevation": s.elevation,
+                            key: round(Vz, 1)})
+            mo_rows.append({"Storey": s.name, "Elevation": s.elevation,
+                            key: round(Mz, 1)})
+        if br_shear >= 1e-6:
+            all_shear[key] = pd.DataFrame(sh_rows)
+        if br_moment >= 1e-6:
+            all_moment[key] = pd.DataFrame(mo_rows)
+
+    df_disp_out = (build_storey_table("Elevation", all_disp,
+        min_z=min_z, base_rxns=base_rxns, total_height=total_height)
+        if all_disp else pd.DataFrame())
+    df_drift_out = (build_storey_table("Elevation (m)", all_drift,
+        min_z=min_z, base_rxns=base_rxns, total_height=total_height)
+        if all_drift else pd.DataFrame())
+    df_shear_out = (build_storey_table("Elevation", all_shear,
+        min_z=min_z, base_rxns=base_rxns, total_height=total_height,
+        base_val="shear",
+        _resultant_shear_fn=resultant_shear)
+        if all_shear else pd.DataFrame())
+    df_moment_out = (build_storey_table("Elevation", all_moment,
+        min_z=min_z, base_rxns=base_rxns, total_height=total_height,
+        base_val="moment",
+        _resultant_shear_fn=resultant_shear,
+        _resultant_moment_fn=resultant_moment)
+        if all_moment else pd.DataFrame())
+
+    return {
+        "df_disp": df_disp_out,
+        "df_drift": df_drift_out,
+        "df_shear": df_shear_out,
+        "df_moment": df_moment_out,
+    }
