@@ -15,7 +15,8 @@ import pytest
 pytest.importorskip("openseespy")
 
 import openseespy.opensees as ops
-from fea_toolkit.opensees.builder import OpenSeesBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.model.geometry import find_constraint_edges
 from fea_toolkit.model.sap_data import (
     SAPModelData,
@@ -53,17 +54,18 @@ def sections():
 
 
 def _run_builder(md, config=None):
-    """Build a model and return its constraint edges."""
+    """Build a model (two-stage) and return its constraint edges."""
     cfg = {"verbose": False, "create_shells": True}
     if config:
         cfg.update(config)
-    b = OpenSeesBuilder(md, cfg)
+    mesh_model = preprocess_model(md, cfg)
+    ab = AnalysisBuilder(mesh_model, cfg)
     try:
-        b.build()
+        ab.build_domain()
         edges = find_constraint_edges(
-            b.model.area_elements,
-            b.model.area_assignments,
-            b.model.nodes,
+            mesh_model.area_elements,
+            getattr(mesh_model, 'area_assignments', {}),
+            mesh_model.nodes,
         )
         return edges
     finally:
@@ -231,19 +233,17 @@ class TestFindConstraintEdges:
             groups={}, frame_auto_mesh={},
             area_mesh={"1": AreaMesh(auto_mesh=True, max_size=4.0)},
         )
-        b = OpenSeesBuilder(md, {"verbose": False, "create_shells": True})
+        mesh_model = preprocess_model(md, {"verbose": False, "create_shells": True})
+        ab = AnalysisBuilder(mesh_model, {"verbose": False, "create_shells": True})
         try:
-            b.build()
+            ab.build_domain()
             edges = find_constraint_edges(
-                b.model.area_elements,
-                b.model.area_assignments,
-                b.model.nodes,
-                frame_elements=b.model.frame_elements,
-                frame_assignments=b.model.frame_assignments,
+                mesh_model.area_elements,
+                mesh_model.area_assignments,
+                mesh_model.nodes,
+                frame_elements=mesh_model.frame_elements,
+                frame_assignments=mesh_model.frame_assignments,
             )
-            # The slab mesh creates sub-elements with intermediate nodes
-            # on the 2→3 edge — the beam has only 2→3 directly.
-            # Should detect at least one tear.
             assert len(edges) >= 1
         finally:
             ops.wipe()
@@ -276,13 +276,14 @@ class TestFindConstraintEdges:
             },
         )
         cfg = {"verbose": False, "create_shells": True}
-        b = OpenSeesBuilder(md, cfg)
+        mesh_model = preprocess_model(md, cfg)
+        ab = AnalysisBuilder(mesh_model, cfg)
         try:
-            b.build()
+            ab.build_domain()
             edges = find_constraint_edges(
-                b.model.area_elements,
-                b.model.area_assignments,
-                b.model.nodes,
+                mesh_model.area_elements,
+                mesh_model.area_assignments,
+                mesh_model.nodes,
             )
             assert len(edges) >= 1
         finally:
@@ -324,15 +325,16 @@ class TestFindConstraintEdges:
             groups={}, frame_auto_mesh={},
             area_mesh={"1": AreaMesh(auto_mesh=True, max_size=3.0)},
         )
-        b = OpenSeesBuilder(md, {"verbose": False, "create_shells": True})
+        mesh_model = preprocess_model(md, {"verbose": False, "create_shells": True})
+        ab = AnalysisBuilder(mesh_model, {"verbose": False, "create_shells": True})
         try:
-            b.build()
+            ab.build_domain()
             edges = find_constraint_edges(
-                b.model.area_elements,
-                b.model.area_assignments,
-                b.model.nodes,
-                frame_elements=b.model.frame_elements,
-                frame_assignments=b.model.frame_assignments,
+                mesh_model.area_elements,
+                mesh_model.area_assignments,
+                mesh_model.nodes,
+                frame_elements=mesh_model.frame_elements,
+                frame_assignments=mesh_model.frame_assignments,
             )
             # At least one tear with the 1→2 edge direction
             assert len(edges) >= 1
