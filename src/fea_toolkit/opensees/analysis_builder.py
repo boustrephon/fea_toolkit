@@ -260,6 +260,49 @@ class AnalysisBuilder:
                 if not getattr(self.mesh_model.area_elements[aid], 'inactive', False)}
 
     # ═══════════════════════════════════════════════════════════════
+    # Local axis utilities (used by visualisation)
+    # ═══════════════════════════════════════════════════════════════
+
+    def _get_local_axes(self, elem: FrameElement):
+        """Return local (vx, vy, vz) unit vectors for a frame element.
+
+        Parameters
+        ----------
+        elem : FrameElement
+            Frame element from the MeshModel.
+
+        Returns
+        -------
+        tuple of np.ndarray
+            Local x, y, z unit vectors (3-element each).
+        """
+        node_i = self.mesh_model.nodes[elem.node_i]
+        node_j = self.mesh_model.nodes[elem.node_j]
+        coords_i = ops.nodeCoord(node_i.node_tag)
+        coords_j = ops.nodeCoord(node_j.node_tag)
+        vec_x = np.array(coords_j) - np.array(coords_i)
+        return get_local_axes(vec_x, getattr(elem, 'angle', 0.0))
+
+    def _global_to_local(self, elem: FrameElement, vec: np.ndarray) -> np.ndarray:
+        """Transform a vector from global to local coordinates.
+
+        Parameters
+        ----------
+        elem : FrameElement
+            Frame element defining the local coordinate system.
+        vec : np.ndarray
+            3-element vector in global coordinates.
+
+        Returns
+        -------
+        np.ndarray
+            3-element vector in local coordinates.
+        """
+        vx, vy, vz = self._get_local_axes(elem)
+        T = np.vstack([vx, vy, vz])
+        return T @ vec
+
+    # ═══════════════════════════════════════════════════════════════
     # Edge constraint dispatcher
     # ═══════════════════════════════════════════════════════════════
 

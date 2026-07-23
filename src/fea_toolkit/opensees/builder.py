@@ -8179,3 +8179,31 @@ class OpenSeesBuilder:
             'M_eff': M_eff,
             'capacity_adrs': {'S_a': S_a_arr.tolist(), 'S_d': S_d_arr.tolist()},
         }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Standalone aliases for OpenSeesBuilder static methods.
+# These allow callers to import the functions directly without
+# referencing the deprecated OpenSeesBuilder class.
+# ═══════════════════════════════════════════════════════════════════
+
+
+def export_model_to_tcl(
+    model_data: "SAPModelData",
+    path: str,
+    lib_path: str = "",
+    ndm: int = 3,
+    ndf: int = 6,
+    tcl_prefix: str = "",
+    tcl_suffix: str = "",
+    config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Export a SAP model directly to a Xara-compatible Tcl script.
+
+    See :meth:`OpenSeesBuilder.export_model_to_tcl` for full docs.
+    This is a standalone alias for the static method.
+    """
+    OpenSeesBuilder.export_model_to_tcl(
+        model_data, path, lib_path, ndm, ndf,
+        tcl_prefix, tcl_suffix, config,
+    )

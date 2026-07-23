@@ -282,9 +282,9 @@ def generate_report(
         if verbose:
             print("Running connectivity check...")
         try:
-            from fea_toolkit.opensees.builder import OpenSeesBuilder
+            from fea_toolkit.model.checks import check_model_connectivity
 
-            connectivity = OpenSeesBuilder.check_model_connectivity(md)
+            connectivity = check_model_connectivity(md)
             if verbose:
                 print(f"  {connectivity['summary']}")
                 if connectivity.get("orphan_nodes"):
