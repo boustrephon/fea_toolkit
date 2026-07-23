@@ -116,20 +116,16 @@ class TestBuildWorkflow:
 # ============================================================================
 
 class TestStaticAnalysisWorkflow:
-    """End-to-end linear static analysis.
-
-    Note: uses OpenSeesBuilder (legacy) for most tests because the
-    AnalysisBuilder path has behavioral differences in load direction
-    mapping that need investigation.
-    """
+    """End-to-end linear static analysis via AnalysisBuilder."""
 
     @pytest.fixture
-    def static_builder(self, sample_md):
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
-        b = OpenSeesBuilder(sample_md, {
-            'element_type': 'elasticBeamColumn', 'verbose': False,
-            'create_shells': False, 'use_preprocessor': False,
-        })
+    def static_ab(self, sample_md):
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        cfg = {'element_type': 'elasticBeamColumn', 'verbose': False,
+               'create_shells': False}
+        mm = preprocess_model(sample_md, cfg)
+        b = AnalysisBuilder(mm, cfg)
         yield b
         ops.wipe()
 
@@ -140,16 +136,17 @@ class TestStaticAnalysisWorkflow:
         assert isinstance(results, dict)
         assert 'nodal_displacements' in results
 
-    def test_static_analysis_displacements(self, static_builder):
+    def test_static_analysis_displacements(self, static_ab):
         """Cantilever tip displaces under lateral wind load."""
-        static_builder.build()
-        results = static_builder.run_static_analysis(
+        static_ab.build_domain()
+        results = static_ab.run_static_analysis(
             pattern_scales={"WIND": 1.0},
             extract_reactions=True,
         )
+        # AnalysisBuilder keys nodal displacements by node_id (string)
         disp = results.get('nodal_displacements', {})
-        assert 2 in disp
-        dx, dy, dz = disp[2]
+        assert "2" in disp, f"node '2' not in displacements: {list(disp.keys())}"
+        dx, dy, dz = disp["2"][:3]
         assert abs(dx) > 1e-6, f"top node X displacement is zero under wind (dx={dx})"
 
     def test_static_element_forces(self, sample_ab):
@@ -166,42 +163,53 @@ class TestStaticAnalysisWorkflow:
         assert 'Fx' in f
         assert 'Mz' in f
 
-    def test_static_gravity_vs_pattern(self, static_builder):
+    def test_static_gravity_vs_pattern(self, static_ab):
         """Multiple static analyses can be run sequentially with different load sets."""
-        static_builder.build()
-        r1 = static_builder.run_static_analysis(
+        static_ab.build_domain()
+        r1 = static_ab.run_static_analysis(
             pattern_scales={"DEAD": 1.0},
         )
-        r2 = static_builder.run_static_analysis(
+        r2 = static_ab.run_static_analysis(
             pattern_scales={"DEAD": 1.0, "WIND": 1.0},
         )
         assert isinstance(r1, dict)
         assert isinstance(r2, dict)
         assert 'nodal_displacements' in r1
         assert 'nodal_displacements' in r2
-        assert 2 in r1['nodal_displacements']
-        assert 2 in r2['nodal_displacements']
-        d1 = r1['nodal_displacements'][2]
-        d2 = r2['nodal_displacements'][2]
+        # AnalysisBuilder keys by node_id (string)
+        assert "2" in r1['nodal_displacements']
+        assert "2" in r2['nodal_displacements']
+        d1 = r1['nodal_displacements']["2"]
+        d2 = r2['nodal_displacements']["2"]
         assert abs(d2[0]) >= abs(d1[0]) - 1e-12, \
             f"X displacement did not increase with wind ({d1[0]} → {d2[0]})"
 
-    def test_static_reactions_equilibrium(self, static_builder):
+    def test_static_reactions_equilibrium(self, static_ab):
         """Reactions at restrained nodes balance applied gravity loads."""
-        static_builder.build()
-        results = static_builder.run_static_analysis(
+        static_ab.build_domain()
+        results = static_ab.run_static_analysis(
             pattern_scales={"DEAD": 1.0},
             extract_reactions=True,
         )
-        summed = results.get('summed_reactions', {})
-        assert summed, "summed_reactions missing or empty"
-        assert abs(summed.get('fz', 0)) > 1e-6, \
-            f"vertical reaction Fz is zero under dead load ({summed})"
+        # AnalysisBuilder returns 'reactions' keyed by node_id, not summed
+        reactions = results.get('reactions', {})
+        assert reactions, "reactions missing or empty"
+        summed_fz = sum(r.get('fz', 0) for r in reactions.values())
+        assert abs(summed_fz) > 1e-6, \
+            f"vertical reaction Fz sum is near zero: {summed_fz}"
 
-    def test_static_self_weight_consistency(self, static_builder):
+    def test_static_self_weight_consistency(self, static_ab, sample_md):
         """Applied self-weight loads match expected values from geometry."""
-        static_builder.build()
-        report = static_builder.check_self_weight_consistency(verbose=False)
+        from fea_toolkit.model.checks import check_self_weight_consistency
+        static_ab.build_domain()
+        # Create DEAD loads to populate _sw_load_totals (build_domain alone
+        # does not create loads — that happens in create_loads).
+        static_ab.create_loads(pattern_scales={"DEAD": 1.0})
+        report = check_self_weight_consistency(
+            sample_md,
+            load_totals=static_ab._sw_load_totals,
+            verbose=False,
+        )
         assert report["passed"], (
             f"Self-weight mismatch: expected {report['expected']}, "
             f"applied {report['applied']} "
