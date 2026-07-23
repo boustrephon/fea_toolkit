@@ -432,3 +432,390 @@ class XaraTclRunner:
             if os.path.exists(candidate):
                 return candidate
         return "tclsh8.6"  # last resort
+
+
+# ════════════════════════════════════════════════════════════════════
+# MeshModel-aware Tcl export
+# ════════════════════════════════════════════════════════════════════
+
+
+def export_mesh_model_to_tcl(
+    mesh_model: "MeshModel",
+    path: str,
+    lib_path: str = "",
+    ndm: int = 3,
+    ndf: int = 6,
+    tcl_prefix: str = "",
+    tcl_suffix: str = "",
+    config: Optional[dict] = None,
+) -> None:
+    """Export a ``MeshModel`` directly to a standalone Tcl script.
+
+    This is a MeshModel-aware alternative to
+    :func:`OpenSeesBuilder.export_model_to_tcl` that works with the
+    two-stage pipeline's pre-computed ``MeshModel``.  Unlike the
+    SAPModelData path, the topology is already split, merged, and
+    tagged — no Preprocessor re-run is needed.
+
+    When *config* is ``None`` or ``{"create_fiber_sections": False}``,
+    all frame elements are exported as ``elasticBeamColumn`` with
+    ``section Elastic``.
+
+    When *config* has ``{"create_fiber_sections": True}``, sections
+    that support fiber conversion (via ``to_fiber_patches()``) are
+    emitted as ``section Fiber`` blocks with ``patch`` commands, and
+    frame elements reference them via ``forceBeamColumn`` +
+    ``beamIntegration Lobatto``.  Elastic sections are used for
+    sections that do not support fiber conversion.
+
+    Args:
+        mesh_model: Pre-processed mesh model to export.
+        path: Output ``.tcl`` file path.
+        lib_path: Path to ``libOpenSeesRT.dylib``.  Auto-detected
+            from the installed ``opensees`` package if not provided.
+        ndm: Spatial dimensions (default 3).
+        ndf: DOFs per node (default 6).
+        tcl_prefix: Tcl commands inserted after the model preamble
+            (e.g. for nDMaterial definitions before sections).
+        tcl_suffix: Tcl commands appended before ``wipe``
+            (e.g. for analysis, recorders, results output).
+        config: Builder config dict.  When
+            ``config["create_fiber_sections"]`` is ``True``, fiber
+            sections are auto-generated for supported section types.
+    """
+    from ..model.mesh_model import MeshModel
+
+    if config is None:
+        config = {}
+
+    # ── Resolve libOpenSeesRT path ───────────────────────────────
+    if not lib_path:
+        try:
+            import opensees as _xara_ops
+            _lib_dir = os.path.dirname(_xara_ops.__file__)
+            for ext in (".dylib", ".so"):
+                cand = os.path.join(_lib_dir, f"libOpenSeesRT{ext}")
+                if os.path.exists(cand):
+                    lib_path = cand
+                    break
+        except ImportError:
+            lib_path = "libOpenSeesRT.dylib"
+        if not lib_path:
+            lib_path = "libOpenSeesRT.dylib"
+
+    lines: list[str] = [
+        "# Xara/OpenSeesRT Tcl script -- exported by export_mesh_model_to_tcl",
+        f"load {{{lib_path}}}",
+        f"model Basic -ndm {ndm} -ndf {ndf}",
+    ]
+
+    # ── Tag maps ─────────────────────────────────────────────────
+    # Material and section tags are pre-computed by the Preprocessor.
+    # We use the same tag scheme as export_model_to_tcl:
+    #   materials: 1..M, sections: M+1..M+S
+    mat_tags: dict[str, int] = dict(mesh_model.material_tags)
+    sec_tags: dict[str, int] = dict(mesh_model.section_tags)
+
+    # If tag maps are empty (e.g. from a non-Preprocessor source),
+    # fall back to sequential assignment.
+    if not mat_tags:
+        for i, mn in enumerate(mesh_model.materials, start=1):
+            mat_tags[mn] = i
+    if not sec_tags:
+        mat_count = max(len(mesh_model.materials), 1)
+        sec_offset = mat_count + 1
+        for i, sn in enumerate(mesh_model.sections, start=sec_offset):
+            sec_tags[sn] = i
+
+    # ── Nodes ────────────────────────────────────────────────────
+    lines.append("")
+    lines.append("# ── Nodes ──")
+    for nd in mesh_model.nodes.values():
+        lines.append(f"node {nd.node_tag} {nd.x:g} {nd.y:g} {nd.z:g}")
+
+    # ── Restraints ───────────────────────────────────────────────
+    if mesh_model.restraints:
+        lines.append("")
+        lines.append("# ── Restraints ──")
+        for nid, r in mesh_model.restraints.items():
+            nd = mesh_model.nodes.get(nid)
+            if nd is None:
+                continue
+            tags = " ".join(str(int(x)) for x in r.dofs)
+            lines.append(f"fix {nd.node_tag} {tags}")
+
+    # ── Materials ────────────────────────────────────────────────
+    if mesh_model.materials:
+        lines.append("")
+        lines.append("# ── Materials ──")
+        for mat_name, mat in mesh_model.materials.items():
+            tag = mat_tags.get(mat_name)
+            if tag is None:
+                continue
+            if mat.type and "concrete" in mat.type.lower():
+                Fc = (mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7) / 1.0
+                epsc = (mat.eFc if mat.eFc and mat.eFc > 0 else 0.002)
+                Fu = 0.2 * Fc
+                epsu = 0.006
+                lines.append(
+                    f"uniaxialMaterial Concrete01 {tag} "
+                    f"{-Fc:g} {-epsc:g} {-Fu:g} {-epsu:g}"
+                )
+            else:
+                E_mod = (mat.E_mod if mat.E_mod and mat.E_mod > 0
+                         else 2.0e11)
+                Fy = (mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8)
+                lines.append(
+                    f"uniaxialMaterial Steel01 {tag} "
+                    f"{Fy:g} {E_mod:g} 0.01"
+                )
+
+    # ── Frame sections ───────────────────────────────────────────
+    if mesh_model.sections:
+        lines.append("")
+        lines.append("# ── Frame sections ──")
+
+        # Detect fiber-capable sections
+        fiber_sec_names: set[str] = set()
+        if config.get("create_fiber_sections", False):
+            for sec_name, sec in mesh_model.sections.items():
+                try:
+                    sec.to_fiber_patches(mat_tag=1)
+                    fiber_sec_names.add(sec_name)
+                except NotImplementedError:
+                    pass
+
+        for sec_name, sec in mesh_model.sections.items():
+            tag = sec_tags.get(sec_name)
+            if tag is None:
+                continue
+
+            if sec_name in fiber_sec_names:
+                # ── Fiber section ──
+                # Need a material tag for the fiber patch materials.
+                # For steel sections: use the existing Steel01 tag.
+                # For RC sections: generate Concrete01 + Steel02 inline.
+                mat = mesh_model.materials.get(sec.material)
+
+                from ..model.sap_data import (
+                    ConcreteRectangularSection,
+                    ConcreteCircularSection,
+                    RectangularSection,
+                )
+                is_rc = isinstance(sec, (
+                    ConcreteRectangularSection,
+                    ConcreteCircularSection,
+                    RectangularSection,
+                ))
+
+                if is_rc:
+                    # Generate RC fiber materials
+                    next_mat_tag = max(mat_tags.values(), default=0) + 1
+                    concrete_unconf = next_mat_tag
+                    concrete_conf = next_mat_tag + 1
+                    rebar_tag = next_mat_tag + 2
+                    next_mat_tag += 3
+
+                    if mat is not None:
+                        Fc = mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7
+                        epsc = 0.002
+                        fcc = mat.eFc if mat.eFc and mat.eFc > 0 else Fc * 1.3
+                        epscc = 0.005
+                        Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
+                    else:
+                        Fc = 3.0e7
+                        epsc = 0.002
+                        fcc = 3.9e7
+                        epscc = 0.005
+                        Fy = 4.0e8
+
+                    lines.append(
+                        f"uniaxialMaterial Concrete01 {concrete_unconf} "
+                        f"{-Fc:g} {-epsc:g} {-0.2*Fc:g} {-0.006:g}"
+                    )
+                    lines.append(
+                        f"uniaxialMaterial Concrete01 {concrete_conf} "
+                        f"{-fcc:g} {-epscc:g} {-0.2*fcc:g} {-0.02:g}"
+                    )
+                    lines.append(
+                        f"uniaxialMaterial Steel02 {rebar_tag} "
+                        f"{Fy:g} {2.0e11:g} 0.01 18.5 0.925 0.15"
+                    )
+                    fiber_mat_tag = concrete_unconf
+                else:
+                    # Steel fiber section — use existing material tag
+                    mat_tag = mat_tags.get(sec.material, 1)
+                    fiber_mat_tag = mat_tag
+
+                # Build fiber patches
+                patches = sec.to_fiber_patches(mat_tag=fiber_mat_tag)
+                lines.append(f"section Fiber {tag} {{")
+                for patch in patches:
+                    cmd, mtag, nfy, nfz, y1, z1, y2, z2 = patch
+                    lines.append(
+                        f"  patch {cmd} {mtag} {nfy} {nfz} "
+                        f"{y1:g} {z1:g} {y2:g} {z2:g}"
+                    )
+                lines.append("}")
+            else:
+                # ── Elastic section ──
+                E_mod = 2.0e11
+                mat = mesh_model.materials.get(sec.material)
+                if mat and mat.E_mod and mat.E_mod > 0:
+                    E_mod = mat.E_mod
+                G = (mat.G_mod if mat and mat.G_mod and mat.G_mod > 0
+                     else 0.4 * E_mod)
+                lines.append(
+                    f"section Elastic {tag} "
+                    f"{E_mod:g} {sec.A:g} {sec.I33:g} {sec.I22:g} "
+                    f"{G:g} {sec.J:g}"
+                )
+
+    # ── tcl_prefix (user-supplied, before elements) ──────────────
+    if tcl_prefix:
+        lines.append("")
+        lines.append("# ── User tcl_prefix ──")
+        lines.append(tcl_prefix)
+
+    # ── Shell sections ───────────────────────────────────────────
+    if mesh_model.area_elements:
+        lines.append("")
+        lines.append("# ── Shell sections & area elements ──")
+
+        # Assign shell section tags (sequential after frame sections)
+        shell_sec_tags: dict[str, int] = {}
+        _next_tag = max(sec_tags.values(), default=0) + 1
+        for _aid, elem in mesh_model.area_elements.items():
+            if getattr(elem, "inactive", False):
+                continue
+            sec_name = mesh_model.area_assignments.get(_aid, "")
+            if not sec_name or sec_name in shell_sec_tags:
+                continue
+            shell_sec_tags[sec_name] = _next_tag
+            _next_tag += 1
+            # Emit ElasticMembranePlateSection
+            area_sec = mesh_model.sections.get(sec_name)
+            if area_sec is not None:
+                E_mod = 2.0e11
+                mat = mesh_model.materials.get(area_sec.material)
+                if mat and mat.E_mod and mat.E_mod > 0:
+                    E_mod = mat.E_mod
+                nu = mat.Nu if mat and mat.Nu and mat.Nu > 0 else 0.2
+                t = getattr(area_sec, "thickness", getattr(area_sec, "t", 0.2))
+                lines.append(
+                    f"section ElasticMembranePlateSection "
+                    f"{shell_sec_tags[sec_name]} {E_mod:g} {nu:g} {t:g}"
+                )
+            else:
+                lines.append(
+                    f"section ElasticMembranePlateSection "
+                    f"{shell_sec_tags[sec_name]} 2.0e11 0.2 0.2"
+                )
+
+        # Area elements
+        for aid, elem in mesh_model.area_elements.items():
+            if getattr(elem, "inactive", False):
+                continue
+            # Resolve node tags
+            n_tags = []
+            for nid in elem.node_ids:
+                nd = mesh_model.nodes.get(nid)
+                if nd is not None:
+                    n_tags.append(str(nd.node_tag))
+            if len(n_tags) < 3:
+                continue
+            stag = shell_sec_tags.get(
+                mesh_model.area_assignments.get(aid, ""), 1
+            )
+            nn = len(n_tags)
+            if nn == 4:
+                lines.append(
+                    f"element ShellMITC4 {elem.area_tag} "
+                    f"{' '.join(n_tags)} {stag}"
+                )
+            elif nn == 3:
+                lines.append(
+                    f"element ShellDKGT {elem.area_tag} "
+                    f"{' '.join(n_tags)} {stag}"
+                )
+
+    # ── Frame elements ───────────────────────────────────────────
+    if mesh_model.frame_elements:
+        lines.append("")
+        lines.append("# ── Frame elements ──")
+
+        # Build frame tag map
+        frame_tag_map: dict[str, int] = {}
+        next_tag = 1
+        used_tags: set[int] = set()
+        for eid, elem in mesh_model.frame_elements.items():
+            if getattr(elem, "inactive", False):
+                continue
+            if elem.elem_tag in used_tags:
+                tag = next_tag
+                next_tag += 1
+            else:
+                tag = elem.elem_tag if elem.elem_tag > 0 else next_tag
+                next_tag = max(next_tag, tag + 1)
+            used_tags.add(tag)
+            frame_tag_map[eid] = tag
+
+        for eid, elem in mesh_model.frame_elements.items():
+            if getattr(elem, "inactive", False):
+                continue
+            sec_name = mesh_model.frame_assignments.get(eid, "")
+            if not sec_name:
+                continue
+            ni = mesh_model.nodes.get(elem.node_i)
+            nj = mesh_model.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+
+            # Geometric transformation
+            dx = nj.x - ni.x
+            dy = nj.y - ni.y
+            dz = nj.z - ni.z
+            if abs(dx) < 1e-12 and abs(dy) < 1e-12:
+                vecxz = "1 0 0"
+            else:
+                vecxz = "0 0 1"
+            transf_tag = 20000 + elem.elem_tag
+            transf_type = config.get("geom_transf_type", "Linear") if config else "Linear"
+            lines.append(f"geomTransf {transf_type} {transf_tag} {vecxz}")
+
+            el_tag = frame_tag_map.get(eid, elem.elem_tag)
+            sec_tag = sec_tags.get(sec_name, 1)
+
+            if config.get("create_fiber_sections", False) and sec_name in fiber_sec_names:
+                # Nonlinear beam-column with fiber section
+                int_tag = 10000 + el_tag
+                n_int_pts = config.get("num_int_pts", 5) if config else 5
+                lines.append(
+                    f"beamIntegration Lobatto {int_tag} {sec_tag} {n_int_pts}"
+                )
+                lines.append(
+                    f"element forceBeamColumn {el_tag} "
+                    f"{ni.node_tag} {nj.node_tag} {transf_tag} {int_tag}"
+                )
+            else:
+                lines.append(
+                    f"element elasticBeamColumn {el_tag} "
+                    f"{ni.node_tag} {nj.node_tag} {sec_tag} {transf_tag}"
+                )
+
+    # ── tcl_suffix (user-supplied, before wipe) ──────────────────
+    if tcl_suffix:
+        lines.append("")
+        lines.append("# ── User tcl_suffix ──")
+        lines.append(tcl_suffix)
+
+    # ── Final ────────────────────────────────────────────────────
+    lines.append("")
+    lines.append('puts "Xara/OpenSeesRT script completed successfully"')
+    lines.append("wipe")
+    lines.append("exit")
+
+    # ── Write file ───────────────────────────────────────────────
+    with open(path, "w") as f:
+        f.write("\n".join(lines))
+        f.write("\n")
