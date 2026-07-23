@@ -1157,3 +1157,68 @@ def wind_sanity_check(md, df_linear,
                      "with the bounding box face areas.")
 
     return "\n".join(lines)
+
+
+def static_load_verification(md, mesh_model, config: dict = None):
+    """Check equilibrium between applied loads and reactions.
+
+    Combines the applied loads (from
+    :func:`load_pattern_totals`) with the reactions (from
+    :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.check_load_equilibrium`)
+    into a single table with Applied, Reaction, and Δ columns.
+
+    Parameters
+    ----------
+    md : SAPModelData
+        Parsed model data.
+    mesh_model : MeshModel
+        Pre-processed mesh model.
+    config : dict, optional
+        Builder configuration.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per load pattern with Applied/Reaction/Δ columns.
+    """
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+    if config is None:
+        config = {"verbose": False}
+
+    df_applied = load_pattern_totals(md)
+    fu = md.units.get("F", "N")
+
+    ab = AnalysisBuilder(mesh_model, config)
+    df_rxn = ab.check_load_equilibrium()
+
+    merged = df_applied.merge(df_rxn, on="Load Pattern", how="outer",
+                               suffixes=("_applied", "_rxn"))
+    rows = []
+    for _, row in merged.iterrows():
+        pname = row["Load Pattern"]
+        pat = md.load_patterns.get(pname)
+        pat_type = pat.pattern_type if pat else "?"
+        ax = row.get(f"Fx ({fu})", 0.0) or 0.0
+        ay = row.get(f"Fy ({fu})", 0.0) or 0.0
+        az = row.get(f"Fz ({fu})", 0.0) or 0.0
+        rx = row.get(f"Reaction Fx ({fu})", 0.0) or 0.0
+        ry = row.get(f"Reaction Fy ({fu})", 0.0) or 0.0
+        rz = row.get(f"Reaction Fz ({fu})", 0.0) or 0.0
+        dx = round(ax + rx, 1)
+        dy = round(ay + ry, 1)
+        dz = round(az + rz, 1)
+        rows.append({
+            "Load Pattern": pname,
+            "Type": pat_type,
+            f"Applied Fx ({fu})": round(ax, 1),
+            f"Applied Fy ({fu})": round(ay, 1),
+            f"Applied Fz ({fu})": round(az, 1),
+            f"Reaction Fx ({fu})": round(rx, 1),
+            f"Reaction Fy ({fu})": round(ry, 1),
+            f"Reaction Fz ({fu})": round(rz, 1),
+            f"\u0394Fx ({fu})": dx,
+            f"\u0394Fy ({fu})": dy,
+            f"\u0394Fz ({fu})": dz,
+        })
+
+    return pd.DataFrame(rows)
