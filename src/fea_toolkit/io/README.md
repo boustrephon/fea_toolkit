@@ -117,7 +117,7 @@ SAP2000Parser ──→ SAPModelData
 from fea_toolkit.io.s2k_parser import SAP2000Parser
 from fea_toolkit.opensees.builder import OpenSeesBuilder
 from fea_toolkit.io.npz_writer import write_results_npz
-from fea_toolkit.io.npz_reader import read_results_npz, npz_to_pyvista_frame_mesh
+from fea_toolkit.io.npz_reader import read_results_npz, read_results, npz_to_pyvista_frame_mesh
 
 # 1. Parse
 md = SAP2000Parser("model.s2k").parse().get_model_data()
