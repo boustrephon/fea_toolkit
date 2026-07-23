@@ -3297,7 +3297,7 @@ def plot_building_views(md, mesh_model=None,
     ----------
     md : SAPModelData
         Parsed model data.
-    mesh_model : MeshModel or None
+    mesh_model : optional
         Preprocessed mesh model for two-stage path.
     window_size : tuple
         PyVista window dimensions (width, height) in pixels.
@@ -3401,3 +3401,241 @@ def plot_building_views(md, mesh_model=None,
     fig.tight_layout()
     fig.canvas.draw()
     return fig
+
+def plot_model_comparison(
+    md,
+    mesh_model=None,
+    out_dir: str = None,
+    off_screen: bool = True,
+    LOADS_ONLY: set = None,
+) -> Optional[Dict[str, Any]]:
+    """Open an interactive PyVista viewer (or save screenshots) comparing
+    the original model geometry with the split/meshed model.
+
+    When *mesh_model* is provided, uses it directly (no re-build needed).
+    Otherwise falls back to the builder path.
+    """
+    import copy
+    import pyvista as pv
+    from fea_toolkit.model.sap_data import Restraint
+    from fea_toolkit.model.selection import Selection
+    from fea_toolkit.opensees.builder import OpenSeesBuilder
+
+    if LOADS_ONLY is None:
+        LOADS_ONLY = set()
+
+    # Fix shell-only base nodes
+    min_z = min(nd.z for nd in md.nodes.values())
+    base_ids = {nd.node_id for nd in md.nodes.values() if nd.z == min_z}
+    frame_conn: set = set()
+    for e in md.frame_elements.values():
+        if e.node_i in base_ids: frame_conn.add(e.node_i)
+        if e.node_j in base_ids: frame_conn.add(e.node_j)
+    for nid in sorted(base_ids - frame_conn):
+        if nid in md.restraints:
+            md.restraints[nid] = Restraint([1, 1, 1, 1, 1, 1])
+
+    md_copy = copy.deepcopy(md)
+    for sn in LOADS_ONLY:
+        if sn in md_copy.sections:
+            s = md_copy.sections[sn]
+            for attr in ('A', 'I33', 'I22', 'J'):
+                setattr(s, attr, getattr(s, attr) * 0.01)
+
+    if mesh_model is not None:
+        builder = OpenSeesBuilder(md_copy, {
+            "element_type": "elasticBeamColumn",
+            "split_elements": True,
+            "create_shells": True,
+            "verbose": False,
+        })
+        # Wire the existing MeshModel into the builder so it skips the Preprocessor
+        builder._mesh_model = mesh_model
+        builder.build()
+    else:
+        sel = Selection(sections=list(LOADS_ONLY), element_types=["Area"])
+        builder = OpenSeesBuilder(md_copy, {
+            "element_type": "elasticBeamColumn",
+            "split_elements": True,
+            "create_shells": True,
+            "verbose": False,
+        })
+        builder.build(selection=sel)
+
+    import openseespy.opensees as ops
+    ops.wipe()
+
+    if off_screen:
+        return _save_comparison_images(md, builder, LOADS_ONLY, out_dir)
+    _run_interactive_viewer(md, builder, LOADS_ONLY)
+
+def _save_comparison_images(md, builder, LOADS_ONLY, out_dir):
+    """Save PNG screenshots of original and meshed views."""
+    import pyvista as pv
+    pv.set_plot_theme("document")
+    pv.OFF_SCREEN = True
+    out_path = Path(out_dir).resolve() if out_dir else Path.cwd().resolve()
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    orig_png = str(out_path / "model_original.png")
+    mesh_png = str(out_path / "model_meshed.png")
+
+    plotter = pv.Plotter(off_screen=True, window_size=[1400, 900])
+    _add_original_geometry(plotter, md)
+    plotter.view_isometric()
+    plotter.show(auto_close=False)
+    plotter.screenshot(orig_png)
+    plotter.close()
+
+    plotter = pv.Plotter(off_screen=True, window_size=[1400, 900])
+    _add_meshed_geometry(plotter, md, builder, LOADS_ONLY)
+    plotter.view_isometric()
+    plotter.show(auto_close=False)
+    plotter.screenshot(mesh_png)
+    plotter.close()
+
+    print(f"  Model comparison saved: {orig_png}, {mesh_png}")
+    return {"orig_png": orig_png, "mesh_png": mesh_png}
+
+def _add_original_geometry(plotter, md):
+    """Add original (unsplit) geometry actors to a plotter."""
+    import pyvista as pv
+    orig_nodes = {nid: nd for nid, nd in md.nodes.items()}
+    orig_frames = {eid: e for eid, e in md.frame_elements.items()}
+    orig_areas = {aid: a for aid, a in md.area_elements.items()}
+
+    FRAME_SHRINK = 0.9
+    pts, lines = [], []
+    off = 0
+    for eid, elem in orig_frames.items():
+        ni = orig_nodes.get(elem.node_i)
+        nj = orig_nodes.get(elem.node_j)
+        if ni is None or nj is None: continue
+        a = np.array([ni.x, ni.y, ni.z])
+        b = np.array([nj.x, nj.y, nj.z])
+        mid = (a + b) * 0.5
+        a = mid + FRAME_SHRINK * (a - mid)
+        b = mid + FRAME_SHRINK * (b - mid)
+        pts.append(a.tolist())
+        pts.append(b.tolist())
+        lines.append([2, off, off + 1])
+        off += 2
+    if pts:
+        plotter.add_mesh(pv.PolyData(np.array(pts), lines=np.array(lines, dtype=int)),
+                         color='#4c72b0', line_width=4, opacity=0.85)
+
+    all_verts, all_faces, cell_cols = [], [], []
+    off = 0
+    for aid, area in orig_areas.items():
+        if len(area.node_ids) < 3: continue
+        verts = []
+        for nid in area.node_ids:
+            nd = orig_nodes.get(nid)
+            if nd is None: break
+            verts.append([nd.x, nd.y, nd.z])
+        if len(verts) < 3: continue
+        n = len(verts)
+        arr = np.array(verts)
+        centroid = arr.mean(axis=0)
+        arr = centroid + 0.9 * (arr - centroid)
+        all_verts.extend(arr.tolist())
+        for i in range(1, n - 1):
+            all_faces.append([3, off, off + i, off + i + 1])
+            cell_cols.append((0.29, 0.44, 0.69))
+        off += n
+    if all_verts:
+        m = pv.PolyData(np.array(all_verts), faces=np.array(all_faces, dtype=int).ravel())
+        m.cell_data['rgb'] = np.array(cell_cols)
+        plotter.add_mesh(m, scalars='rgb', rgb=True, opacity=0.35,
+                         lighting=False, show_edges=False)
+
+    node_pts = np.array([[nd.x, nd.y, nd.z] for nd in orig_nodes.values()])
+    plotter.add_mesh(pv.PolyData(node_pts), color='#333333',
+                     point_size=12, style='points',
+                     render_points_as_spheres=True)
+
+def _add_meshed_geometry(plotter, md, builder, LOADS_ONLY):
+    """Add meshed (split frames + shells) geometry actors to a plotter."""
+    import pyvista as pv
+    mesh_frames = builder.split_elements or builder.model.frame_elements
+    mesh_assign = builder.split_assignments or builder.model.frame_assignments
+    mesh_coords = {nid: (nd.x, nd.y, nd.z) for nid, nd in builder.model.nodes.items()}
+
+    FRAME_SHRINK = 0.9
+
+    for color, is_split in [('#3a5588', False), ('#dd8452', True)]:
+        pts, lines = [], []
+        off = 0
+        for eid, elem in mesh_frames.items():
+            if getattr(elem, 'inactive', False): continue
+            pid = getattr(elem, 'parent_id', None)
+            if (pid is not None) != is_split: continue
+            ci = mesh_coords.get(elem.node_i)
+            cj = mesh_coords.get(elem.node_j)
+            if ci is None or cj is None: continue
+            a = np.array(ci)
+            b = np.array(cj)
+            mid = (a + b) * 0.5
+            a = mid + FRAME_SHRINK * (a - mid)
+            b = mid + FRAME_SHRINK * (b - mid)
+            pts.append(a.tolist())
+            pts.append(b.tolist())
+            lines.append([2, off, off + 1])
+            off += 2
+        if pts:
+            plotter.add_mesh(pv.PolyData(np.array(pts), lines=np.array(lines, dtype=int)),
+                             color=color, line_width=4, opacity=0.85)
+
+    all_verts, all_faces, cell_cols = [], [], []
+    off = 0
+    for aid, area in builder.model.area_elements.items():
+        if getattr(area, 'inactive', False): continue
+        sec_name = builder.model.area_assignments.get(aid, '')
+        if sec_name in LOADS_ONLY: continue
+        if len(area.node_ids) < 3: continue
+        verts = []
+        for nid in area.node_ids:
+            nd = builder.model.nodes.get(nid)
+            if nd is None: break
+            verts.append([nd.x, nd.y, nd.z])
+        if len(verts) < 3: continue
+        n = len(verts)
+        arr = np.array(verts)
+        centroid = arr.mean(axis=0)
+        arr = centroid + 0.9 * (arr - centroid)
+        all_verts.extend(arr.tolist())
+        c = (0.20, 0.31, 0.48)
+        for i in range(1, n - 1):
+            all_faces.append([3, off, off + i, off + i + 1])
+            cell_cols.append(c)
+        off += n
+    if all_verts:
+        m = pv.PolyData(np.array(all_verts), faces=np.array(all_faces, dtype=int).ravel())
+        m.cell_data['rgb'] = np.array(cell_cols)
+        plotter.add_mesh(m, scalars='rgb', rgb=True, opacity=0.45,
+                         lighting=False, show_edges=False)
+
+    node_pts = np.array([[nd.x, nd.y, nd.z] for nd in builder.model.nodes.values()])
+    plotter.add_mesh(pv.PolyData(node_pts), color='#333333',
+                     point_size=10, style='points',
+                     render_points_as_spheres=True)
+    orig_ids = set(md.nodes.keys())
+    split_ids = set(builder.model.nodes.keys()) - orig_ids
+    if split_ids:
+        split_pts = np.array([list(mesh_coords[t]) for t in split_ids if t in mesh_coords])
+        if len(split_pts):
+            plotter.add_mesh(pv.PolyData(split_pts), color='#ff8c00',
+                             point_size=20, style='points',
+                             render_points_as_spheres=True)
+
+def _run_interactive_viewer(md, builder, LOADS_ONLY):
+    """Open an interactive PyVista window with original/meshed toggle."""
+    import pyvista as pv
+    pv.set_plot_theme("document")
+    plotter = pv.Plotter(window_size=[1400, 900])
+    _add_original_geometry(plotter, md)
+    _add_meshed_geometry(plotter, md, builder, LOADS_ONLY)
+    plotter.set_background('white')
+    plotter.view_isometric()
+    plotter.show()
+
