@@ -1308,3 +1308,118 @@ class TestShellSubdivision:
             assert len(data["frame_sap_id"]) >= 4
         finally:
             ops.wipe()
+
+
+# ============================================================================
+# HDF5 reader round-trip
+# ============================================================================
+
+class TestHdf5RoundTrip:
+    """Verify HDF5 write → read produces the same data as NPZ."""
+
+    def test_write_hdf5_and_read_back(self, tmp_path):
+        """Write a minimal schema dict to HDF5 and read it back.
+
+        Exercises:
+            unified_writer._write_h5() →
+            npz_reader.read_results_hdf5()
+        """
+        from fea_toolkit.io.unified_writer import _write_h5
+        from fea_toolkit.io.npz_reader import read_results_hdf5
+
+        # Minimal dict matching the NPZ schema
+        arrays = {
+            "node_tag": np.array([1, 2, 3], dtype=int),
+            "node_sap_id": np.array(["1", "2", "3"]),
+            "node_x": np.array([0.0, 4.0, 4.0]),
+            "node_y": np.array([0.0, 0.0, 0.0]),
+            "node_z": np.array([0.0, 0.0, 3.0]),
+            "frame_eid": np.array([0, 1], dtype=int),
+            "frame_sap_id": np.array(["1", "2"]),
+            "frame_parent_sap_id": np.array(["", ""]),
+            "frame_sec_name": np.array(["COL", "BEAM"]),
+            "frame_node_i": np.array([1, 2], dtype=int),
+            "frame_node_j": np.array([2, 3], dtype=int),
+            "frame_t_start": np.array([0.0, 0.0]),
+            "frame_t_end": np.array([1.0, 1.0]),
+            "static_case_labels": np.array(["DEAD"]),
+            "static/DEAD/fx_i": np.array([0.0, 0.0]),
+            "static/DEAD/node_dx": np.array([0.0, 0.05, 0.08]),
+            "static/DEAD/node_dy": np.array([0.0, 0.0, 0.02]),
+            "static/DEAD/node_dz": np.array([0.0, 0.0, 0.0]),
+        }
+
+        h5_path = str(tmp_path / "test_roundtrip.h5")
+        _write_h5(h5_path, arrays)
+
+        # Read back
+        data = read_results_hdf5(h5_path)
+
+        # Every key should be present
+        for key, expected in arrays.items():
+            assert key in data, f"Missing key: {key}"
+            actual = data[key]
+            assert np.array_equal(actual, expected), \
+                f"Mismatch for {key}: expected {expected}, got {actual}"
+
+        # String arrays should read back as numpy arrays
+        assert isinstance(data["frame_sec_name"], np.ndarray)
+        assert list(data["frame_sec_name"]) == ["COL", "BEAM"]
+
+    def test_read_results_dispatcher(self, tmp_path):
+        """The read_results() dispatcher auto-detects NPZ vs HDF5."""
+        from fea_toolkit.io.unified_writer import _write_h5
+        from fea_toolkit.io.npz_reader import read_results
+
+        arrays = {
+            "node_tag": np.array([1, 2], dtype=int),
+            "node_sap_id": np.array(["1", "2"]),
+            "node_x": np.array([0.0, 4.0]),
+            "node_y": np.array([0.0, 0.0]),
+            "node_z": np.array([0.0, 0.0]),
+        }
+
+        # Write HDF5
+        h5_path = str(tmp_path / "test_dispatch.h5")
+        _write_h5(h5_path, arrays)
+        data_h5 = read_results(h5_path)
+        assert "node_tag" in data_h5
+        assert list(data_h5["node_tag"]) == [1, 2]
+
+        # Write NPZ
+        npz_path = str(tmp_path / "test_dispatch.npz")
+        np.savez_compressed(npz_path, **arrays)
+        data_npz = read_results(npz_path)
+        assert "node_tag" in data_npz
+        assert list(data_npz["node_tag"]) == [1, 2]
+
+    def test_read_results_hdf5_dict_compatible(self, tmp_path):
+        """Dict from read_results_hdf5 can be used by _resolve_mesh_data."""
+        from fea_toolkit.io.unified_writer import _write_h5
+        from fea_toolkit.io.npz_reader import read_results_hdf5
+        from fea_toolkit.plotting.viz import _resolve_mesh_data
+
+        arrays = {
+            "node_tag": np.array([1, 2, 3], dtype=int),
+            "node_sap_id": np.array(["1", "2", "3"]),
+            "node_x": np.array([0.0, 4.0, 4.0]),
+            "node_y": np.array([0.0, 0.0, 0.0]),
+            "node_z": np.array([0.0, 0.0, 3.0]),
+            "frame_eid": np.array([0, 1], dtype=int),
+            "frame_sap_id": np.array(["1", "2"]),
+            "frame_parent_sap_id": np.array(["", ""]),
+            "frame_sec_name": np.array(["COL", "BEAM"]),
+            "frame_node_i": np.array([1, 2], dtype=int),
+            "frame_node_j": np.array([2, 3], dtype=int),
+            "frame_t_start": np.array([0.0, 0.0]),
+            "frame_t_end": np.array([1.0, 1.0]),
+        }
+
+        h5_path = str(tmp_path / "test_compat.h5")
+        _write_h5(h5_path, arrays)
+        data = read_results_hdf5(h5_path)
+
+        # _resolve_mesh_data should accept it
+        resolved = _resolve_mesh_data(data)
+        assert len(resolved["nodes"]) == 3
+        assert len(resolved["frames"]) == 2
