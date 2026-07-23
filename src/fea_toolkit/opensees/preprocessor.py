@@ -920,3 +920,17 @@ class Preprocessor:
             if z_span <= z_tol:
                 levels.add(round(sum(zs) / len(zs), 4))
         return sorted(levels)
+
+
+def preprocess_model(md, config: dict = None):
+    """Run the Preprocessor once and return the prepared MeshModel.
+
+    This is the expensive topology step (frame splitting, area meshing,
+    node merging, edge detection).  Call once, then use the returned
+    ``MeshModel`` for all analysis cases.
+    """
+    from .preprocessor import Preprocessor
+    if config is None:
+        config = {}
+    preprocessor = Preprocessor(config)
+    return preprocessor.run(md)

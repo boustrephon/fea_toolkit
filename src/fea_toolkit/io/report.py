@@ -1035,3 +1035,67 @@ def brace_buckling_check(md, n_longest: int = 2, K: float = 1.0) -> pd.DataFrame
     df = pd.DataFrame(rows)
     df = df.sort_values(f"Length ({lu})", ascending=False).head(n_longest).reset_index(drop=True)
     return df
+
+
+def pushover_comparison_table(
+    all_out,
+    linear_df,
+    patterns: list = None,
+):
+    """Compare pushover performance points with linear analysis results.
+
+    When multiple patterns are present (e.g. ``'uniform'``,
+    ``'triangular'``, ``'mode1'``), each direction produces one row
+    per pattern, with the pattern name as part of the direction label.
+
+    Parameters
+    ----------
+    all_out : dict
+        ``{pattern_name: {direction: {"pp": {...}, ...}}}``.
+    linear_df : pd.DataFrame
+        Linear analysis results with ``Case``, ``Fx``, ``Fy`` columns.
+    patterns : list, optional
+        Pattern names to include (default: all keys in *all_out*).
+
+    Returns
+    -------
+    pd.DataFrame
+    """
+    import pandas as pd
+    if patterns is None:
+        patterns = list(all_out.keys())
+    rows = []
+    has_linear = not linear_df.empty and "Case" in linear_df.columns
+    for label in ["+X", "-X", "+Y", "-Y"]:
+        for pat in patterns:
+            pat_out = all_out.get(pat, {})
+            data = pat_out.get(label)
+            if data is None:
+                continue
+            pp = data["pp"]
+            dir_letter = label[1]
+
+            push_v = pp["V_base"] if pp.get("converged") else 0.0
+            push_d = pp["D_roof"] if pp.get("converged") else 0.0
+
+            row = {
+                "Direction": f"{label} ({pat})",
+                "Pushover V_base": round(push_v, 1) if push_v != 0 else "-",
+                "Pushover D_roof": round(push_d, 4) if push_d != 0 else "-",
+                "Ductility u": round(pp["mu"], 2) if pp.get("converged") else "-",
+                "CSM converged": "Y" if pp.get("converged") else "N",
+            }
+
+            if has_linear:
+                vcol = f"F{dir_letter.lower()}"
+                rd = dir_letter
+                rs_case = linear_df[linear_df["Case"] == f"RS-{rd}"]
+                wind_plus = linear_df[linear_df["Case"] == f"Wind+{rd}"]
+                rs_v = abs(rs_case[vcol].values[0]) if len(rs_case) and vcol in rs_case.columns else 0.0
+                wind_v = abs(wind_plus[vcol].values[0]) if len(wind_plus) and vcol in wind_plus.columns else 0.0
+                row[f"RS-{rd} V_base"] = round(rs_v, 1) if rs_v > 0 else "-"
+                row[f"Wind+{rd} V_base"] = round(wind_v, 1) if wind_v > 0 else "-"
+
+            rows.append(row)
+
+    return pd.DataFrame(rows).fillna("-")

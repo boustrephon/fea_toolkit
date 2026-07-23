@@ -197,6 +197,19 @@ def compute_performance_point(
     total_mass = M_eff  # effective modal mass for first mode
 
     # 2. Bilinearise the capacity spectrum (find yield point)
+    #
+    # Two methods are used:
+    #
+    #   a) **Stiffness-change detection** (primary) — finds the first
+    #      point where secant stiffness drops below 50% of the initial
+    #      elastic stiffness.  This directly captures brace buckling or
+    #      section yielding onset.
+    #
+    #   b) **Equal-energy method** (fallback) — standard ATC-40
+    #      bilinearisation that preserves area under the curve.  Used
+    #      only when stiffness-change detection finds no clear yield
+    #      (e.g. an almost-linear pushover response).
+    #
     peak_idx = np.argmax(S_a_arr)
     S_d_peak = S_d_arr[peak_idx]
     S_a_peak = S_a_arr[peak_idx]
@@ -205,26 +218,62 @@ def compute_performance_point(
     n_el = max(3, len(S_d_arr) // 5)
     K_init = np.polyfit(S_d_arr[:n_el], S_a_arr[:n_el], 1)[0]
 
-    # Bilinear fit using equal energy
-    area_actual = np.trapezoid(S_a_arr[:peak_idx + 1], S_d_arr[:peak_idx + 1])
+    # --- Stiffness-change detection ---
+    secant_k = S_a_arr / np.maximum(S_d_arr, 1e-12)
+    # Find the first point where secant stiffness drops below 50% of
+    # the initial elastic stiffness (secant_k[1], the first valid
+    # step).  Use the relative drop between consecutive steps as a
+    # complementary criterion for cases where the drop is dramatic
+    # but stays just above 50% (e.g. brace buckling: 52.7 → 27.1).
+    K_init_ref = secant_k[1] if len(secant_k) > 1 else K_init
+    if K_init_ref < 1e-12:
+        K_init_ref = K_init
 
-    # Solve for S_dy using equal-energy principle (iterative search)
-    S_dy = S_d_peak * 0.3  # initial guess
-    for _ in range(100):
-        S_ay = K_init * S_dy
-        # Area under bilinear up to peak
-        A1 = 0.5 * S_ay * S_dy
-        A2 = S_ay * (S_d_peak - S_dy)
-        A3 = 0.5 * (S_a_peak - S_ay) * (S_d_peak - S_dy)
-        area_bilin = A1 + A2 + A3
-        err = (area_bilin - area_actual) / area_actual
-        if abs(err) < 0.001:
+    # Criterion A: absolute threshold at 50% of initial
+    threshold = 0.50 * K_init_ref
+    change_idx = None
+    for i in range(1, len(secant_k)):
+        if secant_k[i] < threshold:
+            change_idx = i
             break
-        S_dy *= (1.0 - err * 0.5)
-        # Clamp to [S_d_arr[0], S_d_peak] to prevent runaway correction
-        S_dy = max(S_d_arr[0], min(S_dy, S_d_peak))
 
-    S_ay = max(K_init * S_dy, S_a_arr[1] if len(S_a_arr) > 1 else S_a_arr[0])
+    # Criterion B: maximum relative drop (≥30% in one step)
+    if change_idx is None and len(secant_k) > 2:
+        rel_drops = np.diff(secant_k[1:]) / np.maximum(secant_k[1:-1], 1e-12)
+        worst = np.argmin(rel_drops)  # most negative relative change
+        if rel_drops[worst] < -0.30:
+            change_idx = int(worst) + 2  # +1 for step 0, +1 for diff index
+
+    if change_idx is not None and change_idx < peak_idx:
+        # Use stiffness-change point as the yield
+        S_dy = float(S_d_arr[change_idx])
+        S_ay = float(S_a_arr[change_idx])
+    else:
+        # No clear stiffness change — fall back to equal-energy
+        area_actual = np.trapezoid(
+            S_a_arr[:peak_idx + 1], S_d_arr[:peak_idx + 1])
+
+        S_dy = S_d_peak * 0.3  # initial guess
+        for _ in range(100):
+            S_ay = K_init * S_dy
+            A1 = 0.5 * S_ay * S_dy
+            A2 = S_ay * (S_d_peak - S_dy)
+            A3 = 0.5 * (S_a_peak - S_ay) * (S_d_peak - S_dy)
+            area_bilin = A1 + A2 + A3
+            err = (area_bilin - area_actual) / area_actual
+            if abs(err) < 0.001:
+                break
+            S_dy *= (1.0 - err * 0.5)
+            S_dy = max(S_d_arr[0], min(S_dy, S_d_peak))
+
+        S_ay = max(K_init * S_dy,
+                    S_a_arr[1] if len(S_a_arr) > 1 else S_a_arr[0])
+
+        # Sanity: if yield is >90% of peak, the curve is essentially
+        # linear — no yielding occurred.  Reset to peak (mu = 1).
+        if S_dy >= 0.90 * S_d_peak:
+            S_dy = S_d_peak
+            S_ay = S_a_peak
 
     # 3. Capacity spectrum demand method (secant iteration)
     T_spec = np.array(spectrum_periods)
@@ -354,3 +403,50 @@ def compute_performance_point(
         'M_eff': M_eff,
         'capacity_adrs': {'S_a': S_a_arr.tolist(), 'S_d': S_d_arr.tolist()},
     }
+
+
+def check_modal_pushover_mode(
+    direction: str,
+    mass_ratios: List[float],
+    rs_modal_base_shear: Optional[List[float]] = None,
+) -> Tuple[int, Optional[int], Optional[str]]:
+    """Verify the mode selected for modal pushover.
+
+    The primary mode for pushover is the one with the **highest mass
+    participation ratio** in the push direction (ASCE 41 standard).
+    When RS per-mode base shear data is available, also checks whether
+    that mode is the dominant RS contributor.  A warning is returned
+    if they differ.
+
+    Args:
+        direction: Push direction (``'X'`` or ``'Y'``), for diagnostics.
+        mass_ratios: List of mass participation ratios from modal
+            analysis.
+        rs_modal_base_shear: Optional list of per-mode base shear
+            magnitudes from RS analysis (same ordering as modes).
+
+    Returns:
+        Tuple ``(best_mode_idx, rs_dominant_mode, warning)`` where:
+
+        * ``best_mode_idx`` — 0‑based index of the mode with highest
+          mass participation.
+        * ``rs_dominant_mode`` — RS-dominant mode index, or ``None``.
+        * ``warning`` — warning string if modes differ, else ``None``.
+    """
+    best_idx = int(np.argmax(np.abs(mass_ratios)))
+    warning: Optional[str] = None
+    rs_dominant: Optional[int] = None
+
+    if rs_modal_base_shear is not None and len(rs_modal_base_shear) > 0:
+        rs_arr = np.abs(rs_modal_base_shear)
+        rs_dominant = int(np.argmax(rs_arr))
+        if rs_dominant != best_idx:
+            warning = (
+                f"Modal pushover in {direction}: mass-based best mode "
+                f"(index {best_idx}) differs from RS-based dominant mode "
+                f"(index {rs_dominant}).  Consider reviewing the selected "
+                f"mode — the mode with highest RS base shear contribution "
+                f"may be more appropriate."
+            )
+
+    return best_idx, rs_dominant, warning

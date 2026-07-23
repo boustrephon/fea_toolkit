@@ -6,7 +6,7 @@ and creates the OpenSees domain objects.  It handles all analysis execution
 and result extraction — no topology mutations occur here.
 """
 
-from typing import Dict, Any, Optional, List, Tuple, Set
+from typing import Dict, Any, Optional, List, Tuple, Set, Union
 import copy
 import math
 import numpy as np
@@ -865,6 +865,9 @@ class AnalysisBuilder:
             )
             self._truss_mat_tags: Dict[str, int] = {}
             self._truss_areas: Dict[str, float] = {}
+            self._truss_Fy: Dict[str, float] = {}
+            self._truss_E: Dict[str, float] = {}
+            self._truss_mat_counter: int = 100000
             # Use tags beyond both material AND section tags to avoid clashes
             # with fiber-section materials created in _create_single_section
             # (which use mat_tag = section_tag).
@@ -890,30 +893,10 @@ class AnalysisBuilder:
 
                 self._truss_mat_tags[sec_name] = truss_tag
                 self._truss_areas[sec_name] = area
-
-                # Hysteretic backbone with 3 points in tension, 3 in compression
-                # (matching the legacy Builder's approach)
-                eps_y = Fy / E_sec
-                # Tension: yield → slight hardening
-                s1p, e1p = Fy, eps_y
-                s2p, e2p = Fy * 1.01, eps_y + 0.01
-                s3p, e3p = Fy * 1.02, eps_y + 0.05
-                # Compression: Euler buckling → post-buckling residual
-                # Estimate max unbraced length as 3.0 m (typical brace)
-                _L_brace = 3.0
-                _I_min = getattr(sec, 'I22', 0.0) or getattr(sec, 'I33', 0.0) or 1e-6
-                _P_cr = (math.pi ** 2 * E_sec * _I_min) / (_L_brace ** 2)
-                sig_cr = _P_cr / area if area > 0 else Fy * 0.3
-                eps_cr = sig_cr / E_sec
-                s1n, e1n = -sig_cr, -eps_cr
-                s2n, e2n = -sig_cr * 0.2, -eps_cr - 0.01
-                s3n, e3n = -sig_cr * 0.1, -eps_cr - 0.05
-
-                ops.uniaxialMaterial('Hysteretic', truss_tag,
-                                     s1p, e1p, s2p, e2p, s3p, e3p,
-                                     s1n, e1n, s2n, e2n, s3n, e3n,
-                                     1.0, 1.0, 0.0, 0.0, 0.0)
-                self.material_tags[f"{sec_name}__truss"] = truss_tag
+                # Hysteretic material creation deferred to _add_beam_column
+                # where the actual element length is known for buckling calc.
+                self._truss_Fy[sec_name] = Fy
+                self._truss_E[sec_name] = E_sec
                 truss_tag += 1
 
     # ── Sections ─────────────────────────────────────────────────
@@ -1243,8 +1226,33 @@ class AnalysisBuilder:
         if (self.config.get('brace_truss')
                 and hasattr(self, '_truss_mat_tags')
                 and sec_name in self._truss_mat_tags):
-            mat_tag = self._truss_mat_tags[sec_name]
             A = self._truss_areas[sec_name]
+            Fy = self._truss_Fy[sec_name]
+            E_sec = self._truss_E[sec_name]
+            # Per-element Hysteretic material using actual element length
+            # for Euler buckling — each brace gets its own buckling load.
+            _L_brace = math.sqrt(
+                (nj.x - ni.x)**2 + (nj.y - ni.y)**2 + (nj.z - ni.z)**2)
+            eps_y = Fy / E_sec
+            s1p, e1p = Fy, eps_y
+            s2p, e2p = Fy * 1.01, eps_y + 0.01
+            s3p, e3p = Fy * 1.02, eps_y + 0.05
+            _sec = self.mesh_model.sections.get(sec_name)
+            _I_min = (getattr(_sec, 'I22', 0.0) or
+                      getattr(_sec, 'I33', 0.0) or 1e-6)
+            _P_cr = (math.pi ** 2 * E_sec * _I_min) / (_L_brace ** 2)
+            sig_cr = _P_cr / A if A > 0 else Fy * 0.3
+            eps_cr = sig_cr / E_sec
+            s1n, e1n = -sig_cr, -eps_cr
+            s2n, e2n = -sig_cr * 0.2, -eps_cr - 0.01
+            s3n, e3n = -sig_cr * 0.1, -eps_cr - 0.05
+            mat_tag = self._truss_mat_counter
+            self._truss_mat_counter += 1
+            ops.uniaxialMaterial('Hysteretic', mat_tag,
+                                 s1p, e1p, s2p, e2p, s3p, e3p,
+                                 s1n, e1n, s2n, e2n, s3n, e3n,
+                                 1.0, 1.0, 0.0, 0.0, 0.0)
+            self.material_tags[f"truss_{sec_name}_{tag}"] = mat_tag
             ops.element('Truss', tag, ni.node_tag, nj.node_tag, A, mat_tag)
             return
 
@@ -2480,7 +2488,10 @@ class AnalysisBuilder:
             modal_base_reactions.append(rxn)
 
         # ── CQC / SRSS per component ───────────────────────────
-        dof_map = {'X': (0, 4), 'Y': (1, 5), 'Z': (2, 3)}
+        dof_map = {'X': (0, 4), 'Y': (1, 3), 'Z': (2, 4)}
+        #   X: shear=fx(idx 0), overturning=my(idx 4)
+        #   Y: shear=fy(idx 1), overturning=mx(idx 3)  ← was mz before fix
+        #   Z: shear=fz(idx 2), overturning=my(idx 4)
         f_idx, m_idx = dof_map[direction]
         comp_order = ['fx', 'fy', 'fz', 'mx', 'my', 'mz']
 
@@ -2682,14 +2693,18 @@ class AnalysisBuilder:
         spectrum_func,
         direction: str = 'X',
         damping_ratio: float = 0.05,
-    ) -> Dict[int, Tuple[float, float, float]]:
-        """Compute CQC‑combined peak nodal displacements from RS analysis.
+        return_srss: bool = False,
+    ) -> Union[Dict[int, Tuple[float, float, float]],
+               Tuple[Dict[int, Tuple[float, float, float]],
+                     Dict[int, Tuple[float, float, float]]]]:
+        """Compute CQC‑ (and optionally SRSS‑) combined peak nodal
+        displacements from RS analysis.
 
         Uses mode‑shape superposition rather than re‑running the RS analysis:
 
             u_m = Γ_m · φ_m · Sa_m / ω²_m
 
-        then CQC across modes.
+        then combined with CQC (and optionally SRSS).
 
         Args:
             num_modes: Number of modes.
@@ -2698,9 +2713,14 @@ class AnalysisBuilder:
             spectrum_func: Callable ``f(T) → Sa`` in **m/s²**.
             direction: Excitation direction ``'X'``, ``'Y'``, or ``'Z'``.
             damping_ratio: Damping ratio for CQC correlation.
+            return_srss: If True, return ``(cqc_result, srss_result)``
+                as a tuple of two dicts.  If False (default), return
+                only ``cqc_result`` for backward compatibility.
 
         Returns:
-            Dict mapping ``node_tag`` → ``(dx, dy, dz)`` in model length units.
+            Dict mapping ``node_tag`` → ``(dx, dy, dz)`` in model length
+            units.  When ``return_srss=True``, returns a tuple of two
+            such dicts: ``(cqc, srss)``.
         """
         dof = {'X': 1, 'Y': 2, 'Z': 3}[direction]
         dof_idx = dof - 1
@@ -2748,13 +2768,21 @@ class AnalysisBuilder:
                         per_mode[tag][d].append(0.0)
 
         cqc_result = {}
+        srss_result = {}
         for tag in node_tags:
-            vals = tuple(
+            cqc_vals = tuple(
                 cqc_combine(per_mode[tag][d], omega, damp)
                 for d in range(3)
             )
-            cqc_result[tag] = vals
+            cqc_result[tag] = cqc_vals
+            srss_vals = tuple(
+                math.sqrt(sum(v * v for v in per_mode[tag][d]))
+                for d in range(3)
+            )
+            srss_result[tag] = srss_vals
 
+        if return_srss:
+            return cqc_result, srss_result
         return cqc_result
 
     def extract_mode_shapes(
@@ -3273,10 +3301,13 @@ class AnalysisBuilder:
         # ── Displacement‑controlled push analysis setup ──────────
         disp_inc = max_disp / max(num_steps, 1)
 
+        # Use looser tolerances matching v1 (builder.py) pushover —
+        # NormDispIncr with 1e-4 tolerance, 20 iterations, energy
+        # norm.  Tight tolerances (1e-6/10 iter) prevent convergence
+        # for mode-shape-based pushover patterns.
         _algo = self.config.get('solver_algorithm', 'Newton')
-        _test_type = self.config.get('solver_test_type', 'NormDispIncr')
-        _test_tol = self.config.get('solver_test_tol', 1e-6)
-        _test_iter = self.config.get('solver_test_max_iter', 10)
+        _test_tol = self.config.get('solver_test_tol', 1e-4)
+        _test_iter = self.config.get('solver_test_max_iter', 20)
         _system = self.config.get('solver_system', 'BandGen')
 
         ops.wipeAnalysis()
@@ -3288,7 +3319,7 @@ class AnalysisBuilder:
             ops.constraints(_cs)
         ops.numberer('RCM')
         ops.system(_system)
-        ops.test(_test_type, _test_tol, _test_iter)
+        ops.test('NormDispIncr', _test_tol, _test_iter, 0, 2)
 
         ops.integrator('DisplacementControl',
                        int(control_node_tag), dof, disp_inc)
@@ -3512,10 +3543,17 @@ class AnalysisBuilder:
         mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
         mode_index: int = 0,
     ) -> Dict[int, Tuple[float, float, float]]:
-        """Compute mode‑shape‑proportional lateral loads $F_i = m_i \\phi_i$.
+        """Compute mode‑shape‑proportional lateral loads $F_i = m_i \\cdot |\\phi_i|$.
 
         Each node receives a load proportional to its mass times the
-        eigenvector component in the push direction.
+        **absolute value** of the eigenvector component in the push
+        direction.  Using absolute values ensures all loads act in
+        the same direction — without this, nodes with opposite mode-
+        shape signs would oppose the push, creating a near-self-
+        equilibrating pattern that prevents convergence.
+
+        The sign of the control-node mode shape is used to set the
+        global direction (positive or negative push).
 
         Returns:
             ``{node_tag: (fx, fy, fz)}`` in global coordinates.
@@ -3534,7 +3572,7 @@ class AnalysisBuilder:
             if node is None:
                 continue
             phi = mode.get(node.node_tag, (0.0, 0.0, 0.0))
-            f_mag = mass * phi[dof_idx]
+            f_mag = mass * abs(phi[dof_idx])
             if abs(f_mag) < 1e-12:
                 continue
             f = [0.0, 0.0, 0.0]
@@ -3625,3 +3663,20 @@ class AnalysisBuilder:
             max_iter=max_iter,
             tol=tol,
         )
+
+
+def run_modal(mesh_model, n_modes: int = 12,
+              config: dict = None):
+    """Run modal analysis through the two-stage path.
+
+    Returns the same dict as :meth:`AnalysisBuilder.run_modal_analysis`.
+    """
+    from .analysis_builder import AnalysisBuilder
+    if config is None:
+        config = {"verbose": False}
+    ab = AnalysisBuilder(mesh_model, config)
+    ab.build_domain()
+    ab.compute_seismic_masses()
+    modal = ab.run_modal_analysis(num_modes=n_modes, print_results=False)
+    shapes = ab.extract_mode_shapes(n_modes)
+    return {"modal": modal, "shapes": shapes}
