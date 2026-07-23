@@ -1099,3 +1099,61 @@ def pushover_comparison_table(
             rows.append(row)
 
     return pd.DataFrame(rows).fillna("-")
+
+
+def wind_sanity_check(md, df_linear,
+                      wind_case_x: str = "Wind+X",
+                      wind_case_y: str = "Wind+Y"):
+    """Return a markdown paragraph checking wind loads against face area.
+
+    Parameters
+    ----------
+    md : SAPModelData
+        Model data (for node coordinates and units).
+    df_linear : pd.DataFrame
+        Linear analysis results; must contain ``Case``, ``Fx``, ``Fy`` columns.
+    wind_case_x, wind_case_y : str
+        Case names for the X and Y wind load patterns.
+
+    Returns
+    -------
+    str
+        Markdown paragraph with bounding-box summary and wind-pressure table.
+    """
+    from fea_toolkit.io.report import bounding_box
+    bb = bounding_box(md)
+    x_face = bb["y_span"] * bb["z_span"]
+    y_face = bb["x_span"] * bb["z_span"]
+    fu = md.units.get("F", "?")
+    lu = md.units.get("L", "m")
+
+    wind_x = df_linear[df_linear["Case"] == wind_case_x]
+    wind_y = df_linear[df_linear["Case"] == wind_case_y]
+
+    fx = abs(wind_x["Fx"].values[0]) if len(wind_x) else 0
+    fy = abs(wind_y["Fy"].values[0]) if len(wind_y) else 0
+
+    p_x = fx / x_face if x_face > 0 else 0
+    p_y = fy / y_face if y_face > 0 else 0
+
+    lines = [
+        f"**Bounding box:** "
+        f"{bb['x_span']:.1f} {lu} (X) × "
+        f"{bb['y_span']:.1f} {lu} (Y) × "
+        f"{bb['z_span']:.1f} {lu} (Z) — "
+        f"{bb['n_nodes']} nodes.",
+        "",
+        "**Wind load sanity check:**",
+        "",
+        f"| Face | Area (m²) | Total {fu} | Pressure ({fu}/m²) |",
+        f"|---|---|---|---|",
+        f"| Wind +{wind_case_x[-1]} (Y‑Z face) | {x_face:.0f} | {fx:,.0f} | {p_x:.2f} |",
+        f"| Wind +{wind_case_y[-1]} (X‑Z face) | {y_face:.0f} | {fy:,.0f} | {p_y:.2f} |",
+    ]
+
+    if abs(p_x - p_y) / max(p_x, p_y, 0.01) < 0.1:
+        lines.append("")
+        lines.append("✅ Pressures are within 10 % — wind loads are consistent "
+                     "with the bounding box face areas.")
+
+    return "\n".join(lines)
