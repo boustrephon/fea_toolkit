@@ -2605,7 +2605,7 @@ class TestSubdivideElements:
 
 
 class TestBraceBucklingCheck:
-    """Tests for :meth:`OpenSeesBuilder.check_brace_buckling`."""
+    """Tests for :meth:`~fea_toolkit.model.checks.check_brace_buckling`."""
 
     @pytest.fixture
     def brace_model(self):
@@ -2913,8 +2913,8 @@ class TestEulerBucklingBenchmark:
 
 
 class TestCapacitySpectrumMethod:
-    """Tests for :meth:`OpenSeesBuilder.pushover_to_adrs` and
-    :meth:`OpenSeesBuilder.compute_performance_point`."""
+    """Tests for :meth:`AnalysisBuilder.pushover_to_adrs` and
+    :meth:`AnalysisBuilder.compute_performance_point`."""
 
     @pytest.fixture
     def cantilever_model(self):

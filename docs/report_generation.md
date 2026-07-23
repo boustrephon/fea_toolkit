@@ -429,7 +429,7 @@ challenges are:
   edge nodes must be tied via ``equalDOF`` constraints.  The builder's
   :func:`~fea_toolkit.model.geometry.find_constraint_edges` detects
   incompatible edge meshes and
-  :func:`~fea_toolkit.opensees.builder.OpenSeesBuilder.apply_edge_constraints`
+  :func:`~fea_toolkit.opensees.builder.AnalysisBuilder.apply_edge_constraints`
   emits the corresponding ``equalDOF`` commands.  Future work (P2) could
   store edge-constraint references directly on ``AreaElement``
   (e.g. ``edge_constraint_ids``) for easier lookup.
@@ -712,7 +712,7 @@ development.
 
 ### Motivation
 
-The original ``OpenSeesBuilder`` (legacy single-stage path) did all
+The original ``AnalysisBuilder`` (legacy single-stage path) did all
 topology work (frame splitting, area meshing, node merging, edge
 detection) **every time** a builder was created.  Each analysis case
 (static, modal, pushover) repeated the same expensive operations.
@@ -753,7 +753,7 @@ Stage 2 — AnalysisBuilder (runs per analysis case):
   elements, materials, and sections from the MeshModel.  Each
   AnalysisBuilder owns its own OpenSees domain; multiple builders can
   exist concurrently with different configs (e.g. elastic vs. fiber).
-- **The legacy ``OpenSeesBuilder``** is still present for backward
+- **The legacy ``AnalysisBuilder``** is still present for backward
   compatibility but is deprecated for new development.
 
 ### Current status
@@ -837,7 +837,7 @@ def generate_report(config_path: str):
     2. Parse the model (``SAP2000Parser``).
     3. Detect storeys (``identify_stories``).
     4. For each enabled analysis:
-       a. Build the OpenSees model (``OpenSeesBuilder.build``).
+       a. Build the OpenSees model (``AnalysisBuilder.build_domain``).
        b. Run the analysis (static / modal / RS / pushover).
        c. Post-process storey responses.
        d. Write results to HDF5.
@@ -881,7 +881,7 @@ def generate_report(config_path: str):
         # Merge per-analysis builder overrides on top of global defaults
         analysis_builder = dict(global_builder)
         analysis_builder.update(analysis_cfg.get("builder", {}))
-        builder = OpenSeesBuilder(md, analysis_builder)
+        builder = AnalysisBuilder(mm, analysis_builder)
         builder.build()
 
         if analysis_name == "static":

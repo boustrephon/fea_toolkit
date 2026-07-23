@@ -15,17 +15,18 @@ Two export paths are available:
 ## Direct Tcl export (recommended)
 
 ```python
-from fea_toolkit.opensees.builder import OpenSeesBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
 config = {"create_fiber_sections": True, "geom_transf_type": "PDelta"}
 
-tcl_suffix = OpenSeesBuilder.pushover_tcl(
+tcl_suffix = pushover_tcl(
     control_node=top_node_tag, dof=1, max_disp=0.15,
     lateral_loads=lateral_loads, gravity_loads=gravity_loads,
     adaptive=True,
 )
 
-OpenSeesBuilder.export_model_to_tcl(
+export_model_to_tcl(
     md, "rc_pushover.tcl", config=config, tcl_suffix=tcl_suffix,
 )
 
