@@ -1352,7 +1352,16 @@ class AnalysisBuilder:
             if self.config.get('beam_integration', 'Lobatto') == 'Lobatto':
                 ops.beamIntegration('Lobatto', int_tag, sec_tag, n_ip)
             else:
-                ops.beamIntegration('HingeRadau', int_tag, sec_tag, n_ip)
+                # HingeRadau with explicit hinge lengths
+                _L_hinge = math.sqrt(
+                    (nj.x - ni.x)**2 + (nj.y - ni.y)**2 + (nj.z - ni.z)**2)
+                _sec = self.mesh_model.sections.get(sec_name)
+                if _sec is not None:
+                    from fea_toolkit.model.checks import compute_hinge_length
+                    Lp = compute_hinge_length(_sec, _L_hinge)
+                else:
+                    Lp = 0.1 * _L_hinge
+                ops.beamIntegration('HingeRadau', int_tag, sec_tag, Lp, sec_tag, Lp, sec_tag)
             ops.element(elem_type, tag, *[ni.node_tag, nj.node_tag], transf_tag, int_tag)
 
     # ── Lumped hinges ────────────────────────────────────────────
