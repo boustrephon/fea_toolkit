@@ -342,10 +342,9 @@ def test_create_single_shell_section():
 
     # The method is static; just verify it doesn't crash
     # and produces the right call shape
-    from fea_toolkit.opensees.builder import OpenSeesBuilder
-    # We can't easily capture ops.section output, so at least
-    # confirm the method exists and accepts the right signature
-    assert hasattr(OpenSeesBuilder, '_create_single_shell_section')
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+    # _create_single_shell_section is now on AnalysisBuilder
+    assert hasattr(AnalysisBuilder, '_create_single_shell_section')
 
 
 # ========================================================================
