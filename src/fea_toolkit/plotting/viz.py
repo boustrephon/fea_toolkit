@@ -3286,3 +3286,118 @@ def plot_building_views(md: Any,
         return None
 
 
+def plot_building_views(md, mesh_model=None,
+                        window_size=(1200, 900)):
+    """Return a 2×2 matplotlib figure with plan, two elevations, isometric.
+
+    Uses the two-stage path when *mesh_model* is provided, otherwise
+    falls back to the legacy ``OpenSeesBuilder`` path.
+
+    Parameters
+    ----------
+    md : SAPModelData
+        Parsed model data.
+    mesh_model : MeshModel or None
+        Preprocessed mesh model for two-stage path.
+    window_size : tuple
+        PyVista window dimensions (width, height) in pixels.
+
+    Returns
+    -------
+    matplotlib.figure.Figure or None
+    """
+    try:
+        import matplotlib.pyplot as plt
+        import pyvista as pv
+    except ImportError:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.text(0.5, 0.5, "Building views: PyVista not available",
+                ha="center", va="center", transform=ax.transAxes, fontsize=12)
+        ax.axis("off")
+        return fig
+
+    _ab_views = None
+    try:
+        if mesh_model is not None:
+            from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+            _ab_views = AnalysisBuilder(mesh_model, {"verbose": False})
+            _ab_views.build_domain()
+        else:
+            from fea_toolkit.opensees.builder import OpenSeesBuilder
+            _ab_views = OpenSeesBuilder(md, {
+                "element_type": "elasticBeamColumn",
+                "split_elements": True, "verbose": False,
+            })
+            _ab_views.build()
+    except Exception:
+        import warnings
+        warnings.warn("Could not build model for building views.")
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.text(0.5, 0.5, "Building views: model build failed",
+                ha="center", va="center", transform=ax.transAxes, fontsize=12)
+        ax.axis("off")
+        return fig
+
+    views = ["Plan (XY)", "Elevation (XZ)", "Elevation (YZ)", "Isometric"]
+    fig, axes = plt.subplots(2, 2, figsize=(14, 13))
+    axes_flat = axes.flatten()
+    pv.OFF_SCREEN = True
+
+    xs = [n.x for n in md.nodes.values()]
+    ys = [n.y for n in md.nodes.values()]
+    zs = [n.z for n in md.nodes.values()]
+    x_c, y_c, z_c = (max(xs)+min(xs))/2, (max(ys)+min(ys))/2, (max(zs)+min(zs))/2
+    w_aspect = window_size[0] / window_size[1]
+
+    for ax, title in zip(axes_flat, views):
+        try:
+            pl = plot_mesh(
+                _ab_views, notebook=True,
+                show_nodes=False, show_frames=True, show_shells=True,
+            )
+        except Exception:
+            pl = None
+        if pl is not None:
+            try:
+                pl.camera.parallel_projection = True
+                if title == "Plan (XY)":
+                    pl.view_xy()
+                    uv_map = lambda x, y, z: (x, y)
+                elif title == "Elevation (XZ)":
+                    pl.view_xz()
+                    uv_map = lambda x, y, z: (x, z)
+                elif title == "Elevation (YZ)":
+                    pl.view_yz()
+                    uv_map = lambda x, y, z: (y, z)
+                else:
+                    pl.view_isometric()
+                    inv_sqrt2 = 1.0 / math.sqrt(2)
+                    inv_sqrt6 = 1.0 / math.sqrt(6)
+                    uv_map = lambda x, y, z: ((-x + y) * inv_sqrt2,
+                                              (-x - y + 2 * z) * inv_sqrt6)
+                u_vals, v_vals = [], []
+                for x in (min(xs), max(xs)):
+                    for y in (min(ys), max(ys)):
+                        for z in (min(zs), max(zs)):
+                            u, v = uv_map(x, y, z)
+                            u_vals.append(u)
+                            v_vals.append(v)
+                u_span = max(u_vals) - min(u_vals)
+                v_span = max(v_vals) - min(v_vals)
+                pl.camera.parallel_scale = (
+                    max(v_span / 2, u_span / (2 * w_aspect)) * 1.1
+                )
+                pl.camera.focal_point = (x_c, y_c, z_c)
+                pl.render()
+                img = pl.screenshot(return_img=True, window_size=window_size)
+            except Exception:
+                img = np.zeros((100, 100, 3))
+            pl.close()
+            ax.imshow(img)
+        ax.set_title(title, fontsize=11, fontweight="bold")
+        ax.axis("off")
+
+    fig.suptitle("Structural Model Views", fontsize=13, fontweight="bold")
+    fig.tight_layout()
+    fig.canvas.draw()
+    return fig
