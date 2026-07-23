@@ -439,15 +439,12 @@ parser = SAP2000Parser("model.s2k")
 parser.parse()
 md = parser.get_model_data()
 
-    mm = preprocess_model(md, {"verbose": True})
-    builder = AnalysisBuilder(mm, {"verbose": True})
-    builder.build_domain()
-    builder.create_loads({"DEAD": 1.0})
-    section_responses={
-        "section_forces": True,   # N, Mz, My, Vz, Vy, T at each IP
-        "fiber_stress": True,     # max/min fiber stress per IP
-        "fiber_strain": True,     # max/min fiber strain per IP
-    })
+mm = preprocess_model(md, {"verbose": True})
+builder = AnalysisBuilder(mm, {"verbose": True})
+builder.build_domain()
+builder.create_loads({"DEAD": 1.0})
+static = builder.run_static_analysis()
+builder.export_results_to_npz("results.npz")
 ```
 
 **Inside Rhino** (load .npz and colour by results):

@@ -1,6 +1,6 @@
 ### Modal analysis options
 
-The method :meth:`~fea_toolkit.opensees.builder.AnalysisBuilder.run_modal_analysis`
+The method :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_modal_analysis`
 supports the following ``eigen_solver`` modes:
 
 | Value | Solver | Speed | Notes |
