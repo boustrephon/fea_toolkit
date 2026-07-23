@@ -225,12 +225,12 @@ results = builder.run_static_analysis()
 | — | `run_response_spectrum_analysis()` | Mode-by-mode RS with CQC/SRSS combination |
 | — | `run_static_analysis()` | Static solver with auto-retry algorithm chain |
 
-These analysis methods are also exposed on the ``OpenSeesBuilder`` facade and
+These analysis methods are also exposed on the ``AnalysisBuilder`` facade and
 are **identical** in behaviour to the legacy single‑stage builder.
 
 ---
 
-## Phase 2 — Legacy Single‑Stage Build (`OpenSeesBuilder.build()`)
+## Phase 2 — Legacy Single‑Stage Build (`AnalysisBuilder.build_domain()`)
 
 File: `src/fea_toolkit/opensees/builder.py`
 
@@ -240,11 +240,9 @@ The legacy path (``use_preprocessor=False``) is **deprecated** and will be
 removed in a future release.
 
 ```python
-b = OpenSeesBuilder(md, config)
-b.build(selection=sel)                       # two‑stage (default)
-# or explicitly
-b2 = OpenSeesBuilder(md, {"use_preprocessor": True, …})
-b2.build(selection=sel)                      # two‑stage
+mm = preprocess_model(md)
+b = AnalysisBuilder(mm, config)
+b.build_domain()
 ```
 
 ### Legacy build order
@@ -273,7 +271,7 @@ b2.build(selection=sel)                      # two‑stage
 #### 2a–2b — Reset
 
 Restores pristine frame/area/node data from snapshots taken when
-the `OpenSeesBuilder` was constructed.  Ensures repeated `build()`
+the `AnalysisBuilder` was constructed.  Ensures repeated `build()`
 calls always start from the same original geometry.
 
 #### 2c — `_create_nodes()`
@@ -494,11 +492,11 @@ errors early:
 
 | Label | Location | What it checks | Method |
 |---|---|---|---|
-| **A** | After Phase 1 (pre‑build) | Orphan SAP2000 nodes, shell‑only base nodes, zero‑area sections | `OpenSeesBuilder.check_model_connectivity()` |
-| **B** | After `_split_elements()` 2g | Zero‑length split children, duplicate coordinate nodes | `OpenSeesBuilder.check_split_connectivity()` |
-| **C** | After `_mesh_areas()` 2j | Base mesh nodes without restraint, perimeter nodes with ≤2 shells | `OpenSeesBuilder.check_mesh_connectivity()` |
+| **A** | After Phase 1 (pre‑build) | Orphan SAP2000 nodes, shell‑only base nodes, zero‑area sections | `AnalysisBuilder.check_model_connectivity()` |
+| **B** | After `_split_elements()` 2g | Zero‑length split children, duplicate coordinate nodes | `AnalysisBuilder.check_split_connectivity()` |
+| **C** | After `_mesh_areas()` 2j | Base mesh nodes without restraint, perimeter nodes with ≤2 shells | `AnalysisBuilder.check_mesh_connectivity()` |
 | **D** | Before `_create_elements()` 2m | Unassigned frame elements, missing sections | (validated during element creation) |
-| **E** | After `build()` before analysis | Full node‑element connectivity summary, tree plot | `OpenSeesBuilder.diagnose_singularity()` |
+| **E** | After `build()` before analysis | Full node‑element connectivity summary, tree plot | `AnalysisBuilder.diagnose_singularity()` |
 
 For details on each check method and its output, see the
 [Builder Reference](builder_reference.md).

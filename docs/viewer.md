@@ -58,7 +58,7 @@ overlay results, highlight problem areas, and annotate specific elements.
 ```python
 from fea_toolkit.plotting import ModelViewer
 
-# From a built OpenSeesBuilder
+# From a built AnalysisBuilder
 viewer = ModelViewer(builder)
 viewer.show_model(show_nodes=True, color_by_section=True)
 viewer.show()
@@ -77,7 +77,7 @@ ModelViewer(builder=None, model_data=None, backend="pyvista", **kwargs)
 
 | Argument | Default | Description |
 |---|---|---|
-| `builder` | `None` | An :class:`~fea_toolkit.opensees.builder.OpenSeesBuilder` that has been built. Uses split elements if available. |
+| `builder` | `None` | An :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder` that has been built. Uses split elements if available. |
 | `model_data` | `None` | A :class:`~fea_toolkit.model.sap_data.SAPModelData`. Ignored if *builder* is given. |
 | `backend` | `"pyvista"` | Render backend name. Currently supports ``"pyvista"``. |
 | `**kwargs` | — | Passed to the backend constructor (e.g. ``off_screen=True``). |
@@ -475,8 +475,8 @@ plot_interactive_viewer(
 ## 5. NPZ standalone plots
 
 These functions load a ``.npz`` file created by
-:meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.export_results_to_npz`
-and produce plots **without** needing the original ``OpenSeesBuilder``
+:meth:`~fea_toolkit.opensees.builder.AnalysisBuilder.export_results_to_npz`
+and produce plots **without** needing the original ``AnalysisBuilder``
 or model objects.
 
 ```python

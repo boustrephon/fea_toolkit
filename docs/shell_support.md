@@ -95,7 +95,7 @@ Both detection and automatic splitting are controlled by builder config
 flags:
 
 ```python
-b = OpenSeesBuilder(md, {
+b = AnalysisBuilder(mm, {
     ...,
     detect_wall_slab_intersections=True,   # detect & report (default True)
     split_slabs_at_walls=True,              # auto-split (default False)

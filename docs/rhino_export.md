@@ -411,7 +411,7 @@ The `RhinoImporter` creates Brep polysurfaces (not lightweight
 
 ## Results Visualisation (OpenSees → Rhino)
 
-Analysis results from `OpenSeesBuilder` (end forces, section forces,
+Analysis results from `AnalysisBuilder` (end forces, section forces,
 fiber stresses, nodal displacements) can be exported to a **NumPy .npz**
 file and loaded back into Rhino for colour-coding geometry.
 
@@ -420,7 +420,7 @@ file and loaded back into Rhino for colour-coding geometry.
 ```
 1. PARSING             SAP2000Parser → SAPModelData
 2. SPLITTING           geometry.split_elements() → sub-elements at intermediate nodes
-3. ANALYSIS            OpenSeesBuilder.build() + run_static_analysis()
+3. ANALYSIS            AnalysisBuilder.build_domain() + run_static_analysis()
 4. EXPORT (.npz)       builder.export_results_to_npz("results.npz", results)
 5. RHINO IMPORT        RhinoImporterV2(md).run()  ← unsplit geometry with SAP_* UserStrings
 6. RHINO VISUALISE     np.load("results.npz") → colour by force/stress/displacement
@@ -432,21 +432,17 @@ file and loaded back into Rhino for colour-coding geometry.
 
 ```python
 from fea_toolkit.io.s2k_parser import SAP2000Parser
-from fea_toolkit.opensees.builder import OpenSeesBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
 parser = SAP2000Parser("model.s2k")
 parser.parse()
 md = parser.get_model_data()
 
-builder = OpenSeesBuilder(md, {"verbose": True})
-builder.build()
-results = builder.run_static_analysis()
-
-# Basic export (end forces + displacements)
-builder.export_results_to_npz("results.npz", results)
-
-# With section and fiber data (requires fiber sections)
-builder.export_results_to_npz("results_fiber.npz", results,
+    mm = preprocess_model(md, {"verbose": True})
+    builder = AnalysisBuilder(mm, {"verbose": True})
+    builder.build_domain()
+    builder.create_loads({"DEAD": 1.0})
     section_responses={
         "section_forces": True,   # N, Mz, My, Vz, Vy, T at each IP
         "fiber_stress": True,     # max/min fiber stress per IP
