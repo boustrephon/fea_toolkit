@@ -609,25 +609,22 @@ class TestUnifiedNpzPipeline:
         assert f_pts.shape[0] > 0
         assert f_lines.shape[0] > 0
 
-    @pytest.mark.parametrize("use_preprocessor", [False, True])
-    def test_write_and_read_static_with_split(self, sample_md, tmp_path,
-                                               use_preprocessor):
-        """Unified NPZ pipeline works with split elements.
-
-        Exercises both legacy (use_preprocessor=False) and two-stage
-        (use_preprocessor=True) build paths.
+    def test_write_and_read_static_with_split(self, sample_md, tmp_path):
+        """Unified NPZ pipeline works with split elements via two-stage path.
 
         Builds a model with an intermediate node on a frame so
         split_elements=True produces child elements, then verifies
         parent-child metadata in the NPZ round-trip.
 
         Exercises:
-            build(split_elements=True) →
+            Preprocessor.run() →
+            AnalysisBuilder.build_domain() →
             write_results_npz() →
             read_results_npz() →
             npz_build_child_map() / npz_build_parent_map()
         """
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         from fea_toolkit.io.npz_writer import write_results_npz
         from fea_toolkit.io.npz_reader import (
             read_results_npz,
@@ -635,14 +632,13 @@ class TestUnifiedNpzPipeline:
             npz_build_parent_map,
         )
 
-        b = OpenSeesBuilder(sample_md, {
-            'element_type': 'elasticBeamColumn',
-            'split_elements': True,
-            'verbose': False,
-            'use_preprocessor': use_preprocessor,
-        })
-        b.build()
+        cfg = {'element_type': 'elasticBeamColumn',
+               'split_elements': True, 'verbose': False}
+        mm = preprocess_model(sample_md, cfg)
+        b = AnalysisBuilder(mm, cfg)
+        b.build_domain()
         try:
+            b.create_loads()
             static_result = b.run_static_analysis()
         finally:
             ops.wipe()
