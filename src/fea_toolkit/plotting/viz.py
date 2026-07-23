@@ -3781,7 +3781,8 @@ def _add_meshed_geometry(plotter, md, builder, LOADS_ONLY, mesh_model=None):
         if len(area.node_ids) < 3: continue
         verts = []
         for nid in area.node_ids:
-            nd = builder.model.nodes.get(nid)
+            nd = (mm.nodes.get(nid) if mm is not None
+                  else builder.model.nodes.get(nid))
             if nd is None: break
             verts.append([nd.x, nd.y, nd.z])
         if len(verts) < 3: continue
@@ -3801,12 +3802,13 @@ def _add_meshed_geometry(plotter, md, builder, LOADS_ONLY, mesh_model=None):
         plotter.add_mesh(m, scalars='rgb', rgb=True, opacity=0.45,
                          lighting=False, show_edges=False)
 
-    node_pts = np.array([[nd.x, nd.y, nd.z] for nd in builder.model.nodes.values()])
+    _model_nodes = mm.nodes if mm is not None else builder.model.nodes
+    node_pts = np.array([[nd.x, nd.y, nd.z] for nd in _model_nodes.values()])
     plotter.add_mesh(pv.PolyData(node_pts), color='#333333',
                      point_size=10, style='points',
                      render_points_as_spheres=True)
     orig_ids = set(md.nodes.keys())
-    split_ids = set(builder.model.nodes.keys()) - orig_ids
+    split_ids = set(_model_nodes.keys()) - orig_ids
     if split_ids:
         split_pts = np.array([list(mesh_coords[t]) for t in split_ids if t in mesh_coords])
         if len(split_pts):
