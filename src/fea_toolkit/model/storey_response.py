@@ -765,3 +765,89 @@ def storey_shears(
         })
 
     return pd.DataFrame(rows)
+
+
+# ========================================================================
+# Storey response helpers — extracted from pumphouse reports
+# ========================================================================
+
+def resultant_shear(br: dict) -> float:
+    """Resultant horizontal shear from a reactions dict."""
+    return math.sqrt((br.get("Fx", 0) or 0)**2 + (br.get("Fy", 0) or 0)**2)
+
+
+def resultant_moment(br: dict, shear_fx: float = 0.0,
+                    shear_fy: float = 0.0,
+                    cz: float = 0.0, min_z: float = 0.0) -> float:
+    """Resultant horizontal moment about the BASE (z=min_z).
+
+    ``df_linear`` reports moments about the BB centroid (cz).
+    Convert to base reference: M_base = M_centroid + V × (cz - z_base)
+    """
+    mx = br.get("Mx", 0) or 0
+    my = br.get("My", 0) or 0
+    mx_base = mx + shear_fy * (cz - min_z)
+    my_base = my + shear_fx * (cz - min_z)
+    return math.sqrt(mx_base**2 + my_base**2)
+
+
+def build_storey_table(elev_col: str, data_dict: dict,
+                       min_z: float = 0.0,
+                       base_rxns: dict = None,
+                       total_height: float = 1.0,
+                       base_val: str = "",
+                       _resultant_shear_fn=None,
+                       _resultant_moment_fn=None) -> pd.DataFrame:
+    """Build a storey-level table with an appended Base row.
+
+    Merges per-case DataFrames from *data_dict* on ``["Storey", elev_col]``,
+    then inserts a ``"Base"`` row at *min_z* using the base reactions.
+
+    Parameters
+    ----------
+    elev_col : str
+        Column name for elevation.
+    data_dict : dict
+        ``{case_name: pd.DataFrame}``.
+    min_z : float
+        Base elevation for the inserted row.
+    base_rxns : dict or None
+        ``{case_name: {"Fx": ..., "Fy": ..., "Mx": ..., "My": ...}}``.
+    total_height : float
+        Total building height, used for moment fallback.
+    base_val : str
+        ``"shear"`` or ``"moment"``.  Empty for displacement/drift.
+    _resultant_shear_fn, _resultant_moment_fn : callable
+        Function references (injected so call sites can pass their own).
+    """
+    import pandas as pd
+    if base_rxns is None:
+        base_rxns = {}
+    if _resultant_shear_fn is None:
+        _resultant_shear_fn = resultant_shear
+    if _resultant_moment_fn is None:
+        _resultant_moment_fn = resultant_moment
+
+    if not data_dict:
+        return pd.DataFrame()
+    items = list(data_dict.items())
+    df = items[0][1].copy()
+    for k, df_k in items[1:]:
+        df = df.merge(df_k, on=["Storey", elev_col], how="outer")
+    base_row: dict = {"Storey": "Base", elev_col: min_z}
+    for c in df.columns:
+        if c not in ("Storey", elev_col):
+            br = base_rxns.get(c, {})
+            if base_val == "shear":
+                base_row[c] = round(_resultant_shear_fn(br), 1)
+            elif base_val == "moment":
+                fx_b = br.get("Fx", 0) or 0
+                fy_b = br.get("Fy", 0) or 0
+                brm = _resultant_moment_fn(br, shear_fx=fx_b, shear_fy=fy_b)
+                if brm < 1e-3:
+                    brm = _resultant_shear_fn(br) * 0.7 * total_height
+                base_row[c] = round(brm, 1)
+            else:
+                base_row[c] = 0.0
+    df = pd.concat([pd.DataFrame([base_row]), df], ignore_index=True)
+    return df.sort_values(elev_col).reset_index(drop=True)
