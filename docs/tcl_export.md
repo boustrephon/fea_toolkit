@@ -15,9 +15,10 @@ Two export paths are available:
 ## Direct Tcl export (recommended)
 
 ```python
+from fea_toolkit.opensees.builder import export_model_to_tcl, pushover_tcl
 from fea_toolkit.opensees.preprocessor import preprocess_model
-from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
+mm = preprocess_model(md)
 config = {"create_fiber_sections": True, "geom_transf_type": "PDelta"}
 
 tcl_suffix = pushover_tcl(
@@ -27,7 +28,7 @@ tcl_suffix = pushover_tcl(
 )
 
 export_model_to_tcl(
-    md, "rc_pushover.tcl", config=config, tcl_suffix=tcl_suffix,
+    mm, "rc_pushover.tcl", config=config, tcl_suffix=tcl_suffix,
 )
 
 from fea_toolkit.opensees.recorder import XaraTclRunner

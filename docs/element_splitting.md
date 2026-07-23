@@ -45,6 +45,7 @@ one does, the pair is skipped.
 ## Builder integration
 
 ``Preprocessor.run()`` calls ``geometry.split_elements()``
-and registers any new nodes in the OpenSees domain via ``ops.node()``.
-Split children are stored in ``self.split_elements`` /
+and stores the resulting topology in ``self.split_elements`` /
 ``self.split_assignments`` / ``self.split_dist_loads``.
+OpenSees domain creation (nodes, elements) is handled separately
+by ``AnalysisBuilder.build_domain()``.

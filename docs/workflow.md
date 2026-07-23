@@ -230,22 +230,27 @@ are **identical** in behaviour to the legacy single‑stage builder.
 
 ---
 
-## Phase 2 — Legacy Single‑Stage Build (`AnalysisBuilder.build_domain()`)
+## Phase 2 — Domain Build (`AnalysisBuilder.build_domain()`)
 
-File: `src/fea_toolkit/opensees/builder.py`
+File: `src/fea_toolkit/opensees/analysis_builder.py`
 
-The original single‑stage path bundles the Preprocessor and AnalysisBuilder
-into one call.  The two‑stage path is the default (``use_preprocessor=True``).
-The legacy path (``use_preprocessor=False``) is **deprecated** and will be
-removed in a future release.
+The ``AnalysisBuilder`` takes the prepared ``MeshModel`` from the
+Preprocessor and creates the OpenSees domain.  Multiple analysis
+cases can share a single MeshModel — each creates its own
+``AnalysisBuilder`` with a different config:
 
 ```python
 mm = preprocess_model(md)
 b = AnalysisBuilder(mm, config)
 b.build_domain()
+b.create_loads({"DEAD": 1.0})
+results = b.run_static_analysis()
 ```
 
-### Legacy build order
+The legacy single‑stage path (``OpenSeesBuilder``) has been removed.
+All builds now use the two‑stage pipeline.
+
+### Build order
   2b  │ ops.wipe()               │ ops.wipe()                      │
       │                          │ ops.model('basic','-ndm',3,'-ndf',6)
   2c  │ _create_nodes()          │ ops.node(tag, x, y, z)          │ SAP2000 nodes only

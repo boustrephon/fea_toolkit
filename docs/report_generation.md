@@ -753,8 +753,8 @@ Stage 2 — AnalysisBuilder (runs per analysis case):
   elements, materials, and sections from the MeshModel.  Each
   AnalysisBuilder owns its own OpenSees domain; multiple builders can
   exist concurrently with different configs (e.g. elastic vs. fiber).
-- **The legacy ``AnalysisBuilder``** is still present for backward
-  compatibility but is deprecated for new development.
+- **The former single-stage build path** (``OpenSeesBuilder``) has been
+  removed.  The two-stage pipeline is the only path.
 
 ### Current status
 
@@ -881,8 +881,9 @@ def generate_report(config_path: str):
         # Merge per-analysis builder overrides on top of global defaults
         analysis_builder = dict(global_builder)
         analysis_builder.update(analysis_cfg.get("builder", {}))
+        mm = preprocess_model(md)
         builder = AnalysisBuilder(mm, analysis_builder)
-        builder.build()
+        builder.build_domain()
 
         if analysis_name == "static":
             results = run_linear_cases(builder, cfg)
