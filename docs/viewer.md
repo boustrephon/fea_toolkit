@@ -243,6 +243,7 @@ plot_deformed_displacement_3d(
 )
 
 # From saved NPZ or HDF5 results
+import numpy as np
 from fea_toolkit.io.npz_reader import read_results, _get_static_cases
 
 data = read_results("results.npz")   # or "results.h5"
@@ -656,7 +657,7 @@ data = read_results("results.npz")   # or "results.h5"
 - **Mesh:** ``plot_mesh(data)``
 - **Deformed shape:** ``plot_deformed_displacement_3d(data, displacements_dict)``
 - **Mode shapes:** ``plot_mode_animation(data, None, mode=0)``
-- **Forces:** ``plot_force_diagram_3d(data, combo="DEAD", quantity="Mz")``
+- **Forces:** ``plot_force_diagram_3d(data, force_data=None, combo="DEAD", quantity="Mz")``
 - **2D force (matplotlib):** ``plot_npz_force_diagram("path.npz", quantity="Mz")``
 - **3D force (legacy):** ``plot_npz_moment_3d("path.npz", quantity="Mz")``
 

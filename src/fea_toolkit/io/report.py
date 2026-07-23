@@ -1121,6 +1121,7 @@ def wind_sanity_check(md, df_linear,
         Markdown paragraph with bounding-box summary and wind-pressure table.
     """
     bb = bounding_box(md)
+
     x_face = bb["y_span"] * bb["z_span"]
     y_face = bb["x_span"] * bb["z_span"]
     fu = md.units.get("F", "?")

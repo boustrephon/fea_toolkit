@@ -1040,7 +1040,12 @@ def compute_linear_storey_responses(
     # --- Shear / moment from trapezoidal load -------------------------
     H = total_height
     if H <= 0:
-        return all_shear, all_moment, all_drift
+        return {
+            "df_disp": pd.DataFrame(),
+            "df_drift": pd.DataFrame(),
+            "df_shear": all_shear if isinstance(all_shear, pd.DataFrame) else pd.DataFrame(),
+            "df_moment": all_moment if isinstance(all_moment, pd.DataFrame) else pd.DataFrame(),
+        }
     lateral_keys = {"Wind", "RS-", "RS_"}
     for key, br in base_rxns.items():
         if not any(kw in key for kw in lateral_keys):
