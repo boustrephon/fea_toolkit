@@ -509,7 +509,7 @@ def plot_storey_forces(
       computed directly from nodal displacements and have nothing to do
       with the equivalent load distribution.
     * For element-level force verification use
-      :func:`~fea_toolkit.opensees.builder.OpenSeesBuilder.extract_static_element_forces`
+      :func:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.extract_static_element_forces`
       together with :func:`~fea_toolkit.model.storey_response.storey_shears`
       (Option B / nodal summation approach).
 

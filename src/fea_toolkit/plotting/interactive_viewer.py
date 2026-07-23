@@ -273,15 +273,15 @@ def plot_interactive_viewer(
     * **Click on flag** — overlay shows the numeric value.
 
     Args:
-        builder: Built :class:`~fea_toolkit.opensees.builder.OpenSeesBuilder`.
+        builder: Built :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder`.
         combo_forces: Dict ``{combo_name: elem_forces_dict}`` where each
             *elem_forces_dict* is the output of
-            :meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.extract_static_element_forces`.
+            :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.extract_static_element_forces`.
             If ``None``, defaults to a single ``"Primary"`` empty combo
             (structure-only view).
         combo_results: Dict ``{combo_name: results_dict}`` where each
             *results_dict* is the output of
-            :meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.run_static_analysis`.
+            :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_static_analysis`.
             Required for reaction arrows.
         initial_combo: Combo to show on startup.  Defaults to first key.
         initial_quantity: Initial quantity.  Default ``'Mz'``.
