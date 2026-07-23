@@ -3229,63 +3229,6 @@ def plot_npz_moment_3d(
 # ═══════════════════════════════════════════════════════════════════
 
 
-def plot_building_views(md: Any,
-                        window_size: tuple = (800, 600),
-                        ) -> Optional[Any]:
-    """Return a 2×2 matplotlib figure with plan, two elevations, isometric.
-
-    Uses :func:`plot_model_3d` to render four views of the model and
-    arranges them as a 2×2 grid.  Falls back silently if matplotlib or
-    PyVista is unavailable.
-
-    Args:
-        md: ``SAPModelData`` instance (or any object accepted by
-            :func:`plot_model_3d`).
-        window_size: ``(width, height)`` passed to ``plot_model_3d``.
-
-    Returns:
-        Matplotlib ``Figure``, or ``None`` if the required packages are
-        not installed.
-    """
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return None
-
-    try:
-        # Plan view (looking down Z)
-        ax_plan = plot_model_3d(md, window_size=window_size,
-                                 view_up=(0, 1, 0), view_vector=(0, 0, -1))
-        # Elevation X (looking along Y)
-        ax_elev_x = plot_model_3d(md, window_size=window_size,
-                                   view_up=(0, 0, 1), view_vector=(0, -1, 0))
-        # Elevation Y (looking along X)
-        ax_elev_y = plot_model_3d(md, window_size=window_size,
-                                   view_up=(0, 0, 1), view_vector=(-1, 0, 0))
-        # Isometric
-        ax_iso = plot_model_3d(md, window_size=window_size,
-                                view_up=(0, 0, 1),
-                                view_vector=(-1, -1, 0.5))
-
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
-        for ax, img, title in [
-            (ax1, ax_plan, "Plan"),
-            (ax2, ax_elev_x, "Elevation X"),
-            (ax3, ax_elev_y, "Elevation Y"),
-            (ax4, ax_iso, "Isometric"),
-        ]:
-            if img is not None:
-                ax.imshow(img)
-            ax.set_title(title, fontsize=10, fontweight="bold")
-            ax.axis("off")
-        fig.tight_layout()
-        return fig
-    except Exception as exc:
-        import warnings
-        warnings.warn(f"Could not generate building views: {exc}")
-        return None
-
-
 def plot_building_views(md, mesh_model=None,
                         window_size=(1200, 900)):
     """Return a 2×2 matplotlib figure with plan, two elevations, isometric.
@@ -3405,10 +3348,10 @@ def plot_building_views(md, mesh_model=None,
 def plot_model_comparison(
     md,
     mesh_model=None,
-    out_dir: str = None,
-    off_screen: bool = True,
-    LOADS_ONLY: set = None,
-) -> Optional[Dict[str, Any]]:
+    out_dir=None,
+    off_screen=True,
+    LOADS_ONLY=None,
+):
     """Open an interactive PyVista viewer (or save screenshots) comparing
     the original model geometry with the split/meshed model.
 
@@ -3416,6 +3359,7 @@ def plot_model_comparison(
     Otherwise falls back to the builder path.
     """
     import copy
+    from pathlib import Path
     import pyvista as pv
     from fea_toolkit.model.sap_data import Restraint
     from fea_toolkit.model.selection import Selection
@@ -3471,6 +3415,7 @@ def plot_model_comparison(
 
 def _save_comparison_images(md, builder, LOADS_ONLY, out_dir):
     """Save PNG screenshots of original and meshed views."""
+    from pathlib import Path
     import pyvista as pv
     pv.set_plot_theme("document")
     pv.OFF_SCREEN = True

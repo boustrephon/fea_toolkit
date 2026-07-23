@@ -1171,7 +1171,7 @@ def static_load_verification(md, mesh_model, config: dict = None):
     ----------
     md : SAPModelData
         Parsed model data.
-    mesh_model : MeshModel
+    mesh_model :
         Pre-processed mesh model.
     config : dict, optional
         Builder configuration.
@@ -1240,6 +1240,9 @@ def run_linear_cases(
     """
     rows = []
     config = {"element_type": "elasticBeamColumn", "verbose": False}
+    import math
+    import numpy as np
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
     # ── Static cases: auto-detect LinStatic, then merge user overrides ──
     # Always auto-detect all LinStatic cases from the model
@@ -1281,7 +1284,7 @@ def run_linear_cases(
                     static_cases[cname] = pat_dict
 
     # ── Filter out cases whose constituent patterns have zero loads ──
-    def _pattern_has_loads(m: MeshModel, pname: str) -> bool:
+    def _pattern_has_loads(m, pname: str) -> bool:
         lp = m.load_patterns.get(pname)
         if lp is not None and lp.self_weight_factor > 0:
             return True
@@ -1292,6 +1295,8 @@ def run_linear_cases(
 
     static_cases = {cname: pats for cname, pats in static_cases.items()
                     if any(_pattern_has_loads(mesh_model, p) for p in pats)}
+
+    from fea_toolkit.utils import sum_reactions_with_overturning
 
     from fea_toolkit.utils import sum_reactions_with_overturning
 
@@ -1326,11 +1331,13 @@ def run_linear_cases(
 
     # ── Response spectrum cases ─────────────────────────────────
     if spec_cfg:
+        from fea_toolkit.spectrum import _build_spectrum
         T_spec_built, Sa_spec_built, alpha_max, tg, zeta_eff, _ = _build_spectrum(spec_cfg)
         T_spec = T_spec_built
         Sa_spec = Sa_spec_built
     else:
         # Fallback: rare spectrum with 5% damping
+        from fea_toolkit.spectrum import _gb50011_spectrum
         zeta = 0.05
         gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
         eta_1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
