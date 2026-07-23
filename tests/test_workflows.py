@@ -94,19 +94,22 @@ class TestBuildWorkflow:
     def test_rebuild_preserves_geometry(self, sample_md):
         """Rebuilding with different pattern scales does not corrupt the model.
 
-        Note: uses OpenSeesBuilder (legacy) since AnalysisBuilder does
-        not support re-building with pattern_scales via build_domain().
+        Uses Preprocessor + AnalysisBuilder.  Multiple calls to
+        run_static_analysis with different pattern_scales internally
+        rebuilds the domain each time.
         """
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
-        b = OpenSeesBuilder(sample_md, {
-            'element_type': 'elasticBeamColumn',
-            'verbose': False, 'create_shells': False,
-            'use_preprocessor': False,
-        })
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        cfg = {'element_type': 'elasticBeamColumn', 'verbose': False,
+               'create_shells': False}
+        mm = preprocess_model(sample_md, cfg)
+        b = AnalysisBuilder(mm, cfg)
         try:
-            b.build()
-            # Second build with different scales
-            b.build(pattern_scales={"DEAD": 1.0, "WIND": 0.5})
+            b.build_domain()
+            r1 = b.run_static_analysis(pattern_scales={"DEAD": 1.0})
+            r2 = b.run_static_analysis(pattern_scales={"DEAD": 1.0, "WIND": 0.5})
+            assert r1 is not None
+            assert r2 is not None
         finally:
             ops.wipe()
 
@@ -833,35 +836,22 @@ class TestCSMWorkflow:
 # ============================================================================
 
 class TestBucklingCheckWorkflow:
-    """End-to-end Euler buckling check.
+    """End-to-end Euler buckling check (analytical, no OpenSees needed)."""
 
-    Note: uses OpenSeesBuilder (legacy) since check_brace_buckling is
-    not yet ported to AnalysisBuilder.
-    """
-
-    @pytest.fixture
-    def buck_builder(self, sample_md):
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
-        b = OpenSeesBuilder(sample_md, {
-            'element_type': 'elasticBeamColumn', 'verbose': False,
-            'create_shells': False, 'use_preprocessor': False,
-        })
-        b.build()
-        yield b
-        ops.wipe()
-
-    def test_check_brace_buckling_no_braces(self, buck_builder):
+    def test_check_brace_buckling_no_braces(self, sample_md):
         """Buckling check with no brace selection returns empty."""
-        result = buck_builder.check_brace_buckling(
-            brace_ids=set(), print_results=False,
+        from fea_toolkit.model.checks import check_brace_buckling
+        result = check_brace_buckling(
+            sample_md, brace_ids=set(), print_results=False,
         )
         assert isinstance(result, dict)
         assert len(result) == 0, f"expected empty dict, got {len(result)} entries"
 
-    def test_check_brace_buckling_with_ids(self, buck_builder):
+    def test_check_brace_buckling_with_ids(self, sample_md):
         """Euler buckling load is computed for a given frame element."""
-        result = buck_builder.check_brace_buckling(
-            brace_ids={"1"}, print_results=False,
+        from fea_toolkit.model.checks import check_brace_buckling
+        result = check_brace_buckling(
+            sample_md, brace_ids={"1"}, print_results=False,
         )
         assert isinstance(result, dict)
         assert "1" in result, "brace '1' missing from results"
