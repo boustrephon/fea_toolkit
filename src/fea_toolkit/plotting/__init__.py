@@ -18,6 +18,8 @@ from .viz import (
     plot_capacity_spectrum,
     plot_npz_force_diagram,
     plot_npz_moment_3d,
+    # Deformed shape (unified replacement for plot_deformed_3d / plot_rs_deformed_3d)
+    plot_deformed_displacement_3d,
     # Unified functions (builder or NPZ data)
     plot_mesh,
     compare_meshes,
