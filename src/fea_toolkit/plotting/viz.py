@@ -3492,12 +3492,12 @@ def plot_building_views(md, mesh_model=None,
             _ab_views = AnalysisBuilder(mesh_model, {"verbose": False})
             _ab_views.build_domain()
         else:
-            from fea_toolkit.opensees.builder import OpenSeesBuilder
-            _ab_views = OpenSeesBuilder(md, {
-                "element_type": "elasticBeamColumn",
-                "split_elements": True, "verbose": False,
-            })
-            _ab_views.build()
+            from fea_toolkit.opensees.preprocessor import preprocess_model
+            from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+            _mm = preprocess_model(md, {"element_type": "elasticBeamColumn",
+                                        "split_elements": True, "verbose": False})
+            _ab_views = AnalysisBuilder(_mm, {"verbose": False})
+            _ab_views.build_domain()
     except Exception:
         import warnings
         warnings.warn("Could not build model for building views.")

@@ -42,16 +42,9 @@ def bounding_box(md) -> Dict[str, float]:
 # ========================================================================
 
 def summarise_mass_sources(md, g: float = 9.81) -> pd.DataFrame:
-    """Return a DataFrame summarising all mass sources.
-
-    .. deprecated::
-       This function builds an ``OpenSeesBuilder`` via the legacy single-stage
-       path.  For new code, compute masses using the two-stage
-       ``Preprocessor → AnalysisBuilder`` workflow instead.
-
-    Builds the model to compute total seismic mass and weight for each source.
-    """
-    from ..opensees.builder import OpenSeesBuilder
+    """Return a DataFrame summarising all mass sources."""
+    from ..opensees.preprocessor import preprocess_model
+    from ..opensees.analysis_builder import AnalysisBuilder
 
     rows = []
     for ms_name, ms in md.mass_sources.items():
@@ -70,13 +63,11 @@ def summarise_mass_sources(md, g: float = 9.81) -> pd.DataFrame:
         rows.append(row)
 
     if md.mass_sources:
-        b = OpenSeesBuilder(md, {
-            "element_type": "elasticBeamColumn",
-            "split_elements": True,
-            "use_preprocessor": False,
-            "verbose": False,
-        })
-        b.build()
+        _mm = preprocess_model(md, {"element_type": "elasticBeamColumn",
+                                    "split_elements": True, "verbose": False})
+        b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn",
+                                 "verbose": False})
+        b.build_domain()
         node_masses = b.compute_seismic_masses(g=g)
         total_mass = sum(node_masses.values())
         total_weight = total_mass * g
@@ -209,14 +200,13 @@ def load_pattern_totals(md) -> pd.DataFrame:
     load pattern defined in the model (as computed by the builder's
     ``load_totals`` attribute).
     """
-    from ..opensees.builder import OpenSeesBuilder
-    b = OpenSeesBuilder(md, {
-        "element_type": "elasticBeamColumn",
-        "split_elements": True,
-        "use_preprocessor": False,
-        "verbose": False,
-    })
-    b.build()
+    from ..opensees.preprocessor import preprocess_model
+    from ..opensees.analysis_builder import AnalysisBuilder
+    _mm = preprocess_model(md, {"element_type": "elasticBeamColumn",
+                                "split_elements": True, "verbose": False})
+    b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn",
+                             "verbose": False})
+    b.build_domain()
     lt = getattr(b, "load_totals", {})
 
     # Determine which patterns are referenced by LinStatic load cases
@@ -539,14 +529,13 @@ def modal_table(md, n_modes: int = 12, print_results: bool = False) -> pd.DataFr
 
     Columns: Mode, Period (s), Freq (Hz), Mx (%), My (%), Mz (%).
     """
-    from ..opensees.builder import OpenSeesBuilder
-    b = OpenSeesBuilder(md, {
-        "element_type": "elasticBeamColumn",
-        "split_elements": True,
-        "use_preprocessor": False,
-        "verbose": False,
-    })
-    b.build()
+    from ..opensees.preprocessor import preprocess_model
+    from ..opensees.analysis_builder import AnalysisBuilder
+    _mm = preprocess_model(md, {"element_type": "elasticBeamColumn",
+                                "split_elements": True, "verbose": False})
+    b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn",
+                             "verbose": False})
+    b.build_domain()
     b.compute_seismic_masses()
     modal = b.run_modal_analysis(num_modes=n_modes, print_results=print_results)
     mp = modal["modal_props"]
@@ -577,14 +566,13 @@ def modal_table_enhanced(md, n_modes: int = 12, print_results: bool = False):
 
     Columns: Mode, Period, Mx%, My%, Mz%, Rx%, Ry%, Rz%  + a SUM row.
     """
-    from ..opensees.builder import OpenSeesBuilder
-    b = OpenSeesBuilder(md, {
-        "element_type": "elasticBeamColumn",
-        "split_elements": True,
-        "use_preprocessor": False,
-        "verbose": False,
-    })
-    b.build()
+    from ..opensees.preprocessor import preprocess_model
+    from ..opensees.analysis_builder import AnalysisBuilder
+    _mm = preprocess_model(md, {"element_type": "elasticBeamColumn",
+                                "split_elements": True, "verbose": False})
+    b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn",
+                             "verbose": False})
+    b.build_domain()
     b.compute_seismic_masses()
     modal = b.run_modal_analysis(num_modes=n_modes, print_results=print_results)
     mp = modal["modal_props"]
