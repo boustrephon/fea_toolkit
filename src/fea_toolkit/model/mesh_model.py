@@ -48,7 +48,13 @@ class MeshModel:
     mass_sources: Dict[str, MassSource] = field(default_factory=dict)
 
     # ── Constraints (detected, not yet applied to OpenSees) ───────
-    edge_constraint_pairs: List[tuple] = field(default_factory=list)
+    # ── Detected coarse‑fine node pairs (for visualisation only) ──
+    # Populated by the Preprocessor's ``detect_constraint_edges`` option.
+    # Each entry is a ``(coarse_node, fine_node)`` tuple — rendered in
+    # PyVista as yellow lines.  NOT used for applying constraints at
+    # analysis time — the AnalysisBuilder receives constraint arguments
+    # directly from the caller and saves them in ``_saved_edge_constraints``.
+    detected_edge_pairs: List[tuple] = field(default_factory=list)
     #   [(merged_nodes, master_chain, slave_nodes, type_a, type_b), ...]
     #   — from find_constraint_edges: merged node dict, master chain,
     #     slave nodes, and the two constraint type labels
@@ -85,9 +91,15 @@ class MeshModel:
     # ── Model identification ─────────────────────────────────────
     model_name: str = ""
 
-    # ── Saved edge constraint arguments (for pushover re-apply) ──
-    # Each entry is a tuple of positional args for apply_edge_constraints
-    saved_edge_constraints: List[tuple] = field(default_factory=list)
+    # ── Saved constraint‑application arguments (for pushover re‑apply) ──
+    # Each entry is a tuple of positional args for
+    # ``AnalysisBuilder.apply_edge_constraints()``.  Currently always
+    # empty — the Preprocessor stores detected node pairs in
+    # ``detected_edge_pairs``, not here.  The AnalysisBuilder populates
+    # its own ``_saved_edge_constraints`` when constraints are first
+    # applied.  This field exists for future Preprocessor→AnalysisBuilder
+    # transfer of pre-built constraint arguments.
+    edge_constraint_args: List[tuple] = field(default_factory=list)
 
     # ── Loads-only area IDs (stiffness-free, mass-contributing) ──
     # Areas matching a loads-only selection are NOT created as shell
@@ -121,7 +133,7 @@ class MeshModel:
             "Materials": len(self.materials),
             "Sections": len(self.sections),
             "Material tags": len(self.material_tags),
-            "Constraint pairs": len(self.edge_constraint_pairs),
+            "Constraint pairs": len(self.detected_edge_pairs),
             "Diaphragm levels": len(self.diaphragm_levels),
             "Distributed loads": len(self.frame_dist_loads),
             "Units": str(self.units),
