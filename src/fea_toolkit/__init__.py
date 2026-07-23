@@ -10,3 +10,8 @@ except importlib.metadata.PackageNotFoundError:
 def ops_version() -> str:
     ops_ver = importlib.metadata.version("openseespy")
     return ops_ver
+
+
+# ── Convenience re-exports ──────────────────────────────────────────
+
+from fea_toolkit.report import generate_report  # noqa: E402, F401

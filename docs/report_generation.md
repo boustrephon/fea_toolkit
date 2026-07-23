@@ -791,7 +791,7 @@ dependency on other items.
 | **P10** | Equation numbering (RCM) | 3.7 | Small | `ops.numberer('RCM')` used throughout — no `numberer Plain` remaining. | ✅ Done |
 | **P11** | Damping for dynamic | 3.7 | Medium (when added) | Rayleigh coefficients from target ζ at two frequencies. Not needed until `nonlinear_dynamic`. | ❌ Pending |
 | **—** | CI pipeline (verification suite) | 3.6 | Medium (CI setup) | Run `runVerificationSuite.tcl` automatically to catch regressions from toolkit changes. | ❌ Pending |
-| **R1** | Generalised orchestrator `generate_report()` | 5 | Medium | Extract pipeline orchestration from `pumphouse_report_v2.run_all()` into `fea_toolkit/report.py`.  Create `generate_report(md, mesh_model, config) → dict` that runs all stages and returns a standardised result dict.  `pumphouse_report_v2.run_all()` becomes a thin wrapper. | ❌ Pending |
+| **R1** | Generalised orchestrator `generate_report()` | 5 | Medium | Created ``fea_toolkit/report.generate_report(md, mesh_model, config, out_dir, **overrides) → dict``.  Extracts the generic pipeline orchestration from ``pumphouse_report_v2.run_all()``.  The project-specific script is now a thin wrapper. | ✅ Done |
 | **R2** | Tcl export from MeshModel | 8 | Medium | `export_model_to_tcl()` currently works from `SAPModelData` (legacy builder).  Add a MeshModel-aware path that emits topology + fiber sections for Xara / OpenSeesMP submission. | ❌ Pending |
 | **R3** | HPC job submission + result ingest | — | Large | Helper to submit Tcl to Xara (OpenSeesMP), wait for completion, parse output back into the unified NPZ/HDF5 schema.  Required for `admin_nonlinear.py`. | ❌ Pending |
 | **P0-dyn** | Tcl export for nonlinear RC | — | Medium | Nonlinear RC cannot run in OpenSeesPy. `export_model_to_tcl()` emits fiber sections + analysis commands. | ⚠️ Partial |
@@ -982,10 +982,10 @@ The migration strategy:
 |---|---|---|
 | **1. Adopt Python-dict config** | The proposed YAML config was replaced by a Python ``_DEFAULT_CONFIG`` dict in each report script.  This is more flexible for programmatic use and avoids a YAML dependency. | ✅ Done (see ``pumphouse_report_v2.py``) |
 | **2. Add HDF5 storage** | ``unified_writer._write_h5()`` + ``npz_reader.read_results_hdf5()`` implemented.  Uses flat dict-of-arrays (same schema as NPZ). | ✅ Done |
-| **3. Generalise orchestration** | Extract pipeline orchestration from ``pumphouse_report_v2.run_all()`` into ``fea_toolkit/report.py`` as ``generate_report()``. | ❌ Pending (R1) |
+| **3. Generalise orchestration** | Extract pipeline orchestration from ``pumphouse_report_v2.run_all()`` into ``fea_toolkit/report.py`` as ``generate_report()``. | ✅ Done (R1) |
 | **4. Refactor QMD** | Replace inline computation cells with HDF5 read + plot/table cells. | ⚠️ Partially done (``pumphouse_report_v2.qmd`` reads cached results) |
 | **5. Parametrise template** | Add ``params`` block to QMD header; make it read ``params.hdf5_path``. | ❌ Pending |
-| **6. Build orchestrator** | Create ``generate_report()`` that calls parse → preprocess → analyse → store → render. | ❌ Pending (R1) |
+| **6. Build orchestrator** | Create ``generate_report()`` that calls parse → preprocess → analyse → store → render. | ✅ Done (R1) |
 | **7. CLI entry point** | Add ``fea-toolkit report config.yaml`` console script. | ❌ Pending |
 
 ---
