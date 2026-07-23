@@ -242,10 +242,9 @@ class TestSplitSlabsAtWalls:
 class TestWallSlabPreprocessor:
     """Preprocessor detects wall-slab intersections when configured."""
 
-    def test_preprocessor_detects_intersection(self):
-        """Preprocessor.run() with detect_wall_slab_intersections detects walls."""
-        from fea_toolkit.opensees.preprocessor import Preprocessor
-
+    @pytest.fixture
+    def wall_slab_md(self):
+        """Shared model data: 6×6 m slab with a 2×3 m wall at its centre."""
         nodes = {
             "1": Node("1", 1, 0.0, 0.0, 0.0),
             "2": Node("2", 2, 6.0, 0.0, 0.0),
@@ -263,7 +262,7 @@ class TestWallSlabPreprocessor:
             "Wall300": Section("Wall300", "Shell", "Concrete",
                                A=0, I33=0, I22=0, J=0),
         }
-        md = SAPModelData(
+        return SAPModelData(
             nodes=nodes, restraints={}, materials=materials,
             sections=sections, frame_elements={},
             area_elements={
@@ -274,60 +273,35 @@ class TestWallSlabPreprocessor:
             area_assignments={"Slab": "Slab200", "Wall": "Wall300"},
             groups={}, frame_auto_mesh={},
         )
+
+    def test_preprocessor_detects_intersection(self, wall_slab_md):
+        """Preprocessor.run() with detect_wall_slab_intersections detects walls."""
+        from fea_toolkit.opensees.preprocessor import Preprocessor
 
         pp = Preprocessor({
             "detect_wall_slab_intersections": True,
             "split_slabs_at_walls": False,  # detection only, no split
             "verbose": False,
         })
-        mm = pp.run(md)
+        mm = pp.run(wall_slab_md)
         # The Preprocessor should not crash — detection is silent when
         # split_slabs_at_walls is False.  Just verify the run completed.
         assert mm is not None
         assert "Slab" in mm.area_elements
         assert "Wall" in mm.area_elements
 
-    def test_preprocessor_splits_slabs_at_walls(self):
+    def test_preprocessor_splits_slabs_at_walls(self, wall_slab_md):
         """Preprocessor.run() with split_slabs_at_walls=True splits the slab."""
         from fea_toolkit.opensees.preprocessor import Preprocessor
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         import openseespy.opensees as ops
-
-        nodes = {
-            "1": Node("1", 1, 0.0, 0.0, 0.0),
-            "2": Node("2", 2, 6.0, 0.0, 0.0),
-            "3": Node("3", 3, 6.0, 6.0, 0.0),
-            "4": Node("4", 4, 0.0, 6.0, 0.0),
-            "5": Node("5", 5, 2.0, 2.0, 0.0),
-            "6": Node("6", 6, 4.0, 2.0, 0.0),
-            "7": Node("7", 7, 2.0, 2.0, 3.0),
-            "8": Node("8", 8, 4.0, 2.0, 3.0),
-        }
-        materials = {"Concrete": Material("Concrete", "Concrete", E_mod=3e10)}
-        sections = {
-            "Slab200": Section("Slab200", "Shell", "Concrete",
-                               A=0, I33=0, I22=0, J=0),
-            "Wall300": Section("Wall300", "Shell", "Concrete",
-                               A=0, I33=0, I22=0, J=0),
-        }
-        md = SAPModelData(
-            nodes=nodes, restraints={}, materials=materials,
-            sections=sections, frame_elements={},
-            area_elements={
-                "Slab": AreaElement("Slab", 10, ["1", "2", "3", "4"]),
-                "Wall": AreaElement("Wall", 20, ["5", "6", "8", "7"]),
-            },
-            frame_assignments={},
-            area_assignments={"Slab": "Slab200", "Wall": "Wall300"},
-            groups={}, frame_auto_mesh={},
-        )
 
         cfg = {"detect_wall_slab_intersections": True,
                "split_slabs_at_walls": True,
                "create_shells": True,
                "verbose": False}
         pp = Preprocessor(cfg)
-        mm = pp.run(md)
+        mm = pp.run(wall_slab_md)
         b = AnalysisBuilder(mm, cfg)
         try:
             b.build_domain()
