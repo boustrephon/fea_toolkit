@@ -522,6 +522,28 @@ def _resolve_mesh_data(source):
     return data
 
 
+def _resolve_frame_node(nodes, fr, side='i'):
+    """Resolve a frame endpoint node from resolved mesh data.
+
+    Tries ``ni_id``/``nj_id`` (string key) first, then falls back to
+    searching by ``ni_tag``/``nj_tag`` (integer tag).  Returns the node
+    dict or ``None``.
+    """
+    key_id = f"n{side}_id"
+    key_tag = f"n{side}_tag"
+    nid = fr.get(key_id)
+    if nid is not None:
+        nd = nodes.get(nid)
+        if nd is not None:
+            return nd
+    tag = fr.get(key_tag)
+    if tag is not None:
+        for nd in nodes.values():
+            if nd["tag"] == tag:
+                return nd
+    return None
+
+
 def _render_scene(plotter, data, *,
                   shrink=0.0, xlim=None, ylim=None, zlim=None,
                   show_nodes=True, show_orphan_nodes=False,
@@ -579,12 +601,8 @@ def _render_scene(plotter, data, *,
     if show_frames:
         frame_lines = []
         for fr in data["frames"]:
-            if "ni_id" in fr:
-                ni = nodes.get(fr["ni_id"])
-                nj = nodes.get(fr["nj_id"])
-            else:
-                ni = next((n for n in nodes.values() if n["tag"] == fr["ni_tag"]), None)
-                nj = next((n for n in nodes.values() if n["tag"] == fr["nj_tag"]), None)
+            ni = _resolve_frame_node(nodes, fr, 'i')
+            nj = _resolve_frame_node(nodes, fr, 'j')
             if ni is None or nj is None:
                 continue
             mid = [(ni["x"] + nj["x"]) / 2, (ni["y"] + nj["y"]) / 2, (ni["z"] + nj["z"]) / 2]
@@ -731,12 +749,8 @@ def _render_scene(plotter, data, *,
     if show_frame_labels:
         pts, tags = [], []
         for fr in data["frames"]:
-            if "ni_id" in fr:
-                ni = nodes.get(fr["ni_id"])
-                nj = nodes.get(fr["nj_id"])
-            else:
-                ni = next((n for n in nodes.values() if n["tag"] == fr["ni_tag"]), None)
-                nj = next((n for n in nodes.values() if n["tag"] == fr["nj_tag"]), None)
+            ni = _resolve_frame_node(nodes, fr, 'i')
+            nj = _resolve_frame_node(nodes, fr, 'j')
             if ni is None or nj is None:
                 continue
             mid = [(ni["x"] + nj["x"]) / 2 - node_label_offset,
@@ -1201,15 +1215,8 @@ def plot_deformed_displacement_3d(
 
     # ── Deformed frame lines (warm red) ───────────────────────────
     for fr in frames:
-        nid_i = fr.get("ni_id") or str(fr.get("ni_tag", ""))
-        nid_j = fr.get("nj_id") or str(fr.get("nj_tag", ""))
-        ni = nodes.get(nid_i) or nodes.get(str(fr.get("ni_tag", "")))
-        nj = nodes.get(nid_j) or nodes.get(str(fr.get("nj_tag", "")))
-        # Fallback: search by tag when key-based lookup fails (NPZ dicts)
-        if ni is None:
-            ni = next((n for n in nodes.values() if n["tag"] == fr.get("ni_tag")), None)
-        if nj is None:
-            nj = next((n for n in nodes.values() if n["tag"] == fr.get("nj_tag")), None)
+        ni = _resolve_frame_node(nodes, fr, 'i')
+        nj = _resolve_frame_node(nodes, fr, 'j')
         if ni is None or nj is None:
             continue
         di = displacements.get(ni["tag"], (0, 0, 0))
@@ -1674,14 +1681,8 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
     segments = []
     seg_npoints = []
     for fr in data["frames"]:
-        if "ni_id" in fr:
-            ni = data["nodes"].get(fr["ni_id"])
-            nj = data["nodes"].get(fr["nj_id"])
-        else:
-            ni = next((n for n in data["nodes"].values()
-                       if n["tag"] == fr["ni_tag"]), None)
-            nj = next((n for n in data["nodes"].values()
-                       if n["tag"] == fr["nj_tag"]), None)
+        ni = _resolve_frame_node(data["nodes"], fr, 'i')
+        nj = _resolve_frame_node(data["nodes"], fr, 'j')
         if ni is None or nj is None:
             continue
         p1 = np.array([ni["x"], ni["y"], ni["z"]])
@@ -1908,14 +1909,8 @@ def plot_force_diagram_3d(source, force_data=None, *,
             continue
 
         # Node coordinates
-        if "ni_id" in fr:
-            ni = nodes.get(fr["ni_id"])
-            nj = nodes.get(fr["nj_id"])
-        else:
-            ni = next((n for n in nodes.values()
-                       if n["tag"] == fr["ni_tag"]), None)
-            nj = next((n for n in nodes.values()
-                       if n["tag"] == fr["nj_tag"]), None)
+        ni = _resolve_frame_node(nodes, fr, 'i')
+        nj = _resolve_frame_node(nodes, fr, 'j')
         if ni is None or nj is None:
             continue
 
@@ -2042,14 +2037,8 @@ def _compute_local_forces(source, fr, nodes, force_entry, quantity):
 
     # Otherwise compute from global forces
     # Get node coordinates for element axis
-    if "ni_id" in fr:
-        ni = nodes.get(fr["ni_id"])
-        nj = nodes.get(fr["nj_id"])
-    else:
-        ni = next((n for n in nodes.values()
-                   if n["tag"] == fr["ni_tag"]), None)
-        nj = next((n for n in nodes.values()
-                   if n["tag"] == fr["nj_tag"]), None)
+    ni = _resolve_frame_node(nodes, fr, 'i')
+    nj = _resolve_frame_node(nodes, fr, 'j')
     if ni is None or nj is None:
         return None
 
@@ -2121,14 +2110,8 @@ def _compute_flag_direction(f_local, fr, nodes, quantity):
 def _get_element_axis(fr, nodes):
     """Return unit vector along a frame element from resolved data."""
     import numpy as np
-    if "ni_id" in fr:
-        ni = nodes.get(fr["ni_id"])
-        nj = nodes.get(fr["nj_id"])
-    else:
-        ni = next((n for n in nodes.values()
-                   if n["tag"] == fr["ni_tag"]), None)
-        nj = next((n for n in nodes.values()
-                   if n["tag"] == fr["nj_tag"]), None)
+    ni = _resolve_frame_node(nodes, fr, 'i')
+    nj = _resolve_frame_node(nodes, fr, 'j')
     if ni is None or nj is None:
         return None
     d = np.array([nj["x"] - ni["x"], nj["y"] - ni["y"],
@@ -3491,6 +3474,9 @@ def plot_building_views(md, mesh_model=None,
     """
     try:
         import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+    try:
         import pyvista as pv
     except ImportError:
         fig, ax = plt.subplots(figsize=(6, 4))
