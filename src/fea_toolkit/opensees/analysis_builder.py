@@ -1220,18 +1220,10 @@ class AnalysisBuilder:
         elements = self.mesh_model.frame_elements
         assignments = self.mesh_model.frame_assignments
         dist_loads = self.mesh_model.frame_dist_loads
+        rigid_links: List[tuple] = []
 
-        for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
-                continue
-
-            tag = self.frame_tag_map.get(eid)
-            if tag is None:
-                continue
-
-            self._add_beam_column(elem, tag, elements, assignments)
-
-        # Brace subdivision (Approach A: subdivided elements + imperfection)
+        # Brace subdivision (Approach A) — before element creation loop so
+        # child sub-elements are processed by _add_beam_column below.
         if self.config.get('subdivide_braces') and self._brace_selection:
             n_seg = self.config.get('brace_n_segments', 4)
             imperf = self.config.get('brace_imperfection_ratio', 1.0 / 500.0)
@@ -1253,41 +1245,53 @@ class AnalysisBuilder:
                 end_offset=end_off,
                 next_tag=next_tag,
             )
-            # Update mesh model references with subdivided topology
             self.mesh_model.frame_elements = elements
             self.mesh_model.frame_assignments = assignments
             self.mesh_model.nodes = nodes
+            # Rebuild frame tag map so children get OpenSees tags
+            self._build_frame_tag_map()
             # Create OpenSees nodes for subdivision / offset nodes
             for nd in nodes.values():
                 if nd.node_tag not in self._created_node_tags:
                     ops.node(nd.node_tag, nd.x, nd.y, nd.z)
                     self._created_node_tags.add(nd.node_tag)
-            # Create rigid link elements (same pattern as offset rigid links)
-            if rigid_links:
-                all_sec_tags = set(self.section_tags.values())
-                all_sec_tags.update(self._shell_sec_tags.values())
-                all_sec_tags.update(self._shell_sec_variants.values())
-                rigid_section_tag = max(all_sec_tags, default=0) + 1
-                rigid_E = 2.0e14
-                rigid_A = 1.0
-                rigid_I = 1.0
-                ops.section('Elastic', rigid_section_tag, rigid_E, rigid_A,
-                            rigid_I, rigid_I, rigid_E / 2.6, rigid_I)
-                for _link_id, _node_i_id, _node_j_id, link_tag in rigid_links:
-                    nd_i = nodes.get(_node_i_id)
-                    nd_j = nodes.get(_node_j_id)
-                    if nd_i is None or nd_j is None:
-                        continue
-                    ni_tag = nd_i.node_tag
-                    nj_tag = nd_j.node_tag
-                    dx = float(nd_j.x - nd_i.x)
-                    dy = float(nd_j.y - nd_i.y)
-                    dz = float(nd_j.z - nd_i.z)
-                    vecxz = get_SAP_vecxz(np.array([dx, dy, dz]), 0.0)
-                    ops.geomTransf('Linear', link_tag, *vecxz)
-                    ops.element('elasticBeamColumn', link_tag, ni_tag, nj_tag,
-                                rigid_section_tag, link_tag, '-mass', 0.0)
-                    self._rigid_link_elems[_link_id] = link_tag
+
+        for eid, elem in elements.items():
+            if getattr(elem, 'inactive', False):
+                continue
+
+            tag = self.frame_tag_map.get(eid)
+            if tag is None:
+                continue
+
+            self._add_beam_column(elem, tag, elements, assignments)
+
+        # Rigid links from brace subdivision
+        if rigid_links:
+            all_sec_tags = set(self.section_tags.values())
+            all_sec_tags.update(self._shell_sec_tags.values())
+            all_sec_tags.update(self._shell_sec_variants.values())
+            rigid_section_tag = max(all_sec_tags, default=0) + 1
+            rigid_E = 2.0e14
+            rigid_A = 1.0
+            rigid_I = 1.0
+            ops.section('Elastic', rigid_section_tag, rigid_E, rigid_A,
+                        rigid_I, rigid_I, rigid_E / 2.6, rigid_I)
+            for _link_id, _node_i_id, _node_j_id, link_tag in rigid_links:
+                nd_i = self.mesh_model.nodes.get(_node_i_id)
+                nd_j = self.mesh_model.nodes.get(_node_j_id)
+                if nd_i is None or nd_j is None:
+                    continue
+                ni_tag = nd_i.node_tag
+                nj_tag = nd_j.node_tag
+                dx = float(nd_j.x - nd_i.x)
+                dy = float(nd_j.y - nd_i.y)
+                dz = float(nd_j.z - nd_i.z)
+                vecxz = get_SAP_vecxz(np.array([dx, dy, dz]), 0.0)
+                ops.geomTransf('Linear', link_tag, *vecxz)
+                ops.element('elasticBeamColumn', link_tag, ni_tag, nj_tag,
+                            rigid_section_tag, link_tag, '-mass', 0.0)
+                self._rigid_link_elems[_link_id] = link_tag
 
         # Rigid links from frame end offsets
         # The Preprocessor returns (link_id, node_i, node_j, link_tag) tuples.
@@ -1435,6 +1439,9 @@ class AnalysisBuilder:
         """
         self._brace_selection = brace_ids
         self.config['subdivide_braces'] = True
+        # Always clear first so a subsequent call with end_offset=0.0
+        # does not retain a previous positive value.
+        self.config.pop('brace_end_offset', None)
         if end_offset > 0:
             self.config['brace_end_offset'] = end_offset
 
@@ -1484,6 +1491,33 @@ class AnalysisBuilder:
         """
         if self.config.get('hinge_model') != 'lumped':
             return
+
+        # ── Idempotency: preserve canonical state on first call ────────
+        # Restore from the saved snapshot so repeated build_domain()
+        # calls start from the same topology (hinge nodes are removed
+        # and element endpoints are reset to the original structural nodes).
+        if not hasattr(self, '_hinge_canonical_elements'):
+            self._hinge_canonical_elements = {
+                eid: (elem.node_i, elem.node_j)
+                for eid, elem in self.mesh_model.frame_elements.items()
+                if not getattr(elem, 'inactive', False)
+            }
+            self._hinge_canonical_assignments = dict(
+                self.mesh_model.frame_assignments)
+
+        # Remove any *_hinge_* nodes left from a previous build
+        for nid in list(self.mesh_model.nodes.keys()):
+            if nid.endswith('_hinge_i') or nid.endswith('_hinge_j'):
+                del self.mesh_model.nodes[nid]
+
+        # Restore canonical element endpoints and assignments
+        for eid, elem in self.mesh_model.frame_elements.items():
+            if eid in self._hinge_canonical_elements:
+                ni, nj = self._hinge_canonical_elements[eid]
+                elem.node_i = ni
+                elem.node_j = nj
+        self.mesh_model.frame_assignments = dict(
+            self._hinge_canonical_assignments)
 
         elements = self.mesh_model.frame_elements
         assignments = self.mesh_model.frame_assignments
@@ -1565,16 +1599,30 @@ class AnalysisBuilder:
             mat = self.mesh_model.materials.get(sec.material)
 
             if mat and mat.type and 'concrete' in mat.type.lower():
-                Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
-                E = mat.E_mod if mat.E_mod > 0 else 2.5e10
-                My = Fy * (sec.Z33 if sec.Z33 else sec.I33 / (L * 0.5))
-                My_weak = Fy * (sec.Z22 if sec.Z22 else sec.I22 / (L * 0.5))
+                raise NotImplementedError(
+                    f"Lumped hinges for concrete sections require reinforcement "
+                    f"data not available in generic Section/Material model. "
+                    f"Section '{sec_name}', material '{sec.material}'."
+                )
             else:
                 # Steel: use section yield moment
                 Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
                 E = mat.E_mod if mat.E_mod > 0 else 2.0e11
-                My = Fy * (sec.Z33 if sec.Z33 else sec.I33 / (L * 0.5))
-                My_weak = Fy * (sec.Z22 if sec.Z22 else sec.I22 / (L * 0.5))
+                # Use section geometry for modulus fallback, never member length
+                if sec.Z33:
+                    My = Fy * sec.Z33
+                elif sec.I33 > 0 and sec.A > 0:
+                    d_eff = 2.0 * math.sqrt(sec.I33 / sec.A)  # 2× radius of gyration
+                    My = Fy * (sec.I33 / max(d_eff * 0.5, 1e-6))
+                else:
+                    My = Fy * 1e-4  # Minimal fallback
+                if sec.Z22:
+                    My_weak = Fy * sec.Z22
+                elif sec.I22 > 0 and sec.A > 0:
+                    d_eff = 2.0 * math.sqrt(sec.I22 / sec.A)
+                    My_weak = Fy * (sec.I22 / max(d_eff * 0.5, 1e-6))
+                else:
+                    My_weak = Fy * 1e-4
 
             # ASCE 41 plastic hinge length for yield rotation scaling
             from ..model.checks import compute_asce41_hinge_length
