@@ -792,7 +792,7 @@ dependency on other items.
 | **P11** | Damping for dynamic | 3.7 | Medium (when added) | Rayleigh coefficients from target ζ at two frequencies. Not needed until `nonlinear_dynamic`. | ❌ Pending |
 | **—** | CI pipeline (verification suite) | 3.6 | Medium (CI setup) | Run `runVerificationSuite.tcl` automatically to catch regressions from toolkit changes. | ❌ Pending |
 | **R1** | Generalised orchestrator `generate_report()` | 5 | Medium | Created ``fea_toolkit/report.generate_report(md, mesh_model, config, out_dir, **overrides) → dict``.  Extracts the generic pipeline orchestration from ``pumphouse_report_v2.run_all()``.  The project-specific script is now a thin wrapper. | ✅ Done |
-| **R2** | Tcl export from MeshModel | 8 | Medium | `export_model_to_tcl()` currently works from `SAPModelData` (legacy builder).  Add a MeshModel-aware path that emits topology + fiber sections for Xara / OpenSeesMP submission. | ❌ Pending |
+| **R2** | Tcl export from MeshModel | 8 | Medium | ``export_mesh_model_to_tcl()`` added to ``recorder.py`` — emits topology + fiber sections directly from ``MeshModel``, using pre-computed tag maps.  Supports elastic, steel fiber, and RC fiber sections. | ✅ Done |
 | **R3** | HPC job submission + result ingest | — | Large | Helper to submit Tcl to Xara (OpenSeesMP), wait for completion, parse output back into the unified NPZ/HDF5 schema.  Required for `admin_nonlinear.py`. | ❌ Pending |
 | **P0-dyn** | Tcl export for nonlinear RC | — | Medium | Nonlinear RC cannot run in OpenSeesPy. `export_model_to_tcl()` emits fiber sections + analysis commands. | ⚠️ Partial |
 | **P1-dyn** | Nonlinear dynamic analysis | — | Large | Ground-motion input, Newmark/HHT integrator, time-history output. Requires P0-dyn. | ❌ Pending |
