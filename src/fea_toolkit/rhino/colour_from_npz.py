@@ -17,7 +17,7 @@ Usage in Rhino's Python editor (or ``RunPythonScript``)::
     )
 
 The NPZ file must have been created by
-:meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.export_results_to_npz`.
+:meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.export_results_to_npz`.
 
 Matching logic
 --------------
@@ -647,7 +647,7 @@ def mark_unconnected_edges(
     """Draw thick red lines for coarse edges with unconnected slave nodes.
 
     Use after retrieving detection results from
-    :meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.detect_unconnected_edges`
+    :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.detect_unconnected_edges`
     to visualise where slab meshes are discontinuous.
 
     Parameters

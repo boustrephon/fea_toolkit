@@ -355,7 +355,7 @@ def compute_hinge_length(
 ) -> float:
     """Compute plastic hinge length *Lp* based on section type.
 
-    Follows the same rules as OpenSeesBuilder._compute_hinge_length:
+    Follows the same rules as AnalysisBuilder._compute_hinge_length:
 
     - I/Wide Flange (ISection): Lp = 0.5 * depth
     - Pipe: Lp = 0.5 * outer_diameter
