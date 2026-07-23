@@ -2271,7 +2271,6 @@ class TestPushoverBuild:
 
     def test_returns_expected_keys(self, cantilever_model):
         """Result dict has all required keys (pattern type)."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
         b = _make_pushover_ab(cantilever_model)
         results = b.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
@@ -2289,7 +2288,6 @@ class TestPushoverBuild:
 
     def test_gravity_base_shear_zero(self, cantilever_model):
         """After gravity alone, lateral base shear ≈ 0."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
         b = _make_pushover_ab(cantilever_model)
         results = b.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
@@ -2324,7 +2322,6 @@ class TestPushoverBuild:
 
     def test_uniform_pattern_returns_keys(self, cantilever_model):
         """Uniform pattern returns expected keys."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
         b = _make_pushover_ab(cantilever_model)
         results = b.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
@@ -2341,7 +2338,6 @@ class TestPushoverBuild:
 
     def test_triangular_pattern_returns_keys(self, cantilever_model):
         """Triangular pattern returns expected keys."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
         b = _make_pushover_ab(cantilever_model)
         results = b.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
@@ -2357,7 +2353,6 @@ class TestPushoverBuild:
 
     def test_invalid_lateral_load_type_raises(self, cantilever_model):
         """Invalid lateral_load_type raises ValueError."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
         b = _make_pushover_ab(cantilever_model)
         import pytest
         with pytest.raises(ValueError, match="Unknown lateral_load_type"):
@@ -2372,7 +2367,6 @@ class TestPushoverBuild:
 
     def test_pattern_requires_name(self, cantilever_model):
         """pattern type without lateral_pattern_name raises ValueError."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
         b = _make_pushover_ab(cantilever_model)
         import pytest
         with pytest.raises(ValueError, match="lateral_pattern_name is required"):
@@ -2387,7 +2381,6 @@ class TestPushoverBuild:
 
     def test_pushover_via_two_stage_path(self, cantilever_model):
         """Pushover returns correct keys through the two-stage path."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
         b = _make_pushover_ab(cantilever_model)
         b.compute_seismic_masses(g=9.81)
         modal = b.run_modal_analysis(num_modes=3, print_results=False)
@@ -2412,7 +2405,6 @@ class TestPushoverBuild:
 
     def test_pushover_uniform_via_two_stage(self, cantilever_model):
         """Uniform pushover produces non-zero base shear through two-stage."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
         b = _make_pushover_ab(cantilever_model)
         b.compute_seismic_masses(g=9.81)
         modal = b.run_modal_analysis(num_modes=3, print_results=False)
@@ -2962,7 +2954,6 @@ class TestCapacitySpectrumMethod:
 
     def test_pushover_to_adrs_returns_expected_keys(self, cantilever_model):
         """pushover_to_adrs returns S_a, S_d, Gamma, M_eff, phi_control."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
         b = _make_pushover_ab(cantilever_model)
         b.compute_seismic_masses(g=9.81)
         modal = b.run_modal_analysis(num_modes=3, print_results=False)
@@ -2983,7 +2974,6 @@ class TestCapacitySpectrumMethod:
 
     def test_pushover_to_adrs_values_consistent(self, cantilever_model):
         """ADRS values are positive and consistent (no NaN or negative)."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
         b = _make_pushover_ab(cantilever_model)
         b.compute_seismic_masses(g=9.81)
         modal = b.run_modal_analysis(num_modes=3, print_results=False)
@@ -3004,7 +2994,6 @@ class TestCapacitySpectrumMethod:
 
     def test_performance_point_elastic(self, cantilever_model):
         """Elastic cantilever: S_dp matches demand at modal period."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
         b = _make_pushover_ab(cantilever_model)
         b.compute_seismic_masses(g=9.81)
         modal = b.run_modal_analysis(num_modes=3, print_results=False)
@@ -3743,20 +3732,18 @@ class TestTwoStageBuild:
 
     def test_facade_two_stage_build(self):
         """OpenSeesBuilder with use_preprocessor=True builds correctly."""
-        import openseespy.opensees as ops
         from examples.sample_model import make_sample_model
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        import openseespy.opensees as ops
 
         md = make_sample_model()
-        b = OpenSeesBuilder(md, {
-            "use_preprocessor": True,
-            "split_elements": True,
-            "create_shells": False,
-            "verbose": False,
-        })
+        cfg = {"split_elements": True, "create_shells": False, "verbose": False}
+        mm = preprocess_model(md, cfg)
+        b = AnalysisBuilder(mm, cfg)
         try:
-            b.build()
-            assert b._mesh_model is not None
+            b.build_domain()
+            assert mm is not None
             assert len(b.frame_tag_map) > 0
             node_tags = ops.getNodeTags()
             assert len(node_tags) > 0
@@ -3765,22 +3752,20 @@ class TestTwoStageBuild:
 
     def test_facade_preserves_split_state(self):
         """Facade copies split state back to builder for compat."""
-        import openseespy.opensees as ops
         from examples.sample_model import make_sample_model
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        import openseespy.opensees as ops
 
         md = make_sample_model()
-        b = OpenSeesBuilder(md, {
-            "use_preprocessor": True,
-            "split_elements": True,
-            "create_shells": False,
-            "verbose": False,
-        })
+        cfg = {"split_elements": True, "create_shells": False, "verbose": False}
+        mm = preprocess_model(md, cfg)
+        b = AnalysisBuilder(mm, cfg)
         try:
-            b.build()
-            # These attributes are expected by existing callers
-            assert b.split_elements is not None
-            assert b.split_assignments is not None
+            b.build_domain()
+            # split_elements/split_assignments live on the MeshModel now
+            assert mm.frame_elements is not None
+            assert mm.frame_assignments is not None
             assert hasattr(b, 'frame_tag_map')
             assert len(b.frame_tag_map) > 0
         finally:
