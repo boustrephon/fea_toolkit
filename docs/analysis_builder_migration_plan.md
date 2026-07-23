@@ -1,34 +1,27 @@
-# AnalysisBuilder Migration Plan
+# AnalysisBuilder Migration Plan — Complete
 
-**Status:** ✅ Phase 1, 3a, 3b, CQC, P2 RS, Phase 2 Edge Constraints, **Phase 3c Pushover**  
-**Last updated:** 2026-07-20  
-**Total test count:** 501
+**Status:** ✅ **Migration complete — `OpenSeesBuilder` deleted**  
+**Last updated:** 2026-07-24  
+**Total test count:** 533
 
 ## Overview
 
-Port remaining legacy-only features from `OpenSeesBuilder` to `AnalysisBuilder`.
-The two-stage path (`use_preprocessor=True`) is the default.
+The `OpenSeesBuilder` class has been deleted from ``builder.py``.
+All features have been ported to ``AnalysisBuilder`` or to standalone
+module-level functions.
 
-Summary of completed work:
+Summary of ported features:
 
-| Phase | What | Methods ported |
-|-------|------|----------------|
-| **✅ Core facades** | 7 analysis methods | `run_modal_analysis`, `run_response_spectrum_analysis`, `run_static_analysis`, `compute_seismic_masses`, `extract_mode_shapes`, `export_results`, `extract_static_element_forces` |
-| **✅ Phase 1** | CSM | `pushover_to_adrs`, `compute_performance_point` → `model/csm.py` + tests |
-| **✅ Phase 3a** | Lateral load helpers | `_compute_fallback_masses`, `_compute_uniform/triangular/mode_shape_lateral_loads` |
-| **✅ Phase 3b** | Rebuild infrastructure | `build_domain(config_overrides=...)`, `rebuild_with_fiber_sections`, `_reapply_edge_constraints` |
-| **✅ Phase 2** | Edge constraints | `apply_edge_constraints`, `apply_spring_edge_constraints`, `_apply_penalty_edge_constraints`, `_get_shell_area_ids`, `detect_unconnected_edges` |
-| **✅ Phase 3c** | Pushover main method | `run_pushover_analysis` — gravity + lateral + displacement-controlled push loop with algorithm fallback chain. Supports `uniform`, `triangular`, `mode1`, and `pattern` load types. |
-
-## ✅ All features ported to AnalysisBuilder
-
-All functional features have been ported. The two-stage build path now supports
-the full workflow: static, modal, response-spectrum, pushover, edge constraints,
-CSM, and result export.
-
-### Phase 4: Cleanup / Deprecation (P2) — Complete
-| Task | Status |
-|------|--------|
-| Remove pushover guard (`save/restore _analysis` in Builder) | ✅ Removed |
-| Remove FutureWarning for `use_preprocessor=False` | ✅ Removed (legacy path still functions) |
-| Deprecate `OpenSeesBuilder._rs_base_shear()` | ✅ Already removed (functionality in `spectrum.py`) |
+| Area | Methods / features | Location |
+|------|-------------------|----------|
+| **Core analysis** | `run_modal_analysis`, `run_response_spectrum_analysis`, `run_static_analysis`, `compute_seismic_masses`, `extract_mode_shapes`, `export_results`, `extract_static_element_forces` | `AnalysisBuilder` |
+| **CSM** | `pushover_to_adrs`, `compute_performance_point` → `model/csm.py` | `AnalysisBuilder` + `csm.py` |
+| **Pushover** | `run_pushover_analysis` — gravity + lateral + displacement-controlled push with algorithm fallback chain | `AnalysisBuilder` |
+| **Rebuild** | `build_domain(config_overrides=...)`, `rebuild_with_fiber_sections`, `_reapply_edge_constraints` | `AnalysisBuilder` |
+| **Edge constraints** | `apply_edge_constraints`, `apply_spring_edge_constraints`, `_apply_penalty_edge_constraints`, `detect_unconnected_edges` | `AnalysisBuilder` |
+| **Brace subdivision** | `set_brace_selection`, `check_brace_buckling` (Approach A) | `AnalysisBuilder` + `model/checks.py` + `model/geometry.py` |
+| **Lumped hinges** | `_create_lumped_hinges` — zero-lengthSection with Hysteretic backbone | `AnalysisBuilder` |
+| **Hinge length** | `compute_hinge_length`, `compute_asce41_hinge_length` | `model/checks.py` |
+| **Model checks** | `check_model_connectivity`, `check_self_weight_consistency` | `model/checks.py` |
+| **Tcl export** | `export_model_to_tcl`, `tcl_materials_and_sections`, `pushover_tcl` | `builder.py` (standalone functions) |
+| **Local axes** | `get_local_axes`, `_get_local_axes` | `model/geometry.py` + `AnalysisBuilder` |

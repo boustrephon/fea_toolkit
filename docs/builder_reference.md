@@ -1,15 +1,7 @@
-# Builder Reference — ``OpenSeesBuilder``
+# Builder Reference — Two-stage Pipeline
 
-General-purpose features of the ``OpenSeesBuilder`` class that are not
-specific to pushover analysis.
-
----
-
-## Two-stage build (``use_preprocessor``)
-
-The builder uses a two-stage architecture by default, controlled by the
-``use_preprocessor`` config flag (default ``True``).  See
-``docs/workflow.md`` for the full pipeline description.
+The two-stage pipeline is the standard way to create an OpenSees model
+from parsed SAP2000 data.
 
 ```
 SAPModelData ──→ Preprocessor ──→ MeshModel ──→ AnalysisBuilder ──→ Results
@@ -25,13 +17,19 @@ SAPModelData ──→ Preprocessor ──→ MeshModel ──→ AnalysisBuilde
 Usage:
 
 ```python
-b = OpenSeesBuilder(md, {"use_preprocessor": True, …})
-b.build(selection=sel)        # runs Preprocessor → AnalysisBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+mm = preprocess_model(model_data)
+builder = AnalysisBuilder(mm, config)
+builder.build_domain()
+builder.create_loads({"DEAD": 1.0})
+results = builder.run_static_analysis()
 ```
 
-The facade copies state (``frame_tag_map``, ``section_tags``,
-``material_tags``, ``split_elements``, etc.) back to the builder so
-existing code reading these attributes continues to work unchanged.
+The legacy ``OpenSeesBuilder`` class has been removed.  All features
+(brace subdivision, lumped hinges, Tcl export, buckling checks) are
+available directly on ``AnalysisBuilder`` or as standalone functions.
 
 ---
 
