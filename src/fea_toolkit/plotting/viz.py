@@ -1161,9 +1161,11 @@ def plot_deformed_displacement_3d(
     Example::
 
         # Static analysis
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        mm = preprocess_model(md)
         b = AnalysisBuilder(mm, ...)
-        b.build()
-        results = b.run_static_analysis(pattern_scales={"Wind +X": 1.0})
+        b.build_domain()
+        results = b.run_static_analysis()
         plot_deformed_displacement_3d(b, results["nodal_displacements"],
                                        scale=20.0, show_labels=True)
 
