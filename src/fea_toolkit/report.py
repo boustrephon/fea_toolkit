@@ -116,7 +116,7 @@ def generate_report(
     mesh_model: Optional[MeshModel] = None,
     config: Optional[dict] = None,
     out_dir: Optional[str] = None,
-    run_via_manager: bool = False,
+    run_via_manager: bool = True,
     **overrides,
 ) -> dict:
     """Run the full two-stage analysis pipeline and return all results.
@@ -139,10 +139,9 @@ def generate_report(
         Output directory for cached results and exported figures.
         Defaults to ``./output``.
     run_via_manager : bool
-        When ``True``, use :class:`AnalysisManager` to execute core
-        analyses (modal, static, RS, pushover) instead of inline code.
-        The manager is created internally based on *config*.  Default
-        ``False`` (existing inline path).
+        When ``True`` (default), use :class:`AnalysisManager` to execute
+        core analyses (modal, static, RS, pushover) instead of inline
+        code.  The manager is created internally based on *config*.
     **overrides
         Flat override keys using ``__`` as a nesting separator,
         e.g. ``general__n_modes=6``.  Applied after *config*.
@@ -379,6 +378,9 @@ def generate_report(
                 )
 
         # Pushover (one per pattern)
+        # Note: rs_modal_base_shear is not available until after
+        # run_all(), so it's omitted here.  The mode1 pattern
+        # diagnostic warning is skipped in the manager path.
         if (cfg.get("pushover") and push_cfg.get("patterns")
                 and push_cfg.get("directions")):
             for pattern in push_cfg["patterns"]:
@@ -473,7 +475,13 @@ def generate_report(
                 log.info("pushover", "skipped")
 
     else:
-        # ── Existing inline path (unchanged) ─────────────────────
+        import warnings
+        warnings.warn(
+            "run_via_manager=False uses the deprecated inline analysis path. "
+            "Set run_via_manager=True (default) to use the new AnalysisManager path.",
+            DeprecationWarning, stacklevel=2,
+        )
+        # ── Existing inline path (deprecated) ────────────────────
         if verbose:
             print("Running modal analysis...")
         modal_result = run_modal(mesh_model, n_modes=n_modes)
