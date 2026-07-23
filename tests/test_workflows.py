@@ -458,9 +458,9 @@ class TestUnifiedNpzPipeline:
 
     Pipeline::
 
-        OpenSeesBuilder.run_static_analysis()
-        OpenSeesBuilder.run_modal_analysis()
-        OpenSeesBuilder.extract_mode_shapes()
+        AnalysisBuilder.run_static_analysis()
+        AnalysisBuilder.run_modal_analysis()
+        AnalysisBuilder.extract_mode_shapes()
             │
             ▼
         write_results_npz()  ──→  results.npz

@@ -44,7 +44,7 @@ one does, the pair is skipped.
 
 ## Builder integration
 
-``OpenSeesBuilder._split_elements()`` calls ``geometry.split_elements()``
+``Preprocessor.run()`` calls ``geometry.split_elements()``
 and registers any new nodes in the OpenSees domain via ``ops.node()``.
 Split children are stored in ``self.split_elements`` /
 ``self.split_assignments`` / ``self.split_dist_loads``.

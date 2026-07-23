@@ -102,7 +102,7 @@ SAP2000 .s2k
     ▼
 SAP2000Parser ──→ SAPModelData
     │
-    ├── OpenSeesBuilder ──→ analysis ──→ write_results_npz() ──→ results.npz
+    ├── AnalysisBuilder ──→ analysis ──→ write_results_npz() ──→ results.npz
     │
     ├── RhinoImporter ──→ Rhino geometry (SAP_FrameID UserStrings)
     │
@@ -118,7 +118,8 @@ SAP2000Parser ──→ SAPModelData
 
 ```python
 from fea_toolkit.io.s2k_parser import SAP2000Parser
-from fea_toolkit.opensees.builder import OpenSeesBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.io.npz_writer import write_results_npz
 from fea_toolkit.io.npz_reader import read_results_npz, read_results, npz_to_pyvista_frame_mesh
 
@@ -126,9 +127,11 @@ from fea_toolkit.io.npz_reader import read_results_npz, read_results, npz_to_pyv
 md = SAP2000Parser("model.s2k").parse().get_model_data()
 
 # 2. Analyse
-builder = OpenSeesBuilder(md, {"element_type": "elasticBeamColumn"})
-builder.build()
-static = builder.run_static_analysis(pattern_scales={"DEAD": 1.0, "WIND": 1.0})
+mm = preprocess_model(md)
+builder = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn"})
+builder.build_domain()
+builder.create_loads({"DEAD": 1.0, "WIND": 1.0})
+static = builder.run_static_analysis()
 modal = builder.run_modal_analysis(num_modes=6)
 shapes = builder.extract_mode_shapes(6)
 
