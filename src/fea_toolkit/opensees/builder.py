@@ -40,6 +40,7 @@ from ..model.sap_data import SAPModelData
 
 def export_model_to_tcl(
     model_data: "SAPModelData",
+    # Also accepts MeshModel (nd_materials/layered_shell_sections are optional).
     path: str,
     lib_path: str = "",
     ndm: int = 3,
@@ -81,7 +82,11 @@ def export_model_to_tcl(
         export_model_to_tcl(md, "wall.tcl", tcl_suffix=tcl)
 
     Args:
-        model_data: SAP model data to export.
+        model_data: :class:`~fea_toolkit.model.sap_data.SAPModelData` or
+            :class:`~fea_toolkit.model.mesh_model.MeshModel` to export.
+            When a ``MeshModel`` is passed, the preprocessed topology
+            (split frames, meshed areas, subdivided braces) is written
+            to Tcl rather than the raw SAP2000 data.
         path: Output ``.tcl`` file path.
         lib_path: Path to ``libOpenSeesRT.dylib``.
         ndm: Spatial dimensions (default 3).
@@ -171,21 +176,22 @@ def export_model_to_tcl(
                     f"{Fy:g} {E_mod:g} 0.01"
                 )
 
-    # nD materials (for nonlinear shell analysis)
+    # nD materials (for nonlinear shell analysis, MeshModel may not have them)
     _nd_mat_tag: Dict[str, int] = {}
-    if model_data.nd_materials:
+    _nd_materials = getattr(model_data, 'nd_materials', {})
+    if _nd_materials:
         lines.append("")
         lines.append("# ── nD materials (nonlinear shells) ──")
         _nd_base = max(_mat_tag.values()) + 1 if _mat_tag else 1
         for i, (nd_name, nd_mat) in enumerate(
-                model_data.nd_materials.items(), start=_nd_base):
+                _nd_materials.items(), start=_nd_base):
             _nd_mat_tag[nd_name] = i
             lines.append(nd_mat.to_tcl(i))
         # Wrap each nD material as PlateFiber for layered shell use
-        for nd_name, nd_mat in model_data.nd_materials.items():
+        for nd_name, nd_mat in _nd_materials.items():
             tag = _nd_mat_tag[nd_name]
             if nd_mat.material_type != "ElasticIsotropic":
-                pf_tag = tag + len(model_data.nd_materials)
+                pf_tag = tag + len(_nd_materials)
                 lines.append(
                     f"nDMaterial PlateFromPlaneStress {pf_tag} {tag} 0.0"
                 )
@@ -284,13 +290,13 @@ def export_model_to_tcl(
         _shell_sec_tag: Dict[str, int] = {}
         _next_shell_tag = (
             max(dict(**_mat_tag, **_sec_tag, **_nd_mat_tag).values())
-            + len(model_data.nd_materials) + 1
+            + len(_nd_materials) + 1
             if (_mat_tag or _sec_tag or _nd_mat_tag) else 1000
         )
 
         # Emit layered shell sections from model data
         for ls_name, ls_sec in (
-                model_data.layered_shell_sections or {}).items():
+                getattr(model_data, 'layered_shell_sections', {})).items():
             stag = _next_shell_tag
             _next_shell_tag += 1
             _shell_sec_tag[ls_name] = stag
