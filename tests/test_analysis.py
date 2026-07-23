@@ -262,10 +262,12 @@ class TestAnalysisSignatures:
             _FakeMeshModel(),
             modal_result=None,
             lateral_load_type="mode1",
+            rs_modal_base_shear={"X": [1.0], "Y": [1.0]},
         )
         assert a.requires == [ModalAnalysis]
         assert a.lateral_load_type == "mode1"
         assert a._modal_result is None
+        assert a.rs_modal_base_shear == {"X": [1.0], "Y": [1.0]}
 
     def test_pushover_defaults(self):
         d = PushoverAnalysis.defaults()
@@ -284,7 +286,7 @@ class TestGenerateReportManagerPath:
         import inspect
         sig = inspect.signature(generate_report)
         assert "run_via_manager" in sig.parameters
-        assert sig.parameters["run_via_manager"].default is False
+        assert sig.parameters["run_via_manager"].default is True
 
     def test_inline_path_still_default(self):
         from fea_toolkit.report import generate_report

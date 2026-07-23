@@ -37,6 +37,9 @@ class PushoverAnalysis(Analysis):
         "truss" per steel defaults).
     brace_sections : list, optional
         Section names to treat as braces.
+    rs_modal_base_shear : dict, optional
+        Per-mode RS base shear ``{"X": [...], "Y": [...]}`` for
+        mode1 pattern validation against RS demand (diagnostic only).
     name : str, optional
     config : dict, optional
         Builder config overrides.
@@ -52,6 +55,7 @@ class PushoverAnalysis(Analysis):
         num_steps: int = 50,
         brace_type: str = "truss",
         brace_sections: Optional[list] = None,
+        rs_modal_base_shear: Optional[Dict[str, List[float]]] = None,
         name: Optional[str] = None,
         config: Optional[dict] = None,
     ):
@@ -63,6 +67,7 @@ class PushoverAnalysis(Analysis):
         self.num_steps = num_steps
         self.brace_type = brace_type
         self.brace_sections = brace_sections
+        self.rs_modal_base_shear = rs_modal_base_shear
 
     @classmethod
     def defaults(cls) -> dict:
@@ -92,6 +97,7 @@ class PushoverAnalysis(Analysis):
             num_steps=self.num_steps,
             brace_type=self.brace_type,
             brace_sections=self.brace_sections,
+            rs_modal_base_shear=self.rs_modal_base_shear,
             verbose=self.config.get("verbose", False),
         )
 
