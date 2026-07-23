@@ -357,11 +357,11 @@ def plot_model_3d(
 
     # ── Edge constraint lines (wide transparent yellow) ─────────
     if show_constraints:
-        # Try MeshModel edge_constraint_pairs first (preprocessor path)
+        # Try MeshModel detected_edge_pairs first (preprocessor path)
         raw_pairs = []
         mesh_model = getattr(builder, '_mesh_model', None)
         if mesh_model is not None:
-            raw_pairs = getattr(mesh_model, 'edge_constraint_pairs', [])
+            raw_pairs = getattr(mesh_model, 'detected_edge_pairs', [])
         # Fall back to builder's _saved_edge_constraints (legacy path)
         if not raw_pairs:
             raw_pairs = getattr(builder, '_saved_edge_constraints', [])
@@ -514,8 +514,8 @@ def _resolve_mesh_data(source):
             })
 
         # Edge constraints
-        if mm is not None and hasattr(mm, 'edge_constraint_pairs'):
-            data["edge_constraints"] = list(mm.edge_constraint_pairs)
+        if mm is not None and hasattr(mm, 'detected_edge_pairs'):
+            data["edge_constraints"] = list(mm.detected_edge_pairs)
         elif hasattr(builder, '_saved_edge_constraints'):
             data["edge_constraints"] = list(builder._saved_edge_constraints)
 

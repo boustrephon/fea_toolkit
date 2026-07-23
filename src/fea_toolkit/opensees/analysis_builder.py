@@ -59,7 +59,11 @@ class AnalysisBuilder:
         self._area_element_types: Dict[str, str] = dict(mesh_model.area_element_types)
         self._offset_rigid_links: List[tuple] = list(mesh_model.offset_rigid_links)
         self._edge_constraint_method: Optional[str] = None
-        self._saved_edge_constraints: List[tuple] = list(mesh_model.saved_edge_constraints)
+        # NOTE: mesh_model.edge_constraint_args is always [] today
+        # (the Preprocessor stores detected pairs in detected_edge_pairs,
+        # not constraint arguments).  The list is overwritten when
+        # apply_edge_constraints() is first called at analysis time.
+        self._saved_edge_constraints: List[tuple] = list(mesh_model.edge_constraint_args)
         self.edge_loads_from_areas: list = list(mesh_model.edge_loads_from_areas)
         self._base_z = mesh_model.base_z
 
@@ -205,7 +209,13 @@ class AnalysisBuilder:
             self._reapply_edge_constraints(scale=pushover_spring_scale)
 
     def _reapply_edge_constraints(self, scale: float = 1.0) -> None:
-        """Re-apply saved edge constraints after a domain rebuild."""
+        """Re-apply saved edge constraints after a domain rebuild.
+
+        Iterates ``self._saved_edge_constraints`` (populated when
+        :meth:`apply_edge_constraints` was first called) and re-applies
+        each saved batch.  Used after ``build_domain()`` wipes the
+        OpenSees domain (e.g. during pushover fiber-section rebuild).
+        """
         if not self._saved_edge_constraints:
             return
         for args in self._saved_edge_constraints:
@@ -460,6 +470,10 @@ class AnalysisBuilder:
         if count:
             self._edge_constraint_method = 'spring'
             if coarse_edges is not None or coarse_elements is not None:
+                # Save arguments so they can be re-applied after a
+                # domain rebuild (pushover switches to fiber sections).
+                # Single-entry list: edge constraints are applied as one
+                # batch per analysis cycle.
                 self._saved_edge_constraints = [(
                     coarse_edges, fine_nodes, coarse_elements,
                     tolerance, penalty_stiffness, verbose,

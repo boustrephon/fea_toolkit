@@ -166,7 +166,7 @@ class MeshModel:
     area_assignments: Dict[str, str]
     frame_dist_loads: List[FrameDistributedLoad]  # redistributed to children
     edge_loads_from_areas: List              # converted area loads
-    edge_constraint_pairs: List[tuple]       # detected coarse‑fine pairs
+    detected_edge_pairs: List[tuple]         # detected coarse‑fine pairs (viz only)
     diaphragm_levels: List[float]            # detected storey Z‑levels
     offset_rigid_links: List[tuple]          # from frame end offsets
     frame_element_types: Dict[str, str]      # elem_id → beam/column/brace/…
@@ -179,7 +179,7 @@ class MeshModel:
     material_tags: Dict[str, int]            # material name → Ops tag
     section_tags: Dict[str, int]
     shell_sec_tags: Dict[str, int]
-    saved_edge_constraints: List[tuple]      # for pushover re‑apply
+    edge_constraint_args: List[tuple]        # for pushover re‑apply (currently unused)
     units: Dict[str, str]
     base_z: Optional[float]
     loads_only_area_ids: Set[str]            # areas excluded from shell creation

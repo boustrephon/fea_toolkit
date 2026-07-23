@@ -311,7 +311,7 @@ class Preprocessor:
             area_assignments=md.area_assignments,
             frame_dist_loads=split_dist_loads,
             edge_loads_from_areas=edge_loads_from_areas,
-            edge_constraint_pairs=raw_edges,
+            detected_edge_pairs=raw_edges,
             diaphragm_levels=diaphragm_levels,
             offset_rigid_links=offset_rigid_links,
             frame_element_types=frame_element_types,
