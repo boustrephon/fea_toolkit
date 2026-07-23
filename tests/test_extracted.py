@@ -597,14 +597,14 @@ class TestTclExport:
     def test_export_fiber_sections_have_braces(self):
         """Fiber sections in exported Tcl have brace-delimited blocks."""
         import tempfile, os
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.builder import export_model_to_tcl
         md = self._make_rc_model()
         config = {"create_fiber_sections": True, "geom_transf_type": "PDelta"}
         with tempfile.NamedTemporaryFile(mode="w", suffix=".tcl",
                                           delete=False) as f:
             path = f.name
         try:
-            OpenSeesBuilder.export_model_to_tcl(md, path, config=config)
+            export_model_to_tcl(md, path, config=config)
             with open(path) as f:
                 tcl = f.read()
         finally:
@@ -629,14 +629,14 @@ class TestTclExport:
     def test_export_no_elastic_for_fiber_sections(self):
         """No section Elastic emitted for RC sections with fiber sections."""
         import tempfile, os
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.builder import export_model_to_tcl
         md = self._make_rc_model()
         config = {"create_fiber_sections": True, "geom_transf_type": "PDelta"}
         with tempfile.NamedTemporaryFile(mode="w", suffix=".tcl",
                                           delete=False) as f:
             path = f.name
         try:
-            OpenSeesBuilder.export_model_to_tcl(md, path, config=config)
+            export_model_to_tcl(md, path, config=config)
             with open(path) as f:
                 tcl = f.read()
         finally:
@@ -650,14 +650,14 @@ class TestTclExport:
     def test_export_force_beam_column_for_fiber(self):
         """Frame elements use forceBeamColumn for fiber sections."""
         import tempfile, os
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.builder import export_model_to_tcl
         md = self._make_rc_model()
         config = {"create_fiber_sections": True, "geom_transf_type": "PDelta"}
         with tempfile.NamedTemporaryFile(mode="w", suffix=".tcl",
                                           delete=False) as f:
             path = f.name
         try:
-            OpenSeesBuilder.export_model_to_tcl(md, path, config=config)
+            export_model_to_tcl(md, path, config=config)
             with open(path) as f:
                 tcl = f.read()
         finally:
@@ -687,13 +687,13 @@ class TestTclExport:
     def test_export_without_fiber_uses_elastic(self):
         """Without create_fiber_sections, elasticBeamColumn is used."""
         import tempfile, os
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.builder import export_model_to_tcl
         md = self._make_rc_model()
         with tempfile.NamedTemporaryFile(mode="w", suffix=".tcl",
                                           delete=False) as f:
             path = f.name
         try:
-            OpenSeesBuilder.export_model_to_tcl(md, path, config=None)
+            export_model_to_tcl(md, path, config=None)
             with open(path) as f:
                 tcl = f.read()
         finally:
