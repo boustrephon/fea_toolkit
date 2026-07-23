@@ -256,8 +256,8 @@ def sum_reactions_with_overturning(
     **Usage**
     - **Static lateral loads** (Wind, Quake): called from
       :func:`pumphouse_report_v2.run_linear_cases` and
-      :meth:`AnalysisBuilder.run_static_analysis`
-      <fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_static_analysis>
+      :meth:`AnalysisBuilder.run_static_analysis
+      <fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_static_analysis>`
     - **Response‑spectrum analysis**: the same lever-arm logic is applied
       per-mode in
       :meth:`AnalysisBuilder.run_response_spectrum_analysis

@@ -1266,8 +1266,9 @@ class AnalysisBuilder:
 
             self._add_beam_column(elem, tag, elements, assignments)
 
-        # Rigid links from brace subdivision
-        if rigid_links:
+        # Rigid link section — created once and reused for both brace
+        # subdivision links and frame-end offset links.
+        if rigid_links or self._offset_rigid_links:
             all_sec_tags = set(self.section_tags.values())
             all_sec_tags.update(self._shell_sec_tags.values())
             all_sec_tags.update(self._shell_sec_variants.values())
@@ -1277,6 +1278,10 @@ class AnalysisBuilder:
             rigid_I = 1.0
             ops.section('Elastic', rigid_section_tag, rigid_E, rigid_A,
                         rigid_I, rigid_I, rigid_E / 2.6, rigid_I)
+            self._rigid_section_tag = rigid_section_tag
+
+        # Rigid links from brace subdivision
+        if rigid_links:
             for _link_id, _node_i_id, _node_j_id, link_tag in rigid_links:
                 nd_i = self.mesh_model.nodes.get(_node_i_id)
                 nd_j = self.mesh_model.nodes.get(_node_j_id)
@@ -1290,23 +1295,24 @@ class AnalysisBuilder:
                 vecxz = get_SAP_vecxz(np.array([dx, dy, dz]), 0.0)
                 ops.geomTransf('Linear', link_tag, *vecxz)
                 ops.element('elasticBeamColumn', link_tag, ni_tag, nj_tag,
-                            rigid_section_tag, link_tag, '-mass', 0.0)
+                            self._rigid_section_tag, link_tag, '-mass', 0.0)
                 self._rigid_link_elems[_link_id] = link_tag
 
         # Rigid links from frame end offsets
         # The Preprocessor returns (link_id, node_i, node_j, link_tag) tuples.
         # node_i and node_j are string node IDs — resolve to numeric tags.
         if self._offset_rigid_links:
-            # Pick a tag beyond ALL section tags (frame + shell variant)
-            all_sec_tags = set(self.section_tags.values())
-            all_sec_tags.update(self._shell_sec_tags.values())
-            all_sec_tags.update(self._shell_sec_variants.values())
-            rigid_section_tag = max(all_sec_tags, default=0) + 1
-            rigid_E = 2.0e14
-            rigid_A = 1.0
-            rigid_I = 1.0
-            ops.section('Elastic', rigid_section_tag, rigid_E, rigid_A,
-                        rigid_I, rigid_I, rigid_E / 2.6, rigid_I)
+            if not hasattr(self, '_rigid_section_tag'):
+                all_sec_tags = set(self.section_tags.values())
+                all_sec_tags.update(self._shell_sec_tags.values())
+                all_sec_tags.update(self._shell_sec_variants.values())
+                rigid_section_tag = max(all_sec_tags, default=0) + 1
+                rigid_E = 2.0e14
+                rigid_A = 1.0
+                rigid_I = 1.0
+                ops.section('Elastic', rigid_section_tag, rigid_E, rigid_A,
+                            rigid_I, rigid_I, rigid_E / 2.6, rigid_I)
+                self._rigid_section_tag = rigid_section_tag
             for _link_id, _node_i_id, _node_j_id, link_tag in self._offset_rigid_links:
                 nd_i = self.mesh_model.nodes.get(_node_i_id)
                 nd_j = self.mesh_model.nodes.get(_node_j_id)
@@ -1524,8 +1530,17 @@ class AnalysisBuilder:
 
         next_node_tag = max((nd.node_tag for nd in self.mesh_model.nodes.values()),
                             default=0) + 1
-        next_tag = max((e.elem_tag for e in elements.values() if not e.inactive),
-                       default=0) + 1
+        # Consider existing OpenSees element tags (shells, rigid links already
+        # created) and reserved offset-rigid-link tags to avoid collisions.
+        try:
+            max_ops_tag = max(ops.getEleTags(), default=0)
+        except Exception:
+            max_ops_tag = 0
+        max_rigid_tag = max((r[3] for r in self._offset_rigid_links), default=0)
+        next_tag = max(
+            max((e.elem_tag for e in elements.values() if not e.inactive), default=0),
+            max_ops_tag, max_rigid_tag,
+        ) + 1
         # Separate counter for hinge section/material tags, seeded high
         # to avoid collision with existing tags.
         hinge_tag_base = (max((v for v in self.section_tags.values()), default=0)
