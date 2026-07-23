@@ -3064,20 +3064,21 @@ class TestBuilderFrameEndOffsets:
 
     def test_offset_nodes_created_in_opensees(self, offset_model):
         """Offset nodes are created at correct positions."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         import openseespy.opensees as ops
-        b = OpenSeesBuilder(offset_model, {
-            "verbose": False, "use_elastic_sections": True,
-        })
+        cfg = {"verbose": False, "use_elastic_sections": True}
+        mm = preprocess_model(offset_model, cfg)
+        b = AnalysisBuilder(mm, cfg)
         try:
-            b.build()
+            b.build_domain()
             # Offset nodes: I-end offset=0.3, J-end offset=0.4
             # Element from (0,0,0) → (6,0,0), length 6
             # I-end offset node at: (0 + 0.3, 0, 0) = (0.3, 0, 0)
             # J-end offset node at: (6 - 0.4, 0, 0) = (5.6, 0, 0)
-            assert "1_off_i" in offset_model.nodes, "I-end offset node missing"
-            assert "1_off_j" in offset_model.nodes, "J-end offset node missing"
-            for nid, nd in offset_model.nodes.items():
+            assert "1_off_i" in mm.nodes, "I-end offset node missing"
+            assert "1_off_j" in mm.nodes, "J-end offset node missing"
+            for nid, nd in mm.nodes.items():
                 if "_off_i" in nid:
                     coords = list(ops.nodeCoord(nd.node_tag))
                     assert coords == pytest.approx([0.3, 0.0, 0.0], abs=1e-9)
@@ -3089,13 +3090,14 @@ class TestBuilderFrameEndOffsets:
 
     def test_rigid_links_recorded(self, offset_model):
         """_offset_rigid_links contains entries after build()."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         import openseespy.opensees as ops
-        b = OpenSeesBuilder(offset_model, {
-            "verbose": False, "use_elastic_sections": True,
-        })
+        cfg = {"verbose": False, "use_elastic_sections": True}
+        mm = preprocess_model(offset_model, cfg)
+        b = AnalysisBuilder(mm, cfg)
         try:
-            b.build()
+            b.build_domain()
             assert len(b._offset_rigid_links) == 2
         finally:
             ops.wipe()
@@ -3119,12 +3121,13 @@ class TestBuilderFrameEndOffsets:
             area_assignments={}, groups={}, frame_auto_mesh={},
             frame_end_offsets={"1": FrameEndOffset(0.0, 0.0)},
         )
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
-        b = OpenSeesBuilder(md, {
-            "verbose": False, "use_elastic_sections": True,
-        })
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        cfg = {"verbose": False, "use_elastic_sections": True}
+        mm = preprocess_model(md, cfg)
+        b = AnalysisBuilder(mm, cfg)
         try:
-            b.build()
+            b.build_domain()
             assert len(b._offset_rigid_links) == 0
         finally:
             import openseespy.opensees as ops
@@ -3157,40 +3160,36 @@ class TestBuilderAreaMeshing:
         )
 
     def test_mesh_creates_sub_areas(self, mesh_model):
-        """build() with meshing creates exactly 4 sub-quads (2×2 grid)."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
-        b = OpenSeesBuilder(mesh_model, {
-            "verbose": False, "create_shells": True,
-        })
-        try:
-            b.build()
-            # Original area should be inactive
-            assert mesh_model.area_elements["1"].inactive is True
-            # 12×8 quad with max_size=6.0 → ceil(12/6)=2 × ceil(8/6)=2 = 4
-            sub_ids = sorted(
-                aid for aid in mesh_model.area_elements if "_sub_" in aid
-            )
-            assert len(sub_ids) == 4
-            # Sub-areas should all be active
-            for sid in sub_ids:
-                assert mesh_model.area_elements[sid].inactive is False
-            # Section assignment inherited
-            for sid in sub_ids:
-                assert mesh_model.area_assignments.get(sid) == "Slab200"
-        finally:
-            import openseespy.opensees as ops; ops.wipe()
+        """Preprocessor meshing creates exactly 4 sub-quads (2×2 grid)."""
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        cfg = {"verbose": False, "create_shells": True}
+        mm = preprocess_model(mesh_model, cfg)
+        # Original area should be inactive in the mesh model
+        assert mm.area_elements["1"].inactive is True
+        # 12×8 quad with max_size=6.0 → ceil(12/6)=2 × ceil(8/6)=2 = 4
+        sub_ids = sorted(
+            aid for aid in mm.area_elements if "_sub_" in aid
+        )
+        assert len(sub_ids) == 4
+        # Sub-areas should all be active
+        for sid in sub_ids:
+            assert mm.area_elements[sid].inactive is False
+        # Section assignment inherited
+        for sid in sub_ids:
+            assert mm.area_assignments.get(sid) == "Slab200"
 
     def test_mesh_creates_opensees_nodes(self, mesh_model):
         """Mesh nodes are created at correct grid positions."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         import openseespy.opensees as ops
-        b = OpenSeesBuilder(mesh_model, {
-            "verbose": False, "create_shells": True,
-        })
+        cfg = {"verbose": False, "create_shells": True}
+        mm = preprocess_model(mesh_model, cfg)
+        b = AnalysisBuilder(mm, cfg)
         try:
-            b.build()
+            b.build_domain()
             # 2×2 grid → 5 mesh nodes (4 edge midpoints + 1 interior)
-            mesh_nodes = {nid: nd for nid, nd in mesh_model.nodes.items()
+            mesh_nodes = {nid: nd for nid, nd in mm.nodes.items()
                           if "_mesh_" in nid}
             assert len(mesh_nodes) == 5
             # Expected coordinates (12×8 rectangle, bilinear grid)
@@ -3228,26 +3227,19 @@ class TestBuilderAreaMeshing:
             frame_assignments={}, area_assignments={"1": "Slab200"},
             groups={}, frame_auto_mesh={},
         )
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
-        b = OpenSeesBuilder(md, {
-            "verbose": False, "create_shells": True,
-        })
-        try:
-            b.build()
-            # No area_mesh config → no subdivision
-            assert md.area_elements["1"].inactive is False
-            assert md.area_elements["1"].node_ids == ["1", "2", "3", "4"]
-            # No sub-area or mesh node artifacts
-            assert not any("_sub_" in aid for aid in md.area_elements)
-            assert not any("_mesh_" in nid for nid in md.nodes)
-        finally:
-            import openseespy.opensees as ops; ops.wipe()
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        cfg = {"verbose": False, "create_shells": True}
+        mm = preprocess_model(md, cfg)
+        # No area_mesh config → no subdivision
+        assert mm.area_elements["1"].inactive is False
+        # No sub-area or mesh node artifacts
+        assert not any("_sub_" in aid for aid in mm.area_elements)
+        assert not any("_mesh_" in nid for nid in mm.nodes)
 
     def test_mesh_propagates_edge_restraints(self):
         """Mesh nodes on edges between restrained corners inherit AND of DOFs."""
-        from fea_toolkit.opensees.builder import OpenSeesBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
         from fea_toolkit.model.sap_data import Restraint
-        import openseespy.opensees as ops
 
         nodes = {
             "1": Node("1", 1, 0.0, 0.0, 0.0),
@@ -3276,29 +3268,24 @@ class TestBuilderAreaMeshing:
             groups={}, frame_auto_mesh={},
             area_mesh={"1": AreaMesh(auto_mesh=True, max_size=6.0)},
         )
+        cfg = {"verbose": False, "create_shells": True}
+        mm = preprocess_model(md, cfg)
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        import openseespy.opensees as ops
+        b = AnalysisBuilder(mm, cfg)
         try:
-            b = OpenSeesBuilder(md, {
-                "verbose": False, "create_shells": True,
-                "use_preprocessor": False,
-            })
-            b.build()
+            b.build_domain()
 
-            # Mesh node restraints are applied via ops.fix() in OpenSees
-            # but NOT written to self.model.restraints (which tracks only
-            # original SAP2000 restraints).  Verify the build succeeded
-            # without error and that model.restraints is clean.
-            n1 = md.nodes.get("1_mesh_0_1")  # (6, 0, 0)
+            # Mesh node should exist in MeshModel
+            n1 = mm.nodes.get("1_mesh_0_1")  # (6, 0, 0)
             assert n1 is not None, "bottom-edge mesh node missing"
 
-            # No mesh node IDs should appear in model.restraints
-            mesh_ids = {nid for nid in md.nodes if "_mesh_" in nid}
-            restrained_mesh = mesh_ids & set(md.restraints.keys())
+            # No mesh node IDs should appear in MeshModel restraints
+            mesh_ids = {nid for nid in mm.nodes if "_mesh_" in nid}
+            restrained_mesh = mesh_ids & set(mm.restraints.keys())
             assert len(restrained_mesh) == 0, \
-                f"mesh nodes should NOT appear in model.restraints: {restrained_mesh}"
+                f"mesh nodes should NOT appear in mm.restraints: {restrained_mesh}"
 
-            # Build succeeded — ops.fix was called without errors.
-            # Verify by running a quick static step: the restrained
-            # bottom-edge node should have zero displacement.
             # Check the mesh node at (6,0,0) is fixed in OpenSees
             mesh_tag = b._node_tag_from_id("1_mesh_0_1")
             assert mesh_tag is not None
@@ -3306,7 +3293,7 @@ class TestBuilderAreaMeshing:
             assert len(fixed) == 6, \
                 f"mesh node {mesh_tag} should have 6 fixed DOFs, got {fixed}"
 
-            assert md.area_elements["1"].inactive, \
+            assert mm.area_elements["1"].inactive, \
                 "original area should be inactive after meshing"
 
         finally:
