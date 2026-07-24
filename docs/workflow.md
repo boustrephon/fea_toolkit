@@ -276,8 +276,8 @@ All builds now use the two‑stage pipeline.
 #### 2a–2b — Reset
 
 Restores pristine frame/area/node data from snapshots taken when
-the `AnalysisBuilder` was constructed.  Ensures repeated `build()`
-calls always start from the same original geometry.
+the `AnalysisBuilder` was constructed.  Ensures repeated
+``build_domain()`` calls always start from the same original geometry.
 
 #### 2c — `_create_nodes()`
 

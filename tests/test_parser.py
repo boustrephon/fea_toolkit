@@ -333,18 +333,32 @@ def test_parse_areas_multi_row_with_duplicates(tmp_path):
 # ========================================================================
 
 def test_create_single_shell_section():
-    """Verify _create_single_shell_section produces correct section."""
-    # Build a minimal model to test the static method
-    mat = type("Mat", (), {
-        "E_mod": 3.28e10, "nu": 0.2, "unit_mass": 2549.0,
-    })()
-    sec = type("Sec", (), {"thickness": 0.2, "name": "Slab200"})()
-
-    # The method is static; just verify it doesn't crash
-    # and produces the right call shape
+    """Verify _create_single_shell_section produces a valid OpenSees section."""
+    import openseespy.opensees as ops
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
-    # _create_single_shell_section is now on AnalysisBuilder
-    assert hasattr(AnalysisBuilder, '_create_single_shell_section')
+    from fea_toolkit.model.sap_data import SAPModelData, Node, Material, Section
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    md = SAPModelData(
+        nodes={"1": Node("1", 1, 0, 0, 0)},
+        restraints={},
+        materials={"C": Material("C", "Concrete", E_mod=3.28e10)},
+        sections={"S": Section("S", "Shell", "C", A=0, I33=0, I22=0, J=0)},
+        frame_elements={}, area_elements={},
+        frame_assignments={}, area_assignments={},
+        groups={}, frame_auto_mesh={},
+    )
+    mm = preprocess_model(md)
+    ab = AnalysisBuilder(mm, {})
+    try:
+        ops.wipe()
+        ops.model('basic', '-ndm', 3, '-ndf', 6)
+        mat = type("Mat", (), {"E_mod": 3.28e10, "nu": 0.2})()
+        sec = type("Sec", (), {"thickness": 0.2, "name": "Slab200"})()
+        # Should complete without raising
+        ab._create_single_shell_section(sec, mat, 100)
+    finally:
+        ops.wipe()
 
 
 # ========================================================================

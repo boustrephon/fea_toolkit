@@ -151,10 +151,16 @@ class AnalysisBuilder:
             ops.wipe()
             self._edge_constraint_method = None
             self._rigid_link_elems = {}
+            # Reset cached rigid section tag so it is recomputed fresh
+            self._rigid_section_tag = None
             ops.model('basic', '-ndm', 3, '-ndf', 6)
 
             # Pre-compute frame tag map so shell elements can avoid clashing
             self._build_frame_tag_map()
+
+            # Restore canonical hinge state before any nodes are created,
+            # preventing stale *_hinge_* nodes from being recreated.
+            self._restore_hinge_canonical_state()
 
             self._create_nodes()
             self._apply_restraints()
@@ -1255,6 +1261,33 @@ class AnalysisBuilder:
                 if nd.node_tag not in self._created_node_tags:
                     ops.node(nd.node_tag, nd.x, nd.y, nd.z)
                     self._created_node_tags.add(nd.node_tag)
+            # Redistribute distributed loads from subdivided braces to children
+            # Each child gets a proportional share of the parent's load range.
+            from ..model.sap_data import FrameDistributedLoad as _FDL
+            new_dist_loads: List = []
+            for ld in dist_loads:
+                if ld.frame_id not in self._brace_selection:
+                    new_dist_loads.append(ld)
+                    continue
+                # Parent was subdivided — distribute to each child
+                parent = self.mesh_model.frame_elements.get(ld.frame_id)
+                if parent is None or not hasattr(parent, 'child_ids'):
+                    new_dist_loads.append(ld)
+                    continue
+                total_len = ld.dist_b - ld.dist_a if ld.dist_b > ld.dist_a else 0.0
+                n_child = len(parent.child_ids)
+                for ci, child_id in enumerate(parent.child_ids):
+                    child_start = ld.dist_a + total_len * (ci / n_child)
+                    child_end = ld.dist_a + total_len * ((ci + 1) / n_child)
+                    new_dist_loads.append(_FDL(
+                        pattern=ld.pattern, frame_id=child_id,
+                        direction=ld.direction, load_type=ld.load_type,
+                        shape=ld.shape,
+                        val_a=ld.val_a, val_b=ld.val_b,
+                        rdist_a=ld.rdist_a, rdist_b=ld.rdist_b,
+                        dist_a=child_start, dist_b=child_end,
+                    ))
+            self.mesh_model.frame_dist_loads = new_dist_loads
 
         for eid, elem in elements.items():
             if getattr(elem, 'inactive', False):
@@ -1427,6 +1460,28 @@ class AnalysisBuilder:
 
     # ── Brace selection (Approach A) ─────────────────────────────
 
+    def _restore_hinge_canonical_state(self) -> None:
+        """Restore canonical frame element endpoints and remove stale hinge nodes.
+
+        Called at the start of :meth:`build_domain` (before
+        :meth:`_create_nodes`) to prevent stale ``*_hinge_*`` nodes
+        from a previous build cycle from being recreated.
+        """
+        if not hasattr(self, '_hinge_canonical_elements'):
+            return
+        # Remove any *_hinge_* nodes left from a previous build
+        for nid in list(self.mesh_model.nodes.keys()):
+            if nid.endswith('_hinge_i') or nid.endswith('_hinge_j'):
+                del self.mesh_model.nodes[nid]
+        # Restore canonical element endpoints and assignments
+        for eid, elem in self.mesh_model.frame_elements.items():
+            if eid in self._hinge_canonical_elements:
+                ni, nj = self._hinge_canonical_elements[eid]
+                elem.node_i = ni
+                elem.node_j = nj
+        self.mesh_model.frame_assignments = dict(
+            self._hinge_canonical_assignments)
+
     def set_brace_selection(self, brace_ids: set, end_offset: float = 0.0) -> None:
         """Mark specific frame elements as braces for subdivision.
 
@@ -1499,9 +1554,8 @@ class AnalysisBuilder:
             return
 
         # ── Idempotency: preserve canonical state on first call ────────
-        # Restore from the saved snapshot so repeated build_domain()
-        # calls start from the same topology (hinge nodes are removed
-        # and element endpoints are reset to the original structural nodes).
+        # Save canonical endpoints on first call; restoration is handled
+        # by _restore_hinge_canonical_state() in build_domain().
         if not hasattr(self, '_hinge_canonical_elements'):
             self._hinge_canonical_elements = {
                 eid: (elem.node_i, elem.node_j)
@@ -1510,20 +1564,6 @@ class AnalysisBuilder:
             }
             self._hinge_canonical_assignments = dict(
                 self.mesh_model.frame_assignments)
-
-        # Remove any *_hinge_* nodes left from a previous build
-        for nid in list(self.mesh_model.nodes.keys()):
-            if nid.endswith('_hinge_i') or nid.endswith('_hinge_j'):
-                del self.mesh_model.nodes[nid]
-
-        # Restore canonical element endpoints and assignments
-        for eid, elem in self.mesh_model.frame_elements.items():
-            if eid in self._hinge_canonical_elements:
-                ni, nj = self._hinge_canonical_elements[eid]
-                elem.node_i = ni
-                elem.node_j = nj
-        self.mesh_model.frame_assignments = dict(
-            self._hinge_canonical_assignments)
 
         elements = self.mesh_model.frame_elements
         assignments = self.mesh_model.frame_assignments

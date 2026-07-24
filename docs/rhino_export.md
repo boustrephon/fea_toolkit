@@ -434,6 +434,7 @@ file and loaded back into Rhino for colour-coding geometry.
 from fea_toolkit.io.s2k_parser import SAP2000Parser
 from fea_toolkit.opensees.preprocessor import preprocess_model
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+from fea_toolkit.io.npz_writer import write_results_npz
 
 parser = SAP2000Parser("model.s2k")
 parser.parse()
@@ -444,7 +445,7 @@ builder = AnalysisBuilder(mm, {"verbose": True})
 builder.build_domain()
 builder.create_loads({"DEAD": 1.0})
 static = builder.run_static_analysis()
-builder.export_results_to_npz("results.npz")
+write_results_npz("results.npz", md, static_results=static)
 ```
 
 **Inside Rhino** (load .npz and colour by results):
