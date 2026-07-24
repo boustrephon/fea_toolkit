@@ -5,17 +5,18 @@ Nonlinear RC analysis (fiber sections with ``Concrete01/02``,
 work in OpenSeesPy**.  Any nonlinear analysis must be exported to Tcl
 and run via Xara's standalone ``tclsh8.6``.
 
-Two export paths are available:
+Three export paths are available:
 
 | Path | Method | Use case |
 |---|---|---|
 | Recording | ``RecordingOpenSees`` proxy | Elastic builds — records ``ops.*`` calls during Python build |
 | Direct | ``export_model_to_tcl()`` | Nonlinear — translates ``SAPModelData`` directly to Tcl |
+| MeshModel | ``export_mesh_model_to_tcl()`` | Nonlinear — translates a preprocessed ``MeshModel`` directly to Tcl |
 
 ## Direct Tcl export (recommended)
 
 ```python
-from fea_toolkit.opensees.builder import export_model_to_tcl, pushover_tcl
+from fea_toolkit.opensees.recorder import export_mesh_model_to_tcl, pushover_tcl
 from fea_toolkit.opensees.preprocessor import preprocess_model
 
 mm = preprocess_model(md)
@@ -27,7 +28,7 @@ tcl_suffix = pushover_tcl(
     adaptive=True,
 )
 
-export_model_to_tcl(
+export_mesh_model_to_tcl(
     mm, "rc_pushover.tcl", config=config, tcl_suffix=tcl_suffix,
 )
 

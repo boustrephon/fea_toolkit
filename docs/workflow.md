@@ -251,24 +251,17 @@ The legacy single‑stage path (``OpenSeesBuilder``) has been removed.
 All builds now use the two‑stage pipeline.
 
 ### Build order
-  2b  │ ops.wipe()               │ ops.wipe()                      │
+  2a  │ ops.wipe()               │ ops.wipe()                      │
       │                          │ ops.model('basic','-ndm',3,'-ndf',6)
-  2c  │ _create_nodes()          │ ops.node(tag, x, y, z)          │ SAP2000 nodes only
-  2d  │ _apply_restraints()      │ ops.fix(tag, ux,uy,uz, rx,ry,rz)
-  2e  │ _create_materials()      │ ops.uniaxialMaterial(…)         │
-  2f  │ _create_sections()       │ ops.section('Elastic', tag, …)  │ includes ShellSections
-  2g  │ _split_elements()        │ geometry.split_elements()       │ 🔗 Check B
-  2h  │ _apply_frame_end_offsets()│ rigid‑link records             │
-  2i  │ _convert_area_loads()    │ area → frame edge loads         │
-  2j  │ _mesh_areas()            │ geometry.mesh_area_elements()   │ 🔗 Check C
-      │                          │ ops.fix() for base mesh nodes   │
-  2k  │ _create_shell_elements() │ ops.element('ShellMITC4', …)    │
+  2b  │ _create_nodes()          │ ops.node(tag, x, y, z)          │ SAP2000 nodes only
+  2c  │ _apply_restraints()      │ ops.fix(tag, ux,uy,uz, rx,ry,rz)
+  2d  │ _create_materials()      │ ops.uniaxialMaterial(…)         │
+  2e  │ _create_sections()       │ ops.section('Elastic', tag, …)  │ includes ShellSections
+  2f  │ _create_shell_elements() │ ops.element('ShellMITC4', …)    │
       │                          │ ops.section('ElasticMembranePlateSection', …)
-  2l  │ _create_lumped_hinges()  │ zeroLengthSection hinges        │ optional
-  2m  │ _create_elements()       │ ops.element('elasticBeamColumn')│ 🔗 Check D
+  2g  │ _create_lumped_hinges()  │ zeroLengthSection hinges        │ optional
+  2h  │ _create_elements()       │ ops.element('elasticBeamColumn')│ 🔗 Check D
       │                          │ ops.geomTransf('Linear', …)     │
-  2n  │ _create_loads()          │ ops.pattern() / ops.load() / …  │ patterns & self‑weight
-  2o  │ _setup_recorders()       │ optional opstool recorders      │
 ```
 
 ### Detailed step descriptions

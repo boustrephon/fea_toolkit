@@ -1647,7 +1647,7 @@ Pass ``use_local=False`` to plot raw global forces instead.
 
 - :class:`AnalysisBuilder` API documentation
 - :meth:`AnalysisBuilder.run_pushover_analysis`
-- :meth:`AnalysisBuilder.export_results_to_npz`
+- :meth:`AnalysisBuilder.export_results`
 
 ---
 
