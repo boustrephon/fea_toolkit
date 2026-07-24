@@ -1,0 +1,268 @@
+# fea_toolkit — Project Guardrails (Auto-generated from codebase audit)
+
+> Generated 2026-07-24 from a full audit of `src/`, `tests/`, `examples/`,
+> `docs/`, `pyproject.toml`, and `.gitignore`.
+
+
+## 1. Package Layout & Directory Conventions
+
+### 1.1 `src/` layout (mandatory)
+- All package source code lives under `src/fea_toolkit/`.
+- The `pyproject.toml` uses `[tool.setuptools.packages.find] where = ["src"]`.
+- Never place importable modules at the repo root or in a flat `fea_toolkit/` directory.
+
+### 1.2 Subpackage boundaries
+Each subpackage has a clear domain. Do not cross-contaminate:
+
+| Subpackage | Purpose |
+|---|---|
+| `model/` | Data models, dataclass hierarchies, geometry utilities. No OpenSees imports. |
+| `io/` | File I/O: parsing (`.s2k`, JSON), NPZ read/write, Tcl export, reporting. |
+| `opensees/` | OpenSees domain construction and analysis execution. Imports `ops`. |
+| `analysis/` | Analysis orchestration (`manager.py`) and type-specific runners. |
+| `mesh/` | Mesh quality checks and Gmsh remeshing. Optional dependency. |
+| `plotting/` | PyVista/Matplotlib visualization. Backend-agnostic viewer via `renderers/`. |
+| `rhino/` | Rhino 8 geometry export, layers, colouring. |
+
+### 1.3 `local/` is private
+- `local/` is gitignored. It contains project-specific analysis scripts.
+- Never import from `local/` in production code.
+- If code in `local/` becomes reusable, extract it into the package proper under `src/`.
+
+### 1.4 Test mirroring
+- `tests/` mirrors the source structure. E.g., `src/fea_toolkit/model/geometry.py` → `tests/test_geometry.py`.
+- Test files use `test_*.py` naming.
+- Fixtures live in `tests/fixtures/` (sample `.s2k` files, JSON dumps).
+
+### 1.5 `typings/` directory
+- Type stubs for C extensions (`openseespy`, `opstool`) live at the repo root under `typings/`.
+- These mirror the package structure, e.g. `typings/openseespy/opensees/__init__.pyi`.
+- When adding new `ops.*` calls, update the corresponding `.pyi` stub.
+- The `.vscode/settings.json` stanza `"python.analysis.stubPath": "typings"` is gitignored (set locally), but stubs are committed.
+
+
+## 2. Code Style & Formatting
+
+### 2.1 Imports
+- **Order**: stdlib → third-party → project-relative.
+- Project imports use **relative imports** within the package:
+  ```python
+  from ..model.sap_data import SAPModelData, Node
+  from ..model.geometry import get_SAP_vecxz
+  ```
+- Use `from typing import Dict, List, Optional, Any, Tuple, Union` for type annotations.
+
+### 2.2 Docstrings
+- **Google-style** with `Args:`, `Returns:`, `Raises:`, `Yields:` sections.
+- First line is a concise summary in imperative mood.
+- Use `:class:`, `:func:`, `:meth:`, `:attr:` cross-references in docstrings.
+- Multi-line docstrings use triple quotes on their own lines.
+
+### 2.3 Naming conventions
+| Kind | Convention | Examples |
+|---|---|---|
+| Classes | PascalCase | `SAPModelData`, `OpenSeesBuilder`, `AnalysisBuilder` |
+| Functions/methods | snake_case | `build_domain()`, `run_static_analysis()` |
+| Variables | snake_case | `frame_elements`, `node_tag` |
+| Module-level constants | UPPER_CASE or `_LEADING_UNDERSCORE` | `SHAPE_NAMES`, `_G_SI`, `PUSHOVER_SOLVER_DEFAULTS` |
+| Private members/methods | single leading `_` | `_raw_tables`, `_create_nodes()`, `_set_defaults()` |
+| Private module attrs | single leading `_` | `_mat_tag`, `_sec_tag` |
+| Legacy compatibility aliases | `_`-prefixed thin wrappers | `_deep_merge()` calls `deep_merge()` |
+
+### 2.4 Section comments
+- Use ASCII-art separators for logical sections:
+  ```python
+  # ═══════════════════════════════════════════════════════════════
+  # Major section
+  # ═══════════════════════════════════════════════════════════════
+
+  # ── Minor subsection ──
+  ```
+- Block separator comments: `# --- Section name ---` or `# ── Section name ──`
+
+### 2.5 Doc-comment separators for class members
+- Use `# ── Section name ──` above logical groups of class attributes.
+
+
+## 3. Architectural Patterns
+
+### 3.1 Two-Stage Pipeline (mandatory for new code)
+The project has migrated from a monolithic `OpenSeesBuilder` to a two-stage architecture:
+
+1. **Preprocessor** (`opensees/preprocessor.py`): topology mutations only → produces `MeshModel`.
+2. **AnalysisBuilder** (`opensees/analysis_builder.py`): OpenSees domain creation + analysis execution.
+
+New analysis code must follow this pattern. Do NOT add analysis methods to the preprocessor.
+
+- `opensees/builder.py` is now **purely Tcl export functions** (`export_model_to_tcl`, `pushover_tcl`, `tcl_materials_and_sections`). Do not add analysis logic here.
+
+### 3.2 MeshModel is the stable intermediate
+- After the Preprocessor produces a `MeshModel`, that object is considered **"frozen topology"**.
+- The `AnalysisBuilder` reads from it but never mutates it.
+- All topology work (splitting, meshing, load redistribution) happens in preprocessing.
+- This separation is strict.
+
+### 3.3 Dataclass-first data model
+- All model data uses `@dataclass` classes defined in `model/sap_data.py`.
+- Use `field(default_factory=dict)` / `field(default_factory=list)` for mutable defaults.
+- Subclass hierarchies for polymorphic types (e.g., `Section` → `ISection`, `PipeSection`, `ConcreteRectangularSection`).
+- Use `Optional[type]` with `None` default for fields that may be absent.
+
+### 3.4 Config dict pattern
+- Builder/configurable classes accept an optional `config: Dict[str, Any]` parameter.
+- Defaults are applied via `_set_defaults()` with `dict.setdefault()`.
+- Class-level constants (e.g., `PUSHOVER_SOLVER_DEFAULTS`) hold solver defaults.
+- Config is a flat dict — no nested config objects.
+
+### 3.5 Selection filter pattern
+- The `Selection` class in `model/selection.py` provides composable filtering.
+- **AND across criteria** — every non-`None` field narrows the selection.
+- **OR within a list** — multiple values in the same field are alternatives.
+- New filter functions must follow this same AND/OR semantics.
+
+### 3.6 Facade / convenience re-exports
+- `src/fea_toolkit/__init__.py` re-exports the most-used public API.
+- Subpackage `__init__.py` files define `__all__` or re-export key classes.
+
+### 3.7 NPZ as canonical exchange format
+- Analysis results are serialized to `.npz` using `npz_writer.py` / `npz_reader.py`.
+- All visualizers (PyVista, Rhino, plotting) consume NPZ, not raw results.
+- Schema is defined in `io/results_schema.py`.
+
+### 3.8 Backend-agnostic visualization
+- `plotting/renderers/` defines a `RenderBackend` ABC with a `PyVistaBackend` implementation.
+- `ModelViewer` uses the backend abstraction for 3D rendering or HTML export.
+
+### 3.9 RecordingOpenSees proxy
+- For capturing `ops.*` calls as replayable Tcl or Python scripts, use the `RecordingOpenSees` proxy.
+- This is how the Tcl export in `opensees/builder.py` works.
+
+
+## 4. Naming & Style Rules
+
+### 4.1 IDs vs tags
+- **`*_id`** — SAP2000 string labels (e.g., `"1"`, `"FRAME-45"`).
+- **`*_tag`** — integer tags for OpenSees (`node_tag`, `elem_tag`).
+- Never use SAP IDs directly in OpenSees commands — always map through tags.
+
+### 4.2 Relative load positions
+- `FrameDistributedLoad` stores `rdist_a`, `rdist_b` (0..1 parametric positions).
+- Child elements store `t_locations` for parent-child tracking.
+
+### 4.3 Inactive flag pattern
+- Split/meshed parent elements set `inactive = True`.
+- Builders skip inactive elements during OpenSees domain construction.
+- `parent_id` / `child_ids` track the hierarchy.
+
+### 4.4 Section type dispatch
+- Use `SHAPE_NAMES` dict in `sap_data.py` to map SAP2000 shape strings to canonical IDs.
+- `Section.shape_id` property returns the canonical ID.
+- New section types must be added to `SHAPE_NAMES` and have a corresponding dataclass.
+
+### 4.5 Legacy compatibility
+- When renaming public functions, keep a thin `_`-prefixed wrapper that delegates to the new name.
+- Mark as `# ── Legacy aliases ──` with a comment.
+
+### 4.6 Unit handling
+- `SAPModelData.units` is a `{"F": "N", "L": "m", "T": "C"}` dict.
+- Any function that does physics (gravity, forces, moments) must derive `g` from this dict via `g_from_units()`.
+- Never hardcode `9.81` — always route through `g_from_units(units)`.
+
+### 4.7 Status notation in documentation
+- The `README.md` uses a visual status notation for feature tracking:
+  - `✅ Complete` — fully implemented and tested
+  - `⚠️ Partial` — partially implemented
+  - `🚧 Placeholder` — stub exists, not yet functional
+- New features should follow this convention in project-wide docs.
+
+
+## 5. Technical Constraints
+
+### 5.1 Python version
+- `requires-python = ">=3.9"` in `pyproject.toml`.
+- Do not use Python 3.10+ syntax (match/case, `|` union types) without updating the minimum.
+
+### 5.2 Dependencies
+- **Core** (non-optional): `numpy`, `openseespy`, `opstool`, `opsvis`.
+- **Optional**: `gmsh>=4.12` (via `[mesh-remesh]` extra).
+- Do not add new required dependencies without discussion — keep core lightweight.
+
+### 5.3 OpenSeesPy
+- `openseespy.opensees` is a **C extension** — static analyzers will report false positives.
+- Type stubs in `typings/openseespy/` suppress Pylance errors.
+- When adding new `ops.*` calls, update the stubs in `typings/openseespy/opensees/__init__.pyi`.
+- The `.vscode/settings.json` must point to `"python.analysis.stubPath": "typings"` (set locally, gitignored).
+
+### 5.4 Version management
+- Uses `setuptools-scm` for dynamic versioning from git tags.
+- `src/fea_toolkit/_version.py` is auto-generated — do not edit manually.
+
+### 5.5 Testing
+- **Framework**: pytest (configured in `pyproject.toml` `[tool.pytest.ini_options]`).
+- Test discovery: `test_*.py` files, `Test*` classes, `test_*` functions.
+- Verbose output: `-v --tb=short`.
+- Use `@pytest.fixture` for shared setup — with cleanup (`ops.wipe()` for OpenSees state).
+- Test classes group related workflow tests (e.g., `TestBuildWorkflow`).
+- Integration tests use the built-in `make_sample_model()` from `examples/sample_model.py` to avoid external file dependencies.
+
+### 5.6 `ops.wipe()` hygiene
+- Always call `ops.wipe()` in test teardown (via `finally` or fixture `yield`).
+- OpenSees global state must be clean between tests.
+
+### 5.7 Element type constraints
+- `eleLoad` with 8-arg trapezoidal form is **broken** in OpenSeesPy 3.8.0.0.
+  Non-uniform loads must be decomposed into 4 partial-span uniform segments.
+- `Corotational` geometric transformation does **not** support `eleLoad` in 3D — emit a warning if used.
+- Solver settings are configured via the `config` dict: `solver_test_tol`, `solver_test_max_iter`, `solver_algorithm`, `gravity_num_substeps`.
+
+
+## 6. Git & File Conventions
+
+### 6.1 Ignored paths (from `.gitignore`)
+- `data/` — private section database.
+- `local/` — project-specific scripts.
+- `*.pkl` — serialized data.
+- `*_ss.py` — superseded variants.
+- `*.png` — plot outputs.
+- `examples/output/`, `/output/` — generated output.
+- Standard Python ignores (`__pycache__/`, `*.pyc`, `build/`, `dist/`, `*.egg-info/`, `.venv/`, etc.).
+- `.vscode/settings.json` — user-specific editor settings.
+
+### 6.2 Commit conventions
+- Commit history is clean; follow conventional commits where practical.
+- Use `docs/` for detailed feature documentation (one `.md` per feature/concern).
+- `README.md` is the canonical overview and is kept up-to-date with implementation status.
+
+### 6.3 Branching
+- `origin: https://github.com/boustrephon/fea_toolkit.git`.
+
+
+## 7. Documentation Rules
+
+### 7.1 Inline documentation
+- All public functions/methods/classes must have docstrings.
+- Document shape-specific behavior in subclass docstrings.
+- Reference SAP2000 table names in parser docstrings for traceability.
+
+### 7.2 `docs/` directory
+- One markdown file per feature/analysis type (e.g., `modal_analysis.md`, `pushover_analysis.md`).
+- Reference design decisions, formulas (LaTeX where helpful), and usage examples.
+- `docs/references/` holds reference implementations (e.g., OpenSees Day example scripts).
+
+### 7.3 `examples/`
+- Self-contained, runnable scripts showing one workflow each.
+- Include an `examples/README.md` index.
+
+
+## 8. Anti-Patterns (Do NOT Do)
+
+1. **Do not** import `ops` in `model/` subpackage — model code must be OpenSees-free.
+2. **Do not** add new mutable default arguments to dataclass fields without `field(default_factory=...)`.
+3. **Do not** use `typing.Dict`/`List` if migrating to Python 3.10+ built-ins — but stay consistent with the existing codebase style.
+4. **Do not** add analysis logic to `opensees/builder.py` — this file is now a thin Tcl export module.
+5. **Do not** commit files that match `.gitignore` patterns, particularly `local/`, `data/`, `*.pkl`, `output/`.
+6. **Do not** use 8-arg `eleLoad` trapezoidal form — it is silently broken in OpenSeesPy 3.8.0.0.
+7. **Do not** add new required dependencies without explicit approval.
+8. **Do not** skip `ops.wipe()` cleanup in test fixtures — global state persists across tests.
+9. **Do not** hardcode gravitational acceleration `9.81` — always use `g_from_units(units)`.
+10. **Do not** add topology mutations to `AnalysisBuilder` — it reads `MeshModel` as frozen input only.
