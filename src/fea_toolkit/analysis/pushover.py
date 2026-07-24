@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from fea_toolkit.analysis.base import (
     Analysis,
     AnalysisResult,
-    PUSHOVER_STEEL_DEFAULTS,
+    _PUSHOVER_STEEL_DEFAULTS,
 )
 from fea_toolkit.analysis.modal import ModalAnalysis
 
@@ -71,7 +71,7 @@ class PushoverAnalysis(Analysis):
 
     @classmethod
     def defaults(cls) -> dict:
-        return PUSHOVER_STEEL_DEFAULTS.to_dict()
+        return dict(_PUSHOVER_STEEL_DEFAULTS)
 
     @property
     def requires(self) -> list:

@@ -10,7 +10,7 @@ result passing.
 from fea_toolkit.analysis.base import (
     AnalysisResult,
     Analysis,
-    AnalysisDefaults,
+    AnalysisCaseSpec,
 )
 
 from fea_toolkit.analysis.static import StaticAnalysis
@@ -22,7 +22,7 @@ from fea_toolkit.analysis.manager import AnalysisManager
 __all__ = [
     "AnalysisResult",
     "Analysis",
-    "AnalysisDefaults",
+    "AnalysisCaseSpec",
     "StaticAnalysis",
     "ModalAnalysis",
     "ResponseSpectrumAnalysis",

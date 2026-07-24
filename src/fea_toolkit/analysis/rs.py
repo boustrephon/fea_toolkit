@@ -10,9 +10,8 @@ import numpy as np
 
 from fea_toolkit.analysis.base import (
     Analysis,
-    AnalysisDefaults,
     AnalysisResult,
-    RESPONSE_SPECTRUM_DEFAULTS,
+    _RESPONSE_SPECTRUM_DEFAULTS,
 )
 from fea_toolkit.analysis.modal import ModalAnalysis
 
@@ -64,7 +63,7 @@ class ResponseSpectrumAnalysis(Analysis):
 
     @classmethod
     def defaults(cls) -> dict:
-        return RESPONSE_SPECTRUM_DEFAULTS.to_dict()
+        return dict(_RESPONSE_SPECTRUM_DEFAULTS)
 
     @property
     def requires(self) -> list:

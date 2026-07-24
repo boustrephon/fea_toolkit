@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 from fea_toolkit.analysis.base import (
     Analysis,
     AnalysisResult,
-    MODAL_DEFAULTS,
+    _MODAL_DEFAULTS,
 )
 
 
@@ -37,7 +37,7 @@ class ModalAnalysis(Analysis):
 
     @classmethod
     def defaults(cls) -> dict:
-        return MODAL_DEFAULTS.to_dict()
+        return dict(_MODAL_DEFAULTS)
 
     @property
     def provides(self) -> set:

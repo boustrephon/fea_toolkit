@@ -115,7 +115,13 @@ def generate_report(
     out_dir: Optional[str] = None,
     **overrides,
 ) -> dict:
-    """Run the full two-stage analysis pipeline and return all results.
+    """Run the full two-stage analysis pipeline and return the canonical
+    report result bundle.
+
+    The returned dictionary is the shared repository-owned result contract.
+    It is intentionally generic and stable so that the NPZ writer and any
+    downstream helper can consume it without re-implementing the analysis
+    orchestration.
 
     Parameters
     ----------
