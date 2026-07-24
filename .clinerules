@@ -61,7 +61,7 @@ Each subpackage has a clear domain. Do not cross-contaminate:
 ### 2.3 Naming conventions
 | Kind | Convention | Examples |
 |---|---|---|
-| Classes | PascalCase | `SAPModelData`, `OpenSeesBuilder`, `AnalysisBuilder` |
+| Classes | PascalCase | `SAPModelData`, `MeshModel`, `AnalysisBuilder` |
 | Functions/methods | snake_case | `build_domain()`, `run_static_analysis()` |
 | Variables | snake_case | `frame_elements`, `node_tag` |
 | Module-level constants | UPPER_CASE or `_LEADING_UNDERSCORE` | `SHAPE_NAMES`, `_G_SI`, `PUSHOVER_SOLVER_DEFAULTS` |
@@ -112,7 +112,8 @@ New analysis code must follow this pattern. Do NOT add analysis methods to the p
 - Builder/configurable classes accept an optional `config: Dict[str, Any]` parameter.
 - Defaults are applied via `_set_defaults()` with `dict.setdefault()`.
 - Class-level constants (e.g., `PUSHOVER_SOLVER_DEFAULTS`) hold solver defaults.
-- Config is a flat dict — no nested config objects.
+- For **builder-scoped config** (AnalysisBuilder, Preprocessor), the dict is flat — no nested config objects.
+- For **report-scoped config** (``generate_report()``), nested sections are permitted to separate orchestrator-level options from per-analysis builder defaults: e.g. ``{"spectrum": {"code": "GB50011"}, "pushover": {"max_drift": 0.04}}``.
 
 ### 3.5 Selection filter pattern
 - The `Selection` class in `model/selection.py` provides composable filtering.
@@ -128,10 +129,15 @@ New analysis code must follow this pattern. Do NOT add analysis methods to the p
 - Analysis results are serialized to `.npz` using `npz_writer.py` / `npz_reader.py`.
 - All visualizers (PyVista, Rhino, plotting) consume NPZ, not raw results.
 - Schema is defined in `io/results_schema.py`.
+- The public serialization API is ``write_results_npz()`` in ``fea_toolkit.io.npz_writer``.
+- ``AnalysisBuilder.export_results()`` is the builder‑level convenience wrapper.
 
 ### 3.8 Backend-agnostic visualization
 - `plotting/renderers/` defines a `RenderBackend` ABC with a `PyVistaBackend` implementation.
 - `ModelViewer` uses the backend abstraction for 3D rendering or HTML export.
+- Plotting APIs accept ``AnalysisBuilder`` instances, result data dicts, **or** NPZ file paths — enabling standalone plotting without model objects.
+- Interactive multi-combo viewers accept ``AnalysisBuilder`` + result/force dicts.
+- NPZ‑only plot functions (``plot_npz_force_diagram``, ``plot_npz_moment_3d``) load serialized data without any builder.
 
 ### 3.9 RecordingOpenSees proxy
 - For capturing `ops.*` calls as replayable Tcl or Python scripts, use the `RecordingOpenSees` proxy.
