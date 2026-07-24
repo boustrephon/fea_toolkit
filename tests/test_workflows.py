@@ -622,11 +622,12 @@ class TestUnifiedNpzPipeline:
         assert f_lines.shape[0] > 0
 
     def test_write_and_read_static_with_split(self, sample_md, tmp_path):
-        """Unified NPZ pipeline works with split elements via two-stage path.
+        """Unified NPZ pipeline works with split_elements=True.
 
-        Builds a model with an intermediate node on a frame so
-        split_elements=True produces child elements, then verifies
-        parent-child metadata in the NPZ round-trip.
+        The built-in cantilever has no intermediate joints so no child
+        elements are produced, but the NPZ round-trip still preserves
+        frame_parent_sap_id metadata (all entries are None for the
+        simple model).
 
         Exercises:
             Preprocessor.run() →
@@ -648,8 +649,8 @@ class TestUnifiedNpzPipeline:
                'split_elements': True, 'verbose': False}
         mm = preprocess_model(sample_md, cfg)
         b = AnalysisBuilder(mm, cfg)
-        b.build_domain()
         try:
+            b.build_domain()
             b.create_loads()
             static_result = b.run_static_analysis()
         finally:
