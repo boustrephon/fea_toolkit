@@ -1645,9 +1645,9 @@ Pass ``use_local=False`` to plot raw global forces instead.
 
 ## See also
 
-- :class:`OpenSeesBuilder` API documentation
-- :meth:`OpenSeesBuilder.run_pushover_analysis`
-- :meth:`OpenSeesBuilder.export_results_to_npz`
+- :class:`AnalysisBuilder` API documentation
+- :meth:`AnalysisBuilder.run_pushover_analysis`
+- :meth:`AnalysisBuilder.export_results_to_npz`
 
 ---
 
