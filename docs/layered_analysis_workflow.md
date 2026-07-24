@@ -402,7 +402,7 @@ The smallest practical code change set is therefore:
 
 The admin v3 workflow should remain a “parse once, preprocess once, reuse many analyses” flow.
 
-### 11.1 Intended runtime sequence
+### 12.1 Intended runtime sequence
 
 1. Parse the SAP2000 text model into `SAPModelData`.
 2. Perform the model-specific enrichment step (base restraints, supplemental masses, loads-only selection, etc.).
@@ -411,7 +411,7 @@ The admin v3 workflow should remain a “parse once, preprocess once, reuse many
 5. Pass the same shared `MeshModel` into `AnalysisBuilder` for each case.
 6. Run the builder-specific analysis methods (`run_static_analysis()`, `run_modal_analysis()`, etc.).
 
-### 11.2 What this change means for the admin v3 script
+### 12.2 What this change means for the admin v3 script
 
 The admin v3 script should not become a geometry builder per analysis case. That would reintroduce the old single-stage inefficiency.
 
@@ -426,7 +426,7 @@ For the admin workflow, the likely practical differences are:
 - linear elastic cases keep the base section/material catalogue almost unchanged
 - nonlinear or performance-focused cases use `AnalysisCaseSpec.property_variant` to select different material/section realizations without changing the shared geometry
 
-### 11.3 Practical effect on admin outputs
+### 12.3 Practical effect on admin outputs
 
 Because the `MeshModel` remains the stable object, the admin v3 output pipeline can keep producing the same downstream data products:
 
@@ -445,7 +445,7 @@ The main architectural change is that the admin script will now explicitly separ
 
 The Pumphouse v3 report workflow should follow the same pattern, but with a stronger emphasis on result reuse and case orchestration.
 
-### 12.1 Intended runtime sequence
+### 13.1 Intended runtime sequence
 
 The Pumphouse v3 flow should be structured as:
 
@@ -455,13 +455,13 @@ The Pumphouse v3 flow should be structured as:
 4. run the cases through `AnalysisManager`
 5. export results into the report format expected by the document layer
 
-### 12.2 How the shared report layer should consume this
+### 13.2 How the shared report layer should consume this
 
 The shared report layer in [src/fea_toolkit/report.py](src/fea_toolkit/report.py) should remain the canonical orchestration point.
 
 That means the generalised “run all” flow should be implemented once in the repository and then reused from private local drivers.  The local Pumphouse wrapper should not duplicate the engine; it should delegate to the shared report entry point.
 
-### 12.3 How the report layer should consume this
+### 13.3 How the report layer should consume this
 
 The report entrypoint should remain thin. It should:
 
@@ -473,7 +473,7 @@ The report entrypoint should remain thin. It should:
 
 The important point is that the report path should not need to re-run the geometry and mesh preparation for each case. The report should consume already-prepared results generated from a stable `MeshModel`.
 
-### 12.3 What should change in the report script
+### 13.4 What should change in the report script
 
 The Pumphouse v3 report layer should be updated so that it:
 
@@ -484,7 +484,7 @@ The Pumphouse v3 report layer should be updated so that it:
 
 This reduces the risk of the report workflow mutating the shared model state in place, while preserving the existing report consumption pattern.
 
-### 12.4 Reasonable evolution path
+### 13.5 Reasonable evolution path
 
 The smallest transition path is:
 

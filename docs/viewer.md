@@ -475,7 +475,8 @@ plot_interactive_viewer(
 ## 5. NPZ standalone plots
 
 These functions load a ``.npz`` file created by
-:meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.export_results_to_npz`
+:func:`~fea_toolkit.io.npz_writer.write_results_npz`
+(or :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.export_results`)
 and produce plots **without** needing the original ``AnalysisBuilder``
 or model objects.
 
