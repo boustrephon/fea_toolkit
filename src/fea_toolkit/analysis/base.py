@@ -5,83 +5,137 @@ from dataclasses import dataclass, asdict, field
 from typing import Any, Dict, List, Optional, Set, Type
 
 
+# ── Per-type defaults (simple dicts, no dataclass overhead) ──────────
+
+_STATIC_LINEAR_DEFAULTS: dict = {
+    "element_type": "elasticBeamColumn",
+    "num_int_pts": 3,
+    "use_elastic_sections": True,
+    "create_fiber_sections": False,
+    "geom_transf_type": "Linear",
+    "beam_integration": "Lobatto",
+    "simplify_distributed_loads": False,
+    "solver_test_type": "NormDispIncr",
+    "solver_test_tol": 1e-8,
+    "solver_test_max_iter": 10,
+    "solver_algorithm": "Newton",
+    "solver_constraints": "Transformation",
+    "solver_system": "BandGen",
+    "gravity_num_substeps": 1,
+    "constraint_method": "spring",
+    "brace_type": "beam",
+}
+
+_MODAL_DEFAULTS: dict = {
+    "element_type": "elasticBeamColumn",
+    "num_int_pts": 3,
+    "use_elastic_sections": True,
+    "create_fiber_sections": False,
+    "geom_transf_type": "Linear",
+    "beam_integration": "Lobatto",
+    "simplify_distributed_loads": False,
+    "solver_test_type": "NormDispIncr",
+    "solver_test_tol": 1e-8,
+    "solver_test_max_iter": 10,
+    "solver_algorithm": "Newton",
+    "solver_constraints": "Transformation",
+    "solver_system": "BandGen",
+    "gravity_num_substeps": 1,
+    "constraint_method": "spring",
+    "brace_type": "beam",
+}
+
+_RESPONSE_SPECTRUM_DEFAULTS: dict = {
+    "element_type": "elasticBeamColumn",
+    "num_int_pts": 3,
+    "use_elastic_sections": True,
+    "create_fiber_sections": False,
+    "geom_transf_type": "Linear",
+    "beam_integration": "Lobatto",
+    "simplify_distributed_loads": False,
+    "solver_test_type": "NormDispIncr",
+    "solver_test_tol": 1e-8,
+    "solver_test_max_iter": 10,
+    "solver_algorithm": "Newton",
+    "solver_constraints": "Transformation",
+    "solver_system": "BandGen",
+    "gravity_num_substeps": 1,
+    "constraint_method": "spring",
+    "brace_type": "beam",
+}
+
+_PUSHOVER_STEEL_DEFAULTS: dict = {
+    "element_type": "nonlinearBeamColumn",
+    "num_int_pts": 5,
+    "use_elastic_sections": False,
+    "create_fiber_sections": True,
+    "geom_transf_type": "PDelta",
+    "beam_integration": "Lobatto",
+    "simplify_distributed_loads": False,
+    "solver_test_type": "NormDispIncr",
+    "solver_test_tol": 1e-6,
+    "solver_test_max_iter": 10,
+    "solver_algorithm": "NewtonLineSearch",
+    "solver_constraints": "Transformation",
+    "solver_system": "BandGen",
+    "gravity_num_substeps": 10,
+    "constraint_method": "spring",
+    "brace_type": "truss",
+}
+
+_PUSHOVER_RC_DEFAULTS: dict = {
+    "element_type": "forceBeamColumn",
+    "num_int_pts": 5,
+    "use_elastic_sections": False,
+    "create_fiber_sections": True,
+    "geom_transf_type": "PDelta",
+    "beam_integration": "Lobatto",
+    "simplify_distributed_loads": False,
+    "solver_test_type": "NormDispIncr",
+    "solver_test_tol": 1e-6,
+    "solver_test_max_iter": 10,
+    "solver_algorithm": "NewtonLineSearch",
+    "solver_constraints": "Transformation",
+    "solver_system": "BandGen",
+    "gravity_num_substeps": 10,
+    "constraint_method": "spring",
+    "brace_type": "beam",
+}
+
+
 # ────────────────────────────────────────────────────────────────────
-# AnalysisDefaults — typed config per analysis type
+# AnalysisCaseSpec — minimal per-case runtime contract
 # ────────────────────────────────────────────────────────────────────
 
 
 @dataclass
-class AnalysisDefaults:
-    """Solver, element, and brace defaults for one analysis type.
+class AnalysisCaseSpec:
+    """Minimal, solver-agnostic description of one analysis case.
 
-    Each field has a sensible default for linear-elastic analysis.
-    Analysis subclasses override specific fields via class-level
-    ``defaults()``.
+    The shared ``MeshModel`` is the canonical prepared state.  Each case
+    spec only describes how that shared model should be realized for one
+    analysis run.
+
+    Parameters
+    ----------
+    name : str
+        User-facing case label.
+    analysis_type : str
+        Logical analysis kind, e.g. ``"static"``, ``"modal"``,
+        ``"response_spectrum"``, ``"pushover"``.
+    config : dict, optional
+        Case-specific overrides applied at analysis time.
+    kwargs : dict, optional
+        Additional solver or post-processing arguments for the case.
     """
 
-    # Element / section
-    element_type: str = "elasticBeamColumn"
-    num_int_pts: int = 3
-    use_elastic_sections: bool = True
-    create_fiber_sections: bool = False
-    geom_transf_type: str = "Linear"
-    beam_integration: str = "Lobatto"
-    simplify_distributed_loads: bool = False
-
-    # Solver
-    solver_test_type: str = "NormDispIncr"
-    solver_test_tol: float = 1e-8
-    solver_test_max_iter: int = 10
-    solver_algorithm: str = "Newton"
-    solver_constraints: str = "Transformation"
-    solver_system: str = "BandGen"
-    gravity_num_substeps: int = 1
-    constraint_method: str = "spring"
-
-    # Brace strategy
-    brace_type: str = "beam"  # "beam" | "truss" | "hysteretic"
+    name: str
+    analysis_type: str
+    config: Dict[str, Any] = field(default_factory=dict)
+    kwargs: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
-
-
-# ── Named defaults instances (mirroring the auto-config table) ──────
-
-STATIC_LINEAR_DEFAULTS = AnalysisDefaults(
-    solver_test_tol=1e-8,
-    brace_type="beam",
-)
-
-MODAL_DEFAULTS = AnalysisDefaults(
-    brace_type="beam",
-)
-
-RESPONSE_SPECTRUM_DEFAULTS = AnalysisDefaults(
-    solver_test_tol=1e-8,
-    brace_type="beam",
-)
-
-PUSHOVER_STEEL_DEFAULTS = AnalysisDefaults(
-    element_type="nonlinearBeamColumn",
-    num_int_pts=5,
-    use_elastic_sections=False,
-    create_fiber_sections=True,
-    solver_test_tol=1e-6,
-    solver_algorithm="NewtonLineSearch",
-    geom_transf_type="PDelta",
-    brace_type="truss",
-)
-
-PUSHOVER_RC_DEFAULTS = AnalysisDefaults(
-    element_type="forceBeamColumn",
-    num_int_pts=5,
-    use_elastic_sections=False,
-    create_fiber_sections=True,
-    solver_test_tol=1e-6,
-    solver_algorithm="NewtonLineSearch",
-    geom_transf_type="PDelta",
-    brace_type="beam",
-)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -141,7 +195,7 @@ class Analysis(ABC):
     ):
         self.mesh_model = mesh_model
         self.name = name or type(self).__name__
-        # Start from analysis-type defaults
+        # Start from analysis-type defaults (fresh copy every call)
         self.config: dict = dict(self.defaults())
         # Overlay caller overrides
         if config:
@@ -151,9 +205,9 @@ class Analysis(ABC):
     @classmethod
     @abstractmethod
     def defaults(cls) -> dict:
-        """Return the :class:`AnalysisDefaults` dict for this type.
+        """Return the default config dict for this analysis type.
 
-        Subclasses should return e.g. ``STATIC_LINEAR_DEFAULTS.to_dict()``.
+        Subclasses should return e.g. ``dict(_STATIC_LINEAR_DEFAULTS)``.
         """
         ...
 

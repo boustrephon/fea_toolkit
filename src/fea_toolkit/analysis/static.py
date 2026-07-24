@@ -10,7 +10,7 @@ import pandas as pd
 from fea_toolkit.analysis.base import (
     Analysis,
     AnalysisResult,
-    STATIC_LINEAR_DEFAULTS,
+    _STATIC_LINEAR_DEFAULTS,
 )
 from fea_toolkit.analysis.modal import ModalAnalysis
 
@@ -53,7 +53,7 @@ class StaticAnalysis(Analysis):
 
     @classmethod
     def defaults(cls) -> dict:
-        return STATIC_LINEAR_DEFAULTS.to_dict()
+        return dict(_STATIC_LINEAR_DEFAULTS)
 
     @property
     def requires(self) -> list:
@@ -79,7 +79,7 @@ class StaticAnalysis(Analysis):
         )
         return AnalysisResult(
             name=self.name,
-            analysis_type="StaticAnalysis",
+            analysis_type="linear",
             data={
                 "df_linear": df_linear,
             },
