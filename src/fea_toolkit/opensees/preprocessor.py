@@ -41,8 +41,13 @@ class Preprocessor:
     or by the Tcl export path.
 
     Args:
-        config: Builder configuration dict (same keys as
-            :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder`).
+        config: Configuration dict.  Shares a subset of keys with
+            :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder`
+            (runtime solver settings, element types), but also accepts
+            preprocessing‑specific options that must be supplied **before**
+            constructing the ``AnalysisBuilder``:
+            ``detect_wall_slab_intersections`` (default ``True``) and
+            ``split_slabs_at_walls`` (default ``False``).
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):

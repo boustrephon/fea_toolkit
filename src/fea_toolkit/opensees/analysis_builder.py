@@ -161,6 +161,10 @@ class AnalysisBuilder:
             # Restore canonical hinge state before any nodes are created,
             # preventing stale *_hinge_* nodes from being recreated.
             self._restore_hinge_canonical_state()
+            # Restore canonical brace state so repeated build_domain() /
+            # rebuild_with_fiber_sections() always subdivide the original
+            # (un‑subdivided) elements rather than already-subdivided ones.
+            self._restore_brace_canonical_state()
 
             self._create_nodes()
             self._apply_restraints()
@@ -1228,6 +1232,17 @@ class AnalysisBuilder:
         dist_loads = self.mesh_model.frame_dist_loads
         rigid_links: List[tuple] = []
 
+        # Save canonical state on first brace subdivision so
+        # _restore_brace_canonical_state() can restore it on repeated builds.
+        if self.config.get('subdivide_braces') and self._brace_selection:
+            if not hasattr(self, '_brace_canonical'):
+                self._brace_canonical = {
+                    'frame_elements': dict(self.mesh_model.frame_elements),
+                    'frame_assignments': dict(self.mesh_model.frame_assignments),
+                    'nodes': dict(self.mesh_model.nodes),
+                    'frame_dist_loads': list(self.mesh_model.frame_dist_loads),
+                }
+
         # Brace subdivision (Approach A) — before element creation loop so
         # child sub-elements are processed by _add_beam_column below.
         if self.config.get('subdivide_braces') and self._brace_selection:
@@ -1459,6 +1474,21 @@ class AnalysisBuilder:
             ops.element(elem_type, tag, *[ni.node_tag, nj.node_tag], transf_tag, int_tag)
 
     # ── Brace selection (Approach A) ─────────────────────────────
+
+    def _restore_brace_canonical_state(self) -> None:
+        """Restore canonical frame/assignment/node/dist-load state for brace
+        subdivision, so repeated ``build_domain()`` or
+        ``rebuild_with_fiber_sections()`` calls always subdivide the
+        original (un‑subdivided) elements rather than already-subdivided
+        ones.
+        """
+        if not hasattr(self, '_brace_canonical'):
+            return
+        snap = self._brace_canonical
+        self.mesh_model.frame_elements = snap['frame_elements']
+        self.mesh_model.frame_assignments = snap['frame_assignments']
+        self.mesh_model.nodes = snap['nodes']
+        self.mesh_model.frame_dist_loads = snap['frame_dist_loads']
 
     def _restore_hinge_canonical_state(self) -> None:
         """Restore canonical frame element endpoints and remove stale hinge nodes.
