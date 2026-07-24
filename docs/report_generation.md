@@ -429,7 +429,7 @@ challenges are:
   edge nodes must be tied via ``equalDOF`` constraints.  The builder's
   :func:`~fea_toolkit.model.geometry.find_constraint_edges` detects
   incompatible edge meshes and
-  :func:`~fea_toolkit.opensees.builder.AnalysisBuilder.apply_edge_constraints`
+  :func:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.apply_edge_constraints`
   emits the corresponding ``equalDOF`` commands.  Future work (P2) could
   store edge-constraint references directly on ``AreaElement``
   (e.g. ``edge_constraint_ids``) for easier lookup.

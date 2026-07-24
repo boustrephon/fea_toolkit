@@ -1162,9 +1162,11 @@ def plot_deformed_displacement_3d(
 
         # Static analysis
         from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         mm = preprocess_model(md)
         b = AnalysisBuilder(mm, ...)
         b.build_domain()
+        b.create_loads({"DEAD": 1.0, "WIND": 1.0})
         results = b.run_static_analysis()
         plot_deformed_displacement_3d(b, results["nodal_displacements"],
                                        scale=20.0, show_labels=True)
@@ -1175,8 +1177,8 @@ def plot_deformed_displacement_3d(
                                        scale=20.0, selection=sel)
 
         # RS analysis
-        rs_disp = ab.compute_rs_nodal_displacements(...)
-        plot_deformed_displacement_3d(ab, rs_disp, scale=50.0)
+        rs_disp = b.compute_rs_nodal_displacements(...)
+        plot_deformed_displacement_3d(b, rs_disp, scale=50.0)
     """
     import math
     import numpy as np

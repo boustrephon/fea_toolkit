@@ -102,7 +102,7 @@ SAP2000 .s2k
     ▼
 SAP2000Parser ──→ SAPModelData
     │
-    ├── AnalysisBuilder ──→ analysis ──→ write_results_npz() ──→ results.npz
+    ├── Preprocessor ──→ MeshModel ──→ AnalysisBuilder ──→ analysis ──→ write_results_npz() ──→ results.npz
     │
     ├── RhinoImporter ──→ Rhino geometry (SAP_FrameID UserStrings)
     │
