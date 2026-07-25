@@ -131,7 +131,7 @@ This layer should be limited to the canonical runtime files:
 - `MeshModel`
 - `AnalysisBuilder`
 - `AnalysisManager`
-- `AnalysisDefaults`
+- `AnalysisCaseSpec`
 
 ### 6.4 Helper / downstream consumer layer
 
