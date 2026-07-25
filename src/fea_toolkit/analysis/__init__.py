@@ -19,6 +19,7 @@ from fea_toolkit.analysis.static import StaticAnalysis
 from fea_toolkit.analysis.modal import ModalAnalysis
 from fea_toolkit.analysis.rs import ResponseSpectrumAnalysis
 from fea_toolkit.analysis.pushover import PushoverAnalysis
+from fea_toolkit.analysis.nonlinear_dynamic import NonlinearDynamicAnalysis
 from fea_toolkit.analysis.manager import AnalysisManager
 
 # ── Deprecated compatibility exports ──
@@ -46,5 +47,6 @@ __all__ = [
     "ModalAnalysis",
     "ResponseSpectrumAnalysis",
     "PushoverAnalysis",
+    "NonlinearDynamicAnalysis",
     "AnalysisManager",
 ]

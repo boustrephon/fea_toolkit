@@ -25,6 +25,8 @@ from .viz import (
     compare_meshes,
     plot_mode_animation,
     plot_force_diagram_3d,
+    plot_building_views,
+    plot_model_comparison,
 )
 
 from .diagnostics import (

@@ -16,6 +16,7 @@ import math
 import numpy as np
 
 from ..model.geometry import get_SAP_vecxz, get_local_axes
+from ..model.sap_data import SAPModelData
 from ..utils import compute_flag_parts
 
 if TYPE_CHECKING:
@@ -420,13 +421,229 @@ def plot_model_3d(
 # Unified mesh visualisation (builder or NPZ data)
 # ============================================================================
 
-def _resolve_mesh_data(source):
-    """Extract mesh geometry arrays from a builder or NPZ data dict.
+def _collapse_to_parents(data, source):
+    """Post‑process mesh data to replace child elements with their parents.
+
+    For each frame/shell entry with a non‑empty ``parent`` field, children
+    are removed and replaced by a single entry representing the original
+    unsplit parent element.  Unsplit elements pass through unchanged.
+
+    Parameters
+    ----------
+    data : dict
+        Mesh data dict from :func:`_resolve_mesh_data` (builder or NPZ path).
+    source : object
+        Original data source — used to resolve parent geometry.
+
+    Returns
+    -------
+    dict
+        Updated mesh data dict with children collapsed into parents.
+    """
+    import numpy as np
+    from ..model.sap_data import SAPModelData
+
+    nodes = data["nodes"]
+
+    # ── Collapse frames ─────────────────────────────────────────
+    # Build group: parent_id -> [child_frame_entries]
+    parent_groups: Dict[str, list] = {}
+    for fr in data["frames"]:
+        pid = fr.get("parent")
+        if pid and pid != "?" and pid != "" and pid is not None:
+            parent_groups.setdefault(pid, []).append(fr)
+
+    if parent_groups:
+        collapsed_frames = []
+        seen_parents: set = set()
+
+        # Build a node-tag-to-SAP-id lookup for resolving parent endpoints
+        # from NPZ data (nodes are already populated by _resolve_mesh_data).
+        tag_to_sid: Dict[int, str] = {}
+        for sid, nd in nodes.items():
+            tag_to_sid[nd["tag"]] = sid
+
+        # For builder sources, build a full parent endpoint lookup from model
+        parent_frame_endpoints: Dict[str, tuple] = {}
+        if not isinstance(source, dict) and hasattr(source, 'model') or \
+           (hasattr(source, 'frame_elements') and not isinstance(source, dict)):
+            if hasattr(source, 'model'):
+                model = source.model
+            elif hasattr(source, 'mesh_model'):
+                model = source.mesh_model
+            elif isinstance(source, SAPModelData):
+                model = source
+            else:
+                model = source
+            for eid, elem in model.frame_elements.items():
+                if getattr(elem, 'inactive', False):
+                    parent_frame_endpoints[eid] = (elem.node_i, elem.node_j)
+
+        # For NPZ sources, read parent endpoints from the new arrays
+        npz_parent_node_i: Dict[str, int] = {}
+        npz_parent_node_j: Dict[str, int] = {}
+        if isinstance(source, dict):
+            nf = len(source.get("frame_eid", []))
+            for i in range(nf):
+                sid = str(source["frame_sap_id"][i])
+                pni = int(source.get("frame_parent_node_i", [0]*nf)[i])
+                pnj = int(source.get("frame_parent_node_j", [0]*nf)[i])
+                if pni != 0 and pnj != 0:
+                    npz_parent_node_i[sid] = pni
+                    npz_parent_node_j[sid] = pnj
+                elif source.get("frame_parent_sap_id", [""]*nf)[i] == sid:
+                    # unsplit elements store their own node tags
+                    pass
+
+        for fr in data["frames"]:
+            pid = fr.get("parent")
+            if pid and pid != "?" and pid != "" and pid is not None:
+                if pid in seen_parents:
+                    continue  # already added
+                seen_parents.add(pid)
+                children = parent_groups.get(pid, [])
+
+                # Resolve parent endpoints
+                if not isinstance(source, dict):
+                    # Builder path
+                    p_ni_id, p_nj_id = parent_frame_endpoints.get(pid, (None, None))
+                    if p_ni_id and p_nj_id:
+                        p_ni = nodes.get(p_ni_id)
+                        p_nj = nodes.get(p_nj_id)
+                        if p_ni and p_nj:
+                            collapsed_frames.append({
+                                "id": pid,
+                                "ni_id": p_ni_id,
+                                "nj_id": p_nj_id,
+                                "sec": children[0].get("sec", '?'),
+                                "parent": None,
+                            })
+                            continue
+                    # Fallback: derive from children endpoints
+                    sorted_children = _sort_children_by_location(children, nodes)
+                    if sorted_children:
+                        first = sorted_children[0]
+                        last = sorted_children[-1]
+                        collapsed_frames.append({
+                            "id": pid,
+                            "ni_id": first.get("ni_id"),
+                            "nj_id": last.get("nj_id"),
+                            "ni_tag": first.get("ni_tag"),
+                            "nj_tag": last.get("nj_tag"),
+                            "sec": children[0].get("sec", '?'),
+                            "parent": None,
+                        })
+                else:
+                    # NPZ path — use parent node tags from NPZ arrays
+                    p_ni_tag = npz_parent_node_i.get(pid, 0)
+                    p_nj_tag = npz_parent_node_j.get(pid, 0)
+                    if p_ni_tag and p_nj_tag:
+                        collapsed_frames.append({
+                            "id": pid,
+                            "ni_tag": p_ni_tag,
+                            "nj_tag": p_nj_tag,
+                            "sec": children[0].get("sec", '?'),
+                            "parent": None,
+                        })
+                    else:
+                        # Fallback: derive from sorted children
+                        sorted_children = _sort_children_by_location(children, nodes)
+                        if sorted_children:
+                            first = sorted_children[0]
+                            last = sorted_children[-1]
+                            collapsed_frames.append({
+                                "id": pid,
+                                "ni_tag": first.get("ni_tag"),
+                                "nj_tag": last.get("nj_tag"),
+                                "sec": children[0].get("sec", '?'),
+                                "parent": None,
+                            })
+            else:
+                # Unsplit element — pass through
+                collapsed_frames.append(fr)
+        data["frames"] = collapsed_frames
+
+    # ── Collapse shells ─────────────────────────────────────────
+    shell_parent_groups: Dict[str, list] = {}
+    for sh in data["shells"]:
+        pid = sh.get("parent")
+        if pid and pid != "?" and pid != "" and pid is not None:
+            shell_parent_groups.setdefault(pid, []).append(sh)
+
+    if shell_parent_groups:
+        collapsed_shells = []
+        seen_shell_parents: set = set()
+        for sh in data["shells"]:
+            pid = sh.get("parent")
+            if pid and pid != "?" and pid != "" and pid is not None:
+                if pid in seen_shell_parents:
+                    continue
+                seen_shell_parents.add(pid)
+                children = shell_parent_groups.get(pid, [])
+                # Reconstruct parent from first child's parent reference
+                # (parent node IDs are stored in the original area_element)
+                parent_node_ids = None
+                if not isinstance(source, dict):
+                    model = (source.model if hasattr(source, 'model')
+                             else source)
+                    parent_area = model.area_elements.get(pid)
+                    if parent_area is not None:
+                        parent_node_ids = parent_area.node_ids[:4]
+                if parent_node_ids:
+                    collapsed_shells.append({
+                        "id": pid,
+                        "sec": children[0].get("sec", 'unknown'),
+                        "node_ids": parent_node_ids,
+                        "inactive": False,
+                    })
+                else:
+                    # Fallback: use first child's geometry
+                    collapsed_shells.append(children[0])
+            else:
+                collapsed_shells.append(sh)
+        data["shells"] = collapsed_shells
+
+    return data
+
+
+def _sort_children_by_location(children, nodes):
+    """Sort child frame entries by spatial position along the parent axis.
+
+    For NPZ data (using ``ni_tag``/``nj_tag``), computes the midpoint
+    along the element axis.  For builder data (using ``ni_id``/``nj_id``),
+    sorts by node ID order along the parent span.
+    """
+    if not children:
+        return children
+
+    def _mid_z(fr):
+        """Compute approximate position along parent axis."""
+        ni = _resolve_frame_node(nodes, fr, 'i')
+        nj = _resolve_frame_node(nodes, fr, 'j')
+        if ni and nj:
+            return (ni["z"] + nj["z"]) * 0.5
+        return 0.0
+
+    return sorted(children, key=_mid_z)
+
+
+def _resolve_mesh_data(source, collapse_to_parents=False):
+    """Extract mesh geometry arrays from a builder, SAPModelData, or NPZ data dict.
+
+    Supports three source types:
+
+    * A ``SAPModelData`` instance (raw model, before preprocessing).
+    * An ``AnalysisBuilder`` or builder object (after preprocessing).
+    * A dict loaded from a unified NPZ file (via ``np.load()``).
+
+    When *collapse_to_parents* is ``True``, child elements resulting from
+    splitting are replaced by their original unsplit parent elements, so
+    the displayed geometry matches what the engineer drew in SAP2000.
 
     Returns a dict with keys:
         nodes          – ``{node_id: {tag, x, y, z}}``
         frames         – ``[{id, ni_tag/ni_id, nj_tag/nj_id, sec, parent}]``
-        shells         – ``[{id, sec, node_ids/node_tags, inactive}]``
+        shells         – ``[{id, sec, node_ids/node_tags, inactive, parent}]``
         orphan_nodes   – ``{node_id: {tag, x, y, z}}``
         edge_constraints – list of constraint tuples
         mesh_node_ids  – ``set`` of node IDs containing ``_mesh_``
@@ -436,8 +653,33 @@ def _resolve_mesh_data(source):
     data = {"nodes": {}, "frames": [], "shells": [], "orphan_nodes": {},
             "edge_constraints": [], "mesh_node_ids": set()}
 
+    # ═════════════════════════════════════════════════════════════
+    # Approach A: SAPModelData passthrough — raw importer output
+    # ═════════════════════════════════════════════════════════════
+    if isinstance(source, SAPModelData):
+        for nid, nd in source.nodes.items():
+            data["nodes"][nid] = {
+                "tag": nd.node_tag, "x": nd.x, "y": nd.y, "z": nd.z,
+            }
+        for eid, elem in source.frame_elements.items():
+            data["frames"].append({
+                "id": eid, "ni_id": elem.node_i, "nj_id": elem.node_j,
+                "sec": source.frame_assignments.get(eid, '?'),
+                "parent": None,
+            })
+        for aid, area in source.area_elements.items():
+            data["shells"].append({
+                "id": aid, "sec": source.area_assignments.get(aid, 'unknown'),
+                "node_ids": area.node_ids[:4],
+                "inactive": False,
+                "parent": None,
+            })
+        return data
+
+    # ═════════════════════════════════════════════════════════════
+    # NPZ / HDF5 data dict
+    # ═════════════════════════════════════════════════════════════
     if isinstance(source, dict):
-        # NPZ / HDF5 data dict
         n = len(source.get("node_tag", []))
         for i in range(n):
             tag = source["node_tag"][i]
@@ -466,34 +708,73 @@ def _resolve_mesh_data(source):
                 "sec": str(source["shell_sec_name"][i]),
                 "node_tags": [int(source[f"shell_node_{k}"][i]) for k in (1,2,3,4)],
             })
-    else:
-        # Builder / AnalysisBuilder object
-        builder = source
-        model = builder.model if hasattr(builder, 'model') else builder.mesh_model
-        elements = (builder.split_elements if hasattr(builder, 'split_elements')
-                    and builder.split_elements else model.frame_elements)
-        assignments = (builder.split_assignments if hasattr(builder, 'split_assignments')
-                       and builder.split_assignments else model.frame_assignments)
 
-        # Nodes
-        for nid, nd in model.nodes.items():
-            data["nodes"][nid] = {
+        if collapse_to_parents:
+            data = _collapse_to_parents(data, source)
+        return data
+
+    # ═════════════════════════════════════════════════════════════
+    # Builder / AnalysisBuilder / MeshModel object
+    # ═════════════════════════════════════════════════════════════
+    builder = source
+    if hasattr(builder, 'model'):
+        model = builder.model
+    elif hasattr(builder, 'mesh_model'):
+        model = builder.mesh_model
+    else:
+        model = builder  # assume it's already a MeshModel
+    elements = (builder.split_elements if hasattr(builder, 'split_elements')
+                and builder.split_elements else model.frame_elements)
+    assignments = (builder.split_assignments if hasattr(builder, 'split_assignments')
+                   and builder.split_assignments else model.frame_assignments)
+
+    # Nodes
+    for nid, nd in model.nodes.items():
+        data["nodes"][nid] = {
+            "tag": nd.node_tag, "x": nd.x, "y": nd.y, "z": nd.z,
+        }
+        if "_mesh_" in nid:
+            data["mesh_node_ids"].add(nid)
+
+    # Orphan nodes
+    mm = getattr(builder, '_mesh_model', None) if hasattr(builder, '_mesh_model') else None
+    if mm is None:
+        mm = getattr(builder, 'mesh_model', None)
+    if mm is not None and hasattr(mm, 'orphan_nodes'):
+        for nid, nd in mm.orphan_nodes.items():
+            data["orphan_nodes"][nid] = {
                 "tag": nd.node_tag, "x": nd.x, "y": nd.y, "z": nd.z,
             }
-            if "_mesh_" in nid:
-                data["mesh_node_ids"].add(nid)
 
-        # Orphan nodes
-        mm = getattr(builder, '_mesh_model', None) if hasattr(builder, '_mesh_model') else None
-        if mm is None:
-            mm = getattr(builder, 'mesh_model', None)
-        if mm is not None and hasattr(mm, 'orphan_nodes'):
-            for nid, nd in mm.orphan_nodes.items():
-                data["orphan_nodes"][nid] = {
-                    "tag": nd.node_tag, "x": nd.x, "y": nd.y, "z": nd.z,
-                }
+    if collapse_to_parents:
+        # When collapsing, include inactive parents instead of children
+        # Use the model's full frame_elements (including inactive parents)
+        all_elements = model.frame_elements
+        all_assignments = model.frame_assignments
 
-        # Frames
+        # Add inactive parent elements as frame entries
+        for eid, elem in all_elements.items():
+            if not getattr(elem, 'inactive', False):
+                # Not a parent — skip, will be added by the normal loop
+                continue
+            data["frames"].append({
+                "id": eid, "ni_id": elem.node_i, "nj_id": elem.node_j,
+                "sec": (all_assignments or {}).get(eid, '?'),
+                "parent": None,
+            })
+
+        # Add inactive parent area elements as shell entries
+        for aid, area in model.area_elements.items():
+            if not getattr(area, 'inactive', False):
+                continue
+            data["shells"].append({
+                "id": aid, "sec": model.area_assignments.get(aid, 'unknown'),
+                "node_ids": area.node_ids[:4],
+                "inactive": False,
+                "parent": None,
+            })
+    else:
+        # Normal path: add active (child) elements only
         for eid, elem in elements.items():
             if getattr(elem, 'inactive', False):
                 continue
@@ -503,7 +784,6 @@ def _resolve_mesh_data(source):
                 "parent": getattr(elem, 'parent_id', None),
             })
 
-        # Shells
         for aid, area in model.area_elements.items():
             if getattr(area, 'inactive', False):
                 continue
@@ -511,13 +791,14 @@ def _resolve_mesh_data(source):
                 "id": aid, "sec": model.area_assignments.get(aid, 'unknown'),
                 "node_ids": area.node_ids[:4],
                 "inactive": getattr(area, 'inactive', False),
+                "parent": getattr(area, 'parent_id', None),
             })
 
-        # Edge constraints
-        if mm is not None and hasattr(mm, 'detected_edge_pairs'):
-            data["edge_constraints"] = list(mm.detected_edge_pairs)
-        elif hasattr(builder, '_saved_edge_constraints'):
-            data["edge_constraints"] = list(builder._saved_edge_constraints)
+    # Edge constraints
+    if mm is not None and hasattr(mm, 'detected_edge_pairs'):
+        data["edge_constraints"] = list(mm.detected_edge_pairs)
+    elif hasattr(builder, '_saved_edge_constraints'):
+        data["edge_constraints"] = list(builder._saved_edge_constraints)
 
     return data
 
@@ -787,21 +1068,27 @@ def _render_scene(plotter, data, *,
 
 
 def plot_mesh(source, *,
+              collapse_to_parents=False,
               show_nodes=True, show_frames=True, show_shells=True,
               show_mesh_nodes=False, show_constraints=False,
               show_orphan_nodes=False, shrink=0.0,
               xlim=None, ylim=None, zlim=None,
               show_node_labels=False, show_frame_labels=False,
               show_area_labels=False, notebook=False, **kwargs):
-    """Display a mesh in 3D from a builder or NPZ data dict.
+    """Display a mesh in 3D from a builder, SAPModelData, or NPZ data dict.
 
-    Single‑model viewer — accepts either:
+    Single‑model viewer — accepts:
 
-    * An ``AnalysisBuilder`` instance (built).
+    * An ``SAPModelData`` instance (raw importer output, before preprocessing).
+    * An ``AnalysisBuilder`` instance (built, after preprocessing).
     * A dict loaded from a unified NPZ file (via ``np.load()``).
 
+    When ``collapse_to_parents=True``, split children are replaced with their
+    unsplit parent elements, showing the model as drawn in SAP2000.
+
     Args:
-        source: Builder instance or NPZ data dict.
+        source: Builder, SAPModelData, or NPZ data dict.
+        collapse_to_parents: Show unsplit parent elements (default ``False``).
         show_nodes: Draw node markers.
         show_frames: Draw frame elements.
         show_shells: Draw shell elements.
@@ -819,7 +1106,7 @@ def plot_mesh(source, *,
     """
     import pyvista as pv
 
-    data = _resolve_mesh_data(source)
+    data = _resolve_mesh_data(source, collapse_to_parents=collapse_to_parents)
     pv.set_plot_theme("document")
     plotter = pv.Plotter(notebook=notebook, **kwargs)
     _render_scene(plotter, data,
@@ -839,6 +1126,7 @@ def plot_mesh(source, *,
 
 
 def compare_meshes(source_a, source_b, *,
+                   collapse_to_parents=False,
                    labels=("Model A", "Model B"), **kwargs):
     """Side‑by‑side mesh comparison from two builders or NPZ data dicts.
 
@@ -847,6 +1135,7 @@ def compare_meshes(source_a, source_b, *,
     Args:
         source_a: First model (builder or NPZ dict).
         source_b: Second model (builder or NPZ dict).
+        collapse_to_parents: Show unsplit parent elements (default ``False``).
         labels: Pair of titles for the subplots.
         **kwargs: Passed to :func:`_render_scene` (show_*, shrink, xlim, etc.).
 
@@ -860,7 +1149,7 @@ def compare_meshes(source_a, source_b, *,
                          title=f"Mesh comparison: {labels[0]} (left) vs {labels[1]} (right)")
 
     for i, (src, label) in enumerate([(source_a, labels[0]), (source_b, labels[1])]):
-        data = _resolve_mesh_data(src)
+        data = _resolve_mesh_data(src, collapse_to_parents=collapse_to_parents)
         plotter.subplot(0, i)
         plotter.add_text(label, position='upper_edge', font_size=28)
         _render_scene(plotter, data, **kwargs)
@@ -1104,6 +1393,7 @@ def plot_deformed_displacement_3d(
     source,
     displacements: Dict,
     *,
+    collapse_to_parents=False,
     scale: float = 10.0,
     show_undeformed: bool = True,
     shrink: float = 0.0,
@@ -1189,7 +1479,7 @@ def plot_deformed_displacement_3d(
         return None
 
     # ── Resolve mesh data ──────────────────────────────────────────
-    data = _resolve_mesh_data(source)
+    data = _resolve_mesh_data(source, collapse_to_parents=collapse_to_parents)
     nodes = data["nodes"]
     frames = data["frames"]
 
@@ -1614,6 +1904,7 @@ def plot_mode_3d(
 # ============================================================================
 
 def plot_mode_animation(source, mode_shapes, mode=0, *,
+                        collapse_to_parents=False,
                         scale=30.0, show_original=True,
                         shrink=0.0,
                         animate=True, periods=None,
@@ -1633,6 +1924,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
         mode_shapes: Dict ``{mode_idx: {node_tag: (dx, dy, dz)}}`` from
             ``extract_mode_shapes()``, OR ``None`` to extract from NPZ.
         mode: 0‑based mode index.
+        collapse_to_parents: Show unsplit parent elements (default ``False``).
         scale: Displacement magnification factor.
         show_original: Show undeformed model in grey.
         shrink: Fraction to shrink frame lines toward their midpoint
@@ -1679,7 +1971,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
     disp = mode_shapes[mode]
 
     # Resolve mesh geometry into common format
-    data = _resolve_mesh_data(source)
+    data = _resolve_mesh_data(source, collapse_to_parents=collapse_to_parents)
 
     # Build frame segments
     segments = []
@@ -1783,6 +2075,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
 # ============================================================================
 
 def plot_force_diagram_3d(source, force_data=None, *,
+                          collapse_to_parents=False,
                           quantity='My', mode='flag',
                           moment_scale=None, show_original=True,
                           combo=None, notebook=False, title=None,
@@ -1836,7 +2129,7 @@ def plot_force_diagram_3d(source, force_data=None, *,
         return None
 
     # ── Resolve geometry ──────────────────────────────────────────
-    data = _resolve_mesh_data(source)
+    data = _resolve_mesh_data(source, collapse_to_parents=collapse_to_parents)
     nodes = data["nodes"]
     frames = data["frames"]
 

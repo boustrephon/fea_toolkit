@@ -23,6 +23,8 @@ GEOMETRY_ARRAYS: Dict[str, Tuple] = {
     "frame_sec_name": ("N_frame", "str"),
     "frame_node_i": ("N_frame", "int"),
     "frame_node_j": ("N_frame", "int"),
+    "frame_parent_node_i": ("N_frame", "int"),
+    "frame_parent_node_j": ("N_frame", "int"),
     "frame_t_start": ("N_frame", "float"),   # optional — 0..1 parametric position
     "frame_t_end": ("N_frame", "float"),     # optional — 0..1 parametric position
     "shell_eid": ("N_shell", "int"),
@@ -179,7 +181,7 @@ def validate_npz(path: str) -> List[str]:
                         f"expected {expected_shape}, got {actual_shape}")
 
         # ── Check geometry ────────────────────────────────────────
-        optional_geo = {"frame_t_start", "frame_t_end"}
+        optional_geo = {"frame_t_start", "frame_t_end", "frame_parent_node_i", "frame_parent_node_j"}
         for key, (shape_desc, dtype_str) in GEOMETRY_ARRAYS.items():
             arr = data.get(key)
             if arr is None:

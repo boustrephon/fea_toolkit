@@ -17,7 +17,9 @@ visualisation stacks:
 
 | Function | Backend | What it shows | Best for |
 |---|---|---|---|
-| `ModelViewer(builder).show_model()` | PyVista | 3D model, coloured by section | General model inspection, highlighting problem elements |
+| `ModelViewer(builder, collapse_to_parents=True).show_model()` | PyVista | 3D model with unsplit parent elements | Viewing original SAP2000 geometry |
+| `plot_mesh(source, collapse_to_parents=True)` | PyVista | 3D mesh with children collapsed to parents | Seeing engineer‑drawn elements instead of solver‑split ones |
+| `compare_meshes(a, b, collapse_to_parents=True)` | PyVista | Side‑by‑side comparison with collapsed parents | Comparing unsplit variants |
 | `ModelViewer(...).overlay_deformed()` | PyVista | Deformed shape overlay | Static / modal / RS displacement results |
 | `ModelViewer(...).overlay_forces()` | PyVista | Force/moment flag diagram | Static element forces |
 | `ModelViewer(...).highlight_elements()` | PyVista | Highlighted elements | Marking braces, issues, discussion topics |
@@ -41,7 +43,9 @@ visualisation stacks:
 | `plot_interactive_viewer(builder, forces)` | PyVista + widgets | Full interactive viewer | Exploration, demos |
 | `plot_npz_force_diagram(path)` | Matplotlib | 2D force from saved NPZ | Post‑hoc analysis |
 | `plot_npz_moment_3d(path)` | PyVista | 3D force from saved NPZ | Post‑hoc analysis |
-| `compare_meshes(a, b)` | PyVista | Side‑by‑side mesh comparison | Model diffing |
+| `compare_meshes(a, b, collapse_to_parents=True)` | PyVista | Side‑by‑side mesh comparison with collapsed parents | Model diffing (unsplit) |
+| `plot_building_views(md)` | PyVista | Four‑view layout (plan, elevation, 3D, section‑coloured) | Model overview, reports |
+| `plot_model_comparison(md, labels)` | PyVista | Top‑down comparison of two model variants | Design iterations, mesh variants |
 
 ---
 
@@ -52,6 +56,32 @@ backend‑agnostic 3D viewer for structural models and analysis results.
 It is designed for both interactive exploration and **LLM-assisted
 discussions** — you (or an AI assistant) can call it to display a model,
 overlay results, highlight problem areas, and annotate specific elements.
+
+### Source types and the ``collapse_to_parents`` option
+
+``ModelViewer`` and all unified plot functions (``plot_mesh``, ``compare_meshes``,
+``plot_deformed_displacement_3d``, ``plot_mode_animation``, ``plot_force_diagram_3d``)
+accept three source types:
+
+1. **``SAPModelData``** — raw importer output, before any preprocessing.
+   Shows the geometry exactly as parsed from SAP2000.
+2. **``AnalysisBuilder``** or **``MeshModel``** — post‑split topology.
+   By default shows split children (solver‑ready elements).
+3. **NPZ dict** — serialised results from a unified ``.npz`` file.
+
+When ``collapse_to_parents=True``, split children are replaced by their
+original unsplit parent elements.  The displayed geometry then matches what
+the engineer drew in SAP2000 (one beam per bay, one column per storey),
+while the underlying analysis still uses the solver‑ready split mesh.
+
+This works for all three source types:
+
+- **Builder / MeshModel**: inactive parent elements are read directly from
+  the model's ``frame_elements`` / ``area_elements`` dicts.
+- **NPZ**: parent endpoints are stored in new ``frame_parent_node_*`` arrays
+  (see ``docs/results_schema.md``).
+- **SAPModelData**: the data is inherently unsplit — ``collapse_to_parents``
+  is a no‑op (no splitting has occurred).
 
 ### Quick start
 
@@ -67,18 +97,24 @@ viewer.show()
 viewer = ModelViewer(model_data=md)
 viewer.show_model()
 viewer.show()
+
+# Or from a MeshModel directly (post-split topology, no builder)
+viewer = ModelViewer(mesh_model=mm)
+viewer.show_model()
+viewer.show()
 ```
 
 ### Constructor
 
 ```python
-ModelViewer(builder=None, model_data=None, backend="pyvista", **kwargs)
+ModelViewer(builder=None, model_data=None, mesh_model=None, backend="pyvista", **kwargs)
 ```
 
 | Argument | Default | Description |
 |---|---|---|
 | `builder` | `None` | An :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder` that has been built. Uses split elements if available. |
 | `model_data` | `None` | A :class:`~fea_toolkit.model.sap_data.SAPModelData`. Ignored if *builder* is given. |
+| `mesh_model` | `None` | A :class:`~fea_toolkit.model.mesh_model.MeshModel`. Ignored if *builder* or *model_data* given. Post-split topology — sufficient for ``show_model()`` without a builder. Results overlays warn and return early. |
 | `backend` | `"pyvista"` | Render backend name. Currently supports ``"pyvista"``. |
 | `**kwargs` | — | Passed to the backend constructor (e.g. ``off_screen=True``). |
 
@@ -693,6 +729,18 @@ from ``fea_toolkit.io.npz_reader`` to explore parent-child relationships
 (subdivided elements).  Then feed the resulting element IDs into
 ``selection=Selection(element_ids=[...])`` for visual inspection.
 
+### "Show me the building views"
+→ ``plot_building_views(md)`` (or ``plot_building_views(md, mesh_model=mm)``)
+Opens a PyVista window with a four-panel layout: plan view (top-left),
+elevation (top-right), 3D (bottom-left), and section-coloured 3D (bottom-right).
+Best for getting a quick overview of the model geometry in a report-friendly format.
+
+### "Compare two model variants"
+→ ``compare_meshes(a, b)`` — side‑by‑side 3D view of two meshes.
+Each source can be a builder, AnalysisBuilder, or NPZ/HDF5 data dict.
+Useful for comparing original vs. subdivided meshes, or two design iterations.
+Alternatively, ``plot_model_comparison(md, labels)`` for a top-down 2D overlay.
+
 ### "Export a view for sharing"
 → ``ModelViewer(builder).show_model().export_html("view.html")``
 Saves a self‑contained interactive HTML file — viewable in any browser
@@ -720,6 +768,8 @@ from fea_toolkit.plotting import (
     plot_force_diagram_3d,              # unified (builder or NPZ)
     plot_static_shear_3d,
     plot_static_axial_3d,
+    plot_building_views,                # four-view layout
+    plot_model_comparison,              # top-down variant comparison
 )
 
 # Standalone 2D plots (Matplotlib)

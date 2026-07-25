@@ -57,7 +57,7 @@ class Preprocessor:
 
     def run(self,
             model_data: SAPModelData,
-            selection: Optional[Selection] = None,
+            load_shell_selection: Optional[Selection] = None,
             ) -> MeshModel:
         """Run the full topology preparation pipeline.
 
@@ -65,7 +65,7 @@ class Preprocessor:
 
         Args:
             model_data: Parsed SAP2000 model data.
-            selection: Optional :class:`Selection` designating loads‑only
+            load_shell_selection: Optional :class:`Selection` designating loads‑only
                 areas (no shell elements created for them).  Nodes
                 referenced only by such areas are moved to
                 ``MeshModel.orphan_nodes`` — they are kept for
@@ -148,22 +148,22 @@ class Preprocessor:
         edge_loads_from_areas: list = []
         loads_only_area_ids: Set[str] = set()
         # create_shells already fetched at step 3b, reuse
-        if selection is not None:
+        if load_shell_selection is not None:
             edge_loads_from_areas = self._convert_area_loads(
-                md, selection, new_elems,
+                md, load_shell_selection, new_elems,
             )
-            loads_only_area_ids = set(selection.get_area_ids(md))
+            loads_only_area_ids = set(load_shell_selection.get_area_ids(md))
         elif not create_shells:
             # No shell mode + no selection → convert all area loads
             edge_loads_from_areas = self._convert_area_loads(
-                md, selection, new_elems,
+                md, load_shell_selection, new_elems,
             )
         # else: create_shells=True + selection=None → all areas become shells
         #       → no load conversion (handled by shell elements)
 
         # ── 5. Mesh area elements ─────────────────────────────────
         if create_shells:
-            self._mesh_areas(md, selection=selection)
+            self._mesh_areas(md, selection=load_shell_selection)
             self._merge_coincident_nodes(md)
 
             # Split frames at shell mesh nodes.
@@ -631,7 +631,6 @@ class Preprocessor:
                                        edge_loads=None,
                                        exclude_area_ids=None):
         """Split frame elements at shell subdivision edge nodes.
-
         For each frame element whose root parent has ``AtJoints=True``
         in the original SAP2000 ``frame_auto_mesh`` data, checks whether
         any shell mesh node lies on the frame segment.  If so, the frame
@@ -927,15 +926,24 @@ class Preprocessor:
         return sorted(levels)
 
 
-def preprocess_model(md, config: dict = None):
+def preprocess_model(md, config: dict = None, selection: Optional["Selection"] = None):
     """Run the Preprocessor once and return the prepared MeshModel.
 
     This is the expensive topology step (frame splitting, area meshing,
     node merging, edge detection).  Call once, then use the returned
     ``MeshModel`` for all analysis cases.
+
+    Args:
+        md: The parsed ``SAPModelData`` to preprocess.
+        config: Configuration dict passed to the ``Preprocessor``.
+        selection: Optional :class:`Selection` designating loads‑only
+            areas (no shell elements created for them).  Nodes
+            referenced only by such areas are moved to
+            ``MeshModel.orphan_nodes`` — they are kept for
+            visualisation but not created in OpenSees.
     """
     from .preprocessor import Preprocessor
     if config is None:
         config = {}
     preprocessor = Preprocessor(config)
-    return preprocessor.run(md)
+    return preprocessor.run(md, load_shell_selection=selection)

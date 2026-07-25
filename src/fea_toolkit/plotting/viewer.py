@@ -4,11 +4,20 @@ Usage::
 
     from fea_toolkit.plotting.viewer import ModelViewer
 
+    # From an AnalysisBuilder
     viewer = ModelViewer(builder)
     viewer.show_model(show_nodes=True, color_by_section=True)
     viewer.show()
 
-    # With results
+    # From a MeshModel directly (no builder needed)
+    viewer = ModelViewer(mesh_model=mm)
+    viewer.show_model(show_nodes=True, color_by_section=True)
+    viewer.show()
+
+    # From a MeshModel with collapsed parents (unsplit geometry)
+    viewer = ModelViewer(mesh_model=mm, collapse_to_parents=True)
+
+    # With results (requires builder or explicit data)
     viewer.overlay_deformed(scale=50)
     viewer.highlight_elements(frame_ids=["1", "5"], label="Check")
     viewer.export_html("report.html")
@@ -61,11 +70,19 @@ class ModelViewer:
     Extracts geometry from a builder or model data, then delegates
     rendering to a pluggable backend (PyVista, Rhino, etc.).
 
+    When ``collapse_to_parents=True`` (default ``False``), inactive parent
+    elements are used instead of their active child sub-elements, showing
+    the model as drawn in SAP2000 (unsplit geometry).
+
     Args:
         builder: An ``AnalysisBuilder`` instance that has been built.
-            If ``None``, provide *model_data* instead.
+            If ``None``, provide *model_data* or *mesh_model* instead.
         model_data: A ``SAPModelData`` instance.  Ignored if *builder*
             is provided.
+        mesh_model: A ``MeshModel`` instance.  Ignored if *builder* or
+            *model_data* is provided.  This is the post-split topology
+            and is sufficient for ``show_model()`` — no builder needed.
+        collapse_to_parents: Show unsplit parent elements (default ``False``).
         backend: Render backend name — ``'pyvista'`` (default) or
             ``'rhino'``.
         **kwargs: Passed to the backend constructor.
@@ -75,6 +92,8 @@ class ModelViewer:
         self,
         builder: Any = None,
         model_data: Any = None,
+        mesh_model: Any = None,
+        collapse_to_parents: bool = False,
         backend: str = "pyvista",
         **kwargs,
     ):
@@ -84,9 +103,15 @@ class ModelViewer:
         elif model_data is not None:
             self._model = model_data
             self._builder = None
+        elif mesh_model is not None:
+            self._model = mesh_model
+            self._builder = None
         else:
-            raise ValueError("Provide either 'builder' or 'model_data'.")
+            raise ValueError(
+                "Provide one of 'builder', 'model_data', or 'mesh_model'."
+            )
 
+        self._collapse_to_parents = collapse_to_parents
         self._backend: RenderBackend = _resolve_backend(backend, **kwargs)
 
         # Extracted geometry (populated lazily)
@@ -99,58 +124,106 @@ class ModelViewer:
     # ── Geometry extraction ──────────────────────────────────────────
 
     def _extract_geometry(self) -> None:
-        """Extract frame, shell, and node geometry from the model."""
+        """Extract frame, shell, and node geometry from the model.
+
+        When ``collapse_to_parents=True``, inactive parent elements are
+        included instead of their active child sub-elements, showing the
+        model as drawn in SAP2000.
+        """
         if self._geom_extracted:
             return
 
         md = self._model
         self._section_colors = _section_palette(md.sections)
 
-        # Frame elements
-        elements = (
-            (self._builder.split_elements if self._builder
-             and self._builder.split_elements else md.frame_elements)
-        )
-        assignments = (
-            (self._builder.split_assignments if self._builder
-             and self._builder.split_elements else md.frame_assignments)
-        )
+        if self._collapse_to_parents:
+            # Include inactive parents instead of active children.
+            # Walk all elements: include inactive parents and unsplit
+            # elements (those without parent_id).  Skip active children.
+            for eid, elem in md.frame_elements.items():
+                is_inactive = getattr(elem, 'inactive', False)
+                has_parent = getattr(elem, 'parent_id', None) is not None
+                if not is_inactive and has_parent:
+                    continue  # active child — skip
+                sec = md.frame_assignments.get(eid, "")
+                ni = md.nodes.get(elem.node_i)
+                nj = md.nodes.get(elem.node_j)
+                if ni is None or nj is None:
+                    continue
+                self._frames.append(FrameGeom(
+                    elem_id=eid,
+                    section=sec,
+                    node_i=elem.node_i,
+                    node_j=elem.node_j,
+                    start=np.array([ni.x, ni.y, ni.z], dtype=float),
+                    end=np.array([nj.x, nj.y, nj.z], dtype=float),
+                ))
 
-        for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
-                continue
-            sec = assignments.get(eid, "")
-            ni = md.nodes.get(elem.node_i)
-            nj = md.nodes.get(elem.node_j)
-            if ni is None or nj is None:
-                continue
-            self._frames.append(FrameGeom(
-                elem_id=eid,
-                section=sec,
-                node_i=elem.node_i,
-                node_j=elem.node_j,
-                start=np.array([ni.x, ni.y, ni.z], dtype=float),
-                end=np.array([nj.x, nj.y, nj.z], dtype=float),
-            ))
+            # Shells — include inactive parents
+            for aid, ae in md.area_elements.items():
+                is_inactive = getattr(ae, 'inactive', False)
+                has_parent = getattr(ae, 'parent_id', None) is not None
+                if not is_inactive and has_parent:
+                    continue
+                sec = md.area_assignments.get(aid, "")
+                verts = []
+                for nid in ae.node_ids:
+                    nd = md.nodes.get(nid)
+                    if nd is None:
+                        break
+                    verts.append([nd.x, nd.y, nd.z])
+                if len(verts) < 3:
+                    continue
+                self._shells.append(ShellGeom(
+                    area_id=aid,
+                    section=sec,
+                    vertices=np.array(verts, dtype=float),
+                ))
+        else:
+            # Normal path: active elements only
+            elements = (
+                (self._builder.split_elements if self._builder
+                 and self._builder.split_elements else md.frame_elements)
+            )
+            assignments = (
+                (self._builder.split_assignments if self._builder
+                 and self._builder.split_elements else md.frame_assignments)
+            )
 
-        # Shell elements
-        for aid, ae in md.area_elements.items():
-            if getattr(ae, 'inactive', False):
-                continue
-            sec = md.area_assignments.get(aid, "")
-            verts = []
-            for nid in ae.node_ids:
-                nd = md.nodes.get(nid)
-                if nd is None:
-                    break
-                verts.append([nd.x, nd.y, nd.z])
-            if len(verts) < 3:
-                continue
-            self._shells.append(ShellGeom(
-                area_id=aid,
-                section=sec,
-                vertices=np.array(verts, dtype=float),
-            ))
+            for eid, elem in elements.items():
+                if getattr(elem, 'inactive', False):
+                    continue
+                sec = assignments.get(eid, "")
+                ni = md.nodes.get(elem.node_i)
+                nj = md.nodes.get(elem.node_j)
+                if ni is None or nj is None:
+                    continue
+                self._frames.append(FrameGeom(
+                    elem_id=eid,
+                    section=sec,
+                    node_i=elem.node_i,
+                    node_j=elem.node_j,
+                    start=np.array([ni.x, ni.y, ni.z], dtype=float),
+                    end=np.array([nj.x, nj.y, nj.z], dtype=float),
+                ))
+
+            for aid, ae in md.area_elements.items():
+                if getattr(ae, 'inactive', False):
+                    continue
+                sec = md.area_assignments.get(aid, "")
+                verts = []
+                for nid in ae.node_ids:
+                    nd = md.nodes.get(nid)
+                    if nd is None:
+                        break
+                    verts.append([nd.x, nd.y, nd.z])
+                if len(verts) < 3:
+                    continue
+                self._shells.append(ShellGeom(
+                    area_id=aid,
+                    section=sec,
+                    vertices=np.array(verts, dtype=float),
+                ))
 
         # Nodes
         for nid, nd in md.nodes.items():

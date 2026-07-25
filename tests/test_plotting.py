@@ -253,7 +253,8 @@ class TestBuildDeformedMesh:
 # ============================================================================
 
 class TestResolveMeshData:
-    """Verify the mesh-data resolver works for dict (NPZ) sources."""
+    """Verify the mesh-data resolver works for dict (NPZ), SAPModelData,
+    and builder sources."""
 
     @pytest.fixture(autouse=True)
     def _skip_if_no_pyvista(self):
@@ -293,6 +294,192 @@ class TestResolveMeshData:
         assert data["orphan_nodes"] == {}
         assert data["edge_constraints"] == []
         assert data["mesh_node_ids"] == set()
+
+    # ── SAPModelData passthrough (Approach A) ────────────────────────
+
+    def test_sap_model_data_source(self):
+        """Resolving an SAPModelData produces raw unsplit geometry."""
+        from fea_toolkit.model.sap_data import (
+            SAPModelData, Node, FrameElement,
+            AreaElement, ISection,
+        )
+        from fea_toolkit.plotting.viz import _resolve_mesh_data
+
+        nodes = {
+            "N1": Node("N1", 1, 0.0, 0.0, 0.0),
+            "N2": Node("N2", 2, 4.0, 0.0, 0.0),
+            "N3": Node("N3", 3, 4.0, 0.0, 3.0),
+            "N4": Node("N4", 4, 0.0, 4.0, 0.0),
+        }
+        frames = {
+            "F1": FrameElement("F1", 10, "N1", "N2"),
+            "F2": FrameElement("F2", 20, "N2", "N3"),
+        }
+        sections = {
+            "COL": ISection("COL", "2×2 Box", 0.2, 0.2, 0.02, 0.02),
+            "BEAM": ISection("BEAM", "W16x31", 0.4, 0.2, 0.01, 0.01),
+        }
+        areas = {"A1": AreaElement("A1", 30, ["N1", "N2", "N3", "N4"])}
+
+        md = SAPModelData(
+            nodes=nodes,
+            restraints={},
+            materials={},
+            sections=sections,
+            frame_elements=frames,
+            area_elements=areas,
+            frame_assignments={"F1": "COL", "F2": "BEAM"},
+            area_assignments={"A1": "SLAB"},
+            groups={},
+            frame_auto_mesh={},
+        )
+
+        data = _resolve_mesh_data(md)
+
+        # Should have all 4 nodes, no mesh nodes
+        assert len(data["nodes"]) == 4
+        assert data["mesh_node_ids"] == set()
+
+        # Should have 2 frames with ni_id/nj_id (string keys), no parent
+        assert len(data["frames"]) == 2
+        fr0 = data["frames"][0]
+        assert fr0["id"] == "F1"
+        assert fr0["ni_id"] == "N1"
+        assert fr0["nj_id"] == "N2"
+        assert fr0["sec"] == "COL"
+        assert fr0["parent"] is None
+
+        # Should have 1 shell with node_ids
+        assert len(data["shells"]) == 1
+        sh0 = data["shells"][0]
+        assert sh0["id"] == "A1"
+        assert sh0["sec"] == "SLAB"
+        assert sh0["node_ids"] == ["N1", "N2", "N3", "N4"]
+
+    # ── collapse_to_parents (Approach B) ─────────────────────────────
+
+    def test_npz_collapse_to_parents(self):
+        """NPZ data with parent-child relationships collapses children."""
+        from fea_toolkit.plotting.viz import _resolve_mesh_data
+        n = 4  # 4 child elements
+        npz = {
+            "node_tag": np.array([1, 2, 3, 4, 5]),
+            "node_sap_id": np.array(["1", "2", "3", "4", "5"]),
+            "node_x": np.array([0.0, 1.0, 2.0, 3.0, 4.0]),
+            "node_y": np.array([0.0, 0.0, 0.0, 0.0, 0.0]),
+            "node_z": np.array([0.0, 0.0, 0.0, 0.0, 0.0]),
+            "frame_eid": np.array([0, 1, 2, 3]),
+            "frame_sap_id": np.array(["C1", "C2", "C3", "C4"]),
+            "frame_node_i": np.array([1, 2, 3, 4]),
+            "frame_node_j": np.array([2, 3, 4, 5]),
+            "frame_sec_name": np.array(["COL", "COL", "COL", "COL"]),
+            "frame_parent_sap_id": np.array(["P1", "P1", "P1", "P1"]),
+            "frame_parent_node_i": np.array([1, 1, 1, 1]),
+            "frame_parent_node_j": np.array([5, 5, 5, 5]),
+        }
+
+        # Without collapse — 4 children
+        data = _resolve_mesh_data(npz, collapse_to_parents=False)
+        assert len(data["frames"]) == 4
+        # All have parent "P1"
+        assert all(fr["parent"] == "P1" for fr in data["frames"])
+
+        # With collapse — 1 parent instead of 4 children
+        data = _resolve_mesh_data(npz, collapse_to_parents=True)
+        assert len(data["frames"]) == 1
+        assert data["frames"][0]["id"] == "P1"
+        assert data["frames"][0]["ni_tag"] == 1
+        assert data["frames"][0]["nj_tag"] == 5
+        assert data["frames"][0]["parent"] is None
+
+    def test_plot_mesh_collapse_to_parents(self, sample_npz_data):
+        """plot_mesh accepts collapse_to_parents parameter."""
+        from fea_toolkit.plotting import plot_mesh
+        pl = plot_mesh(sample_npz_data, collapse_to_parents=False, notebook=True)
+        assert pl is not None
+        pl.close()
+
+    def test_compare_meshes_collapse_to_parents(self, sample_npz_data):
+        """compare_meshes accepts collapse_to_parents parameter."""
+        from fea_toolkit.plotting import compare_meshes
+        pl = compare_meshes(
+            sample_npz_data, sample_npz_data,
+            collapse_to_parents=False,
+        )
+        assert pl is not None
+        pl.close()
+
+    def test_deformed_displacement_collapse_to_parents(
+        self, sample_npz_data, sample_displacements):
+        """plot_deformed_displacement_3d accepts collapse_to_parents."""
+        from fea_toolkit.plotting import plot_deformed_displacement_3d
+        pl = plot_deformed_displacement_3d(
+            sample_npz_data, sample_displacements,
+            collapse_to_parents=False,
+            scale=10.0, color_nodes=False, show_labels=False,
+            show_bounds=False, notebook=True,
+        )
+        assert pl is not None
+        pl.close()
+
+    def test_mode_animation_collapse_to_parents(self, sample_npz_data):
+        """plot_mode_animation accepts collapse_to_parents."""
+        from fea_toolkit.plotting import plot_mode_animation
+        disp = {1: (0.0, 0.0, 0.0), 2: (0.1, 0.0, 0.0), 3: (0.2, 0.0, 0.0)}
+        shapes = {0: disp}
+        pl = plot_mode_animation(
+            sample_npz_data, shapes, mode=0,
+            collapse_to_parents=False,
+            scale=10.0, animate=False, notebook=True,
+        )
+        assert pl is not None
+        pl.close()
+
+    def test_force_diagram_collapse_to_parents(self):
+        """plot_force_diagram_3d accepts collapse_to_parents parameter."""
+        from fea_toolkit.plotting.viz import plot_force_diagram_3d
+        # Build a minimal NPZ with static data so the force path works
+        npz = {
+            "node_tag": np.array([1, 2, 3]),
+            "node_sap_id": np.array(["1", "2", "3"]),
+            "node_x": np.array([0.0, 4.0, 4.0]),
+            "node_y": np.array([0.0, 0.0, 0.0]),
+            "node_z": np.array([0.0, 0.0, 3.0]),
+            "frame_eid": np.array([0, 1]),
+            "frame_sap_id": np.array(["1", "2"]),
+            "frame_node_i": np.array([1, 2]),
+            "frame_node_j": np.array([2, 3]),
+            "frame_sec_name": np.array(["COL", "BEAM"]),
+            "frame_parent_sap_id": np.array(["", ""]),
+            "analysis_types": np.array(["static"]),
+            "static_case_labels": np.array(["DEAD"]),
+            "static/DEAD/fx_i": np.array([10.0, -5.0]),
+            "static/DEAD/fx_j": np.array([-10.0, 5.0]),
+            "static/DEAD/my_i": np.array([0.0, 0.0]),
+            "static/DEAD/my_j": np.array([0.0, 0.0]),
+            "static/DEAD/mz_i": np.array([0.0, 0.0]),
+            "static/DEAD/mz_j": np.array([0.0, 0.0]),
+        }
+        pl = plot_force_diagram_3d(
+            npz, force_data=None,
+            collapse_to_parents=False,
+            quantity='Mx', mode='flag', notebook=True,
+        )
+        assert pl is not None
+        pl.close()
+
+    # ── _sort_children_by_location ───────────────────────────────────
+
+    def test_sort_children_by_location(self, sample_npz_data):
+        """Children are sorted by their midpoint elevation."""
+        from fea_toolkit.plotting.viz import _sort_children_by_location
+        from fea_toolkit.plotting.viz import _resolve_mesh_data
+
+        data = _resolve_mesh_data(sample_npz_data)
+        children = data["frames"]
+        sorted_children = _sort_children_by_location(children, data["nodes"])
+        # Should have same length
+        assert len(sorted_children) == len(children)
 
 
 # ============================================================================

@@ -99,16 +99,16 @@ Requirements:
 # After running modal analysis with extract_shapes=True
 shapes = builder.extract_mode_shapes(num_modes)
 
-from fea_toolkit.plotting import plot_mode_3d
+from fea_toolkit.plotting import plot_mode_animation
 
 # Animate mode 4 (0‑based) interactively
-plot_mode_3d(
+plot_mode_animation(
     builder, shapes, mode=4,
     scale=50.0, animate=True, periods=modal_result["periods"],
 )
 
 # Static (non‑animated) display with section‑coloured shells
-plot_mode_3d(
+plot_mode_animation(
     builder, shapes, mode=4,
     scale=50.0, animate=False, periods=modal_result["periods"],
 )

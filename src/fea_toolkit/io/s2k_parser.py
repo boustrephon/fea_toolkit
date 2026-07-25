@@ -959,6 +959,46 @@ class SAP2000Parser:
 
             sections[name] = sec_data
 
+        # ── Post-processing: promote RC sections for fiber analysis ──────
+        # SAP2000 often uses shape="Rectangular" for RC beams/columns
+        # (not "Concrete Rectangular").  Detect these from the material
+        # type and promote to ConcreteRectangularSection so that
+        # to_fiber_patches() produces RC patches (confined core +
+        # unconfined cover + rebar layers) with sensible defaults.
+        # Build a lookup of material names -> type from MATERIAL PROPERTIES
+        # 01 - GENERAL table (which has the Type column for each material).
+        _mat_types: Dict[str, str] = {}
+        for rec in self._raw_tables.get(
+            "MATERIAL PROPERTIES 01 - GENERAL", []
+        ):
+            mn = str(rec.get("Material", ""))
+            mt = str(rec.get("Type", ""))
+            if mn:
+                _mat_types[mn] = mt
+
+        for sec_name, sec in list(sections.items()):
+            if not isinstance(sec, RectangularSection):
+                continue
+            mat_type = _mat_types.get(sec.material, "").lower()
+            if mat_type not in ("concrete", "concrete (ec2)"):
+                continue
+            # Sensible defaults for RC sections (40 mm cover, 20 mm bars)
+            sections[sec_name] = ConcreteRectangularSection(
+                name=sec.name,
+                shape=sec.shape,
+                material=sec.material,
+                A=sec.A, I33=sec.I33, I22=sec.I22, J=sec.J,
+                Z33=sec.Z33, Z22=sec.Z22,
+                modifiers=sec.modifiers,
+                depth=sec.depth,
+                bf=sec.bf,
+                cover=0.04,
+                top_bars=max(4, int(sec.A * 0.002 / (3.14159 * 0.01**2))),
+                bot_bars=max(4, int(sec.A * 0.002 / (3.14159 * 0.01**2))),
+                top_bar_dia=0.020,
+                bot_bar_dia=0.020,
+            )
+
         # ── AREA SECTION PROPERTIES (shell sections not in frame table) ──
         for sec in self._raw_tables.get('AREA SECTION PROPERTIES', []):
             name = sec.get('Section', 'Unknown')

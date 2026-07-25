@@ -102,6 +102,33 @@ _PUSHOVER_RC_DEFAULTS: dict = {
     "brace_type": "beam",
 }
 
+# ── Nonlinear dynamic defaults ────────────────────────────────────
+
+_NONLINEAR_DYNAMIC_DEFAULTS: dict = {
+    "element_type": "forceBeamColumn",
+    "num_int_pts": 5,
+    "use_elastic_sections": False,
+    "create_fiber_sections": True,
+    "geom_transf_type": "PDelta",
+    "beam_integration": "Lobatto",
+    "simplify_distributed_loads": False,
+    "solver_test_type": "NormDispIncr",
+    "solver_test_tol": 1e-5,
+    "solver_test_max_iter": 20,
+    "solver_algorithm": "NewtonLineSearch",
+    "solver_constraints": "Transformation",
+    "solver_system": "BandGen",
+    "gravity_num_substeps": 10,
+    "constraint_method": "spring",
+    "brace_type": "beam",
+    "damping": 0.05,
+    "rayleigh_damping": True,
+    "num_steps": 1000,
+    "dt": 0.005,
+    "newmark_gamma": 0.5,
+    "newmark_beta": 0.25,
+}
+
 
 # ────────────────────────────────────────────────────────────────────
 # AnalysisCaseSpec — minimal per-case runtime contract

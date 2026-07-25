@@ -1565,13 +1565,12 @@ The toolkit provides interactive 3D plots of analysis results using
 
 ### Moment diagrams
 
-:func:`~fea_toolkit.plotting.viz.plot_static_moment_3d` draws a 3D
-moment diagram on the structure, with two display modes:
+:func:`~fea_toolkit.plotting.viz.plot_force_diagram_3d` draws a 3D
+force/moment diagram on the structure, with two display modes:
 
 * ``mode='flag'`` — planar quadrilaterals extruded perpendicular to each
   member on the **tension side** of the bending moment.  Flag height is
-  proportional to the moment magnitude.  Red = positive moment, blue =
-  negative moment.
+  proportional to the magnitude.  Red = positive, blue = negative.
 * ``mode='tube'`` — colour‑coded tubes along each element (red = +ve,
   blue = −ve).
 
@@ -1582,24 +1581,27 @@ direction are correct regardless of member orientation:
 * ``'Mz'`` — major‑axis bending (flags extend in local **y** direction)
 * ``'My'`` — minor‑axis bending (flags extend in local **z** direction)
 
+The unified function accepts an ``AnalysisBuilder``, a model builder,
+or an NPZ data dict as its *source* parameter.
+
 ```python
-from fea_toolkit.plotting.viz import plot_static_moment_3d
+from fea_toolkit.plotting import plot_force_diagram_3d
 
 forces = builder.extract_static_element_forces()
 
 # Interactive flag diagram — opens a PyVista window
-plot_static_moment_3d(builder, forces, quantity="Mz",
+plot_force_diagram_3d(builder, forces, quantity="Mz",
                       mode="flag", show_original=True)
 
 # With reaction arrows and title
 results = builder.run_static_analysis(extract_reactions=True)
-plot_static_moment_3d(builder, forces, quantity="Mz",
+plot_force_diagram_3d(builder, forces, quantity="Mz",
                       mode="flag", show_original=True,
                       show_reactions=True, static_results=results,
                       title="My Model — Mz (Wind +X)")
 
 # Off‑screen screenshot (for batch scripts)
-plotter = plot_static_moment_3d(builder, forces, quantity="Mz",
+plotter = plot_force_diagram_3d(builder, forces, quantity="Mz",
                                 mode="flag", show_original=True,
                                 off_screen=True)
 if plotter is not None:

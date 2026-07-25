@@ -48,14 +48,22 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
     # Frame elements — active only (skip inactive parents)
     frame_eid, frame_sap_id, frame_parent_sap_id, frame_sec_name = [], [], [], []
     frame_ni, frame_nj = [], []
+    frame_parent_ni, frame_parent_nj = [], []
     frame_t_start, frame_t_end = [], []
 
-    # Build parent-index lookup for t_start/t_end computation.
+    # Build parent-index lookup for t_start/t_end computation and parent endpoints.
     # Include inactive parents so split children reference the actual interval.
     parent_lookup: Dict[str, tuple] = {}  # parent_id -> (t_locations, child_ids)
+    parent_endpoints: Dict[str, tuple] = {}  # parent_id -> (parent_node_i_tag, parent_node_j_tag)
     for eid, elem in md.frame_elements.items():
         if elem.t_locations and elem.child_ids:
             parent_lookup[eid] = (elem.t_locations, elem.child_ids)
+        if getattr(elem, 'inactive', False):
+            # Record parent endpoints for collapse_to_parents visualisation
+            p_ni = md.nodes.get(elem.node_i)
+            p_nj = md.nodes.get(elem.node_j)
+            if p_ni and p_nj:
+                parent_endpoints[eid] = (p_ni.node_tag, p_nj.node_tag)
 
     for eid, elem in md.frame_elements.items():
         if getattr(elem, 'inactive', False):
@@ -72,9 +80,19 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
         frame_ni.append(ni.node_tag)
         frame_nj.append(nj.node_tag)
 
+        # Record parent endpoints for collapse_to_parents visualisation
+        pid = elem.parent_id
+        if pid and pid in parent_endpoints:
+            p_ni_tag, p_nj_tag = parent_endpoints[pid]
+            frame_parent_ni.append(p_ni_tag)
+            frame_parent_nj.append(p_nj_tag)
+        else:
+            frame_parent_ni.append(0)
+            frame_parent_nj.append(0)
+
         # Compute parametric position along parent
-        if elem.parent_id and elem.parent_id in parent_lookup:
-            t_locs, children = parent_lookup[elem.parent_id]
+        if pid and pid in parent_lookup:
+            t_locs, children = parent_lookup[pid]
             try:
                 idx = children.index(eid)
                 ts = t_locs[idx - 1] if idx > 0 else 0.0
@@ -94,6 +112,8 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
     arrays["frame_sec_name"] = np.array(frame_sec_name, dtype=str)
     arrays["frame_node_i"] = np.array(frame_ni, dtype=int)
     arrays["frame_node_j"] = np.array(frame_nj, dtype=int)
+    arrays["frame_parent_node_i"] = np.array(frame_parent_ni, dtype=int)
+    arrays["frame_parent_node_j"] = np.array(frame_parent_nj, dtype=int)
     arrays["frame_t_start"] = np.array(frame_t_start, dtype=float)
     arrays["frame_t_end"] = np.array(frame_t_end, dtype=float)
 

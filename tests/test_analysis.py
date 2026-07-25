@@ -7,12 +7,12 @@ import pytest
 
 from fea_toolkit.analysis.base import (
     Analysis,
-    AnalysisDefaults,
+    AnalysisCaseSpec,
     AnalysisResult,
-    STATIC_LINEAR_DEFAULTS,
-    MODAL_DEFAULTS,
-    RESPONSE_SPECTRUM_DEFAULTS,
-    PUSHOVER_STEEL_DEFAULTS,
+    _STATIC_LINEAR_DEFAULTS,
+    _MODAL_DEFAULTS,
+    _RESPONSE_SPECTRUM_DEFAULTS,
+    _PUSHOVER_STEEL_DEFAULTS,
 )
 from fea_toolkit.analysis.modal import ModalAnalysis
 from fea_toolkit.analysis.static import StaticAnalysis
@@ -109,28 +109,35 @@ class TestAnalysisResult:
         assert "x" in repr(r)
 
 
-# ── AnalysisDefaults ────────────────────────────────────────────────────────
+# ── Analysis defaults (plain dicts) ────────────────────────────────────────
 
 
 class TestAnalysisDefaults:
-    def test_to_dict(self):
-        d = AnalysisDefaults(element_type="elastic", num_int_pts=5)
-        data = d.to_dict()
-        assert data["element_type"] == "elastic"
-        assert data["num_int_pts"] == 5
-        assert "solver_algorithm" in data  # should have defaults for missing
+    def test_analysis_case_spec_to_dict(self):
+        spec = AnalysisCaseSpec(name="test", analysis_type="pushover")
+        data = spec.to_dict()
+        assert data["name"] == "test"
+        assert data["analysis_type"] == "pushover"
+        assert data["config"] == {}
+        assert data["kwargs"] == {}
 
-    def test_presets_exist(self):
-        for preset in [
-            STATIC_LINEAR_DEFAULTS,
-            MODAL_DEFAULTS,
-            RESPONSE_SPECTRUM_DEFAULTS,
-            PUSHOVER_STEEL_DEFAULTS,
-        ]:
-            assert isinstance(preset, AnalysisDefaults)
-            d = preset.to_dict()
-            assert "element_type" in d
-            assert "num_int_pts" in d
+    def test_static_defaults_exist(self):
+        d = dict(_STATIC_LINEAR_DEFAULTS)
+        assert "element_type" in d
+        assert "solver_algorithm" in d
+
+    def test_modal_defaults_exist(self):
+        d = dict(_MODAL_DEFAULTS)
+        assert "element_type" in d
+
+    def test_rs_defaults_exist(self):
+        d = dict(_RESPONSE_SPECTRUM_DEFAULTS)
+        assert "element_type" in d
+
+    def test_pushover_steel_defaults_exist(self):
+        d = dict(_PUSHOVER_STEEL_DEFAULTS)
+        assert "element_type" in d
+        assert d["element_type"] == "nonlinearBeamColumn"
 
 
 # ── Analysis ABC ────────────────────────────────────────────────────────────
