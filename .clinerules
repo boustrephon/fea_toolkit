@@ -260,7 +260,40 @@ New analysis code must follow this pattern. Do NOT add analysis methods to the p
 - Include an `examples/README.md` index.
 
 
-## 8. Anti-Patterns (Do NOT Do)
+## 8. Context Efficiency (guard against API errors)
+
+The Cline error "Invalid API Response: The provider returned an empty or
+unparsable response" (confirmed across Anthropic, Grok, Kimi, Qwen, and
+DeepSeek via `github.com/cline/cline/issues/7262`, `#10413`) is typically
+triggered by context saturation from repeated large-file reads.  The
+retry loop compounds the issue because the oversized context is not
+cleared between attempts.
+
+### 8.1 File reading discipline
+- Never read the same file more than 3 times per conversation.
+- When the `[DUPLICATE READ]` warning appears, **use cached content**
+  from that read — the file is unchanged.
+- Prefer one broad ``read_file`` call over multiple narrow sequential
+  reads of the same file.
+- Use ``search_files`` with a targeted regex to locate specific patterns
+  before committing to a broad read.
+
+### 8.2 Context monitoring
+- After each tool use, check ``mm / 1,000K tokens used (%)``.
+- At **30 %**: stop re‑reading files; use ``search_files`` instead.
+- At **40 %**: pause and ask the user to continue in a new message
+  (context resets between messages).
+- At **45 %+**: aggressive truncation — write final results to a file
+  and include only the file path in the completion message.
+
+### 8.3 Error recovery
+- When the "Invalid API Response" error appears, **do not retry**
+  without first reducing the task scope or starting a fresh message.
+- The error indicates the provider could not process the request at
+  the current context size — retrying the same payload will reproduce
+  the failure.
+
+## 9. Anti-Patterns (Do NOT Do)
 
 1. **Do not** import `ops` in `model/` subpackage — model code must be OpenSees-free.
 2. **Do not** add new mutable default arguments to dataclass fields without `field(default_factory=...)`.
