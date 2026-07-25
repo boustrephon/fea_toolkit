@@ -180,6 +180,21 @@ def main():
     except Exception as e:
         print(f"  3D plotting skipped: {e}")
 
+    # ── Shell element forces (if shells exist) ──
+    try:
+        shell_forces = builder.extract_static_shell_forces()
+        if shell_forces:
+            print(f"\n── Shell element forces ({len(shell_forces)} elements) ──")
+            for aid, f in list(shell_forces.items())[:3]:
+                print(f"  Area {aid}: fx={f['fx']:.3f}  fy={f['fy']:.3f}  fxy={f['fxy']:.3f}  "
+                      f"mx={f['mx']:.3e}  my={f['my']:.3e}  mxy={f['mxy']:.3e}")
+            if len(shell_forces) > 3:
+                print(f"  ... and {len(shell_forces) - 3} more")
+        else:
+            print("\n── No shell elements in this model (try with a model that has areas)")
+    except Exception as e:
+        print(f"  Shell extraction skipped: {e}")
+
     print("\nDone.")
 
 
