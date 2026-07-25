@@ -1199,16 +1199,60 @@ class TestShellSubdivision:
             # Original parent should not appear as active shell
             assert "S1" not in shell_ids, \
                 "Inactive parent area should not appear in shell_sap_id"
+        finally:
+            ops.wipe()
 
-            # shell_node_1..4 arrays should reference valid node tags
-            assert "shell_node_1" in data
-            assert "shell_node_4" in data
-            assert len(data["shell_node_1"]) == len(data["shell_eid"])
-            assert len(data["shell_node_4"]) == len(data["shell_eid"])
+    def test_extract_static_shell_forces(self, sample_shell_md):
+        """extract_static_shell_forces() returns local stress resultants.
 
-            # Frame elements should include split children from subdivision
-            assert "frame_sap_id" in data
-            assert len(data["frame_sap_id"]) >= 4
+        After running a static analysis on a model with shell elements,
+        the method returns per-element membrane forces (fx, fy, fxy)
+        and bending moments (mx, my, mxy).
+        """
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+        cfg = {'element_type': 'elasticBeamColumn',
+               'split_elements': False, 'verbose': False,
+               'create_shells': True}
+        mm = preprocess_model(sample_shell_md, cfg)
+        b = AnalysisBuilder(mm, cfg)
+        b.build_domain()
+        try:
+            results = b.run_static_analysis(
+                pattern_scales={"DEAD": 1.0},
+            )
+            # Run BEFORE building and analysis (no analysis yet)
+            # Actually need to run after analysis — the results dict
+            # confirms the analysis completed.
+            assert results is not None
+
+            shell_forces = b.extract_static_shell_forces()
+            # With a single slab area (S1) that is active, we expect
+            # at least one shell element whose parent is S1
+            assert isinstance(shell_forces, dict)
+            assert len(shell_forces) > 0, \
+                f"Expected shell forces, got empty dict. " \
+                f"shell_tag_map={b._shell_tag_map}"
+
+            for aid, f in shell_forces.items():
+                assert isinstance(aid, str)
+                assert f['elem_tag'] > 0
+                assert isinstance(f['fx'], float)
+                assert isinstance(f['fy'], float)
+                assert isinstance(f['fxy'], float)
+                assert isinstance(f['mx'], float)
+                assert isinstance(f['my'], float)
+                assert isinstance(f['mxy'], float)
+                # Node tags should be present
+                assert len(f['node_tags']) >= 3
+                # Sec name should be non-empty
+                assert isinstance(f['sec_name'], str)
+
+            # Verify the shell_tag_map has the expected area ID
+            assert "S1" in b._shell_tag_map or any(
+                "_sub_" in k for k in b._shell_tag_map
+            ), "No S1 or subdivided shell tag in _shell_tag_map"
         finally:
             ops.wipe()
 

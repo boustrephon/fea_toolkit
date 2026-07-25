@@ -235,6 +235,25 @@ def _collect_rs(rs_x: Optional[Dict] = None,
     return arrays
 
 
+def _collect_shell_forces(shell_forces: Dict[str, Dict[str, Any]]) -> Dict[str, np.ndarray]:
+    """Extract shell element force arrays from ``extract_static_shell_forces()``.
+
+    Returns flat arrays keyed by ``shell_*`` for NPZ serialization.
+    """
+    arrays: Dict[str, np.ndarray] = {}
+    aids = list(shell_forces.keys())
+    n = len(aids)
+    arrays["shell_sap_id"] = np.array(aids, dtype=str)
+    for key in ("fx", "fy", "fxy", "mx", "my", "mxy"):
+        arrays[f"shell_{key}"] = np.array(
+            [shell_forces[aid][key] for aid in aids], dtype=float)
+    arrays["shell_elem_tag"] = np.array(
+        [shell_forces[aid]["elem_tag"] for aid in aids], dtype=int)
+    arrays["shell_sec_name"] = np.array(
+        [shell_forces[aid].get("sec_name", "") for aid in aids], dtype=str)
+    return arrays
+
+
 def write_results_npz(
     path: str,
     md: SAPModelData,
@@ -242,6 +261,7 @@ def write_results_npz(
     modal_result: Optional[Dict[str, Any]] = None,
     mode_shapes: Optional[Dict] = None,
     rs_results: Optional[Dict[str, Any]] = None,
+    shell_forces: Optional[Dict[str, Dict[str, Any]]] = None,
     force_unit: str = "kN",
     length_unit: str = "m",
 ) -> str:
@@ -254,6 +274,7 @@ def write_results_npz(
         modal_result: Dict from ``run_modal_analysis()``.
         mode_shapes: Dict from ``extract_mode_shapes()``.
         rs_results: Dict with keys ``'rs_x'``, ``'rs_y'`` from ``run_rs()``.
+        shell_forces: Dict from ``extract_static_shell_forces()``.
         force_unit: Force unit string for metadata.
         length_unit: Length unit string for metadata.
 
@@ -278,6 +299,9 @@ def write_results_npz(
         if rs_results.get("rs_x") or rs_results.get("rs_y"):
             arrays.update(_collect_rs(
                 rs_results.get("rs_x"), rs_results.get("rs_y")))
+    if shell_forces:
+        analysis_types.append("shell_forces")
+        arrays.update(_collect_shell_forces(shell_forces))
 
     arrays["analysis_types"] = np.array(analysis_types, dtype=str)
     arrays["force_unit"] = np.array([force_unit], dtype=str)
