@@ -38,8 +38,8 @@ That function is the canonical runtime contract for the v3 pipeline.
 
 Its responsibilities are to:
 
-1. parse the source `SAPModelData`
-2. preprocess once into a reusable `MeshModel`
+1. accept already-parsed `SAPModelData` from the caller (parsing is caller-owned)
+2. preprocess the provided data once into a reusable `MeshModel`
 3. run the analysis cases through the `AnalysisManager` / `AnalysisBuilder`
    path
 4. return a standard result dictionary

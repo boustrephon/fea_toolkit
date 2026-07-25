@@ -405,17 +405,23 @@ brace_ids = set(sel.get_frame_ids(model))
 # Or manually
 brace_ids = {'10', '11', '12'}
 
-# Configure the builder
+# Preprocess model with brace subdivision already configured
 from fea_toolkit.opensees.preprocessor import preprocess_model
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
-mm = preprocess_model(model_data)
+mm = preprocess_model(model_data, config={
+    'brace_ids': brace_ids,
+    'brace_n_segments': 4,
+    'brace_imperfection_ratio': 1/500,
+})
+
 builder = AnalysisBuilder(mm, {
     'element_type': 'dispBeamColumn',
     'create_fiber_sections': True,
     'geom_transf_type': 'Corotational',  # required for buckling
     'split_elements': True,
 })
+# set_brace_selection retained only for downstream buckling checks
 builder.set_brace_selection(brace_ids)
 
 # Check Euler buckling before running pushover (analytical, no Ops needed)
