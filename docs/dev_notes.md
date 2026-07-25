@@ -80,7 +80,6 @@
 - plot_npz_force_diagram() — 2D matplotlib force vs elevation from NPZ
 - plot_npz_moment_3d() — 3D PyVista force/moment diagram from NPZ
 - _load_npz_for_plotting() helper — loads NPZ, builds element-centric dict with coordinates and forces
-- Both are standalone (no OpenSeesBuilder needed), support local/global forces, flag/tube modes
 
 ## NPZ → Rhino colouring (rhino/colour_from_npz.py)
 - colour_from_npz() matches SAP_FrameID UserStrings to NPZ sap_ids, colours by force quantity

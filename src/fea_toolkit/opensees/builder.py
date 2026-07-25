@@ -27,8 +27,12 @@ removed.  Use the two-stage pipeline instead::
     results = builder.run_static_analysis()
 """
 
-from typing import Dict, Any, Optional, List, Tuple
+import math
+from typing import TYPE_CHECKING, Dict, Any, Optional, List, Tuple
 from ..model.sap_data import SAPModelData
+
+if TYPE_CHECKING:
+    from ..model.mesh_model import MeshModel
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -638,9 +642,11 @@ def pushover_tcl(
         # Adaptive pushover with algorithm fallback chain
         dU = f"[expr {max_disp:.6g} / {num_steps}]"
         lines.extend([
+            f"set control_node {control_node}",
+            f"set dof {dof}",
             "set dU_base " + dU,
             "set dU $dU_base",
-            f"integrator DisplacementControl {control_node} {dof} $dU",
+            "integrator DisplacementControl $control_node $dof $dU",
             "analysis Static",
             "",
             f"set targetDisp {max_disp:.6g}",
@@ -672,7 +678,7 @@ def pushover_tcl(
             '    if {$ok != 0} {',
             "        puts \"   Step cut from $dU to [expr $dU * 0.1]\"",
             "        set dU [expr $dU * 0.1]",
-            f"        integrator DisplacementControl {control_node} {dof} $dU",
+            "        integrator DisplacementControl $control_node $dof $dU",
             "        algorithm Newton",
             "        set ok [analyze 1]",
             "    }",
@@ -685,7 +691,7 @@ def pushover_tcl(
             "    # Restore step size when possible",
             "    if {$dU < $dU_base} {",
             "        set dU $dU_base",
-            f"        integrator DisplacementControl {control_node} {dof} $dU",
+            "        integrator DisplacementControl $control_node $dof $dU",
             "    }",
             "",
             "    set currentDisp [nodeDisp $control_node $dof]",
@@ -733,3 +739,116 @@ def pushover_tcl(
     ])
 
     return "\n".join(lines)
+
+
+def mesh_model_to_gravity_loads(
+    mesh_model: "MeshModel",
+    pattern_names: Optional[list[str]] = None,
+    g: float = 9.81,
+) -> Dict[int, tuple]:
+    """Convert MeshModel load patterns to ``{node_tag: (fx, fy, fz)}``
+    dict suitable for passing as *gravity_loads* to :func:`pushover_tcl`.
+
+    Args:
+        mesh_model: The preprocessed ``MeshModel``.
+        pattern_names: List of load pattern names to include.
+            If ``None``, all patterns with type ``"Dead"`` or
+            containing ``"DEAD"`` are used.
+        g: Gravitational acceleration.
+
+    Returns:
+        Dict mapping node_tag -> (0, 0, -force_z) for gravity direction.
+    """
+    from collections import defaultdict
+
+    if pattern_names is None:
+        pattern_names = [
+            pn for pn, lp in mesh_model.load_patterns.items()
+            if "DEAD" in pn.upper() or lp.pattern_type == "Dead"
+        ]
+
+    pattern_set = set(pattern_names)
+    node_mass: Dict[int, float] = defaultdict(float)
+    for gl in mesh_model.frame_gravity_loads:
+        if gl.pattern not in pattern_set:
+            continue
+        fe = mesh_model.frame_elements.get(gl.frame_id)
+        if fe is None or getattr(fe, "inactive", False):
+            continue
+        ni = mesh_model.nodes.get(fe.node_i)
+        nj = mesh_model.nodes.get(fe.node_j)
+        if ni is None or nj is None:
+            continue
+        sec_name = mesh_model.frame_assignments.get(gl.frame_id, "")
+        sec = mesh_model.sections.get(sec_name) if sec_name else None
+        if sec is not None and sec.A > 0:
+            dx = nj.x - ni.x; dy = nj.y - ni.y; dz = nj.z - ni.z
+            length = math.sqrt(dx*dx + dy*dy + dz*dz)
+            mat = mesh_model.materials.get(sec.material)
+            density = mat.unit_weight / g if mat and mat.unit_weight > 0 else 2400.0
+            elem_mass = sec.A * length * density
+            half = elem_mass * abs(gl.multiplier_z) * 0.5
+            node_mass[ni.node_tag] += half
+            node_mass[nj.node_tag] += half
+
+    for jl in mesh_model.joint_loads:
+        if jl.pattern not in pattern_set:
+            continue
+        nd = mesh_model.nodes.get(jl.node_id)
+        if nd is None:
+            continue
+        node_mass[nd.node_tag] += jl.fz / g if g > 0 else jl.fz
+
+    gravity_loads: Dict[int, tuple] = {}
+    for tag, mass in node_mass.items():
+        gravity_loads[tag] = (0.0, 0.0, -mass * g)
+
+    return gravity_loads
+
+
+def modal_to_lateral_loads(
+    mesh_model: "MeshModel",
+    modal_data: dict,
+    direction: str = "X",
+) -> Dict[int, tuple]:
+    """Generate mode-1 proportional lateral loads from modal results.
+
+    Args:
+        mesh_model: Preprocessed model data.
+        modal_data: Dict from ``run_modal_analysis()``.
+        direction: ``"X"`` (dof 1), ``"Y"`` (dof 2), or ``"Z"`` (dof 3).
+
+    Returns:
+        ``{node_tag: (fx, fy, fz)}`` with mode1-proportional loads
+        normalised so that ``sum(|fx|) = 1.0`` (unit reference load).
+    """
+    dof_idx = {"X": 0, "Y": 1, "Z": 2}.get(direction.upper(), 0)
+    shapes = modal_data.get("shapes", modal_data.get("mode_shapes", {}))
+    if not shapes:
+        loads: Dict[int, tuple] = {}
+        for nd in mesh_model.nodes.values():
+            fx = 1.0 if direction.upper() == "X" else 0.0
+            fy = 1.0 if direction.upper() == "Y" else 0.0
+            fz = 1.0 if direction.upper() == "Z" else 0.0
+            loads[nd.node_tag] = (fx, fy, fz)
+        return loads
+
+    mode1 = shapes.get(0, shapes.get(1, {}))
+    loads = {}
+    total = 0.0
+    for nd in mesh_model.nodes.values():
+        phi = abs(mode1.get(nd.node_tag, (1.0, 0.0, 0.0))[dof_idx])
+        mass = getattr(nd, "mass", 1.0) or 1.0
+        w = mass * phi
+        f = [0.0, 0.0, 0.0]
+        f[dof_idx] = w
+        loads[nd.node_tag] = tuple(f)
+        total += w
+
+    if total > 1e-12:
+        for tag in loads:
+            f = list(loads[tag])
+            f = [v / total for v in f]
+            loads[tag] = tuple(f)
+
+    return loads

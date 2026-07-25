@@ -39,10 +39,11 @@ from __future__ import annotations
 import copy
 import keyword
 import os
+import re
 import subprocess
 import sys
 import types
-from typing import Any
+from typing import Any, Dict, Optional
 
 import numpy as np
 
@@ -377,10 +378,13 @@ class XaraTclRunner:
                 code is non-zero.
         """
         try:
+            # Run from the Tcl file's directory so recorder output
+            # files are written alongside the .tcl file.
+            tcl_dir = os.path.dirname(os.path.abspath(tcl_path))
             result = subprocess.run(
                 [self._tclsh, tcl_path],
                 capture_output=True, text=True, timeout=timeout,
-                check=check,
+                check=check, cwd=tcl_dir,
             )
             if result.stderr:
                 print(result.stderr, file=sys.stderr)
@@ -423,11 +427,12 @@ class XaraTclRunner:
                     return result.stdout.strip()
             except FileNotFoundError:
                 continue
-        # Common Homebrew / Miniforge locations
+        # Common Homebrew / Miniforge / custom build locations
         for candidate in [
             "/Users/andrew/miniforge3/bin/tclsh8.6",
             "/opt/homebrew/bin/tclsh8.6",
             "/usr/local/bin/tclsh8.6",
+            "/Users/andrew/miniforge3/envs/opensees/bin/tclsh8.6",
         ]:
             if os.path.exists(candidate):
                 return candidate
@@ -544,6 +549,17 @@ def export_mesh_model_to_tcl(
             tags = " ".join(str(int(x)) for x in r.dofs)
             lines.append(f"fix {nd.node_tag} {tags}")
 
+    # ── Determine which materials are used by fiber sections ────
+    # These will get nonlinear materials later — skip Elastic here.
+    _fiber_mat_names: set[str] = set()
+    if config.get("create_fiber_sections", False):
+        for sec_name, sec in mesh_model.sections.items():
+            try:
+                sec.to_fiber_patches(mat_tag=1)
+                _fiber_mat_names.add(sec.material)
+            except NotImplementedError:
+                pass
+
     # ── Materials ────────────────────────────────────────────────
     if mesh_model.materials:
         lines.append("")
@@ -551,6 +567,9 @@ def export_mesh_model_to_tcl(
         for mat_name, mat in mesh_model.materials.items():
             tag = mat_tags.get(mat_name)
             if tag is None:
+                continue
+            # Skip Elastic if this material will be replaced by nonlinear fiber materials
+            if mat_name in _fiber_mat_names:
                 continue
             if mat.type and "concrete" in mat.type.lower():
                 Fc = (mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7) / 1.0
@@ -570,20 +589,36 @@ def export_mesh_model_to_tcl(
                     f"{Fy:g} {E_mod:g} 0.01"
                 )
 
+    # ── Determine which sections are actually used by frame elements ──
+    _assigned_to_frames: set[str] = set()
+    for eid, elem in mesh_model.frame_elements.items():
+        if getattr(elem, "inactive", False):
+            continue
+        sn = mesh_model.frame_assignments.get(eid, "")
+        if sn:
+            _assigned_to_frames.add(sn)
+
     # ── Frame sections ───────────────────────────────────────────
     if mesh_model.sections:
         lines.append("")
         lines.append("# ── Frame sections ──")
 
-        # Detect fiber-capable sections
+        # Detect fiber-capable sections that are actually used
         fiber_sec_names: set[str] = set()
         if config.get("create_fiber_sections", False):
             for sec_name, sec in mesh_model.sections.items():
+                if sec_name not in _assigned_to_frames:
+                    continue  # skip unused sections
                 try:
                     sec.to_fiber_patches(mat_tag=1)
                     fiber_sec_names.add(sec_name)
                 except NotImplementedError:
                     pass
+
+        # ── Track which (material, is_rc) groups have emitted nonlinear mats ──
+        # _rc_mat_tags[mat_name] = (concrete_unconf, concrete_conf, rebar_tag)
+        _rc_mat_tags: dict[str, tuple[int, int, int]] = {}
+        _next_mat_tag = max(mat_tags.values(), default=0) + 1
 
         for sec_name, sec in mesh_model.sections.items():
             tag = sec_tags.get(sec_name)
@@ -592,9 +627,6 @@ def export_mesh_model_to_tcl(
 
             if sec_name in fiber_sec_names:
                 # ── Fiber section ──
-                # Need a material tag for the fiber patch materials.
-                # For steel sections: use the existing Steel01 tag.
-                # For RC sections: generate Concrete01 + Steel02 inline.
                 mat = mesh_model.materials.get(sec.material)
 
                 from ..model.sap_data import (
@@ -609,56 +641,89 @@ def export_mesh_model_to_tcl(
                 ))
 
                 if is_rc:
-                    # Generate RC fiber materials
-                    next_mat_tag = max(mat_tags.values(), default=0) + 1
-                    concrete_unconf = next_mat_tag
-                    concrete_conf = next_mat_tag + 1
-                    rebar_tag = next_mat_tag + 2
-                    next_mat_tag += 3
+                    # Emit RC fiber materials ONCE per material, not per section
+                    if sec.material not in _rc_mat_tags:
+                        concrete_unconf = _next_mat_tag
+                        concrete_conf = _next_mat_tag + 1
+                        rebar_tag = _next_mat_tag + 2
+                        _next_mat_tag += 3
+                        _rc_mat_tags[sec.material] = (concrete_unconf, concrete_conf, rebar_tag)
 
-                    if mat is not None:
-                        Fc = mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7
-                        epsc = 0.002
-                        fcc = mat.eFc if mat.eFc and mat.eFc > 0 else Fc * 1.3
-                        epscc = 0.005
-                        Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
+                        if mat is not None:
+                            Fc = mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7
+                            epsc = 0.002
+                            fcc = mat.eFc if mat.eFc and mat.eFc > 0 else Fc * 1.3
+                            epscc = 0.005
+                            Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
+                        else:
+                            Fc = 3.0e7
+                            epsc = 0.002
+                            fcc = 3.9e7
+                            epscc = 0.005
+                            Fy = 4.0e8
+
+                        lines.append(
+                            f"uniaxialMaterial Concrete01 {concrete_unconf} "
+                            f"{-Fc:g} {-epsc:g} {-0.2*Fc:g} {-0.006:g}"
+                        )
+                        lines.append(
+                            f"uniaxialMaterial Concrete01 {concrete_conf} "
+                            f"{-fcc:g} {-epscc:g} {-0.2*fcc:g} {-0.02:g}"
+                        )
+                        lines.append(
+                            f"uniaxialMaterial Steel02 {rebar_tag} "
+                            f"{Fy:g} {2.0e11:g} 0.01 18.5 0.925 0.15"
+                        )
                     else:
-                        Fc = 3.0e7
-                        epsc = 0.002
-                        fcc = 3.9e7
-                        epscc = 0.005
-                        Fy = 4.0e8
-
-                    lines.append(
-                        f"uniaxialMaterial Concrete01 {concrete_unconf} "
-                        f"{-Fc:g} {-epsc:g} {-0.2*Fc:g} {-0.006:g}"
-                    )
-                    lines.append(
-                        f"uniaxialMaterial Concrete01 {concrete_conf} "
-                        f"{-fcc:g} {-epscc:g} {-0.2*fcc:g} {-0.02:g}"
-                    )
-                    lines.append(
-                        f"uniaxialMaterial Steel02 {rebar_tag} "
-                        f"{Fy:g} {2.0e11:g} 0.01 18.5 0.925 0.15"
-                    )
+                        concrete_unconf, concrete_conf, rebar_tag = _rc_mat_tags[sec.material]
                     fiber_mat_tag = concrete_unconf
                 else:
-                    # Steel fiber section — use existing material tag
-                    mat_tag = mat_tags.get(sec.material, 1)
-                    fiber_mat_tag = mat_tag
+                    # Steel fiber section — emit Steel01 if not already done
+                    if sec.material not in _rc_mat_tags:
+                        tag_for_steel = mat_tags.get(sec.material, 1)
+                        _rc_mat_tags[sec.material] = (tag_for_steel, 0, 0)
+                        if mat is not None and hasattr(mat, "type") and mat.type and mat.type.lower() == "steel":
+                            Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
+                            E_mod = mat.E_mod if mat.E_mod > 0 else 2.0e11
+                        else:
+                            Fy = 2.5e8
+                            E_mod = 2.0e11
+                        lines.append(
+                            f"uniaxialMaterial Steel01 {tag_for_steel} "
+                            f"{Fy:g} {E_mod:g} 0.01"
+                        )
+                    fiber_mat_tag = mat_tags.get(sec.material, 1)
 
                 # Build fiber patches
                 patches = sec.to_fiber_patches(mat_tag=fiber_mat_tag)
-                lines.append(f"section Fiber {tag} {{")
-                for patch in patches:
-                    cmd, mtag, nfy, nfz, y1, z1, y2, z2 = patch
-                    lines.append(
-                        f"  patch {cmd} {mtag} {nfy} {nfz} "
-                        f"{y1:g} {z1:g} {y2:g} {z2:g}"
-                    )
+                # GJ torsional rigidity for 3D fiber sections (Xara requirement)
+                _G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * (mat.E_mod if mat and mat.E_mod > 0 else 2.0e11)
+                gj = _G * sec.J
+                lines.append(f"section Fiber {tag} -GJ {gj:g} {{")
+                for entry in patches:
+                    if entry[0] == "rect":
+                        # patch rect $matTag $numSubdivY $numSubdivZ $yI $zI $yJ $zJ
+                        lines.append(
+                            f"  patch rect {entry[1]} {entry[2]} {entry[3]} "
+                            f"{entry[4]:g} {entry[5]:g} {entry[6]:g} {entry[7]:g}"
+                        )
+                    elif entry[0] == "circ":
+                        lines.append(
+                            f"  patch circ {entry[1]} {entry[2]} {entry[3]} "
+                            f"{entry[4]:g} {entry[5]:g} {entry[6]:g} {entry[7]:g}"
+                        )
+                    elif entry[0] == "straight":
+                        # layer straight $matTag $numBars $area $yStart $zStart $yEnd $zEnd
+                        parts = [str(x) for x in entry[1:]]
+                        lines.append(f"  layer straight {' '.join(parts)}")
+                    elif entry[0] == "circ_layer":
+                        parts = [str(x) for x in entry[1:]]
+                        lines.append(f"  layer circ {' '.join(parts)}")
                 lines.append("}")
             else:
-                # ── Elastic section ──
+                # ── Elastic section (skip shell sections — handled below) ──
+                if hasattr(sec, 'shape') and sec.shape == 'Shell':
+                    continue
                 E_mod = 2.0e11
                 mat = mesh_model.materials.get(sec.material)
                 if mat and mat.E_mod and mat.E_mod > 0:
@@ -700,7 +765,7 @@ def export_mesh_model_to_tcl(
                 mat = mesh_model.materials.get(area_sec.material)
                 if mat and mat.E_mod and mat.E_mod > 0:
                     E_mod = mat.E_mod
-                nu = mat.Nu if mat and mat.Nu and mat.Nu > 0 else 0.2
+                nu = mat.nu if mat and mat.nu and mat.nu > 0 else 0.2
                 t = getattr(area_sec, "thickness", getattr(area_sec, "t", 0.2))
                 lines.append(
                     f"section ElasticMembranePlateSection "
@@ -712,11 +777,11 @@ def export_mesh_model_to_tcl(
                     f"{shell_sec_tags[sec_name]} 2.0e11 0.2 0.2"
                 )
 
-        # Area elements
+        # Area elements — use offset tag to avoid colliding with frame elements
+        _shell_elem_tag_offset = 100_000
         for aid, elem in mesh_model.area_elements.items():
             if getattr(elem, "inactive", False):
                 continue
-            # Resolve node tags
             n_tags = []
             for nid in elem.node_ids:
                 nd = mesh_model.nodes.get(nid)
@@ -727,15 +792,16 @@ def export_mesh_model_to_tcl(
             stag = shell_sec_tags.get(
                 mesh_model.area_assignments.get(aid, ""), 1
             )
+            el_tag = _shell_elem_tag_offset + elem.area_tag
             nn = len(n_tags)
             if nn == 4:
                 lines.append(
-                    f"element ShellMITC4 {elem.area_tag} "
+                    f"element ShellMITC4 {el_tag} "
                     f"{' '.join(n_tags)} {stag}"
                 )
             elif nn == 3:
                 lines.append(
-                    f"element ShellDKGT {elem.area_tag} "
+                    f"element ShellDKGT {el_tag} "
                     f"{' '.join(n_tags)} {stag}"
                 )
 
@@ -746,6 +812,7 @@ def export_mesh_model_to_tcl(
 
         # Build frame tag map
         frame_tag_map: dict[str, int] = {}
+        _created_transf_tags: set[int] = set()
         next_tag = 1
         used_tags: set[int] = set()
         for eid, elem in mesh_model.frame_elements.items():
@@ -771,6 +838,9 @@ def export_mesh_model_to_tcl(
             if ni is None or nj is None:
                 continue
 
+            el_tag = frame_tag_map.get(eid, elem.elem_tag)
+            sec_tag = sec_tags.get(sec_name, 1)
+
             # Geometric transformation
             dx = nj.x - ni.x
             dy = nj.y - ni.y
@@ -779,12 +849,21 @@ def export_mesh_model_to_tcl(
                 vecxz = "1 0 0"
             else:
                 vecxz = "0 0 1"
-            transf_tag = 20000 + elem.elem_tag
-            transf_type = config.get("geom_transf_type", "Linear") if config else "Linear"
-            lines.append(f"geomTransf {transf_type} {transf_tag} {vecxz}")
-
-            el_tag = frame_tag_map.get(eid, elem.elem_tag)
-            sec_tag = sec_tags.get(sec_name, 1)
+            # Determine root element for geomTransf: split children share
+            # the parent's orientation, so they share the parent's transf_tag.
+            # Build id→tag lookup for finding the parent's numeric tag.
+            _parent_id = getattr(elem, 'parent_id', None)
+            if _parent_id is not None and _parent_id in frame_tag_map:
+                _root_el_tag = frame_tag_map[_parent_id]
+            else:
+                _root_el_tag = el_tag
+            _transf_base = 20000
+            transf_tag = _transf_base + _root_el_tag
+            # Avoid redundant geomTransf for split children sharing same parent
+            if transf_tag not in _created_transf_tags:
+                _created_transf_tags.add(transf_tag)
+                transf_type = config.get("geom_transf_type", "Linear") if config else "Linear"
+                lines.append(f"geomTransf {transf_type} {transf_tag} {vecxz}")
 
             if config.get("create_fiber_sections", False) and sec_name in fiber_sec_names:
                 # Nonlinear beam-column with fiber section
@@ -819,3 +898,103 @@ def export_mesh_model_to_tcl(
     with open(path, "w") as f:
         f.write("\n".join(lines))
         f.write("\n")
+
+
+def parse_pushover_results(
+    disp_path: str,
+    bs_path: str,
+    reaction_path: Optional[str] = None,
+) -> Dict[str, np.ndarray]:
+    """Parse pushover Tcl recorder output files into numpy arrays.
+
+    Reads the output files generated by :func:`pushover_tcl`:
+
+    - **disp_path**: ``{output_prefix}_disp.out`` — one line per step
+      with ``time`` and ``disp`` columns.  The control node displacement
+      array is the second column.
+    - **bs_path**: ``{output_prefix}_bs.out`` — a single line with
+      three values ``rx ry rz`` representing the total base reactions.
+    - **reaction_path**: ``{output_prefix}_reaction.out`` — optional,
+      one line per step with time and the three reaction components
+      at the base node.
+
+    Returns
+    -------
+    dict
+        Keys:
+        - ``"control_disp"`` — 1-D ndarray of control node displacement
+          at each converged step (from *disp_path*).
+        - ``"base_shear"`` — 1-D ndarray of base shear (Rx) at each
+          step.  If *disp_path* has N rows and *bs_path* has a single
+          scalar, the single value is broadcast to match *control_disp*.
+        - ``"step"`` — 1-D ndarray of step indices (1, 2, ..., N).
+        - ``"base_rx"``, ``"base_ry"``, ``"base_rz"`` — scalar final
+          base reaction components (from *bs_path*).
+
+    Raises
+    ------
+    FileNotFoundError
+        If *disp_path* or *bs_path* does not exist.
+    ValueError
+        If the files cannot be parsed as numeric data.
+    """
+    # ── Displacement ─────────────────────────────────────────────
+    disp_data = np.genfromtxt(disp_path, invalid_raise=False)
+    if disp_data.ndim == 1:
+        # Single column of displacements (no time column)
+        control_disp = disp_data
+    elif disp_data.ndim >= 2:
+        # First column is time, second is displacement
+        control_disp = disp_data[:, 1]
+    else:
+        raise ValueError(f"Cannot parse displacement file: {disp_path}")
+
+    n_steps = len(control_disp)
+
+    # ── Base shear ───────────────────────────────────────────────
+    bs_data = np.genfromtxt(bs_path, invalid_raise=False)
+    if bs_data.ndim == 0:
+        # Single scalar
+        base_shear = np.full(n_steps, float(bs_data))
+    elif bs_data.ndim == 1 and len(bs_data) == 3:
+        # Three components: rx, ry, rz
+        base_shear = np.full(n_steps, float(bs_data[0]))
+    else:
+        # Multi-row: one per step
+        base_shear = np.asarray(bs_data, dtype=float)
+
+    # Broadcast if needed
+    if len(base_shear) == 1 and n_steps > 1:
+        base_shear = np.full(n_steps, base_shear[0])
+    elif len(base_shear) != n_steps:
+        base_shear = np.full(n_steps, float(bs_data[0]) if bs_data.ndim == 0 else float(bs_data[0]))
+
+    # ── Step indices ─────────────────────────────────────────────
+    step = np.arange(1, n_steps + 1, dtype=int)
+
+    result: Dict[str, np.ndarray] = {
+        "control_disp": control_disp,
+        "base_shear": base_shear,
+        "step": step,
+    }
+
+    # ── Final base reactions (single scalar from bs_path) ────────
+    if bs_data.ndim == 1 and len(bs_data) == 3:
+        result["base_rx"] = np.array([bs_data[0]])
+        result["base_ry"] = np.array([bs_data[1]])
+        result["base_rz"] = np.array([bs_data[2]])
+    elif bs_data.ndim == 0:
+        result["base_rx"] = np.array([float(bs_data)])
+
+    # ── Optional: per-step reaction file ─────────────────────────
+    if reaction_path and os.path.exists(reaction_path):
+        try:
+            rx_data = np.genfromtxt(reaction_path, invalid_raise=False)
+            if rx_data.ndim >= 2:
+                result["reaction_rx"] = rx_data[:, 1]
+                result["reaction_ry"] = rx_data[:, 2] if rx_data.shape[1] >= 3 else rx_data[:, 1]
+                result["reaction_rz"] = rx_data[:, 3] if rx_data.shape[1] >= 4 else rx_data[:, 1]
+        except Exception:
+            pass
+
+    return result
