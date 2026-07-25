@@ -11,7 +11,7 @@ is not installed.
 
 import warnings
 from pathlib import Path
-from typing import Dict, List, Optional, Any, TYPE_CHECKING
+from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
 import math
 import numpy as np
 
@@ -3509,7 +3509,7 @@ def plot_npz_force_diagram(
     combo: str = None,
     title: Optional[str] = None,
     figsize: tuple = (8, 6),
-) -> "Figure":
+) -> "plt.Figure":
     """2D diagram of a local force quantity vs elevation from an NPZ file.
 
     This is a **standalone** function — it does **not** require any
