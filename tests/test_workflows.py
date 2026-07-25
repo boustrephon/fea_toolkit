@@ -1264,6 +1264,9 @@ class TestShellSubdivision:
 class TestHdf5RoundTrip:
     """Verify HDF5 write → read produces the same data as NPZ."""
 
+    def setup_method(self):
+        pytest.importorskip("h5py")
+
     def test_write_hdf5_and_read_back(self, tmp_path):
         """Write a minimal schema dict to HDF5 and read it back.
 
