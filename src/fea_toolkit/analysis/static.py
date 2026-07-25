@@ -79,7 +79,7 @@ class StaticAnalysis(Analysis):
         )
         return AnalysisResult(
             name=self.name,
-            analysis_type="linear",
+            analysis_type="StaticAnalysis",
             data={
                 "df_linear": df_linear,
             },
