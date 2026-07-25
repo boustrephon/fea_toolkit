@@ -27,9 +27,12 @@ builder.create_loads({"DEAD": 1.0})
 results = builder.run_static_analysis()
 ```
 
-The legacy ``OpenSeesBuilder`` class has been removed.  All features
-(brace subdivision, lumped hinges, Tcl export, buckling checks) are
-available directly on ``AnalysisBuilder`` or as standalone functions.
+The legacy ``OpenSeesBuilder`` class has been removed.  Brace
+subdivision is now handled by :class:`~fea_toolkit.opensees.preprocessor.Preprocessor`
+(performed **once** before the builder is created).  Lumped hinges,
+Tcl export, and buckling checks are available directly on
+:class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder`
+or as standalone functions.
 
 ---
 

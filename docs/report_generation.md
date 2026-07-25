@@ -712,7 +712,7 @@ development.
 
 ### Motivation
 
-The original ``AnalysisBuilder`` (legacy single-stage path) did all
+The original ``OpenSeesBuilder`` (legacy single-stage path) did all
 topology work (frame splitting, area meshing, node merging, edge
 detection) **every time** a builder was created.  Each analysis case
 (static, modal, pushover) repeated the same expensive operations.
@@ -873,6 +873,7 @@ def generate_report(config_path: str):
     # ── Phase 2: Analyses ─────────────────────────────────────────
     # Global builder defaults (applied to every analysis unless overridden)
     global_builder = cfg.get("builder", {})
+    mm = preprocess_model(md)
 
     for analysis_name, analysis_cfg in cfg["analyses"].items():
         if not analysis_cfg.get("enabled", False):
@@ -881,7 +882,6 @@ def generate_report(config_path: str):
         # Merge per-analysis builder overrides on top of global defaults
         analysis_builder = dict(global_builder)
         analysis_builder.update(analysis_cfg.get("builder", {}))
-        mm = preprocess_model(md)
         builder = AnalysisBuilder(mm, analysis_builder)
         builder.build_domain()
 
