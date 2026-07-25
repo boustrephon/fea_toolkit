@@ -427,25 +427,30 @@ def compute_asce41_hinge_length(
 
     fy_mpa = fy / 1e6
     fc_mpa = (mat.Fc / 1e6) if mat.Fc and mat.Fc > 0 else 25.0
-    # ASCE 41 d_b: beam depth for steel moment frames, section depth
-    # for RC, bar diameter for braces.  Priority: depth → bar_dia → tf → t.
-    if hasattr(sec, 'depth') and getattr(sec, 'depth', 0) > 0:
-        db = sec.depth * _to_mm        # ISection, RectangularSection, etc.
-    elif hasattr(sec, 'top_bar_dia') and getattr(sec, 'top_bar_dia', 0) > 0:
-        db = sec.top_bar_dia * _to_mm  # RC top reinforcement
-    elif hasattr(sec, 'bar_dia') and getattr(sec, 'bar_dia', 0) > 0:
-        db = sec.bar_dia * _to_mm      # RC general rebar
-    elif hasattr(sec, 'od') and getattr(sec, 'od', 0) > 0:
-        db = sec.od * _to_mm           # Pipe/brace outer diameter
-    elif hasattr(sec, 'tf') and getattr(sec, 'tf', 0) > 0:
-        db = sec.tf * _to_mm           # Flange thickness (I-section)
-    elif hasattr(sec, 't') and getattr(sec, 't', 0) > 0:
-        db = sec.t * _to_mm            # Generic thickness
-    else:
-        db = 20.0  # fallback bar diameter in mm (no unit conversion needed)
 
     is_concrete = hasattr(sec, 'cover')
     is_brace = hasattr(sec, 'od') or hasattr(sec, 't')
+
+    if is_concrete:
+        # ASCE 41-17 d_b = longitudinal rebar diameter (mm)
+        if hasattr(sec, 'top_bar_dia') and getattr(sec, 'top_bar_dia', 0) > 0:
+            db = sec.top_bar_dia * _to_mm
+        elif hasattr(sec, 'bar_dia') and getattr(sec, 'bar_dia', 0) > 0:
+            db = sec.bar_dia * _to_mm
+        else:
+            db = 20.0  # fallback rebar diameter in mm
+    else:
+        # Steel: db = section depth in the loading direction (mm)
+        if hasattr(sec, 'depth') and getattr(sec, 'depth', 0) > 0:
+            db = sec.depth * _to_mm
+        elif hasattr(sec, 'od') and getattr(sec, 'od', 0) > 0:
+            db = sec.od * _to_mm
+        elif hasattr(sec, 'tf') and getattr(sec, 'tf', 0) > 0:
+            db = sec.tf * _to_mm
+        elif hasattr(sec, 't') and getattr(sec, 't', 0) > 0:
+            db = sec.t * _to_mm
+        else:
+            db = 20.0  # fallback in mm
 
     if is_concrete:
         Lp = 0.05 * elem_length + 0.1 * db * fy_mpa / (fc_mpa ** 0.5) / 1000.0

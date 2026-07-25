@@ -83,6 +83,7 @@ class AnalysisBuilder:
         self._next_variant_tag: int = (max(self.section_tags.values(), default=0) + 1
                                        if self.section_tags else 1)
         self._rigid_link_elems: Dict[str, int] = {}
+        self._shell_tag_map: Dict[str, int] = {}  # area SAP ID → OpenSees element tag
 
         # Brace state
         self._brace_selection: Optional[set] = None
@@ -1176,6 +1177,7 @@ class AnalysisBuilder:
                             node_tags[2], sec_tag)
             else:
                 ops.element('ShellMITC4', elem_tag, *node_tags[:4], sec_tag)
+            self._shell_tag_map[aid] = elem_tag
             shell_count += 1
 
         if self.config['verbose']:
@@ -1690,35 +1692,45 @@ class AnalysisBuilder:
                     f"Section '{sec_name}', material '{sec.material}'."
                 )
             else:
-                # Steel: use section yield moment
-                Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
-                E = mat.E_mod if mat.E_mod > 0 else 2.0e11
+                # Defensive defaults for nullable section values
+                Z33 = getattr(sec, 'Z33', None) or 0.0
+                Z22 = getattr(sec, 'Z22', None) or 0.0
+                I33 = getattr(sec, 'I33', None) or 0.0
+                I22 = getattr(sec, 'I22', None) or 0.0
+                A_val = getattr(sec, 'A', None) or 0.0
+                J_val = getattr(sec, 'J', None) or 0.0
+
+                # Guard against missing material
+                Fy = mat.Fy if mat and mat.Fy and mat.Fy > 0 else 2.5e8
+                E = mat.E_mod if mat and mat.E_mod > 0 else 2.0e11
+                G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * E
+
                 # Use section geometry for modulus fallback, never member length
-                if sec.Z33:
-                    My = Fy * sec.Z33
-                elif sec.I33 > 0 and sec.A > 0:
-                    d_eff = 2.0 * math.sqrt(sec.I33 / sec.A)  # 2× radius of gyration
-                    My = Fy * (sec.I33 / max(d_eff * 0.5, 1e-6))
+                if Z33 > 0:
+                    My = Fy * Z33
+                elif I33 > 0 and A_val > 0:
+                    d_eff = 2.0 * math.sqrt(I33 / A_val)  # 2× radius of gyration
+                    My = Fy * (I33 / max(d_eff * 0.5, 1e-6))
                 else:
                     My = Fy * 1e-4  # Minimal fallback
-                if sec.Z22:
-                    My_weak = Fy * sec.Z22
-                elif sec.I22 > 0 and sec.A > 0:
-                    d_eff = 2.0 * math.sqrt(sec.I22 / sec.A)
-                    My_weak = Fy * (sec.I22 / max(d_eff * 0.5, 1e-6))
+                if Z22 > 0:
+                    My_weak = Fy * Z22
+                elif I22 > 0 and A_val > 0:
+                    d_eff = 2.0 * math.sqrt(I22 / A_val)
+                    My_weak = Fy * (I22 / max(d_eff * 0.5, 1e-6))
                 else:
                     My_weak = Fy * 1e-4
 
             # ASCE 41 plastic hinge length for yield rotation scaling
             from ..model.checks import compute_asce41_hinge_length
             Lp = compute_asce41_hinge_length(self.mesh_model, sec_name, L)
-            theta_y = (My * Lp) / (max(6.0 * E * sec.I33, 1e-12)) if E * sec.I33 > 0 else 0.005
-            theta_y_weak = (My_weak * Lp) / (max(6.0 * E * sec.I22, 1e-12)) if E * sec.I22 > 0 else 0.005
+            theta_y = (My * Lp) / (max(6.0 * E * max(I33, 1e-12), 1e-12)) if E * max(I33, 1e-12) > 0 else 0.005
+            theta_y_weak = (My_weak * Lp) / (max(6.0 * E * max(I22, 1e-12), 1e-12)) if E * max(I22, 1e-12) > 0 else 0.005
             theta_cap = theta_y * 6.0
             theta_cap_weak = theta_y_weak * 6.0
 
             # Axial material (elastic)
-            ops.uniaxialMaterial('Elastic', hinge_mat_tag, sec.A * E / L)
+            ops.uniaxialMaterial('Elastic', hinge_mat_tag, max(A_val, 1e-6) * E / L)
             # Strong-axis moment (Hysteretic backbone)
             ops.uniaxialMaterial('Hysteretic', hinge_mat_tag + 1,
                                  My, theta_y, My * 1.1, theta_cap,
@@ -1730,9 +1742,8 @@ class AnalysisBuilder:
                                  -My_weak, -theta_y_weak, -My_weak * 1.1, -theta_cap_weak,
                                  1.0, 1.0, 0.0, 0.0, 0.0)
             # Torsion (elastic — no inelastic torsion expected)
-            G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * E
             ops.uniaxialMaterial('Elastic', hinge_mat_tag + 3,
-                                 G * sec.J / L if sec.J else 1e6)
+                                 G * max(J_val, 1e-6) / L if J_val else G * 1e-6 / L)
 
             ops.section('Aggregator', hinge_sec_tag,
                         hinge_mat_tag, 'P',
@@ -3351,6 +3362,64 @@ class AnalysisBuilder:
                 'Mx': m_i_global[0], 'My': m_i_global[1], 'Mz': m_i_global[2],
                 'Fx_j': f_j_global[0], 'Fy_j': f_j_global[1], 'Fz_j': f_j_global[2],
                 'Mx_j': m_j_global[0], 'My_j': m_j_global[1], 'Mz_j': m_j_global[2],
+            }
+        return results
+
+    def extract_static_shell_forces(self) -> Dict[str, Dict[str, Any]]:
+        """Extract shell element forces after a static analysis.
+
+        For each active (non-inactive, non-loads-only) area element,
+        queries ``ops.eleResponse(tag, 'forces')`` and returns the
+        local stress resultants (membrane + bending per unit width).
+
+        ShellMITC4 returns 8 floats per element::
+
+            [fx, fy, fxy, mx, my, mxy, ?, ?]
+
+        The first six are the local force and moment resultants (per
+        unit width).  The last two are element volume and thickness
+        (not force resultants).
+
+        Must be called **after** :meth:`run_static_analysis`.
+
+        Returns
+        -------
+        dict
+            ``{area_sap_id: {
+                'elem_tag': int,
+                'node_tags': list[int],
+                'sec_name': str,
+                'fx': float,   # membrane direct (force/width)
+                'fy': float,   # membrane direct (force/width)
+                'fxy': float,  # membrane shear (force/width)
+                'mx': float,   # bending moment (moment/width)
+                'my': float,   # bending moment (moment/width)
+                'mxy': float,  # twisting moment (moment/width)
+            }}``
+        """
+        results: Dict[str, Dict[str, Any]] = {}
+        areas = self.mesh_model.area_elements
+        loads_only = self.mesh_model.loads_only_area_ids
+        for aid, area in areas.items():
+            if aid in loads_only:
+                continue
+            if getattr(area, 'inactive', False):
+                continue
+            elem_tag = self._shell_tag_map.get(aid)
+            if elem_tag is None:
+                continue
+            try:
+                f = ops.eleResponse(elem_tag, 'forces')
+            except Exception:
+                continue
+            # ShellMITC4 returns [fx, fy, fxy, mx, my, mxy, ?, ?]
+            results[aid] = {
+                'elem_tag': elem_tag,
+                'node_tags': [nd.node_tag for nd_id in area.node_ids
+                              if (nd := self.mesh_model.nodes.get(nd_id)) is not None],
+                'sec_name': self.mesh_model.area_assignments.get(aid, ''),
+                'fx': f[0], 'fy': f[1], 'fxy': f[2],
+                'mx': f[3], 'my': f[4], 'mxy': f[5],
             }
         return results
 
