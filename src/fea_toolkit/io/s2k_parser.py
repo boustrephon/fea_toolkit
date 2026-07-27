@@ -11,6 +11,7 @@ from ..model.sap_data import (
     FrameElement, AreaElement, ShellSection, Group, LoadCase, LoadPattern,
     MassSource, JointLoad, FrameDistributedLoad, AreaUniformLoad, AreaGravityLoad,
     GravityLoad, FrameEndOffset, AreaMesh, AreaEdgeConstraint,
+    StressStrainCurve,
 )
 # from ..model.geometry import get_SAP_vecxz
 
@@ -281,7 +282,8 @@ class SAP2000Parser:
             frame_elements, sections, frame_assignments, frame_end_offsets,
         )
 
-        return SAPModelData(
+        # ── Build the model data ──────────────────────────────────
+        md = SAPModelData(
             nodes=nodes,
             restraints=restraints,
             materials=materials,
@@ -305,6 +307,13 @@ class SAP2000Parser:
             load_cases=load_cases,
             units=model_units,
         )
+
+        # ── Apply material defaults in-place ──────────────────────
+        # Every material is guaranteed non-zero values for E_mod, Fy,
+        # Fc, unit_weight, unit_mass etc. after this call.
+        md.apply_material_defaults()
+
+        return md
 
     def get_model_units(self) -> Dict[str, str]:
         """Extract the units used in the SAP2000 model.
@@ -412,8 +421,72 @@ class SAP2000Parser:
                 if G_mod == 0 and E_mod > 0 and nu > 0:
                     G_mod = E_mod / (2 * (1 + nu))
 
-                assert E_mod is not None and G_mod is not None and nu is not None
-                assert unit_weight is not None and unit_mass is not None
+                # ── Interactive checks on G_mod for type narrowing ──
+                # E_mod, G_mod, nu must be finite numbers at this point.
+                if E_mod is None or G_mod is None or nu is None:
+                    raise ValueError(
+                        f"Missing elastic constants for material {name}: "
+                        f"E={E_mod}, G={G_mod}, nu={nu}"
+                    )
+                if unit_weight is None or unit_mass is None:
+                    raise ValueError(
+                        f"Missing unit weight/mass for material {name}"
+                    )
+
+                # Compute G if missing
+                if G_mod == 0 and E_mod > 0 and nu > 0:
+                    G_mod = E_mod / (2 * (1 + nu))
+
+                # ── Extract effective yield / ultimate (from 03A / 03E) ──
+                eff_Fy = self._to_float(props.get("EffFy", None))
+                eff_Fu = self._to_float(props.get("EffFu", None))
+
+                # ── Extract StressStrainCurve parameters (from 03A/B/E/F/G) ──
+                # These keys are consumed into the structured ss_curve field
+                # and removed from extra to avoid duplication.
+                _curve_keys = {
+                    "SSCurveOpt", "SSHysType", "SHard", "SFc", "SCap",
+                    "SMax", "SRup", "FinalSlope", "CoupModType",
+                    "FAngle", "DAngle", "UseCTDef",
+                }
+                has_curve_data = bool(_curve_keys & props.keys())
+
+                if has_curve_data:
+                    ss_curve_opt = str(props.get("SSCurveOpt", "Simple"))
+                    ss_hys_type = str(props.get("SSHysType", "Kinematic"))
+                    s_hard = self._to_float(props.get("SHard", None))
+                    s_fc = self._to_float(props.get("SFc", None))
+                    s_cap = self._to_float(props.get("SCap", None))
+                    s_max = self._to_float(props.get("SMax", None))
+                    s_rup = self._to_float(props.get("SRup", None))
+                    final_slope = self._to_float(props.get("FinalSlope", None))
+                    coup_mod_type = str(props.get("CoupModType", "Von Mises"))
+                    f_angle = self._to_float(props.get("FAngle", None))
+                    d_angle = self._to_float(props.get("DAngle", None))
+                    raw_use_ct = str(props.get("UseCTDef", "No")).lower()
+                    use_ct_def = raw_use_ct in ("yes", "true")
+
+                    ss_curve = StressStrainCurve(
+                        ss_curve_opt=ss_curve_opt,
+                        ss_hys_type=ss_hys_type,
+                        s_hard=s_hard,
+                        s_fc=s_fc,
+                        s_cap=s_cap,
+                        s_max=s_max,
+                        s_rup=s_rup,
+                        final_slope=final_slope,
+                        coup_mod_type=coup_mod_type,
+                        f_angle=f_angle,
+                        d_angle=d_angle,
+                        use_ct_def=use_ct_def,
+                    )
+                else:
+                    ss_curve = None
+
+                # ── Remove consumed keys from extra ──
+                consumed_keys = {"EffFy", "EffFu"} | _curve_keys
+                clean_extra = {k: v for k, v in props.items()
+                               if k not in consumed_keys}
 
                 material = Material(
                     name=name,
@@ -428,7 +501,10 @@ class SAP2000Parser:
                     Fu=Fu,
                     Fc=Fc,
                     eFc=eFc,
-                    extra=props   # store everything else (damping, acceptance criteria, etc.)
+                    eff_Fy=eff_Fy,
+                    eff_Fu=eff_Fu,
+                    ss_curve=ss_curve,
+                    extra=clean_extra,
                 )
                 materials[name] = material
 

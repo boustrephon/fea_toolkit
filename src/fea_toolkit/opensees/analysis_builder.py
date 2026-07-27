@@ -22,7 +22,9 @@ from ..model.geometry import get_SAP_vecxz, get_local_axes
 from ..model.geometry import polygon_area_3d
 from ..model.tree_utils import collect_descendants
 from ..model.selection import Selection
-from ..utils import g_from_units, cqc_combine
+from ..utils import (
+    g_from_units, cqc_combine,
+)
 
 
 class AnalysisBuilder:
@@ -83,7 +85,7 @@ class AnalysisBuilder:
         self._next_variant_tag: int = (max(self.section_tags.values(), default=0) + 1
                                        if self.section_tags else 1)
         self._rigid_link_elems: Dict[str, int] = {}
-        self._shell_tag_map: Dict[str, int] = {}  # area SAP ID → OpenSees element tag
+        self._shell_tag_map: Dict[str, int] = {}  # area SAP ID → OpenSees element tag (reset at each build_domain())
 
         # Brace state
         self._brace_selection: Optional[set] = None
@@ -1044,9 +1046,14 @@ class AnalysisBuilder:
                 except NotImplementedError:
                     # Fall back to elastic — no Fiber section was created,
                     # so no tag collision with the Elastic replacement.
-                    if self.config.get('verbose', False):
-                        print(f"  Section {tag} ({sec.name}): fiber not supported, "
-                              f"falling back to elastic")
+                    import warnings
+                    warnings.warn(
+                        f"Section '{sec.name}' (tag {tag}) does not support fiber "
+                        f"patches — using elastic section instead. "
+                        f"This may indicate a mixed steel/RC model where some "
+                        f"sections lack fiber conversion.",
+                        UserWarning, stacklevel=2,
+                    )
                     ops.section('Elastic', tag, E_mod, _A, _I33, _I22, G_mod, _J)
                     return
 
@@ -1686,11 +1693,14 @@ class AnalysisBuilder:
             mat = self.mesh_model.materials.get(sec.material)
 
             if mat and mat.type and 'concrete' in mat.type.lower():
-                raise NotImplementedError(
+                import warnings
+                warnings.warn(
                     f"Lumped hinges for concrete sections require reinforcement "
                     f"data not available in generic Section/Material model. "
-                    f"Section '{sec_name}', material '{sec.material}'."
+                    f"Skipping hinge for section '{sec_name}', "
+                    f"material '{sec.material}'."
                 )
+                continue
             else:
                 # Defensive defaults for nullable section values
                 Z33 = getattr(sec, 'Z33', None) or 0.0
@@ -3477,7 +3487,7 @@ class AnalysisBuilder:
             the equilibrium imbalance ``Δ = applied + reaction``
             (should be near zero for a correctly built model).
         """
-        import pandas as pd
+        import pandas as pd  # noqa: F401 — pandas is not a required dependency; the import is inside the method so it only fails when this specific method is called
 
         rows: list = []
         fu = self.mesh_model.units.get('F', '?')
@@ -3666,6 +3676,14 @@ class AnalysisBuilder:
                 sec.to_fiber_patches(mat_tag=1)
             except NotImplementedError:
                 _use_fiber = False
+                import warnings
+                warnings.warn(
+                    f"Section '{sec.name}' does not support fiber patches — "
+                    f"falling back to elastic sections for all frame elements. "
+                    f"Consider implementing to_fiber_patches() for mixed "
+                    f"steel/RC models.",
+                    UserWarning, stacklevel=3,
+                )
                 break
 
         if not _use_fiber:

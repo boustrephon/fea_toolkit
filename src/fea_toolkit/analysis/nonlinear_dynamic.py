@@ -102,12 +102,9 @@ class NonlinearDynamicAnalysis(Analysis):
 
         mm: MeshModel = self.mesh_model
 
-        # ── Gravity loads ──
-        gravity_loads: Dict[int, tuple] = {}
-        g = 9.81
-        for nd in mm.nodes.values():
-            mass = getattr(nd, 'mass', 0.0) or 1.0
-            gravity_loads[nd.node_tag] = (0.0, 0.0, -mass * g)
+        # ── Gravity loads from sections/materials ──
+        from fea_toolkit.opensees.builder import mesh_model_to_gravity_loads
+        gravity_loads = mesh_model_to_gravity_loads(mm)
 
         # ── Rayleigh damping periods from modal result ──
         modal_data = self._modal_result.data
@@ -126,29 +123,31 @@ class NonlinearDynamicAnalysis(Analysis):
             period_1 = 0.2
             period_2 = 2.0
 
-        # ── Write ground motion acceleration file (one per line) ──
-        gm_dir = tempfile.mkdtemp()
-        gm_file = os.path.join(gm_dir, "gm_accel.txt")
-        # Load ground motion
+        # ── Load ground motion ──
         try:
             accel = np.loadtxt(self.ground_motion_file)
-        except Exception:
+        except Exception as e:
             raise ValueError(
-                f"Cannot read ground motion file: {self.ground_motion_file}"
+                f"Cannot read ground motion file: {self.ground_motion_file}. "
                 "Each line should be one acceleration value (m/s²)."
-            )
+            ) from e
+
+        # ── Create single temporary directory for all outputs ──
+        tmp_context = tempfile.TemporaryDirectory()
+        tmp_dir = tmp_context.name
+        gm_file = os.path.join(tmp_dir, "gm_accel.txt")
         np.savetxt(gm_file, accel, fmt="%.8f")
 
         # ── Generate dynamic Tcl suffix ──
         tcl_suffix = dynamic_time_history_tcl(
             ground_motion_file=gm_file,
+            output_prefix=os.path.join(tmp_dir, "dyn"),
             dt=self.dt,
             num_steps=self.num_steps,
             damping=self.damping_ratio,
             period_1=period_1,
             period_2=period_2,
             direction=self.direction,
-            output_prefix="dyn",
             gravity_loads=gravity_loads,
         )
 
@@ -202,13 +201,13 @@ class NonlinearDynamicAnalysis(Analysis):
             except Exception:
                 pass
 
-        # ── Cleanup ──
+        # ── Cleanup temporary directory (removes gm+recorder files) ──
         try:
             os.unlink(tcl_path)
-            for fname in os.listdir(work_dir):
-                if fname.startswith("dyn_"):
-                    os.unlink(os.path.join(work_dir, fname))
-            os.rmdir(gm_dir)
+        except OSError:
+            pass
+        try:
+            tmp_context.cleanup()
         except OSError:
             pass
 

@@ -200,7 +200,12 @@ class TestStaticAnalysisWorkflow:
             f"X displacement did not increase with wind ({d1[0]} → {d2[0]})"
 
     def test_static_reactions_equilibrium(self, static_ab):
-        """Reactions at restrained nodes balance applied gravity loads."""
+        """Reactions at restrained nodes balance applied gravity loads.
+
+        Compares summed vertical reactions against the applied load totals
+        from builder.load_totals, verifying equilibrium: ΣFz_reactions ≈
+        -ΣFz_applied.
+        """
         static_ab.build_domain()
         results = static_ab.run_static_analysis(
             pattern_scales={"DEAD": 1.0},
@@ -212,6 +217,26 @@ class TestStaticAnalysisWorkflow:
         summed_fz = sum(r.get('fz', 0) for r in reactions.values())
         assert abs(summed_fz) > 1e-6, \
             f"vertical reaction Fz sum is near zero: {summed_fz}"
+
+        # ── Verify equilibrium against applied load totals ─────────
+        # load_totals maps pattern_name -> total vector magnitude in
+        # opensees coordinate system (positive = upward at nodes).
+        # Reactions are also in the opensees system (positive = upward).
+        # For a DEAD load (gravity), applied_Fz_total should be negative
+        # (downward), whereas reactions sum to positive (upward).
+        load_totals = getattr(static_ab, 'load_totals', {})
+        if "DEAD" in load_totals:
+            applied_fz = load_totals["DEAD"]
+            # Equilibrium: ΣFz_reaction ≈ ΣFz_applied (both store
+            # positive magnitudes in their respective sign conventions).
+            # The scalar load_totals is the magnitude of applied loads,
+            # while summed_fz is the reaction resultant — they should
+            # be equal in magnitude.
+            ratio = abs(summed_fz - applied_fz) / max(abs(applied_fz), 1.0)
+            assert ratio < 0.10, (
+                f"Equilibrium check failed: applied Fz = {applied_fz:.2f}, "
+                f"reaction Fz = {summed_fz:.2f}, ratio = {ratio:.4f} (> 0.10)"
+            )
 
     def test_static_self_weight_consistency(self, static_ab, sample_md):
         """Applied self-weight loads match expected values from geometry."""

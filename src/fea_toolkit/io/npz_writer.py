@@ -118,7 +118,7 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
     arrays["frame_t_end"] = np.array(frame_t_end, dtype=float)
 
     # Shell elements (quad only)
-    shell_eid, shell_sap_id, shell_sec_name = [], [], []
+    shell_eid, shell_sap_id, shell_sec_name, shell_parent_sap_id = [], [], [], []
     s1, s2, s3, s4 = [], [], [], []
     for aid, area in md.area_elements.items():
         if getattr(area, 'inactive', False):
@@ -145,6 +145,9 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
         s2.append(tags[1])
         s3.append(tags[2])
         s4.append(tags[3])
+        # Record parent SAP ID for collapse_to_parents visualisation
+        pid = getattr(area, 'parent_id', None)
+        shell_parent_sap_id.append(str(pid) if pid else "")
 
     arrays["shell_eid"] = np.array(shell_eid, dtype=int)
     arrays["shell_sap_id"] = np.array(shell_sap_id, dtype=str)
@@ -153,6 +156,7 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
     arrays["shell_node_2"] = np.array(s2, dtype=int)
     arrays["shell_node_3"] = np.array(s3, dtype=int)
     arrays["shell_node_4"] = np.array(s4, dtype=int)
+    arrays["shell_parent_sap_id"] = np.array(shell_parent_sap_id, dtype=str)
 
     return arrays
 
@@ -263,13 +267,13 @@ def _collect_shell_forces(shell_forces: Dict[str, Dict[str, Any]]) -> Dict[str, 
     arrays: Dict[str, np.ndarray] = {}
     aids = list(shell_forces.keys())
     n = len(aids)
-    arrays["shell_sap_id"] = np.array(aids, dtype=str)
+    arrays["shell_forces/sap_id"] = np.array(aids, dtype=str)
     for key in ("fx", "fy", "fxy", "mx", "my", "mxy"):
-        arrays[f"shell_{key}"] = np.array(
-            [shell_forces[aid][key] for aid in aids], dtype=float)
-    arrays["shell_elem_tag"] = np.array(
-        [shell_forces[aid]["elem_tag"] for aid in aids], dtype=int)
-    arrays["shell_sec_name"] = np.array(
+        arrays[f"shell_forces/{key}"] = np.array(
+            [shell_forces[aid].get(key, 0.0) for aid in aids], dtype=float)
+    arrays["shell_forces/elem_tag"] = np.array(
+        [shell_forces[aid].get("elem_tag", 0) for aid in aids], dtype=int)
+    arrays["shell_forces/sec_name"] = np.array(
         [shell_forces[aid].get("sec_name", "") for aid in aids], dtype=str)
     return arrays
 
@@ -322,7 +326,11 @@ def write_results_npz(
     if shell_forces:
         analysis_types.append("shell_forces")
         arrays.update(_collect_shell_forces(shell_forces))
-
+    # NOTE: Legacy flat aliases (shell_fx, shell_fy, ...) were previously
+    # written here for backward compatibility.  As of 2026-07 all consumers
+    # use the namespaced ``shell_forces/*`` keys or the geometry-native
+    # ``shell_sap_id`` / ``shell_sec_name`` arrays.  No flat aliases are
+    # emitted.
     arrays["analysis_types"] = np.array(analysis_types, dtype=str)
     arrays["force_unit"] = np.array([force_unit], dtype=str)
     arrays["length_unit"] = np.array([length_unit], dtype=str)

@@ -480,18 +480,20 @@ def _collapse_to_parents(data, source):
                     parent_frame_endpoints[eid] = (elem.node_i, elem.node_j)
 
         # For NPZ sources, read parent endpoints from the new arrays
+        # Keyed by parent_sap_id so the collapse_to_parents lookup by pid works.
         npz_parent_node_i: Dict[str, int] = {}
         npz_parent_node_j: Dict[str, int] = {}
         if isinstance(source, dict):
             nf = len(source.get("frame_eid", []))
             for i in range(nf):
+                pid = str(source.get("frame_parent_sap_id", [""]*nf)[i])
                 sid = str(source["frame_sap_id"][i])
                 pni = int(source.get("frame_parent_node_i", [0]*nf)[i])
                 pnj = int(source.get("frame_parent_node_j", [0]*nf)[i])
-                if pni != 0 and pnj != 0:
-                    npz_parent_node_i[sid] = pni
-                    npz_parent_node_j[sid] = pnj
-                elif source.get("frame_parent_sap_id", [""]*nf)[i] == sid:
+                if pid and pni != 0 and pnj != 0:
+                    npz_parent_node_i[pid] = pni
+                    npz_parent_node_j[pid] = pnj
+                elif not pid or pid == sid:
                     # unsplit elements store their own node tags
                     pass
 
@@ -606,25 +608,39 @@ def _collapse_to_parents(data, source):
     return data
 
 
-def _sort_children_by_location(children, nodes):
+def _sort_children_by_location(children, nodes, parent_axis=None):
     """Sort child frame entries by spatial position along the parent axis.
 
     For NPZ data (using ``ni_tag``/``nj_tag``), computes the midpoint
     along the element axis.  For builder data (using ``ni_id``/``nj_id``),
     sorts by node ID order along the parent span.
+
+    When *parent_axis* is provided (a unit vector), children are sorted
+    by their midpoint projected onto the parent axis via dot product,
+    rather than using Z-only midpoint.  This gives correct ordering for
+    slanted/curved elements that are not vertical.
     """
+    import numpy as np
+
     if not children:
         return children
 
-    def _mid_z(fr):
-        """Compute approximate position along parent axis."""
+    def _mid_pos(fr):
+        """Compute midpoint of the child element as a 3D point."""
         ni = _resolve_frame_node(nodes, fr, 'i')
         nj = _resolve_frame_node(nodes, fr, 'j')
         if ni and nj:
-            return (ni["z"] + nj["z"]) * 0.5
-        return 0.0
+            return np.array([(ni["x"] + nj["x"]) * 0.5,
+                             (ni["y"] + nj["y"]) * 0.5,
+                             (ni["z"] + nj["z"]) * 0.5])
+        return np.zeros(3)
 
-    return sorted(children, key=_mid_z)
+    if parent_axis is not None:
+        # Project midpoint onto parent axis for correct ordering
+        return sorted(children, key=lambda fr: np.dot(_mid_pos(fr), parent_axis))
+    else:
+        # Fallback: Z-only (backward compatible for vertical elements)
+        return sorted(children, key=lambda fr: _mid_pos(fr)[2])
 
 
 def _resolve_mesh_data(source, collapse_to_parents=False):
@@ -702,11 +718,14 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
             })
 
         ns = len(source.get("shell_eid", []))
+        shell_parent_arr = source.get("shell_parent_sap_id", [""] * ns)
         for i in range(ns):
+            pid = str(shell_parent_arr[i]) if i < len(shell_parent_arr) else ""
             data["shells"].append({
                 "id": str(source["shell_sap_id"][i]),
                 "sec": str(source["shell_sec_name"][i]),
                 "node_tags": [int(source[f"shell_node_{k}"][i]) for k in (1,2,3,4)],
+                "parent": pid if pid and pid != "" and pid != "?" else None,
             })
 
         if collapse_to_parents:
@@ -792,6 +811,17 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
                 "node_ids": area.node_ids[:4],
                 "inactive": getattr(area, 'inactive', False),
                 "parent": getattr(area, 'parent_id', None),
+            })
+
+        # Also add inactive parent area elements as grey wireframe overlays
+        for aid, area in model.area_elements.items():
+            if not getattr(area, 'inactive', False):
+                continue
+            data["shells"].append({
+                "id": aid, "sec": model.area_assignments.get(aid, 'unknown'),
+                "node_ids": area.node_ids[:4],
+                "inactive": True,
+                "parent": None,
             })
 
     # Edge constraints
@@ -1127,7 +1157,8 @@ def plot_mesh(source, *,
 
 def compare_meshes(source_a, source_b, *,
                    collapse_to_parents=False,
-                   labels=("Model A", "Model B"), **kwargs):
+                   labels=("Model A", "Model B"),
+                   notebook=False, **kwargs):
     """Side‑by‑side mesh comparison from two builders or NPZ data dicts.
 
     Shows two PyVista subplots (left = source_a, right = source_b).
@@ -1137,10 +1168,11 @@ def compare_meshes(source_a, source_b, *,
         source_b: Second model (builder or NPZ dict).
         collapse_to_parents: Show unsplit parent elements (default ``False``).
         labels: Pair of titles for the subplots.
+        notebook: Return plotter for Jupyter embedding (default ``False``).
         **kwargs: Passed to :func:`_render_scene` (show_*, shrink, xlim, etc.).
 
     Returns:
-        ``pv.Plotter`` for the side‑by‑side layout.
+        ``pv.Plotter`` if *notebook* is True, otherwise ``None``.
     """
     import pyvista as pv
 
@@ -1155,8 +1187,10 @@ def compare_meshes(source_a, source_b, *,
         _render_scene(plotter, data, **kwargs)
         _set_isometric_view(plotter)
 
+    if notebook:
+        return plotter
     plotter.show()
-    return plotter
+    return None
 
 
 def plot_deformed_3d(
@@ -1919,6 +1953,11 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
     * An NPZ data dict (from ``np.load()``) + mode shapes from the
       ``modal/mode_dx``, ``modal/mode_dy``, ``modal/mode_dz`` arrays.
 
+    When drawing shells, each SAP section type gets its own colour from a
+    fixed palette, with a legend in the lower-right corner (model-specific
+    colours, not section-index cycling — required for visualising shells
+    by material/assignment in mixed models like the admin building).
+
     Args:
         source: Builder or NPZ dict.
         mode_shapes: Dict ``{mode_idx: {node_tag: (dx, dy, dz)}}`` from
@@ -1945,6 +1984,11 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
     except ImportError:
         print("pyvista not installed — install with: pip install pyvista")
         return None
+
+    _SECTION_COLORS = [
+        '#4c72b0', '#dd8452', '#55a868', '#c44e52', '#8172b3',
+        '#937860', '#da8bc3', '#8c8c8c', '#ccb974', '#64b5cd',
+    ]
 
     # Resolve mode shape displacements for this mode
     if isinstance(source, dict) and mode_shapes is None:
@@ -1973,6 +2017,28 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
     # Resolve mesh geometry into common format
     data = _resolve_mesh_data(source, collapse_to_parents=collapse_to_parents)
 
+    # ── Separate inactive (parent) shells from active shells ──
+    # Also group active shells by section name for per-section colouring.
+    inactive_shell_quads: list = []
+    shell_groups: dict = {}
+    for sh in data["shells"]:
+        npts = []
+        ds = []
+        for ref in (sh.get("node_ids") or sh.get("node_tags") or []):
+            nd = data["nodes"].get(ref)
+            if nd is None:
+                nd = data["nodes"].get(str(ref))
+            if nd is None:
+                break
+            npts.append(np.array([nd["x"], nd["y"], nd["z"]]))
+            ds.append(np.array(disp.get(nd["tag"], (0, 0, 0))))
+        if len(npts) == 4:
+            if sh.get("inactive"):
+                inactive_shell_quads.append(npts)
+            else:
+                sec = sh.get("sec", "unknown")
+                shell_groups.setdefault(sec, []).append(tuple(npts) + tuple(ds))
+
     # Build frame segments
     segments = []
     seg_npoints = []
@@ -1992,53 +2058,90 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
         segments.append((p1, p2, di, dj))
         seg_npoints.append(max(2, int(np.linalg.norm(p2 - p1) * 2)))
 
-    # Build shell quads
+    # Flatten shell groups for deformed mesh builder, tracking section index
     all_quads = []
-    for sh in data["shells"]:
-        npts = []
-        ds = []
-        for ref in (sh.get("node_ids") or []):
-            nd = data["nodes"].get(ref)
-            if nd is None:
-                break
-            npts.append(np.array([nd["x"], nd["y"], nd["z"]]))
-            ds.append(np.array(disp.get(nd["tag"], (0, 0, 0))))
-        if len(npts) == 4:
-            all_quads.append(tuple(npts) + tuple(ds))
+    all_sec_idxs = []
+    sec_names_sorted = sorted(shell_groups.keys())
+    sec_name_to_idx = {name: i for i, name in enumerate(sec_names_sorted)}
+    for sec_name, quads in shell_groups.items():
+        sidx = sec_name_to_idx[sec_name]
+        for quad in quads:
+            all_quads.append(quad)
+            all_sec_idxs.append(sidx)
+    n_sections = len(sec_names_sorted)
 
     pv.set_plot_theme("document")
     plotter = pv.Plotter(notebook=notebook, **kwargs)
 
-    # Undeformed shells
-    shell_mesh = pv.PolyData()
-    if show_original and all_quads:
-        _, und_shells = _build_deformed_mesh(
-            segments, seg_npoints, all_quads,
-            [0] * len(all_quads), scale, 0.0)
-        if und_shells is not None and und_shells.n_points:
-            plotter.add_mesh(und_shells, color='lightgrey',
-                             opacity=0.3, show_edges=True, line_width=1)
+    # ── Undeformed shells ──
+    if show_original:
+        # Inactive (parent) quad overlays
+        if inactive_shell_quads:
+            for quad_pts in inactive_shell_quads:
+                face = pv.PolyData(quad_pts, faces=[4, 0, 1, 2, 3])
+                plotter.add_mesh(face, color='lightgrey', opacity=0.12,
+                                 show_edges=True, edge_color='grey', line_width=0.5)
+        # Undeformed active shells at amp=0
+        if all_quads:
+            _, und_shells = _build_deformed_mesh(
+                segments, seg_npoints, all_quads, all_sec_idxs,
+                scale, 0.0)
+            if und_shells is not None and und_shells.n_points:
+                plotter.add_mesh(und_shells, color='lightgrey',
+                                 opacity=0.3, show_edges=True, line_width=1)
 
-    # Undeformed frames
+    # ── Undeformed frames ──
     if show_original:
         for p1, p2, _, _ in segments:
             n = max(2, int(np.linalg.norm(p2 - p1) * 2))
             poly = pv.lines_from_points(np.linspace(p1, p2, n))
             plotter.add_mesh(poly, color='#999999', line_width=1, opacity=0.5)
 
-    # Deformed mesh — use amp=1.0 so non-animated mode shows the
-    # mode shape at full scale.  The animation callback below overrides
-    # the points dynamically when animate=True.
+    # ── Deformed mesh (amp=1.0 for static, overridden during animation) ──
     frame_mesh, shell_mesh = _build_deformed_mesh(
-        segments, seg_npoints, all_quads, [0] * len(all_quads),
+        segments, seg_npoints, all_quads, all_sec_idxs,
         scale, 1.0)
-    if shell_mesh and shell_mesh.n_points:
-        plotter.add_mesh(shell_mesh, color='#c44e52', opacity=0.5,
-                         show_edges=True, line_width=1)
-    if frame_mesh and frame_mesh.n_points:
-        plotter.add_mesh(frame_mesh, color='#c44e52', line_width=2)
 
-    # Title
+    # Shells: per-section colours via cell scalars
+    if shell_mesh is not None and shell_mesh.n_points:
+        if n_sections > 0:
+            plotter.add_mesh(
+                shell_mesh,
+                scalars='section_idx',
+                cmap=_SECTION_COLORS[:n_sections],
+                show_edges=True, edge_color='#333333',
+                opacity=0.85,
+                clim=[-0.5, n_sections - 0.5],
+            )
+        else:
+            plotter.add_mesh(shell_mesh, color='#4c72b0',
+                             show_edges=True, edge_color='#333333',
+                             opacity=0.85)
+
+    # Frames: dark grey (distinct from shell colours)
+    if frame_mesh is not None and frame_mesh.n_points:
+        plotter.add_mesh(frame_mesh, color='#555555', line_width=3,
+                         opacity=0.8)
+
+    # ── Section legend ──
+    if n_sections > 1:
+        legend_entries = [(name, pv.Color(_SECTION_COLORS[i % len(_SECTION_COLORS)]))
+                          for i, name in enumerate(sec_names_sorted)]
+        try:
+            # Newer PyVista supports label_size; older versions don't
+            plotter.add_legend(
+                legend_entries, border=True, size=[0.2, 0.12],
+                loc='lower_right', face='white',
+                label_size=max(8, 14 - n_sections),
+            )
+        except TypeError:
+            # Fallback for older PyVista without label_size kwarg
+            plotter.add_legend(
+                legend_entries, border=True, size=[0.2, 0.12],
+                loc='lower_right', face='white',
+            )
+
+    # ── Title ──
     period_str = ""
     if periods is not None and mode < len(periods):
         period_str = f"  T = {periods[mode]:.4f} s"
@@ -2047,20 +2150,22 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
     plotter.show_grid()
     _set_isometric_view(plotter)
 
+    # ── Animation ──
     if animate:
         import math as _math
 
         def callback(step):
             amp = _math.sin(anim_speed * 2.0 * _math.pi * step / 60.0) * anim_amplitude
             nfm, nsm = _build_deformed_mesh(
-                segments, seg_npoints, all_quads,
-                [0] * len(all_quads), scale, amp)
+                segments, seg_npoints, all_quads, all_sec_idxs,
+                scale, amp)
             if nfm is not None and nfm.n_points and frame_mesh.n_points:
                 frame_mesh.points = nfm.points
             if shell_mesh is not None and nsm is not None and nsm.n_points:
                 shell_mesh.points = nsm.points
 
-        plotter.add_timer_event(60, 16, callback)
+        n_iter = max(30, int(30 * anim_speed))
+        plotter.add_timer_event(60, n_iter, callback)
         plotter.show(auto_close=False)
     else:
         plotter.show()
