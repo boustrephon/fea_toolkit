@@ -492,9 +492,16 @@ When ``end_offset > 0``, :func:`subdivide_elements`:
 **How to use:**
 
 ```python
-builder.set_brace_selection(brace_ids, end_offset=0.15)  # 0.15 m offset
-builder.config['geom_transf_type'] = 'Corotational'
-builder.build_domain()
+preprocess_model(md, config={
+    "brace_ids": brace_ids,
+    "brace_end_offset": 0.15,
+    "brace_n_segments": 4,
+    "brace_imperfection_ratio": 1.0 / 500.0,
+})
+mm = preprocess_model(md)  # or directly from the Preprocessor
+b = AnalysisBuilder(mm, config)
+b.config['geom_transf_type'] = 'Corotational'
+b.build_domain()
 ```
 
 The offset is automatically clamped to 45 % of the brace length to
@@ -904,7 +911,7 @@ from fea_toolkit.plotting.viz import plot_capacity_spectrum
 mm = preprocess_model(model_data)
 b = AnalysisBuilder(mm, config)
 b.build_domain()
-b.compute_seismic_masses(g=9.81)
+b.compute_seismic_masses()
 modal = b.run_modal_analysis(num_modes=5)
 shapes = b.extract_mode_shapes(5)
 push = b.run_pushover_analysis(

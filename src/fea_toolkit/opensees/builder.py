@@ -28,8 +28,35 @@ removed.  Use the two-stage pipeline instead::
 """
 
 import math
+import re
 from typing import TYPE_CHECKING, Dict, Any, Optional, List, Tuple
+from collections import defaultdict
+
+import numpy as np
+
 from ..model.sap_data import SAPModelData
+
+from ..utils import (
+    DEFAULT_EPS_C,
+    DEFAULT_EPS_CC,
+    DEFAULT_G_MOD_FRAC,
+    DEFAULT_FC_PA,
+    DEFAULT_FY_REBAR_PA,
+    DEFAULT_FY_STEEL_PA,
+    DEFAULT_E_S_PA,
+    DEFAULT_RHO_MS_SI,
+    DEFAULT_RHO_WS_SI,
+    DEFAULT_RHO_MC_SI,
+    DEFAULT_RHO_WC_SI,
+    g_from_units,
+    length_scale_factor,
+    force_scale_factor,
+    mass_scale_factor,
+    mass_density_scale_factor,
+    weight_density_scale_factor,
+    stress_scale_factor,
+    DEFAULT_GRAVITY_MS2
+)
 
 if TYPE_CHECKING:
     from ..model.mesh_model import MeshModel
@@ -156,15 +183,16 @@ def export_model_to_tcl(
         tags = " ".join(str(int(x)) for x in r.dofs)
         lines.append(f"fix {nd.node_tag} {tags}")
 
-    # Materials
+    # Materials (values guaranteed non-None by SAPModelData.apply_material_defaults)
     if model_data.materials:
         lines.append("")
         lines.append("# ── Materials ──")
         for mat_name, mat in model_data.materials.items():
             tag = _mat_tag[mat_name]
             if mat.type and "concrete" in mat.type.lower():
-                Fc = (mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7) / 1.0
-                epsc = (mat.eFc if mat.eFc and mat.eFc > 0 else 0.002)
+                Fc = mat.Fc
+                epsc = (mat.eFc if mat.eFc and mat.eFc > 0
+                        else DEFAULT_EPS_C)
                 Fu = 0.2 * Fc
                 epsu = 0.006
                 lines.append(
@@ -172,9 +200,8 @@ def export_model_to_tcl(
                     f"{-Fc:g} {-epsc:g} {-Fu:g} {-epsu:g}"
                 )
             else:
-                E_mod = (mat.E_mod if mat.E_mod and mat.E_mod > 0
-                         else 2.0e11)
-                Fy = (mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8)
+                E_mod = mat.E_mod
+                Fy = mat.Fy
                 lines.append(
                     f"uniaxialMaterial Steel01 {tag} "
                     f"{Fy:g} {E_mod:g} 0.01"
@@ -333,7 +360,7 @@ def export_model_to_tcl(
             nn = len(nids)
             if nn == 4:
                 lines.append(
-                    f"element ShellMITC4 {elem.area_tag} "
+                    f"element ShellDKGQ {elem.area_tag} "
                     + " ".join(nids) + f" {stag}"
                 )
             elif nn == 3:
@@ -431,6 +458,9 @@ def tcl_materials_and_sections(
     for i, sn in enumerate(model_data.sections, start=sec_tag_offset):
         _sec_tag[sn] = i
 
+    # Compute stress unit factor from model units
+    _sf = stress_scale_factor(model_data.units)
+
     for sec_name, sec in model_data.sections.items():
         sec_tag = _sec_tag[sec_name]
         mat = model_data.materials.get(sec.material)
@@ -459,18 +489,21 @@ def tcl_materials_and_sections(
             next_concrete_tag += 3
 
             if mat is not None:
-                Fc = mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7
-                epsc = (float(mat.extra.get("SFc", 0.002))
-                        if hasattr(mat, "extra") else 0.002)
+                Fc = (mat.Fc if mat.Fc and mat.Fc > 0
+                      else DEFAULT_FC_PA * _sf)
+                epsc = (float(mat.ss_curve.s_fc)
+                        if mat.ss_curve is not None and mat.ss_curve.s_fc is not None
+                        else DEFAULT_EPS_C)
                 if epsc > 0.01:
-                    epsc = 0.002
+                    epsc = DEFAULT_EPS_C
 
                 # Confined strength: use eFc from SAP2000, else 1.3×Fc
                 fcc = mat.eFc if mat.eFc and mat.eFc > 0 else Fc * 1.3
-                epscc = (float(mat.extra.get("SCap", 0.005))
-                         if hasattr(mat, "extra") else 0.005)
+                epscc = (float(mat.ss_curve.s_cap)
+                         if mat.ss_curve is not None and mat.ss_curve.s_cap is not None
+                         else DEFAULT_EPS_CC)
                 if epscc > 0.1:
-                    epscc = 0.005
+                    epscc = DEFAULT_EPS_CC
 
                 lines.append(
                     f"uniaxialMaterial Concrete01 {concrete_mat_tag} "
@@ -480,23 +513,30 @@ def tcl_materials_and_sections(
                     f"uniaxialMaterial Concrete01 {concrete_mat_tag + 1} "
                     f"{-fcc:g} {-abs(epscc):g} {-0.2*fcc:g} {-0.02:g}"
                 )
-                Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
+                Fy = (mat.Fy if mat.Fy and mat.Fy > 0
+                      else DEFAULT_FY_REBAR_PA * _sf)
+                E_mod = (mat.E_mod if mat.E_mod and mat.E_mod > 0
+                         else DEFAULT_E_S_PA * _sf)
                 lines.append(
                     f"uniaxialMaterial Steel02 {concrete_mat_tag + 2} "
-                    f"{Fy:g} {2.0e11:g} {0.01:g} {18.5:g} {0.925:g} {0.15:g}"
+                    f"{Fy:g} {E_mod:g} {0.01:g} {18.5:g} {0.925:g} {0.15:g}"
                 )
             else:
+                _fc = DEFAULT_FC_PA * _sf
+                _fcc = 1.3 * _fc
+                _fy = DEFAULT_FY_REBAR_PA * _sf
+                _e = DEFAULT_E_S_PA * _sf
                 lines.append(
                     f"uniaxialMaterial Concrete01 {concrete_mat_tag} "
-                    f"{-3.0e7:g} {-0.002:g} {-6.0e6:g} {-0.006:g}"
+                    f"{-_fc:g} {-DEFAULT_EPS_C:g} {-0.2*_fc:g} {-0.006:g}"
                 )
                 lines.append(
                     f"uniaxialMaterial Concrete01 {concrete_mat_tag + 1} "
-                    f"{-3.9e7:g} {-0.005:g} {-7.8e6:g} {-0.02:g}"
+                    f"{-_fcc:g} {-DEFAULT_EPS_CC:g} {-0.2*_fcc:g} {-0.02:g}"
                 )
                 lines.append(
                     f"uniaxialMaterial Steel02 {concrete_mat_tag + 2} "
-                    f"{4.0e8:g} {2.0e11:g} {0.01:g} {18.5:g} {0.925:g} {0.15:g}"
+                    f"{_fy:g} {_e:g} {0.01:g} {18.5:g} {0.925:g} {0.15:g}"
                 )
 
             fiber_mat_tag = concrete_mat_tag
@@ -504,11 +544,13 @@ def tcl_materials_and_sections(
         else:
             # ── Steel fiber section: Steel01 ──
             if mat is not None and mat.type.lower() == "steel":
-                Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
-                E_mod = mat.E_mod if mat.E_mod > 0 else 2.0e11
+                Fy = (mat.Fy if mat.Fy and mat.Fy > 0
+                      else DEFAULT_FY_STEEL_PA * _sf)
+                E_mod = (mat.E_mod if mat.E_mod > 0
+                         else DEFAULT_E_S_PA * _sf)
             else:
-                Fy = 2.5e8
-                E_mod = 2.0e11
+                Fy = DEFAULT_FY_STEEL_PA * _sf
+                E_mod = DEFAULT_E_S_PA * _sf
             fiber_mat_tag = sec_tag
             lines.append(
                 f"uniaxialMaterial Steel01 {fiber_mat_tag} "
@@ -517,9 +559,9 @@ def tcl_materials_and_sections(
 
         # Compute shear modulus for GJ torsional rigidity
         _E = (mat.E_mod if mat and mat.E_mod and mat.E_mod > 0
-              else 2.0e11) if mat else 2.0e11
+              else DEFAULT_E_S_PA * _sf) if mat else DEFAULT_E_S_PA * _sf
         _G = (mat.G_mod if mat and mat.G_mod and mat.G_mod > 0
-              else 0.4 * _E) if mat else 0.4 * _E
+              else DEFAULT_G_MOD_FRAC * _E) if mat else DEFAULT_G_MOD_FRAC * _E
 
         # ── Fiber section ──
         gj = _G * sec.J
@@ -613,17 +655,20 @@ def pushover_tcl(
             "constraints Transformation",
             "numberer RCM",
             "system BandGeneral",
-            "test NormDispIncr 1.0e-6 10 0",
+            "test NormDispIncr 1.0e-3 20 0",
             "algorithm Newton",
-            "integrator LoadControl 0.1",
+            "integrator LoadControl 0.05",
             "analysis Static",
-            "analyze 10",
+            "analyze 20",
             'loadConst -time 0.0',
             'puts "-> Gravity loads locked."',
         ])
 
     # ── Step B: Lateral pushover ──
     if lateral_loads:
+        lines.append("")
+        lines.append("puts \"-> Gravity complete, starting pushover analysis...\"")
+        lines.append("flush stdout")
         lines.append("")
         lines.append("# ── Step B: Lateral pushover ──")
         lines.append("pattern Plain 2 \"Linear\" {")
@@ -638,31 +683,51 @@ def pushover_tcl(
         "constraints Transformation",
     ])
 
+    # ── Recorders (BEFORE analysis, NOT after) ──
+    lines.extend([
+        "",
+        f"recorder Node -file wall_disp.out -time -node {control_node} -dof {dof} disp",
+        "recorder Node -file wall_reaction.out -time -node 1 -dof 1 reaction",
+        "recorder Element -file wall_forces.out -ele 1 force",
+        'puts "-> Recorders set up, analysis begins..."',
+        "flush stdout",
+    ])
+
     if adaptive:
         # Adaptive pushover with algorithm fallback chain
-        dU = f"[expr {max_disp:.6g} / {num_steps}]"
+        dU_base_val = max_disp / num_steps
         lines.extend([
             f"set control_node {control_node}",
             f"set dof {dof}",
-            "set dU_base " + dU,
-            "set dU $dU_base",
-            "integrator DisplacementControl $control_node $dof $dU",
-            "analysis Static",
+            f"set dU_base {dU_base_val:.8g}",
+            "# ── Solver settings for shell+fiber models ──",
+            "# Sparse solver is essential for models with >1000 shell elements",
+            "system UmfPack",
+            "# Penalty handles shell-edge MPCs correctly (Transformation silently ignores them)",
+            "constraints Penalty 1.0e12 1.0e12",
             "",
+            "# ── Gentle ramp-up for initial pushover step ──",
+            "# Use 1/10 of base step for first step to stabilize fiber section convergence",
+            "set dU [expr $dU_base / 10.0]",
             f"set targetDisp {max_disp:.6g}",
             "set currentDisp 0.0",
             "set stepCount 0",
             "",
+            "# Relaxed norm (1e-3) matches gravity convergence — fiber sections need this",
+            "test NormDispIncr 1.0e-3 200 0",
+            "integrator DisplacementControl $control_node $dof $dU",
+            "analysis Static",
+            "",
             "while {$currentDisp < $targetDisp} {",
             "",
-            "    test NormDispIncr 1.0e-5 200 0",
             "    algorithm Newton",
             "    set ok [analyze 1]",
             "",
             "    # Fallback 1: Krylov-Newton",
             '    if {$ok != 0} {',
             "        puts \"   Krylov-Newton fallback...\"",
-            "        test NormDispIncr 1.0e-5 500 0",
+            "        flush stdout",
+            "        test NormDispIncr 1.0e-2 500 0",
             "        algorithm KrylovNewton",
             "        set ok [analyze 1]",
             "    }",
@@ -670,27 +735,43 @@ def pushover_tcl(
             "    # Fallback 2: ModifiedNewton (initial stiffness)",
             '    if {$ok != 0} {',
             "        puts \"   ModifiedNewton fallback...\"",
+            "        flush stdout",
             "        algorithm ModifiedNewton -initial",
             "        set ok [analyze 1]",
             "    }",
             "",
-            "    # Fallback 3: cut step size",
+            "    # Fallback 3: cut step size by 90%",
             '    if {$ok != 0} {',
             "        puts \"   Step cut from $dU to [expr $dU * 0.1]\"",
+            "        flush stdout",
             "        set dU [expr $dU * 0.1]",
             "        integrator DisplacementControl $control_node $dof $dU",
             "        algorithm Newton",
+            "        test NormDispIncr 1.0e-2 500 0",
+            "        set ok [analyze 1]",
+            "    }",
+            "",
+            "    # Fallback 4: cycle back to tight norm with KrylovNewton at minimal step",
+            '    if {$ok != 0} {',
+            "        puts \"   Final fallback: KrylovNewton + 1.0e-1 norm...\"",
+            "        flush stdout",
+            "        set dU [expr $dU_base / 100.0]",
+            "        integrator DisplacementControl $control_node $dof $dU",
+            "        test NormDispIncr 1.0e-1 1000 0",
+            "        algorithm KrylovNewton",
             "        set ok [analyze 1]",
             "    }",
             "",
             '    if {$ok != 0} {',
-            '        puts "\\n[CRITICAL] Model collapse reached."',
+            '        puts {\\n[CRITICAL] Model collapse reached.}',
+            "        flush stdout",
             "        break",
             "    }",
             "",
-            "    # Restore step size when possible",
+            "    # Restore step size and norm tolerance when possible",
             "    if {$dU < $dU_base} {",
             "        set dU $dU_base",
+            "        test NormDispIncr 1.0e-3 200 0",
             "        integrator DisplacementControl $control_node $dof $dU",
             "    }",
             "",
@@ -698,6 +779,7 @@ def pushover_tcl(
             "    incr stepCount",
             '    if {[expr $stepCount % 20] == 0} {',
             "         puts [format \"   Drift = %.2f mm (step %d)\" $currentDisp $stepCount]",
+            "         flush stdout",
             "    }",
             "}",
         ])
@@ -730,125 +812,417 @@ def pushover_tcl(
         'puts "Base reactions: Rx = $rx  Ry = $ry  Rz = $rz"',
     ])
 
-    # Recorders
-    lines.extend([
-        "",
-        f"recorder Node -file wall_disp.out -time -node {control_node} -dof {dof} disp",
-        "recorder Node -file wall_reaction.out -time -node 1 -dof 1 reaction",
-        "recorder Element -file wall_forces.out -ele 1 force",
-    ])
-
     return "\n".join(lines)
 
 
 def mesh_model_to_gravity_loads(
     mesh_model: "MeshModel",
-    pattern_names: Optional[list[str]] = None,
-    g: float = 9.81,
+    pattern_combination: Optional[Dict[str, float]] = None,
+    g_acc: float = 0.0,
 ) -> Dict[int, tuple]:
-    """Convert MeshModel load patterns to ``{node_tag: (fx, fy, fz)}``
-    dict suitable for passing as *gravity_loads* to :func:`pushover_tcl`.
+    """Convert MeshModel loads to ``{node_tag: (fx, fy, fz)}`` dict
+    for gravity load application in pushover analysis.
+
+    Computes gravity loads from two sources per load pattern:
+
+    1. **Explicit gravity loads** (used when pattern's
+       ``self_weight_factor`` is 0) — from ``frame_gravity_loads``,
+       ``area_gravity_loads``, ``joint_loads``, and ``area_uniform_loads``
+       (pressure loads distributed to nodes).
+
+    2. **Material self-weight** (used when pattern's
+       ``self_weight_factor`` ≠ 0, e.g. ``"Self weight"`` with sw=1) —
+       element self-weight computed **directly** from section geometry
+       and material density.  SAP2000 does **not** emit GravityLoad table
+       entries for self-weight; it computes them internally.
+
+    The load pattern dictionary controls which patterns contribute and
+    at what scale factor, e.g. ``{"DEAD": 1.0, "Self weight": 1.0, "LL": 0.25}``.
+
+    If *pattern_combination* is not provided, defaults to all patterns
+    with ``DesignType=Dead`` (per ASCE/GB 50011 convention).
 
     Args:
         mesh_model: The preprocessed ``MeshModel``.
-        pattern_names: List of load pattern names to include.
-            If ``None``, all patterns with type ``"Dead"`` or
-            containing ``"DEAD"`` are used.
-        g: Gravitational acceleration.
+        pattern_combination: Dict mapping pattern name → factor.
+            E.g. ``{"DEAD": 1.0, "Self weight": 1.0}``.
+        g_acc: Gravitational acceleration (m/s²). Derived from units
+            when not specified.
 
     Returns:
-        Dict mapping node_tag -> (0, 0, -force_z) for gravity direction.
+        Dict mapping node_tag -> (fx, fy, fz) with gravity forces
+        (typically (0, 0, -force_z)).
     """
-    from collections import defaultdict
+    units = mesh_model.units
+    if g_acc == 0.0:
+        g_acc = g_from_units(units)
+    rho_mc = DEFAULT_RHO_MC_SI / mass_density_scale_factor(units)
+    rho_ms = DEFAULT_RHO_MS_SI / mass_density_scale_factor(units)
 
-    if pattern_names is None:
-        pattern_names = [
-            pn for pn, lp in mesh_model.load_patterns.items()
-            if "DEAD" in pn.upper() or lp.pattern_type == "Dead"
-        ]
+    def _mass_density(mat) -> float:
+        """Return mass density from material or fallback default."""
+        if mat is not None and mat.unit_weight > 0:
+            return mat.unit_weight / g_acc
+        is_steel = mat is not None and "steel" in (mat.type or "").lower()
+        return rho_ms if is_steel else rho_mc
 
-    pattern_set = set(pattern_names)
+    if pattern_combination is None:
+        # Default: all DesignType=Dead patterns
+        pattern_combination = {
+            pn: 1.0 for pn, lp in mesh_model.load_patterns.items()
+            if (lp.pattern_type or "").upper() == "DEAD"
+        }
+
+    # Helper: compute polygon area in 3D
+    def _poly_area(node_ids: list[str]) -> float:
+        pts = []
+        for nid in node_ids:
+            nd = mesh_model.nodes.get(nid)
+            if nd is None:
+                return 0.0
+            pts.append((nd.x, nd.y, nd.z))
+        if len(pts) < 3:
+            return 0.0
+        nx = ny = nz = 0.0
+        for i in range(len(pts)):
+            x1, y1, z1 = pts[i]
+            x2, y2, z2 = pts[(i + 1) % len(pts)]
+            nx += (y1 - y2) * (z1 + z2)
+            ny += (z1 - z2) * (x1 + x2)
+            nz += (x1 - x2) * (y1 + y2)
+        return 0.5 * math.hypot(nz, math.hypot(nx, ny))
+
     node_mass: Dict[int, float] = defaultdict(float)
-    for gl in mesh_model.frame_gravity_loads:
-        if gl.pattern not in pattern_set:
-            continue
-        fe = mesh_model.frame_elements.get(gl.frame_id)
-        if fe is None or getattr(fe, "inactive", False):
-            continue
-        ni = mesh_model.nodes.get(fe.node_i)
-        nj = mesh_model.nodes.get(fe.node_j)
-        if ni is None or nj is None:
-            continue
-        sec_name = mesh_model.frame_assignments.get(gl.frame_id, "")
-        sec = mesh_model.sections.get(sec_name) if sec_name else None
-        if sec is not None and sec.A > 0:
-            dx = nj.x - ni.x; dy = nj.y - ni.y; dz = nj.z - ni.z
-            length = math.sqrt(dx*dx + dy*dy + dz*dz)
-            mat = mesh_model.materials.get(sec.material)
-            density = mat.unit_weight / g if mat and mat.unit_weight > 0 else 2400.0
-            elem_mass = sec.A * length * density
-            half = elem_mass * abs(gl.multiplier_z) * 0.5
-            node_mass[ni.node_tag] += half
-            node_mass[nj.node_tag] += half
 
-    for jl in mesh_model.joint_loads:
-        if jl.pattern not in pattern_set:
-            continue
-        nd = mesh_model.nodes.get(jl.node_id)
-        if nd is None:
-            continue
-        node_mass[nd.node_tag] += jl.fz / g if g > 0 else jl.fz
+    for pattern_name, factor in pattern_combination.items():
+        lp = mesh_model.load_patterns.get(pattern_name)
+        has_self_weight = (lp is not None and abs(lp.self_weight_factor) > 1e-12)  # tolerance needs generalised
 
+        # ── Source A: Explicit loads (used when sw=0) ──
+        if not has_self_weight:
+            # A1. Frame gravity loads (explicit self-weight multipliers)
+            for gl in mesh_model.frame_gravity_loads:
+                if gl.pattern != pattern_name:
+                    continue
+                fe = mesh_model.frame_elements.get(gl.frame_id)
+                if fe is None or getattr(fe, "inactive", False):
+                    continue
+                ni = mesh_model.nodes.get(fe.node_i)
+                nj = mesh_model.nodes.get(fe.node_j)
+                if ni is None or nj is None:
+                    continue
+                sec_name = mesh_model.frame_assignments.get(gl.frame_id, "")
+                sec = mesh_model.sections.get(sec_name) if sec_name else None
+                if sec is not None and sec.A > 0:
+                    dx = nj.x - ni.x; dy = nj.y - ni.y; dz = nj.z - ni.z
+                    length = math.sqrt(dx*dx + dy*dy + dz*dz)
+                    mat = mesh_model.materials.get(sec.material)
+                    mass_density = _mass_density(mat)
+                    elem_mass = sec.A * length * mass_density * abs(gl.multiplier_z)
+                    half = elem_mass * factor * 0.5
+                    node_mass[ni.node_tag] += half
+                    node_mass[nj.node_tag] += half
+
+            # A2. Area gravity loads (explicit self-weight multipliers)
+            for al in mesh_model.area_gravity_loads:
+                if al.pattern != pattern_name:
+                    continue
+                ae = mesh_model.area_elements.get(al.area_id)
+                if ae is None or getattr(ae, "inactive", False):
+                    continue
+                area = _poly_area(ae.node_ids)
+                if area <= 0:
+                    continue
+                t = ae.thickness if ae.thickness > 0 else 0.15
+                sec_name = mesh_model.area_assignments.get(al.area_id)
+                sec = mesh_model.sections.get(sec_name) if sec_name else None
+                mat = mesh_model.materials.get(sec.material) if sec else None
+                mass_density = _mass_density(mat)
+                area_mass = area * t * mass_density * abs(al.multiplier_z)
+                n_nodes = len(ae.node_ids)
+                if n_nodes > 0:
+                    node_share = area_mass * factor / n_nodes
+                    for nid in ae.node_ids:
+                        nd = mesh_model.nodes.get(nid)
+                        if nd is not None:
+                            node_mass[nd.node_tag] += node_share
+
+            # A3. Joint loads (concentrated forces)
+            # It is assumed that loads are in the model force units
+            for jl in mesh_model.joint_loads:
+                if jl.pattern != pattern_name:
+                    continue
+                nd = mesh_model.nodes.get(jl.node_id)
+                if nd is None:
+                    continue
+                node_mass[nd.node_tag] += jl.fz * factor / g_acc if g_acc > 0 else jl.fz * factor
+
+            # A4. Area uniform loads (pressure → nodal forces)
+            for au in mesh_model.area_uniform_loads:
+                if au.pattern != pattern_name:
+                    continue
+                if au.direction.upper() not in ("GRAVITY", "Z"):
+                    continue
+                ae = mesh_model.area_elements.get(au.area_id)
+                if ae is None or getattr(ae, "inactive", False):
+                    continue
+                area = _poly_area(ae.node_ids)
+                if area <= 0:
+                    continue
+                total_fz = au.value * area
+                n_nodes = len(ae.node_ids)
+                if n_nodes > 0:
+                    node_share = total_fz * factor / (n_nodes * g_acc) if g_acc > 0 else 0.0
+                    for nid in ae.node_ids:
+                        nd = mesh_model.nodes.get(nid)
+                        if nd is not None:
+                            node_mass[nd.node_tag] += node_share
+
+        # ── Source B: Material self-weight (used when sw≠0) ──
+        else:
+            # B1. Frame element self-mass from section × mass_density × length
+            for eid, fe in mesh_model.frame_elements.items():
+                if getattr(fe, "inactive", False):
+                    continue
+                ni = mesh_model.nodes.get(fe.node_i)
+                nj = mesh_model.nodes.get(fe.node_j)
+                if ni is None or nj is None:
+                    continue
+                sec_name = mesh_model.frame_assignments.get(eid, "")
+                sec = mesh_model.sections.get(sec_name) if sec_name else None
+                if sec is None or sec.A <= 0:
+                    continue
+                dx = nj.x - ni.x; dy = nj.y - ni.y; dz = nj.z - ni.z
+                length = math.sqrt(dx*dx + dy*dy + dz*dz)
+                mat = mesh_model.materials.get(sec.material)
+                mass_density = _mass_density(mat)
+                elem_mass = sec.A * length * mass_density * factor
+                half = elem_mass * 0.5
+                node_mass[ni.node_tag] += half
+                node_mass[nj.node_tag] += half
+
+            # B2. Area element self-mass from area × thickness × mass_density
+            for aid, ae in mesh_model.area_elements.items():
+                if getattr(ae, "inactive", False):
+                    continue
+                area = _poly_area(ae.node_ids)
+                if area <= 0:
+                    continue
+                t = ae.thickness if ae.thickness > 0 else 0.15
+                sec_name = mesh_model.area_assignments.get(aid, "")
+                sec = mesh_model.sections.get(sec_name) if sec_name else None
+                mat = mesh_model.materials.get(sec.material) if sec else None
+                mass_density = _mass_density(mat)
+                area_mass = area * t * mass_density * factor
+                n_nodes = len(ae.node_ids)
+                if n_nodes > 0:
+                    node_share = area_mass / n_nodes
+                    for nid in ae.node_ids:
+                        nd = mesh_model.nodes.get(nid)
+                        if nd is not None:
+                            node_mass[nd.node_tag] += node_share
+
+    # Convert mass to loads
     gravity_loads: Dict[int, tuple] = {}
     for tag, mass in node_mass.items():
-        gravity_loads[tag] = (0.0, 0.0, -mass * g)
+        gravity_loads[tag] = (0.0, 0.0, -mass * g_acc)
 
     return gravity_loads
 
+
+def _find_dominant_mode(
+    modal_data: dict,
+    direction: str = "X",
+) -> int:
+    """Find the mode index with the highest mass participation in *direction*."""
+    ratio_key = {
+        "X": "partiMassRatiosMX",
+        "Y": "partiMassRatiosMY",
+        "Z": "partiMassRatiosMZ",
+    }.get(direction.upper(), "partiMassRatiosMX")
+    modal_props = modal_data.get("modal_props", {})
+    ratios = modal_props.get(ratio_key, [])
+    if not ratios:
+        return 0
+    return int(np.argmax(np.abs(ratios)))
+
+
+def compute_lateral_loads(
+    mesh_model: "MeshModel",
+    pattern_type: str = "triangular",
+    direction: str = "X",
+    nodal_masses: Optional[Dict[int, float]] = None,
+    modal_data: Optional[dict] = None,
+    k: float = 1.0,
+) -> Dict[int, tuple]:
+    """Generate a unit-reference lateral load pattern for pushover analysis.
+
+    Three pattern types are supported (FEMA 356):
+    * **uniform** — ``F_i ∝ m_i`` (mass-proportional).
+    * **triangular** — ``F_i ∝ m_i × z_i^k`` (inverted triangle, k=1 default).
+    * **modal** — ``F_i ∝ m_i × φ_{i,mode}`` (dominant mode in push direction).
+
+    All patterns are normalised so that sum(|F_i|) = 1.0 (unit reference load).
+    """
+    dof_idx = {"X": 0, "Y": 1, "Z": 2}.get(direction.upper(), 0)
+    if nodal_masses is None:
+        nodal_masses = {nd.node_tag: 1.0 for nd in mesh_model.nodes.values()}
+    total_mass = sum(nodal_masses.values())
+
+    loads: Dict[int, tuple] = {}
+    total_w = 0.0
+
+    if pattern_type == "uniform":
+        for nd in mesh_model.nodes.values():
+            mi = nodal_masses.get(nd.node_tag, total_mass / max(len(mesh_model.nodes), 1))
+            w = mi / total_mass if total_mass > 0 else 1.0
+            f = [0.0, 0.0, 0.0]
+            f[dof_idx] = w
+            loads[nd.node_tag] = tuple(f)
+            total_w += w
+
+    elif pattern_type == "triangular":
+        if mesh_model.nodes:
+            z_min = min(nd.z for nd in mesh_model.nodes.values())
+            z_max = max(nd.z for nd in mesh_model.nodes.values())
+            z_range = max(z_max - z_min, 1e-12)
+            for nd in mesh_model.nodes.values():
+                mi = nodal_masses.get(nd.node_tag, 1.0)
+                z_norm = (nd.z - z_min) / z_range
+                w = mi * (z_norm ** k)
+                f = [0.0, 0.0, 0.0]
+                f[dof_idx] = w
+                loads[nd.node_tag] = tuple(f)
+                total_w += w
+
+    elif pattern_type == "modal":
+        if modal_data is None:
+            raise ValueError("modal_data is required for pattern_type='modal'")
+        shapes = modal_data.get("shapes", modal_data.get("mode_shapes", {}))
+        if not shapes:
+            return compute_lateral_loads(mesh_model, "uniform", direction, nodal_masses)
+        mode_idx = _find_dominant_mode(modal_data, direction)
+        mode_shape = shapes.get(mode_idx, shapes.get(0, {}))
+        for nd in mesh_model.nodes.values():
+            phi = abs(mode_shape.get(nd.node_tag, (1.0, 0.0, 0.0))[dof_idx])
+            mi = nodal_masses.get(nd.node_tag, 1.0)
+            w = mi * phi
+            f = [0.0, 0.0, 0.0]
+            f[dof_idx] = w
+            loads[nd.node_tag] = tuple(f)
+            total_w += w
+    else:
+        raise ValueError(f"Unknown pattern_type='{pattern_type}'")
+
+    if total_w > 1e-12:
+        for tag in loads:
+            f = list(loads[tag])
+            f = [v / total_w for v in f]
+            loads[tag] = tuple(f)
+    return loads
+
+
+# ── Convenience wrappers ──
 
 def modal_to_lateral_loads(
     mesh_model: "MeshModel",
     modal_data: dict,
     direction: str = "X",
+    nodal_masses: Optional[Dict[int, float]] = None,
 ) -> Dict[int, tuple]:
-    """Generate mode-1 proportional lateral loads from modal results.
+    """Legacy wrapper — delegates to :func:`compute_lateral_loads`."""
+    return compute_lateral_loads(
+        mesh_model, pattern_type="modal", direction=direction,
+        nodal_masses=nodal_masses, modal_data=modal_data,
+    )
 
-    Args:
-        mesh_model: Preprocessed model data.
-        modal_data: Dict from ``run_modal_analysis()``.
-        direction: ``"X"`` (dof 1), ``"Y"`` (dof 2), or ``"Z"`` (dof 3).
 
-    Returns:
-        ``{node_tag: (fx, fy, fz)}`` with mode1-proportional loads
-        normalised so that ``sum(|fx|) = 1.0`` (unit reference load).
-    """
-    dof_idx = {"X": 0, "Y": 1, "Z": 2}.get(direction.upper(), 0)
-    shapes = modal_data.get("shapes", modal_data.get("mode_shapes", {}))
-    if not shapes:
-        loads: Dict[int, tuple] = {}
-        for nd in mesh_model.nodes.values():
-            fx = 1.0 if direction.upper() == "X" else 0.0
-            fy = 1.0 if direction.upper() == "Y" else 0.0
-            fz = 1.0 if direction.upper() == "Z" else 0.0
-            loads[nd.node_tag] = (fx, fy, fz)
-        return loads
+def uniform_lateral_loads(
+    mesh_model: "MeshModel", direction: str = "X",
+    nodal_masses: Optional[Dict[int, float]] = None,
+) -> Dict[int, tuple]:
+    """Generate uniform (mass-proportional) lateral loads."""
+    return compute_lateral_loads(
+        mesh_model, pattern_type="uniform", direction=direction,
+        nodal_masses=nodal_masses,
+    )
 
-    mode1 = shapes.get(0, shapes.get(1, {}))
-    loads = {}
-    total = 0.0
+
+def triangular_lateral_loads(
+    mesh_model: "MeshModel", direction: str = "X",
+    nodal_masses: Optional[Dict[int, float]] = None,
+    k: float = 1.0,
+) -> Dict[int, tuple]:
+    """Generate triangular (height-proportional) lateral loads."""
+    return compute_lateral_loads(
+        mesh_model, pattern_type="triangular", direction=direction,
+        nodal_masses=nodal_masses, k=k,
+    )
+
+
+def validate_control_node(
+    control_node_tag: int,
+    mesh_model: "MeshModel",
+) -> bool:
+    """Verify a pushover control node is connected to frame elements."""
+    control_node_id: Optional[str] = None
     for nd in mesh_model.nodes.values():
-        phi = abs(mode1.get(nd.node_tag, (1.0, 0.0, 0.0))[dof_idx])
-        mass = getattr(nd, "mass", 1.0) or 1.0
-        w = mass * phi
-        f = [0.0, 0.0, 0.0]
-        f[dof_idx] = w
-        loads[nd.node_tag] = tuple(f)
-        total += w
+        if nd.node_tag == control_node_tag:
+            control_node_id = nd.node_id
+            break
+    if control_node_id is None:
+        print(f"  ⚠ Control node tag {control_node_tag} not found!")
+        return False
+    connected = 0
+    for fe in mesh_model.frame_elements.values():
+        if getattr(fe, "inactive", False):
+            continue
+        if fe.node_i == control_node_id or fe.node_j == control_node_id:
+            connected += 1
+    if connected == 0:
+        print(f"  ⚠ Control node {control_node_tag} NOT connected to any frame element!")
+        return False
+    print(f"  Control node {control_node_tag} connected to {connected} frame element(s) — OK")
+    return True
 
-    if total > 1e-12:
-        for tag in loads:
-            f = list(loads[tag])
-            f = [v / total for v in f]
-            loads[tag] = tuple(f)
 
-    return loads
+def verify_tcl_gravity_loads(
+    tcl_path: str,
+    expected_total_z: Optional[float] = None,
+) -> dict:
+    """Parse a Tcl file and verify gravity loading.
+
+    Reads the generated Tcl file, finds ``pattern Plain 1`` blocks
+    (the gravity load pattern), sums all Z-direction loads, and
+    optionally compares against an expected total.
+    """
+    result: dict = {"present": False, "total_z": 0.0, "z_loads": 0, "match": None, "error": None}
+    try:
+        with open(tcl_path, "r") as f:
+            content = f.read()
+    except Exception as e:
+        result["error"] = str(e)
+        return result
+    in_gravity = False
+    total_z = 0.0
+    load_count = 0
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if re.match(r'pattern\s+Plain\s+1', stripped):
+            in_gravity = True
+            continue
+        if in_gravity:
+            if stripped == "}":
+                break
+            m = re.match(r'load\s+\d+\s+[-\d.e+]+\s+[-\d.e+]+\s+([-\d.e+]+)', stripped)
+            if m:
+                fz = float(m.group(1))
+                total_z += fz
+                load_count += 1
+    result["present"] = load_count > 0
+    result["total_z"] = total_z
+    result["z_loads"] = load_count
+    if expected_total_z is not None and abs(expected_total_z) > 1e-12:
+        ratio = abs(total_z) / abs(expected_total_z)
+        result["match"] = abs(ratio - 1.0) < 0.01
+    return result

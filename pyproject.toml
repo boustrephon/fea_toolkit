@@ -35,3 +35,7 @@ python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::UserWarning:pyvista.jupyter.notebook",
+    "ignore:Section '.*' does not support fiber patches:UserWarning",
+]

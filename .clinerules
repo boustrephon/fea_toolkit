@@ -125,9 +125,10 @@ New analysis code must follow this pattern. Do NOT add analysis methods to the p
 - `src/fea_toolkit/__init__.py` re-exports the most-used public API.
 - Subpackage `__init__.py` files define `__all__` or re-export key classes.
 
-### 3.7 NPZ as canonical exchange format
+### 3.7 NPZ as canonical serialized exchange format
 - Analysis results are serialized to `.npz` using `npz_writer.py` / `npz_reader.py`.
-- All visualizers (PyVista, Rhino, plotting) consume NPZ, not raw results.
+- NPZ is the canonical on-disk exchange format for standalone plotting and post-hoc analysis.
+- For in‑process use, visualizers also accept ``AnalysisBuilder`` instances and result/force dicts directly (see §3.8).
 - Schema is defined in `io/results_schema.py`.
 - The public serialization API is ``write_results_npz()`` in ``fea_toolkit.io.npz_writer``.
 - ``AnalysisBuilder.export_results()`` is the builder‑level convenience wrapper.

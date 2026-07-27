@@ -47,6 +47,17 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+from ..model.sap_data import (
+    DEFAULT_EPS_C,
+    DEFAULT_EPS_CC,
+    DEFAULT_G_MOD_FRAC,
+    DEFAULT_FC_PA,
+    DEFAULT_FY_REBAR_PA,
+    DEFAULT_FY_STEEL_PA,
+    DEFAULT_E_S_PA,
+)
+from ..utils import stress_scale_factor
+
 
 def _py_val(v: Any) -> str:
     """Convert a Python value to a clean literal string for code generation.
@@ -363,6 +374,9 @@ class XaraTclRunner:
             check: bool = False) -> tuple[int, str]:
         """Execute a Tcl script via the standalone interpreter.
 
+        Prints stdout/stderr in real-time as the script runs (avoids
+        buffering issues with ``capture_output=True``).
+
         Args:
             tcl_path: Path to the ``.tcl`` file to execute.
             timeout: Maximum wall-clock time in seconds.
@@ -377,22 +391,38 @@ class XaraTclRunner:
             subprocess.CalledProcessError: If *check* is True and exit
                 code is non-zero.
         """
-        try:
-            # Run from the Tcl file's directory so recorder output
-            # files are written alongside the .tcl file.
-            tcl_dir = os.path.dirname(os.path.abspath(tcl_path))
-            result = subprocess.run(
-                [self._tclsh, tcl_path],
-                capture_output=True, text=True, timeout=timeout,
-                check=check, cwd=tcl_dir,
-            )
-            if result.stderr:
-                print(result.stderr, file=sys.stderr)
-            return result.returncode, result.stdout
-        except subprocess.TimeoutExpired:
-            print(f"XaraTclRunner: script timed out after {timeout}s",
-                  file=sys.stderr)
-            raise
+        tcl_dir = os.path.dirname(os.path.abspath(tcl_path))
+        stdout_buf: list[str] = []
+
+        with subprocess.Popen(
+            [self._tclsh, tcl_path],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1, cwd=tcl_dir,
+        ) as proc:
+            try:
+                # Read combined stdout+stderr line-by-line in real time
+                for line in proc.stdout:
+                    line = line.rstrip("\n")
+                    print(line)
+                    stdout_buf.append(line)
+
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                print(f"XaraTclRunner: script timed out after {timeout}s",
+                      file=sys.stderr)
+                raise
+
+        returncode = proc.returncode
+        stdout_text = "\n".join(stdout_buf)
+
+        if check and returncode != 0:
+            raise subprocess.CalledProcessError(
+                returncode, [self._tclsh, tcl_path],
+                stdout_text, "")
+
+        return returncode, stdout_text
 
     @staticmethod
     def read_recorder(file_path: str) -> np.ndarray:
@@ -488,6 +518,7 @@ def export_mesh_model_to_tcl(
             ``config["create_fiber_sections"]`` is ``True``, fiber
             sections are auto-generated for supported section types.
     """
+    import math
     from ..model.mesh_model import MeshModel
 
     if config is None:
@@ -532,10 +563,40 @@ def export_mesh_model_to_tcl(
         for i, sn in enumerate(mesh_model.sections, start=sec_offset):
             sec_tags[sn] = i
 
+    # ── Determine which nodes are referenced by exported elements ──
+    export_shells = config.get("export_shells", True) if config else True
+    _exported_node_tags: set[int] = set()
+    for eid, elem in mesh_model.frame_elements.items():
+        if getattr(elem, "inactive", False):
+            continue
+        ni = mesh_model.nodes.get(elem.node_i)
+        nj = mesh_model.nodes.get(elem.node_j)
+        if ni: _exported_node_tags.add(ni.node_tag)
+        if nj: _exported_node_tags.add(nj.node_tag)
+    if export_shells:
+        for aid, aelem in mesh_model.area_elements.items():
+            if getattr(aelem, "inactive", False):
+                continue
+            for nid in aelem.node_ids:
+                nd = mesh_model.nodes.get(nid)
+                if nd:
+                    _exported_node_tags.add(nd.node_tag)
+    # Also include restrained nodes even if no element — they may be supports
+    for nid, r in mesh_model.restraints.items():
+        nd = mesh_model.nodes.get(nid)
+        if nd:
+            _exported_node_tags.add(nd.node_tag)
+
+    lines.append("")
+    lines.append(f'puts "-> Building domain: {len(_exported_node_tags)} nodes..."')
+    lines.append("flush stdout")
+
     # ── Nodes ────────────────────────────────────────────────────
     lines.append("")
     lines.append("# ── Nodes ──")
     for nd in mesh_model.nodes.values():
+        if nd.node_tag not in _exported_node_tags:
+            continue
         lines.append(f"node {nd.node_tag} {nd.x:g} {nd.y:g} {nd.z:g}")
 
     # ── Restraints ───────────────────────────────────────────────
@@ -560,6 +621,9 @@ def export_mesh_model_to_tcl(
             except NotImplementedError:
                 pass
 
+    lines.append(f'puts "-> Restraints created, defining materials..."')
+    lines.append("flush stdout")
+
     # ── Materials ────────────────────────────────────────────────
     if mesh_model.materials:
         lines.append("")
@@ -572,8 +636,8 @@ def export_mesh_model_to_tcl(
             if mat_name in _fiber_mat_names:
                 continue
             if mat.type and "concrete" in mat.type.lower():
-                Fc = (mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7) / 1.0
-                epsc = (mat.eFc if mat.eFc and mat.eFc > 0 else 0.002)
+                Fc = (mat.Fc if mat.Fc and mat.Fc > 0 else DEFAULT_FC_PA) / 1.0
+                epsc = (mat.eFc if mat.eFc and mat.eFc > 0 else DEFAULT_EPS_C)
                 Fu = 0.2 * Fc
                 epsu = 0.006
                 lines.append(
@@ -582,8 +646,8 @@ def export_mesh_model_to_tcl(
                 )
             else:
                 E_mod = (mat.E_mod if mat.E_mod and mat.E_mod > 0
-                         else 2.0e11)
-                Fy = (mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8)
+                         else DEFAULT_E_S_PA)
+                Fy = (mat.Fy if mat.Fy and mat.Fy > 0 else DEFAULT_FY_STEEL_PA)
                 lines.append(
                     f"uniaxialMaterial Steel01 {tag} "
                     f"{Fy:g} {E_mod:g} 0.01"
@@ -597,6 +661,9 @@ def export_mesh_model_to_tcl(
         sn = mesh_model.frame_assignments.get(eid, "")
         if sn:
             _assigned_to_frames.add(sn)
+
+    lines.append(f'puts "-> Materials defined, creating frame sections..."')
+    lines.append("flush stdout")
 
     # ── Frame sections ───────────────────────────────────────────
     if mesh_model.sections:
@@ -742,8 +809,11 @@ def export_mesh_model_to_tcl(
         lines.append("# ── User tcl_prefix ──")
         lines.append(tcl_prefix)
 
+    lines.append(f'puts "-> Frame sections created, creating shell sections..."')
+    lines.append("flush stdout")
+
     # ── Shell sections ───────────────────────────────────────────
-    if mesh_model.area_elements:
+    if mesh_model.area_elements and config.get("export_shells", True):
         lines.append("")
         lines.append("# ── Shell sections & area elements ──")
 
@@ -796,7 +866,7 @@ def export_mesh_model_to_tcl(
             nn = len(n_tags)
             if nn == 4:
                 lines.append(
-                    f"element ShellMITC4 {el_tag} "
+                    f"element ShellDKGQ {el_tag} "
                     f"{' '.join(n_tags)} {stag}"
                 )
             elif nn == 3:
@@ -804,6 +874,13 @@ def export_mesh_model_to_tcl(
                     f"element ShellDKGT {el_tag} "
                     f"{' '.join(n_tags)} {stag}"
                 )
+    else:
+        lines.append("")
+        lines.append("# ── Shell elements omitted (export_shells=False) ──")
+        lines.append("puts \"-> Shell elements omitted (export_shells=False)\"")
+
+    lines.append(f'puts "-> Shell sections created, creating frame elements..."')
+    lines.append("flush stdout")
 
     # ── Frame elements ───────────────────────────────────────────
     if mesh_model.frame_elements:
@@ -869,18 +946,44 @@ def export_mesh_model_to_tcl(
                 # Nonlinear beam-column with fiber section
                 int_tag = 10000 + el_tag
                 n_int_pts = config.get("num_int_pts", 5) if config else 5
-                lines.append(
-                    f"beamIntegration Lobatto {int_tag} {sec_tag} {n_int_pts}"
-                )
-                lines.append(
-                    f"element forceBeamColumn {el_tag} "
-                    f"{ni.node_tag} {nj.node_tag} {transf_tag} {int_tag}"
-                )
+                elem_type = config.get("element_type", "forceBeamColumn") if config else "forceBeamColumn"
+
+                if elem_type == "dispBeamColumn":
+                    # dispBeamColumn uses inline Lobatto syntax (required for Xara/OpenSeesRT)
+                    lines.append(
+                        f"element dispBeamColumn {el_tag} "
+                        f"{ni.node_tag} {nj.node_tag} {transf_tag} "
+                        f"\"Lobatto {sec_tag} {n_int_pts}\""
+                    )
+                elif config.get("beam_integration", "Lobatto") == "HingeRadau":
+                    # HingeRadau: 2 Gauss-Radau at each hinge over 4*Lp, 2 interior
+                    dx = nj.x - ni.x; dy = nj.y - ni.y; dz = nj.z - ni.z
+                    elem_len = math.sqrt(dx*dx + dy*dy + dz*dz)
+                    Lp = max(0.05 * elem_len, 0.1)
+                    lines.append(
+                        f"beamIntegration HingeRadau {int_tag} {sec_tag} {Lp:.4f} {sec_tag} {Lp:.4f} {sec_tag}"
+                    )
+                    lines.append(
+                        f"element forceBeamColumn {el_tag} "
+                        f"{ni.node_tag} {nj.node_tag} {transf_tag} {int_tag}"
+                    )
+                else:
+                    # Default (Lobatto): beamIntegration + forceBeamColumn
+                    lines.append(
+                        f"beamIntegration Lobatto {int_tag} {sec_tag} {n_int_pts}"
+                    )
+                    lines.append(
+                        f"element forceBeamColumn {el_tag} "
+                        f"{ni.node_tag} {nj.node_tag} {transf_tag} {int_tag}"
+                    )
             else:
                 lines.append(
                     f"element elasticBeamColumn {el_tag} "
                     f"{ni.node_tag} {nj.node_tag} {sec_tag} {transf_tag}"
                 )
+
+    lines.append(f'puts "-> Domain building complete ({len(mesh_model.nodes)} nodes, {len(mesh_model.frame_elements)} frames, {len(mesh_model.area_elements)} shells)"')
+    lines.append("flush stdout")
 
     # ── tcl_suffix (user-supplied, before wipe) ──────────────────
     if tcl_suffix:
@@ -944,7 +1047,12 @@ def parse_pushover_results(
         # Single column of displacements (no time column)
         control_disp = disp_data
     elif disp_data.ndim >= 2:
-        # First column is time, second is displacement
+        # First column is time, second is displacement — validate shape
+        if disp_data.shape[1] < 2:
+            raise ValueError(
+                f"Displacement file {disp_path} has {disp_data.shape[1]} "
+                f"column(s); expected at least 2 (time + disp)."
+            )
         control_disp = disp_data[:, 1]
     else:
         raise ValueError(f"Cannot parse displacement file: {disp_path}")
@@ -954,20 +1062,23 @@ def parse_pushover_results(
     # ── Base shear ───────────────────────────────────────────────
     bs_data = np.genfromtxt(bs_path, invalid_raise=False)
     if bs_data.ndim == 0:
-        # Single scalar
+        # Single scalar value
         base_shear = np.full(n_steps, float(bs_data))
     elif bs_data.ndim == 1 and len(bs_data) == 3:
-        # Three components: rx, ry, rz
+        # Three components: rx, ry, rz — use first (push direction)
         base_shear = np.full(n_steps, float(bs_data[0]))
+    elif bs_data.ndim == 1:
+        # One value per step
+        base_shear = np.asarray(bs_data, dtype=float)
     else:
         # Multi-row: one per step
         base_shear = np.asarray(bs_data, dtype=float)
 
-    # Broadcast if needed
-    if len(base_shear) == 1 and n_steps > 1:
-        base_shear = np.full(n_steps, base_shear[0])
-    elif len(base_shear) != n_steps:
-        base_shear = np.full(n_steps, float(bs_data[0]) if bs_data.ndim == 0 else float(bs_data[0]))
+    # Broadcast if needed — only for non-scalar data
+    if hasattr(base_shear, '__len__') and len(base_shear) != n_steps and n_steps > 0:
+        # Fallback: use the first value if shapes mismatch
+        base_shear_val = float(bs_data.flat[0]) if hasattr(bs_data, 'flat') else float(bs_data)
+        base_shear = np.full(n_steps, base_shear_val)
 
     # ── Step indices ─────────────────────────────────────────────
     step = np.arange(1, n_steps + 1, dtype=int)

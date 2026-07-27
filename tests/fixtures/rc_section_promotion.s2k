@@ -1,0 +1,19 @@
+TABLE: "PROGRAM CONTROL"
+   CurrUnits="N, mm, C"
+TABLE: "MATERIAL PROPERTIES 01 - GENERAL"
+   Material=CONC   Type="Concrete"
+   Material=STEEL   Type="Steel"
+TABLE: "FRAME SECTION PROPERTIES 01 - GENERAL"
+   SectionName=RC_BEAM   Shape=Rectangular   Material=CONC   Area=0.1   I33=0.001   I22=0.0005   t3=0.4   t2=0.2
+TABLE: "FRAME SECTION PROPERTIES 01 - GENERAL"
+   SectionName=RC_COL   Shape=Rectangular   Material=CONC   Area=0.09   I33=0.000675   I22=0.000675   t3=0.3   t2=0.3
+TABLE: "FRAME SECTION PROPERTIES 01 - GENERAL"
+   SectionName=FSEC1   Shape="I/Wide Flange"   Material=STEEL   Area=0.01   I33=0.0002   I22=0.00005   t3=0.4   t2=0.2   tf=0.012   tw=0.008
+TABLE: "AREA SECTION PROPERTIES"
+   Section=SlabConc   Material=CONC   Thickness=0.15
+TABLE: "AREA SECTION PROPERTIES"
+   Section=WallBrick   Material=CONC   Thickness=0.2
+TABLE: "AREA SECTION PROPERTIES"
+   Section=WallShear   Material=CONC   Thickness=0.3
+TABLE: "AREA SECTION PROPERTIES"
+   Section=ASEC1   Material=CONC   Thickness=0.25

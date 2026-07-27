@@ -8,14 +8,22 @@ Exercises:
     - :func:`plot_deformed_displacement_3d` — unified displaced-shape viewer.
 """
 
+import warnings
 import numpy as np
 import pytest
 
 try:
     import pyvista as pv
     _has_pyvista = True
+    pv.OFF_SCREEN = True  # prevent interactive windows during tests
 except ImportError:
     _has_pyvista = False
+
+# Suppress PyVista's Jupyter backend warning — fires spuriously when
+# pv.Plotter(notebook=True) is constructed in a non-Jupyter environment.
+# This is a PyVista issue where it attempts to load its trame/Jupyter
+# backend even in OFF_SCREEN mode.
+warnings.filterwarnings("ignore", message="Failed to use notebook backend")
 
 
 # ============================================================================
@@ -124,7 +132,7 @@ class TestBuildDeformedMesh:
         # 4 + 4 interpolation points = 8 frame vertices
         assert fm.n_points == 8
         assert sm is not None
-        assert sm.n_faces == 3  # 2 quads + 1 triangle
+        assert sm.n_faces_strict == 3  # 2 quads + 1 triangle
 
     def test_quad_is_quad_face(self, sample_segments, sample_seg_npoints,
                                sample_quads):
@@ -165,7 +173,7 @@ class TestBuildDeformedMesh:
             scale=1.0, amp=1.0,
         )
         assert sm is not None
-        assert sm.n_faces == 1
+        assert sm.n_faces_strict == 1
         # Still a quad face format (degenerate)
         assert sm.faces[0] == 4
         # Triangle data: 4 vertices with last two at same position
@@ -210,7 +218,7 @@ class TestBuildDeformedMesh:
         assert fm.n_lines == 0
         assert fm.n_points == 0
         assert sm is not None
-        assert sm.n_faces == 3
+        assert sm.n_faces_strict == 3
 
     def test_empty_quads(self, sample_segments, sample_seg_npoints):
         """Passing no shell quads yields ``None`` for the shell mesh.
@@ -405,8 +413,10 @@ class TestResolveMeshData:
         pl = compare_meshes(
             sample_npz_data, sample_npz_data,
             collapse_to_parents=False,
+            notebook=True,
         )
         assert pl is not None
+        assert hasattr(pl, 'close')
         pl.close()
 
     def test_deformed_displacement_collapse_to_parents(

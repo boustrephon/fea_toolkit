@@ -46,24 +46,26 @@ def read_peer_record(path: str) -> Tuple[np.ndarray, np.ndarray]:
     # Skip header — search for the first numeric data line
     data_lines: list[str] = []
     dt = 0.005  # default time step
-    for i, line in enumerate(lines):
+    for line in lines:
         stripped = line.strip()
         if not stripped:
             continue
         # Try to detect header metadata
         low = stripped.lower()
-        if "npts" in low:
-            m = re.search(r"(\d+)", stripped)
-        elif "dt" in low:
-            m = re.search(r"([\d.]+)", stripped)
-            if m:
-                dt = float(m.group(1))
+        if "npts" in low or "dt" in low:
+            # Extract DT from header lines, handling NPTS+DT on same line
+            m_dt = re.search(r"(?:^|\s)DT\s*=\s*([\d.]+)", stripped, re.IGNORECASE)
+            if not m_dt:
+                m_dt = re.search(r"([\d.]+)", stripped[stripped.lower().find("dt"):])
+            if m_dt:
+                dt = float(m_dt.group(1))
+            continue  # skip recognized header metadata
         # Check if this line starts with a number (data)
         try:
             float(stripped.split()[0])
             data_lines.extend(stripped.split())
         except (ValueError, IndexError):
-            pass
+            pass  # non-header, non-numeric — ignore
 
     if not data_lines:
         raise ValueError(f"No numeric data found in PEER record: {path}")
@@ -159,26 +161,41 @@ def scale_to_target_sa(
     ndarray
         Scaled acceleration record.
     """
-    from scipy.signal import find_peaks
-
-    # Compute response spectrum via Duhamel integration
+    # Compute response spectrum via Newmark-beta linear acceleration integration
     dt = times[1] - times[0] if len(times) > 1 else 0.005
     w = 2.0 * np.pi / period
-    wd = w * np.sqrt(1.0 - damping**2)
 
-    # Newmark average acceleration integration
+    # Newmark linear acceleration coefficients (gamma=0.5, beta=1/6)
+    gamma = 0.5
+    beta = 1.0 / 6.0
+
     npts = len(accel)
     u = np.zeros(npts)
     v = np.zeros(npts)
     a = np.zeros(npts)
-    a[0] = -accel[0]  # initial acceleration
+    # Initial acceleration from SDOF equation: m*a[0] + c*v[0] + k*u[0] = -m*accel[0]
+    # with u[0]=v[0]=0 → a[0] = -accel[0]
+    a[0] = -accel[0]
+
+    # Effective stiffness: k_eff = k + gamma*c*dt + beta*m*dt^2
+    # c = 2*damping*w*m, k = w^2*m
+    c = 2.0 * damping * w
+    k_eff = w**2 + gamma * c * dt + beta * dt**2  # per unit mass
 
     for i in range(1, npts):
-        # Predictor-corrector for SDOF response
-        u[i] = u[i - 1] + dt * v[i - 1] + dt**2 * (0.5 - 0.25) * a[i - 1] + dt**2 * 0.25 * a[i - 1]
-        v[i] = v[i - 1] + dt * (1.0 - 0.5) * a[i - 1] + dt * 0.5 * a[i]
-        a[i] = (-accel[i] - 2.0 * damping * w * v[i] - w**2 * u[i])
-        # This is approximate — for production use scipy.signal or OpenSees
+        # Effective load per unit mass:
+        # p_eff = -accel[i] + (alpha1 * u[i-1] + alpha2 * v[i-1] + alpha3 * a[i-1])
+        alpha1 = 1.0 / (beta * dt**2)
+        alpha2 = gamma / (beta * dt)
+        alpha3 = 1.0 / (beta * dt) * (1.0 - gamma / beta)  # simplified: (1/(2*beta) - 1) for gamma=0.5
+        # Standard formulation:
+        # p_eff = -accel[i] + (alpha1*u[i-1] + alpha2*v[i-1] + (1/(2*beta) - 1)*a[i-1])
+        p_eff = -accel[i] + (alpha1 * u[i-1] + alpha2 * v[i-1] + (0.5/beta - 1.0) * a[i-1])
+        u[i] = p_eff / k_eff
+        # Update velocity and acceleration using Newmark formulas
+        v[i] = gamma / (beta * dt) * (u[i] - u[i-1]) + (1.0 - gamma / beta) * v[i-1] + dt * (1.0 - gamma / (2.0 * beta)) * a[i-1]
+        a[i] = (u[i] - u[i-1]) / (beta * dt**2) - v[i-1] / (beta * dt) - (1.0 / (2.0 * beta) - 1.0) * a[i-1]
+
     current_sa = np.max(np.abs(u)) * w**2
     if current_sa < 1e-12:
         return accel
