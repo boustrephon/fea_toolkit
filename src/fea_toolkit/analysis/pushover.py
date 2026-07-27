@@ -154,23 +154,32 @@ class PushoverAnalysis(Analysis):
 
         Workflow:
         1. Generate RC fiber Tcl via ``export_mesh_model_to_tcl()``
-        2. Append ``pushover_tcl()`` commands
+        2. Append ``pushover_tcl()`` commands with recorder output files
         3. Run via ``XaraTclRunner``
-        4. Parse output (displacement, base reactions)
+        4. Parse recorder output files via ``parse_pushover_results()``
         5. Return compatible ``AnalysisResult``
+
+        Recorder output files (``*_disp.out``, ``*_bs.out``, ``*_reaction.out``)
+        are written alongside the Tcl script in the ``output/`` directory, which
+        is gitignored per project convention.
         """
         from pathlib import Path
-        import tempfile
         import os
+        import datetime
 
         from fea_toolkit.opensees.recorder import (
             export_mesh_model_to_tcl,
             XaraTclRunner,
+            parse_pushover_results,
         )
         from fea_toolkit.opensees.builder import pushover_tcl
         from fea_toolkit.model.mesh_model import MeshModel
 
         mm: MeshModel = self.mesh_model
+
+        # ── Output directory ─────────────────────────────────────────
+        out_dir = Path("output") / f"pushover_rc_{datetime.datetime.now():%Y%m%d_%H%M%S}"
+        out_dir.mkdir(parents=True, exist_ok=True)
 
         # Determine control node (topmost node along Z)
         control_node = 1
@@ -185,9 +194,10 @@ class PushoverAnalysis(Analysis):
         if not isinstance(modal_data, dict):
             modal_data = {"modal": modal_data}
 
-        periods = modal_data.get("modal", {}).get("periods", [])
-        shapes = modal_data.get("shapes", {})
-        first_mode = shapes.get(1, {}) if shapes else {}
+        modal_nested = modal_data.get("modal", modal_data)
+        periods = modal_nested.get("periods", [])
+        shapes = modal_nested.get("shapes", modal_nested.get("mode_shapes", {}))
+        first_mode = shapes.get(1, shapes.get(0, {})) if shapes else {}
 
         # Lateral load pattern based on lateral_load_type
         lateral_loads: Dict[int, tuple] = {}
@@ -222,7 +232,9 @@ class PushoverAnalysis(Analysis):
         rc_config.update(self.config)
         rc_config["create_fiber_sections"] = True
 
-        # Generate Tcl
+        output_prefix = "pushover_rc"
+
+        # Generate Tcl suffix with recorder files
         tcl_suffix = pushover_tcl(
             control_node=control_node,
             dof=1,
@@ -231,57 +243,74 @@ class PushoverAnalysis(Analysis):
             lateral_loads=lateral_loads,
             gravity_loads=gravity_loads,
             adaptive=True,
+            output_prefix=output_prefix,
         )
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".tcl", delete=False, encoding="utf-8"
-        ) as f:
-            tcl_path = f.name
-            export_mesh_model_to_tcl(
-                mm, tcl_path, config=rc_config, tcl_suffix=tcl_suffix,
-            )
+        # Write Tcl script to output directory
+        tcl_path = str(out_dir / "model.tcl")
+        export_mesh_model_to_tcl(
+            mm, tcl_path, config=rc_config, tcl_suffix=tcl_suffix,
+        )
 
-        # Run via Xara
+        # Run via Xara — the runner sets cwd to the tcl file's directory,
+        # so recorder output files are written alongside ``model.tcl``.
         runner = XaraTclRunner()
         ret, output = runner.run(tcl_path)
 
-        # Clean up temp file
-        try:
-            os.unlink(tcl_path)
-        except OSError:
-            pass
+        # ── Parse recorder output files ─────────────────────────────
+        disp_path = str(out_dir / f"{output_prefix}_disp.out")
+        bs_path = str(out_dir / f"{output_prefix}_bs.out")
+        reaction_path = str(out_dir / f"{output_prefix}_reaction.out")
 
-        # Parse output
-        disp = 0.0
-        rx = 0.0
-        ry = 0.0
-        rz = 0.0
-        for line in output.splitlines():
-            if f"Control node" in line and "dof" in line:
-                parts = line.split(":")
-                if len(parts) >= 2:
-                    try:
-                        disp = float(parts[-1].strip())
-                    except ValueError:
-                        pass
-            if "Base reactions:" in line:
-                import re
-                m = re.search(r"Rx\s*=\s*([-\d.e+]+)", line)
-                if m:
-                    rx = float(m.group(1))
-                m = re.search(r"Ry\s*=\s*([-\d.e+]+)", line)
-                if m:
-                    ry = float(m.group(1))
-                m = re.search(r"Rz\s*=\s*([-\d.e+]+)", line)
-                if m:
-                    rz = float(m.group(1))
+        result = {}
+        if os.path.exists(disp_path) and os.path.exists(bs_path):
+            try:
+                parsed = parse_pushover_results(
+                    disp_path, bs_path,
+                    reaction_path if os.path.exists(reaction_path) else None,
+                )
+                result = {
+                    "control_disp": parsed.get("control_disp", []).tolist(),
+                    "base_shear": parsed.get("base_shear", []).tolist(),
+                    "step": parsed.get("step", []).tolist(),
+                    "base_rx": float(parsed.get("base_rx", [0])[0]),
+                    "base_ry": float(parsed.get("base_ry", [0])[0]) if "base_ry" in parsed else 0.0,
+                    "base_rz": float(parsed.get("base_rz", [0])[0]) if "base_rz" in parsed else 0.0,
+                    "output_raw": output,
+                    "output_dir": str(out_dir),
+                }
+                if "reaction_rx" in parsed:
+                    result["reaction_rx"] = parsed["reaction_rx"].tolist()
+            except Exception as exc:
+                result = {"error": str(exc), "output_raw": output}
+        else:
+            # Fallback: try stdout parsing as before
+            rx = ry = rz = 0.0
+            for line in output.splitlines():
+                if "Base reactions:" in line:
+                    import re
+                    m = re.search(r"Rx\s*=\s*([-\d.e+]+)", line)
+                    if m:
+                        rx = float(m.group(1))
+                    m = re.search(r"Ry\s*=\s*([-\d.e+]+)", line)
+                    if m:
+                        ry = float(m.group(1))
+                    m = re.search(r"Rz\s*=\s*([-\d.e+]+)", line)
+                    if m:
+                        rz = float(m.group(1))
+            result = {
+                "base_reactions": {"rx": rx, "ry": ry, "rz": rz},
+                "output_raw": output,
+                "output_dir": str(out_dir),
+            }
 
-        result = {
-            "control_disp": [disp],
-            "base_shear": [rx],
-            "base_reactions": {"rx": rx, "ry": ry, "rz": rz},
-            "output_raw": output,
-        }
+        # Conditionally clean up
+        if not rc_config.get("keep_tcl", False) and not rc_config.get("keep_output", False):
+            import shutil
+            try:
+                shutil.rmtree(str(out_dir), ignore_errors=True)
+            except OSError:
+                pass
 
         return AnalysisResult(
             name=self.name,
@@ -293,6 +322,7 @@ class PushoverAnalysis(Analysis):
                 "max_disp_val": self.max_disp_val,
                 "num_steps": self.num_steps,
                 "tcl_path": tcl_path if os.path.exists(tcl_path) else None,
+                "output_dir": str(out_dir) if out_dir.exists() else None,
                 "config": self.config,
             },
         )

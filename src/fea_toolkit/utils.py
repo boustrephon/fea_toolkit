@@ -11,6 +11,28 @@ from typing import Dict, List, Optional
 # Gravitational acceleration in m/s²  (SI default)
 _G_SI = 9.80665
 
+# ── Material-property defaults (SI Pa units) ──────────────────────────
+# These are used as fallback values when SAP2000 data is missing.
+# They must be scaled to the model's unit system via 
+# length_scale_factor(), force_scale_factor() and stress_scale_factor().
+
+DEFAULT_FY_STEEL_PA = 250.0e6       # Steel yield stress (Pa)
+DEFAULT_FY_REBAR_PA = 400.0e6       # Rebar / RC steel yield stress (Pa)
+DEFAULT_FC_PA = 30.0e6              # Concrete compressive strength (Pa)
+DEFAULT_E_S_PA = 200.0e9            # Young's modulus (Pa)
+DEFAULT_NU_S = 0.3                  # Poisson's ratio
+DEFAULT_G_S_PA = 76.9e9             # Shear modulus — computed from E & nu (E / (2 * (1 + nu)))
+DEFAULT_G_MOD_FRAC = 0.385          # Default G = G_MOD_FRAC × E when G is missing
+DEFAULT_E_C_PA = 30.0e9             # Concrete Young's modulus
+DEFAULT_NU_C = 0.2                  # Poisson's ratio
+DEFAULT_G_C_PA = 12.5e9             # Shear modulus — computed from E & nu (E / (2 * (1 + nu)))
+DEFAULT_EPS_C = 0.002               # Strain at peak Fc (concrete)
+DEFAULT_EPS_CC = 0.005              # Crushing strain (confined concrete)
+DEFAULT_RHO_WC_SI = 24000.0         # Default concrete unit weight (N/m³)
+DEFAULT_RHO_MC_SI = 2450.0          # Default concrete unit mass (kg/m³)
+DEFAULT_RHO_WS_SI = 77000.0         # Default steel unit weight (N/m³)
+DEFAULT_RHO_MS_SI = 7850.0          # Default steel unit mass (kg/m³)
+DEFAULT_GRAVITY_MS2 = _G_SI         # Gravitational acceleration in m/s²
 
 def g_from_units(units: dict) -> float:
     """Return gravitational acceleration matching the model length unit.
@@ -46,6 +68,288 @@ def g_from_units(units: dict) -> float:
         'in': 39.3701,
     }.get(lu, 1.0)
     return _G_SI * scale
+
+def length_scale_factor(units: dict) -> float:
+    """Compute the stress-unit scaling factor from model units.
+
+    Length-like quantities (m) are converted to the model's unit system
+    by multiplying by this factor::
+
+        value_in_model_units = value_in_m * length_scale_factor(units)
+
+    The factor is ``L_factor² ÷ F_factor`` where:
+
+    =======  =========
+    Unit     L_factor
+    =======  =========
+    m        1.0
+    cm       0.01
+    mm       0.001
+    in       0.0254
+    ft       0.3048
+    =======  =========
+
+    Args:
+        units: Model units dict, e.g. ``{'L': 'm', 'F': 'N', 'T': 'C'}``.
+
+    Returns:
+        Scaling factor to convert m to the model's length unit.
+    """
+    u = units or {}
+    lu = u.get('L', 'm')
+
+    # Normalise
+    _alias_L = {
+        'meter': 'm', 'meters': 'm', 'metre': 'm', 'metres': 'm',
+        'centimeter': 'cm', 'centimeters': 'cm', 'centimetre': 'cm',
+        'millimeter': 'mm', 'millimeters': 'mm', 'millimetre': 'mm',
+        'foot': 'ft', 'feet': 'ft',
+        'inch': 'in', 'inches': 'in',
+    }
+
+    lu_norm = _alias_L.get(lu.lower(), lu.lower()) if isinstance(lu, str) else 'm'
+
+    L_factor = {
+        'm': 1.0,
+        'cm': 0.01,
+        'mm': 0.001,
+        'in': 0.0254,
+        'ft': 0.3048,
+    }.get(lu_norm, 1.0)
+
+    return L_factor
+
+def force_scale_factor(units: dict) -> float:
+    """Compute the force-unit scaling factor from model units.
+
+    Stress-like quantities (N) are converted to the model's unit system
+    by multiplying by this factor::
+
+        value_in_model_units = value_in_N * force_scale_factor(units)
+
+    The factor is ``F_factor`` where:
+
+
+    =======  ==========
+    Unit     F_factor
+    =======  ==========
+    N        1.0
+    kN       1000.0
+    MN       1000000.0
+    kgf      9.80665
+    lb       4.448
+    kip      4448.0
+    =======  ==========
+
+    For example:
+    - N, m   → 1.0² ÷ 1.0    = 1.0     (Pa → Pa)
+    - N, mm  → 0.001² ÷ 1.0  = 1e-6    (Pa → MPa = N/mm²)
+    - kN, mm → 0.001² ÷ 1000 = 1e-9    (Pa → kN/mm²)
+
+    Args:
+        units: Model units dict, e.g. ``{'L': 'm', 'F': 'N', 'T': 'C'}``.
+
+    Returns:
+        Scaling factor to convert N to the model's force unit.
+    """
+    u = units or {}
+    fu = u.get('F', 'N')
+
+    # Normalise
+    _alias_F = {
+        'newton': 'N', 'newtons': 'N',
+        'kilonewton': 'kN', 'kilonewtons': 'kN',
+        'meganewton': 'MN', 'meganewtons': 'MN',
+        'kilogramforce': 'kgf', 'kg': 'kgf',
+        'pound': 'lb', 'pounds': 'lb', 'lbf': 'lb',
+        'kip': 'kip', 'kips': 'kip', 'kipf': 'kip',
+    }
+    fu_norm = _alias_F.get(fu.lower(), fu.lower()) if isinstance(fu, str) else 'n'
+
+    F_factor = {
+        'n': 1.0,
+        'kn': 1000.0,
+        'mn': 1000000.0,
+        'kgf': 9.80665,
+        'lb': 4.448,
+        'kip': 4448.0,
+    }.get(fu_norm, 1.0)
+
+    return F_factor
+
+def mass_scale_factor(units: dict) -> float:
+    """Compute the mass-unit scaling factor from model units.
+
+    Mass-like quantities (kg) are converted to the model's unit system
+    by multiplying by this factor::
+
+        value_in_model_units = value_in_kg * mass_scale_factor(units)
+
+    The factor is ``M_factor`` where:
+
+
+    =======  ==========
+    Unit     M_factor
+    =======  ==========
+    kg        1.0
+    tonne     1000.0
+    kt       1000000.0
+    lb       0.4536
+    kip      453.6
+    =======  ==========
+
+    For example:
+    - N, m   → 1.0² ÷ 1.0    = 1.0     (Pa → Pa)
+    - N, mm  → 0.001² ÷ 1.0  = 1e-6    (Pa → MPa = N/mm²)
+    - kN, mm → 0.001² ÷ 1000 = 1e-9    (Pa → kN/mm²)
+
+    Args:
+        units: Model units dict, e.g. ``{'L': 'm', 'F': 'N', 'T': 'C'}``.
+
+    Returns:
+        Scaling factor to convert N to the model's force unit.
+    """
+    u = units or {}
+    fu = u.get('F', 'kg')
+    # Normalise
+    _alias_F = {
+        'newton': 'N', 'newtons': 'N',
+        'kilonewton': 'kN', 'kilonewtons': 'kN',
+        'meganewton': 'MN', 'meganewtons': 'MN',
+        'kilogramforce': 'kgf', 'kg': 'kgf',
+        'pound': 'lb', 'pounds': 'lb', 'lbf': 'lb',
+        'kip': 'kip', 'kips': 'kip', 'kipf': 'kip',
+    }
+    fu_norm = _alias_F.get(fu.lower(), fu.lower()) if isinstance(fu, str) else 'n'
+
+    lu = u.get('L', 'm')
+
+    # Normalise
+    _alias_L = {
+        'meter': 'm', 'meters': 'm', 'metre': 'm', 'metres': 'm',
+        'centimeter': 'cm', 'centimeters': 'cm', 'centimetre': 'cm',
+        'millimeter': 'mm', 'millimeters': 'mm', 'millimetre': 'mm',
+        'foot': 'ft', 'feet': 'ft',
+        'inch': 'in', 'inches': 'in',
+    }
+
+    lu_norm = _alias_L.get(lu.lower(), lu.lower()) if isinstance(lu, str) else 'm'
+
+    m_dict = {('n','m'): 'kg', ('n','mm'): 'te', ('kn','m'): 'te', ('kn','mm'): 'kg',
+              ('mn','m'): 'mt', ('mn','mm'): 'te', ('lb','in'): 'blob', ('lb','ft'): 'slug',
+              ('kip','in'): 'kiloblob', ('kip','ft'): 'kiloslug', ('kipf','in'): 'kiloblob',
+              ('kipf','ft'): 'kiloslug', ('lbf', 'in'): 'blob', ('lbf', 'ft'): 'slug',
+              ('kgf', 'm'): 'hyl', ('tonf', 'm'): 'khyl', ('tonf', 'mm'): 'hyl',
+              ('kgf', 'cm'): 'glug', ('tonf', 'cm'): 'kglug',}
+    mu_norm = m_dict.get((fu_norm.lower(), lu_norm.lower()), 'kg')
+
+    M_factor = {
+        'kg': 1.0,
+        'kt': 1000.0,
+        'mt': 1000000.0,
+        'hyl': 9.80665,
+        'khyl': 9.80665*1000,
+        'glug': 9.80665 * 100.0,
+        'kglug': 9.80665 * 100000.0,
+        'lb': 4.448,
+        'kip': 4448.0,
+        'slug': 32.174,
+        'kiloslug': 32.174 * 1000.0,
+        'blob': 0.4536,
+        'kiloblob': 0.4536 * 1000.0,
+    }.get(mu_norm, 1.0)
+
+    return M_factor
+
+def stress_scale_factor(units: dict) -> float:
+    """Compute the stress-unit scaling factor from model units.
+
+    Stress-like quantities (Pa) are converted to the model's unit system
+    by multiplying by this factor::
+
+        value_in_model_units = value_in_Pa * stress_scale_factor(units)
+
+    The factor is ``L_factor² ÷ F_factor`` where:
+
+    L_factor = length_scale_factor(units)
+    F_factor = force_scale_factor(units)
+
+    For example:
+    - N, m   → 1.0² ÷ 1.0    = 1.0     (Pa → Pa)
+    - N, mm  → 0.001² ÷ 1.0  = 1e-6    (Pa → MPa = N/mm²)
+    - kN, mm → 0.001² ÷ 1000 = 1e-9    (Pa → kN/mm²)
+
+    Args:
+        units: Model units dict, e.g. ``{'L': 'm', 'F': 'N', 'T': 'C'}``.
+
+    Returns:
+        Scaling factor to convert Pa to the model's stress unit.
+    """
+
+    L_factor = length_scale_factor(units)
+    F_factor = force_scale_factor(units)
+
+    return L_factor ** 2 / F_factor
+
+def mass_density_scale_factor(units: dict) -> float:
+    """Compute the unit-mass-unit scaling factor from model units.
+
+    Unit-mass-like quantities (kg/m3) [M]/[L]^3 are converted to the model's unit system
+    by multiplying by this factor::
+
+        value_in_model_units = value_in_kg_m3 * mass_density_scale_factor(units)
+
+    The factor is ``L_factor^3 ÷ M_factor`` where:
+
+    L_factor = length_scale_factor(units)
+    M_factor = mass_scale_factor(units)
+
+    For example:
+    - kg, m   → 1.0^3 ÷ 1.0    = 1.0     (kg/m^3 → kg/m^3)
+    - kg, mm  → 0.001^3 ÷ 1.0  = 1e-9    (kg/m^3 → kg/mm^3)
+    - tonne, mm → 0.001^3 ÷ 1000 = 1e-12    (kg/m^3 → tonne/mm^3)
+
+    Args:
+        units: Model units dict, e.g. ``{'L': 'm', 'F': 'N', 'T': 'C'}``.
+
+    Returns:
+        Scaling factor to convert Pa to the model's stress unit.
+    """
+
+    L_factor = length_scale_factor(units)
+    M_factor = mass_scale_factor(units)
+
+    return L_factor ** 3 / M_factor
+
+def weight_density_scale_factor(units: dict) -> float:
+    """Compute the unit-weightunit scaling factor from model units.
+
+    Unit-mass-like quantities (N/m3) [F]/[L]^3 are converted to the model's unit system
+    by multiplying by this factor::
+
+        value_in_model_units = value_in_N_m3 * weight_density_scale_factor(units)
+
+    The factor is ``L_factor^3 ÷ F_factor`` where:
+
+    L_factor = length_scale_factor(units)
+    F_factor = force_scale_factor(units)
+
+    For example:
+    - kg, m   → 1.0^3 ÷ 1.0    = 1.0     (kg/m^3 → kg/m^3)
+    - kg, mm  → 0.001^3 ÷ 1.0  = 1e-9    (kg/m^3 → kg/mm^3)
+    - tonne, mm → 0.001^3 ÷ 1000 = 1e-12    (kg/m^3 → tonne/mm^3)
+
+    Args:
+        units: Model units dict, e.g. ``{'L': 'm', 'F': 'N', 'T': 'C'}``.
+
+    Returns:
+        Scaling factor to convert Pa to the model's stress unit.
+    """
+
+    L_factor = length_scale_factor(units)
+    F_factor = force_scale_factor(units)
+
+    return L_factor ** 3 / F_factor
 
 
 def deep_merge(base: dict, override: dict) -> dict:
@@ -229,6 +533,7 @@ def cqc_combine(modal_values: List[float],
             )
             total += modal_values[i] * modal_values[j] * rho
     return math.sqrt(max(total, 0.0))
+
 
 def sum_reactions_with_overturning(
     reactions: dict,

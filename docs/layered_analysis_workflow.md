@@ -89,7 +89,7 @@ The implementation should now be split into two distinct responsibilities.
 
 ### 6.1 Canonical repository-owned report entry point
 
-The repository-owned orchestration heart should live in [src/fea_toolkit/report.py](src/fea_toolkit/report.py), specifically in the shared `generate_report()` / `run_all()`-style flow.
+The repository-owned orchestration heart should live in [src/fea_toolkit/report.py](../src/fea_toolkit/report.py), specifically in the shared `generate_report()` / `run_all()`-style flow.
 
 That file is the correct place for the generalised, reusable analysis pipeline because it owns the sequence:
 
@@ -103,7 +103,7 @@ The shared `report` package entry point should therefore be the canonical “run
 
 ### 6.2 Private local wrappers
 
-Private project-specific drivers, such as those under [local/CLP_BSDG_Latest_Models/Pumphouse](local/CLP_BSDG_Latest_Models/Pumphouse), should remain thin wrappers.
+Private project-specific drivers, such as those under [local/CLP_BSDG_Latest_Models/Pumphouse](../local/CLP_BSDG_Latest_Models/Pumphouse), should remain thin wrappers.
 
 Their role is not to host the general engine. Instead, they should:
 
@@ -457,7 +457,7 @@ The Pumphouse v3 flow should be structured as:
 
 ### 13.2 How the shared report layer should consume this
 
-The shared report layer in [src/fea_toolkit/report.py](src/fea_toolkit/report.py) should remain the canonical orchestration point.
+The shared report layer in [src/fea_toolkit/report.py](../src/fea_toolkit/report.py) should remain the canonical orchestration point.
 
 That means the generalised “run all” flow should be implemented once in the repository and then reused from private local drivers.  The local Pumphouse wrapper should not duplicate the engine; it should delegate to the shared report entry point.
 
@@ -497,49 +497,52 @@ That means the Pumphouse v3 report continues to be a reporting front end, but th
 
 ## 14. Nonlinear analysis roadmap
 
-The long-term goal is to support two nonlinear workflows.
+The project supports two nonlinear workflows.
 
-### 14.1 OpenSeesPy nonlinear workflow
+### 14.1 OpenSeesPy nonlinear workflow (partial)
 
-The project should support nonlinear analyses in OpenSeesPy directly, for example:
+Nonlinear analyses in OpenSeesPy directly are supported for steel pushover
+(with fiber sections: ``Steel01``, ``nonlinearBeamColumn``, ``Lobatto``
+integration).  RC pushover and nonlinear dynamic analysis are executed via
+the Tcl/Xara path (see §14.2).
 
-- pushover analysis for the Pumphouse case
-- nonlinear static analysis for RC or steel structures
-- case-specific nonlinear property realization from the shared `MeshModel`
+Remaining gaps for the direct OpenSeesPy path:
 
-This path should follow the same runtime boundary:
+- RC fiber sections (``Concrete01``, ``Steel02`` via ``forceBeamColumn``)
+  require a pinned OpenSeesPy build — the stock ``pip`` distribution does
+  not include these material formulations.
+- Brace buckling with nonlinear beam-column elements in OpenSeesPy.
+- A reusable ``AnalysisBuilder``-based nonlinear case entry point for the
+  Pumphouse pushover path (the current v3 report script uses the Tcl path
+  via ``run_pushover_analysis()``).
 
-1. parse SAP model
-2. preprocess once into `MeshModel`
-3. build one `AnalysisBuilder` per nonlinear case
-4. run nonlinear OpenSeesPy analysis through `AnalysisBuilder`
-5. return results for plotting / report consumption
+### 14.2 Tcl / Xara nonlinear workflow (implemented)
 
-TODO: add a concrete `AnalysisBuilder` nonlinear case entry point for the Pumphouse pushover path where the current v3 report script needs a reusable nonlinear case object.
+The RC pushover and nonlinear dynamic workflows use the Tcl export +
+Xara execution path, which is fully implemented:
 
-### 14.2 Tcl / Xara nonlinear workflow
+1. ``export_mesh_model_to_tcl()`` — translates a preprocessed ``MeshModel``
+   into a solver-ready Tcl script, including fiber sections and nonlinear
+   material definitions.
+2. ``pushover_tcl()`` / ``dynamic_time_history_tcl()`` — generate the
+   analysis suffix (recorders, solver, post-processing commands).
+3. ``XaraTclRunner`` — runs the Tcl script in the OpenSees/Xara runtime.
+4. ``recorder.parse_pushover_results()`` — collects output records and
+   maps them back into Python-native result dicts.
 
-The repo should also support exporting RC or other nonlinear models to Tcl and running them in OpenSees under Xara, then pulling the results back into Python.
-
-This path should be modeled as a separate export-and-results integration workflow.
-
-Expected stages:
-
-1. export a solver-ready Tcl model from the prepared `MeshModel` or `SAPModelData`
-2. run the Tcl model in the OpenSees/Xara runtime
-3. collect the output results and map them back into Python-native result records
-4. pass those results into the same reporting / visualization helpers
-
-TODO: add a dedicated Tcl export + result import adapter for the Xara/OpenSees runtime. This is not yet implemented in the current runtime core and therefore should be treated as a placeholder workflow for now.
+Entry points: ``PushoverAnalysis.run_pushover_analysis()`` and the
+``NonlinearDynamicAnalysis`` class.
 
 ### 14.3 Current status of placeholders
 
-The following items are intentionally left as placeholders pending implementation:
+The following items remain as placeholders pending implementation:
 
-- `AnalysisCaseSpec` for nonlinear OpenSeesPy cases
-- nonlinear property-variant selection in the builder
-- Tcl export adapter for the Xara/OpenSees path
-- Python result import adapter for Xara/OpenSees output
+- ``AnalysisCaseSpec`` for nonlinear OpenSeesPy cases
+- nonlinear property-variant selection in the builder (selecting among
+  multiple nonlinear realizations from the same shared ``MeshModel``)
+- brace buckling with nonlinear beam-column elements in the direct
+  OpenSeesPy path (the Tcl path supports it via corotational truss +
+  ``Hysteretic`` material)
 
 ## 15. Task list for the migration
 
@@ -570,7 +573,7 @@ The work should be broken into the following tasks.
 
 ### Task 5 — Align the local v3 scripts
 
-- use [local/CLP_BSDG_Latest_Models/Admin_Building/admin_linear_v3.py](local/CLP_BSDG_Latest_Models/Admin_Building/admin_linear_v3.py) as the canonical reference
+- use [local/CLP_BSDG_Latest_Models/Admin_Building/admin_linear_v3.py](../local/CLP_BSDG_Latest_Models/Admin_Building/admin_linear_v3.py) as the canonical reference
 - align the Pumphouse v3 path to that same architecture
 - keep the old v1/v2 report flows out of scope for the migration
 
@@ -585,12 +588,12 @@ Yes — in the current implementation, the original super-elements are preserved
 
 This is already reflected in the dataclasses:
 
-- `FrameElement` in [src/fea_toolkit/model/sap_data.py](src/fea_toolkit/model/sap_data.py#L766-L805)
-- `AreaElement` in [src/fea_toolkit/model/sap_data.py](src/fea_toolkit/model/sap_data.py#L779-L805)
+- `FrameElement` in [src/fea_toolkit/model/sap_data.py](../src/fea_toolkit/model/sap_data.py#L766-L805)
+- `AreaElement` in [src/fea_toolkit/model/sap_data.py](../src/fea_toolkit/model/sap_data.py#L779-L805)
 
 and in the subdivision logic:
 
-- the original frame element is marked `inactive = True` and the child elements are created with `inactive = False` in [src/fea_toolkit/model/geometry.py](src/fea_toolkit/model/geometry.py#L919-L958)
+- the original frame element is marked `inactive = True` and the child elements are created with `inactive = False` in [src/fea_toolkit/model/geometry.py](../src/fea_toolkit/model/geometry.py#L919-L958)
 - the same pattern is used for subdivision of the original area super-elements in the mesh routines
 
 So the intended meaning is:

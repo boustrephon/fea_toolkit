@@ -13,7 +13,7 @@ Three export paths are available:
 | Direct | ``export_model_to_tcl()`` | Nonlinear — translates ``SAPModelData`` directly to Tcl |
 | MeshModel | ``export_mesh_model_to_tcl()`` | Nonlinear — translates a preprocessed ``MeshModel`` directly to Tcl |
 
-## Direct Tcl export (recommended)
+## MeshModel Tcl export (recommended — uses ``export_mesh_model_to_tcl()``)
 
 ```python
 from fea_toolkit.opensees.recorder import export_mesh_model_to_tcl, pushover_tcl

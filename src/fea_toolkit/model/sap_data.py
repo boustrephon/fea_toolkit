@@ -1,8 +1,46 @@
 """Intermediate data model for SAP2000/ETABS models."""
-
 import math
+
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Tuple
+
+from ..utils import (
+    DEFAULT_FY_STEEL_PA,
+    DEFAULT_FY_REBAR_PA,
+    DEFAULT_FC_PA,
+    DEFAULT_E_S_PA,
+    DEFAULT_EPS_C,
+    DEFAULT_EPS_CC,
+    DEFAULT_G_MOD_FRAC,
+    DEFAULT_G_S_PA,
+    DEFAULT_G_C_PA,
+    DEFAULT_NU_S,
+    DEFAULT_NU_C,
+    DEFAULT_RHO_WS_SI,
+    DEFAULT_RHO_MS_SI,
+    DEFAULT_RHO_WC_SI,
+    DEFAULT_RHO_MC_SI,
+    g_from_units
+    )
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Unit conversion factors and material defaults
+# ═════════════════════════════════════════════════════════════════════════════
+
+# SI material-property defaults (Pa, kg/m³, N/m³).
+# These are the single source of truth for fallback values.
+# To convert to model units, divide by the corresponding factor
+# (stress_factor, mass_density_factor, weight_density_factor).
+# DEFAULT_FY_STEEL_PA = 2.5e8           # Steel yield stress (Pa)
+# DEFAULT_FY_REBAR_PA = 4.0e8           # Rebar / RC steel yield stress (Pa)
+# DEFAULT_FC_PA = 3.0e7                 # Concrete compressive strength (Pa)
+# DEFAULT_E_S_PA = 2.0e11             # Young's modulus (Pa)
+# DEFAULT_EPS_C = 0.002                 # Strain at peak Fc (concrete)
+# DEFAULT_EPS_CC = 0.005                # Crushing strain (confined concrete)
+# DEFAULT_G_MOD_FRAC = 0.4              # Default G = G_MOD_FRAC × E when G is missing
+# DEFAULT_RHO_WC_SI = 24000.0      # Default concrete unit weight (N/m³)
+# DEFAULT_RHO_MC_SI = 2450.0         # Default concrete unit mass (kg/m³)
+# DEFAULT_GRAVITY_MS2 = 9.80665         # Gravitational acceleration in m/s²
 
 
 @dataclass
@@ -16,6 +54,7 @@ class CoordSys:
     xx: float = 0
     yy: float = 0
     zz: float = 0
+
 
 default_coord_sys = CoordSys(name="GLOBAL", coord_type="Cartesian")
 
@@ -93,6 +132,67 @@ class AreaEdgeConstraint:
 
 
 @dataclass
+class StressStrainCurve:
+    """Hysteretic stress-strain curve parameters for uniaxial materials.
+
+    These parameters appear across the SAP2000 MATERIAL PROPERTIES 03X
+    family of tables (03A – Steel, 03B – Concrete, 03E – Rebar,
+    03F – Tendon, 03G – Other).
+
+    Not all fields apply to every material type; consult the relevant
+    table for context-specific usage:
+
+    ========== =========== ========== ============ ===========
+    Field      03A Steel   03B Concr  03E Rebar    03F Tendon
+    ========== =========== ========== ============ ===========
+    ss_curve    Simple      Mander     Simple       "270 ksi"
+    ss_hys      Kinematic   Takeda     Kinematic    Kinematic
+    s_hard      0.015       —          0.01         —
+    s_fc        —           0.002      —            —
+    s_cap       —           0.005      0.09         —
+    s_max       0.11        —          —            —
+    s_rup       0.17        —          —            —
+    final_slope -0.1        -0.1       -0.1         -0.1
+    coup_mod    Von Mises   Mod. D-P   Von Mises    Von Mises
+    f_angle     —           0.0        —            —
+    d_angle     —           0.0        —            —
+    use_ct_def  —           —          No           —
+    ========== =========== ========== ============ ===========
+
+    Args:
+        ss_curve_opt: Stress-strain curve option (``"Simple"``,
+            ``"Mander"``, or a custom label like ``"270 ksi"``).
+        ss_hys_type: Hysteresis type (``"Kinematic"``, ``"Takeda"``,
+            ``"Isotropic"``, etc.).
+        s_hard: Strain at onset of hardening (steel/rebar).
+        s_fc: Strain at peak compressive strength ``fc'`` (concrete).
+        s_cap: Strain at crushing / cap point.
+        s_max: Strain at maximum strength (steel).
+        s_rup: Rupture strain (steel).
+        final_slope: Normalised post-peak stiffness (fraction of initial
+            elastic modulus, typically negative).
+        coup_mod_type: Coupling / damage model type (e.g. ``"Von Mises"``,
+            ``"Modified Darwin-Pecknold"``).
+        f_angle: Flow angle (concrete).
+        d_angle: Dilation angle (concrete).
+        use_ct_def: Whether to use CT definition for confinement
+            (rebar, ``"Yes"`` / ``"No"``).
+    """
+    ss_curve_opt: str = "Simple"
+    ss_hys_type: str = "Kinematic"
+    s_hard: Optional[float] = None
+    s_fc: Optional[float] = None
+    s_cap: Optional[float] = None
+    s_max: Optional[float] = None
+    s_rup: Optional[float] = None
+    final_slope: Optional[float] = None
+    coup_mod_type: str = "Von Mises"
+    f_angle: Optional[float] = None
+    d_angle: Optional[float] = None
+    use_ct_def: bool = False
+
+
+@dataclass
 class Material:
     """Material properties from SAP2000, including all tables."""
     name: str
@@ -103,10 +203,16 @@ class Material:
     nu: float = 0.0               # Poisson's ratio
     unit_weight: float = 0.0      # N/m³
     unit_mass: float = 0.0        # kg/m³
-    Fy: Optional[float] = None    # Yield strength (steel, rebar, tendon) – Pa
-    Fu: Optional[float] = None    # Ultimate strength – Pa
+    Fy: Optional[float] = None    # Nominal yield strength (steel, rebar, tendon) – Pa
+    Fu: Optional[float] = None    # Nominal ultimate strength – Pa
     Fc: Optional[float] = None    # Concrete unconfined compressive strength – Pa
     eFc: Optional[float] = None   # Confined compressive strength (fcc') – Pa (NOT strain)
+    # Effective yield / ultimate from the 03A / 03E tables (used for design
+    # or capacity curves — distinct from nominal Fy/Fu).
+    eff_Fy: Optional[float] = None
+    eff_Fu: Optional[float] = None
+    # Hysteretic stress-strain curve parameters (from MATERIAL PROPERTIES 03X)
+    ss_curve: Optional[StressStrainCurve] = None
     extra: Dict[str, Any] = field(default_factory=dict)   # all other properties
 
 
@@ -941,6 +1047,61 @@ class FrameDistributedLoad:
     dist_b: float              # absolute distance from start
     coord_sys: str = "GLOBAL"
 
+
+def _normalise_length_unit(lu: str) -> str:
+    """Normalise a length unit string to a canonical short form."""
+    _alias = {
+        'meter': 'm', 'meters': 'm', 'metre': 'm', 'metres': 'm',
+        'centimeter': 'cm', 'centimeters': 'cm', 'centimetre': 'cm',
+        'millimeter': 'mm', 'millimeters': 'mm', 'millimetre': 'mm',
+        'foot': 'ft', 'feet': 'ft',
+        'inch': 'in', 'inches': 'in',
+    }
+    return _alias.get(lu.lower(), lu.lower()) if isinstance(lu, str) else 'm'
+
+
+def _normalise_force_unit(fu: str) -> str:
+    """Normalise a force unit string to a canonical short form."""
+    _alias = {
+        'newton': 'n', 'newtons': 'n',
+        'kilonewton': 'kn', 'kilonewtons': 'kn',
+        'meganewton': 'mn', 'meganewtons': 'mn',
+        'pound': 'lb', 'pounds': 'lb', 'lbf': 'lb',
+        'kip': 'kip', 'kips': 'kip', 'kipf': 'kip',
+    }
+    return _alias.get(fu.lower(), fu.lower()) if isinstance(fu, str) else 'n'
+
+
+def _length_factor_from_units(lu: str) -> float:
+    """Return the factor to convert model length → metres.
+
+    ``value_in_m = value_in_model_units * length_factor``
+    """
+    lu = _normalise_length_unit(lu)
+    return {
+        'm': 1.0,
+        'cm': 0.01,
+        'mm': 0.001,
+        'in': 0.0254,
+        'ft': 0.3048,
+    }.get(lu, 1.0)
+
+
+def _force_factor_from_units(fu: str) -> float:
+    """Return the factor to convert model force → Newtons.
+
+    ``value_in_N = value_in_model_units * force_factor``
+    """
+    fu = _normalise_force_unit(fu)
+    return {
+        'n': 1.0,
+        'kn': 1000.0,
+        'mn': 1000000.0,
+        'lb': 4.448,
+        'kip': 4448.0,
+    }.get(fu, 1.0)
+
+
 @dataclass
 class SAPModelData:
     """Complete SAP2000 model data for export to OpenSees or Rhino."""
@@ -972,6 +1133,146 @@ class SAPModelData:
     layered_shell_sections: Dict[str, LayeredShellSection] = field(default_factory=dict)
     # Default units used for all coordinates and section properties
     units: Dict[str, str] = field(default_factory=lambda: {'F': "N", 'L': "m", 'T': "C"})
+
+    # ── Unit conversion factors ──────────────────────────────────────────
+    # These are computed from self.units and provide a consistent way to
+    # convert between model units and SI for code-based formulae.
+    #
+    # Usage:
+    #   value_in_SI = value_in_model_units * md.<factor>
+    #   value_in_model_units = value_in_SI / md.<factor>
+
+    @property
+    def length_factor(self) -> float:
+        """Factor to convert model length → metres.
+
+        ``value_in_m = value_in_model_units * length_factor``
+        """
+        return _length_factor_from_units(self.units.get('L', 'm'))
+
+    @property
+    def force_factor(self) -> float:
+        """Factor to convert model force → Newtons.
+
+        ``value_in_N = value_in_model_units * force_factor``
+        """
+        return _force_factor_from_units(self.units.get('F', 'N'))
+
+    @property
+    def stress_factor(self) -> float:
+        """Factor to convert model stress → Pascals.
+
+        Since stress = force / length²:
+        ``value_in_Pa = value_in_model_units * stress_factor``
+
+        Equivalently: ``stress_factor = force_factor / length_factor ** 2``
+        """
+        Lf = self.length_factor
+        return self.force_factor / (Lf * Lf) if Lf != 0 else 1.0
+
+    @property
+    def weight_density_factor(self) -> float:
+        """Factor to convert model weight density → N/m³.
+
+        Weight density = force / length³:
+        ``value_in_N_per_m3 = value_in_model_units * weight_density_factor``
+        """
+        Lf = self.length_factor
+        return self.force_factor / (Lf * Lf * Lf) if Lf != 0 else 1.0
+
+    @property
+    def mass_density_factor(self) -> float:
+        """Factor to convert model mass density → kg/m³.
+
+        Mass density = force×time² / length⁴.
+        Since SAP stores unit_mass in F·s²/L⁴ and SI is kg/m³ = N·s²/m⁴:
+        ``value_in_kg_per_m3 = value_in_model_units * mass_density_factor``
+        """
+        # mass_density_factor = force_factor / (length_factor³ × length_factor / time)
+        # With time in seconds (SAP default), same as weight_density_factor / g scaling
+        # but for mass the conversion is simply force_factor / length_factor**4 * (time_factor**2)
+        # Since SAP time is always seconds and SI uses seconds:
+        # kg = N·s²/m → mass_density = N·s²/m⁴
+        # So the factor = force_factor / length_factor**4
+        Lf = self.length_factor
+        return self.force_factor / (Lf * Lf * Lf * Lf) if Lf != 0 else 1.0
+
+    @property
+    def lineal_force_factor(self) -> float:
+        """Factor to convert model force-per-length → N/m.
+
+        ``value_in_N_per_m = value_in_model_units * lineal_force_factor``
+        """
+        Lf = self.length_factor
+        return self.force_factor / Lf if Lf != 0 else 1.0
+
+    # ── Unit conversion convenience methods ─────────────────────────────
+
+    def model_length_to_m(self, value: float) -> float:
+        """Convert a value from model length units to metres."""
+        return value * self.length_factor
+
+    def model_force_to_n(self, value: float) -> float:
+        """Convert a value from model force units to Newtons."""
+        return value * self.force_factor
+
+    def model_stress_to_pa(self, value: float) -> float:
+        """Convert a value from model stress units to Pascals."""
+        return value * self.stress_factor
+
+    def m_to_model_length(self, value: float) -> float:
+        """Convert a value from metres to model length units."""
+        Lf = self.length_factor
+        return value / Lf if Lf != 0 else value
+
+    def n_to_model_force(self, value: float) -> float:
+        """Convert a value from Newtons to model force units."""
+        Ff = self.force_factor
+        return value / Ff if Ff != 0 else value
+
+    # ── Material defaults ───────────────────────────────────────────────
+
+    def apply_material_defaults(self) -> None:
+        """Fill missing material properties with SI defaults scaled to model units.
+
+        After calling this, all materials are guaranteed to have non-zero
+        values for E_mod, Fy, Fc, unit_weight, unit_mass, etc.  Consumers
+        can read these values directly — no fallback logic needed.
+        """
+        sf = self.stress_factor
+        wdf = self.weight_density_factor
+        mdf = self.mass_density_factor
+
+        for mat in self.materials.values():
+            # E_mod
+            if not mat.E_mod or mat.E_mod <= 0:
+                mat.E_mod = DEFAULT_E_S_PA / sf
+
+            # Fy — use rebar default for rebar/tendon, steel default otherwise
+            if not mat.Fy or mat.Fy <= 0:
+                if mat.type and mat.type.lower() in ('rebar', 'tendon'):
+                    mat.Fy = DEFAULT_FY_REBAR_PA / sf
+                else:
+                    mat.Fy = DEFAULT_FY_STEEL_PA / sf
+
+            # Fc (concrete compressive strength)
+            if not mat.Fc or mat.Fc <= 0:
+                mat.Fc = DEFAULT_FC_PA / sf
+
+            # G_mod — derive from E_mod via Poisson's ratio if missing
+            if not mat.G_mod or mat.G_mod <= 0:
+                if mat.nu and abs(mat.nu) > 1e-12:
+                    mat.G_mod = mat.E_mod / (2.0 * (1.0 + abs(mat.nu)))
+                else:
+                    mat.G_mod = DEFAULT_G_MOD_FRAC * mat.E_mod
+
+            # unit_weight (N/m³ → model units)
+            if not mat.unit_weight or abs(mat.unit_weight) < 1e-12:
+                mat.unit_weight = DEFAULT_RHO_WC_SI / wdf
+
+            # unit_mass (kg/m³ → model units)
+            if not mat.unit_mass or abs(mat.unit_mass) < 1e-12:
+                mat.unit_mass = DEFAULT_RHO_MC_SI / mdf
 
     # ── Utility methods ──────────────────────────────────────────
 
@@ -1007,5 +1308,3 @@ class SAPModelData:
             "Z span (m)": max(zs) - min(zs) if zs else 0,
             "Units": str(self.units),
         }
-    
-
