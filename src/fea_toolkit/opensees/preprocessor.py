@@ -313,25 +313,9 @@ class Preprocessor:
             pass  # kept for visualisation
 
         # ── 10. Resolve per-element creation properties ────────────
-        # Build a lightweight shell for property resolution, then copy
-        # resolved properties into the final MeshModel below.
-        _temp = MeshModel(
-            nodes=md.nodes,
-            frame_elements=new_elems,
-            frame_assignments=new_assigns,
-            area_elements=md.area_elements,
-            area_assignments=md.area_assignments,
-            frame_dist_loads=split_dist_loads,
-            frame_element_types=frame_element_types,
-            area_element_types=area_element_types,
-        )
-        self._resolve_element_properties(_temp, model_data)
-        resolved_fep = dict(_temp.frame_element_properties)
-        resolved_aep = dict(_temp.area_element_properties)
-        resolved_ndm = dict(_temp.nd_materials)
-        resolved_lss = dict(_temp.layered_shell_sections)
-
-        # Build the MeshModel (final version includes resolved properties)
+        # Build the MeshModel first, then resolve properties directly
+        # onto it using the mutated model_data (md) which contains
+        # derived elements (split/meshed children).
         mesh_model = MeshModel(
             nodes=md.nodes,
             frame_elements=new_elems,
@@ -354,10 +338,6 @@ class Preprocessor:
             model_name=getattr(md, 'name', ''),
             material_tags=material_tags,
             section_tags=section_tags,
-            nd_materials=resolved_ndm,
-            layered_shell_sections=resolved_lss,
-            frame_element_properties=resolved_fep,
-            area_element_properties=resolved_aep,
             loads_only_area_ids=loads_only_area_ids,
             orphan_nodes=orphan_nodes,
             # Pass through load collections for AnalysisBuilder consumption
@@ -368,6 +348,9 @@ class Preprocessor:
             load_patterns=getattr(md, 'load_patterns', {}),
             mass_sources=getattr(md, 'mass_sources', {}),
         )
+        # Resolve against the mutated md so derived-element IDs
+        # (from splitting/meshing) can be matched by selections.
+        self._resolve_element_properties(mesh_model, md)
 
         return mesh_model
 
@@ -1061,7 +1044,7 @@ class Preprocessor:
             # Level 2: selection-based groups
             for sel_idx, (sel, sel_props) in enumerate(frame_groups):
                 if sel._frame_matches(model_data, eid):
-                    mesh_model.frame_element_properties[eid] = sel_props
+                    mesh_model.frame_element_properties[eid] = copy.deepcopy(sel_props)
                     _frame_group_matched_ids.add(eid)
                     if verbose:
                         print(f"  [elem_props] {eid}: group {sel_idx} → {sel_props.element_type}")
@@ -1109,6 +1092,11 @@ class Preprocessor:
                     layer_stack=layer_stack,
                 )
                 area_groups.append((group_key, sel, props))
+            else:
+                warnings.warn(
+                    f"shell_layers key '{group_key}' is neither a valid area ID "
+                    f"nor contains a 'selector' key — skipping"
+                )
 
         # ── Resolve per-area properties ──────────────────────────
         _area_group_matched_ids: set = set()
