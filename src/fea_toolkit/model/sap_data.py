@@ -737,7 +737,69 @@ class ShellSection(Section):
         )
 
 
-# ── nD material / layered shell classes ──
+# ── Element creation properties (resolved by Preprocessor) ─────────────
+
+
+@dataclass
+class FrameElementProperties:
+    """Resolved element creation parameters for a single frame element.
+
+    Populated by the Preprocessor from config (three-level resolution:
+    per-ID override → selection group → role default), consumed by the
+    AnalysisBuilder when creating OpenSees elements.
+
+    Args:
+        element_type: OpenSees element command name, e.g.
+            ``"elasticBeamColumn"``, ``"nonlinearBeamColumn"``,
+            ``"dispBeamColumn"``, ``"forceBeamColumn"``, ``"truss"``.
+        material_strategy: Controls section/material creation.
+            ``"elastic"``, ``"fiber_steel"``, ``"fiber_rc"``,
+            ``"steel02"``.
+        integration_type: Integration rule for beam-column elements.
+            ``None`` / ``"Lobatto"``, ``"Legendre"``, ``"Radau"``,
+            ``"NewtonCotes"``, ``"HingeRadau"``, ``"HingeMidpoint"``,
+            ``"HingeRadauTwo"``, ``"UserHinge"``.
+        num_integration_points: Number of integration points.
+            0 = use element default (3 for elastic, 4-5 for fiber).
+        hinge_params: Dict of hinge parameters, e.g.
+            ``{"lpI": 0.1, "lpJ": 0.1}`` for hinge plasticity models.
+    """
+    element_type: str = "elasticBeamColumn"
+    material_strategy: str = "elastic"
+    integration_type: Optional[str] = None
+    num_integration_points: int = 0
+    hinge_params: Optional[Dict[str, float]] = None
+
+
+@dataclass
+class AreaElementProperties:
+    """Resolved element creation parameters for a single area element.
+
+    Populated by the Preprocessor from config (three-level resolution:
+    per-ID override → selection group → role default), consumed by the
+    AnalysisBuilder when creating OpenSees shell elements.
+
+    Args:
+        element_type: OpenSees shell element command, or ``None`` for
+            loads-only (no element created, mass still added).
+            ``"ShellMITC4"``, ``"ShellDKGQ"``, ``"ShellNLDKGQ"``,
+            ``None``.
+        material_strategy: Controls section/material creation.
+            ``"elastic"``, ``"layered_rc"``, ``"layered_steel"``.
+        thickness: Override shell thickness (model units).
+            ``None`` = use value from SAP section properties.
+        nd_material_names: References into the ``nd_materials`` dict
+            for this area's layered section (only used when
+            ``material_strategy`` is ``"layered_rc"`` /
+            ``"layered_steel"``).
+        layer_stack: Direct list of :class:`ShellFiberLayer` objects,
+            overriding ``nd_material_names`` if both are present.
+    """
+    element_type: Optional[str] = "ShellMITC4"
+    material_strategy: str = "elastic"
+    thickness: Optional[float] = None
+    nd_material_names: List[str] = field(default_factory=list)
+    layer_stack: List["ShellFiberLayer"] = field(default_factory=list)
 
 
 @dataclass

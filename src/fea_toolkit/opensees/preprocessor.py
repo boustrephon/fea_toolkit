@@ -29,6 +29,10 @@ from ..model.geometry import (
 )
 from ..model.selection import Selection
 from ..model.mesh_model import MeshModel
+from ..model.sap_data import (
+    FrameElementProperties, AreaElementProperties,
+    NDMaterial, ShellFiberLayer, LayeredShellSection,
+)
 
 
 class Preprocessor:
@@ -308,6 +312,26 @@ class Preprocessor:
         if orphan_nodes:
             pass  # kept for visualisation
 
+        # ── 10. Resolve per-element creation properties ────────────
+        # Build a lightweight shell for property resolution, then copy
+        # resolved properties into the final MeshModel below.
+        _temp = MeshModel(
+            nodes=md.nodes,
+            frame_elements=new_elems,
+            frame_assignments=new_assigns,
+            area_elements=md.area_elements,
+            area_assignments=md.area_assignments,
+            frame_dist_loads=split_dist_loads,
+            frame_element_types=frame_element_types,
+            area_element_types=area_element_types,
+        )
+        self._resolve_element_properties(_temp, model_data)
+        resolved_fep = dict(_temp.frame_element_properties)
+        resolved_aep = dict(_temp.area_element_properties)
+        resolved_ndm = dict(_temp.nd_materials)
+        resolved_lss = dict(_temp.layered_shell_sections)
+
+        # Build the MeshModel (final version includes resolved properties)
         mesh_model = MeshModel(
             nodes=md.nodes,
             frame_elements=new_elems,
@@ -330,6 +354,10 @@ class Preprocessor:
             model_name=getattr(md, 'name', ''),
             material_tags=material_tags,
             section_tags=section_tags,
+            nd_materials=resolved_ndm,
+            layered_shell_sections=resolved_lss,
+            frame_element_properties=resolved_fep,
+            area_element_properties=resolved_aep,
             loads_only_area_ids=loads_only_area_ids,
             orphan_nodes=orphan_nodes,
             # Pass through load collections for AnalysisBuilder consumption
@@ -924,6 +952,217 @@ class Preprocessor:
             if z_span <= z_tol:
                 levels.add(round(sum(zs) / len(zs), 4))
         return sorted(levels)
+
+    def _resolve_element_properties(
+        self, mesh_model: MeshModel, model_data: SAPModelData,
+    ) -> None:
+        """Resolve per-element creation properties from config.
+
+        Three-level resolution (highest priority first):
+        1. per-ID overrides (``frame_overrides`` / area ID keys in
+           ``shell_layers``)
+        2. selection-based groups (``frame_groups`` / ``shell_layers``
+           with ``selector`` dicts)
+        3. role defaults (``element_strategies``)
+
+        Populates ``mesh_model.frame_element_properties``,
+        ``mesh_model.area_element_properties``,
+        ``mesh_model.nd_materials``, and
+        ``mesh_model.layered_shell_sections``.
+        """
+        config = self.config
+        verbose = config.get('verbose', False)
+
+        # ── Default element strategies per role ──────────────────
+        role_defaults = config.get('element_strategies', {})
+
+        # ── Resolve nD materials from config dicts ───────────────
+        nd_mat_config = config.get('nd_materials', {})
+        for mat_name, mat_dict in nd_mat_config.items():
+            mesh_model.nd_materials[mat_name] = NDMaterial(
+                name=mat_name,
+                material_type=mat_dict.get('material_type', 'ElasticIsotropic'),
+                E=mat_dict.get('E', 200.0e9),
+                nu=mat_dict.get('nu', 0.3),
+                fy=mat_dict.get('fy', 400.0e6),
+                Hiso=mat_dict.get('Hiso', 0.0),
+                Hkin=mat_dict.get('Hkin', 0.0),
+                fc=mat_dict.get('fc', 30.0e6),
+                ft=mat_dict.get('ft', 3.0e6),
+                Es=mat_dict.get('Es', 0.0),
+            )
+
+        # ── Resolve layered shell sections from config dicts ─────
+        shell_layers_config = config.get('shell_layers', {})
+        # Build {group_key: [ShellFiberLayer, ...]} lookups
+        _layer_stacks: Dict[str, List[ShellFiberLayer]] = {}
+        for group_key, group_dict in shell_layers_config.items():
+            raw_layers = group_dict.get('layers', [])
+            layers = []
+            for raw in raw_layers:
+                layers.append(ShellFiberLayer(
+                    thickness=raw.get('thickness', 0.1),
+                    nd_material=raw.get('nd_material', ''),
+                    n_ip=raw.get('n_ip', 4),
+                ))
+            _layer_stacks[group_key] = layers
+            if layers:
+                mesh_model.layered_shell_sections[group_key] = LayeredShellSection(
+                    name=group_key, layers=layers,
+                )
+
+        # ── Pre-build Selection objects for frame groups ─────────
+        frame_groups_config = config.get('frame_groups', {})
+        frame_groups: List[tuple] = []  # [(Selection, FrameElementProperties), ...]
+        for group_name, group_dict in frame_groups_config.items():
+            sel_dict = group_dict.get('selector')
+            if not sel_dict or not isinstance(sel_dict, dict):
+                continue
+            sel = Selection(
+                element_types=sel_dict.get('element_types'),
+                sections=sel_dict.get('sections') or sel_dict.get('section_name'),
+                materials=sel_dict.get('materials'),
+                groups=sel_dict.get('groups'),
+                element_ids=sel_dict.get('element_ids'),
+            )
+            props = FrameElementProperties(
+                element_type=group_dict.get('element', 'elasticBeamColumn'),
+                material_strategy=group_dict.get('material', 'elastic'),
+                integration_type=group_dict.get('integration'),
+                num_integration_points=group_dict.get('num_int_pts', 0),
+                hinge_params=group_dict.get('hinge_params'),
+            )
+            frame_groups.append((sel, props))
+
+        # ── Resolve per-frame properties ─────────────────────────
+        frame_overrides = config.get('frame_overrides', {})
+        _frame_group_matched_ids: set = set()
+
+        for eid, elem in mesh_model.frame_elements.items():
+            if getattr(elem, 'inactive', False):
+                continue
+
+            # Level 1: per-ID override
+            if eid in frame_overrides:
+                od = frame_overrides[eid]
+                props = FrameElementProperties(
+                    element_type=od.get('element', 'elasticBeamColumn'),
+                    material_strategy=od.get('material', 'elastic'),
+                    integration_type=od.get('integration'),
+                    num_integration_points=od.get('num_int_pts', 0),
+                    hinge_params=od.get('hinge_params'),
+                )
+                mesh_model.frame_element_properties[eid] = props
+                _frame_group_matched_ids.add(eid)
+                if verbose:
+                    print(f"  [elem_props] {eid}: per-ID → {props.element_type}")
+                continue
+
+            # Level 2: selection-based groups
+            for sel_idx, (sel, sel_props) in enumerate(frame_groups):
+                if sel._frame_matches(model_data, eid):
+                    mesh_model.frame_element_properties[eid] = sel_props
+                    _frame_group_matched_ids.add(eid)
+                    if verbose:
+                        print(f"  [elem_props] {eid}: group {sel_idx} → {sel_props.element_type}")
+                    break
+
+            if eid not in _frame_group_matched_ids:
+                # Level 3: role default
+                etype = mesh_model.frame_element_types.get(eid, '')
+                if etype in role_defaults:
+                    rd = role_defaults[etype]
+                    props = FrameElementProperties(
+                        element_type=rd.get('element', 'elasticBeamColumn'),
+                        material_strategy=rd.get('material', 'elastic'),
+                        integration_type=rd.get('integration'),
+                        num_integration_points=rd.get('num_int_pts', 0),
+                        hinge_params=rd.get('hinge_params'),
+                    )
+                    mesh_model.frame_element_properties[eid] = props
+                else:
+                    mesh_model.frame_element_properties[eid] = FrameElementProperties()
+
+        # ── Pre-build Selection objects for area groups ──────────
+        area_groups: List[tuple] = []  # [(group_key, Selection, AreaElementProperties), ...]
+        area_overrides: dict = {}
+        for group_key, group_dict in shell_layers_config.items():
+            if group_key in mesh_model.area_elements:
+                # Level 1: area ID as key in shell_layers
+                area_overrides[group_key] = group_dict
+            elif 'selector' in group_dict:
+                sel_dict = group_dict['selector']
+                sel = Selection(
+                    element_types=sel_dict.get('element_types'),
+                    sections=sel_dict.get('sections') or sel_dict.get('section_name'),
+                    materials=sel_dict.get('materials'),
+                    groups=sel_dict.get('groups'),
+                    element_ids=sel_dict.get('element_ids'),
+                )
+                layer_stack = _layer_stacks.get(group_key, [])
+                elem_type = group_dict.get('element', 'ShellMITC4')
+                props = AreaElementProperties(
+                    element_type=elem_type if elem_type != 'None' else None,
+                    material_strategy=group_dict.get('material',
+                        'layered_rc' if layer_stack else 'elastic'),
+                    thickness=group_dict.get('thickness'),
+                    layer_stack=layer_stack,
+                )
+                area_groups.append((group_key, sel, props))
+
+        # ── Resolve per-area properties ──────────────────────────
+        _area_group_matched_ids: set = set()
+
+        for aid, area in mesh_model.area_elements.items():
+            if getattr(area, 'inactive', False):
+                continue
+
+            # Level 1: per-ID override
+            if aid in area_overrides:
+                od = area_overrides[aid]
+                layer_stack = _layer_stacks.get(aid, [])
+                elem_type = od.get('element', 'ShellMITC4')
+                props = AreaElementProperties(
+                    element_type=elem_type if elem_type != 'None' else None,
+                    material_strategy=od.get('material',
+                        'layered_rc' if layer_stack else 'elastic'),
+                    thickness=od.get('thickness'),
+                    layer_stack=layer_stack,
+                )
+                mesh_model.area_element_properties[aid] = props
+                _area_group_matched_ids.add(aid)
+                if verbose:
+                    print(f"  [area_props] {aid}: per-ID → {props.element_type}")
+                continue
+
+            # Level 2: selection-based groups
+            for group_name, sel, sel_props in area_groups:
+                if sel._area_matches(model_data, aid):
+                    mesh_model.area_element_properties[aid] = sel_props
+                    _area_group_matched_ids.add(aid)
+                    if verbose:
+                        print(f"  [area_props] {aid}: group '{group_name}' → {sel_props.element_type}")
+                    break
+
+            if aid not in _area_group_matched_ids:
+                # Level 3: role default
+                etype = mesh_model.area_element_types.get(aid, '')
+                if etype in role_defaults:
+                    rd = role_defaults[etype]
+                    elem_type = rd.get('element', 'ShellMITC4')
+                    props = AreaElementProperties(
+                        element_type=elem_type if elem_type != 'None' else None,
+                        material_strategy=rd.get('material', 'elastic'),
+                        thickness=rd.get('thickness'),
+                    )
+                    mesh_model.area_element_properties[aid] = props
+                else:
+                    mesh_model.area_element_properties[aid] = AreaElementProperties()
+
+        if verbose:
+            print(f"  Resolved element properties: "
+                  f"{len(mesh_model.frame_element_properties)} frames, "
+                  f"{len(mesh_model.area_element_properties)} areas")
 
 
 def preprocess_model(md, config: dict = None, selection: Optional["Selection"] = None):
