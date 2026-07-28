@@ -1089,11 +1089,20 @@ def _length_factor_from_units(lu: str) -> float:
 
 
 def _force_factor_from_units(fu: str) -> float:
-    """Return the factor to convert model force → Newtons.
+    """Return the factor to convert model force → Newtons (reciprocal of
+    :func:`~fea_toolkit.utils.force_scale_factor`).
 
     ``value_in_N = value_in_model_units * force_factor``
+
+    Values are exact reciprocals of ``force_scale_factor`` so that:
+
+        force_factor * force_scale_factor == 1.0
+
+    for any valid force unit.
     """
     fu = _normalise_force_unit(fu)
+    # Defined as reciprocal of utils.force_scale_factor() to guarantee
+    # reciprocal consistency between the two factor systems.
     return {
         'n': 1.0,
         'kn': 1000.0,
