@@ -45,7 +45,8 @@ def read_peer_record(path: str) -> Tuple[np.ndarray, np.ndarray]:
 
     # Skip header — search for the first numeric data line
     data_lines: list[str] = []
-    dt = 0.005  # default time step
+    dt = 0.005  # default time step (fallback if no DT header)
+    dt_found = False
     for line in lines:
         stripped = line.strip()
         if not stripped:
@@ -54,11 +55,13 @@ def read_peer_record(path: str) -> Tuple[np.ndarray, np.ndarray]:
         low = stripped.lower()
         if "npts" in low or "dt" in low:
             # Extract DT from header lines, handling NPTS+DT on same line
+            # Only attempt fallback extraction when "dt" is explicitly present
             m_dt = re.search(r"(?:^|\s)DT\s*=\s*([\d.]+)", stripped, re.IGNORECASE)
-            if not m_dt:
+            if not m_dt and "dt" in low:
                 m_dt = re.search(r"([\d.]+)", stripped[stripped.lower().find("dt"):])
             if m_dt:
                 dt = float(m_dt.group(1))
+                dt_found = True
             continue  # skip recognized header metadata
         # Check if this line starts with a number (data)
         try:
@@ -66,6 +69,9 @@ def read_peer_record(path: str) -> Tuple[np.ndarray, np.ndarray]:
             data_lines.extend(stripped.split())
         except (ValueError, IndexError):
             pass  # non-header, non-numeric — ignore
+    # If DT was not found in the header, the 0.005 fallback remains in effect.
+    # This matches the PEER NGA database convention where a missing DT header
+    # typically implies a 0.005 s time step.
 
     if not data_lines:
         raise ValueError(f"No numeric data found in PEER record: {path}")
@@ -101,7 +107,12 @@ def read_time_history_csv(
     """
     data = np.loadtxt(path, delimiter=",", skiprows=skip_header)
     if data.ndim == 1:
-        data = data.reshape(-1, 1)
+        # Single column: treat as rows with one column
+        # Reshape to (N, 1) so column indexing still works
+        data = data.reshape(-1, 1) if data.shape[0] > 0 else data.reshape(1, -1) if data.size > 0 else data
+        if data.ndim == 1:
+            # Single row with all columns: reshape to (1, N)
+            data = data.reshape(1, -1)
     return data[:, col_time], data[:, col_accel]
 
 
@@ -115,7 +126,8 @@ def scale_to_pga(
     Parameters
     ----------
     times : ndarray
-        Time points (s) — used to compute scaling factors only.
+        Time points (s) — accepted for API symmetry with other scaling
+        helpers but not used in the computation.
     accel : ndarray
         Acceleration values (same units as *target_pga*).
     target_pga : float
