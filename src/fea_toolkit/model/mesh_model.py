@@ -120,7 +120,7 @@ class MeshModel:
     # ── Diaphragm components (for rigidDiaphragm constraints) ────
     # Each entry is a (z_level, [node_id, ...]) tuple representing
     # one connected diaphragm component at a given storey.
-    diaphragm_components: List[tuple] = field(default_factory=list)
+    diaphragm_components: List[Tuple[float, List[str]]] = field(default_factory=list)
     #   [(z_level, [master_node_id, slave_node_id, ...]), ...]
 
     # ── Loads-only area IDs (stiffness-free, mass-contributing) ──
