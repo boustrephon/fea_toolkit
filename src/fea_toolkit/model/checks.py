@@ -9,7 +9,10 @@ import math
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
-from fea_toolkit.model.sap_data import SAPModelData, ShellSection
+from fea_toolkit.model.sap_data import (
+    SAPModelData, ShellSection, ConcreteRectangularSection,
+)
+from fea_toolkit.utils import DEFAULT_FY_STEEL_PA, DEFAULT_FC_PA
 
 
 def check_model_connectivity(
@@ -190,6 +193,12 @@ def check_brace_buckling(
         E = mat.E_mod if (mat.E_mod or 0) > 0 else 2.0e11
         I22 = (sec.I22 or 0) if (sec.I22 or 0) > 0 else (sec.I33 or 0)
         A = (sec.A or 0) if (sec.A or 0) > 0 else 1e-4
+
+        # Skip elements with no positive moment of inertia — fabricating
+        # a zero-based buckling result is misleading (division by zero
+        # later in slenderness and ratio).
+        if I22 <= 0 or A <= 0:
+            continue
 
         P_cr = (math.pi ** 2 * E * I22) / ((K * L) ** 2)
         r = math.sqrt(I22 / A)
@@ -456,15 +465,23 @@ def compute_asce41_hinge_length(
     sf, lf = _get_conversion_factors(md)
 
     # ── Convert material strengths from model stress units → Pa → MPa ──
-    fy_model = (mat.Fy or 0) if (mat.Fy or 0) > 0 else 2.5e8   # Pa fallback
-    fc_model = (mat.Fc or 0) if (mat.Fc or 0) > 0 else 3.0e7   # Pa fallback
-    fy_pa = fy_model * sf
+    # Model-provided values are in model stress units and need sf;
+    # fallback constants are already in Pa and bypass sf.
+    if (mat.Fy or 0) > 0:
+        fy_pa = mat.Fy * sf
+    else:
+        fy_pa = DEFAULT_FY_STEEL_PA
+    if (mat.Fc or 0) > 0:
+        fc_pa = mat.Fc * sf
+    else:
+        fc_pa = DEFAULT_FC_PA
     fy_mpa = fy_pa / 1e6
-    fc_pa = fc_model * sf
     fc_mpa = fc_pa / 1e6
 
     # ── Convert section dimensions from model length units → mm ──
-    is_concrete = hasattr(sec, 'cover')
+    # Use explicit ConcreteRectangularSection check rather than generic
+    # attribute-based detection which can misidentify sections.
+    is_concrete = isinstance(sec, ConcreteRectangularSection)
     is_brace = hasattr(sec, 'od') or hasattr(sec, 't')
 
     def _to_mm(val: float) -> float:
@@ -497,7 +514,7 @@ def compute_asce41_hinge_length(
     L_m = elem_length * lf
 
     if is_concrete:
-        Lp = 0.05 * L_m + 0.1 * db * fy_mpa / (fc_mpa ** 0.5) / 1000.0
+        Lp = 0.05 * L_m + 0.1 * db * fy_mpa / max(fc_mpa, 1.0) ** 0.5 / 1000.0
     elif is_brace:
         Lp = 0.08 * L_m + 0.015 * db * fy_mpa / 1000.0
     else:
