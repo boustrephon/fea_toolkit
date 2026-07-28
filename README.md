@@ -28,6 +28,48 @@ The goal is to create a Python package `fea_toolkit` that:
 
 ---
 
+## LLM / AI Assistant Quick Start
+
+This section is designed for **language model (LLM) assistants** working with
+this codebase.  For a full reference, see ``docs/llm_guide.md``.
+
+### Canonical 4-line pipeline
+
+```python
+from fea_toolkit import SAP2000Parser, preprocess_model, AnalysisBuilder
+md = SAP2000Parser("model.s2k").parse().get_model_data()
+mesh = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+builder = AnalysisBuilder(mesh, {}).build_domain()
+```
+
+### Discover the full API
+
+```python
+import fea_toolkit
+# Inspect: fea_toolkit.__all__, fea_toolkit.io.__all__, fea_toolkit.opensees.__all__, etc.
+```
+
+### Task shortcuts
+
+| Goal | Call |
+|------|------|
+| Parse a model | ``SAP2000Parser(path).parse().get_model_data()`` |
+| Filter elements | ``Selection(element_types=['Frame'], groups=['Lateral'])`` |
+| Plot 3D model | ``plot_model_3d(builder)`` |
+| Plot deformed shape | ``plot_deformed_3d(builder, results, scale=100)`` |
+| Plot force diagram | ``plot_force_diagram_3d(builder, results, quantity='Mz')`` |
+| Export to NPZ | ``from fea_toolkit.io import write_results_npz`` |
+| Export to Tcl | ``from fea_toolkit.opensees import export_mesh_model_to_tcl`` |
+
+### Key constraints (do not violate)
+
+- Never hardcode ``9.81`` — use ``g_from_units(units)`` from ``fea_toolkit.utils``.
+- Never use 8-arg trapezoidal ``eleLoad`` — broken in OpenSeesPy 3.8.0.0.
+- ``Corotational`` geomTransf + ``eleLoad`` does not work in 3D.
+- Preprocessor mutates topology. AnalysisBuilder reads frozen ``MeshModel`` — no mutation.
+
+---
+
 ### Current Implementation State
 
 #### 1. Package Structure (Modern `src/` layout)
