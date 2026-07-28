@@ -659,6 +659,13 @@ all other area loads are ignored.
 
 See [`examples/README.md`](examples/README.md) for quick-start examples.
 
+### Documentation index
+
+All feature‑specific documentation (analysis types, model features, export,
+visualisation, tool‑specific workflows) is indexed in
+[`docs/README.md`](docs/README.md) — grouped by category with a tag‑based
+cross‑reference section.
+
 #### Medium Priority
 
 7. **Improved Load Handling**  

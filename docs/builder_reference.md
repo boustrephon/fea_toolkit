@@ -1,3 +1,11 @@
+---
+title: "Builder Reference — Two-stage Pipeline"
+description: "Reference for the Preprocessor + AnalysisBuilder two-stage architecture."
+status: "complete"
+tags: [architecture, preprocessor, analysis-builder, reference]
+category: [core-pipeline]
+related: [workflow.md, layered_analysis_workflow.md, element_classification.md]
+---
 # Builder Reference — Two-stage Pipeline
 
 The two-stage pipeline is the standard way to create an OpenSees model

@@ -1,3 +1,11 @@
+---
+title: "Rhino 3-D Export"
+description: "Export to Rhino 8: centreline and extrusion geometry, layers, colours, and Grasshopper metadata."
+status: "complete"
+tags: [export, rhino, visualisation, geometry]
+category: [export-viz]
+related: [viewer.md, results_schema.md, tcl_export.md]
+---
 # Rhino 3-D Export
 
 Export a parsed SAP2000 model (from `.s2k` or JSON) into the active

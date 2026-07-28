@@ -1,3 +1,11 @@
+---
+title: "Analysis Workflow"
+description: "End-to-end analysis pipeline: parsing, preprocessing, domain construction, analysis execution, post-processing."
+status: "complete"
+tags: [architecture, workflow, pipeline, end-to-end]
+category: [core-pipeline]
+related: [builder_reference.md, layered_analysis_workflow.md, element_classification.md, element_splitting.md]
+---
 # Analysis Workflow
 
 This document describes the end‑to‑end analysis pipeline for a SAP2000

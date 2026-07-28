@@ -1,3 +1,11 @@
+---
+title: "Development Notes"
+description: "Miscellaneous development notes, design decisions, and technical context."
+status: "draft"
+tags: [architecture, development, notes]
+category: [planning]
+related: [analysis_builder_migration_plan.md]
+---
 # fea_toolkit development notes
 
 
