@@ -103,6 +103,10 @@ class AnalysisBuilder:
         self._model_log: Optional[Any] = None
         self._model_diagnostics: Dict[str, Any] = {}
 
+        # nD materials that were skipped (unknown type / unsupported)
+        self._skipped_nd_materials: Set[str] = set()
+        self._skipped_shell_sec_names: Set[str] = set()
+
         # Transf tags
         self._transf_tags: Dict[int, int] = {}
 
@@ -936,11 +940,13 @@ class AnalysisBuilder:
             elif t == "PlateFromPlaneStress":
                 print(f"  ⚠ PlateFromPlaneStress not yet supported for '{name}' — "
                       f"data model missing wrapped-material and Eout fields — skipping")
+                self._skipped_nd_materials.add(name)
                 continue
             else:
                 import warnings as _w
                 _w.warn(f"Unknown nDMaterial type '{t}' for '{name}' — skipping",
                         UserWarning, stacklevel=2)
+                self._skipped_nd_materials.add(name)
                 continue
             self.material_tags[name] = tag
             tag += 1
@@ -954,7 +960,7 @@ class AnalysisBuilder:
 
         Reads ``mesh_model.layered_shell_sections`` (populated by the
         Preprocessor from the config's ``shell_layers`` dict) and calls
-        ``ops.section('LayeredShell', tag, nLayer, matTag1, t1, nIP1, ...)``
+        ``ops.section('LayeredShell', tag, nLayer, matTag1, t1, ...)``
         for each section.
 
         Each layer's nD material must already exist in ``self.material_tags``
@@ -963,13 +969,29 @@ class AnalysisBuilder:
         available for :meth:`_create_shell_elements` to reference when
         creating shell elements with layered sections.
 
+        .. important::
+
+           This method always recreates the ``ops.section()`` domain
+           object for every mapped section, even when the tag already
+           appears in ``self._shell_sec_tags``.  This is necessary
+           because :meth:`build_domain` calls ``ops.wipe()`` at the
+           start of each build, which destroys all previously created
+           section objects — they must be re-registered with the new
+           domain.  Section tags remain stable across builds.
+
         The LayeredShell section is used with ShellNLDKGQ or ShellDKGQ
         elements for nonlinear shear wall analysis where through-thickness
         layering of concrete and rebar is needed.  Each layer is defined by:
 
         * ``matTag`` — reference to an nD material tag
         * ``thickness`` — layer thickness (same units as model)
-        * ``nIP`` — number of integration points through the layer
+
+        .. note::
+
+           OpenSees ``LayeredShell`` section syntax takes only
+           ``(matTag, thickness)`` pairs per layer — the ``nIP``
+           argument found in the ``ShellFiberLayer`` dataclass is
+           metadata for display purposes only.
 
         Typical wall cross-section stacking (outside → inside):
 
@@ -989,32 +1011,51 @@ class AnalysisBuilder:
 
         _max_sec = max(self.section_tags.values(), default=0)
         _max_shell = max(self._shell_sec_tags.values(), default=0)
-        tag = max(_max_sec, _max_shell) + 1
+        next_tag = max(_max_sec, _max_shell) + 1
 
+        created = 0
         for name, lss in self.mesh_model.layered_shell_sections.items():
-            if name in self._shell_sec_tags:
-                continue
             n_layers = len(lss.layers)
             if n_layers == 0:
                 if self.config.get('verbose', False):
                     print(f"  ⚠ Layered section '{name}' has no layers — skipping")
                 continue
             flat_args = []
+            skip_section = False
             for layer in lss.layers:
                 mat_tag = self.material_tags.get(layer.nd_material)
                 if mat_tag is None:
+                    if layer.nd_material in self._skipped_nd_materials:
+                        print(f"  ⚠ nD material '{layer.nd_material}' for "
+                              f"layered section '{name}' was skipped during "
+                              f"material creation (unsupported type) — "
+                              f"skipping section '{name}'")
+                        skip_section = True
+                        break
                     if self.config.get('verbose', False):
                         print(f"  ⚠ nD material '{layer.nd_material}' not found "
-                              f"for layered section '{name}' — skipping")
-                    mat_tag = 1  # fallback
-                flat_args.extend([mat_tag, layer.thickness, layer.n_ip])
+                              f"for layered section '{name}' — skipping section")
+                    skip_section = True
+                    break
+                # LayeredShell syntax: matTag, thickness only (nIP not accepted)
+                flat_args.extend([mat_tag, layer.thickness])
+            if skip_section:
+                self._skipped_shell_sec_names.add(name)
+                continue
+
+            # Reuse pre-assigned tag if one exists (stable across builds)
+            if name in self._shell_sec_tags:
+                tag = self._shell_sec_tags[name]
+            else:
+                tag = next_tag
+                self._shell_sec_tags[name] = tag
+                next_tag += 1
+
             ops.section('LayeredShell', tag, n_layers, *flat_args)
-            self._shell_sec_tags[name] = tag
-            tag += 1
+            created += 1
 
         if self.config.get('verbose', False):
-            n = len(self.mesh_model.layered_shell_sections)
-            print(f"  Created {n} layered shell section(s)")
+            print(f"  Created {created} layered shell section(s)")
 
     # ── Materials ────────────────────────────────────────────────
 
@@ -1139,7 +1180,10 @@ class AnalysisBuilder:
         if self.config['verbose']:
             print("Creating sections...")
 
-        next_tag = max(self.section_tags.values(), default=0) + 1 if self.section_tags else 1
+        # Ensure normal-section tags don't collide with layered-shell tags
+        _max_sec = max(self.section_tags.values(), default=0)
+        _max_shell = max(self._shell_sec_tags.values(), default=0)
+        next_tag = max(_max_sec, _max_shell) + 1 if (self.section_tags or self._shell_sec_tags) else 1
         for sec_name, sec in self.mesh_model.sections.items():
             if sec_name not in self.section_tags:
                 self.section_tags[sec_name] = next_tag
@@ -1296,6 +1340,12 @@ class AnalysisBuilder:
                 continue
 
             sec = self.mesh_model.sections[sec_name]
+            # Skip areas that reference a skipped layered shell section
+            # (e.g. the nD material was unsupported) — do NOT create an
+            # ElasticMembranePlateSection fallback for them.
+            if sec_name in self._skipped_shell_sec_names:
+                continue
+
             mat = self.mesh_model.materials.get(sec.material)
             if mat is None:
                 continue

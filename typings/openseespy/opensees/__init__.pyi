@@ -5,7 +5,7 @@ Provides function signatures with named parameters for hover documentation
 and basic type checking. Based on the official OpenSees command manual:
 https://opensees.ist.berkeley.edu/wiki/index.php/Command_Manual
 """
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union, overload
 
 
 # ============================================================================
@@ -720,11 +720,28 @@ def responseSpectrumAnalysis(ts_tag: int, dof: int, *args: Any) -> None:
 
 # ── Additional query / removal commands ──
 
-def getEleTags() -> Tuple[int, ...]:
-    """Return tags of all elements in the model.
+@overload
+def getEleTags() -> List[int]:
+    """Return tags of all elements in the model (no selector).
 
     Returns:
-        Tuple of element tags.
+        List of element tags.
+    """
+    ...
+
+@overload
+def getEleTags(selector: str, meshTag: int) -> List[int]:
+    """Return element tags for a specific mesh.
+
+    Usage::
+
+        ops.getEleTags('-mesh', meshTag)
+
+    Args:
+        selector: ``'-mesh'``.
+        meshTag: Mesh tag to filter by.
+    Returns:
+        List of element tags.
     """
     ...
 
@@ -736,8 +753,22 @@ def getLoadPatternTags() -> Tuple[int, ...]:
     """
     ...
 
+@overload
+def remove(obj_type: str) -> None:
+    """Remove all recorders.
+
+    Usage::
+
+        ops.remove('recorders')
+
+    Args:
+        obj_type: ``'recorders'`` (single-argument form).
+    """
+    ...
+
+@overload
 def remove(obj_type: str, tag: int) -> None:
-    """Remove an object from the model domain.
+    """Remove a tagged object from the model domain.
 
     Usage::
 
@@ -749,6 +780,22 @@ def remove(obj_type: str, tag: int) -> None:
         obj_type: Object type name (``'timeSeries'``, ``'element'``,
                   ``'loadPattern'``, etc.).
         tag: Tag of the object to remove.
+    """
+    ...
+
+@overload
+def remove(obj_type: str, nodeTag: int, dofTag: int, patternTag: int) -> None:
+    """Remove a single-point constraint (``sp``) from the domain.
+
+    Usage::
+
+        ops.remove('sp', nodeTag, dofTag, patternTag)
+
+    Args:
+        obj_type: ``'sp'``.
+        nodeTag: Node tag.
+        dofTag: DOF number (1‑based).
+        patternTag: Load pattern tag.
     """
     ...
 

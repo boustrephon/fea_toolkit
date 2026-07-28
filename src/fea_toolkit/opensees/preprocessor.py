@@ -33,6 +33,7 @@ from ..model.sap_data import (
     FrameElementProperties, AreaElementProperties,
     NDMaterial, ShellFiberLayer, LayeredShellSection,
 )
+from dataclasses import fields
 
 
 class Preprocessor:
@@ -961,19 +962,11 @@ class Preprocessor:
 
         # ── Resolve nD materials from config dicts ───────────────
         nd_mat_config = config.get('nd_materials', {})
+        _nd_field_names = {f.name for f in fields(NDMaterial)}
         for mat_name, mat_dict in nd_mat_config.items():
-            mesh_model.nd_materials[mat_name] = NDMaterial(
-                name=mat_name,
-                material_type=mat_dict.get('material_type', 'ElasticIsotropic'),
-                E=mat_dict.get('E', 200.0e9),
-                nu=mat_dict.get('nu', 0.3),
-                fy=mat_dict.get('fy', 400.0e6),
-                Hiso=mat_dict.get('Hiso', 0.0),
-                Hkin=mat_dict.get('Hkin', 0.0),
-                fc=mat_dict.get('fc', 30.0e6),
-                ft=mat_dict.get('ft', 3.0e6),
-                Es=mat_dict.get('Es', 0.0),
-            )
+            kwargs = {k: v for k, v in mat_dict.items() if k in _nd_field_names}
+            kwargs.setdefault('name', mat_name)
+            mesh_model.nd_materials[mat_name] = NDMaterial(**kwargs)
 
         # ── Resolve layered shell sections from config dicts ─────
         shell_layers_config = config.get('shell_layers', {})
