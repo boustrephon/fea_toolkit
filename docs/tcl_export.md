@@ -18,6 +18,20 @@ Three export paths are available:
 ```python
 from fea_toolkit.opensees.recorder import export_mesh_model_to_tcl, pushover_tcl
 from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.io.s2k_parser import SAP2000Parser
+
+# --- Setup: caller provides these ---
+# parser = SAP2000Parser("model.s2k")
+# parser.parse()
+# md = parser.get_model_data()
+#
+# mm = preprocess_model(md)
+# config = {"create_fiber_sections": True, "geom_transf_type": "PDelta"}
+#
+# top_node_tag = ...       # control node tag from mesh_model.nodes
+# lateral_loads = {...}    # dict of node_tag -> load magnitude in push direction
+# gravity_loads = {...}    # dict of node_tag/load pattern for gravity
+# --- End setup ---
 
 mm = preprocess_model(md)
 config = {"create_fiber_sections": True, "geom_transf_type": "PDelta"}
@@ -58,10 +72,10 @@ Full parameter details are in the ``pushover_tcl()`` docstring.
 
 ## Two-stage build integration
 
-With ``use_preprocessor: True`` (the default), the Preprocessor produces a ``MeshModel``
-with fully prepared topology.  ``export_model_to_tcl()`` can accept the
-MeshModel's data directly — the topology is already split and meshed,
-eliminating the need for the caller to prepare it manually.
+With the Preprocessor active (default), it produces a ``MeshModel`` with
+fully prepared topology.  Use ``export_mesh_model_to_tcl()`` to export
+that ``MeshModel`` data directly — the topology is already split and
+meshed, eliminating the need for the caller to prepare it manually.
 
 ## Confinement data
 

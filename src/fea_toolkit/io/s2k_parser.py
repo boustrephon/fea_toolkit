@@ -13,6 +13,7 @@ from ..model.sap_data import (
     MassSource, JointLoad, FrameDistributedLoad, AreaUniformLoad, AreaGravityLoad,
     GravityLoad, FrameEndOffset, AreaMesh, AreaEdgeConstraint,
     StressStrainCurve,
+    ConcreteRectangularSection,
 )
 # from ..model.geometry import get_SAP_vecxz
 
@@ -1053,8 +1054,15 @@ class SAP2000Parser:
             if mn:
                 _mat_types[mn] = mt
 
+        # Hoist model units lookup outside the loop
+        _model_units = self.get_model_units()
+        from ..utils import length_scale_factor
+
         for sec_name, sec in list(sections.items()):
             if not isinstance(sec, RectangularSection):
+                continue
+            # Skip sections that are already ConcreteRectangularSection subclasses
+            if isinstance(sec, ConcreteRectangularSection):
                 continue
             mat_type = _mat_types.get(sec.material, "").lower()
             # Accept any material type containing "concrete"
@@ -1062,10 +1070,7 @@ class SAP2000Parser:
                 continue
             # Sensible defaults for RC sections: 40 mm cover, 20 mm bars.
             # Convert default values from metre-based to model length units.
-            units = self.get_model_units()
-            lf = units.get('L', 'm')
-            lf_scale = {'m': 1.0, 'mm': 1000.0, 'in': 39.37, 'ft': 3.28084}.get(
-                lf.lower() if isinstance(lf, str) else 'm', 1.0)
+            lf_scale = length_scale_factor(_model_units)
             cover_val = 0.04 * lf_scale
             bar_dia_val = 0.020 * lf_scale
             # Target reinforcement ratio 0.01 (1 %) of gross area

@@ -324,8 +324,16 @@ class TestResolveMeshData:
             "F2": FrameElement("F2", 20, "N2", "N3"),
         }
         sections = {
-            "COL": ISection("COL", "2×2 Box", 0.2, 0.2, 0.02, 0.02),
-            "BEAM": ISection("BEAM", "W16x31", 0.4, 0.2, 0.01, 0.01),
+            "COL": ISection(
+                name="COL", shape="2×2 Box", material="Steel",
+                A=0.2, I33=0.02, I22=0.02, J=0.0,
+                depth=0.2, bf=0.2, tf=0.02, tw=0.02,
+            ),
+            "BEAM": ISection(
+                name="BEAM", shape="W16x31", material="Steel",
+                A=0.4, I33=0.02, I22=0.02, J=0.0,
+                depth=0.4, bf=0.2, tf=0.01, tw=0.01,
+            ),
         }
         areas = {"A1": AreaElement("A1", 30, ["N1", "N2", "N3", "N4"])}
 

@@ -105,14 +105,7 @@ def read_time_history_csv(
     accel : ndarray
         Acceleration values (m/s²).
     """
-    data = np.loadtxt(path, delimiter=",", skiprows=skip_header)
-    if data.ndim == 1:
-        # Single column: treat as rows with one column
-        # Reshape to (N, 1) so column indexing still works
-        data = data.reshape(-1, 1) if data.shape[0] > 0 else data.reshape(1, -1) if data.size > 0 else data
-        if data.ndim == 1:
-            # Single row with all columns: reshape to (1, N)
-            data = data.reshape(1, -1)
+    data = np.loadtxt(path, delimiter=",", skiprows=skip_header, ndmin=2)
     return data[:, col_time], data[:, col_accel]
 
 
@@ -189,23 +182,22 @@ def scale_to_target_sa(
     # with u[0]=v[0]=0 → a[0] = -accel[0]
     a[0] = -accel[0]
 
-    # Effective stiffness: k_eff = k + gamma*c*dt + beta*m*dt^2
-    # c = 2*damping*w*m, k = w^2*m
+    # Effective stiffness: k_eff = k + gamma*c/(beta*dt) + 1/(beta*dt^2)  (per unit mass)
+    # c = 2*damping*w, k = w^2
     c = 2.0 * damping * w
-    k_eff = w**2 + gamma * c * dt + beta * dt**2  # per unit mass
+    k_eff = w**2 + (gamma * c) / (beta * dt) + 1.0 / (beta * dt**2)
 
     for i in range(1, npts):
-        # Effective load per unit mass:
-        # p_eff = -accel[i] + (alpha1 * u[i-1] + alpha2 * v[i-1] + alpha3 * a[i-1])
-        alpha1 = 1.0 / (beta * dt**2)
-        alpha2 = gamma / (beta * dt)
-        alpha3 = 1.0 / (beta * dt) * (1.0 - gamma / beta)  # simplified: (1/(2*beta) - 1) for gamma=0.5
-        # Standard formulation:
-        # p_eff = -accel[i] + (alpha1*u[i-1] + alpha2*v[i-1] + (1/(2*beta) - 1)*a[i-1])
-        p_eff = -accel[i] + (alpha1 * u[i-1] + alpha2 * v[i-1] + (0.5/beta - 1.0) * a[i-1])
+        # Effective load per unit mass (standard Newmark formulation):
+        # p_eff = -accel[i] + a_bar*u[i-1] + b_bar*v[i-1] + c_bar*a[i-1]
+        # where a_bar = 1/(beta*dt^2), b_bar = gamma/(beta*dt), c_bar = 1/(beta*dt) - 1/(2*beta)
+        # (consistent with k_eff = k + gamma*c/(beta*dt) + 1/(beta*dt^2))
+        p_eff = -accel[i] + (1.0/(beta*dt**2))*u[i-1] + (gamma/(beta*dt))*v[i-1] + (1.0/(beta*dt) - 1.0/(2.0*beta))*a[i-1]
         u[i] = p_eff / k_eff
-        # Update velocity and acceleration using Newmark formulas
-        v[i] = gamma / (beta * dt) * (u[i] - u[i-1]) + (1.0 - gamma / beta) * v[i-1] + dt * (1.0 - gamma / (2.0 * beta)) * a[i-1]
+        # Newmark state update (gamma=0.5, beta=1/6 linear acceleration)
+        # Standard formulas: v[i] = v[i-1] + dt*((1-gamma)*a[i-1] + gamma*a[i])
+        #                    a[i] = (u[i]-u[i-1])/(beta*dt^2) - v[i-1]/(beta*dt) - (1/(2*beta)-1)*a[i-1]
+        v[i] = v[i-1] + dt * ((1.0 - gamma) * a[i-1] + gamma * a[i])
         a[i] = (u[i] - u[i-1]) / (beta * dt**2) - v[i-1] / (beta * dt) - (1.0 / (2.0 * beta) - 1.0) * a[i-1]
 
     current_sa = np.max(np.abs(u)) * w**2
