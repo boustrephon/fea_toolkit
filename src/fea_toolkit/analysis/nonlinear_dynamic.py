@@ -82,9 +82,9 @@ class NonlinearDynamicAnalysis(Analysis):
     @property
     def provides(self) -> set:
         return {
-            "times", "displacements", "velocities",
-            "accelerations", "element_forces",
-            "peak_drift", "peak_acceleration",
+            "times", "displacements", "envelope",
+            "peak_drift", "converged_steps",
+            "gm_file", "direction", "output_raw",
         }
 
     def run(self) -> AnalysisResult:
@@ -133,83 +133,68 @@ class NonlinearDynamicAnalysis(Analysis):
             ) from e
 
         # ── Create single temporary directory for all outputs ──
-        tmp_context = tempfile.TemporaryDirectory()
-        tmp_dir = tmp_context.name
-        gm_file = os.path.join(tmp_dir, "gm_accel.txt")
-        np.savetxt(gm_file, accel, fmt="%.8f")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            gm_file = os.path.join(tmp_dir, "gm_accel.txt")
+            np.savetxt(gm_file, accel, fmt="%.8f")
 
-        # ── Generate dynamic Tcl suffix ──
-        tcl_suffix = dynamic_time_history_tcl(
-            ground_motion_file=gm_file,
-            output_prefix=os.path.join(tmp_dir, "dyn"),
-            dt=self.dt,
-            num_steps=self.num_steps,
-            damping=self.damping_ratio,
-            period_1=period_1,
-            period_2=period_2,
-            direction=self.direction,
-            gravity_loads=gravity_loads,
-        )
+            # ── Generate dynamic Tcl suffix ──
+            tcl_suffix = dynamic_time_history_tcl(
+                ground_motion_file=gm_file,
+                output_prefix=os.path.join(tmp_dir, "dyn"),
+                dt=self.dt,
+                num_steps=self.num_steps,
+                damping=self.damping_ratio,
+                period_1=period_1,
+                period_2=period_2,
+                direction=self.direction,
+                gravity_loads=gravity_loads,
+            )
 
-        # ── RC config with fiber sections for nonlinear modeling ──
-        dyn_config = dict(_NONLINEAR_DYNAMIC_DEFAULTS)
-        dyn_config.update(self.config)
-        dyn_config["create_fiber_sections"] = True
+            # ── RC config with fiber sections for nonlinear modeling ──
+            dyn_config = dict(_NONLINEAR_DYNAMIC_DEFAULTS)
+            dyn_config.update(self.config)
+            dyn_config["create_fiber_sections"] = True
 
-        # ── Write Tcl and run ──
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".tcl", delete=False, encoding="utf-8"
-        ) as f:
-            tcl_path = f.name
+            # ── Write Tcl inside tmp_dir — recorder outputs resolve here ──
+            tcl_path = os.path.join(tmp_dir, "run_dyn.tcl")
             export_mesh_model_to_tcl(
                 mm, tcl_path, config=dyn_config, tcl_suffix=tcl_suffix,
             )
 
-        runner = XaraTclRunner()
-        ret, output = runner.run(tcl_path)
+            runner = XaraTclRunner()
+            ret, output = runner.run(tcl_path)
 
-        # ── Parse output ──
-        converged_steps = 0
-        for line in output.splitlines():
-            if "complete:" in line and "steps converged" in line:
-                m = re.search(r"(\d+) steps converged", line)
-                if m:
-                    converged_steps = int(m.group(1))
-                    break
+            # ── Parse output ──
+            converged_steps = 0
+            for line in output.splitlines():
+                if "complete:" in line and "steps converged" in line:
+                    m = re.search(r"(\d+) steps converged", line)
+                    if m:
+                        converged_steps = int(m.group(1))
+                        break
 
-        # Try to read output files
-        work_dir = os.path.dirname(tcl_path)
-        disp_file = os.path.join(work_dir, "dyn_disp.out")
-        env_disp_file = os.path.join(work_dir, "dyn_env_disp.out")
+            # Try to read output files
+            disp_file = os.path.join(tmp_dir, "dyn_disp.out")
+            env_disp_file = os.path.join(tmp_dir, "dyn_env_disp.out")
 
-        peak_drift = 0.0
-        peak_acc = 0.0
-        disp_data = None
-        env_data = None
+            peak_drift = 0.0
+            disp_data = None
+            env_data = None
 
-        if os.path.exists(disp_file):
-            try:
-                disp_data = np.loadtxt(disp_file)
-                if disp_data.ndim > 1 and disp_data.shape[1] >= 2:
-                    peak_drift = float(np.max(np.abs(disp_data[:, 1:])))
-            except Exception:
-                pass
+            if os.path.exists(disp_file):
+                try:
+                    disp_data = np.loadtxt(disp_file)
+                    if disp_data.ndim > 1 and disp_data.shape[1] >= 2:
+                        peak_drift = float(np.max(np.abs(disp_data[:, 1:])))
+                except Exception:
+                    pass
 
-        if os.path.exists(env_disp_file):
-            try:
-                env_data = np.loadtxt(env_disp_file)
-            except Exception:
-                pass
-
-        # ── Cleanup temporary directory (removes gm+recorder files) ──
-        try:
-            os.unlink(tcl_path)
-        except OSError:
-            pass
-        try:
-            tmp_context.cleanup()
-        except OSError:
-            pass
+            if os.path.exists(env_disp_file):
+                try:
+                    env_data = np.loadtxt(env_disp_file)
+                except Exception:
+                    pass
+            # tmp_dir cleaned up on context exit
 
         result = {
             "times": np.arange(self.num_steps) * self.dt,
