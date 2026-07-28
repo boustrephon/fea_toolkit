@@ -171,11 +171,14 @@ class AnalysisBuilder:
 
             self._create_nodes()
             self._apply_restraints()
+            self._create_nd_materials()
+            self._create_layered_shell_sections()
             self._create_materials()
             self._create_sections()
             self._create_shell_elements()
             self._create_lumped_hinges()
             self._create_elements()
+            self._apply_rigid_diaphragms()
         finally:
             # Restore any overridden config values
             for k, old_v in _saved_overrides.items():
@@ -877,6 +880,137 @@ class AnalysisBuilder:
                     if np.linalg.norm(p - proj) > 0.01:
                         continue
                     ops.fix(nd.node_tag, *combined)
+
+    # ── nD materials / layered shell sections ──────────────────────
+
+    def _create_nd_materials(self) -> None:
+        """Create nD (multi‑axial) materials for nonlinear layered shell analysis.
+
+        Reads ``mesh_model.nd_materials`` (populated by the Preprocessor from
+        the config's ``nd_materials`` dict) and creates the corresponding
+        OpenSees ``nDMaterial`` objects.
+
+        Supports the following OpenSees nD material types:
+
+        * ``ElasticIsotropic`` — linear elastic 2D plane-stress
+        * ``J2PlateFibre`` — J2 plasticity with isotropic/kinematic hardening
+          (used for smeared rebar layers)
+        * ``ConcreteS`` — concrete with compressive strength ``fc`` and tensile
+          strength ``ft`` (fixed crack model)
+        * ``PlateFromPlaneStress`` — wraps a plane-stress material into a
+          plate bending formulation
+
+        Material tags are assigned starting from a base offset above all
+        existing material, section, and frame element tags to avoid clashes.
+
+        This method is called during :meth:`build_domain` **before**
+        :meth:`_create_materials` so that nD material tags are available
+        when layered shell sections are created in
+        :meth:`_create_layered_shell_sections`.
+
+        .. note::
+
+           When ``mesh_model.nd_materials`` is empty (no config set), this
+           method is a no-op — existing behaviour is unchanged.
+        """
+        if not self.mesh_model.nd_materials:
+            return
+
+        _max_mat = max(self.material_tags.values(), default=0)
+        _max_sec = max(self.section_tags.values(), default=0)
+        _max_frame = max(self.frame_tag_map.values(), default=0)
+        _tag_base = max(_max_mat, _max_sec, _max_frame) + 1000
+        tag = _tag_base
+
+        for name, nd_mat in self.mesh_model.nd_materials.items():
+            t = nd_mat.material_type
+            if t == "ElasticIsotropic":
+                ops.nDMaterial('ElasticIsotropic', tag, nd_mat.E, nd_mat.nu)
+            elif t == "J2PlateFibre":
+                ops.nDMaterial('J2PlateFibre', tag, nd_mat.E, nd_mat.nu,
+                               nd_mat.fy, nd_mat.Hiso, nd_mat.Hkin)
+            elif t == "ConcreteS":
+                ops.nDMaterial('ConcreteS', tag, nd_mat.E, nd_mat.nu,
+                               nd_mat.fc, nd_mat.ft, nd_mat.Es)
+            elif t == "PlateFromPlaneStress":
+                ops.nDMaterial('PlateFromPlaneStress', tag, tag, 0.0)
+            else:
+                if self.config.get('verbose', False):
+                    print(f"  ⚠ Unknown nDMaterial type '{t}' for '{name}' — skipping")
+                continue
+            self.material_tags[name] = tag
+            tag += 1
+
+        if self.config.get('verbose', False):
+            n = len(self.mesh_model.nd_materials)
+            print(f"  Created {n} nD material(s)")
+
+    def _create_layered_shell_sections(self) -> None:
+        """Create ``LayeredShell`` sections for nonlinear shell analysis.
+
+        Reads ``mesh_model.layered_shell_sections`` (populated by the
+        Preprocessor from the config's ``shell_layers`` dict) and calls
+        ``ops.section('LayeredShell', tag, nLayer, matTag1, t1, nIP1, ...)``
+        for each section.
+
+        Each layer's nD material must already exist in ``self.material_tags``
+        (created by :meth:`_create_nd_materials`).  Section tags are stored
+        in ``self._shell_sec_tags`` keyed by section name, making them
+        available for :meth:`_create_shell_elements` to reference when
+        creating shell elements with layered sections.
+
+        The LayeredShell section is used with ShellNLDKGQ or ShellDKGQ
+        elements for nonlinear shear wall analysis where through-thickness
+        layering of concrete and rebar is needed.  Each layer is defined by:
+
+        * ``matTag`` — reference to an nD material tag
+        * ``thickness`` — layer thickness (same units as model)
+        * ``nIP`` — number of integration points through the layer
+
+        Typical wall cross-section stacking (outside → inside):
+
+        1. Cover concrete (unconfined), e.g. 40 mm, ``ConcreteS``
+        2. Smeared rebar, e.g. 2 mm, ``J2PlateFibre``
+        3. Core concrete (confined), e.g. 300 mm, ``ConcreteS``
+        4. Smeared rebar, e.g. 2 mm, ``J2PlateFibre``
+        5. Cover concrete (unconfined), e.g. 40 mm, ``ConcreteS``
+
+        .. note::
+
+           When ``mesh_model.layered_shell_sections`` is empty, this method
+           is a no-op — existing behaviour is unchanged.
+        """
+        if not self.mesh_model.layered_shell_sections:
+            return
+
+        _max_sec = max(self.section_tags.values(), default=0)
+        _max_shell = max(self._shell_sec_tags.values(), default=0)
+        tag = max(_max_sec, _max_shell) + 1
+
+        for name, lss in self.mesh_model.layered_shell_sections.items():
+            if name in self._shell_sec_tags:
+                continue
+            n_layers = len(lss.layers)
+            if n_layers == 0:
+                if self.config.get('verbose', False):
+                    print(f"  ⚠ Layered section '{name}' has no layers — skipping")
+                continue
+            flat_args = []
+            for layer in lss.layers:
+                mat_tag = self.material_tags.get(layer.nd_material)
+                if mat_tag is None:
+                    if self.config.get('verbose', False):
+                        print(f"  ⚠ nD material '{layer.nd_material}' not found "
+                              f"for layered section '{name}' — skipping")
+                    mat_tag = 1  # fallback
+                flat_args.extend([mat_tag, layer.thickness, layer.n_ip])
+            ops.section('LayeredShell', tag, n_layers, *flat_args)
+            self._shell_sec_tags[name] = tag
+            tag += 1
+
+        if self.config.get('verbose', False):
+            n = len(self.mesh_model.layered_shell_sections)
+            print(f"  Created {n} layered shell section(s)")
 
     # ── Materials ────────────────────────────────────────────────
 
@@ -3497,7 +3631,7 @@ class AnalysisBuilder:
             the equilibrium imbalance ``Δ = applied + reaction``
             (should be near zero for a correctly built model).
         """
-        import pandas as pd  # optional dependency — import is local to the method so it only fails when this specific method is called
+        import pandas as pd  # noqa: PD901 — optional dep, local import, want short alias
 
         rows: list = []
         fu = self.mesh_model.units.get('F', '?')
