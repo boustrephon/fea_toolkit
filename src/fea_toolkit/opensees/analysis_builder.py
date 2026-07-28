@@ -922,6 +922,7 @@ class AnalysisBuilder:
         _tag_base = max(_max_mat, _max_sec, _max_frame) + 1000
         tag = _tag_base
 
+        created = 0
         for name, nd_mat in self.mesh_model.nd_materials.items():
             t = nd_mat.material_type
             if t == "ElasticIsotropic":
@@ -933,17 +934,20 @@ class AnalysisBuilder:
                 ops.nDMaterial('ConcreteS', tag, nd_mat.E, nd_mat.nu,
                                nd_mat.fc, nd_mat.ft, nd_mat.Es)
             elif t == "PlateFromPlaneStress":
-                ops.nDMaterial('PlateFromPlaneStress', tag, tag, 0.0)
+                print(f"  ⚠ PlateFromPlaneStress not yet supported for '{name}' — "
+                      f"data model missing wrapped-material and Eout fields — skipping")
+                continue
             else:
-                if self.config.get('verbose', False):
-                    print(f"  ⚠ Unknown nDMaterial type '{t}' for '{name}' — skipping")
+                import warnings as _w
+                _w.warn(f"Unknown nDMaterial type '{t}' for '{name}' — skipping",
+                        UserWarning, stacklevel=2)
                 continue
             self.material_tags[name] = tag
             tag += 1
+            created += 1
 
         if self.config.get('verbose', False):
-            n = len(self.mesh_model.nd_materials)
-            print(f"  Created {n} nD material(s)")
+            print(f"  Created {created} nD material(s)")
 
     def _create_layered_shell_sections(self) -> None:
         """Create ``LayeredShell`` sections for nonlinear shell analysis.
@@ -1245,10 +1249,22 @@ class AnalysisBuilder:
         if self.config['verbose']:
             print("Creating shell elements...")
 
-        self._shell_sec_tags = dict(self.mesh_model.shell_sec_tags) if self.mesh_model.shell_sec_tags else {}
-        self._shell_sec_variants = dict(self.mesh_model.shell_sec_variants) if self.mesh_model.shell_sec_variants else {}
-        next_sec_tag = (max(self.section_tags.values(), default=0) + 1
-                        if self.section_tags else 1)
+        # Merge with existing _shell_sec_tags (from _create_layered_shell_sections)
+        # so LayeredShell section tags are preserved, not overwritten.
+        _new_ss = dict(self.mesh_model.shell_sec_tags) if self.mesh_model.shell_sec_tags else {}
+        for k, v in _new_ss.items():
+            self._shell_sec_tags.setdefault(k, v)
+
+        _new_variants = dict(self.mesh_model.shell_sec_variants) if self.mesh_model.shell_sec_variants else {}
+        for k, v in _new_variants.items():
+            self._shell_sec_variants.setdefault(k, v)
+
+        # Seed next_sec_tag from both section_tags and _shell_sec_tags values
+        _all_section_vals = set(self.section_tags.values())
+        _all_section_vals.update(self._shell_sec_tags.values())
+        _all_section_vals.update(self._shell_sec_variants.values())
+        next_sec_tag = (max(_all_section_vals, default=0) + 1
+                        if _all_section_vals else 1)
 
         shell_count = 0
         loads_only = self.mesh_model.loads_only_area_ids
@@ -3631,7 +3647,7 @@ class AnalysisBuilder:
             the equilibrium imbalance ``Δ = applied + reaction``
             (should be near zero for a correctly built model).
         """
-        import pandas as pd  # noqa: PD901 — optional dep, local import, want short alias
+        import pandas as pd
 
         rows: list = []
         fu = self.mesh_model.units.get('F', '?')
