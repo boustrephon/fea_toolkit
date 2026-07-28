@@ -718,6 +718,41 @@ def responseSpectrumAnalysis(ts_tag: int, dof: int, *args: Any) -> None:
     ...
 
 
+# ── Additional query / removal commands ──
+
+def getEleTags() -> Tuple[int, ...]:
+    """Return tags of all elements in the model.
+
+    Returns:
+        Tuple of element tags.
+    """
+    ...
+
+def getLoadPatternTags() -> Tuple[int, ...]:
+    """Return tags of all load patterns in the model.
+
+    Returns:
+        Tuple of load pattern tags.
+    """
+    ...
+
+def remove(obj_type: str, tag: int) -> None:
+    """Remove an object from the model domain.
+
+    Usage::
+
+        ops.remove('timeSeries', ts_tag)
+        ops.remove('element', elem_tag)
+        ops.remove('loadPattern', pat_tag)
+
+    Args:
+        obj_type: Object type name (``'timeSeries'``, ``'element'``,
+                  ``'loadPattern'``, etc.).
+        tag: Tag of the object to remove.
+    """
+    ...
+
+
 # ============================================================================
 # Fallback for any undocumented functions
 # ============================================================================
