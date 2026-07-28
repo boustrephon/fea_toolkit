@@ -1,6 +1,7 @@
 """Parse SAP2000 .S2K text files into intermediate data model."""
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Union, Tuple  # noqa: F401
@@ -1056,9 +1057,20 @@ class SAP2000Parser:
             if not isinstance(sec, RectangularSection):
                 continue
             mat_type = _mat_types.get(sec.material, "").lower()
-            if mat_type not in ("concrete", "concrete (ec2)"):
+            # Accept any material type containing "concrete"
+            if "concrete" not in mat_type:
                 continue
-            # Sensible defaults for RC sections (40 mm cover, 20 mm bars)
+            # Sensible defaults for RC sections: 40 mm cover, 20 mm bars.
+            # Convert default values from metre-based to model length units.
+            units = self.get_model_units()
+            lf = units.get('L', 'm')
+            lf_scale = {'m': 1.0, 'mm': 1000.0, 'in': 39.37, 'ft': 3.28084}.get(
+                lf.lower() if isinstance(lf, str) else 'm', 1.0)
+            cover_val = 0.04 * lf_scale
+            bar_dia_val = 0.020 * lf_scale
+            # Target reinforcement ratio 0.01 (1 %) of gross area
+            bar_area = math.pi * (bar_dia_val / 2.0) ** 2
+            n_bars = max(4, int(sec.A * 0.01 / bar_area)) if bar_area > 0 else 4
             sections[sec_name] = ConcreteRectangularSection(
                 name=sec.name,
                 shape=sec.shape,
@@ -1068,11 +1080,11 @@ class SAP2000Parser:
                 modifiers=sec.modifiers,
                 depth=sec.depth,
                 bf=sec.bf,
-                cover=0.04,
-                top_bars=max(4, int(sec.A * 0.002 / (3.14159 * 0.01**2))),
-                bot_bars=max(4, int(sec.A * 0.002 / (3.14159 * 0.01**2))),
-                top_bar_dia=0.020,
-                bot_bar_dia=0.020,
+                cover=cover_val,
+                top_bars=n_bars,
+                bot_bars=n_bars,
+                top_bar_dia=bar_dia_val,
+                bot_bar_dia=bar_dia_val,
             )
 
         # ── AREA SECTION PROPERTIES (shell sections not in frame table) ──
