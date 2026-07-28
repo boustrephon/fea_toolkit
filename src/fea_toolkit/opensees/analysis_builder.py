@@ -1243,13 +1243,14 @@ class AnalysisBuilder:
 
         # Save canonical state on first brace subdivision so
         # _restore_brace_canonical_state() can restore it on repeated builds.
+        # Use deep copies to prevent shared mutable state with the MeshModel.
         if self.config.get('subdivide_braces') and self._brace_selection:
             if not hasattr(self, '_brace_canonical'):
                 self._brace_canonical = {
-                    'frame_elements': dict(self.mesh_model.frame_elements),
-                    'frame_assignments': dict(self.mesh_model.frame_assignments),
-                    'nodes': dict(self.mesh_model.nodes),
-                    'frame_dist_loads': list(self.mesh_model.frame_dist_loads),
+                    'frame_elements': copy.deepcopy(self.mesh_model.frame_elements),
+                    'frame_assignments': copy.deepcopy(self.mesh_model.frame_assignments),
+                    'nodes': copy.deepcopy(self.mesh_model.nodes),
+                    'frame_dist_loads': copy.deepcopy(self.mesh_model.frame_dist_loads),
                 }
 
         # Brace subdivision (Approach A) — before element creation loop so
@@ -1303,12 +1304,17 @@ class AnalysisBuilder:
                 for ci, child_id in enumerate(parent.child_ids):
                     child_start = ld.dist_a + total_len * (ci / n_child)
                     child_end = ld.dist_a + total_len * ((ci + 1) / n_child)
+                    # Compute child-specific rdist values proportional to the
+                    # child's segment within the parent's parametric range.
+                    parent_rdist_range = ld.rdist_b - ld.rdist_a
+                    child_rdist_a = ld.rdist_a + parent_rdist_range * (ci / n_child)
+                    child_rdist_b = ld.rdist_a + parent_rdist_range * ((ci + 1) / n_child)
                     new_dist_loads.append(_FDL(
                         pattern=ld.pattern, frame_id=child_id,
                         direction=ld.direction, load_type=ld.load_type,
                         shape=ld.shape,
                         val_a=ld.val_a, val_b=ld.val_b,
-                        rdist_a=ld.rdist_a, rdist_b=ld.rdist_b,
+                        rdist_a=child_rdist_a, rdist_b=child_rdist_b,
                         dist_a=child_start, dist_b=child_end,
                     ))
             self.mesh_model.frame_dist_loads = new_dist_loads
@@ -1693,44 +1699,47 @@ class AnalysisBuilder:
             # --- Create Hysteretic hinge section ---
             mat = self.mesh_model.materials.get(sec.material)
 
+            # Defensive defaults for nullable section values — initialised
+            # before the concrete guard so they are guaranteed bound for
+            # the hinge backbone computation below.
+            Z33 = getattr(sec, 'Z33', None) or 0.0
+            Z22 = getattr(sec, 'Z22', None) or 0.0
+            I33 = getattr(sec, 'I33', None) or 0.0
+            I22 = getattr(sec, 'I22', None) or 0.0
+            A_val = getattr(sec, 'A', None) or 0.0
+            J_val = getattr(sec, 'J', None) or 0.0
+            Fy = mat.Fy if mat and mat.Fy and mat.Fy > 0 else 2.5e8
+            E = mat.E_mod if mat and mat.E_mod > 0 else 2.0e11
+            G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * E
+
+            # ── Concrete guard ──────────────────────────────────────
+            # Concrete sections fire a warning (reinforcement data not
+            # available) but still fall through to create elastic hinges
+            # using the defaults initialised above.
             if mat and mat.type and 'concrete' in mat.type.lower():
                 import warnings
                 warnings.warn(
                     f"Lumped hinges for concrete sections require reinforcement "
                     f"data not available in generic Section/Material model. "
-                    f"Skipping hinge for section '{sec_name}', "
-                    f"material '{sec.material}'."
+                    f"Section '{sec_name}', material '{sec.material}' — "
+                    f"using elastic moment defaults.",
                 )
-                continue
+
+            # Compute yield moments from section geometry
+            if Z33 > 0:
+                My = Fy * Z33
+            elif I33 > 0 and A_val > 0:
+                d_eff = 2.0 * math.sqrt(I33 / A_val)  # 2× radius of gyration
+                My = Fy * (I33 / max(d_eff * 0.5, 1e-6))
             else:
-                # Defensive defaults for nullable section values
-                Z33 = getattr(sec, 'Z33', None) or 0.0
-                Z22 = getattr(sec, 'Z22', None) or 0.0
-                I33 = getattr(sec, 'I33', None) or 0.0
-                I22 = getattr(sec, 'I22', None) or 0.0
-                A_val = getattr(sec, 'A', None) or 0.0
-                J_val = getattr(sec, 'J', None) or 0.0
-
-                # Guard against missing material
-                Fy = mat.Fy if mat and mat.Fy and mat.Fy > 0 else 2.5e8
-                E = mat.E_mod if mat and mat.E_mod > 0 else 2.0e11
-                G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * E
-
-                # Use section geometry for modulus fallback, never member length
-                if Z33 > 0:
-                    My = Fy * Z33
-                elif I33 > 0 and A_val > 0:
-                    d_eff = 2.0 * math.sqrt(I33 / A_val)  # 2× radius of gyration
-                    My = Fy * (I33 / max(d_eff * 0.5, 1e-6))
-                else:
-                    My = Fy * 1e-4  # Minimal fallback
-                if Z22 > 0:
-                    My_weak = Fy * Z22
-                elif I22 > 0 and A_val > 0:
-                    d_eff = 2.0 * math.sqrt(I22 / A_val)
-                    My_weak = Fy * (I22 / max(d_eff * 0.5, 1e-6))
-                else:
-                    My_weak = Fy * 1e-4
+                My = Fy * 1e-4  # Minimal fallback
+            if Z22 > 0:
+                My_weak = Fy * Z22
+            elif I22 > 0 and A_val > 0:
+                d_eff = 2.0 * math.sqrt(I22 / A_val)
+                My_weak = Fy * (I22 / max(d_eff * 0.5, 1e-6))
+            else:
+                My_weak = Fy * 1e-4
 
             # ASCE 41 plastic hinge length for yield rotation scaling
             from ..model.checks import compute_asce41_hinge_length
