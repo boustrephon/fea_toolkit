@@ -1,3 +1,11 @@
+---
+title: "Element Splitting"
+description: "Splitting frame elements at joints and intersections with parent-child tracking and load redistribution."
+status: "complete"
+tags: [elements, splitting, meshing, load-redistribution]
+category: [model-features]
+related: [element_classification.md, builder_reference.md, workflow.md]
+---
 # Element splitting
 
 The ``geometry.split_elements()`` function supports two independent

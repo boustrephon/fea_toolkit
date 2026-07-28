@@ -1,3 +1,11 @@
+---
+title: "Storey-level Response Methodology"
+description: "Storey displacement, drift, shear, and modal drift extraction and visualisation."
+status: "complete"
+tags: [analysis-type, storey, drift, shear, displacement, post-processing]
+category: [analysis-types]
+related: [pushover_analysis.md, modal_analysis.md, results_schema.md]
+---
 # Storey-level Response Methodology
 
 This document describes the mathematical approach used by

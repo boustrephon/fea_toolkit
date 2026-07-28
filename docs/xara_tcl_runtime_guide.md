@@ -1,3 +1,11 @@
+---
+title: "Xara/OpenSeesRT Tcl Runtime Guide"
+description: "Guide to running OpenSees Tcl scripts with Xara/OpenSeesRT: execution, monitoring, and troubleshooting."
+status: "complete"
+tags: [xara, tcl, runtime, openseesrt, execution]
+category: [tool-specific]
+related: [tcl_export.md, xara_pushover_workflow.md, xara_gravity_and_solver.md]
+---
 # Xara/OpenSeesRT Tcl Runtime Guide
 
 > Lessons learned from running pushover analysis on a 3-storey RC building

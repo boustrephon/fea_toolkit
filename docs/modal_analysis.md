@@ -1,4 +1,12 @@
-### Modal analysis options
+---
+title: "Modal Analysis Options"
+description: "Modal analysis solver options, mode shape visualisation, and usage examples."
+status: "complete"
+tags: [analysis-type, modal, eigen, eigenvalue, solver]
+category: [analysis-types]
+related: [pushover_analysis.md, report_generation.md, storey_response.md]
+---
+# Modal Analysis Options
 
 The method :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_modal_analysis`
 supports the following ``eigen_solver`` modes:

@@ -1,3 +1,11 @@
+---
+title: "Visualisation Toolkit"
+description: "PyVista-based 3D viewer, backend-agnostic renderer, interactive browser viewer, and HTML export."
+status: "complete"
+tags: [visualisation, pyvista, viewer, html-export, interactive]
+category: [export-viz]
+related: [results_schema.md, rhino_export.md, report_generation.md]
+---
 # Visualisation toolkit
 
 The ``fea_toolkit.plotting`` package provides two complementary

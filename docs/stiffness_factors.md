@@ -1,3 +1,11 @@
+---
+title: "Per-type Stiffness Factors (ACI 318 Cracked-Section Simulation)"
+description: "Applying ACI 318 cracked-section stiffness modifiers per structural role (beam, column, wall, slab)."
+status: "complete"
+tags: [stiffness, cracked-section, aci-318, modifiers]
+category: [model-features]
+related: [element_classification.md, pushover_analysis.md, modal_analysis.md]
+---
 # Per-type stiffness factors (ACI 318 cracked-section simulation)
 
 The ``stiffness_factors`` config option applies different Young's modulus

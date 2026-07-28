@@ -1,3 +1,11 @@
+---
+title: "Xara/OpenSeesRT Gravity & Solver Lessons Learned"
+description: "Lessons learned from Xara/OpenSeesRT gravity analysis and solver configuration."
+status: "complete"
+tags: [xara, tcl, gravity, solver, lessons-learned]
+category: [tool-specific]
+related: [xara_tcl_runtime_guide.md, xara_pushover_workflow.md, tcl_export.md]
+---
 # Xara/OpenSeesRT Gravity & Solver Lessons Learned
 
 ## Model Profile

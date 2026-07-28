@@ -1,3 +1,11 @@
+---
+title: "Xara Pushover Workflow — Nonlinear Analysis via Tcl"
+description: "Pushover analysis workflow for Xara/OpenSeesRT via Tcl script generation and execution."
+status: "complete"
+tags: [xara, tcl, pushover, nonlinear, workflow]
+category: [tool-specific]
+related: [xara_gravity_and_solver.md, xara_tcl_runtime_guide.md, tcl_export.md, pushover_analysis.md]
+---
 # Xara Pushover Workflow — Nonlinear Analysis via Tcl
 
 ## Overview

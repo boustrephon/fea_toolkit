@@ -1,3 +1,11 @@
+---
+title: "Element Properties Configuration"
+description: "Config-driven per-element creation property system: integration rules, fiber sections, hinges, layered shells."
+status: "complete"
+tags: [config, element-properties, fiber, hinges, nonlinear, shell]
+category: [model-features]
+related: [element_classification.md, pushover_analysis.md, shell_support.md, layered_analysis_workflow.md]
+---
 # Element Properties Configuration
 
 This document describes the per-element creation property system — a config-driven approach for controlling how each frame and area element is created in OpenSees, supporting mixed structural systems with different element types, materials, and integration rules per element.

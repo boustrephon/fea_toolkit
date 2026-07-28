@@ -1,3 +1,11 @@
+---
+title: "Element Classification"
+description: "How frame and area elements are classified into structural roles (beam, column, brace, wall, slab)."
+status: "complete"
+tags: [elements, classification, beams, columns, braces, walls, slabs]
+category: [model-features]
+related: [element_splitting.md, stiffness_factors.md, element_properties_config.md, builder_reference.md]
+---
 # Element Classification
 
 Before any analysis runs, every frame element in the model needs to be

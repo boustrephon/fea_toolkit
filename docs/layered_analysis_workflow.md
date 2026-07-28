@@ -1,3 +1,11 @@
+---
+title: "Layered Analysis Workflow for the v3 Architecture"
+description: "Detailed design of the v3 architecture: Preprocessor, MeshModel, AnalysisBuilder pipeline."
+status: "complete"
+tags: [architecture, workflow, preprocessor, analysis-builder, mesh-model]
+category: [core-pipeline]
+related: [workflow.md, builder_reference.md, analysis_builder_migration_plan.md]
+---
 # Layered Analysis Workflow for the v3 Architecture
 
 This note frames the analysis workflow as a layered system in which the SAP2000 model is treated as a source structural description, then progressively converted into a finite-element-ready model and finally into one or more analysis-specific OpenSees models.
