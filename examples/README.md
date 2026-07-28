@@ -21,6 +21,7 @@ python examples/basic_usage.py /path/to/model.s2k
 
 | Script | What it demonstrates | Input |
 |---|---|---|
+| `verify_openseespy.py` | **OpenSeesPy installation smoke-test** — standalone RC cantilever with Concrete01/Steel01 fiber section, dispBeamColumn, gravity analysis, and displacement-controlled pushover. No fea_toolkit imports. | None (self-contained) |
 | `basic_usage.py` | **Core workflow** — parse .s2k, enrich sections, build OpenSees model, run static analysis with equilibrium checks. Start here. | `.s2k` / `--sample` |
 | `static_analysis.py` | **Static analysis + force diagrams** — parse, build, run a load combination, extract element forces, plot 2D/3D moment, shear, and axial diagrams. | `.s2k` / `--sample` |
 | `pushover_analysis.py` | **Non-linear pushover** — two-stage gravity + lateral push with fiber sections. Demonstrates all four lateral load patterns (`uniform`, `triangular`, `mode1`, `pattern`). Exports PNG and SVG plots. | `.s2k` / `--sample` |
