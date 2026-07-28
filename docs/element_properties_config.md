@@ -52,7 +52,7 @@ flowchart LR
 
 ## Config Schema
 
-### Frame elements
+### Frame and area element strategies
 
 ```python
 config = {
