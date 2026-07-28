@@ -492,13 +492,12 @@ When ``end_offset > 0``, :func:`subdivide_elements`:
 **How to use:**
 
 ```python
-preprocess_model(md, config={
+mm = preprocess_model(md, config={
     "brace_ids": brace_ids,
     "brace_end_offset": 0.15,
     "brace_n_segments": 4,
     "brace_imperfection_ratio": 1.0 / 500.0,
 })
-mm = preprocess_model(md)  # or directly from the Preprocessor
 b = AnalysisBuilder(mm, config)
 b.config['geom_transf_type'] = 'Corotational'
 b.build_domain()
@@ -604,7 +603,7 @@ sel = Selection.from_brace_sections(model)
 brace_ids = set(sel.get_frame_ids(model))
 
 # Build the model
-builder.set_brace_selection(brace_ids, end_offset=0.15)
+builder.set_brace_selection(brace_ids)
 builder.build_domain()
 
 # Check buckling — before pushover

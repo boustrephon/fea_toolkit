@@ -49,8 +49,9 @@ Its responsibilities are to:
 In other words:
 
 - the shared `report` layer owns the generalised `run_all()` behaviour
-- the local private Project A wrapper in [local/<private_project>/Project A](../local/<private_project>/Project A) should call that
-  shared entry point, not duplicate it
+- the local private Project A wrapper (a project-specific script in the
+  private ``local/`` directory) should call that shared entry point, not
+  duplicate it
 - the NPZ schema is the serialised output representation of that shared
   result dictionary
 

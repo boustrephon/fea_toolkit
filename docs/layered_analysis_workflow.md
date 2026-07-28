@@ -521,7 +521,7 @@ Remaining gaps for the direct OpenSeesPy path:
 The RC pushover and nonlinear dynamic workflows use the Tcl export +
 Xara execution path, which is fully implemented:
 
-1. ``export_mesh_model_to_tcl()`` — translates a preprocessed ``MeshModel``
+1. ``export_model_to_tcl()`` — translates a preprocessed ``MeshModel``
    into a solver-ready Tcl script, including fiber sections and nonlinear
    material definitions.
 2. ``pushover_tcl()`` / ``dynamic_time_history_tcl()`` — generate the
@@ -530,7 +530,7 @@ Xara execution path, which is fully implemented:
 4. ``recorder.parse_pushover_results()`` — collects output records and
    maps them back into Python-native result dicts.
 
-Entry points: ``PushoverAnalysis.run_pushover_analysis()`` and the
+Entry points: ``AnalysisBuilder.run_pushover_analysis()`` and the
 ``NonlinearDynamicAnalysis`` class.
 
 ### 14.3 Current status of placeholders
