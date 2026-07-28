@@ -23,6 +23,7 @@ from fea_toolkit.analysis.base import (
     _PUSHOVER_STEEL_DEFAULTS,
     _PUSHOVER_RC_DEFAULTS,
 )
+from fea_toolkit.utils import DEFAULT_GRAVITY_MS2
 from fea_toolkit.analysis.modal import ModalAnalysis
 
 if TYPE_CHECKING:
@@ -80,7 +81,6 @@ class PushoverAnalysis(Analysis):
         name: Optional[str] = None,
         config: Optional[dict] = None,
     ):
-        super().__init__(mesh_model, name, config)
         self._modal_result = modal_result
         self.material_type = material_type
         self.gravity_patterns = gravity_patterns
@@ -90,10 +90,21 @@ class PushoverAnalysis(Analysis):
         self.brace_type = brace_type
         self.brace_sections = brace_sections
         self.rs_modal_base_shear = rs_modal_base_shear
+        # Call base init after instance attrs are set, then re-seed config
+        super().__init__(mesh_model, name, config)
+        self.config = dict(self.defaults_for(self.material_type))
+        self.config.update(config or {})
 
     @classmethod
     def defaults(cls, material_type: str = "steel") -> dict:
         """Return default config for the given material type."""
+        if material_type == "rc":
+            return dict(_PUSHOVER_RC_DEFAULTS)
+        return dict(_PUSHOVER_STEEL_DEFAULTS)
+
+    @staticmethod
+    def defaults_for(material_type: str) -> dict:
+        """Instance-aware defaults lookup."""
         if material_type == "rc":
             return dict(_PUSHOVER_RC_DEFAULTS)
         return dict(_PUSHOVER_STEEL_DEFAULTS)
@@ -189,6 +200,13 @@ class PushoverAnalysis(Analysis):
                 max_z = nd.z
                 control_node = nd.node_tag
 
+        # Determine direction index: X=0, Y=1, Z=2 (default X)
+        dir_index = 0
+        if self.config.get("direction") == "Y":
+            dir_index = 1
+        elif self.config.get("direction") == "Z":
+            dir_index = 2
+
         # Build lateral load pattern from mode 1 shape or uniform
         modal_data = self._modal_result.data
         if not isinstance(modal_data, dict):
@@ -204,28 +222,55 @@ class PushoverAnalysis(Analysis):
         if self.lateral_load_type == "uniform":
             # Uniform: unit masses at all nodes
             for nd in mm.nodes.values():
-                lateral_loads[nd.node_tag] = (1.0, 0.0, 0.0)
+                load = [0.0, 0.0, 0.0]
+                load[dir_index] = 1.0
+                lateral_loads[nd.node_tag] = tuple(load)
+        elif self.lateral_load_type == "triangular":
+            # Triangular: proportional to mass × height
+            heights = [nd.z for nd in mm.nodes.values()]
+            min_z = min(heights) if heights else 0.0
+            total_weight = 0.0
+            for nd in mm.nodes.values():
+                h = nd.z - min_z
+                if h < 0:
+                    h = 0.0
+                load = [0.0, 0.0, 0.0]
+                load[dir_index] = h
+                lateral_loads[nd.node_tag] = tuple(load)
+                total_weight += h
+            if total_weight > 1e-12:
+                for tag in lateral_loads:
+                    lateral_loads[tag] = tuple(
+                        v / total_weight for v in lateral_loads[tag])
         elif self.lateral_load_type == "mode1" and first_mode:
             # Mode 1 proportional: mass × mode1 shape
             total_weight = 0.0
             for nd in mm.nodes.values():
-                w = abs(first_mode.get(nd.node_tag, (1.0, 0.0, 0.0))[0])
-                lateral_loads[nd.node_tag] = (w, 0.0, 0.0)
+                mode_comp = first_mode.get(nd.node_tag, (1.0, 0.0, 0.0))
+                w = abs(mode_comp[dir_index] if len(mode_comp) > dir_index else mode_comp[0])
+                load = [0.0, 0.0, 0.0]
+                load[dir_index] = w
+                lateral_loads[nd.node_tag] = tuple(load)
                 total_weight += w
             if total_weight > 0:
                 for tag in lateral_loads:
-                    lateral_loads[tag] = (
-                        lateral_loads[tag][0] / total_weight, 0.0, 0.0)
+                    lateral_loads[tag] = tuple(
+                        v / total_weight for v in lateral_loads[tag])
         else:
+            # Fallback: uniform in configured direction
             for nd in mm.nodes.values():
-                lateral_loads[nd.node_tag] = (1.0, 0.0, 0.0)
+                load = [0.0, 0.0, 0.0]
+                load[dir_index] = 1.0
+                lateral_loads[nd.node_tag] = tuple(load)
 
         # Gravity loads
         gravity_loads: Dict[int, tuple] = {}
-        g = 9.81
+        g = DEFAULT_GRAVITY_MS2
         for nd in mm.nodes.values():
-            mass = getattr(nd, 'mass', 0.0) or 1.0
-            gravity_loads[nd.node_tag] = (0.0, 0.0, -mass * g)
+            mass_val = getattr(nd, 'mass', None)
+            if mass_val is None:
+                mass_val = 1.0
+            gravity_loads[nd.node_tag] = (0.0, 0.0, -mass_val * g)
 
         # RC config (overrides for fiber sections)
         rc_config = dict(_PUSHOVER_RC_DEFAULTS)
@@ -262,6 +307,30 @@ class PushoverAnalysis(Analysis):
         bs_path = str(out_dir / f"{output_prefix}_bs.out")
         reaction_path = str(out_dir / f"{output_prefix}_reaction.out")
 
+        def _safe_list(arr, default=None):
+            """Convert optional array-like to list; return empty list if missing/empty."""
+            if arr is None:
+                return default if default is not None else []
+            try:
+                lst = arr.tolist()
+                if lst is None:
+                    return default if default is not None else []
+                return lst
+            except (AttributeError, ValueError, TypeError):
+                return default if default is not None else []
+
+        def _safe_scalar(arr, default=0.0):
+            """Extract first scalar from optional array-like; return default if missing/empty."""
+            if arr is None:
+                return default
+            try:
+                flat = arr.flatten()
+                if flat.size == 0:
+                    return default
+                return float(flat[0])
+            except (AttributeError, ValueError, IndexError, TypeError):
+                return default
+
         result = {}
         if os.path.exists(disp_path) and os.path.exists(bs_path):
             try:
@@ -270,17 +339,17 @@ class PushoverAnalysis(Analysis):
                     reaction_path if os.path.exists(reaction_path) else None,
                 )
                 result = {
-                    "control_disp": parsed.get("control_disp", []).tolist(),
-                    "base_shear": parsed.get("base_shear", []).tolist(),
-                    "step": parsed.get("step", []).tolist(),
-                    "base_rx": float(parsed.get("base_rx", [0])[0]),
-                    "base_ry": float(parsed.get("base_ry", [0])[0]) if "base_ry" in parsed else 0.0,
-                    "base_rz": float(parsed.get("base_rz", [0])[0]) if "base_rz" in parsed else 0.0,
+                    "control_disp": _safe_list(parsed.get("control_disp")),
+                    "base_shear": _safe_list(parsed.get("base_shear")),
+                    "step": _safe_list(parsed.get("step")),
+                    "base_rx": _safe_scalar(parsed.get("base_rx")),
+                    "base_ry": _safe_scalar(parsed.get("base_ry")),
+                    "base_rz": _safe_scalar(parsed.get("base_rz")),
                     "output_raw": output,
                     "output_dir": str(out_dir),
                 }
                 if "reaction_rx" in parsed:
-                    result["reaction_rx"] = parsed["reaction_rx"].tolist()
+                    result["reaction_rx"] = _safe_list(parsed.get("reaction_rx"))
             except Exception as exc:
                 result = {"error": str(exc), "output_raw": output}
         else:
