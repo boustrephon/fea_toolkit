@@ -459,13 +459,15 @@ class XaraTclRunner:
                 continue
         # Common Homebrew / Miniforge / custom build locations
         for candidate in [
-            "/Users/andrew/miniforge3/bin/tclsh8.6",
             "/opt/homebrew/bin/tclsh8.6",
             "/usr/local/bin/tclsh8.6",
-            "/Users/andrew/miniforge3/envs/opensees/bin/tclsh8.6",
         ]:
             if os.path.exists(candidate):
                 return candidate
+        # Custom paths can be configured via XARA_TCLSH env var
+        env_tclsh = os.environ.get("XARA_TCLSH")
+        if env_tclsh and os.path.exists(env_tclsh):
+            return env_tclsh
         return "tclsh8.6"  # last resort
 
 
@@ -764,7 +766,8 @@ def export_mesh_model_to_tcl(
                 # Build fiber patches
                 patches = sec.to_fiber_patches(mat_tag=fiber_mat_tag)
                 # GJ torsional rigidity for 3D fiber sections (Xara requirement)
-                _G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * (mat.E_mod if mat and mat.E_mod > 0 else 2.0e11)
+                _E_mod = mat.E_mod if mat and mat.E_mod is not None and mat.E_mod > 0 else 2.0e11
+                _G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * _E_mod
                 gj = _G * sec.J
                 lines.append(f"section Fiber {tag} -GJ {gj:g} {{")
                 for entry in patches:

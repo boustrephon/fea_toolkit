@@ -225,9 +225,6 @@ results = builder.run_static_analysis()
 | — | `run_response_spectrum_analysis()` | Mode-by-mode RS with CQC/SRSS combination |
 | — | `run_static_analysis()` | Static solver with auto-retry algorithm chain |
 
-These analysis methods are also exposed on the ``AnalysisBuilder`` facade and
-are **identical** in behaviour to the legacy single‑stage builder.
-
 ---
 
 ## Phase 2 — Domain Build (`AnalysisBuilder.build_domain()`)
@@ -247,8 +244,8 @@ b.create_loads({"DEAD": 1.0})
 results = b.run_static_analysis()
 ```
 
-The legacy single‑stage path (``OpenSeesBuilder``) has been removed.
-All builds now use the two‑stage pipeline.
+All builds use the two‑stage pipeline (Preprocessor → AnalysisBuilder).
+The legacy single‑stage ``OpenSeesBuilder`` has been removed.
 
 ### Build order
   2a  │ ops.wipe()               │ ops.wipe()                      │

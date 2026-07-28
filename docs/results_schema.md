@@ -32,23 +32,23 @@ This means every NPZ array can be mapped 1:1 to an xarray DataArray.
 
 ## Canonical runtime contract
 
-The repository-owned general analysis/report engine should be the
+The repository-owned general analysis/report engine is the
 `generate_report()` entry point in [src/fea_toolkit/report.py](../src/fea_toolkit/report.py).
-That function is the canonical runtime contract for the v3 pipeline.
+That function is the canonical runtime contract for the two‑stage pipeline.
 
 Its responsibilities are to:
 
 1. accept already-parsed `SAPModelData` from the caller (parsing is caller-owned)
-2. preprocess the provided data once into a reusable `MeshModel`
-3. run the analysis cases through the `AnalysisManager` / `AnalysisBuilder`
-   path
-4. return a standard result dictionary
-5. let the result writer / serializer package the final data into the
-   unified NPZ schema
+2. run precondition checks (units, material defaults) on the input data
+3. preprocess the data once into a reusable `MeshModel` via the `Preprocessor`
+4. create an `AnalysisBuilder` for each analysis case from that `MeshModel`
+5. build the OpenSees domain via `build_domain()`, apply loads via
+   `create_loads()`, and run the analysis via the case‑specific runner
+6. return a standard result dictionary that the NPZ writer can consume
 
 In other words:
 
-- the shared `report` layer owns the generalised `run_all()` behaviour
+- the shared ``report`` layer owns the generalised ``run_all()`` behaviour
 - the local private Pumphouse wrapper (a project-specific script in the
   private ``local/`` directory) should call that shared entry point, not
   duplicate it

@@ -17,7 +17,7 @@ Each subpackage has a clear domain. Do not cross-contaminate:
 | Subpackage | Purpose |
 |---|---|
 | `model/` | Data models, dataclass hierarchies, geometry utilities. No OpenSees imports. |
-| `io/` | File I/O: parsing (`.s2k`, JSON), NPZ read/write, Tcl export, reporting. |
+| `io/` | File I/O: parsing (`.s2k`, JSON), NPZ read/write, reporting. |
 | `opensees/` | OpenSees domain construction and analysis execution. Imports `ops`. |
 | `analysis/` | Analysis orchestration (`manager.py`) and type-specific runners. |
 | `mesh/` | Mesh quality checks and Gmsh remeshing. Optional dependency. |

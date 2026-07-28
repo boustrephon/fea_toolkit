@@ -91,16 +91,18 @@ Key points:
 ```
 system BandGeneral
 constraints Transformation
-set dU_base [expr $targetDisp / $numSteps]
+set dU_base [expr abs($targetDisp) / $numSteps]
 set dU [expr $dU_base / 10.0]        # Gentle first step (1/10 of base)
+if {$targetDisp < 0} { set dU [expr -$dU] }
 
 test NormDispIncr 1.0e-3 200 0
 integrator DisplacementControl $ctrlNode $dof $dU
 analysis Static
 
 set currentDisp 0.0
+set sign [expr {$targetDisp >= 0 ? 1 : -1}]
 
-while {$currentDisp < $targetDisp} {
+while {[expr $sign * $currentDisp] < [expr $sign * $targetDisp]} {
     algorithm Newton
     set ok [analyze 1]
 
@@ -113,35 +115,44 @@ while {$currentDisp < $targetDisp} {
 
     # Fallback 2: ModifiedNewton (initial stiffness)
     if {$ok != 0} {
+        # Clamp dU back to base step size before changing algorithm
+        set dU [expr $sign * $dU_base]
+        integrator DisplacementControl $ctrlNode $dof $dU
         algorithm ModifiedNewton -initial
         set ok [analyze 1]
     }
-
-    # Fallback 3: Cut step size by 90% + repeat Newton
+    # Fallback 3: step-size halving
     if {$ok != 0} {
-        set dU [expr $dU * 0.1]
+        set dU0 $dU
+        while {$ok != 0} {
+            set dU [expr $dU / 2.0]
+            integrator DisplacementControl $ctrlNode $dof $dU
+            test NormDispIncr 1.0e-2 500 0
+            set ok [analyze 1]
+            if {abs($dU) < [expr $dU_base / 1024.0]} { break }
+        }
+        set dU [expr $sign * $dU_base]
         integrator DisplacementControl $ctrlNode $dof $dU
-        algorithm Newton
-        test NormDispIncr 1.0e-2 500 0
-        set ok [analyze 1]
     }
 
-    # Fallback 4: Minimal step + KrylovNewton with very relaxed norm
     if {$ok != 0} {
-        set dU [expr $dU_base / 100.0]
-        integrator DisplacementControl $ctrlNode $dof $dU
-        test NormDispIncr 1.0e-1 1000 0
-        algorithm KrylovNewton
-        set ok [analyze 1]
-    }
-
-    # Advance currentDisp only after a successful step
-    if {$ok == 0} {
-        set currentDisp [nodeDisp $ctrlNode $dof]
-    } else {
+        puts "ERROR: Pushover step failed at D = $currentDisp"
         break
     }
+
+    # Update current displacement from recorder file or node
+    if {[info exists ctrlNodeTag]} {
+        set currentDisp [nodeDisp $ctrlNodeTag $dof]
+    } else {
+        set currentDisp [expr $currentDisp + abs($dU)]
+    }
 }
+~~~~~~~
+
+Note: The ``sign`` variable ensures the termination check works for both
+positive and negative target displacements.  The ``dU`` clamping on the
+ModifiedNewton fallback resets the step size to the base value so the
+integrator does not accumulate tiny steps from the halving loop.
 ```
 
 Key points:

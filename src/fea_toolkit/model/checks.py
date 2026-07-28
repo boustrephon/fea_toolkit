@@ -190,14 +190,16 @@ def check_brace_buckling(
 
         # E_mod is guaranteed non-None by SAPModelData.apply_material_defaults(),
         # but manually-constructed fixtures may still have it as None.
-        E = mat.E_mod if (mat.E_mod or 0) > 0 else 2.0e11
+        from ..utils import DEFAULT_E_S_PA
+        E = mat.E_mod if (mat.E_mod or 0) > 0 else DEFAULT_E_S_PA
         I22 = (sec.I22 or 0) if (sec.I22 or 0) > 0 else (sec.I33 or 0)
         A = (sec.A or 0) if (sec.A or 0) > 0 else 1e-4
 
         # Skip elements with no positive moment of inertia — fabricating
         # a zero-based buckling result is misleading (division by zero
-        # later in slenderness and ratio).
-        if I22 <= 0 or A <= 0:
+        # later in slenderness and ratio).  A is clamped to 1e-4 above,
+        # so we only need to guard I22.
+        if I22 <= 0:
             continue
 
         P_cr = (math.pi ** 2 * E * I22) / ((K * L) ** 2)
@@ -498,14 +500,13 @@ def compute_asce41_hinge_length(
             db = 20.0  # fallback rebar diameter in mm
     else:
         # Steel: db = section depth in the loading direction (mm)
+        # ASCE 41-17 §9.3.3.2 uses overall section depth or OD for steel
+        # members — flange thickness (tf) and wall thickness (t) are not
+        # valid d_b terms.
         if (getattr(sec, 'depth', None) or 0) > 0:
             db = _to_mm(sec.depth)
         elif (getattr(sec, 'od', None) or 0) > 0:
             db = _to_mm(sec.od)
-        elif (getattr(sec, 'tf', None) or 0) > 0:
-            db = _to_mm(sec.tf)
-        elif (getattr(sec, 't', None) or 0) > 0:
-            db = _to_mm(sec.t)
         else:
             db = 20.0  # fallback in mm
 

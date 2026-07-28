@@ -589,9 +589,19 @@ load :math:`P_{cr} = \\pi^2 E I_{22} / (K L)^2` for selected braces.
 
 ### When to call it
 
-Call it **after building the model** but **before running the pushover**.
-It only needs the model data (section properties, material, geometry) —
-no OpenSees analysis required.
+Call it **after ``build_domain()``**, before ``create_loads()`` or any
+analysis run.  The method reads section properties and materials from the
+constructed domain — it does not require an OpenSees analysis, but the
+elements must exist so the frame tag map and section data are available.
+
+Example::
+
+    builder = AnalysisBuilder(mm, config)
+    builder.build_domain()
+    brace_selection = Selection(frame_type="Brace")
+    builder.check_brace_buckling(brace_selection)
+    builder.create_loads(...)
+    results = builder.run_pushover_analysis(...)
 
 ### Basic usage
 

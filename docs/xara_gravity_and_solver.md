@@ -147,8 +147,7 @@ When `export_shells=False`, the Tcl exporter must filter gravity and lateral loa
 3. **Krylov-Newton Algorithm**: Default `maxDim=3` means the tangent is reformed every 3 iterations. For large models (6,834 DOF → 6,000+ active), increasing `maxDim` to 10–20 improves convergence.
 
 ### Key recommendations adopted for the adaptive pushover chain:
-- `test NormDispIncr 1.0e-5 200 0` → initial Newton with 200 iterations
+- `test NormDispIncr 1.0e-3 200 0` → validated tolerance for Xara Tcl pushover loops (1.0e-5 recommended for gravity solver stage only)
 - `KrylovNewton` fallback with increased iterations (500)
 - `ModifiedNewton -initial` fallback (initial stiffness is the most robust)
 - Step-size halving when all algorithms fail
-- Future: consider `BeamWithHinges` element for very large models

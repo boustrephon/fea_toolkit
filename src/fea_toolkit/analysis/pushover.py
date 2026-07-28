@@ -90,21 +90,16 @@ class PushoverAnalysis(Analysis):
         self.brace_type = brace_type
         self.brace_sections = brace_sections
         self.rs_modal_base_shear = rs_modal_base_shear
-        # Call base init after instance attrs are set, then re-seed config
         super().__init__(mesh_model, name, config)
-        self.config = dict(self.defaults_for(self.material_type))
-        self.config.update(config or {})
 
     @classmethod
-    def defaults(cls, material_type: str = "steel") -> dict:
-        """Return default config for the given material type."""
-        if material_type == "rc":
-            return dict(_PUSHOVER_RC_DEFAULTS)
+    def defaults(cls) -> dict:
+        """Return default config (steel defaults)."""
         return dict(_PUSHOVER_STEEL_DEFAULTS)
 
-    @staticmethod
-    def defaults_for(material_type: str) -> dict:
-        """Instance-aware defaults lookup."""
+    @classmethod
+    def defaults_for(cls, material_type: str = "steel") -> dict:
+        """Material-type-specific defaults lookup."""
         if material_type == "rc":
             return dict(_PUSHOVER_RC_DEFAULTS)
         return dict(_PUSHOVER_STEEL_DEFAULTS)
@@ -200,12 +195,15 @@ class PushoverAnalysis(Analysis):
                 max_z = nd.z
                 control_node = nd.node_tag
 
-        # Determine direction index: X=0, Y=1, Z=2 (default X)
+        # Determine direction index: X=0, Y=1, Z=2 (default X) for lateral loads
         dir_index = 0
         if self.config.get("direction") == "Y":
             dir_index = 1
         elif self.config.get("direction") == "Z":
             dir_index = 2
+
+        # DOF for control node displacement (1=X, 2=Y, 3=Z) — follows dir_index+1
+        control_dof = dir_index + 1
 
         # Build lateral load pattern from mode 1 shape or uniform
         modal_data = self._modal_result.data
@@ -263,13 +261,14 @@ class PushoverAnalysis(Analysis):
                 load[dir_index] = 1.0
                 lateral_loads[nd.node_tag] = tuple(load)
 
-        # Gravity loads
+        # Gravity loads — use MeshModel's computed mass when available
         gravity_loads: Dict[int, tuple] = {}
         g = DEFAULT_GRAVITY_MS2
         for nd in mm.nodes.values():
             mass_val = getattr(nd, 'mass', None)
-            if mass_val is None:
-                mass_val = 1.0
+            if mass_val is None or mass_val <= 0.0:
+                # Skip nodes without a valid mass rather than fabricating 1.0
+                continue
             gravity_loads[nd.node_tag] = (0.0, 0.0, -mass_val * g)
 
         # RC config (overrides for fiber sections)
@@ -279,16 +278,15 @@ class PushoverAnalysis(Analysis):
 
         output_prefix = "pushover_rc"
 
-        # Generate Tcl suffix with recorder files
+        # Generate Tcl suffix with recorder files — DOF matches direction
         tcl_suffix = pushover_tcl(
             control_node=control_node,
-            dof=1,
+            dof=control_dof,
             max_disp=self.max_disp_val,
             num_steps=self.num_steps,
             lateral_loads=lateral_loads,
             gravity_loads=gravity_loads,
             adaptive=True,
-            output_prefix=output_prefix,
         )
 
         # Write Tcl script to output directory
@@ -301,6 +299,29 @@ class PushoverAnalysis(Analysis):
         # so recorder output files are written alongside ``model.tcl``.
         runner = XaraTclRunner()
         ret, output = runner.run(tcl_path)
+
+        # ── Validate return status ──
+        if ret != 0:
+            # Propagate failure without parsing outputs
+            return AnalysisResult(
+                name=self.name,
+                analysis_type="PushoverAnalysis",
+                data={
+                    "error": f"XaraTclRunner returned status {ret}",
+                    "output_raw": output,
+                    "output_dir": str(out_dir) if out_dir.exists() else None,
+                },
+                metadata={
+                    "material_type": "rc",
+                    "lateral_load_type": self.lateral_load_type,
+                    "max_disp_val": self.max_disp_val,
+                    "num_steps": self.num_steps,
+                    "tcl_path": None,
+                    "output_dir": None,
+                    "config": self.config,
+                    "error": f"runner returned {ret}",
+                },
+            )
 
         # ── Parse recorder output files ─────────────────────────────
         disp_path = str(out_dir / f"{output_prefix}_disp.out")
@@ -373,11 +394,15 @@ class PushoverAnalysis(Analysis):
                 "output_dir": str(out_dir),
             }
 
-        # Conditionally clean up
+        # Determine post-cleanup state for metadata
+        out_dir_removed = False
+        tcl_path_removed = False
         if not rc_config.get("keep_tcl", False) and not rc_config.get("keep_output", False):
             import shutil
             try:
                 shutil.rmtree(str(out_dir), ignore_errors=True)
+                out_dir_removed = True
+                tcl_path_removed = True
             except OSError:
                 pass
 
@@ -390,8 +415,8 @@ class PushoverAnalysis(Analysis):
                 "lateral_load_type": self.lateral_load_type,
                 "max_disp_val": self.max_disp_val,
                 "num_steps": self.num_steps,
-                "tcl_path": tcl_path if os.path.exists(tcl_path) else None,
-                "output_dir": str(out_dir) if out_dir.exists() else None,
+                "tcl_path": None if tcl_path_removed else (tcl_path if os.path.exists(tcl_path) else None),
+                "output_dir": None if out_dir_removed else (str(out_dir) if out_dir.exists() else None),
                 "config": self.config,
             },
         )

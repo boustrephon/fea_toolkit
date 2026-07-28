@@ -9,6 +9,7 @@ from ..utils import (
     DEFAULT_FY_REBAR_PA,
     DEFAULT_FC_PA,
     DEFAULT_E_S_PA,
+    DEFAULT_E_C_PA,
     DEFAULT_EPS_C,
     DEFAULT_EPS_CC,
     DEFAULT_G_MOD_FRAC,
@@ -1097,6 +1098,8 @@ def _force_factor_from_units(fu: str) -> float:
         'n': 1.0,
         'kn': 1000.0,
         'mn': 1000000.0,
+        'kgf': 9.80665,
+        'tonf': 9806.65,
         'lb': 4.448,
         'kip': 4448.0,
     }.get(fu, 1.0)
@@ -1244,9 +1247,15 @@ class SAPModelData:
         mdf = self.mass_density_factor
 
         for mat in self.materials.values():
-            # E_mod
+            is_concrete = mat.type and mat.type.lower() == "concrete"
+            is_steel = mat.type and mat.type.lower() in ("steel", "rebar", "tendon")
+
+            # E_mod — use concrete modulus for concrete, steel modulus otherwise
             if not mat.E_mod or mat.E_mod <= 0:
-                mat.E_mod = DEFAULT_E_S_PA / sf
+                if is_concrete:
+                    mat.E_mod = DEFAULT_E_C_PA / sf
+                else:
+                    mat.E_mod = DEFAULT_E_S_PA / sf
 
             # Fy — use rebar default for rebar/tendon, steel default otherwise
             if not mat.Fy or mat.Fy <= 0:
@@ -1255,24 +1264,34 @@ class SAPModelData:
                 else:
                     mat.Fy = DEFAULT_FY_STEEL_PA / sf
 
-            # Fc (concrete compressive strength)
-            if not mat.Fc or mat.Fc <= 0:
-                mat.Fc = DEFAULT_FC_PA / sf
+            # Fc (concrete compressive strength) — only for concrete materials
+            if is_concrete:
+                if not mat.Fc or mat.Fc <= 0:
+                    mat.Fc = DEFAULT_FC_PA / sf
 
             # G_mod — derive from E_mod via Poisson's ratio if missing
             if not mat.G_mod or mat.G_mod <= 0:
                 if mat.nu and abs(mat.nu) > 1e-12:
                     mat.G_mod = mat.E_mod / (2.0 * (1.0 + abs(mat.nu)))
                 else:
-                    mat.G_mod = DEFAULT_G_MOD_FRAC * mat.E_mod
+                    if is_concrete:
+                        mat.G_mod = DEFAULT_G_C_PA * (mat.E_mod / DEFAULT_E_C_PA if DEFAULT_E_C_PA > 0 else 1.0)
+                    else:
+                        mat.G_mod = DEFAULT_G_MOD_FRAC * mat.E_mod
 
             # unit_weight (N/m³ → model units)
             if not mat.unit_weight or abs(mat.unit_weight) < 1e-12:
-                mat.unit_weight = DEFAULT_RHO_WC_SI / wdf
+                if is_concrete:
+                    mat.unit_weight = DEFAULT_RHO_WC_SI / wdf
+                else:
+                    mat.unit_weight = DEFAULT_RHO_WS_SI / wdf
 
             # unit_mass (kg/m³ → model units)
             if not mat.unit_mass or abs(mat.unit_mass) < 1e-12:
-                mat.unit_mass = DEFAULT_RHO_MC_SI / mdf
+                if is_concrete:
+                    mat.unit_mass = DEFAULT_RHO_MC_SI / mdf
+                else:
+                    mat.unit_mass = DEFAULT_RHO_MS_SI / mdf
 
     # ── Utility methods ──────────────────────────────────────────
 

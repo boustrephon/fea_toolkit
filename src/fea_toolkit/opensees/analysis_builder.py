@@ -1359,7 +1359,7 @@ class AnalysisBuilder:
         # The Preprocessor returns (link_id, node_i, node_j, link_tag) tuples.
         # node_i and node_j are string node IDs — resolve to numeric tags.
         if self._offset_rigid_links:
-            if not hasattr(self, '_rigid_section_tag'):
+            if self._rigid_section_tag is None:
                 all_sec_tags = set(self.section_tags.values())
                 all_sec_tags.update(self._shell_sec_tags.values())
                 all_sec_tags.update(self._shell_sec_variants.values())
@@ -1619,6 +1619,7 @@ class AnalysisBuilder:
         next_tag = max(
             max((e.elem_tag for e in elements.values() if not e.inactive), default=0),
             max_ops_tag, max_rigid_tag,
+            max(self.frame_tag_map.values(), default=0),
         ) + 1
         # Separate counter for hinge section/material tags, seeded high
         # to avoid collision with existing tags.
@@ -3487,7 +3488,7 @@ class AnalysisBuilder:
             the equilibrium imbalance ``Δ = applied + reaction``
             (should be near zero for a correctly built model).
         """
-        import pandas as pd  # noqa: F401 — pandas is not a required dependency; the import is inside the method so it only fails when this specific method is called
+        import pandas as pd  # optional dependency — import is local to the method so it only fails when this specific method is called
 
         rows: list = []
         fu = self.mesh_model.units.get('F', '?')

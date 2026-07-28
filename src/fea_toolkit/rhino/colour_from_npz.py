@@ -17,7 +17,8 @@ Usage in Rhino's Python editor (or ``RunPythonScript``)::
     )
 
 The NPZ file must have been created by
-:meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.export_results_to_npz`.
+:meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.export_results`
+or :func:`~fea_toolkit.io.npz_writer.write_results_npz`.
 
 Matching logic
 --------------

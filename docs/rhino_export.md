@@ -448,6 +448,14 @@ static = builder.run_static_analysis()
 write_results_npz("results.npz", md, static_results=static)
 ```
 
+.. note::
+   The ``write_results_npz()`` invocation above exports **only** nodal
+   displacements and frame-element end forces by default.  To include
+   section-level integration-point results (``sec_*`` arrays), pass
+   ``section_results=True`` and/or ``fiber_results=True`` keyword
+   arguments to the builder's analysis runner, then pass the enriched
+   results dict to ``write_results_npz()``.
+
 **Inside Rhino** (load .npz and colour by results):
 
 ```python
