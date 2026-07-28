@@ -14,6 +14,8 @@ from .sap_data import (
     FrameElement, AreaElement, Group,
     FrameDistributedLoad, JointLoad, GravityLoad,
     AreaGravityLoad, AreaUniformLoad, MassSource, LoadPattern,
+    NDMaterial, LayeredShellSection,
+    FrameElementProperties, AreaElementProperties,
 )
 
 
@@ -100,6 +102,26 @@ class MeshModel:
     # applied.  This field exists for future Preprocessor→AnalysisBuilder
     # transfer of pre-built constraint arguments.
     edge_constraint_args: List[tuple] = field(default_factory=list)
+
+    # ── Resolved element creation properties ─────────────────────
+    # Populated by the Preprocessor from config (three-level resolution:
+    # per-ID override → selection group → role default).
+    frame_element_properties: Dict[str, FrameElementProperties] = field(default_factory=dict)
+    #   elem_id → FrameElementProperties
+    area_element_properties: Dict[str, AreaElementProperties] = field(default_factory=dict)
+    #   area_id → AreaElementProperties
+
+    # ── nD materials for layered shell sections ──────────────────
+    nd_materials: Dict[str, NDMaterial] = field(default_factory=dict)
+    #   material name → NDMaterial (resolved from config nd_materials dict)
+    layered_shell_sections: Dict[str, LayeredShellSection] = field(default_factory=dict)
+    #   section name → LayeredShellSection (resolved from config shell_layers)
+
+    # ── Diaphragm components (for rigidDiaphragm constraints) ────
+    # Each entry is a (z_level, [node_id, ...]) tuple representing
+    # one connected diaphragm component at a given storey.
+    diaphragm_components: List[tuple] = field(default_factory=list)
+    #   [(z_level, [master_node_id, slave_node_id, ...]), ...]
 
     # ── Loads-only area IDs (stiffness-free, mass-contributing) ──
     # Areas matching a loads-only selection are NOT created as shell
