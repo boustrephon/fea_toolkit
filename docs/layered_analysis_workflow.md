@@ -565,10 +565,11 @@ The work should be broken into the following tasks.
 - add placeholder entry points for nonlinear case realization in the builder
 - wire those cases into the report or manager path
 
-### Task 4 — Add the Tcl/Xara placeholder workflow
+### Task 4 — Tcl/Xara workflow
 
-- add a TODO-driven export path that writes a Tcl model
-- add a TODO-driven result import path that reads analysis results back into Python
+- ✅ Tcl export path implemented — `export_mesh_model_to_tcl()` in `opensees/recorder.py`
+- ⚠️ Result import path: analysis results are written to recorder output files (`.out`)
+  and parsed by `XaraTclRunner` — a generic import bridge is pending
 - keep the contract separated from the direct OpenSeesPy path
 
 ### Task 5 — Align the local v3 scripts

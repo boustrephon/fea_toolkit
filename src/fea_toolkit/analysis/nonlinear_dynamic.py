@@ -164,6 +164,31 @@ class NonlinearDynamicAnalysis(Analysis):
             runner = XaraTclRunner()
             ret, output = runner.run(tcl_path)
 
+            # ── Check return status ──
+            if ret != 0:
+                return AnalysisResult(
+                    name=self.name,
+                    analysis_type="NonlinearDynamicAnalysis",
+                    data={
+                        "times": np.array([]),
+                        "displacements": None,
+                        "envelope": None,
+                        "peak_drift": 0.0,
+                        "converged_steps": 0,
+                        "gm_file": self.ground_motion_file,
+                        "direction": self.direction,
+                        "output_raw": output,
+                        "return_code": ret,
+                    },
+                    metadata={
+                        "ground_motion_file": self.ground_motion_file,
+                        "direction": self.direction,
+                        "num_steps": self.num_steps,
+                        "dt": self.dt,
+                        "error": f"XaraTclRunner returned status {ret}",
+                    },
+                )
+
             # ── Parse output ──
             converged_steps = 0
             for line in output.splitlines():
@@ -196,8 +221,15 @@ class NonlinearDynamicAnalysis(Analysis):
                     pass
             # tmp_dir cleaned up on context exit
 
+        # Derive times from recorded data rows when available
+        if disp_data is not None and hasattr(disp_data, 'shape') and disp_data.ndim > 0:
+            n_rows = disp_data.shape[0]
+            times = np.arange(n_rows) * self.dt
+        else:
+            times = np.arange(self.num_steps) * self.dt
+
         result = {
-            "times": np.arange(self.num_steps) * self.dt,
+            "times": times,
             "displacements": disp_data,
             "envelope": env_data,
             "peak_drift": peak_drift,

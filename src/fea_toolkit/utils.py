@@ -70,12 +70,15 @@ def g_from_units(units: dict) -> float:
     return _G_SI * scale
 
 def length_scale_factor(units: dict) -> float:
-    """Compute the stress-unit scaling factor from model units.
+    """Compute the length-unit scaling factor from model units.
 
-    Length-like SI quantities (m) are converted from SI to 
+    Length-like SI quantities (m) are converted from SI to
     the model's unit system by multiplying by this factor:
 
         value_in_model_units = value_in_m * length_scale_factor(units)
+
+    Example: to convert 1.0 m to model units:
+        >> length_scale_factor({'L': 'mm'}) -> 1000.0  (1 m = 1000 mm)
 
     The factor is ``L_factor`` where:
 
