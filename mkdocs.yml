@@ -62,40 +62,40 @@ plugins:
 
 nav:
   - Home: README.md
-  - Documentation Index: docs/README.md
+  - Documentation Index: README.md
   - Core Pipeline:
-      - Analysis Workflow: docs/workflow.md
-      - Builder Reference: docs/builder_reference.md
-      - Layered Analysis Workflow: docs/layered_analysis_workflow.md
+      - Analysis Workflow: workflow.md
+      - Builder Reference: builder_reference.md
+      - Layered Analysis Workflow: layered_analysis_workflow.md
   - Analysis Types:
-      - Modal Analysis: docs/modal_analysis.md
-      - Pushover Analysis: docs/pushover_analysis.md
-      - Storey Response: docs/storey_response.md
-      - Report Generation: docs/report_generation.md
+      - Modal Analysis: modal_analysis.md
+      - Pushover Analysis: pushover_analysis.md
+      - Storey Response: storey_response.md
+      - Report Generation: report_generation.md
   - Model Features:
-      - Element Classification: docs/element_classification.md
-      - Element Splitting: docs/element_splitting.md
-      - Element Properties Config: docs/element_properties_config.md
-      - Shell Element Support: docs/shell_support.md
-      - Stiffness Factors: docs/stiffness_factors.md
-      - Constraint Edge Detection: docs/constraint_detection.md
+      - Element Classification: element_classification.md
+      - Element Splitting: element_splitting.md
+      - Element Properties Config: element_properties_config.md
+      - Shell Element Support: shell_support.md
+      - Stiffness Factors: stiffness_factors.md
+      - Constraint Edge Detection: constraint_detection.md
   - Export & Visualisation:
-      - Rhino 3-D Export: docs/rhino_export.md
-      - Tcl Export: docs/tcl_export.md
-      - Visualisation Toolkit: docs/viewer.md
-      - Results Schema: docs/results_schema.md
+      - Rhino 3-D Export: rhino_export.md
+      - Tcl Export: tcl_export.md
+      - Visualisation Toolkit: viewer.md
+      - Results Schema: results_schema.md
   - Tool-Specific Workflows:
-      - Xara/OpenSeesRT Tcl Runtime: docs/xara_tcl_runtime_guide.md
-      - Xara Pushover Workflow: docs/xara_pushover_workflow.md
-      - Xara Gravity & Solver: docs/xara_gravity_and_solver.md
+      - Xara/OpenSeesRT Tcl Runtime: xara_tcl_runtime_guide.md
+      - Xara Pushover Workflow: xara_pushover_workflow.md
+      - Xara Gravity & Solver: xara_gravity_and_solver.md
   - Planning:
-      - Migration Plan: docs/analysis_builder_migration_plan.md
-      - Development Notes: docs/dev_notes.md
+      - Migration Plan: analysis_builder_migration_plan.md
+      - Development Notes: dev_notes.md
   - API Reference:
-      - model: "src/fea_toolkit/model/"
-      - io: "src/fea_toolkit/io/"
-      - opensees: "src/fea_toolkit/opensees/"
-      - analysis: "src/fea_toolkit/analysis/"
-      - mesh: "src/fea_toolkit/mesh/"
-      - plotting: "src/fea_toolkit/plotting/"
-      - rhino: "src/fea_toolkit/rhino/"
+      - model: api/model.md
+      - io: api/io.md
+      - opensees: api/opensees.md
+      - analysis: api/analysis.md
+      - mesh: api/mesh.md
+      - plotting: api/plotting.md
+      - rhino: api/rhino.md
