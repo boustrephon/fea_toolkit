@@ -898,8 +898,13 @@ class LayeredShellSection:
         """Return the Tcl command to create this layered shell section.
 
         Emits ``section LayeredShell <tag> <nLayers>`` followed by
-        ``<matTag> <thickness> <nIP>`` for each layer, matching the
-        OpenSees convention (material tag before thickness).
+        ``<matTag> <thickness>`` for each layer.
+
+        .. note::
+
+           The OpenSees ``LayeredShell`` section syntax accepts only
+           ``(matTag, thickness)`` per layer — the ``nIP`` field on
+           :class:`ShellFiberLayer` is metadata for display purposes only.
 
         Args:
             tag: Integer tag for the section.
@@ -915,7 +920,7 @@ class LayeredShellSection:
         parts = [f"section LayeredShell {tag} {len(self.layers)}"]
         for layer in self.layers:
             mt = mat_tags[layer.nd_material]  # fail hard on missing material
-            parts.append(f"{mt} {layer.thickness:g} {layer.n_ip}")
+            parts.append(f"{mt} {layer.thickness:g}")
         return "   ".join(parts)
 
 

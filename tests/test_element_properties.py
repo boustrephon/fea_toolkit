@@ -1,11 +1,16 @@
-"""Test per-element creation property resolution.
+"""Test element property dataclasses and MeshModel field plumbing.
 
-These tests verify the data model dataclasses and the Preprocessor's
-three-level resolution logic, without requiring OpenSeesPy.
+Tests cover dataclass defaults/fields for FrameElementProperties,
+AreaElementProperties, NDMaterial, LayeredShellSection, and MeshModel
+field acceptance. Does NOT test the Preprocessor's three-level
+resolution (``_resolve_element_properties``) — see integration tests
+in ``test_workflows.py`` or add dedicated tests there.
 """
 
 import copy
 from dataclasses import dataclass
+
+import pytest
 
 from fea_toolkit.model.sap_data import (
     FrameElementProperties, AreaElementProperties,
@@ -101,7 +106,14 @@ class TestNDMaterial:
     def test_elastic_isotropic(self):
         mat = NDMaterial(name="concrete", material_type="ElasticIsotropic",
                          E=30e9, nu=0.2)
-        assert mat.to_tcl(1) == "nDMaterial ElasticIsotropic 1 3e+10 0.2"
+        tokens = mat.to_tcl(1).split()
+        # Token structure: nDMaterial ElasticIsotropic <tag> <E> <nu>
+        assert tokens[0] == "nDMaterial"          # command
+        assert tokens[1] == "ElasticIsotropic"     # material type
+        assert tokens[2] == "1"                    # tag (integer)
+        assert float(tokens[3]) == pytest.approx(30e9, rel=1e-12)  # E
+        assert float(tokens[4]) == pytest.approx(0.2, rel=1e-12)   # nu
+        assert len(tokens) == 5                    # 5 tokens total
 
     def test_concrete_s(self):
         mat = NDMaterial(name="concrete_s", material_type="ConcreteS",
@@ -131,15 +143,29 @@ class TestLayeredShellSection:
         sec = LayeredShellSection(name="Wall400", layers=layers)
         mat_tags = {"conc_unconfined": 1, "conc_confined": 2, "rebar_smeared": 3}
         tcl = sec.to_tcl(100, mat_tags)
-        assert "section LayeredShell" in tcl
-        assert "5" in tcl  # nLayers
-        assert "100" in tcl  # section tag
-        assert "0.05" in tcl  # layer thickness
+
+        # Parse the Tcl command into whitespace-delimited tokens.
+        tokens = tcl.split()
+        # Expected token sequence:
+        #   section LayeredShell <tag> <nLayers>
+        #   <matTag> <thickness>  (×5 layers — no nIP; nIP is metadata only)
+        expected = [
+            "section", "LayeredShell", "100", "5",
+            "1", "0.05",
+            "3", "0.002",
+            "2", "0.3",
+            "3", "0.002",
+            "1", "0.05",
+        ]
+        assert tokens == expected, (
+            f"Token mismatch\n  got:  {tokens}\n  want: {expected}"
+        )
+        # Also verify total token count.
+        assert len(tokens) == 4 + 5 * 2  # 4 header + 5 layers × 2 tokens each
 
     def test_missing_material(self):
         layers = [ShellFiberLayer(0.1, "missing_mat")]
         sec = LayeredShellSection(name="Bad", layers=layers)
-        import pytest
         with pytest.raises(KeyError):
             sec.to_tcl(10, {"other": 1})
 
