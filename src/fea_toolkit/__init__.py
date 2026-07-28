@@ -73,8 +73,16 @@ except importlib.metadata.PackageNotFoundError:
 
 
 def ops_version() -> str:
-    """Return the installed OpenSeesPy version string."""
-    return importlib.metadata.version("openseespy")
+    """Return the installed OpenSeesPy version string.
+
+    Returns:
+        Version string (e.g. ``"3.8.0.0"``) if openseespy is installed,
+        or ``"unknown (openseespy not installed)"`` otherwise.
+    """
+    try:
+        return importlib.metadata.version("openseespy")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown (openseespy not installed)"
 
 
 # ── Core model types ───────────────────────────────────────────────

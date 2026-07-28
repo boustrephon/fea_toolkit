@@ -800,6 +800,7 @@ class AreaElementProperties:
     thickness: Optional[float] = None
     nd_material_names: List[str] = field(default_factory=list)
     layer_stack: List["ShellFiberLayer"] = field(default_factory=list)
+    layered_section_group_key: Optional[str] = None
 
 
 @dataclass

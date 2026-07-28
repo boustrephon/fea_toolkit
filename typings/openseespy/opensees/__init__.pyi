@@ -784,6 +784,21 @@ def remove(obj_type: str, tag: int) -> None:
     ...
 
 @overload
+def remove(obj_type: str, nodeTag: int, dofTag: int) -> None:
+    """Remove a single-point constraint (``sp``) from all load patterns.
+
+    Usage::
+
+        ops.remove('sp', nodeTag, dofTag)
+
+    Args:
+        obj_type: ``'sp'``.
+        nodeTag: Node tag.
+        dofTag: DOF number (1‑based).
+    """
+    ...
+
+@overload
 def remove(obj_type: str, nodeTag: int, dofTag: int, patternTag: int) -> None:
     """Remove a single-point constraint (``sp``) from the domain.
 
