@@ -49,8 +49,9 @@ Its responsibilities are to:
 In other words:
 
 - the shared `report` layer owns the generalised `run_all()` behaviour
-- the local private Pumphouse wrapper in [local/CLP_BSDG_Latest_Models/Pumphouse](../local/CLP_BSDG_Latest_Models/Pumphouse) should call that
-  shared entry point, not duplicate it
+- the local private Pumphouse wrapper (a project-specific script in the
+  private ``local/`` directory) should call that shared entry point, not
+  duplicate it
 - the NPZ schema is the serialised output representation of that shared
   result dictionary
 

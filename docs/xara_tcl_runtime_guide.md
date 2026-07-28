@@ -14,9 +14,12 @@ output — the crash happens at the Tcl command execution level, before any
 `puts` output is flushed.
 
 **Use `system BandGeneral`** instead.  BandGeneral is a dense solver, so
-it is expensive for large models, but it is reliably compiled into every
-OpenSees build and will never segfault.  For models under ~2000 DOF
-(≈300–400 nodes, 6 DOF each) it is acceptable.
+it is expensive for large models, but it is reliably compiled into the
+tested Xara build (arm64, July 2026) and has been verified not to segfault
+with that specific binary.  Other OpenSees builds or versions may behave
+differently — add a startup capability check that tries the solver and
+fails fast if unavailable.  For models under ~2000 DOF (≈300–400 nodes,
+6 DOF each) BandGeneral is acceptable.
 
 | Solver | Xara? | Behaviour |
 |--------|-------|-----------|
@@ -95,6 +98,8 @@ test NormDispIncr 1.0e-3 200 0
 integrator DisplacementControl $ctrlNode $dof $dU
 analysis Static
 
+set currentDisp 0.0
+
 while {$currentDisp < $targetDisp} {
     algorithm Newton
     set ok [analyze 1]
@@ -128,6 +133,13 @@ while {$currentDisp < $targetDisp} {
         test NormDispIncr 1.0e-1 1000 0
         algorithm KrylovNewton
         set ok [analyze 1]
+    }
+
+    # Advance currentDisp only after a successful step
+    if {$ok == 0} {
+        set currentDisp [nodeDisp $ctrlNode $dof]
+    } else {
+        break
     }
 }
 ```
