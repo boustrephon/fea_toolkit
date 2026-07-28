@@ -7,8 +7,7 @@ increasingly demanding checks on a 3D RC cantilever wall:
   1. **Setup**  — geometry, Concrete01/Steel01 materials, fiber section,
                    dispBeamColumn element, PDelta transformation.
   2. **Gravity** — 500 kN load-controlled gravity analysis (10 substeps).
-  3. **Pushover** — displacement-controlled lateral push to 150 mm drift
-                   (skipped with ``--quick``).
+  3. **Pushover** — displacement-controlled lateral push to 150 mm drift.
 
 Plus additional smoke-tests that exercise other OpenSeesPy API surfaces
 used elsewhere in ``fea_toolkit``:
@@ -117,6 +116,7 @@ def _run_pushover(num_steps: int = 300):
     ops.analysis('Static')
     target = 150.0
     step = 0
+    current = 0.0
     while step < num_steps:
         ops.test('NormDispIncr', 1.0e-5, 200, 0)
         ops.algorithm('Newton')
@@ -139,6 +139,12 @@ def _run_pushover(num_steps: int = 300):
         step += 1
         if current >= target:
             break
+    else:
+        # while exhausted without break (step >= num_steps and target not reached)
+        raise RuntimeError(
+            f"Pushover failed to reach target {target:.1f} mm after {num_steps} "
+            f"steps (final displacement: {current:.1f} mm)"
+        )
     return step, ops.nodeDisp(2, 1)
 
 
@@ -331,12 +337,6 @@ def main():
         check(c, "Gravity analysis", False, str(exc))
     c += 1
 
-    if args.quick:
-        print()
-        print("═══ Quick verification passed ═══")
-        _wipe_model()
-        return 0
-
     # ── Check 3: Pushover ─────────────────────────────────────────────
     _wipe_model()
     _build_cantilever_model()
@@ -348,6 +348,12 @@ def main():
     except Exception as exc:
         check(c, "Pushover analysis", False, str(exc))
     c += 1
+
+    if not run_all:
+        print()
+        print("═══ Quick verification passed ═══")
+        _wipe_model()
+        return 0
 
     # ── Check 4: Elastic frame ────────────────────────────────────────
     print(f"{c}. Elastic frame element...", end=' ')
