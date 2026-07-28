@@ -1,0 +1,101 @@
+site_name: fea_toolkit
+site_description: FEA to OpenSees/Rhino conversion toolkit
+site_url: https://boustrephon.github.io/fea_toolkit/
+repo_url: https://github.com/boustrephon/fea_toolkit
+edit_uri: blob/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_category_heading: true
+            merge_init_into_class: true
+            separate_signature: true
+            show_signature_annotations: true
+  - gen-files:
+      scripts:
+        - docs/_generate_index.py
+
+nav:
+  - Home: README.md
+  - Documentation Index: docs/README.md
+  - Core Pipeline:
+      - Analysis Workflow: docs/workflow.md
+      - Builder Reference: docs/builder_reference.md
+      - Layered Analysis Workflow: docs/layered_analysis_workflow.md
+  - Analysis Types:
+      - Modal Analysis: docs/modal_analysis.md
+      - Pushover Analysis: docs/pushover_analysis.md
+      - Storey Response: docs/storey_response.md
+      - Report Generation: docs/report_generation.md
+  - Model Features:
+      - Element Classification: docs/element_classification.md
+      - Element Splitting: docs/element_splitting.md
+      - Element Properties Config: docs/element_properties_config.md
+      - Shell Element Support: docs/shell_support.md
+      - Stiffness Factors: docs/stiffness_factors.md
+      - Constraint Edge Detection: docs/constraint_detection.md
+  - Export & Visualisation:
+      - Rhino 3-D Export: docs/rhino_export.md
+      - Tcl Export: docs/tcl_export.md
+      - Visualisation Toolkit: docs/viewer.md
+      - Results Schema: docs/results_schema.md
+  - Tool-Specific Workflows:
+      - Xara/OpenSeesRT Tcl Runtime: docs/xara_tcl_runtime_guide.md
+      - Xara Pushover Workflow: docs/xara_pushover_workflow.md
+      - Xara Gravity & Solver: docs/xara_gravity_and_solver.md
+  - Planning:
+      - Migration Plan: docs/analysis_builder_migration_plan.md
+      - Development Notes: docs/dev_notes.md
+  - API Reference:
+      - model: "src/fea_toolkit/model/"
+      - io: "src/fea_toolkit/io/"
+      - opensees: "src/fea_toolkit/opensees/"
+      - analysis: "src/fea_toolkit/analysis/"
+      - mesh: "src/fea_toolkit/mesh/"
+      - plotting: "src/fea_toolkit/plotting/"
+      - rhino: "src/fea_toolkit/rhino/"

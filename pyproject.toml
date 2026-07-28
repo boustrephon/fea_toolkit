@@ -21,6 +21,12 @@ dependencies = [
 mesh-remesh = [
     "gmsh>=4.12",
     ]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.6",
+    "mkdocstrings[python]>=0.27",
+    "mkdocs-gen-files>=0.5",
+    ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
