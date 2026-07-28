@@ -1,3 +1,11 @@
+---
+title: "Tcl Export for Nonlinear Analysis"
+description: "Exporting models to standalone OpenSees Tcl scripts for nonlinear analysis and Xara/OpenSeesRT runtime."
+status: "complete"
+tags: [export, tcl, xara, opensees, scripting]
+category: [export-viz]
+related: [xara_tcl_runtime_guide.md, xara_pushover_workflow.md, xara_gravity_and_solver.md, pushover_analysis.md]
+---
 # Tcl Export for Nonlinear Analysis
 
 Nonlinear RC analysis (fiber sections with ``Concrete01/02``,

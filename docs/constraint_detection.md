@@ -1,3 +1,11 @@
+---
+title: "Constraint Edge Detection"
+description: "Detecting and applying edge constraints for shell element connectivity."
+status: "complete"
+tags: [shell, meshing, constraints, edge-detection]
+category: [model-features]
+related: [shell_support.md, element_splitting.md, builder_reference.md]
+---
 # Constraint Edge Detection
 
 Detects "tears" in the final meshed model where adjacent area elements have

@@ -1,3 +1,11 @@
+---
+title: "AnalysisBuilder Migration Plan"
+description: "Migration plan for the two-stage pipeline, superseding monolithic OpenSeesBuilder."
+status: "draft"
+tags: [architecture, migration, planning]
+category: [planning]
+related: [layered_analysis_workflow.md, workflow.md, dev_notes.md]
+---
 # AnalysisBuilder Migration Plan
 
 **Status:** ✅ **`OpenSeesBuilder` removal complete; ⚠️ remaining migration items pending**  

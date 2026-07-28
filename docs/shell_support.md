@@ -1,3 +1,11 @@
+---
+title: "Shell Element Support"
+description: "Shell element types, meshing strategies, and layered shell support for nonlinear wall analysis."
+status: "complete"
+tags: [shell, area-elements, meshing, elements]
+category: [model-features]
+related: [constraint_detection.md, element_classification.md, element_properties_config.md, builder_reference.md]
+---
 # Shell element support
 
 Shell elements (``ShellMITC4``) are created with

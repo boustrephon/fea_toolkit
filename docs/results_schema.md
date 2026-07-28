@@ -1,3 +1,11 @@
+---
+title: "Unified Results Schema — Design Proposal"
+description: "Design proposal for the unified NPZ results schema, the canonical on-disk exchange format."
+status: "draft"
+tags: [schema, npz, results, design-proposal, io]
+category: [export-viz]
+related: [report_generation.md, viewer.md, rhino_export.md, storey_response.md]
+---
 # Unified Results Schema — Design Proposal
 
 ## Motivation

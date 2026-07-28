@@ -1,3 +1,11 @@
+---
+title: "Report Generation — Design Proposal"
+description: "Design proposal for a YAML-driven report generation pipeline with HDF5 storage."
+status: "draft"
+tags: [reporting, design-proposal, yaml-config, hdf5]
+category: [analysis-types]
+related: [results_schema.md, pushover_analysis.md, modal_analysis.md]
+---
 # Report Generation — Design Proposal
 
 ## Overview

@@ -1,3 +1,11 @@
+---
+title: "Pushover (Non-linear Static) Analysis"
+description: "Pushover analysis: fiber sections, lumped hinges, brace buckling approaches, ADRS conversion, and CSM."
+status: "complete"
+tags: [analysis-type, pushover, nonlinear, fiber, hinges, brace, csm]
+category: [analysis-types]
+related: [modal_analysis.md, tcl_export.md, stiffness_factors.md, element_properties_config.md, storey_response.md]
+---
 # Pushover (Non‑linear Static) Analysis
 
 ## Overview
