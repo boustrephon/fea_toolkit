@@ -158,6 +158,11 @@ class AnalysisBuilder:
             ops.wipe()
             self._edge_constraint_method = None
             self._rigid_link_elems = {}
+            # Clear shell section tag maps so sections are recreated
+            # with fresh tags after ops.wipe().  ElasticMembranePlateSection
+            # cannot be overwritten at the same tag (unlike LayeredShell).
+            self._shell_sec_tags.clear()
+            self._shell_sec_variants.clear()
             # Reset cached rigid section tag so it is recomputed fresh
             self._rigid_section_tag = None
             ops.model('basic', '-ndm', 3, '-ndf', 6)

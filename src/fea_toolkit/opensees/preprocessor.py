@@ -1083,6 +1083,7 @@ class Preprocessor:
                         'layered_rc' if layer_stack else 'elastic'),
                     thickness=group_dict.get('thickness'),
                     layer_stack=layer_stack,
+                    layered_section_group_key=group_key,
                 )
                 area_groups.append((group_key, sel, props))
             else:
@@ -1109,6 +1110,7 @@ class Preprocessor:
                         'layered_rc' if layer_stack else 'elastic'),
                     thickness=od.get('thickness'),
                     layer_stack=layer_stack,
+                    layered_section_group_key=aid,
                 )
                 mesh_model.area_element_properties[aid] = props
                 _area_group_matched_ids.add(aid)

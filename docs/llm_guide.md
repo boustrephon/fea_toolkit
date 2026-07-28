@@ -78,7 +78,7 @@ builder = AnalysisBuilder(mesh, {}).build_domain()
 "Run response spectrum (CQC)"        → AnalysisBuilder(...).run_response_spectrum_analysis()
 "Run pushover"                       → AnalysisBuilder(...).run_pushover_analysis()
 "Run 4-direction pushover"           → from fea_toolkit.opensees import run_pushover_4dir
-"Compute seismic masses"             → builder.compute_seismic_masses(g=9.81)
+"Compute seismic masses (from units)" → from fea_toolkit.utils import g_from_units; builder.compute_seismic_masses(g=g_from_units(md.units))
 "Extract element RS forces"          → builder.extract_element_rs_forces()
 
 Returned dict keys for static:
@@ -265,7 +265,8 @@ from fea_toolkit import SAP2000Parser  # now works from repo root
 
 ### OpenSeesPy not found
 ```python
-from fea_toolkit import ops_version()
+from fea_toolkit import ops_version
+print(ops_version())
 # Returns e.g. "3.8.0.0"
 ```
 

@@ -31,7 +31,7 @@ The goal is to create a Python package `fea_toolkit` that:
 ## LLM / AI Assistant Quick Start
 
 This section is designed for **language model (LLM) assistants** working with
-this codebase.  For a full reference, see ``docs/llm_guide.md``.
+this codebase.  For a full reference, see [docs/llm_guide.md](docs/llm_guide.md).
 
 ### Canonical 4-line pipeline
 
