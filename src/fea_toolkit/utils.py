@@ -72,28 +72,28 @@ def g_from_units(units: dict) -> float:
 def length_scale_factor(units: dict) -> float:
     """Compute the stress-unit scaling factor from model units.
 
-    Length-like quantities (m) are converted to the model's unit system
-    by multiplying by this factor::
+    Length-like SI quantities (m) are converted from SI to 
+    the model's unit system by multiplying by this factor:
 
         value_in_model_units = value_in_m * length_scale_factor(units)
 
-    The factor is ``L_factor² ÷ F_factor`` where:
+    The factor is ``L_factor`` where:
 
     =======  =========
     Unit     L_factor
     =======  =========
     m        1.0
-    cm       0.01
-    mm       0.001
-    in       0.0254
-    ft       0.3048
+    cm       100.0
+    mm       1000.0
+    in       39.3701 = 1 / 0.0254
+    ft       3.28084 = 1 / 0.3048
     =======  =========
 
     Args:
-        units: Model units dict, e.g. ``{'L': 'm', 'F': 'N', 'T': 'C'}``.
+        units: target (model) units dict, e.g. ``{'L': 'm', 'F': 'N', 'T': 'C'}``.
 
     Returns:
-        Scaling factor to convert m to the model's length unit.
+        Scaling factor to convert SI (m) to the model's length unit.
     """
     u = units or {}
     lu = u.get('L', 'm')
@@ -110,11 +110,11 @@ def length_scale_factor(units: dict) -> float:
     lu_norm = _alias_L.get(lu.lower(), lu.lower()) if isinstance(lu, str) else 'm'
 
     L_factor = {
-        'm': 1.0,
-        'cm': 0.01,
-        'mm': 0.001,
-        'in': 0.0254,
-        'ft': 0.3048,
+        'm':  1.0,
+        'cm': 100.0,
+        'mm': 1000.0,
+        'in': 1 / 0.0254,
+        'ft': 1 / 0.3048,
     }.get(lu_norm, 1.0)
 
     return L_factor
@@ -122,10 +122,10 @@ def length_scale_factor(units: dict) -> float:
 def force_scale_factor(units: dict) -> float:
     """Compute the force-unit scaling factor from model units.
 
-    Stress-like quantities (N) are converted to the model's unit system
+    Force-like SI quantities (N) are converted to the model's unit system
     by multiplying by this factor::
 
-        value_in_model_units = value_in_N * force_scale_factor(units)
+        value_in_model_units = value_in_SI_N * force_scale_factor(units)
 
     The factor is ``F_factor`` where:
 
@@ -134,11 +134,11 @@ def force_scale_factor(units: dict) -> float:
     Unit     F_factor
     =======  ==========
     N        1.0
-    kN       1000.0
-    MN       1000000.0
-    kgf      9.80665
-    lb       4.448
-    kip      4448.0
+    kN       0.001
+    MN       0.000001
+    kgf      0.101972 = 1 / 9.80665
+    lbf      0.224809 = 1 / 4.44822
+    kipf     0.000224809 = 1 / 4448.22
     =======  ==========
 
     For example:
@@ -164,15 +164,15 @@ def force_scale_factor(units: dict) -> float:
         'pound': 'lb', 'pounds': 'lb', 'lbf': 'lb',
         'kip': 'kip', 'kips': 'kip', 'kipf': 'kip',
     }
-    fu_norm = _alias_F.get(fu.lower(), fu.lower()) if isinstance(fu, str) else 'n'
+    fu_norm = _alias_F.get(fu.lower(), fu.lower()).lower() if isinstance(fu, str) else 'n'
 
     F_factor = {
         'n': 1.0,
-        'kn': 1000.0,
-        'mn': 1000000.0,
-        'kgf': 9.80665,
-        'lb': 4.448,
-        'kip': 4448.0,
+        'kn': 0.001,
+        'mn': 0.000001,
+        'kgf': 1 / 9.80665,
+        'lb': 1 / 4.448,
+        'kip': 1 / 4448.0,
     }.get(fu_norm, 1.0)
 
     return F_factor
@@ -180,10 +180,10 @@ def force_scale_factor(units: dict) -> float:
 def mass_scale_factor(units: dict) -> float:
     """Compute the mass-unit scaling factor from model units.
 
-    Mass-like quantities (kg) are converted to the model's unit system
+    Mass-like SI quantities (kg) are converted to the model's unit system
     by multiplying by this factor::
 
-        value_in_model_units = value_in_kg * mass_scale_factor(units)
+        value_in_model_units = value_in_SI_kg * mass_scale_factor(units)
 
     The factor is ``M_factor`` where:
 
@@ -191,26 +191,25 @@ def mass_scale_factor(units: dict) -> float:
     =======  ==========
     Unit     M_factor
     =======  ==========
-    kg        1.0
-    tonne     1000.0
-    kt       1000000.0
-    lb       0.4536
-    kip      453.6
+    kg       1.0
+    tonne    0.001
+    kt       0.000001
+    hyl      0.101972 = 1 / 9.80665
+    lbm      2.20462
+    kipm     0.00220462
+    slug     0.0685218 = 1 / 14.59390
+    slinch   0.00571 = 1 / 175.127
+    blob     0.00571
     =======  ==========
-
-    For example:
-    - N, m   → 1.0² ÷ 1.0    = 1.0     (Pa → Pa)
-    - N, mm  → 0.001² ÷ 1.0  = 1e-6    (Pa → MPa = N/mm²)
-    - kN, mm → 0.001² ÷ 1000 = 1e-9    (Pa → kN/mm²)
 
     Args:
         units: Model units dict, e.g. ``{'L': 'm', 'F': 'N', 'T': 'C'}``.
 
     Returns:
-        Scaling factor to convert N to the model's force unit.
+        Scaling factor to convert mass SI units (kg) to the model's force unit.
     """
     u = units or {}
-    fu = u.get('F', 'kg')
+    fu = u.get('F', 'N')
     # Normalise
     _alias_F = {
         'newton': 'N', 'newtons': 'N',
@@ -220,7 +219,7 @@ def mass_scale_factor(units: dict) -> float:
         'pound': 'lb', 'pounds': 'lb', 'lbf': 'lb',
         'kip': 'kip', 'kips': 'kip', 'kipf': 'kip',
     }
-    fu_norm = _alias_F.get(fu.lower(), fu.lower()) if isinstance(fu, str) else 'n'
+    fu_norm = _alias_F.get(fu.lower(), fu.lower()).lower() if isinstance(fu, str) else 'n'
 
     lu = u.get('L', 'm')
 
@@ -245,18 +244,19 @@ def mass_scale_factor(units: dict) -> float:
 
     M_factor = {
         'kg': 1.0,
-        'kt': 1000.0,
-        'mt': 1000000.0,
-        'hyl': 9.80665,
-        'khyl': 9.80665*1000,
-        'glug': 9.80665 * 100.0,
-        'kglug': 9.80665 * 100000.0,
-        'lb': 4.448,
-        'kip': 4448.0,
-        'slug': 32.174,
-        'kiloslug': 32.174 * 1000.0,
-        'blob': 0.4536,
-        'kiloblob': 0.4536 * 1000.0,
+        'te': 0.001,
+        'kt': 0.000001,
+        'mt': 0.000000001,
+        'hyl': 1 / 9.80665,
+        'khyl': 1 / (9.80665*1000),
+        'glug': 10 / 9.80665,
+        'kglug': 10 / 1000 / 9.80665,
+        'lb': 2.20462,
+        'kip': 0.00220462,
+        'slug': 0.0685218,
+        'kiloslug': 0.0685218 / 1000.0,
+        'blob': 0.00571,
+        'kiloblob': 0.00571 / 1000.0,
     }.get(mu_norm, 1.0)
 
     return M_factor
@@ -264,20 +264,20 @@ def mass_scale_factor(units: dict) -> float:
 def stress_scale_factor(units: dict) -> float:
     """Compute the stress-unit scaling factor from model units.
 
-    Stress-like quantities (Pa) are converted to the model's unit system
+    Stress-like SI quantities (Pa) are converted to the model's unit system
     by multiplying by this factor::
 
         value_in_model_units = value_in_Pa * stress_scale_factor(units)
 
-    The factor is ``L_factor² ÷ F_factor`` where:
+    The factor is ``F_factor ÷ L_factor²`` where:
 
-    L_factor = length_scale_factor(units)
     F_factor = force_scale_factor(units)
+    L_factor = length_scale_factor(units)
 
     For example:
-    - N, m   → 1.0² ÷ 1.0    = 1.0     (Pa → Pa)
-    - N, mm  → 0.001² ÷ 1.0  = 1e-6    (Pa → MPa = N/mm²)
-    - kN, mm → 0.001² ÷ 1000 = 1e-9    (Pa → kN/mm²)
+    - N, m   → 1.0 ÷ 1.0²    = 1.0     (Pa → Pa)
+    - N, mm  → 1.0 ÷ 1000.0²  = 1e-6    (Pa → MPa = N/mm²)
+    - kN, mm → 0.001 ÷ 1000.0² = 1e-9    (Pa → kN/mm²)
 
     Args:
         units: Model units dict, e.g. ``{'L': 'm', 'F': 'N', 'T': 'C'}``.
@@ -289,7 +289,7 @@ def stress_scale_factor(units: dict) -> float:
     L_factor = length_scale_factor(units)
     F_factor = force_scale_factor(units)
 
-    return L_factor ** 2 / F_factor
+    return F_factor / L_factor ** 2
 
 def mass_density_scale_factor(units: dict) -> float:
     """Compute the unit-mass-unit scaling factor from model units.
@@ -297,60 +297,59 @@ def mass_density_scale_factor(units: dict) -> float:
     Unit-mass-like quantities (kg/m3) [M]/[L]^3 are converted to the model's unit system
     by multiplying by this factor::
 
-        value_in_model_units = value_in_kg_m3 * mass_density_scale_factor(units)
+        value_in_model_units = value_in_SI_kg_m3 * mass_density_scale_factor(units)
 
-    The factor is ``L_factor^3 ÷ M_factor`` where:
+    The factor is ``M_factor ÷ L_factor^3 `` where:
 
     L_factor = length_scale_factor(units)
     M_factor = mass_scale_factor(units)
 
     For example:
     - kg, m   → 1.0^3 ÷ 1.0    = 1.0     (kg/m^3 → kg/m^3)
-    - kg, mm  → 0.001^3 ÷ 1.0  = 1e-9    (kg/m^3 → kg/mm^3)
-    - tonne, mm → 0.001^3 ÷ 1000 = 1e-12    (kg/m^3 → tonne/mm^3)
+    - kg, mm  → 1.0 ÷ 1.0E3^3  = 1e-9    (kg/m^3 → kg/mm^3)
+    - tonne, mm → 0.001 ÷ 1.0E3^3 = 1e-12    (kg/m^3 → tonne/mm^3)
 
     Args:
         units: Model units dict, e.g. ``{'L': 'm', 'F': 'N', 'T': 'C'}``.
 
     Returns:
-        Scaling factor to convert Pa to the model's stress unit.
+        Scaling factor to convert kg/m3 to the model's mass density unit.
     """
 
-    L_factor = length_scale_factor(units)
     M_factor = mass_scale_factor(units)
+    L_factor = length_scale_factor(units)
 
-    return L_factor ** 3 / M_factor
+    return M_factor / L_factor ** 3 
 
 def weight_density_scale_factor(units: dict) -> float:
-    """Compute the unit-weightunit scaling factor from model units.
+    """Compute the SI unit-weight unit scaling factor from model units.
 
     Unit-mass-like quantities (N/m3) [F]/[L]^3 are converted to the model's unit system
     by multiplying by this factor::
 
         value_in_model_units = value_in_N_m3 * weight_density_scale_factor(units)
 
-    The factor is ``L_factor^3 ÷ F_factor`` where:
+    The factor is ``F_factor ÷ L_factor^3`` where:
 
-    L_factor = length_scale_factor(units)
     F_factor = force_scale_factor(units)
+    L_factor = length_scale_factor(units)
 
     For example:
-    - kg, m   → 1.0^3 ÷ 1.0    = 1.0     (kg/m^3 → kg/m^3)
-    - kg, mm  → 0.001^3 ÷ 1.0  = 1e-9    (kg/m^3 → kg/mm^3)
-    - tonne, mm → 0.001^3 ÷ 1000 = 1e-12    (kg/m^3 → tonne/mm^3)
+    - N, m   → 1.0 ÷ 1.0^3    = 1.0     (N/m^3 → N/m^3)
+    - N, mm  → 1.0 ÷ 1000.0^3  = 1e-9    (N/m^3 → N/mm^3)
+    - kN, mm → 0.001 ÷ 1000.0^3 = 1e-12    (N/m^3 → kN/mm^3)
 
     Args:
         units: Model units dict, e.g. ``{'L': 'm', 'F': 'N', 'T': 'C'}``.
 
     Returns:
-        Scaling factor to convert Pa to the model's stress unit.
+        Scaling factor to convert N/m3 to the model's weight density unit.
     """
 
-    L_factor = length_scale_factor(units)
     F_factor = force_scale_factor(units)
+    L_factor = length_scale_factor(units)
 
-    return L_factor ** 3 / F_factor
-
+    return F_factor / L_factor ** 3
 
 def deep_merge(base: dict, override: dict) -> dict:
     """Merge *override* into *base*.
