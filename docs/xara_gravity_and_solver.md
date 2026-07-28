@@ -137,7 +137,7 @@ All attempts with fiber sections (`create_fiber_sections: True`) timed out with 
 - **Fix:** removed the second copy.
 
 ### Key lesson: frame-only node filtering for gravity/lateral loads
-When `export_shells=False`, the gravity and lateral load dicts MUST be filtered to only include frame-connected nodes. This filtering is currently done in the admin/validation script (external to the library), not in `builder.py`.
+When `export_shells=False`, the Tcl exporter must filter gravity and lateral load entries to only include nodes that are actually exported (frame-connected nodes). This filtering is now applied centrally in the exporter rather than relying on external validation scripts. The exporter derives the set of exported nodes from the frame element connectivity, then rejects any load entry whose node is not in that set, while preserving load emission for all valid exported nodes.
 
 ## External Guidance on RC Pushover Convergence
 

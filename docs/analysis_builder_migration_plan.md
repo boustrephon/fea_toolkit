@@ -1,14 +1,20 @@
-# AnalysisBuilder Migration Plan — Complete
+# AnalysisBuilder Migration Plan
 
-**Status:** ✅ **Migration complete — `OpenSeesBuilder` deleted**  
+**Status:** ✅ **`OpenSeesBuilder` removal complete; ⚠️ remaining migration items pending**  
 **Last updated:** 2026-07-23  
 **Total test count:** 533
 
 ## Overview
 
 The `OpenSeesBuilder` class has been deleted from ``builder.py``.
-All features have been ported to ``AnalysisBuilder`` or to standalone
-module-level functions.
+All features that were part of the original builder have been ported to
+``AnalysisBuilder`` or to standalone module-level functions.
+
+**Note:** While the legacy ``OpenSeesBuilder`` deletion is complete,
+several migration items described later in this document (``AnalysisCaseSpec``
+for nonlinear OpenSeesPy cases, ``NonlinearDynamicAnalysis`` workflow
+alignment, and full ``AnalysisBuilder`` coverage for all nonlinear analysis
+types) remain pending. The table below summarises the ported features.
 
 Summary of ported features:
 
