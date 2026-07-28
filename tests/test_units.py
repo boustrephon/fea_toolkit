@@ -134,9 +134,9 @@ class TestMassScaleFactor:
         assert 1.0 * f == pytest.approx(0.001)
 
     def test_kn_mm_to_kg(self):
-        """1 kg in (kN,mm) → 1.0 kg."""
+        """1 kg in (kN,mm) → 1e-6 (F_factor=0.001, L_factor=1000)."""
         f = utils.mass_scale_factor({"F": "kN", "L": "mm"})
-        assert 1.0 * f == pytest.approx(1.0)
+        assert 1.0 * f == pytest.approx(1e-6)
 
     def test_kgf_m_to_kg(self):
         """1 kg in (kgf,m) → 0.10197162 hyl."""
@@ -144,9 +144,9 @@ class TestMassScaleFactor:
         assert 1.0 * f == pytest.approx(0.10197162)
 
     def test_kgf_cm_to_glug(self):
-        """1 kg in (kgf,m) → 0.10197162 glug."""
+        """1 kg in (kgf,cm) → F_factor / L_factor = (1/9.80665) / 100."""
         f = utils.mass_scale_factor({"F": "kgf", "L": "cm"})
-        assert 1.0 * f == pytest.approx(1.0197162)
+        assert 1.0 * f == pytest.approx(0.001019716)
 
     def test_lb_in_to_blob(self):
         """1 kg in (lb,in) → 0.00571 blob.
@@ -236,9 +236,9 @@ class TestMassDensityScaleFactor:
         assert 1.0 * f == pytest.approx(1.0)
 
     def test_kgf_cm_to_glug_cm3(self):
-        """1 kg/m³ in (kgf,cm) → 1.0197e-6 glug/cm^3"""
+        """1 kg/m³ in (kgf,cm) → M_factor / L_factor³ = (1/9.80665/100) / 100³"""
         f = utils.mass_density_scale_factor({"F": "kgf", "L": "cm"})
-        assert 1.0 * f == pytest.approx(1.019716e-6)
+        assert 1.0 * f == pytest.approx(1.019716e-09)
 
 
 class TestWeightDensityScaleFactor:

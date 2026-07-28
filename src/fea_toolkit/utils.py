@@ -166,6 +166,7 @@ def force_scale_factor(units: dict) -> float:
         'kilogramforce': 'kgf', 'kg': 'kgf',
         'pound': 'lb', 'pounds': 'lb', 'lbf': 'lb',
         'kip': 'kip', 'kips': 'kip', 'kipf': 'kip',
+        'tonneforce': 'tonf', 'tonf': 'tonf', 'ton': 'tonf',
     }
     fu_norm = _alias_F.get(fu.lower(), fu.lower()).lower() if isinstance(fu, str) else 'n'
 
@@ -174,6 +175,7 @@ def force_scale_factor(units: dict) -> float:
         'kn': 0.001,
         'mn': 0.000001,
         'kgf': 1 / 9.80665,
+        'tonf': 1 / 9806.65,
         'lb': 1 / 4.448,
         'kip': 1 / 4448.0,
     }.get(fu_norm, 1.0)
@@ -183,86 +185,41 @@ def force_scale_factor(units: dict) -> float:
 def mass_scale_factor(units: dict) -> float:
     """Compute the mass-unit scaling factor from model units.
 
-    Mass-like SI quantities (kg) are converted to the model's unit system
-    by multiplying by this factor::
+    Mass units are derived from the force-length-time (FLT) basis using
+    Newton's second law (F = m · a).  Since time is always seconds in
+    SAP2000/OpenSees, the acceleration factor equals the length factor::
 
-        value_in_model_units = value_in_SI_kg * mass_scale_factor(units)
+        M_factor = F_factor / L_factor
 
-    The factor is ``M_factor`` where:
+    where:
 
+        F_factor = force_scale_factor(units)   (SI N → model force unit)
+        L_factor = length_scale_factor(units)  (SI m → model length unit)
 
-    =======  ==========
-    Unit     M_factor
-    =======  ==========
-    kg       1.0
-    tonne    0.001
-    kt       0.000001
-    hyl      0.101972 = 1 / 9.80665
-    lbm      2.20462
-    kipm     0.00220462
-    slug     0.0685218 = 1 / 14.59390
-    slinch   0.00571 = 1 / 175.127
-    blob     0.00571
-    =======  ==========
+    This derivation ensures mass units are **consistent** with the
+    model's force, length, and time basis — the same system used by
+    SAP2000 internally.  For example:
+
+    =========== ======== =========== ==========
+    Force unit  Length   F_factor    M_factor
+    =========== ======== =========== ==========
+    N           m        1.0         1.0       (kg)
+    N           mm       1.0         0.001     (tonne)
+    kN          m        0.001       0.001     (tonne)
+    kN          mm       0.001       1e-6      (kg/tonne mix)
+    kgf         m        1/9.80665   1/9.80665 (hyl)
+    lb          in       1/4.448     1/39.37   (blob ≈ 5.71e-3)
+    Kip         ft       1/4448      1/3.2808  (kiloslug ≈ 6.85e-5)
+    =========== ======== =========== ==========
 
     Args:
         units: Model units dict, e.g. ``{'L': 'm', 'F': 'N', 'T': 'C'}``.
 
     Returns:
-        Scaling factor to convert mass SI units (kg) to the model's force unit.
+        Scaling factor to convert SI mass (kg) to model mass units:
+        ``model_mass = SI_kg * mass_scale_factor(units)``.
     """
-    u = units or {}
-    fu = u.get('F', 'N')
-    # Normalise
-    _alias_F = {
-        'newton': 'N', 'newtons': 'N',
-        'kilonewton': 'kN', 'kilonewtons': 'kN',
-        'meganewton': 'MN', 'meganewtons': 'MN',
-        'kilogramforce': 'kgf', 'kg': 'kgf',
-        'pound': 'lb', 'pounds': 'lb', 'lbf': 'lb',
-        'kip': 'kip', 'kips': 'kip', 'kipf': 'kip',
-    }
-    fu_norm = _alias_F.get(fu.lower(), fu.lower()).lower() if isinstance(fu, str) else 'n'
-
-    lu = u.get('L', 'm')
-
-    # Normalise
-    _alias_L = {
-        'meter': 'm', 'meters': 'm', 'metre': 'm', 'metres': 'm',
-        'centimeter': 'cm', 'centimeters': 'cm', 'centimetre': 'cm',
-        'millimeter': 'mm', 'millimeters': 'mm', 'millimetre': 'mm',
-        'foot': 'ft', 'feet': 'ft',
-        'inch': 'in', 'inches': 'in',
-    }
-
-    lu_norm = _alias_L.get(lu.lower(), lu.lower()) if isinstance(lu, str) else 'm'
-
-    m_dict = {('n','m'): 'kg', ('n','mm'): 'te', ('kn','m'): 'te', ('kn','mm'): 'kg',
-              ('mn','m'): 'mt', ('mn','mm'): 'te', ('lb','in'): 'blob', ('lb','ft'): 'slug',
-              ('kip','in'): 'kiloblob', ('kip','ft'): 'kiloslug', ('kipf','in'): 'kiloblob',
-              ('kipf','ft'): 'kiloslug', ('lbf', 'in'): 'blob', ('lbf', 'ft'): 'slug',
-              ('kgf', 'm'): 'hyl', ('tonf', 'm'): 'khyl', ('tonf', 'mm'): 'hyl',
-              ('kgf', 'cm'): 'glug', ('tonf', 'cm'): 'kglug',}
-    mu_norm = m_dict.get((fu_norm.lower(), lu_norm.lower()), 'kg')
-
-    M_factor = {
-        'kg': 1.0,
-        'te': 0.001,
-        'kt': 0.000001,
-        'mt': 0.000000001,
-        'hyl': 1 / 9.80665,
-        'khyl': 1 / (9.80665*1000),
-        'glug': 10 / 9.80665,
-        'kglug': 10 / 1000 / 9.80665,
-        'lb': 2.20462,
-        'kip': 0.00220462,
-        'slug': 0.0685218,
-        'kiloslug': 0.0685218 / 1000.0,
-        'blob': 0.00571,
-        'kiloblob': 0.00571 / 1000.0,
-    }.get(mu_norm, 1.0)
-
-    return M_factor
+    return force_scale_factor(units) / length_scale_factor(units)
 
 def stress_scale_factor(units: dict) -> float:
     """Compute the stress-unit scaling factor from model units.
