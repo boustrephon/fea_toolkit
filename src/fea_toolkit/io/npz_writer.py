@@ -17,23 +17,61 @@ Usage::
 
 import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import numpy as np
 
 from .results_schema import make_static_key
 from ..model.sap_data import SAPModelData
 
+if TYPE_CHECKING:
+    from ..model.mesh_model import MeshModel
 
-def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
-    """Extract model geometry arrays from SAPModelData."""
+
+def _collect_geometry(
+    md: SAPModelData,
+    mesh_model: Optional["MeshModel"] = None,
+) -> Dict[str, np.ndarray]:
+    """Extract model geometry arrays from SAPModelData.
+
+    When *mesh_model* is provided, its post-processing node tags
+    and shell element connectivity are used instead of the raw
+    ``SAPModelData`` — this gives correct (split/meshed) shell
+    geometry for NPZ files written after the preprocessor has run.
+
+    Args:
+        md: Parsed SAP2000 model data.
+        mesh_model: Optional MeshModel with post-processed topology.
+            When provided, uses ``mesh_model.nodes``,
+            ``mesh_model.frame_elements``,
+            ``mesh_model.area_elements``,
+            ``mesh_model.frame_assignments``, and
+            ``mesh_model.area_assignments`` for all geometry
+            extraction (frames *and* shells).
+    """
     arrays: Dict[str, np.ndarray] = {}
+
+    # ── Resolve source dicts ──────────────────────────────────────
+    # Use MeshModel when available (post-split/mesh topology).
+    _nodes = mesh_model.nodes if mesh_model is not None else md.nodes
+    _frame_elements = (mesh_model.frame_elements
+                       if mesh_model is not None
+                       else md.frame_elements)
+    _area_elements = (mesh_model.area_elements
+                      if mesh_model is not None
+                      else md.area_elements)
+    _frame_assignments = (mesh_model.frame_assignments
+                          if mesh_model is not None
+                          else md.frame_assignments)
+    _area_assignments = (mesh_model.area_assignments
+                         if mesh_model is not None
+                         else md.area_assignments)
 
     # Nodes
     node_tags = []
     node_sap_ids = []
     node_x, node_y, node_z = [], [], []
-    for nid, nd in md.nodes.items():
+    for nid, nd in _nodes.items():
         node_tags.append(nd.node_tag)
         node_sap_ids.append(str(nid))
         node_x.append(nd.x)
@@ -55,27 +93,27 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
     # Include inactive parents so split children reference the actual interval.
     parent_lookup: Dict[str, tuple] = {}  # parent_id -> (t_locations, child_ids)
     parent_endpoints: Dict[str, tuple] = {}  # parent_id -> (parent_node_i_tag, parent_node_j_tag)
-    for eid, elem in md.frame_elements.items():
+    for eid, elem in _frame_elements.items():
         if elem.t_locations and elem.child_ids:
             parent_lookup[eid] = (elem.t_locations, elem.child_ids)
         if getattr(elem, 'inactive', False):
             # Record parent endpoints for collapse_to_parents visualisation
-            p_ni = md.nodes.get(elem.node_i)
-            p_nj = md.nodes.get(elem.node_j)
+            p_ni = _nodes.get(elem.node_i)
+            p_nj = _nodes.get(elem.node_j)
             if p_ni and p_nj:
                 parent_endpoints[eid] = (p_ni.node_tag, p_nj.node_tag)
 
-    for eid, elem in md.frame_elements.items():
+    for eid, elem in _frame_elements.items():
         if getattr(elem, 'inactive', False):
             continue
-        ni = md.nodes.get(elem.node_i)
-        nj = md.nodes.get(elem.node_j)
+        ni = _nodes.get(elem.node_i)
+        nj = _nodes.get(elem.node_j)
         if ni is None or nj is None:
             continue
         frame_eid.append(len(frame_eid))
         frame_sap_id.append(str(eid))
         frame_parent_sap_id.append(str(elem.parent_id) if elem.parent_id else "")
-        sec = md.frame_assignments.get(eid, "")
+        sec = _frame_assignments.get(eid, "")
         frame_sec_name.append(sec)
         frame_ni.append(ni.node_tag)
         frame_nj.append(nj.node_tag)
@@ -120,7 +158,7 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
     # Shell elements (quad only)
     shell_eid, shell_sap_id, shell_sec_name, shell_parent_sap_id = [], [], [], []
     s1, s2, s3, s4 = [], [], [], []
-    for aid, area in md.area_elements.items():
+    for aid, area in _area_elements.items():
         if getattr(area, 'inactive', False):
             continue
         if len(area.node_ids) < 3:
@@ -128,7 +166,7 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
         nids = area.node_ids[:4]
         tags = []
         for nid in nids:
-            nd = md.nodes.get(nid)
+            nd = _nodes.get(nid)
             if nd is None:
                 break
             tags.append(nd.node_tag)
@@ -139,7 +177,7 @@ def _collect_geometry(md: SAPModelData) -> Dict[str, np.ndarray]:
             tags.append(tags[-1])
         shell_eid.append(len(shell_eid))
         shell_sap_id.append(str(aid))
-        sec2 = md.area_assignments.get(aid, "")
+        sec2 = _area_assignments.get(aid, "")
         shell_sec_name.append(sec2)
         s1.append(tags[0])
         s2.append(tags[1])
@@ -288,6 +326,7 @@ def write_results_npz(
     shell_forces: Optional[Dict[str, Dict[str, Any]]] = None,
     force_unit: str = "kN",
     length_unit: str = "m",
+    mesh_model: Optional["MeshModel"] = None,
 ) -> str:
     """Write a unified NPZ file with model geometry + analysis results.
 
@@ -301,6 +340,12 @@ def write_results_npz(
         shell_forces: Dict from ``extract_static_shell_forces()``.
         force_unit: Force unit string for metadata.
         length_unit: Length unit string for metadata.
+        mesh_model: Optional post-processed ``MeshModel``. When provided,
+            geometry arrays (nodes, frame elements, shell elements) are
+            extracted from ``mesh_model`` instead of ``md``, giving
+            correct split/meshed topology for visualisation.
+            Pass the same ``MeshModel`` that was passed to the
+            ``AnalysisBuilder``.
 
     Returns:
         Absolute path to the saved file.
@@ -308,7 +353,7 @@ def write_results_npz(
     arrays: Dict[str, np.ndarray] = {}
 
     # Geometry
-    arrays.update(_collect_geometry(md))
+    arrays.update(_collect_geometry(md, mesh_model))
 
     # Analysis types present
     analysis_types = []
