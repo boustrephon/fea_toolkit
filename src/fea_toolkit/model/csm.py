@@ -124,6 +124,210 @@ def pushover_to_adrs(
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Bilinearisation methods
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def bilinearize_stiffness_change(
+    S_d_arr: np.ndarray,
+    S_a_arr: np.ndarray,
+    config: Optional[Dict[str, Any]] = None,
+) -> Tuple[float, float, str]:
+    """Bilinearise a capacity curve via secant stiffness-change detection.
+
+    Yield is detected at the first point where the secant stiffness drops
+    below a fraction of the initial elastic stiffness, *or* where a single
+    step shows a large relative drop.  Intended for structures with a clear
+    yield point (e.g. brace buckling, well-defined section yielding).
+
+    Args:
+        S_d_arr: Spectral displacements (m), positive.
+        S_a_arr: Spectral accelerations (m/s²), positive.
+        config: Optional dict with keys:
+
+            * ``threshold`` — absolute fraction of K_init (default 0.50).
+            * ``min_relative_drop`` — single-step threshold (default -0.30).
+            * ``peak_idx`` — forced peak index (auto-detected if ``None``).
+
+    Returns:
+        Tuple ``(S_dy, S_ay, method_name)``.
+    """
+    cfg = dict(config or {})
+    threshold = cfg.get('threshold', 0.50)
+    min_relative_drop = cfg.get('min_relative_drop', -0.30)
+    peak_idx = cfg.get('peak_idx')
+
+    if peak_idx is None:
+        peak_idx = int(np.argmax(S_a_arr))
+
+    if peak_idx < 1 or len(S_d_arr) < 2:
+        return float(S_d_arr[0]), float(S_a_arr[0]), 'stiffness_change'
+
+    # Initial elastic stiffness from first 20% of points
+    n_el = max(3, len(S_d_arr) // 5)
+    K_init = float(np.polyfit(S_d_arr[:n_el], S_a_arr[:n_el], 1)[0])
+
+    secant_k = S_a_arr / np.maximum(S_d_arr, 1e-12)
+    K_init_ref = secant_k[1] if len(secant_k) > 1 else K_init
+    if K_init_ref < 1e-12:
+        K_init_ref = K_init
+
+    # Criterion A: absolute threshold
+    abs_threshold = threshold * K_init_ref
+    change_idx: Optional[int] = None
+    for i in range(1, len(secant_k)):
+        if secant_k[i] < abs_threshold:
+            change_idx = i
+            break
+
+    # Criterion B: relative drop in one step
+    if change_idx is None and len(secant_k) > 2:
+        rel_drops = np.diff(secant_k[1:]) / np.maximum(secant_k[1:-1], 1e-12)
+        worst = int(np.argmin(rel_drops))
+        if rel_drops[worst] < min_relative_drop:
+            change_idx = worst + 2  # +1 for step 0, +1 for diff index
+
+    if change_idx is not None and change_idx < peak_idx:
+        S_dy = float(S_d_arr[change_idx])
+        S_ay = float(S_a_arr[change_idx])
+    else:
+        # No clear stiffness change — return peak (no yield detected)
+        S_dy = float(S_d_arr[peak_idx])
+        S_ay = float(S_a_arr[peak_idx])
+
+    return S_dy, S_ay, 'stiffness_change'
+
+
+def bilinearize_equal_energy(
+    S_d_arr: np.ndarray,
+    S_a_arr: np.ndarray,
+    config: Optional[Dict[str, Any]] = None,
+) -> Tuple[float, float, str]:
+    """Bilinearise a capacity curve using the ATC-40 equal-energy method.
+
+    Finds the yield point that preserves the area under the capacity
+    curve up to the peak.  Suitable for structures with gradual yielding
+    or no single stiffness-change event.
+
+    Args:
+        S_d_arr: Spectral displacements (m), positive.
+        S_a_arr: Spectral accelerations (m/s²), positive.
+        config: Optional dict with keys:
+
+            * ``initial_guess`` — fraction of S_d_peak (default 0.3).
+            * ``tolerance`` — area error tolerance (default 0.001).
+            * ``max_iter`` — max iterations (default 100).
+            * ``peak_idx`` — forced peak index (auto-detected if ``None``).
+
+    Returns:
+        Tuple ``(S_dy, S_ay, method_name)``.
+    """
+    cfg = dict(config or {})
+    initial_guess = cfg.get('initial_guess', 0.3)
+    tolerance = cfg.get('tolerance', 0.001)
+    max_iter = cfg.get('max_iter', 100)
+    peak_idx = cfg.get('peak_idx')
+
+    if peak_idx is None:
+        peak_idx = int(np.argmax(S_a_arr))
+
+    if peak_idx < 1 or len(S_d_arr) < 2:
+        return float(S_d_arr[0]), float(S_a_arr[0]), 'equal_energy'
+
+    S_d_peak = float(S_d_arr[peak_idx])
+    S_a_peak = float(S_a_arr[peak_idx])
+
+    # Initial elastic stiffness from first 20% of points
+    n_el = max(3, len(S_d_arr) // 5)
+    K_init = float(np.polyfit(S_d_arr[:n_el], S_a_arr[:n_el], 1)[0])
+
+    area_actual = float(np.trapezoid(S_a_arr[:peak_idx + 1], S_d_arr[:peak_idx + 1]))
+
+    S_dy = S_d_peak * initial_guess
+    for _ in range(max_iter):
+        S_ay = K_init * S_dy
+        A1 = 0.5 * S_ay * S_dy
+        A2 = S_ay * (S_d_peak - S_dy)
+        A3 = 0.5 * (S_a_peak - S_ay) * (S_d_peak - S_dy)
+        area_bilin = A1 + A2 + A3
+        err = (area_bilin - area_actual) / max(area_actual, 1e-12)
+        if abs(err) < tolerance:
+            break
+        S_dy *= (1.0 - err * 0.5)
+        S_dy = max(float(S_d_arr[0]), min(S_dy, S_d_peak))
+
+    S_ay = max(K_init * S_dy,
+               float(S_a_arr[1]) if len(S_a_arr) > 1 else float(S_a_arr[0]))
+
+    # Sanity: if yield is >90% of peak, the curve is essentially
+    # linear — reset to peak (mu = 1).
+    if S_dy >= 0.90 * S_d_peak:
+        S_dy = S_d_peak
+        S_ay = S_a_peak
+
+    return S_dy, S_ay, 'equal_energy'
+
+
+def bilinearize_composite(
+    S_d_arr: np.ndarray,
+    S_a_arr: np.ndarray,
+    config: Optional[Dict[str, Any]] = None,
+) -> Tuple[float, float, str]:
+    """Composite bilinearisation: stiffness-change primary, equal-energy fallback.
+
+    Tries :func:`bilinearize_stiffness_change` first.  If the result
+    yields at the peak (no stiffness change detected), falls back to
+    :func:`bilinearize_equal_energy`.  Applies a sanity clamp that
+    S_dy must be at least 10 % of the peak displacement.
+
+    Args:
+        S_d_arr: Spectral displacements (m), positive.
+        S_a_arr: Spectral accelerations (m/s²), positive.
+        config: Optional dict passed through to each sub-method.
+
+    Returns:
+        Tuple ``(S_dy, S_ay, method_name)`` where *method_name* is
+        ``'composite_stiffness_change'`` or ``'composite_equal_energy'``.
+    """
+    cfg = dict(config or {})
+    peak_idx = cfg.get('peak_idx')
+    if peak_idx is None:
+        peak_idx = int(np.argmax(S_a_arr))
+    cfg['peak_idx'] = peak_idx
+
+    # Try stiffness-change first
+    S_dy, S_ay, _ = bilinearize_stiffness_change(S_d_arr, S_a_arr, cfg)
+
+    S_d_peak = float(S_d_arr[peak_idx])
+    S_a_peak = float(S_a_arr[peak_idx])
+
+    if S_dy >= 0.90 * S_d_peak:
+        # No clear yield — fall back to equal-energy
+        S_dy, S_ay, _ = bilinearize_equal_energy(S_d_arr, S_a_arr, cfg)
+        method = 'composite_equal_energy'
+    else:
+        method = 'composite_stiffness_change'
+
+    # Sanity clamp: yield must be at least 10% of peak displacement
+    min_S_dy = 0.10 * S_d_peak if peak_idx > 1 else float(S_d_arr[0])
+    if S_dy < min_S_dy:
+        # Interpolate S_a at the minimum yield displacement
+        if min_S_dy <= S_d_arr[0]:
+            S_dy = min_S_dy
+            S_ay = float(S_a_arr[0])
+        else:
+            S_ay = float(np.interp(min_S_dy, S_d_arr, S_a_arr))
+            S_dy = min_S_dy
+
+    return S_dy, S_ay, method
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Performance point calculation
+# ═══════════════════════════════════════════════════════════════════════════
+
+
 def compute_performance_point(
     pushover_results: Dict[str, Any],
     modal_results: Dict[str, Any],
@@ -135,6 +339,8 @@ def compute_performance_point(
     damping_ratio: float = 0.05,
     max_iter: int = 50,
     tol: float = 0.01,
+    bilinearize_method: str = 'composite',
+    bilinearize_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Find the performance point using the Capacity Spectrum Method (CSM).
 
@@ -156,6 +362,10 @@ def compute_performance_point(
         damping_ratio: Elastic damping ratio (default 0.05).
         max_iter: Maximum iterations for secant convergence.
         tol: Convergence tolerance on S_d (relative).
+        bilinearize_method: One of ``'composite'`` (default),
+            ``'stiffness_change'``, or ``'equal_energy'``.
+        bilinearize_config: Optional dict passed to the bilinearisation
+            function.
 
     Returns:
         Dict with keys:
@@ -168,6 +378,7 @@ def compute_performance_point(
         * ``'mu'`` — ductility demand.
         * ``'converged'`` — whether the iteration converged.
         * ``'S_dy'``, ``'S_ay'`` — bilinear yield point.
+        * ``'bilinearize_method'`` — name of the method actually used.
         * ``'capacity_adrs'`` — the full ADRS curve (dict with ``'S_a'``,
           ``'S_d'``).
     """
@@ -194,86 +405,16 @@ def compute_performance_point(
     best_mode = adrs.get('best_mode', 0)
     control_disp = np.array(pushover_results.get('control_disp', [0]))[mask]
     base_shear = np.array(pushover_results.get('base_shear', [0]))[mask]
-    total_mass = M_eff  # effective modal mass for first mode
 
     # 2. Bilinearise the capacity spectrum (find yield point)
-    #
-    # Two methods are used:
-    #
-    #   a) **Stiffness-change detection** (primary) — finds the first
-    #      point where secant stiffness drops below 50% of the initial
-    #      elastic stiffness.  This directly captures brace buckling or
-    #      section yielding onset.
-    #
-    #   b) **Equal-energy method** (fallback) — standard ATC-40
-    #      bilinearisation that preserves area under the curve.  Used
-    #      only when stiffness-change detection finds no clear yield
-    #      (e.g. an almost-linear pushover response).
-    #
-    peak_idx = np.argmax(S_a_arr)
-    S_d_peak = S_d_arr[peak_idx]
-    S_a_peak = S_a_arr[peak_idx]
-
-    # Initial elastic stiffness from first 20% of points
-    n_el = max(3, len(S_d_arr) // 5)
-    K_init = np.polyfit(S_d_arr[:n_el], S_a_arr[:n_el], 1)[0]
-
-    # --- Stiffness-change detection ---
-    secant_k = S_a_arr / np.maximum(S_d_arr, 1e-12)
-    # Find the first point where secant stiffness drops below 50% of
-    # the initial elastic stiffness (secant_k[1], the first valid
-    # step).  Use the relative drop between consecutive steps as a
-    # complementary criterion for cases where the drop is dramatic
-    # but stays just above 50% (e.g. brace buckling: 52.7 → 27.1).
-    K_init_ref = secant_k[1] if len(secant_k) > 1 else K_init
-    if K_init_ref < 1e-12:
-        K_init_ref = K_init
-
-    # Criterion A: absolute threshold at 50% of initial
-    threshold = 0.50 * K_init_ref
-    change_idx = None
-    for i in range(1, len(secant_k)):
-        if secant_k[i] < threshold:
-            change_idx = i
-            break
-
-    # Criterion B: maximum relative drop (≥30% in one step)
-    if change_idx is None and len(secant_k) > 2:
-        rel_drops = np.diff(secant_k[1:]) / np.maximum(secant_k[1:-1], 1e-12)
-        worst = np.argmin(rel_drops)  # most negative relative change
-        if rel_drops[worst] < -0.30:
-            change_idx = int(worst) + 2  # +1 for step 0, +1 for diff index
-
-    if change_idx is not None and change_idx < peak_idx:
-        # Use stiffness-change point as the yield
-        S_dy = float(S_d_arr[change_idx])
-        S_ay = float(S_a_arr[change_idx])
-    else:
-        # No clear stiffness change — fall back to equal-energy
-        area_actual = np.trapezoid(
-            S_a_arr[:peak_idx + 1], S_d_arr[:peak_idx + 1])
-
-        S_dy = S_d_peak * 0.3  # initial guess
-        for _ in range(100):
-            S_ay = K_init * S_dy
-            A1 = 0.5 * S_ay * S_dy
-            A2 = S_ay * (S_d_peak - S_dy)
-            A3 = 0.5 * (S_a_peak - S_ay) * (S_d_peak - S_dy)
-            area_bilin = A1 + A2 + A3
-            err = (area_bilin - area_actual) / area_actual
-            if abs(err) < 0.001:
-                break
-            S_dy *= (1.0 - err * 0.5)
-            S_dy = max(S_d_arr[0], min(S_dy, S_d_peak))
-
-        S_ay = max(K_init * S_dy,
-                    S_a_arr[1] if len(S_a_arr) > 1 else S_a_arr[0])
-
-        # Sanity: if yield is >90% of peak, the curve is essentially
-        # linear — no yielding occurred.  Reset to peak (mu = 1).
-        if S_dy >= 0.90 * S_d_peak:
-            S_dy = S_d_peak
-            S_ay = S_a_peak
+    _bilin_map = {
+        'composite': bilinearize_composite,
+        'stiffness_change': bilinearize_stiffness_change,
+        'equal_energy': bilinearize_equal_energy,
+    }
+    _bilin_fn = _bilin_map.get(bilinearize_method, bilinearize_composite)
+    S_dy, S_ay, _bilin_name = _bilin_fn(
+        S_d_arr, S_a_arr, config=bilinearize_config)
 
     # 3. Capacity spectrum demand method (secant iteration)
     T_spec = np.array(spectrum_periods)
@@ -283,7 +424,11 @@ def compute_performance_point(
     modal_periods = modal_results.get('periods', [])
     best_mode_period = modal_periods[best_mode] if best_mode < len(modal_periods) else 1.0
 
+    peak_idx = int(np.argmax(S_a_arr))
+    S_d_peak = float(S_d_arr[peak_idx])
+
     S_d_trial = S_d_peak * 0.2  # start at 20% of peak
+    S_dp = S_d_trial  # default in case loop completes without convergence
     converged = False
     prev_S_d = S_d_trial
     stall_count = 0
@@ -399,6 +544,7 @@ def compute_performance_point(
         'iterations': len(history),
         'S_dy': S_dy,
         'S_ay': S_ay,
+        'bilinearize_method': _bilin_name,
         'Gamma': Gamma,
         'M_eff': M_eff,
         'capacity_adrs': {'S_a': S_a_arr.tolist(), 'S_d': S_d_arr.tolist()},
