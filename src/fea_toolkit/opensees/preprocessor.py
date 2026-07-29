@@ -33,6 +33,9 @@ from ..model.sap_data import (
     FrameElementProperties, AreaElementProperties,
     NDMaterial, ShellFiberLayer, LayeredShellSection,
 )
+from ..utils import (
+    stress_scale_factor, scale_material_dict,
+)
 from dataclasses import fields
 
 
@@ -963,8 +966,18 @@ class Preprocessor:
         # ── Resolve nD materials from config dicts ───────────────
         nd_mat_config = config.get('nd_materials', {})
         _nd_field_names = {f.name for f in fields(NDMaterial)}
+        # Scale stress-valued fields from SI Pa to model units
+        ssf = stress_scale_factor(model_data.units)
         for mat_name, mat_dict in nd_mat_config.items():
+            invalid_keys = [k for k in mat_dict if k not in _nd_field_names]
+            if invalid_keys:
+                raise ValueError(
+                    f"Invalid key(s) in nd_materials['{mat_name}']: "
+                    f"{invalid_keys}.  Accepted fields: {sorted(_nd_field_names)}"
+                )
             kwargs = {k: v for k, v in mat_dict.items() if k in _nd_field_names}
+            # Scale stress-valued fields (SI Pa → model stress units)
+            kwargs = scale_material_dict(kwargs, model_data.units, stress_scale=ssf)
             kwargs.setdefault('name', mat_name)
             mesh_model.nd_materials[mat_name] = NDMaterial(**kwargs)
 
