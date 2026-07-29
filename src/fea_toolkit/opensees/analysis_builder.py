@@ -158,10 +158,19 @@ class AnalysisBuilder:
             ops.wipe()
             self._edge_constraint_method = None
             self._rigid_link_elems = {}
-            # Clear shell section tag maps so sections are recreated
-            # with fresh tags after ops.wipe().  ElasticMembranePlateSection
-            # cannot be overwritten at the same tag (unlike LayeredShell).
-            self._shell_sec_tags.clear()
+            # Reset skipped-material/section sets so supported materials
+            # and sections can recover across rebuilds.
+            self._skipped_nd_materials = set()
+            self._skipped_shell_sec_names = set()
+            # Clear non-LayeredShell tags from shell section tag maps so
+            # ElasticMembranePlateSection types are recreated with fresh tags
+            # (they cannot be overwritten at the same tag).  LayeredShell
+            # sections *can* be overwritten after ops.wipe(), so preserve
+            # their tags for lookup-based stability across builds.
+            _layered_names = set(self.mesh_model.layered_shell_sections.keys())
+            for k in list(self._shell_sec_tags):
+                if k not in _layered_names:
+                    del self._shell_sec_tags[k]
             self._shell_sec_variants.clear()
             # Reset cached rigid section tag so it is recomputed fresh
             self._rigid_section_tag = None
@@ -925,6 +934,8 @@ class AnalysisBuilder:
         if not self.mesh_model.nd_materials:
             return
 
+        import warnings as _w
+
         _max_mat = max(self.material_tags.values(), default=0)
         _max_sec = max(self.section_tags.values(), default=0)
         _max_frame = max(self.frame_tag_map.values(), default=0)
@@ -934,28 +945,40 @@ class AnalysisBuilder:
         created = 0
         for name, nd_mat in self.mesh_model.nd_materials.items():
             t = nd_mat.material_type
+
+            # Reuse existing tag if already assigned for this name,
+            # keeping tags stable across repeated build_domain calls.
+            if name in self.material_tags:
+                current_tag = self.material_tags[name]
+                is_new = False
+            else:
+                current_tag = tag
+                is_new = True
+
             if t == "ElasticIsotropic":
-                ops.nDMaterial('ElasticIsotropic', tag, nd_mat.E, nd_mat.nu)
+                ops.nDMaterial('ElasticIsotropic', current_tag, nd_mat.E, nd_mat.nu)
             elif t == "J2PlateFibre":
-                ops.nDMaterial('J2PlateFibre', tag, nd_mat.E, nd_mat.nu,
+                ops.nDMaterial('J2PlateFibre', current_tag, nd_mat.E, nd_mat.nu,
                                nd_mat.fy, nd_mat.Hiso, nd_mat.Hkin)
             elif t == "ConcreteS":
-                ops.nDMaterial('ConcreteS', tag, nd_mat.E, nd_mat.nu,
+                ops.nDMaterial('ConcreteS', current_tag, nd_mat.E, nd_mat.nu,
                                nd_mat.fc, nd_mat.ft, nd_mat.Es)
             elif t == "PlateFromPlaneStress":
-                print(f"  ⚠ PlateFromPlaneStress not yet supported for '{name}' — "
-                      f"data model missing wrapped-material and Eout fields — skipping")
+                _w.warn(f"PlateFromPlaneStress not yet supported for '{name}' — "
+                        f"data model missing wrapped-material and Eout fields — skipping",
+                        UserWarning, stacklevel=2)
                 self._skipped_nd_materials.add(name)
                 continue
             else:
-                import warnings as _w
                 _w.warn(f"Unknown nDMaterial type '{t}' for '{name}' — skipping",
                         UserWarning, stacklevel=2)
                 self._skipped_nd_materials.add(name)
                 continue
-            self.material_tags[name] = tag
-            tag += 1
-            created += 1
+
+            self.material_tags[name] = current_tag
+            if is_new:
+                tag += 1
+                created += 1
 
         if self.config.get('verbose', False):
             print(f"  Created {created} nD material(s)")
@@ -1028,15 +1051,18 @@ class AnalysisBuilder:
             flat_args = []
             skip_section = False
             for layer in lss.layers:
+                # Check skipped set first — this catches stale tags from
+                # a previous build where a now-skipped material still has
+                # a tag in self.material_tags.
+                if layer.nd_material in self._skipped_nd_materials:
+                    print(f"  ⚠ nD material '{layer.nd_material}' for "
+                          f"layered section '{name}' was skipped during "
+                          f"material creation (unsupported type) — "
+                          f"skipping section '{name}'")
+                    skip_section = True
+                    break
                 mat_tag = self.material_tags.get(layer.nd_material)
                 if mat_tag is None:
-                    if layer.nd_material in self._skipped_nd_materials:
-                        print(f"  ⚠ nD material '{layer.nd_material}' for "
-                              f"layered section '{name}' was skipped during "
-                              f"material creation (unsupported type) — "
-                              f"skipping section '{name}'")
-                        skip_section = True
-                        break
                     if self.config.get('verbose', False):
                         print(f"  ⚠ nD material '{layer.nd_material}' not found "
                               f"for layered section '{name}' — skipping section")
