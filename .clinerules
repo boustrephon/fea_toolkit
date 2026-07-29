@@ -2,6 +2,10 @@
 
 > Generated 2026-07-24 from a full audit of `src/`, `tests/`, `examples/`,
 > `docs/`, `pyproject.toml`, and `.gitignore`.
+>
+> **LLM assistants**: Read `docs/llm_guide.md` first — it distills the rules
+> below into a shorter, task-oriented format. Then return here for detail
+> as needed.
 
 
 ## 1. Package Layout & Directory Conventions
@@ -170,9 +174,18 @@ New analysis code must follow this pattern. Do NOT add analysis methods to the p
 - When renaming public functions, keep a thin `_`-prefixed wrapper that delegates to the new name.
 - Mark as `# ── Legacy aliases ──` with a comment.
 
-### 4.6 Unit handling
-- `SAPModelData.units` is a `{"F": "N", "L": "m", "T": "C"}` dict.
-- Any function that does physics (gravity, forces, moments) must derive `g` from this dict via `g_from_units()`.
+### 4.6 Unit handling (critical — the toolkit is unit-agnostic)
+- `SAPModelData.units` is a `{"F": "N", "L": "m", "T": "C"}` dict. The OpenSees model
+  is built in the **same consistent units as the input model** (typically read from a
+  SAP2000 `.s2k` file).
+- **Never hardcode physical constants**: gravity (`g`), material moduli (E),
+  strengths (fy, fc), density — all must derive from the model data or from
+  `g_from_units(units)`.
+- When any function does physics, inspect `model.units` before calculating.
+- Material properties defined in `local/` scripts must match the input model's unit
+  system — do not assume a particular unit set.
+- If in doubt, the OpenSees domain should be in the same units as the `.s2k` input,
+  and all derived quantities must be unit-consistent with that system.
 - Never hardcode `9.81` — always route through `g_from_units(units)`.
 
 ### 4.7 Status notation in documentation
@@ -306,3 +319,5 @@ cleared between attempts.
 8. **Do not** skip `ops.wipe()` cleanup in test fixtures — global state persists across tests.
 9. **Do not** hardcode gravitational acceleration `9.81` — always use `g_from_units(units)`.
 10. **Do not** add topology mutations to `AnalysisBuilder` — it reads `MeshModel` as frozen input only.
+11. **Do not** write a new function without first searching `src/fea_toolkit/` and
+    `src/fea_toolkit/__init__.py` for an existing implementation.
