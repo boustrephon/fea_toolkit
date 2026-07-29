@@ -60,27 +60,36 @@ The NPZ file stores **both** identifiers for every node:
 | `frame_node_i` / `frame_node_j` | Frame endpoint tags (int) | `999` |
 | `shell_node_1` .. `shell_node_4` | Shell vertex tags (int) | `1001` |
 
-**Critical point**: Shell connectivity arrays (`shell_node_1..4`) store
-**integer tags**, not SAP IDs.  The node coordinate dict in the mesh data
-is indexed by **string SAP ID**.  This creates a lookup mismatch that must
-be resolved by searching through node tag values.
-
-## Why This Bugged (the Shell Visualisation Fix)
-
-The `_resolve_mesh_data()` function in `plotting/viz.py` builds a node dict
-keyed by SAP ID:
+**Dual-keyed access**: Since the `_resolve_mesh_data()` fix, the node dict
+stores **both** identifiers — nodes are keyed by both the SAP-ID string
+**and** the integer tag:
 
 ```python
-data["nodes"]["area-1_sub_0_node_1"] = {"tag": 999, "x": 0.0, "y": 0.0, "z": 3.0}
+node_entry = {"tag": 999, "x": 0.0, "y": 0.0, "z": 3.0}
+data["nodes"]["area-1_sub_0_node_1"] = node_entry
+data["nodes"][999] = node_entry          # same entry, int key
 ```
 
-When the NPZ shell arrays contain `shell_node_1 = 999`, a direct lookup
-`data["nodes"].get(999)` returns `None` — the key is `"area-1_sub_0_node_1"`,
-not `999`.
+This means both lookup paths immediately succeed:
 
-Frame elements avoid this because `_resolve_frame_node()` has a tag-search
-fallback.  Shell elements had no such fallback — hence the fix:
-`_resolve_shell_node()`.
+* ``data["nodes"].get("area-1_sub_0_node_1")`` → the node dict
+* ``data["nodes"].get(999)`` → the **same** node dict
+
+Frame endpoints (``frame_node_i`` / ``frame_node_j``) are resolved by
+``_resolve_frame_node()``, which tries ``ni_id``/``nj_id`` (string key)
+first, then falls back to ``ni_tag``/``nj_tag`` (int key).  With the
+dual-keyed dict the tag-based fallback now succeeds immediately.
+
+Shell vertices (``shell_node_1..4``) are resolved by
+``_resolve_shell_node()``, which tries the string key first, then int
+conversion, then a tag-value scan.  With the dual-keyed dict the
+tag-based access succeeds on the first attempt for valid nodes.
+
+**Important**: When iterating ``data["nodes"]`` for rendering (point
+clouds, markers, labels), callers must deduplicate by the ``tag`` field
+to avoid rendering the same physical node twice (once via its SAP-ID
+key and once via its integer-tag key).  Functions like ``_render_scene``
+and ``plot_deformed_displacement_3d`` now perform this deduplication.
 
 ## The Naming Convention
 

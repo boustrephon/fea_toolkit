@@ -563,7 +563,12 @@ def compute_performance_point(
         'stiffness_change': bilinearize_stiffness_change,
         'equal_energy': bilinearize_equal_energy,
     }
-    _bilin_fn = _bilin_map.get(bilinearize_method, bilinearize_composite)
+    if bilinearize_method not in _bilin_map:
+        raise ValueError(
+            f"Unknown bilinearize_method '{bilinearize_method}'. "
+            f"Expected one of {list(_bilin_map.keys())}."
+        )
+    _bilin_fn = _bilin_map[bilinearize_method]
     S_dy, S_ay, _bilin_name = _bilin_fn(
         S_d_arr, S_a_arr, config=bilinearize_config)
 
