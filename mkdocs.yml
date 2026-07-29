@@ -91,6 +91,7 @@ nav:
       - Xara Gravity & Solver: xara_gravity_and_solver.md
   - Planning:
       - Migration Plan: analysis_builder_migration_plan.md
+      - Deprecation Plan: deprecation_plan.md
       - Development Notes: dev_notes.md
   - API Reference:
       - model: api/model.md
