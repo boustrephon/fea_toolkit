@@ -1037,8 +1037,16 @@ def _render_scene(plotter, data, *,
 
     # ── Nodes ───────────────────────────────────────────────────
     if show_nodes:
+        # Deduplicate by tag: NPZ nodes may be dual-keyed (SAP ID + int tag)
+        seen_tags = set()
+        unique_nodes = []
+        for n in nodes.values():
+            tag = n.get("tag")
+            if tag is not None and tag not in seen_tags:
+                seen_tags.add(tag)
+                unique_nodes.append(n)
         npts = np.array([[n["x"], n["y"], n["z"]]
-                         for n in nodes.values() if _in_limits([n["x"], n["y"], n["z"]])])
+                         for n in unique_nodes if _in_limits([n["x"], n["y"], n["z"]])])
         if len(npts):
             plotter.add_mesh(pv.PolyData(npts), color='black',
                              point_size=6, render_points_as_spheres=True)
@@ -1613,7 +1621,13 @@ def plot_deformed_displacement_3d(
     if color_nodes:
         node_pts = []
         node_disp = []
+        seen_tags = set()
         for nid, nd in nodes.items():
+            tag = nd.get("tag")
+            if tag is not None and tag not in seen_tags:
+                seen_tags.add(tag)
+            else:
+                continue
             d = displacements.get(nd["tag"], (0.0, 0.0, 0.0))
             mag = math.hypot(d[0], d[1], d[2])
             node_pts.append([nd["x"], nd["y"], nd["z"]])
@@ -1642,7 +1656,13 @@ def plot_deformed_displacement_3d(
         label_scale = 1000.0 if label_unit == "mm" else 1.0
         label_suffix = label_unit
         labeled = []
+        seen_tags = set()
         for nid, nd in nodes.items():
+            tag = nd.get("tag")
+            if tag is not None and tag not in seen_tags:
+                seen_tags.add(tag)
+            else:
+                continue
             d = displacements.get(nd["tag"], (0.0, 0.0, 0.0))
             mag = math.hypot(d[0], d[1], d[2])
             if mag > label_threshold:
@@ -1963,8 +1983,7 @@ def plot_mode_3d(
                 shell_mesh.points = nsm.points
             plotter.render()
 
-        n_iter = max(30, int(30 * anim_speed))
-        plotter.add_timer_event(3600, n_iter, callback) # ~1 hour at 60ms per tick (effectively continuous)
+        plotter.add_timer_event(max_steps=3600, duration=60, callback=callback)
         plotter.add_text(f"Mode {mode + 1}{period_str}  (oscillating)",
                          position='upper_edge', font_size=font_size)
     else:
@@ -2121,9 +2140,13 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
 
     # ── Undeformed shells ──
     if show_original:
-        # Inactive (parent) quad overlays
+        # Inactive (parent) quad overlays — shrink consistently with active shells
         if inactive_shell_quads:
             for quad_pts in inactive_shell_quads:
+                if shrink:
+                    arr = np.array(quad_pts)
+                    c = np.mean(arr, axis=0)
+                    quad_pts = arr + (c - arr) * shrink
                 face = pv.PolyData(quad_pts, faces=[4, 0, 1, 2, 3])
                 plotter.add_mesh(face, color='lightgrey', opacity=0.12,
                                  show_edges=True, edge_color='grey', line_width=0.5)
@@ -2210,8 +2233,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
             if shell_mesh is not None and nsm is not None and nsm.n_points:
                 shell_mesh.points = nsm.points
 
-        n_iter = max(30, int(30 * anim_speed))
-        plotter.add_timer_event(3600, n_iter, callback)
+        plotter.add_timer_event(max_steps=3600, duration=60, callback=callback)
         plotter.show(auto_close=False)
     else:
         plotter.show()
