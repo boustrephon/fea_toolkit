@@ -321,3 +321,4 @@ cleared between attempts.
 10. **Do not** add topology mutations to `AnalysisBuilder` — it reads `MeshModel` as frozen input only.
 11. **Do not** write a new function without first searching `src/fea_toolkit/` and
     `src/fea_toolkit/__init__.py` for an existing implementation.
+12. **Do not** define material strength or modulus values (`E`, `fc`, `fy`, `Es`, `Hiso`, `Hkin`, etc.) without using the project's unit-scaling infrastructure. Express materials in **SI (Pa)** and let the framework scale them via `scale_material_dict()` or the Preprocessor's automatic `nd_materials` scaling. Hand-converting to model-specific units (e.g. kPa for kN-m models) will silently produce 1000× over-strength and prevent yielding.

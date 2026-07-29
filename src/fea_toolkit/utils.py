@@ -311,6 +311,47 @@ def weight_density_scale_factor(units: dict) -> float:
 
     return F_factor / L_factor ** 3
 
+# ── Known stress-valued material property keys (SI canonical values → model units) ──
+_STRESS_KEYS: frozenset = frozenset({
+    'E', 'Es', 'Ec', 'G',            # elastic moduli
+    'fc', 'ft', 'fcu',                # concrete strengths
+    'fy', 'fyh', 'fu',                # steel strengths
+    'Hiso', 'Hkin',                   # hardening moduli
+})
+
+
+def scale_material_dict(
+    mat_dict: dict,
+    units: dict,
+    stress_scale: Optional[float] = None,
+) -> dict:
+    """Scale stress-valued fields in a material dict from SI Pa to model units.
+
+    Returns a new dict with stress fields multiplied by
+    ``stress_scale_factor(units)``.  Non-stress fields (Poisson's ratio,
+    density, strain values, string flags) are passed through unchanged.
+
+    Args:
+        mat_dict: Material property dict, e.g. ``{"E": 200e9, "nu": 0.3, "fy": 400e6}``.
+        units: Model units dict, e.g. ``{"F": "kN", "L": "m"}``.
+        stress_scale: Pre-computed factor (optional); computed from
+            ``stress_scale_factor(units)`` if ``None``.
+
+    Returns:
+        New dict with stress fields scaled to model units.
+    """
+    ssf = stress_scale if stress_scale is not None else stress_scale_factor(units)
+    if abs(ssf - 1.0) < 1e-15:
+        return dict(mat_dict)  # SI → SI, no scaling needed
+    result = {}
+    for k, v in mat_dict.items():
+        if isinstance(v, (int, float)) and k in _STRESS_KEYS:
+            result[k] = v * ssf
+        else:
+            result[k] = v
+    return result
+
+
 def deep_merge(base: dict, override: dict) -> dict:
     """Merge *override* into *base*.
 
