@@ -81,9 +81,10 @@ first, then falls back to ``ni_tag``/``nj_tag`` (int key).  With the
 dual-keyed dict the tag-based fallback now succeeds immediately.
 
 Shell vertices (``shell_node_1..4``) are resolved by
-``_resolve_shell_node()``, which tries the string key first, then int
-conversion, then a tag-value scan.  With the dual-keyed dict the
-tag-based access succeeds on the first attempt for valid nodes.
+``_resolve_shell_node()``, which tries the string key first, then integer-key
+access (via ``nodes.get(int(nid_or_tag))``), then a tag-value scan as a
+compatibility fallback.  With the dual-keyed dict the integer-key access
+succeeds on the first attempt for valid nodes.
 
 **Important**: When iterating ``data["nodes"]`` for rendering (point
 clouds, markers, labels), callers must deduplicate by the ``tag`` field
@@ -100,9 +101,19 @@ and ``plot_deformed_displacement_3d`` now perform this deduplication.
 | NPZ array | `*_sap_id` means SAP ID | `frame_sap_id`, `shell_sap_id` |
 | NPZ array | `*_tag` or bare `tag` means tag | `node_tag`, `frame_node_i` |
 
-## Rule
+## Integer-key Access Rule
 
 > **Never use SAP IDs directly in OpenSees commands — always map through tags.**
 
-And conversely, when looking up a node by an integer from an NPZ array
-(such as `shell_node_1`), **search by tag value**, not by dict key.
+When looking up a node by an integer value from an NPZ array (such as
+``shell_node_1``), **prefer direct integer-key access into the dual-keyed
+dict** — this is the fastest path and maps directly to the tag:
+
+```python
+node = data["nodes"].get(shell_node_1_value)   # integer key, succeeds immediately
+```
+
+Scanning ``data["nodes"].values()`` for a matching ``tag`` field is only
+necessary as a **compatibility fallback** for NPZ files produced before
+the dual-keying fix.  Newer NPZ files always support direct integer-key
+access.
