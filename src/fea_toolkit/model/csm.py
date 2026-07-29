@@ -137,21 +137,67 @@ def bilinearize_stiffness_change(
     """Bilinearise a capacity curve via secant stiffness-change detection.
 
     Yield is detected at the first point where the secant stiffness drops
-    below a fraction of the initial elastic stiffness, *or* where a single
-    step shows a large relative drop.  Intended for structures with a clear
-    yield point (e.g. brace buckling, well-defined section yielding).
+    below a fraction of the initial elastic stiffness (**Criterion A**),
+    *or* where a single step shows a large relative drop (**Criterion B**).
+
+    The algorithm is:
+
+    1. Determine the peak index (auto-detected or forced via ``peak_idx``).
+    2. Compute initial elastic stiffness ``K_init`` from the first 20 % of
+       points (at least 3 points).
+    3. Compute secant stiffnesses :math:`K_{sec} = S_a / S_d`.
+    4. **Criterion A**: find the first index where
+       :math:`K_{sec} < threshold \\times K_{init}`.
+    5. **Criterion B** (fallback): if criterion A finds nothing and there
+       are enough points, find the largest single-step relative drop in
+       secant stiffness.  If it exceeds ``min_relative_drop``, use that.
+    6. If a change index is found *before* the peak index, yield is at
+       that point.  Otherwise, yield at the peak (no clear yield
+       detected).
+
+    **When to use**: structures with a clear, sharp yield point where
+    a single stiffness-change event can be identified — e.g. brace
+    buckling in concentrically braced frames, well-defined section
+    yielding in steel moment frames with compact sections.
+
+    References:
+        - ATC-40 (1996), *Seismic Evaluation and Retrofit of Concrete
+          Buildings*, Applied Technology Council.
+        - Faella, G., Giordano, A., & Mezzi, M. (2004). "Definition of
+          Suitable Bilinear Pushover Curves in Nonlinear Static
+          Analyses." *13th WCEE*, Paper 1626.
 
     Args:
-        S_d_arr: Spectral displacements (m), positive.
-        S_a_arr: Spectral accelerations (m/s²), positive.
+        S_d_arr: Spectral displacements (m).  Should be monotonically
+            increasing and non-negative.  Zero-values are accepted
+            (clamped to 1e-12 for division).
+        S_a_arr: Spectral accelerations (m/s²), corresponding to
+            *S_d_arr*.  Should be non-negative.  Negative values are
+            tolerated but may produce unexpected results — consider
+            ``np.abs(S_a_arr)`` if numerical noise is present.
         config: Optional dict with keys:
 
-            * ``threshold`` — absolute fraction of K_init (default 0.50).
-            * ``min_relative_drop`` — single-step threshold (default -0.30).
-            * ``peak_idx`` — forced peak index (auto-detected if ``None``).
+            * ``threshold`` — fraction of initial secant stiffness
+              below which yield is detected (default ``0.50``).
+              Range ``(0, 1]``.  Higher values are more sensitive
+              (detect yield earlier / at lower S_dy).
+            * ``min_relative_drop`` — single-step relative drop
+              threshold for criterion B (default ``-0.30``).  A drop
+              more negative than this triggers yield at that step.
+            * ``peak_idx`` — force the peak index to this value
+              (0-based).  If ``None`` (default), auto-detected as
+              ``argmax(S_a_arr)``.
 
     Returns:
-        Tuple ``(S_dy, S_ay, method_name)``.
+        Tuple ``(S_dy, S_ay, method_name)`` where *method_name* is
+        always ``'stiffness_change'``.
+
+    Edge cases:
+        - Fewer than 2 data points: returns
+          ``(S_d_arr[0], S_a_arr[0], 'stiffness_change')``.
+        - ``peak_idx < 1``: same early return.
+        - No stiffness drop detected before peak: returns the peak
+          coordinates (no yield — effectively elastic).
     """
     cfg = dict(config or {})
     threshold = cfg.get('threshold', 0.50)
@@ -206,22 +252,76 @@ def bilinearize_equal_energy(
 ) -> Tuple[float, float, str]:
     """Bilinearise a capacity curve using the ATC-40 equal-energy method.
 
-    Finds the yield point that preserves the area under the capacity
-    curve up to the peak.  Suitable for structures with gradual yielding
-    or no single stiffness-change event.
+    Finds the yield point :math:`(S_{dy}, S_{ay})` that preserves the
+    area under the capacity curve up to the peak, using an iterative
+    Newton-style relaxation.  The bilinear curve is elastic-perfectly
+    plastic with hardening defined by the elastic stiffness :math:`K`.
+
+    The algorithm is:
+
+    1. Determine the peak index and peak coordinates
+       :math:`(S_{d,peak}, S_{a,peak})`.
+    2. Compute initial elastic stiffness ``K_init`` from the first 20 %
+       of data points.
+    3. Compute the actual area under the capacity curve from the origin
+       to the peak (trapezoidal integration).
+    4. Iterate from an initial guess of ``initial_guess * S_d_peak``:
+       - Compute :math:`S_{ay} = K_{init} \\times S_{dy}`
+       - Compute the bilinear area as:
+         :math:`A_{bilin} = \\frac{1}{2} \\times S_{ay} \\times S_{dy}
+         + S_{ay} \\times (S_{d,peak} - S_{dy})
+         + \\frac{1}{2} \\times (S_{a,peak} - S_{ay}) \\times (S_{d,peak} - S_{dy})`
+       - Compute the relative error and update :math:`S_{dy}` using
+         :math:`S_{dy} \\leftarrow S_{dy} \\times (1 - 0.5 \\times err)`
+       - Clamp :math:`S_{dy}` to :math:`[S_{d,0}, S_{d,peak}]`.
+    5. Clamp :math:`S_{ay}` to at least :math:`S_{a,1}` (avoid zero
+       yield acceleration).
+    6. If the converged yield is ≥ 90 % of the peak displacement, the
+       curve is essentially linear — reset to the peak (ductility
+       :math:`\\mu = 1`).
+
+    **When to use**: structures with gradual yielding or no single
+    stiffness-change event — e.g. ductile RC moment frames, steel
+    moment frames with gradual plastification.
+
+    References:
+        - ATC-40 (1996), *Seismic Evaluation and Retrofit of Concrete
+          Buildings*, Applied Technology Council (Procedure B).
+        - Eurocode 8 (2004), EN 1998-1, Annex B.
+        - Faella, G., Giordano, A., & Mezzi, M. (2004). "Definition of
+          Suitable Bilinear Pushover Curves in Nonlinear Static
+          Analyses." *13th WCEE*, Paper 1626.
 
     Args:
-        S_d_arr: Spectral displacements (m), positive.
-        S_a_arr: Spectral accelerations (m/s²), positive.
+        S_d_arr: Spectral displacements (m).  Should be monotonically
+            increasing and non-negative.
+        S_a_arr: Spectral accelerations (m/s²), corresponding to
+            *S_d_arr*.  Should be non-negative.
         config: Optional dict with keys:
 
-            * ``initial_guess`` — fraction of S_d_peak (default 0.3).
-            * ``tolerance`` — area error tolerance (default 0.001).
-            * ``max_iter`` — max iterations (default 100).
-            * ``peak_idx`` — forced peak index (auto-detected if ``None``).
+            * ``initial_guess`` — fraction of ``S_d_peak`` to use as
+              the starting point for iteration (default ``0.3``).
+              Range ``(0, 1)``.  Lower values converge from below
+              (conservative), higher values from above.
+            * ``tolerance`` — relative area error tolerance for
+              convergence (default ``0.001``).  Smaller values give
+              more precise area matching but more iterations.
+            * ``max_iter`` — maximum number of iterations
+              (default ``100``).  Prevents infinite loops.
+            * ``peak_idx`` — force the peak index to this value
+              (0-based).  If ``None`` (default), auto-detected as
+              ``argmax(S_a_arr)``.
 
     Returns:
-        Tuple ``(S_dy, S_ay, method_name)``.
+        Tuple ``(S_dy, S_ay, method_name)`` where *method_name* is
+        always ``'equal_energy'``.
+
+    Edge cases:
+        - Fewer than 2 data points: returns
+          ``(S_d_arr[0], S_a_arr[0], 'equal_energy')``.
+        - ``peak_idx < 1``: same early return.
+        - Converged yield ≥ 90 % of peak: reset to peak (elastic
+          response — :math:`\\mu = 1`).
     """
     cfg = dict(config or {})
     initial_guess = cfg.get('initial_guess', 0.3)
@@ -276,19 +376,70 @@ def bilinearize_composite(
 ) -> Tuple[float, float, str]:
     """Composite bilinearisation: stiffness-change primary, equal-energy fallback.
 
-    Tries :func:`bilinearize_stiffness_change` first.  If the result
-    yields at the peak (no stiffness change detected), falls back to
-    :func:`bilinearize_equal_energy`.  Applies a sanity clamp that
-    S_dy must be at least 10 % of the peak displacement.
+    Designed as a **sensible default** for automated workflows where
+    the structural behaviour is not known in advance.
+
+    The algorithm is:
+
+    1. Extract or auto-detect the peak index.
+    2. Run :func:`bilinearize_stiffness_change` (with the same config).
+    3. If the stiffness-change result yields at ≥ 90 % of the peak
+       displacement (no clear stiffness change detected), fall back to
+       :func:`bilinearize_equal_energy` (with the same config).
+    4. Apply a **sanity clamp**: if the yield displacement is below
+       10 % of the peak displacement, raise it to exactly 10 % and
+       interpolate the corresponding acceleration.  This prevents
+       pathologically low yield points that would produce unrealistically
+       high ductility demands.
+
+    **When to use**: as the default method when the structure type is
+    unknown or mixed.  Also suitable for "black-box" batch processing
+    where individual curve shapes cannot be inspected.
+
+    Design rationale:
+        - Stiffness-change is preferred when it works because it is
+          deterministic and non-iterative.
+        - Equal-energy fallback handles curved backbones (RC, masonry)
+          reliably.
+        - The 10 % clamp (Vamvatsikos 10 % rule) captures the initial
+          stiffness more accurately than area-balancing alone, reducing
+          bias in the computed ductility.
+
+    References:
+        - ATC-40 (1996), *Seismic Evaluation and Retrofit of Concrete
+          Buildings*, Applied Technology Council.
+        - Vamvatsikos, D., De Luca, F., & Iervolino, I. (2013).
+          "Near-optimal piecewise linear fits of static pushover
+          capacity curves." *Earthquake Engineering & Structural
+          Dynamics*, 42(4), 589–600.  doi:10.1002/eqe.2225
+        - Faella, G., Giordano, A., & Mezzi, M. (2004). "Definition of
+          Suitable Bilinear Pushover Curves in Nonlinear Static
+          Analyses." *13th WCEE*, Paper 1626.
 
     Args:
-        S_d_arr: Spectral displacements (m), positive.
-        S_a_arr: Spectral accelerations (m/s²), positive.
+        S_d_arr: Spectral displacements (m).  Should be monotonically
+            increasing and non-negative.
+        S_a_arr: Spectral accelerations (m/s²), corresponding to
+            *S_d_arr*.  Should be non-negative.
         config: Optional dict passed through to each sub-method.
+            See :func:`bilinearize_stiffness_change` and
+            :func:`bilinearize_equal_energy` for supported keys.
 
     Returns:
         Tuple ``(S_dy, S_ay, method_name)`` where *method_name* is
-        ``'composite_stiffness_change'`` or ``'composite_equal_energy'``.
+        ``'composite_stiffness_change'`` or ``'composite_equal_energy'``
+        indicating which sub-method produced the result (before the
+        10 % clamp).
+
+    Edge cases:
+        - Empty arrays: delegates to stiffness-change, which
+          returns ``(0.0, 0.0, 'stiffness_change')``, then the 90 %
+          check fires (0.0 ≥ 0.9 * 0.0 is True), so equal-energy is
+          called, returning ``(0.0, 0.0, 'equal_energy')``.
+          Final method is ``'composite_equal_energy'``.
+        - True elastic curve: stiffness-change returns peak →
+          fallback to equal-energy → the 10 % clamp may or may not
+          engage depending on the equal-energy result.
     """
     cfg = dict(config or {})
     peak_idx = cfg.get('peak_idx')
