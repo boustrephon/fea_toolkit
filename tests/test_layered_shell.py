@@ -5,6 +5,7 @@ Covers the four gaps identified in the audit:
 2. _create_layered_shell_sections() — LayeredShell ops calls exercised
 3. Skipped-material rejection — unknown nD material causes section skip
 4. Section recreation after ops.wipe() — build_domain twice succeeds
+5. Rebuild recovery — supported → unsupported → supported cycle recovers
 """
 
 import pytest
@@ -98,6 +99,7 @@ class TestLayeredShellBuild:
             frame_dist_loads=[],
             material_tags={},
             section_tags={},
+
             shell_sec_tags={},
             shell_sec_variants={},
             frame_element_types={},
@@ -112,35 +114,13 @@ class TestLayeredShellBuild:
             layered_shell_sections=layered_sections or {},
         )
 
-    # ── Test 1: _create_nd_materials with ElasticIsotropic ──────────
+    # ── Test 1: Build with ElasticIsotropic ──────────────────────────
 
-    def test_nd_materials_are_populated_in_build_domain(self):
-        """ElasticIsotropic nD material is created when build_domain runs."""
+    def test_elastic_isotropic_nd_material(self):
+        """Create a single ElasticIsotropic nD material + layered section."""
         ndm = {
-            "concrete": NDMaterial(
-                name="concrete",
-                material_type="ElasticIsotropic",
-                E=30.0e9,
-                nu=0.2,
-            ),
-        }
-        mm = _minimal_mesh(nd_materials=ndm)
-        builder = AnalysisBuilder(mm, {"verbose": False})
-        builder.build_domain()
-
-        assert "concrete" in builder.material_tags
-        tag = builder.material_tags["concrete"]
-        assert isinstance(tag, int) and tag > 0
-        # The material was created (no skipped materials for a known type)
-        assert len(builder._skipped_nd_materials) == 0
-
-    # ── Test 2: _create_layered_shell_sections ──────────────────────
-
-    def test_layered_shell_section_created_via_build_domain(self):
-        """LayeredShell section referencing valid nD material is created by build_domain."""
-        ndm = {
-            "concrete": NDMaterial(
-                name="concrete",
+            "conc1": NDMaterial(
+                name="conc1",
                 material_type="ElasticIsotropic",
                 E=30.0e9,
                 nu=0.2,
@@ -150,8 +130,51 @@ class TestLayeredShellBuild:
             "wall_section": LayeredShellSection(
                 name="wall_section",
                 layers=[
+                    ShellFiberLayer(thickness=0.04, nd_material="conc1", n_ip=3),
+                    ShellFiberLayer(thickness=0.30, nd_material="conc1", n_ip=8),
+                    ShellFiberLayer(thickness=0.04, nd_material="conc1", n_ip=3),
+                ],
+            ),
+        }
+        mm = _minimal_mesh(nd_materials=ndm, layered_sections=lss)
+        builder = AnalysisBuilder(mm, {"verbose": False})
+        builder.build_domain()
+
+        assert "conc1" in builder.material_tags
+        conc_tag = builder.material_tags["conc1"]
+        assert isinstance(conc_tag, int) and conc_tag > 0
+
+        assert "wall_section" in builder._shell_sec_tags
+        sec_tag = builder._shell_sec_tags["wall_section"]
+        assert isinstance(sec_tag, int) and sec_tag > 0
+        assert len(builder._skipped_nd_materials) == 0
+
+    # ── Test 2: Build with J2PlateFibre + ConcreteS ──────────────────
+
+    def test_j2_and_concrete_nd_material(self):
+        """Create J2PlateFibre + ConcreteS nD materials."""
+        ndm = {
+            "rebar": NDMaterial(
+                name="rebar",
+                material_type="J2PlateFibre",
+                E=200.0e9, nu=0.3,
+                fy=400.0e6, Hiso=0.0, Hkin=0.01,
+            ),
+            "concrete": NDMaterial(
+                name="concrete",
+                material_type="ConcreteS",
+                E=30.0e9, nu=0.2,
+                fc=-30.0e6, ft=2.0e6, Es=30.0e9,
+            ),
+        }
+        lss = {
+            "wall_section": LayeredShellSection(
+                name="wall_section",
+                layers=[
                     ShellFiberLayer(thickness=0.04, nd_material="concrete", n_ip=3),
+                    ShellFiberLayer(thickness=0.002, nd_material="rebar", n_ip=5),
                     ShellFiberLayer(thickness=0.30, nd_material="concrete", n_ip=8),
+                    ShellFiberLayer(thickness=0.002, nd_material="rebar", n_ip=5),
                     ShellFiberLayer(thickness=0.04, nd_material="concrete", n_ip=3),
                 ],
             ),
@@ -160,10 +183,9 @@ class TestLayeredShellBuild:
         builder = AnalysisBuilder(mm, {"verbose": False})
         builder.build_domain()
 
+        assert "concrete" in builder.material_tags
+        assert "rebar" in builder.material_tags
         assert "wall_section" in builder._shell_sec_tags
-        sec_tag = builder._shell_sec_tags["wall_section"]
-        assert isinstance(sec_tag, int) and sec_tag > 0
-        # no skipped materials
         assert len(builder._skipped_nd_materials) == 0
 
     # ── Test 3: Skipped-material rejection ──────────────────────────
@@ -237,17 +259,19 @@ class TestLayeredShellBuild:
         builder = AnalysisBuilder(mm, {"verbose": False})
         builder.build_domain()
 
-        # Valid section is created
-        assert "valid_wall" in builder._shell_sec_tags
-        # Invalid section is rejected
-        assert "invalid_wall" not in builder._shell_sec_tags
-        # The bad material was tracked
+        assert "good_conc" in builder.material_tags
         assert "bad_stuff" in builder._skipped_nd_materials
+        assert "valid_wall" in builder._shell_sec_tags
+        assert "invalid_wall" not in builder._shell_sec_tags
 
     # ── Test 4: Section recreation after ops.wipe() ─────────────────
 
-    def test_layered_sections_recreated_after_wipe(self):
-        """Calling build_domain() twice recreates LayeredShell sections."""
+    def test_build_twice_preserves_layered_section_tags(self):
+        """LayeredShell section tags remain stable after a second build_domain.
+
+        Also verifies that shell_sec_tags from a previous build are merged
+        correctly (non-layered tags cleared, new non-layered tags created).
+        """
         ndm = {
             "concrete": NDMaterial(
                 name="concrete",
@@ -256,7 +280,7 @@ class TestLayeredShellBuild:
                 nu=0.2,
             ),
         }
-        lss = {
+        lss_wall = {
             "wall_section": LayeredShellSection(
                 name="wall_section",
                 layers=[
@@ -266,23 +290,62 @@ class TestLayeredShellBuild:
                 ],
             ),
         }
-        mm = _minimal_mesh(nd_materials=ndm, layered_sections=lss)
+        lss_two = {
+            "wall_section": LayeredShellSection(
+                name="wall_section",
+                layers=[
+                    ShellFiberLayer(thickness=0.04, nd_material="concrete", n_ip=3),
+                    ShellFiberLayer(thickness=0.30, nd_material="concrete", n_ip=8),
+                    ShellFiberLayer(thickness=0.04, nd_material="concrete", n_ip=3),
+                ],
+            ),
+            "new_section": LayeredShellSection(
+                name="new_section",
+                layers=[
+                    ShellFiberLayer(thickness=0.04, nd_material="concrete", n_ip=3),
+                    ShellFiberLayer(thickness=0.10, nd_material="concrete", n_ip=5),
+                    ShellFiberLayer(thickness=0.04, nd_material="concrete", n_ip=3),
+                ],
+            ),
+        }
+        mm = _minimal_mesh(nd_materials=ndm, layered_sections=lss_wall)
         builder = AnalysisBuilder(mm, {"verbose": False})
 
-        # First build — creates everything fresh
+        # Set up _shell_sec_tags *before* first build to simulate
+        # reality where mesh_model already carries shell_sec_tags.
+        builder._shell_sec_tags["old_stale_elastic_shell"] = 999
         builder.build_domain()
+
+        # After first build the stale non-layered tag is cleared
+        assert "old_stale_elastic_shell" not in builder._shell_sec_tags
+        # wall_section was created
         assert "wall_section" in builder._shell_sec_tags
-        first_tag = builder._shell_sec_tags["wall_section"]
-        assert isinstance(first_tag, int)
+        wall_tag = builder._shell_sec_tags["wall_section"]
+
+        # Replace mesh_model.layered_shell_sections with a new dict
+        # (simulates what happens when the user reconfigures
+        # shell_layers and rebuilds).
+        mm.layered_shell_sections = lss_two
+        # Manually restore the stale tag so the code path that
+        # clears it on rebuild is exercised.
+        builder._shell_sec_tags["old_stale_elastic_shell"] = 999
 
         # Second build — ops.wipe() is called inside build_domain()
         builder.build_domain()
+        # wall_section uses lookup-based reuse → tag unchanged
         assert "wall_section" in builder._shell_sec_tags
-        second_tag = builder._shell_sec_tags["wall_section"]
-        # The tag should be stable (same after wipe + recreate)
-        assert second_tag == first_tag
+        assert builder._shell_sec_tags["wall_section"] == wall_tag
+        # new_section gets a distinct tag
+        assert "new_section" in builder._shell_sec_tags
+        new_tag = builder._shell_sec_tags["new_section"]
+        assert isinstance(new_tag, int)
+        assert new_tag != wall_tag
+        # No collisions — all values are unique
+        assert len(set(builder._shell_sec_tags.values())) == len(builder._shell_sec_tags)
         # nD material tag should also still exist
         assert "concrete" in builder.material_tags
+        # The stale non-layered tag was cleared again (did not resurrect)
+        assert "old_stale_elastic_shell" not in builder._shell_sec_tags
 
     # ── Test 5: Elastic fallback + section-tag collision ─────────────
 
@@ -306,6 +369,8 @@ class TestLayeredShellBuild:
                 name="wall_using_bad",
                 layers=[
                     ShellFiberLayer(thickness=0.04, nd_material="bad_stuff", n_ip=3),
+                    ShellFiberLayer(thickness=0.20, nd_material="bad_stuff", n_ip=5),
+                    ShellFiberLayer(thickness=0.04, nd_material="bad_stuff", n_ip=3),
                 ],
             ),
         }
@@ -320,3 +385,80 @@ class TestLayeredShellBuild:
 
         # No shell element was created for area 'a1'
         assert "a1" not in builder._shell_tag_map
+
+    # ── Test 6: Rebuild recovery (supported → unsupported → supported) ─
+
+    def test_rebuild_recovery_supported_to_unsupported_back(self):
+        """Verify that a supported → unsupported → supported rebuild cycle
+        correctly recovers and recreates the layered shell section.
+
+        Regression test for the stale-tag bug where:
+        - Build 1: supported material → section created (tag in _shell_sec_tags)
+        - Build 2: unsupported type → material skipped, section skipped,
+          but material_tags still held stale tag → section wrongly recreated
+        - Build 3: supported again → _skipped sets cleared, section recovered
+        """
+        ndm_supported = {
+            "flex_mat": NDMaterial(
+                name="flex_mat",
+                material_type="ElasticIsotropic",
+                E=30.0e9,
+                nu=0.2,
+            ),
+        }
+        ndm_unsupported = {
+            "flex_mat": NDMaterial(
+                name="flex_mat",
+                material_type="NonExistentType",
+                E=30.0e9,
+                nu=0.2,
+            ),
+        }
+        lss = {
+            "flex_section": LayeredShellSection(
+                name="flex_section",
+                layers=[
+                    ShellFiberLayer(thickness=0.04, nd_material="flex_mat", n_ip=3),
+                    ShellFiberLayer(thickness=0.20, nd_material="flex_mat", n_ip=5),
+                    ShellFiberLayer(thickness=0.04, nd_material="flex_mat", n_ip=3),
+                ],
+            ),
+        }
+        mm_supported = _minimal_mesh(nd_materials=ndm_supported,
+                                      layered_sections=lss)
+        mm_unsupported = _minimal_mesh(nd_materials=ndm_unsupported,
+                                        layered_sections=lss)
+
+        # ── Build 1: supported ──
+        builder = AnalysisBuilder(mm_supported, {"verbose": False})
+        builder.build_domain()
+        assert "flex_mat" in builder.material_tags
+        assert "flex_section" in builder._shell_sec_tags
+        assert len(builder._skipped_nd_materials) == 0
+        flex_section_tag = builder._shell_sec_tags["flex_section"]
+
+        # ── Build 2: unsupported (replace mesh_model nd_materials) ──
+        builder.mesh_model = mm_unsupported
+        builder.build_domain()
+        assert "flex_mat" in builder._skipped_nd_materials
+        # The section name is registered in _skipped_shell_sec_names so
+        # _create_shell_elements will skip it (no shell element is
+        # created for this section).  The _shell_sec_tags dict may still
+        # carry the Build 1 tag, but the LayeredShell section is never
+        # registered in OpenSees (ops.section('LayeredShell', ...) is
+        # not called) because the skipped-material guard fires first.
+        assert "flex_section" in builder._skipped_shell_sec_names
+
+        # ── Build 3: supported again ──
+        builder.mesh_model = mm_supported
+        builder.build_domain()
+        # Skip sets were cleared at start of build_domain
+        assert len(builder._skipped_nd_materials) == 0
+        # flex_mat should be created now
+        assert "flex_mat" in builder.material_tags
+        # flex_section should be recreated with a fresh tag
+        assert "flex_section" in builder._shell_sec_tags
+        # Tag may differ from build 1 (after the intervening unsupported build
+        # cleared the tag), but it must be a valid positive integer.
+        recreated_tag = builder._shell_sec_tags["flex_section"]
+        assert isinstance(recreated_tag, int) and recreated_tag > 0
