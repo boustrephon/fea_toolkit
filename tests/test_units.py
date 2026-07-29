@@ -241,6 +241,48 @@ class TestMassDensityScaleFactor:
         assert 1.0 * f == pytest.approx(1.019716e-09)
 
 
+class TestScaleMaterialDict:
+    """``scale_material_dict`` scales stress-valued fields from SI to model units."""
+
+    def test_kN_m_scales_stress_fields(self):
+        """(kN,m): stress fields ÷1000, non-stress fields unchanged."""
+        mat = {"E": 200.0e9, "nu": 0.3, "fy": 500.0e6, "Hiso": 0.0, "material_type": "J2PlateFibre"}
+        result = utils.scale_material_dict(mat, {"F": "kN", "L": "m"})
+        assert result["E"] == pytest.approx(200.0e6)       # 200e9 * 0.001
+        assert result["fy"] == pytest.approx(500.0e3)       # 500e6 * 0.001
+        assert result["Hiso"] == pytest.approx(0.0)
+        assert result["nu"] == pytest.approx(0.3)            # dimensionless, unchanged
+        assert result["material_type"] == "J2PlateFibre"    # string, unchanged
+
+    def test_SI_N_m_no_scaling(self):
+        """(N,m): stress_scale ≈ 1.0, dict returned as-is."""
+        mat = {"E": 200.0e9, "fc": 30.0e6}
+        result = utils.scale_material_dict(mat, {"F": "N", "L": "m"})
+        assert result is not mat  # returns a copy
+        assert result["E"] == pytest.approx(200.0e9)
+        assert result["fc"] == pytest.approx(30.0e6)
+
+    def test_precomputed_stress_scale(self):
+        """Pre-computed stress_scale overrides computed factor."""
+        mat = {"E": 200.0e9, "fy": 500.0e6}
+        result = utils.scale_material_dict(mat, {"F": "N", "L": "m"}, stress_scale=0.001)
+        assert result["E"] == pytest.approx(200.0e6)
+        assert result["fy"] == pytest.approx(500.0e3)
+
+    def test_unknown_keys_pass_through(self):
+        """Keys not in _STRESS_KEYS are not scaled."""
+        mat = {"E": 200.0e9, "E_mod": 200.0e9, "rho": 7850.0, "notes": "test"}
+        result = utils.scale_material_dict(mat, {"F": "kN", "L": "m"})
+        assert result["E"] == pytest.approx(200.0e6)  # stress key → scaled
+        assert result["E_mod"] == pytest.approx(200.0e9)  # NOT in _STRESS_KEYS → unchanged
+        assert result["rho"] == pytest.approx(7850.0)  # not stress → unchanged
+        assert result["notes"] == "test"  # string → unchanged
+
+    def test_empty_dict(self):
+        """Empty dict returns empty dict."""
+        assert utils.scale_material_dict({}, {"F": "kN", "L": "m"}) == {}
+
+
 class TestWeightDensityScaleFactor:
     """SI N/m³ → model weight density unit."""
 
