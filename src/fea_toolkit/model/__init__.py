@@ -118,6 +118,9 @@ from .checks import (
 from .csm import (
     pushover_to_adrs,
     compute_performance_point,
+    bilinearize_stiffness_change,
+    bilinearize_equal_energy,
+    bilinearize_composite,
 )
 
 from .confinement import (
@@ -229,6 +232,9 @@ __all__ = [
     # CSM
     "pushover_to_adrs",
     "compute_performance_point",
+    "bilinearize_stiffness_change",
+    "bilinearize_equal_energy",
+    "bilinearize_composite",
     # Confinement
     "mander_confined",
     "ConfinementData",
