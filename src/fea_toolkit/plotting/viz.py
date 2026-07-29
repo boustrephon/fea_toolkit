@@ -1105,11 +1105,13 @@ def _render_scene(plotter, data, *,
 
     # ── Labels ──────────────────────────────────────────────────
     if show_node_labels:
+        # Use the same tag-deduplicated unique_nodes collection as markers
         pts, tags = [], []
-        for nid, n in nodes.items():
+        for n in unique_nodes:
             if _in_limits([n["x"], n["y"], n["z"]]):
+                tag_val = n.get("tag", "")
                 pts.append([n["x"] + node_label_offset, n["y"] + node_label_offset, n["z"]])
-                tags.append(f"N{nid}")
+                tags.append(f"N{tag_val}")
         if pts:
             plotter.add_point_labels(np.array(pts), tags, font_size=tag_font,
                                      point_size=0, shape=None)
@@ -1983,7 +1985,7 @@ def plot_mode_3d(
                 shell_mesh.points = nsm.points
             plotter.render()
 
-        plotter.add_timer_event(max_steps=3600, duration=60, callback=callback)
+        plotter.add_timer_event(max_steps=3600, interval=17, callback=callback)
         plotter.add_text(f"Mode {mode + 1}{period_str}  (oscillating)",
                          position='upper_edge', font_size=font_size)
     else:
@@ -2233,7 +2235,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
             if shell_mesh is not None and nsm is not None and nsm.n_points:
                 shell_mesh.points = nsm.points
 
-        plotter.add_timer_event(max_steps=3600, duration=60, callback=callback)
+        plotter.add_timer_event(max_steps=3600, interval=17, callback=callback)
         plotter.show(auto_close=False)
     else:
         plotter.show()
