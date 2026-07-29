@@ -19,6 +19,11 @@ from ..model.geometry import get_SAP_vecxz, get_local_axes
 from ..model.sap_data import SAPModelData
 from ..utils import compute_flag_parts
 
+# Types that represent NPZ/HDF5 results data (dict or Numpy NpzFile).
+# Used by isinstance() checks throughout this module to dispatch between
+# NPZ-data paths and builder/model paths.
+_NPZ_TYPES = (dict, np.lib.npyio.NpzFile)
+
 if TYPE_CHECKING:
     from ..model.selection import Selection
 
@@ -57,6 +62,7 @@ def _build_deformed_mesh(
     sec_idxs: list,
     scale: float,
     amp: float,
+    shrink: float = 0.0,
 ) -> "tuple[Any, Optional[Any]]":
     """Build a single merged ``PolyData`` from frame-segment and shell-quad
     geometry, displaced by ``scale * amp`` along each element's eigenvector.
@@ -81,6 +87,11 @@ def _build_deformed_mesh(
         Base scale factor from the eigenvector normalisation.
     amp : float
         Amplitude multiplier for the current frame.
+    shrink : float
+        Fraction to shrink shell quads toward their centroid
+        (0.0 = full size, 0.1 = 10% gap at edges).  Applied to the
+        rest-position vertices before displacement so the point-count
+        invariant is preserved for animation.
 
     Returns
     -------
@@ -116,6 +127,14 @@ def _build_deformed_mesh(
     shell_offset = 0
     for quad in all_quads:
         p1, p2, p3, p4, d1, d2, d3, d4 = quad
+        # Apply shrink to rest positions (before displacement) to
+        # preserve point-count invariance for animation.
+        if shrink:
+            c = (p1 + p2 + p3 + p4) / 4
+            p1 = p1 + (c - p1) * shrink
+            p2 = p2 + (c - p2) * shrink
+            p3 = p3 + (c - p3) * shrink
+            p4 = p4 + (c - p4) * shrink
         a1 = p1 + d1 * scale * amp
         a2 = p2 + d2 * scale * amp
         a3 = p3 + d3 * scale * amp
@@ -695,15 +714,20 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
     # ═════════════════════════════════════════════════════════════
     # NPZ / HDF5 data dict
     # ═════════════════════════════════════════════════════════════
-    if isinstance(source, dict):
+    if isinstance(source, _NPZ_TYPES):
         n = len(source.get("node_tag", []))
         for i in range(n):
-            tag = source["node_tag"][i]
+            tag = int(source["node_tag"][i])
             sid = str(source.get("node_sap_id", [""]*n)[i])
-            data["nodes"][sid] = {
-                "tag": int(tag), "x": float(source["node_x"][i]),
+            node_entry = {
+                "tag": tag, "x": float(source["node_x"][i]),
                 "y": float(source["node_y"][i]), "z": float(source["node_z"][i]),
             }
+            # Key by both SAP ID (string) and node tag (int) so that both
+            # frame endpoint lookups (ni_tag/nj_tag) and shell vertex lookups
+            # (shell_node_1..4) resolve immediately without a tag-search fallback.
+            data["nodes"][sid] = node_entry
+            data["nodes"][tag] = node_entry
             if "_mesh_" in sid:
                 data["mesh_node_ids"].add(sid)
 
@@ -855,6 +879,33 @@ def _resolve_frame_node(nodes, fr, side='i'):
     return None
 
 
+def _resolve_shell_node(nodes, ref):
+    """Resolve a shell vertex node from resolved mesh data.
+
+    Tries the string SAP ID key directly first, then int-to-string
+    conversion, then falls back to searching by ``tag`` value (int)
+    across all nodes.  Returns the node dict or ``None``.
+
+    This is needed because:
+    * ``_resolve_mesh_data`` indexes nodes by SAP ID (string, e.g.
+      ``"area-1_sub_0_node_1"``).
+    * NPZ shell connectivity arrays store node **tags** (integers,
+      e.g. ``999``).
+    * A direct ``nodes.get(tag)`` fails — the key system differs.
+    """
+    nd = nodes.get(ref)
+    if nd is not None:
+        return nd
+    nd = nodes.get(str(ref))
+    if nd is not None:
+        return nd
+    # Fallback: search by tag value
+    for nd in nodes.values():
+        if nd["tag"] == ref:
+            return nd
+    return None
+
+
 def _render_scene(plotter, data, *,
                   shrink=0.0, xlim=None, ylim=None, zlim=None,
                   show_nodes=True, show_orphan_nodes=False,
@@ -947,10 +998,8 @@ def _render_scene(plotter, data, *,
             pts = []
             refs = sh.get("node_ids") or sh.get("node_tags") or []
             for ref in refs:
+                # Nodes dict is dual-keyed (SAP ID string + int tag)
                 nd = nodes.get(ref)
-                if nd is None:
-                    # Try converting int tag to string key
-                    nd = nodes.get(str(ref))
                 if nd is None:
                     break
                 pts.append([nd["x"], nd["y"], nd["z"]])
@@ -1518,7 +1567,7 @@ def plot_deformed_displacement_3d(
     frames = data["frames"]
 
     # ── Apply selection filter (builder sources only) ─────────────
-    if selection is not None and not isinstance(source, dict):
+    if selection is not None and not isinstance(source, _NPZ_TYPES):
         try:
             sel_ids = set(selection.get_frame_ids(source.model))
             frames = [fr for fr in frames if fr.get("id") in sel_ids
@@ -1891,11 +1940,9 @@ def plot_mode_3d(
         if len(shell_groups) > 1:
             legend_entries = [(name, pv.Color(_sec_colors[name]))
                               for name in _sec_names_sorted]
-            label_size = max(8, 14 - len(shell_groups))
             plotter.add_legend(
                 legend_entries, border=True, size=[0.2, 0.12],
-                loc='lower_right', face='white',
-                label_size=label_size,
+                loc='lower right', face='rectangle',
             )
 
     # Build title text with period if available
@@ -1917,7 +1964,7 @@ def plot_mode_3d(
             plotter.render()
 
         n_iter = max(30, int(30 * anim_speed))
-        plotter.add_timer_event(600, n_iter, callback)
+        plotter.add_timer_event(3600, n_iter, callback) # ~1 hour at 60ms per tick (effectively continuous)
         plotter.add_text(f"Mode {mode + 1}{period_str}  (oscillating)",
                          position='upper_edge', font_size=font_size)
     else:
@@ -1991,7 +2038,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
     ]
 
     # Resolve mode shape displacements for this mode
-    if isinstance(source, dict) and mode_shapes is None:
+    if isinstance(source, _NPZ_TYPES) and mode_shapes is None:
         # NPZ data — extract mode shapes from arrays
         dx = source.get("modal/mode_dx")
         dy = source.get("modal/mode_dy")
@@ -2004,7 +2051,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
                                               float(dy[i, mode]),
                                               float(dz[i, mode]))
                               for i in range(len(tags))}}
-    elif isinstance(source, dict):
+    elif isinstance(source, _NPZ_TYPES):
         # NPZ data with pre-extracted mode_shapes — resolve tags
         pass
 
@@ -2025,9 +2072,8 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
         npts = []
         ds = []
         for ref in (sh.get("node_ids") or sh.get("node_tags") or []):
+            # Nodes dict is dual-keyed (SAP ID string + int tag)
             nd = data["nodes"].get(ref)
-            if nd is None:
-                nd = data["nodes"].get(str(ref))
             if nd is None:
                 break
             npts.append(np.array([nd["x"], nd["y"], nd["z"]]))
@@ -2085,7 +2131,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
         if all_quads:
             _, und_shells = _build_deformed_mesh(
                 segments, seg_npoints, all_quads, all_sec_idxs,
-                scale, 0.0)
+                scale, 0.0, shrink=shrink)
             if und_shells is not None and und_shells.n_points:
                 plotter.add_mesh(und_shells, color='lightgrey',
                                  opacity=0.3, show_edges=True, line_width=1)
@@ -2100,7 +2146,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
     # ── Deformed mesh (amp=1.0 for static, overridden during animation) ──
     frame_mesh, shell_mesh = _build_deformed_mesh(
         segments, seg_npoints, all_quads, all_sec_idxs,
-        scale, 1.0)
+        scale, 1.0, shrink=shrink)
 
     # Shells: per-section colours via cell scalars
     if shell_mesh is not None and shell_mesh.n_points:
@@ -2131,14 +2177,14 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
             # Newer PyVista supports label_size; older versions don't
             plotter.add_legend(
                 legend_entries, border=True, size=[0.2, 0.12],
-                loc='lower_right', face='white',
+                loc='lower right', face='rectangle',
                 label_size=max(8, 14 - n_sections),
             )
         except TypeError:
             # Fallback for older PyVista without label_size kwarg
             plotter.add_legend(
                 legend_entries, border=True, size=[0.2, 0.12],
-                loc='lower_right', face='white',
+                loc='lower right',
             )
 
     # ── Title ──
@@ -2158,14 +2204,14 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
             amp = _math.sin(anim_speed * 2.0 * _math.pi * step / 60.0) * anim_amplitude
             nfm, nsm = _build_deformed_mesh(
                 segments, seg_npoints, all_quads, all_sec_idxs,
-                scale, amp)
+                scale, amp, shrink=shrink)
             if nfm is not None and nfm.n_points and frame_mesh.n_points:
                 frame_mesh.points = nfm.points
             if shell_mesh is not None and nsm is not None and nsm.n_points:
                 shell_mesh.points = nsm.points
 
         n_iter = max(30, int(30 * anim_speed))
-        plotter.add_timer_event(60, n_iter, callback)
+        plotter.add_timer_event(3600, n_iter, callback)
         plotter.show(auto_close=False)
     else:
         plotter.show()
@@ -2242,7 +2288,7 @@ def plot_force_diagram_3d(source, force_data=None, *,
     # force_map: {(ni_tag, nj_tag, idx): {Fx, Fy, Fz, Mx, My, Mz,
     #                                      Fx_j, Fy_j, Fz_j, Mx_j, My_j, Mz_j}}
     # The idx is the frame index in the resolved data for traceability.
-    is_npz = isinstance(source, dict)
+    is_npz = isinstance(source, _NPZ_TYPES)
 
     if is_npz:
         # Extract static case name

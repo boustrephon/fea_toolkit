@@ -270,14 +270,25 @@ class TestResolveMeshData:
             pytest.skip("pyvista not installed")
 
     def test_dict_source_nodes(self, sample_npz_data):
-        """Resolving an NPZ-like dict produces correct node entries."""
+        """Resolving an NPZ-like dict produces correct node entries.
+
+        Each node is dual-keyed (SAP ID string + int tag) so the dict
+        has 2× entries per node, but lookups by either key resolve.
+        """
         from fea_toolkit.plotting.viz import _resolve_mesh_data
         data = _resolve_mesh_data(sample_npz_data)
-        assert len(data["nodes"]) == 3
+        # 3 unique nodes × 2 keys (SAP ID + tag) = 6 dict entries
+        assert len(data["nodes"]) == 6
+        # Lookup by SAP ID string works
         assert data["nodes"]["1"]["tag"] == 1
         assert data["nodes"]["1"]["x"] == 0.0
         assert data["nodes"]["2"]["x"] == 4.0
         assert data["nodes"]["3"]["z"] == 3.0
+        # Lookup by int tag also works
+        assert data["nodes"][1]["tag"] == 1
+        assert data["nodes"][1]["x"] == 0.0
+        assert data["nodes"][2]["x"] == 4.0
+        assert data["nodes"][3]["z"] == 3.0
 
     def test_dict_source_frames(self, sample_npz_data):
         """Resolving an NPZ-like dict produces correct frame entries."""
