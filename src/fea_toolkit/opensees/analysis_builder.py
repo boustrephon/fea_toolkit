@@ -1216,13 +1216,40 @@ class AnalysisBuilder:
                 _I22 = getattr(sec, 'I22', 0.0) or 0.0
                 _J = getattr(sec, 'J', 0.0) or 0.0
 
-                # Create material appropriate for the section type
-                mat_tag = tag  # material tag = section tag
+                # Create material(s) appropriate for the section type
+                # Use a continuously incrementing counter so that every
+                # fiber material gets a unique tag (tag-based offsets
+                # collide when e.g. concrete sec 1 uses 500001-500003
+                # and steel sec 2 tries 500002).
+                if not hasattr(self, '_next_fiber_mat_tag'):
+                    _max_all = max(
+                        max(self.material_tags.values(), default=0),
+                        max(self.section_tags.values(), default=0),
+                        max(self._shell_sec_tags.values(), default=0),
+                    )
+                    self._next_fiber_mat_tag = max(_max_all, 1000000) + 1
+                mat_tag = self._next_fiber_mat_tag
+                self._next_fiber_mat_tag += 3 if (mat is not None and mat.type.lower() == 'concrete') else 1
                 if mat is not None and mat.type.lower() == 'concrete':
+                    # Concrete section: to_fiber_patches() uses three tags:
+                    #   mat_tag     → unconfined concrete  (Concrete01)
+                    #   mat_tag + 1 → confined core        (Concrete01)
+                    #   mat_tag + 2 → steel rebar          (Steel02)
                     Fc = getattr(mat, 'Fc', 0.0) or 3.0e7
                     epsc = getattr(mat, 'eFc', 0.0) or 0.002
+                    # Unconfined cover concrete
                     ops.uniaxialMaterial('Concrete01', mat_tag,
                                          -Fc, -abs(epsc), -0.2 * Fc, -0.006)
+                    # Confined core concrete (enhanced strength/ductility)
+                    Fc_core = Fc * 1.25
+                    epsc_core = abs(epsc) * 2.0
+                    ops.uniaxialMaterial('Concrete01', mat_tag + 1,
+                                         -Fc_core, -epsc_core,
+                                         -0.2 * Fc_core, -0.02)
+                    # Steel rebar
+                    Fy = getattr(mat, 'Fy', 0.0) or 4.0e8
+                    Es = getattr(mat, 'E_mod', None) or E_mod
+                    ops.uniaxialMaterial('Steel02', mat_tag + 2, Fy, Es, 0.01, 18, 0.925, 0.15)
                 else:
                     Fy = getattr(mat, 'Fy', 0.0) or 2.5e8
                     ops.uniaxialMaterial('Steel01', mat_tag, Fy, E_mod, 0.01)
@@ -1382,13 +1409,17 @@ class AnalysisBuilder:
             next_shell_tag = max(max_frame_tag, max_rigid_tag) + 1 + shell_count
             elem_tag = next_shell_tag
 
+            # Use ShellNLDKGQ for areas with a LayeredShell section,
+            # ShellMITC4 for all others (linear elastic).
+            is_layered = sec_name in self.mesh_model.layered_shell_sections
+            shell_type = 'ShellNLDKGQ' if is_layered else 'ShellMITC4'
             if len(node_tags) == 3:
                 # Repeat last node tag for the 4th corner (Collapsed quad)
-                ops.element('ShellMITC4', elem_tag,
+                ops.element(shell_type, elem_tag,
                             node_tags[0], node_tags[1], node_tags[2],
                             node_tags[2], sec_tag)
             else:
-                ops.element('ShellMITC4', elem_tag, *node_tags[:4], sec_tag)
+                ops.element(shell_type, elem_tag, *node_tags[:4], sec_tag)
             self._shell_tag_map[aid] = elem_tag
             shell_count += 1
 
