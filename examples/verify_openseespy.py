@@ -88,7 +88,7 @@ def _build_cantilever_model():
 
 
 def _run_gravity() -> float:
-    """Run gravity load-control analysis, return axial shortening (m)."""
+    """Run gravity load-control analysis, return axial shortening (mm)."""
     ops.timeSeries('Linear', 1)
     ops.pattern('Plain', 1, 1)
     ops.load(2, 0.0, 0.0, -500000.0, 0.0, 0.0, 0.0)
@@ -198,20 +198,11 @@ def _check_nd_materials_and_layered_shell():
     _wipe_model()
     ops.model('basic', '-ndm', 3, '-ndf', 6)
 
-    # Four nodes for a single ShellMITC4 element (4×4 m wall panel)
-    ops.node(1, 0.0, 0.0, 0.0)
-    ops.node(2, 4000.0, 0.0, 0.0)
-    ops.node(3, 4000.0, 4000.0, 0.0)
-    ops.node(4, 0.0, 4000.0, 0.0)
-    # Higher nodes for element thickness visibility
+    # Four nodes for a single ShellMITC4 element (4×4 m shell at z = 4000 mm)
     ops.node(5, 0.0, 0.0, 4000.0)
     ops.node(6, 4000.0, 0.0, 4000.0)
     ops.node(7, 4000.0, 4000.0, 4000.0)
     ops.node(8, 0.0, 4000.0, 4000.0)
-    ops.fix(1, 1, 1, 1, 1, 1, 1)
-    ops.fix(2, 1, 1, 1, 1, 1, 1)
-    ops.fix(3, 1, 1, 1, 1, 1, 1)
-    ops.fix(4, 1, 1, 1, 1, 1, 1)
 
     # nD materials (mimics a reinforced concrete shear wall layup)
     # ConcreteS: tag, E, nu, fc, ft, Es
@@ -332,7 +323,7 @@ def main():
     print(f"{c}. Gravity analysis...", end=' ')
     try:
         dz = _run_gravity()
-        check(c, f"Converged. Axial shortening dz = {dz:.4f} m (compression)", True)
+        check(c, f"Converged. Axial shortening dz = {dz:.4f} mm (compression)", True)
     except Exception as exc:
         check(c, "Gravity analysis", False, str(exc))
     c += 1
@@ -432,8 +423,8 @@ def main():
         ops.uniaxialMaterial('ConcreteCM', 1, -30.0, -0.002, 25000.0,
                              4.0, 1.0, 2.0, 0.00008, 1.0, 10000.0, '-GapClose', 0)
         print(f"  ✅ Check {c}: available")
-    except Exception:
-        print(f"  ℹ️ Check {c}: not available (Xara build required)")
+    except Exception as exc:
+        print(f"  ℹ️ Check {c}: not available (Xara build required: {exc})")
     c += 1
 
     print(f"{c}. Xara: SteelMPF (Menegotto-Pinto steel with fatigue)...", end=' ')
@@ -442,8 +433,8 @@ def main():
     try:
         ops.uniaxialMaterial('SteelMPF', 1, 400.0, 400.0, 2.0e5, 0.01, 0.01, 18.5, 0.925, 0.15)
         print(f"  ✅ Check {c}: available")
-    except Exception:
-        print(f"  ℹ️ Check {c}: not available (Xara build required)")
+    except Exception as exc:
+        print(f"  ℹ️ Check {c}: not available (Xara build required: {exc})")
     c += 1
 
     print(f"{c}. Xara: FSAM (Fixed-Strut Angle Model)...", end=' ')
@@ -455,8 +446,8 @@ def main():
         ops.uniaxialMaterial('SteelMPF', 2, 400.0, 400.0, 2.0e5, 0.01, 0.01, 18.5, 0.925, 0.15)
         ops.nDMaterial('FSAM', 3, 0.0, 2, 2, 1, 0.006, 0.006, 0.25, 0.5)
         print(f"  ✅ Check {c}: available")
-    except Exception:
-        print(f"  ℹ️ Check {c}: not available (Xara build required)")
+    except Exception as exc:
+        print(f"  ℹ️ Check {c}: not available (Xara build required: {exc})")
     c += 1
 
     print(f"{c}. Xara: E_SFI (Efficient Shear-Flexure Interaction element)...", end=' ')
@@ -475,8 +466,8 @@ def main():
                     '-width', 500.0, 500.0, 500.0, 500.0,
                     '-mat', 3, 3, 3, 3)
         print(f"  ✅ Check {c}: available")
-    except Exception:
-        print(f"  ℹ️ Check {c}: not available (Xara build required)")
+    except Exception as exc:
+        print(f"  ℹ️ Check {c}: not available (Xara build required: {exc})")
     c += 1
 
     # ── Summary ───────────────────────────────────────────────────────

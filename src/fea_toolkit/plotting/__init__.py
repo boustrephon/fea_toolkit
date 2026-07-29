@@ -37,6 +37,8 @@ from .diagnostics import (
 
 from .interactive_viewer import plot_interactive_viewer
 
+from .report import plot_storey_forces
+
 
 __all__ = [
     # Viewer
@@ -69,4 +71,6 @@ __all__ = [
     "plot_disconnected_nodes",
     # Interactive
     "plot_interactive_viewer",
+    # Reports
+    "plot_storey_forces",
 ]
