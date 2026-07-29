@@ -1370,4 +1370,4 @@ class SAP2000Parser:
             ))
         return loads
 
-print('Loaded S2K Parser')
+# print('Loaded S2K Parser')

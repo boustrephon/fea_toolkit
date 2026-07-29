@@ -302,7 +302,7 @@ def main():
     )
     parser.add_argument(
         '--quick', action='store_true',
-        help='Skip the full pushover and additional API checks (checks 1-3 only).',
+        help='Run only checks 1-3 (setup, gravity, pushover).',
     )
     parser.add_argument(
         '--verify-all', action='store_true',
