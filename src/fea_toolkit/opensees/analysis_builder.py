@@ -955,8 +955,10 @@ class AnalysisBuilder:
 
             # Reuse existing tag if already assigned for this name,
             # keeping tags stable across repeated build_domain calls.
-            if name in self.material_tags:
-                current_tag = self.material_tags[name]
+            # Use dedicated _nd_material_tags namespace so nD material
+            # names do not collide with uniaxial material names.
+            if name in getattr(self, '_nd_material_tags', {}):
+                current_tag = self._nd_material_tags[name]
                 is_new = False
             else:
                 current_tag = tag
@@ -982,7 +984,9 @@ class AnalysisBuilder:
                 self._skipped_nd_materials.add(name)
                 continue
 
-            self.material_tags[name] = current_tag
+            if not hasattr(self, '_nd_material_tags'):
+                self._nd_material_tags = {}
+            self._nd_material_tags[name] = current_tag
             if is_new:
                 tag += 1
                 created += 1
@@ -1069,6 +1073,10 @@ class AnalysisBuilder:
                     skip_section = True
                     break
                 mat_tag = self.material_tags.get(layer.nd_material)
+                if mat_tag is None:
+                    # Also check dedicated nD material tag namespace
+                    nd_tags = getattr(self, '_nd_material_tags', {})
+                    mat_tag = nd_tags.get(layer.nd_material)
                 if mat_tag is None:
                     if self.config.get('verbose', False):
                         print(f"  ⚠ nD material '{layer.nd_material}' not found "
@@ -3766,6 +3774,9 @@ class AnalysisBuilder:
             the equilibrium imbalance ``Δ = applied + reaction``
             (should be near zero for a correctly built model).
         """
+        # TODO: Move `import pandas as pd` to module-level when the
+        # optional dependency is declared in pyproject.toml (currently `pandas`
+        # is not listed as a dependency, so the lazy import avoids breakage).
         import pandas as pd
 
         rows: list = []
@@ -4203,8 +4214,11 @@ class AnalysisBuilder:
         record_node_tags: Set[int] = set()
         if record:
             if record_sel is not None:
+                # Pass storey data if available in config (for story-based Selection filtering)
+                _storey_data = self.config.get("pushover_record_storey_data", None)
                 record_frames, record_areas = record_sel.resolve_to_mesh_sets(
                     self.mesh_model,
+                    storey_data=_storey_data,
                 )
             else:
                 record_frames = {
@@ -4215,10 +4229,24 @@ class AnalysisBuilder:
                     aid for aid, ae in self.mesh_model.area_elements.items()
                     if not getattr(ae, 'inactive', False)
                 }
-            # Collect all node tags for per-step displacement recording
-            record_node_tags = {
-                nd.node_tag for nd in self.mesh_model.nodes.values()
-            }
+            # Collect node tags from selected frames/areas only
+            record_node_tags: Set[int] = set()
+            for eid in record_frames:
+                fe = self.mesh_model.frame_elements.get(eid)
+                if fe is None:
+                    continue
+                for nid in (fe.node_i, fe.node_j):
+                    nd = self.mesh_model.nodes.get(nid)
+                    if nd is not None:
+                        record_node_tags.add(nd.node_tag)
+            for aid in record_areas:
+                ae = self.mesh_model.area_elements.get(aid)
+                if ae is None:
+                    continue
+                for nid in ae.node_ids:
+                    nd = self.mesh_model.nodes.get(nid)
+                    if nd is not None:
+                        record_node_tags.add(nd.node_tag)
             if print_progress and (record_frames or record_areas):
                 print(f"  Recording {len(record_frames)} frame(s) + "
                       f"{len(record_areas)} area(s) + "
@@ -4683,10 +4711,8 @@ def _record_step(
         node_disp: Dict[int, Tuple[float, float, float]] = {}
         for tag in node_tags:
             try:
-                dx = ops.nodeDisp(tag, 1)
-                dy = ops.nodeDisp(tag, 2)
-                dz = ops.nodeDisp(tag, 3)
-                node_disp[tag] = (float(dx), float(dy), float(dz))
+                d = ops.nodeDisp(tag)  # list: [dx, dy, dz, rx, ry, rz]
+                node_disp[tag] = (float(d[0]), float(d[1]), float(d[2]))
             except Exception:
                 continue
         data["node_displacements"] = node_disp

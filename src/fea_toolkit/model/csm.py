@@ -19,6 +19,7 @@ and convergence detection via relative tolerance and stall detection.
 from __future__ import annotations
 
 import math
+import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -74,14 +75,12 @@ def bilinearize_stiffness_change(
     S_d_peak = float(S_d_arr[peak_idx])
     S_a_peak = float(S_a_arr[peak_idx])
 
-    # initial elastic stiffness: first non-zero secant
-    K_init = float(S_a_arr[1] / max(S_d_arr[1], 1e-12)) if S_d_arr[0] < 1e-12 else 0.0
-    if K_init < 1e-12:
-        # fallback: use first two points
-        for i in range(1, len(S_d_arr)):
-            if S_d_arr[i] > 1e-12 and S_a_arr[i] > 1e-12:
-                K_init = S_a_arr[i] / S_d_arr[i]
-                break
+    # initial elastic stiffness: first point with positive S_d and S_a
+    K_init = 0.0
+    for i in range(0, len(S_d_arr)):
+        if S_d_arr[i] > 1e-12 and S_a_arr[i] > 1e-12:
+            K_init = S_a_arr[i] / S_d_arr[i]
+            break
     if K_init < 1e-12:
         K_init = S_a_peak / max(S_d_peak, 1e-12)
 
@@ -138,7 +137,13 @@ def bilinearize_equal_energy(
             - ``peak_idx`` (int, optional): Auto-detected from argmax.
 
     Returns:
-        Tuple (S_dy, S_ay, method) where method is ``'equal_energy'``.
+        Tuple ``(S_dy, S_ay, method)`` where *method* is one of:
+
+        - ``'equal_energy'`` — converged to tolerance.
+        - ``'equal_energy_degenerate'`` — yield acceleration collapsed
+          to zero (degenerate capacity curve).
+        - ``'equal_energy_not_converged'`` — ``max_iter`` exhausted
+          without reaching tolerance (a warning is emitted).
 
     Edge cases:
         - No clear yield (S_dy >= 90 % of peak) → yield at peak (mu = 1).
@@ -164,13 +169,12 @@ def bilinearize_equal_energy(
         S_ay = S_a_peak
         return S_d_peak, S_ay, "equal_energy"
 
-    # Initial elastic stiffness (first non-zero secant)
-    K_init = float(S_a_arr[1] / max(S_d_arr[1], 1e-12)) if S_d_arr[0] < 1e-12 else 0.0
-    if K_init < 1e-12:
-        for i in range(1, peak_idx):
-            if S_d_arr[i] > 1e-12 and S_a_arr[i] > 1e-12:
-                K_init = S_a_arr[i] / S_d_arr[i]
-                break
+    # Initial elastic stiffness (first point with positive S_d and S_a)
+    K_init = 0.0
+    for i in range(0, peak_idx):
+        if S_d_arr[i] > 1e-12 and S_a_arr[i] > 1e-12:
+            K_init = S_a_arr[i] / S_d_arr[i]
+            break
     if K_init < 1e-12:
         K_init = S_a_peak / max(S_d_peak, 1e-12)
 
@@ -195,12 +199,19 @@ def bilinearize_equal_energy(
     if S_dy <= S_d_arr[0]:
         S_dy = float(S_d_arr[1] if len(S_d_arr) > 1 else S_d_arr[0])
 
+    converged = False
+    err = 0.0
+
     for _iteration in range(max_iter):
         if S_dy <= S_d_arr[0]:
             S_dy = float(S_d_arr[0])
         if S_dy >= S_d_peak:
             S_dy = S_d_peak
             S_ay = S_a_peak
+            # Reaching the peak boundary is not inherently degenerate;
+            # the 90 % sanity check after the loop handles this case
+            # and sets converged = True.  Return the same label as
+            # the old code so callers see "equal_energy".
             return S_dy, S_ay, "equal_energy"
 
         # S_a at S_dy (interpolate capacity curve)
@@ -209,8 +220,10 @@ def bilinearize_equal_energy(
         S_ay = min(S_ay_elastic, S_a_at_dy)
 
         if S_ay <= 0:
-            S_dy = S_d_peak * 1.5  # move away from zero
-            continue
+            # Degenerate curve — yield acceleration collapsed to zero.
+            S_dy = S_d_peak
+            S_ay = S_a_peak
+            return S_dy, S_ay, "equal_energy_degenerate"
 
         # Area under bilinear curve up to peak
         A_bilin = 0.5 * S_ay * S_dy + S_ay * (S_d_peak - S_dy)
@@ -219,6 +232,7 @@ def bilinearize_equal_energy(
         err = (A_bilin - A_cap) / max(A_cap, 1e-12)
 
         if abs(err) < tol:
+            converged = True
             break
 
         # Update: increase S_dy if area too small, decrease if too large
@@ -231,6 +245,16 @@ def bilinearize_equal_energy(
     if S_dy >= 0.90 * S_d_peak:
         S_dy = S_d_peak
         S_ay = S_a_peak
+        converged = True
+
+    if not converged:
+        warnings.warn(
+            f"bilinearize_equal_energy did not converge after "
+            f"{max_iter} iterations (err={err:.2e}); using "
+            f"last-iteration values.",
+            RuntimeWarning,
+        )
+        return S_dy, S_ay, "equal_energy_not_converged"
 
     return S_dy, S_ay, "equal_energy"
 
@@ -458,6 +482,19 @@ def compute_performance_point(
     S_a_arr = np.array(adrs["S_a"])
     S_d_arr = np.array(adrs["S_d"])
 
+    # Validate array lengths before masking
+    ctrl_raw = pushover_results.get("control_disp", [0])
+    shear_raw = pushover_results.get("base_shear", [0])
+    n_ctrl = len(ctrl_raw)
+    n_adrs = len(S_d_arr)
+    if n_ctrl != n_adrs:
+        raise ValueError(
+            f"control_disp length ({n_ctrl}) does not match ADRS capacity "
+            f"length ({n_adrs}). The control_disp and base_shear arrays "
+            f"must have the same length as the pushover data before ADRS "
+            f"conversion."
+        )
+
     # Filter out negative / zero values
     mask = (S_d_arr > 1e-12) & (S_a_arr > 1e-12)
     S_d_arr = S_d_arr[mask]
@@ -471,8 +508,8 @@ def compute_performance_point(
     M_eff = adrs["M_eff"]
     phi_control = adrs["phi_control"]
     best_mode = adrs.get("best_mode", 0)
-    control_disp = np.array(pushover_results.get("control_disp", [0]))[mask]
-    base_shear = np.array(pushover_results.get("base_shear", [0]))[mask]
+    control_disp = np.array(ctrl_raw)[mask]
+    base_shear = np.array(shear_raw)[mask]
 
     # 2. Bilinearise the capacity spectrum (find yield point)
     _bilin_map = {
@@ -495,7 +532,13 @@ def compute_performance_point(
 
     # First-mode elastic period from modal analysis
     modal_periods = modal_results.get("periods", [])
-    best_mode_period = float(modal_periods[best_mode]) if best_mode < len(modal_periods) else 1.0
+    # Normalise best_mode to 0-based index for modal_periods list access.
+    # If mode_shapes keys are 1-based (e.g. {1: ..., 2: ...}), convert.
+    if mode_shapes and min(mode_shapes.keys()) == 1:
+        best_mode_idx = max(best_mode - 1, 0)
+    else:
+        best_mode_idx = best_mode
+    best_mode_period = float(modal_periods[best_mode_idx]) if best_mode_idx < len(modal_periods) else 1.0
 
     peak_idx = int(np.argmax(S_a_arr))
     S_d_peak = float(S_d_arr[peak_idx])
@@ -603,7 +646,7 @@ def compute_performance_point(
         V_p = float(np.interp(S_dp, S_d_arr, base_shear))
         D_p = float(np.interp(S_dp, S_d_arr, control_disp))
 
-    T_eq_final = 2.0 * math.pi * math.sqrt(S_dp / max(S_ap, 1e-12))
+    T_eq_final = 2.0 * math.pi * math.sqrt(S_dp / max(S_ap * g, 1e-12))
     mu_final = max(S_dp / max(S_dy, 1e-12), 1.0)
 
     return {
@@ -764,19 +807,27 @@ def pushover_to_adrs(
     else:
         Gamma = L / M_star
         M_eff = L**2 / M_star
-        # Control node = roof node (highest Z)
-        roof_tag = max(
-            (tag for tag in pushover_results.get("node_coords", {}).keys()
-             if tag in best_shape),
-            key=lambda t: pushover_results.get("node_coords", {}).get(t, (0, 0, 0))[2],
-            default=None,
-        )
-        if roof_tag is not None:
-            phi_control = [best_shape[roof_tag][0],
-                           best_shape[roof_tag][1],
-                           best_shape[roof_tag][2]][dir_idx]
+        # Use control/monitor node from pushover_results if available,
+        # otherwise fall back to the roof node (highest Z).
+        node_coords = pushover_results.get("node_coords", {})
+        cntl_tag = pushover_results.get("control_node_tag", None)
+        if cntl_tag is not None and cntl_tag in best_shape:
+            phi_control = [best_shape[cntl_tag][0],
+                           best_shape[cntl_tag][1],
+                           best_shape[cntl_tag][2]][dir_idx]
         else:
-            phi_control = 1.0
+            roof_tag = max(
+                (tag for tag in node_coords.keys()
+                 if tag in best_shape),
+                key=lambda t: node_coords.get(t, (0, 0, 0))[2],
+                default=None,
+            )
+            if roof_tag is not None:
+                phi_control = [best_shape[roof_tag][0],
+                               best_shape[roof_tag][1],
+                               best_shape[roof_tag][2]][dir_idx]
+            else:
+                phi_control = 1.0
 
     control_disp = np.array(pushover_results.get("control_disp", []), dtype=float)
     base_shear = np.array(pushover_results.get("base_shear", []), dtype=float)
@@ -791,10 +842,11 @@ def pushover_to_adrs(
             "best_mode": best_mode,
         }
 
-    # S_a in g, S_d in model length units
+    # S_a in g (dimensionless: base_shear / (M_eff * g)),
+    # S_d in model length units.
     pc = 1.0 if phi_control is None else abs(phi_control)
-    S_a = base_shear / (M_eff * g * pc)
-    S_d = control_disp / (Gamma * pc)
+    S_a = base_shear / (M_eff * g)        # g units, pc does NOT belong here
+    S_d = control_disp / (Gamma * pc)      # pc applies only to S_d
 
     return {
         "S_a": S_a.tolist(),
@@ -812,13 +864,12 @@ def pushover_to_adrs(
 
 
 def compute_equivalent_damping(
-    alpha: float,
-    Ke: float,
-    S_dy: float,
-    S_ay: float,
     mu: float,
+    alpha: float = 0.0,
+    beta_0: float = 0.05,
+    kappa: float = 0.33,
 ) -> float:
-    """Compute equivalent viscous damping per ATC‑40.
+    """Compute equivalent viscous damping per ATC‑40 Eqn 5‑19.
 
     .. math::
 
@@ -827,26 +878,22 @@ def compute_equivalent_damping(
         {\\mu (1 + \\alpha \\mu - \\alpha)}
 
     where:
-    - β₀ = 0.05 (inherent damping)
-    - κ = 0.33 (damping modification factor for typical existing buildings)
+    - β₀ = inherent (elastic) damping ratio
+    - κ = damping modification factor
     - α = post‑yield stiffness ratio
     - μ = ductility = Sd_max / S_dy
 
     Args:
-        alpha: Post‑yield stiffness ratio (0..1).
-        Ke: Elastic stiffness.
-        S_dy: Yield displacement.
-        S_ay: Yield spectral acceleration.
         mu: Ductility demand (≥1).
+        alpha: Post‑yield stiffness ratio (0..1, default 0.0).
+        beta_0: Inherent elastic damping ratio (default 0.05).
+        kappa: Damping modification factor (default 0.33, ATC‑40 Type C).
 
     Returns:
-        Equivalent viscous damping ratio (0.05 + hysteretic contribution).
+        Equivalent viscous damping ratio (beta_0 + hysteretic contribution).
     """
     if mu <= 1.0:
-        return 0.05
-
-    beta_0 = 0.05
-    kappa = 0.33  # Type C (poor hysteretic behaviour) — conservative
+        return beta_0
 
     # Hysteretic damping per ATC-40 Eqn 5-19
     beta_h = (2.0 / math.pi) * (1.0 - alpha) * (mu - 1.0) / (
@@ -856,73 +903,3 @@ def compute_equivalent_damping(
 
     return float(beta_eff)
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Accessory
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-def _seismic_weight_from_masses(masses: List[float],
-                                 g: float = 9.81) -> float:
-    """Convert nodal masses to seismic weight (W = Σ m_i · g)."""
-    return sum(masses) * g
-
-
-def _control_node_mass(masses: List[float],
-                       mode_shape: List[float]) -> float:
-    """Compute effective modal mass for the control node.
-
-    .. math::
-
-        M^* = Σ m_i · φ_i²
-        L = Σ m_i · φ_i
-        M_eff = L² / M^*
-    """
-    M_star = sum(m * p**2 for m, p in zip(masses, mode_shape))
-    L = sum(m * p for m, p in zip(masses, mode_shape))
-    return L**2 / M_star if M_star > 0 else 0.0
-
-
-def first_mode_period(modal_results: Dict[str, Any]) -> float:
-    """Extract first-mode period from modal results.
-
-    Returns 0.0 if modal results are empty or periods unavailable.
-    """
-    periods = modal_results.get("periods", [])
-    if periods:
-        periods = [float(p) for p in periods]
-        return periods[0]
-    return 0.0
-
-
-def _period_from_stiffness(k_eff: float, m_eff: float) -> float:
-    """Effective period from secant stiffness and effective mass."""
-    if k_eff <= 0 or m_eff <= 0:
-        return 0.0
-    return 2.0 * math.pi * math.sqrt(m_eff / k_eff)
-
-
-def _kappa_damping_factor(beta_eq: float) -> float:
-    """Reduce theoretical hysteresis damping per ATC-40 κ-factor.
-
-    Type-A buildings (good hysteretic behaviour): κ = 1.0
-    Type-B buildings (average): κ = 2/3
-    Type-C buildings (poor): κ = 1/3
-
-    Defaults to Type B (κ = 0.67).
-    """
-    kappa = 2.0 / 3.0
-    return 0.05 + kappa * (beta_eq - 0.05)
-
-
-def _adrs_to_physical(s_d: float, s_a: float,
-                       Gamma: float, M_eff: float,
-                       g: float = 9.81) -> Tuple[float, float]:
-    """Convert ADRS coordinates back to physical displacement and base shear.
-
-    D_roof = S_d · Γ · φ_control
-    V_base = S_a · M_eff · g / φ_control
-    """
-    D_roof = s_d * Gamma * 1.0  # φ_control = 1.0 (normalised)
-    V_base = s_a * M_eff * g / 1.0
-    return D_roof, V_base

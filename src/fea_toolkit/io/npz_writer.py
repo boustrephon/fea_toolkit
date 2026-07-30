@@ -383,7 +383,7 @@ def write_results_npz(
         [datetime.datetime.now().isoformat()], dtype=str)
 
     path = str(Path(path).resolve())
-    np.savez_compressed(path, **arrays)
+    np.savez_compressed(path, allow_pickle=True, **arrays)
     return path
 
 
@@ -438,11 +438,12 @@ def _collect_pushover(
             f"frame_{k}": np.full((n_step, n_frame), np.nan, dtype=float)
             for k in comp_keys
         }
+        frame_id_to_idx = {eid: i for i, eid in enumerate(frame_ids)}
         for si, sd in enumerate(step_results):
             for eid, forces in sd.get("frame_forces", {}).items():
-                if eid not in frame_ids:
+                if eid not in frame_id_to_idx:
                     continue
-                j = frame_ids.index(eid)
+                j = frame_id_to_idx[eid]
                 for key in comp_keys:
                     comp_map[f"frame_{key}"][si, j] = forces.get(key, np.nan)
 
@@ -468,11 +469,12 @@ def _collect_pushover(
             f"shell_{k}": np.full((n_step, n_shell), np.nan, dtype=float)
             for k in shell_comp_keys
         }
+        shell_id_to_idx = {aid: i for i, aid in enumerate(shell_ids)}
         for si, sd in enumerate(step_results):
             for aid, forces in sd.get("shell_forces", {}).items():
-                if aid not in shell_ids:
+                if aid not in shell_id_to_idx:
                     continue
-                j = shell_ids.index(aid)
+                j = shell_id_to_idx[aid]
                 for key in shell_comp_keys:
                     shell_comp_map[f"shell_{key}"][si, j] = forces.get(key, np.nan)
 
@@ -587,20 +589,62 @@ def write_pushover_results_npz(
 
     # Add global arrays from pushover_results if provided
     if pushover_results is not None:
-        steps = pushover_results.get("step", [])
-        n = len(steps)
-        if n > 0:
-            key = make_pushover_key(direction, "pushover/{direction}/step")
-            if key not in po_arrays:
-                po_arrays[key] = np.array(steps, dtype=int)
-            key = make_pushover_key(direction, "pushover/{direction}/control_disp")
-            if key not in po_arrays:
-                po_arrays[key] = np.array(
-                    pushover_results.get("control_disp", [0.0] * n), dtype=float)
-            key = make_pushover_key(direction, "pushover/{direction}/base_shear")
-            if key not in po_arrays:
-                po_arrays[key] = np.array(
-                    pushover_results.get("base_shear", [0.0] * n), dtype=float)
+        steps_full = pushover_results.get("step", [])
+        n_full = len(steps_full)
+        if n_full > 0:
+            # Align global arrays with recorded step_results.
+            # step_results only contains entries for converged steps (ok == 0),
+            # while the global arrays (step, control_disp, base_shear) contain
+            # entries for every iteration.  Subset the global arrays so they
+            # match the per-element force arrays in po_arrays.
+            recorded_steps = [sd.get("step", 0) for sd in step_results]
+            n_aligned = len(recorded_steps)
+            if n_aligned > 0 and n_aligned <= n_full:
+                # Build an index map: pushover_results step -> index
+                # Steps are 0-based (step 0 is the initial gravity state)
+                # and then 1..num_steps for converged push iterations.
+                # The recorded steps from step_results contain step indices
+                # that match a subset of pushover_results steps.
+                # Use the step_results' step values to align.
+                step_to_idx_full = {int(s): i for i, s in enumerate(steps_full)}
+
+                # Filter global arrays to match recorded steps
+                aligned_steps = []
+                aligned_disp = []
+                aligned_shear = []
+                full_disp = pushover_results.get("control_disp", [0.0] * n_full)
+                full_shear = pushover_results.get("base_shear", [0.0] * n_full)
+                for rs in recorded_steps:
+                    idx = step_to_idx_full.get(rs)
+                    if idx is not None:
+                        aligned_steps.append(int(steps_full[idx]))
+                        aligned_disp.append(float(full_disp[idx]))
+                        aligned_shear.append(float(full_shear[idx]))
+                    # If a recorded step has no match in full arrays, skip
+
+                if aligned_steps:
+                    key = make_pushover_key(direction, "pushover/{direction}/step")
+                    if key not in po_arrays:
+                        po_arrays[key] = np.array(aligned_steps, dtype=int)
+                    key = make_pushover_key(direction, "pushover/{direction}/control_disp")
+                    if key not in po_arrays:
+                        po_arrays[key] = np.array(aligned_disp, dtype=float)
+                    key = make_pushover_key(direction, "pushover/{direction}/base_shear")
+                    if key not in po_arrays:
+                        po_arrays[key] = np.array(aligned_shear, dtype=float)
+            else:
+                # Fallback: write full arrays (unlikely, but handles edge case)
+                key = make_pushover_key(direction, "pushover/{direction}/step")
+                if key not in po_arrays:
+                    po_arrays[key] = np.array(steps_full, dtype=int)
+                key = make_pushover_key(direction, "pushover/{direction}/control_disp")
+                if key not in po_arrays:
+                    po_arrays[key] = np.array(
+                        pushover_results.get("control_disp", [0.0] * n_full), dtype=float)
+                key = make_pushover_key(direction, "pushover/{direction}/base_shear")
+                if key not in po_arrays:
+                    po_arrays[key] = np.array(
+                        pushover_results.get("base_shear", [0.0] * n_full), dtype=float)
 
     arrays.update(po_arrays)
 
@@ -612,5 +656,5 @@ def write_pushover_results_npz(
         [datetime.datetime.now().isoformat()], dtype=str)
 
     path = str(Path(path).resolve())
-    np.savez_compressed(path, **arrays)
+    np.savez_compressed(path, allow_pickle=True, **arrays)
     return path

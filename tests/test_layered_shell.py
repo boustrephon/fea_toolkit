@@ -12,6 +12,7 @@ import pytest
 import openseespy.opensees as ops
 
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+from fea_toolkit.opensees.preprocessor import Preprocessor
 from fea_toolkit.model.mesh_model import MeshModel
 from fea_toolkit.model.sap_data import (
     NDMaterial,
@@ -21,6 +22,10 @@ from fea_toolkit.model.sap_data import (
     Material,
     AreaElement,
     Node,
+    SAPModelData,
+    FrameElement,
+    FrameDistributedLoad,
+    Restraint,
 )
 
 
@@ -140,8 +145,8 @@ class TestLayeredShellBuild:
         builder = AnalysisBuilder(mm, {"verbose": False})
         builder.build_domain()
 
-        assert "conc1" in builder.material_tags
-        conc_tag = builder.material_tags["conc1"]
+        assert "conc1" in builder._nd_material_tags
+        conc_tag = builder._nd_material_tags["conc1"]
         assert isinstance(conc_tag, int) and conc_tag > 0
 
         assert "wall_section" in builder._shell_sec_tags
@@ -183,8 +188,8 @@ class TestLayeredShellBuild:
         builder = AnalysisBuilder(mm, {"verbose": False})
         builder.build_domain()
 
-        assert "concrete" in builder.material_tags
-        assert "rebar" in builder.material_tags
+        assert "concrete" in builder._nd_material_tags
+        assert "rebar" in builder._nd_material_tags
         assert "wall_section" in builder._shell_sec_tags
         assert len(builder._skipped_nd_materials) == 0
 
@@ -259,7 +264,7 @@ class TestLayeredShellBuild:
         builder = AnalysisBuilder(mm, {"verbose": False})
         builder.build_domain()
 
-        assert "good_conc" in builder.material_tags
+        assert "good_conc" in builder._nd_material_tags
         assert "bad_stuff" in builder._skipped_nd_materials
         assert "valid_wall" in builder._shell_sec_tags
         assert "invalid_wall" not in builder._shell_sec_tags
@@ -343,7 +348,7 @@ class TestLayeredShellBuild:
         # No collisions — all values are unique
         assert len(set(builder._shell_sec_tags.values())) == len(builder._shell_sec_tags)
         # nD material tag should also still exist
-        assert "concrete" in builder.material_tags
+        assert "concrete" in builder._nd_material_tags
         # The stale non-layered tag was cleared again (did not resurrect)
         assert "old_stale_elastic_shell" not in builder._shell_sec_tags
 
@@ -432,7 +437,7 @@ class TestLayeredShellBuild:
         # ── Build 1: supported ──
         builder = AnalysisBuilder(mm_supported, {"verbose": False})
         builder.build_domain()
-        assert "flex_mat" in builder.material_tags
+        assert "flex_mat" in builder._nd_material_tags
         assert "flex_section" in builder._shell_sec_tags
         assert len(builder._skipped_nd_materials) == 0
         flex_section_tag = builder._shell_sec_tags["flex_section"]
@@ -455,10 +460,164 @@ class TestLayeredShellBuild:
         # Skip sets were cleared at start of build_domain
         assert len(builder._skipped_nd_materials) == 0
         # flex_mat should be created now
-        assert "flex_mat" in builder.material_tags
+        assert "flex_mat" in builder._nd_material_tags
         # flex_section should be recreated with a fresh tag
         assert "flex_section" in builder._shell_sec_tags
         # Tag may differ from build 1 (after the intervening unsupported build
         # cleared the tag), but it must be a valid positive integer.
         recreated_tag = builder._shell_sec_tags["flex_section"]
         assert isinstance(recreated_tag, int) and recreated_tag > 0
+
+
+# ── Preprocessor nd_materials tests ────────────────────────────────
+
+def _minimal_sap_model_data(units=None):
+    """Build a minimal SAPModelData that survives Preprocessor.run().
+
+    Provides one node, one material, one section, and a single frame
+    element so the topology pipeline runs without error.  Most of the
+    heavy work (splitting, meshing) is skipped when ``split_elements``
+    and ``create_shells`` are False.
+    """
+    if units is None:
+        units = {"F": "kN", "L": "m", "T": "C"}
+    return SAPModelData(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=5.0, y=0.0, z=0.0),
+        },
+        materials={
+            "steel": Material(
+                name="steel", type="Steel",
+                E_mod=200.0e9, nu=0.3,
+                unit_weight=0.0, unit_mass=0.0,
+            ),
+        },
+        sections={
+            "beam_sec": ShellSection(
+                name="beam_sec", shape="ShellSection",
+                material="steel", thickness=0.1,
+            ),
+        },
+        frame_elements={
+            "f1": FrameElement(
+                elem_id="f1", elem_tag=10,
+                node_i="1", node_j="2",
+            ),
+        },
+        area_elements={},
+        frame_assignments={"f1": "beam_sec"},
+        area_assignments={},
+        groups={},
+        restraints={
+            "1": Restraint(dofs=[1, 1, 1, 1, 1, 1]),
+        },
+        load_cases={},
+        load_patterns={},
+        mass_sources={},
+        joint_loads=[],
+        frame_gravity_loads=[],
+        area_gravity_loads=[],
+        area_uniform_loads=[],
+        frame_dist_loads=[],
+        frame_end_offsets={},
+        frame_auto_mesh={},
+        units=units,
+    )
+
+
+class TestPreprocessorNdMaterials:
+    """Verify Preprocessor._resolve_element_properties nd_materials path.
+
+    Ensures the config->nd_materials path is exercised through
+    Preprocessor.run() so any future refactoring of the validation or
+    scaling logic is caught.
+    """
+
+    def test_invalid_nd_material_key_raises_valueerror(self):
+        """Passing an unknown key in config['nd_materials'] raises ValueError."""
+        model_data = _minimal_sap_model_data()
+        config = {
+            "split_elements": False,
+            "create_shells": False,
+            "verbose": False,
+            "nd_materials": {
+                "mat1": {
+                    "E": 200.0e9,
+                    "nu": 0.3,
+                    "not_a_valid_field": 42,  # ← unknown key
+                },
+            },
+        }
+        pre = Preprocessor(config)
+        with pytest.raises(ValueError, match="Invalid key.*nd_materials.*mat1"):
+            pre.run(model_data)
+
+    def test_stress_fields_scaled_in_mesh_model(self):
+        """Stress-valued fields are scaled from SI Pa to model units.
+
+        Uses kN-m units where stress_scale_factor = 0.001, so
+        400 MPa (SI) → 400 kPa (model).
+        """
+        model_data = _minimal_sap_model_data(units={"F": "kN", "L": "m", "T": "C"})
+        config = {
+            "split_elements": False,
+            "create_shells": False,
+            "verbose": False,
+            "nd_materials": {
+                "steel_mat": {
+                    "material_type": "J2PlateFibre",
+                    "E": 200.0e9,
+                    "nu": 0.3,
+                    "fy": 400.0e6,       # 400 MPa in SI Pa
+                    "Hiso": 0.0,
+                    "Hkin": 0.01e9,       # 10 MPa hardening → scaled
+                },
+            },
+        }
+        pre = Preprocessor(config)
+        mesh_model = pre.run(model_data)
+
+        assert "steel_mat" in mesh_model.nd_materials
+        mat = mesh_model.nd_materials["steel_mat"]
+
+        # In kN-m units: stress_scale = 0.001 (Pa → kPa)
+        # Check that scaling was applied:
+        #   fy: 400.0e6 Pa → 400.0e3 kPa
+        #   Hkin: 0.01e9 Pa → 10.0e3 kPa
+        # Allow for floating-point rounding
+        assert abs(mat.fy - 400.0e3) < 1.0, f"Expected fy≈400e3, got {mat.fy}"
+        assert abs(mat.Hkin - 10.0e3) < 1.0, f"Expected Hkin≈10e3, got {mat.Hkin}"
+
+        # Non-stress fields (nu, material_type) must pass through unchanged
+        assert mat.nu == 0.3
+        assert mat.material_type == "J2PlateFibre"
+
+    def test_stress_fields_scaled_si_units(self):
+        """With SI units (N-m), stress_scale_factor = 1.0 → no change."""
+        model_data = _minimal_sap_model_data(units={"F": "N", "L": "m", "T": "C"})
+        config = {
+            "split_elements": False,
+            "create_shells": False,
+            "verbose": False,
+            "nd_materials": {
+                "conc_mat": {
+                    "material_type": "ConcreteS",
+                    "E": 30.0e9,
+                    "nu": 0.2,
+                    "fc": 30.0e6,
+                    "ft": 2.0e6,
+                    "Es": 30.0e9,
+                },
+            },
+        }
+        pre = Preprocessor(config)
+        mesh_model = pre.run(model_data)
+
+        assert "conc_mat" in mesh_model.nd_materials
+        mat = mesh_model.nd_materials["conc_mat"]
+        # SI → SI: values should be unchanged
+        assert mat.E == 30.0e9
+        assert mat.fc == 30.0e6
+        assert mat.ft == 2.0e6
+        assert mat.Es == 30.0e9
