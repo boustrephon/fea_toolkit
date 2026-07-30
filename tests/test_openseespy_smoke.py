@@ -1,12 +1,22 @@
 """Smoke test: verify_openseespy.py runs without error."""
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
 SCRIPT = EXAMPLES_DIR / "verify_openseespy.py"
+
+openseespy_available = importlib.util.find_spec("openseespy") is not None
+
+pytestmark = pytest.mark.skipif(
+    not openseespy_available,
+    reason="openseespy not installed",
+)
 
 
 def test_openseespy_smoke_quick():
@@ -15,6 +25,7 @@ def test_openseespy_smoke_quick():
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--quick"],
         capture_output=True, text=True,
+        timeout=120,
     )
     print(result.stdout)
     if result.returncode != 0:
@@ -31,6 +42,7 @@ def test_openseespy_smoke_full():
     result = subprocess.run(
         [sys.executable, str(SCRIPT)],
         capture_output=True, text=True,
+        timeout=600,
     )
     print(result.stdout)
     if result.returncode != 0:
