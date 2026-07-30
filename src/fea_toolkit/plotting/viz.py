@@ -143,7 +143,8 @@ def _resolve_pushover_data(
                     sd["shell_forces"][aid] = sf
 
             # Node displacements
-            if node_disp_x is not None and node_disp_y is not None and node_disp_z is not None:
+            if (node_disp_x is not None and node_disp_y is not None
+                    and node_disp_z is not None and node_tags_arr is not None):
                 nd = {}
                 for ni in range(len(node_tags_arr)):
                     tag = int(node_tags_arr[ni])
@@ -162,7 +163,7 @@ def _resolve_pushover_data(
         for i in range(len(frame_sap)):
             frame_eid_to_nodes[str(frame_sap[i])] = (int(frame_ni[i]), int(frame_nj[i]))
 
-        return step_results, node_coords, list(node_tags_arr), frame_eid_to_nodes
+        return step_results, node_coords, list(node_tags_arr) if node_tags_arr is not None else [], frame_eid_to_nodes
 
     if isinstance(data, list):
         # Raw step results list
@@ -254,6 +255,74 @@ def _compute_hinge_ratios(
     return ratios
 
 
+def _compute_hinge_ratios_all_steps(
+    all_frame_forces: List[Dict[str, Dict[str, float]]],
+    use_biaxial: bool = False,
+) -> List[Dict[str, Tuple[float, float]]]:
+    """Compute hinge yield ratios using peak capacities across all steps.
+
+    For each element, the peak My and Mz are determined across *all*
+    provided steps, then each step's forces are normalised against
+    these fixed capacities.  This ensures that the colour mapping is
+    consistent across the entire pushover (a ratio of 1.0 means the
+    element reached its peak observed moment, regardless of which step
+    that occurred at).
+
+    Args:
+        all_frame_forces: List of per-step ``{eid: {my_i, my_j, mz_i, mz_j}}``
+            dicts, one entry per push step.
+        use_biaxial: If True, compute SRSS of My/Mp_y and Mz/Mp_z.
+
+    Returns:
+        List of ``{eid: (ratio_i, ratio_j)}``, one per step, using
+        globally-peak capacities for normalisation.
+    """
+    if not all_frame_forces:
+        return []
+
+    # Step 1: compute global peak capacities across all steps
+    peak_my: Dict[str, float] = {}
+    peak_mz: Dict[str, float] = {}
+    for step_forces in all_frame_forces:
+        for eid, ff in step_forces.items():
+            my_i = abs(ff.get('my_i', 0.0))
+            my_j = abs(ff.get('my_j', 0.0))
+            mz_i = abs(ff.get('mz_i', 0.0))
+            mz_j = abs(ff.get('mz_j', 0.0))
+            peak_my[eid] = max(peak_my.get(eid, 0.0), my_i, my_j)
+            peak_mz[eid] = max(peak_mz.get(eid, 0.0), mz_i, mz_j)
+
+    # Step 2: normalise each step against the fixed capacities
+    step_ratios: List[Dict[str, Tuple[float, float]]] = []
+    for step_forces in all_frame_forces:
+        ratios: Dict[str, Tuple[float, float]] = {}
+        for eid, ff in step_forces.items():
+            if use_biaxial:
+                cap_y = peak_my.get(eid, 1e-12)
+                cap_z = peak_mz.get(eid, 1e-12)
+                safe_cap_y = cap_y if cap_y > 1e-12 else 1e-12
+                safe_cap_z = cap_z if cap_z > 1e-12 else 1e-12
+                my_i = abs(ff.get('my_i', 0.0))
+                my_j = abs(ff.get('my_j', 0.0))
+                mz_i = abs(ff.get('mz_i', 0.0))
+                mz_j = abs(ff.get('mz_j', 0.0))
+                r_i = math.sqrt((my_i / safe_cap_y)**2 + (mz_i / safe_cap_z)**2)
+                r_j = math.sqrt((my_j / safe_cap_y)**2 + (mz_j / safe_cap_z)**2)
+                ratios[eid] = (r_i, r_j)
+            else:
+                cap = peak_mz.get(eid, 1e-12)
+                if cap < 1e-12:
+                    ratios[eid] = (0.0, 0.0)
+                else:
+                    ratios[eid] = (
+                        abs(ff.get('mz_i', 0.0)) / cap,
+                        abs(ff.get('mz_j', 0.0)) / cap,
+                    )
+        step_ratios.append(ratios)
+
+    return step_ratios
+
+
 def _ratio_to_color(ratio: float, max_r: float = 1.0) -> Tuple[float, float, float]:
     """Map hinge ratio [0, max_r] to (blue, yellow, red) RGB.
 
@@ -292,12 +361,25 @@ def _add_hinge_color_legend(
     Builds a :class:`pyvista.LookupTable` using the same interpolation
     as :func:`_ratio_to_color` and attaches it to the plotter.
 
+    The colour scale maps the normalised yield ratio to:
+
+    * **Blue** (ratio < 0.5) — elastic.
+    * **Yellow** (0.5 ≤ ratio < 1.0) — yielding.
+    * **Red** (ratio ≥ 1.0) — fully yielded.
+
+    Internally uses ``pyvista.LookupTable`` with ``n_values`` and ``values``
+    attributes (not ``number_of_colors`` or ``table``, which were removed
+    in PyVista v0.44+).  The ``lookup_table`` kwarg to
+    ``plotter.add_scalar_bar()`` is also version-dependent — a
+    ``TypeError`` fallback omits it for older PyVista installations.
+
     Args:
         plotter: PyVista Plotter to add the legend to.
         title: Title text above the scalar bar.
         position_x, position_y: Normalised position of the scalar bar.
         width, height: Normalised size of the scalar bar.
-        n_colors: Number of discrete colour steps in the lookup table.
+        n_colors: Number of discrete colour steps in the lookup table
+            (sets ``LookupTable.n_values``).
     """
     import numpy as np
     try:
@@ -307,7 +389,7 @@ def _add_hinge_color_legend(
 
     # Build lookup table using same blue→yellow→red logic as _ratio_to_color
     lut = pv.LookupTable()
-    lut.number_of_colors = n_colors
+    lut.n_values = n_colors
     lut.scalar_range = (0.0, 1.0)
     colors = np.zeros((n_colors, 3), dtype=np.uint8)
     for i in range(n_colors):
@@ -319,21 +401,36 @@ def _add_hinge_color_legend(
             s = (t - 0.5) * 2.0
             r, g, b = 1.0, 1.0 - s, 0.0
         colors[i] = (int(r * 255), int(g * 255), int(b * 255))
-    lut.table = colors
+    lut.values = colors
 
-    plotter.add_scalar_bar(
-        title=title,
-        position_x=position_x,
-        position_y=position_y,
-        width=width,
-        height=height,
-        lookup_table=lut,
-        title_font_size=10,
-        label_font_size=8,
-        bold=False,
-        italic=False,
-        shadow=False,
-    )
+    try:
+        plotter.add_scalar_bar(
+            title=title,
+            position_x=position_x,
+            position_y=position_y,
+            width=width,
+            height=height,
+            lookup_table=lut,
+            title_font_size=10,
+            label_font_size=8,
+            bold=False,
+            italic=False,
+            shadow=False,
+        )
+    except TypeError:
+        # Older PyVista versions don't accept lookup_table as a kwarg
+        plotter.add_scalar_bar(
+            title=title,
+            position_x=position_x,
+            position_y=position_y,
+            width=width,
+            height=height,
+            title_font_size=10,
+            label_font_size=8,
+            bold=False,
+            italic=False,
+            shadow=False,
+        )
 
 
 def _add_shell_color_legend(
@@ -350,12 +447,26 @@ def _add_shell_color_legend(
     Builds a :class:`pyvista.LookupTable` using the same interpolation
     as :func:`_ratio_to_shell_color` and attaches it to the plotter.
 
+    The colour scale maps the normalised damage ratio to:
+
+    * **Green** (ratio < 0.7) — elastic.
+    * **Yellow** (0.7 ≤ ratio < 1.0) — yielding.
+    * **Red** (ratio ≥ 1.0) — damaged / crushed.
+    * **Gray** — no data (NaN).
+
+    Internally uses ``pyvista.LookupTable`` with ``n_values`` and ``values``
+    attributes (not ``number_of_colors`` or ``table``, which were removed
+    in PyVista v0.44+).  The ``lookup_table`` kwarg to
+    ``plotter.add_scalar_bar()`` is also version-dependent — a
+    ``TypeError`` fallback omits it for older PyVista installations.
+
     Args:
         plotter: PyVista Plotter to add the legend to.
         title: Title text above the scalar bar.
         position_x, position_y: Normalised position of the scalar bar.
         width, height: Normalised size of the scalar bar.
-        n_colors: Number of discrete colour steps in the lookup table.
+        n_colors: Number of discrete colour steps in the lookup table
+            (sets ``LookupTable.n_values``).
     """
     import numpy as np
     try:
@@ -365,7 +476,7 @@ def _add_shell_color_legend(
 
     # Build lookup table using same green→yellow→red logic as _ratio_to_shell_color
     lut = pv.LookupTable()
-    lut.number_of_colors = n_colors
+    lut.n_values = n_colors
     lut.scalar_range = (0.0, 1.0)
     colors = np.zeros((n_colors, 3), dtype=np.uint8)
     for i in range(n_colors):
@@ -377,21 +488,36 @@ def _add_shell_color_legend(
             s = (t - 0.7) / 0.3
             r, g, b = 1.0, 1.0 - s, 0.0
         colors[i] = (int(r * 255), int(g * 255), int(b * 255))
-    lut.table = colors
+    lut.values = colors
 
-    plotter.add_scalar_bar(
-        title=title,
-        position_x=position_x,
-        position_y=position_y,
-        width=width,
-        height=height,
-        lookup_table=lut,
-        title_font_size=10,
-        label_font_size=8,
-        bold=False,
-        italic=False,
-        shadow=False,
-    )
+    try:
+        plotter.add_scalar_bar(
+            title=title,
+            position_x=position_x,
+            position_y=position_y,
+            width=width,
+            height=height,
+            lookup_table=lut,
+            title_font_size=10,
+            label_font_size=8,
+            bold=False,
+            italic=False,
+            shadow=False,
+        )
+    except TypeError:
+        # Older PyVista versions don't accept lookup_table as a kwarg
+        plotter.add_scalar_bar(
+            title=title,
+            position_x=position_x,
+            position_y=position_y,
+            width=width,
+            height=height,
+            title_font_size=10,
+            label_font_size=8,
+            bold=False,
+            italic=False,
+            shadow=False,
+        )
 
 
 def _add_animation_timer(
@@ -465,6 +591,7 @@ def plot_plastic_hinge_formation(
     displacement_scale: float = 50.0,
     show_deformed: bool = True,
     notebook: bool = False,
+    use_biaxial: bool = False,
     **kwargs,
 ) -> Optional[Any]:
     """Visualise plastic hinge formation as 3D coloured blobs.
@@ -533,11 +660,11 @@ def plot_plastic_hinge_formation(
 
     # ── Pre-compute hinge ratios per step ───────────────────────
     # step_ratios[ei][eid] = (ratio_i, ratio_j)
-    step_ratios: List[Dict[str, Tuple[float, float]]] = []
     step_has_disp = []
+    # Compute peak capacities across all steps for consistent normalization
+    all_frame_forces = [sd.get("frame_forces", {}) for sd in step_results]
+    step_ratios = _compute_hinge_ratios_all_steps(all_frame_forces, use_biaxial=use_biaxial)
     for sd in step_results:
-        ff = sd.get("frame_forces", {})
-        step_ratios.append(_compute_hinge_ratios(ff, use_biaxial=kwargs.get("use_biaxial", False)))
         step_has_disp.append("node_displacements" in sd and bool(sd["node_displacements"]))
 
     # ── Build hinge point locations per frame end ───────────────
@@ -589,25 +716,13 @@ def plot_plastic_hinge_formation(
             all_ratios.append(r)
     max_ratio = max(all_ratios) if all_ratios else 1.0
 
-    def _ratio_to_color(ratio: float, max_r: float = 1.0) -> Tuple[float, float, float]:
-        """Map ratio [0, max_r] to (blue, yellow, red) RGB."""
-        if max_r < 1e-12:
-            return (0.3, 0.45, 0.69)  # default blue
-        norm = min(ratio / max_r, 1.0) if max_r > 0 else 0.0
-        # Interpolate: blue (0) -> yellow (0.5) -> red (1.0)
-        if norm < 0.5:
-            # Blue to yellow: (R,G) from (0.3,0.45) to (1,1); B from 0.69 to 0
-            t = norm / 0.5
-            return (0.3 + 0.7 * t, 0.45 + 0.55 * t, 0.69 * (1.0 - t))
-        else:
-            # Yellow to red: R stays 1, G drops from 1 to 0, B stays 0
-            t = (norm - 0.5) / 0.5
-            return (1.0, 1.0 - t, 0.0)
-
     # ── Create or use existing plotter ───────────────────────────
+    # Consume fea_toolkit-specific kwargs so they aren't forwarded to pv.Plotter
+    _plotter_kwargs = {k: v for k, v in kwargs.items()
+                       if k not in ("use_biaxial",)}
     own_plotter = plotter is None
     if own_plotter:
-        plotter = pv.Plotter(notebook=notebook, **kwargs)
+        plotter = pv.Plotter(notebook=notebook, **_plotter_kwargs)
         # Render the undeformed mesh as background
         _render_scene(plotter, _resolve_mesh_data(data), show_nodes=False)
 
@@ -768,7 +883,7 @@ def plot_plastic_hinge_heatmap(
         step_eids.append(eids_this)
         all_eids.update(eids_this)
 
-        ratios = _compute_hinge_ratios(frame_forces, use_biaxial=kwargs.get("use_biaxial", False))  # {eid: (ri, rj)}
+        ratios = _compute_hinge_ratios(frame_forces)  # {eid: (ri, rj)}
         max_ratios = {}
         for eid, (ri, rj) in ratios.items():
             max_ratios[eid] = max(ri, rj)
@@ -1130,7 +1245,7 @@ def plot_shell_damage_map(
         return None
 
     # ── Build shell geometry ──────────────────────────────────────
-    shell_verts, shell_node_tags = _build_shell_geometry(data, all_shell_ids)
+    shell_verts, shell_node_tags = _resolve_shell_data(data, all_shell_ids)
     if not shell_verts:
         print("No shell geometry found in model source.")
         return None
@@ -1291,6 +1406,8 @@ def plot_pushover_envelope(
     show_frames: bool = True,
     show_shells: bool = False,
     notebook: bool = False,
+    show_original: bool = True,
+    moment_scale: Optional[float] = None,
     **kwargs,
 ) -> Optional[Any]:
     """3D force/moment envelope showing the extreme state across all push steps.
@@ -1403,17 +1520,20 @@ def plot_pushover_envelope(
                        if not k.startswith("_")}
             force_map[idx] = f_entry
 
+    # Consume fea_toolkit-specific kwargs so they aren't forwarded to pv.Plotter
+    _plotter_kwargs = {k: v for k, v in kwargs.items()
+                       if k not in ("show_original", "moment_scale")}
     # ── Create shared plotter ──────────────────────────────────
     pv.set_plot_theme("document")
-    plotter = pv.Plotter(notebook=notebook, **kwargs)
+    plotter = pv.Plotter(notebook=notebook, **_plotter_kwargs)
 
     # ── Render frame force envelope via shared helper ──────────
     if show_frames and force_map:
         _render_frame_force_diagram(
             plotter, data, frames, nodes, force_map,
             quantity, mode,
-            show_original=kwargs.get("show_original", True),
-            moment_scale=kwargs.get("moment_scale"),
+            show_original=show_original,
+            moment_scale=moment_scale,
         )
 
     # ── Render shell envelope (peak damage quads) ──────────────
@@ -1456,6 +1576,7 @@ def animate_pushover_deformation(
     notebook: bool = False,
     save_html: Optional[str] = None,
     animation_interval_ms: int = 200,
+    use_biaxial: bool = False,
     **kwargs,
 ) -> Optional[Any]:
     """Animate the deformed shape through all pushover steps.
@@ -1521,13 +1642,9 @@ def animate_pushover_deformation(
 
     n_step = len(step_results)
 
-    # ── Pre-compute hinge ratios per step ────────────────────────
-    step_ratios: List[Dict[str, Tuple[float, float]]] = []
-    for sd in step_results:
-        ff = sd.get("frame_forces", {})
-        # Extract use_biaxial
-    _use_biaxial = kwargs.get("use_biaxial", False) if "use_biaxial" in kwargs else getattr(type(kwargs.get("kwargs", {})), "use_biaxial", False)
-    step_ratios.append(_compute_hinge_ratios(ff, use_biaxial=_use_biaxial))
+    # ── Pre-compute hinge ratios per step (all steps for consistent capacities) ─
+    all_frame_forces = [sd.get("frame_forces", {}) for sd in step_results]
+    step_ratios = _compute_hinge_ratios_all_steps(all_frame_forces, use_biaxial=use_biaxial)
 
     # ── Pre-compute shell damage per step ────────────────────────
     per_step_indices: List[Dict[str, float]] = []
@@ -1591,7 +1708,7 @@ def animate_pushover_deformation(
     # Build shell_verts + shell_node_tags once (geometry doesn't change)
     shell_verts, shell_node_tags = {}, {}
     if show_shells and all_shell_ids:
-        shell_verts, shell_node_tags = _build_shell_geometry(data, all_shell_ids)
+        shell_verts, shell_node_tags = _resolve_shell_data(data, all_shell_ids)
 
     # per_step_shell_pts[step_idx] = {aid: [(x,y,z), ...]} (deformed)
     per_step_shell_pts: List[Dict[str, list]] = []
@@ -1632,9 +1749,12 @@ def animate_pushover_deformation(
         per_step_shell_pts.append(step_shell_pts)
         per_step_shell_colors.append(step_shell_colors)
 
+    # Consume fea_toolkit-specific kwargs so they aren't forwarded to pv.Plotter
+    _plotter_kwargs = {k: v for k, v in kwargs.items()
+                       if k not in ("use_biaxial",)}
     # ── Create plotter ──────────────────────────────────────────
     own_plotter = True
-    plotter = pv.Plotter(notebook=notebook, **kwargs)
+    plotter = pv.Plotter(notebook=notebook, **_plotter_kwargs)
 
     # Render undeformed mesh as background
     _render_scene(plotter, _resolve_mesh_data(data), show_nodes=False)
@@ -1690,7 +1810,7 @@ def animate_pushover_deformation(
             nv = len(verts)
             if nv >= 3:
                 all_faces.extend([nv, offset, offset + 1, offset + 2,
-                                  *(offset + 3 for _ in range(nv - 3))])
+                                  *(offset + i for i in range(3, nv))])
                 face_colors.append(first_shell_colors.get(aid, (0.6, 0.6, 0.6)))
             offset += nv
 
@@ -1736,11 +1856,10 @@ def animate_pushover_deformation(
                         new_pts.extend(p_j.tolist())
                         new_colors.extend([_ratio_to_color(ri, max_ratio),
                                            _ratio_to_color(rj, max_ratio)])
-                    if new_pts:
-                        n_expected = tube_mesh.n_points
-                        n_new = len(new_pts) // 3
-                        if n_new == n_expected:
-                            tube_mesh.points = np.array(new_pts, dtype=float)
+                    if new_pts and len(new_pts) % 3 == 0:
+                        pts_arr = np.array(new_pts, dtype=float).reshape(-1, 3)
+                        if pts_arr.shape[0] == tube_mesh.n_points:
+                            tube_mesh.points = pts_arr
                             tube_mesh["colors"] = np.array(new_colors, dtype=float)
 
                 # ── Update shell quads ──

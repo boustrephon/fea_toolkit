@@ -1,6 +1,6 @@
 # Pushover Results Storage & Nonlinear Visualization — Implementation Plan
 
-> **Status**: Design finalized, pending implementation
+> **Status**: Phases 1–4 implemented; Phases 5+ pending
 > **Created**: 2026-07-30
 > **Related**: `docs/results_schema.md`, `docs/pushover_analysis.md`, `docs/viewer.md`
 
@@ -318,7 +318,28 @@ def animate_pushover_deformation(
     # ... use plotter.add_time_set() or timer callback ...
 ```
 
-### 4.5 `plot_frame_force_evolution()`
+### 4.5 Colour Legend Helpers
+
+Two private helper functions generate PyVista colour legends for pushover visualizations:
+
+**`_add_hinge_color_legend()`** — adds a scalar bar for the frame hinge yield ratio scale:
+- **Blue** (ratio < 0.5) — elastic
+- **Yellow** (0.5 ≤ ratio < 1.0) — yielding
+- **Red** (ratio ≥ 1.0) — fully yielded
+
+**`_add_shell_color_legend()`** — adds a scalar bar for the shell damage index scale:
+- **Green** (ratio < 0.7) — elastic
+- **Yellow** (0.7 ≤ ratio < 1.0) — yielding
+- **Red** (ratio ≥ 1.0) — damaged / crushed
+- **Gray** — no data (NaN)
+
+Both build a ``pyvista.LookupTable`` and call ``plotter.add_scalar_bar()``.  They handle PyVista version differences with a ``TypeError`` fallback:
+
+- ``LookupTable.n_values`` is used instead of the removed ``number_of_colors`` attribute.
+- ``LookupTable.values`` is set directly (RGB ``uint8`` array) instead of the removed ``table`` attribute.
+- The ``lookup_table`` keyword argument to ``add_scalar_bar()`` is provided when supported; a ``TypeError`` fallback omits it for older PyVista (< v0.44).
+
+### 4.6 `plot_frame_force_evolution()`
 
 **Purpose**: For selected elements, plot force component vs. roof drift.
 

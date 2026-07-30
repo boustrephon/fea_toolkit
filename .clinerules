@@ -193,11 +193,25 @@ New analysis code must follow this pattern. Do NOT add analysis methods to the p
   strengths (fy, fc), density — all must derive from the model data or from
   `g_from_units(units)`.
 - When any function does physics, inspect `model.units` before calculating.
-- Material properties defined in `local/` scripts must match the input model's unit
-  system — do not assume a particular unit set.
 - If in doubt, the OpenSees domain should be in the same units as the `.s2k` input,
   and all derived quantities must be unit-consistent with that system.
 - Never hardcode `9.81` — always route through `g_from_units(units)`.
+
+#### Material property convention
+Material strengths and moduli are **authored in SI (Pa)** and automatically
+scaled to model units by the framework:
+- Use `scale_material_dict(materials, from_units, to_units)` in
+  `fea_toolkit.utils` to convert from SI to the model's unit system.
+- The Preprocessor applies this scaling internally via its `nd_materials`
+  configuration flow — see `preprocessor.setup_nd_materials()`.
+- **Do not hand-convert** material properties to model units in `local/` or
+  user scripts. Always author in Pa and let the framework scale.
+- `local/` scripts that define materials directly must either use the
+  `scale_material_dict()` utility or match the model's unit system explicitly
+  — never mix conventions.
+- The canonical sequence: author in SI (Pa) → `scale_material_dict()` →
+  assign to OpenSees model → the builder creates the domain in model units.
+  This ensures contributors cannot apply scaling twice or omit it.
 
 ### 4.7 Status notation in documentation
 - The `README.md` uses a visual status notation for feature tracking:
