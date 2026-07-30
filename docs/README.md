@@ -137,6 +137,20 @@ for automated cross-referencing.
   Related: [AnalysisBuilder Migration Plan](analysis_builder_migration_plan.md)
 
 
+## 📦 Analysis Type
+
+- [Csm Bilinearization](csm_bilinearization.md)
+  Tags: `csm`, `bilinearization`, `capacity-spectrum`, `pushover`, `yield-point`
+  Related: [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Modal Analysis Options](modal_analysis.md) · [Analysis Workflow](workflow.md)
+
+
+## 📦 Uncategorised
+
+- [Llm Guide](llm_guide.md)
+
+- [Sap Ids Vs Tags](sap_ids_vs_tags.md)
+
+
 ---
 
 ## Tag Index
@@ -149,14 +163,16 @@ Tags across all documentation files:
 - **`architecture`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [workflow.md](workflow.md)
 - **`area-elements`** — [shell_support.md](shell_support.md)
 - **`beams`** — [element_classification.md](element_classification.md)
+- **`bilinearization`** — [csm_bilinearization.md](csm_bilinearization.md)
 - **`brace`** — [pushover_analysis.md](pushover_analysis.md)
 - **`braces`** — [element_classification.md](element_classification.md)
+- **`capacity-spectrum`** — [csm_bilinearization.md](csm_bilinearization.md)
 - **`classification`** — [element_classification.md](element_classification.md)
 - **`columns`** — [element_classification.md](element_classification.md)
 - **`config`** — [element_properties_config.md](element_properties_config.md)
 - **`constraints`** — [constraint_detection.md](constraint_detection.md)
 - **`cracked-section`** — [stiffness_factors.md](stiffness_factors.md)
-- **`csm`** — [pushover_analysis.md](pushover_analysis.md)
+- **`csm`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md)
 - **`design-proposal`** — [report_generation.md](report_generation.md), [results_schema.md](results_schema.md)
 - **`development`** — [dev_notes.md](dev_notes.md)
 - **`displacement`** — [storey_response.md](storey_response.md)
@@ -193,7 +209,7 @@ Tags across all documentation files:
 - **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md)
 - **`post-processing`** — [storey_response.md](storey_response.md)
 - **`preprocessor`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
-- **`pushover`** — [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`pyvista`** — [viewer.md](viewer.md)
 - **`reference`** — [builder_reference.md](builder_reference.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
@@ -216,6 +232,7 @@ Tags across all documentation files:
 - **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [workflow.md](workflow.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`xara`** — [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`yaml-config`** — [report_generation.md](report_generation.md)
+- **`yield-point`** — [csm_bilinearization.md](csm_bilinearization.md)
 
 To regenerate this index, run:
 
