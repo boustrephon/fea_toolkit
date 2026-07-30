@@ -794,6 +794,10 @@ class AreaElementProperties:
             ``"layered_steel"``).
         layer_stack: Direct list of :class:`ShellFiberLayer` objects,
             overriding ``nd_material_names`` if both are present.
+        layered_section_group_key: Key used to look up the layered section
+            group configuration (e.g. from the element property config or
+            area ID). Only relevant when ``material_strategy`` is
+            ``"layered_rc"`` / ``"layered_steel"``.
     """
     element_type: Optional[str] = "ShellMITC4"
     material_strategy: str = "elastic"

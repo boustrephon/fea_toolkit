@@ -47,58 +47,112 @@ STATIC_ARRAYS = [
 ]
 
 MODAL_ARRAYS: Dict[str, Tuple] = {
-    "modal/period": ("N_mode", "float"),
-    "modal/frequency": ("N_mode", "float"),
-    "modal/omega": ("N_mode", "float"),
-    "modal/mx_ratio": ("N_mode", "float"),
-    "modal/my_ratio": ("N_mode", "float"),
-    "modal/mz_ratio": ("N_mode", "float"),
-    "modal/mx_eff": ("N_mode", "float"),
-    "modal/my_eff": ("N_mode", "float"),
-    "modal/mz_eff": ("N_mode", "float"),
-    "modal/mode_dx": ("N_node N_mode", "float"),
-    "modal/mode_dy": ("N_node N_mode", "float"),
-    "modal/mode_dz": ("N_node N_mode", "float"),
+    "modal/period":     ("N_mode", "float"),
+    "modal/frequency":  ("N_mode", "float"),
+    "modal/omega":      ("N_mode", "float"),
+    "modal/mx_ratio":   ("N_mode", "float"),
+    "modal/my_ratio":   ("N_mode", "float"),
+    "modal/mz_ratio":   ("N_mode", "float"),
+    "modal/mx_eff":     ("N_mode", "float"),
+    "modal/my_eff":     ("N_mode", "float"),
+    "modal/mz_eff":     ("N_mode", "float"),
+    "modal/mode_dx":    ("N_node N_mode", "float"),
+    "modal/mode_dy":    ("N_node N_mode", "float"),
+    "modal/mode_dz":    ("N_node N_mode", "float"),
 }
 
 RS_ARRAYS: Dict[str, Tuple] = {
-    "rs/period": ("N_mode", "float"),
-    "rs/v_base_x": ("N_mode", "float"),
-    "rs/v_base_y": ("N_mode", "float"),
-    "rs/v_cqc_x": ("", "float"),
-    "rs/v_cqc_y": ("", "float"),
-    "rs/v_srss_x": ("", "float"),
-    "rs/v_srss_y": ("", "float"),
+    "rs/period":        ("N_mode", "float"),
+    "rs/v_base_x":      ("N_mode", "float"),
+    "rs/v_base_y":      ("N_mode", "float"),
+    "rs/v_cqc_x":       ("", "float"),
+    "rs/v_cqc_y":       ("", "float"),
+    "rs/v_srss_x":      ("", "float"),
+    "rs/v_srss_y":      ("", "float"),
     # Element-level CQC-combined forces (N_frame)
-    "rs/elem_sap_id": ("N_frame", "str"),
-    "rs/elem_z_bot": ("N_frame", "float"),
-    "rs/elem_z_mid": ("N_frame", "float"),
-    "rs/elem_Vy_i": ("N_frame", "float"),
-    "rs/elem_Vy_j": ("N_frame", "float"),
-    "rs/elem_Vz_i": ("N_frame", "float"),
-    "rs/elem_Vz_j": ("N_frame", "float"),
-    "rs/elem_My_i": ("N_frame", "float"),
-    "rs/elem_My_j": ("N_frame", "float"),
-    "rs/elem_Mz_i": ("N_frame", "float"),
-    "rs/elem_Mz_j": ("N_frame", "float"),
+    "rs/elem_sap_id":   ("N_frame", "str"),
+    "rs/elem_z_bot":    ("N_frame", "float"),
+    "rs/elem_z_mid":    ("N_frame", "float"),
+    "rs/elem_Vy_i":     ("N_frame", "float"),
+    "rs/elem_Vy_j":     ("N_frame", "float"),
+    "rs/elem_Vz_i":     ("N_frame", "float"),
+    "rs/elem_Vz_j":     ("N_frame", "float"),
+    "rs/elem_My_i":     ("N_frame", "float"),
+    "rs/elem_My_j":     ("N_frame", "float"),
+    "rs/elem_Mz_i":     ("N_frame", "float"),
+    "rs/elem_Mz_j":     ("N_frame", "float"),
     # Nodal CQC-combined displacements (N_node)
-    "rs/node_tag": ("N_node", "int"),
-    "rs/node_dx": ("N_node", "float"),
-    "rs/node_dy": ("N_node", "float"),
-    "rs/node_dz": ("N_node", "float"),
+    "rs/node_tag":      ("N_node", "int"),
+    "rs/node_dx":       ("N_node", "float"),
+    "rs/node_dy":       ("N_node", "float"),
+    "rs/node_dz":       ("N_node", "float"),
+}
+
+# ── Pushover per-step results (direction-keyed) ───────────────────────────
+
+PUSHOVER_GLOBAL_ARRAYS: Dict[str, Tuple] = {
+    "pushover/{direction}/step":         ("N_step", "int"),
+    "pushover/{direction}/control_disp": ("N_step", "float"),
+    "pushover/{direction}/base_shear":   ("N_step", "float"),
+}
+
+PUSHOVER_FRAME_ARRAYS: Dict[str, Tuple] = {
+    "pushover/{direction}/frame_sap_id": ("N_recorded_frame", "str"),
+    "pushover/{direction}/frame_fx_i":   ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/frame_fy_i":   ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/frame_fz_i":   ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/frame_mx_i":   ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/frame_my_i":   ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/frame_mz_i":   ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/frame_fx_j":   ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/frame_fy_j":   ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/frame_fz_j":   ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/frame_mx_j":   ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/frame_my_j":   ("N_step N_recorded_frame", "float"),
+    "pushover/{direction}/frame_mz_j":   ("N_step N_recorded_frame", "float"),
+}
+
+PUSHOVER_SHELL_ARRAYS: Dict[str, Tuple] = {
+    "pushover/{direction}/shell_sap_id": ("N_recorded_shell", "str"),
+    "pushover/{direction}/shell_Nx":     ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/shell_Ny":     ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/shell_Nxy":    ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/shell_Mx":     ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/shell_My":     ("N_step N_recorded_shell", "float"),
+    "pushover/{direction}/shell_Mxy":    ("N_step N_recorded_shell", "float"),
+}
+
+PUSHOVER_NODE_DISP_ARRAYS: Dict[str, Tuple] = {
+    "pushover/{direction}/node_tag":     ("N_node", "int"),
+    "pushover/{direction}/node_disp_x":  ("N_step N_node", "float"),
+    "pushover/{direction}/node_disp_y":  ("N_step N_node", "float"),
+    "pushover/{direction}/node_disp_z":  ("N_step N_node", "float"),
 }
 
 META_ARRAYS: Dict[str, Tuple] = {
-    "force_unit": ("", "str"),
-    "length_unit": ("", "str"),
-    "created": ("", "str"),
-    "analysis_types": ("N_analysis", "str"),
+    "force_unit":       ("", "str"),
+    "length_unit":      ("", "str"),
+    "created":          ("", "str"),
+    "analysis_types":   ("N_analysis", "str"),
 }
 
 
 def make_static_key(case_name: str, array_name: str) -> str:
     """Build the NPZ key for a static result array, e.g. ``static/DEAD/fx_i``."""
     return f"static/{case_name}/{array_name}"
+
+
+def make_pushover_key(direction: str, template: str) -> str:
+    """Build the NPZ key for a pushover result array, e.g. ``pushover/+X/step``.
+
+    Args:
+        direction: Push direction label, e.g. ``"+X"``, ``"+Y"``.
+        template: Key template containing ``{direction}``.
+
+    Returns:
+        Formatted array name.
+    """
+    return template.replace("{direction}", direction)
 
 
 def validate_npz(path: str) -> List[str]:
@@ -142,6 +196,25 @@ def validate_npz(path: str) -> List[str]:
         at = data.get("analysis_types")
         if at is not None:
             dims["N_analysis"] = len(at)
+        # Pushover dimensions
+        for key in data.keys():
+            if key.endswith("/frame_sap_id") or "/frame_fx_i" in key:
+                arr = data.get(key)
+                if arr is not None:
+                    dims["N_recorded_frame"] = len(arr)
+                    break
+        for key in data.keys():
+            if key.endswith("/shell_sap_id") or "/shell_Nx" in key:
+                arr = data.get(key)
+                if arr is not None:
+                    dims["N_recorded_shell"] = len(arr)
+                    break
+        for key in data.keys():
+            if key.endswith("/step"):
+                arr = data.get(key)
+                if arr is not None:
+                    dims["N_step"] = len(arr)
+                    break
 
         def _check_shape(arr_name: str, arr, shape_desc: str, dtype_str: str):
             """Validate shape and dtype of a single array."""
@@ -218,13 +291,34 @@ def validate_npz(path: str) -> List[str]:
                         messages.append(f"Missing modal array: {key}")
                         continue
                     _check_shape(key, arr, shape_desc, dtype_str)
-        if "rs" in types:
-            for key, (shape_desc, dtype_str) in RS_ARRAYS.items():
-                arr = data.get(key)
-                if arr is None:
-                    messages.append(f"Missing RS array: {key}")
-                    continue
-                _check_shape(key, arr, shape_desc, dtype_str)
+            if "rs" in types:
+                for key, (shape_desc, dtype_str) in RS_ARRAYS.items():
+                    arr = data.get(key)
+                    if arr is None:
+                        messages.append(f"Missing RS array: {key}")
+                        continue
+                    _check_shape(key, arr, shape_desc, dtype_str)
+            if "pushover" in types:
+                # Detect directions from arrays present
+                directions: Set[str] = set()
+                for key in data.keys():
+                    if key.startswith("pushover/") and "/step" in key:
+                        parts = key.split("/")
+                        if len(parts) >= 2:
+                            directions.add(parts[1])
+                for direction in sorted(directions):
+                    for schema_set in (PUSHOVER_GLOBAL_ARRAYS,
+                                       PUSHOVER_FRAME_ARRAYS,
+                                       PUSHOVER_SHELL_ARRAYS):
+                        for template, (shape_desc, dtype_str) in schema_set.items():
+                            key = make_pushover_key(direction, template)
+                            arr = data.get(key)
+                            if arr is None:
+                                # Only flag missing arrays if we detect the schema
+                                # level is present (e.g. don't flag frame arrays
+                                # if no frames were recorded)
+                                continue
+                            _check_shape(key, arr, shape_desc, dtype_str)
 
     except Exception as exc:
         messages.append(f"Error accessing NPZ data: {exc}")

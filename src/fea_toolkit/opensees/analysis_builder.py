@@ -62,6 +62,9 @@ class AnalysisBuilder:
         self.config = config or {}
         self._set_defaults()
 
+        # Pushover step results (populated by run_pushover_analysis)
+        self.pushover_step_results: List[Dict[str, Any]] = []
+
         # Domain state (built during build_domain)
         self.frame_tag_map: Dict[str, int] = {}
         self.material_tags: Dict[str, int] = dict(mesh_model.material_tags)
@@ -123,6 +126,10 @@ class AnalysisBuilder:
             'simplify_distributed_loads': False,
             'constraint_method': 'spring',
             'hinge_model': 'fiber',         # Distributed plasticity by default
+            # ── Pushover recording (opt-in) ──
+            'record_pushover_steps': False,
+            'pushover_record_selection': None,
+            'pushover_record_shell_strains': False,
         }
         # Merge solver defaults from the class constant
         defaults.update(self.PUSHOVER_SOLVER_DEFAULTS)
@@ -4188,6 +4195,36 @@ class AnalysisBuilder:
                        int(control_node_tag), dof, disp_inc)
         ops.analysis('Static')
 
+        # ── Per-step recording setup (opt-in) ─────────────────────
+        record = self.config.get("record_pushover_steps", False)
+        record_sel = self.config.get("pushover_record_selection", None)
+        record_frames: Set[str] = set()
+        record_areas: Set[str] = set()
+        record_node_tags: Set[int] = set()
+        if record:
+            if record_sel is not None:
+                record_frames, record_areas = record_sel.resolve_to_mesh_sets(
+                    self.mesh_model,
+                )
+            else:
+                record_frames = {
+                    eid for eid, fe in self.mesh_model.frame_elements.items()
+                    if not getattr(fe, 'inactive', False)
+                }
+                record_areas = {
+                    aid for aid, ae in self.mesh_model.area_elements.items()
+                    if not getattr(ae, 'inactive', False)
+                }
+            # Collect all node tags for per-step displacement recording
+            record_node_tags = {
+                nd.node_tag for nd in self.mesh_model.nodes.values()
+            }
+            if print_progress and (record_frames or record_areas):
+                print(f"  Recording {len(record_frames)} frame(s) + "
+                      f"{len(record_areas)} area(s) + "
+                      f"{len(record_node_tags)} node(s) per step")
+        step_results: List[Dict[str, Any]] = []
+
         # ── Gravity state (step 0) ───────────────────────────────
         steps: List[int] = [0]
         ctrl_disps: List[float] = [0.0]
@@ -4259,6 +4296,14 @@ class AnalysisBuilder:
             base_shears.append(bs)
             steps.append(step)
 
+            # ── Per-step element recording ──────────────────────
+            if record and ok == 0:
+                step_data = _record_step(
+                    self, step, record_frames, record_areas,
+                    node_tags=record_node_tags,
+                )
+                step_results.append(step_data)
+
             if print_progress:
                 s = '✓' if ok == 0 else '✗'
                 print(f"    Step {step:4d}/{num_steps}: "
@@ -4270,7 +4315,10 @@ class AnalysisBuilder:
                           f"(last algorithm: {_algo_chain[-1]})")
                 break
 
-        return {
+        # Store step results on builder for downstream export
+        self.pushover_step_results = step_results
+
+        result = {
             'step': steps,
             'control_disp': ctrl_disps,
             'base_shear': base_shears,
@@ -4280,10 +4328,47 @@ class AnalysisBuilder:
             'dof': dof,
             'lateral_load_type': lateral_load_type,
         }
+        if record:
+            result['step_results'] = step_results
+
+        return result
 
     # ═══════════════════════════════════════════════════════════════
     # Pushover helpers
     # ═══════════════════════════════════════════════════════════════
+
+    def export_pushover_results(
+        self, path: str, direction: str = "+X",
+        pushover_results: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Export recorded pushover step results to NPZ.
+
+        Args:
+            path: Output .npz file path.
+            direction: Push direction label, e.g. ``"+X"``, ``"+Y"``.
+            pushover_results: Optional full result dict from
+                :meth:`run_pushover_analysis`.  When provided, the
+                global arrays (step, control_disp, base_shear) are
+                included in the NPZ file alongside per-element forces.
+
+        Returns:
+            The path to the written .npz file.
+
+        Raises:
+            ValueError: If no step results have been recorded.
+        """
+        if not getattr(self, 'pushover_step_results', None):
+            raise ValueError(
+                "No pushover step results to export. "
+                "Ensure run_pushover_analysis() was called with "
+                "record_pushover_steps=True in config."
+            )
+        from ..io.npz_writer import write_pushover_results_npz
+        return write_pushover_results_npz(
+            path, self.mesh_model, self.pushover_step_results,
+            direction=direction,
+            pushover_results=pushover_results,
+        )
 
     def _compute_fallback_masses(self) -> Dict[str, float]:
         """Compute nodal masses from element self‑weight when no MASS SOURCE.
@@ -4526,6 +4611,87 @@ class AnalysisBuilder:
             max_iter=max_iter,
             tol=tol,
         )
+
+
+def _record_step(
+    builder: "AnalysisBuilder",
+    step: int,
+    frame_ids: Set[str],
+    area_ids: Set[str],
+    node_tags: Optional[Set[int]] = None,
+) -> Dict[str, Any]:
+    """Query ``ops.eleResponse()`` and ``ops.nodeDisp()`` at the current step.
+
+    Args:
+        builder: The ``AnalysisBuilder`` instance with active OpenSees domain.
+        step: Current push step number.
+        frame_ids: SAP2000 frame element IDs to record.
+        area_ids: SAP2000 area element IDs to record.
+        node_tags: Optional set of OpenSees node tags to record displacements
+            for.  When ``None``, no displacement data is collected.
+
+    Returns:
+        Dict with keys:
+        * ``"step"`` — int
+        * ``"frame_forces"`` — ``{eid: {fx_i, fy_i, fz_i, mx_i, my_i, mz_i,
+          fx_j, fy_j, fz_j, mx_j, my_j, mz_j}}``
+        * ``"shell_forces"`` — ``{aid: {Nx, Ny, Nxy, Mx, My, Mxy}}``
+        * ``"node_displacements"`` — ``{tag: (dx, dy, dz)}`` (when *node_tags* is provided)
+    """
+    data: Dict[str, Any] = {"step": step}
+
+    # ── Frame elements ──
+    frame_forces: Dict[str, Dict[str, float]] = {}
+    for eid in frame_ids:
+        ops_tag = builder.frame_tag_map.get(eid)
+        if ops_tag is None:
+            continue
+        try:
+            f = ops.eleResponse(ops_tag, 'forces')  # 12 values
+        except Exception:
+            continue
+        if len(f) < 12:
+            continue
+        frame_forces[eid] = {
+            'fx_i': f[0], 'fy_i': f[1], 'fz_i': f[2],
+            'mx_i': f[3], 'my_i': f[4], 'mz_i': f[5],
+            'fx_j': f[6], 'fy_j': f[7], 'fz_j': f[8],
+            'mx_j': f[9], 'my_j': f[10], 'mz_j': f[11],
+        }
+    data["frame_forces"] = frame_forces
+
+    # ── Shell elements (stress resultants) ──
+    shell_forces: Dict[str, Dict[str, float]] = {}
+    for aid in area_ids:
+        ops_tag = builder._shell_tag_map.get(aid)
+        if ops_tag is None:
+            continue
+        try:
+            f = ops.eleResponse(ops_tag, 'forces')  # Shell forces
+        except Exception:
+            continue
+        # ShellNLDKGQ / ShellMITC4 returns at least 6 forces
+        if len(f) >= 6:
+            shell_forces[aid] = {
+                'Nx': f[0], 'Ny': f[1], 'Nxy': f[2],
+                'Mx': f[3], 'My': f[4], 'Mxy': f[5],
+            }
+    data["shell_forces"] = shell_forces
+
+    # ── Node displacements ──
+    if node_tags is not None:
+        node_disp: Dict[int, Tuple[float, float, float]] = {}
+        for tag in node_tags:
+            try:
+                dx = ops.nodeDisp(tag, 1)
+                dy = ops.nodeDisp(tag, 2)
+                dz = ops.nodeDisp(tag, 3)
+                node_disp[tag] = (float(dx), float(dy), float(dz))
+            except Exception:
+                continue
+        data["node_displacements"] = node_disp
+
+    return data
 
 
 def run_modal(mesh_model, n_modes: int = 12,

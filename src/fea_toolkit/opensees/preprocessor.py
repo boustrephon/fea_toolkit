@@ -999,6 +999,16 @@ class Preprocessor:
                 mesh_model.layered_shell_sections[group_key] = LayeredShellSection(
                     name=group_key, layers=layers,
                 )
+                # Also register under selector-matched SAP2000 section names
+                # so the AnalysisBuilder can find them by sec_name at element
+                # creation time.  Without this, all shell areas end up using
+                # elastic ShellMITC4 because sec_name ("Shear Wall") never
+                # matches the config group_key ("shear_walls").
+                sel_dict = group_dict.get('selector', {})
+                for sap_sec_name in (sel_dict.get('sections') or []):
+                    mesh_model.layered_shell_sections[sap_sec_name] = LayeredShellSection(
+                        name=sap_sec_name, layers=layers,
+                    )
 
         # ── Pre-build Selection objects for frame groups ─────────
         frame_groups_config = config.get('frame_groups', {})
