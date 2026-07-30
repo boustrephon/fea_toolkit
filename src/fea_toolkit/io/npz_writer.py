@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import numpy as np
 
-from .results_schema import make_static_key
+from .results_schema import make_static_key, make_pushover_key
 from ..model.sap_data import SAPModelData
 
 if TYPE_CHECKING:
@@ -376,6 +376,235 @@ def write_results_npz(
     # use the namespaced ``shell_forces/*`` keys or the geometry-native
     # ``shell_sap_id`` / ``shell_sec_name`` arrays.  No flat aliases are
     # emitted.
+    arrays["analysis_types"] = np.array(analysis_types, dtype=str)
+    arrays["force_unit"] = np.array([force_unit], dtype=str)
+    arrays["length_unit"] = np.array([length_unit], dtype=str)
+    arrays["created"] = np.array(
+        [datetime.datetime.now().isoformat()], dtype=str)
+
+    path = str(Path(path).resolve())
+    np.savez_compressed(path, **arrays)
+    return path
+
+
+def _collect_pushover(
+    mesh_model: "MeshModel",
+    step_results: List[Dict[str, Any]],
+    direction: str = "+X",
+) -> Dict[str, np.ndarray]:
+    """Collect pushover per-step results into NPZ arrays.
+
+    Args:
+        mesh_model: MeshModel for geometry arrays.
+        step_results: List of per-step dicts from
+            ``AnalysisBuilder.pushover_step_results``.
+        direction: Push direction label (e.g. ``"+X"``).
+
+    Returns:
+        Dict of ``{array_name: np.ndarray}`` keyed per the
+        ``PUSHOVER_GLOBAL_ARRAYS``, ``PUSHOVER_FRAME_ARRAYS``,
+        ``PUSHOVER_SHELL_ARRAYS``, and ``PUSHOVER_NODE_DISP_ARRAYS`` schema.
+    """
+    arrays: Dict[str, np.ndarray] = {}
+    n_step = len(step_results)
+    if n_step == 0:
+        return arrays
+
+    # ── Global arrays ─────────────────────────────────────────
+    steps_arr = np.array([sd.get("step", 0) for sd in step_results], dtype=int)
+    arrays[make_pushover_key(direction, "pushover/{direction}/step")] = steps_arr
+    # control_disp and base_shear are NOT stored in step_results
+    # (they come from the pushover result dict).  The caller must
+    # add them separately if needed.
+
+    # ── Frame arrays ──────────────────────────────────────────
+    # Collect all recorded frame IDs in order of first appearance
+    frame_ids: List[str] = []
+    for sd in step_results:
+        for eid in sd.get("frame_forces", {}):
+            if eid not in frame_ids:
+                frame_ids.append(eid)
+    n_frame = len(frame_ids)
+
+    if n_frame > 0:
+        arrays[make_pushover_key(
+            direction, "pushover/{direction}/frame_sap_id")] = np.array(
+            frame_ids, dtype=str)
+
+        # Pre-allocate 2D arrays: (n_step, n_frame)
+        comp_keys = ["fx_i", "fy_i", "fz_i", "mx_i", "my_i", "mz_i",
+                     "fx_j", "fy_j", "fz_j", "mx_j", "my_j", "mz_j"]
+        comp_map = {
+            f"frame_{k}": np.full((n_step, n_frame), np.nan, dtype=float)
+            for k in comp_keys
+        }
+        for si, sd in enumerate(step_results):
+            for eid, forces in sd.get("frame_forces", {}).items():
+                if eid not in frame_ids:
+                    continue
+                j = frame_ids.index(eid)
+                for key in comp_keys:
+                    comp_map[f"frame_{key}"][si, j] = forces.get(key, np.nan)
+
+        for key, arr in comp_map.items():
+            arrays[make_pushover_key(
+                direction, f"pushover/{{direction}}/{key}")] = arr
+
+    # ── Shell arrays ──────────────────────────────────────────
+    shell_ids: List[str] = []
+    for sd in step_results:
+        for aid in sd.get("shell_forces", {}):
+            if aid not in shell_ids:
+                shell_ids.append(aid)
+    n_shell = len(shell_ids)
+
+    if n_shell > 0:
+        arrays[make_pushover_key(
+            direction, "pushover/{direction}/shell_sap_id")] = np.array(
+            shell_ids, dtype=str)
+
+        shell_comp_keys = ["Nx", "Ny", "Nxy", "Mx", "My", "Mxy"]
+        shell_comp_map = {
+            f"shell_{k}": np.full((n_step, n_shell), np.nan, dtype=float)
+            for k in shell_comp_keys
+        }
+        for si, sd in enumerate(step_results):
+            for aid, forces in sd.get("shell_forces", {}).items():
+                if aid not in shell_ids:
+                    continue
+                j = shell_ids.index(aid)
+                for key in shell_comp_keys:
+                    shell_comp_map[f"shell_{key}"][si, j] = forces.get(key, np.nan)
+
+        for key, arr in shell_comp_map.items():
+            arrays[make_pushover_key(
+                direction, f"pushover/{{direction}}/{key}")] = arr
+
+    # ── Node displacement arrays ──────────────────────────────
+    # Collect node tags in a consistent order (matching geometry order)
+    node_tags: List[int] = []
+    for sd in step_results:
+        nd = sd.get("node_displacements", {})
+        for tag in nd:
+            if tag not in node_tags:
+                node_tags.append(tag)
+    # Fall back to mesh_model node order if no displacement data in step results
+    if not node_tags:
+        node_tags = sorted(
+            nd.node_tag for nd in mesh_model.nodes.values()
+        )
+    n_node = len(node_tags)
+
+    if n_node > 0 and n_step > 0:
+        # Check if we have displacement data
+        has_disp = any(
+            "node_displacements" in sd and sd["node_displacements"]
+            for sd in step_results
+        )
+        if has_disp:
+            arrays[make_pushover_key(
+                direction, "pushover/{direction}/node_tag")] = np.array(
+                node_tags, dtype=int)
+
+            dx_arr = np.full((n_step, n_node), np.nan, dtype=float)
+            dy_arr = np.full((n_step, n_node), np.nan, dtype=float)
+            dz_arr = np.full((n_step, n_node), np.nan, dtype=float)
+
+            for si, sd in enumerate(step_results):
+                nd = sd.get("node_displacements", {})
+                for j, tag in enumerate(node_tags):
+                    disp = nd.get(tag)
+                    if disp is not None:
+                        dx_arr[si, j] = disp[0]
+                        dy_arr[si, j] = disp[1]
+                        dz_arr[si, j] = disp[2]
+
+            arrays[make_pushover_key(
+                direction, "pushover/{direction}/node_disp_x")] = dx_arr
+            arrays[make_pushover_key(
+                direction, "pushover/{direction}/node_disp_y")] = dy_arr
+            arrays[make_pushover_key(
+                direction, "pushover/{direction}/node_disp_z")] = dz_arr
+
+    return arrays
+
+
+def write_pushover_results_npz(
+    path: str,
+    mesh_model: "MeshModel",
+    step_results: List[Dict[str, Any]],
+    direction: str = "+X",
+    pushover_results: Optional[Dict[str, Any]] = None,
+    force_unit: str = "kN",
+    length_unit: str = "m",
+) -> str:
+    """Write pushover step results to NPZ.
+
+    Writes geometry arrays (from the MeshModel) plus pushover-specific
+    per-step frame and shell forces.
+
+    Args:
+        path: Output ``.npz`` file path.
+        mesh_model: MeshModel for geometry arrays.
+        step_results: List of per-step dicts from
+            ``AnalysisBuilder.pushover_step_results``.
+        direction: Push direction label (e.g. ``"+X"``).
+        pushover_results: Optional full result dict from
+            ``AnalysisBuilder.run_pushover_analysis()``.  When provided,
+            global arrays (step, control_disp, base_shear) are included.
+        force_unit: Force unit string for metadata.
+        length_unit: Length unit string for metadata.
+
+    Returns:
+        Absolute path to the saved file.
+    """
+    arrays: Dict[str, np.ndarray] = {}
+
+    # ── Geometry (from MeshModel) ─────────────────────────────
+    # Build geometry from mesh_model using a minimal SAPModelData stub
+    # that ``_collect_geometry`` can read.  Since MeshModel and SAPModelData
+    # share the same field names for nodes/frames/areas, we can pass the
+    # mesh_model directly via the mesh_model parameter.
+    # We need an SAPModelData stub for the ``md`` parameter.
+    from ..model.sap_data import SAPModelData, Node, FrameElement, AreaElement
+    stub_md = SAPModelData(
+        nodes=mesh_model.nodes,
+        restraints={},
+        materials=mesh_model.materials,
+        sections=mesh_model.sections,
+        frame_elements=mesh_model.frame_elements,
+        area_elements=mesh_model.area_elements,
+        frame_assignments=mesh_model.frame_assignments,
+        area_assignments=mesh_model.area_assignments,
+        groups=mesh_model.groups,
+        frame_auto_mesh={},
+    )
+    arrays.update(_collect_geometry(stub_md, mesh_model=mesh_model))
+
+    # ── Pushover arrays ───────────────────────────────────────
+    analysis_types: List[str] = ["pushover"]
+    po_arrays = _collect_pushover(mesh_model, step_results, direction=direction)
+
+    # Add global arrays from pushover_results if provided
+    if pushover_results is not None:
+        steps = pushover_results.get("step", [])
+        n = len(steps)
+        if n > 0:
+            key = make_pushover_key(direction, "pushover/{direction}/step")
+            if key not in po_arrays:
+                po_arrays[key] = np.array(steps, dtype=int)
+            key = make_pushover_key(direction, "pushover/{direction}/control_disp")
+            if key not in po_arrays:
+                po_arrays[key] = np.array(
+                    pushover_results.get("control_disp", [0.0] * n), dtype=float)
+            key = make_pushover_key(direction, "pushover/{direction}/base_shear")
+            if key not in po_arrays:
+                po_arrays[key] = np.array(
+                    pushover_results.get("base_shear", [0.0] * n), dtype=float)
+
+    arrays.update(po_arrays)
+
+    # ── Metadata ──────────────────────────────────────────────
     arrays["analysis_types"] = np.array(analysis_types, dtype=str)
     arrays["force_unit"] = np.array([force_unit], dtype=str)
     arrays["length_unit"] = np.array([length_unit], dtype=str)
