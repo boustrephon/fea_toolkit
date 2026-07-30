@@ -27,6 +27,13 @@ from .viz import (
     plot_force_diagram_3d,
     plot_building_views,
     plot_model_comparison,
+    # Pushover visualisation (Phases 4a–4e)
+    plot_plastic_hinge_formation,
+    plot_plastic_hinge_heatmap,
+    plot_shell_damage_map,
+    plot_pushover_envelope,
+    animate_pushover_deformation,
+    plot_frame_force_evolution,
 )
 
 from .diagnostics import (
@@ -65,6 +72,13 @@ __all__ = [
     "plot_force_diagram_3d",
     "plot_building_views",
     "plot_model_comparison",
+    # Pushover visualisation (Phases 4a–4e)
+    "plot_plastic_hinge_formation",
+    "plot_plastic_hinge_heatmap",
+    "plot_shell_damage_map",
+    "plot_pushover_envelope",
+    "animate_pushover_deformation",
+    "plot_frame_force_evolution",
     # Diagnostics
     "find_disconnected_nodes",
     "print_disconnect_report",
