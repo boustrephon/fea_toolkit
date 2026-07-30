@@ -58,6 +58,8 @@ from fea_toolkit.model.geometry import (
     beam_load_to_nodal_loads,
 )
 from fea_toolkit.model.selection import Selection
+from fea_toolkit.model.mesh_model import MeshModel
+from fea_toolkit.model.stories import StoryLevel
 from fea_toolkit.model.csm import (
     bilinearize_stiffness_change,
     bilinearize_equal_energy,
@@ -1802,6 +1804,265 @@ class TestSelection:
         loads = sel.filter_area_gravity_loads(model)
         assert len(loads) == 1
         assert loads[0].multiplier_z == -1.0
+
+
+# ============================================================================
+# Selection → MeshModel resolution tests
+# ============================================================================
+
+
+class TestSelectionMeshModel:
+    """Tests for :meth:`Selection.resolve_to_mesh_sets` — resolving a
+    Selection against a MeshModel with elevation_range and story filters."""
+
+    @pytest.fixture
+    def mesh_model(self):
+        """Minimal MeshModel with frames, areas, nodes, sections, groups.
+
+        Nodes:
+          1: (0, 0, 0)   2: (6, 0, 0)    3: (6, 0, 3)    4: (0, 0, 3)
+          5: (0, 0, 6)   6: (6, 0, 6)    7: (0, 0, 9)    8: (6, 0, 9)
+
+        Frames:
+          Frame "1": nodes 1→2  at z=0          (mid-height Z = 0)
+          Frame "2": nodes 3→4  at z=3          (mid-height Z = 3)
+          Frame "3": nodes 5→6  at z=6          (mid-height Z = 6)
+          Frame "4": nodes 7→8  at z=9          (mid-height Z = 9)
+
+        Areas:
+          Area "1": nodes 1-2-3-4 at z=0…3    (centroid Z ≈ 1.5)
+        """
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=6, y=0, z=0),
+            "3": Node(node_id="3", node_tag=3, x=6, y=0, z=3),
+            "4": Node(node_id="4", node_tag=4, x=0, y=0, z=3),
+            "5": Node(node_id="5", node_tag=5, x=0, y=0, z=6),
+            "6": Node(node_id="6", node_tag=6, x=6, y=0, z=6),
+            "7": Node(node_id="7", node_tag=7, x=0, y=0, z=9),
+            "8": Node(node_id="8", node_tag=8, x=6, y=0, z=9),
+        }
+        materials = {
+            "Steel": Material(name="Steel", type="Steel",
+                              E_mod=2e11, unit_weight=77000),
+            "Concrete": Material(name="Concrete", type="Concrete",
+                                 E_mod=3e10, unit_weight=24000),
+        }
+        sections = {
+            "UB100": Section(name="UB100", shape="I/Wide Flange",
+                             material="Steel", A=0.01, I33=1e-4,
+                             I22=1e-5, J=1e-6),
+            "Slab": ShellSection(name="Slab", shape="Shell",
+                                 material="Concrete",
+                                 A=0, I33=0, I22=0, J=0,
+                                 thickness=0.2),
+        }
+        frames = {
+            "1": FrameElement(elem_id="1", elem_tag=1,
+                              node_i="1", node_j="2"),
+            "2": FrameElement(elem_id="2", elem_tag=2,
+                              node_i="3", node_j="4"),
+            "3": FrameElement(elem_id="3", elem_tag=3,
+                              node_i="5", node_j="6"),
+            "4": FrameElement(elem_id="4", elem_tag=4,
+                              node_i="7", node_j="8"),
+        }
+        areas = {
+            "1": AreaElement(area_id="1", area_tag=10,
+                             node_ids=["1", "2", "3", "4"],
+                             thickness=0.2),
+        }
+        groups = {
+            "Cols": Group(name="Cols",
+                          objects=["Frame:1", "Frame:2",
+                                   "Frame:3", "Frame:4"]),
+        }
+        return MeshModel(
+            nodes=nodes,
+            frame_elements=frames,
+            frame_assignments={"1": "UB100", "2": "UB100",
+                               "3": "UB100", "4": "UB100"},
+            area_elements=areas,
+            area_assignments={"1": "Slab"},
+            frame_dist_loads=[],
+            materials=materials,
+            sections=sections,
+            groups=groups,
+        )
+
+    # ── elevation_range ──
+
+    def test_elevation_range_filters_frames(self, mesh_model):
+        """elevation_range=(0, 3) returns frames at Z=0 and Z=3 only."""
+        sel = Selection(element_types=["Frame"],
+                        elevation_range=(0.0, 3.0))
+        frame_ids, area_ids = sel.resolve_to_mesh_sets(mesh_model)
+        assert frame_ids == {"1", "2"}
+        assert area_ids == set()
+
+    def test_elevation_range_middle_storey(self, mesh_model):
+        """elevation_range=(3, 6) returns frame at Z=3 and Z=6 (mid-heights
+        3.0 and 6.0 both satisfy 3 ≤ z ≤ 6)."""
+        sel = Selection(element_types=["Frame"],
+                        elevation_range=(3.0, 6.0))
+        frame_ids, area_ids = sel.resolve_to_mesh_sets(mesh_model)
+        assert frame_ids == {"2", "3"}
+        assert area_ids == set()
+
+    def test_elevation_range_upper_storey(self, mesh_model):
+        """elevation_range=(9, 12) returns only frame at Z=9."""
+        sel = Selection(element_types=["Frame"],
+                        elevation_range=(9.0, 12.0))
+        frame_ids, _ = sel.resolve_to_mesh_sets(mesh_model)
+        assert frame_ids == {"4"}
+
+    def test_elevation_range_no_match(self, mesh_model):
+        """elevation_range=(100, 200) returns empty."""
+        sel = Selection(element_types=["Frame"],
+                        elevation_range=(100.0, 200.0))
+        frame_ids, area_ids = sel.resolve_to_mesh_sets(mesh_model)
+        assert frame_ids == set()
+        assert area_ids == set()
+
+    def test_elevation_range_areas(self, mesh_model):
+        """Area with centroid Z≈1.5 matches elevation_range=(0, 2)."""
+        sel = Selection(element_types=["Area"],
+                        elevation_range=(0.0, 2.0))
+        frame_ids, area_ids = sel.resolve_to_mesh_sets(mesh_model)
+        assert frame_ids == set()
+        assert area_ids == {"1"}
+
+    def test_elevation_range_areas_outside(self, mesh_model):
+        """Area with centroid Z≈1.5 does NOT match elevation_range=(5, 10)."""
+        sel = Selection(element_types=["Area"],
+                        elevation_range=(5.0, 10.0))
+        _, area_ids = sel.resolve_to_mesh_sets(mesh_model)
+        assert area_ids == set()
+
+    def test_elevation_range_no_element_type_filter(self, mesh_model):
+        """No element_types filter → matches both frames and areas."""
+        sel = Selection(elevation_range=(0.0, 3.0))
+        frame_ids, area_ids = sel.resolve_to_mesh_sets(mesh_model)
+        assert frame_ids == {"1", "2"}
+        assert area_ids == {"1"}
+
+    # ── story filter ──
+
+    def test_story_filter_basic(self, mesh_model):
+        """story=['Storey 1'] at elevation 0 → matches frames at Z=0."""
+        stories = [
+            StoryLevel(name="Storey 1", elevation=0.0,
+                       method="manual", confidence="high"),
+        ]
+        sel = Selection(element_types=["Frame"], story=["Storey 1"])
+        frame_ids, area_ids = sel.resolve_to_mesh_sets(
+            mesh_model, storey_data=stories,
+        )
+        assert frame_ids == {"1"}
+        assert area_ids == set()
+
+    def test_story_filter_multiple_storeys(self, mesh_model):
+        """story=['Storey 1', 'Storey 2'] → frames at Z=0 and Z=3."""
+        stories = [
+            StoryLevel(name="Storey 1", elevation=0.0,
+                       method="manual", confidence="high"),
+            StoryLevel(name="Storey 2", elevation=3.0,
+                       method="manual", confidence="high"),
+        ]
+        sel = Selection(element_types=["Frame"],
+                        story=["Storey 1", "Storey 2"])
+        frame_ids, _ = sel.resolve_to_mesh_sets(
+            mesh_model, storey_data=stories,
+        )
+        assert frame_ids == {"1", "2"}
+
+    def test_story_filter_custom_tolerance(self, mesh_model):
+        """With tolerance=0.1, frame at Z=3 matches Storey 2 at Z=3.0."""
+        stories = [
+            StoryLevel(name="Storey 2", elevation=3.0,
+                       method="manual", confidence="high"),
+        ]
+        sel = Selection(element_types=["Frame"], story=["Storey 2"])
+        frame_ids, _ = sel.resolve_to_mesh_sets(
+            mesh_model, storey_data=stories, story_z_tolerance=0.1,
+        )
+        assert frame_ids == {"2"}
+
+    def test_story_filter_raises_without_storey_data(self, mesh_model):
+        """story filter without storey_data raises ValueError."""
+        sel = Selection(element_types=["Frame"], story=["Storey 1"])
+        with pytest.raises(ValueError, match="storey_data"):
+            sel.resolve_to_mesh_sets(mesh_model)
+
+    def test_story_filter_area(self, mesh_model):
+        """Area at centroid Z≈1.5 matches Storey 1 at Z=1.5 with tolerance."""
+        stories = [
+            StoryLevel(name="Storey 1", elevation=1.5,
+                       method="manual", confidence="medium"),
+        ]
+        sel = Selection(element_types=["Area"], story=["Storey 1"])
+        _, area_ids = sel.resolve_to_mesh_sets(
+            mesh_model, storey_data=stories, story_z_tolerance=0.1,
+        )
+        assert area_ids == {"1"}
+
+    def test_story_filter_no_match(self, mesh_model):
+        """Non-existent storey name returns empty."""
+        stories = [
+            StoryLevel(name="Roof", elevation=9.0,
+                       method="manual", confidence="high"),
+        ]
+        sel = Selection(element_types=["Frame"], story=["Basement"])
+        frame_ids, _ = sel.resolve_to_mesh_sets(
+            mesh_model, storey_data=stories,
+        )
+        assert frame_ids == set()
+
+    # ── combined filters ──
+
+    def test_elevation_range_and_element_type(self, mesh_model):
+        """Elevation + element_type = Frame → only frames in range."""
+        sel = Selection(element_types=["Frame"],
+                        elevation_range=(3.0, 9.0))
+        frame_ids, area_ids = sel.resolve_to_mesh_sets(mesh_model)
+        assert frame_ids == {"2", "3", "4"}
+        assert area_ids == set()
+
+    def test_elevation_and_story(self, mesh_model):
+        """Both elevation_range and story must match (AND logic)."""
+        stories = [
+            StoryLevel(name="Storey 2", elevation=3.0,
+                       method="manual", confidence="high"),
+        ]
+        # elevation_range=(0, 2) ∩ story=["Storey 2"] (Z=3) → no match
+        sel = Selection(
+            element_types=["Frame"],
+            elevation_range=(0.0, 2.0),
+            story=["Storey 2"],
+        )
+        frame_ids, _ = sel.resolve_to_mesh_sets(
+            mesh_model, storey_data=stories,
+        )
+        assert frame_ids == set()
+
+    # ── None defaults ──
+
+    def test_default_none_behaviour(self, mesh_model):
+        """All-None Selection returns all active elements."""
+        sel = Selection()
+        frame_ids, area_ids = sel.resolve_to_mesh_sets(mesh_model)
+        assert frame_ids == {"1", "2", "3", "4"}
+        assert area_ids == {"1"}
+
+    # ── inactive element skipping ──
+
+    def test_inactive_elements_skipped(self, mesh_model):
+        """Inactive elements are excluded from results."""
+        mesh_model.frame_elements["1"].inactive = True
+        sel = Selection(element_types=["Frame"])
+        frame_ids, _ = sel.resolve_to_mesh_sets(mesh_model)
+        assert "1" not in frame_ids
+        assert frame_ids == {"2", "3", "4"}
 
 
 # ============================================================================

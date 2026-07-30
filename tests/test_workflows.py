@@ -1395,6 +1395,9 @@ class TestHdf5RoundTrip:
         data = read_results_hdf5(h5_path)
 
         # _resolve_mesh_data should accept it
+        # Note: _resolve_mesh_data stores each node under two keys
+        # (SAP ID string + node tag int) for fast lookup, so 3 nodes
+        # produce 6 dict entries.
         resolved = _resolve_mesh_data(data)
-        assert len(resolved["nodes"]) == 3
+        assert len(resolved["nodes"]) == 6
         assert len(resolved["frames"]) == 2
