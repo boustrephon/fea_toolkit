@@ -159,6 +159,53 @@ types, batch processing.
    Suitable Bilinear Pushover Curves in Nonlinear Static Analyses."
    *13th World Conference on Earthquake Engineering*, Paper 1626.
 
+## Performance Point (CSM)
+
+The ``compute_performance_point()`` function in ``csm.py`` implements the
+full ATC‑40 Capacity Spectrum Method with secant iteration:
+
+1. **ADRS conversion** — pushover curve (V‑δ) → spectral acceleration
+   vs. spectral displacement using the first-mode participation factor
+   and effective modal mass.
+2. **Bilinearization** — one of the three methods above (composite
+   by default) determines the yield point (S_dy, S_ay).
+3. **Secant iteration** — starting from 20 % of peak S_d, repeatedly:
+   - Compute equivalent secant period T_eq from the trial point
+   - Compute ductility μ and equivalent viscous damping β_eq
+     (ATC‑40 Eqn 5‑19)
+   - Compute damping reduction factor B (ATC‑40 / GB 50011 compatible)
+   - Interpolate elastic demand spectrum at T_eq and reduce by B
+     to obtain inelastic demand displacement
+   - Check convergence (relative tolerance or 3‑iteration stall)
+   - Weighted update of trial point (50 % demand, 50 % capacity)
+4. **Elastic convergence** — if both trial and demand drop below the
+   first capacity data point, the structure is elastic.  Performance
+   point computed directly from best‑mode period and elastic spectrum.
+5. **Returns** — S_dp, S_ap, V_base, D_roof, T_eq, μ, converged flag,
+   iteration count, bilinear yield point (S_dy, S_ay).
+
+### API
+
+```python
+from fea_toolkit.model.csm import compute_performance_point
+
+pp = compute_performance_point(
+    pushover_results, modal_results, mode_shapes,
+    spectrum_periods, spectrum_accels,
+    direction="X",
+    damping_ratio=0.05,
+    max_iter=50,
+    tol=0.01,
+    bilinearize_method="composite",
+)
+print(f"S_dp = {pp['S_dp']:.3f} m, converged = {pp['converged']}")
+```
+
+**Status:** ✅ Fully implemented and wired into ``report.py`` via
+``_run_pushover_with_csm()``.
+
+---
+
 ## See Also
 
 - [Pushover (Non-linear Static) Analysis](pushover_analysis.md)

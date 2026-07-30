@@ -1,12 +1,22 @@
-"""Capacity Spectrum Method (CSM) utilities.
-
-Standalone functions for converting pushover results to ADRS format and
-computing the performance point per ATC-40 / GB 50011.
-
-These functions are **pure data-flow** — they take analysis results dicts
-as input and return results dicts.  They have no dependency on any builder
-or model object, making them easy to test and reuse.
 """
+Capacity Spectrum Method (CSM) — bilinearization and performance‑point detection.
+
+Provides three bilinearization methods for pushover capacity curves:
+
+1. **Stiffness-change detection** — yield point where secant stiffness
+   drops below a threshold of the initial elastic stiffness.
+2. **Equal-energy (ATC‑40 / EC8)** — yield point preserving the area
+   under the capacity curve.
+3. **Composite** — stiffness‑change primary, equal‑energy fallback,
+   with a 10 % of peak displacement clamp (Vamvatsikos 10 % rule).
+
+The `compute_performance_point()` function implements the full ATC‑40
+Capacity Spectrum Method (CSM) with secant iteration: ADRS conversion,
+bilinearization, equivalent viscous damping, damping reduction factor,
+and convergence detection via relative tolerance and stall detection.
+"""
+
+from __future__ import annotations
 
 import math
 from typing import Any, Dict, List, Optional, Tuple
@@ -14,118 +24,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 
-def pushover_to_adrs(
-    pushover_results: Dict[str, Any],
-    modal_results: Dict[str, Any],
-    mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
-    direction: str = 'X',
-    g: Optional[float] = None,
-) -> Dict[str, Any]:
-    """Convert a pushover capacity curve to ADRS (Acceleration-Displacement
-    Response Spectrum) coordinates.
-
-    The conversion uses the fundamental mode:
-
-    .. math::
-
-        S_d = \\frac{\\Delta_{control}}{\\Gamma_1 \\phi_{1,control}}
-
-        S_a = \\frac{V_{base}}{M_1^*}
-
-    where :math:`\\Gamma_1` is the modal participation factor,
-    :math:`\\phi_{1,control}` is the mode shape value at the control
-    node, and :math:`M_1^*` is the effective modal mass.
-
-    Args:
-        pushover_results: Output from :meth:`run_pushover_analysis`.
-        modal_results: Output from :meth:`run_modal_analysis` (must
-            contain ``'modal_props'``).
-        mode_shapes: Output from :meth:`extract_mode_shapes`.
-        direction: Push direction (``'X'``, ``'Y'``, or ``'Z'``).
-        g: Gravitational acceleration (m/s²).  Not used directly in the
-            current implementation — provided for API compatibility with
-            callers that compute it.
-
-    Returns:
-        Dict with keys:
-
-        * ``'S_a'`` — list of spectral accelerations (m/s²).
-        * ``'S_d'`` — list of spectral displacements (m).
-        * ``'Gamma'`` — modal participation factor.
-        * ``'M_eff'`` — effective modal mass (kg).
-        * ``'phi_control'`` — mode shape at control node.
-        * ``'S_dy'``, ``'S_ay'`` — bilinear yield point (m, m/s²)
-          or ``None`` if not computed.
-    """
-    direction_map = {'X': 0, 'Y': 1, 'Z': 2}
-    dof_idx = direction_map.get(direction.upper(), 0)
-
-    control_node_tag = pushover_results.get('control_node')
-    if control_node_tag is None:
-        raise ValueError("pushover_results must contain 'control_node'")
-
-    # Modal participation factor from the dominant mode in the push direction
-    modal_props = modal_results.get('modal_props', {})
-    mass_key = (f'partiMassMX' if direction.upper() == 'X'
-                else f'partiMassMY' if direction.upper() == 'Y'
-                else f'partiMassMZ')
-    ratio_key = (f'partiMassRatiosMX' if direction.upper() == 'X'
-                 else f'partiMassRatiosMY' if direction.upper() == 'Y'
-                 else f'partiMassRatiosMZ')
-
-    mass_list = modal_props.get(mass_key, [0.0])
-    ratio_list = modal_props.get(ratio_key, [0.0])
-
-    # Find the mode with the highest mass participation in push direction
-    best_mode = 0
-    best_ratio = 0.0
-    for i, r in enumerate(ratio_list):
-        if abs(r) > best_ratio:
-            best_ratio = abs(r)
-            best_mode = i
-
-    M_eff = mass_list[best_mode] if mass_list else 1.0
-    if abs(M_eff) < 1e-12:
-        total_mass_key = 'totalFreeMass'
-        free_mass = modal_props.get(total_mass_key, [0])
-        free_val = free_mass[0] if free_mass else 0.0
-        M_eff = free_val if abs(free_val) > 1e-12 else 1.0
-
-    # Participation factor for mass-normalised eigenvectors.
-    # nodeEigenvector returns mass-normalised eigenvectors (φᵀMφ = 1),
-    # so the participation factor Γ = √M_eff.
-    Gamma = math.sqrt(abs(M_eff))
-
-    # Mode shape value at the control node (best mode)
-    phi_control = 1.0
-    if mode_shapes and best_mode in mode_shapes:
-        node_shape = mode_shapes[best_mode].get(control_node_tag)
-        if node_shape is not None:
-            phi_control = node_shape[dof_idx]
-    if abs(phi_control) < 1e-12:
-        phi_control = 1.0
-
-    # Convert
-    control_disp = pushover_results.get('control_disp', [0.0])
-    base_shear = pushover_results.get('base_shear', [0.0])
-
-    S_d = [abs(d) / (abs(Gamma) * abs(phi_control)) for d in control_disp]
-    S_a = [abs(v) / abs(M_eff) for v in base_shear]
-
-    return {
-        'S_a': S_a,
-        'S_d': S_d,
-        'Gamma': Gamma,
-        'M_eff': M_eff,
-        'phi_control': phi_control,
-        'best_mode': best_mode,
-        'S_dy': None,
-        'S_ay': None,
-    }
-
-
 # ═══════════════════════════════════════════════════════════════════════════
-# Bilinearisation methods
+# Bilinearization — Stiffness-change detection
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -134,115 +34,84 @@ def bilinearize_stiffness_change(
     S_a_arr: np.ndarray,
     config: Optional[Dict[str, Any]] = None,
 ) -> Tuple[float, float, str]:
-    """Bilinearise a capacity curve via secant stiffness-change detection.
+    """Bilinearise by detecting where secant stiffness drops significantly.
 
-    Yield is detected at the first point where the secant stiffness drops
-    below a fraction of the initial elastic stiffness (**Criterion A**),
-    *or* where a single step shows a large relative drop (**Criterion B**).
-
-    The algorithm is:
-
-    1. Determine the peak index (auto-detected or forced via ``peak_idx``).
-    2. Compute initial elastic stiffness ``K_init`` from the first 20 % of
-       points (at least 3 points).
-    3. Compute secant stiffnesses :math:`K_{sec} = S_a / S_d`.
-    4. **Criterion A**: find the first index where
-       :math:`K_{sec} < threshold \\times K_{init}`.
-    5. **Criterion B** (fallback): if criterion A finds nothing and there
-       are enough points, find the largest single-step relative drop in
-       secant stiffness.  If it exceeds ``min_relative_drop``, use that.
-    6. If a change index is found *before* the peak index, yield is at
-       that point.  Otherwise, yield at the peak (no clear yield
-       detected).
-
-    **When to use**: structures with a clear, sharp yield point where
-    a single stiffness-change event can be identified — e.g. brace
-    buckling in concentrically braced frames, well-defined section
-    yielding in steel moment frames with compact sections.
-
-    References:
-        - ATC-40 (1996), *Seismic Evaluation and Retrofit of Concrete
-          Buildings*, Applied Technology Council.
-        - Faella, G., Giordano, A., & Mezzi, M. (2004). "Definition of
-          Suitable Bilinear Pushover Curves in Nonlinear Static
-          Analyses." *13th WCEE*, Paper 1626.
+    Yield is detected where the secant stiffness falls below a fraction
+    of the initial elastic stiffness (Criterion A), or where a single
+    step shows a large relative drop (Criterion B).
 
     Args:
-        S_d_arr: Spectral displacements (m).  Should be monotonically
-            increasing and non-negative.  Zero-values are accepted
-            (clamped to 1e-12 for division).
-        S_a_arr: Spectral accelerations (m/s²), corresponding to
-            *S_d_arr*.  Should be non-negative.  Negative values are
-            tolerated but may produce unexpected results — consider
-            ``np.abs(S_a_arr)`` if numerical noise is present.
+        S_d_arr: Spectral displacements array (sorted ascending, >=0).
+        S_a_arr: Spectral accelerations (same length as S_d_arr).
         config: Optional dict with keys:
 
-            * ``threshold`` — fraction of initial secant stiffness
-              below which yield is detected (default ``0.50``).
-              Range ``(0, 1]``.  Higher values are more sensitive
-              (detect yield earlier / at lower S_dy).
-            * ``min_relative_drop`` — single-step relative drop
-              threshold for criterion B (default ``-0.30``).  A drop
-              more negative than this triggers yield at that step.
-            * ``peak_idx`` — force the peak index to this value
-              (0-based).  If ``None`` (default), auto-detected as
-              ``argmax(S_a_arr)``.
+            - ``threshold`` (float, default 0.50): Fraction of K_init
+              below which yield is declared (Criterion A).
+            - ``min_relative_drop`` (float, default -0.30): Single-step
+              secant-stiffness relative drop threshold (Criterion B).
+            - ``peak_idx`` (int, optional): Index of the peak / target
+              displacement. Auto-detected from argmax if not provided.
 
     Returns:
-        Tuple ``(S_dy, S_ay, method_name)`` where *method_name* is
-        always ``'stiffness_change'``.
+        Tuple (S_dy, S_ay, method) where method is ``'stiffness_change'``.
 
     Edge cases:
-        - Fewer than 2 data points: returns
-          ``(S_d_arr[0], S_a_arr[0], 'stiffness_change')``.
-        - ``peak_idx < 1``: same early return.
-        - No stiffness drop detected before peak: returns the peak
-          coordinates (no yield — effectively elastic).
+        - No clear yield detected → yield at peak (mu = 1).
+        - Empty arrays → returns (0.0, 0.0, 'stiffness_change').
     """
-    cfg = dict(config or {})
-    threshold = cfg.get('threshold', 0.50)
-    min_relative_drop = cfg.get('min_relative_drop', -0.30)
-    peak_idx = cfg.get('peak_idx')
+    config = config or {}
+    S_d_arr = np.asarray(S_d_arr, dtype=float)
+    S_a_arr = np.asarray(S_a_arr, dtype=float)
 
+    if len(S_d_arr) < 2 or len(S_a_arr) < 2:
+        return 0.0, 0.0, "stiffness_change"
+
+    peak_idx = config.get("peak_idx")
     if peak_idx is None:
         peak_idx = int(np.argmax(S_a_arr))
+    peak_idx = min(peak_idx, len(S_d_arr) - 1)
 
-    if peak_idx < 1 or len(S_d_arr) < 2:
-        return float(S_d_arr[0]), float(S_a_arr[0]), 'stiffness_change'
+    S_d_peak = float(S_d_arr[peak_idx])
+    S_a_peak = float(S_a_arr[peak_idx])
 
-    # Initial elastic stiffness from first 20% of points
-    n_el = max(3, len(S_d_arr) // 5)
-    K_init = float(np.polyfit(S_d_arr[:n_el], S_a_arr[:n_el], 1)[0])
+    # initial elastic stiffness: first non-zero secant
+    K_init = float(S_a_arr[1] / max(S_d_arr[1], 1e-12)) if S_d_arr[0] < 1e-12 else 0.0
+    if K_init < 1e-12:
+        # fallback: use first two points
+        for i in range(1, len(S_d_arr)):
+            if S_d_arr[i] > 1e-12 and S_a_arr[i] > 1e-12:
+                K_init = S_a_arr[i] / S_d_arr[i]
+                break
+    if K_init < 1e-12:
+        K_init = S_a_peak / max(S_d_peak, 1e-12)
 
-    secant_k = S_a_arr / np.maximum(S_d_arr, 1e-12)
-    K_init_ref = secant_k[1] if len(secant_k) > 1 else K_init
-    if K_init_ref < 1e-12:
-        K_init_ref = K_init
+    threshold = config.get("threshold", 0.50)
+    min_drop = config.get("min_relative_drop", -0.30)
 
-    # Criterion A: absolute threshold
-    abs_threshold = threshold * K_init_ref
-    change_idx: Optional[int] = None
-    for i in range(1, len(secant_k)):
-        if secant_k[i] < abs_threshold:
-            change_idx = i
+    S_dy, S_ay = S_d_peak, S_a_peak
+
+    for i in range(1, peak_idx):
+        if S_d_arr[i] < 1e-12:
+            continue
+        K_sec = S_a_arr[i] / S_d_arr[i]
+        # Criterion A: secant stiffness below threshold * K_init
+        if K_sec < threshold * K_init:
+            S_dy, S_ay = S_d_arr[i], S_a_arr[i]
             break
+        # Criterion B: large relative drop in secant stiffness
+        if i > 1:
+            K_prev = S_a_arr[i - 1] / max(S_d_arr[i - 1], 1e-12)
+            relative_drop = (K_sec - K_prev) / max(K_prev, 1e-12)
+            if relative_drop < min_drop:
+                S_dy, S_ay = S_d_arr[i], S_a_arr[i]
+                break
 
-    # Criterion B: relative drop in one step
-    if change_idx is None and len(secant_k) > 2:
-        rel_drops = np.diff(secant_k[1:]) / np.maximum(secant_k[1:-1], 1e-12)
-        worst = int(np.argmin(rel_drops))
-        if rel_drops[worst] < min_relative_drop:
-            change_idx = worst + 2  # +1 for step 0, +1 for diff index
+    return float(S_dy), float(S_ay), "stiffness_change"
 
-    if change_idx is not None and change_idx < peak_idx:
-        S_dy = float(S_d_arr[change_idx])
-        S_ay = float(S_a_arr[change_idx])
-    else:
-        # No clear stiffness change — return peak (no yield detected)
-        S_dy = float(S_d_arr[peak_idx])
-        S_ay = float(S_a_arr[peak_idx])
 
-    return S_dy, S_ay, 'stiffness_change'
+# ═══════════════════════════════════════════════════════════════════════════
+# Bilinearization — Equal-energy (ATC‑40 / EC8)
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def bilinearize_equal_energy(
@@ -250,115 +119,112 @@ def bilinearize_equal_energy(
     S_a_arr: np.ndarray,
     config: Optional[Dict[str, Any]] = None,
 ) -> Tuple[float, float, str]:
-    """Bilinearise a capacity curve using the ATC-40 equal-energy method.
+    """Bilinearise by preserving the area under the capacity curve.
 
-    Finds the yield point :math:`(S_{dy}, S_{ay})` that preserves the
-    area under the capacity curve up to the peak, using an iterative
-    Newton-style relaxation.  The bilinear curve is elastic-perfectly
-    plastic with hardening defined by the elastic stiffness :math:`K`.
-
-    The algorithm is:
-
-    1. Determine the peak index and peak coordinates
-       :math:`(S_{d,peak}, S_{a,peak})`.
-    2. Compute initial elastic stiffness ``K_init`` from the first 20 %
-       of data points.
-    3. Compute the actual area under the capacity curve from the origin
-       to the peak (trapezoidal integration).
-    4. Iterate from an initial guess of ``initial_guess * S_d_peak``:
-       - Compute :math:`S_{ay} = K_{init} \\times S_{dy}`
-       - Compute the bilinear area as:
-         :math:`A_{bilin} = \\frac{1}{2} \\times S_{ay} \\times S_{dy}
-         + S_{ay} \\times (S_{d,peak} - S_{dy})
-         + \\frac{1}{2} \\times (S_{a,peak} - S_{ay}) \\times (S_{d,peak} - S_{dy})`
-       - Compute the relative error and update :math:`S_{dy}` using
-         :math:`S_{dy} \\leftarrow S_{dy} \\times (1 - 0.5 \\times err)`
-       - Clamp :math:`S_{dy}` to :math:`[S_{d,0}, S_{d,peak}]`.
-    5. Clamp :math:`S_{ay}` to at least :math:`S_{a,1}` (avoid zero
-       yield acceleration).
-    6. If the converged yield is ≥ 90 % of the peak displacement, the
-       curve is essentially linear — reset to the peak (ductility
-       :math:`\\mu = 1`).
-
-    **When to use**: structures with gradual yielding or no single
-    stiffness-change event — e.g. ductile RC moment frames, steel
-    moment frames with gradual plastification.
-
-    References:
-        - ATC-40 (1996), *Seismic Evaluation and Retrofit of Concrete
-          Buildings*, Applied Technology Council (Procedure B).
-        - Eurocode 8 (2004), EN 1998-1, Annex B.
-        - Faella, G., Giordano, A., & Mezzi, M. (2004). "Definition of
-          Suitable Bilinear Pushover Curves in Nonlinear Static
-          Analyses." *13th WCEE*, Paper 1626.
+    Iterative Newton-style relaxation to find the yield point (S_dy, S_ay)
+    such that the area under the bilinear curve equals the area under the
+    capacity curve up to the peak displacement.
 
     Args:
-        S_d_arr: Spectral displacements (m).  Should be monotonically
-            increasing and non-negative.
-        S_a_arr: Spectral accelerations (m/s²), corresponding to
-            *S_d_arr*.  Should be non-negative.
+        S_d_arr: Spectral displacements array (sorted ascending, >=0).
+        S_a_arr: Spectral accelerations (same length as S_d_arr).
         config: Optional dict with keys:
 
-            * ``initial_guess`` — fraction of ``S_d_peak`` to use as
-              the starting point for iteration (default ``0.3``).
-              Range ``(0, 1)``.  Lower values converge from below
-              (conservative), higher values from above.
-            * ``tolerance`` — relative area error tolerance for
-              convergence (default ``0.001``).  Smaller values give
-              more precise area matching but more iterations.
-            * ``max_iter`` — maximum number of iterations
-              (default ``100``).  Prevents infinite loops.
-            * ``peak_idx`` — force the peak index to this value
-              (0-based).  If ``None`` (default), auto-detected as
-              ``argmax(S_a_arr)``.
+            - ``initial_guess`` (float, default 0.30): Fraction of
+              S_d_peak to use as the initial yield-displacement guess.
+            - ``tolerance`` (float, default 1e-3): Relative area-error
+              convergence tolerance.
+            - ``max_iter`` (int, default 100): Maximum iterations.
+            - ``peak_idx`` (int, optional): Auto-detected from argmax.
 
     Returns:
-        Tuple ``(S_dy, S_ay, method_name)`` where *method_name* is
-        always ``'equal_energy'``.
+        Tuple (S_dy, S_ay, method) where method is ``'equal_energy'``.
 
     Edge cases:
-        - Fewer than 2 data points: returns
-          ``(S_d_arr[0], S_a_arr[0], 'equal_energy')``.
-        - ``peak_idx < 1``: same early return.
-        - Converged yield ≥ 90 % of peak: reset to peak (elastic
-          response — :math:`\\mu = 1`).
+        - No clear yield (S_dy >= 90 % of peak) → yield at peak (mu = 1).
+        - Empty arrays → returns (0.0, 0.0, 'equal_energy').
     """
-    cfg = dict(config or {})
-    initial_guess = cfg.get('initial_guess', 0.3)
-    tolerance = cfg.get('tolerance', 0.001)
-    max_iter = cfg.get('max_iter', 100)
-    peak_idx = cfg.get('peak_idx')
+    config = config or {}
+    S_d_arr = np.asarray(S_d_arr, dtype=float)
+    S_a_arr = np.asarray(S_a_arr, dtype=float)
 
+    if len(S_d_arr) < 2 or len(S_a_arr) < 2:
+        return 0.0, 0.0, "equal_energy"
+
+    peak_idx = config.get("peak_idx")
     if peak_idx is None:
         peak_idx = int(np.argmax(S_a_arr))
-
-    if peak_idx < 1 or len(S_d_arr) < 2:
-        return float(S_d_arr[0]), float(S_a_arr[0]), 'equal_energy'
+    peak_idx = min(peak_idx, len(S_d_arr) - 1)
 
     S_d_peak = float(S_d_arr[peak_idx])
     S_a_peak = float(S_a_arr[peak_idx])
 
-    # Initial elastic stiffness from first 20% of points
-    n_el = max(3, len(S_d_arr) // 5)
-    K_init = float(np.polyfit(S_d_arr[:n_el], S_a_arr[:n_el], 1)[0])
+    if peak_idx < 2:
+        # Not enough data — yield at peak
+        S_ay = S_a_peak
+        return S_d_peak, S_ay, "equal_energy"
 
-    area_actual = float(np.trapezoid(S_a_arr[:peak_idx + 1], S_d_arr[:peak_idx + 1]))
+    # Initial elastic stiffness (first non-zero secant)
+    K_init = float(S_a_arr[1] / max(S_d_arr[1], 1e-12)) if S_d_arr[0] < 1e-12 else 0.0
+    if K_init < 1e-12:
+        for i in range(1, peak_idx):
+            if S_d_arr[i] > 1e-12 and S_a_arr[i] > 1e-12:
+                K_init = S_a_arr[i] / S_d_arr[i]
+                break
+    if K_init < 1e-12:
+        K_init = S_a_peak / max(S_d_peak, 1e-12)
+
+    # Cumulative integral (trapezoidal rule)
+    I = np.zeros_like(S_d_arr)
+    for i in range(1, peak_idx + 1):
+        I[i] = I[i - 1] + 0.5 * (S_d_arr[i] - S_d_arr[i - 1]) * (
+            S_a_arr[i] + S_a_arr[i - 1]
+        )
+    A_cap = I[peak_idx]
+
+    # Local variable for S_a at yield (used in loop and after)
+    S_ay_local = 0.0
+
+    # Initial guess
+    initial_guess = config.get("initial_guess", 0.30)
+    tol = config.get("tolerance", 1e-3)
+    max_iter = config.get("max_iter", 100)
 
     S_dy = S_d_peak * initial_guess
-    for _ in range(max_iter):
-        S_ay = K_init * S_dy
-        A1 = 0.5 * S_ay * S_dy
-        A2 = S_ay * (S_d_peak - S_dy)
-        A3 = 0.5 * (S_a_peak - S_ay) * (S_d_peak - S_dy)
-        area_bilin = A1 + A2 + A3
-        err = (area_bilin - area_actual) / max(area_actual, 1e-12)
-        if abs(err) < tolerance:
-            break
-        S_dy *= (1.0 - err * 0.5)
-        S_dy = max(float(S_d_arr[0]), min(S_dy, S_d_peak))
+    S_ay = 0.0  # ensure bound before loop
+    if S_dy <= S_d_arr[0]:
+        S_dy = float(S_d_arr[1] if len(S_d_arr) > 1 else S_d_arr[0])
 
-    S_ay = max(K_init * S_dy,
-               float(S_a_arr[1]) if len(S_a_arr) > 1 else float(S_a_arr[0]))
+    for _iteration in range(max_iter):
+        if S_dy <= S_d_arr[0]:
+            S_dy = float(S_d_arr[0])
+        if S_dy >= S_d_peak:
+            S_dy = S_d_peak
+            S_ay = S_a_peak
+            return S_dy, S_ay, "equal_energy"
+
+        # S_a at S_dy (interpolate capacity curve)
+        S_ay_elastic = K_init * S_dy
+        S_a_at_dy = float(np.interp(S_dy, S_d_arr, S_a_arr))
+        S_ay = min(S_ay_elastic, S_a_at_dy)
+
+        if S_ay <= 0:
+            S_dy = S_d_peak * 1.5  # move away from zero
+            continue
+
+        # Area under bilinear curve up to peak
+        A_bilin = 0.5 * S_ay * S_dy + S_ay * (S_d_peak - S_dy)
+        A_bilin += 0.5 * (S_a_peak - S_ay) * (S_d_peak - S_dy)
+
+        err = (A_bilin - A_cap) / max(A_cap, 1e-12)
+
+        if abs(err) < tol:
+            break
+
+        # Update: increase S_dy if area too small, decrease if too large
+        S_dy *= 1.0 - 0.5 * err
+        S_dy = max(float(S_d_arr[0] if len(S_d_arr) > 0 else 0.0),
+                   min(S_dy, S_d_peak))
 
     # Sanity: if yield is >90% of peak, the curve is essentially
     # linear — reset to peak (mu = 1).
@@ -366,7 +232,7 @@ def bilinearize_equal_energy(
         S_dy = S_d_peak
         S_ay = S_a_peak
 
-    return S_dy, S_ay, 'equal_energy'
+    return S_dy, S_ay, "equal_energy"
 
 
 def bilinearize_composite(
@@ -442,10 +308,10 @@ def bilinearize_composite(
           engage depending on the equal-energy result.
     """
     cfg = dict(config or {})
-    peak_idx = cfg.get('peak_idx')
+    peak_idx = cfg.get("peak_idx")
     if peak_idx is None:
         peak_idx = int(np.argmax(S_a_arr))
-    cfg['peak_idx'] = peak_idx
+    cfg["peak_idx"] = peak_idx
 
     # Try stiffness-change first
     S_dy, S_ay, _ = bilinearize_stiffness_change(S_d_arr, S_a_arr, cfg)
@@ -456,9 +322,9 @@ def bilinearize_composite(
     if S_dy >= 0.90 * S_d_peak:
         # No clear yield — fall back to equal-energy
         S_dy, S_ay, _ = bilinearize_equal_energy(S_d_arr, S_a_arr, cfg)
-        method = 'composite_equal_energy'
+        method = "composite_equal_energy"
     else:
-        method = 'composite_stiffness_change'
+        method = "composite_stiffness_change"
 
     # Sanity clamp: yield must be at least 10% of peak displacement
     min_S_dy = 0.10 * S_d_peak if peak_idx > 1 else float(S_d_arr[0])
@@ -485,34 +351,70 @@ def compute_performance_point(
     mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
     spectrum_periods: List[float],
     spectrum_accels: List[float],
-    direction: str = 'X',
+    direction: str = "X",
     g: Optional[float] = None,
     damping_ratio: float = 0.05,
     max_iter: int = 50,
     tol: float = 0.01,
-    bilinearize_method: str = 'composite',
+    bilinearize_method: str = "composite",
     bilinearize_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Find the performance point using the Capacity Spectrum Method (CSM).
 
-    The capacity spectrum is bilinearised and intersected with the
-    demand response spectrum (in ADRS format).  Equivalent viscous
-    damping from hysteresis is used to reduce the elastic demand
-    (per ATC-40 / GB 50011 CSM procedure).
+    Fully implements the ATC-40 Capacity Spectrum Method with secant
+    iteration.  The capacity curve is converted to ADRS format,
+    bilinearised, and intersected with the design response spectrum
+    reduced by equivalent viscous damping.
+
+    Procedure:
+        1. **ADRS conversion** — pushover curve (V‑δ) → spectral
+           acceleration vs. spectral displacement using the first-mode
+           participation factor and effective modal mass.
+        2. **Bilinearization** — one of ``'composite'`` (default),
+           ``'stiffness_change'``, or ``'equal_energy'`` methods
+           determines the yield point (S_dy, S_ay).
+        3. **Secant iteration** — starting from 20 % of the peak
+           spectral displacement, repeatedly:
+           a. Compute equivalent secant period T_eq from the trial
+              point on the capacity curve.
+           b. Compute ductility μ and equivalent viscous damping
+              β_eq (ATC-40 Eqn 5-19).
+           c. Compute damping reduction factor B (ATC‑40 / GB 50011
+              compatible).
+           d. Interpolate the elastic demand spectrum at T_eq and
+              reduce it by B to obtain the inelastic demand
+              displacement S_d_demand.
+           e. Check convergence: relative change < tol, or stall
+              detection (S_d_trial stops changing over 3 iterations).
+           f. Update trial point (50 % weighting with demand).
+        4. **Elastic convergence** — if both trial and demand drop
+           below the first capacity data point, the structure is in
+           the elastic range.  The performance point is computed
+           directly from the best-mode period and elastic spectrum.
+        5. **Return values** — performance point (S_dp, S_ap),
+           base shear V_base, roof displacement D_roof, equivalent
+           period T_eq, ductility μ, and convergence status.
 
     Args:
         pushover_results: Output from :meth:`run_pushover_analysis`.
+            Expected keys: ``'control_disp'``, ``'base_shear'``,
+            ``'roof_disp'``, ``'monitor_disp'`` (roof displacement
+            history).
         modal_results: Output from :meth:`run_modal_analysis`.
+            Expected key: ``'periods'`` (list of periods in s).
         mode_shapes: Output from :meth:`extract_mode_shapes`.
+            Dict mapping mode index → {node_tag: (ux, uy, uz)}.
         spectrum_periods: Periods (s) defining the elastic demand
-            spectrum.
+            response spectrum.
         spectrum_accels: Spectral accelerations (m/s²) corresponding
             to *spectrum_periods*.
-        direction: Push direction.
-        g: Gravitational acceleration.
+        direction: Push direction (``'X'`` or ``'Y'``), used for
+            extracting the appropriate mode shape component.
+        g: Gravitational acceleration.  If ``None``, taken from
+            ``pushover_results`` or default 9.81.
         damping_ratio: Elastic damping ratio (default 0.05).
-        max_iter: Maximum iterations for secant convergence.
-        tol: Convergence tolerance on S_d (relative).
+        max_iter: Maximum iterations for secant convergence (default 50).
+        tol: Convergence tolerance on S_d (relative, default 1 %).
         bilinearize_method: One of ``'composite'`` (default),
             ``'stiffness_change'``, or ``'equal_energy'``.
         bilinearize_config: Optional dict passed to the bilinearisation
@@ -528,18 +430,33 @@ def compute_performance_point(
         * ``'T_eq'`` — equivalent period at performance point (s).
         * ``'mu'`` — ductility demand.
         * ``'converged'`` — whether the iteration converged.
+        * ``'iterations'`` — number of iterations used.
         * ``'S_dy'``, ``'S_ay'`` — bilinear yield point.
         * ``'bilinearize_method'`` — name of the method actually used.
-        * ``'capacity_adrs'`` — the full ADRS curve (dict with ``'S_a'``,
-          ``'S_d'``).
+        * ``'Gamma'`` — participation factor.
+        * ``'M_eff'`` — effective modal mass.
+        * ``'capacity_adrs'`` — dict with ``'S_a'`` and ``'S_d'`` lists.
+
+    Raises:
+        ValueError: If the capacity spectrum has fewer than 3 valid
+            data points after filtering.
+
+    Example:
+        >>> pp = compute_performance_point(
+        ...     pushover_results, modal_results, mode_shapes,
+        ...     [0.0, 0.1, 0.5, 1.0, 2.0],
+        ...     [2.5, 2.5, 1.0, 0.5, 0.2],
+        ...     direction='X',
+        ... )
+        >>> print(f"S_dp = {pp['S_dp']:.3f} m, converged = {pp['converged']}")
     """
     # 1. Convert pushover to ADRS
     adrs = pushover_to_adrs(
         pushover_results, modal_results, mode_shapes,
         direction=direction, g=g,
     )
-    S_a_arr = np.array(adrs['S_a'])
-    S_d_arr = np.array(adrs['S_d'])
+    S_a_arr = np.array(adrs["S_a"])
+    S_d_arr = np.array(adrs["S_d"])
 
     # Filter out negative / zero values
     mask = (S_d_arr > 1e-12) & (S_a_arr > 1e-12)
@@ -550,18 +467,18 @@ def compute_performance_point(
             "Too few valid data points in capacity spectrum"
         )
 
-    Gamma = adrs['Gamma']
-    M_eff = adrs['M_eff']
-    phi_control = adrs['phi_control']
-    best_mode = adrs.get('best_mode', 0)
-    control_disp = np.array(pushover_results.get('control_disp', [0]))[mask]
-    base_shear = np.array(pushover_results.get('base_shear', [0]))[mask]
+    Gamma = adrs["Gamma"]
+    M_eff = adrs["M_eff"]
+    phi_control = adrs["phi_control"]
+    best_mode = adrs.get("best_mode", 0)
+    control_disp = np.array(pushover_results.get("control_disp", [0]))[mask]
+    base_shear = np.array(pushover_results.get("base_shear", [0]))[mask]
 
     # 2. Bilinearise the capacity spectrum (find yield point)
     _bilin_map = {
-        'composite': bilinearize_composite,
-        'stiffness_change': bilinearize_stiffness_change,
-        'equal_energy': bilinearize_equal_energy,
+        "composite": bilinearize_composite,
+        "stiffness_change": bilinearize_stiffness_change,
+        "equal_energy": bilinearize_equal_energy,
     }
     if bilinearize_method not in _bilin_map:
         raise ValueError(
@@ -577,8 +494,8 @@ def compute_performance_point(
     Sa_spec = np.array(spectrum_accels)
 
     # First-mode elastic period from modal analysis
-    modal_periods = modal_results.get('periods', [])
-    best_mode_period = modal_periods[best_mode] if best_mode < len(modal_periods) else 1.0
+    modal_periods = modal_results.get("periods", [])
+    best_mode_period = float(modal_periods[best_mode]) if best_mode < len(modal_periods) else 1.0
 
     peak_idx = int(np.argmax(S_a_arr))
     S_d_peak = float(S_d_arr[peak_idx])
@@ -593,9 +510,9 @@ def compute_performance_point(
     for iteration in range(max_iter):
         # Spectral acceleration at trial point (interpolate capacity)
         if S_d_trial <= S_d_arr[0]:
-            S_a_trial = S_a_arr[0]
+            S_a_trial = float(S_a_arr[0])
         elif S_d_trial >= S_d_arr[-1]:
-            S_a_trial = S_a_arr[-1]
+            S_a_trial = float(S_a_arr[-1])
         else:
             S_a_trial = float(np.interp(S_d_trial, S_d_arr, S_a_arr))
 
@@ -690,20 +607,20 @@ def compute_performance_point(
     mu_final = max(S_dp / max(S_dy, 1e-12), 1.0)
 
     return {
-        'S_dp': S_dp,
-        'S_ap': S_ap,
-        'V_base': V_p,
-        'D_roof': D_p,
-        'T_eq': T_eq_final,
-        'mu': mu_final,
-        'converged': converged,
-        'iterations': len(history),
-        'S_dy': S_dy,
-        'S_ay': S_ay,
-        'bilinearize_method': _bilin_name,
-        'Gamma': Gamma,
-        'M_eff': M_eff,
-        'capacity_adrs': {'S_a': S_a_arr.tolist(), 'S_d': S_d_arr.tolist()},
+        "S_dp": S_dp,
+        "S_ap": S_ap,
+        "V_base": V_p,
+        "D_roof": D_p,
+        "T_eq": T_eq_final,
+        "mu": mu_final,
+        "converged": converged,
+        "iterations": len(history),
+        "S_dy": S_dy,
+        "S_ay": S_ay,
+        "bilinearize_method": _bilin_name,
+        "Gamma": Gamma,
+        "M_eff": M_eff,
+        "capacity_adrs": {"S_a": S_a_arr.tolist(), "S_d": S_d_arr.tolist()},
     }
 
 
@@ -752,3 +669,260 @@ def check_modal_pushover_mode(
             )
 
     return best_idx, rs_dominant, warning
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ADRS conversion
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def pushover_to_adrs(
+    pushover_results: Dict[str, Any],
+    modal_results: Dict[str, Any],
+    mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
+    direction: str = "X",
+    g: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Convert pushover capacity curve (V‑δ) → ADRS (S_a‑S_d) format.
+
+    Uses the first-mode (or best-mode) participation factor and
+    effective modal mass to convert the physical pushover curve to
+    spectral coordinates.
+
+    .. math::
+
+        S_a = \\frac{V}{M^* \\cdot g} \\cdot \\frac{1}{\\phi_{\\text{control}}}
+        S_d = \\frac{\\delta}{\\Gamma \\cdot \\phi_{\\text{control}}}
+
+    Where:
+    - M^* = effective modal mass = L² / M* where M* = Σ m_i φ_i²
+    - Γ = participation factor = L / M*
+    - φ_control = mode shape ordinate at the control/roof node
+
+    Args:
+        pushover_results: Dict with ``'control_disp'``, ``'base_shear'``,
+            and ``'roof_disp'`` (or ``'monitor_disp'``) arrays.
+        modal_results: Dict with ``'periods'``, and ``'nodal_masses'``
+            (optional).
+        mode_shapes: Dict mapping mode index → {node_tag: (ux, uy, uz)}.
+        direction: Push direction (``'X'``, ``'Y'``, or ``'Z'``).
+        g: Gravitational acceleration.  Uses ``pushover_results`` value
+            or defaults to 9.81.
+
+    Returns:
+        Dict with keys:
+
+        * ``'S_a'`` — spectral acceleration array (g units).
+        * ``'S_d'`` — spectral displacement array (model length units).
+        * ``'Gamma'`` — participation factor.
+        * ``'M_eff'`` — effective modal mass.
+        * ``'phi_control'`` — control-node mode shape ordinate.
+        * ``'best_mode'`` — selected mode index.
+    """
+    if g is None:
+        g = pushover_results.get("g", 9.81)
+
+    # Use best mode (highest mass participation in push direction)
+    masses = modal_results.get("nodal_masses", {})
+    periods = modal_results.get("periods", [])
+
+    dir_idx = {"X": 0, "Y": 1, "Z": 2}.get(direction, 0)
+
+    # Find the mode with highest participation in the push direction
+    best_mode = 0
+    best_participation = 0.0
+    for mode_idx, shape in mode_shapes.items():
+        # Compute participation factor L/M*
+        M_star = 0.0
+        L = 0.0
+        for node_tag, (ux, uy, uz) in shape.items():
+            m = masses.get(node_tag, 0.0)
+            phi = [ux, uy, uz][dir_idx]
+            M_star += m * phi**2
+            L += m * phi
+        if M_star > 0:
+            participation = L**2 / M_star
+            if participation > best_participation:
+                best_participation = participation
+                best_mode = mode_idx
+
+    # Extract the best mode shape
+    best_shape = mode_shapes.get(best_mode, {})
+    M_star = 0.0
+    L = 0.0
+    for node_tag, (ux, uy, uz) in best_shape.items():
+        m = masses.get(node_tag, 0.0)
+        phi = [ux, uy, uz][dir_idx]
+        M_star += m * phi**2
+        L += m * phi
+
+    if M_star <= 0:
+        # Fallback: no masses or mode shapes — use unit values
+        Gamma = 1.0
+        M_eff = 1.0
+        phi_control = 1.0
+    else:
+        Gamma = L / M_star
+        M_eff = L**2 / M_star
+        # Control node = roof node (highest Z)
+        roof_tag = max(
+            (tag for tag in pushover_results.get("node_coords", {}).keys()
+             if tag in best_shape),
+            key=lambda t: pushover_results.get("node_coords", {}).get(t, (0, 0, 0))[2],
+            default=None,
+        )
+        if roof_tag is not None:
+            phi_control = [best_shape[roof_tag][0],
+                           best_shape[roof_tag][1],
+                           best_shape[roof_tag][2]][dir_idx]
+        else:
+            phi_control = 1.0
+
+    control_disp = np.array(pushover_results.get("control_disp", []), dtype=float)
+    base_shear = np.array(pushover_results.get("base_shear", []), dtype=float)
+
+    if len(control_disp) < 2 or len(base_shear) < 2:
+        return {
+            "S_a": [],
+            "S_d": [],
+            "Gamma": Gamma,
+            "M_eff": M_eff,
+            "phi_control": 1.0 if phi_control is None else phi_control,
+            "best_mode": best_mode,
+        }
+
+    # S_a in g, S_d in model length units
+    pc = 1.0 if phi_control is None else abs(phi_control)
+    S_a = base_shear / (M_eff * g * pc)
+    S_d = control_disp / (Gamma * pc)
+
+    return {
+        "S_a": S_a.tolist(),
+        "S_d": S_d.tolist(),
+        "Gamma": Gamma,
+        "M_eff": M_eff,
+        "phi_control": phi_control,
+        "best_mode": best_mode,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Equivalent damping — ATC‑40
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def compute_equivalent_damping(
+    alpha: float,
+    Ke: float,
+    S_dy: float,
+    S_ay: float,
+    mu: float,
+) -> float:
+    """Compute equivalent viscous damping per ATC‑40.
+
+    .. math::
+
+        \\beta_{\\text{eff}} = \\beta_0 + \\kappa \\cdot
+        \\frac{2}{\\pi} \\cdot \\frac{(1 - \\alpha)(\\mu - 1)}
+        {\\mu (1 + \\alpha \\mu - \\alpha)}
+
+    where:
+    - β₀ = 0.05 (inherent damping)
+    - κ = 0.33 (damping modification factor for typical existing buildings)
+    - α = post‑yield stiffness ratio
+    - μ = ductility = Sd_max / S_dy
+
+    Args:
+        alpha: Post‑yield stiffness ratio (0..1).
+        Ke: Elastic stiffness.
+        S_dy: Yield displacement.
+        S_ay: Yield spectral acceleration.
+        mu: Ductility demand (≥1).
+
+    Returns:
+        Equivalent viscous damping ratio (0.05 + hysteretic contribution).
+    """
+    if mu <= 1.0:
+        return 0.05
+
+    beta_0 = 0.05
+    kappa = 0.33  # Type C (poor hysteretic behaviour) — conservative
+
+    # Hysteretic damping per ATC-40 Eqn 5-19
+    beta_h = (2.0 / math.pi) * (1.0 - alpha) * (mu - 1.0) / (
+        mu * (1.0 + alpha * mu - alpha)
+    )
+    beta_eff = beta_0 + kappa * beta_h
+
+    return float(beta_eff)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Accessory
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _seismic_weight_from_masses(masses: List[float],
+                                 g: float = 9.81) -> float:
+    """Convert nodal masses to seismic weight (W = Σ m_i · g)."""
+    return sum(masses) * g
+
+
+def _control_node_mass(masses: List[float],
+                       mode_shape: List[float]) -> float:
+    """Compute effective modal mass for the control node.
+
+    .. math::
+
+        M^* = Σ m_i · φ_i²
+        L = Σ m_i · φ_i
+        M_eff = L² / M^*
+    """
+    M_star = sum(m * p**2 for m, p in zip(masses, mode_shape))
+    L = sum(m * p for m, p in zip(masses, mode_shape))
+    return L**2 / M_star if M_star > 0 else 0.0
+
+
+def first_mode_period(modal_results: Dict[str, Any]) -> float:
+    """Extract first-mode period from modal results.
+
+    Returns 0.0 if modal results are empty or periods unavailable.
+    """
+    periods = modal_results.get("periods", [])
+    if periods:
+        periods = [float(p) for p in periods]
+        return periods[0]
+    return 0.0
+
+
+def _period_from_stiffness(k_eff: float, m_eff: float) -> float:
+    """Effective period from secant stiffness and effective mass."""
+    if k_eff <= 0 or m_eff <= 0:
+        return 0.0
+    return 2.0 * math.pi * math.sqrt(m_eff / k_eff)
+
+
+def _kappa_damping_factor(beta_eq: float) -> float:
+    """Reduce theoretical hysteresis damping per ATC-40 κ-factor.
+
+    Type-A buildings (good hysteretic behaviour): κ = 1.0
+    Type-B buildings (average): κ = 2/3
+    Type-C buildings (poor): κ = 1/3
+
+    Defaults to Type B (κ = 0.67).
+    """
+    kappa = 2.0 / 3.0
+    return 0.05 + kappa * (beta_eq - 0.05)
+
+
+def _adrs_to_physical(s_d: float, s_a: float,
+                       Gamma: float, M_eff: float,
+                       g: float = 9.81) -> Tuple[float, float]:
+    """Convert ADRS coordinates back to physical displacement and base shear.
+
+    D_roof = S_d · Γ · φ_control
+    V_base = S_a · M_eff · g / φ_control
+    """
+    D_roof = s_d * Gamma * 1.0  # φ_control = 1.0 (normalised)
+    V_base = s_a * M_eff * g / 1.0
+    return D_roof, V_base
