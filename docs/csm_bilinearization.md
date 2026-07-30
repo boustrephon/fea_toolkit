@@ -1,7 +1,10 @@
 ---
-tags: csm, bilinearization, capacity-spectrum, pushover, yield-point
-category: analysis-type
-related: pushover_analysis.md, modal_analysis.md, workflow.md
+title: "CSM Bilinearization"
+description: "Bilinearisation methods for capacity curves (stiffness-change, energy-based, R-μ-T) for the Capacity Spectrum Method per ATC-40 and Eurocode 8."
+status: "complete"
+tags: [csm, bilinearization, capacity-spectrum, pushover, yield-point]
+category: [analysis-types]
+related: [pushover_analysis.md, modal_analysis.md, workflow.md]
 ---
 
 # Bilinearisation of Capacity Curves
@@ -16,8 +19,8 @@ displacement-based assessment procedures.
 
 The bilinear curve is defined by:
 
-- **Yield point** ``(S_dy, S_ay)`` — the onset of yielding.
-- **Initial elastic stiffness** ``K_init`` — slope of the elastic
+- **Yield point** `(S_dy, S_ay)` — the onset of yielding.
+- **Initial elastic stiffness** `K_init` — slope of the elastic
   branch.
 - **Post-elastic stiffness** (implicit in the yield-to-peak geometry).
 
@@ -29,7 +32,7 @@ the performance point.
 
 ### 1. Stiffness-Change Detection
 
-**``bilinearize_stiffness_change()``**
+**`bilinearize_stiffness_change()`**
 
 Yield is detected where the secant stiffness drops below a fraction of
 the initial elastic stiffness (Criterion A), or where a single step
@@ -37,9 +40,9 @@ shows a large relative drop (Criterion B).
 
 | Config | Default | Effect |
 |---|---|---|
-| ``threshold`` | 0.50 | Fraction of K_init for Criterion A |
-| ``min_relative_drop`` | -0.30 | Single-step drop threshold for Criterion B |
-| ``peak_idx`` | auto | Force peak index |
+| `threshold` | 0.50 | Fraction of K_init for Criterion A |
+| `min_relative_drop` | -0.30 | Single-step drop threshold for Criterion B |
+| `peak_idx` | auto | Force peak index |
 
 **When to use**: Braced frames, buckling-critical members, structures
 with a clear stiffness discontinuity.
@@ -52,7 +55,7 @@ stiffness drop is detected, and the method falls back to the peak
 
 ### 2. Equal-Energy (ATC-40 / EC8)
 
-**``bilinearize_equal_energy()``**
+**`bilinearize_equal_energy()`**
 
 Finds the yield point that preserves the area under the capacity curve
 up to the peak.  Iterative Newton-style relaxation from an initial
@@ -60,17 +63,17 @@ guess.
 
 | Config | Default | Effect |
 |---|---|---|
-| ``initial_guess`` | 0.3 | Fraction of S_d_peak for start |
-| ``tolerance`` | 0.001 | Relative area error tolerance |
-| ``max_iter`` | 100 | Maximum iterations |
-| ``peak_idx`` | auto | Force peak index |
+| `initial_guess` | 0.3 | Fraction of S_d_peak for start |
+| `tolerance` | 0.001 | Relative area error tolerance |
+| `max_iter` | 100 | Maximum iterations |
+| `peak_idx` | auto | Force peak index |
 
 **Algorithm** (per iteration):
-1. Compute ``S_ay = K_init * S_dy``
+1. Compute `S_ay = K_init * S_dy`
 2. Compute bilinear area:
-   ``A_bilin = 0.5 * S_ay * S_dy + S_ay * (S_d_peak - S_dy) + 0.5 * (S_a_peak - S_ay) * (S_d_peak - S_dy)``
-3. Relative error ``err = (A_bilin - A_actual) / A_actual``
-4. Update: ``S_dy *= (1.0 - 0.5 * err)``, clamp to ``[S_d[0], S_d_peak]``
+   `A_bilin = 0.5 * S_ay * S_dy + S_ay * (S_d_peak - S_dy) + 0.5 * (S_a_peak - S_ay) * (S_d_peak - S_dy)`
+3. Relative error `err = (A_bilin - A_actual) / A_actual`
+4. Update: `S_dy *= (1.0 - 0.5 * err)`, clamp to `[S_d[0], S_d_peak]`
 5. If converged yield ≥ 90 % of peak → reset to peak (elastic case).
 
 **When to use**: Ductile moment frames, RC structures with gradual
@@ -82,11 +85,11 @@ plastification, structures with no single stiffness-change event.
 
 ### 3. Composite (Default)
 
-**``bilinearize_composite()``**
+**`bilinearize_composite()`**
 
 A hybrid method that tries stiffness-change first and falls back to
 equal-energy when no clear stiffness change is detected.  A final
-sanity clamp ensures ``S_dy ≥ 10 % of S_d_peak``.
+sanity clamp ensures `S_dy ≥ 10 % of S_d_peak`.
 
 | Config | Effect |
 |---|---|
@@ -161,7 +164,7 @@ types, batch processing.
 
 ## Performance Point (CSM)
 
-The ``compute_performance_point()`` function in ``csm.py`` implements the
+The `compute_performance_point()` function in `csm.py` implements the
 full ATC‑40 Capacity Spectrum Method with secant iteration:
 
 1. **ADRS conversion** — pushover curve (V‑δ) → spectral acceleration
@@ -201,8 +204,8 @@ pp = compute_performance_point(
 print(f"S_dp = {pp['S_dp']:.3f} m, converged = {pp['converged']}")
 ```
 
-**Status:** ✅ Fully implemented and wired into ``report.py`` via
-``_run_pushover_with_csm()``.
+**Status:** ✅ Fully implemented and wired into `report.py` via
+`_run_pushover_with_csm()`.
 
 ---
 
@@ -211,5 +214,5 @@ print(f"S_dp = {pp['S_dp']:.3f} m, converged = {pp['converged']}")
 - [Pushover (Non-linear Static) Analysis](pushover_analysis.md)
 - [Builder Reference — Two-stage Pipeline](builder_reference.md)
 - [Modal Analysis Options](modal_analysis.md)
-- Source: ``src/fea_toolkit/model/csm.py``
-- Tests: ``tests/test_model.py::TestBilinearization`` (24 tests)
+- Source: `src/fea_toolkit/model/csm.py`
+- Tests: `tests/test_model.py::TestBilinearization` (24 tests)
