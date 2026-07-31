@@ -41,10 +41,11 @@ def bounding_box(md) -> Dict[str, float]:
 # Mass source summary
 # ========================================================================
 
-def summarise_mass_sources(md, g: float = 9.81) -> pd.DataFrame:
+def summarise_mass_sources(md) -> pd.DataFrame:
     """Return a DataFrame summarising all mass sources."""
     from ..opensees.preprocessor import preprocess_model
     from ..opensees.analysis_builder import AnalysisBuilder
+    from ..utils import g_from_units
 
     rows = []
     for ms_name, ms in md.mass_sources.items():
@@ -68,9 +69,9 @@ def summarise_mass_sources(md, g: float = 9.81) -> pd.DataFrame:
         b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn",
                                  "verbose": False})
         b.build_domain()
-        node_masses = b.compute_seismic_masses(g=g)
+        node_masses = b.compute_seismic_masses()
         total_mass = sum(node_masses.values())
-        total_weight = total_mass * g
+        total_weight = total_mass * g_from_units(md.units)
         for row in rows:
             row["Mass (t)"] = f"{total_mass:.2f}"
             row["Weight (kN)"] = f"{total_weight:.1f}"
@@ -1329,8 +1330,8 @@ def run_linear_cases(
         eta_1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
         eta_2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))
         lu = md.units.get("L", "m")
-        gravity = {"m": 9.81, "cm": 981.0, "mm": 9810.0,
-                   "ft": 32.2, "in": 386.4}.get(lu, 9.81)
+        from ..utils import g_from_units
+        gravity = g_from_units(md.units)
         tg = 0.25
         alpha_max = 0.50
         T_spec = np.linspace(0.0, 6.0, 300).tolist()
