@@ -347,3 +347,25 @@ cleared between attempts.
 11. **Do not** write a new function without first searching ``src/fea_toolkit/`` and
     ``src/fea_toolkit/__init__.py`` for an existing implementation.
 12. **Do not** define material strength or modulus values (`E`, `fc`, `fy`, `Es`, `Hiso`, `Hkin`, etc.) without using the project's unit-scaling infrastructure. Express materials in **SI (Pa)** and let the framework scale them via `scale_material_dict()` or the Preprocessor's automatic `nd_materials` scaling. Hand-converting to model-specific units (e.g. kPa for kN-m models) will silently produce 1000× over-strength and prevent yielding.
+
+## 10. Tool-Call Hygiene (prevent malformed tool-call XML)
+
+LLM assistants occasionally emit half-formed XML closing-tag fragments inside their own
+tool-call parameters (in `path`, `diff`, `content`, or `task_progress`), which corrupts
+the call and makes it fail with "The 'diff' parameter was empty" or "File not found"
+(where the reported path visibly ends in a stray tag fragment).  This is self-corruption,
+never a project error.  Keep future tool calls clean:
+
+1. **Never embed literal XML tag syntax in parameter values** — `path`, `diff`,
+   `content`, `command`, and `task_progress` must contain only plain text.
+2. **Emit one complete, well-formed tool call per message**; do not start writing a call,
+   get interrupted mid-tag, and resume (a truncated closing tag can be appended to the
+   next parameter).
+3. **Use clean delimiters only** — open with `<tool_name>` + `<parameter_name>`, close
+   with `</parameter_name>` + `</tool_name>` exactly once per the documented schema.
+4. **Keep `task_progress` short** (a handful of complete lines).
+5. **If a call fails with "diff/content parameter was empty" or a corrupted path, treat
+   it as a formatting glitch** — re-issue the call with a minimal, clean parameter set
+   rather than re-reading files or diagnosing project state.
+6. **Prefer `sed -n 'A,Bp' <file>` / `grep` for narrow read-only probes** when a
+   `read_file` has just failed on a corrupted `path`.
