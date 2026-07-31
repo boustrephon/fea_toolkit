@@ -1,3 +1,10 @@
+---
+title: "SAP IDs vs OpenSees Tags"
+description: "The two distinct identifier systems (SAP2000 string IDs vs OpenSees integer tags), who creates each, NPZ storage conventions, and common pitfalls."
+status: "complete"
+tags: [identifiers, sap2000, opensees, reference, architecture]
+category: [core-pipeline]
+---
 # SAP IDs vs OpenSees Tags — Identifier Systems
 
 ## Overview

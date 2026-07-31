@@ -21,6 +21,14 @@ for automated cross-referencing.
   Tags: `architecture`, `workflow`, `preprocessor`, `analysis-builder`, `mesh-model`
   Related: [Analysis Workflow](workflow.md) · [Builder Reference — Two-stage Pipeline](builder_reference.md) · [AnalysisBuilder Migration Plan](analysis_builder_migration_plan.md)
 
+- [LLM & AI Assistant Guide](llm_guide.md) — ✅ Complete
+  > Canonical goal-to-code mapping, full public API surface by domain, and key technical constraints — structured for language model consumption.
+  Tags: `llm`, `ai`, `guide`, `api-reference`, `usage`
+
+- [SAP IDs vs OpenSees Tags](sap_ids_vs_tags.md) — ✅ Complete
+  > The two distinct identifier systems (SAP2000 string IDs vs OpenSees integer tags), who creates each, NPZ storage conventions, and common pitfalls.
+  Tags: `identifiers`, `sap2000`, `opensees`, `reference`, `architecture`
+
 - [Analysis Workflow](workflow.md) — ✅ Complete
   > End-to-end analysis pipeline: parsing, preprocessing, domain construction, analysis execution, post-processing.
   Tags: `architecture`, `workflow`, `pipeline`, `end-to-end`
@@ -28,6 +36,11 @@ for automated cross-referencing.
 
 
 ## 🔬 Analysis Types
+
+- [CSM Bilinearization](csm_bilinearization.md) — ✅ Complete
+  > Bilinearisation methods for capacity curves (stiffness-change, energy-based, R-μ-T) for the Capacity Spectrum Method per ATC-40 and Eurocode 8.
+  Tags: `csm`, `bilinearization`, `capacity-spectrum`, `pushover`, `yield-point`
+  Related: [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Modal Analysis Options](modal_analysis.md) · [Analysis Workflow](workflow.md)
 
 - [Modal Analysis Options](modal_analysis.md) — ✅ Complete
   > Modal analysis solver options, mode shape visualisation, and usage examples.
@@ -131,24 +144,19 @@ for automated cross-referencing.
   Tags: `architecture`, `migration`, `planning`
   Related: [Layered Analysis Workflow for the v3 Architecture](layered_analysis_workflow.md) · [Analysis Workflow](workflow.md) · [Development Notes](dev_notes.md)
 
+- [Deprecation Removal Plan](deprecation_plan.md) — 🚧 Draft
+  > Plan for removing deprecated APIs after the RC nonlinear static analysis release.
+  Tags: `planning`, `deprecation`, `cleanup`
+
 - [Development Notes](dev_notes.md) — 🚧 Draft
   > Miscellaneous development notes, design decisions, and technical context.
   Tags: `architecture`, `development`, `notes`
   Related: [AnalysisBuilder Migration Plan](analysis_builder_migration_plan.md)
 
 
-## 📦 Analysis Type
-
-- [Csm Bilinearization](csm_bilinearization.md)
-  Tags: `csm`, `bilinearization`, `capacity-spectrum`, `pushover`, `yield-point`
-  Related: [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Modal Analysis Options](modal_analysis.md) · [Analysis Workflow](workflow.md)
-
-
 ## 📦 Uncategorised
 
-- [Llm Guide](llm_guide.md)
-
-- [Sap Ids Vs Tags](sap_ids_vs_tags.md)
+- [Pushover Results Storage Viz](pushover_results_storage_viz.md)
 
 
 ---
@@ -158,9 +166,11 @@ for automated cross-referencing.
 Tags across all documentation files:
 
 - **`aci-318`** — [stiffness_factors.md](stiffness_factors.md)
+- **`ai`** — [llm_guide.md](llm_guide.md)
 - **`analysis-builder`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`analysis-type`** — [modal_analysis.md](modal_analysis.md), [pushover_analysis.md](pushover_analysis.md), [storey_response.md](storey_response.md)
-- **`architecture`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [workflow.md](workflow.md)
+- **`api-reference`** — [llm_guide.md](llm_guide.md)
+- **`architecture`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md)
 - **`area-elements`** — [shell_support.md](shell_support.md)
 - **`beams`** — [element_classification.md](element_classification.md)
 - **`bilinearization`** — [csm_bilinearization.md](csm_bilinearization.md)
@@ -168,11 +178,13 @@ Tags across all documentation files:
 - **`braces`** — [element_classification.md](element_classification.md)
 - **`capacity-spectrum`** — [csm_bilinearization.md](csm_bilinearization.md)
 - **`classification`** — [element_classification.md](element_classification.md)
+- **`cleanup`** — [deprecation_plan.md](deprecation_plan.md)
 - **`columns`** — [element_classification.md](element_classification.md)
 - **`config`** — [element_properties_config.md](element_properties_config.md)
 - **`constraints`** — [constraint_detection.md](constraint_detection.md)
 - **`cracked-section`** — [stiffness_factors.md](stiffness_factors.md)
 - **`csm`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md)
+- **`deprecation`** — [deprecation_plan.md](deprecation_plan.md)
 - **`design-proposal`** — [report_generation.md](report_generation.md), [results_schema.md](results_schema.md)
 - **`development`** — [dev_notes.md](dev_notes.md)
 - **`displacement`** — [storey_response.md](storey_response.md)
@@ -188,12 +200,15 @@ Tags across all documentation files:
 - **`fiber`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md)
 - **`geometry`** — [rhino_export.md](rhino_export.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
+- **`guide`** — [llm_guide.md](llm_guide.md)
 - **`hdf5`** — [report_generation.md](report_generation.md)
 - **`hinges`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md)
 - **`html-export`** — [viewer.md](viewer.md)
+- **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`interactive`** — [viewer.md](viewer.md)
 - **`io`** — [results_schema.md](results_schema.md)
 - **`lessons-learned`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
+- **`llm`** — [llm_guide.md](llm_guide.md)
 - **`load-redistribution`** — [element_splitting.md](element_splitting.md)
 - **`mesh-model`** — [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`meshing`** — [constraint_detection.md](constraint_detection.md), [element_splitting.md](element_splitting.md), [shell_support.md](shell_support.md)
@@ -203,19 +218,20 @@ Tags across all documentation files:
 - **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`notes`** — [dev_notes.md](dev_notes.md)
 - **`npz`** — [results_schema.md](results_schema.md)
-- **`opensees`** — [tcl_export.md](tcl_export.md)
+- **`opensees`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`pipeline`** — [workflow.md](workflow.md)
-- **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md)
+- **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [deprecation_plan.md](deprecation_plan.md)
 - **`post-processing`** — [storey_response.md](storey_response.md)
 - **`preprocessor`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`pyvista`** — [viewer.md](viewer.md)
-- **`reference`** — [builder_reference.md](builder_reference.md)
+- **`reference`** — [builder_reference.md](builder_reference.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
 - **`results`** — [results_schema.md](results_schema.md)
 - **`rhino`** — [rhino_export.md](rhino_export.md)
 - **`runtime`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
+- **`sap2000`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`schema`** — [results_schema.md](results_schema.md)
 - **`scripting`** — [tcl_export.md](tcl_export.md)
 - **`shear`** — [storey_response.md](storey_response.md)
@@ -226,6 +242,7 @@ Tags across all documentation files:
 - **`stiffness`** — [stiffness_factors.md](stiffness_factors.md)
 - **`storey`** — [storey_response.md](storey_response.md)
 - **`tcl`** — [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
+- **`usage`** — [llm_guide.md](llm_guide.md)
 - **`viewer`** — [viewer.md](viewer.md)
 - **`visualisation`** — [rhino_export.md](rhino_export.md), [viewer.md](viewer.md)
 - **`walls`** — [element_classification.md](element_classification.md)
