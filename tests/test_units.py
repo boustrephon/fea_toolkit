@@ -295,3 +295,76 @@ class TestWeightDensityScaleFactor:
         """1 N/m³ in (N,mm) → 1e-9."""
         f = utils.weight_density_scale_factor({"F": "N", "L": "mm"})
         assert 1.0 * f == pytest.approx(1e-9)
+
+
+class TestInverseScaleFactors:
+    """Model→SI functions are exact inverses of SI→model functions.
+
+    For any valid units dict:
+
+        value_in_SI = value_in_model_units * to_si_factor(units)
+        value_in_model_units = value_in_SI * scale_factor(units)
+
+    so ``scale_factor * to_si_factor == 1.0`` for every pair.
+    """
+
+    _UNIT_SET = [
+        {"F": "N", "L": "m"},
+        {"F": "N", "L": "mm"},
+        {"F": "kN", "L": "m"},
+        {"F": "kN", "L": "mm"},
+        {"F": "MN", "L": "cm"},
+        {"F": "lb", "L": "in"},
+        {"F": "kip", "L": "ft"},
+        {"F": "kgf", "L": "cm"},
+        {"F": "tonf", "L": "m"},
+    ]
+
+    def test_length_roundtrip(self):
+        """length_to_si_factor is the reciprocal of length_scale_factor."""
+        for u in self._UNIT_SET:
+            assert utils.length_scale_factor(u) * utils.length_to_si_factor(u) \
+                == pytest.approx(1.0, rel=1e-12)
+
+    def test_force_roundtrip(self):
+        """force_to_si_factor is the reciprocal of force_scale_factor."""
+        for u in self._UNIT_SET:
+            assert utils.force_scale_factor(u) * utils.force_to_si_factor(u) \
+                == pytest.approx(1.0, rel=1e-12)
+
+    def test_mass_roundtrip(self):
+        """mass_to_si_factor is the reciprocal of mass_scale_factor."""
+        for u in self._UNIT_SET:
+            assert utils.mass_scale_factor(u) * utils.mass_to_si_factor(u) \
+                == pytest.approx(1.0, rel=1e-12)
+
+    def test_stress_roundtrip(self):
+        """stress_to_si_factor is the reciprocal of stress_scale_factor."""
+        for u in self._UNIT_SET:
+            assert utils.stress_scale_factor(u) * utils.stress_to_si_factor(u) \
+                == pytest.approx(1.0, rel=1e-12)
+
+    def test_mass_density_roundtrip(self):
+        """mass_density_to_si_factor is the reciprocal of mass_density_scale_factor."""
+        for u in self._UNIT_SET:
+            assert utils.mass_density_scale_factor(u) * utils.mass_density_to_si_factor(u) \
+                == pytest.approx(1.0, rel=1e-12)
+
+    def test_weight_density_roundtrip(self):
+        """weight_density_to_si_factor is the reciprocal of weight_density_scale_factor."""
+        for u in self._UNIT_SET:
+            assert utils.weight_density_scale_factor(u) * utils.weight_density_to_si_factor(u) \
+                == pytest.approx(1.0, rel=1e-12)
+
+    def test_lineal_force_consistency(self):
+        """lineal_force_to_si_factor == force_to_si / length_to_si."""
+        for u in self._UNIT_SET:
+            expected = utils.force_to_si_factor(u) / utils.length_to_si_factor(u)
+            assert utils.lineal_force_to_si_factor(u) == pytest.approx(expected, rel=1e-12)
+
+    def test_alias_inverse_matches_bare_string(self):
+        """Length aliases normalise identically in both factor systems."""
+        assert utils.length_to_si_factor({"L": "millimetre"}) \
+            == pytest.approx(utils.length_to_si_factor({"L": "mm"}))
+        assert utils.force_to_si_factor({"F": "kilonewtons"}) \
+            == pytest.approx(utils.force_to_si_factor({"F": "kN"}))

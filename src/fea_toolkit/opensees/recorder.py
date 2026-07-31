@@ -47,7 +47,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from ..model.sap_data import (
+from ..utils import (
     DEFAULT_EPS_C,
     DEFAULT_EPS_CC,
     DEFAULT_G_MOD_FRAC,
@@ -55,8 +55,8 @@ from ..model.sap_data import (
     DEFAULT_FY_REBAR_PA,
     DEFAULT_FY_STEEL_PA,
     DEFAULT_E_S_PA,
+    stress_scale_factor,
 )
-from ..utils import stress_scale_factor
 
 
 def _py_val(v: Any) -> str:
@@ -647,9 +647,10 @@ def export_mesh_model_to_tcl(
                     f"{-Fc:g} {-epsc:g} {-Fu:g} {-epsu:g}"
                 )
             else:
+                _stress_factor = stress_scale_factor(mesh_model.units)
                 E_mod = (mat.E_mod if mat.E_mod and mat.E_mod > 0
-                         else DEFAULT_E_S_PA)
-                Fy = (mat.Fy if mat.Fy and mat.Fy > 0 else DEFAULT_FY_STEEL_PA)
+                         else DEFAULT_E_S_PA * _stress_factor)
+                Fy = (mat.Fy if mat.Fy and mat.Fy > 0 else DEFAULT_FY_STEEL_PA * _stress_factor)
                 lines.append(
                     f"uniaxialMaterial Steel01 {tag} "
                     f"{Fy:g} {E_mod:g} 0.01"
@@ -723,13 +724,40 @@ def export_mesh_model_to_tcl(
                             epsc = 0.002
                             fcc = mat.eFc if mat.eFc and mat.eFc > 0 else Fc * 1.3
                             epscc = 0.005
-                            Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 4.0e8
                         else:
                             Fc = 3.0e7
                             epsc = 0.002
                             fcc = 3.9e7
                             epscc = 0.005
-                            Fy = 4.0e8
+
+                        # ── Rebar material (Steel02) ──────────────────
+                        # Priority: config override (Pa, scaled to model
+                        # units) → section.rebar_material lookup (model
+                        # units, used as-is) → framework defaults (Pa,
+                        # scaled to model units).
+                        _ssf = stress_scale_factor(mesh_model.units)
+                        Fy_rebar = config.get("rebar_Fy_override")
+                        Es_rebar = config.get("rebar_Es_override")
+                        if Fy_rebar is not None:
+                            Fy_rebar = Fy_rebar * _ssf
+                        if Es_rebar is not None:
+                            Es_rebar = Es_rebar * _ssf
+                        if Fy_rebar is None or Es_rebar is None:
+                            rebar_mat = None
+                            rm_name = getattr(sec, "rebar_material", None)
+                            if rm_name:
+                                rebar_mat = mesh_model.materials.get(rm_name)
+                            if rebar_mat is not None:
+                                rm_Fy = getattr(rebar_mat, "Fy", 0.0) or 0.0
+                                rm_Es = getattr(rebar_mat, "E_mod", 0.0) or 0.0
+                                if Fy_rebar is None and rm_Fy > 0:
+                                    Fy_rebar = rm_Fy
+                                if Es_rebar is None and rm_Es > 0:
+                                    Es_rebar = rm_Es
+                        if not Fy_rebar:
+                            Fy_rebar = DEFAULT_FY_REBAR_PA * _ssf
+                        if not Es_rebar:
+                            Es_rebar = DEFAULT_E_S_PA * _ssf
 
                         lines.append(
                             f"uniaxialMaterial Concrete01 {concrete_unconf} "
@@ -741,7 +769,7 @@ def export_mesh_model_to_tcl(
                         )
                         lines.append(
                             f"uniaxialMaterial Steel02 {rebar_tag} "
-                            f"{Fy:g} {2.0e11:g} 0.01 18.5 0.925 0.15"
+                            f"{Fy_rebar:g} {Es_rebar:g} 0.01 18.5 0.925 0.15"
                         )
                     else:
                         concrete_unconf, concrete_conf, rebar_tag = _rc_mat_tags[sec.material]

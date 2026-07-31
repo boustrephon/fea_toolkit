@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Tuple
 
 from ..utils import (
+    # Material-property defaults (SI units — single source of truth in utils.py)
     DEFAULT_FY_STEEL_PA,
     DEFAULT_FY_REBAR_PA,
     DEFAULT_FC_PA,
@@ -21,27 +22,23 @@ from ..utils import (
     DEFAULT_RHO_MS_SI,
     DEFAULT_RHO_WC_SI,
     DEFAULT_RHO_MC_SI,
-    g_from_units
-    )
-
-# ═════════════════════════════════════════════════════════════════════════════
-# Unit conversion factors and material defaults
-# ═════════════════════════════════════════════════════════════════════════════
-
-# SI material-property defaults (Pa, kg/m³, N/m³).
-# These are the single source of truth for fallback values.
-# To convert to model units, divide by the corresponding factor
-# (stress_factor, mass_density_factor, weight_density_factor).
-# DEFAULT_FY_STEEL_PA = 2.5e8           # Steel yield stress (Pa)
-# DEFAULT_FY_REBAR_PA = 4.0e8           # Rebar / RC steel yield stress (Pa)
-# DEFAULT_FC_PA = 3.0e7                 # Concrete compressive strength (Pa)
-# DEFAULT_E_S_PA = 2.0e11             # Young's modulus (Pa)
-# DEFAULT_EPS_C = 0.002                 # Strain at peak Fc (concrete)
-# DEFAULT_EPS_CC = 0.005                # Crushing strain (confined concrete)
-# DEFAULT_G_MOD_FRAC = 0.4              # Default G = G_MOD_FRAC × E when G is missing
-# DEFAULT_RHO_WC_SI = 24000.0      # Default concrete unit weight (N/m³)
-# DEFAULT_RHO_MC_SI = 2450.0         # Default concrete unit mass (kg/m³)
-# DEFAULT_GRAVITY_MS2 = 9.80665         # Gravitational acceleration in m/s²
+    g_from_units,
+    # Unit conversion factors — SI → model units
+    length_scale_factor,
+    force_scale_factor,
+    mass_scale_factor,
+    stress_scale_factor,
+    mass_density_scale_factor,
+    weight_density_scale_factor,
+    # Unit conversion factors — model units → SI (exact inverses)
+    length_to_si_factor,
+    force_to_si_factor,
+    mass_to_si_factor,
+    stress_to_si_factor,
+    mass_density_to_si_factor,
+    weight_density_to_si_factor,
+    lineal_force_to_si_factor,
+)
 
 
 @dataclass
@@ -510,6 +507,11 @@ class ConcreteRectangularSection(Section):
     bot_bars: int = 0
     top_bar_dia: float = 0.0
     bot_bar_dia: float = 0.0
+    # SAP2000 longitudinal rebar material name from
+    # "FRAME SECTION PROPERTIES 02 - CONCRETE COLUMN" / 03 - CONCRETE BEAM
+    # (``RebarMatL``).  None → framework uses rebar-specific SI defaults
+    # (DEFAULT_FY_REBAR_PA / DEFAULT_E_S_PA) scaled to model units.
+    rebar_material: Optional[str] = None
 
     def to_fiber_patches(
         self, mat_tag: int, nfy: int = 12, nfz: int = 6
@@ -579,6 +581,9 @@ class ConcreteCircularSection(Section):
     cover: float = 0.0
     bar_count: int = 0
     bar_dia: float = 0.0
+    # SAP2000 longitudinal rebar material name (``RebarMatL``) — see
+    # :class:`ConcreteRectangularSection`.
+    rebar_material: Optional[str] = None
 
     def to_fiber_patches(
         self, mat_tag: int, nfy: int = 12, nfz: int = 6
@@ -728,6 +733,10 @@ class EncasedSection(Section):
 class ShellSection(Section):
     """Shell / area section (2‑D)."""
     thickness: float = 0.0
+    # SAP2000 area-section rebar material name from
+    # "AREA SECTION PROPERTY DESIGN PARAMETERS" (``RebarMat``).  None →
+    # framework defaults apply for nonlinear wall/slab analysis.
+    rebar_material: Optional[str] = None
 
     def to_fiber_patches(
         self, mat_tag: int, nfy: int = 8, nfz: int = 4
@@ -1121,69 +1130,71 @@ class FrameDistributedLoad:
     coord_sys: str = "GLOBAL"
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# Legacy unit-conversion helpers (deprecated)
+# ═══════════════════════════════════════════════════════════════════════
+# The canonical unit-conversion functions live in ``fea_toolkit.utils``
+# (``*_scale_factor`` for SI→model, ``*_to_si_factor`` for model→SI).
+# The aliases below accept a bare unit string for backward compatibility
+# and emit a ``DeprecationWarning`` to guide callers to the unified API.
+
+
 def _normalise_length_unit(lu: str) -> str:
-    """Normalise a length unit string to a canonical short form."""
-    _alias = {
-        'meter': 'm', 'meters': 'm', 'metre': 'm', 'metres': 'm',
-        'centimeter': 'cm', 'centimeters': 'cm', 'centimetre': 'cm',
-        'millimeter': 'mm', 'millimeters': 'mm', 'millimetre': 'mm',
-        'foot': 'ft', 'feet': 'ft',
-        'inch': 'in', 'inches': 'in',
-    }
-    return _alias.get(lu.lower(), lu.lower()) if isinstance(lu, str) else 'm'
+    """[Deprecated] Normalise a length unit string to canonical short form.
+
+    Use :func:`fea_toolkit.utils._normalise_unit` instead.
+    """
+    import warnings
+    warnings.warn(
+        "_normalise_length_unit is deprecated; use "
+        "fea_toolkit.utils._normalise_unit(raw, 'm') instead",
+        DeprecationWarning, stacklevel=2,
+    )
+    from ..utils import _normalise_unit
+    return _normalise_unit(lu, 'm')
 
 
 def _normalise_force_unit(fu: str) -> str:
-    """Normalise a force unit string to a canonical short form."""
-    _alias = {
-        'newton': 'n', 'newtons': 'n',
-        'kilonewton': 'kn', 'kilonewtons': 'kn',
-        'meganewton': 'mn', 'meganewtons': 'mn',
-        'pound': 'lb', 'pounds': 'lb', 'lbf': 'lb',
-        'kip': 'kip', 'kips': 'kip', 'kipf': 'kip',
-    }
-    return _alias.get(fu.lower(), fu.lower()) if isinstance(fu, str) else 'n'
+    """[Deprecated] Normalise a force unit string to canonical short form.
+
+    Use :func:`fea_toolkit.utils._normalise_unit` instead.
+    """
+    import warnings
+    warnings.warn(
+        "_normalise_force_unit is deprecated; use "
+        "fea_toolkit.utils._normalise_unit(raw, 'n') instead",
+        DeprecationWarning, stacklevel=2,
+    )
+    from ..utils import _normalise_unit
+    return _normalise_unit(fu, 'n')
 
 
 def _length_factor_from_units(lu: str) -> float:
-    """Return the factor to convert model length → metres.
+    """[Deprecated] Factor to convert model length → metres.
 
-    ``value_in_m = value_in_model_units * length_factor``
+    Use :func:`fea_toolkit.utils.length_to_si_factor` instead.
     """
-    lu = _normalise_length_unit(lu)
-    return {
-        'm': 1.0,
-        'cm': 0.01,
-        'mm': 0.001,
-        'in': 0.0254,
-        'ft': 0.3048,
-    }.get(lu, 1.0)
+    import warnings
+    warnings.warn(
+        "_length_factor_from_units is deprecated; use "
+        "fea_toolkit.utils.length_to_si_factor(units) instead",
+        DeprecationWarning, stacklevel=2,
+    )
+    return length_to_si_factor({'L': lu})
 
 
 def _force_factor_from_units(fu: str) -> float:
-    """Return the factor to convert model force → Newtons (reciprocal of
-    :func:`~fea_toolkit.utils.force_scale_factor`).
+    """[Deprecated] Factor to convert model force → Newtons.
 
-    ``value_in_N = value_in_model_units * force_factor``
-
-    Values are exact reciprocals of ``force_scale_factor`` so that:
-
-        force_factor * force_scale_factor == 1.0
-
-    for any valid force unit.
+    Use :func:`fea_toolkit.utils.force_to_si_factor` instead.
     """
-    fu = _normalise_force_unit(fu)
-    # Defined as reciprocal of utils.force_scale_factor() to guarantee
-    # reciprocal consistency between the two factor systems.
-    return {
-        'n': 1.0,
-        'kn': 1000.0,
-        'mn': 1000000.0,
-        'kgf': 9.80665,
-        'tonf': 9806.65,
-        'lb': 4.448,
-        'kip': 4448.0,
-    }.get(fu, 1.0)
+    import warnings
+    warnings.warn(
+        "_force_factor_from_units is deprecated; use "
+        "fea_toolkit.utils.force_to_si_factor(units) instead",
+        DeprecationWarning, stacklevel=2,
+    )
+    return force_to_si_factor({'F': fu})
 
 
 @dataclass
@@ -1222,73 +1233,74 @@ class SAPModelData:
     # These are computed from self.units and provide a consistent way to
     # convert between model units and SI for code-based formulae.
     #
-    # Usage:
+    # The properties are thin wrappers around the canonical conversion
+    # functions in ``fea_toolkit.utils``:
+    #
     #   value_in_SI = value_in_model_units * md.<factor>
     #   value_in_model_units = value_in_SI / md.<factor>
+    #
+    # e.g. ``md.length_factor == utils.length_to_si_factor(md.units)``,
+    # and ``md.weight_density_factor == 1.0 / weight_density_scale_factor(md.units)``.
 
     @property
     def length_factor(self) -> float:
         """Factor to convert model length → metres.
 
         ``value_in_m = value_in_model_units * length_factor``
+
+        Wraps :func:`fea_toolkit.utils.length_to_si_factor`.
         """
-        return _length_factor_from_units(self.units.get('L', 'm'))
+        return length_to_si_factor(self.units)
 
     @property
     def force_factor(self) -> float:
         """Factor to convert model force → Newtons.
 
         ``value_in_N = value_in_model_units * force_factor``
+
+        Wraps :func:`fea_toolkit.utils.force_to_si_factor`.
         """
-        return _force_factor_from_units(self.units.get('F', 'N'))
+        return force_to_si_factor(self.units)
 
     @property
     def stress_factor(self) -> float:
         """Factor to convert model stress → Pascals.
 
-        Since stress = force / length²:
         ``value_in_Pa = value_in_model_units * stress_factor``
 
-        Equivalently: ``stress_factor = force_factor / length_factor ** 2``
+        Wraps :func:`fea_toolkit.utils.stress_to_si_factor`.
         """
-        Lf = self.length_factor
-        return self.force_factor / (Lf * Lf) if Lf != 0 else 1.0
+        return stress_to_si_factor(self.units)
 
     @property
     def weight_density_factor(self) -> float:
         """Factor to convert model weight density → N/m³.
 
-        Weight density = force / length³:
         ``value_in_N_per_m3 = value_in_model_units * weight_density_factor``
+
+        Wraps :func:`fea_toolkit.utils.weight_density_to_si_factor`.
         """
-        Lf = self.length_factor
-        return self.force_factor / (Lf * Lf * Lf) if Lf != 0 else 1.0
+        return weight_density_to_si_factor(self.units)
 
     @property
     def mass_density_factor(self) -> float:
         """Factor to convert model mass density → kg/m³.
 
-        Mass density = force×time² / length⁴.
-        Since SAP stores unit_mass in F·s²/L⁴ and SI is kg/m³ = N·s²/m⁴:
         ``value_in_kg_per_m3 = value_in_model_units * mass_density_factor``
+
+        Wraps :func:`fea_toolkit.utils.mass_density_to_si_factor`.
         """
-        # mass_density_factor = force_factor / (length_factor³ × length_factor / time)
-        # With time in seconds (SAP default), same as weight_density_factor / g scaling
-        # but for mass the conversion is simply force_factor / length_factor**4 * (time_factor**2)
-        # Since SAP time is always seconds and SI uses seconds:
-        # kg = N·s²/m → mass_density = N·s²/m⁴
-        # So the factor = force_factor / length_factor**4
-        Lf = self.length_factor
-        return self.force_factor / (Lf * Lf * Lf * Lf) if Lf != 0 else 1.0
+        return mass_density_to_si_factor(self.units)
 
     @property
     def lineal_force_factor(self) -> float:
         """Factor to convert model force-per-length → N/m.
 
         ``value_in_N_per_m = value_in_model_units * lineal_force_factor``
+
+        Wraps :func:`fea_toolkit.utils.lineal_force_to_si_factor`.
         """
-        Lf = self.length_factor
-        return self.force_factor / Lf if Lf != 0 else 1.0
+        return lineal_force_to_si_factor(self.units)
 
     # ── Unit conversion convenience methods ─────────────────────────────
 
@@ -1319,13 +1331,19 @@ class SAPModelData:
     def apply_material_defaults(self) -> None:
         """Fill missing material properties with SI defaults scaled to model units.
 
+        Material-property defaults are authored in SI (Pa, N/m³, kg/m³)
+        and scaled to the model's unit system by the canonical
+        ``utils`` factors:
+
+            model_value = SI_default * scale_factor(units)
+
         After calling this, all materials are guaranteed to have non-zero
         values for E_mod, Fy, Fc, unit_weight, unit_mass, etc.  Consumers
         can read these values directly — no fallback logic needed.
         """
-        sf = self.stress_factor
-        wdf = self.weight_density_factor
-        mdf = self.mass_density_factor
+        ssf = stress_scale_factor(self.units)             # Pa → model stress
+        wdsf = weight_density_scale_factor(self.units)    # N/m³ → model W-density
+        mdsf = mass_density_scale_factor(self.units)      # kg/m³ → model M-density
 
         for mat in self.materials.values():
             is_concrete = mat.type and mat.type.lower() == "concrete"
@@ -1334,21 +1352,21 @@ class SAPModelData:
             # E_mod — use concrete modulus for concrete, steel modulus otherwise
             if not mat.E_mod or mat.E_mod <= 0:
                 if is_concrete:
-                    mat.E_mod = DEFAULT_E_C_PA / sf
+                    mat.E_mod = DEFAULT_E_C_PA * ssf
                 else:
-                    mat.E_mod = DEFAULT_E_S_PA / sf
+                    mat.E_mod = DEFAULT_E_S_PA * ssf
 
             # Fy — use rebar default for rebar/tendon, steel default otherwise
             if not mat.Fy or mat.Fy <= 0:
                 if mat.type and mat.type.lower() in ('rebar', 'tendon'):
-                    mat.Fy = DEFAULT_FY_REBAR_PA / sf
+                    mat.Fy = DEFAULT_FY_REBAR_PA * ssf
                 else:
-                    mat.Fy = DEFAULT_FY_STEEL_PA / sf
+                    mat.Fy = DEFAULT_FY_STEEL_PA * ssf
 
             # Fc (concrete compressive strength) — only for concrete materials
             if is_concrete:
                 if not mat.Fc or mat.Fc <= 0:
-                    mat.Fc = DEFAULT_FC_PA / sf
+                    mat.Fc = DEFAULT_FC_PA * ssf
 
             # G_mod — derive from E_mod via Poisson's ratio if missing
             if not mat.G_mod or mat.G_mod <= 0:
@@ -1356,23 +1374,23 @@ class SAPModelData:
                     mat.G_mod = mat.E_mod / (2.0 * (1.0 + abs(mat.nu)))
                 else:
                     if is_concrete:
-                        mat.G_mod = DEFAULT_G_C_PA * (mat.E_mod / DEFAULT_E_C_PA if DEFAULT_E_C_PA > 0 else 1.0)
+                        mat.G_mod = DEFAULT_G_C_PA * ssf
                     else:
                         mat.G_mod = DEFAULT_G_MOD_FRAC * mat.E_mod
 
             # unit_weight (N/m³ → model units)
             if not mat.unit_weight or abs(mat.unit_weight) < 1e-12:
                 if is_concrete:
-                    mat.unit_weight = DEFAULT_RHO_WC_SI / wdf
+                    mat.unit_weight = DEFAULT_RHO_WC_SI * wdsf
                 else:
-                    mat.unit_weight = DEFAULT_RHO_WS_SI / wdf
+                    mat.unit_weight = DEFAULT_RHO_WS_SI * wdsf
 
             # unit_mass (kg/m³ → model units)
             if not mat.unit_mass or abs(mat.unit_mass) < 1e-12:
                 if is_concrete:
-                    mat.unit_mass = DEFAULT_RHO_MC_SI / mdf
+                    mat.unit_mass = DEFAULT_RHO_MC_SI * mdsf
                 else:
-                    mat.unit_mass = DEFAULT_RHO_MS_SI / mdf
+                    mat.unit_mass = DEFAULT_RHO_MS_SI * mdsf
 
     # ── Utility methods ──────────────────────────────────────────
 

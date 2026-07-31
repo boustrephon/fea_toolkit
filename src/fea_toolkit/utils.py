@@ -11,6 +11,48 @@ from typing import Dict, List, Optional
 # Gravitational acceleration in m/s²  (SI default)
 _G_SI = 9.80665
 
+# ── Unit alias registry ──────────────────────────────────────────────
+# Canonical short forms recognised by the scaling functions.  Full
+# names (e.g. "millimetre", "kilonewton") are mapped to lowercase
+# canonical forms.  Lookup is case-insensitive via _normalise_unit().
+_UNIT_ALIASES = {
+    # Length
+    'meter': 'm', 'meters': 'm', 'metre': 'm', 'metres': 'm',
+    'centimeter': 'cm', 'centimeters': 'cm', 'centimetre': 'cm',
+    'millimeter': 'mm', 'millimeters': 'mm', 'millimetre': 'mm',
+    'foot': 'ft', 'feet': 'ft',
+    'inch': 'in', 'inches': 'in',
+    # Force
+    'newton': 'n', 'newtons': 'n',
+    'kilonewton': 'kn', 'kilonewtons': 'kn',
+    'meganewton': 'mn', 'meganewtons': 'mn',
+    'kilogramforce': 'kgf', 'kg': 'kgf',
+    'pound': 'lb', 'pounds': 'lb', 'lbf': 'lb',
+    'kip': 'kip', 'kips': 'kip', 'kipf': 'kip',
+    'tonneforce': 'tonf', 'tonf': 'tonf', 'ton': 'tonf',
+}
+
+
+def _normalise_unit(raw: Optional[str], default: str) -> str:
+    """Normalise a unit string to its canonical short form.
+
+    Maps full names (``"millimetre"``, ``"kilonewton"``) to short
+    canonical forms (``"mm"``, ``"kn"``) in a case-insensitive manner.
+    Unknown or missing values fall back to *default*.
+
+    Args:
+        raw: Unit string (may be ``None`` or non-str).
+        default: Canonical short form returned when *raw* is missing
+            or not a string.
+
+    Returns:
+        Canonical short unit form.
+    """
+    if not isinstance(raw, str) or not raw:
+        return default
+    return _UNIT_ALIASES.get(raw.lower(), raw.lower())
+
+
 # ── Material-property defaults (SI Pa units) ──────────────────────────
 # These are used as fallback values when SAP2000 data is missing.
 # They must be scaled to the model's unit system via 
@@ -47,18 +89,7 @@ def g_from_units(units: dict) -> float:
     Returns:
         Gravitational acceleration in the model's length-unit / s².
     """
-    lu = (units or {}).get('L', 'm')
-    if not lu or not isinstance(lu, str):
-        lu = 'm'
-    # Normalise aliases before scaling
-    _alias = {
-        'meter': 'm', 'meters': 'm', 'metre': 'm', 'metres': 'm',
-        'centimeter': 'cm', 'centimeters': 'cm', 'centimetre': 'cm',
-        'millimeter': 'mm', 'millimeters': 'mm', 'millimetre': 'mm',
-        'foot': 'ft', 'feet': 'ft',
-        'inch': 'in', 'inches': 'in',
-    }
-    lu = _alias.get(lu.lower(), lu.lower())
+    lu = _normalise_unit((units or {}).get('L'), 'm')
     # Scale factor relative to 1 m
     scale = {
         'm': 1.0,
@@ -99,18 +130,7 @@ def length_scale_factor(units: dict) -> float:
         Scaling factor to convert SI (m) to the model's length unit.
     """
     u = units or {}
-    lu = u.get('L', 'm')
-
-    # Normalise
-    _alias_L = {
-        'meter': 'm', 'meters': 'm', 'metre': 'm', 'metres': 'm',
-        'centimeter': 'cm', 'centimeters': 'cm', 'centimetre': 'cm',
-        'millimeter': 'mm', 'millimeters': 'mm', 'millimetre': 'mm',
-        'foot': 'ft', 'feet': 'ft',
-        'inch': 'in', 'inches': 'in',
-    }
-
-    lu_norm = _alias_L.get(lu.lower(), lu.lower()) if isinstance(lu, str) else 'm'
+    lu_norm = _normalise_unit(u.get('L'), 'm')
 
     L_factor = {
         'm':  1.0,
@@ -156,19 +176,7 @@ def force_scale_factor(units: dict) -> float:
         Scaling factor to convert N to the model's force unit.
     """
     u = units or {}
-    fu = u.get('F', 'N')
-
-    # Normalise
-    _alias_F = {
-        'newton': 'N', 'newtons': 'N',
-        'kilonewton': 'kN', 'kilonewtons': 'kN',
-        'meganewton': 'MN', 'meganewtons': 'MN',
-        'kilogramforce': 'kgf', 'kg': 'kgf',
-        'pound': 'lb', 'pounds': 'lb', 'lbf': 'lb',
-        'kip': 'kip', 'kips': 'kip', 'kipf': 'kip',
-        'tonneforce': 'tonf', 'tonf': 'tonf', 'ton': 'tonf',
-    }
-    fu_norm = _alias_F.get(fu.lower(), fu.lower()).lower() if isinstance(fu, str) else 'n'
+    fu_norm = _normalise_unit(u.get('F'), 'n')
 
     F_factor = {
         'n': 1.0,
@@ -310,6 +318,142 @@ def weight_density_scale_factor(units: dict) -> float:
     L_factor = length_scale_factor(units)
 
     return F_factor / L_factor ** 3
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Inverse factors — model units → SI
+# ═══════════════════════════════════════════════════════════════════════
+# The functions above convert SI → model units (multiply by factor).
+# These functions are the exact inverse: convert model units → SI
+# (multiply by factor).  For any valid units dict:
+#
+#     length_scale_factor(u)  * length_to_si_factor(u)  == 1.0
+#     force_scale_factor(u)   * force_to_si_factor(u)   == 1.0
+#     stress_scale_factor(u)  * stress_to_si_factor(u)  == 1.0
+#     ... etc.
+#
+# The inverse is defined as a reciprocal rather than a separate
+# hard-coded table so the two cannot drift out of agreement.
+
+
+def length_to_si_factor(units: dict) -> float:
+    """Compute the factor to convert model length → metres.
+
+    ``value_in_m = value_in_model_length * length_to_si_factor(units)``
+
+    This is the exact inverse of :func:`length_scale_factor`:
+    ``1.0 / length_scale_factor(units)``.
+
+    Args:
+        units: Model units dict, e.g. ``{'L': 'mm', 'F': 'N'}``.
+
+    Returns:
+        Factor to convert model length units to metres.
+    """
+    return 1.0 / length_scale_factor(units)
+
+
+def force_to_si_factor(units: dict) -> float:
+    """Compute the factor to convert model force → Newtons.
+
+    ``value_in_N = value_in_model_force * force_to_si_factor(units)``
+
+    This is the exact inverse of :func:`force_scale_factor`:
+    ``1.0 / force_scale_factor(units)``.
+
+    Args:
+        units: Model units dict, e.g. ``{'L': 'mm', 'F': 'kN'}``.
+
+    Returns:
+        Factor to convert model force units to Newtons.
+    """
+    return 1.0 / force_scale_factor(units)
+
+
+def mass_to_si_factor(units: dict) -> float:
+    """Compute the factor to convert model mass → kg.
+
+    ``value_in_kg = value_in_model_mass * mass_to_si_factor(units)``
+
+    This is the exact inverse of :func:`mass_scale_factor`:
+    ``1.0 / mass_scale_factor(units)``.
+
+    Args:
+        units: Model units dict, e.g. ``{'L': 'mm', 'F': 'kN'}``.
+
+    Returns:
+        Factor to convert model mass units to kilograms.
+    """
+    return 1.0 / mass_scale_factor(units)
+
+
+def stress_to_si_factor(units: dict) -> float:
+    """Compute the factor to convert model stress → Pascals.
+
+    ``value_in_Pa = value_in_model_stress * stress_to_si_factor(units)``
+
+    This is the exact inverse of :func:`stress_scale_factor`:
+    ``1.0 / stress_scale_factor(units)``.
+
+    Args:
+        units: Model units dict, e.g. ``{'L': 'mm', 'F': 'N'}``.
+
+    Returns:
+        Factor to convert model stress units to Pascals.
+    """
+    return 1.0 / stress_scale_factor(units)
+
+
+def mass_density_to_si_factor(units: dict) -> float:
+    """Compute the factor to convert model mass density → kg/m³.
+
+    ``value_in_kg_m3 = value_in_model_mass_density * mass_density_to_si_factor(units)``
+
+    This is the exact inverse of :func:`mass_density_scale_factor`:
+    ``1.0 / mass_density_scale_factor(units)``.
+
+    Args:
+        units: Model units dict, e.g. ``{'L': 'mm', 'F': 'kN'}``.
+
+    Returns:
+        Factor to convert model mass density units to kg/m³.
+    """
+    return 1.0 / mass_density_scale_factor(units)
+
+
+def weight_density_to_si_factor(units: dict) -> float:
+    """Compute the factor to convert model weight density → N/m³.
+
+    ``value_in_N_m3 = value_in_model_weight_density * weight_density_to_si_factor(units)``
+
+    This is the exact inverse of :func:`weight_density_scale_factor`:
+    ``1.0 / weight_density_scale_factor(units)``.
+
+    Args:
+        units: Model units dict, e.g. ``{'L': 'mm', 'F': 'kN'}``.
+
+    Returns:
+        Factor to convert model weight density units to N/m³.
+    """
+    return 1.0 / weight_density_scale_factor(units)
+
+
+def lineal_force_to_si_factor(units: dict) -> float:
+    """Compute the factor to convert model force-per-length → N/m.
+
+    ``value_in_N_m = value_in_model_force_per_length * lineal_force_to_si_factor(units)``
+
+    Derived as ``force_to_si_factor / length_to_si_factor`` (N/m =
+    N ÷ m), consistent with the SI→model direction.
+
+    Args:
+        units: Model units dict, e.g. ``{'L': 'mm', 'F': 'kN'}``.
+
+    Returns:
+        Factor to convert model force-per-length units to N/m.
+    """
+    return force_to_si_factor(units) / length_to_si_factor(units)
+
 
 # ── Known stress-valued material property keys (SI canonical values → model units) ──
 _STRESS_KEYS: frozenset = frozenset({
