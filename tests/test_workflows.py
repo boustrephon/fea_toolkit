@@ -98,7 +98,7 @@ def sample_nl_ab(sample_nl_md):
 
 @pytest.fixture
 def sample_rc_md():
-    """Built-in 2-storey RC moment frame with fiber-capable sections.
+    """Built-in single-storey RC moment frame with fiber-capable sections.
 
     ``ConcreteRectangularSection`` (columns) and ``RectangularSection``
     (beams) both override ``to_fiber_patches()``, so
@@ -111,7 +111,7 @@ def sample_rc_md():
 
 @pytest.fixture
 def sample_rc_ab(sample_rc_md):
-    """AnalysisBuilder for the 2-storey RC moment frame.
+    """AnalysisBuilder for the single-storey RC moment frame.
 
     The initial domain is built with elastic sections (used for the
     modal analysis); the pushover step rebuilds with fiber sections
@@ -911,10 +911,16 @@ class TestCSMWorkflow:
     def test_compute_performance_point(self, sample_rc_ab, spectrum):
         """CSM performance point can be computed from a nonlinear pushover.
 
-        Uses the built-in 2-storey RC moment frame
+        Uses the built-in single-storey RC moment frame
         (:func:`make_rc_frame_model`), so the pushover response
         actually yields — giving a proper bilinear capacity curve and a
         converged ATC-40 performance point with meaningful ductility.
+
+        The demand spectrum is scaled by 13.0 relative to the base fixture
+        so the elastic demand exceeds the frame's yield capacity
+        (S_ay ~ 16.1 m/s^2 in ADRS coordinates (S_a = V/M_eff)).  With the base 1.0×
+        spectrum the performance point sits below yield (mu = 1.0),
+        which would not exercise the inelastic branch of the CSM.
         """
         sample_rc_ab.build_domain()
         sample_rc_ab.compute_seismic_masses()
@@ -924,28 +930,60 @@ class TestCSMWorkflow:
             gravity_patterns={"DEAD": 1.0},
             lateral_load_type='uniform',
             lateral_direction='X',
-            control_node_tag=6,
+            control_node_tag=4,
             max_disp=0.3,
-            num_steps=40,
+            num_steps=50,
             print_progress=False,
         )
         periods, accels = spectrum
+        # Scale demand spectrum so the frame yields (see docstring).
+        accels = [a * 13.0 for a in accels]
+        # Use CSM defaults (max_iter=50, tol=0.01) — do not loosen.
         pp = sample_rc_ab.compute_performance_point(
             results, modal, shapes,
             periods, accels,
             direction='X',
             damping_ratio=0.05,
-            max_iter=20, tol=0.05,
         )
-        assert isinstance(pp, dict)
-        assert 'S_dp' in pp
-        assert 'S_ap' in pp
-        assert 'V_base' in pp
-        assert 'mu' in pp
-        assert pp['S_dp'] > 1e-6
-        assert pp['S_ap'] > 1e-6
-        # A yielding RC frame should report a non-trivial ductility
-        assert abs(pp['mu']) > 1.0
+        # ── Unit system propagated through the pipeline ────────────
+        assert results['units'] == {"F": "KN", "L": "m", "T": "C"}, \
+            f"Pushover units not kN-m: {results['units']}"
+
+        # ── Non-trivial performance point ──────────────────────────
+        assert pp['S_dp'] > 1e-6, f"S_dp degenerate: {pp['S_dp']}"
+        assert pp['S_ap'] > 1e-6, f"S_ap degenerate: {pp['S_ap']}"
+
+        # ── RC frame must yield — elastic response is a test failure ──
+        assert pp['mu'] > 1.05, \
+            f"RC frame did not yield in CSM (mu={pp['mu']:.3f}) — " \
+            "the capacity curve or ADRS conversion is degenerate"
+
+        # ── CSM iteration must converge with default tolerances ────
+        # --- Hysteretic damping must be exercised (mu > 1) ---
+        assert pp['beta_eq'] > 0.05, \
+            f"beta_eq not elevated by hysteresis: {pp['beta_eq']}"
+        assert pp['B'] > 1.0, \
+            f"damping reduction factor B not > 1: {pp['B']}"
+
+        assert pp['converged'] is True, \
+            f"CSM did not converge (iterations={pp['iterations']})"
+
+        # ── Effective modal mass must be a plausible fraction of the
+        #    physical frame mass (~11.06 t) — not the old degenerate
+        #    value of 1.0 nor a bloated value from SI-unit leakage. ──
+        assert pp['M_eff'] > 1.0, \
+            f"M_eff degenerate ({pp['M_eff']}) — ADRS missed nodal masses"
+        assert pp['M_eff'] < 50.0, \
+            f"M_eff implausibly large ({pp['M_eff']} t) for a 1-bay frame"
+
+        # ── Base shear sanity: kN range (not mega-Newtons from the
+        #    old SI-unit ISection model which gave ~4917 t mass). ──
+        first_nz = next(
+            (abs(s) for s in results['base_shear'] if abs(s) > 1e-9),
+            0.0,
+        )
+        assert 0.0 < first_nz < 1000.0, \
+            f"First non-zero base shear out of kN range: {first_nz:.2f} kN"
 
 
 # ============================================================================
