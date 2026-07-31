@@ -23,7 +23,7 @@ from fea_toolkit.analysis.base import (
     _PUSHOVER_STEEL_DEFAULTS,
     _PUSHOVER_RC_DEFAULTS,
 )
-from fea_toolkit.utils import DEFAULT_GRAVITY_MS2
+from fea_toolkit.utils import g_from_units
 from fea_toolkit.analysis.modal import ModalAnalysis
 
 if TYPE_CHECKING:
@@ -263,7 +263,8 @@ class PushoverAnalysis(Analysis):
 
         # Gravity loads — use MeshModel's computed mass when available
         gravity_loads: Dict[int, tuple] = {}
-        g = DEFAULT_GRAVITY_MS2
+        # Scale gravitational acceleration to model units (never hardcode g).
+        g = g_from_units(mm.units)
         for nd in mm.nodes.values():
             mass_val = getattr(nd, 'mass', None)
             if mass_val is None or mass_val <= 0.0:

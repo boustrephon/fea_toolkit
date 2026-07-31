@@ -368,3 +368,48 @@ class TestInverseScaleFactors:
             == pytest.approx(utils.length_to_si_factor({"L": "mm"}))
         assert utils.force_to_si_factor({"F": "kilonewtons"}) \
             == pytest.approx(utils.force_to_si_factor({"F": "kN"}))
+
+
+class TestApplyMaterialDefaultsScaleFactors:
+    """`SAPModelData.apply_material_defaults()` must scale SI authoring
+    values to the model unit system.
+
+    Defaults are authored in SI (Pa, N/m³, kg/m³) and converted via
+    the canonical utils factors (multiplication convention):
+
+        model_value = SI_default * scale_factor(units)
+
+    Round-trip: model_value * to_si_factor(units) == SI_default.
+    """
+
+    def test_concrete_defaults_roundtrip_non_si(self):
+        """Concrete stress/weight/mass defaults round-trip in kN-m."""
+        mds = utils.mass_density_scale_factor({"F": "kN", "L": "m"})
+        wds = utils.weight_density_scale_factor({"F": "kN", "L": "m"})
+        ssf = utils.stress_scale_factor({"F": "kN", "L": "m"})
+        ssti = utils.stress_to_si_factor({"F": "kN", "L": "m"})
+        mdsi = utils.mass_density_to_si_factor({"F": "kN", "L": "m"})
+        wdsi = utils.weight_density_to_si_factor({"F": "kN", "L": "m"})
+
+        E = utils.DEFAULT_E_C_PA * ssf
+        assert E * ssti == pytest.approx(utils.DEFAULT_E_C_PA, rel=1e-12)
+        assert E > 0 and E < 1e12  # sane model-unit magnitude
+
+        uw = utils.DEFAULT_RHO_WC_SI * wds
+        assert uw * wdsi == pytest.approx(utils.DEFAULT_RHO_WC_SI, rel=1e-12)
+
+        um = utils.DEFAULT_RHO_MC_SI * mds
+        assert um * mdsi == pytest.approx(utils.DEFAULT_RHO_MC_SI, rel=1e-12)
+
+    def test_builder_style_density_division_is_not_roundtrip(self):
+        """Regression — division convention (pre-fix builder.py) does NOT
+        round-trip; multiplication is the correct SI→model conversion."""
+        mds = utils.mass_density_scale_factor({"F": "kN", "L": "m"})
+        mdsi = utils.mass_density_to_si_factor({"F": "kN", "L": "m"})
+        division_value = utils.DEFAULT_RHO_MC_SI / mds
+        assert division_value * mdsi != pytest.approx(utils.DEFAULT_RHO_MC_SI)
+        # 2450 / 0.001 = 2.45e6; * 1000 = 2.45e9 — wrong by a factor of 1000
+        assert abs(division_value * mdsi / utils.DEFAULT_RHO_MC_SI - 1.0) > 100
+        multiplication_value = utils.DEFAULT_RHO_MC_SI * mds
+        assert abs(multiplication_value * mdsi / utils.DEFAULT_RHO_MC_SI - 1.0) \
+            < 1e-12  # multiplication round-trips exactly
