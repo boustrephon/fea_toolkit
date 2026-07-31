@@ -209,6 +209,92 @@ print(f"S_dp = {pp['S_dp']:.3f} m, converged = {pp['converged']}")
 
 ---
 
+## ADRS Unit Convention and Damping Reduction
+
+This section documents the exact ADRS (Acceleration-Displacement Response
+Spectrum) unit convention used by :func:`~fea_toolkit.model.csm.pushover_to_adrs`
+and :func:`~fea_toolkit.model.csm.compute_performance_point`, together
+with the equivalent-damping and damping-reduction machinery introduced
+for the CSM workflow.
+
+### 1. Spectral acceleration — Newton's second law, no `g`
+
+The capacity curve is converted from base-shear vs. roof-displacement
+(`V`–`δ`) to ADRS coordinates via:
+
+```text
+S_a = V / M_eff          # m/s²  (NOT V / (M_eff · g))
+S_d = δ / (|Γ| · |φ_control|)
+```
+
+- `M_eff` is the first-mode effective modal mass (model mass units —
+  tonnes for a kN-m model) and `V` is the base shear (kN).  Because
+  `kN / t = m/s²` exactly, `S_a = V / M_eff` is **Newton's second law**
+  and holds for **any** consistent F/L/T unit system — no gravitational
+  constant `g` appears in the conversion.
+- Earlier versions incorrectly used `S_a = V / (M_eff · g)`, which returns
+  spectral acceleration in **g-units** while `compute_performance_point`
+  treated it as `m/s²`.  That single mismatch inflated
+  `T_eq = 2π√(S_d/S_a)` by `√g ≈ 3.13`, so the demand spectrum was
+  interpolated at the wrong (longer) period and the secant iteration
+  stalled on a phantom high-ductility point far from the true elastic
+  intersection.  This is now fixed.
+
+### 2. Origin anchoring
+
+The capacity curve is anchored at the origin `(S_d = 0, S_a = 0)`.
+Earlier code dropped the first data point with a `S_d > 1e-12` mask,
+so the capacity curve did not start at `(0, 0)` and the initial-elastic
+stiffness `K_init` was underestimated.
+
+### 3. Equivalent viscous damping (ATC-40 Eqn 5-19)
+
+```text
+β_eq = β_0 + κ · (2/π) · (μ − 1) / (μ · (1 + αμ − α))
+```
+
+Implemented in :func:`~fea_toolkit.model.csm.compute_equivalent_damping`:
+
+- `β_0` — elastic damping ratio (default 0.05).
+- `κ` — damping adjustment factor (default 0.33).
+- `μ` — ductility `S_dp / S_dy`.
+- `α` — post-yield stiffness ratio `(S_a_peak − S_ay) / (S_d_peak − S_dy)`
+  normalized by initial stiffness.
+
+### 4. Damping reduction factor `B` (ATC-40 / GB 50011 compatible)
+
+```text
+B = √[(1 + 10·Δβ) / (1 + 5·Δβ)]        with  Δβ = β_eq − β_0
+```
+
+Implemented in :func:`~fea_toolkit.model.csm.damping_reduction_factor`
+and clamped to `[0.5, 2.0]`.
+
+The inelastic demand spectrum is obtained by dividing the elastic
+spectrum by `B`:
+
+```text
+Sa_demand(T_eq) = Sa_elastic(T_eq) / B
+Sd_demand       = Sa_demand(T_eq) · (T_eq / 2π)²
+```
+
+### 5. New result keys
+
+:func:`~fea_toolkit.model.csm.compute_performance_point` now returns two
+additional keys alongside the existing ``S_dp``, ``S_ap``, ``V_base``,
+``D_roof``, ``T_eq``, ``mu``, ``converged``:
+
+- ``beta_eq`` — equivalent viscous damping ratio at the performance point.
+- ``B`` — spectral damping reduction factor.
+
+For the bundled RC frame example at a demand scale of 13.0× the elastic
+spectrum, the converged point is `μ = 3.00`, `T_eq = 0.574 s`,
+`β_eq = 0.189`, `B = 1.188` (33 iterations).
+
+**Status:** ✅ Fully implemented.  See `tests/test_workflows.py::TestCSMWorkflow`.
+
+---
+
 ## See Also
 
 - [Pushover (Non-linear Static) Analysis](pushover_analysis.md)
