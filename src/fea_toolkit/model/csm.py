@@ -24,6 +24,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from ..utils import g_from_units
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Bilinearization — Stiffness-change detection
@@ -64,7 +66,9 @@ def bilinearize_stiffness_change(
     S_d_arr = np.asarray(S_d_arr, dtype=float)
     S_a_arr = np.asarray(S_a_arr, dtype=float)
 
-    if len(S_d_arr) < 2 or len(S_a_arr) < 2:
+    # Let argmax raise ValueError on empty arrays — the caller's
+    # responsibility to provide valid capacity curve data.
+    if len(S_d_arr) == 0 or len(S_a_arr) == 0:
         return 0.0, 0.0, "stiffness_change"
 
     peak_idx = config.get("peak_idx")
@@ -153,7 +157,7 @@ def bilinearize_equal_energy(
     S_d_arr = np.asarray(S_d_arr, dtype=float)
     S_a_arr = np.asarray(S_a_arr, dtype=float)
 
-    if len(S_d_arr) < 2 or len(S_a_arr) < 2:
+    if len(S_d_arr) == 0 or len(S_a_arr) == 0:
         return 0.0, 0.0, "equal_energy"
 
     peak_idx = config.get("peak_idx")
@@ -240,9 +244,12 @@ def bilinearize_equal_energy(
         S_dy = max(float(S_d_arr[0] if len(S_d_arr) > 0 else 0.0),
                    min(S_dy, S_d_peak))
 
-    # Sanity: if yield is >90% of peak, the curve is essentially
-    # linear — reset to peak (mu = 1).
-    if S_dy >= 0.90 * S_d_peak:
+    # Sanity: if yield is >90% of peak and the iteration did NOT
+    # converge below tolerance, the curve is essentially linear —
+    # reset to peak (mu = 1).  If it converged, accept the result
+    # even if it happens to be near the peak (e.g. hardening curves
+    # with yield at the end point).
+    if S_dy >= 0.90 * S_d_peak and not converged:
         S_dy = S_d_peak
         S_ay = S_a_peak
         converged = True
@@ -332,6 +339,11 @@ def bilinearize_composite(
           engage depending on the equal-energy result.
     """
     cfg = dict(config or {})
+    S_d_arr = np.asarray(S_d_arr, dtype=float)
+    S_a_arr = np.asarray(S_a_arr, dtype=float)
+
+    if len(S_d_arr) == 0 or len(S_a_arr) == 0:
+        return 0.0, 0.0, "composite_equal_energy"
     peak_idx = cfg.get("peak_idx")
     if peak_idx is None:
         peak_idx = int(np.argmax(S_a_arr))
@@ -376,7 +388,6 @@ def compute_performance_point(
     spectrum_periods: List[float],
     spectrum_accels: List[float],
     direction: str = "X",
-    g: Optional[float] = None,
     damping_ratio: float = 0.05,
     max_iter: int = 50,
     tol: float = 0.01,
@@ -434,8 +445,6 @@ def compute_performance_point(
             to *spectrum_periods*.
         direction: Push direction (``'X'`` or ``'Y'``), used for
             extracting the appropriate mode shape component.
-        g: Gravitational acceleration.  If ``None``, taken from
-            ``pushover_results`` or default 9.81.
         damping_ratio: Elastic damping ratio (default 0.05).
         max_iter: Maximum iterations for secant convergence (default 50).
         tol: Convergence tolerance on S_d (relative, default 1 %).
@@ -477,7 +486,7 @@ def compute_performance_point(
     # 1. Convert pushover to ADRS
     adrs = pushover_to_adrs(
         pushover_results, modal_results, mode_shapes,
-        direction=direction, g=g,
+        direction=direction,
     )
     S_a_arr = np.array(adrs["S_a"])
     S_d_arr = np.array(adrs["S_d"])
@@ -646,7 +655,8 @@ def compute_performance_point(
         V_p = float(np.interp(S_dp, S_d_arr, base_shear))
         D_p = float(np.interp(S_dp, S_d_arr, control_disp))
 
-    T_eq_final = 2.0 * math.pi * math.sqrt(S_dp / max(S_ap * g, 1e-12))
+    g_val = g_from_units(pushover_results.get("units", {"L": "m"}))
+    T_eq_final = 2.0 * math.pi * math.sqrt(S_dp / max(S_ap * g_val, 1e-12))
     mu_final = max(S_dp / max(S_dy, 1e-12), 1.0)
 
     return {
@@ -724,7 +734,6 @@ def pushover_to_adrs(
     modal_results: Dict[str, Any],
     mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
     direction: str = "X",
-    g: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Convert pushover capacity curve (V‑δ) → ADRS (S_a‑S_d) format.
 
@@ -749,8 +758,10 @@ def pushover_to_adrs(
             (optional).
         mode_shapes: Dict mapping mode index → {node_tag: (ux, uy, uz)}.
         direction: Push direction (``'X'``, ``'Y'``, or ``'Z'``).
-        g: Gravitational acceleration.  Uses ``pushover_results`` value
-            or defaults to 9.81.
+        Gravitational acceleration is derived from
+        ``pushover_results.get("units", {"L": "m"})`` via
+        ``g_from_units()`` — the ``units`` dict is the single source of
+        truth and must be present when the model units are not SI‑m.
 
     Returns:
         Dict with keys:
@@ -762,9 +773,6 @@ def pushover_to_adrs(
         * ``'phi_control'`` — control-node mode shape ordinate.
         * ``'best_mode'`` — selected mode index.
     """
-    if g is None:
-        g = pushover_results.get("g", 9.81)
-
     # Use best mode (highest mass participation in push direction)
     masses = modal_results.get("nodal_masses", {})
     periods = modal_results.get("periods", [])
@@ -845,7 +853,8 @@ def pushover_to_adrs(
     # S_a in g (dimensionless: base_shear / (M_eff * g)),
     # S_d in model length units.
     pc = 1.0 if phi_control is None else abs(phi_control)
-    S_a = base_shear / (M_eff * g)        # g units, pc does NOT belong here
+    g_val = g_from_units(pushover_results.get("units", {"L": "m"}))
+    S_a = base_shear / (M_eff * g_val)        # g units, pc does NOT belong here
     S_d = control_disp / (Gamma * pc)      # pc applies only to S_d
 
     return {
