@@ -14,6 +14,26 @@ The `compute_performance_point()` function implements the full ATC‑40
 Capacity Spectrum Method (CSM) with secant iteration: ADRS conversion,
 bilinearization, equivalent viscous damping, damping reduction factor,
 and convergence detection via relative tolerance and stall detection.
+
+**Unit convention (important)**
+
+The pushover results carry a ``units`` dict (e.g. ``{"F": "KN",
+"L": "m", "T": "C"}``).  All spectral quantities returned by this module
+are expressed in those model units:
+
+- ``S_a``, ``S_ay``, ``S_ap`` — spectral acceleration in **m/s²**
+  (force/mass acceleration, dimensionally consistent regardless of the
+  force/length unit chosen).
+- ``S_d``, ``S_dy``, ``S_dp`` — spectral displacement in model length
+  units (m for a kN-m model).
+- ``V_base`` — base shear in model force units (kN for a kN-m model).
+- ``D_roof`` — roof displacement in model length units (m).
+
+The ADRS conversion computes ``S_a = V / M_eff`` (Newton's second law
+with no explicit gravitational constant), which is exact in any
+consistent unit system: kN / t = m/s², N / kg = m/s².  It does **not**
+divide by ``g`` — dividing by ``g`` would produce g-units and silently
+corrupt every downstream quantity (T_eq, ductility, intersection).
 """
 
 from __future__ import annotations
@@ -23,8 +43,6 @@ import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-
-from ..utils import g_from_units
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -150,7 +168,7 @@ def bilinearize_equal_energy(
           without reaching tolerance (a warning is emitted).
 
     Edge cases:
-        - No clear yield (S_dy >= 90 % of peak) → yield at peak (mu = 1).
+        - No clear yield (S_dy >= 90 % of peak) → yield at peak (mu = 1).
         - Empty arrays → returns (0.0, 0.0, 'equal_energy').
     """
     config = config or {}
@@ -318,9 +336,6 @@ def bilinearize_composite(
             increasing and non-negative.
         S_a_arr: Spectral accelerations (m/s²), corresponding to
             *S_d_arr*.  Should be non-negative.
-        config: Optional dict passed through to each sub-method.
-            See :func:`bilinearize_stiffness_change` and
-            :func:`bilinearize_equal_energy` for supported keys.
 
     Returns:
         Tuple ``(S_dy, S_ay, method_name)`` where *method_name* is
@@ -377,6 +392,92 @@ def bilinearize_composite(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Equivalent viscous damping — ATC‑40
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def compute_equivalent_damping(
+    mu: float,
+    alpha: float = 0.0,
+    beta_0: float = 0.05,
+    kappa: float = 0.33,
+) -> float:
+    """Compute equivalent viscous damping per ATC‑40 Eqn 5‑19.
+
+    .. math::
+
+        \\beta_{\\text{eq}} = \\beta_0 + \\kappa \\cdot
+        \\frac{2}{\\pi} \\cdot \\frac{(1 - \\alpha)(\\mu - 1)}
+        {\\mu (1 + \\alpha \\mu - \\alpha)}
+
+    where:
+    - β₀ = inherent (elastic) damping ratio
+    - κ = damping modification factor
+    - α = post‑yield stiffness ratio
+    - μ = ductility = Sd_max / S_dy
+
+    Args:
+        mu: Ductility demand (≥1).
+        alpha: Post‑yield stiffness ratio (0..1, default 0.0).
+        beta_0: Inherent elastic damping ratio (default 0.05).
+        kappa: Damping modification factor (default 0.33, ATC‑40 Type C).
+
+    Returns:
+        Equivalent viscous damping ratio (beta_0 + hysteretic contribution).
+    """
+    if mu <= 1.0:
+        return beta_0
+
+    # Hysteretic damping per ATC-40 Eqn 5-19
+    beta_h = (2.0 / math.pi) * (1.0 - alpha) * (mu - 1.0) / (
+        mu * (1.0 + alpha * mu - alpha)
+    )
+    beta_eff = beta_0 + kappa * beta_h
+
+    return float(beta_eff)
+
+
+def damping_reduction_factor(
+    beta_eq: float,
+    beta_0: float = 0.05,
+    lo: float = 0.5,
+    hi: float = 2.0,
+) -> float:
+    """Damping reduction factor B used to scale the elastic demand spectrum.
+
+    Implements the ATC‑40 / GB 50011 compatible expression:
+
+    .. math::
+
+        B = \\sqrt{\\frac{1 + 10(\\beta_{\\text{eq}} - \\beta_0)}
+                       {1 + 5(\\beta_{\\text{eq}} - \\beta_0)}}
+
+    clamped to ``[lo, hi]`` (ATC‑40 allows B in [0.5, 1.0] plus a small
+    extension for very high damping; the toolkit widens the upper bound
+    to 2.0 so lightly-damped systems are not amplified unrealistically).
+
+    The inelastic demand acceleration at an equivalent period is then
+    ``Sa_demand = Sa_elastic / B``.
+
+    Args:
+        beta_eq: Equivalent viscous damping ratio (≥ beta_0).
+        beta_0: Inherent elastic damping ratio (default 0.05).
+        lo: Lower clamp (default 0.5).
+        hi: Upper clamp (default 2.0).
+
+    Returns:
+        Damping reduction factor B (≥ 1 when beta_eq > beta_0).
+    """
+    if beta_eq <= beta_0:
+        return 1.0
+    B = math.sqrt(
+        (1.0 + 10.0 * (beta_eq - beta_0)) /
+        (1.0 + 5.0 * (beta_eq - beta_0))
+    )
+    return float(max(lo, min(hi, B)))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Performance point calculation
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -404,31 +505,35 @@ def compute_performance_point(
     Procedure:
         1. **ADRS conversion** — pushover curve (V‑δ) → spectral
            acceleration vs. spectral displacement using the first-mode
-           participation factor and effective modal mass.
+           participation factor and effective modal mass.  ``S_a`` is
+           computed as ``V / M_eff`` (**m/s²**) — see the module
+           docstring for the unit convention.
         2. **Bilinearization** — one of ``'composite'`` (default),
            ``'stiffness_change'``, or ``'equal_energy'`` methods
            determines the yield point (S_dy, S_ay).
-        3. **Secant iteration** — starting from 20 % of the peak
+        3. **Secant iteration** — starting from 20 % of the peak
            spectral displacement, repeatedly:
            a. Compute equivalent secant period T_eq from the trial
               point on the capacity curve.
            b. Compute ductility μ and equivalent viscous damping
               β_eq (ATC-40 Eqn 5-19).
-           c. Compute damping reduction factor B (ATC‑40 / GB 50011
-              compatible).
+           c. Compute damping reduction factor B (
+              :func:`damping_reduction_factor`).
            d. Interpolate the elastic demand spectrum at T_eq and
               reduce it by B to obtain the inelastic demand
               displacement S_d_demand.
            e. Check convergence: relative change < tol, or stall
               detection (S_d_trial stops changing over 3 iterations).
-           f. Update trial point (50 % weighting with demand).
+           f. Update trial point (50 % weighting with demand).
         4. **Elastic convergence** — if both trial and demand drop
            below the first capacity data point, the structure is in
            the elastic range.  The performance point is computed
            directly from the best-mode period and elastic spectrum.
         5. **Return values** — performance point (S_dp, S_ap),
            base shear V_base, roof displacement D_roof, equivalent
-           period T_eq, ductility μ, and convergence status.
+           period T_eq, ductility μ, convergence status, and the
+           damping ratio β_eq / reduction factor B used at the
+           performance point.
 
     Args:
         pushover_results: Output from :meth:`run_pushover_analysis`.
@@ -441,13 +546,13 @@ def compute_performance_point(
             Dict mapping mode index → {node_tag: (ux, uy, uz)}.
         spectrum_periods: Periods (s) defining the elastic demand
             response spectrum.
-        spectrum_accels: Spectral accelerations (m/s²) corresponding
+        spectrum_accels: Spectral accelerations (**m/s²**) corresponding
             to *spectrum_periods*.
         direction: Push direction (``'X'`` or ``'Y'``), used for
             extracting the appropriate mode shape component.
         damping_ratio: Elastic damping ratio (default 0.05).
         max_iter: Maximum iterations for secant convergence (default 50).
-        tol: Convergence tolerance on S_d (relative, default 1 %).
+        tol: Convergence tolerance on S_d (relative, default 1 %).
         bilinearize_method: One of ``'composite'`` (default),
             ``'stiffness_change'``, or ``'equal_energy'``.
         bilinearize_config: Optional dict passed to the bilinearisation
@@ -458,7 +563,7 @@ def compute_performance_point(
 
         * ``'S_dp'`` — performance point spectral displacement (m).
         * ``'S_ap'`` — performance point spectral acceleration (m/s²).
-        * ``'V_base'`` — corresponding base shear (N).
+        * ``'V_base'`` — corresponding base shear (model force units).
         * ``'D_roof'`` — corresponding roof displacement (m).
         * ``'T_eq'`` — equivalent period at performance point (s).
         * ``'mu'`` — ductility demand.
@@ -468,7 +573,12 @@ def compute_performance_point(
         * ``'bilinearize_method'`` — name of the method actually used.
         * ``'Gamma'`` — participation factor.
         * ``'M_eff'`` — effective modal mass.
-        * ``'capacity_adrs'`` — dict with ``'S_a'`` and ``'S_d'`` lists.
+        * ``'beta_eq'`` — equivalent viscous damping ratio at the
+          performance point (β₀ + hysteretic contribution).
+        * ``'B'`` — damping reduction factor applied to the demand
+          spectrum at the performance point.
+        * ``'capacity_adrs'`` — dict with ``'S_a'`` (m/s²) and
+          ``'S_d'`` lists.
 
     Raises:
         ValueError: If the capacity spectrum has fewer than 3 valid
@@ -504,21 +614,39 @@ def compute_performance_point(
             f"conversion."
         )
 
-    # Filter out negative / zero values
-    mask = (S_d_arr > 1e-12) & (S_a_arr > 1e-12)
+    # Filter out negative / zero values — but keep the origin so the
+    # capacity curve starts at (0,0).  The first push step can have a
+    # tiny non-zero displacement; prepending an explicit origin keeps
+    # the curve anchored for the bilinearization and for plotting.
+    mask = (S_d_arr >= -1e-12) & (S_a_arr >= -1e-12)
     S_d_arr = S_d_arr[mask]
     S_a_arr = S_a_arr[mask]
     if len(S_d_arr) < 3:
         raise ValueError(
             "Too few valid data points in capacity spectrum"
         )
+    # Anchor at origin (0,0) so the capacity curve starts at the origin
+    # and the secant stiffness K_init is well-defined from the first
+    # non-zero step.
+    if S_d_arr[0] > 1e-12 or S_a_arr[0] > 1e-12:
+        S_d_arr = np.concatenate([[0.0], S_d_arr])
+        S_a_arr = np.concatenate([[0.0], S_a_arr])
 
     Gamma = adrs["Gamma"]
     M_eff = adrs["M_eff"]
     phi_control = adrs["phi_control"]
     best_mode = adrs.get("best_mode", 0)
-    control_disp = np.array(ctrl_raw)[mask]
-    base_shear = np.array(shear_raw)[mask]
+    control_disp_orig = np.array(ctrl_raw, dtype=float)[mask]
+    base_shear_orig = np.array(shear_raw, dtype=float)[mask]
+    # Same anchoring for the physical arrays used for V_base/D_roof
+    # interpolation.
+    if S_d_arr[0] <= 1e-12 and (control_disp_orig[0] > 1e-12 or
+                                base_shear_orig[0] > 1e-12):
+        control_disp = np.concatenate([[0.0], control_disp_orig])
+        base_shear = np.concatenate([[0.0], base_shear_orig])
+    else:
+        control_disp = control_disp_orig
+        base_shear = base_shear_orig
 
     # 2. Bilinearise the capacity spectrum (find yield point)
     _bilin_map = {
@@ -558,6 +686,8 @@ def compute_performance_point(
     prev_S_d = S_d_trial
     stall_count = 0
     history = []
+    beta_eq_final = damping_ratio
+    B_final = 1.0
 
     for iteration in range(max_iter):
         # Spectral acceleration at trial point (interpolate capacity)
@@ -569,23 +699,19 @@ def compute_performance_point(
             S_a_trial = float(np.interp(S_d_trial, S_d_arr, S_a_arr))
 
         # Equivalent period at trial point
+        #   T_eq = 2π √(S_d / S_a)  — S_a in m/s² (force/mass), so this
+        #   is the exact secant period in seconds regardless of the
+        #   model's force/length units (kN/t = N/kg = m/s²).
         T_eq = 2.0 * math.pi * math.sqrt(S_d_trial / max(S_a_trial, 1e-12))
 
         # Ductility
         mu = max(S_d_trial / max(S_dy, 1e-12), 1.0)
 
         # Equivalent viscous damping from hysteresis (ATC-40 Eqn 5-19)
-        if mu > 1.0:
-            beta_eq = damping_ratio + 0.637 * (mu - 1.0) / (mu * math.pi)
-        else:
-            beta_eq = damping_ratio
+        beta_eq = compute_equivalent_damping(mu, beta_0=damping_ratio)
 
         # Damping reduction factor (ATC-40 / GB 50011 compatible)
-        B = 1.0
-        if beta_eq > damping_ratio:
-            B = math.sqrt((1.0 + 10.0 * (beta_eq - damping_ratio)) /
-                          (1.0 + 5.0 * (beta_eq - damping_ratio)))
-        B = max(0.5, min(2.0, B))
+        B = damping_reduction_factor(beta_eq, beta_0=damping_ratio)
 
         # Demand spectral acceleration at T_eq
         Sa_demand = float(np.interp(T_eq, T_spec, Sa_spec)) / B
@@ -594,6 +720,8 @@ def compute_performance_point(
         S_d_demand = Sa_demand * (T_eq / (2.0 * math.pi)) ** 2
 
         history.append((S_d_trial, S_d_demand))
+        beta_eq_final = beta_eq
+        B_final = B
 
         # Convergence checks
         delta = abs(S_d_demand - S_d_trial)
@@ -637,13 +765,11 @@ def compute_performance_point(
         S_ap = float(np.interp(best_mode_period, T_spec, Sa_spec))
         mu_p = max(S_dp / max(S_dy, 1e-12), 1.0)
         if mu_p > 1.0:
-            beta_p = damping_ratio + 0.637 * (mu_p - 1.0) / (mu_p * math.pi)
-            B_p = 1.0
-            if beta_p > damping_ratio:
-                B_p = math.sqrt((1.0 + 10.0 * (beta_p - damping_ratio)) /
-                                (1.0 + 5.0 * (beta_p - damping_ratio)))
-            B_p = max(0.5, min(2.0, B_p))
+            beta_p = compute_equivalent_damping(mu_p, beta_0=damping_ratio)
+            B_p = damping_reduction_factor(beta_p, beta_0=damping_ratio)
             S_ap /= B_p
+            beta_eq_final = beta_p
+            B_final = B_p
         V_p = S_ap * abs(M_eff)
         D_p = S_dp * abs(Gamma) * abs(phi_control)
     elif S_dp >= S_d_arr[-1]:
@@ -655,9 +781,13 @@ def compute_performance_point(
         V_p = float(np.interp(S_dp, S_d_arr, base_shear))
         D_p = float(np.interp(S_dp, S_d_arr, control_disp))
 
-    g_val = g_from_units(pushover_results.get("units", {"L": "m"}))
-    T_eq_final = 2.0 * math.pi * math.sqrt(S_dp / max(S_ap * g_val, 1e-12))
+    T_eq_final = 2.0 * math.pi * math.sqrt(S_dp / max(S_ap, 1e-12))
     mu_final = max(S_dp / max(S_dy, 1e-12), 1.0)
+    if not converged or not math.isfinite(T_eq_final) or T_eq_final <= 0:
+        # Fall back to the last-iteration equivalent period if the
+        # interpolation above could not produce a positive period.
+        T_eq_final = 2.0 * math.pi * math.sqrt(
+            S_dp / max(S_ap, 1e-12))
 
     return {
         "S_dp": S_dp,
@@ -673,6 +803,8 @@ def compute_performance_point(
         "bilinearize_method": _bilin_name,
         "Gamma": Gamma,
         "M_eff": M_eff,
+        "beta_eq": beta_eq_final,
+        "B": B_final,
         "capacity_adrs": {"S_a": S_a_arr.tolist(), "S_d": S_d_arr.tolist()},
     }
 
@@ -743,13 +875,20 @@ def pushover_to_adrs(
 
     .. math::
 
-        S_a = \\frac{V}{M^* \\cdot g} \\cdot \\frac{1}{\\phi_{\\text{control}}}
+        S_a = \\frac{V}{M^*}          \\quad (\\text{m/s²})
         S_d = \\frac{\\delta}{\\Gamma \\cdot \\phi_{\\text{control}}}
 
     Where:
     - M^* = effective modal mass = L² / M* where M* = Σ m_i φ_i²
     - Γ = participation factor = L / M*
     - φ_control = mode shape ordinate at the control/roof node
+
+    **Units**: ``S_a`` is returned in **m/s²**, computed directly from
+    Newton's second law ``F = M·a`` with no gravitational constant — the
+    model's force and mass units cancel (kN/t = N/kg = m/s²).  This is
+    the same unit system as the demand spectrum accelerations passed to
+    :func:`compute_performance_point`.  ``S_d`` is in model length units
+    (m for a kN-m model).
 
     Args:
         pushover_results: Dict with ``'control_disp'``, ``'base_shear'``,
@@ -758,15 +897,11 @@ def pushover_to_adrs(
             (optional).
         mode_shapes: Dict mapping mode index → {node_tag: (ux, uy, uz)}.
         direction: Push direction (``'X'``, ``'Y'``, or ``'Z'``).
-        Gravitational acceleration is derived from
-        ``pushover_results.get("units", {"L": "m"})`` via
-        ``g_from_units()`` — the ``units`` dict is the single source of
-        truth and must be present when the model units are not SI‑m.
 
     Returns:
         Dict with keys:
 
-        * ``'S_a'`` — spectral acceleration array (g units).
+        * ``'S_a'`` — spectral acceleration array (**m/s²**).
         * ``'S_d'`` — spectral displacement array (model length units).
         * ``'Gamma'`` — participation factor.
         * ``'M_eff'`` — effective modal mass.
@@ -778,6 +913,10 @@ def pushover_to_adrs(
     periods = modal_results.get("periods", [])
 
     dir_idx = {"X": 0, "Y": 1, "Z": 2}.get(direction, 0)
+
+    # Total physical mass (used to reject degenerate modes whose push-
+    # direction component vanishes to machine noise).
+    M_total = sum(masses.values())
 
     # Find the mode with highest participation in the push direction
     best_mode = 0
@@ -792,6 +931,14 @@ def pushover_to_adrs(
             M_star += m * phi**2
             L += m * phi
         if M_star > 0:
+            # Reject modes whose push-direction component carries
+            # negligible kinetic energy (M_star much less than M_total).
+            # For such modes L and M_star are both ~machine-noise zeros
+            # and their ratio L^2/M_star is numerically ill-conditioned,
+            # producing spuriously large "participation" values that can
+            # win the selection over the true push-direction mode.
+            if M_total > 0 and M_star < 1e-8 * M_total:
+                continue
             participation = L**2 / M_star
             if participation > best_participation:
                 best_participation = participation
@@ -818,7 +965,9 @@ def pushover_to_adrs(
         # Use control/monitor node from pushover_results if available,
         # otherwise fall back to the roof node (highest Z).
         node_coords = pushover_results.get("node_coords", {})
-        cntl_tag = pushover_results.get("control_node_tag", None)
+        cntl_tag = pushover_results.get(
+            "control_node", pushover_results.get("control_node_tag", None)
+        )
         if cntl_tag is not None and cntl_tag in best_shape:
             phi_control = [best_shape[cntl_tag][0],
                            best_shape[cntl_tag][1],
@@ -850,12 +999,15 @@ def pushover_to_adrs(
             "best_mode": best_mode,
         }
 
-    # S_a in g (dimensionless: base_shear / (M_eff * g)),
-    # S_d in model length units.
+    # S_a in m/s² via F = M·a (no g): kN/t = N/kg = m/s², so the
+    # conversion is exact in any consistent force/mass unit system.
+    # S_d in model length units.  Use |Gamma| so S_d is positive for a
+    # push in the positive direction — the mode-shape sign is arbitrary
+    # (eigenvector normalization) and must not flip the spectral
+    # displacement ordering of the capacity curve.
     pc = 1.0 if phi_control is None else abs(phi_control)
-    g_val = g_from_units(pushover_results.get("units", {"L": "m"}))
-    S_a = base_shear / (M_eff * g_val)        # g units, pc does NOT belong here
-    S_d = control_disp / (Gamma * pc)      # pc applies only to S_d
+    S_a = base_shear / M_eff        # m/s²
+    S_d = control_disp / (abs(Gamma) * pc)   # model length units
 
     return {
         "S_a": S_a.tolist(),
@@ -865,50 +1017,3 @@ def pushover_to_adrs(
         "phi_control": phi_control,
         "best_mode": best_mode,
     }
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Equivalent damping — ATC‑40
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-def compute_equivalent_damping(
-    mu: float,
-    alpha: float = 0.0,
-    beta_0: float = 0.05,
-    kappa: float = 0.33,
-) -> float:
-    """Compute equivalent viscous damping per ATC‑40 Eqn 5‑19.
-
-    .. math::
-
-        \\beta_{\\text{eff}} = \\beta_0 + \\kappa \\cdot
-        \\frac{2}{\\pi} \\cdot \\frac{(1 - \\alpha)(\\mu - 1)}
-        {\\mu (1 + \\alpha \\mu - \\alpha)}
-
-    where:
-    - β₀ = inherent (elastic) damping ratio
-    - κ = damping modification factor
-    - α = post‑yield stiffness ratio
-    - μ = ductility = Sd_max / S_dy
-
-    Args:
-        mu: Ductility demand (≥1).
-        alpha: Post‑yield stiffness ratio (0..1, default 0.0).
-        beta_0: Inherent elastic damping ratio (default 0.05).
-        kappa: Damping modification factor (default 0.33, ATC‑40 Type C).
-
-    Returns:
-        Equivalent viscous damping ratio (beta_0 + hysteretic contribution).
-    """
-    if mu <= 1.0:
-        return beta_0
-
-    # Hysteretic damping per ATC-40 Eqn 5-19
-    beta_h = (2.0 / math.pi) * (1.0 - alpha) * (mu - 1.0) / (
-        mu * (1.0 + alpha * mu - alpha)
-    )
-    beta_eff = beta_0 + kappa * beta_h
-
-    return float(beta_eff)
-
