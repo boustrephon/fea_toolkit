@@ -638,7 +638,9 @@ def export_mesh_model_to_tcl(
             if mat_name in _fiber_mat_names:
                 continue
             if mat.type and "concrete" in mat.type.lower():
-                Fc = (mat.Fc if mat.Fc and mat.Fc > 0 else DEFAULT_FC_PA) / 1.0
+                _stress_factor = stress_scale_factor(mesh_model.units)
+                Fc = (mat.Fc if mat.Fc and mat.Fc > 0
+                      else DEFAULT_FC_PA * _stress_factor)
                 epsc = (mat.eFc if mat.eFc and mat.eFc > 0 else DEFAULT_EPS_C)
                 Fu = 0.2 * Fc
                 epsu = 0.006

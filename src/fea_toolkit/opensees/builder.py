@@ -856,8 +856,8 @@ def mesh_model_to_gravity_loads(
     units = mesh_model.units
     if g_acc == 0.0:
         g_acc = g_from_units(units)
-    rho_mc = DEFAULT_RHO_MC_SI / mass_density_scale_factor(units)
-    rho_ms = DEFAULT_RHO_MS_SI / mass_density_scale_factor(units)
+    rho_mc = DEFAULT_RHO_MC_SI * mass_density_scale_factor(units)
+    rho_ms = DEFAULT_RHO_MS_SI * mass_density_scale_factor(units)
 
     def _mass_density(mat) -> float:
         """Return mass density from material or fallback default."""
