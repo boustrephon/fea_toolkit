@@ -919,8 +919,94 @@ class SAP2000Parser:
 
         return uniform_loads, gravity_loads
 
+    def _get_reinf_tables(self) -> Tuple[Dict[str, Dict[str, Any]],
+                                          Dict[str, Dict[str, Any]],
+                                          Dict[str, str],
+                                          Dict[str, float]]:
+        """Parse SAP2000 reinforcement / rebar-size tables.
+
+        Returns:
+            ``(column_reinf, beam_reinf, area_rebar_mat, rebar_diameters)``
+
+            * ``column_reinf`` — from ``FRAME SECTION PROPERTIES 02 - CONCRETE COLUMN``:
+              ``{SectionName: {rebar_mat, bar_size_along3, bar_size_along2}}``
+            * ``beam_reinf`` — from ``FRAME SECTION PROPERTIES 03 - CONCRETE BEAM``:
+              ``{SectionName: {rebar_mat, bar_size_top, bar_size_bot}}``
+            * ``area_rebar_mat`` — from ``AREA SECTION PROPERTY DESIGN PARAMETERS``:
+              ``{Section: rebar_mat_name_or_None}``
+            * ``rebar_diameters`` — from ``REBAR SIZES``:
+              ``{RebarID: Diameter}`` (model length units)
+        """
+        # ── REBAR SIZES: RebarID → Diameter (model units) ────────────
+        rebar_diameters: Dict[str, float] = {}
+        for rec in self._raw_tables.get('REBAR SIZES', []):
+            rid = str(rec.get('RebarID', '')).strip()
+            dia = rec.get('Diameter')
+            if rid and dia is not None:
+                try:
+                    rebar_diameters[rid] = float(dia)
+                except (ValueError, TypeError):
+                    pass
+
+        # ── FRAME SECTION PROPERTIES 02 - CONCRETE COLUMN ───────────
+        column_reinf: Dict[str, Dict[str, Any]] = {}
+        for rec in self._raw_tables.get(
+            'FRAME SECTION PROPERTIES 02 - CONCRETE COLUMN', []
+        ):
+            name = str(rec.get('SectionName', '')).strip()
+            if not name:
+                continue
+            rebar_mat = str(rec.get('RebarMatL', '') or '').strip() or None
+            entry: Dict[str, Any] = {
+                'rebar_mat': rebar_mat,
+                'bar_size_along3': str(rec.get('BarSizeL', '') or '').strip() or None,
+                'bar_size_along2': str(rec.get('BarSizeL', '') or '').strip() or None,
+            }
+            # If RebarMatL absent (e.g. older S2K), fall back to RebarMatM
+            if rebar_mat is None:
+                m = str(rec.get('RebarMatM', '') or '').strip() or None
+                entry['rebar_mat'] = m
+            column_reinf[name] = entry
+
+        # ── FRAME SECTION PROPERTIES 03 - CONCRETE BEAM ──────────────
+        beam_reinf: Dict[str, Dict[str, Any]] = {}
+        for rec in self._raw_tables.get(
+            'FRAME SECTION PROPERTIES 03 - CONCRETE BEAM', []
+        ):
+            name = str(rec.get('SectionName', '')).strip()
+            if not name:
+                continue
+            rebar_mat = str(rec.get('RebarMatL', '') or '').strip() or None
+            if rebar_mat is None:
+                rebar_mat = str(rec.get('RebarMatM', '') or '').strip() or None
+            beam_reinf[name] = {
+                'rebar_mat': rebar_mat,
+                'bar_size_top': str(rec.get('BarSizeTop', '') or '').strip() or None,
+                'bar_size_bot': str(rec.get('BarSizeBot', '') or '').strip() or None,
+            }
+
+        # ── AREA SECTION PROPERTY DESIGN PARAMETERS ──────────────────
+        area_rebar_mat: Dict[str, str] = {}
+        for rec in self._raw_tables.get(
+            'AREA SECTION PROPERTY DESIGN PARAMETERS', []
+        ):
+            name = str(rec.get('Section', '')).strip()
+            if not name:
+                continue
+            rm = str(rec.get('RebarMat', '') or '').strip() or None
+            if rm == 'None':
+                rm = None
+            area_rebar_mat[name] = rm
+
+        return column_reinf, beam_reinf, area_rebar_mat, rebar_diameters
+
     def _get_sections_with_material_properties(self) -> Dict[str, Section]:
         """Combine section geometry from FRAME SECTION PROPERTIES with material data."""
+        # Parse SAP2000 reinforcement tables (column/beam rebar material +
+        # bar sizes, area-section rebar material, and rebar-size diameters).
+        column_reinf, beam_reinf, area_rebar_mat, rebar_diameters = (
+            self._get_reinf_tables()
+        )
         from ..model.sap_data import (
             ISection, ChannelSection, PipeSection, BoxSection,
             RectangularSection, CircularSection,
@@ -1011,22 +1097,43 @@ class SAP2000Parser:
                            "Steel Plate"):
                 sec_data = RectangularSection(**common, depth=t3, bf=t2)
             elif shape == "Concrete Rectangular":
+                _reinf = column_reinf.get(name) or beam_reinf.get(name) or {}
+                _bar_id = (_reinf.get('bar_size_along3')
+                           or _reinf.get('bar_size_top')
+                           or _reinf.get('bar_size_bot'))
+                _bar_dia = rebar_diameters.get(_bar_id) if _bar_id else None
+                _top_dia = float(sec.get('topBarDia', 0))
+                _bot_dia = float(sec.get('botBarDia', 0))
+                if (not _top_dia or _top_dia <= 0) and _bar_dia:
+                    _top_dia = _bar_dia
+                if (not _bot_dia or _bot_dia <= 0) and _bar_dia:
+                    _bot_dia = _bar_dia
                 sec_data = ConcreteRectangularSection(
                     **common, depth=t3, bf=t2,
                     cover=float(sec.get('cover', 0)),
                     top_bars=int(sec.get('topBars', 0)),
                     bot_bars=int(sec.get('botBars', 0)),
-                    top_bar_dia=float(sec.get('topBarDia', 0)),
-                    bot_bar_dia=float(sec.get('botBarDia', 0)),
+                    top_bar_dia=_top_dia,
+                    bot_bar_dia=_bot_dia,
+                    rebar_material=_reinf.get('rebar_mat'),
                 )
             elif shape in ("Circle", "CIRCLE", "Steel Rod", "Steel Circle",
                            "Concrete Circular", "Concrete Circle"):
                 if shape in ("Concrete Circular", "Concrete Circle"):
+                    _reinf = column_reinf.get(name) or beam_reinf.get(name) or {}
+                    _bar_id = (_reinf.get('bar_size_along3')
+                               or _reinf.get('bar_size_along2')
+                               or _reinf.get('bar_size_top'))
+                    _bar_dia = rebar_diameters.get(_bar_id) if _bar_id else None
+                    _dia = float(sec.get('barDia', 0))
+                    if (not _dia or _dia <= 0) and _bar_dia:
+                        _dia = _bar_dia
                     sec_data = ConcreteCircularSection(
                         **common, diameter=t3,
                         cover=float(sec.get('cover', 0)),
                         bar_count=int(sec.get('barCount', 0)),
-                        bar_dia=float(sec.get('barDia', 0)),
+                        bar_dia=_dia,
+                        rebar_material=_reinf.get('rebar_mat'),
                     )
                 else:
                     sec_data = CircularSection(**common, diameter=t3)
@@ -1076,6 +1183,16 @@ class SAP2000Parser:
             # Target reinforcement ratio 0.01 (1 %) of gross area
             bar_area = math.pi * (bar_dia_val / 2.0) ** 2
             n_bars = max(4, int(sec.A * 0.01 / bar_area)) if bar_area > 0 else 4
+            # Wire in SAP2000 rebar material/size for this section when
+            # the concrete-column / concrete-beam table has an entry
+            # (e.g. promoted "Rectangular" sections that also appear in
+            # the 02 - CONCRETE COLUMN table).
+            _reinf = (column_reinf.get(sec_name)
+                      or beam_reinf.get(sec_name) or {})
+            _bar_id = (_reinf.get('bar_size_along3')
+                       or _reinf.get('bar_size_top')
+                       or _reinf.get('bar_size_bot'))
+            _bar_dia = rebar_diameters.get(_bar_id) if _bar_id else None
             sections[sec_name] = ConcreteRectangularSection(
                 name=sec.name,
                 shape=sec.shape,
@@ -1088,8 +1205,9 @@ class SAP2000Parser:
                 cover=cover_val,
                 top_bars=n_bars,
                 bot_bars=n_bars,
-                top_bar_dia=bar_dia_val,
-                bot_bar_dia=bar_dia_val,
+                top_bar_dia=_bar_dia or bar_dia_val,
+                bot_bar_dia=_bar_dia or bar_dia_val,
+                rebar_material=_reinf.get('rebar_mat'),
             )
 
         # ── AREA SECTION PROPERTIES (shell sections not in frame table) ──
@@ -1106,6 +1224,7 @@ class SAP2000Parser:
                 material=mat_name,
                 A=0.0, I33=0.0, I22=0.0, J=0.0,
                 thickness=thickness,
+                rebar_material=area_rebar_mat.get(name),
             )
 
         return sections

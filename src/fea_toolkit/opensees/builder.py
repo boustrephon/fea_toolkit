@@ -513,10 +513,24 @@ def tcl_materials_and_sections(
                     f"uniaxialMaterial Concrete01 {concrete_mat_tag + 1} "
                     f"{-fcc:g} {-abs(epscc):g} {-0.2*fcc:g} {-0.02:g}"
                 )
-                Fy = (mat.Fy if mat.Fy and mat.Fy > 0
-                      else DEFAULT_FY_REBAR_PA * _sf)
-                E_mod = (mat.E_mod if mat.E_mod and mat.E_mod > 0
-                         else DEFAULT_E_S_PA * _sf)
+                # ── Steel rebar ──
+                # Resolve Fy/Es in priority order:
+                #   1) section's SAP2000 rebar_material (RebarMatL) lookup
+                #   2) framework rebar defaults (DEFAULT_FY_REBAR_PA / E_S)
+                #      scaled to model units
+                _rebar_mat = None
+                _rebar_mat_name = getattr(sec, 'rebar_material', None)
+                if _rebar_mat_name:
+                    _rebar_mat = model_data.materials.get(_rebar_mat_name)
+                if _rebar_mat is not None:
+                    Fy = (_rebar_mat.Fy if _rebar_mat.Fy and _rebar_mat.Fy > 0
+                          else DEFAULT_FY_REBAR_PA * _sf)
+                    E_mod = (_rebar_mat.E_mod
+                             if _rebar_mat.E_mod and _rebar_mat.E_mod > 0
+                             else DEFAULT_E_S_PA * _sf)
+                else:
+                    Fy = DEFAULT_FY_REBAR_PA * _sf
+                    E_mod = DEFAULT_E_S_PA * _sf
                 lines.append(
                     f"uniaxialMaterial Steel02 {concrete_mat_tag + 2} "
                     f"{Fy:g} {E_mod:g} {0.01:g} {18.5:g} {0.925:g} {0.15:g}"
