@@ -6,12 +6,19 @@ and creates the OpenSees domain objects.  It handles all analysis execution
 and result extraction — no topology mutations occur here.
 """
 
-from typing import Dict, Any, Optional, List, Tuple, Set, Union
+from typing import Dict, Any, Optional, List, Tuple, Set, Union, TYPE_CHECKING
 import copy
 import math
 import numpy as np
 
 import openseespy.opensees as ops
+
+if TYPE_CHECKING:
+    # pandas is not a required dependency — only imported at runtime inside
+    # check_load_equilibrium().  The TYPE_CHECKING guard lets Ruff resolve
+    # the "pd.DataFrame" return annotation statically without adding pandas
+    # to the core dependencies.
+    import pandas as pd
 
 from ..model.mesh_model import MeshModel
 from ..model.sap_data import (
@@ -2744,6 +2751,30 @@ class AnalysisBuilder:
 
         return node_mass
 
+    def _query_nodal_masses(self) -> Dict[int, float]:
+        """Query lumped translational masses from the active OpenSees domain.
+
+        Reads ``ops.nodeMass()`` directly so the returned dict is keyed by
+        numeric OpenSees node tag — the same key space used by
+        :meth:`extract_mode_shapes`.  This is the dict consumed by
+        :func:`~fea_toolkit.model.csm.pushover_to_adrs` via the
+        ``modal_results['nodal_masses']`` key; without it the ADRS
+        conversion degenerates to ``Gamma = M_eff = 1.0``.
+
+        Returns:
+            ``{node_tag: mass}`` for every node in the active domain.
+            Nodes with no applicable mass are included with ``0.0`` so
+            the ADRS conversion sees the full node set.
+        """
+        masses: Dict[int, float] = {}
+        for tag in ops.getNodeTags():
+            try:
+                m = ops.nodeMass(int(tag))
+                masses[int(tag)] = float(m[0]) if m else 0.0
+            except Exception:
+                masses[int(tag)] = 0.0
+        return masses
+
     def _mass_from_elements(self, mm, elements, assignments,
                              node_mass, g):
         """Add mass from element self-weight."""
@@ -3003,6 +3034,8 @@ class AnalysisBuilder:
             * ``'frequencies'`` — list of natural frequencies (Hz).
             * ``'modal_props'`` — the full ``ops.modalProperties()`` dict.
             * ``'num_modes'`` — number of converged modes.
+            * ``'nodal_masses'`` — dict of nodal masses ``{tag: (mx, my, mz)}``
+              in model units (tonnes for kN-m models).
         """
         if self.config.get('verbose'):
             print(f"Running modal analysis for {num_modes} modes...")
@@ -3128,6 +3161,7 @@ class AnalysisBuilder:
             'frequencies': frequencies,
             'modal_props': modal_props,
             'num_modes': n_modes,
+            'nodal_masses': self._query_nodal_masses(),
         }
 
         if print_results:
