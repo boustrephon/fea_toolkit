@@ -12,7 +12,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from fea_toolkit.model.sap_data import (
     SAPModelData, ShellSection, ConcreteRectangularSection,
 )
-from fea_toolkit.utils import DEFAULT_FY_STEEL_PA, DEFAULT_FC_PA
+from fea_toolkit.utils import (
+    DEFAULT_FY_STEEL_PA, DEFAULT_FC_PA,
+    length_to_si_factor, force_to_si_factor,
+)
 
 
 def check_model_connectivity(
@@ -409,16 +412,10 @@ def _get_conversion_factors(md: Any) -> tuple:
     """
     if hasattr(md, 'stress_factor') and hasattr(md, 'length_factor'):
         return md.stress_factor, md.length_factor
-    # Fallback: compute from units dict
-    units = getattr(md, 'units', {})
-    if not units:
-        units = {}
-    from ..model.sap_data import (
-        _length_factor_from_units,
-        _force_factor_from_units,
-    )
-    lf = _length_factor_from_units(units.get('L', 'm'))
-    ff = _force_factor_from_units(units.get('F', 'N'))
+    # Fallback: compute from units dict using the canonical utils factors.
+    units = getattr(md, 'units', {}) or {}
+    lf = length_to_si_factor(units)
+    ff = force_to_si_factor(units)
     sf = ff / (lf * lf) if lf != 0 else 1.0
     return sf, lf
 
