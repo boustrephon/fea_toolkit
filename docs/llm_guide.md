@@ -1,3 +1,10 @@
+---
+title: "LLM & AI Assistant Guide"
+description: "Canonical goal-to-code mapping, full public API surface by domain, and key technical constraints — structured for language model consumption."
+status: "complete"
+tags: [llm, ai, guide, api-reference, usage]
+category: [core-pipeline]
+---
 # LLM / AI Assistant Guide for fea_toolkit
 
 This document is structured for **language model consumption**. It provides
