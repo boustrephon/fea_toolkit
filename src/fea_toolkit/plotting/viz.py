@@ -391,7 +391,7 @@ def _add_hinge_color_legend(
     lut = pv.LookupTable()
     lut.n_values = n_colors
     lut.scalar_range = (0.0, 1.0)
-    colors = np.zeros((n_colors, 3), dtype=np.uint8)
+    colors = np.zeros((n_colors, 4), dtype=np.uint8)
     for i in range(n_colors):
         t = i / (n_colors - 1)
         if t < 0.5:
@@ -400,7 +400,7 @@ def _add_hinge_color_legend(
         else:
             s = (t - 0.5) * 2.0
             r, g, b = 1.0, 1.0 - s, 0.0
-        colors[i] = (int(r * 255), int(g * 255), int(b * 255))
+        colors[i] = (int(r * 255), int(g * 255), int(b * 255), 255)
     lut.values = colors
 
     try:
@@ -478,7 +478,7 @@ def _add_shell_color_legend(
     lut = pv.LookupTable()
     lut.n_values = n_colors
     lut.scalar_range = (0.0, 1.0)
-    colors = np.zeros((n_colors, 3), dtype=np.uint8)
+    colors = np.zeros((n_colors, 4), dtype=np.uint8)
     for i in range(n_colors):
         t = i / (n_colors - 1)
         if t < 0.7:
@@ -487,7 +487,7 @@ def _add_shell_color_legend(
         else:
             s = (t - 0.7) / 0.3
             r, g, b = 1.0, 1.0 - s, 0.0
-        colors[i] = (int(r * 255), int(g * 255), int(b * 255))
+        colors[i] = (int(r * 255), int(g * 255), int(b * 255), 255)
     lut.values = colors
 
     try:

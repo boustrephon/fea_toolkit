@@ -202,6 +202,11 @@ class TestColorLegendHelpers:
             _add_hinge_color_legend, _add_shell_color_legend,
         )
         plotter = pv.Plotter(notebook=True)
+        # PyVista 0.44+ requires a mapper (mesh with scalars) before
+        # add_scalar_bar() can be called — add a dummy mesh so the mapper exists.
+        dummy = pv.PolyData(np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]))
+        dummy["scalars"] = np.array([0.0, 1.0])
+        plotter.add_mesh(dummy)
         _add_hinge_color_legend(plotter)
         _add_shell_color_legend(plotter)
         plotter.close()
