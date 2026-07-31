@@ -11,7 +11,10 @@ import openseespy.opensees as ops
 
 import numpy as np
 
-from examples.sample_model import make_sample_model
+from examples.sample_model import (
+    make_sample_model, make_nonlinear_sample_model,
+    make_rc_frame_model,
+)
 
 
 # ============================================================================
@@ -20,6 +23,19 @@ from examples.sample_model import make_sample_model
 
 _AB_CONFIG = {
     'element_type': 'elasticBeamColumn',
+    'verbose': False,
+    'create_shells': False,
+}
+
+
+# ============================================================================
+# Constants for nonlinear / fiber-based analysis
+# ============================================================================
+
+_NL_CONFIG = {
+    'element_type': 'dispBeamColumn',
+    'create_fiber_sections': True,
+    'use_elastic_sections': False,
     'verbose': False,
     'create_shells': False,
 }
@@ -46,6 +62,65 @@ def sample_ab(sample_md):
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
     mesh_model = preprocess_model(sample_md, _AB_CONFIG)
+    b = AnalysisBuilder(mesh_model, _AB_CONFIG)
+    yield b
+    ops.wipe()
+
+
+@pytest.fixture
+def sample_nl_md():
+    """Built-in 10 m steel cantilever with an ISection (fiber-based).
+
+    ``ISection.to_fiber_patches()`` succeeds, so
+    :meth:`AnalysisBuilder.run_pushover_analysis` automatically rebuilds
+    the domain with ``dispBeamColumn`` + fiber sections and produces a
+    genuinely nonlinear (yielding) pushover curve.
+    """
+    return make_nonlinear_sample_model()
+
+
+@pytest.fixture
+def sample_nl_ab(sample_nl_md):
+    """AnalysisBuilder for the nonlinear ISection cantilever.
+
+    The initial domain is built with elastic sections (used for the
+    modal analysis); the pushover step rebuilds with fiber sections
+    internally via ``rebuild_with_fiber_sections()``.
+    """
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    mesh_model = preprocess_model(sample_nl_md, _AB_CONFIG)
+    b = AnalysisBuilder(mesh_model, _AB_CONFIG)
+    yield b
+    ops.wipe()
+
+
+@pytest.fixture
+def sample_rc_md():
+    """Built-in 2-storey RC moment frame with fiber-capable sections.
+
+    ``ConcreteRectangularSection`` (columns) and ``RectangularSection``
+    (beams) both override ``to_fiber_patches()``, so
+    :meth:`AnalysisBuilder.run_pushover_analysis` rebuilds the domain
+    with ``dispBeamColumn`` + fiber sections and produces a genuinely
+    nonlinear (yielding) pushover curve with meaningful ductility.
+    """
+    return make_rc_frame_model()
+
+
+@pytest.fixture
+def sample_rc_ab(sample_rc_md):
+    """AnalysisBuilder for the 2-storey RC moment frame.
+
+    The initial domain is built with elastic sections (used for the
+    modal analysis); the pushover step rebuilds with fiber sections
+    internally via ``rebuild_with_fiber_sections()``.
+    """
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    mesh_model = preprocess_model(sample_rc_md, _AB_CONFIG)
     b = AnalysisBuilder(mesh_model, _AB_CONFIG)
     yield b
     ops.wipe()
@@ -268,7 +343,7 @@ class TestModalAnalysisWorkflow:
     def test_modal_analysis_returns_keys(self, sample_ab):
         """Modal analysis returns periods, eigenvalues, and frequencies."""
         sample_ab.build_domain()
-        sample_ab.compute_seismic_masses(g=9.81)
+        sample_ab.compute_seismic_masses()
         modal = sample_ab.run_modal_analysis(num_modes=3)
         assert isinstance(modal, dict)
         assert 'periods' in modal
@@ -281,7 +356,7 @@ class TestModalAnalysisWorkflow:
     def test_modal_first_period_positive(self, sample_ab):
         """Fundamental period of a 10 m steel cantilever is in a reasonable range."""
         sample_ab.build_domain()
-        sample_ab.compute_seismic_masses(g=9.81)
+        sample_ab.compute_seismic_masses()
         modal = sample_ab.run_modal_analysis(num_modes=3)
         T1 = modal['periods'][0]
         assert 0.01 < T1 < 10.0, f"T1={T1} outside plausible range"
@@ -289,7 +364,7 @@ class TestModalAnalysisWorkflow:
     def test_extract_mode_shapes(self, sample_ab):
         """Mode shapes can be extracted after eigenvalue analysis."""
         sample_ab.build_domain()
-        sample_ab.compute_seismic_masses(g=9.81)
+        sample_ab.compute_seismic_masses()
         modal = sample_ab.run_modal_analysis(num_modes=2)
         shapes = sample_ab.extract_mode_shapes(num_modes=2)
         assert isinstance(shapes, dict)
@@ -308,7 +383,7 @@ class TestPushoverWorkflow:
     def test_pushover_uniform_returns_keys(self, sample_ab):
         """Uniform-mass-proportional pushover produces a capacity curve."""
         sample_ab.build_domain()
-        sample_ab.compute_seismic_masses(g=9.81)
+        sample_ab.compute_seismic_masses()
         results = sample_ab.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
             lateral_load_type='uniform',
@@ -330,7 +405,7 @@ class TestPushoverWorkflow:
     def test_pushover_triangular_returns_keys(self, sample_ab):
         """Triangular (ELF) pushover produces a valid capacity curve."""
         sample_ab.build_domain()
-        sample_ab.compute_seismic_masses(g=9.81)
+        sample_ab.compute_seismic_masses()
         results = sample_ab.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
             lateral_load_type='triangular',
@@ -388,7 +463,7 @@ class TestResponseSpectrumWorkflow:
     def test_rs_analysis_returns_dict(self, sample_ab, spectrum):
         """CQC response-spectrum analysis computes combined base shear."""
         sample_ab.build_domain()
-        sample_ab.compute_seismic_masses(g=9.81)
+        sample_ab.compute_seismic_masses()
         modal = sample_ab.run_modal_analysis(num_modes=3)
         periods, accels = spectrum
         results = sample_ab.run_response_spectrum_analysis(
@@ -407,7 +482,7 @@ class TestResponseSpectrumWorkflow:
     def test_element_rs_forces(self, sample_ab, spectrum):
         """Element-level RS forces are available after spectrum analysis."""
         sample_ab.build_domain()
-        sample_ab.compute_seismic_masses(g=9.81)
+        sample_ab.compute_seismic_masses()
         modal = sample_ab.run_modal_analysis(num_modes=3)
         periods, accels = spectrum
         sample_ab.run_response_spectrum_analysis(
@@ -511,7 +586,7 @@ class TestUnifiedNpzPipeline:
         mesh_model = preprocess_model(sample_md, _AB_CONFIG)
         b = AnalysisBuilder(mesh_model, _AB_CONFIG)
         b.build_domain()
-        b.compute_seismic_masses(g=9.81)
+        b.compute_seismic_masses()
         # Stash the original SAPModelData for NPZ writer functions
         b.sap_model_data = sample_md
         yield b
@@ -807,7 +882,7 @@ class TestCSMWorkflow:
     def test_pushover_to_adrs(self, sample_ab):
         """Pushover curve can be converted to ADRS format."""
         sample_ab.build_domain()
-        sample_ab.compute_seismic_masses(g=9.81)
+        sample_ab.compute_seismic_masses()
         modal = sample_ab.run_modal_analysis(num_modes=3)
         shapes = sample_ab.extract_mode_shapes(3)
         results = sample_ab.run_pushover_analysis(
@@ -833,23 +908,29 @@ class TestCSMWorkflow:
         assert adrs['Gamma'] > 1e-6
         assert adrs['M_eff'] > 1e-6
 
-    def test_compute_performance_point(self, sample_ab, spectrum):
-        """CSM performance point can be computed from pushover + spectrum."""
-        sample_ab.build_domain()
-        sample_ab.compute_seismic_masses(g=9.81)
-        modal = sample_ab.run_modal_analysis(num_modes=3)
-        shapes = sample_ab.extract_mode_shapes(3)
-        results = sample_ab.run_pushover_analysis(
+    def test_compute_performance_point(self, sample_rc_ab, spectrum):
+        """CSM performance point can be computed from a nonlinear pushover.
+
+        Uses the built-in 2-storey RC moment frame
+        (:func:`make_rc_frame_model`), so the pushover response
+        actually yields — giving a proper bilinear capacity curve and a
+        converged ATC-40 performance point with meaningful ductility.
+        """
+        sample_rc_ab.build_domain()
+        sample_rc_ab.compute_seismic_masses()
+        modal = sample_rc_ab.run_modal_analysis(num_modes=3)
+        shapes = sample_rc_ab.extract_mode_shapes(3)
+        results = sample_rc_ab.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
             lateral_load_type='uniform',
             lateral_direction='X',
-            control_node_tag=2,
-            max_disp=0.1,
-            num_steps=5,
+            control_node_tag=6,
+            max_disp=0.3,
+            num_steps=40,
             print_progress=False,
         )
         periods, accels = spectrum
-        pp = sample_ab.compute_performance_point(
+        pp = sample_rc_ab.compute_performance_point(
             results, modal, shapes,
             periods, accels,
             direction='X',
@@ -863,6 +944,8 @@ class TestCSMWorkflow:
         assert 'mu' in pp
         assert pp['S_dp'] > 1e-6
         assert pp['S_ap'] > 1e-6
+        # A yielding RC frame should report a non-trivial ductility
+        assert abs(pp['mu']) > 1.0
 
 
 # ============================================================================
@@ -1126,7 +1209,7 @@ class TestShellSubdivision:
         assert total_frames >= 4
 
         # Build should have completed — try static analysis
-        b.compute_seismic_masses(g=9.81)
+        b.compute_seismic_masses()
         results = b.run_static_analysis(
             pattern_scales={"DEAD": 1.0},
         )
@@ -1400,4 +1483,13 @@ class TestHdf5RoundTrip:
         # produce 6 dict entries.
         resolved = _resolve_mesh_data(data)
         assert len(resolved["nodes"]) == 6
+        # Verify dual-key contract: each node is addressable by both
+        # its SAP-ID string and its integer tag to the same entry.
+        for i in range(len(arrays["node_tag"])):
+            tag = int(arrays["node_tag"][i])
+            sid = str(arrays["node_sap_id"][i])
+            assert tag in resolved["nodes"], f"node tag {tag} not in resolved nodes"
+            assert sid in resolved["nodes"], f"node sap_id {sid} not in resolved nodes"
+            assert resolved["nodes"][sid] is resolved["nodes"][tag], \
+                f"entries for {sid} and {tag} are not the same object"
         assert len(resolved["frames"]) == 2
