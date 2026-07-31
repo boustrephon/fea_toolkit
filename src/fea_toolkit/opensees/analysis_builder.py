@@ -24,6 +24,8 @@ from ..model.tree_utils import collect_descendants
 from ..model.selection import Selection
 from ..utils import (
     g_from_units, cqc_combine,
+    stress_scale_factor,
+    DEFAULT_FY_REBAR_PA, DEFAULT_E_S_PA,
 )
 
 
@@ -126,6 +128,18 @@ class AnalysisBuilder:
             'simplify_distributed_loads': False,
             'constraint_method': 'spring',
             'hinge_model': 'fiber',         # Distributed plasticity by default
+            # ── RC rebar material (fiber sections) ──
+            # Config overrides in SI (Pa): user may override the yield
+            # strength / elastic modulus / hardening of the Steel02 rebar
+            # used in RC fiber sections.  None → use the section's
+            # ``rebar_material`` from the S2K model, else the framework
+            # rebar defaults (DEFAULT_FY_REBAR_PA / DEFAULT_E_S_PA).
+            'rebar_Fy_override': None,
+            'rebar_Es_override': None,
+            'rebar_b': 0.01,
+            'rebar_R0': 18.0,
+            'rebar_cR1': 0.925,
+            'rebar_cR2': 0.15,
             # ── Pushover recording (opt-in) ──
             'record_pushover_steps': False,
             'pushover_record_selection': None,
@@ -1287,10 +1301,42 @@ class AnalysisBuilder:
                     ops.uniaxialMaterial('Concrete01', mat_tag + 1,
                                          -Fc_core, -epsc_core,
                                          -0.2 * Fc_core, -0.02)
-                    # Steel rebar
-                    Fy = getattr(mat, 'Fy', 0.0) or 4.0e8
-                    Es = getattr(mat, 'E_mod', None) or E_mod
-                    ops.uniaxialMaterial('Steel02', mat_tag + 2, Fy, Es, 0.01, 18, 0.925, 0.15)
+                    # Steel rebar — resolve Fy/Es in priority order:
+                    #   1) config override (SI Pa, scaled to model units)
+                    #   2) section's SAP2000 rebar_material (RebarMatL) lookup
+                    #   3) framework rebar defaults (DEFAULT_FY_REBAR_PA / E_S)
+                    #      scaled to model units
+                    ssf = stress_scale_factor(self.mesh_model.units)
+                    Fy_rebar = self.config.get('rebar_Fy_override')
+                    Es_rebar = self.config.get('rebar_Es_override')
+                    if Fy_rebar is not None:
+                        Fy_rebar = Fy_rebar * ssf
+                    if Es_rebar is not None:
+                        Es_rebar = Es_rebar * ssf
+                    if Fy_rebar is None or Es_rebar is None:
+                        rebar_mat_name = getattr(sec, 'rebar_material', None)
+                        rebar_mat = (
+                            self.mesh_model.materials.get(rebar_mat_name)
+                            if rebar_mat_name else None
+                        )
+                        if rebar_mat is not None:
+                            rm_Fy = getattr(rebar_mat, 'Fy', 0.0) or 0.0
+                            rm_Es = getattr(rebar_mat, 'E_mod', 0.0) or 0.0
+                            if rm_Fy > 0:
+                                Fy_rebar = Fy_rebar if Fy_rebar is not None else rm_Fy
+                            if rm_Es > 0:
+                                Es_rebar = Es_rebar if Es_rebar is not None else rm_Es
+                    if not Fy_rebar:
+                        Fy_rebar = DEFAULT_FY_REBAR_PA * ssf
+                    if not Es_rebar:
+                        Es_rebar = DEFAULT_E_S_PA * ssf
+                    ops.uniaxialMaterial(
+                        'Steel02', mat_tag + 2, Fy_rebar, Es_rebar,
+                        float(self.config.get('rebar_b', 0.01)),
+                        float(self.config.get('rebar_R0', 18.0)),
+                        float(self.config.get('rebar_cR1', 0.925)),
+                        float(self.config.get('rebar_cR2', 0.15)),
+                    )
                 else:
                     Fy = getattr(mat, 'Fy', 0.0) or 2.5e8
                     ops.uniaxialMaterial('Steel01', mat_tag, Fy, E_mod, 0.01)
@@ -2633,22 +2679,21 @@ class AnalysisBuilder:
     # Mass
     # ═══════════════════════════════════════════════════════════════
 
-    def compute_seismic_masses(self, g: Optional[float] = None) -> Dict[str, float]:
+    def compute_seismic_masses(self) -> Dict[str, float]:
         """Compute lumped nodal masses from the model's MASS SOURCE entries.
+
+        Gravitational acceleration is derived from the model's units via
+        :func:`~fea_toolkit.utils.g_from_units` — the model unit system is
+        the single source of truth (never a hardcoded 9.81).
 
         All mass contributions are lumped to nodes and assigned via
         ``ops.mass(node, m, m, m, 0, 0, 0)``.
-
-        Args:
-            g: Gravitational acceleration.  ``None`` = auto-detect from
-                model units (SI default 9.80665 m/s²).
 
         Returns:
             Dictionary mapping node ID → total lumped mass (tonnes).
         """
         from ..utils import g_from_units
-        if g is None:
-            g = g_from_units(self.mesh_model.units)
+        g = g_from_units(self.mesh_model.units)
 
         mm = self.mesh_model
         elements = mm.frame_elements
@@ -2927,8 +2972,7 @@ class AnalysisBuilder:
 
     def run_modal_analysis(self, num_modes: int = 30,
                            print_results: bool = True,
-                           eigen_solver: str = "default",
-                           g: Optional[float] = None) -> Dict[str, Any]:
+                           eigen_solver: str = "default") -> Dict[str, Any]:
         """Run eigenvalue / modal analysis and return results.
 
         Requires that seismic masses have been assigned (call
@@ -2950,7 +2994,6 @@ class AnalysisBuilder:
                     Symmetric banded Lapack solver.
                 ``"ritz"``
                     Gravity pre-step then ARPACK.
-            g: Gravitational acceleration.  ``None`` = auto-detect.
 
         Returns:
             Dictionary with keys:
@@ -2965,8 +3008,7 @@ class AnalysisBuilder:
             print(f"Running modal analysis for {num_modes} modes...")
 
         from ..utils import g_from_units
-        if g is None:
-            g = g_from_units(self.mesh_model.units)
+        g = g_from_units(self.mesh_model.units)
 
         # ── Ensure seismic masses are present ────────────────────
         _has_mass = False
@@ -2979,9 +3021,7 @@ class AnalysisBuilder:
             except Exception:
                 pass
         if not _has_mass:
-            _stored_g = getattr(self, '_mass_g', None)
-            _active_g = g if g is not None else _stored_g
-            self.compute_seismic_masses(g=_active_g)
+            self.compute_seismic_masses()
 
         # ── Ritz / pre-load nudge ────────────────────────────────
         _needs_nudge = eigen_solver in ("genBandArpack", "ritz")
@@ -4272,7 +4312,12 @@ class AnalysisBuilder:
                         bs0 += float(rxn)
                     except Exception:
                         pass
-            base_shears[0] = bs0
+            # Sign convention: nodeReaction() returns the force the
+            # ground exerts on the structure (Newton's 3rd law pair of
+            # the applied lateral push).  Negate so base_shear records
+            # the structure's lateral resistance, which is positive
+            # when pushed in the positive DOF direction.
+            base_shears[0] = -bs0
         except Exception:
             pass
 
@@ -4321,7 +4366,11 @@ class AnalysisBuilder:
                             pass
             except Exception:
                 bs = 0.0
-            base_shears.append(bs)
+            # Same sign convention as step 0: nodeReaction() is the
+            # ground-on-structure force (Newton's 3rd law pair of the
+            # applied lateral push).  Negate so base_shear is the
+            # structure's lateral resistance (positive in push direction).
+            base_shears.append(-bs)
             steps.append(step)
 
             # ── Per-step element recording ──────────────────────
@@ -4355,6 +4404,7 @@ class AnalysisBuilder:
             'control_node': control_node_tag,
             'dof': dof,
             'lateral_load_type': lateral_load_type,
+            'units': self.mesh_model.units,
         }
         if record:
             result['step_results'] = step_results
@@ -4566,7 +4616,6 @@ class AnalysisBuilder:
         modal_results: Dict[str, Any],
         mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
         direction: str = 'X',
-        g: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Convert a pushover capacity curve to ADRS coordinates.
 
@@ -4577,7 +4626,6 @@ class AnalysisBuilder:
             modal_results: Output from :meth:`run_modal_analysis`.
             mode_shapes: Output from :meth:`extract_mode_shapes`.
             direction: Push direction (``'X'``, ``'Y'``, or ``'Z'``).
-            g: Gravitational acceleration (m/s²).
 
         Returns:
             Dict with ``'S_a'``, ``'S_d'``, ``'Gamma'``, ``'M_eff'``,
@@ -4589,7 +4637,6 @@ class AnalysisBuilder:
             modal_results=modal_results,
             mode_shapes=mode_shapes,
             direction=direction,
-            g=g,
         )
 
     def compute_performance_point(
@@ -4600,7 +4647,6 @@ class AnalysisBuilder:
         spectrum_periods: List[float],
         spectrum_accels: List[float],
         direction: str = 'X',
-        g: Optional[float] = None,
         damping_ratio: float = 0.05,
         max_iter: int = 50,
         tol: float = 0.01,
@@ -4616,7 +4662,6 @@ class AnalysisBuilder:
             spectrum_periods: Periods (s) defining the elastic demand spectrum.
             spectrum_accels: Spectral accelerations (m/s²).
             direction: Push direction.
-            g: Gravitational acceleration.
             damping_ratio: Elastic damping ratio (default 0.05).
             max_iter: Maximum iterations (default 50).
             tol: Convergence tolerance on S_d (default 0.01).
@@ -4634,7 +4679,6 @@ class AnalysisBuilder:
             spectrum_periods=spectrum_periods,
             spectrum_accels=spectrum_accels,
             direction=direction,
-            g=g,
             damping_ratio=damping_ratio,
             max_iter=max_iter,
             tol=tol,
