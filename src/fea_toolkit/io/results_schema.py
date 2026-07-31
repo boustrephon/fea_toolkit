@@ -196,26 +196,6 @@ def validate_npz(path: str) -> List[str]:
         at = data.get("analysis_types")
         if at is not None:
             dims["N_analysis"] = len(at)
-        # Pushover dimensions
-        for key in data.keys():
-            if key.endswith("/frame_sap_id") or "/frame_fx_i" in key:
-                arr = data.get(key)
-                if arr is not None:
-                    dims["N_recorded_frame"] = len(arr)
-                    break
-        for key in data.keys():
-            if key.endswith("/shell_sap_id") or "/shell_Nx" in key:
-                arr = data.get(key)
-                if arr is not None:
-                    dims["N_recorded_shell"] = len(arr)
-                    break
-        for key in data.keys():
-            if key.endswith("/step"):
-                arr = data.get(key)
-                if arr is not None:
-                    dims["N_step"] = len(arr)
-                    break
-
         def _check_shape(arr_name: str, arr, shape_desc: str, dtype_str: str):
             """Validate shape and dtype of a single array."""
             if arr is None:
@@ -307,17 +287,40 @@ def validate_npz(path: str) -> List[str]:
                         if len(parts) >= 2:
                             directions.add(parts[1])
                 for direction in sorted(directions):
+                    # ── Resolve N_step / N_recorded_* per direction ──
+                    step_arr = data.get(
+                        make_pushover_key(direction, "pushover/{direction}/step"))
+                    if step_arr is not None:
+                        dims["N_step"] = len(step_arr)
+                    frame_id_arr = data.get(
+                        make_pushover_key(direction, "pushover/{direction}/frame_sap_id"))
+                    if frame_id_arr is not None:
+                        dims["N_recorded_frame"] = len(frame_id_arr)
+                    shell_id_arr = data.get(
+                        make_pushover_key(direction, "pushover/{direction}/shell_sap_id"))
+                    if shell_id_arr is not None:
+                        dims["N_recorded_shell"] = len(shell_id_arr)
+
+                    # ── Required: global + node-disp arrays ──
                     for schema_set in (PUSHOVER_GLOBAL_ARRAYS,
-                                       PUSHOVER_FRAME_ARRAYS,
+                                       PUSHOVER_NODE_DISP_ARRAYS):
+                        for template, (shape_desc, dtype_str) in schema_set.items():
+                            key = make_pushover_key(direction, template)
+                            arr = data.get(key)
+                            if arr is None:
+                                messages.append(
+                                    f"Missing pushover array: {key}")
+                                continue
+                            _check_shape(key, arr, shape_desc, dtype_str)
+
+                    # ── Optional: frame + shell arrays ──
+                    for schema_set in (PUSHOVER_FRAME_ARRAYS,
                                        PUSHOVER_SHELL_ARRAYS):
                         for template, (shape_desc, dtype_str) in schema_set.items():
                             key = make_pushover_key(direction, template)
                             arr = data.get(key)
                             if arr is None:
-                                # Only flag missing arrays if we detect the schema
-                                # level is present (e.g. don't flag frame arrays
-                                # if no frames were recorded)
-                                continue
+                                continue  # not recorded for this model
                             _check_shape(key, arr, shape_desc, dtype_str)
 
     except Exception as exc:
