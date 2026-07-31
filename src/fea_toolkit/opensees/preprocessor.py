@@ -1006,6 +1006,15 @@ class Preprocessor:
                 # matches the config group_key ("shear_walls").
                 sel_dict = group_dict.get('selector', {})
                 for sap_sec_name in (sel_dict.get('sections') or []):
+                    if sap_sec_name in mesh_model.layered_shell_sections:
+                        warnings.warn(
+                            f"Shell layer group '{group_key}': SAP section name "
+                            f"'{sap_sec_name}' is already registered in "
+                            f"layered_shell_sections (from group "
+                            f"'{mesh_model.layered_shell_sections[sap_sec_name].name}'). "
+                            f"Skipping duplicate — the first layer stack will be used."
+                        )
+                        continue
                     mesh_model.layered_shell_sections[sap_sec_name] = LayeredShellSection(
                         name=sap_sec_name, layers=layers,
                     )
