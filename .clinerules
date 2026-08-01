@@ -369,9 +369,20 @@ never a project error.  Keep future tool calls clean:
    rather than re-reading files or diagnosing project state.
 6. **Prefer `sed -n 'A,Bp' <file>` / `grep` for narrow read-only probes** when a
    `read_file` has just failed on a corrupted `path`.
-7. **Tool-call brace discipline** — keep brace characters (`{`/`}`) out of
-   `command` parameters where possible; prefer short single-line `python -c`
-   edits with `pathlib.Path` over long multi-line heredocs (brace-heavy
-   commands intermittently corrupt the tool-call XML and fail with
-   "command parameter was empty"); re-issue an unchanged call once when it
-   fails with an empty-parameter error instead of re-wording.
+7. **Tool-call parameter robustness** — three documented failure modes
+   (see Cline issues #4116, #9920, PR #11305) cause "command/content
+   parameter was empty" errors:
+   a) **HTML entity escaping** — models may encode `<`/`>`/`&`/`"`
+      as HTML entities in shell commands; Cline now decodes these for
+      ``execute_command.command`` only (PR #11305), so keep HTML/XML
+      characters out of tool parameters where possible.
+   b) **Response truncation under context pressure** — long multi-line
+      commands (heredocs, multi-paragraph file contents) consume the
+      output token budget; if the closing tag never arrives the parser
+      reports an empty parameter.  Prefer short single-line ``python -c``
+      edits with ``pathlib.Path`` over long here-documents.
+   c) **XML tag leakage** — literal ``<tool_name>`` / ``</tool_name>``
+      strings inside a parameter value confuse XML boundary detection.
+   When an empty-parameter error occurs, re-issue the same call unchanged
+   once; if it persists, restructure the call to use shorter parameter
+   values rather than re-wording.
