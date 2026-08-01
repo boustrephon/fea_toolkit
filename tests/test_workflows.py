@@ -330,7 +330,9 @@ class TestStaticAnalysisWorkflow:
             f"applied {report['applied']} "
             f"(disc. {report['discrepancy']} > tol. {report['tolerance']})"
         )
-        assert abs(report["expected"] - 6280.0) < 1.0
+        # 10 m cantilever with real UB305×165×40 section (A = 0.00509434 m²,
+        # steel unit_weight 78500 N/m³): 0.00509434 × 78500 × 10 ≈ 3999.06 N.
+        assert abs(report["expected"] - 3999.0569) < 1.0
 
 
 # ============================================================================
@@ -916,10 +918,13 @@ class TestCSMWorkflow:
         actually yields — giving a proper bilinear capacity curve and a
         converged ATC-40 performance point with meaningful ductility.
 
-        The demand spectrum is scaled by 13.0 relative to the base fixture
-        so the elastic demand exceeds the frame's yield capacity
-        (S_ay ~ 16.1 m/s^2 in ADRS coordinates (S_a = V/M_eff)).  With the base 1.0×
-        spectrum the performance point sits below yield (mu = 1.0),
+        The demand spectrum is scaled by a factor derived from the
+        frame's own bilinear capacity: ``S_ay * MARGIN / max(accels)``.
+        This ensures the elastic demand plateau exceeds the frame's
+        yield acceleration by a fixed 20 % margin, while remaining
+        robust to model changes (the hard-coded 13.0 multiplier would
+        silently break if the frame's S_ay changed).  With the base
+        1.0× spectrum the performance point sits below yield (mu = 1.0),
         which would not exercise the inelastic branch of the CSM.
         """
         sample_rc_ab.build_domain()
@@ -936,8 +941,28 @@ class TestCSMWorkflow:
             print_progress=False,
         )
         periods, accels = spectrum
-        # Scale demand spectrum so the frame yields (see docstring).
-        accels = [a * 13.0 for a in accels]
+
+        # ── Derive the yield capacity (S_ay) from the pushover curve ──
+        # Convert the capacity curve to ADRS and bilinearize with the
+        # same composite method used inside the performance-point
+        # solver, so the scale factor tracks the actual frame capacity.
+        from fea_toolkit.model.csm import bilinearize_composite
+        adrs = sample_rc_ab.pushover_to_adrs(
+            results, modal, shapes, direction='X',
+        )
+        _S_dy, S_ay, _ = bilinearize_composite(
+            np.asarray(adrs['S_d'], dtype=float),
+            np.asarray(adrs['S_a'], dtype=float),
+        )
+        assert S_ay > 1e-6, \
+            f"Degenerate yield acceleration S_ay={S_ay:.3g} — " \
+            "the capacity curve did not bilinearize properly"
+
+        # Scale demand spectrum so the frame yields: the elastic
+        # plateau must exceed S_ay by a fixed 20 % margin.
+        MARGIN = 1.2
+        scale = (S_ay * MARGIN) / max(accels)
+        accels = [a * scale for a in accels]
         # Use CSM defaults (max_iter=50, tol=0.01) — do not loosen.
         pp = sample_rc_ab.compute_performance_point(
             results, modal, shapes,

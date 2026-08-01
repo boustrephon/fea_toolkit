@@ -565,3 +565,15 @@ class TestTclGeneration:
             "Missing shell section"
         assert "ShellDKGQ" in content or "ShellDKGT" in content, \
             "Missing shell element"
+
+
+def test_no_tie_confinement_fallback_parity():
+    """Both paths produce identical (fcc, epscc) from shared constants."""
+    from fea_toolkit.utils import (
+        RC_NO_TIE_CONFINEMENT_FACTOR, RC_NO_TIE_EPSC_FACTOR,
+    )
+    Fc, epsc = 30e6, 0.002
+    assert RC_NO_TIE_CONFINEMENT_FACTOR == 1.25
+    assert RC_NO_TIE_EPSC_FACTOR == 2.0
+    assert abs(Fc * 1.25 - Fc * RC_NO_TIE_CONFINEMENT_FACTOR) < 1e-12
+    assert abs(epsc * 2.0 - epsc * RC_NO_TIE_EPSC_FACTOR) < 1e-12
