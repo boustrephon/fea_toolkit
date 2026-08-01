@@ -497,13 +497,47 @@ def tcl_materials_and_sections(
                 if epsc > 0.01:
                     epsc = DEFAULT_EPS_C
 
-                # Confined strength: use eFc from SAP2000, else 1.3×Fc
-                fcc = mat.eFc if mat.eFc and mat.eFc > 0 else Fc * 1.3
-                epscc = (float(mat.ss_curve.s_cap)
-                         if mat.ss_curve is not None and mat.ss_curve.s_cap is not None
-                         else DEFAULT_EPS_CC)
+                # Confined strength: Mander confinement (when tie data is
+                # present on the section) → else eFc from SAP2000 (if any)
+                # → else conventional 1.3×Fc heuristic.
+                fcc = Fc * 1.3
+                epscc = DEFAULT_EPS_CC
+                ecu_cc = 0.02
+                fc_method = getattr(sec, 'fiber_confinement', None)
+                if callable(fc_method):
+                    tie_fy = getattr(sec, 'tie_fy', None) or 0.0
+                    if tie_fy <= 0:
+                        # Resolve tie_fy from the transverse rebar material
+                        # (RebarMatT) first, then the longitudinal rebar
+                        # material (RebarMatL) as a fallback.
+                        _tie_mat_name = (getattr(sec, 'tie_rebar_mat', None)
+                                         or getattr(sec, 'rebar_material', None))
+                        _tie_mat = (model_data.materials.get(_tie_mat_name)
+                                    if _tie_mat_name else None)
+                        if _tie_mat is not None:
+                            tie_fy = getattr(_tie_mat, 'Fy', 0.0) or 0.0
+                    try:
+                        _conf_val = fc_method(Fc, tie_fy)
+                        _conf_dict = (
+                            _conf_val if isinstance(_conf_val, dict) else None
+                        )
+                    except Exception:
+                        _conf_dict = None
+                    if _conf_dict is not None:
+                        fcc = _conf_dict.get('fcc', fcc)
+                        epscc = _conf_dict.get('ecc', epscc)
+                        ecu_cc = _conf_dict.get('ecu', ecu_cc)
+                else:
+                    if mat.eFc and mat.eFc > 0:
+                        fcc = mat.eFc
+                    _scc = (float(mat.ss_curve.s_cap)
+                            if mat.ss_curve is not None and mat.ss_curve.s_cap is not None
+                            else None)
+                    if _scc is not None and _scc <= 0.1:
+                        epscc = _scc
                 if epscc > 0.1:
                     epscc = DEFAULT_EPS_CC
+                ecu_cc = ecu_cc if ecu_cc <= 0.025 else 0.02
 
                 lines.append(
                     f"uniaxialMaterial Concrete01 {concrete_mat_tag} "
@@ -511,7 +545,7 @@ def tcl_materials_and_sections(
                 )
                 lines.append(
                     f"uniaxialMaterial Concrete01 {concrete_mat_tag + 1} "
-                    f"{-fcc:g} {-abs(epscc):g} {-0.2*fcc:g} {-0.02:g}"
+                    f"{-fcc:g} {-abs(epscc):g} {-0.2*fcc:g} {-ecu_cc:g}"
                 )
                 # ── Steel rebar ──
                 # Resolve Fy/Es in priority order:

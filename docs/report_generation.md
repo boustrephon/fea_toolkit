@@ -48,36 +48,33 @@ this to sensible defaults:
 | `modal` | `elasticBeamColumn` | Elastic (E, A, I) | Linear | None | Eigen (lapack) | `beam` (elastic) | ✅ OpenSeesPy |
 | `response_spectrum` | `elasticBeamColumn` | Elastic (E, A, I) | Linear | CQC (inherent) | Eigen + CQC | `beam` (elastic) | ✅ OpenSeesPy |
 | `pushover` (steel) | `nonlinearBeamColumn` | Fiber (`Steel01`) | PDelta | Rayleigh (2%) | NewtonLineSearch · 1e-6 · RCM · auto-fallback | `truss` + `Hysteretic` | ⚠️ OpenSeesPy (steel OK) |
-| `pushover` (RC) | `forceBeamColumn` | Fiber (`Concrete01`, `Steel02`) | PDelta | Rayleigh (2%) | Same | `beam` (elastic) | ❌ OpenSeesPy → **Tcl export** |
-| `nonlinear_dynamic` | `forceBeamColumn` | Fiber (any) | PDelta | Rayleigh (2%) | Newmark · HHT · RCM | `truss` + `Hysteretic` | ❌ OpenSeesPy → **Tcl export** |
+| `pushover` (RC) | `forceBeamColumn` | Fiber (`Concrete01`, `Steel02`) | PDelta | Rayleigh (2%) | Same | `beam` (elastic) | ✅ OpenSeesPy (direct) — Tcl export optional |
+| `nonlinear_dynamic` | `forceBeamColumn` | Fiber (any) | PDelta | Rayleigh (2%) | Newmark · HHT · RCM | `truss` + `Hysteretic` | ⚠️ OpenSeesPy (frames OK) — Tcl export optional |
 
 Individual overrides in the ``builder`` section take precedence over
 these defaults.
 
-> **Important: OpenSeesPy limitation for nonlinear RC analysis.**
-> Nonlinear RC analysis with fiber sections (``Concrete01``, ``Steel02``,
-> ``forceBeamColumn`` with ``Lobatto`` integration) is supported only
-> when using the **pinned OpenSeesPy build** bundled with the toolkit.
-> The stock ``pip install openseespy`` distribution does not include
-> these nonlinear material formulations.  Users must ensure the pinned
-> build is active in their environment.
+> **OpenSeesPy supports nonlinear RC analysis directly.**
+> Nonlinear RC analysis with fiber sections (``Concrete01`` cover +
+> confined core, ``Steel02`` rebar via ``forceBeamColumn`` /
+> ``dispBeamColumn``) runs in the stock ``pip install openseespy``
+> distribution — no pinned build is required.  RC walls/nonlinear shells
+> use ``ConcreteS`` + ``J2PlateFibre`` nD materials with ``ShellMITC4`` /
+> ``ShellNLDKGQ`` layered shells.
 >
-> Analysis requiring nonlinear materials — pushover with RC fiber
-> sections, nonlinear dynamic, or brace buckling — can be executed
-> either directly in Python (with the pinned build) or via **Tcl export**
-> to a standalone OpenSees executable.  The toolkit provides two export
-> paths:
+> The direct OpenSeesPy path is the default.  The toolkit also provides
+> two optional Tcl export paths for standalone OpenSees executables:
 >
 > - ``export_model_to_tcl()`` — translates ``SAPModelData`` directly to
 >   Tcl commands, accepting ``tcl_prefix`` and ``tcl_suffix`` to inject
 >   nonlinear material definitions, fiber sections, and custom analysis
 >   commands.
 > - ``RecordingOpenSees`` — records all ``ops.*`` calls during a Python
->   build, then saves them as a Tcl script.  For elastic builds only
->   (fiber sections cannot be created in Python then recorded, as the
->   pinned build is required for simulation).
+>   build, then saves them as a Tcl script (elastic builds; fiber
+>   sections can also be created directly in Python for the OpenSeesPy
+>   path).
 >
-> The practical pipeline for nonlinear analyses via Tcl is:
+> The optional Tcl pipeline for nonlinear analyses when required is:
 >
 > ```
 > SAPModelData  ──→  export_model_to_tcl()  ──→  model.tcl
@@ -672,13 +669,17 @@ This is the ASCE 41 recommended modal pattern.
 
 #### Concrete Confinement (Cover vs. Core)
 
-The fiber sections created for pushover analysis use a single material
-across the entire section.  RC columns require separation between
-**confined core** (Concrete01/02 with enhanced strength/ductility from
-transverse steel) and **unconfined cover** (Concrete01/02 with spalling
-at εc ≈ 0.004).  This is implemented via concentric ``patch``
-commands in the fiber section definition — the toolkit does not yet
-do this, which overestimates column ductility.
+RC fiber sections separate **confined core** (Concrete01 with enhanced
+strength/ductility from transverse steel) from **unconfined cover**
+(Concrete01 with spalling at εc ≈ 0.004).  This is implemented via
+concentric ``patch`` commands in ``to_fiber_patches()`` on
+:class:`~fea_toolkit.model.sap_data.ConcreteRectangularSection` /
+:class:`~fea_toolkit.model.sap_data.ConcreteCircularSection`, and the
+core strength/strain (``fcc`` / ``ecc`` / ``ecu``) is computed from the
+Mander et al. (1988) confinement model when transverse-reinforcement data
+(``TieSizeL`` / ``TieSpacingL`` / ``RebarMatT``) is present in the
+SAP2000 column/beam tables.  When tie data is absent, a conventional
+1.25–1.3 × f'c heuristic is used for backward compatibility.
 
 #### Equation Numbering and Solver Selection
 
@@ -802,7 +803,7 @@ dependency on other items.
 | **R1** | Generalised orchestrator `generate_report()` | 5 | Medium | Created ``fea_toolkit/report.generate_report(md, mesh_model, config, out_dir, **overrides) → dict``.  Extracts the generic pipeline orchestration from ``pumphouse_report_v2.run_all()``.  The project-specific script is now a thin wrapper. | ✅ Done |
 | **R2** | Tcl export from MeshModel | 8 | Medium | ``export_mesh_model_to_tcl()`` added to ``recorder.py`` — emits topology + fiber sections directly from ``MeshModel``, using pre-computed tag maps.  Supports elastic, steel fiber, and RC fiber sections. | ✅ Done |
 | **R3** | HPC job submission + result ingest | — | Large | Helper to submit Tcl to Xara (OpenSeesMP), wait for completion, parse output back into the unified NPZ/HDF5 schema.  Required for `admin_nonlinear.py`. | ❌ Pending |
-| **P0-dyn** | Tcl export for nonlinear RC | — | Medium | Nonlinear RC cannot run in OpenSeesPy. `export_model_to_tcl()` emits fiber sections + analysis commands. | ⚠️ Partial |
+| **P0-dyn** | Tcl export for nonlinear RC | — | Medium | Direct OpenSeesPy path supports RC fiber sections (`Concrete01`, `Steel02`, `forceBeamColumn`) — no Tcl required.  `export_model_to_tcl()` remains an optional alternative for standalone OpenSees executables. | ✅ Done |
 | **P1-dyn** | Nonlinear dynamic analysis | — | Large | Ground-motion input, Newmark/HHT integrator, time-history output. Requires P0-dyn. | ❌ Pending |
 | **P2-dyn** | Validation suite | 3.6 | Ongoing | Collect PEER 2017/03, PEER 2015/01, Scott & Fenves (2006), SAC Steel benchmarks as regression tests. | ❌ Pending |
 

@@ -499,6 +499,13 @@ class ConcreteRectangularSection(Section):
     """Reinforced concrete rectangular section.
 
     SAP2000 shape: ``Concrete Rectangular``
+
+    Confinement fields (``tie_diameter``, ``tie_spacing``, ``tie_fy``,
+    ``tie_config``) describe the transverse reinforcement and feed the
+    Mander et al. (1988) confinement model via
+    :meth:`fiber_confinement`.  When any required tie field is missing
+    (``None`` / ``<= 0``), no confinement modelling is applied and a
+    conventional heuristic core (1.25–1.3 × f'c) is used by the builders.
     """
     depth: float = 0.0       # D (local y direction)
     bf: float = 0.0          # B (local z direction)
@@ -512,6 +519,79 @@ class ConcreteRectangularSection(Section):
     # (``RebarMatL``).  None → framework uses rebar-specific SI defaults
     # (DEFAULT_FY_REBAR_PA / DEFAULT_E_S_PA) scaled to model units.
     rebar_material: Optional[str] = None
+
+    # ── Transverse (tie/hoop) reinforcement — Mander confinement ──
+    # All geometric values are in model units; ``tie_fy`` is in model
+    # stress units.  From "FRAME SECTION PROPERTIES 02 - CONCRETE COLUMN"
+    # (``TieSizeL`` / ``TieSpacingT`` / ``RebarMatT``) when available.
+    tie_diameter: Optional[float] = None   # tie bar diameter
+    tie_spacing: Optional[float] = None    # centre-to-centre spacing
+    tie_fy: Optional[float] = None         # tie yield strength
+    # SAP2000 transverse rebar material name (``RebarMatT``).  Used to
+    # resolve ``tie_fy`` when not provided directly.  None → framework
+    # falls back to the section's longitudinal ``rebar_material``.
+    tie_rebar_mat: Optional[str] = None
+    tie_config: str = "standard"           # "standard" | "cross_tie" | "spiral"
+    # Longitudinal bar counts for the Mander effective-confinement
+    # coefficient ``ke``.  ``long_count_x`` runs along the width (bf),
+    # ``long_count_y`` along the depth (D).  0 = derive from top/bot bars.
+    long_count_x: int = 0
+    long_count_y: int = 0
+
+    def fiber_confinement(
+        self, fc: float, tie_fy: float
+    ) -> Optional[Dict[str, float]]:
+        """Compute Mander confined-core properties for this section.
+
+        Uses the Mander et al. (1988) model implemented in
+        :mod:`fea_toolkit.model.confinement`.  All quantities use the
+        same (model) unit system — the Mander engine is unit-agnostic as
+        long as stress, length and strain inputs are internally
+        consistent.
+
+        Args:
+            fc: Unconfined concrete compressive strength (model units).
+            tie_fy: Transverse (tie) rebar yield strength (model units).
+
+        Returns:
+            Dict with keys ``fcc`` (confined strength), ``ecc`` (strain at
+            confined peak) and ``ecu`` (ultimate/spalling strain) when
+            complete tie data is present and geometrically valid, else
+            ``None`` to signal that the caller should fall back to a
+            conventional heuristic core.
+        """
+        if not (self.tie_diameter and self.tie_diameter > 0
+                and self.tie_spacing and self.tie_spacing > 0
+                and tie_fy and tie_fy > 0):
+            return None
+        # Core dimensions to the centreline of the perimeter hoop.
+        # Mander uses centreline-to-centreline of the tie, i.e. clear
+        # cover + one tie diameter.
+        core_bc = self.bf - 2.0 * self.cover - self.tie_diameter
+        core_dc = self.depth - 2.0 * self.cover - self.tie_diameter
+        if core_bc <= 0 or core_dc <= 0:
+            return None
+        from .confinement import ConfinementData, mander_confined
+        lcx = self.long_count_x or self.top_bars or 0
+        lcy = self.long_count_y or self.bot_bars or 0
+        try:
+            data = ConfinementData(
+                fc=fc,
+                tie_diameter=self.tie_diameter,
+                tie_spacing=self.tie_spacing,
+                tie_fy=tie_fy,
+                core_bc=core_bc,
+                core_dc=core_dc,
+                long_diameter=max(self.top_bar_dia or 0.0,
+                                  self.bot_bar_dia or 0.0),
+                long_count_x=max(lcx, 0),
+                long_count_y=max(lcy, 0),
+                tie_config=self.tie_config or "standard",
+            )
+            res = mander_confined(data)
+        except ValueError:
+            return None
+        return {"fcc": res.fcc, "ecc": res.ecc, "ecu": res.ecu}
 
     def to_fiber_patches(
         self, mat_tag: int, nfy: int = 12, nfz: int = 6
@@ -576,6 +656,13 @@ class ConcreteCircularSection(Section):
     """Reinforced concrete circular section.
 
     SAP2000 shape: ``Concrete Circular``
+
+    Confinement fields (``tie_diameter``, ``tie_spacing``, ``tie_fy``,
+    ``tie_config``) describe the spiral/circular hoop reinforcement and
+    feed the Mander et al. (1988) confinement model via
+    :meth:`fiber_confinement`.  When any required tie field is missing,
+    no confinement modelling is applied and a conventional heuristic
+    core (1.25–1.3 × f'c) is used by the builders.
     """
     diameter: float = 0.0
     cover: float = 0.0
@@ -584,6 +671,62 @@ class ConcreteCircularSection(Section):
     # SAP2000 longitudinal rebar material name (``RebarMatL``) — see
     # :class:`ConcreteRectangularSection`.
     rebar_material: Optional[str] = None
+
+    # ── Transverse (spiral/hoop) reinforcement — Mander confinement ──
+    # Geometric values in model units; ``tie_fy`` in model stress units.
+    tie_diameter: Optional[float] = None   # spiral/hoop bar diameter
+    tie_spacing: Optional[float] = None    # centre-to-centre pitch
+    tie_fy: Optional[float] = None         # transverse yield strength
+    # SAP2000 transverse rebar material name (``RebarMatT``).  Used to
+    # resolve ``tie_fy`` when not provided directly.  None → framework
+    # falls back to the section's longitudinal ``rebar_material``.
+    tie_rebar_mat: Optional[str] = None
+    tie_config: str = "spiral"             # "spiral" | "standard" | "cross_tie"
+
+    def fiber_confinement(
+        self, fc: float, tie_fy: float
+    ) -> Optional[Dict[str, float]]:
+        """Compute Mander confined-core properties for this section.
+
+        Uses the Mander et al. (1988) model implemented in
+        :mod:`fea_toolkit.model.confinement`.  For circular sections the
+        ``"spiral"`` configuration is used (perimeter spiral or circular
+        hoops).
+
+        Args:
+            fc: Unconfined concrete compressive strength (model units).
+            tie_fy: Transverse (spiral/hoop) rebar yield strength (model
+                units).
+
+        Returns:
+            Dict with keys ``fcc``, ``ecc`` and ``ecu`` when complete tie
+            data is present and geometrically valid, else ``None``.
+        """
+        if not (self.tie_diameter and self.tie_diameter > 0
+                and self.tie_spacing and self.tie_spacing > 0
+                and tie_fy and tie_fy > 0):
+            return None
+        core_d = self.diameter - 2.0 * self.cover - self.tie_diameter
+        if core_d <= 0:
+            return None
+        from .confinement import ConfinementData, mander_confined
+        try:
+            data = ConfinementData(
+                fc=fc,
+                tie_diameter=self.tie_diameter,
+                tie_spacing=self.tie_spacing,
+                tie_fy=tie_fy,
+                core_bc=core_d,
+                core_dc=core_d,
+                long_diameter=self.bar_dia or 0.0,
+                long_count_x=self.bar_count or 0,
+                long_count_y=self.bar_count or 0,
+                tie_config=self.tie_config or "spiral",
+            )
+            res = mander_confined(data)
+        except ValueError:
+            return None
+        return {"fcc": res.fcc, "ecc": res.ecc, "ecu": res.ecu}
 
     def to_fiber_patches(
         self, mat_tag: int, nfy: int = 12, nfz: int = 6
