@@ -383,7 +383,7 @@ def write_results_npz(
         [datetime.datetime.now().isoformat()], dtype=str)
 
     path = str(Path(path).resolve())
-    np.savez_compressed(path, allow_pickle=True, **arrays)
+    np.savez_compressed(path, **arrays)
     return path
 
 
@@ -483,18 +483,14 @@ def _collect_pushover(
                 direction, f"pushover/{{direction}}/{key}")] = arr
 
     # ── Node displacement arrays ──────────────────────────────
-    # Collect node tags in a consistent order (matching geometry order)
-    node_tags: List[int] = []
-    for sd in step_results:
-        nd = sd.get("node_displacements", {})
-        for tag in nd:
-            if tag not in node_tags:
-                node_tags.append(tag)
-    # Fall back to mesh_model node order if no displacement data in step results
-    if not node_tags:
-        node_tags = sorted(
-            nd.node_tag for nd in mesh_model.nodes.values()
-        )
+    # Use all geometry nodes so ``node_tag`` matches the ``N_node``
+    # dimension declared by PUSHOVER_NODE_DISP_ARRAYS (which mirrors the
+    # geometry ``N_node`` dim from ``_collect_geometry``).  Steps that did
+    # not record a particular node are filled with NaN below; never emit a
+    # subset of recorded node tags under the N_node schema.
+    node_tags = sorted(
+        nd.node_tag for nd in mesh_model.nodes.values()
+    )
     n_node = len(node_tags)
 
     if n_node > 0 and n_step > 0:
@@ -593,58 +589,48 @@ def write_pushover_results_npz(
         n_full = len(steps_full)
         if n_full > 0:
             # Align global arrays with recorded step_results.
-            # step_results only contains entries for converged steps (ok == 0),
-            # while the global arrays (step, control_disp, base_shear) contain
-            # entries for every iteration.  Subset the global arrays so they
-            # match the per-element force arrays in po_arrays.
-            recorded_steps = [sd.get("step", 0) for sd in step_results]
+            # step_results only contains entries for converged steps
+            # (ok == 0), while the global arrays (step, control_disp,
+            # base_shear) may contain entries for every iteration.  The
+            # per-element force arrays in po_arrays are indexed by the
+            # recorded steps, so the global arrays must always have
+            # exactly ``n_aligned`` entries — trim to the recorded-step
+            # ordering and NaN-pad any recorded step missing from the
+            # full arrays.
+            recorded_steps = [int(sd.get("step", 0)) for sd in step_results]
             n_aligned = len(recorded_steps)
-            if n_aligned > 0 and n_aligned <= n_full:
-                # Build an index map: pushover_results step -> index
-                # Steps are 0-based (step 0 is the initial gravity state)
-                # and then 1..num_steps for converged push iterations.
-                # The recorded steps from step_results contain step indices
-                # that match a subset of pushover_results steps.
-                # Use the step_results' step values to align.
-                step_to_idx_full = {int(s): i for i, s in enumerate(steps_full)}
+            step_to_idx_full = {int(s): i for i, s in enumerate(steps_full)}
+            full_disp = pushover_results.get("control_disp", [0.0] * n_full)
+            full_shear = pushover_results.get("base_shear", [0.0] * n_full)
 
-                # Filter global arrays to match recorded steps
-                aligned_steps = []
-                aligned_disp = []
-                aligned_shear = []
-                full_disp = pushover_results.get("control_disp", [0.0] * n_full)
-                full_shear = pushover_results.get("base_shear", [0.0] * n_full)
-                for rs in recorded_steps:
-                    idx = step_to_idx_full.get(rs)
-                    if idx is not None:
-                        aligned_steps.append(int(steps_full[idx]))
-                        aligned_disp.append(float(full_disp[idx]))
-                        aligned_shear.append(float(full_shear[idx]))
-                    # If a recorded step has no match in full arrays, skip
+            aligned_steps = []
+            aligned_disp = []
+            aligned_shear = []
+            for rs in recorded_steps:
+                idx = step_to_idx_full.get(rs)
+                if idx is not None:
+                    aligned_steps.append(int(steps_full[idx]))
+                    aligned_disp.append(float(full_disp[idx]))
+                    aligned_shear.append(float(full_shear[idx]))
+                else:
+                    # Recorded step missing from the full arrays — pad
+                    # with NaN to preserve the aligned length.
+                    aligned_steps.append(rs)
+                    aligned_disp.append(float("nan"))
+                    aligned_shear.append(float("nan"))
 
-                if aligned_steps:
-                    key = make_pushover_key(direction, "pushover/{direction}/step")
-                    if key not in po_arrays:
-                        po_arrays[key] = np.array(aligned_steps, dtype=int)
-                    key = make_pushover_key(direction, "pushover/{direction}/control_disp")
-                    if key not in po_arrays:
-                        po_arrays[key] = np.array(aligned_disp, dtype=float)
-                    key = make_pushover_key(direction, "pushover/{direction}/base_shear")
-                    if key not in po_arrays:
-                        po_arrays[key] = np.array(aligned_shear, dtype=float)
-            else:
-                # Fallback: write full arrays (unlikely, but handles edge case)
-                key = make_pushover_key(direction, "pushover/{direction}/step")
-                if key not in po_arrays:
-                    po_arrays[key] = np.array(steps_full, dtype=int)
-                key = make_pushover_key(direction, "pushover/{direction}/control_disp")
-                if key not in po_arrays:
-                    po_arrays[key] = np.array(
-                        pushover_results.get("control_disp", [0.0] * n_full), dtype=float)
-                key = make_pushover_key(direction, "pushover/{direction}/base_shear")
-                if key not in po_arrays:
-                    po_arrays[key] = np.array(
-                        pushover_results.get("base_shear", [0.0] * n_full), dtype=float)
+            # Write aligned arrays directly into po_arrays so the
+            # aligned values are actually used rather than being
+            # shadowed by the step array from ``_collect_pushover``.
+            po_arrays[make_pushover_key(
+                direction, "pushover/{direction}/step")] = np.array(
+                aligned_steps, dtype=int)
+            po_arrays[make_pushover_key(
+                direction, "pushover/{direction}/control_disp")] = np.array(
+                aligned_disp, dtype=float)
+            po_arrays[make_pushover_key(
+                direction, "pushover/{direction}/base_shear")] = np.array(
+                aligned_shear, dtype=float)
 
     arrays.update(po_arrays)
 
@@ -656,5 +642,5 @@ def write_pushover_results_npz(
         [datetime.datetime.now().isoformat()], dtype=str)
 
     path = str(Path(path).resolve())
-    np.savez_compressed(path, allow_pickle=True, **arrays)
+    np.savez_compressed(path, **arrays)
     return path
