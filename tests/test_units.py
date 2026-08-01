@@ -21,6 +21,8 @@ _spec = importlib.util.spec_from_file_location(
 utils = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(utils)
 
+from fea_toolkit.model.sap_data import SAPModelData, Material
+
 
 class TestLengthScaleFactor:
     """SI metre → model length unit.  factor × SI = model."""
@@ -381,6 +383,42 @@ class TestApplyMaterialDefaultsScaleFactors:
 
     Round-trip: model_value * to_si_factor(units) == SI_default.
     """
+
+    def test_apply_material_defaults_sets_si_defaults_in_model_units(self):
+        """apply_material_defaults() fills zero concrete properties with
+        SI defaults scaled to the model unit system."""
+        units = {"F": "kN", "L": "m", "T": "C"}
+        md = SAPModelData(
+            nodes={},
+            restraints={},
+            materials={
+                "C30": Material(
+                    name="C30",
+                    type="Concrete",
+                    E_mod=0.0,
+                    unit_weight=0.0,
+                    unit_mass=0.0,
+                ),
+            },
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            units=units,
+        )
+
+        md.apply_material_defaults()
+
+        mat = md.materials["C30"]
+        assert mat.E_mod * utils.stress_to_si_factor(units) \
+            == pytest.approx(utils.DEFAULT_E_C_PA, rel=1e-12)
+        assert mat.unit_weight * utils.weight_density_to_si_factor(units) \
+            == pytest.approx(utils.DEFAULT_RHO_WC_SI, rel=1e-12)
+        assert mat.unit_mass * utils.mass_density_to_si_factor(units) \
+            == pytest.approx(utils.DEFAULT_RHO_MC_SI, rel=1e-12)
 
     def test_concrete_defaults_roundtrip_non_si(self):
         """Concrete stress/weight/mass defaults round-trip in kN-m."""
