@@ -161,7 +161,7 @@ NZSEE C5 uses **0.05**; the value is configurable (see §5).
 | Model | εcc at peak | εcu (spalling) | Strength | Notes |
 |---|---|---|---|---|
 | **Mander 1988 (this toolkit)** | `0.002 * (1 + 5(f'cc/f'c - 1))` | `0.004 + 1.4 ρs f_yh εsu / f'cc`, capped at `ecu_max` (default 0.025) | Closed-form Eq. 29 | Full Mander with documented simplifications (min biaxial, capped εcu) |
-| **NZSEE C5 Modified Mander** | `0.002 * (1 + 5(f'cc/f'c - 1))` | `0.004 + 1.4 ρs f_yh (0.6 εsu) / f'cc`, capped at **0.05** | `f'cc = f'c (2.254 √(1+7.94 f'l/f'c) - 2 f'l/f'c - 1.254)` | Uses a reduced ultimate steel strain `0.6 εsu` for longitudinal bars (C5 Table C4.1) and a 0.75 factor on `ρst` where noted; εcu cap 0.05 for conventional ductile detailing |
+| **NZSEE C5 Modified Mander** | `0.002 * (1 + 5(f'cc/f'c - 1))` | `0.004 + 1.4 ρs f_yh (0.6 εsu) / f'cc`, capped at **0.05** | `f'cc = f'c (2.254 √(1+7.94 f'l/f'c) - 2 f'l/f'c - 1.254)` | Uses a reduced ultimate strain `0.6 εsu` for the transverse (tie) steel — paired with the tie yield strength `f_yh` and the transverse volumetric ratio `ρs` (C5 Table C4.1) — and a 0.75 factor on `ρst` where noted; εcu cap 0.05 for conventional ductile detailing |
 | **OpenSees Concrete07** | Stress-strain curve fitted to Mander for cyclic loading | Degradation beyond peak; no explicit spalling cap | Mander | Material model for fiber sections; εcu is implicitly bounded by the user-provided curve endpoints |
 | **TSC2018 Annex 5-A** | Based on Turkish code provisions | Code-prescribed ultimate strain limits | Code formula | Conservative; ductility limits from TSC 2018 |
 
