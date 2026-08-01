@@ -921,7 +921,7 @@ class SAP2000Parser:
 
     def _get_reinf_tables(self) -> Tuple[Dict[str, Dict[str, Any]],
                                           Dict[str, Dict[str, Any]],
-                                          Dict[str, str],
+                                          Dict[str, Optional[str]],
                                           Dict[str, float]]:
         """Parse SAP2000 reinforcement / rebar-size tables.
 
@@ -1037,7 +1037,7 @@ class SAP2000Parser:
             beam_reinf[name] = entry
 
         # ── AREA SECTION PROPERTY DESIGN PARAMETERS ──────────────────
-        area_rebar_mat: Dict[str, str] = {}
+        area_rebar_mat: Dict[str, Optional[str]] = {}
         for rec in self._raw_tables.get(
             'AREA SECTION PROPERTY DESIGN PARAMETERS', []
         ):
