@@ -55,6 +55,8 @@ from ..utils import (
     DEFAULT_FY_REBAR_PA,
     DEFAULT_FY_STEEL_PA,
     DEFAULT_E_S_PA,
+    RC_NO_TIE_CONFINEMENT_FACTOR,
+    RC_NO_TIE_EPSC_FACTOR,
     stress_scale_factor,
 )
 
@@ -726,18 +728,22 @@ def export_mesh_model_to_tcl(
                         # property convention in .clinerules §4.6).
                         _ssf = stress_scale_factor(mesh_model.units)
                         _fc_pa = DEFAULT_FC_PA * _ssf
+                        # No-tie-data confined-core heuristic — use the
+                        # shared RC_NO_TIE_* factors (same as builder.py
+                        # and AnalysisBuilder) so all Tcl/OpenSees paths
+                        # emit identical Concrete01 parameters.
                         if mat is not None:
                             Fc = mat.Fc if mat.Fc and mat.Fc > 0 else _fc_pa
                             epsc = 0.002
                             fcc = (mat.eFc
                                    if mat.eFc and mat.eFc > 0
-                                   else Fc * 1.3)
-                            epscc = 0.005
+                                   else Fc * RC_NO_TIE_CONFINEMENT_FACTOR)
+                            epscc = epsc * RC_NO_TIE_EPSC_FACTOR
                         else:
                             Fc = _fc_pa
                             epsc = 0.002
-                            fcc = 1.3 * _fc_pa
-                            epscc = 0.005
+                            fcc = RC_NO_TIE_CONFINEMENT_FACTOR * _fc_pa
+                            epscc = epsc * RC_NO_TIE_EPSC_FACTOR
 
                         # ── Rebar material (Steel02) ──────────────────
                         # Priority: config override (Pa, scaled to model

@@ -521,7 +521,10 @@ class TestManderConfinement:
         Ds = data.core_bc  # core diameter to centreline
         s_prime = s - db
         Al = math.pi * data.long_diameter**2 / 4.0
-        n_longs = data.long_count_x * data.long_count_y
+        # Ring count stored in both long_count_x/y for circular sections
+        # (see ConcreteCircularSection.fiber_confinement) — use either
+        # field directly, never the product.
+        n_longs = data.long_count_x
         Ac = math.pi * Ds**2 / 4.0
         rho_cc = (n_longs * Al) / Ac if Ac > 0 else 0.0
         expected_ke = ((1.0 - s_prime / (2.0 * Ds))**2 /
