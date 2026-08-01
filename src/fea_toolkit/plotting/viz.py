@@ -334,23 +334,37 @@ def _sample_cmap(points: List[float], cmap_name: str) -> List[Tuple[float, float
     Returns a list of ``(r, g, b)`` tuples in 0..1 for each *points* value
     (each clamped to ``[0, 1]``).  Falls back to a fixed (blue, yellow, red)
     palette if matplotlib is unavailable or the colormap name is unknown.
+
+    Uses ``matplotlib.colormaps.get_cmap`` (available since Matplotlib 3.5).
+    The deprecated ``matplotlib.cm.get_cmap`` legacy API (removed in
+    Matplotlib 3.11) is intentionally not used.
     """
     try:
-        # Modern API (Matplotlib 3.7+); get_cmap is deprecated.
         import matplotlib.colormaps as _mcmaps
         cmap = _mcmaps.get_cmap(cmap_name)
         return [tuple(float(c) for c in cmap(min(max(p, 0.0), 1.0))[:3])
                 for p in points]
-    except Exception:
-        try:
-            # Legacy fallback for older Matplotlib (< 3.5).
-            from matplotlib import cm as _mcm
-            cmap = _mcm.get_cmap(cmap_name)
-            return [tuple(float(c) for c in cmap(min(max(p, 0.0), 1.0))[:3])
-                    for p in points]
-        except Exception:
-            # Fallback (red-green colour-blind safe defaults preserved).
-            return [(0.3, 0.45, 0.69), (0.9, 0.8, 0.2), (0.9, 0.25, 0.2)]
+    except (ImportError, AttributeError, ValueError):
+        # Fallback (red-green colour-blind safe defaults preserved) —
+        # interpolate the fixed blue → yellow → red palette at the
+        # normalised positions so the fallback is position-dependent,
+        # matching the matplotlib sampling contract.
+        _fallback = [(0.3, 0.45, 0.69), (0.9, 0.8, 0.2), (0.9, 0.25, 0.2)]
+        out: List[Tuple[float, float, float]] = []
+        for p in points:
+            t = min(max(p, 0.0), 1.0)
+            if t < 0.5:
+                s = t * 2.0
+                c0, c1 = _fallback[0], _fallback[1]
+            else:
+                s = (t - 0.5) * 2.0
+                c0, c1 = _fallback[1], _fallback[2]
+            out.append((
+                c0[0] + (c1[0] - c0[0]) * s,
+                c0[1] + (c1[1] - c0[1]) * s,
+                c0[2] + (c1[2] - c0[2]) * s,
+            ))
+        return out
 
 
 def _rgb_to_hex(rgb: Tuple[float, float, float]) -> str:
@@ -389,7 +403,7 @@ def _ratio_to_color(ratio: float, max_r: float = 1.0,
     if max_r < 1e-12:
         try:
             return _sample_cmap([0.0], cmap_name)[0]
-        except Exception:
+        except (ImportError, AttributeError, ValueError, TypeError):
             return (0.3, 0.45, 0.69)  # default blue
     norm = min(ratio / max_r, 1.0) if max_r > 0 else 0.0
     samples = _sample_cmap([0.0, 0.5, 1.0], cmap_name)
@@ -2642,7 +2656,6 @@ def _collapse_to_parents(data, source):
         Updated mesh data dict with children collapsed into parents.
     """
     import numpy as np
-    from ..model.sap_data import SAPModelData
 
     nodes = data["nodes"]
 
