@@ -550,8 +550,12 @@ class TestPreprocessorNdMaterials:
             },
         }
         pre = Preprocessor(config)
-        with pytest.raises(ValueError, match="Invalid key.*nd_materials.*mat1"):
+        with pytest.raises(ValueError) as exc_info:
             pre.run(model_data)
+        msg = str(exc_info.value)
+        assert "Invalid key" in msg
+        assert "nd_materials" in msg
+        assert "mat1" in msg
 
     def test_stress_fields_scaled_in_mesh_model(self):
         """Stress-valued fields are scaled from SI Pa to model units.
