@@ -3660,6 +3660,79 @@ class TestConcreteCircularSectionFiberPatches:
 
 
 # ============================================================================
+# Mander confinement wiring tests
+# ============================================================================
+
+class TestManderConfinementWiring:
+    """Mander confinement wiring on concrete section dataclasses.
+
+    Verifies that:
+    * ``fiber_confinement()`` returns Mander results when tie data is
+      complete and geometrically valid.
+    * ``fiber_confinement()`` returns ``None`` (backward compatible) when
+      any required tie data is missing, so builders fall back to the
+      conventional 1.25–1.3 × f'c heuristic.
+    * The computed confined strength is strictly higher than f'c and the
+      confined strain higher than the unconfined 0.002.
+    """
+
+    def test_rectangular_confined(self):
+        from fea_toolkit.model.sap_data import ConcreteRectangularSection
+        sec = ConcreteRectangularSection(
+            name="CR400", shape="Concrete Rectangular", material="Concrete",
+            A=0.16, I33=0.00213, I22=0.00213, J=0,
+            depth=0.4, bf=0.4, cover=0.04,
+            top_bars=4, bot_bars=4,
+            top_bar_dia=0.02, bot_bar_dia=0.02,
+            tie_diameter=0.01, tie_spacing=0.1, tie_fy=420e6,
+        )
+        res = sec.fiber_confinement(fc=30e6, tie_fy=420e6)
+        assert res is not None
+        assert res["fcc"] > 30e6
+        assert res["ecc"] > 0.002
+        assert res["ecu"] > res["ecc"]
+
+    def test_rectangular_missing_tie_returns_none(self):
+        from fea_toolkit.model.sap_data import ConcreteRectangularSection
+        sec = ConcreteRectangularSection(
+            name="CR400", shape="Concrete Rectangular", material="Concrete",
+            A=0.16, I33=0.00213, I22=0.00213, J=0,
+            depth=0.4, bf=0.4, cover=0.04,
+            top_bars=4, bot_bars=4,
+            top_bar_dia=0.02, bot_bar_dia=0.02,
+        )
+        # No tie data → None (builders use the conventional heuristic)
+        assert sec.fiber_confinement(fc=30e6, tie_fy=420e6) is None
+        # Partial tie data (no spacing) → None
+        sec.tie_diameter = 0.01
+        assert sec.fiber_confinement(fc=30e6, tie_fy=420e6) is None
+
+    def test_circular_confined_spiral(self):
+        from fea_toolkit.model.sap_data import ConcreteCircularSection
+        sec = ConcreteCircularSection(
+            name="CC400", shape="Concrete Circular", material="Concrete",
+            A=0.1256, I33=0.00126, I22=0.00126, J=0,
+            diameter=0.4, cover=0.04,
+            bar_count=8, bar_dia=0.02,
+            tie_diameter=0.01, tie_spacing=0.08, tie_fy=420e6,
+        )
+        res = sec.fiber_confinement(fc=30e6, tie_fy=420e6)
+        assert res is not None
+        assert res["fcc"] > 30e6
+        assert res["ecc"] > 0.002
+
+    def test_circular_missing_tie_returns_none(self):
+        from fea_toolkit.model.sap_data import ConcreteCircularSection
+        sec = ConcreteCircularSection(
+            name="CC400", shape="Concrete Circular", material="Concrete",
+            A=0.1256, I33=0.00126, I22=0.00126, J=0,
+            diameter=0.4, cover=0.04,
+            bar_count=8, bar_dia=0.02,
+        )
+        assert sec.fiber_confinement(fc=30e6, tie_fy=420e6) is None
+
+
+# ============================================================================
 # Builder hinge type tests
 # ============================================================================
 

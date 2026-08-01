@@ -1,15 +1,15 @@
 # CSM Test Model Development Plan
 
-## Status: ⚠️ Partially implemented — operations 1 & 2 need rewriting
+## Status: ✅ Complete — all three operations implemented
 
 **Date**: 2026-07-31  
-**Last updated**: 2026-07-31  
+**Last updated**: 2026-08-01  
 **Context**: The existing CSM integration test `test_compute_performance_point` in
 `tests/test_workflows.py` originally used an ISection cantilever which gave degenerate ADRS
-conversion (`Gamma = 1.0`, `M_eff = 1.0`, `mu = 1.0`).  The test and model were partially
-migrated to an RC frame, but the model still uses SI units (N, m) instead of the planned
-kN-m system, and has a single material instead of the intended three-material setup.  This
-blocks meaningful nonlinear response — the plan below fixes this.
+conversion (`Gamma = 1.0`, `M_eff = 1.0`, `mu = 1.0`).  The test and model were migrated
+to an RC frame in kN-m units with a three-material setup (C30/Rebar/Q355) and self-weight +
+DEAD floor load, producing meaningful nonlinear response.  All three operations below are
+now complete.
 
 ---
 

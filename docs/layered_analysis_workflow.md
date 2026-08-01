@@ -507,18 +507,29 @@ That means the Pumphouse v3 report continues to be a reporting front end, but th
 
 The project supports two nonlinear workflows.
 
-### 14.1 OpenSeesPy nonlinear workflow (partial)
+### 14.1 OpenSeesPy nonlinear workflow (implemented)
 
-Nonlinear analyses in OpenSeesPy directly are supported for steel pushover
-(with fiber sections: ``Steel01``, ``nonlinearBeamColumn``, ``Lobatto``
-integration).  RC pushover and nonlinear dynamic analysis are executed via
-the Tcl/Xara path (see §14.2).
+Nonlinear analyses in OpenSeesPy directly (no Tcl/Xara required) are
+supported for both steel and RC pushover:
+
+- **Steel** — fiber sections (``Steel01``, ``nonlinearBeamColumn``,
+  ``Lobatto`` integration).
+- **RC frames** — fiber sections (``Concrete01`` cover + confined core,
+  ``Steel02`` rebar via ``forceBeamColumn`` / ``dispBeamColumn`` with
+  fiber patches from
+  :meth:`~fea_toolkit.model.sap_data.ConcreteRectangularSection.to_fiber_patches`).
+- **RC walls / nonlinear shells** — concrete + smeared rebar via
+  ``ConcreteS`` and ``J2PlateFibre`` nD materials with ``ShellMITC4`` /
+  ``ShellNLDKGQ`` layered shells (see
+  ``local/CLP_BSDG_Latest_Models/Admin_Building/admin_pushover_v4.py``
+  for a working end-to-end example in the stock ``pip`` OpenSeesPy).
+
+The stock ``pip install openseespy`` distribution **does** include these
+material and element formulations; no pinned build is required for the
+direct path.
 
 Remaining gaps for the direct OpenSeesPy path:
 
-- RC fiber sections (``Concrete01``, ``Steel02`` via ``forceBeamColumn``)
-  require a pinned OpenSeesPy build — the stock ``pip`` distribution does
-  not include these material formulations.
 - Brace buckling with nonlinear beam-column elements in OpenSeesPy.
 - A reusable ``AnalysisBuilder``-based nonlinear case entry point for the
   Pumphouse pushover path (the current v3 report script uses the Tcl path

@@ -1302,12 +1302,39 @@ class AnalysisBuilder:
                     # Unconfined cover concrete
                     ops.uniaxialMaterial('Concrete01', mat_tag,
                                          -Fc, -abs(epsc), -0.2 * Fc, -0.006)
-                    # Confined core concrete (enhanced strength/ductility)
+                    # Confined core concrete — use Mander confinement when
+                    # tie data is present on the section, else fall back
+                    # to the conventional 1.25 × f'c heuristic.
                     Fc_core = Fc * 1.25
                     epsc_core = abs(epsc) * 2.0
+                    ecu_core = 0.02
+                    tie_fy = getattr(sec, 'tie_fy', None) or 0.0
+                    if tie_fy <= 0:
+                        # Attempt to resolve tie_fy from the tie rebar
+                        # material (RebarMatT), then the longitudinal
+                        # rebar material (RebarMatL) as a fallback.
+                        tie_mat_name = (getattr(sec, 'tie_rebar_mat', None)
+                                        or getattr(sec, 'rebar_material', None))
+                        tie_mat = (
+                            self.mesh_model.materials.get(tie_mat_name)
+                            if tie_mat_name else None
+                        )
+                        if tie_mat is not None:
+                            tie_fy = getattr(tie_mat, 'Fy', 0.0) or 0.0
+                    confinement = None
+                    fc_method = getattr(sec, 'fiber_confinement', None)
+                    if callable(fc_method):
+                        try:
+                            confinement = fc_method(Fc, tie_fy)
+                        except Exception:
+                            confinement = None
+                    if confinement is not None:
+                        Fc_core = confinement.get('fcc', Fc_core)
+                        epsc_core = confinement.get('ecc', epsc_core)
+                        ecu_core = confinement.get('ecu', 0.02)
                     ops.uniaxialMaterial('Concrete01', mat_tag + 1,
                                          -Fc_core, -epsc_core,
-                                         -0.2 * Fc_core, -0.02)
+                                         -0.2 * Fc_core, -ecu_core)
                     # Steel rebar — resolve Fy/Es in priority order:
                     #   1) config override (SI Pa, scaled to model units)
                     #   2) section's SAP2000 rebar_material (RebarMatL) lookup
