@@ -574,7 +574,10 @@ class ConcreteRectangularSection(Section):
             return None
         from .confinement import ConfinementData, mander_confined
         lcx = self.long_count_x or self.top_bars or 0
-        lcy = self.long_count_y or self.bot_bars or 0
+        # Depth-direction bar count.  An unset long_count_y defaults to 2
+        # (a single pair of bars along the depth) rather than bot_bars,
+        # which would over-count the bars running along the width face.
+        lcy = self.long_count_y or 2
         try:
             data = ConfinementData(
                 fc=fc,

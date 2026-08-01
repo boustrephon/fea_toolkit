@@ -14,7 +14,7 @@ from fea_toolkit.model.sap_data import (
 )
 from fea_toolkit.utils import (
     DEFAULT_FY_STEEL_PA, DEFAULT_FC_PA,
-    length_to_si_factor, force_to_si_factor,
+    length_to_si_factor, stress_to_si_factor,
 )
 
 
@@ -414,9 +414,8 @@ def _get_conversion_factors(md: Any) -> tuple:
         return md.stress_factor, md.length_factor
     # Fallback: compute from units dict using the canonical utils factors.
     units = getattr(md, 'units', {}) or {}
+    sf = stress_to_si_factor(units)
     lf = length_to_si_factor(units)
-    ff = force_to_si_factor(units)
-    sf = ff / (lf * lf) if lf != 0 else 1.0
     return sf, lf
 
 
