@@ -151,6 +151,12 @@ class AnalysisBuilder:
             'record_pushover_steps': False,
             'pushover_record_selection': None,
             'pushover_record_shell_strains': False,
+            # ── Confined concrete spalling-strain cap ──
+            # Upper bound for the confined core ultimate (spalling)
+            # strain when using the Mander confinement model.  The
+            # Priestley (1996) formula can predict very large strains;
+            # NZSEE C5 uses 0.05.  Mirrors ``ConfinementData.ecu_max``.
+            'confined_ecu_max': 0.025,
         }
         # Merge solver defaults from the class constant
         defaults.update(self.PUSHOVER_SOLVER_DEFAULTS)
@@ -1332,6 +1338,9 @@ class AnalysisBuilder:
                         Fc_core = confinement.get('fcc', Fc_core)
                         epsc_core = confinement.get('ecc', epsc_core)
                         ecu_core = confinement.get('ecu', 0.02)
+                    # Cap the confined spalling strain (configurable).
+                    _ecu_max = float(self.config.get('confined_ecu_max', 0.025))
+                    ecu_core = min(ecu_core, _ecu_max)
                     ops.uniaxialMaterial('Concrete01', mat_tag + 1,
                                          -Fc_core, -epsc_core,
                                          -0.2 * Fc_core, -ecu_core)
