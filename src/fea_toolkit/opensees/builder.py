@@ -537,7 +537,9 @@ def tcl_materials_and_sections(
                         epscc = _scc
                 if epscc > 0.1:
                     epscc = DEFAULT_EPS_CC
-                ecu_cc = ecu_cc if ecu_cc <= 0.025 else 0.02
+                # Cap the confined spalling strain (configurable).
+                _ecu_max = float(config.get('confined_ecu_max', 0.025))
+                ecu_cc = min(ecu_cc, _ecu_max)
 
                 lines.append(
                     f"uniaxialMaterial Concrete01 {concrete_mat_tag} "

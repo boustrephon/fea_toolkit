@@ -369,3 +369,9 @@ never a project error.  Keep future tool calls clean:
    rather than re-reading files or diagnosing project state.
 6. **Prefer `sed -n 'A,Bp' <file>` / `grep` for narrow read-only probes** when a
    `read_file` has just failed on a corrupted `path`.
+7. **Tool-call brace discipline** — keep brace characters (`{`/`}`) out of
+   `command` parameters where possible; prefer short single-line `python -c`
+   edits with `pathlib.Path` over long multi-line heredocs (brace-heavy
+   commands intermittently corrupt the tool-call XML and fail with
+   "command parameter was empty"); re-issue an unchanged call once when it
+   fails with an empty-parameter error instead of re-wording.
