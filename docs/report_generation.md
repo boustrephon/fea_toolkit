@@ -671,7 +671,15 @@ This is the ASCE 41 recommended modal pattern.
 
 RC fiber sections separate **confined core** (Concrete01 with enhanced
 strength/ductility from transverse steel) from **unconfined cover**
-(Concrete01 with spalling at εc ≈ 0.004).  This is implemented via
+(Concrete01 with spalling at εc = 0.006).
+
+> **Prose-only value**: the `0.006` spalling strain is a prose-derived
+> approximation; all code paths already use `εc = 0.006` for unconfined
+> cover spalling (e.g. the `-0.006` in the cover `Concrete01` emitted by
+> `AnalysisBuilder._create_single_section()` and the Tcl export in
+> `opensees/builder.py`).
+
+This is implemented via
 concentric ``patch`` commands in ``to_fiber_patches()`` on
 :class:`~fea_toolkit.model.sap_data.ConcreteRectangularSection` /
 :class:`~fea_toolkit.model.sap_data.ConcreteCircularSection`, and the
@@ -679,7 +687,9 @@ core strength/strain (``fcc`` / ``ecc`` / ``ecu``) is computed from the
 Mander et al. (1988) confinement model when transverse-reinforcement data
 (``TieSizeL`` / ``TieSpacingL`` / ``RebarMatT``) is present in the
 SAP2000 column/beam tables.  When tie data is absent, a conventional
-1.25–1.3 × f'c heuristic is used for backward compatibility.
+1.25 × f'c heuristic (shared by both paths via
+`RC_NO_TIE_CONFINEMENT_FACTOR` / `RC_NO_TIE_EPSC_FACTOR` in `utils.py`)
+is used for backward compatibility.
 
 #### Equation Numbering and Solver Selection
 

@@ -201,7 +201,8 @@ pp = compute_performance_point(
     tol=0.01,
     bilinearize_method="composite",
 )
-print(f"S_dp = {pp['S_dp']:.3f} m, converged = {pp['converged']}")
+# S_dp is in model length units (e.g. m for a kN-m model, mm for a kN-mm model)
+print(f"S_dp = {pp['S_dp']:.3f} (model length units), converged = {pp['converged']}")
 ```
 
 **Status:** ✅ Fully implemented and wired into `report.py` via
