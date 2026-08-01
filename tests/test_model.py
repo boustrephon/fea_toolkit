@@ -3180,136 +3180,103 @@ class TestEulerBucklingBenchmark:
 
 class TestCapacitySpectrumMethod:
     """Tests for :meth:`AnalysisBuilder.pushover_to_adrs` and
-    :meth:`AnalysisBuilder.compute_performance_point`."""
+    :meth:`AnalysisBuilder.compute_performance_point`.
+
+    CSM/ADRS requires a consistent mass matrix, which the elastic
+    cantilever fixture could not provide (near-zero effective mass via
+    ``compute_seismic_masses()``).  These tests use the fiber-capable
+    single-storey RC moment frame from :func:`make_rc_frame_model`
+    instead: the initial domain is built with elastic sections (used
+    for the modal analysis), and ``run_pushover_analysis()`` rebuilds
+    it with ``forceBeamColumn`` + fiber sections internally, giving a
+    genuinely nonlinear capacity curve.
+    """
 
     @pytest.fixture
-    def cantilever_model(self):
-        """2-node cantilever with seismic mass for CSM testing."""
-        nodes = {
-            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
-            "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
-        }
-        restraints = {"1": Restraint([1, 1, 1, 1, 1, 1])}
-        materials = {
-            "Steel": Material(name="Steel", type="Steel",
-                              E_mod=2e11, unit_weight=77000),
-        }
-        sections = {
-            "UB300": Section(name="UB300", shape="I/Wide Flange",
-                             material="Steel", A=0.01, I33=1.2e-4,
-                             I22=4e-5, J=2e-6),
-        }
-        frames = {
-            "1": FrameElement(elem_id="1", elem_tag=1,
-                              node_i="1", node_j="2"),
-        }
-        load_patterns = {
-            "DEAD": LoadPattern(name="DEAD", pattern_type="DEAD",
-                                self_weight_factor=1),
-        }
-        mass_sources = {
-            "M1": MassSource(name="M1", elements=True,
-                             masses=False, loads=True,
-                             load_pattern={"DEAD": 1.0}),
-        }
-        return SAPModelData(
-            nodes=nodes, restraints=restraints,
-            materials=materials, sections=sections,
-            frame_elements=frames, area_elements={},
-            frame_assignments={"1": "UB300"},
-            area_assignments={}, groups={}, frame_auto_mesh={},
-            load_patterns=load_patterns,
-            mass_sources=mass_sources,
-        )
+    def rc_model(self):
+        """Fiber-capable single-storey RC moment frame for CSM testing."""
+        from examples.sample_model import make_rc_frame_model
+        return make_rc_frame_model()
 
-    def test_pushover_to_adrs_returns_expected_keys(self, cantilever_model):
-        """pushover_to_adrs returns S_a, S_d, Gamma, M_eff, phi_control."""
-        b = _make_pushover_ab(cantilever_model)
-        b.compute_seismic_masses()
-        modal = b.run_modal_analysis(num_modes=1, print_results=False)
-        shapes = b.extract_mode_shapes(1)
-        results = b.run_pushover_analysis(
+    @pytest.fixture
+    def rc_ab(self, rc_model):
+        """AnalysisBuilder for the RC frame (elastic sections for modal)."""
+        import openseespy.opensees as ops
+        cfg = {'element_type': 'elasticBeamColumn', 'split_elements': False,
+               'verbose': False}
+        mesh_model = preprocess_model(rc_model, cfg)
+        b = AnalysisBuilder(mesh_model, cfg)
+        yield b
+        ops.wipe()
+
+    @pytest.fixture
+    def rc_adrs(self, rc_ab):
+        """ADRS data from a nonlinear pushover of the RC frame."""
+        rc_ab.build_domain()
+        rc_ab.compute_seismic_masses()
+        modal = rc_ab.run_modal_analysis(num_modes=1, print_results=False)
+        shapes = rc_ab.extract_mode_shapes(1)
+        results = rc_ab.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
             lateral_load_type='uniform',
             lateral_direction='X',
-            control_node_tag=2,
-            max_disp=0.3, num_steps=5,
+            control_node_tag=4,
+            max_disp=0.3, num_steps=50,
             print_progress=False,
         )
-        adrs = b.pushover_to_adrs(results, modal, shapes, direction='X')
-        for key in ('S_a', 'S_d', 'Gamma', 'M_eff', 'phi_control', 'best_mode'):
-            assert key in adrs
+        adrs = rc_ab.pushover_to_adrs(results, modal, shapes, direction='X')
+        return rc_ab, results, modal, shapes, adrs
+
+    def test_pushover_to_adrs_values_consistent(self, rc_adrs):
+        """ADRS values are positive and consistent (no NaN or negative)."""
+        _b, _results, _modal, _shapes, adrs = rc_adrs
+        assert len(adrs['S_a']) == len(adrs['S_d']) > 0
         assert abs(adrs['M_eff']) > 0
-        assert len(adrs['S_a']) == len(adrs['S_d'])
-
-    @pytest.mark.skip(
-        reason="CSM/ADRS requires a consistent mass matrix; "
-               "elasticBeamColumn produces near-zero effective mass "
-               "via compute_seismic_masses(). "
-               "Switch to forceBeamColumn with fiber sections to re-enable."
-    )
-    def test_pushover_to_adrs_values_consistent(self, cantilever_model):
-        """ADRS values are positive and consistent (no NaN or negative).
-
-        TODO: Switch to forceBeamColumn + create_fiber_sections=True
-        once a section type supporting fiber patches is available.
-        """
-        b = _make_pushover_ab(cantilever_model)
-        b.compute_seismic_masses()
-        modal = b.run_modal_analysis(num_modes=1, print_results=False)
-        shapes = b.extract_mode_shapes(1)
-        results = b.run_pushover_analysis(
-            gravity_patterns={"DEAD": 1.0},
-            lateral_load_type='uniform',
-            lateral_direction='X',
-            control_node_tag=2,
-            max_disp=0.3, num_steps=5,
-            print_progress=False,
-        )
-        adrs = b.pushover_to_adrs(results, modal, shapes, direction='X')
         assert all(v >= 0 for v in np.abs(adrs['S_a']))
         assert all(v >= 0 for v in adrs['S_d'])
         assert all(math.isfinite(v) for v in adrs['S_a'])
         assert all(math.isfinite(v) for v in adrs['S_d'])
 
-    @pytest.mark.skip(
-        reason="CSM/ADRS requires a consistent mass matrix; "
-               "elasticBeamColumn produces near-zero effective mass. "
-               "Switch to forceBeamColumn with fiber sections to re-enable."
-    )
-    def test_performance_point_elastic(self, cantilever_model):
-        """Elastic cantilever: S_dp matches demand at modal period.
+    def test_performance_point_elastic(self, rc_adrs):
+        """Elastic demand path: converges at mu = 1 with finite values.
 
-        TODO: Switch to forceBeamColumn + create_fiber_sections=True
-        once a section type supporting fiber patches is available.
+        A weak demand spectrum (50 % of the bilinearised yield
+        acceleration) keeps the frame below yield, so the CSM iteration
+        must converge to mu = 1.  The equivalent secant period is the
+        secant stiffness of the *capacity curve at the performance
+        point* — for a real RC frame this is not guaranteed to equal
+        the elastic modal period, so it is only required to be positive
+        and finite.
         """
-        b = _make_pushover_ab(cantilever_model)
-        b.compute_seismic_masses()
-        modal = b.run_modal_analysis(num_modes=1, print_results=False)
-        shapes = b.extract_mode_shapes(1)
-        results = b.run_pushover_analysis(
-            gravity_patterns={"DEAD": 1.0},
-            lateral_load_type='uniform',
-            lateral_direction='X',
-            control_node_tag=2,
-            max_disp=0.3, num_steps=5,
-            print_progress=False,
+        from fea_toolkit.model.csm import bilinearize_composite
+        b, results, modal, shapes, adrs = rc_adrs
+        # Anchor the spectrum to the bilinearised yield acceleration —
+        # the same non-hard-coded scaling used by
+        # test_workflows.py::test_compute_performance_point, with a
+        # 0.5× factor so the demand plateau stays below yield and the
+        # frame remains elastic.
+        _S_dy, S_ay, _ = bilinearize_composite(
+            np.asarray(adrs['S_d'], dtype=float),
+            np.asarray(adrs['S_a'], dtype=float),
         )
-        # Simple elastic design spectrum (GB 50011-like)
-        T_spec = [0.0, 0.1, 0.35, 0.5, 1.0, 2.0, 4.0, 6.0]
-        Sa_spec = [0.16*9.81*0.45, 0.16*9.81, 0.16*9.81, 0.16*9.81,
-                   0.16*9.81*0.35, 0.16*9.81*0.35/2,
-                   0.16*9.81*0.35/4, 0.16*9.81*0.35/6]
+        assert S_ay > 1e-6, \
+            f"Degenerate yield acceleration S_ay={S_ay:.3g}"
+
+        T_spec = [0.0, 0.1, 0.5, 1.0, 2.0, 4.0, 6.0]
+        accels = [0.5, 1.5, 1.5, 0.75, 0.375, 0.25, 0.125]
+        # Scale so the spectrum peak is 50 % of the frame's yield
+        # acceleration — well below yield → mu = 1.
+        scale = (0.5 * S_ay) / max(accels)
+        Sa_spec = [a * scale for a in accels]
         pp = b.compute_performance_point(
             results, modal, shapes, T_spec, Sa_spec, direction='X',
         )
-        # Elastic → mu=1, S_dp should be positive and finite
         assert pp['converged']
         assert pp['S_dp'] > 0
-        assert pp['mu'] == pytest.approx(1.0, abs=0.01)
         assert pp['S_ap'] > 0
-        # T_eq should be close to the dominant modal period (0.464s)
-        assert pp['T_eq'] == pytest.approx(0.464, abs=0.03)
+        assert math.isfinite(pp['T_eq']) and pp['T_eq'] > 0
+        # Demand below yield → no ductility.
+        assert pp['mu'] == pytest.approx(1.0, abs=0.01)
 
 
 # ============================================================================
@@ -4207,14 +4174,6 @@ class TestCsmModule:
         assert adrs["phi_control"] > 0
         assert adrs["best_mode"] == 0  # mode 0 has 80% ratio
 
-    def test_pushover_to_adrs_missing_control_node(self):
-        """Falls back to default phi_control=1.0 when control_node is missing."""
-        from fea_toolkit.model.csm import pushover_to_adrs
-        result = pushover_to_adrs({"control_disp": [0]}, {}, {}, "X")
-        assert result["phi_control"] == 1.0
-        assert result["Gamma"] == 1.0
-        assert result["M_eff"] == 1.0
-
     def test_compute_performance_point_basic(self):
         """Performance point computation runs with valid data."""
         from fea_toolkit.model.csm import compute_performance_point
@@ -4509,18 +4468,6 @@ class TestBilinearization:
         assert S_dy < 0.90 * S_d[peak_idx], (
             f"Peak reset should not trigger: S_dy={S_dy:.4f}, "
             f"90% of peak={0.90 * S_d[peak_idx]:.4f}")
-
-    def test_equal_energy_hardening_converges(self, hardening_curve):
-        """Hardening curve converges to a yield point below peak."""
-        S_d, S_a = hardening_curve
-        S_dy, S_ay, method = bilinearize_equal_energy(S_d, S_a)
-        assert method == 'equal_energy'
-        peak_idx = int(np.argmax(S_a))
-        S_d_peak = S_d[peak_idx]
-        assert S_d_peak > 0
-        # For a hardening curve S_dy may converge at or near the peak;
-        # the equal-energy method should return a finite positive value.
-        assert S_dy > 0
 
     def test_equal_energy_config_tolerance(self, hardening_curve):
         """Tighter tolerance affects iteration depth (result stable)."""

@@ -1,7 +1,7 @@
 """Flexible selection/filter criteria for SAP2000 model elements."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from .mesh_model import MeshModel
@@ -134,6 +134,15 @@ class Selection:
     elevation_range: Optional[Tuple[float, float]] = None
     story: Optional[List[str]] = None
 
+    def __post_init__(self) -> None:
+        """Validate invariants after construction."""
+        if (self.elevation_range is not None
+                and self.elevation_range[0] > self.elevation_range[1]):
+            raise ValueError(
+                f"Invalid elevation_range {self.elevation_range}: "
+                f"lower bound must not exceed upper bound"
+            )
+
     # ── helpers ──────────────────────────────────────────────────────────────
 
     def _match_element_type(self, etype: str) -> bool:
@@ -149,8 +158,15 @@ class Selection:
         return sec_name in self.sections
 
     def _match_material(
-        self, model: "SAPModelData", sec_name: Optional[str]
+        self,
+        model: Union["SAPModelData", "MeshModel"],
+        sec_name: Optional[str],
     ) -> bool:
+        """Check the material criterion against either model type.
+
+        Both :class:`SAPModelData` and :class:`MeshModel` expose the same
+        ``sections`` mapping, so the same lookup serves both.
+        """
         if self.materials is None:
             return True
         if sec_name is None:
@@ -161,8 +177,16 @@ class Selection:
         return sec.material in self.materials
 
     def _match_groups(
-        self, model: "SAPModelData", etype: str, eid: str
+        self,
+        model: Union["SAPModelData", "MeshModel"],
+        etype: str,
+        eid: str,
     ) -> bool:
+        """Check the group membership criterion against either model type.
+
+        Both :class:`SAPModelData` and :class:`MeshModel` expose the same
+        ``groups`` mapping, so the same lookup serves both.
+        """
         if self.groups is None:
             return True
         # Groups store references as "Frame:123", "Area:456", "Joint:1"
@@ -180,7 +204,20 @@ class Selection:
             return True
         return eid in self.element_ids
 
-    def _frame_matches(self, model: "SAPModelData", eid: str) -> bool:
+    def _frame_matches(
+        self,
+        model: Union["SAPModelData", "MeshModel"],
+        eid: str,
+        story_elevations: Optional[Dict[str, float]] = None,
+        story_z_tolerance: float = 0.5,
+    ) -> bool:
+        """Check all selection criteria against either model type.
+
+        When ``story_elevations`` is supplied (e.g. from
+        :func:`~fea_toolkit.model.stories.identify_stories`), the
+        :attr:`elevation_range` and :attr:`story` filters are also applied
+        using the frame's mid-height Z.
+        """
         if not self._match_element_type("Frame"):
             return False
         if not self._match_id(eid):
@@ -192,9 +229,33 @@ class Selection:
             return False
         if not self._match_groups(model, "Frame", eid):
             return False
+        # Elevation and story filters (only if either is set)
+        if self.elevation_range is not None or self.story is not None:
+            z_mid = self._get_frame_z_mid(model, eid)
+            if z_mid is None:
+                return False
+            if not self._match_elevation(z_mid):
+                return False
+            if self.story is not None and story_elevations is None:
+                return False
+            if not self._match_story(z_mid, story_elevations, story_z_tolerance):
+                return False
         return True
 
-    def _area_matches(self, model: "SAPModelData", eid: str) -> bool:
+    def _area_matches(
+        self,
+        model: Union["SAPModelData", "MeshModel"],
+        eid: str,
+        story_elevations: Optional[Dict[str, float]] = None,
+        story_z_tolerance: float = 0.5,
+    ) -> bool:
+        """Check all selection criteria against either model type.
+
+        When ``story_elevations`` is supplied (e.g. from
+        :func:`~fea_toolkit.model.stories.identify_stories`), the
+        :attr:`elevation_range` and :attr:`story` filters are also applied
+        using the area's centroid Z.
+        """
         if not self._match_element_type("Area"):
             return False
         if not self._match_id(eid):
@@ -206,6 +267,17 @@ class Selection:
             return False
         if not self._match_groups(model, "Area", eid):
             return False
+        # Elevation and story filters (only if either is set)
+        if self.elevation_range is not None or self.story is not None:
+            z_mid = self._get_area_z_mid(model, eid)
+            if z_mid is None:
+                return False
+            if not self._match_elevation(z_mid):
+                return False
+            if self.story is not None and story_elevations is None:
+                return False
+            if not self._match_story(z_mid, story_elevations, story_z_tolerance):
+                return False
         return True
 
     def _node_matches(self, model: "SAPModelData", eid: str) -> bool:
@@ -524,7 +596,7 @@ class Selection:
         for eid, fe in mesh_model.frame_elements.items():
             if getattr(fe, 'inactive', False):
                 continue
-            if self._frame_matches_mesh(
+            if self._frame_matches(
                 mesh_model, eid, story_elevations, story_z_tolerance,
             ):
                 frame_ids.add(eid)
@@ -532,7 +604,7 @@ class Selection:
         for aid, ae in mesh_model.area_elements.items():
             if getattr(ae, 'inactive', False):
                 continue
-            if self._area_matches_mesh(
+            if self._area_matches(
                 mesh_model, aid, story_elevations, story_z_tolerance,
             ):
                 area_ids.add(aid)
@@ -557,9 +629,8 @@ class Selection:
         """Check if a Z coordinate matches any named storey."""
         if self.story is None:
             return True
-        # story_elevations is guaranteed non-None when self.story is set
-        # (enforced by resolve_to_mesh_sets).
-        assert story_elevations is not None
+        if story_elevations is None:
+            return False  # no elevation data to match against — exclude
         for story_name in self.story:
             elev = story_elevations.get(story_name)
             if elev is None:
@@ -570,132 +641,34 @@ class Selection:
 
     @staticmethod
     def _get_frame_z_mid(
-        mesh_model: "MeshModel", eid: str
+        model: Union["SAPModelData", "MeshModel"], eid: str
     ) -> Optional[float]:
         """Return the mid-height Z of a frame element, or None."""
-        fe = mesh_model.frame_elements.get(eid)
+        fe = model.frame_elements.get(eid)
         if fe is None:
             return None
-        node_i = mesh_model.nodes.get(fe.node_i)
-        node_j = mesh_model.nodes.get(fe.node_j)
+        node_i = model.nodes.get(fe.node_i)
+        node_j = model.nodes.get(fe.node_j)
         if node_i is None or node_j is None:
             return None
         return (node_i.z + node_j.z) / 2.0
 
     @staticmethod
     def _get_area_z_mid(
-        mesh_model: "MeshModel", aid: str
+        model: Union["SAPModelData", "MeshModel"], aid: str
     ) -> Optional[float]:
         """Return the centroid Z of an area element, or None."""
-        ae = mesh_model.area_elements.get(aid)
+        ae = model.area_elements.get(aid)
         if ae is None:
             return None
         z_vals = []
         for nid in ae.node_ids:
-            nd = mesh_model.nodes.get(nid)
+            nd = model.nodes.get(nid)
             if nd is not None:
                 z_vals.append(nd.z)
         if not z_vals:
             return None
         return sum(z_vals) / len(z_vals)
-
-    def _match_material_mesh(
-        self, mesh_model: "MeshModel", sec_name: Optional[str]
-    ) -> bool:
-        """Check material criterion against a MeshModel."""
-        if self.materials is None:
-            return True
-        if sec_name is None:
-            return False
-        sec = mesh_model.sections.get(sec_name)
-        if sec is None:
-            return False
-        return sec.material in self.materials
-
-    def _match_groups_mesh(
-        self, mesh_model: "MeshModel", etype: str, eid: str
-    ) -> bool:
-        """Check group membership criterion against a MeshModel."""
-        if self.groups is None:
-            return True
-        prefix = etype + ":"
-        for gname in self.groups:
-            grp = mesh_model.groups.get(gname)
-            if grp is None:
-                continue
-            if f"{prefix}{eid}" in grp.objects:
-                return True
-        return False
-
-    def _frame_matches_mesh(
-        self,
-        mesh_model: "MeshModel",
-        eid: str,
-        story_elevations: Optional[Dict[str, float]],
-        story_z_tolerance: float,
-    ) -> bool:
-        """Check all selection criteria against a MeshModel for a frame.
-
-        Logic follows the same AND-across / OR-within pattern as
-        :meth:`_frame_matches`, but reads from a ``MeshModel`` and adds
-        :attr:`elevation_range` and :attr:`story` support.
-        """
-        if not self._match_element_type("Frame"):
-            return False
-        if not self._match_id(eid):
-            return False
-        sec_name = mesh_model.frame_assignments.get(eid)
-        if not self._match_section(sec_name):
-            return False
-        if not self._match_material_mesh(mesh_model, sec_name):
-            return False
-        if not self._match_groups_mesh(mesh_model, "Frame", eid):
-            return False
-        # Elevation and story filters (only if either is set)
-        if self.elevation_range is not None or self.story is not None:
-            z_mid = self._get_frame_z_mid(mesh_model, eid)
-            if z_mid is None:
-                return False
-            if not self._match_elevation(z_mid):
-                return False
-            if not self._match_story(z_mid, story_elevations, story_z_tolerance):
-                return False
-        return True
-
-    def _area_matches_mesh(
-        self,
-        mesh_model: "MeshModel",
-        aid: str,
-        story_elevations: Optional[Dict[str, float]],
-        story_z_tolerance: float,
-    ) -> bool:
-        """Check all selection criteria against a MeshModel for an area.
-
-        Logic follows the same AND-across / OR-within pattern as
-        :meth:`_area_matches`, but reads from a ``MeshModel`` and adds
-        :attr:`elevation_range` and :attr:`story` support.
-        """
-        if not self._match_element_type("Area"):
-            return False
-        if not self._match_id(aid):
-            return False
-        sec_name = mesh_model.area_assignments.get(aid)
-        if not self._match_section(sec_name):
-            return False
-        if not self._match_material_mesh(mesh_model, sec_name):
-            return False
-        if not self._match_groups_mesh(mesh_model, "Area", aid):
-            return False
-        # Elevation and story filters (only if either is set)
-        if self.elevation_range is not None or self.story is not None:
-            z_mid = self._get_area_z_mid(mesh_model, aid)
-            if z_mid is None:
-                return False
-            if not self._match_elevation(z_mid):
-                return False
-            if not self._match_story(z_mid, story_elevations, story_z_tolerance):
-                return False
-        return True
 
     # ── Brace detection ──────────────────────────────────────────────────────
 

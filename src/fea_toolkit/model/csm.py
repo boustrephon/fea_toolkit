@@ -362,6 +362,10 @@ def bilinearize_composite(
     peak_idx = cfg.get("peak_idx")
     if peak_idx is None:
         peak_idx = int(np.argmax(S_a_arr))
+    # Clamp a caller-supplied peak_idx to the final valid index so it can
+    # never be used to index out of bounds (matching the boundary behaviour
+    # of bilinearize_stiffness_change / bilinearize_equal_energy).
+    peak_idx = max(0, min(int(peak_idx), len(S_d_arr) - 1))
     cfg["peak_idx"] = peak_idx
 
     # Try stiffness-change first
@@ -784,10 +788,14 @@ def compute_performance_point(
     T_eq_final = 2.0 * math.pi * math.sqrt(S_dp / max(S_ap, 1e-12))
     mu_final = max(S_dp / max(S_dy, 1e-12), 1.0)
     if not converged or not math.isfinite(T_eq_final) or T_eq_final <= 0:
-        # Fall back to the last-iteration equivalent period if the
-        # interpolation above could not produce a positive period.
-        T_eq_final = 2.0 * math.pi * math.sqrt(
-            S_dp / max(S_ap, 1e-12))
+        # Fall back to a valid previously recorded period rather than
+        # recomputing the same S_dp/S_ap expression (which produced the
+        # invalid T_eq_final above).  Prefer the best-mode elastic period.
+        _valid_T = best_mode_period
+        if not math.isfinite(_valid_T) or _valid_T <= 0:
+            _valid_T = T_eq
+        if math.isfinite(_valid_T) and _valid_T > 0:
+            T_eq_final = _valid_T
 
     return {
         "S_dp": S_dp,
@@ -861,6 +869,32 @@ def check_modal_pushover_mode(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+def _modal_participation(
+    shape: Dict[int, Tuple[float, float, float]],
+    masses: Dict[int, float],
+    dir_idx: int,
+) -> Tuple[float, float]:
+    """Compute the modal participation terms (L, M_star) for one mode.
+
+    Args:
+        shape: Mode shape dict mapping node tag → (ux, uy, uz).
+        masses: Nodal mass dict mapping node tag → mass.
+        dir_idx: Direction index, 0 (X), 1 (Y), or 2 (Z).
+
+    Returns:
+        Tuple ``(L, M_star)`` where ``L = Σ m_i φ_i`` and
+        ``M_star = Σ m_i φ_i²`` for the given direction.
+    """
+    L = 0.0
+    M_star = 0.0
+    for node_tag, (ux, uy, uz) in shape.items():
+        m = masses.get(node_tag, 0.0)
+        phi = [ux, uy, uz][dir_idx]
+        M_star += m * phi**2
+        L += m * phi
+    return L, M_star
+
+
 def pushover_to_adrs(
     pushover_results: Dict[str, Any],
     modal_results: Dict[str, Any],
@@ -923,13 +957,7 @@ def pushover_to_adrs(
     best_participation = 0.0
     for mode_idx, shape in mode_shapes.items():
         # Compute participation factor L/M*
-        M_star = 0.0
-        L = 0.0
-        for node_tag, (ux, uy, uz) in shape.items():
-            m = masses.get(node_tag, 0.0)
-            phi = [ux, uy, uz][dir_idx]
-            M_star += m * phi**2
-            L += m * phi
+        L, M_star = _modal_participation(shape, masses, dir_idx)
         if M_star > 0:
             # Reject modes whose push-direction component carries
             # negligible kinetic energy (M_star much less than M_total).
@@ -946,13 +974,7 @@ def pushover_to_adrs(
 
     # Extract the best mode shape
     best_shape = mode_shapes.get(best_mode, {})
-    M_star = 0.0
-    L = 0.0
-    for node_tag, (ux, uy, uz) in best_shape.items():
-        m = masses.get(node_tag, 0.0)
-        phi = [ux, uy, uz][dir_idx]
-        M_star += m * phi**2
-        L += m * phi
+    L, M_star = _modal_participation(best_shape, masses, dir_idx)
 
     if M_star <= 0:
         # Fallback: no masses or mode shapes — use unit values
@@ -984,6 +1006,11 @@ def pushover_to_adrs(
                                best_shape[roof_tag][1],
                                best_shape[roof_tag][2]][dir_idx]
             else:
+                warnings.warn(
+                    "pushover_to_adrs: control_node is missing and no roof "
+                    "node could be resolved — phi_control falls back to 1.0.",
+                    UserWarning, stacklevel=2,
+                )
                 phi_control = 1.0
 
     control_disp = np.array(pushover_results.get("control_disp", []), dtype=float)
