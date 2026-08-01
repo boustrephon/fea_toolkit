@@ -288,6 +288,11 @@ def validate_npz(path: str) -> List[str]:
                             directions.add(parts[1])
                 for direction in sorted(directions):
                     # ── Resolve N_step / N_recorded_* per direction ──
+                    # Clear the shared dims first so each direction is
+                    # validated only against its own arrays — stale dims
+                    # from a previous direction must not leak through.
+                    for dk in ("N_step", "N_recorded_frame", "N_recorded_shell"):
+                        dims.pop(dk, None)
                     step_arr = data.get(
                         make_pushover_key(direction, "pushover/{direction}/step"))
                     if step_arr is not None:
@@ -301,17 +306,25 @@ def validate_npz(path: str) -> List[str]:
                     if shell_id_arr is not None:
                         dims["N_recorded_shell"] = len(shell_id_arr)
 
-                    # ── Required: global + node-disp arrays ──
-                    for schema_set in (PUSHOVER_GLOBAL_ARRAYS,
-                                       PUSHOVER_NODE_DISP_ARRAYS):
-                        for template, (shape_desc, dtype_str) in schema_set.items():
-                            key = make_pushover_key(direction, template)
-                            arr = data.get(key)
-                            if arr is None:
-                                messages.append(
-                                    f"Missing pushover array: {key}")
-                                continue
-                            _check_shape(key, arr, shape_desc, dtype_str)
+                    # ── Required: global arrays ──
+                    for template, (shape_desc, dtype_str) in PUSHOVER_GLOBAL_ARRAYS.items():
+                        key = make_pushover_key(direction, template)
+                        arr = data.get(key)
+                        if arr is None:
+                            messages.append(
+                                f"Missing pushover array: {key}")
+                            continue
+                        _check_shape(key, arr, shape_desc, dtype_str)
+
+                    # ── Optional: node-disp arrays (only present when
+                    #    displacement data was recorded — see has_disp in
+                    #    ``_collect_pushover``) ──
+                    for template, (shape_desc, dtype_str) in PUSHOVER_NODE_DISP_ARRAYS.items():
+                        key = make_pushover_key(direction, template)
+                        arr = data.get(key)
+                        if arr is None:
+                            continue  # not recorded for this model
+                        _check_shape(key, arr, shape_desc, dtype_str)
 
                     # ── Optional: frame + shell arrays ──
                     for schema_set in (PUSHOVER_FRAME_ARRAYS,
