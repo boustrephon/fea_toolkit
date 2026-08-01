@@ -85,6 +85,11 @@ for automated cross-referencing.
   Tags: `elements`, `splitting`, `meshing`, `load-redistribution`
   Related: [Element Classification](element_classification.md) · [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Analysis Workflow](workflow.md)
 
+- [Mander Confinement Model Validation](mander_confinement_validation.md) — ✅ Complete
+  > Formula-by-formula conformance of the Mander confinement engine to Mander et al. (1988), documented simplifications, and comparison against NZSEE C5, OpenSees Concrete07, and TSC2018.
+  Tags: `mander`, `confinement`, `validation`, `theory`, `reference`
+  Related: [Rectangular Concrete Section Workflow](rc_rectangular_section_workflow.md) · [Element Properties Configuration](element_properties_config.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md)
+
 - [Rectangular Concrete Section Workflow](rc_rectangular_section_workflow.md) — ✅ Complete
   > SAP2000 → OpenSees fiber workflow for rectangular RC beam/column sections: parser defaults, promotion, Mander confinement, and user overrides.
   Tags: `rc`, `sections`, `fiber`, `mander`, `confinement`, `workflow`
@@ -188,7 +193,7 @@ Tags across all documentation files:
 - **`cleanup`** — [deprecation_plan.md](deprecation_plan.md)
 - **`columns`** — [element_classification.md](element_classification.md)
 - **`config`** — [element_properties_config.md](element_properties_config.md)
-- **`confinement`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
+- **`confinement`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`constraints`** — [constraint_detection.md](constraint_detection.md)
 - **`cracked-section`** — [stiffness_factors.md](stiffness_factors.md)
 - **`csm`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md)
@@ -218,7 +223,7 @@ Tags across all documentation files:
 - **`lessons-learned`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`llm`** — [llm_guide.md](llm_guide.md)
 - **`load-redistribution`** — [element_splitting.md](element_splitting.md)
-- **`mander`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
+- **`mander`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`mesh-model`** — [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`meshing`** — [constraint_detection.md](constraint_detection.md), [element_splitting.md](element_splitting.md), [shell_support.md](shell_support.md)
 - **`migration`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md)
@@ -236,7 +241,7 @@ Tags across all documentation files:
 - **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`pyvista`** — [viewer.md](viewer.md)
 - **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
-- **`reference`** — [builder_reference.md](builder_reference.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
+- **`reference`** — [builder_reference.md](builder_reference.md), [mander_confinement_validation.md](mander_confinement_validation.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
 - **`results`** — [results_schema.md](results_schema.md)
 - **`rhino`** — [rhino_export.md](rhino_export.md)
@@ -253,7 +258,9 @@ Tags across all documentation files:
 - **`stiffness`** — [stiffness_factors.md](stiffness_factors.md)
 - **`storey`** — [storey_response.md](storey_response.md)
 - **`tcl`** — [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
+- **`theory`** — [mander_confinement_validation.md](mander_confinement_validation.md)
 - **`usage`** — [llm_guide.md](llm_guide.md)
+- **`validation`** — [mander_confinement_validation.md](mander_confinement_validation.md)
 - **`viewer`** — [viewer.md](viewer.md)
 - **`visualisation`** — [rhino_export.md](rhino_export.md), [viewer.md](viewer.md)
 - **`walls`** — [element_classification.md](element_classification.md)

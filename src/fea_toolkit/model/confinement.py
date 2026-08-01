@@ -73,6 +73,11 @@ class ConfinementData:
     eps_su : float, optional
         Ultimate strain of the transverse steel (default 0.1 for
         ASTM A706).  Used in the spalling/ultimate strain formula.
+    ecu_max : float, optional
+        Upper bound for the confined ultimate (spalling) strain
+        (default 0.025).  The Priestley (1996) spalling formula can
+        predict very large strains; NZSEE C5 uses 0.05.  The value
+        is configurable.
     """
     fc: float
     tie_diameter: float
@@ -91,6 +96,8 @@ class ConfinementData:
     overall_h: float = 0.0
     eps_su: float = 0.1
     """Ultimate strain of transverse steel (default 0.1 for ASTM A706)."""
+    ecu_max: float = 0.025
+    """Upper bound for the confined ultimate strain (default 0.025)."""
 
     def __post_init__(self) -> None:
         # Validate fundamental material/geometry parameters
@@ -122,6 +129,11 @@ class ConfinementData:
         if self.cross_tie_count_y < 0:
             raise ValueError(
                 f"cross_tie_count_y must be >= 0, got {self.cross_tie_count_y}"
+            )
+        # Validate ecu_max
+        if self.ecu_max <= 0:
+            raise ValueError(
+                f"ecu_max must be greater than 0, got {self.ecu_max}"
             )
         # Validate eps_su
         if self.eps_su <= 0:
@@ -318,7 +330,7 @@ def mander_confined(data: ConfinementData) -> ConfinementResult:
     # Priestley et al. (1996) simplified form using confined strength:
     #   ecu = 0.004 + 1.4 * rho_s * fyh * eps_su / f'cc
     ecu = 0.004 + 1.4 * rho_s * fyh * data.eps_su / fcc if fcc > 0 else 0.004
-    ecu = min(ecu, 0.025)  # cap at 2.5%
+    ecu = min(ecu, data.ecu_max)  # configurable cap on spalling strain
 
     return ConfinementResult(
         fcc=fcc,

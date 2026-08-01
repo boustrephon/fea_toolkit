@@ -532,6 +532,7 @@ class ConcreteRectangularSection(Section):
     # falls back to the section's longitudinal ``rebar_material``.
     tie_rebar_mat: Optional[str] = None
     tie_config: str = "standard"           # "standard" | "cross_tie" | "spiral"
+    ecu_max: float = 0.025                 # cap on Mander spalling (ecu)
     # Longitudinal bar counts for the Mander effective-confinement
     # coefficient ``ke``.  ``long_count_x`` runs along the width (bf),
     # ``long_count_y`` along the depth (D).  0 = derive from top/bot bars.
@@ -587,6 +588,7 @@ class ConcreteRectangularSection(Section):
                 long_count_x=max(lcx, 0),
                 long_count_y=max(lcy, 0),
                 tie_config=self.tie_config or "standard",
+                ecu_max=self.ecu_max,
             )
             res = mander_confined(data)
         except ValueError:
@@ -682,6 +684,7 @@ class ConcreteCircularSection(Section):
     # falls back to the section's longitudinal ``rebar_material``.
     tie_rebar_mat: Optional[str] = None
     tie_config: str = "spiral"             # "spiral" | "standard" | "cross_tie"
+    ecu_max: float = 0.025                 # cap on Mander spalling (ecu)
 
     def fiber_confinement(
         self, fc: float, tie_fy: float
@@ -722,6 +725,7 @@ class ConcreteCircularSection(Section):
                 long_count_x=self.bar_count or 0,
                 long_count_y=self.bar_count or 0,
                 tie_config=self.tie_config or "spiral",
+                ecu_max=self.ecu_max,
             )
             res = mander_confined(data)
         except ValueError:

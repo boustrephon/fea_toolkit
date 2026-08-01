@@ -85,6 +85,12 @@ class TestConfinementDataValidation:
                             tie_fy=420e6, core_bc=0.0, core_dc=0.0,
                             tie_config="spiral")
 
+    def test_invalid_ecu_max_raises(self):
+        with pytest.raises(ValueError, match="ecu_max must be greater than 0"):
+            ConfinementData(fc=30e6, tie_diameter=0.01, tie_spacing=0.1,
+                            tie_fy=420e6, core_bc=0.3, core_dc=0.3,
+                            ecu_max=0.0)
+
 
 # ============================================================================
 # mander_confined() — rectangular perimeter hoop
@@ -188,6 +194,22 @@ class TestManderRectangularCrossTie:
     def test_cross_tie_ecu_capped_at_2_5_percent(self):
         res = mander_confined(self._data())
         assert res.ecu == pytest.approx(0.025)
+
+    def test_ecu_max_configurable(self):
+        """Lowering ``ecu_max`` reduces the capped spalling strain."""
+        data = self._data()
+        data.ecu_max = 0.01
+        res = mander_confined(data)
+        assert res.ecu == pytest.approx(0.01)
+
+    def test_ecu_max_larger_than_default(self):
+        """Raising ``ecu_max`` allows spalling strains above 2.5 %."""
+        data = self._data()
+        data.ecu_max = 0.05
+        res = mander_confined(data)
+        # Un-capped model predicts a strain well above 2.5% for this case
+        assert res.ecu > 0.025
+        assert res.ecu <= 0.05
 
     def test_cross_tie_doubles_volumetric_ratio(self):
         """Two extra legs per direction double the transverse steel ratio."""
