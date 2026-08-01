@@ -242,15 +242,25 @@ def mander_confined(data: ConfinementData) -> ConfinementResult:
         # Effective confinement coefficient for circular
         # Mander Eq. 5-8: ke = (1 - s'/(2*Ds))^2 / (1 - rho_cc)
         # where rho_cc = Al / Ac (longitudinal / core area)
+        #
+        # For circular sections the caller stores the total number of
+        # longitudinal bars around the ring in *both* long_count_x and
+        # long_count_y (see ConcreteCircularSection.fiber_confinement).
+        # The ring count is therefore the value of either field — taking
+        # the product would count each bar twice (or 64 bars for an 8-bar
+        # ring), inflating rho_cc and driving ke above 1.0.
         s_prime = s - db  # clear spacing
         rho_cc = 0.0
-        if data.long_diameter > 0 and data.long_count_x > 0 and data.long_count_y > 0:
+        if data.long_diameter > 0 and data.long_count_x > 0:
             Al = math.pi * data.long_diameter**2 / 4.0
-            n_longs = data.long_count_x * data.long_count_y
+            n_longs = data.long_count_x
             Ac = math.pi * Ds**2 / 4.0
             rho_cc = (n_longs * Al) / Ac if Ac > 0 else 0.0
-        ke = ((1.0 - s_prime / (2.0 * Ds))**2 /
-              (1.0 - rho_cc)) if Ds > 0 else 0.0
+        # Clamp ke to the physically admissible range (0, 1] — a value
+        # above 1.0 would indicate an over-counted longitudinal ratio.
+        _ke_raw = ((1.0 - s_prime / (2.0 * Ds))**2 /
+                   (1.0 - rho_cc)) if Ds > 0 else 0.0
+        ke = min(max(_ke_raw, 0.0), 1.0)
         # Effective lateral confining stress (factored by ke)
         f_l = ke * 0.5 * rho_s * fyh
     else:

@@ -48,6 +48,8 @@ from ..utils import (
     DEFAULT_RHO_WS_SI,
     DEFAULT_RHO_MC_SI,
     DEFAULT_RHO_WC_SI,
+    RC_NO_TIE_CONFINEMENT_FACTOR,
+    RC_NO_TIE_EPSC_FACTOR,
     g_from_units,
     length_scale_factor,
     force_scale_factor,
@@ -499,11 +501,15 @@ def tcl_materials_and_sections(
 
                 # Confined strength: Mander confinement (when tie data is
                 # present on the section) → else eFc from SAP2000 (if any)
-                # → else conventional 1.3×Fc heuristic.
-                fcc = Fc * 1.3
-                epscc = DEFAULT_EPS_CC
+                # → else the shared RC_NO_TIE_CONFINEMENT_FACTOR /
+                # RC_NO_TIE_EPSC_FACTOR heuristic (1.25 × f'c, 2.0 × εc —
+                # consistent with the OpenSees Berkeley comparison manual
+                # default and the Mander-model approximation).
+                fcc = Fc * RC_NO_TIE_CONFINEMENT_FACTOR
+                epscc = epsc * RC_NO_TIE_EPSC_FACTOR
                 ecu_cc = 0.02
                 fc_method = getattr(sec, 'fiber_confinement', None)
+                _conf_dict = None
                 if callable(fc_method):
                     tie_fy = getattr(sec, 'tie_fy', None) or 0.0
                     if tie_fy <= 0:
@@ -527,7 +533,12 @@ def tcl_materials_and_sections(
                         fcc = _conf_dict.get('fcc', fcc)
                         epscc = _conf_dict.get('ecc', epscc)
                         ecu_cc = _conf_dict.get('ecu', ecu_cc)
-                else:
+                # A None result from fiber_confinement (or a non-callable
+                # method) means Mander confinement data is unavailable —
+                # fall back to the SAP2000 eFc / ss_curve.s_cap values before
+                # retaining the shared confinement heuristic defaults
+                # (RC_NO_TIE_CONFINEMENT_FACTOR / RC_NO_TIE_EPSC_FACTOR).
+                if _conf_dict is None:
                     if mat.eFc and mat.eFc > 0:
                         fcc = mat.eFc
                     _scc = (float(mat.ss_curve.s_cap)
@@ -573,7 +584,7 @@ def tcl_materials_and_sections(
                 )
             else:
                 _fc = DEFAULT_FC_PA * _sf
-                _fcc = 1.3 * _fc
+                _fcc = _fc * RC_NO_TIE_CONFINEMENT_FACTOR
                 _fy = DEFAULT_FY_REBAR_PA * _sf
                 _e = DEFAULT_E_S_PA * _sf
                 lines.append(

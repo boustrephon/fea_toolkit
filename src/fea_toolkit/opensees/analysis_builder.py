@@ -33,6 +33,7 @@ from ..utils import (
     g_from_units, cqc_combine,
     stress_scale_factor,
     DEFAULT_FY_REBAR_PA, DEFAULT_E_S_PA,
+    RC_NO_TIE_CONFINEMENT_FACTOR, RC_NO_TIE_EPSC_FACTOR,
 )
 
 
@@ -974,6 +975,13 @@ class AnalysisBuilder:
         _max_sec = max(self.section_tags.values(), default=0)
         _max_frame = max(self.frame_tag_map.values(), default=0)
         _tag_base = max(_max_mat, _max_sec, _max_frame) + 1000
+        # Also start above any tag already stored in the dedicated
+        # _nd_material_tags namespace so newly created materials cannot
+        # collide with tags from a previous build (e.g. after materials
+        # were removed from the config).
+        _nd_existing = getattr(self, '_nd_material_tags', {})
+        if _nd_existing:
+            _tag_base = max(_tag_base, max(_nd_existing.values()) + 1)
         tag = _tag_base
 
         created = 0
@@ -1016,6 +1024,10 @@ class AnalysisBuilder:
             self._nd_material_tags[name] = current_tag
             if is_new:
                 tag += 1
+                # Advance past any occupied tags (safety net — new tags
+                # normally start above all existing ones).
+                while tag in self._nd_material_tags.values():
+                    tag += 1
                 created += 1
 
         if self.config.get('verbose', False):
@@ -1310,9 +1322,11 @@ class AnalysisBuilder:
                                          -Fc, -abs(epsc), -0.2 * Fc, -0.006)
                     # Confined core concrete — use Mander confinement when
                     # tie data is present on the section, else fall back
-                    # to the conventional 1.25 × f'c heuristic.
-                    Fc_core = Fc * 1.25
-                    epsc_core = abs(epsc) * 2.0
+                    # to the conventional no-tie-data heuristic defined by
+                    # RC_NO_TIE_CONFINEMENT_FACTOR / RC_NO_TIE_EPSC_FACTOR
+                    # (shared with the Tcl export in builder.py).
+                    Fc_core = Fc * RC_NO_TIE_CONFINEMENT_FACTOR
+                    epsc_core = abs(epsc) * RC_NO_TIE_EPSC_FACTOR
                     ecu_core = 0.02
                     tie_fy = getattr(sec, 'tie_fy', None) or 0.0
                     if tie_fy <= 0:
@@ -1332,15 +1346,23 @@ class AnalysisBuilder:
                     if callable(fc_method):
                         try:
                             confinement = fc_method(Fc, tie_fy)
-                        except Exception:
+                        except Exception as e:
+                            import warnings
+                            warnings.warn(
+                                f"fiber_confinement failed for section "
+                                f"'{sec.name}': {e}"
+                            )
                             confinement = None
                     if confinement is not None:
                         Fc_core = confinement.get('fcc', Fc_core)
                         epsc_core = confinement.get('ecc', epsc_core)
                         ecu_core = confinement.get('ecu', 0.02)
-                    # Cap the confined spalling strain (configurable).
+                    # Cap the confined spalling strain (configurable), but
+                    # never clamp it below the strain at confined peak —
+                    # an ecu below epsc_core would give a degenerate
+                    # Concrete01 curve.
                     _ecu_max = float(self.config.get('confined_ecu_max', 0.025))
-                    ecu_core = min(ecu_core, _ecu_max)
+                    ecu_core = min(max(ecu_core, epsc_core), _ecu_max)
                     ops.uniaxialMaterial('Concrete01', mat_tag + 1,
                                          -Fc_core, -epsc_core,
                                          -0.2 * Fc_core, -ecu_core)

@@ -630,6 +630,7 @@ def export_mesh_model_to_tcl(
     if mesh_model.materials:
         lines.append("")
         lines.append("# ── Materials ──")
+        _stress_factor = stress_scale_factor(mesh_model.units)
         for mat_name, mat in mesh_model.materials.items():
             tag = mat_tags.get(mat_name)
             if tag is None:
@@ -638,7 +639,6 @@ def export_mesh_model_to_tcl(
             if mat_name in _fiber_mat_names:
                 continue
             if mat.type and "concrete" in mat.type.lower():
-                _stress_factor = stress_scale_factor(mesh_model.units)
                 Fc = (mat.Fc if mat.Fc and mat.Fc > 0
                       else DEFAULT_FC_PA * _stress_factor)
                 epsc = (mat.eFc if mat.eFc and mat.eFc > 0 else DEFAULT_EPS_C)
@@ -649,7 +649,6 @@ def export_mesh_model_to_tcl(
                     f"{-Fc:g} {-epsc:g} {-Fu:g} {-epsu:g}"
                 )
             else:
-                _stress_factor = stress_scale_factor(mesh_model.units)
                 E_mod = (mat.E_mod if mat.E_mod and mat.E_mod > 0
                          else DEFAULT_E_S_PA * _stress_factor)
                 Fy = (mat.Fy if mat.Fy and mat.Fy > 0 else DEFAULT_FY_STEEL_PA * _stress_factor)
@@ -721,15 +720,23 @@ def export_mesh_model_to_tcl(
                         _next_mat_tag += 3
                         _rc_mat_tags[sec.material] = (concrete_unconf, concrete_conf, rebar_tag)
 
+                        # Concrete fallback strengths are authored in SI
+                        # (Pa) and scaled to model units via _ssf — never
+                        # hand-converted literals (see the material-
+                        # property convention in .clinerules §4.6).
+                        _ssf = stress_scale_factor(mesh_model.units)
+                        _fc_pa = DEFAULT_FC_PA * _ssf
                         if mat is not None:
-                            Fc = mat.Fc if mat.Fc and mat.Fc > 0 else 3.0e7
+                            Fc = mat.Fc if mat.Fc and mat.Fc > 0 else _fc_pa
                             epsc = 0.002
-                            fcc = mat.eFc if mat.eFc and mat.eFc > 0 else Fc * 1.3
+                            fcc = (mat.eFc
+                                   if mat.eFc and mat.eFc > 0
+                                   else Fc * 1.3)
                             epscc = 0.005
                         else:
-                            Fc = 3.0e7
+                            Fc = _fc_pa
                             epsc = 0.002
-                            fcc = 3.9e7
+                            fcc = 1.3 * _fc_pa
                             epscc = 0.005
 
                         # ── Rebar material (Steel02) ──────────────────
@@ -737,7 +744,6 @@ def export_mesh_model_to_tcl(
                         # units) → section.rebar_material lookup (model
                         # units, used as-is) → framework defaults (Pa,
                         # scaled to model units).
-                        _ssf = stress_scale_factor(mesh_model.units)
                         Fy_rebar = config.get("rebar_Fy_override")
                         Es_rebar = config.get("rebar_Es_override")
                         if Fy_rebar is not None:

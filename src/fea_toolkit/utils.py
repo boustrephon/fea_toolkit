@@ -70,6 +70,28 @@ DEFAULT_NU_C = 0.2                  # Poisson's ratio
 DEFAULT_G_C_PA = 12.5e9             # Shear modulus — computed from E & nu (E / (2 * (1 + nu)))
 DEFAULT_EPS_C = 0.002               # Strain at peak Fc (concrete)
 DEFAULT_EPS_CC = 0.005              # Crushing strain (confined concrete)
+
+# Conventional no-tie-data confined-concrete heuristic (used when Mander
+# confinement data is unavailable): strength multiplier applied to f'c for
+# the confined core, and the strain-at-peak multiplier applied to eps_c.
+# Shared by AnalysisBuilder._create_single_section() and the Tcl export in
+# opensees/builder.py so both paths produce identical core Concrete01
+# parameters.
+RC_NO_TIE_CONFINEMENT_FACTOR = 1.25
+RC_NO_TIE_EPSC_FACTOR = 2.0
+
+# References:
+# - OpenSees Berkeley comparison manual: default confined-concrete
+#   max stress uses 1.25 × f'c (Mander model approximation).
+# - OpenSeesWiki BuildingTcl: default confinement effect 1.3×
+#   ("no strength increase by default") with 1.35× for "highly
+#   confined".  1.25 is the conservative round number used by
+#   the OpenSees comparison benchmarks.
+# - FEMA 356 Table 6-4: lower-bound → expected strength factor
+#   for concrete compressive strength is 1.25.
+# - Mander relation:  ε_cc / ε_c0 = 1 + 5 × (f_cc / f_c0 − 1).
+#   For f_cc = 1.25 f_c0, ε_cc = 2.25 ε_c0 → conservatively 2.0×.
+
 DEFAULT_RHO_WC_SI = 24000.0         # Default concrete unit weight (N/m³)
 DEFAULT_RHO_MC_SI = 2450.0          # Default concrete unit mass (kg/m³)
 DEFAULT_RHO_WS_SI = 77000.0         # Default steel unit weight (N/m³)
@@ -463,6 +485,16 @@ _STRESS_KEYS: frozenset = frozenset({
     'Hiso', 'Hkin',                   # hardening moduli
 })
 
+# Numeric fields that are explicitly **not** stress-valued — passed
+# through unchanged (dimensionless, strain, density, fraction, etc.).
+_NON_STRESS_NUMERIC_KEYS: frozenset = frozenset({
+    'nu',             # Poisson's ratio (dimensionless)
+    'strain', 'eps_c', 'epscc', 'eps_cc',  # strains
+    'density', 'rho', 'unit_weight', 'unit_mass',
+    'b', 'R0', 'cR1', 'cR2',        # Steel02 hardening shape params
+    'alpha', 'beta', 'gamma',        # generic dimensionless params
+})
+
 
 def scale_material_dict(
     mat_dict: dict,
@@ -475,6 +507,11 @@ def scale_material_dict(
     ``stress_scale_factor(units)``.  Non-stress fields (Poisson's ratio,
     density, strain values, string flags) are passed through unchanged.
 
+    Numeric fields that are not classified as stress-valued and not in
+    the known non-stress set emit a :class:`UserWarning` identifying the
+    unclassified field — a diagnostic that the field may need to join
+    :data:`_STRESS_KEYS` (or :data:`_NON_STRESS_NUMERIC_KEYS`).
+
     Args:
         mat_dict: Material property dict, e.g. ``{"E": 200e9, "nu": 0.3, "fy": 400e6}``.
         units: Model units dict, e.g. ``{"F": "kN", "L": "m"}``.
@@ -484,13 +521,26 @@ def scale_material_dict(
     Returns:
         New dict with stress fields scaled to model units.
     """
+    import warnings as _w
     ssf = stress_scale if stress_scale is not None else stress_scale_factor(units)
     if abs(ssf - 1.0) < 1e-15:
         return dict(mat_dict)  # SI → SI, no scaling needed
     result = {}
     for k, v in mat_dict.items():
-        if isinstance(v, (int, float)) and k in _STRESS_KEYS:
-            result[k] = v * ssf
+        if isinstance(v, (int, float)):
+            if k in _STRESS_KEYS:
+                result[k] = v * ssf
+            elif k not in _NON_STRESS_NUMERIC_KEYS:
+                _w.warn(
+                    f"scale_material_dict: numeric field '{k}' is not "
+                    f"classified as stress-valued (Pa) nor as a known "
+                    f"non-stress field — passing through unchanged. "
+                    f"If '{k}' is a stress, add it to _STRESS_KEYS.",
+                    UserWarning, stacklevel=2,
+                )
+                result[k] = v
+            else:
+                result[k] = v
         else:
             result[k] = v
     return result
