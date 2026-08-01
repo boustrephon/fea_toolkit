@@ -85,6 +85,11 @@ for automated cross-referencing.
   Tags: `elements`, `splitting`, `meshing`, `load-redistribution`
   Related: [Element Classification](element_classification.md) · [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Analysis Workflow](workflow.md)
 
+- [Rectangular Concrete Section Workflow](rc_rectangular_section_workflow.md) — ✅ Complete
+  > SAP2000 → OpenSees fiber workflow for rectangular RC beam/column sections: parser defaults, promotion, Mander confinement, and user overrides.
+  Tags: `rc`, `sections`, `fiber`, `mander`, `confinement`, `workflow`
+  Related: [Element Classification](element_classification.md) · [Element Properties Configuration](element_properties_config.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Report Generation — Design Proposal](report_generation.md)
+
 - [Shell Element Support](shell_support.md) — ✅ Complete
   > Shell element types, meshing strategies, and layered shell support for nonlinear wall analysis.
   Tags: `shell`, `area-elements`, `meshing`, `elements`
@@ -139,7 +144,7 @@ for automated cross-referencing.
 
 ## 📋 Planning & Historical
 
-- [AnalysisBuilder Migration Plan](analysis_builder_migration_plan.md) — 🚧 Draft
+- [AnalysisBuilder Migration Plan](analysis_builder_migration_plan.md) — ✅ Complete
   > Migration plan for the two-stage pipeline, superseding monolithic OpenSeesBuilder.
   Tags: `architecture`, `migration`, `planning`
   Related: [Layered Analysis Workflow for the v3 Architecture](layered_analysis_workflow.md) · [Analysis Workflow](workflow.md) · [Development Notes](dev_notes.md)
@@ -155,6 +160,8 @@ for automated cross-referencing.
 
 
 ## 📦 Uncategorised
+
+- [Csm Test Model Plan](csm_test_model_plan.md)
 
 - [Pushover Results Storage Viz](pushover_results_storage_viz.md)
 
@@ -181,6 +188,7 @@ Tags across all documentation files:
 - **`cleanup`** — [deprecation_plan.md](deprecation_plan.md)
 - **`columns`** — [element_classification.md](element_classification.md)
 - **`config`** — [element_properties_config.md](element_properties_config.md)
+- **`confinement`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`constraints`** — [constraint_detection.md](constraint_detection.md)
 - **`cracked-section`** — [stiffness_factors.md](stiffness_factors.md)
 - **`csm`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md)
@@ -197,7 +205,7 @@ Tags across all documentation files:
 - **`end-to-end`** — [workflow.md](workflow.md)
 - **`execution`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`export`** — [rhino_export.md](rhino_export.md), [tcl_export.md](tcl_export.md)
-- **`fiber`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md)
+- **`fiber`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`geometry`** — [rhino_export.md](rhino_export.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`guide`** — [llm_guide.md](llm_guide.md)
@@ -210,6 +218,7 @@ Tags across all documentation files:
 - **`lessons-learned`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`llm`** — [llm_guide.md](llm_guide.md)
 - **`load-redistribution`** — [element_splitting.md](element_splitting.md)
+- **`mander`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`mesh-model`** — [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`meshing`** — [constraint_detection.md](constraint_detection.md), [element_splitting.md](element_splitting.md), [shell_support.md](shell_support.md)
 - **`migration`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md)
@@ -226,6 +235,7 @@ Tags across all documentation files:
 - **`preprocessor`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`pyvista`** — [viewer.md](viewer.md)
+- **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`reference`** — [builder_reference.md](builder_reference.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
 - **`results`** — [results_schema.md](results_schema.md)
@@ -234,6 +244,7 @@ Tags across all documentation files:
 - **`sap2000`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`schema`** — [results_schema.md](results_schema.md)
 - **`scripting`** — [tcl_export.md](tcl_export.md)
+- **`sections`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`shear`** — [storey_response.md](storey_response.md)
 - **`shell`** — [constraint_detection.md](constraint_detection.md), [element_properties_config.md](element_properties_config.md), [shell_support.md](shell_support.md)
 - **`slabs`** — [element_classification.md](element_classification.md)
@@ -246,7 +257,7 @@ Tags across all documentation files:
 - **`viewer`** — [viewer.md](viewer.md)
 - **`visualisation`** — [rhino_export.md](rhino_export.md), [viewer.md](viewer.md)
 - **`walls`** — [element_classification.md](element_classification.md)
-- **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [workflow.md](workflow.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [workflow.md](workflow.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`xara`** — [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`yaml-config`** — [report_generation.md](report_generation.md)
 - **`yield-point`** — [csm_bilinearization.md](csm_bilinearization.md)

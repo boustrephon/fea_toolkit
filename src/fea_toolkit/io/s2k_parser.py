@@ -948,6 +948,54 @@ class SAP2000Parser:
                 except (ValueError, TypeError):
                     pass
 
+        # Helper: extract a tie/bar size designation and map it to a
+        # diameter in model units via the REBAR SIZES table when possible.
+        def _tie_diameter(
+            rec: Dict[str, Any],
+            size_key: str,
+        ) -> Optional[float]:
+            """Resolve a tie-size column to a diameter (model units)."""
+            _tid = str(rec.get(size_key, '') or '').strip() or None
+            if not _tid:
+                return None
+            return rebar_diameters.get(_tid)
+
+        def _tie_data(rec: Dict[str, Any]) -> Dict[str, Any]:
+            """Extract transverse-reinforcement data for Mander confinement.
+
+            Reads the standard SAP2000 E2K concrete column/beam table
+            columns:
+              ``TieSizeL``      — tie bar size designation (longitudinal
+                                  direction; column table).
+              ``TieSizeT``      — tie bar size designation (transverse
+                                  direction; beam table).
+              ``TieSpacingL``   — tie centre-to-centre spacing (model
+                                  length units).
+              ``RebarMatT``     — tie rebar material name.
+
+            Returns an empty dict when no tie data is present.
+            """
+            data: Dict[str, Any] = {}
+            tie_dia = (_tie_diameter(rec, 'TieSizeL')
+                       or _tie_diameter(rec, 'TieSizeT')
+                       or _tie_diameter(rec, 'TieSizeM'))
+            if tie_dia:
+                data['tie_diameter'] = tie_dia
+            for k in ('TieSpacingL', 'TieSpacingT', 'TieSpacingM'):
+                v = rec.get(k)
+                if v is not None:
+                    try:
+                        fv = float(v)
+                    except (ValueError, TypeError):
+                        continue
+                    if fv > 0:
+                        data['tie_spacing'] = fv
+                        break
+            tie_mat = str(rec.get('RebarMatT', '') or '').strip() or None
+            if tie_mat and tie_mat != 'None':
+                data['tie_rebar_mat'] = tie_mat
+            return data
+
         # ── FRAME SECTION PROPERTIES 02 - CONCRETE COLUMN ───────────
         column_reinf: Dict[str, Dict[str, Any]] = {}
         for rec in self._raw_tables.get(
@@ -966,6 +1014,7 @@ class SAP2000Parser:
             if rebar_mat is None:
                 m = str(rec.get('RebarMatM', '') or '').strip() or None
                 entry['rebar_mat'] = m
+            entry.update(_tie_data(rec))
             column_reinf[name] = entry
 
         # ── FRAME SECTION PROPERTIES 03 - CONCRETE BEAM ──────────────
@@ -979,11 +1028,13 @@ class SAP2000Parser:
             rebar_mat = str(rec.get('RebarMatL', '') or '').strip() or None
             if rebar_mat is None:
                 rebar_mat = str(rec.get('RebarMatM', '') or '').strip() or None
-            beam_reinf[name] = {
+            entry = {
                 'rebar_mat': rebar_mat,
                 'bar_size_top': str(rec.get('BarSizeTop', '') or '').strip() or None,
                 'bar_size_bot': str(rec.get('BarSizeBot', '') or '').strip() or None,
             }
+            entry.update(_tie_data(rec))
+            beam_reinf[name] = entry
 
         # ── AREA SECTION PROPERTY DESIGN PARAMETERS ──────────────────
         area_rebar_mat: Dict[str, str] = {}
@@ -1108,6 +1159,8 @@ class SAP2000Parser:
                     _top_dia = _bar_dia
                 if (not _bot_dia or _bot_dia <= 0) and _bar_dia:
                     _bot_dia = _bar_dia
+                # Tie data from the column/beam tables feeds Mander
+                # confinement when present (all values are model units).
                 sec_data = ConcreteRectangularSection(
                     **common, depth=t3, bf=t2,
                     cover=float(sec.get('cover', 0)),
@@ -1116,6 +1169,9 @@ class SAP2000Parser:
                     top_bar_dia=_top_dia,
                     bot_bar_dia=_bot_dia,
                     rebar_material=_reinf.get('rebar_mat'),
+                    tie_diameter=_reinf.get('tie_diameter'),
+                    tie_spacing=_reinf.get('tie_spacing'),
+                    tie_rebar_mat=_reinf.get('tie_rebar_mat'),
                 )
             elif shape in ("Circle", "CIRCLE", "Steel Rod", "Steel Circle",
                            "Concrete Circular", "Concrete Circle"):
@@ -1134,6 +1190,9 @@ class SAP2000Parser:
                         bar_count=int(sec.get('barCount', 0)),
                         bar_dia=_dia,
                         rebar_material=_reinf.get('rebar_mat'),
+                        tie_diameter=_reinf.get('tie_diameter'),
+                        tie_spacing=_reinf.get('tie_spacing'),
+                        tie_rebar_mat=_reinf.get('tie_rebar_mat'),
                     )
                 else:
                     sec_data = CircularSection(**common, diameter=t3)
@@ -1208,6 +1267,9 @@ class SAP2000Parser:
                 top_bar_dia=_bar_dia or bar_dia_val,
                 bot_bar_dia=_bar_dia or bar_dia_val,
                 rebar_material=_reinf.get('rebar_mat'),
+                tie_diameter=_reinf.get('tie_diameter'),
+                tie_spacing=_reinf.get('tie_spacing'),
+                tie_rebar_mat=_reinf.get('tie_rebar_mat'),
             )
 
         # ── AREA SECTION PROPERTIES (shell sections not in frame table) ──

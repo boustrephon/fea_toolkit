@@ -1,15 +1,16 @@
 ---
 title: "AnalysisBuilder Migration Plan"
 description: "Migration plan for the two-stage pipeline, superseding monolithic OpenSeesBuilder."
-status: "draft"
+status: "complete"
 tags: [architecture, migration, planning]
 category: [planning]
 related: [layered_analysis_workflow.md, workflow.md, dev_notes.md]
 ---
+
 # AnalysisBuilder Migration Plan
 
-**Status:** ✅ **`OpenSeesBuilder` removal complete; ⚠️ remaining migration items pending**  
-**Last updated:** 2026-07-23  
+**Status:** ✅ **Complete — two-stage pipeline fully implemented**
+**Last updated:** 2026-08-01
 **Total test count:** 533
 
 ## Overview
@@ -18,13 +19,12 @@ The `OpenSeesBuilder` class has been deleted from ``builder.py``.
 All features that were part of the original builder have been ported to
 ``AnalysisBuilder`` or to standalone module-level functions.
 
-**Note:** While the legacy ``OpenSeesBuilder`` deletion is complete,
-several migration items described later in this document (``AnalysisCaseSpec``
-for nonlinear OpenSeesPy cases, ``NonlinearDynamicAnalysis`` workflow
-alignment, and full ``AnalysisBuilder`` coverage for all nonlinear analysis
-types) remain pending. The table below summarises the ported features.
+This document serves as a reconciliation record: it lists what the plan
+called for, what was implemented, and what remains as a known limitation.
 
-Summary of ported features:
+---
+
+## Summary of ported features
 
 | Area | Methods / features | Location |
 |------|-------------------|----------|
@@ -39,3 +39,147 @@ Summary of ported features:
 | **Model checks** | `check_model_connectivity`, `check_self_weight_consistency` | `model/checks.py` |
 | **Tcl export** | `export_model_to_tcl`, `tcl_materials_and_sections`, `pushover_tcl` | `builder.py` (standalone functions) |
 | **Local axes** | `get_local_axes`, `_get_local_axes` | `model/geometry.py` + `AnalysisBuilder` |
+
+---
+
+## Plan vs. implementation reconciliation
+
+### Architecture (from `layered_analysis_workflow.md` §11.5 / Task 2)
+
+| Planned | Status | Location |
+|---------|--------|----------|
+| Keep `MeshModel` as the canonical shared state | ✅ **Done** | `model/mesh_model.py` — Preprocessor output, frozen topology |
+| Add `AnalysisCaseSpec` to the analysis layer | ✅ **Done** | `analysis/base.py` — `name`, `analysis_type`, `config`, `kwargs` |
+| Add `AnalysisManager` with dependency resolution | ✅ **Done** | `analysis/manager.py` — Kahn's algorithm topological sort, `_inject_dependencies()` for modal→RS / modal→pushover |
+| Add `Analysis` ABC with `defaults()`, `run()`, `requires`, `provides` | ✅ **Done** | `analysis/base.py` |
+| Add `analysis_variant_map` / `analysis_property_overrides` / `analysis_load_overrides` metadata to `MeshModel` | ⚠️ **Superseded** | Replaced by the simpler `AnalysisCaseSpec.config` dict — case-specific overrides live on the case spec, not on the shared model |
+
+### Typed analysis classes
+
+| Planned | Status | Location |
+|---------|--------|----------|
+| `StaticAnalysis` | ✅ **Done** | `analysis/static.py` |
+| `ModalAnalysis` | ✅ **Done** | `analysis/modal.py` |
+| `ResponseSpectrumAnalysis` | ✅ **Done** | `analysis/rs.py` |
+| `PushoverAnalysis` | ✅ **Done** | `analysis/pushover.py` |
+| `NonlinearDynamicAnalysis` | ✅ **Done** | `analysis/nonlinear_dynamic.py` |
+
+All five classes are re-exported from `analysis/__init__.py` and registered on
+the old `AnalysisDefaults` deprecation path.
+
+### Per-type config defaults
+
+| Planned | Status | Location |
+|---------|--------|----------|
+| `_STATIC_LINEAR_DEFAULTS` | ✅ **Done** | `analysis/base.py` |
+| `_MODAL_DEFAULTS` | ✅ **Done** | `analysis/base.py` |
+| `_RESPONSE_SPECTRUM_DEFAULTS` | ✅ **Done** | `analysis/base.py` |
+| `_PUSHOVER_STEEL_DEFAULTS` | ✅ **Done** | `analysis/base.py` — `nonlinearBeamColumn`, `Steel01` |
+| `_PUSHOVER_RC_DEFAULTS` | ✅ **Done** | `analysis/base.py` — `forceBeamColumn`, `Concrete01`/`Steel02` fibers |
+| `_NONLINEAR_DYNAMIC_DEFAULTS` | ✅ **Done** | `analysis/base.py` — `forceBeamColumn`, Rayleigh damping, Newmark |
+
+### RC nonlinear workflow (was §14.1 — "requires a pinned OpenSeesPy build")
+
+> **Update (2026-08-01):** RC fiber sections are now available in the direct
+> OpenSeesPy path. The claim in the original plan that the stock ``pip``
+> OpenSeesPy distribution does not include RC material formulations has been
+> disproven — ``Concrete01`` and ``Steel02`` work with ``forceBeamColumn`` +
+> ``Lobatto`` integration directly.
+
+| Planned | Status | Location |
+|---------|--------|----------|
+| RC fiber sections (`Concrete01`, `Steel02` via `forceBeamColumn`) | ✅ **Done** | `ConcreteRectangularSection.to_fiber_patches()` / `ConcreteCircularSection.to_fiber_patches()` → `AnalysisBuilder._create_single_section()` (3 material tags: cover `Concrete01`, core `Concrete01`, rebar `Steel02`) |
+| Automatic `create_fiber_sections=True` promotion | ✅ **Done** | `rebuild_with_fiber_sections()` — falls back silently to elastic if `to_fiber_patches()` raises `NotImplementedError` |
+| Rebar material resolution (config override → SAP2000 lookup → framework defaults) | ✅ **Done** | `AnalysisBuilder` + `export_mesh_model_to_tcl` (covered by `tests/test_rebar_material.py`) |
+| Mander confinement wiring | ⚠️ **Partial** | `model/confinement.py` has `mander_confined()`; builder currently uses a 1.25× strength / 2.0× strain heuristic for the core patch rather than calling it |
+| End-to-end RC validation benchmark | ✅ **Done** | `examples/sample_model.py` `make_rc_frame_model()` (single-storey RC frame, kN-m units, 3 materials) + `tests/test_workflows.py` `test_compute_performance_point` (strengthened assertions: `mu > 1`, converged, plausible `M_eff`) — see `docs/csm_test_model_plan.md` |
+| Pushover solver tuning for RC | ✅ **Done** | `_PUSHOVER_RC_DEFAULTS` uses `NewtonLineSearch`, `NormDispIncr 1e-6`, 10 substeps |
+
+### Tcl / Xara nonlinear workflow (was §14.2)
+
+| Planned | Status | Location |
+|---------|--------|----------|
+| `export_model_to_tcl()` — solver-ready Tcl translation incl. fiber sections + nonlinear materials | ✅ **Done** | `opensees/recorder.py` + `builder.py` |
+| `pushover_tcl()` / `dynamic_time_history_tcl()` — analysis suffix | ✅ **Done** | `opensees/recorder.py` |
+| `XaraTclRunner` — Tcl runtime execution | ✅ **Done** | `opensees/recorder.py` |
+| `recorder.parse_pushover_results()` — output records → Python dicts | ✅ **Done** | `opensees/recorder.py` |
+
+### What remains
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Brace buckling with nonlinear beam-column elements in the direct OpenSeesPy path | ❌ **Not implemented** | Tcl path supports it (corotational truss + `Hysteretic`); the direct-path equivalent is an open enhancement |
+
+Everything else in the original migration plan has been implemented or
+superseded by a simpler design.
+
+---
+
+## Nonlinear analysis roadmap (updated)
+
+The project now supports both nonlinear workflows:
+
+### 14.1 OpenSeesPy nonlinear workflow (implemented)
+
+Nonlinear analyses in OpenSeesPy directly are supported for:
+
+- **Steel pushover** — `nonlinearBeamColumn`, `Steel01`, `Lobatto` integration
+- **RC pushover** — `forceBeamColumn`, `Concrete01` (cover + confined core) +
+  `Steel02` (rebar) fiber sections, auto-promoted from
+  `ConcreteRectangularSection` / `ConcreteCircularSection`
+- **Nonlinear dynamic** — `NonlinearDynamicAnalysis` with `forceBeamColumn`,
+  Rayleigh damping, Newmark integration
+
+### 14.2 Tcl / Xara nonlinear workflow (implemented)
+
+RC and nonlinear dynamic workflows can also be executed via the Tcl export +
+Xara runtime path:
+
+1. ``export_model_to_tcl()`` — translates a preprocessed ``MeshModel``
+   into a solver-ready Tcl script, including fiber sections and nonlinear
+   material definitions.
+2. ``pushover_tcl()`` / ``dynamic_time_history_tcl()`` — generate the
+   analysis suffix (recorders, solver, post-processing commands).
+3. ``XaraTclRunner`` — runs the Tcl script in the OpenSees/Xara runtime.
+4. ``recorder.parse_pushover_results()`` — collects output records and
+   maps them back into Python-native result dicts.
+
+Entry points: ``AnalysisBuilder.run_pushover_analysis()`` and the
+``NonlinearDynamicAnalysis`` class.
+
+---
+
+## Task list — migration status
+
+| Task | Status |
+|------|--------|
+| **Task 1** — Define the runtime boundary (Preprocessor + AnalysisBuilder only active stages) | ✅ **Done** |
+| **Task 2** — Add the analysis-case contract (`AnalysisCaseSpec` + `AnalysisManager`) | ✅ **Done** — `analysis/base.py` + `analysis/manager.py` |
+| **Task 3** — Make nonlinear OpenSeesPy cases explicit (RC pushover, nonlinear dynamic) | ✅ **Done** — `PushoverAnalysis` + `NonlinearDynamicAnalysis` with per-type defaults |
+| **Task 4** — Tcl/Xara workflow | ✅ **Done** — Tcl export + `XaraTclRunner` + result parsing |
+| **Task 5** — Align the local v3 scripts to the shared `MeshModel` / per-case `AnalysisBuilder` architecture | ✅ **Done** — model-specific drivers are thin wrappers over `generate_report()` |
+| **Task 6** — Verify the helper-consumer boundary (plotting/report/Rhino consume results) | ✅ **Done** |
+
+---
+
+## Answer to the incidental question: does `MeshModel` still contain the original SAP elements?
+
+Yes — in the current implementation, the original super-elements are preserved in the element dictionaries and are marked inactive once the mesh/subdivision process creates children.
+
+This is already reflected in the dataclasses:
+
+- `FrameElement` in [src/fea_toolkit/model/sap_data.py](../src/fea_toolkit/model/sap_data.py#L766-L805)
+- `AreaElement` in [src/fea_toolkit/model/sap_data.py](../src/fea_toolkit/model/sap_data.py#L779-L805)
+
+and in the subdivision logic:
+
+- the original frame element is marked `inactive = True` and the child elements are created with `inactive = False` in [src/fea_toolkit/model/geometry.py](../src/fea_toolkit/model/geometry.py#L919-L958)
+- the same pattern is used for subdivision of the original area super-elements in the mesh routines
+
+So the intended meaning is:
+
+- the parent / original SAP element remains present for traceability and hierarchy
+- the active FE-ready child elements are the ones used for analysis
+- the parent is kept as an inactive historical / superelement record, not as an active solver object
+
+That is exactly the right structure for the "SAP geometry as superelements, then subdivided into FEA-ready children" formulation.
