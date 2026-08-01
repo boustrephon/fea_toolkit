@@ -124,22 +124,26 @@ def _resolve_pushover_data(
         for si in range(n_step):
             sd = {"step": int(step_arr[si]), "frame_forces": {}, "shell_forces": {}}
 
-            # Frame forces for this step
+            # Frame forces for this step — only iterate components that
+            # were actually archived (missing ones are skipped).
             if n_frame > 0 and frame_arrays:
                 for fi in range(n_frame):
                     eid = str(frame_sap_id[fi])
                     ff = {}
                     for key in comp_keys:
-                        ff[key] = float(frame_arrays[key][si, fi])
+                        if key in frame_arrays:
+                            ff[key] = float(frame_arrays[key][si, fi])
                     sd["frame_forces"][eid] = ff
 
-            # Shell forces for this step
+            # Shell forces for this step — same guard against missing
+            # archived components.
             if n_shell > 0 and shell_arrays:
                 for si_shell in range(n_shell):
                     aid = str(shell_sap_id[si_shell])
                     sf = {}
                     for key in shell_comp_keys:
-                        sf[key] = float(shell_arrays[key][si, si_shell])
+                        if key in shell_arrays:
+                            sf[key] = float(shell_arrays[key][si, si_shell])
                     sd["shell_forces"][aid] = sf
 
             # Node displacements
@@ -195,7 +199,6 @@ def _resolve_pushover_data(
 
 def _compute_hinge_ratios(
     frame_forces: Dict[str, Dict[str, float]],
-    range_based: bool = True,
     use_biaxial: bool = False,
 ) -> Dict[str, Tuple[float, float]]:
     """Compute hinge yield ratios for each frame element end.
@@ -207,10 +210,10 @@ def _compute_hinge_ratios(
 
     Returns ``{eid: (ratio_i, ratio_j)}``.
     """
+    peak_mz: Dict[str, float] = {}
     if use_biaxial:
         # Biaxial SRSS mode: track peak My and Mz separately per element
         peak_my: Dict[str, float] = {}
-        peak_mz: Dict[str, float] = {}
         for eid, ff in frame_forces.items():
             my_i = abs(ff.get('my_i', 0.0))
             my_j = abs(ff.get('my_j', 0.0))
@@ -236,7 +239,6 @@ def _compute_hinge_ratios(
         return ratios
 
     # Uniaxial mode (default): ratio = |Mz| / peak|Mz|
-    peak_mz: Dict[str, float] = {}
     for eid, ff in frame_forces.items():
         mz_i = abs(ff.get('mz_i', 0.0))
         mz_j = abs(ff.get('mz_j', 0.0))
@@ -323,27 +325,86 @@ def _compute_hinge_ratios_all_steps(
     return step_ratios
 
 
-def _ratio_to_color(ratio: float, max_r: float = 1.0) -> Tuple[float, float, float]:
-    """Map hinge ratio [0, max_r] to (blue, yellow, red) RGB.
+_DEFAULT_HINGE_CMAP = "plasma"
 
-    Expects *ratio* ≤ *max_r*.  Colours:
 
-    * **Blue** (ratio < 0.5·max_r) — elastic.
-    * **Yellow** (0.5 ≤ ratio < max_r) — yielding.
-    * **Red** (ratio ≥ max_r) — fully yielded.
+def _sample_cmap(points: List[float], cmap_name: str) -> List[Tuple[float, float, float]]:
+    """Sample a matplotlib colormap at normalised positions.
+
+    Returns a list of ``(r, g, b)`` tuples in 0..1 for each *points* value
+    (each clamped to ``[0, 1]``).  Falls back to a fixed (blue, yellow, red)
+    palette if matplotlib is unavailable or the colormap name is unknown.
+    """
+    try:
+        # Modern API (Matplotlib 3.7+); get_cmap is deprecated.
+        import matplotlib.colormaps as _mcmaps
+        cmap = _mcmaps.get_cmap(cmap_name)
+        return [tuple(float(c) for c in cmap(min(max(p, 0.0), 1.0))[:3])
+                for p in points]
+    except Exception:
+        try:
+            # Legacy fallback for older Matplotlib (< 3.5).
+            from matplotlib import cm as _mcm
+            cmap = _mcm.get_cmap(cmap_name)
+            return [tuple(float(c) for c in cmap(min(max(p, 0.0), 1.0))[:3])
+                    for p in points]
+        except Exception:
+            # Fallback (red-green colour-blind safe defaults preserved).
+            return [(0.3, 0.45, 0.69), (0.9, 0.8, 0.2), (0.9, 0.25, 0.2)]
+
+
+def _rgb_to_hex(rgb: Tuple[float, float, float]) -> str:
+    """Convert an (r, g, b) tuple in [0, 1] to a ``#RRGGBB`` hex string."""
+    r = max(0.0, min(1.0, rgb[0]))
+    g = max(0.0, min(1.0, rgb[1]))
+    b = max(0.0, min(1.0, rgb[2]))
+    return "#{:02x}{:02x}{:02x}".format(int(round(r * 255)),
+                                        int(round(g * 255)),
+                                        int(round(b * 255)))
+
+
+def _ratio_to_color(ratio: float, max_r: float = 1.0,
+                    cmap_name: str = _DEFAULT_HINGE_CMAP) -> Tuple[float, float, float]:
+    """Map hinge ratio [0, max_r] to an RGB colour.
+
+    Colours are sampled from the named matplotlib colormap at positions
+    0.0 (elastic), 0.5 (yielding) and 1.0 (fully yielded) with a continuous
+    interpolation between them.  ``cmap_name`` defaults to
+    :data:`_DEFAULT_HINGE_CMAP` (``"plasma"`` — perceptually uniform and
+    colour-blind safe).  The 0.5 / 1.0 thresholds are fixed:
+
+    * **elastic** (ratio < 0.5·max_r).
+    * **yielding** (0.5 ≤ ratio < max_r).
+    * **fully yielded** (ratio ≥ max_r).
+
+    Args:
+        ratio: Hinge ratio in ``[0, max_r]`` (values above *max_r* clamp).
+        max_r: Normalisation denominator (expected yield value).
+        cmap_name: Matplotlib colormap name (e.g. ``"plasma"``, ``"viridis"``,
+            ``"cividis"``); falls back to blue/yellow/red if unavailable.
+
+    Returns:
+        ``(r, g, b)`` tuple with components in ``[0, 1]``.
     """
     if max_r < 1e-12:
-        return (0.3, 0.45, 0.69)  # default blue
+        try:
+            return _sample_cmap([0.0], cmap_name)[0]
+        except Exception:
+            return (0.3, 0.45, 0.69)  # default blue
     norm = min(ratio / max_r, 1.0) if max_r > 0 else 0.0
-    # Interpolate: blue (0) -> yellow (0.5) -> red (1.0)
+    samples = _sample_cmap([0.0, 0.5, 1.0], cmap_name)
+    c0, c1, c2 = samples[0], samples[1], samples[2]
+    # Interpolate: c0 (0) -> c1 (0.5) -> c2 (1.0)
     if norm < 0.5:
-        # Blue to yellow: (R,G) from (0.3,0.45) to (1,1); B from 0.69 to 0
         t = norm / 0.5
-        return (0.3 + 0.7 * t, 0.45 + 0.55 * t, 0.69 * (1.0 - t))
+        return (c0[0] + (c1[0] - c0[0]) * t,
+                c0[1] + (c1[1] - c0[1]) * t,
+                c0[2] + (c1[2] - c0[2]) * t)
     else:
-        # Yellow to red: R stays 1, G drops from 1 to 0, B stays 0
         t = (norm - 0.5) / 0.5
-        return (1.0, 1.0 - t, 0.0)
+        return (c1[0] + (c2[0] - c1[0]) * t,
+                c1[1] + (c2[1] - c1[1]) * t,
+                c1[2] + (c2[2] - c1[2]) * t)
 
 
 
@@ -355,17 +416,22 @@ def _add_hinge_color_legend(
     width: float = 0.06,
     height: float = 0.6,
     n_colors: int = 256,
+    cmap_name: str = _DEFAULT_HINGE_CMAP,
 ) -> None:
-    """Add a scalar bar / colour legend for the hinge ratio blue→yellow→red scale.
+    """Add a scalar bar / colour legend for the hinge ratio scale.
 
     Builds a :class:`pyvista.LookupTable` using the same interpolation
     as :func:`_ratio_to_color` and attaches it to the plotter.
 
-    The colour scale maps the normalised yield ratio to:
+    The colour scale maps the normalised yield ratio (threshold 0.5) to:
 
-    * **Blue** (ratio < 0.5) — elastic.
-    * **Yellow** (0.5 ≤ ratio < 1.0) — yielding.
-    * **Red** (ratio ≥ 1.0) — fully yielded.
+    * **elastic** (ratio < 0.5) — sampled at cmap position 0.0.
+    * **yielding** (0.5 ≤ ratio < 1.0) — sampled at cmap position 0.5.
+    * **fully yielded** (ratio ≥ 1.0) — sampled at cmap position 1.0.
+
+    Colours come from the named matplotlib colormap (default
+    :data:`_DEFAULT_HINGE_CMAP` — ``"plasma"``, which is perceptually
+    uniform and colour-blind safe).
 
     Internally uses ``pyvista.LookupTable`` with ``n_values`` and ``values``
     attributes (not ``number_of_colors`` or ``table``, which were removed
@@ -380,6 +446,7 @@ def _add_hinge_color_legend(
         width, height: Normalised size of the scalar bar.
         n_colors: Number of discrete colour steps in the lookup table
             (sets ``LookupTable.n_values``).
+        cmap_name: Matplotlib colormap name for the colour scale.
     """
     import numpy as np
     try:
@@ -387,19 +454,24 @@ def _add_hinge_color_legend(
     except ImportError:
         return
 
-    # Build lookup table using same blue→yellow→red logic as _ratio_to_color
+    # Build lookup table using same sampled-colormap logic as _ratio_to_color
     lut = pv.LookupTable()
     lut.n_values = n_colors
     lut.scalar_range = (0.0, 1.0)
+    c0, c1, c2 = _sample_cmap([0.0, 0.5, 1.0], cmap_name)
     colors = np.zeros((n_colors, 4), dtype=np.uint8)
     for i in range(n_colors):
         t = i / (n_colors - 1)
         if t < 0.5:
             s = t * 2.0
-            r, g, b = s, s, 1.0 - s
+            r = c0[0] + (c1[0] - c0[0]) * s
+            g = c0[1] + (c1[1] - c0[1]) * s
+            b = c0[2] + (c1[2] - c0[2]) * s
         else:
             s = (t - 0.5) * 2.0
-            r, g, b = 1.0, 1.0 - s, 0.0
+            r = c1[0] + (c2[0] - c1[0]) * s
+            g = c1[1] + (c2[1] - c1[1]) * s
+            b = c1[2] + (c2[2] - c1[2]) * s
         colors[i] = (int(r * 255), int(g * 255), int(b * 255), 255)
     lut.values = colors
 
@@ -592,17 +664,19 @@ def plot_plastic_hinge_formation(
     show_deformed: bool = True,
     notebook: bool = False,
     use_biaxial: bool = False,
+    colormap: str = _DEFAULT_HINGE_CMAP,
     **kwargs,
 ) -> Optional[Any]:
     """Visualise plastic hinge formation as 3D coloured blobs.
 
     Displays frame element end hinges as coloured spheres (rendered as
     GPU impostors via ``render_points_as_spheres=True`` for efficiency)
-    at the element node locations.  Colour indicates yield state:
+    at the element node locations.  Colour indicates yield state
+    (threshold 0.5, sampled from the named matplotlib colormap):
 
-    * **blue** (ratio < 0.7) — elastic
-    * **yellow** (0.7 ≤ ratio < 1.0) — yielding
-    * **red** (ratio ≥ 1.0) — fully yielded
+    * **elastic** (ratio < 0.5) — sampled at cmap position 0.0.
+    * **yielding** (0.5 ≤ ratio < 1.0) — sampled at cmap position 0.5.
+    * **fully yielded** (ratio ≥ 1.0) — sampled at cmap position 1.0.
 
     When *step* is ``None`` (default), a slider widget is added to scrub
     through all push steps.  When *plotter* is provided, the hinge blobs
@@ -627,6 +701,10 @@ def plot_plastic_hinge_formation(
         show_deformed: If True, place hinge blobs at deformed node
             positions.  Requires node displacement data.
         notebook: Return plotter for Jupyter embedding.
+        colormap: Matplotlib colormap name for the yield-ratio colour
+            scale (default ``"plasma"`` — perceptually uniform and
+            colour-blind safe).  Other accessible options include
+            ``"viridis"``, ``"cividis"``, ``"turbo"``.
         **kwargs: Passed to ``pyvista.Plotter()``.
 
     Returns:
@@ -737,7 +815,8 @@ def plot_plastic_hinge_formation(
         hinge_cloud["ratio"] = ratios_arr
 
         # Compute colours for initial state
-        colors = np.array([_ratio_to_color(r, max_ratio) for r in ratios_arr])
+        colors = np.array([_ratio_to_color(r, max_ratio, cmap_name=colormap)
+                           for r in ratios_arr])
         hinge_cloud["colors"] = colors
 
         # Render as points with GPU sphere impostors
@@ -762,7 +841,8 @@ def plot_plastic_hinge_formation(
                     return
                 pts_new = np.array([(x, y, z) for x, y, z, _ in pts_list], dtype=float)
                 ratios_new = np.array([r for _, _, _, r in pts_list], dtype=float)
-                colors_new = np.array([_ratio_to_color(r, max_ratio) for r in ratios_new])
+                colors_new = np.array([_ratio_to_color(r, max_ratio, cmap_name=colormap)
+                                       for r in ratios_new])
 
                 hinge_cloud.points = pts_new
                 hinge_cloud["ratio"] = ratios_new
@@ -786,14 +866,16 @@ def plot_plastic_hinge_formation(
             if pts_list:
                 pts_new = np.array([(x, y, z) for x, y, z, _ in pts_list], dtype=float)
                 ratios_new = np.array([r for _, _, _, r in pts_list], dtype=float)
-                colors_new = np.array([_ratio_to_color(r, max_ratio) for r in ratios_new])
+                colors_new = np.array([_ratio_to_color(r, max_ratio, cmap_name=colormap)
+                                       for r in ratios_new])
                 hinge_cloud.points = pts_new
                 hinge_cloud["ratio"] = ratios_new
                 hinge_cloud["colors"] = colors_new
 
     # ── Add colour legend ────────────────────────────────────────
     if own_plotter and hinge_locs_per_step and hinge_locs_per_step[0]:
-        _add_hinge_color_legend(plotter, title="Yield Ratio (M/M_y)")
+        _add_hinge_color_legend(plotter, title="Yield Ratio (M/M_y)",
+                                cmap_name=colormap)
 
     # ── Finalise ─────────────────────────────────────────────────
     if own_plotter:
@@ -815,17 +897,20 @@ def plot_plastic_hinge_heatmap(
     drifts: Optional[List[float]] = None,
     figsize: Tuple[float, float] = (10, 8),
     save_path: Optional[str] = None,
+    colormap: str = _DEFAULT_HINGE_CMAP,
 ) -> Optional[Any]:
     """2D heatmap giving a birds‑eye overview of plastic hinge formation.
 
     Plots a colour grid where **each cell** represents one frame element
     (Y‑axis = mid‑height elevation) at one push step (X‑axis).  The colour
-    shows the yield state:
+    shows the yield state (threshold 0.5, sampled from the named
+    matplotlib colormap — same convention as
+    :func:`plot_plastic_hinge_formation`):
 
     * **Gray** — no data (element not recorded at that step)
-    * **Blue** — elastic (peak |Mz| / My < 0.7)
-    * **Yellow** — yielding (0.7 ≤ ratio < 1.0)
-    * **Red** — fully yielded (ratio ≥ 1.0)
+    * **Elastic** (ratio < 0.5) — sampled at cmap position 0.0
+    * **Yielding** (0.5 ≤ ratio < 1.0) — sampled at cmap position 0.5
+    * **Yielded** (ratio ≥ 1.0) — sampled at cmap position 1.0
 
     Parameters
     ----------
@@ -863,7 +948,9 @@ def plot_plastic_hinge_heatmap(
     import numpy as np
 
     # ── Step 1 – Resolve data ──────────────────────────────────────
-    push_data, _, _, _ = _resolve_pushover_data(data, direction)
+    # Preserve node_coords / frame_eid_to_nodes so Method B can derive
+    # frame mid-height elevations for NPZ inputs.
+    push_data, node_coords, _, frame_eid_to_nodes = _resolve_pushover_data(data, direction)
     if not push_data:
         print("No pushover data found.")
         return None
@@ -877,13 +964,19 @@ def plot_plastic_hinge_heatmap(
     step_eids: List[set] = []
     per_step_ratios: List[Dict[str, float]] = []
 
-    for sidx, step_entry in enumerate(push_data):
+    all_frame_forces = [
+        step_entry.get("frame_forces", {}) for step_entry in push_data
+    ]
+    for step_entry in push_data:
         frame_forces = step_entry.get("frame_forces", {})
-        eids_this = set(frame_forces.keys())
-        step_eids.append(eids_this)
-        all_eids.update(eids_this)
+        step_eids.append(set(frame_forces.keys()))
+        all_eids.update(frame_forces.keys())
 
-        ratios = _compute_hinge_ratios(frame_forces)  # {eid: (ri, rj)}
+    # Compute hinge ratios once using capacities fixed across all steps
+    # so the colour mapping is consistent for the whole pushover.
+    step_ratios_all = _compute_hinge_ratios_all_steps(all_frame_forces)
+    for sidx in range(n_step):
+        ratios = step_ratios_all[sidx] if sidx < len(step_ratios_all) else {}
         max_ratios = {}
         for eid, (ri, rj) in ratios.items():
             max_ratios[eid] = max(ri, rj)
@@ -912,11 +1005,21 @@ def plot_plastic_hinge_heatmap(
                 if ni and nj:
                     elevations[eid] = (ni.z + nj.z) / 2.0
     else:
-        # Method B: NPZ raw data has node_coords
-        raw = push_data[0].get("node_coords", {})
-        if raw:
+        # Method B: NPZ raw data — derive each frame's mid-height
+        # elevation from node_coords via frame_eid_to_nodes.
+        if node_coords and frame_eid_to_nodes:
             for eid in all_eids:
-                # Try to find element coords from the first step
+                pair = frame_eid_to_nodes.get(eid)
+                if pair is None:
+                    continue
+                ni_tag, nj_tag = pair
+                ci = node_coords.get(ni_tag)
+                cj = node_coords.get(nj_tag)
+                if ci is not None and cj is not None:
+                    elevations[eid] = (ci[2] + cj[2]) / 2.0
+        # Retain legacy fallback for embedded mid_z / z_i / z_j keys.
+        if not elevations:
+            for eid in all_eids:
                 for step_entry in push_data:
                     ff = step_entry.get("frame_forces", {}).get(eid)
                     if ff and "mid_z" in ff:
@@ -961,11 +1064,19 @@ def plot_plastic_hinge_heatmap(
     # ── Step 5 – Plot with pcolormesh ──────────────────────────────
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Colormap: gray = no data (NaN → sentinel -1), blue = elastic,
-    # yellow = yielding, red = yielded
-    cmap = ListedColormap(["#999999", "#1f77b4", "#ff7f0e", "#d62728"])
-    # Boundaries: -1 (no data), 0–0.7 (elastic), 0.7–1.0 (yielding), ≥1.0 (yielded)
-    bounds = [-0.5, 0.0, 0.7, 1.0, 2.0]
+    # Colormap: gray = no data (NaN → sentinel -1), then 3 discrete bins
+    # sampled from the named matplotlib colormap:
+    #   elastic (ratio < 0.5), yielding (0.5 ≤ ratio < 1.0), yielded (≥ 1.0)
+    # This matches the 0.5 threshold used by _ratio_to_color() in the 3D view.
+    _c0, _c1, _c2 = _sample_cmap([0.0, 0.5, 1.0], colormap)
+    cmap = ListedColormap([
+        "#999999",
+        _rgb_to_hex(_c0),
+        _rgb_to_hex(_c1),
+        _rgb_to_hex(_c2),
+    ])
+    # Boundaries: -1 (no data), 0–0.5 (elastic), 0.5–1.0 (yielding), ≥1.0 (yielded)
+    bounds = [-0.5, 0.0, 0.5, 1.0, 2.0]
     norm = BoundaryNorm(bounds, cmap.N)
 
     # Fill NaN with -1 so BoundaryNorm maps them to gray
@@ -1019,7 +1130,6 @@ def plot_plastic_hinge_heatmap(
 
 def _compute_shell_damage(
     shell_forces: Dict[str, Dict[str, float]],
-    range_based: bool = True,
     yield_stress: Optional[float] = None,
     thickness: Optional[float] = None,
 ) -> Dict[str, Tuple[float, float]]:
@@ -1552,8 +1662,6 @@ def plot_pushover_envelope(
                 )
 
     # ── Finalise ─────────────────────────────────────────────────
-    is_moment = quantity.startswith("M")
-    kind = "Moment" if is_moment else "Force"
     plotter.add_text(f"{quantity} (local)  (red = +ve, blue = −ve)",
                      position='lower_edge', font_size=10)
     _set_isometric_view(plotter)
@@ -1876,9 +1984,12 @@ def animate_pushover_deformation(
                                 new_pts.extend(v)
                             new_fcolors.append(
                                 step_shell_cols.get(aid, (0.6, 0.6, 0.6)))
-                    if new_pts:
+                    if new_pts and len(new_pts) % 3 == 0:
+                        # Reshape the flat coordinate list into (N, 3)
+                        # before assignment, matching the initial mesh
+                        # construction.
                         shell_actor.mapper.dataset.points = \
-                            np.array(new_pts, dtype=float)
+                            np.array(new_pts, dtype=float).reshape(-1, 3)
                         shell_actor.mapper.dataset.cell_data["colors"] = \
                             np.array(new_fcolors, dtype=float)
                         shell_actor.mapper.Update()
@@ -3107,15 +3218,18 @@ def _render_scene(plotter, data, *,
                                  show_edges=True, edge_color=c, line_width=0.8)
 
     # ── Nodes ───────────────────────────────────────────────────
+    # Deduplicate by tag: NPZ nodes may be dual-keyed (SAP ID + int tag).
+    # Built once before the marker and label blocks so node labels work
+    # even when show_nodes is False.
+    seen_tags = set()
+    unique_nodes = []
+    for n in nodes.values():
+        tag = n.get("tag")
+        if tag is not None and tag not in seen_tags:
+            seen_tags.add(tag)
+            unique_nodes.append(n)
+
     if show_nodes:
-        # Deduplicate by tag: NPZ nodes may be dual-keyed (SAP ID + int tag)
-        seen_tags = set()
-        unique_nodes = []
-        for n in nodes.values():
-            tag = n.get("tag")
-            if tag is not None and tag not in seen_tags:
-                seen_tags.add(tag)
-                unique_nodes.append(n)
         npts = np.array([[n["x"], n["y"], n["z"]]
                          for n in unique_nodes if _in_limits([n["x"], n["y"], n["z"]])])
         if len(npts):
@@ -4549,7 +4663,6 @@ def plot_force_diagram_3d(source, force_data=None, *,
         print(f"No {quantity} data to plot.")
         return None
 
-    kind = "Moment" if is_moment else "Force"
     plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)",
                      position='lower_edge', font_size=10)
     if title:

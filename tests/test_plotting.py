@@ -11,6 +11,7 @@ Exercises:
 import warnings
 import numpy as np
 import pytest
+import matplotlib
 
 try:
     import pyvista as pv
@@ -24,6 +25,15 @@ except ImportError:
 # This is a PyVista issue where it attempts to load its trame/Jupyter
 # backend even in OFF_SCREEN mode.
 warnings.filterwarnings("ignore", message="Failed to use notebook backend")
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _configure_matplotlib():
+    """Set the Agg backend once per module and close all figures on exit."""
+    matplotlib.use("Agg")
+    yield
+    import matplotlib.pyplot as plt
+    plt.close("all")
 
 
 # ============================================================================
@@ -716,9 +726,8 @@ class TestPushoverHeatmap:
 
     def test_heatmap_basic(self, raw_pushover_data):
         """Heatmap returns a matplotlib Figure with expected shape."""
+        import matplotlib.pyplot as plt
         from fea_toolkit.plotting.viz import plot_plastic_hinge_heatmap
-        import matplotlib
-        matplotlib.use("Agg")  # headless backend
 
         fig = plot_plastic_hinge_heatmap(
             raw_pushover_data,
@@ -734,12 +743,12 @@ class TestPushoverHeatmap:
         # Verify axes labels
         assert fig.axes[0].get_xlabel() == "Push step"
         assert "elevation" in fig.axes[0].get_ylabel().lower()
+        plt.close(fig)
 
     def test_heatmap_missing_data_gray(self, raw_pushover_data):
         """Element missing in a step should show as gray (no data)."""
+        import matplotlib.pyplot as plt
         from fea_toolkit.plotting.viz import plot_plastic_hinge_heatmap
-        import matplotlib
-        matplotlib.use("Agg")
 
         fig = plot_plastic_hinge_heatmap(
             raw_pushover_data,
@@ -758,12 +767,12 @@ class TestPushoverHeatmap:
         assert any("No data" in txt for txt in tick_texts), (
             f"Expected 'No data' in colorbar ticks, got: {tick_texts}"
         )
+        plt.close(fig)
 
     def test_heatmap_roof_drift_xaxis(self, raw_pushover_data):
         """Heatmap with drift-based X-axis."""
+        import matplotlib.pyplot as plt
         from fea_toolkit.plotting.viz import plot_plastic_hinge_heatmap
-        import matplotlib
-        matplotlib.use("Agg")
 
         drifts = [0.1, 0.3, 0.6, 1.0, 1.8]  # 5 drift values
         fig = plot_plastic_hinge_heatmap(
@@ -774,12 +783,13 @@ class TestPushoverHeatmap:
         )
         assert fig is not None
         assert "drift" in fig.axes[0].get_xlabel().lower()
+        plt.close(fig)
 
     def test_heatmap_save_path(self, raw_pushover_data, tmp_path):
         """Heatmap saves to file when save_path is provided."""
+        import os
+        import matplotlib.pyplot as plt
         from fea_toolkit.plotting.viz import plot_plastic_hinge_heatmap
-        import matplotlib
-        matplotlib.use("Agg")
 
         save_path = str(tmp_path / "test_heatmap.png")
         fig = plot_plastic_hinge_heatmap(
@@ -789,14 +799,12 @@ class TestPushoverHeatmap:
         )
         assert fig is not None
         # Check the file was created
-        import os
         assert os.path.exists(save_path)
+        plt.close(fig)
 
     def test_heatmap_no_data(self):
         """Heatmap with empty data returns None."""
         from fea_toolkit.plotting.viz import plot_plastic_hinge_heatmap
-        import matplotlib
-        matplotlib.use("Agg")
 
         fig = plot_plastic_hinge_heatmap([], figsize=(6, 4))
         assert fig is None
@@ -1397,9 +1405,8 @@ class TestFrameForceEvolution:
 
     def test_force_evolution_basic(self, force_evolution_data):
         """Basic force evolution returns Figure with correct subplots."""
+        import matplotlib.pyplot as plt
         from fea_toolkit.plotting.viz import plot_frame_force_evolution
-        import matplotlib
-        matplotlib.use("Agg")
 
         fig = plot_frame_force_evolution(
             force_evolution_data, quantity="Mz", figsize=(6, 4),
@@ -1407,12 +1414,12 @@ class TestFrameForceEvolution:
         assert fig is not None
         # 2 elements should produce 2 subplots (1 row × 2 cols)
         assert len(fig.axes) == 2
+        plt.close(fig)
 
     def test_force_evolution_with_yield(self, force_evolution_data):
         """Yield moment is drawn as a dashed line."""
+        import matplotlib.pyplot as plt
         from fea_toolkit.plotting.viz import plot_frame_force_evolution
-        import matplotlib
-        matplotlib.use("Agg")
 
         fig = plot_frame_force_evolution(
             force_evolution_data, quantity="Mz",
@@ -1420,34 +1427,33 @@ class TestFrameForceEvolution:
             figsize=(6, 4),
         )
         assert fig is not None
+        plt.close(fig)
 
     def test_force_evolution_no_data(self):
         """Empty data returns None."""
         from fea_toolkit.plotting.viz import plot_frame_force_evolution
-        import matplotlib
-        matplotlib.use("Agg")
 
         fig = plot_frame_force_evolution([], figsize=(6, 4))
         assert fig is None
 
     def test_force_evolution_quantity_v(self, force_evolution_data):
         """Force quantity 'V' (shear) works."""
+        import matplotlib.pyplot as plt
         from fea_toolkit.plotting.viz import plot_frame_force_evolution
-        import matplotlib
-        matplotlib.use("Agg")
 
         fig = plot_frame_force_evolution(
             force_evolution_data, quantity="V", figsize=(6, 4),
         )
         assert fig is not None
+        plt.close(fig)
 
     def test_force_evolution_quantity_n(self, force_evolution_data):
         """Force quantity 'N' (axial) works."""
+        import matplotlib.pyplot as plt
         from fea_toolkit.plotting.viz import plot_frame_force_evolution
-        import matplotlib
-        matplotlib.use("Agg")
 
         fig = plot_frame_force_evolution(
             force_evolution_data, quantity="N", figsize=(6, 4),
         )
         assert fig is not None
+        plt.close(fig)
