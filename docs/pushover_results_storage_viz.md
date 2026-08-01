@@ -266,12 +266,24 @@ For the admin building: `Admin_0.7E_short term_pushover_+X.npz`
 - **X-axis**: Push step (or roof drift %)
 - **Y-axis**: Element elevation (Z coordinate, sorted)
 - **Color**: Yield state per element per step
-  - Blue = elastic (response < 0.7 × yield capacity)
-  - Yellow = yielding (0.7–1.0 × yield capacity)
-  - Red = fully yielded (≥ yield capacity)
+  - Gray = no data (element not recorded at that step)
+  - Elastic (ratio < 0.5) = sampled at cmap position 0.0
+  - Yielding (0.5 ≤ ratio < 1.0) = sampled at cmap position 0.5
+  - Fully yielded (ratio ≥ 1.0) = sampled at cmap position 1.0
 - Each horizontal slice is one element's state evolution.
+- The three sampled colours come from the named matplotlib colormap
+  (`colormap="plasma"` by default, see §4.5) — the same 0.5 threshold and
+  palette used by the 3D hinge view.
 
-**Yield detection**: Compare per-step `Mz` envelope to section yield moment `My = Fy × S` (plastic section modulus). For `forceBeamColumn` + fiber sections, also query section force-deformation at integration points.
+**Yield detection**: The hinge ratio is **range-normalised**: for each
+element it is `ratio = |Mz| / peak|Mz|` across all push steps (and the SRSS
+biaxial variant combining `My`/`Mz` when `use_biaxial=True`), *not*
+`Fy × S`.  The ratio therefore measures how far an element has progressed
+toward its own peak demand, not an absolute yield-capacity check.  For RC
+and axially-loaded members, rely on the fiber-section force-deformation
+response (`forceBeamColumn` + fiber sections) to identify true yielding;
+hinge classification output follows the element-specific capacity
+criterion.
 
 ### 4.2 `plot_shell_damage_map()`
 
@@ -323,9 +335,16 @@ def animate_pushover_deformation(
 Two private helper functions generate PyVista colour legends for pushover visualizations:
 
 **`_add_hinge_color_legend()`** — adds a scalar bar for the frame hinge yield ratio scale:
-- **Blue** (ratio < 0.5) — elastic
-- **Yellow** (0.5 ≤ ratio < 1.0) — yielding
-- **Red** (ratio ≥ 1.0) — fully yielded
+- **Colour 1** (ratio < 0.5) — elastic (cmap position 0.0)
+- **Colour 2** (0.5 ≤ ratio < 1.0) — yielding (cmap position 0.5)
+- **Colour 3** (ratio ≥ 1.0) — fully yielded (cmap position 1.0)
+
+The three colours are sampled from the `colormap` parameter (default
+`"plasma"`, a perceptually-uniform colour-blind-safe map) and interpolated
+continuously between them.  The 0.5 threshold is shared with the 2D
+heatmap (`plot_plastic_hinge_heatmap`) so both views always agree.
+Accessible alternates: `"viridis"`, `"cividis"`, `"turbo"`.  Unknown
+colormap names fall back to blue/yellow/red.
 
 **`_add_shell_color_legend()`** — adds a scalar bar for the shell damage index scale:
 - **Green** (ratio < 0.7) — elastic

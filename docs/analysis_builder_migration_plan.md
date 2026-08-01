@@ -89,9 +89,9 @@ the old `AnalysisDefaults` deprecation path.
 | Planned | Status | Location |
 |---------|--------|----------|
 | RC fiber sections (`Concrete01`, `Steel02` via `forceBeamColumn`) | ✅ **Done** | `ConcreteRectangularSection.to_fiber_patches()` / `ConcreteCircularSection.to_fiber_patches()` → `AnalysisBuilder._create_single_section()` (3 material tags: cover `Concrete01`, core `Concrete01`, rebar `Steel02`) |
-| Automatic `create_fiber_sections=True` promotion | ✅ **Done** | `rebuild_with_fiber_sections()` — falls back silently to elastic if `to_fiber_patches()` raises `NotImplementedError` |
+| Automatic `create_fiber_sections=True` promotion | ✅ **Done** | `rebuild_with_fiber_sections()` — if `to_fiber_patches()` raises `NotImplementedError`, the builder emits a `UserWarning` and falls back to an elastic section (no silent fallback) |
 | Rebar material resolution (config override → SAP2000 lookup → framework defaults) | ✅ **Done** | `AnalysisBuilder` + `export_mesh_model_to_tcl` (covered by `tests/test_rebar_material.py`) |
-| Mander confinement wiring | ⚠️ **Partial** | `model/confinement.py` has `mander_confined()`; builder currently uses a 1.25× strength / 2.0× strain heuristic for the core patch rather than calling it |
+| Mander confinement wiring | ✅ **Done** | `AnalysisBuilder._create_single_section()` calls `fiber_confinement(Fc, tie_fy)` when the section exposes it, and uses the returned `fcc/ecc/ecu` for the core `Concrete01` patch when confinement data is present; a 1.25× strength / 2.0× strain heuristic is only used as a fallback when no tie data is available. `model/confinement.py` provides `mander_confined()` |
 | End-to-end RC validation benchmark | ✅ **Done** | `examples/sample_model.py` `make_rc_frame_model()` (single-storey RC frame, kN-m units, 3 materials) + `tests/test_workflows.py` `test_compute_performance_point` (strengthened assertions: `mu > 1`, converged, plausible `M_eff`) — see `docs/csm_test_model_plan.md` |
 | Pushover solver tuning for RC | ✅ **Done** | `_PUSHOVER_RC_DEFAULTS` uses `NewtonLineSearch`, `NormDispIncr 1e-6`, 10 substeps |
 

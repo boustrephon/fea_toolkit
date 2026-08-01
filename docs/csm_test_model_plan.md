@@ -2,7 +2,7 @@
 
 ## Status: ✅ Complete — all three operations implemented
 
-**Date**: 2026-07-31  
+**Date**: 2026-08-01  
 **Last updated**: 2026-08-01  
 **Context**: The existing CSM integration test `test_compute_performance_point` in
 `tests/test_workflows.py` originally used an ISection cantilever which gave degenerate ADRS
@@ -87,13 +87,18 @@ Both section types therefore trigger `rebuild_with_fiber_sections()` automatical
 
 ### What stays the same
 
-- Geometry: 6 nodes (2-storey, 1-bay, 4 m bay, 3 m storey)
-  - Nodes: 1:(0,0,0), 2:(4,0,0), 3:(0,0,3), 4:(4,0,3), 5:(0,0,6), 6:(4,0,6)
-  - Elements: C1–C4 columns (tags 1–4), B1–B2 beams (tags 5–6)
+- Geometry: 4 nodes (1-storey, 1-bay, 4 m bay, 3 m storey)
+  - Nodes: 1:(0,0,0), 2:(4,0,0), 3:(0,0,3), 4:(4,0,3)
+  - Elements: "1"–"2" columns (tags 1–2), "3" beam (tag 3)
 - Column sections: `ConcreteRectangularSection` 300×300 mm, cover=40 mm, 4φ16 top/bot
 - Beam sections: `RectangularSection` 300×500 mm, referencing `"C30"`
-- Loads: DEAD self-weight only; `MassSource(elements=True)`
-- No `frame_dist_loads` — lateral loads generated at pushover time by `lateral_load_type='uniform'`
+- Loads: DEAD self-weight (`LoadPattern("DEAD", self_weight_factor=1)`) **plus** a
+  20 kN/m uniform beam floor dead load (`frame_dist_loads` on frame `"3"`)
+- Mass source: `MassSource(elements=True, masses=False, loads=True,
+  load_pattern={"DEAD": 1.0})` — element self-weight *and* DEAD floor loads
+  both contribute to seismic mass
+- Pushover control node: `control_node_tag=4` (roof node, top-right)
+- No lateral `frame_dist_loads` on WIND — lateral loads generated at pushover time by `lateral_load_type='uniform'`
 
 ## Operation 2: Strengthen `test_compute_performance_point` in `tests/test_workflows.py`
 
@@ -102,7 +107,7 @@ Both section types therefore trigger `rebuild_with_fiber_sections()` automatical
 - **Fixture**: `make_rc_frame_model()` → `preprocess_model()` → `AnalysisBuilder` (already correct)
 - **Uniform lateral pushover** (not modal-based): `lateral_load_type='uniform'` (already correct)
 - **Modal analysis**: still run (needed for CSM ADRS conversion) but assertions don't check mode details
-- **Pushover params**: `max_disp=0.3`, `num_steps=50` (was 40), `control_node_tag=6`
+- **Pushover params**: `max_disp=0.3`, `num_steps=50` (was 40), `control_node_tag=4`
 - **CSM params**: use defaults (`max_iter=50`, `tol=0.01`) — don't override to looser values
 
 ### Assertions

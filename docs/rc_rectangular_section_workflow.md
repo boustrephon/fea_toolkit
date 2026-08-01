@@ -105,8 +105,10 @@ Validation: negative cover or cover ≥ half-dimension raises `ValueError`.
 
 1. **Mander** — `fiber_confinement()` result when tie data present (uses `tie_rebar_mat`
    → `RebarMatT` Fy, falling back to `rebar_material` → `RebarMatL` Fy).
-2. **Heuristic (backward compatible)** — `1.25 × f'c` (OpenSeesPy builder) /
-   `1.3 × f'c` (Tcl export) when no tie data.
+2. **Heuristic (backward compatible)** — `1.25 × f'c` (shared by both paths via
+   `RC_NO_TIE_CONFINEMENT_FACTOR` / `RC_NO_TIE_EPSC_FACTOR` in `utils.py`) when
+   no tie data — consistent with the OpenSees Berkeley comparison manual default
+   and Mander-model approximation.
 
 ## 5. Rebar material resolution (3-level)
 
