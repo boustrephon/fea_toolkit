@@ -103,6 +103,41 @@ def _steel02_fy_es(content: str) -> tuple:
     raise AssertionError("No 'uniaxialMaterial Steel02' line in Tcl output")
 
 
+def _builder_steel02_fy_es(mm: MeshModel, config: dict) -> tuple:
+    """Build the domain with fiber sections, returning the Steel02 (Fy, Es).
+
+    Monkeypatches ``ops.uniaxialMaterial`` to capture the Steel02 material
+    arguments as they are issued during ``AnalysisBuilder.build_domain()``
+    (the installed OpenSeesPy exposes no material-introspection API; the
+    project's ``RecordingOpenSees`` proxy is only wired into the Tcl export).
+    """
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    captured: Dict[str, float] = {}
+
+    _original = ops.uniaxialMaterial
+
+    def _recording_uniaxial_material(*args):
+        if args and args[0] == "Steel02" and "Fy" not in captured:
+            captured["Fy"] = args[2]
+            captured["Es"] = args[3]
+        _original(*args)
+
+    ops.uniaxialMaterial = _recording_uniaxial_material
+    try:
+        cfg = {"create_fiber_sections": True, "verbose": False}
+        cfg.update(config)
+        AnalysisBuilder(mm, cfg).build_domain()
+    finally:
+        ops.uniaxialMaterial = _original
+        ops.wipe()
+    assert "Fy" in captured, \
+        "No 'Steel02' uniaxialMaterial call during build_domain()"
+    return captured["Fy"], captured["Es"]
+
+
 # ═══════════════════════════════════════════════════════════════
 # Parser: rebar tables -> section fields
 # ═══════════════════════════════════════════════════════════════
@@ -155,7 +190,8 @@ TABLE: "REBAR SIZES"
 # ═══════════════════════════════════════════════════════════════
 
 class TestTclRebarResolution:
-    """Steel02 rebar Fy/Es resolution in export_mesh_model_to_tcl."""
+    """Steel02 rebar Fy/Es resolution in export_mesh_model_to_tcl and
+    AnalysisBuilder fiber-section domain construction."""
 
     def test_rebar_material_lookup(self, tmp_path):
         """Section rebar_material is looked up; Fy/E_mod pass through."""
@@ -183,5 +219,32 @@ class TestTclRebarResolution:
             {"rebar_Fy_override": 500.0e6, "rebar_Es_override": 210.0e9},
         )
         fy, es = _steel02_fy_es(content)
+        assert fy == pytest.approx(500.0e6)
+        assert es == pytest.approx(210.0e9)
+
+    # ── AnalysisBuilder path (fiber sections) ─────────────────────
+
+    def test_builder_rebar_material_lookup(self):
+        """build_domain() with fiber sections uses section rebar_material."""
+        fy, es = _builder_steel02_fy_es(_make_mesh(_REBAR_NAME), {})
+        assert fy == pytest.approx(413685.0)
+        assert es == pytest.approx(199947978.8)
+
+    def test_builder_fallback_to_framework_defaults(self):
+        """No rebar material -> scaled DEFAULT_FY_REBAR_PA / DEFAULT_E_S_PA."""
+        fy, es = _builder_steel02_fy_es(_make_mesh(""), {})
+        ssf = stress_scale_factor(_MODEL_UNITS)
+        assert fy == pytest.approx(DEFAULT_FY_REBAR_PA * ssf)
+        assert es == pytest.approx(DEFAULT_E_S_PA * ssf)
+        # N/m model: scale factor is 1.0, so defaults land at 4e8 / 2e11
+        assert fy == pytest.approx(4.0e8)
+        assert es == pytest.approx(2.0e11)
+
+    def test_builder_config_override_precedes_lookup(self):
+        """rebar_Fy_override / rebar_Es_override (Pa) win over lookup."""
+        fy, es = _builder_steel02_fy_es(
+            _make_mesh(_REBAR_NAME),
+            {"rebar_Fy_override": 500.0e6, "rebar_Es_override": 210.0e9},
+        )
         assert fy == pytest.approx(500.0e6)
         assert es == pytest.approx(210.0e9)
