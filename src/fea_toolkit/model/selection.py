@@ -280,7 +280,11 @@ class Selection:
                 return False
         return True
 
-    def _node_matches(self, model: "SAPModelData", eid: str) -> bool:
+    def _node_matches(
+        self,
+        model: Union["SAPModelData", "MeshModel"],
+        eid: str,
+    ) -> bool:
         if not self._match_element_type("Node"):
             return False
         if not self._match_id(eid):
@@ -292,22 +296,40 @@ class Selection:
 
     # ── Public query methods ─────────────────────────────────────────────────
 
-    def get_frame_ids(self, model: "SAPModelData") -> List[str]:
-        """Return frame element IDs matching this selection."""
+    def get_frame_ids(
+        self, model: Union["SAPModelData", "MeshModel"]
+    ) -> List[str]:
+        """Return frame element IDs matching this selection.
+
+        Both :class:`SAPModelData` and :class:`MeshModel` expose the same
+        ``frame_elements`` mapping, so the same lookup serves both.
+        """
         return [
             eid for eid in model.frame_elements
             if self._frame_matches(model, eid)
         ]
 
-    def get_area_ids(self, model: "SAPModelData") -> List[str]:
-        """Return area element IDs matching this selection."""
+    def get_area_ids(
+        self, model: Union["SAPModelData", "MeshModel"]
+    ) -> List[str]:
+        """Return area element IDs matching this selection.
+
+        Both :class:`SAPModelData` and :class:`MeshModel` expose the same
+        ``area_elements`` mapping, so the same lookup serves both.
+        """
         return [
             eid for eid in model.area_elements
             if self._area_matches(model, eid)
         ]
 
-    def get_node_ids(self, model: "SAPModelData") -> List[str]:
-        """Return node IDs matching this selection."""
+    def get_node_ids(
+        self, model: Union["SAPModelData", "MeshModel"]
+    ) -> List[str]:
+        """Return node IDs matching this selection.
+
+        Both :class:`SAPModelData` and :class:`MeshModel` expose the same
+        ``nodes`` mapping, so the same lookup serves both.
+        """
         return [
             nid for nid in model.nodes
             if self._node_matches(model, nid)
@@ -316,27 +338,39 @@ class Selection:
     # ── Dict filters ─────────────────────────────────────────────────────────
 
     def filter_frames(
-        self, model: "SAPModelData"
+        self, model: Union["SAPModelData", "MeshModel"]
     ) -> Dict[str, "FrameElement"]:
-        """Return filtered frame elements as ``{id: FrameElement}``."""
+        """Return filtered frame elements as ``{id: FrameElement}``.
+
+        Both :class:`SAPModelData` and :class:`MeshModel` store
+        :class:`FrameElement` objects, so the same lookup serves both.
+        """
         return {
             eid: model.frame_elements[eid]
             for eid in self.get_frame_ids(model)
         }
 
     def filter_areas(
-        self, model: "SAPModelData"
+        self, model: Union["SAPModelData", "MeshModel"]
     ) -> Dict[str, "AreaElement"]:
-        """Return filtered area elements as ``{id: AreaElement}``."""
+        """Return filtered area elements as ``{id: AreaElement}``.
+
+        Both :class:`SAPModelData` and :class:`MeshModel` store
+        :class:`AreaElement` objects, so the same lookup serves both.
+        """
         return {
             eid: model.area_elements[eid]
             for eid in self.get_area_ids(model)
         }
 
     def filter_nodes(
-        self, model: "SAPModelData"
+        self, model: Union["SAPModelData", "MeshModel"]
     ) -> Dict[str, "Node"]:
-        """Return filtered nodes as ``{id: Node}``."""
+        """Return filtered nodes as ``{id: Node}``.
+
+        Both :class:`SAPModelData` and :class:`MeshModel` store
+        :class:`Node` objects, so the same lookup serves both.
+        """
         return {
             nid: model.nodes[nid]
             for nid in self.get_node_ids(model)
@@ -345,13 +379,16 @@ class Selection:
     # ── Load filters ─────────────────────────────────────────────────────────
 
     def filter_area_uniform_loads(
-        self, model: "SAPModelData"
+        self, model: Union["SAPModelData", "MeshModel"]
     ) -> List["AreaUniformLoad"]:
         """Return area uniform loads for areas matching this selection.
 
         Only checks membership (element type ``'Area'`` plus any
         section / material / group / id filters).  If the selection
         has ``element_types`` set, it must include ``'Area'``.
+
+        Both :class:`SAPModelData` and :class:`MeshModel` expose the same
+        ``area_uniform_loads`` list, so the same lookup serves both.
         """
         selected_ids: Set[str] = set(self.get_area_ids(model))
         return [
@@ -360,9 +397,13 @@ class Selection:
         ]
 
     def filter_area_gravity_loads(
-        self, model: "SAPModelData"
+        self, model: Union["SAPModelData", "MeshModel"]
     ) -> List["AreaGravityLoad"]:
-        """Return area gravity loads for areas matching this selection."""
+        """Return area gravity loads for areas matching this selection.
+
+        Both :class:`SAPModelData` and :class:`MeshModel` expose the same
+        ``area_gravity_loads`` list, so the same lookup serves both.
+        """
         selected_ids: Set[str] = set(self.get_area_ids(model))
         return [
             ld for ld in model.area_gravity_loads
@@ -482,13 +523,17 @@ class Selection:
 
     def _filter_groups(
         self,
-        model: "SAPModelData",
+        model: Union["SAPModelData", "MeshModel"],
         frame_ids: Set[str],
         area_ids: Set[str],
         node_ids: Set[str],
     ) -> Dict[str, "Group"]:
         """Return groups that have at least one selected element, pruned
-        to only those references."""
+        to only those references.
+
+        Both :class:`SAPModelData` and :class:`MeshModel` expose the same
+        ``groups`` mapping, so the same lookup serves both.
+        """
         from .sap_data import Group
         result: Dict[str, Group] = {}
         for gname, grp in model.groups.items():
@@ -673,7 +718,9 @@ class Selection:
     # ── Brace detection ──────────────────────────────────────────────────────
 
     @staticmethod
-    def from_brace_sections(model: "SAPModelData") -> "Selection":
+    def from_brace_sections(
+        model: Union["SAPModelData", "MeshModel"]
+    ) -> "Selection":
         """Create a ``Selection`` targeting brace‑type sections.
 
         Identifies frame elements whose section shape is one of the common
@@ -701,7 +748,8 @@ class Selection:
            misclassified as braces.
 
         Args:
-            model: The parsed ``SAPModelData``.
+            model: The parsed ``SAPModelData`` or ``MeshModel`` (both expose
+                the same ``sections`` mapping).
 
         Returns:
             A ``Selection`` with ``element_types=['Frame']`` and
