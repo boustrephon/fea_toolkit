@@ -1,0 +1,21 @@
+# Pre-commit hook configuration — see https://pre-commit.com
+#
+# Install once with:
+#     pip install pre-commit
+#     pre-commit install
+#
+# Then every `git commit` runs:
+#   1. ruff check --fix   (auto-fix safe lint issues; fail on remaining)
+#   2. ruff format        (format the code)
+#
+# Upgrade the hook revision by bumping `rev:` to a newer tagged release
+# of ruff (keep in sync with the version pinned in pyproject.toml).
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Ruff version — keep in sync with `pipx install ruff==<version>`.
+    rev: v0.16.1
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
