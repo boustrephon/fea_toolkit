@@ -5,7 +5,7 @@ objects, respecting their ``requires`` declarations to determine
 execution order and passing results between dependent analyses.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Type
+from typing import TYPE_CHECKING, Optional
 
 from fea_toolkit.analysis.base import Analysis, AnalysisResult
 
@@ -27,15 +27,15 @@ class AnalysisManager:
     def __init__(self, mesh_model: "MeshModel", out_dir: Optional[str] = None):
         self.mesh_model = mesh_model
         self.out_dir = out_dir
-        self._analyses: List[Analysis] = []
-        self.results: Dict[str, AnalysisResult] = {}
+        self._analyses: list[Analysis] = []
+        self.results: dict[str, AnalysisResult] = {}
 
     def add(self, analysis: Analysis) -> "AnalysisManager":
         """Register an analysis to run. Returns self for chaining."""
         self._analyses.append(analysis)
         return self
 
-    def run_all(self) -> Dict[str, AnalysisResult]:
+    def run_all(self) -> dict[str, AnalysisResult]:
         """Execute all registered analyses in dependency order.
 
         Uses Kahn's algorithm to topologically sort based on each
@@ -76,20 +76,20 @@ class AnalysisManager:
             # Check if the analysis has a _modal_result attribute
             # (ResponseSpectrumAnalysis and PushoverAnalysis both do)
             if getattr(analysis, "_modal_result", None) is None:
-                setattr(analysis, "_modal_result", self.results[dep_name])
+                analysis._modal_result = self.results[dep_name]
 
-    def _topological_sort(self) -> List[Analysis]:
+    def _topological_sort(self) -> list[Analysis]:
         """Kahn's algorithm on the analysis dependency graph.
 
         Returns analyses in execution order.  Raises ``ValueError``
         if a circular dependency is detected.
         """
         # Build adjacency and in-degree maps
-        remaining = set(id(a) for a in self._analyses)
-        edges: Dict[int, List[int]] = {id(a): [] for a in self._analyses}
-        in_degree: Dict[int, int] = {id(a): 0 for a in self._analyses}
+        remaining = {id(a) for a in self._analyses}
+        edges: dict[int, list[int]] = {id(a): [] for a in self._analyses}
+        in_degree: dict[int, int] = {id(a): 0 for a in self._analyses}
 
-        id_map: Dict[int, Analysis] = {id(a): a for a in self._analyses}
+        id_map: dict[int, Analysis] = {id(a): a for a in self._analyses}
 
         for a in self._analyses:
             for dep_type in a.requires:
@@ -103,7 +103,7 @@ class AnalysisManager:
 
         # Kahn's algorithm
         queue = [n for n in remaining if in_degree.get(n, 0) == 0]
-        ordered: List[Analysis] = []
+        ordered: list[Analysis] = []
 
         while queue:
             node_id = queue.pop(0)

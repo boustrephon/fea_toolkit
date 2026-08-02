@@ -15,19 +15,19 @@ import pytest
 pytest.importorskip("openseespy")
 
 import openseespy.opensees as ops
-from fea_toolkit.opensees.preprocessor import preprocess_model
-from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
 from fea_toolkit.model.geometry import find_constraint_edges
 from fea_toolkit.model.sap_data import (
-    SAPModelData,
-    Node,
-    Material,
-    ShellSection,
-    FrameElement,
     AreaElement,
     AreaMesh,
+    FrameElement,
+    Material,
+    Node,
+    SAPModelData,
+    ShellSection,
 )
-
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
 
 # ========================================================================
 # Fixtures
@@ -64,7 +64,7 @@ def _run_builder(md, config=None):
         ab.build_domain()
         edges = find_constraint_edges(
             mesh_model.area_elements,
-            getattr(mesh_model, 'area_assignments', {}),
+            getattr(mesh_model, "area_assignments", {}),
             mesh_model.nodes,
         )
         return edges
@@ -95,10 +95,16 @@ class TestFindConstraintEdges:
             "2": AreaElement("2", 20, ["2", "5", "6", "3"]),  # right, unmeshed
         }
         md = SAPModelData(
-            nodes=nodes, restraints={}, materials=materials,
-            sections=sections, frame_elements={}, area_elements=areas,
-            frame_assignments={}, area_assignments={"1": "Slab200", "2": "Wall200"},
-            groups={}, frame_auto_mesh={},
+            nodes=nodes,
+            restraints={},
+            materials=materials,
+            sections=sections,
+            frame_elements={},
+            area_elements=areas,
+            frame_assignments={},
+            area_assignments={"1": "Slab200", "2": "Wall200"},
+            groups={},
+            frame_auto_mesh={},
             area_mesh={"1": AreaMesh(auto_mesh=True, max_size=3.0)},
         )
         edges = _run_builder(md)
@@ -126,10 +132,16 @@ class TestFindConstraintEdges:
         }
         # Both areas meshed with the SAME max_size → compatible edge
         md = SAPModelData(
-            nodes=nodes, restraints={}, materials=materials,
-            sections=sections, frame_elements={}, area_elements=areas,
-            frame_assignments={}, area_assignments={"1": "Slab200", "2": "Slab200"},
-            groups={}, frame_auto_mesh={},
+            nodes=nodes,
+            restraints={},
+            materials=materials,
+            sections=sections,
+            frame_elements={},
+            area_elements=areas,
+            frame_assignments={},
+            area_assignments={"1": "Slab200", "2": "Slab200"},
+            groups={},
+            frame_auto_mesh={},
             area_mesh={
                 "1": AreaMesh(auto_mesh=True, max_size=3.0),
                 "2": AreaMesh(auto_mesh=True, max_size=3.0),
@@ -141,10 +153,16 @@ class TestFindConstraintEdges:
     def test_no_areas_returns_empty(self, materials, sections):
         """No area elements → no constraints."""
         md = SAPModelData(
-            nodes={}, restraints={}, materials=materials,
-            sections=sections, frame_elements={}, area_elements={},
-            frame_assignments={}, area_assignments={},
-            groups={}, frame_auto_mesh={},
+            nodes={},
+            restraints={},
+            materials=materials,
+            sections=sections,
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
         )
         edges = _run_builder(md)
         assert edges == []
@@ -168,11 +186,16 @@ class TestFindConstraintEdges:
             "2": AreaElement("2", 20, ["2", "5", "6", "3"]),
         }
         md = SAPModelData(
-            nodes=nodes, restraints={}, materials=materials,
-            sections=sections, frame_elements={}, area_elements=areas,
+            nodes=nodes,
+            restraints={},
+            materials=materials,
+            sections=sections,
+            frame_elements={},
+            area_elements=areas,
             frame_assignments={},
             area_assignments={"1": "Brick", "2": "Brick"},
-            groups={}, frame_auto_mesh={},
+            groups={},
+            frame_auto_mesh={},
             area_mesh={"1": AreaMesh(auto_mesh=True, max_size=3.0)},
         )
         # Default exclude_types={'brick'} now matches 'Brick' via
@@ -195,11 +218,16 @@ class TestFindConstraintEdges:
             "2": AreaElement("2", 20, ["2", "5", "6", "3"]),
         }
         md = SAPModelData(
-            nodes=nodes, restraints={}, materials=materials,
-            sections=sections, frame_elements={}, area_elements=areas,
+            nodes=nodes,
+            restraints={},
+            materials=materials,
+            sections=sections,
+            frame_elements={},
+            area_elements=areas,
             frame_assignments={},
             area_assignments={"1": "Slab200", "2": "Wall200"},
-            groups={}, frame_auto_mesh={},
+            groups={},
+            frame_auto_mesh={},
             area_mesh={"1": AreaMesh(auto_mesh=True, max_size=3.0)},
         )
         edges = _run_builder(md)
@@ -225,12 +253,16 @@ class TestFindConstraintEdges:
             "B1": FrameElement("B1", 100, node_i="2", node_j="3"),
         }
         md = SAPModelData(
-            nodes=nodes, restraints={}, materials=materials,
+            nodes=nodes,
+            restraints={},
+            materials=materials,
             sections=sections,
-            frame_elements=frames, area_elements=areas,
+            frame_elements=frames,
+            area_elements=areas,
             frame_assignments={"B1": "Slab200"},
             area_assignments={"1": "Slab200"},
-            groups={}, frame_auto_mesh={},
+            groups={},
+            frame_auto_mesh={},
             area_mesh={"1": AreaMesh(auto_mesh=True, max_size=4.0)},
         )
         mesh_model = preprocess_model(md, {"verbose": False, "create_shells": True})
@@ -265,11 +297,16 @@ class TestFindConstraintEdges:
             "2": AreaElement("2", 20, ["5", "6", "7", "8"]),
         }
         md = SAPModelData(
-            nodes=nodes, restraints={}, materials=materials,
-            sections=sections, frame_elements={}, area_elements=areas,
+            nodes=nodes,
+            restraints={},
+            materials=materials,
+            sections=sections,
+            frame_elements={},
+            area_elements=areas,
             frame_assignments={},
             area_assignments={"1": "Slab200", "2": "Wall200"},
-            groups={}, frame_auto_mesh={},
+            groups={},
+            frame_auto_mesh={},
             area_mesh={
                 "1": AreaMesh(auto_mesh=True, max_size=2.5),
                 "2": AreaMesh(auto_mesh=True, max_size=6.0),
@@ -317,12 +354,16 @@ class TestFindConstraintEdges:
             "B1": FrameElement("B1", 100, node_i="1", node_j="2"),
         }
         md = SAPModelData(
-            nodes=nodes, restraints={}, materials=materials,
+            nodes=nodes,
+            restraints={},
+            materials=materials,
             sections=sections,
-            frame_elements=frames, area_elements=areas,
+            frame_elements=frames,
+            area_elements=areas,
             frame_assignments={"B1": "Slab200"},
             area_assignments={"1": "Slab200"},
-            groups={}, frame_auto_mesh={},
+            groups={},
+            frame_auto_mesh={},
             area_mesh={"1": AreaMesh(auto_mesh=True, max_size=3.0)},
         )
         mesh_model = preprocess_model(md, {"verbose": False, "create_shells": True})
@@ -375,17 +416,22 @@ class TestFindConstraintEdges:
             "6": Node("6", 6, 0.0, -6.0, 0.0),
         }
         areas = {
-            "Slab":  AreaElement("Slab",  10, ["1", "2", "3", "4"]),
+            "Slab": AreaElement("Slab", 10, ["1", "2", "3", "4"]),
             "WallA": AreaElement("WallA", 20, ["1", "2", "5", "6"]),
         }
         md = SAPModelData(
-            nodes=nodes, restraints={}, materials=materials,
-            sections=sections, frame_elements={}, area_elements=areas,
+            nodes=nodes,
+            restraints={},
+            materials=materials,
+            sections=sections,
+            frame_elements={},
+            area_elements=areas,
             frame_assignments={},
             area_assignments={"Slab": "Slab200", "WallA": "Wall200"},
-            groups={}, frame_auto_mesh={},
+            groups={},
+            frame_auto_mesh={},
             area_mesh={
-                "Slab":  AreaMesh(auto_mesh=True, max_size=6.0),
+                "Slab": AreaMesh(auto_mesh=True, max_size=6.0),
                 "WallA": AreaMesh(auto_mesh=True, max_size=3.0),
             },
         )
@@ -439,11 +485,16 @@ class TestFindConstraintEdges:
         # Make them colinear: let's make B a strip between A and C:
         # A above B, C below B, all sharing the X=0..12 edge line.
         md = SAPModelData(
-            nodes=nodes, restraints={}, materials=materials,
-            sections=sections, frame_elements={}, area_elements=areas,
+            nodes=nodes,
+            restraints={},
+            materials=materials,
+            sections=sections,
+            frame_elements={},
+            area_elements=areas,
             frame_assignments={},
             area_assignments={"A": "Wall200", "B": "Slab200", "C": "Wall200"},
-            groups={}, frame_auto_mesh={},
+            groups={},
+            frame_auto_mesh={},
             area_mesh={
                 "A": AreaMesh(auto_mesh=True, max_size=2.0),
                 "C": AreaMesh(auto_mesh=True, max_size=2.0),
@@ -487,10 +538,16 @@ class TestFindConstraintEdges:
         }
         # Add an extra node near the edge to create a chain with an off-line node
         md = SAPModelData(
-            nodes=nodes, restraints={}, materials=materials,
-            sections=sections, frame_elements={}, area_elements=areas,
-            frame_assignments={}, area_assignments={"Slab": "Slab200"},
-            groups={}, frame_auto_mesh={},
+            nodes=nodes,
+            restraints={},
+            materials=materials,
+            sections=sections,
+            frame_elements={},
+            area_elements=areas,
+            frame_assignments={},
+            area_assignments={"Slab": "Slab200"},
+            groups={},
+            frame_auto_mesh={},
         )
         # This test verifies the function doesn't crash with off-line nodes.
         # An edge with only one element produces no tear (expected: empty).

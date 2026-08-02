@@ -2,16 +2,15 @@
 Pushover analysis orchestration — multi-direction, multi-pattern.
 """
 
-from typing import Dict, List, Optional, Tuple, Any, Callable
+from typing import Optional
 
 import numpy as np
-import math
 
 
 def run_pushover_4dir(
     mesh_model,
-    modal_result: Dict,
-    gravity_patterns: Dict[str, float] = None,
+    modal_result: dict,
+    gravity_patterns: dict[str, float] = None,
     lateral_load_type: str = "uniform",
     max_disp_val: float = 0.30,
     num_steps: int = 50,
@@ -22,8 +21,8 @@ def run_pushover_4dir(
     verbose: bool = False,
     brace_type: str = "truss",
     brace_sections: Optional[list] = None,
-    rs_modal_base_shear: Optional[Dict[str, List[float]]] = None,
-) -> Dict:
+    rs_modal_base_shear: Optional[dict[str, list[float]]] = None,
+) -> dict:
     """Run pushover in all 4 directions with CSM (two-stage path).
 
     The topology work (Preprocessor) is already done — each direction
@@ -67,9 +66,9 @@ def run_pushover_4dir(
     dict
         ``{direction: {"results": ..., "adrs": ..., "pp": ..., ...}}``.
     """
+    from fea_toolkit.model.csm import check_modal_pushover_mode
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
     from fea_toolkit.spectrum import _gb50011_spectrum
-    from fea_toolkit.model.csm import check_modal_pushover_mode
 
     if gravity_patterns is None:
         gravity_patterns = {"DEAD": 1.0, "DEAD SDL": 1.0, "LL": 0.5}
@@ -93,13 +92,15 @@ def run_pushover_4dir(
     roof_tag = roof_node.node_tag
 
     T_spec = np.linspace(0.0, 6.0, 200).tolist()
-    Sa_spec = _gb50011_spectrum(T_spec, alpha_max_rare, tg, gamma=gamma,
-                                 eta1=eta_1, eta2=eta_2, g=g).tolist()
+    Sa_spec = _gb50011_spectrum(
+        T_spec, alpha_max_rare, tg, gamma=gamma, eta1=eta_1, eta2=eta_2, g=g
+    ).tolist()
     roof_tag = roof_node.node_tag
 
     T_spec = np.linspace(0.0, 6.0, 200).tolist()
-    Sa_spec = _gb50011_spectrum(T_spec, alpha_max_rare, tg, gamma=gamma,
-                                 eta1=eta_1, eta2=eta_2, g=g).tolist()
+    Sa_spec = _gb50011_spectrum(
+        T_spec, alpha_max_rare, tg, gamma=gamma, eta1=eta_1, eta2=eta_2, g=g
+    ).tolist()
 
     if brace_type == "truss":
         builder_cfg = {
@@ -155,9 +156,13 @@ def run_pushover_4dir(
 
         adrs = ab.pushover_to_adrs(results, modal, shapes, direction=cfg["dir"], g=g)
         pp = ab.compute_performance_point(
-            results, modal, shapes,
-            T_spec, Sa_spec,
-            direction=cfg["dir"], g=g,
+            results,
+            modal,
+            shapes,
+            T_spec,
+            Sa_spec,
+            direction=cfg["dir"],
+            g=g,
         )
 
         # Validate mode selection against RS
@@ -165,8 +170,10 @@ def run_pushover_4dir(
         if lateral_load_type == "mode1" and rs_modal_base_shear is not None:
             rs_list = rs_modal_base_shear.get(cfg["dir"])
             if rs_list:
-                _, rs_dom, rs_warning = check_modal_pushover_mode(
-                    cfg["dir"], ratios if ratios else [], rs_list,
+                _, _rs_dom, rs_warning = check_modal_pushover_mode(
+                    cfg["dir"],
+                    ratios or [],
+                    rs_list,
                 )
                 if rs_warning and verbose:
                     print(f"    {rs_warning}")

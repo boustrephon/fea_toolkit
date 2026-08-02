@@ -86,15 +86,15 @@ from __future__ import annotations
 import math
 import warnings
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 
-
 # ========================================================================
 # Dataclasses
 # ========================================================================
+
 
 @dataclass
 class StoreyRigidBody:
@@ -122,6 +122,7 @@ class StoreyRigidBody:
         Maximum resultant displacement at any node
         (Ux, Uy + Rz lever-arm evaluated at all node positions).
     """
+
     storey: str
     elevation: float
     x_cm: float
@@ -138,6 +139,7 @@ class StoreyRigidBody:
 # ========================================================================
 # Node-to-storey assignment
 # ========================================================================
+
 
 def assign_nodes_to_storeys(md, stories, z_tolerance: float = 0.5):
     """Group node IDs by storey based on Z proximity or stored membership.
@@ -166,10 +168,10 @@ def assign_nodes_to_storeys(md, stories, z_tolerance: float = 0.5):
     """
     if not hasattr(md, "nodes"):
         return {}
-    assignments: Dict[str, List[str]] = {s.name: [] for s in stories}
+    assignments: dict[str, list[str]] = {s.name: [] for s in stories}
     half_band = z_tolerance / 2
     # Precompute sets for O(1) membership checks
-    node_id_sets: Dict[str, set] = {}
+    node_id_sets: dict[str, set] = {}
     for s in stories:
         if s.node_ids is not None:
             node_id_sets[s.name] = set(s.node_ids)
@@ -198,8 +200,10 @@ def assign_nodes_to_storeys(md, stories, z_tolerance: float = 0.5):
 # Centre of mass per storey
 # ========================================================================
 
-def storey_centroids(md, stories, node_masses: Optional[Dict[str, float]] = None,
-                    z_tolerance: float = 0.5):
+
+def storey_centroids(
+    md, stories, node_masses: Optional[dict[str, float]] = None, z_tolerance: float = 0.5
+):
     """Compute centre of mass for each storey.
 
     Parameters
@@ -219,7 +223,7 @@ def storey_centroids(md, stories, node_masses: Optional[Dict[str, float]] = None
         ``{storey_name: (x_cm, y_cm)}``
     """
     assign = assign_nodes_to_storeys(md, stories, z_tolerance)
-    centroids: Dict[str, Tuple[float, float]] = {}
+    centroids: dict[str, tuple[float, float]] = {}
     for s in stories:
         nids = assign.get(s.name, [])
         if not nids:
@@ -246,6 +250,7 @@ def storey_centroids(md, stories, node_masses: Optional[Dict[str, float]] = None
 # Rigid-body fit
 # ========================================================================
 
+
 def rigid_body_fit(
     ux: np.ndarray,
     uy: np.ndarray,
@@ -254,7 +259,7 @@ def rigid_body_fit(
     x_cm: float,
     y_cm: float,
     outlier_threshold: float = 3.0,
-) -> Tuple[float, float, float, float, int, int, np.ndarray]:
+) -> tuple[float, float, float, float, int, int, np.ndarray]:
     """Least-squares rigid-body fit about centre of mass.
 
     Solves::
@@ -304,14 +309,11 @@ def rigid_body_fit(
     # Compute residuals
     ux_pred = Ux1 - Rz1 * y_tilde
     uy_pred = Uy1 + Rz1 * x_tilde
-    res = np.sqrt((ux - ux_pred)**2 + (uy - uy_pred)**2)
+    res = np.sqrt((ux - ux_pred) ** 2 + (uy - uy_pred) ** 2)
 
     # Outlier rejection
     med_res = np.median(res)
-    if med_res < 1e-12:
-        mask = np.ones(n, dtype=bool)
-    else:
-        mask = res < outlier_threshold * med_res
+    mask = np.ones(n, dtype=bool) if med_res < 1e-12 else res < outlier_threshold * med_res
 
     n_outliers = n - int(mask.sum())
 
@@ -334,7 +336,7 @@ def rigid_body_fit(
         Ux, Uy, Rz = theta2[0], theta2[1], theta2[2]
         ux_pred2 = Ux - Rz * y_tilde[mask]
         uy_pred2 = Uy + Rz * x_tilde[mask]
-        res2 = np.sqrt((ux[mask] - ux_pred2)**2 + (uy[mask] - uy_pred2)**2)
+        res2 = np.sqrt((ux[mask] - ux_pred2) ** 2 + (uy[mask] - uy_pred2) ** 2)
         rms = float(np.sqrt(np.mean(res2**2)))
     else:
         # Fall back to Pass-1 fit using ALL nodes; reset counts accordingly
@@ -349,6 +351,7 @@ def rigid_body_fit(
 # ========================================================================
 # Peak displacement at worst-node location
 # ========================================================================
+
 
 def peak_displacement(
     x: np.ndarray,
@@ -375,12 +378,13 @@ def peak_displacement(
 # Full storey displacement pipeline
 # ========================================================================
 
+
 def storey_displacements(
     md,
     stories,
-    node_ux: Dict[str, float],
-    node_uy: Dict[str, float],
-    node_masses: Optional[Dict[str, float]] = None,
+    node_ux: dict[str, float],
+    node_uy: dict[str, float],
+    node_masses: Optional[dict[str, float]] = None,
     outlier_threshold: float = 3.0,
     z_tolerance: float = 0.5,
 ) -> pd.DataFrame:
@@ -439,27 +443,35 @@ def storey_displacements(
         uy_arr = np.array(uy_a)
         xc, yc = cm.get(s.name, (0.0, 0.0))
 
-        Ux, Uy, Rz, rms, n_used, n_out, mask = rigid_body_fit(
-            ux_arr, uy_arr, x_arr, y_arr, xc, yc, outlier_threshold,
+        Ux, Uy, Rz, rms, n_used, n_out, _mask = rigid_body_fit(
+            ux_arr,
+            uy_arr,
+            x_arr,
+            y_arr,
+            xc,
+            yc,
+            outlier_threshold,
         )
         peak = peak_displacement(x_arr, y_arr, xc, yc, Ux, Uy, Rz)
         # R_max = farthest node-to-CM distance (actual storey geometry)
-        r_max = float(np.max(np.sqrt((x_arr - xc)**2 + (y_arr - yc)**2)))
+        r_max = float(np.max(np.sqrt((x_arr - xc) ** 2 + (y_arr - yc) ** 2)))
 
-        rows.append({
-            "Storey": s.name,
-            "Elevation": s.elevation,
-            "X_cm": round(xc, 3),
-            "Y_cm": round(yc, 3),
-            "Ux": round(Ux, 6),
-            "Uy": round(Uy, 6),
-            "Rz": round(Rz, 8),
-            "Peak_disp": round(peak, 6),
-            "RMS_residual": round(rms, 6),
-            "R_max": round(r_max, 3),
-            "N_nodes": n_used,
-            "N_outliers": n_out,
-        })
+        rows.append(
+            {
+                "Storey": s.name,
+                "Elevation": s.elevation,
+                "X_cm": round(xc, 3),
+                "Y_cm": round(yc, 3),
+                "Ux": round(Ux, 6),
+                "Uy": round(Uy, 6),
+                "Rz": round(Rz, 8),
+                "Peak_disp": round(peak, 6),
+                "RMS_residual": round(rms, 6),
+                "R_max": round(r_max, 3),
+                "N_nodes": n_used,
+                "N_outliers": n_out,
+            }
+        )
 
     return pd.DataFrame(rows)
 
@@ -468,16 +480,23 @@ def _empty_row(s):
     return {
         "Storey": s.name,
         "Elevation": s.elevation,
-        "X_cm": 0.0, "Y_cm": 0.0,
-        "Ux": 0.0, "Uy": 0.0, "Rz": 0.0,
-        "Peak_disp": 0.0, "RMS_residual": 0.0, "R_max": 0.0,
-        "N_nodes": 0, "N_outliers": 0,
+        "X_cm": 0.0,
+        "Y_cm": 0.0,
+        "Ux": 0.0,
+        "Uy": 0.0,
+        "Rz": 0.0,
+        "Peak_disp": 0.0,
+        "RMS_residual": 0.0,
+        "R_max": 0.0,
+        "N_nodes": 0,
+        "N_outliers": 0,
     }
 
 
 # ========================================================================
 # Storey drifts
 # ========================================================================
+
 
 def storey_drifts(
     df_disp: pd.DataFrame,
@@ -515,15 +534,17 @@ def storey_drifts(
         # actual farthest node-to-CM distance (R_max).
         r_max = curr["R_max"]
         peak_drift = math.sqrt(drift_x**2 + drift_y**2) + abs(drift_rz) * r_max
-        rows.append({
-            "Storey": curr["Storey"],
-            "Elevation (m)": curr["Elevation"],
-            "Drift_X": round(drift_x, 6),
-            "Drift_Y": round(drift_y, 6),
-            "Drift_Rz": round(drift_rz, 8),
-            "Drift_peak": round(peak_drift, 6),
-            "h (m)": round(h, 3),
-        })
+        rows.append(
+            {
+                "Storey": curr["Storey"],
+                "Elevation (m)": curr["Elevation"],
+                "Drift_X": round(drift_x, 6),
+                "Drift_Y": round(drift_y, 6),
+                "Drift_Rz": round(drift_rz, 8),
+                "Drift_peak": round(peak_drift, 6),
+                "h (m)": round(h, 3),
+            }
+        )
 
     return pd.DataFrame(rows)
 
@@ -532,11 +553,12 @@ def storey_drifts(
 # CQC combination coefficient
 # ========================================================================
 
+
 def _cqc_coeff(f_i: float, f_j: float, zeta: float = 0.05) -> float:
     """CQC cross-modal correlation coefficient."""
     r = f_i / f_j if f_j > 0 else 0
     num = 8 * zeta**2 * (1 + r) * r**1.5
-    den = (1 - r**2)**2 + 4 * zeta**2 * r * (1 + r)**2
+    den = (1 - r**2) ** 2 + 4 * zeta**2 * r * (1 + r) ** 2
     return num / den if den > 0 else 0.0
 
 
@@ -544,16 +566,17 @@ def _cqc_coeff(f_i: float, f_j: float, zeta: float = 0.05) -> float:
 # Modal storey drifts (CQC-combined)
 # ========================================================================
 
+
 def modal_storey_drifts(
     md,
     stories,
-    modal: Dict,
+    modal: dict,
     n_modes: int = 12,
     damping: float = 0.05,
     z_tolerance: float = 0.5,
-    spectrum_periods: Optional[List[float]] = None,
-    spectrum_accels: Optional[List[float]] = None,
-    node_masses: Optional[Dict[str, float]] = None,
+    spectrum_periods: Optional[list[float]] = None,
+    spectrum_accels: Optional[list[float]] = None,
+    node_masses: Optional[dict[str, float]] = None,
 ) -> pd.DataFrame:
     """Compute CQC-combined storey drifts from modal analysis.
 
@@ -608,8 +631,9 @@ def modal_storey_drifts(
             T_m = periods[m]
             if T_m < T_min or T_m > T_max:
                 import warnings
+
                 warnings.warn(
-                    f"Mode {m+1} period T={T_m:.4f}s outside spectrum range "
+                    f"Mode {m + 1} period T={T_m:.4f}s outside spectrum range "
                     f"[{T_min:.4f}, {T_max:.4f}] — clamping to nearest boundary"
                 )
             omega_m = 2.0 * math.pi / max(T_m, 1e-12)
@@ -619,21 +643,24 @@ def modal_storey_drifts(
             scale_factors[m] = Sd_m
 
     # Per-mode storey displacement DataFrames
-    mode_dfs: List[pd.DataFrame] = []
+    mode_dfs: list[pd.DataFrame] = []
     for m in range(n_avail):
         node_shapes = shapes.get(m, {})  # {tag: (dx, dy, dz)}
         scale = scale_factors[m]
-        node_ux: Dict[str, float] = {}
-        node_uy: Dict[str, float] = {}
+        node_ux: dict[str, float] = {}
+        node_uy: dict[str, float] = {}
         # Iterate md.nodes (string IDs) and look up each by tag
         for nid, nd in md.nodes.items():
             vec = node_shapes.get(nd.node_tag)
             if vec is not None:
-                dx, dy, dz = vec
+                dx, dy, _dz = vec
                 node_ux[nid] = dx * scale
                 node_uy[nid] = dy * scale
         df_m = storey_displacements(
-            md, stories, node_ux, node_uy,
+            md,
+            stories,
+            node_ux,
+            node_uy,
             z_tolerance=z_tolerance,
             node_masses=node_masses,
         )
@@ -661,11 +688,13 @@ def modal_storey_drifts(
         if i == 0:
             continue  # Base / first storey — no drift yet
         # gap index = i - 1
-        rows.append({
-            "Storey": s.name,
-            "Elevation (m)": s.elevation,
-            "Drift_CQC": round(float(cqc_drift[i - 1]), 6),
-        })
+        rows.append(
+            {
+                "Storey": s.name,
+                "Elevation (m)": s.elevation,
+                "Drift_CQC": round(float(cqc_drift[i - 1]), 6),
+            }
+        )
 
     return pd.DataFrame(rows)
 
@@ -674,10 +703,11 @@ def modal_storey_drifts(
 # Storey shears (summed element forces)
 # ========================================================================
 
+
 def storey_shears(
     md,
     stories,
-    element_forces: Dict,
+    element_forces: dict,
     z_tolerance: float = 0.5,
 ) -> pd.DataFrame:
     """Sum element-end forces at each storey level.
@@ -697,16 +727,14 @@ def storey_shears(
     """
     assign = assign_nodes_to_storeys(md, stories, z_tolerance)
     # Build reverse map: node_id -> storey name
-    node_to_storey: Dict[str, str] = {}
+    node_to_storey: dict[str, str] = {}
     for sname, nids in assign.items():
         for nid in nids:
             node_to_storey[nid] = sname
 
     # Initialise accumulators
-    storey_forces: Dict[str, Dict[str, float]] = {
-        s.name: {"Fx": 0.0, "Fy": 0.0, "Fz": 0.0,
-                 "Mx": 0.0, "My": 0.0, "Mz": 0.0}
-        for s in stories
+    storey_forces: dict[str, dict[str, float]] = {
+        s.name: {"Fx": 0.0, "Fy": 0.0, "Fz": 0.0, "Mx": 0.0, "My": 0.0, "Mz": 0.0} for s in stories
     }
     dropped_i: int = 0
     dropped_j: int = 0
@@ -752,16 +780,18 @@ def storey_shears(
         )
     for s in stories:
         f = storey_forces[s.name]
-        rows.append({
-            "Storey": s.name,
-            "Elevation": s.elevation,
-            "Fx": round(f["Fx"], 1),
-            "Fy": round(f["Fy"], 1),
-            "Fz": round(f["Fz"], 1),
-            "Mx": round(f["Mx"], 1),
-            "My": round(f["My"], 1),
-            "Mz": round(f["Mz"], 1),
-        })
+        rows.append(
+            {
+                "Storey": s.name,
+                "Elevation": s.elevation,
+                "Fx": round(f["Fx"], 1),
+                "Fy": round(f["Fy"], 1),
+                "Fz": round(f["Fz"], 1),
+                "Mx": round(f["Mx"], 1),
+                "My": round(f["My"], 1),
+                "Mz": round(f["Mz"], 1),
+            }
+        )
 
     return pd.DataFrame(rows)
 
@@ -770,14 +800,15 @@ def storey_shears(
 # Storey response helpers — extracted from pumphouse reports
 # ========================================================================
 
+
 def resultant_shear(br: dict) -> float:
     """Resultant horizontal shear from a reactions dict."""
-    return math.sqrt((br.get("Fx", 0) or 0)**2 + (br.get("Fy", 0) or 0)**2)
+    return math.sqrt((br.get("Fx", 0) or 0) ** 2 + (br.get("Fy", 0) or 0) ** 2)
 
 
-def resultant_moment(br: dict, shear_fx: float = 0.0,
-                    shear_fy: float = 0.0,
-                    cz: float = 0.0, min_z: float = 0.0) -> float:
+def resultant_moment(
+    br: dict, shear_fx: float = 0.0, shear_fy: float = 0.0, cz: float = 0.0, min_z: float = 0.0
+) -> float:
     """Resultant horizontal moment about the BASE (z=min_z).
 
     ``df_linear`` reports moments about the BB centroid (cz).
@@ -790,13 +821,16 @@ def resultant_moment(br: dict, shear_fx: float = 0.0,
     return math.sqrt(mx_base**2 + my_base**2)
 
 
-def build_storey_table(elev_col: str, data_dict: dict,
-                       min_z: float = 0.0,
-                       base_rxns: dict = None,
-                       total_height: float = 1.0,
-                       base_val: str = "",
-                       _resultant_shear_fn=None,
-                       _resultant_moment_fn=None) -> pd.DataFrame:
+def build_storey_table(
+    elev_col: str,
+    data_dict: dict,
+    min_z: float = 0.0,
+    base_rxns: dict = None,
+    total_height: float = 1.0,
+    base_val: str = "",
+    _resultant_shear_fn=None,
+    _resultant_moment_fn=None,
+) -> pd.DataFrame:
     """Build a storey-level table with an appended Base row.
 
     Merges per-case DataFrames from *data_dict* on ``["Storey", elev_col]``,
@@ -820,6 +854,7 @@ def build_storey_table(elev_col: str, data_dict: dict,
         Function references (injected so call sites can pass their own).
     """
     import pandas as pd
+
     if base_rxns is None:
         base_rxns = {}
     if _resultant_shear_fn is None:
@@ -850,11 +885,20 @@ def build_storey_table(elev_col: str, data_dict: dict,
                 base_row[c] = 0.0
     df = pd.concat([pd.DataFrame([base_row]), df], ignore_index=True)
     return df.sort_values(elev_col).reset_index(drop=True)
+
+
 def compute_linear_storey_responses(
-    md, mesh_model, stories, linear_cfg, df_linear, modal_result, T_spec, Sa_spec,
+    md,
+    mesh_model,
+    stories,
+    linear_cfg,
+    df_linear,
+    modal_result,
+    T_spec,
+    Sa_spec,
     n_modes=12,
     rigid_body_fit_threshold: float = 0.05,
-) -> Dict[str, pd.DataFrame]:
+) -> dict[str, pd.DataFrame]:
     """Compute storey-level displacements, drifts, shears, and moments.
 
     See :func:`pumphouse_report.compute_linear_storey_responses` for
@@ -863,12 +907,12 @@ def compute_linear_storey_responses(
     """
     config = {"element_type": "elasticBeamColumn", "verbose": False}
     modal = modal_result["modal"]
-    modal_shapes = modal_result["shapes"]
+    modal_result["shapes"]
 
-    all_disp: Dict[str, pd.DataFrame] = {}
-    all_drift: Dict[str, pd.DataFrame] = {}
-    all_shear: Dict[str, pd.DataFrame] = {}
-    all_moment: Dict[str, pd.DataFrame] = {}
+    all_disp: dict[str, pd.DataFrame] = {}
+    all_drift: dict[str, pd.DataFrame] = {}
+    all_shear: dict[str, pd.DataFrame] = {}
+    all_moment: dict[str, pd.DataFrame] = {}
 
     lateral_static = []
     wind_keys = ("Wind", "QUAKE", "Quake", "quake")
@@ -886,7 +930,7 @@ def compute_linear_storey_responses(
             elif isinstance(sd, dict):
                 pats = {sd["LoadName"]: sd["LoadSF"]}
         elif isinstance(entry, dict):
-            cname = list(entry.keys())[0]
+            cname = next(iter(entry.keys()))
             pats = entry[cname]
         if not any(kw in cname for kw in wind_keys):
             continue
@@ -896,7 +940,7 @@ def compute_linear_storey_responses(
     max_z = max(nd.z for nd in md.nodes.values())
     total_height = max_z - min_z
 
-    base_rxns: Dict[str, dict] = {}
+    base_rxns: dict[str, dict] = {}
     if df_linear is not None and not df_linear.empty:
         for _, row in df_linear.iterrows():
             cname = row["Case"]
@@ -922,14 +966,11 @@ def compute_linear_storey_responses(
         key = cname.replace(" ", "_")
         ab = AnalysisBuilder(mesh_model, config)
         try:
-            results = ab.run_static_analysis(pattern_scales=pats,
-                                            extract_reactions=True)
+            results = ab.run_static_analysis(pattern_scales=pats, extract_reactions=True)
             ndisp = results.get("nodal_displacements", {})
 
-            node_ux = {nid: ndisp.get(nid, (0, 0, 0))[0]
-                       for nid, nd in md.nodes.items()}
-            node_uy = {nid: ndisp.get(nid, (0, 0, 0))[1]
-                       for nid, nd in md.nodes.items()}
+            node_ux = {nid: ndisp.get(nid, (0, 0, 0))[0] for nid, nd in md.nodes.items()}
+            node_uy = {nid: ndisp.get(nid, (0, 0, 0))[1] for nid, nd in md.nodes.items()}
 
             df_rb = storey_displacements(md, stories, node_ux, node_uy)
             assign = assign_nodes_to_storeys(md, stories, 0.5)
@@ -955,18 +996,22 @@ def compute_linear_storey_responses(
                     storey_disp = peak
                 else:
                     storey_disp = row["Peak_disp"]
-                disp_rows.append({
-                    "Storey": row["Storey"],
-                    "Elevation": row["Elevation"],
-                    key: round(storey_disp, 4),
-                })
+                disp_rows.append(
+                    {
+                        "Storey": row["Storey"],
+                        "Elevation": row["Elevation"],
+                        key: round(storey_disp, 4),
+                    }
+                )
                 h = row["Elevation"] - min_z
                 if h > 1e-12:
-                    drift_rows.append({
-                        "Storey": row["Storey"],
-                        "Elevation (m)": row["Elevation"],
-                        key: round(abs(storey_disp) / h, 6),
-                    })
+                    drift_rows.append(
+                        {
+                            "Storey": row["Storey"],
+                            "Elevation (m)": row["Elevation"],
+                            key: round(abs(storey_disp) / h, 6),
+                        }
+                    )
 
             if disp_rows:
                 all_disp[key] = pd.DataFrame(disp_rows)
@@ -977,6 +1022,7 @@ def compute_linear_storey_responses(
 
     # --- RS cases via modal shapes -----------------------------------
     if T_spec and Sa_spec and len(T_spec) > 1:
+
         def _spectrum_func(T):
             return float(np.interp(T, T_spec, Sa_spec))
 
@@ -990,8 +1036,7 @@ def compute_linear_storey_responses(
             ab.build_domain()
             ab.compute_seismic_masses()
             try:
-                modal_rs = ab.run_modal_analysis(num_modes=n_avail,
-                                                 print_results=False)
+                ab.run_modal_analysis(num_modes=n_avail, print_results=False)
                 rs_disp = ab.compute_rs_nodal_displacements(
                     num_modes=n_avail,
                     modal_periods=periods,
@@ -1017,18 +1062,22 @@ def compute_linear_storey_responses(
                             hyps.append(math.hypot(d[0], d[1]))
                         if hyps:
                             peak_disp = max(hyps)
-                            d_rows.append({
-                                "Storey": s.name,
-                                "Elevation": s.elevation,
-                                key: round(peak_disp, 4),
-                            })
+                            d_rows.append(
+                                {
+                                    "Storey": s.name,
+                                    "Elevation": s.elevation,
+                                    key: round(peak_disp, 4),
+                                }
+                            )
                             h = s.elevation - min_z
                             if h > 1e-12:
-                                dr_rows.append({
-                                    "Storey": s.name,
-                                    "Elevation (m)": s.elevation,
-                                    key: round(abs(peak_disp) / h, 6),
-                                })
+                                dr_rows.append(
+                                    {
+                                        "Storey": s.name,
+                                        "Elevation (m)": s.elevation,
+                                        key: round(abs(peak_disp) / h, 6),
+                                    }
+                                )
                     if d_rows:
                         all_disp[key] = pd.DataFrame(d_rows)
                     if dr_rows:
@@ -1052,8 +1101,7 @@ def compute_linear_storey_responses(
         br_shear = resultant_shear(br)
         fx = br.get("Fx", 0) or 0
         fy = br.get("Fy", 0) or 0
-        br_moment = resultant_moment(br, shear_fx=fx, shear_fy=fy,
-                                     cz=cz, min_z=min_z)
+        br_moment = resultant_moment(br, shear_fx=fx, shear_fy=fy, cz=cz, min_z=min_z)
         if br_shear < 1e-6 and br_moment < 1e-6:
             continue
         if br_moment < 1e-3 and br_shear >= 1e-3:
@@ -1068,35 +1116,56 @@ def compute_linear_storey_responses(
         mo_rows = []
         for s in stories:
             z = s.elevation - min_z
-            Vz = br_shear - w0*z - (w1 - w0) * z**2 / (2.0 * H)
-            Mz = (br_moment - br_shear*z + w0*z**2/2.0
-                  + (w1 - w0) * z**3 / (6.0 * H))
-            sh_rows.append({"Storey": s.name, "Elevation": s.elevation,
-                            key: round(Vz, 1)})
-            mo_rows.append({"Storey": s.name, "Elevation": s.elevation,
-                            key: round(Mz, 1)})
+            Vz = br_shear - w0 * z - (w1 - w0) * z**2 / (2.0 * H)
+            Mz = br_moment - br_shear * z + w0 * z**2 / 2.0 + (w1 - w0) * z**3 / (6.0 * H)
+            sh_rows.append({"Storey": s.name, "Elevation": s.elevation, key: round(Vz, 1)})
+            mo_rows.append({"Storey": s.name, "Elevation": s.elevation, key: round(Mz, 1)})
         if br_shear >= 1e-6:
             all_shear[key] = pd.DataFrame(sh_rows)
         if br_moment >= 1e-6:
             all_moment[key] = pd.DataFrame(mo_rows)
 
-    df_disp_out = (build_storey_table("Elevation", all_disp,
-        min_z=min_z, base_rxns=base_rxns, total_height=total_height)
-        if all_disp else pd.DataFrame())
-    df_drift_out = (build_storey_table("Elevation (m)", all_drift,
-        min_z=min_z, base_rxns=base_rxns, total_height=total_height)
-        if all_drift else pd.DataFrame())
-    df_shear_out = (build_storey_table("Elevation", all_shear,
-        min_z=min_z, base_rxns=base_rxns, total_height=total_height,
-        base_val="shear",
-        _resultant_shear_fn=resultant_shear)
-        if all_shear else pd.DataFrame())
-    df_moment_out = (build_storey_table("Elevation", all_moment,
-        min_z=min_z, base_rxns=base_rxns, total_height=total_height,
-        base_val="moment",
-        _resultant_shear_fn=resultant_shear,
-        _resultant_moment_fn=resultant_moment)
-        if all_moment else pd.DataFrame())
+    df_disp_out = (
+        build_storey_table(
+            "Elevation", all_disp, min_z=min_z, base_rxns=base_rxns, total_height=total_height
+        )
+        if all_disp
+        else pd.DataFrame()
+    )
+    df_drift_out = (
+        build_storey_table(
+            "Elevation (m)", all_drift, min_z=min_z, base_rxns=base_rxns, total_height=total_height
+        )
+        if all_drift
+        else pd.DataFrame()
+    )
+    df_shear_out = (
+        build_storey_table(
+            "Elevation",
+            all_shear,
+            min_z=min_z,
+            base_rxns=base_rxns,
+            total_height=total_height,
+            base_val="shear",
+            _resultant_shear_fn=resultant_shear,
+        )
+        if all_shear
+        else pd.DataFrame()
+    )
+    df_moment_out = (
+        build_storey_table(
+            "Elevation",
+            all_moment,
+            min_z=min_z,
+            base_rxns=base_rxns,
+            total_height=total_height,
+            base_val="moment",
+            _resultant_shear_fn=resultant_shear,
+            _resultant_moment_fn=resultant_moment,
+        )
+        if all_moment
+        else pd.DataFrame()
+    )
 
     return {
         "df_disp": df_disp_out,

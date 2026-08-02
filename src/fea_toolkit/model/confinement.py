@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -79,6 +78,7 @@ class ConfinementData:
         predict very large strains; NZSEE C5 uses 0.05.  The value
         is configurable.
     """
+
     fc: float
     tie_diameter: float
     tie_spacing: float
@@ -123,30 +123,21 @@ class ConfinementData:
             )
         # Validate cross-tie counts
         if self.cross_tie_count_x < 0:
-            raise ValueError(
-                f"cross_tie_count_x must be >= 0, got {self.cross_tie_count_x}"
-            )
+            raise ValueError(f"cross_tie_count_x must be >= 0, got {self.cross_tie_count_x}")
         if self.cross_tie_count_y < 0:
-            raise ValueError(
-                f"cross_tie_count_y must be >= 0, got {self.cross_tie_count_y}"
-            )
+            raise ValueError(f"cross_tie_count_y must be >= 0, got {self.cross_tie_count_y}")
         # Validate ecu_max
         if self.ecu_max <= 0:
-            raise ValueError(
-                f"ecu_max must be greater than 0, got {self.ecu_max}"
-            )
+            raise ValueError(f"ecu_max must be greater than 0, got {self.ecu_max}")
         # Validate eps_su
         if self.eps_su <= 0:
-            raise ValueError(
-                f"eps_su must be > 0, got {self.eps_su}"
-            )
+            raise ValueError(f"eps_su must be > 0, got {self.eps_su}")
         # For spiral, require compatible core dimensions
-        if self.tie_config == "spiral":
-            if self.core_bc <= 0 and self.core_dc <= 0:
-                raise ValueError(
-                    f"Spiral tie_config requires positive core_bc and core_dc; "
-                    f"got core_bc={self.core_bc}, core_dc={self.core_dc}"
-                )
+        if self.tie_config == "spiral" and self.core_bc <= 0 and self.core_dc <= 0:
+            raise ValueError(
+                f"Spiral tie_config requires positive core_bc and core_dc; "
+                f"got core_bc={self.core_bc}, core_dc={self.core_dc}"
+            )
         # Derive core dimensions from overall + cover if not given directly
         if self.core_bc <= 0 and self.overall_b > 0:
             self.core_bc = self.overall_b - 2 * self.cover - self.tie_diameter
@@ -190,6 +181,7 @@ class ConfinementResult:
     f_l : float
         Effective lateral confining stress (Pa).
     """
+
     fcc: float
     ecc: float
     ecu: float = 0.02
@@ -258,8 +250,7 @@ def mander_confined(data: ConfinementData) -> ConfinementResult:
             rho_cc = (n_longs * Al) / Ac if Ac > 0 else 0.0
         # Clamp ke to the physically admissible range (0, 1] — a value
         # above 1.0 would indicate an over-counted longitudinal ratio.
-        _ke_raw = ((1.0 - s_prime / (2.0 * Ds))**2 /
-                   (1.0 - rho_cc)) if Ds > 0 else 0.0
+        _ke_raw = ((1.0 - s_prime / (2.0 * Ds)) ** 2 / (1.0 - rho_cc)) if Ds > 0 else 0.0
         ke = min(max(_ke_raw, 0.0), 1.0)
         # Effective lateral confining stress (factored by ke)
         f_l = ke * 0.5 * rho_s * fyh

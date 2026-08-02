@@ -49,7 +49,7 @@ import json
 import os
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 class ModelLog:
@@ -66,13 +66,13 @@ class ModelLog:
         self,
         model_name: str,
         output_dir: str = "output",
-        build_config: Optional[Dict[str, Any]] = None,
+        build_config: Optional[dict[str, Any]] = None,
     ) -> None:
         self.model_name = model_name
         self.output_dir = output_dir
         self.created = datetime.now(timezone.utc).isoformat()
         self.build_config = build_config or {}
-        self.diagnostics: List[Dict[str, Any]] = []
+        self.diagnostics: list[dict[str, Any]] = []
         self._next_id = 1
 
     # ── Public API ──────────────────────────────────────────────
@@ -82,7 +82,7 @@ class ModelLog:
         type: str,
         severity: str,
         message: str,
-        details: Optional[Dict[str, Any]] = None,
+        details: Optional[dict[str, Any]] = None,
         fix_applied: bool = False,
         visualisation_hint: str = "",
     ) -> int:
@@ -103,7 +103,7 @@ class ModelLog:
         Returns:
             The 1‑based diagnostic ID.
         """
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "id": self._next_id,
             "type": type,
             "severity": severity,
@@ -128,11 +128,10 @@ class ModelLog:
             The path the file was written to.
         """
         if filepath is None:
-            safe_name = re.sub(r'[^a-zA-Z0-9_\-.]', '_', self.model_name)
+            safe_name = re.sub(r"[^a-zA-Z0-9_\-.]", "_", self.model_name)
             filepath = os.path.join(self.output_dir, f"{safe_name}.log.json")
         # Prevent path traversal
-        resolved = os.path.abspath(os.path.join(self.output_dir,
-                                   os.path.basename(filepath)))
+        resolved = os.path.abspath(os.path.join(self.output_dir, os.path.basename(filepath)))
         if not resolved.startswith(os.path.abspath(self.output_dir)):
             raise ValueError(f"File path escapes output directory: {filepath}")
         filepath = resolved
@@ -158,7 +157,7 @@ class ModelLog:
             The path the file was written to.
         """
         if filepath is None:
-            safe_name = re.sub(r'[^a-zA-Z0-9_\-.]', '_', self.model_name)
+            safe_name = re.sub(r"[^a-zA-Z0-9_\-.]", "_", self.model_name)
             filepath = os.path.join(self.output_dir, f"{safe_name}.log.py")
         os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
 
@@ -334,14 +333,18 @@ if __name__ == "__main__":
             print(f"  [{self.model_name}] No diagnostics recorded.")
             return
         n_unfixed = sum(1 for d in self.diagnostics if not d["fix_applied"])
-        print(f"  [{self.model_name}] {n} diagnostic(s): "
-              f"{n_unfixed} unfixed, {n - n_unfixed} resolved.")
+        print(
+            f"  [{self.model_name}] {n} diagnostic(s): "
+            f"{n_unfixed} unfixed, {n - n_unfixed} resolved."
+        )
         for diag in self.diagnostics:
             fix = "✓" if diag["fix_applied"] else "✗"
-            print(f"    [#{diag['id']}] {diag['severity'].upper():>7} "
-                  f"{diag['type']:<30} {diag['message']}  [{fix}]")
+            print(
+                f"    [#{diag['id']}] {diag['severity'].upper():>7} "
+                f"{diag['type']:<30} {diag['message']}  [{fix}]"
+            )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-compatible dict."""
         return {
             "model_name": self.model_name,
@@ -352,7 +355,7 @@ if __name__ == "__main__":
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ModelLog":
+    def from_dict(cls, data: dict[str, Any]) -> ModelLog:
         """Deserialise from a dict (e.g. loaded from JSON)."""
         log = cls(
             model_name=data.get("model_name", "unknown"),
@@ -365,9 +368,10 @@ if __name__ == "__main__":
             log._next_id = max(d["id"] for d in log.diagnostics) + 1
         return log
 
-    def merge(self, other: "ModelLog") -> None:
+    def merge(self, other: ModelLog) -> None:
         """Merge diagnostics from another log into this one."""
         import copy
+
         for diag in other.diagnostics:
             merged = copy.deepcopy(diag)
             merged["id"] = self._next_id

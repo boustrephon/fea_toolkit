@@ -6,23 +6,31 @@ from __future__ import annotations
 
 import math
 import warnings
-import numpy as np
-from typing import Sequence, Set, Tuple, Dict, List, Any, Union, Optional
 from collections import defaultdict
+from collections.abc import Sequence
+from typing import Any, Optional, Union
+
+import numpy as np
 
 from ..model.sap_data import (
-    Node, Material, Section,
-    FrameElement, AreaElement, Group, SAPModelData,
-    FrameDistributedLoad, AreaUniformLoad,
-    FrameEndOffset, AreaMesh, JointLoad, Restraint,
+    AreaElement,
+    AreaMesh,
+    AreaUniformLoad,
+    FrameDistributedLoad,
+    FrameElement,
+    FrameEndOffset,
+    Group,
+    JointLoad,
+    Node,
+    SAPModelData,
 )
 
 # ============================================================================
 # Vector and orientation functions (from SAP2OPS_v4.py)
 # ============================================================================
 
-def get_SAP_vecxz(vec_x: Union[Sequence[float], np.ndarray],
-                  angle: float = 0.0) -> np.ndarray:
+
+def get_SAP_vecxz(vec_x: Union[Sequence[float], np.ndarray], angle: float = 0.0) -> np.ndarray:
     """Generate default vecxz vector for OpenSees geometric transformation.
 
     Args:
@@ -59,7 +67,9 @@ def get_SAP_vecxz(vec_x: Union[Sequence[float], np.ndarray],
         return rotate_about_axis(v3_norm, v1_norm, theta)
 
 
-def get_local_axes(axis: np.ndarray, angle: float = 0.0) -> "tuple[np.ndarray, np.ndarray, np.ndarray]":
+def get_local_axes(
+    axis: np.ndarray, angle: float = 0.0
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute the full local coordinate system for a frame element.
 
     Given the element axis (I→J vector), returns the orthonormal
@@ -131,16 +141,20 @@ def rotate_about_axis(v: np.ndarray, axis: np.ndarray, theta_rad: float) -> np.n
         Rotated unit vector.
     """
     k = axis / np.linalg.norm(axis)
-    v_rot = (v * math.cos(theta_rad) +
-             np.cross(k, v) * math.sin(theta_rad) +
-             k * np.dot(k, v) * (1 - math.cos(theta_rad)))
+    v_rot = (
+        v * math.cos(theta_rad)
+        + np.cross(k, v) * math.sin(theta_rad)
+        + k * np.dot(k, v) * (1 - math.cos(theta_rad))
+    )
     return v_rot / np.linalg.norm(v_rot)
 
 
-def point_on_segment(p: Union[Sequence[float], np.ndarray],
-                     a: Union[Sequence[float], np.ndarray],
-                     b: Union[Sequence[float], np.ndarray],
-                     tol: float = 1e-6) -> bool:
+def point_on_segment(
+    p: Union[Sequence[float], np.ndarray],
+    a: Union[Sequence[float], np.ndarray],
+    b: Union[Sequence[float], np.ndarray],
+    tol: float = 1e-6,
+) -> bool:
     """Check if point p lies on the closed line segment from a to b.
 
     Args:
@@ -165,9 +179,8 @@ def point_on_segment(p: Union[Sequence[float], np.ndarray],
         return False
 
     # Check if projection lies between a and b
-    if np.dot(ap, ab) < -tol or np.dot(bp, -ab) < -tol:
-        return False
-    return True
+    return not (np.dot(ap, ab) < -tol or np.dot(bp, -ab) < -tol)
+
 
 def compute_t_location(point, a, b) -> float:
     """Return parametric location t (0..1) of point on line segment a-b."""
@@ -186,32 +199,33 @@ def compute_t_location(point, a, b) -> float:
 def global_to_local_distributed_load(ele_tag, global_force_vector):
     """Transform a global distributed load vector into OpenSees local coordinates
     and applies it to a 3D beam element.
-    
+
     global_force_vector: list/array [Wx, Wy, Wz] (Force per unit true length)
 
     Apply to OpenSees 3D beam (Format: wy, wz, wx)
         ops.eleLoad('-ele', ele_tag, '-type', '-beamUniform', wy, wz, wx)
     """
     import openseespy.opensees as ops
+
     # 1. Fetch node coordinates for the element
     node_tags = ops.eleNodes(ele_tag)
     i_node, j_node = node_tags[0], node_tags[1]
-    
+
     pos_i = np.array(ops.nodeCoord(i_node))
     pos_j = np.array(ops.nodeCoord(j_node))
-    
+
     # 2. Get local X-axis (element vector)
     element_vector = pos_j - pos_i
     true_length = np.linalg.norm(element_vector)
     local_x = element_vector / true_length
-    
+
     # 3. Retrieve the cross-product vector used in the element's geometric transformation
     # OpenSees stores geomTransf tags. Here, we fetch the defined local Y/Z or look it up.
-    # Note: If OpenSees 'eleResponse' doesn't support 'yaxis' directly for your element type, 
+    # Note: If OpenSees 'eleResponse' doesn't support 'yaxis' directly for your element type,
     # extract the vecxz vector used when you defined the geomTransf.
     try:
-        local_y = np.array(ops.eleResponse(ele_tag, 'yaxis'))
-        local_z = np.array(ops.eleResponse(ele_tag, 'zaxis'))
+        local_y = np.array(ops.eleResponse(ele_tag, "yaxis"))
+        local_z = np.array(ops.eleResponse(ele_tag, "zaxis"))
     except Exception:
         # Fallback manual calculation if eleResponse isn't available for the element type.
         # Note: OpenSees beam-column elements (elasticBeamColumn, forceBeamColumn, etc.)
@@ -227,13 +241,16 @@ def global_to_local_distributed_load(ele_tag, global_force_vector):
     wx = np.dot(W, local_x)
     wy = np.dot(W, local_y)
     wz = np.dot(W, local_z)
-    
-    return wx, wy,wz
 
-def interp(x:float, x1: float, x2: float, y1: Optional[float], y2: Optional[float]) -> Optional[float]:
-    """Returns an interpolated y-value for a line 
+    return wx, wy, wz
+
+
+def interp(
+    x: float, x1: float, x2: float, y1: Optional[float], y2: Optional[float]
+) -> Optional[float]:
+    """Returns an interpolated y-value for a line
     between two points (x1, y1) and (x2, y2)
-    for a given x-value - i.e. linear interpolation 
+    for a given x-value - i.e. linear interpolation
     along a line.
 
     Args:
@@ -245,7 +262,7 @@ def interp(x:float, x1: float, x2: float, y1: Optional[float], y2: Optional[floa
 
     Returns:
         float: interpolated y-value for a line at point x
-    
+
     Example:
         >>> interp(1.5, 0.7, 1.9, 1.4, 2.3)
         2.0
@@ -262,27 +279,32 @@ def interp(x:float, x1: float, x2: float, y1: Optional[float], y2: Optional[floa
         return y1 + (x - x1) / (x2 - x1) * (y2 - y1)
 
 
-def list_interp(val: float, list_1: list[float], list_2: list[float], 
-                extend:bool = False, extrapolate:bool=False)-> float|None:
-    """Returns interpolated values from list_2 based 
-    on values related to list_1, returning zero if 
-    `extend` is False and the values are outside the 
-    range of list_1 or returning the bookends 
-    if the provided values are outside the range of 
-    list_1 and if `extrapolate` is False. If any of 
+def list_interp(
+    val: float,
+    list_1: list[float],
+    list_2: list[float],
+    extend: bool = False,
+    extrapolate: bool = False,
+) -> float | None:
+    """Returns interpolated values from list_2 based
+    on values related to list_1, returning zero if
+    `extend` is False and the values are outside the
+    range of list_1 or returning the bookends
+    if the provided values are outside the range of
+    list_1 and if `extrapolate` is False. If any of
     the values are None, it will return `None`.
-    
+
     Args:
         val (float): the lookup value
         list_1 (list[float]): the lookup list
-        list_2 (list[float]): is the result list with values corresponding 
+        list_2 (list[float]): is the result list with values corresponding
                 to those on list_1
-        extrapolate (bool, optional): the option to extrapolate linearly 
+        extrapolate (bool, optional): the option to extrapolate linearly
             outside the limits of list_1. Defaults to False.
 
     Returns:
         float: Linearly interpolated function
-        
+
     Examples:
         >>> list_interp(0.5, [0.2, 0.8, 1.1], [1.1, 1.35, 1.4])
         1.225
@@ -292,7 +314,7 @@ def list_interp(val: float, list_1: list[float], list_2: list[float],
         1.1
     """
     i_list = [i for i, n in enumerate(list_1) if n == val]
-    if i_list:  
+    if i_list:
         # if lookup value matches a value in list_1
         return list_2[i_list[0]]
     elif val <= list_1[0]:
@@ -319,20 +341,18 @@ def list_interp(val: float, list_1: list[float], list_2: list[float],
             return list_2[-1]
     else:
         # carry out interpolation
-        index_list = [i for i, (x1, x2) 
-                      in enumerate(zip(list_1[:-1], list_1[1:])) 
-                      if val >= x1 and val <= x2]
+        index_list = [
+            i for i, (x1, x2) in enumerate(zip(list_1[:-1], list_1[1:])) if val >= x1 and val <= x2
+        ]
         if len(index_list) == 1:
             j = index_list[0]
-            vals = (list_1[j], list_1[j+1], 
-                    list_2[j], list_2[j+1])
-            if any([v is None for v in vals]):
+            vals = (list_1[j], list_1[j + 1], list_2[j], list_2[j + 1])
+            if any(v is None for v in vals):
                 return None
             else:
                 return interp(val, *vals)
         else:
             return None
-
 
 
 # ============================================================================
@@ -367,7 +387,7 @@ def polygon_area_3d(pts):
 
 def _segment_intersection_3d(a, b, c, d, tol=1e-6):
     """Find intersection point of line segments AB and CD in 3D.
-    
+
     Returns (intersect_point, s, t) or (None, None, None) if no intersection.
     s = parametric position along AB (0=a, 1=b)
     t = parametric position along CD (0=c, 1=d)
@@ -375,22 +395,21 @@ def _segment_intersection_3d(a, b, c, d, tol=1e-6):
     ab = b - a
     cd = d - c
     ac = c - a
-    
+
     # Evaluate all three coordinate-pair projections and choose the one
     # with the largest absolute determinant for best numerical stability.
     best = None  # (det, i, j)
-    for (i, j) in [(0, 1), (0, 2), (1, 2)]:
+    for i, j in [(0, 1), (0, 2), (1, 2)]:
         det = ab[i] * (-cd[j]) - ab[j] * (-cd[i])
-        if abs(det) > tol:
-            if best is None or abs(det) > abs(best[0]):
-                best = (det, i, j)
+        if abs(det) > tol and (best is None or abs(det) > abs(best[0])):
+            best = (det, i, j)
     if best is None:
         return None, None, None
     det, i, j = best
     s = (ac[i] * (-cd[j]) - ac[j] * (-cd[i])) / det
     t = (ab[i] * ac[j] - ab[j] * ac[i]) / det
     k = 3 - i - j
-    residual = (a[k] + s*ab[k]) - (c[k] + t*cd[k])
+    residual = (a[k] + s * ab[k]) - (c[k] + t * cd[k])
     if abs(residual) > tol * max(1.0, abs(a[k]), abs(b[k]), abs(c[k]), abs(d[k])):
         return None, None, None
     if -tol <= s <= 1 + tol and -tol <= t <= 1 + tol:
@@ -425,17 +444,22 @@ class SpatialGrid:
         or query extent.  Auto-sized to about 1 percent of model extent in most
         callers.
     """
+
     def __init__(self, cell_size: float = 1.0):
         self.cell_size = cell_size
-        self.grid: Dict[Tuple[int, int, int], List[Tuple[Any, Tuple[float, float, float]]]] = defaultdict(list)
+        self.grid: dict[tuple[int, int, int], list[tuple[Any, tuple[float, float, float]]]] = (
+            defaultdict(list)
+        )
 
-    def _cell(self, x: float, y: float, z: float) -> Tuple[int, int, int]:
+    def _cell(self, x: float, y: float, z: float) -> tuple[int, int, int]:
         """Return the (i, j, k) cell index for a given coordinate."""
-        return (int(math.floor(x / self.cell_size)),
-                int(math.floor(y / self.cell_size)),
-                int(math.floor(z / self.cell_size)))
+        return (
+            int(math.floor(x / self.cell_size)),
+            int(math.floor(y / self.cell_size)),
+            int(math.floor(z / self.cell_size)),
+        )
 
-    def add_point(self, point_id: Any, coords: Tuple[float, float, float]) -> None:
+    def add_point(self, point_id: Any, coords: tuple[float, float, float]) -> None:
         """Store *point_id* at *coords* in the grid.
 
         Parameters
@@ -447,8 +471,9 @@ class SpatialGrid:
         """
         self.grid[self._cell(*coords)].append((point_id, coords))
 
-    def points_in_bbox(self, mins: Tuple[float, float, float],
-                       maxs: Tuple[float, float, float]) -> List[Tuple[Any, Tuple[float, float, float]]]:
+    def points_in_bbox(
+        self, mins: tuple[float, float, float], maxs: tuple[float, float, float]
+    ) -> list[tuple[Any, tuple[float, float, float]]]:
         """Return all points whose cell overlaps the axis-aligned bounding box.
 
         Parameters
@@ -480,14 +505,17 @@ class SpatialGrid:
 # Element splitting at joints (respecting auto‑mesh)
 # ============================================================================
 
-def split_elements_at_joints(nodes: Dict[str, Dict[str, float]],
-                             elements: Dict[str, Dict[str, Any]],
-                             assignments: Dict[str, Any],
-                             dist_loads: Dict[str, Any],
-                             auto_mesh: Dict[str, Dict[str, Any]],
-                             frame_dist_loads: Dict[str, Any],
-                             tol: float = 1e-6,
-                             verbose: bool = False) -> Tuple[Dict[str, Dict], Dict[str, Any], Dict[str, Any]]:
+
+def split_elements_at_joints(
+    nodes: dict[str, dict[str, float]],
+    elements: dict[str, dict[str, Any]],
+    assignments: dict[str, Any],
+    dist_loads: dict[str, Any],
+    auto_mesh: dict[str, dict[str, Any]],
+    frame_dist_loads: dict[str, Any],
+    tol: float = 1e-6,
+    verbose: bool = False,
+) -> tuple[dict[str, dict], dict[str, Any], dict[str, Any]]:
     """Split frame elements at nodes that lie on them, using spatial grid.
 
     Only splits if ``auto_mesh[eid].get('AtJoints')`` is True.
@@ -523,7 +551,7 @@ def split_elements_at_joints(nodes: Dict[str, Dict[str, float]],
         return elements, assignments, dist_loads
 
     # Build spatial grid of all nodes
-    node_coords = {nid: (nd['x'], nd['y'], nd['z']) for nid, nd in nodes.items()}
+    node_coords = {nid: (nd["x"], nd["y"], nd["z"]) for nid, nd in nodes.items()}
     # Estimate grid cell size as 1% of model extent
     all_coords = np.array(list(node_coords.values()))
     extent = np.max(all_coords, axis=0) - np.min(all_coords, axis=0)
@@ -536,11 +564,13 @@ def split_elements_at_joints(nodes: Dict[str, Dict[str, float]],
     new_assignments = {}
     new_dist_loads = {}
     # Determine next element ID (assuming numeric IDs)
-    existing_ids = [int(e.get('id', 0)) for e in elements.values() if str(e.get('id', '0')).isdigit()]
+    existing_ids = [
+        int(e.get("id", 0)) for e in elements.values() if str(e.get("id", "0")).isdigit()
+    ]
     next_id = max(existing_ids) + 1 if existing_ids else 1
 
     for eid, el in elements.items():
-        mesh_flag = auto_mesh.get(eid, {}).get('AtJoints', False)
+        mesh_flag = auto_mesh.get(eid, {}).get("AtJoints", False)
         if not mesh_flag:
             # Keep as is
             new_elements[eid] = el
@@ -550,8 +580,8 @@ def split_elements_at_joints(nodes: Dict[str, Dict[str, float]],
                 new_dist_loads[eid] = dist_loads[eid]
             continue
 
-        a = np.array(node_coords[el['i']])
-        b = np.array(node_coords[el['j']])
+        a = np.array(node_coords[el["i"]])
+        b = np.array(node_coords[el["j"]])
         # Bounding box enlarged by tol
         mins = np.minimum(a, b) - tol
         maxs = np.maximum(a, b) + tol
@@ -559,7 +589,7 @@ def split_elements_at_joints(nodes: Dict[str, Dict[str, float]],
 
         intermediate = []
         for nid, coord in candidates:
-            if nid == el['i'] or nid == el['j']:
+            if nid == el["i"] or nid == el["j"]:
                 continue
             if point_on_segment(coord, a, b, tol):
                 intermediate.append((nid, coord))
@@ -573,20 +603,21 @@ def split_elements_at_joints(nodes: Dict[str, Dict[str, float]],
             continue
 
         # Sort by distance from a
-        def dist_from_a(item):
+        def dist_from_a(item, a=a):
             coord = item[1]
-            return math.hypot(coord[0]-a[0], coord[1]-a[1], coord[2]-a[2])
+            return math.hypot(coord[0] - a[0], coord[1] - a[1], coord[2] - a[2])
+
         intermediate.sort(key=dist_from_a)
-        ordered_nodes = [el['i']] + [nid for nid, _ in intermediate] + [el['j']]
+        ordered_nodes = [el["i"]] + [nid for nid, _ in intermediate] + [el["j"]]
 
         for k in range(len(ordered_nodes) - 1):
             new_eid = f"{eid}-{k}"
             new_el_id = next_id
             next_id += 1
             new_el = el.copy()
-            new_el['id'] = new_el_id
-            new_el['i'] = ordered_nodes[k]
-            new_el['j'] = ordered_nodes[k+1]
+            new_el["id"] = new_el_id
+            new_el["i"] = ordered_nodes[k]
+            new_el["j"] = ordered_nodes[k + 1]
             new_elements[new_eid] = new_el
             # Propagate assignments and loads
             if eid in assignments:
@@ -599,9 +630,10 @@ def split_elements_at_joints(nodes: Dict[str, Dict[str, float]],
     return new_elements, new_assignments, new_dist_loads
 
 
-def trapezoidal_force_split(f_data: Tuple[Tuple[float, float], Tuple[float, float]],
-                            t_values: List[float]) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
-    """Splits TRAPF data based on t-parameters - 
+def trapezoidal_force_split(
+    f_data: tuple[tuple[float, float], tuple[float, float]], t_values: list[float]
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    """Splits TRAPF data based on t-parameters -
     returns (n + 1) values for a set of n t-parameters
 
     Args:
@@ -611,7 +643,7 @@ def trapezoidal_force_split(f_data: Tuple[Tuple[float, float], Tuple[float, floa
     Returns:
         _type_: Collections of tuples ((RDSTART, FSTART), (RDEND, FEND))
         based on the t-parameters
-    
+
     Examples:
         >> f_data = ((0.2, 1.2), (0.8, 5.1))
         >> t_values = [0.1, 0.5, 0.75, 0.95]
@@ -619,14 +651,14 @@ def trapezoidal_force_split(f_data: Tuple[Tuple[float, float], Tuple[float, floa
         [((0, 0), (1, 0)), ((0.25, 1.2), (1, 3.1499999999999995)), ((0, 3.1499999999999995), (1, 4.7749999999999995)), ((0, 4.7749999999999995), (0.2500000000000003, 5.1)), ((0, 0), (1, 0))]
     """
     tt, ff = zip(*f_data)
-    # print(tt,ff)    
-    t_values = sorted(set([0] + t_values + [1.0]))
+    # print(tt,ff)
+    t_values = sorted({0, *t_values, 1.0})
     f_values = [list_interp(t, tt, ff) for t in t_values]
     # print(f_values, '**')
-    data_list  = []
+    data_list = []
     for t1, t2, f1, f2 in zip(t_values[:-1], t_values[1:], f_values[:-1], f_values[1:]):
         # print(t1, t2, f1, f2)
-        if f1 == 0 and f2 != 0:   # left transition
+        if f1 == 0 and f2 != 0:  # left transition
             dt = (tt[0] - t1) / (t2 - t1)
             data_list.append(((dt, ff[0]), (1, f2)))
         elif f1 != 0 and f2 == 0:  # right transition
@@ -642,14 +674,17 @@ def trapezoidal_force_split(f_data: Tuple[Tuple[float, float], Tuple[float, floa
             data_list.append(((0, 0), (1, 0)))
     return data_list
 
-def split_elements_ss(nodes: Dict[str, Dict[str, float]],
-                   elements: Dict[str, Dict[str, Any]],
-                   assignments: Dict[str, Any],
-                   dist_loads: Dict[str, Any],
-                   auto_mesh: Dict[str, Dict[str, Any]],
-                   frame_dist_loads: Dict[str, Any],
-                   tol: float = 1e-6,
-                   verbose: bool = False) -> Tuple[Dict[str, Dict], Dict[str, Any], Dict[str, Any]]:
+
+def split_elements_ss(
+    nodes: dict[str, dict[str, float]],
+    elements: dict[str, dict[str, Any]],
+    assignments: dict[str, Any],
+    dist_loads: dict[str, Any],
+    auto_mesh: dict[str, dict[str, Any]],
+    frame_dist_loads: dict[str, Any],
+    tol: float = 1e-6,
+    verbose: bool = False,
+) -> tuple[dict[str, dict], dict[str, Any], dict[str, Any]]:
     """Main entry point for element splitting (currently only at joints).
 
     .. deprecated::
@@ -657,18 +692,20 @@ def split_elements_ss(nodes: Dict[str, Dict[str, float]],
        and AtFrames splitting.  This wrapper will be removed in a future
        version.
     """
-    return split_elements_at_joints(nodes, elements, assignments, dist_loads,
-                        auto_mesh, frame_dist_loads, tol, verbose)
+    return split_elements_at_joints(
+        nodes, elements, assignments, dist_loads, auto_mesh, frame_dist_loads, tol, verbose
+    )
+
 
 def split_elements(
-        nodes: Dict[str, 'Node'],
-        elements: Dict[str, FrameElement],
-        assignments: Dict[str, str],
-        dist_loads: List[FrameDistributedLoad],
-        auto_mesh: Dict[str, Dict[str, Any]],
-        tol: float = 1e-6,
-        verbose: bool = False
-        )-> Tuple[Dict[str, FrameElement], Dict[str, str], List[FrameDistributedLoad]]:
+    nodes: dict[str, Node],
+    elements: dict[str, FrameElement],
+    assignments: dict[str, str],
+    dist_loads: list[FrameDistributedLoad],
+    auto_mesh: dict[str, dict[str, Any]],
+    tol: float = 1e-6,
+    verbose: bool = False,
+) -> tuple[dict[str, FrameElement], dict[str, str], list[FrameDistributedLoad]]:
     """Split elements at joints (if AtJoints=True) and/or frame-frame
     intersections (if AtFrames=True), then redistribute distributed loads.
 
@@ -718,7 +755,6 @@ def split_elements(
     """
     # Build node coords dict
 
-
     node_coords = {nid: (node.x, node.y, node.z) for nid, node in nodes.items()}
     # Create spatial grid (default cell_size=1.0) for fast broad-phase
     # pre-filtering of candidate nodes.  Auto-sizing based on model
@@ -731,8 +767,7 @@ def split_elements(
     # ---- AtFrames: find frame-frame intersections and create new nodes ----
     # Collect elements that want frame-frame splitting
     at_frames_ids = [
-        eid for eid, el in elements.items()
-        if auto_mesh.get(eid, {}).get('AtFrames', False)
+        eid for eid, el in elements.items() if auto_mesh.get(eid, {}).get("AtFrames", False)
     ]
     # Track all node IDs involved in AtFrames (created or reused)
     at_frames_nodes: set = set()
@@ -749,7 +784,7 @@ def split_elements(
         at_frames_elems = [(eid, el) for eid, el in elements.items() if eid in at_frames_ids]
 
         # Precompute 3D bounding boxes for broad-phase filtering
-        _elem_bbox: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
+        _elem_bbox: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         for eid, el in at_frames_elems:
             pa = node_coords[el.node_i]
             pb = node_coords[el.node_j]
@@ -771,8 +806,9 @@ def split_elements(
                 eid_b, el_b = at_frames_elems[j]
                 # Broad-phase: skip if bounding boxes do not overlap
                 bbox_b_min, bbox_b_max = _elem_bbox[eid_b]
-                if np.any(bbox_a_max + _bbox_tol < bbox_b_min - _bbox_tol) or \
-                   np.any(bbox_b_max + _bbox_tol < bbox_a_min - _bbox_tol):
+                if np.any(bbox_a_max + _bbox_tol < bbox_b_min - _bbox_tol) or np.any(
+                    bbox_b_max + _bbox_tol < bbox_a_min - _bbox_tol
+                ):
                     continue
                 c = np.array(node_coords[el_b.node_i])
                 d = np.array(node_coords[el_b.node_j])
@@ -821,7 +857,9 @@ def split_elements(
                     new_node = Node(
                         node_id=used_nid,
                         node_tag=next_node_tag,
-                        x=float(p[0]), y=float(p[1]), z=float(p[2]),
+                        x=float(p[0]),
+                        y=float(p[1]),
+                        z=float(p[2]),
                     )
                     next_node_tag += 1
                     nodes[used_nid] = new_node
@@ -833,7 +871,7 @@ def split_elements(
                 # Record t-location with tolerance-based dedup
                 # (set() only catches exact duplicates)
                 if split_a:
-                    merged = list(el_a.t_locations) + [s]
+                    merged = [*list(el_a.t_locations), s]
                     merged.sort()
                     deduped = []
                     prev = None
@@ -843,7 +881,7 @@ def split_elements(
                         prev = val
                     el_a.t_locations = deduped
                 if split_b:
-                    merged = list(el_b.t_locations) + [t]
+                    merged = [*list(el_b.t_locations), t]
                     merged.sort()
                     deduped = []
                     prev = None
@@ -855,12 +893,12 @@ def split_elements(
 
     new_elements = {}
     new_assignments = {}
-    new_dist_loads = []   # will hold new loads for child elements
+    new_dist_loads = []  # will hold new loads for child elements
     next_tag = max((elem.elem_tag for elem in elements.values()), default=0) + 1
 
     for eid, el in elements.items():
         # Check if auto-mesh and AtJoints is True, or has AtFrames t_locations
-        mesh_flag = auto_mesh.get(eid, {}).get('AtJoints', False) or bool(el.t_locations)
+        mesh_flag = auto_mesh.get(eid, {}).get("AtJoints", False) or bool(el.t_locations)
         if not mesh_flag:
             # No splitting
             new_elements[eid] = el
@@ -888,9 +926,9 @@ def split_elements(
         maxs = np.maximum(a, b) + tol
         candidates = grid.points_in_bbox(tuple(mins), tuple(maxs))
         intermediate = []
-        at_joints = auto_mesh.get(eid, {}).get('AtJoints', False)
+        at_joints = auto_mesh.get(eid, {}).get("AtJoints", False)
         for nid, coord in candidates:
-            if nid == el.node_i or nid == el.node_j:
+            if nid in (el.node_i, el.node_j):
                 continue
             if point_on_segment(coord, a, b, tol):
                 # If AtJoints is False, only split at AtFrames-tracked nodes
@@ -933,7 +971,7 @@ def split_elements(
 
         # Create child elements
         child_elements = []
-        for k in range(len(node_list)-1):
+        for k in range(len(node_list) - 1):
             child_id = f"{eid}-{k}"
             child_tag = next_tag
             next_tag += 1
@@ -941,13 +979,13 @@ def split_elements(
                 elem_id=child_id,
                 elem_tag=child_tag,
                 node_i=node_list[k],
-                node_j=node_list[k+1],
+                node_j=node_list[k + 1],
                 angle=el.angle,
                 parent_id=eid,
-                inactive=False
+                inactive=False,
             )
             new_elements[child_id] = child
-            new_assignments[child_id] = assignments.get(eid, None)
+            new_assignments[child_id] = assignments.get(eid)
             el.child_ids.append(child_id)
             child_elements.append(child)
 
@@ -975,13 +1013,14 @@ def split_elements(
                 if abs(f_start) < 1e-12 and abs(f_end) < 1e-12:
                     continue
 
-                child_len = float(np.linalg.norm(
-                    np.array(node_coords[child.node_j]) -
-                    np.array(node_coords[child.node_i])
-                ))
+                child_len = float(
+                    np.linalg.norm(
+                        np.array(node_coords[child.node_j]) - np.array(node_coords[child.node_i])
+                    )
+                )
                 child_dist_a = t_start_local * child_len
                 child_dist_b = t_end_local * child_len
-                shape = 'Uniform' if abs(f_start - f_end) < 1e-6 else 'Linear'
+                shape = "Uniform" if abs(f_start - f_end) < 1e-6 else "Linear"
 
                 child_load = FrameDistributedLoad(
                     pattern=ld.pattern,
@@ -994,7 +1033,7 @@ def split_elements(
                     rdist_a=t_start_local,
                     rdist_b=t_end_local,
                     dist_a=child_dist_a,
-                    dist_b=child_dist_b
+                    dist_b=child_dist_b,
                 )
                 new_dist_loads.append(child_load)
 
@@ -1014,12 +1053,13 @@ def child_length(child, node_coords):
 # Nodal load conversion (for geomTransf types that don't support eleLoad)
 # ============================================================================
 
+
 def beam_load_to_nodal_loads(
     load: FrameDistributedLoad,
     elem: FrameElement,
-    node_coords: Dict[str, Tuple[float, float, float]],
+    node_coords: dict[str, tuple[float, float, float]],
     length: float,
-) -> Dict[str, Dict[str, float]]:
+) -> dict[str, dict[str, float]]:
     """Convert a distributed beam load into statically equivalent nodal loads.
 
     This is a fallback for geometric transformations that do **not** support
@@ -1049,13 +1089,13 @@ def beam_load_to_nodal_loads(
     vec_y = vec_y / np.linalg.norm(vec_y)
 
     # Determine global direction of the load (SAP2000 convention)
-    if load.direction == 'Gravity':
+    if load.direction == "Gravity":
         global_dir = np.array([0.0, 0.0, -1.0])
-    elif load.direction == 'X':
+    elif load.direction == "X":
         global_dir = np.array([1.0, 0.0, 0.0])
-    elif load.direction == 'Y':
+    elif load.direction == "Y":
         global_dir = np.array([0.0, 1.0, 0.0])
-    elif load.direction == 'Z':
+    elif load.direction == "Z":
         global_dir = np.array([0.0, 0.0, 1.0])
     else:
         global_dir = np.array([0.0, 0.0, -1.0])
@@ -1092,9 +1132,9 @@ def beam_load_to_nodal_loads(
     #   M_i += w_var * (span * L)² / 30
     #   M_j -= w_var * (span * L)² / 20
 
-    def fixed_end_forces(w_start: float, w_end: float,
-                         a_frac: float, b_frac: float, L_total: float
-                         ) -> Tuple[float, float, float, float]:
+    def fixed_end_forces(
+        w_start: float, w_end: float, a_frac: float, b_frac: float, L_total: float
+    ) -> tuple[float, float, float, float]:
         """Return (V_i, V_j, M_i, M_j) for one load component.
 
         Decomposes a trapezoid into a uniform part (``w_min``) plus a
@@ -1105,7 +1145,7 @@ def beam_load_to_nodal_loads(
         if s < 1e-12 or (abs(w_start) < 1e-12 and abs(w_end) < 1e-12):
             return (0.0, 0.0, 0.0, 0.0)
 
-        sL = s * L_total          # loaded length
+        sL = s * L_total  # loaded length
         centre = (a_frac + b_frac) * 0.5  # mid-point of loaded region
 
         # --- Uniform part (value closer to zero over full loaded span) ---
@@ -1118,9 +1158,9 @@ def beam_load_to_nodal_loads(
         # --- Triangular part (0 at a_frac, w_tri at b_frac) ---
         w_tri = w_end - w_start
         if abs(w_tri) > 1e-12:
-            F_tri = 0.5 * w_tri * sL   # total triangular force
+            F_tri = 0.5 * w_tri * sL  # total triangular force
             # Centroid of triangle from node i: (a_frac + 2*s/3) * L
-            c_tri = (a_frac + 2.0 * s / 3.0)
+            c_tri = a_frac + 2.0 * s / 3.0
             V_i_tri = F_tri * (1.0 - c_tri)
             V_j_tri = F_tri * c_tri
             # Fixed-end moment for triangular load on [0, sL]:
@@ -1131,10 +1171,7 @@ def beam_load_to_nodal_loads(
         else:
             V_i_tri = V_j_tri = M_i_tri = M_j_tri = 0.0
 
-        return (V_i_uni + V_i_tri,
-                V_j_uni + V_j_tri,
-                M_i_uni + M_i_tri,
-                M_j_uni + M_j_tri)
+        return (V_i_uni + V_i_tri, V_j_uni + V_j_tri, M_i_uni + M_i_tri, M_j_uni + M_j_tri)
 
     # Compute local fixed-end forces for each direction.
     # wy (local y) → shear in y, moment about local z.
@@ -1142,13 +1179,13 @@ def beam_load_to_nodal_loads(
     # wx (axial)   → axial force, no moment.
     Viy, Vjy, Miz, Mjz = fixed_end_forces(wy_a, wy_b, aL, bL, L)
     Viz, Vjz, Miy, Mjy = fixed_end_forces(wz_a, wz_b, aL, bL, L)
-    Vix, Vjx, _, _     = fixed_end_forces(wx_a, wx_b, aL, bL, L)
+    Vix, Vjx, _, _ = fixed_end_forces(wx_a, wx_b, aL, bL, L)
 
     # Transform local forces back to global coordinates
     T = np.column_stack([vec_x, vec_y, vec_z])  # local-to-global transform
 
     f_i_local = np.array([Vix, Viy, Viz])
-    m_i_local = np.array([0.0, Miy, Miz])   # wx (axial) → no moment
+    m_i_local = np.array([0.0, Miy, Miz])  # wx (axial) → no moment
     f_j_local = np.array([Vjx, Vjy, Vjz])
     m_j_local = np.array([0.0, Mjy, Mjz])
 
@@ -1158,10 +1195,22 @@ def beam_load_to_nodal_loads(
     m_j_global = T @ m_j_local
 
     return {
-        "i": {"fx": f_i_global[0], "fy": f_i_global[1], "fz": f_i_global[2],
-              "mx": m_i_global[0], "my": m_i_global[1], "mz": m_i_global[2]},
-        "j": {"fx": f_j_global[0], "fy": f_j_global[1], "fz": f_j_global[2],
-              "mx": m_j_global[0], "my": m_j_global[1], "mz": m_j_global[2]},
+        "i": {
+            "fx": f_i_global[0],
+            "fy": f_i_global[1],
+            "fz": f_i_global[2],
+            "mx": m_i_global[0],
+            "my": m_i_global[1],
+            "mz": m_i_global[2],
+        },
+        "j": {
+            "fx": f_j_global[0],
+            "fy": f_j_global[1],
+            "fz": f_j_global[2],
+            "mx": m_j_global[0],
+            "my": m_j_global[1],
+            "mz": m_j_global[2],
+        },
     }
 
 
@@ -1169,12 +1218,13 @@ def beam_load_to_nodal_loads(
 # Area load → frame edge load conversion
 # ============================================================================
 
+
 def convert_area_loads_to_edge_loads(
-    nodes: Dict[str, 'Node'],
-    area_elements: Dict[str, AreaElement],
-    frame_elements: Dict[str, FrameElement],
-    area_loads: List[AreaUniformLoad],
-) -> List[FrameDistributedLoad]:
+    nodes: dict[str, Node],
+    area_elements: dict[str, AreaElement],
+    frame_elements: dict[str, FrameElement],
+    area_loads: list[AreaUniformLoad],
+) -> list[FrameDistributedLoad]:
     """Convert uniform area loads to equivalent frame edge loads.
 
     For each area element with a uniform pressure load, the total force
@@ -1198,7 +1248,7 @@ def convert_area_loads_to_edge_loads(
     # Build lookup: pair of node IDs → frame element ID
     edge_map = {}  # (node_i, node_j) sorted → frame_id
     for eid, elem in frame_elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         key = tuple(sorted((elem.node_i, elem.node_j)))
         edge_map[key] = eid
@@ -1261,26 +1311,25 @@ def convert_area_loads_to_edge_loads(
                 continue
 
             # Determine load direction from the area load
-            if al.direction == 'Gravity':
-                direction = 'Z'
-            else:
-                direction = al.direction
+            direction = "Z" if al.direction == "Gravity" else al.direction
 
             # Create the edge load — uniform over the full span
-            result_loads.append(FrameDistributedLoad(
-                pattern=al.pattern,
-                frame_id=frame_id,
-                direction=direction,
-                load_type='Force',
-                shape='Uniform',
-                val_a=w,
-                val_b=w,
-                rdist_a=0.0,
-                rdist_b=1.0,
-                dist_a=0.0,
-                dist_b=edge_len,
-                coord_sys=al.coord_sys,
-            ))
+            result_loads.append(
+                FrameDistributedLoad(
+                    pattern=al.pattern,
+                    frame_id=frame_id,
+                    direction=direction,
+                    load_type="Force",
+                    shape="Uniform",
+                    val_a=w,
+                    val_b=w,
+                    rdist_a=0.0,
+                    rdist_b=1.0,
+                    dist_a=0.0,
+                    dist_b=edge_len,
+                    coord_sys=al.coord_sys,
+                )
+            )
 
     return result_loads
 
@@ -1289,16 +1338,17 @@ def convert_area_loads_to_edge_loads(
 # Brace subdivision with initial imperfection (Approach A)
 # ============================================================================
 
+
 def subdivide_elements(
-    elements: Dict[str, FrameElement],
-    assignments: Dict[str, str],
-    nodes: Dict[str, 'Node'],
+    elements: dict[str, FrameElement],
+    assignments: dict[str, str],
+    nodes: dict[str, Node],
     n_segments: int = 4,
     imperfection_ratio: float = 1.0 / 500.0,
     brace_ids: Optional[set] = None,
     end_offset: float = 0.0,
     next_tag: int = 1,
-) -> Tuple[Dict[str, FrameElement], Dict[str, str], Dict[str, 'Node'], int, List[tuple]]:
+) -> tuple[dict[str, FrameElement], dict[str, str], dict[str, Node], int, list[tuple]]:
     """Subdivide selected frame elements into *n_segments* sub‑elements
     with a small initial imperfection to trigger buckling under compression.
 
@@ -1354,13 +1404,13 @@ def subdivide_elements(
     if brace_ids is None:
         brace_ids = set()
 
-    rigid_links: List[tuple] = []
+    rigid_links: list[tuple] = []
 
     for eid in list(brace_ids):
         elem = elements.get(eid)
         # Skip already-inactive elements — prevents double subdivision when
         # the model is rebuilt (e.g., run_static_analysis with pattern_scales).
-        if elem is None or getattr(elem, 'inactive', False):
+        if elem is None or getattr(elem, "inactive", False):
             continue
 
         ni = nodes.get(elem.node_i)
@@ -1391,16 +1441,22 @@ def subdivide_elements(
             offset_i_tag = next_tag
             next_tag += 1
             nodes[offset_i_id] = Node(
-                node_id=offset_i_id, node_tag=offset_i_tag,
-                x=float(p_start[0]), y=float(p_start[1]), z=float(p_start[2]),
+                node_id=offset_i_id,
+                node_tag=offset_i_tag,
+                x=float(p_start[0]),
+                y=float(p_start[1]),
+                z=float(p_start[2]),
             )
 
             offset_j_id = f"{eid}_offset_j"
             offset_j_tag = next_tag
             next_tag += 1
             nodes[offset_j_id] = Node(
-                node_id=offset_j_id, node_tag=offset_j_tag,
-                x=float(p_end[0]), y=float(p_end[1]), z=float(p_end[2]),
+                node_id=offset_j_id,
+                node_tag=offset_j_tag,
+                x=float(p_end[0]),
+                y=float(p_end[1]),
+                z=float(p_end[2]),
             )
 
             # Rigid link at I‑end
@@ -1458,8 +1514,11 @@ def subdivide_elements(
                 new_tag = next_tag
                 next_tag += 1
                 nodes[new_node_id] = Node(
-                    node_id=new_node_id, node_tag=new_tag,
-                    x=float(end_pt[0]), y=float(end_pt[1]), z=float(end_pt[2]),
+                    node_id=new_node_id,
+                    node_tag=new_tag,
+                    x=float(end_pt[0]),
+                    y=float(end_pt[1]),
+                    z=float(end_pt[2]),
                 )
                 j_node_id = new_node_id
             else:
@@ -1470,8 +1529,11 @@ def subdivide_elements(
             next_tag += 1
 
             elements[sub_elem_id] = FrameElement(
-                elem_id=sub_elem_id, elem_tag=sub_tag,
-                node_i=prev_node_id, node_j=j_node_id, angle=elem.angle,
+                elem_id=sub_elem_id,
+                elem_tag=sub_tag,
+                node_i=prev_node_id,
+                node_j=j_node_id,
+                angle=elem.angle,
             )
             seg_tags.append(sub_elem_id)
             if eid in assignments:
@@ -1488,13 +1550,14 @@ def subdivide_elements(
 # Frame end offsets (rigid zones at joints)
 # ============================================================================
 
+
 def apply_frame_end_offsets(
-    elements: Dict[str, FrameElement],
-    assignments: Dict[str, str],
-    nodes: Dict[str, 'Node'],
-    offsets: Dict[str, FrameEndOffset],
+    elements: dict[str, FrameElement],
+    assignments: dict[str, str],
+    nodes: dict[str, Node],
+    offsets: dict[str, FrameEndOffset],
     next_tag: int = 1,
-) -> Tuple[Dict[str, FrameElement], Dict[str, str], Dict[str, 'Node'], int, List[tuple]]:
+) -> tuple[dict[str, FrameElement], dict[str, str], dict[str, Node], int, list[tuple]]:
     """Apply rigid end offsets to frame elements.
 
     For each frame with a non-zero offset, the elastic portion is shortened
@@ -1513,14 +1576,14 @@ def apply_frame_end_offsets(
         ``rigid_links`` is a list of ``(link_id, node_i, node_j, link_tag)``
         tuples.
     """
-    rigid_links: List[tuple] = []
+    rigid_links: list[tuple] = []
 
     for eid, off in offsets.items():
         if off.end_i == 0.0 and off.end_j == 0.0:
             continue
 
         elem = elements.get(eid)
-        if elem is None or getattr(elem, 'inactive', False):
+        if elem is None or getattr(elem, "inactive", False):
             continue
 
         ni = nodes.get(elem.node_i)
@@ -1549,8 +1612,11 @@ def apply_frame_end_offsets(
             next_tag += 1
             p_start = p_i + u * d_i
             nodes[offset_i_id] = Node(
-                node_id=offset_i_id, node_tag=offset_i_tag,
-                x=float(p_start[0]), y=float(p_start[1]), z=float(p_start[2]),
+                node_id=offset_i_id,
+                node_tag=offset_i_tag,
+                x=float(p_start[0]),
+                y=float(p_start[1]),
+                z=float(p_start[2]),
             )
             rigid_i_id = f"{eid}_rigid_i"
             rigid_i_tag = next_tag
@@ -1566,8 +1632,11 @@ def apply_frame_end_offsets(
             next_tag += 1
             p_end = p_j - u * d_j
             nodes[offset_j_id] = Node(
-                node_id=offset_j_id, node_tag=offset_j_tag,
-                x=float(p_end[0]), y=float(p_end[1]), z=float(p_end[2]),
+                node_id=offset_j_id,
+                node_tag=offset_j_tag,
+                x=float(p_end[0]),
+                y=float(p_end[1]),
+                z=float(p_end[2]),
             )
             rigid_j_id = f"{eid}_rigid_j"
             rigid_j_tag = next_tag
@@ -1590,8 +1659,8 @@ def apply_frame_end_offsets(
 
 def _point_uv_on_quad(
     pt: np.ndarray,
-    corners: List[np.ndarray],
-) -> Optional[Tuple[float, float]]:
+    corners: list[np.ndarray],
+) -> Optional[tuple[float, float]]:
     """Estimate parametric (u, v) of *pt* on a bilinear quad.
 
     Uses Newton iteration on the bilinear surface
@@ -1632,13 +1701,13 @@ def _point_uv_on_quad(
 
 
 def mesh_area_elements(
-    area_elements: Dict[str, AreaElement],
-    area_assignments: Dict[str, str],
-    nodes: Dict[str, 'Node'],
-    area_mesh: Dict[str, AreaMesh],
+    area_elements: dict[str, AreaElement],
+    area_assignments: dict[str, str],
+    nodes: dict[str, Node],
+    area_mesh: dict[str, AreaMesh],
     next_tag: int = 1,
-    groups: Optional[Dict[str, 'Group']] = None,
-) -> Tuple[Dict[str, AreaElement], Dict[str, str], Dict[str, 'Node'], int]:
+    groups: Optional[dict[str, Group]] = None,
+) -> tuple[dict[str, AreaElement], dict[str, str], dict[str, Node], int]:
     """Subdivide area elements into a grid of smaller shell elements.
 
     Only areas with ``auto_mesh=True`` and a positive ``max_size`` are
@@ -1664,18 +1733,20 @@ def mesh_area_elements(
         ``(area_elements, area_assignments, nodes, next_tag)`` with
         subdivided areas added and original areas marked inactive.
     """
+
     # Coordinate-based node registry for subdividing areas.
     # Populated per-area from corner nodes only, so adjacent areas'
     # shared edges are still deduplicated without collapsing
     # intentionally separate nodes at the same coordinate.
     def _coord_key(x, y, z):
         return (round(x, 6), round(y, 6), round(z, 6))
-    _coord_to_id: Dict[tuple, str] = {}
+
+    _coord_to_id: dict[tuple, str] = {}
 
     # ── Pre-build vectorised cache of real SAP2000 nodes ──────────
     # Avoids a full nodes.items() scan inside each area's mesh loop.
-    _cached_ids: List[str] = []
-    _cached_pos: List[np.ndarray] = []
+    _cached_ids: list[str] = []
+    _cached_pos: list[np.ndarray] = []
     for nid, nd in nodes.items():
         if nd.node_tag > 999999:
             continue  # internal tag, not a real SAP2000 node
@@ -1690,7 +1761,7 @@ def mesh_area_elements(
         elem = area_elements.get(aid)
         if elem is None or len(elem.node_ids) != 4:
             continue  # only quad areas are meshed
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue  # already subdivided in a previous build
 
         # Seed registry from this area's corner nodes
@@ -1725,9 +1796,7 @@ def mesh_area_elements(
                     (_cached_pos_arr >= bbox_min) & (_cached_pos_arr <= bbox_max),
                     axis=1,
                 )
-                near_plane = (
-                    np.abs(np.dot(_cached_pos_arr - box_pts[0], n_plane)) < _tol
-                )
+                near_plane = np.abs(np.dot(_cached_pos_arr - box_pts[0], n_plane)) < _tol
                 for idx in np.flatnonzero(in_bbox & near_plane):
                     nid = _cached_ids[idx]
                     if nid in _coord_to_id:
@@ -1762,21 +1831,23 @@ def mesh_area_elements(
         dom = int(np.argmax(abs_n))  # 0=X, 1=Y, 2=Z
         # 2D signed area on the projection plane perpendicular to the
         # dominant normal axis.  Negative → clockwise → reverse.
-        if dom == 0:     # project onto YZ  (ey × ez = +ex, right-handed)
+        if dom == 0:  # project onto YZ  (ey × ez = +ex, right-handed)
             u = [c[1] for c in corners]
             v = [c[2] for c in corners]
-        elif dom == 1:   # project onto ZX  (ez × ex = +ey, right-handed)
+        elif dom == 1:  # project onto ZX  (ez × ex = +ey, right-handed)
             u = [c[2] for c in corners]
             v = [c[0] for c in corners]
-        else:            # project onto XY  (ex × ey = +ez, right-handed)
+        else:  # project onto XY  (ex × ey = +ez, right-handed)
             u = [c[0] for c in corners]
             v = [c[1] for c in corners]
         # 2D signed area (shoelace) on the projection plane.
         # Negative → clockwise → reverse the vertex order.
-        signed_2d = ((u[0] * v[1] - u[1] * v[0])
-                   + (u[1] * v[2] - u[2] * v[1])
-                   + (u[2] * v[3] - u[3] * v[2])
-                   + (u[3] * v[0] - u[0] * v[3])) * 0.5
+        signed_2d = (
+            (u[0] * v[1] - u[1] * v[0])
+            + (u[1] * v[2] - u[2] * v[1])
+            + (u[2] * v[3] - u[3] * v[2])
+            + (u[3] * v[0] - u[0] * v[3])
+        ) * 0.5
         if signed_2d < 0:  # clockwise → reverse
             corner_ids = [corner_ids[0], corner_ids[3], corner_ids[2], corner_ids[1]]
             corners = [corners[0], corners[3], corners[2], corners[1]]
@@ -1792,8 +1863,8 @@ def mesh_area_elements(
 
         # Use the longest edge in each parametric direction so that
         # no sub-element exceeds max_size, even on tapered faces.
-        len_u = max(l01, l23)   # I→J direction (edge 0-1, 2-3)
-        len_v = max(l12, l30)   # orthogonal direction (edge 1-2, 3-0)
+        len_u = max(l01, l23)  # I→J direction (edge 0-1, 2-3)
+        len_v = max(l12, l30)  # orthogonal direction (edge 1-2, 3-0)
 
         n_u = max(1, math.ceil(len_u / mesh.max_size))
         n_v = max(1, math.ceil(len_v / mesh.max_size))
@@ -1813,7 +1884,7 @@ def mesh_area_elements(
         # ── Check for interior seed nodes (e.g. wall edge nodes that ──
         # ── lie inside this slab area).  When found, switch to an    ──
         # ── irregular subdivision so the mesh passes through them.   ──
-        interior_seeds: List[Tuple[float, float]] = []  # (u, v)
+        interior_seeds: list[tuple[float, float]] = []  # (u, v)
         _corner_set = set(corner_ids)
         # Reverse map from _coord_to_id to check seeded nodes
         seeded_ids = set(_coord_to_id.values())
@@ -1838,16 +1909,20 @@ def mesh_area_elements(
         if interior_seeds:
             # Merge near-duplicates and sort
             _tol_uv = 1e-6
-            u_vals = sorted(set(
-                [0.0, 1.0]
-                + [round(i / n_u, 8) for i in range(n_u + 1)]
-                + [s[0] for s in interior_seeds]
-            ))
-            v_vals = sorted(set(
-                [0.0, 1.0]
-                + [round(j / n_v, 8) for j in range(n_v + 1)]
-                + [s[1] for s in interior_seeds]
-            ))
+            u_vals = sorted(
+                set(
+                    [0.0, 1.0]
+                    + [round(i / n_u, 8) for i in range(n_u + 1)]
+                    + [s[0] for s in interior_seeds]
+                )
+            )
+            v_vals = sorted(
+                set(
+                    [0.0, 1.0]
+                    + [round(j / n_v, 8) for j in range(n_v + 1)]
+                    + [s[1] for s in interior_seeds]
+                )
+            )
             # Deduplicate near-equal values
             u_vals = [u_vals[0]] + [
                 u for u in u_vals[1:] if u - u_vals[u_vals.index(u) - 1] > _tol_uv
@@ -1915,8 +1990,11 @@ def mesh_area_elements(
                 new_tag = next_tag
                 next_tag += 1
                 nodes[new_id] = Node(
-                    node_id=new_id, node_tag=new_tag,
-                    x=float(pt[0]), y=float(pt[1]), z=float(pt[2]),
+                    node_id=new_id,
+                    node_tag=new_tag,
+                    x=float(pt[0]),
+                    y=float(pt[1]),
+                    z=float(pt[2]),
                 )
                 _coord_to_id[ck] = new_id
                 node_grid[j][i] = new_id
@@ -1925,7 +2003,7 @@ def mesh_area_elements(
         elem.inactive = True
 
         # Determine which groups contain the parent area
-        parent_groups: List[str] = []
+        parent_groups: list[str] = []
         if groups is not None:
             for gname, g in groups.items():
                 ref = f"Area:{aid}"
@@ -1945,7 +2023,8 @@ def mesh_area_elements(
                 n2 = node_grid[j + 1][i + 1]
                 n3 = node_grid[j + 1][i]
                 area_elements[sub_id] = AreaElement(
-                    area_id=sub_id, area_tag=sub_tag,
+                    area_id=sub_id,
+                    area_tag=sub_tag,
                     node_ids=[n0, n1, n2, n3],
                     thickness=elem.thickness,
                     parent_id=aid,
@@ -1967,15 +2046,16 @@ def mesh_area_elements(
 # grid of smaller shell elements at the model-data level.
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def subdivide_area_mesh(
-    area_elements: Dict[str, AreaElement],
-    area_assignments: Dict[str, str],
-    nodes: Dict[str, 'Node'],
+    area_elements: dict[str, AreaElement],
+    area_assignments: dict[str, str],
+    nodes: dict[str, Node],
     n: int,
-    selection: Optional[Set[str]] = None,
+    selection: Optional[set[str]] = None,
     next_tag: int = 1,
-    groups: Optional[Dict[str, 'Group']] = None,
-) -> Tuple[Dict[str, AreaElement], Dict[str, str], Dict[str, 'Node'], int]:
+    groups: Optional[dict[str, Group]] = None,
+) -> tuple[dict[str, AreaElement], dict[str, str], dict[str, Node], int]:
     """Subdivide each coarse shell quad into an N×N grid of sub-elements.
 
     Operates on model data (``AreaElement`` / ``Node`` dataclasses) so the
@@ -2011,9 +2091,9 @@ def subdivide_area_mesh(
     # nodes only — not from every node in the model — so that
     # coincident offset/release/disconnected nodes are not spuriously
     # reused during deduplication.
-    _coord_to_id: Dict[tuple, str] = {}
+    _coord_to_id: dict[tuple, str] = {}
     for aid, elem in area_elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         if len(elem.node_ids) != 4:
             continue
@@ -2025,7 +2105,7 @@ def subdivide_area_mesh(
     for aid, elem in list(area_elements.items()):
         if selection is not None and aid not in selection:
             continue
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         if len(elem.node_ids) != 4:
             continue
@@ -2066,13 +2146,17 @@ def subdivide_area_mesh(
         for j in range(n + 1):
             for i in range(n + 1):
                 if i == 0 and j == 0:
-                    node_grid[j][i] = corner_ids[0]; continue
+                    node_grid[j][i] = corner_ids[0]
+                    continue
                 if i == n and j == 0:
-                    node_grid[j][i] = corner_ids[1]; continue
+                    node_grid[j][i] = corner_ids[1]
+                    continue
                 if i == n and j == n:
-                    node_grid[j][i] = corner_ids[2]; continue
+                    node_grid[j][i] = corner_ids[2]
+                    continue
                 if i == 0 and j == n:
-                    node_grid[j][i] = corner_ids[3]; continue
+                    node_grid[j][i] = corner_ids[3]
+                    continue
                 pt = grid[j, i]
                 ck = _coord_key(float(pt[0]), float(pt[1]), float(pt[2]))
                 existing = _coord_to_id.get(ck)
@@ -2083,14 +2167,17 @@ def subdivide_area_mesh(
                 new_tag = next_tag
                 next_tag += 1
                 nodes[new_id] = Node(
-                    node_id=new_id, node_tag=new_tag,
-                    x=float(pt[0]), y=float(pt[1]), z=float(pt[2]),
+                    node_id=new_id,
+                    node_tag=new_tag,
+                    x=float(pt[0]),
+                    y=float(pt[1]),
+                    z=float(pt[2]),
                 )
                 _coord_to_id[ck] = new_id
                 node_grid[j][i] = new_id
 
         # Determine which groups contain the parent area
-        parent_groups: List[str] = []
+        parent_groups: list[str] = []
         if groups is not None:
             for gname, g in groups.items():
                 ref = f"Area:{aid}"
@@ -2112,7 +2199,8 @@ def subdivide_area_mesh(
                 n2 = node_grid[j + 1][i + 1]
                 n3 = node_grid[j + 1][i]
                 area_elements[sub_id] = AreaElement(
-                    area_id=sub_id, area_tag=sub_tag,
+                    area_id=sub_id,
+                    area_tag=sub_tag,
                     node_ids=[n0, n1, n2, n3],
                     thickness=elem.thickness,
                     parent_id=aid,
@@ -2133,14 +2221,15 @@ def subdivide_area_mesh(
 # AtFrames for areas — subdivide shell elements at frame edge nodes
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def split_areas_at_frame_edges(
-    area_elements: Dict[str, 'AreaElement'],
-    area_assignments: Dict[str, str],
-    nodes: Dict[str, 'Node'],
-    frame_elements: Dict[str, 'FrameElement'],
+    area_elements: dict[str, AreaElement],
+    area_assignments: dict[str, str],
+    nodes: dict[str, Node],
+    frame_elements: dict[str, FrameElement],
     next_tag: int = 1,
-    groups: Optional[Dict[str, 'Group']] = None,
-) -> Tuple[Dict[str, 'AreaElement'], Dict[str, str], Dict[str, 'Node'], int]:
+    groups: Optional[dict[str, Group]] = None,
+) -> tuple[dict[str, AreaElement], dict[str, str], dict[str, Node], int]:
     """Subdivide areas at frame-element edge nodes not at area corners.
 
     For each area that is not already subdivided (``inactive=False``),
@@ -2172,7 +2261,8 @@ def split_areas_at_frame_edges(
         ``(area_elements, area_assignments, nodes, next_tag)`` with
         subdivided areas added and original areas marked inactive.
     """
-    from .sap_data import Node as _Node, AreaElement as _AreaElement
+    from .sap_data import AreaElement as _AreaElement
+    from .sap_data import Node as _Node
 
     # Collect all frame node IDs
     frame_node_ids: set = set()
@@ -2181,19 +2271,19 @@ def split_areas_at_frame_edges(
         frame_node_ids.add(fe.node_j)
 
     # Coordinates of frame nodes (for collinearity tests)
-    frame_node_coords: Dict[str, np.ndarray] = {}
+    frame_node_coords: dict[str, np.ndarray] = {}
     # \u2500\u2500 Spatial indices for frame nodes \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     # Z-band index \u2014 groups nodes by integer Z-band (efficient for
     # slabs).  Uses int(z / tol) for robust bucket keys \u2014 avoids
     # round() pitfalls where nearby values can land in different buckets.
     z_band_tol = 0.1  # 100\u202fmm band width
-    frame_nodes_by_z: Dict[int, List[str]] = {}
+    frame_nodes_by_z: dict[int, list[str]] = {}
     # XY spatial grid \u2014 groups nodes by integer XY cell (efficient
     # for walls).  Cell size should be large enough that a wall\u2019s
     # bounding box overlaps at least one cell, small enough that the
     # number of candidate nodes per cell stays manageable.
     xy_grid_size = 0.5  # 500\u202fmm cell size
-    frame_nodes_xy: Dict[Tuple[int, int], List[str]] = {}
+    frame_nodes_xy: dict[tuple[int, int], list[str]] = {}
     for nid in frame_node_ids:
         nd = nodes.get(nid)
         if nd is not None:
@@ -2209,15 +2299,14 @@ def split_areas_at_frame_edges(
         return area_elements, area_assignments, nodes, next_tag
 
     for aid, elem in list(area_elements.items()):
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         if elem is None or len(elem.node_ids) != 4:
             continue
 
         corners = list(elem.node_ids)
         corner_coords = [
-            np.array([nodes[c].x, nodes[c].y, nodes[c].z], dtype=float)
-            if c in nodes else None
+            np.array([nodes[c].x, nodes[c].y, nodes[c].z], dtype=float) if c in nodes else None
             for c in corners
         ]
         if any(c is None for c in corner_coords):
@@ -2231,25 +2320,24 @@ def split_areas_at_frame_edges(
         signed = float(np.dot(normal, np.cross(c2 - c0, c3 - c0)))
         if signed < 0:
             corners = [corners[0], corners[3], corners[2], corners[1]]
-            corner_coords = [corner_coords[0], corner_coords[3],
-                             corner_coords[2], corner_coords[1]]
+            corner_coords = [corner_coords[0], corner_coords[3], corner_coords[2], corner_coords[1]]
 
         # Four edges: (0\u21921), (1\u21922), (2\u21923), (3\u21920)
         edges = [
-            (0, 1, 'u'),  # edge 0\u21921, u-direction
-            (1, 2, 'v'),  # edge 1\u21922, v-direction
-            (2, 3, 'u'),  # edge 2\u21923, u-direction (reverse)
-            (3, 0, 'v'),  # edge 3\u21920, v-direction (reverse)
+            (0, 1, "u"),  # edge 0\u21921, u-direction
+            (1, 2, "v"),  # edge 1\u21922, v-direction
+            (2, 3, "u"),  # edge 2\u21923, u-direction (reverse)
+            (3, 0, "v"),  # edge 3\u21920, v-direction (reverse)
         ]
 
         # Choose spatial filter based on orientation
         normal_len = float(np.linalg.norm(normal))
         nz_abs = abs(normal[2]) / normal_len if normal_len > 0 else 0.0
         # Warn if a vertical area (|nz|\u22480) has a slab-like section name
-        sec_name = area_assignments.get(aid, '')
-        if nz_abs < 0.1 and 'slab' in sec_name.lower():
+        sec_name = area_assignments.get(aid, "")
+        if nz_abs < 0.1 and "slab" in sec_name.lower():
             warnings.warn(
-                f"Area {aid}: section \"{sec_name}\" assigned to a vertical "
+                f'Area {aid}: section "{sec_name}" assigned to a vertical '
                 f"element (|nz|={nz_abs:.3f}) \u2014 likely mis-classified in "
                 f"the source model.",
                 UserWarning,
@@ -2283,7 +2371,7 @@ def split_areas_at_frame_edges(
                 for iy in range(iy_min, iy_max + 1):
                     local_frame_ids.update(frame_nodes_xy.get((ix, iy), []))
 
-        edge_node_lists: Dict[str, list] = {'u': [], 'v': []}
+        edge_node_lists: dict[str, list] = {"u": [], "v": []}
         for ei, ej, direction in edges:
             p_i = corner_coords[ei]
             p_j = corner_coords[ej]
@@ -2308,20 +2396,19 @@ def split_areas_at_frame_edges(
                 if t < -1e-6 or t > 1 + 1e-6:
                     continue
                 # Store with adjustment for reversed edges
-                if direction == 'u':
+                if direction == "u":
                     if ei == 0:  # edge 0\u21921: t as-is
-                        edge_node_lists['u'].append(t)
+                        edge_node_lists["u"].append(t)
                     else:  # edge 2\u21923: reverse \u2192 1-t
-                        edge_node_lists['u'].append(1.0 - t)
-                else:  # 'v'
-                    if ei == 1:  # edge 1\u21922: t as-is
-                        edge_node_lists['v'].append(t)
-                    else:  # edge 3\u21920: reverse \u2192 1-t
-                        edge_node_lists['v'].append(1.0 - t)
+                        edge_node_lists["u"].append(1.0 - t)
+                elif ei == 1:  # edge 1\u21922: t as-is
+                    edge_node_lists["v"].append(t)
+                else:  # edge 3\u21920: reverse \u2192 1-t
+                    edge_node_lists["v"].append(1.0 - t)
 
         # Deduplicate and sort t-values (add 0 and 1 as implicit boundaries)
-        u_vals = sorted(set([0.0, 1.0] + edge_node_lists['u']))
-        v_vals = sorted(set([0.0, 1.0] + edge_node_lists['v']))
+        u_vals = sorted(set([0.0, 1.0] + edge_node_lists["u"]))
+        v_vals = sorted(set([0.0, 1.0] + edge_node_lists["v"]))
 
         # Only subdivide if there\u2019s at least one intermediate node
         if len(u_vals) <= 2 and len(v_vals) <= 2:
@@ -2329,14 +2416,8 @@ def split_areas_at_frame_edges(
 
         # Ensure minimum spacing between t-values (merge near-duplicates)
         _tol = 1e-6
-        u_vals = [u_vals[0]] + [
-            u for u in u_vals[1:]
-            if u - u_vals[u_vals.index(u) - 1] > _tol
-        ]
-        v_vals = [v_vals[0]] + [
-            v for v in v_vals[1:]
-            if v - v_vals[v_vals.index(v) - 1] > _tol
-        ]
+        u_vals = [u_vals[0]] + [u for u in u_vals[1:] if u - u_vals[u_vals.index(u) - 1] > _tol]
+        v_vals = [v_vals[0]] + [v for v in v_vals[1:] if v - v_vals[v_vals.index(v) - 1] > _tol]
 
         n_u = len(u_vals) - 1  # number of sub-divisions in u-direction
         n_v = len(v_vals) - 1
@@ -2381,9 +2462,8 @@ def split_areas_at_frame_edges(
                 grid[j, i] = top * (1 - v) + bot * v
 
         # Build spatial coordinate cache once (reuse across grid points)
-        _pos_cache_np: Dict[str, np.ndarray] = {
-            nid: np.array([nd.x, nd.y, nd.z], dtype=float)
-            for nid, nd in nodes.items()
+        _pos_cache_np: dict[str, np.ndarray] = {
+            nid: np.array([nd.x, nd.y, nd.z], dtype=float) for nid, nd in nodes.items()
         }
         # Merge frame node coords into cache
         for nid, npos in frame_node_coords.items():
@@ -2407,8 +2487,11 @@ def split_areas_at_frame_edges(
                 new_tag = next_tag
                 next_tag += 1
                 nd = _Node(
-                    node_id=new_id, node_tag=new_tag,
-                    x=float(pt[0]), y=float(pt[1]), z=float(pt[2]),
+                    node_id=new_id,
+                    node_tag=new_tag,
+                    x=float(pt[0]),
+                    y=float(pt[1]),
+                    z=float(pt[2]),
                 )
                 nodes[new_id] = nd
                 _pos_cache_np[new_id] = np.array([pt[0], pt[1], pt[2]], dtype=float)
@@ -2419,7 +2502,7 @@ def split_areas_at_frame_edges(
         elem.child_ids = []
 
         # Determine parent groups
-        parent_groups: List[str] = []
+        parent_groups: list[str] = []
         if groups is not None:
             for gname, g in groups.items():
                 ref = f"Area:{aid}"
@@ -2444,9 +2527,10 @@ def split_areas_at_frame_edges(
                 if len(deduped) < 3:
                     continue
                 area_elements[sub_id] = _AreaElement(
-                    area_id=sub_id, area_tag=sub_tag,
+                    area_id=sub_id,
+                    area_tag=sub_tag,
                     node_ids=deduped,
-                    thickness=getattr(elem, 'thickness', 0.0),
+                    thickness=getattr(elem, "thickness", 0.0),
                     inactive=False,
                     parent_id=aid,
                 )
@@ -2459,6 +2543,7 @@ def split_areas_at_frame_edges(
                         groups[gname].objects.append(sub_ref)
 
     return area_elements, area_assignments, nodes, next_tag
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Constraint-edge detection for slab-wall and misaligned slab interfaces
@@ -2477,12 +2562,12 @@ def split_areas_at_frame_edges(
 
 
 def warn_frame_overlaps(
-    frame_elements: Dict[str, 'FrameElement'],
-    frame_assignments: Optional[Dict[str, str]],
-    nodes: Dict[str, 'Node'],
+    frame_elements: dict[str, FrameElement],
+    frame_assignments: Optional[dict[str, str]],
+    nodes: dict[str, Node],
     *,
-    prefix: str = '',
-    exclude_types: frozenset = frozenset({'brick wall'}),
+    prefix: str = "",
+    exclude_types: frozenset = frozenset({"brick wall"}),
 ) -> None:
     """Warn about overlapping or collinear frame elements.
 
@@ -2507,13 +2592,13 @@ def warn_frame_overlaps(
             substring match).
     """
     from collections import defaultdict
+
     import numpy as np
 
     COSINE_TOL = 0.9999
 
     assign = frame_assignments or {}
-    _node_arr = {nid: np.array([nd.x, nd.y, nd.z], dtype=float)
-                 for nid, nd in nodes.items()}
+    _node_arr = {nid: np.array([nd.x, nd.y, nd.z], dtype=float) for nid, nd in nodes.items()}
 
     def _is_excluded(name: str) -> bool:
         name_lower = name.lower()
@@ -2534,11 +2619,11 @@ def warn_frame_overlaps(
         return vec / nrm if nrm > 1e-12 else None
 
     # Build frame-only edge registry
-    frame_reg: Dict[Tuple[str, str], List[str]] = defaultdict(list)
+    frame_reg: dict[tuple[str, str], list[str]] = defaultdict(list)
     for fid, felem in frame_elements.items():
-        if getattr(felem, 'inactive', False) or felem is None:
+        if getattr(felem, "inactive", False) or felem is None:
             continue
-        if _is_excluded(assign.get(fid, '')):
+        if _is_excluded(assign.get(fid, "")):
             continue
         nA, nB = felem.node_i, felem.node_j
         if nA == nB:
@@ -2549,7 +2634,7 @@ def warn_frame_overlaps(
     # ── 1. Identical overlaps (same key, 2+ frame elements) ────
     for key, fids in frame_reg.items():
         if len(fids) >= 2:
-            names = {fid: assign.get(fid, '?') for fid in fids}
+            names = {fid: assign.get(fid, "?") for fid in fids}
             warnings.warn(
                 f"{prefix}Overlapping frame elements on edge "
                 f"{key[0]}\u2192{key[1]}: {names}.  "
@@ -2559,7 +2644,7 @@ def warn_frame_overlaps(
 
     # ── 2. Partial overlaps (different keys, collinear, share
     #      a node, different lengths) ────────────────────────────
-    node_edges: Dict[str, List[tuple]] = defaultdict(list)
+    node_edges: dict[str, list[tuple]] = defaultdict(list)
     for (nA, nB), fids in frame_reg.items():
         fid = fids[0]
         ndA, ndB = _node_arr[nA], _node_arr[nB]
@@ -2586,8 +2671,8 @@ def warn_frame_overlaps(
                 if not _cos_match(d_i, d_j):
                     continue
                 if abs(leni - lenj) > 1e-9:
-                    ni = assign.get(fidi, '?')
-                    nj = assign.get(fidj, '?')
+                    ni = assign.get(fidi, "?")
+                    nj = assign.get(fidj, "?")
                     warnings.warn(
                         f"{prefix}Overlapping collinear frame elements: "
                         f"{fidi} ({ni}) on {ki[0]}\u2192{ki[1]} "
@@ -2598,14 +2683,14 @@ def warn_frame_overlaps(
 
 
 def find_constraint_edges(
-    area_elements: Dict[str, 'AreaElement'],
-    area_assignments: Dict[str, str],
-    nodes: Dict[str, 'Node'],
-    frame_elements: Optional[Dict[str, 'FrameElement']] = None,
-    frame_assignments: Optional[Dict[str, str]] = None,
-    exclude_types: frozenset = frozenset({'brick'}),
+    area_elements: dict[str, AreaElement],
+    area_assignments: dict[str, str],
+    nodes: dict[str, Node],
+    frame_elements: Optional[dict[str, FrameElement]] = None,
+    frame_assignments: Optional[dict[str, str]] = None,
+    exclude_types: frozenset = frozenset({"brick"}),
     verbose: bool = True,
-) -> List[Tuple[List[str], List[tuple], List[tuple], str, str]]:
+) -> list[tuple[list[str], list[tuple], list[tuple], str, str]]:
     """Find tears in the final mesh via sweep-line chain following.
 
     Detects locations where two (or more) adjacent elements share a
@@ -2664,7 +2749,9 @@ def find_constraint_edges(
         the first merged node to the last.
     """
     from collections import defaultdict
+
     import numpy as np
+
     COSINE_TOL = 0.9999
 
     # ── Helper: case-insensitive substring matching ─────────────
@@ -2676,7 +2763,7 @@ def find_constraint_edges(
         return any(excl.lower() in name_lower for excl in exclude_types)
 
     # ── 0. Node arrays & position sort key ──────────────────────
-    _node_arr: Dict[str, np.ndarray] = {}
+    _node_arr: dict[str, np.ndarray] = {}
     for nid, nd in nodes.items():
         _node_arr[nid] = np.array([nd.x, nd.y, nd.z], dtype=float)
 
@@ -2690,15 +2777,14 @@ def find_constraint_edges(
     # Separate sets track which keys came from area vs frame elements
     # so the sweep can skip frame-vs-frame comparisons (those should
     # be resolved as modeling errors, not constraints).
-    edge_reg: Dict[Tuple[str, str], List[str]] = defaultdict(list)
-    area_keys: set = set()   # keys contributed by area elements
+    edge_reg: dict[tuple[str, str], list[str]] = defaultdict(list)
+    area_keys: set = set()  # keys contributed by area elements
     frame_keys: set = set()  # keys contributed by frame elements
 
     for aid, elem in area_elements.items():
-        if (getattr(elem, 'inactive', False) or elem is None
-                or len(elem.node_ids) < 3):
+        if getattr(elem, "inactive", False) or elem is None or len(elem.node_ids) < 3:
             continue
-        if _is_excluded(area_assignments.get(aid, '')):
+        if _is_excluded(area_assignments.get(aid, "")):
             continue
         nids = list(elem.node_ids)
         n = len(nids)
@@ -2715,9 +2801,9 @@ def find_constraint_edges(
     if frame_elements is not None:
         assign = frame_assignments or {}
         for fid, felem in frame_elements.items():
-            if getattr(felem, 'inactive', False) or felem is None:
+            if getattr(felem, "inactive", False) or felem is None:
                 continue
-            if _is_excluded(assign.get(fid, '')):
+            if _is_excluded(assign.get(fid, "")):
                 continue
             nA, nB = felem.node_i, felem.node_j
             if nA == nB:
@@ -2728,7 +2814,7 @@ def find_constraint_edges(
 
     # ── 2. Build node→keys index for chain following ────────────
     # Derived directly from the registry — not a separate data model.
-    node_keys: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+    node_keys: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for nA, nB in edge_reg:
         node_keys[nA].append((nA, nB))
         node_keys[nB].append((nA, nB))
@@ -2744,7 +2830,7 @@ def find_constraint_edges(
         nrm = float(np.linalg.norm(vec))
         return vec / nrm if nrm > 1e-12 else None
 
-    def _follow(start_node: str, key: tuple) -> List[str]:
+    def _follow(start_node: str, key: tuple) -> list[str]:
         """Follow a single chain from start_node through key."""
         other = key[1] if key[0] == start_node else key[0]
         chain = [start_node, other]
@@ -2777,17 +2863,17 @@ def find_constraint_edges(
             cur = nxt
         return chain
 
-    def _truncate_at_junction(c1: List[str], c2: List[str]):
+    def _truncate_at_junction(c1: list[str], c2: list[str]):
         """Truncate both chains at the first common node after start.
         Returns (truncated_c1, truncated_c2) or None if no junction."""
         set2 = set(c2[1:])
         for i, nid in enumerate(c1[1:], 1):
             if nid in set2:
                 j = c2.index(nid)
-                return c1[:i+1], c2[:j+1]
+                return c1[: i + 1], c2[: j + 1]
         return None
 
-    def _collect(chains: List[List[str]], d: np.ndarray) -> List[str]:
+    def _collect(chains: list[list[str]], d: np.ndarray) -> list[str]:
         nodes_set: set = set()
         for ch in chains:
             nodes_set.update(ch)
@@ -2800,27 +2886,32 @@ def find_constraint_edges(
     # ── 3. Single pass: horizontal edges (by Z-band) ────────────
     # All edges in this model are at constant Z — there are no true
     # vertical (Z-changing) tears.  A single Z-band sweep suffices.
-    z_groups: Dict[float, List[tuple]] = defaultdict(list)
+    z_groups: dict[float, list[tuple]] = defaultdict(list)
     for nA, nB in edge_reg:
         zk = round((_node_arr[nA][2] + _node_arr[nB][2]) * 0.5, 1)
         z_groups[zk].append((nA, nB))
 
-    tears: List[tuple] = []  # each: (merged_nodes, [(chain, elem_id), ...])
+    tears: list[tuple] = []  # each: (merged_nodes, [(chain, elem_id), ...])
 
     for zk, group in z_groups.items():
         if len(group) < 2:
             continue
         # Sort by min-X then min-Y of the two nodes
-        group.sort(key=lambda k: (min(_node_arr[k[0]][0], _node_arr[k[1]][0]),
-                                  min(_node_arr[k[0]][1], _node_arr[k[1]][1])))
-        active: List[tuple] = []  # list of (nA, nB)
+        group.sort(
+            key=lambda k: (
+                min(_node_arr[k[0]][0], _node_arr[k[1]][0]),
+                min(_node_arr[k[0]][1], _node_arr[k[1]][1]),
+            )
+        )
+        active: list[tuple] = []  # list of (nA, nB)
 
         for nA, nB in group:
             x_min = min(_node_arr[nA][0], _node_arr[nB][0])
 
             # Retire keys whose max X < sweep position
-            active = [k for k in active
-                      if max(_node_arr[k[0]][0], _node_arr[k[1]][0]) >= x_min - 1e-6]
+            active = [
+                k for k in active if max(_node_arr[k[0]][0], _node_arr[k[1]][0]) >= x_min - 1e-6
+            ]
 
             # Check both nA and nB against the active set
             for k in active:
@@ -2859,16 +2950,14 @@ def find_constraint_edges(
     fa = frame_assignments or {}
 
     def _elem_type(eid: str) -> str:
-        return (area_assignments.get(eid)
-                or fa.get(eid)
-                or 'unknown')
+        return area_assignments.get(eid) or fa.get(eid) or "unknown"
 
     # ── 4. Merge overlapping tears ──────────────────────────────
     # Two tears overlap if they share ≥1 node and are colinear
     # (absolute cosine of endpoint vectors > COSINE_TOL).
     # Each tear carries the per-element node chains for ALL elements
     # sharing the edge — there can be 2, 3, or more.
-    merged: List[Tuple[List[str], List[tuple], str, str]] = []
+    merged: list[tuple[list[str], list[tuple], str, str]] = []
     # (merged_nodes, [(chain_with_t, type), ...], type_a, type_b)
     used = [False] * len(tears)
     from collections import defaultdict
@@ -2879,11 +2968,10 @@ def find_constraint_edges(
         nids_i, chains_i = tears[i]
         group_nids = [nids_i]
         # elem_id → set_of_nodes for each participating element
-        elem_chains: Dict[str, set] = {}
+        elem_chains: dict[str, set] = {}
         for chain, eid in chains_i:
             elem_chains[eid] = set(chain)
-        types_by_elem: Dict[str, str] = {eid: _elem_type(eid)
-                                          for chain, eid in chains_i}
+        types_by_elem: dict[str, str] = {eid: _elem_type(eid) for chain, eid in chains_i}
         used[i] = True
         # Direction from first tear's endpoints
         fa_i = _node_arr[nids_i[0]]
@@ -2936,9 +3024,14 @@ def find_constraint_edges(
             span_dir = span_vec / span_len if span_len > 1e-12 else np.array([1.0, 0.0, 0.0])
             ref_pt = _node_arr[ordered[0]]
 
-            def _chain_with_t(nodes: set) -> List[tuple]:
-                items = [(nid, float(np.dot(_node_arr[nid] - ref_pt, span_dir)) / span_len)
-                         for nid in nodes if nid in _node_arr]
+            def _chain_with_t(
+                nodes: set, ref_pt=ref_pt, span_dir=span_dir, span_len=span_len
+            ) -> list[tuple]:
+                items = [
+                    (nid, float(np.dot(_node_arr[nid] - ref_pt, span_dir)) / span_len)
+                    for nid in nodes
+                    if nid in _node_arr
+                ]
                 items.sort(key=lambda x: x[1])
                 return items
 
@@ -2946,10 +3039,10 @@ def find_constraint_edges(
             # (merging by type mixes coarse and fine nodes from different
             # elements of the same section — we need to keep them separate
             # to correctly identify which chain is the coarsest master).
-            all_chains: List[tuple] = []  # [(chain_with_t, type, elem_id), ...]
-            for eid, nodes in elem_chains.items():
+            all_chains: list[tuple] = []  # [(chain_with_t, type, elem_id), ...]
+            for eid, elem_nodes in elem_chains.items():
                 t = types_by_elem[eid]
-                all_chains.append((_chain_with_t(nodes), t, eid))
+                all_chains.append((_chain_with_t(elem_nodes), t, eid))
 
             # Sort by chain length (fewest nodes = coarsest mesh = master)
             all_chains.sort(key=lambda x: len(x[0]))
@@ -2962,16 +3055,18 @@ def find_constraint_edges(
                 t_start = master_chain[0][1]
                 t_end = master_chain[-1][1]
                 if t_start > 0.01 or t_end < 0.99:
-                    print(f"  ⚠ Master chain t-range [{t_start:.3f}, {t_end:.3f}] "
-                          f"does not span full tear — slave nodes outside this "
-                          f"range will use extrapolated interpolation")
+                    print(
+                        f"  ⚠ Master chain t-range [{t_start:.3f}, {t_end:.3f}] "
+                        f"does not span full tear — slave nodes outside this "
+                        f"range will use extrapolated interpolation"
+                    )
 
             # All other chains are slaves
             slave_chains = [c for c, _, _ in all_chains[1:]] if len(all_chains) > 1 else []
 
             # Collect all slave nodes (excluding master nodes)
             master_nodes = {nid for nid, _ in master_chain}
-            slave_nodes: List[tuple] = []
+            slave_nodes: list[tuple] = []
             for sc in slave_chains:
                 for nid, tval in sc:
                     if nid not in master_nodes:
@@ -2995,11 +3090,12 @@ def find_constraint_edges(
                         if off > 0.01 * span_len:
                             # Master node is off the span line — add to slaves
                             slave_nodes.append((nid, tval))
-                            master_chain = [(m0_n, m0_t) for m0_n, m0_t in master_chain
-                                            if m0_n != nid]
+                            master_chain = [
+                                (m0_n, m0_t) for m0_n, m0_t in master_chain if m0_n != nid
+                            ]
 
             type_names = sorted({t for _, t, _ in all_chains})
-            type_a = type_names[0] if type_names else 'unknown'
+            type_a = type_names[0] if type_names else "unknown"
             type_b = type_names[-1] if len(type_names) > 1 else type_a
             merged.append((ordered, master_chain, slave_nodes, type_a, type_b))
 
@@ -3007,7 +3103,7 @@ def find_constraint_edges(
     # Returns: [(merged_nodes, master_chain, slave_nodes, type_a, type_b)]
     # master_chain: [(node_id, t), ...] — coarsest element's nodes (master edge)
     # slave_nodes:  [(node_id, t), ...] — all non-master nodes in order
-    results: List[Tuple[List[str], List[tuple], List[tuple], str, str]] = []
+    results: list[tuple[list[str], list[tuple], list[tuple], str, str]] = []
     for nids, master, slaves, ta, tb in merged:
         results.append((nids, master, slaves, ta, tb))
 
@@ -3018,13 +3114,14 @@ def find_constraint_edges(
 # Wall-slab intersection diagnostics and splitting
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def find_wall_nodes_inside_slabs(
-    area_elements: Dict[str, 'AreaElement'],
-    area_assignments: Dict[str, str],
-    nodes: Dict[str, 'Node'],
+    area_elements: dict[str, AreaElement],
+    area_assignments: dict[str, str],
+    nodes: dict[str, Node],
     z_tol: float = 0.5,
     verbose: bool = False,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Identify wall-area nodes that lie inside slab areas.
 
     A *wall* is any area whose corners span more than *z_tol* in Z
@@ -3067,7 +3164,7 @@ def find_wall_nodes_inside_slabs(
     slab_ids: set = set()
     wall_ids: set = set()
     for aid, ae in area_elements.items():
-        if getattr(ae, 'inactive', False):
+        if getattr(ae, "inactive", False):
             continue
         nds = [nodes.get(n) for n in ae.node_ids]
         nds = [n for n in nds if n is not None]
@@ -3085,26 +3182,30 @@ def find_wall_nodes_inside_slabs(
 
     # ── Gather wall node coordinates ────────────────────────────
     # Wall nodes that are at each wall's bottom Z (typically a slab level)
-    wall_nodes_at_z: Dict[float, List[Dict]] = defaultdict(list)
+    wall_nodes_at_z: dict[float, list[dict]] = defaultdict(list)
     for wid in wall_ids:
         ae = area_elements[wid]
         for nid in ae.node_ids:
             nd = nodes.get(nid)
             if nd is None:
                 continue
-            wall_nodes_at_z[round(nd.z, 4)].append({
-                "node_id": nid,
-                "node_tag": nd.node_tag,
-                "x": nd.x, "y": nd.y, "z": nd.z,
-                "wall_id": wid,
-                "section": area_assignments.get(wid, ""),
-            })
+            wall_nodes_at_z[round(nd.z, 4)].append(
+                {
+                    "node_id": nid,
+                    "node_tag": nd.node_tag,
+                    "x": nd.x,
+                    "y": nd.y,
+                    "z": nd.z,
+                    "wall_id": wid,
+                    "section": area_assignments.get(wid, ""),
+                }
+            )
 
     if not wall_nodes_at_z:
         return []
 
     # ── Check each slab for interior wall nodes ─────────────────
-    findings: List[Dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
     for sid in slab_ids:
         ae = area_elements[sid]
         corner_nds = [nodes.get(n) for n in ae.node_ids if n in nodes]
@@ -3127,9 +3228,11 @@ def find_wall_nodes_inside_slabs(
                 _slab_rotated = True
                 break
         if _slab_rotated and verbose:
-            print(f"  ⚠ Slab {sid} is rotated — wall-node containment "
-                  f"uses axis-aligned bounding box, may have false "
-                  f"positives")
+            print(
+                f"  ⚠ Slab {sid} is rotated — wall-node containment "
+                f"uses axis-aligned bounding box, may have false "
+                f"positives"
+            )
 
         x_min, x_max = min(xs), max(xs)
         y_min, y_max = min(ys), max(ys)
@@ -3139,7 +3242,7 @@ def find_wall_nodes_inside_slabs(
         if not wall_node_set:
             continue
 
-        interior: List[Dict] = []
+        interior: list[dict] = []
         seen_walls: set = set()
         for wn in wall_node_set:
             # Inside slab XY projection (not at corners)
@@ -3149,8 +3252,7 @@ def find_wall_nodes_inside_slabs(
                 continue
             # Skip slab corner nodes
             is_corner = any(
-                abs(wn["x"] - cn.x) < margin and abs(wn["y"] - cn.y) < margin
-                for cn in corner_nds
+                abs(wn["x"] - cn.x) < margin and abs(wn["y"] - cn.y) < margin for cn in corner_nds
             )
             if is_corner:
                 continue
@@ -3162,21 +3264,23 @@ def find_wall_nodes_inside_slabs(
 
         for wid in sorted(seen_walls):
             wall_nodes = [wn for wn in interior if wn["wall_id"] == wid]
-            findings.append({
-                "slab_id": sid,
-                "wall_id": wid,
-                "nodes": wall_nodes,
-                "slab_X": (x_min, x_max),
-                "slab_Y": (y_min, y_max),
-                "slab_Z": float(np.mean(zs)),
-                "section": wall_nodes[0]["section"],
-            })
+            findings.append(
+                {
+                    "slab_id": sid,
+                    "wall_id": wid,
+                    "nodes": wall_nodes,
+                    "slab_X": (x_min, x_max),
+                    "slab_Y": (y_min, y_max),
+                    "slab_Z": float(np.mean(zs)),
+                    "section": wall_nodes[0]["section"],
+                }
+            )
 
     return findings
 
 
 def print_wall_inside_slab_report(
-    findings: List[Dict[str, Any]],
+    findings: list[dict[str, Any]],
     file=None,
     verbose: bool = False,
 ) -> None:
@@ -3197,8 +3301,7 @@ def print_wall_inside_slab_report(
         for f in findings:
             sec = f["section"]
             coords = "; ".join(
-                f"{wn['node_id']}({wn['x']:.1f},{wn['y']:.1f},{wn['z']:.2f})"
-                for wn in f["nodes"]
+                f"{wn['node_id']}({wn['x']:.1f},{wn['y']:.1f},{wn['z']:.2f})" for wn in f["nodes"]
             )
             print(
                 f"    Wall {f['wall_id']:>4} ({sec}) inside slab {f['slab_id']:>4}\n"
@@ -3209,13 +3312,13 @@ def print_wall_inside_slab_report(
 
 
 def split_slabs_at_wall_intersections(
-    area_elements: Dict[str, 'AreaElement'],
-    area_assignments: Dict[str, str],
-    nodes: Dict[str, 'Node'],
+    area_elements: dict[str, AreaElement],
+    area_assignments: dict[str, str],
+    nodes: dict[str, Node],
     next_tag: int = 1,
-    groups: Optional[Dict[str, 'Group']] = None,
+    groups: Optional[dict[str, Group]] = None,
     z_tol: float = 0.5,
-) -> Tuple[Dict[str, 'AreaElement'], Dict[str, str], Dict[str, 'Node'], int]:
+) -> tuple[dict[str, AreaElement], dict[str, str], dict[str, Node], int]:
     """Subdivide slab areas at wall-edge intersection lines.
 
     Before the regular max_size-based meshing, this function detects
@@ -3239,25 +3342,29 @@ def split_slabs_at_wall_intersections(
         ``(area_elements, area_assignments, nodes, next_tag)`` with
         subdivided slab areas added.
     """
-    from .sap_data import Node as _Node, AreaElement as _AreaElement
+    from .sap_data import AreaElement as _AreaElement
+    from .sap_data import Node as _Node
 
     # ── 1. Find intersections ───────────────────────────────────
     findings = find_wall_nodes_inside_slabs(
-        area_elements, area_assignments, nodes, z_tol=z_tol,
+        area_elements,
+        area_assignments,
+        nodes,
+        z_tol=z_tol,
     )
     if not findings:
         return area_elements, area_assignments, nodes, next_tag
 
     # ── 2. Group findings by slab ───────────────────────────────
     # Each group: (slab_id, [(wall_id, wall_nodes), ...])
-    slab_groups: Dict[str, List[Tuple[str, List[Dict]]]] = defaultdict(list)
+    slab_groups: dict[str, list[tuple[str, list[dict]]]] = defaultdict(list)
     for f in findings:
         slab_groups[f["slab_id"]].append((f["wall_id"], f["nodes"]))
 
     # ── 3. For each slab, collect parametric split positions ────
     for sid, wall_list in slab_groups.items():
         elem = area_elements.get(sid)
-        if elem is None or getattr(elem, 'inactive', False):
+        if elem is None or getattr(elem, "inactive", False):
             continue
         if len(elem.node_ids) != 4:
             continue
@@ -3274,7 +3381,7 @@ def split_slabs_at_wall_intersections(
         corners_arr = [c0, c1, c2, c3]
 
         # Get wall interior nodes as numpy arrays
-        interior_pts: List[np.ndarray] = []
+        interior_pts: list[np.ndarray] = []
         for wid, wall_nodes in wall_list:
             for wn in wall_nodes:
                 interior_pts.append(np.array([wn["x"], wn["y"], wn["z"]]))
@@ -3317,7 +3424,7 @@ def split_slabs_at_wall_intersections(
                 grid[j, i] = top * (1.0 - v) + bot * v
 
         # Build coordinate cache
-        _pos_cache: Dict[str, np.ndarray] = {}
+        _pos_cache: dict[str, np.ndarray] = {}
         for nid, nd in nodes.items():
             _pos_cache[nid] = np.array([nd.x, nd.y, nd.z])
         for pt in interior_pts:
@@ -3354,8 +3461,11 @@ def split_slabs_at_wall_intersections(
                 new_tag = next_tag
                 next_tag += 1
                 nodes[new_id] = _Node(
-                    node_id=new_id, node_tag=new_tag,
-                    x=float(pt[0]), y=float(pt[1]), z=float(pt[2]),
+                    node_id=new_id,
+                    node_tag=new_tag,
+                    x=float(pt[0]),
+                    y=float(pt[1]),
+                    z=float(pt[2]),
                 )
                 _pos_cache[new_id] = np.array([pt[0], pt[1], pt[2]])
                 node_grid[j][i] = new_id
@@ -3364,7 +3474,7 @@ def split_slabs_at_wall_intersections(
         elem.inactive = True
 
         # Determine parent groups
-        parent_groups: List[str] = []
+        parent_groups: list[str] = []
         if groups is not None:
             for gname, g in groups.items():
                 if f"Area:{sid}" in g.objects:
@@ -3382,7 +3492,8 @@ def split_slabs_at_wall_intersections(
                 n2 = node_grid[j + 1][i + 1]
                 n3 = node_grid[j + 1][i]
                 area_elements[sub_id] = _AreaElement(
-                    area_id=sub_id, area_tag=sub_tag,
+                    area_id=sub_id,
+                    area_tag=sub_tag,
                     node_ids=[n0, n1, n2, n3],
                     thickness=elem.thickness,
                     parent_id=sid,
@@ -3403,9 +3514,10 @@ def split_slabs_at_wall_intersections(
 # ═══════════════════════════════════════════════════════════════════
 
 
-def remove_floating_nodes(md: 'SAPModelData',
-                          z_tolerance: float = 0.5,
-                          ) -> List[Dict[str, Any]]:
+def remove_floating_nodes(
+    md: SAPModelData,
+    z_tolerance: float = 0.5,
+) -> list[dict[str, Any]]:
     """Remove nodes not connected to any element, redistributing loads and mass.
 
     SAP2000 can define nodes that are not referenced by any frame or
@@ -3433,40 +3545,39 @@ def remove_floating_nodes(md: 'SAPModelData',
     """
     connected: set = set()
     for fe in md.frame_elements.values():
-        if not getattr(fe, 'inactive', False):
+        if not getattr(fe, "inactive", False):
             connected.add(fe.node_i)
             connected.add(fe.node_j)
     for ae in md.area_elements.values():
-        if not getattr(ae, 'inactive', False):
+        if not getattr(ae, "inactive", False):
             connected.update(ae.node_ids)
 
-    joint_loads: Dict[str, List[float]] = {}
-    for jl in getattr(md, 'joint_loads', []):
-        nid = getattr(jl, 'node_id', '') or getattr(jl, 'node', '')
+    joint_loads: dict[str, list[float]] = {}
+    for jl in getattr(md, "joint_loads", []):
+        nid = getattr(jl, "node_id", "") or getattr(jl, "node", "")
         if not nid:
             continue
         if nid not in joint_loads:
             joint_loads[nid] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        joint_loads[nid][0] += getattr(jl, 'fx', 0.0) or 0.0
-        joint_loads[nid][1] += getattr(jl, 'fy', 0.0) or 0.0
-        joint_loads[nid][2] += getattr(jl, 'fz', 0.0) or 0.0
-        joint_loads[nid][3] += getattr(jl, 'mx', 0.0) or 0.0
-        joint_loads[nid][4] += getattr(jl, 'my', 0.0) or 0.0
-        joint_loads[nid][5] += getattr(jl, 'mz', 0.0) or 0.0
+        joint_loads[nid][0] += getattr(jl, "fx", 0.0) or 0.0
+        joint_loads[nid][1] += getattr(jl, "fy", 0.0) or 0.0
+        joint_loads[nid][2] += getattr(jl, "fz", 0.0) or 0.0
+        joint_loads[nid][3] += getattr(jl, "mx", 0.0) or 0.0
+        joint_loads[nid][4] += getattr(jl, "my", 0.0) or 0.0
+        joint_loads[nid][5] += getattr(jl, "mz", 0.0) or 0.0
 
     ms_has_masses = any(
-        getattr(src, 'masses', False) for src in
-        getattr(md, 'mass_sources', {}).values()
+        getattr(src, "masses", False) for src in getattr(md, "mass_sources", {}).values()
     )
 
-    restraints = getattr(md, 'restraints', {})
+    restraints = getattr(md, "restraints", {})
 
-    floating: List[str] = [nid for nid in md.nodes if nid not in connected]
+    floating: list[str] = [nid for nid in md.nodes if nid not in connected]
     if not floating:
         return []
 
-    rows: List[Dict[str, Any]] = []
-    removed_nodes: List[str] = []
+    rows: list[dict[str, Any]] = []
+    removed_nodes: list[str] = []
 
     for nid in floating:
         nd = md.nodes[nid]
@@ -3499,27 +3610,39 @@ def remove_floating_nodes(md: 'SAPModelData',
                     best_nid = cnid
 
         if has_loads and best_nid:
-            if not hasattr(md, 'joint_loads') or md.joint_loads is None:
+            if not hasattr(md, "joint_loads") or md.joint_loads is None:
                 md.joint_loads = []
-            md.joint_loads.append(JointLoad(
-                node=best_nid,
-                fx=loads[0], fy=loads[1], fz=loads[2],
-                mx=loads[3], my=loads[4], mz=loads[5],
-            ))
+            md.joint_loads.append(
+                JointLoad(
+                    node=best_nid,
+                    fx=loads[0],
+                    fy=loads[1],
+                    fz=loads[2],
+                    mx=loads[3],
+                    my=loads[4],
+                    mz=loads[5],
+                )
+            )
 
         if has_restraint and best_nid and best_nid not in restraints:
             restraints[best_nid] = restraints.pop(nid)
 
-        rows.append({
-            "node_id": nid,
-            "x": nd.x, "y": nd.y, "z": nd.z,
-            "mass_source": ms_has_masses,
-            "loads": (f"({loads[0]:.1f}, {loads[1]:.1f}, {loads[2]:.1f}, "
-                      f"{loads[3]:.1f}, {loads[4]:.1f}, {loads[5]:.1f})"),
-            "restrained": has_restraint,
-            "nearest_node": best_nid,
-            "distance": best_dist,
-        })
+        rows.append(
+            {
+                "node_id": nid,
+                "x": nd.x,
+                "y": nd.y,
+                "z": nd.z,
+                "mass_source": ms_has_masses,
+                "loads": (
+                    f"({loads[0]:.1f}, {loads[1]:.1f}, {loads[2]:.1f}, "
+                    f"{loads[3]:.1f}, {loads[4]:.1f}, {loads[5]:.1f})"
+                ),
+                "restrained": has_restraint,
+                "nearest_node": best_nid,
+                "distance": best_dist,
+            }
+        )
         removed_nodes.append(nid)
 
     for nid in removed_nodes:

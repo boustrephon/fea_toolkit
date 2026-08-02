@@ -2,69 +2,69 @@
 
 import math
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 import pytest
 
-from fea_toolkit.opensees.preprocessor import preprocess_model
-from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
-
-from fea_toolkit.model.sap_data import (
-    SAPModelData,
-    Node,
-    Restraint,
-    Material,
-    Section,
-    ISection,
-    GeneralSection,
-    PipeSection,
-    BoxSection,
-    RectangularSection,
-    CircularSection,
-    ChannelSection,
-    AngleSection,
-    DoubleAngleSection,
-    TeeSection,
-    SDSection,
-    EncasedSection,
-    ShellSection,
-    FrameElement,
-    AreaElement,
-    Group,
-    LoadCase,
-    LoadPattern,
-    LoadCombination,
-    JointLoad,
-    FrameDistributedLoad,
-    GravityLoad,
-    MassSource,
-    AreaGravityLoad,
-    AreaUniformLoad,
-    Constraint,
-    default_coord_sys,
-    FrameEndOffset,
-    AreaMesh,
+from fea_toolkit.model.csm import (
+    bilinearize_composite,
+    bilinearize_equal_energy,
+    bilinearize_stiffness_change,
 )
 from fea_toolkit.model.geometry import (
-    get_SAP_vecxz,
-    get_local_axes,
-    rotate_about_axis,
-    point_on_segment,
-    compute_t_location,
-    interp,
-    list_interp,
-    trapezoidal_force_split,
     SpatialGrid,
     beam_load_to_nodal_loads,
+    compute_t_location,
+    get_local_axes,
+    get_SAP_vecxz,
+    interp,
+    list_interp,
+    point_on_segment,
+    rotate_about_axis,
+    trapezoidal_force_split,
+)
+from fea_toolkit.model.mesh_model import MeshModel
+from fea_toolkit.model.sap_data import (
+    AngleSection,
+    AreaElement,
+    AreaGravityLoad,
+    AreaMesh,
+    AreaUniformLoad,
+    BoxSection,
+    ChannelSection,
+    CircularSection,
+    Constraint,
+    DoubleAngleSection,
+    EncasedSection,
+    FrameDistributedLoad,
+    FrameElement,
+    FrameEndOffset,
+    GeneralSection,
+    GravityLoad,
+    Group,
+    ISection,
+    JointLoad,
+    LoadCase,
+    LoadCombination,
+    LoadPattern,
+    MassSource,
+    Material,
+    Node,
+    PipeSection,
+    RectangularSection,
+    Restraint,
+    SAPModelData,
+    SDSection,
+    Section,
+    ShellSection,
+    TeeSection,
+    default_coord_sys,
 )
 from fea_toolkit.model.selection import Selection
-from fea_toolkit.model.mesh_model import MeshModel
 from fea_toolkit.model.stories import StoryLevel
-from fea_toolkit.model.csm import (
-    bilinearize_stiffness_change,
-    bilinearize_equal_energy,
-    bilinearize_composite,
-)
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
 
 # ============================================================================
 # Fixtures
@@ -248,18 +248,14 @@ class TestFrameDistributedLoad:
 
 class TestGravityLoad:
     def test_defaults(self):
-        gl = GravityLoad(
-            pattern="DEAD", frame_id="1", multiplier_z=-1.0
-        )
+        gl = GravityLoad(pattern="DEAD", frame_id="1", multiplier_z=-1.0)
         assert gl.multiplier_z == -1.0
         assert gl.multiplier_x == 0.0
 
 
 class TestAreaGravityLoad:
     def test_defaults(self):
-        agl = AreaGravityLoad(
-            pattern="DEAD", area_id="10", multiplier_z=-1.0
-        )
+        agl = AreaGravityLoad(pattern="DEAD", area_id="10", multiplier_z=-1.0)
         assert agl.pattern == "DEAD"
         assert agl.area_id == "10"
         assert agl.multiplier_z == -1.0
@@ -340,9 +336,17 @@ class TestSectionSubclasses:
 
     def test_isection_creation(self):
         sec = ISection(
-            name="W200x52", shape="I/Wide Flange", material="Steel",
-            A=0.00665, I33=5.25e-5, I22=1.77e-5, J=1e-6,
-            depth=0.206, bf=0.134, tf=0.0126, tw=0.0072,
+            name="W200x52",
+            shape="I/Wide Flange",
+            material="Steel",
+            A=0.00665,
+            I33=5.25e-5,
+            I22=1.77e-5,
+            J=1e-6,
+            depth=0.206,
+            bf=0.134,
+            tf=0.0126,
+            tw=0.0072,
         )
         assert sec.shape_id == "I"
         assert sec.depth == 0.206
@@ -350,9 +354,17 @@ class TestSectionSubclasses:
 
     def test_isection_fiber_patches(self):
         sec = ISection(
-            name="W200x52", shape="I/Wide Flange", material="Steel",
-            A=0.00665, I33=5.25e-5, I22=1.77e-5, J=1e-6,
-            depth=0.4, bf=0.2, tf=0.015, tw=0.01,
+            name="W200x52",
+            shape="I/Wide Flange",
+            material="Steel",
+            A=0.00665,
+            I33=5.25e-5,
+            I22=1.77e-5,
+            J=1e-6,
+            depth=0.4,
+            bf=0.2,
+            tf=0.015,
+            tw=0.01,
         )
         patches = sec.to_fiber_patches(mat_tag=1)
         assert len(patches) == 3  # bottom flange, web, top flange
@@ -363,13 +375,18 @@ class TestSectionSubclasses:
         assert patches[1][0] == "rect"
         assert patches[1][3] == 4  # nfz
         # Verify y-coordinates are ordered
-        _, _, _, _, y1, z1, y2, z2 = patches[2]
+        _, _, _, _, y1, _z1, _y2, _z2 = patches[2]
         assert y1 > 0  # top flange is in positive y
 
     def test_general_section(self):
         sec = GeneralSection(
-            name="CatalogueSec", shape="General", material="Steel",
-            A=0.01, I33=1e-4, I22=5e-5, J=1e-6,
+            name="CatalogueSec",
+            shape="General",
+            material="Steel",
+            A=0.01,
+            I33=1e-4,
+            I22=5e-5,
+            J=1e-6,
         )
         assert sec.shape_id == "GEN"
         with pytest.raises(NotImplementedError):
@@ -377,26 +394,46 @@ class TestSectionSubclasses:
 
     def test_pipe_section(self):
         sec = PipeSection(
-            name="CHS_273x10", shape="Pipe", material="Steel",
-            A=0.00826, I33=7.1e-5, I22=7.1e-5, J=1.42e-4,
-            od=0.273, t=0.01,
+            name="CHS_273x10",
+            shape="Pipe",
+            material="Steel",
+            A=0.00826,
+            I33=7.1e-5,
+            I22=7.1e-5,
+            J=1.42e-4,
+            od=0.273,
+            t=0.01,
         )
         assert sec.od == 0.273
         assert sec.shape_id == "CHS"
 
     def test_box_section(self):
         sec = BoxSection(
-            name="Box_200x100x8", shape="Box/Tube", material="Steel",
-            A=0.00445, I33=2.5e-5, I22=1.2e-5, J=3.0e-5,
-            depth=0.2, bf=0.1, tf=0.008, tw=0.008,
+            name="Box_200x100x8",
+            shape="Box/Tube",
+            material="Steel",
+            A=0.00445,
+            I33=2.5e-5,
+            I22=1.2e-5,
+            J=3.0e-5,
+            depth=0.2,
+            bf=0.1,
+            tf=0.008,
+            tw=0.008,
         )
         assert sec.shape_id == "RHS"
 
     def test_rectangular_section(self):
         sec = RectangularSection(
-            name="R_300x600", shape="Rectangular", material="Concrete",
-            A=0.18, I33=0.0054, I22=0.00135, J=0.0,
-            depth=0.6, bf=0.3,
+            name="R_300x600",
+            shape="Rectangular",
+            material="Concrete",
+            A=0.18,
+            I33=0.0054,
+            I22=0.00135,
+            J=0.0,
+            depth=0.6,
+            bf=0.3,
         )
         patches = sec.to_fiber_patches(mat_tag=2)
         # Now returns: confined core + 4 cover patches + 2 steel layers
@@ -410,87 +447,156 @@ class TestSectionSubclasses:
 
     def test_circular_section(self):
         sec = CircularSection(
-            name="Bar_32", shape="Circle", material="Steel",
-            A=0.000804, I33=5.15e-8, I22=5.15e-8, J=1.03e-7,
+            name="Bar_32",
+            shape="Circle",
+            material="Steel",
+            A=0.000804,
+            I33=5.15e-8,
+            I22=5.15e-8,
+            J=1.03e-7,
             diameter=0.032,
         )
         assert sec.diameter == 0.032
 
     def test_channel_section(self):
         sec = ChannelSection(
-            name="C_200x50", shape="Channel", material="Steel",
-            A=0.00215, I33=1.25e-5, I22=4.78e-7, J=4.2e-8,
-            depth=0.2032, bf=0.0508, tf=0.00965, tw=0.00635,
+            name="C_200x50",
+            shape="Channel",
+            material="Steel",
+            A=0.00215,
+            I33=1.25e-5,
+            I22=4.78e-7,
+            J=4.2e-8,
+            depth=0.2032,
+            bf=0.0508,
+            tf=0.00965,
+            tw=0.00635,
         )
         assert sec.shape_id == "CH"
 
     def test_angle_section(self):
         sec = AngleSection(
-            name="L_100x100x10", shape="Angle", material="Steel",
-            A=0.00193, I33=1.8e-6, I22=1.8e-6, J=1e-8,
-            depth=0.1, bf=0.1, tf=0.01, tw=0.01,
+            name="L_100x100x10",
+            shape="Angle",
+            material="Steel",
+            A=0.00193,
+            I33=1.8e-6,
+            I22=1.8e-6,
+            J=1e-8,
+            depth=0.1,
+            bf=0.1,
+            tf=0.01,
+            tw=0.01,
         )
         assert sec.shape_id == "A"
 
     def test_double_angle_section(self):
         sec = DoubleAngleSection(
-            name="2L_100x100x10", shape="Double Angle", material="Steel",
-            A=0.00386, I33=3.6e-6, I22=3.6e-6, J=2e-8,
-            depth=0.1, bf=0.21, tf=0.01, tw=0.01, dis=0.01,
+            name="2L_100x100x10",
+            shape="Double Angle",
+            material="Steel",
+            A=0.00386,
+            I33=3.6e-6,
+            I22=3.6e-6,
+            J=2e-8,
+            depth=0.1,
+            bf=0.21,
+            tf=0.01,
+            tw=0.01,
+            dis=0.01,
         )
         assert sec.shape_id == "AA"
         assert sec.dis == 0.01
 
     def test_tee_section(self):
         sec = TeeSection(
-            name="T_150x100x10", shape="Tee", material="Steel",
-            A=0.0024, I33=2.0e-6, I22=1.5e-6, J=5e-9,
-            depth=0.15, bf=0.1, tf=0.01, tw=0.008,
+            name="T_150x100x10",
+            shape="Tee",
+            material="Steel",
+            A=0.0024,
+            I33=2.0e-6,
+            I22=1.5e-6,
+            J=5e-9,
+            depth=0.15,
+            bf=0.1,
+            tf=0.01,
+            tw=0.008,
         )
         assert sec.shape_id == "T"
 
     def test_sd_section(self):
         sec = SDSection(
-            name="SD_Custom", shape="SD Section", material="Steel",
-            A=0.01, I33=1e-4, I22=5e-5, J=0.0,
+            name="SD_Custom",
+            shape="SD Section",
+            material="Steel",
+            A=0.01,
+            I33=1e-4,
+            I22=5e-5,
+            J=0.0,
         )
         assert sec.shape_id == "SD"
 
     def test_encased_section(self):
         inner = ISection(
-            name="W200x52", shape="I/Wide Flange", material="Steel",
-            A=0.00665, I33=5.25e-5, I22=1.77e-5, J=1e-6,
-            depth=0.206, bf=0.134, tf=0.0126, tw=0.0072,
+            name="W200x52",
+            shape="I/Wide Flange",
+            material="Steel",
+            A=0.00665,
+            I33=5.25e-5,
+            I22=1.77e-5,
+            J=1e-6,
+            depth=0.206,
+            bf=0.134,
+            tf=0.0126,
+            tw=0.0072,
         )
         sec = EncasedSection(
-            name="SRC_400x400", shape="Concrete Encasement Rectangle",
+            name="SRC_400x400",
+            shape="Concrete Encasement Rectangle",
             material="Steel",
-            A=0.16, I33=0.00213, I22=0.00213, J=2e-5,
+            A=0.16,
+            I33=0.00213,
+            I22=0.00213,
+            J=2e-5,
             embedded_section=inner,
             encasement_material="Concrete_40MPa",
-            encasement_depth=0.4, encasement_bf=0.4,
+            encasement_depth=0.4,
+            encasement_bf=0.4,
         )
         assert sec.embedded_section is not None
         assert sec.encasement_material == "Concrete_40MPa"
 
     def test_shell_section(self):
         sec = ShellSection(
-            name="Shell_200mm", shape="Shell", material="Concrete",
-            A=0.2, I33=0, I22=0, J=0,
+            name="Shell_200mm",
+            shape="Shell",
+            material="Concrete",
+            A=0.2,
+            I33=0,
+            I22=0,
+            J=0,
             thickness=0.2,
         )
         assert sec.thickness == 0.2
         assert sec.shape_id == "GEN"  # Shell is not in SHAPE_NAMES
 
     def test_shape_id_mapping(self):
-        assert ISection(name="", shape="I/Wide Flange", material="",
-                        A=0,I33=0,I22=0,J=0).shape_id == "I"
-        assert ISection(name="", shape="WIDE FLANGE", material="",
-                        A=0,I33=0,I22=0,J=0).shape_id == "I"
-        assert PipeSection(name="", shape="Pipe", material="",
-                           A=0,I33=0,I22=0,J=0).shape_id == "CHS"
-        assert BoxSection(name="", shape="Box/Tube", material="",
-                          A=0,I33=0,I22=0,J=0).shape_id == "RHS"
+        assert (
+            ISection(name="", shape="I/Wide Flange", material="", A=0, I33=0, I22=0, J=0).shape_id
+            == "I"
+        )
+        assert (
+            ISection(name="", shape="WIDE FLANGE", material="", A=0, I33=0, I22=0, J=0).shape_id
+            == "I"
+        )
+        assert (
+            PipeSection(name="", shape="Pipe", material="", A=0, I33=0, I22=0, J=0).shape_id
+            == "CHS"
+        )
+        assert (
+            BoxSection(name="", shape="Box/Tube", material="", A=0, I33=0, I22=0, J=0).shape_id
+            == "RHS"
+        )
 
     def test_base_section_raises(self):
         """Base Section.to_fiber_patches() should raise NotImplementedError."""
@@ -538,19 +644,31 @@ class TestSAPModelData:
     def test_default_units(self):
         """Default length unit should be meters."""
         m = SAPModelData(
-            nodes={}, restraints={}, materials={}, sections={},
-            frame_elements={}, area_elements={}, frame_assignments={},
-            area_assignments={}, groups={}, frame_auto_mesh={},
+            nodes={},
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
         )
-        assert m.units["L"] == "m", (
-            f"Expected default length unit 'm', got '{m.units['L']}'"
-        )
+        assert m.units["L"] == "m", f"Expected default length unit 'm', got '{m.units['L']}'"
 
     def test_custom_units(self):
         m = SAPModelData(
-            nodes={}, restraints={}, materials={}, sections={},
-            frame_elements={}, area_elements={}, frame_assignments={},
-            area_assignments={}, groups={}, frame_auto_mesh={},
+            nodes={},
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
             units={"F": "kip", "L": "in", "T": "F"},
         )
         assert m.units == {"F": "kip", "L": "in", "T": "F"}
@@ -558,9 +676,16 @@ class TestSAPModelData:
     def test_new_load_fields_default(self):
         """Verify recently-added load fields default to empty lists."""
         m = SAPModelData(
-            nodes={}, restraints={}, materials={}, sections={},
-            frame_elements={}, area_elements={}, frame_assignments={},
-            area_assignments={}, groups={}, frame_auto_mesh={},
+            nodes={},
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
         )
         assert m.area_gravity_loads == []
         assert m.frame_gravity_loads == []
@@ -591,7 +716,7 @@ class TestGetSAPVecxz:
     def test_with_angle(self):
         """Rotation should change vecxz."""
         vec_x = np.array([5.0, 0.0, 0.0])
-        vecxz_0 = get_SAP_vecxz(vec_x, angle=0.0)
+        get_SAP_vecxz(vec_x, angle=0.0)
         vecxz_90 = get_SAP_vecxz(vec_x, angle=90.0)
         # With 90° rotation about X, vecxz should become (0, 0, -1)
         expected = np.array([0.0, 0.0, -1.0])
@@ -631,16 +756,12 @@ class TestGetLocalAxes:
         """Beam along X with 45° rotation: vy rotated from (0,0,1) about x."""
         vx, vy, vz = get_local_axes(np.array([5.0, 0.0, 0.0]), angle=45.0)
         np.testing.assert_array_almost_equal(vx, [1, 0, 0])
-        np.testing.assert_array_almost_equal(
-            vy, [0, -0.70710678, 0.70710678], decimal=6
-        )
-        np.testing.assert_array_almost_equal(
-            vz, [0, -0.70710678, -0.70710678], decimal=6
-        )
+        np.testing.assert_array_almost_equal(vy, [0, -0.70710678, 0.70710678], decimal=6)
+        np.testing.assert_array_almost_equal(vz, [0, -0.70710678, -0.70710678], decimal=6)
 
     def test_90_degree_swap(self):
         """Angle=90°: vy_90 = vz_0, vz_90 = -vy_0."""
-        vx0, vy0, vz0 = get_local_axes(np.array([5.0, 0.0, 0.0]), angle=0.0)
+        _vx0, vy0, vz0 = get_local_axes(np.array([5.0, 0.0, 0.0]), angle=0.0)
         vx, vy, vz = get_local_axes(np.array([5.0, 0.0, 0.0]), angle=90.0)
         np.testing.assert_array_almost_equal(vx, [1, 0, 0])
         np.testing.assert_array_almost_equal(vy, vz0)
@@ -659,14 +780,12 @@ class TestGetLocalAxes:
             for angle in (0.0, 30.0, -45.0, 90.0):
                 vx, vy, vz = get_local_axes(axis, angle=angle)
                 for name, v in [("vx", vx), ("vy", vy), ("vz", vz)]:
-                    assert abs(np.linalg.norm(v) - 1.0) < 1e-10, \
+                    assert abs(np.linalg.norm(v) - 1.0) < 1e-10, (
                         f"{name} not unit for axis={axis}, angle={angle}"
-                assert abs(np.dot(vx, vy)) < 1e-10, \
-                    f"vx·vy not zero for axis={axis}, angle={angle}"
-                assert abs(np.dot(vx, vz)) < 1e-10, \
-                    f"vx·vz not zero for axis={axis}, angle={angle}"
-                assert abs(np.dot(vy, vz)) < 1e-10, \
-                    f"vy·vz not zero for axis={axis}, angle={angle}"
+                    )
+                assert abs(np.dot(vx, vy)) < 1e-10, f"vx·vy not zero for axis={axis}, angle={angle}"
+                assert abs(np.dot(vx, vz)) < 1e-10, f"vx·vz not zero for axis={axis}, angle={angle}"
+                assert abs(np.dot(vy, vz)) < 1e-10, f"vy·vz not zero for axis={axis}, angle={angle}"
 
     def test_zero_length_raises(self):
         with pytest.raises(ValueError, match="zero length"):
@@ -682,13 +801,9 @@ class TestGetLocalAxes:
     def test_beam_diagonal_xy(self):
         """Diagonal in XY: vx=(0.707,0.707,0), vy=(0,0,1), vz=(0.707,-0.707,0)."""
         vx, vy, vz = get_local_axes(np.array([1.0, 1.0, 0.0]))
-        np.testing.assert_array_almost_equal(
-            vx, [0.70710678, 0.70710678, 0], decimal=6
-        )
+        np.testing.assert_array_almost_equal(vx, [0.70710678, 0.70710678, 0], decimal=6)
         np.testing.assert_array_almost_equal(vy, [0, 0, 1])
-        np.testing.assert_array_almost_equal(
-            vz, [0.70710678, -0.70710678, 0], decimal=6
-        )
+        np.testing.assert_array_almost_equal(vz, [0.70710678, -0.70710678, 0], decimal=6)
 
     def test_returns_numpy_arrays(self):
         """Result components are numpy arrays, not lists."""
@@ -776,16 +891,10 @@ class TestListInterp:
         assert list_interp(0.08, [0.2, 0.8], [1.1, 1.35]) == 0
 
     def test_below_range_extrapolate(self):
-        assert (
-            list_interp(0.08, [0.2, 0.8], [1.1, 1.35], extend=True, extrapolate=True)
-            == 1.05
-        )
+        assert list_interp(0.08, [0.2, 0.8], [1.1, 1.35], extend=True, extrapolate=True) == 1.05
 
     def test_below_range_no_extrapolate(self):
-        assert (
-            list_interp(0.08, [0.2, 0.8], [1.1, 1.35], extend=True, extrapolate=False)
-            == 1.1
-        )
+        assert list_interp(0.08, [0.2, 0.8], [1.1, 1.35], extend=True, extrapolate=False) == 1.1
 
 
 class TestTrapezoidalForceSplit:
@@ -842,8 +951,8 @@ class TestSpatialGrid:
         the cell mapping is correct.
         """
         grid = SpatialGrid(cell_size=1.0)
-        grid.add_point("N1", (-0.5, -0.5, -0.5))   # → cell (-1,-1,-1)
-        grid.add_point("N2", (-1.5, -1.5, -1.5))   # → cell (-2,-2,-2)
+        grid.add_point("N1", (-0.5, -0.5, -0.5))  # → cell (-1,-1,-1)
+        grid.add_point("N2", (-1.5, -1.5, -1.5))  # → cell (-2,-2,-2)
         # Query covering cells (-1,-1,-1): includes N1 + possibly N2
         r1 = grid.points_in_bbox((-1, -1, -1), (0, 0, 0))
         ids_1 = {p[0] for p in r1}
@@ -856,9 +965,9 @@ class TestSpatialGrid:
     def test_multi_cell_query(self):
         """Bbox spanning multiple cells returns points from all touched cells."""
         grid = SpatialGrid(cell_size=2.0)  # 2m cells
-        grid.add_point("A", (0, 0, 0))      # cell (0,0,0)
+        grid.add_point("A", (0, 0, 0))  # cell (0,0,0)
         grid.add_point("B", (2.1, 2.1, 2.1))  # cell (1,1,1) — just over boundary
-        grid.add_point("C", (10, 10, 10))     # cell (5,5,5) — far away
+        grid.add_point("C", (10, 10, 10))  # cell (5,5,5) — far away
         results = grid.points_in_bbox((-1, -1, -1), (5, 5, 5))
         assert len(results) == 2
         ids = {r[0] for r in results}
@@ -874,9 +983,9 @@ class TestSpatialGrid:
         """
         grid = SpatialGrid(cell_size=0.5)
         # Exactly on cell boundaries
-        grid.add_point("X", (0.0, 0.0, 0.0))   # → cell (0,0,0)
-        grid.add_point("Y", (0.5, 0.5, 0.5))   # → cell (1,1,1)
-        grid.add_point("Z", (1.0, 1.0, 1.0))   # → cell (2,2,2)
+        grid.add_point("X", (0.0, 0.0, 0.0))  # → cell (0,0,0)
+        grid.add_point("Y", (0.5, 0.5, 0.5))  # → cell (1,1,1)
+        grid.add_point("Z", (1.0, 1.0, 1.0))  # → cell (2,2,2)
         # All three should be in distinct cells
         r_all = grid.points_in_bbox((-0.1, -0.1, -0.1), (1.1, 1.1, 1.1))
         assert len(r_all) == 3
@@ -994,9 +1103,7 @@ class TestParserModelIntegration:
     def test_auto_mesh_parsed(self, parsed_model):
         assert len(parsed_model.frame_auto_mesh) > 0
         # Check AtJoints flag is set on some frames
-        at_joints_count = sum(
-            1 for v in parsed_model.frame_auto_mesh.values() if v.get("AtJoints")
-        )
+        at_joints_count = sum(1 for v in parsed_model.frame_auto_mesh.values() if v.get("AtJoints"))
         assert at_joints_count > 0
 
     def test_units_parsed(self, parsed_model):
@@ -1023,7 +1130,7 @@ class TestParserModelIntegration:
             tol=1e-6,
             verbose=False,
         )
-        new_elements, new_assignments, new_dist_loads = result
+        new_elements, _new_assignments, _new_dist_loads = result
         assert len(new_elements) > 0
         # Parent elements should be marked inactive
         inactive = [e for e in new_elements.values() if e.inactive]
@@ -1046,9 +1153,7 @@ class TestParserModelIntegration:
         # Check that parent elements have child_ids populated
         for eid, elem in new_elements.items():
             if elem.inactive:
-                assert len(elem.child_ids) > 0, (
-                    f"Inactive element {eid} should have children"
-                )
+                assert len(elem.child_ids) > 0, f"Inactive element {eid} should have children"
 
 
 # ============================================================================
@@ -1074,8 +1179,9 @@ class TestSplitElementsAtFrames:
             "B": FrameElement(elem_id="B", elem_tag=11, node_i="3", node_j="4"),
         }
         auto_mesh = {"A": {"AtFrames": True}, "B": {"AtFrames": True}}
-        result = split_elements(nodes=nodes, elements=elements,
-                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        result = split_elements(
+            nodes=nodes, elements=elements, assignments={}, dist_loads=[], auto_mesh=auto_mesh
+        )
         new_elems, _, _ = result
         assert len(new_elems) == 2
         assert "A" in new_elems and "B" in new_elems
@@ -1098,8 +1204,9 @@ class TestSplitElementsAtFrames:
         }
         auto_mesh = {"A": {"AtFrames": True}, "B": {"AtFrames": True}}
         # Pass nodes directly (not a copy) so we can check new nodes
-        result = split_elements(nodes=nodes, elements=elements,
-                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        result = split_elements(
+            nodes=nodes, elements=elements, assignments={}, dist_loads=[], auto_mesh=auto_mesh
+        )
         new_elems, _, _ = result
         # Both elements should be split → 2 children each + 2 inactive parents
         assert "A" in new_elems
@@ -1118,8 +1225,7 @@ class TestSplitElementsAtFrames:
         assert abs(split_node.x - 5) < 1e-6
         assert abs(split_node.y - 0) < 1e-6
         assert abs(split_node.z - 0) < 1e-6
-        assert split_node.node_tag == 5, (
-            f"Expected next tag 5, got {split_node.node_tag}")
+        assert split_node.node_tag == 5, f"Expected next tag 5, got {split_node.node_tag}"
         assert split_node.node_id == "split_n_1"
 
     def test_at_frames_skips_shared_joint(self):
@@ -1137,8 +1243,9 @@ class TestSplitElementsAtFrames:
         }
         auto_mesh = {"A": {"AtFrames": True}, "B": {"AtFrames": True}}
         # Should not crash — they share node "2"
-        result = split_elements(nodes=nodes, elements=elements,
-                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        result = split_elements(
+            nodes=nodes, elements=elements, assignments={}, dist_loads=[], auto_mesh=auto_mesh
+        )
         new_elems, _, _ = result
         # Should not crash — they share node "2"
         assert len(new_elems) == 2
@@ -1160,8 +1267,9 @@ class TestSplitElementsAtFrames:
             "B": FrameElement(elem_id="B", elem_tag=11, node_i="3", node_j="4"),
         }
         auto_mesh = {"A": {"AtFrames": True}, "B": {"AtFrames": True}}
-        result = split_elements(nodes=nodes, elements=elements,
-                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        result = split_elements(
+            nodes=nodes, elements=elements, assignments={}, dist_loads=[], auto_mesh=auto_mesh
+        )
         new_elems, _, _ = result
         # Non-coplanar → no intersection → no split
         assert not new_elems["A"].inactive
@@ -1182,10 +1290,13 @@ class TestSplitElementsAtFrames:
             "B": FrameElement(elem_id="B", elem_tag=11, node_i="3", node_j="4"),
         }
         # Only AtFrames, no AtJoints
-        auto_mesh = {"A": {"AtJoints": False, "AtFrames": True},
-                     "B": {"AtJoints": False, "AtFrames": True}}
-        result = split_elements(nodes=nodes, elements=elements,
-                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        auto_mesh = {
+            "A": {"AtJoints": False, "AtFrames": True},
+            "B": {"AtJoints": False, "AtFrames": True},
+        }
+        result = split_elements(
+            nodes=nodes, elements=elements, assignments={}, dist_loads=[], auto_mesh=auto_mesh
+        )
         new_elems, _, _ = result
         assert new_elems["A"].inactive
         assert len(new_elems["A"].child_ids) == 2
@@ -1218,22 +1329,25 @@ class TestSplitElementsAtFrames:
             "B": FrameElement(elem_id="B", elem_tag=11, node_i="5", node_j="6"),
             "C": FrameElement(elem_id="C", elem_tag=12, node_i="3", node_j="4"),
         }
-        auto_mesh = {"A": {"AtJoints": False, "AtFrames": True},
-                     "B": {"AtJoints": False, "AtFrames": True},
-                     "C": {"AtJoints": False, "AtFrames": False}}
-        result = split_elements(nodes=nodes, elements=elements,
-                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        auto_mesh = {
+            "A": {"AtJoints": False, "AtFrames": True},
+            "B": {"AtJoints": False, "AtFrames": True},
+            "C": {"AtJoints": False, "AtFrames": False},
+        }
+        result = split_elements(
+            nodes=nodes, elements=elements, assignments={}, dist_loads=[], auto_mesh=auto_mesh
+        )
         new_elems, _, _ = result
         # Element A should be split only at the AtFrames node (5,0,0),
         # NOT at the existing joint node 3 (3,0,0).
         # So it should have 2 children (split at t=0.5).
         assert new_elems["A"].inactive
         assert len(new_elems["A"].child_ids) == 2, (
-            f"Expected 2 children, got {len(new_elems['A'].child_ids)}")
+            f"Expected 2 children, got {len(new_elems['A'].child_ids)}"
+        )
         # The AtFrames node should get the next sequential tag (7 after 1..6)
         split_nid = next(nid for nid in nodes if nid.startswith("split_n_"))
-        assert nodes[split_nid].node_tag == 7, (
-            f"Expected tag 7, got {nodes[split_nid].node_tag}")
+        assert nodes[split_nid].node_tag == 7, f"Expected tag 7, got {nodes[split_nid].node_tag}"
         # Element C (no AtFrames, no AtJoints) should not be split
         assert not new_elems["C"].inactive
         # Only one new node should exist (the AtFrames intersection)
@@ -1275,39 +1389,41 @@ class TestSplitElementsAtFrames:
             "B": FrameElement(elem_id="B", elem_tag=11, node_i="3", node_j="4"),
             "C": FrameElement(elem_id="C", elem_tag=12, node_i="5", node_j="6"),
         }
-        auto_mesh = {"A": {"AtJoints": False, "AtFrames": True},
-                     "B": {"AtJoints": False, "AtFrames": True},
-                     "C": {"AtJoints": False, "AtFrames": True}}
-        result = split_elements(nodes=nodes, elements=elements,
-                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        auto_mesh = {
+            "A": {"AtJoints": False, "AtFrames": True},
+            "B": {"AtJoints": False, "AtFrames": True},
+            "C": {"AtJoints": False, "AtFrames": True},
+        }
+        result = split_elements(
+            nodes=nodes, elements=elements, assignments={}, dist_loads=[], auto_mesh=auto_mesh
+        )
         new_elems, _, _ = result
         # Element A should have 2 children (split once, not twice)
         assert new_elems["A"].inactive
         assert len(new_elems["A"].child_ids) == 2, (
-            f"Expected 2 children (dedup), got {len(new_elems['A'].child_ids)}")
+            f"Expected 2 children (dedup), got {len(new_elems['A'].child_ids)}"
+        )
 
         # Exactly one split node should exist (B and C share it)
         split_nodes = [nid for nid in nodes if nid.startswith("split_n_")]
         assert len(split_nodes) == 1, (
-            f"Expected 1 split node, got {len(split_nodes)}: {split_nodes}")
+            f"Expected 1 split node, got {len(split_nodes)}: {split_nodes}"
+        )
 
         # A's breakpoint metadata should also reflect the dedup: only one
         # t-location kept (0.5), not both near-identical s entries
         assert len(new_elems["A"].t_locations) == 1, (
-            f"Expected 1 t-location (deduped), got {new_elems['A'].t_locations}")
+            f"Expected 1 t-location (deduped), got {new_elems['A'].t_locations}"
+        )
 
         # B and C's children should both reference that same shared node
         shared_nid = split_nodes[0]
-        b_children = [c for cid in new_elems["B"].child_ids
-                      for c in [new_elems.get(cid)] if c]
-        c_children = [c for cid in new_elems["C"].child_ids
-                      for c in [new_elems.get(cid)] if c]
+        b_children = [c for cid in new_elems["B"].child_ids for c in [new_elems.get(cid)] if c]
+        c_children = [c for cid in new_elems["C"].child_ids for c in [new_elems.get(cid)] if c]
         b_refs = {c.node_i for c in b_children} | {c.node_j for c in b_children}
         c_refs = {c.node_i for c in c_children} | {c.node_j for c in c_children}
-        assert shared_nid in b_refs, (
-            f"Element B children don't reference {shared_nid}")
-        assert shared_nid in c_refs, (
-            f"Element C children don't reference {shared_nid}")
+        assert shared_nid in b_refs, f"Element B children don't reference {shared_nid}"
+        assert shared_nid in c_refs, f"Element C children don't reference {shared_nid}"
 
     def test_at_frames_t_dedup_direct(self):
         """Integration test: t-based dedup via split_elements().
@@ -1339,27 +1455,26 @@ class TestSplitElementsAtFrames:
             "A": FrameElement(elem_id="A", elem_tag=10, node_i="1", node_j="2"),
         }
         auto_mesh = {"A": {"AtJoints": True, "AtFrames": False}}
-        result = split_elements(nodes=nodes, elements=elements,
-                                assignments={}, dist_loads=[], auto_mesh=auto_mesh)
+        result = split_elements(
+            nodes=nodes, elements=elements, assignments={}, dist_loads=[], auto_mesh=auto_mesh
+        )
         new_elems, _, _ = result
 
         # Element A should have 2 children (one split, the second
         # candidate was deduped away)
         assert new_elems["A"].inactive
         assert len(new_elems["A"].child_ids) == 2, (
-            f"Expected 2 children (t-dedup), got {len(new_elems['A'].child_ids)}")
+            f"Expected 2 children (t-dedup), got {len(new_elems['A'].child_ids)}"
+        )
 
         # The intermediate children reference existing node IDs (no
         # split_n_ nodes are created for AtJoints).  Verify that node 5
         # was deduped away: children span (1→3) and (3→2).
         children = [new_elems[cid] for cid in new_elems["A"].child_ids]
         node_pairs = {(c.node_i, c.node_j) for c in children}
-        assert ("1", "3") in node_pairs, (
-            f"Expected child 1→3, got {node_pairs}")
-        assert ("3", "2") in node_pairs, (
-            f"Expected child 3→2, got {node_pairs}")
-        assert ("5") not in str(node_pairs), (
-            "Node 5 should have been deduped")
+        assert ("1", "3") in node_pairs, f"Expected child 1→3, got {node_pairs}"
+        assert ("3", "2") in node_pairs, f"Expected child 3→2, got {node_pairs}"
+        assert ("5") not in str(node_pairs), "Node 5 should have been deduped"
 
         # Distinct t values → all kept (sanity: no accidental dedup)
         # Node 6 at (3,0,0) → t=0.3, Node 7 at (7,0,0) → t=0.7
@@ -1371,13 +1486,14 @@ class TestSplitElementsAtFrames:
         }
         elements2 = {"B": FrameElement("B", 20, "1", "2")}
         auto_mesh2 = {"B": {"AtJoints": True, "AtFrames": False}}
-        result2 = split_elements(nodes=nodes2, elements=elements2,
-                                 assignments={}, dist_loads=[], auto_mesh=auto_mesh2)
+        result2 = split_elements(
+            nodes=nodes2, elements=elements2, assignments={}, dist_loads=[], auto_mesh=auto_mesh2
+        )
         new_elems2, _, _ = result2
         assert new_elems2["B"].inactive
         assert len(new_elems2["B"].child_ids) == 3, (
-            f"Expected 3 children (2 splits, no dedup), "
-            f"got {len(new_elems2['B'].child_ids)}")
+            f"Expected 3 children (2 splits, no dedup), got {len(new_elems2['B'].child_ids)}"
+        )
 
 
 class TestEdgeCases:
@@ -1442,13 +1558,24 @@ class TestBeamLoadToNodalLoads:
     def test_uniform_gravity(self):
         """Uniform gravity load on a horizontal X element."""
         load = FrameDistributedLoad(
-            pattern="DEAD", frame_id="1", direction="Gravity",
-            load_type="Force", shape="Uniform",
-            val_a=10000.0, val_b=10000.0,
-            rdist_a=0.0, rdist_b=1.0, dist_a=0.0, dist_b=5.0,
+            pattern="DEAD",
+            frame_id="1",
+            direction="Gravity",
+            load_type="Force",
+            shape="Uniform",
+            val_a=10000.0,
+            val_b=10000.0,
+            rdist_a=0.0,
+            rdist_b=1.0,
+            dist_a=0.0,
+            dist_b=5.0,
         )
         elem = FrameElement(
-            elem_id="1", elem_tag=1, node_i="1", node_j="2", angle=0.0,
+            elem_id="1",
+            elem_tag=1,
+            node_i="1",
+            node_j="2",
+            angle=0.0,
         )
         node_coords = {"1": (0.0, 0.0, 0.0), "2": (5.0, 0.0, 0.0)}
         result = beam_load_to_nodal_loads(load, elem, node_coords, length=5.0)
@@ -1469,13 +1596,24 @@ class TestBeamLoadToNodalLoads:
     def test_uniform_x_direction(self):
         """Uniform load in global X direction."""
         load = FrameDistributedLoad(
-            pattern="WIND", frame_id="1", direction="X",
-            load_type="Force", shape="Uniform",
-            val_a=5000.0, val_b=5000.0,
-            rdist_a=0.0, rdist_b=1.0, dist_a=0.0, dist_b=5.0,
+            pattern="WIND",
+            frame_id="1",
+            direction="X",
+            load_type="Force",
+            shape="Uniform",
+            val_a=5000.0,
+            val_b=5000.0,
+            rdist_a=0.0,
+            rdist_b=1.0,
+            dist_a=0.0,
+            dist_b=5.0,
         )
         elem = FrameElement(
-            elem_id="1", elem_tag=1, node_i="1", node_j="2", angle=0.0,
+            elem_id="1",
+            elem_tag=1,
+            node_i="1",
+            node_j="2",
+            angle=0.0,
         )
         node_coords = {"1": (0.0, 0.0, 0.0), "2": (5.0, 0.0, 0.0)}
         result = beam_load_to_nodal_loads(load, elem, node_coords, length=5.0)
@@ -1490,13 +1628,24 @@ class TestBeamLoadToNodalLoads:
     def test_partial_span_uniform(self):
         """Uniform load on a partial span [0.2, 0.8]."""
         load = FrameDistributedLoad(
-            pattern="DEAD", frame_id="1", direction="Gravity",
-            load_type="Force", shape="Uniform",
-            val_a=10000.0, val_b=10000.0,
-            rdist_a=0.2, rdist_b=0.8, dist_a=1.0, dist_b=4.0,
+            pattern="DEAD",
+            frame_id="1",
+            direction="Gravity",
+            load_type="Force",
+            shape="Uniform",
+            val_a=10000.0,
+            val_b=10000.0,
+            rdist_a=0.2,
+            rdist_b=0.8,
+            dist_a=1.0,
+            dist_b=4.0,
         )
         elem = FrameElement(
-            elem_id="1", elem_tag=1, node_i="1", node_j="2", angle=0.0,
+            elem_id="1",
+            elem_tag=1,
+            node_i="1",
+            node_j="2",
+            angle=0.0,
         )
         node_coords = {"1": (0.0, 0.0, 0.0), "2": (5.0, 0.0, 0.0)}
         result = beam_load_to_nodal_loads(load, elem, node_coords, length=5.0)
@@ -1508,13 +1657,24 @@ class TestBeamLoadToNodalLoads:
     def test_trapezoidal_load(self):
         """Trapezoidal load varying from 5000 to 10000."""
         load = FrameDistributedLoad(
-            pattern="DEAD", frame_id="1", direction="Gravity",
-            load_type="Force", shape="Trapezoidal",
-            val_a=5000.0, val_b=10000.0,
-            rdist_a=0.0, rdist_b=1.0, dist_a=0.0, dist_b=5.0,
+            pattern="DEAD",
+            frame_id="1",
+            direction="Gravity",
+            load_type="Force",
+            shape="Trapezoidal",
+            val_a=5000.0,
+            val_b=10000.0,
+            rdist_a=0.0,
+            rdist_b=1.0,
+            dist_a=0.0,
+            dist_b=5.0,
         )
         elem = FrameElement(
-            elem_id="1", elem_tag=1, node_i="1", node_j="2", angle=0.0,
+            elem_id="1",
+            elem_tag=1,
+            node_i="1",
+            node_j="2",
+            angle=0.0,
         )
         node_coords = {"1": (0.0, 0.0, 0.0), "2": (5.0, 0.0, 0.0)}
         result = beam_load_to_nodal_loads(load, elem, node_coords, length=5.0)
@@ -1530,7 +1690,8 @@ class TestBeamLoadToNodalLoads:
 # MassSource tests
 # ============================================================================
 
-class TestMassSource:
+
+class TestMassSource2:
     def test_defaults(self):
         ms = MassSource(name="MSSSRC1")
         assert ms.name == "MSSSRC1"
@@ -1558,12 +1719,13 @@ class TestMassSource:
 # Fiber patch tests
 # ============================================================================
 
+
 class TestPipeSectionFiberPatches:
     def test_annular_ring(self):
         p = PipeSection("PIPE", "Pipe", "STEEL", od=1.0, t=0.1)
         patches = p.to_fiber_patches(mat_tag=1, nfy=8, nfz=4)
         assert len(patches) == 1
-        ptype, mat, ncirc, nrad, yc, zc, r_in, r_out, sa, ea = patches[0]
+        ptype, mat, ncirc, nrad, _yc, _zc, r_in, r_out, sa, ea = patches[0]
         assert ptype == "circ"
         assert mat == 1
         assert ncirc == 8 and nrad == 4
@@ -1584,7 +1746,7 @@ class TestCircularSectionFiberPatches:
         c = CircularSection("CIRC", "Circle", "STEEL", diameter=0.6)
         patches = c.to_fiber_patches(mat_tag=3, nfy=12, nfz=6)
         assert len(patches) == 1
-        ptype, mat, ncirc, nrad, yc, zc, r_in, r_out, sa, ea = patches[0]
+        ptype, mat, ncirc, nrad, _yc, _zc, r_in, r_out, _sa, _ea = patches[0]
         assert ptype == "circ"
         assert mat == 3
         assert ncirc == 12 and nrad == 6
@@ -1594,8 +1756,7 @@ class TestCircularSectionFiberPatches:
 
 class TestBoxSectionFiberPatches:
     def test_four_rect_patches(self):
-        b = BoxSection("BOX", "Box/Tube", "STEEL",
-                       depth=0.6, bf=0.4, tf=0.02, tw=0.015)
+        b = BoxSection("BOX", "Box/Tube", "STEEL", depth=0.6, bf=0.4, tf=0.02, tw=0.015)
         patches = b.to_fiber_patches(mat_tag=4, nfy=3, nfz=2)
         assert len(patches) == 4
         for p in patches:
@@ -1603,7 +1764,7 @@ class TestBoxSectionFiberPatches:
             assert p[1] == 4
         # Top flange: y from 0.28 to 0.3, z from -0.2 to 0.2
         assert abs(patches[0][4] - 0.28) < 1e-12  # yI
-        assert abs(patches[0][6] - 0.3) < 1e-12   # yJ
+        assert abs(patches[0][6] - 0.3) < 1e-12  # yJ
         # Bottom flange: y from -0.3 to -0.28
         assert abs(patches[1][4] + 0.3) < 1e-12
         assert abs(patches[1][6] + 0.28) < 1e-12
@@ -1628,29 +1789,36 @@ class TestSelection:
             "5": Node(node_id="5", node_tag=5, x=0, y=0, z=3),
         }
         materials = {
-            "Steel": Material(name="Steel", type="Steel",
-                              E_mod=2e11, unit_weight=77000),
-            "Concrete": Material(name="Concrete", type="Concrete",
-                                 E_mod=3e10, unit_weight=24000),
+            "Steel": Material(name="Steel", type="Steel", E_mod=2e11, unit_weight=77000),
+            "Concrete": Material(name="Concrete", type="Concrete", E_mod=3e10, unit_weight=24000),
         }
         sections = {
-            "UB100": Section(name="UB100", shape="I/Wide Flange",
-                             material="Steel", A=0.01, I33=1e-4,
-                             I22=1e-5, J=1e-6),
-            "Slab200": ShellSection(name="Slab200", shape="Shell",
-                                    material="Concrete",
-                                    A=0, I33=0, I22=0, J=0,
-                                    thickness=0.2),
+            "UB100": Section(
+                name="UB100",
+                shape="I/Wide Flange",
+                material="Steel",
+                A=0.01,
+                I33=1e-4,
+                I22=1e-5,
+                J=1e-6,
+            ),
+            "Slab200": ShellSection(
+                name="Slab200",
+                shape="Shell",
+                material="Concrete",
+                A=0,
+                I33=0,
+                I22=0,
+                J=0,
+                thickness=0.2,
+            ),
         }
         frames = {
-            "1": FrameElement(elem_id="1", elem_tag=1,
-                              node_i="1", node_j="2"),
-            "2": FrameElement(elem_id="2", elem_tag=2,
-                              node_i="2", node_j="3"),
+            "1": FrameElement(elem_id="1", elem_tag=1, node_i="1", node_j="2"),
+            "2": FrameElement(elem_id="2", elem_tag=2, node_i="2", node_j="3"),
         }
         areas = {
-            "1": AreaElement(area_id="1", area_tag=1,
-                             node_ids=["1","2","3","4"], thickness=0.2),
+            "1": AreaElement(area_id="1", area_tag=1, node_ids=["1", "2", "3", "4"], thickness=0.2),
         }
         groups = {
             "Moment Frame": Group(
@@ -1663,12 +1831,10 @@ class TestSelection:
             ),
         }
         area_uniform = [
-            AreaUniformLoad(pattern="DEAD", area_id="1",
-                            direction="Gravity", value=5000),
+            AreaUniformLoad(pattern="DEAD", area_id="1", direction="Gravity", value=5000),
         ]
         area_gravity = [
-            AreaGravityLoad(pattern="DEAD", area_id="1",
-                            multiplier_z=-1.0),
+            AreaGravityLoad(pattern="DEAD", area_id="1", multiplier_z=-1.0),
         ]
         return SAPModelData(
             nodes=nodes,
@@ -1843,45 +2009,48 @@ class TestSelectionMeshModel:
             "8": Node(node_id="8", node_tag=8, x=6, y=0, z=9),
         }
         materials = {
-            "Steel": Material(name="Steel", type="Steel",
-                              E_mod=2e11, unit_weight=77000),
-            "Concrete": Material(name="Concrete", type="Concrete",
-                                 E_mod=3e10, unit_weight=24000),
+            "Steel": Material(name="Steel", type="Steel", E_mod=2e11, unit_weight=77000),
+            "Concrete": Material(name="Concrete", type="Concrete", E_mod=3e10, unit_weight=24000),
         }
         sections = {
-            "UB100": Section(name="UB100", shape="I/Wide Flange",
-                             material="Steel", A=0.01, I33=1e-4,
-                             I22=1e-5, J=1e-6),
-            "Slab": ShellSection(name="Slab", shape="Shell",
-                                 material="Concrete",
-                                 A=0, I33=0, I22=0, J=0,
-                                 thickness=0.2),
+            "UB100": Section(
+                name="UB100",
+                shape="I/Wide Flange",
+                material="Steel",
+                A=0.01,
+                I33=1e-4,
+                I22=1e-5,
+                J=1e-6,
+            ),
+            "Slab": ShellSection(
+                name="Slab",
+                shape="Shell",
+                material="Concrete",
+                A=0,
+                I33=0,
+                I22=0,
+                J=0,
+                thickness=0.2,
+            ),
         }
         frames = {
-            "1": FrameElement(elem_id="1", elem_tag=1,
-                              node_i="1", node_j="2"),
-            "2": FrameElement(elem_id="2", elem_tag=2,
-                              node_i="3", node_j="4"),
-            "3": FrameElement(elem_id="3", elem_tag=3,
-                              node_i="5", node_j="6"),
-            "4": FrameElement(elem_id="4", elem_tag=4,
-                              node_i="7", node_j="8"),
+            "1": FrameElement(elem_id="1", elem_tag=1, node_i="1", node_j="2"),
+            "2": FrameElement(elem_id="2", elem_tag=2, node_i="3", node_j="4"),
+            "3": FrameElement(elem_id="3", elem_tag=3, node_i="5", node_j="6"),
+            "4": FrameElement(elem_id="4", elem_tag=4, node_i="7", node_j="8"),
         }
         areas = {
-            "1": AreaElement(area_id="1", area_tag=10,
-                             node_ids=["1", "2", "3", "4"],
-                             thickness=0.2),
+            "1": AreaElement(
+                area_id="1", area_tag=10, node_ids=["1", "2", "3", "4"], thickness=0.2
+            ),
         }
         groups = {
-            "Cols": Group(name="Cols",
-                          objects=["Frame:1", "Frame:2",
-                                   "Frame:3", "Frame:4"]),
+            "Cols": Group(name="Cols", objects=["Frame:1", "Frame:2", "Frame:3", "Frame:4"]),
         }
         return MeshModel(
             nodes=nodes,
             frame_elements=frames,
-            frame_assignments={"1": "UB100", "2": "UB100",
-                               "3": "UB100", "4": "UB100"},
+            frame_assignments={"1": "UB100", "2": "UB100", "3": "UB100", "4": "UB100"},
             area_elements=areas,
             area_assignments={"1": "Slab"},
             frame_dist_loads=[],
@@ -1894,8 +2063,7 @@ class TestSelectionMeshModel:
 
     def test_elevation_range_filters_frames(self, mesh_model):
         """elevation_range=(0, 3) returns frames at Z=0 and Z=3 only."""
-        sel = Selection(element_types=["Frame"],
-                        elevation_range=(0.0, 3.0))
+        sel = Selection(element_types=["Frame"], elevation_range=(0.0, 3.0))
         frame_ids, area_ids = sel.resolve_to_mesh_sets(mesh_model)
         assert frame_ids == {"1", "2"}
         assert area_ids == set()
@@ -1903,39 +2071,34 @@ class TestSelectionMeshModel:
     def test_elevation_range_middle_storey(self, mesh_model):
         """elevation_range=(3, 6) returns frame at Z=3 and Z=6 (mid-heights
         3.0 and 6.0 both satisfy 3 ≤ z ≤ 6)."""
-        sel = Selection(element_types=["Frame"],
-                        elevation_range=(3.0, 6.0))
+        sel = Selection(element_types=["Frame"], elevation_range=(3.0, 6.0))
         frame_ids, area_ids = sel.resolve_to_mesh_sets(mesh_model)
         assert frame_ids == {"2", "3"}
         assert area_ids == set()
 
     def test_elevation_range_upper_storey(self, mesh_model):
         """elevation_range=(9, 12) returns only frame at Z=9."""
-        sel = Selection(element_types=["Frame"],
-                        elevation_range=(9.0, 12.0))
+        sel = Selection(element_types=["Frame"], elevation_range=(9.0, 12.0))
         frame_ids, _ = sel.resolve_to_mesh_sets(mesh_model)
         assert frame_ids == {"4"}
 
     def test_elevation_range_no_match(self, mesh_model):
         """elevation_range=(100, 200) returns empty."""
-        sel = Selection(element_types=["Frame"],
-                        elevation_range=(100.0, 200.0))
+        sel = Selection(element_types=["Frame"], elevation_range=(100.0, 200.0))
         frame_ids, area_ids = sel.resolve_to_mesh_sets(mesh_model)
         assert frame_ids == set()
         assert area_ids == set()
 
     def test_elevation_range_areas(self, mesh_model):
         """Area with centroid Z≈1.5 matches elevation_range=(0, 2)."""
-        sel = Selection(element_types=["Area"],
-                        elevation_range=(0.0, 2.0))
+        sel = Selection(element_types=["Area"], elevation_range=(0.0, 2.0))
         frame_ids, area_ids = sel.resolve_to_mesh_sets(mesh_model)
         assert frame_ids == set()
         assert area_ids == {"1"}
 
     def test_elevation_range_areas_outside(self, mesh_model):
         """Area with centroid Z≈1.5 does NOT match elevation_range=(5, 10)."""
-        sel = Selection(element_types=["Area"],
-                        elevation_range=(5.0, 10.0))
+        sel = Selection(element_types=["Area"], elevation_range=(5.0, 10.0))
         _, area_ids = sel.resolve_to_mesh_sets(mesh_model)
         assert area_ids == set()
 
@@ -1951,12 +2114,12 @@ class TestSelectionMeshModel:
     def test_story_filter_basic(self, mesh_model):
         """story=['Storey 1'] at elevation 0 → matches frames at Z=0."""
         stories = [
-            StoryLevel(name="Storey 1", elevation=0.0,
-                       method="manual", confidence="high"),
+            StoryLevel(name="Storey 1", elevation=0.0, method="manual", confidence="high"),
         ]
         sel = Selection(element_types=["Frame"], story=["Storey 1"])
         frame_ids, area_ids = sel.resolve_to_mesh_sets(
-            mesh_model, storey_data=stories,
+            mesh_model,
+            storey_data=stories,
         )
         assert frame_ids == {"1"}
         assert area_ids == set()
@@ -1964,27 +2127,26 @@ class TestSelectionMeshModel:
     def test_story_filter_multiple_storeys(self, mesh_model):
         """story=['Storey 1', 'Storey 2'] → frames at Z=0 and Z=3."""
         stories = [
-            StoryLevel(name="Storey 1", elevation=0.0,
-                       method="manual", confidence="high"),
-            StoryLevel(name="Storey 2", elevation=3.0,
-                       method="manual", confidence="high"),
+            StoryLevel(name="Storey 1", elevation=0.0, method="manual", confidence="high"),
+            StoryLevel(name="Storey 2", elevation=3.0, method="manual", confidence="high"),
         ]
-        sel = Selection(element_types=["Frame"],
-                        story=["Storey 1", "Storey 2"])
+        sel = Selection(element_types=["Frame"], story=["Storey 1", "Storey 2"])
         frame_ids, _ = sel.resolve_to_mesh_sets(
-            mesh_model, storey_data=stories,
+            mesh_model,
+            storey_data=stories,
         )
         assert frame_ids == {"1", "2"}
 
     def test_story_filter_custom_tolerance(self, mesh_model):
         """With tolerance=0.1, frame at Z=3 matches Storey 2 at Z=3.0."""
         stories = [
-            StoryLevel(name="Storey 2", elevation=3.0,
-                       method="manual", confidence="high"),
+            StoryLevel(name="Storey 2", elevation=3.0, method="manual", confidence="high"),
         ]
         sel = Selection(element_types=["Frame"], story=["Storey 2"])
         frame_ids, _ = sel.resolve_to_mesh_sets(
-            mesh_model, storey_data=stories, story_z_tolerance=0.1,
+            mesh_model,
+            storey_data=stories,
+            story_z_tolerance=0.1,
         )
         assert frame_ids == {"2"}
 
@@ -1997,24 +2159,25 @@ class TestSelectionMeshModel:
     def test_story_filter_area(self, mesh_model):
         """Area at centroid Z≈1.5 matches Storey 1 at Z=1.5 with tolerance."""
         stories = [
-            StoryLevel(name="Storey 1", elevation=1.5,
-                       method="manual", confidence="medium"),
+            StoryLevel(name="Storey 1", elevation=1.5, method="manual", confidence="medium"),
         ]
         sel = Selection(element_types=["Area"], story=["Storey 1"])
         _, area_ids = sel.resolve_to_mesh_sets(
-            mesh_model, storey_data=stories, story_z_tolerance=0.1,
+            mesh_model,
+            storey_data=stories,
+            story_z_tolerance=0.1,
         )
         assert area_ids == {"1"}
 
     def test_story_filter_no_match(self, mesh_model):
         """Non-existent storey name returns empty."""
         stories = [
-            StoryLevel(name="Roof", elevation=9.0,
-                       method="manual", confidence="high"),
+            StoryLevel(name="Roof", elevation=9.0, method="manual", confidence="high"),
         ]
         sel = Selection(element_types=["Frame"], story=["Basement"])
         frame_ids, _ = sel.resolve_to_mesh_sets(
-            mesh_model, storey_data=stories,
+            mesh_model,
+            storey_data=stories,
         )
         assert frame_ids == set()
 
@@ -2024,8 +2187,7 @@ class TestSelectionMeshModel:
         """A frame with a dangling node reference is excluded when the
         elevation/story filters are active (z_mid is None)."""
         del mesh_model.nodes["2"]  # frame "1" (1→2) loses its far node
-        sel = Selection(element_types=["Frame"],
-                        elevation_range=(0.0, 3.0))
+        sel = Selection(element_types=["Frame"], elevation_range=(0.0, 3.0))
         frame_ids, _ = sel.resolve_to_mesh_sets(mesh_model)
         # Frame "1" would be in range but has no computable z_mid → excluded
         assert frame_ids == {"2"}
@@ -2033,8 +2195,7 @@ class TestSelectionMeshModel:
     def test_elevation_filter_excludes_area_with_missing_nodes(self, mesh_model):
         """An area with no resolvable vertex nodes is excluded (z_mid None)."""
         mesh_model.area_elements["1"].node_ids = ["999"]
-        sel = Selection(element_types=["Area"],
-                        elevation_range=(0.0, 2.0))
+        sel = Selection(element_types=["Area"], elevation_range=(0.0, 2.0))
         _, area_ids = sel.resolve_to_mesh_sets(mesh_model)
         # Area "1" would be in range but has no computable z_mid → excluded
         assert area_ids == set()
@@ -2043,8 +2204,7 @@ class TestSelectionMeshModel:
 
     def test_elevation_range_and_element_type(self, mesh_model):
         """Elevation + element_type = Frame → only frames in range."""
-        sel = Selection(element_types=["Frame"],
-                        elevation_range=(3.0, 9.0))
+        sel = Selection(element_types=["Frame"], elevation_range=(3.0, 9.0))
         frame_ids, area_ids = sel.resolve_to_mesh_sets(mesh_model)
         assert frame_ids == {"2", "3", "4"}
         assert area_ids == set()
@@ -2052,8 +2212,7 @@ class TestSelectionMeshModel:
     def test_elevation_and_story(self, mesh_model):
         """Both elevation_range and story must match (AND logic)."""
         stories = [
-            StoryLevel(name="Storey 2", elevation=3.0,
-                       method="manual", confidence="high"),
+            StoryLevel(name="Storey 2", elevation=3.0, method="manual", confidence="high"),
         ]
         # elevation_range=(0, 2) ∩ story=["Storey 2"] (Z=3) → no match
         sel = Selection(
@@ -2062,7 +2221,8 @@ class TestSelectionMeshModel:
             story=["Storey 2"],
         )
         frame_ids, _ = sel.resolve_to_mesh_sets(
-            mesh_model, storey_data=stories,
+            mesh_model,
+            storey_data=stories,
         )
         assert frame_ids == set()
 
@@ -2120,63 +2280,72 @@ class TestSelectionFilterModel:
             "2": Restraint([1, 1, 1, 1, 1, 1]),
         }
         materials = {
-            "Steel": Material(name="Steel", type="Steel", E_mod=2e11,
-                              unit_weight=77000),
-            "Conc":  Material(name="Conc", type="Concrete", E_mod=3e10,
-                              unit_weight=24000),
+            "Steel": Material(name="Steel", type="Steel", E_mod=2e11, unit_weight=77000),
+            "Conc": Material(name="Conc", type="Concrete", E_mod=3e10, unit_weight=24000),
         }
         sections = {
-            "UB100": Section(name="UB100", shape="I/Wide Flange",
-                             material="Steel", A=0.01, I33=1e-4,
-                             I22=1e-5, J=1e-6),
-            "UB200": Section(name="UB200", shape="I/Wide Flange",
-                             material="Steel", A=0.02, I33=2e-4,
-                             I22=2e-5, J=2e-6),
-            "Slab": ShellSection(name="Slab", shape="Shell",
-                                 material="Conc", A=0, I33=0,
-                                 I22=0, J=0, thickness=0.2),
+            "UB100": Section(
+                name="UB100",
+                shape="I/Wide Flange",
+                material="Steel",
+                A=0.01,
+                I33=1e-4,
+                I22=1e-5,
+                J=1e-6,
+            ),
+            "UB200": Section(
+                name="UB200",
+                shape="I/Wide Flange",
+                material="Steel",
+                A=0.02,
+                I33=2e-4,
+                I22=2e-5,
+                J=2e-6,
+            ),
+            "Slab": ShellSection(
+                name="Slab", shape="Shell", material="Conc", A=0, I33=0, I22=0, J=0, thickness=0.2
+            ),
         }
         frames = {
-            "1": FrameElement(elem_id="1", elem_tag=1,
-                              node_i="1", node_j="3"),
-            "2": FrameElement(elem_id="2", elem_tag=2,
-                              node_i="2", node_j="4"),
-            "3": FrameElement(elem_id="3", elem_tag=3,
-                              node_i="3", node_j="7"),
-            "4": FrameElement(elem_id="4", elem_tag=4,
-                              node_i="4", node_j="8"),
+            "1": FrameElement(elem_id="1", elem_tag=1, node_i="1", node_j="3"),
+            "2": FrameElement(elem_id="2", elem_tag=2, node_i="2", node_j="4"),
+            "3": FrameElement(elem_id="3", elem_tag=3, node_i="3", node_j="7"),
+            "4": FrameElement(elem_id="4", elem_tag=4, node_i="4", node_j="8"),
         }
         areas = {
-            "1": AreaElement(area_id="1", area_tag=1,
-                             node_ids=["1", "2", "5", "6"], thickness=0.2),
+            "1": AreaElement(area_id="1", area_tag=1, node_ids=["1", "2", "5", "6"], thickness=0.2),
         }
         groups = {
-            "Cols": Group(name="Cols",
-                          objects=["Frame:1", "Frame:2"]),
-            "Slab": Group(name="Slab",
-                          objects=["Area:1", "Joint:5", "Joint:6"]),
+            "Cols": Group(name="Cols", objects=["Frame:1", "Frame:2"]),
+            "Slab": Group(name="Slab", objects=["Area:1", "Joint:5", "Joint:6"]),
         }
         load_patterns = {
             "DEAD": LoadPattern(name="DEAD", pattern_type="DEAD"),
             "WIND": LoadPattern(name="WIND", pattern_type="WIND"),
         }
         frame_dist_loads = [
-            FrameDistributedLoad(pattern="WIND", frame_id="1",
-                                 direction="X", load_type="Force",
-                                 shape="Uniform", val_a=1000, val_b=1000,
-                                 rdist_a=0, rdist_b=1, dist_a=0, dist_b=3),
+            FrameDistributedLoad(
+                pattern="WIND",
+                frame_id="1",
+                direction="X",
+                load_type="Force",
+                shape="Uniform",
+                val_a=1000,
+                val_b=1000,
+                rdist_a=0,
+                rdist_b=1,
+                dist_a=0,
+                dist_b=3,
+            ),
         ]
         frame_gravity_loads = [
-            GravityLoad(pattern="DEAD", frame_id="2",
-                        multiplier_z=-1.0),
+            GravityLoad(pattern="DEAD", frame_id="2", multiplier_z=-1.0),
         ]
         area_uniform_loads = [
-            AreaUniformLoad(pattern="DEAD", area_id="1",
-                            direction="Gravity", value=5000),
+            AreaUniformLoad(pattern="DEAD", area_id="1", direction="Gravity", value=5000),
         ]
         area_gravity_loads = [
-            AreaGravityLoad(pattern="DEAD", area_id="1",
-                            multiplier_z=-1.0),
+            AreaGravityLoad(pattern="DEAD", area_id="1", multiplier_z=-1.0),
         ]
         joint_loads = [
             JointLoad(pattern="DEAD", node_id="3", fz=-5000),
@@ -2188,8 +2357,7 @@ class TestSelectionFilterModel:
             sections=sections,
             frame_elements=frames,
             area_elements=areas,
-            frame_assignments={"1": "UB100", "2": "UB100",
-                               "3": "UB200", "4": "UB200"},
+            frame_assignments={"1": "UB100", "2": "UB100", "3": "UB200", "4": "UB200"},
             area_assignments={"1": "Slab"},
             groups=groups,
             frame_auto_mesh={},
@@ -2208,14 +2376,13 @@ class TestSelectionFilterModel:
         sub = Selection(element_types=["Frame"]).filter_model(full_model)
         assert len(sub.frame_elements) == 4
         assert len(sub.area_elements) == 0
-        assert len(sub.nodes) == 6          # frame end-nodes: 1,2,3,4,7,8
+        assert len(sub.nodes) == 6  # frame end-nodes: 1,2,3,4,7,8
         assert sorted(sub.nodes) == ["1", "2", "3", "4", "7", "8"]
-        assert len(sub.restraints) == 2     # nodes 1, 2
+        assert len(sub.restraints) == 2  # nodes 1, 2
 
     def test_frame_selection_by_group(self, full_model):
         """Group ``Cols`` → only frames 1 & 2, their 4 end-nodes."""
-        sub = Selection(element_types=["Frame"],
-                        groups=["Cols"]).filter_model(full_model)
+        sub = Selection(element_types=["Frame"], groups=["Cols"]).filter_model(full_model)
         assert len(sub.frame_elements) == 2
         assert set(sub.frame_elements) == {"1", "2"}
         # End-nodes: 1,3 + 2,4 = 4 nodes
@@ -2225,18 +2392,16 @@ class TestSelectionFilterModel:
 
     def test_frame_selection_sections_materials(self, full_model):
         """Only ``UB100`` section and ``Steel`` material; no Concrete."""
-        sub = Selection(element_types=["Frame"],
-                        groups=["Cols"]).filter_model(full_model)
+        sub = Selection(element_types=["Frame"], groups=["Cols"]).filter_model(full_model)
         assert sorted(sub.sections) == ["UB100"]
         assert sorted(sub.materials) == ["Steel"]
         assert "Conc" not in sub.materials
 
     def test_frame_selection_loads(self, full_model):
         """Distributed, gravity, and joint loads on selected frames; no area loads."""
-        sub = Selection(element_types=["Frame"],
-                        groups=["Cols"]).filter_model(full_model)
+        sub = Selection(element_types=["Frame"], groups=["Cols"]).filter_model(full_model)
         # Only loads on frames 1, 2
-        assert len(sub.frame_dist_loads) == 1    # WIND on frame 1
+        assert len(sub.frame_dist_loads) == 1  # WIND on frame 1
         assert sub.frame_dist_loads[0].frame_id == "1"
         assert len(sub.frame_gravity_loads) == 1  # DEAD on frame 2
         assert sub.frame_gravity_loads[0].frame_id == "2"
@@ -2271,7 +2436,7 @@ class TestSelectionFilterModel:
         assert len(sub.area_gravity_loads) == 1
         assert len(sub.frame_dist_loads) == 0
         assert len(sub.frame_gravity_loads) == 0
-        assert len(sub.joint_loads) == 0   # joint on node 3, not an area node
+        assert len(sub.joint_loads) == 0  # joint on node 3, not an area node
 
     # ── Combined selection ──
 
@@ -2282,15 +2447,14 @@ class TestSelectionFilterModel:
         assert len(sub.area_elements) == 1
         # All nodes: frame end-nodes (1,2,3,4,7,8) + area corners (1,2,5,6)
         assert sorted(sub.nodes) == ["1", "2", "3", "4", "5", "6", "7", "8"]
-        assert len(sub.sections) == 3     # UB100, UB200, Slab
-        assert len(sub.materials) == 2    # Steel, Conc
+        assert len(sub.sections) == 3  # UB100, UB200, Slab
+        assert len(sub.materials) == 2  # Steel, Conc
 
     # ── Group pruning ──
 
     def test_group_pruning(self, full_model):
         """``Cols`` kept with its 2 frame refs; ``Slab`` excluded entirely."""
-        sub = Selection(element_types=["Frame"],
-                        groups=["Cols"]).filter_model(full_model)
+        sub = Selection(element_types=["Frame"], groups=["Cols"]).filter_model(full_model)
         assert "Cols" in sub.groups
         assert "Slab" not in sub.groups
         # Cols group should only have its two Frame references
@@ -2307,8 +2471,7 @@ class TestSelectionFilterModel:
 
     def test_no_match(self, full_model):
         """Non-existent section → empty subset (0 frames, 0 nodes)."""
-        sub = Selection(element_types=["Frame"],
-                        sections=["Nonexistent"]).filter_model(full_model)
+        sub = Selection(element_types=["Frame"], sections=["Nonexistent"]).filter_model(full_model)
         assert len(sub.frame_elements) == 0
         assert len(sub.nodes) == 0
         assert len(sub.sections) == 0
@@ -2323,16 +2486,19 @@ class TestSelectionFilterModel:
         assert len(full_model.frame_elements) == 4
         assert "Conc" in full_model.materials
 
+
 class TestCqcCombineUtils:
     """Tests for :func:`fea_toolkit.utils.cqc_combine`."""
 
     def test_single_mode(self):
         from fea_toolkit.utils import cqc_combine
+
         result = cqc_combine([100.0], [2.0], [0.05])
         assert abs(result - 100.0) < 1e-6
 
     def test_two_uncorrelated(self):
         from fea_toolkit.utils import cqc_combine
+
         # Very separated frequencies → ρ ≈ 0 → SRSS ≈ sqrt(a² + b²)
         vals = [100.0, 50.0]
         omega = [1.0, 50.0]
@@ -2343,6 +2509,7 @@ class TestCqcCombineUtils:
 
     def test_identical_modes(self):
         from fea_toolkit.utils import cqc_combine
+
         # Identical frequency → ρ → 1 → CQC = sum of absolute values
         vals = [100.0, 50.0]
         omega = [2.0, 2.0]
@@ -2355,89 +2522,105 @@ class TestCqcCombineUtils:
 # Plotting module import tests
 # ============================================================================
 
+
 class TestPlottingImports:
     def test_force_diagram_no_data(self):
         from fea_toolkit.plotting import plot_force_diagram
-        fig = plot_force_diagram([], 'My_i')
+
+        fig = plot_force_diagram([], "My_i")
         assert fig is None
 
     def test_static_force_diagram_missing_matplotlib(self):
         """Just verify the import path resolves; actual plotting
         requires matplotlib which may not be available in CI."""
         from fea_toolkit.plotting import plot_static_force_diagram
+
         assert callable(plot_static_force_diagram)
 
     def test_force_diagram_3d_import(self):
         """plot_force_diagram_3d is callable from the plotting package."""
         from fea_toolkit.plotting import plot_force_diagram_3d
+
         assert callable(plot_force_diagram_3d)
 
     def test_force_diagram_3d_invalid_quantity(self):
         """Invalid quantity returns None."""
         from fea_toolkit.plotting import plot_force_diagram_3d
-        result = plot_force_diagram_3d({}, quantity='ZZ')
+
+        result = plot_force_diagram_3d({}, quantity="ZZ")
         assert result is None
 
     def test_force_diagram_3d_no_data_builder(self):
         """Builder without force_data returns None."""
         from fea_toolkit.plotting import plot_force_diagram_3d
+
         # Use a minimal mock that satisfies _resolve_mesh_data
         class MockModel:
-            nodes = {}
-            frame_elements = {}
-            area_elements = {}
-            frame_assignments = {}
-            area_assignments = {}
+            nodes: ClassVar = {}
+            frame_elements: ClassVar = {}
+            area_elements: ClassVar = {}
+            frame_assignments: ClassVar = {}
+            area_assignments: ClassVar = {}
+
         class MockBuilder:
             model = MockModel()
-            split_elements = {}
-            split_assignments = {}
+            split_elements: ClassVar = {}
+            split_assignments: ClassVar = {}
             _mesh_model = None
+
         result = plot_force_diagram_3d(MockBuilder())
         assert result is None
 
     def test_force_diagram_3d_npz_no_static(self):
         """NPZ dict without static cases raises ValueError."""
-        from fea_toolkit.plotting import plot_force_diagram_3d
         import pytest
+
+        from fea_toolkit.plotting import plot_force_diagram_3d
+
         with pytest.raises(ValueError, match="No static cases found"):
-            plot_force_diagram_3d({}, quantity='Mz')
+            plot_force_diagram_3d({}, quantity="Mz")
 
     def test_unified_functions_import(self):
         """All unified functions are importable from the plotting package."""
         from fea_toolkit.plotting import (
-            plot_mesh, compare_meshes, plot_mode_animation,
+            compare_meshes,
+            plot_mesh,
+            plot_mode_animation,
         )
+
         assert callable(plot_mesh)
         assert callable(compare_meshes)
         assert callable(plot_mode_animation)
 
     def test_model_viewer_import_and_types(self):
         """ModelViewer and its data types import correctly."""
-        from fea_toolkit.plotting.renderers import (
-            FrameGeom, ShellGeom, NodeGeom,
-            HighlightDef, AnnotationDef,
-        )
         import numpy as np
 
+        from fea_toolkit.plotting.renderers import (
+            AnnotationDef,
+            FrameGeom,
+            HighlightDef,
+            NodeGeom,
+            ShellGeom,
+        )
+
         # Data types construct
-        f = FrameGeom(elem_id='1', section='UB300',
-                       node_i='1', node_j='2',
-                       start=np.zeros(3), end=np.ones(3))
-        assert f.elem_id == '1'
+        f = FrameGeom(
+            elem_id="1", section="UB300", node_i="1", node_j="2", start=np.zeros(3), end=np.ones(3)
+        )
+        assert f.elem_id == "1"
 
-        s = ShellGeom(area_id='1', section='SLAB',
-                       vertices=np.zeros((4, 3)))
-        assert s.area_id == '1'
+        s = ShellGeom(area_id="1", section="SLAB", vertices=np.zeros((4, 3)))
+        assert s.area_id == "1"
 
-        n = NodeGeom(node_id='1', position=np.zeros(3))
-        assert n.node_id == '1'
+        n = NodeGeom(node_id="1", position=np.zeros(3))
+        assert n.node_id == "1"
 
-        h = HighlightDef(frame_ids=['1'], color=(1, 0, 0), label='Test')
-        assert h.label == 'Test'
+        h = HighlightDef(frame_ids=["1"], color=(1, 0, 0), label="Test")
+        assert h.label == "Test"
 
-        a = AnnotationDef(text='Hello', position=np.zeros(3))
-        assert a.text == 'Hello'
+        a = AnnotationDef(text="Hello", position=np.zeros(3))
+        assert a.text == "Hello"
 
     def test_model_viewer_from_sample(self):
         """ModelViewer extracts geometry from sample model data."""
@@ -2445,27 +2628,25 @@ class TestPlottingImports:
         from fea_toolkit.plotting import ModelViewer
 
         md = make_sample_model()
-        viewer = ModelViewer(model_data=md, backend='pyvista',
-                              off_screen=True)
+        viewer = ModelViewer(model_data=md, backend="pyvista", off_screen=True)
 
         # show_model should extract geometry and render
         viewer.show_model(show_nodes=True, show_shells=False)
         assert viewer._geom_extracted
         assert len(viewer._frames) == 1
-        assert viewer._frames[0].elem_id == '1'
+        assert viewer._frames[0].elem_id == "1"
 
         # Test highlight
-        viewer.highlight_elements(
-            frame_ids=['1'], color=(1, 0, 0), label='Test'
-        )
+        viewer.highlight_elements(frame_ids=["1"], color=(1, 0, 0), label="Test")
 
         # Test annotation
-        viewer.annotate('Hi', node_id='2', color=(1, 1, 0))
+        viewer.annotate("Hi", node_id="2", color=(1, 1, 0))
 
         # Test screenshot
-        import tempfile
         import os
-        tmp = tempfile.mktemp(suffix='.png')
+        import tempfile
+
+        tmp = tempfile.mktemp(suffix=".png")
         viewer.screenshot(tmp)
         assert os.path.getsize(tmp) > 0
         os.remove(tmp)
@@ -2477,20 +2658,22 @@ class TestPlottingImports:
 # MASS SOURCE parser tests (integration)
 # ============================================================================
 
+
 class TestMassSourceParser:
     def test_parse_from_s2k(self):
         """Verify MassSource is parsed from a sample S2K file."""
         from fea_toolkit.io.s2k_parser import SAP2000Parser
+
         s2k_file = FIXTURES_DIR / "sample.s2k"
         if not s2k_file.exists():
             pytest.skip("sample.s2k not available")
         parser = SAP2000Parser(s2k_file)
         parser.parse()
         md = parser.get_model_data()
-        assert hasattr(md, 'mass_sources')
+        assert hasattr(md, "mass_sources")
         # sample.s2k has MSSSRC1 with Elements=True, Masses=True, Loads=False
         if md.mass_sources:
-            ms = md.mass_sources.get('MSSSRC1')
+            ms = md.mass_sources.get("MSSSRC1")
             if ms:
                 assert ms.elements is True
 
@@ -2502,8 +2685,7 @@ class TestMassSourceParser:
 
 def _make_pushover_ab(md):
     """Create a pre-built AnalysisBuilder for pushover tests."""
-    cfg = {'element_type': 'elasticBeamColumn', 'split_elements': False,
-           'verbose': False}
+    cfg = {"element_type": "elasticBeamColumn", "split_elements": False, "verbose": False}
     mesh_model = preprocess_model(md, cfg)
     ab = AnalysisBuilder(mesh_model, cfg)
     ab.build_domain()
@@ -2522,36 +2704,52 @@ class TestPushoverBuild:
         }
         restraints = {"1": Restraint([1, 1, 1, 1, 1, 1])}
         materials = {
-            "Steel": Material(name="Steel", type="Steel",
-                              E_mod=2e11, unit_weight=77000),
+            "Steel": Material(name="Steel", type="Steel", E_mod=2e11, unit_weight=77000),
         }
         sections = {
-            "UB100": Section(name="UB100", shape="I/Wide Flange",
-                             material="Steel", A=0.01, I33=1e-4,
-                             I22=1e-5, J=1e-6),
+            "UB100": Section(
+                name="UB100",
+                shape="I/Wide Flange",
+                material="Steel",
+                A=0.01,
+                I33=1e-4,
+                I22=1e-5,
+                J=1e-6,
+            ),
         }
         frames = {
-            "1": FrameElement(elem_id="1", elem_tag=1,
-                              node_i="1", node_j="2"),
+            "1": FrameElement(elem_id="1", elem_tag=1, node_i="1", node_j="2"),
         }
         load_patterns = {
-            "DEAD": LoadPattern(name="DEAD", pattern_type="DEAD",
-                                self_weight_factor=1),
-            "WIND": LoadPattern(name="WIND", pattern_type="WIND",
-                                self_weight_factor=0),
+            "DEAD": LoadPattern(name="DEAD", pattern_type="DEAD", self_weight_factor=1),
+            "WIND": LoadPattern(name="WIND", pattern_type="WIND", self_weight_factor=0),
         }
         frame_dist_loads = [
-            FrameDistributedLoad(pattern="WIND", frame_id="1",
-                                 direction="X", load_type="Force",
-                                 shape="Uniform", val_a=1000, val_b=1000,
-                                 rdist_a=0, rdist_b=1, dist_a=0, dist_b=5),
+            FrameDistributedLoad(
+                pattern="WIND",
+                frame_id="1",
+                direction="X",
+                load_type="Force",
+                shape="Uniform",
+                val_a=1000,
+                val_b=1000,
+                rdist_a=0,
+                rdist_b=1,
+                dist_a=0,
+                dist_b=5,
+            ),
         ]
         return SAPModelData(
-            nodes=nodes, restraints=restraints,
-            materials=materials, sections=sections,
-            frame_elements=frames, area_elements={},
+            nodes=nodes,
+            restraints=restraints,
+            materials=materials,
+            sections=sections,
+            frame_elements=frames,
+            area_elements={},
             frame_assignments={"1": "UB100"},
-            area_assignments={}, groups={}, frame_auto_mesh={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
             load_patterns=load_patterns,
             frame_dist_loads=frame_dist_loads,
         )
@@ -2561,94 +2759,105 @@ class TestPushoverBuild:
         b = _make_pushover_ab(cantilever_model)
         results = b.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
-            lateral_load_type='pattern',
+            lateral_load_type="pattern",
             lateral_pattern_name="WIND",
             lateral_direction="X",
             control_node_tag=2,
-            max_disp=0.1, num_steps=5,
+            max_disp=0.1,
+            num_steps=5,
             print_progress=False,
         )
-        for key in ('step', 'control_disp', 'base_shear',
-                    'status', 'control_node', 'dof', 'lateral_load_type'):
+        for key in (
+            "step",
+            "control_disp",
+            "base_shear",
+            "status",
+            "control_node",
+            "dof",
+            "lateral_load_type",
+        ):
             assert key in results
-        assert results['lateral_load_type'] == 'pattern'
+        assert results["lateral_load_type"] == "pattern"
 
     def test_gravity_base_shear_zero(self, cantilever_model):
         """After gravity alone, lateral base shear ≈ 0."""
         b = _make_pushover_ab(cantilever_model)
         results = b.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
-            lateral_load_type='pattern',
+            lateral_load_type="pattern",
             lateral_pattern_name="WIND",
             lateral_direction="X",
             control_node_tag=2,
-            max_disp=0.1, num_steps=5,
+            max_disp=0.1,
+            num_steps=5,
             print_progress=False,
         )
         # Note: initial base_shear includes gravity reaction
-        assert abs(results['base_shear'][0]) < 3000.0
+        assert abs(results["base_shear"][0]) < 3000.0
 
     def test_cantilever_linear_pushover_pattern(self, cantilever_model):
         """Cantilever with elastic sections: linear, monotonic (pattern)."""
         b = _make_pushover_ab(cantilever_model)
         results = b.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
-            lateral_load_type='pattern',
+            lateral_load_type="pattern",
             lateral_pattern_name="WIND",
             lateral_direction="X",
             control_node_tag=2,
-            max_disp=0.1, num_steps=10,
+            max_disp=0.1,
+            num_steps=10,
             print_progress=False,
         )
-        assert len(results['control_disp']) == 11
-        assert results['status'][-1] == 0, "Last step failed"
-        shears = [abs(v) for v in results['base_shear']]
-        assert all(shears[i] <= shears[i + 1]
-                   for i in range(len(shears) - 1)), "Not monotonic"
-        assert abs(results['control_disp'][-1] - 0.1) < 0.01
+        assert len(results["control_disp"]) == 11
+        assert results["status"][-1] == 0, "Last step failed"
+        shears = [abs(v) for v in results["base_shear"]]
+        assert all(shears[i] <= shears[i + 1] for i in range(len(shears) - 1)), "Not monotonic"
+        assert abs(results["control_disp"][-1] - 0.1) < 0.01
 
     def test_uniform_pattern_returns_keys(self, cantilever_model):
         """Uniform pattern returns expected keys."""
         b = _make_pushover_ab(cantilever_model)
         results = b.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
-            lateral_load_type='uniform',
+            lateral_load_type="uniform",
             lateral_direction="X",
             control_node_tag=2,
-            max_disp=0.1, num_steps=5,
+            max_disp=0.1,
+            num_steps=5,
             print_progress=False,
         )
-        for key in ('step', 'control_disp', 'base_shear',
-                    'status', 'control_node', 'dof'):
+        for key in ("step", "control_disp", "base_shear", "status", "control_node", "dof"):
             assert key in results
-        assert results['lateral_load_type'] == 'uniform'
+        assert results["lateral_load_type"] == "uniform"
 
     def test_triangular_pattern_returns_keys(self, cantilever_model):
         """Triangular pattern returns expected keys."""
         b = _make_pushover_ab(cantilever_model)
         results = b.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
-            lateral_load_type='triangular',
+            lateral_load_type="triangular",
             lateral_direction="X",
             control_node_tag=2,
-            max_disp=0.1, num_steps=5,
+            max_disp=0.1,
+            num_steps=5,
             print_progress=False,
         )
-        for key in ('step', 'control_disp', 'base_shear',
-                    'status', 'control_node', 'dof'):
+        for key in ("step", "control_disp", "base_shear", "status", "control_node", "dof"):
             assert key in results
 
     def test_invalid_lateral_load_type_raises(self, cantilever_model):
         """Invalid lateral_load_type raises ValueError."""
         b = _make_pushover_ab(cantilever_model)
         import pytest
+
         with pytest.raises(ValueError, match="Unknown lateral_load_type"):
             b.run_pushover_analysis(
                 gravity_patterns={"DEAD": 1.0},
-                lateral_load_type='wind',
+                lateral_load_type="wind",
                 lateral_direction="X",
                 control_node_tag=2,
-                max_disp=0.1, num_steps=5,
+                max_disp=0.1,
+                num_steps=5,
                 print_progress=False,
             )
 
@@ -2656,13 +2865,15 @@ class TestPushoverBuild:
         """pattern type without lateral_pattern_name raises ValueError."""
         b = _make_pushover_ab(cantilever_model)
         import pytest
+
         with pytest.raises(ValueError, match="lateral_pattern_name is required"):
             b.run_pushover_analysis(
                 gravity_patterns={"DEAD": 1.0},
-                lateral_load_type='pattern',
+                lateral_load_type="pattern",
                 lateral_direction="X",
                 control_node_tag=2,
-                max_disp=0.1, num_steps=5,
+                max_disp=0.1,
+                num_steps=5,
                 print_progress=False,
             )
 
@@ -2670,47 +2881,61 @@ class TestPushoverBuild:
         """Pushover returns correct keys through the two-stage path."""
         b = _make_pushover_ab(cantilever_model)
         b.compute_seismic_masses()
-        modal = b.run_modal_analysis(num_modes=1, print_results=False)
-        shapes = b.extract_mode_shapes(1)
+        b.run_modal_analysis(num_modes=1, print_results=False)
+        b.extract_mode_shapes(1)
         results = b.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
-            lateral_load_type='uniform',
-            lateral_direction='X',
+            lateral_load_type="uniform",
+            lateral_direction="X",
             control_node_tag=2,
-            max_disp=0.3, num_steps=5,
+            max_disp=0.3,
+            num_steps=5,
             print_progress=False,
         )
-        for key in ('step', 'control_disp', 'base_shear', 'status',
-                    'gravity_displacements', 'control_node', 'dof',
-                    'lateral_load_type'):
+        for key in (
+            "step",
+            "control_disp",
+            "base_shear",
+            "status",
+            "gravity_displacements",
+            "control_node",
+            "dof",
+            "lateral_load_type",
+        ):
             assert key in results, f"Missing key: {key}"
-        assert len(results['step']) == len(results['control_disp']) == \
-            len(results['base_shear']) == len(results['status'])
-        assert results['step'][0] == 0  # gravity step recorded
-        assert results['control_node'] == 2
-        assert results['dof'] == 1  # X direction
+        assert (
+            len(results["step"])
+            == len(results["control_disp"])
+            == len(results["base_shear"])
+            == len(results["status"])
+        )
+        assert results["step"][0] == 0  # gravity step recorded
+        assert results["control_node"] == 2
+        assert results["dof"] == 1  # X direction
 
     def test_pushover_uniform_via_two_stage(self, cantilever_model):
         """Uniform pushover produces non-zero base shear through two-stage."""
         b = _make_pushover_ab(cantilever_model)
         b.compute_seismic_masses()
-        modal = b.run_modal_analysis(num_modes=1, print_results=False)
-        shapes = b.extract_mode_shapes(1)
+        b.run_modal_analysis(num_modes=1, print_results=False)
+        b.extract_mode_shapes(1)
         results = b.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
-            lateral_load_type='uniform',
-            lateral_direction='X',
+            lateral_load_type="uniform",
+            lateral_direction="X",
             control_node_tag=2,
-            max_disp=0.3, num_steps=5,
+            max_disp=0.3,
+            num_steps=5,
             print_progress=False,
         )
         # Base shears should be non-zero (cantilever fixed at base, push at top)
-        assert any(abs(v) > 0 for v in results['base_shear']), \
+        assert any(abs(v) > 0 for v in results["base_shear"]), (
             "Expected non-zero base shear in at least one step"
+        )
         # Displacement should increase monotonically
         assert all(
-            results['control_disp'][i] <= results['control_disp'][i + 1]
-            for i in range(len(results['control_disp']) - 1)
+            results["control_disp"][i] <= results["control_disp"][i + 1]
+            for i in range(len(results["control_disp"]) - 1)
         ), "Control displacement should be monotonic"
 
 
@@ -2725,14 +2950,31 @@ class TestHingeRadauIntegration:
     def test_hinge_length_i_section(self):
         """ISection depth → Lp = 0.5 * depth."""
         from fea_toolkit.model.checks import compute_hinge_length
-        md = SAPModelData(nodes={}, restraints={}, materials={}, sections={},
-                          frame_elements={}, area_elements={},
-                          frame_assignments={}, area_assignments={},
-                          groups={}, frame_auto_mesh={})
+
+        md = SAPModelData(
+            nodes={},
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+        )
         md.sections["UB300"] = ISection(
-            name="UB300", shape="I/Wide Flange", material="Steel",
-            depth=0.3, bf=0.15, tf=0.01, tw=0.006,
-            A=8e-3, I33=1.2e-4, I22=4e-5, J=2e-6,
+            name="UB300",
+            shape="I/Wide Flange",
+            material="Steel",
+            depth=0.3,
+            bf=0.15,
+            tf=0.01,
+            tw=0.006,
+            A=8e-3,
+            I33=1.2e-4,
+            I22=4e-5,
+            J=2e-6,
         )
         Lp = compute_hinge_length(md.sections["UB300"], 10.0)
         assert abs(Lp - 0.15) < 0.01  # 0.5 * 0.3
@@ -2740,13 +2982,29 @@ class TestHingeRadauIntegration:
     def test_hinge_length_pipe_section(self):
         """Pipe OD → Lp = 0.5 * OD."""
         from fea_toolkit.model.checks import compute_hinge_length
-        md = SAPModelData(nodes={}, restraints={}, materials={}, sections={},
-                          frame_elements={}, area_elements={},
-                          frame_assignments={}, area_assignments={},
-                          groups={}, frame_auto_mesh={})
+
+        md = SAPModelData(
+            nodes={},
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+        )
         md.sections["PIP4"] = PipeSection(
-            name="PIP4", shape="Pipe", material="Steel",
-            od=0.1143, t=0.006, A=2e-3, I33=3e-6, I22=3e-6, J=1e-6,
+            name="PIP4",
+            shape="Pipe",
+            material="Steel",
+            od=0.1143,
+            t=0.006,
+            A=2e-3,
+            I33=3e-6,
+            I22=3e-6,
+            J=1e-6,
         )
         Lp = compute_hinge_length(md.sections["PIP4"], 10.0)
         assert abs(Lp - 0.05715) < 0.001  # 0.5 * 0.1143
@@ -2754,13 +3012,27 @@ class TestHingeRadauIntegration:
     def test_hinge_length_fallback(self):
         """Unknown section → Lp = 0.1 * L."""
         from fea_toolkit.model.checks import compute_hinge_length
-        md = SAPModelData(nodes={}, restraints={}, materials={}, sections={},
-                          frame_elements={}, area_elements={},
-                          frame_assignments={}, area_assignments={},
-                          groups={}, frame_auto_mesh={})
+
+        md = SAPModelData(
+            nodes={},
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+        )
         md.sections["GENERIC"] = Section(
-            name="GENERIC", shape="NA", material="Steel",
-            A=1e-2, I33=1e-4, I22=1e-4, J=1e-6,
+            name="GENERIC",
+            shape="NA",
+            material="Steel",
+            A=1e-2,
+            I33=1e-4,
+            I22=1e-4,
+            J=1e-6,
         )
         Lp = compute_hinge_length(md.sections["GENERIC"], 8.0)
         assert abs(Lp - 0.8) < 0.01  # 0.1 * 8.0
@@ -2777,6 +3049,7 @@ class TestSubdivideElements:
     def test_subdivide_creates_sub_elements(self):
         """4 segments → 4 child elements, original marked inactive."""
         from fea_toolkit.model.geometry import subdivide_elements
+
         nodes = {
             "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
             "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
@@ -2784,9 +3057,13 @@ class TestSubdivideElements:
         elem = FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2")
         elements = {"B1": elem}
         assignments = {"B1": "UB300"}
-        result_elems, result_assign, result_nodes, _, _ = subdivide_elements(
-            elements, assignments, nodes,
-            n_segments=4, brace_ids={"B1"}, next_tag=100,
+        result_elems, result_assign, _result_nodes, _, _ = subdivide_elements(
+            elements,
+            assignments,
+            nodes,
+            n_segments=4,
+            brace_ids={"B1"},
+            next_tag=100,
         )
         assert elem.inactive is True, "Original should be inactive"
         assert len(result_elems) == 5  # 1 original + 4 subs
@@ -2799,6 +3076,7 @@ class TestSubdivideElements:
     def test_subdivide_creates_internal_nodes(self):
         """4 segments → 3 new internal nodes."""
         from fea_toolkit.model.geometry import subdivide_elements
+
         nodes = {
             "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
             "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
@@ -2807,8 +3085,12 @@ class TestSubdivideElements:
         elements = {"B1": elem}
         assignments = {"B1": "UB300"}
         _, _, result_nodes, _, _ = subdivide_elements(
-            elements, assignments, nodes,
-            n_segments=4, brace_ids={"B1"}, next_tag=100,
+            elements,
+            assignments,
+            nodes,
+            n_segments=4,
+            brace_ids={"B1"},
+            next_tag=100,
         )
         new_nodes = [nid for nid in result_nodes if nid.startswith("B1_sub")]
         assert len(new_nodes) == 3  # 4 segments → 3 internal nodes
@@ -2816,6 +3098,7 @@ class TestSubdivideElements:
     def test_imperfection_offsets_mid_node(self):
         """Mid-node of subdivided brace has lateral offset ≈ L/500."""
         from fea_toolkit.model.geometry import subdivide_elements
+
         nodes = {
             "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
             "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
@@ -2823,13 +3106,20 @@ class TestSubdivideElements:
         elem = FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2")
         elements = {"B1": elem}
         _, _, result_nodes, _, _ = subdivide_elements(
-            elements, assignments={"B1": "UB300"}, nodes=nodes,
-            n_segments=4, imperfection_ratio=1/500, brace_ids={"B1"},
+            elements,
+            assignments={"B1": "UB300"},
+            nodes=nodes,
+            n_segments=4,
+            imperfection_ratio=1 / 500,
+            brace_ids={"B1"},
             next_tag=100,
         )
         # The middle internal node (at z≈5) should have an x-offset
-        mid_nodes = [n for nid, n in result_nodes.items()
-                     if nid.startswith("B1_sub") and abs(n.z - 5.0) < 0.5]
+        mid_nodes = [
+            n
+            for nid, n in result_nodes.items()
+            if nid.startswith("B1_sub") and abs(n.z - 5.0) < 0.5
+        ]
         assert len(mid_nodes) > 0, "No midpoint node found — subdivision may have failed"
         # Imperfection is perpendicular to the brace axis. For a vertical brace
         # (0,0,0)→(0,0,10) the perpendicular direction is Y.
@@ -2839,6 +3129,7 @@ class TestSubdivideElements:
     def test_end_offset_creates_rigid_links(self):
         """end_offset > 0 creates offset nodes and rigid link entries."""
         from fea_toolkit.model.geometry import subdivide_elements
+
         nodes = {
             "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
             "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
@@ -2846,14 +3137,19 @@ class TestSubdivideElements:
         elem = FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2")
         elements = {"B1": elem}
         _, _, result_nodes, _, rigid_links = subdivide_elements(
-            elements, assignments={"B1": "UB300"}, nodes=nodes,
-            n_segments=4, brace_ids={"B1"}, end_offset=0.5, next_tag=100,
+            elements,
+            assignments={"B1": "UB300"},
+            nodes=nodes,
+            n_segments=4,
+            brace_ids={"B1"},
+            end_offset=0.5,
+            next_tag=100,
         )
         # Should have two rigid links (I-end and J-end)
         assert len(rigid_links) == 2
         link_i, link_j = rigid_links
-        assert link_i[1] == "1"   # I-end: original node
-        assert link_j[2] == "2"   # J-end: original node
+        assert link_i[1] == "1"  # I-end: original node
+        assert link_j[2] == "2"  # J-end: original node
         # Should have two offset nodes
         offset_ids = [nid for nid in result_nodes if "_offset_" in nid]
         assert len(offset_ids) == 2
@@ -2867,15 +3163,21 @@ class TestSubdivideElements:
     def test_end_offset_clamped_to_half_length(self):
         """end_offset larger than half length is clamped."""
         from fea_toolkit.model.geometry import subdivide_elements
+
         nodes = {
             "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
             "2": Node(node_id="2", node_tag=2, x=0, y=0, z=5),
         }
         elem = FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2")
         elements = {"B1": elem}
-        _, _, result_nodes, _, rigid_links = subdivide_elements(
-            elements, assignments={"B1": "UB300"}, nodes=nodes,
-            n_segments=2, brace_ids={"B1"}, end_offset=3.0, next_tag=100,
+        _, _, result_nodes, _, _rigid_links = subdivide_elements(
+            elements,
+            assignments={"B1": "UB300"},
+            nodes=nodes,
+            n_segments=2,
+            brace_ids={"B1"},
+            end_offset=3.0,
+            next_tag=100,
         )
         # Brace should still have at least some length (clamped to 45%)
         offset_ids = [nid for nid in result_nodes if "_offset_" in nid]
@@ -2903,43 +3205,57 @@ class TestBraceBucklingCheck:
         }
         restraints = {"1": Restraint([1, 1, 1, 1, 1, 1])}
         materials = {
-            "Steel": Material(name="Steel", type="Steel",
-                              E_mod=2e11, unit_weight=77000),
+            "Steel": Material(name="Steel", type="Steel", E_mod=2e11, unit_weight=77000),
         }
         sections = {
-            "PIP4": PipeSection(name="PIP4", shape="Pipe", material="Steel",
-                                od=0.1143, t=0.006,
-                                A=2e-3, I33=3e-6, I22=3e-6, J=1e-6),
+            "PIP4": PipeSection(
+                name="PIP4",
+                shape="Pipe",
+                material="Steel",
+                od=0.1143,
+                t=0.006,
+                A=2e-3,
+                I33=3e-6,
+                I22=3e-6,
+                J=1e-6,
+            ),
         }
         frames = {
-            "B1": FrameElement(elem_id="B1", elem_tag=1,
-                               node_i="1", node_j="2"),
+            "B1": FrameElement(elem_id="B1", elem_tag=1, node_i="1", node_j="2"),
         }
         return SAPModelData(
-            nodes=nodes, restraints=restraints,
-            materials=materials, sections=sections,
-            frame_elements=frames, area_elements={},
+            nodes=nodes,
+            restraints=restraints,
+            materials=materials,
+            sections=sections,
+            frame_elements=frames,
+            area_elements={},
             frame_assignments={"B1": "PIP4"},
-            area_assignments={}, groups={}, frame_auto_mesh={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
         )
 
     def test_euler_buckling_pinned(self, brace_model):
         """Euler P_cr with K=1 matches π²EI/L²."""
         from fea_toolkit.model.checks import check_brace_buckling
-        results = check_brace_buckling(brace_model, brace_ids={"B1"}, K=1.0,
-                                        print_results=False)
+
+        results = check_brace_buckling(brace_model, brace_ids={"B1"}, K=1.0, print_results=False)
         assert "B1" in results
         r = results["B1"]
         # L = sqrt(6² + 6²) ≈ 8.485, I = 3e-6, E = 2e11
-        expected = (math.pi ** 2 * 2e11 * 3e-6) / (8.485 ** 2)
+        expected = (math.pi**2 * 2e11 * 3e-6) / (8.485**2)
         assert abs(r["P_cr"] - expected) / expected < 0.01
         assert r["slenderness"] > 0
 
     def test_buckling_with_axial_demand(self, brace_model):
         """D/C ratio computed correctly."""
         from fea_toolkit.model.checks import check_brace_buckling
+
         results = check_brace_buckling(
-            brace_model, brace_ids={"B1"}, K=1.0,
+            brace_model,
+            brace_ids={"B1"},
+            K=1.0,
             axial_demand={"B1": 50000.0},  # 50 kN
             print_results=False,
         )
@@ -2950,20 +3266,44 @@ class TestBraceBucklingCheck:
     def test_from_brace_sections(self):
         """Selection.from_brace_sections detects Pipe, Angle, etc."""
         from fea_toolkit.model.selection import Selection
+
         sections = {
-            "PIP4": PipeSection(name="PIP4", shape="Pipe", material="Steel",
-                                od=0.1, t=0.005, A=1e-3,
-                                I33=1e-6, I22=1e-6, J=1e-7),
-            "UB300": ISection(name="UB300", shape="I/Wide Flange",
-                              material="Steel", depth=0.3, bf=0.15,
-                              tf=0.01, tw=0.006,
-                              A=8e-3, I33=1.2e-4, I22=4e-5, J=2e-6),
+            "PIP4": PipeSection(
+                name="PIP4",
+                shape="Pipe",
+                material="Steel",
+                od=0.1,
+                t=0.005,
+                A=1e-3,
+                I33=1e-6,
+                I22=1e-6,
+                J=1e-7,
+            ),
+            "UB300": ISection(
+                name="UB300",
+                shape="I/Wide Flange",
+                material="Steel",
+                depth=0.3,
+                bf=0.15,
+                tf=0.01,
+                tw=0.006,
+                A=8e-3,
+                I33=1.2e-4,
+                I22=4e-5,
+                J=2e-6,
+            ),
         }
         model = SAPModelData(
-            nodes={}, restraints={}, materials={}, sections=sections,
-            frame_elements={}, area_elements={},
-            frame_assignments={}, area_assignments={},
-            groups={}, frame_auto_mesh={},
+            nodes={},
+            restraints={},
+            materials={},
+            sections=sections,
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
         )
         sel = Selection.from_brace_sections(model)
         assert sel.sections is not None
@@ -2999,84 +3339,111 @@ class TestSubdividedBraceInPushover:
         }
         restraints = {"1": Restraint([1, 1, 1, 1, 1, 1])}
         materials = {
-            "Steel": Material(name="Steel", type="Steel",
-                              E_mod=2e11, unit_weight=77000, Fy=2.5e8),
+            "Steel": Material(name="Steel", type="Steel", E_mod=2e11, unit_weight=77000, Fy=2.5e8),
         }
         sections = {
-            "PIP4": PipeSection(name="PIP4", shape="Pipe", material="Steel",
-                                od=0.1, t=0.005,
-                                A=0.001492, I33=1.70e-6, I22=1.70e-6, J=3.4e-6),
+            "PIP4": PipeSection(
+                name="PIP4",
+                shape="Pipe",
+                material="Steel",
+                od=0.1,
+                t=0.005,
+                A=0.001492,
+                I33=1.70e-6,
+                I22=1.70e-6,
+                J=3.4e-6,
+            ),
         }
         frames = {
-            "B1": FrameElement(elem_id="B1", elem_tag=10,
-                               node_i="1", node_j="2"),
+            "B1": FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2"),
         }
         load_patterns = {
-            "WIND": LoadPattern(name="WIND", pattern_type="Wind",
-                                self_weight_factor=0),
+            "WIND": LoadPattern(name="WIND", pattern_type="Wind", self_weight_factor=0),
         }
         frame_dist_loads = [
-            FrameDistributedLoad(pattern="WIND", frame_id="B1",
-                                 direction="X", load_type="Force",
-                                 shape="Uniform", val_a=5000, val_b=5000,
-                                 rdist_a=0, rdist_b=1, dist_a=0, dist_b=10),
+            FrameDistributedLoad(
+                pattern="WIND",
+                frame_id="B1",
+                direction="X",
+                load_type="Force",
+                shape="Uniform",
+                val_a=5000,
+                val_b=5000,
+                rdist_a=0,
+                rdist_b=1,
+                dist_a=0,
+                dist_b=10,
+            ),
         ]
         return SAPModelData(
-            nodes=nodes, restraints=restraints,
-            materials=materials, sections=sections,
-            frame_elements=frames, area_elements={},
+            nodes=nodes,
+            restraints=restraints,
+            materials=materials,
+            sections=sections,
+            frame_elements=frames,
+            area_elements={},
             frame_assignments={"B1": "PIP4"},
-            area_assignments={}, groups={}, frame_auto_mesh={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
             load_patterns=load_patterns,
             frame_dist_loads=frame_dist_loads,
         )
 
     def test_subdivided_brace_builds_and_runs(self, brace_model):
         """AnalysisBuilder with subdivided braces runs pushover without crash."""
-        from fea_toolkit.opensees.preprocessor import preprocess_model
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
 
-        mm = preprocess_model(brace_model, {'split_elements': False})
-        b = AnalysisBuilder(mm, {
-            'element_type': 'forceBeamColumn',
-            'create_fiber_sections': True,
-            'geom_transf_type': 'Corotational',
-            'split_elements': False,
-            'verbose': False,
-        })
+        mm = preprocess_model(brace_model, {"split_elements": False})
+        b = AnalysisBuilder(
+            mm,
+            {
+                "element_type": "forceBeamColumn",
+                "create_fiber_sections": True,
+                "geom_transf_type": "Corotational",
+                "split_elements": False,
+                "verbose": False,
+            },
+        )
         b.set_brace_selection({"B1"}, end_offset=0.0)
 
         # Run a quick pushover to verify the pipeline holds
         results = b.run_pushover_analysis(
             gravity_patterns={},
-            lateral_load_type='uniform',
-            lateral_direction='X',
+            lateral_load_type="uniform",
+            lateral_direction="X",
             control_node_tag=2,
             max_disp=0.05,
             num_steps=5,
             print_progress=False,
         )
         assert results is not None
-        assert 'control_disp' in results
-        assert len(results['control_disp']) > 1
+        assert "control_disp" in results
+        assert len(results["control_disp"]) > 1
 
     def test_check_buckling_after_pushover(self, brace_model):
         """Can check Euler buckling of braces (analytical, no OpenSees needed)."""
-        from fea_toolkit.opensees.preprocessor import preprocess_model
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
 
-        mm = preprocess_model(brace_model, {'split_elements': False})
-        b = AnalysisBuilder(mm, {
-            'element_type': 'forceBeamColumn',
-            'create_fiber_sections': True,
-            'split_elements': False,
-            'verbose': False,
-        })
+        mm = preprocess_model(brace_model, {"split_elements": False})
+        b = AnalysisBuilder(
+            mm,
+            {
+                "element_type": "forceBeamColumn",
+                "create_fiber_sections": True,
+                "split_elements": False,
+                "verbose": False,
+            },
+        )
         b.set_brace_selection({"B1"}, end_offset=0.0)
 
         # Check Euler buckling directly from model data (no analysis required)
         buckling = b.check_brace_buckling(
-            brace_ids={"B1"}, K=1.0, print_results=False,
+            brace_ids={"B1"},
+            K=1.0,
+            print_results=False,
         )
         assert "B1" in buckling
         assert buckling["B1"]["P_cr"] > 0
@@ -3111,14 +3478,14 @@ class TestEulerBucklingBenchmark:
 
     def test_eigenvalue_buckling_matches_euler(self):
         """Eigenvalue buckling from FEA assembly matches Euler P_cr within 5 %."""
-        scipy = pytest.importorskip("scipy", reason="scipy not installed")
-        from scipy.linalg import eig
+        pytest.importorskip("scipy", reason="scipy not installed")
         import numpy as np
+        from scipy.linalg import eig
 
         L = 10.0
         E = 2e11
         I22 = 1.70e-6
-        P_cr_euler = (math.pi ** 2 * E * I22) / (L ** 2)
+        P_cr_euler = (math.pi**2 * E * I22) / (L**2)
 
         # Subdivide into N segments
         n_seg = 6
@@ -3127,28 +3494,42 @@ class TestEulerBucklingBenchmark:
 
         # DOF numbering: each node has 2 DOFs (v, θ)
         # Pinned ends: v=0, θ free → remove v DOFs at ends
-        n_dof_total = n_nodes * 2      # raw DOFs including constraints
-        constrained = {0}                # node 0: v=0 → DOF 0 removed (θ free)
+        n_dof_total = n_nodes * 2  # raw DOFs including constraints
+        constrained = {0}  # node 0: v=0 → DOF 0 removed (θ free)
         constrained.add(n_nodes * 2 - 2)  # last node: v=0 → DOF removed (θ free)
         dof_map_raw = [d for d in range(n_dof_total) if d not in constrained]
         n_dof = len(dof_map_raw)
         # dof_map_raw[i] = global raw DOF index for reduced DOF i
 
         def beam_stiffness(Le, Ee, Ie):
-            return np.array([
-                [12*Ee*Ie/Le**3,  6*Ee*Ie/Le**2, -12*Ee*Ie/Le**3,  6*Ee*Ie/Le**2],
-                [6*Ee*Ie/Le**2,   4*Ee*Ie/Le,    -6*Ee*Ie/Le**2,  2*Ee*Ie/Le],
-                [-12*Ee*Ie/Le**3, -6*Ee*Ie/Le**2, 12*Ee*Ie/Le**3, -6*Ee*Ie/Le**2],
-                [6*Ee*Ie/Le**2,   2*Ee*Ie/Le,    -6*Ee*Ie/Le**2,  4*Ee*Ie/Le],
-            ])
+            return np.array(
+                [
+                    [
+                        12 * Ee * Ie / Le**3,
+                        6 * Ee * Ie / Le**2,
+                        -12 * Ee * Ie / Le**3,
+                        6 * Ee * Ie / Le**2,
+                    ],
+                    [6 * Ee * Ie / Le**2, 4 * Ee * Ie / Le, -6 * Ee * Ie / Le**2, 2 * Ee * Ie / Le],
+                    [
+                        -12 * Ee * Ie / Le**3,
+                        -6 * Ee * Ie / Le**2,
+                        12 * Ee * Ie / Le**3,
+                        -6 * Ee * Ie / Le**2,
+                    ],
+                    [6 * Ee * Ie / Le**2, 2 * Ee * Ie / Le, -6 * Ee * Ie / Le**2, 4 * Ee * Ie / Le],
+                ]
+            )
 
         def beam_geo_stiffness(Le):
-            return (1.0 / (30 * Le)) * np.array([
-                [36,     3*Le,    -36,     3*Le],
-                [3*Le,  4*Le**2, -3*Le,  -Le**2],
-                [-36,   -3*Le,    36,    -3*Le],
-                [3*Le, -Le**2,  -3*Le,  4*Le**2],
-            ])
+            return (1.0 / (30 * Le)) * np.array(
+                [
+                    [36, 3 * Le, -36, 3 * Le],
+                    [3 * Le, 4 * Le**2, -3 * Le, -(Le**2)],
+                    [-36, -3 * Le, 36, -3 * Le],
+                    [3 * Le, -(Le**2), -3 * Le, 4 * Le**2],
+                ]
+            )
 
         def to_global(raw_dofs):
             """Map 4 element DOFs to reduced system indices (or -1 if constrained)."""
@@ -3158,10 +3539,10 @@ class TestEulerBucklingBenchmark:
         Kg = np.zeros((n_dof, n_dof))
 
         for seg in range(n_seg):
-            n0 = seg       # left node index
-            n1 = seg + 1   # right node index
+            n0 = seg  # left node index
+            n1 = seg + 1  # right node index
             # Raw DOFs: [n0*2 (v0), n0*2+1 (θ0), n1*2 (v1), n1*2+1 (θ1)]
-            raw = [n0*2, n0*2+1, n1*2, n1*2+1]
+            raw = [n0 * 2, n0 * 2 + 1, n1 * 2, n1 * 2 + 1]
             gn = to_global(raw)
 
             k_e = beam_stiffness(seg_len, E, I22)
@@ -3181,16 +3562,15 @@ class TestEulerBucklingBenchmark:
         # Solve (K - λ Kg)φ = 0
         eigvals, _ = eig(K, Kg)
         # The smallest positive eigenvalue is the buckling load
-        buckling_loads = sorted([
-            np.real(ev) for ev in eigvals
-            if np.real(ev) > 1000 and not np.iscomplex(ev)
-        ])
+        buckling_loads = sorted(
+            [np.real(ev) for ev in eigvals if np.real(ev) > 1000 and not np.iscomplex(ev)]
+        )
         assert len(buckling_loads) > 0, "No valid buckling eigenvalues found"
         P_cr_fea = buckling_loads[0]
         ratio = P_cr_fea / P_cr_euler
         assert 0.95 < ratio < 1.10, (
             f"FEA eigenvalue P_cr ({P_cr_fea:.0f} N) differs from Euler "
-            f"({P_cr_euler:.0f} N) by {abs(1-ratio)*100:.1f}%"
+            f"({P_cr_euler:.0f} N) by {abs(1 - ratio) * 100:.1f}%"
         )
 
 
@@ -3217,14 +3597,15 @@ class TestCapacitySpectrumMethod:
     def rc_model(self):
         """Fiber-capable single-storey RC moment frame for CSM testing."""
         from examples.sample_model import make_rc_frame_model
+
         return make_rc_frame_model()
 
     @pytest.fixture
     def rc_ab(self, rc_model):
         """AnalysisBuilder for the RC frame (elastic sections for modal)."""
         import openseespy.opensees as ops
-        cfg = {'element_type': 'elasticBeamColumn', 'split_elements': False,
-               'verbose': False}
+
+        cfg = {"element_type": "elasticBeamColumn", "split_elements": False, "verbose": False}
         mesh_model = preprocess_model(rc_model, cfg)
         b = AnalysisBuilder(mesh_model, cfg)
         yield b
@@ -3239,24 +3620,25 @@ class TestCapacitySpectrumMethod:
         shapes = rc_ab.extract_mode_shapes(1)
         results = rc_ab.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
-            lateral_load_type='uniform',
-            lateral_direction='X',
+            lateral_load_type="uniform",
+            lateral_direction="X",
             control_node_tag=4,
-            max_disp=0.3, num_steps=50,
+            max_disp=0.3,
+            num_steps=50,
             print_progress=False,
         )
-        adrs = rc_ab.pushover_to_adrs(results, modal, shapes, direction='X')
+        adrs = rc_ab.pushover_to_adrs(results, modal, shapes, direction="X")
         return rc_ab, results, modal, shapes, adrs
 
     def test_pushover_to_adrs_values_consistent(self, rc_adrs):
         """ADRS values are positive and consistent (no NaN or negative)."""
         _b, _results, _modal, _shapes, adrs = rc_adrs
-        assert len(adrs['S_a']) == len(adrs['S_d']) > 0
-        assert abs(adrs['M_eff']) > 0
-        assert all(v >= 0 for v in adrs['S_a'])
-        assert all(v >= 0 for v in adrs['S_d'])
-        assert all(math.isfinite(v) for v in adrs['S_a'])
-        assert all(math.isfinite(v) for v in adrs['S_d'])
+        assert len(adrs["S_a"]) == len(adrs["S_d"]) > 0
+        assert abs(adrs["M_eff"]) > 0
+        assert all(v >= 0 for v in adrs["S_a"])
+        assert all(v >= 0 for v in adrs["S_d"])
+        assert all(math.isfinite(v) for v in adrs["S_a"])
+        assert all(math.isfinite(v) for v in adrs["S_d"])
 
     def test_performance_point_elastic(self, rc_adrs):
         """Elastic demand path: converges at mu = 1 with finite values.
@@ -3270,6 +3652,7 @@ class TestCapacitySpectrumMethod:
         and finite.
         """
         from fea_toolkit.model.csm import bilinearize_composite
+
         b, results, modal, shapes, adrs = rc_adrs
         # Anchor the spectrum to the bilinearised yield acceleration —
         # the same non-hard-coded scaling used by
@@ -3277,11 +3660,10 @@ class TestCapacitySpectrumMethod:
         # 0.5× factor so the demand plateau stays below yield and the
         # frame remains elastic.
         _S_dy, S_ay, _ = bilinearize_composite(
-            np.asarray(adrs['S_d'], dtype=float),
-            np.asarray(adrs['S_a'], dtype=float),
+            np.asarray(adrs["S_d"], dtype=float),
+            np.asarray(adrs["S_a"], dtype=float),
         )
-        assert S_ay > 1e-6, \
-            f"Degenerate yield acceleration S_ay={S_ay:.3g}"
+        assert S_ay > 1e-6, f"Degenerate yield acceleration S_ay={S_ay:.3g}"
 
         T_spec = [0.0, 0.1, 0.5, 1.0, 2.0, 4.0, 6.0]
         accels = [0.5, 1.5, 1.5, 0.75, 0.375, 0.25, 0.125]
@@ -3290,19 +3672,25 @@ class TestCapacitySpectrumMethod:
         scale = (0.5 * S_ay) / max(accels)
         Sa_spec = [a * scale for a in accels]
         pp = b.compute_performance_point(
-            results, modal, shapes, T_spec, Sa_spec, direction='X',
+            results,
+            modal,
+            shapes,
+            T_spec,
+            Sa_spec,
+            direction="X",
         )
-        assert pp['converged']
-        assert pp['S_dp'] > 0
-        assert pp['S_ap'] > 0
-        assert math.isfinite(pp['T_eq']) and pp['T_eq'] > 0
+        assert pp["converged"]
+        assert pp["S_dp"] > 0
+        assert pp["S_ap"] > 0
+        assert math.isfinite(pp["T_eq"]) and pp["T_eq"] > 0
         # Demand below yield → no ductility.
-        assert pp['mu'] == pytest.approx(1.0, abs=0.01)
+        assert pp["mu"] == pytest.approx(1.0, abs=0.01)
 
 
 # ============================================================================
 # Builder integration tests: frame end offsets + area meshing
 # ============================================================================
+
 
 class TestBuilderFrameEndOffsets:
     """Verify frame end offsets are applied during build()."""
@@ -3315,24 +3703,30 @@ class TestBuilderFrameEndOffsets:
         }
         mats = {"Steel": Material("Steel", "Steel", E_mod=2e11)}
         secs = {
-            "UB300": Section("UB300", "I/Wide Flange", "Steel",
-                             A=0.01, I33=1e-4, I22=1e-5, J=1e-6),
+            "UB300": Section("UB300", "I/Wide Flange", "Steel", A=0.01, I33=1e-4, I22=1e-5, J=1e-6),
         }
         frames = {"1": FrameElement("1", 10, "1", "2")}
         return SAPModelData(
-            nodes=nodes, restraints={"1": Restraint([1,1,1,1,1,1])},
-            materials=mats, sections=secs,
-            frame_elements=frames, area_elements={},
+            nodes=nodes,
+            restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+            materials=mats,
+            sections=secs,
+            frame_elements=frames,
+            area_elements={},
             frame_assignments={"1": "UB300"},
-            area_assignments={}, groups={}, frame_auto_mesh={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
             frame_end_offsets={"1": FrameEndOffset(0.3, 0.4)},
         )
 
     def test_offset_nodes_created_in_opensees(self, offset_model):
         """Offset nodes are created at correct positions."""
-        from fea_toolkit.opensees.preprocessor import preprocess_model
-        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         import openseespy.opensees as ops
+
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
         cfg = {"verbose": False, "use_elastic_sections": True}
         mm = preprocess_model(offset_model, cfg)
         b = AnalysisBuilder(mm, cfg)
@@ -3356,9 +3750,11 @@ class TestBuilderFrameEndOffsets:
 
     def test_rigid_links_recorded(self, offset_model):
         """_offset_rigid_links contains entries after build()."""
-        from fea_toolkit.opensees.preprocessor import preprocess_model
-        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         import openseespy.opensees as ops
+
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
         cfg = {"verbose": False, "use_elastic_sections": True}
         mm = preprocess_model(offset_model, cfg)
         b = AnalysisBuilder(mm, cfg)
@@ -3376,19 +3772,25 @@ class TestBuilderFrameEndOffsets:
         }
         mats = {"Steel": Material("Steel", "Steel", E_mod=2e11)}
         secs = {
-            "UB300": Section("UB300", "I/Wide Flange", "Steel",
-                             A=0.01, I33=1e-4, I22=1e-5, J=1e-6),
+            "UB300": Section("UB300", "I/Wide Flange", "Steel", A=0.01, I33=1e-4, I22=1e-5, J=1e-6),
         }
         frames = {"1": FrameElement("1", 10, "1", "2")}
         md = SAPModelData(
-            nodes=nodes, restraints={}, materials=mats, sections=secs,
-            frame_elements=frames, area_elements={},
+            nodes=nodes,
+            restraints={},
+            materials=mats,
+            sections=secs,
+            frame_elements=frames,
+            area_elements={},
             frame_assignments={"1": "UB300"},
-            area_assignments={}, groups={}, frame_auto_mesh={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
             frame_end_offsets={"1": FrameEndOffset(0.0, 0.0)},
         )
-        from fea_toolkit.opensees.preprocessor import preprocess_model
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
         cfg = {"verbose": False, "use_elastic_sections": True}
         mm = preprocess_model(md, cfg)
         b = AnalysisBuilder(mm, cfg)
@@ -3397,6 +3799,7 @@ class TestBuilderFrameEndOffsets:
             assert len(b._offset_rigid_links) == 0
         finally:
             import openseespy.opensees as ops
+
             ops.wipe()
 
 
@@ -3413,29 +3816,33 @@ class TestBuilderAreaMeshing:
         }
         mats = {"Concrete": Material("Concrete", "Concrete", E_mod=3e10)}
         secs = {
-            "Slab200": ShellSection("Slab200", "Shell", "Concrete",
-                                    thickness=0.2),
+            "Slab200": ShellSection("Slab200", "Shell", "Concrete", thickness=0.2),
         }
         areas = {"1": AreaElement("1", 10, ["1", "2", "3", "4"])}
         return SAPModelData(
-            nodes=nodes, restraints={}, materials=mats, sections=secs,
-            frame_elements={}, area_elements=areas,
-            frame_assignments={}, area_assignments={"1": "Slab200"},
-            groups={}, frame_auto_mesh={},
+            nodes=nodes,
+            restraints={},
+            materials=mats,
+            sections=secs,
+            frame_elements={},
+            area_elements=areas,
+            frame_assignments={},
+            area_assignments={"1": "Slab200"},
+            groups={},
+            frame_auto_mesh={},
             area_mesh={"1": AreaMesh(auto_mesh=True, max_size=6.0)},
         )
 
     def test_mesh_creates_sub_areas(self, mesh_model):
         """Preprocessor meshing creates exactly 4 sub-quads (2×2 grid)."""
         from fea_toolkit.opensees.preprocessor import preprocess_model
+
         cfg = {"verbose": False, "create_shells": True}
         mm = preprocess_model(mesh_model, cfg)
         # Original area should be inactive in the mesh model
         assert mm.area_elements["1"].inactive is True
         # 12×8 quad with max_size=6.0 → ceil(12/6)=2 × ceil(8/6)=2 = 4
-        sub_ids = sorted(
-            aid for aid in mm.area_elements if "_sub_" in aid
-        )
+        sub_ids = sorted(aid for aid in mm.area_elements if "_sub_" in aid)
         assert len(sub_ids) == 4
         # Sub-areas should all be active
         for sid in sub_ids:
@@ -3446,30 +3853,32 @@ class TestBuilderAreaMeshing:
 
     def test_mesh_creates_opensees_nodes(self, mesh_model):
         """Mesh nodes are created at correct grid positions."""
-        from fea_toolkit.opensees.preprocessor import preprocess_model
-        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         import openseespy.opensees as ops
+
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
         cfg = {"verbose": False, "create_shells": True}
         mm = preprocess_model(mesh_model, cfg)
         b = AnalysisBuilder(mm, cfg)
         try:
             b.build_domain()
             # 2×2 grid → 5 mesh nodes (4 edge midpoints + 1 interior)
-            mesh_nodes = {nid: nd for nid, nd in mm.nodes.items()
-                          if "_mesh_" in nid}
+            mesh_nodes = {nid: nd for nid, nd in mm.nodes.items() if "_mesh_" in nid}
             assert len(mesh_nodes) == 5
             # Expected coordinates (12×8 rectangle, bilinear grid)
             expected = {
-                "1_mesh_0_1": (6.0, 0.0, 0.0),   # edge midpoint
+                "1_mesh_0_1": (6.0, 0.0, 0.0),  # edge midpoint
                 "1_mesh_1_0": (0.0, 4.0, 0.0),
-                "1_mesh_1_1": (6.0, 4.0, 0.0),   # fully interior
+                "1_mesh_1_1": (6.0, 4.0, 0.0),  # fully interior
                 "1_mesh_1_2": (12.0, 4.0, 0.0),
                 "1_mesh_2_1": (6.0, 8.0, 0.0),
             }
             for nid, nd in mesh_nodes.items():
                 coords = list(ops.nodeCoord(nd.node_tag))
-                assert coords == pytest.approx(expected[nid], abs=1e-9), \
+                assert coords == pytest.approx(expected[nid], abs=1e-9), (
                     f"{nid}: expected {expected[nid]}, got {coords}"
+                )
         finally:
             ops.wipe()
 
@@ -3483,17 +3892,23 @@ class TestBuilderAreaMeshing:
         }
         mats = {"Concrete": Material("Concrete", "Concrete", E_mod=3e10)}
         secs = {
-            "Slab200": ShellSection("Slab200", "Shell", "Concrete",
-                                    thickness=0.2),
+            "Slab200": ShellSection("Slab200", "Shell", "Concrete", thickness=0.2),
         }
         areas = {"1": AreaElement("1", 10, ["1", "2", "3", "4"])}
         md = SAPModelData(
-            nodes=nodes, restraints={}, materials=mats, sections=secs,
-            frame_elements={}, area_elements=areas,
-            frame_assignments={}, area_assignments={"1": "Slab200"},
-            groups={}, frame_auto_mesh={},
+            nodes=nodes,
+            restraints={},
+            materials=mats,
+            sections=secs,
+            frame_elements={},
+            area_elements=areas,
+            frame_assignments={},
+            area_assignments={"1": "Slab200"},
+            groups={},
+            frame_auto_mesh={},
         )
         from fea_toolkit.opensees.preprocessor import preprocess_model
+
         cfg = {"verbose": False, "create_shells": True}
         mm = preprocess_model(md, cfg)
         # No area_mesh config → no subdivision
@@ -3504,8 +3919,8 @@ class TestBuilderAreaMeshing:
 
     def test_mesh_propagates_edge_restraints(self):
         """Mesh nodes on edges between restrained corners inherit AND of DOFs."""
-        from fea_toolkit.opensees.preprocessor import preprocess_model
         from fea_toolkit.model.sap_data import Restraint
+        from fea_toolkit.opensees.preprocessor import preprocess_model
 
         nodes = {
             "1": Node("1", 1, 0.0, 0.0, 0.0),
@@ -3523,21 +3938,28 @@ class TestBuilderAreaMeshing:
         }
         mats = {"Concrete": Material("Concrete", "Concrete", E_mod=3e10)}
         secs = {
-            "Slab200": ShellSection("Slab200", "Shell", "Concrete",
-                                    thickness=0.2),
+            "Slab200": ShellSection("Slab200", "Shell", "Concrete", thickness=0.2),
         }
         areas = {"1": AreaElement("1", 10, ["1", "2", "3", "4"])}
         md = SAPModelData(
-            nodes=nodes, restraints=restraints, materials=mats, sections=secs,
-            frame_elements={}, area_elements=areas,
-            frame_assignments={}, area_assignments={"1": "Slab200"},
-            groups={}, frame_auto_mesh={},
+            nodes=nodes,
+            restraints=restraints,
+            materials=mats,
+            sections=secs,
+            frame_elements={},
+            area_elements=areas,
+            frame_assignments={},
+            area_assignments={"1": "Slab200"},
+            groups={},
+            frame_auto_mesh={},
             area_mesh={"1": AreaMesh(auto_mesh=True, max_size=6.0)},
         )
         cfg = {"verbose": False, "create_shells": True}
         mm = preprocess_model(md, cfg)
-        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         import openseespy.opensees as ops
+
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
         b = AnalysisBuilder(mm, cfg)
         try:
             b.build_domain()
@@ -3549,18 +3971,17 @@ class TestBuilderAreaMeshing:
             # No mesh node IDs should appear in MeshModel restraints
             mesh_ids = {nid for nid in mm.nodes if "_mesh_" in nid}
             restrained_mesh = mesh_ids & set(mm.restraints.keys())
-            assert len(restrained_mesh) == 0, \
+            assert len(restrained_mesh) == 0, (
                 f"mesh nodes should NOT appear in mm.restraints: {restrained_mesh}"
+            )
 
             # Check the mesh node at (6,0,0) is fixed in OpenSees
             mesh_tag = b._node_tag_from_id("1_mesh_0_1")
             assert mesh_tag is not None
             fixed = ops.getFixedDOFs(int(mesh_tag))
-            assert len(fixed) == 6, \
-                f"mesh node {mesh_tag} should have 6 fixed DOFs, got {fixed}"
+            assert len(fixed) == 6, f"mesh node {mesh_tag} should have 6 fixed DOFs, got {fixed}"
 
-            assert mm.area_elements["1"].inactive, \
-                "original area should be inactive after meshing"
+            assert mm.area_elements["1"].inactive, "original area should be inactive after meshing"
 
         finally:
             ops.wipe()
@@ -3570,17 +3991,28 @@ class TestBuilderAreaMeshing:
 # Concrete section fiber patch tests
 # ============================================================================
 
+
 class TestConcreteRectangularSectionFiberPatches:
     """Fiber patch generation for ConcreteRectangularSection."""
 
     def test_concrete_rect_basic(self):
         from fea_toolkit.model.sap_data import ConcreteRectangularSection
+
         sec = ConcreteRectangularSection(
-            name="CR400", shape="Concrete Rectangular", material="Concrete",
-            A=0.16, I33=0.00213, I22=0.00213, J=0,
-            depth=0.4, bf=0.4, cover=0.04,
-            top_bars=4, bot_bars=4,
-            top_bar_dia=0.02, bot_bar_dia=0.02,
+            name="CR400",
+            shape="Concrete Rectangular",
+            material="Concrete",
+            A=0.16,
+            I33=0.00213,
+            I22=0.00213,
+            J=0,
+            depth=0.4,
+            bf=0.4,
+            cover=0.04,
+            top_bars=4,
+            bot_bars=4,
+            top_bar_dia=0.02,
+            bot_bar_dia=0.02,
         )
         patches = sec.to_fiber_patches(mat_tag=1)
         # Concrete patches: core, top cover, bottom cover, left cover, right cover
@@ -3601,14 +4033,22 @@ class TestConcreteRectangularSectionFiberPatches:
 
     def test_concrete_rect_no_rebar(self):
         from fea_toolkit.model.sap_data import ConcreteRectangularSection
+
         sec = ConcreteRectangularSection(
-            name="CR400", shape="Concrete Rectangular", material="Concrete",
-            A=0.16, I33=0.00213, I22=0.00213, J=0,
-            depth=0.4, bf=0.4, cover=0.04,
+            name="CR400",
+            shape="Concrete Rectangular",
+            material="Concrete",
+            A=0.16,
+            I33=0.00213,
+            I22=0.00213,
+            J=0,
+            depth=0.4,
+            bf=0.4,
+            cover=0.04,
         )
         patches = sec.to_fiber_patches(mat_tag=1)
         for p in patches:
-            assert p[0] in ("rect",)
+            assert p[0] == "rect"
         assert len(patches) >= 3  # core + 2 covers
 
 
@@ -3617,11 +4057,19 @@ class TestConcreteCircularSectionFiberPatches:
 
     def test_concrete_circ_basic(self):
         from fea_toolkit.model.sap_data import ConcreteCircularSection
+
         sec = ConcreteCircularSection(
-            name="CC400", shape="Concrete Circular", material="Concrete",
-            A=0.1256, I33=0.00126, I22=0.00126, J=0,
-            diameter=0.4, cover=0.04,
-            bar_count=8, bar_dia=0.02,
+            name="CC400",
+            shape="Concrete Circular",
+            material="Concrete",
+            A=0.1256,
+            I33=0.00126,
+            I22=0.00126,
+            J=0,
+            diameter=0.4,
+            cover=0.04,
+            bar_count=8,
+            bar_dia=0.02,
         )
         patches = sec.to_fiber_patches(mat_tag=1)
         # Concrete: confined core (circ), unconfined cover (circ)
@@ -3638,10 +4086,17 @@ class TestConcreteCircularSectionFiberPatches:
 
     def test_concrete_circ_no_rebar(self):
         from fea_toolkit.model.sap_data import ConcreteCircularSection
+
         sec = ConcreteCircularSection(
-            name="CC400", shape="Concrete Circular", material="Concrete",
-            A=0.1256, I33=0.00126, I22=0.00126, J=0,
-            diameter=0.4, cover=0.04,
+            name="CC400",
+            shape="Concrete Circular",
+            material="Concrete",
+            A=0.1256,
+            I33=0.00126,
+            I22=0.00126,
+            J=0,
+            diameter=0.4,
+            cover=0.04,
         )
         patches = sec.to_fiber_patches(mat_tag=1)
         assert len(patches) == 2  # core + cover only, no rebar
@@ -3650,6 +4105,7 @@ class TestConcreteCircularSectionFiberPatches:
 # ============================================================================
 # Mander confinement wiring tests
 # ============================================================================
+
 
 class TestManderConfinementWiring:
     """Mander confinement wiring on concrete section dataclasses.
@@ -3666,13 +4122,25 @@ class TestManderConfinementWiring:
 
     def test_rectangular_confined(self):
         from fea_toolkit.model.sap_data import ConcreteRectangularSection
+
         sec = ConcreteRectangularSection(
-            name="CR400", shape="Concrete Rectangular", material="Concrete",
-            A=0.16, I33=0.00213, I22=0.00213, J=0,
-            depth=0.4, bf=0.4, cover=0.04,
-            top_bars=4, bot_bars=4,
-            top_bar_dia=0.02, bot_bar_dia=0.02,
-            tie_diameter=0.01, tie_spacing=0.1, tie_fy=420e6,
+            name="CR400",
+            shape="Concrete Rectangular",
+            material="Concrete",
+            A=0.16,
+            I33=0.00213,
+            I22=0.00213,
+            J=0,
+            depth=0.4,
+            bf=0.4,
+            cover=0.04,
+            top_bars=4,
+            bot_bars=4,
+            top_bar_dia=0.02,
+            bot_bar_dia=0.02,
+            tie_diameter=0.01,
+            tie_spacing=0.1,
+            tie_fy=420e6,
         )
         res = sec.fiber_confinement(fc=30e6, tie_fy=420e6)
         assert res is not None
@@ -3682,12 +4150,22 @@ class TestManderConfinementWiring:
 
     def test_rectangular_missing_tie_returns_none(self):
         from fea_toolkit.model.sap_data import ConcreteRectangularSection
+
         sec = ConcreteRectangularSection(
-            name="CR400", shape="Concrete Rectangular", material="Concrete",
-            A=0.16, I33=0.00213, I22=0.00213, J=0,
-            depth=0.4, bf=0.4, cover=0.04,
-            top_bars=4, bot_bars=4,
-            top_bar_dia=0.02, bot_bar_dia=0.02,
+            name="CR400",
+            shape="Concrete Rectangular",
+            material="Concrete",
+            A=0.16,
+            I33=0.00213,
+            I22=0.00213,
+            J=0,
+            depth=0.4,
+            bf=0.4,
+            cover=0.04,
+            top_bars=4,
+            bot_bars=4,
+            top_bar_dia=0.02,
+            bot_bar_dia=0.02,
         )
         # No tie data → None (builders use the conventional heuristic)
         assert sec.fiber_confinement(fc=30e6, tie_fy=420e6) is None
@@ -3697,12 +4175,22 @@ class TestManderConfinementWiring:
 
     def test_circular_confined_spiral(self):
         from fea_toolkit.model.sap_data import ConcreteCircularSection
+
         sec = ConcreteCircularSection(
-            name="CC400", shape="Concrete Circular", material="Concrete",
-            A=0.1256, I33=0.00126, I22=0.00126, J=0,
-            diameter=0.4, cover=0.04,
-            bar_count=8, bar_dia=0.02,
-            tie_diameter=0.01, tie_spacing=0.08, tie_fy=420e6,
+            name="CC400",
+            shape="Concrete Circular",
+            material="Concrete",
+            A=0.1256,
+            I33=0.00126,
+            I22=0.00126,
+            J=0,
+            diameter=0.4,
+            cover=0.04,
+            bar_count=8,
+            bar_dia=0.02,
+            tie_diameter=0.01,
+            tie_spacing=0.08,
+            tie_fy=420e6,
         )
         res = sec.fiber_confinement(fc=30e6, tie_fy=420e6)
         assert res is not None
@@ -3711,11 +4199,19 @@ class TestManderConfinementWiring:
 
     def test_circular_missing_tie_returns_none(self):
         from fea_toolkit.model.sap_data import ConcreteCircularSection
+
         sec = ConcreteCircularSection(
-            name="CC400", shape="Concrete Circular", material="Concrete",
-            A=0.1256, I33=0.00126, I22=0.00126, J=0,
-            diameter=0.4, cover=0.04,
-            bar_count=8, bar_dia=0.02,
+            name="CC400",
+            shape="Concrete Circular",
+            material="Concrete",
+            A=0.1256,
+            I33=0.00126,
+            I22=0.00126,
+            J=0,
+            diameter=0.4,
+            cover=0.04,
+            bar_count=8,
+            bar_dia=0.02,
         )
         assert sec.fiber_confinement(fc=30e6, tie_fy=420e6) is None
 
@@ -3724,21 +4220,31 @@ class TestManderConfinementWiring:
 # Builder hinge type tests
 # ============================================================================
 
+
 class TestBuilderHingeModel:
     """Lumped plasticity (hinge_model='lumped') integration."""
 
     def test_default_hinge_model_is_fiber(self):
         """Default config uses fiber (distributed plasticity)."""
-        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         from fea_toolkit.model.sap_data import SAPModelData
-        md = SAPModelData(nodes={}, restraints={}, materials={}, sections={},
-                          frame_elements={}, area_elements={},
-                          frame_assignments={}, area_assignments={},
-                          groups={}, frame_auto_mesh={})
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+        SAPModelData(
+            nodes={},
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+        )
         b = AnalysisBuilder.__new__(AnalysisBuilder)
         b.config = {}
         b._set_defaults()
-        assert b.config['hinge_model'] == 'fiber'
+        assert b.config["hinge_model"] == "fiber"
 
     def test_asce41_hinge_length_steel_beam(self):
         """Steel I-section with depth uses d_b = depth per ASCE 41-17 Eq 10-1.
@@ -3746,23 +4252,43 @@ class TestBuilderHingeModel:
         An ISection with depth=0.3 m (UB300) gives:
           Lp = 0.08·6.0 + 0.022·300·250/1000 = 2.13 → capped at 0.33·6.0 = 1.98
         """
-        from fea_toolkit.model.sap_data import (
-            SAPModelData, ISection, Material, Node, Restraint,
-        )
         from fea_toolkit.model.checks import compute_asce41_hinge_length
+        from fea_toolkit.model.sap_data import (
+            ISection,
+            Material,
+            Node,
+            SAPModelData,
+        )
+
         nodes = {"1": Node("1", 1, 0, 0, 0), "2": Node("2", 2, 6, 0, 0)}
         mats = {"Steel": Material("Steel", "Steel", E_mod=2e11, Fy=2.5e8)}
         secs = {
             "UB300": ISection(
-                name="UB300", shape="I/Wide Flange", material="Steel",
-                depth=0.3, bf=0.15, tf=0.01, tw=0.006,
-                A=8e-3, I33=1.2e-4, I22=4e-5, J=2e-6,
+                name="UB300",
+                shape="I/Wide Flange",
+                material="Steel",
+                depth=0.3,
+                bf=0.15,
+                tf=0.01,
+                tw=0.006,
+                A=8e-3,
+                I33=1.2e-4,
+                I22=4e-5,
+                J=2e-6,
             ),
         }
-        md = SAPModelData(nodes=nodes, restraints={}, materials=mats,
-                          sections=secs, frame_elements={}, area_elements={},
-                          frame_assignments={}, area_assignments={},
-                          groups={}, frame_auto_mesh={})
+        md = SAPModelData(
+            nodes=nodes,
+            restraints={},
+            materials=mats,
+            sections=secs,
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+        )
         Lp = compute_asce41_hinge_length(md, "UB300", 6.0)
         # Capped at 0.33 * L = 1.98
         assert Lp == pytest.approx(1.98, abs=0.01)
@@ -3770,16 +4296,21 @@ class TestBuilderHingeModel:
     def test_lumped_hinge_build_invokes_create_lumped_hinges(self):
         """build_domain() with hinge_model='lumped' exercises _create_lumped_hinges."""
         import openseespy.opensees as ops
+
         from examples.sample_model import make_sample_model
-        from fea_toolkit.opensees.preprocessor import preprocess_model
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
         md = make_sample_model()
-        mm = preprocess_model(md, {'split_elements': False})
-        b = AnalysisBuilder(mm, {
-            'element_type': 'elasticBeamColumn',
-            'hinge_model': 'lumped',
-            'verbose': False,
-        })
+        mm = preprocess_model(md, {"split_elements": False})
+        b = AnalysisBuilder(
+            mm,
+            {
+                "element_type": "elasticBeamColumn",
+                "hinge_model": "lumped",
+                "verbose": False,
+            },
+        )
         try:
             b.build_domain()
             node_tags = ops.getNodeTags()
@@ -3812,20 +4343,20 @@ class TestSAPModelDataMethods:
             "3": Node(node_id="3", node_tag=30, x=6, y=8, z=0),
         }
         frames = {
-            "F1": FrameElement(elem_id="F1", elem_tag=1,
-                                node_i="1", node_j="2"),
+            "F1": FrameElement(elem_id="F1", elem_tag=1, node_i="1", node_j="2"),
         }
         areas = {
-            "A1": AreaElement(area_id="A1", area_tag=2,
-                               node_ids=["1", "2", "3"]),
+            "A1": AreaElement(area_id="A1", area_tag=2, node_ids=["1", "2", "3"]),
         }
         materials = {"C40": Material(name="C40", type="Concrete", E_mod=3e7)}
-        sections = {"SEC1": Section(
-            name="SEC1", material="C40", shape="Rectangular", A=0.16)}
+        sections = {"SEC1": Section(name="SEC1", material="C40", shape="Rectangular", A=0.16)}
         return SAPModelData(
-            nodes=nodes, restraints={},
-            materials=materials, sections=sections,
-            frame_elements=frames, area_elements=areas,
+            nodes=nodes,
+            restraints={},
+            materials=materials,
+            sections=sections,
+            frame_elements=frames,
+            area_elements=areas,
             frame_assignments={"F1": "SEC1"},
             area_assignments={"A1": "SEC1"},
             groups={},
@@ -3836,32 +4367,51 @@ class TestSAPModelDataMethods:
         assert sample_md.max_node_tag() == 30
 
     def test_max_node_tag_empty(self):
-        md = SAPModelData(nodes={}, restraints={},
-                          materials={}, sections={},
-                          frame_elements={}, area_elements={},
-                          frame_assignments={}, area_assignments={},
-                          groups={}, frame_auto_mesh={})
+        md = SAPModelData(
+            nodes={},
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+        )
         assert md.max_node_tag() == 0
 
     def test_auto_detect_static_cases(self):
         from fea_toolkit.model.sap_data import LoadCase
+
         md = SAPModelData(
-            nodes={}, restraints={},
-            materials={}, sections={},
-            frame_elements={}, area_elements={},
-            frame_assignments={}, area_assignments={},
-            groups={}, frame_auto_mesh={},
+            nodes={},
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
             load_cases={
-                "DEAD": LoadCase(case_name="DEAD", case_type="LinStatic",
-                                  design_type_option="Prog Det",
-                                  design_type="Dead",
-                                  design_action_option="Prog Det",
-                                  design_action="Non-Composite"),
-                "MODAL": LoadCase(case_name="MODAL", case_type="LinModal",
-                                   design_type_option="Prog Det",
-                                   design_type="Other",
-                                   design_action_option="Prog Det",
-                                   design_action="Other"),
+                "DEAD": LoadCase(
+                    case_name="DEAD",
+                    case_type="LinStatic",
+                    design_type_option="Prog Det",
+                    design_type="Dead",
+                    design_action_option="Prog Det",
+                    design_action="Non-Composite",
+                ),
+                "MODAL": LoadCase(
+                    case_name="MODAL",
+                    case_type="LinModal",
+                    design_type_option="Prog Det",
+                    design_type="Other",
+                    design_action_option="Prog Det",
+                    design_action="Other",
+                ),
             },
         )
         cases = md.auto_detect_static_cases()
@@ -3881,6 +4431,7 @@ class TestSAPModelDataMethods:
     def test_remove_floating_nodes(self):
         """remove_floating_nodes eliminates unreferenced nodes."""
         from fea_toolkit.model.geometry import remove_floating_nodes
+
         md = SAPModelData(
             nodes={
                 "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
@@ -3888,15 +4439,16 @@ class TestSAPModelDataMethods:
                 "3": Node(node_id="3", node_tag=3, x=3, y=4, z=0),  # floating
             },
             restraints={},
-            materials={}, sections={},
+            materials={},
+            sections={},
             frame_elements={
-                "F1": FrameElement(elem_id="F1", elem_tag=10,
-                                    node_i="1", node_j="2"),
+                "F1": FrameElement(elem_id="F1", elem_tag=10, node_i="1", node_j="2"),
             },
             area_elements={},
             frame_assignments={"F1": "SEC1"},
             area_assignments={},
-            groups={}, frame_auto_mesh={},
+            groups={},
+            frame_auto_mesh={},
         )
         rows = remove_floating_nodes(md)
         # Inert node is removed silently (no mass/loads/restraint to redistribute)
@@ -3906,6 +4458,7 @@ class TestSAPModelDataMethods:
     def test_remove_floating_nodes_with_restraint(self):
         """Floating node with restraint transfers it to nearest neighbour."""
         from fea_toolkit.model.geometry import remove_floating_nodes
+
         md = SAPModelData(
             nodes={
                 "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
@@ -3913,15 +4466,16 @@ class TestSAPModelDataMethods:
                 "3": Node(node_id="3", node_tag=3, x=3, y=0, z=0),  # floating
             },
             restraints={"3": Restraint([1, 1, 1, 1, 1, 1])},
-            materials={}, sections={},
+            materials={},
+            sections={},
             frame_elements={
-                "F1": FrameElement(elem_id="F1", elem_tag=10,
-                                    node_i="1", node_j="2"),
+                "F1": FrameElement(elem_id="F1", elem_tag=10, node_i="1", node_j="2"),
             },
             area_elements={},
             frame_assignments={"F1": "SEC1"},
             area_assignments={},
-            groups={}, frame_auto_mesh={},
+            groups={},
+            frame_auto_mesh={},
         )
         rows = remove_floating_nodes(md)
         assert len(rows) == 1
@@ -3944,6 +4498,7 @@ class TestCqcCombine:
 
         def _sa(T):
             return 9.81  # constant 1g
+
         result = cqc_combine(
             eff_masses=[100.0],
             periods=[1.0],
@@ -3960,23 +4515,26 @@ class TestCqcCombine:
 
         def _sa(T):
             return 9.81
+
         result = cqc_combine(
             eff_masses=[100.0, 60.0],
             periods=[1.0, 0.01],  # very separated → rho ≈ 0
             spectrum_fn=_sa,
             damping=0.05,
         )
-        expected_srss = math.sqrt((100 * 9.81)**2 + (60 * 9.81)**2)
+        expected_srss = math.sqrt((100 * 9.81) ** 2 + (60 * 9.81) ** 2)
         assert abs(result["base_shear_srss"] - expected_srss) < 1e-6
 
     def test_total_mass_missing(self):
         """Missing-mass correction is proportional to residual mass × Sa(0)."""
         from fea_toolkit.spectrum import cqc_combine
+
         calls = []
 
         def _sa(T):
             calls.append(T)
-            return 9.81 if T == 0 else 9.81
+            return 9.81
+
         result = cqc_combine(
             eff_masses=[100.0],
             periods=[1.0],
@@ -3992,6 +4550,7 @@ class TestCqcCombine:
 
         def _sa(T):
             return 9.81 if T < 0.05 else 9.81 * 2.0  # 1g rigid, 2g flexible
+
         result = cqc_combine(
             eff_masses=[100.0, 60.0],
             periods=[0.02, 1.0],  # first mode is rigid
@@ -4004,6 +4563,7 @@ class TestCqcCombine:
     def test_empty_input(self):
         """Empty inputs return empty dict."""
         from fea_toolkit.spectrum import cqc_combine
+
         result = cqc_combine(eff_masses=[], periods=[], spectrum_fn=lambda T: 0)
         assert result == {}
 
@@ -4018,6 +4578,7 @@ class TestModalParticipationDf:
 
     def test_basic(self):
         from fea_toolkit.io.report import modal_participation_df
+
         modal_result = {
             "periods": [0.5, 0.2],
             "modal_props": {
@@ -4036,6 +4597,7 @@ class TestModalParticipationDf:
 
     def test_empty(self):
         from fea_toolkit.io.report import modal_participation_df
+
         assert modal_participation_df({"periods": [], "modal_props": {}}) is None
 
 
@@ -4047,30 +4609,27 @@ class TestSumReactionsWithOverturning:
 
     def test_single_node_no_overturning(self):
         """Single node at centroid → forces pass through directly."""
-        from fea_toolkit.utils import sum_reactions_with_overturning
         from fea_toolkit.model.sap_data import Node
+        from fea_toolkit.utils import sum_reactions_with_overturning
 
         nodes = {"B1": Node(node_id="B1", node_tag=1, x=5, y=5, z=0)}
-        reactions = {1: {"fx": 100.0, "fy": 0.0, "fz": 0.0,
-                          "mx": 0.0, "my": 0.0, "mz": 0.0}}
+        reactions = {1: {"fx": 100.0, "fy": 0.0, "fz": 0.0, "mx": 0.0, "my": 0.0, "mz": 0.0}}
         result = sum_reactions_with_overturning(reactions, nodes)
         assert result["fx"] == 100.0
         assert result["mx"] == 0.0  # at centroid → no lever arm
 
     def test_two_node_overturning(self):
         """Two base nodes with vertical reactions → My from Fz·dx."""
-        from fea_toolkit.utils import sum_reactions_with_overturning
         from fea_toolkit.model.sap_data import Node
+        from fea_toolkit.utils import sum_reactions_with_overturning
 
         nodes = {
             "A": Node(node_id="A", node_tag=10, x=0, y=0, z=0),
             "B": Node(node_id="B", node_tag=20, x=10, y=0, z=0),
         }
         reactions = {
-            10: {"fx": 0.0, "fy": 0.0, "fz": 100.0,
-                  "mx": 0.0, "my": 0.0, "mz": 0.0},
-            20: {"fx": 0.0, "fy": 0.0, "fz": -100.0,
-                  "mx": 0.0, "my": 0.0, "mz": 0.0},
+            10: {"fx": 0.0, "fy": 0.0, "fz": 100.0, "mx": 0.0, "my": 0.0, "mz": 0.0},
+            20: {"fx": 0.0, "fy": 0.0, "fz": -100.0, "mx": 0.0, "my": 0.0, "mz": 0.0},
         }
         result = sum_reactions_with_overturning(reactions, nodes)
         assert abs(result["fz"]) < 1e-10  # equal and opposite
@@ -4080,14 +4639,20 @@ class TestSumReactionsWithOverturning:
     def test_empty_reactions(self):
         """Empty reactions → all zero."""
         from fea_toolkit.utils import sum_reactions_with_overturning
-        result = sum_reactions_with_overturning({}, {"N1": type("N", (), {"x": 0, "y": 0, "z": 0})()})
+
+        result = sum_reactions_with_overturning(
+            {}, {"N1": type("N", (), {"x": 0, "y": 0, "z": 0})()}
+        )
         for k in ["fx", "fy", "fz", "mx", "my", "mz"]:
             assert result[k] == 0.0
 
     def test_empty_nodes(self):
         """Empty nodes → all zero."""
         from fea_toolkit.utils import sum_reactions_with_overturning
-        result = sum_reactions_with_overturning({1: {"fx": 1.0, "fy": 0, "fz": 0, "mx": 0, "my": 0, "mz": 0}}, {})
+
+        result = sum_reactions_with_overturning(
+            {1: {"fx": 1.0, "fy": 0, "fz": 0, "mx": 0, "my": 0, "mz": 0}}, {}
+        )
         for k in ["fx", "fy", "fz", "mx", "my", "mz"]:
             assert result[k] == 0.0
 
@@ -4096,39 +4661,45 @@ class TestSumReactionsWithOverturning:
 # RS base_reactions_cqc (two-stage path)
 # ═════════════════════════════════════════════════════════════════════════════
 
+
 class TestRSBaseReactionsTwoStage:
     """Test that RS analysis returns full 6-DoF base reactions."""
 
     def test_base_reactions_cqc_keys(self):
         """run_response_spectrum_analysis returns base_reactions_cqc."""
-        import openseespy.opensees as ops
         from examples.sample_model import make_sample_model
-        from fea_toolkit.opensees.preprocessor import Preprocessor
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import Preprocessor
 
         md = make_sample_model()
-        pp = Preprocessor({"split_elements": True, "create_shells": False,
-                           "verbose": False})
+        pp = Preprocessor({"split_elements": True, "create_shells": False, "verbose": False})
         mesh = pp.run(md)
-        ab = AnalysisBuilder(mesh, {"verbose": False,
-                                     "element_type": "elasticBeamColumn"})
+        ab = AnalysisBuilder(mesh, {"verbose": False, "element_type": "elasticBeamColumn"})
         ab.build_domain()
         ab.compute_seismic_masses()
 
         spec_cfg = {
-            "code": "GB50011", "intensity": 7, "acceleration": 0.10,
-            "site_class": "I1", "design_group": 1, "level": "rare",
+            "code": "GB50011",
+            "intensity": 7,
+            "acceleration": 0.10,
+            "site_class": "I1",
+            "design_group": 1,
+            "level": "rare",
             "damping": 0.05,
         }
         from fea_toolkit.spectrum import _build_spectrum
+
         T_spec, Sa_spec, _, _, _, _ = _build_spectrum(spec_cfg)
 
         modal = ab.run_modal_analysis(num_modes=2, print_results=False)
         rs = ab.run_response_spectrum_analysis(
             num_modes=min(2, modal["num_modes"]),
             modal_periods=modal["periods"],
-            spectrum_periods=T_spec, spectrum_accels=Sa_spec,
-            direction="X", damping_ratio=0.05, print_results=False,
+            spectrum_periods=T_spec,
+            spectrum_accels=Sa_spec,
+            direction="X",
+            damping_ratio=0.05,
+            print_results=False,
         )
 
         # New full 6-DoF results
@@ -4146,8 +4717,8 @@ class TestRSBaseReactionsTwoStage:
     def test_check_load_equilibrium_has_correct_units(self):
         """check_load_equilibrium uses mesh_model.units, not '?'."""
         from examples.sample_model import make_sample_model
-        from fea_toolkit.opensees.preprocessor import Preprocessor
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import Preprocessor
 
         md = make_sample_model()
         pp = Preprocessor({"split_elements": True, "verbose": False})
@@ -4163,6 +4734,7 @@ class TestRSBaseReactionsTwoStage:
 # ═════════════════════════════════════════════════════════════════════════════
 # CSM module tests (standalone, no OpenSees required)
 # ═════════════════════════════════════════════════════════════════════════════
+
 
 class TestCsmModule:
     """Test the standalone CSM utility functions in model/csm.py."""
@@ -4216,12 +4788,28 @@ class TestCsmModule:
         accels = [3.0, 3.0, 3.0, 1.5, 0.8, 0.4, 0.2]
 
         pp = compute_performance_point(
-            pushover, modal, shapes, periods, accels,
-            direction="X", damping_ratio=0.05, max_iter=20, tol=0.05,
+            pushover,
+            modal,
+            shapes,
+            periods,
+            accels,
+            direction="X",
+            damping_ratio=0.05,
+            max_iter=20,
+            tol=0.05,
         )
         assert isinstance(pp, dict)
-        assert set(pp) >= {"S_dp", "S_ap", "V_base", "D_roof", "T_eq", "mu",
-                          "converged", "S_dy", "S_ay"}
+        assert set(pp) >= {
+            "S_dp",
+            "S_ap",
+            "V_base",
+            "D_roof",
+            "T_eq",
+            "mu",
+            "converged",
+            "S_dy",
+            "S_ay",
+        }
         assert pp["S_dp"] > 1e-6
         assert pp["S_ap"] > 1e-6
         assert pp["V_base"] > 1e-6
@@ -4244,10 +4832,13 @@ class TestCsmModule:
             "periods": [0.5],
         }
         shapes = {0: {1: (1.0, 0.0, 0.0)}}
-        with pytest.raises(ValueError, match="too few|Too few"):
+        with pytest.raises(ValueError, match=r"too few|Too few"):
             compute_performance_point(
-                pushover, modal, shapes,
-                [0.1, 0.5], [3.0, 1.5],
+                pushover,
+                modal,
+                shapes,
+                [0.1, 0.5],
+                [3.0, 1.5],
             )
 
     def test_pushover_to_adrs_y_direction(self):
@@ -4303,8 +4894,7 @@ class TestBilinearization:
         stiffness-change can detect the knee and composite will not fall back."""
         S_d = np.linspace(0.0, 0.08, 41)
         # Linear elastic up to S_d = 0.02 (S_a = 100), then hardening at 500.
-        S_a = np.where(S_d <= 0.02, 5000.0 * S_d,
-                       100.0 + 500.0 * (S_d - 0.02))
+        S_a = np.where(S_d <= 0.02, 5000.0 * S_d, 100.0 + 500.0 * (S_d - 0.02))
         S_a[0] = 0.0
         return S_d, S_a
 
@@ -4329,9 +4919,7 @@ class TestBilinearization:
         """Curve with a clear peak before softening."""
         S_d = np.linspace(0.0, 0.10, 31)
         # Ascend to 0.040 m, then descend
-        S_a = np.where(S_d <= 0.04,
-                       10000.0 * S_d,
-                       400.0 - 200.0 * (S_d - 0.04) / 0.06)
+        S_a = np.where(S_d <= 0.04, 10000.0 * S_d, 400.0 - 200.0 * (S_d - 0.04) / 0.06)
         S_a = np.maximum(S_a, 0.0)
         return S_d, S_a
 
@@ -4344,10 +4932,26 @@ class TestBilinearization:
         *after* the peak, stiffness-change returns peak (fallback) and
         composite falls back to equal-energy.
         """
-        S_d = np.array([0.0, 0.005, 0.010, 0.015, 0.020, 0.025, 0.030,
-                        0.035, 0.040, 0.050, 0.060, 0.070, 0.080])
-        S_a = np.array([0.0, 50.0, 100.0, 150.0, 200.0, 250.0, 275.0,
-                        285.0, 110.0, 120.0, 125.0, 128.0, 130.0])
+        S_d = np.array(
+            [
+                0.0,
+                0.005,
+                0.010,
+                0.015,
+                0.020,
+                0.025,
+                0.030,
+                0.035,
+                0.040,
+                0.050,
+                0.060,
+                0.070,
+                0.080,
+            ]
+        )
+        S_a = np.array(
+            [0.0, 50.0, 100.0, 150.0, 200.0, 250.0, 275.0, 285.0, 110.0, 120.0, 125.0, 128.0, 130.0]
+        )
         return S_d, S_a
 
     @pytest.fixture
@@ -4364,8 +4968,7 @@ class TestBilinearization:
     def noisy_curve(self):
         """Bilinear with slight numerical noise (negative S_a near origin)."""
         S_d = np.linspace(0.0, 0.08, 41)
-        S_a = np.where(S_d <= 0.02, 5000.0 * S_d,
-                       100.0 + 500.0 * (S_d - 0.02))
+        S_a = np.where(S_d <= 0.02, 5000.0 * S_d, 100.0 + 500.0 * (S_d - 0.02))
         # Inject small negative noise at a single point
         S_a[3] = -5.0
         S_a[0] = 0.0
@@ -4379,23 +4982,22 @@ class TestBilinearization:
         For this bilinear+hardening curve (K₁=5000, K₂=500), the secant
         stiffness crosses the 50 % threshold at S_d ≈ 0.046 m."""
         S_d, S_a = bilinear_curve
-        S_dy, S_ay, method = bilinearize_stiffness_change(S_d, S_a)
-        assert method == 'stiffness_change'
+        S_dy, _S_ay, method = bilinearize_stiffness_change(S_d, S_a)
+        assert method == "stiffness_change"
         # The stiffness-change detector finds the first point where
         # secant stiffness < 50 % of K_init.  For this curve that's
         # near S_d ≈ 0.046.
         peak_idx = int(np.argmax(S_a))
-        assert 0.040 <= S_dy <= 0.055, (
-            f"Expected S_dy in [0.040, 0.055], got {S_dy:.6f}")
+        assert 0.040 <= S_dy <= 0.055, f"Expected S_dy in [0.040, 0.055], got {S_dy:.6f}"
         assert S_dy < S_d[peak_idx] * 0.9, (
-            f"Expected yield well below peak, got S_dy={S_dy:.4f} "
-            f"vs peak={S_d[peak_idx]:.4f}")
+            f"Expected yield well below peak, got S_dy={S_dy:.4f} vs peak={S_d[peak_idx]:.4f}"
+        )
 
     def test_stiffness_change_elastic_resets_to_peak(self, elastic_curve):
         """Elastic curve → no stiffness drop → returns peak."""
         S_d, S_a = elastic_curve
         S_dy, S_ay, method = bilinearize_stiffness_change(S_d, S_a)
-        assert method == 'stiffness_change'
+        assert method == "stiffness_change"
         peak_idx = int(np.argmax(S_a))
         assert S_dy == pytest.approx(S_d[peak_idx])
         assert S_ay == pytest.approx(S_a[peak_idx])
@@ -4404,29 +5006,28 @@ class TestBilinearization:
         """Hardening curve returns a valid yield point."""
         S_d, S_a = hardening_curve
         S_dy, S_ay, method = bilinearize_stiffness_change(S_d, S_a)
-        assert method == 'stiffness_change'
+        assert method == "stiffness_change"
         assert S_dy > 0
         assert S_ay > 0
 
     def test_stiffness_change_threshold_config(self, bilinear_curve):
         """Higher threshold → more sensitive → earlier yield (smaller S_dy)."""
         S_d, S_a = bilinear_curve
-        S_dy_lo, _, _ = bilinearize_stiffness_change(
-            S_d, S_a, {'threshold': 0.30})
-        S_dy_hi, _, _ = bilinearize_stiffness_change(
-            S_d, S_a, {'threshold': 0.85})
+        S_dy_lo, _, _ = bilinearize_stiffness_change(S_d, S_a, {"threshold": 0.30})
+        S_dy_hi, _, _ = bilinearize_stiffness_change(S_d, S_a, {"threshold": 0.85})
         # A lower threshold (0.30) is less sensitive → detects later
         # (higher S_dy).  A higher threshold (0.85) is more sensitive
         # → detects earlier (lower S_dy).
         assert S_dy_hi <= S_dy_lo, (
             f"Higher threshold (0.85) should give S_dy <= lower (0.30), "
-            f"got {S_dy_hi:.6f} > {S_dy_lo:.6f}")
+            f"got {S_dy_hi:.6f} > {S_dy_lo:.6f}"
+        )
 
     def test_stiffness_change_sudden_drop_criterion_b(self, sudden_drop_curve):
         """Sudden single-step stiffness drop triggers criterion B."""
         S_d, S_a = sudden_drop_curve
-        S_dy, S_ay, method = bilinearize_stiffness_change(S_d, S_a)
-        assert method == 'stiffness_change'
+        S_dy, _S_ay, method = bilinearize_stiffness_change(S_d, S_a)
+        assert method == "stiffness_change"
         # Should detect at or near the drop index (8 → S_d=0.040)
         assert 0.035 <= S_dy <= 0.045, f"Expected S_dy near 0.040, got {S_dy:.6f}"
 
@@ -4434,20 +5035,19 @@ class TestBilinearization:
         """Explicit peak_idx truncates search range."""
         S_d, S_a = bilinear_curve
         # peak_idx=5 → peaks early → yield forced to peak area
-        S_dy_early, S_ay_early, method = bilinearize_stiffness_change(
-            S_d, S_a, {'peak_idx': 5})
-        assert method == 'stiffness_change'
+        S_dy_early, _S_ay_early, method = bilinearize_stiffness_change(S_d, S_a, {"peak_idx": 5})
+        assert method == "stiffness_change"
         # peak_idx=5 is before the true knee
         # S_d_arr ≈ [0, 0.002, 0.004, 0.006, 0.008, 0.010, ...]
         assert S_dy_early <= S_d[5], (
-            f"Expected S_dy <= {S_d[5]:.6f} (peak at index 5), "
-            f"got {S_dy_early:.6f}")
+            f"Expected S_dy <= {S_d[5]:.6f} (peak at index 5), got {S_dy_early:.6f}"
+        )
 
     def test_stiffness_change_two_points(self, two_point_curve):
         """Only 2 data points → returns the last (non-zero) point."""
         S_d, S_a = two_point_curve
         S_dy, S_ay, method = bilinearize_stiffness_change(S_d, S_a)
-        assert method == 'stiffness_change'
+        assert method == "stiffness_change"
         # With 2 points, peak_idx=1 (not < 1), so it computes secant
         # stiffness and falls through to return the peak.
         assert S_dy == pytest.approx(0.01)
@@ -4458,13 +5058,12 @@ class TestBilinearization:
     def test_equal_energy_bilinear_reasonable(self, bilinear_curve):
         """Bilinear curve → yield in plausible range with energy balance."""
         S_d, S_a = bilinear_curve
-        S_dy, S_ay, method = bilinearize_equal_energy(S_d, S_a)
-        assert method == 'equal_energy'
+        S_dy, _S_ay, method = bilinearize_equal_energy(S_d, S_a)
+        assert method == "equal_energy"
         peak_idx = int(np.argmax(S_a))
         S_d_peak = S_d[peak_idx]
         # Yield should be at or before peak for bilinear with plateau
-        assert S_dy <= S_d_peak, (
-            f"Expected S_dy ≤ peak ({S_d_peak:.4f}), got {S_dy:.4f}")
+        assert S_dy <= S_d_peak, f"Expected S_dy ≤ peak ({S_d_peak:.4f}), got {S_dy:.4f}"
         assert S_dy > 0
 
     def test_equal_energy_elastic_converges(self, elastic_curve):
@@ -4476,40 +5075,42 @@ class TestBilinearization:
         guess (0.3 * S_d_peak), so no peak-reset occurs.
         """
         S_d, S_a = elastic_curve
-        S_dy, S_ay, method = bilinearize_equal_energy(S_d, S_a)
-        assert method == 'equal_energy'
+        S_dy, _S_ay, method = bilinearize_equal_energy(S_d, S_a)
+        assert method == "equal_energy"
         peak_idx = int(np.argmax(S_a))
         # Initial guess = 0.3 * S_d_peak
         expected = 0.3 * S_d[peak_idx]
         assert S_dy == pytest.approx(expected, abs=1e-6), (
-            f"Expected S_dy ≈ {expected:.6f} (30% of peak), "
-            f"got {S_dy:.6f}")
+            f"Expected S_dy ≈ {expected:.6f} (30% of peak), got {S_dy:.6f}"
+        )
         # The ≥90% reset should NOT trigger for a linear curve
         # because S_dy (30% of peak) < 90% of peak.
         assert S_dy < 0.90 * S_d[peak_idx], (
             f"Peak reset should not trigger: S_dy={S_dy:.4f}, "
-            f"90% of peak={0.90 * S_d[peak_idx]:.4f}")
+            f"90% of peak={0.90 * S_d[peak_idx]:.4f}"
+        )
 
     def test_equal_energy_config_tolerance(self, hardening_curve):
         """Tighter tolerance affects iteration depth (result stable)."""
         S_d, S_a = hardening_curve
         # Coarse tolerance should still give a sensible S_dy
-        S_dy_coarse, S_ay_coarse, _ = bilinearize_equal_energy(
-            S_d, S_a, {'tolerance': 0.05, 'max_iter': 5})
-        S_dy_fine, S_ay_fine, _ = bilinearize_equal_energy(
-            S_d, S_a, {'tolerance': 0.0001, 'max_iter': 200})
+        S_dy_coarse, _S_ay_coarse, _ = bilinearize_equal_energy(
+            S_d, S_a, {"tolerance": 0.05, "max_iter": 5}
+        )
+        S_dy_fine, _S_ay_fine, _ = bilinearize_equal_energy(
+            S_d, S_a, {"tolerance": 0.0001, "max_iter": 200}
+        )
         # Both should be in a plausible range
         peak_idx = int(np.argmax(S_a))
         S_d_peak = S_d[peak_idx]
         for label, S_dy_val in [("coarse", S_dy_coarse), ("fine", S_dy_fine)]:
-            assert 0 < S_dy_val, (
-                f"{label} S_dy={S_dy_val:.4f} out of range (peak={S_d_peak:.4f})")
+            assert S_dy_val > 0, f"{label} S_dy={S_dy_val:.4f} out of range (peak={S_d_peak:.4f})"
 
     def test_equal_energy_two_points(self, two_point_curve):
         """Only 2 data points — peak_idx < 2 returns yield at peak."""
         S_d, S_a = two_point_curve
         S_dy, S_ay, method = bilinearize_equal_energy(S_d, S_a)
-        assert method == 'equal_energy'
+        assert method == "equal_energy"
         # With peak_idx=1 (< 2), the function returns S_d_peak = 0.01.
         assert S_dy == pytest.approx(0.01, abs=1e-10)
         assert S_ay == pytest.approx(100.0, abs=1e-10)
@@ -4527,7 +5128,7 @@ class TestBilinearization:
         """
         S_d, S_a = hardening_curve
         S_dy, S_ay, method = bilinearize_equal_energy(S_d, S_a)
-        assert method in ('equal_energy', 'equal_energy_not_converged')
+        assert method in ("equal_energy", "equal_energy_not_converged")
         assert S_dy > 0
         assert S_ay > 0
         # If yield is below peak, verify area preservation
@@ -4537,7 +5138,7 @@ class TestBilinearization:
             K_init = float(np.polyfit(S_d[:n_el], S_a[:n_el], 1)[0])
             S_d_peak = float(S_d[peak_idx])
             S_a_peak = float(S_a[peak_idx])
-            area_actual = float(np.trapezoid(S_a[:peak_idx + 1], S_d[:peak_idx + 1]))
+            area_actual = float(np.trapezoid(S_a[: peak_idx + 1], S_d[: peak_idx + 1]))
             S_ay_derived = K_init * S_dy
             A1 = 0.5 * S_ay_derived * S_dy
             A2 = S_ay_derived * (S_d_peak - S_dy)
@@ -4546,7 +5147,8 @@ class TestBilinearization:
             rel_err = abs(area_bilin - area_actual) / max(area_actual, 1e-12)
             assert rel_err <= 0.01, (
                 f"Area error {rel_err:.4f} exceeds 1% for hardening curve: "
-                f"area_bilin={area_bilin:.6e}, area_actual={area_actual:.6e}")
+                f"area_bilin={area_bilin:.6e}, area_actual={area_actual:.6e}"
+            )
 
     def test_equal_energy_initial_guess_config(self, hardening_curve):
         """Higher initial_guess shifts the converged S_dy upward.
@@ -4558,23 +5160,21 @@ class TestBilinearization:
         moves from above vs below the true value.
         """
         S_d, S_a = hardening_curve
-        S_dy_low, _, _ = bilinearize_equal_energy(
-            S_d, S_a, {'initial_guess': 0.2})
-        S_dy_high, _, _ = bilinearize_equal_energy(
-            S_d, S_a, {'initial_guess': 0.6})
+        S_dy_low, _, _ = bilinearize_equal_energy(S_d, S_a, {"initial_guess": 0.2})
+        S_dy_high, _, _ = bilinearize_equal_energy(S_d, S_a, {"initial_guess": 0.6})
         peak_idx = int(np.argmax(S_a))
         S_d_peak = S_d[peak_idx]
         # Both guesses should yield plausible values < peak.
         assert 0 < S_dy_low <= S_d_peak, (
-            f"Expected 0 < S_dy_low ({S_dy_low:.4f}) <= peak"
-            f"({S_d_peak:.4f})")
+            f"Expected 0 < S_dy_low ({S_dy_low:.4f}) <= peak({S_d_peak:.4f})"
+        )
         assert 0 < S_dy_high <= S_d_peak, (
-            f"Expected 0 < S_dy_high ({S_dy_high:.4f}) <= peak"
-            f"({S_d_peak:.4f})")
+            f"Expected 0 < S_dy_high ({S_dy_high:.4f}) <= peak({S_d_peak:.4f})"
+        )
         # The higher initial guess should converge to a larger S_dy.
         assert S_dy_low <= S_dy_high, (
-            f"Expected S_dy_low ({S_dy_low:.4f}) <= S_dy_high "
-            f"({S_dy_high:.4f})")
+            f"Expected S_dy_low ({S_dy_low:.4f}) <= S_dy_high ({S_dy_high:.4f})"
+        )
         # The lower guess should be closer to the initial 20% of peak
         # and the higher guess closer to 60% of peak.
         # For hardening curves both guesses may converge at the peak
@@ -4584,28 +5184,28 @@ class TestBilinearization:
         # Only check the ratio when the result is below the peak.
         if S_dy_low < S_d_peak:
             assert abs(S_dy_low / S_d_peak - 0.2) <= 0.15, (
-                f"S_dy_low/{S_d_peak} = {S_dy_low / S_d_peak:.4f}, "
-                f"expected near 0.20")
+                f"S_dy_low/{S_d_peak} = {S_dy_low / S_d_peak:.4f}, expected near 0.20"
+            )
         if S_dy_high < S_d_peak:
             assert abs(S_dy_high / S_d_peak - 0.6) <= 0.4, (
-                f"S_dy_high/{S_d_peak} = {S_dy_high / S_d_peak:.4f}, "
-                f"expected near 0.6")
+                f"S_dy_high/{S_d_peak} = {S_dy_high / S_d_peak:.4f}, expected near 0.6"
+            )
 
     # ── bilinearize_composite ────────────────────────────────────────
 
     def test_composite_bilinear_uses_stiffness_change(self, bilinear_curve):
         """Clear yield below peak → composite uses stiffness-change path."""
         S_d, S_a = bilinear_curve
-        S_dy, S_ay, method = bilinearize_composite(S_d, S_a)
-        assert method == 'composite_stiffness_change', (
-            f"Expected composite_stiffness_change, got {method}")
+        S_dy, _S_ay, method = bilinearize_composite(S_d, S_a)
+        assert method == "composite_stiffness_change", (
+            f"Expected composite_stiffness_change, got {method}"
+        )
         peak_idx = int(np.argmax(S_a))
-        assert 0.040 <= S_dy <= 0.055, (
-            f"Expected S_dy in [0.040, 0.055], got {S_dy:.6f}")
+        assert 0.040 <= S_dy <= 0.055, f"Expected S_dy in [0.040, 0.055], got {S_dy:.6f}"
         # Yield must be well below the peak (no fallback)
         assert S_dy < 0.90 * S_d[peak_idx], (
-            f"Yield at {S_dy:.4f} should be < 90% of peak "
-            f"({S_d[peak_idx]:.4f})")
+            f"Yield at {S_dy:.4f} should be < 90% of peak ({S_d[peak_idx]:.4f})"
+        )
 
     def test_composite_elastic_falls_back(self, elastic_curve):
         """Elastic curve → stiffness-change yields at peak → fallback.
@@ -4616,24 +5216,22 @@ class TestBilinearization:
         peak (see test_equal_energy_elastic_converges).
         """
         S_d, S_a = elastic_curve
-        S_dy, S_ay, method = bilinearize_composite(S_d, S_a)
-        assert method == 'composite_equal_energy'
+        S_dy, _S_ay, method = bilinearize_composite(S_d, S_a)
+        assert method == "composite_equal_energy"
         peak_idx = int(np.argmax(S_a))
         # Expected yield = 30% peak (equal-energy default initial guess)
         expected = 0.3 * S_d[peak_idx]
         assert S_dy == pytest.approx(expected, abs=1e-6), (
-            f"Expected S_dy ≈ {expected:.6f} (30% peak), "
-            f"got {S_dy:.6f}")
+            f"Expected S_dy ≈ {expected:.6f} (30% peak), got {S_dy:.6f}"
+        )
 
     def test_composite_hardening_in_range(self, hardening_curve):
         """Hardening curve returns a method and plausible yield."""
         S_d, S_a = hardening_curve
-        S_dy, S_ay, method = bilinearize_composite(S_d, S_a)
-        assert method in ('composite_stiffness_change',
-                          'composite_equal_energy')
+        S_dy, _S_ay, method = bilinearize_composite(S_d, S_a)
+        assert method in ("composite_stiffness_change", "composite_equal_energy")
         peak_idx = int(np.argmax(S_a))
-        assert S_dy < S_d[peak_idx], (
-            f"Expected yield < peak ({S_d[peak_idx]:.4f}), got {S_dy:.4f}")
+        assert S_dy < S_d[peak_idx], f"Expected yield < peak ({S_d[peak_idx]:.4f}), got {S_dy:.4f}"
         assert S_dy > 0
 
     def test_composite_minimum_10_percent_clamp(self, bilinear_curve):
@@ -4642,48 +5240,54 @@ class TestBilinearization:
         Construct a curve whose stiffness-change yield would land near
         zero, then verify the composite clamp brings it up to 10 %.
         """
-        S_d = np.array([0.0, 0.001, 0.002, 0.003, 0.004, 0.005,
-                        0.010, 0.020, 0.040, 0.060, 0.080, 0.100])
-        S_a = np.array([0.0, 10.0, 20.0, 30.0, 40.0, 50.0,
-                        100.0, 200.0, 350.0, 400.0, 420.0, 430.0])
-        S_dy, S_ay, method = bilinearize_composite(S_d, S_a)
+        S_d = np.array(
+            [0.0, 0.001, 0.002, 0.003, 0.004, 0.005, 0.010, 0.020, 0.040, 0.060, 0.080, 0.100]
+        )
+        S_a = np.array(
+            [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 100.0, 200.0, 350.0, 400.0, 420.0, 430.0]
+        )
+        S_dy, _S_ay, _method = bilinearize_composite(S_d, S_a)
         peak_idx = int(np.argmax(S_a))
         min_S_dy = 0.10 * S_d[peak_idx]
         assert S_dy >= min_S_dy - 1e-12, (
-            f"Expected S_dy >= 10% of peak ({min_S_dy:.6f}), "
-            f"got {S_dy:.6f}")
+            f"Expected S_dy >= 10% of peak ({min_S_dy:.6f}), got {S_dy:.6f}"
+        )
 
     def test_composite_peak_idx_passthrough(self, peak_curve):
         """Explicit peak_idx is passed through to sub-methods."""
         S_d, S_a = peak_curve
         peak_idx = 15  # well before the true peak
-        S_dy, S_ay, method = bilinearize_composite(
-            S_d, S_a, {'peak_idx': peak_idx})
-        assert method in ('composite_stiffness_change',
-                          'composite_equal_energy')
+        S_dy, _S_ay, method = bilinearize_composite(S_d, S_a, {"peak_idx": peak_idx})
+        assert method in ("composite_stiffness_change", "composite_equal_energy")
         # The yield should be ≤ S_d[peak_idx] since that's the forced peak
         assert S_dy <= S_d[peak_idx] + 1e-12, (
             f"Expected S_dy <= forced peak at index {peak_idx} "
-            f"({S_d[peak_idx]:.6f}), got {S_dy:.6f}")
+            f"({S_d[peak_idx]:.6f}), got {S_dy:.6f}"
+        )
 
     def test_composite_config_passthrough(self, bilinear_curve):
         """Config dict is passed through, affecting sub-method behavior."""
         S_d, S_a = bilinear_curve
         S_dy_default, _, method_default = bilinearize_composite(S_d, S_a)
         S_dy_custom, _, method_custom = bilinearize_composite(
-            S_d, S_a, {'initial_guess': 0.6})  # passed to equal-energy
+            S_d, S_a, {"initial_guess": 0.6}
+        )  # passed to equal-energy
         # Both should be stiffness-change since bilinear has clear knee
         # below 90% of peak
-        assert method_default == 'composite_stiffness_change', (
-            f"Expected composite_stiffness_change, got {method_default}")
-        assert method_custom == 'composite_stiffness_change', (
-            f"Expected composite_stiffness_change, got {method_custom}")
+        assert method_default == "composite_stiffness_change", (
+            f"Expected composite_stiffness_change, got {method_default}"
+        )
+        assert method_custom == "composite_stiffness_change", (
+            f"Expected composite_stiffness_change, got {method_custom}"
+        )
         # Both should return the same stiffness-change result
-        peak_idx = int(np.argmax(S_a))
+        int(np.argmax(S_a))
         assert 0.040 <= S_dy_default <= 0.055, (
-            f"Expected S_dy in [0.040, 0.055], got {S_dy_default:.6f}")
+            f"Expected S_dy in [0.040, 0.055], got {S_dy_default:.6f}"
+        )
         assert 0.040 <= S_dy_custom <= 0.055, (
-            f"Expected S_dy in [0.040, 0.055], got {S_dy_custom:.6f}")
+            f"Expected S_dy in [0.040, 0.055], got {S_dy_custom:.6f}"
+        )
 
     # ── Edge cases (applies to all methods) ─────────────────────────
 
@@ -4695,9 +5299,9 @@ class TestBilinearization:
         """
         S_d, S_a = empty_curve
         for fn, expected_method in [
-            (bilinearize_stiffness_change, 'stiffness_change'),
-            (bilinearize_equal_energy, 'equal_energy'),
-            (bilinearize_composite, 'composite_equal_energy'),
+            (bilinearize_stiffness_change, "stiffness_change"),
+            (bilinearize_equal_energy, "equal_energy"),
+            (bilinearize_composite, "composite_equal_energy"),
         ]:
             S_dy, S_ay, method = fn(S_d, S_a)
             assert S_dy == 0.0, f"{fn.__name__}: expected S_dy=0.0, got {S_dy}"
@@ -4714,9 +5318,7 @@ class TestBilinearization:
         yield point (the negative point is skipped during peak search).
         """
         S_d, S_a = noisy_curve
-        for fn in (bilinearize_stiffness_change,
-                   bilinearize_equal_energy,
-                   bilinearize_composite):
+        for fn in (bilinearize_stiffness_change, bilinearize_equal_energy, bilinearize_composite):
             S_dy, S_ay, _ = fn(S_d, np.abs(S_a))
             assert S_dy > 0, f"S_dy should be positive, got {S_dy:.6e}"
             assert S_ay > 0, f"S_ay should be positive, got {S_ay:.6e}"
@@ -4729,7 +5331,7 @@ class TestBilinearization:
         For a purely linear curve S_a = K * S_d:
         - stiffness_change returns the peak (no stiffness drop detected)
         - equal_energy converges at the 30% initial guess
-        
+
         Both results should produce a plausible ductility ≤ 3.33 (i.e.
         S_dy ≥ 30 % of peak), consistent with an essentially elastic
         structure.
@@ -4740,20 +5342,21 @@ class TestBilinearization:
         S_a_peak = S_a[peak_idx]
 
         results = {
-            'stiffness_change': bilinearize_stiffness_change(S_d, S_a),
-            'equal_energy': bilinearize_equal_energy(S_d, S_a),
-            'composite': bilinearize_composite(S_d, S_a),
+            "stiffness_change": bilinearize_stiffness_change(S_d, S_a),
+            "equal_energy": bilinearize_equal_energy(S_d, S_a),
+            "composite": bilinearize_composite(S_d, S_a),
         }
 
         for name, (S_dy, S_ay, method) in results.items():
             # Yield displacement must be at least 30 % of peak
             assert S_dy >= 0.30 * S_d_peak, (
                 f"{name} ({method}): S_dy={S_dy:.6f} < 30% of peak "
-                f"({0.30 * S_d_peak:.6f}) for an elastic curve")
+                f"({0.30 * S_d_peak:.6f}) for an elastic curve"
+            )
             # Yield acceleration must be positive and finite
             assert 0 < S_ay <= S_a_peak, (
-                f"{name} ({method}): S_ay={S_ay:.6f} out of "
-                f"range (0, {S_a_peak:.6f}]")
+                f"{name} ({method}): S_ay={S_ay:.6f} out of range (0, {S_a_peak:.6f}]"
+            )
             # Ductility mu = S_d_peak / S_dy must be ≤ 3.34
             # (3.33 allows for floating-point rounding — exact 30% guess
             # gives 3.333..., which just exceeds 3.33)
@@ -4761,7 +5364,8 @@ class TestBilinearization:
             assert mu <= 3.34, (
                 f"{name} ({method}): mu={mu:.2f} > 3.34 "
                 f"(S_dy={S_dy:.6f}, peak={S_d_peak:.6f}) "
-                f"for an elastic curve")
+                f"for an elastic curve"
+            )
 
     def test_yield_index_before_peak(self, bilinear_curve):
         """Yield index from stiffness-change and equal-energy is before peak.
@@ -4772,27 +5376,27 @@ class TestBilinearization:
         """
         S_d, S_a = bilinear_curve
         peak_idx = int(np.argmax(S_a))
-        for fn in (bilinearize_stiffness_change,
-                   bilinearize_equal_energy):
-            S_dy, S_ay, _ = fn(S_d, S_a)
+        for fn in (bilinearize_stiffness_change, bilinearize_equal_energy):
+            S_dy, _S_ay, _ = fn(S_d, S_a)
             # Find the first index where S_d ≥ S_dy
             if S_dy > 0:
                 yield_idx = int(np.argmax(S_d >= S_dy))
                 assert yield_idx <= peak_idx, (
-                    f"Yield at index {yield_idx} is after peak "
-                    f"at index {peak_idx}")
+                    f"Yield at index {yield_idx} is after peak at index {peak_idx}"
+                )
                 assert S_dy <= S_d[peak_idx], (
-                    f"Yield S_dy={S_dy:.6f} should be <= "
-                    f"S_d_peak={S_d[peak_idx]:.6f}")
+                    f"Yield S_dy={S_dy:.6f} should be <= S_d_peak={S_d[peak_idx]:.6f}"
+                )
 
     def test_composite_sudden_drop_falls_back(self, sudden_drop_curve):
         """Sudden drop after peak → stiffness-change falls back to peak
         (>90% of S_d_peak) → composite uses equal-energy."""
         S_d, S_a = sudden_drop_curve
-        S_dy, S_ay, method = bilinearize_composite(S_d, S_a)
-        assert method == 'composite_equal_energy', (
+        S_dy, _S_ay, method = bilinearize_composite(S_d, S_a)
+        assert method == "composite_equal_energy", (
             f"Expected composite_equal_energy (stiffness-change returns "
-            f"peak, triggering fallback), got {method}")
+            f"peak, triggering fallback), got {method}"
+        )
         peak_idx = int(np.argmax(S_a))
         # Equal-energy converges near S_d ≈ 0.026 for this curve
         # (the initial guess is 30% of peak = 0.0105, but the curve
@@ -4801,5 +5405,5 @@ class TestBilinearization:
         # Equal-energy converges at the peak for a sudden-drop curve where
         # the curve is near-linear up to the peak — S_dy may equal S_d_peak.
         assert 0.020 <= S_dy <= S_d[peak_idx], (
-            f"Expected S_dy in [0.020, {S_d[peak_idx]:.6f}], "
-            f"got {S_dy:.6f}")
+            f"Expected S_dy in [0.020, {S_d[peak_idx]:.6f}], got {S_dy:.6f}"
+        )

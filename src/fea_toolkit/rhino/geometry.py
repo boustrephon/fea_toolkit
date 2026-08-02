@@ -8,23 +8,26 @@ lightweight Extrusion objects.
 
 from __future__ import annotations
 
-import typing as t
 import math
+import typing as t
 
 try:
-    import Rhino  # pyright: ignore[reportMissingImports] # noqa: F401
-    import scriptcontext as sc  # pyright: ignore[reportMissingImports]
+    import Rhino  # pyright: ignore[reportMissingImports]
     import Rhino.DocObjects as rd  # pyright: ignore[reportMissingImports]
     import Rhino.Geometry as rg  # pyright: ignore[reportMissingImports]
+    import scriptcontext as sc  # pyright: ignore[reportMissingImports]
 except ImportError:
     Rhino = sc = rd = rg = None  # type: ignore
 
-from ..model.sap_data import SAPModelData
 from ..model.sap_data import (
-    ISection, PipeSection, BoxSection, ChannelSection,
-    RectangularSection, CircularSection,
+    BoxSection,
+    ChannelSection,
+    CircularSection,
+    ISection,
+    PipeSection,
+    RectangularSection,
+    SAPModelData,
 )
-
 
 # ========================================================================
 # Section profile builders (XY plane for Extrusion.Create)
@@ -32,54 +35,68 @@ from ..model.sap_data import (
 # Extrusion.Create() extrudes along Z, so profiles are in the XY plane.
 # The convention: x = width (→ element y_axis), y = depth (→ element z_axis)
 
-def _profile_rect(depth: float, bf: float) -> t.List[t.Tuple[float, float]]:
+
+def _profile_rect(depth: float, bf: float) -> list[tuple[float, float]]:
     """Solid rectangular profile in the XY plane."""
     h, w = depth / 2.0, bf / 2.0
     return [(-w, -h), (-w, h), (w, h), (w, -h)]
 
 
-def _profile_i(depth: float, bf: float, tf: float, tw: float
-               ) -> t.List[t.Tuple[float, float]]:
+def _profile_i(depth: float, bf: float, tf: float, tw: float) -> list[tuple[float, float]]:
     """I/Wide-flange profile in the XY plane."""
     h = depth / 2.0
     w = bf / 2.0
     wi = tw / 2.0
     fi = h - tf
     return [
-        (-w, -h), (w, -h),
-        (w, -fi), (wi, -fi),
-        (wi, fi), (w, fi),
-        (w, h), (-w, h),
-        (-w, fi), (-wi, fi),
-        (-wi, -fi), (-w, -fi),
+        (-w, -h),
+        (w, -h),
+        (w, -fi),
+        (wi, -fi),
+        (wi, fi),
+        (w, fi),
+        (w, h),
+        (-w, h),
+        (-w, fi),
+        (-wi, fi),
+        (-wi, -fi),
+        (-w, -fi),
     ]
 
 
-def _profile_box(depth: float, bf: float, tf: float, tw: float
-                 ) -> t.List[t.Tuple[float, float]]:
+def _profile_box(depth: float, bf: float, tf: float, tw: float) -> list[tuple[float, float]]:
     """Box/RHS profile in the XY plane."""
     h = depth / 2.0
     w = bf / 2.0
     hi = h - tf
     wi = w - tw
     return [
-        (-w, -h), (w, -h), (w, h), (-w, h),
-        (-w, hi), (wi, hi), (wi, -hi), (-w, -hi),
+        (-w, -h),
+        (w, -h),
+        (w, h),
+        (-w, h),
+        (-w, hi),
+        (wi, hi),
+        (wi, -hi),
+        (-w, -hi),
     ]
 
 
-def _profile_channel(depth: float, bf: float, tf: float, tw: float
-                     ) -> t.List[t.Tuple[float, float]]:
+def _profile_channel(depth: float, bf: float, tf: float, tw: float) -> list[tuple[float, float]]:
     """Channel/C-section profile in the XY plane (CW winding)."""
     h = depth / 2.0
     w = bf / 2.0
     fi = h - tf
     wi = tw / 2.0
     return [
-        (-w, -h), (-w, h),
-        (w, h), (w, fi),
-        (wi, fi), (wi, -fi),
-        (w, -fi), (w, -h),
+        (-w, -h),
+        (-w, h),
+        (w, h),
+        (w, fi),
+        (wi, fi),
+        (wi, -fi),
+        (w, -fi),
+        (w, -h),
     ]
 
 
@@ -110,13 +127,12 @@ def _build_profile_curve(sec) -> t.Optional[t.Any]:
     elif isinstance(sec, BoxSection):
         if sec.depth > 0 and sec.bf > 0:
             pts_2d = _profile_box(sec.depth, sec.bf, sec.tf, sec.tw)
-    elif isinstance(sec, ChannelSection):
-        if sec.depth > 0 and sec.bf > 0:
-            pts_2d = _profile_channel(sec.depth, sec.bf, sec.tf, sec.tw)
+    elif isinstance(sec, ChannelSection) and sec.depth > 0 and sec.bf > 0:
+        pts_2d = _profile_channel(sec.depth, sec.bf, sec.tf, sec.tw)
 
     # Fallback for catalogue sections with zero dimensions
     if pts_2d is None and not is_circle:
-        side = (sec.A ** 0.5) if sec.A > 0 else 0.1
+        side = (sec.A**0.5) if sec.A > 0 else 0.1
         pts_2d = _profile_rect(side, side)
 
     if is_circle:
@@ -137,9 +153,10 @@ def _build_profile_curve(sec) -> t.Optional[t.Any]:
 # Local axes (mirrors ``get_SAP_vecxz``)
 # ========================================================================
 
-def _local_axes(p_i: rg.Point3d, p_j: rg.Point3d,
-                angle_deg: float = 0.0
-                ) -> t.Optional[t.Tuple[rg.Vector3d, rg.Vector3d, rg.Vector3d]]:
+
+def _local_axes(
+    p_i: rg.Point3d, p_j: rg.Point3d, angle_deg: float = 0.0
+) -> t.Optional[tuple[rg.Vector3d, rg.Vector3d, rg.Vector3d]]:
     """Compute local (x, y, z) unit vectors — matches OpenSees convention."""
     x_axis = rg.Vector3d(p_j.X - p_i.X, p_j.Y - p_i.Y, p_j.Z - p_i.Z)
     length = x_axis.Length
@@ -181,21 +198,22 @@ def _local_axes(p_i: rg.Point3d, p_j: rg.Point3d,
 # Joint / Node geometry
 # ========================================================================
 
+
 def create_joint_points(
     md: SAPModelData,
     joint_layer_index: int,
-) -> t.Tuple[int, t.List[str]]:
+) -> tuple[int, list[str]]:
     """Create point objects for each node — same API as ``geometry.py``."""
     doc = sc.doc
     count = 0
-    obj_ids: t.List[str] = []
+    obj_ids: list[str] = []
 
     for nid, node in md.nodes.items():
         try:
             point = rg.Point3d(node.x, node.y, node.z)
             attr = rd.ObjectAttributes()
             attr.LayerIndex = joint_layer_index
-            attr.Name = "SAP_Joint_{}".format(nid)
+            attr.Name = f"SAP_Joint_{nid}"
 
             obj_id = doc.Objects.AddPoint(point, attr)
             if obj_id is None:
@@ -221,13 +239,9 @@ def create_joint_points(
                 for i, dof in enumerate(dof_names):
                     if i < len(restraint.dofs) and restraint.dofs[i]:
                         active.append(dof)
-                        attrs.SetUserString(
-                            "SAP_Restraint_{}".format(dof), "True"
-                        )
+                        attrs.SetUserString(f"SAP_Restraint_{dof}", "True")
                 if active:
-                    attrs.SetUserString(
-                        "SAP_Restraints", ",".join(active)
-                    )
+                    attrs.SetUserString("SAP_Restraints", ",".join(active))
             obj.CommitChanges()
         except Exception:
             continue
@@ -238,6 +252,7 @@ def create_joint_points(
 # ========================================================================
 # Frame element geometry — lightweight Extrusion
 # ========================================================================
+
 
 def _get_frame_points(md: SAPModelData, eid: str, elem):
     """Compute node I/J positions adjusted for frame end offsets.
@@ -286,14 +301,25 @@ def _get_frame_points(md: SAPModelData, eid: str, elem):
     elastic_i = rg.Point3d(p_i.X + xi.X, p_i.Y + xi.Y, p_i.Z + xi.Z)
     elastic_j = rg.Point3d(p_j.X - xj.X, p_j.Y - xj.Y, p_j.Z - xj.Z)
 
-    return (p_i, p_j, x_axis, y_axis, z_axis, length,
-            elastic_i, elastic_j,
-            off_y_i, off_z_i, off_y_j, off_z_j)
+    return (
+        p_i,
+        p_j,
+        x_axis,
+        y_axis,
+        z_axis,
+        length,
+        elastic_i,
+        elastic_j,
+        off_y_i,
+        off_z_i,
+        off_y_j,
+        off_z_j,
+    )
 
 
 def create_frame_lines(
     md: SAPModelData,
-    frame_section_layers: t.Dict[str, int],
+    frame_section_layers: dict[str, int],
 ) -> int:
     """Create line objects for frame centrelines (elastic portion)."""
     doc = sc.doc
@@ -313,7 +339,7 @@ def create_frame_lines(
             line = rg.Line(ei, ej)
             attr = rd.ObjectAttributes()
             attr.LayerIndex = layer_index
-            attr.Name = "SAP_Frame_{}".format(eid)
+            attr.Name = f"SAP_Frame_{eid}"
 
             obj_id = doc.Objects.AddLine(line, attr)
             if obj_id is None:
@@ -347,7 +373,7 @@ def create_frame_lines(
 
 def create_frame_extrusions(
     md: SAPModelData,
-    frame_extrusion_layers: t.Dict[str, int],
+    frame_extrusion_layers: dict[str, int],
 ) -> int:
     """Create lightweight ``Extrusion`` objects for frame elements.
 
@@ -364,9 +390,20 @@ def create_frame_extrusions(
             pts = _get_frame_points(md, eid, elem)
             if pts is None:
                 continue
-            (p_i, p_j, x_axis, y_axis, z_axis, length,
-             ei, ej,
-             off_y_i, off_z_i, off_y_j, off_z_j) = pts
+            (
+                _p_i,
+                _p_j,
+                x_axis,
+                y_axis,
+                z_axis,
+                length,
+                ei,
+                ej,
+                off_y_i,
+                off_z_i,
+                off_y_j,
+                off_z_j,
+            ) = pts
 
             sec_name = md.frame_assignments.get(eid, "")
             layer_index = frame_extrusion_layers.get(sec_name, default_layer)
@@ -394,10 +431,10 @@ def create_frame_extrusions(
                 extrusion = rg.Extrusion.Create(profile_curve, length, True)
             else:
                 signed_area = 0.0
-                n = profile.PointCount # pyright: ignore[reportAttributeAccessIssue]
+                n = profile.PointCount  # pyright: ignore[reportAttributeAccessIssue]
                 for j in range(n):
-                    p0 = profile.Point(j)     # pyright: ignore[reportAttributeAccessIssue]
-                    p1 = profile.Point((j + 1) % n)    # pyright: ignore[reportAttributeAccessIssue]
+                    p0 = profile.Point(j)  # pyright: ignore[reportAttributeAccessIssue]
+                    p1 = profile.Point((j + 1) % n)  # pyright: ignore[reportAttributeAccessIssue]
                     signed_area += p0.X * p1.Y - p1.X * p0.Y
                 signed_area *= 0.5
                 if signed_area < 0:
@@ -417,11 +454,13 @@ def create_frame_extrusions(
                 origin_i = rg.Point3d(
                     ei.X + y_axis.X * oy_i + z_axis.X * oz_i,
                     ei.Y + y_axis.Y * oy_i + z_axis.Y * oz_i,
-                    ei.Z + y_axis.Z * oy_i + z_axis.Z * oz_i)
+                    ei.Z + y_axis.Z * oy_i + z_axis.Z * oz_i,
+                )
                 origin_j = rg.Point3d(
                     ej.X + y_axis.X * off_y_j + z_axis.X * off_z_j,
                     ej.Y + y_axis.Y * off_y_j + z_axis.Y * off_z_j,
-                    ej.Z + y_axis.Z * off_y_j + z_axis.Z * off_z_j)
+                    ej.Z + y_axis.Z * off_y_j + z_axis.Z * off_z_j,
+                )
 
                 # Create a extrusion at I-end then morph to J-end
                 xform_i = rg.Transform.Identity
@@ -441,17 +480,16 @@ def create_frame_extrusions(
                 extrusion.Transform(xform_i)
 
                 path_vec = rg.Vector3d(
-                    origin_j.X - origin_i.X,
-                    origin_j.Y - origin_i.Y,
-                    origin_j.Z - origin_i.Z)
+                    origin_j.X - origin_i.X, origin_j.Y - origin_i.Y, origin_j.Z - origin_i.Z
+                )
                 if path_vec.Length > 1e-6:
                     cap0 = extrusion.PathBottom.Copy()
                     cap1 = extrusion.PathTop.Copy()
                     if cap0 and cap1:
                         cap1.Translate(path_vec)
                         brep = rg.Brep.CreateFromSweep(
-                            rg.Line(origin_i, origin_j).ToNurbsCurve(),
-                            cap0, True, 0.001)
+                            rg.Line(origin_i, origin_j).ToNurbsCurve(), cap0, True, 0.001
+                        )
                         if brep:
                             extrusion.Dispose()
                             # Store as extrusion-compatible (use a mesh representation)
@@ -498,7 +536,7 @@ def create_frame_extrusions(
 
             attr = rd.ObjectAttributes()
             attr.LayerIndex = layer_index
-            attr.Name = "SAP_FrameExt_{}".format(eid)
+            attr.Name = f"SAP_FrameExt_{eid}"
             obj_id = doc.Objects.AddExtrusion(extrusion, attr)
             if obj_id is None:
                 continue
@@ -527,29 +565,26 @@ def create_frame_extrusions(
 # Shell / Area element geometry
 # ========================================================================
 
+
 def _create_brep_from_points(points, area_id: str, layer_index: int, doc):
     """Create a planar Brep (or mesh fallback) from corner points."""
     n = len(points)
 
     if n == 3:
-        brep = rg.Brep.CreateFromCornerPoints(
-            points[0], points[1], points[2], 0.001
-        )
+        brep = rg.Brep.CreateFromCornerPoints(points[0], points[1], points[2], 0.001)
         if brep:
             attr = rd.ObjectAttributes()
             attr.LayerIndex = layer_index
-            attr.Name = "SAP_Shell_{}".format(area_id)
+            attr.Name = f"SAP_Shell_{area_id}"
             return doc.Objects.AddBrep(brep, attr)
         return None
 
     if n == 4:
-        brep = rg.Brep.CreateFromCornerPoints(
-            points[0], points[1], points[2], points[3], 0.001
-        )
+        brep = rg.Brep.CreateFromCornerPoints(points[0], points[1], points[2], points[3], 0.001)
         if brep:
             attr = rd.ObjectAttributes()
             attr.LayerIndex = layer_index
-            attr.Name = "SAP_Shell_{}".format(area_id)
+            attr.Name = f"SAP_Shell_{area_id}"
             return doc.Objects.AddBrep(brep, attr)
         return None
 
@@ -563,14 +598,15 @@ def _create_brep_from_points(points, area_id: str, layer_index: int, doc):
         if planar and len(planar) > 0:
             attr = rd.ObjectAttributes()
             attr.LayerIndex = layer_index
-            attr.Name = "SAP_Shell_{}_Ngon".format(area_id)
+            attr.Name = f"SAP_Shell_{area_id}_Ngon"
             return doc.Objects.AddBrep(planar[0], attr)
     except Exception:
         pass
 
     # Mesh fallback
     try:
-        from System.Collections.Generic import List # pyright: ignore[reportMissingImports]
+        from System.Collections.Generic import List  # pyright: ignore[reportMissingImports]
+
         mesh = rg.Mesh()
         for pt in points:
             mesh.Vertices.Add(pt)
@@ -582,7 +618,7 @@ def _create_brep_from_points(points, area_id: str, layer_index: int, doc):
         mesh.Compact()
         attr = rd.ObjectAttributes()
         attr.LayerIndex = layer_index
-        attr.Name = "SAP_Shell_{}_Ngon".format(area_id)
+        attr.Name = f"SAP_Shell_{area_id}_Ngon"
         return doc.Objects.AddMesh(mesh, attr)
     except Exception:
         return None
@@ -590,7 +626,7 @@ def _create_brep_from_points(points, area_id: str, layer_index: int, doc):
 
 def create_shell_breps(
     md: SAPModelData,
-    shell_section_layers: t.Dict[str, int],
+    shell_section_layers: dict[str, int],
 ) -> int:
     """Create planar Brep surfaces for shell elements."""
     doc = sc.doc
@@ -642,7 +678,7 @@ def create_shell_breps(
 
 def create_shell_extrusions(
     md: SAPModelData,
-    shell_extrusion_layers: t.Dict[str, int],
+    shell_extrusion_layers: dict[str, int],
 ) -> int:
     """Create solid Breps for shell elements by offsetting the face."""
     doc = sc.doc
@@ -682,9 +718,7 @@ def create_shell_extrusions(
             shell_brep = shell_obj.Geometry
             face = shell_brep.Faces[0]
 
-            brep_solid = rg.Brep.CreateFromOffsetFace(
-                face, thickness, 0.001, True, True
-            )
+            brep_solid = rg.Brep.CreateFromOffsetFace(face, thickness, 0.001, True, True)
             if brep_solid is None:
                 continue
 
@@ -692,7 +726,7 @@ def create_shell_extrusions(
 
             attr = rd.ObjectAttributes()
             attr.LayerIndex = layer_index
-            attr.Name = "SAP_ShellExt_{}".format(aid)
+            attr.Name = f"SAP_ShellExt_{aid}"
             new_id = doc.Objects.AddBrep(brep_solid, attr)
             if new_id is None:
                 continue

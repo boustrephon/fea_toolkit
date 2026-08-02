@@ -16,7 +16,6 @@ from fea_toolkit.model.confinement import (
     mander_confined,
 )
 
-
 # ============================================================================
 # ConfinementData validation
 # ============================================================================
@@ -27,53 +26,90 @@ class TestConfinementDataValidation:
 
     def test_invalid_fc_raises(self):
         with pytest.raises(ValueError, match="fc must be > 0"):
-            ConfinementData(fc=0.0, tie_diameter=0.01, tie_spacing=0.1,
-                            tie_fy=420e6, core_bc=0.3, core_dc=0.3)
+            ConfinementData(
+                fc=0.0, tie_diameter=0.01, tie_spacing=0.1, tie_fy=420e6, core_bc=0.3, core_dc=0.3
+            )
 
     def test_invalid_tie_fy_raises(self):
         with pytest.raises(ValueError, match="tie_fy must be > 0"):
-            ConfinementData(fc=30e6, tie_diameter=0.01, tie_spacing=0.1,
-                            tie_fy=0.0, core_bc=0.3, core_dc=0.3)
+            ConfinementData(
+                fc=30e6, tie_diameter=0.01, tie_spacing=0.1, tie_fy=0.0, core_bc=0.3, core_dc=0.3
+            )
 
     def test_invalid_tie_diameter_raises(self):
         with pytest.raises(ValueError, match="tie_diameter must be > 0"):
-            ConfinementData(fc=30e6, tie_diameter=-0.01, tie_spacing=0.1,
-                            tie_fy=420e6, core_bc=0.3, core_dc=0.3)
+            ConfinementData(
+                fc=30e6, tie_diameter=-0.01, tie_spacing=0.1, tie_fy=420e6, core_bc=0.3, core_dc=0.3
+            )
 
     def test_negative_spacing_raises(self):
         with pytest.raises(ValueError, match="tie_spacing must be >= 0"):
-            ConfinementData(fc=30e6, tie_diameter=0.01, tie_spacing=-0.1,
-                            tie_fy=420e6, core_bc=0.3, core_dc=0.3)
+            ConfinementData(
+                fc=30e6, tie_diameter=0.01, tie_spacing=-0.1, tie_fy=420e6, core_bc=0.3, core_dc=0.3
+            )
 
     def test_spacing_smaller_than_tie_diameter_raises(self):
         with pytest.raises(ValueError, match="smaller than tie_diameter"):
-            ConfinementData(fc=30e6, tie_diameter=0.01, tie_spacing=0.005,
-                            tie_fy=420e6, core_bc=0.3, core_dc=0.3)
+            ConfinementData(
+                fc=30e6,
+                tie_diameter=0.01,
+                tie_spacing=0.005,
+                tie_fy=420e6,
+                core_bc=0.3,
+                core_dc=0.3,
+            )
 
     def test_unsupported_tie_config_raises(self):
         with pytest.raises(ValueError, match="Unsupported tie_config"):
-            ConfinementData(fc=30e6, tie_diameter=0.01, tie_spacing=0.1,
-                            tie_fy=420e6, core_bc=0.3, core_dc=0.3,
-                            tie_config="octagonal")
+            ConfinementData(
+                fc=30e6,
+                tie_diameter=0.01,
+                tie_spacing=0.1,
+                tie_fy=420e6,
+                core_bc=0.3,
+                core_dc=0.3,
+                tie_config="octagonal",
+            )
 
     def test_negative_cross_tie_count_raises(self):
         with pytest.raises(ValueError, match="cross_tie_count_x"):
-            ConfinementData(fc=30e6, tie_diameter=0.01, tie_spacing=0.1,
-                            tie_fy=420e6, core_bc=0.3, core_dc=0.3,
-                            tie_config="cross_tie", cross_tie_count_x=-1)
+            ConfinementData(
+                fc=30e6,
+                tie_diameter=0.01,
+                tie_spacing=0.1,
+                tie_fy=420e6,
+                core_bc=0.3,
+                core_dc=0.3,
+                tie_config="cross_tie",
+                cross_tie_count_x=-1,
+            )
 
     def test_zero_core_raises(self):
         with pytest.raises(ValueError, match="core_bc"):
-            ConfinementData(fc=30e6, tie_diameter=0.01, tie_spacing=0.1,
-                            tie_fy=420e6, core_bc=0.0, core_dc=0.3,
-                            overall_b=0.0, overall_h=0.0, cover=0.0)
+            ConfinementData(
+                fc=30e6,
+                tie_diameter=0.01,
+                tie_spacing=0.1,
+                tie_fy=420e6,
+                core_bc=0.0,
+                core_dc=0.3,
+                overall_b=0.0,
+                overall_h=0.0,
+                cover=0.0,
+            )
 
     def test_core_derived_from_overall_and_cover(self):
         """Core dimensions derived from overall dims when not given directly."""
         data = ConfinementData(
-            fc=30e6, tie_diameter=0.01, tie_spacing=0.1, tie_fy=420e6,
-            core_bc=0.0, core_dc=0.0,
-            overall_b=0.4, overall_h=0.5, cover=0.04,
+            fc=30e6,
+            tie_diameter=0.01,
+            tie_spacing=0.1,
+            tie_fy=420e6,
+            core_bc=0.0,
+            core_dc=0.0,
+            overall_b=0.4,
+            overall_h=0.5,
+            cover=0.04,
         )
         # centreline-to-centreline: overall - 2*cover - tie diameter
         assert data.core_bc == pytest.approx(0.4 - 2 * 0.04 - 0.01)
@@ -81,15 +117,27 @@ class TestConfinementDataValidation:
 
     def test_spiral_requires_core(self):
         with pytest.raises(ValueError, match="Spiral tie_config"):
-            ConfinementData(fc=30e6, tie_diameter=0.01, tie_spacing=0.08,
-                            tie_fy=420e6, core_bc=0.0, core_dc=0.0,
-                            tie_config="spiral")
+            ConfinementData(
+                fc=30e6,
+                tie_diameter=0.01,
+                tie_spacing=0.08,
+                tie_fy=420e6,
+                core_bc=0.0,
+                core_dc=0.0,
+                tie_config="spiral",
+            )
 
     def test_invalid_ecu_max_raises(self):
         with pytest.raises(ValueError, match="ecu_max must be greater than 0"):
-            ConfinementData(fc=30e6, tie_diameter=0.01, tie_spacing=0.1,
-                            tie_fy=420e6, core_bc=0.3, core_dc=0.3,
-                            ecu_max=0.0)
+            ConfinementData(
+                fc=30e6,
+                tie_diameter=0.01,
+                tie_spacing=0.1,
+                tie_fy=420e6,
+                core_bc=0.3,
+                core_dc=0.3,
+                ecu_max=0.0,
+            )
 
 
 # ============================================================================
@@ -215,9 +263,16 @@ class TestManderRectangularCrossTie:
         """Two extra legs per direction double the transverse steel ratio."""
         standard = mander_confined(
             ConfinementData(
-                fc=30e6, tie_diameter=0.01, tie_spacing=0.1, tie_fy=420e6,
-                core_bc=0.3, core_dc=0.3, long_diameter=0.02,
-                long_count_x=4, long_count_y=4, tie_config="standard",
+                fc=30e6,
+                tie_diameter=0.01,
+                tie_spacing=0.1,
+                tie_fy=420e6,
+                core_bc=0.3,
+                core_dc=0.3,
+                long_diameter=0.02,
+                long_count_x=4,
+                long_count_y=4,
+                tie_config="standard",
             )
         )
         cross = mander_confined(self._data())
@@ -226,9 +281,16 @@ class TestManderRectangularCrossTie:
     def test_cross_tie_stronger_than_standard(self):
         standard = mander_confined(
             ConfinementData(
-                fc=30e6, tie_diameter=0.01, tie_spacing=0.1, tie_fy=420e6,
-                core_bc=0.3, core_dc=0.3, long_diameter=0.02,
-                long_count_x=4, long_count_y=4, tie_config="standard",
+                fc=30e6,
+                tie_diameter=0.01,
+                tie_spacing=0.1,
+                tie_fy=420e6,
+                core_bc=0.3,
+                core_dc=0.3,
+                long_diameter=0.02,
+                long_count_x=4,
+                long_count_y=4,
+                tie_config="standard",
             )
         )
         cross = mander_confined(self._data())
@@ -284,9 +346,7 @@ class TestManderCircularSpiral:
     def test_spiral_volumetric_ratio(self):
         res = mander_confined(self._data())
         # rho_s = 4*Ab / (s*Ds) for spirals
-        expected_rho = (
-            4.0 * (math.pi * 0.01**2 / 4.0) / (0.08 * 0.32)
-        )
+        expected_rho = 4.0 * (math.pi * 0.01**2 / 4.0) / (0.08 * 0.32)
         assert res.rho_s == pytest.approx(expected_rho, rel=1e-6)
 
     def test_spiral_bounds(self):
@@ -308,8 +368,12 @@ class TestManderUnconfinedFallback:
         """s = 0 means no confinement - the engine returns f'c properties."""
         res = mander_confined(
             ConfinementData(
-                fc=30e6, tie_diameter=0.01, tie_spacing=0.0, tie_fy=420e6,
-                core_bc=0.3, core_dc=0.3,
+                fc=30e6,
+                tie_diameter=0.01,
+                tie_spacing=0.0,
+                tie_fy=420e6,
+                core_bc=0.3,
+                core_dc=0.3,
             )
         )
         assert res.fcc == pytest.approx(30e6)
@@ -323,8 +387,12 @@ class TestManderUnconfinedFallback:
         """Mesh-only formulas (ke, rho_cc) tolerate zero longitudinal data."""
         res = mander_confined(
             ConfinementData(
-                fc=30e6, tie_diameter=0.01, tie_spacing=0.1, tie_fy=420e6,
-                core_bc=0.3, core_dc=0.3,
+                fc=30e6,
+                tie_diameter=0.01,
+                tie_spacing=0.1,
+                tie_fy=420e6,
+                core_bc=0.3,
+                core_dc=0.3,
             )
         )
         assert res.fcc > 30e6
@@ -333,21 +401,33 @@ class TestManderUnconfinedFallback:
     def test_derived_core_dimensions_flow_through(self):
         """Overall + cover path yields the same result as explicit core."""
         derived = ConfinementData(
-            fc=30e6, tie_diameter=0.01, tie_spacing=0.1, tie_fy=420e6,
-            core_bc=0.0, core_dc=0.0,
-            overall_b=0.4, overall_h=0.4, cover=0.04,
-            long_diameter=0.02, long_count_x=4, long_count_y=4,
+            fc=30e6,
+            tie_diameter=0.01,
+            tie_spacing=0.1,
+            tie_fy=420e6,
+            core_bc=0.0,
+            core_dc=0.0,
+            overall_b=0.4,
+            overall_h=0.4,
+            cover=0.04,
+            long_diameter=0.02,
+            long_count_x=4,
+            long_count_y=4,
         )
         explicit = ConfinementData(
-            fc=30e6, tie_diameter=0.01, tie_spacing=0.1, tie_fy=420e6,
-            core_bc=0.31, core_dc=0.31,
-            long_diameter=0.02, long_count_x=4, long_count_y=4,
+            fc=30e6,
+            tie_diameter=0.01,
+            tie_spacing=0.1,
+            tie_fy=420e6,
+            core_bc=0.31,
+            core_dc=0.31,
+            long_diameter=0.02,
+            long_count_x=4,
+            long_count_y=4,
         )
         # 400 - 2*40 - 10 = 310 mm to hoop centreline
         assert mander_confined(derived).fcc == pytest.approx(
             mander_confined(explicit).fcc, rel=1e-6
         )
         # Spot-check a known value for the derived configuration
-        assert mander_confined(derived).fcc == pytest.approx(
-            39529032.48241702, rel=1e-6
-        )
+        assert mander_confined(derived).fcc == pytest.approx(39529032.48241702, rel=1e-6)

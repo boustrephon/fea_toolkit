@@ -7,19 +7,20 @@ dict/string.  They are independent of any specific project — the same
 functions can be used for any model parsed with ``SAP2000Parser``.
 """
 
-from typing import Dict, List, Optional, Tuple, Any
 import math
+from typing import Any, Optional
+
 import numpy as np
 import pandas as pd
 
 from ..model.sap_data import SAPModelData, ShellSection
 
-
 # ========================================================================
 # Bounding box
 # ========================================================================
 
-def bounding_box(md) -> Dict[str, float]:
+
+def bounding_box(md) -> dict[str, float]:
     """Return the model's node bounding box extents.
 
     Returns a dict with keys ``x_min``, ``x_max``, ``x_span``,
@@ -30,9 +31,15 @@ def bounding_box(md) -> Dict[str, float]:
     ys = [n.y for n in md.nodes.values()]
     zs = [n.z for n in md.nodes.values()]
     return {
-        "x_min": min(xs), "x_max": max(xs), "x_span": max(xs) - min(xs),
-        "y_min": min(ys), "y_max": max(ys), "y_span": max(ys) - min(ys),
-        "z_min": min(zs), "z_max": max(zs), "z_span": max(zs) - min(zs),
+        "x_min": min(xs),
+        "x_max": max(xs),
+        "x_span": max(xs) - min(xs),
+        "y_min": min(ys),
+        "y_max": max(ys),
+        "y_span": max(ys) - min(ys),
+        "z_min": min(zs),
+        "z_max": max(zs),
+        "z_span": max(zs) - min(zs),
         "n_nodes": len(md.nodes),
     }
 
@@ -41,10 +48,11 @@ def bounding_box(md) -> Dict[str, float]:
 # Mass source summary
 # ========================================================================
 
+
 def summarise_mass_sources(md) -> pd.DataFrame:
     """Return a DataFrame summarising all mass sources."""
-    from ..opensees.preprocessor import preprocess_model
     from ..opensees.analysis_builder import AnalysisBuilder
+    from ..opensees.preprocessor import preprocess_model
     from ..utils import g_from_units
 
     rows = []
@@ -64,10 +72,10 @@ def summarise_mass_sources(md) -> pd.DataFrame:
         rows.append(row)
 
     if md.mass_sources:
-        _mm = preprocess_model(md, {"element_type": "elasticBeamColumn",
-                                    "split_elements": True, "verbose": False})
-        b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn",
-                                 "verbose": False})
+        _mm = preprocess_model(
+            md, {"element_type": "elasticBeamColumn", "split_elements": True, "verbose": False}
+        )
+        b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn", "verbose": False})
         b.build_domain()
         node_masses = b.compute_seismic_masses()
         total_mass = sum(node_masses.values())
@@ -84,6 +92,7 @@ def summarise_mass_sources(md) -> pd.DataFrame:
 # ========================================================================
 # Load case summary
 # ========================================================================
+
 
 def summarise_load_cases(md) -> pd.DataFrame:
     """Return a DataFrame summarising all load cases.
@@ -147,6 +156,7 @@ def summarise_load_cases(md) -> pd.DataFrame:
 # Load pattern summary
 # ========================================================================
 
+
 def summarise_load_patterns(md) -> pd.DataFrame:
     """Return a DataFrame summarising all load patterns.
 
@@ -173,9 +183,11 @@ def summarise_load_patterns(md) -> pd.DataFrame:
     for col in ["LoadPat", "Type", "SelfWtMult", "\u03b1_max", "Tg (s)", "\u03b6", "SI"]:
         if col not in df.columns:
             df[col] = ""
-    cols = [c for c in ["LoadPat", "Type", "SelfWtMult",
-                         "\u03b1_max", "Tg (s)", "\u03b6", "SI"]
-            if c in df.columns]
+    cols = [
+        c
+        for c in ["LoadPat", "Type", "SelfWtMult", "\u03b1_max", "Tg (s)", "\u03b6", "SI"]
+        if c in df.columns
+    ]
     for c in df.columns:
         if c not in cols:
             cols.append(c)
@@ -186,6 +198,7 @@ def summarise_load_patterns(md) -> pd.DataFrame:
 # ========================================================================
 # Load pattern totals (from builder)
 # ========================================================================
+
 
 def load_pattern_totals(md) -> pd.DataFrame:
     """Build the model and return a DataFrame of total applied load per pattern.
@@ -201,12 +214,13 @@ def load_pattern_totals(md) -> pd.DataFrame:
     load pattern defined in the model (as computed by the builder's
     ``load_totals`` attribute).
     """
-    from ..opensees.preprocessor import preprocess_model
     from ..opensees.analysis_builder import AnalysisBuilder
-    _mm = preprocess_model(md, {"element_type": "elasticBeamColumn",
-                                "split_elements": True, "verbose": False})
-    b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn",
-                             "verbose": False})
+    from ..opensees.preprocessor import preprocess_model
+
+    _mm = preprocess_model(
+        md, {"element_type": "elasticBeamColumn", "split_elements": True, "verbose": False}
+    )
+    b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn", "verbose": False})
     b.build_domain()
     lt = getattr(b, "load_totals", {})
 
@@ -240,12 +254,14 @@ def load_pattern_totals(md) -> pd.DataFrame:
         # Skip patterns with zero load in all directions
         if fx == 0.0 and fy == 0.0 and fz == 0.0:
             continue
-        rows.append({
-            "Load Pattern": pname,
-            f"Fx ({fu})": fx,
-            f"Fy ({fu})": fy,
-            f"Fz ({fu})": fz,
-        })
+        rows.append(
+            {
+                "Load Pattern": pname,
+                f"Fx ({fu})": fx,
+                f"Fy ({fu})": fy,
+                f"Fz ({fu})": fz,
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -253,11 +269,12 @@ def load_pattern_totals(md) -> pd.DataFrame:
 # Material quantities
 # ========================================================================
 
+
 def material_summary(md) -> pd.DataFrame:
     """Return a DataFrame of material quantities (volume, weight)."""
     rows = []
     for eid, elem in md.frame_elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         sec_name = md.frame_assignments.get(eid)
         if not sec_name or sec_name not in md.sections:
@@ -275,40 +292,50 @@ def material_summary(md) -> pd.DataFrame:
         L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
         volume = sec.A * L
         weight = volume * mat.unit_weight
-        rows.append({
-            "material": sec.material,
-            "section": sec_name,
-            "elem_id": eid,
-            "length_m": round(L, 3),
-            "volume_m3": round(volume, 6),
-            "weight": round(weight, 2),
-        })
+        rows.append(
+            {
+                "material": sec.material,
+                "section": sec_name,
+                "elem_id": eid,
+                "length_m": round(L, 3),
+                "volume_m3": round(volume, 6),
+                "weight": round(weight, 2),
+            }
+        )
 
     if not rows:
         return pd.DataFrame()
 
     df = pd.DataFrame(rows)
     force_unit = md.units.get("F", "?")
-    summary = df.groupby("material").agg(
-        count=("elem_id", "count"),
-        total_volume_m3=("volume_m3", "sum"),
-        total_weight=("weight", "sum"),
-    ).reset_index()
-    total_row = pd.DataFrame([{
-        "material": "<strong>Total</strong>",
-        "count": summary["count"].sum(),
-        "total_volume_m3": summary["total_volume_m3"].sum(),
-        "total_weight": summary["total_weight"].sum(),
-    }])
+    summary = (
+        df.groupby("material")
+        .agg(
+            count=("elem_id", "count"),
+            total_volume_m3=("volume_m3", "sum"),
+            total_weight=("weight", "sum"),
+        )
+        .reset_index()
+    )
+    total_row = pd.DataFrame(
+        [
+            {
+                "material": "<strong>Total</strong>",
+                "count": summary["count"].sum(),
+                "total_volume_m3": summary["total_volume_m3"].sum(),
+                "total_weight": summary["total_weight"].sum(),
+            }
+        ]
+    )
     summary = pd.concat([summary, total_row], ignore_index=True)
     summary.columns = [
-        "Material", "Element count", "Total volume (m\u00b3)",
+        "Material",
+        "Element count",
+        "Total volume (m\u00b3)",
         f"Total weight ({force_unit})",
     ]
     for col in ["Total volume (m\u00b3)", f"Total weight ({force_unit})"]:
-        summary[col] = summary[col].apply(
-            lambda v: f"{v:.1f}" if v > 0 else "\u2014"
-        )
+        summary[col] = summary[col].apply(lambda v: f"{v:.1f}" if v > 0 else "\u2014")
     summary["Element count"] = summary["Element count"].apply(
         lambda v: f"{v}" if v > 0 else "\u2014"
     )
@@ -318,6 +345,7 @@ def material_summary(md) -> pd.DataFrame:
 # ========================================================================
 # Formatting helpers for section tables
 # ========================================================================
+
 
 def _sig4(val):
     """Format a number to 4 significant figures, or return '\u2014' if zero."""
@@ -343,6 +371,7 @@ def _force_unit_label(md) -> str:
 # Section summary
 # ========================================================================
 
+
 def section_summary(md) -> pd.DataFrame:
     """Return a DataFrame of structural sections with dimensions and weights.
 
@@ -353,7 +382,7 @@ def section_summary(md) -> pd.DataFrame:
 
     rows = []
     for eid, elem in md.frame_elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         sec_name = md.frame_assignments.get(eid)
         if not sec_name or sec_name not in md.sections:
@@ -374,18 +403,20 @@ def section_summary(md) -> pd.DataFrame:
         gamma = mat.unit_weight if mat and mat.unit_weight else 0
         w_total = gamma * sec.A * L if sec.A else 0
 
-        rows.append({
-            "Section": sec_name,
-            "Shape": shape,
-            "Material": mat_name,
-            "Count": 1,
-            "A": sec.A if sec.A else 0,
-            "I33": sec.I33 if sec.I33 else 0,
-            "I22": sec.I22 if sec.I22 else 0,
-            "Dimensions": "",
-            "W_total": w_total,
-            "elem_id": eid,
-        })
+        rows.append(
+            {
+                "Section": sec_name,
+                "Shape": shape,
+                "Material": mat_name,
+                "Count": 1,
+                "A": sec.A or 0,
+                "I33": sec.I33 or 0,
+                "I22": sec.I22 or 0,
+                "Dimensions": "",
+                "W_total": w_total,
+                "elem_id": eid,
+            }
+        )
 
     if not rows:
         return pd.DataFrame()
@@ -416,17 +447,19 @@ def section_summary(md) -> pd.DataFrame:
             elif hasattr(sec, "diameter") and sec.diameter:
                 dims = f"\u2300={_sig4(sec.diameter)}"
 
-        display.append({
-            "Section": sec_name,
-            "Shape": r["Shape"],
-            "Material": r["Material"],
-            "Count": total_count,
-            f"A ({length_unit}\u00b2)": _sig4(r["A"]),
-            f"I33 ({length_unit}\u2074)": _sig4(r["I33"]),
-            f"I22 ({length_unit}\u2074)": _sig4(r["I22"]),
-            "Dimensions": _nbsp(dims),
-            f"Total weight ({force_unit})": round(total_w, 1),
-        })
+        display.append(
+            {
+                "Section": sec_name,
+                "Shape": r["Shape"],
+                "Material": r["Material"],
+                "Count": total_count,
+                f"A ({length_unit}\u00b2)": _sig4(r["A"]),
+                f"I33 ({length_unit}\u2074)": _sig4(r["I33"]),
+                f"I22 ({length_unit}\u2074)": _sig4(r["I22"]),
+                "Dimensions": _nbsp(dims),
+                f"Total weight ({force_unit})": round(total_w, 1),
+            }
+        )
 
     return pd.DataFrame(display)
 
@@ -434,6 +467,7 @@ def section_summary(md) -> pd.DataFrame:
 # ========================================================================
 # Area (shell) section summary
 # ========================================================================
+
 
 def area_section_summary(md) -> pd.DataFrame:
     """Return a DataFrame of area (shell) sections with area and weight."""
@@ -469,19 +503,21 @@ def area_section_summary(md) -> pd.DataFrame:
             nx += (y1 - y2) * (z1 + z2)
             ny += (z1 - z2) * (x1 + x2)
             nz += (x1 - x2) * (y1 + y2)
-        area_mag = 0.5 * math.sqrt(nx*nx + ny*ny + nz*nz)
+        area_mag = 0.5 * math.sqrt(nx * nx + ny * ny + nz * nz)
         if area_mag < 1e-12:
             continue
 
         weight = area_mag * thickness * mat.unit_weight
 
-        rows.append({
-            "Area": aid,
-            "Section": sec_name,
-            "Thickness": thickness,
-            f"Area ({length_unit}\u00b2)": round(area_mag, 3),
-            f"Weight ({force_unit})": round(weight, 1),
-        })
+        rows.append(
+            {
+                "Area": aid,
+                "Section": sec_name,
+                "Thickness": thickness,
+                f"Area ({length_unit}\u00b2)": round(area_mag, 3),
+                f"Weight ({force_unit})": round(weight, 1),
+            }
+        )
 
     if not rows:
         return pd.DataFrame()
@@ -494,13 +530,15 @@ def area_section_summary(md) -> pd.DataFrame:
         total_weight = grp[f"Weight ({force_unit})"].sum()
         count = len(grp)
         r = grp.iloc[0]
-        display.append({
-            "Section": sec_name,
-            "Count": count,
-            "Thickness": r["Thickness"],
-            f"Total area ({length_unit}\u00b2)": round(total_area, 3),
-            f"Total weight ({force_unit})": round(total_weight, 1),
-        })
+        display.append(
+            {
+                "Section": sec_name,
+                "Count": count,
+                "Thickness": r["Thickness"],
+                f"Total area ({length_unit}\u00b2)": round(total_area, 3),
+                f"Total weight ({force_unit})": round(total_weight, 1),
+            }
+        )
 
     result = pd.DataFrame(display)
     total_area = df[f"Area ({length_unit}\u00b2)"].sum()
@@ -520,6 +558,7 @@ def area_section_summary(md) -> pd.DataFrame:
 # Modal analysis table (basic — 3 translational DOFs)
 # ========================================================================
 
+
 def modal_table(md, n_modes: int = 12, print_results: bool = False) -> pd.DataFrame:
     """Run elastic modal analysis and return a DataFrame of mode properties.
 
@@ -530,32 +569,36 @@ def modal_table(md, n_modes: int = 12, print_results: bool = False) -> pd.DataFr
 
     Columns: Mode, Period (s), Freq (Hz), Mx (%), My (%), Mz (%).
     """
-    from ..opensees.preprocessor import preprocess_model
     from ..opensees.analysis_builder import AnalysisBuilder
-    _mm = preprocess_model(md, {"element_type": "elasticBeamColumn",
-                                "split_elements": True, "verbose": False})
-    b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn",
-                             "verbose": False})
+    from ..opensees.preprocessor import preprocess_model
+
+    _mm = preprocess_model(
+        md, {"element_type": "elasticBeamColumn", "split_elements": True, "verbose": False}
+    )
+    b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn", "verbose": False})
     b.build_domain()
     b.compute_seismic_masses()
     modal = b.run_modal_analysis(num_modes=n_modes, print_results=print_results)
     mp = modal["modal_props"]
     rows = []
     for i in range(modal["num_modes"]):
-        rows.append({
-            "Mode": i + 1,
-            "Period (s)": round(modal["periods"][i], 4),
-            "Freq (Hz)": round(modal["frequencies"][i], 4),
-            "Mx (%)": round(mp.get("partiMassRatiosMX", [0])[i], 2),
-            "My (%)": round(mp.get("partiMassRatiosMY", [0])[i], 2),
-            "Mz (%)": round(mp.get("partiMassRatiosMZ", [0])[i], 2),
-        })
+        rows.append(
+            {
+                "Mode": i + 1,
+                "Period (s)": round(modal["periods"][i], 4),
+                "Freq (Hz)": round(modal["frequencies"][i], 4),
+                "Mx (%)": round(mp.get("partiMassRatiosMX", [0])[i], 2),
+                "My (%)": round(mp.get("partiMassRatiosMY", [0])[i], 2),
+                "Mz (%)": round(mp.get("partiMassRatiosMZ", [0])[i], 2),
+            }
+        )
     return pd.DataFrame(rows), modal
 
 
 # ========================================================================
 # Modal analysis table (enhanced — 6 DOFs including rotational)
 # ========================================================================
+
 
 def modal_table_enhanced(md, n_modes: int = 12, print_results: bool = False):
     """Run elastic modal analysis and return a DataFrame with 6 DOF participation.
@@ -567,12 +610,13 @@ def modal_table_enhanced(md, n_modes: int = 12, print_results: bool = False):
 
     Columns: Mode, Period, Mx%, My%, Mz%, Rx%, Ry%, Rz%  + a SUM row.
     """
-    from ..opensees.preprocessor import preprocess_model
     from ..opensees.analysis_builder import AnalysisBuilder
-    _mm = preprocess_model(md, {"element_type": "elasticBeamColumn",
-                                "split_elements": True, "verbose": False})
-    b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn",
-                             "verbose": False})
+    from ..opensees.preprocessor import preprocess_model
+
+    _mm = preprocess_model(
+        md, {"element_type": "elasticBeamColumn", "split_elements": True, "verbose": False}
+    )
+    b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn", "verbose": False})
     b.build_domain()
     b.compute_seismic_masses()
     modal = b.run_modal_analysis(num_modes=n_modes, print_results=print_results)
@@ -585,16 +629,18 @@ def modal_table_enhanced(md, n_modes: int = 12, print_results: bool = False):
 
     rows = []
     for i in range(n):
-        rows.append({
-            "Mode": i + 1,
-            "Period (s)": round(modal["periods"][i], 4),
-            "Mx (%)": _col("partiMassRatiosMX", i),
-            "My (%)": _col("partiMassRatiosMY", i),
-            "Mz (%)": _col("partiMassRatiosMZ", i),
-            "Rx (%)": _col("partiMassRatiosRMX", i),
-            "Ry (%)": _col("partiMassRatiosRMY", i),
-            "Rz (%)": _col("partiMassRatiosRMZ", i),
-        })
+        rows.append(
+            {
+                "Mode": i + 1,
+                "Period (s)": round(modal["periods"][i], 4),
+                "Mx (%)": _col("partiMassRatiosMX", i),
+                "My (%)": _col("partiMassRatiosMY", i),
+                "Mz (%)": _col("partiMassRatiosMZ", i),
+                "Rx (%)": _col("partiMassRatiosRMX", i),
+                "Ry (%)": _col("partiMassRatiosRMY", i),
+                "Rz (%)": _col("partiMassRatiosRMZ", i),
+            }
+        )
     df = pd.DataFrame(rows)
     pct_cols = ["Mx (%)", "My (%)", "Mz (%)", "Rx (%)", "Ry (%)", "Rz (%)"]
     for c in pct_cols:
@@ -602,7 +648,7 @@ def modal_table_enhanced(md, n_modes: int = 12, print_results: bool = False):
     # SUM row
     sum_row = {"Mode": "<strong>SUM</strong>"}
     for col in df.columns:
-        if col != "Mode" and col != "Period (s)":
+        if col not in {"Mode", "Period (s)"}:
             if col in pct_cols:
                 sum_row[col] = f"{df[col].astype(float).sum():.2f}"
             else:
@@ -618,7 +664,7 @@ def modal_table_enhanced(md, n_modes: int = 12, print_results: bool = False):
 # ========================================================================
 
 
-def modal_participation_df(modal_result: Dict[str, Any]) -> Optional[pd.DataFrame]:
+def modal_participation_df(modal_result: dict[str, Any]) -> Optional[pd.DataFrame]:
     """Build a modal participation DataFrame from existing modal results.
 
     Uses the modal_props dict returned by
@@ -637,12 +683,20 @@ def modal_participation_df(modal_result: Dict[str, Any]) -> Optional[pd.DataFram
         return None
 
     ratio_keys = [
-        "partiMassRatiosMX", "partiMassRatiosMY", "partiMassRatiosMZ",
-        "partiMassRatiosRMX", "partiMassRatiosRMY", "partiMassRatiosRMZ",
+        "partiMassRatiosMX",
+        "partiMassRatiosMY",
+        "partiMassRatiosMZ",
+        "partiMassRatiosRMX",
+        "partiMassRatiosRMY",
+        "partiMassRatiosRMZ",
     ]
     col_names = [
-        "Mx (%)", "My (%)", "Mz (%)",
-        "Rx (%)", "Ry (%)", "Rz (%)",
+        "Mx (%)",
+        "My (%)",
+        "Mz (%)",
+        "Rx (%)",
+        "Ry (%)",
+        "Rz (%)",
     ]
 
     rows = []
@@ -661,9 +715,10 @@ def modal_participation_df(modal_result: Dict[str, Any]) -> Optional[pd.DataFram
     return df
 
 
-def save_modal_participation_html(modal_result: Dict[str, Any],
-                                  out_dir: str = "output",
-                                  ) -> Optional[str]:
+def save_modal_participation_html(
+    modal_result: dict[str, Any],
+    out_dir: str = "output",
+) -> Optional[str]:
     """Build an HTML modal‑participation table from existing results and save.
 
     Also prints a clean text summary to the console.
@@ -671,6 +726,7 @@ def save_modal_participation_html(modal_result: Dict[str, Any],
     Returns the path to the saved HTML file, or ``None``.
     """
     from pathlib import Path
+
     df = modal_participation_df(modal_result)
     if df is None:
         return None
@@ -715,6 +771,7 @@ def save_modal_participation_html(modal_result: Dict[str, Any],
 # Linear analysis table formatting
 # ========================================================================
 
+
 def format_linear_table(df_linear: pd.DataFrame, units: dict) -> pd.DataFrame:
     """Format the linear analysis table for display.
 
@@ -758,8 +815,8 @@ def format_linear_table(df_linear: pd.DataFrame, units: dict) -> pd.DataFrame:
 # Storey level summary
 # ========================================================================
 
-def storey_level_summary(md, z_tol: float = 0.01,
-                         print_results: bool = True) -> pd.DataFrame:
+
+def storey_level_summary(md, z_tol: float = 0.01, print_results: bool = True) -> pd.DataFrame:
     """Report storey (floor) levels inferred from the model's node Z‑coordinates.
 
     Nodes are clustered by their Z coordinate.  For each level the
@@ -801,7 +858,6 @@ def storey_level_summary(md, z_tol: float = 0.01,
     Returns:
         A :class:`pandas.DataFrame` sorted top‑to‑bottom.
     """
-    from collections import Counter
 
     # ── 1. Cluster nodes by Z (tolerance-based) ────────────────────────
     z_levels = {}
@@ -890,15 +946,17 @@ def storey_level_summary(md, z_tol: float = 0.01,
         diaph_nodes = [nid for nid in node_ids if nid not in restrained_set]
         n_diaph = len(diaph_nodes)
 
-        rows.append({
-            "Level": level_labels[z],
-            "Z": round(z, 3),
-            "Nodes": n_nodes,
-            "Restrained": n_restrained,
-            "Diaph nodes": n_diaph,
-            "Horiz frames": n_horiz_frames,
-            "Horiz areas": n_horiz_areas,
-        })
+        rows.append(
+            {
+                "Level": level_labels[z],
+                "Z": round(z, 3),
+                "Nodes": n_nodes,
+                "Restrained": n_restrained,
+                "Diaph nodes": n_diaph,
+                "Horiz frames": n_horiz_frames,
+                "Horiz areas": n_horiz_areas,
+            }
+        )
 
     df = pd.DataFrame(rows)
 
@@ -930,8 +988,7 @@ def storey_level_summary(md, z_tol: float = 0.01,
             )
             print(row)
         print(sep)
-        print(f"\n{len(sorted_zs)} storey levels detected "
-              f"(Z tolerance = {z_tol}).")
+        print(f"\n{len(sorted_zs)} storey levels detected (Z tolerance = {z_tol}).")
 
     return df
 
@@ -939,6 +996,7 @@ def storey_level_summary(md, z_tol: float = 0.01,
 # ========================================================================
 # Euler buckling check for braces
 # ========================================================================
+
 
 def brace_buckling_check(md, n_longest: int = 2, K: float = 1.0) -> pd.DataFrame:
     """Identify the longest braces and compute their Euler buckling capacity.
@@ -966,18 +1024,26 @@ def brace_buckling_check(md, n_longest: int = 2, K: float = 1.0) -> pd.DataFrame
         ``P_cr ({fu})`` (Euler buckling load, in force units).
     """
     from ..model.sap_data import (
-        PipeSection, AngleSection, DoubleAngleSection, TeeSection, ChannelSection,
+        AngleSection,
+        ChannelSection,
+        DoubleAngleSection,
+        PipeSection,
+        TeeSection,
     )
+
     brace_shape_types = (
-        PipeSection, AngleSection, DoubleAngleSection,
-        TeeSection, ChannelSection,
+        PipeSection,
+        AngleSection,
+        DoubleAngleSection,
+        TeeSection,
+        ChannelSection,
     )
     fu = md.units.get("F", "N")
     lu = md.units.get("L", "m")
 
     rows = []
     for eid, elem in md.frame_elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         sec_name = md.frame_assignments.get(eid)
         if not sec_name or sec_name not in md.sections:
@@ -1002,21 +1068,23 @@ def brace_buckling_check(md, n_longest: int = 2, K: float = 1.0) -> pd.DataFrame
         I22 = sec.I22 if sec.I22 and sec.I22 > 0 else sec.I33
         A = sec.A if sec.A and sec.A > 0 else 1e-4
 
-        P_cr = (math.pi ** 2 * E * I22) / ((K * L) ** 2)
+        P_cr = (math.pi**2 * E * I22) / ((K * L) ** 2)
         r_val = math.sqrt(I22 / A)
-        slenderness = (K * L) / r_val if r_val > 0 else float('inf')
+        slenderness = (K * L) / r_val if r_val > 0 else float("inf")
 
-        rows.append({
-            "Element": eid,
-            "Section": sec_name,
-            "Shape": type(sec).__name__.replace("Section", ""),
-            "Material": sec.material,
-            f"Length ({lu})": round(L, 3),
-            f"A ({lu}\u00b2)": round(A, 6),
-            f"I22 ({lu}\u2074)": round(I22, 8),
-            "Slenderness": round(slenderness, 1),
-            f"P_cr ({fu})": round(P_cr, 0),
-        })
+        rows.append(
+            {
+                "Element": eid,
+                "Section": sec_name,
+                "Shape": type(sec).__name__.replace("Section", ""),
+                "Material": sec.material,
+                f"Length ({lu})": round(L, 3),
+                f"A ({lu}\u00b2)": round(A, 6),
+                f"I22 ({lu}\u2074)": round(I22, 8),
+                "Slenderness": round(slenderness, 1),
+                f"P_cr ({fu})": round(P_cr, 0),
+            }
+        )
 
     if not rows:
         return pd.DataFrame({"Note": ["No brace sections found in model."]})
@@ -1051,6 +1119,7 @@ def pushover_comparison_table(
     pd.DataFrame
     """
     import pandas as pd
+
     if patterns is None:
         patterns = list(all_out.keys())
     rows = []
@@ -1080,8 +1149,16 @@ def pushover_comparison_table(
                 rd = dir_letter
                 rs_case = linear_df[linear_df["Case"] == f"RS-{rd}"]
                 wind_plus = linear_df[linear_df["Case"] == f"Wind+{rd}"]
-                rs_v = abs(rs_case[vcol].values[0]) if len(rs_case) and vcol in rs_case.columns else 0.0
-                wind_v = abs(wind_plus[vcol].values[0]) if len(wind_plus) and vcol in wind_plus.columns else 0.0
+                rs_v = (
+                    abs(rs_case[vcol].values[0])
+                    if len(rs_case) and vcol in rs_case.columns
+                    else 0.0
+                )
+                wind_v = (
+                    abs(wind_plus[vcol].values[0])
+                    if len(wind_plus) and vcol in wind_plus.columns
+                    else 0.0
+                )
                 row[f"RS-{rd} V_base"] = round(rs_v, 1) if rs_v > 0 else "-"
                 row[f"Wind+{rd} V_base"] = round(wind_v, 1) if wind_v > 0 else "-"
 
@@ -1090,9 +1167,7 @@ def pushover_comparison_table(
     return pd.DataFrame(rows).fillna("-")
 
 
-def wind_sanity_check(md, df_linear,
-                      wind_case_x: str = "Wind+X",
-                      wind_case_y: str = "Wind+Y"):
+def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: str = "Wind+Y"):
     """Return a markdown paragraph checking wind loads against face area.
 
     Parameters
@@ -1135,15 +1210,17 @@ def wind_sanity_check(md, df_linear,
         "**Wind load sanity check:**",
         "",
         f"| Face | Area ({lu}²) | Total {fu} | Pressure ({fu}/{lu}²) |",
-        f"|---|---|---|---|",
+        "|---|---|---|---|",
         f"| Wind +{wind_case_x[-1]} (Y‑Z face) | {x_face:.0f} | {fx:,.0f} | {p_x:.2f} |",
         f"| Wind +{wind_case_y[-1]} (X‑Z face) | {y_face:.0f} | {fy:,.0f} | {p_y:.2f} |",
     ]
 
     if max(p_x, p_y) > 0 and abs(p_x - p_y) / max(p_x, p_y) < 0.1:
         lines.append("")
-        lines.append("✅ Pressures are within 10 % — wind loads are consistent "
-                     "with the bounding box face areas.")
+        lines.append(
+            "✅ Pressures are within 10 % — wind loads are consistent "
+            "with the bounding box face areas."
+        )
 
     return "\n".join(lines)
 
@@ -1171,6 +1248,7 @@ def static_load_verification(md, mesh_model, config: dict = None):
         One row per load pattern with Applied/Reaction/Δ columns.
     """
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
     if config is None:
         config = {"verbose": False}
 
@@ -1180,8 +1258,7 @@ def static_load_verification(md, mesh_model, config: dict = None):
     ab = AnalysisBuilder(mesh_model, config)
     df_rxn = ab.check_load_equilibrium()
 
-    merged = df_applied.merge(df_rxn, on="Load Pattern", how="outer",
-                               suffixes=("_applied", "_rxn"))
+    merged = df_applied.merge(df_rxn, on="Load Pattern", how="outer", suffixes=("_applied", "_rxn"))
     rows = []
     for _, row in merged.iterrows():
         pname = row["Load Pattern"]
@@ -1196,19 +1273,21 @@ def static_load_verification(md, mesh_model, config: dict = None):
         dx = round(ax + rx, 1)
         dy = round(ay + ry, 1)
         dz = round(az + rz, 1)
-        rows.append({
-            "Load Pattern": pname,
-            "Type": pat_type,
-            f"Applied Fx ({fu})": round(ax, 1),
-            f"Applied Fy ({fu})": round(ay, 1),
-            f"Applied Fz ({fu})": round(az, 1),
-            f"Reaction Fx ({fu})": round(rx, 1),
-            f"Reaction Fy ({fu})": round(ry, 1),
-            f"Reaction Fz ({fu})": round(rz, 1),
-            f"\u0394Fx ({fu})": dx,
-            f"\u0394Fy ({fu})": dy,
-            f"\u0394Fz ({fu})": dz,
-        })
+        rows.append(
+            {
+                "Load Pattern": pname,
+                "Type": pat_type,
+                f"Applied Fx ({fu})": round(ax, 1),
+                f"Applied Fy ({fu})": round(ay, 1),
+                f"Applied Fz ({fu})": round(az, 1),
+                f"Reaction Fx ({fu})": round(rx, 1),
+                f"Reaction Fy ({fu})": round(ry, 1),
+                f"Reaction Fz ({fu})": round(rz, 1),
+                f"\u0394Fx ({fu})": dx,
+                f"\u0394Fy ({fu})": dy,
+                f"\u0394Fz ({fu})": dz,
+            }
+        )
 
     return pd.DataFrame(rows)
 
@@ -1230,19 +1309,18 @@ def run_linear_cases(
     rows = []
     config = {"element_type": "elasticBeamColumn", "verbose": False}
     import math
-    import numpy as np
+
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
     # ── Static cases: auto-detect LinStatic, then merge user overrides ──
     # Always auto-detect all LinStatic cases from the model
-    static_cases: Dict[str, Dict[str, float]] = {}
+    static_cases: dict[str, dict[str, float]] = {}
     for cname, lc in md.load_cases.items():
         if lc.case_type != "LinStatic":
             continue
         sd = lc.case_data.get("CASE - STATIC 1 - LOAD ASSIGNMENTS", [])
         if isinstance(sd, list):
-            pats = {a["LoadName"]: a["LoadSF"]
-                   for a in sd if "LoadName" in a}
+            pats = {a["LoadName"]: a["LoadSF"] for a in sd if "LoadName" in a}
         elif isinstance(sd, dict):
             pats = {sd["LoadName"]: sd["LoadSF"]}
         else:
@@ -1260,8 +1338,7 @@ def run_linear_cases(
                     continue
                 sd = lc.case_data.get("CASE - STATIC 1 - LOAD ASSIGNMENTS", [])
                 if isinstance(sd, list):
-                    pats = {a["LoadName"]: a["LoadSF"]
-                           for a in sd if "LoadName" in a}
+                    pats = {a["LoadName"]: a["LoadSF"] for a in sd if "LoadName" in a}
                 elif isinstance(sd, dict):
                     pats = {sd["LoadName"]: sd["LoadSF"]}
                 else:
@@ -1277,26 +1354,34 @@ def run_linear_cases(
         lp = m.load_patterns.get(pname)
         if lp is not None and lp.self_weight_factor > 0:
             return True
-        return any(ld.pattern == pname for ld in m.frame_dist_loads) \
-            or any(ld.pattern == pname for ld in m.joint_loads) \
-            or any(ld.pattern == pname for ld in m.area_gravity_loads) \
+        return (
+            any(ld.pattern == pname for ld in m.frame_dist_loads)
+            or any(ld.pattern == pname for ld in m.joint_loads)
+            or any(ld.pattern == pname for ld in m.area_gravity_loads)
             or any(ld.pattern == pname for ld in m.edge_loads_from_areas)
+        )
 
-    static_cases = {cname: pats for cname, pats in static_cases.items()
-                    if any(_pattern_has_loads(mesh_model, p) for p in pats)}
+    static_cases = {
+        cname: pats
+        for cname, pats in static_cases.items()
+        if any(_pattern_has_loads(mesh_model, p) for p in pats)
+    }
 
     from fea_toolkit.utils import sum_reactions_with_overturning
 
     for case_name, patterns in static_cases.items():
         ab = AnalysisBuilder(mesh_model, config)
         try:
-            results = ab.run_static_analysis(pattern_scales=patterns,
-                                            extract_reactions=True)
+            results = ab.run_static_analysis(pattern_scales=patterns, extract_reactions=True)
             # Use centralized overturning-moment computation (v1 match)
             rxn = results.get("reactions", {})
             summed = sum_reactions_with_overturning(rxn, mesh_model.nodes)
-            fx = summed["fx"]; fy = summed["fy"]; fz = summed["fz"]
-            mx = summed["mx"]; my = summed["my"]; mz = summed["mz"]
+            fx = summed["fx"]
+            fy = summed["fy"]
+            fz = summed["fz"]
+            mx = summed["mx"]
+            my = summed["my"]
+            mz = summed["mz"]
             disp = results.get("nodal_displacements", {})
             max_roof_disp = 0.0
             if disp:
@@ -1308,29 +1393,38 @@ def run_linear_cases(
             fx = fy = fz = mx = my = mz = max_roof_disp = 0.0
             print(f"  Warning: {case_name} failed — {e}")
 
-        rows.append({
-            "Case": case_name,
-            "Type": "Static",
-            "Fx": fx, "Fy": fy, "Fz": fz,
-            "Mx": mx, "My": my, "Mz": mz,
-            "Roof disp": max_roof_disp if "Wind" in case_name else None,
-        })
+        rows.append(
+            {
+                "Case": case_name,
+                "Type": "Static",
+                "Fx": fx,
+                "Fy": fy,
+                "Fz": fz,
+                "Mx": mx,
+                "My": my,
+                "Mz": mz,
+                "Roof disp": max_roof_disp if "Wind" in case_name else None,
+            }
+        )
 
     # ── Response spectrum cases ─────────────────────────────────
     if spec_cfg:
         from fea_toolkit.spectrum import _build_spectrum
-        T_spec_built, Sa_spec_built, alpha_max, tg, zeta_eff, _ = _build_spectrum(spec_cfg)
+
+        T_spec_built, Sa_spec_built, alpha_max, tg, _zeta_eff, _ = _build_spectrum(spec_cfg)
         T_spec = T_spec_built
         Sa_spec = Sa_spec_built
     else:
         # Fallback: rare spectrum with 5% damping
         from fea_toolkit.spectrum import _gb50011_spectrum
+
         zeta = 0.05
         gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
         eta_1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
         eta_2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))
-        lu = md.units.get("L", "m")
+        md.units.get("L", "m")
         from ..utils import g_from_units
+
         gravity = g_from_units(md.units)
         tg = 0.25
         alpha_max = 0.50
@@ -1358,8 +1452,8 @@ def run_linear_cases(
                 damping_ratio=0.05,
                 print_results=False,
             )
-            v_base = rs.get("base_shear_cqc", 0.0)
-            m_base = rs.get("base_moment_cqc", 0.0)
+            rs.get("base_shear_cqc", 0.0)
+            rs.get("base_moment_cqc", 0.0)
             v_srss = rs.get("base_shear_srss", 0.0)
             m_srss = rs.get("base_moment_srss", 0.0)
             # Full 6-DoF reactions with overturning (from new centralized
@@ -1384,23 +1478,25 @@ def run_linear_cases(
             else:
                 roof_disp_rs = roof_disp_srss = 0.0
         except Exception as e:
-            v_base = m_base = v_srss = m_srss = roof_disp_rs = roof_disp_srss = 0.0
+            v_srss = m_srss = roof_disp_rs = roof_disp_srss = 0.0
             r_cqc = {}
             print(f"  Warning: RS-{rs_dir} failed — {e}")
 
-        rows.append({
-            "Case": f"RS-{rs_dir}",
-            "Type": "Response Spectrum",
-            "Fx": r_cqc.get("fx", 0.0),
-            "Fy": r_cqc.get("fy", 0.0),
-            "Fz": r_cqc.get("fz", 0.0),
-            "Mx": r_cqc.get("mx", 0.0),
-            "My": r_cqc.get("my", 0.0),
-            "Mz": r_cqc.get("mz", 0.0),
-            "Roof disp": roof_disp_rs,
-            "Roof disp SRSS": roof_disp_srss,
-            "V_srss": v_srss,
-            "M_srss": m_srss,
-        })
+        rows.append(
+            {
+                "Case": f"RS-{rs_dir}",
+                "Type": "Response Spectrum",
+                "Fx": r_cqc.get("fx", 0.0),
+                "Fy": r_cqc.get("fy", 0.0),
+                "Fz": r_cqc.get("fz", 0.0),
+                "Mx": r_cqc.get("mx", 0.0),
+                "My": r_cqc.get("my", 0.0),
+                "Mz": r_cqc.get("mz", 0.0),
+                "Roof disp": roof_disp_rs,
+                "Roof disp SRSS": roof_disp_srss,
+                "V_srss": v_srss,
+                "M_srss": m_srss,
+            }
+        )
 
     return pd.DataFrame(rows)

@@ -1,12 +1,19 @@
 """Flexible selection/filter criteria for SAP2000 model elements."""
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional, Union
 
 if TYPE_CHECKING:
     from .mesh_model import MeshModel
-    from .sap_data import Group, SAPModelData, FrameElement, AreaElement, Node
-    from .sap_data import AreaUniformLoad, AreaGravityLoad
+    from .sap_data import (
+        AreaElement,
+        AreaGravityLoad,
+        AreaUniformLoad,
+        FrameElement,
+        Group,
+        Node,
+        SAPModelData,
+    )
     from .stories import StoryLevel
 
 
@@ -126,18 +133,17 @@ class Selection:
         ... )
     """
 
-    element_types: Optional[List[str]] = None
-    sections: Optional[List[str]] = None
-    materials: Optional[List[str]] = None
-    groups: Optional[List[str]] = None
-    element_ids: Optional[List[str]] = None
-    elevation_range: Optional[Tuple[float, float]] = None
-    story: Optional[List[str]] = None
+    element_types: Optional[list[str]] = None
+    sections: Optional[list[str]] = None
+    materials: Optional[list[str]] = None
+    groups: Optional[list[str]] = None
+    element_ids: Optional[list[str]] = None
+    elevation_range: Optional[tuple[float, float]] = None
+    story: Optional[list[str]] = None
 
     def __post_init__(self) -> None:
         """Validate invariants after construction."""
-        if (self.elevation_range is not None
-                and self.elevation_range[0] > self.elevation_range[1]):
+        if self.elevation_range is not None and self.elevation_range[0] > self.elevation_range[1]:
             raise ValueError(
                 f"Invalid elevation_range {self.elevation_range}: "
                 f"lower bound must not exceed upper bound"
@@ -208,7 +214,7 @@ class Selection:
         self,
         model: Union["SAPModelData", "MeshModel"],
         eid: str,
-        story_elevations: Optional[Dict[str, float]] = None,
+        story_elevations: Optional[dict[str, float]] = None,
         story_z_tolerance: float = 0.5,
     ) -> bool:
         """Check all selection criteria against either model type.
@@ -232,9 +238,7 @@ class Selection:
         # Elevation and story filters (only if either is set)
         if self.elevation_range is not None or self.story is not None:
             z_mid = self._get_frame_z_mid(model, eid)
-            if not self._match_z_filter(
-                z_mid, story_elevations, story_z_tolerance
-            ):
+            if not self._match_z_filter(z_mid, story_elevations, story_z_tolerance):
                 return False
         return True
 
@@ -242,7 +246,7 @@ class Selection:
         self,
         model: Union["SAPModelData", "MeshModel"],
         eid: str,
-        story_elevations: Optional[Dict[str, float]] = None,
+        story_elevations: Optional[dict[str, float]] = None,
         story_z_tolerance: float = 0.5,
     ) -> bool:
         """Check all selection criteria against either model type.
@@ -266,9 +270,7 @@ class Selection:
         # Elevation and story filters (only if either is set)
         if self.elevation_range is not None or self.story is not None:
             z_mid = self._get_area_z_mid(model, eid)
-            if not self._match_z_filter(
-                z_mid, story_elevations, story_z_tolerance
-            ):
+            if not self._match_z_filter(z_mid, story_elevations, story_z_tolerance):
                 return False
         return True
 
@@ -281,98 +283,66 @@ class Selection:
             return False
         if not self._match_id(eid):
             return False
-        if not self._match_groups(model, "Joint", eid):
-            return False
         # Nodes have no section/material, so those criteria are skipped
-        return True
+        return self._match_groups(model, "Joint", eid)
 
     # ── Public query methods ─────────────────────────────────────────────────
 
-    def get_frame_ids(
-        self, model: Union["SAPModelData", "MeshModel"]
-    ) -> List[str]:
+    def get_frame_ids(self, model: Union["SAPModelData", "MeshModel"]) -> list[str]:
         """Return frame element IDs matching this selection.
 
         Both :class:`SAPModelData` and :class:`MeshModel` expose the same
         ``frame_elements`` mapping, so the same lookup serves both.
         """
-        return [
-            eid for eid in model.frame_elements
-            if self._frame_matches(model, eid)
-        ]
+        return [eid for eid in model.frame_elements if self._frame_matches(model, eid)]
 
-    def get_area_ids(
-        self, model: Union["SAPModelData", "MeshModel"]
-    ) -> List[str]:
+    def get_area_ids(self, model: Union["SAPModelData", "MeshModel"]) -> list[str]:
         """Return area element IDs matching this selection.
 
         Both :class:`SAPModelData` and :class:`MeshModel` expose the same
         ``area_elements`` mapping, so the same lookup serves both.
         """
-        return [
-            eid for eid in model.area_elements
-            if self._area_matches(model, eid)
-        ]
+        return [eid for eid in model.area_elements if self._area_matches(model, eid)]
 
-    def get_node_ids(
-        self, model: Union["SAPModelData", "MeshModel"]
-    ) -> List[str]:
+    def get_node_ids(self, model: Union["SAPModelData", "MeshModel"]) -> list[str]:
         """Return node IDs matching this selection.
 
         Both :class:`SAPModelData` and :class:`MeshModel` expose the same
         ``nodes`` mapping, so the same lookup serves both.
         """
-        return [
-            nid for nid in model.nodes
-            if self._node_matches(model, nid)
-        ]
+        return [nid for nid in model.nodes if self._node_matches(model, nid)]
 
     # ── Dict filters ─────────────────────────────────────────────────────────
 
-    def filter_frames(
-        self, model: Union["SAPModelData", "MeshModel"]
-    ) -> Dict[str, "FrameElement"]:
+    def filter_frames(self, model: Union["SAPModelData", "MeshModel"]) -> dict[str, "FrameElement"]:
         """Return filtered frame elements as ``{id: FrameElement}``.
 
         Both :class:`SAPModelData` and :class:`MeshModel` store
         :class:`FrameElement` objects, so the same lookup serves both.
         """
-        return {
-            eid: model.frame_elements[eid]
-            for eid in self.get_frame_ids(model)
-        }
+        return {eid: model.frame_elements[eid] for eid in self.get_frame_ids(model)}
 
-    def filter_areas(
-        self, model: Union["SAPModelData", "MeshModel"]
-    ) -> Dict[str, "AreaElement"]:
+    def filter_areas(self, model: Union["SAPModelData", "MeshModel"]) -> dict[str, "AreaElement"]:
         """Return filtered area elements as ``{id: AreaElement}``.
 
         Both :class:`SAPModelData` and :class:`MeshModel` store
         :class:`AreaElement` objects, so the same lookup serves both.
         """
-        return {
-            eid: model.area_elements[eid]
-            for eid in self.get_area_ids(model)
-        }
+        return {eid: model.area_elements[eid] for eid in self.get_area_ids(model)}
 
-    def filter_nodes(
-        self, model: Union["SAPModelData", "MeshModel"]
-    ) -> Dict[str, "Node"]:
+    def filter_nodes(self, model: Union["SAPModelData", "MeshModel"]) -> dict[str, "Node"]:
         """Return filtered nodes as ``{id: Node}``.
 
         Both :class:`SAPModelData` and :class:`MeshModel` store
         :class:`Node` objects, so the same lookup serves both.
         """
-        return {
-            nid: model.nodes[nid]
-            for nid in self.get_node_ids(model)
-        }
+        return {nid: model.nodes[nid] for nid in self.get_node_ids(model)}
 
     # ── Load filters ─────────────────────────────────────────────────────────
 
     def filter_area_uniform_loads(
         self, model: Union["SAPModelData", "MeshModel"]
-    ) -> List["AreaUniformLoad"]:
+    ) -> list["AreaUniformLoad"]:
         """Return area uniform loads for areas matching this selection.
 
         Only checks membership (element type ``'Area'`` plus any
@@ -382,25 +352,19 @@ class Selection:
         Both :class:`SAPModelData` and :class:`MeshModel` expose the same
         ``area_uniform_loads`` list, so the same lookup serves both.
         """
-        selected_ids: Set[str] = set(self.get_area_ids(model))
-        return [
-            ld for ld in model.area_uniform_loads
-            if ld.area_id in selected_ids
-        ]
+        selected_ids: set[str] = set(self.get_area_ids(model))
+        return [ld for ld in model.area_uniform_loads if ld.area_id in selected_ids]
 
     def filter_area_gravity_loads(
         self, model: Union["SAPModelData", "MeshModel"]
-    ) -> List["AreaGravityLoad"]:
+    ) -> list["AreaGravityLoad"]:
         """Return area gravity loads for areas matching this selection.
 
         Both :class:`SAPModelData` and :class:`MeshModel` expose the same
         ``area_gravity_loads`` list, so the same lookup serves both.
         """
-        selected_ids: Set[str] = set(self.get_area_ids(model))
-        return [
-            ld for ld in model.area_gravity_loads
-            if ld.area_id in selected_ids
-        ]
+        selected_ids: set[str] = set(self.get_area_ids(model))
+        return [ld for ld in model.area_gravity_loads if ld.area_id in selected_ids]
 
     # ── Self-contained subset ────────────────────────────────────────────────
 
@@ -433,7 +397,7 @@ class Selection:
         area_ids = set(self.get_area_ids(model))
 
         # 2. Collect referenced node IDs
-        node_ids: Set[str] = set()
+        node_ids: set[str] = set()
         for fid in frame_ids:
             fe = model.frame_elements.get(fid)
             if fe is not None:
@@ -445,7 +409,7 @@ class Selection:
                 node_ids.update(ae.node_ids)
 
         # 3. Collect section names referenced by selected elements
-        sec_names: Set[str] = set()
+        sec_names: set[str] = set()
         for fid in frame_ids:
             s = model.frame_assignments.get(fid)
             if s:
@@ -456,7 +420,7 @@ class Selection:
                 sec_names.add(s)
 
         # 4. Collect material names from those sections
-        mat_names: Set[str] = set()
+        mat_names: set[str] = set()
         for sn in sec_names:
             sec = model.sections.get(sn)
             if sec is not None:
@@ -465,33 +429,35 @@ class Selection:
         # 5. Build filtered dicts
         subset = SAPModelData(
             # Nodes
-            nodes={nid: model.nodes[nid] for nid in node_ids
-                   if nid in model.nodes},
+            nodes={nid: model.nodes[nid] for nid in node_ids if nid in model.nodes},
             # Restraints on those nodes
-            restraints={nid: model.restraints[nid] for nid in node_ids
-                        if nid in model.restraints},
+            restraints={nid: model.restraints[nid] for nid in node_ids if nid in model.restraints},
             # Materials used by selected sections
-            materials={mn: model.materials[mn] for mn in mat_names
-                       if mn in model.materials},
+            materials={mn: model.materials[mn] for mn in mat_names if mn in model.materials},
             # Sections used by selected elements
-            sections={sn: model.sections[sn] for sn in sec_names
-                      if sn in model.sections},
+            sections={sn: model.sections[sn] for sn in sec_names if sn in model.sections},
             # Frame & area elements
-            frame_elements={fid: model.frame_elements[fid] for fid in frame_ids
-                            if fid in model.frame_elements},
-            area_elements={aid: model.area_elements[aid] for aid in area_ids
-                           if aid in model.area_elements},
+            frame_elements={
+                fid: model.frame_elements[fid] for fid in frame_ids if fid in model.frame_elements
+            },
+            area_elements={
+                aid: model.area_elements[aid] for aid in area_ids if aid in model.area_elements
+            },
             # Assignments
-            frame_assignments={fid: model.frame_assignments[fid]
-                               for fid in frame_ids
-                               if fid in model.frame_assignments},
-            area_assignments={aid: model.area_assignments[aid]
-                              for aid in area_ids
-                              if aid in model.area_assignments},
+            frame_assignments={
+                fid: model.frame_assignments[fid]
+                for fid in frame_ids
+                if fid in model.frame_assignments
+            },
+            area_assignments={
+                aid: model.area_assignments[aid]
+                for aid in area_ids
+                if aid in model.area_assignments
+            },
             # Auto-mesh for selected frames
-            frame_auto_mesh={fid: model.frame_auto_mesh[fid]
-                             for fid in frame_ids
-                             if fid in model.frame_auto_mesh},
+            frame_auto_mesh={
+                fid: model.frame_auto_mesh[fid] for fid in frame_ids if fid in model.frame_auto_mesh
+            },
             # Groups — keep those that contain selected elements, with only
             # the matching references
             groups=self._filter_groups(model, frame_ids, area_ids, node_ids),
@@ -500,12 +466,11 @@ class Selection:
             load_patterns=model.load_patterns,
             mass_sources=model.mass_sources,
             # Loads on selected elements / nodes
-            joint_loads=[jl for jl in model.joint_loads
-                         if jl.node_id in node_ids],
-            frame_dist_loads=[ld for ld in model.frame_dist_loads
-                              if ld.frame_id in frame_ids],
-            frame_gravity_loads=[gl for gl in model.frame_gravity_loads
-                                 if gl.frame_id in frame_ids],
+            joint_loads=[jl for jl in model.joint_loads if jl.node_id in node_ids],
+            frame_dist_loads=[ld for ld in model.frame_dist_loads if ld.frame_id in frame_ids],
+            frame_gravity_loads=[
+                gl for gl in model.frame_gravity_loads if gl.frame_id in frame_ids
+            ],
             area_uniform_loads=self.filter_area_uniform_loads(model),
             area_gravity_loads=self.filter_area_gravity_loads(model),
             # Units
@@ -516,10 +481,10 @@ class Selection:
     def _filter_groups(
         self,
         model: Union["SAPModelData", "MeshModel"],
-        frame_ids: Set[str],
-        area_ids: Set[str],
-        node_ids: Set[str],
-    ) -> Dict[str, "Group"]:
+        frame_ids: set[str],
+        area_ids: set[str],
+        node_ids: set[str],
+    ) -> dict[str, "Group"]:
         """Return groups that have at least one selected element, pruned
         to only those references.
 
@@ -527,9 +492,10 @@ class Selection:
         ``groups`` mapping, so the same lookup serves both.
         """
         from .sap_data import Group
-        result: Dict[str, Group] = {}
+
+        result: dict[str, Group] = {}
         for gname, grp in model.groups.items():
-            kept: List[str] = []
+            kept: list[str] = []
             for obj in grp.objects:
                 # Object references are "Frame:123", "Area:456", "Joint:1"
                 if obj.startswith("Frame:"):
@@ -560,9 +526,9 @@ class Selection:
     def resolve_to_mesh_sets(
         self,
         mesh_model: "MeshModel",
-        storey_data: "Optional[List[StoryLevel]]" = None,
+        storey_data: "Optional[list[StoryLevel]]" = None,
         story_z_tolerance: float = 0.5,
-    ) -> Tuple[Set[str], Set[str]]:
+    ) -> tuple[set[str], set[str]]:
         """Resolve this Selection against a ``MeshModel``.
 
         Returns the set of frame and area SAP2000 IDs that match all
@@ -617,7 +583,7 @@ class Selection:
             )
         """
         # ── Build story name → elevation lookup ──
-        story_elevations: Optional[Dict[str, float]] = None
+        story_elevations: Optional[dict[str, float]] = None
         if self.story is not None:
             if storey_data is None:
                 raise ValueError(
@@ -627,22 +593,28 @@ class Selection:
                 )
             story_elevations = {s.name: s.elevation for s in storey_data}
 
-        frame_ids: Set[str] = set()
-        area_ids: Set[str] = set()
+        frame_ids: set[str] = set()
+        area_ids: set[str] = set()
 
         for eid, fe in mesh_model.frame_elements.items():
-            if getattr(fe, 'inactive', False):
+            if getattr(fe, "inactive", False):
                 continue
             if self._frame_matches(
-                mesh_model, eid, story_elevations, story_z_tolerance,
+                mesh_model,
+                eid,
+                story_elevations,
+                story_z_tolerance,
             ):
                 frame_ids.add(eid)
 
         for aid, ae in mesh_model.area_elements.items():
-            if getattr(ae, 'inactive', False):
+            if getattr(ae, "inactive", False):
                 continue
             if self._area_matches(
-                mesh_model, aid, story_elevations, story_z_tolerance,
+                mesh_model,
+                aid,
+                story_elevations,
+                story_z_tolerance,
             ):
                 area_ids.add(aid)
 
@@ -653,7 +625,7 @@ class Selection:
     def _match_z_filter(
         self,
         z_mid: Optional[float],
-        story_elevations: Optional[Dict[str, float]] = None,
+        story_elevations: Optional[dict[str, float]] = None,
         story_z_tolerance: float = 0.5,
     ) -> bool:
         """Apply the elevation-range and storey filters to a resolved Z.
@@ -679,7 +651,7 @@ class Selection:
     def _match_story(
         self,
         z_mid: float,
-        story_elevations: Optional[Dict[str, float]],
+        story_elevations: Optional[dict[str, float]],
         story_z_tolerance: float,
     ) -> bool:
         """Check if a Z coordinate matches any named storey."""
@@ -696,9 +668,7 @@ class Selection:
         return False
 
     @staticmethod
-    def _get_frame_z_mid(
-        model: Union["SAPModelData", "MeshModel"], eid: str
-    ) -> Optional[float]:
+    def _get_frame_z_mid(model: Union["SAPModelData", "MeshModel"], eid: str) -> Optional[float]:
         """Return the mid-height Z of a frame element, or None."""
         fe = model.frame_elements.get(eid)
         if fe is None:
@@ -710,9 +680,7 @@ class Selection:
         return (node_i.z + node_j.z) / 2.0
 
     @staticmethod
-    def _get_area_z_mid(
-        model: Union["SAPModelData", "MeshModel"], aid: str
-    ) -> Optional[float]:
+    def _get_area_z_mid(model: Union["SAPModelData", "MeshModel"], aid: str) -> Optional[float]:
         """Return the centroid Z of an area element, or None."""
         ae = model.area_elements.get(aid)
         if ae is None:
@@ -729,9 +697,7 @@ class Selection:
     # ── Brace detection ──────────────────────────────────────────────────────
 
     @staticmethod
-    def from_brace_sections(
-        model: Union["SAPModelData", "MeshModel"]
-    ) -> "Selection":
+    def from_brace_sections(model: Union["SAPModelData", "MeshModel"]) -> "Selection":
         """Create a ``Selection`` targeting brace‑type sections.
 
         Identifies frame elements whose section shape is one of the common
@@ -768,16 +734,22 @@ class Selection:
             Returns an empty Selection if no brace-shaped sections exist.
         """
         from .sap_data import (
-            PipeSection, AngleSection, DoubleAngleSection,
-            TeeSection, ChannelSection,
+            AngleSection,
+            ChannelSection,
+            DoubleAngleSection,
+            PipeSection,
+            TeeSection,
         )
+
         brace_shape_types = (
-            PipeSection, AngleSection, DoubleAngleSection,
-            TeeSection, ChannelSection,
+            PipeSection,
+            AngleSection,
+            DoubleAngleSection,
+            TeeSection,
+            ChannelSection,
         )
         brace_sec_names = [
-            name for name, sec in model.sections.items()
-            if isinstance(sec, brace_shape_types)
+            name for name, sec in model.sections.items() if isinstance(sec, brace_shape_types)
         ]
         if not brace_sec_names:
             # Return an empty selection — no braces to find
@@ -786,6 +758,6 @@ class Selection:
                 sections=[],
             )
         return Selection(
-            element_types=['Frame'],
+            element_types=["Frame"],
             sections=brace_sec_names,
         )

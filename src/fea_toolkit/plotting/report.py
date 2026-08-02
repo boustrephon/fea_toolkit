@@ -8,15 +8,16 @@ notebooks.
 See also :mod:`fea_toolkit.plotting.viz` for PyVista 3D views.
 """
 
-from typing import Dict, List, Optional, Any
 import math
+from typing import Any, Optional
+
 import numpy as np
 import pandas as pd
 
 
 def plot_pushover_curves(
-    all_out: Dict,
-    units: Optional[Dict] = None,
+    all_out: dict,
+    units: Optional[dict] = None,
 ) -> Optional[Any]:
     """Plot pushover capacity curves for all 4 directions.
 
@@ -42,8 +43,7 @@ def plot_pushover_curves(
 
     for lb in ["+X", "-X", "+Y", "-Y"]:
         r = all_out[lb]["results"]
-        ax.plot(r["control_disp"], r["base_shear"],
-                label=lb, color=clr[lb], lw=1.5)
+        ax.plot(r["control_disp"], r["base_shear"], label=lb, color=clr[lb], lw=1.5)
         pp = all_out[lb]["pp"]
         if pp["converged"] and pp["D_roof"] != 0:
             ax.plot(pp["D_roof"], pp["V_base"], "D", color=clr[lb], ms=10)
@@ -128,7 +128,9 @@ def plot_modal_participation(
                 _hidden_bar[col] = data_all[~data_all.index.isin(data.index)][col].sum()
 
     fig, (ax1, ax2) = plt.subplots(
-        2, 1, figsize=(max(8, n_modes * 0.55 + 2), 6),
+        2,
+        1,
+        figsize=(max(8, n_modes * 0.55 + 2), 6),
         sharex=True,
     )
 
@@ -140,27 +142,43 @@ def plot_modal_participation(
             vals = data[dof].values if dof in data.columns else np.zeros(n_modes)
             cum = np.cumsum(vals)
             # Significant modes
-            ax.bar(x[:n_modes] + (i - 1) * w, vals, w,
-                   label=dof, color=colors[i], zorder=3)
-            ax.bar(x[:n_modes] + (i - 1) * w, cum - vals, w,
-                   bottom=vals, color=colors[i], alpha=0.10, zorder=3)
+            ax.bar(x[:n_modes] + (i - 1) * w, vals, w, label=dof, color=colors[i], zorder=3)
+            ax.bar(
+                x[:n_modes] + (i - 1) * w,
+                cum - vals,
+                w,
+                bottom=vals,
+                color=colors[i],
+                alpha=0.10,
+                zorder=3,
+            )
             # Hidden low-participation modes (aggregated)
             if _hidden_bar:
                 h_val = _hidden_bar.get(dof, 0.0)
                 hx = n_modes
-                ax.bar(hx + (i - 1) * w, h_val, w,
-                       color=colors[i], alpha=0.35, zorder=3,
-                       hatch="//")
+                ax.bar(
+                    hx + (i - 1) * w, h_val, w, color=colors[i], alpha=0.35, zorder=3, hatch="//"
+                )
                 # Cumulative marker at end
                 total = full_cum.get(dof, cum[-1] + h_val)
-                ax.annotate(f"{total:.0f}%",
-                            xy=(hx + (i - 1) * w, total),
-                            fontsize=6, color=colors[i],
-                            ha="center", va="bottom",
-                            fontweight="bold")
+                ax.annotate(
+                    f"{total:.0f}%",
+                    xy=(hx + (i - 1) * w, total),
+                    fontsize=6,
+                    color=colors[i],
+                    ha="center",
+                    va="bottom",
+                    fontweight="bold",
+                )
         ax.axhline(90, color="grey", linewidth=0.8, linestyle="--", zorder=2)
-        ax.text(n_modes + 1.5 + (1 if _hidden_bar else 0), 91, "90 %",
-                fontsize=7, color="grey", va="bottom")
+        ax.text(
+            n_modes + 1.5 + (1 if _hidden_bar else 0),
+            91,
+            "90 %",
+            fontsize=7,
+            color="grey",
+            va="bottom",
+        )
         ax.set_ylabel("Mass participation (%)")
         ax.set_title(title, fontsize=10)
         ax.set_ylim(0, y_lim)
@@ -206,19 +224,20 @@ def plot_modal_participation(
         labels.append(f"Low\n({n_hidden} modes)")
     ax2.set_xticklabels(labels, fontsize=7)
 
-    fig.suptitle("Modal Mass Participation by Degree of Freedom",
-                 fontsize=11, fontweight="bold")
+    fig.suptitle("Modal Mass Participation by Degree of Freedom", fontsize=11, fontweight="bold")
     fig.tight_layout()
     return fig
 
 
-def plot_rs_modal_analysis(modal_props: dict,
-                           modal_base_shear_x: list,
-                           modal_base_shear_y: list,
-                           periods: Optional[List[float]] = None,
-                           base_shear_rigid_x: float = 0.0,
-                           base_shear_rigid_y: float = 0.0,
-                           T_rigid: Optional[float] = None) -> Optional[Any]:
+def plot_rs_modal_analysis(
+    modal_props: dict,
+    modal_base_shear_x: list,
+    modal_base_shear_y: list,
+    periods: Optional[list[float]] = None,
+    base_shear_rigid_x: float = 0.0,
+    base_shear_rigid_y: float = 0.0,
+    T_rigid: Optional[float] = None,
+) -> Optional[Any]:
     """Two-panel figure: mass participation (top) + modal base shear (bottom).
 
     Parameters
@@ -242,12 +261,11 @@ def plot_rs_modal_analysis(modal_props: dict,
     except ImportError:
         return None
 
-    n = max(len(modal_props.get("partiMassRatiosMX", [])),
-            len(modal_base_shear_x))
+    n = max(len(modal_props.get("partiMassRatiosMX", [])), len(modal_base_shear_x))
 
-    fig, (ax1, ax2) = plt.subplots(2, 1,
-        figsize=(max(8, n * 0.45), 6),
-        sharex=True, gridspec_kw={"height_ratios": [1, 2]})
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1, figsize=(max(8, n * 0.45), 6), sharex=True, gridspec_kw={"height_ratios": [1, 2]}
+    )
     x = np.arange(n)
     w = 0.25
 
@@ -260,7 +278,7 @@ def plot_rs_modal_analysis(modal_props: dict,
     mrz = _pad(modal_props.get("partiMassRatiosRMZ", []), n)
 
     ax1.bar(x - w, mx, w, label="X", color="#1f77b4")
-    ax1.bar(x,     my, w, label="Y", color="#ff7f0e")
+    ax1.bar(x, my, w, label="Y", color="#ff7f0e")
     ax1.bar(x + w, mrz, w, label="RZ", color="#2ca02c")
     ax1.set_ylabel("Mass participation (%)")
     ax1.set_title("Modal Mass Participation")
@@ -272,7 +290,7 @@ def plot_rs_modal_analysis(modal_props: dict,
     sy = _pad(modal_base_shear_y, n)
 
     ax2.bar(x - w, sx, w, label="RS-X", color="#1f77b4")
-    ax2.bar(x,     sy, w, label="RS-Y", color="#ff7f0e")
+    ax2.bar(x, sy, w, label="RS-Y", color="#ff7f0e")
     # Empty placeholder bar at the RZ position so bars align with the top panel
     ax2.bar(x + w, [0] * n, w, label="_RS-RZ", color="none", edgecolor="none")
     ax2.set_xlabel("Mode")
@@ -288,16 +306,32 @@ def plot_rs_modal_analysis(modal_props: dict,
     if T_rigid is not None and (base_shear_rigid_x > 0 or base_shear_rigid_y > 0):
         label = f"Rigid (T\u2264{T_rigid:.3f}s)"
         if base_shear_rigid_x > 0:
-            ax2.axhline(base_shear_rigid_x, color="#1f77b4", linewidth=1.0,
-                        linestyle="--", alpha=0.7)
-            ax2.text(n - 0.5, base_shear_rigid_x * 1.02, label,
-                     color="#1f77b4", fontsize=6, ha="right", va="bottom")
+            ax2.axhline(
+                base_shear_rigid_x, color="#1f77b4", linewidth=1.0, linestyle="--", alpha=0.7
+            )
+            ax2.text(
+                n - 0.5,
+                base_shear_rigid_x * 1.02,
+                label,
+                color="#1f77b4",
+                fontsize=6,
+                ha="right",
+                va="bottom",
+            )
         if base_shear_rigid_y > 0:
             label_y = f"Rigid Y (T≤{T_rigid:.3f}s)"
-            ax2.axhline(base_shear_rigid_y, color="#ff7f0e", linewidth=1.0,
-                        linestyle=":", alpha=0.7)
-            ax2.text(n - 0.5, base_shear_rigid_y * 1.02, label_y,
-                     color="#ff7f0e", fontsize=6, ha="right", va="bottom")
+            ax2.axhline(
+                base_shear_rigid_y, color="#ff7f0e", linewidth=1.0, linestyle=":", alpha=0.7
+            )
+            ax2.text(
+                n - 0.5,
+                base_shear_rigid_y * 1.02,
+                label_y,
+                color="#ff7f0e",
+                fontsize=6,
+                ha="right",
+                va="bottom",
+            )
     ax2.legend(fontsize=8)
     ax2.grid(True, alpha=0.3, axis="y")
 
@@ -306,8 +340,8 @@ def plot_rs_modal_analysis(modal_props: dict,
 
 
 def plot_csm_4panel(
-    all_out: Dict,
-    modal: Dict,
+    all_out: dict,
+    modal: dict,
     tg: float = 0.25,
     zeta: float = 0.05,
     alpha_max_rare: float = 0.50,
@@ -353,8 +387,9 @@ def plot_csm_4panel(
     T_max_plot = 6.0
     n_plot = 200
     T_plot = np.linspace(0.01, T_max_plot, n_plot)
-    Sa_plot = _gb50011_spectrum(T_plot, alpha_max_rare, tg,
-                                 gamma=gamma, eta1=eta_1, eta2=eta_2, g=g)
+    Sa_plot = _gb50011_spectrum(
+        T_plot, alpha_max_rare, tg, gamma=gamma, eta1=eta_1, eta2=eta_2, g=g
+    )
     Sd_plot = Sa_plot * (T_plot / (2.0 * math.pi)) ** 2
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
@@ -373,27 +408,34 @@ def plot_csm_4panel(
         max_Sa = max(S_a.max(), Sa_plot.max())
         x_lim = 0.30
         yield_ok = (
-            pp.get("S_dy") and pp["S_dy"] > 0
-            and pp["S_dy"] <= x_lim and pp["S_ay"] <= max_Sa
+            pp.get("S_dy") and pp["S_dy"] > 0 and pp["S_dy"] <= x_lim and pp["S_ay"] <= max_Sa
         )
         yield_label = (
-            f"Yield ({pp['S_dy']:.3f}, {pp['S_ay']:.1f})"
-            if yield_ok else "Yield (NA, NA)"
+            f"Yield ({pp['S_dy']:.3f}, {pp['S_ay']:.1f})" if yield_ok else "Yield (NA, NA)"
         )
         pp_label = (
             f"Perf. Pt. ({pp['S_dp']:.3f}, {pp['S_ap']:.1f})"
-            if pp["converged"] and pp["S_dp"] > 0 else ""
+            if pp["converged"] and pp["S_dp"] > 0
+            else ""
         )
 
         title_text = (
-            f"{label}   μ={pp['mu']:.2f}  "
-            f"$S_{{dp}}$=({pp['S_dp']:.3f}m, {pp['S_ap']:.1f}m/s²)"
+            f"{label}   μ={pp['mu']:.2f}  $S_{{dp}}$=({pp['S_dp']:.3f}m, {pp['S_ap']:.1f}m/s²)"
         )
 
-        ax.plot(S_d, S_a, "-o", markersize=2.5, linewidth=1.5,
-                color="tab:blue", label="Capacity", zorder=3)
-        ax.plot(Sd_plot, Sa_plot, "--", color="tab:red", linewidth=1.5,
-                label="Demand (rare)", zorder=2)
+        ax.plot(
+            S_d,
+            S_a,
+            "-o",
+            markersize=2.5,
+            linewidth=1.5,
+            color="tab:blue",
+            label="Capacity",
+            zorder=3,
+        )
+        ax.plot(
+            Sd_plot, Sa_plot, "--", color="tab:red", linewidth=1.5, label="Demand (rare)", zorder=2
+        )
 
         y_lim = max(S_a.max(), Sa_plot.max()) * 1.15
         for T in [0.1, 0.2, 0.5, 1.0, 2.0, 4.0]:
@@ -402,22 +444,41 @@ def plot_csm_4panel(
             mask = sa_test <= y_lim
             if not mask.any():
                 continue
-            ax.plot(sd_test[mask], sa_test[mask], ":", color="grey",
-                    linewidth=0.5, alpha=0.3)
-            ax.text(sd_test[mask][-1], sa_test[mask][-1], f"T={T}s", fontsize=6,
-                    color="grey", alpha=0.5, va="bottom", ha="left")
+            ax.plot(sd_test[mask], sa_test[mask], ":", color="grey", linewidth=0.5, alpha=0.3)
+            ax.text(
+                sd_test[mask][-1],
+                sa_test[mask][-1],
+                f"T={T}s",
+                fontsize=6,
+                color="grey",
+                alpha=0.5,
+                va="bottom",
+                ha="left",
+            )
 
         if pp["converged"] and pp["S_dp"] > 0:
-            ax.plot(pp["S_dp"], pp["S_ap"], "D", color="tab:green",
-                    markersize=10, zorder=6, label=pp_label)
-            ax.axvline(pp["S_dp"], color="tab:green", linewidth=0.8,
-                       linestyle="--", alpha=0.5)
-            ax.axhline(pp["S_ap"], color="tab:green", linewidth=0.8,
-                       linestyle="--", alpha=0.5)
+            ax.plot(
+                pp["S_dp"],
+                pp["S_ap"],
+                "D",
+                color="tab:green",
+                markersize=10,
+                zorder=6,
+                label=pp_label,
+            )
+            ax.axvline(pp["S_dp"], color="tab:green", linewidth=0.8, linestyle="--", alpha=0.5)
+            ax.axhline(pp["S_ap"], color="tab:green", linewidth=0.8, linestyle="--", alpha=0.5)
 
         if pp.get("S_dy") and pp["S_dy"] > 0:
-            ax.plot(pp["S_dy"], pp["S_ay"], "s", color="tab:orange",
-                    markersize=7, zorder=5, label=yield_label)
+            ax.plot(
+                pp["S_dy"],
+                pp["S_ay"],
+                "s",
+                color="tab:orange",
+                markersize=7,
+                zorder=5,
+                label=yield_label,
+            )
 
         ax.set_title(title_text, fontsize=10, fontweight="bold")
         ax.set_xlabel("S$_d$ (m)", fontsize=9)
@@ -431,12 +492,15 @@ def plot_csm_4panel(
     fig.suptitle(
         f"Pumphouse \u2014 Capacity Spectrum Method\n"
         f"GB\u200950011 Rare Earthquake, Intensity VII(0.10g), Site I\u2081 (Tg={tg}s)",
-        fontsize=12, fontweight="bold", y=0.98,
+        fontsize=12,
+        fontweight="bold",
+        y=0.98,
     )
     fig.subplots_adjust(top=0.88, bottom=0.08, hspace=0.28, wspace=0.25)
 
     if out_dir:
         from pathlib import Path
+
         p = Path(out_dir) / "csm_4panel.png"
         fig.savefig(p, dpi=200, bbox_inches="tight")
 
@@ -446,6 +510,7 @@ def plot_csm_4panel(
 # ========================================================================
 # Storey force and displacement profile plots
 # ========================================================================
+
 
 def plot_storey_forces(
     df_shear: pd.DataFrame,
@@ -543,8 +608,7 @@ def plot_storey_forces(
     if not elev_candidates:
         return None
     elev_col_s = elev_candidates[0]
-    elev_col_m = ([c for c in df_moment.columns if "Elevation" in c]
-                  or [None])[0]
+    elev_col_m = ([c for c in df_moment.columns if "Elevation" in c] or [None])[0]
 
     base_skip = {"Storey", elev_col_s}
     if elev_col_m and elev_col_m != elev_col_s:
@@ -557,14 +621,15 @@ def plot_storey_forces(
     dropped_moment = [c for c in mom_cols if c not in common_cols]
     if dropped_shear or dropped_moment:
         import warnings
+
         if dropped_shear:
             warnings.warn(
-                f"Columns in shear DataFrame not found in moment DataFrame: "
-                f"{dropped_shear}")
+                f"Columns in shear DataFrame not found in moment DataFrame: {dropped_shear}"
+            )
         if dropped_moment:
             warnings.warn(
-                f"Columns in moment DataFrame not found in shear DataFrame: "
-                f"{dropped_moment}")
+                f"Columns in moment DataFrame not found in shear DataFrame: {dropped_moment}"
+            )
     elev = df_shear[elev_col_s].values
     base_elev = elev.min()
     roof_elev = elev.max()
@@ -585,9 +650,8 @@ def plot_storey_forces(
         w0 = w_sum - w1
         # Evaluate at n_points
         z_pts = np.linspace(0, H, n_points)
-        V_pts = V_base - w0*z_pts - (w1 - w0) * z_pts**2 / (2.0 * H)
-        M_pts = (M_base - V_base*z_pts + w0*z_pts**2/2.0
-                 + (w1 - w0) * z_pts**3 / (6.0 * H))
+        V_pts = V_base - w0 * z_pts - (w1 - w0) * z_pts**2 / (2.0 * H)
+        M_pts = M_base - V_base * z_pts + w0 * z_pts**2 / 2.0 + (w1 - w0) * z_pts**3 / (6.0 * H)
         elev_pts = base_elev + z_pts
         return elev_pts, V_pts, M_pts
 
@@ -665,12 +729,24 @@ def plot_storey_displacements(
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, sharey=True)
 
     # Resolve elevation column
-    elev_col_disp = "Elevation" if "Elevation" in df_disp.columns else (
-        [c for c in df_disp.columns if "Elevation" in c][0]
-        if any("Elevation" in c for c in df_disp.columns) else None)
-    elev_col_drift = "Elevation" if "Elevation" in df_drift.columns else (
-        [c for c in df_drift.columns if "Elevation" in c][0]
-        if any("Elevation" in c for c in df_drift.columns) else None)
+    elev_col_disp = (
+        "Elevation"
+        if "Elevation" in df_disp.columns
+        else (
+            next(c for c in df_disp.columns if "Elevation" in c)
+            if any("Elevation" in c for c in df_disp.columns)
+            else None
+        )
+    )
+    elev_col_drift = (
+        "Elevation"
+        if "Elevation" in df_drift.columns
+        else (
+            next(c for c in df_drift.columns if "Elevation" in c)
+            if any("Elevation" in c for c in df_drift.columns)
+            else None
+        )
+    )
 
     if elev_col_disp is None or elev_col_drift is None:
         return None
@@ -684,8 +760,7 @@ def plot_storey_displacements(
         )
     if disp_unit not in _LENGTH_TO_METRE:
         raise ValueError(
-            f"Unsupported disp_unit={disp_unit!r}. "
-            f"Supported: {list(_LENGTH_TO_METRE)}"
+            f"Unsupported disp_unit={disp_unit!r}. Supported: {list(_LENGTH_TO_METRE)}"
         )
     source_to_m = _LENGTH_TO_METRE[source_length_unit]
     target_to_m = _LENGTH_TO_METRE[disp_unit]
@@ -702,18 +777,13 @@ def plot_storey_displacements(
         "radians": 1.0,
     }
     if drift_unit not in _DRIFT_SCALES:
-        raise ValueError(
-            f"Unsupported drift_unit={drift_unit!r}. "
-            f"Supported: {list(_DRIFT_SCALES)}"
-        )
+        raise ValueError(f"Unsupported drift_unit={drift_unit!r}. Supported: {list(_DRIFT_SCALES)}")
     drift_scale = _DRIFT_SCALES[drift_unit]
 
     # Exclude the resolved elevation columns dynamically
     base_skip = {"Storey"}
-    disp_cols = [c for c in df_disp.columns
-                 if c not in base_skip and c != elev_col_disp]
-    drift_cols = [c for c in df_drift.columns
-                  if c not in base_skip and c != elev_col_drift]
+    disp_cols = [c for c in df_disp.columns if c not in base_skip and c != elev_col_disp]
+    drift_cols = [c for c in df_drift.columns if c not in base_skip and c != elev_col_drift]
 
     elev_disp = df_disp[elev_col_disp].values
     elev_drift = df_drift[elev_col_drift].values

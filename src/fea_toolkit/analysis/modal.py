@@ -3,12 +3,12 @@
 Wraps :func:`~fea_toolkit.opensees.analysis_builder.run_modal`.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Optional
 
 from fea_toolkit.analysis.base import (
+    _MODAL_DEFAULTS,
     Analysis,
     AnalysisResult,
-    _MODAL_DEFAULTS,
 )
 
 if TYPE_CHECKING:

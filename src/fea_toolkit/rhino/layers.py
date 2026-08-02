@@ -31,24 +31,25 @@ and **extrusion** geometry (3-D solids):
 
 import typing as t
 
-from .colors import safe_str, get_sap2000_color, SHELL_PALETTE, FRAME_PALETTE
+from .colors import FRAME_PALETTE, SHELL_PALETTE, get_sap2000_color, safe_str
 
 
 def _ensure_rhino():
     """Lazy-import Rhino modules — only works inside the Rhino process."""
     try:
         import Rhino  # noqa: F401
-        import scriptcontext as sc
         import Rhino.DocObjects as rd
+        import scriptcontext as sc
+
         return sc, rd
     except ImportError:
         raise RuntimeError(
-            "Rhino modules are not available. This code must run inside "
-            "Rhinoceros 3D (IronPython)."
-        )
+            "Rhino modules are not available. This code must run inside Rhinoceros 3D (IronPython)."
+        ) from None
 
 
 # ── Layer name utilities ─────────────────────────────────────────────────
+
 
 def sanitize_layer_name(name: str) -> str:
     """Sanitise a string for use as a Rhino layer name.
@@ -57,7 +58,7 @@ def sanitize_layer_name(name: str) -> str:
     Returns ``"Unnamed"`` if the result would be empty.
     """
     name = safe_str(name)
-    for char in ["/", "\\", ":", "*", "?", "\"", "<", ">", "|", "."]:
+    for char in ["/", "\\", ":", "*", "?", '"', "<", ">", "|", "."]:
         name = name.replace(char, "_")
     if not name:
         return "Unnamed"
@@ -66,9 +67,9 @@ def sanitize_layer_name(name: str) -> str:
     return name
 
 
-def create_or_get_layer(layer_name: str,
-                        parent_layer_index: t.Optional[int] = None,
-                        color=None) -> int:
+def create_or_get_layer(
+    layer_name: str, parent_layer_index: t.Optional[int] = None, color=None
+) -> int:
     """Find or create a Rhino layer.
 
     Args:
@@ -90,7 +91,7 @@ def create_or_get_layer(layer_name: str,
 
     # Create new layer — use only the last segment as the layer name
     new_layer = rd.Layer()
-    new_layer.Name = layer_name.split("/")[-1]
+    new_layer.Name = layer_name.rsplit("/", maxsplit=1)[-1]
     if color is not None:
         new_layer.Color = color
 
@@ -103,8 +104,8 @@ def create_or_get_layer(layer_name: str,
 
 # ── Top-level layer structure ────────────────────────────────────────────
 
-def create_root_layer(name: str = "SAP2000",
-                      parent: t.Optional[int] = None) -> int:
+
+def create_root_layer(name: str = "SAP2000", parent: t.Optional[int] = None) -> int:
     """Create a root layer (default: ``SAP2000``).
 
     When *parent* is provided, the layer is created as a sub‑layer of that
@@ -122,8 +123,7 @@ def create_root_layer(name: str = "SAP2000",
     except ImportError:
         Color = None
     root_color = Color.LightGray if Color else None
-    return create_or_get_layer(name, parent_layer_index=parent,
-                               color=root_color)
+    return create_or_get_layer(name, parent_layer_index=parent, color=root_color)
 
 
 def create_joints_layer(root_layer_index: int) -> int:
@@ -135,19 +135,19 @@ def create_joints_layer(root_layer_index: int) -> int:
     Returns:
         Layer index of the Joints layer.
     """
-    return create_or_get_layer("SAP2000/Joints",
-                               parent_layer_index=root_layer_index)
+    return create_or_get_layer("SAP2000/Joints", parent_layer_index=root_layer_index)
 
 
 # ── Helper: build section sub-layers under a parent path ─────────────────
+
 
 def _create_section_layers(
     parent_path: str,
     parent_index: int,
     section_names: t.Iterable[str],
-    palette: t.List[tuple],
-    section_props: t.Dict[str, dict],
-) -> t.Dict[str, int]:
+    palette: list[tuple],
+    section_props: dict[str, dict],
+) -> dict[str, int]:
     """Create one sub-layer per section name under *parent_path*.
 
     Args:
@@ -165,10 +165,9 @@ def _create_section_layers(
     except ImportError:
         Color = None
 
-    layers: t.Dict[str, int] = {}
-    color_index = 0
+    layers: dict[str, int] = {}
 
-    for sec_name in section_names:
+    for color_index, sec_name in enumerate(section_names):
         props = section_props.get(sec_name, {})
         color_value = props.get("Color", "") if props else ""
         default_rgb = palette[color_index % len(palette)]
@@ -176,15 +175,13 @@ def _create_section_layers(
         color = get_sap2000_color(color_value, default_color)
 
         safe_name = sanitize_layer_name(sec_name)
-        layer_name = "{}/{}".format(parent_path, safe_name)
-        idx = create_or_get_layer(layer_name, parent_layer_index=parent_index,
-                                  color=color)
+        layer_name = f"{parent_path}/{safe_name}"
+        idx = create_or_get_layer(layer_name, parent_layer_index=parent_index, color=color)
         layers[sec_name] = idx
-        color_index += 1
 
     if not layers:
         # Fallback default layer
-        layer_name = "{}/Default".format(parent_path)
+        layer_name = f"{parent_path}/Default"
         idx = create_or_get_layer(layer_name, parent_layer_index=parent_index)
         layers["Default"] = idx
 
@@ -192,6 +189,7 @@ def _create_section_layers(
 
 
 # ── Frame layer tree ─────────────────────────────────────────────────────
+
 
 class FrameLayerSet:
     """Container for frame centreline and extrusion layer indices.
@@ -201,16 +199,14 @@ class FrameLayerSet:
         extrusion:   Dict mapping section name → extrusion layer index.
     """
 
-    def __init__(self,
-                 centreline: t.Dict[str, int],
-                 extrusion: t.Dict[str, int]):
+    def __init__(self, centreline: dict[str, int], extrusion: dict[str, int]):
         self.centreline = centreline
         self.extrusion = extrusion
 
 
-def create_frame_layers(root_layer_index: int,
-                        frame_sections: t.Dict[str, dict],
-                        prefix: str = "") -> FrameLayerSet:
+def create_frame_layers(
+    root_layer_index: int, frame_sections: dict[str, dict], prefix: str = ""
+) -> FrameLayerSet:
     """Create the frame layer tree.
 
     Layout::
@@ -231,29 +227,31 @@ def create_frame_layers(root_layer_index: int,
         A :class:`FrameLayerSet` with centreline and extrusion dicts.
     """
     base = "SAP2000" + ("/" + prefix.rstrip("/") if prefix else "")
-    frames_parent = create_or_get_layer(f"{base}/Frames",
-                                        parent_layer_index=root_layer_index)
+    frames_parent = create_or_get_layer(f"{base}/Frames", parent_layer_index=root_layer_index)
 
-    cl_parent = create_or_get_layer(f"{base}/Frames/Centreline",
-                                    parent_layer_index=frames_parent)
+    cl_parent = create_or_get_layer(f"{base}/Frames/Centreline", parent_layer_index=frames_parent)
     cl_layers = _create_section_layers(
-        f"{base}/Frames/Centreline", cl_parent,
+        f"{base}/Frames/Centreline",
+        cl_parent,
         sorted(frame_sections) if frame_sections else [],
-        FRAME_PALETTE, frame_sections,
+        FRAME_PALETTE,
+        frame_sections,
     )
 
-    ex_parent = create_or_get_layer(f"{base}/Frames/Extrusion",
-                                    parent_layer_index=frames_parent)
+    ex_parent = create_or_get_layer(f"{base}/Frames/Extrusion", parent_layer_index=frames_parent)
     ex_layers = _create_section_layers(
-        f"{base}/Frames/Extrusion", ex_parent,
+        f"{base}/Frames/Extrusion",
+        ex_parent,
         sorted(frame_sections) if frame_sections else [],
-        FRAME_PALETTE, frame_sections,
+        FRAME_PALETTE,
+        frame_sections,
     )
 
     return FrameLayerSet(centreline=cl_layers, extrusion=ex_layers)
 
 
 # ── Shell layer tree ─────────────────────────────────────────────────────
+
 
 class ShellLayerSet:
     """Container for shell centreline and extrusion layer indices.
@@ -263,16 +261,14 @@ class ShellLayerSet:
         extrusion:   Dict mapping section name → extrusion layer index.
     """
 
-    def __init__(self,
-                 centreline: t.Dict[str, int],
-                 extrusion: t.Dict[str, int]):
+    def __init__(self, centreline: dict[str, int], extrusion: dict[str, int]):
         self.centreline = centreline
         self.extrusion = extrusion
 
 
-def create_shell_layers(root_layer_index: int,
-                        shell_sections: t.Dict[str, dict],
-                        prefix: str = "") -> ShellLayerSet:
+def create_shell_layers(
+    root_layer_index: int, shell_sections: dict[str, dict], prefix: str = ""
+) -> ShellLayerSet:
     """Create the shell layer tree.
 
     Layout::
@@ -293,23 +289,24 @@ def create_shell_layers(root_layer_index: int,
         A :class:`ShellLayerSet` with centreline and extrusion dicts.
     """
     base = "SAP2000" + ("/" + prefix.rstrip("/") if prefix else "")
-    shells_parent = create_or_get_layer(f"{base}/Shells",
-                                        parent_layer_index=root_layer_index)
+    shells_parent = create_or_get_layer(f"{base}/Shells", parent_layer_index=root_layer_index)
 
-    cl_parent = create_or_get_layer(f"{base}/Shells/Centreline",
-                                    parent_layer_index=shells_parent)
+    cl_parent = create_or_get_layer(f"{base}/Shells/Centreline", parent_layer_index=shells_parent)
     cl_layers = _create_section_layers(
-        f"{base}/Shells/Centreline", cl_parent,
+        f"{base}/Shells/Centreline",
+        cl_parent,
         sorted(shell_sections) if shell_sections else [],
-        SHELL_PALETTE, shell_sections,
+        SHELL_PALETTE,
+        shell_sections,
     )
 
-    ex_parent = create_or_get_layer(f"{base}/Shells/Extrusion",
-                                    parent_layer_index=shells_parent)
+    ex_parent = create_or_get_layer(f"{base}/Shells/Extrusion", parent_layer_index=shells_parent)
     ex_layers = _create_section_layers(
-        f"{base}/Shells/Extrusion", ex_parent,
+        f"{base}/Shells/Extrusion",
+        ex_parent,
         sorted(shell_sections) if shell_sections else [],
-        SHELL_PALETTE, shell_sections,
+        SHELL_PALETTE,
+        shell_sections,
     )
 
     return ShellLayerSet(centreline=cl_layers, extrusion=ex_layers)

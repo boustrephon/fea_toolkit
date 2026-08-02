@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
 SCRIPT = EXAMPLES_DIR / "verify_openseespy.py"
 
@@ -24,7 +23,9 @@ def test_openseespy_smoke_quick():
     assert SCRIPT.exists(), f"{SCRIPT} not found"
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--quick"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
+        check=False,
         timeout=120,
     )
     print(result.stdout)
@@ -41,13 +42,13 @@ def test_openseespy_smoke_full():
     assert SCRIPT.exists(), f"{SCRIPT} not found"
     result = subprocess.run(
         [sys.executable, str(SCRIPT)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
+        check=False,
         timeout=600,
     )
     print(result.stdout)
     if result.returncode != 0:
         print(result.stderr)
-    assert result.returncode == 0, (
-        f"verify_openseespy.py failed with exit code {result.returncode}"
-    )
+    assert result.returncode == 0, f"verify_openseespy.py failed with exit code {result.returncode}"
     assert "All 14 checks passed" in result.stdout

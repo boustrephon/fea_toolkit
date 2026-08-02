@@ -2,36 +2,40 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
+
 import numpy as np
 
-
 # ── Intermediate geometry representations ──────────────────────────────
+
 
 @dataclass
 class FrameGeom:
     """A single frame/beam/column element ready for rendering."""
+
     elem_id: str
     section: str
     node_i: str
     node_j: str
-    start: np.ndarray          # shape (3,) — global coordinates
-    end: np.ndarray            # shape (3,) — global coordinates
+    start: np.ndarray  # shape (3,) — global coordinates
+    end: np.ndarray  # shape (3,) — global coordinates
 
 
 @dataclass
 class ShellGeom:
     """A single shell/area element ready for rendering."""
+
     area_id: str
     section: str
-    vertices: np.ndarray       # shape (N, 3) — polygon vertices in order
+    vertices: np.ndarray  # shape (N, 3) — polygon vertices in order
 
 
 @dataclass
 class NodeGeom:
     """A single node ready for rendering."""
+
     node_id: str
-    position: np.ndarray       # shape (3,)
+    position: np.ndarray  # shape (3,)
 
 
 @dataclass
@@ -42,28 +46,31 @@ class HighlightDef:
     geometry so the backend can render them directly without needing
     to look up data from the model.
     """
-    frame_ids: List[str] = field(default_factory=list)
-    area_ids: List[str] = field(default_factory=list)
-    node_ids: List[str] = field(default_factory=list)
-    color: Tuple[float, float, float] = (1.0, 0.0, 0.0)   # RGB 0..1
+
+    frame_ids: list[str] = field(default_factory=list)
+    area_ids: list[str] = field(default_factory=list)
+    node_ids: list[str] = field(default_factory=list)
+    color: tuple[float, float, float] = (1.0, 0.0, 0.0)  # RGB 0..1
     label: Optional[str] = None
-    radius: Optional[float] = None      # tube radius for frames
+    radius: Optional[float] = None  # tube radius for frames
     # Resolved geometry payloads (populated by ModelViewer)
-    frames: List['FrameGeom'] = field(default_factory=list)
-    shells: List['ShellGeom'] = field(default_factory=list)
-    nodes: List['NodeGeom'] = field(default_factory=list)
+    frames: list["FrameGeom"] = field(default_factory=list)
+    shells: list["ShellGeom"] = field(default_factory=list)
+    nodes: list["NodeGeom"] = field(default_factory=list)
 
 
 @dataclass
 class AnnotationDef:
     """A text annotation attached to a position."""
+
     text: str
-    position: np.ndarray               # shape (3,)
-    color: Tuple[float, float, float] = (1.0, 1.0, 0.0)  # RGB 0..1
+    position: np.ndarray  # shape (3,)
+    color: tuple[float, float, float] = (1.0, 1.0, 0.0)  # RGB 0..1
     font_size: int = 14
 
 
 # ── Abstract backend ──────────────────────────────────────────────────
+
 
 class RenderBackend(ABC):
     """Abstract interface for a 3D render backend.
@@ -75,8 +82,8 @@ class RenderBackend(ABC):
     @abstractmethod
     def render_frames(
         self,
-        frames: List[FrameGeom],
-        colors: Dict[str, Tuple[float, float, float]],
+        frames: list[FrameGeom],
+        colors: dict[str, tuple[float, float, float]],
         opacity: float = 1.0,
     ) -> None:
         """Draw frame elements as lines or tubes.
@@ -91,8 +98,8 @@ class RenderBackend(ABC):
     @abstractmethod
     def render_shells(
         self,
-        shells: List[ShellGeom],
-        colors: Dict[str, Tuple[float, float, float]],
+        shells: list[ShellGeom],
+        colors: dict[str, tuple[float, float, float]],
         opacity: float = 1.0,
     ) -> None:
         """Draw shell elements as planar surfaces.
@@ -107,8 +114,8 @@ class RenderBackend(ABC):
     @abstractmethod
     def render_nodes(
         self,
-        nodes: List[NodeGeom],
-        color: Tuple[float, float, float] = (0.3, 0.3, 0.3),
+        nodes: list[NodeGeom],
+        color: tuple[float, float, float] = (0.3, 0.3, 0.3),
         radius: float = 0.02,
     ) -> None:
         """Draw node markers.
@@ -123,7 +130,7 @@ class RenderBackend(ABC):
     @abstractmethod
     def render_highlights(
         self,
-        highlights: List[HighlightDef],
+        highlights: list[HighlightDef],
     ) -> None:
         """Draw highlighted elements/nodes on top of the model.
 
@@ -135,7 +142,7 @@ class RenderBackend(ABC):
     @abstractmethod
     def render_annotations(
         self,
-        annotations: List[AnnotationDef],
+        annotations: list[AnnotationDef],
     ) -> None:
         """Draw text annotations in 3D space.
 
@@ -147,10 +154,10 @@ class RenderBackend(ABC):
     @abstractmethod
     def render_deformed(
         self,
-        frames: List[FrameGeom],
-        displacements: Dict[str, np.ndarray],   # node_id → (dx, dy, dz)
+        frames: list[FrameGeom],
+        displacements: dict[str, np.ndarray],  # node_id → (dx, dy, dz)
         scale: float = 1.0,
-        color: Tuple[float, float, float] = (0.3, 0.6, 1.0),
+        color: tuple[float, float, float] = (0.3, 0.6, 1.0),
     ) -> None:
         """Draw deformed frame elements.
 
@@ -165,8 +172,8 @@ class RenderBackend(ABC):
     @abstractmethod
     def render_force_flags(
         self,
-        frames: List[FrameGeom],
-        forces: Dict[str, Tuple[float, float]],   # elem_id → (val_i, val_j)
+        frames: list[FrameGeom],
+        forces: dict[str, tuple[float, float]],  # elem_id → (val_i, val_j)
         quantity: str = "Mz",
         scale_factor: float = 1.0,
     ) -> None:
