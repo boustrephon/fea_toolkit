@@ -1,0 +1,18 @@
+{
+  "exclude": [
+    "src/fea_toolkit/rhino",
+    "local",
+    "examples",
+    "tests",
+    "docs"
+  ],
+  "typeCheckingMode": "basic",
+  "reportOptionalMemberAccess": "warning",
+  "reportOptionalSubscript": "warning",
+  "reportOptionalOperand": "warning",
+  "reportOptionalIterable": "warning",
+  "reportAttributeAccessIssue": "warning",
+  "reportMissingImports": "error",
+  "reportUndefinedVariable": "error",
+  "reportUnboundVariable": "error"
+}

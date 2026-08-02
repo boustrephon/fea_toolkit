@@ -279,11 +279,13 @@ For the admin building: `Admin_0.7E_short term_pushover_+X.npz`
 element it is `ratio = |Mz| / peak|Mz|` across all push steps (and the SRSS
 biaxial variant combining `My`/`Mz` when `use_biaxial=True`), *not*
 `Fy × S`.  The ratio therefore measures how far an element has progressed
-toward its own peak demand, not an absolute yield-capacity check.  For RC
-and axially-loaded members, rely on the fiber-section force-deformation
-response (`forceBeamColumn` + fiber sections) to identify true yielding;
-hinge classification output follows the element-specific capacity
-criterion.
+toward its own peak demand, not an absolute yield-capacity check.  The
+hinge classification ratios are normalised against each element's peak
+recorded demand, not a physical yield capacity.  For RC and
+axially-loaded members, true yielding requires the force-deformation
+response from fiber-section analysis (`forceBeamColumn` + fiber sections);
+hinge classification output is demand-relative, so it must not be
+confused with an absolute yield-capacity check.
 
 ### 4.2 `plot_shell_damage_map()`
 

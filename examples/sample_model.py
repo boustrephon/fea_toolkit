@@ -40,7 +40,7 @@ def make_sample_model() -> SAPModelData:
             Fy=2.5e8,
         ),
     }
-    # ── Section (real UB 305×165×40, BS 4-1) ──
+    # ── Section (UB 305×165×40, nominal flange/web approximation) ──
     sections = {
         "UB300": Section(
             name="UB300", shape="I/Wide Flange",
@@ -100,11 +100,11 @@ def make_nonlinear_sample_model() -> SAPModelData:
     a genuinely nonlinear pushover curve (elastic → yielding), which is
     required for the CSM performance-point workflow.
 
-    The UB300 section is a real **UB 305×165×40** universal beam
-    (BS 4-1): d = 303.4 mm, bf = 165.1 mm, tw = 6.1 mm, tf = 10.2 mm.
-    Sectional properties are computed from the standard flange/web model
-    (matching the published values A = 50.9 cm², Iₓ = 8490 cm⁴,
-    Iᵧ = 762 cm⁴):
+    The UB300 section is a **UB 305×165×40** universal beam
+    (nominal flange/web approximation): d = 303.4 mm, bf = 165.1 mm,
+    tw = 6.1 mm, tf = 10.2 mm.  Sectional properties are computed from
+    the standard flange/web model (nominal values; published BS 4-1
+    Iₓ/Iᵧ differ slightly):
 
     * A    = 2·bf·tf + (d − 2·tf)·tw             = 5.09e-3 m²
     * I33  = bf·d³/12 − (bf − tw)·(d − 2·tf)³/12  = 8.39e-5 m⁴
@@ -115,7 +115,7 @@ def make_nonlinear_sample_model() -> SAPModelData:
         ``preprocess_model(..., create_fiber_sections=True)``.
     """
     md = make_sample_model()
-    # Real UB 305×165×40 (BS 4-1) — d, bf, tw, tf in metres.
+    # UB 305×165×40 (nominal flange/web approximation) — d, bf, tw, tf in metres.
     d, bf, tw, tf = 0.3034, 0.1651, 0.0061, 0.0102
     md.sections["UB300"] = ISection(
         name="UB300", shape="I/Wide Flange",
@@ -197,10 +197,16 @@ def make_rc_frame_model() -> SAPModelData:
         "3": Node(node_id="3", node_tag=3, x=0.0, y=0.0, z=3.0),
         "4": Node(node_id="4", node_tag=4, x=4.0, y=0.0, z=3.0),
     }
-    # ── Restraints (fixed base) ──
+    # ── Restraints ──
+    # Base nodes 1, 2 are fully fixed.  Roof nodes 3, 4 are restrained
+    # against out-of-plane translation (UY) only, so the frame is a true
+    # 2D X–Z portal: the X-sway mode becomes the fundamental mode and is
+    # the first one returned by ``run_modal_analysis``.
     restraints = {
         "1": Restraint([1, 1, 1, 1, 1, 1]),
         "2": Restraint([1, 1, 1, 1, 1, 1]),
+        "3": Restraint([0, 1, 0, 0, 0, 0]),
+        "4": Restraint([0, 1, 0, 0, 0, 0]),
     }
     # ── Materials (model units: kPa / kN·m⁻³) ──
     materials = {
