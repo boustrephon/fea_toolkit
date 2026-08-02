@@ -104,6 +104,10 @@ class PushoverAnalysis(Analysis):
             return dict(_PUSHOVER_RC_DEFAULTS)
         return dict(_PUSHOVER_STEEL_DEFAULTS)
 
+    def _accept_dependency(self, dep_result: AnalysisResult, dep_type: type["Analysis"]) -> None:
+        if dep_type is ModalAnalysis and self._modal_result is None:
+            self._modal_result = dep_result
+
     @property
     def requires(self) -> list:
         return [ModalAnalysis]
@@ -211,7 +215,6 @@ class PushoverAnalysis(Analysis):
             modal_data = {"modal": modal_data}
 
         modal_nested = modal_data.get("modal", modal_data)
-        modal_nested.get("periods", [])
         shapes = modal_nested.get("shapes", modal_nested.get("mode_shapes", {}))
         first_mode = shapes.get(1, shapes.get(0, {})) if shapes else {}
 

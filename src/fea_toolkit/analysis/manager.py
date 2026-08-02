@@ -73,10 +73,12 @@ class AnalysisManager:
                     f"{type(analysis).__name__} requires "
                     f"{dep_type.__name__} but none was registered"
                 )
-            # Check if the analysis has a _modal_result attribute
-            # (ResponseSpectrumAnalysis and PushoverAnalysis both do)
-            if getattr(analysis, "_modal_result", None) is None:
-                analysis._modal_result = self.results[dep_name]
+            # Dispatch dependency by type — each consumer overrides
+            # _accept_dependency() to store the result in the attribute
+            # it actually uses.  The base no-op default ensures analyses
+            # that do not declare acceptance of a dependency never
+            # receive it through an unrelated attribute.
+            analysis._accept_dependency(self.results[dep_name], dep_type)
 
     def _topological_sort(self) -> list[Analysis]:
         """Kahn's algorithm on the analysis dependency graph.

@@ -78,6 +78,10 @@ class NonlinearDynamicAnalysis(Analysis):
     def defaults(cls) -> dict:
         return dict(_NONLINEAR_DYNAMIC_DEFAULTS)
 
+    def _accept_dependency(self, dep_result: AnalysisResult, dep_type: type["Analysis"]) -> None:
+        if dep_type is ModalAnalysis and self._modal_result is None:
+            self._modal_result = dep_result
+
     @property
     def requires(self) -> list:
         return [ModalAnalysis]

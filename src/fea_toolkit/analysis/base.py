@@ -260,6 +260,17 @@ class Analysis(ABC):
         """Data keys this analysis writes into its result."""
         return set()
 
+    def _accept_dependency(  # noqa: B027 — intentional no-op default
+        self, dep_result: AnalysisResult, dep_type: type["Analysis"]
+    ) -> None:
+        """Wire a completed dependency result into this analysis.
+
+        Called by :class:`AnalysisManager` once per entry in
+        :meth:`requires`.  Subclasses override to store the dependency
+        in the appropriate instance attribute.  The default
+        implementation is a no-op.
+        """
+
     @property
     def result(self) -> Optional[AnalysisResult]:
         return self._result
