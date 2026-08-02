@@ -3,7 +3,7 @@
 Wraps :func:`~fea_toolkit.io.report.run_linear_cases`.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -13,6 +13,9 @@ from fea_toolkit.analysis.base import (
     _STATIC_LINEAR_DEFAULTS,
 )
 from fea_toolkit.analysis.modal import ModalAnalysis
+
+if TYPE_CHECKING:
+    from fea_toolkit.model.mesh_model import MeshModel
 
 
 class StaticAnalysis(Analysis):

@@ -600,7 +600,6 @@ def modal_storey_drifts(
     # Per-mode spectral displacement scaling factors
     scale_factors = [1.0] * n_avail
     if spectrum_periods is not None and spectrum_accels is not None:
-        import numpy as np
         spec_p = np.array(spectrum_periods)
         spec_a = np.array(spectrum_accels)
         T_min = float(spec_p.min())

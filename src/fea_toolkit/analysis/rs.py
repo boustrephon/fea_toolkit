@@ -4,7 +4,7 @@ Wraps :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder`
 RS execution.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import numpy as np
 
@@ -14,6 +14,9 @@ from fea_toolkit.analysis.base import (
     _RESPONSE_SPECTRUM_DEFAULTS,
 )
 from fea_toolkit.analysis.modal import ModalAnalysis
+
+if TYPE_CHECKING:
+    from fea_toolkit.model.mesh_model import MeshModel
 
 
 class ResponseSpectrumAnalysis(Analysis):

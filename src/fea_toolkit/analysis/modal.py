@@ -3,13 +3,16 @@
 Wraps :func:`~fea_toolkit.opensees.analysis_builder.run_modal`.
 """
 
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from fea_toolkit.analysis.base import (
     Analysis,
     AnalysisResult,
     _MODAL_DEFAULTS,
 )
+
+if TYPE_CHECKING:
+    from fea_toolkit.model.mesh_model import MeshModel
 
 
 class ModalAnalysis(Analysis):

@@ -5,9 +5,12 @@ objects, respecting their ``requires`` declarations to determine
 execution order and passing results between dependent analyses.
 """
 
-from typing import Any, Dict, List, Optional, Set, Type
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Type
 
 from fea_toolkit.analysis.base import Analysis, AnalysisResult
+
+if TYPE_CHECKING:
+    from fea_toolkit.model.mesh_model import MeshModel
 
 
 class AnalysisManager:
@@ -72,8 +75,8 @@ class AnalysisManager:
                 )
             # Check if the analysis has a _modal_result attribute
             # (ResponseSpectrumAnalysis and PushoverAnalysis both do)
-            if hasattr(analysis, "_modal_result") and analysis._modal_result is None:
-                analysis._modal_result = self.results[dep_name]
+            if getattr(analysis, "_modal_result", None) is None:
+                setattr(analysis, "_modal_result", self.results[dep_name])
 
     def _topological_sort(self) -> List[Analysis]:
         """Kahn's algorithm on the analysis dependency graph.

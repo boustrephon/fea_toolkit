@@ -2,7 +2,10 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, asdict, field
-from typing import Any, Dict, List, Optional, Set, Type
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Type
+
+if TYPE_CHECKING:
+    from fea_toolkit.model.mesh_model import MeshModel
 
 
 # ── Per-type defaults (simple dicts, no dataclass overhead) ──────────

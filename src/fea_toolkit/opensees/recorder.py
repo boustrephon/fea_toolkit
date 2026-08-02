@@ -43,9 +43,12 @@ import re
 import subprocess
 import sys
 import types
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from ..model.mesh_model import MeshModel
 
 from ..utils import (
     DEFAULT_EPS_C,
