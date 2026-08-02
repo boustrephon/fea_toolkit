@@ -11,9 +11,17 @@ Usage::
 """
 
 from fea_toolkit.model.sap_data import (
-    SAPModelData, Node, Restraint, Material, Section, ISection,
-    RectangularSection, ConcreteRectangularSection,
-    FrameElement, LoadPattern, FrameDistributedLoad,
+    SAPModelData,
+    Node,
+    Restraint,
+    Material,
+    Section,
+    ISection,
+    RectangularSection,
+    ConcreteRectangularSection,
+    FrameElement,
+    LoadPattern,
+    FrameDistributedLoad,
     MassSource,
 )
 
@@ -34,17 +42,27 @@ def make_sample_model() -> SAPModelData:
     # ── Material ──
     materials = {
         "Steel": Material(
-            name="Steel", type="Steel",
-            E_mod=2.0e11, G_mod=7.7e10, nu=0.3,
+            name="Steel",
+            type="Steel",
+            E_mod=2.0e11,
+            G_mod=7.7e10,
+            nu=0.3,
             unit_weight=7.85e4,  # N/m³
             Fy=2.5e8,
         ),
     }
     # ── Section (UB 305×165×40, nominal flange/web approximation) ──
+    # NOTE: The key/name "UB300" is retained as a legacy identifier —
+    # the section is actually a UB 305×165×40, so exported labels use
+    # "UB300" for backward compatibility with existing fixtures/tests.
     sections = {
         "UB300": Section(
-            name="UB300", shape="I/Wide Flange",
-            material="Steel", A=0.00509434, I33=8.3935e-5, I22=7.6559e-6,
+            name="UB300",
+            shape="I/Wide Flange",
+            material="Steel",
+            A=0.00509434,
+            I33=8.3935e-5,
+            I22=7.6559e-6,
             J=2.0e-6,
         ),
     }
@@ -61,16 +79,26 @@ def make_sample_model() -> SAPModelData:
     # ── Distributed load on the frame (uniform X load for WIND) ──
     frame_dist_loads = [
         FrameDistributedLoad(
-            pattern="WIND", frame_id="1",
-            direction="X", load_type="Force",
-            shape="Uniform", val_a=1.0e4, val_b=1.0e4,
-            rdist_a=0.0, rdist_b=1.0, dist_a=0.0, dist_b=10.0,
+            pattern="WIND",
+            frame_id="1",
+            direction="X",
+            load_type="Force",
+            shape="Uniform",
+            val_a=1.0e4,
+            val_b=1.0e4,
+            rdist_a=0.0,
+            rdist_b=1.0,
+            dist_a=0.0,
+            dist_b=10.0,
         ),
     ]
     # ── Mass source ──
     mass_sources = {
         "MSSSRC1": MassSource(
-            name="MSSSRC1", elements=True, masses=False, loads=False,
+            name="MSSSRC1",
+            elements=True,
+            masses=False,
+            loads=False,
         ),
     }
     return SAPModelData(
@@ -118,10 +146,17 @@ def make_nonlinear_sample_model() -> SAPModelData:
     # UB 305×165×40 (nominal flange/web approximation) — d, bf, tw, tf in metres.
     d, bf, tw, tf = 0.3034, 0.1651, 0.0061, 0.0102
     md.sections["UB300"] = ISection(
-        name="UB300", shape="I/Wide Flange",
+        name="UB300",
+        shape="I/Wide Flange",
         material="Steel",
-        A=0.00509434, I33=8.3935e-5, I22=7.6559e-6, J=2.0e-6,
-        depth=d, bf=bf, tw=tw, tf=tf,
+        A=0.00509434,
+        I33=8.3935e-5,
+        I22=7.6559e-6,
+        J=2.0e-6,
+        depth=d,
+        bf=bf,
+        tw=tw,
+        tf=tf,
     )
     return md
 
@@ -211,22 +246,30 @@ def make_rc_frame_model() -> SAPModelData:
     # ── Materials (model units: kPa / kN·m⁻³) ──
     materials = {
         "C30": Material(
-            name="C30", type="Concrete",
-            E_mod=15.54e6, G_mod=6.475e6, nu=0.2,
-            unit_weight=25.0,          # kN/m³
-            Fc=20.1e3,                 # kPa (20.1 MPa)
+            name="C30",
+            type="Concrete",
+            E_mod=15.54e6,
+            G_mod=6.475e6,
+            nu=0.2,
+            unit_weight=25.0,  # kN/m³
+            Fc=20.1e3,  # kPa (20.1 MPa)
         ),
         "Rebar": Material(
-            name="Rebar", type="Rebar",
-            E_mod=199.95e6, nu=0.3,
-            unit_weight=77.0,          # kN/m³
-            Fy=413.685e3,              # kPa (A615Gr60)
+            name="Rebar",
+            type="Rebar",
+            E_mod=199.95e6,
+            nu=0.3,
+            unit_weight=77.0,  # kN/m³
+            Fy=413.685e3,  # kPa (A615Gr60)
         ),
         "Q355": Material(
-            name="Q355", type="Steel",
-            E_mod=206e6, G_mod=79.23e6, nu=0.3,
-            unit_weight=77.0,          # kN/m³
-            Fy=355e3,                  # kPa
+            name="Q355",
+            type="Steel",
+            E_mod=206e6,
+            G_mod=79.23e6,
+            nu=0.3,
+            unit_weight=77.0,  # kN/m³
+            Fy=355e3,  # kPa
         ),
     }
     # ── Sections ──
@@ -235,19 +278,34 @@ def make_rc_frame_model() -> SAPModelData:
         # the builder's 3-level rebar Fy/Es resolution (config override →
         # SAP2000 lookup → framework defaults).
         "COL": ConcreteRectangularSection(
-            name="COL", shape="Concrete Rectangular", material="C30",
+            name="COL",
+            shape="Concrete Rectangular",
+            material="C30",
             rebar_material="Rebar",
-            A=0.09, I33=6.75e-4, I22=6.75e-4, J=1.14e-3,
-            depth=0.3, bf=0.3, cover=0.04,
-            top_bars=4, bot_bars=4,
-            top_bar_dia=0.016, bot_bar_dia=0.016,
+            A=0.09,
+            I33=6.75e-4,
+            I22=6.75e-4,
+            J=1.14e-3,
+            depth=0.3,
+            bf=0.3,
+            cover=0.04,
+            top_bars=4,
+            bot_bars=4,
+            top_bar_dia=0.016,
+            bot_bar_dia=0.016,
         ),
         # Beams: fibre-capable rectangular section referencing "C30"
         # (0.6 % steel ratio with 40 mm cover via to_fiber_patches()).
         "BEAM": RectangularSection(
-            name="BEAM", shape="Concrete Rectangular", material="C30",
-            A=0.15, I33=3.125e-3, I22=1.125e-3, J=1.5e-3,
-            depth=0.5, bf=0.3,
+            name="BEAM",
+            shape="Concrete Rectangular",
+            material="C30",
+            A=0.15,
+            I33=3.125e-3,
+            I22=1.125e-3,
+            J=1.5e-3,
+            depth=0.5,
+            bf=0.3,
         ),
     }
     # ── Frame elements (columns 1-2, beam 3) ──
@@ -257,7 +315,9 @@ def make_rc_frame_model() -> SAPModelData:
         "3": FrameElement(elem_id="3", elem_tag=3, node_i="3", node_j="4"),
     }
     frame_assignments = {
-        "1": "COL", "2": "COL", "3": "BEAM",
+        "1": "COL",
+        "2": "COL",
+        "3": "BEAM",
     }
     # ── Load patterns ──
     load_patterns = {
@@ -268,16 +328,26 @@ def make_rc_frame_model() -> SAPModelData:
     #    Contributes to seismic mass via MassSource(loads=True, DEAD). ──
     frame_dist_loads = [
         FrameDistributedLoad(
-            pattern="DEAD", frame_id="3",
-            direction="Gravity", load_type="Force",
-            shape="Uniform", val_a=20.0, val_b=20.0,
-            rdist_a=0.0, rdist_b=1.0, dist_a=0.0, dist_b=4.0,
+            pattern="DEAD",
+            frame_id="3",
+            direction="Gravity",
+            load_type="Force",
+            shape="Uniform",
+            val_a=20.0,
+            val_b=20.0,
+            rdist_a=0.0,
+            rdist_b=1.0,
+            dist_a=0.0,
+            dist_b=4.0,
         ),
     ]
     # ── Mass source: element self-weight + DEAD floor loads → nodal mass ──
     mass_sources = {
         "MSSSRC1": MassSource(
-            name="MSSSRC1", elements=True, masses=False, loads=True,
+            name="MSSSRC1",
+            elements=True,
+            masses=False,
+            loads=True,
             load_pattern={"DEAD": 1.0},
         ),
     }

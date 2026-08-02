@@ -347,6 +347,16 @@ cleared between attempts.
     ``src/fea_toolkit/__init__.py`` for an existing implementation.
 12. **Do not** define material strength or modulus values (`E`, `fc`, `fy`, `Es`, `Hiso`, `Hkin`, etc.) without using the project's unit-scaling infrastructure. Express materials in **SI (Pa)** and let the framework scale them via `scale_material_dict()` or the Preprocessor's automatic `nd_materials` scaling. Hand-converting to model-specific units (e.g. kPa for kN-m models) will silently produce 1000× under-strength, leading to premature yielding rather than preventing yield or keeping the material elastic. See §4.6 Material property convention for details.
 
+> **Exception — direct `SAPModelData` construction**: when callers build
+> `SAPModelData` objects directly (not via the parser or Preprocessor),
+> material values may be authored in the **model's own unit system** and
+> used as-is, or may be authored in SI (Pa) and converted **exactly once**
+> via `scale_material_dict()`.  Parser and Preprocessor flows must author
+> SI values and scale them **exactly once** — never zero times and never
+> twice.  This exception prevents both unscaled SI values (1000× weak in
+> kN-m models) and double-scaling of model-unit values (1000× strong),
+> while preserving the existing SI/scaling rule for all other paths.
+
 ## 10. Tool-Call Hygiene (prevent malformed tool-call XML)
 
 LLM assistants occasionally emit half-formed XML closing-tag fragments inside their own
@@ -382,6 +392,42 @@ never a project error.  Keep future tool calls clean:
       edits with ``pathlib.Path`` over long here-documents.
    c) **XML tag leakage** — literal ``<tool_name>`` / ``</tool_name>``
       strings inside a parameter value confuse XML boundary detection.
-   When an empty-parameter error occurs, re-issue the same call unchanged
-   once; if it persists, restructure the call to use shorter parameter
-   values rather than re-wording.
+    When an empty-parameter error occurs, re-issue the same call unchanged
+    once; if it persists, restructure the call to use shorter parameter
+    values rather than re-wording.
+
+
+## 11. Known Benign Static-Analysis Warnings (do not spend time on these)
+
+The following Pylance/Pyright diagnostics are **expected and safe** — the
+code is correct at runtime, and no fix is required unless a real bug is
+suspected.  Do not re-audit these without a concrete reason:
+
+### 11.1 `dict` invariance in `tests/test_model.py`
+- `dict[str, PipeSection]` / `dict[str, ShellSection]` / `dict[str, ISection]`
+  passed to `SAPModelData(sections=...)` (expects `dict[str, Section]`).
+- These are inherited-type assignment errors caused by Pyright's invariant
+  `dict` typing.  All subclasses are valid `Section` values at runtime.
+- Fixing them properly would require changing `SAPModelData.sections` to a
+  covariant ``Mapping[str, Section]`` — an API change beyond a lint cleanup.
+  Do **not** add per-call-site ``# type: ignore`` comments.
+
+### 11.2 pandas ``.values`` typing noise in ``plotting/report.py``
+- Errors like `min()` arg not `SupportsRichComparison`, `*` not supported
+  for `ExtensionArray | Categorical`, and `np.concatenate` overload failures
+  on `Series.values` / `DataFrame` column access (e.g. in
+  `plot_storey_displacements`).
+- These are pandas-stub false positives: `Series.values` returns
+  `ExtensionArray | np.ndarray` at static-analysis level but concrete
+  float arrays at runtime.
+- The same pattern is pervasive across the codebase; do not chase it
+  one line at a time.  If cleaning up, prefer a project-wide
+  `pd.Series.to_numpy()` convention instead of scattered casts.
+
+### 11.3 Elevation-column resolution helper
+- All storey-plot elevation-column lookups in `src/fea_toolkit/plotting/report.py`
+  (``plot_storey_forces`` and ``plot_storey_displacements``) must go through
+  the shared ``_resolve_elevation_column(df)`` helper.  Prefer the exact
+  ``"Elevation"`` column; otherwise the first column containing
+  ``"Elevation"``; otherwise ``None``.  Do not reintroduce inline
+  ``any(...)`` / nested-ternary checks.

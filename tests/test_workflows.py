@@ -16,6 +16,12 @@ from examples.sample_model import (
     make_sample_model,
 )
 
+# The pushover tests use the base "UB300" Section (no fiber patches), so the
+# AnalysisBuilder legitimately warns and falls back to elastic elements.  This
+# is expected behavior — suppress the specific message so the test suite output
+# stays clean, but leave any other warnings visible.
+pytestmark = pytest.mark.filterwarnings("ignore:Section 'UB300' does not support fiber patches")
+
 # ============================================================================
 # Constants
 # ============================================================================
