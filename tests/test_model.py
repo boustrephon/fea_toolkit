@@ -2018,6 +2018,27 @@ class TestSelectionMeshModel:
         )
         assert frame_ids == set()
 
+    # ── missing geometry (z_mid is None) ──
+
+    def test_elevation_filter_excludes_frame_with_missing_nodes(self, mesh_model):
+        """A frame with a dangling node reference is excluded when the
+        elevation/story filters are active (z_mid is None)."""
+        del mesh_model.nodes["2"]  # frame "1" (1→2) loses its far node
+        sel = Selection(element_types=["Frame"],
+                        elevation_range=(0.0, 3.0))
+        frame_ids, _ = sel.resolve_to_mesh_sets(mesh_model)
+        # Frame "1" would be in range but has no computable z_mid → excluded
+        assert frame_ids == {"2"}
+
+    def test_elevation_filter_excludes_area_with_missing_nodes(self, mesh_model):
+        """An area with no resolvable vertex nodes is excluded (z_mid None)."""
+        mesh_model.area_elements["1"].node_ids = ["999"]
+        sel = Selection(element_types=["Area"],
+                        elevation_range=(0.0, 2.0))
+        _, area_ids = sel.resolve_to_mesh_sets(mesh_model)
+        # Area "1" would be in range but has no computable z_mid → excluded
+        assert area_ids == set()
+
     # ── combined filters ──
 
     def test_elevation_range_and_element_type(self, mesh_model):

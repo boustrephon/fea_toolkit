@@ -232,13 +232,9 @@ class Selection:
         # Elevation and story filters (only if either is set)
         if self.elevation_range is not None or self.story is not None:
             z_mid = self._get_frame_z_mid(model, eid)
-            if z_mid is None:
-                return False
-            if not self._match_elevation(z_mid):
-                return False
-            if self.story is not None and story_elevations is None:
-                return False
-            if not self._match_story(z_mid, story_elevations, story_z_tolerance):
+            if not self._match_z_filter(
+                z_mid, story_elevations, story_z_tolerance
+            ):
                 return False
         return True
 
@@ -270,13 +266,9 @@ class Selection:
         # Elevation and story filters (only if either is set)
         if self.elevation_range is not None or self.story is not None:
             z_mid = self._get_area_z_mid(model, eid)
-            if z_mid is None:
-                return False
-            if not self._match_elevation(z_mid):
-                return False
-            if self.story is not None and story_elevations is None:
-                return False
-            if not self._match_story(z_mid, story_elevations, story_z_tolerance):
+            if not self._match_z_filter(
+                z_mid, story_elevations, story_z_tolerance
+            ):
                 return False
         return True
 
@@ -657,6 +649,25 @@ class Selection:
         return frame_ids, area_ids
 
     # ── MeshModel matching helpers ──────────────────────────────────────────
+
+    def _match_z_filter(
+        self,
+        z_mid: Optional[float],
+        story_elevations: Optional[Dict[str, float]] = None,
+        story_z_tolerance: float = 0.5,
+    ) -> bool:
+        """Apply the elevation-range and storey filters to a resolved Z.
+
+        The elevation and storey criteria are applied only when set
+        (:meth:`_match_elevation` and :meth:`_match_story` each trivially
+        pass when their filter is unset).  A ``None`` ``z_mid`` — element
+        geometry unavailable — excludes the element from the selection.
+        """
+        if z_mid is None:
+            return False
+        if not self._match_elevation(z_mid):
+            return False
+        return self._match_story(z_mid, story_elevations, story_z_tolerance)
 
     def _match_elevation(self, z_mid: float) -> bool:
         """Check if a Z coordinate falls within *elevation_range*."""
