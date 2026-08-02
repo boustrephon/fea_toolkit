@@ -103,6 +103,7 @@ def export_model_to_tcl(
             control_node=8, dof=2, max_disp=0.1,
             lateral_loads={5: (0,10000,0), 6: (0,10000,0),
                            7: (0,10000,0), 8: (0,10000,0)},
+            base_node_tag=1, push_elem_tag=1,
         )
         export_model_to_tcl(md, "wall.tcl", tcl_suffix=tcl)
 
@@ -261,7 +262,6 @@ def export_model_to_tcl(
             # Geometric transformation
             dx = nj.x - ni.x
             dy = nj.y - ni.y
-            nj.z - ni.z
             vecxz = "1 0 0" if abs(dx) < 1e-12 and abs(dy) < 1e-12 else "0 0 1"
             # Use config-driven geometric transformation
             # Use a deterministic integer tag for the transformation

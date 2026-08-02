@@ -446,7 +446,6 @@ def plot_wall_slab_intersections(
     # ── 3. Walls with edges on this slab (orange, below/above) ──
     # Find all wall areas that share a Z-level edge with the target
     # slab — these are the walls that continue above or below.
-    {round(f["slab_Z"], 4) for f in relevant}
     adjacent_wall_ids: set = set()
     for sid in target_slab_ids:
         ae = area_elements.get(sid)
