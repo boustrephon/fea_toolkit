@@ -1360,9 +1360,11 @@ class AnalysisBuilder:
                     # Cap the confined spalling strain (configurable), but
                     # never clamp it below the strain at confined peak —
                     # an ecu below epsc_core would give a degenerate
-                    # Concrete01 curve.
+                    # Concrete01 curve.  Apply the cap first, then enforce
+                    # epsc_core as the absolute lower bound so a cap set
+                    # below epsc_core still yields a valid curve.
                     _ecu_max = float(self.config.get('confined_ecu_max', 0.025))
-                    ecu_core = min(max(ecu_core, epsc_core), _ecu_max)
+                    ecu_core = max(min(ecu_core, _ecu_max), epsc_core)
                     ops.uniaxialMaterial('Concrete01', mat_tag + 1,
                                          -Fc_core, -epsc_core,
                                          -0.2 * Fc_core, -ecu_core)
@@ -1775,7 +1777,6 @@ class AnalysisBuilder:
                 dx = float(nd_j.x - nd_i.x)
                 dy = float(nd_j.y - nd_i.y)
                 dz = float(nd_j.z - nd_i.z)
-                from ..model.geometry import get_SAP_vecxz
                 vecxz = get_SAP_vecxz(np.array([dx, dy, dz]), 0.0)
                 ops.geomTransf('Linear', link_tag, *vecxz)
                 ops.element('elasticBeamColumn', link_tag, ni_tag, nj_tag,
