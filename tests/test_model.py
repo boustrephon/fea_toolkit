@@ -3232,7 +3232,7 @@ class TestCapacitySpectrumMethod:
         _b, _results, _modal, _shapes, adrs = rc_adrs
         assert len(adrs['S_a']) == len(adrs['S_d']) > 0
         assert abs(adrs['M_eff']) > 0
-        assert all(v >= 0 for v in np.abs(adrs['S_a']))
+        assert all(v >= 0 for v in adrs['S_a'])
         assert all(v >= 0 for v in adrs['S_d'])
         assert all(math.isfinite(v) for v in adrs['S_a'])
         assert all(math.isfinite(v) for v in adrs['S_d'])

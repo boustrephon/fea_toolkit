@@ -523,8 +523,9 @@ def scale_material_dict(
     """
     import warnings as _w
     ssf = stress_scale if stress_scale is not None else stress_scale_factor(units)
-    if abs(ssf - 1.0) < 1e-15:
-        return dict(mat_dict)  # SI → SI, no scaling needed
+    # No early return for unity scale factors: the classification loop
+    # below must always run so unclassified numeric fields still emit
+    # UserWarning for SI models (values are unchanged, multiplied by 1.0).
     result = {}
     for k, v in mat_dict.items():
         if isinstance(v, (int, float)):
