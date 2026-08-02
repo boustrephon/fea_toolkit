@@ -29,35 +29,27 @@ removed.  Use the two-stage pipeline instead::
 
 import math
 import re
-from typing import TYPE_CHECKING, Dict, Any, Optional, List, Tuple
 from collections import defaultdict
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 
 from ..model.sap_data import SAPModelData
-
 from ..utils import (
+    DEFAULT_E_S_PA,
     DEFAULT_EPS_C,
     DEFAULT_EPS_CC,
-    DEFAULT_G_MOD_FRAC,
     DEFAULT_FC_PA,
     DEFAULT_FY_REBAR_PA,
     DEFAULT_FY_STEEL_PA,
-    DEFAULT_E_S_PA,
-    DEFAULT_RHO_MS_SI,
-    DEFAULT_RHO_WS_SI,
+    DEFAULT_G_MOD_FRAC,
     DEFAULT_RHO_MC_SI,
-    DEFAULT_RHO_WC_SI,
+    DEFAULT_RHO_MS_SI,
     RC_NO_TIE_CONFINEMENT_FACTOR,
     RC_NO_TIE_EPSC_FACTOR,
     g_from_units,
-    length_scale_factor,
-    force_scale_factor,
-    mass_scale_factor,
     mass_density_scale_factor,
-    weight_density_scale_factor,
     stress_scale_factor,
-    DEFAULT_GRAVITY_MS2
 )
 
 if TYPE_CHECKING:
@@ -80,7 +72,7 @@ def export_model_to_tcl(
     ndf: int = 6,
     tcl_prefix: str = "",
     tcl_suffix: str = "",
-    config: Optional[Dict[str, Any]] = None,
+    config: Optional[dict[str, Any]] = None,
 ) -> None:
     """Export a SAP model directly to a Xara-compatible Tcl script.
 
@@ -137,8 +129,10 @@ def export_model_to_tcl(
     """
     if not lib_path:
         try:
-            import opensees as _xara_ops
             import os as _os
+
+            import opensees as _xara_ops
+
             lib_dir = _os.path.dirname(_xara_ops.__file__)
             for ext in (".dylib", ".so"):
                 cand = _os.path.join(lib_dir, f"libOpenSeesRT{ext}")
@@ -157,8 +151,8 @@ def export_model_to_tcl(
     ]
 
     # Map SAP string IDs to integer tags for Tcl compatibility
-    _mat_tag: Dict[str, int] = {}
-    _sec_tag: Dict[str, int] = {}
+    _mat_tag: dict[str, int] = {}
+    _sec_tag: dict[str, int] = {}
     for i, mn in enumerate(model_data.materials, start=1):
         _mat_tag[mn] = i
     mat_count = max(len(model_data.materials), 1)
@@ -168,9 +162,7 @@ def export_model_to_tcl(
 
     # Nodes
     for nid, nd in model_data.nodes.items():
-        lines.append(
-            f"node {nd.node_tag} {nd.x:g} {nd.y:g} {nd.z:g}"
-        )
+        lines.append(f"node {nd.node_tag} {nd.x:g} {nd.y:g} {nd.z:g}")
 
     # Restraints
     restraints_added = False
@@ -193,31 +185,25 @@ def export_model_to_tcl(
             tag = _mat_tag[mat_name]
             if mat.type and "concrete" in mat.type.lower():
                 Fc = mat.Fc
-                epsc = (mat.eFc if mat.eFc and mat.eFc > 0
-                        else DEFAULT_EPS_C)
+                epsc = mat.eFc if mat.eFc and mat.eFc > 0 else DEFAULT_EPS_C
                 Fu = 0.2 * Fc
                 epsu = 0.006
                 lines.append(
-                    f"uniaxialMaterial Concrete01 {tag} "
-                    f"{-Fc:g} {-epsc:g} {-Fu:g} {-epsu:g}"
+                    f"uniaxialMaterial Concrete01 {tag} {-Fc:g} {-epsc:g} {-Fu:g} {-epsu:g}"
                 )
             else:
                 E_mod = mat.E_mod
                 Fy = mat.Fy
-                lines.append(
-                    f"uniaxialMaterial Steel01 {tag} "
-                    f"{Fy:g} {E_mod:g} 0.01"
-                )
+                lines.append(f"uniaxialMaterial Steel01 {tag} {Fy:g} {E_mod:g} 0.01")
 
     # nD materials (for nonlinear shell analysis, MeshModel may not have them)
-    _nd_mat_tag: Dict[str, int] = {}
-    _nd_materials = getattr(model_data, 'nd_materials', {})
+    _nd_mat_tag: dict[str, int] = {}
+    _nd_materials = getattr(model_data, "nd_materials", {})
     if _nd_materials:
         lines.append("")
         lines.append("# ── nD materials (nonlinear shells) ──")
         _nd_base = max(_mat_tag.values()) + 1 if _mat_tag else 1
-        for i, (nd_name, nd_mat) in enumerate(
-                _nd_materials.items(), start=_nd_base):
+        for i, (nd_name, nd_mat) in enumerate(_nd_materials.items(), start=_nd_base):
             _nd_mat_tag[nd_name] = i
             lines.append(nd_mat.to_tcl(i))
         # Wrap each nD material as PlateFiber for layered shell use
@@ -225,9 +211,7 @@ def export_model_to_tcl(
             tag = _nd_mat_tag[nd_name]
             if nd_mat.material_type != "ElasticIsotropic":
                 pf_tag = tag + len(_nd_materials)
-                lines.append(
-                    f"nDMaterial PlateFromPlaneStress {pf_tag} {tag} 0.0"
-                )
+                lines.append(f"nDMaterial PlateFromPlaneStress {pf_tag} {tag} 0.0")
 
     # Sections
     if model_data.sections:
@@ -255,12 +239,9 @@ def export_model_to_tcl(
             mat = model_data.materials.get(sec.material)
             if mat and mat.E_mod and mat.E_mod > 0:
                 E_mod = mat.E_mod
-            G = (mat.G_mod if mat and mat.G_mod and mat.G_mod > 0
-                 else 0.4 * E_mod)
+            G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * E_mod
             lines.append(
-                f"section Elastic {tag} "
-                f"{E_mod:g} {sec.A:g} {sec.I33:g} {sec.I22:g} "
-                f"{G:g} {sec.J:g}"
+                f"section Elastic {tag} {E_mod:g} {sec.A:g} {sec.I33:g} {sec.I22:g} {G:g} {sec.J:g}"
             )
 
     # Frame elements
@@ -280,29 +261,25 @@ def export_model_to_tcl(
             # Geometric transformation
             dx = nj.x - ni.x
             dy = nj.y - ni.y
-            dz = nj.z - ni.z
-            if abs(dx) < 1e-12 and abs(dy) < 1e-12:
-                vecxz = "1 0 0"
-            else:
-                vecxz = "0 0 1"
+            nj.z - ni.z
+            vecxz = "1 0 0" if abs(dx) < 1e-12 and abs(dy) < 1e-12 else "0 0 1"
             # Use config-driven geometric transformation
             # Use a deterministic integer tag for the transformation
             transf_tag = 20000 + elem.elem_tag
             transf_type = "Linear"
             if config:
                 transf_type = config.get("geom_transf_type", "Linear")
-            lines.append(
-                f"geomTransf {transf_type} {transf_tag} {vecxz}"
-            )
+            lines.append(f"geomTransf {transf_type} {transf_tag} {vecxz}")
             sec_tag = _sec_tag.get(sec_name, sec_name)
-            if config and config.get("create_fiber_sections", False) and sec_name in fiber_sec_names:
+            if (
+                config
+                and config.get("create_fiber_sections", False)
+                and sec_name in fiber_sec_names
+            ):
                 # Nonlinear beam-column with fibre section
                 int_tag = 10000 + elem.elem_tag
                 n_int_pts = config.get("num_int_pts", 5)
-                lines.append(
-                    "beamIntegration Lobatto {} {} {}".format(
-                        int_tag, sec_tag, n_int_pts)
-                )
+                lines.append(f"beamIntegration Lobatto {int_tag} {sec_tag} {n_int_pts}")
                 lines.append(
                     f"element forceBeamColumn {elem.elem_tag} "
                     f"{ni.node_tag} {nj.node_tag} {transf_tag} {int_tag}"
@@ -320,16 +297,15 @@ def export_model_to_tcl(
 
         # Map area section names to a _shell_sec_tag dict; prefer
         # LayeredShellSection if available, else ElasticMembranePlate.
-        _shell_sec_tag: Dict[str, int] = {}
+        _shell_sec_tag: dict[str, int] = {}
         _next_shell_tag = (
-            max(dict(**_mat_tag, **_sec_tag, **_nd_mat_tag).values())
-            + len(_nd_materials) + 1
-            if (_mat_tag or _sec_tag or _nd_mat_tag) else 1000
+            max(dict(**_mat_tag, **_sec_tag, **_nd_mat_tag).values()) + len(_nd_materials) + 1
+            if (_mat_tag or _sec_tag or _nd_mat_tag)
+            else 1000
         )
 
         # Emit layered shell sections from model data
-        for ls_name, ls_sec in (
-                getattr(model_data, 'layered_shell_sections', {})).items():
+        for ls_name, ls_sec in (getattr(model_data, "layered_shell_sections", {})).items():
             stag = _next_shell_tag
             _next_shell_tag += 1
             _shell_sec_tag[ls_name] = stag
@@ -351,29 +327,23 @@ def export_model_to_tcl(
         for aid, elem in model_data.area_elements.items():
             if getattr(elem, "inactive", False):
                 continue
-            nids = [str(nd.node_tag) for nd_id in elem.node_ids
-                    for nd in [model_data.nodes.get(nd_id)]
-                    if nd is not None]
+            nids = [
+                str(nd.node_tag)
+                for nd_id in elem.node_ids
+                for nd in [model_data.nodes.get(nd_id)]
+                if nd is not None
+            ]
             if len(nids) < 3:
                 continue
-            stag = _shell_sec_tag.get(
-                model_data.area_assignments.get(aid, ""), 1
-            )
+            stag = _shell_sec_tag.get(model_data.area_assignments.get(aid, ""), 1)
             nn = len(nids)
             if nn == 4:
-                lines.append(
-                    f"element ShellDKGQ {elem.area_tag} "
-                    + " ".join(nids) + f" {stag}"
-                )
+                lines.append(f"element ShellDKGQ {elem.area_tag} " + " ".join(nids) + f" {stag}")
             elif nn == 3:
-                lines.append(
-                    f"element ShellDKGT {elem.area_tag} "
-                    + " ".join(nids) + f" {stag}"
-                )
+                lines.append(f"element ShellDKGT {elem.area_tag} " + " ".join(nids) + f" {stag}")
 
     # Auto-generate nonlinear materials and fiber sections from config
-    nonlinear_tcl = tcl_materials_and_sections(
-        model_data, config)
+    nonlinear_tcl = tcl_materials_and_sections(model_data, config)
 
     # Insert auto-generated nonlinear Tcl before the sections block
     first_section_idx = None
@@ -389,7 +359,7 @@ def export_model_to_tcl(
     if tcl_prefix:
         first_section_idx = None
         for i, line in enumerate(lines):
-            if line.startswith("# ── Materials") or line.startswith("# ── Frame sections"):
+            if line.startswith(("# ── Materials", "# ── Frame sections")):
                 first_section_idx = i
                 break
         if first_section_idx is not None:
@@ -405,7 +375,7 @@ def export_model_to_tcl(
         lines.append(tcl_suffix)
 
     lines.append("")
-    lines.append("puts \"Model exported successfully.\"")
+    lines.append('puts "Model exported successfully."')
     lines.append("wipe")
     lines.append("exit")
 
@@ -420,7 +390,7 @@ def export_model_to_tcl(
 
 def tcl_materials_and_sections(
     model_data: "SAPModelData",
-    config: Optional[Dict[str, Any]] = None,
+    config: Optional[dict[str, Any]] = None,
 ) -> str:
     """Generate Tcl code for nonlinear materials and fiber sections.
 
@@ -440,7 +410,7 @@ def tcl_materials_and_sections(
     if not config.get("create_fiber_sections", False):
         return ""
 
-    lines: List[str] = [
+    lines: list[str] = [
         "",
         "# ── Nonlinear materials and fiber sections ──",
         "# (generated by fea_toolkit.opensees.builder)",
@@ -456,7 +426,7 @@ def tcl_materials_and_sections(
     next_concrete_tag = sec_tag_offset + sec_count
 
     # Map section name → tag
-    _sec_tag: Dict[str, int] = {}
+    _sec_tag: dict[str, int] = {}
     for i, sn in enumerate(model_data.sections, start=sec_tag_offset):
         _sec_tag[sn] = i
 
@@ -468,22 +438,24 @@ def tcl_materials_and_sections(
         mat = model_data.materials.get(sec.material)
 
         from ..model.sap_data import (
-            ConcreteRectangularSection,
             ConcreteCircularSection,
+            ConcreteRectangularSection,
             RectangularSection,
             ShellSection,
-            Section as BaseSection,
         )
 
         # Shell sections → elastic only (no fiber)
         if isinstance(sec, ShellSection):
             continue
 
-        is_rc = isinstance(sec, (
-            ConcreteRectangularSection,
-            ConcreteCircularSection,
-            RectangularSection,
-        ))
+        is_rc = isinstance(
+            sec,
+            (
+                ConcreteRectangularSection,
+                ConcreteCircularSection,
+                RectangularSection,
+            ),
+        )
 
         if is_rc:
             # ── RC fiber section: unconfined, confined, rebar ──
@@ -491,11 +463,12 @@ def tcl_materials_and_sections(
             next_concrete_tag += 3
 
             if mat is not None:
-                Fc = (mat.Fc if mat.Fc and mat.Fc > 0
-                      else DEFAULT_FC_PA * _sf)
-                epsc = (float(mat.ss_curve.s_fc)
-                        if mat.ss_curve is not None and mat.ss_curve.s_fc is not None
-                        else DEFAULT_EPS_C)
+                Fc = mat.Fc if mat.Fc and mat.Fc > 0 else DEFAULT_FC_PA * _sf
+                epsc = (
+                    float(mat.ss_curve.s_fc)
+                    if mat.ss_curve is not None and mat.ss_curve.s_fc is not None
+                    else DEFAULT_EPS_C
+                )
                 if epsc > 0.01:
                     epsc = DEFAULT_EPS_C
 
@@ -508,31 +481,31 @@ def tcl_materials_and_sections(
                 fcc = Fc * RC_NO_TIE_CONFINEMENT_FACTOR
                 epscc = epsc * RC_NO_TIE_EPSC_FACTOR
                 ecu_cc = 0.02
-                fc_method = getattr(sec, 'fiber_confinement', None)
+                fc_method = getattr(sec, "fiber_confinement", None)
                 _conf_dict = None
                 if callable(fc_method):
-                    tie_fy = getattr(sec, 'tie_fy', None) or 0.0
+                    tie_fy = getattr(sec, "tie_fy", None) or 0.0
                     if tie_fy <= 0:
                         # Resolve tie_fy from the transverse rebar material
                         # (RebarMatT) first, then the longitudinal rebar
                         # material (RebarMatL) as a fallback.
-                        _tie_mat_name = (getattr(sec, 'tie_rebar_mat', None)
-                                         or getattr(sec, 'rebar_material', None))
-                        _tie_mat = (model_data.materials.get(_tie_mat_name)
-                                    if _tie_mat_name else None)
+                        _tie_mat_name = getattr(sec, "tie_rebar_mat", None) or getattr(
+                            sec, "rebar_material", None
+                        )
+                        _tie_mat = (
+                            model_data.materials.get(_tie_mat_name) if _tie_mat_name else None
+                        )
                         if _tie_mat is not None:
-                            tie_fy = getattr(_tie_mat, 'Fy', 0.0) or 0.0
+                            tie_fy = getattr(_tie_mat, "Fy", 0.0) or 0.0
                     try:
                         _conf_val = fc_method(Fc, tie_fy)
-                        _conf_dict = (
-                            _conf_val if isinstance(_conf_val, dict) else None
-                        )
+                        _conf_dict = _conf_val if isinstance(_conf_val, dict) else None
                     except Exception:
                         _conf_dict = None
                     if _conf_dict is not None:
-                        fcc = _conf_dict.get('fcc', fcc)
-                        epscc = _conf_dict.get('ecc', epscc)
-                        ecu_cc = _conf_dict.get('ecu', ecu_cc)
+                        fcc = _conf_dict.get("fcc", fcc)
+                        epscc = _conf_dict.get("ecc", epscc)
+                        ecu_cc = _conf_dict.get("ecu", ecu_cc)
                 # A None result from fiber_confinement (or a non-callable
                 # method) means Mander confinement data is unavailable —
                 # fall back to the SAP2000 eFc / ss_curve.s_cap values before
@@ -541,24 +514,26 @@ def tcl_materials_and_sections(
                 if _conf_dict is None:
                     if mat.eFc and mat.eFc > 0:
                         fcc = mat.eFc
-                    _scc = (float(mat.ss_curve.s_cap)
-                            if mat.ss_curve is not None and mat.ss_curve.s_cap is not None
-                            else None)
+                    _scc = (
+                        float(mat.ss_curve.s_cap)
+                        if mat.ss_curve is not None and mat.ss_curve.s_cap is not None
+                        else None
+                    )
                     if _scc is not None and _scc <= 0.1:
                         epscc = _scc
                 if epscc > 0.1:
                     epscc = DEFAULT_EPS_CC
                 # Cap the confined spalling strain (configurable).
-                _ecu_max = float(config.get('confined_ecu_max', 0.025))
+                _ecu_max = float(config.get("confined_ecu_max", 0.025))
                 ecu_cc = min(ecu_cc, _ecu_max)
 
                 lines.append(
                     f"uniaxialMaterial Concrete01 {concrete_mat_tag} "
-                    f"{-Fc:g} {-abs(epsc):g} {-0.2*Fc:g} {-0.006:g}"
+                    f"{-Fc:g} {-abs(epsc):g} {-0.2 * Fc:g} {-0.006:g}"
                 )
                 lines.append(
                     f"uniaxialMaterial Concrete01 {concrete_mat_tag + 1} "
-                    f"{-fcc:g} {-abs(epscc):g} {-0.2*fcc:g} {-ecu_cc:g}"
+                    f"{-fcc:g} {-abs(epscc):g} {-0.2 * fcc:g} {-ecu_cc:g}"
                 )
                 # ── Steel rebar ──
                 # Resolve Fy/Es in priority order:
@@ -566,15 +541,20 @@ def tcl_materials_and_sections(
                 #   2) framework rebar defaults (DEFAULT_FY_REBAR_PA / E_S)
                 #      scaled to model units
                 _rebar_mat = None
-                _rebar_mat_name = getattr(sec, 'rebar_material', None)
+                _rebar_mat_name = getattr(sec, "rebar_material", None)
                 if _rebar_mat_name:
                     _rebar_mat = model_data.materials.get(_rebar_mat_name)
                 if _rebar_mat is not None:
-                    Fy = (_rebar_mat.Fy if _rebar_mat.Fy and _rebar_mat.Fy > 0
-                          else DEFAULT_FY_REBAR_PA * _sf)
-                    E_mod = (_rebar_mat.E_mod
-                             if _rebar_mat.E_mod and _rebar_mat.E_mod > 0
-                             else DEFAULT_E_S_PA * _sf)
+                    Fy = (
+                        _rebar_mat.Fy
+                        if _rebar_mat.Fy and _rebar_mat.Fy > 0
+                        else DEFAULT_FY_REBAR_PA * _sf
+                    )
+                    E_mod = (
+                        _rebar_mat.E_mod
+                        if _rebar_mat.E_mod and _rebar_mat.E_mod > 0
+                        else DEFAULT_E_S_PA * _sf
+                    )
                 else:
                     Fy = DEFAULT_FY_REBAR_PA * _sf
                     E_mod = DEFAULT_E_S_PA * _sf
@@ -589,11 +569,11 @@ def tcl_materials_and_sections(
                 _e = DEFAULT_E_S_PA * _sf
                 lines.append(
                     f"uniaxialMaterial Concrete01 {concrete_mat_tag} "
-                    f"{-_fc:g} {-DEFAULT_EPS_C:g} {-0.2*_fc:g} {-0.006:g}"
+                    f"{-_fc:g} {-DEFAULT_EPS_C:g} {-0.2 * _fc:g} {-0.006:g}"
                 )
                 lines.append(
                     f"uniaxialMaterial Concrete01 {concrete_mat_tag + 1} "
-                    f"{-_fcc:g} {-DEFAULT_EPS_CC:g} {-0.2*_fcc:g} {-0.02:g}"
+                    f"{-_fcc:g} {-DEFAULT_EPS_CC:g} {-0.2 * _fcc:g} {-0.02:g}"
                 )
                 lines.append(
                     f"uniaxialMaterial Steel02 {concrete_mat_tag + 2} "
@@ -605,24 +585,25 @@ def tcl_materials_and_sections(
         else:
             # ── Steel fiber section: Steel01 ──
             if mat is not None and mat.type.lower() == "steel":
-                Fy = (mat.Fy if mat.Fy and mat.Fy > 0
-                      else DEFAULT_FY_STEEL_PA * _sf)
-                E_mod = (mat.E_mod if mat.E_mod > 0
-                         else DEFAULT_E_S_PA * _sf)
+                Fy = mat.Fy if mat.Fy and mat.Fy > 0 else DEFAULT_FY_STEEL_PA * _sf
+                E_mod = mat.E_mod if mat.E_mod > 0 else DEFAULT_E_S_PA * _sf
             else:
                 Fy = DEFAULT_FY_STEEL_PA * _sf
                 E_mod = DEFAULT_E_S_PA * _sf
             fiber_mat_tag = sec_tag
-            lines.append(
-                f"uniaxialMaterial Steel01 {fiber_mat_tag} "
-                f"{Fy:g} {E_mod:g} {0.01:g}"
-            )
+            lines.append(f"uniaxialMaterial Steel01 {fiber_mat_tag} {Fy:g} {E_mod:g} {0.01:g}")
 
         # Compute shear modulus for GJ torsional rigidity
-        _E = (mat.E_mod if mat and mat.E_mod and mat.E_mod > 0
-              else DEFAULT_E_S_PA * _sf) if mat else DEFAULT_E_S_PA * _sf
-        _G = (mat.G_mod if mat and mat.G_mod and mat.G_mod > 0
-              else DEFAULT_G_MOD_FRAC * _E) if mat else DEFAULT_G_MOD_FRAC * _E
+        _E = (
+            (mat.E_mod if mat and mat.E_mod and mat.E_mod > 0 else DEFAULT_E_S_PA * _sf)
+            if mat
+            else DEFAULT_E_S_PA * _sf
+        )
+        _G = (
+            (mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else DEFAULT_G_MOD_FRAC * _E)
+            if mat
+            else DEFAULT_G_MOD_FRAC * _E
+        )
 
         # ── Fiber section ──
         gj = _G * sec.J
@@ -672,8 +653,8 @@ def pushover_tcl(
     dof: int = 1,
     max_disp: float = 0.1,
     num_steps: int = 100,
-    lateral_loads: Optional[Dict[int, tuple]] = None,
-    gravity_loads: Optional[Dict[int, tuple]] = None,
+    lateral_loads: Optional[dict[int, tuple]] = None,
+    gravity_loads: Optional[dict[int, tuple]] = None,
     gravity_pattern: str = "",
     adaptive: bool = False,
 ) -> str:
@@ -702,176 +683,188 @@ def pushover_tcl(
     Returns:
         Tcl commands as a string.
     """
-    lines: List[str] = []
+    lines: list[str] = []
 
     # ── Step A: Gravity ──
     if gravity_loads:
         lines.append("")
         lines.append("# ── Step A: Gravity analysis ──")
-        lines.append(f"pattern Plain 1 \"Linear\" {{")
+        lines.append('pattern Plain 1 "Linear" {')
         for nid, (fx, fy, fz) in gravity_loads.items():
             lines.append(f"    load {nid} {fx:g} {fy:g} {fz:g} 0 0 0")
         lines.append("}")
-        lines.extend([
-            "constraints Transformation",
-            "numberer RCM",
-            "system BandGeneral",
-            "test NormDispIncr 1.0e-3 20 0",
-            "algorithm Newton",
-            "integrator LoadControl 0.05",
-            "analysis Static",
-            "analyze 20",
-            'loadConst -time 0.0',
-            'puts "-> Gravity loads locked."',
-        ])
+        lines.extend(
+            [
+                "constraints Transformation",
+                "numberer RCM",
+                "system BandGeneral",
+                "test NormDispIncr 1.0e-3 20 0",
+                "algorithm Newton",
+                "integrator LoadControl 0.05",
+                "analysis Static",
+                "analyze 20",
+                "loadConst -time 0.0",
+                'puts "-> Gravity loads locked."',
+            ]
+        )
 
     # ── Step B: Lateral pushover ──
     if lateral_loads:
         lines.append("")
-        lines.append("puts \"-> Gravity complete, starting pushover analysis...\"")
+        lines.append('puts "-> Gravity complete, starting pushover analysis..."')
         lines.append("flush stdout")
         lines.append("")
         lines.append("# ── Step B: Lateral pushover ──")
-        lines.append("pattern Plain 2 \"Linear\" {")
+        lines.append('pattern Plain 2 "Linear" {')
         for nid, (fx, fy, fz) in lateral_loads.items():
             lines.append(f"    load {nid} {fx:g} {fy:g} {fz:g} 0 0 0")
         lines.append("}")
 
-    lines.extend([
-        "",
-        "system BandGeneral",
-        "numberer RCM",
-        "constraints Transformation",
-    ])
+    lines.extend(
+        [
+            "",
+            "system BandGeneral",
+            "numberer RCM",
+            "constraints Transformation",
+        ]
+    )
 
     # ── Recorders (BEFORE analysis, NOT after) ──
-    lines.extend([
-        "",
-        f"recorder Node -file wall_disp.out -time -node {control_node} -dof {dof} disp",
-        "recorder Node -file wall_reaction.out -time -node 1 -dof 1 reaction",
-        "recorder Element -file wall_forces.out -ele 1 force",
-        'puts "-> Recorders set up, analysis begins..."',
-        "flush stdout",
-    ])
+    lines.extend(
+        [
+            "",
+            f"recorder Node -file wall_disp.out -time -node {control_node} -dof {dof} disp",
+            "recorder Node -file wall_reaction.out -time -node 1 -dof 1 reaction",
+            "recorder Element -file wall_forces.out -ele 1 force",
+            'puts "-> Recorders set up, analysis begins..."',
+            "flush stdout",
+        ]
+    )
 
     if adaptive:
         # Adaptive pushover with algorithm fallback chain
         dU_base_val = max_disp / num_steps
-        lines.extend([
-            f"set control_node {control_node}",
-            f"set dof {dof}",
-            f"set dU_base {dU_base_val:.8g}",
-            "# ── Solver settings for shell+fiber models ──",
-            "# Sparse solver is essential for models with >1000 shell elements",
-            "system UmfPack",
-            "# Penalty handles shell-edge MPCs correctly (Transformation silently ignores them)",
-            "constraints Penalty 1.0e12 1.0e12",
-            "",
-            "# ── Gentle ramp-up for initial pushover step ──",
-            "# Use 1/10 of base step for first step to stabilize fiber section convergence",
-            "set dU [expr $dU_base / 10.0]",
-            f"set targetDisp {max_disp:.6g}",
-            "set currentDisp 0.0",
-            "set stepCount 0",
-            "",
-            "# Relaxed norm (1e-3) matches gravity convergence — fiber sections need this",
-            "test NormDispIncr 1.0e-3 200 0",
-            "integrator DisplacementControl $control_node $dof $dU",
-            "analysis Static",
-            "",
-            "while {$currentDisp < $targetDisp} {",
-            "",
-            "    algorithm Newton",
-            "    set ok [analyze 1]",
-            "",
-            "    # Fallback 1: Krylov-Newton",
-            '    if {$ok != 0} {',
-            "        puts \"   Krylov-Newton fallback...\"",
-            "        flush stdout",
-            "        test NormDispIncr 1.0e-2 500 0",
-            "        algorithm KrylovNewton",
-            "        set ok [analyze 1]",
-            "    }",
-            "",
-            "    # Fallback 2: ModifiedNewton (initial stiffness)",
-            '    if {$ok != 0} {',
-            "        puts \"   ModifiedNewton fallback...\"",
-            "        flush stdout",
-            "        algorithm ModifiedNewton -initial",
-            "        set ok [analyze 1]",
-            "    }",
-            "",
-            "    # Fallback 3: cut step size by 90%",
-            '    if {$ok != 0} {',
-            "        puts \"   Step cut from $dU to [expr $dU * 0.1]\"",
-            "        flush stdout",
-            "        set dU [expr $dU * 0.1]",
-            "        integrator DisplacementControl $control_node $dof $dU",
-            "        algorithm Newton",
-            "        test NormDispIncr 1.0e-2 500 0",
-            "        set ok [analyze 1]",
-            "    }",
-            "",
-            "    # Fallback 4: cycle back to tight norm with KrylovNewton at minimal step",
-            '    if {$ok != 0} {',
-            "        puts \"   Final fallback: KrylovNewton + 1.0e-1 norm...\"",
-            "        flush stdout",
-            "        set dU [expr $dU_base / 100.0]",
-            "        integrator DisplacementControl $control_node $dof $dU",
-            "        test NormDispIncr 1.0e-1 1000 0",
-            "        algorithm KrylovNewton",
-            "        set ok [analyze 1]",
-            "    }",
-            "",
-            '    if {$ok != 0} {',
-            '        puts {\\n[CRITICAL] Model collapse reached.}',
-            "        flush stdout",
-            "        break",
-            "    }",
-            "",
-            "    # Restore step size and norm tolerance when possible",
-            "    if {$dU < $dU_base} {",
-            "        set dU $dU_base",
-            "        test NormDispIncr 1.0e-3 200 0",
-            "        integrator DisplacementControl $control_node $dof $dU",
-            "    }",
-            "",
-            "    set currentDisp [nodeDisp $control_node $dof]",
-            "    incr stepCount",
-            '    if {[expr $stepCount % 20] == 0} {',
-            "         puts [format \"   Drift = %.2f mm (step %d)\" $currentDisp $stepCount]",
-            "         flush stdout",
-            "    }",
-            "}",
-        ])
+        lines.extend(
+            [
+                f"set control_node {control_node}",
+                f"set dof {dof}",
+                f"set dU_base {dU_base_val:.8g}",
+                "# ── Solver settings for shell+fiber models ──",
+                "# Sparse solver is essential for models with >1000 shell elements",
+                "system UmfPack",
+                "# Penalty handles shell-edge MPCs correctly (Transformation silently ignores them)",
+                "constraints Penalty 1.0e12 1.0e12",
+                "",
+                "# ── Gentle ramp-up for initial pushover step ──",
+                "# Use 1/10 of base step for first step to stabilize fiber section convergence",
+                "set dU [expr $dU_base / 10.0]",
+                f"set targetDisp {max_disp:.6g}",
+                "set currentDisp 0.0",
+                "set stepCount 0",
+                "",
+                "# Relaxed norm (1e-3) matches gravity convergence — fiber sections need this",
+                "test NormDispIncr 1.0e-3 200 0",
+                "integrator DisplacementControl $control_node $dof $dU",
+                "analysis Static",
+                "",
+                "while {$currentDisp < $targetDisp} {",
+                "",
+                "    algorithm Newton",
+                "    set ok [analyze 1]",
+                "",
+                "    # Fallback 1: Krylov-Newton",
+                "    if {$ok != 0} {",
+                '        puts "   Krylov-Newton fallback..."',
+                "        flush stdout",
+                "        test NormDispIncr 1.0e-2 500 0",
+                "        algorithm KrylovNewton",
+                "        set ok [analyze 1]",
+                "    }",
+                "",
+                "    # Fallback 2: ModifiedNewton (initial stiffness)",
+                "    if {$ok != 0} {",
+                '        puts "   ModifiedNewton fallback..."',
+                "        flush stdout",
+                "        algorithm ModifiedNewton -initial",
+                "        set ok [analyze 1]",
+                "    }",
+                "",
+                "    # Fallback 3: cut step size by 90%",
+                "    if {$ok != 0} {",
+                '        puts "   Step cut from $dU to [expr $dU * 0.1]"',
+                "        flush stdout",
+                "        set dU [expr $dU * 0.1]",
+                "        integrator DisplacementControl $control_node $dof $dU",
+                "        algorithm Newton",
+                "        test NormDispIncr 1.0e-2 500 0",
+                "        set ok [analyze 1]",
+                "    }",
+                "",
+                "    # Fallback 4: cycle back to tight norm with KrylovNewton at minimal step",
+                "    if {$ok != 0} {",
+                '        puts "   Final fallback: KrylovNewton + 1.0e-1 norm..."',
+                "        flush stdout",
+                "        set dU [expr $dU_base / 100.0]",
+                "        integrator DisplacementControl $control_node $dof $dU",
+                "        test NormDispIncr 1.0e-1 1000 0",
+                "        algorithm KrylovNewton",
+                "        set ok [analyze 1]",
+                "    }",
+                "",
+                "    if {$ok != 0} {",
+                "        puts {\\n[CRITICAL] Model collapse reached.}",
+                "        flush stdout",
+                "        break",
+                "    }",
+                "",
+                "    # Restore step size and norm tolerance when possible",
+                "    if {$dU < $dU_base} {",
+                "        set dU $dU_base",
+                "        test NormDispIncr 1.0e-3 200 0",
+                "        integrator DisplacementControl $control_node $dof $dU",
+                "    }",
+                "",
+                "    set currentDisp [nodeDisp $control_node $dof]",
+                "    incr stepCount",
+                "    if {[expr $stepCount % 20] == 0} {",
+                '         puts [format "   Drift = %.2f mm (step %d)" $currentDisp $stepCount]',
+                "         flush stdout",
+                "    }",
+                "}",
+            ]
+        )
     else:
         # Simple fixed-step pushover
-        lines.extend([
-            "test NormDispIncr 1.0e-6 100",
-            "algorithm Newton",
-            f"integrator DisplacementControl {control_node} {dof} "
-            f"[expr {max_disp:.6g} / {num_steps}]",
-            "analysis Static",
-            "",
-            f"set ok [analyze {num_steps}]",
-            'puts "Pushover: $ok steps"',
-        ])
+        lines.extend(
+            [
+                "test NormDispIncr 1.0e-6 100",
+                "algorithm Newton",
+                f"integrator DisplacementControl {control_node} {dof} "
+                f"[expr {max_disp:.6g} / {num_steps}]",
+                "analysis Static",
+                "",
+                f"set ok [analyze {num_steps}]",
+                'puts "Pushover: $ok steps"',
+            ]
+        )
 
     # ── Results ──
-    lines.extend([
-        "",
-        f'puts "Control node {control_node} dof {dof}: [nodeDisp {control_node} {dof}]"',
-        "",
-        "reactions",
-        "# Sum base reactions",
-        "set rx 0; set ry 0; set rz 0",
-        "foreach n [getNodeTags] {",
-        "    set rx [expr $rx + [nodeReaction $n 1]]",
-        "    set ry [expr $ry + [nodeReaction $n 2]]",
-        "    set rz [expr $rz + [nodeReaction $n 3]]",
-        "}",
-        'puts "Base reactions: Rx = $rx  Ry = $ry  Rz = $rz"',
-    ])
+    lines.extend(
+        [
+            "",
+            f'puts "Control node {control_node} dof {dof}: [nodeDisp {control_node} {dof}]"',
+            "",
+            "reactions",
+            "# Sum base reactions",
+            "set rx 0; set ry 0; set rz 0",
+            "foreach n [getNodeTags] {",
+            "    set rx [expr $rx + [nodeReaction $n 1]]",
+            "    set ry [expr $ry + [nodeReaction $n 2]]",
+            "    set rz [expr $rz + [nodeReaction $n 3]]",
+            "}",
+            'puts "Base reactions: Rx = $rx  Ry = $ry  Rz = $rz"',
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -886,7 +879,7 @@ def dynamic_time_history_tcl(
     period_1: float = 0.2,
     period_2: float = 2.0,
     direction: str = "X",
-    gravity_loads: Optional[Dict[int, tuple]] = None,
+    gravity_loads: Optional[dict[int, tuple]] = None,
 ) -> str:
     """Generate a nonlinear time-history analysis block for OpenSees Tcl.
 
@@ -922,7 +915,7 @@ def dynamic_time_history_tcl(
     a0 = 4.0 * math.pi * damping / (period_1 + period_2)
     a1 = damping * period_1 * period_2 / math.pi
 
-    lines: List[str] = []
+    lines: list[str] = []
 
     # ── Step A: Gravity ──
     if gravity_loads:
@@ -932,64 +925,69 @@ def dynamic_time_history_tcl(
         for nid, (fx, fy, fz) in gravity_loads.items():
             lines.append(f"    load {nid} {fx:g} {fy:g} {fz:g} 0 0 0")
         lines.append("}")
-        lines.extend([
+        lines.extend(
+            [
+                "constraints Transformation",
+                "numberer RCM",
+                "system BandGeneral",
+                "test NormDispIncr 1.0e-3 20 0",
+                "algorithm Newton",
+                "integrator LoadControl 0.05",
+                "analysis Static",
+                "analyze 20",
+                "loadConst -time 0.0",
+                'puts "-> Gravity loads locked."',
+                "flush stdout",
+            ]
+        )
+
+    # ── Step B: Transient analysis ──
+    lines.extend(
+        [
+            "",
+            'puts "-> Gravity complete, starting time-history analysis..."',
+            "flush stdout",
+            "",
+            "# ── Step B: Transient dynamic analysis ──",
             "constraints Transformation",
             "numberer RCM",
             "system BandGeneral",
-            "test NormDispIncr 1.0e-3 20 0",
-            "algorithm Newton",
-            "integrator LoadControl 0.05",
-            "analysis Static",
-            "analyze 20",
-            "loadConst -time 0.0",
-            'puts "-> Gravity loads locked."',
-            "flush stdout",
-        ])
-
-    # ── Step B: Transient analysis ──
-    lines.extend([
-        "",
-        "puts \"-> Gravity complete, starting time-history analysis...\"",
-        "flush stdout",
-        "",
-        "# ── Step B: Transient dynamic analysis ──",
-        "constraints Transformation",
-        "numberer RCM",
-        "system BandGeneral",
-        f"rayleigh {a0:.8g} 0.0 {a1:.8g} 0.0",
-        "",
-        f"timeSeries Path 2 -dt {dt:g} -filePath {ground_motion_file} -factor 1.0",
-        f"pattern UniformExcitation 2 {dof} -accel 2",
-        "",
-    ])
+            f"rayleigh {a0:.8g} 0.0 {a1:.8g} 0.0",
+            "",
+            f"timeSeries Path 2 -dt {dt:g} -filePath {ground_motion_file} -factor 1.0",
+            f"pattern UniformExcitation 2 {dof} -accel 2",
+            "",
+        ]
+    )
 
     # ── Recorders (BEFORE analysis) ──
-    lines.extend([
-        "set nodeTags [getNodeTags]",
-        f"recorder Node -file {output_prefix}_disp.out -time "
-        f"-node $nodeTags -dof 1 2 3 disp",
-        f"recorder EnvelopeNode -file {output_prefix}_env_disp.out -time "
-        f"-node $nodeTags -dof 1 2 3 disp",
-        'puts "-> Recorders set up, analysis begins..."',
-        "flush stdout",
-        "",
-        "test EnergyIncr 1.0e-6 200 0",
-        "algorithm Newton",
-        "integrator Newmark 0.5 0.25",
-        "analysis Transient",
-        f"analyze {num_steps} {dt:g}",
-        "puts \"Time-history analysis complete.\"",
-        "flush stdout",
-    ])
+    lines.extend(
+        [
+            "set nodeTags [getNodeTags]",
+            f"recorder Node -file {output_prefix}_disp.out -time -node $nodeTags -dof 1 2 3 disp",
+            f"recorder EnvelopeNode -file {output_prefix}_env_disp.out -time "
+            f"-node $nodeTags -dof 1 2 3 disp",
+            'puts "-> Recorders set up, analysis begins..."',
+            "flush stdout",
+            "",
+            "test EnergyIncr 1.0e-6 200 0",
+            "algorithm Newton",
+            "integrator Newmark 0.5 0.25",
+            "analysis Transient",
+            f"analyze {num_steps} {dt:g}",
+            'puts "Time-history analysis complete."',
+            "flush stdout",
+        ]
+    )
 
     return "\n".join(lines)
 
 
 def mesh_model_to_gravity_loads(
     mesh_model: "MeshModel",
-    pattern_combination: Optional[Dict[str, float]] = None,
+    pattern_combination: Optional[dict[str, float]] = None,
     g_acc: float = 0.0,
-) -> Dict[int, tuple]:
+) -> dict[int, tuple]:
     """Convert MeshModel loads to ``{node_tag: (fx, fy, fz)}`` dict
     for gravity load application in pushover analysis.
 
@@ -1039,7 +1037,8 @@ def mesh_model_to_gravity_loads(
     if pattern_combination is None:
         # Default: all DesignType=Dead patterns
         pattern_combination = {
-            pn: 1.0 for pn, lp in mesh_model.load_patterns.items()
+            pn: 1.0
+            for pn, lp in mesh_model.load_patterns.items()
             if (lp.pattern_type or "").upper() == "DEAD"
         }
 
@@ -1062,11 +1061,13 @@ def mesh_model_to_gravity_loads(
             nz += (x1 - x2) * (y1 + y2)
         return 0.5 * math.hypot(nz, math.hypot(nx, ny))
 
-    node_mass: Dict[int, float] = defaultdict(float)
+    node_mass: dict[int, float] = defaultdict(float)
 
     for pattern_name, factor in pattern_combination.items():
         lp = mesh_model.load_patterns.get(pattern_name)
-        has_self_weight = (lp is not None and abs(lp.self_weight_factor) > 1e-12)  # tolerance needs generalised
+        has_self_weight = (
+            lp is not None and abs(lp.self_weight_factor) > 1e-12
+        )  # tolerance needs generalised
 
         # ── Source A: Explicit loads (used when sw=0) ──
         if not has_self_weight:
@@ -1084,8 +1085,10 @@ def mesh_model_to_gravity_loads(
                 sec_name = mesh_model.frame_assignments.get(gl.frame_id, "")
                 sec = mesh_model.sections.get(sec_name) if sec_name else None
                 if sec is not None and sec.A > 0:
-                    dx = nj.x - ni.x; dy = nj.y - ni.y; dz = nj.z - ni.z
-                    length = math.sqrt(dx*dx + dy*dy + dz*dz)
+                    dx = nj.x - ni.x
+                    dy = nj.y - ni.y
+                    dz = nj.z - ni.z
+                    length = math.sqrt(dx * dx + dy * dy + dz * dz)
                     mat = mesh_model.materials.get(sec.material)
                     mass_density = _mass_density(mat)
                     elem_mass = sec.A * length * mass_density * abs(gl.multiplier_z)
@@ -1162,8 +1165,10 @@ def mesh_model_to_gravity_loads(
                 sec = mesh_model.sections.get(sec_name) if sec_name else None
                 if sec is None or sec.A <= 0:
                     continue
-                dx = nj.x - ni.x; dy = nj.y - ni.y; dz = nj.z - ni.z
-                length = math.sqrt(dx*dx + dy*dy + dz*dz)
+                dx = nj.x - ni.x
+                dy = nj.y - ni.y
+                dz = nj.z - ni.z
+                length = math.sqrt(dx * dx + dy * dy + dz * dz)
                 mat = mesh_model.materials.get(sec.material)
                 mass_density = _mass_density(mat)
                 elem_mass = sec.A * length * mass_density * factor
@@ -1193,7 +1198,7 @@ def mesh_model_to_gravity_loads(
                             node_mass[nd.node_tag] += node_share
 
     # Convert mass to loads
-    gravity_loads: Dict[int, tuple] = {}
+    gravity_loads: dict[int, tuple] = {}
     for tag, mass in node_mass.items():
         gravity_loads[tag] = (0.0, 0.0, -mass * g_acc)
 
@@ -1221,10 +1226,10 @@ def compute_lateral_loads(
     mesh_model: "MeshModel",
     pattern_type: str = "triangular",
     direction: str = "X",
-    nodal_masses: Optional[Dict[int, float]] = None,
+    nodal_masses: Optional[dict[int, float]] = None,
     modal_data: Optional[dict] = None,
     k: float = 1.0,
-) -> Dict[int, tuple]:
+) -> dict[int, tuple]:
     """Generate a unit-reference lateral load pattern for pushover analysis.
 
     Three pattern types are supported (FEMA 356):
@@ -1239,7 +1244,7 @@ def compute_lateral_loads(
         nodal_masses = {nd.node_tag: 1.0 for nd in mesh_model.nodes.values()}
     total_mass = sum(nodal_masses.values())
 
-    loads: Dict[int, tuple] = {}
+    loads: dict[int, tuple] = {}
     total_w = 0.0
 
     if pattern_type == "uniform":
@@ -1259,7 +1264,7 @@ def compute_lateral_loads(
             for nd in mesh_model.nodes.values():
                 mi = nodal_masses.get(nd.node_tag, 1.0)
                 z_norm = (nd.z - z_min) / z_range
-                w = mi * (z_norm ** k)
+                w = mi * (z_norm**k)
                 f = [0.0, 0.0, 0.0]
                 f[dof_idx] = w
                 loads[nd.node_tag] = tuple(f)
@@ -1285,48 +1290,59 @@ def compute_lateral_loads(
         raise ValueError(f"Unknown pattern_type='{pattern_type}'")
 
     if total_w > 1e-12:
-        for tag in loads:
-            f = list(loads[tag])
-            f = [v / total_w for v in f]
-            loads[tag] = tuple(f)
+        for tag, f_val in loads.items():
+            f_list = list(f_val)
+            f_list = [v / total_w for v in f_list]
+            loads[tag] = tuple(f_list)
     return loads
 
 
 # ── Convenience wrappers ──
 
+
 def modal_to_lateral_loads(
     mesh_model: "MeshModel",
     modal_data: dict,
     direction: str = "X",
-    nodal_masses: Optional[Dict[int, float]] = None,
-) -> Dict[int, tuple]:
+    nodal_masses: Optional[dict[int, float]] = None,
+) -> dict[int, tuple]:
     """Legacy wrapper — delegates to :func:`compute_lateral_loads`."""
     return compute_lateral_loads(
-        mesh_model, pattern_type="modal", direction=direction,
-        nodal_masses=nodal_masses, modal_data=modal_data,
+        mesh_model,
+        pattern_type="modal",
+        direction=direction,
+        nodal_masses=nodal_masses,
+        modal_data=modal_data,
     )
 
 
 def uniform_lateral_loads(
-    mesh_model: "MeshModel", direction: str = "X",
-    nodal_masses: Optional[Dict[int, float]] = None,
-) -> Dict[int, tuple]:
+    mesh_model: "MeshModel",
+    direction: str = "X",
+    nodal_masses: Optional[dict[int, float]] = None,
+) -> dict[int, tuple]:
     """Generate uniform (mass-proportional) lateral loads."""
     return compute_lateral_loads(
-        mesh_model, pattern_type="uniform", direction=direction,
+        mesh_model,
+        pattern_type="uniform",
+        direction=direction,
         nodal_masses=nodal_masses,
     )
 
 
 def triangular_lateral_loads(
-    mesh_model: "MeshModel", direction: str = "X",
-    nodal_masses: Optional[Dict[int, float]] = None,
+    mesh_model: "MeshModel",
+    direction: str = "X",
+    nodal_masses: Optional[dict[int, float]] = None,
     k: float = 1.0,
-) -> Dict[int, tuple]:
+) -> dict[int, tuple]:
     """Generate triangular (height-proportional) lateral loads."""
     return compute_lateral_loads(
-        mesh_model, pattern_type="triangular", direction=direction,
-        nodal_masses=nodal_masses, k=k,
+        mesh_model,
+        pattern_type="triangular",
+        direction=direction,
+        nodal_masses=nodal_masses,
+        k=k,
     )
 
 
@@ -1347,7 +1363,7 @@ def validate_control_node(
     for fe in mesh_model.frame_elements.values():
         if getattr(fe, "inactive", False):
             continue
-        if fe.node_i == control_node_id or fe.node_j == control_node_id:
+        if control_node_id in (fe.node_i, fe.node_j):
             connected += 1
     if connected == 0:
         print(f"  ⚠ Control node {control_node_tag} NOT connected to any frame element!")
@@ -1368,7 +1384,7 @@ def verify_tcl_gravity_loads(
     """
     result: dict = {"present": False, "total_z": 0.0, "z_loads": 0, "match": None, "error": None}
     try:
-        with open(tcl_path, "r") as f:
+        with open(tcl_path) as f:
             content = f.read()
     except Exception as e:
         result["error"] = str(e)
@@ -1378,13 +1394,13 @@ def verify_tcl_gravity_loads(
     load_count = 0
     for line in content.split("\n"):
         stripped = line.strip()
-        if re.match(r'pattern\s+Plain\s+1', stripped):
+        if re.match(r"pattern\s+Plain\s+1", stripped):
             in_gravity = True
             continue
         if in_gravity:
             if stripped == "}":
                 break
-            m = re.match(r'load\s+\d+\s+[-\d.e+]+\s+[-\d.e+]+\s+([-\d.e+]+)', stripped)
+            m = re.match(r"load\s+\d+\s+[-\d.e+]+\s+[-\d.e+]+\s+([-\d.e+]+)", stripped)
             if m:
                 fz = float(m.group(1))
                 total_z += fz

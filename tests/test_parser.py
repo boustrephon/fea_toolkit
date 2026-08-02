@@ -1,9 +1,16 @@
-import pytest
 from pathlib import Path
+
+import pytest
+
 from fea_toolkit.io.s2k_parser import SAP2000Parser
 from fea_toolkit.model.sap_data import (
-    AreaGravityLoad, AreaUniformLoad, GravityLoad,
-    ShellSection, AreaElement, Node, Section,
+    AreaElement,
+    AreaGravityLoad,
+    AreaUniformLoad,
+    GravityLoad,
+    Node,
+    Section,
+    ShellSection,
 )
 
 # Path to test fixtures
@@ -11,21 +18,23 @@ FIXTURES = Path(__file__).parent / "fixtures"
 SAMPLE_S2K = FIXTURES / "sample.s2k"
 SAMPLE_AREAS_JSON = FIXTURES / "sample_areas.json"
 
+
 def test_parse_sample():
     """Test parsing of a sample .s2k file."""
     if not SAMPLE_S2K.exists():
         pytest.skip(f"Sample file not found: {SAMPLE_S2K}")
-    
+
     parser = SAP2000Parser(SAMPLE_S2K)
     parser.parse()
     assert parser._raw_tables is not None
     assert len(parser._raw_tables) > 0
 
+
 def test_get_model_data():
     """Test conversion to SAPModelData."""
     if not SAMPLE_S2K.exists():
         pytest.skip(f"Sample file not found: {SAMPLE_S2K}")
-    
+
     parser = SAP2000Parser(SAMPLE_S2K)
     parser.parse()
     model = parser.get_model_data()
@@ -36,7 +45,7 @@ def test_get_model_data():
 def test_parse_from_example(tmp_path):
     """Test parsing using the built-in example content."""
     from fea_toolkit.io.s2k_parser import SAP2000Parser
-    
+
     example_content = """File test.s2k was saved on m/d/yy at h:mm:ss
 TABLE:  "PROGRAM CONTROL"
    ProgramName=SAP2000   Version=26.2.0
@@ -46,7 +55,7 @@ TABLE:  "JOINT COORDINATES"
 """
     s2k_file = tmp_path / "example.s2k"
     s2k_file.write_text(example_content)
-    
+
     parser = SAP2000Parser(s2k_file)
     parser.parse()
     assert "JOINT COORDINATES" in parser._raw_tables
@@ -56,8 +65,8 @@ TABLE:  "JOINT COORDINATES"
     model = parser.get_model_data()
     node1 = model.nodes.get("1")
     assert node1 is not None
-    assert node1.node_id == "1"       # string SAP2000 label
-    assert node1.node_tag == 1         # integer OpenSees tag
+    assert node1.node_id == "1"  # string SAP2000 label
+    assert node1.node_tag == 1  # integer OpenSees tag
     node2 = model.nodes.get("2")
     assert node2 is not None
     assert node2.node_id == "2"
@@ -192,6 +201,7 @@ TABLE:  "AREA LOADS - MYSTERY"
 # JSON import tests
 # ========================================================================
 
+
 def test_parse_areas_from_json():
     """Import area elements and shell sections from a JSON file."""
     if not SAMPLE_AREAS_JSON.exists():
@@ -261,8 +271,7 @@ def test_parse_areas_multi_row_consolidation(tmp_path):
     """Multi-row area connectivity consolidates joint IDs correctly."""
     json_data = {
         "JOINT COORDINATES": [
-            {"Joint": i, "XorR": i * 1000.0, "Y": 0.0, "Z": 0.0}
-            for i in range(1, 9)
+            {"Joint": i, "XorR": i * 1000.0, "Y": 0.0, "Z": 0.0} for i in range(1, 9)
         ],
         "CONNECTIVITY - AREA": [
             # Area 1 spans two rows: first row has Joint1..Joint4
@@ -271,14 +280,20 @@ def test_parse_areas_multi_row_consolidation(tmp_path):
             {"Area": 1, "Joint1": 4, "Joint2": 5, "Joint3": 6},
         ],
         "AREA SECTION PROPERTIES": [
-            {"Section": "Slab200", "Material": "C30/37",
-             "Thickness": 200.0, "AreaType": "Shell", "Type": "Shell-Thin"},
+            {
+                "Section": "Slab200",
+                "Material": "C30/37",
+                "Thickness": 200.0,
+                "AreaType": "Shell",
+                "Type": "Shell-Thin",
+            },
         ],
         "AREA SECTION ASSIGNMENTS": [
             {"Area": 1, "Section": "Slab200"},
         ],
     }
     import json
+
     json_path = tmp_path / "multi_row.json"
     with open(json_path, "w") as f:
         json.dump(json_data, f)
@@ -297,8 +312,7 @@ def test_parse_areas_multi_row_with_duplicates(tmp_path):
     """Multi-row consolidation should not produce duplicate joint IDs."""
     json_data = {
         "JOINT COORDINATES": [
-            {"Joint": i, "XorR": i * 1000.0, "Y": 0.0, "Z": 0.0}
-            for i in range(1, 5)
+            {"Joint": i, "XorR": i * 1000.0, "Y": 0.0, "Z": 0.0} for i in range(1, 5)
         ],
         "CONNECTIVITY - AREA": [
             # Row 1: Joint1..Joint4
@@ -307,14 +321,20 @@ def test_parse_areas_multi_row_with_duplicates(tmp_path):
             {"Area": 1, "Joint1": 1, "Joint2": 2, "Joint3": 3, "Joint4": 4},
         ],
         "AREA SECTION PROPERTIES": [
-            {"Section": "Slab200", "Material": "C30/37",
-             "Thickness": 200.0, "AreaType": "Shell", "Type": "Shell-Thin"},
+            {
+                "Section": "Slab200",
+                "Material": "C30/37",
+                "Thickness": 200.0,
+                "AreaType": "Shell",
+                "Type": "Shell-Thin",
+            },
         ],
         "AREA SECTION ASSIGNMENTS": [
             {"Area": 1, "Section": "Slab200"},
         ],
     }
     import json
+
     json_path = tmp_path / "dup.json"
     with open(json_path, "w") as f:
         json.dump(json_data, f)
@@ -332,11 +352,13 @@ def test_parse_areas_multi_row_with_duplicates(tmp_path):
 # Shell section creation tests
 # ========================================================================
 
+
 def test_create_single_shell_section():
     """Verify _create_single_shell_section produces a valid OpenSees section."""
     import openseespy.opensees as ops
+
+    from fea_toolkit.model.sap_data import Material, SAPModelData
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
-    from fea_toolkit.model.sap_data import SAPModelData, Node, Material, Section
     from fea_toolkit.opensees.preprocessor import preprocess_model
 
     md = SAPModelData(
@@ -344,15 +366,18 @@ def test_create_single_shell_section():
         restraints={},
         materials={"C": Material("C", "Concrete", E_mod=3.28e10)},
         sections={"S": Section("S", "Shell", "C", A=0, I33=0, I22=0, J=0)},
-        frame_elements={}, area_elements={},
-        frame_assignments={}, area_assignments={},
-        groups={}, frame_auto_mesh={},
+        frame_elements={},
+        area_elements={},
+        frame_assignments={},
+        area_assignments={},
+        groups={},
+        frame_auto_mesh={},
     )
     mm = preprocess_model(md)
     ab = AnalysisBuilder(mm, {})
     try:
         ops.wipe()
-        ops.model('basic', '-ndm', 3, '-ndf', 6)
+        ops.model("basic", "-ndm", 3, "-ndf", 6)
         mat = type("Mat", (), {"E_mod": 3.28e10, "nu": 0.2})()
         sec = type("Sec", (), {"thickness": 0.2, "name": "Slab200"})()
         # Should complete without raising
@@ -364,6 +389,7 @@ def test_create_single_shell_section():
 # ========================================================================
 # Frame end offsets, area mesh, area edge constraints
 # ========================================================================
+
 
 def test_frame_end_offsets_parsed(tmp_path):
     """FRAME END LENGTH OFFSETS table is parsed correctly."""
@@ -377,8 +403,16 @@ def test_frame_end_offsets_parsed(tmp_path):
             {"Frame": 1, "JointI": 1, "JointJ": 2},
         ],
         "FRAME SECTION PROPERTIES 01 - GENERAL": [
-            {"Section": "Col600", "Material": "C30/37", "Shape": "Rectangular",
-             "t3": 0.6, "t2": 0.6, "Area": 0.36, "I33": 0.0108, "I22": 0.0108},
+            {
+                "Section": "Col600",
+                "Material": "C30/37",
+                "Shape": "Rectangular",
+                "t3": 0.6,
+                "t2": 0.6,
+                "Area": 0.36,
+                "I33": 0.0108,
+                "I22": 0.0108,
+            },
         ],
         "FRAME SECTION ASSIGNMENTS": [
             {"Frame": 1, "Section": "Col600"},
@@ -388,6 +422,7 @@ def test_frame_end_offsets_parsed(tmp_path):
         ],
     }
     import json
+
     json_path = tmp_path / "offsets.json"
     with open(json_path, "w") as f:
         json.dump(json_data, f)
@@ -411,6 +446,7 @@ def test_frame_end_offsets_empty_when_missing(tmp_path):
         ],
     }
     import json
+
     json_path = tmp_path / "no_offsets.json"
     with open(json_path, "w") as f:
         json.dump(json_data, f)
@@ -424,26 +460,35 @@ def test_area_mesh_parsed(tmp_path):
     """AREA MESH ASSIGNMENTS table is parsed correctly."""
     json_data = {
         "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25"}],
-        "JOINT COORDINATES": [
-            {"Joint": i, "XorR": 0.0, "Y": 0.0, "Z": 0.0} for i in range(1, 5)
-        ],
+        "JOINT COORDINATES": [{"Joint": i, "XorR": 0.0, "Y": 0.0, "Z": 0.0} for i in range(1, 5)],
         "CONNECTIVITY - AREA": [
             {"Area": 1, "Joint1": 1, "Joint2": 2, "Joint3": 3, "Joint4": 4},
         ],
         "AREA SECTION PROPERTIES": [
-            {"Section": "Slab200", "Material": "C30/37",
-             "Thickness": 200.0, "AreaType": "Shell", "Type": "Shell-Thin"},
+            {
+                "Section": "Slab200",
+                "Material": "C30/37",
+                "Thickness": 200.0,
+                "AreaType": "Shell",
+                "Type": "Shell-Thin",
+            },
         ],
         "AREA SECTION ASSIGNMENTS": [
             {"Area": 1, "Section": "Slab200"},
         ],
         "AREA MESH ASSIGNMENTS": [
-            {"Area": 1, "AutoMesh": "Yes",
-             "NoAutoMeshAtEdges": "No", "NoSubMesh": "No",
-             "MinSize": 0.5, "MaxSize": 1.0},
+            {
+                "Area": 1,
+                "AutoMesh": "Yes",
+                "NoAutoMeshAtEdges": "No",
+                "NoSubMesh": "No",
+                "MinSize": 0.5,
+                "MaxSize": 1.0,
+            },
         ],
     }
     import json
+
     json_path = tmp_path / "mesh.json"
     with open(json_path, "w") as f:
         json.dump(json_data, f)
@@ -463,15 +508,18 @@ def test_area_edge_constraints_parsed(tmp_path):
     """AREA EDGE CONSTRAINT ASSIGNMENTS table is parsed correctly."""
     json_data = {
         "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25"}],
-        "JOINT COORDINATES": [
-            {"Joint": i, "XorR": 0.0, "Y": 0.0, "Z": 0.0} for i in range(1, 5)
-        ],
+        "JOINT COORDINATES": [{"Joint": i, "XorR": 0.0, "Y": 0.0, "Z": 0.0} for i in range(1, 5)],
         "CONNECTIVITY - AREA": [
             {"Area": 1, "Joint1": 1, "Joint2": 2, "Joint3": 3, "Joint4": 4},
         ],
         "AREA SECTION PROPERTIES": [
-            {"Section": "Slab200", "Material": "C30/37",
-             "Thickness": 200.0, "AreaType": "Shell", "Type": "Shell-Thin"},
+            {
+                "Section": "Slab200",
+                "Material": "C30/37",
+                "Thickness": 200.0,
+                "AreaType": "Shell",
+                "Type": "Shell-Thin",
+            },
         ],
         "AREA SECTION ASSIGNMENTS": [
             {"Area": 1, "Section": "Slab200"},
@@ -484,6 +532,7 @@ def test_area_edge_constraints_parsed(tmp_path):
         ],
     }
     import json
+
     json_path = tmp_path / "edge_con.json"
     with open(json_path, "w") as f:
         json.dump(json_data, f)
@@ -502,15 +551,21 @@ def test_tolerant_float_parsing_with_empty_cells(tmp_path):
     """Empty-string float cells default to 0.0 instead of crashing."""
     json_data = {
         "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25"}],
-        "JOINT COORDINATES": [
-            {"Joint": i, "XorR": 0.0, "Y": 0.0, "Z": 0.0} for i in range(1, 5)
-        ],
+        "JOINT COORDINATES": [{"Joint": i, "XorR": 0.0, "Y": 0.0, "Z": 0.0} for i in range(1, 5)],
         "CONNECTIVITY - FRAME": [
             {"Frame": 1, "JointI": 1, "JointJ": 2},
         ],
         "FRAME SECTION PROPERTIES 01 - GENERAL": [
-            {"Section": "Col600", "Material": "C30/37", "Shape": "Rectangular",
-             "t3": 0.6, "t2": 0.6, "Area": 0.36, "I33": 0.0108, "I22": 0.0108},
+            {
+                "Section": "Col600",
+                "Material": "C30/37",
+                "Shape": "Rectangular",
+                "t3": 0.6,
+                "t2": 0.6,
+                "Area": 0.36,
+                "I33": 0.0108,
+                "I22": 0.0108,
+            },
         ],
         "FRAME SECTION ASSIGNMENTS": [
             {"Frame": 1, "Section": "Col600"},
@@ -523,8 +578,13 @@ def test_tolerant_float_parsing_with_empty_cells(tmp_path):
             {"Area": 1, "Joint1": 1, "Joint2": 2, "Joint3": 3, "Joint4": 4},
         ],
         "AREA SECTION PROPERTIES": [
-            {"Section": "Slab200", "Material": "C30/37",
-             "Thickness": 200.0, "AreaType": "Shell", "Type": "Shell-Thin"},
+            {
+                "Section": "Slab200",
+                "Material": "C30/37",
+                "Thickness": 200.0,
+                "AreaType": "Shell",
+                "Type": "Shell-Thin",
+            },
         ],
         "AREA SECTION ASSIGNMENTS": [
             {"Area": 1, "Section": "Slab200"},
@@ -535,6 +595,7 @@ def test_tolerant_float_parsing_with_empty_cells(tmp_path):
         ],
     }
     import json
+
     json_path = tmp_path / "empty_cells.json"
     with open(json_path, "w") as f:
         json.dump(json_data, f)
@@ -563,6 +624,7 @@ def test_new_tables_empty_when_missing(tmp_path):
         ],
     }
     import json
+
     json_path = tmp_path / "empty.json"
     with open(json_path, "w") as f:
         json.dump(json_data, f)
@@ -578,12 +640,13 @@ def test_new_tables_empty_when_missing(tmp_path):
 # P0 — Cardinal point extraction from FRAME SECTION ASSIGNMENTS
 # ============================================================================
 
+
 def test_cardinal_points_extracted(tmp_path):
     """CardinalPoint column in FRAME SECTION ASSIGNMENTS is parsed."""
     import json
+
     data = {
-        "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25",
-                              "CurrUnits": "N, mm, C"}],
+        "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25", "CurrUnits": "N, mm, C"}],
         "JOINT COORDINATES": [
             {"Joint": 1, "XorR": 0, "Y": 0, "Z": 0},
             {"Joint": 2, "XorR": 4, "Y": 0, "Z": 0},
@@ -593,14 +656,23 @@ def test_cardinal_points_extracted(tmp_path):
             {"Frame": 1, "JointI": 1, "JointJ": 2},
             {"Frame": 2, "JointI": 2, "JointJ": 3},
         ],
-        "FRAME SECTION PROPERTIES 01 - GENERAL": [{
-            "SectionName": "B400",
-            "Material": "CONC",
-            "Shape": "Rectangular",
-            "t3": 400, "t2": 200,
-            "Area": 80000, "I33": 1.067e9, "I22": 2.667e8, "TorsConst": 1.0,
-            "AMod": 1, "I3Mod": 1, "I2Mod": 1, "JMod": 1,
-        }],
+        "FRAME SECTION PROPERTIES 01 - GENERAL": [
+            {
+                "SectionName": "B400",
+                "Material": "CONC",
+                "Shape": "Rectangular",
+                "t3": 400,
+                "t2": 200,
+                "Area": 80000,
+                "I33": 1.067e9,
+                "I22": 2.667e8,
+                "TorsConst": 1.0,
+                "AMod": 1,
+                "I3Mod": 1,
+                "I2Mod": 1,
+                "JMod": 1,
+            }
+        ],
         "FRAME SECTION ASSIGNMENTS": [
             {"Frame": 1, "AnalSect": "B400", "CardinalPoint": 8},
             {"Frame": 2, "AnalSect": "B400", "CardinalPoint": 2},
@@ -635,9 +707,9 @@ def test_cardinal_points_extracted(tmp_path):
 def test_cardinal_points_alternative_column_names(tmp_path):
     """CARDINALPT column name also works."""
     import json
+
     data = {
-        "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25",
-                              "CurrUnits": "N, mm, C"}],
+        "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25", "CurrUnits": "N, mm, C"}],
         "JOINT COORDINATES": [
             {"Joint": 1, "XorR": 0, "Y": 0, "Z": 0},
             {"Joint": 2, "XorR": 4, "Y": 0, "Z": 0},
@@ -645,14 +717,23 @@ def test_cardinal_points_alternative_column_names(tmp_path):
         "CONNECTIVITY - FRAME": [
             {"Frame": 1, "JointI": 1, "JointJ": 2},
         ],
-        "FRAME SECTION PROPERTIES 01 - GENERAL": [{
-            "SectionName": "B400",
-            "Material": "CONC",
-            "Shape": "Rectangular",
-            "t3": 400, "t2": 200,
-            "Area": 80000, "I33": 1.067e9, "I22": 2.667e8, "TorsConst": 1.0,
-            "AMod": 1, "I3Mod": 1, "I2Mod": 1, "JMod": 1,
-        }],
+        "FRAME SECTION PROPERTIES 01 - GENERAL": [
+            {
+                "SectionName": "B400",
+                "Material": "CONC",
+                "Shape": "Rectangular",
+                "t3": 400,
+                "t2": 200,
+                "Area": 80000,
+                "I33": 1.067e9,
+                "I22": 2.667e8,
+                "TorsConst": 1.0,
+                "AMod": 1,
+                "I3Mod": 1,
+                "I2Mod": 1,
+                "JMod": 1,
+            }
+        ],
         "FRAME SECTION ASSIGNMENTS": [
             {"Frame": 1, "AnalSect": "B400", "CARDINALPT": 10},
         ],
@@ -668,9 +749,9 @@ def test_cardinal_points_alternative_column_names(tmp_path):
 def test_cardinal_points_default_when_missing(tmp_path):
     """No cardinal point column → defaults to 10 (centroid)."""
     import json
+
     data = {
-        "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25",
-                              "CurrUnits": "N, mm, C"}],
+        "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25", "CurrUnits": "N, mm, C"}],
         "JOINT COORDINATES": [
             {"Joint": 1, "XorR": 0, "Y": 0, "Z": 0},
             {"Joint": 2, "XorR": 4, "Y": 0, "Z": 0},
@@ -678,13 +759,19 @@ def test_cardinal_points_default_when_missing(tmp_path):
         "CONNECTIVITY - FRAME": [
             {"Frame": 1, "JointI": 1, "JointJ": 2},
         ],
-        "FRAME SECTION PROPERTIES 01 - GENERAL": [{
-            "SectionName": "B400",
-            "Material": "CONC",
-            "Shape": "Rectangular",
-            "t3": 400, "t2": 200,
-            "Area": 80000, "I33": 1.067e9, "I22": 2.667e8, "TorsConst": 1.0,
-        }],
+        "FRAME SECTION PROPERTIES 01 - GENERAL": [
+            {
+                "SectionName": "B400",
+                "Material": "CONC",
+                "Shape": "Rectangular",
+                "t3": 400,
+                "t2": 200,
+                "Area": 80000,
+                "I33": 1.067e9,
+                "I22": 2.667e8,
+                "TorsConst": 1.0,
+            }
+        ],
         "FRAME SECTION ASSIGNMENTS": [
             {"Frame": 1, "AnalSect": "B400"},
         ],
@@ -695,4 +782,3 @@ def test_cardinal_points_default_when_missing(tmp_path):
     parser = SAP2000Parser.from_json(json_path)
     md = parser.get_model_data()
     assert md.frame_elements["1"].cardinal_point == 10
-

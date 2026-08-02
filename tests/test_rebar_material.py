@@ -15,21 +15,18 @@ Also verifies the S2K parser reads the rebar tables (``REBAR SIZES``,
 ``FRAME SECTION PROPERTIES 02 - CONCRETE COLUMN``) into section fields.
 """
 
-from typing import Dict
-
 import pytest
 
 from fea_toolkit.model.mesh_model import MeshModel
 from fea_toolkit.model.sap_data import (
-    Node,
-    Material,
+    DEFAULT_E_S_PA,
+    DEFAULT_FY_REBAR_PA,
     ConcreteRectangularSection,
     FrameElement,
-    DEFAULT_FY_REBAR_PA,
-    DEFAULT_E_S_PA,
+    Material,
+    Node,
 )
 from fea_toolkit.utils import stress_scale_factor
-
 
 # ═══════════════════════════════════════════════════════════════
 # Shared helpers
@@ -42,22 +39,33 @@ _REBAR_NAME = "A615Gr60"
 
 def _make_mesh(rebar_material: str) -> MeshModel:
     """Minimal single-column MeshModel with an RC fibre section."""
-    materials: Dict[str, Material] = {
+    materials: dict[str, Material] = {
         "CONC": Material(
-            name="CONC", type="Concrete",
-            Fc=4.0e7, eFc=5.2e7, E_mod=3.0e10,
+            name="CONC",
+            type="Concrete",
+            Fc=4.0e7,
+            eFc=5.2e7,
+            E_mod=3.0e10,
         ),
         _REBAR_NAME: Material(
-            name=_REBAR_NAME, type="Rebar",
-            Fy=413685.0, E_mod=199947978.8,
+            name=_REBAR_NAME,
+            type="Rebar",
+            Fy=413685.0,
+            E_mod=199947978.8,
         ),
     }
     sections = {
         "RC_COL": ConcreteRectangularSection(
-            name="RC_COL", shape="Rectangular", material="CONC",
-            depth=0.3, bf=0.3, cover=0.04,
-            top_bars=4, bot_bars=4,
-            top_bar_dia=0.0286, bot_bar_dia=0.0286,
+            name="RC_COL",
+            shape="Rectangular",
+            material="CONC",
+            depth=0.3,
+            bf=0.3,
+            cover=0.04,
+            top_bars=4,
+            bot_bars=4,
+            top_bar_dia=0.0286,
+            bot_bar_dia=0.0286,
             rebar_material=rebar_material or None,
         ),
     }
@@ -89,7 +97,7 @@ def _export_tcl(mm: MeshModel, tmp_path, config: dict) -> str:
     cfg = {"create_fiber_sections": True}
     cfg.update(config)
     export_mesh_model_to_tcl(mm, tcl_path, config=cfg)
-    with open(tcl_path, "r") as f:
+    with open(tcl_path) as f:
         return f.read()
 
 
@@ -115,7 +123,7 @@ def _builder_steel02_fy_es(mm: MeshModel, config: dict) -> tuple:
 
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
-    captured: Dict[str, float] = {}
+    captured: dict[str, float] = {}
 
     _original = ops.uniaxialMaterial
 
@@ -133,14 +141,14 @@ def _builder_steel02_fy_es(mm: MeshModel, config: dict) -> tuple:
     finally:
         ops.uniaxialMaterial = _original
         ops.wipe()
-    assert "Fy" in captured, \
-        "No 'Steel02' uniaxialMaterial call during build_domain()"
+    assert "Fy" in captured, "No 'Steel02' uniaxialMaterial call during build_domain()"
     return captured["Fy"], captured["Es"]
 
 
 # ═══════════════════════════════════════════════════════════════
 # Parser: rebar tables -> section fields
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestParserRebarTables:
     """S2K rebar tables are parsed into section and material data."""
@@ -175,19 +183,22 @@ TABLE: "REBAR SIZES"
 
         sec = md.sections["RC_COL"]
         assert isinstance(sec, ConcreteRectangularSection)
-        assert sec.rebar_material == "A615Gr60", \
+        assert sec.rebar_material == "A615Gr60", (
             f"Expected RebarMatL wired, got {sec.rebar_material!r}"
-        assert sec.top_bar_dia == pytest.approx(0.0286), \
+        )
+        assert sec.top_bar_dia == pytest.approx(0.0286), (
             f"Top bar diameter from REBAR SIZES, got {sec.top_bar_dia}"
-        assert sec.bot_bar_dia == pytest.approx(0.0286), \
+        )
+        assert sec.bot_bar_dia == pytest.approx(0.0286), (
             f"Bot bar diameter from REBAR SIZES, got {sec.bot_bar_dia}"
-        assert "A615Gr60" in md.materials, \
-            "Rebar material missing from model materials"
+        )
+        assert "A615Gr60" in md.materials, "Rebar material missing from model materials"
 
 
 # ═══════════════════════════════════════════════════════════════
 # Tcl export: rebar material resolution
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestTclRebarResolution:
     """Steel02 rebar Fy/Es resolution in export_mesh_model_to_tcl and

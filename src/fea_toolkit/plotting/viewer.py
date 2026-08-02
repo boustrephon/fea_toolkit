@@ -23,30 +23,28 @@ Usage::
     viewer.export_html("report.html")
 """
 
-from typing import Dict, List, Optional, Tuple, Any, Type
+from typing import Any, Optional
+
 import numpy as np
 
-from .renderers import RenderBackend, FrameGeom, ShellGeom, NodeGeom
-from .renderers import HighlightDef, AnnotationDef
+from .renderers import AnnotationDef, FrameGeom, HighlightDef, NodeGeom, RenderBackend, ShellGeom
 
 
 def _resolve_backend(backend: str, **kwargs) -> RenderBackend:
     """Import and instantiate a render backend by name."""
     if backend == "pyvista":
         from .renderers.pyvista import PyVistaRenderer
+
         return PyVistaRenderer(**kwargs)
     elif backend == "rhino":
-        raise ImportError(
-            "Rhino backend requires Rhino 8 and is not yet implemented."
-        )
+        raise ImportError("Rhino backend requires Rhino 8 and is not yet implemented.")
     else:
-        raise ValueError(f"Unknown render backend: {backend!r}. "
-                         f"Choices: 'pyvista', 'rhino'.")
+        raise ValueError(f"Unknown render backend: {backend!r}. Choices: 'pyvista', 'rhino'.")
 
 
 def _section_palette(
-    sections: Dict[str, Any],
-) -> Dict[str, Tuple[float, float, float]]:
+    sections: dict[str, Any],
+) -> dict[str, tuple[float, float, float]]:
     """Build a deterministic colour map from section names."""
     palette = [
         (0.122, 0.467, 0.706),
@@ -107,18 +105,16 @@ class ModelViewer:
             self._model = mesh_model
             self._builder = None
         else:
-            raise ValueError(
-                "Provide one of 'builder', 'model_data', or 'mesh_model'."
-            )
+            raise ValueError("Provide one of 'builder', 'model_data', or 'mesh_model'.")
 
         self._collapse_to_parents = collapse_to_parents
         self._backend: RenderBackend = _resolve_backend(backend, **kwargs)
 
         # Extracted geometry (populated lazily)
-        self._frames: List[FrameGeom] = []
-        self._shells: List[ShellGeom] = []
-        self._nodes: List[NodeGeom] = []
-        self._section_colors: Dict[str, Tuple[float, float, float]] = {}
+        self._frames: list[FrameGeom] = []
+        self._shells: list[ShellGeom] = []
+        self._nodes: list[NodeGeom] = []
+        self._section_colors: dict[str, tuple[float, float, float]] = {}
         self._geom_extracted = False
 
     # ── Geometry extraction ──────────────────────────────────────────
@@ -141,8 +137,8 @@ class ModelViewer:
             # Walk all elements: include inactive parents and unsplit
             # elements (those without parent_id).  Skip active children.
             for eid, elem in md.frame_elements.items():
-                is_inactive = getattr(elem, 'inactive', False)
-                has_parent = getattr(elem, 'parent_id', None) is not None
+                is_inactive = getattr(elem, "inactive", False)
+                has_parent = getattr(elem, "parent_id", None) is not None
                 if not is_inactive and has_parent:
                     continue  # active child — skip
                 sec = md.frame_assignments.get(eid, "")
@@ -150,19 +146,21 @@ class ModelViewer:
                 nj = md.nodes.get(elem.node_j)
                 if ni is None or nj is None:
                     continue
-                self._frames.append(FrameGeom(
-                    elem_id=eid,
-                    section=sec,
-                    node_i=elem.node_i,
-                    node_j=elem.node_j,
-                    start=np.array([ni.x, ni.y, ni.z], dtype=float),
-                    end=np.array([nj.x, nj.y, nj.z], dtype=float),
-                ))
+                self._frames.append(
+                    FrameGeom(
+                        elem_id=eid,
+                        section=sec,
+                        node_i=elem.node_i,
+                        node_j=elem.node_j,
+                        start=np.array([ni.x, ni.y, ni.z], dtype=float),
+                        end=np.array([nj.x, nj.y, nj.z], dtype=float),
+                    )
+                )
 
             # Shells — include inactive parents
             for aid, ae in md.area_elements.items():
-                is_inactive = getattr(ae, 'inactive', False)
-                has_parent = getattr(ae, 'parent_id', None) is not None
+                is_inactive = getattr(ae, "inactive", False)
+                has_parent = getattr(ae, "parent_id", None) is not None
                 if not is_inactive and has_parent:
                     continue
                 sec = md.area_assignments.get(aid, "")
@@ -174,41 +172,47 @@ class ModelViewer:
                     verts.append([nd.x, nd.y, nd.z])
                 if len(verts) < 3:
                     continue
-                self._shells.append(ShellGeom(
-                    area_id=aid,
-                    section=sec,
-                    vertices=np.array(verts, dtype=float),
-                ))
+                self._shells.append(
+                    ShellGeom(
+                        area_id=aid,
+                        section=sec,
+                        vertices=np.array(verts, dtype=float),
+                    )
+                )
         else:
             # Normal path: active elements only
             elements = (
-                (self._builder.split_elements if self._builder
-                 and self._builder.split_elements else md.frame_elements)
+                self._builder.split_elements
+                if self._builder and self._builder.split_elements
+                else md.frame_elements
             )
             assignments = (
-                (self._builder.split_assignments if self._builder
-                 and self._builder.split_elements else md.frame_assignments)
+                self._builder.split_assignments
+                if self._builder and self._builder.split_elements
+                else md.frame_assignments
             )
 
             for eid, elem in elements.items():
-                if getattr(elem, 'inactive', False):
+                if getattr(elem, "inactive", False):
                     continue
                 sec = assignments.get(eid, "")
                 ni = md.nodes.get(elem.node_i)
                 nj = md.nodes.get(elem.node_j)
                 if ni is None or nj is None:
                     continue
-                self._frames.append(FrameGeom(
-                    elem_id=eid,
-                    section=sec,
-                    node_i=elem.node_i,
-                    node_j=elem.node_j,
-                    start=np.array([ni.x, ni.y, ni.z], dtype=float),
-                    end=np.array([nj.x, nj.y, nj.z], dtype=float),
-                ))
+                self._frames.append(
+                    FrameGeom(
+                        elem_id=eid,
+                        section=sec,
+                        node_i=elem.node_i,
+                        node_j=elem.node_j,
+                        start=np.array([ni.x, ni.y, ni.z], dtype=float),
+                        end=np.array([nj.x, nj.y, nj.z], dtype=float),
+                    )
+                )
 
             for aid, ae in md.area_elements.items():
-                if getattr(ae, 'inactive', False):
+                if getattr(ae, "inactive", False):
                     continue
                 sec = md.area_assignments.get(aid, "")
                 verts = []
@@ -219,18 +223,22 @@ class ModelViewer:
                     verts.append([nd.x, nd.y, nd.z])
                 if len(verts) < 3:
                     continue
-                self._shells.append(ShellGeom(
-                    area_id=aid,
-                    section=sec,
-                    vertices=np.array(verts, dtype=float),
-                ))
+                self._shells.append(
+                    ShellGeom(
+                        area_id=aid,
+                        section=sec,
+                        vertices=np.array(verts, dtype=float),
+                    )
+                )
 
         # Nodes
         for nid, nd in md.nodes.items():
-            self._nodes.append(NodeGeom(
-                node_id=nid,
-                position=np.array([nd.x, nd.y, nd.z], dtype=float),
-            ))
+            self._nodes.append(
+                NodeGeom(
+                    node_id=nid,
+                    position=np.array([nd.x, nd.y, nd.z], dtype=float),
+                )
+            )
 
         self._geom_extracted = True
 
@@ -261,7 +269,7 @@ class ModelViewer:
         if color_by_section:
             colors = self._section_colors
         else:
-            colors = {sec: (0.5, 0.5, 0.5) for sec in self._section_colors}
+            colors = dict.fromkeys(self._section_colors, (0.5, 0.5, 0.5))
 
         self._backend.render_frames(self._frames, colors, opacity=opacity)
 
@@ -269,8 +277,7 @@ class ModelViewer:
             self._backend.render_shells(self._shells, colors, opacity=opacity)
 
         if show_nodes:
-            self._backend.render_nodes(self._nodes, color=(0.3, 0.3, 0.3),
-                                       radius=node_size)
+            self._backend.render_nodes(self._nodes, color=(0.3, 0.3, 0.3), radius=node_size)
 
         return self
 
@@ -278,9 +285,9 @@ class ModelViewer:
 
     def overlay_deformed(
         self,
-        displacements: Optional[Dict[str, np.ndarray]] = None,
+        displacements: Optional[dict[str, np.ndarray]] = None,
         scale: float = 1.0,
-        color: Tuple[float, float, float] = (0.3, 0.6, 1.0),
+        color: tuple[float, float, float] = (0.3, 0.6, 1.0),
     ) -> "ModelViewer":
         """Overlay deformed shape on the model.
 
@@ -295,9 +302,9 @@ class ModelViewer:
         """
         self._extract_geometry()
         if displacements is None and self._builder is not None:
-            results = getattr(self._builder, '_last_static_results', None)
+            results = getattr(self._builder, "_last_static_results", None)
             if results is not None:
-                raw = results.get('nodal_displacements', {})
+                raw = results.get("nodal_displacements", {})
                 displacements = {}
                 for nid, nd in self._model.nodes.items():
                     raw_d = raw.get(nd.node_tag)
@@ -308,13 +315,16 @@ class ModelViewer:
             return self
 
         self._backend.render_deformed(
-            self._frames, displacements, scale=scale, color=color,
+            self._frames,
+            displacements,
+            scale=scale,
+            color=color,
         )
         return self
 
     def overlay_forces(
         self,
-        elem_forces: Optional[Dict[str, Dict]] = None,
+        elem_forces: Optional[dict[str, dict]] = None,
         quantity: str = "Mz",
         use_local: bool = True,
         scale_factor: Optional[float] = None,
@@ -333,29 +343,28 @@ class ModelViewer:
         """
         self._extract_geometry()
         if elem_forces is None and self._builder is not None:
-            results = getattr(self._builder, '_last_static_results', None)
+            results = getattr(self._builder, "_last_static_results", None)
             if results is not None:
-                elem_forces = results.get('element_forces')
+                elem_forces = results.get("element_forces")
 
         if elem_forces is None:
             print("Warning: no element force data available.")
             return self
 
-        suffix = '_local' if use_local else ''
+        suffix = "_local" if use_local else ""
         q_i = f"{quantity.lower()}_i{suffix}"
         q_j = f"{quantity.lower()}_j{suffix}"
 
-        forces: Dict[str, Tuple[float, float]] = {}
+        forces: dict[str, tuple[float, float]] = {}
         vals = []
         for f in self._frames:
             ef = elem_forces.get(f.elem_id)
-            if ef is None:
+            if ef is None and self._builder is not None:
                 # Try numeric tag
-                if self._builder is not None:
-                    tag_map = getattr(self._builder, 'frame_tag_map', {})
-                    ops_tag = tag_map.get(f.elem_id)
-                    if ops_tag is not None:
-                        ef = elem_forces.get(str(ops_tag))
+                tag_map = getattr(self._builder, "frame_tag_map", {})
+                ops_tag = tag_map.get(f.elem_id)
+                if ops_tag is not None:
+                    ef = elem_forces.get(str(ops_tag))
             if ef is None:
                 continue
             vi = ef.get(q_i, 0.0)
@@ -372,14 +381,15 @@ class ModelViewer:
             max_val = max(vals) if vals else 1.0
             if max_val < 1e-12:
                 max_val = 1.0
-            all_pts = np.vstack([f.start for f in self._frames]
-                                + [f.end for f in self._frames])
+            all_pts = np.vstack([f.start for f in self._frames] + [f.end for f in self._frames])
             diag = np.ptp(all_pts, axis=0)
             model_size = max(np.linalg.norm(diag), 1.0)
             scale_factor = 0.1 * model_size / max_val
 
         self._backend.render_force_flags(
-            self._frames, forces, quantity=quantity,
+            self._frames,
+            forces,
+            quantity=quantity,
             scale_factor=scale_factor,
         )
         return self
@@ -388,9 +398,9 @@ class ModelViewer:
 
     def highlight_elements(
         self,
-        frame_ids: Optional[List[str]] = None,
-        area_ids: Optional[List[str]] = None,
-        color: Tuple[float, float, float] = (1.0, 0.0, 0.0),
+        frame_ids: Optional[list[str]] = None,
+        area_ids: Optional[list[str]] = None,
+        color: tuple[float, float, float] = (1.0, 0.0, 0.0),
         label: Optional[str] = None,
         radius: Optional[float] = None,
     ) -> "ModelViewer":
@@ -427,8 +437,8 @@ class ModelViewer:
 
     def highlight_nodes(
         self,
-        node_ids: List[str],
-        color: Tuple[float, float, float] = (0.0, 1.0, 0.0),
+        node_ids: list[str],
+        color: tuple[float, float, float] = (0.0, 1.0, 0.0),
         label: Optional[str] = None,
     ) -> "ModelViewer":
         """Highlight specific nodes.
@@ -461,7 +471,7 @@ class ModelViewer:
         text: str,
         node_id: Optional[str] = None,
         position: Optional[np.ndarray] = None,
-        color: Tuple[float, float, float] = (1.0, 1.0, 0.0),
+        color: tuple[float, float, float] = (1.0, 1.0, 0.0),
         font_size: int = 14,
     ) -> "ModelViewer":
         """Add a text annotation in 3D space.

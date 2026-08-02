@@ -22,21 +22,24 @@ Inside Rhino::
     print(report)
 """
 
-import typing as t
 import copy
+import typing as t
 
-from ..model.sap_data import SAPModelData
 from .colors import RESTRAINT_COLORS
-from .layers import (
-    create_root_layer, create_joints_layer,
-    create_frame_layers, create_shell_layers,
-)
 from .geometry import (
-    create_joint_points, create_frame_lines, create_shell_breps,
-    create_frame_extrusions, create_shell_extrusions,
+    create_frame_extrusions,
+    create_frame_lines,
+    create_joint_points,
+    create_shell_breps,
+    create_shell_extrusions,
 )
 from .groups import create_sap_groups, create_selection_groups
-
+from .layers import (
+    create_frame_layers,
+    create_joints_layer,
+    create_root_layer,
+    create_shell_layers,
+)
 
 __all__ = ["RhinoImporter"]
 
@@ -77,9 +80,8 @@ class RhinoImporter:
             import scriptcontext as sc  # noqa: F401
         except ImportError:
             raise RuntimeError(
-                "RhinoImporter requires Rhino 8. "
-                "The Rhino API is not available in standard Python."
-            )
+                "RhinoImporter requires Rhino 8. The Rhino API is not available in standard Python."
+            ) from None
 
     def run(
         self,
@@ -89,7 +91,7 @@ class RhinoImporter:
         create_groups: bool = True,
         create_meshed: bool = False,
         verbose: bool = True,
-    ) -> t.Dict[str, t.Any]:
+    ) -> dict[str, t.Any]:
         """Execute the full import sequence.
 
         Args:
@@ -105,7 +107,7 @@ class RhinoImporter:
         Returns:
             Dict with counts per geometry type.
         """
-        results: t.Dict[str, t.Any] = {
+        results: dict[str, t.Any] = {
             "joints": 0,
             "frame_centrelines": 0,
             "shell_centrelines": 0,
@@ -124,8 +126,8 @@ class RhinoImporter:
         root_idx = create_root_layer()
         joint_layer = create_joints_layer(root_idx)
 
-        frame_section_props: t.Dict[str, dict] = {}
-        shell_section_props: t.Dict[str, dict] = {}
+        frame_section_props: dict[str, dict] = {}
+        shell_section_props: dict[str, dict] = {}
         for sname, sec in self.md.sections.items():
             props = {"Material": sec.material, "Shape": sec.shape}
             if hasattr(sec, "thickness"):
@@ -137,9 +139,9 @@ class RhinoImporter:
         frame_layers = create_frame_layers(root_idx, frame_section_props)
         shell_layers = create_shell_layers(root_idx, shell_section_props)
 
-        joint_obj_ids: t.List[str] = []
-        frame_obj_ids: t.List[str] = []
-        shell_obj_ids: t.List[str] = []
+        joint_obj_ids: list[str] = []
+        frame_obj_ids: list[str] = []
+        shell_obj_ids: list[str] = []
 
         # 2. Joints
         if verbose:
@@ -152,15 +154,11 @@ class RhinoImporter:
             if self.md.frame_elements:
                 if verbose:
                     print("Creating frame centreline lines...")
-                results["frame_centrelines"] = create_frame_lines(
-                    self.md, frame_layers.centreline
-                )
+                results["frame_centrelines"] = create_frame_lines(self.md, frame_layers.centreline)
             if self.md.area_elements:
                 if verbose:
                     print("Creating shell centreline Breps...")
-                results["shell_centrelines"] = create_shell_breps(
-                    self.md, shell_layers.centreline
-                )
+                results["shell_centrelines"] = create_shell_breps(self.md, shell_layers.centreline)
 
         # 4. Extrusions (lightweight Extrusion objects)
         if create_extrusions:
@@ -185,8 +183,8 @@ class RhinoImporter:
             try:
                 from ..model.geometry import (
                     mesh_area_elements,
-                    split_elements,
                     split_areas_at_frame_edges,
+                    split_elements,
                 )
 
                 md_mesh = copy.deepcopy(self.md)
@@ -196,55 +194,61 @@ class RhinoImporter:
                     max_tag = max(max_tag, nd.node_tag)
                 next_tag = max_tag + 1
 
-                dist_loads = getattr(md_mesh, 'frame_dist_loads', [])
-                frame_auto_mesh = getattr(md_mesh, 'frame_auto_mesh', {})
-                area_mesh = getattr(md_mesh, 'area_mesh', {})
+                dist_loads = getattr(md_mesh, "frame_dist_loads", [])
+                frame_auto_mesh = getattr(md_mesh, "frame_auto_mesh", {})
+                area_mesh = getattr(md_mesh, "area_mesh", {})
 
-                md_mesh.area_elements, md_mesh.area_assignments, \
-                    md_mesh.nodes, next_tag = mesh_area_elements(
-                    md_mesh.area_elements, md_mesh.area_assignments,
-                    md_mesh.nodes, area_mesh, next_tag=next_tag,
-                )
-
-                md_mesh.frame_elements, md_mesh.frame_assignments, _ = (
-                    split_elements(
-                        md_mesh.nodes, md_mesh.frame_elements,
-                        md_mesh.frame_assignments,
-                        dist_loads, frame_auto_mesh,
+                md_mesh.area_elements, md_mesh.area_assignments, md_mesh.nodes, next_tag = (
+                    mesh_area_elements(
+                        md_mesh.area_elements,
+                        md_mesh.area_assignments,
+                        md_mesh.nodes,
+                        area_mesh,
+                        next_tag=next_tag,
                     )
                 )
 
+                md_mesh.frame_elements, md_mesh.frame_assignments, _ = split_elements(
+                    md_mesh.nodes,
+                    md_mesh.frame_elements,
+                    md_mesh.frame_assignments,
+                    dist_loads,
+                    frame_auto_mesh,
+                )
+
                 # Remap frame_end_offsets to split children
-                if hasattr(md_mesh, 'frame_end_offsets') and md_mesh.frame_end_offsets:
+                if hasattr(md_mesh, "frame_end_offsets") and md_mesh.frame_end_offsets:
                     new_offsets = {}
                     for eid, elem in md_mesh.frame_elements.items():
-                        if getattr(elem, 'inactive', False):
+                        if getattr(elem, "inactive", False):
                             continue
-                        parent = getattr(elem, 'parent_id', None)
+                        parent = getattr(elem, "parent_id", None)
                         if parent and parent in md_mesh.frame_end_offsets:
                             parent_elem = md_mesh.frame_elements.get(parent)
-                            if parent_elem and getattr(parent_elem, 'child_ids', None):
+                            if parent_elem and getattr(parent_elem, "child_ids", None):
                                 children = parent_elem.child_ids
                                 orig = md_mesh.frame_end_offsets[parent]
-                                if eid == children[0]:
+                                if eid == children[0] or eid == children[-1]:
                                     new_offsets[eid] = orig
-                                elif eid == children[-1]:
-                                    new_offsets[eid] = orig
-                        else:
-                            if eid in md_mesh.frame_end_offsets:
-                                new_offsets[eid] = md_mesh.frame_end_offsets[eid]
+                        elif eid in md_mesh.frame_end_offsets:
+                            new_offsets[eid] = md_mesh.frame_end_offsets[eid]
                     md_mesh.frame_end_offsets = new_offsets
 
-                md_mesh.area_elements, md_mesh.area_assignments, \
-                    md_mesh.nodes, next_tag = split_areas_at_frame_edges(
-                    md_mesh.area_elements, md_mesh.area_assignments,
-                    md_mesh.nodes, md_mesh.frame_elements,
-                    next_tag=next_tag,
+                md_mesh.area_elements, md_mesh.area_assignments, md_mesh.nodes, next_tag = (
+                    split_areas_at_frame_edges(
+                        md_mesh.area_elements,
+                        md_mesh.area_assignments,
+                        md_mesh.nodes,
+                        md_mesh.frame_elements,
+                        next_tag=next_tag,
+                    )
                 )
 
                 if verbose:
-                    print(f"  Meshed: {len(md_mesh.area_elements)} shells, "
-                          f"{len(md_mesh.frame_elements)} frames")
+                    print(
+                        f"  Meshed: {len(md_mesh.area_elements)} shells, "
+                        f"{len(md_mesh.frame_elements)} frames"
+                    )
 
             except Exception as exc:
                 if verbose:
@@ -252,8 +256,7 @@ class RhinoImporter:
                 md_mesh = None
 
             if md_mesh is not None:
-                meshed_root = create_root_layer(name="Meshed",
-                                                 parent=root_idx)
+                meshed_root = create_root_layer(name="Meshed", parent=root_idx)
                 meshed_frame_layers = create_frame_layers(
                     meshed_root, frame_section_props, prefix="Meshed/"
                 )
@@ -265,33 +268,29 @@ class RhinoImporter:
                     if md_mesh.frame_elements:
                         if verbose:
                             print("Creating meshed frame centreline lines...")
-                        results["meshed_frame_centrelines"] = \
-                            create_frame_lines(
-                                md_mesh, meshed_frame_layers.centreline
-                            )
+                        results["meshed_frame_centrelines"] = create_frame_lines(
+                            md_mesh, meshed_frame_layers.centreline
+                        )
                     if md_mesh.area_elements:
                         if verbose:
                             print("Creating meshed shell centreline Breps...")
-                        results["meshed_shell_centrelines"] = \
-                            create_shell_breps(
-                                md_mesh, meshed_shell_layers.centreline
-                            )
+                        results["meshed_shell_centrelines"] = create_shell_breps(
+                            md_mesh, meshed_shell_layers.centreline
+                        )
 
                 if create_extrusions:
                     if md_mesh.frame_elements:
                         if verbose:
                             print("Creating meshed frame extrusions...")
-                        results["meshed_frame_extrusions"] = \
-                            create_frame_extrusions(
-                                md_mesh, meshed_frame_layers.extrusion
-                            )
+                        results["meshed_frame_extrusions"] = create_frame_extrusions(
+                            md_mesh, meshed_frame_layers.extrusion
+                        )
                     if md_mesh.area_elements:
                         if verbose:
                             print("Creating meshed shell extrusions...")
-                        results["meshed_shell_extrusions"] = \
-                            create_shell_extrusions(
-                                md_mesh, meshed_shell_layers.extrusion
-                            )
+                        results["meshed_shell_extrusions"] = create_shell_extrusions(
+                            md_mesh, meshed_shell_layers.extrusion
+                        )
 
         # 6. Groups
         if create_groups:
@@ -314,14 +313,15 @@ class RhinoImporter:
         if verbose:
             print("\nImport complete.")
             for key, val in results.items():
-                print("  {}: {}".format(key, val))
+                print(f"  {key}: {val}")
 
         return results
 
-    def _color_code_joints(self, joint_object_ids: t.List[str]) -> None:
+    def _color_code_joints(self, joint_object_ids: list[str]) -> None:
         """Colour joints by restraint type."""
-        import scriptcontext as sc
         import Rhino.DocObjects as rd
+        import scriptcontext as sc
+
         doc = sc.doc
 
         for obj_id in joint_object_ids:

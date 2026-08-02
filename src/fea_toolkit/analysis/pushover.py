@@ -15,16 +15,16 @@ RC path
     Uses ``forceBeamColumn`` with fiber sections (Concrete01, Steel02).
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from fea_toolkit.analysis.base import (
+    _PUSHOVER_RC_DEFAULTS,
+    _PUSHOVER_STEEL_DEFAULTS,
     Analysis,
     AnalysisResult,
-    _PUSHOVER_STEEL_DEFAULTS,
-    _PUSHOVER_RC_DEFAULTS,
 )
-from fea_toolkit.utils import g_from_units
 from fea_toolkit.analysis.modal import ModalAnalysis
+from fea_toolkit.utils import g_from_units
 
 if TYPE_CHECKING:
     from fea_toolkit.model.mesh_model import MeshModel
@@ -68,16 +68,16 @@ class PushoverAnalysis(Analysis):
 
     def __init__(
         self,
-        mesh_model: "MeshModel",  # noqa: F821
+        mesh_model: "MeshModel",
         modal_result: AnalysisResult,
         material_type: str = "steel",
-        gravity_patterns: Optional[Dict[str, float]] = None,
+        gravity_patterns: Optional[dict[str, float]] = None,
         lateral_load_type: str = "mode1",
         max_disp_val: float = 0.30,
         num_steps: int = 50,
         brace_type: str = "truss",
         brace_sections: Optional[list] = None,
-        rs_modal_base_shear: Optional[Dict[str, List[float]]] = None,
+        rs_modal_base_shear: Optional[dict[str, list[float]]] = None,
         name: Optional[str] = None,
         config: Optional[dict] = None,
     ):
@@ -169,17 +169,17 @@ class PushoverAnalysis(Analysis):
         are written alongside the Tcl script in the ``output/`` directory, which
         is gitignored per project convention.
         """
-        from pathlib import Path
-        import os
         import datetime
+        import os
+        from pathlib import Path
 
+        from fea_toolkit.model.mesh_model import MeshModel
+        from fea_toolkit.opensees.builder import pushover_tcl
         from fea_toolkit.opensees.recorder import (
-            export_mesh_model_to_tcl,
             XaraTclRunner,
+            export_mesh_model_to_tcl,
             parse_pushover_results,
         )
-        from fea_toolkit.opensees.builder import pushover_tcl
-        from fea_toolkit.model.mesh_model import MeshModel
 
         mm: MeshModel = self.mesh_model
 
@@ -211,12 +211,12 @@ class PushoverAnalysis(Analysis):
             modal_data = {"modal": modal_data}
 
         modal_nested = modal_data.get("modal", modal_data)
-        periods = modal_nested.get("periods", [])
+        modal_nested.get("periods", [])
         shapes = modal_nested.get("shapes", modal_nested.get("mode_shapes", {}))
         first_mode = shapes.get(1, shapes.get(0, {})) if shapes else {}
 
         # Lateral load pattern based on lateral_load_type
-        lateral_loads: Dict[int, tuple] = {}
+        lateral_loads: dict[int, tuple] = {}
         if self.lateral_load_type == "uniform":
             # Uniform: unit masses at all nodes
             for nd in mm.nodes.values():
@@ -237,9 +237,8 @@ class PushoverAnalysis(Analysis):
                 lateral_loads[nd.node_tag] = tuple(load)
                 total_weight += h
             if total_weight > 1e-12:
-                for tag in lateral_loads:
-                    lateral_loads[tag] = tuple(
-                        v / total_weight for v in lateral_loads[tag])
+                for tag, ld in lateral_loads.items():
+                    lateral_loads[tag] = tuple(v / total_weight for v in ld)
         elif self.lateral_load_type == "mode1" and first_mode:
             # Mode 1 proportional: mass × mode1 shape
             total_weight = 0.0
@@ -251,9 +250,8 @@ class PushoverAnalysis(Analysis):
                 lateral_loads[nd.node_tag] = tuple(load)
                 total_weight += w
             if total_weight > 0:
-                for tag in lateral_loads:
-                    lateral_loads[tag] = tuple(
-                        v / total_weight for v in lateral_loads[tag])
+                for tag, ld in lateral_loads.items():
+                    lateral_loads[tag] = tuple(v / total_weight for v in ld)
         else:
             # Fallback: uniform in configured direction
             for nd in mm.nodes.values():
@@ -262,11 +260,11 @@ class PushoverAnalysis(Analysis):
                 lateral_loads[nd.node_tag] = tuple(load)
 
         # Gravity loads — use MeshModel's computed mass when available
-        gravity_loads: Dict[int, tuple] = {}
+        gravity_loads: dict[int, tuple] = {}
         # Scale gravitational acceleration to model units (never hardcode g).
         g = g_from_units(mm.units)
         for nd in mm.nodes.values():
-            mass_val = getattr(nd, 'mass', None)
+            mass_val = getattr(nd, "mass", None)
             if mass_val is None or mass_val <= 0.0:
                 # Skip nodes without a valid mass rather than fabricating 1.0
                 continue
@@ -293,7 +291,10 @@ class PushoverAnalysis(Analysis):
         # Write Tcl script to output directory
         tcl_path = str(out_dir / "model.tcl")
         export_mesh_model_to_tcl(
-            mm, tcl_path, config=rc_config, tcl_suffix=tcl_suffix,
+            mm,
+            tcl_path,
+            config=rc_config,
+            tcl_suffix=tcl_suffix,
         )
 
         # Run via Xara — the runner sets cwd to the tcl file's directory,
@@ -357,7 +358,8 @@ class PushoverAnalysis(Analysis):
         if os.path.exists(disp_path) and os.path.exists(bs_path):
             try:
                 parsed = parse_pushover_results(
-                    disp_path, bs_path,
+                    disp_path,
+                    bs_path,
                     reaction_path if os.path.exists(reaction_path) else None,
                 )
                 result = {
@@ -380,6 +382,7 @@ class PushoverAnalysis(Analysis):
             for line in output.splitlines():
                 if "Base reactions:" in line:
                     import re
+
                     m = re.search(r"Rx\s*=\s*([-\d.e+]+)", line)
                     if m:
                         rx = float(m.group(1))
@@ -400,6 +403,7 @@ class PushoverAnalysis(Analysis):
         tcl_path_removed = False
         if not rc_config.get("keep_tcl", False) and not rc_config.get("keep_output", False):
             import shutil
+
             try:
                 shutil.rmtree(str(out_dir), ignore_errors=True)
                 out_dir_removed = True
@@ -416,8 +420,12 @@ class PushoverAnalysis(Analysis):
                 "lateral_load_type": self.lateral_load_type,
                 "max_disp_val": self.max_disp_val,
                 "num_steps": self.num_steps,
-                "tcl_path": None if tcl_path_removed else (tcl_path if os.path.exists(tcl_path) else None),
-                "output_dir": None if out_dir_removed else (str(out_dir) if out_dir.exists() else None),
+                "tcl_path": None
+                if tcl_path_removed
+                else (tcl_path if os.path.exists(tcl_path) else None),
+                "output_dir": None
+                if out_dir_removed
+                else (str(out_dir) if out_dir.exists() else None),
                 "config": self.config,
             },
         )

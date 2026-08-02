@@ -6,11 +6,14 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "src"))
 
-import numpy as np
 import pytest
 
 from fea_toolkit.model.sap_data import (
-    SAPModelData, Node, AreaElement, ShellSection, Material,
+    AreaElement,
+    Material,
+    Node,
+    SAPModelData,
+    ShellSection,
 )
 
 
@@ -24,12 +27,12 @@ def _build_test_model():
     connected to area 1 — they should be detected as unconnected.
     """
     nodes = {
-        "1":  Node("1",  1,  0.0, 0.0, 0.0),
-        "2":  Node("2",  2,  6.0, 0.0, 0.0),
-        "3":  Node("3",  3,  6.0, 4.0, 0.0),
-        "4":  Node("4",  4,  0.0, 4.0, 0.0),
-        "5":  Node("5",  5,  2.0, 0.0, 0.0),   # on edge 1-2
-        "6":  Node("6",  6,  4.0, 0.0, 0.0),   # on edge 1-2
+        "1": Node("1", 1, 0.0, 0.0, 0.0),
+        "2": Node("2", 2, 6.0, 0.0, 0.0),
+        "3": Node("3", 3, 6.0, 4.0, 0.0),
+        "4": Node("4", 4, 0.0, 4.0, 0.0),
+        "5": Node("5", 5, 2.0, 0.0, 0.0),  # on edge 1-2
+        "6": Node("6", 6, 4.0, 0.0, 0.0),  # on edge 1-2
     }
     mats = {"Concrete": Material("Concrete", "Concrete", E_mod=3e10)}
     shell_secs = {"Slab200": ShellSection("Slab200", "Shell", "Concrete", thickness=0.2)}
@@ -46,12 +49,16 @@ def _build_test_model():
         area_elements=areas,
         area_assignments=area_assignments,
         # Minimal empties for the rest
-        restraints={}, frame_elements={}, frame_assignments={},
-        groups={}, frame_auto_mesh={},
+        restraints={},
+        frame_elements={},
+        frame_assignments={},
+        groups={},
+        frame_auto_mesh={},
     )
 
 
 # ── Tests ─────────────────────────────────────────────────────────────
+
 
 class TestDetectUnconnectedEdges:
     """Tests for AnalysisBuilder.detect_unconnected_edges()."""
@@ -59,8 +66,9 @@ class TestDetectUnconnectedEdges:
     def _make_builder(self):
         """Create a builder with a minimal model and OpenSees nodes."""
         import openseespy.opensees as ops
-        from fea_toolkit.opensees.preprocessor import preprocess_model
+
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
 
         md = _build_test_model()
         mm = preprocess_model(md, {"verbose": False, "create_shells": True})
@@ -68,7 +76,7 @@ class TestDetectUnconnectedEdges:
 
         # Create nodes in OpenSees memory (no full build_domain needed)
         ops.wipe()
-        ops.model('basic', '-ndm', 3, '-ndf', 6)
+        ops.model("basic", "-ndm", 3, "-ndf", 6)
         for nid, node in mm.nodes.items():
             ops.node(int(nid), node.x, node.y, node.z)
 
@@ -90,12 +98,12 @@ class TestDetectUnconnectedEdges:
             assert r["master_node_j"] == 2, f"Expected master_j=2, got {r['master_node_j']}"
         # Verify interpolation weights for node 5
         r5 = by_slave[5]
-        assert r5["N1"] == pytest.approx(2.0/3.0, abs=1e-5)  # 1 - 2/6
-        assert r5["N2"] == pytest.approx(1.0/3.0, abs=1e-5)  # 2/6
+        assert r5["N1"] == pytest.approx(2.0 / 3.0, abs=1e-5)  # 1 - 2/6
+        assert r5["N2"] == pytest.approx(1.0 / 3.0, abs=1e-5)  # 2/6
         # Verify interpolation weights for node 6
         r6 = by_slave[6]
-        assert r6["N1"] == pytest.approx(1.0/3.0, abs=1e-5)  # 1 - 4/6
-        assert r6["N2"] == pytest.approx(2.0/3.0, abs=1e-5)  # 4/6
+        assert r6["N1"] == pytest.approx(1.0 / 3.0, abs=1e-5)  # 1 - 4/6
+        assert r6["N2"] == pytest.approx(2.0 / 3.0, abs=1e-5)  # 4/6
         ops.wipe()
 
     def test_detect_returns_empty_for_no_misalignment(self):
@@ -111,14 +119,15 @@ class TestDetectUnconnectedEdges:
     def test_detect_respects_tolerance(self):
         """A node just beyond tolerance should not be detected."""
         import openseespy.opensees as ops
-        from fea_toolkit.opensees.preprocessor import preprocess_model
+
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
 
         md = _build_test_model()
         mm = preprocess_model(md, {"verbose": False, "create_shells": True})
         builder = AnalysisBuilder(mm, {"verbose": False})
         ops.wipe()
-        ops.model('basic', '-ndm', 3, '-ndf', 6)
+        ops.model("basic", "-ndm", 3, "-ndf", 6)
         # Node 7 sits 0.5 mm off the edge 1-2 (very close but not on it)
         ops.node(1, 0.0, 0.0, 0.0)
         ops.node(2, 6.0, 0.0, 0.0)
@@ -146,14 +155,15 @@ class TestApplyEdgeConstraints:
     def _make_builder(self):
         """Create builder and OpenSees model with nodes."""
         import openseespy.opensees as ops
-        from fea_toolkit.opensees.preprocessor import preprocess_model
+
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
 
         md = _build_test_model()
         mm = preprocess_model(md, {"verbose": False, "create_shells": True})
         builder = AnalysisBuilder(mm, {"verbose": False})
         ops.wipe()
-        ops.model('basic', '-ndm', 3, '-ndf', 6)
+        ops.model("basic", "-ndm", 3, "-ndf", 6)
         for nid, node in md.nodes.items():
             ops.node(int(nid), node.x, node.y, node.z)
         return builder, ops
@@ -170,7 +180,7 @@ class TestApplyEdgeConstraints:
         # Spring method creates 2 elements per slave (one to each master),
         # so 2 slaves × 2 masters = 4 elements (vs 2 MPCs with penalty)
         assert n == 4, f"Expected 4 spring elements, got {n}"
-        assert builder._edge_constraint_method == 'spring'
+        assert builder._edge_constraint_method == "spring"
         ops.wipe()
         ops.wipe()
 
@@ -198,7 +208,7 @@ class TestApplyEdgeConstraints:
             tolerance=1e-4,
             verbose=False,
         )
-        assert builder._edge_constraint_method == 'spring'
+        assert builder._edge_constraint_method == "spring"
         # Running again should keep it 'spring'
         builder.apply_edge_constraints(
             coarse_edges=[(2, 3)],
@@ -206,7 +216,7 @@ class TestApplyEdgeConstraints:
             tolerance=1e-4,
             verbose=False,
         )
-        assert builder._edge_constraint_method == 'spring'
+        assert builder._edge_constraint_method == "spring"
         ops.wipe()
 
     def test_apply_with_no_edges_returns_zero(self):
@@ -227,16 +237,17 @@ class TestApplyEdgeConstraintsPenalty:
     def _make_builder(self):
         """Create builder with penalty method and OpenSees model with nodes."""
         import openseespy.opensees as ops
-        from fea_toolkit.opensees.preprocessor import preprocess_model
+
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
 
         md = _build_test_model()
-        mm = preprocess_model(md, {"verbose": False, "create_shells": True,
-                                       "constraint_method": "penalty"})
-        builder = AnalysisBuilder(mm, {"verbose": False,
-                                       "constraint_method": "penalty"})
+        mm = preprocess_model(
+            md, {"verbose": False, "create_shells": True, "constraint_method": "penalty"}
+        )
+        builder = AnalysisBuilder(mm, {"verbose": False, "constraint_method": "penalty"})
         ops.wipe()
-        ops.model('basic', '-ndm', 3, '-ndf', 6)
+        ops.model("basic", "-ndm", 3, "-ndf", 6)
         for nid, node in md.nodes.items():
             ops.node(int(nid), node.x, node.y, node.z)
         return builder, ops
@@ -252,7 +263,7 @@ class TestApplyEdgeConstraintsPenalty:
         )
         # Penalty creates 1 equationConstraint per slave → 2 for 2 slaves
         assert n == 2, f"Expected 2 penalty constraints, got {n}"
-        assert builder._edge_constraint_method == 'penalty'
+        assert builder._edge_constraint_method == "penalty"
         ops.wipe()
 
     def test_penalty_no_match_returns_zero(self):
@@ -278,7 +289,7 @@ class TestApplyEdgeConstraintsPenalty:
             tolerance=1e-4,
             verbose=False,
         )
-        assert builder._edge_constraint_method == 'penalty'
+        assert builder._edge_constraint_method == "penalty"
         # Second call with no matches should keep 'penalty'
         builder.apply_edge_constraints(
             coarse_edges=[(2, 3)],
@@ -286,7 +297,7 @@ class TestApplyEdgeConstraintsPenalty:
             tolerance=1e-4,
             verbose=False,
         )
-        assert builder._edge_constraint_method == 'penalty'
+        assert builder._edge_constraint_method == "penalty"
         ops.wipe()
 
     def test_penalty_with_no_edges_returns_zero(self):

@@ -7,15 +7,27 @@ subdivided areas, detected constraints — with no OpenSees domain objects.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Tuple, Set
+from typing import Any, Optional
 
 from .sap_data import (
-    Node, Restraint, Material, Section,
-    FrameElement, AreaElement, Group,
-    FrameDistributedLoad, JointLoad, GravityLoad,
-    AreaGravityLoad, AreaUniformLoad, MassSource, LoadPattern,
-    NDMaterial, LayeredShellSection,
-    FrameElementProperties, AreaElementProperties,
+    AreaElement,
+    AreaElementProperties,
+    AreaGravityLoad,
+    AreaUniformLoad,
+    FrameDistributedLoad,
+    FrameElement,
+    FrameElementProperties,
+    GravityLoad,
+    Group,
+    JointLoad,
+    LayeredShellSection,
+    LoadPattern,
+    MassSource,
+    Material,
+    NDMaterial,
+    Node,
+    Restraint,
+    Section,
 )
 
 
@@ -28,26 +40,26 @@ class MeshModel:
     """
 
     # ── Nodes ────────────────────────────────────────────────────
-    nodes: Dict[str, Node]                     # original · mesh · split
+    nodes: dict[str, Node]  # original · mesh · split
 
     # ── Frame elements (split + offset children) ──────────────────
-    frame_elements: Dict[str, FrameElement]
-    frame_assignments: Dict[str, str]
+    frame_elements: dict[str, FrameElement]
+    frame_assignments: dict[str, str]
 
     # ── Area elements (meshed + subdivided) ───────────────────────
-    area_elements: Dict[str, AreaElement]
-    area_assignments: Dict[str, str]
+    area_elements: dict[str, AreaElement]
+    area_assignments: dict[str, str]
 
     # ── Loads (redistributed to split children) ───────────────────
-    frame_dist_loads: List[FrameDistributedLoad]
-    edge_loads_from_areas: List = field(default_factory=list)
+    frame_dist_loads: list[FrameDistributedLoad]
+    edge_loads_from_areas: list = field(default_factory=list)
     # (list of tuples — exact format matches builder's edge_loads_from_areas)
-    joint_loads: List[JointLoad] = field(default_factory=list)
-    frame_gravity_loads: List[GravityLoad] = field(default_factory=list)
-    area_gravity_loads: List[AreaGravityLoad] = field(default_factory=list)
-    area_uniform_loads: List[AreaUniformLoad] = field(default_factory=list)
-    load_patterns: Dict[str, "LoadPattern"] = field(default_factory=dict)
-    mass_sources: Dict[str, MassSource] = field(default_factory=dict)
+    joint_loads: list[JointLoad] = field(default_factory=list)
+    frame_gravity_loads: list[GravityLoad] = field(default_factory=list)
+    area_gravity_loads: list[AreaGravityLoad] = field(default_factory=list)
+    area_uniform_loads: list[AreaUniformLoad] = field(default_factory=list)
+    load_patterns: dict[str, "LoadPattern"] = field(default_factory=dict)
+    mass_sources: dict[str, MassSource] = field(default_factory=dict)
 
     # ── Constraints (detected, not yet applied to OpenSees) ───────
     # ── Detected coarse‑fine node pairs (for visualisation only) ──
@@ -56,39 +68,39 @@ class MeshModel:
     # PyVista as yellow lines.  NOT used for applying constraints at
     # analysis time — the AnalysisBuilder receives constraint arguments
     # directly from the caller and saves them in ``_saved_edge_constraints``.
-    detected_edge_pairs: List[tuple] = field(default_factory=list)
+    detected_edge_pairs: list[tuple] = field(default_factory=list)
     #   [(merged_nodes, master_chain, slave_nodes, type_a, type_b), ...]
     #   — from find_constraint_edges: merged node dict, master chain,
     #     slave nodes, and the two constraint type labels
-    diaphragm_levels: List[float] = field(default_factory=list)
+    diaphragm_levels: list[float] = field(default_factory=list)
 
     # ── Rigid links from frame end offsets ────────────────────────
-    offset_rigid_links: List[tuple] = field(default_factory=list)
+    offset_rigid_links: list[tuple] = field(default_factory=list)
 
     # ── Metadata for element creation ─────────────────────────────
-    frame_element_types: Dict[str, str] = field(default_factory=dict)
+    frame_element_types: dict[str, str] = field(default_factory=dict)
     #   elem_id → "beam" | "column" | "brace" | "wall" | "slab" | "unknown"
-    area_element_types: Dict[str, str] = field(default_factory=dict)
+    area_element_types: dict[str, str] = field(default_factory=dict)
 
     # ── Materials, sections, groups, restraints ───────────────────
-    materials: Dict[str, Material] = field(default_factory=dict)
-    sections: Dict[str, Section] = field(default_factory=dict)
-    groups: Dict[str, Group] = field(default_factory=dict)
-    restraints: Dict[str, Restraint] = field(default_factory=dict)
+    materials: dict[str, Material] = field(default_factory=dict)
+    sections: dict[str, Section] = field(default_factory=dict)
+    groups: dict[str, Group] = field(default_factory=dict)
+    restraints: dict[str, Restraint] = field(default_factory=dict)
     base_z: Optional[float] = None
 
     # ── Tag maps (pre-computed for deterministic Ops recreation) ──
-    frame_tag_map: Dict[str, int] = field(default_factory=dict)
+    frame_tag_map: dict[str, int] = field(default_factory=dict)
     #   elem_id → OpenSees element tag
-    material_tags: Dict[str, int] = field(default_factory=dict)
+    material_tags: dict[str, int] = field(default_factory=dict)
     #   material name → OpenSees material tag
-    section_tags: Dict[str, int] = field(default_factory=dict)
+    section_tags: dict[str, int] = field(default_factory=dict)
     #   section name → OpenSees section tag
-    shell_sec_tags: Dict[str, int] = field(default_factory=dict)
-    shell_sec_variants: Dict[str, int] = field(default_factory=dict)
+    shell_sec_tags: dict[str, int] = field(default_factory=dict)
+    shell_sec_variants: dict[str, int] = field(default_factory=dict)
 
     # ── Units ─────────────────────────────────────────────────────
-    units: Dict[str, str] = field(default_factory=lambda: {"F": "N", "L": "m", "T": "C"})
+    units: dict[str, str] = field(default_factory=lambda: {"F": "N", "L": "m", "T": "C"})
 
     # ── Model identification ─────────────────────────────────────
     model_name: str = ""
@@ -101,38 +113,38 @@ class MeshModel:
     # its own ``_saved_edge_constraints`` when constraints are first
     # applied.  This field exists for future Preprocessor→AnalysisBuilder
     # transfer of pre-built constraint arguments.
-    edge_constraint_args: List[tuple] = field(default_factory=list)
+    edge_constraint_args: list[tuple] = field(default_factory=list)
 
     # ── Resolved element creation properties ─────────────────────
     # Populated by the Preprocessor from config (three-level resolution:
     # per-ID override → selection group → role default).
-    frame_element_properties: Dict[str, FrameElementProperties] = field(default_factory=dict)
+    frame_element_properties: dict[str, FrameElementProperties] = field(default_factory=dict)
     #   elem_id → FrameElementProperties
-    area_element_properties: Dict[str, AreaElementProperties] = field(default_factory=dict)
+    area_element_properties: dict[str, AreaElementProperties] = field(default_factory=dict)
     #   area_id → AreaElementProperties
 
     # ── nD materials for layered shell sections ──────────────────
-    nd_materials: Dict[str, NDMaterial] = field(default_factory=dict)
+    nd_materials: dict[str, NDMaterial] = field(default_factory=dict)
     #   material name → NDMaterial (resolved from config nd_materials dict)
-    layered_shell_sections: Dict[str, LayeredShellSection] = field(default_factory=dict)
+    layered_shell_sections: dict[str, LayeredShellSection] = field(default_factory=dict)
     #   section name → LayeredShellSection (resolved from config shell_layers)
 
     # ── Diaphragm components (for rigidDiaphragm constraints) ────
     # Each entry is a (z_level, [node_id, ...]) tuple representing
     # one connected diaphragm component at a given storey.
-    diaphragm_components: List[Tuple[float, List[str]]] = field(default_factory=list)
+    diaphragm_components: list[tuple[float, list[str]]] = field(default_factory=list)
     #   [(z_level, [master_node_id, slave_node_id, ...]), ...]
 
     # ── Loads-only area IDs (stiffness-free, mass-contributing) ──
     # Areas matching a loads-only selection are NOT created as shell
     # elements in OpenSees, but remain in the model for mass calc.
-    loads_only_area_ids: Set[str] = field(default_factory=set)
+    loads_only_area_ids: set[str] = field(default_factory=set)
 
     # ── Orphan nodes (kept for visualisation only) ───────────────
     # Nodes that were removed from the main model because they are
     # only referenced by loads-only areas.  They exist purely for
     # rendering / visualisation and are NOT created in OpenSees.
-    orphan_nodes: Dict[str, Node] = field(default_factory=dict)
+    orphan_nodes: dict[str, Node] = field(default_factory=dict)
 
     @property
     def num_nodes(self) -> int:
@@ -146,7 +158,7 @@ class MeshModel:
     def num_areas(self) -> int:
         return len(self.area_elements)
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         """Return a dict of model statistics."""
         return {
             "Nodes": self.num_nodes,

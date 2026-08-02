@@ -8,25 +8,24 @@ Covers the four gaps identified in the audit:
 5. Rebuild recovery — supported → unsupported → supported cycle recovers
 """
 
-import pytest
 import openseespy.opensees as ops
+import pytest
 
-from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
-from fea_toolkit.opensees.preprocessor import Preprocessor
 from fea_toolkit.model.mesh_model import MeshModel
 from fea_toolkit.model.sap_data import (
-    NDMaterial,
-    ShellFiberLayer,
-    LayeredShellSection,
-    ShellSection,
-    Material,
     AreaElement,
-    Node,
-    SAPModelData,
     FrameElement,
-    FrameDistributedLoad,
+    LayeredShellSection,
+    Material,
+    NDMaterial,
+    Node,
     Restraint,
+    SAPModelData,
+    ShellFiberLayer,
+    ShellSection,
 )
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+from fea_toolkit.opensees.preprocessor import Preprocessor
 
 
 def _minimal_mesh(nd_materials=None, layered_sections=None):
@@ -80,22 +79,28 @@ class TestLayeredShellBuild:
             },
             materials={
                 "mat_concrete": Material(
-                    name="mat_concrete", type="Concrete",
-                    E_mod=30.0e9, nu=0.2,
-                    unit_weight=0.0, unit_mass=0.0,
+                    name="mat_concrete",
+                    type="Concrete",
+                    E_mod=30.0e9,
+                    nu=0.2,
+                    unit_weight=0.0,
+                    unit_mass=0.0,
                 ),
             },
             sections={
                 sec_name: ShellSection(
-                    name=sec_name, shape="ShellSection",
-                    material="mat_concrete", thickness=0.3,
+                    name=sec_name,
+                    shape="ShellSection",
+                    material="mat_concrete",
+                    thickness=0.3,
                 ),
             },
             frame_elements={},
             frame_assignments={},
             area_elements={
                 "a1": AreaElement(
-                    area_id="a1", area_tag=201,
+                    area_id="a1",
+                    area_tag=201,
                     node_ids=["n1", "n2", "n3"],
                     thickness=0.3,
                 ),
@@ -104,7 +109,6 @@ class TestLayeredShellBuild:
             frame_dist_loads=[],
             material_tags={},
             section_tags={},
-
             shell_sec_tags={},
             shell_sec_variants={},
             frame_element_types={},
@@ -162,14 +166,20 @@ class TestLayeredShellBuild:
             "rebar": NDMaterial(
                 name="rebar",
                 material_type="J2PlateFibre",
-                E=200.0e9, nu=0.3,
-                fy=400.0e6, Hiso=0.0, Hkin=0.01,
+                E=200.0e9,
+                nu=0.3,
+                fy=400.0e6,
+                Hiso=0.0,
+                Hkin=0.01,
             ),
             "concrete": NDMaterial(
                 name="concrete",
                 material_type="ConcreteS",
-                E=30.0e9, nu=0.2,
-                fc=-30.0e6, ft=2.0e6, Es=30.0e9,
+                E=30.0e9,
+                nu=0.2,
+                fc=-30.0e6,
+                ft=2.0e6,
+                Es=30.0e9,
             ),
         }
         lss = {
@@ -379,10 +389,10 @@ class TestLayeredShellBuild:
                 ],
             ),
         }
-        mm = self._three_node_area_mesh(nd_materials=ndm, layered_sections=lss,
-                                        sec_name="wall_using_bad")
-        builder = AnalysisBuilder(mm, {"verbose": False,
-                                        "create_shells": True})
+        mm = self._three_node_area_mesh(
+            nd_materials=ndm, layered_sections=lss, sec_name="wall_using_bad"
+        )
+        builder = AnalysisBuilder(mm, {"verbose": False, "create_shells": True})
         builder.build_domain()
 
         # The skipped section name is tracked
@@ -429,10 +439,8 @@ class TestLayeredShellBuild:
                 ],
             ),
         }
-        mm_supported = _minimal_mesh(nd_materials=ndm_supported,
-                                      layered_sections=lss)
-        mm_unsupported = _minimal_mesh(nd_materials=ndm_unsupported,
-                                        layered_sections=lss)
+        mm_supported = _minimal_mesh(nd_materials=ndm_supported, layered_sections=lss)
+        mm_unsupported = _minimal_mesh(nd_materials=ndm_unsupported, layered_sections=lss)
 
         # ── Build 1: supported ──
         builder = AnalysisBuilder(mm_supported, {"verbose": False})
@@ -440,7 +448,7 @@ class TestLayeredShellBuild:
         assert "flex_mat" in builder._nd_material_tags
         assert "flex_section" in builder._shell_sec_tags
         assert len(builder._skipped_nd_materials) == 0
-        flex_section_tag = builder._shell_sec_tags["flex_section"]
+        builder._shell_sec_tags["flex_section"]
 
         # ── Build 2: unsupported (replace mesh_model nd_materials) ──
         builder.mesh_model = mm_unsupported
@@ -471,6 +479,7 @@ class TestLayeredShellBuild:
 
 # ── Preprocessor nd_materials tests ────────────────────────────────
 
+
 def _minimal_sap_model_data(units=None):
     """Build a minimal SAPModelData that survives Preprocessor.run().
 
@@ -488,21 +497,28 @@ def _minimal_sap_model_data(units=None):
         },
         materials={
             "steel": Material(
-                name="steel", type="Steel",
-                E_mod=200.0e9, nu=0.3,
-                unit_weight=0.0, unit_mass=0.0,
+                name="steel",
+                type="Steel",
+                E_mod=200.0e9,
+                nu=0.3,
+                unit_weight=0.0,
+                unit_mass=0.0,
             ),
         },
         sections={
             "beam_sec": ShellSection(
-                name="beam_sec", shape="ShellSection",
-                material="steel", thickness=0.1,
+                name="beam_sec",
+                shape="ShellSection",
+                material="steel",
+                thickness=0.1,
             ),
         },
         frame_elements={
             "f1": FrameElement(
-                elem_id="f1", elem_tag=10,
-                node_i="1", node_j="2",
+                elem_id="f1",
+                elem_tag=10,
+                node_i="1",
+                node_j="2",
             ),
         },
         area_elements={},
@@ -573,9 +589,9 @@ class TestPreprocessorNdMaterials:
                     "material_type": "J2PlateFibre",
                     "E": 200.0e9,
                     "nu": 0.3,
-                    "fy": 400.0e6,       # 400 MPa in SI Pa
+                    "fy": 400.0e6,  # 400 MPa in SI Pa
                     "Hiso": 0.0,
-                    "Hkin": 0.01e9,       # 10 MPa hardening → scaled
+                    "Hkin": 0.01e9,  # 10 MPa hardening → scaled
                 },
             },
         }

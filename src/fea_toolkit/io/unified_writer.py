@@ -18,23 +18,22 @@ Usage::
                    fmt="h5")
 """
 
-from typing import Dict, Any, Optional, List, Tuple
-from pathlib import Path
 import datetime
 import json
+from pathlib import Path
+from typing import Any, Optional
+
 import numpy as np
 
 from ..model.mesh_model import MeshModel
-from ..model.sap_data import SAPModelData
 from .results_schema import make_static_key
-
 
 # ═══════════════════════════════════════════════════════════════════
 # Geometry collection (works with MeshModel or SAPModelData)
 # ═══════════════════════════════════════════════════════════════════
 
 
-def _get_nodes(model) -> Tuple[List, List, List, List, List]:
+def _get_nodes(model) -> tuple[list, list, list, list, list]:
     """Extract node arrays from a MeshModel or SAPModelData."""
     tags, sap_ids, xs, ys, zs = [], [], [], [], []
     for nid, nd in model.nodes.items():
@@ -46,22 +45,21 @@ def _get_nodes(model) -> Tuple[List, List, List, List, List]:
     return tags, sap_ids, xs, ys, zs
 
 
-def _get_frames(model) -> Tuple:
+def _get_frames(model) -> tuple:
     """Extract frame element arrays."""
-    from collections import defaultdict
 
     frame_eid, frame_sap_id, frame_parent_sap_id, frame_sec_name = [], [], [], []
     frame_ni, frame_nj = [], []
     frame_t_start, frame_t_end = [], []
 
     # Build parent lookup for t_start/t_end
-    parent_lookup: Dict[str, tuple] = {}
+    parent_lookup: dict[str, tuple] = {}
     for eid, elem in model.frame_elements.items():
         if elem.t_locations and elem.child_ids:
             parent_lookup[eid] = (elem.t_locations, elem.child_ids)
 
     for eid, elem in model.frame_elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         ni = model.nodes.get(elem.node_i)
         nj = model.nodes.get(elem.node_j)
@@ -90,17 +88,25 @@ def _get_frames(model) -> Tuple:
             frame_t_start.append(0.0)
             frame_t_end.append(1.0)
 
-    return (frame_eid, frame_sap_id, frame_parent_sap_id, frame_sec_name,
-            frame_ni, frame_nj, frame_t_start, frame_t_end)
+    return (
+        frame_eid,
+        frame_sap_id,
+        frame_parent_sap_id,
+        frame_sec_name,
+        frame_ni,
+        frame_nj,
+        frame_t_start,
+        frame_t_end,
+    )
 
 
-def _get_shells(model) -> Tuple:
+def _get_shells(model) -> tuple:
     """Extract shell element arrays."""
     shell_eid, shell_sap_id, shell_sec_name = [], [], []
     s1, s2, s3, s4 = [], [], [], []
 
     for aid, area in model.area_elements.items():
-        if getattr(area, 'inactive', False):
+        if getattr(area, "inactive", False):
             continue
         if len(area.node_ids) < 3:
             continue
@@ -127,12 +133,12 @@ def _get_shells(model) -> Tuple:
     return shell_eid, shell_sap_id, shell_sec_name, s1, s2, s3, s4
 
 
-def collect_geometry_arrays(model) -> Dict[str, np.ndarray]:
+def collect_geometry_arrays(model) -> dict[str, np.ndarray]:
     """Extract all geometry arrays from a MeshModel or SAPModelData.
 
     The returned dict can be written to NPZ or HDF5.
     """
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
 
     # Nodes
     tags, sids, xs, ys, zs = _get_nodes(model)
@@ -143,8 +149,7 @@ def collect_geometry_arrays(model) -> Dict[str, np.ndarray]:
     arrays["node_z"] = np.array(zs, dtype=float)
 
     # Frames
-    (feid, fsid, fpsid, fsec,
-     fni, fnj, fts, fte) = _get_frames(model)
+    (feid, fsid, fpsid, fsec, fni, fnj, fts, fte) = _get_frames(model)
     arrays["frame_eid"] = np.array(feid, dtype=int)
     arrays["frame_sap_id"] = np.array(fsid, dtype=str)
     arrays["frame_parent_sap_id"] = np.array(fpsid, dtype=str)
@@ -155,8 +160,7 @@ def collect_geometry_arrays(model) -> Dict[str, np.ndarray]:
     arrays["frame_t_end"] = np.array(fte, dtype=float)
 
     # Shells
-    (seid, ssid, ssec,
-     sn1, sn2, sn3, sn4) = _get_shells(model)
+    (seid, ssid, ssec, sn1, sn2, sn3, sn4) = _get_shells(model)
     arrays["shell_eid"] = np.array(seid, dtype=int)
     arrays["shell_sap_id"] = np.array(ssid, dtype=str)
     arrays["shell_sec_name"] = np.array(ssec, dtype=str)
@@ -173,7 +177,7 @@ def collect_geometry_arrays(model) -> Dict[str, np.ndarray]:
 # ═══════════════════════════════════════════════════════════════════
 
 
-def collect_static_arrays(static_results: Dict[str, Any]) -> Dict[str, np.ndarray]:
+def collect_static_arrays(static_results: dict[str, Any]) -> dict[str, np.ndarray]:
     """Extract static analysis arrays.
 
     Accepts both formats:
@@ -183,7 +187,7 @@ def collect_static_arrays(static_results: Dict[str, Any]) -> Dict[str, np.ndarra
     * **Flat** (AnalysisBuilder): ``{"nodal_displacements": ...,
       "reactions": ...}`` (stored under case ``"1"``)
     """
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
 
     # Detect format
     has_nested_cases = any(
@@ -207,40 +211,53 @@ def collect_static_arrays(static_results: Dict[str, Any]) -> Dict[str, np.ndarra
     return arrays
 
 
-def _collect_case_forces(arrays: Dict[str, np.ndarray], case: str,
-                         data: Dict[str, Any]) -> None:
+def _collect_case_forces(arrays: dict[str, np.ndarray], case: str, data: dict[str, Any]) -> None:
     """Collect element force arrays for one static case."""
     force_keys = [
-        "fx_i", "fy_i", "fz_i", "mx_i", "my_i", "mz_i",
-        "fx_j", "fy_j", "fz_j", "mx_j", "my_j", "mz_j",
+        "fx_i",
+        "fy_i",
+        "fz_i",
+        "mx_i",
+        "my_i",
+        "mz_i",
+        "fx_j",
+        "fy_j",
+        "fz_j",
+        "mx_j",
+        "my_j",
+        "mz_j",
     ]
     for key in force_keys:
         vals = data.get(key, data.get("element_forces", {}).get(key, []))
         arrays[make_static_key(case, key)] = np.asarray(vals, dtype=float)
 
 
-def _collect_case_displacements(arrays: Dict[str, np.ndarray], case: str,
-                                data: Dict[str, Any]) -> None:
+def _collect_case_displacements(
+    arrays: dict[str, np.ndarray], case: str, data: dict[str, Any]
+) -> None:
     """Collect nodal displacement arrays for one static case."""
     disp = data.get("nodal_displacements", {})
     if not disp:
         return
+
     def _disp_sort_key(k: str):
         try:
             return (0, int(k), k)
         except ValueError:
             return (1, 0, k)
+
     tags = sorted(disp.keys(), key=_disp_sort_key)
     for i, dof in enumerate(["dx", "dy", "dz"]):
         arr = np.array([disp[t][i] for t in tags], dtype=float)
         arrays[make_static_key(case, f"node_{dof}")] = arr
 
 
-def collect_modal_arrays(modal_result: Dict[str, Any],
-                          mode_shapes: Optional[Dict] = None,
-                          ) -> Dict[str, np.ndarray]:
+def collect_modal_arrays(
+    modal_result: dict[str, Any],
+    mode_shapes: Optional[dict] = None,
+) -> dict[str, np.ndarray]:
     """Extract modal analysis arrays."""
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
     mp = modal_result.get("modal_props", {})
     periods = list(modal_result.get("periods", []))
     n = len(periods)
@@ -248,10 +265,10 @@ def collect_modal_arrays(modal_result: Dict[str, Any],
         return arrays
 
     arrays["modal/period"] = np.array(periods, dtype=float)
-    arrays["modal/frequency"] = np.array(
-        [1.0 / p if p > 0 else 0.0 for p in periods], dtype=float)
+    arrays["modal/frequency"] = np.array([1.0 / p if p > 0 else 0.0 for p in periods], dtype=float)
     arrays["modal/omega"] = np.array(
-        [2.0 * np.pi / p if p > 0 else 0.0 for p in periods], dtype=float)
+        [2.0 * np.pi / p if p > 0 else 0.0 for p in periods], dtype=float
+    )
 
     for key, npz_key in [
         ("partiMassRatiosMX", "modal/mx_ratio"),
@@ -270,9 +287,7 @@ def collect_modal_arrays(modal_result: Dict[str, Any],
         if node_tags:
             n_nodes = len(node_tags)
             tag_to_idx = {t: i for i, t in enumerate(node_tags)}
-            for dof_idx, npz_key in enumerate(["modal/mode_dx",
-                                                "modal/mode_dy",
-                                                "modal/mode_dz"]):
+            for dof_idx, npz_key in enumerate(["modal/mode_dx", "modal/mode_dy", "modal/mode_dz"]):
                 arr = np.zeros((n_nodes, n))
                 for midx in range(n):
                     node_vals = mode_shapes.get(midx, {})
@@ -285,14 +300,15 @@ def collect_modal_arrays(modal_result: Dict[str, Any],
     return arrays
 
 
-def collect_rs_arrays(rs_x: Optional[Dict] = None,
-                       rs_y: Optional[Dict] = None) -> Dict[str, np.ndarray]:
+def collect_rs_arrays(
+    rs_x: Optional[dict] = None, rs_y: Optional[dict] = None
+) -> dict[str, np.ndarray]:
     """Extract response-spectrum base shear arrays.
 
     ``rs/period`` is taken from the first available result dict
     (same periods apply to both X and Y directions).
     """
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
     first = rs_x or rs_y
     if first is not None:
         periods = first.get("modal_periods", [])
@@ -301,16 +317,15 @@ def collect_rs_arrays(rs_x: Optional[Dict] = None,
         rs = rs_x if direction == "X" else rs_y
         if rs is None:
             continue
-        arrays[f"rs/v_base_{d_key}"] = np.array(
-            rs.get("modal_base_shear", []), dtype=float)
+        arrays[f"rs/v_base_{d_key}"] = np.array(rs.get("modal_base_shear", []), dtype=float)
         arrays[f"rs/v_cqc_{d_key}"] = np.array([rs.get("base_shear_cqc", 0.0)])
         arrays[f"rs/v_srss_{d_key}"] = np.array([rs.get("base_shear_srss", 0.0)])
     return arrays
 
 
 def collect_rs_element_force_arrays(
-    rs_element_forces: Optional[Dict[str, Any]] = None,
-) -> Dict[str, np.ndarray]:
+    rs_element_forces: Optional[dict[str, Any]] = None,
+) -> dict[str, np.ndarray]:
     """Extract element-level RS force arrays (CQC-combined).
 
     Expects *rs_element_forces* to have the structure returned by
@@ -328,7 +343,7 @@ def collect_rs_element_force_arrays(
     Writes ``rs/elem_sap_id``, ``rs/elem_z_bot``, ``rs/elem_z_mid``,
     ``rs/elem_Vy_i`` … ``rs/elem_Mz_j`` (one row per element).
     """
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
     if not rs_element_forces:
         return arrays
 
@@ -340,8 +355,7 @@ def collect_rs_element_force_arrays(
     arrays["rs/elem_z_bot"] = np.array([r["z_bot"] for r in results], dtype=float)
     arrays["rs/elem_z_mid"] = np.array([r["z_mid"] for r in results], dtype=float)
 
-    for qty in ("Vy_i", "Vy_j", "Vz_i", "Vz_j",
-                 "My_i", "My_j", "Mz_i", "Mz_j"):
+    for qty in ("Vy_i", "Vy_j", "Vz_i", "Vz_j", "My_i", "My_j", "Mz_i", "Mz_j"):
         key = f"rs/elem_{qty}"
         arrays[key] = np.array([r.get(qty, 0.0) for r in results], dtype=float)
 
@@ -349,8 +363,8 @@ def collect_rs_element_force_arrays(
 
 
 def collect_rs_nodal_displacement_arrays(
-    rs_nodal_displacements: Optional[Dict[int, tuple]] = None,
-) -> Dict[str, np.ndarray]:
+    rs_nodal_displacements: Optional[dict[int, tuple]] = None,
+) -> dict[str, np.ndarray]:
     """Extract RS nodal displacement arrays (CQC-combined).
 
     Expects *rs_nodal_displacements* to have the structure returned by
@@ -361,7 +375,7 @@ def collect_rs_nodal_displacement_arrays(
     Writes ``rs/node_tag`` and ``rs/node_dx``, ``rs/node_dy``,
     ``rs/node_dz`` arrays sorted by node tag.
     """
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
     if not rs_nodal_displacements:
         return arrays
 
@@ -369,8 +383,7 @@ def collect_rs_nodal_displacement_arrays(
     arrays["rs/node_tag"] = np.array(tags, dtype=int)
     for i, dof in enumerate(["dx", "dy", "dz"]):
         key = f"rs/node_{dof}"
-        arrays[key] = np.array(
-            [rs_nodal_displacements[t][i] for t in tags], dtype=float)
+        arrays[key] = np.array([rs_nodal_displacements[t][i] for t in tags], dtype=float)
 
     return arrays
 
@@ -380,17 +393,18 @@ def collect_rs_nodal_displacement_arrays(
 # ═══════════════════════════════════════════════════════════════════
 
 
-def _build_metadata(model, static_results=None, modal_result=None,
-                     config=None) -> str:
+def _build_metadata(model, static_results=None, modal_result=None, config=None) -> str:
     """Build JSON metadata string."""
     meta = {
         "created": datetime.datetime.now().isoformat(),
-        "model_name": getattr(model, 'model_name', ''),
+        "model_name": getattr(model, "model_name", ""),
         "num_nodes": len(model.nodes),
-        "num_frames": len([e for e in model.frame_elements.values()
-                           if not getattr(e, 'inactive', False)]),
-        "num_areas": len([a for a in model.area_elements.values()
-                          if not getattr(a, 'inactive', False)]),
+        "num_frames": len(
+            [e for e in model.frame_elements.values() if not getattr(e, "inactive", False)]
+        ),
+        "num_areas": len(
+            [a for a in model.area_elements.values() if not getattr(a, "inactive", False)]
+        ),
     }
     if static_results:
         # Use same nested/flat detection as collect_static_arrays
@@ -400,20 +414,16 @@ def _build_metadata(model, static_results=None, modal_result=None,
         )
         if has_nested_cases:
             meta["static_cases"] = list(static_results.keys())
-            meta["has_local_forces"] = any(
-                "fx_i" in r for r in static_results.values())
+            meta["has_local_forces"] = any("fx_i" in r for r in static_results.values())
         else:
             meta["static_cases"] = ["1"]
-            meta["has_local_forces"] = (
-                "fx_i" in static_results or
-                any("fx_i" in v for v in static_results.values()
-                    if isinstance(v, dict))
+            meta["has_local_forces"] = "fx_i" in static_results or any(
+                "fx_i" in v for v in static_results.values() if isinstance(v, dict)
             )
     if modal_result:
         meta["num_modes"] = len(modal_result.get("periods", []))
     if config:
-        meta["config"] = {k: v for k, v in config.items()
-                          if isinstance(v, (str, int, float, bool))}
+        meta["config"] = {k: v for k, v in config.items() if isinstance(v, (str, int, float, bool))}
     return json.dumps(meta)
 
 
@@ -422,7 +432,7 @@ def _build_metadata(model, static_results=None, modal_result=None,
 # ═══════════════════════════════════════════════════════════════════
 
 
-def _write_npz(path: str, arrays: Dict[str, np.ndarray]) -> str:
+def _write_npz(path: str, arrays: dict[str, np.ndarray]) -> str:
     """Write arrays to NPZ file."""
     path = str(path)
     np.savez_compressed(path, **arrays)
@@ -434,7 +444,7 @@ def _write_npz(path: str, arrays: Dict[str, np.ndarray]) -> str:
 # ═══════════════════════════════════════════════════════════════════
 
 
-def _write_h5(path: str, arrays: Dict[str, np.ndarray]) -> str:
+def _write_h5(path: str, arrays: dict[str, np.ndarray]) -> str:
     """Write arrays to HDF5 file using h5py.
 
     Organises data into groups matching the NPZ key hierarchy.
@@ -443,36 +453,33 @@ def _write_h5(path: str, arrays: Dict[str, np.ndarray]) -> str:
     try:
         import h5py
     except ImportError:
-        raise ImportError(
-            "HDF5 output requires h5py. Install with: pip install h5py")
+        raise ImportError("HDF5 output requires h5py. Install with: pip install h5py") from None
 
     path = str(path)
-    with h5py.File(path, 'w') as f:
+    with h5py.File(path, "w") as f:
         for key, arr in arrays.items():
-            parts = key.split('/')
+            parts = key.split("/")
             dataset_name = parts[-1]
-            group_path = '/'.join(parts[:-1]) if len(parts) > 1 else ''
+            group_path = "/".join(parts[:-1]) if len(parts) > 1 else ""
 
             # Handle string arrays — h5py can't write NumPy fixed-width string dtype
-            if arr.dtype.kind == 'U' or arr.dtype.kind == 'S':
+            if arr.dtype.kind in {"U", "S"}:
                 dt = h5py.string_dtype()
                 arr_obj = arr.astype(object)
                 if arr.ndim == 0:
                     ds = f.create_dataset(key, shape=(), dtype=dt)
                     ds[()] = str(arr.item())
                     continue
-                else:
-                    if group_path:
-                        g = f.require_group(group_path)
-                        g.create_dataset(dataset_name, data=arr_obj, dtype=dt)
-                    else:
-                        f.create_dataset(dataset_name, data=arr_obj, dtype=dt)
-            else:
-                if group_path:
+                elif group_path:
                     g = f.require_group(group_path)
-                    g.create_dataset(dataset_name, data=arr)
+                    g.create_dataset(dataset_name, data=arr_obj, dtype=dt)
                 else:
-                    f.create_dataset(key, data=arr)
+                    f.create_dataset(dataset_name, data=arr_obj, dtype=dt)
+            elif group_path:
+                g = f.require_group(group_path)
+                g.create_dataset(dataset_name, data=arr)
+            else:
+                f.create_dataset(key, data=arr)
     return path
 
 
@@ -485,14 +492,14 @@ def write_results(
     path: str,
     model=None,
     mesh_model: Optional[MeshModel] = None,
-    static_results: Optional[Dict[str, Any]] = None,
-    modal_result: Optional[Dict[str, Any]] = None,
-    mode_shapes: Optional[Dict] = None,
-    rs_results: Optional[Dict[str, Dict]] = None,
-    rs_element_forces: Optional[Dict[str, Any]] = None,
-    rs_nodal_displacements: Optional[Dict[int, tuple]] = None,
+    static_results: Optional[dict[str, Any]] = None,
+    modal_result: Optional[dict[str, Any]] = None,
+    mode_shapes: Optional[dict] = None,
+    rs_results: Optional[dict[str, dict]] = None,
+    rs_element_forces: Optional[dict[str, Any]] = None,
+    rs_nodal_displacements: Optional[dict[int, tuple]] = None,
     fmt: str = "npz",
-    config: Optional[Dict] = None,
+    config: Optional[dict] = None,
 ) -> str:
     """Write model geometry + analysis results to a unified output file.
 
@@ -519,10 +526,10 @@ def write_results(
         raise ValueError("Either mesh_model or model must be provided")
 
     # Collect all arrays
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
 
     # Geometry
-    if hasattr(src, 'nodes'):
+    if hasattr(src, "nodes"):
         arrays.update(collect_geometry_arrays(src))
 
     # Static results
@@ -535,10 +542,12 @@ def write_results(
 
     # RS results
     if rs_results:
-        arrays.update(collect_rs_arrays(
-            rs_x=rs_results.get("rs_x"),
-            rs_y=rs_results.get("rs_y"),
-        ))
+        arrays.update(
+            collect_rs_arrays(
+                rs_x=rs_results.get("rs_x"),
+                rs_y=rs_results.get("rs_y"),
+            )
+        )
 
     # RS element forces
     if rs_element_forces:
@@ -549,9 +558,7 @@ def write_results(
         arrays.update(collect_rs_nodal_displacement_arrays(rs_nodal_displacements))
 
     # Metadata
-    arrays["metadata_json"] = np.array([
-        _build_metadata(src, static_results, modal_result, config)
-    ])
+    arrays["metadata_json"] = np.array([_build_metadata(src, static_results, modal_result, config)])
 
     # Write — validate fmt explicitly
     if fmt == "h5":

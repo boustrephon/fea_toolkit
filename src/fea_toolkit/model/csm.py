@@ -40,10 +40,9 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import numpy as np
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Bilinearization — Stiffness-change detection
@@ -53,8 +52,8 @@ import numpy as np
 def bilinearize_stiffness_change(
     S_d_arr: np.ndarray,
     S_a_arr: np.ndarray,
-    config: Optional[Dict[str, Any]] = None,
-) -> Tuple[float, float, str]:
+    config: Optional[dict[str, Any]] = None,
+) -> tuple[float, float, str]:
     """Bilinearise by detecting where secant stiffness drops significantly.
 
     Yield is detected where the secant stiffness falls below a fraction
@@ -99,7 +98,7 @@ def bilinearize_stiffness_change(
 
     # initial elastic stiffness: first point with positive S_d and S_a
     K_init = 0.0
-    for i in range(0, len(S_d_arr)):
+    for i in range(len(S_d_arr)):
         if S_d_arr[i] > 1e-12 and S_a_arr[i] > 1e-12:
             K_init = S_a_arr[i] / S_d_arr[i]
             break
@@ -138,8 +137,8 @@ def bilinearize_stiffness_change(
 def bilinearize_equal_energy(
     S_d_arr: np.ndarray,
     S_a_arr: np.ndarray,
-    config: Optional[Dict[str, Any]] = None,
-) -> Tuple[float, float, str]:
+    config: Optional[dict[str, Any]] = None,
+) -> tuple[float, float, str]:
     """Bilinearise by preserving the area under the capacity curve.
 
     Iterative Newton-style relaxation to find the yield point (S_dy, S_ay)
@@ -193,7 +192,7 @@ def bilinearize_equal_energy(
 
     # Initial elastic stiffness (first point with positive S_d and S_a)
     K_init = 0.0
-    for i in range(0, peak_idx):
+    for i in range(peak_idx):
         if S_d_arr[i] > 1e-12 and S_a_arr[i] > 1e-12:
             K_init = S_a_arr[i] / S_d_arr[i]
             break
@@ -201,15 +200,14 @@ def bilinearize_equal_energy(
         K_init = S_a_peak / max(S_d_peak, 1e-12)
 
     # Cumulative integral (trapezoidal rule)
-    I = np.zeros_like(S_d_arr)
+    integral = np.zeros_like(S_d_arr)
     for i in range(1, peak_idx + 1):
-        I[i] = I[i - 1] + 0.5 * (S_d_arr[i] - S_d_arr[i - 1]) * (
+        integral[i] = integral[i - 1] + 0.5 * (S_d_arr[i] - S_d_arr[i - 1]) * (
             S_a_arr[i] + S_a_arr[i - 1]
         )
-    A_cap = I[peak_idx]
+    A_cap = integral[peak_idx]
 
     # Local variable for S_a at yield (used in loop and after)
-    S_ay_local = 0.0
 
     # Initial guess
     initial_guess = config.get("initial_guess", 0.30)
@@ -259,8 +257,7 @@ def bilinearize_equal_energy(
 
         # Update: increase S_dy if area too small, decrease if too large
         S_dy *= 1.0 - 0.5 * err
-        S_dy = max(float(S_d_arr[0] if len(S_d_arr) > 0 else 0.0),
-                   min(S_dy, S_d_peak))
+        S_dy = max(float(S_d_arr[0] if len(S_d_arr) > 0 else 0.0), min(S_dy, S_d_peak))
 
     # Sanity: if yield is >90% of peak and the iteration did NOT
     # converge below tolerance, the curve is essentially linear —
@@ -287,8 +284,8 @@ def bilinearize_equal_energy(
 def bilinearize_composite(
     S_d_arr: np.ndarray,
     S_a_arr: np.ndarray,
-    config: Optional[Dict[str, Any]] = None,
-) -> Tuple[float, float, str]:
+    config: Optional[dict[str, Any]] = None,
+) -> tuple[float, float, str]:
     """Composite bilinearisation: stiffness-change primary, equal-energy fallback.
 
     Designed as a **sensible default** for automated workflows where
@@ -372,7 +369,7 @@ def bilinearize_composite(
     S_dy, S_ay, _ = bilinearize_stiffness_change(S_d_arr, S_a_arr, cfg)
 
     S_d_peak = float(S_d_arr[peak_idx])
-    S_a_peak = float(S_a_arr[peak_idx])
+    float(S_a_arr[peak_idx])
 
     if S_dy >= 0.90 * S_d_peak:
         # No clear yield — fall back to equal-energy
@@ -433,9 +430,7 @@ def compute_equivalent_damping(
         return beta_0
 
     # Hysteretic damping per ATC-40 Eqn 5-19
-    beta_h = (2.0 / math.pi) * (1.0 - alpha) * (mu - 1.0) / (
-        mu * (1.0 + alpha * mu - alpha)
-    )
+    beta_h = (2.0 / math.pi) * (1.0 - alpha) * (mu - 1.0) / (mu * (1.0 + alpha * mu - alpha))
     beta_eff = beta_0 + kappa * beta_h
 
     return float(beta_eff)
@@ -474,10 +469,7 @@ def damping_reduction_factor(
     """
     if beta_eq <= beta_0:
         return 1.0
-    B = math.sqrt(
-        (1.0 + 10.0 * (beta_eq - beta_0)) /
-        (1.0 + 5.0 * (beta_eq - beta_0))
-    )
+    B = math.sqrt((1.0 + 10.0 * (beta_eq - beta_0)) / (1.0 + 5.0 * (beta_eq - beta_0)))
     return float(max(lo, min(hi, B)))
 
 
@@ -487,18 +479,18 @@ def damping_reduction_factor(
 
 
 def compute_performance_point(
-    pushover_results: Dict[str, Any],
-    modal_results: Dict[str, Any],
-    mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
-    spectrum_periods: List[float],
-    spectrum_accels: List[float],
+    pushover_results: dict[str, Any],
+    modal_results: dict[str, Any],
+    mode_shapes: dict[int, dict[int, tuple[float, float, float]]],
+    spectrum_periods: list[float],
+    spectrum_accels: list[float],
     direction: str = "X",
     damping_ratio: float = 0.05,
     max_iter: int = 50,
     tol: float = 0.01,
     bilinearize_method: str = "composite",
-    bilinearize_config: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    bilinearize_config: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     """Find the performance point using the Capacity Spectrum Method (CSM).
 
     Fully implements the ATC-40 Capacity Spectrum Method with secant
@@ -599,7 +591,9 @@ def compute_performance_point(
     """
     # 1. Convert pushover to ADRS
     adrs = pushover_to_adrs(
-        pushover_results, modal_results, mode_shapes,
+        pushover_results,
+        modal_results,
+        mode_shapes,
         direction=direction,
     )
     S_a_arr = np.array(adrs["S_a"])
@@ -626,9 +620,7 @@ def compute_performance_point(
     S_d_arr = S_d_arr[mask]
     S_a_arr = S_a_arr[mask]
     if len(S_d_arr) < 3:
-        raise ValueError(
-            "Too few valid data points in capacity spectrum"
-        )
+        raise ValueError("Too few valid data points in capacity spectrum")
     # Anchor at origin (0,0) so the capacity curve starts at the origin
     # and the secant stiffness K_init is well-defined from the first
     # non-zero step.
@@ -644,8 +636,7 @@ def compute_performance_point(
     base_shear_orig = np.array(shear_raw, dtype=float)[mask]
     # Same anchoring for the physical arrays used for V_base/D_roof
     # interpolation.
-    if S_d_arr[0] <= 1e-12 and (control_disp_orig[0] > 1e-12 or
-                                base_shear_orig[0] > 1e-12):
+    if S_d_arr[0] <= 1e-12 and (control_disp_orig[0] > 1e-12 or base_shear_orig[0] > 1e-12):
         control_disp = np.concatenate([[0.0], control_disp_orig])
         base_shear = np.concatenate([[0.0], base_shear_orig])
     else:
@@ -664,8 +655,7 @@ def compute_performance_point(
             f"Expected one of {list(_bilin_map.keys())}."
         )
     _bilin_fn = _bilin_map[bilinearize_method]
-    S_dy, S_ay, _bilin_name = _bilin_fn(
-        S_d_arr, S_a_arr, config=bilinearize_config)
+    S_dy, S_ay, _bilin_name = _bilin_fn(S_d_arr, S_a_arr, config=bilinearize_config)
 
     # 3. Capacity spectrum demand method (secant iteration)
     T_spec = np.array(spectrum_periods)
@@ -679,7 +669,9 @@ def compute_performance_point(
         best_mode_idx = max(best_mode - 1, 0)
     else:
         best_mode_idx = best_mode
-    best_mode_period = float(modal_periods[best_mode_idx]) if best_mode_idx < len(modal_periods) else 1.0
+    best_mode_period = (
+        float(modal_periods[best_mode_idx]) if best_mode_idx < len(modal_periods) else 1.0
+    )
 
     peak_idx = int(np.argmax(S_a_arr))
     S_d_peak = float(S_d_arr[peak_idx])
@@ -825,9 +817,9 @@ def compute_performance_point(
 
 def check_modal_pushover_mode(
     direction: str,
-    mass_ratios: List[float],
-    rs_modal_base_shear: Optional[List[float]] = None,
-) -> Tuple[int, Optional[int], Optional[str]]:
+    mass_ratios: list[float],
+    rs_modal_base_shear: Optional[list[float]] = None,
+) -> tuple[int, Optional[int], Optional[str]]:
     """Verify the mode selected for modal pushover.
 
     The primary mode for pushover is the one with the **highest mass
@@ -876,10 +868,10 @@ def check_modal_pushover_mode(
 
 
 def _modal_participation(
-    shape: Dict[int, Tuple[float, float, float]],
-    masses: Dict[int, float],
+    shape: dict[int, tuple[float, float, float]],
+    masses: dict[int, float],
     dir_idx: int,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Compute the modal participation terms (L, M_star) for one mode.
 
     Args:
@@ -902,11 +894,11 @@ def _modal_participation(
 
 
 def pushover_to_adrs(
-    pushover_results: Dict[str, Any],
-    modal_results: Dict[str, Any],
-    mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
+    pushover_results: dict[str, Any],
+    modal_results: dict[str, Any],
+    mode_shapes: dict[int, dict[int, tuple[float, float, float]]],
     direction: str = "X",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Convert pushover capacity curve (V‑δ) → ADRS (S_a‑S_d) format.
 
     Uses the first-mode (or best-mode) participation factor and
@@ -950,7 +942,7 @@ def pushover_to_adrs(
     """
     # Use best mode (highest mass participation in push direction)
     masses = modal_results.get("nodal_masses", {})
-    periods = modal_results.get("periods", [])
+    modal_results.get("periods", [])
 
     dir_idx = {"X": 0, "Y": 1, "Z": 2}.get(direction, 0)
 
@@ -994,9 +986,10 @@ def pushover_to_adrs(
         # and produces a spuriously large Gamma.
         warnings.warn(
             "pushover_to_adrs: no mode has meaningful participation in "
-            "direction %r — increase num_modes or restrain out-of-plane "
-            "degrees of freedom. Falling back to Gamma=1.0, M_eff=1.0." % direction,
-            UserWarning, stacklevel=2,
+            f"direction {direction!r} — increase num_modes or restrain out-of-plane "
+            "degrees of freedom. Falling back to Gamma=1.0, M_eff=1.0.",
+            UserWarning,
+            stacklevel=2,
         )
         # Fall through with unit values so the ADRS curve is still
         # produced from the physical pushover data (identity conversion:
@@ -1024,28 +1017,32 @@ def pushover_to_adrs(
             # otherwise fall back to the roof node (highest Z).
             node_coords = pushover_results.get("node_coords", {})
             cntl_tag = pushover_results.get(
-                "control_node", pushover_results.get("control_node_tag", None)
+                "control_node", pushover_results.get("control_node_tag")
             )
             if cntl_tag is not None and cntl_tag in best_shape:
-                phi_control = [best_shape[cntl_tag][0],
-                               best_shape[cntl_tag][1],
-                               best_shape[cntl_tag][2]][dir_idx]
+                phi_control = [
+                    best_shape[cntl_tag][0],
+                    best_shape[cntl_tag][1],
+                    best_shape[cntl_tag][2],
+                ][dir_idx]
             else:
                 roof_tag = max(
-                    (tag for tag in node_coords.keys()
-                     if tag in best_shape),
+                    (tag for tag in node_coords if tag in best_shape),
                     key=lambda t: node_coords.get(t, (0, 0, 0))[2],
                     default=None,
                 )
                 if roof_tag is not None:
-                    phi_control = [best_shape[roof_tag][0],
-                                   best_shape[roof_tag][1],
-                                   best_shape[roof_tag][2]][dir_idx]
+                    phi_control = [
+                        best_shape[roof_tag][0],
+                        best_shape[roof_tag][1],
+                        best_shape[roof_tag][2],
+                    ][dir_idx]
                 else:
                     warnings.warn(
                         "pushover_to_adrs: control_node is missing and no roof "
                         "node could be resolved — phi_control falls back to 1.0.",
-                        UserWarning, stacklevel=2,
+                        UserWarning,
+                        stacklevel=2,
                     )
                     phi_control = 1.0
 
@@ -1069,8 +1066,8 @@ def pushover_to_adrs(
     # (eigenvector normalization) and must not flip the spectral
     # displacement ordering of the capacity curve.
     pc = 1.0 if phi_control is None else abs(phi_control)
-    S_a = base_shear / M_eff        # m/s²
-    S_d = control_disp / (abs(Gamma) * pc)   # model length units
+    S_a = base_shear / M_eff  # m/s²
+    S_d = control_disp / (abs(Gamma) * pc)  # model length units
 
     # The capacity curve is anchored at the origin (S_a[0] = 0, S_d[0] = 0).
     # At zero displacement the first push step produces V ≈ 0, so S_a[0]

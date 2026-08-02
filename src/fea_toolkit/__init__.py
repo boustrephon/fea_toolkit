@@ -87,99 +87,90 @@ def ops_version() -> str:
 
 # ── Core model types ───────────────────────────────────────────────
 
-from fea_toolkit.model.sap_data import (
-    SAPModelData,
-    Node,
-    FrameElement,
-    AreaElement,
-    Section,
-    ISection,
-    PipeSection,
-    BoxSection,
-    RectangularSection,
-    CircularSection,
-    Material,
-    LoadPattern,
-    JointLoad,
-    FrameDistributedLoad,
-)
-
-from fea_toolkit.model.selection import Selection
-from fea_toolkit.model.mesh_model import MeshModel
-from fea_toolkit.model.sections import SectionLibrary
-
 # ── Pipeline ───────────────────────────────────────────────────────
-
 from fea_toolkit.io.s2k_parser import SAP2000Parser
-
-from fea_toolkit.opensees.preprocessor import Preprocessor, preprocess_model
-from fea_toolkit.opensees.analysis_builder import AnalysisBuilder, run_modal
-
-# ── Visualisation ─────────────────────────────────────────────────
-
-from fea_toolkit.plotting.viz import (
-    plot_model_3d,
-    plot_deformed_3d,
-    plot_force_diagram_3d,
-    plot_pushover_curve,
-    plot_capacity_spectrum,
-    plot_mesh,
-    compare_meshes,
-    plot_mode_animation,
-    plot_building_views,
-    plot_model_comparison,
+from fea_toolkit.model.mesh_model import MeshModel
+from fea_toolkit.model.sap_data import (
+    AreaElement,
+    BoxSection,
+    CircularSection,
+    FrameDistributedLoad,
+    FrameElement,
+    ISection,
+    JointLoad,
+    LoadPattern,
+    Material,
+    Node,
+    PipeSection,
+    RectangularSection,
+    SAPModelData,
+    Section,
 )
-
+from fea_toolkit.model.sections import SectionLibrary
+from fea_toolkit.model.selection import Selection
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder, run_modal
+from fea_toolkit.opensees.preprocessor import Preprocessor, preprocess_model
 from fea_toolkit.plotting.interactive_viewer import plot_interactive_viewer
-
 from fea_toolkit.plotting.viewer import ModelViewer
 
-# ── Report ─────────────────────────────────────────────────────────
+# ── Visualisation ─────────────────────────────────────────────────
+from fea_toolkit.plotting.viz import (
+    compare_meshes,
+    plot_building_views,
+    plot_capacity_spectrum,
+    plot_deformed_3d,
+    plot_force_diagram_3d,
+    plot_mesh,
+    plot_mode_animation,
+    plot_model_3d,
+    plot_model_comparison,
+    plot_pushover_curve,
+)
 
+# ── Report ─────────────────────────────────────────────────────────
 from fea_toolkit.report import generate_report
 
-
 __all__ = [
-    # Version
-    "__version__",
-    "ops_version",
-    # Core model types
-    "SAPModelData",
-    "Node",
-    "FrameElement",
+    "AnalysisBuilder",
     "AreaElement",
-    "Section",
-    "ISection",
-    "PipeSection",
     "BoxSection",
-    "RectangularSection",
     "CircularSection",
-    "Material",
-    "LoadPattern",
-    "JointLoad",
     "FrameDistributedLoad",
-    "Selection",
+    "FrameElement",
+    "ISection",
+    "JointLoad",
+    "LoadPattern",
+    "Material",
     "MeshModel",
-    "SectionLibrary",
+    "ModelViewer",
+    "Node",
+    "PipeSection",
+    "Preprocessor",
+    "RectangularSection",
     # Pipeline
     "SAP2000Parser",
-    "Preprocessor",
-    "preprocess_model",
-    "AnalysisBuilder",
-    "run_modal",
-    # Visualisation
-    "plot_model_3d",
-    "plot_deformed_3d",
-    "plot_force_diagram_3d",
-    "plot_pushover_curve",
-    "plot_capacity_spectrum",
-    "plot_mesh",
+    # Core model types
+    "SAPModelData",
+    "Section",
+    "SectionLibrary",
+    "Selection",
+    # Version
+    "__version__",
     "compare_meshes",
-    "plot_mode_animation",
-    "plot_building_views",
-    "plot_model_comparison",
-    "plot_interactive_viewer",
-    "ModelViewer",
     # Report
     "generate_report",
+    "ops_version",
+    "plot_building_views",
+    "plot_capacity_spectrum",
+    "plot_deformed_3d",
+    "plot_force_diagram_3d",
+    "plot_interactive_viewer",
+    "plot_mesh",
+    "plot_mode_animation",
+    # Visualisation
+    "plot_model_3d",
+    "plot_model_comparison",
+    "plot_pushover_curve",
+    "preprocess_model",
+    "run_modal",
 ]

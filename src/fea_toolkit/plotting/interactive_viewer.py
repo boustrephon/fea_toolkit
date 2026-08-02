@@ -13,11 +13,12 @@ PyVista window with:
 * **Click on a force flag** to show its numeric value.
 """
 
-from typing import Dict, List, Optional, Any, TYPE_CHECKING
+import contextlib
 import math
+from typing import TYPE_CHECKING, Any, Optional
+
 import numpy as np
 
-from ..model.geometry import get_SAP_vecxz
 from ..utils import compute_flag_parts
 from .viz import _set_isometric_view
 
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 # Internal helpers
 # ============================================================================
 
+
 def _local_end_forces_quick(builder, elem, tag, elem_forces):
     """Transform global end forces to local coordinates (inline helper)."""
     try:
@@ -37,24 +39,33 @@ def _local_end_forces_quick(builder, elem, tag, elem_forces):
         return None
     T = np.vstack([vx, vy, vz])
     f = elem_forces.get(tag, {})
-    f_i = np.array([f.get('Fx', 0.0), f.get('Fy', 0.0), f.get('Fz', 0.0)])
-    m_i = np.array([f.get('Mx', 0.0), f.get('My', 0.0), f.get('Mz', 0.0)])
-    f_j = np.array([f.get('Fx_j', 0.0), f.get('Fy_j', 0.0), f.get('Fz_j', 0.0)])
-    m_j = np.array([f.get('Mx_j', 0.0), f.get('My_j', 0.0), f.get('Mz_j', 0.0)])
+    f_i = np.array([f.get("Fx", 0.0), f.get("Fy", 0.0), f.get("Fz", 0.0)])
+    m_i = np.array([f.get("Mx", 0.0), f.get("My", 0.0), f.get("Mz", 0.0)])
+    f_j = np.array([f.get("Fx_j", 0.0), f.get("Fy_j", 0.0), f.get("Fz_j", 0.0)])
+    m_j = np.array([f.get("Mx_j", 0.0), f.get("My_j", 0.0), f.get("Mz_j", 0.0)])
     f_i_loc = T @ f_i
     m_i_loc = T @ m_i
     f_j_loc = T @ f_j
     m_j_loc = T @ m_j
     return {
-        'Fx': f_i_loc[0], 'Fy': f_i_loc[1], 'Fz': f_i_loc[2],
-        'Mx': m_i_loc[0], 'My': m_i_loc[1], 'Mz': m_i_loc[2],
-        'Fx_j': f_j_loc[0], 'Fy_j': f_j_loc[1], 'Fz_j': f_j_loc[2],
-        'Mx_j': m_j_loc[0], 'My_j': m_j_loc[1], 'Mz_j': m_j_loc[2],
+        "Fx": f_i_loc[0],
+        "Fy": f_i_loc[1],
+        "Fz": f_i_loc[2],
+        "Mx": m_i_loc[0],
+        "My": m_i_loc[1],
+        "Mz": m_i_loc[2],
+        "Fx_j": f_j_loc[0],
+        "Fy_j": f_j_loc[1],
+        "Fz_j": f_j_loc[2],
+        "Mx_j": m_j_loc[0],
+        "My_j": m_j_loc[1],
+        "Mz_j": m_j_loc[2],
     }
 
 
-def _build_flag_mesh(builder, elements, assignments, elem_forces, quantity,
-                     elem_local_axes, model_height):
+def _build_flag_mesh(
+    builder, elements, assignments, elem_forces, quantity, elem_local_axes, model_height
+):
     """Build a merged PolyData of all force/moment flags for *quantity*.
 
     Returns a ``(mesh, max_abs_val)`` tuple, or ``(None, 0.0)`` if no data.
@@ -71,7 +82,7 @@ def _build_flag_mesh(builder, elements, assignments, elem_forces, quantity,
     all_polys = []  # list of (verts, col_val, elem_tag)
 
     for eid, elem in elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         tag = elem.elem_tag
         if tag not in elem_forces:
@@ -88,7 +99,7 @@ def _build_flag_mesh(builder, elements, assignments, elem_forces, quantity,
         if loc is None:
             continue
         v_i = loc.get(quantity, 0.0)
-        v_j = loc.get(quantity + '_j', 0.0)
+        v_j = loc.get(quantity + "_j", 0.0)
 
         # Flag offset direction
         vx_e, vy_e, vz_e = elem_local_axes.get(eid, (None, None, None))
@@ -122,7 +133,7 @@ def _build_flag_mesh(builder, elements, assignments, elem_forces, quantity,
     # (e.g., quads for flag body, triangles for caps), so we accumulate
     # faces as a flat buffer instead of a 2D array.
     verts_list = []
-    faces_flat: List[int] = []
+    faces_flat: list[int] = []
     scalars_list = []
     elem_tag_list = []
     offset = 0
@@ -144,10 +155,8 @@ def _build_flag_mesh(builder, elements, assignments, elem_forces, quantity,
     vertices = np.vstack(verts_list)
     faces = np.array(faces_flat, dtype=int)
     mesh = pv.PolyData(vertices, faces=faces)
-    mesh.point_data['col_val'] = np.repeat(scalars_list,
-                                            [len(v) for v in verts_list])
-    mesh.point_data['elem_tag'] = np.repeat(elem_tag_list,
-                                             [len(v) for v in verts_list])
+    mesh.point_data["col_val"] = np.repeat(scalars_list, [len(v) for v in verts_list])
+    mesh.point_data["elem_tag"] = np.repeat(elem_tag_list, [len(v) for v in verts_list])
     return mesh, max_val
 
 
@@ -161,12 +170,22 @@ def _build_structure_tubes(builder, elements, assignments, model):
     all_sec_names = []
     offset = 0
 
-    sec_set = sorted(set(assignments.get(e, '?') for e in elements))
-    cmap = ['#4c72b0', '#dd8452', '#55a868', '#c44e52', '#8172b3',
-            '#937860', '#da8bc3', '#8c8c8c', '#ccb974', '#64b5cd']
+    sec_set = sorted({assignments.get(e, "?") for e in elements})
+    cmap = [
+        "#4c72b0",
+        "#dd8452",
+        "#55a868",
+        "#c44e52",
+        "#8172b3",
+        "#937860",
+        "#da8bc3",
+        "#8c8c8c",
+        "#ccb974",
+        "#64b5cd",
+    ]
 
     for eid, elem in elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         ni = model.nodes.get(elem.node_i)
         nj = model.nodes.get(elem.node_j)
@@ -182,9 +201,9 @@ def _build_structure_tubes(builder, elements, assignments, model):
         direction = (p2 - p1) / length
         radius = max(length * 0.015, 0.05)
 
-        cyl = pv.Cylinder(center=mid, direction=direction,
-                          radius=radius, height=length * 0.95,
-                          resolution=8)
+        cyl = pv.Cylinder(
+            center=mid, direction=direction, radius=radius, height=length * 0.95, resolution=8
+        )
         # Triangulate to handle mixed quad/triangle capped cylinders
         cyl.triangulate()
         n_pts = cyl.n_points
@@ -196,7 +215,7 @@ def _build_structure_tubes(builder, elements, assignments, model):
         faces[:, 1:] += offset
         all_faces.append(faces.ravel())
         all_elem_tags.append(np.full(n_cells, elem.elem_tag, dtype=int))
-        all_sec_names.append(assignments.get(eid, '?'))
+        all_sec_names.append(assignments.get(eid, "?"))
         offset += n_pts
 
     if not all_verts:
@@ -205,14 +224,14 @@ def _build_structure_tubes(builder, elements, assignments, model):
     vertices = np.vstack(all_verts)
     faces = np.concatenate(all_faces)
     mesh = pv.PolyData(vertices, faces=faces)
-    mesh.cell_data['elem_tag'] = np.concatenate(all_elem_tags)
+    mesh.cell_data["elem_tag"] = np.concatenate(all_elem_tags)
 
     # Colour array: map section name to colour index
     sec_idx_map = {s: i for i, s in enumerate(sec_set)}
     sec_indices = np.array([sec_idx_map.get(s, 0) for s in all_sec_names], dtype=int)
     # Expand to per-cell
     per_cell = np.repeat(sec_indices, [len(t) for t in all_elem_tags])
-    mesh.cell_data['section_idx'] = per_cell
+    mesh.cell_data["section_idx"] = per_cell
     return mesh, sec_set, cmap
 
 
@@ -224,7 +243,7 @@ def _build_centreline_mesh(builder, elements, model):
     all_lines = []
     offset = 0
     for eid, elem in elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         ni = model.nodes.get(elem.node_i)
         nj = model.nodes.get(elem.node_j)
@@ -249,13 +268,14 @@ def _build_centreline_mesh(builder, elements, model):
 # Main entry point
 # ============================================================================
 
+
 def plot_interactive_viewer(
     builder,
-    combo_forces: Dict[str, Dict[int, Dict[str, float]]] = None,
-    combo_results: Dict[str, Dict[str, Any]] = None,
+    combo_forces: dict[str, dict[int, dict[str, float]]] = None,
+    combo_results: dict[str, dict[str, Any]] = None,
     initial_combo: str = None,
-    initial_quantity: str = 'Mz',
-    selection: Optional['Selection'] = None,
+    initial_quantity: str = "Mz",
+    selection: Optional["Selection"] = None,
     notebook: bool = False,
     **kwargs,
 ) -> Optional[Any]:
@@ -304,15 +324,14 @@ def plot_interactive_viewer(
     # ------------------------------------------------------------------
     # 1. Data preparation
     # ------------------------------------------------------------------
-    elements = (builder.split_elements if builder.split_elements
-                else builder.model.frame_elements)
-    assignments = (builder.split_assignments if builder.split_elements
-                   else builder.model.frame_assignments)
+    elements = builder.split_elements or builder.model.frame_elements
+    assignments = (
+        builder.split_assignments if builder.split_elements else builder.model.frame_assignments
+    )
 
     if selection is not None:
         sel_ids = set(selection.get_frame_ids(builder.model))
-        elements = {eid: elem for eid, elem in elements.items()
-                    if eid in sel_ids}
+        elements = {eid: elem for eid, elem in elements.items() if eid in sel_ids}
 
     model = builder.model
 
@@ -325,22 +344,22 @@ def plot_interactive_viewer(
         initial_combo = combo_names[0]
 
     # Active elements only
-    active_elems = {eid: elem for eid, elem in elements.items()
-                    if not getattr(elem, 'inactive', False)}
+    active_elems = {
+        eid: elem for eid, elem in elements.items() if not getattr(elem, "inactive", False)
+    }
 
     # Element info lookup
-    elem_info: Dict[int, dict] = {}
+    elem_info: dict[int, dict] = {}
     for eid, elem in active_elems.items():
-        sec_name = assignments.get(eid, '?')
+        sec_name = assignments.get(eid, "?")
         sec = model.sections.get(sec_name)
-        mat_name = sec.material if sec else '?'
-        sap_id = getattr(elem, 'sap_id',
-                         getattr(elem, 'elem_id', eid)) or eid
+        mat_name = sec.material if sec else "?"
+        sap_id = getattr(elem, "sap_id", getattr(elem, "elem_id", eid)) or eid
         elem_info[elem.elem_tag] = {
-            'elem_id': eid,
-            'sap_id': sap_id,
-            'section_name': sec_name,
-            'material_name': mat_name,
+            "elem_id": eid,
+            "sap_id": sap_id,
+            "section_name": sec_name,
+            "material_name": mat_name,
         }
 
     # Model height for auto-scaling
@@ -348,7 +367,7 @@ def plot_interactive_viewer(
     model_height = max(z_all) - min(z_all) if z_all else 10.0
 
     # Pre-compute local axes for all active elements
-    elem_local_axes: Dict[str, tuple] = {}
+    elem_local_axes: dict[str, tuple] = {}
     for eid, elem in active_elems.items():
         try:
             vx, vy, vz = builder._get_local_axes(elem)
@@ -357,8 +376,8 @@ def plot_interactive_viewer(
             pass
 
     # Unit labels
-    force_unit = builder.units.get('F', 'N')
-    length_unit = builder.units.get('L', 'm')
+    force_unit = builder.units.get("F", "N")
+    length_unit = builder.units.get("L", "m")
     moment_unit = f"{force_unit}·{length_unit}"
 
     # ------------------------------------------------------------------
@@ -376,7 +395,7 @@ def plot_interactive_viewer(
 
     # Pre-build flag meshes for each combo (just the first quantity for now)
     # We'll rebuild on quantity change
-    flag_cache: Dict[str, Dict[str, Any]] = {}  # combo -> {quantity: (mesh, max_val)}
+    flag_cache: dict[str, dict[str, Any]] = {}  # combo -> {quantity: (mesh, max_val)}
 
     def _get_flag(combo: str, quantity: str):
         """Get or build flag mesh for a combo+quantity pair."""
@@ -385,8 +404,13 @@ def plot_interactive_viewer(
             return flag_cache[key]
         forces = combo_forces.get(combo, {})
         mesh, max_val = _build_flag_mesh(
-            builder, active_elems, assignments, forces,
-            quantity, elem_local_axes, model_height,
+            builder,
+            active_elems,
+            assignments,
+            forces,
+            quantity,
+            elem_local_axes,
+            model_height,
         )
         flag_cache[key] = (mesh, max_val)
         return mesh, max_val
@@ -400,45 +424,46 @@ def plot_interactive_viewer(
     # Colour tubes by section
     n_sec = len(sec_names)
     lut = pv.LookupTable()
-    lut.table = np.array(
-        [pv.Color(cmap[i % len(cmap)]).int_rgba for i in range(max(n_sec, 1))]
-    )
-    tube_actor = plotter.add_mesh(
-        tube_mesh, scalars='section_idx', lookup_table=lut,
-        pickable=True, name='structure_tubes',
-        show_scalar_bar=False, lighting=True,
+    lut.table = np.array([pv.Color(cmap[i % len(cmap)]).int_rgba for i in range(max(n_sec, 1))])
+    plotter.add_mesh(
+        tube_mesh,
+        scalars="section_idx",
+        lookup_table=lut,
+        pickable=True,
+        name="structure_tubes",
+        show_scalar_bar=False,
+        lighting=True,
         smooth_shading=True,
     )
 
     # -- Centreline overlay (grey, toggleable) --
     centreline_actor = plotter.add_mesh(
-        centreline_mesh, color='lightgrey', line_width=2,
-        opacity=0.4, name='centreline',
+        centreline_mesh,
+        color="lightgrey",
+        line_width=2,
+        opacity=0.4,
+        name="centreline",
     )
 
     # -- Force flags (will be replaced on quantity/combo change) --
     current_combo = initial_combo
     current_quantity = initial_quantity
-    flag_actor_ref = {'actor': None}  # mutable ref for closures
-    legend_actor_ref = {'actor': None}
+    flag_actor_ref = {"actor": None}  # mutable ref for closures
+    legend_actor_ref = {"actor": None}
 
     def _update_flags(combo, quantity):
         """Replace the flag actor with a new one for *combo*/*quantity*."""
         nonlocal flag_actor_ref
         # Remove old flag actor
-        if flag_actor_ref['actor'] is not None:
-            try:
-                plotter.remove_actor(flag_actor_ref['actor'])
-            except Exception:
-                pass
-            flag_actor_ref['actor'] = None
+        if flag_actor_ref["actor"] is not None:
+            with contextlib.suppress(Exception):
+                plotter.remove_actor(flag_actor_ref["actor"])
+            flag_actor_ref["actor"] = None
         # Remove old legend text
-        if legend_actor_ref['actor'] is not None:
-            try:
-                plotter.remove_actor(legend_actor_ref['actor'])
-            except Exception:
-                pass
-            legend_actor_ref['actor'] = None
+        if legend_actor_ref["actor"] is not None:
+            with contextlib.suppress(Exception):
+                plotter.remove_actor(legend_actor_ref["actor"])
+            legend_actor_ref["actor"] = None
 
         flag_mesh, max_val = _get_flag(combo, quantity)
         if flag_mesh is None or max_val < 1e-15:
@@ -446,29 +471,35 @@ def plot_interactive_viewer(
 
         # Build a colour LUT: red (+ve) → white (0) → blue (-ve)
         clim = [-max_val, max_val]
-        lut2 = pv.LookupTable(cmap='RdBu', scalar_range=(-max_val, max_val))
+        lut2 = pv.LookupTable(cmap="RdBu", scalar_range=(-max_val, max_val))
         lut2.divergent = True
 
         actor = plotter.add_mesh(
-            flag_mesh, scalars='col_val', lookup_table=lut2,
-            clim=clim, name='force_flags',
-            pickable=True, opacity=0.85,
-            show_scalar_bar=True, lighting=False,
+            flag_mesh,
+            scalars="col_val",
+            lookup_table=lut2,
+            clim=clim,
+            name="force_flags",
+            pickable=True,
+            opacity=0.85,
+            show_scalar_bar=True,
+            lighting=False,
         )
-        flag_actor_ref['actor'] = actor
+        flag_actor_ref["actor"] = actor
 
         # Add/replace legend text
-        kind = "Moment" if quantity.startswith("M") else "Force"
+        "Moment" if quantity.startswith("M") else "Force"
         unit = moment_unit if quantity.startswith("M") else force_unit
-        legend_actor_ref['actor'] = plotter.add_text(
+        legend_actor_ref["actor"] = plotter.add_text(
             f"{quantity} [{unit}]  (red = +ve, blue = −ve)",
-            position='lower_edge', font_size=10,
+            position="lower_edge",
+            font_size=10,
         )
 
     _update_flags(current_combo, current_quantity)
 
     # -- Reaction arrows (toggleable) --
-    reaction_actors: List[Any] = []
+    reaction_actors: list[Any] = []
     _reactions_visible = False  # tracks checkbox state; starts hidden
 
     def _build_reactions(combo):
@@ -507,11 +538,9 @@ def plot_interactive_viewer(
         s_v = (z_rng * 0.08) / max(max_v, 1.0)
         for atype, pos, vec, mag in data:
             sc = s_h if atype == "h" else s_v
-            arrow = pv.Arrow(start=pos, direction=vec / max(mag, 1e-12),
-                             scale=mag * sc)
+            arrow = pv.Arrow(start=pos, direction=vec / max(mag, 1e-12), scale=mag * sc)
             colour = (0.9, 0.1, 0.1) if atype == "h" else (0.1, 0.8, 0.1)
-            act = plotter.add_mesh(arrow, color=colour, opacity=0.85,
-                                   name=f'reaction_{id(arrow)}')
+            act = plotter.add_mesh(arrow, color=colour, opacity=0.85, name=f"reaction_{id(arrow)}")
             # Apply current visibility state immediately
             act.SetVisibility(_reactions_visible)
             actors.append(act)
@@ -522,18 +551,15 @@ def plot_interactive_viewer(
     def _clear_reactions():
         nonlocal reaction_actors
         for act in reaction_actors:
-            try:
+            with contextlib.suppress(Exception):
                 plotter.remove_actor(act)
-            except Exception:
-                pass
         reaction_actors = []
 
     # -- Element labels (toggleable, built on demand) --
-    labels_actor = {'actor': None}
+    labels_actor = {"actor": None}
 
     def _build_labels():
         """Create a single point-labels actor for all elements."""
-        import pyvista as pv
         pts = []
         labels = []
         for eid, elem in active_elems.items():
@@ -541,37 +567,41 @@ def plot_interactive_viewer(
             nj = model.nodes.get(elem.node_j)
             if ni is None or nj is None:
                 continue
-            mid = np.array([(ni.x + nj.x) * 0.5, (ni.y + nj.y) * 0.5,
-                            (ni.z + nj.z) * 0.5])
-            sec = assignments.get(eid, '?')
+            mid = np.array([(ni.x + nj.x) * 0.5, (ni.y + nj.y) * 0.5, (ni.z + nj.z) * 0.5])
+            sec = assignments.get(eid, "?")
             pts.append(mid)
             labels.append(f"{elem.elem_tag} [{sec}]")
         if not pts:
             return None
         pts_arr = np.array(pts)
         return plotter.add_point_labels(
-            pts_arr, labels, font_size=8, point_size=4,
-            shape='rounded_rect', fill_shape=True,
-            shape_opacity=0.7, always_visible=True,
-            name='elem_labels',
+            pts_arr,
+            labels,
+            font_size=8,
+            point_size=4,
+            shape="rounded_rect",
+            fill_shape=True,
+            shape_opacity=0.7,
+            always_visible=True,
+            name="elem_labels",
         )
 
     # ------------------------------------------------------------------
     # 4. Info overlay (updated on picking)
     # ------------------------------------------------------------------
-    info_actor = {'actor': None}
+    info_actor = {"actor": None}
 
     def _set_info_text(text: str):
         """Set or update the info overlay at the top-left."""
-        if info_actor['actor'] is not None:
-            try:
-                plotter.remove_actor(info_actor['actor'])
-            except Exception:
-                pass
+        if info_actor["actor"] is not None:
+            with contextlib.suppress(Exception):
+                plotter.remove_actor(info_actor["actor"])
         text = text.strip()
-        info_actor['actor'] = plotter.add_text(
-            text, position='upper_left', font_size=11,
-            color='black',
+        info_actor["actor"] = plotter.add_text(
+            text,
+            position="upper_left",
+            font_size=11,
+            color="black",
         )
 
     _set_info_text(
@@ -588,11 +618,11 @@ def plot_interactive_viewer(
         # Determine what was picked
         try:
             actor = mesh_or_actor  # when use_actor=True
-            name = actor.name if hasattr(actor, 'name') else ''
+            name = actor.name if hasattr(actor, "name") else ""
         except Exception:
             return
 
-        if name.startswith('elem_') or name == 'structure_tubes':
+        if name.startswith("elem_") or name == "structure_tubes":
             # Tube element picked — get elem_tag from cell data
             try:
                 # Get the picked point and find closest element
@@ -603,14 +633,13 @@ def plot_interactive_viewer(
             if pick_pos is not None:
                 # Find closest element by checking midpoints
                 best_tag = None
-                best_dist = float('inf')
+                best_dist = float("inf")
                 for eid, elem in active_elems.items():
                     ni = model.nodes.get(elem.node_i)
                     nj = model.nodes.get(elem.node_j)
                     if ni is None or nj is None:
                         continue
-                    mid = np.array([(ni.x + nj.x) * 0.5, (ni.y + nj.y) * 0.5,
-                                    (ni.z + nj.z) * 0.5])
+                    mid = np.array([(ni.x + nj.x) * 0.5, (ni.y + nj.y) * 0.5, (ni.z + nj.z) * 0.5])
                     d = np.linalg.norm(np.array(pick_pos[:3]) - mid)
                     if d < best_dist:
                         best_dist = d
@@ -624,7 +653,7 @@ def plot_interactive_viewer(
                         f"  Section: {info['section_name']}\n"
                         f"  Material: {info['material_name']}"
                     )
-        elif name == 'force_flags':
+        elif name == "force_flags":
             # Flag picked — get the col_val and elem_tag from point data
             try:
                 pick_pos = plotter.picked_point
@@ -636,8 +665,8 @@ def plot_interactive_viewer(
                 if flag_mesh is not None:
                     # Find closest point
                     pts = flag_mesh.points
-                    vals = flag_mesh.point_data.get('col_val', None)
-                    tags = flag_mesh.point_data.get('elem_tag', None)
+                    vals = flag_mesh.point_data.get("col_val", None)
+                    tags = flag_mesh.point_data.get("elem_tag", None)
                     if vals is not None and tags is not None:
                         dists = np.linalg.norm(pts - np.array(pick_pos[:3]), axis=1)
                         idx = np.argmin(dists)
@@ -645,22 +674,20 @@ def plot_interactive_viewer(
                             val = float(vals[idx])
                             tag = int(tags[idx])
                             info = elem_info.get(tag, {})
-                            sec = info.get('section_name', '?') if info else '?'
+                            sec = info.get("section_name", "?") if info else "?"
                             unit = moment_unit if current_quantity.startswith("M") else force_unit
                             _set_info_text(
-                                f"Element {tag}  [{sec}]\n"
-                                f"  {current_quantity} = {val:.3f} {unit}"
+                                f"Element {tag}  [{sec}]\n  {current_quantity} = {val:.3f} {unit}"
                             )
 
-    plotter.enable_mesh_picking(callback=_picking_callback, use_actor=True,
-                                show=False)
+    plotter.enable_mesh_picking(callback=_picking_callback, use_actor=True, show=False)
 
     # ------------------------------------------------------------------
     # 6. Widgets
     # ------------------------------------------------------------------
 
     # -- 6a. Radio buttons: quantity selection --
-    quantities = ['Mz', 'My', 'Mx', 'Fz', 'Fy', 'Fx']
+    quantities = ["Mz", "My", "Mx", "Fz", "Fy", "Fx"]
     q_start_y = 10.0
     q_spacing = 55.0
     q_btn_size = 40
@@ -668,6 +695,7 @@ def plot_interactive_viewer(
     class _QuantityCallback:
         def __init__(self, q):
             self.q = q
+
         def __call__(self):
             nonlocal current_quantity
             current_quantity = self.q
@@ -677,23 +705,24 @@ def plot_interactive_viewer(
                 reaction_actors.extend(_build_reactions(current_combo))
 
     for i, q in enumerate(quantities):
-        is_moment = q.startswith('M')
-        btn_color = '#c44e52' if is_moment else '#4c72b0'
+        is_moment = q.startswith("M")
+        btn_color = "#c44e52" if is_moment else "#4c72b0"
         plotter.add_radio_button_widget(
             _QuantityCallback(q),
-            'quantity_group',
+            "quantity_group",
             position=(10.0, q_start_y + i * q_spacing),
             title=q,
             value=(q == initial_quantity),
             size=q_btn_size,
             border_size=6,
             color_on=btn_color,
-            color_off='grey',
-            background_color='white',
+            color_off="grey",
+            background_color="white",
         )
 
     # -- 6b. Text slider: combo selection --
     if len(combo_names) > 1:
+
         def _combo_callback(value: str):
             nonlocal current_combo
             current_combo = value
@@ -708,7 +737,7 @@ def plot_interactive_viewer(
             value=combo_names.index(current_combo),
             pointa=(0.35, 0.95),
             pointb=(0.85, 0.95),
-            color='black',
+            color="black",
         )
 
     # -- 6c. Checkboxes: overlay toggles --
@@ -720,34 +749,39 @@ def plot_interactive_viewer(
     class _ToggleCentreline:
         def __call__(self, state):
             centreline_actor.SetVisibility(state)
+
     plotter.add_checkbox_button_widget(
-        _ToggleCentreline(), value=True,
+        _ToggleCentreline(),
+        value=True,
         position=(10.0, toggle_y_start),
-        size=30, border_size=4,
-        color_on='#55a868', color_off='grey',
+        size=30,
+        border_size=4,
+        color_on="#55a868",
+        color_off="grey",
     )
 
     class _ToggleLabels:
         def __call__(self, state):
             if state:
-                if labels_actor['actor'] is None:
-                    labels_actor['actor'] = _build_labels()
+                if labels_actor["actor"] is None:
+                    labels_actor["actor"] = _build_labels()
                 else:
                     try:
-                        labels_actor['actor'].SetVisibility(True)
+                        labels_actor["actor"].SetVisibility(True)
                     except Exception:
-                        labels_actor['actor'] = _build_labels()
-            else:
-                if labels_actor['actor'] is not None:
-                    try:
-                        labels_actor['actor'].SetVisibility(False)
-                    except Exception:
-                        pass
+                        labels_actor["actor"] = _build_labels()
+            elif labels_actor["actor"] is not None:
+                with contextlib.suppress(Exception):
+                    labels_actor["actor"].SetVisibility(False)
+
     plotter.add_checkbox_button_widget(
-        _ToggleLabels(), value=False,
+        _ToggleLabels(),
+        value=False,
         position=(10.0, toggle_y_start + toggle_spacing),
-        size=30, border_size=4,
-        color_on='#55a868', color_off='grey',
+        size=30,
+        border_size=4,
+        color_on="#55a868",
+        color_off="grey",
     )
 
     class _ToggleReactions:
@@ -755,15 +789,17 @@ def plot_interactive_viewer(
             nonlocal _reactions_visible
             _reactions_visible = state
             for act in reaction_actors:
-                try:
+                with contextlib.suppress(Exception):
                     act.SetVisibility(state)
-                except Exception:
-                    pass
+
     plotter.add_checkbox_button_widget(
-        _ToggleReactions(), value=False,
+        _ToggleReactions(),
+        value=False,
         position=(10.0, toggle_y_start + 2 * toggle_spacing),
-        size=30, border_size=4,
-        color_on='#55a868', color_off='grey',
+        size=30,
+        border_size=4,
+        color_on="#55a868",
+        color_off="grey",
     )
 
     # ------------------------------------------------------------------

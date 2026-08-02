@@ -6,7 +6,7 @@ from raw SAP2000 table data and merge user config with defaults.
 """
 
 import math
-from typing import Dict, List, Optional
+from typing import Optional
 
 # Gravitational acceleration in m/s²  (SI default)
 _G_SI = 9.80665
@@ -17,19 +17,38 @@ _G_SI = 9.80665
 # canonical forms.  Lookup is case-insensitive via _normalise_unit().
 _UNIT_ALIASES = {
     # Length
-    'meter': 'm', 'meters': 'm', 'metre': 'm', 'metres': 'm',
-    'centimeter': 'cm', 'centimeters': 'cm', 'centimetre': 'cm',
-    'millimeter': 'mm', 'millimeters': 'mm', 'millimetre': 'mm',
-    'foot': 'ft', 'feet': 'ft',
-    'inch': 'in', 'inches': 'in',
+    "meter": "m",
+    "meters": "m",
+    "metre": "m",
+    "metres": "m",
+    "centimeter": "cm",
+    "centimeters": "cm",
+    "centimetre": "cm",
+    "millimeter": "mm",
+    "millimeters": "mm",
+    "millimetre": "mm",
+    "foot": "ft",
+    "feet": "ft",
+    "inch": "in",
+    "inches": "in",
     # Force
-    'newton': 'n', 'newtons': 'n',
-    'kilonewton': 'kn', 'kilonewtons': 'kn',
-    'meganewton': 'mn', 'meganewtons': 'mn',
-    'kilogramforce': 'kgf', 'kg': 'kgf',
-    'pound': 'lb', 'pounds': 'lb', 'lbf': 'lb',
-    'kip': 'kip', 'kips': 'kip', 'kipf': 'kip',
-    'tonneforce': 'tonf', 'tonf': 'tonf', 'ton': 'tonf',
+    "newton": "n",
+    "newtons": "n",
+    "kilonewton": "kn",
+    "kilonewtons": "kn",
+    "meganewton": "mn",
+    "meganewtons": "mn",
+    "kilogramforce": "kgf",
+    "kg": "kgf",
+    "pound": "lb",
+    "pounds": "lb",
+    "lbf": "lb",
+    "kip": "kip",
+    "kips": "kip",
+    "kipf": "kip",
+    "tonneforce": "tonf",
+    "tonf": "tonf",
+    "ton": "tonf",
 }
 
 
@@ -55,21 +74,21 @@ def _normalise_unit(raw: Optional[str], default: str) -> str:
 
 # ── Material-property defaults (SI Pa units) ──────────────────────────
 # These are used as fallback values when SAP2000 data is missing.
-# They must be scaled to the model's unit system via 
+# They must be scaled to the model's unit system via
 # length_scale_factor(), force_scale_factor() and stress_scale_factor().
 
-DEFAULT_FY_STEEL_PA = 250.0e6       # Steel yield stress (Pa)
-DEFAULT_FY_REBAR_PA = 400.0e6       # Rebar / RC steel yield stress (Pa)
-DEFAULT_FC_PA = 30.0e6              # Concrete compressive strength (Pa)
-DEFAULT_E_S_PA = 200.0e9            # Young's modulus (Pa)
-DEFAULT_NU_S = 0.3                  # Poisson's ratio
-DEFAULT_G_S_PA = 76.9e9             # Shear modulus — computed from E & nu (E / (2 * (1 + nu)))
-DEFAULT_G_MOD_FRAC = 0.385          # Default G = G_MOD_FRAC × E when G is missing
-DEFAULT_E_C_PA = 30.0e9             # Concrete Young's modulus
-DEFAULT_NU_C = 0.2                  # Poisson's ratio
-DEFAULT_G_C_PA = 12.5e9             # Shear modulus — computed from E & nu (E / (2 * (1 + nu)))
-DEFAULT_EPS_C = 0.002               # Strain at peak Fc (concrete)
-DEFAULT_EPS_CC = 0.005              # Crushing strain (confined concrete)
+DEFAULT_FY_STEEL_PA = 250.0e6  # Steel yield stress (Pa)
+DEFAULT_FY_REBAR_PA = 400.0e6  # Rebar / RC steel yield stress (Pa)
+DEFAULT_FC_PA = 30.0e6  # Concrete compressive strength (Pa)
+DEFAULT_E_S_PA = 200.0e9  # Young's modulus (Pa)
+DEFAULT_NU_S = 0.3  # Poisson's ratio
+DEFAULT_G_S_PA = 76.9e9  # Shear modulus — computed from E & nu (E / (2 * (1 + nu)))
+DEFAULT_G_MOD_FRAC = 0.385  # Default G = G_MOD_FRAC × E when G is missing
+DEFAULT_E_C_PA = 30.0e9  # Concrete Young's modulus
+DEFAULT_NU_C = 0.2  # Poisson's ratio
+DEFAULT_G_C_PA = 12.5e9  # Shear modulus — computed from E & nu (E / (2 * (1 + nu)))
+DEFAULT_EPS_C = 0.002  # Strain at peak Fc (concrete)
+DEFAULT_EPS_CC = 0.005  # Crushing strain (confined concrete)
 
 # Conventional no-tie-data confined-concrete heuristic (used when Mander
 # confinement data is unavailable): strength multiplier applied to f'c for
@@ -92,11 +111,12 @@ RC_NO_TIE_EPSC_FACTOR = 2.0
 # - Mander relation:  ε_cc / ε_c0 = 1 + 5 × (f_cc / f_c0 − 1).
 #   For f_cc = 1.25 f_c0, ε_cc = 2.25 ε_c0 → conservatively 2.0×.
 
-DEFAULT_RHO_WC_SI = 24000.0         # Default concrete unit weight (N/m³)
-DEFAULT_RHO_MC_SI = 2450.0          # Default concrete unit mass (kg/m³)
-DEFAULT_RHO_WS_SI = 77000.0         # Default steel unit weight (N/m³)
-DEFAULT_RHO_MS_SI = 7850.0          # Default steel unit mass (kg/m³)
-DEFAULT_GRAVITY_MS2 = _G_SI         # Gravitational acceleration in m/s²
+DEFAULT_RHO_WC_SI = 24000.0  # Default concrete unit weight (N/m³)
+DEFAULT_RHO_MC_SI = 2450.0  # Default concrete unit mass (kg/m³)
+DEFAULT_RHO_WS_SI = 77000.0  # Default steel unit weight (N/m³)
+DEFAULT_RHO_MS_SI = 7850.0  # Default steel unit mass (kg/m³)
+DEFAULT_GRAVITY_MS2 = _G_SI  # Gravitational acceleration in m/s²
+
 
 def g_from_units(units: dict) -> float:
     """Return gravitational acceleration matching the model length unit.
@@ -111,16 +131,17 @@ def g_from_units(units: dict) -> float:
     Returns:
         Gravitational acceleration in the model's length-unit / s².
     """
-    lu = _normalise_unit((units or {}).get('L'), 'm')
+    lu = _normalise_unit((units or {}).get("L"), "m")
     # Scale factor relative to 1 m
     scale = {
-        'm': 1.0,
-        'cm': 100.0,
-        'mm': 1000.0,
-        'ft': 3.28084,
-        'in': 39.3701,
+        "m": 1.0,
+        "cm": 100.0,
+        "mm": 1000.0,
+        "ft": 3.28084,
+        "in": 39.3701,
     }.get(lu, 1.0)
     return _G_SI * scale
+
 
 def length_scale_factor(units: dict) -> float:
     """Compute the length-unit scaling factor from model units.
@@ -152,17 +173,18 @@ def length_scale_factor(units: dict) -> float:
         Scaling factor to convert SI (m) to the model's length unit.
     """
     u = units or {}
-    lu_norm = _normalise_unit(u.get('L'), 'm')
+    lu_norm = _normalise_unit(u.get("L"), "m")
 
     L_factor = {
-        'm':  1.0,
-        'cm': 100.0,
-        'mm': 1000.0,
-        'in': 1 / 0.0254,
-        'ft': 1 / 0.3048,
+        "m": 1.0,
+        "cm": 100.0,
+        "mm": 1000.0,
+        "in": 1 / 0.0254,
+        "ft": 1 / 0.3048,
     }.get(lu_norm, 1.0)
 
     return L_factor
+
 
 def force_scale_factor(units: dict) -> float:
     """Compute the force-unit scaling factor from model units.
@@ -198,19 +220,20 @@ def force_scale_factor(units: dict) -> float:
         Scaling factor to convert N to the model's force unit.
     """
     u = units or {}
-    fu_norm = _normalise_unit(u.get('F'), 'n')
+    fu_norm = _normalise_unit(u.get("F"), "n")
 
     F_factor = {
-        'n': 1.0,
-        'kn': 0.001,
-        'mn': 0.000001,
-        'kgf': 1 / 9.80665,
-        'tonf': 1 / 9806.65,
-        'lb': 1 / 4.448,
-        'kip': 1 / 4448.0,
+        "n": 1.0,
+        "kn": 0.001,
+        "mn": 0.000001,
+        "kgf": 1 / 9.80665,
+        "tonf": 1 / 9806.65,
+        "lb": 1 / 4.448,
+        "kip": 1 / 4448.0,
     }.get(fu_norm, 1.0)
 
     return F_factor
+
 
 def mass_scale_factor(units: dict) -> float:
     """Compute the mass-unit scaling factor from model units.
@@ -251,6 +274,7 @@ def mass_scale_factor(units: dict) -> float:
     """
     return force_scale_factor(units) / length_scale_factor(units)
 
+
 def stress_scale_factor(units: dict) -> float:
     """Compute the stress-unit scaling factor from model units.
 
@@ -279,7 +303,8 @@ def stress_scale_factor(units: dict) -> float:
     L_factor = length_scale_factor(units)
     F_factor = force_scale_factor(units)
 
-    return F_factor / L_factor ** 2
+    return F_factor / L_factor**2
+
 
 def mass_density_scale_factor(units: dict) -> float:
     """Compute the unit-mass-unit scaling factor from model units.
@@ -309,7 +334,8 @@ def mass_density_scale_factor(units: dict) -> float:
     M_factor = mass_scale_factor(units)
     L_factor = length_scale_factor(units)
 
-    return M_factor / L_factor ** 3 
+    return M_factor / L_factor**3
+
 
 def weight_density_scale_factor(units: dict) -> float:
     """Compute the SI unit-weight unit scaling factor from model units.
@@ -339,7 +365,7 @@ def weight_density_scale_factor(units: dict) -> float:
     F_factor = force_scale_factor(units)
     L_factor = length_scale_factor(units)
 
-    return F_factor / L_factor ** 3
+    return F_factor / L_factor**3
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -478,22 +504,45 @@ def lineal_force_to_si_factor(units: dict) -> float:
 
 
 # ── Known stress-valued material property keys (SI canonical values → model units) ──
-_STRESS_KEYS: frozenset = frozenset({
-    'E', 'Es', 'Ec', 'G',            # elastic moduli
-    'fc', 'ft', 'fcu',                # concrete strengths
-    'fy', 'fyh', 'fu',                # steel strengths
-    'Hiso', 'Hkin',                   # hardening moduli
-})
+_STRESS_KEYS: frozenset = frozenset(
+    {
+        "E",
+        "Es",
+        "Ec",
+        "G",  # elastic moduli
+        "fc",
+        "ft",
+        "fcu",  # concrete strengths
+        "fy",
+        "fyh",
+        "fu",  # steel strengths
+        "Hiso",
+        "Hkin",  # hardening moduli
+    }
+)
 
 # Numeric fields that are explicitly **not** stress-valued — passed
 # through unchanged (dimensionless, strain, density, fraction, etc.).
-_NON_STRESS_NUMERIC_KEYS: frozenset = frozenset({
-    'nu',             # Poisson's ratio (dimensionless)
-    'strain', 'eps_c', 'epscc', 'eps_cc',  # strains
-    'density', 'rho', 'unit_weight', 'unit_mass',
-    'b', 'R0', 'cR1', 'cR2',        # Steel02 hardening shape params
-    'alpha', 'beta', 'gamma',        # generic dimensionless params
-})
+_NON_STRESS_NUMERIC_KEYS: frozenset = frozenset(
+    {
+        "nu",  # Poisson's ratio (dimensionless)
+        "strain",
+        "eps_c",
+        "epscc",
+        "eps_cc",  # strains
+        "density",
+        "rho",
+        "unit_weight",
+        "unit_mass",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",  # Steel02 hardening shape params
+        "alpha",
+        "beta",
+        "gamma",  # generic dimensionless params
+    }
+)
 
 
 def scale_material_dict(
@@ -522,6 +571,7 @@ def scale_material_dict(
         New dict with stress fields scaled to model units.
     """
     import warnings as _w
+
     ssf = stress_scale if stress_scale is not None else stress_scale_factor(units)
     # No early return for unity scale factors: the classification loop
     # below must always run so unclassified numeric fields still emit
@@ -537,7 +587,8 @@ def scale_material_dict(
                     f"classified as stress-valued (Pa) nor as a known "
                     f"non-stress field — passing through unchanged. "
                     f"If '{k}' is a stress, add it to _STRESS_KEYS.",
-                    UserWarning, stacklevel=2,
+                    UserWarning,
+                    stacklevel=2,
                 )
                 result[k] = v
             else:
@@ -617,6 +668,7 @@ def pick_wind(inferred: dict, direction: str) -> dict:
 
 # ── Legacy aliases with underscore prefixes (for backward compat) ──────
 
+
 def _deep_merge(base: dict, override: dict) -> dict:
     return deep_merge(base, override)
 
@@ -634,6 +686,7 @@ def _pick_wind(inferred: dict, direction: str) -> dict:
 
 
 # ── Flag diagram geometry (pure NumPy, no renderer dependency) ────────
+
 
 def compute_flag_parts(pt1, pt2, vn, Fi, Fj, scale):
     """Yield ``(vertices, col_val)`` for each part of a flag diagram element.
@@ -665,8 +718,8 @@ def compute_flag_parts(pt1, pt2, vn, Fi, Fj, scale):
     if abs(Fi) < 1e-12 and abs(Fj) < 1e-12:
         return
 
-    off_i = vn * Fi * scale       # I-end: +vn for positive Fi
-    off_j = -vn * Fj * scale      # J-end: -vn for positive Fj (baked-in negation)
+    off_i = vn * Fi * scale  # I-end: +vn for positive Fi
+    off_j = -vn * Fj * scale  # J-end: -vn for positive Fj (baked-in negation)
 
     if Fi * Fj < 0.0:
         # Trapezoid: [pt1, pt2, pt2+off_j, pt1+off_i]
@@ -684,9 +737,7 @@ def compute_flag_parts(pt1, pt2, vn, Fi, Fj, scale):
             yield [p_zero, pt2, pt2 + off_j], Fj
 
 
-def cqc_combine(modal_values: List[float],
-                omega: List[float],
-                damp_ratios: List[float]) -> float:
+def cqc_combine(modal_values: list[float], omega: list[float], damp_ratios: list[float]) -> float:
     """Complete Quadratic Combination of modal results (Der Kiureghian 1980).
 
     Uses the standard CQC correlation coefficient formula:
@@ -719,12 +770,10 @@ def cqc_combine(modal_values: List[float],
             om_i = omega[i] if i < len(omega) else 1.0
             om_j = omega[j] if j < len(omega) else 1.0
             bij = om_i / om_j if om_j > 0 else 1.0
-            rho = (
-                8.0 * math.sqrt(di * dj) * (di + bij * dj) * (bij ** 1.5)
-            ) / (
-                (1.0 - bij ** 2.0) ** 2.0
-                + 4.0 * di * dj * bij * (1.0 + bij ** 2.0)
-                + 4.0 * (di ** 2.0 + dj ** 2.0) * bij ** 2.0
+            rho = (8.0 * math.sqrt(di * dj) * (di + bij * dj) * (bij**1.5)) / (
+                (1.0 - bij**2.0) ** 2.0
+                + 4.0 * di * dj * bij * (1.0 + bij**2.0)
+                + 4.0 * (di**2.0 + dj**2.0) * bij**2.0
             )
             total += modal_values[i] * modal_values[j] * rho
     return math.sqrt(max(total, 0.0))
@@ -733,7 +782,7 @@ def cqc_combine(modal_values: List[float],
 def sum_reactions_with_overturning(
     reactions: dict,
     nodes: dict,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Sum per‑node reaction forces and moments, adding overturning
     moments from force × lever‑arm about the plan centroid at base level.
 
@@ -781,14 +830,13 @@ def sum_reactions_with_overturning(
         moment included.
     """
     if not nodes:
-        return {'fx': 0.0, 'fy': 0.0, 'fz': 0.0,
-                'mx': 0.0, 'my': 0.0, 'mz': 0.0}
+        return {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": 0.0, "my": 0.0, "mz": 0.0}
 
     # Build a one-time tag-to-node index for efficient lookups.
     # Reaction keys may be string IDs or integer node_tags; build both.
-    tag_to_node: Dict = {}
+    tag_to_node: dict = {}
     for nd in nodes.values():
-        t = getattr(nd, 'node_tag', None)
+        t = getattr(nd, "node_tag", None)
         if t is not None:
             tag_to_node[t] = nd
 
@@ -823,17 +871,24 @@ def sum_reactions_with_overturning(
         cy = (min(ys) + max(ys)) * 0.5
         z_base = min(n.z for n in nodes.values())
 
-    summed = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0,
-              'mx': 0.0, 'my': 0.0, 'mz': 0.0}
+    summed = {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": 0.0, "my": 0.0, "mz": 0.0}
     for nid, r in reactions.items():
         node = _resolve_node(nid)
         if node is None:
             continue
-        fx = r.get('fx', 0.0); fy = r.get('fy', 0.0); fz = r.get('fz', 0.0)
-        mx = r.get('mx', 0.0); my = r.get('my', 0.0); mz = r.get('mz', 0.0)
-        dx = node.x - cx; dy = node.y - cy; dz = node.z - z_base
-        summed['fx'] += fx; summed['fy'] += fy; summed['fz'] += fz
-        summed['mx'] += mx + fz * dy - fy * dz
-        summed['my'] += my + fx * dz - fz * dx
-        summed['mz'] += mz + fy * dx - fx * dy
+        fx = r.get("fx", 0.0)
+        fy = r.get("fy", 0.0)
+        fz = r.get("fz", 0.0)
+        mx = r.get("mx", 0.0)
+        my = r.get("my", 0.0)
+        mz = r.get("mz", 0.0)
+        dx = node.x - cx
+        dy = node.y - cy
+        dz = node.z - z_base
+        summed["fx"] += fx
+        summed["fy"] += fy
+        summed["fz"] += fz
+        summed["mx"] += mx + fz * dy - fy * dz
+        summed["my"] += my + fx * dz - fz * dx
+        summed["mz"] += mz + fy * dx - fx * dy
     return summed

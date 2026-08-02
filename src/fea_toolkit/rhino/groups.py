@@ -11,8 +11,6 @@ Three kinds of groups are created:
   ``SAP_Shape_{type}`` for filtering by cross-section.
 """
 
-import typing as t
-
 from ..model.sap_data import SAPModelData
 from .colors import get_sap2000_color
 
@@ -21,25 +19,24 @@ def _ensure_rhino():
     """Lazy-import Rhino modules."""
     try:
         import Rhino  # noqa: F401
-        import scriptcontext as sc
         import Rhino.DocObjects as rd
+        import scriptcontext as sc
+
         return sc, rd
     except ImportError:
         raise RuntimeError(
-            "Rhino modules are not available. This code must run inside "
-            "Rhinoceros 3D (IronPython)."
-        )
+            "Rhino modules are not available. This code must run inside Rhinoceros 3D (IronPython)."
+        ) from None
 
 
 def _sanitise_group_name(name: str) -> str:
     """Replace characters that are invalid in Rhino group names."""
-    for ch in [":", "/", "\\", ".", "*", "?", "\"", "<", ">", "|"]:
+    for ch in [":", "/", "\\", ".", "*", "?", '"', "<", ">", "|"]:
         name = name.replace(ch, "_")
     return name
 
 
-def create_rhino_group(group_name: str, object_ids: t.List[str],
-                       color=None) -> bool:
+def create_rhino_group(group_name: str, object_ids: list[str], color=None) -> bool:
     """Create or replace a Rhino group with the given objects. ..."""
     sc, rd = _ensure_rhino()
     doc = sc.doc
@@ -65,9 +62,9 @@ def create_rhino_group(group_name: str, object_ids: t.List[str],
     return added > 0
 
 
-def _stamp_group_membership(object_ids: t.List[str], group_name: str) -> None:
+def _stamp_group_membership(object_ids: list[str], group_name: str) -> None:
     """Append *group_name* to the ``SAP_Groups`` UserString on each object."""
-    sc, rd = _ensure_rhino()
+    sc, _rd = _ensure_rhino()
     doc = sc.doc
     for oid in object_ids:
         obj = doc.Objects.Find(oid)
@@ -86,21 +83,25 @@ def _stamp_group_membership(object_ids: t.List[str], group_name: str) -> None:
 # SAP2000 group creation
 # ========================================================================
 
-def create_sap_groups(md: SAPModelData, joint_object_ids: t.List[str],
-                      frame_object_ids: t.List[str],
-                      shell_object_ids: t.List[str]) -> int:
+
+def create_sap_groups(
+    md: SAPModelData,
+    joint_object_ids: list[str],
+    frame_object_ids: list[str],
+    shell_object_ids: list[str],
+) -> int:
     """Create Rhino groups from SAP2000 group definitions and assignments.
 
     Each object also gets a ``SAP_Groups`` UserString listing every
     SAP2000 group it belongs to (comma-separated).
     """
-    sc, rd = _ensure_rhino()
+    sc, _rd = _ensure_rhino()
     doc = sc.doc
 
     # Build lookups: SAP element ID -> list of Rhino object IDs
-    sap_frames: t.Dict[str, t.List[str]] = {}
-    sap_shells: t.Dict[str, t.List[str]] = {}
-    sap_joints: t.Dict[str, t.List[str]] = {}
+    sap_frames: dict[str, list[str]] = {}
+    sap_shells: dict[str, list[str]] = {}
+    sap_joints: dict[str, list[str]] = {}
 
     for oid in frame_object_ids:
         obj = doc.Objects.Find(oid)
@@ -126,7 +127,7 @@ def create_sap_groups(md: SAPModelData, joint_object_ids: t.List[str],
 
     groups_created = 0
     for gname, group in md.groups.items():
-        member_ids: t.List[str] = []
+        member_ids: list[str] = []
         group_color = get_sap2000_color(group.color, None)
         for ref in group.objects:
             parts = ref.split(":", 1)
@@ -153,20 +154,21 @@ def create_sap_groups(md: SAPModelData, joint_object_ids: t.List[str],
 # Selection groups
 # ========================================================================
 
+
 def create_selection_groups() -> None:
     """Create type, section, and shape groups by scanning SAP metadata.
 
     Groups: ``SAP_All_Frames``, ``SAP_All_Shells``, ``SAP_All_Joints``,
     ``SAP_Section_{name}``, ``SAP_Shape_{type}``.
     """
-    sc, rd = _ensure_rhino()
+    sc, _rd = _ensure_rhino()
     doc = sc.doc
 
-    frames: t.List[str] = []
-    shells: t.List[str] = []
-    joints: t.List[str] = []
-    by_section: t.Dict[str, t.List[str]] = {}
-    by_shape: t.Dict[str, t.List[str]] = {}
+    frames: list[str] = []
+    shells: list[str] = []
+    joints: list[str] = []
+    by_section: dict[str, list[str]] = {}
+    by_shape: dict[str, list[str]] = {}
 
     for obj in doc.Objects:
         try:
@@ -197,6 +199,6 @@ def create_selection_groups() -> None:
     if joints:
         create_rhino_group("SAP_All_Joints", joints)
     for sec_name, oids in by_section.items():
-        create_rhino_group("SAP_Section_{}".format(_sanitise_group_name(sec_name)), oids)
+        create_rhino_group(f"SAP_Section_{_sanitise_group_name(sec_name)}", oids)
     for shape_name, oids in by_shape.items():
-        create_rhino_group("SAP_Shape_{}".format(_sanitise_group_name(shape_name)), oids)
+        create_rhino_group(f"SAP_Shape_{_sanitise_group_name(shape_name)}", oids)

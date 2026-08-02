@@ -20,12 +20,12 @@ Usage::
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import numpy as np
 
 
-def read_results(path: str) -> Dict[str, Any]:
+def read_results(path: str) -> dict[str, Any]:
     """Load a unified results file (NPZ or HDF5) and return a dict of arrays.
 
     Format is auto-detected from the file extension:
@@ -43,7 +43,7 @@ def read_results(path: str) -> Dict[str, Any]:
     return read_results_npz(str(p))
 
 
-def read_results_npz(path: str) -> Dict[str, Any]:
+def read_results_npz(path: str) -> dict[str, Any]:
     """Load a unified NPZ file and return a dict of numpy arrays.
 
     The dict preserves the schema key names so consumers can access
@@ -61,10 +61,10 @@ def _decode_hdf5_array(arr: np.ndarray) -> np.ndarray:
     h5py stores variable-length strings as ``bytes``; NPZ stores them
     as ``str``.  This helper normalises HDF5 output to match NPZ.
     """
-    if arr.dtype.kind == 'O' or arr.dtype.kind == 'S':
+    if arr.dtype.kind in {"O", "S"}:
         # Object or byte-string dtype — decode each element
         decoded = np.vectorize(
-            lambda x: x.decode('utf-8') if isinstance(x, bytes) else str(x),
+            lambda x: x.decode("utf-8") if isinstance(x, bytes) else str(x),
             otypes=[object],
         )(arr)
         # Ensure consistent str dtype
@@ -72,7 +72,7 @@ def _decode_hdf5_array(arr: np.ndarray) -> np.ndarray:
     return arr
 
 
-def read_results_hdf5(path: str) -> Dict[str, Any]:
+def read_results_hdf5(path: str) -> dict[str, Any]:
     """Load a unified HDF5 results file and return a flat dict of arrays.
 
     Reads HDF5 files written by :func:`~fea_toolkit.io.unified_writer._write_h5`.
@@ -93,10 +93,11 @@ def read_results_hdf5(path: str) -> Dict[str, Any]:
         import h5py
     except ImportError:
         raise ImportError(
-            "Reading HDF5 files requires h5py. Install with: pip install h5py")
+            "Reading HDF5 files requires h5py. Install with: pip install h5py"
+        ) from None
 
     path = str(Path(path).resolve())
-    result: Dict[str, Any] = {}
+    result: dict[str, Any] = {}
 
     def _walk(group: h5py.Group, prefix: str = "") -> None:
         for key, item in group.items():
@@ -113,15 +114,15 @@ def read_results_hdf5(path: str) -> Dict[str, Any]:
     return result
 
 
-def _get_static_cases(data: Dict[str, Any]) -> List[str]:
+def _get_static_cases(data: dict[str, Any]) -> list[str]:
     """Return list of static case names present in the data."""
     labels = data.get("static_case_labels")
     if labels is not None:
-        return [str(l) for l in labels]
+        return [str(label) for label in labels]
     return []
 
 
-def _get_analysis_types(data: Dict[str, Any]) -> List[str]:
+def _get_analysis_types(data: dict[str, Any]) -> list[str]:
     types = data.get("analysis_types")
     if types is not None:
         return [str(t) for t in types]
@@ -130,11 +131,12 @@ def _get_analysis_types(data: Dict[str, Any]) -> List[str]:
 
 # ── PyVista adapter ───────────────────────────────────────────────────────
 
+
 def npz_to_pyvista_frame_mesh(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     deformed_case: Optional[str] = None,
     scale: float = 1.0,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Build frame line vertices and connectivity for PyVista.
 
     Returns ``(points, lines, displacements, sap_ids)`` where:
@@ -151,11 +153,13 @@ def npz_to_pyvista_frame_mesh(
     if nid is None:
         return np.empty((0, 3)), np.empty((0, 3)), np.empty((0, 3)), np.empty((0,), dtype=str)
 
-    coords = np.column_stack([
-        data.get("node_x", []),
-        data.get("node_y", []),
-        data.get("node_z", []),
-    ])
+    coords = np.column_stack(
+        [
+            data.get("node_x", []),
+            data.get("node_y", []),
+            data.get("node_z", []),
+        ]
+    )
     ni = data.get("frame_node_i", [])
     nj = data.get("frame_node_j", [])
     n_frame = len(ni)
@@ -184,19 +188,17 @@ def npz_to_pyvista_frame_mesh(
             dx = data.get(key_prefix + "x", np.zeros(len(nid)))
             dy = data.get(key_prefix + "y", np.zeros(len(nid)))
             dz = data.get(key_prefix + "z", np.zeros(len(nid)))
-            disp[ei * 2] = [dx[i_idx] * scale, dy[i_idx] * scale,
-                            dz[i_idx] * scale]
-            disp[ei * 2 + 1] = [dx[j_idx] * scale, dy[j_idx] * scale,
-                                dz[j_idx] * scale]
+            disp[ei * 2] = [dx[i_idx] * scale, dy[i_idx] * scale, dz[i_idx] * scale]
+            disp[ei * 2 + 1] = [dx[j_idx] * scale, dy[j_idx] * scale, dz[j_idx] * scale]
 
     return points, lines, disp, sap_ids
 
 
 def npz_to_pyvista_shell_mesh(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     deformed_case: Optional[str] = None,
     scale: float = 1.0,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build shell quad vertices and face connectivity for PyVista.
 
     Returns ``(points, faces, displacements)``.
@@ -207,16 +209,24 @@ def npz_to_pyvista_shell_mesh(
         return np.empty((0, 3)), np.empty((0, 3)), np.empty((0, 3))
 
     nid = data.get("node_tag")
-    coords = np.column_stack([
-        data.get("node_x", []), data.get("node_y", []), data.get("node_z", []),
-    ])
+    coords = np.column_stack(
+        [
+            data.get("node_x", []),
+            data.get("node_y", []),
+            data.get("node_z", []),
+        ]
+    )
     tag_to_idx = {int(t): i for i, t in enumerate(nid)}
 
     points = np.zeros((n_shell * 4, 3))
     faces = np.zeros((n_shell, 5), dtype=int)
     disp = np.zeros((n_shell * 4, 3))
-    sn = [s1, data.get("shell_node_2", []),
-          data.get("shell_node_3", []), data.get("shell_node_4", [])]
+    sn = [
+        s1,
+        data.get("shell_node_2", []),
+        data.get("shell_node_3", []),
+        data.get("shell_node_4", []),
+    ]
 
     for ei in range(n_shell):
         for k in range(4):
@@ -230,24 +240,29 @@ def npz_to_pyvista_shell_mesh(
                 dx = data.get(key_prefix + "x", np.zeros(len(nid)))
                 dy = data.get(key_prefix + "y", np.zeros(len(nid)))
                 dz = data.get(key_prefix + "z", np.zeros(len(nid)))
-                disp[ei * 4 + k] = [dx[idx] * scale, dy[idx] * scale,
-                                    dz[idx] * scale]
+                disp[ei * 4 + k] = [dx[idx] * scale, dy[idx] * scale, dz[idx] * scale]
 
     return points, faces, disp
 
 
 def npz_to_pyvista_modal_mesh(
-    data: Dict[str, Any], mode_idx: int, scale: float = 1.0,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    data: dict[str, Any],
+    mode_idx: int,
+    scale: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Build a deformed mesh for a given mode index.
 
     Returns ``(frame_points, frame_lines, shell_points, shell_faces)``
     where the node positions are offset by the eigenvector displacement.
     """
     nid = data.get("node_tag")
-    coords = np.column_stack([
-        data.get("node_x", []), data.get("node_y", []), data.get("node_z", []),
-    ])
+    np.column_stack(
+        [
+            data.get("node_x", []),
+            data.get("node_y", []),
+            data.get("node_z", []),
+        ]
+    )
     tag_to_idx = {int(t): i for i, t in enumerate(nid)}
 
     dx = data.get("modal/mode_dx", np.zeros((len(nid), 1)))[:, mode_idx]
@@ -312,11 +327,12 @@ def npz_to_pyvista_modal_mesh(
 
 # ── Rhino adapter ─────────────────────────────────────────────────────────
 
+
 def npz_to_rhino_colour_data(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     quantity: str = "fx_i",
     case: Optional[str] = None,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Extract per-element scalar data for Rhino colouring.
 
     Returns ``{sap_frame_id: value}`` dict matching SAP_FrameID UserStrings.
@@ -341,7 +357,7 @@ def npz_to_rhino_colour_data(
     return {str(sap_ids[i]): float(vals[i]) for i in range(len(vals))}
 
 
-def npz_build_id_tag_map(data: Dict[str, Any]) -> Dict[str, int]:
+def npz_build_id_tag_map(data: dict[str, Any]) -> dict[str, int]:
     """Build a mapping from SAP2000 string node ID → OpenSees node tag.
 
     Returns {sap_node_id: node_tag}, e.g. ``{"1": 1, "2": 2, ...}``.
@@ -353,7 +369,7 @@ def npz_build_id_tag_map(data: Dict[str, Any]) -> Dict[str, int]:
     return {str(sap_ids[i]): int(tags[i]) for i in range(len(sap_ids))}
 
 
-def npz_build_child_map(data: Dict[str, Any]) -> Dict[str, list]:
+def npz_build_child_map(data: dict[str, Any]) -> dict[str, list]:
     """Build a mapping from parent SAP ID → list of child SAP IDs.
 
     Useful when the Rhino model has original (un-split) geometry and
@@ -367,7 +383,7 @@ def npz_build_child_map(data: Dict[str, Any]) -> Dict[str, list]:
     parent_ids = data.get("frame_parent_sap_id")
     if child_ids is None or parent_ids is None:
         return {}
-    result: Dict[str, list] = {}
+    result: dict[str, list] = {}
     for i in range(len(child_ids)):
         pid = str(parent_ids[i])
         if pid:
@@ -375,7 +391,7 @@ def npz_build_child_map(data: Dict[str, Any]) -> Dict[str, list]:
     return result
 
 
-def npz_build_parent_map(data: Dict[str, Any]) -> Dict[str, str]:
+def npz_build_parent_map(data: dict[str, Any]) -> dict[str, str]:
     """Build a reverse mapping from child SAP ID → parent SAP ID.
 
     Returns {child_sap_id: parent_sap_id}, e.g.
@@ -385,5 +401,6 @@ def npz_build_parent_map(data: Dict[str, Any]) -> Dict[str, str]:
     parent_ids = data.get("frame_parent_sap_id")
     if child_ids is None or parent_ids is None:
         return {}
-    return {str(child_ids[i]): str(parent_ids[i])
-            for i in range(len(child_ids)) if str(parent_ids[i])}
+    return {
+        str(child_ids[i]): str(parent_ids[i]) for i in range(len(child_ids)) if str(parent_ids[i])
+    }

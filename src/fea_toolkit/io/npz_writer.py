@@ -17,12 +17,12 @@ Usage::
 
 import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 
-from .results_schema import make_static_key, make_pushover_key
 from ..model.sap_data import SAPModelData
+from .results_schema import make_pushover_key, make_static_key
 
 if TYPE_CHECKING:
     from ..model.mesh_model import MeshModel
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 def _collect_geometry(
     md: SAPModelData,
     mesh_model: Optional["MeshModel"] = None,
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
     """Extract model geometry arrays from SAPModelData.
 
     When *mesh_model* is provided, its post-processing node tags
@@ -49,23 +49,19 @@ def _collect_geometry(
             ``mesh_model.area_assignments`` for all geometry
             extraction (frames *and* shells).
     """
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
 
     # ── Resolve source dicts ──────────────────────────────────────
     # Use MeshModel when available (post-split/mesh topology).
     _nodes = mesh_model.nodes if mesh_model is not None else md.nodes
-    _frame_elements = (mesh_model.frame_elements
-                       if mesh_model is not None
-                       else md.frame_elements)
-    _area_elements = (mesh_model.area_elements
-                      if mesh_model is not None
-                      else md.area_elements)
-    _frame_assignments = (mesh_model.frame_assignments
-                          if mesh_model is not None
-                          else md.frame_assignments)
-    _area_assignments = (mesh_model.area_assignments
-                         if mesh_model is not None
-                         else md.area_assignments)
+    _frame_elements = mesh_model.frame_elements if mesh_model is not None else md.frame_elements
+    _area_elements = mesh_model.area_elements if mesh_model is not None else md.area_elements
+    _frame_assignments = (
+        mesh_model.frame_assignments if mesh_model is not None else md.frame_assignments
+    )
+    _area_assignments = (
+        mesh_model.area_assignments if mesh_model is not None else md.area_assignments
+    )
 
     # Nodes
     node_tags = []
@@ -91,12 +87,12 @@ def _collect_geometry(
 
     # Build parent-index lookup for t_start/t_end computation and parent endpoints.
     # Include inactive parents so split children reference the actual interval.
-    parent_lookup: Dict[str, tuple] = {}  # parent_id -> (t_locations, child_ids)
-    parent_endpoints: Dict[str, tuple] = {}  # parent_id -> (parent_node_i_tag, parent_node_j_tag)
+    parent_lookup: dict[str, tuple] = {}  # parent_id -> (t_locations, child_ids)
+    parent_endpoints: dict[str, tuple] = {}  # parent_id -> (parent_node_i_tag, parent_node_j_tag)
     for eid, elem in _frame_elements.items():
         if elem.t_locations and elem.child_ids:
             parent_lookup[eid] = (elem.t_locations, elem.child_ids)
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             # Record parent endpoints for collapse_to_parents visualisation
             p_ni = _nodes.get(elem.node_i)
             p_nj = _nodes.get(elem.node_j)
@@ -104,7 +100,7 @@ def _collect_geometry(
                 parent_endpoints[eid] = (p_ni.node_tag, p_nj.node_tag)
 
     for eid, elem in _frame_elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         ni = _nodes.get(elem.node_i)
         nj = _nodes.get(elem.node_j)
@@ -159,7 +155,7 @@ def _collect_geometry(
     shell_eid, shell_sap_id, shell_sec_name, shell_parent_sap_id = [], [], [], []
     s1, s2, s3, s4 = [], [], [], []
     for aid, area in _area_elements.items():
-        if getattr(area, 'inactive', False):
+        if getattr(area, "inactive", False):
             continue
         if len(area.node_ids) < 3:
             continue
@@ -184,7 +180,7 @@ def _collect_geometry(
         s3.append(tags[2])
         s4.append(tags[3])
         # Record parent SAP ID for collapse_to_parents visualisation
-        pid = getattr(area, 'parent_id', None)
+        pid = getattr(area, "parent_id", None)
         shell_parent_sap_id.append(str(pid) if pid else "")
 
     arrays["shell_eid"] = np.array(shell_eid, dtype=int)
@@ -199,15 +195,25 @@ def _collect_geometry(
     return arrays
 
 
-def _collect_static(static_results: Dict[str, Any]) -> Dict[str, np.ndarray]:
+def _collect_static(static_results: dict[str, Any]) -> dict[str, np.ndarray]:
     """Extract static analysis arrays."""
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
     case_labels = list(static_results.keys())
     arrays["static_case_labels"] = np.array(case_labels, dtype=str)
 
     force_keys = [
-        "fx_i", "fy_i", "fz_i", "mx_i", "my_i", "mz_i",
-        "fx_j", "fy_j", "fz_j", "mx_j", "my_j", "mz_j",
+        "fx_i",
+        "fy_i",
+        "fz_i",
+        "mx_i",
+        "my_i",
+        "mz_i",
+        "fx_j",
+        "fy_j",
+        "fz_j",
+        "mx_j",
+        "my_j",
+        "mz_j",
     ]
     for case in case_labels:
         data = static_results[case]
@@ -227,10 +233,11 @@ def _collect_static(static_results: Dict[str, Any]) -> Dict[str, np.ndarray]:
     return arrays
 
 
-def _collect_modal(modal_result: Dict[str, Any],
-                   mode_shapes: Optional[Dict] = None) -> Dict[str, np.ndarray]:
+def _collect_modal(
+    modal_result: dict[str, Any], mode_shapes: Optional[dict] = None
+) -> dict[str, np.ndarray]:
     """Extract modal analysis arrays."""
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
     mp = modal_result.get("modal_props", {})
     periods = list(modal_result.get("periods", []))
     n = len(periods)
@@ -238,10 +245,10 @@ def _collect_modal(modal_result: Dict[str, Any],
         return arrays
 
     arrays["modal/period"] = np.array(periods, dtype=float)
-    arrays["modal/frequency"] = np.array(
-        [1.0 / p if p > 0 else 0.0 for p in periods], dtype=float)
+    arrays["modal/frequency"] = np.array([1.0 / p if p > 0 else 0.0 for p in periods], dtype=float)
     arrays["modal/omega"] = np.array(
-        [2.0 * np.pi / p if p > 0 else 0.0 for p in periods], dtype=float)
+        [2.0 * np.pi / p if p > 0 else 0.0 for p in periods], dtype=float
+    )
 
     for key, npz_key in [
         ("partiMassRatiosMX", "modal/mx_ratio"),
@@ -262,9 +269,7 @@ def _collect_modal(modal_result: Dict[str, Any],
         if node_tags:
             n_nodes = len(node_tags)
             tag_to_idx = {t: i for i, t in enumerate(node_tags)}
-            for dof_idx, npz_key in enumerate(["modal/mode_dx",
-                                                "modal/mode_dy",
-                                                "modal/mode_dz"]):
+            for dof_idx, npz_key in enumerate(["modal/mode_dx", "modal/mode_dy", "modal/mode_dz"]):
                 arr = np.zeros((n_nodes, n))
                 for midx in range(n):
                     node_vals = mode_shapes.get(midx, {})
@@ -277,53 +282,52 @@ def _collect_modal(modal_result: Dict[str, Any],
     return arrays
 
 
-def _collect_rs(rs_x: Optional[Dict] = None,
-                rs_y: Optional[Dict] = None) -> Dict[str, np.ndarray]:
+def _collect_rs(rs_x: Optional[dict] = None, rs_y: Optional[dict] = None) -> dict[str, np.ndarray]:
     """Extract response-spectrum arrays with directional keys."""
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
     for direction, d_key in [("X", "x"), ("Y", "y")]:
         rs = rs_x if direction == "X" else rs_y
         if rs is None:
             continue
-        n = len(rs.get("modal_periods", []))
-        arrays[f"rs/sa_{d_key}"] = np.array(
-            rs.get("spectral_accels", []), dtype=float)
-        arrays[f"rs/eff_mass_{d_key}"] = np.array(
-            rs.get("effective_masses", []), dtype=float)
-        arrays[f"rs/v_base_{d_key}"] = np.array(
-            rs.get("modal_base_shear", []), dtype=float)
+        len(rs.get("modal_periods", []))
+        arrays[f"rs/sa_{d_key}"] = np.array(rs.get("spectral_accels", []), dtype=float)
+        arrays[f"rs/eff_mass_{d_key}"] = np.array(rs.get("effective_masses", []), dtype=float)
+        arrays[f"rs/v_base_{d_key}"] = np.array(rs.get("modal_base_shear", []), dtype=float)
         arrays[f"rs/v_cqc_{d_key}"] = np.array([rs.get("base_shear_cqc", 0.0)])
         arrays[f"rs/v_total_{d_key}"] = np.array([rs.get("base_shear_total", 0.0)])
     return arrays
 
 
-def _collect_shell_forces(shell_forces: Dict[str, Dict[str, Any]]) -> Dict[str, np.ndarray]:
+def _collect_shell_forces(shell_forces: dict[str, dict[str, Any]]) -> dict[str, np.ndarray]:
     """Extract shell element force arrays from ``extract_static_shell_forces()``.
 
     Returns flat arrays keyed by ``shell_*`` for NPZ serialization.
     """
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
     aids = list(shell_forces.keys())
-    n = len(aids)
+    len(aids)
     arrays["shell_forces/sap_id"] = np.array(aids, dtype=str)
     for key in ("fx", "fy", "fxy", "mx", "my", "mxy"):
         arrays[f"shell_forces/{key}"] = np.array(
-            [shell_forces[aid].get(key, 0.0) for aid in aids], dtype=float)
+            [shell_forces[aid].get(key, 0.0) for aid in aids], dtype=float
+        )
     arrays["shell_forces/elem_tag"] = np.array(
-        [shell_forces[aid].get("elem_tag", 0) for aid in aids], dtype=int)
+        [shell_forces[aid].get("elem_tag", 0) for aid in aids], dtype=int
+    )
     arrays["shell_forces/sec_name"] = np.array(
-        [shell_forces[aid].get("sec_name", "") for aid in aids], dtype=str)
+        [shell_forces[aid].get("sec_name", "") for aid in aids], dtype=str
+    )
     return arrays
 
 
 def write_results_npz(
     path: str,
     md: SAPModelData,
-    static_results: Optional[Dict[str, Any]] = None,
-    modal_result: Optional[Dict[str, Any]] = None,
-    mode_shapes: Optional[Dict] = None,
-    rs_results: Optional[Dict[str, Any]] = None,
-    shell_forces: Optional[Dict[str, Dict[str, Any]]] = None,
+    static_results: Optional[dict[str, Any]] = None,
+    modal_result: Optional[dict[str, Any]] = None,
+    mode_shapes: Optional[dict] = None,
+    rs_results: Optional[dict[str, Any]] = None,
+    shell_forces: Optional[dict[str, dict[str, Any]]] = None,
     force_unit: str = "kN",
     length_unit: str = "m",
     mesh_model: Optional["MeshModel"] = None,
@@ -350,7 +354,7 @@ def write_results_npz(
     Returns:
         Absolute path to the saved file.
     """
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
 
     # Geometry
     arrays.update(_collect_geometry(md, mesh_model))
@@ -366,8 +370,7 @@ def write_results_npz(
     if rs_results:
         analysis_types.append("rs")
         if rs_results.get("rs_x") or rs_results.get("rs_y"):
-            arrays.update(_collect_rs(
-                rs_results.get("rs_x"), rs_results.get("rs_y")))
+            arrays.update(_collect_rs(rs_results.get("rs_x"), rs_results.get("rs_y")))
     if shell_forces:
         analysis_types.append("shell_forces")
         arrays.update(_collect_shell_forces(shell_forces))
@@ -379,8 +382,7 @@ def write_results_npz(
     arrays["analysis_types"] = np.array(analysis_types, dtype=str)
     arrays["force_unit"] = np.array([force_unit], dtype=str)
     arrays["length_unit"] = np.array([length_unit], dtype=str)
-    arrays["created"] = np.array(
-        [datetime.datetime.now().isoformat()], dtype=str)
+    arrays["created"] = np.array([datetime.datetime.now().isoformat()], dtype=str)
 
     path = str(Path(path).resolve())
     np.savez_compressed(path, **arrays)
@@ -389,9 +391,9 @@ def write_results_npz(
 
 def _collect_pushover(
     mesh_model: "MeshModel",
-    step_results: List[Dict[str, Any]],
+    step_results: list[dict[str, Any]],
     direction: str = "+X",
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
     """Collect pushover per-step results into NPZ arrays.
 
     Args:
@@ -405,7 +407,7 @@ def _collect_pushover(
         ``PUSHOVER_GLOBAL_ARRAYS``, ``PUSHOVER_FRAME_ARRAYS``,
         ``PUSHOVER_SHELL_ARRAYS``, and ``PUSHOVER_NODE_DISP_ARRAYS`` schema.
     """
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
     n_step = len(step_results)
     if n_step == 0:
         return arrays
@@ -419,7 +421,7 @@ def _collect_pushover(
 
     # ── Frame arrays ──────────────────────────────────────────
     # Collect all recorded frame IDs in order of first appearance
-    frame_ids: List[str] = []
+    frame_ids: list[str] = []
     for sd in step_results:
         for eid in sd.get("frame_forces", {}):
             if eid not in frame_ids:
@@ -427,16 +429,27 @@ def _collect_pushover(
     n_frame = len(frame_ids)
 
     if n_frame > 0:
-        arrays[make_pushover_key(
-            direction, "pushover/{direction}/frame_sap_id")] = np.array(
-            frame_ids, dtype=str)
+        arrays[make_pushover_key(direction, "pushover/{direction}/frame_sap_id")] = np.array(
+            frame_ids, dtype=str
+        )
 
         # Pre-allocate 2D arrays: (n_step, n_frame)
-        comp_keys = ["fx_i", "fy_i", "fz_i", "mx_i", "my_i", "mz_i",
-                     "fx_j", "fy_j", "fz_j", "mx_j", "my_j", "mz_j"]
+        comp_keys = [
+            "fx_i",
+            "fy_i",
+            "fz_i",
+            "mx_i",
+            "my_i",
+            "mz_i",
+            "fx_j",
+            "fy_j",
+            "fz_j",
+            "mx_j",
+            "my_j",
+            "mz_j",
+        ]
         comp_map = {
-            f"frame_{k}": np.full((n_step, n_frame), np.nan, dtype=float)
-            for k in comp_keys
+            f"frame_{k}": np.full((n_step, n_frame), np.nan, dtype=float) for k in comp_keys
         }
         frame_id_to_idx = {eid: i for i, eid in enumerate(frame_ids)}
         for si, sd in enumerate(step_results):
@@ -448,11 +461,10 @@ def _collect_pushover(
                     comp_map[f"frame_{key}"][si, j] = forces.get(key, np.nan)
 
         for key, arr in comp_map.items():
-            arrays[make_pushover_key(
-                direction, f"pushover/{{direction}}/{key}")] = arr
+            arrays[make_pushover_key(direction, f"pushover/{{direction}}/{key}")] = arr
 
     # ── Shell arrays ──────────────────────────────────────────
-    shell_ids: List[str] = []
+    shell_ids: list[str] = []
     for sd in step_results:
         for aid in sd.get("shell_forces", {}):
             if aid not in shell_ids:
@@ -460,14 +472,13 @@ def _collect_pushover(
     n_shell = len(shell_ids)
 
     if n_shell > 0:
-        arrays[make_pushover_key(
-            direction, "pushover/{direction}/shell_sap_id")] = np.array(
-            shell_ids, dtype=str)
+        arrays[make_pushover_key(direction, "pushover/{direction}/shell_sap_id")] = np.array(
+            shell_ids, dtype=str
+        )
 
         shell_comp_keys = ["Nx", "Ny", "Nxy", "Mx", "My", "Mxy"]
         shell_comp_map = {
-            f"shell_{k}": np.full((n_step, n_shell), np.nan, dtype=float)
-            for k in shell_comp_keys
+            f"shell_{k}": np.full((n_step, n_shell), np.nan, dtype=float) for k in shell_comp_keys
         }
         shell_id_to_idx = {aid: i for i, aid in enumerate(shell_ids)}
         for si, sd in enumerate(step_results):
@@ -479,8 +490,7 @@ def _collect_pushover(
                     shell_comp_map[f"shell_{key}"][si, j] = forces.get(key, np.nan)
 
         for key, arr in shell_comp_map.items():
-            arrays[make_pushover_key(
-                direction, f"pushover/{{direction}}/{key}")] = arr
+            arrays[make_pushover_key(direction, f"pushover/{{direction}}/{key}")] = arr
 
     # ── Node displacement arrays ──────────────────────────────
     # Use all geometry nodes so ``node_tag`` matches the ``N_node``
@@ -488,21 +498,18 @@ def _collect_pushover(
     # geometry ``N_node`` dim from ``_collect_geometry``).  Steps that did
     # not record a particular node are filled with NaN below; never emit a
     # subset of recorded node tags under the N_node schema.
-    node_tags = sorted(
-        nd.node_tag for nd in mesh_model.nodes.values()
-    )
+    node_tags = sorted(nd.node_tag for nd in mesh_model.nodes.values())
     n_node = len(node_tags)
 
     if n_node > 0 and n_step > 0:
         # Check if we have displacement data
         has_disp = any(
-            "node_displacements" in sd and sd["node_displacements"]
-            for sd in step_results
+            "node_displacements" in sd and sd["node_displacements"] for sd in step_results
         )
         if has_disp:
-            arrays[make_pushover_key(
-                direction, "pushover/{direction}/node_tag")] = np.array(
-                node_tags, dtype=int)
+            arrays[make_pushover_key(direction, "pushover/{direction}/node_tag")] = np.array(
+                node_tags, dtype=int
+            )
 
             dx_arr = np.full((n_step, n_node), np.nan, dtype=float)
             dy_arr = np.full((n_step, n_node), np.nan, dtype=float)
@@ -517,12 +524,9 @@ def _collect_pushover(
                         dy_arr[si, j] = disp[1]
                         dz_arr[si, j] = disp[2]
 
-            arrays[make_pushover_key(
-                direction, "pushover/{direction}/node_disp_x")] = dx_arr
-            arrays[make_pushover_key(
-                direction, "pushover/{direction}/node_disp_y")] = dy_arr
-            arrays[make_pushover_key(
-                direction, "pushover/{direction}/node_disp_z")] = dz_arr
+            arrays[make_pushover_key(direction, "pushover/{direction}/node_disp_x")] = dx_arr
+            arrays[make_pushover_key(direction, "pushover/{direction}/node_disp_y")] = dy_arr
+            arrays[make_pushover_key(direction, "pushover/{direction}/node_disp_z")] = dz_arr
 
     return arrays
 
@@ -530,9 +534,9 @@ def _collect_pushover(
 def write_pushover_results_npz(
     path: str,
     mesh_model: "MeshModel",
-    step_results: List[Dict[str, Any]],
+    step_results: list[dict[str, Any]],
     direction: str = "+X",
-    pushover_results: Optional[Dict[str, Any]] = None,
+    pushover_results: Optional[dict[str, Any]] = None,
     force_unit: str = "kN",
     length_unit: str = "m",
 ) -> str:
@@ -556,7 +560,7 @@ def write_pushover_results_npz(
     Returns:
         Absolute path to the saved file.
     """
-    arrays: Dict[str, np.ndarray] = {}
+    arrays: dict[str, np.ndarray] = {}
 
     # ── Geometry (from MeshModel) ─────────────────────────────
     # Build geometry from mesh_model using a minimal SAPModelData stub
@@ -564,7 +568,8 @@ def write_pushover_results_npz(
     # share the same field names for nodes/frames/areas, we can pass the
     # mesh_model directly via the mesh_model parameter.
     # We need an SAPModelData stub for the ``md`` parameter.
-    from ..model.sap_data import SAPModelData, Node, FrameElement, AreaElement
+    from ..model.sap_data import SAPModelData
+
     stub_md = SAPModelData(
         nodes=mesh_model.nodes,
         restraints={},
@@ -580,7 +585,7 @@ def write_pushover_results_npz(
     arrays.update(_collect_geometry(stub_md, mesh_model=mesh_model))
 
     # ── Pushover arrays ───────────────────────────────────────
-    analysis_types: List[str] = ["pushover"]
+    analysis_types: list[str] = ["pushover"]
     po_arrays = _collect_pushover(mesh_model, step_results, direction=direction)
 
     # Add global arrays from pushover_results if provided
@@ -598,7 +603,7 @@ def write_pushover_results_npz(
             # ordering and NaN-pad any recorded step missing from the
             # full arrays.
             recorded_steps = [int(sd.get("step", 0)) for sd in step_results]
-            n_aligned = len(recorded_steps)
+            len(recorded_steps)
             step_to_idx_full = {int(s): i for i, s in enumerate(steps_full)}
             full_disp = pushover_results.get("control_disp", [0.0] * n_full)
             full_shear = pushover_results.get("base_shear", [0.0] * n_full)
@@ -622,15 +627,15 @@ def write_pushover_results_npz(
             # Write aligned arrays directly into po_arrays so the
             # aligned values are actually used rather than being
             # shadowed by the step array from ``_collect_pushover``.
-            po_arrays[make_pushover_key(
-                direction, "pushover/{direction}/step")] = np.array(
-                aligned_steps, dtype=int)
-            po_arrays[make_pushover_key(
-                direction, "pushover/{direction}/control_disp")] = np.array(
-                aligned_disp, dtype=float)
-            po_arrays[make_pushover_key(
-                direction, "pushover/{direction}/base_shear")] = np.array(
-                aligned_shear, dtype=float)
+            po_arrays[make_pushover_key(direction, "pushover/{direction}/step")] = np.array(
+                aligned_steps, dtype=int
+            )
+            po_arrays[make_pushover_key(direction, "pushover/{direction}/control_disp")] = np.array(
+                aligned_disp, dtype=float
+            )
+            po_arrays[make_pushover_key(direction, "pushover/{direction}/base_shear")] = np.array(
+                aligned_shear, dtype=float
+            )
 
     arrays.update(po_arrays)
 
@@ -638,8 +643,7 @@ def write_pushover_results_npz(
     arrays["analysis_types"] = np.array(analysis_types, dtype=str)
     arrays["force_unit"] = np.array([force_unit], dtype=str)
     arrays["length_unit"] = np.array([length_unit], dtype=str)
-    arrays["created"] = np.array(
-        [datetime.datetime.now().isoformat()], dtype=str)
+    arrays["created"] = np.array([datetime.datetime.now().isoformat()], dtype=str)
 
     path = str(Path(path).resolve())
     np.savez_compressed(path, **arrays)

@@ -2,7 +2,7 @@
 
 import pickle
 from pathlib import Path
-from typing import Dict, Optional, Any, List
+from typing import Any, ClassVar, Optional
 
 from .sap_data import Section
 
@@ -23,19 +23,53 @@ class SectionLibrary:
 
     # Mapping from property name to length exponent
     # Add more names as needed from your database
-    _EXPONENT_MAP = {
+    _EXPONENT_MAP: ClassVar[dict] = {
         # exponent 1 (length)
-        'B': 1, 'BF': 1, 'D': 1, 'TW': 1, 'TF': 1, 'TFT': 1, 'TFB': 1,
-        'BFT': 1, 'BFB': 1, 'DIS': 1, 'R33': 1, 'R22': 1, 'OD': 1,
-        'TDES': 1, 'Y': 1, 'X': 1, 't3': 1, 't2': 1, 'depth': 1, 'width': 1,
-        'KDES': 1, 'tw': 1, 'tf': 1, 'tfb': 1, 't2b': 1, 'FilletRadius': 1,
-        'CGOffset3': 1, 'CGOffset2': 1,
+        "B": 1,
+        "BF": 1,
+        "D": 1,
+        "TW": 1,
+        "TF": 1,
+        "TFT": 1,
+        "TFB": 1,
+        "BFT": 1,
+        "BFB": 1,
+        "DIS": 1,
+        "R33": 1,
+        "R22": 1,
+        "OD": 1,
+        "TDES": 1,
+        "Y": 1,
+        "X": 1,
+        "t3": 1,
+        "t2": 1,
+        "depth": 1,
+        "width": 1,
+        "KDES": 1,
+        "tw": 1,
+        "tf": 1,
+        "tfb": 1,
+        "t2b": 1,
+        "FilletRadius": 1,
+        "CGOffset3": 1,
+        "CGOffset2": 1,
         # exponent 2 (area)
-        'A': 2, 'AS2': 2, 'AS3': 2,
+        "A": 2,
+        "AS2": 2,
+        "AS3": 2,
         # exponent 3 (section moduli)
-        'Z33': 3, 'Z22': 3, 'S33POS': 3, 'S22POS': 3, 'S33NEG': 3, 'S22NEG': 3,
+        "Z33": 3,
+        "Z22": 3,
+        "S33POS": 3,
+        "S22POS": 3,
+        "S33NEG": 3,
+        "S22NEG": 3,
         # exponent 4 (moments of inertia, torsion constant)
-        'I33': 4, 'I22': 4, 'J': 4, 'TorsConst': 4, 'Cw': 4,
+        "I33": 4,
+        "I22": 4,
+        "J": 4,
+        "TorsConst": 4,
+        "Cw": 4,
     }
 
     # Conversion factor from inches to mm (for exponent 1)
@@ -46,7 +80,7 @@ class SectionLibrary:
     FOOT_TO_CM = 30.48
     FOOT_TO_M = 0.3048
 
-    def __init__(self, db_path: Path, target_units: str = 'mm'):
+    def __init__(self, db_path: Path, target_units: str = "mm"):
         """Load the pickle file and set target unit system.
 
         Args:
@@ -56,24 +90,24 @@ class SectionLibrary:
         """
         self.db_path = db_path
         self.target_units = target_units.lower()
-        self._catalogues: Dict[str, Dict] = {}
+        self._catalogues: dict[str, dict] = {}
         self._load()
 
     def _load(self) -> None:
-        with open(self.db_path, 'rb') as f:
+        with open(self.db_path, "rb") as f:
             self._catalogues = pickle.load(f)
 
-    def list_catalogues(self) -> List[str]:
+    def list_catalogues(self) -> list[str]:
         return list(self._catalogues.keys())
 
-    def get_section_properties(self, name: str) -> Optional[Dict[str, Any]]:
+    def get_section_properties(self, name: str) -> Optional[dict[str, Any]]:
         """Return raw properties dict (with units info) for a section name."""
         for cat_name, cat_data in self._catalogues.items():
-            sections_dict = cat_data.get('SECTIONS', cat_data)
+            sections_dict = cat_data.get("SECTIONS", cat_data)
             if name in sections_dict:
                 props = sections_dict[name].copy()
-                props['_catalogue'] = cat_name
-                props['_length_units'] = cat_data.get('LENGTH_UNITS', 'm')
+                props["_catalogue"] = cat_name
+                props["_length_units"] = cat_data.get("LENGTH_UNITS", "m")
                 return props
         return None
 
@@ -90,13 +124,13 @@ class SectionLibrary:
             return val
 
         # Determine conversion factor
-        if from_units == 'in' and self.target_units == 'mm':
-            factor = self.INCH_TO_MM ** exponent
-        elif from_units == 'in' and self.target_units == 'm':
-            factor = self.INCH_TO_M ** exponent
-        elif from_units == 'mm' and self.target_units == 'in':
+        if from_units == "in" and self.target_units == "mm":
+            factor = self.INCH_TO_MM**exponent
+        elif from_units == "in" and self.target_units == "m":
+            factor = self.INCH_TO_M**exponent
+        elif from_units == "mm" and self.target_units == "in":
             factor = (1.0 / self.INCH_TO_MM) ** exponent
-        elif from_units == 'm' and self.target_units == 'in':
+        elif from_units == "m" and self.target_units == "in":
             factor = (1.0 / self.INCH_TO_M) ** exponent
         else:
             factor = 1.0  # unknown units, no conversion
@@ -111,9 +145,9 @@ class SectionLibrary:
         if not props:
             return section
 
-        from_units = props.pop('_length_units', 'mm')
+        from_units = props.pop("_length_units", "mm")
         # Remove internal marker
-        props.pop('_catalogue', None)
+        props.pop("_catalogue", None)
 
         # Process all known properties using the exponent map
         for prop_name, exponent in self._EXPONENT_MAP.items():
@@ -126,19 +160,18 @@ class SectionLibrary:
 
             # Map to Section fields (use same name where possible)
             # Some property names differ between database and Section dataclass
-            if prop_name == 'D':
+            if prop_name == "D":
                 section.depth = converted
-            elif prop_name == 'BF' or prop_name == 'B':
+            elif prop_name in {"BF", "B"}:
                 section.width = converted
-            elif prop_name == 'TW':
+            elif prop_name == "TW":
                 section.tw = converted
-            elif prop_name == 'TF':
+            elif prop_name == "TF":
                 section.tf = converted
-            elif prop_name in ('Z33', 'Z22', 'I33', 'I22', 'J', 'A'):
+            elif prop_name in ("Z33", "Z22", "I33", "I22", "J", "A"):
                 setattr(section, prop_name, converted)
             # Add more mappings as needed
 
         # Set manufacturer name
-        section.manufacturer = props.get('_catalogue', 'unknown')
+        section.manufacturer = props.get("_catalogue", "unknown")
         return section
-
