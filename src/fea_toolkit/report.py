@@ -404,7 +404,6 @@ def generate_report(
     # ── Extract results ──────────────────────────────────────
     modal_result = _man_results["ModalAnalysis"].data
     modal = modal_result["modal"]
-    modal_result["shapes"]
     if log:
         log.info("modal", f"{n_modes} modes, T1={modal['periods'][0]:.3f}s")
 

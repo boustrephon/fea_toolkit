@@ -2067,7 +2067,6 @@ def animate_pushover_deformation(
                     step_shell_cols = shell_cols_per_step[idx]
                     new_pts = []
                     new_fcolors = []
-                    len(shell_faces_data)
                     for aid in shell_faces_data:
                         if aid in step_shell_pts:
                             verts = step_shell_pts[aid]
@@ -5640,7 +5639,6 @@ def _plot_moment_tubes(
         tube = poly.tube(radius=radius)
         plotter.add_mesh(tube, color=colour, smooth_shading=False, lighting=False)
 
-    "Moment" if quantity.startswith("M") else "Force"
     plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)", position="lower_edge", font_size=10)
     if title:
         plotter.add_text(title, position="upper_edge", font_size=12)
@@ -6521,8 +6519,6 @@ def plot_npz_moment_3d(
                 )
                 first = False
 
-    quantity.startswith("M")
-
     for idx, ed in enumerate(elem_data):
         v_i = ed.get(q_i, np.nan)
         v_j = ed.get(q_j, np.nan)
@@ -6587,7 +6583,6 @@ def plot_npz_moment_3d(
             plotter.add_mesh(cyl, color=c, opacity=0.5, show_edges=False, lighting=False)
 
     # Legend (text, not scalar bar — colours are explicit RGB, not a colormap)
-    "Moment" if quantity.startswith("M") else "Force"
     plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)", position="lower_edge", font_size=14)
 
     plotter.add_axes()

@@ -907,7 +907,6 @@ def compute_linear_storey_responses(
     """
     config = {"element_type": "elasticBeamColumn", "verbose": False}
     modal = modal_result["modal"]
-    modal_result["shapes"]
 
     all_disp: dict[str, pd.DataFrame] = {}
     all_drift: dict[str, pd.DataFrame] = {}

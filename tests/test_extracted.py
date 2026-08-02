@@ -758,8 +758,6 @@ class TestTclExport:
                 assert len(tokens) == 5, (
                     f"Expected 5 tokens in beamIntegration line, got {len(tokens)}: {tokens}"
                 )
-                tokens[2]
-                tokens[3]
                 npts = tokens[4]
                 assert npts == "5", f"Expected 5 integration points, got {npts}"
                 break

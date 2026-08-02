@@ -276,7 +276,6 @@ class TestProfilePoints:
         h = depth / 2.0
         w = bf / 2.0
         wi = tw / 2.0
-        h - tf
         return [
             (-wi, -h),
             (-wi, -h + tf),
@@ -294,7 +293,6 @@ class TestProfilePoints:
 
     def _box(self, depth, bf, tf, tw):
         h = depth / 2.0
-        bf / 2.0
         wi = tw / 2.0
         return [(-wi, -h), (-wi, h), (wi, h), (wi, -h)]
 
