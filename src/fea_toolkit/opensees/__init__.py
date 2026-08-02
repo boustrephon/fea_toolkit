@@ -19,6 +19,7 @@ pushover — 4-direction pushover runner with gravity gravity + lateral load seq
 from .analysis_builder import AnalysisBuilder, run_modal
 from .builder import (
     compute_lateral_loads,
+    dynamic_time_history_tcl,
     export_model_to_tcl,
     modal_to_lateral_loads,
     pushover_tcl,
@@ -43,6 +44,7 @@ __all__ = [
     "RecordingOpenSees",
     "XaraTclRunner",
     "compute_lateral_loads",
+    "dynamic_time_history_tcl",
     "export_mesh_model_to_tcl",
     # Legacy builder (Tcl export)
     "export_model_to_tcl",
