@@ -298,11 +298,10 @@ def export_model_to_tcl(
         # Map area section names to a _shell_sec_tag dict; prefer
         # LayeredShellSection if available, else ElasticMembranePlate.
         _shell_sec_tag: dict[str, int] = {}
-        _next_shell_tag = (
-            max(dict(**_mat_tag, **_sec_tag, **_nd_mat_tag).values()) + len(_nd_materials) + 1
-            if (_mat_tag or _sec_tag or _nd_mat_tag)
-            else 1000
+        _all_tag_vals = (
+            list(_mat_tag.values()) + list(_sec_tag.values()) + list(_nd_mat_tag.values())
         )
+        _next_shell_tag = max(_all_tag_vals) + len(_nd_materials) + 1 if _all_tag_vals else 1000
 
         # Emit layered shell sections from model data
         for ls_name, ls_sec in (getattr(model_data, "layered_shell_sections", {})).items():
@@ -911,9 +910,9 @@ def dynamic_time_history_tcl(
 
     # Rayleigh coefficients from the two periods.
     # C = a0 * M + a1 * K  with  a0 = 4π ζ / (T1 + T2),
-    # a1 = ζ * T1 * T2 / π (approximation valid for T1/T2 ≤ ~10).
+    # a1 = ζ * T1 * T2 / (π * (T1 + T2)) — exact two-period formula.
     a0 = 4.0 * math.pi * damping / (period_1 + period_2)
-    a1 = damping * period_1 * period_2 / math.pi
+    a1 = damping * period_1 * period_2 / (math.pi * (period_1 + period_2))
 
     lines: list[str] = []
 

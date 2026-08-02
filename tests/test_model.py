@@ -1474,7 +1474,8 @@ class TestSplitElementsAtFrames:
         node_pairs = {(c.node_i, c.node_j) for c in children}
         assert ("1", "3") in node_pairs, f"Expected child 1→3, got {node_pairs}"
         assert ("3", "2") in node_pairs, f"Expected child 3→2, got {node_pairs}"
-        assert ("5") not in str(node_pairs), "Node 5 should have been deduped"
+        child_endpoints = {nid for pair in node_pairs for nid in pair}
+        assert "5" not in child_endpoints, "Node 5 should have been deduped"
 
         # Distinct t values → all kept (sanity: no accidental dedup)
         # Node 6 at (3,0,0) → t=0.3, Node 7 at (7,0,0) → t=0.7
