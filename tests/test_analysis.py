@@ -2,7 +2,6 @@
 static.py, rs.py, pushover.py, manager.py).
 """
 
-import numpy as np
 import pytest
 
 from fea_toolkit.analysis.base import (
@@ -19,12 +18,23 @@ from fea_toolkit.analysis.modal import ModalAnalysis
 from fea_toolkit.analysis.pushover import PushoverAnalysis
 from fea_toolkit.analysis.rs import ResponseSpectrumAnalysis
 from fea_toolkit.analysis.static import StaticAnalysis
+from fea_toolkit.model.mesh_model import MeshModel
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 
-class _FakeMeshModel:
-    """Minimal stand-in for MeshModel — just enough to construct analyses."""
+class _FakeMeshModel(MeshModel):
+    """Minimal MeshModel stand-in — all collections empty, no OpenSees state."""
+
+    def __init__(self):
+        super().__init__(
+            nodes={},
+            frame_elements={},
+            frame_assignments={},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+        )
 
 
 class _FakeAnalysis(Analysis):
@@ -55,11 +65,16 @@ class _DepAnalysis(Analysis):
 
     def __init__(self, mesh_model, name=None, config=None):
         super().__init__(mesh_model, name, config)
-        self._modal_result = None  # manager.inject_dependencies sets this
+        self._modal_result = None  # set via _accept_dependency hook
 
     @classmethod
     def defaults(cls) -> dict:
         return {}
+
+    def _accept_dependency(self, dep_result, dep_type):
+        # Only accept results of the declared dependency type
+        if dep_type is _FakeAnalysis and self._modal_result is None:
+            self._modal_result = dep_result
 
     @property
     def requires(self) -> list:
@@ -144,7 +159,7 @@ class TestAnalysisDefaults:
 class TestAnalysis:
     def test_cannot_instantiate_abc(self):
         with pytest.raises(TypeError):
-            Analysis(_FakeMeshModel())  # type: ignore
+            Analysis(_FakeMeshModel())  # type: ignore[abstract]  # deliberate
 
     def test_concrete_subclass(self):
         a = _FakeAnalysis(_FakeMeshModel(), name="test", config={"key": 1})
@@ -265,27 +280,29 @@ class TestAnalysisSignatures:
         assert "df_linear" in a.provides
 
     def test_rs_analysis_init(self):
+        dummy = AnalysisResult(name="dummy", analysis_type="ModalAnalysis", data={})
         a = ResponseSpectrumAnalysis(
             _FakeMeshModel(),
-            modal_result=None,
+            modal_result=dummy,
             direction="x",
-            T_spec=np.array([0.0, 1.0]),
-            Sa_spec=np.array([1.0, 1.0]),
+            T_spec=[0.0, 1.0],
+            Sa_spec=[1.0, 1.0],
         )
         assert a.requires == [ModalAnalysis]
-        assert a._modal_result is None  # not injected yet
+        assert a._modal_result is dummy  # wired from constructor
         assert "rs_nodal_displacements" in a.provides
 
     def test_pushover_analysis_init(self):
+        dummy = AnalysisResult(name="dummy", analysis_type="ModalAnalysis", data={})
         a = PushoverAnalysis(
             _FakeMeshModel(),
-            modal_result=None,
+            modal_result=dummy,
             lateral_load_type="mode1",
             rs_modal_base_shear={"X": [1.0], "Y": [1.0]},
         )
         assert a.requires == [ModalAnalysis]
         assert a.lateral_load_type == "mode1"
-        assert a._modal_result is None
+        assert a._modal_result is dummy  # wired from constructor
         assert a.rs_modal_base_shear == {"X": [1.0], "Y": [1.0]}
 
     def test_pushover_defaults(self):
