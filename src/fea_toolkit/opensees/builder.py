@@ -656,6 +656,8 @@ def pushover_tcl(
     gravity_loads: Optional[dict[int, tuple]] = None,
     gravity_pattern: str = "",
     adaptive: bool = False,
+    base_node_tag: int = 1,
+    push_elem_tag: int = 1,
 ) -> str:
     """Generate a pushover analysis block for Xara/OpenSeesRT Tcl.
 
@@ -678,6 +680,8 @@ def pushover_tcl(
             chain (Newton → KrylovNewton → ModifiedNewton with
             automatic step-size reduction) suitable for highly
             nonlinear pushover analyses.
+        base_node_tag: Node tag for the wall/base reaction recorder.
+        push_elem_tag: Element tag for the wall force recorder.
 
     Returns:
         Tcl commands as a string.
@@ -733,8 +737,8 @@ def pushover_tcl(
         [
             "",
             f"recorder Node -file wall_disp.out -time -node {control_node} -dof {dof} disp",
-            "recorder Node -file wall_reaction.out -time -node 1 -dof 1 reaction",
-            "recorder Element -file wall_forces.out -ele 1 force",
+            f"recorder Node -file wall_reaction.out -time -node {base_node_tag} -dof 1 reaction",
+            f"recorder Element -file wall_forces.out -ele {push_elem_tag} force",
             'puts "-> Recorders set up, analysis begins..."',
             "flush stdout",
         ]
