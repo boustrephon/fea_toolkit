@@ -604,11 +604,10 @@ def plot_storey_forces(
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, sharey=True)
 
     # Resolve elevation column first, then exclude it from data columns
-    elev_candidates = [c for c in df_shear.columns if "Elevation" in c]
-    if not elev_candidates:
+    elev_col_s = _resolve_elevation_column(df_shear)
+    if elev_col_s is None:
         return None
-    elev_col_s = elev_candidates[0]
-    elev_col_m = ([c for c in df_moment.columns if "Elevation" in c] or [None])[0]
+    elev_col_m = _resolve_elevation_column(df_moment)
 
     base_skip = {"Storey", elev_col_s}
     if elev_col_m and elev_col_m != elev_col_s:
@@ -686,6 +685,17 @@ def plot_storey_forces(
     return fig
 
 
+def _resolve_elevation_column(df: pd.DataFrame) -> Optional[str]:
+    """Return the elevation column name, or ``None`` if not found.
+
+    Prefers the exact column name ``"Elevation"``; otherwise returns
+    the first column whose name contains ``"Elevation"``.
+    """
+    if "Elevation" in df.columns:
+        return "Elevation"
+    return next((c for c in df.columns if "Elevation" in c), None)
+
+
 def plot_storey_displacements(
     df_disp: pd.DataFrame,
     df_drift: pd.DataFrame,
@@ -729,24 +739,8 @@ def plot_storey_displacements(
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, sharey=True)
 
     # Resolve elevation column
-    elev_col_disp = (
-        "Elevation"
-        if "Elevation" in df_disp.columns
-        else (
-            next(c for c in df_disp.columns if "Elevation" in c)
-            if any("Elevation" in c for c in df_disp.columns)
-            else None
-        )
-    )
-    elev_col_drift = (
-        "Elevation"
-        if "Elevation" in df_drift.columns
-        else (
-            next(c for c in df_drift.columns if "Elevation" in c)
-            if any("Elevation" in c for c in df_drift.columns)
-            else None
-        )
-    )
+    elev_col_disp = _resolve_elevation_column(df_disp)
+    elev_col_drift = _resolve_elevation_column(df_drift)
 
     if elev_col_disp is None or elev_col_drift is None:
         return None
