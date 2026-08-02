@@ -876,6 +876,115 @@ def pushover_tcl(
     return "\n".join(lines)
 
 
+def dynamic_time_history_tcl(
+    *,
+    ground_motion_file: str,
+    output_prefix: str,
+    dt: float = 0.005,
+    num_steps: int = 1000,
+    damping: float = 0.05,
+    period_1: float = 0.2,
+    period_2: float = 2.0,
+    direction: str = "X",
+    gravity_loads: Optional[Dict[int, tuple]] = None,
+) -> str:
+    """Generate a nonlinear time-history analysis block for OpenSees Tcl.
+
+    Returns a Tcl code string suitable for passing as *tcl_suffix* to
+    :func:`export_model_to_tcl`.
+
+    Args:
+        ground_motion_file: Path to a text file with one acceleration
+            value per line (consistent units with the model).
+        output_prefix: Prefix for recorder output files (e.g.
+            ``"output/dyn"`` → ``dyn_disp.out``, ``dyn_env_disp.out``).
+            The directory must already exist.
+        dt: Time step of the ground motion record (model time units).
+        num_steps: Number of analysis steps.
+        damping: Rayleigh damping ratio for the two retained modes.
+        period_1: First Rayleigh period (seconds).
+        period_2: Second Rayleigh period (seconds).
+        direction: Excitation direction — ``"X"`` (dof 1), ``"Y"``
+            (dof 2) or ``"Z"`` (dof 3).
+        gravity_loads: Dict mapping node_tag -> (fx, fy, fz) for the
+            gravity load pattern, applied and locked before the
+            transient phase.
+
+    Returns:
+        Tcl commands as a string.
+    """
+    dof_map = {"X": 1, "Y": 2, "Z": 3}
+    dof = dof_map.get(direction.upper(), 1)
+
+    # Rayleigh coefficients from the two periods.
+    # C = a0 * M + a1 * K  with  a0 = 4π ζ / (T1 + T2),
+    # a1 = ζ * T1 * T2 / π (approximation valid for T1/T2 ≤ ~10).
+    a0 = 4.0 * math.pi * damping / (period_1 + period_2)
+    a1 = damping * period_1 * period_2 / math.pi
+
+    lines: List[str] = []
+
+    # ── Step A: Gravity ──
+    if gravity_loads:
+        lines.append("")
+        lines.append("# ── Step A: Gravity analysis ──")
+        lines.append('pattern Plain 1 "Linear" {')
+        for nid, (fx, fy, fz) in gravity_loads.items():
+            lines.append(f"    load {nid} {fx:g} {fy:g} {fz:g} 0 0 0")
+        lines.append("}")
+        lines.extend([
+            "constraints Transformation",
+            "numberer RCM",
+            "system BandGeneral",
+            "test NormDispIncr 1.0e-3 20 0",
+            "algorithm Newton",
+            "integrator LoadControl 0.05",
+            "analysis Static",
+            "analyze 20",
+            "loadConst -time 0.0",
+            'puts "-> Gravity loads locked."',
+            "flush stdout",
+        ])
+
+    # ── Step B: Transient analysis ──
+    lines.extend([
+        "",
+        "puts \"-> Gravity complete, starting time-history analysis...\"",
+        "flush stdout",
+        "",
+        "# ── Step B: Transient dynamic analysis ──",
+        "constraints Transformation",
+        "numberer RCM",
+        "system BandGeneral",
+        f"rayleigh {a0:.8g} 0.0 {a1:.8g} 0.0",
+        "",
+        f"timeSeries Path 2 -dt {dt:g} -filePath {ground_motion_file} -factor 1.0",
+        f"pattern UniformExcitation 2 {dof} -accel 2",
+        "",
+    ])
+
+    # ── Recorders (BEFORE analysis) ──
+    lines.extend([
+        "set nodeTags [getNodeTags]",
+        f"recorder Node -file {output_prefix}_disp.out -time "
+        f"-node $nodeTags -dof 1 2 3 disp",
+        f"recorder EnvelopeNode -file {output_prefix}_env_disp.out -time "
+        f"-node $nodeTags -dof 1 2 3 disp",
+        'puts "-> Recorders set up, analysis begins..."',
+        "flush stdout",
+        "",
+        "test EnergyIncr 1.0e-6 200 0",
+        "algorithm Newton",
+        "integrator Newmark 0.5 0.25",
+        "analysis Transient",
+        f"analyze {num_steps} {dt:g}",
+        "puts \"Time-history analysis complete.\"",
+        "flush stdout",
+    ])
+
+    return "\n".join(lines)
+
+
 def mesh_model_to_gravity_loads(
     mesh_model: "MeshModel",
     pattern_combination: Optional[Dict[str, float]] = None,
