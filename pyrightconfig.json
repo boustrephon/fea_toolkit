@@ -7,6 +7,7 @@
     "docs"
   ],
   "typeCheckingMode": "basic",
+  "pythonVersion": "3.9",
   "reportOptionalMemberAccess": "warning",
   "reportOptionalSubscript": "warning",
   "reportOptionalOperand": "warning",
