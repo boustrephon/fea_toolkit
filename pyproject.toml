@@ -44,3 +44,62 @@ addopts = "-v --tb=short"
 filterwarnings = [
     "ignore::UserWarning:pyvista.jupyter.notebook",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+exclude = ["local", "docs", "examples", "typings"]
+
+[tool.ruff.lint]
+select = [
+    "F",     # Pyflakes: unused imports, undefined names
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "I",     # isort: import ordering
+    "UP",    # pyupgrade: modernization (3.9-compatible subset via ignore)
+    "SIM",   # flake8-simplify
+    "B",     # flake8-bugbear
+    "RUF",   # Ruff-specific rules
+    "PERF",  # perflint
+    "C4",    # flake8-comprehensions (C400-C419)
+    "PL",    # pylint (useful subset via ignore)
+    "G",     # flake8-logging-format
+    "PIE",   # flake8-pie
+    "FURB",  # refurb
+    "DTZ",   # flake8-datetimez
+    "ISC",   # flake8-implicit-str-concat
+]
+ignore = [
+    # Python 3.10+ syntax - project requires-python is >=3.9 (.clinerules §5.1)
+    "UP007",   # Use `X | Y` for type annotations (needs 3.10)
+    "UP045",   # Use `X | None` for type annotations (needs 3.10)
+    "FA100",   # Requires `from __future__ import annotations` project-wide decision
+    # Intentional patterns in analysis/data-parsing code
+    "DTZ005",  # datetime.now() without tz: analysis scripts use local wall-clock time
+    "RUF013",  # Implicit Optional in dataclass field defaults (pervasive; revisit later)
+    "PLC0415", # Conditional imports are intentional for optional deps (gmsh, pyvista backends)
+    "PLR2004", # Magic-number comparisons are scientific tolerances (1e-12, 1e-6, ...)
+    "PLR0913", # Too many args in function signatures - legitimate for builder/config APIs
+    "PLR0917", # Too many positional args - same rationale
+    "PLR0912", # Too many branches - legitimately complex analysis dispatch
+    "PLR0911", # Too many return statements - legitimately multi-branch analysis APIs
+    "PLR0915", # Too many statements - large domain-build methods are cohesive units
+    "RUF046",  # int(int_val) casts - defensive numpy interop, not real issues
+    "ISC004",  # Implicit string concat in collections - intentional in docstring tables
+    "PLR6201", # Literal membership tests (2-element tuples) - set is not faster here
+    "RUF001",  # Ambiguous unicode in strings - intentional × − – symbols in labels/names
+    "RUF002",  # Ambiguous unicode in docstrings - intentional × − – symbols in docs
+    "RUF003",  # Ambiguous unicode in comments - same rationale
+    "B007",    # Unused loop variables - many are count-only loops by design
+    "E501",    # Long lines sometimes unavoidable (URLs, scientific formulas)
+    "E701",    # Multiple statements on one line (colon) - compact a/b branches by design
+    "E702",    # Multiple statements on one line (semicolon) - compact one-liners by design
+    "E402",    # Module-level imports not at top - conditional imports for optional deps
+    "PERF203", # try/except in loop is sometimes required (probe optional data)
+    "PLE1205", # Logging format arg mismatch - not functionally critical
+    "B028",    # `warnings.warn` without `stacklevel` - low-priority improvement
+    # Performance micro-optimizations that are not worth the churn
+    "PERF102", # manually iterating dict items - idiomatic and clear
+    "PERF401", # list.extend instead of comprehension - comprehension is clear
+    "PERF403", # manual dict building - not hot paths
+]
