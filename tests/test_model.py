@@ -716,7 +716,6 @@ class TestGetSAPVecxz:
     def test_with_angle(self):
         """Rotation should change vecxz."""
         vec_x = np.array([5.0, 0.0, 0.0])
-        get_SAP_vecxz(vec_x, angle=0.0)
         vecxz_90 = get_SAP_vecxz(vec_x, angle=90.0)
         # With 90° rotation about X, vecxz should become (0, 0, -1)
         expected = np.array([0.0, 0.0, -1.0])
@@ -4227,21 +4226,8 @@ class TestBuilderHingeModel:
 
     def test_default_hinge_model_is_fiber(self):
         """Default config uses fiber (distributed plasticity)."""
-        from fea_toolkit.model.sap_data import SAPModelData
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
-        SAPModelData(
-            nodes={},
-            restraints={},
-            materials={},
-            sections={},
-            frame_elements={},
-            area_elements={},
-            frame_assignments={},
-            area_assignments={},
-            groups={},
-            frame_auto_mesh={},
-        )
         b = AnalysisBuilder.__new__(AnalysisBuilder)
         b.config = {}
         b._set_defaults()
@@ -5282,7 +5268,6 @@ class TestBilinearization:
             f"Expected composite_stiffness_change, got {method_custom}"
         )
         # Both should return the same stiffness-change result
-        int(np.argmax(S_a))
         assert 0.040 <= S_dy_default <= 0.055, (
             f"Expected S_dy in [0.040, 0.055], got {S_dy_default:.6f}"
         )

@@ -6,17 +6,18 @@ from typing import Optional
 
 import numpy as np
 
+from ..utils import g_from_units
+
 
 def run_pushover_4dir(
     mesh_model,
     modal_result: dict,
-    gravity_patterns: dict[str, float] = None,
+    gravity_patterns: Optional[dict[str, float]] = None,
     lateral_load_type: str = "uniform",
     max_disp_val: float = 0.30,
     num_steps: int = 50,
     tg: float = 0.25,
     alpha_max_rare: float = 0.50,
-    g: float = 9.81,
     zeta: float = 0.05,
     verbose: bool = False,
     brace_type: str = "truss",
@@ -47,8 +48,6 @@ def run_pushover_4dir(
         Characteristic period for GB 50011 spectrum (s).
     alpha_max_rare : float
         Seismic influence coefficient (rare event).
-    g : float
-        Gravitational acceleration (m/s²).
     zeta : float
         Damping ratio.
     verbose : bool
@@ -87,6 +86,9 @@ def run_pushover_4dir(
     gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
     eta_1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
     eta_2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))
+
+    # Derive gravity acceleration from the model's unit system.
+    g = g_from_units(mesh_model.units)
 
     roof_node = max(mesh_model.nodes.values(), key=lambda n: n.z)
     roof_tag = roof_node.node_tag
@@ -154,7 +156,7 @@ def run_pushover_4dir(
             print_progress=False,
         )
 
-        adrs = ab.pushover_to_adrs(results, modal, shapes, direction=cfg["dir"], g=g)
+        adrs = ab.pushover_to_adrs(results, modal, shapes, direction=cfg["dir"])
         pp = ab.compute_performance_point(
             results,
             modal,
@@ -162,7 +164,6 @@ def run_pushover_4dir(
             T_spec,
             Sa_spec,
             direction=cfg["dir"],
-            g=g,
         )
 
         # Validate mode selection against RS

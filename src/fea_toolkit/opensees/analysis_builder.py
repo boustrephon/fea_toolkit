@@ -3370,8 +3370,6 @@ class AnalysisBuilder:
         if self.config.get("verbose"):
             print(f"Running modal analysis for {num_modes} modes...")
 
-        g_from_units(self.mesh_model.units)
-
         # ── Ensure seismic masses are present ────────────────────
         _has_mass = False
         for t in ops.getNodeTags():
@@ -4675,7 +4673,6 @@ class AnalysisBuilder:
                     if not getattr(ae, "inactive", False)
                 }
             # Collect node tags from selected frames/areas only
-            record_node_tags: set[int] = set()
             for eid in record_frames:
                 fe = self.mesh_model.frame_elements.get(eid)
                 if fe is None:

@@ -271,9 +271,9 @@ def _build_centreline_mesh(builder, elements, model):
 
 def plot_interactive_viewer(
     builder,
-    combo_forces: dict[str, dict[int, dict[str, float]]] = None,
-    combo_results: dict[str, dict[str, Any]] = None,
-    initial_combo: str = None,
+    combo_forces: Optional[dict[str, dict[int, dict[str, float]]]] = None,
+    combo_results: Optional[dict[str, dict[str, Any]]] = None,
+    initial_combo: Optional[str] = None,
     initial_quantity: str = "Mz",
     selection: Optional["Selection"] = None,
     notebook: bool = False,
@@ -488,7 +488,6 @@ def plot_interactive_viewer(
         flag_actor_ref["actor"] = actor
 
         # Add/replace legend text
-        "Moment" if quantity.startswith("M") else "Force"
         unit = moment_unit if quantity.startswith("M") else force_unit
         legend_actor_ref["actor"] = plotter.add_text(
             f"{quantity} [{unit}]  (red = +ve, blue = −ve)",
