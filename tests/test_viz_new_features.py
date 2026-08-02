@@ -44,7 +44,7 @@ def _make_pushover_data(frame_my_i, frame_mz_i, frame_my_j, frame_mz_j):
         "frame_node_j": np.array([2]),
         "frame_sec_name": np.array(["COL"]),
         "frame_parent_sap_id": np.array([""]),
-        "pushover/+X/step": np.array([0, 1]),
+        "pushover/+X/step": np.arange(n_steps),
         "pushover/+X/frame_sap_id": np.array(["F1"]),
         "pushover/+X/frame_fx_i": zero_f,
         "pushover/+X/frame_fy_i": zero_f,

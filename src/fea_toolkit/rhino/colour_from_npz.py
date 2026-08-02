@@ -139,7 +139,7 @@ def colour_from_npz(
 
     # Load NPZ data
     sap_values, (vmin, vmax), _meta = _load_npz_quantities(
-        npz_path, quantity, use_local, combo=combo
+        npz_path, quantity, use_local, case=combo
     )
     if not sap_values:
         print(f"No {quantity} data found in {npz_path}")

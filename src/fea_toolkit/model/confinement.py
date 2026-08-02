@@ -133,7 +133,7 @@ class ConfinementData:
         if self.eps_su <= 0:
             raise ValueError(f"eps_su must be > 0, got {self.eps_su}")
         # For spiral, require compatible core dimensions
-        if self.tie_config == "spiral" and self.core_bc <= 0 and self.core_dc <= 0:
+        if self.tie_config == "spiral" and (self.core_bc <= 0 or self.core_dc <= 0):
             raise ValueError(
                 f"Spiral tie_config requires positive core_bc and core_dc; "
                 f"got core_bc={self.core_bc}, core_dc={self.core_dc}"
@@ -250,7 +250,9 @@ def mander_confined(data: ConfinementData) -> ConfinementResult:
             rho_cc = (n_longs * Al) / Ac if Ac > 0 else 0.0
         # Clamp ke to the physically admissible range (0, 1] — a value
         # above 1.0 would indicate an over-counted longitudinal ratio.
-        _ke_raw = ((1.0 - s_prime / (2.0 * Ds)) ** 2 / (1.0 - rho_cc)) if Ds > 0 else 0.0
+        _ke_raw = (
+            ((1.0 - s_prime / (2.0 * Ds)) ** 2 / (1.0 - rho_cc)) if Ds > 0 and rho_cc < 1.0 else 0.0
+        )
         ke = min(max(_ke_raw, 0.0), 1.0)
         # Effective lateral confining stress (factored by ke)
         f_l = ke * 0.5 * rho_s * fyh
