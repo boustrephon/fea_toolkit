@@ -9,18 +9,14 @@ Tests exercise:
 """
 
 import os
-import sys
-import tempfile
-import math
-from typing import Dict, Optional
 
 import numpy as np
 import pytest
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Test 1: Section promotion from S2K parsing
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.filterwarnings("ignore::UserWarning")
 class TestSectionPromotion:
@@ -30,15 +26,13 @@ class TestSectionPromotion:
     @pytest.fixture(scope="class")
     def promotion_fixture_path(self) -> str:
         """Path to the minimal RC section promotion S2K fixture."""
-        return os.path.join(
-            os.path.dirname(__file__), "fixtures", "rc_section_promotion.s2k"
-        )
+        return os.path.join(os.path.dirname(__file__), "fixtures", "rc_section_promotion.s2k")
 
     def test_rc_section_promotion(self, promotion_fixture_path):
         """Parse fixture S2K and verify RC sections are promoted."""
         from fea_toolkit.io.s2k_parser import SAP2000Parser
         from fea_toolkit.model.sap_data import (
-            ConcreteRectangularSection, RectangularSection, ISection,
+            ConcreteRectangularSection,
         )
 
         parser = SAP2000Parser(promotion_fixture_path)
@@ -53,24 +47,24 @@ class TestSectionPromotion:
                 concrete_rect_count += 1
                 # Verify RC fiber patches produce 7 entries
                 patches = sec.to_fiber_patches(mat_tag=1)
-                assert len(patches) == 7, \
-                    f"Expected 7 RC patches for {name}, got {len(patches)}"
+                assert len(patches) == 7, f"Expected 7 RC patches for {name}, got {len(patches)}"
                 # Verify sensible defaults
                 assert sec.cover > 0, f"Cover missing for {name}"
                 assert sec.top_bars >= 4, f"Too few top bars for {name}"
                 assert sec.bot_bars >= 4, f"Too few bot bars for {name}"
                 assert sec.top_bar_dia > 0, f"Bar diameter missing for {name}"
 
-        assert concrete_rect_count > 0, \
+        assert concrete_rect_count > 0, (
             f"No ConcreteRectangularSections found (got {list(md.sections.keys())})"
-        print(f"  ✓ {concrete_rect_count} RC sections promoted, "
-              f"all with 7 fiber patches")
+        )
+        print(f"  ✓ {concrete_rect_count} RC sections promoted, all with 7 fiber patches")
 
     def test_steel_section_unaffected(self, promotion_fixture_path):
         """Steel and shell sections should not be promoted."""
         from fea_toolkit.io.s2k_parser import SAP2000Parser
         from fea_toolkit.model.sap_data import (
-            ConcreteRectangularSection, RectangularSection, ISection, ShellSection,
+            ISection,
+            ShellSection,
         )
 
         parser = SAP2000Parser(promotion_fixture_path)
@@ -80,19 +74,18 @@ class TestSectionPromotion:
         # FSEC1 should be ISection (steel)
         fsec1 = md.sections.get("FSEC1")
         assert fsec1 is not None, "FSEC1 section missing"
-        assert isinstance(fsec1, ISection), \
-            f"FSEC1 expected ISection, got {type(fsec1).__name__}"
+        assert isinstance(fsec1, ISection), f"FSEC1 expected ISection, got {type(fsec1).__name__}"
         # Steel fiber patches = 3
         patches = fsec1.to_fiber_patches(mat_tag=1)
-        assert len(patches) == 3, \
-            f"Expected 3 steel patches for FSEC1, got {len(patches)}"
+        assert len(patches) == 3, f"Expected 3 steel patches for FSEC1, got {len(patches)}"
 
         # Shell sections — single-word names to avoid S2K parser space-splitting
         for name in ["SlabConc", "WallBrick", "WallShear", "ASEC1"]:
             sec = md.sections.get(name)
             assert sec is not None, f"Section {name} missing"
-            assert isinstance(sec, ShellSection), \
+            assert isinstance(sec, ShellSection), (
                 f"{name} expected ShellSection, got {type(sec).__name__}"
+            )
 
         print("  ✓ Steel ISection and ShellSections unaffected")
 
@@ -100,6 +93,7 @@ class TestSectionPromotion:
 # ═══════════════════════════════════════════════════════════════════════════
 # Test 2: Tcl generation format
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestPushoverTclFormat:
     """Verify pushover_tcl() produces correctly formatted Tcl."""
@@ -109,26 +103,32 @@ class TestPushoverTclFormat:
         from fea_toolkit.opensees.builder import pushover_tcl
 
         tcl = pushover_tcl(
-            control_node=10, dof=1, max_disp=0.15, num_steps=50,
+            control_node=10,
+            dof=1,
+            max_disp=0.15,
+            num_steps=50,
         )
-        assert 'DisplacementControl 10 1' in tcl
+        assert "DisplacementControl 10 1" in tcl
 
     def test_recorder_output_files(self):
         """Recorder file references use hardcoded output filenames."""
         from fea_toolkit.opensees.builder import pushover_tcl
 
         tcl = pushover_tcl(
-            control_node=5, dof=2, max_disp=0.1, num_steps=30,
+            control_node=5,
+            dof=2,
+            max_disp=0.1,
+            num_steps=30,
             lateral_loads={5: (1.0, 0.0, 0.0)},
             gravity_loads={1: (0.0, 0.0, -1000.0)},
             adaptive=True,
         )
-        assert 'wall_disp.out' in tcl, "Missing disp recorder"
-        assert 'wall_reaction.out' in tcl, "Missing reaction recorder"
-        assert 'wall_forces.out' in tcl, "Missing element forces recorder"
+        assert "wall_disp.out" in tcl, "Missing disp recorder"
+        assert "wall_reaction.out" in tcl, "Missing reaction recorder"
+        assert "wall_forces.out" in tcl, "Missing element forces recorder"
         # In adaptive mode the control node is set via a variable
-        assert 'set control_node 5' in tcl, "Wrong control node"
-        assert 'set dof 2' in tcl, "Wrong DOF"
+        assert "set control_node 5" in tcl, "Wrong control node"
+        assert "set dof 2" in tcl, "Wrong DOF"
 
     def test_adaptive_vs_simple(self):
         """Adaptive mode includes fallback chain; simple mode does not."""
@@ -139,22 +139,30 @@ class TestPushoverTclFormat:
 
         # Adaptive
         tcl_a = pushover_tcl(
-            control_node=5, dof=1, max_disp=0.1, num_steps=30,
-            lateral_loads=lateral, gravity_loads=gravity,
+            control_node=5,
+            dof=1,
+            max_disp=0.1,
+            num_steps=30,
+            lateral_loads=lateral,
+            gravity_loads=gravity,
             adaptive=True,
         )
-        assert 'while {$currentDisp < $targetDisp}' in tcl_a
-        assert 'KrylovNewton' in tcl_a
-        assert 'ModifiedNewton' in tcl_a
+        assert "while {$currentDisp < $targetDisp}" in tcl_a
+        assert "KrylovNewton" in tcl_a
+        assert "ModifiedNewton" in tcl_a
 
         # Simple
         tcl_s = pushover_tcl(
-            control_node=5, dof=1, max_disp=0.1, num_steps=30,
-            lateral_loads=lateral, gravity_loads=gravity,
+            control_node=5,
+            dof=1,
+            max_disp=0.1,
+            num_steps=30,
+            lateral_loads=lateral,
+            gravity_loads=gravity,
             adaptive=False,
         )
-        assert 'while' not in tcl_s
-        assert 'analyze 30' in tcl_s
+        assert "while" not in tcl_s
+        assert "analyze 30" in tcl_s
 
     # Note: test_element_type_param_documented was removed because
     # pushover_tcl() no longer accepts an element_type parameter.
@@ -166,32 +174,39 @@ class TestPushoverTclFormat:
         from fea_toolkit.opensees.builder import pushover_tcl
 
         tcl = pushover_tcl(
-            control_node=5, dof=1, max_disp=0.1, num_steps=10,
+            control_node=5,
+            dof=1,
+            max_disp=0.1,
+            num_steps=10,
             gravity_loads={1: (0.0, 0.0, -5000.0), 2: (0.0, 0.0, -2000.0)},
         )
         assert 'pattern Plain 1 "Linear"' in tcl
-        assert 'load 1 0 0 -5000 0 0 0' in tcl
-        assert 'load 2 0 0 -2000 0 0 0' in tcl
-        assert 'integrator LoadControl 0.05' in tcl
-        assert 'analyze 20' in tcl
-        assert 'loadConst -time 0.0' in tcl
+        assert "load 1 0 0 -5000 0 0 0" in tcl
+        assert "load 2 0 0 -2000 0 0 0" in tcl
+        assert "integrator LoadControl 0.05" in tcl
+        assert "analyze 20" in tcl
+        assert "loadConst -time 0.0" in tcl
 
     def test_lateral_loads_format(self):
         """Lateral loads should be pattern Plain 2 with DisplacementControl."""
         from fea_toolkit.opensees.builder import pushover_tcl
 
         tcl = pushover_tcl(
-            control_node=10, dof=1, max_disp=0.2, num_steps=40,
+            control_node=10,
+            dof=1,
+            max_disp=0.2,
+            num_steps=40,
             lateral_loads={10: (1.0, 0.0, 0.0)},
         )
         assert 'pattern Plain 2 "Linear"' in tcl
-        assert 'load 10 1 0 0 0 0 0' in tcl
-        assert 'DisplacementControl 10 1' in tcl
+        assert "load 10 1 0 0 0 0 0" in tcl
+        assert "DisplacementControl 10 1" in tcl
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Test 3: Result parsing
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestParsePushoverResults:
     """Verify parse_pushover_results handles various output file formats."""
@@ -202,25 +217,22 @@ class TestParsePushoverResults:
 
         # Displacement file: time, disp
         disp = tmp_path / "disp.out"
-        np.savetxt(str(disp), [[0.0, 0.001],
-                               [0.2, 0.005],
-                               [0.4, 0.012],
-                               [0.6, 0.020]])
+        np.savetxt(str(disp), [[0.0, 0.001], [0.2, 0.005], [0.4, 0.012], [0.6, 0.020]])
 
         # Base shear: single line with rx, ry, rz
         bs = tmp_path / "bs.out"
         np.savetxt(str(bs), [[-1250.0, 0.0, 5000.0]])
 
         result = parse_pushover_results(str(disp), str(bs))
-        assert 'control_disp' in result
-        assert 'base_shear' in result
-        assert 'step' in result
-        assert len(result['control_disp']) == 4
-        assert len(result['base_shear']) == 4
-        assert abs(result['control_disp'][-1] - 0.020) < 1e-8
-        assert abs(result['base_shear'][0] + 1250.0) < 1.0
-        assert 'base_rx' in result
-        assert abs(result['base_rx'][0] + 1250.0) < 1.0
+        assert "control_disp" in result
+        assert "base_shear" in result
+        assert "step" in result
+        assert len(result["control_disp"]) == 4
+        assert len(result["base_shear"]) == 4
+        assert abs(result["control_disp"][-1] - 0.020) < 1e-8
+        assert abs(result["base_shear"][0] + 1250.0) < 1.0
+        assert "base_rx" in result
+        assert abs(result["base_rx"][0] + 1250.0) < 1.0
 
     def test_genfromtxt_robustness(self, tmp_path):
         """Parse with nan/inf entries (genfromtxt should handle gracefully)."""
@@ -240,11 +252,11 @@ class TestParsePushoverResults:
 
         result = parse_pushover_results(str(disp), str(bs))
         # genfromtxt replaces nan/inf with NaN silently
-        assert len(result['control_disp']) > 0
+        assert len(result["control_disp"]) > 0
         # NaN values in the output won't cause crashes
-        assert isinstance(result['control_disp'], np.ndarray)
-        assert isinstance(result['base_shear'], np.ndarray)
-        assert len(result['step']) == len(result['control_disp'])
+        assert isinstance(result["control_disp"], np.ndarray)
+        assert isinstance(result["base_shear"], np.ndarray)
+        assert len(result["step"]) == len(result["control_disp"])
 
     def test_single_column_displacement(self, tmp_path):
         """Single-column displacement (no time prefix)."""
@@ -257,8 +269,8 @@ class TestParsePushoverResults:
         np.savetxt(str(bs), [[-1000.0, 0.0, 4000.0]])
 
         result = parse_pushover_results(str(disp), str(bs))
-        assert len(result['control_disp']) == 4
-        assert result['control_disp'][-1] == 0.020
+        assert len(result["control_disp"]) == 4
+        assert result["control_disp"][-1] == 0.020
 
     def test_optional_reaction_file(self, tmp_path):
         """Optional per-step reaction file is parsed if provided."""
@@ -271,12 +283,11 @@ class TestParsePushoverResults:
         np.savetxt(str(bs), [[-100.0, 0.0, 400.0]])
 
         react = tmp_path / "r_react.out"
-        np.savetxt(str(react), [[0.0, -50.0, 0.0, 200.0],
-                                 [0.2, -100.0, 0.0, 400.0]])
+        np.savetxt(str(react), [[0.0, -50.0, 0.0, 200.0], [0.2, -100.0, 0.0, 400.0]])
 
         result = parse_pushover_results(str(disp), str(bs), str(react))
-        assert 'reaction_rx' in result
-        assert len(result['reaction_rx']) == 2
+        assert "reaction_rx" in result
+        assert len(result["reaction_rx"]) == 2
 
     def test_file_not_found_raises(self, tmp_path):
         """Missing file should raise OSError."""
@@ -293,6 +304,7 @@ class TestParsePushoverResults:
 # Test 4: MeshModel load helpers
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 class TestLoadHelpers:
     """Verify mesh_model_to_gravity_loads and modal_to_lateral_loads."""
 
@@ -300,8 +312,12 @@ class TestLoadHelpers:
         """Create a minimal MeshModel with one frame element and one node."""
         from fea_toolkit.model.mesh_model import MeshModel
         from fea_toolkit.model.sap_data import (
-            Node, Material, Section, FrameElement, GravityLoad,
-            JointLoad, LoadPattern,
+            FrameElement,
+            GravityLoad,
+            LoadPattern,
+            Material,
+            Node,
+            Section,
         )
 
         mm = MeshModel(
@@ -310,25 +326,21 @@ class TestLoadHelpers:
                 "2": Node(node_id="2", node_tag=2, x=0, y=0, z=3.0),
             },
             frame_elements={
-                "F1": FrameElement(elem_id="F1", elem_tag=1,
-                                    node_i="1", node_j="2"),
+                "F1": FrameElement(elem_id="F1", elem_tag=1, node_i="1", node_j="2"),
             },
             area_elements={},
             area_assignments={},
             frame_assignments={"F1": "COL"},
             sections={
-                "COL": Section(name="COL", shape="Rectangular",
-                               A=0.25, material="C40"),
+                "COL": Section(name="COL", shape="Rectangular", A=0.25, material="C40"),
             },
             materials={
-                "C40": Material(name="C40", type="Concrete",
-                                E_mod=3.0e10, unit_weight=25000.0),
+                "C40": Material(name="C40", type="Concrete", E_mod=3.0e10, unit_weight=25000.0),
             },
             frame_dist_loads=[],
             load_patterns={"DEAD": LoadPattern(name="DEAD", pattern_type="Dead")},
             frame_gravity_loads=[
-                GravityLoad(pattern="DEAD", frame_id="F1",
-                            multiplier_z=-1.0),
+                GravityLoad(pattern="DEAD", frame_id="F1", multiplier_z=-1.0),
             ],
         )
         return mm
@@ -379,13 +391,13 @@ class TestLoadHelpers:
         # Mode shape at node 2 > node 1, so load at node 2 > node 1
         f2 = abs(result[2][0])
         f1 = abs(result[1][0])
-        assert f2 >= f1, \
-            f"Expected node 2 load >= node 1 load, got {f2} vs {f1}"
+        assert f2 >= f1, f"Expected node 2 load >= node 1 load, got {f2} vs {f1}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Test 5: Tcl file generation export (syntax check)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestTclGeneration:
     """Verify export_mesh_model_to_tcl + pushover_tcl produces valid Tcl."""
@@ -394,9 +406,12 @@ class TestTclGeneration:
         """Small but realistic MeshModel for Tcl export testing."""
         from fea_toolkit.model.mesh_model import MeshModel
         from fea_toolkit.model.sap_data import (
-            Node, Restraint, Material,
-            ConcreteRectangularSection, ISection, ShellSection,
-            FrameElement, AreaElement,
+            ConcreteRectangularSection,
+            FrameElement,
+            ISection,
+            Material,
+            Node,
+            Restraint,
         )
 
         nodes = {
@@ -410,34 +425,47 @@ class TestTclGeneration:
             "3": Restraint([1, 1, 1, 1, 1, 1]),
         }
         mats = {
-            "C40": Material(name="C40", type="Concrete",
-                            E_mod=3.0e10, unit_weight=25000.0,
-                            Fc=26800.0, Fy=4.0e8),
-            "Steel": Material(name="Steel", type="Steel",
-                              E_mod=2.0e11, unit_weight=78500.0,
-                              Fy=3.45e8),
+            "C40": Material(
+                name="C40", type="Concrete", E_mod=3.0e10, unit_weight=25000.0, Fc=26800.0, Fy=4.0e8
+            ),
+            "Steel": Material(
+                name="Steel", type="Steel", E_mod=2.0e11, unit_weight=78500.0, Fy=3.45e8
+            ),
         }
         sections = {
             "RC_COL": ConcreteRectangularSection(
-                name="RC_COL", material="C40",
+                name="RC_COL",
+                material="C40",
                 shape="Rectangular",
-                A=0.16, I33=0.00213, I22=0.00213, J=0.001,
-                depth=0.4, bf=0.4,
-                cover=0.04, top_bars=4, bot_bars=4,
-                top_bar_dia=0.020, bot_bar_dia=0.020,
+                A=0.16,
+                I33=0.00213,
+                I22=0.00213,
+                J=0.001,
+                depth=0.4,
+                bf=0.4,
+                cover=0.04,
+                top_bars=4,
+                bot_bars=4,
+                top_bar_dia=0.020,
+                bot_bar_dia=0.020,
             ),
             "STEEL_BM": ISection(
-                name="STEEL_BM", material="Steel",
+                name="STEEL_BM",
+                material="Steel",
                 shape="I/Wide Flange",
-                A=0.011, I33=1.5e-4, I22=5.0e-5, J=1.0e-6,
-                depth=0.3, bf=0.15, tf=0.01, tw=0.006,
+                A=0.011,
+                I33=1.5e-4,
+                I22=5.0e-5,
+                J=1.0e-6,
+                depth=0.3,
+                bf=0.15,
+                tf=0.01,
+                tw=0.006,
             ),
         }
         frames = {
-            "F1": FrameElement(elem_id="F1", elem_tag=1,
-                                node_i="1", node_j="2"),
-            "F2": FrameElement(elem_id="F2", elem_tag=2,
-                                node_i="3", node_j="4"),
+            "F1": FrameElement(elem_id="F1", elem_tag=1, node_i="1", node_j="2"),
+            "F2": FrameElement(elem_id="F2", elem_tag=2, node_i="3", node_j="4"),
         }
         frame_assign = {"F1": "RC_COL", "F2": "STEEL_BM"}
 
@@ -458,13 +486,16 @@ class TestTclGeneration:
 
     def test_export_with_pushover_tcl(self, tmp_path):
         """Export a MeshModel + pushover_tcl suffix produces valid Tcl."""
-        from fea_toolkit.opensees.recorder import export_mesh_model_to_tcl
         from fea_toolkit.opensees.builder import pushover_tcl
+        from fea_toolkit.opensees.recorder import export_mesh_model_to_tcl
 
         mm = self._make_sample_mesh_model()
 
         tcl_push = pushover_tcl(
-            control_node=2, dof=1, max_disp=0.1, num_steps=20,
+            control_node=2,
+            dof=1,
+            max_disp=0.1,
+            num_steps=20,
             lateral_loads={2: (1.0, 0.0, 0.0)},
             gravity_loads={1: (0.0, 0.0, -10000.0)},
             adaptive=True,
@@ -472,27 +503,26 @@ class TestTclGeneration:
 
         tcl_path = str(tmp_path / "test_pushover.tcl")
         export_mesh_model_to_tcl(
-            mm, tcl_path,
-            config={"create_fiber_sections": True,
-                    "geom_transf_type": "PDelta"},
+            mm,
+            tcl_path,
+            config={"create_fiber_sections": True, "geom_transf_type": "PDelta"},
             tcl_suffix=tcl_push,
         )
 
         assert os.path.exists(tcl_path)
-        with open(tcl_path, "r") as f:
+        with open(tcl_path) as f:
             content = f.read()
 
         # Verify key structural elements
         assert "model Basic" in content, "Missing model command"
         assert "node 1" in content, "Missing nodes"
         assert "fix 1" in content, "Missing restraints"
-        assert "uniaxialMaterial Concrete01" in content, \
-            "Missing concrete material"
-        assert "uniaxialMaterial Steel01" in content, \
-            "Missing steel material"
+        assert "uniaxialMaterial Concrete01" in content, "Missing concrete material"
+        assert "uniaxialMaterial Steel01" in content, "Missing steel material"
         assert "section Fiber" in content, "Missing fiber section"
-        assert "dispBeamColumn" in content or "forceBeamColumn" in content, \
+        assert "dispBeamColumn" in content or "forceBeamColumn" in content, (
             "Missing beam-column element"
+        )
         assert "DisplacementControl" in content, "Missing pushover analysis"
         assert "wipe" in content, "Missing wipe"
 
@@ -505,21 +535,21 @@ class TestTclGeneration:
         tcl_path = str(tmp_path / "test_elastic.tcl")
         export_mesh_model_to_tcl(mm, tcl_path)
 
-        with open(tcl_path, "r") as f:
+        with open(tcl_path) as f:
             content = f.read()
 
-        assert "section Elastic" in content, \
-            "Elastic section should be used"
-        assert "section Fiber" not in content, \
-            "Fiber section should NOT be present in elastic mode"
-        assert "elasticBeamColumn" in content, \
-            "Elastic elements should be used"
+        assert "section Elastic" in content, "Elastic section should be used"
+        assert "section Fiber" not in content, "Fiber section should NOT be present in elastic mode"
+        assert "elasticBeamColumn" in content, "Elastic elements should be used"
 
     def test_export_with_shells(self, tmp_path):
         """Verify shell export works with area elements."""
         from fea_toolkit.model.mesh_model import MeshModel
         from fea_toolkit.model.sap_data import (
-            Node, Restraint, Material, ShellSection, AreaElement,
+            AreaElement,
+            Material,
+            Node,
+            ShellSection,
         )
         from fea_toolkit.opensees.recorder import export_mesh_model_to_tcl
 
@@ -533,22 +563,24 @@ class TestTclGeneration:
             frame_elements={},
             frame_assignments={},
             area_elements={
-                "S1": AreaElement(area_id="S1", area_tag=100,
-                                   node_ids=["1", "2", "3", "4"],
-                                   thickness=0.2),
+                "S1": AreaElement(
+                    area_id="S1", area_tag=100, node_ids=["1", "2", "3", "4"], thickness=0.2
+                ),
             },
             area_assignments={"S1": "SLAB"},
             frame_dist_loads=[],
             restraints={},
             materials={
-                "C40": Material(name="C40", type="Concrete",
-                                E_mod=3.0e10, unit_weight=25000.0,
-                                nu=0.2),
+                "C40": Material(
+                    name="C40", type="Concrete", E_mod=3.0e10, unit_weight=25000.0, nu=0.2
+                ),
             },
             sections={
                 "SLAB": ShellSection(
-                    name="SLAB", material="C40",
-                    shape="Shell", thickness=0.2,
+                    name="SLAB",
+                    material="C40",
+                    shape="Shell",
+                    thickness=0.2,
                 ),
             },
             material_tags={"C40": 1},
@@ -558,20 +590,20 @@ class TestTclGeneration:
         tcl_path = str(tmp_path / "test_shell.tcl")
         export_mesh_model_to_tcl(mm, tcl_path)
 
-        with open(tcl_path, "r") as f:
+        with open(tcl_path) as f:
             content = f.read()
 
-        assert "ElasticMembranePlateSection" in content, \
-            "Missing shell section"
-        assert "ShellDKGQ" in content or "ShellDKGT" in content, \
-            "Missing shell element"
+        assert "ElasticMembranePlateSection" in content, "Missing shell section"
+        assert "ShellDKGQ" in content or "ShellDKGT" in content, "Missing shell element"
 
 
 def test_no_tie_confinement_fallback_parity():
     """Both paths produce identical (fcc, epscc) from shared constants."""
     from fea_toolkit.utils import (
-        RC_NO_TIE_CONFINEMENT_FACTOR, RC_NO_TIE_EPSC_FACTOR,
+        RC_NO_TIE_CONFINEMENT_FACTOR,
+        RC_NO_TIE_EPSC_FACTOR,
     )
+
     Fc, epsc = 30e6, 0.002
     assert RC_NO_TIE_CONFINEMENT_FACTOR == 1.25
     assert RC_NO_TIE_EPSC_FACTOR == 2.0

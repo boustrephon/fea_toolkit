@@ -4,14 +4,12 @@ Wraps :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder`
 RS execution.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
-
-import numpy as np
+from typing import TYPE_CHECKING, Optional
 
 from fea_toolkit.analysis.base import (
+    _RESPONSE_SPECTRUM_DEFAULTS,
     Analysis,
     AnalysisResult,
-    _RESPONSE_SPECTRUM_DEFAULTS,
 )
 from fea_toolkit.analysis.modal import ModalAnalysis
 
@@ -49,8 +47,8 @@ class ResponseSpectrumAnalysis(Analysis):
         mesh_model: "MeshModel",
         modal_result: AnalysisResult,
         direction: str,
-        T_spec: List[float],
-        Sa_spec: List[float],
+        T_spec: list[float],
+        Sa_spec: list[float],
         damping: float = 0.05,
         n_modes: int = 12,
         name: Optional[str] = None,
@@ -74,8 +72,7 @@ class ResponseSpectrumAnalysis(Analysis):
 
     @property
     def provides(self) -> set:
-        return {"rs_nodal_displacements", "rs_element_forces",
-                "rs_base_shear", "modal_base_shear"}
+        return {"rs_nodal_displacements", "rs_element_forces", "rs_base_shear", "modal_base_shear"}
 
     def run(self) -> AnalysisResult:
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder

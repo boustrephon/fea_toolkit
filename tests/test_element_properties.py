@@ -7,23 +7,21 @@ resolution (``_resolve_element_properties``) — see integration tests
 in ``test_workflows.py`` or add dedicated tests there.
 """
 
-import copy
-from dataclasses import dataclass
-
 import pytest
 
-from fea_toolkit.model.sap_data import (
-    FrameElementProperties, AreaElementProperties,
-    NDMaterial, ShellFiberLayer, LayeredShellSection,
-    ShellSection, FrameElement, AreaElement,
-    Material, Node,
-)
 from fea_toolkit.model.mesh_model import MeshModel
-
+from fea_toolkit.model.sap_data import (
+    AreaElementProperties,
+    FrameElementProperties,
+    LayeredShellSection,
+    NDMaterial,
+    ShellFiberLayer,
+)
 
 # ═══════════════════════════════════════════════════════════════════
 # FrameElementProperties
 # ═══════════════════════════════════════════════════════════════════
+
 
 class TestFrameElementProperties:
     """Verify FrameElementProperties dataclass fields and defaults."""
@@ -61,6 +59,7 @@ class TestFrameElementProperties:
 # ═══════════════════════════════════════════════════════════════════
 # AreaElementProperties
 # ═══════════════════════════════════════════════════════════════════
+
 
 class TestAreaElementProperties:
     """Verify AreaElementProperties dataclass fields and defaults."""
@@ -100,31 +99,39 @@ class TestAreaElementProperties:
 # NDMaterial / ShellFiberLayer / LayeredShellSection
 # ═══════════════════════════════════════════════════════════════════
 
+
 class TestNDMaterial:
     """Verify NDMaterial dataclass and to_tcl method."""
 
     def test_elastic_isotropic(self):
-        mat = NDMaterial(name="concrete", material_type="ElasticIsotropic",
-                         E=30e9, nu=0.2)
+        mat = NDMaterial(name="concrete", material_type="ElasticIsotropic", E=30e9, nu=0.2)
         tokens = mat.to_tcl(1).split()
         # Token structure: nDMaterial ElasticIsotropic <tag> <E> <nu>
-        assert tokens[0] == "nDMaterial"          # command
-        assert tokens[1] == "ElasticIsotropic"     # material type
-        assert tokens[2] == "1"                    # tag (integer)
+        assert tokens[0] == "nDMaterial"  # command
+        assert tokens[1] == "ElasticIsotropic"  # material type
+        assert tokens[2] == "1"  # tag (integer)
         assert float(tokens[3]) == pytest.approx(30e9, rel=1e-12)  # E
-        assert float(tokens[4]) == pytest.approx(0.2, rel=1e-12)   # nu
-        assert len(tokens) == 5                    # 5 tokens total
+        assert float(tokens[4]) == pytest.approx(0.2, rel=1e-12)  # nu
+        assert len(tokens) == 5  # 5 tokens total
 
     def test_concrete_s(self):
-        mat = NDMaterial(name="concrete_s", material_type="ConcreteS",
-                         E=30e9, nu=0.2, fc=30e6, ft=3e6, Es=200e9)
+        mat = NDMaterial(
+            name="concrete_s", material_type="ConcreteS", E=30e9, nu=0.2, fc=30e6, ft=3e6, Es=200e9
+        )
         tcl = mat.to_tcl(2)
         assert "ConcreteS" in tcl
         assert "3e+07" in tcl  # fc
 
     def test_j2_plate_fibre(self):
-        mat = NDMaterial(name="rebar", material_type="J2PlateFibre",
-                         E=200e9, nu=0.3, fy=400e6, Hiso=0.0, Hkin=0.5e9)
+        mat = NDMaterial(
+            name="rebar",
+            material_type="J2PlateFibre",
+            E=200e9,
+            nu=0.3,
+            fy=400e6,
+            Hiso=0.0,
+            Hkin=0.5e9,
+        )
         tcl = mat.to_tcl(3)
         assert "J2PlateFibre" in tcl
 
@@ -150,16 +157,22 @@ class TestLayeredShellSection:
         #   section LayeredShell <tag> <nLayers>
         #   <matTag> <thickness>  (×5 layers — no nIP; nIP is metadata only)
         expected = [
-            "section", "LayeredShell", "100", "5",
-            "1", "0.05",
-            "3", "0.002",
-            "2", "0.3",
-            "3", "0.002",
-            "1", "0.05",
+            "section",
+            "LayeredShell",
+            "100",
+            "5",
+            "1",
+            "0.05",
+            "3",
+            "0.002",
+            "2",
+            "0.3",
+            "3",
+            "0.002",
+            "1",
+            "0.05",
         ]
-        assert tokens == expected, (
-            f"Token mismatch\n  got:  {tokens}\n  want: {expected}"
-        )
+        assert tokens == expected, f"Token mismatch\n  got:  {tokens}\n  want: {expected}"
         # Also verify total token count.
         assert len(tokens) == 4 + 5 * 2  # 4 header + 5 layers × 2 tokens each
 
@@ -173,6 +186,7 @@ class TestLayeredShellSection:
 # ═══════════════════════════════════════════════════════════════════
 # MeshModel — verify new fields exist and are populated by Preprocessor
 # ═══════════════════════════════════════════════════════════════════
+
 
 class TestMeshModelNewFields:
     """Verify MeshModel accepts the new fields."""
@@ -219,6 +233,7 @@ class TestMeshModelNewFields:
 # ═══════════════════════════════════════════════════════════════════
 # Top-level module import verification
 # ═══════════════════════════════════════════════════════════════════
+
 
 def test_imports():
     """Verify all new public types are importable from sap_data."""

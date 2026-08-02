@@ -10,11 +10,19 @@ Available backends
 """
 
 from .base import (
-    RenderBackend, FrameGeom, ShellGeom, NodeGeom,
-    HighlightDef, AnnotationDef,
+    AnnotationDef,
+    FrameGeom,
+    HighlightDef,
+    NodeGeom,
+    RenderBackend,
+    ShellGeom,
 )
 
 __all__ = [
-    "RenderBackend", "FrameGeom", "ShellGeom", "NodeGeom",
-    "HighlightDef", "AnnotationDef",
+    "AnnotationDef",
+    "FrameGeom",
+    "HighlightDef",
+    "NodeGeom",
+    "RenderBackend",
+    "ShellGeom",
 ]

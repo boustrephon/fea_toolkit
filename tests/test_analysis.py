@@ -6,27 +6,25 @@ import numpy as np
 import pytest
 
 from fea_toolkit.analysis.base import (
+    _MODAL_DEFAULTS,
+    _PUSHOVER_STEEL_DEFAULTS,
+    _RESPONSE_SPECTRUM_DEFAULTS,
+    _STATIC_LINEAR_DEFAULTS,
     Analysis,
     AnalysisCaseSpec,
     AnalysisResult,
-    _STATIC_LINEAR_DEFAULTS,
-    _MODAL_DEFAULTS,
-    _RESPONSE_SPECTRUM_DEFAULTS,
-    _PUSHOVER_STEEL_DEFAULTS,
 )
-from fea_toolkit.analysis.modal import ModalAnalysis
-from fea_toolkit.analysis.static import StaticAnalysis
-from fea_toolkit.analysis.rs import ResponseSpectrumAnalysis
-from fea_toolkit.analysis.pushover import PushoverAnalysis
 from fea_toolkit.analysis.manager import AnalysisManager
-
+from fea_toolkit.analysis.modal import ModalAnalysis
+from fea_toolkit.analysis.pushover import PushoverAnalysis
+from fea_toolkit.analysis.rs import ResponseSpectrumAnalysis
+from fea_toolkit.analysis.static import StaticAnalysis
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 
 class _FakeMeshModel:
     """Minimal stand-in for MeshModel — just enough to construct analyses."""
-    pass
 
 
 class _FakeAnalysis(Analysis):
@@ -189,32 +187,46 @@ class TestAnalysisManager:
         mgr = AnalysisManager(_FakeMeshModel())
         dep = _DepAnalysis(_FakeMeshModel(), name="dep")
         mgr.add(dep)
-        with pytest.raises(ValueError, match="requires.*_FakeAnalysis"):
+        with pytest.raises(ValueError, match=r"requires.*_FakeAnalysis"):
             mgr.run_all()
 
     def test_circular_dependency_raises(self):
         class CircularA(Analysis):
             @classmethod
-            def defaults(cls): return {}
+            def defaults(cls):
+                return {}
+
             @property
-            def requires(self): return [CircularB]
+            def requires(self):
+                return [CircularB]
+
             @property
-            def provides(self): return {"a"}
-            def run(self): return AnalysisResult("ca", "A", {})
+            def provides(self):
+                return {"a"}
+
+            def run(self):
+                return AnalysisResult("ca", "A", {})
 
         class CircularB(Analysis):
             @classmethod
-            def defaults(cls): return {}
+            def defaults(cls):
+                return {}
+
             @property
-            def requires(self): return [CircularA]
+            def requires(self):
+                return [CircularA]
+
             @property
-            def provides(self): return {"b"}
-            def run(self): return AnalysisResult("cb", "B", {})
+            def provides(self):
+                return {"b"}
+
+            def run(self):
+                return AnalysisResult("cb", "B", {})
 
         mgr = AnalysisManager(_FakeMeshModel())
         mgr.add(CircularA(_FakeMeshModel(), name="ca"))
         mgr.add(CircularB(_FakeMeshModel(), name="cb"))
-        with pytest.raises(ValueError, match="(?i)circular"):
+        with pytest.raises(ValueError, match=r"(?i)circular"):
             mgr.run_all()
 
     def test_run_one(self):
@@ -289,14 +301,17 @@ class TestGenerateReportManagerPath:
     """Verify that generate_report always uses the AnalysisManager path."""
 
     def test_run_via_manager_param_removed(self):
-        from fea_toolkit.report import generate_report
         import inspect
+
+        from fea_toolkit.report import generate_report
+
         sig = inspect.signature(generate_report)
         # run_via_manager param has been removed (always uses manager path)
         assert "run_via_manager" not in sig.parameters
 
     def test_inline_path_still_default(self):
         from fea_toolkit.report import _DEFAULT_CONFIG
+
         # The default config should not include run_via_manager
         # (it's a function parameter, not a config key)
         assert "run_via_manager" not in _DEFAULT_CONFIG

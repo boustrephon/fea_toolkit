@@ -15,7 +15,6 @@ Usage::
 
 import json
 import time
-from typing import List, Dict, Optional
 
 
 def _escape_md_cell(text: str) -> str:
@@ -27,38 +26,44 @@ class AnalysisLog:
     """A simple structured log for analysis pipeline events."""
 
     def __init__(self):
-        self._entries: List[Dict] = []
+        self._entries: list[dict] = []
         self._start = time.monotonic()
 
     def info(self, step: str, msg: str) -> None:
         """Record an informational message."""
-        self._entries.append({
-            "level": "INFO",
-            "step": step,
-            "msg": msg,
-            "time": time.monotonic(),
-        })
+        self._entries.append(
+            {
+                "level": "INFO",
+                "step": step,
+                "msg": msg,
+                "time": time.monotonic(),
+            }
+        )
 
     def warn(self, step: str, msg: str) -> None:
         """Record a warning."""
-        self._entries.append({
-            "level": "WARN",
-            "step": step,
-            "msg": msg,
-            "time": time.monotonic(),
-        })
+        self._entries.append(
+            {
+                "level": "WARN",
+                "step": step,
+                "msg": msg,
+                "time": time.monotonic(),
+            }
+        )
 
     def error(self, step: str, msg: str) -> None:
         """Record an error (analysis step failed or was skipped)."""
-        self._entries.append({
-            "level": "ERROR",
-            "step": step,
-            "msg": msg,
-            "time": time.monotonic(),
-        })
+        self._entries.append(
+            {
+                "level": "ERROR",
+                "step": step,
+                "msg": msg,
+                "time": time.monotonic(),
+            }
+        )
 
     @property
-    def entries(self) -> List[Dict]:
+    def entries(self) -> list[dict]:
         return list(self._entries)
 
     def summary(self) -> str:
@@ -79,17 +84,25 @@ class AnalysisLog:
     def to_json(self, path: str) -> None:
         """Write log entries to a JSON file with elapsed-time keys."""
         import datetime
+
         with open(path, "w") as f:
-            json.dump({
-                "generated": datetime.datetime.now().isoformat(),
-                "n_entries": len(self._entries),
-                "entries": [{
-                    "level": e["level"],
-                    "step": e["step"],
-                    "msg": e["msg"],
-                    "time_s": e["time"] - self._start,
-                } for e in self._entries],
-            }, f, indent=2)
+            json.dump(
+                {
+                    "generated": datetime.datetime.now().isoformat(),
+                    "n_entries": len(self._entries),
+                    "entries": [
+                        {
+                            "level": e["level"],
+                            "step": e["step"],
+                            "msg": e["msg"],
+                            "time_s": e["time"] - self._start,
+                        }
+                        for e in self._entries
+                    ],
+                },
+                f,
+                indent=2,
+            )
 
     def markdown(self) -> str:
         """Return a collapsible markdown section for QMD display."""

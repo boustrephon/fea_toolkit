@@ -23,18 +23,19 @@ Usage from cached NPZ::
     plot_disconnected_nodes(data, report)
 """
 
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any, Optional
+
 import numpy as np
 
 from .viz import _set_isometric_view
 
 
 def find_disconnected_nodes(
-    data: Dict[str, np.ndarray],
+    data: dict[str, np.ndarray],
     top_n: int = 30,
     z_score_threshold: float = 3.0,
     max_modes: Optional[int] = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Identify disconnected nodes from mode shape data using outlier
     detection.
 
@@ -79,15 +80,16 @@ def find_disconnected_nodes(
 
     n_nodes = len(dx)
     # Displacement magnitude per node per mode
-    mag = np.sqrt(dx[:, :n_modes] ** 2 + dy[:, :n_modes] ** 2
-                  + dz[:, :n_modes] ** 2)
+    mag = np.sqrt(dx[:, :n_modes] ** 2 + dy[:, :n_modes] ** 2 + dz[:, :n_modes] ** 2)
 
     node_tags = data.get("node_tag", np.arange(n_nodes))
-    coords = np.column_stack([
-        data.get("node_x", np.zeros(n_nodes)),
-        data.get("node_y", np.zeros(n_nodes)),
-        data.get("node_z", np.zeros(n_nodes)),
-    ])
+    coords = np.column_stack(
+        [
+            data.get("node_x", np.zeros(n_nodes)),
+            data.get("node_y", np.zeros(n_nodes)),
+            data.get("node_z", np.zeros(n_nodes)),
+        ]
+    )
 
     # Z-score per mode — within each mode, how many stds from mean
     results = []
@@ -100,10 +102,7 @@ def find_disconnected_nodes(
             col = mag[:, mi]
             mean = float(np.mean(col))
             std = float(np.std(col))
-            if std < 1e-12:
-                z = 0.0
-            else:
-                z = (float(mag[ni, mi]) - mean) / std
+            z = 0.0 if std < 1e-12 else (float(mag[ni, mi]) - mean) / std
             z_scores.append(z)
             if abs(z) > z_score_threshold:
                 outlier_count += 1
@@ -114,24 +113,26 @@ def find_disconnected_nodes(
         score = outlier_count / max(n_modes, 1)
         if score == 0:
             continue
-        results.append({
-            "node_tag": int(node_tags[ni]),
-            "x": float(coords[ni, 0]),
-            "y": float(coords[ni, 1]),
-            "z": float(coords[ni, 2]),
-            "score": score,
-            "worst_mode": worst_m,
-            "max_magnitude": float(np.max(mag[ni, :])),
-            "z_scores": z_scores,
-        })
+        results.append(
+            {
+                "node_tag": int(node_tags[ni]),
+                "x": float(coords[ni, 0]),
+                "y": float(coords[ni, 1]),
+                "z": float(coords[ni, 2]),
+                "score": score,
+                "worst_mode": worst_m,
+                "max_magnitude": float(np.max(mag[ni, :])),
+                "z_scores": z_scores,
+            }
+        )
 
     results.sort(key=lambda r: -r["score"])
     return results[:top_n]
 
 
-def print_disconnect_report(report: List[Dict[str, Any]],
-                              n_modes: int,
-                              z_score_threshold: float = 3.0) -> None:
+def print_disconnect_report(
+    report: list[dict[str, Any]], n_modes: int, z_score_threshold: float = 3.0
+) -> None:
     """Print a formatted table of disconnected-node findings.
 
     Args:
@@ -152,14 +153,16 @@ def print_disconnect_report(report: List[Dict[str, Any]],
     print(f"  {'':>8} {'':>7} {'Mode':>5} {'':>30}")
     print(f"  {'-' * 54}")
     for r in report:
-        print(f"  {r['node_tag']:>8} {r['score']:.2f} {r['worst_mode']:>5}  "
-              f"({r['x']:8.2f}, {r['y']:8.2f}, {r['z']:8.2f})")
+        print(
+            f"  {r['node_tag']:>8} {r['score']:.2f} {r['worst_mode']:>5}  "
+            f"({r['x']:8.2f}, {r['y']:8.2f}, {r['z']:8.2f})"
+        )
     print()
 
 
 def plot_disconnected_nodes(
-    data: Dict[str, np.ndarray],
-    report: List[Dict[str, Any]],
+    data: dict[str, np.ndarray],
+    report: list[dict[str, Any]],
     show_labels: bool = True,
 ) -> Optional[Any]:
     """PyVista 3D scatter plot of the model with disconnected nodes
@@ -191,9 +194,13 @@ def plot_disconnected_nodes(
     pv.set_plot_theme("document")
 
     nid = data.get("node_tag", [])
-    coords = np.column_stack([
-        data.get("node_x", []), data.get("node_y", []), data.get("node_z", []),
-    ])
+    coords = np.column_stack(
+        [
+            data.get("node_x", []),
+            data.get("node_y", []),
+            data.get("node_z", []),
+        ]
+    )
     tag_to_idx = {int(t): i for i, t in enumerate(nid)}
 
     # ── Frame wireframe ──
@@ -238,8 +245,9 @@ def plot_disconnected_nodes(
 
     # Semi-transparent shell surfaces
     if shell_mesh.n_points > 0:
-        plotter.add_mesh(shell_mesh, color="lightblue", opacity=0.15,
-                         show_edges=False, lighting=False)
+        plotter.add_mesh(
+            shell_mesh, color="lightblue", opacity=0.15, show_edges=False, lighting=False
+        )
 
     # Frame wireframe (slightly darker than shells)
     if frame_mesh.n_points > 0:
@@ -255,7 +263,10 @@ def plot_disconnected_nodes(
             label = f"Node {r['node_tag']} (score={r['score']:.2f})"
             plotter.add_point_labels(
                 np.array([[r["x"], r["y"], r["z"]]]),
-                [label], font_size=12, point_size=0, shape_opacity=0.6,
+                [label],
+                font_size=12,
+                point_size=0,
+                shape_opacity=0.6,
             )
 
     plotter.show_grid()
@@ -270,11 +281,12 @@ def plot_disconnected_nodes(
 # Wall-in-slab intersection visualisation
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def plot_wall_slab_intersections(
-    area_elements: Dict[str, Any],
-    area_assignments: Dict[str, str],
-    nodes: Dict[str, Any],
-    findings: List[Dict[str, Any]],
+    area_elements: dict[str, Any],
+    area_assignments: dict[str, str],
+    nodes: dict[str, Any],
+    findings: list[dict[str, Any]],
     slab_id: Optional[str] = None,
     context_radius: float = 4.0,
     show_labels: bool = True,
@@ -371,7 +383,7 @@ def plot_wall_slab_intersections(
 
     context_slabs = set()
     for aid, ae in area_elements.items():
-        if getattr(ae, 'inactive', False):
+        if getattr(ae, "inactive", False):
             continue
         nds = [nodes.get(n) for n in ae.node_ids if n in nodes]
         nds = [n for n in nds if n is not None]
@@ -389,8 +401,7 @@ def plot_wall_slab_intersections(
         ax_min, ax_max = min(xs), max(xs)
         ay_min, ay_max = min(ys), max(ys)
         # Check overlap with extended bbox
-        if (ax_max < ctx_x_min or ax_min > ctx_x_max or
-            ay_max < ctx_y_min or ay_min > ctx_y_max):
+        if ax_max < ctx_x_min or ax_min > ctx_x_max or ay_max < ctx_y_min or ay_min > ctx_y_max:
             continue
         context_slabs.add(aid)
 
@@ -398,8 +409,9 @@ def plot_wall_slab_intersections(
     wall_ids: set = {f["wall_id"] for f in relevant}
 
     # ── Helper: build area quad ──────────────────────────────────
-    def _area_quad(aid: str, color: str, opacity: float,
-                   edge_color: str, label: bool = False) -> None:
+    def _area_quad(
+        aid: str, color: str, opacity: float, edge_color: str, label: bool = False
+    ) -> None:
         ae = area_elements.get(aid)
         if ae is None:
             return
@@ -410,13 +422,18 @@ def plot_wall_slab_intersections(
         pts = np.array([[n.x, n.y, n.z] for n in nds[:4]])
         face = np.array([[4, 0, 1, 2, 3]])
         mesh = pv.PolyData(pts, faces=face)
-        plotter.add_mesh(mesh, color=color, opacity=opacity,
-                         show_edges=True, edge_color=edge_color,
-                         line_width=1, lighting=False)
+        plotter.add_mesh(
+            mesh,
+            color=color,
+            opacity=opacity,
+            show_edges=True,
+            edge_color=edge_color,
+            line_width=1,
+            lighting=False,
+        )
         if label:
             labels = [f"{aid}\\n{n.node_id}(t={n.node_tag})" for n in nds[:4]]
-            plotter.add_point_labels(pts, labels, font_size=8,
-                                     point_size=4, shape_opacity=0.5)
+            plotter.add_point_labels(pts, labels, font_size=8, point_size=4, shape_opacity=0.5)
 
     # ── 1. Context slabs (light grey, low opacity) ───────────────
     for aid in context_slabs - target_slab_ids:
@@ -429,7 +446,7 @@ def plot_wall_slab_intersections(
     # ── 3. Walls with edges on this slab (orange, below/above) ──
     # Find all wall areas that share a Z-level edge with the target
     # slab — these are the walls that continue above or below.
-    slab_z_levels: set = {round(f["slab_Z"], 4) for f in relevant}
+    {round(f["slab_Z"], 4) for f in relevant}
     adjacent_wall_ids: set = set()
     for sid in target_slab_ids:
         ae = area_elements.get(sid)
@@ -446,7 +463,7 @@ def plot_wall_slab_intersections(
         slab_z = round(sum(n.z for n in slab_nds) / len(slab_nds), 4)
 
         for wid, wae in area_elements.items():
-            if getattr(wae, 'inactive', False):
+            if getattr(wae, "inactive", False):
                 continue
             if wid in wall_ids:
                 continue  # already shown as intersecting wall
@@ -482,8 +499,13 @@ def plot_wall_slab_intersections(
         lines = np.array([[2, i, i + 1] for i in range(n_seg)], dtype=int)
         wall_mesh = pv.PolyData(line_pts, lines=lines)
         assign = area_assignments.get(wid, "")
-        plotter.add_mesh(wall_mesh, color="orange", line_width=2,
-                         opacity=0.5, label=f"Adj. wall {wid} ({assign})")
+        plotter.add_mesh(
+            wall_mesh,
+            color="orange",
+            line_width=2,
+            opacity=0.5,
+            label=f"Adj. wall {wid} ({assign})",
+        )
 
     # ── 4. Intersecting wall outlines (red edges) ────────────────
     for wid in wall_ids:
@@ -500,8 +522,9 @@ def plot_wall_slab_intersections(
         lines = np.array([[2, i, i + 1] for i in range(n_seg)], dtype=int)
         wall_mesh = pv.PolyData(line_pts, lines=lines)
         assign = area_assignments.get(wid, "")
-        plotter.add_mesh(wall_mesh, color="red", line_width=3,
-                         opacity=0.9, label=f"Wall {wid} ({assign})")
+        plotter.add_mesh(
+            wall_mesh, color="red", line_width=3, opacity=0.9, label=f"Wall {wid} ({assign})"
+        )
 
     # ── 5. Wall nodes inside slab (red spheres, labelled) ─────────
     for f in relevant:
@@ -513,8 +536,11 @@ def plot_wall_slab_intersections(
                 label = f"{wn['node_id']}(t={wn['node_tag']})"
                 plotter.add_point_labels(
                     np.array([center]),
-                    [label], font_size=10, point_size=0,
-                    shape_opacity=0.6, text_color="red",
+                    [label],
+                    font_size=10,
+                    point_size=0,
+                    shape_opacity=0.6,
+                    text_color="red",
                 )
 
     # ── 6. Legend ───────────────────────────────────────────────
@@ -526,8 +552,7 @@ def plot_wall_slab_intersections(
     cx = (zoom_x[0] + zoom_x[1]) * 0.5
     cy = (zoom_y[0] + zoom_y[1]) * 0.5
     cz = (zoom_z[0] + zoom_z[1]) * 0.5
-    d = max(zoom_x[1] - zoom_x[0], zoom_y[1] - zoom_y[0],
-            zoom_z[1] - zoom_z[0], 1.0) * 1.8
+    d = max(zoom_x[1] - zoom_x[0], zoom_y[1] - zoom_y[0], zoom_z[1] - zoom_z[0], 1.0) * 1.8
     plotter.camera.position = (cx + d, cy + d * 0.6, cz + d * 0.4)
     plotter.camera.focal_point = (cx, cy, cz)
     plotter.camera.up = (0, 0, 1)

@@ -1,6 +1,6 @@
 """Shared plotting utilities (backend-agnostic)."""
 
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 
@@ -11,11 +11,11 @@ def _unit_vec(v: np.ndarray) -> np.ndarray:
     return v / n if n > 1e-12 else np.array([1.0, 0.0, 0.0])
 
 
-def _flag_color(value: float) -> Tuple[int, int, int]:
+def _flag_color(value: float) -> tuple[int, int, int]:
     """Map a signed force value to an RGB triple (blue = positive, red = negative)."""
     if value >= 0:
-        return (59, 130, 246)   # blue
-    return (239, 68, 68)        # red
+        return (59, 130, 246)  # blue
+    return (239, 68, 68)  # red
 
 
 def compute_flag_parts(
@@ -24,7 +24,7 @@ def compute_flag_parts(
     vi: float,
     vj: float,
     scale_factor: float = 1.0,
-) -> Optional[Tuple[np.ndarray, np.ndarray, List[Tuple[int, int, int]]]]:
+) -> Optional[tuple[np.ndarray, np.ndarray, list[tuple[int, int, int]]]]:
     """Build a triangular "flag" mesh for a bending-moment diagram.
 
     The flag protrudes perpendicular to the member axis, with signed

@@ -39,11 +39,10 @@ from __future__ import annotations
 import copy
 import keyword
 import os
-import re
 import subprocess
 import sys
 import types
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 
@@ -51,13 +50,11 @@ if TYPE_CHECKING:
     from ..model.mesh_model import MeshModel
 
 from ..utils import (
+    DEFAULT_E_S_PA,
     DEFAULT_EPS_C,
-    DEFAULT_EPS_CC,
-    DEFAULT_G_MOD_FRAC,
     DEFAULT_FC_PA,
     DEFAULT_FY_REBAR_PA,
     DEFAULT_FY_STEEL_PA,
-    DEFAULT_E_S_PA,
     RC_NO_TIE_CONFINEMENT_FACTOR,
     RC_NO_TIE_EPSC_FACTOR,
     stress_scale_factor,
@@ -146,9 +143,7 @@ class RecordingOpenSees(types.ModuleType):
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             # Snapshot args/kwargs at call time so later mutations don't
             # affect what save_as_python() / save_as_tcl() replay.
-            self._commands.append(
-                (name, copy.deepcopy(args), copy.deepcopy(kwargs))
-            )
+            self._commands.append((name, copy.deepcopy(args), copy.deepcopy(kwargs)))
             return attr(*args, **kwargs)
 
         return wrapper
@@ -187,19 +182,16 @@ class RecordingOpenSees(types.ModuleType):
             reserved keyword.
         """
         if not isinstance(func_name, str) or not func_name.isidentifier():
-            raise ValueError(
-                f"func_name={func_name!r} is not a valid Python identifier"
-            )
+            raise ValueError(f"func_name={func_name!r} is not a valid Python identifier")
         if keyword.iskeyword(func_name):
             raise ValueError(
-                f"func_name={func_name!r} is a Python keyword and cannot "
-                f"be used as a function name"
+                f"func_name={func_name!r} is a Python keyword and cannot be used as a function name"
             )
 
         lines = [
-            '#!/usr/bin/env python',
+            "#!/usr/bin/env python",
             '"""Auto-generated OpenSeesPy model -- created by RecordingOpenSees."""',
-            '',
+            "",
             "import openseespy.opensees as ops",
             "",
             "",
@@ -207,9 +199,7 @@ class RecordingOpenSees(types.ModuleType):
         ]
         for cmd_name, args, kwargs in self._commands:
             arg_str = ", ".join(_py_val(a) for a in args)
-            kwarg_str = ", ".join(
-                f"{k}={_py_val(v)}" for k, v in kwargs.items()
-            )
+            kwarg_str = ", ".join(f"{k}={_py_val(v)}" for k, v in kwargs.items())
             all_args = arg_str
             if kwarg_str:
                 all_args += ", " + kwarg_str
@@ -280,8 +270,11 @@ class RecordingOpenSees(types.ModuleType):
             f.write("\n".join(lines) + "\n")
 
     def save_as_xara_tcl(
-        self, path: str, lib_path: str = "",
-        ndm: int = 3, ndf: int = 6,
+        self,
+        path: str,
+        lib_path: str = "",
+        ndm: int = 3,
+        ndf: int = 6,
     ) -> None:
         """Save recorded commands as a Tcl script for Xara/OpenSeesRT.
 
@@ -302,6 +295,7 @@ class RecordingOpenSees(types.ModuleType):
         if not lib_path:
             try:
                 import opensees
+
                 lib_dir = os.path.dirname(opensees.__file__)
                 found = False
                 for candidate in (
@@ -325,19 +319,34 @@ class RecordingOpenSees(types.ModuleType):
 
         # Commands filtered: skip query-only calls; preserve stateful ones.
         _skip = {
-            "wipe", "model", "wipeAnalysis",
+            "wipe",
+            "model",
+            "wipeAnalysis",
             # Pure query calls (no Tcl model-building effect)
-            "nodeCoord", "getNodeTags", "getEleTags", "eleNodes",
-            "nodeDisp", "nodeEigenvector", "nodeReaction", "nodeMass",
-            "eleResponse", "modalProperties",
+            "nodeCoord",
+            "getNodeTags",
+            "getEleTags",
+            "eleNodes",
+            "nodeDisp",
+            "nodeEigenvector",
+            "nodeReaction",
+            "nodeMass",
+            "eleResponse",
+            "modalProperties",
             "responseSpectrumAnalysis",
-            "eigen", "analyze",
+            "eigen",
+            "analyze",
             # Analysis/solver setup (emitted separately by exported analysis)
             # Note: "constraints" is NOT skipped because equationConstraint
             # MPCs require a specific handler (Penalty).  Without it, the
             # Tcl defaults to Transformation and MPCs are silently ignored.
-            "system", "numberer", "integrator",
-            "algorithm", "test", "analysis", "recorder",
+            "system",
+            "numberer",
+            "integrator",
+            "algorithm",
+            "test",
+            "analysis",
+            "recorder",
         }
         for cmd_name, args, kwargs in self._commands:
             if cmd_name in _skip:
@@ -375,8 +384,7 @@ class XaraTclRunner:
     def __init__(self, tclsh_path: str = "tclsh8.6"):
         self._tclsh = tclsh_path
 
-    def run(self, tcl_path: str, timeout: float = 300.0,
-            check: bool = False) -> tuple[int, str]:
+    def run(self, tcl_path: str, timeout: float = 300.0, check: bool = False) -> tuple[int, str]:
         """Execute a Tcl script via the standalone interpreter.
 
         Prints stdout/stderr in real-time as the script runs (avoids
@@ -401,13 +409,16 @@ class XaraTclRunner:
 
         with subprocess.Popen(
             [self._tclsh, tcl_path],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1, cwd=tcl_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            cwd=tcl_dir,
         ) as proc:
             try:
                 # Read combined stdout+stderr line-by-line in real time
-                for line in proc.stdout:
-                    line = line.rstrip("\n")
+                for raw_line in proc.stdout:
+                    line = raw_line.rstrip("\n")
                     print(line)
                     stdout_buf.append(line)
 
@@ -415,8 +426,7 @@ class XaraTclRunner:
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
-                print(f"XaraTclRunner: script timed out after {timeout}s",
-                      file=sys.stderr)
+                print(f"XaraTclRunner: script timed out after {timeout}s", file=sys.stderr)
                 raise
 
         returncode = proc.returncode
@@ -424,8 +434,8 @@ class XaraTclRunner:
 
         if check and returncode != 0:
             raise subprocess.CalledProcessError(
-                returncode, [self._tclsh, tcl_path],
-                stdout_text, "")
+                returncode, [self._tclsh, tcl_path], stdout_text, ""
+            )
 
         return returncode, stdout_text
 
@@ -456,7 +466,9 @@ class XaraTclRunner:
             try:
                 result = subprocess.run(
                     ["which", candidate],
-                    capture_output=True, text=True,
+                    capture_output=True,
+                    text=True,
+                    check=False,  # non-zero = not found; handled below
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     return result.stdout.strip()
@@ -482,7 +494,7 @@ class XaraTclRunner:
 
 
 def export_mesh_model_to_tcl(
-    mesh_model: "MeshModel",
+    mesh_model: MeshModel,
     path: str,
     lib_path: str = "",
     ndm: int = 3,
@@ -526,7 +538,6 @@ def export_mesh_model_to_tcl(
             sections are auto-generated for supported section types.
     """
     import math
-    from ..model.mesh_model import MeshModel
 
     if config is None:
         config = {}
@@ -535,6 +546,7 @@ def export_mesh_model_to_tcl(
     if not lib_path:
         try:
             import opensees as _xara_ops
+
             _lib_dir = os.path.dirname(_xara_ops.__file__)
             for ext in (".dylib", ".so"):
                 cand = os.path.join(_lib_dir, f"libOpenSeesRT{ext}")
@@ -578,8 +590,10 @@ def export_mesh_model_to_tcl(
             continue
         ni = mesh_model.nodes.get(elem.node_i)
         nj = mesh_model.nodes.get(elem.node_j)
-        if ni: _exported_node_tags.add(ni.node_tag)
-        if nj: _exported_node_tags.add(nj.node_tag)
+        if ni:
+            _exported_node_tags.add(ni.node_tag)
+        if nj:
+            _exported_node_tags.add(nj.node_tag)
     if export_shells:
         for aid, aelem in mesh_model.area_elements.items():
             if getattr(aelem, "inactive", False):
@@ -628,7 +642,7 @@ def export_mesh_model_to_tcl(
             except NotImplementedError:
                 pass
 
-    lines.append(f'puts "-> Restraints created, defining materials..."')
+    lines.append('puts "-> Restraints created, defining materials..."')
     lines.append("flush stdout")
 
     # ── Materials ────────────────────────────────────────────────
@@ -644,23 +658,19 @@ def export_mesh_model_to_tcl(
             if mat_name in _fiber_mat_names:
                 continue
             if mat.type and "concrete" in mat.type.lower():
-                Fc = (mat.Fc if mat.Fc and mat.Fc > 0
-                      else DEFAULT_FC_PA * _stress_factor)
-                epsc = (mat.eFc if mat.eFc and mat.eFc > 0 else DEFAULT_EPS_C)
+                Fc = mat.Fc if mat.Fc and mat.Fc > 0 else DEFAULT_FC_PA * _stress_factor
+                epsc = mat.eFc if mat.eFc and mat.eFc > 0 else DEFAULT_EPS_C
                 Fu = 0.2 * Fc
                 epsu = 0.006
                 lines.append(
-                    f"uniaxialMaterial Concrete01 {tag} "
-                    f"{-Fc:g} {-epsc:g} {-Fu:g} {-epsu:g}"
+                    f"uniaxialMaterial Concrete01 {tag} {-Fc:g} {-epsc:g} {-Fu:g} {-epsu:g}"
                 )
             else:
-                E_mod = (mat.E_mod if mat.E_mod and mat.E_mod > 0
-                         else DEFAULT_E_S_PA * _stress_factor)
-                Fy = (mat.Fy if mat.Fy and mat.Fy > 0 else DEFAULT_FY_STEEL_PA * _stress_factor)
-                lines.append(
-                    f"uniaxialMaterial Steel01 {tag} "
-                    f"{Fy:g} {E_mod:g} 0.01"
+                E_mod = (
+                    mat.E_mod if mat.E_mod and mat.E_mod > 0 else DEFAULT_E_S_PA * _stress_factor
                 )
+                Fy = mat.Fy if mat.Fy and mat.Fy > 0 else DEFAULT_FY_STEEL_PA * _stress_factor
+                lines.append(f"uniaxialMaterial Steel01 {tag} {Fy:g} {E_mod:g} 0.01")
 
     # ── Determine which sections are actually used by frame elements ──
     _assigned_to_frames: set[str] = set()
@@ -671,7 +681,7 @@ def export_mesh_model_to_tcl(
         if sn:
             _assigned_to_frames.add(sn)
 
-    lines.append(f'puts "-> Materials defined, creating frame sections..."')
+    lines.append('puts "-> Materials defined, creating frame sections..."')
     lines.append("flush stdout")
 
     # ── Frame sections ───────────────────────────────────────────
@@ -706,15 +716,19 @@ def export_mesh_model_to_tcl(
                 mat = mesh_model.materials.get(sec.material)
 
                 from ..model.sap_data import (
-                    ConcreteRectangularSection,
                     ConcreteCircularSection,
+                    ConcreteRectangularSection,
                     RectangularSection,
                 )
-                is_rc = isinstance(sec, (
-                    ConcreteRectangularSection,
-                    ConcreteCircularSection,
-                    RectangularSection,
-                ))
+
+                is_rc = isinstance(
+                    sec,
+                    (
+                        ConcreteRectangularSection,
+                        ConcreteCircularSection,
+                        RectangularSection,
+                    ),
+                )
 
                 if is_rc:
                     # Emit RC fiber materials ONCE per material, not per section
@@ -738,9 +752,11 @@ def export_mesh_model_to_tcl(
                         if mat is not None:
                             Fc = mat.Fc if mat.Fc and mat.Fc > 0 else _fc_pa
                             epsc = 0.002
-                            fcc = (mat.eFc
-                                   if mat.eFc and mat.eFc > 0
-                                   else Fc * RC_NO_TIE_CONFINEMENT_FACTOR)
+                            fcc = (
+                                mat.eFc
+                                if mat.eFc and mat.eFc > 0
+                                else Fc * RC_NO_TIE_CONFINEMENT_FACTOR
+                            )
                             epscc = epsc * RC_NO_TIE_EPSC_FACTOR
                         else:
                             Fc = _fc_pa
@@ -778,11 +794,11 @@ def export_mesh_model_to_tcl(
 
                         lines.append(
                             f"uniaxialMaterial Concrete01 {concrete_unconf} "
-                            f"{-Fc:g} {-epsc:g} {-0.2*Fc:g} {-0.006:g}"
+                            f"{-Fc:g} {-epsc:g} {-0.2 * Fc:g} {-0.006:g}"
                         )
                         lines.append(
                             f"uniaxialMaterial Concrete01 {concrete_conf} "
-                            f"{-fcc:g} {-epscc:g} {-0.2*fcc:g} {-0.02:g}"
+                            f"{-fcc:g} {-epscc:g} {-0.2 * fcc:g} {-0.02:g}"
                         )
                         lines.append(
                             f"uniaxialMaterial Steel02 {rebar_tag} "
@@ -796,15 +812,19 @@ def export_mesh_model_to_tcl(
                     if sec.material not in _rc_mat_tags:
                         tag_for_steel = mat_tags.get(sec.material, 1)
                         _rc_mat_tags[sec.material] = (tag_for_steel, 0, 0)
-                        if mat is not None and hasattr(mat, "type") and mat.type and mat.type.lower() == "steel":
+                        if (
+                            mat is not None
+                            and hasattr(mat, "type")
+                            and mat.type
+                            and mat.type.lower() == "steel"
+                        ):
                             Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
                             E_mod = mat.E_mod if mat.E_mod > 0 else 2.0e11
                         else:
                             Fy = 2.5e8
                             E_mod = 2.0e11
                         lines.append(
-                            f"uniaxialMaterial Steel01 {tag_for_steel} "
-                            f"{Fy:g} {E_mod:g} 0.01"
+                            f"uniaxialMaterial Steel01 {tag_for_steel} {Fy:g} {E_mod:g} 0.01"
                         )
                     fiber_mat_tag = mat_tags.get(sec.material, 1)
 
@@ -837,14 +857,13 @@ def export_mesh_model_to_tcl(
                 lines.append("}")
             else:
                 # ── Elastic section (skip shell sections — handled below) ──
-                if hasattr(sec, 'shape') and sec.shape == 'Shell':
+                if hasattr(sec, "shape") and sec.shape == "Shell":
                     continue
                 E_mod = 2.0e11
                 mat = mesh_model.materials.get(sec.material)
                 if mat and mat.E_mod and mat.E_mod > 0:
                     E_mod = mat.E_mod
-                G = (mat.G_mod if mat and mat.G_mod and mat.G_mod > 0
-                     else 0.4 * E_mod)
+                G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * E_mod
                 lines.append(
                     f"section Elastic {tag} "
                     f"{E_mod:g} {sec.A:g} {sec.I33:g} {sec.I22:g} "
@@ -857,7 +876,7 @@ def export_mesh_model_to_tcl(
         lines.append("# ── User tcl_prefix ──")
         lines.append(tcl_prefix)
 
-    lines.append(f'puts "-> Frame sections created, creating shell sections..."')
+    lines.append('puts "-> Frame sections created, creating shell sections..."')
     lines.append("flush stdout")
 
     # ── Shell sections ───────────────────────────────────────────
@@ -891,8 +910,7 @@ def export_mesh_model_to_tcl(
                 )
             else:
                 lines.append(
-                    f"section ElasticMembranePlateSection "
-                    f"{shell_sec_tags[sec_name]} 2.0e11 0.2 0.2"
+                    f"section ElasticMembranePlateSection {shell_sec_tags[sec_name]} 2.0e11 0.2 0.2"
                 )
 
         # Area elements — use offset tag to avoid colliding with frame elements
@@ -907,27 +925,19 @@ def export_mesh_model_to_tcl(
                     n_tags.append(str(nd.node_tag))
             if len(n_tags) < 3:
                 continue
-            stag = shell_sec_tags.get(
-                mesh_model.area_assignments.get(aid, ""), 1
-            )
+            stag = shell_sec_tags.get(mesh_model.area_assignments.get(aid, ""), 1)
             el_tag = _shell_elem_tag_offset + elem.area_tag
             nn = len(n_tags)
             if nn == 4:
-                lines.append(
-                    f"element ShellDKGQ {el_tag} "
-                    f"{' '.join(n_tags)} {stag}"
-                )
+                lines.append(f"element ShellDKGQ {el_tag} {' '.join(n_tags)} {stag}")
             elif nn == 3:
-                lines.append(
-                    f"element ShellDKGT {el_tag} "
-                    f"{' '.join(n_tags)} {stag}"
-                )
+                lines.append(f"element ShellDKGT {el_tag} {' '.join(n_tags)} {stag}")
     else:
         lines.append("")
         lines.append("# ── Shell elements omitted (export_shells=False) ──")
-        lines.append("puts \"-> Shell elements omitted (export_shells=False)\"")
+        lines.append('puts "-> Shell elements omitted (export_shells=False)"')
 
-    lines.append(f'puts "-> Shell sections created, creating frame elements..."')
+    lines.append('puts "-> Shell sections created, creating frame elements..."')
     lines.append("flush stdout")
 
     # ── Frame elements ───────────────────────────────────────────
@@ -970,14 +980,11 @@ def export_mesh_model_to_tcl(
             dx = nj.x - ni.x
             dy = nj.y - ni.y
             dz = nj.z - ni.z
-            if abs(dx) < 1e-12 and abs(dy) < 1e-12:
-                vecxz = "1 0 0"
-            else:
-                vecxz = "0 0 1"
+            vecxz = "1 0 0" if abs(dx) < 1e-12 and abs(dy) < 1e-12 else "0 0 1"
             # Determine root element for geomTransf: split children share
             # the parent's orientation, so they share the parent's transf_tag.
             # Build id→tag lookup for finding the parent's numeric tag.
-            _parent_id = getattr(elem, 'parent_id', None)
+            _parent_id = getattr(elem, "parent_id", None)
             if _parent_id is not None and _parent_id in frame_tag_map:
                 _root_el_tag = frame_tag_map[_parent_id]
             else:
@@ -994,19 +1001,23 @@ def export_mesh_model_to_tcl(
                 # Nonlinear beam-column with fiber section
                 int_tag = 10000 + el_tag
                 n_int_pts = config.get("num_int_pts", 5) if config else 5
-                elem_type = config.get("element_type", "forceBeamColumn") if config else "forceBeamColumn"
+                elem_type = (
+                    config.get("element_type", "forceBeamColumn") if config else "forceBeamColumn"
+                )
 
                 if elem_type == "dispBeamColumn":
                     # dispBeamColumn uses inline Lobatto syntax (required for Xara/OpenSeesRT)
                     lines.append(
                         f"element dispBeamColumn {el_tag} "
                         f"{ni.node_tag} {nj.node_tag} {transf_tag} "
-                        f"\"Lobatto {sec_tag} {n_int_pts}\""
+                        f'"Lobatto {sec_tag} {n_int_pts}"'
                     )
                 elif config.get("beam_integration", "Lobatto") == "HingeRadau":
                     # HingeRadau: 2 Gauss-Radau at each hinge over 4*Lp, 2 interior
-                    dx = nj.x - ni.x; dy = nj.y - ni.y; dz = nj.z - ni.z
-                    elem_len = math.sqrt(dx*dx + dy*dy + dz*dz)
+                    dx = nj.x - ni.x
+                    dy = nj.y - ni.y
+                    dz = nj.z - ni.z
+                    elem_len = math.sqrt(dx * dx + dy * dy + dz * dz)
                     Lp = max(0.05 * elem_len, 0.1)
                     lines.append(
                         f"beamIntegration HingeRadau {int_tag} {sec_tag} {Lp:.4f} {sec_tag} {Lp:.4f} {sec_tag}"
@@ -1017,9 +1028,7 @@ def export_mesh_model_to_tcl(
                     )
                 else:
                     # Default (Lobatto): beamIntegration + forceBeamColumn
-                    lines.append(
-                        f"beamIntegration Lobatto {int_tag} {sec_tag} {n_int_pts}"
-                    )
+                    lines.append(f"beamIntegration Lobatto {int_tag} {sec_tag} {n_int_pts}")
                     lines.append(
                         f"element forceBeamColumn {el_tag} "
                         f"{ni.node_tag} {nj.node_tag} {transf_tag} {int_tag}"
@@ -1030,7 +1039,9 @@ def export_mesh_model_to_tcl(
                     f"{ni.node_tag} {nj.node_tag} {sec_tag} {transf_tag}"
                 )
 
-    lines.append(f'puts "-> Domain building complete ({len(mesh_model.nodes)} nodes, {len(mesh_model.frame_elements)} frames, {len(mesh_model.area_elements)} shells)"')
+    lines.append(
+        f'puts "-> Domain building complete ({len(mesh_model.nodes)} nodes, {len(mesh_model.frame_elements)} frames, {len(mesh_model.area_elements)} shells)"'
+    )
     lines.append("flush stdout")
 
     # ── tcl_suffix (user-supplied, before wipe) ──────────────────
@@ -1055,7 +1066,7 @@ def parse_pushover_results(
     disp_path: str,
     bs_path: str,
     reaction_path: Optional[str] = None,
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
     """Parse pushover Tcl recorder output files into numpy arrays.
 
     Reads the output files generated by :func:`pushover_tcl`:
@@ -1123,15 +1134,15 @@ def parse_pushover_results(
         base_shear = np.asarray(bs_data, dtype=float)
 
     # Broadcast if needed — only for non-scalar data
-    if hasattr(base_shear, '__len__') and len(base_shear) != n_steps and n_steps > 0:
+    if hasattr(base_shear, "__len__") and len(base_shear) != n_steps and n_steps > 0:
         # Fallback: use the first value if shapes mismatch
-        base_shear_val = float(bs_data.flat[0]) if hasattr(bs_data, 'flat') else float(bs_data)
+        base_shear_val = float(bs_data.flat[0]) if hasattr(bs_data, "flat") else float(bs_data)
         base_shear = np.full(n_steps, base_shear_val)
 
     # ── Step indices ─────────────────────────────────────────────
     step = np.arange(1, n_steps + 1, dtype=int)
 
-    result: Dict[str, np.ndarray] = {
+    result: dict[str, np.ndarray] = {
         "control_disp": control_disp,
         "base_shear": base_shear,
         "step": step,

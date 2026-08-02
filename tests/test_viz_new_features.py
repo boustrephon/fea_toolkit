@@ -1,20 +1,20 @@
 """Tests for new visualization features: use_biaxial, physical shell damage, color legends."""
 
 import math
+
 import numpy as np
 import pytest
 
 try:
     import pyvista as pv
+
     _has_pyvista = True
     pv.OFF_SCREEN = True
 except ImportError:
     _has_pyvista = False
 
 # Module-level skip marker for pyvista-dependent tests
-_needs_pyvista = pytest.mark.skipif(
-    not _has_pyvista, reason="pyvista not installed"
-)
+_needs_pyvista = pytest.mark.skipif(not _has_pyvista, reason="pyvista not installed")
 
 
 def _make_pushover_data(frame_my_i, frame_mz_i, frame_my_j, frame_mz_j):
@@ -71,6 +71,7 @@ class TestHingeRatiosBiaxial:
     def test_uniaxial_default_mode(self):
         """Default mode (use_biaxial=False) uses Mz-only."""
         from fea_toolkit.plotting.viz import _compute_hinge_ratios
+
         forces = {
             "F1": {"mz_i": 10.0, "mz_j": 5.0, "my_i": 100.0, "my_j": 50.0},
             "F2": {"mz_i": 8.0, "mz_j": 12.0, "my_i": 80.0, "my_j": 120.0},
@@ -83,6 +84,7 @@ class TestHingeRatiosBiaxial:
     def test_biaxial_srss_mode(self):
         """Biaxial mode combines My and Mz via SRSS."""
         from fea_toolkit.plotting.viz import _compute_hinge_ratios
+
         forces = {
             "F1": {"mz_i": 3.0, "mz_j": 0.0, "my_i": 4.0, "my_j": 0.0},
         }
@@ -93,6 +95,7 @@ class TestHingeRatiosBiaxial:
     def test_biaxial_with_all_zero_forces(self):
         """Biaxial handles all-zero forces without division by zero."""
         from fea_toolkit.plotting.viz import _compute_hinge_ratios
+
         forces = {
             "F1": {"mz_i": 0.0, "mz_j": 0.0, "my_i": 0.0, "my_j": 0.0},
         }
@@ -104,6 +107,7 @@ class TestHingeRatiosBiaxial:
     def test_biaxial_with_single_element(self):
         """Single-element biaxial works correctly."""
         from fea_toolkit.plotting.viz import _compute_hinge_ratios
+
         forces = {
             "F1": {"mz_i": 10.0, "mz_j": 20.0, "my_i": 5.0, "my_j": 10.0},
         }
@@ -114,14 +118,14 @@ class TestHingeRatiosBiaxial:
     def test_biaxial_kwarg_threaded_to_plot(self):
         """use_biaxial kwarg is accepted by plot_plastic_hinge_formation."""
         from fea_toolkit.plotting.viz import plot_plastic_hinge_formation
+
         data = _make_pushover_data(
             np.array([[3.0], [6.0]]),
             np.array([[4.0], [8.0]]),
             np.array([[3.0], [6.0]]),
             np.array([[4.0], [8.0]]),
         )
-        pl = plot_plastic_hinge_formation(data, step=0, notebook=True,
-                                          use_biaxial=True)
+        pl = plot_plastic_hinge_formation(data, step=0, notebook=True, use_biaxial=True)
         assert pl is not None
         pl.close()
 
@@ -129,6 +133,7 @@ class TestHingeRatiosBiaxial:
     def test_animate_accepts_biaxial_kwarg(self):
         """animate_pushover_deformation accepts use_biaxial kwarg."""
         from fea_toolkit.plotting.viz import animate_pushover_deformation
+
         data = _make_pushover_data(
             np.array([[3.0], [6.0]]),
             np.array([[4.0], [8.0]]),
@@ -146,28 +151,30 @@ class TestShellDamagePhysical:
     def test_physical_mode_with_stress_and_thickness(self):
         """Physical mode uses von Mises + bending stress vs yield stress."""
         from fea_toolkit.plotting.viz import _compute_shell_damage
-        shells = {"W1": {"Nx": 1e6, "Ny": 0.0, "Nxy": 0.0,
-                         "Mx": 1000.0, "My": 0.0, "Mxy": 0.0}}
+
+        shells = {"W1": {"Nx": 1e6, "Ny": 0.0, "Nxy": 0.0, "Mx": 1000.0, "My": 0.0, "Mxy": 0.0}}
         indices = _compute_shell_damage(shells, yield_stress=40e6, thickness=0.15)
         assert "W1" in indices
-        D, m_mag = indices["W1"]
+        D, _m_mag = indices["W1"]
         assert D > 0
         assert D < 1.0
 
     def test_physical_mode_higher_damage(self):
         """Higher forces produce higher damage index."""
         from fea_toolkit.plotting.viz import _compute_shell_damage
-        shells = {"W1": {"Nx": 20e6, "Ny": 10e6, "Nxy": 5e6,
-                         "Mx": 50000.0, "My": 30000.0, "Mxy": 10000.0}}
+
+        shells = {
+            "W1": {"Nx": 20e6, "Ny": 10e6, "Nxy": 5e6, "Mx": 50000.0, "My": 30000.0, "Mxy": 10000.0}
+        }
         indices = _compute_shell_damage(shells, yield_stress=40e6, thickness=0.15)
-        D, m_mag = indices["W1"]
+        D, _m_mag = indices["W1"]
         assert D > 0.5
 
     def test_physical_mode_missing_params_falls_back(self):
         """Missing yield_stress or thickness falls back to range-based."""
         from fea_toolkit.plotting.viz import _compute_shell_damage
-        shells = {"W1": {"Nx": 100.0, "Ny": 50.0, "Nxy": 10.0,
-                         "Mx": 5.0, "My": 3.0, "Mxy": 1.0}}
+
+        shells = {"W1": {"Nx": 100.0, "Ny": 50.0, "Nxy": 10.0, "Mx": 5.0, "My": 3.0, "Mxy": 1.0}}
         indices = _compute_shell_damage(shells)
         assert "W1" in indices
         D, _ = indices["W1"]
@@ -176,8 +183,8 @@ class TestShellDamagePhysical:
     def test_physical_mode_with_none_thickness(self):
         """None thickness should fall back to range-based."""
         from fea_toolkit.plotting.viz import _compute_shell_damage
-        shells = {"W1": {"Nx": 100.0, "Ny": 50.0, "Nxy": 10.0,
-                         "Mx": 5.0, "My": 3.0, "Mxy": 1.0}}
+
+        shells = {"W1": {"Nx": 100.0, "Ny": 50.0, "Nxy": 10.0, "Mx": 5.0, "My": 3.0, "Mxy": 1.0}}
         indices = _compute_shell_damage(shells, yield_stress=40e6, thickness=None)
         assert "W1" in indices
         D, _ = indices["W1"]
@@ -190,19 +197,23 @@ class TestColorLegendHelpers:
     def test_hinge_color_legend_importable(self):
         """_add_hinge_color_legend can be imported."""
         from fea_toolkit.plotting.viz import _add_hinge_color_legend
+
         assert callable(_add_hinge_color_legend)
 
     def test_shell_color_legend_importable(self):
         """_add_shell_color_legend can be imported."""
         from fea_toolkit.plotting.viz import _add_shell_color_legend
+
         assert callable(_add_shell_color_legend)
 
     @_needs_pyvista
     def test_legends_dont_raise_with_pyvista_plotter(self):
         """Adding both legends to a plotter does not raise."""
         from fea_toolkit.plotting.viz import (
-            _add_hinge_color_legend, _add_shell_color_legend,
+            _add_hinge_color_legend,
+            _add_shell_color_legend,
         )
+
         plotter = pv.Plotter(notebook=True)
         # PyVista 0.44+ requires a mapper (mesh with scalars) before
         # add_scalar_bar() can be called — add a dummy mesh so the mapper exists.
@@ -225,8 +236,10 @@ class TestHingeColormap:
     def test_ratio_to_color_boundaries_match_sampled_cmap(self):
         """Ratios 0.0/0.5/1.0 map exactly to cmap samples at 0/0.5/1.0."""
         from fea_toolkit.plotting.viz import (
-            _ratio_to_color, _sample_cmap,
+            _ratio_to_color,
+            _sample_cmap,
         )
+
         samples = _sample_cmap([0.0, 0.5, 1.0], "plasma")
         self._assert_close(_ratio_to_color(0.0, 1.0), samples[0])
         # 0.5 boundary → exactly the mid (yielding) colour.
@@ -236,8 +249,10 @@ class TestHingeColormap:
     def test_ratio_to_color_interpolates_between_samples(self):
         """Mid-segment ratios interpolate linearly between samples."""
         from fea_toolkit.plotting.viz import (
-            _ratio_to_color, _sample_cmap,
+            _ratio_to_color,
+            _sample_cmap,
         )
+
         c0, c1, c2 = _sample_cmap([0.0, 0.5, 1.0], "plasma")
         # norm = 0.25 → halfway between c0 and c1.
         mid_low = tuple(0.5 * (c0[i] + c1[i]) for i in range(3))
@@ -249,8 +264,10 @@ class TestHingeColormap:
     def test_ratio_to_color_clamps_above_max(self):
         """Ratios above max_r clamp to the fully-yielded colour."""
         from fea_toolkit.plotting.viz import (
-            _ratio_to_color, _sample_cmap,
+            _ratio_to_color,
+            _sample_cmap,
         )
+
         c2 = _sample_cmap([1.0], "plasma")[0]
         self._assert_close(_ratio_to_color(2.0, 1.0), c2)
         self._assert_close(_ratio_to_color(5.0, 2.0), c2)
@@ -258,8 +275,10 @@ class TestHingeColormap:
     def test_ratio_to_color_zero_max_r(self):
         """max_r ≈ 0 maps to the elastic (low) colour without error."""
         from fea_toolkit.plotting.viz import (
-            _ratio_to_color, _sample_cmap,
+            _ratio_to_color,
+            _sample_cmap,
         )
+
         c0 = _sample_cmap([0.0], "plasma")[0]
         self._assert_close(_ratio_to_color(0.0, 0.0), c0)
         self._assert_close(_ratio_to_color(1.0, 1e-15), c0)
@@ -267,30 +286,30 @@ class TestHingeColormap:
     def test_custom_colormap(self):
         """Custom colormap names are honoured."""
         from fea_toolkit.plotting.viz import (
-            _ratio_to_color, _sample_cmap,
+            _ratio_to_color,
+            _sample_cmap,
         )
+
         samples = _sample_cmap([0.0, 0.5, 1.0], "viridis")
-        self._assert_close(_ratio_to_color(0.0, 1.0, cmap_name="viridis"),
-                           samples[0])
-        self._assert_close(_ratio_to_color(0.5, 1.0, cmap_name="viridis"),
-                           samples[1])
-        self._assert_close(_ratio_to_color(1.0, 1.0, cmap_name="viridis"),
-                           samples[2])
+        self._assert_close(_ratio_to_color(0.0, 1.0, cmap_name="viridis"), samples[0])
+        self._assert_close(_ratio_to_color(0.5, 1.0, cmap_name="viridis"), samples[1])
+        self._assert_close(_ratio_to_color(1.0, 1.0, cmap_name="viridis"), samples[2])
 
     def test_invalid_colormap_falls_back(self):
         """Unknown colormap names fall back to the fixed palette."""
         from fea_toolkit.plotting.viz import (
-            _ratio_to_color, _sample_cmap,
+            _ratio_to_color,
+            _sample_cmap,
         )
+
         fallback = [(0.3, 0.45, 0.69), (0.9, 0.8, 0.2), (0.9, 0.25, 0.2)]
         assert _sample_cmap([0.0, 0.5, 1.0], "no-such-cmap-xyz") == fallback
-        self._assert_close(_ratio_to_color(0.0, 1.0,
-                                           cmap_name="no-such-cmap-xyz"),
-                           fallback[0])
+        self._assert_close(_ratio_to_color(0.0, 1.0, cmap_name="no-such-cmap-xyz"), fallback[0])
 
     def test_rgb_to_hex(self):
         """_rgb_to_hex renders #RRGGBB and clamps out-of-range values."""
         from fea_toolkit.plotting.viz import _rgb_to_hex
+
         assert _rgb_to_hex((0.0, 0.0, 0.0)) == "#000000"
         assert _rgb_to_hex((1.0, 1.0, 1.0)) == "#ffffff"
         assert _rgb_to_hex((1.0, 0.5, 0.0)) == "#ff8000"
@@ -304,13 +323,13 @@ class TestAnimationInterval:
     def test_animate_accepts_interval_param(self):
         """animate_pushover_deformation accepts animation_interval_ms."""
         from fea_toolkit.plotting.viz import animate_pushover_deformation
+
         data = _make_pushover_data(
             np.zeros((2, 1)),
             np.array([[5.0], [10.0]]),
             np.zeros((2, 1)),
             np.array([[5.0], [10.0]]),
         )
-        pl = animate_pushover_deformation(data, notebook=True,
-                                          animation_interval_ms=100)
+        pl = animate_pushover_deformation(data, notebook=True, animation_interval_ms=100)
         assert pl is not None
         pl.close()

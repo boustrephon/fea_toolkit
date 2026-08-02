@@ -16,8 +16,8 @@ confidence level, and the method used to determine it.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 
@@ -26,10 +26,10 @@ if TYPE_CHECKING:
 
 import openseespy.opensees as ops
 
-
 # ========================================================================
 # StoryLevel dataclass
 # ========================================================================
+
 
 @dataclass
 class StoryLevel:
@@ -53,40 +53,39 @@ class StoryLevel:
         Node IDs belonging to this storey, as determined during
         detection.  ``None`` if not available (e.g. s2k_table method).
     """
+
     name: str
     elevation: float
     method: str = "unknown"
     confidence: str = "low"
-    bbox: Optional[Tuple[float, float, float, float]] = None
-    total_area: float = 0.0         # total plan area of horizontal elements at this level
-    node_ids: Optional[List[str]] = None
+    bbox: Optional[tuple[float, float, float, float]] = None
+    total_area: float = 0.0  # total plan area of horizontal elements at this level
+    node_ids: Optional[list[str]] = None
 
     def __repr__(self) -> str:
-        return (
-            f"{self.name} @ {self.elevation:.3f} "
-            f"[{self.method}, {self.confidence}]"
-        )
+        return f"{self.name} @ {self.elevation:.3f} [{self.method}, {self.confidence}]"
 
 
 # ========================================================================
 # Tolerance helpers
 # ========================================================================
 
-_DEFAULT_Z_TOL = 0.5        # half-metre clustering band
-_SLOPE_TOL_DEG = 20.0       # degrees from vertical to consider "horizontal"
-                           # (catches typical pitched roofs up to ~20°)
+_DEFAULT_Z_TOL = 0.5  # half-metre clustering band
+_SLOPE_TOL_DEG = 20.0  # degrees from vertical to consider "horizontal"
+# (catches typical pitched roofs up to ~20°)
 
 
 # ========================================================================
 # Pipeline: identify_stories
 # ========================================================================
 
+
 def identify_stories(
     md,
-    raw_tables: Optional[Dict] = None,
+    raw_tables: Optional[dict] = None,
     method: str = "auto",
     z_tolerance: float = _DEFAULT_Z_TOL,
-) -> List[StoryLevel]:
+) -> list[StoryLevel]:
     """Identify likely storey levels from a parsed SAP2000 model.
 
     Parameters
@@ -136,10 +135,7 @@ def identify_stories(
     if fn is None:
         raise ValueError(f"Unknown method: {method}")
     # Methods that need raw_tables
-    if method in ("s2k_table", "diaphragm"):
-        result = fn(md, raw_tables)
-    else:
-        result = fn(md, z_tolerance)
+    result = fn(md, raw_tables) if method in ("s2k_table", "diaphragm") else fn(md, z_tolerance)
     return _sort_and_name(result)
 
 
@@ -147,7 +143,8 @@ def identify_stories(
 # Strategy 1 — S2K table
 # ========================================================================
 
-def _try_s2k_table(md, raw_tables) -> List[StoryLevel]:
+
+def _try_s2k_table(md, raw_tables) -> list[StoryLevel]:
     """Read STORY DATA from the .s2k file if available."""
     if raw_tables is None:
         return []
@@ -164,12 +161,14 @@ def _try_s2k_table(md, raw_tables) -> List[StoryLevel]:
             elev = _safe_float(rec.get("Elevation"))
         if elev is None:
             continue
-        stories.append(StoryLevel(
-            name=name,
-            elevation=elev,
-            method="s2k_table",
-            confidence="high",
-        ))
+        stories.append(
+            StoryLevel(
+                name=name,
+                elevation=elev,
+                method="s2k_table",
+                confidence="high",
+            )
+        )
     return stories
 
 
@@ -177,7 +176,8 @@ def _try_s2k_table(md, raw_tables) -> List[StoryLevel]:
 # Strategy 2 — Diaphragm constraints
 # ========================================================================
 
-def _try_diaphragms(md, raw_tables) -> List[StoryLevel]:
+
+def _try_diaphragms(md, raw_tables) -> list[StoryLevel]:
     """Detect storeys from diaphragm constraints defined in the .s2k file.
 
     Uses two tables from the s2k file:
@@ -197,10 +197,10 @@ def _try_diaphragms(md, raw_tables) -> List[StoryLevel]:
         return []
 
     # Collect names of Z-axis diaphragms
-    diaph_names: List[str] = []
+    diaph_names: list[str] = []
     for rec in diaph_defs:
         name = rec.get("Name", "")
-        axis = (rec.get("Axis") or "")
+        axis = rec.get("Axis") or ""
         if name and axis.upper() == "Z":
             diaph_names.append(name)
 
@@ -209,7 +209,7 @@ def _try_diaphragms(md, raw_tables) -> List[StoryLevel]:
 
     # 2. Get joint assignments and group by constraint name
     assignments = raw_tables.get("JOINT CONSTRAINT ASSIGNMENTS") or []
-    constraint_groups: Dict[str, List[str]] = {n: [] for n in diaph_names}
+    constraint_groups: dict[str, list[str]] = {n: [] for n in diaph_names}
     for rec in assignments:
         joint = rec.get("Joint", "")
         cname = rec.get("Constraint", "")
@@ -230,14 +230,16 @@ def _try_diaphragms(md, raw_tables) -> List[StoryLevel]:
             continue
         elev = sum(z_vals) / len(z_vals)
         bbox = _bbox_for_nodes(md, joint_ids)
-        stories.append(StoryLevel(
-            name=cname,
-            elevation=elev,
-            method="diaphragm",
-            confidence="high",
-            bbox=bbox,
-            node_ids=joint_ids,
-        ))
+        stories.append(
+            StoryLevel(
+                name=cname,
+                elevation=elev,
+                method="diaphragm",
+                confidence="high",
+                bbox=bbox,
+                node_ids=joint_ids,
+            )
+        )
 
     return stories
 
@@ -246,13 +248,14 @@ def _try_diaphragms(md, raw_tables) -> List[StoryLevel]:
 # Strategy 3 — Horizontal area elements (floor/roof slabs)
 # ========================================================================
 
-def _try_area_elements(md, z_tolerance: float) -> List[StoryLevel]:
+
+def _try_area_elements(md, z_tolerance: float) -> list[StoryLevel]:
     """Identify storey levels from nearly-horizontal area elements."""
     if not hasattr(md, "area_elements") or not md.area_elements:
         return []
 
     # Collect (z, area, node_ids) for each horizontal slab element
-    slab_data: List[Tuple[float, float, List[str]]] = []
+    slab_data: list[tuple[float, float, list[str]]] = []
     for aid, ae in md.area_elements.items():
         if ae.inactive:
             continue
@@ -282,20 +285,22 @@ def _try_area_elements(md, z_tolerance: float) -> List[StoryLevel]:
     stories = []
     for cz, area_sum, indices in clusters:
         # Collect all node IDs from slabs in this cluster
-        cluster_nodes: List[str] = []
+        cluster_nodes: list[str] = []
         for idx in indices:
             cluster_nodes.extend(slab_data[idx][2])
 
         bbox = _bbox_for_nodes(md, cluster_nodes)
-        stories.append(StoryLevel(
-            name="",
-            elevation=cz,
-            method="area_elements",
-            confidence="medium",
-            bbox=bbox,
-            total_area=area_sum,
-            node_ids=list(set(cluster_nodes)),
-        ))
+        stories.append(
+            StoryLevel(
+                name="",
+                elevation=cz,
+                method="area_elements",
+                confidence="medium",
+                bbox=bbox,
+                total_area=area_sum,
+                node_ids=list(set(cluster_nodes)),
+            )
+        )
 
     return stories
 
@@ -304,7 +309,8 @@ def _try_area_elements(md, z_tolerance: float) -> List[StoryLevel]:
 # Strategy 4 — Node Z clustering
 # ========================================================================
 
-def _try_node_clustering(md, z_tolerance: float) -> List[StoryLevel]:
+
+def _try_node_clustering(md, z_tolerance: float) -> list[StoryLevel]:
     """Cluster node Z coordinates to infer storey levels.
 
     This is a fallback for models with no area elements or explicit
@@ -327,14 +333,16 @@ def _try_node_clustering(md, z_tolerance: float) -> List[StoryLevel]:
         # Use cluster member indices directly (avoids recomputing membership)
         node_ids = [node_list[i].node_id for i in member_idx]
         bbox = _bbox_for_nodes(md, node_ids)
-        stories.append(StoryLevel(
-            name="",
-            elevation=cz,
-            method="node_clustering",
-            confidence="low",
-            bbox=bbox,
-            node_ids=node_ids,
-        ))
+        stories.append(
+            StoryLevel(
+                name="",
+                elevation=cz,
+                method="node_clustering",
+                confidence="low",
+                bbox=bbox,
+                node_ids=node_ids,
+            )
+        )
 
     return stories
 
@@ -342,6 +350,7 @@ def _try_node_clustering(md, z_tolerance: float) -> List[StoryLevel]:
 # ========================================================================
 # Geometry helpers
 # ========================================================================
+
 
 def _get_area_vertices(md, ae):
     """Return list of (node_id, x, y, z) tuples for an area element."""
@@ -411,17 +420,13 @@ def _cluster_z(data, z_tolerance: float):
         else:
             anchor, prev_z_sum, prev_w, prev_idxs = clusters[-1]
             if abs(z - anchor) <= z_tolerance:
-                clusters[-1] = (anchor, prev_z_sum + z * w, prev_w + w,
-                                prev_idxs + [idx])
+                clusters[-1] = (anchor, prev_z_sum + z * w, prev_w + w, [*prev_idxs, idx])
             else:
                 clusters.append((z, z * w, w, [idx]))
-    return [
-        (z_sum / w_sum, w_sum, indices)
-        for _, z_sum, w_sum, indices in clusters
-    ]
+    return [(z_sum / w_sum, w_sum, indices) for _, z_sum, w_sum, indices in clusters]
 
 
-def _cluster_1d(values: np.ndarray, tolerance: float) -> List[Tuple[float, List[int]]]:
+def _cluster_1d(values: np.ndarray, tolerance: float) -> list[tuple[float, list[int]]]:
     """Simple 1D greedy clustering with fixed anchor.
 
     Each new value is compared to the **first** value in the current
@@ -438,31 +443,27 @@ def _cluster_1d(values: np.ndarray, tolerance: float) -> List[Tuple[float, List[
     for orig_idx, v in zip(idx_sorted, sorted_vals):
         if not clusters:
             clusters.append((v, [orig_idx]))
+        elif abs(v - clusters[-1][0]) <= tolerance:
+            clusters[-1][1].append(orig_idx)
         else:
-            if abs(v - clusters[-1][0]) <= tolerance:
-                clusters[-1][1].append(orig_idx)
-            else:
-                clusters.append((v, [orig_idx]))
-    return [
-        (float(np.mean(values[member_idx])), member_idx)
-        for _, member_idx in clusters
-    ]
+            clusters.append((v, [orig_idx]))
+    return [(float(np.mean(values[member_idx])), member_idx) for _, member_idx in clusters]
 
 
-def _sort_and_name(stories: List[StoryLevel]) -> List[StoryLevel]:
+def _sort_and_name(stories: list[StoryLevel]) -> list[StoryLevel]:
     """Sort by elevation and assign default names (Storey 1, Storey 2, …)."""
     stories.sort(key=lambda s: s.elevation)
     n_digits = len(str(len(stories)))
     for i, s in enumerate(stories):
         if not s.name:
             if i == len(stories) - 1 and s.elevation > 0:
-                s.name = f"Roof"
+                s.name = "Roof"
             else:
                 s.name = f"Storey {i + 1:{n_digits}d}".strip()
     return stories
 
 
-def _bbox_for_nodes(md, node_ids: List[str]):
+def _bbox_for_nodes(md, node_ids: list[str]):
     """Compute (x_min, x_max, y_min, y_max) from a list of node IDs."""
     xs, ys = [], []
     for nid in node_ids:
@@ -491,25 +492,26 @@ def _safe_float(v) -> Optional[float]:
 # Summary table
 # ========================================================================
 
-def stories_dataframe(stories: List[StoryLevel]) -> "pd.DataFrame":
+
+def stories_dataframe(stories: list[StoryLevel]) -> pd.DataFrame:
     """Return a pandas DataFrame summarising identified storeys."""
     import pandas as pd
+
     rows = []
     for s in stories:
         bbox_str = ""
         if s.bbox:
-            bbox_str = (
-                f"{s.bbox[0]:.1f}–{s.bbox[1]:.1f} × "
-                f"{s.bbox[2]:.1f}–{s.bbox[3]:.1f}"
-            )
-        rows.append({
-            "Storey": s.name,
-            "Elevation": f"{s.elevation:.2f}",
-            "Method": s.method,
-            "Confidence": s.confidence,
-            "BBox (X × Y)": bbox_str,
-            "Area (m²)": f"{s.total_area:.1f}" if s.total_area else "",
-        })
+            bbox_str = f"{s.bbox[0]:.1f}–{s.bbox[1]:.1f} × {s.bbox[2]:.1f}–{s.bbox[3]:.1f}"
+        rows.append(
+            {
+                "Storey": s.name,
+                "Elevation": f"{s.elevation:.2f}",
+                "Method": s.method,
+                "Confidence": s.confidence,
+                "BBox (X × Y)": bbox_str,
+                "Area (m²)": f"{s.total_area:.1f}" if s.total_area else "",
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -517,11 +519,12 @@ def stories_dataframe(stories: List[StoryLevel]) -> "pd.DataFrame":
 # PyVista 3D visualisation
 # ========================================================================
 
+
 def plot_stories(
     md,
-    stories: List[StoryLevel],
+    stories: list[StoryLevel],
     off_screen: bool = True,
-    window_size: Tuple[int, int] = (1200, 900),
+    window_size: tuple[int, int] = (1200, 900),
     plane_opacity: float = 0.15,
 ) -> Optional[Any]:
     """Render a 3D view of the model with semi-transparent storey planes.
@@ -546,10 +549,11 @@ def plot_stories(
         if PyVista is unavailable.
     """
     try:
-        import pyvista as pv
         import matplotlib.pyplot as plt
-        from fea_toolkit.opensees.preprocessor import preprocess_model
+        import pyvista as pv
+
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
         from fea_toolkit.plotting.viz import plot_mesh
     except ImportError:
         return None
@@ -563,15 +567,15 @@ def plot_stories(
     pv.OFF_SCREEN = off_screen
     try:
         # Build a lightweight elastic model for visualisation (two-stage)
-        _mm = preprocess_model(md, {"element_type": "elasticBeamColumn",
-                                    "split_elements": True, "verbose": False})
-        b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn",
-                                 "verbose": False})
+        _mm = preprocess_model(
+            md, {"element_type": "elasticBeamColumn", "split_elements": True, "verbose": False}
+        )
+        b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn", "verbose": False})
         b.build_domain()
     except Exception as exc:
         import logging
-        logging.getLogger(__name__).warning(
-            "Could not build visualisation model: %s", exc)
+
+        logging.getLogger(__name__).warning("Could not build visualisation model: %s", exc)
         return None
     finally:
         ops.wipe()
@@ -592,7 +596,7 @@ def plot_stories(
     global_ymin, global_ymax = min(ys), max(ys)
     x_span = global_xmax - global_xmin
     y_span = global_ymax - global_ymin
-    z_span = max(zs) - min(zs)
+    max(zs) - min(zs)
 
     # Add a semi-transparent plane for each storey
     for i, s in enumerate(stories):
@@ -615,9 +619,15 @@ def plot_stories(
             (xmin - pad, ymax + pad, s.elevation),
         ]
         plane = pv.PolyData(corners, faces=[4, 0, 1, 2, 3])
-        pl.add_mesh(plane, color="yellow", opacity=plane_opacity,
-                     show_edges=True, edge_color="gold", line_width=1,
-                     label=s.name)
+        pl.add_mesh(
+            plane,
+            color="yellow",
+            opacity=plane_opacity,
+            show_edges=True,
+            edge_color="gold",
+            line_width=1,
+            label=s.name,
+        )
 
     pl.add_legend(bcolor="w", face="circle", size=(0.2, 0.15))
 

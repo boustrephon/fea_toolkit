@@ -9,19 +9,17 @@ The reverted utils.py returns factors where length_scale_factor values
 are model-unit-per-SI-metre (0.001 for mm, 0.0254 for in).
 """
 
-import math
-import pytest
 import importlib.util
-import sys
+from typing import ClassVar
+
+import pytest
 
 # Load module directly to avoid package-level pandas dependency
-_spec = importlib.util.spec_from_file_location(
-    "utils", "src/fea_toolkit/utils.py"
-)
+_spec = importlib.util.spec_from_file_location("utils", "src/fea_toolkit/utils.py")
 utils = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(utils)
 
-from fea_toolkit.model.sap_data import SAPModelData, Material
+from fea_toolkit.model.sap_data import Material, SAPModelData
 
 
 class TestLengthScaleFactor:
@@ -250,11 +248,11 @@ class TestScaleMaterialDict:
         """(kN,m): stress fields ÷1000, non-stress fields unchanged."""
         mat = {"E": 200.0e9, "nu": 0.3, "fy": 500.0e6, "Hiso": 0.0, "material_type": "J2PlateFibre"}
         result = utils.scale_material_dict(mat, {"F": "kN", "L": "m"})
-        assert result["E"] == pytest.approx(200.0e6)       # 200e9 * 0.001
-        assert result["fy"] == pytest.approx(500.0e3)       # 500e6 * 0.001
+        assert result["E"] == pytest.approx(200.0e6)  # 200e9 * 0.001
+        assert result["fy"] == pytest.approx(500.0e3)  # 500e6 * 0.001
         assert result["Hiso"] == pytest.approx(0.0)
-        assert result["nu"] == pytest.approx(0.3)            # dimensionless, unchanged
-        assert result["material_type"] == "J2PlateFibre"    # string, unchanged
+        assert result["nu"] == pytest.approx(0.3)  # dimensionless, unchanged
+        assert result["material_type"] == "J2PlateFibre"  # string, unchanged
 
     def test_SI_N_m_no_scaling(self):
         """(N,m): stress_scale ≈ 1.0, dict returned as-is."""
@@ -310,7 +308,7 @@ class TestInverseScaleFactors:
     so ``scale_factor * to_si_factor == 1.0`` for every pair.
     """
 
-    _UNIT_SET = [
+    _UNIT_SET: ClassVar = [
         {"F": "N", "L": "m"},
         {"F": "N", "L": "mm"},
         {"F": "kN", "L": "m"},
@@ -325,38 +323,44 @@ class TestInverseScaleFactors:
     def test_length_roundtrip(self):
         """length_to_si_factor is the reciprocal of length_scale_factor."""
         for u in self._UNIT_SET:
-            assert utils.length_scale_factor(u) * utils.length_to_si_factor(u) \
-                == pytest.approx(1.0, rel=1e-12)
+            assert utils.length_scale_factor(u) * utils.length_to_si_factor(u) == pytest.approx(
+                1.0, rel=1e-12
+            )
 
     def test_force_roundtrip(self):
         """force_to_si_factor is the reciprocal of force_scale_factor."""
         for u in self._UNIT_SET:
-            assert utils.force_scale_factor(u) * utils.force_to_si_factor(u) \
-                == pytest.approx(1.0, rel=1e-12)
+            assert utils.force_scale_factor(u) * utils.force_to_si_factor(u) == pytest.approx(
+                1.0, rel=1e-12
+            )
 
     def test_mass_roundtrip(self):
         """mass_to_si_factor is the reciprocal of mass_scale_factor."""
         for u in self._UNIT_SET:
-            assert utils.mass_scale_factor(u) * utils.mass_to_si_factor(u) \
-                == pytest.approx(1.0, rel=1e-12)
+            assert utils.mass_scale_factor(u) * utils.mass_to_si_factor(u) == pytest.approx(
+                1.0, rel=1e-12
+            )
 
     def test_stress_roundtrip(self):
         """stress_to_si_factor is the reciprocal of stress_scale_factor."""
         for u in self._UNIT_SET:
-            assert utils.stress_scale_factor(u) * utils.stress_to_si_factor(u) \
-                == pytest.approx(1.0, rel=1e-12)
+            assert utils.stress_scale_factor(u) * utils.stress_to_si_factor(u) == pytest.approx(
+                1.0, rel=1e-12
+            )
 
     def test_mass_density_roundtrip(self):
         """mass_density_to_si_factor is the reciprocal of mass_density_scale_factor."""
         for u in self._UNIT_SET:
-            assert utils.mass_density_scale_factor(u) * utils.mass_density_to_si_factor(u) \
-                == pytest.approx(1.0, rel=1e-12)
+            assert utils.mass_density_scale_factor(u) * utils.mass_density_to_si_factor(
+                u
+            ) == pytest.approx(1.0, rel=1e-12)
 
     def test_weight_density_roundtrip(self):
         """weight_density_to_si_factor is the reciprocal of weight_density_scale_factor."""
         for u in self._UNIT_SET:
-            assert utils.weight_density_scale_factor(u) * utils.weight_density_to_si_factor(u) \
-                == pytest.approx(1.0, rel=1e-12)
+            assert utils.weight_density_scale_factor(u) * utils.weight_density_to_si_factor(
+                u
+            ) == pytest.approx(1.0, rel=1e-12)
 
     def test_lineal_force_consistency(self):
         """lineal_force_to_si_factor == force_to_si / length_to_si."""
@@ -366,10 +370,12 @@ class TestInverseScaleFactors:
 
     def test_alias_inverse_matches_bare_string(self):
         """Length aliases normalise identically in both factor systems."""
-        assert utils.length_to_si_factor({"L": "millimetre"}) \
-            == pytest.approx(utils.length_to_si_factor({"L": "mm"}))
-        assert utils.force_to_si_factor({"F": "kilonewtons"}) \
-            == pytest.approx(utils.force_to_si_factor({"F": "kN"}))
+        assert utils.length_to_si_factor({"L": "millimetre"}) == pytest.approx(
+            utils.length_to_si_factor({"L": "mm"})
+        )
+        assert utils.force_to_si_factor({"F": "kilonewtons"}) == pytest.approx(
+            utils.force_to_si_factor({"F": "kN"})
+        )
 
 
 class TestApplyMaterialDefaultsScaleFactors:
@@ -413,12 +419,15 @@ class TestApplyMaterialDefaultsScaleFactors:
         md.apply_material_defaults()
 
         mat = md.materials["C30"]
-        assert mat.E_mod * utils.stress_to_si_factor(units) \
-            == pytest.approx(utils.DEFAULT_E_C_PA, rel=1e-12)
-        assert mat.unit_weight * utils.weight_density_to_si_factor(units) \
-            == pytest.approx(utils.DEFAULT_RHO_WC_SI, rel=1e-12)
-        assert mat.unit_mass * utils.mass_density_to_si_factor(units) \
-            == pytest.approx(utils.DEFAULT_RHO_MC_SI, rel=1e-12)
+        assert mat.E_mod * utils.stress_to_si_factor(units) == pytest.approx(
+            utils.DEFAULT_E_C_PA, rel=1e-12
+        )
+        assert mat.unit_weight * utils.weight_density_to_si_factor(units) == pytest.approx(
+            utils.DEFAULT_RHO_WC_SI, rel=1e-12
+        )
+        assert mat.unit_mass * utils.mass_density_to_si_factor(units) == pytest.approx(
+            utils.DEFAULT_RHO_MC_SI, rel=1e-12
+        )
 
     def test_concrete_defaults_roundtrip_non_si(self):
         """Concrete stress/weight/mass defaults round-trip in kN-m."""
@@ -449,5 +458,6 @@ class TestApplyMaterialDefaultsScaleFactors:
         # 2450 / 0.001 = 2.45e6; * 1000 = 2.45e9 — wrong by a factor of 1000
         assert abs(division_value * mdsi / utils.DEFAULT_RHO_MC_SI - 1.0) > 100
         multiplication_value = utils.DEFAULT_RHO_MC_SI * mds
-        assert abs(multiplication_value * mdsi / utils.DEFAULT_RHO_MC_SI - 1.0) \
-            < 1e-12  # multiplication round-trips exactly
+        assert (
+            abs(multiplication_value * mdsi / utils.DEFAULT_RHO_MC_SI - 1.0) < 1e-12
+        )  # multiplication round-trips exactly

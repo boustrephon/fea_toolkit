@@ -5,14 +5,12 @@ time-history CSV) and utility functions for scaling, baseline
 correction, and spectral matching.
 """
 
-from typing import Optional, Tuple
-
 import numpy as np
-
 
 # ── PEER NGA record reader ───────────────────────────────────────
 
-def read_peer_record(path: str) -> Tuple[np.ndarray, np.ndarray]:
+
+def read_peer_record(path: str) -> tuple[np.ndarray, np.ndarray]:
     """Read a PEER NGA strong motion record.
 
     PEER NGA format (``.AT2``) has a header with metadata followed
@@ -40,13 +38,12 @@ def read_peer_record(path: str) -> Tuple[np.ndarray, np.ndarray]:
     """
     import re
 
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
+    with open(path, encoding="utf-8", errors="replace") as f:
         lines = f.readlines()
 
     # Skip header — search for the first numeric data line
     data_lines: list[str] = []
     dt = 0.005  # default time step (fallback if no DT header)
-    dt_found = False
     for line in lines:
         stripped = line.strip()
         if not stripped:
@@ -58,10 +55,9 @@ def read_peer_record(path: str) -> Tuple[np.ndarray, np.ndarray]:
             # Only attempt fallback extraction when "dt" is explicitly present
             m_dt = re.search(r"(?:^|\s)DT\s*=\s*([\d.]+)", stripped, re.IGNORECASE)
             if not m_dt and "dt" in low:
-                m_dt = re.search(r"([\d.]+)", stripped[stripped.lower().find("dt"):])
+                m_dt = re.search(r"([\d.]+)", stripped[stripped.lower().find("dt") :])
             if m_dt:
                 dt = float(m_dt.group(1))
-                dt_found = True
             continue  # skip recognized header metadata
         # Check if this line starts with a number (data)
         try:
@@ -84,7 +80,7 @@ def read_peer_record(path: str) -> Tuple[np.ndarray, np.ndarray]:
 
 def read_time_history_csv(
     path: str, col_time: int = 0, col_accel: int = 1, skip_header: int = 1
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Read a simple CSV time history.
 
     Parameters
@@ -111,9 +107,8 @@ def read_time_history_csv(
 
 # ── Scaling ───────────────────────────────────────────────────────
 
-def scale_to_pga(
-    times: np.ndarray, accel: np.ndarray, target_pga: float
-) -> np.ndarray:
+
+def scale_to_pga(times: np.ndarray, accel: np.ndarray, target_pga: float) -> np.ndarray:
     """Scale accelerations to a target peak ground acceleration.
 
     Parameters
@@ -192,13 +187,22 @@ def scale_to_target_sa(
         # p_eff = -accel[i] + a_bar*u[i-1] + b_bar*v[i-1] + c_bar*a[i-1]
         # where a_bar = 1/(beta*dt^2), b_bar = gamma/(beta*dt), c_bar = 1/(beta*dt) - 1/(2*beta)
         # (consistent with k_eff = k + gamma*c/(beta*dt) + 1/(beta*dt^2))
-        p_eff = -accel[i] + (1.0/(beta*dt**2))*u[i-1] + (gamma/(beta*dt))*v[i-1] + (1.0/(beta*dt) - 1.0/(2.0*beta))*a[i-1]
+        p_eff = (
+            -accel[i]
+            + (1.0 / (beta * dt**2)) * u[i - 1]
+            + (gamma / (beta * dt)) * v[i - 1]
+            + (1.0 / (beta * dt) - 1.0 / (2.0 * beta)) * a[i - 1]
+        )
         u[i] = p_eff / k_eff
         # Newmark state update (gamma=0.5, beta=1/6 linear acceleration)
         # Standard formulas: v[i] = v[i-1] + dt*((1-gamma)*a[i-1] + gamma*a[i])
         #                    a[i] = (u[i]-u[i-1])/(beta*dt^2) - v[i-1]/(beta*dt) - (1/(2*beta)-1)*a[i-1]
-        v[i] = v[i-1] + dt * ((1.0 - gamma) * a[i-1] + gamma * a[i])
-        a[i] = (u[i] - u[i-1]) / (beta * dt**2) - v[i-1] / (beta * dt) - (1.0 / (2.0 * beta) - 1.0) * a[i-1]
+        v[i] = v[i - 1] + dt * ((1.0 - gamma) * a[i - 1] + gamma * a[i])
+        a[i] = (
+            (u[i] - u[i - 1]) / (beta * dt**2)
+            - v[i - 1] / (beta * dt)
+            - (1.0 / (2.0 * beta) - 1.0) * a[i - 1]
+        )
 
     current_sa = np.max(np.abs(u)) * w**2
     if current_sa < 1e-12:
@@ -208,9 +212,8 @@ def scale_to_target_sa(
 
 # ── Baseline correction ───────────────────────────────────────────
 
-def baseline_correct(
-    times: np.ndarray, accel: np.ndarray, order: int = 3
-) -> np.ndarray:
+
+def baseline_correct(times: np.ndarray, accel: np.ndarray, order: int = 3) -> np.ndarray:
     """Remove polynomial baseline drift from an acceleration record.
 
     Parameters
@@ -233,6 +236,7 @@ def baseline_correct(
 
 
 # ── Record metadata ───────────────────────────────────────────────
+
 
 def record_summary(times: np.ndarray, accel: np.ndarray) -> dict:
     """Return summary statistics for a ground motion record.

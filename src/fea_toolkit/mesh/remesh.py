@@ -11,10 +11,9 @@ Requires ``gmsh`` (``pip install fea_toolkit[mesh-remesh]``).
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import numpy as np
-
 
 # ── Internal helpers ───────────────────────────────────────────────────
 
@@ -23,12 +22,13 @@ def _check_gmsh() -> bool:
     """Return True if ``gmsh`` is available."""
     try:
         import gmsh  # noqa: F401
+
         return True
     except ImportError:
         return False
 
 
-def _newell_area(pts: List[Tuple[float, float, float]]) -> float:
+def _newell_area(pts: list[tuple[float, float, float]]) -> float:
     """3D polygon area via Newell's method."""
     nx = ny = nz = 0.0
     for i in range(len(pts)):
@@ -46,15 +46,15 @@ def _newell_area(pts: List[Tuple[float, float, float]]) -> float:
 
 
 def remesh_areas(
-    area_elements: Dict[str, Any],
-    area_assignments: Dict[str, str],
-    nodes: Dict[str, Any],
-    area_mesh: Dict[str, Any],
-    line_constraints: Optional[Dict[str, List[Tuple[str, str, str]]]] = None,
+    area_elements: dict[str, Any],
+    area_assignments: dict[str, str],
+    nodes: dict[str, Any],
+    area_mesh: dict[str, Any],
+    line_constraints: Optional[dict[str, list[tuple[str, str, str]]]] = None,
     target_length: float = 0.5,
     recombine: bool = True,
     verbose: bool = False,
-) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Any], int]:
+) -> tuple[dict[str, Any], dict[str, str], dict[str, Any], int]:
     """Remesh quadrilateral areas via Gmsh, optionally preserving frame-
     element edges as line constraints.
 
@@ -109,8 +109,10 @@ def remesh_areas(
         # nodes only, so adjacent areas' shared edges are still
         # deduplicated without collapsing intentionally separate
         # nodes at the same coordinate. ──
-        _coord_key = lambda x, y, z: (round(x, 6), round(y, 6), round(z, 6))
-        _coord_to_id: Dict[tuple, str] = {}
+        def _coord_key(x, y, z):
+            return (round(x, 6), round(y, 6), round(z, 6))
+
+        _coord_to_id: dict[tuple, str] = {}
 
         # Seed next_tag from the highest area tag to avoid collisions.
         existing_tags = {nd.node_tag for nd in nodes.values()}
@@ -176,7 +178,7 @@ def remesh_areas(
             # --- Embed line constraints (frame edges) ---
             frame_constraints = line_constraints.get(aid, [])
             if frame_constraints:
-                constraint_curves: List[int] = []
+                constraint_curves: list[int] = []
                 for fid, nid_a, nid_b in frame_constraints:
                     nd_a = nodes.get(nid_a)
                     nd_b = nodes.get(nid_b)
@@ -184,6 +186,7 @@ def remesh_areas(
                         continue
                     pta = (nd_a.x, nd_a.y, nd_a.z)
                     ptb = (nd_b.x, nd_b.y, nd_b.z)
+
                     # Skip constraints whose endpoints are not within
                     # tolerance of the area boundary (1‑mm check).
                     def _on_boundary(p, corners, tol=1e-3):
@@ -193,9 +196,13 @@ def remesh_areas(
                             ap = np.array(p) - np.array(a)
                             cross = np.linalg.norm(np.cross(ab, ap))
                             edge_len = max(np.linalg.norm(ab), 1e-12)
-                            if cross / edge_len < tol and 0 <= np.dot(ap, ab) / max(np.dot(ab, ab), 1e-12) <= 1:
+                            if (
+                                cross / edge_len < tol
+                                and 0 <= np.dot(ap, ab) / max(np.dot(ab, ab), 1e-12) <= 1
+                            ):
                                 return True
                         return False
+
                     if not (_on_boundary(pta, pts) and _on_boundary(ptb, pts)):
                         continue
                     ta = gmsh.model.occ.add_point(*pta, lc)
@@ -226,14 +233,11 @@ def remesh_areas(
             coord_map = dict(zip(node_tags_local, coords.reshape((-1, 3))))
 
             # Separate corner nodes from interior/edge nodes
-            corner_coords = set(
-                (round(pt[0], 6), round(pt[1], 6), round(pt[2], 6))
-                for pt in pts
-            )
+            {(round(pt[0], 6), round(pt[1], 6), round(pt[2], 6)) for pt in pts}
 
             # Get element types and connectivity for this surface
-            all_elem_types, all_elem_tags, all_conn = gmsh.model.mesh.getElements(2, surf)
-            quad_conn: List[List[int]] = []
+            all_elem_types, _all_elem_tags, all_conn = gmsh.model.mesh.getElements(2, surf)
+            quad_conn: list[list[int]] = []
             for etype_idx, etype in enumerate(all_elem_types):
                 if etype == 3:  # 4-node quad
                     conn = np.array(all_conn[etype_idx]).reshape((-1, 4))
@@ -247,7 +251,7 @@ def remesh_areas(
 
             # --- Map Gmsh nodes back to fea_toolkit nodes,
             # reusing any previously-created node at the same coordinate. ---
-            sub_node_map: Dict[int, str] = {}  # gmsh_tag → fea_toolkit_id
+            sub_node_map: dict[int, str] = {}  # gmsh_tag → fea_toolkit_id
             for gmsh_tag in node_tags_local:
                 coord = coord_map[gmsh_tag]
                 key = (round(coord[0], 6), round(coord[1], 6), round(coord[2], 6))
@@ -259,10 +263,14 @@ def remesh_areas(
                 nid = f"{aid}_gmsh_{gmsh_tag}"
                 ntag = next_node_tag
                 next_node_tag += 1
-                from ..model.sap_data import Node  # noqa: E402
+                from ..model.sap_data import Node
+
                 nodes[nid] = Node(
-                    node_id=nid, node_tag=ntag,
-                    x=float(coord[0]), y=float(coord[1]), z=float(coord[2]),
+                    node_id=nid,
+                    node_tag=ntag,
+                    x=float(coord[0]),
+                    y=float(coord[1]),
+                    z=float(coord[2]),
                 )
                 _coord_to_id[key] = nid
                 sub_node_map[gmsh_tag] = nid
@@ -272,11 +280,14 @@ def remesh_areas(
             sec_name = area_assignments.get(aid, "")
             sub_count = 0
             for row in quad_conn:
-                sub_id = f"{aid}_gmsh_{len([k for k in area_elements if k.startswith(f'{aid}_gmsh_')])}"
+                sub_id = (
+                    f"{aid}_gmsh_{len([k for k in area_elements if k.startswith(f'{aid}_gmsh_')])}"
+                )
                 sub_tag = next_tag
                 next_tag += 1
                 sub_nodes = [sub_node_map[int(t)] for t in row]
-                from ..model.sap_data import AreaElement  # noqa: E402
+                from ..model.sap_data import AreaElement
+
                 area_elements[sub_id] = AreaElement(
                     area_id=sub_id,
                     area_tag=sub_tag,
@@ -306,8 +317,8 @@ def constrain_line(
     frame_id: str,
     node_a: str,
     node_b: str,
-    nodes: Dict[str, Any],
-    constraints: Dict[str, List[Tuple[str, str, str]]],
+    nodes: dict[str, Any],
+    constraints: dict[str, list[tuple[str, str, str]]],
 ) -> None:
     """Register a frame element edge as a line constraint for a given area.
 

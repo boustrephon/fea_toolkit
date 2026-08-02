@@ -22,14 +22,19 @@ Typical usage::
     })
 """
 
-import math
 import pickle
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
-import numpy as np
 import pandas as pd
 
+from fea_toolkit.analysis import (
+    AnalysisManager,
+    ModalAnalysis,
+    PushoverAnalysis,
+    ResponseSpectrumAnalysis,
+    StaticAnalysis,
+)
 from fea_toolkit.io.analysis_log import AnalysisLog
 from fea_toolkit.io.report import (
     bounding_box,
@@ -42,20 +47,13 @@ from fea_toolkit.io.report import (
 from fea_toolkit.model.mesh_model import MeshModel
 from fea_toolkit.model.sap_data import SAPModelData
 from fea_toolkit.model.selection import Selection
-from fea_toolkit.model.stories import identify_stories, stories_dataframe, plot_stories
 from fea_toolkit.model.storey_response import compute_linear_storey_responses
-from fea_toolkit.analysis import (
-    AnalysisManager,
-    ModalAnalysis,
-    PushoverAnalysis,
-    ResponseSpectrumAnalysis,
-    StaticAnalysis,
-)
+from fea_toolkit.model.stories import identify_stories, plot_stories, stories_dataframe
 from fea_toolkit.opensees.preprocessor import preprocess_model
 from fea_toolkit.plotting.report import (
     plot_csm_4panel,
-    plot_storey_forces,
     plot_storey_displacements,
+    plot_storey_forces,
 )
 from fea_toolkit.plotting.viz import plot_model_comparison
 from fea_toolkit.spectrum import _build_spectrum, plot_seismic_spectrum
@@ -261,9 +259,7 @@ def generate_report(
             df_load_verify = static_load_verification(md, mesh_model)
             _lv_patterns = cfg.get("static_verification", {}).get("patterns")
             if _lv_patterns and not df_load_verify.empty:
-                df_load_verify = df_load_verify[
-                    df_load_verify["Load Pattern"].isin(_lv_patterns)
-                ]
+                df_load_verify = df_load_verify[df_load_verify["Load Pattern"].isin(_lv_patterns)]
             if log:
                 log.info("load_verify", f"{len(df_load_verify)} patterns")
             if verbose:
@@ -286,17 +282,14 @@ def generate_report(
             if verbose:
                 print(f"  {connectivity['summary']}")
                 if connectivity.get("orphan_nodes"):
-                    print(
-                        f"  ⚠ {len(connectivity['orphan_nodes'])} orphan node(s)"
-                    )
+                    print(f"  ⚠ {len(connectivity['orphan_nodes'])} orphan node(s)")
                 if connectivity.get("shell_only_base_nodes"):
                     print(
-                        f"  ⚠ {len(connectivity['shell_only_base_nodes'])}"
-                        " shell-only base node(s)"
+                        f"  ⚠ {len(connectivity['shell_only_base_nodes'])} shell-only base node(s)"
                     )
         except Exception as e:
             if log:
-                log.warn("connectivity", str(e))
+                log.warning("connectivity", str(e))
             print(f"  Connectivity check failed: {e}")
 
         # ── Self-weight check ────────────────────────────────────
@@ -325,7 +318,7 @@ def generate_report(
                 print(f"  Status:   {'✓ PASS' if passed else '✗ FAIL'}")
         except Exception as e:
             if log:
-                log.warn("self_weight", str(e))
+                log.warning("self_weight", str(e))
             print(f"  Self-weight check failed: {e}")
 
     # ── Build spectrum (common to both paths) ────────────────────
@@ -333,7 +326,12 @@ def generate_report(
         T_spec, Sa_spec, alpha_max, tg, zeta, spec_label = _build_spectrum(spec_cfg)
     else:
         T_spec, Sa_spec, alpha_max, tg, zeta, spec_label = (
-            [], [], 0.0, 0.25, zeta_cfg, "",
+            [],
+            [],
+            0.0,
+            0.25,
+            zeta_cfg,
+            "",
         )
 
     if push_spec_cfg:
@@ -349,17 +347,17 @@ def generate_report(
 
     # Modal
     mgr.add(
-        ModalAnalysis(mesh_model, n_modes=n_modes, name="ModalAnalysis",
-                      config={"verbose": verbose})
+        ModalAnalysis(
+            mesh_model, n_modes=n_modes, name="ModalAnalysis", config={"verbose": verbose}
+        )
     )
 
     # Static linear (if enabled)
     if cfg.get("linear", {}).get("run", True):
         mgr.add(
-            StaticAnalysis(mesh_model, spec_cfg=spec_cfg,
-                           linear_cfg=cfg.get("linear"),
-                           name="StaticAnalysis")
-            .bind_md(md)
+            StaticAnalysis(
+                mesh_model, spec_cfg=spec_cfg, linear_cfg=cfg.get("linear"), name="StaticAnalysis"
+            ).bind_md(md)
         )
 
     # Response spectrum (one per direction)
@@ -367,9 +365,13 @@ def generate_report(
         for rs_dir in ("X", "Y"):
             mgr.add(
                 ResponseSpectrumAnalysis(
-                    mesh_model, modal_result=None,
-                    direction=rs_dir, T_spec=T_spec, Sa_spec=Sa_spec,
-                    damping=0.05, n_modes=n_modes,
+                    mesh_model,
+                    modal_result=None,
+                    direction=rs_dir,
+                    T_spec=T_spec,
+                    Sa_spec=Sa_spec,
+                    damping=0.05,
+                    n_modes=n_modes,
                     name=f"RS-{rs_dir}",
                 )
             )
@@ -378,12 +380,12 @@ def generate_report(
     # Note: rs_modal_base_shear is not available until after
     # run_all(), so it's omitted here.  The mode1 pattern
     # diagnostic warning is skipped in the manager path.
-    if (cfg.get("pushover") and push_cfg.get("patterns")
-            and push_cfg.get("directions")):
+    if cfg.get("pushover") and push_cfg.get("patterns") and push_cfg.get("directions"):
         for pattern in push_cfg["patterns"]:
             mgr.add(
                 PushoverAnalysis(
-                    mesh_model, modal_result=None,
+                    mesh_model,
+                    modal_result=None,
                     gravity_patterns=load_cfg["gravity"],
                     lateral_load_type=pattern,
                     max_disp_val=push_cfg["max_disp"],
@@ -402,7 +404,7 @@ def generate_report(
     # ── Extract results ──────────────────────────────────────
     modal_result = _man_results["ModalAnalysis"].data
     modal = modal_result["modal"]
-    modal_shapes = modal_result["shapes"]
+    modal_result["shapes"]
     if log:
         log.info("modal", f"{n_modes} modes, T1={modal['periods'][0]:.3f}s")
 
@@ -410,22 +412,27 @@ def generate_report(
     mp = modal["modal_props"]
     pct_cols = ["Mx (%)", "My (%)", "Mz (%)", "Rx (%)", "Ry (%)", "Rz (%)"]
     _mp_keys = {
-        "Mx (%)": "partiMassRatiosMX", "My (%)": "partiMassRatiosMY",
-        "Mz (%)": "partiMassRatiosMZ", "Rx (%)": "partiMassRatiosRMX",
-        "Ry (%)": "partiMassRatiosRMY", "Rz (%)": "partiMassRatiosRMZ",
+        "Mx (%)": "partiMassRatiosMX",
+        "My (%)": "partiMassRatiosMY",
+        "Mz (%)": "partiMassRatiosMZ",
+        "Rx (%)": "partiMassRatiosRMX",
+        "Ry (%)": "partiMassRatiosRMY",
+        "Rz (%)": "partiMassRatiosRMZ",
     }
     modal_rows = []
     for i in range(modal["num_modes"]):
-        row = {"Mode": i + 1, "Period (s)": round(modal["periods"][i], 4),
-               "Freq (Hz)": round(modal["frequencies"][i], 4)}
+        row = {
+            "Mode": i + 1,
+            "Period (s)": round(modal["periods"][i], 4),
+            "Freq (Hz)": round(modal["frequencies"][i], 4),
+        }
         for col, key in _mp_keys.items():
             row[col] = round(mp.get(key, [0])[i], 2)
         modal_rows.append(row)
     df_modal = pd.DataFrame(modal_rows)
     for c in pct_cols:
         df_modal[c] = df_modal[c].apply(lambda v: f"{v:.2f}")
-    sum_row = {"Mode": "<strong>SUM</strong>", "Period (s)": "\u2014",
-               "Freq (Hz)": "\u2014"}
+    sum_row = {"Mode": "<strong>SUM</strong>", "Period (s)": "\u2014", "Freq (Hz)": "\u2014"}
     for col in pct_cols:
         sum_row[col] = f"{df_modal[col].astype(float).sum():.2f}"
     df_modal = pd.concat([df_modal, pd.DataFrame([sum_row])], ignore_index=True)
@@ -435,8 +442,12 @@ def generate_report(
     df_linear = _static_ar.data.get("df_linear", pd.DataFrame()) if _static_ar else pd.DataFrame()
 
     # RS per-mode base shear
-    rs_modal_x = _man_results["RS-X"].data.get("modal_base_shear", []) if "RS-X" in _man_results else []
-    rs_modal_y = _man_results["RS-Y"].data.get("modal_base_shear", []) if "RS-Y" in _man_results else []
+    rs_modal_x = (
+        _man_results["RS-X"].data.get("modal_base_shear", []) if "RS-X" in _man_results else []
+    )
+    rs_modal_y = (
+        _man_results["RS-Y"].data.get("modal_base_shear", []) if "RS-Y" in _man_results else []
+    )
 
     # Pushover
     all_out = {}
@@ -457,8 +468,12 @@ def generate_report(
                 if log:
                     log.info("csm_plot", f"{pat} — generating")
                 fig_csm_plots[pat] = plot_csm_4panel(
-                    all_out[pat], modal, tg=push_tg, zeta=push_zeta,
-                    alpha_max_rare=push_alpha_max, out_dir=str(resolved_out),
+                    all_out[pat],
+                    modal,
+                    tg=push_tg,
+                    zeta=push_zeta,
+                    alpha_max_rare=push_alpha_max,
+                    out_dir=str(resolved_out),
                 )
                 if log:
                     log.info("csm_plot", f"{pat} — done")
@@ -502,8 +517,7 @@ def generate_report(
             model_stories = identify_stories(md, raw_tables=raw_tables)
             if model_stories:
                 df_stories = stories_dataframe(model_stories)
-                fig = plot_stories(md, model_stories, off_screen=True,
-                                   window_size=(1400, 900))
+                fig = plot_stories(md, model_stories, off_screen=True, window_size=(1400, 900))
                 if fig:
                     stories_png = str(resolved_out / "model_stories.png")
                     fig.savefig(stories_png, dpi=150, bbox_inches="tight")
@@ -511,7 +525,7 @@ def generate_report(
                         print(f"  Saved storey visualisation to {stories_png}")
         except Exception as e:
             if log:
-                log.warn("storey_detection", str(e))
+                log.warning("storey_detection", str(e))
             print(f"  Storey detection failed: {e}")
 
     # ── Storey response ──────────────────────────────────────────
@@ -559,9 +573,7 @@ def generate_report(
                     df_storey_moment,
                 ]:
                     _drop = [
-                        c
-                        for c in _df.columns
-                        if c not in keep_cases and c not in _struct_cols
+                        c for c in _df.columns if c not in keep_cases and c not in _struct_cols
                     ]
                     if _drop:
                         _df.drop(columns=_drop, inplace=True, errors="ignore")
@@ -569,17 +581,13 @@ def generate_report(
             if not df_storey_disp.empty and not df_storey_drift.empty:
                 if log:
                     log.info("storey_fig", "displacement — generating")
-                fig_storey_disp = plot_storey_displacements(
-                    df_storey_disp, df_storey_drift
-                )
+                fig_storey_disp = plot_storey_displacements(df_storey_disp, df_storey_drift)
                 if log:
                     log.info("storey_fig", "displacement — done")
             if not df_storey_shear.empty and not df_storey_moment.empty:
                 if log:
                     log.info("storey_fig", "forces — generating")
-                fig_storey_forces = plot_storey_forces(
-                    df_storey_shear, df_storey_moment
-                )
+                fig_storey_forces = plot_storey_forces(df_storey_shear, df_storey_moment)
                 if log:
                     log.info("storey_fig", "forces — done")
             if log:
@@ -630,9 +638,7 @@ def generate_report(
         "brace_ids": brace_ids,
         "bounding_box": bounding_box(md),
         "wind_check": (
-            wind_sanity_check(md, df_linear)
-            if not df_linear.empty
-            else "Linear analysis skipped"
+            wind_sanity_check(md, df_linear) if not df_linear.empty else "Linear analysis skipped"
         ),
         "inferred_loads": inferred,
         "spec_label": spec_label,

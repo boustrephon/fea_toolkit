@@ -15,15 +15,15 @@ Works with any element type that has ``inactive``, ``child_ids``, and
 ``parent_id`` attributes (both ``FrameElement`` and ``AreaElement``).
 """
 
-from typing import Dict, List, Optional, Set, Any
+from typing import Any, Optional
 
 
 def collect_descendants(
     elem_id: str,
-    elements: Dict[str, Any],
-    cache: Optional[Dict[str, List[str]]] = None,
-    _visited: Optional[Set[str]] = None,
-) -> List[str]:
+    elements: dict[str, Any],
+    cache: Optional[dict[str, list[str]]] = None,
+    _visited: Optional[set[str]] = None,
+) -> list[str]:
     """Return all **active leaf** descendants of a root element.
 
     Used when gathering results for an original beam/column/area that has
@@ -79,7 +79,7 @@ def collect_descendants(
 
 def get_root_parent(
     elem_id: str,
-    elements: Dict[str, Any],
+    elements: dict[str, Any],
 ) -> Optional[str]:
     """Trace ``parent_id`` up the chain to find the ultimate root.
 
@@ -98,7 +98,7 @@ def get_root_parent(
         root = get_root_parent("3-1-1", mesh.frame_elements)
         # → "3"
     """
-    seen: Set[str] = set()
+    seen: set[str] = set()
     current = elem_id
     while current in elements:
         if current in seen:
@@ -113,8 +113,8 @@ def get_root_parent(
 
 def get_element_chain(
     elem_id: str,
-    elements: Dict[str, Any],
-) -> List[str]:
+    elements: dict[str, Any],
+) -> list[str]:
     """Return the full chain from root to *elem_id* (inclusive).
 
     Useful for understanding the splitting history of an element
@@ -132,8 +132,8 @@ def get_element_chain(
         chain = get_element_chain("3-1-1", mesh.frame_elements)
         # → ["3", "3-1", "3-1-1"]
     """
-    chain: List[str] = []
-    seen: Set[str] = set()
+    chain: list[str] = []
+    seen: set[str] = set()
     current = elem_id
     while current in elements:
         if current in seen:
@@ -149,8 +149,8 @@ def get_element_chain(
 
 
 def frame_split_summary(
-    elements: Dict[str, Any],
-) -> List[dict]:
+    elements: dict[str, Any],
+) -> list[dict]:
     """Summarise the split hierarchy of all root elements.
 
     Returns a list of dicts, one per root element, with its ID,
@@ -174,7 +174,7 @@ def frame_split_summary(
     """
     # Find all roots (elements whose parent is not in the dict)
     all_ids = set(elements.keys())
-    root_ids: List[str] = []
+    root_ids: list[str] = []
     for eid, elem in elements.items():
         if elem.parent_id is None or elem.parent_id not in all_ids:
             root_ids.append(eid)
@@ -189,14 +189,16 @@ def frame_split_summary(
 
     root_ids.sort(key=_sort_key)
 
-    cache: Dict[str, List[str]] = {}
-    result: List[dict] = []
+    cache: dict[str, list[str]] = {}
+    result: list[dict] = []
     for rid in root_ids:
         leaves = collect_descendants(rid, elements, cache)
         elem = elements[rid]
-        result.append({
-            "root_id": rid,
-            "leaf_count": len(leaves),
-            "children": list(elem.child_ids),
-        })
+        result.append(
+            {
+                "root_id": rid,
+                "leaf_count": len(leaves),
+                "children": list(elem.child_ids),
+            }
+        )
     return result

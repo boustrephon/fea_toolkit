@@ -9,16 +9,17 @@ All functions gracefully fall back to a warning if the required package
 is not installed.
 """
 
+import math
 import warnings
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
-import math
+from typing import TYPE_CHECKING, Any, Optional
+
 import numpy as np
 
-from ..model.geometry import get_SAP_vecxz, get_local_axes
+from ..io.results_schema import make_pushover_key
+from ..model.geometry import get_local_axes
 from ..model.sap_data import SAPModelData
 from ..utils import compute_flag_parts
-from ..io.results_schema import make_pushover_key
 
 # Types that represent NPZ/HDF5 results data (dict or Numpy NpzFile).
 # Used by isinstance() checks throughout this module to dispatch between
@@ -56,8 +57,10 @@ def _set_isometric_view(plotter) -> None:
 # Pushover per-step data helpers
 # ============================================================================
 
+
 def _resolve_pushover_data(
-    data, direction="+X",
+    data,
+    direction="+X",
 ) -> "tuple[list, list, list, Optional[dict]]":
     """Normalise pushover data from any source into standard Python structures.
 
@@ -99,12 +102,26 @@ def _resolve_pushover_data(
         node_tags_arr = data.get(make_pushover_key(direction, "pushover/{direction}/node_tag"))
 
         # Read frame SAP IDs
-        frame_sap_id = data.get(make_pushover_key(direction, "pushover/{direction}/frame_sap_id"), [])
+        frame_sap_id = data.get(
+            make_pushover_key(direction, "pushover/{direction}/frame_sap_id"), []
+        )
         n_frame = len(frame_sap_id)
 
         # Read frame force arrays
-        comp_keys = ["fx_i", "fy_i", "fz_i", "mx_i", "my_i", "mz_i",
-                     "fx_j", "fy_j", "fz_j", "mx_j", "my_j", "mz_j"]
+        comp_keys = [
+            "fx_i",
+            "fy_i",
+            "fz_i",
+            "mx_i",
+            "my_i",
+            "mz_i",
+            "fx_j",
+            "fy_j",
+            "fz_j",
+            "mx_j",
+            "my_j",
+            "mz_j",
+        ]
         frame_arrays = {}
         for key in comp_keys:
             arr = data.get(make_pushover_key(direction, f"pushover/{{direction}}/frame_{key}"))
@@ -112,7 +129,9 @@ def _resolve_pushover_data(
                 frame_arrays[key] = arr
 
         # Read shell SAP IDs
-        shell_sap_id = data.get(make_pushover_key(direction, "pushover/{direction}/shell_sap_id"), [])
+        shell_sap_id = data.get(
+            make_pushover_key(direction, "pushover/{direction}/shell_sap_id"), []
+        )
         n_shell = len(shell_sap_id)
         shell_comp_keys = ["Nx", "Ny", "Nxy", "Mx", "My", "Mxy"]
         shell_arrays = {}
@@ -147,14 +166,20 @@ def _resolve_pushover_data(
                     sd["shell_forces"][aid] = sf
 
             # Node displacements
-            if (node_disp_x is not None and node_disp_y is not None
-                    and node_disp_z is not None and node_tags_arr is not None):
+            if (
+                node_disp_x is not None
+                and node_disp_y is not None
+                and node_disp_z is not None
+                and node_tags_arr is not None
+            ):
                 nd = {}
                 for ni in range(len(node_tags_arr)):
                     tag = int(node_tags_arr[ni])
-                    nd[tag] = (float(node_disp_x[si, ni]),
-                               float(node_disp_y[si, ni]),
-                               float(node_disp_z[si, ni]))
+                    nd[tag] = (
+                        float(node_disp_x[si, ni]),
+                        float(node_disp_y[si, ni]),
+                        float(node_disp_z[si, ni]),
+                    )
                 sd["node_displacements"] = nd
 
             step_results.append(sd)
@@ -167,17 +192,22 @@ def _resolve_pushover_data(
         for i in range(len(frame_sap)):
             frame_eid_to_nodes[str(frame_sap[i])] = (int(frame_ni[i]), int(frame_nj[i]))
 
-        return step_results, node_coords, list(node_tags_arr) if node_tags_arr is not None else [], frame_eid_to_nodes
+        return (
+            step_results,
+            node_coords,
+            list(node_tags_arr) if node_tags_arr is not None else [],
+            frame_eid_to_nodes,
+        )
 
     if isinstance(data, list):
         # Raw step results list
         return data, {}, [], None
 
     # Builder/AnalysisBuilder path
-    step_results = list(getattr(data, 'pushover_step_results', []) or [])
+    step_results = list(getattr(data, "pushover_step_results", []) or [])
     # Build node coords from mesh_model
     node_coords = {}
-    mm = getattr(data, 'mesh_model', None)
+    mm = getattr(data, "mesh_model", None)
     if mm is not None:
         for nd in mm.nodes.values():
             node_coords[nd.node_tag] = (nd.x, nd.y, nd.z)
@@ -186,7 +216,7 @@ def _resolve_pushover_data(
     frame_eid_to_nodes = {}
     if mm is not None:
         for eid, elem in mm.frame_elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
             ni = mm.nodes.get(elem.node_i)
             nj = mm.nodes.get(elem.node_j)
@@ -198,9 +228,9 @@ def _resolve_pushover_data(
 
 
 def _compute_hinge_ratios(
-    frame_forces: Dict[str, Dict[str, float]],
+    frame_forces: dict[str, dict[str, float]],
     use_biaxial: bool = False,
-) -> Dict[str, Tuple[float, float]]:
+) -> dict[str, tuple[float, float]]:
     """Compute hinge yield ratios for each frame element end.
 
     Uniaxial mode (default): ratio = |Mz| / max|Mz| across steps.
@@ -210,15 +240,15 @@ def _compute_hinge_ratios(
 
     Returns ``{eid: (ratio_i, ratio_j)}``.
     """
-    peak_mz: Dict[str, float] = {}
+    peak_mz: dict[str, float] = {}
     if use_biaxial:
         # Biaxial SRSS mode: track peak My and Mz separately per element
-        peak_my: Dict[str, float] = {}
+        peak_my: dict[str, float] = {}
         for eid, ff in frame_forces.items():
-            my_i = abs(ff.get('my_i', 0.0))
-            my_j = abs(ff.get('my_j', 0.0))
-            mz_i = abs(ff.get('mz_i', 0.0))
-            mz_j = abs(ff.get('mz_j', 0.0))
+            my_i = abs(ff.get("my_i", 0.0))
+            my_j = abs(ff.get("my_j", 0.0))
+            mz_i = abs(ff.get("mz_i", 0.0))
+            mz_j = abs(ff.get("mz_j", 0.0))
             peak_my[eid] = max(peak_my.get(eid, 0.0), my_i, my_j)
             peak_mz[eid] = max(peak_mz.get(eid, 0.0), mz_i, mz_j)
 
@@ -227,21 +257,21 @@ def _compute_hinge_ratios(
             cap_y = peak_my.get(eid, 1e-12)
             cap_z = peak_mz.get(eid, 1e-12)
             # Guard against zero capacity in each axis separately
-            safe_cap_y = cap_y if cap_y > 1e-12 else 1e-12
-            safe_cap_z = cap_z if cap_z > 1e-12 else 1e-12
-            my_i = abs(ff.get('my_i', 0.0))
-            my_j = abs(ff.get('my_j', 0.0))
-            mz_i = abs(ff.get('mz_i', 0.0))
-            mz_j = abs(ff.get('mz_j', 0.0))
-            r_i = math.sqrt((my_i / safe_cap_y)**2 + (mz_i / safe_cap_z)**2)
-            r_j = math.sqrt((my_j / safe_cap_y)**2 + (mz_j / safe_cap_z)**2)
+            safe_cap_y = max(1e-12, cap_y)
+            safe_cap_z = max(1e-12, cap_z)
+            my_i = abs(ff.get("my_i", 0.0))
+            my_j = abs(ff.get("my_j", 0.0))
+            mz_i = abs(ff.get("mz_i", 0.0))
+            mz_j = abs(ff.get("mz_j", 0.0))
+            r_i = math.sqrt((my_i / safe_cap_y) ** 2 + (mz_i / safe_cap_z) ** 2)
+            r_j = math.sqrt((my_j / safe_cap_y) ** 2 + (mz_j / safe_cap_z) ** 2)
             ratios[eid] = (r_i, r_j)
         return ratios
 
     # Uniaxial mode (default): ratio = |Mz| / peak|Mz|
     for eid, ff in frame_forces.items():
-        mz_i = abs(ff.get('mz_i', 0.0))
-        mz_j = abs(ff.get('mz_j', 0.0))
+        mz_i = abs(ff.get("mz_i", 0.0))
+        mz_j = abs(ff.get("mz_j", 0.0))
         peak_mz[eid] = max(peak_mz.get(eid, 0.0), mz_i, mz_j)
 
     ratios = {}
@@ -251,16 +281,16 @@ def _compute_hinge_ratios(
             ratios[eid] = (0.0, 0.0)
         else:
             ratios[eid] = (
-                abs(ff.get('mz_i', 0.0)) / peak,
-                abs(ff.get('mz_j', 0.0)) / peak,
+                abs(ff.get("mz_i", 0.0)) / peak,
+                abs(ff.get("mz_j", 0.0)) / peak,
             )
     return ratios
 
 
 def _compute_hinge_ratios_all_steps(
-    all_frame_forces: List[Dict[str, Dict[str, float]]],
+    all_frame_forces: list[dict[str, dict[str, float]]],
     use_biaxial: bool = False,
-) -> List[Dict[str, Tuple[float, float]]]:
+) -> list[dict[str, tuple[float, float]]]:
     """Compute hinge yield ratios using peak capacities across all steps.
 
     For each element, the peak My and Mz are determined across *all*
@@ -283,33 +313,33 @@ def _compute_hinge_ratios_all_steps(
         return []
 
     # Step 1: compute global peak capacities across all steps
-    peak_my: Dict[str, float] = {}
-    peak_mz: Dict[str, float] = {}
+    peak_my: dict[str, float] = {}
+    peak_mz: dict[str, float] = {}
     for step_forces in all_frame_forces:
         for eid, ff in step_forces.items():
-            my_i = abs(ff.get('my_i', 0.0))
-            my_j = abs(ff.get('my_j', 0.0))
-            mz_i = abs(ff.get('mz_i', 0.0))
-            mz_j = abs(ff.get('mz_j', 0.0))
+            my_i = abs(ff.get("my_i", 0.0))
+            my_j = abs(ff.get("my_j", 0.0))
+            mz_i = abs(ff.get("mz_i", 0.0))
+            mz_j = abs(ff.get("mz_j", 0.0))
             peak_my[eid] = max(peak_my.get(eid, 0.0), my_i, my_j)
             peak_mz[eid] = max(peak_mz.get(eid, 0.0), mz_i, mz_j)
 
     # Step 2: normalise each step against the fixed capacities
-    step_ratios: List[Dict[str, Tuple[float, float]]] = []
+    step_ratios: list[dict[str, tuple[float, float]]] = []
     for step_forces in all_frame_forces:
-        ratios: Dict[str, Tuple[float, float]] = {}
+        ratios: dict[str, tuple[float, float]] = {}
         for eid, ff in step_forces.items():
             if use_biaxial:
                 cap_y = peak_my.get(eid, 1e-12)
                 cap_z = peak_mz.get(eid, 1e-12)
-                safe_cap_y = cap_y if cap_y > 1e-12 else 1e-12
-                safe_cap_z = cap_z if cap_z > 1e-12 else 1e-12
-                my_i = abs(ff.get('my_i', 0.0))
-                my_j = abs(ff.get('my_j', 0.0))
-                mz_i = abs(ff.get('mz_i', 0.0))
-                mz_j = abs(ff.get('mz_j', 0.0))
-                r_i = math.sqrt((my_i / safe_cap_y)**2 + (mz_i / safe_cap_z)**2)
-                r_j = math.sqrt((my_j / safe_cap_y)**2 + (mz_j / safe_cap_z)**2)
+                safe_cap_y = max(1e-12, cap_y)
+                safe_cap_z = max(1e-12, cap_z)
+                my_i = abs(ff.get("my_i", 0.0))
+                my_j = abs(ff.get("my_j", 0.0))
+                mz_i = abs(ff.get("mz_i", 0.0))
+                mz_j = abs(ff.get("mz_j", 0.0))
+                r_i = math.sqrt((my_i / safe_cap_y) ** 2 + (mz_i / safe_cap_z) ** 2)
+                r_j = math.sqrt((my_j / safe_cap_y) ** 2 + (mz_j / safe_cap_z) ** 2)
                 ratios[eid] = (r_i, r_j)
             else:
                 cap = peak_mz.get(eid, 1e-12)
@@ -317,8 +347,8 @@ def _compute_hinge_ratios_all_steps(
                     ratios[eid] = (0.0, 0.0)
                 else:
                     ratios[eid] = (
-                        abs(ff.get('mz_i', 0.0)) / cap,
-                        abs(ff.get('mz_j', 0.0)) / cap,
+                        abs(ff.get("mz_i", 0.0)) / cap,
+                        abs(ff.get("mz_j", 0.0)) / cap,
                     )
         step_ratios.append(ratios)
 
@@ -328,7 +358,7 @@ def _compute_hinge_ratios_all_steps(
 _DEFAULT_HINGE_CMAP = "plasma"
 
 
-def _sample_cmap(points: List[float], cmap_name: str) -> List[Tuple[float, float, float]]:
+def _sample_cmap(points: list[float], cmap_name: str) -> list[tuple[float, float, float]]:
     """Sample a matplotlib colormap at normalised positions.
 
     Returns a list of ``(r, g, b)`` tuples in 0..1 for each *points* value
@@ -341,16 +371,16 @@ def _sample_cmap(points: List[float], cmap_name: str) -> List[Tuple[float, float
     """
     try:
         from matplotlib import colormaps as _mcmaps
+
         cmap = _mcmaps.get_cmap(cmap_name)
-        return [tuple(float(c) for c in cmap(min(max(p, 0.0), 1.0))[:3])
-                for p in points]
+        return [tuple(float(c) for c in cmap(min(max(p, 0.0), 1.0))[:3]) for p in points]
     except (ImportError, AttributeError, ValueError):
         # Fallback (red-green colour-blind safe defaults preserved) —
         # interpolate the fixed blue → yellow → red palette at the
         # normalised positions so the fallback is position-dependent,
         # matching the matplotlib sampling contract.
         _fallback = [(0.3, 0.45, 0.69), (0.9, 0.8, 0.2), (0.9, 0.25, 0.2)]
-        out: List[Tuple[float, float, float]] = []
+        out: list[tuple[float, float, float]] = []
         for p in points:
             t = min(max(p, 0.0), 1.0)
             if t < 0.5:
@@ -359,26 +389,27 @@ def _sample_cmap(points: List[float], cmap_name: str) -> List[Tuple[float, float
             else:
                 s = (t - 0.5) * 2.0
                 c0, c1 = _fallback[1], _fallback[2]
-            out.append((
-                c0[0] + (c1[0] - c0[0]) * s,
-                c0[1] + (c1[1] - c0[1]) * s,
-                c0[2] + (c1[2] - c0[2]) * s,
-            ))
+            out.append(
+                (
+                    c0[0] + (c1[0] - c0[0]) * s,
+                    c0[1] + (c1[1] - c0[1]) * s,
+                    c0[2] + (c1[2] - c0[2]) * s,
+                )
+            )
         return out
 
 
-def _rgb_to_hex(rgb: Tuple[float, float, float]) -> str:
+def _rgb_to_hex(rgb: tuple[float, float, float]) -> str:
     """Convert an (r, g, b) tuple in [0, 1] to a ``#RRGGBB`` hex string."""
     r = max(0.0, min(1.0, rgb[0]))
     g = max(0.0, min(1.0, rgb[1]))
     b = max(0.0, min(1.0, rgb[2]))
-    return "#{:02x}{:02x}{:02x}".format(int(round(r * 255)),
-                                        int(round(g * 255)),
-                                        int(round(b * 255)))
+    return f"#{int(round(r * 255)):02x}{int(round(g * 255)):02x}{int(round(b * 255)):02x}"
 
 
-def _ratio_to_color(ratio: float, max_r: float = 1.0,
-                    cmap_name: str = _DEFAULT_HINGE_CMAP) -> Tuple[float, float, float]:
+def _ratio_to_color(
+    ratio: float, max_r: float = 1.0, cmap_name: str = _DEFAULT_HINGE_CMAP
+) -> tuple[float, float, float]:
     """Map hinge ratio [0, max_r] to an RGB colour.
 
     Colours are sampled from the named matplotlib colormap at positions
@@ -411,15 +442,18 @@ def _ratio_to_color(ratio: float, max_r: float = 1.0,
     # Interpolate: c0 (0) -> c1 (0.5) -> c2 (1.0)
     if norm < 0.5:
         t = norm / 0.5
-        return (c0[0] + (c1[0] - c0[0]) * t,
-                c0[1] + (c1[1] - c0[1]) * t,
-                c0[2] + (c1[2] - c0[2]) * t)
+        return (
+            c0[0] + (c1[0] - c0[0]) * t,
+            c0[1] + (c1[1] - c0[1]) * t,
+            c0[2] + (c1[2] - c0[2]) * t,
+        )
     else:
         t = (norm - 0.5) / 0.5
-        return (c1[0] + (c2[0] - c1[0]) * t,
-                c1[1] + (c2[1] - c1[1]) * t,
-                c1[2] + (c2[2] - c1[2]) * t)
-
+        return (
+            c1[0] + (c2[0] - c1[0]) * t,
+            c1[1] + (c2[1] - c1[1]) * t,
+            c1[2] + (c2[2] - c1[2]) * t,
+        )
 
 
 def _add_hinge_color_legend(
@@ -463,6 +497,7 @@ def _add_hinge_color_legend(
         cmap_name: Matplotlib colormap name for the colour scale.
     """
     import numpy as np
+
     try:
         import pyvista as pv
     except ImportError:
@@ -555,6 +590,7 @@ def _add_shell_color_legend(
             (sets ``LookupTable.n_values``).
     """
     import numpy as np
+
     try:
         import pyvista as pv
     except ImportError:
@@ -634,8 +670,7 @@ def _add_animation_timer(
     """
     # Strategy 1: modern PyVista with named kwargs
     try:
-        plotter.add_timer_event(max_steps=max_steps, interval=interval_ms,
-                                callback=callback)
+        plotter.add_timer_event(max_steps=max_steps, interval=interval_ms, callback=callback)
         return
     except TypeError:
         pass  # fall through
@@ -654,7 +689,7 @@ def _add_animation_timer(
     # Strategy 3: VTK-level observer (most compatible)
     try:
         iren = plotter.render_window.GetInteractor()
-        iren.AddObserver('TimerEvent', callback)
+        iren.AddObserver("TimerEvent", callback)
         iren.CreateRepeatingTimer(interval_ms)
         return
     except Exception:
@@ -667,6 +702,7 @@ def _add_animation_timer(
 # ============================================================================
 # Pushover plastic hinge visualisation — 3D hinge blobs
 # ============================================================================
+
 
 def plot_plastic_hinge_formation(
     data,
@@ -726,6 +762,7 @@ def plot_plastic_hinge_formation(
         otherwise ``None``.
     """
     import numpy as np
+
     try:
         import pyvista as pv
     except ImportError:
@@ -735,8 +772,9 @@ def plot_plastic_hinge_formation(
     pv.set_plot_theme("document")
 
     # ── Resolve data ─────────────────────────────────────────────
-    step_results, node_coords, node_tag_list, frame_eid_to_nodes = \
-        _resolve_pushover_data(data, direction=direction)
+    step_results, node_coords, _node_tag_list, frame_eid_to_nodes = _resolve_pushover_data(
+        data, direction=direction
+    )
 
     if not step_results:
         print("No pushover step results found.")
@@ -744,8 +782,9 @@ def plot_plastic_hinge_formation(
 
     # Raw list data has no mesh geometry, so 3D rendering is not possible
     if isinstance(data, list):
-        print("Raw list data is not supported for 3D animation — "
-              "use an NPZ dict or Builder instead.")
+        print(
+            "Raw list data is not supported for 3D animation — use an NPZ dict or Builder instead."
+        )
         return None
 
     n_step = len(step_results)
@@ -763,7 +802,7 @@ def plot_plastic_hinge_formation(
     # For each element that appears in frame_forces, identify its
     # i-end and j-end node coordinates (rest or deformed).
     # hinge_locs[step_idx] = [(x, y, z, ratio), ...]
-    hinge_locs_per_step: List[List[Tuple[float, float, float, float]]] = []
+    hinge_locs_per_step: list[list[tuple[float, float, float, float]]] = []
 
     for si, sd in enumerate(step_results):
         ff = sd.get("frame_forces", {})
@@ -771,7 +810,7 @@ def plot_plastic_hinge_formation(
         nd = sd.get("node_displacements", {})
         has_disp = bool(nd) and show_deformed
 
-        hinge_pts: List[Tuple[float, float, float, float]] = []
+        hinge_pts: list[tuple[float, float, float, float]] = []
 
         for eid in ff:
             if eid not in frame_eid_to_nodes:
@@ -810,8 +849,7 @@ def plot_plastic_hinge_formation(
 
     # ── Create or use existing plotter ───────────────────────────
     # Consume fea_toolkit-specific kwargs so they aren't forwarded to pv.Plotter
-    _plotter_kwargs = {k: v for k, v in kwargs.items()
-                       if k not in ("use_biaxial",)}
+    _plotter_kwargs = {k: v for k, v in kwargs.items() if k != "use_biaxial"}
     own_plotter = plotter is None
     if own_plotter:
         plotter = pv.Plotter(notebook=notebook, **_plotter_kwargs)
@@ -829,13 +867,12 @@ def plot_plastic_hinge_formation(
         hinge_cloud["ratio"] = ratios_arr
 
         # Compute colours for initial state
-        colors = np.array([_ratio_to_color(r, max_ratio, cmap_name=colormap)
-                           for r in ratios_arr])
+        colors = np.array([_ratio_to_color(r, max_ratio, cmap_name=colormap) for r in ratios_arr])
         hinge_cloud["colors"] = colors
 
         # Render as points with GPU sphere impostors
         point_size = 15 * hinge_scale
-        actor = plotter.add_mesh(
+        plotter.add_mesh(
             hinge_cloud,
             scalars="colors",
             rgb=True,
@@ -855,8 +892,9 @@ def plot_plastic_hinge_formation(
                     return
                 pts_new = np.array([(x, y, z) for x, y, z, _ in pts_list], dtype=float)
                 ratios_new = np.array([r for _, _, _, r in pts_list], dtype=float)
-                colors_new = np.array([_ratio_to_color(r, max_ratio, cmap_name=colormap)
-                                       for r in ratios_new])
+                colors_new = np.array(
+                    [_ratio_to_color(r, max_ratio, cmap_name=colormap) for r in ratios_new]
+                )
 
                 hinge_cloud.points = pts_new
                 hinge_cloud["ratio"] = ratios_new
@@ -880,16 +918,16 @@ def plot_plastic_hinge_formation(
             if pts_list:
                 pts_new = np.array([(x, y, z) for x, y, z, _ in pts_list], dtype=float)
                 ratios_new = np.array([r for _, _, _, r in pts_list], dtype=float)
-                colors_new = np.array([_ratio_to_color(r, max_ratio, cmap_name=colormap)
-                                       for r in ratios_new])
+                colors_new = np.array(
+                    [_ratio_to_color(r, max_ratio, cmap_name=colormap) for r in ratios_new]
+                )
                 hinge_cloud.points = pts_new
                 hinge_cloud["ratio"] = ratios_new
                 hinge_cloud["colors"] = colors_new
 
     # ── Add colour legend ────────────────────────────────────────
     if own_plotter and hinge_locs_per_step and hinge_locs_per_step[0]:
-        _add_hinge_color_legend(plotter, title="Yield Ratio (M/M_y)",
-                                cmap_name=colormap)
+        _add_hinge_color_legend(plotter, title="Yield Ratio (M/M_y)", cmap_name=colormap)
 
     # ── Finalise ─────────────────────────────────────────────────
     if own_plotter:
@@ -903,13 +941,14 @@ def plot_plastic_hinge_formation(
         return plotter
     return None
 
+
 def plot_plastic_hinge_heatmap(
     data,
     direction: str = "+X",
     title: str = "Plastic Hinge Formation — 2D Heatmap",
     xaxis: str = "step",
-    drifts: Optional[List[float]] = None,
-    figsize: Tuple[float, float] = (10, 8),
+    drifts: Optional[list[float]] = None,
+    figsize: tuple[float, float] = (10, 8),
     save_path: Optional[str] = None,
     colormap: str = _DEFAULT_HINGE_CMAP,
 ) -> Optional[Any]:
@@ -955,7 +994,7 @@ def plot_plastic_hinge_heatmap(
     """
     try:
         import matplotlib.pyplot as plt
-        from matplotlib.colors import ListedColormap, BoundaryNorm
+        from matplotlib.colors import BoundaryNorm, ListedColormap
     except ImportError:
         print("Warning: matplotlib not available.  pip install matplotlib")
         return None
@@ -975,12 +1014,10 @@ def plot_plastic_hinge_heatmap(
     # We build a dict of dicts:  ratio_matrix[eid][step_idx] = max(ri, rj)
     # so we can handle elements that appear/disappear between steps.
     all_eids: set = set()
-    step_eids: List[set] = []
-    per_step_ratios: List[Dict[str, float]] = []
+    step_eids: list[set] = []
+    per_step_ratios: list[dict[str, float]] = []
 
-    all_frame_forces = [
-        step_entry.get("frame_forces", {}) for step_entry in push_data
-    ]
+    all_frame_forces = [step_entry.get("frame_forces", {}) for step_entry in push_data]
     for step_entry in push_data:
         frame_forces = step_entry.get("frame_forces", {})
         step_eids.append(set(frame_forces.keys()))
@@ -1002,7 +1039,7 @@ def plot_plastic_hinge_heatmap(
 
     # ── Step 3 – Determine elevation per element ───────────────────
     # Try to get elevations from builder's mesh_model, or from NPZ raw data.
-    elevations: Dict[str, float] = {}
+    elevations: dict[str, float] = {}
     # Method A: builder has mesh_model with node coords
     builder = getattr(data, "mesh_model", None) or (
         getattr(data, "model", None) if hasattr(data, "model") else None
@@ -1083,12 +1120,14 @@ def plot_plastic_hinge_heatmap(
     #   elastic (ratio < 0.5), yielding (0.5 ≤ ratio < 1.0), yielded (≥ 1.0)
     # This matches the 0.5 threshold used by _ratio_to_color() in the 3D view.
     _c0, _c1, _c2 = _sample_cmap([0.0, 0.5, 1.0], colormap)
-    cmap = ListedColormap([
-        "#999999",
-        _rgb_to_hex(_c0),
-        _rgb_to_hex(_c1),
-        _rgb_to_hex(_c2),
-    ])
+    cmap = ListedColormap(
+        [
+            "#999999",
+            _rgb_to_hex(_c0),
+            _rgb_to_hex(_c1),
+            _rgb_to_hex(_c2),
+        ]
+    )
     # Boundaries: -1 (no data), 0–0.5 (elastic), 0.5–1.0 (yielding), ≥1.0 (yielded)
     bounds = [-0.5, 0.0, 0.5, 1.0, 2.0]
     norm = BoundaryNorm(bounds, cmap.N)
@@ -1102,8 +1141,9 @@ def plot_plastic_hinge_heatmap(
     x_edges = np.concatenate([x_values - 0.5, x_values[-1:] + 0.5])
     y_edges = np.arange(n_elem + 1) - 0.5
 
-    mesh = ax.pcolormesh(x_edges, y_edges, plot_data, cmap=cmap, norm=norm,
-                         shading="flat", edgecolors="none")
+    mesh = ax.pcolormesh(
+        x_edges, y_edges, plot_data, cmap=cmap, norm=norm, shading="flat", edgecolors="none"
+    )
 
     # ── Step 6 – Colourbar with labels ────────────────────────────
     cbar = fig.colorbar(mesh, ax=ax, ticks=[-0.25, 0.35, 0.85, 1.5])
@@ -1142,11 +1182,12 @@ def plot_plastic_hinge_heatmap(
 # Pushover shell damage visualisation — 3D damage map
 # ============================================================================
 
+
 def _compute_shell_damage(
-    shell_forces: Dict[str, Dict[str, float]],
+    shell_forces: dict[str, dict[str, float]],
     yield_stress: Optional[float] = None,
     thickness: Optional[float] = None,
-) -> Dict[str, Tuple[float, float]]:
+) -> dict[str, tuple[float, float]]:
     """Compute a scalar damage index for each shell element.
 
     Uses a combined von Mises membrane stress proxy + bending moment
@@ -1163,28 +1204,31 @@ def _compute_shell_damage(
     and *M_mag* is the bending envelope (for debugging).
     """
     import math as _math
-    indices: Dict[str, Tuple[float, float]] = {}
+
+    indices: dict[str, tuple[float, float]] = {}
     for aid, sf in shell_forces.items():
-        nx = sf.get('Nx', 0.0)
-        ny = sf.get('Ny', 0.0)
-        nxy = sf.get('Nxy', 0.0)
-        mx = sf.get('Mx', 0.0)
-        my = sf.get('My', 0.0)
-        mxy = sf.get('Mxy', 0.0)
+        nx = sf.get("Nx", 0.0)
+        ny = sf.get("Ny", 0.0)
+        nxy = sf.get("Nxy", 0.0)
+        mx = sf.get("Mx", 0.0)
+        my = sf.get("My", 0.0)
+        mxy = sf.get("Mxy", 0.0)
 
         if yield_stress is not None and thickness is not None and thickness > 0:
             # Physical stress-based damage index
             # Membrane stress: σ_vm = sqrt(Nx² + Ny² - Nx·Ny + 3·Nxy²) / t
-            vm_stress = _math.sqrt(max(0.0, nx*nx + ny*ny - nx*ny + 3.0*nxy*nxy)) / thickness
+            vm_stress = (
+                _math.sqrt(max(0.0, nx * nx + ny * ny - nx * ny + 3.0 * nxy * nxy)) / thickness
+            )
             # Bending stress at extreme fibre: σ_b = sqrt(Mx² + My² + Mxy²) / (t²/6)
-            m_mag = _math.sqrt(mx*mx + my*my + mxy*mxy)
+            m_mag = _math.sqrt(mx * mx + my * my + mxy * mxy)
             bend_stress = m_mag / (thickness * thickness / 6.0) if thickness > 0 else 0.0
             D = max(vm_stress, bend_stress) / yield_stress if yield_stress > 0 else 0.0
             indices[aid] = (D, m_mag)
         else:
             # Range-based normalisation (legacy behaviour)
-            vm_mem = _math.sqrt(max(0.0, nx*nx + ny*ny - nx*ny + 3.0*nxy*nxy))
-            m_mag = _math.sqrt(mx*mx + my*my + mxy*mxy)
+            vm_mem = _math.sqrt(max(0.0, nx * nx + ny * ny - nx * ny + 3.0 * nxy * nxy))
+            m_mag = _math.sqrt(mx * mx + my * my + mxy * mxy)
             D = max(vm_mem, m_mag)
             indices[aid] = (D, m_mag)
     return indices
@@ -1193,7 +1237,7 @@ def _compute_shell_damage(
 def _resolve_shell_data(
     source,
     shell_ids: set,
-) -> Tuple[Dict[str, List[Tuple[float, float, float]]], Dict[str, List[int]]]:
+) -> tuple[dict[str, list[tuple[float, float, float]]], dict[str, list[int]]]:
     """Build shell vertex coordinates and node‑tag mapping for a subset of shell IDs.
 
     Uses ``_resolve_mesh_data()`` internally, avoiding duplicated NPZ/build‑path
@@ -1206,8 +1250,8 @@ def _resolve_shell_data(
     - *shell_node_tags* — ``{aid: [tag1, tag2, tag3, tag4]}`` for
       resolving displacements.
     """
-    shell_verts: Dict[str, List[Tuple[float, float, float]]] = {}
-    shell_node_tags: Dict[str, List[int]] = {}
+    shell_verts: dict[str, list[tuple[float, float, float]]] = {}
+    shell_node_tags: dict[str, list[int]] = {}
 
     # Raw list data — no geometry available, return empty
     if isinstance(source, list):
@@ -1221,8 +1265,8 @@ def _resolve_shell_data(
         if aid not in shell_ids:
             continue
         refs = sh.get("node_ids") or sh.get("node_tags") or []
-        verts: List[Tuple[float, float, float]] = []
-        tags: List[int] = []
+        verts: list[tuple[float, float, float]] = []
+        tags: list[int] = []
         for ref in refs:
             nd = resolved["nodes"].get(ref) or resolved["nodes"].get(str(ref))
             if nd is None:
@@ -1244,7 +1288,7 @@ def _resolve_shell_data(
 def _build_shell_geometry(
     data,
     shell_ids: set,
-) -> Tuple[Dict[str, List[Tuple[float, float, float]]], Dict[str, int]]:
+) -> tuple[dict[str, list[tuple[float, float, float]]], dict[str, int]]:
     """Build shell vertex coordinates and node-tag mapping from source.
 
     .. deprecated::
@@ -1260,12 +1304,13 @@ def _build_shell_geometry(
     """
     warnings.warn(
         "_build_shell_geometry is deprecated — use _resolve_shell_data() instead.",
-        DeprecationWarning, stacklevel=2,
+        DeprecationWarning,
+        stacklevel=2,
     )
     return _resolve_shell_data(data, shell_ids)
 
 
-def _ratio_to_shell_color(ratio: float) -> Tuple[float, float, float]:
+def _ratio_to_shell_color(ratio: float) -> tuple[float, float, float]:
     """Map a damage ratio to (green, yellow, red) RGB.
 
     * ratio < 0.7 → green
@@ -1274,6 +1319,7 @@ def _ratio_to_shell_color(ratio: float) -> Tuple[float, float, float]:
     * NaN → gray (no data)
     """
     import math as _math
+
     if _math.isnan(ratio) or ratio < -0.5:
         return (0.6, 0.6, 0.6)  # gray
     norm = min(ratio / 1.0, 1.0)
@@ -1331,6 +1377,7 @@ def plot_shell_damage_map(
         otherwise ``None``.
     """
     import numpy as np
+
     try:
         import pyvista as pv
     except ImportError:
@@ -1340,8 +1387,9 @@ def plot_shell_damage_map(
     pv.set_plot_theme("document")
 
     # ── Resolve data ─────────────────────────────────────────────
-    step_results, node_coords, node_tag_list, _ = \
-        _resolve_pushover_data(data, direction=direction)
+    step_results, _node_coords, _node_tag_list, _ = _resolve_pushover_data(
+        data, direction=direction
+    )
 
     if not step_results:
         print("No pushover step results found.")
@@ -1349,23 +1397,26 @@ def plot_shell_damage_map(
 
     # Raw list data has no mesh geometry, so 3D rendering is not possible
     if isinstance(data, list):
-        print("Raw list data is not supported for 3D animation — "
-              "use an NPZ dict or Builder instead.")
+        print(
+            "Raw list data is not supported for 3D animation — use an NPZ dict or Builder instead."
+        )
         return None
 
     n_step = len(step_results)
 
     # ── Collect all shell IDs across steps ────────────────────────
     all_shell_ids: set = set()
-    per_step_indices: List[Dict[str, float]] = []
+    per_step_indices: list[dict[str, float]] = []
     for sd in step_results:
         sf = sd.get("shell_forces", {})
         all_shell_ids.update(sf.keys())
         per_step_indices.append(_compute_shell_damage(sf))
 
     if not all_shell_ids:
-        print("No shell element data found. Use pushover_record_selection "
-              "with element_types=['Area'] or include areas in the analysis.")
+        print(
+            "No shell element data found. Use pushover_record_selection "
+            "with element_types=['Area'] or include areas in the analysis."
+        )
         return None
 
     # ── Build shell geometry ──────────────────────────────────────
@@ -1375,9 +1426,9 @@ def plot_shell_damage_map(
         return None
 
     # Build a single PolyData for all shells (one face per shell)
-    all_pts: List[float] = []
-    all_faces: List[int] = []
-    shell_aid_to_face_idx: Dict[str, int] = {}
+    all_pts: list[float] = []
+    all_faces: list[int] = []
+    shell_aid_to_face_idx: dict[str, int] = {}
     offset = 0
     for aid, verts in shell_verts.items():
         for v in verts:
@@ -1395,13 +1446,13 @@ def plot_shell_damage_map(
 
     # ── Pre-compute per-step colours ──────────────────────────────
     # Track peak D per element across all steps for range normalisation
-    peak_D: Dict[str, float] = {}
+    peak_D: dict[str, float] = {}
     for idx_dict in per_step_indices:
         for aid, (D, _) in idx_dict.items():
             peak_D[aid] = max(peak_D.get(aid, 0.0), D)
 
     # per_step_fcolors[step_idx] = {face_idx: (r,g,b)}
-    per_step_fcolors: List[Dict[int, Tuple[float, float, float]]] = []
+    per_step_fcolors: list[dict[int, tuple[float, float, float]]] = []
 
     # Also build deformed positions per step if available
     per_step_deformed_pts: list = []
@@ -1411,7 +1462,7 @@ def plot_shell_damage_map(
         nd = sd.get("node_displacements", {})
         has_disp = bool(nd) and show_deformed
 
-        fcolors: Dict[int, Tuple[float, float, float]] = {}
+        fcolors: dict[int, tuple[float, float, float]] = {}
         def_pts = pts_arr.copy()
 
         for aid in all_shell_ids:
@@ -1425,7 +1476,7 @@ def plot_shell_damage_map(
                 fcolors[face_idx] = _ratio_to_shell_color(min(ratio, 2.0))
             else:
                 # No data for this shell at this step → gray
-                fcolors[face_idx] = _ratio_to_shell_color(float('nan'))
+                fcolors[face_idx] = _ratio_to_shell_color(float("nan"))
 
             # Apply displacement to vertices
             if has_disp and aid in shell_node_tags:
@@ -1435,8 +1486,10 @@ def plot_shell_damage_map(
                     if global_idx < len(def_pts) and tag in nd:
                         dx, dy, dz = nd[tag]
                         # Add to original (undeformed) position
-                        def_pts[global_idx] = np.array(pts_arr[global_idx]) + \
-                            np.array([dx, dy, dz]) * displacement_scale
+                        def_pts[global_idx] = (
+                            np.array(pts_arr[global_idx])
+                            + np.array([dx, dy, dz]) * displacement_scale
+                        )
 
         per_step_fcolors.append(fcolors)
         per_step_deformed_pts.append(def_pts)
@@ -1457,11 +1510,12 @@ def plot_shell_damage_map(
     if own_plotter:
         plotter = pv.Plotter(notebook=notebook, **kwargs)
         # Add undeflected frames for context
-        _render_scene(plotter, _resolve_mesh_data(data), show_nodes=False,
-                      show_shells=False, show_frames=True)
+        _render_scene(
+            plotter, _resolve_mesh_data(data), show_nodes=False, show_shells=False, show_frames=True
+        )
 
     # Add the shell damage mesh
-    actor = plotter.add_mesh(
+    plotter.add_mesh(
         mesh_shell,
         scalars="RGB",
         rgb=True,
@@ -1522,6 +1576,7 @@ def plot_shell_damage_map(
 # Pushover force/moment envelope — 3D peak-state visualisation
 # ============================================================================
 
+
 def plot_pushover_envelope(
     data,
     quantity: str = "Mz",
@@ -1571,15 +1626,16 @@ def plot_pushover_envelope(
         return None
 
     # ── Resolve pushover data ───────────────────────────────────
-    step_results, node_coords, node_tags, frame_eid_to_nodes = \
-        _resolve_pushover_data(data, direction=direction)
+    step_results, _node_coords, _node_tags, _frame_eid_to_nodes = _resolve_pushover_data(
+        data, direction=direction
+    )
 
     if not step_results:
         print("No pushover step results found.")
         return None
 
     # ── Build envelope: for each frame element, find peak force step ──
-    envelope_global: Dict[str, Dict[str, float]] = {}
+    envelope_global: dict[str, dict[str, float]] = {}
 
     for sd in step_results:
         ff = sd.get("frame_forces", {})
@@ -1595,24 +1651,24 @@ def plot_pushover_envelope(
             prev_mag = existing.get("_peak_mag", -1.0)
             if step_mag > prev_mag:
                 new_entry = {
-                    'Fx': entry.get('fx_i', 0.0),
-                    'Fy': entry.get('fy_i', 0.0),
-                    'Fz': entry.get('fz_i', 0.0),
-                    'Mx': entry.get('mx_i', 0.0),
-                    'My': entry.get('my_i', 0.0),
-                    'Mz': entry.get('mz_i', 0.0),
-                    'Fx_j': entry.get('fx_j', 0.0),
-                    'Fy_j': entry.get('fy_j', 0.0),
-                    'Fz_j': entry.get('fz_j', 0.0),
-                    'Mx_j': entry.get('mx_j', 0.0),
-                    'My_j': entry.get('my_j', 0.0),
-                    'Mz_j': entry.get('mz_j', 0.0),
-                    '_peak_mag': step_mag,
+                    "Fx": entry.get("fx_i", 0.0),
+                    "Fy": entry.get("fy_i", 0.0),
+                    "Fz": entry.get("fz_i", 0.0),
+                    "Mx": entry.get("mx_i", 0.0),
+                    "My": entry.get("my_i", 0.0),
+                    "Mz": entry.get("mz_i", 0.0),
+                    "Fx_j": entry.get("fx_j", 0.0),
+                    "Fy_j": entry.get("fy_j", 0.0),
+                    "Fz_j": entry.get("fz_j", 0.0),
+                    "Mx_j": entry.get("mx_j", 0.0),
+                    "My_j": entry.get("my_j", 0.0),
+                    "Mz_j": entry.get("mz_j", 0.0),
+                    "_peak_mag": step_mag,
                 }
                 envelope_global[eid] = new_entry
 
     # ── Compute shell envelope (peak damage per shell) ────────────
-    shell_envelope: Dict[str, float] = {}
+    shell_envelope: dict[str, float] = {}
     all_shell_ids: set = set()
     if show_shells:
         for sd in step_results:
@@ -1621,7 +1677,7 @@ def plot_pushover_envelope(
             damages = _compute_shell_damage(sf)
             for aid, (D, _) in damages.items():
                 prev = shell_envelope.get(aid, -1.0)
-                if D > prev:
+                if prev < D:
                     shell_envelope[aid] = D
 
     # ── Resolve mesh geometry for rendering ─────────────────────
@@ -1636,17 +1692,17 @@ def plot_pushover_envelope(
     nodes = mesh_data["nodes"]
 
     # ── Build force_map: {frame_index -> force_entry} ──────────
-    force_map: Dict[int, Dict[str, float]] = {}
+    force_map: dict[int, dict[str, float]] = {}
     for idx, fr in enumerate(frames):
         eid = fr.get("id")
         if eid and eid in envelope_global:
-            f_entry = {k: v for k, v in envelope_global[eid].items()
-                       if not k.startswith("_")}
+            f_entry = {k: v for k, v in envelope_global[eid].items() if not k.startswith("_")}
             force_map[idx] = f_entry
 
     # Consume fea_toolkit-specific kwargs so they aren't forwarded to pv.Plotter
-    _plotter_kwargs = {k: v for k, v in kwargs.items()
-                       if k not in ("show_original", "moment_scale")}
+    _plotter_kwargs = {
+        k: v for k, v in kwargs.items() if k not in ("show_original", "moment_scale")
+    }
     # ── Create shared plotter ──────────────────────────────────
     pv.set_plot_theme("document")
     plotter = pv.Plotter(notebook=notebook, **_plotter_kwargs)
@@ -1654,8 +1710,13 @@ def plot_pushover_envelope(
     # ── Render frame force envelope via shared helper ──────────
     if show_frames and force_map:
         _render_frame_force_diagram(
-            plotter, data, frames, nodes, force_map,
-            quantity, mode,
+            plotter,
+            data,
+            frames,
+            nodes,
+            force_map,
+            quantity,
+            mode,
             show_original=show_original,
             moment_scale=moment_scale,
         )
@@ -1671,13 +1732,18 @@ def plot_pushover_envelope(
                 pts = np.array(verts, dtype=float)
                 quad = pv.PolyData(pts, faces=[4, 0, 1, 2, 3])
                 plotter.add_mesh(
-                    quad, color=color, show_edges=True,
-                    edge_color="black", line_width=1, opacity=0.85,
+                    quad,
+                    color=color,
+                    show_edges=True,
+                    edge_color="black",
+                    line_width=1,
+                    opacity=0.85,
                 )
 
     # ── Finalise ─────────────────────────────────────────────────
-    plotter.add_text(f"{quantity} (local)  (red = +ve, blue = −ve)",
-                     position='lower_edge', font_size=10)
+    plotter.add_text(
+        f"{quantity} (local)  (red = +ve, blue = −ve)", position="lower_edge", font_size=10
+    )
     _set_isometric_view(plotter)
     if notebook:
         return plotter
@@ -1688,6 +1754,7 @@ def plot_pushover_envelope(
 # ============================================================================
 # Pushover deformation animation — interactive 3D + HTML export
 # ============================================================================
+
 
 def animate_pushover_deformation(
     data,
@@ -1740,6 +1807,7 @@ def animate_pushover_deformation(
         ``pv.Plotter`` if *notebook* is True, otherwise ``None``.
     """
     import numpy as np
+
     try:
         import pyvista as pv
     except ImportError:
@@ -1749,8 +1817,9 @@ def animate_pushover_deformation(
     pv.set_plot_theme("document")
 
     # ── Resolve data ─────────────────────────────────────────────
-    step_results, node_coords, node_tag_list, frame_eid_to_nodes = \
-        _resolve_pushover_data(data, direction=direction)
+    step_results, node_coords, _node_tag_list, frame_eid_to_nodes = _resolve_pushover_data(
+        data, direction=direction
+    )
 
     if not step_results:
         print("No pushover step results found.")
@@ -1758,8 +1827,9 @@ def animate_pushover_deformation(
 
     # Raw list data has no mesh geometry, so 3D rendering is not possible
     if isinstance(data, list):
-        print("Raw list data is not supported for 3D animation — "
-              "use an NPZ dict or Builder instead.")
+        print(
+            "Raw list data is not supported for 3D animation — use an NPZ dict or Builder instead."
+        )
         return None
 
     n_step = len(step_results)
@@ -1769,7 +1839,7 @@ def animate_pushover_deformation(
     step_ratios = _compute_hinge_ratios_all_steps(all_frame_forces, use_biaxial=use_biaxial)
 
     # ── Pre-compute shell damage per step ────────────────────────
-    per_step_indices: List[Dict[str, float]] = []
+    per_step_indices: list[dict[str, float]] = []
     all_shell_ids: set = set()
     for sd in step_results:
         sf = sd.get("shell_forces", {})
@@ -1785,14 +1855,14 @@ def animate_pushover_deformation(
     max_ratio = max(all_ratios) if all_ratios else 1.0
 
     # Global peak shell damage
-    peak_D: Dict[str, float] = {}
+    peak_D: dict[str, float] = {}
     for idx_dict in per_step_indices:
         for aid, (D, _) in idx_dict.items():
             peak_D[aid] = max(peak_D.get(aid, 0.0), D)
 
     # ── Build frame geometry ─────────────────────────────────────
     # frame_segs_per_step[step_idx] = list of (p_i, p_j, ratio_i, ratio_j)
-    frame_segs_per_step: List[List[tuple]] = []
+    frame_segs_per_step: list[list[tuple]] = []
     for si, sd in enumerate(step_results):
         ff = sd.get("frame_forces", {})
         ratios = step_ratios[si]
@@ -1818,10 +1888,8 @@ def animate_pushover_deformation(
             ni_tag, nj_tag = frame_eid_to_nodes[eid]
             ri, rj = ratios.get(eid, (0.0, 0.0))
 
-            p_i = _get_deformed_pos(ni_tag, step_nd, step_has_disp,
-                                    displacement_scale, node_coords)
-            p_j = _get_deformed_pos(nj_tag, step_nd, step_has_disp,
-                                    displacement_scale, node_coords)
+            p_i = _get_deformed_pos(ni_tag, step_nd, step_has_disp, displacement_scale, node_coords)
+            p_j = _get_deformed_pos(nj_tag, step_nd, step_has_disp, displacement_scale, node_coords)
             if p_i is not None and p_j is not None:
                 segs.append((p_i, p_j, ri, rj))
         frame_segs_per_step.append(segs)
@@ -1833,27 +1901,31 @@ def animate_pushover_deformation(
         shell_verts, shell_node_tags = _resolve_shell_data(data, all_shell_ids)
 
     # per_step_shell_pts[step_idx] = {aid: [(x,y,z), ...]} (deformed)
-    per_step_shell_pts: List[Dict[str, list]] = []
-    per_step_shell_colors: List[Dict[str, Tuple[float, float, float]]] = []
+    per_step_shell_pts: list[dict[str, list]] = []
+    per_step_shell_colors: list[dict[str, tuple[float, float, float]]] = []
     for si, sd in enumerate(step_results):
         idx_dict = per_step_indices[si]
         nd = sd.get("node_displacements", {})
         has_disp = bool(nd)
-        step_shell_pts: Dict[str, list] = {}
-        step_shell_colors: Dict[str, tuple] = {}
+        step_shell_pts: dict[str, list] = {}
+        step_shell_colors: dict[str, tuple] = {}
 
         for aid in all_shell_ids:
             if aid not in shell_verts:
                 continue
             verts = shell_verts[aid]
             tags = shell_node_tags.get(aid, [])
-            # Deform vertices
-            def _shell_disp(tag, vert):
+
+            # Deform vertices — bind loop vars as defaults so the closure
+            # is independent of subsequent loop iterations (B023).
+            def _shell_disp(tag, vert, has_disp=has_disp, nd=nd):
                 if has_disp and tag in nd:
                     dx, dy, dz = nd[tag]
-                    return (vert[0] + dx * displacement_scale,
-                            vert[1] + dy * displacement_scale,
-                            vert[2] + dz * displacement_scale)
+                    return (
+                        vert[0] + dx * displacement_scale,
+                        vert[1] + dy * displacement_scale,
+                        vert[2] + dz * displacement_scale,
+                    )
                 return vert
 
             deformed = [_shell_disp(tags[k], verts[k]) for k in range(len(verts))]
@@ -1872,10 +1944,8 @@ def animate_pushover_deformation(
         per_step_shell_colors.append(step_shell_colors)
 
     # Consume fea_toolkit-specific kwargs so they aren't forwarded to pv.Plotter
-    _plotter_kwargs = {k: v for k, v in kwargs.items()
-                       if k not in ("use_biaxial",)}
+    _plotter_kwargs = {k: v for k, v in kwargs.items() if k != "use_biaxial"}
     # ── Create plotter ──────────────────────────────────────────
-    own_plotter = True
     plotter = pv.Plotter(notebook=notebook, **_plotter_kwargs)
 
     # Render undeformed mesh as background
@@ -1931,8 +2001,9 @@ def animate_pushover_deformation(
                 all_pts.extend(v)
             nv = len(verts)
             if nv >= 3:
-                all_faces.extend([nv, offset, offset + 1, offset + 2,
-                                  *(offset + i for i in range(3, nv))])
+                all_faces.extend(
+                    [nv, offset, offset + 1, offset + 2, *(offset + i for i in range(3, nv))]
+                )
                 face_colors.append(first_shell_colors.get(aid, (0.6, 0.6, 0.6)))
             offset += nv
 
@@ -1956,14 +2027,17 @@ def animate_pushover_deformation(
     if n_step > 1:
 
         def _make_update_fn(
-            segs_per_step, shell_pts_per_step, shell_cols_per_step,
-            tube_mesh, shell_mesh_data, n_step_,
+            segs_per_step,
+            shell_pts_per_step,
+            shell_cols_per_step,
+            tube_mesh,
+            shell_mesh_data,
+            n_step_,
         ):
             """Return a closure that updates geometry at a given step."""
-            shell_verts_data = None
             shell_faces_data = None
             if shell_mesh_data is not None:
-                shell_verts_data, shell_faces_data = shell_mesh_data
+                _shell_verts_data, shell_faces_data = shell_mesh_data
 
             def _update(step_val: float):
                 idx = min(int(round(step_val)), n_step_ - 1)
@@ -1976,8 +2050,9 @@ def animate_pushover_deformation(
                     for p_i, p_j, ri, rj in segs:
                         new_pts.extend(p_i.tolist())
                         new_pts.extend(p_j.tolist())
-                        new_colors.extend([_ratio_to_color(ri, max_ratio),
-                                           _ratio_to_color(rj, max_ratio)])
+                        new_colors.extend(
+                            [_ratio_to_color(ri, max_ratio), _ratio_to_color(rj, max_ratio)]
+                        )
                     if new_pts and len(new_pts) % 3 == 0:
                         pts_arr = np.array(new_pts, dtype=float).reshape(-1, 3)
                         if pts_arr.shape[0] == tube_mesh.n_points:
@@ -1990,22 +2065,23 @@ def animate_pushover_deformation(
                     step_shell_cols = shell_cols_per_step[idx]
                     new_pts = []
                     new_fcolors = []
-                    nv_cell = len(shell_faces_data)
+                    len(shell_faces_data)
                     for aid in shell_faces_data:
                         if aid in step_shell_pts:
                             verts = step_shell_pts[aid]
                             for v in verts:
                                 new_pts.extend(v)
-                            new_fcolors.append(
-                                step_shell_cols.get(aid, (0.6, 0.6, 0.6)))
+                            new_fcolors.append(step_shell_cols.get(aid, (0.6, 0.6, 0.6)))
                     if new_pts and len(new_pts) % 3 == 0:
                         # Reshape the flat coordinate list into (N, 3)
                         # before assignment, matching the initial mesh
                         # construction.
-                        shell_actor.mapper.dataset.points = \
-                            np.array(new_pts, dtype=float).reshape(-1, 3)
-                        shell_actor.mapper.dataset.cell_data["colors"] = \
-                            np.array(new_fcolors, dtype=float)
+                        shell_actor.mapper.dataset.points = np.array(new_pts, dtype=float).reshape(
+                            -1, 3
+                        )
+                        shell_actor.mapper.dataset.cell_data["colors"] = np.array(
+                            new_fcolors, dtype=float
+                        )
                         shell_actor.mapper.Update()
 
                 plotter.render()
@@ -2013,7 +2089,7 @@ def animate_pushover_deformation(
             return _update
 
         # Pre-compute shell face data structure for efficient update
-        shell_faces_data: List[str] = []
+        shell_faces_data: list[str] = []
         if show_shells and all_shell_ids and shell_verts:
             shell_faces_data = list(all_shell_ids)
 
@@ -2045,8 +2121,10 @@ def animate_pushover_deformation(
             update_fn(float(timer_step[0]))
 
         _add_animation_timer(
-            plotter, _timer_callback,
-            max_steps=n_step * 100, interval_ms=animation_interval_ms,
+            plotter,
+            _timer_callback,
+            max_steps=n_step * 100,
+            interval_ms=animation_interval_ms,
         )
 
     # ── HTML export ──────────────────────────────────────────────
@@ -2059,11 +2137,11 @@ def animate_pushover_deformation(
 
     # ── Add colour legends ───────────────────────────────────────
     if show_frames and frame_segs_per_step and frame_segs_per_step[0]:
-        _add_hinge_color_legend(plotter, title="Yield Ratio (M/M_y)",
-                                position_x=0.82, position_y=0.1)
+        _add_hinge_color_legend(
+            plotter, title="Yield Ratio (M/M_y)", position_x=0.82, position_y=0.1
+        )
     if show_shells and all_shell_ids and shell_verts:
-        _add_shell_color_legend(plotter, title="Damage Index",
-                               position_x=0.82, position_y=0.1)
+        _add_shell_color_legend(plotter, title="Damage Index", position_x=0.82, position_y=0.1)
 
     # ── Finalise ─────────────────────────────────────────────────
     _set_isometric_view(plotter)
@@ -2077,15 +2155,16 @@ def animate_pushover_deformation(
 # Frame force evolution — 2D subplot grid (Matplotlib)
 # ============================================================================
 
+
 def plot_frame_force_evolution(
     data,
     direction: str = "+X",
     quantity: str = "Mz",
-    element_ids: Optional[List[str]] = None,
-    yield_moment: Optional[Dict[str, float]] = None,
+    element_ids: Optional[list[str]] = None,
+    yield_moment: Optional[dict[str, float]] = None,
     xaxis: str = "step",
-    drifts: Optional[List[float]] = None,
-    figsize: Tuple[float, float] = (10, 8),
+    drifts: Optional[list[float]] = None,
+    figsize: tuple[float, float] = (10, 8),
     **kwargs,
 ) -> Optional[Any]:
     """Plot the evolution of a force quantity for selected frame elements.
@@ -2139,7 +2218,7 @@ def plot_frame_force_evolution(
     # ── Collect per-element force history ────────────────────────
     # force_history[eid] = [(val_i, val_j), ...] one entry per step
     all_eids: set = set()
-    force_history: Dict[str, List[Tuple[float, float]]] = {}
+    force_history: dict[str, list[tuple[float, float]]] = {}
     for sd in step_results:
         ff = sd.get("frame_forces", {})
         for eid, entry in ff.items():
@@ -2176,8 +2255,7 @@ def plot_frame_force_evolution(
 
     # Filter by element_ids if provided
     if element_ids is not None:
-        selected = {eid: force_history[eid] for eid in element_ids
-                    if eid in force_history}
+        selected = {eid: force_history[eid] for eid in element_ids if eid in force_history}
         if not selected:
             print(f"No data for requested element_ids: {element_ids}")
             return None
@@ -2207,21 +2285,20 @@ def plot_frame_force_evolution(
         history = force_history[eid]
         # Pad history to n_step (in case element appears mid-analysis)
         while len(history) < n_step:
-            history.append((float('nan'), float('nan')))
+            history.append((float("nan"), float("nan")))
 
         v_i_series = np.array([v[0] for v in history])
         v_j_series = np.array([v[1] for v in history])
 
-        ax.plot(x_vals[:len(v_i_series)], v_i_series,
-                '-o', markersize=3, label="I-end", **kwargs)
-        ax.plot(x_vals[:len(v_j_series)], v_j_series,
-                '-s', markersize=3, label="J-end", **kwargs)
+        ax.plot(x_vals[: len(v_i_series)], v_i_series, "-o", markersize=3, label="I-end", **kwargs)
+        ax.plot(x_vals[: len(v_j_series)], v_j_series, "-s", markersize=3, label="J-end", **kwargs)
 
         # Yield moment line
         if yield_moment is not None and eid in yield_moment:
             yv = yield_moment[eid]
-            ax.axhline(yv, color='red', linestyle='--', linewidth=1,
-                       alpha=0.7, label=f"Yield ({yv:.1f})")
+            ax.axhline(
+                yv, color="red", linestyle="--", linewidth=1, alpha=0.7, label=f"Yield ({yv:.1f})"
+            )
 
         ax.set_title(f"Elem {eid}")
         ax.set_xlabel(x_label)
@@ -2234,15 +2311,13 @@ def plot_frame_force_evolution(
         col = i % 3
         fig.delaxes(axes[row][col])
 
-    unit_map = {"Mz": "Moment", "My": "Moment", "Mx": "Moment",
-                "V": "Shear", "N": "Axial"}
+    unit_map = {"Mz": "Moment", "My": "Moment", "Mx": "Moment", "V": "Shear", "N": "Axial"}
     ylabel = unit_map.get(quantity, quantity)
     # Add Y-label to the left-most column of each row
     for row in range(nrows):
         axes[row][0].set_ylabel(ylabel)
 
-    fig.suptitle(f"Force evolution — {ylabel} ({quantity})",
-                 fontsize=12, fontweight="bold")
+    fig.suptitle(f"Force evolution — {ylabel} ({quantity})", fontsize=12, fontweight="bold")
     fig.tight_layout()
     return fig
 
@@ -2250,6 +2325,7 @@ def plot_frame_force_evolution(
 # ============================================================================
 # Interactive viewer helpers
 # ============================================================================
+
 
 def _build_deformed_mesh(
     segments: list,
@@ -2336,8 +2412,7 @@ def _build_deformed_mesh(
         a3 = p3 + d3 * scale * amp
         a4 = p4 + d4 * scale * amp
         all_pts.extend([a1, a2, a3, a4])
-        all_faces.append([4, shell_offset, shell_offset + 1,
-                          shell_offset + 2, shell_offset + 3])
+        all_faces.append([4, shell_offset, shell_offset + 1, shell_offset + 2, shell_offset + 3])
         shell_offset += 4
         offset += 4  # still track global offset for verts partitioning
 
@@ -2349,8 +2424,7 @@ def _build_deformed_mesh(
     # ── Frame mesh ──
     frame_mesh = pv.PolyData()
     if n_frame_pts > 0:
-        cells = (np.array(all_lines, dtype=int) if all_lines
-                 else np.empty((0, 3), dtype=int))
+        cells = np.array(all_lines, dtype=int) if all_lines else np.empty((0, 3), dtype=int)
         fm = pv.PolyData(verts[:n_frame_pts])
         if len(cells) > 0:
             fm.lines = cells
@@ -2367,7 +2441,7 @@ def _build_deformed_mesh(
         sm.points = verts[n_frame_pts:]
         if sec_idxs:
             # Each quad → 1 face → 1 cell_data entry (no mismatch)
-            sm.cell_data['section_idx'] = np.array(sec_idxs, dtype=int)
+            sm.cell_data["section_idx"] = np.array(sec_idxs, dtype=int)
         shell_mesh = sm
 
     return frame_mesh, shell_mesh
@@ -2377,12 +2451,13 @@ def _build_deformed_mesh(
 # 3D model view (PyVista)
 # ============================================================================
 
+
 def plot_model_3d(
     builder,
     show_nodes: bool = True,
     show_labels: bool = False,
     color_by_section: bool = True,
-    selection: Optional['Selection'] = None,
+    selection: Optional["Selection"] = None,
     show_constraints: bool = False,
     show_mesh_nodes: bool = False,
     notebook: bool = False,
@@ -2416,9 +2491,9 @@ def plot_model_3d(
         ``pyvista`` — install via ``pip install pyvista``.
     """
     warnings.warn(
-        "plot_model_3d is deprecated — use plot_mesh() instead "
-        "(works with builder or NPZ data)",
-        DeprecationWarning, stacklevel=2,
+        "plot_model_3d is deprecated — use plot_mesh() instead (works with builder or NPZ data)",
+        DeprecationWarning,
+        stacklevel=2,
     )
     try:
         import pyvista as pv
@@ -2430,24 +2505,23 @@ def plot_model_3d(
     pv.set_plot_theme("document")
 
     # Collect element lines
-    elements = (builder.split_elements if builder.split_elements
-                else builder.model.frame_elements)
+    elements = builder.split_elements or builder.model.frame_elements
     if selection is not None:
         sel_ids = set(selection.get_frame_ids(builder.model))
-        elements = {eid: elem for eid, elem in elements.items()
-                    if eid in sel_ids}
+        elements = {eid: elem for eid, elem in elements.items() if eid in sel_ids}
     lines = []
-    _assignments = (builder.split_assignments if builder.split_elements
-                    else builder.model.frame_assignments)
+    _assignments = (
+        builder.split_assignments if builder.split_elements else builder.model.frame_assignments
+    )
 
     for eid, elem in elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         ni = builder.model.nodes.get(elem.node_i)
         nj = builder.model.nodes.get(elem.node_j)
         if ni is None or nj is None:
             continue
-        sec = (_assignments or {}).get(eid, '?')
+        sec = (_assignments or {}).get(eid, "?")
         p1 = np.array([ni.x, ni.y, ni.z])
         p2 = np.array([nj.x, nj.y, nj.z])
         lines.append((p1, p2, sec))
@@ -2456,12 +2530,20 @@ def plot_model_3d(
     all_secs = sorted({s for _, _, s in lines})
     if color_by_section and len(all_secs) > 1:
         cmap = [
-            '#4c72b0', '#dd8452', '#55a868', '#c44e52', '#8172b3',
-            '#937860', '#da8bc3', '#8c8c8c', '#ccb974', '#64b5cd',
+            "#4c72b0",
+            "#dd8452",
+            "#55a868",
+            "#c44e52",
+            "#8172b3",
+            "#937860",
+            "#da8bc3",
+            "#8c8c8c",
+            "#ccb974",
+            "#64b5cd",
         ]
         sec_colour = {s: cmap[i % len(cmap)] for i, s in enumerate(all_secs)}
     else:
-        sec_colour = {s: '#4c72b0' for s in all_secs}
+        sec_colour = dict.fromkeys(all_secs, "#4c72b0")
 
     plotter = pv.Plotter(notebook=notebook, **kwargs)
 
@@ -2470,9 +2552,8 @@ def plot_model_3d(
         n_pts = max(2, int(np.linalg.norm(p2 - p1) * 2))
         pts = np.linspace(p1, p2, n_pts)
         poly = pv.lines_from_points(pts)
-        colour = sec_colour.get(sec, '#4c72b0')
-        plotter.add_mesh(poly, color=colour, line_width=4,
-                         label=sec if color_by_section else None)
+        colour = sec_colour.get(sec, "#4c72b0")
+        plotter.add_mesh(poly, color=colour, line_width=4, label=sec if color_by_section else None)
 
     if color_by_section and len(all_secs) > 1:
         plotter.add_legend()
@@ -2487,8 +2568,8 @@ def plot_model_3d(
             sel_area_ids = set(selection.get_area_ids(builder.model))
 
         # Collect active and inactive areas
-        active_quads: Dict[str, list] = {}   # sec_name → [quad points]
-        inactive_quads: list = []             # parent quads (grey overlay)
+        active_quads: dict[str, list] = {}  # sec_name → [quad points]
+        inactive_quads: list = []  # parent quads (grey overlay)
 
         for aid, area in builder.model.area_elements.items():
             if sel_area_ids is not None and aid not in sel_area_ids:
@@ -2508,36 +2589,51 @@ def plot_model_3d(
             while len(pts) < 4:
                 pts.append(pts[-1])
 
-            is_inactive = getattr(area, 'inactive', False)
+            is_inactive = getattr(area, "inactive", False)
             if is_inactive:
                 inactive_quads.append(np.array(pts))
             else:
-                sec_name = builder.model.area_assignments.get(aid, 'unknown')
+                sec_name = builder.model.area_assignments.get(aid, "unknown")
                 active_quads.setdefault(sec_name, []).append(np.array(pts))
 
         # Render inactive (parent) quads as grey wireframe — Approach B
         if inactive_quads:
             for quad_pts in inactive_quads:
                 face = pv.PolyData(quad_pts, faces=[4, 0, 1, 2, 3])
-                plotter.add_mesh(face, color='lightgrey', opacity=0.15,
-                                 show_edges=True, edge_color='grey',
-                                 line_width=0.5)
+                plotter.add_mesh(
+                    face,
+                    color="lightgrey",
+                    opacity=0.15,
+                    show_edges=True,
+                    edge_color="grey",
+                    line_width=0.5,
+                )
 
         # Render active (sub-element) quads
         if active_quads:
             _shell_secs = sorted(active_quads.keys())
             _shell_cmap = [
-                '#4c72b0', '#dd8452', '#55a868', '#c44e52', '#8172b3',
-                '#937860', '#da8bc3', '#8c8c8c', '#ccb974', '#64b5cd',
+                "#4c72b0",
+                "#dd8452",
+                "#55a868",
+                "#c44e52",
+                "#8172b3",
+                "#937860",
+                "#da8bc3",
+                "#8c8c8c",
+                "#ccb974",
+                "#64b5cd",
             ]
-            _shell_colour = {s: _shell_cmap[i % len(_shell_cmap)]
-                            for i, s in enumerate(_shell_secs)}
+            _shell_colour = {
+                s: _shell_cmap[i % len(_shell_cmap)] for i, s in enumerate(_shell_secs)
+            }
 
             for sec_name, quads in active_quads.items():
-                if color_by_section:
-                    colour = _shell_colour.get(sec_name, '#4c72b0')
-                else:
-                    colour = '#4c72b0'  # neutral blue, matching frame default
+                colour = (
+                    _shell_colour.get(sec_name, "#4c72b0")
+                    if color_by_section
+                    else "#4c72b0"  # neutral blue, matching frame default
+                )
                 for quad_pts in quads:
                     pts = np.array(quad_pts)
                     is_tri = np.allclose(pts[2], pts[3])
@@ -2545,42 +2641,42 @@ def plot_model_3d(
                         face = pv.PolyData(pts[:3], faces=[3, 0, 1, 2])
                     else:
                         face = pv.PolyData(pts, faces=[4, 0, 1, 2, 3])
-                    plotter.add_mesh(face, color=colour, opacity=0.6,
-                                     show_edges=True, edge_color=colour,
-                                     line_width=1.0,
-                                     label=sec_name if color_by_section else None)
+                    plotter.add_mesh(
+                        face,
+                        color=colour,
+                        opacity=0.6,
+                        show_edges=True,
+                        edge_color=colour,
+                        line_width=1.0,
+                        label=sec_name if color_by_section else None,
+                    )
 
     # Add nodes
     if show_nodes:
-        node_pts = np.array([
-            [n.x, n.y, n.z] for n in builder.model.nodes.values()
-        ])
+        node_pts = np.array([[n.x, n.y, n.z] for n in builder.model.nodes.values()])
         if len(node_pts):
             cloud = pv.PolyData(node_pts)
-            plotter.add_mesh(cloud, color='black', point_size=8,
-                             render_points_as_spheres=True)
+            plotter.add_mesh(cloud, color="black", point_size=8, render_points_as_spheres=True)
 
     # ── Mesh-created nodes (green spheres) ──────────────────────
     if show_mesh_nodes:
-        mesh_pts = np.array([
-            [n.x, n.y, n.z] for nid, n in builder.model.nodes.items()
-            if "_mesh_" in nid
-        ])
+        mesh_pts = np.array(
+            [[n.x, n.y, n.z] for nid, n in builder.model.nodes.items() if "_mesh_" in nid]
+        )
         if len(mesh_pts):
             cloud = pv.PolyData(mesh_pts)
-            plotter.add_mesh(cloud, color='green', point_size=12,
-                             render_points_as_spheres=True)
+            plotter.add_mesh(cloud, color="green", point_size=12, render_points_as_spheres=True)
 
     # ── Edge constraint lines (wide transparent yellow) ─────────
     if show_constraints:
         # Try MeshModel detected_edge_pairs first (preprocessor path)
         raw_pairs = []
-        mesh_model = getattr(builder, '_mesh_model', None)
+        mesh_model = getattr(builder, "_mesh_model", None)
         if mesh_model is not None:
-            raw_pairs = getattr(mesh_model, 'detected_edge_pairs', [])
+            raw_pairs = getattr(mesh_model, "detected_edge_pairs", [])
         # Fall back to builder's _saved_edge_constraints (legacy path)
         if not raw_pairs:
-            raw_pairs = getattr(builder, '_saved_edge_constraints', [])
+            raw_pairs = getattr(builder, "_saved_edge_constraints", [])
         if raw_pairs:
             lines_poly = []
             for entry in raw_pairs:
@@ -2600,19 +2696,19 @@ def plot_model_3d(
                         fnode = builder.model.nodes.get(sid) if isinstance(sid, str) else None
                         if fnode is None:
                             continue
-                        lines_poly.append([cnode.x, cnode.y, cnode.z,
-                                           fnode.x, fnode.y, fnode.z])
+                        lines_poly.append([cnode.x, cnode.y, cnode.z, fnode.x, fnode.y, fnode.z])
             if lines_poly:
                 pts = np.array(lines_poly).reshape(-1, 3)
                 n_lines = len(lines_poly)
-                connectivity = np.column_stack([
-                    np.full(n_lines, 2, dtype=int),
-                    np.arange(0, 2 * n_lines, 2, dtype=int),
-                    np.arange(1, 2 * n_lines + 1, 2, dtype=int),
-                ]).ravel()
+                connectivity = np.column_stack(
+                    [
+                        np.full(n_lines, 2, dtype=int),
+                        np.arange(0, 2 * n_lines, 2, dtype=int),
+                        np.arange(1, 2 * n_lines + 1, 2, dtype=int),
+                    ]
+                ).ravel()
                 poly = pv.PolyData(pts, lines=connectivity)
-                plotter.add_mesh(poly, color='yellow', opacity=0.6,
-                                 line_width=10)
+                plotter.add_mesh(poly, color="yellow", opacity=0.6, line_width=10)
 
     # Labels
     if show_labels:
@@ -2620,7 +2716,8 @@ def plot_model_3d(
             plotter.add_point_labels(
                 np.array([[node.x, node.y, node.z]]),
                 [str(node.node_tag)],
-                font_size=10, point_size=0,
+                font_size=10,
+                point_size=0,
             )
 
     plotter.show_grid()
@@ -2635,6 +2732,7 @@ def plot_model_3d(
 # ============================================================================
 # Unified mesh visualisation (builder or NPZ data)
 # ============================================================================
+
 
 def _collapse_to_parents(data, source):
     """Post‑process mesh data to replace child elements with their parents.
@@ -2655,16 +2753,15 @@ def _collapse_to_parents(data, source):
     dict
         Updated mesh data dict with children collapsed into parents.
     """
-    import numpy as np
 
     nodes = data["nodes"]
 
     # ── Collapse frames ─────────────────────────────────────────
     # Build group: parent_id -> [child_frame_entries]
-    parent_groups: Dict[str, list] = {}
+    parent_groups: dict[str, list] = {}
     for fr in data["frames"]:
         pid = fr.get("parent")
-        if pid and pid != "?" and pid != "" and pid is not None:
+        if pid and pid not in {"?", ""} and pid is not None:
             parent_groups.setdefault(pid, []).append(fr)
 
     if parent_groups:
@@ -2673,37 +2770,38 @@ def _collapse_to_parents(data, source):
 
         # Build a node-tag-to-SAP-id lookup for resolving parent endpoints
         # from NPZ data (nodes are already populated by _resolve_mesh_data).
-        tag_to_sid: Dict[int, str] = {}
+        tag_to_sid: dict[int, str] = {}
         for sid, nd in nodes.items():
             tag_to_sid[nd["tag"]] = sid
 
         # For builder sources, build a full parent endpoint lookup from model
-        parent_frame_endpoints: Dict[str, tuple] = {}
-        if not isinstance(source, dict) and hasattr(source, 'model') or \
-           (hasattr(source, 'frame_elements') and not isinstance(source, dict)):
-            if hasattr(source, 'model'):
+        parent_frame_endpoints: dict[str, tuple] = {}
+        if (not isinstance(source, dict) and hasattr(source, "model")) or (
+            hasattr(source, "frame_elements") and not isinstance(source, dict)
+        ):
+            if hasattr(source, "model"):
                 model = source.model
-            elif hasattr(source, 'mesh_model'):
+            elif hasattr(source, "mesh_model"):
                 model = source.mesh_model
             elif isinstance(source, SAPModelData):
                 model = source
             else:
                 model = source
             for eid, elem in model.frame_elements.items():
-                if getattr(elem, 'inactive', False):
+                if getattr(elem, "inactive", False):
                     parent_frame_endpoints[eid] = (elem.node_i, elem.node_j)
 
         # For NPZ sources, read parent endpoints from the new arrays
         # Keyed by parent_sap_id so the collapse_to_parents lookup by pid works.
-        npz_parent_node_i: Dict[str, int] = {}
-        npz_parent_node_j: Dict[str, int] = {}
+        npz_parent_node_i: dict[str, int] = {}
+        npz_parent_node_j: dict[str, int] = {}
         if isinstance(source, dict):
             nf = len(source.get("frame_eid", []))
             for i in range(nf):
-                pid = str(source.get("frame_parent_sap_id", [""]*nf)[i])
+                pid = str(source.get("frame_parent_sap_id", [""] * nf)[i])
                 sid = str(source["frame_sap_id"][i])
-                pni = int(source.get("frame_parent_node_i", [0]*nf)[i])
-                pnj = int(source.get("frame_parent_node_j", [0]*nf)[i])
+                pni = int(source.get("frame_parent_node_i", [0] * nf)[i])
+                pnj = int(source.get("frame_parent_node_j", [0] * nf)[i])
                 if pid and pni != 0 and pnj != 0:
                     npz_parent_node_i[pid] = pni
                     npz_parent_node_j[pid] = pnj
@@ -2713,7 +2811,7 @@ def _collapse_to_parents(data, source):
 
         for fr in data["frames"]:
             pid = fr.get("parent")
-            if pid and pid != "?" and pid != "" and pid is not None:
+            if pid and pid not in {"?", ""} and pid is not None:
                 if pid in seen_parents:
                     continue  # already added
                 seen_parents.add(pid)
@@ -2727,63 +2825,71 @@ def _collapse_to_parents(data, source):
                         p_ni = nodes.get(p_ni_id)
                         p_nj = nodes.get(p_nj_id)
                         if p_ni and p_nj:
-                            collapsed_frames.append({
-                                "id": pid,
-                                "ni_id": p_ni_id,
-                                "nj_id": p_nj_id,
-                                "sec": children[0].get("sec", '?'),
-                                "parent": None,
-                            })
+                            collapsed_frames.append(
+                                {
+                                    "id": pid,
+                                    "ni_id": p_ni_id,
+                                    "nj_id": p_nj_id,
+                                    "sec": children[0].get("sec", "?"),
+                                    "parent": None,
+                                }
+                            )
                             continue
                     # Fallback: derive from children endpoints
                     sorted_children = _sort_children_by_location(children, nodes)
                     if sorted_children:
                         first = sorted_children[0]
                         last = sorted_children[-1]
-                        collapsed_frames.append({
-                            "id": pid,
-                            "ni_id": first.get("ni_id"),
-                            "nj_id": last.get("nj_id"),
-                            "ni_tag": first.get("ni_tag"),
-                            "nj_tag": last.get("nj_tag"),
-                            "sec": children[0].get("sec", '?'),
-                            "parent": None,
-                        })
+                        collapsed_frames.append(
+                            {
+                                "id": pid,
+                                "ni_id": first.get("ni_id"),
+                                "nj_id": last.get("nj_id"),
+                                "ni_tag": first.get("ni_tag"),
+                                "nj_tag": last.get("nj_tag"),
+                                "sec": children[0].get("sec", "?"),
+                                "parent": None,
+                            }
+                        )
                 else:
                     # NPZ path — use parent node tags from NPZ arrays
                     p_ni_tag = npz_parent_node_i.get(pid, 0)
                     p_nj_tag = npz_parent_node_j.get(pid, 0)
                     if p_ni_tag and p_nj_tag:
-                        collapsed_frames.append({
-                            "id": pid,
-                            "ni_tag": p_ni_tag,
-                            "nj_tag": p_nj_tag,
-                            "sec": children[0].get("sec", '?'),
-                            "parent": None,
-                        })
+                        collapsed_frames.append(
+                            {
+                                "id": pid,
+                                "ni_tag": p_ni_tag,
+                                "nj_tag": p_nj_tag,
+                                "sec": children[0].get("sec", "?"),
+                                "parent": None,
+                            }
+                        )
                     else:
                         # Fallback: derive from sorted children
                         sorted_children = _sort_children_by_location(children, nodes)
                         if sorted_children:
                             first = sorted_children[0]
                             last = sorted_children[-1]
-                            collapsed_frames.append({
-                                "id": pid,
-                                "ni_tag": first.get("ni_tag"),
-                                "nj_tag": last.get("nj_tag"),
-                                "sec": children[0].get("sec", '?'),
-                                "parent": None,
-                            })
+                            collapsed_frames.append(
+                                {
+                                    "id": pid,
+                                    "ni_tag": first.get("ni_tag"),
+                                    "nj_tag": last.get("nj_tag"),
+                                    "sec": children[0].get("sec", "?"),
+                                    "parent": None,
+                                }
+                            )
             else:
                 # Unsplit element — pass through
                 collapsed_frames.append(fr)
         data["frames"] = collapsed_frames
 
     # ── Collapse shells ─────────────────────────────────────────
-    shell_parent_groups: Dict[str, list] = {}
+    shell_parent_groups: dict[str, list] = {}
     for sh in data["shells"]:
         pid = sh.get("parent")
-        if pid and pid != "?" and pid != "" and pid is not None:
+        if pid and pid not in {"?", ""} and pid is not None:
             shell_parent_groups.setdefault(pid, []).append(sh)
 
     if shell_parent_groups:
@@ -2791,7 +2897,7 @@ def _collapse_to_parents(data, source):
         seen_shell_parents: set = set()
         for sh in data["shells"]:
             pid = sh.get("parent")
-            if pid and pid != "?" and pid != "" and pid is not None:
+            if pid and pid not in {"?", ""} and pid is not None:
                 if pid in seen_shell_parents:
                     continue
                 seen_shell_parents.add(pid)
@@ -2800,18 +2906,19 @@ def _collapse_to_parents(data, source):
                 # (parent node IDs are stored in the original area_element)
                 parent_node_ids = None
                 if not isinstance(source, dict):
-                    model = (source.model if hasattr(source, 'model')
-                             else source)
+                    model = source.model if hasattr(source, "model") else source
                     parent_area = model.area_elements.get(pid)
                     if parent_area is not None:
                         parent_node_ids = parent_area.node_ids[:4]
                 if parent_node_ids:
-                    collapsed_shells.append({
-                        "id": pid,
-                        "sec": children[0].get("sec", 'unknown'),
-                        "node_ids": parent_node_ids,
-                        "inactive": False,
-                    })
+                    collapsed_shells.append(
+                        {
+                            "id": pid,
+                            "sec": children[0].get("sec", "unknown"),
+                            "node_ids": parent_node_ids,
+                            "inactive": False,
+                        }
+                    )
                 else:
                     # Fallback: use first child's geometry
                     collapsed_shells.append(children[0])
@@ -2841,12 +2948,12 @@ def _sort_children_by_location(children, nodes, parent_axis=None):
 
     def _mid_pos(fr):
         """Compute midpoint of the child element as a 3D point."""
-        ni = _resolve_frame_node(nodes, fr, 'i')
-        nj = _resolve_frame_node(nodes, fr, 'j')
+        ni = _resolve_frame_node(nodes, fr, "i")
+        nj = _resolve_frame_node(nodes, fr, "j")
         if ni and nj:
-            return np.array([(ni["x"] + nj["x"]) * 0.5,
-                             (ni["y"] + nj["y"]) * 0.5,
-                             (ni["z"] + nj["z"]) * 0.5])
+            return np.array(
+                [(ni["x"] + nj["x"]) * 0.5, (ni["y"] + nj["y"]) * 0.5, (ni["z"] + nj["z"]) * 0.5]
+            )
         return np.zeros(3)
 
     if parent_axis is not None:
@@ -2878,10 +2985,15 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
         edge_constraints – list of constraint tuples
         mesh_node_ids  – ``set`` of node IDs containing ``_mesh_``
     """
-    import numpy as np
 
-    data = {"nodes": {}, "frames": [], "shells": [], "orphan_nodes": {},
-            "edge_constraints": [], "mesh_node_ids": set()}
+    data = {
+        "nodes": {},
+        "frames": [],
+        "shells": [],
+        "orphan_nodes": {},
+        "edge_constraints": [],
+        "mesh_node_ids": set(),
+    }
 
     # ═════════════════════════════════════════════════════════════
     # Approach A: SAPModelData passthrough — raw importer output
@@ -2889,21 +3001,31 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
     if isinstance(source, SAPModelData):
         for nid, nd in source.nodes.items():
             data["nodes"][nid] = {
-                "tag": nd.node_tag, "x": nd.x, "y": nd.y, "z": nd.z,
+                "tag": nd.node_tag,
+                "x": nd.x,
+                "y": nd.y,
+                "z": nd.z,
             }
         for eid, elem in source.frame_elements.items():
-            data["frames"].append({
-                "id": eid, "ni_id": elem.node_i, "nj_id": elem.node_j,
-                "sec": source.frame_assignments.get(eid, '?'),
-                "parent": None,
-            })
+            data["frames"].append(
+                {
+                    "id": eid,
+                    "ni_id": elem.node_i,
+                    "nj_id": elem.node_j,
+                    "sec": source.frame_assignments.get(eid, "?"),
+                    "parent": None,
+                }
+            )
         for aid, area in source.area_elements.items():
-            data["shells"].append({
-                "id": aid, "sec": source.area_assignments.get(aid, 'unknown'),
-                "node_ids": area.node_ids[:4],
-                "inactive": False,
-                "parent": None,
-            })
+            data["shells"].append(
+                {
+                    "id": aid,
+                    "sec": source.area_assignments.get(aid, "unknown"),
+                    "node_ids": area.node_ids[:4],
+                    "inactive": False,
+                    "parent": None,
+                }
+            )
         return data
 
     # ═════════════════════════════════════════════════════════════
@@ -2913,10 +3035,12 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
         n = len(source.get("node_tag", []))
         for i in range(n):
             tag = int(source["node_tag"][i])
-            sid = str(source.get("node_sap_id", [""]*n)[i])
+            sid = str(source.get("node_sap_id", [""] * n)[i])
             node_entry = {
-                "tag": tag, "x": float(source["node_x"][i]),
-                "y": float(source["node_y"][i]), "z": float(source["node_z"][i]),
+                "tag": tag,
+                "x": float(source["node_x"][i]),
+                "y": float(source["node_y"][i]),
+                "z": float(source["node_z"][i]),
             }
             # Key by both SAP ID (string) and node tag (int) so that both
             # frame endpoint lookups (ni_tag/nj_tag) and shell vertex lookups
@@ -2928,24 +3052,28 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
 
         nf = len(source.get("frame_eid", []))
         for i in range(nf):
-            data["frames"].append({
-                "id": str(source["frame_sap_id"][i]),
-                "ni_tag": int(source["frame_node_i"][i]),
-                "nj_tag": int(source["frame_node_j"][i]),
-                "sec": str(source["frame_sec_name"][i]),
-                "parent": str(source.get("frame_parent_sap_id", [""]*nf)[i]),
-            })
+            data["frames"].append(
+                {
+                    "id": str(source["frame_sap_id"][i]),
+                    "ni_tag": int(source["frame_node_i"][i]),
+                    "nj_tag": int(source["frame_node_j"][i]),
+                    "sec": str(source["frame_sec_name"][i]),
+                    "parent": str(source.get("frame_parent_sap_id", [""] * nf)[i]),
+                }
+            )
 
         ns = len(source.get("shell_eid", []))
         shell_parent_arr = source.get("shell_parent_sap_id", [""] * ns)
         for i in range(ns):
             pid = str(shell_parent_arr[i]) if i < len(shell_parent_arr) else ""
-            data["shells"].append({
-                "id": str(source["shell_sap_id"][i]),
-                "sec": str(source["shell_sec_name"][i]),
-                "node_tags": [int(source[f"shell_node_{k}"][i]) for k in (1,2,3,4)],
-                "parent": pid if pid and pid != "" and pid != "?" else None,
-            })
+            data["shells"].append(
+                {
+                    "id": str(source["shell_sap_id"][i]),
+                    "sec": str(source["shell_sec_name"][i]),
+                    "node_tags": [int(source[f"shell_node_{k}"][i]) for k in (1, 2, 3, 4)],
+                    "parent": pid if pid and pid not in {"", "?"} else None,
+                }
+            )
 
         if collapse_to_parents:
             data = _collapse_to_parents(data, source)
@@ -2955,33 +3083,45 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
     # Builder / AnalysisBuilder / MeshModel object
     # ═════════════════════════════════════════════════════════════
     builder = source
-    if hasattr(builder, 'model'):
+    if hasattr(builder, "model"):
         model = builder.model
-    elif hasattr(builder, 'mesh_model'):
+    elif hasattr(builder, "mesh_model"):
         model = builder.mesh_model
     else:
         model = builder  # assume it's already a MeshModel
-    elements = (builder.split_elements if hasattr(builder, 'split_elements')
-                and builder.split_elements else model.frame_elements)
-    assignments = (builder.split_assignments if hasattr(builder, 'split_assignments')
-                   and builder.split_assignments else model.frame_assignments)
+    elements = (
+        builder.split_elements
+        if hasattr(builder, "split_elements") and builder.split_elements
+        else model.frame_elements
+    )
+    assignments = (
+        builder.split_assignments
+        if hasattr(builder, "split_assignments") and builder.split_assignments
+        else model.frame_assignments
+    )
 
     # Nodes
     for nid, nd in model.nodes.items():
         data["nodes"][nid] = {
-            "tag": nd.node_tag, "x": nd.x, "y": nd.y, "z": nd.z,
+            "tag": nd.node_tag,
+            "x": nd.x,
+            "y": nd.y,
+            "z": nd.z,
         }
         if "_mesh_" in nid:
             data["mesh_node_ids"].add(nid)
 
     # Orphan nodes
-    mm = getattr(builder, '_mesh_model', None) if hasattr(builder, '_mesh_model') else None
+    mm = getattr(builder, "_mesh_model", None) if hasattr(builder, "_mesh_model") else None
     if mm is None:
-        mm = getattr(builder, 'mesh_model', None)
-    if mm is not None and hasattr(mm, 'orphan_nodes'):
+        mm = getattr(builder, "mesh_model", None)
+    if mm is not None and hasattr(mm, "orphan_nodes"):
         for nid, nd in mm.orphan_nodes.items():
             data["orphan_nodes"][nid] = {
-                "tag": nd.node_tag, "x": nd.x, "y": nd.y, "z": nd.z,
+                "tag": nd.node_tag,
+                "x": nd.x,
+                "y": nd.y,
+                "z": nd.z,
             }
 
     if collapse_to_parents:
@@ -2992,67 +3132,84 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
 
         # Add inactive parent elements as frame entries
         for eid, elem in all_elements.items():
-            if not getattr(elem, 'inactive', False):
+            if not getattr(elem, "inactive", False):
                 # Not a parent — skip, will be added by the normal loop
                 continue
-            data["frames"].append({
-                "id": eid, "ni_id": elem.node_i, "nj_id": elem.node_j,
-                "sec": (all_assignments or {}).get(eid, '?'),
-                "parent": None,
-            })
+            data["frames"].append(
+                {
+                    "id": eid,
+                    "ni_id": elem.node_i,
+                    "nj_id": elem.node_j,
+                    "sec": (all_assignments or {}).get(eid, "?"),
+                    "parent": None,
+                }
+            )
 
         # Add inactive parent area elements as shell entries
         for aid, area in model.area_elements.items():
-            if not getattr(area, 'inactive', False):
+            if not getattr(area, "inactive", False):
                 continue
-            data["shells"].append({
-                "id": aid, "sec": model.area_assignments.get(aid, 'unknown'),
-                "node_ids": area.node_ids[:4],
-                "inactive": False,
-                "parent": None,
-            })
+            data["shells"].append(
+                {
+                    "id": aid,
+                    "sec": model.area_assignments.get(aid, "unknown"),
+                    "node_ids": area.node_ids[:4],
+                    "inactive": False,
+                    "parent": None,
+                }
+            )
     else:
         # Normal path: add active (child) elements only
         for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
-            data["frames"].append({
-                "id": eid, "ni_id": elem.node_i, "nj_id": elem.node_j,
-                "sec": (assignments or {}).get(eid, '?'),
-                "parent": getattr(elem, 'parent_id', None),
-            })
+            data["frames"].append(
+                {
+                    "id": eid,
+                    "ni_id": elem.node_i,
+                    "nj_id": elem.node_j,
+                    "sec": (assignments or {}).get(eid, "?"),
+                    "parent": getattr(elem, "parent_id", None),
+                }
+            )
 
         for aid, area in model.area_elements.items():
-            if getattr(area, 'inactive', False):
+            if getattr(area, "inactive", False):
                 continue
-            data["shells"].append({
-                "id": aid, "sec": model.area_assignments.get(aid, 'unknown'),
-                "node_ids": area.node_ids[:4],
-                "inactive": getattr(area, 'inactive', False),
-                "parent": getattr(area, 'parent_id', None),
-            })
+            data["shells"].append(
+                {
+                    "id": aid,
+                    "sec": model.area_assignments.get(aid, "unknown"),
+                    "node_ids": area.node_ids[:4],
+                    "inactive": getattr(area, "inactive", False),
+                    "parent": getattr(area, "parent_id", None),
+                }
+            )
 
         # Also add inactive parent area elements as grey wireframe overlays
         for aid, area in model.area_elements.items():
-            if not getattr(area, 'inactive', False):
+            if not getattr(area, "inactive", False):
                 continue
-            data["shells"].append({
-                "id": aid, "sec": model.area_assignments.get(aid, 'unknown'),
-                "node_ids": area.node_ids[:4],
-                "inactive": True,
-                "parent": None,
-            })
+            data["shells"].append(
+                {
+                    "id": aid,
+                    "sec": model.area_assignments.get(aid, "unknown"),
+                    "node_ids": area.node_ids[:4],
+                    "inactive": True,
+                    "parent": None,
+                }
+            )
 
     # Edge constraints
-    if mm is not None and hasattr(mm, 'detected_edge_pairs'):
+    if mm is not None and hasattr(mm, "detected_edge_pairs"):
         data["edge_constraints"] = list(mm.detected_edge_pairs)
-    elif hasattr(builder, '_saved_edge_constraints'):
+    elif hasattr(builder, "_saved_edge_constraints"):
         data["edge_constraints"] = list(builder._saved_edge_constraints)
 
     return data
 
 
-def _resolve_frame_node(nodes, fr, side='i'):
+def _resolve_frame_node(nodes, fr, side="i"):
     """Resolve a frame endpoint node from resolved mesh data.
 
     Tries ``ni_id``/``nj_id`` (string key) first, then falls back to
@@ -3101,14 +3258,27 @@ def _resolve_shell_node(nodes, ref):
     return None
 
 
-def _render_scene(plotter, data, *,
-                  shrink=0.0, xlim=None, ylim=None, zlim=None,
-                  show_nodes=True, show_orphan_nodes=False,
-                  show_mesh_nodes=False, show_frames=True, show_shells=True,
-                  show_constraints=False, show_frame_labels=False,
-                  show_node_labels=False, show_area_labels=False,
-                  node_label_offset=0.4, tag_font=16,
-                  section_colors=None):
+def _render_scene(
+    plotter,
+    data,
+    *,
+    shrink=0.0,
+    xlim=None,
+    ylim=None,
+    zlim=None,
+    show_nodes=True,
+    show_orphan_nodes=False,
+    show_mesh_nodes=False,
+    show_frames=True,
+    show_shells=True,
+    show_constraints=False,
+    show_frame_labels=False,
+    show_node_labels=False,
+    show_area_labels=False,
+    node_label_offset=0.4,
+    tag_font=16,
+    section_colors=None,
+):
     """Render mesh geometry from resolved data into a PyVista plotter.
 
     Parameters
@@ -3149,8 +3319,18 @@ def _render_scene(plotter, data, *,
         return pts + (c - pts) * factor
 
     nodes = data["nodes"]
-    cmap = ['#4c72b0', '#dd8452', '#55a868', '#c44e52', '#8172b3',
-            '#937860', '#da8bc3', '#8c8c8c', '#ccb974', '#64b5cd']
+    cmap = [
+        "#4c72b0",
+        "#dd8452",
+        "#55a868",
+        "#c44e52",
+        "#8172b3",
+        "#937860",
+        "#da8bc3",
+        "#8c8c8c",
+        "#ccb974",
+        "#64b5cd",
+    ]
     if section_colors is None:
         section_colors = {}
 
@@ -3158,8 +3338,8 @@ def _render_scene(plotter, data, *,
     if show_frames:
         frame_lines = []
         for fr in data["frames"]:
-            ni = _resolve_frame_node(nodes, fr, 'i')
-            nj = _resolve_frame_node(nodes, fr, 'j')
+            ni = _resolve_frame_node(nodes, fr, "i")
+            nj = _resolve_frame_node(nodes, fr, "j")
             if ni is None or nj is None:
                 continue
             mid = [(ni["x"] + nj["x"]) / 2, (ni["y"] + nj["y"]) / 2, (ni["z"] + nj["z"]) / 2]
@@ -3171,19 +3351,17 @@ def _render_scene(plotter, data, *,
                 m = (p1 + p2) / 2
                 p1 = p1 + (m - p1) * shrink
                 p2 = p2 + (m - p2) * shrink
-            sec = fr.get("sec", '?')
+            sec = fr.get("sec", "?")
             frame_lines.append((p1, p2, sec))
 
         all_secs = sorted({s for _, _, s in frame_lines})
-        sec_col = section_colors or {s: cmap[i % len(cmap)]
-                                      for i, s in enumerate(all_secs)}
+        sec_col = section_colors or {s: cmap[i % len(cmap)] for i, s in enumerate(all_secs)}
 
         for p1, p2, sec in frame_lines:
             n = max(2, int(np.linalg.norm(p2 - p1) * 2))
             pts = np.linspace(p1, p2, n)
             poly = pv.lines_from_points(pts)
-            plotter.add_mesh(poly, color=sec_col.get(sec, '#4c72b0'),
-                             line_width=4, opacity=0.7)
+            plotter.add_mesh(poly, color=sec_col.get(sec, "#4c72b0"), line_width=4, opacity=0.7)
 
     # ── Shells ──────────────────────────────────────────────────
     if show_shells:
@@ -3208,14 +3386,19 @@ def _render_scene(plotter, data, *,
             if sh.get("inactive"):
                 inactive_shells.append(np.array(pts))
             else:
-                sec = sh.get("sec", 'unknown')
+                sec = sh.get("sec", "unknown")
                 active_shells.setdefault(sec, []).append(np.array(pts))
 
         for quad_pts in inactive_shells:
             qp = _shrink_quad(np.array(quad_pts), shrink) if shrink else np.array(quad_pts)
-            plotter.add_mesh(pv.PolyData(qp, faces=[4, 0, 1, 2, 3]),
-                            color='lightgrey', opacity=0.12,
-                            show_edges=True, edge_color='grey', line_width=0.5)
+            plotter.add_mesh(
+                pv.PolyData(qp, faces=[4, 0, 1, 2, 3]),
+                color="lightgrey",
+                opacity=0.12,
+                show_edges=True,
+                edge_color="grey",
+                line_width=0.5,
+            )
 
         for i, (sec_name, quads) in enumerate(active_shells.items()):
             if section_colors:
@@ -3225,10 +3408,14 @@ def _render_scene(plotter, data, *,
             for quad_pts in quads:
                 pts = _shrink_quad(np.array(quad_pts), shrink) if shrink else np.array(quad_pts)
                 is_tri = np.allclose(pts[2], pts[3])
-                face = pv.PolyData(pts[:3], faces=[3, 0, 1, 2]) if is_tri else \
-                       pv.PolyData(pts, faces=[4, 0, 1, 2, 3])
-                plotter.add_mesh(face, color=c, opacity=0.35,
-                                 show_edges=True, edge_color=c, line_width=0.8)
+                face = (
+                    pv.PolyData(pts[:3], faces=[3, 0, 1, 2])
+                    if is_tri
+                    else pv.PolyData(pts, faces=[4, 0, 1, 2, 3])
+                )
+                plotter.add_mesh(
+                    face, color=c, opacity=0.35, show_edges=True, edge_color=c, line_width=0.8
+                )
 
     # ── Nodes ───────────────────────────────────────────────────
     # Deduplicate by tag: NPZ nodes may be dual-keyed (SAP ID + int tag).
@@ -3243,29 +3430,41 @@ def _render_scene(plotter, data, *,
             unique_nodes.append(n)
 
     if show_nodes:
-        npts = np.array([[n["x"], n["y"], n["z"]]
-                         for n in unique_nodes if _in_limits([n["x"], n["y"], n["z"]])])
+        npts = np.array(
+            [[n["x"], n["y"], n["z"]] for n in unique_nodes if _in_limits([n["x"], n["y"], n["z"]])]
+        )
         if len(npts):
-            plotter.add_mesh(pv.PolyData(npts), color='black',
-                             point_size=6, render_points_as_spheres=True)
+            plotter.add_mesh(
+                pv.PolyData(npts), color="black", point_size=6, render_points_as_spheres=True
+            )
 
     # ── Orphan nodes ────────────────────────────────────────────
     if show_orphan_nodes and data["orphan_nodes"]:
-        opts = np.array([[n["x"], n["y"], n["z"]]
-                         for n in data["orphan_nodes"].values()
-                         if _in_limits([n["x"], n["y"], n["z"]])])
+        opts = np.array(
+            [
+                [n["x"], n["y"], n["z"]]
+                for n in data["orphan_nodes"].values()
+                if _in_limits([n["x"], n["y"], n["z"]])
+            ]
+        )
         if len(opts):
-            plotter.add_mesh(pv.PolyData(opts), color='darkorange',
-                             point_size=8, render_points_as_spheres=True)
+            plotter.add_mesh(
+                pv.PolyData(opts), color="darkorange", point_size=8, render_points_as_spheres=True
+            )
 
     # ── Mesh-created nodes ──────────────────────────────────────
     if show_mesh_nodes:
-        mpts = np.array([[nodes[nid]["x"], nodes[nid]["y"], nodes[nid]["z"]]
-                         for nid in data["mesh_node_ids"] if nid in nodes
-                         and _in_limits([nodes[nid]["x"], nodes[nid]["y"], nodes[nid]["z"]])])
+        mpts = np.array(
+            [
+                [nodes[nid]["x"], nodes[nid]["y"], nodes[nid]["z"]]
+                for nid in data["mesh_node_ids"]
+                if nid in nodes and _in_limits([nodes[nid]["x"], nodes[nid]["y"], nodes[nid]["z"]])
+            ]
+        )
         if len(mpts):
-            plotter.add_mesh(pv.PolyData(mpts), color='lime',
-                             point_size=10, render_points_as_spheres=True)
+            plotter.add_mesh(
+                pv.PolyData(mpts), color="lime", point_size=10, render_points_as_spheres=True
+            )
 
     # ── Edge constraints ────────────────────────────────────────
     if show_constraints and data["edge_constraints"]:
@@ -3285,21 +3484,27 @@ def _render_scene(plotter, data, *,
                     fn = nodes.get(sid)
                     if fn is None:
                         continue
-                    mid = [(cn["x"] + fn["x"]) / 2, (cn["y"] + fn["y"]) / 2,
-                           (cn["z"] + fn["z"]) / 2]
+                    mid = [
+                        (cn["x"] + fn["x"]) / 2,
+                        (cn["y"] + fn["y"]) / 2,
+                        (cn["z"] + fn["z"]) / 2,
+                    ]
                     if not _in_limits(mid):
                         continue
                     segs.append([cn["x"], cn["y"], cn["z"], fn["x"], fn["y"], fn["z"]])
         if segs:
             pts = np.array(segs).reshape(-1, 3)
             n_s = len(segs)
-            conn = np.column_stack([
-                np.full(n_s, 2, dtype=int),
-                np.arange(0, 2 * n_s, 2, dtype=int),
-                np.arange(1, 2 * n_s + 1, 2, dtype=int),
-            ]).ravel()
-            plotter.add_mesh(pv.PolyData(pts, lines=conn),
-                             color='yellow', opacity=0.25, line_width=12)
+            conn = np.column_stack(
+                [
+                    np.full(n_s, 2, dtype=int),
+                    np.arange(0, 2 * n_s, 2, dtype=int),
+                    np.arange(1, 2 * n_s + 1, 2, dtype=int),
+                ]
+            ).ravel()
+            plotter.add_mesh(
+                pv.PolyData(pts, lines=conn), color="yellow", opacity=0.25, line_width=12
+            )
 
     # ── Labels ──────────────────────────────────────────────────
     if show_node_labels:
@@ -3311,32 +3516,36 @@ def _render_scene(plotter, data, *,
                 pts.append([n["x"] + node_label_offset, n["y"] + node_label_offset, n["z"]])
                 tags.append(f"N{tag_val}")
         if pts:
-            plotter.add_point_labels(np.array(pts), tags, font_size=tag_font,
-                                     point_size=0, shape=None)
+            plotter.add_point_labels(
+                np.array(pts), tags, font_size=tag_font, point_size=0, shape=None
+            )
 
     if show_frame_labels:
         pts, tags = [], []
         for fr in data["frames"]:
-            ni = _resolve_frame_node(nodes, fr, 'i')
-            nj = _resolve_frame_node(nodes, fr, 'j')
+            ni = _resolve_frame_node(nodes, fr, "i")
+            nj = _resolve_frame_node(nodes, fr, "j")
             if ni is None or nj is None:
                 continue
-            mid = [(ni["x"] + nj["x"]) / 2 - node_label_offset,
-                   (ni["y"] + nj["y"]) / 2 - node_label_offset,
-                   (ni["z"] + nj["z"]) / 2]
+            mid = [
+                (ni["x"] + nj["x"]) / 2 - node_label_offset,
+                (ni["y"] + nj["y"]) / 2 - node_label_offset,
+                (ni["z"] + nj["z"]) / 2,
+            ]
             if not _in_limits(mid):
                 continue
             pts.append(mid)
             tags.append(f"F{fr['id']}")
         if pts:
-            plotter.add_point_labels(np.array(pts), tags, font_size=tag_font,
-                                     point_size=0, shape=None)
+            plotter.add_point_labels(
+                np.array(pts), tags, font_size=tag_font, point_size=0, shape=None
+            )
 
     if show_area_labels:
         pts, tags = [], []
         for sh in data["shells"]:
             npts = []
-            for ref in (sh.get("node_ids") or []):
+            for ref in sh.get("node_ids") or []:
                 nd = nodes.get(ref)
                 if nd:
                     npts.append([nd["x"], nd["y"], nd["z"]])
@@ -3348,20 +3557,33 @@ def _render_scene(plotter, data, *,
             pts.append([centroid[0], centroid[1], centroid[2] + node_label_offset])
             tags.append(f"A{sh['id']}")
         if pts:
-            plotter.add_point_labels(np.array(pts), tags, font_size=tag_font,
-                                     point_size=0, shape=None)
+            plotter.add_point_labels(
+                np.array(pts), tags, font_size=tag_font, point_size=0, shape=None
+            )
 
     plotter.show_grid()
 
 
-def plot_mesh(source, *,
-              collapse_to_parents=False,
-              show_nodes=True, show_frames=True, show_shells=True,
-              show_mesh_nodes=False, show_constraints=False,
-              show_orphan_nodes=False, shrink=0.0,
-              xlim=None, ylim=None, zlim=None,
-              show_node_labels=False, show_frame_labels=False,
-              show_area_labels=False, notebook=False, **kwargs):
+def plot_mesh(
+    source,
+    *,
+    collapse_to_parents=False,
+    show_nodes=True,
+    show_frames=True,
+    show_shells=True,
+    show_mesh_nodes=False,
+    show_constraints=False,
+    show_orphan_nodes=False,
+    shrink=0.0,
+    xlim=None,
+    ylim=None,
+    zlim=None,
+    show_node_labels=False,
+    show_frame_labels=False,
+    show_area_labels=False,
+    notebook=False,
+    **kwargs,
+):
     """Display a mesh in 3D from a builder, SAPModelData, or NPZ data dict.
 
     Single‑model viewer — accepts:
@@ -3396,15 +3618,23 @@ def plot_mesh(source, *,
     data = _resolve_mesh_data(source, collapse_to_parents=collapse_to_parents)
     pv.set_plot_theme("document")
     plotter = pv.Plotter(notebook=notebook, **kwargs)
-    _render_scene(plotter, data,
-                  show_nodes=show_nodes, show_frames=show_frames,
-                  show_shells=show_shells, show_mesh_nodes=show_mesh_nodes,
-                  show_constraints=show_constraints,
-                  show_orphan_nodes=show_orphan_nodes, shrink=shrink,
-                  xlim=xlim, ylim=ylim, zlim=zlim,
-                  show_node_labels=show_node_labels,
-                  show_frame_labels=show_frame_labels,
-                  show_area_labels=show_area_labels)
+    _render_scene(
+        plotter,
+        data,
+        show_nodes=show_nodes,
+        show_frames=show_frames,
+        show_shells=show_shells,
+        show_mesh_nodes=show_mesh_nodes,
+        show_constraints=show_constraints,
+        show_orphan_nodes=show_orphan_nodes,
+        shrink=shrink,
+        xlim=xlim,
+        ylim=ylim,
+        zlim=zlim,
+        show_node_labels=show_node_labels,
+        show_frame_labels=show_frame_labels,
+        show_area_labels=show_area_labels,
+    )
     _set_isometric_view(plotter)
     if notebook:
         return plotter
@@ -3412,10 +3642,15 @@ def plot_mesh(source, *,
     return None
 
 
-def compare_meshes(source_a, source_b, *,
-                   collapse_to_parents=False,
-                   labels=("Model A", "Model B"),
-                   notebook=False, **kwargs):
+def compare_meshes(
+    source_a,
+    source_b,
+    *,
+    collapse_to_parents=False,
+    labels=("Model A", "Model B"),
+    notebook=False,
+    **kwargs,
+):
     """Side‑by‑side mesh comparison from two builders or NPZ data dicts.
 
     Shows two PyVista subplots (left = source_a, right = source_b).
@@ -3434,13 +3669,16 @@ def compare_meshes(source_a, source_b, *,
     import pyvista as pv
 
     pv.set_plot_theme("document")
-    plotter = pv.Plotter(shape=(1, 2), window_size=[2000, 900],
-                         title=f"Mesh comparison: {labels[0]} (left) vs {labels[1]} (right)")
+    plotter = pv.Plotter(
+        shape=(1, 2),
+        window_size=[2000, 900],
+        title=f"Mesh comparison: {labels[0]} (left) vs {labels[1]} (right)",
+    )
 
     for i, (src, label) in enumerate([(source_a, labels[0]), (source_b, labels[1])]):
         data = _resolve_mesh_data(src, collapse_to_parents=collapse_to_parents)
         plotter.subplot(0, i)
-        plotter.add_text(label, position='upper_edge', font_size=28)
+        plotter.add_text(label, position="upper_edge", font_size=28)
         _render_scene(plotter, data, **kwargs)
         _set_isometric_view(plotter)
 
@@ -3452,10 +3690,10 @@ def compare_meshes(source_a, source_b, *,
 
 def plot_deformed_3d(
     builder,
-    results: Dict[str, Any],
+    results: dict[str, Any],
     scale: float = 10.0,
     show_original: bool = True,
-    selection: Optional['Selection'] = None,
+    selection: Optional["Selection"] = None,
     notebook: bool = False,
     **kwargs,
 ) -> Optional[Any]:
@@ -3483,7 +3721,8 @@ def plot_deformed_3d(
     warnings.warn(
         "plot_deformed_3d is deprecated and will be replaced by a "
         "unified version in a future release.",
-        DeprecationWarning, stacklevel=2,
+        DeprecationWarning,
+        stacklevel=2,
     )
     try:
         import pyvista as pv
@@ -3491,26 +3730,26 @@ def plot_deformed_3d(
         print("Warning: pyvista not installed.  Install with: pip install pyvista")
         return None
 
-    disp = results.get('nodal_displacements', {})
+    disp = results.get("nodal_displacements", {})
     if not disp:
-        print("No displacement data in results — run static analysis with "
-              "extract_reactions=True first.")
+        print(
+            "No displacement data in results — run static analysis with "
+            "extract_reactions=True first."
+        )
         return None
 
     pv.set_plot_theme("document")
 
-    elements = (builder.split_elements if builder.split_elements
-                else builder.model.frame_elements)
+    elements = builder.split_elements or builder.model.frame_elements
     if selection is not None:
         sel_ids = set(selection.get_frame_ids(builder.model))
-        elements = {eid: elem for eid, elem in elements.items()
-                    if eid in sel_ids}
+        elements = {eid: elem for eid, elem in elements.items() if eid in sel_ids}
     plotter = pv.Plotter(notebook=notebook, **kwargs)
 
     # Undeformed (greyed out)
     if show_original:
         for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
             ni = builder.model.nodes.get(elem.node_i)
             nj = builder.model.nodes.get(elem.node_j)
@@ -3521,12 +3760,11 @@ def plot_deformed_3d(
             n_pts = max(2, int(np.linalg.norm(p2 - p1) * 2))
             pts = np.linspace(p1, p2, n_pts)
             poly = pv.lines_from_points(pts)
-            plotter.add_mesh(poly, color='lightgrey', line_width=2,
-                             opacity=0.5)
+            plotter.add_mesh(poly, color="lightgrey", line_width=2, opacity=0.5)
 
     # Deformed (coloured)
     for eid, elem in elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         ni = builder.model.nodes.get(elem.node_i)
         nj = builder.model.nodes.get(elem.node_j)
@@ -3534,17 +3772,14 @@ def plot_deformed_3d(
             continue
         di = disp.get(ni.node_tag, (0, 0, 0))
         dj = disp.get(nj.node_tag, (0, 0, 0))
-        p1 = np.array([ni.x + di[0] * scale,
-                        ni.y + di[1] * scale,
-                        ni.z + di[2] * scale])
-        p2 = np.array([nj.x + dj[0] * scale,
-                        nj.y + dj[1] * scale,
-                        nj.z + dj[2] * scale])
-        n_pts = max(2, int(np.linalg.norm(np.array([ni.x, ni.y, ni.z])
-                                           - np.array([nj.x, nj.y, nj.z])) * 2))
+        p1 = np.array([ni.x + di[0] * scale, ni.y + di[1] * scale, ni.z + di[2] * scale])
+        p2 = np.array([nj.x + dj[0] * scale, nj.y + dj[1] * scale, nj.z + dj[2] * scale])
+        n_pts = max(
+            2, int(np.linalg.norm(np.array([ni.x, ni.y, ni.z]) - np.array([nj.x, nj.y, nj.z])) * 2)
+        )
         pts = np.linspace(p1, p2, n_pts)
         poly = pv.lines_from_points(pts)
-        plotter.add_mesh(poly, color='#c44e52', line_width=4)
+        plotter.add_mesh(poly, color="#c44e52", line_width=4)
 
     plotter.show_grid()
     _set_isometric_view(plotter)
@@ -3559,12 +3794,13 @@ def plot_deformed_3d(
 # RS deformed shape (PyVista) — from CQC-combined nodal displacements
 # ============================================================================
 
+
 def plot_rs_deformed_3d(
     builder,
-    rs_displacements: Dict[int, tuple],
+    rs_displacements: dict[int, tuple],
     scale: float = 10.0,
     show_original: bool = True,
-    selection: Optional['Selection'] = None,
+    selection: Optional["Selection"] = None,
     notebook: bool = False,
     **kwargs,
 ) -> Optional[Any]:
@@ -3593,7 +3829,8 @@ def plot_rs_deformed_3d(
     warnings.warn(
         "plot_rs_deformed_3d is deprecated and will be replaced by a "
         "unified version in a future release.",
-        DeprecationWarning, stacklevel=2,
+        DeprecationWarning,
+        stacklevel=2,
     )
     try:
         import pyvista as pv
@@ -3607,19 +3844,17 @@ def plot_rs_deformed_3d(
 
     pv.set_plot_theme("document")
 
-    elements = (builder.split_elements if builder.split_elements
-                else builder.model.frame_elements)
+    elements = builder.split_elements or builder.model.frame_elements
     if selection is not None:
         sel_ids = set(selection.get_frame_ids(builder.model))
-        elements = {eid: elem for eid, elem in elements.items()
-                    if eid in sel_ids}
+        elements = {eid: elem for eid, elem in elements.items() if eid in sel_ids}
 
     plotter = pv.Plotter(notebook=notebook, **kwargs)
 
     # Undeformed (grey)
     if show_original:
         for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
             ni = builder.model.nodes.get(elem.node_i)
             nj = builder.model.nodes.get(elem.node_j)
@@ -3629,16 +3864,17 @@ def plot_rs_deformed_3d(
             p2 = np.array([nj.x, nj.y, nj.z])
             n = max(2, int(np.linalg.norm(p2 - p1) * 2))
             poly = pv.lines_from_points(np.linspace(p1, p2, n))
-            plotter.add_mesh(poly, color='lightgrey', line_width=2, opacity=0.5)
+            plotter.add_mesh(poly, color="lightgrey", line_width=2, opacity=0.5)
 
     # Deformed — coloured by displacement magnitude
-    max_disp = max(
-        math.sqrt(dx**2 + dy**2 + dz**2)
-        for dx, dy, dz in rs_displacements.values()
-    ) if rs_displacements else 1.0
+    max_disp = (
+        max(math.sqrt(dx**2 + dy**2 + dz**2) for dx, dy, dz in rs_displacements.values())
+        if rs_displacements
+        else 1.0
+    )
 
     for eid, elem in elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         ni = builder.model.nodes.get(elem.node_i)
         nj = builder.model.nodes.get(elem.node_j)
@@ -3646,23 +3882,22 @@ def plot_rs_deformed_3d(
             continue
         di = rs_displacements.get(ni.node_tag, (0, 0, 0))
         dj = rs_displacements.get(nj.node_tag, (0, 0, 0))
-        p1 = np.array([ni.x + di[0] * scale,
-                        ni.y + di[1] * scale,
-                        ni.z + di[2] * scale])
-        p2 = np.array([nj.x + dj[0] * scale,
-                        nj.y + dj[1] * scale,
-                        nj.z + dj[2] * scale])
+        p1 = np.array([ni.x + di[0] * scale, ni.y + di[1] * scale, ni.z + di[2] * scale])
+        p2 = np.array([nj.x + dj[0] * scale, nj.y + dj[1] * scale, nj.z + dj[2] * scale])
         # Colour by average displacement magnitude along this element
-        avg_disp = (math.sqrt(di[0]**2 + di[1]**2 + di[2]**2) +
-                    math.sqrt(dj[0]**2 + dj[1]**2 + dj[2]**2)) * 0.5
+        avg_disp = (
+            math.sqrt(di[0] ** 2 + di[1] ** 2 + di[2] ** 2)
+            + math.sqrt(dj[0] ** 2 + dj[1] ** 2 + dj[2] ** 2)
+        ) * 0.5
         intensity = avg_disp / max_disp if max_disp > 0 else 0.0
         # Blue‑white‑red colour map
         r = min(1.0, intensity * 2)
         b = min(1.0, (1.0 - intensity) * 2)
         colour = (r, 0.0, b)
 
-        n = max(2, int(np.linalg.norm(np.array([ni.x, ni.y, ni.z])
-                                       - np.array([nj.x, nj.y, nj.z])) * 2))
+        n = max(
+            2, int(np.linalg.norm(np.array([ni.x, ni.y, ni.z]) - np.array([nj.x, nj.y, nj.z])) * 2)
+        )
         pts = np.linspace(p1, p2, n)
         poly = pv.lines_from_points(pts)
         plotter.add_mesh(poly, color=colour, line_width=4)
@@ -3680,9 +3915,10 @@ def plot_rs_deformed_3d(
 # Displaced shape 3D (PyVista) — unified static/RS displacement viewer
 # ============================================================================
 
+
 def plot_deformed_displacement_3d(
     source,
-    displacements: Dict,
+    displacements: dict,
     *,
     collapse_to_parents=False,
     scale: float = 10.0,
@@ -3696,7 +3932,7 @@ def plot_deformed_displacement_3d(
     label_unit: str = "mm",
     show_bounds: bool = True,
     camera: str = "iso",
-    selection: Optional['Selection'] = None,
+    selection: Optional["Selection"] = None,
     save_screenshot: Optional[str] = None,
     screenshot_views: Optional[list] = None,
     notebook: bool = False,
@@ -3762,7 +3998,9 @@ def plot_deformed_displacement_3d(
         plot_deformed_displacement_3d(b, rs_disp, scale=50.0)
     """
     import math
+
     import numpy as np
+
     try:
         import pyvista as pv
     except ImportError:
@@ -3778,12 +4016,15 @@ def plot_deformed_displacement_3d(
     if selection is not None and not isinstance(source, _NPZ_TYPES):
         try:
             sel_ids = set(selection.get_frame_ids(source.model))
-            frames = [fr for fr in frames if fr.get("id") in sel_ids
-                      or str(fr.get("id")) in sel_ids]
-            data["frames"] = frames   # also used by _render_scene
+            frames = [
+                fr for fr in frames if fr.get("id") in sel_ids or str(fr.get("id")) in sel_ids
+            ]
+            data["frames"] = frames  # also used by _render_scene
         except AttributeError:
-            print("Warning: selection requires a builder/analysis-builder "
-                  "source with a .model attribute — ignoring selection.")
+            print(
+                "Warning: selection requires a builder/analysis-builder "
+                "source with a .model attribute — ignoring selection."
+            )
 
     if not displacements:
         print("No displacement data provided.")
@@ -3794,20 +4035,26 @@ def plot_deformed_displacement_3d(
 
     # ── Undeformed mesh (greyed out) ──────────────────────────────
     if show_undeformed:
-        _render_scene(plotter, data, show_nodes=False, show_shells=True,
-                      show_frames=True, show_constraints=False,
-                      shrink=shrink)
+        _render_scene(
+            plotter,
+            data,
+            show_nodes=False,
+            show_shells=True,
+            show_frames=True,
+            show_constraints=False,
+            shrink=shrink,
+        )
 
     # ── Deformed frame lines (warm red) ───────────────────────────
     for fr in frames:
-        ni = _resolve_frame_node(nodes, fr, 'i')
-        nj = _resolve_frame_node(nodes, fr, 'j')
+        ni = _resolve_frame_node(nodes, fr, "i")
+        nj = _resolve_frame_node(nodes, fr, "j")
         if ni is None or nj is None:
             continue
         di = displacements.get(ni["tag"], (0, 0, 0))
         dj = displacements.get(nj["tag"], (0, 0, 0))
-        p1 = np.array([ni["x"] + di[0]*scale, ni["y"] + di[1]*scale, ni["z"] + di[2]*scale])
-        p2 = np.array([nj["x"] + dj[0]*scale, nj["y"] + dj[1]*scale, nj["z"] + dj[2]*scale])
+        p1 = np.array([ni["x"] + di[0] * scale, ni["y"] + di[1] * scale, ni["z"] + di[2] * scale])
+        p2 = np.array([nj["x"] + dj[0] * scale, nj["y"] + dj[1] * scale, nj["z"] + dj[2] * scale])
         if shrink:
             m = (p1 + p2) / 2
             p1 = p1 + (m - p1) * shrink
@@ -3874,9 +4121,13 @@ def plot_deformed_displacement_3d(
             plotter.add_point_labels(
                 np.array([[x, y, z]]),
                 [f"{val}{label_suffix}"],
-                point_size=0, font_size=10, text_color="black",
-                shape="rounded_rect", shape_color="white",
-                shape_opacity=0.8, always_visible=True,
+                point_size=0,
+                font_size=10,
+                text_color="black",
+                shape="rounded_rect",
+                shape_color="white",
+                shape_opacity=0.8,
+                always_visible=True,
             )
 
     # ── Axes, bounds, camera ──────────────────────────────────────
@@ -3922,16 +4173,17 @@ def plot_deformed_displacement_3d(
 # Mode shape 3D view (PyVista) — animated or static
 # ============================================================================
 
+
 def plot_mode_3d(
     builder,
-    mode_shapes: Dict[int, Dict[int, tuple]],
+    mode_shapes: dict[int, dict[int, tuple]],
     mode: int = 0,
     scale: float = 10.0,
     show_original: bool = True,
     animate: bool = True,
-    periods: Optional[List[float]] = None,
+    periods: Optional[list[float]] = None,
     font_size: int = 14,
-    selection: Optional['Selection'] = None,
+    selection: Optional["Selection"] = None,
     notebook: bool = False,
     anim_speed: float = 2.0,
     anim_amplitude: float = 1.5,
@@ -3972,7 +4224,8 @@ def plot_mode_3d(
     warnings.warn(
         "plot_mode_3d is deprecated — use plot_mode_animation() instead "
         "(works with builder or NPZ data)",
-        DeprecationWarning, stacklevel=2,
+        DeprecationWarning,
+        stacklevel=2,
     )
     try:
         import pyvista as pv
@@ -3989,16 +4242,14 @@ def plot_mode_3d(
     disp = mode_shapes[mode]  # {node_tag: (dx, dy, dz)}
 
     # ── Collect frame segments ──
-    elements = (builder.split_elements if builder.split_elements
-                else builder.model.frame_elements)
+    elements = builder.split_elements or builder.model.frame_elements
     if selection is not None:
         sel_ids = set(selection.get_frame_ids(builder.model))
-        elements = {eid: elem for eid, elem in elements.items()
-                    if eid in sel_ids}
+        elements = {eid: elem for eid, elem in elements.items() if eid in sel_ids}
 
     segments = []
     for eid, elem in elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         ni = builder.model.nodes.get(elem.node_i)
         nj = builder.model.nodes.get(elem.node_j)
@@ -4012,14 +4263,15 @@ def plot_mode_3d(
 
     # ── Collect shell quads from area elements, grouped by section ──
     from collections import defaultdict
-    shell_groups: Dict[str, list] = defaultdict(list)
+
+    shell_groups: dict[str, list] = defaultdict(list)
     # section_name -> (p1, p2, p3, p4, d1, d2, d3, d4)
-    inactive_shell_quads: List[list] = []  # parent quads for grey overlay
+    inactive_shell_quads: list[list] = []  # parent quads for grey overlay
     for aid, area in builder.model.area_elements.items():
         if len(area.node_ids) < 3:
             continue
-        is_inactive = getattr(area, 'inactive', False)
-        sec_name = builder.model.area_assignments.get(aid, 'unknown')
+        is_inactive = getattr(area, "inactive", False)
+        sec_name = builder.model.area_assignments.get(aid, "unknown")
         nids = area.node_ids[:4]  # at most 4 for a quad
         pts = []
         ds = []
@@ -4044,24 +4296,39 @@ def plot_mode_3d(
 
     # ── Colour palette for shell section groups ──
     _SECTION_COLORS = [
-        '#4c72b0', '#dd8452', '#55a868', '#c44e52', '#8172b3',
-        '#937860', '#da8bc3', '#8c8c8c', '#ccb974', '#64b5cd',
+        "#4c72b0",
+        "#dd8452",
+        "#55a868",
+        "#c44e52",
+        "#8172b3",
+        "#937860",
+        "#da8bc3",
+        "#8c8c8c",
+        "#ccb974",
+        "#64b5cd",
     ]
     _sec_names_sorted = sorted(shell_groups.keys())
-    _sec_colors = {name: _SECTION_COLORS[i % len(_SECTION_COLORS)]
-                   for i, name in enumerate(_sec_names_sorted)}
+    _sec_colors = {
+        name: _SECTION_COLORS[i % len(_SECTION_COLORS)] for i, name in enumerate(_sec_names_sorted)
+    }
 
     # Undeformed (grey)
     if show_original:
         for p1, p2, _, _ in segments:
             n = max(2, int(np.linalg.norm(p2 - p1) * 2))
             poly = pv.lines_from_points(np.linspace(p1, p2, n))
-            plotter.add_mesh(poly, color='lightgrey', line_width=2, opacity=0.3)
+            plotter.add_mesh(poly, color="lightgrey", line_width=2, opacity=0.3)
         # Undeformed shells — inactive parents (coarse mesh) as grey overlay
         for quad_pts in inactive_shell_quads:
             face = pv.PolyData(quad_pts, faces=[4, 0, 1, 2, 3])
-            plotter.add_mesh(face, color='lightgrey', opacity=0.12,
-                             show_edges=True, edge_color='grey', line_width=0.5)
+            plotter.add_mesh(
+                face,
+                color="lightgrey",
+                opacity=0.12,
+                show_edges=True,
+                edge_color="grey",
+                line_width=0.5,
+            )
 
     # ── Helper: build deformed mesh (used by both animate and static paths) ──
     # Pre-compute the UNDEFORMED length of each frame segment so the number
@@ -4071,8 +4338,8 @@ def plot_mode_3d(
         n = max(2, int(np.linalg.norm(p2 - p1) * 2))
         _seg_npoints.append(n)
     # Build flat lists for the animation path, with per-quad section index
-    _all_quads_flat: List[list] = []
-    _all_sec_idxs: List[int] = []
+    _all_quads_flat: list[list] = []
+    _all_sec_idxs: list[int] = []
     _sec_name_to_idx = {name: i for i, name in enumerate(_sec_names_sorted)}
     for sec_name, quads in shell_groups.items():
         sidx = _sec_name_to_idx[sec_name]
@@ -4088,9 +4355,12 @@ def plot_mode_3d(
         colouring (one entry per quad face, 1:1 mapping).
         """
         return _build_deformed_mesh(
-            segments, _seg_npoints,
-            _all_quads_flat, _all_sec_idxs,
-            scale, amp,
+            segments,
+            _seg_npoints,
+            _all_quads_flat,
+            _all_sec_idxs,
+            scale,
+            amp,
         )
 
     if animate:
@@ -4100,8 +4370,7 @@ def plot_mode_3d(
 
         # Render frames as coloured lines
         if frame_mesh is not None and frame_mesh.n_points:
-            plotter.add_mesh(frame_mesh, color='#555555',
-                             line_width=4, opacity=0.85)
+            plotter.add_mesh(frame_mesh, color="#555555", line_width=4, opacity=0.85)
 
         # Render shells with per-section colours via cell scalars.
         # Each quad is a single face, so cell_data maps 1:1 to faces.
@@ -4110,16 +4379,17 @@ def plot_mode_3d(
             if n_sections > 0:
                 plotter.add_mesh(
                     shell_mesh,
-                    scalars='section_idx',
+                    scalars="section_idx",
                     cmap=_SECTION_COLORS[:n_sections],
-                    show_edges=True, edge_color='#333333',
+                    show_edges=True,
+                    edge_color="#333333",
                     opacity=0.85,
                     clim=[-0.5, n_sections - 0.5],
                 )
             else:
-                plotter.add_mesh(shell_mesh, color='#4c72b0',
-                                 show_edges=True, edge_color='#333333',
-                                 opacity=0.85)
+                plotter.add_mesh(
+                    shell_mesh, color="#4c72b0", show_edges=True, edge_color="#333333", opacity=0.85
+                )
 
         # ── Slider / animation callback ──
         def _on_animation(amp_val: float, fm=frame_mesh, sm=shell_mesh):
@@ -4147,22 +4417,28 @@ def plot_mode_3d(
                 verts = np.vstack(all_pts)
                 faces = np.array(all_faces, dtype=int)
                 group_mesh = pv.PolyData(verts, faces=faces)
-                plotter.add_mesh(group_mesh, color=color,
-                                 show_edges=True, edge_color='#333333',
-                                 line_width=0.8, opacity=0.85)
+                plotter.add_mesh(
+                    group_mesh,
+                    color=color,
+                    show_edges=True,
+                    edge_color="#333333",
+                    line_width=0.8,
+                    opacity=0.85,
+                )
         # Also draw frame lines on top in a neutral colour
         if segments:
             fm, _ = make_deformed(1.0)
             if fm is not None and fm.n_points:
-                plotter.add_mesh(fm, color='#555555', line_width=3,
-                                 opacity=0.8)
+                plotter.add_mesh(fm, color="#555555", line_width=3, opacity=0.8)
         # Legend for shell section colours
         if len(shell_groups) > 1:
-            legend_entries = [(name, pv.Color(_sec_colors[name]))
-                              for name in _sec_names_sorted]
+            legend_entries = [(name, pv.Color(_sec_colors[name])) for name in _sec_names_sorted]
             plotter.add_legend(
-                legend_entries, border=True, size=[0.2, 0.12],
-                loc='lower right', face='rectangle',
+                legend_entries,
+                border=True,
+                size=[0.2, 0.12],
+                loc="lower right",
+                face="rectangle",
             )
 
     # Build title text with period if available
@@ -4174,8 +4450,7 @@ def plot_mode_3d(
         import math as _math
 
         def callback(step):
-            amp = anim_amplitude * _math.sin(
-                2.0 * _math.pi * step * anim_speed / 60.0)
+            amp = anim_amplitude * _math.sin(2.0 * _math.pi * step * anim_speed / 60.0)
             nfm, nsm = make_deformed(amp)
             if frame_mesh is not None and nfm is not None:
                 frame_mesh.points = nfm.points
@@ -4184,14 +4459,18 @@ def plot_mode_3d(
             plotter.render()
 
         _add_animation_timer(
-            plotter, callback,
-            max_steps=3600, interval_ms=17,
+            plotter,
+            callback,
+            max_steps=3600,
+            interval_ms=17,
         )
-        plotter.add_text(f"Mode {mode + 1}{period_str}  (oscillating)",
-                         position='upper_edge', font_size=font_size)
+        plotter.add_text(
+            f"Mode {mode + 1}{period_str}  (oscillating)",
+            position="upper_edge",
+            font_size=font_size,
+        )
     else:
-        plotter.add_text(f"Mode {mode + 1}{period_str}",
-                         position='upper_edge', font_size=font_size)
+        plotter.add_text(f"Mode {mode + 1}{period_str}", position="upper_edge", font_size=font_size)
 
     plotter.show_grid()
     _set_isometric_view(plotter)
@@ -4206,13 +4485,25 @@ def plot_mode_3d(
 # Mode shape animation (builder or NPZ data)
 # ============================================================================
 
-def plot_mode_animation(source, mode_shapes, mode=0, *,
-                        collapse_to_parents=False,
-                        scale=30.0, show_original=True,
-                        shrink=0.0,
-                        animate=True, periods=None,
-                        font_size=14, anim_speed=2.0, anim_amplitude=1.5,
-                        selection=None, notebook=False, **kwargs):
+
+def plot_mode_animation(
+    source,
+    mode_shapes,
+    mode=0,
+    *,
+    collapse_to_parents=False,
+    scale=30.0,
+    show_original=True,
+    shrink=0.0,
+    animate=True,
+    periods=None,
+    font_size=14,
+    anim_speed=2.0,
+    anim_amplitude=1.5,
+    selection=None,
+    notebook=False,
+    **kwargs,
+):
     """Display / animate a mode shape from a builder or NPZ data.
 
     Works with either:
@@ -4248,6 +4539,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
         ``pv.Plotter`` if *notebook*, else ``None``.
     """
     import numpy as np
+
     try:
         import pyvista as pv
     except ImportError:
@@ -4255,8 +4547,16 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
         return None
 
     _SECTION_COLORS = [
-        '#4c72b0', '#dd8452', '#55a868', '#c44e52', '#8172b3',
-        '#937860', '#da8bc3', '#8c8c8c', '#ccb974', '#64b5cd',
+        "#4c72b0",
+        "#dd8452",
+        "#55a868",
+        "#c44e52",
+        "#8172b3",
+        "#937860",
+        "#da8bc3",
+        "#8c8c8c",
+        "#ccb974",
+        "#64b5cd",
     ]
 
     # Resolve mode shape displacements for this mode
@@ -4269,10 +4569,12 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
             print(f"No mode shape data for mode {mode} in NPZ.")
             return None
         tags = list(source.get("node_tag", []))
-        mode_shapes = {mode: {int(tags[i]): (float(dx[i, mode]),
-                                              float(dy[i, mode]),
-                                              float(dz[i, mode]))
-                              for i in range(len(tags))}}
+        mode_shapes = {
+            mode: {
+                int(tags[i]): (float(dx[i, mode]), float(dy[i, mode]), float(dz[i, mode]))
+                for i in range(len(tags))
+            }
+        }
     elif isinstance(source, _NPZ_TYPES):
         # NPZ data with pre-extracted mode_shapes — resolve tags
         pass
@@ -4293,7 +4595,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
     for sh in data["shells"]:
         npts = []
         ds = []
-        for ref in (sh.get("node_ids") or sh.get("node_tags") or []):
+        for ref in sh.get("node_ids") or sh.get("node_tags") or []:
             # Nodes dict is dual-keyed (SAP ID string + int tag)
             nd = data["nodes"].get(ref)
             if nd is None:
@@ -4311,8 +4613,8 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
     segments = []
     seg_npoints = []
     for fr in data["frames"]:
-        ni = _resolve_frame_node(data["nodes"], fr, 'i')
-        nj = _resolve_frame_node(data["nodes"], fr, 'j')
+        ni = _resolve_frame_node(data["nodes"], fr, "i")
+        nj = _resolve_frame_node(data["nodes"], fr, "j")
         if ni is None or nj is None:
             continue
         p1 = np.array([ni["x"], ni["y"], ni["z"]])
@@ -4345,80 +4647,95 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
     if show_original:
         # Inactive (parent) quad overlays — shrink consistently with active shells
         if inactive_shell_quads:
-            for quad_pts in inactive_shell_quads:
+            for quad_pts_raw in inactive_shell_quads:
                 if shrink:
-                    arr = np.array(quad_pts)
+                    arr = np.array(quad_pts_raw)
                     c = np.mean(arr, axis=0)
                     quad_pts = arr + (c - arr) * shrink
+                else:
+                    quad_pts = quad_pts_raw
                 face = pv.PolyData(quad_pts, faces=[4, 0, 1, 2, 3])
-                plotter.add_mesh(face, color='lightgrey', opacity=0.12,
-                                 show_edges=True, edge_color='grey', line_width=0.5)
+                plotter.add_mesh(
+                    face,
+                    color="lightgrey",
+                    opacity=0.12,
+                    show_edges=True,
+                    edge_color="grey",
+                    line_width=0.5,
+                )
         # Undeformed active shells at amp=0
         if all_quads:
             _, und_shells = _build_deformed_mesh(
-                segments, seg_npoints, all_quads, all_sec_idxs,
-                scale, 0.0, shrink=shrink)
+                segments, seg_npoints, all_quads, all_sec_idxs, scale, 0.0, shrink=shrink
+            )
             if und_shells is not None and und_shells.n_points:
-                plotter.add_mesh(und_shells, color='lightgrey',
-                                 opacity=0.3, show_edges=True, line_width=1)
+                plotter.add_mesh(
+                    und_shells, color="lightgrey", opacity=0.3, show_edges=True, line_width=1
+                )
 
     # ── Undeformed frames ──
     if show_original:
         for p1, p2, _, _ in segments:
             n = max(2, int(np.linalg.norm(p2 - p1) * 2))
             poly = pv.lines_from_points(np.linspace(p1, p2, n))
-            plotter.add_mesh(poly, color='#999999', line_width=1, opacity=0.5)
+            plotter.add_mesh(poly, color="#999999", line_width=1, opacity=0.5)
 
     # ── Deformed mesh (amp=1.0 for static, overridden during animation) ──
     frame_mesh, shell_mesh = _build_deformed_mesh(
-        segments, seg_npoints, all_quads, all_sec_idxs,
-        scale, 1.0, shrink=shrink)
+        segments, seg_npoints, all_quads, all_sec_idxs, scale, 1.0, shrink=shrink
+    )
 
     # Shells: per-section colours via cell scalars
     if shell_mesh is not None and shell_mesh.n_points:
         if n_sections > 0:
             plotter.add_mesh(
                 shell_mesh,
-                scalars='section_idx',
+                scalars="section_idx",
                 cmap=_SECTION_COLORS[:n_sections],
-                show_edges=True, edge_color='#333333',
+                show_edges=True,
+                edge_color="#333333",
                 opacity=0.85,
                 clim=[-0.5, n_sections - 0.5],
             )
         else:
-            plotter.add_mesh(shell_mesh, color='#4c72b0',
-                             show_edges=True, edge_color='#333333',
-                             opacity=0.85)
+            plotter.add_mesh(
+                shell_mesh, color="#4c72b0", show_edges=True, edge_color="#333333", opacity=0.85
+            )
 
     # Frames: dark grey (distinct from shell colours)
     if frame_mesh is not None and frame_mesh.n_points:
-        plotter.add_mesh(frame_mesh, color='#555555', line_width=3,
-                         opacity=0.8)
+        plotter.add_mesh(frame_mesh, color="#555555", line_width=3, opacity=0.8)
 
     # ── Section legend ──
     if n_sections > 1:
-        legend_entries = [(name, pv.Color(_SECTION_COLORS[i % len(_SECTION_COLORS)]))
-                          for i, name in enumerate(sec_names_sorted)]
+        legend_entries = [
+            (name, pv.Color(_SECTION_COLORS[i % len(_SECTION_COLORS)]))
+            for i, name in enumerate(sec_names_sorted)
+        ]
         try:
             # Newer PyVista supports label_size; older versions don't
             plotter.add_legend(
-                legend_entries, border=True, size=[0.2, 0.12],
-                loc='lower right', face='rectangle',
+                legend_entries,
+                border=True,
+                size=[0.2, 0.12],
+                loc="lower right",
+                face="rectangle",
                 label_size=max(8, 14 - n_sections),
             )
         except TypeError:
             # Fallback for older PyVista without label_size kwarg
             plotter.add_legend(
-                legend_entries, border=True, size=[0.2, 0.12],
-                loc='lower right',
+                legend_entries,
+                border=True,
+                size=[0.2, 0.12],
+                loc="lower right",
             )
 
     # ── Title ──
     period_str = ""
     if periods is not None and mode < len(periods):
         period_str = f"  T = {periods[mode]:.4f} s"
-    plotter.add_text(f"Mode {mode + 1}  {period_str}",
-                     position='upper_edge', font_size=font_size)
+    plotter.add_text(f"Mode {mode + 1}  {period_str}", position="upper_edge", font_size=font_size)
     plotter.show_grid()
     _set_isometric_view(plotter)
 
@@ -4429,16 +4746,18 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
         def callback(step):
             amp = _math.sin(anim_speed * 2.0 * _math.pi * step / 60.0) * anim_amplitude
             nfm, nsm = _build_deformed_mesh(
-                segments, seg_npoints, all_quads, all_sec_idxs,
-                scale, amp, shrink=shrink)
+                segments, seg_npoints, all_quads, all_sec_idxs, scale, amp, shrink=shrink
+            )
             if nfm is not None and nfm.n_points and frame_mesh.n_points:
                 frame_mesh.points = nfm.points
             if shell_mesh is not None and nsm is not None and nsm.n_points:
                 shell_mesh.points = nsm.points
 
         _add_animation_timer(
-            plotter, callback,
-            max_steps=3600, interval_ms=17,
+            plotter,
+            callback,
+            max_steps=3600,
+            interval_ms=17,
         )
         plotter.show(auto_close=False)
     else:
@@ -4453,6 +4772,7 @@ def plot_mode_animation(source, mode_shapes, mode=0, *,
 # Shared frame force diagram renderer (used by static and pushover plots)
 # ============================================================================
 
+
 def _render_frame_force_diagram(
     plotter,
     source,
@@ -4464,7 +4784,7 @@ def _render_frame_force_diagram(
     *,
     show_original: bool = True,
     moment_scale: Optional[float] = None,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Render frame force diagram (flags or tubes) on an existing plotter.
 
     *force_map* maps ``{frame_index: {Fx, Fy, Fz, Mx, My, Mz, Fx_j, ...}}`` —
@@ -4475,6 +4795,7 @@ def _render_frame_force_diagram(
     compute auto-scaling or add supplementary geometry.
     """
     import numpy as np
+
     try:
         import pyvista as pv
     except ImportError:
@@ -4490,13 +4811,12 @@ def _render_frame_force_diagram(
     for idx, fr in enumerate(frames):
         if idx not in force_map:
             continue
-        f_local = _compute_local_forces(source, fr, nodes, force_map[idx],
-                                        quantity)
+        f_local = _compute_local_forces(source, fr, nodes, force_map[idx], quantity)
         if f_local is None:
             continue
 
-        ni = _resolve_frame_node(nodes, fr, 'i')
-        nj = _resolve_frame_node(nodes, fr, 'j')
+        ni = _resolve_frame_node(nodes, fr, "i")
+        nj = _resolve_frame_node(nodes, fr, "j")
         if ni is None or nj is None:
             continue
 
@@ -4505,7 +4825,7 @@ def _render_frame_force_diagram(
         model_height = max(model_height, ni["z"], nj["z"])
 
         v_i = f_local.get(quantity, 0.0)
-        v_j = f_local.get(quantity + '_j', 0.0)
+        v_j = f_local.get(quantity + "_j", 0.0)
         max_abs_val = max(max_abs_val, abs(v_i), abs(v_j))
 
         if mode == "flag":
@@ -4523,17 +4843,15 @@ def _render_frame_force_diagram(
 
     # Show original centreline in grey
     if show_original:
-        for seg in segs_flag if mode == "flag" else \
-                [(p_i, p_j) for p_i, p_j, _ in segs_tube]:
+        for seg in segs_flag if mode == "flag" else [(p_i, p_j) for p_i, p_j, _ in segs_tube]:
             p_i, p_j = seg[0], seg[1]
             n = max(2, int(np.linalg.norm(p_j - p_i) * 2))
             poly = pv.lines_from_points(np.linspace(p_i, p_j, n))
-            plotter.add_mesh(poly, color='lightgrey', line_width=1, opacity=0.4)
+            plotter.add_mesh(poly, color="lightgrey", line_width=1, opacity=0.4)
 
     if mode == "flag":
         for p_i, p_j, vn, Fi, Fj in segs_flag:
-            for verts, col_val in compute_flag_parts(p_i, p_j, vn, Fi, Fj,
-                                                     moment_scale):
+            for verts, col_val in compute_flag_parts(p_i, p_j, vn, Fi, Fj, moment_scale):
                 _add_coloured_poly(plotter, verts, col_val, max_abs_val)
     else:
         for p_i, p_j, val in segs_tube:
@@ -4546,12 +4864,21 @@ def _render_frame_force_diagram(
 # Unified force/moment diagram (builder or NPZ data)
 # ============================================================================
 
-def plot_force_diagram_3d(source, force_data=None, *,
-                          collapse_to_parents=False,
-                          quantity='My', mode='flag',
-                          moment_scale=None, show_original=True,
-                          combo=None, notebook=False, title=None,
-                          **kwargs):
+
+def plot_force_diagram_3d(
+    source,
+    force_data=None,
+    *,
+    collapse_to_parents=False,
+    quantity="My",
+    mode="flag",
+    moment_scale=None,
+    show_original=True,
+    combo=None,
+    notebook=False,
+    title=None,
+    **kwargs,
+):
     """Draw a 3D force/moment diagram from a builder or NPZ/HDF5 data.
 
     Works with either:
@@ -4588,7 +4915,6 @@ def plot_force_diagram_3d(source, force_data=None, *,
     Returns:
         ``pv.Plotter`` if *notebook* else ``None``.
     """
-    import numpy as np
     try:
         import pyvista as pv
     except ImportError:
@@ -4623,14 +4949,16 @@ def plot_force_diagram_3d(source, force_data=None, *,
             return None
         # Hoist invariant builder/model/elements resolution
         builder = source
-        model = (builder.model if hasattr(builder, 'model')
-                 else builder.mesh_model)
-        elements = (builder.split_elements if hasattr(builder, 'split_elements')
-                    and builder.split_elements else model.frame_elements)
+        model = builder.model if hasattr(builder, "model") else builder.mesh_model
+        elements = (
+            builder.split_elements
+            if hasattr(builder, "split_elements") and builder.split_elements
+            else model.frame_elements
+        )
         # Build a {(ni_tag, nj_tag): elem_tag} lookup once
-        elem_by_node_pair: Dict[Tuple[int, int], int] = {}
+        elem_by_node_pair: dict[tuple[int, int], int] = {}
         for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
             eni = model.nodes.get(elem.node_i)
             enj = model.nodes.get(elem.node_j)
@@ -4666,8 +4994,13 @@ def plot_force_diagram_3d(source, force_data=None, *,
     plotter = pv.Plotter(notebook=notebook, **kwargs)
 
     model_height, max_abs_val = _render_frame_force_diagram(
-        plotter, source, frames, nodes, force_map,
-        quantity, mode,
+        plotter,
+        source,
+        frames,
+        nodes,
+        force_map,
+        quantity,
+        mode,
         show_original=show_original,
         moment_scale=moment_scale,
     )
@@ -4676,10 +5009,9 @@ def plot_force_diagram_3d(source, force_data=None, *,
         print(f"No {quantity} data to plot.")
         return None
 
-    plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)",
-                     position='lower_edge', font_size=10)
+    plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)", position="lower_edge", font_size=10)
     if title:
-        plotter.add_text(title, position='upper_edge', font_size=12)
+        plotter.add_text(title, position="upper_edge", font_size=12)
     _set_isometric_view(plotter)
 
     if notebook:
@@ -4690,9 +5022,11 @@ def plot_force_diagram_3d(source, force_data=None, *,
 
 # ── Internal helpers for unified force diagram ────────────────────────────
 
+
 def _resolve_npz_static_case(source: dict, combo: str = None) -> str:
     """Determine the NPZ static case prefix (e.g. ``'static/DEAD/'``)."""
     from ..io.npz_reader import _get_static_cases
+
     cases = _get_static_cases(source)
     if not cases:
         raise ValueError("No static cases found in NPZ data.")
@@ -4705,9 +5039,8 @@ def _extract_npz_frame_forces(source, case_prefix, frames):
 
     Returns ``{idx: {Fx, Fy, Fz, Mx, My, Mz, Fx_j, ..., local variants}}``.
     """
-    import numpy as np
     force_map = {}
-    qty_list = ['fx', 'fy', 'fz', 'mx', 'my', 'mz']
+    qty_list = ["fx", "fy", "fz", "mx", "my", "mz"]
     for idx in range(len(frames)):
         entry = {}
         for q in qty_list:
@@ -4754,13 +5087,12 @@ def _compute_local_forces(source, fr, nodes, force_entry, quantity):
 
     # Otherwise compute from global forces
     # Get node coordinates for element axis
-    ni = _resolve_frame_node(nodes, fr, 'i')
-    nj = _resolve_frame_node(nodes, fr, 'j')
+    ni = _resolve_frame_node(nodes, fr, "i")
+    nj = _resolve_frame_node(nodes, fr, "j")
     if ni is None or nj is None:
         return None
 
-    axis = np.array([nj["x"] - ni["x"], nj["y"] - ni["y"],
-                     nj["z"] - ni["z"]])
+    axis = np.array([nj["x"] - ni["x"], nj["y"] - ni["y"], nj["z"] - ni["z"]])
     axis_len = np.linalg.norm(axis)
     if axis_len < 1e-12:
         return None
@@ -4778,10 +5110,10 @@ def _compute_local_forces(source, fr, nodes, force_entry, quantity):
     def _g(q):
         return force_entry.get(q, force_entry.get(q.lower(), 0.0))
 
-    f_i = np.array([_g('FX'), _g('FY'), _g('FZ')])
-    m_i = np.array([_g('MX'), _g('MY'), _g('MZ')])
-    f_j = np.array([_g('FX_j'), _g('FY_j'), _g('FZ_j')])
-    m_j = np.array([_g('MX_j'), _g('MY_j'), _g('MZ_j')])
+    f_i = np.array([_g("FX"), _g("FY"), _g("FZ")])
+    m_i = np.array([_g("MX"), _g("MY"), _g("MZ")])
+    f_j = np.array([_g("FX_j"), _g("FY_j"), _g("FZ_j")])
+    m_j = np.array([_g("MX_j"), _g("MY_j"), _g("MZ_j")])
 
     f_i_loc = T @ f_i
     m_i_loc = T @ m_i
@@ -4789,16 +5121,25 @@ def _compute_local_forces(source, fr, nodes, force_entry, quantity):
     m_j_loc = T @ m_j
 
     return {
-        'Fx': f_i_loc[0], 'Fy': f_i_loc[1], 'Fz': f_i_loc[2],
-        'Mx': m_i_loc[0], 'My': m_i_loc[1], 'Mz': m_i_loc[2],
-        'Fx_j': f_j_loc[0], 'Fy_j': f_j_loc[1], 'Fz_j': f_j_loc[2],
-        'Mx_j': m_j_loc[0], 'My_j': m_j_loc[1], 'Mz_j': m_j_loc[2],
+        "Fx": f_i_loc[0],
+        "Fy": f_i_loc[1],
+        "Fz": f_i_loc[2],
+        "Mx": m_i_loc[0],
+        "My": m_i_loc[1],
+        "Mz": m_i_loc[2],
+        "Fx_j": f_j_loc[0],
+        "Fy_j": f_j_loc[1],
+        "Fz_j": f_j_loc[2],
+        "Mx_j": m_j_loc[0],
+        "My_j": m_j_loc[1],
+        "Mz_j": m_j_loc[2],
     }
 
 
 def _compute_flag_direction(f_local, fr, nodes, quantity):
     """Determine the flag extrusion direction (vn) for a frame element."""
     import numpy as np
+
     axis = _get_element_axis(fr, nodes)
     if axis is None:
         return np.array([0.0, 1.0, 0.0])
@@ -4827,12 +5168,12 @@ def _compute_flag_direction(f_local, fr, nodes, quantity):
 def _get_element_axis(fr, nodes):
     """Return unit vector along a frame element from resolved data."""
     import numpy as np
-    ni = _resolve_frame_node(nodes, fr, 'i')
-    nj = _resolve_frame_node(nodes, fr, 'j')
+
+    ni = _resolve_frame_node(nodes, fr, "i")
+    nj = _resolve_frame_node(nodes, fr, "j")
     if ni is None or nj is None:
         return None
-    d = np.array([nj["x"] - ni["x"], nj["y"] - ni["y"],
-                  nj["z"] - ni["z"]])
+    d = np.array([nj["x"] - ni["x"], nj["y"] - ni["y"], nj["z"] - ni["z"]])
     norm = np.linalg.norm(d)
     return d / norm if norm > 1e-12 else None
 
@@ -4841,22 +5182,25 @@ def _add_coloured_poly(plotter, verts, col_val, max_abs_val):
     """Add a coloured polygon to the plotter (flag mode)."""
     import numpy as np
     import pyvista as pv
+
     pts_arr = np.array(verts)
     n = len(verts)
-    surf = pv.PolyData(pts_arr, faces=[n] + list(range(n)))
+    surf = pv.PolyData(pts_arr, faces=[n, *list(range(n))])
     t = min(abs(col_val) / max(max_abs_val, 1.0), 1.0)
     if col_val >= 0:
         colour = (0.3 + 0.7 * t, 0.3 - 0.2 * t, 0.3 - 0.3 * t)
     else:
         colour = (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
-    plotter.add_mesh(surf, color=colour, opacity=0.85,
-                     show_edges=False, smooth_shading=False, lighting=False)
+    plotter.add_mesh(
+        surf, color=colour, opacity=0.85, show_edges=False, smooth_shading=False, lighting=False
+    )
 
 
 def _add_coloured_tube(plotter, p_i, p_j, val, max_abs_val):
     """Add a coloured cylinder to the plotter (tube mode)."""
     import numpy as np
     import pyvista as pv
+
     axis = p_j - p_i
     axis_len = np.linalg.norm(axis)
     if axis_len < 1e-12:
@@ -4869,26 +5213,25 @@ def _add_coloured_tube(plotter, p_i, p_j, val, max_abs_val):
         colour = (0.3 + 0.7 * t, 0.3 - 0.2 * t, 0.3 - 0.3 * t)
     else:
         colour = (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
-    cyl = pv.Cylinder(center=p_mid, direction=direction, radius=radius,
-                      height=axis_len * 0.9)
-    plotter.add_mesh(cyl, color=colour, opacity=0.5, show_edges=False,
-                     lighting=False)
+    cyl = pv.Cylinder(center=p_mid, direction=direction, radius=radius, height=axis_len * 0.9)
+    plotter.add_mesh(cyl, color=colour, opacity=0.5, show_edges=False, lighting=False)
 
 
 # ============================================================================
 # 3D moment diagram (PyVista) — extruded flags on the tension side
 # ============================================================================
 
+
 def plot_static_moment_3d(
     builder,
-    elem_forces: Dict[int, Dict[str, float]],
-    quantity: str = 'My',
-    mode: str = 'flag',
+    elem_forces: dict[int, dict[str, float]],
+    quantity: str = "My",
+    mode: str = "flag",
     moment_scale: float = None,
     show_original: bool = True,
     show_reactions: bool = False,
-    static_results: Optional[Dict[str, Any]] = None,
-    selection: Optional['Selection'] = None,
+    static_results: Optional[dict[str, Any]] = None,
+    selection: Optional["Selection"] = None,
     notebook: bool = False,
     title: str = None,
     **kwargs,
@@ -4948,7 +5291,8 @@ def plot_static_moment_3d(
     warnings.warn(
         "plot_static_moment_3d is deprecated — use plot_force_diagram_3d() "
         "instead (works with builder or NPZ data)",
-        DeprecationWarning, stacklevel=2,
+        DeprecationWarning,
+        stacklevel=2,
     )
     try:
         import pyvista as pv
@@ -4958,21 +5302,27 @@ def plot_static_moment_3d(
 
     pv.set_plot_theme("document")
 
-    elements = (builder.split_elements if builder.split_elements
-                else builder.model.frame_elements)
+    elements = builder.split_elements or builder.model.frame_elements
     if selection is not None:
         sel_ids = set(selection.get_frame_ids(builder.model))
-        elements = {eid: elem for eid, elem in elements.items()
-                    if eid in sel_ids}
+        elements = {eid: elem for eid, elem in elements.items() if eid in sel_ids}
 
-    if mode == 'flag':
-        plotter = _plot_moment_flags(builder, elements, elem_forces, quantity,
-                                     moment_scale, show_original, notebook,
-                                     title=title, **kwargs)
-    elif mode == 'tube':
-        plotter = _plot_moment_tubes(builder, elements, elem_forces, quantity,
-                                     show_original, notebook,
-                                     title=title, **kwargs)
+    if mode == "flag":
+        plotter = _plot_moment_flags(
+            builder,
+            elements,
+            elem_forces,
+            quantity,
+            moment_scale,
+            show_original,
+            notebook,
+            title=title,
+            **kwargs,
+        )
+    elif mode == "tube":
+        plotter = _plot_moment_tubes(
+            builder, elements, elem_forces, quantity, show_original, notebook, title=title, **kwargs
+        )
     else:
         print(f"Unknown mode '{mode}'.  Use 'flag' or 'tube'.")
         return None
@@ -4993,30 +5343,39 @@ def _get_local_end_forces(builder, elem, tag, elem_forces):
     and their ``_j`` counterparts, or ``None`` if axes cannot be computed.
     """
     import numpy as np
+
     try:
         vx, vy, vz = builder._get_local_axes(elem)
     except Exception:
         return None
     T = np.vstack([vx, vy, vz])  # (3, 3) local ← global
     f = elem_forces.get(tag, {})
-    f_i = np.array([f.get('Fx', 0.0), f.get('Fy', 0.0), f.get('Fz', 0.0)])
-    m_i = np.array([f.get('Mx', 0.0), f.get('My', 0.0), f.get('Mz', 0.0)])
-    f_j = np.array([f.get('Fx_j', 0.0), f.get('Fy_j', 0.0), f.get('Fz_j', 0.0)])
-    m_j = np.array([f.get('Mx_j', 0.0), f.get('My_j', 0.0), f.get('Mz_j', 0.0)])
+    f_i = np.array([f.get("Fx", 0.0), f.get("Fy", 0.0), f.get("Fz", 0.0)])
+    m_i = np.array([f.get("Mx", 0.0), f.get("My", 0.0), f.get("Mz", 0.0)])
+    f_j = np.array([f.get("Fx_j", 0.0), f.get("Fy_j", 0.0), f.get("Fz_j", 0.0)])
+    m_j = np.array([f.get("Mx_j", 0.0), f.get("My_j", 0.0), f.get("Mz_j", 0.0)])
     f_i_loc = T @ f_i
     m_i_loc = T @ m_i
     f_j_loc = T @ f_j
     m_j_loc = T @ m_j
     return {
-        'Fx': f_i_loc[0], 'Fy': f_i_loc[1], 'Fz': f_i_loc[2],
-        'Mx': m_i_loc[0], 'My': m_i_loc[1], 'Mz': m_i_loc[2],
-        'Fx_j': f_j_loc[0], 'Fy_j': f_j_loc[1], 'Fz_j': f_j_loc[2],
-        'Mx_j': m_j_loc[0], 'My_j': m_j_loc[1], 'Mz_j': m_j_loc[2],
+        "Fx": f_i_loc[0],
+        "Fy": f_i_loc[1],
+        "Fz": f_i_loc[2],
+        "Mx": m_i_loc[0],
+        "My": m_i_loc[1],
+        "Mz": m_i_loc[2],
+        "Fx_j": f_j_loc[0],
+        "Fy_j": f_j_loc[1],
+        "Fz_j": f_j_loc[2],
+        "Mx_j": m_j_loc[0],
+        "My_j": m_j_loc[1],
+        "Mz_j": m_j_loc[2],
     }
 
 
 # Convenience wrappers for shear, axial, and other force diagrams
-def plot_static_shear_3d(builder, elem_forces, quantity='Fz', **kwargs):
+def plot_static_shear_3d(builder, elem_forces, quantity="Fz", **kwargs):
     """3D shear force diagram — convenience wrapper.
 
     .. deprecated::
@@ -5043,7 +5402,7 @@ def plot_static_axial_3d(builder, elem_forces, **kwargs):
     **kwargs
         Passed through to :func:`plot_static_moment_3d`.
     """
-    return plot_static_moment_3d(builder, elem_forces, quantity='Fx', **kwargs)
+    return plot_static_moment_3d(builder, elem_forces, quantity="Fx", **kwargs)
 
 
 def _add_reaction_arrows(plotter, builder, static_results):
@@ -5091,15 +5450,22 @@ def _add_reaction_arrows(plotter, builder, static_results):
 
     for atype, pos, vec, mag in arrow_data:
         scale = scale_h if atype == "horiz" else scale_v
-        arrow = pv.Arrow(start=pos, direction=vec / max(mag, 1e-12),
-                         scale=mag * scale)
+        arrow = pv.Arrow(start=pos, direction=vec / max(mag, 1e-12), scale=mag * scale)
         colour = (0.9, 0.1, 0.1) if atype == "horiz" else (0.1, 0.8, 0.1)
         plotter.add_mesh(arrow, color=colour, opacity=0.85)
 
 
-def _plot_moment_flags(builder, elements, elem_forces, quantity,
-                       moment_scale, show_original, notebook,
-                       title=None, **kwargs):
+def _plot_moment_flags(
+    builder,
+    elements,
+    elem_forces,
+    quantity,
+    moment_scale,
+    show_original,
+    notebook,
+    title=None,
+    **kwargs,
+):
     """Flag‑based force/moment diagram (extruded on tension/sign side).
 
     Uses **local** forces so the flag always extends perpendicular to the
@@ -5121,7 +5487,7 @@ def _plot_moment_flags(builder, elements, elem_forces, quantity,
     max_val = 0.0
     flags = []
     for eid, elem in elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         tag = elem.elem_tag
         if tag not in elem_forces:
@@ -5139,13 +5505,13 @@ def _plot_moment_flags(builder, elements, elem_forces, quantity,
         if loc is None:
             continue
         v_i = loc.get(quantity, 0.0)
-        v_j = loc.get(quantity + '_j', 0.0)
+        v_j = loc.get(quantity + "_j", 0.0)
 
         # Flag offset direction (vn) based on quantity
         # Positive Fi → offset in +vn at I-end
         # Positive Fj → offset in -vn at J-end (baked-in negation)
         try:
-            vx_e, vy_e, vz_e = builder._get_local_axes(elem)
+            _vx_e, vy_e, vz_e = builder._get_local_axes(elem)
         except Exception:
             continue
         if quantity == "Fx":
@@ -5179,26 +5545,32 @@ def _plot_moment_flags(builder, elements, elem_forces, quantity,
         for p_i, p_j, _, _, _ in flags:
             n = max(2, int(np.linalg.norm(p_j - p_i) * 2))
             poly = pv.lines_from_points(np.linspace(p_i, p_j, n))
-            plotter.add_mesh(poly, color='lightgrey', line_width=1, opacity=0.4)
+            plotter.add_mesh(poly, color="lightgrey", line_width=1, opacity=0.4)
 
     for p_i, p_j, vn, Fi, Fj in flags:
         for verts, col_val in compute_flag_parts(p_i, p_j, vn, Fi, Fj, moment_scale):
             pts_arr = np.array(verts)
             n = len(verts)
-            surf = pv.PolyData(pts_arr, faces=[n] + list(range(n)))
+            surf = pv.PolyData(pts_arr, faces=[n, *list(range(n))])
             t = min(abs(col_val) / max(max_val, 1.0), 1.0)
             if col_val >= 0:
                 colour = (0.3 + 0.7 * t, 0.3 - 0.2 * t, 0.3 - 0.3 * t)
             else:
                 colour = (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
-            plotter.add_mesh(surf, color=colour, opacity=0.85,
-                             show_edges=False, smooth_shading=False, lighting=False)
+            plotter.add_mesh(
+                surf,
+                color=colour,
+                opacity=0.85,
+                show_edges=False,
+                smooth_shading=False,
+                lighting=False,
+            )
 
-    kind = "Moment" if is_moment else "Force"
-    plotter.add_text(f"{quantity} (local)  (red = +ve, blue = −ve)",
-                     position='lower_edge', font_size=10)
+    plotter.add_text(
+        f"{quantity} (local)  (red = +ve, blue = −ve)", position="lower_edge", font_size=10
+    )
     if title:
-        plotter.add_text(title, position='upper_edge', font_size=12)
+        plotter.add_text(title, position="upper_edge", font_size=12)
     _set_isometric_view(plotter)
     if notebook:
         return plotter
@@ -5206,8 +5578,9 @@ def _plot_moment_flags(builder, elements, elem_forces, quantity,
     return None
 
 
-def _plot_moment_tubes(builder, elements, elem_forces, quantity,
-                       show_original, notebook, title=None, **kwargs):
+def _plot_moment_tubes(
+    builder, elements, elem_forces, quantity, show_original, notebook, title=None, **kwargs
+):
     """Tube‑based force/moment diagram (colour‑coded along element).
 
     Uses **local** forces for consistent colour mapping regardless of
@@ -5219,7 +5592,7 @@ def _plot_moment_tubes(builder, elements, elem_forces, quantity,
     values = []
     segments = []
     for eid, elem in elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         tag = elem.elem_tag
         if tag not in elem_forces:
@@ -5244,13 +5617,13 @@ def _plot_moment_tubes(builder, elements, elem_forces, quantity,
     vlim = max(abs(min(values)), abs(max(values)), 1.0)
 
     plotter = pv.Plotter(notebook=notebook, **kwargs)
-    plotter.set_background('white')
+    plotter.set_background("white")
 
     if show_original:
         for p1, p2, _ in segments:
             n = max(2, int(np.linalg.norm(p2 - p1) * 2))
             poly = pv.lines_from_points(np.linspace(p1, p2, n))
-            plotter.add_mesh(poly, color='lightgrey', line_width=1, opacity=0.3)
+            plotter.add_mesh(poly, color="lightgrey", line_width=1, opacity=0.3)
 
     for p1, p2, val in segments:
         n = max(8, int(np.linalg.norm(p2 - p1) * 4))
@@ -5265,11 +5638,10 @@ def _plot_moment_tubes(builder, elements, elem_forces, quantity,
         tube = poly.tube(radius=radius)
         plotter.add_mesh(tube, color=colour, smooth_shading=False, lighting=False)
 
-    kind = "Moment" if quantity.startswith("M") else "Force"
-    plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)",
-                     position='lower_edge', font_size=10)
+    "Moment" if quantity.startswith("M") else "Force"
+    plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)", position="lower_edge", font_size=10)
     if title:
-        plotter.add_text(title, position='upper_edge', font_size=12)
+        plotter.add_text(title, position="upper_edge", font_size=12)
     _set_isometric_view(plotter)
     if notebook:
         return plotter
@@ -5281,12 +5653,13 @@ def _plot_moment_tubes(builder, elements, elem_forces, quantity,
 # 2D force diagram (Matplotlib) — moment / shear vs elevation
 # ============================================================================
 
+
 def plot_static_force_diagram(
     builder,
-    elem_forces: Dict[int, Dict[str, float]],
-    quantity: str = 'Fz',
+    elem_forces: dict[int, dict[str, float]],
+    quantity: str = "Fz",
     title: str = None,
-    selection: Optional['Selection'] = None,
+    selection: Optional["Selection"] = None,
     figsize=(6, 8),
     use_local: bool = True,
     **kwargs,
@@ -5346,20 +5719,19 @@ def plot_static_force_diagram(
         "plot_static_force_diagram is deprecated — use "
         "plot_npz_force_diagram() instead for standalone NPZ data, "
         "or plot_force_diagram_3d() for unified builder/NPZ support.",
-        DeprecationWarning, stacklevel=2,
+        DeprecationWarning,
+        stacklevel=2,
     )
     import matplotlib.pyplot as plt
     import numpy as np
 
-    elements = (builder.split_elements if builder.split_elements
-                else builder.model.frame_elements)
+    elements = builder.split_elements or builder.model.frame_elements
     if selection is not None:
         sel_ids = set(selection.get_frame_ids(builder.model))
-        elements = {eid: elem for eid, elem in elements.items()
-                    if eid in sel_ids}
+        elements = {eid: elem for eid, elem in elements.items() if eid in sel_ids}
 
-    is_moment = quantity.startswith('M')
-    j_key = quantity + '_j' if is_moment else quantity + '_j'
+    is_moment = quantity.startswith("M")
+    j_key = quantity + "_j"
 
     # ── Helper: get local end forces for one element ──
     def _local_end_forces(elem, tag) -> dict:
@@ -5371,45 +5743,61 @@ def plot_static_force_diagram(
         # Build 3×3 rotation matrix (local ← global)
         T = np.vstack([vx, vy, vz])  # (3, 3)
         # Extract global force & moment vectors at I-end
-        f_i_global = np.array([
-            elem_forces[tag].get('Fx', 0.0),
-            elem_forces[tag].get('Fy', 0.0),
-            elem_forces[tag].get('Fz', 0.0),
-        ])
-        m_i_global = np.array([
-            elem_forces[tag].get('Mx', 0.0),
-            elem_forces[tag].get('My', 0.0),
-            elem_forces[tag].get('Mz', 0.0),
-        ])
-        f_j_global = np.array([
-            elem_forces[tag].get('Fx_j', 0.0),
-            elem_forces[tag].get('Fy_j', 0.0),
-            elem_forces[tag].get('Fz_j', 0.0),
-        ])
-        m_j_global = np.array([
-            elem_forces[tag].get('Mx_j', 0.0),
-            elem_forces[tag].get('My_j', 0.0),
-            elem_forces[tag].get('Mz_j', 0.0),
-        ])
+        f_i_global = np.array(
+            [
+                elem_forces[tag].get("Fx", 0.0),
+                elem_forces[tag].get("Fy", 0.0),
+                elem_forces[tag].get("Fz", 0.0),
+            ]
+        )
+        m_i_global = np.array(
+            [
+                elem_forces[tag].get("Mx", 0.0),
+                elem_forces[tag].get("My", 0.0),
+                elem_forces[tag].get("Mz", 0.0),
+            ]
+        )
+        f_j_global = np.array(
+            [
+                elem_forces[tag].get("Fx_j", 0.0),
+                elem_forces[tag].get("Fy_j", 0.0),
+                elem_forces[tag].get("Fz_j", 0.0),
+            ]
+        )
+        m_j_global = np.array(
+            [
+                elem_forces[tag].get("Mx_j", 0.0),
+                elem_forces[tag].get("My_j", 0.0),
+                elem_forces[tag].get("Mz_j", 0.0),
+            ]
+        )
         # Transform: local = T @ global
         f_i_local = T @ f_i_global
         m_i_local = T @ m_i_global
         f_j_local = T @ f_j_global
         m_j_local = T @ m_j_global
         return {
-            'Fx': f_i_local[0], 'Fy': f_i_local[1], 'Fz': f_i_local[2],
-            'Mx': m_i_local[0], 'My': m_i_local[1], 'Mz': m_i_local[2],
-            'Fx_j': f_j_local[0], 'Fy_j': f_j_local[1], 'Fz_j': f_j_local[2],
-            'Mx_j': m_j_local[0], 'My_j': m_j_local[1], 'Mz_j': m_j_local[2],
+            "Fx": f_i_local[0],
+            "Fy": f_i_local[1],
+            "Fz": f_i_local[2],
+            "Mx": m_i_local[0],
+            "My": m_i_local[1],
+            "Mz": m_i_local[2],
+            "Fx_j": f_j_local[0],
+            "Fy_j": f_j_local[1],
+            "Fz_j": f_j_local[2],
+            "Mx_j": m_j_local[0],
+            "My_j": m_j_local[1],
+            "Mz_j": m_j_local[2],
         }
 
     # Collect (z, value) pairs — two per element (I‑end and J‑end)
-    z_coords: List[float] = []
-    values: List[float] = []
-    segments: List[List[int]] = []  # each = [idx_i, idx_j]
+    z_coords: list[float] = []
+    values: list[float] = []
+    segments: list[list[int]] = []  # each = [idx_i, idx_j]
 
     for eid, elem in elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         tag = elem.elem_tag
         if tag not in elem_forces:
@@ -5430,10 +5818,7 @@ def plot_static_force_diagram(
 
         val_i = src.get(quantity, 0.0)
         # Negate J‑end for consistent diagram convention
-        if j_key and j_key in src:
-            val_j = -src.get(j_key, 0.0)
-        else:
-            val_j = val_i
+        val_j = -src.get(j_key, 0.0) if j_key and j_key in src else val_i
 
         idx_i = len(z_coords)
         z_coords.append(ni.z)
@@ -5452,29 +5837,31 @@ def plot_static_force_diagram(
     fig, ax = plt.subplots(figsize=figsize)
 
     # Plot each element as a solid line segment
-    line_kw = {k: v for k, v in kwargs.items()
-               if k not in ('marker', 'linestyle')}
+    line_kw = {k: v for k, v in kwargs.items() if k not in ("marker", "linestyle")}
 
     for seg in segments:
-        ax.plot([values[seg[0]], values[seg[1]]],
-                [z_coords[seg[0]], z_coords[seg[1]]],
-                **line_kw,
-                )
+        ax.plot(
+            [values[seg[0]], values[seg[1]]],
+            [z_coords[seg[0]], z_coords[seg[1]]],
+            **line_kw,
+        )
 
     # Markers at the data points
-    ax.plot(values, z_coords,
-            **kwargs,
-            linestyle='',
-            )
+    ax.plot(
+        values,
+        z_coords,
+        **kwargs,
+        linestyle="",
+    )
 
     # Unit label
-    unit_label = builder.units.get('F', 'N')
+    unit_label = builder.units.get("F", "N")
     if is_moment:
-        length_unit = builder.units.get('L', 'm')
+        length_unit = builder.units.get("L", "m")
         unit_label = f"{unit_label}·{length_unit}"
 
     local_tag = " (local)" if use_local else ""
-    ax.axvline(0, color='grey', linewidth=0.8, linestyle='--', alpha=0.5)
+    ax.axvline(0, color="grey", linewidth=0.8, linestyle="--", alpha=0.5)
     ax.set_xlabel(f"{quantity}{local_tag} ({unit_label})")
     ax.set_ylabel("Elevation (m)")
     ax.set_title(title or f"{quantity}{local_tag} vs elevation")
@@ -5484,8 +5871,8 @@ def plot_static_force_diagram(
 
 
 def plot_force_diagram(
-    elem_results: List[Dict[str, Any]],
-    quantity: str = 'My_i',
+    elem_results: list[dict[str, Any]],
+    quantity: str = "My_i",
     title: str = None,
     figsize=(6, 8),
     **kwargs,
@@ -5514,8 +5901,7 @@ def plot_force_diagram(
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print("Warning: matplotlib not installed.  "
-              "Install with: pip install matplotlib")
+        print("Warning: matplotlib not installed.  Install with: pip install matplotlib")
         return None
 
     if not elem_results:
@@ -5523,29 +5909,29 @@ def plot_force_diagram(
         return None
 
     # Sort by elevation and extract
-    sorted_res = sorted(elem_results, key=lambda r: r['z_mid'])
-    z = [r['z_mid'] for r in sorted_res]
+    sorted_res = sorted(elem_results, key=lambda r: r["z_mid"])
+    z = [r["z_mid"] for r in sorted_res]
     vals = [r.get(quantity, 0.0) for r in sorted_res]
 
     # Determine unit label
     q = quantity.lower()
-    if q.startswith('m'):
-        unit = 'kN·m'
+    if q.startswith("m"):
+        unit = "kN·m"
         quantity_label = quantity
-    elif q.startswith('v'):
-        unit = 'kN'
+    elif q.startswith("v"):
+        unit = "kN"
         quantity_label = quantity
     else:
-        unit = ''
+        unit = ""
         quantity_label = quantity
 
     fig, ax = plt.subplots(figsize=figsize)
-    ax.plot(vals, z, '-o', **kwargs or {})
-    ax.set_xlabel(f'{quantity_label} ({unit})')
-    ax.set_ylabel('Elevation (m)')
-    ax.set_title(title or f'{quantity_label} vs Elevation (CQC combined)')
+    ax.plot(vals, z, "-o", **kwargs or {})
+    ax.set_xlabel(f"{quantity_label} ({unit})")
+    ax.set_ylabel("Elevation (m)")
+    ax.set_title(title or f"{quantity_label} vs Elevation (CQC combined)")
     ax.grid(True, alpha=0.3)
-    ax.axvline(0, color='grey', linewidth=0.5)
+    ax.axvline(0, color="grey", linewidth=0.5)
 
     fig.tight_layout()
     return fig
@@ -5555,8 +5941,9 @@ def plot_force_diagram(
 # Pushover capacity curve (Matplotlib)
 # ============================================================================
 
+
 def plot_pushover_curve(
-    pushover_results: Dict[str, Any],
+    pushover_results: dict[str, Any],
     title: str = None,
     figsize=(8, 6),
     **kwargs,
@@ -5577,32 +5964,31 @@ def plot_pushover_curve(
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print("Warning: matplotlib not installed.  "
-              "Install with: pip install matplotlib")
+        print("Warning: matplotlib not installed.  Install with: pip install matplotlib")
         return None
 
-    disp = pushover_results.get('control_disp', [])
-    shear = pushover_results.get('base_shear', [])
+    disp = pushover_results.get("control_disp", [])
+    shear = pushover_results.get("base_shear", [])
 
     if not disp or not shear:
         print("No pushover data to plot.")
         return None
 
     fig, ax = plt.subplots(figsize=figsize)
-    ax.plot(disp, shear, '-o', markersize=3, **kwargs or {})
-    ax.set_xlabel('Control node displacement (m)')
-    ax.set_ylabel('Base shear (kN)')
-    ax.set_title(title or 'Pushover Capacity Curve')
+    ax.plot(disp, shear, "-o", markersize=3, **kwargs or {})
+    ax.set_xlabel("Control node displacement (m)")
+    ax.set_ylabel("Base shear (kN)")
+    ax.set_title(title or "Pushover Capacity Curve")
     ax.grid(True, alpha=0.3)
-    ax.axhline(0, color='grey', linewidth=0.5)
-    ax.axvline(0, color='grey', linewidth=0.5)
+    ax.axhline(0, color="grey", linewidth=0.5)
+    ax.axvline(0, color="grey", linewidth=0.5)
 
     fig.tight_layout()
     return fig
 
 
 def plot_pushover_curve_enhanced(
-    pushover_results: Dict[str, Any],
+    pushover_results: dict[str, Any],
     title: str = None,
     figsize=(10, 6),
     design_disp: Optional[float] = None,
@@ -5636,12 +6022,11 @@ def plot_pushover_curve_enhanced(
         import matplotlib.pyplot as plt
         import numpy as np
     except ImportError:
-        print("Warning: matplotlib not installed.  "
-              "Install with: pip install matplotlib")
+        print("Warning: matplotlib not installed.  Install with: pip install matplotlib")
         return None
 
-    disp = np.asarray(pushover_results.get('control_disp', []), dtype=float)
-    shear = np.asarray(pushover_results.get('base_shear', []), dtype=float)
+    disp = np.asarray(pushover_results.get("control_disp", []), dtype=float)
+    shear = np.asarray(pushover_results.get("base_shear", []), dtype=float)
     shear = shear * unit_conversion
 
     if len(disp) < 2 or len(shear) < 2 or len(disp) != len(shear):
@@ -5666,43 +6051,58 @@ def plot_pushover_curve_enhanced(
     fig, ax = plt.subplots(figsize=figsize)
 
     # Main curve — merge caller kwargs with defaults
-    plot_kw = dict(label='Pushover curve', linewidth=2)
+    plot_kw = {"label": "Pushover curve", "linewidth": 2}
     plot_kw.update(kwargs)
-    ax.plot(disp, shear, 'b-', **plot_kw)
+    ax.plot(disp, shear, "b-", **plot_kw)
 
     # Area fill
-    ax.fill_between(disp, 0, shear, alpha=0.08, color='blue')
+    ax.fill_between(disp, 0, shear, alpha=0.08, color="blue")
 
     # Initial stiffness line
     if k0 > 0:
-        ax.plot(disp, k0 * disp, 'r--', linewidth=1, alpha=0.5,
-                label=f'Initial stiffness ({k0:.0f} kN/m)')
+        ax.plot(
+            disp,
+            k0 * disp,
+            "r--",
+            linewidth=1,
+            alpha=0.5,
+            label=f"Initial stiffness ({k0:.0f} kN/m)",
+        )
 
     # Final stiffness line
     if kf > 0:
-        ax.plot(disp, kf * disp, 'g--', linewidth=1, alpha=0.5,
-                label=f'Final stiffness ({kf:.0f} kN/m)')
+        ax.plot(
+            disp, kf * disp, "g--", linewidth=1, alpha=0.5, label=f"Final stiffness ({kf:.0f} kN/m)"
+        )
 
     # Design drift marker
     if design_disp is not None:
-        ax.axvline(design_disp, color='orange', linestyle=':', linewidth=1.5,
-                   label=f'Design drift ({design_disp:.3f} m)')
+        ax.axvline(
+            design_disp,
+            color="orange",
+            linestyle=":",
+            linewidth=1.5,
+            label=f"Design drift ({design_disp:.3f} m)",
+        )
 
     # Labels & title
-    ax.set_xlabel('Control node displacement (m)')
-    ax.set_ylabel('Base shear (kN)')
-    ax.set_title(title or 'Pushover Capacity Curve')
-    ax.legend(loc='lower right', fontsize=9)
+    ax.set_xlabel("Control node displacement (m)")
+    ax.set_ylabel("Base shear (kN)")
+    ax.set_title(title or "Pushover Capacity Curve")
+    ax.legend(loc="lower right", fontsize=9)
     ax.grid(True, alpha=0.3)
-    ax.axhline(0, color='grey', linewidth=0.5)
-    ax.axvline(0, color='grey', linewidth=0.5)
+    ax.axhline(0, color="grey", linewidth=0.5)
+    ax.axvline(0, color="grey", linewidth=0.5)
 
     # Stiffness loss annotation
     ax.annotate(
-        f'Stiffness loss: {loss_pct:.1f}%',
-        xy=(0.97, 0.03), xycoords='axes fraction',
-        ha='right', va='bottom', fontsize=10,
-        bbox=dict(boxstyle='round,pad=0.3', fc='lightyellow', ec='gray', alpha=0.8),
+        f"Stiffness loss: {loss_pct:.1f}%",
+        xy=(0.97, 0.03),
+        xycoords="axes fraction",
+        ha="right",
+        va="bottom",
+        fontsize=10,
+        bbox={"boxstyle": "round,pad=0.3", "fc": "lightyellow", "ec": "gray", "alpha": 0.8},
     )
 
     fig.tight_layout()
@@ -5710,10 +6110,10 @@ def plot_pushover_curve_enhanced(
 
 
 def plot_capacity_spectrum(
-    capacity_adrs: Dict[str, List[float]],
-    spectrum_periods: List[float],
-    spectrum_accels: List[float],
-    performance_point: Dict[str, Any] = None,
+    capacity_adrs: dict[str, list[float]],
+    spectrum_periods: list[float],
+    spectrum_accels: list[float],
+    performance_point: dict[str, Any] = None,
     title: str = None,
     figsize=(8, 6),
 ) -> Optional[Any]:
@@ -5739,12 +6139,11 @@ def plot_capacity_spectrum(
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print("Warning: matplotlib not installed.  "
-              "Install with: pip install matplotlib")
+        print("Warning: matplotlib not installed.  Install with: pip install matplotlib")
         return None
 
-    S_d = np.array(capacity_adrs.get('S_d', []))
-    S_a = np.array(capacity_adrs.get('S_a', []))
+    S_d = np.array(capacity_adrs.get("S_d", []))
+    S_a = np.array(capacity_adrs.get("S_a", []))
 
     if len(S_d) < 2 or len(S_a) < 2 or len(S_d) != len(S_a):
         print("Insufficient or mismatched ADRS data to plot.")
@@ -5757,15 +6156,13 @@ def plot_capacity_spectrum(
     fig, ax = plt.subplots(figsize=figsize)
 
     # --- Capacity spectrum ---
-    ax.plot(S_d, S_a, '-o', markersize=3, label='Capacity (pushover)',
-            color='tab:blue', zorder=3)
+    ax.plot(S_d, S_a, "-o", markersize=3, label="Capacity (pushover)", color="tab:blue", zorder=3)
 
     # --- Demand spectrum (period lines + curve) ---
     T_spec = np.array(spectrum_periods)
     Sa_spec = np.array(spectrum_accels)
     Sd_spec = Sa_spec * (T_spec / (2.0 * math.pi)) ** 2
-    ax.plot(Sd_spec, Sa_spec, '--', label='Demand (elastic)',
-            color='tab:red', zorder=2)
+    ax.plot(Sd_spec, Sa_spec, "--", label="Demand (elastic)", color="tab:red", zorder=2)
 
     # --- Constant-period lines ---
     T_labels = [0.1, 0.2, 0.5, 1.0, 2.0, 4.0]
@@ -5774,46 +6171,64 @@ def plot_capacity_spectrum(
     for T in T_labels:
         sd_line = np.linspace(0, S_d_max, 50)
         sa_line = (2.0 * math.pi / T) ** 2 * sd_line
-        ax.plot(sd_line, sa_line, ':', color='grey', linewidth=0.5, alpha=0.4)
-        ax.text(sd_line[-1], sa_line[-1], f'T={T}s', fontsize=7,
-                color='grey', alpha=0.6, va='bottom')
+        ax.plot(sd_line, sa_line, ":", color="grey", linewidth=0.5, alpha=0.4)
+        ax.text(
+            sd_line[-1], sa_line[-1], f"T={T}s", fontsize=7, color="grey", alpha=0.6, va="bottom"
+        )
 
     # --- Performance point ---
     if performance_point is not None:
-        S_dp = performance_point.get('S_dp')
-        S_ap = performance_point.get('S_ap')
-        S_dy = performance_point.get('S_dy')
-        S_ay = performance_point.get('S_ay')
+        S_dp = performance_point.get("S_dp")
+        S_ap = performance_point.get("S_ap")
+        S_dy = performance_point.get("S_dy")
+        S_ay = performance_point.get("S_ay")
 
         # Bilinear yield point
         if S_dy is not None and S_ay is not None and S_dy > 0:
-            ax.plot(S_dy, S_ay, 's', color='tab:orange', markersize=8,
-                    zorder=5, label=f'Yield ({S_dy:.3f}, {S_ay:.1f})')
+            ax.plot(
+                S_dy,
+                S_ay,
+                "s",
+                color="tab:orange",
+                markersize=8,
+                zorder=5,
+                label=f"Yield ({S_dy:.3f}, {S_ay:.1f})",
+            )
             # Bilinear line
             sd_bilin = np.linspace(0, S_dy, 20)
             K_init = S_ay / S_dy
-            ax.plot(sd_bilin, K_init * sd_bilin, '-', color='tab:orange',
-                    linewidth=1.5, alpha=0.7)
+            ax.plot(sd_bilin, K_init * sd_bilin, "-", color="tab:orange", linewidth=1.5, alpha=0.7)
             # Post-yield line
             if S_dp > S_dy and S_dp > 0:
                 sd_post = np.linspace(S_dy, max(S_dp * 1.2, S_d.max()), 20)
                 K_post = (S_ap - S_ay) / (S_dp - S_dy) if S_dp != S_dy else 0
-                ax.plot(sd_post, S_ay + K_post * (sd_post - S_dy), '-',
-                        color='tab:orange', linewidth=1.5, alpha=0.7)
+                ax.plot(
+                    sd_post,
+                    S_ay + K_post * (sd_post - S_dy),
+                    "-",
+                    color="tab:orange",
+                    linewidth=1.5,
+                    alpha=0.7,
+                )
 
         # Performance point
         if S_dp is not None and S_ap is not None and S_dp > 0:
-            ax.plot(S_dp, S_ap, 'D', color='tab:green', markersize=10,
-                    zorder=6, label=f'Perf. Pt. ({S_dp:.3f}, {S_ap:.1f})')
+            ax.plot(
+                S_dp,
+                S_ap,
+                "D",
+                color="tab:green",
+                markersize=10,
+                zorder=6,
+                label=f"Perf. Pt. ({S_dp:.3f}, {S_ap:.1f})",
+            )
             # Vertical & horizontal dashed lines
-            ax.axvline(S_dp, color='tab:green', linewidth=0.8, linestyle='--',
-                       alpha=0.5)
-            ax.axhline(S_ap, color='tab:green', linewidth=0.8, linestyle='--',
-                       alpha=0.5)
+            ax.axvline(S_dp, color="tab:green", linewidth=0.8, linestyle="--", alpha=0.5)
+            ax.axhline(S_ap, color="tab:green", linewidth=0.8, linestyle="--", alpha=0.5)
 
-    ax.set_xlabel('Spectral displacement S$_d$ (m)')
-    ax.set_ylabel('Spectral acceleration S$_a$ (m/s²)')
-    ax.set_title(title or 'Capacity Spectrum Method – ADRS Format')
+    ax.set_xlabel("Spectral displacement S$_d$ (m)")
+    ax.set_ylabel("Spectral acceleration S$_a$ (m/s²)")
+    ax.set_title(title or "Capacity Spectrum Method – ADRS Format")
     ax.set_xlim(0, S_d_max)
     ax.set_ylim(0, S_a_max)
     ax.grid(True, alpha=0.3)
@@ -5852,18 +6267,18 @@ def _load_npz_for_plotting(npz_path: str, combo: str = None) -> dict:
         - force_unit, length_unit: unit strings
         - raw_data: the loaded npz dict
     """
-    from ..io.npz_reader import read_results, _get_static_cases
+    from ..io.npz_reader import _get_static_cases, read_results
+
     d = read_results(npz_path)
 
     force_unit = "?"
     length_unit = "?"
-    elem_data: List[dict] = []
+    elem_data: list[dict] = []
 
     # ── Unified schema ────────────────────────────────────────────
     cases = _get_static_cases(d)
     if combo is not None and combo not in cases:
-        raise ValueError(
-            f"Case '{combo}' not found in NPZ. Available: {cases}")
+        raise ValueError(f"Case '{combo}' not found in NPZ. Available: {cases}")
     case = combo if combo and combo in cases else (cases[0] if cases else None)
 
     fu = d.get("force_unit")
@@ -5891,19 +6306,31 @@ def _load_npz_for_plotting(npz_path: str, combo: str = None) -> dict:
         c_j = node_coords.get(int(fj[i]), (0, 0, 0))
         mid_z = (c_i[2] + c_j[2]) / 2.0
 
-        def _g(k):
+        def _g(k, i=i):
             arr = d.get(f"{pre}{k}")
             return float(arr[i]) if arr is not None else 0.0
 
         entry = {
             "sap_id": str(sap_ids[i]),
-            "x_i": c_i[0], "y_i": c_i[1], "z_i": c_i[2],
-            "x_j": c_j[0], "y_j": c_j[1], "z_j": c_j[2],
+            "x_i": c_i[0],
+            "y_i": c_i[1],
+            "z_i": c_i[2],
+            "x_j": c_j[0],
+            "y_j": c_j[1],
+            "z_j": c_j[2],
             "mid_z": mid_z,
-            "fx_i": _g("fx_i"), "fy_i": _g("fy_i"), "fz_i": _g("fz_i"),
-            "mx_i": _g("mx_i"), "my_i": _g("my_i"), "mz_i": _g("mz_i"),
-            "fx_j": _g("fx_j"), "fy_j": _g("fy_j"), "fz_j": _g("fz_j"),
-            "mx_j": _g("mx_j"), "my_j": _g("my_j"), "mz_j": _g("mz_j"),
+            "fx_i": _g("fx_i"),
+            "fy_i": _g("fy_i"),
+            "fz_i": _g("fz_i"),
+            "mx_i": _g("mx_i"),
+            "my_i": _g("my_i"),
+            "mz_i": _g("mz_i"),
+            "fx_j": _g("fx_j"),
+            "fy_j": _g("fy_j"),
+            "fz_j": _g("fz_j"),
+            "mx_j": _g("mx_j"),
+            "my_j": _g("my_j"),
+            "mz_j": _g("mz_j"),
         }
         # Local forces (optional) — set NaN when missing
         for q in ("fx", "fy", "fz", "mx", "my", "mz"):
@@ -6054,14 +6481,15 @@ def plot_npz_moment_3d(
         return None
 
     # Compute model height from element coordinates for auto-scaling
-    model_height = max(max(ed["z_i"], ed["z_j"]) for ed in elem_data) - \
-                   min(min(ed["z_i"], ed["z_j"]) for ed in elem_data)
+    model_height = max(max(ed["z_i"], ed["z_j"]) for ed in elem_data) - min(
+        min(ed["z_i"], ed["z_j"]) for ed in elem_data
+    )
     model_height = max(model_height, 1.0)
     # Flag scale: largest flag = 20 % of model height (same as builder version)
     moment_scale = (model_height * 0.2) / max(max_abs_val, 1.0)
 
     plotter = pv.Plotter()
-    plotter.set_background('white')
+    plotter.set_background("white")
     plotter.title = title or f"{quantity} 3D — standalone NPZ"
 
     # ── Draw original structure wireframe ───────────────────────────
@@ -6073,8 +6501,10 @@ def plot_npz_moment_3d(
     sub_n_i = raw.get("sub_node_i_tag")
     sub_n_j = raw.get("sub_node_j_tag")
     if all(a is not None for a in (n_tags, n_x, n_y, n_z, sub_n_i, sub_n_j)):
-        node_map = {int(n_tags[k]): (float(n_x[k]), float(n_y[k]), float(n_z[k]))
-                    for k in range(len(n_tags))}
+        node_map = {
+            int(n_tags[k]): (float(n_x[k]), float(n_y[k]), float(n_z[k]))
+            for k in range(len(n_tags))
+        }
         lines = []
         for k in range(len(sub_n_i)):
             ci = node_map.get(int(sub_n_i[k]))
@@ -6084,11 +6514,12 @@ def plot_npz_moment_3d(
         if lines:
             first = True
             for seg in lines:
-                plotter.add_lines(np.array(seg), color="grey", width=1,
-                                  label="Structure" if first else None)
+                plotter.add_lines(
+                    np.array(seg), color="grey", width=1, label="Structure" if first else None
+                )
                 first = False
 
-    is_moment = quantity.startswith("M")
+    quantity.startswith("M")
 
     for idx, ed in enumerate(elem_data):
         v_i = ed.get(q_i, np.nan)
@@ -6123,18 +6554,22 @@ def plot_npz_moment_3d(
 
         if mode == "flag":
             for verts, col_val in compute_flag_parts(
-                p_i, p_j, vn, v_i, v_j, moment_scale,
+                p_i,
+                p_j,
+                vn,
+                v_i,
+                v_j,
+                moment_scale,
             ):
                 pts_arr = np.array(verts)
                 n = len(verts)
-                surf = pv.PolyData(pts_arr, faces=[n] + list(range(n)))
+                surf = pv.PolyData(pts_arr, faces=[n, *list(range(n))])
                 t = min(abs(col_val) / max_abs_val, 1.0)
                 if col_val >= 0:
                     c = (0.3 + 0.7 * t, 0.3 - 0.2 * t, 0.3 - 0.3 * t)
                 else:
                     c = (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
-                plotter.add_mesh(surf, color=c, opacity=0.6, show_edges=False,
-                                 lighting=False)
+                plotter.add_mesh(surf, color=c, opacity=0.6, show_edges=False, lighting=False)
         else:
             # tube mode — colour-coded radius (fixed fraction of element length)
             avg = (abs(v_i) + abs(v_j)) * 0.5
@@ -6147,13 +6582,11 @@ def plot_npz_moment_3d(
                 c = (0.3 + 0.7 * t, 0.3 - 0.2 * t, 0.3 - 0.3 * t)
             else:
                 c = (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
-            plotter.add_mesh(cyl, color=c, opacity=0.5, show_edges=False,
-                             lighting=False)
+            plotter.add_mesh(cyl, color=c, opacity=0.5, show_edges=False, lighting=False)
 
     # Legend (text, not scalar bar — colours are explicit RGB, not a colormap)
-    kind = "Moment" if quantity.startswith("M") else "Force"
-    plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)",
-                     position='lower_edge', font_size=14)
+    "Moment" if quantity.startswith("M") else "Force"
+    plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)", position="lower_edge", font_size=14)
 
     plotter.add_axes()
     _set_isometric_view(plotter)
@@ -6169,8 +6602,7 @@ def plot_npz_moment_3d(
 # ═══════════════════════════════════════════════════════════════════
 
 
-def plot_building_views(md, mesh_model=None,
-                        window_size=(1200, 900)):
+def plot_building_views(md, mesh_model=None, window_size=(1200, 900)):
     """Return a 2×2 matplotlib figure with plan, two elevations, isometric.
 
     Uses the two-stage path when *mesh_model* is provided, otherwise
@@ -6197,8 +6629,15 @@ def plot_building_views(md, mesh_model=None,
         import pyvista as pv
     except ImportError:
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "Building views: PyVista not available",
-                ha="center", va="center", transform=ax.transAxes, fontsize=12)
+        ax.text(
+            0.5,
+            0.5,
+            "Building views: PyVista not available",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+            fontsize=12,
+        )
         ax.axis("off")
         return fig
 
@@ -6206,21 +6645,32 @@ def plot_building_views(md, mesh_model=None,
     try:
         if mesh_model is not None:
             from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
             _ab_views = AnalysisBuilder(mesh_model, {"verbose": False})
             _ab_views.build_domain()
         else:
-            from fea_toolkit.opensees.preprocessor import preprocess_model
             from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
-            _mm = preprocess_model(md, {"element_type": "elasticBeamColumn",
-                                        "split_elements": True, "verbose": False})
+            from fea_toolkit.opensees.preprocessor import preprocess_model
+
+            _mm = preprocess_model(
+                md, {"element_type": "elasticBeamColumn", "split_elements": True, "verbose": False}
+            )
             _ab_views = AnalysisBuilder(_mm, {"verbose": False})
             _ab_views.build_domain()
     except Exception:
         import warnings
+
         warnings.warn("Could not build model for building views.")
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "Building views: model build failed",
-                ha="center", va="center", transform=ax.transAxes, fontsize=12)
+        ax.text(
+            0.5,
+            0.5,
+            "Building views: model build failed",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+            fontsize=12,
+        )
         ax.axis("off")
         return fig
 
@@ -6232,14 +6682,17 @@ def plot_building_views(md, mesh_model=None,
     xs = [n.x for n in md.nodes.values()]
     ys = [n.y for n in md.nodes.values()]
     zs = [n.z for n in md.nodes.values()]
-    x_c, y_c, z_c = (max(xs)+min(xs))/2, (max(ys)+min(ys))/2, (max(zs)+min(zs))/2
+    x_c, y_c, z_c = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2, (max(zs) + min(zs)) / 2
     w_aspect = window_size[0] / window_size[1]
 
     for ax, title in zip(axes_flat, views):
         try:
             pl = plot_mesh(
-                _ab_views, notebook=True,
-                show_nodes=False, show_frames=True, show_shells=True,
+                _ab_views,
+                notebook=True,
+                show_nodes=False,
+                show_frames=True,
+                show_shells=True,
             )
         except Exception:
             pl = None
@@ -6248,19 +6701,27 @@ def plot_building_views(md, mesh_model=None,
                 pl.camera.parallel_projection = True
                 if title == "Plan (XY)":
                     pl.view_xy()
-                    uv_map = lambda x, y, z: (x, y)
+
+                    def uv_map(x, y, z):
+                        return (x, y)
                 elif title == "Elevation (XZ)":
                     pl.view_xz()
-                    uv_map = lambda x, y, z: (x, z)
+
+                    def uv_map(x, y, z):
+                        return (x, z)
                 elif title == "Elevation (YZ)":
                     pl.view_yz()
-                    uv_map = lambda x, y, z: (y, z)
+
+                    def uv_map(x, y, z):
+                        return (y, z)
                 else:
                     pl.view_isometric()
                     inv_sqrt2 = 1.0 / math.sqrt(2)
                     inv_sqrt6 = 1.0 / math.sqrt(6)
-                    uv_map = lambda x, y, z: ((-x + y) * inv_sqrt2,
-                                              (-x - y + 2 * z) * inv_sqrt6)
+
+                    def uv_map(x, y, z, inv_sqrt2=inv_sqrt2, inv_sqrt6=inv_sqrt6):
+                        return ((-x + y) * inv_sqrt2, (-x - y + 2 * z) * inv_sqrt6)
+
                 u_vals, v_vals = [], []
                 for x in (min(xs), max(xs)):
                     for y in (min(ys), max(ys)):
@@ -6270,9 +6731,7 @@ def plot_building_views(md, mesh_model=None,
                             v_vals.append(v)
                 u_span = max(u_vals) - min(u_vals)
                 v_span = max(v_vals) - min(v_vals)
-                pl.camera.parallel_scale = (
-                    max(v_span / 2, u_span / (2 * w_aspect)) * 1.1
-                )
+                pl.camera.parallel_scale = max(v_span / 2, u_span / (2 * w_aspect)) * 1.1
                 pl.camera.focal_point = (x_c, y_c, z_c)
                 pl.render()
                 img = pl.screenshot(return_img=True, window_size=window_size)
@@ -6288,6 +6747,7 @@ def plot_building_views(md, mesh_model=None,
     fig.canvas.draw()
     return fig
 
+
 def plot_model_comparison(
     md,
     mesh_model=None,
@@ -6302,12 +6762,11 @@ def plot_model_comparison(
     Otherwise falls back to the two-stage build path.
     """
     import copy
-    from pathlib import Path
-    import pyvista as pv
+
     from fea_toolkit.model.sap_data import Restraint
     from fea_toolkit.model.selection import Selection
-    from fea_toolkit.opensees.preprocessor import preprocess_model
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+    from fea_toolkit.opensees.preprocessor import preprocess_model
 
     if LOADS_ONLY is None:
         LOADS_ONLY = set()
@@ -6319,8 +6778,10 @@ def plot_model_comparison(
     base_ids = {nd.node_id for nd in md_copy.nodes.values() if nd.z == min_z}
     frame_conn: set = set()
     for e in md_copy.frame_elements.values():
-        if e.node_i in base_ids: frame_conn.add(e.node_i)
-        if e.node_j in base_ids: frame_conn.add(e.node_j)
+        if e.node_i in base_ids:
+            frame_conn.add(e.node_i)
+        if e.node_j in base_ids:
+            frame_conn.add(e.node_j)
     for nid in sorted(base_ids - frame_conn):
         if nid in md_copy.restraints:
             md_copy.restraints[nid] = Restraint([1, 1, 1, 1, 1, 1])
@@ -6328,44 +6789,56 @@ def plot_model_comparison(
     for sn in LOADS_ONLY:
         if sn in md_copy.sections:
             s = md_copy.sections[sn]
-            for attr in ('A', 'I33', 'I22', 'J'):
+            for attr in ("A", "I33", "I22", "J"):
                 setattr(s, attr, getattr(s, attr) * 0.01)
 
     if mesh_model is not None:
         _mm = mesh_model
         # Build domain from existing MeshModel
-        builder = AnalysisBuilder(_mm, {
-            "element_type": "elasticBeamColumn",
-            "verbose": False,
-        })
+        builder = AnalysisBuilder(
+            _mm,
+            {
+                "element_type": "elasticBeamColumn",
+                "verbose": False,
+            },
+        )
         builder.build_domain()
     else:
-        sel = Selection(sections=list(LOADS_ONLY), element_types=["Area"])
-        _mm = preprocess_model(md_copy, {
-            "element_type": "elasticBeamColumn",
-            "split_elements": True,
-            "create_shells": True,
-            "verbose": False,
-        })
-        builder = AnalysisBuilder(_mm, {
-            "element_type": "elasticBeamColumn",
-            "verbose": False,
-        })
+        Selection(sections=list(LOADS_ONLY), element_types=["Area"])
+        _mm = preprocess_model(
+            md_copy,
+            {
+                "element_type": "elasticBeamColumn",
+                "split_elements": True,
+                "create_shells": True,
+                "verbose": False,
+            },
+        )
+        builder = AnalysisBuilder(
+            _mm,
+            {
+                "element_type": "elasticBeamColumn",
+                "verbose": False,
+            },
+        )
         builder.build_domain()
 
     import openseespy.opensees as ops
+
     ops.wipe()
 
-    mm = getattr(builder, 'mesh_model', None)
+    mm = getattr(builder, "mesh_model", None)
     if off_screen:
-        return _save_comparison_images(md, builder, LOADS_ONLY, out_dir,
-                                       mesh_model=mm)
+        return _save_comparison_images(md, builder, LOADS_ONLY, out_dir, mesh_model=mm)
     _run_interactive_viewer(md, builder, LOADS_ONLY, mesh_model=mm)
+
 
 def _save_comparison_images(md, builder, LOADS_ONLY, out_dir, mesh_model=None):
     """Save PNG screenshots of original and meshed views."""
     from pathlib import Path
+
     import pyvista as pv
+
     pv.set_plot_theme("document")
     pv.OFF_SCREEN = True
     out_path = Path(out_dir).resolve() if out_dir else Path.cwd().resolve()
@@ -6382,8 +6855,9 @@ def _save_comparison_images(md, builder, LOADS_ONLY, out_dir, mesh_model=None):
     plotter.close()
 
     plotter = pv.Plotter(off_screen=True, window_size=[1400, 900])
-    _add_meshed_geometry(plotter, md, builder, LOADS_ONLY,
-                          mesh_model=getattr(builder, 'mesh_model', None))
+    _add_meshed_geometry(
+        plotter, md, builder, LOADS_ONLY, mesh_model=getattr(builder, "mesh_model", None)
+    )
     plotter.view_isometric()
     plotter.show(auto_close=False)
     plotter.screenshot(mesh_png)
@@ -6392,12 +6866,14 @@ def _save_comparison_images(md, builder, LOADS_ONLY, out_dir, mesh_model=None):
     print(f"  Model comparison saved: {orig_png}, {mesh_png}")
     return {"orig_png": orig_png, "mesh_png": mesh_png}
 
+
 def _add_original_geometry(plotter, md):
     """Add original (unsplit) geometry actors to a plotter."""
     import pyvista as pv
-    orig_nodes = {nid: nd for nid, nd in md.nodes.items()}
-    orig_frames = {eid: e for eid, e in md.frame_elements.items()}
-    orig_areas = {aid: a for aid, a in md.area_elements.items()}
+
+    orig_nodes = dict(md.nodes.items())
+    orig_frames = dict(md.frame_elements.items())
+    orig_areas = dict(md.area_elements.items())
 
     FRAME_SHRINK = 0.9
     pts, lines = [], []
@@ -6405,7 +6881,8 @@ def _add_original_geometry(plotter, md):
     for eid, elem in orig_frames.items():
         ni = orig_nodes.get(elem.node_i)
         nj = orig_nodes.get(elem.node_j)
-        if ni is None or nj is None: continue
+        if ni is None or nj is None:
+            continue
         a = np.array([ni.x, ni.y, ni.z])
         b = np.array([nj.x, nj.y, nj.z])
         mid = (a + b) * 0.5
@@ -6416,19 +6893,26 @@ def _add_original_geometry(plotter, md):
         lines.append([2, off, off + 1])
         off += 2
     if pts:
-        plotter.add_mesh(pv.PolyData(np.array(pts), lines=np.array(lines, dtype=int)),
-                         color='#4c72b0', line_width=4, opacity=0.85)
+        plotter.add_mesh(
+            pv.PolyData(np.array(pts), lines=np.array(lines, dtype=int)),
+            color="#4c72b0",
+            line_width=4,
+            opacity=0.85,
+        )
 
     all_verts, all_faces, cell_cols = [], [], []
     off = 0
     for aid, area in orig_areas.items():
-        if len(area.node_ids) < 3: continue
+        if len(area.node_ids) < 3:
+            continue
         verts = []
         for nid in area.node_ids:
             nd = orig_nodes.get(nid)
-            if nd is None: break
+            if nd is None:
+                break
             verts.append([nd.x, nd.y, nd.z])
-        if len(verts) < 3: continue
+        if len(verts) < 3:
+            continue
         n = len(verts)
         arr = np.array(verts)
         centroid = arr.mean(axis=0)
@@ -6440,40 +6924,46 @@ def _add_original_geometry(plotter, md):
         off += n
     if all_verts:
         m = pv.PolyData(np.array(all_verts), faces=np.array(all_faces, dtype=int).ravel())
-        m.cell_data['rgb'] = np.array(cell_cols)
-        plotter.add_mesh(m, scalars='rgb', rgb=True, opacity=0.35,
-                         lighting=False, show_edges=False)
+        m.cell_data["rgb"] = np.array(cell_cols)
+        plotter.add_mesh(m, scalars="rgb", rgb=True, opacity=0.35, lighting=False, show_edges=False)
 
     node_pts = np.array([[nd.x, nd.y, nd.z] for nd in orig_nodes.values()])
-    plotter.add_mesh(pv.PolyData(node_pts), color='#333333',
-                     point_size=12, style='points',
-                     render_points_as_spheres=True)
+    plotter.add_mesh(
+        pv.PolyData(node_pts),
+        color="#333333",
+        point_size=12,
+        style="points",
+        render_points_as_spheres=True,
+    )
+
 
 def _add_meshed_geometry(plotter, md, builder, LOADS_ONLY, mesh_model=None):
     """Add meshed (split frames + shells) geometry actors to a plotter."""
     import pyvista as pv
-    mm = mesh_model or getattr(builder, 'mesh_model', None)
+
+    mm = mesh_model or getattr(builder, "mesh_model", None)
     if mm is not None:
         mesh_frames = mm.frame_elements
-        mesh_assign = mm.frame_assignments
         mesh_coords = {nid: (nd.x, nd.y, nd.z) for nid, nd in mm.nodes.items()}
     else:
         mesh_frames = builder.split_elements or builder.model.frame_elements
-        mesh_assign = builder.split_assignments or builder.model.frame_assignments
         mesh_coords = {nid: (nd.x, nd.y, nd.z) for nid, nd in builder.model.nodes.items()}
 
     FRAME_SHRINK = 0.9
 
-    for color, is_split in [('#3a5588', False), ('#dd8452', True)]:
+    for color, is_split in [("#3a5588", False), ("#dd8452", True)]:
         pts, lines = [], []
         off = 0
         for eid, elem in mesh_frames.items():
-            if getattr(elem, 'inactive', False): continue
-            pid = getattr(elem, 'parent_id', None)
-            if (pid is not None) != is_split: continue
+            if getattr(elem, "inactive", False):
+                continue
+            pid = getattr(elem, "parent_id", None)
+            if (pid is not None) != is_split:
+                continue
             ci = mesh_coords.get(elem.node_i)
             cj = mesh_coords.get(elem.node_j)
-            if ci is None or cj is None: continue
+            if ci is None or cj is None:
+                continue
             a = np.array(ci)
             b = np.array(cj)
             mid = (a + b) * 0.5
@@ -6484,25 +6974,33 @@ def _add_meshed_geometry(plotter, md, builder, LOADS_ONLY, mesh_model=None):
             lines.append([2, off, off + 1])
             off += 2
         if pts:
-            plotter.add_mesh(pv.PolyData(np.array(pts), lines=np.array(lines, dtype=int)),
-                             color=color, line_width=4, opacity=0.85)
+            plotter.add_mesh(
+                pv.PolyData(np.array(pts), lines=np.array(lines, dtype=int)),
+                color=color,
+                line_width=4,
+                opacity=0.85,
+            )
 
     all_verts, all_faces, cell_cols = [], [], []
     off = 0
     _area_elems = mm.area_elements if mm is not None else builder.model.area_elements
     _area_asgn = mm.area_assignments if mm is not None else builder.model.area_assignments
     for aid, area in _area_elems.items():
-        if getattr(area, 'inactive', False): continue
-        sec_name = _area_asgn.get(aid, '')
-        if sec_name in LOADS_ONLY: continue
-        if len(area.node_ids) < 3: continue
+        if getattr(area, "inactive", False):
+            continue
+        sec_name = _area_asgn.get(aid, "")
+        if sec_name in LOADS_ONLY:
+            continue
+        if len(area.node_ids) < 3:
+            continue
         verts = []
         for nid in area.node_ids:
-            nd = (mm.nodes.get(nid) if mm is not None
-                  else builder.model.nodes.get(nid))
-            if nd is None: break
+            nd = mm.nodes.get(nid) if mm is not None else builder.model.nodes.get(nid)
+            if nd is None:
+                break
             verts.append([nd.x, nd.y, nd.z])
-        if len(verts) < 3: continue
+        if len(verts) < 3:
+            continue
         n = len(verts)
         arr = np.array(verts)
         centroid = arr.mean(axis=0)
@@ -6515,33 +7013,40 @@ def _add_meshed_geometry(plotter, md, builder, LOADS_ONLY, mesh_model=None):
         off += n
     if all_verts:
         m = pv.PolyData(np.array(all_verts), faces=np.array(all_faces, dtype=int).ravel())
-        m.cell_data['rgb'] = np.array(cell_cols)
-        plotter.add_mesh(m, scalars='rgb', rgb=True, opacity=0.45,
-                         lighting=False, show_edges=False)
+        m.cell_data["rgb"] = np.array(cell_cols)
+        plotter.add_mesh(m, scalars="rgb", rgb=True, opacity=0.45, lighting=False, show_edges=False)
 
     _model_nodes = mm.nodes if mm is not None else builder.model.nodes
     node_pts = np.array([[nd.x, nd.y, nd.z] for nd in _model_nodes.values()])
-    plotter.add_mesh(pv.PolyData(node_pts), color='#333333',
-                     point_size=10, style='points',
-                     render_points_as_spheres=True)
+    plotter.add_mesh(
+        pv.PolyData(node_pts),
+        color="#333333",
+        point_size=10,
+        style="points",
+        render_points_as_spheres=True,
+    )
     orig_ids = set(md.nodes.keys())
     split_ids = set(_model_nodes.keys()) - orig_ids
     if split_ids:
         split_pts = np.array([list(mesh_coords[t]) for t in split_ids if t in mesh_coords])
         if len(split_pts):
-            plotter.add_mesh(pv.PolyData(split_pts), color='#ff8c00',
-                             point_size=20, style='points',
-                             render_points_as_spheres=True)
+            plotter.add_mesh(
+                pv.PolyData(split_pts),
+                color="#ff8c00",
+                point_size=20,
+                style="points",
+                render_points_as_spheres=True,
+            )
+
 
 def _run_interactive_viewer(md, builder, LOADS_ONLY, mesh_model=None):
     """Open an interactive PyVista window with original/meshed toggle."""
     import pyvista as pv
+
     pv.set_plot_theme("document")
     plotter = pv.Plotter(window_size=[1400, 900])
     _add_original_geometry(plotter, md)
-    _add_meshed_geometry(plotter, md, builder, LOADS_ONLY,
-                          mesh_model=mesh_model)
-    plotter.set_background('white')
+    _add_meshed_geometry(plotter, md, builder, LOADS_ONLY, mesh_model=mesh_model)
+    plotter.set_background("white")
     plotter.view_isometric()
     plotter.show()
-

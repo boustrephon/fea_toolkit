@@ -6,6 +6,8 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "src"))
 
+import contextlib
+
 import openseespy.opensees as _real
 import pytest
 
@@ -59,6 +61,7 @@ class TestRecordingOpenSees:
         rec.node(1, 0.0, 0.0, 0.0)
         # Node should actually exist in OpenSees memory
         import openseespy.opensees as ops
+
         coords = ops.nodeCoord(1)
         assert list(coords) == [0.0, 0.0, 0.0]
         _real.wipe()
@@ -78,14 +81,17 @@ class TestRecordingOpenSees:
         # Validate content
         assert "import openseespy.opensees as ops" in content
         assert "def build_model():" in content
-        assert 'ops.wipe()' in content
+        assert "ops.wipe()" in content
         assert "ops.node(1, 0, 0, 0)" in content
 
         # Actually run it
         import subprocess
+
         ret = subprocess.run(
             [sys.executable, str(out)],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         assert ret.returncode == 0, f"Script failed: {ret.stderr}"
         assert "Model built successfully" in ret.stdout
@@ -118,13 +124,18 @@ class TestRecordingOpenSees:
     def test_numpy_values_are_clean(self, tmp_path):
         """NumPy types are serialised to plain Python literals."""
         import numpy as np
+
         rec = RecordingOpenSees(_real)
         # Manually inject commands with numpy types to test serialisation
         # without forwarding to the real C++ engine (which chokes on numpy types).
-        object.__setattr__(rec, "_commands", [
-            ("wipe", (), {}),
-            ("load", (1, np.float64(-10.5), np.int32(3), 0.0), {}),
-        ])
+        object.__setattr__(
+            rec,
+            "_commands",
+            [
+                ("wipe", (), {}),
+                ("load", (1, np.float64(-10.5), np.int32(3), 0.0), {}),
+            ],
+        )
         rec.save_as_python(str(tmp_path / "npy.py"))
         content = (tmp_path / "npy.py").read_text()
         assert "np" not in content  # no numpy dependency
@@ -136,7 +147,6 @@ class TestRecordingOpenSees:
 
     def test_args_are_snapshotted(self):
         """Mutating an argument after the call does not affect recorded command."""
-        import numpy as np
         rec = RecordingOpenSees(_real)
         rec.wipe()
         rec.model("basic", "-ndm", 3, "-ndf", 6)
@@ -159,10 +169,8 @@ class TestRecordingOpenSees:
         rec = RecordingOpenSees(_real)
         rec.wipe()
         d = {"key": "value"}
-        try:
+        with contextlib.suppress(Exception):
             rec.model("basic", "-ndm", 3, "-ndf", 6, **d)
-        except Exception:
-            pass
         d["key"] = "mutated"
 
         assert len(rec.commands) >= 2  # wipe + model
@@ -208,11 +216,17 @@ class TestRecordingOpenSees:
 
     def test_no_recording_without_swap(self):
         """Builder works normally without recorder (no side effects)."""
-        from fea_toolkit.opensees.preprocessor import preprocess_model
-        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         from fea_toolkit.model.sap_data import (
-            SAPModelData, Node, Material, Restraint, Section, FrameElement,
+            FrameElement,
+            Material,
+            Node,
+            Restraint,
+            SAPModelData,
+            Section,
         )
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
         md = SAPModelData(
             nodes={
                 "1": Node("1", 1, 0, 0, 0),
@@ -223,8 +237,13 @@ class TestRecordingOpenSees:
             },
             sections={
                 "Col600": Section(
-                    name="Col600", shape="Rectangular",
-                    material="Concrete", A=0.36, I33=0.0108, I22=0.0108, J=0.018,
+                    name="Col600",
+                    shape="Rectangular",
+                    material="Concrete",
+                    A=0.36,
+                    I33=0.0108,
+                    I22=0.0108,
+                    J=0.018,
                 ),
             },
             frame_elements={
@@ -236,8 +255,10 @@ class TestRecordingOpenSees:
             restraints={
                 "1": Restraint([1, 1, 1, 1, 1, 1]),
             },
-            area_elements={}, area_assignments={},
-            groups={}, frame_auto_mesh={},
+            area_elements={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
         )
         cfg = {"verbose": False, "use_elastic_sections": True}
         mesh_model = preprocess_model(md, cfg)
@@ -245,6 +266,7 @@ class TestRecordingOpenSees:
         ab.build_domain()
 
         import openseespy.opensees as ops
+
         assert list(ops.nodeCoord(1)) == [0.0, 0.0, 0.0]
         assert list(ops.nodeCoord(2)) == [6.0, 0.0, 0.0]
         ops.wipe()

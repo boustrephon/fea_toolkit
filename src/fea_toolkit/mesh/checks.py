@@ -7,10 +7,9 @@ after ``mesh_area_elements()``.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
-
 
 # ========================================================================
 # Mesh quality checks
@@ -18,9 +17,9 @@ import numpy as np
 
 
 def aspect_ratios(
-    area_elements: Dict[str, Any],
-    nodes: Dict[str, Any],
-) -> Dict[str, float]:
+    area_elements: dict[str, Any],
+    nodes: dict[str, Any],
+) -> dict[str, float]:
     """Compute aspect ratio (longest / shortest edge) per quad element.
 
     A ratio > 4 is generally considered poor for quadrilateral shell
@@ -33,7 +32,7 @@ def aspect_ratios(
     Returns:
         ``{area_id: aspect_ratio}`` for each quad element.
     """
-    ratios: Dict[str, float] = {}
+    ratios: dict[str, float] = {}
     for aid, elem in area_elements.items():
         nids = getattr(elem, "node_ids", None)
         if nids is None or len(nids) != 4:
@@ -57,9 +56,9 @@ def aspect_ratios(
 
 
 def flatness(
-    area_elements: Dict[str, Any],
-    nodes: Dict[str, Any],
-) -> Dict[str, float]:
+    area_elements: dict[str, Any],
+    nodes: dict[str, Any],
+) -> dict[str, float]:
     """Compute quad flatness as the ratio of diagonal distance to
     average edge length.
 
@@ -73,7 +72,7 @@ def flatness(
     Returns:
         ``{area_id: flatness_deviation}``.
     """
-    deviations: Dict[str, float] = {}
+    deviations: dict[str, float] = {}
     for aid, elem in area_elements.items():
         nids = getattr(elem, "node_ids", None)
         if nids is None or len(nids) != 4:
@@ -115,9 +114,9 @@ def flatness(
 
 
 def skew(
-    area_elements: Dict[str, Any],
-    nodes: Dict[str, Any],
-) -> Dict[str, float]:
+    area_elements: dict[str, Any],
+    nodes: dict[str, Any],
+) -> dict[str, float]:
     """Compute element skew as deviation from 90° (degrees).
 
     For each quad, the interior angles at the 4 corners are computed.
@@ -132,7 +131,7 @@ def skew(
     Returns:
         ``{area_id: max_skew_degrees}``.
     """
-    skews: Dict[str, float] = {}
+    skews: dict[str, float] = {}
     for aid, elem in area_elements.items():
         nids = getattr(elem, "node_ids", None)
         if nids is None or len(nids) != 4:
@@ -163,12 +162,12 @@ def skew(
 
 
 def report(
-    area_elements: Dict[str, Any],
-    nodes: Dict[str, Any],
+    area_elements: dict[str, Any],
+    nodes: dict[str, Any],
     aspect_warn: float = 4.0,
     flatness_warn: float = 0.02,
     skew_warn: float = 30.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate a comprehensive mesh quality report.
 
     Args:
@@ -192,7 +191,7 @@ def report(
     sk = skew(area_elements, nodes)
     fl = flatness(area_elements, nodes)
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     for aid in ar:
         if ar[aid] > aspect_warn:
             warnings.append(f"Area {aid}: aspect ratio {ar[aid]:.2f} > {aspect_warn}")

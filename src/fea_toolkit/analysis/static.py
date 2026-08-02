@@ -3,16 +3,13 @@
 Wraps :func:`~fea_toolkit.io.report.run_linear_cases`.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
-
-import pandas as pd
+from typing import TYPE_CHECKING, Any, Optional
 
 from fea_toolkit.analysis.base import (
+    _STATIC_LINEAR_DEFAULTS,
     Analysis,
     AnalysisResult,
-    _STATIC_LINEAR_DEFAULTS,
 )
-from fea_toolkit.analysis.modal import ModalAnalysis
 
 if TYPE_CHECKING:
     from fea_toolkit.model.mesh_model import MeshModel
@@ -70,9 +67,7 @@ class StaticAnalysis(Analysis):
         from fea_toolkit.io.report import run_linear_cases
 
         if self._md is None:
-            raise RuntimeError(
-                "StaticAnalysis requires md to be bound via bind_md()"
-            )
+            raise RuntimeError("StaticAnalysis requires md to be bound via bind_md()")
 
         df_linear = run_linear_cases(
             self._md,

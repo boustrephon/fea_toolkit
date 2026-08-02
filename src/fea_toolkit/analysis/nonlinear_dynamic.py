@@ -5,16 +5,19 @@ transient analyses.  Requires a preceding :class:`ModalAnalysis` for
 Rayleigh damping coefficients.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
+
 if TYPE_CHECKING:
     from fea_toolkit.model.mesh_model import MeshModel
 
+import contextlib
+
 from fea_toolkit.analysis.base import (
+    _NONLINEAR_DYNAMIC_DEFAULTS,
     Analysis,
     AnalysisResult,
-    _NONLINEAR_DYNAMIC_DEFAULTS,
 )
 from fea_toolkit.analysis.modal import ModalAnalysis
 
@@ -53,7 +56,7 @@ class NonlinearDynamicAnalysis(Analysis):
 
     def __init__(
         self,
-        mesh_model: "MeshModel",  # noqa: F821
+        mesh_model: "MeshModel",
         modal_result: AnalysisResult,
         ground_motion_file: str,
         dt: float = 0.005,
@@ -82,28 +85,33 @@ class NonlinearDynamicAnalysis(Analysis):
     @property
     def provides(self) -> set:
         return {
-            "times", "displacements", "envelope",
-            "peak_drift", "converged_steps",
-            "gm_file", "direction", "output_raw",
+            "times",
+            "displacements",
+            "envelope",
+            "peak_drift",
+            "converged_steps",
+            "gm_file",
+            "direction",
+            "output_raw",
         }
 
     def run(self) -> AnalysisResult:
-        from pathlib import Path
-        import tempfile
         import os
         import re
+        import tempfile
 
-        from fea_toolkit.opensees.recorder import (
-            export_mesh_model_to_tcl,
-            XaraTclRunner,
-        )
-        from fea_toolkit.opensees.builder import dynamic_time_history_tcl
         from fea_toolkit.model.mesh_model import MeshModel
+        from fea_toolkit.opensees.builder import dynamic_time_history_tcl
+        from fea_toolkit.opensees.recorder import (
+            XaraTclRunner,
+            export_mesh_model_to_tcl,
+        )
 
         mm: MeshModel = self.mesh_model
 
         # ── Gravity loads from sections/materials ──
         from fea_toolkit.opensees.builder import mesh_model_to_gravity_loads
+
         gravity_loads = mesh_model_to_gravity_loads(mm)
 
         # ── Rayleigh damping periods from modal result ──
@@ -158,7 +166,10 @@ class NonlinearDynamicAnalysis(Analysis):
             # ── Write Tcl inside tmp_dir — recorder outputs resolve here ──
             tcl_path = os.path.join(tmp_dir, "run_dyn.tcl")
             export_mesh_model_to_tcl(
-                mm, tcl_path, config=dyn_config, tcl_suffix=tcl_suffix,
+                mm,
+                tcl_path,
+                config=dyn_config,
+                tcl_suffix=tcl_suffix,
             )
 
             runner = XaraTclRunner()
@@ -215,14 +226,12 @@ class NonlinearDynamicAnalysis(Analysis):
                     pass
 
             if os.path.exists(env_disp_file):
-                try:
+                with contextlib.suppress(Exception):
                     env_data = np.loadtxt(env_disp_file)
-                except Exception:
-                    pass
             # tmp_dir cleaned up on context exit
 
         # Derive times from recorded data rows when available
-        if disp_data is not None and hasattr(disp_data, 'shape') and disp_data.ndim > 0:
+        if disp_data is not None and hasattr(disp_data, "shape") and disp_data.ndim > 0:
             n_rows = disp_data.shape[0]
             times = np.arange(n_rows) * self.dt
         else:

@@ -27,14 +27,14 @@ Each Rhino object with a ``SAP_FrameID`` UserString (matching a
 based on the force/moment magnitude at the element's I‑end.
 """
 
-from typing import List, Optional, Tuple
 import numpy as np
 
 # ---------------------------------------------------------------------------
 # Colour mapping helpers (pure NumPy — no Rhino dependency on import)
 # ---------------------------------------------------------------------------
 
-def _value_to_rgb(val: float, vmin: float, vmax: float) -> Tuple[int, int, int]:
+
+def _value_to_rgb(val: float, vmin: float, vmax: float) -> tuple[int, int, int]:
     """Map *val* in [*vmin*, *vmax*] to an (R, G, B) tuple (0‑255).
 
     Uses a diverging red‑white‑blue scheme:
@@ -53,20 +53,17 @@ def _value_to_rgb(val: float, vmin: float, vmax: float) -> Tuple[int, int, int]:
         r = int(255 * (0.3 - 0.3 * t))
         g = int(255 * (0.3 - 0.2 * t))
         b = int(255 * (0.3 + 0.7 * t))
-    return (max(0, min(255, r)),
-            max(0, min(255, g)),
-            max(0, min(255, b)))
+    return (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
 
 
-def _load_npz_quantities(npz_path: str, quantity: str, use_local: bool = True,
-                          case: str = None):
+def _load_npz_quantities(npz_path: str, quantity: str, use_local: bool = True, case: str = None):
     """Load a unified NPZ and return a dict {sap_id: value}."""
-    from ..io.npz_reader import read_results_npz, _get_static_cases
+    from ..io.npz_reader import _get_static_cases, read_results_npz
+
     d = read_results_npz(npz_path)
     cases = _get_static_cases(d)
     if case is not None and case not in cases:
-        raise ValueError(
-            f"Case '{case}' not found in NPZ. Available: {cases}")
+        raise ValueError(f"Case '{case}' not found in NPZ. Available: {cases}")
     case_name = case if case and case in cases else (cases[0] if cases else None)
     if case_name is None:
         return {}, (0.0, 0.0), {}
@@ -136,13 +133,12 @@ def colour_from_npz(
         Number of objects coloured.
     """
     # Rhino imports — must happen at call time inside Rhino
-    import rhinoscriptsyntax as rs
-    import scriptcontext as sc
     import Rhino
+    import scriptcontext as sc
     from Rhino.DocObjects import ObjectColorSource
 
     # Load NPZ data
-    sap_values, (vmin, vmax), meta = _load_npz_quantities(
+    sap_values, (vmin, vmax), _meta = _load_npz_quantities(
         npz_path, quantity, use_local, combo=combo
     )
     if not sap_values:
@@ -169,6 +165,7 @@ def colour_from_npz(
         # Layer filter
         if layer_filter:
             import fnmatch
+
             layer_path = rh_obj.Layer.FullPath
             if not fnmatch.fnmatch(layer_path, layer_filter):
                 continue
@@ -199,10 +196,10 @@ def colour_from_npz(
     return coloured
 
 
-
 # ==========================================================================
 # Convenience helpers
 # ==========================================================================
+
 
 def colour_frame_by_npz_ratio(
     npz_path: str,
@@ -254,9 +251,8 @@ def colour_frame_by_npz_ratio(
                 vmax = max(vmax, r)
 
     # Re-use colouring logic with a temporary value map
-    import rhinoscriptsyntax as rs
-    import scriptcontext as sc
     import Rhino
+    import scriptcontext as sc
     from Rhino.DocObjects import ObjectColorSource
 
     coloured = 0
@@ -333,16 +329,18 @@ def create_result_flags(
         Number of flags created.
     """
     # ── Rhino imports ──────────────────────────────────────────────
-    import scriptcontext as sc
     import Rhino
-    import Rhino.Geometry as rg
     import Rhino.DocObjects as rd
+    import Rhino.Geometry as rg
+    import scriptcontext as sc
+
     # ── Load NPZ data (auto-detect format) ─────────────────────────
     raw = np.load(npz_path, allow_pickle=True)
     is_unified = "analysis_types" in raw or "frame_eid" in raw
 
     if is_unified:
-        from ..io.npz_reader import read_results_npz, _get_static_cases
+        from ..io.npz_reader import _get_static_cases, read_results_npz
+
         data = read_results_npz(npz_path)
         cases = _get_static_cases(data)
         case = combo if combo and combo in cases else (cases[0] if cases else None)
@@ -387,7 +385,7 @@ def create_result_flags(
         val_j_arr = data.get(key_j)
 
     # ── Build node coordinate lookup ───────────────────────────────
-    node_coords: Dict[int, rg.Point3d] = {}
+    node_coords: dict[int, rg.Point3d] = {}
     z_vals = []
     for k in range(len(n_tags)):
         pt = rg.Point3d(float(n_x[k]), float(n_y[k]), float(n_z[k]))
@@ -424,7 +422,7 @@ def create_result_flags(
             new_layer.Name = parts[j - 1]
             new_layer.Color = Rhino.Display.ColorRGBA(200, 200, 200, 255)
             if j > 1:
-                parent_idx = layer_table.Find("/".join(parts[:j-1]), True)
+                parent_idx = layer_table.Find("/".join(parts[: j - 1]), True)
                 if parent_idx >= 0:
                     new_layer.ParentLayerId = layer_table[parent_idx].Id
             layer_table.Add(new_layer)
@@ -472,6 +470,7 @@ def create_result_flags(
         # Compute local axes (SAP2000 convention, angle=0 default)
         try:
             from ..model.geometry import get_local_axes
+
             _, vec_y, vec_z = get_local_axes(axis_u, 0.0)
         except (ImportError, ModuleNotFoundError):
             _gz = np.array([0.0, 0.0, 1.0])
@@ -515,13 +514,17 @@ def create_result_flags(
         def _c(val):
             t = min(abs(val) / max_abs, 1.0) if max_abs > 0 else 0.0
             if val >= 0:
-                return (int(255 * (0.3 + 0.7 * t)),
-                        int(255 * (0.3 - 0.2 * t)),
-                        int(255 * (0.3 - 0.3 * t)))
+                return (
+                    int(255 * (0.3 + 0.7 * t)),
+                    int(255 * (0.3 - 0.2 * t)),
+                    int(255 * (0.3 - 0.3 * t)),
+                )
             else:
-                return (int(255 * (0.3 - 0.3 * t)),
-                        int(255 * (0.3 - 0.2 * t)),
-                        int(255 * (0.3 + 0.7 * t)))
+                return (
+                    int(255 * (0.3 - 0.3 * t)),
+                    int(255 * (0.3 - 0.2 * t)),
+                    int(255 * (0.3 + 0.7 * t)),
+                )
 
         def _add_flag_mesh(verts, col_val, fid, vi_t, vj_t):
             """Add a coloured Mesh flag with attributes and UserText."""
@@ -551,8 +554,12 @@ def create_result_flags(
         # ── Build flag geometry via shared utility ─────────────────
         try:
             for verts, col_val in compute_flag_parts(
-                (p_i.X, p_i.Y, p_i.Z), (p_j.X, p_j.Y, p_j.Z),
-                vn, Fi, Fj, scale_factor,
+                (p_i.X, p_i.Y, p_i.Z),
+                (p_j.X, p_j.Y, p_j.Z),
+                vn,
+                Fi,
+                Fj,
+                scale_factor,
             ):
                 _add_flag_mesh(verts, col_val, int(sub_sap_ids[i]), Fi, Fj)
                 created += 1
@@ -563,13 +570,13 @@ def create_result_flags(
     # Reset CPlane to World XY
     try:
         import rhinoscriptsyntax as rs
+
         rs.Command("_-CPlane _World _XY", 0)
     except Exception:
         pass
 
     if verbose:
-        print(f"Created {created} flag(s) on layer '{layer_name}' "
-              f"for {quantity}")
+        print(f"Created {created} flag(s) on layer '{layer_name}' for {quantity}")
 
     return created
 
@@ -622,8 +629,12 @@ def create_all_result_flags(
     total = 0
     for qty, label in _ALL_QUANTITIES:
         n = create_result_flags(
-            npz_path, quantity=qty, use_local=use_local,
-            combo=combo, scale_factor=scale_factor, verbose=verbose,
+            npz_path,
+            quantity=qty,
+            use_local=use_local,
+            combo=combo,
+            scale_factor=scale_factor,
+            verbose=verbose,
         )
         total += n
     if verbose:
@@ -668,10 +679,10 @@ def mark_unconnected_edges(
     int
         Number of edge lines created.
     """
-    import scriptcontext as sc
     import Rhino
-    import Rhino.Geometry as rg
     import Rhino.DocObjects as rd
+    import Rhino.Geometry as rg
+    import scriptcontext as sc
 
     doc = sc.doc
 
@@ -686,7 +697,7 @@ def mark_unconnected_edges(
             new_layer.Name = parts[j - 1]
             new_layer.Color = Rhino.Display.ColorRGBA(200, 50, 50, 255)
             if j > 1:
-                parent = layer_table.Find("/".join(parts[:j-1]), True)
+                parent = layer_table.Find("/".join(parts[: j - 1]), True)
                 if parent >= 0:
                     new_layer.ParentLayerId = layer_table[parent].Id
             layer_table.Add(new_layer)
@@ -738,7 +749,8 @@ def mark_unconnected_edges(
 
     if verbose:
         slave_count = len(reports)
-        print(f"Marked {line_count} edge(s) and {slave_count} slave node(s) "
-              f"on layer '{layer_name}'")
+        print(
+            f"Marked {line_count} edge(s) and {slave_count} slave node(s) on layer '{layer_name}'"
+        )
 
     return line_count

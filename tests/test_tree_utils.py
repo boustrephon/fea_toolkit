@@ -1,14 +1,14 @@
 """Tests for frame-element tree-traversal utilities."""
 
 import pytest
+
 from fea_toolkit.model.sap_data import FrameElement
 from fea_toolkit.model.tree_utils import (
     collect_descendants,
-    get_root_parent,
-    get_element_chain,
     frame_split_summary,
+    get_element_chain,
+    get_root_parent,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────
 
@@ -18,16 +18,28 @@ def simple_split():
     """A single frame split into two children."""
     return {
         "3": FrameElement(
-            elem_id="3", elem_tag=3, node_i="1", node_j="2",
-            inactive=True, child_ids=["3-0", "3-1"],
+            elem_id="3",
+            elem_tag=3,
+            node_i="1",
+            node_j="2",
+            inactive=True,
+            child_ids=["3-0", "3-1"],
         ),
         "3-0": FrameElement(
-            elem_id="3-0", elem_tag=4, node_i="1", node_j="5",
-            inactive=False, parent_id="3",
+            elem_id="3-0",
+            elem_tag=4,
+            node_i="1",
+            node_j="5",
+            inactive=False,
+            parent_id="3",
         ),
         "3-1": FrameElement(
-            elem_id="3-1", elem_tag=5, node_i="5", node_j="2",
-            inactive=False, parent_id="3",
+            elem_id="3-1",
+            elem_tag=5,
+            node_i="5",
+            node_j="2",
+            inactive=False,
+            parent_id="3",
         ),
     }
 
@@ -37,24 +49,45 @@ def nested_split():
     """A frame split twice — root → child → grandchild."""
     return {
         "3": FrameElement(
-            elem_id="3", elem_tag=3, node_i="1", node_j="2",
-            inactive=True, child_ids=["3-0", "3-1"],
+            elem_id="3",
+            elem_tag=3,
+            node_i="1",
+            node_j="2",
+            inactive=True,
+            child_ids=["3-0", "3-1"],
         ),
         "3-0": FrameElement(
-            elem_id="3-0", elem_tag=4, node_i="1", node_j="6",
-            inactive=True, parent_id="3", child_ids=["3-0-0", "3-0-1"],
+            elem_id="3-0",
+            elem_tag=4,
+            node_i="1",
+            node_j="6",
+            inactive=True,
+            parent_id="3",
+            child_ids=["3-0-0", "3-0-1"],
         ),
         "3-0-0": FrameElement(
-            elem_id="3-0-0", elem_tag=5, node_i="1", node_j="7",
-            inactive=False, parent_id="3-0",
+            elem_id="3-0-0",
+            elem_tag=5,
+            node_i="1",
+            node_j="7",
+            inactive=False,
+            parent_id="3-0",
         ),
         "3-0-1": FrameElement(
-            elem_id="3-0-1", elem_tag=6, node_i="7", node_j="6",
-            inactive=False, parent_id="3-0",
+            elem_id="3-0-1",
+            elem_tag=6,
+            node_i="7",
+            node_j="6",
+            inactive=False,
+            parent_id="3-0",
         ),
         "3-1": FrameElement(
-            elem_id="3-1", elem_tag=7, node_i="6", node_j="2",
-            inactive=False, parent_id="3",
+            elem_id="3-1",
+            elem_tag=7,
+            node_i="6",
+            node_j="2",
+            inactive=False,
+            parent_id="3",
         ),
     }
 
@@ -64,7 +97,10 @@ def no_split():
     """A single frame that was never split."""
     return {
         "1": FrameElement(
-            elem_id="1", elem_tag=1, node_i="1", node_j="2",
+            elem_id="1",
+            elem_tag=1,
+            node_i="1",
+            node_j="2",
             inactive=False,
         ),
     }

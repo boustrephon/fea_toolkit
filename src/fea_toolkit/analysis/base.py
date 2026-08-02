@@ -1,8 +1,8 @@
 """Base classes for the analysis framework."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, asdict, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Type
+from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from fea_toolkit.model.mesh_model import MeshModel
@@ -161,8 +161,8 @@ class AnalysisCaseSpec:
 
     name: str
     analysis_type: str
-    config: Dict[str, Any] = field(default_factory=dict)
-    kwargs: Dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
+    kwargs: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -192,8 +192,8 @@ class AnalysisResult:
 
     name: str
     analysis_type: str
-    data: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -247,7 +247,7 @@ class Analysis(ABC):
         ...
 
     @property
-    def requires(self) -> List[Type["Analysis"]]:
+    def requires(self) -> list[type["Analysis"]]:
         """Analysis classes that must run before this one.
 
         Override to declare dependencies (e.g. ``[ModalAnalysis]``).
@@ -256,7 +256,7 @@ class Analysis(ABC):
         return []
 
     @property
-    def provides(self) -> Set[str]:
+    def provides(self) -> set[str]:
         """Data keys this analysis writes into its result."""
         return set()
 

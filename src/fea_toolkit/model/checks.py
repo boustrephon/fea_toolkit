@@ -7,21 +7,25 @@ to detect model issues before running any analysis.
 
 import math
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 from fea_toolkit.model.sap_data import (
-    SAPModelData, ShellSection, ConcreteRectangularSection,
+    ConcreteRectangularSection,
+    SAPModelData,
+    ShellSection,
 )
 from fea_toolkit.utils import (
-    DEFAULT_FY_STEEL_PA, DEFAULT_FC_PA,
-    length_to_si_factor, stress_to_si_factor,
+    DEFAULT_FC_PA,
+    DEFAULT_FY_STEEL_PA,
+    length_to_si_factor,
+    stress_to_si_factor,
 )
 
 
 def check_model_connectivity(
     md: SAPModelData,
     tol: float = 1e-6,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Pre-build connectivity check on parsed SAP2000 data.
 
     Call **before** creating a builder to detect model issues that
@@ -40,7 +44,7 @@ def check_model_connectivity(
         Keys ``orphan_nodes``, ``shell_only_base_nodes``,
         ``duplicate_coords``, ``zero_area_sections``, ``summary``.
     """
-    report: Dict[str, Any] = {}
+    report: dict[str, Any] = {}
 
     # ── Orphan nodes ───────────────────────────────────────────────
     frame_nodes: set = set()
@@ -62,10 +66,7 @@ def check_model_connectivity(
     shell_only: list = []
     if md.nodes:
         min_z = min(nd.z for nd in md.nodes.values())
-        base_ids = {
-            nid for nid, nd in md.nodes.items()
-            if abs(nd.z - min_z) < 0.01
-        }
+        base_ids = {nid for nid, nd in md.nodes.items() if abs(nd.z - min_z) < 0.01}
         base_frame_conn = set()
         for e in md.frame_elements.values():
             if e.node_i in base_ids:
@@ -86,13 +87,14 @@ def check_model_connectivity(
         report["shell_only_base_nodes"] = []
 
     # ── Duplicate coordinate nodes ─────────────────────────────────
-    coord_map: Dict[tuple, list] = defaultdict(list)
+    coord_map: dict[tuple, list] = defaultdict(list)
     for nid, nd in md.nodes.items():
         key = (round(nd.x / tol), round(nd.y / tol), round(nd.z / tol))
         coord_map[key].append(nid)
     dupes = [
         {"coord": (k[0] * tol, k[1] * tol, k[2] * tol), "node_ids": v}
-        for k, v in coord_map.items() if len(v) > 1
+        for k, v in coord_map.items()
+        if len(v) > 1
     ]
     report["duplicate_coords"] = dupes
 
@@ -101,15 +103,21 @@ def check_model_connectivity(
     for sn, s in md.sections.items():
         if isinstance(s, ShellSection):
             if s.thickness <= 0:
-                zero_secs.append({
-                    "name": sn, "type": "ShellSection",
-                    "thickness": s.thickness,
-                })
+                zero_secs.append(
+                    {
+                        "name": sn,
+                        "type": "ShellSection",
+                        "thickness": s.thickness,
+                    }
+                )
         elif (getattr(s, "A", None) or 0) == 0.0:
-            zero_secs.append({
-                "name": sn, "type": type(s).__name__,
-                "thickness": getattr(s, "thickness", 0),
-            })
+            zero_secs.append(
+                {
+                    "name": sn,
+                    "type": type(s).__name__,
+                    "thickness": getattr(s, "thickness", 0),
+                }
+            )
     report["zero_area_sections"] = zero_secs
 
     # ── Summary ────────────────────────────────────────────────────
@@ -133,9 +141,9 @@ def check_brace_buckling(
     md: "SAPModelData",
     brace_ids: Optional[set] = None,
     K: float = 1.0,
-    axial_demand: Optional[Dict[str, float]] = None,
+    axial_demand: Optional[dict[str, float]] = None,
     print_results: bool = True,
-) -> Dict[str, Dict[str, float]]:
+) -> dict[str, dict[str, float]]:
     """Check selected braces against Euler buckling.
 
     Computes P_cr = π²EI₂₂/(KL)² for each brace and optionally
@@ -170,7 +178,7 @@ def check_brace_buckling(
     elements = md.frame_elements
     assignments = md.frame_assignments
 
-    results: Dict[str, Dict[str, float]] = {}
+    results: dict[str, dict[str, float]] = {}
     for eid in brace_ids:
         elem = elements.get(eid)
         if elem is None:
@@ -194,6 +202,7 @@ def check_brace_buckling(
         # E_mod is guaranteed non-None by SAPModelData.apply_material_defaults(),
         # but manually-constructed fixtures may still have it as None.
         from ..utils import DEFAULT_E_S_PA
+
         E = mat.E_mod if (mat.E_mod or 0) > 0 else DEFAULT_E_S_PA
         I22 = (sec.I22 or 0) if (sec.I22 or 0) > 0 else (sec.I33 or 0)
         A = (sec.A or 0) if (sec.A or 0) > 0 else 1e-4
@@ -205,43 +214,46 @@ def check_brace_buckling(
         if I22 <= 0:
             continue
 
-        P_cr = (math.pi ** 2 * E * I22) / ((K * L) ** 2)
+        P_cr = (math.pi**2 * E * I22) / ((K * L) ** 2)
         r = math.sqrt(I22 / A)
-        slenderness = (K * L) / r if r > 0 else float('inf')
+        slenderness = (K * L) / r if r > 0 else float("inf")
 
         demand = axial_demand.get(eid, 0.0) if axial_demand else 0.0
-        ratio = demand / P_cr if P_cr > 0 else float('inf')
+        ratio = demand / P_cr if P_cr > 0 else float("inf")
 
         results[eid] = {
-            'P_cr': P_cr,
-            'P_demand': demand,
-            'ratio': ratio,
-            'slenderness': slenderness,
-            'length': L,
-            'section': sec_name,
+            "P_cr": P_cr,
+            "P_demand": demand,
+            "ratio": ratio,
+            "slenderness": slenderness,
+            "length": L,
+            "section": sec_name,
         }
 
     if print_results and results:
-        force_unit = md.units.get('F', 'N')
+        force_unit = md.units.get("F", "N")
         print(f"\n── Euler buckling check (K={K}) ──")
-        header = (f"  {'ID':>12} {'Section':>20} {'L (m)':>8} "
-                  f"{'λ':>8} {'P_cr (' + force_unit + ')':>14}")
+        header = (
+            f"  {'ID':>12} {'Section':>20} {'L (m)':>8} {'λ':>8} {'P_cr (' + force_unit + ')':>14}"
+        )
         if axial_demand:
             header += f" {'P_dem (' + force_unit + ')':>14} {'Ratio':>8}"
         print(header)
         print("  " + "-" * len(header))
         for eid, r in sorted(results.items()):
-            line = (f"  {eid:>12} {r['section']:>20} {r['length']:8.3f} "
-                    f"{r['slenderness']:8.1f} {r['P_cr']:10.1f}")
+            line = (
+                f"  {eid:>12} {r['section']:>20} {r['length']:8.3f} "
+                f"{r['slenderness']:8.1f} {r['P_cr']:10.1f}"
+            )
             if axial_demand:
                 line += f" {r['P_demand']:10.1f} {r['ratio']:8.3f}"
             print(line)
         if axial_demand:
-            n_critical = sum(1 for r in results.values() if r['ratio'] > 0.5)
+            n_critical = sum(1 for r in results.values() if r["ratio"] > 0.5)
             if n_critical:
                 print(f"\n  ⚠ {n_critical} brace(s) with demand > 50% of P_cr")
             else:
-                print(f"\n  ✅ All braces with demand < 50% of P_cr")
+                print("\n  ✅ All braces with demand < 50% of P_cr")
     return results
 
 
@@ -252,10 +264,10 @@ def check_brace_buckling(
 
 def check_self_weight_consistency(
     md: "SAPModelData",
-    load_totals: Optional[Dict[str, Dict[str, float]]] = None,
+    load_totals: Optional[dict[str, dict[str, float]]] = None,
     atol: Optional[float] = None,
     verbose: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compare applied self-weight loads against expected values.
 
     Parameters
@@ -281,10 +293,10 @@ def check_self_weight_consistency(
 
     # ── Compute expected self-weight from geometry ──
     expected = 0.0
-    by_section: Dict[str, float] = {}
+    by_section: dict[str, float] = {}
 
     for eid, elem in md.frame_elements.items():
-        if getattr(elem, 'inactive', False):
+        if getattr(elem, "inactive", False):
             continue
         sec_name = md.frame_assignments.get(eid)
         if not sec_name or sec_name not in md.sections:
@@ -303,7 +315,7 @@ def check_self_weight_consistency(
         by_section[sec_name] = by_section.get(sec_name, 0.0) + w
 
     for aid, area in md.area_elements.items():
-        if getattr(area, 'inactive', False):
+        if getattr(area, "inactive", False):
             continue
         sec_name = md.area_assignments.get(aid)
         if not sec_name or sec_name not in md.sections:
@@ -324,8 +336,10 @@ def check_self_weight_consistency(
         xs = [v.x for v in verts]
         ys = [v.y for v in verts]
         area_val = 0.5 * abs(
-            sum(xs[i] * ys[(i + 1) % len(verts)] - xs[(i + 1) % len(verts)] * ys[i]
-                for i in range(len(verts)))
+            sum(
+                xs[i] * ys[(i + 1) % len(verts)] - xs[(i + 1) % len(verts)] * ys[i]
+                for i in range(len(verts))
+            )
         )
         w = area_val * thickness * mat.unit_weight
         expected += w
@@ -334,7 +348,7 @@ def check_self_weight_consistency(
     # ── Applied load from load_totals ──
     applied = 0.0
     if load_totals:
-        lt_fz = sum(abs(v.get('fz', 0)) for v in load_totals.values())
+        lt_fz = sum(abs(v.get("fz", 0)) for v in load_totals.values())
         applied = lt_fz
 
     if atol is None:
@@ -344,7 +358,7 @@ def check_self_weight_consistency(
     passed = discrepancy < atol
 
     if verbose:
-        fu = md.units.get('F', 'N')
+        fu = md.units.get("F", "N")
         print(f"  Expected self-weight: {expected:.0f} {fu}")
         print(f"  Applied self-weight:  {applied:.0f} {fu}")
         print(f"  Discrepancy:          {discrepancy:.0f} {fu} (tol={atol:.0f})")
@@ -410,10 +424,10 @@ def _get_conversion_factors(md: Any) -> tuple:
     tuple
         ``(stress_factor, length_factor)`` as floats (SI → model units).
     """
-    if hasattr(md, 'stress_factor') and hasattr(md, 'length_factor'):
+    if hasattr(md, "stress_factor") and hasattr(md, "length_factor"):
         return md.stress_factor, md.length_factor
     # Fallback: compute from units dict using the canonical utils factors.
-    units = getattr(md, 'units', {}) or {}
+    units = getattr(md, "units", {}) or {}
     sf = stress_to_si_factor(units)
     lf = length_to_si_factor(units)
     return sf, lf
@@ -465,14 +479,8 @@ def compute_asce41_hinge_length(
     # ── Convert material strengths from model stress units → Pa → MPa ──
     # Model-provided values are in model stress units and need sf;
     # fallback constants are already in Pa and bypass sf.
-    if (mat.Fy or 0) > 0:
-        fy_pa = mat.Fy * sf
-    else:
-        fy_pa = DEFAULT_FY_STEEL_PA
-    if (mat.Fc or 0) > 0:
-        fc_pa = mat.Fc * sf
-    else:
-        fc_pa = DEFAULT_FC_PA
+    fy_pa = mat.Fy * sf if (mat.Fy or 0) > 0 else DEFAULT_FY_STEEL_PA
+    fc_pa = mat.Fc * sf if (mat.Fc or 0) > 0 else DEFAULT_FC_PA
     fy_mpa = fy_pa / 1e6
     fc_mpa = fc_pa / 1e6
 
@@ -480,7 +488,7 @@ def compute_asce41_hinge_length(
     # Use explicit ConcreteRectangularSection check rather than generic
     # attribute-based detection which can misidentify sections.
     is_concrete = isinstance(sec, ConcreteRectangularSection)
-    is_brace = hasattr(sec, 'od') or hasattr(sec, 't')
+    is_brace = hasattr(sec, "od") or hasattr(sec, "t")
 
     def _to_mm(val: float) -> float:
         """Convert a value in model length units to mm."""
@@ -488,23 +496,22 @@ def compute_asce41_hinge_length(
 
     if is_concrete:
         # ASCE 41-17 d_b = longitudinal rebar diameter (mm)
-        if (getattr(sec, 'top_bar_dia', None) or 0) > 0:
+        if (getattr(sec, "top_bar_dia", None) or 0) > 0:
             db = _to_mm(sec.top_bar_dia)
-        elif (getattr(sec, 'bar_dia', None) or 0) > 0:
+        elif (getattr(sec, "bar_dia", None) or 0) > 0:
             db = _to_mm(sec.bar_dia)
         else:
             db = 20.0  # fallback rebar diameter in mm
+    # Steel: db = section depth in the loading direction (mm)
+    # ASCE 41-17 §9.3.3.2 uses overall section depth or OD for steel
+    # members — flange thickness (tf) and wall thickness (t) are not
+    # valid d_b terms.
+    elif (getattr(sec, "depth", None) or 0) > 0:
+        db = _to_mm(sec.depth)
+    elif (getattr(sec, "od", None) or 0) > 0:
+        db = _to_mm(sec.od)
     else:
-        # Steel: db = section depth in the loading direction (mm)
-        # ASCE 41-17 §9.3.3.2 uses overall section depth or OD for steel
-        # members — flange thickness (tf) and wall thickness (t) are not
-        # valid d_b terms.
-        if (getattr(sec, 'depth', None) or 0) > 0:
-            db = _to_mm(sec.depth)
-        elif (getattr(sec, 'od', None) or 0) > 0:
-            db = _to_mm(sec.od)
-        else:
-            db = 20.0  # fallback in mm
+        db = 20.0  # fallback in mm
 
     # ── ASCE 41-17 formula §10.8 ──
     # Convert elem_length to metres for the formula

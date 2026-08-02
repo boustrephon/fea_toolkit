@@ -6,11 +6,11 @@ and creates the OpenSees domain objects.  It handles all analysis execution
 and result extraction — no topology mutations occur here.
 """
 
-from typing import Dict, Any, Optional, List, Tuple, Set, Union, TYPE_CHECKING
 import copy
 import math
-import numpy as np
+from typing import TYPE_CHECKING, Any, ClassVar, Optional, Union
 
+import numpy as np
 import openseespy.opensees as ops
 
 if TYPE_CHECKING:
@@ -20,20 +20,24 @@ if TYPE_CHECKING:
     # to the core dependencies.
     import pandas as pd
 
+import contextlib
+
+from ..model.geometry import get_local_axes, get_SAP_vecxz, polygon_area_3d
 from ..model.mesh_model import MeshModel
 from ..model.sap_data import (
-    Node, FrameElement, AreaElement,
-    ShellSection, Restraint,
+    FrameElement,
+    Node,
+    ShellSection,
 )
-from ..model.geometry import get_SAP_vecxz, get_local_axes
-from ..model.geometry import polygon_area_3d
 from ..model.tree_utils import collect_descendants
-from ..model.selection import Selection
 from ..utils import (
-    g_from_units, cqc_combine,
+    DEFAULT_E_S_PA,
+    DEFAULT_FY_REBAR_PA,
+    RC_NO_TIE_CONFINEMENT_FACTOR,
+    RC_NO_TIE_EPSC_FACTOR,
+    cqc_combine,
+    g_from_units,
     stress_scale_factor,
-    DEFAULT_FY_REBAR_PA, DEFAULT_E_S_PA,
-    RC_NO_TIE_CONFINEMENT_FACTOR, RC_NO_TIE_EPSC_FACTOR,
 )
 
 
@@ -54,7 +58,7 @@ class AnalysisBuilder:
     """
 
     # ── Solver defaults for pushover / nonlinear analysis ────────────
-    PUSHOVER_SOLVER_DEFAULTS: dict = {
+    PUSHOVER_SOLVER_DEFAULTS: ClassVar[dict] = {
         "solver_test_type": "NormDispIncr",
         "solver_test_tol": 1e-6,
         "solver_test_max_iter": 10,
@@ -64,100 +68,101 @@ class AnalysisBuilder:
         "gravity_num_substeps": 1,
     }
 
-    def __init__(self,
-                 mesh_model: MeshModel,
-                 config: Optional[Dict[str, Any]] = None):
+    def __init__(self, mesh_model: MeshModel, config: Optional[dict[str, Any]] = None):
         self.mesh_model = mesh_model
         self.units = mesh_model.units
         self.config = config or {}
         self._set_defaults()
 
         # Pushover step results (populated by run_pushover_analysis)
-        self.pushover_step_results: List[Dict[str, Any]] = []
+        self.pushover_step_results: list[dict[str, Any]] = []
 
         # Domain state (built during build_domain)
-        self.frame_tag_map: Dict[str, int] = {}
-        self.material_tags: Dict[str, int] = dict(mesh_model.material_tags)
-        self.section_tags: Dict[str, int] = dict(mesh_model.section_tags)
-        self._shell_sec_tags: Dict[str, int] = dict(mesh_model.shell_sec_tags)
-        self._shell_sec_variants: Dict[str, int] = dict(mesh_model.shell_sec_variants)
-        self._frame_element_types: Dict[str, str] = dict(mesh_model.frame_element_types)
-        self._area_element_types: Dict[str, str] = dict(mesh_model.area_element_types)
-        self._offset_rigid_links: List[tuple] = list(mesh_model.offset_rigid_links)
+        self.frame_tag_map: dict[str, int] = {}
+        self.material_tags: dict[str, int] = dict(mesh_model.material_tags)
+        self.section_tags: dict[str, int] = dict(mesh_model.section_tags)
+        self._shell_sec_tags: dict[str, int] = dict(mesh_model.shell_sec_tags)
+        self._shell_sec_variants: dict[str, int] = dict(mesh_model.shell_sec_variants)
+        self._frame_element_types: dict[str, str] = dict(mesh_model.frame_element_types)
+        self._area_element_types: dict[str, str] = dict(mesh_model.area_element_types)
+        self._offset_rigid_links: list[tuple] = list(mesh_model.offset_rigid_links)
         self._edge_constraint_method: Optional[str] = None
         # NOTE: mesh_model.edge_constraint_args is always [] today
         # (the Preprocessor stores detected pairs in detected_edge_pairs,
         # not constraint arguments).  The list is overwritten when
         # apply_edge_constraints() is first called at analysis time.
-        self._saved_edge_constraints: List[tuple] = list(mesh_model.edge_constraint_args)
+        self._saved_edge_constraints: list[tuple] = list(mesh_model.edge_constraint_args)
         self.edge_loads_from_areas: list = list(mesh_model.edge_loads_from_areas)
         self._base_z = mesh_model.base_z
 
         # Per-build tracking
         self._created_node_tags: set = set()
-        self._next_variant_tag: int = (max(self.section_tags.values(), default=0) + 1
-                                       if self.section_tags else 1)
-        self._rigid_link_elems: Dict[str, int] = {}
-        self._shell_tag_map: Dict[str, int] = {}  # area SAP ID → OpenSees element tag (reset at each build_domain())
+        self._next_variant_tag: int = (
+            max(self.section_tags.values(), default=0) + 1 if self.section_tags else 1
+        )
+        self._rigid_link_elems: dict[str, int] = {}
+        self._shell_tag_map: dict[
+            str, int
+        ] = {}  # area SAP ID → OpenSees element tag (reset at each build_domain())
 
         # Brace state
         self._brace_selection: Optional[set] = None
 
         # Mass tracking
-        self.node_masses: Dict[str, float] = {}
+        self.node_masses: dict[str, float] = {}
         self._mass_g: float = 9.81
 
         # Load totals
-        self.load_totals: Dict[str, float] = {}
-        self._sw_load_totals: Dict[str, Dict[str, float]] = {}
-        self._gravity_load_totals: Dict[str, float] = {}
+        self.load_totals: dict[str, float] = {}
+        self._sw_load_totals: dict[str, dict[str, float]] = {}
+        self._gravity_load_totals: dict[str, float] = {}
 
         # Model log
         self._model_log: Optional[Any] = None
-        self._model_diagnostics: Dict[str, Any] = {}
+        self._model_diagnostics: dict[str, Any] = {}
 
         # nD materials that were skipped (unknown type / unsupported)
-        self._skipped_nd_materials: Set[str] = set()
-        self._skipped_shell_sec_names: Set[str] = set()
+        self._skipped_nd_materials: set[str] = set()
+        self._skipped_shell_sec_names: set[str] = set()
 
         # Transf tags
-        self._transf_tags: Dict[int, int] = {}
+        self._transf_tags: dict[int, int] = {}
 
     def _set_defaults(self) -> None:
         """Set default configuration values."""
         defaults = {
-            'element_type': 'elasticBeamColumn',
-            'num_int_pts': 3,
-            'use_elastic_sections': True,
-            'create_fiber_sections': False,
-            'verbose': False,
-            'geom_transf_type': 'Linear',
-            'beam_integration': 'Lobatto',
-            'simplify_distributed_loads': False,
-            'constraint_method': 'spring',
-            'hinge_model': 'fiber',         # Distributed plasticity by default
+            "element_type": "elasticBeamColumn",
+            "num_int_pts": 3,
+            "use_elastic_sections": True,
+            "create_fiber_sections": False,
+            "verbose": False,
+            "geom_transf_type": "Linear",
+            "beam_integration": "Lobatto",
+            "simplify_distributed_loads": False,
+            "constraint_method": "spring",
+            "hinge_model": "fiber",  # Distributed plasticity by default
             # ── RC rebar material (fiber sections) ──
             # Config overrides in SI (Pa): user may override the yield
             # strength / elastic modulus / hardening of the Steel02 rebar
             # used in RC fiber sections.  None → use the section's
             # ``rebar_material`` from the S2K model, else the framework
             # rebar defaults (DEFAULT_FY_REBAR_PA / DEFAULT_E_S_PA).
-            'rebar_Fy_override': None,
-            'rebar_Es_override': None,
-            'rebar_b': 0.01,
-            'rebar_R0': 18.0,
-            'rebar_cR1': 0.925,
-            'rebar_cR2': 0.15,
+            "rebar_Fy_override": None,
+            "rebar_Es_override": None,
+            "rebar_b": 0.01,
+            "rebar_R0": 18.0,
+            "rebar_cR1": 0.925,
+            "rebar_cR2": 0.15,
             # ── Pushover recording (opt-in) ──
-            'record_pushover_steps': False,
-            'pushover_record_selection': None,
-            'pushover_record_shell_strains': False,
+            "record_pushover_steps": False,
+            "pushover_record_selection": None,
+            "pushover_record_shell_strains": False,
             # ── Confined concrete spalling-strain cap ──
             # Upper bound for the confined core ultimate (spalling)
             # strain when using the Mander confinement model.  The
             # Priestley (1996) formula can predict very large strains;
             # NZSEE C5 uses 0.05.  Mirrors ``ConfinementData.ecu_max``.
-            'confined_ecu_max': 0.025,
+            "confined_ecu_max": 0.025,
         }
         # Merge solver defaults from the class constant
         defaults.update(self.PUSHOVER_SOLVER_DEFAULTS)
@@ -168,9 +173,10 @@ class AnalysisBuilder:
     # Domain construction
     # ═══════════════════════════════════════════════════════════════
 
-    def build_domain(self,
-                     config_overrides: Optional[Dict[str, Any]] = None,
-                     ) -> None:
+    def build_domain(
+        self,
+        config_overrides: Optional[dict[str, Any]] = None,
+    ) -> None:
         """Create the full OpenSees domain from the MeshModel.
 
         Creates nodes, restraints, materials, sections, frame elements,
@@ -183,7 +189,7 @@ class AnalysisBuilder:
                 element types.  The overrides are reset after the build.
         """
         # Apply temporary config overrides
-        _saved_overrides: Dict[str, Any] = {}
+        _saved_overrides: dict[str, Any] = {}
         if config_overrides:
             for k, v in config_overrides.items():
                 _saved_overrides[k] = self.config.get(k)
@@ -209,7 +215,7 @@ class AnalysisBuilder:
             self._shell_sec_variants.clear()
             # Reset cached rigid section tag so it is recomputed fresh
             self._rigid_section_tag = None
-            ops.model('basic', '-ndm', 3, '-ndf', 6)
+            ops.model("basic", "-ndm", 3, "-ndf", 6)
 
             # Pre-compute frame tag map so shell elements can avoid clashing
             self._build_frame_tag_map()
@@ -268,14 +274,14 @@ class AnalysisBuilder:
             transformation by default, which is required for
             buckling to develop under compression.
         """
-        overrides: Dict[str, Any] = {
-            'element_type': 'dispBeamColumn',
-            'create_fiber_sections': True,
-            'use_elastic_sections': False,
+        overrides: dict[str, Any] = {
+            "element_type": "dispBeamColumn",
+            "create_fiber_sections": True,
+            "use_elastic_sections": False,
         }
         if brace_selection:
-            overrides['geom_transf_type'] = 'PDelta'
-            overrides['subdivide_braces'] = True
+            overrides["geom_transf_type"] = "PDelta"
+            overrides["subdivide_braces"] = True
             self._brace_selection = brace_selection
 
         self.build_domain(config_overrides=overrides)
@@ -304,7 +310,7 @@ class AnalysisBuilder:
                 coarse_elements=coarse_elems,
                 tolerance=tolerance,
                 penalty_stiffness=k,
-                verbose=verbose or self.config.get('verbose', False),
+                verbose=verbose or self.config.get("verbose", False),
             )
 
     # ═══════════════════════════════════════════════════════════════
@@ -325,8 +331,11 @@ class AnalysisBuilder:
         are still returned to support diagnostic detection of unconnected
         edges before deciding whether to create shells.
         """
-        return {aid for aid in self.mesh_model.area_elements
-                if not getattr(self.mesh_model.area_elements[aid], 'inactive', False)}
+        return {
+            aid
+            for aid in self.mesh_model.area_elements
+            if not getattr(self.mesh_model.area_elements[aid], "inactive", False)
+        }
 
     # ═══════════════════════════════════════════════════════════════
     # Local axis utilities (used by visualisation)
@@ -350,7 +359,7 @@ class AnalysisBuilder:
         coords_i = ops.nodeCoord(node_i.node_tag)
         coords_j = ops.nodeCoord(node_j.node_tag)
         vec_x = np.array(coords_j) - np.array(coords_i)
-        return get_local_axes(vec_x, getattr(elem, 'angle', 0.0))
+        return get_local_axes(vec_x, getattr(elem, "angle", 0.0))
 
     def _global_to_local(self, elem: FrameElement, vec: np.ndarray) -> np.ndarray:
         """Transform a vector from global to local coordinates.
@@ -377,9 +386,9 @@ class AnalysisBuilder:
 
     def apply_edge_constraints(
         self,
-        coarse_edges: Optional[List[Tuple[int, int]]] = None,
-        fine_nodes: Optional[List[int]] = None,
-        coarse_elements: Optional[List[int]] = None,
+        coarse_edges: Optional[list[tuple[int, int]]] = None,
+        fine_nodes: Optional[list[int]] = None,
+        coarse_elements: Optional[list[int]] = None,
         tolerance: float = 1e-4,
         penalty_stiffness: Optional[float] = None,
         verbose: bool = True,
@@ -396,8 +405,8 @@ class AnalysisBuilder:
         See :meth:`apply_spring_edge_constraints` and
         :meth:`_apply_penalty_edge_constraints` for full parameter docs.
         """
-        method = self.config.get('constraint_method', 'spring')
-        if method == 'spring':
+        method = self.config.get("constraint_method", "spring")
+        if method == "spring":
             return self.apply_spring_edge_constraints(
                 coarse_edges=coarse_edges,
                 fine_nodes=fine_nodes,
@@ -406,7 +415,7 @@ class AnalysisBuilder:
                 penalty_stiffness=penalty_stiffness,
                 verbose=verbose,
             )
-        if method == 'penalty':
+        if method == "penalty":
             return self._apply_penalty_edge_constraints(
                 coarse_edges=coarse_edges,
                 fine_nodes=fine_nodes,
@@ -414,9 +423,7 @@ class AnalysisBuilder:
                 tolerance=tolerance,
                 verbose=verbose,
             )
-        raise ValueError(
-            f"Unknown constraint_method '{method}'. "
-            f"Choose 'spring' or 'penalty'.")
+        raise ValueError(f"Unknown constraint_method '{method}'. Choose 'spring' or 'penalty'.")
 
     # ═══════════════════════════════════════════════════════════════
     # Spring-based edge constraints (twoNodeLink)
@@ -424,9 +431,9 @@ class AnalysisBuilder:
 
     def apply_spring_edge_constraints(
         self,
-        coarse_edges: Optional[List[Tuple[int, int]]] = None,
-        fine_nodes: Optional[List[int]] = None,
-        coarse_elements: Optional[List[int]] = None,
+        coarse_edges: Optional[list[tuple[int, int]]] = None,
+        fine_nodes: Optional[list[int]] = None,
+        coarse_elements: Optional[list[int]] = None,
         tolerance: float = 1e-4,
         penalty_stiffness: Optional[float] = None,
         verbose: bool = True,
@@ -499,12 +506,12 @@ class AnalysisBuilder:
             avg_Et = 0.0
             _count = 0
             for _aid in self.mesh_model.area_elements:
-                if getattr(self.mesh_model.area_elements[_aid], 'inactive', False):
+                if getattr(self.mesh_model.area_elements[_aid], "inactive", False):
                     continue
                 _sec_name = self.mesh_model.area_assignments.get(_aid)
                 if _sec_name:
                     _sec = self.mesh_model.sections.get(_sec_name)
-                    if _sec and hasattr(_sec, 'thickness') and _sec.thickness > 0:
+                    if _sec and hasattr(_sec, "thickness") and _sec.thickness > 0:
                         _mat = self.mesh_model.materials.get(_sec.material)
                         if _mat and _mat.E_mod > 0:
                             avg_Et += _mat.E_mod * _sec.thickness
@@ -513,27 +520,31 @@ class AnalysisBuilder:
                 avg_Et /= _count
                 penalty_stiffness = 100.0 * avg_Et
                 if verbose:
-                    print(f"  Spring stiffness auto: E·t_avg = {avg_Et:.3e}, "
-                          f"k = {penalty_stiffness:.3e}  "
-                          f"(scanned {_count} shell element(s))")
+                    print(
+                        f"  Spring stiffness auto: E·t_avg = {avg_Et:.3e}, "
+                        f"k = {penalty_stiffness:.3e}  "
+                        f"(scanned {_count} shell element(s))"
+                    )
             else:
-                _E = 2e8   # KN/m² (200 GPa steel)
+                _E = 2e8  # KN/m² (200 GPa steel)
                 _t = 0.15  # m (typical slab)
                 penalty_stiffness = 100.0 * _E * _t
                 if verbose:
-                    print(f"  Spring stiffness auto: using fallback "
-                          f"k = {penalty_stiffness:.3e}")
+                    print(f"  Spring stiffness auto: using fallback k = {penalty_stiffness:.3e}")
 
         # ── Find tags ─────────────────────────────────────────────
         max_elem = max(
-            (e.elem_tag for e in self.mesh_model.frame_elements.values()
-             if hasattr(e, 'elem_tag') and e.elem_tag is not None),
+            (
+                e.elem_tag
+                for e in self.mesh_model.frame_elements.values()
+                if hasattr(e, "elem_tag") and e.elem_tag is not None
+            ),
             default=0,
         )
         try:
             active = ops.getEleTags()
             if active:
-                max_elem = max(max_elem, max(active))
+                max_elem = max(max_elem, *active)
         except Exception:
             pass
         ele_tag = max_elem + 100_000
@@ -572,11 +583,27 @@ class AnalysisBuilder:
                     if weight < 1e-12:
                         continue
                     k = penalty_stiffness * weight
-                    ops.uniaxialMaterial('Elastic', mat_tag, k)
-                    ops.element('twoNodeLink', ele_tag, int(s_id), int(master),
-                                '-mat', mat_tag, mat_tag, mat_tag,
-                                mat_tag, mat_tag, mat_tag,
-                                '-dir', 1, 2, 3, 4, 5, 6)
+                    ops.uniaxialMaterial("Elastic", mat_tag, k)
+                    ops.element(
+                        "twoNodeLink",
+                        ele_tag,
+                        int(s_id),
+                        int(master),
+                        "-mat",
+                        mat_tag,
+                        mat_tag,
+                        mat_tag,
+                        mat_tag,
+                        mat_tag,
+                        mat_tag,
+                        "-dir",
+                        1,
+                        2,
+                        3,
+                        4,
+                        5,
+                        6,
+                    )
                     if verbose:
                         print(
                             f"  Spring constraint: node {s_id} → "
@@ -587,16 +614,22 @@ class AnalysisBuilder:
                     count += 1
 
         if count:
-            self._edge_constraint_method = 'spring'
+            self._edge_constraint_method = "spring"
             if coarse_edges is not None or coarse_elements is not None:
                 # Save arguments so they can be re-applied after a
                 # domain rebuild (pushover switches to fiber sections).
                 # Single-entry list: edge constraints are applied as one
                 # batch per analysis cycle.
-                self._saved_edge_constraints = [(
-                    coarse_edges, fine_nodes, coarse_elements,
-                    tolerance, penalty_stiffness, verbose,
-                )]
+                self._saved_edge_constraints = [
+                    (
+                        coarse_edges,
+                        fine_nodes,
+                        coarse_elements,
+                        tolerance,
+                        penalty_stiffness,
+                        verbose,
+                    )
+                ]
             if verbose:
                 print(f"Applied {count} spring element(s).")
 
@@ -608,9 +641,9 @@ class AnalysisBuilder:
 
     def _apply_penalty_edge_constraints(
         self,
-        coarse_edges: Optional[List[Tuple[int, int]]] = None,
-        fine_nodes: Optional[List[int]] = None,
-        coarse_elements: Optional[List[int]] = None,
+        coarse_edges: Optional[list[tuple[int, int]]] = None,
+        fine_nodes: Optional[list[int]] = None,
+        coarse_elements: Optional[list[int]] = None,
         tolerance: float = 1e-4,
         verbose: bool = True,
     ) -> int:
@@ -693,7 +726,7 @@ class AnalysisBuilder:
                 continue
 
             for s_id in slave_candidates:
-                if s_id == m1_id or s_id == m2_id:
+                if s_id in (m1_id, m2_id):
                     continue
                 try:
                     cs = np.array(ops.nodeCoord(s_id))
@@ -711,9 +744,15 @@ class AnalysisBuilder:
                     N1 = 1.0 - N2
                     for dof in range(1, 7):
                         ops.equationConstraint(
-                            int(s_id), dof, 1.0,
-                            int(m1_id), dof, -N1,
-                            int(m2_id), dof, -N2,
+                            int(s_id),
+                            dof,
+                            1.0,
+                            int(m1_id),
+                            dof,
+                            -N1,
+                            int(m2_id),
+                            dof,
+                            -N2,
                         )
                     count += 1
                     if verbose:
@@ -724,15 +763,20 @@ class AnalysisBuilder:
                         )
 
         if count:
-            self._edge_constraint_method = 'penalty'
+            self._edge_constraint_method = "penalty"
             if coarse_edges is not None or coarse_elements is not None:
-                self._saved_edge_constraints = [(
-                    coarse_edges, fine_nodes, coarse_elements,
-                    tolerance, None, verbose,
-                )]
+                self._saved_edge_constraints = [
+                    (
+                        coarse_edges,
+                        fine_nodes,
+                        coarse_elements,
+                        tolerance,
+                        None,
+                        verbose,
+                    )
+                ]
             if verbose:
-                print(f"Applied {count} edge constraint(s). "
-                      f"Solver will use Penalty handler.")
+                print(f"Applied {count} edge constraint(s). Solver will use Penalty handler.")
 
         return count
 
@@ -744,7 +788,7 @@ class AnalysisBuilder:
         self,
         tolerance: float = 1e-4,
         include_frame_connections: bool = False,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Scan shell elements and report fine-mesh nodes that sit on
         coarse-mesh edges without being directly connected.
 
@@ -763,7 +807,7 @@ class AnalysisBuilder:
             ``master_node_j``, ``coords``, ``N1``, ``N2``, ``edge_length``,
             ``distance``.
         """
-        reports: List[Dict[str, Any]] = []
+        reports: list[dict[str, Any]] = []
 
         shell_area_ids = self._get_shell_area_ids()
         if not shell_area_ids:
@@ -814,7 +858,7 @@ class AnalysisBuilder:
                 continue
 
             for s_tag in all_slave_nodes:
-                if s_tag == m1_tag or s_tag == m2_tag:
+                if s_tag in (m1_tag, m2_tag):
                     continue
                 try:
                     cs = np.array(ops.nodeCoord(s_tag))
@@ -831,24 +875,27 @@ class AnalysisBuilder:
                 if 0.0 < proj < edge_len:
                     N2 = proj / edge_len
                     N1 = 1.0 - N2
-                    reports.append({
-                        "slave_node": s_tag,
-                        "master_node_i": m1_tag,
-                        "master_node_j": m2_tag,
-                        "coords": tuple(cs),
-                        "master_coords_i": tuple(c1),
-                        "master_coords_j": tuple(c2),
-                        "N1": round(N1, 6),
-                        "N2": round(N2, 6),
-                        "edge_length": round(edge_len, 6),
-                        "distance": round(distance, 8),
-                    })
+                    reports.append(
+                        {
+                            "slave_node": s_tag,
+                            "master_node_i": m1_tag,
+                            "master_node_j": m2_tag,
+                            "coords": tuple(cs),
+                            "master_coords_i": tuple(c1),
+                            "master_coords_j": tuple(c2),
+                            "N1": round(N1, 6),
+                            "N2": round(N2, 6),
+                            "edge_length": round(edge_len, 6),
+                            "distance": round(distance, 8),
+                        }
+                    )
 
         return reports
 
-    def create_loads(self,
-                     pattern_scales: Optional[Dict[str, float]] = None,
-                     ) -> None:
+    def create_loads(
+        self,
+        pattern_scales: Optional[dict[str, float]] = None,
+    ) -> None:
         """Create load patterns on the OpenSees domain.
 
         Args:
@@ -891,7 +938,7 @@ class AnalysisBuilder:
         # along an edge have restraints.  If so, intermediate mesh
         # nodes inherit the AND (more-restrictive) combination.
         for aid, elem in self.mesh_model.area_elements.items():
-            if not getattr(elem, 'inactive', False):
+            if not getattr(elem, "inactive", False):
                 continue  # only look at subdivided parents
             if len(elem.node_ids) != 4:
                 continue
@@ -905,9 +952,7 @@ class AnalysisBuilder:
                 if ri is None or rj is None:
                     continue
                 # AND of restraint DOFs (more restricted wins)
-                combined = [
-                    min(ri.dofs[d], rj.dofs[d]) for d in range(6)
-                ]
+                combined = [min(ri.dofs[d], rj.dofs[d]) for d in range(6)]
                 if sum(combined) == 0:
                     continue
                 nd_i = self.mesh_model.nodes.get(nid_i)
@@ -979,7 +1024,7 @@ class AnalysisBuilder:
         # _nd_material_tags namespace so newly created materials cannot
         # collide with tags from a previous build (e.g. after materials
         # were removed from the config).
-        _nd_existing = getattr(self, '_nd_material_tags', {})
+        _nd_existing = getattr(self, "_nd_material_tags", {})
         if _nd_existing:
             _tag_base = max(_tag_base, max(_nd_existing.values()) + 1)
         tag = _tag_base
@@ -992,7 +1037,7 @@ class AnalysisBuilder:
             # keeping tags stable across repeated build_domain calls.
             # Use dedicated _nd_material_tags namespace so nD material
             # names do not collide with uniaxial material names.
-            if name in getattr(self, '_nd_material_tags', {}):
+            if name in getattr(self, "_nd_material_tags", {}):
                 current_tag = self._nd_material_tags[name]
                 is_new = False
             else:
@@ -1000,26 +1045,40 @@ class AnalysisBuilder:
                 is_new = True
 
             if t == "ElasticIsotropic":
-                ops.nDMaterial('ElasticIsotropic', current_tag, nd_mat.E, nd_mat.nu)
+                ops.nDMaterial("ElasticIsotropic", current_tag, nd_mat.E, nd_mat.nu)
             elif t == "J2PlateFibre":
-                ops.nDMaterial('J2PlateFibre', current_tag, nd_mat.E, nd_mat.nu,
-                               nd_mat.fy, nd_mat.Hiso, nd_mat.Hkin)
+                ops.nDMaterial(
+                    "J2PlateFibre",
+                    current_tag,
+                    nd_mat.E,
+                    nd_mat.nu,
+                    nd_mat.fy,
+                    nd_mat.Hiso,
+                    nd_mat.Hkin,
+                )
             elif t == "ConcreteS":
-                ops.nDMaterial('ConcreteS', current_tag, nd_mat.E, nd_mat.nu,
-                               nd_mat.fc, nd_mat.ft, nd_mat.Es)
+                ops.nDMaterial(
+                    "ConcreteS", current_tag, nd_mat.E, nd_mat.nu, nd_mat.fc, nd_mat.ft, nd_mat.Es
+                )
             elif t == "PlateFromPlaneStress":
-                _w.warn(f"PlateFromPlaneStress not yet supported for '{name}' — "
-                        f"data model missing wrapped-material and Eout fields — skipping",
-                        UserWarning, stacklevel=2)
+                _w.warn(
+                    f"PlateFromPlaneStress not yet supported for '{name}' — "
+                    f"data model missing wrapped-material and Eout fields — skipping",
+                    UserWarning,
+                    stacklevel=2,
+                )
                 self._skipped_nd_materials.add(name)
                 continue
             else:
-                _w.warn(f"Unknown nDMaterial type '{t}' for '{name}' — skipping",
-                        UserWarning, stacklevel=2)
+                _w.warn(
+                    f"Unknown nDMaterial type '{t}' for '{name}' — skipping",
+                    UserWarning,
+                    stacklevel=2,
+                )
                 self._skipped_nd_materials.add(name)
                 continue
 
-            if not hasattr(self, '_nd_material_tags'):
+            if not hasattr(self, "_nd_material_tags"):
                 self._nd_material_tags = {}
             self._nd_material_tags[name] = current_tag
             if is_new:
@@ -1030,7 +1089,7 @@ class AnalysisBuilder:
                     tag += 1
                 created += 1
 
-        if self.config.get('verbose', False):
+        if self.config.get("verbose", False):
             print(f"  Created {created} nD material(s)")
 
     def _create_layered_shell_sections(self) -> None:
@@ -1095,7 +1154,7 @@ class AnalysisBuilder:
         for name, lss in self.mesh_model.layered_shell_sections.items():
             n_layers = len(lss.layers)
             if n_layers == 0:
-                if self.config.get('verbose', False):
+                if self.config.get("verbose", False):
                     print(f"  ⚠ Layered section '{name}' has no layers — skipping")
                 continue
             flat_args = []
@@ -1105,21 +1164,25 @@ class AnalysisBuilder:
                 # a previous build where a now-skipped material still has
                 # a tag in self.material_tags.
                 if layer.nd_material in self._skipped_nd_materials:
-                    print(f"  ⚠ nD material '{layer.nd_material}' for "
-                          f"layered section '{name}' was skipped during "
-                          f"material creation (unsupported type) — "
-                          f"skipping section '{name}'")
+                    print(
+                        f"  ⚠ nD material '{layer.nd_material}' for "
+                        f"layered section '{name}' was skipped during "
+                        f"material creation (unsupported type) — "
+                        f"skipping section '{name}'"
+                    )
                     skip_section = True
                     break
                 mat_tag = self.material_tags.get(layer.nd_material)
                 if mat_tag is None:
                     # Also check dedicated nD material tag namespace
-                    nd_tags = getattr(self, '_nd_material_tags', {})
+                    nd_tags = getattr(self, "_nd_material_tags", {})
                     mat_tag = nd_tags.get(layer.nd_material)
                 if mat_tag is None:
-                    if self.config.get('verbose', False):
-                        print(f"  ⚠ nD material '{layer.nd_material}' not found "
-                              f"for layered section '{name}' — skipping section")
+                    if self.config.get("verbose", False):
+                        print(
+                            f"  ⚠ nD material '{layer.nd_material}' not found "
+                            f"for layered section '{name}' — skipping section"
+                        )
                     skip_section = True
                     break
                 # LayeredShell syntax: matTag, thickness only (nIP not accepted)
@@ -1136,10 +1199,10 @@ class AnalysisBuilder:
                 self._shell_sec_tags[name] = tag
                 next_tag += 1
 
-            ops.section('LayeredShell', tag, n_layers, *flat_args)
+            ops.section("LayeredShell", tag, n_layers, *flat_args)
             created += 1
 
-        if self.config.get('verbose', False):
+        if self.config.get("verbose", False):
             print(f"  Created {created} layered shell section(s)")
 
     # ── Materials ────────────────────────────────────────────────
@@ -1164,16 +1227,23 @@ class AnalysisBuilder:
         # we can skip Elastic creation for them (the Hysteretic material
         # replaces the Elastic at a distinct tag, but creating both is wasteful).
         _brace_mat_names: set = set()
-        if self.config.get('brace_truss'):
+        if self.config.get("brace_truss"):
             from ..model.sap_data import (
-                PipeSection, AngleSection, DoubleAngleSection,
-                TeeSection, ChannelSection,
+                AngleSection,
+                ChannelSection,
+                DoubleAngleSection,
+                PipeSection,
+                TeeSection,
             )
+
             brace_sec_types = (
-                PipeSection, AngleSection, DoubleAngleSection,
-                TeeSection, ChannelSection,
+                PipeSection,
+                AngleSection,
+                DoubleAngleSection,
+                TeeSection,
+                ChannelSection,
             )
-            explicit = self.config.get('brace_sections')
+            explicit = self.config.get("brace_sections")
             for sec_name, sec in self.mesh_model.sections.items():
                 if explicit is not None:
                     if sec_name not in explicit:
@@ -1189,17 +1259,20 @@ class AnalysisBuilder:
             E_mod = mat.E_mod or 200e9
             if mat_name in _brace_mat_names:
                 continue  # will be created as Hysteretic in brace-truss section
-            try:
-                ops.uniaxialMaterial('Elastic', tag, E_mod)
-            except Exception:
-                pass  # may already exist
+            # May already exist on rebuild — suppress the OpenSees error.
+            with contextlib.suppress(Exception):
+                ops.uniaxialMaterial("Elastic", tag, E_mod)
 
         # Fiber section materials
-        if self.config.get('create_fiber_sections'):
+        if self.config.get("create_fiber_sections"):
             from ..model.sap_data import (
-                PipeSection, AngleSection, DoubleAngleSection,
-                TeeSection, ChannelSection,
+                AngleSection,
+                ChannelSection,
+                DoubleAngleSection,
+                PipeSection,
+                TeeSection,
             )
+
             for sec_name, sec in self.mesh_model.sections.items():
                 mat_name = sec.material
                 mat_tag = self.material_tags.get(mat_name)
@@ -1209,19 +1282,26 @@ class AnalysisBuilder:
                 # sec.to_fiber_patches(mat_tag, ...) in _create_single_section
 
         # Brace truss materials
-        if self.config.get('brace_truss'):
+        if self.config.get("brace_truss"):
             from ..model.sap_data import (
-                PipeSection, AngleSection, DoubleAngleSection,
-                TeeSection, ChannelSection,
+                AngleSection,
+                ChannelSection,
+                DoubleAngleSection,
+                PipeSection,
+                TeeSection,
             )
+
             brace_types = (
-                PipeSection, AngleSection, DoubleAngleSection,
-                TeeSection, ChannelSection,
+                PipeSection,
+                AngleSection,
+                DoubleAngleSection,
+                TeeSection,
+                ChannelSection,
             )
-            self._truss_mat_tags: Dict[str, int] = {}
-            self._truss_areas: Dict[str, float] = {}
-            self._truss_Fy: Dict[str, float] = {}
-            self._truss_E: Dict[str, float] = {}
+            self._truss_mat_tags: dict[str, int] = {}
+            self._truss_areas: dict[str, float] = {}
+            self._truss_Fy: dict[str, float] = {}
+            self._truss_E: dict[str, float] = {}
             self._truss_mat_counter: int = 100000
             # Use tags beyond both material AND section tags to avoid clashes
             # with fiber-section materials created in _create_single_section
@@ -1232,19 +1312,19 @@ class AnalysisBuilder:
             )
             truss_tag = _existing + 1
 
-            explicit = self.config.get('brace_sections')
+            explicit = self.config.get("brace_sections")
             for sec_name, sec in self.mesh_model.sections.items():
                 if explicit is not None:
                     if sec_name not in explicit:
                         continue
                 elif not isinstance(sec, brace_types):
                     continue
-                area = getattr(sec, 'A', 0.0) or 0.0
+                area = getattr(sec, "A", 0.0) or 0.0
                 if area < 1e-12:
                     continue
                 mat = self.mesh_model.materials.get(sec.material)
                 E_sec = mat.E_mod if mat else 200e9
-                Fy = getattr(sec, 'Fy', None) or getattr(mat, 'Fy', 250e6) if mat else 250e6
+                Fy = getattr(sec, "Fy", None) or getattr(mat, "Fy", 250e6) if mat else 250e6
 
                 self._truss_mat_tags[sec_name] = truss_tag
                 self._truss_areas[sec_name] = area
@@ -1262,13 +1342,15 @@ class AnalysisBuilder:
         Assigns section tags sequentially if they are not already
         populated in ``self.section_tags`` (from MeshModel).
         """
-        if self.config['verbose']:
+        if self.config["verbose"]:
             print("Creating sections...")
 
         # Ensure normal-section tags don't collide with layered-shell tags
         _max_sec = max(self.section_tags.values(), default=0)
         _max_shell = max(self._shell_sec_tags.values(), default=0)
-        next_tag = max(_max_sec, _max_shell) + 1 if (self.section_tags or self._shell_sec_tags) else 1
+        next_tag = (
+            max(_max_sec, _max_shell) + 1 if (self.section_tags or self._shell_sec_tags) else 1
+        )
         for sec_name, sec in self.mesh_model.sections.items():
             if sec_name not in self.section_tags:
                 self.section_tags[sec_name] = next_tag
@@ -1278,10 +1360,11 @@ class AnalysisBuilder:
 
     def _create_single_section(self, sec, tag: int) -> None:
         """Create a single OpenSees section."""
-        mods = getattr(sec, 'modifiers', {}) or {}
+        mods = getattr(sec, "modifiers", {}) or {}
         # ── Fiber section path (frame sections only) ────────────
-        if self.config.get('create_fiber_sections'):
+        if self.config.get("create_fiber_sections"):
             from ..model.sap_data import ShellSection as _ShellSec
+
             if not isinstance(sec, _ShellSec):
                 mat = self.mesh_model.materials.get(sec.material)
                 if mat is None:
@@ -1291,17 +1374,17 @@ class AnalysisBuilder:
                     E_mod = mat.E_mod or 200e9
                     G_mod = mat.G_mod or (E_mod / 2.6)
 
-                _A = getattr(sec, 'A', 0.0) or 0.0
-                _I33 = getattr(sec, 'I33', 0.0) or 0.0
-                _I22 = getattr(sec, 'I22', 0.0) or 0.0
-                _J = getattr(sec, 'J', 0.0) or 0.0
+                _A = getattr(sec, "A", 0.0) or 0.0
+                _I33 = getattr(sec, "I33", 0.0) or 0.0
+                _I22 = getattr(sec, "I22", 0.0) or 0.0
+                _J = getattr(sec, "J", 0.0) or 0.0
 
                 # Create material(s) appropriate for the section type
                 # Use a continuously incrementing counter so that every
                 # fiber material gets a unique tag (tag-based offsets
                 # collide when e.g. concrete sec 1 uses 500001-500003
                 # and steel sec 2 tries 500002).
-                if not hasattr(self, '_next_fiber_mat_tag'):
+                if not hasattr(self, "_next_fiber_mat_tag"):
                     _max_all = max(
                         max(self.material_tags.values(), default=0),
                         max(self.section_tags.values(), default=0),
@@ -1309,17 +1392,18 @@ class AnalysisBuilder:
                     )
                     self._next_fiber_mat_tag = max(_max_all, 1000000) + 1
                 mat_tag = self._next_fiber_mat_tag
-                self._next_fiber_mat_tag += 3 if (mat is not None and mat.type.lower() == 'concrete') else 1
-                if mat is not None and mat.type.lower() == 'concrete':
+                self._next_fiber_mat_tag += (
+                    3 if (mat is not None and mat.type.lower() == "concrete") else 1
+                )
+                if mat is not None and mat.type.lower() == "concrete":
                     # Concrete section: to_fiber_patches() uses three tags:
                     #   mat_tag     → unconfined concrete  (Concrete01)
                     #   mat_tag + 1 → confined core        (Concrete01)
                     #   mat_tag + 2 → steel rebar          (Steel02)
-                    Fc = getattr(mat, 'Fc', 0.0) or 3.0e7
-                    epsc = getattr(mat, 'eFc', 0.0) or 0.002
+                    Fc = getattr(mat, "Fc", 0.0) or 3.0e7
+                    epsc = getattr(mat, "eFc", 0.0) or 0.002
                     # Unconfined cover concrete
-                    ops.uniaxialMaterial('Concrete01', mat_tag,
-                                         -Fc, -abs(epsc), -0.2 * Fc, -0.006)
+                    ops.uniaxialMaterial("Concrete01", mat_tag, -Fc, -abs(epsc), -0.2 * Fc, -0.006)
                     # Confined core concrete — use Mander confinement when
                     # tie data is present on the section, else fall back
                     # to the conventional no-tie-data heuristic defined by
@@ -1328,67 +1412,66 @@ class AnalysisBuilder:
                     Fc_core = Fc * RC_NO_TIE_CONFINEMENT_FACTOR
                     epsc_core = abs(epsc) * RC_NO_TIE_EPSC_FACTOR
                     ecu_core = 0.02
-                    tie_fy = getattr(sec, 'tie_fy', None) or 0.0
+                    tie_fy = getattr(sec, "tie_fy", None) or 0.0
                     if tie_fy <= 0:
                         # Attempt to resolve tie_fy from the tie rebar
                         # material (RebarMatT), then the longitudinal
                         # rebar material (RebarMatL) as a fallback.
-                        tie_mat_name = (getattr(sec, 'tie_rebar_mat', None)
-                                        or getattr(sec, 'rebar_material', None))
+                        tie_mat_name = getattr(sec, "tie_rebar_mat", None) or getattr(
+                            sec, "rebar_material", None
+                        )
                         tie_mat = (
-                            self.mesh_model.materials.get(tie_mat_name)
-                            if tie_mat_name else None
+                            self.mesh_model.materials.get(tie_mat_name) if tie_mat_name else None
                         )
                         if tie_mat is not None:
-                            tie_fy = getattr(tie_mat, 'Fy', 0.0) or 0.0
+                            tie_fy = getattr(tie_mat, "Fy", 0.0) or 0.0
                     confinement = None
-                    fc_method = getattr(sec, 'fiber_confinement', None)
+                    fc_method = getattr(sec, "fiber_confinement", None)
                     if callable(fc_method):
                         try:
                             confinement = fc_method(Fc, tie_fy)
                         except Exception as e:
                             import warnings
-                            warnings.warn(
-                                f"fiber_confinement failed for section "
-                                f"'{sec.name}': {e}"
-                            )
+
+                            warnings.warn(f"fiber_confinement failed for section '{sec.name}': {e}")
                             confinement = None
                     if confinement is not None:
-                        Fc_core = confinement.get('fcc', Fc_core)
-                        epsc_core = confinement.get('ecc', epsc_core)
-                        ecu_core = confinement.get('ecu', 0.02)
+                        Fc_core = confinement.get("fcc", Fc_core)
+                        epsc_core = confinement.get("ecc", epsc_core)
+                        ecu_core = confinement.get("ecu", 0.02)
                     # Cap the confined spalling strain (configurable), but
                     # never clamp it below the strain at confined peak —
                     # an ecu below epsc_core would give a degenerate
                     # Concrete01 curve.  Apply the cap first, then enforce
                     # epsc_core as the absolute lower bound so a cap set
                     # below epsc_core still yields a valid curve.
-                    _ecu_max = float(self.config.get('confined_ecu_max', 0.025))
+                    _ecu_max = float(self.config.get("confined_ecu_max", 0.025))
                     ecu_core = max(min(ecu_core, _ecu_max), epsc_core)
-                    ops.uniaxialMaterial('Concrete01', mat_tag + 1,
-                                         -Fc_core, -epsc_core,
-                                         -0.2 * Fc_core, -ecu_core)
+                    ops.uniaxialMaterial(
+                        "Concrete01", mat_tag + 1, -Fc_core, -epsc_core, -0.2 * Fc_core, -ecu_core
+                    )
                     # Steel rebar — resolve Fy/Es in priority order:
                     #   1) config override (SI Pa, scaled to model units)
                     #   2) section's SAP2000 rebar_material (RebarMatL) lookup
                     #   3) framework rebar defaults (DEFAULT_FY_REBAR_PA / E_S)
                     #      scaled to model units
                     ssf = stress_scale_factor(self.mesh_model.units)
-                    Fy_rebar = self.config.get('rebar_Fy_override')
-                    Es_rebar = self.config.get('rebar_Es_override')
+                    Fy_rebar = self.config.get("rebar_Fy_override")
+                    Es_rebar = self.config.get("rebar_Es_override")
                     if Fy_rebar is not None:
                         Fy_rebar = Fy_rebar * ssf
                     if Es_rebar is not None:
                         Es_rebar = Es_rebar * ssf
                     if Fy_rebar is None or Es_rebar is None:
-                        rebar_mat_name = getattr(sec, 'rebar_material', None)
+                        rebar_mat_name = getattr(sec, "rebar_material", None)
                         rebar_mat = (
                             self.mesh_model.materials.get(rebar_mat_name)
-                            if rebar_mat_name else None
+                            if rebar_mat_name
+                            else None
                         )
                         if rebar_mat is not None:
-                            rm_Fy = getattr(rebar_mat, 'Fy', 0.0) or 0.0
-                            rm_Es = getattr(rebar_mat, 'E_mod', 0.0) or 0.0
+                            rm_Fy = getattr(rebar_mat, "Fy", 0.0) or 0.0
+                            rm_Es = getattr(rebar_mat, "E_mod", 0.0) or 0.0
                             if rm_Fy > 0:
                                 Fy_rebar = Fy_rebar if Fy_rebar is not None else rm_Fy
                             if rm_Es > 0:
@@ -1398,15 +1481,18 @@ class AnalysisBuilder:
                     if not Es_rebar:
                         Es_rebar = DEFAULT_E_S_PA * ssf
                     ops.uniaxialMaterial(
-                        'Steel02', mat_tag + 2, Fy_rebar, Es_rebar,
-                        float(self.config.get('rebar_b', 0.01)),
-                        float(self.config.get('rebar_R0', 18.0)),
-                        float(self.config.get('rebar_cR1', 0.925)),
-                        float(self.config.get('rebar_cR2', 0.15)),
+                        "Steel02",
+                        mat_tag + 2,
+                        Fy_rebar,
+                        Es_rebar,
+                        float(self.config.get("rebar_b", 0.01)),
+                        float(self.config.get("rebar_R0", 18.0)),
+                        float(self.config.get("rebar_cR1", 0.925)),
+                        float(self.config.get("rebar_cR2", 0.15)),
                     )
                 else:
-                    Fy = getattr(mat, 'Fy', 0.0) or 2.5e8
-                    ops.uniaxialMaterial('Steel01', mat_tag, Fy, E_mod, 0.01)
+                    Fy = getattr(mat, "Fy", 0.0) or 2.5e8
+                    ops.uniaxialMaterial("Steel01", mat_tag, Fy, E_mod, 0.01)
 
                 # Create fiber section (after to_fiber_patches succeeds)
                 try:
@@ -1415,68 +1501,71 @@ class AnalysisBuilder:
                     # Fall back to elastic — no Fiber section was created,
                     # so no tag collision with the Elastic replacement.
                     import warnings
+
                     warnings.warn(
                         f"Section '{sec.name}' (tag {tag}) does not support fiber "
                         f"patches — using elastic section instead. "
                         f"This may indicate a mixed steel/RC model where some "
                         f"sections lack fiber conversion.",
-                        UserWarning, stacklevel=2,
+                        UserWarning,
+                        stacklevel=2,
                     )
-                    ops.section('Elastic', tag, E_mod, _A, _I33, _I22, G_mod, _J)
+                    ops.section("Elastic", tag, E_mod, _A, _I33, _I22, G_mod, _J)
                     return
 
-                ops.section('Fiber', tag, '-GJ', _J)
+                ops.section("Fiber", tag, "-GJ", _J)
                 for entry in entries:
-                    if entry[0] in ('rect', 'circ', 'quad'):
+                    if entry[0] in ("rect", "circ", "quad"):
                         ops.patch(*entry)
-                    elif entry[0] == 'straight':
-                        ops.layer('straight', *entry[1:])
-                    elif entry[0] == 'circ_layer':
-                        ops.layer('circ', *entry[1:])
+                    elif entry[0] == "straight":
+                        ops.layer("straight", *entry[1:])
+                    elif entry[0] == "circ_layer":
+                        ops.layer("circ", *entry[1:])
 
-                if self.config.get('verbose', False):
+                if self.config.get("verbose", False):
                     print(f"  Section {tag}: {sec.name} (Fiber, {len(entries)} patches)")
                 return  # fiber path done
 
         # ── Elastic section path (including ShellSections) ──────
         mat = self.mesh_model.materials.get(sec.material)
         if mat is None:
-            if self.config.get('verbose', False):
-                print(f"  ⚠ Section {sec.name}: material '{sec.material}' not found, using defaults")
+            if self.config.get("verbose", False):
+                print(
+                    f"  ⚠ Section {sec.name}: material '{sec.material}' not found, using defaults"
+                )
             E_mod = 200e9
             G_mod = 80e9
-            nu_val = 0.3
         else:
             E_mod = mat.E_mod
             if mat.G_mod and mat.G_mod > 0:
                 G_mod = mat.G_mod
             else:
                 G_mod = E_mod / (2 * (1 + mat.nu)) if mat.nu else E_mod / 2.6
-            nu_val = mat.nu
 
-        _A = getattr(sec, 'A', 0.0) or 0.0
-        _I33 = getattr(sec, 'I33', 0.0) or 0.0
-        _I22 = getattr(sec, 'I22', 0.0) or 0.0
-        _J = getattr(sec, 'J', 0.0) or 0.0
+        _A = getattr(sec, "A", 0.0) or 0.0
+        _I33 = getattr(sec, "I33", 0.0) or 0.0
+        _I22 = getattr(sec, "I22", 0.0) or 0.0
+        _J = getattr(sec, "J", 0.0) or 0.0
 
         # Stiffness modifiers
-        amod = mods.get('AMod', 1.0)
-        i33mod = mods.get('I3Mod', 1.0)
-        i22mod = mods.get('I2Mod', 1.0)
-        jmod = mods.get('JMod', 1.0)
+        amod = mods.get("AMod", 1.0)
+        i33mod = mods.get("I3Mod", 1.0)
+        i22mod = mods.get("I2Mod", 1.0)
+        jmod = mods.get("JMod", 1.0)
 
-        if self.config.get('use_elastic_sections', True):
-            ops.section('Elastic', tag, E_mod, _A * amod,
-                        _I33 * i33mod, _I22 * i22mod, G_mod, _J * jmod)
+        if self.config.get("use_elastic_sections", True):
+            ops.section(
+                "Elastic", tag, E_mod, _A * amod, _I33 * i33mod, _I22 * i22mod, G_mod, _J * jmod
+            )
 
     # ── Shell elements ───────────────────────────────────────────
 
     def _create_shell_elements(self) -> None:
         """Create ShellMITC4 elements from MeshModel area elements."""
-        if not self.config.get('create_shells', False):
+        if not self.config.get("create_shells", False):
             return
 
-        if self.config['verbose']:
+        if self.config["verbose"]:
             print("Creating shell elements...")
 
         # Merge with existing _shell_sec_tags (from _create_layered_shell_sections)
@@ -1485,7 +1574,9 @@ class AnalysisBuilder:
         for k, v in _new_ss.items():
             self._shell_sec_tags.setdefault(k, v)
 
-        _new_variants = dict(self.mesh_model.shell_sec_variants) if self.mesh_model.shell_sec_variants else {}
+        _new_variants = (
+            dict(self.mesh_model.shell_sec_variants) if self.mesh_model.shell_sec_variants else {}
+        )
         for k, v in _new_variants.items():
             self._shell_sec_variants.setdefault(k, v)
 
@@ -1493,8 +1584,7 @@ class AnalysisBuilder:
         _all_section_vals = set(self.section_tags.values())
         _all_section_vals.update(self._shell_sec_tags.values())
         _all_section_vals.update(self._shell_sec_variants.values())
-        next_sec_tag = (max(_all_section_vals, default=0) + 1
-                        if _all_section_vals else 1)
+        next_sec_tag = max(_all_section_vals, default=0) + 1 if _all_section_vals else 1
 
         shell_count = 0
         loads_only = self.mesh_model.loads_only_area_ids
@@ -1502,7 +1592,7 @@ class AnalysisBuilder:
             # Skip loads-only areas — they contribute mass but not stiffness
             if aid in loads_only:
                 continue
-            if getattr(area, 'inactive', False):
+            if getattr(area, "inactive", False):
                 continue
 
             nids = area.node_ids
@@ -1521,7 +1611,7 @@ class AnalysisBuilder:
             if skip:
                 continue
 
-            sec_name = self.mesh_model.area_assignments.get(aid, '')
+            sec_name = self.mesh_model.area_assignments.get(aid, "")
             if not sec_name or sec_name not in self.mesh_model.sections:
                 continue
 
@@ -1556,28 +1646,38 @@ class AnalysisBuilder:
 
             # Determine element tag — avoid clashing with frame elements
             max_frame_tag = max(self.frame_tag_map.values(), default=0)
-            max_rigid_tag = max(
-                (r[3] for r in self._offset_rigid_links),
-                default=0,
-            ) if self._offset_rigid_links else 0
+            max_rigid_tag = (
+                max(
+                    (r[3] for r in self._offset_rigid_links),
+                    default=0,
+                )
+                if self._offset_rigid_links
+                else 0
+            )
             next_shell_tag = max(max_frame_tag, max_rigid_tag) + 1 + shell_count
             elem_tag = next_shell_tag
 
             # Use ShellNLDKGQ for areas with a LayeredShell section,
             # ShellMITC4 for all others (linear elastic).
             is_layered = sec_name in self.mesh_model.layered_shell_sections
-            shell_type = 'ShellNLDKGQ' if is_layered else 'ShellMITC4'
+            shell_type = "ShellNLDKGQ" if is_layered else "ShellMITC4"
             if len(node_tags) == 3:
                 # Repeat last node tag for the 4th corner (Collapsed quad)
-                ops.element(shell_type, elem_tag,
-                            node_tags[0], node_tags[1], node_tags[2],
-                            node_tags[2], sec_tag)
+                ops.element(
+                    shell_type,
+                    elem_tag,
+                    node_tags[0],
+                    node_tags[1],
+                    node_tags[2],
+                    node_tags[2],
+                    sec_tag,
+                )
             else:
                 ops.element(shell_type, elem_tag, *node_tags[:4], sec_tag)
             self._shell_tag_map[aid] = elem_tag
             shell_count += 1
 
-        if self.config['verbose']:
+        if self.config["verbose"]:
             print(f"  Created {shell_count} shell elements")
 
     def _create_single_shell_section(self, sec, mat, tag, etype=None):
@@ -1585,14 +1685,14 @@ class AnalysisBuilder:
         E_mod = mat.E_mod or 200e9
         nu_val = mat.nu or 0.2
         factor = self._get_type_factor(etype) if etype else 1.0
-        thickness = getattr(sec, 'thickness', 0.0) or 1.0
+        thickness = getattr(sec, "thickness", 0.0) or 1.0
         if factor != 1.0:
             E_mod *= factor
-        ops.section('ElasticMembranePlateSection', tag, E_mod, nu_val, thickness)
+        ops.section("ElasticMembranePlateSection", tag, E_mod, nu_val, thickness)
 
     def _get_type_factor(self, etype: str) -> float:
         """Return stiffness reduction factor for a structural type."""
-        factors = self.config.get('stiffness_factors', {})
+        factors = self.config.get("stiffness_factors", {})
         return factors.get(etype, 1.0)
 
     # ── Frame elements ───────────────────────────────────────────
@@ -1606,9 +1706,9 @@ class AnalysisBuilder:
         elements = self.mesh_model.frame_elements
         next_tag = 1
         self.frame_tag_map = {}
-        used_tags: Set[int] = set()
+        used_tags: set[int] = set()
         for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
             if elem.elem_tag in used_tags:
                 tag = next_tag
@@ -1623,32 +1723,35 @@ class AnalysisBuilder:
         """Create OpenSees frame elements from MeshModel."""
         from ..model.geometry import subdivide_elements
 
-        if self.config['verbose']:
+        if self.config["verbose"]:
             print("Creating frame elements...")
 
         elements = self.mesh_model.frame_elements
         assignments = self.mesh_model.frame_assignments
         dist_loads = self.mesh_model.frame_dist_loads
-        rigid_links: List[tuple] = []
+        rigid_links: list[tuple] = []
 
         # Save canonical state on first brace subdivision so
         # _restore_brace_canonical_state() can restore it on repeated builds.
         # Use deep copies to prevent shared mutable state with the MeshModel.
-        if self.config.get('subdivide_braces') and self._brace_selection:
-            if not hasattr(self, '_brace_canonical'):
-                self._brace_canonical = {
-                    'frame_elements': copy.deepcopy(self.mesh_model.frame_elements),
-                    'frame_assignments': copy.deepcopy(self.mesh_model.frame_assignments),
-                    'nodes': copy.deepcopy(self.mesh_model.nodes),
-                    'frame_dist_loads': copy.deepcopy(self.mesh_model.frame_dist_loads),
-                }
+        if (
+            self.config.get("subdivide_braces")
+            and self._brace_selection
+            and not hasattr(self, "_brace_canonical")
+        ):
+            self._brace_canonical = {
+                "frame_elements": copy.deepcopy(self.mesh_model.frame_elements),
+                "frame_assignments": copy.deepcopy(self.mesh_model.frame_assignments),
+                "nodes": copy.deepcopy(self.mesh_model.nodes),
+                "frame_dist_loads": copy.deepcopy(self.mesh_model.frame_dist_loads),
+            }
 
         # Brace subdivision (Approach A) — before element creation loop so
         # child sub-elements are processed by _add_beam_column below.
-        if self.config.get('subdivide_braces') and self._brace_selection:
-            n_seg = self.config.get('brace_n_segments', 4)
-            imperf = self.config.get('brace_imperfection_ratio', 1.0 / 500.0)
-            end_off = self.config.get('brace_end_offset', 0.0)
+        if self.config.get("subdivide_braces") and self._brace_selection:
+            n_seg = self.config.get("brace_n_segments", 4)
+            imperf = self.config.get("brace_imperfection_ratio", 1.0 / 500.0)
+            end_off = self.config.get("brace_end_offset", 0.0)
             nodes = self.mesh_model.nodes
             max_elem_tag = max((e.elem_tag for e in elements.values()), default=0)
             max_node_tag = max((nd.node_tag for nd in nodes.values()), default=0)
@@ -1659,7 +1762,9 @@ class AnalysisBuilder:
             max_rigid_tag = max((r[3] for r in self._offset_rigid_links), default=0)
             next_tag = max(max_elem_tag, max_node_tag, max_ops_tag, max_rigid_tag) + 1
             elements, assignments, nodes, next_tag, rigid_links = subdivide_elements(
-                elements, assignments, nodes,
+                elements,
+                assignments,
+                nodes,
                 n_segments=n_seg,
                 imperfection_ratio=imperf,
                 brace_ids=self._brace_selection,
@@ -1679,14 +1784,15 @@ class AnalysisBuilder:
             # Redistribute distributed loads from subdivided braces to children
             # Each child gets a proportional share of the parent's load range.
             from ..model.sap_data import FrameDistributedLoad as _FDL
-            new_dist_loads: List = []
+
+            new_dist_loads: list = []
             for ld in dist_loads:
                 if ld.frame_id not in self._brace_selection:
                     new_dist_loads.append(ld)
                     continue
                 # Parent was subdivided — distribute to each child
                 parent = self.mesh_model.frame_elements.get(ld.frame_id)
-                if parent is None or not hasattr(parent, 'child_ids'):
+                if parent is None or not hasattr(parent, "child_ids"):
                     new_dist_loads.append(ld)
                     continue
                 total_len = ld.dist_b - ld.dist_a if ld.dist_b > ld.dist_a else 0.0
@@ -1699,18 +1805,25 @@ class AnalysisBuilder:
                     parent_rdist_range = ld.rdist_b - ld.rdist_a
                     child_rdist_a = ld.rdist_a + parent_rdist_range * (ci / n_child)
                     child_rdist_b = ld.rdist_a + parent_rdist_range * ((ci + 1) / n_child)
-                    new_dist_loads.append(_FDL(
-                        pattern=ld.pattern, frame_id=child_id,
-                        direction=ld.direction, load_type=ld.load_type,
-                        shape=ld.shape,
-                        val_a=ld.val_a, val_b=ld.val_b,
-                        rdist_a=child_rdist_a, rdist_b=child_rdist_b,
-                        dist_a=child_start, dist_b=child_end,
-                    ))
+                    new_dist_loads.append(
+                        _FDL(
+                            pattern=ld.pattern,
+                            frame_id=child_id,
+                            direction=ld.direction,
+                            load_type=ld.load_type,
+                            shape=ld.shape,
+                            val_a=ld.val_a,
+                            val_b=ld.val_b,
+                            rdist_a=child_rdist_a,
+                            rdist_b=child_rdist_b,
+                            dist_a=child_start,
+                            dist_b=child_end,
+                        )
+                    )
             self.mesh_model.frame_dist_loads = new_dist_loads
 
         for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
 
             tag = self.frame_tag_map.get(eid)
@@ -1729,8 +1842,16 @@ class AnalysisBuilder:
             rigid_E = 2.0e14
             rigid_A = 1.0
             rigid_I = 1.0
-            ops.section('Elastic', rigid_section_tag, rigid_E, rigid_A,
-                        rigid_I, rigid_I, rigid_E / 2.6, rigid_I)
+            ops.section(
+                "Elastic",
+                rigid_section_tag,
+                rigid_E,
+                rigid_A,
+                rigid_I,
+                rigid_I,
+                rigid_E / 2.6,
+                rigid_I,
+            )
             self._rigid_section_tag = rigid_section_tag
 
         # Rigid links from brace subdivision
@@ -1746,9 +1867,17 @@ class AnalysisBuilder:
                 dy = float(nd_j.y - nd_i.y)
                 dz = float(nd_j.z - nd_i.z)
                 vecxz = get_SAP_vecxz(np.array([dx, dy, dz]), 0.0)
-                ops.geomTransf('Linear', link_tag, *vecxz)
-                ops.element('elasticBeamColumn', link_tag, ni_tag, nj_tag,
-                            self._rigid_section_tag, link_tag, '-mass', 0.0)
+                ops.geomTransf("Linear", link_tag, *vecxz)
+                ops.element(
+                    "elasticBeamColumn",
+                    link_tag,
+                    ni_tag,
+                    nj_tag,
+                    self._rigid_section_tag,
+                    link_tag,
+                    "-mass",
+                    0.0,
+                )
                 self._rigid_link_elems[_link_id] = link_tag
 
         # Rigid links from frame end offsets
@@ -1763,8 +1892,16 @@ class AnalysisBuilder:
                 rigid_E = 2.0e14
                 rigid_A = 1.0
                 rigid_I = 1.0
-                ops.section('Elastic', rigid_section_tag, rigid_E, rigid_A,
-                            rigid_I, rigid_I, rigid_E / 2.6, rigid_I)
+                ops.section(
+                    "Elastic",
+                    rigid_section_tag,
+                    rigid_E,
+                    rigid_A,
+                    rigid_I,
+                    rigid_I,
+                    rigid_E / 2.6,
+                    rigid_I,
+                )
                 self._rigid_section_tag = rigid_section_tag
             for _link_id, _node_i_id, _node_j_id, link_tag in self._offset_rigid_links:
                 nd_i = self.mesh_model.nodes.get(_node_i_id)
@@ -1778,13 +1915,21 @@ class AnalysisBuilder:
                 dy = float(nd_j.y - nd_i.y)
                 dz = float(nd_j.z - nd_i.z)
                 vecxz = get_SAP_vecxz(np.array([dx, dy, dz]), 0.0)
-                ops.geomTransf('Linear', link_tag, *vecxz)
-                ops.element('elasticBeamColumn', link_tag, ni_tag, nj_tag,
-                            rigid_section_tag, link_tag, '-mass', 0.0)
+                ops.geomTransf("Linear", link_tag, *vecxz)
+                ops.element(
+                    "elasticBeamColumn",
+                    link_tag,
+                    ni_tag,
+                    nj_tag,
+                    rigid_section_tag,
+                    link_tag,
+                    "-mass",
+                    0.0,
+                )
                 self._rigid_link_elems[_link_id] = link_tag
 
-        if self.config['verbose']:
-            n = len([e for e in elements.values() if not getattr(e, 'inactive', False)])
+        if self.config["verbose"]:
+            n = len([e for e in elements.values() if not getattr(e, "inactive", False)])
             print(f"  Created {n} frame elements")
 
     def _add_beam_column(self, elem, tag, elements, assignments):
@@ -1794,7 +1939,7 @@ class AnalysisBuilder:
         if ni is None or nj is None:
             return
 
-        sec_name = assignments.get(elem.elem_id, '')
+        sec_name = assignments.get(elem.elem_id, "")
 
         # Determine section tag (check type-specific variant first)
         etype = self._frame_element_types.get(elem.elem_id)
@@ -1814,24 +1959,24 @@ class AnalysisBuilder:
         # When brace_truss is active, sections matching _truss_mat_tags
         # become Truss elements with Hysteretic material instead of
         # beam-column elements (matching the legacy Builder behaviour).
-        if (self.config.get('brace_truss')
-                and hasattr(self, '_truss_mat_tags')
-                and sec_name in self._truss_mat_tags):
+        if (
+            self.config.get("brace_truss")
+            and hasattr(self, "_truss_mat_tags")
+            and sec_name in self._truss_mat_tags
+        ):
             A = self._truss_areas[sec_name]
             Fy = self._truss_Fy[sec_name]
             E_sec = self._truss_E[sec_name]
             # Per-element Hysteretic material using actual element length
             # for Euler buckling — each brace gets its own buckling load.
-            _L_brace = math.sqrt(
-                (nj.x - ni.x)**2 + (nj.y - ni.y)**2 + (nj.z - ni.z)**2)
+            _L_brace = math.sqrt((nj.x - ni.x) ** 2 + (nj.y - ni.y) ** 2 + (nj.z - ni.z) ** 2)
             eps_y = Fy / E_sec
             s1p, e1p = Fy, eps_y
             s2p, e2p = Fy * 1.01, eps_y + 0.01
             s3p, e3p = Fy * 1.02, eps_y + 0.05
             _sec = self.mesh_model.sections.get(sec_name)
-            _I_min = (getattr(_sec, 'I22', 0.0) or
-                      getattr(_sec, 'I33', 0.0) or 1e-6)
-            _P_cr = (math.pi ** 2 * E_sec * _I_min) / (_L_brace ** 2)
+            _I_min = getattr(_sec, "I22", 0.0) or getattr(_sec, "I33", 0.0) or 1e-6
+            _P_cr = (math.pi**2 * E_sec * _I_min) / (_L_brace**2)
             sig_cr = _P_cr / A if A > 0 else Fy * 0.3
             eps_cr = sig_cr / E_sec
             s1n, e1n = -sig_cr, -eps_cr
@@ -1839,42 +1984,59 @@ class AnalysisBuilder:
             s3n, e3n = -sig_cr * 0.1, -eps_cr - 0.05
             mat_tag = self._truss_mat_counter
             self._truss_mat_counter += 1
-            ops.uniaxialMaterial('Hysteretic', mat_tag,
-                                 s1p, e1p, s2p, e2p, s3p, e3p,
-                                 s1n, e1n, s2n, e2n, s3n, e3n,
-                                 1.0, 1.0, 0.0, 0.0, 0.0)
+            ops.uniaxialMaterial(
+                "Hysteretic",
+                mat_tag,
+                s1p,
+                e1p,
+                s2p,
+                e2p,
+                s3p,
+                e3p,
+                s1n,
+                e1n,
+                s2n,
+                e2n,
+                s3n,
+                e3n,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+            )
             self.material_tags[f"truss_{sec_name}_{tag}"] = mat_tag
-            ops.element('Truss', tag, ni.node_tag, nj.node_tag, A, mat_tag)
+            ops.element("Truss", tag, ni.node_tag, nj.node_tag, A, mat_tag)
             return
 
         # Geometric transformation
-        angle = getattr(elem, 'angle', 0.0)
+        angle = getattr(elem, "angle", 0.0)
         vecxz = get_SAP_vecxz(np.array([nj.x - ni.x, nj.y - ni.y, nj.z - ni.z]), angle)
-        transf_type = self.config.get('geom_transf_type', 'Linear')
+        transf_type = self.config.get("geom_transf_type", "Linear")
         transf_tag = tag
         ops.geomTransf(transf_type, transf_tag, *vecxz)
         self._transf_tags[tag] = transf_tag
 
         # Element
-        elem_type = self.config['element_type']
-        n_ip = self.config.get('num_int_pts', 3)
-        if elem_type == 'elasticBeamColumn':
+        elem_type = self.config["element_type"]
+        n_ip = self.config.get("num_int_pts", 3)
+        if elem_type == "elasticBeamColumn":
             ops.element(elem_type, tag, *[ni.node_tag, nj.node_tag], sec_tag, transf_tag)
         else:
             int_tag = tag + 10000
-            if self.config.get('beam_integration', 'Lobatto') == 'Lobatto':
-                ops.beamIntegration('Lobatto', int_tag, sec_tag, n_ip)
+            if self.config.get("beam_integration", "Lobatto") == "Lobatto":
+                ops.beamIntegration("Lobatto", int_tag, sec_tag, n_ip)
             else:
                 # HingeRadau with explicit hinge lengths
-                _L_hinge = math.sqrt(
-                    (nj.x - ni.x)**2 + (nj.y - ni.y)**2 + (nj.z - ni.z)**2)
+                _L_hinge = math.sqrt((nj.x - ni.x) ** 2 + (nj.y - ni.y) ** 2 + (nj.z - ni.z) ** 2)
                 _sec = self.mesh_model.sections.get(sec_name)
                 if _sec is not None:
                     from fea_toolkit.model.checks import compute_hinge_length
+
                     Lp = compute_hinge_length(_sec, _L_hinge)
                 else:
                     Lp = 0.1 * _L_hinge
-                ops.beamIntegration('HingeRadau', int_tag, sec_tag, Lp, sec_tag, Lp, sec_tag)
+                ops.beamIntegration("HingeRadau", int_tag, sec_tag, Lp, sec_tag, Lp, sec_tag)
             ops.element(elem_type, tag, *[ni.node_tag, nj.node_tag], transf_tag, int_tag)
 
     # ── Brace selection (Approach A) ─────────────────────────────
@@ -1886,13 +2048,13 @@ class AnalysisBuilder:
         original (un‑subdivided) elements rather than already-subdivided
         ones.
         """
-        if not hasattr(self, '_brace_canonical'):
+        if not hasattr(self, "_brace_canonical"):
             return
         snap = self._brace_canonical
-        self.mesh_model.frame_elements = snap['frame_elements']
-        self.mesh_model.frame_assignments = snap['frame_assignments']
-        self.mesh_model.nodes = snap['nodes']
-        self.mesh_model.frame_dist_loads = snap['frame_dist_loads']
+        self.mesh_model.frame_elements = snap["frame_elements"]
+        self.mesh_model.frame_assignments = snap["frame_assignments"]
+        self.mesh_model.nodes = snap["nodes"]
+        self.mesh_model.frame_dist_loads = snap["frame_dist_loads"]
 
     def _restore_hinge_canonical_state(self) -> None:
         """Restore canonical frame element endpoints and remove stale hinge nodes.
@@ -1901,11 +2063,11 @@ class AnalysisBuilder:
         :meth:`_create_nodes`) to prevent stale ``*_hinge_*`` nodes
         from a previous build cycle from being recreated.
         """
-        if not hasattr(self, '_hinge_canonical_elements'):
+        if not hasattr(self, "_hinge_canonical_elements"):
             return
         # Remove any *_hinge_* nodes left from a previous build
         for nid in list(self.mesh_model.nodes.keys()):
-            if nid.endswith('_hinge_i') or nid.endswith('_hinge_j'):
+            if nid.endswith(("_hinge_i", "_hinge_j")):
                 del self.mesh_model.nodes[nid]
         # Restore canonical element endpoints and assignments
         for eid, elem in self.mesh_model.frame_elements.items():
@@ -1913,8 +2075,7 @@ class AnalysisBuilder:
                 ni, nj = self._hinge_canonical_elements[eid]
                 elem.node_i = ni
                 elem.node_j = nj
-        self.mesh_model.frame_assignments = dict(
-            self._hinge_canonical_assignments)
+        self.mesh_model.frame_assignments = dict(self._hinge_canonical_assignments)
 
     def set_brace_selection(self, brace_ids: set, end_offset: float = 0.0) -> None:
         """Mark specific frame elements as braces for subdivision.
@@ -1933,20 +2094,20 @@ class AnalysisBuilder:
                 physical end.  Default 0.0 (no offset).
         """
         self._brace_selection = brace_ids
-        self.config['subdivide_braces'] = True
+        self.config["subdivide_braces"] = True
         # Always clear first so a subsequent call with end_offset=0.0
         # does not retain a previous positive value.
-        self.config.pop('brace_end_offset', None)
+        self.config.pop("brace_end_offset", None)
         if end_offset > 0:
-            self.config['brace_end_offset'] = end_offset
+            self.config["brace_end_offset"] = end_offset
 
     def check_brace_buckling(
         self,
         brace_ids: Optional[set] = None,
         K: float = 1.0,
-        axial_demand: Optional[Dict[str, float]] = None,
+        axial_demand: Optional[dict[str, float]] = None,
         print_results: bool = True,
-    ) -> Dict[str, Dict[str, float]]:
+    ) -> dict[str, dict[str, float]]:
         """Check selected braces against Euler buckling.
 
         Delegates to :func:`fea_toolkit.model.checks.check_brace_buckling`.
@@ -1962,6 +2123,7 @@ class AnalysisBuilder:
             Dict of ``{elem_id: {P_cr, P_demand, ratio, slenderness, ...}}``.
         """
         from ..model.checks import check_brace_buckling as _check_buckling
+
         if brace_ids is None:
             brace_ids = self._brace_selection or set()
         return _check_buckling(self.mesh_model, brace_ids, K, axial_demand, print_results)
@@ -1984,26 +2146,24 @@ class AnalysisBuilder:
         Hinge backbones use ``Hysteretic`` materials matched to ASCE 41
         rotation limits.
         """
-        if self.config.get('hinge_model') != 'lumped':
+        if self.config.get("hinge_model") != "lumped":
             return
 
         # ── Idempotency: preserve canonical state on first call ────────
         # Save canonical endpoints on first call; restoration is handled
         # by _restore_hinge_canonical_state() in build_domain().
-        if not hasattr(self, '_hinge_canonical_elements'):
+        if not hasattr(self, "_hinge_canonical_elements"):
             self._hinge_canonical_elements = {
                 eid: (elem.node_i, elem.node_j)
                 for eid, elem in self.mesh_model.frame_elements.items()
-                if not getattr(elem, 'inactive', False)
+                if not getattr(elem, "inactive", False)
             }
-            self._hinge_canonical_assignments = dict(
-                self.mesh_model.frame_assignments)
+            self._hinge_canonical_assignments = dict(self.mesh_model.frame_assignments)
 
         elements = self.mesh_model.frame_elements
         assignments = self.mesh_model.frame_assignments
 
-        next_node_tag = max((nd.node_tag for nd in self.mesh_model.nodes.values()),
-                            default=0) + 1
+        next_node_tag = max((nd.node_tag for nd in self.mesh_model.nodes.values()), default=0) + 1
         # Consider existing OpenSees element tags (shells, rigid links already
         # created) and reserved offset-rigid-link tags to avoid collisions.
         try:
@@ -2011,20 +2171,25 @@ class AnalysisBuilder:
         except Exception:
             max_ops_tag = 0
         max_rigid_tag = max((r[3] for r in self._offset_rigid_links), default=0)
-        next_tag = max(
-            max((e.elem_tag for e in elements.values() if not e.inactive), default=0),
-            max_ops_tag, max_rigid_tag,
-            max(self.frame_tag_map.values(), default=0),
-        ) + 1
+        next_tag = (
+            max(
+                max((e.elem_tag for e in elements.values() if not e.inactive), default=0),
+                max_ops_tag,
+                max_rigid_tag,
+                max(self.frame_tag_map.values(), default=0),
+            )
+            + 1
+        )
         # Separate counter for hinge section/material tags, seeded high
         # to avoid collision with existing tags.
-        hinge_tag_base = (max((v for v in self.section_tags.values()), default=0)
-                          + len(self.section_tags) + 100)
+        hinge_tag_base = (
+            max((v for v in self.section_tags.values()), default=0) + len(self.section_tags) + 100
+        )
         hinge_sec_tag = hinge_tag_base
         hinge_mat_tag = hinge_tag_base + len(self.section_tags) + 1
 
-        new_elements: Dict[str, FrameElement] = {}
-        new_assignments: Dict[str, str] = {}
+        new_elements: dict[str, FrameElement] = {}
+        new_assignments: dict[str, str] = {}
 
         for eid, elem in list(elements.items()):
             if elem.inactive:
@@ -2051,9 +2216,9 @@ class AnalysisBuilder:
             etype = self._frame_element_types.get(eid)
             type_key = f"{sec_name}__{etype}" if etype else None
             if type_key and type_key in self.section_tags:
-                sec_tag = self.section_tags[type_key]
+                self.section_tags[type_key]
             else:
-                sec_tag = self.section_tags[sec_name]
+                self.section_tags[sec_name]
             sec = self.mesh_model.sections.get(sec_name)
             if sec is None:
                 new_elements[eid] = elem
@@ -2068,12 +2233,18 @@ class AnalysisBuilder:
             next_node_tag += 1
 
             self.mesh_model.nodes[hinge_i_id] = Node(
-                node_id=hinge_i_id, node_tag=hinge_i_tag,
-                x=ni.x, y=ni.y, z=ni.z,
+                node_id=hinge_i_id,
+                node_tag=hinge_i_tag,
+                x=ni.x,
+                y=ni.y,
+                z=ni.z,
             )
             self.mesh_model.nodes[hinge_j_id] = Node(
-                node_id=hinge_j_id, node_tag=hinge_j_tag,
-                x=nj.x, y=nj.y, z=nj.z,
+                node_id=hinge_j_id,
+                node_tag=hinge_j_tag,
+                x=nj.x,
+                y=nj.y,
+                z=nj.z,
             )
 
             # Create OpenSees nodes for coincident hinge nodes
@@ -2091,12 +2262,12 @@ class AnalysisBuilder:
             # Defensive defaults for nullable section values — initialised
             # before the concrete guard so they are guaranteed bound for
             # the hinge backbone computation below.
-            Z33 = getattr(sec, 'Z33', None) or 0.0
-            Z22 = getattr(sec, 'Z22', None) or 0.0
-            I33 = getattr(sec, 'I33', None) or 0.0
-            I22 = getattr(sec, 'I22', None) or 0.0
-            A_val = getattr(sec, 'A', None) or 0.0
-            J_val = getattr(sec, 'J', None) or 0.0
+            Z33 = getattr(sec, "Z33", None) or 0.0
+            Z22 = getattr(sec, "Z22", None) or 0.0
+            I33 = getattr(sec, "I33", None) or 0.0
+            I22 = getattr(sec, "I22", None) or 0.0
+            A_val = getattr(sec, "A", None) or 0.0
+            J_val = getattr(sec, "J", None) or 0.0
             Fy = mat.Fy if mat and mat.Fy and mat.Fy > 0 else 2.5e8
             E = mat.E_mod if mat and mat.E_mod > 0 else 2.0e11
             G = mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else 0.4 * E
@@ -2105,8 +2276,9 @@ class AnalysisBuilder:
             # Concrete sections fire a warning (reinforcement data not
             # available) but still fall through to create elastic hinges
             # using the defaults initialised above.
-            if mat and mat.type and 'concrete' in mat.type.lower():
+            if mat and mat.type and "concrete" in mat.type.lower():
                 import warnings
+
                 warnings.warn(
                     f"Lumped hinges for concrete sections require reinforcement "
                     f"data not available in generic Section/Material model. "
@@ -2132,39 +2304,82 @@ class AnalysisBuilder:
 
             # ASCE 41 plastic hinge length for yield rotation scaling
             from ..model.checks import compute_asce41_hinge_length
+
             Lp = compute_asce41_hinge_length(self.mesh_model, sec_name, L)
-            theta_y = (My * Lp) / (max(6.0 * E * max(I33, 1e-12), 1e-12)) if E * max(I33, 1e-12) > 0 else 0.005
-            theta_y_weak = (My_weak * Lp) / (max(6.0 * E * max(I22, 1e-12), 1e-12)) if E * max(I22, 1e-12) > 0 else 0.005
+            theta_y = (
+                (My * Lp) / (max(6.0 * E * max(I33, 1e-12), 1e-12))
+                if E * max(I33, 1e-12) > 0
+                else 0.005
+            )
+            theta_y_weak = (
+                (My_weak * Lp) / (max(6.0 * E * max(I22, 1e-12), 1e-12))
+                if E * max(I22, 1e-12) > 0
+                else 0.005
+            )
             theta_cap = theta_y * 6.0
             theta_cap_weak = theta_y_weak * 6.0
 
             # Axial material (elastic)
-            ops.uniaxialMaterial('Elastic', hinge_mat_tag, max(A_val, 1e-6) * E / L)
+            ops.uniaxialMaterial("Elastic", hinge_mat_tag, max(A_val, 1e-6) * E / L)
             # Strong-axis moment (Hysteretic backbone)
-            ops.uniaxialMaterial('Hysteretic', hinge_mat_tag + 1,
-                                 My, theta_y, My * 1.1, theta_cap,
-                                 -My, -theta_y, -My * 1.1, -theta_cap,
-                                 1.0, 1.0, 0.0, 0.0, 0.0)
+            ops.uniaxialMaterial(
+                "Hysteretic",
+                hinge_mat_tag + 1,
+                My,
+                theta_y,
+                My * 1.1,
+                theta_cap,
+                -My,
+                -theta_y,
+                -My * 1.1,
+                -theta_cap,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+            )
             # Weak-axis moment
-            ops.uniaxialMaterial('Hysteretic', hinge_mat_tag + 2,
-                                 My_weak, theta_y_weak, My_weak * 1.1, theta_cap_weak,
-                                 -My_weak, -theta_y_weak, -My_weak * 1.1, -theta_cap_weak,
-                                 1.0, 1.0, 0.0, 0.0, 0.0)
+            ops.uniaxialMaterial(
+                "Hysteretic",
+                hinge_mat_tag + 2,
+                My_weak,
+                theta_y_weak,
+                My_weak * 1.1,
+                theta_cap_weak,
+                -My_weak,
+                -theta_y_weak,
+                -My_weak * 1.1,
+                -theta_cap_weak,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+            )
             # Torsion (elastic — no inelastic torsion expected)
-            ops.uniaxialMaterial('Elastic', hinge_mat_tag + 3,
-                                 G * max(J_val, 1e-6) / L if J_val else G * 1e-6 / L)
+            ops.uniaxialMaterial(
+                "Elastic", hinge_mat_tag + 3, G * max(J_val, 1e-6) / L if J_val else G * 1e-6 / L
+            )
 
-            ops.section('Aggregator', hinge_sec_tag,
-                        hinge_mat_tag, 'P',
-                        hinge_mat_tag + 1, 'Mz',
-                        hinge_mat_tag + 2, 'My',
-                        hinge_mat_tag + 3, 'T')
+            ops.section(
+                "Aggregator",
+                hinge_sec_tag,
+                hinge_mat_tag,
+                "P",
+                hinge_mat_tag + 1,
+                "Mz",
+                hinge_mat_tag + 2,
+                "My",
+                hinge_mat_tag + 3,
+                "T",
+            )
             hinge_sec_tag += 1
             hinge_mat_tag += 4
 
             # Get local axes for element orientation
             try:
-                vx, vy, vz = self._get_local_axes(elem)
+                vx, _vy, vz = self._get_local_axes(elem)
                 orient = (vx[0], vx[1], vx[2], vz[0], vz[1], vz[2])
             except Exception:
                 orient = None
@@ -2173,24 +2388,54 @@ class AnalysisBuilder:
             hinge_i_elem_tag = next_tag
             next_tag += 1
             if orient:
-                ops.element('zeroLengthSection', hinge_i_elem_tag,
-                            ni.node_tag, hinge_i_tag, hinge_sec_tag - 1,
-                            '-orient', orient[0], orient[1], orient[2],
-                            orient[3], orient[4], orient[5])
+                ops.element(
+                    "zeroLengthSection",
+                    hinge_i_elem_tag,
+                    ni.node_tag,
+                    hinge_i_tag,
+                    hinge_sec_tag - 1,
+                    "-orient",
+                    orient[0],
+                    orient[1],
+                    orient[2],
+                    orient[3],
+                    orient[4],
+                    orient[5],
+                )
             else:
-                ops.element('zeroLengthSection', hinge_i_elem_tag,
-                            ni.node_tag, hinge_i_tag, hinge_sec_tag - 1)
+                ops.element(
+                    "zeroLengthSection",
+                    hinge_i_elem_tag,
+                    ni.node_tag,
+                    hinge_i_tag,
+                    hinge_sec_tag - 1,
+                )
 
             hinge_j_elem_tag = next_tag
             next_tag += 1
             if orient:
-                ops.element('zeroLengthSection', hinge_j_elem_tag,
-                            hinge_j_tag, nj.node_tag, hinge_sec_tag - 1,
-                            '-orient', orient[0], orient[1], orient[2],
-                            orient[3], orient[4], orient[5])
+                ops.element(
+                    "zeroLengthSection",
+                    hinge_j_elem_tag,
+                    hinge_j_tag,
+                    nj.node_tag,
+                    hinge_sec_tag - 1,
+                    "-orient",
+                    orient[0],
+                    orient[1],
+                    orient[2],
+                    orient[3],
+                    orient[4],
+                    orient[5],
+                )
             else:
-                ops.element('zeroLengthSection', hinge_j_elem_tag,
-                            hinge_j_tag, nj.node_tag, hinge_sec_tag - 1)
+                ops.element(
+                    "zeroLengthSection",
+                    hinge_j_elem_tag,
+                    hinge_j_tag,
+                    nj.node_tag,
+                    hinge_sec_tag - 1,
+                )
 
             # --- Shorten original element to span between hinge nodes ---
             elem.node_i = hinge_i_id
@@ -2204,9 +2449,10 @@ class AnalysisBuilder:
 
     # ── Loads ────────────────────────────────────────────────────
 
-    def _create_loads(self,
-                      pattern_scales: Optional[Dict[str, float]] = None,
-                      ) -> None:
+    def _create_loads(
+        self,
+        pattern_scales: Optional[dict[str, float]] = None,
+    ) -> None:
         """Create OpenSees load patterns from MeshModel data."""
 
         elements = self.mesh_model.frame_elements
@@ -2222,25 +2468,25 @@ class AnalysisBuilder:
         # ── Pre-compute frame + area self-weight per-node ────────
         # Stored as a list of (node_tag, fz) tuples; applied per-pattern
         # during the pattern loop below if the pattern's swf > 0.
-        _sw_node_loads: List[Tuple[int, float]] = []
+        _sw_node_loads: list[tuple[int, float]] = []
         for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
-            sec_name = assignments.get(eid, '')
+            sec_name = assignments.get(eid, "")
             sec = self.mesh_model.sections.get(sec_name)
             if sec is None:
                 continue
             mat = self.mesh_model.materials.get(sec.material)
             if mat is None or mat.unit_weight == 0:
                 continue
-            _A = getattr(sec, 'A', 0.0)
+            _A = getattr(sec, "A", 0.0)
             if _A <= 0:
                 continue
             ni = self.mesh_model.nodes.get(elem.node_i)
             nj = self.mesh_model.nodes.get(elem.node_j)
             if ni is None or nj is None:
                 continue
-            L = math.sqrt((nj.x - ni.x)**2 + (nj.y - ni.y)**2 + (nj.z - ni.z)**2)
+            L = math.sqrt((nj.x - ni.x) ** 2 + (nj.y - ni.y) ** 2 + (nj.z - ni.z) ** 2)
             total_w = _A * mat.unit_weight * L
             nd_i = self.mesh_model.nodes.get(elem.node_i)
             nd_j = self.mesh_model.nodes.get(elem.node_j)
@@ -2251,17 +2497,18 @@ class AnalysisBuilder:
 
         # ── Area element self-weight ─────────────────────────────
         from ..model.sap_data import ShellSection as _ShellSec
+
         for aid, area in self.mesh_model.area_elements.items():
-            if getattr(area, 'inactive', False):
+            if getattr(area, "inactive", False):
                 continue
-            sec_name = self.mesh_model.area_assignments.get(aid, '')
+            sec_name = self.mesh_model.area_assignments.get(aid, "")
             sec = self.mesh_model.sections.get(sec_name)
             if sec is None or not isinstance(sec, _ShellSec):
                 continue
             mat = self.mesh_model.materials.get(sec.material)
             if mat is None or mat.unit_weight == 0:
                 continue
-            t = getattr(sec, 'thickness', 0.0)
+            t = getattr(sec, "thickness", 0.0)
             if t <= 0:
                 continue
             poly = [self.mesh_model.nodes.get(nid) for nid in area.node_ids]
@@ -2285,22 +2532,19 @@ class AnalysisBuilder:
             all_patterns.add(ld.pattern)
         for ld in edge_loads:
             all_patterns.add(ld.pattern)
-        for jl in getattr(self.mesh_model, 'joint_loads', []):
+        for jl in getattr(self.mesh_model, "joint_loads", []):
             all_patterns.add(jl.pattern)
-        for gl in getattr(self.mesh_model, 'frame_gravity_loads', []):
+        for gl in getattr(self.mesh_model, "frame_gravity_loads", []):
             all_patterns.add(gl.pattern)
-        for agl in getattr(self.mesh_model, 'area_gravity_loads', []):
+        for agl in getattr(self.mesh_model, "area_gravity_loads", []):
             all_patterns.add(agl.pattern)
         # Include patterns with self_weight_factor > 0 so their self-weight
         # can be activated even when they have no explicit load entries.
         for pn, lp in self.mesh_model.load_patterns.items():
-            if abs(getattr(lp, 'self_weight_factor', 0.0)) > 1e-12:
+            if abs(getattr(lp, "self_weight_factor", 0.0)) > 1e-12:
                 all_patterns.add(pn)
         # Assign deterministic tags based on sorted pattern names
-        _pat_tags = {
-            pname: (1000 + i, 100 + i)
-            for i, pname in enumerate(sorted(all_patterns))
-        }
+        _pat_tags = {pname: (1000 + i, 100 + i) for i, pname in enumerate(sorted(all_patterns))}
 
         for pname in sorted(all_patterns):
             if pattern_scales is not None and pname not in pattern_scales:
@@ -2308,8 +2552,8 @@ class AnalysisBuilder:
             scale = pattern_scales.get(pname, 1.0) if pattern_scales else 1.0
 
             ts_tag, ptag = _pat_tags.get(pname, (1000, 100))
-            ops.timeSeries('Linear', ts_tag)
-            ops.pattern('Plain', ptag, ts_tag)
+            ops.timeSeries("Linear", ts_tag)
+            ops.pattern("Plain", ptag, ts_tag)
             patterns_created.add(pname)
 
             load_total = 0.0
@@ -2322,7 +2566,7 @@ class AnalysisBuilder:
                 if tag is None:
                     continue
                 elem = elements.get(ld.frame_id)
-                if elem is None or getattr(elem, 'inactive', False):
+                if elem is None or getattr(elem, "inactive", False):
                     continue
                 ni = self.mesh_model.nodes.get(elem.node_i)
                 nj = self.mesh_model.nodes.get(elem.node_j)
@@ -2336,7 +2580,7 @@ class AnalysisBuilder:
 
                 vx, vy, vz = self.get_local_axes(elem)
                 T = np.column_stack([vx, vy, vz])
-                dir_map = {'Gravity': (0, 0, -1), 'X': (1, 0, 0), 'Y': (0, 1, 0), 'Z': (0, 0, 1)}
+                dir_map = {"Gravity": (0, 0, -1), "X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}
                 gx, gy, gz = dir_map.get(ld.direction, (0, 0, 0))
                 g_local = np.linalg.solve(T, np.array([gx, gy, gz]))
                 wy_a = g_local[1] * wa
@@ -2348,20 +2592,26 @@ class AnalysisBuilder:
 
                 is_uniform = abs(wa - wb) < 1e-12
                 if is_uniform and abs(aL) < 1e-12 and abs(bL - 1.0) < 1e-12:
-                    ops.eleLoad('-ele', tag, '-type', '-beamUniform', wy_a, wz_a, wx_a)
+                    ops.eleLoad("-ele", tag, "-type", "-beamUniform", wy_a, wz_a, wx_a)
                 elif is_uniform:
-                    ops.eleLoad('-ele', tag, '-type', '-beamUniform', wy_a, wz_a, wx_a, aL, bL)
+                    ops.eleLoad("-ele", tag, "-type", "-beamUniform", wy_a, wz_a, wx_a, aL, bL)
                 else:
                     L_seg = bL - aL
                     for i in range(4):
                         seg_a = aL + i * L_seg / 4
                         seg_b = aL + (i + 1) * L_seg / 4
                         xi = (i + 0.5) / 4
-                        ops.eleLoad('-ele', tag, '-type', '-beamUniform',
-                                    wy_a + (wy_b - wy_a) * xi,
-                                    wz_a + (wz_b - wz_a) * xi,
-                                    wx_a + (wx_b - wx_a) * xi,
-                                    seg_a, seg_b)
+                        ops.eleLoad(
+                            "-ele",
+                            tag,
+                            "-type",
+                            "-beamUniform",
+                            wy_a + (wy_b - wy_a) * xi,
+                            wz_a + (wz_b - wz_a) * xi,
+                            wx_a + (wx_b - wx_a) * xi,
+                            seg_a,
+                            seg_b,
+                        )
 
                 load_total += abs(wa + wb) * 0.5 * abs(bL - aL)
 
@@ -2375,26 +2625,26 @@ class AnalysisBuilder:
                 # Look up the unsplit (original) frame element to get
                 # its local axes for projecting the global direction.
                 elem = self.mesh_model.frame_elements.get(ld.frame_id)
-                if elem is None or getattr(elem, 'inactive', False):
+                if elem is None or getattr(elem, "inactive", False):
                     continue
                 try:
                     vx, vy, vz = self.get_local_axes(elem)
                 except Exception:
                     continue
                 # Determine the global direction vector
-                if ld.direction == 'Gravity':
+                if ld.direction == "Gravity":
                     gdir = np.array([0.0, 0.0, -1.0])
-                elif ld.direction == 'X':
+                elif ld.direction == "X":
                     gdir = np.array([1.0, 0.0, 0.0])
-                elif ld.direction == 'Y':
+                elif ld.direction == "Y":
                     gdir = np.array([0.0, 1.0, 0.0])
-                elif ld.direction == 'Z':
+                elif ld.direction == "Z":
                     gdir = np.array([0.0, 0.0, 1.0])
-                elif ld.direction == 'LocalX':
+                elif ld.direction == "LocalX":
                     gdir = vx
-                elif ld.direction == 'LocalY':
+                elif ld.direction == "LocalY":
                     gdir = vy
-                elif ld.direction == 'LocalZ':
+                elif ld.direction == "LocalZ":
                     gdir = vz
                 else:
                     gdir = np.array([0.0, 0.0, -1.0])
@@ -2413,11 +2663,11 @@ class AnalysisBuilder:
                 is_uniform = abs(wa - wb) < 1e-6
                 is_full_span = abs(a_overL) < 1e-12 and abs(b_overL - 1.0) < 1e-12
                 if is_uniform and is_full_span:
-                    ops.eleLoad('-ele', tag, '-type', '-beamUniform',
-                                wy_a, wz_a, wx_a)
+                    ops.eleLoad("-ele", tag, "-type", "-beamUniform", wy_a, wz_a, wx_a)
                 elif is_uniform:
-                    ops.eleLoad('-ele', tag, '-type', '-beamUniform',
-                                wy_a, wz_a, wx_a, a_overL, b_overL)
+                    ops.eleLoad(
+                        "-ele", tag, "-type", "-beamUniform", wy_a, wz_a, wx_a, a_overL, b_overL
+                    )
                 else:
                     # Non-uniform → decompose into partial-span segments
                     N = 4
@@ -2429,8 +2679,17 @@ class AnalysisBuilder:
                         wy_mid = wy_a + (wy_b - wy_a) * xi
                         wz_mid = wz_a + (wz_b - wz_a) * xi
                         wx_mid = wx_a + (wx_b - wx_a) * xi
-                        ops.eleLoad('-ele', tag, '-type', '-beamUniform',
-                                    wy_mid, wz_mid, wx_mid, seg_a, seg_b)
+                        ops.eleLoad(
+                            "-ele",
+                            tag,
+                            "-type",
+                            "-beamUniform",
+                            wy_mid,
+                            wz_mid,
+                            wx_mid,
+                            seg_a,
+                            seg_b,
+                        )
                 load_total += abs(wa) * abs(b_overL - a_overL)
 
             # ── Self-weight for this pattern ────────────────────────
@@ -2438,7 +2697,7 @@ class AnalysisBuilder:
             # Look up the pattern's swf from MeshModel load_patterns (passed
             # through from SAP2000 by the Preprocessor).
             _lp = self.mesh_model.load_patterns.get(pname)
-            swf = getattr(_lp, 'self_weight_factor', 0.0) if _lp else 0.0
+            swf = getattr(_lp, "self_weight_factor", 0.0) if _lp else 0.0
             if abs(swf) > 1e-12:
                 sw_scale = swf * scale
                 sw_total = 0.0
@@ -2449,15 +2708,16 @@ class AnalysisBuilder:
                     _sw_fz_total += fz * sw_scale
                 # Store per-pattern for check_self_weight_consistency
                 if pname not in self._sw_load_totals:
-                    self._sw_load_totals[pname] = {k: 0.0 for k in
-                                             ('fx','fy','fz','mx','my','mz')}
-                self._sw_load_totals[pname]['fz'] += _sw_fz_total
+                    self._sw_load_totals[pname] = dict.fromkeys(
+                        ("fx", "fy", "fz", "mx", "my", "mz"), 0.0
+                    )
+                self._sw_load_totals[pname]["fz"] += _sw_fz_total
                 load_total += sw_total
 
             self.load_totals[pname] = load_total
 
         # ── Frame gravity loads (explicit multipliers on self-weight) ──
-        for gl in getattr(self.mesh_model, 'frame_gravity_loads', []):
+        for gl in getattr(self.mesh_model, "frame_gravity_loads", []):
             pname = gl.pattern
             if pattern_scales is not None and pname not in pattern_scales:
                 continue
@@ -2467,13 +2727,13 @@ class AnalysisBuilder:
             # Create pattern if needed
             if pname not in patterns_created:
                 ts_tag, ptag = _pat_tags.get(pname, (1000, 100))
-                ops.timeSeries('Linear', ts_tag)
-                ops.pattern('Plain', ptag, ts_tag)
+                ops.timeSeries("Linear", ts_tag)
+                ops.pattern("Plain", ptag, ts_tag)
                 patterns_created.add(pname)
             elem = elements.get(gl.frame_id)
-            if elem is None or getattr(elem, 'inactive', False):
+            if elem is None or getattr(elem, "inactive", False):
                 continue
-            sec_name = assignments.get(gl.frame_id, '')
+            sec_name = assignments.get(gl.frame_id, "")
             if not sec_name:
                 continue
             sec = self.mesh_model.sections.get(sec_name)
@@ -2486,23 +2746,29 @@ class AnalysisBuilder:
             nj = self.mesh_model.nodes.get(elem.node_j)
             if ni is None or nj is None:
                 continue
-            L = math.sqrt((nj.x - ni.x)**2 + (nj.y - ni.y)**2 + (nj.z - ni.z)**2)
+            L = math.sqrt((nj.x - ni.x) ** 2 + (nj.y - ni.y) ** 2 + (nj.z - ni.z) ** 2)
             if L < 1e-12:
                 continue
-            sw_per_len = getattr(sec, 'A', 0.0) * mat.unit_weight
+            sw_per_len = getattr(sec, "A", 0.0) * mat.unit_weight
             fx = sw_per_len * L * gl.multiplier_x * scale * 0.5
             fy = sw_per_len * L * gl.multiplier_y * scale * 0.5
             fz = sw_per_len * L * gl.multiplier_z * scale * 0.5
             ops.load(ni.node_tag, fx, fy, fz, 0.0, 0.0, 0.0)
             ops.load(nj.node_tag, fx, fy, fz, 0.0, 0.0, 0.0)
             if pname not in self._gravity_load_totals:
-                self._gravity_load_totals[pname] = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0,
-                                                     'mx': 0.0, 'my': 0.0, 'mz': 0.0}
-            self._gravity_load_totals[pname]['fx'] += fx * 2
-            self._gravity_load_totals[pname]['fy'] += fy * 2
-            self._gravity_load_totals[pname]['fz'] += fz * 2
+                self._gravity_load_totals[pname] = {
+                    "fx": 0.0,
+                    "fy": 0.0,
+                    "fz": 0.0,
+                    "mx": 0.0,
+                    "my": 0.0,
+                    "mz": 0.0,
+                }
+            self._gravity_load_totals[pname]["fx"] += fx * 2
+            self._gravity_load_totals[pname]["fy"] += fy * 2
+            self._gravity_load_totals[pname]["fz"] += fz * 2
         # ── Area gravity loads (explicit multipliers) ────────────
-        for agl in getattr(self.mesh_model, 'area_gravity_loads', []):
+        for agl in getattr(self.mesh_model, "area_gravity_loads", []):
             pname = agl.pattern
             if pattern_scales is not None and pname not in pattern_scales:
                 continue
@@ -2511,21 +2777,20 @@ class AnalysisBuilder:
                 continue
             if pname not in patterns_created:
                 ts_tag, ptag = _pat_tags.get(pname, (1000, 100))
-                ops.timeSeries('Linear', ts_tag)
-                ops.pattern('Plain', ptag, ts_tag)
+                ops.timeSeries("Linear", ts_tag)
+                ops.pattern("Plain", ptag, ts_tag)
                 patterns_created.add(pname)
             area_elem = self.mesh_model.area_elements.get(agl.area_id)
             if area_elem is None:
                 continue
-            if getattr(area_elem, 'inactive', False):
+            if getattr(area_elem, "inactive", False):
                 # Parent was split/meshed — apply to all leaf descendants
-                sub_ids = collect_descendants(
-                    agl.area_id, self.mesh_model.area_elements)
+                sub_ids = collect_descendants(agl.area_id, self.mesh_model.area_elements)
                 if not sub_ids:
                     continue
                 for sub_id in sub_ids:
                     sub_elem = self.mesh_model.area_elements[sub_id]
-                    sec_name = self.mesh_model.area_assignments.get(sub_id, '')
+                    sec_name = self.mesh_model.area_assignments.get(sub_id, "")
                     if not sec_name:
                         continue
                     sec = self.mesh_model.sections.get(sec_name)
@@ -2534,7 +2799,7 @@ class AnalysisBuilder:
                     mat = self.mesh_model.materials.get(sec.material)
                     if mat is None or abs(mat.unit_weight) < 1e-12:
                         continue
-                    thickness = getattr(sub_elem, 'thickness', 0.0) or 0.0
+                    thickness = getattr(sub_elem, "thickness", 0.0) or 0.0
                     if thickness < 1e-12:
                         continue
                     corner_pts = []
@@ -2556,11 +2821,10 @@ class AnalysisBuilder:
                     for nid in sub_elem.node_ids:
                         nd = self.mesh_model.nodes.get(nid)
                         if nd is not None:
-                            ops.load(nd.node_tag, tfx / n_c, tfy / n_c, tfz / n_c,
-                                     0.0, 0.0, 0.0)
+                            ops.load(nd.node_tag, tfx / n_c, tfy / n_c, tfz / n_c, 0.0, 0.0, 0.0)
                 continue
             # Active (unmeshed) area element
-            sec_name = self.mesh_model.area_assignments.get(agl.area_id, '')
+            sec_name = self.mesh_model.area_assignments.get(agl.area_id, "")
             if not sec_name:
                 continue
             sec = self.mesh_model.sections.get(sec_name)
@@ -2569,7 +2833,7 @@ class AnalysisBuilder:
             mat = self.mesh_model.materials.get(sec.material)
             if mat is None or abs(mat.unit_weight) < 1e-12:
                 continue
-            thickness = getattr(area_elem, 'thickness', 0.0) or 0.0
+            thickness = getattr(area_elem, "thickness", 0.0) or 0.0
             if thickness < 1e-12:
                 continue
             corner_pts = []
@@ -2591,15 +2855,14 @@ class AnalysisBuilder:
             for nid in area_elem.node_ids:
                 nd = self.mesh_model.nodes.get(nid)
                 if nd is not None:
-                    ops.load(nd.node_tag, tfx / n_c, tfy / n_c, tfz / n_c,
-                             0.0, 0.0, 0.0)
+                    ops.load(nd.node_tag, tfx / n_c, tfy / n_c, tfz / n_c, 0.0, 0.0, 0.0)
 
     # ── Rigid diaphragms ─────────────────────────────────────────
 
     def _apply_rigid_diaphragms(self) -> int:
         """Apply rigid diaphragm constraints at detected storey levels."""
         levels = self.mesh_model.diaphragm_levels
-        config_val = self.config.get('rigid_diaphragms', False)
+        config_val = self.config.get("rigid_diaphragms", False)
         if not config_val or not levels:
             return 0
 
@@ -2624,9 +2887,12 @@ class AnalysisBuilder:
             ys = [float(ops.nodeCoord(t)[1]) for t in tags_at_z]
             cx = sum(xs) / len(xs)
             cy = sum(ys) / len(ys)
-            master = min(tags_at_z,
-                         key=lambda t: (float(ops.nodeCoord(t)[0]) - cx)**2
-                                      + (float(ops.nodeCoord(t)[1]) - cy)**2)
+            master = min(
+                tags_at_z,
+                key=lambda t: (
+                    (float(ops.nodeCoord(t)[0]) - cx) ** 2 + (float(ops.nodeCoord(t)[1]) - cy) ** 2
+                ),
+            )
             slaves = [t for t in tags_at_z if t != master]
             try:
                 ops.rigidDiaphragm(3, master, *slaves)
@@ -2639,10 +2905,11 @@ class AnalysisBuilder:
     # Analysis methods
     # ═══════════════════════════════════════════════════════════════
 
-    def run_static_analysis(self,
-                            extract_reactions: bool = True,
-                            pattern_scales: Optional[Dict[str, float]] = None,
-                            ) -> Dict[str, Any]:
+    def run_static_analysis(
+        self,
+        extract_reactions: bool = True,
+        pattern_scales: Optional[dict[str, float]] = None,
+    ) -> dict[str, Any]:
         """Run static analysis on the current OpenSees domain.
 
         When *pattern_scales* is provided, the domain is rebuilt with
@@ -2661,43 +2928,42 @@ class AnalysisBuilder:
 
         sol_cfg = self.config
         sd = self.PUSHOVER_SOLVER_DEFAULTS
-        test_type = sol_cfg.get('solver_test_type', sd['solver_test_type'])
-        test_tol = sol_cfg.get('solver_test_tol', sd['solver_test_tol'])
-        test_iter = sol_cfg.get('solver_test_max_iter', sd['solver_test_max_iter'])
-        algo = sol_cfg.get('solver_algorithm', sd['solver_algorithm'])
-        n_sub = sol_cfg.get('gravity_num_substeps', sd['gravity_num_substeps'])
+        test_type = sol_cfg.get("solver_test_type", sd["solver_test_type"])
+        test_tol = sol_cfg.get("solver_test_tol", sd["solver_test_tol"])
+        test_iter = sol_cfg.get("solver_test_max_iter", sd["solver_test_max_iter"])
+        algo = sol_cfg.get("solver_algorithm", sd["solver_algorithm"])
+        n_sub = sol_cfg.get("gravity_num_substeps", sd["gravity_num_substeps"])
 
-        cs = sol_cfg.get('solver_constraints', sd['solver_constraints'])
-        if self._edge_constraint_method == 'penalty':
-            cs = 'Penalty'
-            ops.constraints('Penalty', 1.0e12, 1.0e12)
+        cs = sol_cfg.get("solver_constraints", sd["solver_constraints"])
+        if self._edge_constraint_method == "penalty":
+            cs = "Penalty"
+            ops.constraints("Penalty", 1.0e12, 1.0e12)
         else:
             ops.constraints(cs)
-        ops.numberer('RCM')
-        ops.system(sol_cfg.get('solver_system', sd['solver_system']))
+        ops.numberer("RCM")
+        ops.system(sol_cfg.get("solver_system", sd["solver_system"]))
         ops.test(test_type, test_tol, test_iter)
 
         _algo_chain = [algo]
-        if algo != 'NewtonLineSearch':
-            _algo_chain.append('NewtonLineSearch')
-        if algo != 'ModifiedNewton':
-            _algo_chain.append(('ModifiedNewton', '-initial'))
-        if algo != 'KrylovNewton':
-            _algo_chain.append('KrylovNewton')
+        if algo != "NewtonLineSearch":
+            _algo_chain.append("NewtonLineSearch")
+        if algo != "ModifiedNewton":
+            _algo_chain.append(("ModifiedNewton", "-initial"))
+        if algo != "KrylovNewton":
+            _algo_chain.append("KrylovNewton")
 
-        ops.integrator('LoadControl', 1.0 / n_sub)
-        ops.analysis('Static')
+        ops.integrator("LoadControl", 1.0 / n_sub)
+        ops.analysis("Static")
 
         converged = 0
         ok = -1
         for attempt in _algo_chain:
             if isinstance(attempt, tuple):
                 ops.algorithm(*attempt)
+            elif attempt == "ModifiedNewton":
+                ops.algorithm("ModifiedNewton", "-initial")
             else:
-                if attempt == 'ModifiedNewton':
-                    ops.algorithm('ModifiedNewton', '-initial')
-                else:
-                    ops.algorithm(attempt)
+                ops.algorithm(attempt)
             ok = 0
             for s in range(converged, n_sub):
                 ok = ops.analyze(1)
@@ -2711,30 +2977,34 @@ class AnalysisBuilder:
             return {}
 
         # Extract results
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
 
         # Nodal displacements
-        result['nodal_displacements'] = {}
+        result["nodal_displacements"] = {}
         for nd in self.mesh_model.nodes.values():
             try:
                 disp = ops.nodeDisp(nd.node_tag)
-                result['nodal_displacements'][nd.node_id] = list(disp)
+                result["nodal_displacements"][nd.node_id] = list(disp)
             except Exception:
                 continue
 
         # Reactions
         if extract_reactions:
             ops.reactions()
-            result['reactions'] = {}
+            result["reactions"] = {}
             for nid, restraint in self.mesh_model.restraints.items():
                 nd = self.mesh_model.nodes.get(nid)
                 if nd is None:
                     continue
                 try:
                     rxn = ops.nodeReaction(nd.node_tag)
-                    result['reactions'][nid] = {
-                        'fx': rxn[0], 'fy': rxn[1], 'fz': rxn[2],
-                        'mx': rxn[3], 'my': rxn[4], 'mz': rxn[5],
+                    result["reactions"][nid] = {
+                        "fx": rxn[0],
+                        "fy": rxn[1],
+                        "fz": rxn[2],
+                        "mx": rxn[3],
+                        "my": rxn[4],
+                        "mz": rxn[5],
                     }
                 except Exception:
                     continue
@@ -2745,7 +3015,7 @@ class AnalysisBuilder:
     # Mass
     # ═══════════════════════════════════════════════════════════════
 
-    def compute_seismic_masses(self) -> Dict[str, float]:
+    def compute_seismic_masses(self) -> dict[str, float]:
         """Compute lumped nodal masses from the model's MASS SOURCE entries.
 
         Gravitational acceleration is derived from the model's units via
@@ -2758,7 +3028,6 @@ class AnalysisBuilder:
         Returns:
             Dictionary mapping node ID → total lumped mass (tonnes).
         """
-        from ..utils import g_from_units
         g = g_from_units(self.mesh_model.units)
 
         mm = self.mesh_model
@@ -2766,14 +3035,13 @@ class AnalysisBuilder:
         assignments = mm.frame_assignments
         dist_loads = mm.frame_dist_loads
 
-        node_mass: Dict[str, float] = {}
+        node_mass: dict[str, float] = {}
 
-        mass_sources = getattr(mm, 'mass_sources', {})
+        mass_sources = getattr(mm, "mass_sources", {})
         if not mass_sources:
             # No MASS SOURCE definitions — fallback: element self-weight + DEAD
             self._mass_from_elements(mm, elements, assignments, node_mass, g)
-            self._mass_from_dist_loads(mm, elements, dist_loads, node_mass, g,
-                                       ["DEAD"])
+            self._mass_from_dist_loads(mm, elements, dist_loads, node_mass, g, ["DEAD"])
         else:
             for ms in mass_sources.values():
                 if ms.elements:
@@ -2783,8 +3051,9 @@ class AnalysisBuilder:
                     for lp_name, mult in ms.load_pattern.items():
                         if abs(mult) < 1e-12:
                             continue
-                        self._mass_from_dist_loads(mm, elements, dist_loads,
-                                                   node_mass, g, [lp_name], mult)
+                        self._mass_from_dist_loads(
+                            mm, elements, dist_loads, node_mass, g, [lp_name], mult
+                        )
                         self._mass_from_joint_loads(mm, node_mass, g, lp_name, mult)
                         self._mass_from_area_gravity(mm, node_mass, g, lp_name, mult)
                         self._mass_from_area_uniform(mm, node_mass, g, lp_name, mult)
@@ -2803,14 +3072,14 @@ class AnalysisBuilder:
         self.node_masses = node_mass
         self._mass_g = g
 
-        if self.config.get('verbose'):
+        if self.config.get("verbose"):
             total = sum(node_mass.values())
             print(f"  Total seismic mass: {total:.2f} tonnes")
             print(f"  Total seismic weight: {total * g / 1000:.2f} MN")
 
         return node_mass
 
-    def _query_nodal_masses(self) -> Dict[int, float]:
+    def _query_nodal_masses(self) -> dict[int, float]:
         """Query lumped translational masses from the active OpenSees domain.
 
         Reads ``ops.nodeMass()`` directly so the returned dict is keyed by
@@ -2825,7 +3094,7 @@ class AnalysisBuilder:
             Nodes with no applicable mass are included with ``0.0`` so
             the ADRS conversion sees the full node set.
         """
-        masses: Dict[int, float] = {}
+        masses: dict[int, float] = {}
         for tag in ops.getNodeTags():
             try:
                 m = ops.nodeMass(int(tag))
@@ -2834,13 +3103,12 @@ class AnalysisBuilder:
                 masses[int(tag)] = 0.0
         return masses
 
-    def _mass_from_elements(self, mm, elements, assignments,
-                             node_mass, g):
+    def _mass_from_elements(self, mm, elements, assignments, node_mass, g):
         """Add mass from element self-weight."""
         for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
-            sec_name = assignments.get(eid, '')
+            sec_name = assignments.get(eid, "")
             if not sec_name:
                 continue
             sec = mm.sections.get(sec_name)
@@ -2856,16 +3124,16 @@ class AnalysisBuilder:
             L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
             if L < 1e-12:
                 continue
-            weight = getattr(sec, 'A', 0.0) * mat.unit_weight * L
+            weight = getattr(sec, "A", 0.0) * mat.unit_weight * L
             mass = weight / g
             node_mass[elem.node_i] = node_mass.get(elem.node_i, 0.0) + mass * 0.5
             node_mass[elem.node_j] = node_mass.get(elem.node_j, 0.0) + mass * 0.5
 
         # Area elements
         for aid, ae in mm.area_elements.items():
-            if getattr(ae, 'inactive', False):
+            if getattr(ae, "inactive", False):
                 continue
-            sec_name = mm.area_assignments.get(aid, '')
+            sec_name = mm.area_assignments.get(aid, "")
             if not sec_name:
                 continue
             sec = mm.sections.get(sec_name)
@@ -2874,7 +3142,7 @@ class AnalysisBuilder:
             mat = mm.materials.get(sec.material)
             if mat is None or abs(mat.unit_weight) < 1e-12:
                 continue
-            thickness = getattr(ae, 'thickness', 0.0) or 0.0
+            thickness = getattr(ae, "thickness", 0.0) or 0.0
             if thickness < 1e-12:
                 continue
             corner_pts = []
@@ -2894,14 +3162,15 @@ class AnalysisBuilder:
             for nid in ae.node_ids:
                 node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_c
 
-    def _mass_from_dist_loads(self, mm, elements, dist_loads,
-                               node_mass, g, pattern_names, mult=1.0):
+    def _mass_from_dist_loads(
+        self, mm, elements, dist_loads, node_mass, g, pattern_names, mult=1.0
+    ):
         """Add mass from frame distributed loads in given patterns."""
         for ld in dist_loads or []:
             if ld.pattern not in pattern_names:
                 continue
             elem = elements.get(ld.frame_id)
-            if elem is None or getattr(elem, 'inactive', False):
+            if elem is None or getattr(elem, "inactive", False):
                 continue
             ni = mm.nodes.get(elem.node_i)
             nj = mm.nodes.get(elem.node_j)
@@ -2919,7 +3188,7 @@ class AnalysisBuilder:
 
     def _mass_from_joint_loads(self, mm, node_mass, g, lp_name, mult):
         """Add mass from joint loads in the given pattern."""
-        for jl in getattr(mm, 'joint_loads', []):
+        for jl in getattr(mm, "joint_loads", []):
             if jl.pattern != lp_name:
                 continue
             total_force = abs(jl.fz) * mult
@@ -2929,13 +3198,14 @@ class AnalysisBuilder:
     def _mass_from_area_gravity(self, mm, node_mass, g, lp_name, mult):
         """Add mass from area gravity loads in the given pattern."""
         from ..model.tree_utils import collect_descendants
-        for agl in getattr(mm, 'area_gravity_loads', []):
+
+        for agl in getattr(mm, "area_gravity_loads", []):
             if agl.pattern != lp_name:
                 continue
             ae = mm.area_elements.get(agl.area_id)
             if ae is None:
                 continue
-            if getattr(ae, 'inactive', False):
+            if getattr(ae, "inactive", False):
                 sub_ids = collect_descendants(agl.area_id, mm.area_elements)
                 if not sub_ids:
                     continue
@@ -2943,7 +3213,7 @@ class AnalysisBuilder:
                     sub_elem = mm.area_elements.get(sub_id)
                     if sub_elem is None:
                         continue
-                    sec_name = mm.area_assignments.get(sub_id, '')
+                    sec_name = mm.area_assignments.get(sub_id, "")
                     if not sec_name:
                         continue
                     sec = mm.sections.get(sec_name)
@@ -2952,7 +3222,7 @@ class AnalysisBuilder:
                     mat = mm.materials.get(sec.material)
                     if mat is None or abs(mat.unit_weight) < 1e-12:
                         continue
-                    thickness = getattr(sub_elem, 'thickness', 0.0) or 0.0
+                    thickness = getattr(sub_elem, "thickness", 0.0) or 0.0
                     if thickness < 1e-12:
                         continue
                     corner_pts = []
@@ -2973,7 +3243,7 @@ class AnalysisBuilder:
                     for nid in sub_elem.node_ids:
                         node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_c
                 continue
-            sec_name = mm.area_assignments.get(agl.area_id, '')
+            sec_name = mm.area_assignments.get(agl.area_id, "")
             if not sec_name:
                 continue
             sec = mm.sections.get(sec_name)
@@ -2982,7 +3252,7 @@ class AnalysisBuilder:
             mat = mm.materials.get(sec.material)
             if mat is None or abs(mat.unit_weight) < 1e-12:
                 continue
-            thickness = getattr(ae, 'thickness', 0.0) or 0.0
+            thickness = getattr(ae, "thickness", 0.0) or 0.0
             if thickness < 1e-12:
                 continue
             corner_pts = []
@@ -3006,13 +3276,14 @@ class AnalysisBuilder:
     def _mass_from_area_uniform(self, mm, node_mass, g, lp_name, mult):
         """Add mass from area uniform loads in the given pattern."""
         from ..model.tree_utils import collect_descendants
-        for aul in getattr(mm, 'area_uniform_loads', []):
+
+        for aul in getattr(mm, "area_uniform_loads", []):
             if aul.pattern != lp_name:
                 continue
             ae = mm.area_elements.get(aul.area_id)
             if ae is None:
                 continue
-            if getattr(ae, 'inactive', False):
+            if getattr(ae, "inactive", False):
                 sub_ids = collect_descendants(aul.area_id, mm.area_elements)
                 if not sub_ids:
                     continue
@@ -3060,9 +3331,9 @@ class AnalysisBuilder:
     # Modal and response-spectrum analysis
     # ═══════════════════════════════════════════════════════════════
 
-    def run_modal_analysis(self, num_modes: int = 30,
-                           print_results: bool = True,
-                           eigen_solver: str = "default") -> Dict[str, Any]:
+    def run_modal_analysis(
+        self, num_modes: int = 30, print_results: bool = True, eigen_solver: str = "default"
+    ) -> dict[str, Any]:
         """Run eigenvalue / modal analysis and return results.
 
         Requires that seismic masses have been assigned (call
@@ -3096,11 +3367,10 @@ class AnalysisBuilder:
             * ``'nodal_masses'`` — dict of nodal masses ``{tag: (mx, my, mz)}``
               in model units (tonnes for kN-m models).
         """
-        if self.config.get('verbose'):
+        if self.config.get("verbose"):
             print(f"Running modal analysis for {num_modes} modes...")
 
-        from ..utils import g_from_units
-        g = g_from_units(self.mesh_model.units)
+        g_from_units(self.mesh_model.units)
 
         # ── Ensure seismic masses are present ────────────────────
         _has_mass = False
@@ -3118,47 +3388,44 @@ class AnalysisBuilder:
         # ── Ritz / pre-load nudge ────────────────────────────────
         _needs_nudge = eigen_solver in ("genBandArpack", "ritz")
         if _needs_nudge:
-            if self.config.get('verbose'):
+            if self.config.get("verbose"):
                 print("  Ritz pre-step (static gravity)...")
             # Run a self-weight gravity load step
             self.create_loads(pattern_scales={"Self weight": 1.0})
             try:
-                if self._edge_constraint_method == 'penalty':
-                    ops.constraints('Penalty', 1.0e12, 1.0e12)
+                if self._edge_constraint_method == "penalty":
+                    ops.constraints("Penalty", 1.0e12, 1.0e12)
                 else:
-                    ops.constraints('Transformation')
-                ops.numberer('RCM')
-                ops.system(self.config.get('solver_system', 'BandGen'))
-                ops.test('NormDispIncr', 1e-3, 5, 0)
-                _algorithms = ['Newton', 'NewtonLineSearch',
-                               'ModifiedNewton', 'KrylovNewton']
+                    ops.constraints("Transformation")
+                ops.numberer("RCM")
+                ops.system(self.config.get("solver_system", "BandGen"))
+                ops.test("NormDispIncr", 1e-3, 5, 0)
+                _algorithms = ["Newton", "NewtonLineSearch", "ModifiedNewton", "KrylovNewton"]
                 _ok = -1
                 for _alg in _algorithms:
                     try:
                         ops.algorithm(_alg)
                     except Exception:
                         continue
-                    ops.integrator('LoadControl', 1.0)
-                    ops.analysis('Static')
+                    ops.integrator("LoadControl", 1.0)
+                    ops.analysis("Static")
                     _ok = ops.analyze(1)
                     if _ok == 0:
                         break
-                if _ok != 0 and self.config.get('verbose'):
-                    print("  ⚠ Ritz pre-step did not converge — "
-                          "continuing with zero initial state")
+                if _ok != 0 and self.config.get("verbose"):
+                    print("  ⚠ Ritz pre-step did not converge — continuing with zero initial state")
             except Exception:
-                if self.config.get('verbose'):
+                if self.config.get("verbose"):
                     print("  ⚠ Ritz pre-step failed — continuing")
 
         # ── Set constraint handler for eigen analysis ────────────
         try:
-            if self._edge_constraint_method == 'penalty':
-                ops.constraints('Penalty', 1.0e12, 1.0e12)
+            if self._edge_constraint_method == "penalty":
+                ops.constraints("Penalty", 1.0e12, 1.0e12)
             else:
-                ops.constraints(self.config.get('solver_constraints',
-                                                'Transformation'))
-            ops.numberer('RCM')
-            ops.system(self.config.get('solver_system', 'BandGen'))
+                ops.constraints(self.config.get("solver_constraints", "Transformation"))
+            ops.numberer("RCM")
+            ops.system(self.config.get("solver_system", "BandGen"))
         except Exception:
             pass
 
@@ -3185,7 +3452,7 @@ class AnalysisBuilder:
                 if not eigenvals_all:
                     print("  ⚠ ARPACK also failed — falling back to fullGenLapack")
                     try:
-                        eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
+                        eigenvals_all = ops.eigen("-fullGenLapack", num_modes)
                     except Exception:
                         eigenvals_all = []
         else:
@@ -3196,76 +3463,81 @@ class AnalysisBuilder:
             if not eigenvals_all:
                 print("  ⚠ ARPACK solver failed — falling back to fullGenLapack")
                 try:
-                    eigenvals_all = ops.eigen('-fullGenLapack', num_modes)
+                    eigenvals_all = ops.eigen("-fullGenLapack", num_modes)
                 except Exception:
                     eigenvals_all = []
 
         eigenvals = [ev for ev in eigenvals_all if ev > 1e-12]
         n_modes = len(eigenvals)
-        if n_modes < num_modes and self.config.get('verbose'):
-            print(f"  Warning: only {n_modes} positive eigenvalues out of "
-                  f"{num_modes}.  Proceeding with {n_modes} modes.")
+        if n_modes < num_modes and self.config.get("verbose"):
+            print(
+                f"  Warning: only {n_modes} positive eigenvalues out of "
+                f"{num_modes}.  Proceeding with {n_modes} modes."
+            )
 
         periods = [2.0 * math.pi / math.sqrt(ev) for ev in eigenvals]
         frequencies = [math.sqrt(ev) / (2.0 * math.pi) for ev in eigenvals]
 
         try:
-            modal_props = ops.modalProperties('-return', '-unorm')
+            modal_props = ops.modalProperties("-return", "-unorm")
         except Exception:
             modal_props = {}
 
         results = {
-            'eigenvalues': eigenvals,
-            'periods': periods,
-            'frequencies': frequencies,
-            'modal_props': modal_props,
-            'num_modes': n_modes,
-            'nodal_masses': self._query_nodal_masses(),
+            "eigenvalues": eigenvals,
+            "periods": periods,
+            "frequencies": frequencies,
+            "modal_props": modal_props,
+            "num_modes": n_modes,
+            "nodal_masses": self._query_nodal_masses(),
         }
 
         if print_results:
             print("\n===== MODAL ANALYSIS =====")
             if modal_props:
                 try:
-                    total_mass = modal_props.get('totalFreeMass', [0])[0]
-                    print(f"Total translational mass (free DOFs): "
-                          f"{total_mass:.2f} tonnes\n")
-                    header = (f"{'Mode':>5} {'Freq(Hz)':>10} {'Period(s)':>10} "
-                              f"{'Mx(t)':>12} {'My(t)':>12} {'Mz(t)':>12} "
-                              f"{'%X':>7} {'%Y':>7} {'%Z':>7}")
+                    total_mass = modal_props.get("totalFreeMass", [0])[0]
+                    print(f"Total translational mass (free DOFs): {total_mass:.2f} tonnes\n")
+                    header = (
+                        f"{'Mode':>5} {'Freq(Hz)':>10} {'Period(s)':>10} "
+                        f"{'Mx(t)':>12} {'My(t)':>12} {'Mz(t)':>12} "
+                        f"{'%X':>7} {'%Y':>7} {'%Z':>7}"
+                    )
                     print(header)
                     print("-" * len(header))
                     for i in range(n_modes):
-                        mx = modal_props.get('partiMassMX', [0]*n_modes)[i]
-                        my = modal_props.get('partiMassMY', [0]*n_modes)[i]
-                        mz = modal_props.get('partiMassMZ', [0]*n_modes)[i]
-                        rx = modal_props.get('partiMassRatiosMX', [0]*n_modes)[i]
-                        ry = modal_props.get('partiMassRatiosMY', [0]*n_modes)[i]
-                        rz = modal_props.get('partiMassRatiosMZ', [0]*n_modes)[i]
-                        print(f"{i+1:5d} {frequencies[i]:10.4f} "
-                              f"{periods[i]:10.4f} {mx:12.2f} {my:12.2f} "
-                              f"{mz:12.2f} {rx:6.2f}% {ry:6.2f}% {rz:6.2f}%")
+                        mx = modal_props.get("partiMassMX", [0] * n_modes)[i]
+                        my = modal_props.get("partiMassMY", [0] * n_modes)[i]
+                        mz = modal_props.get("partiMassMZ", [0] * n_modes)[i]
+                        rx = modal_props.get("partiMassRatiosMX", [0] * n_modes)[i]
+                        ry = modal_props.get("partiMassRatiosMY", [0] * n_modes)[i]
+                        rz = modal_props.get("partiMassRatiosMZ", [0] * n_modes)[i]
+                        print(
+                            f"{i + 1:5d} {frequencies[i]:10.4f} "
+                            f"{periods[i]:10.4f} {mx:12.2f} {my:12.2f} "
+                            f"{mz:12.2f} {rx:6.2f}% {ry:6.2f}% {rz:6.2f}%"
+                        )
                 except Exception:
                     pass
             else:
                 print(f"{'Mode':>5} {'Period(s)':>10} {'Freq(Hz)':>10}")
                 print("-" * 30)
                 for i in range(n_modes):
-                    print(f"{i+1:5d} {periods[i]:10.4f} {frequencies[i]:10.4f}")
+                    print(f"{i + 1:5d} {periods[i]:10.4f} {frequencies[i]:10.4f}")
 
         return results
 
     def run_response_spectrum_analysis(
         self,
         num_modes: int,
-        modal_periods: List[float],
-        spectrum_periods: List[float],
-        spectrum_accels: List[float],
-        direction: str = 'X',
+        modal_periods: list[float],
+        spectrum_periods: list[float],
+        spectrum_accels: list[float],
+        direction: str = "X",
         damping_ratio: float = 0.05,
         T_rigid: Optional[float] = None,
         print_results: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run a response‑spectrum analysis using CQC modal combination.
 
         Performs mode‑by‑mode RS analysis using OpenSees'
@@ -3324,7 +3596,7 @@ class AnalysisBuilder:
               the fixed geometric centroid (bounding-box midpoint).
               This fixed reference ensures CQC validity across modes.
         """
-        if self.config.get('verbose'):
+        if self.config.get("verbose"):
             print(f"Running response spectrum analysis (dir={direction})...")
 
         num_modes = min(num_modes, len(modal_periods))
@@ -3335,28 +3607,27 @@ class AnalysisBuilder:
         damp_ratios = [damping_ratio] * num_modes
 
         SPECTRUM_TS_TAG = 9999
-        try:
-            ops.remove('timeSeries', SPECTRUM_TS_TAG)
-        except Exception:
-            pass
-        ops.timeSeries('Path', SPECTRUM_TS_TAG,
-                       '-time', *spectrum_periods,
-                       '-values', *spectrum_accels)
+        with contextlib.suppress(Exception):
+            ops.remove("timeSeries", SPECTRUM_TS_TAG)
+        ops.timeSeries(
+            "Path", SPECTRUM_TS_TAG, "-time", *spectrum_periods, "-values", *spectrum_accels
+        )
 
         modal_base_shear = []
         modal_base_moment = []
-        dof = {'X': 1, 'Y': 2, 'Z': 3}[direction]
+        dof = {"X": 1, "Y": 2, "Z": 3}[direction]
 
-        dof_idx = {'X': 0, 'Y': 1, 'Z': 2}[direction]
+        dof_idx = {"X": 0, "Y": 1, "Z": 2}[direction]
         base_nodes = {
-            nid for nid, r in self.mesh_model.restraints.items()
+            nid
+            for nid, r in self.mesh_model.restraints.items()
             if len(r.dofs) > dof_idx and r.dofs[dof_idx] == 1
         }
 
         elements = self.mesh_model.frame_elements
         base_elements = []
         for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
             nd_i = self.mesh_model.nodes.get(elem.node_i)
             nd_j = self.mesh_model.nodes.get(elem.node_j)
@@ -3366,17 +3637,18 @@ class AnalysisBuilder:
             # split-frame children are addressed by their correct tag.
             ops_tag = self.frame_tag_map.get(eid, elem.elem_tag)
             if elem.node_i in base_nodes and elem.node_j not in base_nodes:
-                base_elements.append((ops_tag, 'i'))
+                base_elements.append((ops_tag, "i"))
             elif elem.node_j in base_nodes and elem.node_i not in base_nodes:
-                base_elements.append((ops_tag, 'j'))
+                base_elements.append((ops_tag, "j"))
 
         # ── Pre-compute fixed reference point for overturning moment ──
         # Compute from base (support) nodes only — the centre of the base
         # footprint. This ensures a consistent reference across all modes
         # for valid CQC combination.  Same approach as
         # sum_reactions_with_overturning in utils.py.
-        _base_nds = [self.mesh_model.nodes[nid] for nid in base_nodes
-                     if nid in self.mesh_model.nodes]
+        _base_nds = [
+            self.mesh_model.nodes[nid] for nid in base_nodes if nid in self.mesh_model.nodes
+        ]
         if _base_nds:
             _xs = [n.x for n in _base_nds]
             _ys = [n.y for n in _base_nds]
@@ -3388,7 +3660,7 @@ class AnalysisBuilder:
 
         # Pre-compute base-element node coordinates for lever-arm
         # Build a one-time tag-to-element index (ops tag → element)
-        _elem_by_tag: Dict = {}
+        _elem_by_tag: dict = {}
         for _e in elements.values():
             _elem_by_tag[_e.elem_tag] = _e
 
@@ -3397,7 +3669,7 @@ class AnalysisBuilder:
             elem = elements.get(str(eid)) or _elem_by_tag.get(eid)
             if elem is None:
                 continue
-            nid = elem.node_i if end == 'i' else elem.node_j
+            nid = elem.node_i if end == "i" else elem.node_j
             nd = self.mesh_model.nodes.get(nid)
             if nd is None:
                 continue
@@ -3405,40 +3677,53 @@ class AnalysisBuilder:
 
         modal_base_reactions = []
         for mode in range(1, num_modes + 1):
-            ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, '-mode', mode)
+            ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, "-mode", mode)
 
-            rxn = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0,
-                   'mx': 0.0, 'my': 0.0, 'mz': 0.0}
+            rxn = {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": 0.0, "my": 0.0, "mz": 0.0}
             for eid, end, nx, ny, nz in _base_elem_coords:
                 try:
-                    forces = ops.eleResponse(eid, 'forces')
+                    forces = ops.eleResponse(eid, "forces")
                 except Exception:
                     continue
-                if end == 'i':
-                    fx, fy, fz, mx, my, mz = forces[0], forces[1], forces[2], forces[3], forces[4], forces[5]
+                if end == "i":
+                    fx, fy, fz, mx, my, mz = (
+                        forces[0],
+                        forces[1],
+                        forces[2],
+                        forces[3],
+                        forces[4],
+                        forces[5],
+                    )
                 else:
-                    fx, fy, fz, mx, my, mz = forces[6], forces[7], forces[8], forces[9], forces[10], forces[11]
+                    fx, fy, fz, mx, my, mz = (
+                        forces[6],
+                        forces[7],
+                        forces[8],
+                        forces[9],
+                        forces[10],
+                        forces[11],
+                    )
 
-                rxn['fx'] += fx
-                rxn['fy'] += fy
-                rxn['fz'] += fz
+                rxn["fx"] += fx
+                rxn["fy"] += fy
+                rxn["fz"] += fz
                 # Overturning: direct moment + force × lever-arm about fixed reference
                 dx = nx - _cx
                 dy = ny - _cy
                 dz = nz - _z_base
-                rxn['mx'] += mx + fz * dy - fy * dz
-                rxn['my'] += my + fx * dz - fz * dx
-                rxn['mz'] += mz + fy * dx - fx * dy
+                rxn["mx"] += mx + fz * dy - fy * dz
+                rxn["my"] += my + fx * dz - fz * dx
+                rxn["mz"] += mz + fy * dx - fx * dy
 
             modal_base_reactions.append(rxn)
 
         # ── CQC / SRSS per component ───────────────────────────
-        dof_map = {'X': (0, 4), 'Y': (1, 3), 'Z': (2, 4)}
+        dof_map = {"X": (0, 4), "Y": (1, 3), "Z": (2, 4)}
         #   X: shear=fx(idx 0), overturning=my(idx 4)
         #   Y: shear=fy(idx 1), overturning=mx(idx 3)  ← was mz before fix
         #   Z: shear=fz(idx 2), overturning=my(idx 4)
         f_idx, m_idx = dof_map[direction]
-        comp_order = ['fx', 'fy', 'fz', 'mx', 'my', 'mz']
+        comp_order = ["fx", "fy", "fz", "mx", "my", "mz"]
 
         # Keep scalar arrays for backward compat
         modal_base_shear = [r[comp_order[f_idx]] for r in modal_base_reactions]
@@ -3457,33 +3742,30 @@ class AnalysisBuilder:
         base_moment_srss = base_reactions_srss[comp_order[m_idx]]
 
         result = {
-            'modal_base_shear': modal_base_shear,
-            'modal_base_moment': modal_base_moment,
-            'base_shear_cqc': base_shear_cqc,
-            'base_shear_srss': base_shear_srss,
-            'base_moment_cqc': base_moment_cqc,
-            'base_moment_srss': base_moment_srss,
-            'modal_periods': modal_periods,
+            "modal_base_shear": modal_base_shear,
+            "modal_base_moment": modal_base_moment,
+            "base_shear_cqc": base_shear_cqc,
+            "base_shear_srss": base_shear_srss,
+            "base_moment_cqc": base_moment_cqc,
+            "base_moment_srss": base_moment_srss,
+            "modal_periods": modal_periods,
             # New: full 6-DoF base reactions per-mode and combined
-            'modal_base_reactions': modal_base_reactions,
-            'base_reactions_cqc': base_reactions_cqc,
-            'base_reactions_srss': base_reactions_srss,
+            "modal_base_reactions": modal_base_reactions,
+            "base_reactions_cqc": base_reactions_cqc,
+            "base_reactions_srss": base_reactions_srss,
         }
 
         if print_results:
             print(f"\n===== RESPONSE SPECTRUM ({direction}) =====")
-            print(f"{'Mode':>5} {'Period(s)':>10} {'Shear (kN)':>14} "
-                  f"{'Moment (kN-m)':>16}")
+            print(f"{'Mode':>5} {'Period(s)':>10} {'Shear (kN)':>14} {'Moment (kN-m)':>16}")
             print("-" * 48)
-            for i, (T, v, m) in enumerate(zip(modal_periods[:num_modes],
-                                                modal_base_shear,
-                                                modal_base_moment)):
-                print(f"{i+1:5d} {T:10.4f} {v:14.2f} {m:16.2f}")
+            for i, (T, v, m) in enumerate(
+                zip(modal_periods[:num_modes], modal_base_shear, modal_base_moment)
+            ):
+                print(f"{i + 1:5d} {T:10.4f} {v:14.2f} {m:16.2f}")
             print("-" * 48)
-            print(f"{'CQC':>5} {'':>10} {base_shear_cqc:14.2f} "
-                  f"{base_moment_cqc:16.2f}")
-            print(f"{'SRSS':>5} {'':>10} {base_shear_srss:14.2f} "
-                  f"{base_moment_srss:16.2f}")
+            print(f"{'CQC':>5} {'':>10} {base_shear_cqc:14.2f} {base_moment_cqc:16.2f}")
+            print(f"{'SRSS':>5} {'':>10} {base_shear_srss:14.2f} {base_moment_srss:16.2f}")
             print()
 
         return result
@@ -3494,13 +3776,13 @@ class AnalysisBuilder:
     def extract_element_rs_forces(
         self,
         num_modes: int,
-        modal_periods: List[float],
-        spectrum_periods: List[float],
-        spectrum_accels: List[float],
-        direction: str = 'X',
+        modal_periods: list[float],
+        spectrum_periods: list[float],
+        spectrum_accels: list[float],
+        direction: str = "X",
         damping_ratio: float = 0.05,
         print_results: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run RS analysis and return CQC‑combined element forces sorted by height.
 
         For each element this returns the CQC‑combined moments (My_i, My_j,
@@ -3518,13 +3800,13 @@ class AnalysisBuilder:
               ``Vz_i``, ``Vz_j``, ``My_i``, ``My_j``, ``Mz_i``, ``Mz_j``.
             * ``'modal_periods'``, ``'omega'`` — for diagnostics.
         """
-        if self.config.get('verbose'):
+        if self.config.get("verbose"):
             print("Extracting element RS forces...")
 
         omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods]
         damp_ratios = [damping_ratio] * num_modes
 
-        dof = {'X': 1, 'Y': 2, 'Z': 3}[direction]
+        dof = {"X": 1, "Y": 2, "Z": 3}[direction]
 
         SPECTRUM_TS_TAG = 9999
 
@@ -3533,7 +3815,7 @@ class AnalysisBuilder:
         # Pre-compute element info + storage
         elem_data = {}
         for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
             ni = self.mesh_model.nodes.get(elem.node_i)
             nj = self.mesh_model.nodes.get(elem.node_j)
@@ -3544,48 +3826,48 @@ class AnalysisBuilder:
                 z_i, z_j = z_j, z_i
             ops_tag = self.frame_tag_map.get(eid, elem.elem_tag)
             elem_data[eid] = {
-                'tag': ops_tag,
-                'elem_id': eid,
-                'z_bot': z_i,
-                'z_mid': (z_i + z_j) * 0.5,
-                'My_i': [], 'My_j': [], 'Mz_i': [], 'Mz_j': [],
+                "tag": ops_tag,
+                "elem_id": eid,
+                "z_bot": z_i,
+                "z_mid": (z_i + z_j) * 0.5,
+                "My_i": [],
+                "My_j": [],
+                "Mz_i": [],
+                "Mz_j": [],
             }
 
         # Mode-by-mode extraction
         for mode in range(1, num_modes + 1):
-            ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, '-mode', mode)
+            ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, "-mode", mode)
             for eid, ed in elem_data.items():
                 try:
-                    forces = ops.eleResponse(ed['tag'], 'forces')
+                    forces = ops.eleResponse(ed["tag"], "forces")
                 except Exception:
                     forces = [0.0] * 12
-                ed['My_i'].append(forces[4])
-                ed['My_j'].append(forces[10])
-                ed['Mz_i'].append(forces[5])
-                ed['Mz_j'].append(forces[11])
+                ed["My_i"].append(forces[4])
+                ed["My_j"].append(forces[10])
+                ed["Mz_i"].append(forces[5])
+                ed["Mz_j"].append(forces[11])
 
         # CQC combine per element and compute shears
         element_results = []
         for eid, ed in elem_data.items():
-            ne = len(ed['My_i'])
+            ne = len(ed["My_i"])
             n_use = min(ne, num_modes)
             o_use = omega[:n_use]
             d_use = damp_ratios[:n_use]
 
-            My_i = cqc_combine(ed['My_i'][:n_use], o_use, d_use)
-            My_j = cqc_combine(ed['My_j'][:n_use], o_use, d_use)
-            Mz_i = cqc_combine(ed['Mz_i'][:n_use], o_use, d_use)
-            Mz_j = cqc_combine(ed['Mz_j'][:n_use], o_use, d_use)
+            My_i = cqc_combine(ed["My_i"][:n_use], o_use, d_use)
+            My_j = cqc_combine(ed["My_j"][:n_use], o_use, d_use)
+            Mz_i = cqc_combine(ed["Mz_i"][:n_use], o_use, d_use)
+            Mz_j = cqc_combine(ed["Mz_j"][:n_use], o_use, d_use)
 
             # Element length
             elem = elements.get(eid)
             if elem:
                 ni = self.mesh_model.nodes.get(elem.node_i)
                 nj = self.mesh_model.nodes.get(elem.node_j)
-                if ni and nj:
-                    L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
-                else:
-                    L = 1.0
+                L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z) if ni and nj else 1.0
             else:
                 L = 1.0
 
@@ -3595,36 +3877,50 @@ class AnalysisBuilder:
             Vz_i = (My_i - My_j) / L if L > 1e-12 else 0.0
             Vz_j = Vz_i
 
-            element_results.append({
-                'elem_id': ed['elem_id'],
-                'z_bot': ed['z_bot'],
-                'z_mid': ed['z_mid'],
-                'Vy_i': Vy_i, 'Vy_j': Vy_j,
-                'Vz_i': Vz_i, 'Vz_j': Vz_j,
-                'My_i': My_i, 'My_j': My_j,
-                'Mz_i': Mz_i, 'Mz_j': Mz_j,
-            })
+            element_results.append(
+                {
+                    "elem_id": ed["elem_id"],
+                    "z_bot": ed["z_bot"],
+                    "z_mid": ed["z_mid"],
+                    "Vy_i": Vy_i,
+                    "Vy_j": Vy_j,
+                    "Vz_i": Vz_i,
+                    "Vz_j": Vz_j,
+                    "My_i": My_i,
+                    "My_j": My_j,
+                    "Mz_i": Mz_i,
+                    "Mz_j": Mz_j,
+                }
+            )
 
         # Sort by height
-        element_results.sort(key=lambda r: r['z_mid'])
+        element_results.sort(key=lambda r: r["z_mid"])
 
         if print_results:
-            print(f"\n===== RESPONSE SPECTRUM RESULTS ({direction} only, CQC) FOR ALL ELEMENTS =====")
-            header = (f"{'Elem':>30} {'Z_bot(m)':>10} {'Z_mid(m)':>10} {'End':>5} "
-                      f"{'Vy (kN)':>12} {'Vz (kN)':>12} {'My (kN-m)':>12} {'Mz (kN-m)':>12}")
+            print(
+                f"\n===== RESPONSE SPECTRUM RESULTS ({direction} only, CQC) FOR ALL ELEMENTS ====="
+            )
+            header = (
+                f"{'Elem':>30} {'Z_bot(m)':>10} {'Z_mid(m)':>10} {'End':>5} "
+                f"{'Vy (kN)':>12} {'Vz (kN)':>12} {'My (kN-m)':>12} {'Mz (kN-m)':>12}"
+            )
             print(header)
             print("-" * len(header))
             for r in element_results:
                 eid_str = f"{r['elem_id']:30s}"
-                print(f"{eid_str} {r['z_bot']:10.2f} {r['z_mid']:10.2f} {'I':>5} "
-                      f"{r['Vy_i']:12.2f} {r['Vz_i']:12.2f} {r['My_i']:12.2f} {r['Mz_i']:12.2f}")
-                print(f"{eid_str} {r['z_bot']:10.2f} {r['z_mid']:10.2f} {'J':>5} "
-                      f"{r['Vy_j']:12.2f} {r['Vz_j']:12.2f} {r['My_j']:12.2f} {r['Mz_j']:12.2f}")
+                print(
+                    f"{eid_str} {r['z_bot']:10.2f} {r['z_mid']:10.2f} {'I':>5} "
+                    f"{r['Vy_i']:12.2f} {r['Vz_i']:12.2f} {r['My_i']:12.2f} {r['Mz_i']:12.2f}"
+                )
+                print(
+                    f"{eid_str} {r['z_bot']:10.2f} {r['z_mid']:10.2f} {'J':>5} "
+                    f"{r['Vy_j']:12.2f} {r['Vz_j']:12.2f} {r['My_j']:12.2f} {r['Mz_j']:12.2f}"
+                )
 
         return {
-            'element_results': element_results,
-            'modal_periods': modal_periods,
-            'omega': omega,
+            "element_results": element_results,
+            "modal_periods": modal_periods,
+            "omega": omega,
         }
 
     # =========================================================================
@@ -3633,15 +3929,16 @@ class AnalysisBuilder:
     def compute_rs_nodal_displacements(
         self,
         num_modes: int,
-        modal_periods: List[float],
-        eigenvalues: List[float],
+        modal_periods: list[float],
+        eigenvalues: list[float],
         spectrum_func,
-        direction: str = 'X',
+        direction: str = "X",
         damping_ratio: float = 0.05,
         return_srss: bool = False,
-    ) -> Union[Dict[int, Tuple[float, float, float]],
-               Tuple[Dict[int, Tuple[float, float, float]],
-                     Dict[int, Tuple[float, float, float]]]]:
+    ) -> Union[
+        dict[int, tuple[float, float, float]],
+        tuple[dict[int, tuple[float, float, float]], dict[int, tuple[float, float, float]]],
+    ]:
         """Compute CQC‑ (and optionally SRSS‑) combined peak nodal
         displacements from RS analysis.
 
@@ -3667,17 +3964,21 @@ class AnalysisBuilder:
             units.  When ``return_srss=True``, returns a tuple of two
             such dicts: ``(cqc, srss)``.
         """
-        dof = {'X': 1, 'Y': 2, 'Z': 3}[direction]
+        dof = {"X": 1, "Y": 2, "Z": 3}[direction]
         dof_idx = dof - 1
 
         # Get participation factors from modalProperties
         try:
-            mp = ops.modalProperties('-return', '-unorm')
+            mp = ops.modalProperties("-return", "-unorm")
         except Exception:
             mp = {}
-        mass_key = ('partiMassMX' if direction == 'X'
-                    else 'partiMassMY' if direction == 'Y'
-                    else 'partiMassMZ')
+        mass_key = (
+            "partiMassMX"
+            if direction == "X"
+            else "partiMassMY"
+            if direction == "Y"
+            else "partiMassMZ"
+        )
         eff_masses = mp.get(mass_key, [0.0] * num_modes)
 
         omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods]
@@ -3715,15 +4016,9 @@ class AnalysisBuilder:
         cqc_result = {}
         srss_result = {}
         for tag in node_tags:
-            cqc_vals = tuple(
-                cqc_combine(per_mode[tag][d], omega, damp)
-                for d in range(3)
-            )
+            cqc_vals = tuple(cqc_combine(per_mode[tag][d], omega, damp) for d in range(3))
             cqc_result[tag] = cqc_vals
-            srss_vals = tuple(
-                math.sqrt(sum(v * v for v in per_mode[tag][d]))
-                for d in range(3)
-            )
+            srss_vals = tuple(math.sqrt(sum(v * v for v in per_mode[tag][d])) for d in range(3))
             srss_result[tag] = srss_vals
 
         if return_srss:
@@ -3732,7 +4027,7 @@ class AnalysisBuilder:
 
     def extract_mode_shapes(
         self, num_modes: int
-    ) -> Dict[int, Dict[int, Tuple[float, float, float]]]:
+    ) -> dict[int, dict[int, tuple[float, float, float]]]:
         """Extract mode shape displacements for each node and each mode.
 
         Must be called **after** :meth:`run_modal_analysis`.
@@ -3746,10 +4041,10 @@ class AnalysisBuilder:
         """
         node_tags = list(ops.getNodeTags())
         dof_map = {0: 1, 1: 2, 2: 3}
-        shapes: Dict[int, Dict[int, Tuple]] = {}
+        shapes: dict[int, dict[int, tuple]] = {}
         for m in range(num_modes):
             mode_num = m + 1
-            per_node: Dict[int, Tuple] = {}
+            per_node: dict[int, tuple] = {}
             for tag in node_tags:
                 dx = ops.nodeEigenvector(tag, mode_num, dof_map[0])
                 dy = ops.nodeEigenvector(tag, mode_num, dof_map[1])
@@ -3758,7 +4053,7 @@ class AnalysisBuilder:
             shapes[m] = per_node
         return shapes
 
-    def extract_static_element_forces(self) -> Dict[int, Dict[str, float]]:
+    def extract_static_element_forces(self) -> dict[int, dict[str, float]]:
         """Extract element end forces in the **global** coordinate system.
 
         Must be called **after** :meth:`run_static_analysis`.
@@ -3772,14 +4067,14 @@ class AnalysisBuilder:
         elements = self.mesh_model.frame_elements
         results = {}
         for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
             # Resolve the OpenSees element tag — may differ from elem.elem_tag
             # when the Preprocessor creates frame elements with deterministic
             # tags stored in frame_tag_map.
             tag = self.frame_tag_map.get(eid, elem.elem_tag)
             try:
-                f = ops.eleResponse(tag, 'forces')
+                f = ops.eleResponse(tag, "forces")
             except Exception:
                 continue
             f_i_global = np.array([f[0], f[1], f[2]])
@@ -3788,14 +4083,22 @@ class AnalysisBuilder:
             m_j_global = np.array([f[9], f[10], f[11]])
 
             results[tag] = {
-                'Fx': f_i_global[0], 'Fy': f_i_global[1], 'Fz': f_i_global[2],
-                'Mx': m_i_global[0], 'My': m_i_global[1], 'Mz': m_i_global[2],
-                'Fx_j': f_j_global[0], 'Fy_j': f_j_global[1], 'Fz_j': f_j_global[2],
-                'Mx_j': m_j_global[0], 'My_j': m_j_global[1], 'Mz_j': m_j_global[2],
+                "Fx": f_i_global[0],
+                "Fy": f_i_global[1],
+                "Fz": f_i_global[2],
+                "Mx": m_i_global[0],
+                "My": m_i_global[1],
+                "Mz": m_i_global[2],
+                "Fx_j": f_j_global[0],
+                "Fy_j": f_j_global[1],
+                "Fz_j": f_j_global[2],
+                "Mx_j": m_j_global[0],
+                "My_j": m_j_global[1],
+                "Mz_j": m_j_global[2],
             }
         return results
 
-    def extract_static_shell_forces(self) -> Dict[str, Dict[str, Any]]:
+    def extract_static_shell_forces(self) -> dict[str, dict[str, Any]]:
         """Extract shell element forces after a static analysis.
 
         For each active (non-inactive, non-loads-only) area element,
@@ -3827,29 +4130,36 @@ class AnalysisBuilder:
                 'mxy': float,  # twisting moment (moment/width)
             }}``
         """
-        results: Dict[str, Dict[str, Any]] = {}
+        results: dict[str, dict[str, Any]] = {}
         areas = self.mesh_model.area_elements
         loads_only = self.mesh_model.loads_only_area_ids
         for aid, area in areas.items():
             if aid in loads_only:
                 continue
-            if getattr(area, 'inactive', False):
+            if getattr(area, "inactive", False):
                 continue
             elem_tag = self._shell_tag_map.get(aid)
             if elem_tag is None:
                 continue
             try:
-                f = ops.eleResponse(elem_tag, 'forces')
+                f = ops.eleResponse(elem_tag, "forces")
             except Exception:
                 continue
             # ShellMITC4 returns [fx, fy, fxy, mx, my, mxy, ?, ?]
             results[aid] = {
-                'elem_tag': elem_tag,
-                'node_tags': [nd.node_tag for nd_id in area.node_ids
-                              if (nd := self.mesh_model.nodes.get(nd_id)) is not None],
-                'sec_name': self.mesh_model.area_assignments.get(aid, ''),
-                'fx': f[0], 'fy': f[1], 'fxy': f[2],
-                'mx': f[3], 'my': f[4], 'mxy': f[5],
+                "elem_tag": elem_tag,
+                "node_tags": [
+                    nd.node_tag
+                    for nd_id in area.node_ids
+                    if (nd := self.mesh_model.nodes.get(nd_id)) is not None
+                ],
+                "sec_name": self.mesh_model.area_assignments.get(aid, ""),
+                "fx": f[0],
+                "fy": f[1],
+                "fxy": f[2],
+                "mx": f[3],
+                "my": f[4],
+                "mxy": f[5],
             }
         return results
 
@@ -3857,7 +4167,7 @@ class AnalysisBuilder:
     # Utilities
     # ═══════════════════════════════════════════════════════════════
 
-    def get_local_axes(self, elem: FrameElement) -> Tuple[np.ndarray, ...]:
+    def get_local_axes(self, elem: FrameElement) -> tuple[np.ndarray, ...]:
         """Compute local x, y, z unit vectors for a frame element.
 
         Uses ``get_SAP_vecxz`` from the geometry module (which handles
@@ -3877,12 +4187,13 @@ class AnalysisBuilder:
                 element has zero length.
         """
         from ..model.geometry import get_local_axes
+
         ni = self.mesh_model.nodes.get(elem.node_i)
         nj = self.mesh_model.nodes.get(elem.node_j)
         if ni is None or nj is None:
             raise ValueError(f"Cannot resolve nodes for {elem.elem_id}")
         vx = np.array([nj.x - ni.x, nj.y - ni.y, nj.z - ni.z])
-        return get_local_axes(vx, getattr(elem, 'angle', 0.0))
+        return get_local_axes(vx, getattr(elem, "angle", 0.0))
 
     # ═══════════════════════════════════════════════════════════════
     # Load equilibrium check
@@ -3913,7 +4224,7 @@ class AnalysisBuilder:
         import pandas as pd
 
         rows: list = []
-        fu = self.mesh_model.units.get('F', '?')
+        fu = self.mesh_model.units.get("F", "?")
         # Collect pattern names from the MeshModel's load_patterns dict
         # (matching the legacy Builder which iterates self.model.load_patterns).
         # Skip patterns with zero applied loads (e.g. SLX, SLY).
@@ -3934,17 +4245,19 @@ class AnalysisBuilder:
                 extract_reactions=True,
                 pattern_scales={pname: 1.0},
             )
-            rxn = result.get('reactions', {})
-            rx = sum(v['fx'] for v in rxn.values())
-            ry = sum(v['fy'] for v in rxn.values())
-            rz = sum(v['fz'] for v in rxn.values())
+            rxn = result.get("reactions", {})
+            rx = sum(v["fx"] for v in rxn.values())
+            ry = sum(v["fy"] for v in rxn.values())
+            rz = sum(v["fz"] for v in rxn.values())
 
-            rows.append({
-                'Load Pattern': pname,
-                f'Reaction Fx ({fu})': round(rx, 1),
-                f'Reaction Fy ({fu})': round(ry, 1),
-                f'Reaction Fz ({fu})': round(rz, 1),
-            })
+            rows.append(
+                {
+                    "Load Pattern": pname,
+                    f"Reaction Fx ({fu})": round(rx, 1),
+                    f"Reaction Fy ({fu})": round(ry, 1),
+                    f"Reaction Fz ({fu})": round(rz, 1),
+                }
+            )
 
         return pd.DataFrame(rows)
 
@@ -3952,16 +4265,17 @@ class AnalysisBuilder:
     # Export
     # ═══════════════════════════════════════════════════════════════
 
-    def export_results(self,
-                      filepath: str,
-                      static_results: Optional[Dict[str, Any]] = None,
-                      modal_result: Optional[Dict[str, Any]] = None,
-                      mode_shapes: Optional[Dict] = None,
-                      rs_results: Optional[Dict[str, Dict]] = None,
-                      rs_element_forces: Optional[Dict[str, Any]] = None,
-                      rs_nodal_displacements: Optional[Dict[int, tuple]] = None,
-                      fmt: str = "npz",
-                      ) -> str:
+    def export_results(
+        self,
+        filepath: str,
+        static_results: Optional[dict[str, Any]] = None,
+        modal_result: Optional[dict[str, Any]] = None,
+        mode_shapes: Optional[dict] = None,
+        rs_results: Optional[dict[str, dict]] = None,
+        rs_element_forces: Optional[dict[str, Any]] = None,
+        rs_nodal_displacements: Optional[dict[int, tuple]] = None,
+        fmt: str = "npz",
+    ) -> str:
         """Export model geometry and analysis results to a unified file.
 
         Delegates to :func:`~fea_toolkit.io.unified_writer.write_results`
@@ -4003,18 +4317,18 @@ class AnalysisBuilder:
 
     def run_pushover_analysis(
         self,
-        gravity_patterns: Dict[str, float],
-        lateral_load_type: str = 'uniform',
+        gravity_patterns: dict[str, float],
+        lateral_load_type: str = "uniform",
         lateral_pattern_name: Optional[str] = None,
-        lateral_direction: str = 'X',
+        lateral_direction: str = "X",
         control_node_tag: Optional[int] = None,
         max_disp: float = 0.5,
         num_steps: int = 100,
         fundamental_period: Optional[float] = None,
-        mode_shapes: Optional[Dict] = None,
+        mode_shapes: Optional[dict] = None,
         mode_index: int = 0,
         print_progress: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run a displacement‑controlled pushover analysis.
 
         **Two‑stage process:**
@@ -4065,24 +4379,22 @@ class AnalysisBuilder:
             ``status``, ``gravity_displacements``, ``control_node``,
             ``dof``, ``lateral_load_type``.
         """
-        valid_types = {'uniform', 'triangular', 'mode1', 'pattern'}
+        valid_types = {"uniform", "triangular", "mode1", "pattern"}
         if lateral_load_type not in valid_types:
             raise ValueError(
-                f"Unknown lateral_load_type '{lateral_load_type}'. "
-                f"Choose from {valid_types}."
+                f"Unknown lateral_load_type '{lateral_load_type}'. Choose from {valid_types}."
             )
-        if lateral_load_type == 'pattern' and not lateral_pattern_name:
-            raise ValueError(
-                "lateral_pattern_name is required when "
-                "lateral_load_type='pattern'"
+        if lateral_load_type == "pattern" and not lateral_pattern_name:
+            raise ValueError("lateral_pattern_name is required when lateral_load_type='pattern'")
+
+        if self.config.get("verbose") or print_progress:
+            print(
+                f"Running pushover: {lateral_load_type} in "
+                f"{lateral_direction}, {num_steps} steps, "
+                f"max disp = {max_disp:.3f} m"
             )
 
-        if self.config.get('verbose') or print_progress:
-            print(f"Running pushover: {lateral_load_type} in "
-                  f"{lateral_direction}, {num_steps} steps, "
-                  f"max disp = {max_disp:.3f} m")
-
-        dof = {'X': 1, 'Y': 2, 'Z': 3}[lateral_direction]
+        dof = {"X": 1, "Y": 2, "Z": 3}[lateral_direction]
 
         # ── Rebuild with fiber sections ──────────────────────────
         # Pushover always attempts fiber sections (nonlinear).  Check
@@ -4091,7 +4403,6 @@ class AnalysisBuilder:
         # Note: brace_truss is orthogonal — braces use Hysteretic truss
         # elements while beams/columns can still use fiber sections.
         _use_fiber = True
-        from ..model.sap_data import Section as _BaseSection, ShellSection
         for sec in self.mesh_model.sections.values():
             if isinstance(sec, ShellSection):
                 continue
@@ -4100,20 +4411,22 @@ class AnalysisBuilder:
             except NotImplementedError:
                 _use_fiber = False
                 import warnings
+
                 warnings.warn(
                     f"Section '{sec.name}' does not support fiber patches — "
                     f"falling back to elastic sections for all frame elements. "
                     f"Consider implementing to_fiber_patches() for mixed "
                     f"steel/RC models.",
-                    UserWarning, stacklevel=3,
+                    UserWarning,
+                    stacklevel=3,
                 )
                 break
 
         if not _use_fiber:
-            overrides: Dict[str, Any] = {
-                'element_type': 'elasticBeamColumn',
-                'create_fiber_sections': False,
-                'use_elastic_sections': True,
+            overrides: dict[str, Any] = {
+                "element_type": "elasticBeamColumn",
+                "create_fiber_sections": False,
+                "use_elastic_sections": True,
             }
             self.build_domain(config_overrides=overrides)
         else:
@@ -4122,7 +4435,7 @@ class AnalysisBuilder:
             )
 
         # ── Re-apply edge constraints ────────────────────────────
-        _spring_scale = float(self.config.get('pushover_spring_scale', 1.0))
+        _spring_scale = float(self.config.get("pushover_spring_scale", 1.0))
         if self._saved_edge_constraints and _spring_scale > 0:
             for args in self._saved_edge_constraints:
                 coarse_edges, fine_nodes, coarse_elems, tolerance, k, verbose = args
@@ -4134,9 +4447,9 @@ class AnalysisBuilder:
                     coarse_elements=coarse_elems,
                     tolerance=tolerance,
                     penalty_stiffness=k,
-                    verbose=verbose or self.config.get('verbose', False),
+                    verbose=verbose or self.config.get("verbose", False),
                 )
-            if self.config.get('verbose', False) or print_progress:
+            if self.config.get("verbose", False) or print_progress:
                 n = len(self._saved_edge_constraints)
                 print(f"  Re-applied edge constraints from {n} tear(s)")
 
@@ -4144,7 +4457,7 @@ class AnalysisBuilder:
         try:
             self.compute_seismic_masses()
         except Exception:
-            if self.config.get('verbose'):
+            if self.config.get("verbose"):
                 print("  compute_seismic_masses failed, using fallback masses")
             self._compute_fallback_masses()
 
@@ -4158,10 +4471,7 @@ class AnalysisBuilder:
         grav_results = self.run_static_analysis(
             extract_reactions=True,
         )
-        grav_disp = (
-            grav_results.get('nodal_displacements', {})
-            if grav_results else {}
-        )
+        grav_disp = grav_results.get("nodal_displacements", {}) if grav_results else {}
 
         # ── Control node auto‑select ─────────────────────────────
         if control_node_tag is None:
@@ -4169,9 +4479,8 @@ class AnalysisBuilder:
             max_z = -1e12
             for nid, nd in self.mesh_model.nodes.items():
                 restraint = self.mesh_model.restraints.get(nid)
-                if restraint and len(restraint.dofs) > dof - 1:
-                    if restraint.dofs[dof - 1] == 1:
-                        continue  # restrained in push direction
+                if restraint and len(restraint.dofs) > dof - 1 and restraint.dofs[dof - 1] == 1:
+                    continue  # restrained in push direction
                 try:
                     z = ops.nodeCoord(nd.node_tag)[2]
                 except Exception:
@@ -4183,8 +4492,7 @@ class AnalysisBuilder:
                 control_node_tag = candidate
             else:
                 raise RuntimeError(
-                    "Could not auto-select control node — "
-                    "no unrestrained nodes found"
+                    "Could not auto-select control node — no unrestrained nodes found"
                 )
 
         if print_progress:
@@ -4197,23 +4505,22 @@ class AnalysisBuilder:
             grav_ctrl_disp = 0.0
 
         # ── Lock gravity ─────────────────────────────────────────
-        ops.loadConst('-time', 0.0)
+        ops.loadConst("-time", 0.0)
 
         # Find a free pattern tag
         _pat_tag = 9001
         try:
             existing = ops.getLoadPatternTags()
             if existing:
-                _pat_tag = max(max(existing), 9000) + 1
+                _pat_tag = max(*existing, 9000) + 1
         except Exception:
             pass
 
         # ── Apply lateral loads ──────────────────────────────────
-        if lateral_load_type == 'pattern':
+        if lateral_load_type == "pattern":
             # Use existing SAP2000 frame distributed loads projected
             # onto the push direction.
-            dir_map = {'Gravity': (0,0,-1), 'X': (1,0,0),
-                       'Y': (0,1,0), 'Z': (0,0,1)}
+            dir_map = {"Gravity": (0, 0, -1), "X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}
 
             for ld in self.mesh_model.frame_dist_loads:
                 if ld.pattern != lateral_pattern_name:
@@ -4221,7 +4528,7 @@ class AnalysisBuilder:
 
                 gx, gy, gz = dir_map.get(ld.direction, (0, 0, 0))
                 elem = self.mesh_model.frame_elements.get(ld.frame_id)
-                if elem is None or getattr(elem, 'inactive', False):
+                if elem is None or getattr(elem, "inactive", False):
                     continue
                 ops_tag = self.frame_tag_map.get(ld.frame_id, elem.elem_tag)
 
@@ -4234,7 +4541,7 @@ class AnalysisBuilder:
                     continue
                 axis = np.array([nd_j.x - nd_i.x, nd_j.y - nd_i.y, nd_j.z - nd_i.z])
                 try:
-                    vx, vy, vz = get_local_axes(axis, getattr(elem, 'angle', 0.0))
+                    vx, vy, vz = get_local_axes(axis, getattr(elem, "angle", 0.0))
                 except Exception:
                     continue
 
@@ -4252,49 +4559,54 @@ class AnalysisBuilder:
 
                 is_uniform = abs(wa - wb) < 1e-12
                 if is_uniform and abs(aL) < 1e-12 and abs(bL - 1.0) < 1e-12:
-                    ops.eleLoad('-ele', ops_tag, '-type', '-beamUniform',
-                                wy_a, wz_a, wx_a)
+                    ops.eleLoad("-ele", ops_tag, "-type", "-beamUniform", wy_a, wz_a, wx_a)
                 elif is_uniform:
-                    ops.eleLoad('-ele', ops_tag, '-type', '-beamUniform',
-                                wy_a, wz_a, wx_a, aL, bL)
+                    ops.eleLoad("-ele", ops_tag, "-type", "-beamUniform", wy_a, wz_a, wx_a, aL, bL)
                 else:
                     for i in range(4):
                         span = bL - aL
                         seg_a = aL + i * span / 4
                         seg_b = aL + (i + 1) * span / 4
                         xi = (i + 0.5) / 4
-                        ops.eleLoad('-ele', ops_tag, '-type', '-beamUniform',
-                                    wy_a + (wy_b - wy_a) * xi,
-                                    wz_a + (wz_b - wz_a) * xi,
-                                    wx_a + (wx_b - wx_a) * xi,
-                                    seg_a, seg_b)
+                        ops.eleLoad(
+                            "-ele",
+                            ops_tag,
+                            "-type",
+                            "-beamUniform",
+                            wy_a + (wy_b - wy_a) * xi,
+                            wz_a + (wz_b - wz_a) * xi,
+                            wx_a + (wx_b - wx_a) * xi,
+                            seg_a,
+                            seg_b,
+                        )
 
             if print_progress:
-                n = sum(1 for ld in self.mesh_model.frame_dist_loads
-                        if ld.pattern == lateral_pattern_name)
-                print(f"  Applied lateral loads from pattern "
-                      f"'{lateral_pattern_name}' ({n} load(s))")
+                n = sum(
+                    1
+                    for ld in self.mesh_model.frame_dist_loads
+                    if ld.pattern == lateral_pattern_name
+                )
+                print(
+                    f"  Applied lateral loads from pattern '{lateral_pattern_name}' ({n} load(s))"
+                )
         else:
-            ops.timeSeries('Linear', _pat_tag)
-            ops.pattern('Plain', _pat_tag, _pat_tag)
+            ops.timeSeries("Linear", _pat_tag)
+            ops.pattern("Plain", _pat_tag, _pat_tag)
 
-            if lateral_load_type == 'uniform':
+            if lateral_load_type == "uniform":
                 node_loads = self._compute_uniform_lateral_loads(
                     direction=lateral_direction,
                     node_masses=self.node_masses,
                 )
-            elif lateral_load_type == 'triangular':
+            elif lateral_load_type == "triangular":
                 node_loads = self._compute_triangular_lateral_loads(
                     direction=lateral_direction,
                     node_masses=self.node_masses,
                     fundamental_period=fundamental_period,
                 )
-            elif lateral_load_type == 'mode1':
+            elif lateral_load_type == "mode1":
                 if mode_shapes is None:
-                    raise ValueError(
-                        "mode_shapes is required when "
-                        "lateral_load_type='mode1'"
-                    )
+                    raise ValueError("mode_shapes is required when lateral_load_type='mode1'")
                 node_loads = self._compute_mode_shape_lateral_loads(
                     direction=lateral_direction,
                     node_masses=self.node_masses,
@@ -4309,8 +4621,7 @@ class AnalysisBuilder:
 
             n_loaded = len(node_loads)
             if print_progress:
-                print(f"  Applied lateral loads ({lateral_load_type}) "
-                      f"to {n_loaded} node(s)")
+                print(f"  Applied lateral loads ({lateral_load_type}) to {n_loaded} node(s)")
 
         # ── Displacement‑controlled push analysis setup ──────────
         disp_inc = max_disp / max(num_steps, 1)
@@ -4319,32 +4630,31 @@ class AnalysisBuilder:
         # NormDispIncr with 1e-4 tolerance, 20 iterations, energy
         # norm.  Tight tolerances (1e-6/10 iter) prevent convergence
         # for mode-shape-based pushover patterns.
-        _algo = self.config.get('solver_algorithm', 'Newton')
-        _test_tol = self.config.get('solver_test_tol', 1e-4)
-        _test_iter = self.config.get('solver_test_max_iter', 20)
-        _system = self.config.get('solver_system', 'BandGen')
+        _algo = self.config.get("solver_algorithm", "Newton")
+        _test_tol = self.config.get("solver_test_tol", 1e-4)
+        _test_iter = self.config.get("solver_test_max_iter", 20)
+        _system = self.config.get("solver_system", "BandGen")
 
         ops.wipeAnalysis()
-        _cs = self.config.get('solver_constraints', 'Transformation')
-        if self._edge_constraint_method == 'penalty':
-            _cs = 'Penalty'
-            ops.constraints('Penalty', 1.0e12, 1.0e12)
+        _cs = self.config.get("solver_constraints", "Transformation")
+        if self._edge_constraint_method == "penalty":
+            _cs = "Penalty"
+            ops.constraints("Penalty", 1.0e12, 1.0e12)
         else:
             ops.constraints(_cs)
-        ops.numberer('RCM')
+        ops.numberer("RCM")
         ops.system(_system)
-        ops.test('NormDispIncr', _test_tol, _test_iter, 0, 2)
+        ops.test("NormDispIncr", _test_tol, _test_iter, 0, 2)
 
-        ops.integrator('DisplacementControl',
-                       int(control_node_tag), dof, disp_inc)
-        ops.analysis('Static')
+        ops.integrator("DisplacementControl", int(control_node_tag), dof, disp_inc)
+        ops.analysis("Static")
 
         # ── Per-step recording setup (opt-in) ─────────────────────
         record = self.config.get("record_pushover_steps", False)
         record_sel = self.config.get("pushover_record_selection", None)
-        record_frames: Set[str] = set()
-        record_areas: Set[str] = set()
-        record_node_tags: Set[int] = set()
+        record_frames: set[str] = set()
+        record_areas: set[str] = set()
+        record_node_tags: set[int] = set()
         if record:
             if record_sel is not None:
                 # Pass storey data if available in config (for story-based Selection filtering)
@@ -4355,15 +4665,17 @@ class AnalysisBuilder:
                 )
             else:
                 record_frames = {
-                    eid for eid, fe in self.mesh_model.frame_elements.items()
-                    if not getattr(fe, 'inactive', False)
+                    eid
+                    for eid, fe in self.mesh_model.frame_elements.items()
+                    if not getattr(fe, "inactive", False)
                 }
                 record_areas = {
-                    aid for aid, ae in self.mesh_model.area_elements.items()
-                    if not getattr(ae, 'inactive', False)
+                    aid
+                    for aid, ae in self.mesh_model.area_elements.items()
+                    if not getattr(ae, "inactive", False)
                 }
             # Collect node tags from selected frames/areas only
-            record_node_tags: Set[int] = set()
+            record_node_tags: set[int] = set()
             for eid in record_frames:
                 fe = self.mesh_model.frame_elements.get(eid)
                 if fe is None:
@@ -4381,16 +4693,18 @@ class AnalysisBuilder:
                     if nd is not None:
                         record_node_tags.add(nd.node_tag)
             if print_progress and (record_frames or record_areas):
-                print(f"  Recording {len(record_frames)} frame(s) + "
-                      f"{len(record_areas)} area(s) + "
-                      f"{len(record_node_tags)} node(s) per step")
-        step_results: List[Dict[str, Any]] = []
+                print(
+                    f"  Recording {len(record_frames)} frame(s) + "
+                    f"{len(record_areas)} area(s) + "
+                    f"{len(record_node_tags)} node(s) per step"
+                )
+        step_results: list[dict[str, Any]] = []
 
         # ── Gravity state (step 0) ───────────────────────────────
-        steps: List[int] = [0]
-        ctrl_disps: List[float] = [0.0]
-        base_shears: List[float] = [0.0]
-        statuses: List[int] = [0]
+        steps: list[int] = [0]
+        ctrl_disps: list[float] = [0.0]
+        base_shears: list[float] = [0.0]
+        statuses: list[int] = [0]
 
         try:
             ops.reactions()
@@ -4416,12 +4730,12 @@ class AnalysisBuilder:
 
         # ── Push loop with algorithm fallback chain ──────────────
         for step in range(1, num_steps + 1):
-            _algo_chain: List = [_algo]
-            if _algo != 'NewtonLineSearch':
-                _algo_chain.append('NewtonLineSearch')
-            if _algo != 'ModifiedNewton':
-                _algo_chain.append(('ModifiedNewton', '-initial'))
-            _algo_chain.append('KrylovNewton')
+            _algo_chain: list = [_algo]
+            if _algo != "NewtonLineSearch":
+                _algo_chain.append("NewtonLineSearch")
+            if _algo != "ModifiedNewton":
+                _algo_chain.append(("ModifiedNewton", "-initial"))
+            _algo_chain.append("KrylovNewton")
 
             ok = -1
             for attempt in _algo_chain:
@@ -4469,38 +4783,41 @@ class AnalysisBuilder:
             # ── Per-step element recording ──────────────────────
             if record and ok == 0:
                 step_data = _record_step(
-                    self, step, record_frames, record_areas,
+                    self,
+                    step,
+                    record_frames,
+                    record_areas,
                     node_tags=record_node_tags,
                 )
                 step_results.append(step_data)
 
             if print_progress:
-                s = '✓' if ok == 0 else '✗'
-                print(f"    Step {step:4d}/{num_steps}: "
-                      f"u={cd:.6f} m  V={bs:.2f} kN  {s}")
+                s = "✓" if ok == 0 else "✗"
+                print(f"    Step {step:4d}/{num_steps}: u={cd:.6f} m  V={bs:.2f} kN  {s}")
 
             if ok != 0:
                 if print_progress:
-                    print("    Push stopped — non-converged step "
-                          f"(last algorithm: {_algo_chain[-1]})")
+                    print(
+                        f"    Push stopped — non-converged step (last algorithm: {_algo_chain[-1]})"
+                    )
                 break
 
         # Store step results on builder for downstream export
         self.pushover_step_results = step_results
 
         result = {
-            'step': steps,
-            'control_disp': ctrl_disps,
-            'base_shear': base_shears,
-            'status': statuses,
-            'gravity_displacements': grav_disp,
-            'control_node': control_node_tag,
-            'dof': dof,
-            'lateral_load_type': lateral_load_type,
-            'units': self.mesh_model.units,
+            "step": steps,
+            "control_disp": ctrl_disps,
+            "base_shear": base_shears,
+            "status": statuses,
+            "gravity_displacements": grav_disp,
+            "control_node": control_node_tag,
+            "dof": dof,
+            "lateral_load_type": lateral_load_type,
+            "units": self.mesh_model.units,
         }
         if record:
-            result['step_results'] = step_results
+            result["step_results"] = step_results
 
         return result
 
@@ -4509,8 +4826,10 @@ class AnalysisBuilder:
     # ═══════════════════════════════════════════════════════════════
 
     def export_pushover_results(
-        self, path: str, direction: str = "+X",
-        pushover_results: Optional[Dict[str, Any]] = None,
+        self,
+        path: str,
+        direction: str = "+X",
+        pushover_results: Optional[dict[str, Any]] = None,
     ) -> str:
         """Export recorded pushover step results to NPZ.
 
@@ -4528,32 +4847,34 @@ class AnalysisBuilder:
         Raises:
             ValueError: If no step results have been recorded.
         """
-        if not getattr(self, 'pushover_step_results', None):
+        if not getattr(self, "pushover_step_results", None):
             raise ValueError(
                 "No pushover step results to export. "
                 "Ensure run_pushover_analysis() was called with "
                 "record_pushover_steps=True in config."
             )
         from ..io.npz_writer import write_pushover_results_npz
+
         return write_pushover_results_npz(
-            path, self.mesh_model, self.pushover_step_results,
+            path,
+            self.mesh_model,
+            self.pushover_step_results,
             direction=direction,
             pushover_results=pushover_results,
         )
 
-    def _compute_fallback_masses(self) -> Dict[str, float]:
+    def _compute_fallback_masses(self) -> dict[str, float]:
         """Compute nodal masses from element self‑weight when no MASS SOURCE.
 
         Used as a fallback when the model has no mass source definitions.
         Masses are used to define the shape of uniform/triangular pushover
         load patterns.
         """
-        from ..utils import g_from_units
         g = g_from_units(self.mesh_model.units)
-        node_mass: Dict[str, float] = {}
+        node_mass: dict[str, float] = {}
 
         for eid, elem in self.mesh_model.frame_elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
             sec_name = self.mesh_model.frame_assignments.get(eid)
             if not sec_name or sec_name not in self.mesh_model.sections:
@@ -4579,8 +4900,8 @@ class AnalysisBuilder:
     def _compute_uniform_lateral_loads(
         self,
         direction: str,
-        node_masses: Dict[str, float],
-    ) -> Dict[int, Tuple[float, float, float]]:
+        node_masses: dict[str, float],
+    ) -> dict[int, tuple[float, float, float]]:
         """Compute mass‑proportional lateral loads (uniform acceleration).
 
         Per ASCE 41 / ATC‑40 \"Uniform\" pattern — each node with mass
@@ -4591,9 +4912,9 @@ class AnalysisBuilder:
         Returns:
             ``{node_tag: (fx, fy, fz)}`` in global coordinates.
         """
-        dof_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(direction.upper(), 0)
+        dof_idx = {"X": 0, "Y": 1, "Z": 2}.get(direction.upper(), 0)
 
-        nodal_loads: Dict[int, Tuple[float, float, float]] = {}
+        nodal_loads: dict[int, tuple[float, float, float]] = {}
         for nid, mass in node_masses.items():
             if mass <= 0:
                 continue
@@ -4608,9 +4929,9 @@ class AnalysisBuilder:
     def _compute_triangular_lateral_loads(
         self,
         direction: str,
-        node_masses: Dict[str, float],
+        node_masses: dict[str, float],
         fundamental_period: Optional[float] = None,
-    ) -> Dict[int, Tuple[float, float, float]]:
+    ) -> dict[int, tuple[float, float, float]]:
         """Compute triangular (ELF) lateral loads proportional to $m_i h_i^k$.
 
         Per ASCE 7 / ASCE 41:
@@ -4623,23 +4944,21 @@ class AnalysisBuilder:
         Returns:
             ``{node_tag: (fx, fy, fz)}`` in global coordinates.
         """
-        dof_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(direction.upper(), 0)
+        dof_idx = {"X": 0, "Y": 1, "Z": 2}.get(direction.upper(), 0)
 
         # Find base elevation
         z_vals = [node.z for node in self.mesh_model.nodes.values()]
         z_min = min(z_vals) if z_vals else 0.0
 
         # Compute k exponent per ASCE 7
-        if fundamental_period is None:
-            k = 1.0
-        elif fundamental_period <= 0.5:
+        if fundamental_period is None or fundamental_period <= 0.5:
             k = 1.0
         elif fundamental_period >= 2.5:
             k = 2.0
         else:
             k = 1.0 + (fundamental_period - 0.5) / 2.0
 
-        nodal_loads: Dict[int, Tuple[float, float, float]] = {}
+        nodal_loads: dict[int, tuple[float, float, float]] = {}
         for nid, mass in node_masses.items():
             if mass <= 0:
                 continue
@@ -4647,7 +4966,7 @@ class AnalysisBuilder:
             if node is None:
                 continue
             h = max(node.z - z_min, 0.0)
-            f_mag = mass * (h ** k)
+            f_mag = mass * (h**k)
             if abs(f_mag) < 1e-12:
                 continue
             f = [0.0, 0.0, 0.0]
@@ -4658,10 +4977,10 @@ class AnalysisBuilder:
     def _compute_mode_shape_lateral_loads(
         self,
         direction: str,
-        node_masses: Dict[str, float],
-        mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
+        node_masses: dict[str, float],
+        mode_shapes: dict[int, dict[int, tuple[float, float, float]]],
         mode_index: int = 0,
-    ) -> Dict[int, Tuple[float, float, float]]:
+    ) -> dict[int, tuple[float, float, float]]:
         """Compute mode‑shape‑proportional lateral loads $F_i = m_i \\cdot |\\phi_i|$.
 
         Each node receives a load proportional to its mass times the
@@ -4681,9 +5000,9 @@ class AnalysisBuilder:
             raise ValueError(f"Mode index {mode_index} not found in mode_shapes")
 
         mode = mode_shapes[mode_index]
-        dof_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(direction.upper(), 0)
+        dof_idx = {"X": 0, "Y": 1, "Z": 2}.get(direction.upper(), 0)
 
-        nodal_loads: Dict[int, Tuple[float, float, float]] = {}
+        nodal_loads: dict[int, tuple[float, float, float]] = {}
         for nid, mass in node_masses.items():
             if mass <= 0:
                 continue
@@ -4705,11 +5024,11 @@ class AnalysisBuilder:
 
     def pushover_to_adrs(
         self,
-        pushover_results: Dict[str, Any],
-        modal_results: Dict[str, Any],
-        mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
-        direction: str = 'X',
-    ) -> Dict[str, Any]:
+        pushover_results: dict[str, Any],
+        modal_results: dict[str, Any],
+        mode_shapes: dict[int, dict[int, tuple[float, float, float]]],
+        direction: str = "X",
+    ) -> dict[str, Any]:
         """Convert a pushover capacity curve to ADRS coordinates.
 
         Delegates to :func:`~fea_toolkit.model.csm.pushover_to_adrs`.
@@ -4725,6 +5044,7 @@ class AnalysisBuilder:
             ``'phi_control'`` — see :func:`~fea_toolkit.model.csm.pushover_to_adrs`.
         """
         from ..model.csm import pushover_to_adrs as _csm_pushover_to_adrs
+
         return _csm_pushover_to_adrs(
             pushover_results=pushover_results,
             modal_results=modal_results,
@@ -4734,16 +5054,16 @@ class AnalysisBuilder:
 
     def compute_performance_point(
         self,
-        pushover_results: Dict[str, Any],
-        modal_results: Dict[str, Any],
-        mode_shapes: Dict[int, Dict[int, Tuple[float, float, float]]],
-        spectrum_periods: List[float],
-        spectrum_accels: List[float],
-        direction: str = 'X',
+        pushover_results: dict[str, Any],
+        modal_results: dict[str, Any],
+        mode_shapes: dict[int, dict[int, tuple[float, float, float]]],
+        spectrum_periods: list[float],
+        spectrum_accels: list[float],
+        direction: str = "X",
         damping_ratio: float = 0.05,
         max_iter: int = 50,
         tol: float = 0.01,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Find the performance point using the Capacity Spectrum Method.
 
         Delegates to :func:`~fea_toolkit.model.csm.compute_performance_point`.
@@ -4765,6 +5085,7 @@ class AnalysisBuilder:
             :func:`~fea_toolkit.model.csm.compute_performance_point`.
         """
         from ..model.csm import compute_performance_point as _csm_compute
+
         return _csm_compute(
             pushover_results=pushover_results,
             modal_results=modal_results,
@@ -4781,10 +5102,10 @@ class AnalysisBuilder:
 def _record_step(
     builder: "AnalysisBuilder",
     step: int,
-    frame_ids: Set[str],
-    area_ids: Set[str],
-    node_tags: Optional[Set[int]] = None,
-) -> Dict[str, Any]:
+    frame_ids: set[str],
+    area_ids: set[str],
+    node_tags: Optional[set[int]] = None,
+) -> dict[str, Any]:
     """Query ``ops.eleResponse()`` and ``ops.nodeDisp()`` at the current step.
 
     Args:
@@ -4803,49 +5124,61 @@ def _record_step(
         * ``"shell_forces"`` — ``{aid: {Nx, Ny, Nxy, Mx, My, Mxy}}``
         * ``"node_displacements"`` — ``{tag: (dx, dy, dz)}`` (when *node_tags* is provided)
     """
-    data: Dict[str, Any] = {"step": step}
+    data: dict[str, Any] = {"step": step}
 
     # ── Frame elements ──
-    frame_forces: Dict[str, Dict[str, float]] = {}
+    frame_forces: dict[str, dict[str, float]] = {}
     for eid in frame_ids:
         ops_tag = builder.frame_tag_map.get(eid)
         if ops_tag is None:
             continue
         try:
-            f = ops.eleResponse(ops_tag, 'forces')  # 12 values
+            f = ops.eleResponse(ops_tag, "forces")  # 12 values
         except Exception:
             continue
         if len(f) < 12:
             continue
         frame_forces[eid] = {
-            'fx_i': f[0], 'fy_i': f[1], 'fz_i': f[2],
-            'mx_i': f[3], 'my_i': f[4], 'mz_i': f[5],
-            'fx_j': f[6], 'fy_j': f[7], 'fz_j': f[8],
-            'mx_j': f[9], 'my_j': f[10], 'mz_j': f[11],
+            "fx_i": f[0],
+            "fy_i": f[1],
+            "fz_i": f[2],
+            "mx_i": f[3],
+            "my_i": f[4],
+            "mz_i": f[5],
+            "fx_j": f[6],
+            "fy_j": f[7],
+            "fz_j": f[8],
+            "mx_j": f[9],
+            "my_j": f[10],
+            "mz_j": f[11],
         }
     data["frame_forces"] = frame_forces
 
     # ── Shell elements (stress resultants) ──
-    shell_forces: Dict[str, Dict[str, float]] = {}
+    shell_forces: dict[str, dict[str, float]] = {}
     for aid in area_ids:
         ops_tag = builder._shell_tag_map.get(aid)
         if ops_tag is None:
             continue
         try:
-            f = ops.eleResponse(ops_tag, 'forces')  # Shell forces
+            f = ops.eleResponse(ops_tag, "forces")  # Shell forces
         except Exception:
             continue
         # ShellNLDKGQ / ShellMITC4 returns at least 6 forces
         if len(f) >= 6:
             shell_forces[aid] = {
-                'Nx': f[0], 'Ny': f[1], 'Nxy': f[2],
-                'Mx': f[3], 'My': f[4], 'Mxy': f[5],
+                "Nx": f[0],
+                "Ny": f[1],
+                "Nxy": f[2],
+                "Mx": f[3],
+                "My": f[4],
+                "Mxy": f[5],
             }
     data["shell_forces"] = shell_forces
 
     # ── Node displacements ──
     if node_tags is not None:
-        node_disp: Dict[int, Tuple[float, float, float]] = {}
+        node_disp: dict[int, tuple[float, float, float]] = {}
         for tag in node_tags:
             try:
                 d = ops.nodeDisp(tag)  # list: [dx, dy, dz, rx, ry, rz]
@@ -4857,13 +5190,13 @@ def _record_step(
     return data
 
 
-def run_modal(mesh_model, n_modes: int = 12,
-              config: dict = None):
+def run_modal(mesh_model, n_modes: int = 12, config: dict = None):
     """Run modal analysis through the two-stage path.
 
     Returns the same dict as :meth:`AnalysisBuilder.run_modal_analysis`.
     """
     from .analysis_builder import AnalysisBuilder
+
     if config is None:
         config = {"verbose": False}
     ab = AnalysisBuilder(mesh_model, config)

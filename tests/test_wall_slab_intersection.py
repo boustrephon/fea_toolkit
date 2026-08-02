@@ -4,18 +4,20 @@ Tests the geometry functions used by the Preprocessor's
 ``detect_wall_slab_intersections`` and ``split_slabs_at_walls`` features.
 """
 
-import math
 import pytest
 
 from fea_toolkit.model.sap_data import (
-    SAPModelData, Node, Restraint, Material, Section, FrameElement,
-    AreaElement, LoadPattern,
+    AreaElement,
+    Material,
+    Node,
+    SAPModelData,
+    Section,
 )
-
 
 # ============================================================================
 # Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def materials():
@@ -33,6 +35,7 @@ def sections():
 # ============================================================================
 # Wall-slab intersection detection
 # ============================================================================
+
 
 class TestFindWallNodesInsideSlabs:
     """Tests for :func:`find_wall_nodes_inside_slabs`."""
@@ -68,14 +71,10 @@ class TestFindWallNodesInsideSlabs:
         assert len(findings) >= 1, f"Expected ≥1 finding, got {len(findings)}"
         # The wall should be detected
         wall_findings = [f for f in findings if f["wall_id"] == "Wall"]
-        assert len(wall_findings) == 1, (
-            f"Expected 1 finding for Wall, got {len(wall_findings)}"
-        )
+        assert len(wall_findings) == 1, f"Expected 1 finding for Wall, got {len(wall_findings)}"
         wf = wall_findings[0]
         assert wf["slab_id"] == "Slab"
-        assert len(wf["nodes"]) >= 2, (
-            f"Expected ≥2 wall nodes inside slab, got {len(wf['nodes'])}"
-        )
+        assert len(wf["nodes"]) >= 2, f"Expected ≥2 wall nodes inside slab, got {len(wf['nodes'])}"
         # Wall bottom nodes should be inside slab
         inside_ids = {n["node_id"] for n in wf["nodes"]}
         assert "5" in inside_ids, "Wall bottom-left node missing from findings"
@@ -106,8 +105,7 @@ class TestFindWallNodesInsideSlabs:
 
         findings = find_wall_nodes_inside_slabs(areas, assigns, nodes)
         assert len(findings) == 0, (
-            f"Expected empty findings for non-intersecting areas, "
-            f"got {len(findings)}"
+            f"Expected empty findings for non-intersecting areas, got {len(findings)}"
         )
 
     def test_slab_only_returns_empty(self, materials, sections):
@@ -142,7 +140,7 @@ class TestFindWallNodesInsideSlabs:
             "7": Node("7", 7, 6.0, 6.0, 3.0),
             "8": Node("8", 8, 0.0, 6.0, 3.0),
             # Wall from ground to roof through interior
-            "9":  Node("9", 9, 2.0, 2.0, 0.0),
+            "9": Node("9", 9, 2.0, 2.0, 0.0),
             "10": Node("10", 10, 4.0, 2.0, 0.0),
             "11": Node("11", 11, 4.0, 2.0, 3.0),
             "12": Node("12", 12, 2.0, 2.0, 3.0),
@@ -156,16 +154,16 @@ class TestFindWallNodesInsideSlabs:
 
         findings = find_wall_nodes_inside_slabs(areas, assigns, nodes)
         # Wall bottom nodes should be found in ground slab
-        ground_findings = [f for f in findings
-                          if f["slab_id"] == "Ground" and f["wall_id"] == "Wall"]
+        ground_findings = [
+            f for f in findings if f["slab_id"] == "Ground" and f["wall_id"] == "Wall"
+        ]
         assert len(ground_findings) == 1
         bottom_ids = {n["node_id"] for n in ground_findings[0]["nodes"]}
         assert "9" in bottom_ids
         assert "10" in bottom_ids
 
         # Wall top nodes should be found in roof slab
-        roof_findings = [f for f in findings
-                        if f["slab_id"] == "Roof" and f["wall_id"] == "Wall"]
+        roof_findings = [f for f in findings if f["slab_id"] == "Roof" and f["wall_id"] == "Wall"]
         assert len(roof_findings) == 1
         top_ids = {n["node_id"] for n in roof_findings[0]["nodes"]}
         assert "11" in top_ids
@@ -175,6 +173,7 @@ class TestFindWallNodesInsideSlabs:
 # ============================================================================
 # Wall-slab splitting (Preprocessor integration)
 # ============================================================================
+
 
 class TestSplitSlabsAtWalls:
     """Tests for :func:`split_slabs_at_wall_intersections`."""
@@ -200,15 +199,13 @@ class TestSplitSlabsAtWalls:
         }
         assigns = {"Slab": "Slab200", "Wall": "Wall300"}
 
-        result_areas, result_assign, result_nodes, _ = (
-            split_slabs_at_wall_intersections(areas, assigns, nodes)
+        result_areas, _result_assign, _result_nodes, _ = split_slabs_at_wall_intersections(
+            areas, assigns, nodes
         )
         # The slab should now be split into multiple sub-areas
-        slab_sub_ids = [aid for aid in result_areas
-                       if aid != "Wall" and "_sub_" in aid]
+        slab_sub_ids = [aid for aid in result_areas if aid != "Wall" and "_sub_" in aid]
         assert len(slab_sub_ids) >= 2, (
-            f"Expected ≥2 slab sub-areas after splitting, "
-            f"got {len(slab_sub_ids)}: {slab_sub_ids}"
+            f"Expected ≥2 slab sub-areas after splitting, got {len(slab_sub_ids)}: {slab_sub_ids}"
         )
         # Original slab should be inactive
         assert result_areas["Slab"].inactive is True
@@ -226,8 +223,8 @@ class TestSplitSlabsAtWalls:
         areas = {"Slab": AreaElement("Slab", 10, ["1", "2", "3", "4"])}
         assigns = {"Slab": "Slab200"}
 
-        result_areas, result_assign, result_nodes, _ = (
-            split_slabs_at_wall_intersections(areas, assigns, nodes)
+        result_areas, _result_assign, _result_nodes, _ = split_slabs_at_wall_intersections(
+            areas, assigns, nodes
         )
         # Slab unchanged
         assert "Slab" in result_areas
@@ -238,6 +235,7 @@ class TestSplitSlabsAtWalls:
 # ============================================================================
 # Preprocessor integration test
 # ============================================================================
+
 
 class TestWallSlabPreprocessor:
     """Preprocessor detects wall-slab intersections when configured."""
@@ -257,32 +255,36 @@ class TestWallSlabPreprocessor:
         }
         materials = {"Concrete": Material("Concrete", "Concrete", E_mod=3e10)}
         sections = {
-            "Slab200": Section("Slab200", "Shell", "Concrete",
-                               A=0, I33=0, I22=0, J=0),
-            "Wall300": Section("Wall300", "Shell", "Concrete",
-                               A=0, I33=0, I22=0, J=0),
+            "Slab200": Section("Slab200", "Shell", "Concrete", A=0, I33=0, I22=0, J=0),
+            "Wall300": Section("Wall300", "Shell", "Concrete", A=0, I33=0, I22=0, J=0),
         }
         return SAPModelData(
-            nodes=nodes, restraints={}, materials=materials,
-            sections=sections, frame_elements={},
+            nodes=nodes,
+            restraints={},
+            materials=materials,
+            sections=sections,
+            frame_elements={},
             area_elements={
                 "Slab": AreaElement("Slab", 10, ["1", "2", "3", "4"]),
                 "Wall": AreaElement("Wall", 20, ["5", "6", "8", "7"]),
             },
             frame_assignments={},
             area_assignments={"Slab": "Slab200", "Wall": "Wall300"},
-            groups={}, frame_auto_mesh={},
+            groups={},
+            frame_auto_mesh={},
         )
 
     def test_preprocessor_detects_intersection(self, wall_slab_md):
         """Preprocessor.run() with detect_wall_slab_intersections detects walls."""
         from fea_toolkit.opensees.preprocessor import Preprocessor
 
-        pp = Preprocessor({
-            "detect_wall_slab_intersections": True,
-            "split_slabs_at_walls": False,  # detection only, no split
-            "verbose": False,
-        })
+        pp = Preprocessor(
+            {
+                "detect_wall_slab_intersections": True,
+                "split_slabs_at_walls": False,  # detection only, no split
+                "verbose": False,
+            }
+        )
         mm = pp.run(wall_slab_md)
         # The Preprocessor should not crash — detection is silent when
         # split_slabs_at_walls is False.  Just verify the run completed.
@@ -292,25 +294,26 @@ class TestWallSlabPreprocessor:
 
     def test_preprocessor_splits_slabs_at_walls(self, wall_slab_md):
         """Preprocessor.run() with split_slabs_at_walls=True splits the slab."""
-        from fea_toolkit.opensees.preprocessor import Preprocessor
-        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         import openseespy.opensees as ops
 
-        cfg = {"detect_wall_slab_intersections": True,
-               "split_slabs_at_walls": True,
-               "create_shells": True,
-               "verbose": False}
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import Preprocessor
+
+        cfg = {
+            "detect_wall_slab_intersections": True,
+            "split_slabs_at_walls": True,
+            "create_shells": True,
+            "verbose": False,
+        }
         pp = Preprocessor(cfg)
         mm = pp.run(wall_slab_md)
         b = AnalysisBuilder(mm, cfg)
         try:
             b.build_domain()
             # The original slab should now be split into sub-areas
-            slab_sub_ids = [aid for aid in mm.area_elements
-                          if "_sub_" in aid]
+            slab_sub_ids = [aid for aid in mm.area_elements if "_sub_" in aid]
             assert len(slab_sub_ids) >= 2, (
-                f"Expected ≥2 slab sub-areas, "
-                f"got {len(slab_sub_ids)}: {slab_sub_ids}"
+                f"Expected ≥2 slab sub-areas, got {len(slab_sub_ids)}: {slab_sub_ids}"
             )
             # The wall and slab sub-areas should share nodes
             wall_node_ids = set(mm.area_elements["Wall"].node_ids)

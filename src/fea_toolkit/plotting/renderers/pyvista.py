@@ -1,13 +1,17 @@
 """PyVista render backend for ModelViewer."""
 
-from typing import Dict, List, Optional, Tuple
+import contextlib
+
 import numpy as np
 
 from .base import (
-    RenderBackend, FrameGeom, ShellGeom, NodeGeom,
-    HighlightDef, AnnotationDef,
+    AnnotationDef,
+    FrameGeom,
+    HighlightDef,
+    NodeGeom,
+    RenderBackend,
+    ShellGeom,
 )
-
 
 # ── Colour palette for section-based colouring ────────────────────────
 # Matplotlib "tab10" palette, RGB in 0..1 range.
@@ -25,7 +29,7 @@ _SECTION_PALETTE = [
 ]
 
 
-def _section_color(sec_name: str, palette: List[Tuple] = _SECTION_PALETTE) -> Tuple:
+def _section_color(sec_name: str, palette: list[tuple] = _SECTION_PALETTE) -> tuple:
     """Deterministic colour for a section name."""
     idx = hash(sec_name) % len(palette)
     return palette[idx]
@@ -55,30 +59,31 @@ class PyVistaRenderer(RenderBackend):
     def plotter(self):
         if self._plotter is None:
             import pyvista as pv
+
             # Use pyvista's global theme
             theme = pv.global_theme
             theme.font.label_size = 12
-            kwargs = dict(off_screen=self._off_screen, notebook=self._notebook)
+            kwargs = {"off_screen": self._off_screen, "notebook": self._notebook}
             # Only pass window_size in off_screen mode
             if self._off_screen:
-                kwargs['window_size'] = [1920, 1080]
+                kwargs["window_size"] = [1920, 1080]
             self._plotter = pv.Plotter(**kwargs)
             self._plotter.show_axes()
             # Show grid on the ground plane
-            try:
+            with contextlib.suppress(Exception):
                 self._plotter.show_grid(
-                    grid='back', location='outer', ticks='both',
+                    grid="back",
+                    location="outer",
+                    ticks="both",
                 )
-            except Exception:
-                pass
         return self._plotter
 
     # ── Frame elements ───────────────────────────────────────────────
 
     def render_frames(
         self,
-        frames: List[FrameGeom],
-        colors: Dict[str, Tuple[float, float, float]],
+        frames: list[FrameGeom],
+        colors: dict[str, tuple[float, float, float]],
         opacity: float = 1.0,
     ) -> None:
         if not frames:
@@ -97,11 +102,16 @@ class PyVistaRenderer(RenderBackend):
             per_line_color[idx] = colors.get(f.section, (0.5, 0.5, 0.5))
 
         import pyvista as pv
+
         mesh = pv.PolyData(points, lines=lines)
-        mesh['rgb'] = per_line_color
+        mesh["rgb"] = per_line_color
         actor = p.add_mesh(
-            mesh, scalars='rgb', rgb=True, opacity=opacity,
-            line_width=2, show_scalar_bar=False,
+            mesh,
+            scalars="rgb",
+            rgb=True,
+            opacity=opacity,
+            line_width=2,
+            show_scalar_bar=False,
         )
         self._actors.append(actor)
 
@@ -109,8 +119,8 @@ class PyVistaRenderer(RenderBackend):
 
     def render_shells(
         self,
-        shells: List[ShellGeom],
-        colors: Dict[str, Tuple[float, float, float]],
+        shells: list[ShellGeom],
+        colors: dict[str, tuple[float, float, float]],
         opacity: float = 1.0,
     ) -> None:
         if not shells:
@@ -118,9 +128,9 @@ class PyVistaRenderer(RenderBackend):
         p = self.plotter
         import pyvista as pv
 
-        all_verts: List[np.ndarray] = []
-        all_faces: List[np.ndarray] = []
-        shell_colors: List[Tuple] = []
+        all_verts: list[np.ndarray] = []
+        all_faces: list[np.ndarray] = []
+        shell_colors: list[tuple] = []
         offset = 0
 
         for s in shells:
@@ -147,10 +157,15 @@ class PyVistaRenderer(RenderBackend):
             for _ in range(n_tris):
                 cell_colors.append(c)
         if cell_colors:
-            mesh.cell_data['rgb'] = np.array(cell_colors)
+            mesh.cell_data["rgb"] = np.array(cell_colors)
             actor = p.add_mesh(
-                mesh, scalars='rgb', rgb=True, opacity=opacity,
-                show_edges=True, edge_color='grey', lighting=True,
+                mesh,
+                scalars="rgb",
+                rgb=True,
+                opacity=opacity,
+                show_edges=True,
+                edge_color="grey",
+                lighting=True,
                 show_scalar_bar=False,
             )
             self._actors.append(actor)
@@ -159,8 +174,8 @@ class PyVistaRenderer(RenderBackend):
 
     def render_nodes(
         self,
-        nodes: List[NodeGeom],
-        color: Tuple[float, float, float] = (0.3, 0.3, 0.3),
+        nodes: list[NodeGeom],
+        color: tuple[float, float, float] = (0.3, 0.3, 0.3),
         radius: float = 0.02,
     ) -> None:
         if not nodes:
@@ -171,8 +186,11 @@ class PyVistaRenderer(RenderBackend):
         pts = np.array([n.position for n in nodes])
         cloud = pv.PolyData(pts)
         actor = p.add_mesh(
-            cloud, color=color, point_size=radius * 20,
-            style='points', render_points_as_spheres=True,
+            cloud,
+            color=color,
+            point_size=radius * 20,
+            style="points",
+            render_points_as_spheres=True,
             show_scalar_bar=False,
         )
         self._actors.append(actor)
@@ -181,7 +199,7 @@ class PyVistaRenderer(RenderBackend):
 
     def render_highlights(
         self,
-        highlights: List[HighlightDef],
+        highlights: list[HighlightDef],
     ) -> None:
         if not highlights:
             return
@@ -202,7 +220,9 @@ class PyVistaRenderer(RenderBackend):
                 mesh = pv.PolyData(pts, lines=lines)
                 tube = mesh.tube(radius=r)
                 actor = p.add_mesh(
-                    tube, color=h.color, opacity=0.85,
+                    tube,
+                    color=h.color,
+                    opacity=0.85,
                     show_scalar_bar=False,
                 )
                 self._actors.append(actor)
@@ -212,8 +232,10 @@ class PyVistaRenderer(RenderBackend):
                 pts = np.array([n.position for n in h.nodes])
                 cloud = pv.PolyData(pts)
                 actor = p.add_mesh(
-                    cloud, color=h.color,
-                    point_size=15, style='points',
+                    cloud,
+                    color=h.color,
+                    point_size=15,
+                    style="points",
                     render_points_as_spheres=True,
                     show_scalar_bar=False,
                 )
@@ -238,13 +260,20 @@ class PyVistaRenderer(RenderBackend):
                     verts = np.vstack(all_verts)
                     faces = np.hstack(all_faces) if all_faces else np.array([], dtype=int)
                     mesh = pv.PolyData(verts, faces=faces)
-                    n_tris = sum(max(0, len(s.vertices) - 2) for s in h.shells if len(s.vertices) >= 3)
+                    n_tris = sum(
+                        max(0, len(s.vertices) - 2) for s in h.shells if len(s.vertices) >= 3
+                    )
                     cell_colors = [h.color] * n_tris
-                    mesh.cell_data['rgb'] = np.array(cell_colors)
+                    mesh.cell_data["rgb"] = np.array(cell_colors)
                     actor = p.add_mesh(
-                        mesh, scalars='rgb', rgb=True, opacity=0.7,
-                        show_edges=True, edge_color='grey',
-                        lighting=True, show_scalar_bar=False,
+                        mesh,
+                        scalars="rgb",
+                        rgb=True,
+                        opacity=0.7,
+                        show_edges=True,
+                        edge_color="grey",
+                        lighting=True,
+                        show_scalar_bar=False,
                     )
                     self._actors.append(actor)
 
@@ -253,8 +282,7 @@ class PyVistaRenderer(RenderBackend):
                 centroid = np.zeros(3)
                 count = 0
                 if h.frames:
-                    all_pts = np.vstack([f.start for f in h.frames] +
-                                        [f.end for f in h.frames])
+                    all_pts = np.vstack([f.start for f in h.frames] + [f.end for f in h.frames])
                     centroid += all_pts.sum(axis=0)
                     count += len(all_pts)
                 if h.nodes:
@@ -271,10 +299,13 @@ class PyVistaRenderer(RenderBackend):
                 else:
                     continue
                 lbl = p.add_point_labels(
-                    [centroid], [h.label],
-                    font_size=16, text_color=h.color,
-                    point_color=h.color, point_size=8,
-                    shape='rounded_rect',
+                    [centroid],
+                    [h.label],
+                    font_size=16,
+                    text_color=h.color,
+                    point_color=h.color,
+                    point_size=8,
+                    shape="rounded_rect",
                 )
                 self._actors.append(lbl)
 
@@ -282,19 +313,20 @@ class PyVistaRenderer(RenderBackend):
 
     def render_annotations(
         self,
-        annotations: List[AnnotationDef],
+        annotations: list[AnnotationDef],
     ) -> None:
         if not annotations:
             return
         p = self.plotter
         for a in annotations:
             actor = p.add_point_labels(
-                [a.position], [a.text],
+                [a.position],
+                [a.text],
                 font_size=a.font_size,
                 text_color=a.color,
                 point_color=a.color,
                 point_size=4,
-                shape='rounded_rect',
+                shape="rounded_rect",
             )
             self._actors.append(actor)
 
@@ -302,10 +334,10 @@ class PyVistaRenderer(RenderBackend):
 
     def render_deformed(
         self,
-        frames: List[FrameGeom],
-        displacements: Dict[str, np.ndarray],
+        frames: list[FrameGeom],
+        displacements: dict[str, np.ndarray],
         scale: float = 1.0,
-        color: Tuple[float, float, float] = (0.3, 0.6, 1.0),
+        color: tuple[float, float, float] = (0.3, 0.6, 1.0),
     ) -> None:
         if not frames:
             return
@@ -324,8 +356,11 @@ class PyVistaRenderer(RenderBackend):
 
         mesh = pv.PolyData(pts, lines=lines)
         actor = p.add_mesh(
-            mesh, color=color, opacity=0.7,
-            line_width=2, show_scalar_bar=False,
+            mesh,
+            color=color,
+            opacity=0.7,
+            line_width=2,
+            show_scalar_bar=False,
         )
         self._actors.append(actor)
 
@@ -333,8 +368,8 @@ class PyVistaRenderer(RenderBackend):
 
     def render_force_flags(
         self,
-        frames: List[FrameGeom],
-        forces: Dict[str, Tuple[float, float]],
+        frames: list[FrameGeom],
+        forces: dict[str, tuple[float, float]],
         quantity: str = "Mz",
         scale_factor: float = 1.0,
     ) -> None:
@@ -345,9 +380,9 @@ class PyVistaRenderer(RenderBackend):
 
         from ..utils import compute_flag_parts
 
-        flag_verts: List[np.ndarray] = []
-        flag_faces: List[np.ndarray] = []
-        flag_colors: List[Tuple] = []
+        flag_verts: list[np.ndarray] = []
+        flag_faces: list[np.ndarray] = []
+        flag_colors: list[tuple] = []
         vert_offset = 0
 
         for f in frames:
@@ -355,18 +390,16 @@ class PyVistaRenderer(RenderBackend):
             if fij is None:
                 continue
             vi, vj = fij
-            parts = compute_flag_parts(
-                f.start, f.end, vi, vj, scale_factor
-            )
+            parts = compute_flag_parts(f.start, f.end, vi, vj, scale_factor)
             if parts is None:
                 continue
             verts, tris, colors = parts  # (V, 3), (T, 3), (T, 3)
             nv = len(verts)
             flag_verts.append(verts)
             for tri in tris:
-                flag_faces.append(np.array([3, tri[0] + vert_offset,
-                                            tri[1] + vert_offset,
-                                            tri[2] + vert_offset]))
+                flag_faces.append(
+                    np.array([3, tri[0] + vert_offset, tri[1] + vert_offset, tri[2] + vert_offset])
+                )
             flag_colors.extend(colors)
             vert_offset += nv
 
@@ -376,11 +409,15 @@ class PyVistaRenderer(RenderBackend):
         all_verts = np.vstack(flag_verts)
         all_faces = np.hstack(flag_faces) if flag_faces else np.array([], dtype=int)
         mesh = pv.PolyData(all_verts, faces=all_faces)
-        mesh.cell_data['rgb'] = np.array(flag_colors)
+        mesh.cell_data["rgb"] = np.array(flag_colors)
         actor = p.add_mesh(
-            mesh, scalars='rgb', rgb=True, opacity=0.85,
-            lighting=False, show_scalar_bar=True,
-            scalar_bar_args={'title': quantity, 'n_colors': 10},
+            mesh,
+            scalars="rgb",
+            rgb=True,
+            opacity=0.85,
+            lighting=False,
+            show_scalar_bar=True,
+            scalar_bar_args={"title": quantity, "n_colors": 10},
         )
         self._actors.append(actor)
 
@@ -390,10 +427,8 @@ class PyVistaRenderer(RenderBackend):
         p = self._plotter
         if p is not None:
             for actor in self._actors:
-                try:
+                with contextlib.suppress(Exception):
                     p.remove_actor(actor)
-                except Exception:
-                    pass
         self._actors = []
 
     def show(self) -> None:
@@ -409,6 +444,5 @@ class PyVistaRenderer(RenderBackend):
         try:
             p.export_html(path)
         except ImportError:
-            print("Warning: install 'nest_asyncio2' for HTML export: "
-                  "pip install nest_asyncio2")
+            print("Warning: install 'nest_asyncio2' for HTML export: pip install nest_asyncio2")
             raise
