@@ -340,7 +340,7 @@ def _sample_cmap(points: List[float], cmap_name: str) -> List[Tuple[float, float
     Matplotlib 3.11) is intentionally not used.
     """
     try:
-        import matplotlib.colormaps as _mcmaps
+        from matplotlib import colormaps as _mcmaps
         cmap = _mcmaps.get_cmap(cmap_name)
         return [tuple(float(c) for c in cmap(min(max(p, 0.0), 1.0))[:3])
                 for p in points]
