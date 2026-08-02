@@ -265,11 +265,11 @@ For the admin building: `Admin_0.7E_short term_pushover_+X.npz`
 **Display**: 2D map.
 - **X-axis**: Push step (or roof drift %)
 - **Y-axis**: Element elevation (Z coordinate, sorted)
-- **Color**: Yield state per element per step
+- **Color**: Demand-relative level per element per step
   - Gray = no data (element not recorded at that step)
-  - Elastic (ratio < 0.5) = sampled at cmap position 0.0
-  - Yielding (0.5 ≤ ratio < 1.0) = sampled at cmap position 0.5
-  - Fully yielded (ratio ≥ 1.0) = sampled at cmap position 1.0
+  - Low demand (ratio < 0.5) = sampled at cmap position 0.0
+  - Moderate demand (0.5 ≤ ratio < 1.0) = sampled at cmap position 0.5
+  - High demand (ratio ≥ 1.0) = sampled at cmap position 1.0
 - Each horizontal slice is one element's state evolution.
 - The three sampled colours come from the named matplotlib colormap
   (`colormap="plasma"` by default, see §4.5) — the same 0.5 threshold and
@@ -336,10 +336,10 @@ def animate_pushover_deformation(
 
 Two private helper functions generate PyVista colour legends for pushover visualizations:
 
-**`_add_hinge_color_legend()`** — adds a scalar bar for the frame hinge yield ratio scale:
-- **Colour 1** (ratio < 0.5) — elastic (cmap position 0.0)
-- **Colour 2** (0.5 ≤ ratio < 1.0) — yielding (cmap position 0.5)
-- **Colour 3** (ratio ≥ 1.0) — fully yielded (cmap position 1.0)
+**`_add_hinge_color_legend()`** — adds a scalar bar for the frame hinge demand-relative ratio scale:
+- **Colour 1** (ratio < 0.5) — low demand (cmap position 0.0)
+- **Colour 2** (0.5 ≤ ratio < 1.0) — moderate demand (cmap position 0.5)
+- **Colour 3** (ratio ≥ 1.0) — high demand (cmap position 1.0)
 
 The three colours are sampled from the `colormap` parameter (default
 `"plasma"`, a perceptually-uniform colour-blind-safe map) and interpolated
