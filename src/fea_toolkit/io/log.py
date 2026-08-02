@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -303,8 +304,8 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if ws_entries:
-        label = f" for slab {args.slab}" if args.slab else ""
-        print(f"\\nOpening visualisation{label}...")
+        label = f" for slab {{args.slab}}" if args.slab else ""
+        print(f"\\nOpening visualisation{{label}}...")
         print("  Colour key:")
         print("    Blue quad  = target slab (labelled corner coordinates)")
         print("    Red edges  = walls with nodes inside this slab")

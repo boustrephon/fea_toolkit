@@ -692,6 +692,9 @@ def compute_performance_point(
     history = []
     beta_eq_final = damping_ratio
     B_final = 1.0
+    # Initialised before the loop so the fallback below never references
+    # an undefined loop variable when max_iter is zero.
+    T_eq = best_mode_period
 
     for iteration in range(max_iter):
         # Spectral acceleration at trial point (interpolate capacity)
@@ -787,7 +790,10 @@ def compute_performance_point(
 
     T_eq_final = 2.0 * math.pi * math.sqrt(S_dp / max(S_ap, 1e-12))
     mu_final = max(S_dp / max(S_dy, 1e-12), 1.0)
-    if not converged or not math.isfinite(T_eq_final) or T_eq_final <= 0:
+    # Fall back only when the computed value is non-finite or
+    # non-positive — a valid finite T_eq_final is kept even when the
+    # capacity-demand iteration did not formally converge.
+    if not math.isfinite(T_eq_final) or T_eq_final <= 0:
         # Fall back to a valid previously recorded period rather than
         # recomputing the same S_dp/S_ap expression (which produced the
         # invalid T_eq_final above).  Prefer the best-mode elastic period.
@@ -955,6 +961,7 @@ def pushover_to_adrs(
     # Find the mode with highest participation in the push direction
     best_mode = 0
     best_participation = 0.0
+    mode_accepted = False
     for mode_idx, shape in mode_shapes.items():
         # Compute participation factor L/M*
         L, M_star = _modal_participation(shape, masses, dir_idx)
@@ -965,53 +972,82 @@ def pushover_to_adrs(
             # and their ratio L^2/M_star is numerically ill-conditioned,
             # producing spuriously large "participation" values that can
             # win the selection over the true push-direction mode.
+            # Note: this is a *directional relevance* filter, not a
+            # zero-energy (rigid-body) mode test — the mode itself is
+            # structurally valid but simply does not displace in the
+            # push direction (e.g. the Y-sway mode of a 2D X–Z frame,
+            # where ux ≈ machine noise but uy is fully developed).
             if M_total > 0 and M_star < 1e-8 * M_total:
                 continue
+            mode_accepted = True
             participation = L**2 / M_star
             if participation > best_participation:
                 best_participation = participation
                 best_mode = mode_idx
 
-    # Extract the best mode shape
-    best_shape = mode_shapes.get(best_mode, {})
-    L, M_star = _modal_participation(best_shape, masses, dir_idx)
-
-    if M_star <= 0:
-        # Fallback: no masses or mode shapes — use unit values
+    if not mode_accepted:
+        # Every mode was rejected as degenerate (no mode carries
+        # meaningful kinetic energy in the push direction — e.g. when
+        # ``num_modes`` is too small to reach the true push-direction
+        # mode).  Fall back to unit values rather than silently using a
+        # rejected mode whose L/M* ratio is numerically ill-conditioned
+        # and produces a spuriously large Gamma.
+        warnings.warn(
+            "pushover_to_adrs: no mode has meaningful participation in "
+            "direction %r — increase num_modes or restrain out-of-plane "
+            "degrees of freedom. Falling back to Gamma=1.0, M_eff=1.0." % direction,
+            UserWarning, stacklevel=2,
+        )
+        # Fall through with unit values so the ADRS curve is still
+        # produced from the physical pushover data (identity conversion:
+        # S_a = V, S_d = δ).
+        M_star = 1.0
+        L = 1.0
+        best_shape = {}
         Gamma = 1.0
         M_eff = 1.0
         phi_control = 1.0
     else:
-        Gamma = L / M_star
-        M_eff = L**2 / M_star
-        # Use control/monitor node from pushover_results if available,
-        # otherwise fall back to the roof node (highest Z).
-        node_coords = pushover_results.get("node_coords", {})
-        cntl_tag = pushover_results.get(
-            "control_node", pushover_results.get("control_node_tag", None)
-        )
-        if cntl_tag is not None and cntl_tag in best_shape:
-            phi_control = [best_shape[cntl_tag][0],
-                           best_shape[cntl_tag][1],
-                           best_shape[cntl_tag][2]][dir_idx]
+        # Extract the best mode shape
+        best_shape = mode_shapes.get(best_mode, {})
+        L, M_star = _modal_participation(best_shape, masses, dir_idx)
+
+        if M_star <= 0:
+            # Fallback: no masses or mode shapes — use unit values
+            Gamma = 1.0
+            M_eff = 1.0
+            phi_control = 1.0
         else:
-            roof_tag = max(
-                (tag for tag in node_coords.keys()
-                 if tag in best_shape),
-                key=lambda t: node_coords.get(t, (0, 0, 0))[2],
-                default=None,
+            Gamma = L / M_star
+            M_eff = L**2 / M_star
+            # Use control/monitor node from pushover_results if available,
+            # otherwise fall back to the roof node (highest Z).
+            node_coords = pushover_results.get("node_coords", {})
+            cntl_tag = pushover_results.get(
+                "control_node", pushover_results.get("control_node_tag", None)
             )
-            if roof_tag is not None:
-                phi_control = [best_shape[roof_tag][0],
-                               best_shape[roof_tag][1],
-                               best_shape[roof_tag][2]][dir_idx]
+            if cntl_tag is not None and cntl_tag in best_shape:
+                phi_control = [best_shape[cntl_tag][0],
+                               best_shape[cntl_tag][1],
+                               best_shape[cntl_tag][2]][dir_idx]
             else:
-                warnings.warn(
-                    "pushover_to_adrs: control_node is missing and no roof "
-                    "node could be resolved — phi_control falls back to 1.0.",
-                    UserWarning, stacklevel=2,
+                roof_tag = max(
+                    (tag for tag in node_coords.keys()
+                     if tag in best_shape),
+                    key=lambda t: node_coords.get(t, (0, 0, 0))[2],
+                    default=None,
                 )
-                phi_control = 1.0
+                if roof_tag is not None:
+                    phi_control = [best_shape[roof_tag][0],
+                                   best_shape[roof_tag][1],
+                                   best_shape[roof_tag][2]][dir_idx]
+                else:
+                    warnings.warn(
+                        "pushover_to_adrs: control_node is missing and no roof "
+                        "node could be resolved — phi_control falls back to 1.0.",
+                        UserWarning, stacklevel=2,
+                    )
+                    phi_control = 1.0
 
     control_disp = np.array(pushover_results.get("control_disp", []), dtype=float)
     base_shear = np.array(pushover_results.get("base_shear", []), dtype=float)
@@ -1035,6 +1071,13 @@ def pushover_to_adrs(
     pc = 1.0 if phi_control is None else abs(phi_control)
     S_a = base_shear / M_eff        # m/s²
     S_d = control_disp / (abs(Gamma) * pc)   # model length units
+
+    # The capacity curve is anchored at the origin (S_a[0] = 0, S_d[0] = 0).
+    # At zero displacement the first push step produces V ≈ 0, so S_a[0]
+    # can carry a tiny negative machine-noise value (e.g. -1e-17) that
+    # must not fail downstream non-negativity assertions.
+    if len(S_a) > 0 and S_a[0] < 0:
+        S_a[0] = 0.0
 
     return {
         "S_a": S_a.tolist(),
