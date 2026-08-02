@@ -374,7 +374,7 @@ def _sample_cmap(points: list[float], cmap_name: str) -> list[tuple[float, float
 
         cmap = _mcmaps.get_cmap(cmap_name)
         return [tuple(float(c) for c in cmap(min(max(p, 0.0), 1.0))[:3]) for p in points]
-    except (ImportError, AttributeError, ValueError):
+    except (ImportError, AttributeError, KeyError, ValueError):
         # Fallback (red-green colour-blind safe defaults preserved) —
         # interpolate the fixed blue → yellow → red palette at the
         # normalised positions so the fallback is position-dependent,
@@ -434,7 +434,7 @@ def _ratio_to_color(
     if max_r < 1e-12:
         try:
             return _sample_cmap([0.0], cmap_name)[0]
-        except (ImportError, AttributeError, ValueError, TypeError):
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError):
             return (0.3, 0.45, 0.69)  # default blue
     norm = min(ratio / max_r, 1.0) if max_r > 0 else 0.0
     samples = _sample_cmap([0.0, 0.5, 1.0], cmap_name)
@@ -1918,7 +1918,9 @@ def animate_pushover_deformation(
 
             # Deform vertices — bind loop vars as defaults so the closure
             # is independent of subsequent loop iterations (B023).
-            def _shell_disp(tag, vert, has_disp=has_disp, nd=nd):
+            def _shell_disp(
+                tag, vert, has_disp=has_disp, nd=nd, displacement_scale=displacement_scale
+            ):
                 if has_disp and tag in nd:
                     dx, dy, dz = nd[tag]
                     return (

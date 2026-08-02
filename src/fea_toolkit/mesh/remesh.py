@@ -280,9 +280,7 @@ def remesh_areas(
             sec_name = area_assignments.get(aid, "")
             sub_count = 0
             for row in quad_conn:
-                sub_id = (
-                    f"{aid}_gmsh_{len([k for k in area_elements if k.startswith(f'{aid}_gmsh_')])}"
-                )
+                sub_id = f"{aid}_gmsh_{sub_count}"
                 sub_tag = next_tag
                 next_tag += 1
                 sub_nodes = [sub_node_map[int(t)] for t in row]

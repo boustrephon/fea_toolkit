@@ -751,7 +751,7 @@ def export_mesh_model_to_tcl(
                         # emit identical Concrete01 parameters.
                         if mat is not None:
                             Fc = mat.Fc if mat.Fc and mat.Fc > 0 else _fc_pa
-                            epsc = 0.002
+                            epsc = DEFAULT_EPS_C
                             fcc = (
                                 mat.eFc
                                 if mat.eFc and mat.eFc > 0
@@ -760,7 +760,7 @@ def export_mesh_model_to_tcl(
                             epscc = epsc * RC_NO_TIE_EPSC_FACTOR
                         else:
                             Fc = _fc_pa
-                            epsc = 0.002
+                            epsc = DEFAULT_EPS_C
                             fcc = RC_NO_TIE_CONFINEMENT_FACTOR * _fc_pa
                             epscc = epsc * RC_NO_TIE_EPSC_FACTOR
 
@@ -818,11 +818,15 @@ def export_mesh_model_to_tcl(
                             and mat.type
                             and mat.type.lower() == "steel"
                         ):
-                            Fy = mat.Fy if mat.Fy and mat.Fy > 0 else 2.5e8
-                            E_mod = mat.E_mod if mat.E_mod > 0 else 2.0e11
+                            Fy = (
+                                mat.Fy
+                                if mat.Fy and mat.Fy > 0
+                                else DEFAULT_FY_STEEL_PA * _stress_factor
+                            )
+                            E_mod = mat.E_mod if mat.E_mod > 0 else DEFAULT_E_S_PA * _stress_factor
                         else:
-                            Fy = 2.5e8
-                            E_mod = 2.0e11
+                            Fy = DEFAULT_FY_STEEL_PA * _stress_factor
+                            E_mod = DEFAULT_E_S_PA * _stress_factor
                         lines.append(
                             f"uniaxialMaterial Steel01 {tag_for_steel} {Fy:g} {E_mod:g} 0.01"
                         )

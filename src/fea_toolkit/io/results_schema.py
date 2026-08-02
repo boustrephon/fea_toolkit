@@ -239,11 +239,13 @@ def validate_npz(path: str) -> list[str]:
                     return
                 expected_shape = tuple(int(x) for x in resolved_parts if x)
                 if (
-                    len(expected_shape) == 1
-                    and expected_shape[0] != actual_shape[0]
-                    and not (expected_shape[0] == 0 and len(actual_shape) == 1)
-                    and dims.get(expected.split()[0].strip())
-                ) or (len(expected_shape) != 1 and expected_shape != actual_shape):
+                    not (
+                        len(expected_shape) == 1
+                        and expected_shape[0] == 0
+                        and len(actual_shape) == 1
+                    )
+                    and expected_shape != actual_shape
+                ):
                     messages.append(
                         f"  Shape mismatch for {arr_name}: "
                         f"expected {expected_shape}, got {actual_shape}"

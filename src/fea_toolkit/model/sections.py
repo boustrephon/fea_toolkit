@@ -163,7 +163,7 @@ class SectionLibrary:
             if prop_name == "D":
                 section.depth = converted
             elif prop_name in {"BF", "B"}:
-                section.width = converted
+                section.bf = converted
             elif prop_name == "TW":
                 section.tw = converted
             elif prop_name == "TF":
