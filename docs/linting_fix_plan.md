@@ -11,7 +11,7 @@
 1. **Read this document** to understand the overall strategy.
 2. **Check the current state**: `python -m pyright src/ --outputjson > /tmp/pyright_src.json`
 3. **Compare** against the baseline counts below to see what's already been fixed.
-4. **Work through Phase 1 (real bugs)** first, then **Phase 2 (config)**, then **Phase 3 (optional type improvements)**.
+4. **Work through Phase 1 (real bugs)** first (9 findings → 13 diagnostics), then **Phase 2 (config)**, then **Phase 3 (optional type improvements)**.
 
 ---
 
@@ -19,7 +19,7 @@
 
 | Phase | Category | Count | Strategy |
 |---|---|---|---|
-| 1 | Real bugs (missing imports, undefined vars) | 13 | Fix individually |
+| 1 | Real bugs (missing imports, undefined vars) | 13 diagnostics (9 findings; finding 1.9 spans 6 files) | Fix individually |
 | 2 | Config suppression (rhino, optional, dynamic attr) | ~342 | `pyrightconfig.json` |
 | 3 | Type variance / annotation improvements | ~182 | Fix or suppress per-file |
 
@@ -193,8 +193,8 @@ Using int/float as dict keys — runtime duck-typing, but the type checker can't
 ## Execution Order
 
 ```
-1. Create pyrightconfig.json  ←  run pyright, verify ~342 drop
-2. Fix Phase 1 bugs (13 items)  ←  run pyright, verify ~13 drop
+1. Fix Phase 1 bugs (9 findings → 13 diagnostics)  ←  run pyright, verify ~13 drop
+2. Create pyrightconfig.json  ←  run pyright, verify ~342 drop (Phase 2 baseline)
 3. Run full test suite  ←  confirm no regressions
 4. (Future) Phase 3 improvements  ←  per-file triage
 ```

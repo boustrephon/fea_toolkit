@@ -165,6 +165,6 @@ section Fiber <sec> -GJ J { patch rect ... ×N  layer straight ... }
 | Cover (promoted beams) | 40 mm → model units | `cover` from `.s2k` frame table |
 | Bar diameter (promoted beams) | 20 mm → model units | `BarSizeL` / `topBarDia` / `botBarDia` |
 | Bar count (promoted beams) | 1 % of gross | `topBars` / `botBars` from `.s2k` |
-| Confined core strength | Mander (tie data) else 1.25–1.3 × f'c | `tie_diameter`/`tie_spacing`/`tie_fy` fields |
+| Confined core strength | Mander (tie data) else 1.25 × f'c (`RC_NO_TIE_CONFINEMENT_FACTOR`; strain × `RC_NO_TIE_EPSC_FACTOR`) | `tie_diameter`/`tie_spacing`/`tie_fy` fields |
 | Rebar Fy/Es | framework defaults (SI) | `rebar_Fy_override` / `rebar_Es_override` (SI) |
 | Concrete fc/epsc | `apply_material_defaults()` (SI→model) | section material entry (`Fc`) |
