@@ -231,7 +231,7 @@ def _compute_hinge_ratios(
     frame_forces: dict[str, dict[str, float]],
     use_biaxial: bool = False,
 ) -> dict[str, tuple[float, float]]:
-    """Compute hinge yield ratios for each frame element end.
+    """Compute demand/capacity hinge ratios for each frame element end.
 
     Uniaxial mode (default): ratio = |Mz| / max|Mz| across steps.
     Biaxial mode: ratio = sqrt((My/Mp_y)² + (Mz/Mp_z)²) where Mp_y and Mp_z
@@ -291,7 +291,7 @@ def _compute_hinge_ratios_all_steps(
     all_frame_forces: list[dict[str, dict[str, float]]],
     use_biaxial: bool = False,
 ) -> list[dict[str, tuple[float, float]]]:
-    """Compute hinge yield ratios using peak capacities across all steps.
+    """Compute demand/capacity hinge ratios using peak capacities across all steps.
 
     For each element, the peak My and Mz are determined across *all*
     provided steps, then each step's forces are normalised against
@@ -458,7 +458,7 @@ def _ratio_to_color(
 
 def _add_hinge_color_legend(
     plotter,
-    title: str = "Yield Ratio (M/M_y)",
+    title: str = "Demand/Capacity Ratio (M/M_y)",
     position_x: float = 0.82,
     position_y: float = 0.1,
     width: float = 0.06,
@@ -471,7 +471,7 @@ def _add_hinge_color_legend(
     Builds a :class:`pyvista.LookupTable` using the same interpolation
     as :func:`_ratio_to_color` and attaches it to the plotter.
 
-    The colour scale maps the normalised yield ratio (threshold 0.5) to:
+    The colour scale maps the demand/capacity hinge ratio (threshold 0.5) to:
 
     * **elastic** (ratio < 0.5) — sampled at cmap position 0.0.
     * **yielding** (0.5 ≤ ratio < 1.0) — sampled at cmap position 0.5.
@@ -751,8 +751,9 @@ def plot_plastic_hinge_formation(
         show_deformed: If True, place hinge blobs at deformed node
             positions.  Requires node displacement data.
         notebook: Return plotter for Jupyter embedding.
-        colormap: Matplotlib colormap name for the yield-ratio colour
-            scale (default ``"plasma"`` — perceptually uniform and
+        colormap: Matplotlib colormap name for the demand/capacity
+            hinge-ratio colour scale (default ``"plasma"`` — perceptually
+            uniform and
             colour-blind safe).  Other accessible options include
             ``"viridis"``, ``"cividis"``, ``"turbo"``.
         **kwargs: Passed to ``pyvista.Plotter()``.
@@ -927,7 +928,7 @@ def plot_plastic_hinge_formation(
 
     # ── Add colour legend ────────────────────────────────────────
     if own_plotter and hinge_locs_per_step and hinge_locs_per_step[0]:
-        _add_hinge_color_legend(plotter, title="Yield Ratio (M/M_y)", cmap_name=colormap)
+        _add_hinge_color_legend(plotter, title="Demand/Capacity Ratio (M/M_y)", cmap_name=colormap)
 
     # ── Finalise ─────────────────────────────────────────────────
     if own_plotter:
@@ -1770,7 +1771,7 @@ def animate_pushover_deformation(
 ) -> Optional[Any]:
     """Animate the deformed shape through all pushover steps.
 
-    Displays frame elements as coloured tubes (by hinge yield ratio) and
+    Displays frame elements as coloured tubes (by demand/capacity hinge ratio) and
     shell elements as coloured quad faces (by damage index), deformed by
     recorded node displacements.  Includes a slider widget to scrub
     through steps and a timer callback for auto-play.
@@ -2139,7 +2140,7 @@ def animate_pushover_deformation(
     # ── Add colour legends ───────────────────────────────────────
     if show_frames and frame_segs_per_step and frame_segs_per_step[0]:
         _add_hinge_color_legend(
-            plotter, title="Yield Ratio (M/M_y)", position_x=0.82, position_y=0.1
+            plotter, title="Demand/Capacity Ratio (M/M_y)", position_x=0.82, position_y=0.1
         )
     if show_shells and all_shell_ids and shell_verts:
         _add_shell_color_legend(plotter, title="Damage Index", position_x=0.82, position_y=0.1)

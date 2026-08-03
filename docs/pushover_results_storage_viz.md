@@ -336,7 +336,11 @@ def animate_pushover_deformation(
 
 Two private helper functions generate PyVista colour legends for pushover visualizations:
 
-**`_add_hinge_color_legend()`** — adds a scalar bar for the frame hinge demand-relative ratio scale:
+**`_add_hinge_color_legend()`** — adds a scalar bar for the frame hinge
+demand-relative ratio scale.  The scalar-bar title is
+``"Demand/Capacity Ratio (M/M_y)"`` — the ratios plotted are the
+demand-relative hinge ratios (moment demand normalised by the observed
+peak capacity), **not** a physical yield-capacity ratio:
 - **Colour 1** (ratio < 0.5) — low demand (cmap position 0.0)
 - **Colour 2** (0.5 ≤ ratio < 1.0) — moderate demand (cmap position 0.5)
 - **Colour 3** (ratio ≥ 1.0) — high demand (cmap position 1.0)
