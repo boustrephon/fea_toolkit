@@ -107,11 +107,12 @@ class TestPushoverTclFormat:
             dof=1,
             max_disp=0.15,
             num_steps=50,
+            base_node_tags=[1],
         )
         assert "DisplacementControl 10 1" in tcl
 
     def test_recorder_output_files(self):
-        """Recorder file references use hardcoded output filenames."""
+        """Recorder files use wall_*.out convention for a single base node."""
         from fea_toolkit.opensees.builder import pushover_tcl
 
         tcl = pushover_tcl(
@@ -122,13 +123,48 @@ class TestPushoverTclFormat:
             lateral_loads={5: (1.0, 0.0, 0.0)},
             gravity_loads={1: (0.0, 0.0, -1000.0)},
             adaptive=True,
+            base_node_tags=[1],
         )
         assert "wall_disp.out" in tcl, "Missing disp recorder"
         assert "wall_reaction.out" in tcl, "Missing reaction recorder"
-        assert "wall_forces.out" in tcl, "Missing element forces recorder"
         # In adaptive mode the control node is set via a variable
         assert "set control_node 5" in tcl, "Wrong control node"
         assert "set dof 2" in tcl, "Wrong DOF"
+
+    def test_multiple_base_nodes(self):
+        """Multiple base nodes emit per-node wall_reaction_<tag>.out recorders."""
+        from fea_toolkit.opensees.builder import pushover_tcl
+
+        tcl = pushover_tcl(
+            control_node=5,
+            dof=1,
+            max_disp=0.1,
+            num_steps=30,
+            lateral_loads={5: (1.0, 0.0, 0.0)},
+            adaptive=True,
+            base_node_tags=[1, 2, 3],
+        )
+        assert "wall_reaction_1.out" in tcl, "Missing reaction recorder for node 1"
+        assert "wall_reaction_2.out" in tcl, "Missing reaction recorder for node 2"
+        assert "wall_reaction_3.out" in tcl, "Missing reaction recorder for node 3"
+        # No bare wall_reaction.out for multi-node case
+        assert "wall_reaction.out" not in tcl, "Unexpected bare reaction filename"
+        assert "wall_forces.out" not in tcl, "Element force recorder should be removed"
+
+    def test_none_base_node_tags_falls_back_to_node_1(self):
+        """Deprecated None → single reaction recorder for node 1."""
+        from fea_toolkit.opensees.builder import pushover_tcl
+
+        tcl = pushover_tcl(
+            control_node=5,
+            dof=1,
+            max_disp=0.1,
+            num_steps=30,
+            adaptive=True,
+            base_node_tags=None,
+        )
+        assert "wall_reaction.out" in tcl, "Missing fallback reaction recorder"
+        assert "wall_forces.out" not in tcl, "Element force recorder should be removed"
 
     def test_adaptive_vs_simple(self):
         """Adaptive mode includes fallback chain; simple mode does not."""
@@ -499,6 +535,7 @@ class TestTclGeneration:
             lateral_loads={2: (1.0, 0.0, 0.0)},
             gravity_loads={1: (0.0, 0.0, -10000.0)},
             adaptive=True,
+            base_node_tags=[1],
         )
 
         tcl_path = str(tmp_path / "test_pushover.tcl")

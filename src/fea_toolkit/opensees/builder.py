@@ -103,7 +103,7 @@ def export_model_to_tcl(
             control_node=8, dof=2, max_disp=0.1,
             lateral_loads={5: (0,10000,0), 6: (0,10000,0),
                            7: (0,10000,0), 8: (0,10000,0)},
-            base_node_tag=1, push_elem_tag=1,
+            base_node_tags=[1],
         )
         export_model_to_tcl(md, "wall.tcl", tcl_suffix=tcl)
 
@@ -656,8 +656,8 @@ def pushover_tcl(
     gravity_loads: Optional[dict[int, tuple]] = None,
     gravity_pattern: str = "",
     adaptive: bool = False,
-    base_node_tag: int = 1,
-    push_elem_tag: int = 1,
+    base_node_tags: Optional[list[int]] = None,
+    output_prefix: str = "wall",
 ) -> str:
     """Generate a pushover analysis block for Xara/OpenSeesRT Tcl.
 
@@ -680,8 +680,18 @@ def pushover_tcl(
             chain (Newton → KrylovNewton → ModifiedNewton with
             automatic step-size reduction) suitable for highly
             nonlinear pushover analyses.
-        base_node_tag: Node tag for the wall/base reaction recorder.
-        push_elem_tag: Element tag for the wall force recorder.
+        base_node_tags: List of node tags for the base reactions
+            to record.  A ``recorder Node`` is emitted for each tag.
+            If ``None`` (deprecated), a single reaction recorder is
+            emitted for node 1.
+        output_prefix: Prefix for the recorder output file names
+            (default ``"wall"`` for backward compatibility).  The
+            control-displacement recorder is written to
+            ``{output_prefix}_disp.out``, the summed base reactions to
+            ``{output_prefix}_bs.out`` (single line ``rx ry rz``), and
+            the per-node reaction recorders to
+            ``{output_prefix}_reaction.out`` (single base node) or
+            ``{output_prefix}_reaction_{tag}.out`` (multiple).
 
     Returns:
         Tcl commands as a string.
@@ -733,12 +743,28 @@ def pushover_tcl(
     )
 
     # ── Recorders (BEFORE analysis, NOT after) ──
+    # Emit one reaction recorder per base node.  A single base node uses
+    # ``{output_prefix}_reaction.out``; multiple base nodes get per-node
+    # files ``{output_prefix}_reaction_<tag>.out``.
+    rec_nodes = [1] if base_node_tags is None else list(base_node_tags)
+    recorder_lines: list[str] = [
+        "",
+        f"recorder Node -file {output_prefix}_disp.out -time -node {control_node} -dof {dof} disp",
+    ]
+    if len(rec_nodes) == 1:
+        recorder_lines.append(
+            f"recorder Node -file {output_prefix}_reaction.out "
+            f"-time -node {rec_nodes[0]} -dof {dof} reaction"
+        )
+    else:
+        for tag in rec_nodes:
+            recorder_lines.append(
+                f"recorder Node -file {output_prefix}_reaction_{tag}.out "
+                f"-time -node {tag} -dof {dof} reaction"
+            )
+    lines.extend(recorder_lines)
     lines.extend(
         [
-            "",
-            f"recorder Node -file wall_disp.out -time -node {control_node} -dof {dof} disp",
-            f"recorder Node -file wall_reaction.out -time -node {base_node_tag} -dof 1 reaction",
-            f"recorder Element -file wall_forces.out -ele {push_elem_tag} force",
             'puts "-> Recorders set up, analysis begins..."',
             "flush stdout",
         ]
@@ -866,6 +892,9 @@ def pushover_tcl(
             "    set rz [expr $rz + [nodeReaction $n 3]]",
             "}",
             'puts "Base reactions: Rx = $rx  Ry = $ry  Rz = $rz"',
+            f"set bs_file [open {output_prefix}_bs.out w]",
+            'puts $bs_file "$rx $ry $rz"',
+            "close $bs_file",
         ]
     )
 
