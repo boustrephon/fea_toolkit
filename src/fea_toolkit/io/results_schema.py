@@ -238,12 +238,13 @@ def validate_npz(path: str) -> list[str]:
                 if unresolved:
                     return
                 expected_shape = tuple(int(x) for x in resolved_parts if x)
+                # An expected shape of (0,) is tolerated only when the
+                # actual shape is exactly (0,) as well — any non-empty
+                # one-dimensional actual array (e.g. (5,)) is still a
+                # mismatch.  All other shape combinations use exact
+                # tuple comparison.
                 if (
-                    not (
-                        len(expected_shape) == 1
-                        and expected_shape[0] == 0
-                        and len(actual_shape) == 1
-                    )
+                    not (expected_shape == (0,) and actual_shape == (0,))
                     and expected_shape != actual_shape
                 ):
                     messages.append(
