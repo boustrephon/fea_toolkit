@@ -278,7 +278,20 @@ def remesh_areas(
 
             # --- Create sub-area elements from Gmsh quads ---
             sec_name = area_assignments.get(aid, "")
+            # Sub-area IDs use sequential ``{aid}_gmsh_{n}`` suffixes.  If
+            # this function has been called before with the same
+            # ``area_elements`` dict, resume from the next unused suffix so
+            # previously generated sub-areas are preserved rather than
+            # overwritten.
+            prefix = f"{aid}_gmsh_"
             sub_count = 0
+            for existing_id in area_elements:
+                if existing_id.startswith(prefix):
+                    try:
+                        sub_count = max(sub_count, int(existing_id[len(prefix) :]) + 1)
+                    except ValueError:
+                        continue
+            created_sub_count = 0
             for row in quad_conn:
                 sub_id = f"{aid}_gmsh_{sub_count}"
                 sub_tag = next_tag
@@ -295,10 +308,12 @@ def remesh_areas(
                 if sec_name:
                     area_assignments[sub_id] = sec_name
                 sub_count += 1
+                created_sub_count += 1
 
-            # Only mark original as inactive when at least one
-            # 4-node quad element was actually created.
-            if sub_count > 0:
+            # Only mark original as inactive when at least one new
+            # 4-node quad element was actually created in this call
+            # (pre-existing sub-areas from earlier calls don't count).
+            if created_sub_count > 0:
                 elem.inactive = True
 
             # Remove this area's Gmsh model so the next iteration
