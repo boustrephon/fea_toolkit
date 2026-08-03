@@ -1074,6 +1074,78 @@ class TestCSMWorkflow:
             f"First non-zero base shear out of kN range: {first_nz:.2f} kN"
         )
 
+    def test_pushover_rc_openseespy_single_direction(self, sample_rc_md):
+        """RC fiber pushover orchestration runs in a single direction.
+
+        Exercises :func:`fea_toolkit.opensees.pushover.pushover_rc_openseespy`
+        end-to-end: modal analysis on an elastic builder, then a
+        forceBeamColumn + fiber pushover in ``+X`` only, verifying the
+        return shape matches the steel four-direction convention.
+        """
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.opensees.pushover import pushover_rc_openseespy
+
+        topo_cfg = {
+            "split_elements": True,
+            "verbose": False,
+            "create_shells": False,
+        }
+        elastic_cfg = {
+            "element_type": "elasticBeamColumn",
+            "create_fiber_sections": False,
+            "use_elastic_sections": True,
+            "verbose": False,
+            "create_shells": False,
+        }
+
+        mm = preprocess_model(sample_rc_md, topo_cfg)
+
+        # Modal on an elastic builder sharing the same frozen MeshModel.
+        ab = AnalysisBuilder(mm, elastic_cfg)
+        ab.build_domain()
+        ab.compute_seismic_masses()
+        modal = ab.run_modal_analysis(num_modes=3)
+        shapes = ab.extract_mode_shapes(3)
+        ops.wipe()  # clean between modal and pushover builders
+
+        out = pushover_rc_openseespy(
+            mm,
+            {"modal": modal, "shapes": shapes},
+            directions="+X",
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type="uniform",
+            max_disp=0.3,
+            num_steps=15,
+            config={
+                "beam_integration": "HingeRadau",
+            },
+            verbose=False,
+        )
+
+        # Single-direction call returns exactly that key.
+        assert set(out.keys()) == {"+X"}
+        entry = out["+X"]
+        assert "results" in entry
+        assert "adrs" in entry
+        assert "pp" in entry
+        assert "mode_index" in entry
+        assert "rs_warning" in entry
+
+        # Pushover curve ran at least 2 steps with positive base shear.
+        assert len(entry["results"]["step"]) >= 2
+        assert entry["results"]["base_shear"][-1] > 0.0
+
+        # ADRS conversion produced meaningful capacity data.
+        # (index 0 is the unloaded step — zero shear; check the final
+        # pushed point for a physically meaningful value.)
+        assert entry["adrs"]["S_a"][-1] > 0.0
+        assert entry["adrs"]["S_d"][-1] >= 0.0
+
+        # Performance point keys are present (values may be elastic).
+        for key in ("S_dp", "S_ap", "mu"):
+            assert key in entry["pp"]
+
 
 # ============================================================================
 # Workflow: Euler buckling check
