@@ -1,13 +1,24 @@
 """Pushover (nonlinear static) analysis — 4 directions with CSM.
 
-Supports steel (OpenSeesPy) and RC (Tcl/Xara export) nonlinear pushover.
+Supports steel (OpenSeesPy) and RC (OpenSeesPy or Tcl/Xara export)
+nonlinear pushover.
 
 Steel path
     Wraps :func:`~fea_toolkit.opensees.pushover.run_pushover_4dir`.
     Uses :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder`
     with steel fiber sections, Hysteretic brace trusses, and CSM.
 
-RC path
+RC path (OpenSeesPy, preferred)
+    Wraps :func:`~fea_toolkit.opensees.pushover.pushover_rc_openseespy`.
+    Uses :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder`
+    with ``forceBeamColumn`` fiber sections (Concrete01, Steel02) and
+    optional nonlinear shell walls.  Supports single-direction or
+    four-direction push with CSM post-processing.
+    Note: dispatch to this path lands in :meth:`PushoverAnalysis.run`
+    (Task 5); for now the method is available as
+    :meth:`PushoverAnalysis._run_rc_openseespy_path`.
+
+RC path (Tcl/Xara export, legacy fallback)
     Exports the model to Tcl via
     :func:`~fea_toolkit.opensees.recorder.export_mesh_model_to_tcl`,
     appends ``pushover_tcl()`` commands, and runs via
@@ -28,6 +39,118 @@ from fea_toolkit.utils import g_from_units
 
 if TYPE_CHECKING:
     from fea_toolkit.model.mesh_model import MeshModel
+
+
+# ── Shared load helpers (Tcl path and future ReplayConcrete path) ──
+
+
+def _find_control_node(mm: "MeshModel") -> int:
+    """Return the node tag of the topmost node (max Z)."""
+    control_node = 1
+    max_z = -1e12
+    for nd in mm.nodes.values():
+        if nd.z > max_z:
+            max_z = nd.z
+            control_node = nd.node_tag
+    return control_node
+
+
+def _build_lateral_loads(
+    mm: "MeshModel",
+    lateral_load_type: str,
+    dir_index: int,
+    shapes: Optional[dict] = None,
+) -> dict[int, tuple]:
+    """Build nodal lateral load pattern (uniform / triangular / mode1).
+
+    Parameters
+    ----------
+    mm : MeshModel
+        Frozen topology from the Preprocessor.
+    lateral_load_type : str
+        One of ``'uniform'``, ``'triangular'``, ``'mode1'``.
+    dir_index : int
+        Lateral direction index: 0=X, 1=Y, 2=Z.
+    shapes : dict, optional
+        Mode-shape dict (mode index → {node_tag: (dx, dy, dz)}) used
+        only by the ``'mode1'`` pattern.
+
+    Returns
+    -------
+    dict
+        ``{node_tag: (fx, fy, fz)}`` — normalized weights (not scaled
+        by gravity or mass) for the Tcl ``pushover_tcl()`` helper.
+    """
+    lateral_loads: dict[int, tuple] = {}
+    if lateral_load_type == "uniform":
+        # Uniform: unit weights at all nodes
+        for nd in mm.nodes.values():
+            load = [0.0, 0.0, 0.0]
+            load[dir_index] = 1.0
+            lateral_loads[nd.node_tag] = tuple(load)
+    elif lateral_load_type == "triangular":
+        # Triangular: proportional to height above base
+        heights = [nd.z for nd in mm.nodes.values()]
+        min_z = min(heights) if heights else 0.0
+        total_weight = 0.0
+        for nd in mm.nodes.values():
+            h = max(nd.z - min_z, 0.0)
+            load = [0.0, 0.0, 0.0]
+            load[dir_index] = h
+            lateral_loads[nd.node_tag] = tuple(load)
+            total_weight += h
+        if total_weight > 1e-12:
+            for tag, ld in lateral_loads.items():
+                lateral_loads[tag] = tuple(v / total_weight for v in ld)
+    elif lateral_load_type == "mode1" and shapes:
+        # Mode 1 proportional: mode-shape component in lateral direction
+        first_mode = shapes.get(1, shapes.get(0, {})) if shapes else {}
+        total_weight = 0.0
+        for nd in mm.nodes.values():
+            mode_comp = first_mode.get(nd.node_tag, (1.0, 0.0, 0.0))
+            w = abs(mode_comp[dir_index] if len(mode_comp) > dir_index else mode_comp[0])
+            load = [0.0, 0.0, 0.0]
+            load[dir_index] = w
+            lateral_loads[nd.node_tag] = tuple(load)
+            total_weight += w
+        if total_weight > 0:
+            for tag, ld in lateral_loads.items():
+                lateral_loads[tag] = tuple(v / total_weight for v in ld)
+    else:
+        # Fallback: uniform in configured direction
+        for nd in mm.nodes.values():
+            load = [0.0, 0.0, 0.0]
+            load[dir_index] = 1.0
+            lateral_loads[nd.node_tag] = tuple(load)
+
+    return lateral_loads
+
+
+def _build_gravity_loads(mm: "MeshModel") -> dict[int, tuple]:
+    """Build nodal gravity loads from node masses and model-unit g.
+
+    Uses :func:`~fea_toolkit.utils.g_from_units` for the unit-consistent
+    gravitational acceleration — never hardcodes ``g``.
+    """
+    gravity_loads: dict[int, tuple] = {}
+    g = g_from_units(mm.units)
+    for nd in mm.nodes.values():
+        mass_val = getattr(nd, "mass", None)
+        if mass_val is None or mass_val <= 0.0:
+            # Skip nodes without a valid mass rather than fabricating 1.0
+            continue
+        gravity_loads[nd.node_tag] = (0.0, 0.0, -mass_val * g)
+    return gravity_loads
+
+
+def _find_base_node_tags(mm: "MeshModel") -> list[int]:
+    """Return node tags of restrained (support) nodes."""
+    base_node_tags: list[int] = []
+    for nid, nd in mm.nodes.items():
+        r = mm.restraints.get(nid)
+        if r is not None and any(int(x) != 0 for x in r.dofs):
+            base_node_tags.append(nd.node_tag)
+    return base_node_tags or [1]
 
 
 class PushoverAnalysis(Analysis):
@@ -64,6 +187,9 @@ class PushoverAnalysis(Analysis):
     name : str, optional
     config : dict, optional
         Builder config overrides.
+    directions : str, optional
+        ``"4dir"`` (default) or a single label ``"+X"``, ``"-X"``,
+        ``"+Y"``, ``"-Y"``.  Only used by the RC OpenSeesPy path.
     """
 
     def __init__(
@@ -118,7 +244,18 @@ class PushoverAnalysis(Analysis):
 
     def run(self) -> AnalysisResult:
         if self.material_type == "rc":
-            return self._run_rc_tcl_path()
+            if self.config.get("use_tcl_fallback", False):
+                import warnings
+
+                warnings.warn(
+                    "PushoverAnalysis RC Tcl path is deprecated. "
+                    "Set use_tcl_fallback=False (default) to use the "
+                    "OpenSeesPy path.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                return self._run_rc_tcl_path()
+            return self._run_rc_openseespy_path()
         return self._run_steel_path()
 
     # ── Steel path (OpenSeesPy) ───────────────────────────────────
@@ -157,6 +294,60 @@ class PushoverAnalysis(Analysis):
             },
         )
 
+    # ── RC path (OpenSeesPy, preferred) ──────────────────────────
+
+    def _run_rc_openseespy_path(self) -> AnalysisResult:
+        """Run RC pushover via OpenSeesPy (AnalysisBuilder).
+
+        Wraps :func:`~fea_toolkit.opensees.pushover.pushover_rc_openseespy`
+        with the same orchestration as :meth:`_run_steel_path` but for
+        reinforced-concrete fiber sections.  Supports ``directions``
+        ``"4dir"`` or a single label.
+
+        The modal result dict is passed through unchanged; the helper
+        extracts ``modal`` / ``shapes`` internally.
+        """
+        from fea_toolkit.opensees.pushover import pushover_rc_openseespy
+
+        modal_data = self._modal_result.data
+        if not isinstance(modal_data, dict):
+            modal_data = {"modal": modal_data}
+
+        # RC builder config: user overrides merged over RC defaults.
+        rc_config = dict(_PUSHOVER_RC_DEFAULTS)
+        rc_config.update(self.config)
+        rc_config["create_fiber_sections"] = True
+
+        directions = self.config.get("directions", "4dir")
+
+        result = pushover_rc_openseespy(
+            self.mesh_model,
+            modal_result=modal_data,
+            directions=directions,
+            gravity_patterns=self.gravity_patterns,
+            lateral_load_type=self.lateral_load_type,
+            max_disp=self.max_disp_val,
+            num_steps=self.num_steps,
+            config=rc_config,
+            rs_modal_base_shear=self.rs_modal_base_shear,
+            verbose=rc_config.get("verbose", False),
+        )
+
+        return AnalysisResult(
+            name=self.name,
+            analysis_type="PushoverAnalysis",
+            data=result,
+            metadata={
+                "material_type": "rc",
+                "path": "openseespy",
+                "directions": directions,
+                "lateral_load_type": self.lateral_load_type,
+                "max_disp_val": self.max_disp_val,
+                "num_steps": self.num_steps,
+                "config": self.config,
+            },
+        )
+
     # ── RC path (Tcl/Xara export) ────────────────────────────────
 
     def _run_rc_tcl_path(self) -> AnalysisResult:
@@ -191,13 +382,8 @@ class PushoverAnalysis(Analysis):
         out_dir = Path("output") / f"pushover_rc_{datetime.datetime.now():%Y%m%d_%H%M%S}"
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        # Determine control node (topmost node along Z)
-        control_node = 1
-        max_z = -1e12
-        for nd in mm.nodes.values():
-            if nd.z > max_z:
-                max_z = nd.z
-                control_node = nd.node_tag
+        # ── Control node and direction resolution ────────────────
+        control_node = _find_control_node(mm)
 
         # Determine direction index: X=0, Y=1, Z=2 (default X) for lateral loads
         dir_index = 0
@@ -216,62 +402,16 @@ class PushoverAnalysis(Analysis):
 
         modal_nested = modal_data.get("modal", modal_data)
         shapes = modal_nested.get("shapes", modal_nested.get("mode_shapes", {}))
-        first_mode = shapes.get(1, shapes.get(0, {})) if shapes else {}
 
-        # Lateral load pattern based on lateral_load_type
-        lateral_loads: dict[int, tuple] = {}
-        if self.lateral_load_type == "uniform":
-            # Uniform: unit masses at all nodes
-            for nd in mm.nodes.values():
-                load = [0.0, 0.0, 0.0]
-                load[dir_index] = 1.0
-                lateral_loads[nd.node_tag] = tuple(load)
-        elif self.lateral_load_type == "triangular":
-            # Triangular: proportional to mass × height
-            heights = [nd.z for nd in mm.nodes.values()]
-            min_z = min(heights) if heights else 0.0
-            total_weight = 0.0
-            for nd in mm.nodes.values():
-                h = nd.z - min_z
-                if h < 0:
-                    h = 0.0
-                load = [0.0, 0.0, 0.0]
-                load[dir_index] = h
-                lateral_loads[nd.node_tag] = tuple(load)
-                total_weight += h
-            if total_weight > 1e-12:
-                for tag, ld in lateral_loads.items():
-                    lateral_loads[tag] = tuple(v / total_weight for v in ld)
-        elif self.lateral_load_type == "mode1" and first_mode:
-            # Mode 1 proportional: mass × mode1 shape
-            total_weight = 0.0
-            for nd in mm.nodes.values():
-                mode_comp = first_mode.get(nd.node_tag, (1.0, 0.0, 0.0))
-                w = abs(mode_comp[dir_index] if len(mode_comp) > dir_index else mode_comp[0])
-                load = [0.0, 0.0, 0.0]
-                load[dir_index] = w
-                lateral_loads[nd.node_tag] = tuple(load)
-                total_weight += w
-            if total_weight > 0:
-                for tag, ld in lateral_loads.items():
-                    lateral_loads[tag] = tuple(v / total_weight for v in ld)
-        else:
-            # Fallback: uniform in configured direction
-            for nd in mm.nodes.values():
-                load = [0.0, 0.0, 0.0]
-                load[dir_index] = 1.0
-                lateral_loads[nd.node_tag] = tuple(load)
+        lateral_loads = _build_lateral_loads(
+            mm,
+            self.lateral_load_type,
+            dir_index,
+            shapes=shapes,
+        )
 
         # Gravity loads — use MeshModel's computed mass when available
-        gravity_loads: dict[int, tuple] = {}
-        # Scale gravitational acceleration to model units (never hardcode g).
-        g = g_from_units(mm.units)
-        for nd in mm.nodes.values():
-            mass_val = getattr(nd, "mass", None)
-            if mass_val is None or mass_val <= 0.0:
-                # Skip nodes without a valid mass rather than fabricating 1.0
-                continue
-            gravity_loads[nd.node_tag] = (0.0, 0.0, -mass_val * g)
+        gravity_loads = _build_gravity_loads(mm)
 
         # RC config (overrides for fiber sections)
         rc_config = dict(_PUSHOVER_RC_DEFAULTS)
@@ -280,7 +420,13 @@ class PushoverAnalysis(Analysis):
 
         output_prefix = "pushover_rc"
 
-        # Generate Tcl suffix with recorder files — DOF matches direction
+        # Determine base node tags from restrained nodes so the reaction
+        # recorders monitor the actual supports (not an implicit node 1).
+        base_node_tags = _find_base_node_tags(mm)
+
+        # Generate Tcl suffix with recorder files — DOF matches direction.
+        # ``output_prefix`` controls the recorder filenames so they match
+        # the paths expected below (``pushover_rc_{disp,bs,reaction}.out``).
         tcl_suffix = pushover_tcl(
             control_node=control_node,
             dof=control_dof,
@@ -289,6 +435,8 @@ class PushoverAnalysis(Analysis):
             lateral_loads=lateral_loads,
             gravity_loads=gravity_loads,
             adaptive=True,
+            base_node_tags=base_node_tags,
+            output_prefix=output_prefix,
         )
 
         # Write Tcl script to output directory
@@ -331,7 +479,13 @@ class PushoverAnalysis(Analysis):
         # ── Parse recorder output files ─────────────────────────────
         disp_path = str(out_dir / f"{output_prefix}_disp.out")
         bs_path = str(out_dir / f"{output_prefix}_bs.out")
-        reaction_path = str(out_dir / f"{output_prefix}_reaction.out")
+        # A single base node writes ``{prefix}_reaction.out``; multiple
+        # base nodes write per-node ``{prefix}_reaction_{tag}.out`` files
+        # (no bare ``{prefix}_reaction.out``), so only pass a reaction
+        # path for the single-node case.
+        reaction_path = (
+            str(out_dir / f"{output_prefix}_reaction.out") if len(base_node_tags) == 1 else None
+        )
 
         def _safe_list(arr, default=None):
             """Convert optional array-like to list; return empty list if missing/empty."""
@@ -360,10 +514,13 @@ class PushoverAnalysis(Analysis):
         result = {}
         if os.path.exists(disp_path) and os.path.exists(bs_path):
             try:
+                reaction_arg = (
+                    reaction_path if reaction_path and os.path.exists(reaction_path) else None
+                )
                 parsed = parse_pushover_results(
                     disp_path,
                     bs_path,
-                    reaction_path if os.path.exists(reaction_path) else None,
+                    reaction_arg,
                 )
                 result = {
                     "control_disp": _safe_list(parsed.get("control_disp")),
