@@ -2,12 +2,15 @@
 Pushover analysis orchestration — multi-direction, multi-pattern.
 """
 
+import logging
 from typing import Optional
 
 import numpy as np
 
 from ..spectrum import ResponseSpectrum
 from ..utils import g_from_units
+
+logger = logging.getLogger(__name__)
 
 
 def run_pushover_4dir(
@@ -144,17 +147,21 @@ def run_pushover_4dir(
 
         ab = AnalysisBuilder(mesh_model, builder_cfg)
 
-        results = ab.run_pushover_analysis(
-            gravity_patterns=gravity_patterns,
-            lateral_load_type=lateral_load_type,
-            lateral_direction=cfg["dir"],
-            control_node_tag=roof_tag,
-            max_disp=cfg["disp"],
-            num_steps=num_steps,
-            mode_shapes=shapes if lateral_load_type == "mode1" else None,
-            mode_index=best_mode_idx,
-            print_progress=False,
-        )
+        try:
+            results = ab.run_pushover_analysis(
+                gravity_patterns=gravity_patterns,
+                lateral_load_type=lateral_load_type,
+                lateral_direction=cfg["dir"],
+                control_node_tag=roof_tag,
+                max_disp=cfg["disp"],
+                num_steps=num_steps,
+                mode_shapes=shapes if lateral_load_type == "mode1" else None,
+                mode_index=best_mode_idx,
+                print_progress=False,
+            )
+        except RuntimeError as e:
+            logger.warning("Pushover %s skipped — gravity analysis failed: %s", label, e)
+            continue
 
         adrs = ab.pushover_to_adrs(results, modal, shapes, direction=cfg["dir"])
         pp = ab.compute_performance_point(
@@ -330,18 +337,22 @@ def pushover_rc_openseespy(
 
         ab = AnalysisBuilder(mesh_model, builder_cfg)
 
-        results = ab.run_pushover_analysis(
-            gravity_patterns=gravity_patterns,
-            lateral_load_type=lateral_load_type,
-            lateral_direction=cfg["dir"],
-            control_node_tag=roof_tag,
-            max_disp=cfg["disp"],
-            num_steps=num_steps,
-            mode_shapes=shapes if lateral_load_type == "mode1" else None,
-            mode_index=best_mode_idx,
-            print_progress=False,
-            node_mass_overrides=node_mass_overrides,
-        )
+        try:
+            results = ab.run_pushover_analysis(
+                gravity_patterns=gravity_patterns,
+                lateral_load_type=lateral_load_type,
+                lateral_direction=cfg["dir"],
+                control_node_tag=roof_tag,
+                max_disp=cfg["disp"],
+                num_steps=num_steps,
+                mode_shapes=shapes if lateral_load_type == "mode1" else None,
+                mode_index=best_mode_idx,
+                print_progress=False,
+                node_mass_overrides=node_mass_overrides,
+            )
+        except RuntimeError as e:
+            logger.warning("Pushover %s skipped — gravity analysis failed: %s", label, e)
+            continue
 
         adrs = ab.pushover_to_adrs(results, modal, shapes, direction=cfg["dir"])
         pp = ab.compute_performance_point(
