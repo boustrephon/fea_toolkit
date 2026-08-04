@@ -3034,8 +3034,14 @@ class AnalysisBuilder:
                 rxn = result.get("reactions", {}).get(nid, {})
                 total_reaction_fz += rxn.get("fz", 0.0)
 
+            # Compare magnitudes using the established opposite-sign
+            # convention: gravity loads are downward (negative Fz) while
+            # reactions are upward (positive Fz).  The equilibrium delta
+            # is the difference of the magnitudes, not the direct
+            # subtraction of signed values (which double-counts).
             abs_applied = abs(total_applied_fz)
-            delta = abs(total_applied_fz - total_reaction_fz)
+            abs_reaction = abs(total_reaction_fz)
+            delta = abs(abs_applied - abs_reaction)
             tol = max(abs_applied * 0.01, 1e-6)
 
             if delta > tol and abs_applied > 1e-12:
