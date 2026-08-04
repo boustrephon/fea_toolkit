@@ -401,8 +401,12 @@ def plot_csm_4panel(
         adrs = data["adrs"]
         pp = data["pp"]
 
-        S_d = np.array(adrs["S_d"])
-        S_a = np.array(adrs["S_a"])
+        # ADRS arrays carry the push-direction sign (~X pushes are
+        # negative).  The CSM plot displays magnitudes in the positive
+        # quadrant, matching the signed physical pushover curves shown
+        # by plot_pushover_curves — the direction label conveys the sign.
+        S_d = np.abs(np.array(adrs["S_d"], dtype=float))
+        S_a = np.abs(np.array(adrs["S_a"], dtype=float))
 
         # Determine bounds — if yield exceeds the visible range, report NA
         max_Sa = max(S_a.max(), Sa_plot.max())
