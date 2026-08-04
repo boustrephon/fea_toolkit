@@ -187,6 +187,15 @@ class ResponseSpectrum:
             )
         self.T = [float(t) for t in self.T]
         self.Sa = [float(s) for s in self.Sa]
+        # Require strictly increasing period ordinates: unsorted or
+        # duplicate periods produce silently incorrect interpolated
+        # spectral accelerations (e.g. via `interpolate_sa`).
+        for i in range(1, len(self.T)):
+            if self.T[i] <= self.T[i - 1]:
+                raise ValueError(
+                    f"ResponseSpectrum T ordinates must be strictly increasing; "
+                    f"found T[{i}]={self.T[i]} <= T[{i - 1}]={self.T[i - 1]}"
+                )
 
 
 def _gb50011_spectrum(
