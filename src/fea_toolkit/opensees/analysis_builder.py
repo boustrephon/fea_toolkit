@@ -7,6 +7,7 @@ and result extraction — no topology mutations occur here.
 """
 
 import copy
+import logging
 import math
 from typing import TYPE_CHECKING, Any, ClassVar, Optional, Union
 
@@ -39,6 +40,8 @@ from ..utils import (
     g_from_units,
     stress_scale_factor,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AnalysisBuilder:
@@ -2958,6 +2961,12 @@ class AnalysisBuilder:
         converged = 0
         ok = -1
         for attempt in _algo_chain:
+            # Reset the integrator before each algorithm attempt.  A failed
+            # Newton step leaves the integrator's load factor advanced past
+            # the converged reference state; switching algorithms without
+            # resetting causes the load factor to accumulate across attempts
+            # (e.g. 1.10 -> 2.09 -> 2.18 ...) and eventually diverge to NaN.
+            ops.integrator("LoadControl", 1.0 / n_sub)
             if isinstance(attempt, tuple):
                 ops.algorithm(*attempt)
             elif attempt == "ModifiedNewton":
@@ -2974,7 +2983,9 @@ class AnalysisBuilder:
                 break
 
         if ok != 0:
-            return {}
+            raise RuntimeError(
+                f"Static analysis failed to converge after trying algorithms: {_algo_chain}"
+            )
 
         # Extract results
         result: dict[str, Any] = {}
@@ -3008,6 +3019,43 @@ class AnalysisBuilder:
                     }
                 except Exception:
                     continue
+
+        # ── Gravity load/reaction sanity check ──────────────────
+        if extract_reactions and self._gravity_load_totals:
+            total_applied_fz = 0.0
+            for totals in self._gravity_load_totals.values():
+                total_applied_fz += totals.get("fz", 0.0)
+
+            total_reaction_fz = 0.0
+            for nid, restraint in self.mesh_model.restraints.items():
+                # Full fixity only (6 DOFs all True)
+                if not all(restraint.dofs):
+                    continue
+                rxn = result.get("reactions", {}).get(nid, {})
+                total_reaction_fz += rxn.get("fz", 0.0)
+
+            abs_applied = abs(total_applied_fz)
+            delta = abs(total_applied_fz - total_reaction_fz)
+            tol = max(abs_applied * 0.01, 1e-6)
+
+            if delta > tol and abs_applied > 1e-12:
+                pct = (delta / abs_applied * 100) if abs_applied > 1e-12 else 0.0
+                logger.warning(
+                    "Gravity load/reaction mismatch: "
+                    "applied fz=%.6e, "
+                    "reaction fz=%.6e, "
+                    "Δ=%.6e (%.1f%%)",
+                    total_applied_fz,
+                    total_reaction_fz,
+                    delta,
+                    pct,
+                )
+
+            result["load_reaction_check"] = {
+                "applied_fz": total_applied_fz,
+                "reaction_fz": total_reaction_fz,
+                "delta": delta,
+            }
 
         return result
 
@@ -4500,7 +4548,7 @@ class AnalysisBuilder:
         grav_results = self.run_static_analysis(
             extract_reactions=True,
         )
-        grav_disp = grav_results.get("nodal_displacements", {}) if grav_results else {}
+        grav_disp = grav_results.get("nodal_displacements", {})
 
         # ── Control node auto‑select ─────────────────────────────
         if control_node_tag is None:
