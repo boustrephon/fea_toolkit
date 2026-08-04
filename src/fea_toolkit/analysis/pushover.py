@@ -231,6 +231,14 @@ class PushoverAnalysis(Analysis):
         self.rs_modal_base_shear = rs_modal_base_shear
         self.spectrum = spectrum
         super().__init__(mesh_model, name, config)
+        # Material-type-specific defaults take precedence over the steel
+        # defaults applied by Analysis.__init__ (which calls
+        # ``self.defaults()``).  The caller's *config* overrides are then
+        # merged on top so user-supplied keys win.
+        material_defaults = self.defaults_for(self.material_type)
+        if config:
+            material_defaults.update(config)
+        self.config = material_defaults
 
     @classmethod
     def defaults(cls) -> dict:
@@ -497,12 +505,20 @@ class PushoverAnalysis(Analysis):
         disp_path = str(out_dir / f"{output_prefix}_disp.out")
         bs_path = str(out_dir / f"{output_prefix}_bs.out")
         # A single base node writes ``{prefix}_reaction.out``; multiple
-        # base nodes write per-node ``{prefix}_reaction_{tag}.out`` files
-        # (no bare ``{prefix}_reaction.out``), so only pass a reaction
-        # path for the single-node case.
-        reaction_path = (
-            str(out_dir / f"{output_prefix}_reaction.out") if len(base_node_tags) == 1 else None
-        )
+        # base nodes write per-node ``{prefix}_reaction_{tag}.out`` files.
+        # Pass the per-node paths to the parser so reactions are summed
+        # across all bases (each file carries the push-direction reaction
+        # for that base node, aggregated by matching recorded time steps).
+        from typing import Union as _Union
+
+        if len(base_node_tags) == 1:
+            reaction_path: Optional[_Union[str, list[str]]] = str(
+                out_dir / f"{output_prefix}_reaction.out"
+            )
+        else:
+            reaction_path = [
+                str(out_dir / f"{output_prefix}_reaction_{tag}.out") for tag in base_node_tags
+            ]
 
         def _safe_list(arr, default=None):
             """Convert optional array-like to list; return empty list if missing/empty."""
@@ -531,9 +547,13 @@ class PushoverAnalysis(Analysis):
         result = {}
         if os.path.exists(disp_path) and os.path.exists(bs_path):
             try:
-                reaction_arg = (
-                    reaction_path if reaction_path and os.path.exists(reaction_path) else None
-                )
+                if reaction_path is None:
+                    reaction_arg = None
+                elif isinstance(reaction_path, str):
+                    reaction_arg = reaction_path if os.path.exists(reaction_path) else None
+                else:
+                    existing = [p for p in reaction_path if os.path.exists(p)]
+                    reaction_arg = list(existing) if existing else None
                 parsed = parse_pushover_results(
                     disp_path,
                     bs_path,

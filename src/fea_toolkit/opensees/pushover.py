@@ -136,6 +136,10 @@ def run_pushover_4dir(
 
         # Determine best mode for this push direction
         best_mode_idx = 0
+        # Initialise before the try block so the later mode1 validation
+        # can safely reference ``ratios`` even when modal-property
+        # extraction fails (mirrors pushover_rc_openseespy).
+        ratios = []
         try:
             mp = modal.get("modal_props", {})
             dir_key = "partiMassRatiosMX" if cfg["dir"] == "X" else "partiMassRatiosMY"

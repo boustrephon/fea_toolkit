@@ -187,7 +187,7 @@ class TestPushoverTclFormat:
         assert "KrylovNewton" in tcl_a
         assert "ModifiedNewton" in tcl_a
 
-        # Simple
+        # Simple (per-step loop with per-step base-shear history)
         tcl_s = pushover_tcl(
             control_node=5,
             dof=1,
@@ -198,7 +198,12 @@ class TestPushoverTclFormat:
             adaptive=False,
         )
         assert "while" not in tcl_s
-        assert "analyze 30" in tcl_s
+        # Issue 8: simple mode uses a per-step for loop so the computed
+        # base reactions are written to ``wall_bs.out`` every displacement
+        # step (one line per step) — not a single final line.
+        assert "for {set i 1} {$i <= 30} {incr i}" in tcl_s
+        assert "analyze 1" in tcl_s
+        assert 'puts $bs_file "$rx $ry $rz"' in tcl_s
 
     # Note: test_element_type_param_documented was removed because
     # pushover_tcl() no longer accepts an element_type parameter.
@@ -324,6 +329,72 @@ class TestParsePushoverResults:
         result = parse_pushover_results(str(disp), str(bs), str(react))
         assert "reaction_rx" in result
         assert len(result["reaction_rx"]) == 2
+
+    def test_two_support_multi_base_reaction_summed(self, tmp_path):
+        """Two support nodes: per-node reaction files are summed by
+        parse_pushover_results, and base_shear/control_disp lengths match.
+
+        Mirrors the Tcl workflow: the generated ``pushover_tcl()`` emits
+        per-step base-shear history in ``{prefix}_bs.out`` plus per-node
+        reaction files ``{prefix}_reaction_{tag}.out``.  The parser must
+        aggregate the per-node reactions across matching time steps so
+        the returned ``base_shear`` and ``control_disp`` arrays have the
+        same length.
+        """
+        from fea_toolkit.opensees.builder import pushover_tcl
+        from fea_toolkit.opensees.recorder import parse_pushover_results
+
+        # ── 1. Generate the Tcl suffix for two base nodes ─────────────
+        tcl = pushover_tcl(
+            control_node=5,
+            dof=1,
+            max_disp=0.1,
+            num_steps=3,
+            lateral_loads={5: (1.0, 0.0, 0.0)},
+            adaptive=False,
+            base_node_tags=[1, 2],
+        )
+        # Per-node reaction recorder files are emitted for multi-base runs.
+        # The default output_prefix is "wall", so multi-base runs emit
+        # ``wall_reaction_1.out`` / ``wall_reaction_2.out`` (no bare
+        # ``wall_reaction.out``).
+        assert "wall_reaction_1.out" in tcl, "Missing per-node reaction recorder 1"
+        assert "wall_reaction_2.out" in tcl, "Missing per-node reaction recorder 2"
+        assert "wall_reaction.out" not in tcl.replace("wall_reaction_1.out", "").replace(
+            "wall_reaction_2.out", ""
+        ), "Bare reaction file should not exist for multi-base"
+
+        # ── 2. Parse recorder files with two per-node reactions ──────
+
+        # Displacement file: time, disp (3 steps)
+        disp = tmp_path / "disp.out"
+        np.savetxt(str(disp), [[0.0, 0.001], [0.2, 0.005], [0.4, 0.012]])
+
+        # Per-step base-shear history (3 lines, one per step)
+        bs = tmp_path / "bs.out"
+        np.savetxt(str(bs), [[-100.0, 0.0, 400.0], [-200.0, 0.0, 800.0], [-300.0, 0.0, 1200.0]])
+
+        # Per-node reaction files with matching time steps
+        react_1 = tmp_path / "reaction_1.out"
+        np.savetxt(str(react_1), [[0.0, -40.0], [0.2, -80.0], [0.4, -120.0]])
+        react_2 = tmp_path / "reaction_2.out"
+        np.savetxt(str(react_2), [[0.0, -60.0], [0.2, -120.0], [0.4, -180.0]])
+
+        # Pass a list of reaction paths → parser sums per-node reactions
+        result = parse_pushover_results(
+            str(disp),
+            str(bs),
+            [str(react_1), str(react_2)],
+        )
+
+        assert len(result["control_disp"]) == 3
+        assert len(result["base_shear"]) == 3
+        assert len(result["step"]) == 3
+        assert len(result["reaction_rx"]) == 3
+        # Sum of both base nodes at each step: -40 + -60 = -100, etc.
+        assert abs(result["reaction_rx"][0] - (-100.0)) < 1e-6
+        assert abs(result["reaction_rx"][1] - (-200.0)) < 1e-6
+        assert abs(result["reaction_rx"][2] - (-300.0)) < 1e-6
 
     def test_file_not_found_raises(self, tmp_path):
         """Missing file should raise OSError."""

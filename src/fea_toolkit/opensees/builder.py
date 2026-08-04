@@ -796,6 +796,10 @@ def pushover_tcl(
                 "integrator DisplacementControl $control_node $dof $dU",
                 "analysis Static",
                 "",
+                "# ── Base-shear history file (one line per step) ──",
+                f"set bs_file [open {output_prefix}_bs.out w]",
+                f"set base_tags [list {(' '.join(str(t) for t in rec_nodes))}]",
+                "",
                 "while {$currentDisp < $targetDisp} {",
                 "",
                 "    algorithm Newton",
@@ -846,6 +850,15 @@ def pushover_tcl(
                 "        break",
                 "    }",
                 "",
+                "    # ── Record base shear for this step ──",
+                "    set rx 0; set ry 0; set rz 0",
+                "    foreach n $base_tags {",
+                "        set rx [expr $rx + [nodeReaction $n 1]]",
+                "        set ry [expr $ry + [nodeReaction $n 2]]",
+                "        set rz [expr $rz + [nodeReaction $n 3]]",
+                "    }",
+                '    puts $bs_file "$rx $ry $rz"',
+                "",
                 "    # Restore step size and norm tolerance when possible",
                 "    if {$dU < $dU_base} {",
                 "        set dU $dU_base",
@@ -860,10 +873,12 @@ def pushover_tcl(
                 "         flush stdout",
                 "    }",
                 "}",
+                "",
+                "close $bs_file",
             ]
         )
     else:
-        # Simple fixed-step pushover
+        # Simple fixed-step pushover — per-step base-shear history
         lines.extend(
             [
                 "test NormDispIncr 1.0e-6 100",
@@ -872,8 +887,26 @@ def pushover_tcl(
                 f"[expr {max_disp:.6g} / {num_steps}]",
                 "analysis Static",
                 "",
-                f"set ok [analyze {num_steps}]",
-                'puts "Pushover: $ok steps"',
+                f"set base_tags [list {(' '.join(str(t) for t in rec_nodes))}]",
+                f"set bs_file [open {output_prefix}_bs.out w]",
+                "",
+                "for {set i 1} {$i <= " + str(num_steps) + "} {incr i} {",
+                "    set ok [analyze 1]",
+                "    if {$ok != 0} {",
+                '        puts "Pushover: analyze failed at step $i"',
+                "        break",
+                "    }",
+                "    # ── Record base shear for this step ──",
+                "    set rx 0; set ry 0; set rz 0",
+                "    foreach n $base_tags {",
+                "        set rx [expr $rx + [nodeReaction $n 1]]",
+                "        set ry [expr $ry + [nodeReaction $n 2]]",
+                "        set rz [expr $rz + [nodeReaction $n 3]]",
+                "    }",
+                '    puts $bs_file "$rx $ry $rz"',
+                "}",
+                "close $bs_file",
+                'puts "Pushover: completed $i-1 steps"',
             ]
         )
 
@@ -892,9 +925,6 @@ def pushover_tcl(
             "    set rz [expr $rz + [nodeReaction $n 3]]",
             "}",
             'puts "Base reactions: Rx = $rx  Ry = $ry  Rz = $rz"',
-            f"set bs_file [open {output_prefix}_bs.out w]",
-            'puts $bs_file "$rx $ry $rz"',
-            "close $bs_file",
         ]
     )
 

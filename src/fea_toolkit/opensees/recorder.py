@@ -42,7 +42,7 @@ import os
 import subprocess
 import sys
 import types
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 import numpy as np
 
@@ -1069,7 +1069,7 @@ def export_mesh_model_to_tcl(
 def parse_pushover_results(
     disp_path: str,
     bs_path: str,
-    reaction_path: Optional[str] = None,
+    reaction_path: Optional[Union[str, list[str]]] = None,
 ) -> dict[str, np.ndarray]:
     """Parse pushover Tcl recorder output files into numpy arrays.
 
@@ -1080,17 +1080,19 @@ def parse_pushover_results(
     - **disp_path**: ``{output_prefix}_disp.out`` — one line per
       converged step with ``time`` and control-node displacement
       columns.  The displacement array is the second column.
-    - **bs_path**: ``{output_prefix}_bs.out`` — a single line with
-      three values ``rx ry rz`` representing the summed base reactions
-      after the final step.  ``base_shear`` is taken from the first
-      value (the push-direction reaction) and broadcast to match the
-      step count.
-    - **reaction_path**: ``{output_prefix}_reaction.out`` — optional,
-      one line per step with ``time`` and the base-node reaction in
-      the push direction.  This file exists only for a single base
-      node (``base_node_tags=[tag]``); multiple base nodes emit
-      per-node files ``{output_prefix}_reaction_{tag}.out`` and are
-      not passed here.
+    - **bs_path**: ``{output_prefix}_bs.out`` — one line per step
+      with three values ``rx ry rz`` representing the summed base
+      reactions at that step.  ``base_shear`` is taken from the first
+      value (the push-direction reaction) for each step.  A single
+      scalar or 3-value line (legacy format) is broadcast to match
+      the step count.
+    - **reaction_path**: ``{output_prefix}_reaction.out`` (single base
+      node) or a **list** of paths
+      ``[{output_prefix}_reaction_{tag}.out, ...]`` (multiple base
+      nodes) — optional, one line per step with ``time`` and the
+      base-node reaction in the push direction.  When a list is given,
+      reactions are summed across all base nodes by matching recorded
+      time steps.
 
     Returns
     -------
@@ -1171,15 +1173,48 @@ def parse_pushover_results(
     elif bs_data.ndim == 0:
         result["base_rx"] = np.array([float(bs_data)])
 
-    # ── Optional: per-step reaction file ─────────────────────────
-    if reaction_path and os.path.exists(reaction_path):
+    # ── Optional: per-step reaction file(s) ──────────────────────
+    # A single base node writes ``{prefix}_reaction.out``; multiple
+    # base nodes write per-node ``{prefix}_reaction_{tag}.out`` files.
+    # When a list of paths is supplied, reactions are summed across
+    # all base nodes by matching recorded time steps.
+    reaction_paths: list[str] = []
+    if reaction_path:
+        reaction_paths = [reaction_path] if isinstance(reaction_path, str) else list(reaction_path)
+
+    def _read_reaction_series(path: str) -> tuple[np.ndarray, np.ndarray]:
+        """Read (time, reaction) columns from a single recorder file."""
+        data = np.genfromtxt(path, invalid_raise=False)
+        if data.ndim < 2 or data.shape[1] < 2:
+            return np.array([]), np.array([])
+        return data[:, 0], data[:, 1]
+
+    summed_rx: Optional[np.ndarray] = None
+    ref_time: Optional[np.ndarray] = None
+    for p in reaction_paths:
+        if not os.path.exists(p):
+            continue
         try:
-            rx_data = np.genfromtxt(reaction_path, invalid_raise=False)
-            if rx_data.ndim >= 2:
-                result["reaction_rx"] = rx_data[:, 1]
-                result["reaction_ry"] = rx_data[:, 2] if rx_data.shape[1] >= 3 else rx_data[:, 1]
-                result["reaction_rz"] = rx_data[:, 3] if rx_data.shape[1] >= 4 else rx_data[:, 1]
+            t_vals, r_vals = _read_reaction_series(p)
+            if len(t_vals) == 0:
+                continue
+            if ref_time is None:
+                # First available file defines the reference time grid;
+                # subsequent files are interpolated onto it so reactions
+                # from all base nodes align even if steps differ slightly.
+                ref_time = t_vals
+                summed_rx = np.zeros_like(ref_time, dtype=float)
+            # Interpolate this node's reaction onto the reference grid
+            interp_vals = np.interp(ref_time, t_vals, r_vals)
+            summed_rx = summed_rx + interp_vals
         except Exception:
-            pass
+            continue
+
+    if summed_rx is not None and len(summed_rx) > 0:
+        # The recorder emits only the push-direction DOF reaction, so
+        # all three channels reflect the same summed quantity.
+        result["reaction_rx"] = summed_rx
+        result["reaction_ry"] = summed_rx
+        result["reaction_rz"] = summed_rx
 
     return result
