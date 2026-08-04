@@ -53,7 +53,8 @@ an internal helper, not part of the public API.
 
 Remove legacy underscore-prefixed aliases (e.g. `_deep_merge` → `deep_merge`).
 Audit internal callers first; if any remain, update them to use the
-non-underscore names.
+non-underscore names.  **(Status: ✅ Done — removed 2026-08; all four
+alias wrappers deleted, `local/` callers updated to use the plain names.)**
 
 ### 4. Opensees — `src/fea_toolkit/opensees/builder.py`
 
@@ -120,42 +121,131 @@ comfortably.  Below is a realistic assessment of what remains.
 | `to_fiber_patches` dispatch in builder | `_create_single_section` detects `mat.type == 'concrete'` and creates 3 material tags (cover, core, rebar) | ✅ Implemented |
 | `create_fiber_sections=True` automatic promotion | Check on each section; falls back silently to elastic if `to_fiber_patches` raises `NotImplementedError` | ✅ Implemented |
 | RC pushover smoke-test | `test_rc_pushover.py` exists | ⚠️ Partial |
-| Confined concrete (Mander) | `model/confinement.py` has `mander_confined()` but the builder does not yet wire it into fiber patches | ⚠️ Partial |
+| Confined concrete (Mander) | `model/confinement.py` has `mander_confined()` **and** `AnalysisBuilder._create_single_section()` wires it into the confined core `Concrete01` via `sec.fiber_confinement()` (falls back to 1.25× heuristic when tie data absent) | ✅ Wired |
 | Shear-governed behaviour | Not available in standard OpenSees beam-column elements | ❌ Not planned |
 | Layered-shell RC walls | Working via `LayeredShell` + `ShellMITC4` (validated in `test_layered_shell.py`) | ✅ Validated |
 
-### Gaps to Close
+### Gaps to Close (assessed 2026-08)
 
-1. **Mander confinement wiring** — `ConcreteRectangularSection.to_fiber_patches()`
-   already knows about confined vs. unconfined concrete, but currently
-   uses `Concrete01` for both.  Integrate the existing `mander_confined()`
-   function so the core patch uses a confined stress–strain curve.
+1. **Mander confinement wiring** — **✅ Closed.** `_create_single_section()`
+   already calls `sec.fiber_confinement(fc, tie_fy)` (with `tie_fy` resolved
+   from `RebarMatT` → `RebarMatL` → framework defaults), reads the
+   `fcc/ecc/ecu` result, and applies the configurable `confined_ecu_max`
+   cap.  The no-tie-data fallback uses the shared
+   `RC_NO_TIE_CONFINEMENT_FACTOR` (1.25×) heuristic.  **Parity confirmed:
+   the Tcl export in `opensees/builder.py` also routes through
+   `sec.fiber_confinement()` (line ~483) with the same shared factor —
+   no further work needed.**
 
-2. **Rebar layer offset from cover** — the current `to_fiber_patches`
-   places rebar at a hard-coded offset from the section edge.  Make this
-   configurable via section properties or a config dict.
+2. **Rebar layer offset from cover** — **🟢 De minimis.**  The current
+   `to_fiber_patches()` places rebar at `±(half_d − cover)` — the standard
+   SAP2000 convention.  Making top/bottom cover separately configurable
+   (`top_cover` / `bot_cover` fields) would be a small extension but no
+   concrete use case demands it yet.  Defer until needed.
 
-3. **2D vs 3D model dispatch** — RC pushover should work for both
-   `-ndm 2 -ndf 3` (frame models) and `-ndm 3 -ndf 6` (full models
-   with shells).  The `forceBeamColumn` path works for both; verify
-   the `Lobatto` integration and `PDelta` transform converge
-   reliably with RC fiber sections.
+3. **2D vs 3D model dispatch** — **🟡 Code complete, needs validation.**
+   The Preprocessor sets `-ndm 2 -ndf 3` or `-ndm 3 -ndf 6` correctly;
+   `forceBeamColumn` + `Lobatto` + `PDelta` is the default pushover path.
+   The remaining work is running real RC models through both dims and
+   verifying convergence — a validation task, not a code gap.
 
-4. **End-to-end validation benchmark** — a simple 2-storey RC frame
-   with known pushover curve (compare against literature or SAP2000
-   staged-construction pushover).  This gives confidence before
-   running on production models.
+4. **End-to-end validation benchmark** — **🔴 Not started — concrete plan
+   identified.**  The recommended reference case is the **Vecchio & Emara
+   (1992)** large-scale 2-storey, 2-bay RC plane frame (University of
+   Toronto).  Its characteristics make it ideal:
 
-5. **Pushover solver tuning** — RC fibers produce softer response than
-   steel, especially after cracking.  The default solver settings
-   (`Newton`, `NormDispIncr 1e-6`, 10 iters) may need relaxation for
-   RC models (e.g. `KrylovNewton`, `NormUnbalance`, higher sub-step
-   count).  Expose via the builder config dict rather than hard-coding.
+   - Flexure-critical with well-confined cross-sections
+   - Beam span-depth ratio 8.75; columns under axial load
+   - Pushed to 155 mm lateral displacement, then unloaded to zero net load
+   - Reference: Vecchio, F.J. & Emara, M.B. (1992). "Shear Deformations in
+     Reinforced Concrete Frames." *ACI Structural Journal* (full geometry,
+     rebar layouts, and material data are published)
+   - Independent replication benchmark: Guner & Vecchio (2010),
+     "Pushover Analysis of Shear-Critical Frames," *ACI Structural Journal*
+     — reported peak-capacity ratio **calc/obs = 0.98**, energy dissipation
+     44.6 vs 44.4 kN·m, and P-Δ ≈ 12% of overturning moment at ultimate.
 
-6. **CSM bilinearisation validation** — verify that the
-   `bilinearize_composite` default produces sensible yield points for
-   RC capacity curves (which are more curved than steel SDOF backbones).
-   The existing test suite covers synthetic curves but not real RC.
+   **Measures required:**
+   1. Extract published geometry, rebar layouts, and material strengths for
+      the Vecchio & Emara frame as a new `tests/fixtures/` `.s2k` file or a
+      programmatic `SAPModelData` builder in `tests/test_rc_benchmark.py`.
+   2. Run `preprocess_model()` → `AnalysisBuilder` with
+      `create_fiber_sections=True` and `forceBeamColumn` + `Lobatto`.
+   3. Compare the computed base-shear vs roof-displacement envelope against
+      the published experimental curve (digitise Guner & Vecchio's Fig. 11).
+   4. **Acceptance criteria:** peak base shear within ±10 % of experiment,
+      initial stiffness within ±15 %, and the softening/ductility trend
+      qualitatively matches (the frame is flexure-critical; shear ≈ 20 % of
+      total deformation is expected and acceptable for beam-column fiber
+      elements).
+   5. Optionally re-run the Vecchio & Balopoulou (1990) variant (cut-back
+      top reinforcement) to verify sensitivity to reinforcement details.
+
+5. **Pushover solver tuning** — **🟡 Priority: high — concrete recommended
+   changes identified.**  `PUSHOVER_SOLVER_DEFAULTS` currently uses
+   `Newton` + `NormDispIncr 1e-6` + 10 iters + 1 gravity substep.  Two
+   research-backed findings drive the change:
+
+   **(a) `NormUnbalance` is safer than `NormDispIncr` for force-based
+   elements with `eleLoad` member loads.**  Michael Scott (OpenSeesDigital,
+   2026) documents a pathological-convergence case: `forceBeamColumn`
+   carries member loads internally (not as equivalent nodal loads), so
+   `NormDispIncr` can report a zero displacement increment while the
+   residual is still large — appearing converged when out of equilibrium.
+   `NormUnbalance` correctly detects the residual.  The pushover pipeline
+   applies self-weight via `eleLoad -type -beamUniform`, so this applies
+   directly.
+
+   **(b) The OpenSeesWiki RC-frame-pushover fallback pattern** is the
+   battle-tested approach for RC softening: try `Newton` first; on failure
+   relax the tolerance and switch to `ModifiedNewton -initial` for the step;
+   then restore the primary solver.
+
+   **Measures required:**
+   1. Change default `solver_test_type` from `"NormDispIncr"` to
+      `"NormUnbalance"` in `PUSHOVER_SOLVER_DEFAULTS`.
+   2. Add a `PUSHOVER_FALLBACK_DEFAULTS` class constant
+      (`{"solver_test_type": "NormUnbalance", "solver_test_tol": 1e-12,
+      "solver_test_max_iter": 1000, "solver_algorithm": "ModifiedNewton"}`).
+   3. Implement per-step fallback logic in `run_pushover_analysis()`:
+      on a failed step with primary settings, retry with the fallback dict,
+      then restore primary settings for subsequent steps.
+   4. Raise the default `gravity_num_substeps` from 1 → 4 so cracking RC
+      models apply gravity incrementally (available via config key).
+   5. Add an `RC_PUSHOVER_SOLVER_DEFAULTS` convenience preset combining all
+      of the above, and document the recommended RC settings in
+      `docs/pushover_analysis.md`.
+   6. After the Vecchio & Emara benchmark (Gap 4) is running, tune these
+      defaults empirically and record the final values in the plan.
+
+6. **CSM bilinearisation validation** — **🟡 Validation gap — concrete
+   plan identified.**  The existing `bilinearize_composite()` uses
+   equal-area / equal-energy criteria tuned for steel yield plateaus.
+   RC capacity curves are highly curved (gradual cracking → rebar yield →
+   softening), so the fitted yield point may snap to the **cracking
+   transition** rather than the **rebar-yield drift**.  Research:
+
+   - De Luca, Vamvatsikos & Iervolino (2013, *Earthquake Engineering &
+     Structural Dynamics*), "Near-optimal piecewise linear fits of static
+     pushover capacity curves": code-mandated bilinear fits (FEMA 60 %
+     secant, EC8 equal-area) are **highly biased for curved RC backbones**;
+     the FEMA 60 %-secant rule can overestimate displacement demand by
+     ~25 %.  They propose a near-optimal **"10 % rule"**: elastic secant at
+     10 % of peak strength (instead of 60 %), with post-elastic slope
+     chosen to minimise the absolute area discrepancy.
+
+   **Measures required:**
+   1. Run `bilinearize_composite()` against synthetic RC-shaped curves
+      (gradual softening, no sharp yield plateau) and compare the fitted
+      yield point against the De Luca 10 %-secant near-optimal fit.
+   2. Implement a `bilinearize_rc()` variant (or a configurable
+      `csm_bilinear_method` key: `"equal_area"` / `"equal_energy"` current
+      default / `"de_luca_10pct"` new) implementing the 10 %-secant rule.
+   3. Validate against the real RC pushover curve from the Gap 4 benchmark —
+      the yield point should sit near the expected rebar-yield drift
+      (~0.5–1 % roof drift), not at the premature cracking transition.
+   4. Update `docs/csm_bilinearization.md` documenting the method choice
+      and the calibration results.
 
 ### Recommended Validation Sequence
 
@@ -166,8 +256,8 @@ comfortably.  Below is a realistic assessment of what remains.
 
 2. **2-storey 2-bay RC frame** — `ConcreteRectangularSection` beams
    and columns auto-promoted from S2K parser.  Gravity + pushover.
-   Compare yield drift and base shear against literature benchmark
-   (e.g. PEER RC frame, Vecchio & Emara 1992).
+   Compare yield drift and base shear against the Vecchio & Emara
+   (1992) benchmark described in Gap 4 above.
 
 3. **RC frame with shell slabs** — verify interaction between
    `forceBeamColumn` frame elements and `ShellMITC4` slab elements

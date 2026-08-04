@@ -666,25 +666,6 @@ def pick_wind(inferred: dict, direction: str) -> dict:
     return {}
 
 
-# ── Legacy aliases with underscore prefixes (for backward compat) ──────
-
-
-def _deep_merge(base: dict, override: dict) -> dict:
-    return deep_merge(base, override)
-
-
-def _infer_loads(raw_tables: dict) -> dict:
-    return infer_loads(raw_tables)
-
-
-def _build_gravity_patterns(inferred: dict) -> dict:
-    return build_gravity_patterns(inferred)
-
-
-def _pick_wind(inferred: dict, direction: str) -> dict:
-    return pick_wind(inferred, direction)
-
-
 # ── Flag diagram geometry (pure NumPy, no renderer dependency) ────────
 
 
