@@ -11,6 +11,11 @@ for automated cross-referencing.
 
 ## 🚀 Core Pipeline
 
+- [Typed Analysis Orchestration](analysis.md) — ✅ Complete
+  > The fea_toolkit.analysis subpackage: typed, configurable, dependency-aware analysis objects composed via AnalysisManager.
+  Tags: `analysis`, `manager`, `orchestration`, `typed-results`, `architecture`
+  Related: [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Analysis Workflow](workflow.md) · [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md)
+
 - [Builder Reference — Two-stage Pipeline](builder_reference.md) — ✅ Complete
   > Reference for the Preprocessor + AnalysisBuilder two-stage architecture.
   Tags: `architecture`, `preprocessor`, `analysis-builder`, `reference`
@@ -46,6 +51,11 @@ for automated cross-referencing.
   > Modal analysis solver options, mode shape visualisation, and usage examples.
   Tags: `analysis-type`, `modal`, `eigen`, `eigenvalue`, `solver`
   Related: [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Report Generation — Design Proposal](report_generation.md) · [Storey-level Response Methodology](storey_response.md)
+
+- [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md) — ✅ Complete
+  > Ground-motion-driven transient analysis via Tcl export and Xara/OpenSeesRT, with Rayleigh damping from a preceding modal analysis.
+  Tags: `analysis-type`, `nonlinear`, `dynamic`, `time-history`, `ground-motion`, `tcl`, `xara`
+  Related: [Modal Analysis Options](modal_analysis.md) · [Tcl Export for Nonlinear Analysis](tcl_export.md) · [Xara/OpenSeesRT Tcl Runtime Guide](xara_tcl_runtime_guide.md) · [Typed Analysis Orchestration](analysis.md)
 
 - [Pushover (Non-linear Static) Analysis](pushover_analysis.md) — ✅ Complete
   > Pushover analysis: fiber sections, lumped hinges, brace buckling approaches, ADRS conversion, and CSM.
@@ -118,7 +128,7 @@ for automated cross-referencing.
   Tags: `export`, `rhino`, `visualisation`, `geometry`
   Related: [Visualisation Toolkit](viewer.md) · [Unified Results Schema — Design Proposal](results_schema.md) · [Tcl Export for Nonlinear Analysis](tcl_export.md)
 
-- [Tcl Export for Nonlinear Analysis](tcl_export.md) — ✅ Complete
+- [Tcl Export for Nonlinear Analysis](tcl_export.md)
   > Exporting models to standalone OpenSees Tcl scripts for nonlinear analysis and Xara/OpenSeesRT runtime.
   Tags: `export`, `tcl`, `xara`, `opensees`, `scripting`
   Related: [Xara/OpenSeesRT Tcl Runtime Guide](xara_tcl_runtime_guide.md) · [Xara Pushover Workflow — Nonlinear Analysis via Tcl](xara_pushover_workflow.md) · [Xara/OpenSeesRT Gravity & Solver Lessons Learned](xara_gravity_and_solver.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md)
@@ -154,6 +164,11 @@ for automated cross-referencing.
   Tags: `architecture`, `migration`, `planning`
   Related: [Layered Analysis Workflow for the v3 Architecture](layered_analysis_workflow.md) · [Analysis Workflow](workflow.md) · [Development Notes](dev_notes.md)
 
+- [CSM Test Model Development Plan](csm_test_model_plan.md) — ✅ Complete
+  > Development plan for the CSM test model - an RC frame in kN-m units with a three-material setup (C30/Rebar/Q355) exercising meaningful nonlinear ADRS response.
+  Tags: `csm`, `test-model`, `planning`, `capacity-spectrum`
+  Related: [CSM Bilinearization](csm_bilinearization.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md)
+
 - [Deprecation Removal Plan](deprecation_plan.md) — 🚧 Draft
   > Plan for removing deprecated APIs after the RC nonlinear static analysis release.
   Tags: `planning`, `deprecation`, `cleanup`
@@ -163,12 +178,14 @@ for automated cross-referencing.
   Tags: `architecture`, `development`, `notes`
   Related: [AnalysisBuilder Migration Plan](analysis_builder_migration_plan.md)
 
+- [Linting Fix Plan](linting_fix_plan.md) — 🚧 Draft
+  > Pyright error baseline and phased fix strategy for src/fea_toolkit (reference for cleanup work).
+  Tags: `planning`, `linting`, `pyright`, `cleanup`
 
-## 📦 Uncategorised
-
-- [Csm Test Model Plan](csm_test_model_plan.md)
-
-- [Pushover Results Storage Viz](pushover_results_storage_viz.md)
+- [Pushover Results Storage & Nonlinear Visualization](pushover_results_storage_viz.md) — ⚠️ Partial
+  > Implementation plan and status for per-element pushover result recording (frame end forces, shell stress resultants, plasticity indicators) and nonlinear visualization.
+  Tags: `pushover`, `results`, `storage`, `visualization`, `npz`, `planning`
+  Related: [Unified Results Schema — Design Proposal](results_schema.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Visualisation Toolkit](viewer.md)
 
 
 ---
@@ -179,29 +196,31 @@ Tags across all documentation files:
 
 - **`aci-318`** — [stiffness_factors.md](stiffness_factors.md)
 - **`ai`** — [llm_guide.md](llm_guide.md)
+- **`analysis`** — [analysis.md](analysis.md)
 - **`analysis-builder`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
-- **`analysis-type`** — [modal_analysis.md](modal_analysis.md), [pushover_analysis.md](pushover_analysis.md), [storey_response.md](storey_response.md)
+- **`analysis-type`** — [modal_analysis.md](modal_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [storey_response.md](storey_response.md)
 - **`api-reference`** — [llm_guide.md](llm_guide.md)
-- **`architecture`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md)
+- **`architecture`** — [analysis.md](analysis.md), [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md)
 - **`area-elements`** — [shell_support.md](shell_support.md)
 - **`beams`** — [element_classification.md](element_classification.md)
 - **`bilinearization`** — [csm_bilinearization.md](csm_bilinearization.md)
 - **`brace`** — [pushover_analysis.md](pushover_analysis.md)
 - **`braces`** — [element_classification.md](element_classification.md)
-- **`capacity-spectrum`** — [csm_bilinearization.md](csm_bilinearization.md)
+- **`capacity-spectrum`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md)
 - **`classification`** — [element_classification.md](element_classification.md)
-- **`cleanup`** — [deprecation_plan.md](deprecation_plan.md)
+- **`cleanup`** — [deprecation_plan.md](deprecation_plan.md), [linting_fix_plan.md](linting_fix_plan.md)
 - **`columns`** — [element_classification.md](element_classification.md)
 - **`config`** — [element_properties_config.md](element_properties_config.md)
 - **`confinement`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`constraints`** — [constraint_detection.md](constraint_detection.md)
 - **`cracked-section`** — [stiffness_factors.md](stiffness_factors.md)
-- **`csm`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md)
+- **`csm`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md), [pushover_analysis.md](pushover_analysis.md)
 - **`deprecation`** — [deprecation_plan.md](deprecation_plan.md)
 - **`design-proposal`** — [report_generation.md](report_generation.md), [results_schema.md](results_schema.md)
 - **`development`** — [dev_notes.md](dev_notes.md)
 - **`displacement`** — [storey_response.md](storey_response.md)
 - **`drift`** — [storey_response.md](storey_response.md)
+- **`dynamic`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
 - **`edge-detection`** — [constraint_detection.md](constraint_detection.md)
 - **`eigen`** — [modal_analysis.md](modal_analysis.md)
 - **`eigenvalue`** — [modal_analysis.md](modal_analysis.md)
@@ -213,6 +232,7 @@ Tags across all documentation files:
 - **`fiber`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`geometry`** — [rhino_export.md](rhino_export.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
+- **`ground-motion`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
 - **`guide`** — [llm_guide.md](llm_guide.md)
 - **`hdf5`** — [report_generation.md](report_generation.md)
 - **`hinges`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md)
@@ -221,29 +241,33 @@ Tags across all documentation files:
 - **`interactive`** — [viewer.md](viewer.md)
 - **`io`** — [results_schema.md](results_schema.md)
 - **`lessons-learned`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
+- **`linting`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`llm`** — [llm_guide.md](llm_guide.md)
 - **`load-redistribution`** — [element_splitting.md](element_splitting.md)
+- **`manager`** — [analysis.md](analysis.md)
 - **`mander`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`mesh-model`** — [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`meshing`** — [constraint_detection.md](constraint_detection.md), [element_splitting.md](element_splitting.md), [shell_support.md](shell_support.md)
 - **`migration`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md)
 - **`modal`** — [modal_analysis.md](modal_analysis.md)
 - **`modifiers`** — [stiffness_factors.md](stiffness_factors.md)
-- **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`notes`** — [dev_notes.md](dev_notes.md)
-- **`npz`** — [results_schema.md](results_schema.md)
+- **`npz`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`opensees`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
+- **`orchestration`** — [analysis.md](analysis.md)
 - **`pipeline`** — [workflow.md](workflow.md)
-- **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [deprecation_plan.md](deprecation_plan.md)
+- **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
 - **`post-processing`** — [storey_response.md](storey_response.md)
 - **`preprocessor`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
-- **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`pyright`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`pyvista`** — [viewer.md](viewer.md)
 - **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`reference`** — [builder_reference.md](builder_reference.md), [mander_confinement_validation.md](mander_confinement_validation.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
-- **`results`** — [results_schema.md](results_schema.md)
+- **`results`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`rhino`** — [rhino_export.md](rhino_export.md)
 - **`runtime`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`sap2000`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
@@ -256,16 +280,21 @@ Tags across all documentation files:
 - **`solver`** — [modal_analysis.md](modal_analysis.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`splitting`** — [element_splitting.md](element_splitting.md)
 - **`stiffness`** — [stiffness_factors.md](stiffness_factors.md)
+- **`storage`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
 - **`storey`** — [storey_response.md](storey_response.md)
-- **`tcl`** — [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
+- **`tcl`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
+- **`test-model`** — [csm_test_model_plan.md](csm_test_model_plan.md)
 - **`theory`** — [mander_confinement_validation.md](mander_confinement_validation.md)
+- **`time-history`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
+- **`typed-results`** — [analysis.md](analysis.md)
 - **`usage`** — [llm_guide.md](llm_guide.md)
 - **`validation`** — [mander_confinement_validation.md](mander_confinement_validation.md)
 - **`viewer`** — [viewer.md](viewer.md)
 - **`visualisation`** — [rhino_export.md](rhino_export.md), [viewer.md](viewer.md)
+- **`visualization`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
 - **`walls`** — [element_classification.md](element_classification.md)
 - **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [workflow.md](workflow.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
-- **`xara`** — [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
+- **`xara`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`yaml-config`** — [report_generation.md](report_generation.md)
 - **`yield-point`** — [csm_bilinearization.md](csm_bilinearization.md)
 

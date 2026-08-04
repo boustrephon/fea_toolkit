@@ -1,3 +1,10 @@
+---
+title: "Pending Work Log"
+description: "Internal log of completed and pending work items across documentation and visualization fixes."
+status: "draft"
+tags: [planning, work-log, internal]
+category: [planning]
+---
 # Pending work — fea_toolkit (2026-08-01 continued)
 
 ## DONE (documentation findings 1–10)
