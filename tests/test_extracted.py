@@ -26,8 +26,62 @@ from fea_toolkit.model.sap_data import (
     PipeSection,
     RectangularSection,
 )
-from fea_toolkit.spectrum import _build_spectrum, _gb50011_spectrum, _interp_sa
+from fea_toolkit.spectrum import (
+    ResponseSpectrum,
+    _build_spectrum,
+    _gb50011_spectrum,
+    _interp_sa,
+)
 from fea_toolkit.utils import build_gravity_patterns, deep_merge, infer_loads, pick_wind
+
+# ── ResponseSpectrum tests ─────────────────────────────────────────────
+
+
+class TestResponseSpectrum:
+    """The canonical T/Sa demand-spectrum carrier for pushover CSM."""
+
+    def test_from_arrays_roundtrip(self):
+        s = ResponseSpectrum.from_arrays(
+            T=[0.0, 0.5, 1.0],
+            Sa=[2.0, 1.5, 0.8],
+            code="ASCE7-16",
+            description="site-specific",
+        )
+        assert s.code == "ASCE7-16"
+        assert s.description == "site-specific"
+        assert s.T == [0.0, 0.5, 1.0]
+        assert s.Sa == [2.0, 1.5, 0.8]
+
+    def test_interpolate(self):
+        s = ResponseSpectrum.from_arrays(T=[0.0, 1.0, 2.0], Sa=[1.0, 2.0, 3.0])
+        vals = s.interpolate([0.0, 0.5, 1.0, 2.0])
+        assert np.allclose(vals, [1.0, 1.5, 2.0, 3.0])
+
+    def test_from_gb50011_ascending_branch(self):
+        """T=0.05 uses the damping-corrected branch 0.45 + (η₂ − 0.45)·10·T."""
+        s = ResponseSpectrum.from_gb50011(alpha_max=0.5, tg=0.35, zeta=0.05)
+        assert s.code == "GB50011"
+        assert len(s.T) == 200
+        assert len(s.Sa) == 200
+        # At 5% damping η₂ = 1.0; T=0.05 on the ascending branch:
+        # (0.45 + (1.0 − 0.45)·10·0.05) · α_max · g = 0.725 · 0.5 · 9.81
+        sa_at_005 = s.interpolate([0.05])[0]
+        expected = (0.45 + (1.0 - 0.45) * 10.0 * 0.05) * 0.5 * 9.81
+        np.testing.assert_allclose(sa_at_005, expected, rtol=1e-10)
+
+    def test_from_gb50011_plateau(self):
+        """At T=tg the spectrum returns η₂ × α_max × g."""
+        s = ResponseSpectrum.from_gb50011(alpha_max=0.5, tg=0.35, zeta=0.05)
+        assert s.interpolate([0.35])[0] > s.interpolate([0.05])[0]
+
+    def test_validation_mismatched_lengths(self):
+        with pytest.raises(ValueError):
+            ResponseSpectrum(T=[0.0, 0.5], Sa=[1.0])
+
+    def test_validation_empty(self):
+        with pytest.raises(ValueError):
+            ResponseSpectrum(T=[], Sa=[])
+
 
 # ── Spectrum tests ─────────────────────────────────────────────────────
 

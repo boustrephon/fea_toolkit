@@ -110,6 +110,7 @@ from fea_toolkit.model.sections import SectionLibrary
 from fea_toolkit.model.selection import Selection
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder, run_modal
 from fea_toolkit.opensees.preprocessor import Preprocessor, preprocess_model
+from fea_toolkit.opensees.pushover import pushover_rc_openseespy
 from fea_toolkit.plotting.interactive_viewer import plot_interactive_viewer
 from fea_toolkit.plotting.viewer import ModelViewer
 
@@ -129,6 +130,7 @@ from fea_toolkit.plotting.viz import (
 
 # ── Report ─────────────────────────────────────────────────────────
 from fea_toolkit.report import generate_report
+from fea_toolkit.spectrum import ResponseSpectrum
 
 __all__ = [
     "AnalysisBuilder",
@@ -147,6 +149,7 @@ __all__ = [
     "PipeSection",
     "Preprocessor",
     "RectangularSection",
+    "ResponseSpectrum",
     # Pipeline
     "SAP2000Parser",
     # Core model types
@@ -172,5 +175,6 @@ __all__ = [
     "plot_model_comparison",
     "plot_pushover_curve",
     "preprocess_model",
+    "pushover_rc_openseespy",
     "run_modal",
 ]

@@ -13,10 +13,9 @@ RC path (OpenSeesPy, preferred)
     Uses :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder`
     with ``forceBeamColumn`` fiber sections (Concrete01, Steel02) and
     optional nonlinear shell walls.  Supports single-direction or
-    four-direction push with CSM post-processing.
-    Note: dispatch to this path lands in :meth:`PushoverAnalysis.run`
-    (Task 5); for now the method is available as
-    :meth:`PushoverAnalysis._run_rc_openseespy_path`.
+    four-direction push with CSM post-processing.  Dispatched from
+    :meth:`PushoverAnalysis.run` when ``material_type="rc"`` (unless
+    ``use_tcl_fallback`` is set).
 
 RC path (Tcl/Xara export, legacy fallback)
     Exports the model to Tcl via
@@ -35,6 +34,7 @@ from fea_toolkit.analysis.base import (
     AnalysisResult,
 )
 from fea_toolkit.analysis.modal import ModalAnalysis
+from fea_toolkit.spectrum import ResponseSpectrum
 from fea_toolkit.utils import g_from_units
 
 if TYPE_CHECKING:
@@ -156,8 +156,12 @@ def _find_base_node_tags(mm: "MeshModel") -> list[int]:
 class PushoverAnalysis(Analysis):
     """Run pushover analysis in 4 directions with CSM evaluation.
 
-    Requires the result of a :class:`ModalAnalysis` for mode shapes
-    and periods (needed for ``mode1`` lateral load pattern and CSM).
+    Always requires the result of a :class:`ModalAnalysis` — not just
+    for the ``mode1`` lateral load pattern.  The CSM post-processing
+    needs the fundamental period and modal effective mass to convert
+    the pushover curve to an ADRS capacity spectrum and to locate the
+    performance point.  ``lateral_load_type`` only controls the *shape*
+    of the lateral load distribution, not whether modal analysis runs.
 
     Parameters
     ----------
@@ -166,12 +170,16 @@ class PushoverAnalysis(Analysis):
         Result from a preceding :class:`ModalAnalysis`.
     material_type : str
         ``"steel"`` (default) or ``"rc"``.  Steel uses OpenSeesPy
-        directly with Hysteretic hinges.  RC exports to Tcl and runs
-        via Xara with ``forceBeamColumn`` + fiber sections.
+        directly with Hysteretic hinges.  RC runs in OpenSeesPy with
+        ``forceBeamColumn`` + fiber sections, unless
+        ``config["use_tcl_fallback"]`` is set to export to Tcl and
+        run via Xara (legacy).
     gravity_patterns : dict, optional
         Dict mapping pattern name → scale factor for gravity loads.
     lateral_load_type : str
         One of ``"uniform"``, ``"triangular"``, ``"mode1"`` (default).
+        Controls the lateral load distribution shape only; modal
+        analysis is always required regardless of this setting.
     max_disp_val : float
         Maximum control displacement (m, default 0.30).
     num_steps : int
@@ -184,6 +192,10 @@ class PushoverAnalysis(Analysis):
     rs_modal_base_shear : dict, optional
         Per-mode RS base shear ``{"X": [...], "Y": [...]}`` for
         mode1 pattern validation against RS demand (diagnostic only).
+    spectrum : ResponseSpectrum, optional
+        Pre-computed demand spectrum (T/Sa) for CSM performance-point
+        search.  When ``None``, a GB 50011 rare-event spectrum is built
+        from the config ``tg`` / ``alpha_max_rare`` (or defaults).
     name : str, optional
     config : dict, optional
         Builder config overrides.
@@ -204,6 +216,7 @@ class PushoverAnalysis(Analysis):
         brace_type: str = "truss",
         brace_sections: Optional[list] = None,
         rs_modal_base_shear: Optional[dict[str, list[float]]] = None,
+        spectrum: Optional[ResponseSpectrum] = None,
         name: Optional[str] = None,
         config: Optional[dict] = None,
     ):
@@ -216,6 +229,7 @@ class PushoverAnalysis(Analysis):
         self.brace_type = brace_type
         self.brace_sections = brace_sections
         self.rs_modal_base_shear = rs_modal_base_shear
+        self.spectrum = spectrum
         super().__init__(mesh_model, name, config)
 
     @classmethod
@@ -255,7 +269,7 @@ class PushoverAnalysis(Analysis):
                     stacklevel=2,
                 )
                 return self._run_rc_tcl_path()
-            return self._run_rc_openseespy_path()
+            return self._run_rc_path()
         return self._run_steel_path()
 
     # ── Steel path (OpenSeesPy) ───────────────────────────────────
@@ -277,6 +291,7 @@ class PushoverAnalysis(Analysis):
             brace_type=self.brace_type,
             brace_sections=self.brace_sections,
             rs_modal_base_shear=self.rs_modal_base_shear,
+            spectrum=self.spectrum,
             verbose=self.config.get("verbose", False),
         )
 
@@ -296,7 +311,7 @@ class PushoverAnalysis(Analysis):
 
     # ── RC path (OpenSeesPy, preferred) ──────────────────────────
 
-    def _run_rc_openseespy_path(self) -> AnalysisResult:
+    def _run_rc_path(self) -> AnalysisResult:
         """Run RC pushover via OpenSeesPy (AnalysisBuilder).
 
         Wraps :func:`~fea_toolkit.opensees.pushover.pushover_rc_openseespy`
@@ -330,7 +345,9 @@ class PushoverAnalysis(Analysis):
             num_steps=self.num_steps,
             config=rc_config,
             rs_modal_base_shear=self.rs_modal_base_shear,
+            spectrum=self.spectrum,
             verbose=rc_config.get("verbose", False),
+            node_mass_overrides=rc_config.get("node_mass_overrides"),
         )
 
         return AnalysisResult(

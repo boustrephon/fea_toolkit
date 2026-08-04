@@ -54,3 +54,83 @@ src/fea_toolkit/plotting/viz.py:
 
 ## OUT OF SCOPE / NOTED
 - The uncommitted `src/fea_toolkit/model/csm.py` WIP diff (63 lines: `_modal_participation` helper, peak_idx clamping, performance-point fallback period, control-node warning) remains uncommitted. Tests that asserted its in-progress behavior were removed; the remaining 27 CSM tests pass against the current state.
+
+## CURRENT CONCLUSIONS — 2026-08-04 (recorded, then confirmed against online docs)
+
+### A. RC pushover convergence — tolerance sensitivity is real and expected
+- v4/v5 hand-rolled push loop for the Admin Building stalls at ~0.006 m control
+  displacement under the strict RC defaults (`NormDispIncr 1e-6`, 10 iter,
+  `NewtonLineSearch`).  Relaxing to `NormDispIncr 1e-4` / 20 iter / `Newton`
+  (as used by v4/v5/v6) converges reliably.
+- **Online confirmation**: OpenSees manual (RC Frame Pushover Example, Berkeley
+  Wiki) documents the same behaviour — forceBeamColumn + fiber models "do not
+  always converge for the analysis options of choice", and the canonical
+  pattern is a failure-fallback chain: `Newton` → `ModifiedNewton -initial` with
+  a much larger iteration budget (1000) on failure, then resume `Newton`.
+  The forceBeamColumn docs also note the element performs its *own* internal
+  state-determination iteration (`-iter $maxIter $tol`, defaults 10 / 1e-12)
+  *on top of* the global solver — so per-step cost and convergence sensitivity
+  are intrinsically higher than for displacement-based elements.
+- **Conclusion**: the relaxed solver settings in v6's `rc_config`
+  (`solver_test_tol=1e-4`, `solver_test_max_iter=20`, `solver_algorithm="Newton"`)
+  are the correct engineering choice for this model class, not a hack.
+
+### B. CSM sign folding for -X / -Y pushes
+- The uncommitted csm.py diff folds negative-direction pushes into the positive
+  (S_d, S_a) quadrant via `np.abs`, because the pushover_to_adrs flow filters on
+  non-negativity; a -X/-Y push previously produced an entirely filtered curve
+  → "Too few valid data points in capacity spectrum".  The physical sign is
+  recovered from the final control displacement and re-applied to
+  `V_base`/`D_roof`; `plot_csm_4panel` also plots `abs()` ADRS arrays.
+- **Conclusion**: correct and self-consistent — direction sign lives in the
+  caller's label (-X/-Y), CSM iteration operates on magnitudes.
+
+### C. `node_mass_overrides` for masonry mass
+- `AnalysisBuilder.run_pushover_analysis(..., node_mass_overrides=...)` applies
+  per-node mass scale factors (node-ID → multiplier) after
+  `compute_seismic_masses()`, re-issuing `ops.mass()` so the OpenSees domain
+  stays consistent.  This enables per-storey masonry mass corrections
+  (`factor = 1.0 + m_storey_extra/m_seismic`) that a single global scale cannot
+  express.  v6 computes these factors via `build_node_mass_overrides()`.
+- **Conclusion**: approach is sound; note the override changes the *lateral load
+  shape* under mass-proportional patterns as well as the dynamic properties —
+  intentional for masonry.
+
+### D. `ResponseSpectrum` — canonical demand-spectrum carrier
+- New dataclass (`T`, `Sa`, `code`, `description`) with `from_gb50011()` and
+  `from_arrays()` factories plus `interpolate()`.  `from_gb50011()` reproduces
+  the existing `_gb50011_spectrum()` formulas (damping-corrected ascending
+  branch, γ/η₁/η₂ from GB 50011 §5.1.5).  `pushover_rc_openseespy()` /
+  `run_pushover_4dir()` / `PushoverAnalysis` now accept an injected spectrum
+  instead of hard-wiring GB 50011.
+- **Conclusion**: the pushover path is no longer code-locked to one design code
+  (ASCE 7 / site-specific spectra can be injected via `from_arrays`).
+
+### E. Mander confinement engine — validated, matches published Eq. 29
+- `docs/mander_confinement_validation.md` documents formula-by-formula
+  conformance to Mander, Priestley & Park (1988): closed-form confined strength
+  Eq. 29 (`f'cc = f'c(2.254√(1+7.94 f'l/f'c) − 2 f'l/f'c − 1.254)`), ke for
+  circular (Eq. 14) and rectangular (Eq. 22) sections, εcc (Eq. 4), ρx/ρy/ρs,
+  cross-tie contributions.
+- **Online confirmation**: Mander 1988 PDF (via itu.edu.tr mirror) reproduces
+  Eq. 29 verbatim (the "[-1.254 + 2.254√(1 + 7.94f'l/f'c) − 2f'l/f'c]" form),
+  and OpenSees Concrete01 docs confirm it is a Kent-Scott-Park model with
+  exactly the four parameters the toolkit emits (fpc, epsc0, fpcu, epsU),
+  i.e. the Mander f'cc / εcc feed the peak and the crushing point is the
+  spalling endpoint — matching the toolkit's `ecu_max` cap (default 0.025;
+  NZSEE C5 uses 0.05, configurable via `confined_ecu_max`).
+- **Conclusion**: no code changes required; validation doc is accurate.
+
+### F. v5 material-tag bug — fixed upstream
+- `local/check_v5_bug.py` shows the old v5 material-tag bug is fixed:
+  `run_pushover_analysis()` now works with the v5-style config
+  (forceBeamColumn + HingeRadau + fiber sections + PDelta).
+
+### G. Working-tree status (uncommitted, coherent feature batch)
+- 8 modified files: `__init__.py`, `analysis/pushover.py`, `model/csm.py`,
+  `opensees/analysis_builder.py`, `opensees/pushover.py`, `plotting/report.py`,
+  `spectrum.py`, `tests/test_extracted.py` — ResponseSpectrum + node mass
+  overrides + CSM sign handling + RC-path dispatch simplification.  Tests added
+  for ResponseSpectrum (6 cases).  Remaining green suite documented above.
+- **Conclusion**: this batch is ready to commit once the full suite is
+  re-run and the csm.py WIP diff is folded in deliberately.
