@@ -967,7 +967,16 @@ def pushover_to_adrs(
     masses = modal_results.get("nodal_masses", {})
     modal_results.get("periods", [])
 
-    dir_idx = {"X": 0, "Y": 1, "Z": 2}.get(direction, 0)
+    # Strip a leading sign ("-Y" → "Y") so negative-Y pushes select the
+    # Y component.  Unsupported labels are explicitly rejected rather
+    # than silently falling back to axis 0 (X).
+    _base_dir = direction.lstrip("+-")
+    if _base_dir not in ("X", "Y", "Z"):
+        raise ValueError(
+            f"Unsupported push direction: {direction!r}. "
+            f"Expected one of 'X', 'Y', 'Z', '+X', '-X', '+Y', '-Y'."
+        )
+    dir_idx = {"X": 0, "Y": 1, "Z": 2}[_base_dir]
 
     # Total physical mass (used to reject degenerate modes whose push-
     # direction component vanishes to machine noise).
