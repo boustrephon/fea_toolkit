@@ -596,8 +596,15 @@ def compute_performance_point(
         mode_shapes,
         direction=direction,
     )
-    S_a_arr = np.array(adrs["S_a"])
-    S_d_arr = np.array(adrs["S_d"])
+    # Fold the capacity curve into the positive (S_d, S_a) quadrant.
+    # A -X / -Y push produces negative physical displacements and base
+    # shear; without this, the non-negativity mask below filters out the
+    # entire curve and raises "Too few valid data points in capacity
+    # spectrum".  The push direction is carried by the caller's label
+    # (e.g. "-X") — the CSM iteration operates on magnitudes.  The
+    # physical sign is re-applied to V_base / D_roof at the end.
+    S_a_arr = np.abs(np.array(adrs["S_a"], dtype=float))
+    S_d_arr = np.abs(np.array(adrs["S_d"], dtype=float))
 
     # Validate array lengths before masking
     ctrl_raw = pushover_results.get("control_disp", [0])
@@ -621,27 +628,38 @@ def compute_performance_point(
     S_a_arr = S_a_arr[mask]
     if len(S_d_arr) < 3:
         raise ValueError("Too few valid data points in capacity spectrum")
-    # Anchor at origin (0,0) so the capacity curve starts at the origin
-    # and the secant stiffness K_init is well-defined from the first
-    # non-zero step.
-    if S_d_arr[0] > 1e-12 or S_a_arr[0] > 1e-12:
-        S_d_arr = np.concatenate([[0.0], S_d_arr])
-        S_a_arr = np.concatenate([[0.0], S_a_arr])
 
     Gamma = adrs["Gamma"]
     M_eff = adrs["M_eff"]
     phi_control = adrs["phi_control"]
     best_mode = adrs.get("best_mode", 0)
-    control_disp_orig = np.array(ctrl_raw, dtype=float)[mask]
-    base_shear_orig = np.array(shear_raw, dtype=float)[mask]
-    # Same anchoring for the physical arrays used for V_base/D_roof
+    _ctrl_arr = np.array(ctrl_raw, dtype=float)
+    _shear_arr = np.array(shear_raw, dtype=float)
+    # Push-direction sign, recovered from the final control displacement,
+    # is re-applied to the physical (non-spectral) outputs below.
+    dir_sign = 1.0
+    if _ctrl_arr.size > 0 and _ctrl_arr[-1] < 0:
+        dir_sign = -1.0
+    control_disp_orig = np.abs(_ctrl_arr)[mask]
+    base_shear_orig = np.abs(_shear_arr)[mask]
+
+    # Anchor at origin (0,0) so the capacity curve starts at the origin
+    # and the secant stiffness K_init is well-defined from the first
+    # non-zero step.  The physical arrays below are anchored in lockstep
+    # with the spectral arrays so ``np.interp`` always receives equal
+    # length ``xp``/``fp`` (previously the origin was only prepended to
+    # the physical arrays when the *first masked* step had non-trivial
+    # displacement/shear, which desynced lengths when it did not).
+    if S_d_arr[0] > 1e-12 or S_a_arr[0] > 1e-12:
+        S_d_arr = np.concatenate([[0.0], S_d_arr])
+        S_a_arr = np.concatenate([[0.0], S_a_arr])
+        control_disp_orig = np.concatenate([[0.0], control_disp_orig])
+        base_shear_orig = np.concatenate([[0.0], base_shear_orig])
+    # The physical arrays are anchored in lockstep with the spectral
+    # arrays (above); they are used directly for V_base/D_roof
     # interpolation.
-    if S_d_arr[0] <= 1e-12 and (control_disp_orig[0] > 1e-12 or base_shear_orig[0] > 1e-12):
-        control_disp = np.concatenate([[0.0], control_disp_orig])
-        base_shear = np.concatenate([[0.0], base_shear_orig])
-    else:
-        control_disp = control_disp_orig
-        base_shear = base_shear_orig
+    control_disp = control_disp_orig
+    base_shear = base_shear_orig
 
     # 2. Bilinearise the capacity spectrum (find yield point)
     _bilin_map = {
@@ -779,6 +797,11 @@ def compute_performance_point(
         S_ap = float(np.interp(S_dp, S_d_arr, S_a_arr))
         V_p = float(np.interp(S_dp, S_d_arr, base_shear))
         D_p = float(np.interp(S_dp, S_d_arr, control_disp))
+
+    # Re-apply the push-direction sign to the physical outputs so that a
+    # -X / -Y performance point reports a negative V_base and D_roof.
+    V_p *= dir_sign
+    D_p *= dir_sign
 
     T_eq_final = 2.0 * math.pi * math.sqrt(S_dp / max(S_ap, 1e-12))
     mu_final = max(S_dp / max(S_dy, 1e-12), 1.0)

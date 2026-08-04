@@ -12,13 +12,181 @@ for the ascending branch:
 
 ``plot_seismic_spectrum`` renders all three levels (frequent,
 fortification, rare) on a single figure.
+
+The :class:`ResponseSpectrum` dataclass is the canonical carrier for an
+arbitrary T/Sa spectrum (GB 50011, ASCE 7, site-specific hazard curves,
+etc.) that can be injected into pushover analysis — no code is wired to
+a single design code.
 """
 
+from dataclasses import dataclass
 from typing import Any, Optional
 
 import numpy as np
 
 from .utils import cqc_combine as _cqc_combine_modal
+
+
+@dataclass
+class ResponseSpectrum:
+    """Seismic demand spectrum as (T, Sa) ordinate pairs.
+
+    This is the canonical exchange type for seismic demand spectra used
+    by pushover CSM post-processing.  Any code path (GB 50011, ASCE 7,
+    site-specific hazard curve, etc.) can produce one via the factories
+    below, so the pushover path never hardwires a particular design code.
+
+    Attributes
+    ----------
+    T : list of float
+        Period ordinates (s), ascending.
+    Sa : list of float
+        Spectral acceleration ordinates (model units, e.g. m/s²).
+    code : str
+        Optional design-code label (``"GB50011"``, ``"ASCE7-16"``, etc.).
+    description : str
+        Optional free-text note (e.g. ``"Rare, site class II"``).
+    """
+
+    T: list[float]
+    Sa: list[float]
+    code: str = ""
+    description: str = ""
+
+    @classmethod
+    def from_gb50011(
+        cls,
+        alpha_max: float,
+        tg: float,
+        zeta: float = 0.05,
+        g: Optional[float] = None,
+        T_max: float = 6.0,
+        n_pts: int = 200,
+        description: str = "",
+    ) -> "ResponseSpectrum":
+        """Build a GB 50011 elastic spectrum as a :class:`ResponseSpectrum`.
+
+        Uses the *damping-corrected* ascending branch
+        (``0.45 + (η₂ − 0.45)·10·T``) consistent with :func:`_build_spectrum`.
+        The damping-dependent shape factors γ, η₁, η₂ are derived from
+        *zeta* using the GB 50011 §5.1.5 formulas.
+
+        Parameters
+        ----------
+        alpha_max : float
+            Seismic influence coefficient maximum (Table 5.1.4-1).
+        tg : float
+            Characteristic period (s) — site-class dependent (Table 5.1.4-2).
+        zeta : float
+            Damping ratio (default 0.05).
+        g : float, optional
+            Gravitational acceleration (m/s²).  Defaults to ``9.81`` when
+            ``None`` — override with ``g_from_units(model.units)`` to keep
+            the spectrum in the model's unit system.
+        T_max : float
+            Upper period bound (s, default 6.0).
+        n_pts : int
+            Number of ordinates (default 200).
+        description : str
+            Optional label stored on the instance.
+
+        Returns
+        -------
+        ResponseSpectrum
+            The spectrum ordinates.
+        """
+        if g is None:
+            g = 9.81
+
+        gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
+        eta_1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
+        eta_2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))
+
+        T_spec = np.linspace(0.0, T_max, n_pts)
+        Sa_spec = np.array(
+            [
+                0.45 * alpha_max * g
+                if T <= 0.0
+                else (0.45 + (eta_2 - 0.45) * 10.0 * T) * alpha_max * g
+                if T <= 0.1
+                else eta_2 * alpha_max * g
+                if tg >= T
+                else (tg / T) ** gamma * eta_2 * alpha_max * g
+                if 5.0 * tg >= T
+                else (eta_2 * 0.2**gamma - eta_1 * (T - 5.0 * tg)) * alpha_max * g
+                for T in T_spec
+            ]
+        )
+
+        return cls(
+            T=T_spec.tolist(),
+            Sa=Sa_spec.tolist(),
+            code="GB50011",
+            description=description or f"GB 50011 elastic, alpha_max={alpha_max}, tg={tg}",
+        )
+
+    @classmethod
+    def from_arrays(
+        cls,
+        T: list[float],
+        Sa: list[float],
+        *,
+        code: str = "",
+        description: str = "",
+    ) -> "ResponseSpectrum":
+        """Build a :class:`ResponseSpectrum` from explicit T/Sa arrays.
+
+        Use this for non-GB-50011 spectra (ASCE 7, site-specific hazard
+        curves, user-defined).
+
+        Parameters
+        ----------
+        T : list of float
+            Period ordinates (s), ascending.
+        Sa : list of float
+            Spectral acceleration ordinates (model units).
+        code : str
+            Design-code label.
+        description : str
+            Free-text note.
+
+        Returns
+        -------
+        ResponseSpectrum
+            The spectrum ordinates.
+        """
+        return cls(
+            T=list(T),
+            Sa=list(Sa),
+            code=code,
+            description=description,
+        )
+
+    def interpolate(self, T_query: Any) -> np.ndarray:
+        """Interpolate Sa onto *T_query* periods.
+
+        Parameters
+        ----------
+        T_query : array-like
+            Target period values (s).
+
+        Returns
+        -------
+        np.ndarray
+            Interpolated spectral acceleration values.
+        """
+        return np.interp(np.asarray(T_query), np.asarray(self.T), np.asarray(self.Sa))
+
+    def __post_init__(self) -> None:
+        """Validate that T and Sa are equal-length, non-empty lists."""
+        if len(self.T) == 0 or len(self.Sa) == 0:
+            raise ValueError("ResponseSpectrum requires non-empty T and Sa arrays")
+        if len(self.T) != len(self.Sa):
+            raise ValueError(
+                f"T and Sa must be the same length (got {len(self.T)} vs {len(self.Sa)})"
+            )
+        self.T = [float(t) for t in self.T]
+        self.Sa = [float(s) for s in self.Sa]
 
 
 def _gb50011_spectrum(
@@ -41,11 +209,11 @@ def _gb50011_spectrum(
     tg : float
         Characteristic period (s) — Site-class dependent (Table 5.1.4-2).
     gamma : float
-        Descending-branch exponent (default 0.9 for 5 % damping).
+        Descending-branch exponent (default 0.9 for 5 % damping).
     eta1 : float
-        Linear-drop correction factor (default 0.02 for 5 % damping).
+        Linear-drop correction factor (default 0.02 for 5 % damping).
     eta2 : float
-        Damping reduction factor (default 1.0 for 5 % damping).
+        Damping reduction factor (default 1.0 for 5 % damping).
     g : float
         Gravitational acceleration (m/s²).  Default 9.81.
 

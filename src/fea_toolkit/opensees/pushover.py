@@ -6,6 +6,7 @@ from typing import Optional
 
 import numpy as np
 
+from ..spectrum import ResponseSpectrum
 from ..utils import g_from_units
 
 
@@ -23,6 +24,7 @@ def run_pushover_4dir(
     brace_type: str = "truss",
     brace_sections: Optional[list] = None,
     rs_modal_base_shear: Optional[dict[str, list[float]]] = None,
+    spectrum: Optional[ResponseSpectrum] = None,
 ) -> dict:
     """Run pushover in all 4 directions with CSM (two-stage path).
 
@@ -50,6 +52,9 @@ def run_pushover_4dir(
         Seismic influence coefficient (rare event).
     zeta : float
         Damping ratio.
+    spectrum : ResponseSpectrum, optional
+        Pre-computed demand spectrum (T/Sa).  When ``None`` a GB 50011
+        rare-event spectrum is built from *tg* / *alpha_max_rare*.
     verbose : bool
         Print progress.
     brace_type : str
@@ -67,7 +72,6 @@ def run_pushover_4dir(
     """
     from fea_toolkit.model.csm import check_modal_pushover_mode
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
-    from fea_toolkit.spectrum import _gb50011_spectrum
 
     if gravity_patterns is None:
         gravity_patterns = {"DEAD": 1.0, "DEAD SDL": 1.0, "LL": 0.5}
@@ -83,20 +87,22 @@ def run_pushover_4dir(
         "-Y": {"dir": "Y", "disp": -max_disp_val},
     }
 
-    gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
-    eta_1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
-    eta_2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))
-
     # Derive gravity acceleration from the model's unit system.
     g = g_from_units(mesh_model.units)
 
     roof_node = max(mesh_model.nodes.values(), key=lambda n: n.z)
     roof_tag = roof_node.node_tag
 
-    T_spec = np.linspace(0.0, 6.0, 200).tolist()
-    Sa_spec = _gb50011_spectrum(
-        T_spec, alpha_max_rare, tg, gamma=gamma, eta1=eta_1, eta2=eta_2, g=g
-    ).tolist()
+    if spectrum is None:
+        spectrum = ResponseSpectrum.from_gb50011(
+            alpha_max=alpha_max_rare,
+            tg=tg,
+            zeta=zeta,
+            g=g,
+            description="GB 50011 rare fallback",
+        )
+    T_spec = spectrum.T
+    Sa_spec = spectrum.Sa
 
     if brace_type == "truss":
         builder_cfg = {
@@ -199,6 +205,8 @@ def pushover_rc_openseespy(
     config: Optional[dict] = None,
     verbose: bool = False,
     rs_modal_base_shear: Optional[dict[str, list[float]]] = None,
+    spectrum: Optional[ResponseSpectrum] = None,
+    node_mass_overrides: Optional[dict[str, float]] = None,
 ) -> dict:
     """Run RC pushover in one or all 4 directions (OpenSeesPy path).
 
@@ -232,6 +240,9 @@ def pushover_rc_openseespy(
         Seismic influence coefficient (rare event).
     zeta : float
         Damping ratio.
+    spectrum : ResponseSpectrum, optional
+        Pre-computed demand spectrum (T/Sa).  When ``None`` a GB 50011
+        rare-event spectrum is built from *tg* / *alpha_max_rare*.
     config : dict, optional
         RC builder config overrides merged over
         ``_PUSHOVER_RC_DEFAULTS`` — e.g. ``beam_integration``,
@@ -241,6 +252,10 @@ def pushover_rc_openseespy(
     rs_modal_base_shear : dict, optional
         Per-direction RS base shear for mode validation
         ``{"X": [...], "Y": [...]}``.
+    node_mass_overrides : dict, optional
+        Mapping of node ID (SAP string label) → mass scale factor.
+        Applied after computed seismic masses are assigned, allowing
+        per-storey masonry/mass adjustments.
 
     Returns
     -------
@@ -249,7 +264,6 @@ def pushover_rc_openseespy(
     """
     from fea_toolkit.model.csm import check_modal_pushover_mode
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
-    from fea_toolkit.spectrum import _gb50011_spectrum
 
     from ..analysis.base import _PUSHOVER_RC_DEFAULTS
 
@@ -274,20 +288,22 @@ def pushover_rc_openseespy(
         "-Y": {"dir": "Y", "disp": -max_disp},
     }
 
-    gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
-    eta_1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
-    eta_2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))
-
     # Derive gravity acceleration from the model's unit system.
     g = g_from_units(mesh_model.units)
 
     roof_node = max(mesh_model.nodes.values(), key=lambda n: n.z)
     roof_tag = roof_node.node_tag
 
-    T_spec = np.linspace(0.0, 6.0, 200).tolist()
-    Sa_spec = _gb50011_spectrum(
-        T_spec, alpha_max_rare, tg, gamma=gamma, eta1=eta_1, eta2=eta_2, g=g
-    ).tolist()
+    if spectrum is None:
+        spectrum = ResponseSpectrum.from_gb50011(
+            alpha_max=alpha_max_rare,
+            tg=tg,
+            zeta=zeta,
+            g=g,
+            description="GB 50011 rare fallback",
+        )
+    T_spec = spectrum.T
+    Sa_spec = spectrum.Sa
 
     # RC-specific builder config: framework defaults + user overrides.
     builder_cfg = dict(_PUSHOVER_RC_DEFAULTS)
@@ -324,6 +340,7 @@ def pushover_rc_openseespy(
             mode_shapes=shapes if lateral_load_type == "mode1" else None,
             mode_index=best_mode_idx,
             print_progress=False,
+            node_mass_overrides=node_mass_overrides,
         )
 
         adrs = ab.pushover_to_adrs(results, modal, shapes, direction=cfg["dir"])

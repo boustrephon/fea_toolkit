@@ -4325,6 +4325,7 @@ class AnalysisBuilder:
         fundamental_period: Optional[float] = None,
         mode_shapes: Optional[dict] = None,
         mode_index: int = 0,
+        node_mass_overrides: Optional[dict[str, float]] = None,
         print_progress: bool = True,
     ) -> dict[str, Any]:
         """Run a displacement‑controlled pushover analysis.
@@ -4370,6 +4371,14 @@ class AnalysisBuilder:
                 from :meth:`extract_mode_shapes`; required for
                 ``'mode1'``.
             mode_index: Mode index (0‑based) for ``'mode1'``.
+            node_mass_overrides: Optional dict mapping **node ID** →
+                mass scale factor (multiplier) applied after seismic
+                masses are computed.  Enables per‑storey masonry mass
+                corrections (``factor = 1.0 + m_storey_extra/m_storey``)
+                that change the mass distribution rather than a single
+                global scale.  Node IDs match
+                :attr:`node_masses` keys (string SAP IDs), not
+                OpenSees tags.
             print_progress: Print a progress line per step.
 
         Returns:
@@ -4458,6 +4467,28 @@ class AnalysisBuilder:
             if self.config.get("verbose"):
                 print("  compute_seismic_masses failed, using fallback masses")
             self._compute_fallback_masses()
+
+        # ── Apply per-node mass overrides (masonry/storey scaling) ─
+        if node_mass_overrides:
+            for nid, factor in node_mass_overrides.items():
+                if nid not in self.node_masses or factor <= 0:
+                    continue
+                scaled = self.node_masses[nid] * factor
+                self.node_masses[nid] = scaled
+                node = self.mesh_model.nodes.get(nid)
+                if node is None:
+                    continue
+                # Re-issue: ops.mass() overwrites the previous value,
+                # keeping the OpenSees model consistent with the scaled
+                # Python-side masses (affects dynamic analysis + lateral
+                # load shapes).
+                with contextlib.suppress(Exception):
+                    ops.mass(node.node_tag, scaled, scaled, scaled, 0.0, 0.0, 0.0)
+            if self.config.get("verbose") or print_progress:
+                print(
+                    f"  Applied node_mass_overrides to "
+                    f"{len([f for f in node_mass_overrides.values() if f > 0])} node(s)"
+                )
 
         # ── Gravity analysis ─────────────────────────────────────
         # Create loads directly (domain was just rebuilt by
