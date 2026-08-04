@@ -1,0 +1,77 @@
+---
+title: "Nonlinear Dynamic (Time-History) Analysis"
+description: "Ground-motion-driven transient analysis via Tcl export and Xara/OpenSeesRT, with Rayleigh damping from a preceding modal analysis."
+status: "complete"
+tags: [analysis-type, nonlinear, dynamic, time-history, ground-motion, tcl, xara]
+category: [analysis-types]
+related: [modal_analysis.md, tcl_export.md, xara_tcl_runtime_guide.md, analysis.md]
+---
+
+# Nonlinear Dynamic (Time-History) Analysis
+
+The :class:`~fea_toolkit.analysis.nonlinear_dynamic.NonlinearDynamicAnalysis`
+class runs a ground-motion-driven transient analysis through the **Tcl export +
+Xara/OpenSeesRT** path. It requires a preceding
+:class:`~fea_toolkit.analysis.modal.ModalAnalysis` to supply periods for
+Rayleigh damping.
+
+## Usage
+
+```python
+from fea_toolkit.analysis import AnalysisManager, ModalAnalysis, NonlinearDynamicAnalysis
+
+manager = AnalysisManager(mesh_model)
+manager.add(ModalAnalysis(mesh_model, num_modes=6))
+manager.add(
+    NonlinearDynamicAnalysis(
+        mesh_model,
+        ground_motion_file="gm_accel.txt",
+        dt=0.005,
+        num_steps=1000,
+        direction="X",
+        damping_ratio=0.05,
+    )
+)
+result = manager.run_all()["NonlinearDynamicAnalysis"]
+```
+
+## Parameters
+
+| Parameter | Default | Description |
+|---|---|---|
+| `ground_motion_file` | required | Path to acceleration record - one value (m/s2) per line, no header |
+| `dt` | `0.005` | Time step of the record (s) |
+| `num_steps` | `1000` | Number of analysis steps |
+| `direction` | `"X"` | Excitation direction (`"X"`, `"Y"`, `"Z"`) |
+| `damping_ratio` | `0.05` | Rayleigh damping ratio |
+| `modal_result` | - | Injected by `AnalysisManager` from the preceding `ModalAnalysis` |
+
+## Result keys
+
+| Key | Type | Description |
+|---|---|---|
+| `times` | `ndarray` | Time vector |
+| `displacements` | `ndarray` | Nodal displacement time histories (from recorder) |
+| `envelope` | `ndarray` | Envelope displacement output (if recorded) |
+| `peak_drift` | `float` | Max absolute displacement across nodes |
+| `converged_steps` | `int` | Steps converged by the solver |
+| `gm_file` | `str` | Original ground motion path |
+| `direction` | `str` | Excitation direction |
+| `output_raw` | `str` | Raw XaraTclRunner output |
+
+On a non-zero runner exit status the result is returned with `converged_steps=0`,
+`times=[]`, and an `error` entry in `metadata`.
+
+## How it works
+
+1. Gravity loads are derived from sections/materials via `mesh_model_to_gravity_loads()`.
+2. Rayleigh damping periods come from the preceding modal analysis (first and last mode; single-mode and fallback cases are handled).
+3. The model is exported to Tcl via `export_mesh_model_to_tcl()` with `dynamic_time_history_tcl()` appended.
+4. Execution uses `XaraTclRunner`.
+5. Output files (`dyn_disp.out`, `dyn_env_disp.out`) are parsed; `peak_drift` is derived from the displacement recorder.
+
+## Notes
+
+- Requires **Xara/OpenSeesRT** for Tcl execution - see [Xara/OpenSeesRT Tcl Runtime Guide](xara_tcl_runtime_guide.md).
+- Composed via `AnalysisManager` for dependency injection; can also run standalone with an explicit `modal_result`.
+- `config` overrides are applied on top of class defaults, with `create_fiber_sections=True` forced for nonlinear material response.

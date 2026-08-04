@@ -1,3 +1,10 @@
+---
+title: "Linting Fix Plan"
+description: "Pyright error baseline and phased fix strategy for src/fea_toolkit (reference for cleanup work)."
+status: "draft"
+tags: [planning, linting, pyright, cleanup]
+category: [planning]
+---
 # Linting Fix Plan — Pyright Errors (Jan 2026)
 
 > Generated from a full pyright run on `src/fea_toolkit/` on 2026-01-08.

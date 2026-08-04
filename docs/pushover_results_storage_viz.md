@@ -1,3 +1,11 @@
+---
+title: "Pushover Results Storage & Nonlinear Visualization"
+description: "Implementation plan and status for per-element pushover result recording (frame end forces, shell stress resultants, plasticity indicators) and nonlinear visualization."
+status: "partial"
+tags: [pushover, results, storage, visualization, npz, planning]
+category: [planning]
+related: [results_schema.md, pushover_analysis.md, viewer.md]
+---
 # Pushover Results Storage & Nonlinear Visualization — Implementation Plan
 
 > **Status**: Phases 1–4 implemented; Phases 5+ pending
@@ -338,7 +346,7 @@ Two private helper functions generate PyVista colour legends for pushover visual
 
 **`_add_hinge_color_legend()`** — adds a scalar bar for the frame hinge
 demand-relative ratio scale.  The scalar-bar title is
-``"Demand/Capacity Ratio (M/M_y)"`` — the ratios plotted are the
+``"Relative Moment Demand (peak-normalized)"`` — the ratios plotted are the
 demand-relative hinge ratios (moment demand normalised by the observed
 peak capacity), **not** a physical yield-capacity ratio:
 - **Colour 1** (ratio < 0.5) — low demand (cmap position 0.0)
