@@ -68,9 +68,11 @@ nav:
       - Analysis Workflow: workflow.md
       - Builder Reference: builder_reference.md
       - Layered Analysis Workflow: layered_analysis_workflow.md
+      - Typed Analysis Orchestration: analysis.md
   - Analysis Types:
       - Modal Analysis: modal_analysis.md
       - Pushover Analysis: pushover_analysis.md
+      - Nonlinear Dynamic Analysis: nonlinear_dynamic_analysis.md
       - Storey Response: storey_response.md
       - Report Generation: report_generation.md
   - Model Features:

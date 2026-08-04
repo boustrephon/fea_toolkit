@@ -88,7 +88,9 @@ import fea_toolkit
 │   │   ├── sections.py       # SectionLibrary with unit conversion (mm/in)
 │   │   └── geometry.py       # SpatialGrid, point_on_segment, trapezoidal_force_split, split_elements (joint splitting + load redistribution)
 │   ├── opensees/
-│   │   └── builder.py        # OpenSeesBuilder: creates nodes, restraints, sections, splits elements, builds elements, applies loads (using relative positions), runs linear static analysis
+│   │   ├── preprocessor.py   # Preprocessor: topology mutations → MeshModel
+│   │   ├── analysis_builder.py  # AnalysisBuilder: OpenSees domain + analysis execution
+│   │   └── builder.py        # Tcl export functions (export_model_to_tcl, etc.)
 │   └── rhino/
 │       ├── __init__.py       # Public API (RhinoImporter)
 │       ├── colors.py         # SAP2000 colour conversion
@@ -110,7 +112,8 @@ import fea_toolkit
 | **`SAPModelData`** | ✅ Complete | Contains all model data with mutable defaults via `field(default_factory=...)`; includes `units` dict with default `{'F':'N','L':'m','T':'C'}`. |
 | **`SectionLibrary`** | ✅ Complete | Loads section catalogue pickle; converts units to match model (`mm` or `in`); enriches `Section` objects with `Z33`, `Z22`, dimensions, etc. |
 | **`geometry.split_elements`** | ✅ Complete | Splits elements at joints when `AtJoints=True`; marks parent as `inactive`; creates child elements with new numeric tags; redistributes distributed loads using `trapezoidal_force_split`; stores relative positions (`rdist_a`, `rdist_b`) in child loads. |
-| **`OpenSeesBuilder`** | ✅ Complete | Builds OpenSees model: nodes, restraints, elastic sections, elements (skips inactive), loads (patterns, joint loads, distributed loads with N‑segment decomposition), linear static analysis; returns nodal displacements, reactions, load totals.
+| **`Preprocessor`** | ✅ Complete | Topology-only mutations: element splitting, auto-meshing, end offsets, edge constraints — produces a frozen `MeshModel`. |
+| **`AnalysisBuilder`** | ✅ Complete | Reads the frozen `MeshModel`, builds the OpenSees domain (nodes, restraints, elastic/nonlinear sections, elements, loads) and runs static/modal/RS/pushover analyses. |
 | **Modal Analysis** | ✅ Complete | `run_modal_analysis()` — eigenvalue extraction (`ops.eigen`), modal properties table with frequencies, periods, participating masses & ratios.
 | **Response Spectrum** | ✅ Complete | `run_response_spectrum_analysis()` — mode‑by‑mode RS analysis using GB50011 (or user‑supplied) spectrum, CQC/SRSS combination, base shear + moment.
 | **Element‑Level RS Forces** | ✅ Complete | `extract_element_rs_forces()` — CQC‑combined moments/shears per element, sorted by elevation.
@@ -169,7 +172,7 @@ import fea_toolkit
 
 ## Pipeline Overview
 
-A typical analysis flows through four stages.  Each stage produces or
+A typical analysis flows through five stages.  Each stage produces or
 consumes a well-defined data structure, making it easy to pick up at
 any point (e.g. load a cached NPZ and jump straight to visualisation).
 
@@ -182,7 +185,12 @@ SAP2000 .s2k / .json
        │  └──────────────────────┘
        │
        ▼  ┌──────────────────────┐
-       │  │  OpenSeesBuilder     │  Stage 2 — Analysis
+       │  │  Preprocessor        │  Stage 2 — Preprocess
+       │  │  → MeshModel         │  (frozen topology)
+       │  └──────────────────────┘
+       │
+       ▼  ┌──────────────────────┐
+       │  │  AnalysisBuilder     │  Stage 3 — Analysis
        │  │  → static results    │
        │  │  → modal results     │
        │  │  → RS results        │
@@ -190,12 +198,12 @@ SAP2000 .s2k / .json
        │  └──────────────────────┘
        │
        ▼  ┌──────────────────────┐
-       │  │  write_results_npz() │  Stage 3 — Storage
+       │  │  write_results_npz() │  Stage 4 — Storage
        │  │  → results.npz       │  (unified NPZ schema)
        │  └──────────────────────┘
        │
        ├──┬──────────────────────┐
-       │  │  read_results_npz()  │  Stage 4 — Visualisation
+       │  │  read_results_npz()  │  Stage 5 — Visualisation
        │  │  → npz_to_pyvista_*  │     (PyVista 3D plots)
        │  │  → npz_to_rhino_*    │     (Rhino colouring)
        │  │  → plot_npz_*        │     (force diagrams, moments)
@@ -213,11 +221,12 @@ SAP2000 .s2k / .json
 | Stage | Data structure | Location |
 |---|---|---|
 | 1 — Parsed model | `SAPModelData` (dataclass tree) | `fea_toolkit.model.sap_data` |
-| 2 — Analysis output | `dict` with `nodal_displacements`, `periods`, etc. | Returned by `OpenSeesBuilder` methods |
-| 3 — NPZ archive | `Dict[str, np.ndarray]` (keyed by schema) | `fea_toolkit.io.results_schema` |
-| 4 — Visualisation | `pyvista.Plotter` / Rhino objects | `fea_toolkit.plotting` / `fea_toolkit.rhino` |
+| 2 — Preprocessed topology | `MeshModel` (frozen) | `fea_toolkit.model.mesh_model` |
+| 3 — Analysis output | `dict` with `nodal_displacements`, `periods`, etc. | Returned by `AnalysisBuilder` methods |
+| 4 — NPZ archive | `Dict[str, np.ndarray]` (keyed by schema) | `fea_toolkit.io.results_schema` |
+| 5 — Visualisation | `pyvista.Plotter` / Rhino objects | `fea_toolkit.plotting` / `fea_toolkit.rhino` |
 
-The unified NPZ schema (Stage 3) is the **canonical exchange format** —
+The unified NPZ schema (Stage 4) is the **canonical exchange format** —
 it is what the visualisers consume.  You can save it once and reuse
 for PyVista animations, Rhino colouring, and report plots without
 re-running the analysis.
@@ -225,7 +234,8 @@ re-running the analysis.
 ```python
 # Minimal end-to-end pipeline
 from fea_toolkit.io.s2k_parser import SAP2000Parser
-from fea_toolkit.opensees.builder import OpenSeesBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.io.npz_writer import write_results_npz
 from fea_toolkit.io.npz_reader import read_results_npz, npz_to_pyvista_frame_mesh
 from fea_toolkit.plotting.viz import plot_deformed_3d, plot_npz_force_diagram
@@ -233,19 +243,21 @@ from fea_toolkit.plotting.viz import plot_deformed_3d, plot_npz_force_diagram
 # 1. Parse
 md = SAP2000Parser("model.s2k").parse().get_model_data()
 
-# 2. Analyse — run each static case separately
-b = OpenSeesBuilder(md, {"element_type": "elasticBeamColumn"})
-b.build()
+# 2. Preprocess — frozen MeshModel topology
+mm = preprocess_model(md, {"element_type": "elasticBeamColumn"})
+
+# 3. Analyse — run each static case separately
+b = AnalysisBuilder(mm, {})
+b.build_domain()
 static_dead = b.run_static_analysis(pattern_scales={"DEAD": 1.0})
-b.wipe()
-b.build()
+b.build_domain()
 static_wind = b.run_static_analysis(pattern_scales={"WIND": 1.0})
 
-# 3. Save to NPZ as case-keyed mapping
+# 4. Save to NPZ as case-keyed mapping
 cases = {"DEAD": static_dead, "WIND": static_wind}
 write_results_npz("results.npz", md, static_results=cases)
 
-# 4. Visualise from NPZ
+# 5. Visualise from NPZ
 data = read_results_npz("results.npz")
 plot_npz_force_diagram(data, quantity="fx_i", case="DEAD")  # axial force diagram
 ```
@@ -253,7 +265,7 @@ plot_npz_force_diagram(data, quantity="fx_i", case="DEAD")  # axial force diagra
 See also:
 - `local/admin_linear.py` — full end‑to‑end workflow (parse → mesh → split →
   static → modal → RS → plots → animate)
-- `src/fea_toolkit/io/README.md` — NPZ schema reference
+- `src/fea_toolkit/io/README.md` — NPZ schema reference (also indexed from [`docs/README.md`](docs/README.md))
 
 ## Available Workflows
 
@@ -272,7 +284,7 @@ parsing through analysis to visualisation and reporting.
 
 | Workflow | Entry point | What it does |
 |---|---|---|
-| **Build OpenSees model** | `OpenSeesBuilder.build()` | Construct nodes, restraints, materials, sections, elements, loads |
+| **Build OpenSees model** | `preprocess_model()` → `AnalysisBuilder(mm, cfg).build_domain()` | Preprocess topology into a frozen `MeshModel`, then construct nodes, restraints, materials, sections, elements, loads |
 | **Build with shells** | `build(create_shells=True)` | Also create `ShellMITC4` for area elements (with optional loads-only selection) |
 | **Split elements at joints** | `build()` with `split_elements=True` config | Subdivide frame elements at intermediate nodes (SAP2000 auto-mesh) |
 | **Apply frame end offsets** | `build()` with `frame_end_offsets` data | Rigid zones at joints via stiff link elements |
@@ -515,13 +527,14 @@ All formulas are capped at 0.33L per ASCE 41.
 
 **Fiber pushover (steel)**::
 
-    builder = OpenSeesBuilder(md, {
+    mm = preprocess_model(md, {'split_elements': True})
+    builder = AnalysisBuilder(mm, {
         'create_fiber_sections': True,
         'element_type': 'forceBeamColumn',
         'hinge_model': 'fiber',
     })
-    builder.build()
-    builder.compute_seismic_masses(g=9.81)
+    builder.build_domain()
+    builder.compute_seismic_masses()
     modal = builder.run_modal_analysis(num_modes=3)
     shapes = builder.extract_mode_shapes(3)
     results = builder.run_pushover_analysis(
@@ -531,7 +544,8 @@ All formulas are capped at 0.33L per ASCE 41.
 
 **Lumped plasticity pushover (steel or RC)**::
 
-    builder = OpenSeesBuilder(md, {
+    mm = preprocess_model(md, {'split_elements': True})
+    builder = AnalysisBuilder(mm, {
         'use_elastic_sections': True,
         'hinge_model': 'lumped',
     })
@@ -541,11 +555,12 @@ All formulas are capped at 0.33L per ASCE 41.
 ``ConcreteRectangularSection`` or ``ConcreteCircularSection`` for
 ``Concrete Rectangular`` / ``Concrete Circular`` SAP2000 shapes::
 
-    builder = OpenSeesBuilder(md, {
+    mm = preprocess_model(md, {'split_elements': True})
+    builder = AnalysisBuilder(mm, {
         'create_fiber_sections': True,
         'element_type': 'forceBeamColumn',
     })
-    builder.build()  # confined/unconfined/steel materials created automatically
+    builder.build_domain()  # confined/unconfined/steel materials created automatically
 
 ---
 
@@ -668,7 +683,7 @@ all other area loads are ignored.
 3. **Load Combinations and Analysis Types**  
    - ~~`MassSource`~~ ✅ Parsed by `_get_mass_sources()` and stored in `SAPModelData.mass_sources`.  
    - `LoadCase`, `LoadCombination` dataclasses defined in `sap_data.py` — parsing of `LOAD CASES` and `LOAD COMBINATIONS` tables still needed.  
-   - In `OpenSeesBuilder`, allow the user to select which load cases/combinations to run with combination factors (e.g., `1.2 DL + 1.6 LL`).
+   - In `AnalysisBuilder`, allow the user to select which load cases/combinations to run with combination factors (e.g., `1.2 DL + 1.6 LL`).
 
 4. **Advanced Analyses**  
    - ~~Modal Analysis~~ ✅ `run_modal_analysis()` implemented — eigenvalue extraction with modal properties table.  
@@ -685,7 +700,7 @@ all other area loads are ignored.
 
 5. **Joint Modeling** (for concrete frames)  
    - Extend parser to recognise joint elements (if present in SAP2000).  
-   - Implement `Joint2D` and `beamColumnJoint` elements in `OpenSeesBuilder`.
+   - Implement `Joint2D` and `beamColumnJoint` elements in `AnalysisBuilder`.
 
 6. **Brace gusset plates / joint offsets**  
    - Model gusset plate flexibility as rotational springs at brace ends.  
@@ -727,7 +742,7 @@ cross‑reference section.
     - `test_parser.py` covers basic parsing; `test_model.py` is yet to be populated.  
     - Add tests for `split_elements` with trapezoidal loads.  
     - Add unit tests for `SectionLibrary`, `SAPModelData` dataclasses, and geometry utilities.  
-    - Add integration tests for `OpenSeesBuilder` using small test models.
+    - Add integration tests for the two-stage pipeline (`Preprocessor` → `AnalysisBuilder`) using small test models.
 
 #### Low Priority
 
@@ -883,11 +898,12 @@ The following items are the highest-impact improvements identified during a code
 4. **Create `fea_toolkit/plotting/report.py`**
    Move `plot_pushover_curves()`, `plot_modal_participation()`, `plot_rs_modal_analysis()`, and `plot_csm_4panel()` from `pumphouse_report.py` into the plotting subpackage alongside the existing `viz.py`.
 
-5. **Split `builder.py` (3,306 lines)**
-   `OpenSeesBuilder` is a single class handling model construction, element creation, loads, pushover, modal analysis, response spectrum, CQC, mass computation, ADRS conversion, and CSM performance points. Extract analysis methods into focused modules:
-   - `opensees/analysis.py` — `run_static_analysis`, `run_pushover_analysis`, `run_modal_analysis`, `run_response_spectrum_analysis`, `extract_element_rs_forces`, etc.
-   - `opensees/csm.py` — `pushover_to_adrs`, `compute_performance_point`
-   - `opensees/builder.py` — keep model construction (`build`, `_create_nodes`, `_create_sections`, `_create_elements`, `_create_loads`, `compute_seismic_masses`)
+5. **Split `builder.py`** — ✅ Done: replaced by the two-stage pipeline.
+   Topology mutation lives in `opensees/preprocessor.py` (produces a frozen `MeshModel`);
+   OpenSees domain construction + analysis execution live in `opensees/analysis_builder.py`
+   (`build_domain`, `run_static_analysis`, `run_modal_analysis`, `run_pushover_analysis`,
+   `pushover_to_adrs`, `compute_performance_point`, `compute_seismic_masses`, etc.);
+   `opensees/builder.py` now only exports standalone Tcl-export functions.
 
 6. **Add unit tests**
    Critical paths with zero coverage: `compute_seismic_masses()` area-element paths, truss brace pushover (Approach B), response spectrum CQC combination, ADRS conversion, CSM performance point iteration, and all extracted `spectrum.py` / `io/report.py` functions.
