@@ -925,20 +925,18 @@ class Preprocessor:
             if not getattr(elem, "inactive", False):
                 new_frames[eid] = elem
                 new_assigns[eid] = frame_assignments.get(eid, "")
-        _new_load_ids = {ld.frame_id for ld in new_loads}
+        # Append every source load whose frame was not split.  Multiple
+        # load records for the same unsplit frame (different patterns,
+        # directions, or spans) are all preserved — no frame_id-based
+        # deduplication.
         for ld in dist_loads:
             if ld.frame_id in _split_frame_ids:
                 continue  # already redistributed to children
-            if ld.frame_id not in _new_load_ids:
-                _new_load_ids.add(ld.frame_id)
-                new_loads.append(ld)
-        _new_edge_load_ids = {ld.frame_id for ld in new_edge_loads}
+            new_loads.append(ld)
         for ld in _edge_loads_in:
             if ld.frame_id in _split_frame_ids:
                 continue  # already redistributed to children
-            if ld.frame_id not in _new_edge_load_ids:
-                _new_edge_load_ids.add(ld.frame_id)
-                new_edge_loads.append(ld)
+            new_edge_loads.append(ld)
 
         _mesh_ids = len([n for n in sub_nodes if "_mesh_" in n])
         print(

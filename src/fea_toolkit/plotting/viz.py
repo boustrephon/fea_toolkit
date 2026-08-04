@@ -458,7 +458,7 @@ def _ratio_to_color(
 
 def _add_hinge_color_legend(
     plotter,
-    title: str = "Demand/Capacity Ratio (M/M_y)",
+    title: str = "Relative Moment Demand (peak-normalized)",
     position_x: float = 0.82,
     position_y: float = 0.1,
     width: float = 0.06,
@@ -928,7 +928,9 @@ def plot_plastic_hinge_formation(
 
     # ── Add colour legend ────────────────────────────────────────
     if own_plotter and hinge_locs_per_step and hinge_locs_per_step[0]:
-        _add_hinge_color_legend(plotter, title="Demand/Capacity Ratio (M/M_y)", cmap_name=colormap)
+        _add_hinge_color_legend(
+            plotter, title="Relative Moment Demand (peak-normalized)", cmap_name=colormap
+        )
 
     # ── Finalise ─────────────────────────────────────────────────
     if own_plotter:
@@ -2140,7 +2142,10 @@ def animate_pushover_deformation(
     # ── Add colour legends ───────────────────────────────────────
     if show_frames and frame_segs_per_step and frame_segs_per_step[0]:
         _add_hinge_color_legend(
-            plotter, title="Demand/Capacity Ratio (M/M_y)", position_x=0.82, position_y=0.1
+            plotter,
+            title="Relative Moment Demand (peak-normalized)",
+            position_x=0.82,
+            position_y=0.1,
         )
     if show_shells and all_shell_ids and shell_verts:
         _add_shell_color_legend(plotter, title="Damage Index", position_x=0.82, position_y=0.1)

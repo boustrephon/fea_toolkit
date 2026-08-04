@@ -132,17 +132,19 @@ class ConfinementData:
         # Validate eps_su
         if self.eps_su <= 0:
             raise ValueError(f"eps_su must be > 0, got {self.eps_su}")
-        # For spiral, require compatible core dimensions
-        if self.tie_config == "spiral" and (self.core_bc <= 0 or self.core_dc <= 0):
-            raise ValueError(
-                f"Spiral tie_config requires positive core_bc and core_dc; "
-                f"got core_bc={self.core_bc}, core_dc={self.core_dc}"
-            )
         # Derive core dimensions from overall + cover if not given directly
         if self.core_bc <= 0 and self.overall_b > 0:
             self.core_bc = self.overall_b - 2 * self.cover - self.tie_diameter
         if self.core_dc <= 0 and self.overall_h > 0:
             self.core_dc = self.overall_h - 2 * self.cover - self.tie_diameter
+        # For spiral, require compatible core dimensions — validate AFTER
+        # derivation so omitted dimensions resolved from overall_b/overall_h
+        # are checked against the final derived values.
+        if self.tie_config == "spiral" and (self.core_bc <= 0 or self.core_dc <= 0):
+            raise ValueError(
+                f"Spiral tie_config requires positive core_bc and core_dc; "
+                f"got core_bc={self.core_bc}, core_dc={self.core_dc}"
+            )
         # Validate derived dimensions
         if self.core_bc <= 0:
             raise ValueError(
