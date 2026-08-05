@@ -701,19 +701,28 @@ def _add_animation_timer(
         _n_pos = 1
         _has_varargs = True
 
+    _vtk_step = [0]  # mutable closure — timer events carry no step count
+
     def _adapted(*args: Any) -> Any:
         """Forward the right number of positional args to the user callback.
 
         PyVista's ``add_timer_event`` invokes the callback with
         ``(step, plotter)`` on v0.44+ and ``(step,)`` (or nothing) on
-        older versions.  ``args`` (if any) are step-count values, so
-        truncating to the callback's arity is always safe.
+        older versions.  Extra args beyond the callback's arity are
+        dropped.  If the timer passes **fewer** args than the callback
+        expects (notably a legacy no-argument invocation), trailing
+        gaps are padded with ``None``, and a missing step count is
+        backed by the same internal counter the VTK path uses.
         """
-        if _has_varargs or len(args) <= _n_pos:
+        if _has_varargs or len(args) >= _n_pos:
+            if not _has_varargs and len(args) > _n_pos:
+                return callback(*args[:_n_pos])
             return callback(*args)
-        return callback(*args[:_n_pos])
-
-    _vtk_step = [0]  # mutable closure — VTK TimerEvent has no step count
+        if not args:
+            # Legacy timer passed no step — use the internal counter.
+            _vtk_step[0] += 1
+            args = (_vtk_step[0],)
+        return callback(*args, *[None] * (_n_pos - len(args)))
 
     def _vtk_adapted(*_args: Any) -> Any:
         """VTK ``TimerEvent`` observer — forwards ``(caller, event)``.
@@ -724,11 +733,15 @@ def _add_animation_timer(
         (e.g. ``plot_mode_animation``'s ``callback(step)``, which computes
         a sine phase), an internal incrementing counter is supplied so the
         oscillation actually progresses; zero-argument callbacks (e.g. the
-        pushover ``_timer_callback``) are invoked with no arguments.
+        pushover ``_timer_callback``) are invoked with no arguments, and
+        two-argument callbacks ``callback(step, plotter)`` receive ``None``
+        for the plotter since no plotter object exists on this path.
         """
         if _n_pos >= 1:
+            # Supply the incrementing counter (plus ``None`` placeholders
+            # for any additional expected args, e.g. the plotter).
             _vtk_step[0] += 1
-            return callback(_vtk_step[0])
+            return callback(_vtk_step[0], *([None] * (_n_pos - 1)))
         return callback()
 
     # Strategy 1: modern PyVista with named kwargs

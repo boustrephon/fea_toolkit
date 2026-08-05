@@ -1931,6 +1931,21 @@ class TestAnimationTimerCallbackArity:
         self._invoke_registered_callback(fp, "pyvista_no_interval", (2,))
         assert calls == [2]
 
+    def test_one_arg_callback_legacy_no_args(self):
+        """Very old PyVista may invoke the callback with **no** args — a
+        ``callback(step)`` must still receive an internal step count."""
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        calls = []
+
+        def callback(step):
+            calls.append(step)
+
+        fp = self._make_fake_plotter("pyvista_no_interval")
+        _add_animation_timer(fp, callback, max_steps=10, interval_ms=17)
+        self._invoke_registered_callback(fp, "pyvista_no_interval", ())
+        assert calls == [1], f"Expected internal step counter, got {calls}"
+
     def test_vtk_fallback_supplies_incrementing_step(self):
         """VTK TimerEvent passes (caller, event) with no step count — a
         ``callback(step)`` must receive an internal incrementing counter so
@@ -1976,3 +1991,20 @@ class TestAnimationTimerCallbackArity:
         assert fp.observer_added
         assert fp.timer_created
         assert fp.interval_ms == 33
+
+    def test_two_arg_callback_vtk_fallback(self):
+        """A ``callback(step, plotter)`` on the VTK fallback receives the
+        internal step count plus ``None`` for the missing plotter."""
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        received = []
+
+        def callback(step, plotter):
+            received.append((step, plotter))
+            return step
+
+        fp = self._make_fake_plotter("vtek")
+        _add_animation_timer(fp, callback, max_steps=10, interval_ms=17)
+        self._invoke_registered_callback(fp, "vtek", ("caller", "TimerEvent"))
+        self._invoke_registered_callback(fp, "vtek", ("caller", "TimerEvent"))
+        assert received == [(1, None), (2, None)], f"Unexpected args: {received}"
