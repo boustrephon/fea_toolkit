@@ -141,3 +141,52 @@ src/fea_toolkit/plotting/viz.py:
   for ResponseSpectrum (6 cases).  Remaining green suite documented above.
 - **Conclusion**: this batch is ready to commit once the full suite is
   re-run and the csm.py WIP diff is folded in deliberately.
+
+
+## CURRENT CONCLUSIONS — 2026-05-08 (Session G)
+
+### H. Wall tau/tau_cap DCR outliers = genuine demand (extraction verified)
+- Both extract paths query `ops.eleResponse(tag, "section", 1, "forces")` — true
+  per-unit-width resultants for ShellNLDKGQ + LayeredShell.
+- Controlled probe (`local/probe_layered_shear_correct.py`), exact admin
+  5-layer stack, clean pure shear (ux=g0, uy=0): Nxy = sum(Gi*ti)*g0 exactly
+  (ratio 1.000000); elastic-section reference also 1.000000.  Early "2.000x"
+  was a probe artifact (prescribing ux=gy AND uy=gx doubles engineering shear).
+- tau/tau_cap up to 2.517 reflect real computed in-plane shear demand at PP;
+  follow-up is engineering action (capacity/layout/material), not a code fix.
+- New regression: `test_record_step_layered_shell_shear_resultant` in
+  tests/test_layered_shell.py locks the 5-layer composite-shear resultant.
+
+- **Sectional-average note (addendum)**: local max Nxy exceeds same-row section
+  avg 1.32-2.64x (pX 3838 vs 1457, nX 3826 vs 2781, pY 3814 vs 2724,
+  nY 3828 vs 2900 kN/m).  GB 50010 tau_cap is calibrated on sectional-average
+  shear V/(b*h0); a design-grade wall check should average Nxy per storey
+  section before /t.  Element-peak basis is conservative by ~this factor.
+
+### I. Parent-row sectional-average wall DCR — implemented (Phase A, local)
+- `admin_pushover_checks_v8.py` now supports the sectional-average wall basis:
+  `WALL_AVERAGE_BY_PARENT_ROW = True` groups all ``{parent}_sub_{row}_{col}``
+  sub-elements and averages Nxy/Ny over each ``(parent, row)`` band before
+  computing tau/sigma (see `group_shell_by_parent_row()`).  Non-matching
+  elements fall back to being checked alone under ``(id, "?")``.
+- CSV output: ``*_walls_by_section.csv`` with ``{parent}_section_{row}`` IDs
+  and an `n_subs` column.  Element-peak mode (original) preserved via the
+  toggle.
+- Cross-checked against raw NPZ at the PP step (pX D_roof → step 5):
+  `1_section_2` avg_Nxy = 921.552 kN/m → tau = 6143.68 kPa, avg_Ny =
+  -306.532 → sigma = 2043.545 kPa — exact match to CSV output.
+- Direction summary at PP (sectional-average, tau_cap = 4231.17 kPa):
+  - pX: worst 1_section_2 τ/τcap = 1.452; element-peak worst was 1.673
+  - pY: worst 4_section_0 τ/τcap = 1.417
+  - nY: worst 2_section_0 τ/τcap = 1.677
+  - nX: (from script run) several sections still fail
+- Even on the sectional-average basis the lowest storey bands fail
+  (τ/τcap ≈ 1.3-1.7) — the demand is genuine, concentrated at the wall
+  base.  Engineering actions: wall-section thickening / increased web
+  shear reinforcement (rho_sh) / alternative layout.
+- **Next (Phase B, toolkit)**: generalise the grouping into
+  `src/fea_toolkit/model/storey_response.py` as
+  `group_shell_forces_by_section(shell_sap_ids, shell_parent_sap_id,
+  shell_Nxy, shell_Ny, step_idx)` using the NPZ `shell_parent_sap_id`
+  array (not naming-convention parsing), with a unit test in
+  `tests/test_storey_response.py` on a fabricated 2x2 quad mesh.

@@ -166,10 +166,18 @@ def _record_step(builder, step, frame_ids, area_ids, dof_idx, direction):
         if ops_tag is None:
             continue
         try:
-            f = ops.eleResponse(ops_tag, 'forces')  # Shell forces
+            # IMPORTANT: shell resultants must be queried via the
+            # section interface.  ``eleResponse(ops_tag, 'forces')`` on a
+            # shell returns the raw **24-entry local nodal-force vector**
+            # (6 DOF × 4 corners), NOT the per-unit-width membrane/
+            # bending resultants — indexing f[0..5] would silently
+            # mislabel Nx=local fx₁, Ny=local fy₁, Nxy=local fz₁ and
+            # inflate wall shear DCRs computed from Nxy/t.
+            f = ops.eleResponse(ops_tag, 'section', 1, 'forces')
         except Exception:
             continue
-        # ShellNLDKGQ returns 12 forces (similar layout)
+        # Section forces return [Nx, Ny, Nxy, Mx, My, Mxy, ?, ?] — the
+        # per-unit-width membrane/bending stress resultants.
         if len(f) >= 6:
             shell_forces[aid] = {
                 'Nx': f[0], 'Ny': f[1], 'Nxy': f[2],
@@ -250,7 +258,64 @@ def write_pushover_results_npz(
     """
 ```
 
-### 3.3 File naming convention
+### 3.3 Performance-point scalars — `static/pp/{direction}/{field}`
+
+**Status**: ✅ Complete — `write_results_npz()` now persists scalar
+entries from a static-result case (see ``npz_writer._collect_static``).
+
+The static NPZ emitted alongside a 4-direction pushover run carries one
+``pp`` static case whose keys are flattened ``{direction}/{field}``
+(e.g. ``+X/D_roof``).  ``write_results_npz()`` serializes each scalar as a
+shape-``(1,)`` array under:
+
+```
+static/pp/{direction}/{field}
+```
+
+Per-direction fields come from
+:func:`~fea_toolkit.model.csm.compute_performance_point`:
+
+| Field | Meaning | Units |
+|---|---|---|
+| `D_roof` | Roof displacement at the performance point | model length (m) |
+| `V_base` | Base shear at the performance point | model force (kN) |
+| `S_dp` | Spectral displacement at PP | model length (m) |
+| `S_ap` | Spectral acceleration at PP | m/s² |
+| `S_dy`, `S_ay` | Bilinear yield point | m, m/s² |
+| `mu` | Ductility `S_dp / S_dy` | — |
+| `T_eq` | Equivalent period at PP | s |
+| `beta_eq`, `B` | Equivalent damping / reduction factor | — |
+| `converged` | CSM convergence flag | bool |
+| `bilinearize_method` | Yield-point detection method | str |
+
+Example keys in a v8 admin-building NPZ:
+
+```
+static/pp/+X/D_roof      shape (1,) float   [0.0191]
+static/pp/+X/V_base      shape (1,) float   [3532.74]
+static/pp/+X/S_dp        shape (1,) float   [0.0145885]
+static/pp/+X/converged   shape (1,) bool    [True]
+```
+
+Authoring rule for callers of ``write_results_npz()``: put the PP
+payload under a single ``"pp"`` static case with flattened
+``f"{direction}/{field}"`` keys and plain scalar values — no
+``{"value": ...}`` wrappers and no nested per-direction cases (those are
+silently dropped by the writer):
+
+```python
+npz_static["pp"] = {
+    f"{direction}/{field}": value   # +X/D_roof, -Y/mu, ...
+    for direction, fields in pp_per_direction.items()
+    for field, value in fields.items()
+}
+```
+
+Consumers (e.g. the GB 50010/GB 50011 checks scripts) locate the PP step
+by reading ``static/pp/{direction}/D_roof`` and finding the nearest
+recorded ``pushover/{direction}/control_disp`` value.
+
+### 3.4 File naming convention
 
 ```
 {model_stem}_pushover_{direction}.npz

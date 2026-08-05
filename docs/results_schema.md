@@ -157,6 +157,43 @@ Sorted by SAP node ID (see ID conventions above).
 |---|---|---|---|
 | `static_case_labels` | `(N_case,)` | `str` | e.g. ``["DEAD", "SL_X", "LL"]`` |
 
+**Scalar entries (incl. pushover performance-point scalars):**
+
+| Array | Shape | dtype | Description |
+|---|---|---|---|
+| `static/{case}/{key}` | `(1,)` | same as value | Any JSON-scalar (`int`, `float`, `str`, `bool`) or `{"value": scalar}` entry in a static case dict is persisted as a shape-`(1,)` array. |
+
+For a 4-direction pushover run the performance-point scalars from
+:func:`~fea_toolkit.model.csm.compute_performance_point` are stored under
+a single ``"pp"`` static case with flattened ``{direction}/{field}``
+keys:
+
+| Array | Shape | dtype | Description |
+|---|---|---|---|
+| `static/pp/{direction}/D_roof` | `(1,)` | `float` | Roof displacement at PP (model length units, m) |
+| `static/pp/{direction}/V_base` | `(1,)` | `float` | Base shear at PP (model force units, kN) |
+| `static/pp/{direction}/S_dp` | `(1,)` | `float` | Spectral displacement at PP (m) |
+| `static/pp/{direction}/S_ap` | `(1,)` | `float` | Spectral acceleration at PP (m/s²) |
+| `static/pp/{direction}/S_dy`, ``S_ay`` | `(1,)` | `float` | Bilinear yield point (m, m/s²) |
+| `static/pp/{direction}/mu` | `(1,)` | `float` | Ductility `S_dp / S_dy` |
+| `static/pp/{direction}/T_eq` | `(1,)` | `float` | Equivalent period at PP (s) |
+| `static/pp/{direction}/beta_eq`, ``B`` | `(1,)` | `float` | Equivalent damping / reduction factor |
+| `static/pp/{direction}/converged` | `(1,)` | `bool` | CSM convergence flag |
+| `static/pp/{direction}/bilinearize_method` | `(1,)` | `str` | Yield-point detection method |
+
+Example:
+
+```
+data["static/pp/+X/D_roof"]   # array([0.0191])
+data["static/pp/+X/V_base"]   # array([3532.74])
+```
+
+Authoring rule: pass the PP payload as one ``"pp"`` static case with
+flattened ``f"{direction}/{field}"`` keys and plain scalar values (no
+``{"value": ...}`` wrappers, no nested per-direction cases).  Consumers
+locate the PP step by reading ``static/pp/{direction}/D_roof`` and finding
+the nearest ``pushover/{direction}/control_disp`` value.
+
 ### Modal analysis results
 
 | Array | Shape | dtype | Description |
