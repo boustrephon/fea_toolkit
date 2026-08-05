@@ -353,8 +353,10 @@ cleared between attempts.
 > used as-is, or may be authored in SI (Pa) and converted **exactly once**
 > via `scale_material_dict()`.  Parser and Preprocessor flows must author
 > SI values and scale them **exactly once** — never zero times and never
-> twice.  This exception prevents both unscaled SI values (1000× strong in
-> kN-m models) and double-scaling of model-unit values (1000× weak),
+> twice.  This exception prevents both unscaled SI values (1000× strong
+> relative to a kN-m model's force unit, because SI Pa is 1000× kN/m²)
+> and double-scaling of model-unit values (1000× weak relative to a
+> kN-m model's force unit),
 > while preserving the existing SI/scaling rule for all other paths.
 
 ## 10. Tool-Call Hygiene (prevent malformed tool-call XML)

@@ -43,9 +43,10 @@ Methods: `add()` / `run_all()` / `run_one()` / `_inject_dependencies()` / `_topo
 ## Relationship to the pipeline
 
 ```
-SAP2000Parser → SAPModelData → Preprocessor → MeshModel → AnalysisBuilder → AnalysisManager → results
+SAP2000Parser → SAPModelData → Preprocessor → MeshModel → AnalysisManager → results
+                                    (drives AnalysisBuilder)
 ```
 
-`AnalysisManager` consumes a frozen `MeshModel` (Preprocessor output) — it never mutates topology. It drives `AnalysisBuilder` for domain creation and execution, then wraps raw dict results in typed `AnalysisResult` objects.
+`AnalysisManager` consumes a frozen `MeshModel` (Preprocessor output) — it never mutates topology. It is the orchestrator that drives `AnalysisBuilder` for domain creation and execution, then wraps raw dict results in typed `AnalysisResult` objects.
 
 See [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md) for the time-history runner.

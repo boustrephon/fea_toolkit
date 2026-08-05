@@ -175,16 +175,34 @@ comfortably.  Below is a realistic assessment of what remains.
       the published experimental curve (digitise Guner & Vecchio's Fig. 11).
    4. **Acceptance criteria:** peak base shear within ±10 % of experiment,
       initial stiffness within ±15 %, and the softening/ductility trend
-      qualitatively matches (the frame is flexure-critical; shear ≈ 20 % of
-      total deformation is expected and acceptable for beam-column fiber
-      elements).
+      qualitatively matches.  Because ``forceBeamColumn`` fiber sections
+      model **flexure only** (no shear deformation), the comparison must
+      target a **flexure-only experimental basis**.  If the published
+      peak-shear / stiffness / deformation targets include the frame's
+      ~20 % shear contribution, model the expected shear deformation with
+      explicit shear-flexible components (e.g. a shear spring or section
+      aggregation) so the modeled response matches the validation target.
+      Otherwise, restrict the acceptance criteria to flexure-only
+      quantities and note that the ~20 % shear share is not captured by
+      the fiber model.
    5. Optionally re-run the Vecchio & Balopoulou (1990) variant (cut-back
       top reinforcement) to verify sensitivity to reinforcement details.
 
 5. **Pushover solver tuning** — **🟡 Priority: high — concrete recommended
-   changes identified.**  `PUSHOVER_SOLVER_DEFAULTS` currently uses
-   `Newton` + `NormDispIncr 1e-6` + 10 iters + 1 gravity substep.  Two
-   research-backed findings drive the change:
+   changes identified.**  `PUSHOVER_SOLVER_DEFAULTS` currently has a
+   primary `NormDispIncr 1e-6 / 10 iter / Newton / 1 gravity substep`,
+   the pushover run path uses `NormDispIncr 1e-4 / 20 / Newton`, and —
+   when a step fails — the implemented per-step fallback switches to
+   `NormUnbalance` + `ModifiedNewton -initial` with a **runtime-scaled
+   relaxed tolerance** (derived from total mass × g × 1e-6 or 10 × the
+   primary tolerance, whichever is larger) and 1000 iterations, then
+   restores the primary settings for subsequent steps.  LayeredShell
+   models automatically ramp gravity over 10 substeps.  The documented
+   analysis guidance (see `docs/pushover_analysis.md`) reflects this
+   implemented contract: `NormUnbalance`/`ModifiedNewton` fallback flow,
+   automatic LayeredShell substeps, and the relaxed (2e-4-equivalent
+   for kN-m full-building models) fallback tolerance, not a hard 1e-12.
+   Two refinement findings drive further tuning:
 
    **(a) `NormUnbalance` is safer than `NormDispIncr` for force-based
    elements with `eleLoad` member loads.**  Michael Scott (OpenSeesDigital,
@@ -201,20 +219,26 @@ comfortably.  Below is a realistic assessment of what remains.
    relax the tolerance and switch to `ModifiedNewton -initial` for the step;
    then restore the primary solver.
 
-   **Measures required:**
-   1. Change default `solver_test_type` from `"NormDispIncr"` to
-      `"NormUnbalance"` in `PUSHOVER_SOLVER_DEFAULTS`.
-   2. Add a `PUSHOVER_FALLBACK_DEFAULTS` class constant
-      (`{"solver_test_type": "NormUnbalance", "solver_test_tol": 1e-12,
-      "solver_test_max_iter": 1000, "solver_algorithm": "ModifiedNewton"}`).
-   3. Implement per-step fallback logic in `run_pushover_analysis()`:
+   **Measures required (confirming/refining the implemented contract):**
+   1. Confirm the documented flow: the pushover path's primary test is
+      `NormDispIncr 1e-4 / 20`, and on failure the per-step fallback
+      switches to `NormUnbalance` + `ModifiedNewton -initial` with the
+      relaxed runtime-scaled tolerance and 1000 iterations, then restores
+      the primary settings.
+   2. `PUSHOVER_FALLBACK_DEFAULTS` carries
+      `{"solver_test_type": "NormUnbalance", "solver_test_max_iter": 1000,
+      "solver_algorithm": "ModifiedNewton"}` — the tolerance is computed
+      at runtime from the model's characteristic weight (via
+      `g_from_units`), so the stale **1e-12** value must not re-appear;
+      the relaxed tolerance for a kN-m full-building model is ~2e-4.
+   3. Confirm per-step fallback logic in `run_pushover_analysis()`:
       on a failed step with primary settings, retry with the fallback dict,
       then restore primary settings for subsequent steps.
-   4. Raise the default `gravity_num_substeps` from 1 → 4 so cracking RC
-      models apply gravity incrementally (available via config key).
-   5. Add an `RC_PUSHOVER_SOLVER_DEFAULTS` convenience preset combining all
-      of the above, and document the recommended RC settings in
-      `docs/pushover_analysis.md`.
+   4. Keep the automatic `gravity_num_substeps` = 10 ramping for models
+      with LayeredShell sections (explicit config value always wins).
+   5. Keep the `RC_PUSHOVER_SOLVER_DEFAULTS` convenience preset combining
+      all of the above; `docs/pushover_analysis.md` documents the
+      recommended RC settings.
    6. After the Vecchio & Emara benchmark (Gap 4) is running, tune these
       defaults empirically and record the final values in the plan.
 

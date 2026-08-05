@@ -53,14 +53,15 @@ result = manager.run_all()["NonlinearDynamicAnalysis"]
 | `times` | `ndarray` | Time vector |
 | `displacements` | `ndarray` | Nodal displacement time histories (from recorder) |
 | `envelope` | `ndarray` | Envelope displacement output (if recorded) |
-| `peak_drift` | `float` | Max absolute displacement across nodes |
+| `peak_drift` | `float` | Max absolute nodal displacement across nodes (not inter-storey drift) |
 | `converged_steps` | `int` | Steps converged by the solver |
 | `gm_file` | `str` | Original ground motion path |
 | `direction` | `str` | Excitation direction |
 | `output_raw` | `str` | Raw XaraTclRunner output |
 
 On a non-zero runner exit status the result is returned with `converged_steps=0`,
-`times=[]`, and an `error` entry in `metadata`.
+`times=np.array([])` (an empty `ndarray`, preserving the container type declared
+above), and an `error` entry in `metadata`.
 
 ## How it works
 
