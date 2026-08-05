@@ -4856,6 +4856,55 @@ class TestCsmModule:
         assert adrs["M_eff"] == 700.0
         assert adrs["Gamma"] == 1.0
 
+    def test_pushover_to_adrs_rejects_ill_conditioned_modes(self):
+        """Low-participation torsional modes must not win ADRS selection.
+
+        Regression test for the Admin Building CSM flattening bug: a
+        torsional eigenvector whose residual X components are all ~0.002
+        same-sign noise produces a tiny ``M_star_x`` (~0.003) while
+        ``L_x / M_star_x`` is ill-conditioned, so ``L_x²/M_star_x``
+        blows up to ≈ ``M_total``.  Under a naive max of ``L²/M_star``
+        this contaminated mode out-ranks the true ~99 % X sway mode,
+        corrupting the ``S_a``/``S_d`` scaling of the whole CSM curve.
+        """
+        from fea_toolkit.model.csm import pushover_to_adrs
+
+        pushover = {
+            "control_node": 1,
+            "control_disp": [0.0, 0.01],
+            "base_shear": [0.0, 100.0],
+        }
+        masses = {1: 100.0, 2: 100.0, 3: 100.0, 4: 100.0, 5: 100.0, 6: 100.0}
+        modal = {
+            "modal_props": {},
+            "periods": [0.5, 0.1],
+            "nodal_masses": masses,
+        }
+        # Mode 0 (index 0): genuine X sway, ~99 % participation with a
+        # varying mode shape.  Mode 1 (index 1): torsional eigenvector
+        # (large ±z components) whose residual X components are all
+        # ~0.002 same-sign noise — M_star_x ≈ 0.003 but L_x²/M_star_x
+        # ≈ M_total, which used to win the naive max selection.
+        sway_phis = [1.0, 0.95, 0.9, 0.85, 0.8, 0.75]
+        shapes = {
+            0: {i: (phi, 0.0, 0.0) for i, phi in zip(range(1, 7), sway_phis)},
+            1: {
+                i: (0.002 + (i - 1) * 0.0001, 0.0, 1.0 if i % 2 == 0 else -1.0) for i in range(1, 7)
+            },
+        }
+
+        adrs = pushover_to_adrs(pushover, modal, shapes, direction="X")
+
+        # The fix must pick the true sway mode, not the contaminated
+        # torsional mode.
+        assert adrs["best_mode"] == 0
+        L0 = 100.0 * sum(sway_phis)
+        Ms0 = 100.0 * sum(p * p for p in sway_phis)
+        assert abs(adrs["M_eff"] - L0 * L0 / Ms0) < 1e-8
+        # Effective modal mass can never exceed the total physical mass.
+        assert adrs["M_eff"] < 600.0
+        assert adrs["phi_control"] == 1.0
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Bilinearisation utility tests (standalone, no OpenSees required)
