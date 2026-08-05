@@ -63,6 +63,75 @@ Stage 2:  Lock gravity (loadConst), apply lateral loads, push
 
    The structure deforms under gravity alone.
 
+### Gravity convergence (LayeredShell RC models)
+
+RC models with LayeredShell walls (e.g. the cropped Admin Building model)
+can fail the gravity stage with `NormUnbalance` errors.  Two distinct
+failure modes were observed in practice:
+
+| Symptom | Root cause | Fix |
+|---|---|---|
+| `Norm ≈ 1.000e-4` vs tol `1e-4` — repeated "analyze failed" | Near-miss tolerance: the residual sits just above `solver_test_tol` | Relax `solver_test_tol` to `2e-4` |
+| `Norm = NaN` during the gravity step | Sudden LayeredShell stiffness shock when shells activate in a single `LoadControl` step | Ramp gravity with `gravity_num_substeps: 10` |
+
+Both settings are configured through the builder `config` dict:
+
+```python
+config = {
+    # ... pushover / section / shell settings ...
+    "solver_test_tol": 2e-4,        # default 1e-6 (general), 1e-4 (pushover)
+    "solver_test_max_iter": 1000,   # sufficient for the fiber/LayeredShell chain
+    "solver_algorithm": "Newton",   # falls back to ModifiedNewton automatically
+    "gravity_num_substeps": 10,     # ramp gravity in 10 LoadControl increments
+}
+```
+
+| Config key | Default | Notes |
+|---|---|---|
+| `solver_test_tol` | `1e-6` (general), `1e-4` (pushover) | Relax to `2e-4` for RC + LayeredShell models |
+| `solver_test_max_iter` | `10` (general), `20` (pushover), `1000` (automatic fallback) | The pushover path auto-falls back to `ModifiedNewton` with 1000 iterations |
+| `solver_algorithm` | `"Newton"` | Falls back to `ModifiedNewton` automatically |
+| `gravity_num_substeps` | `1` (`10` auto when the model has LayeredShell sections) | Use 5–10 for LayeredShell RC models |
+
+#### Auto-detection of LayeredShell models
+
+Since fea_toolkit v0.x, the `AnalysisBuilder` **automatically ramps gravity
+over 10 substeps** whenever the ``MeshModel`` contains at least one
+``LayeredShellSection`` (i.e. the model uses the Preprocessor's
+``shell_layers`` config).  This removes the need to remember the
+`gravity_num_substeps: 10` manual override for RC wall models:
+
+* **Detection**: `mesh_model.layered_shell_sections` is non-empty.
+* **Override**: an explicit `gravity_num_substeps` in the config dict
+  always wins — auto-detection is skipped when the user sets it.
+* **Constant**: the auto value is stored in
+  `AnalysisBuilder.LAYERED_SHELL_GRAVITY_SUBSTEPS = 10`.
+
+So the recommended config for a new LayeredShell RC model is simply:
+
+```python
+config = {
+    # ... pushover / section / shell settings ...
+    "solver_test_tol": 2e-4,        # still recommended — near-miss tolerance
+    "solver_test_max_iter": 1000,
+    "solver_algorithm": "Newton",
+}
+```
+
+and the builder handles gravity substepping automatically.
+
+**Verification** — after the run, the log should show **zero** failures:
+
+```bash
+grep -c "analyze failed" output/v8_run.log   # → 0
+```
+
+This eliminated all 18 gravity convergence failures seen in the Admin
+Building v7 run (which used `solver_test_tol: 1e-4` and a single gravity
+step).  Use the ``venv_opensees`` Python environment when running these
+models — the stock interpreter produced NaN results in the LayeredShell
+gravity stage.
+
 ### Stage 2 — Lateral push
 
 4. **`ops.loadConst('-time', 0.0)`** is called.  This is the critical

@@ -210,6 +210,92 @@ print(f"S_dp = {pp['S_dp']:.3f} (model length units), converged = {pp['converged
 
 ---
 
+## Mode Selection for the ADRS Transformation
+
+The ADRS (Acceleration-Displacement Response Spectrum) transformation in
+:func:`~fea_toolkit.model.csm.pushover_to_adrs` converts the physical
+pushover curve (base shear V vs roof displacement δ) into spectral
+coordinates using a **single equivalent-SDOF mode**:
+
+```text
+S_a = V / M_eff          # m/s²
+S_d = δ / (Γ · φ_control)
+```
+
+where:
+
+- `M_eff` = effective modal mass = `L² / M*`
+- `Γ` = participation factor = `L / M*`
+- `φ_control` = mode-shape ordinate at the control/roof node
+- `L = Σ m_i φ_i` and `M* = Σ m_i φ_i²` (summed over the push direction)
+
+### Which mode is selected?
+
+For a push in direction *d*, the function picks the mode with the
+**highest modal participation ratio in that direction** (`L² / M*`).
+This is the standard ASCE 41 approach: the pushover lateral-load
+pattern and the equivalent-SDOF scaling use the mode that most strongly
+participates in the push direction.
+
+### The ill-conditioned-mode trap (torsional fundamental modes)
+
+A naive ``max(L² / M*)`` selection can fail on 3D buildings whose
+fundamental mode is **torsional** (or otherwise barely participates in
+the push direction).  The participation ratio `L² / M*` is
+**scale-invariant** but numerically ill-conditioned when `M* ≈ 0`:
+eigenvector-normalisation noise in a mode that barely displaces in the
+push direction (e.g. a 0.3 %-participation torsional mode) makes
+`L² / M*` spuriously large, so the naive max picks the wrong mode and
+corrupts the S_a / S_d scaling of the entire CSM curve.
+
+To prevent this, :func:`~fea_toolkit.model.csm.pushover_to_adrs`
+performs a **two-pass selection**:
+
+1. **Pass 1 — compute every mode's kinetic energy.**  For each mode
+   shape, compute `(L, M*)` for the push direction and record the
+   maximum modal kinetic energy `M*_max` across all modes.
+2. **Pass 2 — reject low-participation modes.**  Any mode whose
+   push-direction kinetic energy `M*` is below
+   `1 % of M*_max` is excluded *before* evaluating the participation
+   ratio.  Then the mode with the highest `L² / M*` among the
+   survivors is selected.
+
+The `1 %` threshold is far below the 30–60 % that characterises a
+genuine sway mode, yet safely above the ~`1e-3` relative level of the
+numerically contaminated modes observed with real 3D building models.
+The threshold is measured against `M*_max` (same eigenvector
+normalisation) rather than the absolute total mass, which keeps the
+criterion normalisation-independent.
+
+If *every* mode is rejected (no mode carries meaningful kinetic energy
+in the push direction — e.g. too few modes requested), a warning is
+raised and the function falls back to `Γ = 1.0`, `M_eff = 1.0`
+(identity scaling: `S_a = V`, `S_d = δ`).
+
+### Why this matters for the CSM results
+
+The yield point (`S_ay`, `S_dy`) and performance point (`S_ap`, `S_dp`)
+computed by :func:`~fea_toolkit.model.csm.compute_performance_point`
+are entirely downstream of the ADRS coordinate system.  If
+`pushover_to_adrs` selects the wrong (torsional, ill-conditioned) mode,
+the ductility, equivalent damping, and the intersection with the
+demand spectrum are all computed in corrupted coordinates.  The
+two-pass filter ensures a building with a torsional fundamental mode
+(or with slight plan irregularity) still converts its X/Y pushover
+curves using the genuine X/Y sway modes.
+
+**References:**
+
+- ASCE 41-17 (2017). *Seismic Evaluation and Retrofit of Existing
+  Buildings*. American Society of Civil Engineers, Reston, VA.
+- Applied Technology Council (1996). *ATC-40 — Seismic Evaluation and
+  Retrofit of Concrete Buildings*. Redwood City, CA.
+- Fajfar, P. (2000). "A Nonlinear Analysis Method for Performance-Based
+  Seismic Design." *Earthquake Spectra*, 16(3), 573–592.
+  doi:10.1193/1.1586128
+
+---
+
 ## ADRS Unit Convention and Damping Reduction
 
 This section documents the exact ADRS (Acceleration-Displacement Response
