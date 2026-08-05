@@ -63,6 +63,399 @@ def _minimal_mesh(nd_materials=None, layered_sections=None):
     )
 
 
+class TestGravitySubstepAutoDetection:
+    """Verify LayeredShell models auto-ramp gravity without explicit config."""
+
+    def teardown_method(self):
+        ops.wipe()
+
+    def test_non_layered_keeps_single_substep(self):
+        """Models without LayeredShell sections keep gravity_num_substeps=1."""
+        mm = _minimal_mesh(nd_materials=None, layered_sections=None)
+        ab = AnalysisBuilder(mm, {})
+        assert ab.config["gravity_num_substeps"] == 1
+
+    def test_layered_auto_sets_ten_substeps(self):
+        """Models with a LayeredShell section auto-set gravity_num_substeps=10."""
+        ndm = {
+            "WallConcrete": NDMaterial(
+                name="WallConcrete",
+                material_type="ConcreteS",
+                E=30e9,
+                nu=0.2,
+                fc=30e6,
+                ft=3e6,
+                Es=0.0,
+            )
+        }
+        lss = {
+            "WallSec": LayeredShellSection(
+                name="WallSec",
+                layers=[
+                    ShellFiberLayer(nd_material="WallConcrete", thickness=0.2, n_ip=2),
+                ],
+            )
+        }
+        mm = _minimal_mesh(nd_materials=ndm, layered_sections=lss)
+        ab = AnalysisBuilder(mm, {})
+        assert ab.config["gravity_num_substeps"] == 10
+
+    def test_explicit_config_wins_over_auto(self):
+        """An explicit gravity_num_substeps value is never overridden."""
+        ndm = {
+            "WallConcrete": NDMaterial(
+                name="WallConcrete",
+                material_type="ConcreteS",
+                E=30e9,
+                nu=0.2,
+                fc=30e6,
+                ft=3e6,
+                Es=0.0,
+            )
+        }
+        lss = {
+            "WallSec": LayeredShellSection(
+                name="WallSec",
+                layers=[
+                    ShellFiberLayer(nd_material="WallConcrete", thickness=0.2, n_ip=2),
+                ],
+            )
+        }
+        mm = _minimal_mesh(nd_materials=ndm, layered_sections=lss)
+        ab = AnalysisBuilder(mm, {"gravity_num_substeps": 3})
+        assert ab.config["gravity_num_substeps"] == 3
+
+
+class TestShellForceResultants:
+    """Verify shell stress resultants come from the section-force query.
+
+    Regression test for the DCR bug: ``ops.eleResponse(tag, "forces")`` on
+    a shell returns the **24-entry local nodal-force vector**, not the
+    per-unit-width membrane/bending resultants.  The correct query is
+    ``ops.eleResponse(tag, "section", 1, "forces")``.  Under a known
+    uniaxial in-plane strain the extracted Nx must equal E·t·εx (Poisson
+    Ny = ν·Nx, Nxy = 0) — anything else means a corner nodal force leaked
+    into the resultant slot (e.g. shell Nxy = fz1 inflating wall τ DCRs).
+    """
+
+    def teardown_method(self):
+        ops.wipe()
+
+    def test_extract_static_shell_forces_membrane_resultants(self):
+        """extract_static_shell_forces() returns E·t·εx, not nodal forces."""
+        E = 30.0e6  # Pa (N/m²)
+        nu = 0.2
+        t = 0.15  # m
+        eps_x = 1.0e-4
+        expected_Nx = E * t * eps_x
+
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=1.0, y=0.0, z=0.0),
+            "3": Node(node_id="3", node_tag=3, x=1.0, y=1.0, z=0.0),
+            "4": Node(node_id="4", node_tag=4, x=0.0, y=1.0, z=0.0),
+        }
+        mat = {"Conc": Material(name="Conc", type="Concrete", E_mod=E, nu=nu)}
+        sec = {
+            "WSec": ShellSection(
+                name="WSec",
+                shape="Shell",
+                material="Conc",
+                A=0.0,
+                I33=0.0,
+                I22=0.0,
+                J=0.0,
+                thickness=t,
+            )
+        }
+        area = {
+            "A1": AreaElement(area_id="A1", area_tag=10, node_ids=["1", "2", "3", "4"], thickness=t)
+        }
+        mm = MeshModel(
+            nodes=nodes,
+            materials=mat,
+            sections=sec,
+            frame_elements={},
+            frame_assignments={},
+            area_elements=area,
+            area_assignments={"A1": "WSec"},
+            frame_dist_loads=[],
+            material_tags={},
+            section_tags={},
+            shell_sec_tags={},  # NOT pre-seeded — builder must create the shell section
+            shell_sec_variants={},
+            frame_element_types={},
+            area_element_types={},
+            offset_rigid_links=[],
+            edge_constraint_args=[],
+            edge_loads_from_areas=[],
+            loads_only_area_ids=set(),
+            base_z=0.0,
+            units={"F": "N", "L": "m", "T": "C"},
+        )
+
+        ab = AnalysisBuilder(mm, {"create_shells": True, "verbose": False})
+        ab.build_domain()
+
+        # Uniaxial in-plane extension: fix x, z and all rotations on every
+        # node, leave y free so Poisson contraction can develop.  Then
+        # prescribe ux = eps_x at nodes 2 and 3 (SP constraints override
+        # the fix for the x DOF at those nodes).
+        for nd in (1, 2, 3, 4):
+            ops.fix(nd, 1, 0, 1, 1, 1, 1)
+        ops.timeSeries("Linear", 1)
+        ops.pattern("Plain", 1, 1)
+        for nd in (2, 3):
+            ops.sp(nd, 1, eps_x)
+        ops.system("BandSPD")
+        ops.numberer("RCM")
+        ops.constraints("Transformation")
+        ops.integrator("LoadControl", 1.0)
+        ops.algorithm("Linear")
+        ops.analysis("Static")
+        assert ops.analyze(1) == 0
+
+        res = ab.extract_static_shell_forces()
+        assert "A1" in res, f"extract_static_shell_forces keys: {list(res)}"
+        f = res["A1"]
+        # ShellMITC4 samples the membrane stress resultants at its own
+        # integration points, so Nx is within ~5% of E·t·εx for a single
+        # coarse element under a prescribed boundary strain.  The decisive
+        # regression checks are (a) the result is a force-per-width
+        # resultant on the E·t·εx scale (never ±225 kN corner nodal
+        # forces) and (b) Nxy ≈ 0 under pure uniaxial strain.
+        assert abs(f["fx"] - expected_Nx) < expected_Nx * 0.10, (
+            f"Nx={f['fx']:.6g} != E*t*eps_x={expected_Nx:.6g} (±10%)"
+        )
+        assert abs(f["fy"] - nu * expected_Nx) < expected_Nx * 0.10, (
+            f"Ny={f['fy']:.6g} != nu*Nx={nu * expected_Nx:.6g} (Poisson, ±10%)"
+        )
+        assert abs(f["fxy"]) < expected_Nx * 1e-6, (
+            f"Nxy={f['fxy']:.6g} != 0 — a corner nodal force leaked in"
+        )
+
+    def test_record_step_shell_resultants(self):
+        """_record_step() (pushover recorder) stores true Nx/Ny/Nxy resultants."""
+        E = 30.0e6
+        nu = 0.2
+        t = 0.15
+        eps_x = 1.0e-4
+        expected_Nx = E * t * eps_x
+
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=1.0, y=0.0, z=0.0),
+            "3": Node(node_id="3", node_tag=3, x=1.0, y=1.0, z=0.0),
+            "4": Node(node_id="4", node_tag=4, x=0.0, y=1.0, z=0.0),
+        }
+        mat = {"Conc": Material(name="Conc", type="Concrete", E_mod=E, nu=nu)}
+        sec = {
+            "WSec": ShellSection(
+                name="WSec",
+                shape="Shell",
+                material="Conc",
+                A=0.0,
+                I33=0.0,
+                I22=0.0,
+                J=0.0,
+                thickness=t,
+            )
+        }
+        area = {
+            "A1": AreaElement(area_id="A1", area_tag=10, node_ids=["1", "2", "3", "4"], thickness=t)
+        }
+        mm = MeshModel(
+            nodes=nodes,
+            materials=mat,
+            sections=sec,
+            frame_elements={},
+            frame_assignments={},
+            area_elements=area,
+            area_assignments={"A1": "WSec"},
+            frame_dist_loads=[],
+            material_tags={},
+            section_tags={},
+            shell_sec_tags={},
+            shell_sec_variants={},
+            frame_element_types={},
+            area_element_types={},
+            offset_rigid_links=[],
+            edge_constraint_args=[],
+            edge_loads_from_areas=[],
+            loads_only_area_ids=set(),
+            base_z=0.0,
+            units={"F": "N", "L": "m", "T": "C"},
+        )
+
+        ab = AnalysisBuilder(mm, {"create_shells": True, "verbose": False})
+        ab.build_domain()
+        # Same constraint scheme as the static-extraction test — y must be
+        # free for the Poisson contraction under uniaxial extension.
+        for nd in (1, 2, 3, 4):
+            ops.fix(nd, 1, 0, 1, 1, 1, 1)
+        ops.timeSeries("Linear", 1)
+        ops.pattern("Plain", 1, 1)
+        for nd in (2, 3):
+            ops.sp(nd, 1, eps_x)
+        ops.system("BandSPD")
+        ops.numberer("RCM")
+        ops.constraints("Transformation")
+        ops.integrator("LoadControl", 1.0)
+        ops.algorithm("Linear")
+        ops.analysis("Static")
+        assert ops.analyze(1) == 0
+
+        from fea_toolkit.opensees.analysis_builder import _record_step
+
+        rec = _record_step(ab, 1, set(), {"A1"})
+        sh = rec["shell_forces"]["A1"]
+        # Same ±10% band as the static test (ShellMITC4 integration-point
+        # sampling); Nxy must remain ~0 (it was previously fz1, the
+        # out-of-plane corner nodal force — the source of inflated wall
+        # τ/τcap DCRs).
+        assert abs(sh["Nx"] - expected_Nx) < expected_Nx * 0.10, (
+            f"recorded Nx={sh['Nx']:.6g} != E*t*eps_x={expected_Nx:.6g} (±10%)"
+        )
+        assert abs(sh["Ny"] - nu * expected_Nx) < expected_Nx * 0.10, (
+            f"recorded Ny={sh['Ny']:.6g} != nu*Nx={nu * expected_Nx:.6g} (Poisson, ±10%)"
+        )
+        assert abs(sh["Nxy"]) < expected_Nx * 1e-6, (
+            f"recorded Nxy={sh['Nxy']:.6g} != 0 — this is what inflated wall τ DCRs"
+        )
+
+    def test_record_step_layered_shell_shear_resultant(self):
+        """_record_step() returns true composite-shear resultants for a 5-layer
+        LayeredShell under an exact pure in-plane shear field.
+
+        Regression test for the wall τ DCR extraction path.  An admin shear
+        wall is ShellNLDKGQ + a 5-layer LayeredShell (0.020/0.002/0.106/
+        0.002/0.020 m).  Under ux = γ₀ at the top edge (uy = 0) the
+        engineering shear strain is exactly γ₀, so Nxy must equal
+        Σ(Gᵢ tᵢ)·γ₀.  A tensor/engineering factor-of-2 mix-up or a corner
+        nodal-force leak would silently inflate wall τ/τcap DCRs.
+        """
+        E_c, nu_c = 30.0e9, 0.2
+        E_s, nu_s = 200.0e9, 0.3
+        G_c = E_c / (2 * (1 + nu_c))
+        G_s = E_s / (2 * (1 + nu_s))
+        thk = [0.020, 0.002, 0.106, 0.002, 0.020]
+        gamma0 = 2.0e-4
+
+        ndm = {
+            "WallConcrete": NDMaterial(
+                name="WallConcrete",
+                material_type="ElasticIsotropic",
+                E=E_c,
+                nu=nu_c,
+            ),
+            "WallRebar": NDMaterial(
+                name="WallRebar",
+                material_type="J2PlateFibre",
+                E=E_s,
+                nu=nu_s,
+                fy=400.0e6,
+                Hiso=0.0,
+                Hkin=0.0,
+            ),
+        }
+        lss = {
+            "WallSec": LayeredShellSection(
+                name="WallSec",
+                layers=[
+                    ShellFiberLayer(nd_material="WallConcrete", thickness=thk[0]),
+                    ShellFiberLayer(nd_material="WallRebar", thickness=thk[1]),
+                    ShellFiberLayer(nd_material="WallConcrete", thickness=thk[2]),
+                    ShellFiberLayer(nd_material="WallRebar", thickness=thk[3]),
+                    ShellFiberLayer(nd_material="WallConcrete", thickness=thk[4]),
+                ],
+            )
+        }
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=1.0, y=0.0, z=0.0),
+            "3": Node(node_id="3", node_tag=3, x=1.0, y=1.0, z=0.0),
+            "4": Node(node_id="4", node_tag=4, x=0.0, y=1.0, z=0.0),
+        }
+        area = {
+            "A1": AreaElement(
+                area_id="A1",
+                area_tag=10,
+                node_ids=["1", "2", "3", "4"],
+                thickness=0.15,
+            )
+        }
+        sec = {
+            "WallSec": ShellSection(
+                name="WallSec",
+                shape="Shell",
+                material="WallConc",
+                A=0.0,
+                I33=0.0,
+                I22=0.0,
+                J=0.0,
+                thickness=0.15,
+            )
+        }
+        mats = {
+            "WallConc": Material(name="WallConc", type="Concrete", E_mod=E_c, nu=nu_c),
+        }
+        mm = MeshModel(
+            nodes=nodes,
+            materials=mats,
+            sections=sec,
+            frame_elements={},
+            frame_assignments={},
+            area_elements=area,
+            area_assignments={"A1": "WallSec"},
+            frame_dist_loads=[],
+            material_tags={},
+            section_tags={},
+            shell_sec_tags={},
+            shell_sec_variants={},
+            frame_element_types={},
+            area_element_types={},
+            offset_rigid_links=[],
+            edge_constraint_args=[],
+            edge_loads_from_areas=[],
+            loads_only_area_ids=set(),
+            base_z=0.0,
+            units={"F": "N", "L": "m", "T": "C"},
+            nd_materials=ndm,
+            layered_shell_sections=lss,
+        )
+        ab = AnalysisBuilder(mm, {"create_shells": True, "verbose": False})
+        ab.build_domain()
+
+        # Pure in-plane shear: ux = gamma0*y, uy = 0  ->  gamma_xy = gamma0.
+        ops.fix(1, 1, 1, 1, 1, 1, 1)
+        for nd in (2, 3, 4):
+            ops.fix(nd, 0, 1, 1, 1, 1, 1)
+        ops.timeSeries("Linear", 1)
+        ops.pattern("Plain", 1, 1)
+        ops.sp(3, 1, gamma0)
+        ops.sp(4, 1, gamma0)
+        ops.system("BandSPD")
+        ops.numberer("RCM")
+        ops.constraints("Transformation")
+        ops.integrator("LoadControl", 1.0)
+        ops.algorithm("Linear")
+        ops.analysis("Static")
+        assert ops.analyze(1) == 0
+
+        from fea_toolkit.opensees.analysis_builder import _record_step
+
+        rec = _record_step(ab, 1, set(), {"A1"})
+        sh = rec["shell_forces"]["A1"]
+        GAw = G_c * thk[0] + G_s * thk[1] + G_c * thk[2] + G_s * thk[3] + G_c * thk[4]
+        expected_Nxy = GAw * gamma0
+        assert abs(sh["Nxy"] - expected_Nxy) < expected_Nxy * 0.05, (
+            f"recorded Nxy={sh['Nxy']:.6g} != GAw*gamma0={expected_Nxy:.6g} (±5%)"
+        )
+        tol = expected_Nxy * 1e-4
+        assert abs(sh["Nx"]) < tol, f"pure shear must give Nx≈0, got {sh['Nx']:.6g}"
+        assert abs(sh["Ny"]) < tol, f"pure shear must give Ny≈0, got {sh['Ny']:.6g}"
+
+
 class TestLayeredShellBuild:
     """Verify AnalysisBuilder builds nD materials and layered shell sections."""
 
