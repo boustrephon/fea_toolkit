@@ -218,6 +218,7 @@ def pushover_rc_openseespy(
     rs_modal_base_shear: Optional[dict[str, list[float]]] = None,
     spectrum: Optional[ResponseSpectrum] = None,
     node_mass_overrides: Optional[dict[str, float]] = None,
+    return_builders: bool = False,
 ) -> dict:
     """Run RC pushover in one or all 4 directions (OpenSeesPy path).
 
@@ -267,11 +268,18 @@ def pushover_rc_openseespy(
         Mapping of node ID (SAP string label) → mass scale factor.
         Applied after computed seismic masses are assigned, allowing
         per-storey masonry/mass adjustments.
+    return_builders : bool, optional
+        When ``True``, each per-direction output dict also contains a
+        ``"builder"`` key holding the ``AnalysisBuilder`` instance so
+        callers can export recorded per-step results with
+        ``AnalysisBuilder.export_pushover_results()``.
 
     Returns
     -------
     dict
         ``{direction: {"results": ..., "adrs": ..., "pp": ..., ...}}``.
+        When *return_builders* is ``True``, each value additionally
+        contains ``"builder"``.
     """
     from fea_toolkit.model.csm import check_modal_pushover_mode
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
@@ -388,5 +396,7 @@ def pushover_rc_openseespy(
             "mode_index": best_mode_idx,
             "rs_warning": rs_warning,
         }
+        if return_builders:
+            all_out[label]["builder"] = ab
 
     return all_out

@@ -77,6 +77,7 @@ MODAL_ARRAYS: dict[str, tuple] = {
     "modal/mode_dx": ("N_node N_mode", "float"),
     "modal/mode_dy": ("N_node N_mode", "float"),
     "modal/mode_dz": ("N_node N_mode", "float"),
+    "modal/node_tag": ("N_node", "int"),
 }
 
 RS_ARRAYS: dict[str, tuple] = {
@@ -289,10 +290,15 @@ def validate_npz(path: str) -> list[str]:
                             else:
                                 _check_shape(key, arr, "N_frame", "float")
             if "modal" in types:
+                # modal/node_tag is an optional row-alignment convenience
+                # (added 2026-08 for the NPZ mode-plotting path) — legacy
+                # modal NPZ files predating it must still validate.
+                _optional_modal = {"modal/node_tag"}
                 for key, (shape_desc, dtype_str) in MODAL_ARRAYS.items():
                     arr = data.get(key)
                     if arr is None:
-                        messages.append(f"Missing modal array: {key}")
+                        if key not in _optional_modal:
+                            messages.append(f"Missing modal array: {key}")
                         continue
                     _check_shape(key, arr, shape_desc, dtype_str)
             if "rs" in types:

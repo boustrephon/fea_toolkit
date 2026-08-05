@@ -196,7 +196,22 @@ def _collect_geometry(
 
 
 def _collect_static(static_results: dict[str, Any]) -> dict[str, np.ndarray]:
-    """Extract static analysis arrays."""
+    """Extract static analysis arrays.
+
+    Each static case is a dict whose entries are serialized as flat
+    ``static/{case}/{key}`` NPZ arrays:
+
+    * The standard 12 frame force keys (``fx_i`` … ``mz_j``) are written as
+      per-element arrays (shape ``(n_elem,)``, empty when no element forces
+      are recorded).
+    * ``nodal_displacements`` — dict of ``{tag: [dx, dy, dz]}`` — is written
+      as ``node_dx`` / ``node_dy`` / ``node_dz`` arrays ordered by node tag.
+    * **Scalar entries** — any remaining key whose value is a JSON-scalar
+      (``int`` / ``float`` / ``str`` / ``bool``) or a ``{"value": scalar}``
+      dict — are persisted as shape-``(1,)`` arrays.  This is how
+      performance-point scalars (e.g. ``static/pp/+X/D_roof``) survive
+      serialization; without it they are silently dropped.
+    """
     arrays: dict[str, np.ndarray] = {}
     case_labels = list(static_results.keys())
     arrays["static_case_labels"] = np.array(case_labels, dtype=str)
@@ -229,6 +244,20 @@ def _collect_static(static_results: dict[str, Any]) -> dict[str, np.ndarray]:
             for i, dof in enumerate(["dx", "dy", "dz"]):
                 arr = np.array([disp[t][i] for t in tags], dtype=float)
                 arrays[make_static_key(case, f"node_{dof}")] = arr
+
+        # Scalar entries (including ``{"value": scalar}`` wrappers).
+        # Keys already consumed above are skipped.
+        consumed = set(force_keys) | {"nodal_displacements"}
+        for key, raw_val in data.items():
+            if key in consumed:
+                continue
+            val = (
+                raw_val.get("value")
+                if (isinstance(raw_val, dict) and set(raw_val) <= {"value"})
+                else raw_val
+            )
+            if isinstance(val, (int, float, str, bool, np.number)):
+                arrays[make_static_key(case, key)] = np.array([val])
 
     return arrays
 
@@ -278,6 +307,13 @@ def _collect_modal(
                         if idx is not None:
                             arr[idx, midx] = disp[dof_idx]
                 arrays[npz_key] = arr
+            # Row alignment for the N_node × N_mode arrays above.  The
+            # geometry ``node_tag`` array is written in MeshModel dict
+            # order (see _collect_geometry), which is *not* sorted, so
+            # standalone visualizers (plot_mode_animation NPZ path) must
+            # pair row i of mode_dx/y/z against this explicit sorted tag
+            # list rather than the geometry node_tag field.
+            arrays["modal/node_tag"] = np.array(node_tags, dtype=int)
 
     return arrays
 
@@ -383,9 +419,17 @@ def write_results_npz(
     arrays["force_unit"] = np.array([force_unit], dtype=str)
     arrays["length_unit"] = np.array([length_unit], dtype=str)
     arrays["created"] = np.array([datetime.datetime.now().isoformat()], dtype=str)
+    # Frame end-force arrays (static/*/fx_i, ...) are recorded in the
+    # element LOCAL coordinate system (OpenSees "localForces" query).
+    arrays["forces_coordinate_system"] = np.array(["local"], dtype=str)
 
     path = str(Path(path).resolve())
-    np.savez_compressed(path, **arrays)
+    # Pyright's numpy stub declares ``allow_pickle`` before ``**kwds``;
+    # ``**dict[str, ndarray]`` expansion triggers a false-positive overlap
+    # diagnostic on ``savez_compressed``.  Unpack via an ``Any`` reference —
+    # runtime behaviour is unchanged.
+    _arrays: Any = arrays
+    np.savez_compressed(path, **_arrays)
     return path
 
 
@@ -644,7 +688,16 @@ def write_pushover_results_npz(
     arrays["force_unit"] = np.array([force_unit], dtype=str)
     arrays["length_unit"] = np.array([length_unit], dtype=str)
     arrays["created"] = np.array([datetime.datetime.now().isoformat()], dtype=str)
+    # Frame end-force arrays (pushover/{direction}/frame_fx_i, ...) are
+    # recorded in the element LOCAL coordinate system (OpenSees
+    # "localForces" query).
+    arrays["forces_coordinate_system"] = np.array(["local"], dtype=str)
 
     path = str(Path(path).resolve())
-    np.savez_compressed(path, **arrays)
+    # Pyright's numpy stub declares ``allow_pickle`` before ``**kwds``;
+    # ``**dict[str, ndarray]`` expansion triggers a false-positive overlap
+    # diagnostic on ``savez_compressed``.  Unpack via an ``Any`` reference —
+    # runtime behaviour is unchanged.
+    _arrays: Any = arrays
+    np.savez_compressed(path, **_arrays)
     return path

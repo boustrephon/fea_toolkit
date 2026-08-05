@@ -71,10 +71,46 @@ class AnalysisBuilder:
         "gravity_num_substeps": 1,
     }
 
+    # ── Fallback solver settings for RC softening (Gap 5) ────────────
+    # When a step fails with the primary settings (e.g. the NC fiber-
+    # rebuild gravity solve), retry with NormUnbalance + relaxed
+    # tolerance + ModifiedNewton(-initial), then restore the primary
+    # settings for subsequent steps.  NormUnbalance is safer than
+    # NormDispIncr for forceBeamColumn elements carrying eleLoad member
+    # loads — the displacement increment can be zero while the residual
+    # is still large (Michael Scott, OpenSeesDigital 2026).
+    #
+    # The fallback test tolerance is computed at runtime, scaled off the
+    # model's characteristic weight (total mass × g via g_from_units) so
+    # it is unit-consistent.  An unscaled absolute tolerance (e.g. 1e-12)
+    # is numerically unattainable for a full RC building with kN-m
+    # residuals — the fallback would always burn its iteration budget and
+    # never converge.
+    PUSHOVER_FALLBACK_DEFAULTS: ClassVar[dict] = {
+        "solver_test_type": "NormUnbalance",
+        "solver_test_max_iter": 1000,
+        "solver_algorithm": "ModifiedNewton",
+    }
+
+    # ── LayeredShell gravity substeps (auto-detection) ───────────────
+    # RC models with LayeredShell walls (resolved via the Preprocessor's
+    # ``shell_layers`` config) can fail the gravity stage with a NaN
+    # stiffness shock if the full gravity combination is applied in a
+    # single ``LoadControl`` step.  When any LayeredShell section is
+    # present, the builder ramps gravity over this many substeps by
+    # default.  Users may still override ``gravity_num_substeps`` in the
+    # config dict — the explicit value wins.
+    LAYERED_SHELL_GRAVITY_SUBSTEPS: ClassVar[int] = 10
+
     def __init__(self, mesh_model: MeshModel, config: Optional[dict[str, Any]] = None):
         self.mesh_model = mesh_model
         self.units = mesh_model.units
         self.config = config or {}
+        # Track whether the user explicitly configured gravity substeps so
+        # _set_defaults() can auto-select a LayeredShell-safe count when
+        # config omits it (see LAYERED_SHELL_GRAVITY_SUBSTEPS and
+        # run_static_analysis).  An explicit value always wins.
+        self._user_set_gravity_substeps = "gravity_num_substeps" in self.config
         self._set_defaults()
 
         # Pushover step results (populated by run_pushover_analysis)
@@ -171,6 +207,28 @@ class AnalysisBuilder:
         defaults.update(self.PUSHOVER_SOLVER_DEFAULTS)
         for k, v in defaults.items():
             self.config.setdefault(k, v)
+
+        # ── LayeredShell gravity substep auto-detection ──────────────
+        # RC models with LayeredShell walls (populated by the Preprocessor
+        # from the config ``shell_layers`` dict) can fail the gravity stage
+        # with a NaN stiffness shock if the full gravity combination is
+        # applied in a single ``LoadControl`` step.  When the mesh has any
+        # LayeredShell section and the user did NOT explicitly set
+        # ``gravity_num_substeps`` in the config, ramp gravity over
+        # LAYERED_SHELL_GRAVITY_SUBSTEPS increments automatically so the
+        # model behaves well out-of-the-box.  An explicit config value
+        # always wins (``_user_set_gravity_substeps`` True).
+        #
+        # Note: ``getattr`` guards are used because some tests construct
+        # the builder via ``AnalysisBuilder.__new__`` (bypassing
+        # ``__init__``) and call ``_set_defaults()`` directly.  In that
+        # path ``_user_set_gravity_substeps`` is absent — defaulting to
+        # ``True`` disables auto-detection so the legacy behaviour is
+        # unchanged for such callers.
+        _user_set = getattr(self, "_user_set_gravity_substeps", True)
+        _mesh = getattr(self, "mesh_model", None)
+        if not _user_set and _mesh is not None and _mesh.layered_shell_sections:
+            self.config["gravity_num_substeps"] = self.LAYERED_SHELL_GRAVITY_SUBSTEPS
 
     # ═══════════════════════════════════════════════════════════════
     # Domain construction
@@ -2955,18 +3013,43 @@ class AnalysisBuilder:
         if algo != "KrylovNewton":
             _algo_chain.append("KrylovNewton")
 
+        # ── Fallback settings (Gap 5) ────────────────────────────
+        # If the primary chain fails (e.g. the fiber-rebuild gravity
+        # solve returning NaN), retry the remaining substeps with
+        # NormUnbalance + relaxed tolerance + ModifiedNewton(-initial).
+        _fallback = sol_cfg.get("pushover_fallback_defaults", self.PUSHOVER_FALLBACK_DEFAULTS)
+        fb_test_type = _fallback.get("solver_test_type", "NormUnbalance")
+        # Units-aware fallback tolerance: scale off the model's
+        # characteristic weight (total mass × g via g_from_units), which
+        # has consistent force units.  An absolute unscaled tolerance
+        # (e.g. 1e-12) is unattainable for full-building residuals.
+        _g = g_from_units(self.units)
+        _fb_total_mass = sum(self.node_masses.values()) if self.node_masses else 0.0
+        if _fb_total_mass > 0:
+            fb_test_tol = max(_fb_total_mass * _g * 1e-6, test_tol * 10.0)
+        else:
+            fb_test_tol = test_tol * 10.0
+        fb_test_iter = max(_fallback.get("solver_test_max_iter", 1000), test_iter * 10)
+        fb_algo = _fallback.get("solver_algorithm", "ModifiedNewton")
+
+        # ── Configure the static analysis once ──────────────────
+        # Do NOT re-create the integrator/analysis between algorithm
+        # attempts.  A failed step rolls back to the last committed
+        # state but the integrator's internal load factor remains at
+        # the last *converged* increment.  Re-creating the analysis (as
+        # historically done) resets that counter to 0, so a partially-
+        # converged attempt (e.g. substeps 1-2 of n_sub=10 succeeded,
+        # then substep 3 failed) forces the next algorithm to *unload*
+        # from load factor 0.2 back to 0.1 — with forceBeamColumn fiber
+        # sections this unloading path produces NaN.  Keeping the same
+        # StaticAnalysis object and switching only the algorithm lets the
+        # load factor continue monotonically 0.1 -> 0.2 -> ... -> 1.0.
         ops.integrator("LoadControl", 1.0 / n_sub)
         ops.analysis("Static")
 
         converged = 0
         ok = -1
         for attempt in _algo_chain:
-            # Reset the integrator before each algorithm attempt.  A failed
-            # Newton step leaves the integrator's load factor advanced past
-            # the converged reference state; switching algorithms without
-            # resetting causes the load factor to accumulate across attempts
-            # (e.g. 1.10 -> 2.09 -> 2.18 ...) and eventually diverge to NaN.
-            ops.integrator("LoadControl", 1.0 / n_sub)
             if isinstance(attempt, tuple):
                 ops.algorithm(*attempt)
             elif attempt == "ModifiedNewton":
@@ -2981,6 +3064,56 @@ class AnalysisBuilder:
                 converged = s + 1
             if ok == 0:
                 break
+
+        if ok != 0:
+            # Relaxed NormUnbalance + ModifiedNewton(-initial) fallback
+            # pass, resuming from the last converged substep *without*
+            # resetting the integrator (same monotonic-load-factor
+            # reasoning as above).
+            ops.test(fb_test_type, fb_test_tol, fb_test_iter)
+            if fb_algo == "ModifiedNewton":
+                ops.algorithm("ModifiedNewton", "-initial")
+            else:
+                ops.algorithm(fb_algo)
+            ok = 0
+            for s in range(converged, n_sub):
+                ok = ops.analyze(1)
+                if ok != 0:
+                    break
+                converged = s + 1
+
+        if ok != 0:
+            # Adaptive substepping (Gap 5): the RC fiber model can
+            # still fail a fixed LoadControl step (e.g. 30% of gravity)
+            # when a column softens between two converged states.  Halve
+            # the load increment and continue monotonically from the last
+            # converged state.  The analysis object stays alive — only
+            # the integrator is swapped — so the load factor continues
+            # 0.2 → 0.225 → 0.25 ... instead of unloading back toward 0
+            # (which produced the original NaN).
+            half_n_sub = n_sub * 2
+            half_inc = 1.0 / half_n_sub
+            done_half = int(round(converged * (half_n_sub / n_sub)))
+            ops.integrator("LoadControl", half_inc)
+            ok = 0
+            for s in range(done_half, half_n_sub):
+                ok = ops.analyze(1)
+                if ok != 0:
+                    break
+                converged = int(round(s + 1) * n_sub / half_n_sub)
+            if ok != 0:
+                # Final fallback: quarter inc (only used when the model is
+                # extremely soft near the target gravity combination).
+                quad_n_sub = n_sub * 4
+                quad_inc = 1.0 / quad_n_sub
+                done_quad = int(round(converged * (quad_n_sub / n_sub)))
+                ops.integrator("LoadControl", quad_inc)
+                ok = 0
+                for s in range(done_quad, quad_n_sub):
+                    ok = ops.analyze(1)
+                    if ok != 0:
+                        break
+                    converged = int(round(s + 1) * n_sub / quad_n_sub)
 
         if ok != 0:
             raise RuntimeError(
@@ -4106,7 +4239,7 @@ class AnalysisBuilder:
         return shapes
 
     def extract_static_element_forces(self) -> dict[int, dict[str, float]]:
-        """Extract element end forces in the **global** coordinate system.
+        """Extract element end forces in the **local** coordinate system.
 
         Must be called **after** :meth:`run_static_analysis`.
 
@@ -4126,27 +4259,34 @@ class AnalysisBuilder:
             # tags stored in frame_tag_map.
             tag = self.frame_tag_map.get(eid, elem.elem_tag)
             try:
-                f = ops.eleResponse(tag, "forces")
+                f = ops.eleResponse(tag, "localForces")
             except Exception:
                 continue
-            f_i_global = np.array([f[0], f[1], f[2]])
-            m_i_global = np.array([f[3], f[4], f[5]])
-            f_j_global = np.array([f[6], f[7], f[8]])
-            m_j_global = np.array([f[9], f[10], f[11]])
+            if len(f) == 1:
+                # Truss elements return a single scalar (local axial force,
+                # tension-positive in OpenSees).  Expand to the standard 12
+                # component row: fx_i = -P, fx_j = +P keeps the result dense
+                # and satisfies force equilibrium (fx_i + fx_j = 0).
+                axial = float(f[0])
+                f = [-axial, 0.0, 0.0, 0.0, 0.0, 0.0, axial, 0.0, 0.0, 0.0, 0.0, 0.0]
+            f_i_local = np.array([f[0], f[1], f[2]])
+            m_i_local = np.array([f[3], f[4], f[5]])
+            f_j_local = np.array([f[6], f[7], f[8]])
+            m_j_local = np.array([f[9], f[10], f[11]])
 
             results[tag] = {
-                "Fx": f_i_global[0],
-                "Fy": f_i_global[1],
-                "Fz": f_i_global[2],
-                "Mx": m_i_global[0],
-                "My": m_i_global[1],
-                "Mz": m_i_global[2],
-                "Fx_j": f_j_global[0],
-                "Fy_j": f_j_global[1],
-                "Fz_j": f_j_global[2],
-                "Mx_j": m_j_global[0],
-                "My_j": m_j_global[1],
-                "Mz_j": m_j_global[2],
+                "Fx": f_i_local[0],
+                "Fy": f_i_local[1],
+                "Fz": f_i_local[2],
+                "Mx": m_i_local[0],
+                "My": m_i_local[1],
+                "Mz": m_i_local[2],
+                "Fx_j": f_j_local[0],
+                "Fy_j": f_j_local[1],
+                "Fz_j": f_j_local[2],
+                "Mx_j": m_j_local[0],
+                "My_j": m_j_local[1],
+                "Mz_j": m_j_local[2],
             }
         return results
 
@@ -4194,10 +4334,12 @@ class AnalysisBuilder:
             if elem_tag is None:
                 continue
             try:
-                f = ops.eleResponse(elem_tag, "forces")
+                f = ops.eleResponse(elem_tag, "section", 1, "forces")
             except Exception:
                 continue
-            # ShellMITC4 returns [fx, fy, fxy, mx, my, mxy, ?, ?]
+            # Shell section forces: [Nx, Ny, Nxy, Mx, My, Mxy, ?, ?]
+            # (per-unit-width resultants — "forces" alone returns the raw
+            # 24-entry local nodal-force vector for shells, not resultants.)
             results[aid] = {
                 "elem_tag": elem_tag,
                 "node_tags": [
@@ -4556,6 +4698,90 @@ class AnalysisBuilder:
         )
         grav_disp = grav_results.get("nodal_displacements", {})
 
+        # ── Gravity diagnostic: reaction summary ────────────────
+        # Report the total applied vs. reacted vertical load so the
+        # user can verify the design gravity combination (λ=1.0) is
+        # actually in place before lateral pushover begins.
+        _lr_check = grav_results.get("load_reaction_check", {})
+        if _lr_check:
+            _applied = _lr_check.get("applied_fz", 0.0)
+            _reaction = _lr_check.get("reaction_fz", 0.0)
+            logger.info(
+                "  Gravity reached λ=1.0 — applied Fz=%.3f, reacted Fz=%.3f, Δ=%.3f",
+                _applied,
+                _reaction,
+                _lr_check.get("delta", 0.0),
+            )
+        if print_progress:
+            _reac = grav_results.get("reactions", {})
+            _sum_fz = sum(float(r.get("fz", 0.0)) for r in _reac.values())
+            _n_full = sum(1 for r in self.mesh_model.restraints.values() if all(r.dofs))
+            print(
+                f"  Gravity converged — total vertical reaction = {_sum_fz:.1f} "
+                f"({_n_full} fully-fixed base node(s))"
+            )
+
+        # ── Gravity diagnostic: concrete/rbar strain check ──────
+        # After gravity converges, probe the extreme fibre strains at
+        # the end sections of every fiber frame element.  Flags any
+        # element whose concrete reaches crushing or rebar reaches
+        # yield under the *design gravity load alone* — a useful
+        # pre-pushover damage assessment.  Purely diagnostic (never
+        # raises); wrapped so a query failure cannot abort the run.
+        try:
+            # threshold defaults — concrete crushing ~ -0.003, rebar
+            # yield from material properties when available
+            _crush_eps = -0.0030
+            _yield_eps = 0.0025
+            _flagged: list[tuple[str, float]] = []
+            _assignments = self.mesh_model.frame_assignments or {}
+            for eid, elem in self.mesh_model.frame_elements.items():
+                tag = self.frame_tag_map.get(eid)
+                if tag is None:
+                    continue
+                sec_name = _assignments.get(eid, "")
+                if not sec_name:
+                    continue
+                _sec = self.mesh_model.sections.get(sec_name)
+                if _sec is None:
+                    continue
+                try:
+                    # first integration-point section deformation
+                    sec_def = ops.eleResponse(int(tag), "section", 1, "deformation")
+                except Exception:
+                    continue
+                if not sec_def or len(sec_def) < 3:
+                    continue
+                # axial strain eps0 + curvature about local z × h/2
+                eps0 = float(sec_def[0])
+                kz = float(sec_def[2])
+                h_guess = 0.5 * float(
+                    getattr(_sec, "h", getattr(_sec, "depth", getattr(_sec, "t3", 0.0))) or 0.5
+                )
+                eps_max = eps0 + kz * h_guess
+                eps_min = eps0 - kz * h_guess
+                if eps_min < _crush_eps:
+                    _flagged.append((str(eid), eps_min))
+                elif eps_max > _yield_eps:
+                    _flagged.append((str(eid), eps_max))
+            if _flagged:
+                logger.warning(
+                    "  ⚠ Gravity-only damage check: %d / %d frame element(s) "
+                    "exceed strain limits (crush < %.4f or yield > %.4f): %s",
+                    len(_flagged),
+                    len(self.frame_tag_map),
+                    _crush_eps,
+                    _yield_eps,
+                    _flagged[:8],
+                )
+            elif print_progress:
+                print(
+                    f"  Gravity-only damage check: 0 / {len(self.frame_tag_map)} "
+                    f"frame element(s) exceed concrete crush / rebar yield strain"
+                )
+        except Exception:
+            logger.debug("  Gravity damage check skipped", exc_info=True)
+
         # ── Control node auto‑select ─────────────────────────────
         if control_node_tag is None:
             candidate = None
@@ -4828,6 +5054,34 @@ class AnalysisBuilder:
                 ok = ops.analyze(1)
                 if ok == 0:
                     break
+
+            # Per-step fallback (Gap 5): on failure, retry once with
+            # relaxed NormUnbalance + ModifiedNewton(-initial), then
+            # restore the primary test settings for subsequent steps.
+            if ok != 0:
+                _fallback = self.config.get(
+                    "pushover_fallback_defaults", self.PUSHOVER_FALLBACK_DEFAULTS
+                )
+                # Units-aware fallback tolerance (see run_static_analysis).
+                _g = g_from_units(self.units)
+                _fb_total_mass = sum(self.node_masses.values()) if self.node_masses else 0.0
+                if _fb_total_mass > 0:
+                    _fb_tol = max(_fb_total_mass * _g * 1e-6, _test_tol * 10.0)
+                else:
+                    _fb_tol = _test_tol * 10.0
+                ops.test(
+                    _fallback.get("solver_test_type", "NormUnbalance"),
+                    _fb_tol,
+                    _fallback.get("solver_test_max_iter", 1000),
+                )
+                _fb_algo = _fallback.get("solver_algorithm", "ModifiedNewton")
+                if _fb_algo == "ModifiedNewton":
+                    ops.algorithm("ModifiedNewton", "-initial")
+                else:
+                    ops.algorithm(_fb_algo)
+                ok = ops.analyze(1)
+                # Restore primary settings for subsequent steps
+                ops.test("NormDispIncr", _test_tol, _test_iter, 0, 2)
 
             statuses.append(ok)
 
@@ -5215,10 +5469,17 @@ def _record_step(
         if ops_tag is None:
             continue
         try:
-            f = ops.eleResponse(ops_tag, "forces")  # 12 values
+            f = ops.eleResponse(ops_tag, "localForces")  # 12 local values
         except Exception:
             continue
-        if len(f) < 12:
+        if len(f) == 1:
+            # Truss elements return a single scalar (local axial force,
+            # tension-positive in OpenSees).  Expand to the standard 12
+            # component row: fx_i = -P, fx_j = +P keeps the result array
+            # dense and maintains force equilibrium.
+            axial = float(f[0])
+            f = [-axial, 0.0, 0.0, 0.0, 0.0, 0.0, axial, 0.0, 0.0, 0.0, 0.0, 0.0]
+        elif len(f) < 12:
             continue
         frame_forces[eid] = {
             "fx_i": f[0],
@@ -5243,10 +5504,12 @@ def _record_step(
         if ops_tag is None:
             continue
         try:
-            f = ops.eleResponse(ops_tag, "forces")  # Shell forces
+            f = ops.eleResponse(ops_tag, "section", 1, "forces")  # Shell resultants
         except Exception:
             continue
-        # ShellNLDKGQ / ShellMITC4 returns at least 6 forces
+        # Section forces return [Nx, Ny, Nxy, Mx, My, Mxy, ?, ?] — the
+        # per-unit-width membrane/bending resultants.  (Plain "forces" on a
+        # shell returns 24 local nodal forces, which must NOT be used here.)
         if len(f) >= 6:
             shell_forces[aid] = {
                 "Nx": f[0],
