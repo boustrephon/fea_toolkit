@@ -299,9 +299,12 @@ static/pp/+X/converged   shape (1,) bool    [True]
 
 Authoring rule for callers of ``write_results_npz()``: put the PP
 payload under a single ``"pp"`` static case with flattened
-``f"{direction}/{field}"`` keys and plain scalar values — no
-``{"value": ...}`` wrappers and no nested per-direction cases (those are
-silently dropped by the writer):
+``f"{direction}/{field}"`` keys and plain scalar values.  A
+``{"value": scalar}`` wrapper is also accepted for a single key, but
+**nested per-direction cases (e.g. ``{"+X": {...}}``) or any other
+dict with more than the ``"value"`` key raise a ``ValueError``** from
+the writer rather than being silently dropped — malformed PP entries
+must be fixed at the call site, not hidden:
 
 ```python
 npz_static["pp"] = {
