@@ -170,11 +170,11 @@ keys:
 
 | Array | Shape | dtype | Description |
 |---|---|---|---|
-| `static/pp/{direction}/D_roof` | `(1,)` | `float` | Roof displacement at PP (model length units, m) |
-| `static/pp/{direction}/V_base` | `(1,)` | `float` | Base shear at PP (model force units, kN) |
-| `static/pp/{direction}/S_dp` | `(1,)` | `float` | Spectral displacement at PP (m) |
-| `static/pp/{direction}/S_ap` | `(1,)` | `float` | Spectral acceleration at PP (m/s²) |
-| `static/pp/{direction}/S_dy`, ``S_ay`` | `(1,)` | `float` | Bilinear yield point (m, m/s²) |
+| `static/pp/{direction}/D_roof` | `(1,)` | `float` | Roof displacement at PP (model length units) |
+| `static/pp/{direction}/V_base` | `(1,)` | `float` | Base shear at PP (model force units) |
+| `static/pp/{direction}/S_dp` | `(1,)` | `float` | Spectral displacement at PP (model length units) |
+| `static/pp/{direction}/S_ap` | `(1,)` | `float` | Spectral acceleration at PP (model acceleration units) |
+| `static/pp/{direction}/S_dy`, ``S_ay`` | `(1,)` | `float` | Bilinear yield point (model length units, model acceleration units) |
 | `static/pp/{direction}/mu` | `(1,)` | `float` | Ductility `S_dp / S_dy` |
 | `static/pp/{direction}/T_eq` | `(1,)` | `float` | Equivalent period at PP (s) |
 | `static/pp/{direction}/beta_eq`, ``B`` | `(1,)` | `float` | Equivalent damping / reduction factor |

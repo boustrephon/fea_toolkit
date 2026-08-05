@@ -88,7 +88,7 @@ config = {
 
 | Config key | Default | Notes |
 |---|---|---|
-| `solver_test_tol` | `1e-6` (general), `1e-4` (pushover) | Relax to `2e-4` for RC + LayeredShell models |
+| `solver_test_tol` | `1e-6` (general), `1e-4` (pushover) | Relax to `2e-4` for RC + LayeredShell models. **The `2e-4` value is specific to the documented kN-m unit system** — for other force/length unit systems it should be scaled from `model.units` (e.g. via the model's characteristic weight `total_mass × g_from_units(units) × 1e-6`, as the builder's automatic fallback does) or derived from the typical residual magnitude in those units. |
 | `solver_test_max_iter` | `10` (general), `20` (pushover), `1000` (automatic fallback) | The pushover path auto-falls back to `ModifiedNewton` with 1000 iterations |
 | `solver_algorithm` | `"Newton"` | Falls back to `ModifiedNewton` automatically |
 | `gravity_num_substeps` | `1` (`10` auto when the model has LayeredShell sections) | Use 5–10 for LayeredShell RC models |

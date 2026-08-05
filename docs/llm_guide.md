@@ -243,17 +243,22 @@ affecting accuracy.
 
 1. **Always** include ``"solver_test_tol": 2e-4`` and
    ``"solver_test_max_iter": 1000`` in the config for RC + LayeredShell
-   pushover runs.
+   pushover runs (the 2e-4 value applies to the documented kN-m unit
+   system; see `docs/pushover_analysis.md` for other unit systems).
 2. **Do NOT** set ``gravity_num_substeps`` manually for LayeredShell
    models — the ``AnalysisBuilder`` **auto-detects** the layered shell
-   sections and sets ``gravity_num_substeps = 10`` automatically
+   sections and uses ``gravity_num_substeps = 10`` automatically
    (``AnalysisBuilder.LAYERED_SHELL_GRAVITY_SUBSTEPS``).  An explicit
-   config value always wins.
+   ``gravity_num_substeps`` config value overrides this auto-detection
+   when needed.
 3. **Verify** the run log shows zero failures:
    `grep -c "analyze failed" run.log  # → 0`.
 4. If a run still fails after these settings, the builder's built-in
-   fallback chain (NormUnbalance + ModifiedNewton + adaptive
-   substepping) automatically kicks in — no manual intervention needed.
+   per-step fallback (relaxed ``NormUnbalance`` tolerance +
+   ``ModifiedNewton -initial``, then restore the primary settings)
+   automatically kicks in for the pushover loop — no manual intervention
+   needed.  The gravity stage additionally adapts by halving/quartering
+   the load increment on failure.
 5. Use the ``venv_opensees`` Python environment for these models — the
    stock interpreter produced NaN results in the LayeredShell gravity
    stage.
