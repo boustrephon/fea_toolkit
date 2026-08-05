@@ -1784,3 +1784,195 @@ class TestFrameForceEvolution:
         )
         assert fig is not None
         plt.close(fig)
+
+
+class TestAnimationTimerCallbackArity:
+    """Regression tests for PyVista ``add_timer_event`` callback arity.
+
+    PyVista >= 0.44 invokes ``add_timer_event`` callbacks with **two**
+    positional arguments ``(step, plotter)``, while older versions pass
+    ``(step,)`` or nothing.  The toolkit's callbacks accept ``()``
+    (``_timer_callback`` in ``animate_pushover_deformation``) or
+    ``(step)`` (mode-shape callbacks in ``plot_mode_animation`` and
+    ``plot_mode_3d``).  ``_add_animation_timer`` must adapt the callback
+    so the correct number of arguments is forwarded regardless of the
+    installed PyVista version — otherwise the classic
+    ``TypeError: callback() takes N positional arguments but M were given``
+    breaks mode animations on newer PyVista.
+    """
+
+    @staticmethod
+    def _make_fake_plotter(register_as):
+        """Build a minimal fake plotter that records how the timer is registered.
+
+        Simulates each of the three registration paths in ``_add_animation_timer``:
+
+        - ``"pyvista_2arg"`` — modern PyVista: ``add_timer_event`` succeeds on
+          the first attempt (callback accepted as keyword).
+        - ``"pyvista_no_interval"`` — older PyVista: the first call with the
+          ``interval`` kwarg raises ``TypeError``; the retry without it succeeds.
+        - ``"vtek"`` — both ``add_timer_event`` attempts raise, so the helper
+          falls through to the low-level VTK ``AddObserver`` path.
+        """
+
+        class _FakeInteractor:
+            def __init__(self, plotter_ref):
+                self.plotter_ref = plotter_ref
+                self._observers = []
+
+            def AddObserver(self, event, callback):
+                self._observers.append((event, callback))
+                self.plotter_ref.observer_added = True
+
+            def CreateRepeatingTimer(self, interval_ms):
+                self.plotter_ref.timer_created = True
+                self.plotter_ref.interval_ms = interval_ms
+
+        class _FakePlotter:
+            def __init__(self, mode):
+                self.mode = mode
+                self.method_calls = []
+                self.observer_added = False
+                self.timer_created = False
+                self.registered_callback = None
+                self.render_window = self  # iren lookup uses plotter.render_window
+                self._interactor = _FakeInteractor(self)
+
+            def add_timer_event(self, *args, **kwargs):
+                self.method_calls.append(("add_timer_event", args, kwargs))
+                if self.mode == "vtek":
+                    # No timer API available — force VTK fallback.
+                    raise AttributeError("no add_timer_event")
+                if self.mode == "pyvista_no_interval" and "interval" in kwargs:
+                    # Older PyVista rejects the interval kwarg.
+                    raise TypeError("interval not supported")
+                self.registered_callback = kwargs.get("callback")
+
+            def GetInteractor(self):
+                return self._interactor
+
+        fp = _FakePlotter(register_as)
+        return fp
+
+    def _invoke_registered_callback(self, fake_plotter, register_as, pyvista_args):
+        """Simulate PyVista calling the registered callback with *pyvista_args*.
+
+        For the modern/older paths the callback was stored by
+        ``add_timer_event``; for the VTK path it was stored via
+        ``AddObserver("TimerEvent", ...)``.
+        """
+        if register_as == "vtek":
+            assert fake_plotter.observer_added, "VTK observer was not added"
+            event, cb = fake_plotter._interactor._observers[0]
+            assert event == "TimerEvent"
+            # VTK passes (caller, event) — no step meaning.
+            return cb("vtk_caller", "TimerEvent")
+
+        assert fake_plotter.registered_callback is not None, "callback not registered"
+        return fake_plotter.registered_callback(*pyvista_args)
+
+    def test_one_arg_callback_receives_two_pyvista_args(self):
+        """A ``callback(step)`` must tolerate PyVista passing ``(step, plotter)``."""
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        calls = []
+
+        def callback(step):
+            calls.append(step)
+            return step
+
+        fp = self._make_fake_plotter("pyvista_2arg")
+        _add_animation_timer(fp, callback, max_steps=10, interval_ms=17)
+        out = self._invoke_registered_callback(fp, "pyvista_2arg", (3, "plotter_obj"))
+        assert out == 3
+        assert calls == [3]
+
+    def test_zero_arg_callback_receives_two_pyvista_args(self):
+        """A ``callback()`` (pushover timer) must tolerate 2 PyVista args."""
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        calls = []
+
+        def callback():
+            calls.append(1)
+
+        fp = self._make_fake_plotter("pyvista_2arg")
+        _add_animation_timer(fp, callback, max_steps=10, interval_ms=17)
+        self._invoke_registered_callback(fp, "pyvista_2arg", (3, "plotter_obj"))
+        assert calls == [1]
+
+    def test_varargs_callback_receives_all_pyvista_args(self):
+        """A ``callback(*args)`` receives both step and plotter."""
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        received = []
+
+        def callback(*args):
+            received.append(args)
+            return args
+
+        fp = self._make_fake_plotter("pyvista_2arg")
+        _add_animation_timer(fp, callback, max_steps=10, interval_ms=17)
+        out = self._invoke_registered_callback(fp, "pyvista_2arg", (5, "plotter_obj"))
+        assert out == (5, "plotter_obj")
+        assert received == [(5, "plotter_obj")]
+
+    def test_one_arg_callback_older_pyvista_no_interval(self):
+        """Older PyVista (no interval kwarg) — callback still adapted."""
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        calls = []
+
+        def callback(step):
+            calls.append(step)
+
+        fp = self._make_fake_plotter("pyvista_no_interval")
+        _add_animation_timer(fp, callback, max_steps=10, interval_ms=17)
+        self._invoke_registered_callback(fp, "pyvista_no_interval", (2,))
+        assert calls == [2]
+
+    def test_vtk_fallback_supplies_incrementing_step(self):
+        """VTK TimerEvent passes (caller, event) with no step count — a
+        ``callback(step)`` must receive an internal incrementing counter so
+        the sine-phase oscillation actually progresses."""
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        calls = []
+
+        def callback(step):
+            calls.append(step)
+
+        fp = self._make_fake_plotter("vtek")
+        _add_animation_timer(fp, callback, max_steps=10, interval_ms=17)
+        self._invoke_registered_callback(fp, "vtek", ("caller", "TimerEvent"))
+        self._invoke_registered_callback(fp, "vtek", ("caller", "TimerEvent"))
+        # Internal counter increments on each tick (starts at 1).
+        assert calls == [1, 2], f"Expected incrementing steps, got {calls}"
+
+    def test_vtk_fallback_supplies_no_args_to_zero_arg_callback(self):
+        """A zero-argument callback (pushover ``_timer_callback``) is invoked
+        with **no** args on the VTK fallback path."""
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        calls = []
+
+        def callback():
+            calls.append(1)
+
+        fp = self._make_fake_plotter("vtek")
+        _add_animation_timer(fp, callback, max_steps=10, interval_ms=17)
+        self._invoke_registered_callback(fp, "vtek", ("caller", "TimerEvent"))
+        assert calls == [1]
+
+    def test_vtk_fallback_sets_repeating_timer(self):
+        """VTK fallback creates the repeating timer with the interval."""
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        def callback(step):
+            return step
+
+        fp = self._make_fake_plotter("vtek")
+        _add_animation_timer(fp, callback, max_steps=10, interval_ms=33)
+        assert fp.observer_added
+        assert fp.timer_created
+        assert fp.interval_ms == 33
