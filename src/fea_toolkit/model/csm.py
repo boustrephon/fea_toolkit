@@ -961,7 +961,10 @@ def pushover_to_adrs(
         * ``'Gamma'`` — participation factor.
         * ``'M_eff'`` — effective modal mass.
         * ``'phi_control'`` — control-node mode shape ordinate.
-        * ``'best_mode'`` — selected mode index.
+        * ``'best_mode'`` — selected mode index (**0‑based**, matching
+          the ``mode_shapes`` key space and OpenSees mode numbering
+          minus one; display as ``best_mode + 1`` for a 1‑based mode
+          number).
     """
     # Use best mode (highest mass participation in push direction)
     masses = modal_results.get("nodal_masses", {})
@@ -978,31 +981,42 @@ def pushover_to_adrs(
         )
     dir_idx = {"X": 0, "Y": 1, "Z": 2}[_base_dir]
 
-    # Total physical mass (used to reject degenerate modes whose push-
-    # direction component vanishes to machine noise).
-    M_total = sum(masses.values())
-
-    # Find the mode with highest participation in the push direction
+    # Find the mode with highest participation in the push direction.
+    #
+    # Two-pass selection: first compute (L, M_star) for every mode and
+    # record the maximum modal kinetic energy M_star_max.  Modes whose
+    # push-direction kinetic energy is negligible relative to the best
+    # mode are excluded *before* evaluating the participation ratio
+    # L²/M_star.  This matters because the ratio is scale-invariant but
+    # numerically ill-conditioned when M_star ≈ 0: eigenvector-
+    # normalization noise in a mode that barely displaces in the push
+    # direction (e.g. a 0.3 %-participation torsional mode out-ranking
+    # the true 62 % sway mode of a 3D building) makes L²/M_star
+    # spuriously large, so a naive max selection picks the wrong mode
+    # and corrupts the S_a/S_d scaling of the whole CSM curve.  The
+    # threshold is measured against M_star_max (same eigenvector
+    # normalization) rather than the absolute total mass, which is
+    # normalization-dependent.
     best_mode = 0
     best_participation = 0.0
     mode_accepted = False
+
+    _stats: list[tuple[int, float, float]] = []
+    _m_star_max = 0.0
     for mode_idx, shape in mode_shapes.items():
-        # Compute participation factor L/M*
         L, M_star = _modal_participation(shape, masses, dir_idx)
-        if M_star > 0:
-            # Reject modes whose push-direction component carries
-            # negligible kinetic energy (M_star much less than M_total).
-            # For such modes L and M_star are both ~machine-noise zeros
-            # and their ratio L^2/M_star is numerically ill-conditioned,
-            # producing spuriously large "participation" values that can
-            # win the selection over the true push-direction mode.
-            # Note: this is a *directional relevance* filter, not a
-            # zero-energy (rigid-body) mode test — the mode itself is
-            # structurally valid but simply does not displace in the
-            # push direction (e.g. the Y-sway mode of a 2D X–Z frame,
-            # where ux ≈ machine noise but uy is fully developed).
-            if M_total > 0 and M_star < 1e-8 * M_total:
-                continue
+        _stats.append((mode_idx, L, M_star))
+        _m_star_max = max(_m_star_max, M_star)
+
+    # Reject modes carrying < 1 % of the best mode's push-direction
+    # kinetic energy (M_star = Σ mᵢ φᵢ²).  1 % is far below the
+    # 30–60 % of a genuine sway mode but safely above the ~1e-3
+    # relative level of the numerically contaminated modes observed
+    # with real 3D building models.
+    _min_m_star = _m_star_max * 1e-2
+
+    for mode_idx, L, M_star in _stats:
+        if M_star > 0 and M_star >= _min_m_star:
             mode_accepted = True
             participation = L**2 / M_star
             if participation > best_participation:
