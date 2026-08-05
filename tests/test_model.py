@@ -4741,6 +4741,7 @@ class TestCsmModule:
                 "partiMassMX": [800.0, 100.0],
             },
             "periods": [0.5, 0.1],
+            "nodal_masses": {1: 1000.0},
         }
         shapes = {0: {1: (1.0, 0.0, 0.0)}, 1: {1: (0.0, 1.0, 0.0)}}
 
@@ -4769,6 +4770,7 @@ class TestCsmModule:
                 "partiMassMX": [800.0, 150.0],
             },
             "periods": [0.5, 0.12],
+            "nodal_masses": {1: 1000.0},
         }
         shapes = {0: {1: (1.0, 0.0, 0.0)}, 1: {1: (0.0, 1.0, 0.0)}}
         periods = [0.0, 0.1, 0.2, 0.5, 1.0, 2.0, 3.0]
@@ -4817,6 +4819,7 @@ class TestCsmModule:
                 "partiMassMX": [800.0],
             },
             "periods": [0.5],
+            "nodal_masses": {1: 1000.0},
         }
         shapes = {0: {1: (1.0, 0.0, 0.0)}}
         with pytest.raises(ValueError, match=r"too few|Too few"):

@@ -977,15 +977,15 @@ def pushover_to_adrs(
     if _base_dir not in ("X", "Y", "Z"):
         raise ValueError(
             f"Unsupported push direction: {direction!r}. "
-            f"Expected one of 'X', 'Y', 'Z', '+X', '-X', '+Y', '-Y'."
+            f"Expected one of 'X', 'Y', 'Z', '+X', '-X', '+Y', '-Y', '+Z', '-Z'."
         )
     dir_idx = {"X": 0, "Y": 1, "Z": 2}[_base_dir]
 
     # Find the mode with highest participation in the push direction.
     #
     # Two-pass selection: first compute (L, M_star) for every mode and
-    # record the maximum modal kinetic energy M_star_max.  Modes whose
-    # push-direction kinetic energy is negligible relative to the best
+    # record the maximum modal effective mass M_star_max.  Modes whose
+    # push-direction effective mass is negligible relative to the best
     # mode are excluded *before* evaluating the participation ratio
     # L²/M_star.  This matters because the ratio is scale-invariant but
     # numerically ill-conditioned when M_star ≈ 0: eigenvector-
@@ -995,8 +995,9 @@ def pushover_to_adrs(
     # spuriously large, so a naive max selection picks the wrong mode
     # and corrupts the S_a/S_d scaling of the whole CSM curve.  The
     # threshold is measured against M_star_max (same eigenvector
-    # normalization) rather than the absolute total mass, which is
-    # normalization-dependent.
+    # normalization) rather than the absolute total mass — this is
+    # only meaningful when all mode shapes share a common
+    # normalization.
     best_mode = 0
     best_participation = 0.0
     mode_accepted = False
@@ -1009,7 +1010,7 @@ def pushover_to_adrs(
         _m_star_max = max(_m_star_max, M_star)
 
     # Reject modes carrying < 1 % of the best mode's push-direction
-    # kinetic energy (M_star = Σ mᵢ φᵢ²).  1 % is far below the
+    # effective modal mass (M_star = Σ mᵢ φᵢ²).  1 % is far below the
     # 30–60 % of a genuine sway mode but safely above the ~1e-3
     # relative level of the numerically contaminated modes observed
     # with real 3D building models.
@@ -1025,37 +1026,33 @@ def pushover_to_adrs(
 
     if not mode_accepted:
         # Every mode was rejected as degenerate (no mode carries
-        # meaningful kinetic energy in the push direction — e.g. when
-        # ``num_modes`` is too small to reach the true push-direction
-        # mode).  Fall back to unit values rather than silently using a
-        # rejected mode whose L/M* ratio is numerically ill-conditioned
-        # and produces a spuriously large Gamma.
-        warnings.warn(
-            "pushover_to_adrs: no mode has meaningful participation in "
-            f"direction {direction!r} — increase num_modes or restrain out-of-plane "
-            "degrees of freedom. Falling back to Gamma=1.0, M_eff=1.0.",
-            UserWarning,
-            stacklevel=2,
+        # meaningful effective modal mass in the push direction — e.g.
+        # when ``num_modes`` is too small to reach the true
+        # push-direction mode).  A unit-value fallback (Gamma = 1.0,
+        # M_eff = 1.0) is NOT used: M_eff would be dimensionless rather
+        # than a mass, and the resulting S_a / S_d / T_eq would not be
+        # valid CSM quantities.  Fail loudly instead.
+        raise ValueError(
+            "pushover_to_adrs: no mode has meaningful effective modal "
+            f"mass in direction {direction!r} — increase num_modes or "
+            "restrain out-of-plane degrees of freedom. S_a, S_d, and "
+            "T_eq cannot be computed without a physical equivalent mode."
         )
-        # Fall through with unit values so the ADRS curve is still
-        # produced from the physical pushover data (identity conversion:
-        # S_a = V, S_d = δ).
-        M_star = 1.0
-        L = 1.0
-        best_shape = {}
-        Gamma = 1.0
-        M_eff = 1.0
-        phi_control = 1.0
     else:
         # Extract the best mode shape
         best_shape = mode_shapes.get(best_mode, {})
         L, M_star = _modal_participation(best_shape, masses, dir_idx)
 
         if M_star <= 0:
-            # Fallback: no masses or mode shapes — use unit values
-            Gamma = 1.0
-            M_eff = 1.0
-            phi_control = 1.0
+            # No masses or mode shapes — the unit-value identity
+            # (Gamma = 1.0, M_eff = 1.0) is dimensionally invalid
+            # (M_eff must be a mass) and would corrupt S_a / S_d /
+            # T_eq.  Fail loudly instead.
+            raise ValueError(
+                "pushover_to_adrs: selected mode has non-positive "
+                f"effective modal mass in direction {direction!r} "
+                "— missing nodal masses or degenerate mode shape."
+            )
         else:
             Gamma = L / M_star
             M_eff = L**2 / M_star
