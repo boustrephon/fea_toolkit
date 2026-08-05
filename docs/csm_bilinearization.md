@@ -218,8 +218,8 @@ pushover curve (base shear V vs roof displacement δ) into spectral
 coordinates using a **single equivalent-SDOF mode**:
 
 ```text
-S_a = V / M_eff          # m/s²
-S_d = δ / (Γ · φ_control)
+S_a = |V| / M_eff        # m/s²
+S_d = |δ| / (Γ · φ_control)
 ```
 
 where:
@@ -228,6 +228,16 @@ where:
 - `Γ` = participation factor = `L / M*`
 - `φ_control` = mode-shape ordinate at the control/roof node
 - `L = Σ m_i φ_i` and `M* = Σ m_i φ_i²` (summed over the push direction)
+
+**Sign convention**: `pushover_to_adrs()` converts the signed base-shear
+and roof-displacement arrays to **magnitudes** (`abs(V)`, `abs(δ)`) before
+forming the nonnegative ADRS coordinates `S_a`, `S_d`.  The physical
+push direction (`+X`, `-X`, `+Y`, `-Y`) is **not** embedded in these
+scalars — it is retained in the caller's directional stack entry (e.g.
+the ``"-X"`` key of a per-direction results dict) and in the signed
+``control_disp`` / ``base_shear`` arrays returned alongside the ADRS
+coordinates.  Directional stack entries therefore carry the sign;
+ADRS coordinates are always nonnegative magnitudes.
 
 ### Which mode is selected?
 
@@ -251,11 +261,11 @@ corrupts the S_a / S_d scaling of the entire CSM curve.
 To prevent this, :func:`~fea_toolkit.model.csm.pushover_to_adrs`
 performs a **two-pass selection**:
 
-1. **Pass 1 — compute every mode's kinetic energy.**  For each mode
-   shape, compute `(L, M*)` for the push direction and record the
-   maximum modal kinetic energy `M*_max` across all modes.
+1. **Pass 1 — compute every mode's effective modal mass.**  For each
+   mode shape, compute `(L, M*)` for the push direction and record the
+   maximum modal effective mass `M*_max` across all modes.
 2. **Pass 2 — reject low-participation modes.**  Any mode whose
-   push-direction kinetic energy `M*` is below
+   push-direction effective modal mass `M*` is below
    `1 % of M*_max` is excluded *before* evaluating the participation
    ratio.  Then the mode with the highest `L² / M*` among the
    survivors is selected.
@@ -263,14 +273,21 @@ performs a **two-pass selection**:
 The `1 %` threshold is far below the 30–60 % that characterises a
 genuine sway mode, yet safely above the ~`1e-3` relative level of the
 numerically contaminated modes observed with real 3D building models.
-The threshold is measured against `M*_max` (same eigenvector
-normalisation) rather than the absolute total mass, which keeps the
-criterion normalisation-independent.
+This threshold is **only meaningful when all mode shapes use a common
+normalization** (e.g. mass-normalised eigenvectors); with inconsistent
+normalizations the ratio `M* / M*_max` is normalization-dependent and
+must not be compared across modes.  Callers must ensure the supplied
+`mode_shapes` are commonly normalized before relying on the 1 %
+filter — or replace the threshold with a scale-invariant directional
+metric (e.g. load participation `L / M*` normalised by total mass).
 
-If *every* mode is rejected (no mode carries meaningful kinetic energy
-in the push direction — e.g. too few modes requested), a warning is
-raised and the function falls back to `Γ = 1.0`, `M_eff = 1.0`
-(identity scaling: `S_a = V`, `S_d = δ`).
+If *every* mode is rejected (no mode carries meaningful effective mass
+in the push direction — e.g. too few modes requested), the function
+raises a `ValueError` and returns **no** `S_a`, `S_d`, or `T_eq` —
+these quantities are meaningless without a physical equivalent mode.
+A unit-value fallback (`Γ = 1.0`, `M_eff = 1.0`) is **not** used, since
+`M_eff` would be dimensionless (1.0) rather than a mass and the
+resulting ADRS coordinates would be invalid CSM quantities.
 
 ### Why this matters for the CSM results
 
