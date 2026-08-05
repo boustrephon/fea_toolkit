@@ -1237,6 +1237,30 @@ def group_shell_forces_by_section(
     if len(shell_sap_ids) == 0:
         return pd.DataFrame(columns=["section", "parent", "row", "n_subs", "Nxy_avg", "Ny_avg"])
 
+    # Validate the response arrays before indexing: both must be 2-D
+    # with shape ``(N_step, len(shell_sap_ids))`` and ``step_idx`` must
+    # lie within the available step range.
+    for arr_name, arr in (("shell_Nxy", shell_Nxy), ("shell_Ny", shell_Ny)):
+        if not isinstance(arr, np.ndarray) or arr.ndim != 2:
+            raise ValueError(
+                f"{arr_name} must be a 2-D array of shape "
+                f"(N_step, {len(shell_sap_ids)}); got "
+                f"{getattr(arr, 'shape', type(arr).__name__)}."
+            )
+        if arr.shape[1] != len(shell_sap_ids):
+            raise ValueError(
+                f"{arr_name} second dimension must equal the number of shell "
+                f"IDs ({len(shell_sap_ids)}); got shape {arr.shape}."
+            )
+    n_steps = shell_Nxy.shape[0]
+    if shell_Ny.shape[0] != n_steps:
+        raise ValueError(
+            f"shell_Nxy and shell_Ny must share the same step count; "
+            f"got {shell_Nxy.shape} vs {shell_Ny.shape}."
+        )
+    if not (0 <= step_idx < n_steps):
+        raise ValueError(f"step_idx={step_idx} is out of range for {n_steps} available steps.")
+
     groups: dict[tuple[str, str, str], list[int]] = {}
     order: list[tuple[str, str, str]] = []
     for j, (sid_raw, pid_raw) in enumerate(zip(shell_sap_ids, shell_parent_sap_id)):

@@ -184,9 +184,12 @@ src/fea_toolkit/plotting/viz.py:
   (τ/τcap ≈ 1.3-1.7) — the demand is genuine, concentrated at the wall
   base.  Engineering actions: wall-section thickening / increased web
   shear reinforcement (rho_sh) / alternative layout.
-- **Next (Phase B, toolkit)**: generalise the grouping into
+- **Phase B (toolkit) — done**: the grouping is generalised in
   `src/fea_toolkit/model/storey_response.py` as
   `group_shell_forces_by_section(shell_sap_ids, shell_parent_sap_id,
-  shell_Nxy, shell_Ny, step_idx)` using the NPZ `shell_parent_sap_id`
-  array (not naming-convention parsing), with a unit test in
+  shell_Nxy, shell_Ny, step_idx)`, using the NPZ `shell_parent_sap_id`
+  array (not naming-convention parsing), with unit tests in
   `tests/test_storey_response.py` on a fabricated 2x2 quad mesh.
+  Remaining gaps: none known for the grouping helper itself — the
+  sectional-average demand ratios above still need engineering action
+  (wall thickening / rho_sh / alternative layout).
