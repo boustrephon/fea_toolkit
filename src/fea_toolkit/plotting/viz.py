@@ -650,27 +650,90 @@ def _add_animation_timer(
 ) -> None:
     """Attach a repeating timer to a PyVista plotter for animation.
 
-    Handles PyVista version differences:
+    Handles PyVista version differences in **both** the registration API
+    and the callback signature:
 
-    * Newer PyVista (v0.44+): ``plotter.add_timer_event(max_steps=...,
-      interval=..., callback=...)`` — accepts named kwargs.
-    * Older PyVista: ``plotter.add_timer_event(max_steps=..., interval=...,
-      callback=...)`` — certain versions reject the ``interval`` kwarg,
-      in which case we retry without it.
-    * Fallback: attempts low-level VTK ``iren.add_observer('TimerEvent', ...)``.
+    * PyVista < 0.44: ``add_timer_event`` invokes the callback with no
+      arguments (or a single ``step`` argument depending on version).
+    * PyVista >= 0.44: ``add_timer_event`` invokes the callback with two
+      positional arguments ``(step, plotter)``.
+
+    The caller's callback may accept 0, 1, or 2 positional arguments
+    (``f()``, ``f(step)``, or ``f(step, plotter)``).  This helper adapts
+    the callback so the correct number of arguments is forwarded no
+    matter what the installed PyVista version passes — preventing the
+    classic ``TypeError: callback() takes N positional arguments but M
+    were given`` that otherwise breaks mode-shape and pushover
+    animations on newer PyVista.
+
+    Registration strategies (in order):
+      1. Modern PyVista: ``plotter.add_timer_event(max_steps=...,
+         interval=..., callback=...)``.
+      2. Older PyVista without ``interval`` kwarg support.
+      3. Low-level VTK ``iren.AddObserver("TimerEvent", ...)``.
 
     If none succeed, a brief message is printed and animation proceeds
     via the slider widget alone.
 
     Args:
         plotter: A PyVista ``Plotter`` instance.
-        callback: Zero-argument function called on each timer tick.
+        callback: Callback invoked on each timer tick.  May accept 0, 1,
+            or 2 positional arguments (``()``, ``(step,)``, or
+            ``(step, plotter)``).
         max_steps: Maximum timer events before auto-stopping.
         interval_ms: Timer interval in milliseconds.
     """
+    import inspect
+
+    # ── Adapt the callback to however many positional args the timer passes ──
+    try:
+        _sig = inspect.signature(callback)
+        _n_pos = sum(
+            1
+            for p in _sig.parameters.values()
+            if p.kind
+            in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        )
+        _has_varargs = any(
+            p.kind == inspect.Parameter.VAR_POSITIONAL for p in _sig.parameters.values()
+        )
+    except (TypeError, ValueError):  # not introspectable (e.g. C-bound)
+        _n_pos = 1
+        _has_varargs = True
+
+    def _adapted(*args: Any) -> Any:
+        """Forward the right number of positional args to the user callback.
+
+        PyVista's ``add_timer_event`` invokes the callback with
+        ``(step, plotter)`` on v0.44+ and ``(step,)`` (or nothing) on
+        older versions.  ``args`` (if any) are step-count values, so
+        truncating to the callback's arity is always safe.
+        """
+        if _has_varargs or len(args) <= _n_pos:
+            return callback(*args)
+        return callback(*args[:_n_pos])
+
+    _vtk_step = [0]  # mutable closure — VTK TimerEvent has no step count
+
+    def _vtk_adapted(*_args: Any) -> Any:
+        """VTK ``TimerEvent`` observer — forwards ``(caller, event)``.
+
+        The ``caller``/``event`` positional arguments are discarded: they
+        carry no step-count meaning, and toolkit callbacks never require
+        the VTK caller object.  For a callback that expects a step count
+        (e.g. ``plot_mode_animation``'s ``callback(step)``, which computes
+        a sine phase), an internal incrementing counter is supplied so the
+        oscillation actually progresses; zero-argument callbacks (e.g. the
+        pushover ``_timer_callback``) are invoked with no arguments.
+        """
+        if _n_pos >= 1:
+            _vtk_step[0] += 1
+            return callback(_vtk_step[0])
+        return callback()
+
     # Strategy 1: modern PyVista with named kwargs
     try:
-        plotter.add_timer_event(max_steps=max_steps, interval=interval_ms, callback=callback)
+        plotter.add_timer_event(max_steps=max_steps, interval=interval_ms, callback=_adapted)
         return
     except TypeError:
         pass  # fall through
@@ -679,7 +742,7 @@ def _add_animation_timer(
 
     # Strategy 2: older PyVista — try positional args, or without interval
     try:
-        plotter.add_timer_event(max_steps=max_steps, callback=callback)
+        plotter.add_timer_event(max_steps=max_steps, callback=_adapted)
         return
     except TypeError:
         pass
@@ -689,7 +752,7 @@ def _add_animation_timer(
     # Strategy 3: VTK-level observer (most compatible)
     try:
         iren = plotter.render_window.GetInteractor()
-        iren.AddObserver("TimerEvent", callback)
+        iren.AddObserver("TimerEvent", _vtk_adapted)
         iren.CreateRepeatingTimer(interval_ms)
         return
     except Exception:
@@ -4575,7 +4638,13 @@ def plot_mode_animation(
         if dx is None or mode >= dx.shape[1]:
             print(f"No mode shape data for mode {mode} in NPZ.")
             return None
-        tags = list(source.get("node_tag", []))
+        # Row alignment: the N_node × N_mode mode arrays are written in
+        # SORTED node-tag order (see npz_writer._collect_modal), which does
+        # not match the geometry ``node_tag`` array (MeshModel dict order).
+        # Prefer the explicit ``modal/node_tag`` row-alignment array when
+        # present; fall back to the geometry node_tag for legacy NPZ files
+        # where the two orders happened to coincide.
+        tags = list(source.get("modal/node_tag", source.get("node_tag", [])))
         mode_shapes = {
             mode: {
                 int(tags[i]): (float(dx[i, mode]), float(dy[i, mode]), float(dz[i, mode]))
@@ -5045,7 +5114,27 @@ def _extract_npz_frame_forces(source, case_prefix, frames):
     """Build force_map from NPZ arrays for the given static case.
 
     Returns ``{idx: {Fx, Fy, Fz, Mx, My, Mz, Fx_j, ..., local variants}}``.
+
+    When the NPZ declares ``forces_coordinate_system == "local"`` (the
+    current schema — the recorders use OpenSees ``localForces``), the
+    ``fx_i ... mz_j`` arrays are already in the element local coordinate
+    system.  The ``*_i_local`` / ``*_j_local`` variant keys are then
+    populated from those arrays directly so
+    :func:`_compute_local_forces` uses them verbatim (no second
+    rotation).  Legacy global-force NPZ files (no metadata key) keep
+    the old behaviour.
     """
+    import numpy as np
+
+    _cs_val = None
+    _cs_arr = source.get("forces_coordinate_system")
+    if _cs_arr is not None:
+        try:
+            _cs_val = str(np.asarray(_cs_arr).ravel()[0])
+        except Exception:
+            _cs_val = None
+    _forces_local = _cs_val == "local"
+
     force_map = {}
     qty_list = ["fx", "fy", "fz", "mx", "my", "mz"]
     for idx in range(len(frames)):
@@ -5060,12 +5149,20 @@ def _extract_npz_frame_forces(source, case_prefix, frames):
             if arr_j is not None and idx < len(arr_j):
                 entry[f"{q.upper()}_j"] = float(arr_j[idx])
             # Local variants
-            loc_i = f"{case_prefix}{q}_i_local"
-            loc_j = f"{case_prefix}{q}_j_local"
-            if loc_i in source:
-                entry[f"{q.upper()}_i_local"] = float(source[loc_i][idx])
-            if loc_j in source:
-                entry[f"{q.upper()}_j_local"] = float(source[loc_j][idx])
+            if _forces_local:
+                # Forces are already stored in local coordinates — expose
+                # them under the local variant keys directly.
+                if arr_i is not None and idx < len(arr_i):
+                    entry[f"{q.upper()}_i_local"] = float(arr_i[idx])
+                if arr_j is not None and idx < len(arr_j):
+                    entry[f"{q.upper()}_j_local"] = float(arr_j[idx])
+            else:
+                loc_i = f"{case_prefix}{q}_i_local"
+                loc_j = f"{case_prefix}{q}_j_local"
+                if loc_i in source:
+                    entry[f"{q.upper()}_i_local"] = float(source[loc_i][idx])
+                if loc_j in source:
+                    entry[f"{q.upper()}_j_local"] = float(source[loc_j][idx])
         if entry:
             force_map[idx] = entry
     return force_map
@@ -6292,6 +6389,18 @@ def _load_npz_for_plotting(npz_path: str, combo: str = None) -> dict:
     lu = d.get("length_unit")
     length_unit = str(lu[0]) if lu is not None and len(lu) else "?"
 
+    # Current NPZ schema stores frame end forces in the element LOCAL
+    # coordinate system (OpenSees "localForces").  When the metadata key
+    # says so, the bare ``fx_i ... mz_j`` arrays are local — expose them
+    # under the ``*_i_local`` / ``*_j_local`` variant keys below.
+    _cs_arr = d.get("forces_coordinate_system")
+    _forces_local = False
+    if _cs_arr is not None:
+        try:
+            _forces_local = str(np.asarray(_cs_arr).ravel()[0]) == "local"
+        except Exception:
+            _forces_local = False
+
     # Node coords lookup
     nid = d.get("node_tag", np.array([]))
     nx = d.get("node_x", np.array([]))
@@ -6342,8 +6451,17 @@ def _load_npz_for_plotting(npz_path: str, combo: str = None) -> dict:
         for q in ("fx", "fy", "fz", "mx", "my", "mz"):
             loc_i = f"{pre}{q}_i_local"
             loc_j = f"{pre}{q}_j_local"
-            entry[f"{q}_i_local"] = float(d[loc_i][i]) if loc_i in d else np.nan
-            entry[f"{q}_j_local"] = float(d[loc_j][i]) if loc_j in d else np.nan
+            if _forces_local:
+                # Bare arrays are already local — mirror them into the
+                # local variant keys so ``use_local=True`` consumers read
+                # verified local values without re-transformation.
+                arr_i = d.get(f"{pre}{q}_i")
+                arr_j = d.get(f"{pre}{q}_j")
+                entry[f"{q}_i_local"] = float(arr_i[i]) if arr_i is not None else np.nan
+                entry[f"{q}_j_local"] = float(arr_j[i]) if arr_j is not None else np.nan
+            else:
+                entry[f"{q}_i_local"] = float(d[loc_i][i]) if loc_i in d else np.nan
+                entry[f"{q}_j_local"] = float(d[loc_j][i]) if loc_j in d else np.nan
         elem_data.append(entry)
 
     return {
