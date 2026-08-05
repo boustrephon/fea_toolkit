@@ -1191,6 +1191,10 @@ def parse_pushover_results(
 
     summed_rx: Optional[np.ndarray] = None
     ref_time: Optional[np.ndarray] = None
+    # Read every readable file once, then choose the LONGEST time grid
+    # available as the reference so records that extend beyond the first
+    # (or any shorter) file are not truncated.
+    _series_list = []
     for p in reaction_paths:
         if not os.path.exists(p):
             continue
@@ -1198,23 +1202,39 @@ def parse_pushover_results(
             t_vals, r_vals = _read_reaction_series(p)
             if len(t_vals) == 0:
                 continue
-            if ref_time is None:
-                # First available file defines the reference time grid;
-                # subsequent files are interpolated onto it so reactions
-                # from all base nodes align even if steps differ slightly.
+            _series_list.append((t_vals, r_vals))
+            if ref_time is None or len(t_vals) > len(ref_time):
                 ref_time = t_vals
-                summed_rx = np.zeros_like(ref_time, dtype=float)
-            # Interpolate this node's reaction onto the reference grid
-            interp_vals = np.interp(ref_time, t_vals, r_vals)
-            summed_rx = summed_rx + interp_vals
         except Exception:
             continue
+    if ref_time is not None:
+        summed_rx = np.zeros_like(ref_time, dtype=float)
+    # Interpolate each series onto that grid.  Times outside a series'
+    # t_vals range are marked absent (masked) and excluded from the sum
+    # so np.interp endpoint clamping cannot inflate summed_rx.
+    _missing = np.zeros_like(ref_time, dtype=bool)
+    for t_vals, r_vals in _series_list:
+        try:
+            in_range = (ref_time >= t_vals[0]) & (ref_time <= t_vals[-1])
+            interp_vals = np.interp(ref_time, t_vals, r_vals)
+            cur = np.where(in_range, interp_vals, 0.0)
+            summed_rx = summed_rx + cur
+            _missing |= ~in_range
+        except Exception:
+            continue
+    # Any time step where ALL series were absent is set to NaN so it
+    # cannot silently appear as a zero reaction contribution.
+    if _missing.any():
+        summed_rx = summed_rx.astype(float)
+        summed_rx[_missing] = np.nan
 
     if summed_rx is not None and len(summed_rx) > 0:
         # The recorder emits only the push-direction DOF reaction, so
         # all three channels reflect the same summed quantity.
+        # Only the push-direction reaction (rx) is available — the
+        # recorder emits only the push-direction DOF data.  Y and Z
+        # reactions are not independently measured and are deliberately
+        # not exposed (previously they duplicated the rx value).
         result["reaction_rx"] = summed_rx
-        result["reaction_ry"] = summed_rx
-        result["reaction_rz"] = summed_rx
 
     return result
