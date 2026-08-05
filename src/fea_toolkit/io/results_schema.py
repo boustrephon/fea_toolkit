@@ -27,6 +27,7 @@ GEOMETRY_ARRAYS: dict[str, tuple] = {
     "frame_t_end": ("N_frame", "float"),  # optional — 0..1 parametric position
     "shell_eid": ("N_shell", "int"),
     "shell_sap_id": ("N_shell", "str"),
+    "shell_parent_sap_id": ("N_shell", "str"),
     "shell_sec_name": ("N_shell", "str"),
     "shell_node_1": ("N_shell", "int"),
     "shell_node_2": ("N_shell", "int"),
