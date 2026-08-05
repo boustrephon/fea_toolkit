@@ -198,10 +198,15 @@ class TestShellForceResultants:
         ab.build_domain()
 
         # Uniaxial in-plane extension: fix x, z and all rotations on every
-        # node, leave y free so Poisson contraction can develop.  Then
-        # prescribe ux = eps_x at nodes 2 and 3 (SP constraints override
-        # the fix for the x DOF at those nodes).
-        for nd in (1, 2, 3, 4):
+        # node.  Restrain uy at nodes 1 and 2 only (rigid-body y translation)
+        # and leave uy free at nodes 3 and 4 so Poisson contraction can
+        # develop.  Then prescribe ux = eps_x at nodes 2 and 3 (SP
+        # constraints override the fix for the x DOF at those nodes).
+        # This keeps the BandSPD system non-singular while allowing
+        # Ny = ν·Nx to develop under the uniaxial strain state.
+        for nd in (1, 2):
+            ops.fix(nd, 1, 1, 1, 1, 1, 1)
+        for nd in (3, 4):
             ops.fix(nd, 1, 0, 1, 1, 1, 1)
         ops.timeSeries("Linear", 1)
         ops.pattern("Plain", 1, 1)
