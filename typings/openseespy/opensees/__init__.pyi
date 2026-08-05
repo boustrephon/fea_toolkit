@@ -5,8 +5,8 @@ Provides function signatures with named parameters for hover documentation
 and basic type checking. Based on the official OpenSees command manual:
 https://opensees.ist.berkeley.edu/wiki/index.php/Command_Manual
 """
-from typing import Any, List, Optional, Tuple, Union, overload
 
+from typing import Any, List, Optional, Tuple, Union, overload
 
 # ============================================================================
 # Domain / model commands
@@ -128,7 +128,6 @@ def getNodeTags() -> Tuple[int, ...]:
     """
     ...
 
-
 # ============================================================================
 # Element commands
 # ============================================================================
@@ -146,14 +145,41 @@ def eleNodes(tag: int) -> Tuple[int, int]:
 def eleResponse(tag: int, *args: str) -> Any:
     """Query an element response quantity.
 
+    Common identifier combinations (frame beam-column elements):
+
+    * ``eleResponse(tag, "forces")`` — **global** element-end forces,
+      12 values ``[Fx_i, Fy_i, Fz_i, Mx_i, My_i, Mz_i, Fx_j, ..., Mz_j]``.
+    * ``eleResponse(tag, "localForces")`` — **local** element-end forces,
+      12 values ``[P_i, Vy_i, Vz_i, T_i, My_i, Mz_i, P_j, ..., Mz_j]``.
+      Local forces are the correct choice for section checks and framing
+      envelopes: local Fx = axial, Fy/Fz = shear, My/Mz = bending.
+      ``Truss`` elements return a single scalar (local axial, tension-positive)
+      for either variant.
+
+    Shell / section queries:
+
+    * ``eleResponse(tag, "section", n, "forces")`` — section resultants,
+      6 values ``[Nx, Ny, Nxy, Mx, My, Mxy]`` (per-unit-width membrane +
+      bending) at integration point ``n`` (shells: 1-based).
+    * ``eleResponse(tag, "section", n, "deformation")`` — section
+      deformations ``[eps0, ky, kz, ...]`` (fiber beam-columns).
+
+    Geometry / material queries:
+
+    * ``eleResponse(tag, "yaxis")`` / ``"zaxis"`` — local y/z unit vectors
+      (3 values each).
+    * ``eleResponse(tag, "material", matTag, "stress")`` /
+      ``"material", matTag, "strain"`` — per-integration-point stress/strain.
+    * ``eleResponse(tag, "plasticDeformation")`` — plastic deformation.
+    * ``eleResponse(tag, "plasticRotation")`` — plastic rotation.
+
     Args:
         tag: Element tag.
-        *args: Response identifiers (e.g. ``'yaxis'``, ``'zaxis'``, ``'force'``).
+        *args: Response identifiers (see above).
     Returns:
-        Requested response value(s).
+        Requested response value(s); a list/tuple for vector quantities.
     """
     ...
-
 
 # ============================================================================
 # Load commands
@@ -221,7 +247,6 @@ def eleLoad(*args: Any) -> None:
     """
     ...
 
-
 # ============================================================================
 # Analysis commands
 # ============================================================================
@@ -255,8 +280,6 @@ def analyze(num_incr: int, *args: Any) -> int:
         0 if successful, non-zero if failed.
     """
     ...
-
-
 
 def reactions(*args: str) -> None:
     """Compute nodal reactions for the current load case.
@@ -299,9 +322,6 @@ def modalProperties(*args: str) -> Optional[dict]:
     """
     ...
 
-
-
-
 # ============================================================================
 # Recorder commands
 # ============================================================================
@@ -315,7 +335,6 @@ def recorder(*args: Any) -> int:
         Recorder handle (integer), or -1 on failure.
     """
     ...
-
 
 # ============================================================================
 # Material commands
@@ -364,8 +383,7 @@ def section(sec_type: str, tag: int, *args: Any) -> None:
     """
     ...
 
-def patch(patch_type: str, mat_tag: int, n_y: int, n_z: int,
-          *coords: float) -> None:
+def patch(patch_type: str, mat_tag: int, n_y: int, n_z: int, *coords: float) -> None:
     """Define a fiber patch within a fiber section.
 
     Called between ``section('Fiber', ...)`` and ``section('Fiber', '-end')``::
@@ -388,8 +406,7 @@ def patch(patch_type: str, mat_tag: int, n_y: int, n_z: int,
     """
     ...
 
-def layer(layer_type: str, mat_tag: int, n_bars: int, area: float,
-          *coords: float) -> None:
+def layer(layer_type: str, mat_tag: int, n_bars: int, area: float, *coords: float) -> None:
     """Define a reinforcement layer within a fiber section.
 
     Called between ``section('Fiber', ...)`` and ``section('Fiber', '-end')``::
@@ -408,7 +425,6 @@ def layer(layer_type: str, mat_tag: int, n_bars: int, area: float,
         *coords: Layer geometry.
     """
     ...
-
 
 # ============================================================================
 # Material commands (nD)
@@ -430,7 +446,6 @@ def nDMaterial(mat_type: str, tag: int, *args: Any) -> None:
         *args: Material-specific parameters.
     """
     ...
-
 
 # ============================================================================
 # Element commands
@@ -475,7 +490,6 @@ def element(elem_type: str, tag: int, *args: Any) -> None:
     """
     ...
 
-
 # ============================================================================
 # Geometric transformation commands
 # ============================================================================
@@ -504,7 +518,6 @@ def geomTransf(transf_type: str, tag: int, *args: Any) -> None:
         *args: Vector components or options.
     """
     ...
-
 
 # ============================================================================
 # Beam integration commands
@@ -535,7 +548,6 @@ def beamIntegration(integration_type: str, tag: int, *args: Any) -> None:
                or hinge parameters (HingeRadau).
     """
     ...
-
 
 # ============================================================================
 # Constraint commands
@@ -580,7 +592,6 @@ def equationConstraint(*args: Any) -> None:
     See the OpenSees manual for equation syntax.
     """
     ...
-
 
 # ============================================================================
 # Analysis component commands
@@ -694,7 +705,6 @@ def eigen(*args: Any) -> List[float]:
     """
     ...
 
-
 # ============================================================================
 # Sensitivity commands
 # ============================================================================
@@ -716,7 +726,6 @@ def responseSpectrumAnalysis(ts_tag: int, dof: int, *args: Any) -> None:
         *args: ``'-mode', modeNum`` and optional overrides.
     """
     ...
-
 
 # ── Additional query / removal commands ──
 
@@ -813,7 +822,6 @@ def remove(obj_type: str, nodeTag: int, dofTag: int, patternTag: int) -> None:
         patternTag: Load pattern tag.
     """
     ...
-
 
 # ============================================================================
 # Fallback for any undocumented functions
