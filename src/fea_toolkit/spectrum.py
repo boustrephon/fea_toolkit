@@ -187,6 +187,12 @@ class ResponseSpectrum:
             )
         self.T = [float(t) for t in self.T]
         self.Sa = [float(s) for s in self.Sa]
+        # Reject non-finite ordinates (NaN, inf) — NaN comparisons always
+        # return False, so NaN would pass the strictly-increasing check
+        # and silently corrupt the interpolated spectrum.
+        for i, t in enumerate(self.T):
+            if not np.isfinite(t):
+                raise ValueError(f"ResponseSpectrum T ordinates must be finite; found T[{i}]={t!r}")
         # Require strictly increasing period ordinates: unsorted or
         # duplicate periods produce silently incorrect interpolated
         # spectral accelerations (e.g. via `interpolate_sa`).

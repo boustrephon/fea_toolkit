@@ -57,6 +57,12 @@ class TestResponseSpectrum:
         vals = s.interpolate([0.0, 0.5, 1.0, 2.0])
         assert np.allclose(vals, [1.0, 1.5, 2.0, 3.0])
 
+    def test_rejects_nan_period(self):
+        """NaN T ordinate is rejected (NaN comparisons otherwise pass the
+        strictly-increasing check silently)."""
+        with pytest.raises(ValueError):
+            ResponseSpectrum.from_arrays(T=[0.0, float("nan")], Sa=[1.0, 2.0])
+
     def test_from_gb50011_ascending_branch(self):
         """T=0.05 uses the damping-corrected branch 0.45 + (η₂ − 0.45)·10·T."""
         s = ResponseSpectrum.from_gb50011(alpha_max=0.5, tg=0.35, zeta=0.05)
