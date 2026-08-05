@@ -106,6 +106,7 @@ from .storey_response import (
     StoreyRigidBody,
     build_storey_table,
     compute_linear_storey_responses,
+    group_shell_forces_by_section,
     modal_storey_drifts,
     peak_displacement,
     rigid_body_fit,
@@ -208,6 +209,7 @@ __all__ = [
     "get_element_chain",
     "get_local_axes",
     "get_root_parent",
+    "group_shell_forces_by_section",
     # Stories
     "identify_stories",
     # Confinement
