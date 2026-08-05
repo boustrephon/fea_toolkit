@@ -142,36 +142,57 @@ def eleNodes(tag: int) -> Tuple[int, int]:
     """
     ...
 
-def eleResponse(tag: int, *args: str) -> Any:
+
+def eleResponse(tag: int, *args: Any) -> Any:
     """Query an element response quantity.
 
-    Common identifier combinations (frame beam-column elements):
+        Beam-column element force queries (3D frame elements):
 
-    * ``eleResponse(tag, "forces")`` — **global** element-end forces,
-      12 values ``[Fx_i, Fy_i, Fz_i, Mx_i, My_i, Mz_i, Fx_j, ..., Mz_j]``.
-    * ``eleResponse(tag, "localForces")`` — **local** element-end forces,
-      12 values ``[P_i, Vy_i, Vz_i, T_i, My_i, Mz_i, P_j, ..., Mz_j]``.
-      Local forces are the correct choice for section checks and framing
-      envelopes: local Fx = axial, Fy/Fz = shear, My/Mz = bending.
-      ``Truss`` elements return a single scalar (local axial, tension-positive)
-      for either variant.
+        * ``eleResponse(tag, "forces")`` — **global** element-end forces,
+          12 values ``[Fx_i, Fy_i, Fz_i, Mx_i, My_i, Mz_i, Fx_j, ..., Mz_j]``.
+          **2D frame elements return 6 values** (one force + moment per end).
+        * ``eleResponse(tag, "localForces")`` — **local** element-end forces,
+          12 values ``[P_i, Vy_i, Vz_i, T_i, My_i, Mz_i, P_j, ..., Mz_j]`` for
+          3D frames (6 for 2D).  Local forces are the preferred choice for
+          section checks and framing envelopes: local Fx = axial, Fy/Fz =
+          shear, My/Mz = bending.  ``Truss`` elements return **nodal force
+          vectors** (2 values in 1D, 4 in 2D, 6 in 3D) for both ``forces``
+          and ``localForces`` — the scalar axial response is obtained with
+          ``axialForce`` or ``basicForce``.
 
-    Shell / section queries:
+        Beam-column section queries (fiber `forceBeamColumn`/`dispBeamColumn`):
 
-    * ``eleResponse(tag, "section", n, "forces")`` — section resultants,
-      6 values ``[Nx, Ny, Nxy, Mx, My, Mxy]`` (per-unit-width membrane +
-      bending) at integration point ``n`` (shells: 1-based).
-    * ``eleResponse(tag, "section", n, "deformation")`` — section
-      deformations ``[eps0, ky, kz, ...]`` (fiber beam-columns).
+        * ``eleResponse(tag, "section", n, "force")`` — **section resultants
+          (singular keyword ``"force"``)**, e.g. ``[P, Mz, My, ...]`` at
+          integration point ``n`` (1-based).  Component ordering and count
+          are beam-section-specific (not a universal six-value schema).
 
-    Geometry / material queries:
+        Shell section / material queries (ASDShellQ4 and other multi-layer
+        shells):
 
-    * ``eleResponse(tag, "yaxis")`` / ``"zaxis"`` — local y/z unit vectors
-      (3 values each).
-    * ``eleResponse(tag, "material", matTag, "stress")`` /
-      ``"material", matTag, "strain"`` — per-integration-point stress/strain.
-    * ``eleResponse(tag, "plasticDeformation")`` — plastic deformation.
-    * ``eleResponse(tag, "plasticRotation")`` — plastic rotation.
+        * ``eleResponse(tag, "section", n, "force")`` — per-integration-point
+          resultants.  For **ASDShellQ4** and similar layered shells the
+          section resultants are ``[Nx, Ny, Nxy, Mx, My, Mxy]`` —
+          per-unit-width membrane + bending.  Force and deformation
+          lengths and ordering are **section-specific**; check the element
+          type before relying on a fixed layout.
+        * ``eleResponse(tag, "section", n, "deformation")`` — section
+          deformations (fiber beam-columns: ``[eps0, ky, kz, ...]``).
+
+        Geometry / material queries:
+
+        * ``eleResponse(tag, "yaxis")`` / ``"zaxis"`` — local y/z unit vectors
+          (3 values each).  **Frame beam-column elements only**.
+        * ``eleResponse(tag, "material", point, "stress")`` /
+          ``"material", point, "strain"`` — per-integration-point stress/strain,
+          where *point* is the integration-point index (also called
+          ``matTag`` or ``material_index``).  For shells this is the
+          integration-point index of the material-quantity query.
+        * ``eleResponse(tag, "plasticDeformation")`` — plastic deformation
+          (beam-column / truss elements with an inelastic material).
+        * ``eleResponse(tag, "plasticRotation")`` — plastic rotation
+          (beam-column elements; **not** available for truss or shell
+          elements).
 
     Args:
         tag: Element tag.
