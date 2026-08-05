@@ -251,13 +251,35 @@ def _collect_static(static_results: dict[str, Any]) -> dict[str, np.ndarray]:
         for key, raw_val in data.items():
             if key in consumed:
                 continue
-            val = (
-                raw_val.get("value")
-                if (isinstance(raw_val, dict) and set(raw_val) <= {"value"})
-                else raw_val
-            )
+            # Unwrap a single-key ``{"value": scalar}`` wrapper.
+            if isinstance(raw_val, dict):
+                if set(raw_val) <= {"value"}:
+                    val = raw_val.get("value")
+                elif case == "pp":
+                    # PP payloads must be flat ``f"{direction}/{field}"``
+                    # keys with plain scalar values.  Nested per-direction
+                    # cases (e.g. ``{"+X": {...}}``) or any other dict with
+                    # more than the "value" key are malformed and must be
+                    # fixed at the call site rather than silently dropped.
+                    raise ValueError(
+                        f"static case {case!r} key {key!r} is a nested dict — "
+                        "only flat scalar values or {'value': scalar} wrappers "
+                        f"are allowed (e.g. static/pp/+X/D_roof)."
+                    )
+                else:
+                    # Non-PP nested data (e.g. ``reactions``) is not a
+                    # serializable scalar — skip it as before.
+                    continue
+            else:
+                val = raw_val
             if isinstance(val, (int, float, str, bool, np.number)):
                 arrays[make_static_key(case, key)] = np.array([val])
+            elif case == "pp":
+                raise ValueError(
+                    f"static case {case!r} key {key!r} has unsupported value "
+                    f"type {type(val).__name__} — expected a JSON scalar "
+                    "(int, float, str, bool) or a {'value': scalar} wrapper."
+                )
 
     return arrays
 
