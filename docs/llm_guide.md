@@ -208,6 +208,59 @@ All plot functions gracefully degrade to a warning if PyVista is not installed.
 - Type stubs for OpenSeesPy live in `typings/openseespy/opensees/__init__.pyi`.
   Pylance must have `python.analysis.stubPath` pointed there.
 
+### Solver convergence (RC models with LayeredShell walls)
+
+RC models with LayeredShell walls (resolved via the Preprocessor's
+``shell_layers`` config) can fail the **gravity stage** with two distinct
+OpenSees error signatures:
+
+| Symptom | Root cause | Practical fix |
+|---|---|---|
+| `Norm ≈ 1.000e-4` vs tol `1e-4` — repeated "analyze failed" | Near-miss tolerance: the residual sits just above `solver_test_tol` due to floating-point noise at the `LayeredShell` stiffness floor | Relax `solver_test_tol` to `2e-4` |
+| `Norm = NaN` during the gravity step | Sudden LayeredShell stiffness shock when shells activate in a single `LoadControl` step | Ramp gravity with `gravity_num_substeps: 10` |
+
+**Theory**
+
+The LayeredShell elements used for nonlinear RC walls (via
+``nd_materials``) have a much lower stiffness at zero load than
+elastic elements.  When the full gravity combination (dead + live) is
+applied in a single ``LoadControl(1.0)`` step, the strain jumps from 0
+to the full service level in one increment — the tangent stiffness
+evaluation at the unloaded state produces a near-singular system and
+the Newton iteration diverges to NaN.  Substepping (``gravity_num_substeps``
+> 1) replaces the single big jump with a sequence of small, stable
+increments that each converge on the first Newton iteration.
+
+Separately, the solver convergence test compares the residual norm
+against an absolute tolerance.  For full-building models with kN-m
+units, a residual of exactly 1.000e-4 can sit marginally *above* a
+tolerance of 1e-4 due to round-off — OpenSees reports this as a
+failure even though the state is physically converged.  Relaxing the
+tolerance by a factor of 2 eliminates these near-miss failures without
+affecting accuracy.
+
+**Practical points (LLMs: follow these rules)**
+
+1. **Always** include ``"solver_test_tol": 2e-4`` and
+   ``"solver_test_max_iter": 1000`` in the config for RC + LayeredShell
+   pushover runs.
+2. **Do NOT** set ``gravity_num_substeps`` manually for LayeredShell
+   models — the ``AnalysisBuilder`` **auto-detects** the layered shell
+   sections and sets ``gravity_num_substeps = 10`` automatically
+   (``AnalysisBuilder.LAYERED_SHELL_GRAVITY_SUBSTEPS``).  An explicit
+   config value always wins.
+3. **Verify** the run log shows zero failures:
+   `grep -c "analyze failed" run.log  # → 0`.
+4. If a run still fails after these settings, the builder's built-in
+   fallback chain (NormUnbalance + ModifiedNewton + adaptive
+   substepping) automatically kicks in — no manual intervention needed.
+5. Use the ``venv_opensees`` Python environment for these models — the
+   stock interpreter produced NaN results in the LayeredShell gravity
+   stage.
+
+Full theory and worked example: `docs/pushover_analysis.md`
+→ *Gravity convergence (LayeredShell RC models)*.
+
 ---
 
 ## 5. Selection Patterns (for targeted visualisation)
