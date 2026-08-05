@@ -851,6 +851,7 @@ def pushover_tcl(
                 "    }",
                 "",
                 "    # ── Record base shear for this step ──",
+                "    reactions",
                 "    set rx 0; set ry 0; set rz 0",
                 "    foreach n $base_tags {",
                 "        set rx [expr $rx + [nodeReaction $n 1]]",
@@ -897,6 +898,7 @@ def pushover_tcl(
                 "        break",
                 "    }",
                 "    # ── Record base shear for this step ──",
+                "    reactions",
                 "    set rx 0; set ry 0; set rz 0",
                 "    foreach n $base_tags {",
                 "        set rx [expr $rx + [nodeReaction $n 1]]",
@@ -906,7 +908,7 @@ def pushover_tcl(
                 '    puts $bs_file "$rx $ry $rz"',
                 "}",
                 "close $bs_file",
-                'puts "Pushover: completed $i-1 steps"',
+                'puts "Pushover: completed [expr {$i - 1}] steps"',
             ]
         )
 
