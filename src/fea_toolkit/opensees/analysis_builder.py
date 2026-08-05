@@ -3091,29 +3091,37 @@ class AnalysisBuilder:
             # the integrator is swapped — so the load factor continues
             # 0.2 → 0.225 → 0.25 ... instead of unloading back toward 0
             # (which produced the original NaN).
+            # Track the applied load factor as a float (each successful
+            # ops.analyze(1) advances it by the current increment) rather
+            # than remapping the integer converged step count.  Retry
+            # passes derive their start index from this load factor, so
+            # they never issue increments beyond gravity load factor 1.0.
+            applied_load_factor = float(converged) / float(n_sub)
             half_n_sub = n_sub * 2
             half_inc = 1.0 / half_n_sub
-            done_half = int(round(converged * (half_n_sub / n_sub)))
+            done_half = int(round(applied_load_factor * half_n_sub))
+            done_half = min(max(done_half, 0), half_n_sub)
             ops.integrator("LoadControl", half_inc)
             ok = 0
             for s in range(done_half, half_n_sub):
                 ok = ops.analyze(1)
                 if ok != 0:
                     break
-                converged = int(round(s + 1) * n_sub / half_n_sub)
+                applied_load_factor += half_inc
             if ok != 0:
                 # Final fallback: quarter inc (only used when the model is
                 # extremely soft near the target gravity combination).
                 quad_n_sub = n_sub * 4
                 quad_inc = 1.0 / quad_n_sub
-                done_quad = int(round(converged * (quad_n_sub / n_sub)))
+                done_quad = int(round(applied_load_factor * quad_n_sub))
+                done_quad = min(max(done_quad, 0), quad_n_sub)
                 ops.integrator("LoadControl", quad_inc)
                 ok = 0
                 for s in range(done_quad, quad_n_sub):
                     ok = ops.analyze(1)
                     if ok != 0:
                         break
-                    converged = int(round(s + 1) * n_sub / quad_n_sub)
+                    applied_load_factor += quad_inc
 
         if ok != 0:
             raise RuntimeError(
@@ -4269,25 +4277,30 @@ class AnalysisBuilder:
                 # and satisfies force equilibrium (fx_i + fx_j = 0).
                 axial = float(f[0])
                 f = [-axial, 0.0, 0.0, 0.0, 0.0, 0.0, axial, 0.0, 0.0, 0.0, 0.0, 0.0]
-            f_i_local = np.array([f[0], f[1], f[2]])
-            m_i_local = np.array([f[3], f[4], f[5]])
-            f_j_local = np.array([f[6], f[7], f[8]])
-            m_j_local = np.array([f[9], f[10], f[11]])
+            elif len(f) < 12:
+                # Empty or short response — skip this element without
+                # aborting the extraction (same guard used in _record_step).
+                continue
+            if len(f) >= 12:
+                f_i_local = np.array([f[0], f[1], f[2]])
+                m_i_local = np.array([f[3], f[4], f[5]])
+                f_j_local = np.array([f[6], f[7], f[8]])
+                m_j_local = np.array([f[9], f[10], f[11]])
 
-            results[tag] = {
-                "Fx": f_i_local[0],
-                "Fy": f_i_local[1],
-                "Fz": f_i_local[2],
-                "Mx": m_i_local[0],
-                "My": m_i_local[1],
-                "Mz": m_i_local[2],
-                "Fx_j": f_j_local[0],
-                "Fy_j": f_j_local[1],
-                "Fz_j": f_j_local[2],
-                "Mx_j": m_j_local[0],
-                "My_j": m_j_local[1],
-                "Mz_j": m_j_local[2],
-            }
+                results[tag] = {
+                    "Fx": f_i_local[0],
+                    "Fy": f_i_local[1],
+                    "Fz": f_i_local[2],
+                    "Mx": m_i_local[0],
+                    "My": m_i_local[1],
+                    "Mz": m_i_local[2],
+                    "Fx_j": f_j_local[0],
+                    "Fy_j": f_j_local[1],
+                    "Fz_j": f_j_local[2],
+                    "Mx_j": m_j_local[0],
+                    "My_j": m_j_local[1],
+                    "Mz_j": m_j_local[2],
+                }
         return results
 
     def extract_static_shell_forces(self) -> dict[str, dict[str, Any]]:
@@ -4758,8 +4771,10 @@ class AnalysisBuilder:
                 h_guess = 0.5 * float(
                     getattr(_sec, "h", getattr(_sec, "depth", getattr(_sec, "t3", 0.0))) or 0.5
                 )
-                eps_max = eps0 + kz * h_guess
-                eps_min = eps0 - kz * h_guess
+                strain_upper = eps0 + kz * h_guess
+                strain_lower = eps0 - kz * h_guess
+                eps_max = max(strain_upper, strain_lower)
+                eps_min = min(strain_upper, strain_lower)
                 if eps_min < _crush_eps:
                     _flagged.append((str(eid), eps_min))
                 elif eps_max > _yield_eps:
