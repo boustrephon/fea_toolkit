@@ -85,6 +85,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Optional
 
@@ -1172,3 +1173,104 @@ def compute_linear_storey_responses(
         "df_shear": df_shear_out,
         "df_moment": df_moment_out,
     }
+
+
+# ========================================================================
+# Shell sectional-average grouping (wall DCR basis)
+# ========================================================================
+
+
+def group_shell_forces_by_section(
+    shell_sap_ids: Sequence[str],
+    shell_parent_sap_id: Sequence[str],
+    shell_Nxy: np.ndarray,
+    shell_Ny: np.ndarray,
+    step_idx: int,
+) -> pd.DataFrame:
+    """Average shell membrane resultants by parent / row-band section.
+
+    Groups shell elements by their **parent SAP ID** taken from the NPZ
+    ``shell_parent_sap_id`` array (authoritative -- never parsed from the
+    element name), then subdivides each parent's children into
+    horizontal row bands using the child naming suffix
+    ``{parent}_sub_{row}_{col}`` where the suffix is present.
+    Unparented shells form their own single-element section.
+
+    This provides the member-level basis for wall DCR checks (e.g. GB
+    50010 in-plane shear tau = Nxy/t): element-peak Nxy in meshed walls
+    can exceed the parent-row sectional average by 1.3-2.6x (admin
+    building, see docs/_pending_work.md Sessions G/H/I).  Averaging
+    Nxy/Ny over the section band before forming the DCR gives the
+    engineering member-level demand.
+
+    Parameters
+    ----------
+    shell_sap_ids : Sequence[str]
+        Shell SAP IDs in recorded order (``pushover/{dir}/shell_sap_id``).
+    shell_parent_sap_id : Sequence[str]
+        Per-shell parent SAP ID (NPZ ``shell_parent_sap_id`` geometry
+        array), ``""`` for unparented shells.
+    shell_Nxy : np.ndarray
+        Per-step in-plane shear resultants, shape ``(N_step, N_shell)``.
+    shell_Ny : np.ndarray
+        Per-step vertical membrane resultants, shape ``(N_step, N_shell)``.
+    step_idx : int
+        Step index into the result arrays (e.g. the performance point).
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (parent, row-band) section with columns:
+        ``section``, ``parent``, ``row``, ``n_subs``, ``Nxy_avg``,
+        ``Ny_avg``.  Section labels are ``{parent}_section_{row}`` for
+        banded children, the bare parent ID for whole-parent sections,
+        and the SAP ID for unparented shells.
+
+    Raises
+    ------
+    ValueError
+        If ``shell_sap_ids`` and ``shell_parent_sap_id`` differ in
+        length.
+    """
+    if len(shell_sap_ids) != len(shell_parent_sap_id):
+        raise ValueError("shell_sap_ids and shell_parent_sap_id must have equal length")
+    if len(shell_sap_ids) == 0:
+        return pd.DataFrame(columns=["section", "parent", "row", "n_subs", "Nxy_avg", "Ny_avg"])
+
+    groups: dict[tuple[str, str, str], list[int]] = {}
+    order: list[tuple[str, str, str]] = []
+    for j, (sid_raw, pid_raw) in enumerate(zip(shell_sap_ids, shell_parent_sap_id)):
+        sid = str(sid_raw)
+        pid = str(pid_raw)
+        if pid:
+            # Row band from child suffix ``_sub_{row}_{col}`` -- only
+            # when the prefix before ``_sub_`` actually matches the
+            # parent.  Children without the suffix collapse to a
+            # whole-parent section.
+            row = ""
+            head, sep, tail = sid.partition("_sub_")
+            if sep and head == pid:
+                row = tail.split("_", 1)[0]
+            section = f"{pid}_section_{row}" if row else pid
+            key = (section, pid, row)
+        else:
+            key = (sid, "", "")
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(j)
+
+    rows = []
+    for section, parent, row in order:
+        idxs = groups[(section, parent, row)]
+        rows.append(
+            {
+                "section": section,
+                "parent": parent,
+                "row": row,
+                "n_subs": len(idxs),
+                "Nxy_avg": float(np.nanmean(shell_Nxy[step_idx, idxs])),
+                "Ny_avg": float(np.nanmean(shell_Ny[step_idx, idxs])),
+            }
+        )
+    return pd.DataFrame(rows)
