@@ -164,7 +164,13 @@ class ResponseSpectrum:
         ResponseSpectrum
             The spectrum ordinates.
         """
-        T_spec = np.linspace(0.0, T_max, n_pts)
+        # IEC 62271-207 defines branch transitions at 1.1, 8.0 and 33.0 Hz.
+        # Sample those exact periods (1/1.1, 1/8, 1/33 s) in addition to
+        # the uniform grid so the piecewise spectrum is captured at its
+        # corner points, not just approximately.
+        branch_periods = [1.0 / 33.0, 1.0 / 8.0, 1.0 / 1.1]
+        T_spec = np.unique(np.concatenate([np.linspace(0.0, T_max, n_pts), branch_periods]))
+        T_spec = T_spec[T_spec <= T_max]
         Sa_spec = _iec_spectrum(T_spec, pga, zeta=zeta)
         return cls(
             T=T_spec.tolist(),
@@ -341,15 +347,17 @@ def _iec_spectrum(T, pga, zeta: float = 0.05):
     Raises
     ------
     ValueError
-        If *pga* is not finite, *zeta* is non-positive or exceeds 0.20
-        (the damping factor uses ``log(100 * zeta)``), or *T* is negative
-        or not finite.  ``T = 0`` is valid and maps to the zero-period
-        acceleration.
+        If *pga* is not finite or is negative, *zeta* is non-positive or
+        exceeds 0.20 (the damping factor uses ``log(100 * zeta)``), or *T*
+        is negative or not finite.  ``T = 0`` is valid and maps to the
+        zero-period acceleration.
     """
     if zeta <= 0 or zeta > 0.20:
         raise ValueError("zeta must be in (0, 0.20] (damping factor uses log(100 * zeta))")
     if not np.isfinite(pga):
         raise ValueError("pga must be finite")
+    if pga < 0:
+        raise ValueError("pga must be non-negative")
     if np.any(~np.isfinite(T)):
         raise ValueError("T values must be finite")
     T_arr = np.asarray(T, dtype=float)

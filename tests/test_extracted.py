@@ -214,11 +214,39 @@ class TestIec62271:
         """from_iec62271 builds a canonical ResponseSpectrum."""
         s = ResponseSpectrum.from_iec62271(pga=0.4, zeta=0.05)
         assert s.code == "IEC62271-207"
-        assert len(s.T) == 200
-        assert len(s.Sa) == 200
+        # 200 uniform grid points + 3 IEC branch-corner periods (1/33,
+        # 1/8, 1/1.1 s) → 203 unique ordinates.
+        assert len(s.T) == 203
+        assert len(s.Sa) == 203
         assert s.Sa[0] == pytest.approx(0.4)
         # Plateau point must exceed the zero-period ordinate.
         assert s.interpolate([0.5])[0] > 0.4
+
+    def test_factory_sampled_at_branch_periods(self):
+        """from_iec62271 samples the exact IEC branch corners.
+
+        The piecewise spectrum changes slope at 33, 8 and 1.1 Hz
+        (T = 1/33, 1/8, 1/1.1 s).  These must appear as explicit
+        ordinates so interpolation reproduces the corner values, not
+        a linear blend across a branch transition.
+        """
+        s = ResponseSpectrum.from_iec62271(pga=0.4, zeta=0.05)
+        for branch_T in (1.0 / 33.0, 1.0 / 8.0, 1.0 / 1.1):
+            assert branch_T in s.T, f"Branch period T={branch_T} missing from IEC ordinates"
+
+        # The corner value must equal _iec_spectrum evaluated exactly
+        # at that period (not interpolated across it).
+        zeta = 0.05
+        beta = (3.21 - 0.68 * np.log(100.0 * zeta)) / 2.1156
+        assert s.interpolate([1.0 / 1.1])[0] == pytest.approx(0.4 / 0.25 * 0.572 * beta * 1.1)
+        assert s.interpolate([1.0 / 8.0])[0] == pytest.approx(0.4 * 2.5 * beta)
+
+    def test_negative_pga_rejected(self):
+        """_iec_spectrum rejects negative peak ground acceleration."""
+        with pytest.raises(ValueError):
+            _iec_spectrum(0.5, pga=-0.1)
+        with pytest.raises(ValueError):
+            ResponseSpectrum.from_iec62271(pga=-0.4)
 
 
 # ── Utils tests ────────────────────────────────────────────────────────
