@@ -156,9 +156,9 @@ def eleResponse(tag: int, *args: Any) -> Any:
           3D frames (6 for 2D).  Local forces are the preferred choice for
           section checks and framing envelopes: local Fx = axial, Fy/Fz =
           shear, My/Mz = bending.  ``Truss`` elements return **nodal force
-          vectors** (2 values in 1D, 4 in 2D, 6 in 3D) for both ``forces``
-          and ``localForces`` — the scalar axial response is obtained with
-          ``axialForce`` or ``basicForce``.
+          vectors** (2 values in 1D, 4 in 2D, 6 in 3D) for ``forces``, but
+          **each of ``localForces`` and ``basicForce`` returns a scalar
+          axial response** (tension-positive).
 
         Beam-column section queries (fiber `forceBeamColumn`/`dispBeamColumn`):
 
