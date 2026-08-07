@@ -709,9 +709,14 @@ def _add_animation_timer(
             p.kind == inspect.Parameter.VAR_POSITIONAL for p in _sig.parameters.values()
         )
     except (TypeError, ValueError):  # not introspectable (e.g. C-bound)
+        # Conservative bound: treat as a bare ``callback(step)``.  Varargs is
+        # *not* assumed, so surplus PyVista args (e.g. ``(step, plotter)``)
+        # are truncated to ``(step,)`` instead of being forwarded and raising
+        # ``TypeError: callback() takes 1 positional argument but 2 were
+        # given``.  The step slot stays pad-able from the internal counter.
         _n_pos = 1
         _n_pos_total = 1
-        _has_varargs = True
+        _has_varargs = False
 
     _vtk_step = [0]  # mutable closure — timer events carry no step count
 
@@ -720,21 +725,35 @@ def _add_animation_timer(
 
         PyVista's ``add_timer_event`` invokes the callback with
         ``(step, plotter)`` on v0.44+ and ``(step,)`` (or nothing) on
-        older versions.  Extra args beyond the callback's arity are
-        dropped.  If the timer passes **fewer** args than the callback
-        expects (notably a legacy no-argument invocation), trailing
-        gaps are padded with ``None``, and a missing step count is
-        backed by the same internal counter the VTK path uses.
+        older versions.
+
+        Three adaptation rules apply:
+
+        1. **Truncate surplus args** when the callback has no ``*args`` to
+           absorb them (e.g. a one-argument ``callback(step)`` receiving
+           ``(step, plotter)``).  ``_has_varargs`` only suppresses this
+           truncation — it never affects the other two rules.
+        2. **Supply a missing step** from the internal counter when the
+           timer passes nothing at all and the callback needs at least one
+           positional argument (e.g. ``callback(step)`` or
+           ``callback(step, *extra)`` on a legacy no-argument timer).
+        3. **Pad trailing gaps** with ``None`` when the timer passes fewer
+           args than the callback's required positional parameters (e.g.
+           ``callback(step, plotter)`` receiving only ``(step,)``).
         """
-        if _has_varargs or len(args) >= _n_pos:
-            if not _has_varargs and len(args) > _n_pos_total:
-                return callback(*args[:_n_pos_total])
-            return callback(*args)
-        if not args:
-            # Legacy timer passed no step — use the internal counter.
+        # Rule 1 — drop surplus positional args unless the callback's
+        # *args can absorb them.
+        if not _has_varargs and len(args) > _n_pos_total:
+            args = args[:_n_pos_total]
+        # Rule 2 — legacy no-argument timer: back the step with the same
+        # internal counter the VTK path uses.
+        if not args and _n_pos >= 1:
             _vtk_step[0] += 1
             args = (_vtk_step[0],)
-        return callback(*args, *[None] * (_n_pos - len(args)))
+        # Rule 3 — pad trailing gaps with None.
+        if len(args) < _n_pos:
+            return callback(*args, *[None] * (_n_pos - len(args)))
+        return callback(*args)
 
     def _vtk_adapted(*_args: Any) -> Any:
         """VTK ``TimerEvent`` observer — forwards ``(caller, event)``.
