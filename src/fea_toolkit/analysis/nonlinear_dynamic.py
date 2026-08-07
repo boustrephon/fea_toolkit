@@ -96,7 +96,7 @@ class NonlinearDynamicAnalysis(Analysis):
             "times",
             "displacements",
             "envelope",
-            "peak_drift",
+            "peak_displacement",
             "converged_steps",
             "gm_file",
             "direction",
@@ -193,7 +193,7 @@ class NonlinearDynamicAnalysis(Analysis):
                         "times": np.array([]),
                         "displacements": None,
                         "envelope": None,
-                        "peak_drift": 0.0,
+                        "peak_displacement": 0.0,
                         "converged_steps": 0,
                         "gm_file": self.ground_motion_file,
                         "direction": self.direction,
@@ -222,7 +222,7 @@ class NonlinearDynamicAnalysis(Analysis):
             disp_file = os.path.join(tmp_dir, "dyn_disp.out")
             env_disp_file = os.path.join(tmp_dir, "dyn_env_disp.out")
 
-            peak_drift = 0.0
+            peak_displacement = 0.0
             disp_data = None
             env_data = None
 
@@ -230,7 +230,7 @@ class NonlinearDynamicAnalysis(Analysis):
                 try:
                     disp_data = np.loadtxt(disp_file)
                     if disp_data.ndim > 1 and disp_data.shape[1] >= 2:
-                        peak_drift = float(np.max(np.abs(disp_data[:, 1:])))
+                        peak_displacement = float(np.max(np.abs(disp_data[:, 1:])))
                 except Exception:
                     pass
 
@@ -250,7 +250,7 @@ class NonlinearDynamicAnalysis(Analysis):
             "times": times,
             "displacements": disp_data,
             "envelope": env_data,
-            "peak_drift": peak_drift,
+            "peak_displacement": peak_displacement,
             "converged_steps": converged_steps,
             "gm_file": self.ground_motion_file,
             "direction": self.direction,
