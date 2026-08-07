@@ -4277,30 +4277,50 @@ class AnalysisBuilder:
                 # and satisfies force equilibrium (fx_i + fx_j = 0).
                 axial = float(f[0])
                 f = [-axial, 0.0, 0.0, 0.0, 0.0, 0.0, axial, 0.0, 0.0, 0.0, 0.0, 0.0]
+            elif len(f) == 6:
+                # 3D truss elements return a 6-value vector from
+                # localForces: [fx_i, fy_i, fz_i, fx_j, fy_j, fz_j]
+                # with no moment components.  Expand to the standard 12
+                # component row with zero moments so the response is
+                # preserved rather than skipped.
+                f = [
+                    f[0],
+                    f[1],
+                    f[2],
+                    0.0,
+                    0.0,
+                    0.0,
+                    f[3],
+                    f[4],
+                    f[5],
+                    0.0,
+                    0.0,
+                    0.0,
+                ]
             elif len(f) < 12:
-                # Empty or short response — skip this element without
-                # aborting the extraction (same guard used in _record_step).
+                # Empty or short unsupported response — skip this element
+                # without aborting the extraction (same guard used in
+                # _record_step).
                 continue
-            if len(f) >= 12:
-                f_i_local = np.array([f[0], f[1], f[2]])
-                m_i_local = np.array([f[3], f[4], f[5]])
-                f_j_local = np.array([f[6], f[7], f[8]])
-                m_j_local = np.array([f[9], f[10], f[11]])
+            f_i_local = np.array([f[0], f[1], f[2]])
+            m_i_local = np.array([f[3], f[4], f[5]])
+            f_j_local = np.array([f[6], f[7], f[8]])
+            m_j_local = np.array([f[9], f[10], f[11]])
 
-                results[tag] = {
-                    "Fx": f_i_local[0],
-                    "Fy": f_i_local[1],
-                    "Fz": f_i_local[2],
-                    "Mx": m_i_local[0],
-                    "My": m_i_local[1],
-                    "Mz": m_i_local[2],
-                    "Fx_j": f_j_local[0],
-                    "Fy_j": f_j_local[1],
-                    "Fz_j": f_j_local[2],
-                    "Mx_j": m_j_local[0],
-                    "My_j": m_j_local[1],
-                    "Mz_j": m_j_local[2],
-                }
+            results[tag] = {
+                "Fx": f_i_local[0],
+                "Fy": f_i_local[1],
+                "Fz": f_i_local[2],
+                "Mx": m_i_local[0],
+                "My": m_i_local[1],
+                "Mz": m_i_local[2],
+                "Fx_j": f_j_local[0],
+                "Fy_j": f_j_local[1],
+                "Fz_j": f_j_local[2],
+                "Mx_j": m_j_local[0],
+                "My_j": m_j_local[1],
+                "Mz_j": m_j_local[2],
+            }
         return results
 
     def extract_static_shell_forces(self) -> dict[str, dict[str, Any]]:
@@ -4742,11 +4762,12 @@ class AnalysisBuilder:
         # pre-pushover damage assessment.  Purely diagnostic (never
         # raises); wrapped so a query failure cannot abort the run.
         try:
-            # threshold defaults — concrete crushing ~ -0.003, rebar
-            # yield from material properties when available
+            # threshold defaults — concrete crushing ~ -0.003
+            # rebar yield ~ 0.0025 (typical εy ≈ 500 MPa / 200 GPa)
             _crush_eps = -0.0030
             _yield_eps = 0.0025
             _flagged: list[tuple[str, float]] = []
+            _n_scanned = 0
             _assignments = self.mesh_model.frame_assignments or {}
             for eid, elem in self.mesh_model.frame_elements.items():
                 tag = self.frame_tag_map.get(eid)
@@ -4768,11 +4789,12 @@ class AnalysisBuilder:
                 # axial strain eps0 + curvature about local z × h/2
                 eps0 = float(sec_def[0])
                 kz = float(sec_def[2])
-                h_guess = 0.5 * float(
+                _n_scanned += 1
+                half_depth = 0.5 * float(
                     getattr(_sec, "h", getattr(_sec, "depth", getattr(_sec, "t3", 0.0))) or 0.5
                 )
-                strain_upper = eps0 + kz * h_guess
-                strain_lower = eps0 - kz * h_guess
+                strain_upper = eps0 + kz * half_depth
+                strain_lower = eps0 - kz * half_depth
                 eps_max = max(strain_upper, strain_lower)
                 eps_min = min(strain_upper, strain_lower)
                 if eps_min < _crush_eps:
@@ -4784,14 +4806,14 @@ class AnalysisBuilder:
                     "  ⚠ Gravity-only damage check: %d / %d frame element(s) "
                     "exceed strain limits (crush < %.4f or yield > %.4f): %s",
                     len(_flagged),
-                    len(self.frame_tag_map),
+                    _n_scanned,
                     _crush_eps,
                     _yield_eps,
                     _flagged[:8],
                 )
             elif print_progress:
                 print(
-                    f"  Gravity-only damage check: 0 / {len(self.frame_tag_map)} "
+                    f"  Gravity-only damage check: 0 / {_n_scanned} "
                     f"frame element(s) exceed concrete crush / rebar yield strain"
                 )
         except Exception:
