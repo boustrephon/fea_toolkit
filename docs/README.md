@@ -53,7 +53,7 @@ for automated cross-referencing.
   Related: [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Report Generation — Design Proposal](report_generation.md) · [Storey-level Response Methodology](storey_response.md)
 
 - [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md) — ✅ Complete
-  > Ground-motion-driven transient analysis via Tcl export and Xara/OpenSeesRT, with Rayleigh damping from a preceding modal analysis.
+  > Ground-motion-driven transient analysis via the complete Tcl export + Xara/OpenSeesRT path (with Rayleigh damping from a preceding modal analysis). Additional Python-native integration schemes remain planned.
   Tags: `analysis-type`, `nonlinear`, `dynamic`, `time-history`, `ground-motion`, `tcl`, `xara`
   Related: [Modal Analysis Options](modal_analysis.md) · [Tcl Export for Nonlinear Analysis](tcl_export.md) · [Xara/OpenSeesRT Tcl Runtime Guide](xara_tcl_runtime_guide.md) · [Typed Analysis Orchestration](analysis.md)
 
@@ -65,12 +65,12 @@ for automated cross-referencing.
 - [Report Generation — Design Proposal](report_generation.md) — 🚧 Draft
   > Design proposal for a YAML-driven report generation pipeline with HDF5 storage.
   Tags: `reporting`, `design-proposal`, `yaml-config`, `hdf5`
-  Related: [Unified Results Schema — Design Proposal](results_schema.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Modal Analysis Options](modal_analysis.md)
+  Related: [Unified Results Schema](results_schema.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Modal Analysis Options](modal_analysis.md)
 
 - [Storey-level Response Methodology](storey_response.md) — ✅ Complete
   > Storey displacement, drift, shear, and modal drift extraction and visualisation.
   Tags: `analysis-type`, `storey`, `drift`, `shear`, `displacement`, `post-processing`
-  Related: [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Modal Analysis Options](modal_analysis.md) · [Unified Results Schema — Design Proposal](results_schema.md)
+  Related: [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Modal Analysis Options](modal_analysis.md) · [Unified Results Schema](results_schema.md)
 
 
 ## ⚙️ Model Features
@@ -118,15 +118,15 @@ for automated cross-referencing.
 
 ## 🎨 Export & Visualisation
 
-- [Unified Results Schema — Design Proposal](results_schema.md) — 🚧 Draft
-  > Design proposal for the unified NPZ results schema, the canonical on-disk exchange format.
-  Tags: `schema`, `npz`, `results`, `design-proposal`, `io`
+- [Unified Results Schema](results_schema.md) — ✅ Complete
+  > The canonical unified NPZ results schema — the on-disk exchange format implemented by fea_toolkit.io.npz_writer.
+  Tags: `schema`, `npz`, `results`, `io`
   Related: [Report Generation — Design Proposal](report_generation.md) · [Visualisation Toolkit](viewer.md) · [Rhino 3-D Export](rhino_export.md) · [Storey-level Response Methodology](storey_response.md)
 
 - [Rhino 3-D Export](rhino_export.md) — ✅ Complete
   > Export to Rhino 8: centreline and extrusion geometry, layers, colours, and Grasshopper metadata.
   Tags: `export`, `rhino`, `visualisation`, `geometry`
-  Related: [Visualisation Toolkit](viewer.md) · [Unified Results Schema — Design Proposal](results_schema.md) · [Tcl Export for Nonlinear Analysis](tcl_export.md)
+  Related: [Visualisation Toolkit](viewer.md) · [Unified Results Schema](results_schema.md) · [Tcl Export for Nonlinear Analysis](tcl_export.md)
 
 - [Tcl Export for Nonlinear Analysis](tcl_export.md)
   > Exporting models to standalone OpenSees Tcl scripts for nonlinear analysis and Xara/OpenSeesRT runtime.
@@ -136,7 +136,7 @@ for automated cross-referencing.
 - [Visualisation Toolkit](viewer.md) — ✅ Complete
   > PyVista-based 3D viewer, backend-agnostic renderer, interactive browser viewer, and HTML export.
   Tags: `visualisation`, `pyvista`, `viewer`, `html-export`, `interactive`
-  Related: [Unified Results Schema — Design Proposal](results_schema.md) · [Rhino 3-D Export](rhino_export.md) · [Report Generation — Design Proposal](report_generation.md)
+  Related: [Unified Results Schema](results_schema.md) · [Rhino 3-D Export](rhino_export.md) · [Report Generation — Design Proposal](report_generation.md)
 
 
 ## 🛠️ Tool-Specific Workflows
@@ -185,7 +185,7 @@ for automated cross-referencing.
 - [Pushover Results Storage & Nonlinear Visualization](pushover_results_storage_viz.md) — ⚠️ Partial
   > Implementation plan and status for per-element pushover result recording (frame end forces, shell stress resultants, plasticity indicators) and nonlinear visualization.
   Tags: `pushover`, `results`, `storage`, `visualization`, `npz`, `planning`
-  Related: [Unified Results Schema — Design Proposal](results_schema.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Visualisation Toolkit](viewer.md)
+  Related: [Unified Results Schema](results_schema.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Visualisation Toolkit](viewer.md)
 
 
 ---
@@ -216,7 +216,7 @@ Tags across all documentation files:
 - **`cracked-section`** — [stiffness_factors.md](stiffness_factors.md)
 - **`csm`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md), [pushover_analysis.md](pushover_analysis.md)
 - **`deprecation`** — [deprecation_plan.md](deprecation_plan.md)
-- **`design-proposal`** — [report_generation.md](report_generation.md), [results_schema.md](results_schema.md)
+- **`design-proposal`** — [report_generation.md](report_generation.md)
 - **`development`** — [dev_notes.md](dev_notes.md)
 - **`displacement`** — [storey_response.md](storey_response.md)
 - **`drift`** — [storey_response.md](storey_response.md)

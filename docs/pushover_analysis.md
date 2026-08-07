@@ -53,13 +53,30 @@ Stage 2:  Lock gravity (loadConst), apply lateral loads, push
    area gravity loads, frame gravity loads, frame distributed loads).
 
 3. A load‑controlled static analysis is run using
-   `LoadControl(1.0)`:
+   `LoadControl(1.0)` — either as a single step (non‑LayeredShell
+   baseline):
 
    ```python
    ops.integrator('LoadControl', 1.0)
    ops.analysis('Static')
    ops.analyze(1)
    ```
+
+   or — for LayeredShell RC models — ramped over `gravity_num_substeps`
+   increments so the shells activate gradually without a stiffness shock:
+
+   ```python
+   NUM_SUB = 10  # AnalysisBuilder.LAYERED_SHELL_GRAVITY_SUBSTEPS
+   for i in range(1, NUM_SUB + 1):
+       ops.integrator("LoadControl", i / NUM_SUB)
+       ops.analysis("Static")
+       ok = ops.analyze(1)
+       if ok != 0:
+           break
+   ```
+
+   The substep count is auto‑detected from `mesh_model.layered_shell_sections`
+   (an explicit `gravity_num_substeps` config value always wins).
 
    The structure deforms under gravity alone.
 
