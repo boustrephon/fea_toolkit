@@ -634,9 +634,24 @@ cracking directly.
 
 SAP2000 creates rigid floor diaphragms via `CONSTRAINT DEFINITIONS -
 DIAPHRAGM` + `JOINT CONSTRAINT ASSIGNMENTS`.  The parser stores
-diaphragm data in `SAPModelData.constraints`, but the builder does not
-call `ops.rigidDiaphragm()`.  This means lateral load distribution
-depends on in-plane slab stiffness, which:
+diaphragm data in `SAPModelData.constraints`, and the Preprocessor +
+AnalysisBuilder now apply them:
+
+- The Preprocessor detects diaphragm levels/components (S2K Z-axis
+  DIAPHRAGM constraints → horizontal area-element fallback → forced
+  storey detection via `identify_stories()`) and records them on the
+  `MeshModel` as `diaphragm_components` — one `(mean_z, [node_id, ...])`
+  tuple per S2K constraint, preserving the constraint grouping.
+- The builder emits one `ops.rigidDiaphragm(3, master, *slaves)` per
+  component, picking the group centroid node as master.
+- The `rigid_diaphragms` config overrides behaviour: `False` disables,
+  `True` forces storey-based detection, `[z1, z2, ...]` overrides levels
+  with per-elevation merging, and `[{name, nodes|selection}, ...]`
+  supplies explicit named groups (see `docs/shell_support.md`).
+
+This matches SAP2000 results for models where SAP2000 uses rigid
+diaphragms by default.  Without them (config `False`), lateral load
+distribution depends on in-plane slab stiffness, which:
 - Is stiffer than a rigid diaphragm for thick slabs.
 - Is softer than a rigid diaphragm for thin slabs with fine meshes.
 - Does not match SAP2000 results for models where SAP2000 uses rigid
@@ -802,7 +817,7 @@ dependency on other items.
 | **P2** | Auto line constraints | 3.1/3.2 | Medium (builder change) | Mesh-density transitions (wall ↔ slab, frame ↔ slab) need automatic detection and MPC application. Implemented as `find_constraint_edges()` — sorted-tuple edge registry + sweep-line chain following. Returns 46 edges for the Admin Building. | ✅ Done |
 | **P3** | Joint modelling — Level 2 | 3.4 | Medium (builder change) | Enables semi-rigid connection modelling. Level 1 (rigid offset) exists; Level 2 replaces stiff links with calibrated zero-length springs (flexibility %). | ❌ Pending |
 | **P4** | Effective stiffness modifiers | 3.7 | Small | ASCE 41 cracked sections: 0.35EI beams, 0.70EI columns. AMod/I3Mod/I2Mod/JMod parsed from section properties; applied in builder for elastic builds only (skipped for nonlinear fiber sections). | ✅ Done |
-| **P5** | Rigid diaphragms | 3.7 | Medium (builder change) | Lateral load distribution differs from SAP2000. Parser stores constraint data, builder never calls `ops.rigidDiaphragm()`. | ❌ Pending |
+| **P5** | Rigid diaphragms | 3.7 | Medium (builder change) | Preprocessor detects S2K Z-axis DIAPHRAGM constraints (plus area fallback / storey detection) and builder applies ``ops.rigidDiaphragm()`` per group, preserving constraint identity. Config override via ``rigid_diaphragms`` (``False``/``True``/Z-list/explicit named groups). | ✅ Done |
 | **P6** | P-Delta geom. transformation | 3.7 | Small | Pushover config sets `geom_transf_type = 'PDelta'` via `rebuild_with_fiber_sections()`, but the `brace_selection` argument is never wired from `run_pushover_4dir`.  The code path is **dormant** — see docstring in `analysis_builder.py` for details. | ⚠️ Dormant |
 | **P7** | Convergence fallback | 3.7 | Medium (builder change) | Auto-retry chain (Newton → LineSearch → ModifiedNewton → KrylovNewton). Prevents analysis failure on marginally nonlinear models. | ❌ Pending |
 | **P8** | Concrete confinement | 3.7 | Medium (builder change) | Fiber sections overestimate column ductility without unconfined cover layer. Mander confinement formula fixed: effective lateral stress `f_l` now factored by confinement effectiveness coefficient `ke`. | ✅ Done |

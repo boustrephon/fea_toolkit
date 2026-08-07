@@ -127,3 +127,80 @@ where N₁, N₂ are linear interpolation weights.  This matches SAP2000's
 Auto Edge Constraint approach.  The default ``"spring"`` method creates
 ``twoNodeLink`` elements visible to all solvers; ``"penalty"`` switches
 the constraint handler to Penalty automatically.
+
+---
+
+## Rigid diaphragms
+
+Rigid diaphragms tie the in‑plane (X‑Y) translations of a storey's nodes to
+a common plane motion via a master node.  The builder emits one
+``ops.rigidDiaphragm(3, master, *slaves)`` constraint per diaphragm group.
+
+### Sources
+
+The Preprocessor populates ``mesh_model.diaphragm_levels`` and
+``mesh_model.diaphragm_components`` from several sources, selected by the
+``rigid_diaphragms`` config value:
+
+| Config value | Behaviour |
+|---|---|
+| absent / ``None`` | Auto‑detect (default) — S2K Z‑axis DIAPHRAGM constraints; falls back to horizontal area‑element mean‑Z levels when no constraints exist |
+| ``False`` | Explicitly **disable** all rigid diaphragms |
+| ``True`` | Force storey‑based detection via ``identify_stories()`` — one component per identified storey, skipping S2K constraints |
+| ``[z1, z2, ...]`` | Legacy override — use the explicit elevations and merge all nodes within 0.01 of each level into one diaphragm |
+| ``[{name, nodes\|selection}, ...]`` | **Explicit named groups** — bypass all detection; each dict is one independent diaphragm |
+
+### Explicit named groups
+
+Each group dict must contain either a ``nodes`` or a ``selection`` key
+(omitting both raises ``ValueError``):
+
+```python
+config = {
+    "rigid_diaphragms": [
+        {"name": "Tower A core", "nodes": ["101", "102", "103", "104"]},
+        {"name": "Tower A slabs",
+         "selection": {"element_types": ["Area"], "sections": ["Slab 200"]}},
+    ],
+}
+```
+
+- ``name`` — optional identifier, used only for verbose diagnostics.
+- ``nodes`` — explicit SAP2000 joint ID list, filtered to nodes that survive
+  preprocessing.
+- ``selection`` — a selector dict with the usual
+  :class:`~fea_toolkit.model.selection.Selection` keys (``element_types``,
+  ``sections``, ``materials``, ``groups``, ``element_ids``) or an actual
+  ``Selection`` instance:
+
+  ```python
+  from fea_toolkit.model.selection import Selection
+
+  config = {
+      "rigid_diaphragms": [
+          {"name": "slabs", "selection": Selection(
+              element_types=["Area"], sections=["Slab 200"])},
+      ],
+  }
+  ```
+
+  Matching **area** elements contribute their vertex nodes; matching
+  **frame** elements contribute both end nodes.  The union (deduplicated,
+  first‑seen order) becomes the group.
+
+Each group produces **one independent ``rigidDiaphragm``**.  Groups at the
+same elevation are **not** merged — this preserves separate wings or cores
+separated by a seismic gap.  A group's elevation is taken as the mean Z of
+its resolved nodes.
+
+### Grouping behaviour
+
+- **S2K joint constraints** — each Z‑axis ``DIAPHRAGM`` constraint in
+  ``CONSTRAINT DEFINITIONS - DIAPHRAGM`` + ``JOINT CONSTRAINT ASSIGNMENTS``
+  becomes one component, preserving the S2K constraint grouping.
+- **Area fallback** — when no explicit constraints exist and
+  ``rigid_diaphragms`` is absent, the Preprocessor records only mean‑Z
+  levels (no components).  The builder then falls back to per‑elevation
+  merging: all nodes near each level form a single diaphragm.
+- **Storey detection (``True``)** — each ``StoryLevel`` from
+  ``identify_stories()`` becomes one component.

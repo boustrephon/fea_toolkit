@@ -113,7 +113,7 @@ def identify_stories(
         if stories:
             return _sort_and_name(stories)
 
-        stories = _try_diaphragms(md, raw_tables)
+        stories = _try_diaphragms(md)
         if stories:
             return _sort_and_name(stories)
 
@@ -134,8 +134,14 @@ def identify_stories(
     fn = dispatch.get(method)
     if fn is None:
         raise ValueError(f"Unknown method: {method}")
-    # Methods that need raw_tables
-    result = fn(md, raw_tables) if method in ("s2k_table", "diaphragm") else fn(md, z_tolerance)
+    # Only the s2k_table strategy needs raw_tables; the diaphragm strategy
+    # reads constraint data from the structured SAPModelData attributes.
+    if method == "s2k_table":
+        result = fn(md, raw_tables)
+    elif method == "diaphragm":
+        result = fn(md)
+    else:
+        result = fn(md, z_tolerance)
     return _sort_and_name(result)
 
 
@@ -177,55 +183,52 @@ def _try_s2k_table(md, raw_tables) -> list[StoryLevel]:
 # ========================================================================
 
 
-def _try_diaphragms(md, raw_tables) -> list[StoryLevel]:
-    """Detect storeys from diaphragm constraints defined in the .s2k file.
+def _try_diaphragms(md) -> list[StoryLevel]:
+    """Detect storeys from Z-axis diaphragm constraints on model data.
 
-    Uses two tables from the s2k file:
-    - ``CONSTRAINT DEFINITIONS - DIAPHRAGM`` — defines diaphragm names
-      and their constraint axis (e.g. Z)
-    - ``JOINT CONSTRAINT ASSIGNMENTS`` — maps joints to those constraints
+    Reads the structured constraint data carried by ``SAPModelData``:
 
-    Joints sharing the same diaphragm constraint are grouped; the storey
-    elevation is taken from the average Z of the group.
+    - ``md.constraints`` — ``{constraint_name: Constraint}``, including the
+      definition type (``DIAPHRAGM``, ``BODY``, ``EQUAL``, …) and the
+      constraint axis held in ``constraint_data``.
+    - ``md.constraint_assignments`` — ``{joint_id: constraint_name}``
+      mapping joints to the constraint they belong to.
+
+    Only ``DIAPHRAGM`` constraints with a ``Z`` axis are considered; all
+    other constraint types (``BODY``, ``EQUAL``, etc.) are ignored by the
+    type/axis filter.  Joints sharing the same diaphragm constraint are
+    grouped; the storey elevation is the average Z of the group.
     """
-    if raw_tables is None:
+    constraints = getattr(md, "constraints", {})
+    assignments = getattr(md, "constraint_assignments", {})
+    if not constraints or not assignments:
         return []
 
-    # 1. Get diaphragm constraint definitions
-    diaph_defs = raw_tables.get("CONSTRAINT DEFINITIONS - DIAPHRAGM") or []
-    if not diaph_defs:
-        return []
-
-    # Collect names of Z-axis diaphragms
+    # 1. Collect names of Z-axis diaphragm constraints
     diaph_names: list[str] = []
-    for rec in diaph_defs:
-        name = rec.get("Name", "")
-        axis = rec.get("Axis") or ""
-        if name and axis.upper() == "Z":
-            diaph_names.append(name)
+    for cname, con in constraints.items():
+        if con.constraint_type != "DIAPHRAGM":
+            continue
+        axis = str(con.constraint_data.get("Axis", "")).upper()
+        if axis and axis != "Z":
+            continue
+        diaph_names.append(cname)
 
     if not diaph_names:
         return []
 
-    # 2. Get joint assignments and group by constraint name
-    assignments = raw_tables.get("JOINT CONSTRAINT ASSIGNMENTS") or []
+    # 2. Group assigned joints by constraint name
     constraint_groups: dict[str, list[str]] = {n: [] for n in diaph_names}
-    for rec in assignments:
-        joint = rec.get("Joint", "")
-        cname = rec.get("Constraint", "")
-        if joint and cname in constraint_groups:
-            constraint_groups[cname].append(joint)
+    for joint_id, cname in assignments.items():
+        if cname in constraint_groups and joint_id in md.nodes:
+            constraint_groups[cname].append(joint_id)
 
     # 3. Compute elevation for each group from joint Z coordinates
     stories = []
     for cname, joint_ids in constraint_groups.items():
         if len(joint_ids) < 2:
             continue  # skip degenerate groups
-        z_vals = []
-        for jid in joint_ids:
-            node = md.nodes.get(jid)
-            if node is not None:
-                z_vals.append(node.z)
+        z_vals = [md.nodes[jid].z for jid in joint_ids]
         if not z_vals:
             continue
         elev = sum(z_vals) / len(z_vals)
