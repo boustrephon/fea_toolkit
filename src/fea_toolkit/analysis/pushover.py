@@ -25,7 +25,7 @@ RC path (Tcl/Xara export, legacy fallback)
     Uses ``forceBeamColumn`` with fiber sections (Concrete01, Steel02).
 """
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 from fea_toolkit.analysis.base import (
     _PUSHOVER_RC_DEFAULTS,
@@ -509,10 +509,8 @@ class PushoverAnalysis(Analysis):
         # Pass the per-node paths to the parser so reactions are summed
         # across all bases (each file carries the push-direction reaction
         # for that base node, aggregated by matching recorded time steps).
-        from typing import Union as _Union
-
         if len(base_node_tags) == 1:
-            reaction_path: Optional[_Union[str, list[str]]] = str(
+            reaction_path: Optional[Union[str, list[str]]] = str(
                 out_dir / f"{output_prefix}_reaction.out"
             )
         else:
