@@ -241,6 +241,11 @@ class ResponseSpectrum:
         for i, t in enumerate(self.T):
             if not np.isfinite(t):
                 raise ValueError(f"ResponseSpectrum T ordinates must be finite; found T[{i}]={t!r}")
+        for i, s in enumerate(self.Sa):
+            if not np.isfinite(s):
+                raise ValueError(
+                    f"ResponseSpectrum Sa ordinates must be finite; found Sa[{i}]={s!r}"
+                )
         # Require strictly increasing period ordinates: unsorted or
         # duplicate periods produce silently incorrect interpolated
         # spectral accelerations (e.g. via `interpolate_sa`).
@@ -308,7 +313,7 @@ def _iec_spectrum(T, pga, zeta: float = 0.05):
     critical damping ``d = 100 * zeta``:
 
     * ``0 <= f <= 1.1`` — rising branch: ``(pga / 0.25) * 0.572 * beta * f``
-    * ``1.0 <= f <= 8.0`` — plateau: ``pga * 2.5 * beta``
+    * ``1.1 <= f <= 8.0`` — plateau: ``pga * 2.5 * beta``
     * ``8.0 <= f <= 33.0`` — falling branch:
       ``(pga / 0.25) * ((6.6 * beta - 2.64) / f - 0.2 * beta + 0.33)``
     * ``f > 33`` — constant: ``pga``
@@ -336,15 +341,21 @@ def _iec_spectrum(T, pga, zeta: float = 0.05):
     Raises
     ------
     ValueError
-        If *zeta* is non-positive (the damping factor uses ``log(100 * zeta)``)
-        or *T* contains NaN values.
+        If *pga* is not finite, *zeta* is non-positive or exceeds 0.20
+        (the damping factor uses ``log(100 * zeta)``), or *T* is negative
+        or not finite.  ``T = 0`` is valid and maps to the zero-period
+        acceleration.
     """
-    if zeta <= 0:
-        raise ValueError("zeta must be positive (damping factor uses log(100 * zeta))")
+    if zeta <= 0 or zeta > 0.20:
+        raise ValueError("zeta must be in (0, 0.20] (damping factor uses log(100 * zeta))")
+    if not np.isfinite(pga):
+        raise ValueError("pga must be finite")
     if np.any(~np.isfinite(T)):
         raise ValueError("T values must be finite")
-
     T_arr = np.asarray(T, dtype=float)
+    if np.any(T_arr < 0):
+        raise ValueError("T values must be non-negative")
+
     scalar_in = T_arr.ndim == 0
     T_arr = np.atleast_1d(T_arr)
 
