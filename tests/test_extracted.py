@@ -240,6 +240,11 @@ class TestIec62271:
         beta = (3.21 - 0.68 * np.log(100.0 * zeta)) / 2.1156
         assert s.interpolate([1.0 / 1.1])[0] == pytest.approx(0.4 / 0.25 * 0.572 * beta * 1.1)
         assert s.interpolate([1.0 / 8.0])[0] == pytest.approx(0.4 * 2.5 * beta)
+        # Falling branch at f = 33 Hz, where it transitions to the
+        # constant-pga high-frequency region.
+        assert s.interpolate([1.0 / 33.0])[0] == pytest.approx(
+            0.4 / 0.25 * ((6.6 * beta - 2.64) / 33.0 - 0.2 * beta + 0.33)
+        )
 
     def test_negative_pga_rejected(self):
         """_iec_spectrum rejects negative peak ground acceleration."""

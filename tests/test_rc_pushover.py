@@ -407,6 +407,7 @@ class TestParsePushoverResults:
         assert abs(result["base_shear"][2, 0] - (-300.0)) < 1e-6
         # Column 1 = Ry (zero for a pure-X push)
         assert abs(result["base_shear"][0, 1] - 0.0) < 1e-6
+        assert abs(result["base_shear"][1, 1] - 0.0) < 1e-6
         assert abs(result["base_shear"][2, 1] - 0.0) < 1e-6
         # Column 2 = Rz (vertical base reactions grow with drift)
         assert abs(result["base_shear"][0, 2] - 400.0) < 1e-6
