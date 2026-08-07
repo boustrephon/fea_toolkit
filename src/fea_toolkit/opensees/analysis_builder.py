@@ -4291,37 +4291,10 @@ class AnalysisBuilder:
                 f = ops.eleResponse(tag, "localForces")
             except Exception:
                 continue
-            if len(f) == 1:
-                # Truss elements return a single scalar (local axial force,
-                # tension-positive in OpenSees).  Expand to the standard 12
-                # component row: fx_i = -P, fx_j = +P keeps the result dense
-                # and satisfies force equilibrium (fx_i + fx_j = 0).
-                axial = float(f[0])
-                f = [-axial, 0.0, 0.0, 0.0, 0.0, 0.0, axial, 0.0, 0.0, 0.0, 0.0, 0.0]
-            elif len(f) == 6:
-                # 3D truss elements return a 6-value vector from
-                # localForces: [fx_i, fy_i, fz_i, fx_j, fy_j, fz_j]
-                # with no moment components.  Expand to the standard 12
-                # component row with zero moments so the response is
-                # preserved rather than skipped.
-                f = [
-                    f[0],
-                    f[1],
-                    f[2],
-                    0.0,
-                    0.0,
-                    0.0,
-                    f[3],
-                    f[4],
-                    f[5],
-                    0.0,
-                    0.0,
-                    0.0,
-                ]
-            elif len(f) < 12:
+            f = _normalise_frame_response(f)
+            if f is None:
                 # Empty or short unsupported response — skip this element
-                # without aborting the extraction (same guard used in
-                # _record_step).
+                # without aborting the extraction.
                 continue
             f_i_local = np.array([f[0], f[1], f[2]])
             m_i_local = np.array([f[3], f[4], f[5]])
@@ -5493,6 +5466,49 @@ class AnalysisBuilder:
         )
 
 
+def _normalise_frame_response(f) -> Optional[list[float]]:
+    """Normalise an ``ops.eleResponse(tag, 'localForces')`` response.
+
+    Handles the variable-length responses returned by OpenSees element
+    types:
+
+    * **1 value** — ``Truss`` local axial force (tension-positive).
+      Expanded to the standard 12-component row as
+      ``[-P, 0, 0, 0, 0, 0, P, 0, 0, 0, 0, 0]`` — ``fx_i = -P``,
+      ``fx_j = +P`` keeps the array dense and satisfies force
+      equilibrium.
+    * **6 values** — 3D ``Truss`` local end forces
+      ``[fx_i, fy_i, fz_i, fx_j, fy_j, fz_j]`` with no moment
+      components.  Expanded to the standard 12-component row with zero
+      moments so the response is preserved rather than skipped.
+    * **< 12 values (other than 1 or 6)** — unsupported; ``None`` is
+      returned and the caller skips the element.
+    * **>= 12 values** — the first 12 values are returned.
+
+    This single helper replaces the ad-hoc inline normalisation that was
+    previously duplicated in
+    :meth:`AnalysisBuilder.extract_static_element_forces` and
+    :func:`_record_step` — the two call sites disagreed on whether a
+    6-value (3D truss) response was recordable, which silently dropped
+    truss members from per-step pushover recording.
+
+    Args:
+        f: Raw response from ``ops.eleResponse`` (list or array-like).
+
+    Returns:
+        List of 12 values, or ``None`` when the response length is not
+        supported.
+    """
+    if len(f) == 1:
+        axial = float(f[0])
+        return [-axial, 0.0, 0.0, 0.0, 0.0, 0.0, axial, 0.0, 0.0, 0.0, 0.0, 0.0]
+    if len(f) == 6:
+        return [f[0], f[1], f[2], 0.0, 0.0, 0.0, f[3], f[4], f[5], 0.0, 0.0, 0.0]
+    if len(f) < 12:
+        return None
+    return list(f[:12])
+
+
 def _record_step(
     builder: "AnalysisBuilder",
     step: int,
@@ -5530,14 +5546,8 @@ def _record_step(
             f = ops.eleResponse(ops_tag, "localForces")  # 12 local values
         except Exception:
             continue
-        if len(f) == 1:
-            # Truss elements return a single scalar (local axial force,
-            # tension-positive in OpenSees).  Expand to the standard 12
-            # component row: fx_i = -P, fx_j = +P keeps the result array
-            # dense and maintains force equilibrium.
-            axial = float(f[0])
-            f = [-axial, 0.0, 0.0, 0.0, 0.0, 0.0, axial, 0.0, 0.0, 0.0, 0.0, 0.0]
-        elif len(f) < 12:
+        f = _normalise_frame_response(f)
+        if f is None:
             continue
         frame_forces[eid] = {
             "fx_i": f[0],
