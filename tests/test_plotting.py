@@ -2008,3 +2008,58 @@ class TestAnimationTimerCallbackArity:
         self._invoke_registered_callback(fp, "vtek", ("caller", "TimerEvent"))
         self._invoke_registered_callback(fp, "vtek", ("caller", "TimerEvent"))
         assert received == [(1, None), (2, None)], f"Unexpected args: {received}"
+
+    def test_non_introspectable_callback_truncates_surplus_args(self):
+        """A callback whose signature cannot be inspected (``inspect.signature``
+        raises, as for some C-bound callables) is treated as ``callback(step)``
+        — PyVista's documented contract — so surplus args like
+        ``(step, plotter)`` are truncated to ``(step,)`` instead of raising
+        ``TypeError``."""
+        from unittest.mock import patch
+
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        received = []
+
+        def callback(step):
+            received.append(step)
+            return step
+
+        # Force the non-introspectable fallback branch in _add_animation_timer.
+        with patch("inspect.signature", side_effect=TypeError("no signature")):
+            fp = self._make_fake_plotter("pyvista_2arg")
+            _add_animation_timer(fp, callback, max_steps=10, interval_ms=17)
+            out = self._invoke_registered_callback(fp, "pyvista_2arg", (3, "plotter_obj"))
+        assert out == 3
+        assert received == [3]
+
+    def test_varargs_callback_with_required_step_legacy_no_args(self):
+        """A ``callback(step, *extra)`` on a legacy no-argument timer
+        receives the internal step count, with ``extra`` empty."""
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        received = []
+
+        def callback(step, *extra):
+            received.append((step, extra))
+
+        fp = self._make_fake_plotter("pyvista_no_interval")
+        _add_animation_timer(fp, callback, max_steps=10, interval_ms=17)
+        self._invoke_registered_callback(fp, "pyvista_no_interval", ())
+        assert received == [(1, ())]
+
+    def test_varargs_callback_with_required_step_vtk_fallback(self):
+        """A ``callback(step, *extra)`` on the VTK fallback receives the
+        internal step count with ``extra`` empty; the ``(caller, event)``
+        pair is discarded rather than forwarded into the varargs."""
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        received = []
+
+        def callback(step, *extra):
+            received.append((step, extra))
+
+        fp = self._make_fake_plotter("vtek")
+        _add_animation_timer(fp, callback, max_steps=10, interval_ms=17)
+        self._invoke_registered_callback(fp, "vtek", ("caller", "TimerEvent"))
+        assert received == [(1, ())]
