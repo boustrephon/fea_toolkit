@@ -280,11 +280,12 @@ performs a **two-pass selection**:
 meaningful when all mode shapes share a common normalization.  With
 **mass-normalised eigenvectors** — the standard output of
 :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.extract_mode_shapes` —
-``M* = 1`` for every mode and the filter passes all modes trivially.
-Selection then reduces to the largest ``L = Σ mᵢ φᵢ`` in the push
-direction, which correctly favours a translational sway mode over a
-torsional mode (whose directional components largely cancel in the
-sum).  The filter is therefore a **defensive measure for
+ ``M* = 1`` for every mode and the filter passes all modes trivially.
+ Selection then reduces to the largest ``L² / M* = L²`` — i.e. the
+ largest ``abs(L) = |Σ mᵢ φᵢ|`` in the push direction, since the
+ squared ratio is sign-invariant.  This favours a translational sway
+ mode over a torsional mode (whose directional components largely
+ cancel in the sum).  The filter is therefore a **defensive measure for
 non-mass-normalised mode shapes** (e.g. hand-scaled shapes from an
 external source) where a mode with `M* ≈ 0` could otherwise produce a
 spuriously large `L² / M*` and out-rank the true sway mode.
@@ -305,11 +306,14 @@ procedure to estimate seismic demands for unsymmetric-plan buildings"*,
 | Torsionally-similarly-stiff (TSS) | Strongly coupled | Strongly coupled | ✗ Degrades |
 | Torsionally-flexible (TF) | Torsional-dominant | Lateral-dominant | ⚠ First mode unusable |
 
-- **Torsionally-flexible (TF)** — the first mode is torsional, so a
-  naive "first-mode" ADRS conversion would be corrupt.  The two-pass
-  filter above selects the lateral mode instead, which is the correct
-  engineering choice.  This is the situation in the Admin Building
-  test model.
+ - **Torsionally-flexible (TF)** — the first mode is torsional, so a
+   naive "first-mode" ADRS conversion would be corrupt.  The two-pass
+   filter above may select a lateral mode instead, but this is only a
+   **heuristic** based on the highest surviving ``L² / M*``: the 1 %
+   ``M*`` threshold does not itself identify lateral versus torsional
+   modes, so the non-fundamental-mode choice should be validated before
+   being relied upon.  This is the situation in the Admin Building
+   test model.
 - **Torsionally-similarly-stiff (TSS)** — the first two (or more)
   modes have **closely-spaced periods and strongly coupled
   lateral-torsional motion**: both modes carry comparable lateral *and*

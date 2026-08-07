@@ -65,8 +65,11 @@ contract; see `docs/analysis.md` for the typed container):
 On a non-zero runner exit status the result is returned with `converged_steps=0`,
 `times=np.array([])` (an empty `ndarray`, preserving the container type declared
 above), and an **`error`** entry under `result.metadata` (not `result.data`).
-`peak_displacement` always represents the **maximum absolute nodal displacement**,
-not inter-storey drift.
+In this failure path `peak_displacement` is set to `0.0` as a **runner-failure
+sentinel** — it is **not** a measured value.  Consumers must check
+`result.metadata["error"]` before interpreting `peak_displacement`.  On a
+successful run `peak_displacement` represents the **maximum absolute nodal
+displacement**, not inter-storey drift.
 
 ## How it works
 
