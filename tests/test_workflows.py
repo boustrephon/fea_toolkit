@@ -720,6 +720,46 @@ class TestUnifiedNpzPipeline:
         # Displacements should be non-zero under DEAD load
         assert np.any(np.abs(disp) > 1e-12)
 
+    def test_static_pp_numpy_bool_scalar(self, analysed_builder, tmp_path):
+        """A numpy ``np.bool_`` scalar in a ``pp`` static case is persisted.
+
+        ``compute_performance_point()`` returns the ``converged`` flag as a
+        numpy scalar (``np.bool_``), which is *not* an instance of Python
+        ``bool``.  ``_collect_static()`` must accept it as a JSON-scalar so
+        ``static/pp/+X/converged`` survives serialization instead of raising
+        ``ValueError``.
+        """
+        import numpy as np
+
+        from fea_toolkit.io.npz_writer import _collect_static
+
+        static_results = {
+            "pp": {
+                "+X/D_roof": 0.0191,
+                "+X/V_base": 3532.74,
+                "+X/converged": np.bool_(True),
+            }
+        }
+        arrays = _collect_static(static_results)
+
+        # Numpy bool must be treated as a serializable scalar, not rejected.
+        assert "static/pp/+X/converged" in arrays
+        assert arrays["static/pp/+X/converged"].shape == (1,)
+        assert bool(arrays["static/pp/+X/converged"][0]) is True
+        assert "static/pp/+X/D_roof" in arrays
+        assert "static/pp/+X/V_base" in arrays
+
+        # Full write → read round-trip preserves the flag.
+        md = analysed_builder.sap_model_data
+        from fea_toolkit.io.npz_reader import read_results_npz
+        from fea_toolkit.io.npz_writer import write_results_npz
+
+        npz_path = str(tmp_path / "test_pp_numpy_bool.npz")
+        write_results_npz(npz_path, md, static_results=static_results)
+        data = read_results_npz(npz_path)
+        assert "static/pp/+X/converged" in data
+        assert bool(data["static/pp/+X/converged"][0]) is True
+
     def test_write_and_read_modal(self, analysed_builder, tmp_path):
         """Modal results can be written to NPZ, read back, and used for
         mode-shape visualisation.
