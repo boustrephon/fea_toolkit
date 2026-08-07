@@ -1,12 +1,12 @@
 ---
-title: "Unified Results Schema — Design Proposal"
-description: "Design proposal for the unified NPZ results schema, the canonical on-disk exchange format."
-status: "draft"
-tags: [schema, npz, results, design-proposal, io]
+title: "Unified Results Schema"
+description: "The canonical unified NPZ results schema — the on-disk exchange format implemented by fea_toolkit.io.npz_writer."
+status: "stable"
+tags: [schema, npz, results, io]
 category: [export-viz]
 related: [report_generation.md, viewer.md, rhino_export.md, storey_response.md]
 ---
-# Unified Results Schema — Design Proposal
+# Unified Results Schema
 
 ## Motivation
 
@@ -120,6 +120,7 @@ supported.
 |---|---|---|---|
 | `shell_eid` | `(N_shell,)` | `int` | Element index (0‑based) |
 | `shell_sap_id` | `(N_shell,)` | `str` | Original SAP2000 AreaID |
+| `shell_parent_sap_id` | `(N_shell,)` | `str` | Parent SAP2000 ID for split/meshed children (from ``area.parent_id``), empty string for original areas. Aligned 1:1 with ``shell_sap_id`` — the authoritative source for `group_shell_forces_by_section()` child grouping (never parsed from element names). |
 | `shell_sec_name` | `(N_shell,)` | `str` | Section name |
 | `shell_node_1` | `(N_shell,)` | `int` | Corner node 1 **tag** (OpenSees, matches ``node_tag``) |
 | `shell_node_2` | `(N_shell,)` | `int` | Corner node 2 **tag** |
@@ -192,21 +193,23 @@ Authoring rule: pass the PP payload as one ``"pp"`` static case with
 flattened ``f"{direction}/{field}"`` keys and plain scalar values (no
 ``{"value": ...}`` wrappers, no nested per-direction cases).
 
-**D_roof sign convention**: ``D_roof`` is a **magnitude** (non-negative)
-— the CSM engine folds the capacity curve into the positive quadrant and
-re-applies the push-direction sign only to ``V_base`` / ``D_roof`` at the
-caller boundary.  Consumers matching ``D_roof`` against recorded pushover
-steps must therefore compare against ``abs(control_disp)``, not the
-signed ``control_disp`` array.
+**D_roof sign convention**: ``D_roof`` is a **non-negative magnitude** —
+the single canonical convention.  The CSM engine folds the capacity curve
+into the positive quadrant; the push-direction sign is carried by
+``V_base`` only.  Consumers matching ``D_roof`` against recorded pushover
+steps must always compare against ``abs(control_disp)``, never the signed
+``control_disp`` array.
 
-**Deterministic step selection**: consumers must not rely on
-nearest-value matching alone (repeated control displacements from
-oscillating curves can match the wrong step).  The PP authoring payload
-should additionally persist the selected control-step index (or another
-unique step key) under ``static/pp/{direction}/control_step`` / a
-``control_disp`` mirror, so the performance-point ↔ capacity-step mapping
-is deterministic.  When that key is absent, fall back to locating the
-nearest ``abs(pushover/{direction}/control_disp)`` value to ``D_roof``.
+**Deterministic step selection**: the primary (and authoritative) mapping
+between the performance point and the recorded pushover capacity curve is
+the persisted control-step index.  The PP authoring payload **must**
+include ``static/pp/{direction}/control_step`` (the integer index into
+``pushover/{direction}/control_disp`` / ``pushover/{direction}/base_shear``)
+together with a ``control_disp`` mirror.  Consumers **must** use
+``control_step`` to locate the capacity-curve row; ``D_roof`` /
+``control_disp`` are used only to validate the match (compare
+``abs(control_disp[control_step])`` to ``D_roof``) and must **not** be
+used for nearest-value lookup.
 
 ### Modal analysis results
 
