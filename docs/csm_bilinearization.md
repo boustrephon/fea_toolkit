@@ -275,16 +275,63 @@ performs a **two-pass selection**:
    ratio.  Then the mode with the highest `L² / M*` among the
    survivors is selected.
 
-The `1 %` threshold is far below the 30–60 % that characterises a
-genuine sway mode, yet safely above the ~`1e-3` relative level of the
-numerically contaminated modes observed with real 3D building models.
-This threshold is **only meaningful when all mode shapes use a common
-normalization** (e.g. mass-normalised eigenvectors); with inconsistent
-normalizations the ratio `M* / M*_max` is normalization-dependent and
-must not be compared across modes.  Callers must ensure the supplied
-`mode_shapes` are commonly normalized before relying on the 1 %
-filter — or replace the threshold with a scale-invariant directional
-metric (e.g. load participation `L / M*` normalised by total mass).
+**When is this filter active?**  The threshold compares `M*` against
+`M*_max` **within the same eigenvector normalization**, so it is only
+meaningful when all mode shapes share a common normalization.  With
+**mass-normalised eigenvectors** — the standard output of
+:meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.extract_mode_shapes` —
+``M* = 1`` for every mode and the filter passes all modes trivially.
+Selection then reduces to the largest ``L = Σ mᵢ φᵢ`` in the push
+direction, which correctly favours a translational sway mode over a
+torsional mode (whose directional components largely cancel in the
+sum).  The filter is therefore a **defensive measure for
+non-mass-normalised mode shapes** (e.g. hand-scaled shapes from an
+external source) where a mode with `M* ≈ 0` could otherwise produce a
+spuriously large `L² / M*` and out-rank the true sway mode.
+
+### Lateral-torsional coupling: known limitations
+
+CSM assumes the response is controlled by a **single translational
+mode in the push direction** (the fundamental mode).  For
+unsymmetric-plan buildings this assumption degrades or fails depending
+on the degree of lateral-torsional coupling.  Following the
+classification of Chopra & Goel (2004), *"A modal pushover analysis
+procedure to estimate seismic demands for unsymmetric-plan buildings"*,
+*Earthquake Engineering & Structural Dynamics* **33**, 903–927:
+
+| System | Mode 1 | Mode 2 | CSM suitability |
+|---|---|---|---|
+| Torsionally-stiff (TS) | Lateral-dominant | Torsional-dominant | ✓ Adequate |
+| Torsionally-similarly-stiff (TSS) | Strongly coupled | Strongly coupled | ✗ Degrades |
+| Torsionally-flexible (TF) | Torsional-dominant | Lateral-dominant | ⚠ First mode unusable |
+
+- **Torsionally-flexible (TF)** — the first mode is torsional, so a
+  naive "first-mode" ADRS conversion would be corrupt.  The two-pass
+  filter above selects the lateral mode instead, which is the correct
+  engineering choice.  This is the situation in the Admin Building
+  test model.
+- **Torsionally-similarly-stiff (TSS)** — the first two (or more)
+  modes have **closely-spaced periods and strongly coupled
+  lateral-torsional motion**: both modes carry comparable lateral *and*
+  torsional components centred on a combined period.  No single
+  translational mode exists, so the single-mode CSM assumption breaks
+  down — results "deteriorate for a torsionally-similarly-stiff
+  unsymmetric-plan system" (Chopra & Goel 2004).  A later study of 96
+  steel moment-resisting-frame buildings reached the same conclusion:
+  CSM is unreliable for buildings with dominant lateral-torsional
+  modes of vibration.  For such buildings use Modal Pushover Analysis
+  (MPA, combining per-mode pushovers by the CQC rule) or nonlinear
+  response history analysis instead.
+
+**Practical detection**: the ``partiMassRatiosMX`` / ``partiMassRatiosMY``
+arrays returned by ``run_modal_analysis()`` give the directional
+mass-participation of each mode.  If the push-direction participation
+is low across the first few modes (< ~10 %), the structure may be
+torsionally dominated — reconsider whether CSM is appropriate or
+whether more modes / a multi-mode pushover are needed.  If two
+adjacent modes have both similar periods and similar directional
+participation, they are likely coupled lateral-torsional modes (TSS)
+and CSM should not be relied upon.
 
 The function raises a `ValueError` when a valid mode cannot be found.
 This can happen in two ways:
