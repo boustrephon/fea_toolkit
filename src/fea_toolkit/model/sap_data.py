@@ -1419,6 +1419,11 @@ class SAPModelData:
     frame_end_offsets: dict[str, FrameEndOffset] = field(default_factory=dict)
     area_mesh: dict[str, AreaMesh] = field(default_factory=dict)
     area_edge_constraints: dict[str, list[AreaEdgeConstraint]] = field(default_factory=dict)
+    # Joint constraint definitions keyed by constraint name (e.g. "D1", "BODY1").
+    # ``constraint_type`` distinguishes BODY / DIAPHRAGM / EQUAL / etc.
+    constraints: dict[str, Constraint] = field(default_factory=dict)
+    # Joint constraint assignments: SAP joint ID -> constraint name.
+    constraint_assignments: dict[str, str] = field(default_factory=dict)
     # Loads (to be expanded later)
     load_cases: dict[str, LoadCase] = field(default_factory=dict)
     load_patterns: dict[str, LoadPattern] = field(default_factory=dict)
