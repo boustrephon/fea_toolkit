@@ -948,8 +948,11 @@ def pushover_to_adrs(
     Args:
         pushover_results: Dict with ``'control_disp'``, ``'base_shear'``,
             and ``'roof_disp'`` (or ``'monitor_disp'``) arrays.
-        modal_results: Dict with ``'periods'``, and ``'nodal_masses'``
-            (optional).
+        modal_results: Dict with ``'periods'`` and **required**
+            ``'nodal_masses'`` — a ``{node_tag: mass}`` map (same keys as
+            ``mode_shapes``).  Missing or empty mass data raises
+            ``ValueError`` because it would degenerate ``Gamma`` /
+            ``M_eff`` to zero and falsify the ADRS conversion.
         mode_shapes: Dict mapping mode index → {node_tag: (ux, uy, uz)}.
         direction: Push direction (``'X'``, ``'Y'``, or ``'Z'``).
 
@@ -966,9 +969,20 @@ def pushover_to_adrs(
           minus one; display as ``best_mode + 1`` for a 1‑based mode
           number).
     """
-    # Use best mode (highest mass participation in push direction)
+    # Use best mode (highest mass participation in push direction).
+    # ``nodal_masses`` is part of the required modal-result contract
+    # (``run_modal_analysis`` always includes it).  A missing or empty
+    # mass map degenerates Gamma / M_eff to zero — with no participation
+    # terms every mode is "negligible", yet the empty-map accept-state
+    # check can still pass and silently emit S_a = V / 0.  Fail loudly.
     masses = modal_results.get("nodal_masses", {})
-    modal_results.get("periods", [])
+    if not masses:
+        raise ValueError(
+            "pushover_to_adrs: modal_results['nodal_masses'] is missing or "
+            "empty — ADRS conversion requires the nodal mass map (produced "
+            "by run_modal_analysis). Without it Gamma and M_eff degenerate "
+            "and S_a/S_d are invalid."
+        )
 
     # Strip a leading sign ("-Y" → "Y") so negative-Y pushes select the
     # Y component.  Unsupported labels are explicitly rejected rather
