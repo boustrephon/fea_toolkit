@@ -1207,7 +1207,6 @@ def parse_pushover_results(
                 ref_time = t_vals
         except Exception:
             continue
-    summed_rx = None
     n_series = len(_series_list)
     if ref_time is not None:
         summed_rx = np.zeros_like(ref_time, dtype=float)
