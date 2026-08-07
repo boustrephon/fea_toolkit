@@ -190,9 +190,23 @@ data["static/pp/+X/V_base"]   # array([3532.74])
 
 Authoring rule: pass the PP payload as one ``"pp"`` static case with
 flattened ``f"{direction}/{field}"`` keys and plain scalar values (no
-``{"value": ...}`` wrappers, no nested per-direction cases).  Consumers
-locate the PP step by reading ``static/pp/{direction}/D_roof`` and finding
-the nearest ``pushover/{direction}/control_disp`` value.
+``{"value": ...}`` wrappers, no nested per-direction cases).
+
+**D_roof sign convention**: ``D_roof`` is a **magnitude** (non-negative)
+— the CSM engine folds the capacity curve into the positive quadrant and
+re-applies the push-direction sign only to ``V_base`` / ``D_roof`` at the
+caller boundary.  Consumers matching ``D_roof`` against recorded pushover
+steps must therefore compare against ``abs(control_disp)``, not the
+signed ``control_disp`` array.
+
+**Deterministic step selection**: consumers must not rely on
+nearest-value matching alone (repeated control displacements from
+oscillating curves can match the wrong step).  The PP authoring payload
+should additionally persist the selected control-step index (or another
+unique step key) under ``static/pp/{direction}/control_step`` / a
+``control_disp`` mirror, so the performance-point ↔ capacity-step mapping
+is deterministic.  When that key is absent, fall back to locating the
+nearest ``abs(pushover/{direction}/control_disp)`` value to ``D_roof``.
 
 ### Modal analysis results
 

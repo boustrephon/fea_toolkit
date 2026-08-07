@@ -245,12 +245,21 @@ affecting accuracy.
    ``"solver_test_max_iter": 1000`` in the config for RC + LayeredShell
    pushover runs (the 2e-4 value applies to the documented kN-m unit
    system; see `docs/pushover_analysis.md` for other unit systems).
+   Note: the default **primary** pushover test budget is 20
+   iterations; the per-step automatic fallback (relaxed
+   ``NormUnbalance`` + ``ModifiedNewton -initial``, see
+   `docs/deprecation_plan.md` §5) uses a separate **1000**-iteration
+   budget.  Setting ``solver_test_max_iter: 1000`` in the config
+   **intentionally overrides the primary budget from 20 to 1000** —
+   for RC + LayeredShell this gives the Cholesky zero-pivot path
+   enough Newton iterations to converge in the primary solver so the
+   algorithm-switching fallback is not needed.
 2. **Do NOT** set ``gravity_num_substeps`` manually for LayeredShell
    models — the ``AnalysisBuilder`` **auto-detects** the layered shell
    sections and uses ``gravity_num_substeps = 10`` automatically
-   (``AnalysisBuilder.LAYERED_SHELL_GRAVITY_SUBSTEPS``).  An explicit
-   ``gravity_num_substeps`` config value overrides this auto-detection
-   when needed.
+   (``AnalysisBuilder.LAYERED_SHELL_GRAVITY_SUBSTEPS``).  Setting the
+   key explicitly is appropriate **only** to override that automatic
+   default (e.g. to a different substep count).
 3. **Verify** the run log shows zero failures:
    `grep -c "analyze failed" run.log  # → 0`.
 4. If a run still fails after these settings, the builder's built-in

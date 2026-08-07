@@ -144,7 +144,10 @@ comfortably.  Below is a realistic assessment of what remains.
    concrete use case demands it yet.  Defer until needed.
 
 3. **2D vs 3D model dispatch** — **🟡 Code complete, needs validation.**
-   The Preprocessor sets `-ndm 2 -ndf 3` or `-ndm 3 -ndf 6` correctly;
+   The Preprocessor detects model dimensionality from SAP geometry and
+   records `MeshModel.ndm` / `.ndf` (2 or 3); AnalysisBuilder reads
+   those values and applies them to the OpenSees domain (`model Basic
+   -ndm {ndm} -ndf {ndf}`) when constructing the model.
    `forceBeamColumn` + `Lobatto` + `PDelta` is the default pushover path.
    The remaining work is running real RC models through both dims and
    verifying convergence — a validation task, not a code gap.

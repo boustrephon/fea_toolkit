@@ -219,15 +219,20 @@ coordinates using a **single equivalent-SDOF mode**:
 
 ```text
 S_a = |V| / M_eff        # m/s²
-S_d = |δ| / (Γ · φ_control)
+S_d = |δ| / |Γ · φ_control|
 ```
 
 where:
 
-- `M_eff` = effective modal mass = `L² / M*`
+- `M*` (or `M_star`) = generalised modal mass = `Σ mᵢ φᵢ²` (summed over the **full 3D mode shape**)
+- `L` = generalised participation factor = `Σ mᵢ φᵢ` (direction-specific projection)
+- `M_eff` = **effective modal mass** = `L² / M*`
 - `Γ` = participation factor = `L / M*`
 - `φ_control` = mode-shape ordinate at the control/roof node
-- `L = Σ m_i φ_i` and `M* = Σ m_i φ_i²` (summed over the push direction)
+
+The denominator `|Γ · φ_control|` uses the absolute value of the
+product so `S_d` is non-negative even when the participation factor
+and the control-node mode-shape ordinate have opposite signs.
 
 **Sign convention**: `pushover_to_adrs()` converts the signed base-shear
 and roof-displacement arrays to **magnitudes** (`abs(V)`, `abs(δ)`) before
@@ -261,11 +266,11 @@ corrupts the S_a / S_d scaling of the entire CSM curve.
 To prevent this, :func:`~fea_toolkit.model.csm.pushover_to_adrs`
 performs a **two-pass selection**:
 
-1. **Pass 1 — compute every mode's effective modal mass.**  For each
+1. **Pass 1 — compute every mode's generalised modal mass.**  For each
    mode shape, compute `(L, M*)` for the push direction and record the
-   maximum modal effective mass `M*_max` across all modes.
+   maximum generalised modal mass `M*_max` across all modes.
 2. **Pass 2 — reject low-participation modes.**  Any mode whose
-   push-direction effective modal mass `M*` is below
+   push-direction generalised modal mass `M*` is below
    `1 % of M*_max` is excluded *before* evaluating the participation
    ratio.  Then the mode with the highest `L² / M*` among the
    survivors is selected.
@@ -281,9 +286,17 @@ must not be compared across modes.  Callers must ensure the supplied
 filter — or replace the threshold with a scale-invariant directional
 metric (e.g. load participation `L / M*` normalised by total mass).
 
-If *every* mode is rejected (no mode carries meaningful effective mass
-in the push direction — e.g. too few modes requested), the function
-raises a `ValueError` and returns **no** `S_a`, `S_d`, or `T_eq` —
+The function raises a `ValueError` when a valid mode cannot be found.
+This can happen in two ways:
+
+1. *Every* mode is rejected by the participation filter (no mode
+   carries meaningful generalised modal mass in the push direction —
+   e.g. too few modes requested), or
+2. the selected best mode has a non-positive `M*` (zero or NaN) in the
+   push direction, indicating missing nodal masses or a degenerate mode
+   shape.
+
+On failure, the function returns **no** `S_a`, `S_d`, or `T_eq` —
 these quantities are meaningless without a physical equivalent mode.
 A unit-value fallback (`Γ = 1.0`, `M_eff = 1.0`) is **not** used, since
 `M_eff` would be dimensionless (1.0) rather than a mass and the
@@ -297,9 +310,13 @@ are entirely downstream of the ADRS coordinate system.  If
 `pushover_to_adrs` selects the wrong (torsional, ill-conditioned) mode,
 the ductility, equivalent damping, and the intersection with the
 demand spectrum are all computed in corrupted coordinates.  The
-two-pass filter ensures a building with a torsional fundamental mode
-(or with slight plan irregularity) still converts its X/Y pushover
-curves using the genuine X/Y sway modes.
+two-pass filter is intended to ensure a building with a torsional
+fundamental mode (or with slight plan irregularity) still converts
+its X/Y pushover curves using the genuine X/Y sway modes.  In
+practice the filter may still accept a weakly participating mode
+when the requested direction has no strongly participating sway
+mode (e.g. too few modes); downstream validation of the resulting
+capacity curve remains the caller's responsibility.
 
 **References:**
 
