@@ -207,9 +207,10 @@ def _collect_static(static_results: dict[str, Any]) -> dict[str, np.ndarray]:
     * ``nodal_displacements`` — dict of ``{tag: [dx, dy, dz]}`` — is written
       as ``node_dx`` / ``node_dy`` / ``node_dz`` arrays ordered by node tag.
     * **Scalar entries** — any remaining key whose value is a JSON-scalar
-      (``int`` / ``float`` / ``str`` / ``bool``) or a ``{"value": scalar}``
-      dict — are persisted as shape-``(1,)`` arrays.  This is how
-      performance-point scalars (e.g. ``static/pp/+X/D_roof``) survive
+      (``int`` / ``float`` / ``str`` / ``bool`` / ``np.bool_`` / ``np.number``)
+      or a ``{"value": scalar}`` dict — are persisted as shape-``(1,)``
+      arrays.  This is how performance-point scalars (e.g.
+      ``static/pp/+X/D_roof`` and the numpy ``converged`` flag) survive
       serialization; without it they are silently dropped.
     """
     arrays: dict[str, np.ndarray] = {}
@@ -272,7 +273,7 @@ def _collect_static(static_results: dict[str, Any]) -> dict[str, np.ndarray]:
                     continue
             else:
                 val = raw_val
-            if isinstance(val, (int, float, str, bool, np.number)):
+            if isinstance(val, (int, float, str, bool, np.bool_, np.number)):
                 arrays[make_static_key(case, key)] = np.array([val])
             elif case == "pp":
                 raise ValueError(
