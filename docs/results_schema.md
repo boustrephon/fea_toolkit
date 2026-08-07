@@ -173,6 +173,7 @@ keys:
 |---|---|---|---|
 | `static/pp/{direction}/D_roof` | `(1,)` | `float` | Roof displacement at PP (model length units) |
 | `static/pp/{direction}/V_base` | `(1,)` | `float` | Base shear at PP (model force units) |
+| `static/pp/{direction}/control_disp` | `(1,)` | `float` | **Optional** mirror of the capacity-curve control displacement at the PP step (model length units).  When present it must equal ``abs(control_disp[step])`` at the matched capacity-curve row; used for validation only. |
 | `static/pp/{direction}/S_dp` | `(1,)` | `float` | Spectral displacement at PP (model length units) |
 | `static/pp/{direction}/S_ap` | `(1,)` | `float` | Spectral acceleration at PP (model acceleration units) |
 | `static/pp/{direction}/S_dy`, ``S_ay`` | `(1,)` | `float` | Bilinear yield point (model length units, model acceleration units) |
@@ -200,16 +201,17 @@ into the positive quadrant; the push-direction sign is carried by
 steps must always compare against ``abs(control_disp)``, never the signed
 ``control_disp`` array.
 
-**Deterministic step selection**: the primary (and authoritative) mapping
-between the performance point and the recorded pushover capacity curve is
-the persisted control-step index.  The PP authoring payload **must**
-include ``static/pp/{direction}/control_step`` (the integer index into
-``pushover/{direction}/control_disp`` / ``pushover/{direction}/base_shear``)
-together with a ``control_disp`` mirror.  Consumers **must** use
-``control_step`` to locate the capacity-curve row; ``D_roof`` /
-``control_disp`` are used only to validate the match (compare
-``abs(control_disp[control_step])`` to ``D_roof``) and must **not** be
-used for nearest-value lookup.
+**Consumers locating the capacity-curve row**: no step index is
+persisted in the PP payload — the canonical ``"pp"`` static case is
+exactly the flattened ``f"{direction}/{field}"`` output of
+:func:`~fea_toolkit.model.csm.compute_performance_point` (one scalar per
+field; the keys listed in the table above).  ``control_step`` is *not*
+part of the schema.  Consumers that need the recorded pushover step at
+(or nearest to) the performance point match by value: find the index of
+``pushover/{direction}/control_disp`` closest to ``D_roof`` (or to
+``control_disp`` when present) and use the same index into
+``pushover/{direction}/base_shear``.  Because ``D_roof`` is a magnitude,
+always compare against ``abs(control_disp)``.
 
 ### Modal analysis results
 
