@@ -697,7 +697,8 @@ all other area loads are ignored.
    - ~~Brace detection~~ ✅ `Selection.from_brace_sections()`.  
    - ~~Buckling eigenvalue benchmark~~ ✅ SciPy-based independent validation — subdivided column buckling matches Euler within 0.01 %.  
    - ~~Capacity Spectrum Method~~ ✅ `pushover_to_adrs()` + `compute_performance_point()` + `plot_capacity_spectrum()` — see [`docs/pushover_analysis.md`](docs/pushover_analysis.md).  
-   - **Nonlinear Time History** – add ground motion input and integration schemes.
+   - ~~Nonlinear Time History (Tcl/Xara ground-motion path)~~ ✅ `NonlinearDynamicAnalysis` implemented — ground-motion input + transient analysis via Tcl export and Xara/OpenSeesRT, with Rayleigh damping from a preceding modal analysis (see [`docs/nonlinear_dynamic_analysis.md`](docs/nonlinear_dynamic_analysis.md)).  
+   - **Nonlinear Time History (additional integration schemes)** – Python-native integration schemes (e.g. direct OpenSeesPy transient analysis) remain planned.
 
 5. **Joint Modeling** (for concrete frames)  
    - Extend parser to recognise joint elements (if present in SAP2000).  

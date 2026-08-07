@@ -37,9 +37,13 @@ class NonlinearDynamicAnalysis(Analysis):
     modal_result : AnalysisResult
         Result from a preceding :class:`ModalAnalysis` (for periods
         used in Rayleigh damping).
-    ground_motion_file : str
-        Path to the ground motion file.  One acceleration value
-        (m/s²) per line, no header.
+        ground_motion_file : str
+            Path to the ground motion file.  One acceleration value per
+            line, no header, authored in **model acceleration units**
+            (length-unit per s²).  The Tcl path applies values with
+            ``-factor 1.0`` — no g-division is performed.  For metre
+            models SI m/s² values are used as-is; for millimetre models
+            multiply SI m/s² values by 1000.
     dt : float
         Time step of the ground motion record (s, default 0.005).
     num_steps : int
@@ -141,7 +145,8 @@ class NonlinearDynamicAnalysis(Analysis):
         except Exception as e:
             raise ValueError(
                 f"Cannot read ground motion file: {self.ground_motion_file}. "
-                "Each line should be one acceleration value (m/s²)."
+                "Each line should be one acceleration value in model "
+                "acceleration units."
             ) from e
 
         # ── Create single temporary directory for all outputs ──

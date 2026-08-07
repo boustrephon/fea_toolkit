@@ -1,6 +1,6 @@
 ---
 title: "Nonlinear Dynamic (Time-History) Analysis"
-description: "Ground-motion-driven transient analysis via Tcl export and Xara/OpenSeesRT, with Rayleigh damping from a preceding modal analysis."
+description: "Ground-motion-driven transient analysis via the complete Tcl export + Xara/OpenSeesRT path (with Rayleigh damping from a preceding modal analysis). Additional Python-native integration schemes remain planned."
 status: "complete"
 tags: [analysis-type, nonlinear, dynamic, time-history, ground-motion, tcl, xara]
 category: [analysis-types]
@@ -39,7 +39,7 @@ result = manager.run_all()["NonlinearDynamicAnalysis"]
 
 | Parameter | Default | Description |
 |---|---|---|
-| `ground_motion_file` | required | Path to acceleration record - one value per line, no header. Values are **assumed to be in SI units (m/s²)** and are converted to model acceleration units by the Tcl path using `g_from_units(mesh_model.units)` as `accel_model = accel_SI / g_model`. For non-metre unit systems (e.g. kN-mm) the record is still authored in m/s² and converted automatically. |
+| `ground_motion_file` | required | Path to acceleration record - one value per line, no header. Values must be authored in **model acceleration units** (length-unit per s²); the Tcl path applies them with `-factor 1.0` and performs **no g-division**. For metre models, SI m/s² values are used directly (×1.0); for millimetre models (e.g. kN-mm), multiply SI m/s² values by 1000 to obtain mm/s². |
 | `dt` | `0.005` | Time step of the record (s) |
 | `num_steps` | `1000` | Number of analysis steps |
 | `direction` | `"X"` | Excitation direction (`"X"`, `"Y"`, `"Z"`) |

@@ -30,6 +30,7 @@ CATEGORIES = [
 
 STATUS_BADGE = {
     "complete": "✅ Complete",
+    "stable": "✅ Complete",
     "partial": "⚠️ Partial",
     "draft": "🚧 Draft",
     "placeholder": "🚧 Placeholder",

@@ -58,10 +58,12 @@ alias wrappers deleted, `local/` callers updated to use the plain names.)**
 
 ### 4. Opensees — `src/fea_toolkit/opensees/builder.py`
 
-Verify whether the legacy `OpenSeesBuilder` class still exists.  If only
-the Tcl-export functions remain (as the module docstring claims), the
-class can be removed.  The Tcl functions are standalone and do not
-depend on it.
+**(Status: ✅ Done — removed 2026-07.)**  The legacy `OpenSeesBuilder`
+class no longer exists anywhere in `src/`.  The builder split is
+complete: topology mutation lives in `opensees/preprocessor.py`,
+OpenSees domain construction + analysis execution live in
+`opensees/analysis_builder.py`, and `opensees/builder.py` now only
+exports standalone Tcl-export functions (no analysis logic).
 
 ### 5. IO / Report — `src/fea_toolkit/io/report.py`
 

@@ -323,11 +323,12 @@ the per-direction archive whose ``direction`` key matches the PP
 direction they want.
 
 Consumers (e.g. the GB 50010/GB 50011 checks scripts) locate the PP step
-by reading ``static/pp/{direction}/D_roof`` and matching it against the
-recorded ``pushover/{direction}/control_disp`` array — see the
-deterministic step-selection rule in `docs/results_schema.md` §PP
-authoring (persist the selected control-step index rather than relying
-on nearest-value matching).
+by reading ``static/pp/{direction}/control_step`` — the deterministic,
+authoritative index into the recorded ``pushover/{direction}/control_disp``
+and ``pushover/{direction}/base_shear`` arrays.  ``D_roof`` is used only
+to validate the match (``abs(control_disp[control_step])`` ≈ ``D_roof``),
+never for nearest-value lookup — see the deterministic step-selection rule
+in `docs/results_schema.md` §PP authoring.
 
 ### 3.4 File naming convention
 
@@ -426,9 +427,9 @@ Two private helper functions generate PyVista colour legends for pushover visual
 
 **`_add_hinge_color_legend()`** — adds a scalar bar for the frame hinge
 demand-relative ratio scale.  The scalar-bar title is
-``"Relative Moment Demand (peak-normalized)"`` — the ratios plotted are the
-demand-relative hinge ratios (moment demand normalised by the observed
-peak capacity), **not** a physical yield-capacity ratio:
+  ``"Relative Moment Demand (peak-normalized)"`` — the ratios plotted are the
+  demand-relative hinge ratios (moment demand normalised by the element's
+  peak recorded moment demand), **not** a physical yield-capacity ratio:
 - **Colour 1** (ratio < 0.5) — low demand (cmap position 0.0)
 - **Colour 2** (0.5 ≤ ratio < 1.0) — moderate demand (cmap position 0.5)
 - **Colour 3** (ratio ≥ 1.0) — high demand (cmap position 1.0)
