@@ -420,6 +420,11 @@ def write_results_npz(
     Returns:
         Absolute path to the saved file.
     """
+    if forces_coordinate_system != "local":
+        raise ValueError(
+            f"forces_coordinate_system must be 'local', got {forces_coordinate_system!r}"
+        )
+
     arrays: dict[str, np.ndarray] = {}
 
     # Geometry
@@ -639,6 +644,11 @@ def write_pushover_results_npz(
     Returns:
         Absolute path to the saved file.
     """
+    if forces_coordinate_system != "local":
+        raise ValueError(
+            f"forces_coordinate_system must be 'local', got {forces_coordinate_system!r}"
+        )
+
     arrays: dict[str, np.ndarray] = {}
 
     # ── Geometry (from MeshModel) ─────────────────────────────

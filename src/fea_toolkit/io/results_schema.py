@@ -260,6 +260,7 @@ def validate_npz(path: str) -> list[str]:
             "frame_t_end",
             "frame_parent_node_i",
             "frame_parent_node_j",
+            "shell_parent_sap_id",
         }
         for key, (shape_desc, dtype_str) in GEOMETRY_ARRAYS.items():
             arr = data.get(key)
