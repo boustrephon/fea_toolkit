@@ -388,6 +388,7 @@ def write_results_npz(
     shell_forces: Optional[dict[str, dict[str, Any]]] = None,
     force_unit: str = "kN",
     length_unit: str = "m",
+    forces_coordinate_system: str = "local",
     mesh_model: Optional["MeshModel"] = None,
 ) -> str:
     """Write a unified NPZ file with model geometry + analysis results.
@@ -402,6 +403,12 @@ def write_results_npz(
         shell_forces: Dict from ``extract_static_shell_forces()``.
         force_unit: Force unit string for metadata.
         length_unit: Length unit string for metadata.
+        forces_coordinate_system: Coordinate system of the recorded frame
+            end-force arrays.  Defaults to ``"local"`` — frame end-forces
+            (``static/*/fx_i``, ...) are recorded in the element LOCAL
+            coordinate system via the OpenSees "localForces" query.  If a
+            caller passes a different value, the forces must already be in
+            that coordinate system before collection.
         mesh_model: Optional post-processed ``MeshModel``. When provided,
             geometry arrays (nodes, frame elements, shell elements) are
             extracted from ``mesh_model`` instead of ``md``, giving
@@ -441,9 +448,7 @@ def write_results_npz(
     arrays["force_unit"] = np.array([force_unit], dtype=str)
     arrays["length_unit"] = np.array([length_unit], dtype=str)
     arrays["created"] = np.array([datetime.datetime.now().isoformat()], dtype=str)
-    # Frame end-force arrays (static/*/fx_i, ...) are recorded in the
-    # element LOCAL coordinate system (OpenSees "localForces" query).
-    arrays["forces_coordinate_system"] = np.array(["local"], dtype=str)
+    arrays["forces_coordinate_system"] = np.array([forces_coordinate_system], dtype=str)
 
     path = str(Path(path).resolve())
     # Pyright's numpy stub declares ``allow_pickle`` before ``**kwds``;
@@ -605,6 +610,7 @@ def write_pushover_results_npz(
     pushover_results: Optional[dict[str, Any]] = None,
     force_unit: str = "kN",
     length_unit: str = "m",
+    forces_coordinate_system: str = "local",
 ) -> str:
     """Write pushover step results to NPZ.
 
@@ -622,6 +628,12 @@ def write_pushover_results_npz(
             global arrays (step, control_disp, base_shear) are included.
         force_unit: Force unit string for metadata.
         length_unit: Length unit string for metadata.
+        forces_coordinate_system: Coordinate system of the recorded frame
+            end-force arrays.  Defaults to ``"local"`` — frame end-forces
+            (``pushover/{direction}/frame_fx_i``, ...) are recorded in the
+            element LOCAL coordinate system via the OpenSees "localForces"
+            query.  If a caller passes a different value, the forces must
+            already be in that coordinate system before collection.
 
     Returns:
         Absolute path to the saved file.
@@ -710,10 +722,7 @@ def write_pushover_results_npz(
     arrays["force_unit"] = np.array([force_unit], dtype=str)
     arrays["length_unit"] = np.array([length_unit], dtype=str)
     arrays["created"] = np.array([datetime.datetime.now().isoformat()], dtype=str)
-    # Frame end-force arrays (pushover/{direction}/frame_fx_i, ...) are
-    # recorded in the element LOCAL coordinate system (OpenSees
-    # "localForces" query).
-    arrays["forces_coordinate_system"] = np.array(["local"], dtype=str)
+    arrays["forces_coordinate_system"] = np.array([forces_coordinate_system], dtype=str)
 
     path = str(Path(path).resolve())
     # Pyright's numpy stub declares ``allow_pickle`` before ``**kwds``;
