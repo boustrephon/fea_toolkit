@@ -964,10 +964,16 @@ def pushover_to_adrs(
         * ``'Gamma'`` — participation factor.
         * ``'M_eff'`` — effective modal mass.
         * ``'phi_control'`` — control-node mode shape ordinate.
-        * ``'best_mode'`` — selected mode index (**0‑based**, matching
-          the ``mode_shapes`` key space and OpenSees mode numbering
-          minus one; display as ``best_mode + 1`` for a 1‑based mode
-          number).
+        * ``'best_mode'`` — index of the mode with the highest
+          push-direction participation, measured by ``L² / M_star``
+          (equivalently ``M_eff``).  For mass-normalized eigenvectors —
+          the standard output of
+          :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.extract_mode_shapes` —
+          ``M_star = 1`` for every mode, so this reduces to the mode with
+          the largest ``L = Σ mᵢ φᵢ`` in the push direction.  The index
+          follows the ``mode_shapes`` key space (0‑based for
+          ``extract_mode_shapes()`` output, where OpenSees mode number =
+          ``best_mode + 1``).
     """
     # Use best mode (highest mass participation in push direction).
     # ``nodal_masses`` is part of the required modal-result contract
