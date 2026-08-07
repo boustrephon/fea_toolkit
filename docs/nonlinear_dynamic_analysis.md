@@ -56,7 +56,7 @@ contract; see `docs/analysis.md` for the typed container):
 | `times` | `ndarray` | Time vector |
 | `displacements` | `ndarray` | Nodal displacement time histories (from recorder) |
 | `envelope` | `ndarray` | Envelope displacement output (if recorded) |
-| `peak_drift` | `float` | Max absolute nodal displacement across nodes (not inter-storey drift) |
+| `peak_displacement` | `float` | Max absolute nodal displacement across nodes (not inter-storey drift) |
 | `converged_steps` | `int` | Steps converged by the solver |
 | `gm_file` | `str` | Original ground motion path |
 | `direction` | `str` | Excitation direction |
@@ -65,7 +65,7 @@ contract; see `docs/analysis.md` for the typed container):
 On a non-zero runner exit status the result is returned with `converged_steps=0`,
 `times=np.array([])` (an empty `ndarray`, preserving the container type declared
 above), and an **`error`** entry under `result.metadata` (not `result.data`).
-`peak_drift` always represents the **maximum absolute nodal displacement**,
+`peak_displacement` always represents the **maximum absolute nodal displacement**,
 not inter-storey drift.
 
 ## How it works
@@ -74,7 +74,7 @@ not inter-storey drift.
 2. Rayleigh damping periods come from the preceding modal analysis (first and last mode; single-mode and fallback cases are handled).
 3. The model is exported to Tcl via `export_mesh_model_to_tcl()` with `dynamic_time_history_tcl()` appended.
 4. Execution uses `XaraTclRunner`.
-5. Output files (`dyn_disp.out`, `dyn_env_disp.out`) are parsed; `peak_drift` is derived from the displacement recorder.
+5. Output files (`dyn_disp.out`, `dyn_env_disp.out`) are parsed; `peak_displacement` is derived from the displacement recorder.
 
 ## Notes
 
