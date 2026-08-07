@@ -2921,14 +2921,35 @@ class AnalysisBuilder:
     # ── Rigid diaphragms ─────────────────────────────────────────
 
     def _apply_rigid_diaphragms(self) -> int:
-        """Apply rigid diaphragm constraints at detected storey levels."""
-        levels = self.mesh_model.diaphragm_levels
-        config_val = self.config.get("rigid_diaphragms", False)
-        if not config_val or not levels:
-            return 0
+        """Apply rigid diaphragm constraints at detected storey levels.
 
+        Diaphragm levels come from ``mesh_model.diaphragm_levels``, which the
+        Preprocessor populates from two sources:
+
+        1. **S2K joint constraints** — Z-axis ``DIAPHRAGM`` constraints parsed
+           from ``CONSTRAINT DEFINITIONS - DIAPHRAGM`` +
+           ``JOINT CONSTRAINT ASSIGNMENTS`` (the canonical source for frame-only
+           models with explicit diaphragm definitions).
+        2. **Horizontal area elements** — fallback for models without explicit
+           constraints.
+
+        The ``rigid_diaphragms`` config is an optional tri-state override:
+
+        * **absent** — apply constraints detected from the S2K file / area
+          elements.  No config entry is required when the model declares its
+          diaphragms.
+        * ``False`` — explicitly **disable** all rigid diaphragms, even when
+          levels are otherwise detected.
+        * ``[z1, z2, ...]`` — override the detected levels with explicit ones.
+        """
+        levels = self.mesh_model.diaphragm_levels
+        config_val = self.config.get("rigid_diaphragms", None)
         if isinstance(config_val, list):
             levels = sorted(float(z) for z in config_val)
+        elif config_val is False:
+            return 0  # explicit opt-out — skip even if levels were detected
+        elif not levels:
+            return 0
 
         applied = 0
         for z in levels:
