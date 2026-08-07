@@ -2920,6 +2920,32 @@ class AnalysisBuilder:
 
     # ── Rigid diaphragms ─────────────────────────────────────────
 
+    @staticmethod
+    def _select_diaphragm_master(tags):
+        """Select the node tag nearest the centroid of the given tags.
+
+        Reads each node's coordinate from the OpenSees domain once and
+        caches the ``(x, y)`` values, then returns the tag whose cached
+        position is closest to the centroid of all cached points.  Used to
+        pick a diaphragm master for both the per-group and per-elevation
+        paths.
+
+        Args:
+            tags: Sequence of OpenSees node tags in the diaphragm group.
+
+        Returns:
+            The node tag whose cached ``(x, y)`` is nearest the centroid.
+        """
+        coords = {t: tuple(ops.nodeCoord(t)[:2]) for t in tags}
+        xs = [c[0] for c in coords.values()]
+        ys = [c[1] for c in coords.values()]
+        cx = sum(xs) / len(xs)
+        cy = sum(ys) / len(ys)
+        return min(
+            tags,
+            key=lambda t: (coords[t][0] - cx) ** 2 + (coords[t][1] - cy) ** 2,
+        )
+
     def _apply_rigid_diaphragms(self) -> int:
         """Apply rigid diaphragm constraints at detected storey levels.
 
@@ -2966,6 +2992,18 @@ class AnalysisBuilder:
         #   [{name, nodes|selection}]  → explicit named groups (one
         #                                rigidDiaphragm per component, resolved by
         #                                the Preprocessor)
+        if (
+            isinstance(config_val, list)
+            and config_val
+            and any(isinstance(item, dict) for item in config_val)
+            and not all(isinstance(item, dict) for item in config_val)
+        ):
+            raise ValueError(
+                "rigid_diaphragms must be either an all-numeric legacy Z list "
+                "([z1, z2, ...]) or an all-dict list of explicit named groups "
+                "([{name, nodes/selection}, ...]) - mixed lists containing both "
+                "dicts and non-dicts are not supported."
+            )
         is_legacy_z_list = isinstance(config_val, list) and not (
             bool(config_val) and all(isinstance(item, dict) for item in config_val)
         )
@@ -2973,7 +3011,7 @@ class AnalysisBuilder:
             levels = sorted(float(z) for z in config_val)
             existing_components = getattr(self.mesh_model, "diaphragm_components", [])
             if existing_components:
-                logging.getLogger(__name__).warning(
+                logger.warning(
                     "rigid_diaphragms as a legacy [z1, z2, ...] list will merge %d "
                     "independent constraint group(s) into per-elevation diaphragms. "
                     "Use explicit group dicts ({name, nodes|selection}) to preserve "
@@ -3014,22 +3052,19 @@ class AnalysisBuilder:
                 if len(tags) < 2:
                     continue
 
-                xs = [float(ops.nodeCoord(t)[0]) for t in tags]
-                ys = [float(ops.nodeCoord(t)[1]) for t in tags]
-                cx = sum(xs) / len(xs)
-                cy = sum(ys) / len(ys)
-                master = min(
-                    tags,
-                    key=lambda t: (
-                        (float(ops.nodeCoord(t)[0]) - cx) ** 2
-                        + (float(ops.nodeCoord(t)[1]) - cy) ** 2
-                    ),
-                )
+                master = self._select_diaphragm_master(tags)
                 slaves = [t for t in tags if t != master]
                 try:
                     ops.rigidDiaphragm(3, master, *slaves)
                     applied += 1
-                except Exception:
+                except Exception as exc:
+                    logger.warning(
+                        "rigidDiaphragm failed for group at z=%.3f (master=%d, %d slaves): %s",
+                        _z,
+                        master,
+                        len(slaves),
+                        exc,
+                    )
                     continue
             return applied
 
@@ -3048,21 +3083,19 @@ class AnalysisBuilder:
             if len(tags_at_z) < 2:
                 continue
 
-            xs = [float(ops.nodeCoord(t)[0]) for t in tags_at_z]
-            ys = [float(ops.nodeCoord(t)[1]) for t in tags_at_z]
-            cx = sum(xs) / len(xs)
-            cy = sum(ys) / len(ys)
-            master = min(
-                tags_at_z,
-                key=lambda t: (
-                    (float(ops.nodeCoord(t)[0]) - cx) ** 2 + (float(ops.nodeCoord(t)[1]) - cy) ** 2
-                ),
-            )
+            master = self._select_diaphragm_master(tags_at_z)
             slaves = [t for t in tags_at_z if t != master]
             try:
                 ops.rigidDiaphragm(3, master, *slaves)
                 applied += 1
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "rigidDiaphragm failed for elevation z=%.3f (master=%d, %d slaves): %s",
+                    float(z),
+                    master,
+                    len(slaves),
+                    exc,
+                )
                 continue
         return applied
 

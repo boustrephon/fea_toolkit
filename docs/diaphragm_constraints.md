@@ -119,20 +119,23 @@ Nodes are matched with a Z tolerance — see §5.
 > same elevation.  The builder now logs a warning in this situation and
 > recommends explicit group dicts instead.
 
-## 5. Z-Tolerance (`diaphragm_z_tolerance`)
+## 5. Z-Tolerances
 
-The `diaphragm_z_tolerance` config key controls unit-consistent matching
-in **two** places:
+Diaphragm detection uses **two independent** config keys, both
+unit-consistent:
 
-| Context | Default | Meaning |
-|---|---|---|
-| Preprocessor source 3 (area elements) | `0.5` | Max Z-span for an area element to count as horizontal |
-| AnalysisBuilder per-elevation matching | `0.01` | Max `|node_z − elevation|` for a node to join a diaphragm |
+| Config key | Default | Location | Meaning |
+|---|---|---|---|
+| `area_diaphragm_z_tolerance` | `0.5` | Preprocessor source 3 (area elements) | Max Z-span for an area element to count as horizontal |
+| `diaphragm_z_tolerance` | `0.01` | AnalysisBuilder per-elevation matching | Max absolute difference between node_z and the elevation for a node to join a diaphragm |
 
-The value is stored on `MeshModel.diaphragm_z_tolerance` (default
-`0.01`) by the Preprocessor, consuming the same config key.  Because
-models are built in the same length units as the `.s2k` input, the
-tolerance is unit-agnostic — it scales with the model's unit system.
+The Preprocessor consumes `area_diaphragm_z_tolerance` when classifying
+horizontal area elements; the resulting tolerance is stored on
+`MeshModel.diaphragm_z_tolerance` (default `0.01`) for the
+AnalysisBuilder's per-elevation matching.  The two keys are independent
+and can be set separately in the config dict.  Because models are built
+in the same length units as the `.s2k` input, both tolerances are
+unit-agnostic — they scale with the model's unit system.
 
 ## 6. Error Handling
 

@@ -1090,7 +1090,7 @@ def test_legacy_z_list_merges_and_warns(tmp_path, caplog):
             _make_in_memory_domain(builder, md)
             n = builder._apply_rigid_diaphragms()
         assert n == 2  # one merged diaphragm per elevation
-        assert any("legacy [z1, z2, ...] list will merge" in r.message for r in caplog.records)
+        assert any("legacy [z1, z2, ...] list will merge" in r.getMessage() for r in caplog.records)
     finally:
         ops.wipe()
 
@@ -1138,9 +1138,10 @@ def test_diaphragm_z_tolerance_propagates_to_mesh_model(tmp_path):
     assert mm2.diaphragm_z_tolerance == 0.05
 
 
-def test_area_diaphragm_z_span_uses_diaphragm_z_tolerance(tmp_path):
+def test_area_diaphragm_z_span_uses_area_diaphragm_z_tolerance(tmp_path):
     """Nearly-horizontal slabs drive Source-3 diaphragm detection; the Z-span
-    threshold follows ``diaphragm_z_tolerance`` (default 0.5 for detection)."""
+    threshold follows ``area_diaphragm_z_tolerance`` (default 0.5 for
+    detection), independent of the builder's ``diaphragm_z_tolerance``."""
     import json
 
     from fea_toolkit.opensees.preprocessor import preprocess_model
@@ -1176,7 +1177,7 @@ def test_area_diaphragm_z_span_uses_diaphragm_z_tolerance(tmp_path):
     def _levels(tol):
         cfg = {"create_shells": True, "split_elements": False, "verbose": False}
         if tol is not None:
-            cfg["diaphragm_z_tolerance"] = tol
+            cfg["area_diaphragm_z_tolerance"] = tol
         json_path = tmp_path / f"slab_tol_{tol}.json"
         json_path.write_text(json.dumps(data))
         parser = SAP2000Parser.from_json(json_path)
