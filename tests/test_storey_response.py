@@ -108,6 +108,43 @@ def test_nan_handling_in_section_mean():
     assert df.loc[0, "Ny_avg"] == pytest.approx(12.0)
 
 
+def test_malformed_child_suffix_missing_col_raises():
+    # ``{parent}_sub_{row}`` is incomplete -- the mesher always emits
+    # ``{aid}_sub_{j}_{i}``, so a single trailing segment signals a
+    # malformed child ID.
+    with pytest.raises(ValueError, match="malformed child suffix"):
+        group_shell_forces_by_section(
+            ["W1_sub_0"], ["W1"], np.zeros((1, 1)), np.zeros((1, 1)), step_idx=0
+        )
+
+
+def test_malformed_child_suffix_extra_segment_raises():
+    # ``{parent}_sub_{row}_{col}_extra`` has too many segments.
+    with pytest.raises(ValueError, match="malformed child suffix"):
+        group_shell_forces_by_section(
+            ["W1_sub_0_1_9"], ["W1"], np.zeros((1, 1)), np.zeros((1, 1)), step_idx=0
+        )
+
+
+def test_wall_slab_wi_suffix_collapses_to_whole_parent():
+    # The wall-slab intersection mesher emits ``{sid}_wi_sub_{j}_{i}``.
+    # The ``_wi_`` marker means the ``{parent}_sub_`` prefix does not
+    # match, so these children legitimately collapse to the whole-parent
+    # section instead of raising.
+    shell_sap_ids = ["W1_wi_sub_0_1"]
+    shell_parent_sap_id = ["W1"]
+    nxy = np.array([[42.0]])
+    ny = np.array([[4.2]])
+
+    df = group_shell_forces_by_section(shell_sap_ids, shell_parent_sap_id, nxy, ny, step_idx=0)
+
+    assert list(df["section"]) == ["W1"]
+    assert list(df["row"]) == [""]
+    assert list(df["n_subs"]) == [1]
+    assert df.loc[0, "Nxy_avg"] == pytest.approx(42.0)
+    assert df.loc[0, "Ny_avg"] == pytest.approx(4.2)
+
+
 def test_length_mismatch_raises():
     with pytest.raises(ValueError, match="equal length"):
         group_shell_forces_by_section(
