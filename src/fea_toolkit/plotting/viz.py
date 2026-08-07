@@ -688,7 +688,18 @@ def _add_animation_timer(
     # ── Adapt the callback to however many positional args the timer passes ──
     try:
         _sig = inspect.signature(callback)
+        # Required positional params (no default) — padding below only fills
+        # these, so callback defaults are preserved when fewer args arrive.
         _n_pos = sum(
+            1
+            for p in _sig.parameters.values()
+            if p.kind
+            in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            and p.default is inspect.Parameter.empty
+        )
+        # Total positional params (with defaults) — used only as the upper
+        # bound when truncating excess positional args from the timer.
+        _n_pos_total = sum(
             1
             for p in _sig.parameters.values()
             if p.kind
@@ -699,6 +710,7 @@ def _add_animation_timer(
         )
     except (TypeError, ValueError):  # not introspectable (e.g. C-bound)
         _n_pos = 1
+        _n_pos_total = 1
         _has_varargs = True
 
     _vtk_step = [0]  # mutable closure — timer events carry no step count
@@ -715,8 +727,8 @@ def _add_animation_timer(
         backed by the same internal counter the VTK path uses.
         """
         if _has_varargs or len(args) >= _n_pos:
-            if not _has_varargs and len(args) > _n_pos:
-                return callback(*args[:_n_pos])
+            if not _has_varargs and len(args) > _n_pos_total:
+                return callback(*args[:_n_pos_total])
             return callback(*args)
         if not args:
             # Legacy timer passed no step — use the internal counter.
