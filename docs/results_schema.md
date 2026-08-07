@@ -140,7 +140,15 @@ Sorted by SAP node ID (see ID conventions above).
 | `static/{case}/node_dy` | `(N_node,)` | `float` | Displacement in Y |
 | `static/{case}/node_dz` | `(N_node,)` | `float` | Displacement in Z |
 
-**Element forces at each end (global coordinates):**
+**Element forces at each end (local coordinates):**
+
+The static force arrays are recorded in the **local** element coordinate
+system (the OpenSees ``localForces`` response), matching the
+``forces_coordinate_system`` metadata entry (``"local"``) that the NPZ
+writer hard-validates before writing.  This contract is shared by the
+static and pushover producers — both query ``ops.eleResponse(tag,
+"localForces")``.  Visualisers must not interpret these arrays as global;
+use the element geometry to transform to global coordinates if needed.
 
 | Array | Shape | dtype | Description |
 |---|---|---|---|
@@ -173,7 +181,7 @@ keys:
 |---|---|---|---|
 | `static/pp/{direction}/D_roof` | `(1,)` | `float` | Roof displacement at PP (model length units) |
 | `static/pp/{direction}/V_base` | `(1,)` | `float` | Base shear at PP (model force units) |
-| `static/pp/{direction}/control_disp` | `(1,)` | `float` | **Optional** mirror of the capacity-curve control displacement at the PP step (model length units).  When present it must equal ``abs(control_disp[step])`` at the matched capacity-curve row; used for validation only. |
+| `static/pp/{direction}/control_disp` | `(1,)` | `float` | **Optional** mirror of the capacity-curve control displacement at the PP step (model length units).  The capacity-curve row is located **by matching ``D_roof``** to the pushover capacity curve (same as ``V_base``); ``control_disp`` is then validated as ``abs(control_disp[that_row])``.  Used for validation only. |
 | `static/pp/{direction}/S_dp` | `(1,)` | `float` | Spectral displacement at PP (model length units) |
 | `static/pp/{direction}/S_ap` | `(1,)` | `float` | Spectral acceleration at PP (model acceleration units) |
 | `static/pp/{direction}/S_dy`, ``S_ay`` | `(1,)` | `float` | Bilinear yield point (model length units, model acceleration units) |
