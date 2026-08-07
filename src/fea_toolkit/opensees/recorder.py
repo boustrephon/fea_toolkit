@@ -1207,26 +1207,26 @@ def parse_pushover_results(
                 ref_time = t_vals
         except Exception:
             continue
+    summed_rx = None
     if ref_time is not None:
         summed_rx = np.zeros_like(ref_time, dtype=float)
-    # Interpolate each series onto that grid.  Times outside a series'
-    # t_vals range are marked absent (masked) and excluded from the sum
-    # so np.interp endpoint clamping cannot inflate summed_rx.
-    _missing = np.zeros_like(ref_time, dtype=bool)
-    for t_vals, r_vals in _series_list:
-        try:
-            in_range = (ref_time >= t_vals[0]) & (ref_time <= t_vals[-1])
-            interp_vals = np.interp(ref_time, t_vals, r_vals)
-            cur = np.where(in_range, interp_vals, 0.0)
-            summed_rx = summed_rx + cur
-            _missing |= ~in_range
-        except Exception:
-            continue
-    # Any time step where ALL series were absent is set to NaN so it
-    # cannot silently appear as a zero reaction contribution.
-    if _missing.any():
+        # Interpolate each series onto that grid.  Times outside a series'
+        # t_vals range are marked absent (masked) and excluded from the sum
+        # so np.interp endpoint clamping cannot inflate summed_rx.
+        ref_ncontrib = np.zeros_like(ref_time, dtype=int)
+        for t_vals, r_vals in _series_list:
+            try:
+                in_range = (ref_time >= t_vals[0]) & (ref_time <= t_vals[-1])
+                interp_vals = np.interp(ref_time, t_vals, r_vals)
+                cur = np.where(in_range, interp_vals, 0.0)
+                summed_rx = summed_rx + cur
+                ref_ncontrib = ref_ncontrib + in_range.astype(int)
+            except Exception:
+                continue
+        # Any time step where NO series contributed is set to NaN so it
+        # cannot silently appear as a zero reaction contribution.
         summed_rx = summed_rx.astype(float)
-        summed_rx[_missing] = np.nan
+        summed_rx[ref_ncontrib == 0] = np.nan
 
     if summed_rx is not None and len(summed_rx) > 0:
         # The recorder emits only the push-direction DOF reaction, so
