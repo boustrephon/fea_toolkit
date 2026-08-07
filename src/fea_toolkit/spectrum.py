@@ -14,9 +14,14 @@ for the ascending branch:
 fortification, rare) on a single figure.
 
 The :class:`ResponseSpectrum` dataclass is the canonical carrier for an
-arbitrary T/Sa spectrum (GB 50011, ASCE 7, site-specific hazard curves,
-etc.) that can be injected into pushover analysis — no code is wired to
-a single design code.
+arbitrary T/Sa spectrum (GB 50011, IEC 62271-207, ASCE 7, site-specific
+hazard curves, etc.) that can be injected into pushover analysis — no
+code is wired to a single design code.
+
+``_iec_spectrum`` implements the IEC 62271-207 seismic response spectrum
+for high-voltage switchgear — a frequency-banded spectrum anchored to the
+peak ground acceleration.  ``ResponseSpectrum.from_iec62271`` builds a
+canonical :class:`ResponseSpectrum` from it.
 """
 
 from dataclasses import dataclass
@@ -123,6 +128,49 @@ class ResponseSpectrum:
             Sa=Sa_spec.tolist(),
             code="GB50011",
             description=description or f"GB 50011 elastic, alpha_max={alpha_max}, tg={tg}",
+        )
+
+    @classmethod
+    def from_iec62271(
+        cls,
+        pga: float,
+        zeta: float = 0.05,
+        T_max: float = 4.0,
+        n_pts: int = 200,
+        description: str = "",
+    ) -> "ResponseSpectrum":
+        """Build an IEC 62271-207 seismic response spectrum.
+
+        The spectrum is defined for equipment frequencies up to 33 Hz;
+        *T_max* defaults to 4.0 s so the rising branch is captured down
+        to 0.25 Hz.  *pga* carries the caller's unit system — the
+        returned accelerations have the same units.
+
+        Parameters
+        ----------
+        pga : float
+            Peak ground acceleration in the model's acceleration units.
+        zeta : float
+            Damping ratio (default 0.05).
+        T_max : float
+            Upper period bound (s, default 4.0).
+        n_pts : int
+            Number of ordinates (default 200).
+        description : str
+            Optional label stored on the instance.
+
+        Returns
+        -------
+        ResponseSpectrum
+            The spectrum ordinates.
+        """
+        T_spec = np.linspace(0.0, T_max, n_pts)
+        Sa_spec = _iec_spectrum(T_spec, pga, zeta=zeta)
+        return cls(
+            T=T_spec.tolist(),
+            Sa=Sa_spec.tolist(),
+            code="IEC62271-207",
+            description=description or f"IEC 62271-207, pga={pga}, zeta={zeta}",
         )
 
     @classmethod
@@ -250,6 +298,82 @@ def _gb50011_spectrum(
         else:
             Sa.append((eta2 * 0.2**gamma - eta1 * (T - 5.0 * tg)) * alpha_max * g)
     return np.array(Sa)
+
+
+def _iec_spectrum(T, pga, zeta: float = 0.05):
+    """Evaluate the IEC 62271-207 seismic response spectrum.
+
+    The spectrum is defined piecewise in frequency ``f = 1 / T`` with a
+    damping correction factor ``beta`` that depends on the percentage of
+    critical damping ``d = 100 * zeta``:
+
+    * ``0 <= f <= 1.1`` — rising branch: ``(pga / 0.25) * 0.572 * beta * f``
+    * ``1.0 <= f <= 8.0`` — plateau: ``pga * 2.5 * beta``
+    * ``8.0 <= f <= 33.0`` — falling branch:
+      ``(pga / 0.25) * ((6.6 * beta - 2.64) / f - 0.2 * beta + 0.33)``
+    * ``f > 33`` — constant: ``pga``
+
+    At ``T = 0`` the zero-period acceleration is returned (``Sa = pga``).
+    *pga* carries the caller's unit system — the returned acceleration
+    has the same units (e.g. m/s² or g), so no gravity constant is
+    hardcoded (see .clinerules §4.6).
+
+    Parameters
+    ----------
+    T : float or array-like
+        Period values (s) at which to evaluate the spectrum.
+    pga : float
+        Peak ground acceleration in the model's acceleration units.
+    zeta : float
+        Damping ratio (fraction of critical damping, default 0.05).
+
+    Returns
+    -------
+    float or np.ndarray
+        Spectral acceleration(s) in the same units as *pga* — a float
+        for scalar *T*, otherwise an array.
+
+    Raises
+    ------
+    ValueError
+        If *zeta* is non-positive (the damping factor uses ``log(100 * zeta)``)
+        or *T* contains NaN values.
+    """
+    if zeta <= 0:
+        raise ValueError("zeta must be positive (damping factor uses log(100 * zeta))")
+    if np.any(~np.isfinite(T)):
+        raise ValueError("T values must be finite")
+
+    T_arr = np.asarray(T, dtype=float)
+    scalar_in = T_arr.ndim == 0
+    T_arr = np.atleast_1d(T_arr)
+
+    d = 100.0 * zeta
+    beta = (3.21 - 0.68 * np.log(d)) / 2.1156
+
+    Sa = np.empty_like(T_arr)
+    positive = T_arr > 0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        f = 1.0 / T_arr
+
+    # T <= 0 maps to the zero-period acceleration.
+    Sa[~positive] = pga
+
+    # Bands are checked in IEC 62271-207 order; the first match wins
+    # (the bands overlap at their shared boundaries).
+    rising = positive & (f <= 1.1)
+    Sa[rising] = pga / 0.25 * 0.572 * beta * f[rising]
+
+    plateau = positive & (f >= 1.0) & (f <= 8.0) & ~rising
+    Sa[plateau] = pga * 2.5 * beta
+
+    falling = positive & (f >= 8.0) & (f <= 33.0) & ~rising & ~plateau
+    Sa[falling] = pga / 0.25 * ((6.6 * beta - 2.64) / f[falling] - 0.2 * beta + 0.33)
+
+    high_freq = positive & ~rising & ~plateau & ~falling
+    Sa[high_freq] = pga
+
+    return float(Sa[0]) if scalar_in else Sa
 
 
 def _build_spectrum(cfg: dict) -> tuple:

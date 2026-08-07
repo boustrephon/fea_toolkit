@@ -30,6 +30,7 @@ from fea_toolkit.spectrum import (
     ResponseSpectrum,
     _build_spectrum,
     _gb50011_spectrum,
+    _iec_spectrum,
     _interp_sa,
 )
 from fea_toolkit.utils import build_gravity_patterns, deep_merge, infer_loads, pick_wind
@@ -153,6 +154,71 @@ def test_interp_sa():
     result = _interp_sa([0.25, 0.75], T, Sa)
     expected = np.interp([0.25, 0.75], T, Sa)
     np.testing.assert_array_almost_equal(result, expected)
+
+
+# ── IEC 62271-207 spectrum tests ───────────────────────────────────────
+
+
+class TestIec62271:
+    """IEC 62271-207 seismic response spectrum."""
+
+    def test_zero_period_returns_pga(self):
+        """At T=0 the spectrum returns the peak ground acceleration."""
+        assert _iec_spectrum(0.0, pga=0.4) == pytest.approx(0.4)
+
+    def test_plateau_branch(self):
+        """On the plateau (1.0 ≤ f ≤ 8.0 Hz) Sa = pga · 2.5 · β."""
+        zeta = 0.05
+        beta = (3.21 - 0.68 * math.log(100.0 * zeta)) / 2.1156
+        # T = 0.5 s → f = 2.0 Hz, deep in the plateau band.
+        assert _iec_spectrum(0.5, pga=0.4, zeta=zeta) == pytest.approx(0.4 * 2.5 * beta)
+
+    def test_rising_branch(self):
+        """On the rising branch (f < 1.0 Hz) Sa = pga/0.25 · 0.572 · β · f."""
+        zeta = 0.05
+        beta = (3.21 - 0.68 * math.log(100.0 * zeta)) / 2.1156
+        # T = 2.0 s → f = 0.5 Hz.
+        assert _iec_spectrum(2.0, pga=0.4, zeta=zeta) == pytest.approx(
+            0.4 / 0.25 * 0.572 * beta * 0.5
+        )
+
+    def test_falling_branch(self):
+        """On the falling branch (8 < f ≤ 33 Hz) Sa is below the plateau."""
+        zeta = 0.05
+        beta = (3.21 - 0.68 * math.log(100.0 * zeta)) / 2.1156
+        # T = 0.1 s → f = 10.0 Hz.
+        sa = _iec_spectrum(0.1, pga=0.4, zeta=zeta)
+        expected = 0.4 / 0.25 * ((6.6 * beta - 2.64) / 10.0 - 0.2 * beta + 0.33)
+        assert sa == pytest.approx(expected)
+        assert sa < 0.4 * 2.5 * beta
+
+    def test_high_frequency_returns_pga(self):
+        """Above 33 Hz the response is constant at pga."""
+        # T = 0.01 s → f = 100 Hz.
+        assert _iec_spectrum(0.01, pga=0.4) == pytest.approx(0.4)
+
+    def test_vectorized(self):
+        """Array input returns a per-point array of spectral accelerations."""
+        T = np.array([0.0, 0.5, 2.0])
+        Sa = _iec_spectrum(T, pga=0.4)
+        assert isinstance(Sa, np.ndarray)
+        assert Sa.shape == (3,)
+        assert Sa[0] == pytest.approx(0.4)
+
+    def test_invalid_zeta_rejected(self):
+        """Non-positive damping is rejected (log(100·ζ) is undefined)."""
+        with pytest.raises(ValueError):
+            _iec_spectrum(0.5, pga=0.4, zeta=0.0)
+
+    def test_from_factory(self):
+        """from_iec62271 builds a canonical ResponseSpectrum."""
+        s = ResponseSpectrum.from_iec62271(pga=0.4, zeta=0.05)
+        assert s.code == "IEC62271-207"
+        assert len(s.T) == 200
+        assert len(s.Sa) == 200
+        assert s.Sa[0] == pytest.approx(0.4)
+        # Plateau point must exceed the zero-period ordinate.
+        assert s.interpolate([0.5])[0] > 0.4
 
 
 # ── Utils tests ────────────────────────────────────────────────────────
