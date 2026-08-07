@@ -277,11 +277,11 @@ Per-direction fields come from
 
 | Field | Meaning | Units |
 |---|---|---|
-| `D_roof` | Roof displacement at the performance point | model length (m) |
-| `V_base` | Base shear at the performance point | model force (kN) |
-| `S_dp` | Spectral displacement at PP | model length (m) |
-| `S_ap` | Spectral acceleration at PP | m/s² |
-| `S_dy`, `S_ay` | Bilinear yield point | m, m/s² |
+| `D_roof` | Roof displacement at the performance point | model length — **archive-dependent** (e.g. m for a kN-m model, mm for a kN-mm model; read `static/units` or `model` metadata) |
+| `V_base` | Base shear at the performance point | model force — **archive-dependent** (e.g. kN for a kN-m model, N for a N-mm model) |
+| `S_dp` | Spectral displacement at PP | model length — **archive-dependent** (same units as `D_roof`) |
+| `S_ap` | Spectral acceleration at PP | **archive-dependent** (m/s² for an SI-consistent model; verify against the archive metadata / model units) |
+| `S_dy`, `S_ay` | Bilinear yield point | model length / model acceleration — **archive-dependent** |
 | `mu` | Ductility `S_dp / S_dy` | — |
 | `T_eq` | Equivalent period at PP | s |
 | `beta_eq`, `B` | Equivalent damping / reduction factor | — |
@@ -314,9 +314,20 @@ npz_static["pp"] = {
 }
 ```
 
+A single 4-direction pushover run produces **one archive per direction**
+(`{model_stem}_pushover_{direction}.npz`), each containing the full
+``pushover/{direction}/...`` payload (step, control_disp, base_shear,
+per-element/shell forces) plus the ``static/pp/{direction}/...``
+performance-point scalars for that direction.  Consumers therefore load
+the per-direction archive whose ``direction`` key matches the PP
+direction they want.
+
 Consumers (e.g. the GB 50010/GB 50011 checks scripts) locate the PP step
-by reading ``static/pp/{direction}/D_roof`` and finding the nearest
-recorded ``pushover/{direction}/control_disp`` value.
+by reading ``static/pp/{direction}/D_roof`` and matching it against the
+recorded ``pushover/{direction}/control_disp`` array — see the
+deterministic step-selection rule in `docs/results_schema.md` §PP
+authoring (persist the selected control-step index rather than relying
+on nearest-value matching).
 
 ### 3.4 File naming convention
 
@@ -325,6 +336,7 @@ recorded ``pushover/{direction}/control_disp`` value.
 ```
 
 For the admin building: `Admin_0.7E_short term_pushover_+X.npz`
+(one such file per direction: `+X`, `-X`, `+Y`, `-Y`).
 
 ---
 

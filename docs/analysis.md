@@ -47,6 +47,6 @@ SAP2000Parser → SAPModelData → Preprocessor → MeshModel → AnalysisManage
                                     (drives AnalysisBuilder)
 ```
 
-`AnalysisManager` consumes a frozen `MeshModel` (Preprocessor output) — it never mutates topology. It is the orchestrator that drives `AnalysisBuilder` for domain creation and execution, then wraps raw dict results in typed `AnalysisResult` objects.
+`AnalysisManager` consumes a frozen `MeshModel` (Preprocessor output) — it never mutates topology. It dispatches each analysis implementation (modal, static, RS, pushover, NLD) to its type-specific runner, wraps raw dict results in typed `AnalysisResult` objects, and — for builder-backed analyses (e.g. modal, static, RS) — the runner creates and configures an `AnalysisBuilder` internally for domain creation and execution.
 
 See [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md) for the time-history runner.
