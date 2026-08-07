@@ -81,7 +81,7 @@ config = {
     # ... pushover / section / shell settings ...
     "solver_test_tol": 2e-4,        # default 1e-6 (general), 1e-4 (pushover)
     "solver_test_max_iter": 1000,   # sufficient for the fiber/LayeredShell chain
-    "solver_algorithm": "Newton",   # falls back to ModifiedNewton automatically
+    "solver_algorithm": "Newton",   # falls back to ModifiedNewton only during the lateral pushover loop; gravity handles failures by adapting the load increment, not switching algorithms
     "gravity_num_substeps": 10,     # ramp gravity in 10 LoadControl increments
 }
 ```
@@ -89,8 +89,8 @@ config = {
 | Config key | Default | Notes |
 |---|---|---|
 | `solver_test_tol` | `1e-6` (general), `1e-4` (pushover) | Relax to `2e-4` for RC + LayeredShell models. **The `2e-4` value is specific to the documented kN-m unit system** — for other force/length unit systems it should be scaled from `model.units` (e.g. via the model's characteristic weight `total_mass × g_from_units(units) × 1e-6`, as the builder's automatic fallback does) or derived from the typical residual magnitude in those units. |
-| `solver_test_max_iter` | `10` (general), `20` (pushover), `1000` (automatic fallback) | The pushover path auto-falls back to `ModifiedNewton` with 1000 iterations |
-| `solver_algorithm` | `"Newton"` | Falls back to `ModifiedNewton` automatically |
+| `solver_test_max_iter` | `10` (general), `20` (pushover), `1000` (automatic fallback) | The pushover path auto-falls back to `ModifiedNewton` with 1000 iterations — **only during the lateral pushover loop** |
+| `solver_algorithm` | `"Newton"` | Falls back to `ModifiedNewton` automatically **only during the lateral pushover loop**; the gravity stage adapts the load increment (halving/quartering) rather than switching algorithms |
 | `gravity_num_substeps` | `1` (`10` auto when the model has LayeredShell sections) | Use 5–10 for LayeredShell RC models |
 
 #### Auto-detection of LayeredShell models
@@ -114,7 +114,7 @@ config = {
     # ... pushover / section / shell settings ...
     "solver_test_tol": 2e-4,        # still recommended — near-miss tolerance
     "solver_test_max_iter": 1000,
-    "solver_algorithm": "Newton",
+    "solver_algorithm": "Newton",   # falls back to ModifiedNewton only in the lateral pushover loop
 }
 ```
 

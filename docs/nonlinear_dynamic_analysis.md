@@ -39,7 +39,7 @@ result = manager.run_all()["NonlinearDynamicAnalysis"]
 
 | Parameter | Default | Description |
 |---|---|---|
-| `ground_motion_file` | required | Path to acceleration record - one value (m/s2) per line, no header |
+| `ground_motion_file` | required | Path to acceleration record - one value per line, no header. Values are **assumed to be in SI units (m/s²)** and are converted to model acceleration units by the Tcl path using `g_from_units(mesh_model.units)` as `accel_model = accel_SI / g_model`. For non-metre unit systems (e.g. kN-mm) the record is still authored in m/s² and converted automatically. |
 | `dt` | `0.005` | Time step of the record (s) |
 | `num_steps` | `1000` | Number of analysis steps |
 | `direction` | `"X"` | Excitation direction (`"X"`, `"Y"`, `"Z"`) |
@@ -47,6 +47,9 @@ result = manager.run_all()["NonlinearDynamicAnalysis"]
 | `modal_result` | - | Injected by `AnalysisManager` from the preceding `ModalAnalysis` |
 
 ## Result keys
+
+All result keys below live under `result.data` (the `AnalysisResult`
+contract; see `docs/analysis.md` for the typed container):
 
 | Key | Type | Description |
 |---|---|---|
@@ -61,7 +64,9 @@ result = manager.run_all()["NonlinearDynamicAnalysis"]
 
 On a non-zero runner exit status the result is returned with `converged_steps=0`,
 `times=np.array([])` (an empty `ndarray`, preserving the container type declared
-above), and an `error` entry in `metadata`.
+above), and an **`error`** entry under `result.metadata` (not `result.data`).
+`peak_drift` always represents the **maximum absolute nodal displacement**,
+not inter-storey drift.
 
 ## How it works
 

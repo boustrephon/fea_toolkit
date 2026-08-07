@@ -72,7 +72,8 @@ import fea_toolkit
 
 ### Current Implementation State
 
-#### 1. Package Structure (Modern `src/` layout)
+#### 1. Package Structure (Modern `src/` layout) — abbreviated; see
+the "Package tree (abbreviated)" section below for the full subpackage list
 
 ```
 ~/Projects/fea_toolkit/
@@ -285,10 +286,10 @@ parsing through analysis to visualisation and reporting.
 | Workflow | Entry point | What it does |
 |---|---|---|
 | **Build OpenSees model** | `preprocess_model()` → `AnalysisBuilder(mm, cfg).build_domain()` | Preprocess topology into a frozen `MeshModel`, then construct nodes, restraints, materials, sections, elements, loads |
-| **Build with shells** | `build(create_shells=True)` | Also create `ShellMITC4` for area elements (with optional loads-only selection) |
-| **Split elements at joints** | `build()` with `split_elements=True` config | Subdivide frame elements at intermediate nodes (SAP2000 auto-mesh) |
-| **Apply frame end offsets** | `build()` with `frame_end_offsets` data | Rigid zones at joints via stiff link elements |
-| **Mesh area elements** | `build()` with `create_shells=True` | Bilinear subdivision of quad areas per SAP2000 auto-mesh settings, triggered automatically during build |
+| **Build with shells** | `preprocess_model(create_shells=True)` → `AnalysisBuilder(mm, cfg).build_domain()` | Preprocessor creates `ShellMITC4` for area elements (with optional loads-only selection); builder then constructs the domain |
+| **Split elements at joints** | `preprocess_model(split_elements=True)` → `AnalysisBuilder(mm, cfg).build_domain()` | Preprocessor subdivides frame elements at intermediate nodes (SAP2000 auto-mesh); builder then constructs the domain |
+| **Apply frame end offsets** | `preprocess_model(frame_end_offsets=...)` → `AnalysisBuilder(mm, cfg).build_domain()` | Preprocessor creates rigid zones at joints via stiff link elements; builder then constructs the domain |
+| **Mesh area elements** | `preprocess_model(create_shells=True)` → `AnalysisBuilder(mm, cfg).build_domain()` | Preprocessor performs bilinear subdivision of quad areas per SAP2000 auto-mesh settings; builder then constructs the domain |
 | **Apply edge constraints** | `apply_edge_constraints()` | Tie fine-mesh nodes to coarse edges via `equationConstraint` |
 | **Detect unconnected edges** | `detect_unconnected_edges()` | Diagnostic: find shell nodes on coarse edges not yet connected |
 | **Record as script** | `RecordingOpenSees` proxy | Capture all `ops.*` calls as standalone Python or Tcl script |
