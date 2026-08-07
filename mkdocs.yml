@@ -82,6 +82,7 @@ nav:
       - Shell Element Support: shell_support.md
       - Stiffness Factors: stiffness_factors.md
       - Constraint Edge Detection: constraint_detection.md
+      - Diaphragm Constraints & Storey ID: diaphragm_constraints.md
       - Mander Confinement Validation: mander_confinement_validation.md
   - Export & Visualisation:
       - Rhino 3-D Export: rhino_export.md

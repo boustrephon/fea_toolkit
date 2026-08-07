@@ -55,8 +55,14 @@ class Preprocessor:
             (runtime solver settings, element types), but also accepts
             preprocessing‑specific options that must be supplied **before**
             constructing the ``AnalysisBuilder``:
-            ``detect_wall_slab_intersections`` (default ``True``) and
-            ``split_slabs_at_walls`` (default ``False``).
+            ``detect_wall_slab_intersections`` (default ``True``),
+            ``split_slabs_at_walls`` (default ``False``), and
+            ``diaphragm_z_tolerance`` — the Z tolerance (in model length
+            units) used when (a) treating an area element as horizontal for
+            storey-level detection (default ``0.5``) and (b) matching nodes
+            to a detected diaphragm elevation in the AnalysisBuilder
+            (default ``0.01``).  Stored on the ``MeshModel`` as
+            ``diaphragm_z_tolerance`` for the builder to consume.
     """
 
     def __init__(self, config: Optional[dict[str, Any]] = None):
@@ -253,7 +259,10 @@ class Preprocessor:
             raw_edges = self._detect_constraint_edges(md, new_elems, new_assigns)
 
         # ── 7. Detect diaphragm levels ───────────────────────────
-        diaphragm_levels = self._detect_diaphragm_levels(md)
+        # Returns (sorted Z elevations, per-constraint node groups).
+        # The per-group components preserve S2K constraint identity so
+        # independent diaphragms at the same elevation stay separate.
+        diaphragm_levels, diaphragm_components = self._detect_diaphragm_levels(md)
 
         # ── 8. Build MeshModel ───────────────────────────────────
         base_z = min((nd.z for nd in md.nodes.values()), default=None)
@@ -370,9 +379,11 @@ class Preprocessor:
             edge_loads_from_areas=edge_loads_from_areas,
             detected_edge_pairs=raw_edges,
             diaphragm_levels=diaphragm_levels,
+            diaphragm_components=diaphragm_components,
             offset_rigid_links=offset_rigid_links,
             frame_element_types=frame_element_types,
             area_element_types=area_element_types,
+            diaphragm_z_tolerance=float(self.config.get("diaphragm_z_tolerance", 0.01)),
             materials=md.materials,
             sections=md.sections,
             groups=getattr(md, "groups", {}),
@@ -970,60 +981,221 @@ class Preprocessor:
         )
         return raw_edges
 
-    def _detect_diaphragm_levels(self, md) -> list[float]:
-        """Detect storey levels from horizontal area elements and S2K constraints.
+    def _detect_diaphragm_levels(self, md) -> tuple[list[float], list[tuple[float, list[str]]]]:
+        """Detect storey levels and per-group diaphragm components.
 
-        Two sources are merged:
+        Four sources feed this method, selected by the ``rigid_diaphragms``
+        config value (see :meth:`_apply_rigid_diaphragms` in the
+        AnalysisBuilder for the full decision tree):
 
-        1. **Joint constraints** — Z-axis DIAPHRAGM constraints parsed from
+        1. **Explicit groups** (``rigid_diaphragms: [ {name, nodes|selection},
+           ... ]``) — each dict defines one named diaphragm group.  A
+           ``nodes`` list is used verbatim; a ``selection`` key is resolved
+           against the model data — matching **area** elements contribute
+           their vertex nodes, matching **frame** elements contribute their
+           two end nodes, and the union becomes the group.  This bypasses
+           all detection.
+        2. **Joint constraints** — Z-axis DIAPHRAGM constraints parsed from
            the ``.s2k`` file (``CONSTRAINT DEFINITIONS - DIAPHRAGM`` +
            ``JOINT CONSTRAINT ASSIGNMENTS``).  For each Z-axis diaphragm,
            the storey elevation is the rounded mean Z of its assigned
            joints.  This is the canonical source for frame-only models
            that carry explicit diaphragm definitions (e.g. the
            SeismoStruct Ex12 verification model).
-        2. **Horizontal area elements** — each nearly-horizontal shell's
+        3. **Horizontal area elements** — each nearly-horizontal shell's
            mean Z (backward-compatible fallback for models without
            explicit constraints, e.g. slab-only models).
+        4. **Storey detection** (``rigid_diaphragms: True``) — force
+           :func:`fea_toolkit.model.stories.identify_stories` even when the
+           model carries explicit S2K diaphragm constraints.  The storey
+           node clusters become the diaphragm components.
+
+        Returns
+        -------
+        tuple
+            ``(levels, components)`` where *levels* is the sorted list of
+            Z elevations with horizontal diaphragm behaviour, and
+            *components* is a list of ``(mean_z, [joint_id, ...])`` tuples
+            — one per explicit Z-axis DIAPHRAGM constraint, preserving the
+            S2K constraint grouping so independent diaphragms at the same
+            elevation are not merged.  *components* is empty when no
+            explicit constraints are present (area-only fallback).
         """
         levels: set[float] = set()
-        z_tol = 0.5
+        z_tol = float(self.config.get("diaphragm_z_tolerance", 0.5))
+        components: list[tuple[float, list[str]]] = []
 
-        # ── Source 1: explicit Z-axis diaphragm constraints ──────────
+        config_val = self.config.get("rigid_diaphragms", None)
+
+        # ── Source 1: explicit named groups from config ────────────
+        # A list-of-dicts means the user bypasses all detection and
+        # supplies the exact diaphragm groups they want.
+        explicit_groups = self._resolve_explicit_diaphragm_groups(md)
+        if explicit_groups is not None:
+            for z, node_ids in explicit_groups:
+                if not node_ids:
+                    continue
+                levels.add(round(z, 4))
+                components.append((round(z, 4), node_ids))
+            components.sort(key=lambda item: item[0])
+            return sorted(levels), components
+
+        # ── Source 2: explicit Z-axis diaphragm constraints ────────
+        # Skip Path A when `rigid_diaphragms: True` forces storey-based
+        # detection (Path B) instead.
         constraints = getattr(md, "constraints", {})
         assignments = getattr(md, "constraint_assignments", {})
-        for cname, con in constraints.items():
-            if con.constraint_type != "DIAPHRAGM":
-                continue
-            axis = str(con.constraint_data.get("Axis", "")).upper()
-            if axis and axis != "Z":
-                continue
-            # Group assigned joints for this constraint
-            joint_ids = [jid for jid, c in assignments.items() if c == cname]
-            zs = []
-            for jid in joint_ids:
-                nd = md.nodes.get(jid)
-                if nd is not None:
-                    zs.append(nd.z)
-            if not zs:
-                continue
-            levels.add(round(sum(zs) / len(zs), 4))
+        if config_val is not True:
+            for cname, con in constraints.items():
+                if con.constraint_type != "DIAPHRAGM":
+                    continue
+                axis = str(con.constraint_data.get("Axis", "")).upper()
+                if axis and axis != "Z":
+                    continue
+                # Group assigned joints for this constraint
+                joint_ids = [jid for jid, c in assignments.items() if c == cname]
+                zs = []
+                for jid in joint_ids:
+                    nd = md.nodes.get(jid)
+                    if nd is not None:
+                        zs.append(nd.z)
+                if not zs:
+                    continue
+                z_mean = round(sum(zs) / len(zs), 4)
+                levels.add(z_mean)
+                # Keep only joints that survive topology preprocessing.
+                components.append((z_mean, [jid for jid in joint_ids if jid in md.nodes]))
 
-        # ── Source 2: horizontal area elements ────────────────────
-        for ae in md.area_elements.values():
-            if getattr(ae, "inactive", False):
+        # ── Source 3: horizontal area elements ────────────────────
+        if not components:
+            for ae in md.area_elements.values():
+                if getattr(ae, "inactive", False):
+                    continue
+                zs = []
+                for nid in ae.node_ids:
+                    nd = md.nodes.get(nid)
+                    if nd is not None:
+                        zs.append(nd.z)
+                if not zs:
+                    continue
+                z_span = max(zs) - min(zs)
+                if z_span <= z_tol:
+                    levels.add(round(sum(zs) / len(zs), 4))
+
+        # ── Source 4: forced storey-based detection (Path B) ──────
+        # `rigid_diaphragms: True` skips S2K constraints and instead
+        # derives one diaphragm component per identified storey.
+        if config_val is True and not components:
+            components = self._storey_diaphragm_components(md)
+            for z, _ids in components:
+                levels.add(round(z, 4))
+
+        # Deterministic ordering: sort components by elevation.
+        components.sort(key=lambda item: item[0])
+        return sorted(levels), components
+
+    def _resolve_explicit_diaphragm_groups(self, md) -> Optional[list[tuple[float, list[str]]]]:
+        """Resolve the ``rigid_diaphragms: [ {name, nodes|selection}, ... ]``
+        config form into ``(mean_z, node_ids)`` components.
+
+        Returns ``None`` when the config value is not a list-of-dicts (so
+        the caller falls through to normal detection).  Node-based groups
+        use the supplied ID list verbatim (filtered to nodes that survive
+        preprocessing).  Selection-based groups collect the vertex nodes of
+        every matching **area** element and both end nodes of every
+        matching **frame** element; the union is the group.
+
+        The group's elevation is the mean Z of its resolved nodes, since
+        the builder emits a single ``rigidDiaphragm`` per component and
+        needs a representative Z for sorting / diagnostics.
+        """
+        config_val = self.config.get("rigid_diaphragms", None)
+        if not isinstance(config_val, list) or not config_val:
+            return None
+        if not all(isinstance(item, dict) for item in config_val):
+            return None  # legacy [z1, z2, ...] float list
+
+        components: list[tuple[float, list[str]]] = []
+        for group_dict in config_val:
+            if not isinstance(group_dict, dict):
                 continue
+            name = group_dict.get("name", "")
+            if "nodes" in group_dict:
+                node_ids = [str(nid) for nid in group_dict["nodes"]]
+                node_ids = [nid for nid in node_ids if nid in md.nodes]
+            elif "selection" in group_dict:
+                sel = group_dict["selection"]
+                node_ids = self._nodes_from_selection(md, sel)
+            else:
+                raise ValueError(
+                    "rigid_diaphragms explicit group must contain either "
+                    f"'nodes' or 'selection' keys — got: {sorted(group_dict)}"
+                )
+            node_ids = list(dict.fromkeys(node_ids))  # dedupe, keep order
             zs = []
-            for nid in ae.node_ids:
+            for nid in node_ids:
                 nd = md.nodes.get(nid)
                 if nd is not None:
                     zs.append(nd.z)
-            if not zs:
+            z_mean = round(sum(zs) / len(zs), 4) if zs else 0.0
+            if self.config.get("verbose", False):
+                print(
+                    f"  [diaphragm] explicit group '{name}': {len(node_ids)} node(s) @ z={z_mean}"
+                )
+            components.append((z_mean, node_ids))
+        return components
+
+    def _nodes_from_selection(self, md, sel) -> list[str]:
+        """Collect node IDs from frame/area elements matching a Selection.
+
+        Matching **frame** elements contribute ``node_i`` and ``node_j``;
+        matching **area** elements contribute all vertex ``node_ids``.  The
+        union (in first-seen order) is returned.  The selection is resolved
+        against ``md`` — the (mutated) model data used for preprocessing —
+        so freshly-split/meshed elements are included.
+        """
+        if not isinstance(sel, Selection):
+            # Accept raw dict selectors too — mirror frame_groups config.
+            sel = Selection(
+                element_types=sel.get("element_types"),
+                sections=sel.get("sections") or sel.get("section_name"),
+                materials=sel.get("materials"),
+                groups=sel.get("groups"),
+                element_ids=sel.get("element_ids"),
+            )
+        node_ids: list[str] = []
+        for fid in sel.get_frame_ids(md):
+            fe = md.frame_elements.get(fid)
+            if fe is None or getattr(fe, "inactive", False):
                 continue
-            z_span = max(zs) - min(zs)
-            if z_span <= z_tol:
-                levels.add(round(sum(zs) / len(zs), 4))
-        return sorted(levels)
+            node_ids.append(fe.node_i)
+            node_ids.append(fe.node_j)
+        for aid in sel.get_area_ids(md):
+            ae = md.area_elements.get(aid)
+            if ae is None or getattr(ae, "inactive", False):
+                continue
+            node_ids.extend(ae.node_ids)
+        return list(dict.fromkeys(node_ids))
+
+    def _storey_diaphragm_components(self, md) -> list[tuple[float, list[str]]]:
+        """Derive diaphragm components from storey-level detection (Path B).
+
+        Uses :func:`fea_toolkit.model.stories.identify_stories` to cluster
+        nodes into storey levels; each storey becomes one
+        ``(elevation, node_ids)`` component.  Imported lazily because
+        ``model.stories`` imports ``openseespy`` at module level.
+        """
+        from ..model.stories import identify_stories
+
+        story_levels = identify_stories(md)
+        components: list[tuple[float, list[str]]] = []
+        for story in story_levels:
+            node_ids = [nid for nid in (story.node_ids or []) if nid in md.nodes]
+            if not node_ids:
+                continue
+            z_mean = round(story.elevation, 4)
+            components.append((z_mean, node_ids))
+        return components
 
     def _resolve_element_properties(
         self,

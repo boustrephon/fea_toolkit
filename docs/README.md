@@ -80,6 +80,11 @@ for automated cross-referencing.
   Tags: `shell`, `meshing`, `constraints`, `edge-detection`
   Related: [Shell Element Support](shell_support.md) · [Element Splitting](element_splitting.md) · [Builder Reference — Two-stage Pipeline](builder_reference.md)
 
+- [Storey Identification & Diaphragm Constraints](diaphragm_constraints.md) — ✅ Complete
+  > How storey levels are identified from SAP2000 models and applied as rigid diaphragm constraints in OpenSees.
+  Tags: `storey`, `diaphragm`, `constraints`, `rigidDiaphragm`, `z-tolerance`
+  Related: [Storey-level Response Methodology](storey_response.md) · [Shell Element Support](shell_support.md) · [Analysis Workflow](workflow.md) · [Constraint Edge Detection](constraint_detection.md)
+
 - [Element Classification](element_classification.md) — ✅ Complete
   > How frame and area elements are classified into structural roles (beam, column, brace, wall, slab).
   Tags: `elements`, `classification`, `beams`, `columns`, `braces`, `walls`, `slabs`
@@ -212,12 +217,13 @@ Tags across all documentation files:
 - **`columns`** — [element_classification.md](element_classification.md)
 - **`config`** — [element_properties_config.md](element_properties_config.md)
 - **`confinement`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
-- **`constraints`** — [constraint_detection.md](constraint_detection.md)
+- **`constraints`** — [constraint_detection.md](constraint_detection.md), [diaphragm_constraints.md](diaphragm_constraints.md)
 - **`cracked-section`** — [stiffness_factors.md](stiffness_factors.md)
 - **`csm`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md), [pushover_analysis.md](pushover_analysis.md)
 - **`deprecation`** — [deprecation_plan.md](deprecation_plan.md)
 - **`design-proposal`** — [report_generation.md](report_generation.md)
 - **`development`** — [dev_notes.md](dev_notes.md)
+- **`diaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
 - **`displacement`** — [storey_response.md](storey_response.md)
 - **`drift`** — [storey_response.md](storey_response.md)
 - **`dynamic`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
@@ -269,6 +275,7 @@ Tags across all documentation files:
 - **`reporting`** — [report_generation.md](report_generation.md)
 - **`results`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`rhino`** — [rhino_export.md](rhino_export.md)
+- **`rigidDiaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
 - **`runtime`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`sap2000`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`schema`** — [results_schema.md](results_schema.md)
@@ -281,7 +288,7 @@ Tags across all documentation files:
 - **`splitting`** — [element_splitting.md](element_splitting.md)
 - **`stiffness`** — [stiffness_factors.md](stiffness_factors.md)
 - **`storage`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
-- **`storey`** — [storey_response.md](storey_response.md)
+- **`storey`** — [diaphragm_constraints.md](diaphragm_constraints.md), [storey_response.md](storey_response.md)
 - **`tcl`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`test-model`** — [csm_test_model_plan.md](csm_test_model_plan.md)
 - **`theory`** — [mander_confinement_validation.md](mander_confinement_validation.md)
@@ -297,6 +304,7 @@ Tags across all documentation files:
 - **`xara`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`yaml-config`** — [report_generation.md](report_generation.md)
 - **`yield-point`** — [csm_bilinearization.md](csm_bilinearization.md)
+- **`z-tolerance`** — [diaphragm_constraints.md](diaphragm_constraints.md)
 
 To regenerate this index, run:
 
