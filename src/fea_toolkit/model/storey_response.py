@@ -1230,7 +1230,9 @@ def group_shell_forces_by_section(
     ------
     ValueError
         If ``shell_sap_ids`` and ``shell_parent_sap_id`` differ in
-        length.
+        length, or if a child ID carries the ``{parent}_sub_`` prefix
+        with a malformed suffix (anything other than exactly
+        ``{row}_{col}``).
     """
     if len(shell_sap_ids) != len(shell_parent_sap_id):
         raise ValueError("shell_sap_ids and shell_parent_sap_id must have equal length")
@@ -1269,12 +1271,26 @@ def group_shell_forces_by_section(
         if pid:
             # Row band from child suffix ``_sub_{row}_{col}`` -- only
             # when the prefix before ``_sub_`` actually matches the
-            # parent.  Children without the suffix collapse to a
-            # whole-parent section.
+            # parent.  Children without the suffix (e.g. the wall-slab
+            # ``{sid}_wi_sub_{j}_{i}`` naming, which carries a ``_wi_``
+            # marker) collapse to a whole-parent section.
             row = ""
             suffix = sid.removeprefix(f"{pid}_sub_")
             if suffix != sid:
-                row = suffix.split("_", 1)[0]
+                # Child ID matches the ``{parent}_sub_`` prefix: the
+                # suffix must be exactly ``{row}_{col}`` (two non-empty
+                # parts, e.g. ``2_5``).  Anything else indicates a
+                # malformed or unexpected child ID, so fail loudly
+                # rather than silently collapsing into the wrong row
+                # band (the mesher always emits ``{aid}_sub_{j}_{i}``).
+                parts = suffix.split("_")
+                if len(parts) != 2 or not all(parts):
+                    raise ValueError(
+                        f"shell '{sid}' with parent '{pid}' has a malformed "
+                        f"child suffix '{suffix}'; expected "
+                        f"{{parent}}_sub_{{row}}_{{col}}."
+                    )
+                row = parts[0]
             section = f"{pid}_section_{row}" if row else pid
             key = (section, pid, row)
         else:

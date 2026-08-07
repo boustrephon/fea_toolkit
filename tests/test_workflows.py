@@ -749,6 +749,14 @@ class TestUnifiedNpzPipeline:
         assert "static/pp/+X/D_roof" in arrays
         assert "static/pp/+X/V_base" in arrays
 
+        # A nested dict within a pp case is malformed — must raise.
+        with pytest.raises(ValueError, match="nested dict"):
+            _collect_static({"pp": {"+X": {"D_roof": 0.0191}}})
+
+        # An unsupported scalar type within a pp case must raise.
+        with pytest.raises(ValueError, match="unsupported"):
+            _collect_static({"pp": {"+X/bad": [1, 2, 3]}})
+
         # Full write → read round-trip preserves the flag.
         md = analysed_builder.sap_model_data
         from fea_toolkit.io.npz_reader import read_results_npz
