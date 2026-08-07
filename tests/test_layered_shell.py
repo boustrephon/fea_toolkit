@@ -433,13 +433,20 @@ class TestShellForceResultants:
 
         # Pure in-plane shear: ux = gamma0*y, uy = 0  ->  gamma_xy = gamma0.
         ops.fix(1, 1, 1, 1, 1, 1, 1)
-        for nd in (2, 3, 4):
+        # ux = gamma0*y = 0 at y = 0 for both nodes 1 and 2.
+        ops.fix(2, 1, 1, 1, 1, 1, 1)
+        for nd in (3, 4):
             ops.fix(nd, 0, 1, 1, 1, 1, 1)
         ops.timeSeries("Linear", 1)
         ops.pattern("Plain", 1, 1)
         ops.sp(3, 1, gamma0)
         ops.sp(4, 1, gamma0)
-        ops.system("BandSPD")
+        # All four nodes are fully constrained (fix + SP), leaving zero
+        # free equations.  BandSPD cannot handle that (LAPACK DPBSV
+        # "parameter 8 illegal value" — a known OpenSees limitation), so
+        # use the sparse UmfPack solver, which checks for zero equations.
+        # See docs/llm_guide.md under "Solver selection".
+        ops.system("UmfPack")
         ops.numberer("RCM")
         ops.constraints("Transformation")
         ops.integrator("LoadControl", 1.0)
