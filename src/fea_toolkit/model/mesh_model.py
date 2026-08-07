@@ -135,6 +135,15 @@ class MeshModel:
     diaphragm_components: list[tuple[float, list[str]]] = field(default_factory=list)
     #   [(z_level, [master_node_id, slave_node_id, ...]), ...]
 
+    # ── Diaphragm Z tolerance (per-elevation node matching) ───────
+    # Tolerance (in model length units) used when grouping nodes near
+    # a detected diaphragm elevation into a single rigidDiaphragm.
+    # Configured via ``diaphragm_z_tolerance`` in the Preprocessor
+    # config; defaults to 0.01 length units (matching the historical
+    # hardcoded value).  Unit-agnostic: the model is built in the same
+    # length units as the .s2k input.
+    diaphragm_z_tolerance: float = 0.01
+
     # ── Loads-only area IDs (stiffness-free, mass-contributing) ──
     # Areas matching a loads-only selection are NOT created as shell
     # elements in OpenSees, but remain in the model for mass calc.

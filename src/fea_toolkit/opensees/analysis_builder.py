@@ -2923,8 +2923,8 @@ class AnalysisBuilder:
     def _apply_rigid_diaphragms(self) -> int:
         """Apply rigid diaphragm constraints at detected storey levels.
 
-        Diaphragm levels come from ``mesh_model.diaphragm_levels``, which the
-        Preprocessor populates from two sources:
+        Diaphragm definitions come from ``MeshModel``, which the Preprocessor
+        populates from two sources:
 
         1. **S2K joint constraints** — Z-axis ``DIAPHRAGM`` constraints parsed
            from ``CONSTRAINT DEFINITIONS - DIAPHRAGM`` +
@@ -2933,6 +2933,18 @@ class AnalysisBuilder:
         2. **Horizontal area elements** — fallback for models without explicit
            constraints.
 
+        When explicit S2K constraints are present, the Preprocessor records
+        them as ``mesh_model.diaphragm_components`` — one ``(mean_z, [node_id,
+        ...])`` tuple per constraint.  This preserves the S2K constraint
+        grouping so **independent diaphragms at the same elevation are not
+        merged** (e.g. two building wings separated by a seismic gap).  The
+        builder emits one ``rigidDiaphragm`` per group, picking the centroid
+        node inside each group as its master.
+
+        When no explicit constraints exist (area-only fallback), the builder
+        falls back to per-elevation merging: all nodes near a detected ``z``
+        are grouped into a single diaphragm.
+
         The ``rigid_diaphragms`` config is an optional tri-state override:
 
         * **absent** — apply constraints detected from the S2K file / area
@@ -2940,22 +2952,93 @@ class AnalysisBuilder:
           diaphragms.
         * ``False`` — explicitly **disable** all rigid diaphragms, even when
           levels are otherwise detected.
-        * ``[z1, z2, ...]`` — override the detected levels with explicit ones.
+        * ``[z1, z2, ...]`` — override the detected levels with explicit
+          ones.  When this list is given, per-group components are ignored
+          and the per-elevation merge behaviour is used.
         """
         levels = self.mesh_model.diaphragm_levels
         config_val = self.config.get("rigid_diaphragms", None)
-        if isinstance(config_val, list):
-            levels = sorted(float(z) for z in config_val)
-        elif config_val is False:
+        if config_val is False:
             return 0  # explicit opt-out — skip even if levels were detected
-        elif not levels:
+
+        # Distinguish the two list forms:
+        #   [z1, z2, ...]              → legacy explicit Z list (merge by elevation)
+        #   [{name, nodes|selection}]  → explicit named groups (one
+        #                                rigidDiaphragm per component, resolved by
+        #                                the Preprocessor)
+        is_legacy_z_list = isinstance(config_val, list) and not (
+            bool(config_val) and all(isinstance(item, dict) for item in config_val)
+        )
+        if is_legacy_z_list:
+            levels = sorted(float(z) for z in config_val)
+            existing_components = getattr(self.mesh_model, "diaphragm_components", [])
+            if existing_components:
+                logging.getLogger(__name__).warning(
+                    "rigid_diaphragms as a legacy [z1, z2, ...] list will merge %d "
+                    "independent constraint group(s) into per-elevation diaphragms. "
+                    "Use explicit group dicts ({name, nodes|selection}) to preserve "
+                    "independent diaphragm identity at the same elevation.",
+                    len(existing_components),
+                )
+
+        components = getattr(self.mesh_model, "diaphragm_components", [])
+        # Per-group path is used whenever the Preprocessor recorded explicit
+        # components (S2K constraint groups, explicit named groups, or forced
+        # storey detection).  Only a legacy Z-list override forces the
+        # per-elevation merge behaviour.
+        use_groups = not is_legacy_z_list and bool(components)
+
+        if not use_groups and not levels:
             return 0
 
         applied = 0
+
+        # ── Per-group path: preserve S2K constraint identity ──────
+        if use_groups:
+            for _z, node_ids in components:
+                tags = []
+                for nid in node_ids:
+                    nd = self.mesh_model.nodes.get(nid)
+                    if nd is None:
+                        continue
+                    try:
+                        ops.nodeCoord(nd.node_tag)
+                        tags.append(nd.node_tag)
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"Node tag {nd.node_tag} (id={nid}) from diaphragm "
+                            f"component at z={_z:.3f} does not exist in the "
+                            f"OpenSees domain. The node may have been removed "
+                            f"during preprocessing."
+                        ) from exc
+                if len(tags) < 2:
+                    continue
+
+                xs = [float(ops.nodeCoord(t)[0]) for t in tags]
+                ys = [float(ops.nodeCoord(t)[1]) for t in tags]
+                cx = sum(xs) / len(xs)
+                cy = sum(ys) / len(ys)
+                master = min(
+                    tags,
+                    key=lambda t: (
+                        (float(ops.nodeCoord(t)[0]) - cx) ** 2
+                        + (float(ops.nodeCoord(t)[1]) - cy) ** 2
+                    ),
+                )
+                slaves = [t for t in tags if t != master]
+                try:
+                    ops.rigidDiaphragm(3, master, *slaves)
+                    applied += 1
+                except Exception:
+                    continue
+            return applied
+
+        # ── Per-elevation fallback: merge all nodes near each level ──
+        z_tol = float(getattr(self.mesh_model, "diaphragm_z_tolerance", 0.01))
         for z in levels:
             tags_at_z = []
             for nid, nd in self.mesh_model.nodes.items():
-                if abs(nd.z - float(z)) > 0.01:
+                if abs(nd.z - float(z)) > z_tol:
                     continue
                 try:
                     ops.nodeCoord(nd.node_tag)
@@ -5494,11 +5577,18 @@ def _normalise_frame_response(f) -> Optional[list[float]]:
 
     Args:
         f: Raw response from ``ops.eleResponse`` (list or array-like).
+           May be ``None`` when OpenSees fails to produce a response.
 
     Returns:
         List of 12 values, or ``None`` when the response length is not
         supported.
     """
+    if f is None:
+        # ``ops.eleResponse`` returns None on some failed queries —
+        # treat identically to an unsupported-length response so the
+        # caller's existing ``if f is None: continue`` paths skip the
+        # element instead of crashing on ``len(None)``.
+        return None
     if len(f) == 1:
         axial = float(f[0])
         return [-axial, 0.0, 0.0, 0.0, 0.0, 0.0, axial, 0.0, 0.0, 0.0, 0.0, 0.0]

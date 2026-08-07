@@ -823,13 +823,21 @@ def _parse_diaphragm_s2k(tmp_path):
 
 
 def _make_in_memory_domain(builder, md):
-    """Create the nodes in the OpenSees domain for _apply_rigid_diaphragms."""
+    """Create the nodes in the OpenSees domain for _apply_rigid_diaphragms.
+
+    Nodes are created at ``node.node_tag`` (the tag the builder expects),
+    NOT at ``int(node_id)`` — SAP identifiers and OpenSees tags only
+    coincide for the first few sequentially-parsed nodes.  Using the
+    MeshModel's tags means every node referenced by a diaphragm component
+    exists in the domain, so ``_apply_rigid_diaphragms`` can verify the
+    full group membership.
+    """
     import openseespy.opensees as ops
 
     ops.wipe()
     ops.model("basic", "-ndm", 3, "-ndf", 6)
-    for nid, node in md.nodes.items():
-        ops.node(int(nid), node.x, node.y, node.z)
+    for node in builder.mesh_model.nodes.values():
+        ops.node(node.node_tag, node.x, node.y, node.z)
 
 
 def test_diaphragm_constraints_drive_diaphragm_levels(tmp_path):
@@ -881,6 +889,303 @@ def test_rigid_diaphragms_false_disables_detected_levels(tmp_path):
         assert n == 0  # explicit opt-out — even though levels were detected
     finally:
         ops.wipe()
+
+
+def test_diaphragm_same_z_constraints_stay_separate(tmp_path):
+    """Two DIAPHRAGM constraints at the same Z produce two distinct
+    ``rigidDiaphragm`` calls (per-constraint grouping preserved)."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    data = _diaphragm_constraint_s2k_data()
+    # Move D2's joints (4,5,6) down to Z=10000 so D1 and D2 both sit at
+    # the same elevation and only the per-constraint grouping separates them.
+    data["JOINT COORDINATES"] = [
+        {"Joint": 1, "XorR": 0.0, "Y": 0.0, "Z": 10000.0},
+        {"Joint": 2, "XorR": 5000.0, "Y": 0.0, "Z": 10000.0},
+        {"Joint": 3, "XorR": 0.0, "Y": 5000.0, "Z": 10000.0},
+        {"Joint": 4, "XorR": 20000.0, "Y": 0.0, "Z": 10000.0},
+        {"Joint": 5, "XorR": 25000.0, "Y": 0.0, "Z": 10000.0},
+        {"Joint": 6, "XorR": 20000.0, "Y": 5000.0, "Z": 10000.0},
+    ]
+
+    import json
+
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    json_path = tmp_path / "diaphragm_same_z.json"
+    json_path.write_text(json.dumps(data))
+    parser = SAP2000Parser.from_json(json_path)
+    md = parser.get_model_data()
+    mm = preprocess_model(md, {"split_elements": False, "verbose": False})
+
+    # D1 and D2 both sit at Z=10000 → 2 components at the same Z
+    assert mm.diaphragm_levels == [10000.0]
+    comps = mm.diaphragm_components
+    assert len(comps) == 2
+    assert all(abs(z - 10000.0) < 1e-6 for z, _ids in comps)
+    # D1 group = joints 1,2,3 ; D2 group = joints 4,5,6 (both at Z=10000)
+    group_sizes = sorted(len(ids) for _z, ids in comps)
+    assert group_sizes == [3, 3]
+
+    # Two rigidDiaphragm calls at the same elevation — one per group
+    builder = AnalysisBuilder(mm, {"verbose": False})
+    try:
+        _make_in_memory_domain(builder, md)
+        n = builder._apply_rigid_diaphragms()
+        assert n == 2  # per-constraint, not per-level
+    finally:
+        ops.wipe()
+
+
+def test_rigid_diaphragms_explicit_node_groups(tmp_path):
+    """``rigid_diaphragms: [ {name, nodes}, ... ]`` bypasses detection and
+    emits one rigidDiaphragm per explicit group."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    md, _mm0 = _parse_diaphragm_s2k(tmp_path)
+    # Suppress all detection except the two explicit node-based groups.
+    # Group A = joints 1-3 (Z=10000), Group B = joints 4-6 (Z=20000).
+    config = {
+        "split_elements": False,
+        "verbose": False,
+        "rigid_diaphragms": [
+            {"name": "wing_a", "nodes": ["1", "2", "3"]},
+            {"name": "wing_b", "nodes": ["4", "5", "6"]},
+        ],
+    }
+    mm = preprocess_model(md, config)
+
+    # Explicit groups populate components; levels are derived from them
+    assert len(mm.diaphragm_components) == 2
+    assert mm.diaphragm_components[0][1] == ["1", "2", "3"]
+    assert mm.diaphragm_components[1][1] == ["4", "5", "6"]
+    assert mm.diaphragm_levels == [10000.0, 20000.0]
+
+    builder = AnalysisBuilder(mm, {"verbose": False})
+    try:
+        _make_in_memory_domain(builder, md)
+        n = builder._apply_rigid_diaphragms()
+        assert n == 2  # one per explicit group
+    finally:
+        ops.wipe()
+
+
+def test_rigid_diaphragms_explicit_selection_groups(tmp_path):
+    """``rigid_diaphragms: [ {name, selection}, ... ]`` resolves nodes from
+    matching area elements and emits one rigidDiaphragm per group."""
+    import json
+
+    import openseespy.opensees as ops
+
+    from fea_toolkit.model.selection import Selection
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    data = _diaphragm_constraint_s2k_data()
+    # Add a horizontal slab centred at Z=15000 covering joints 4-6 and 9
+    data["JOINT COORDINATES"] += [
+        {"Joint": 9, "XorR": 0.0, "Y": 0.0, "Z": 15000.0},
+    ]
+    data["AREA SECTION PROPERTIES"] = [
+        {"Section": "SLAB", "Material": "CONC", "Thickness": 150.0},
+    ]
+    data["AREA SECTION ASSIGNMENTS"] = [{"Area": "A1", "Section": "SLAB"}]
+    data["CONNECTIVITY - AREA"] = [
+        {"Area": "A1", "Joint1": 4, "Joint2": 5, "Joint3": 6, "Joint4": 9},
+    ]
+    data["MATERIAL PROPERTIES 01 - GENERAL"] += [
+        {"Material": "CONC", "Type": "Concrete"},
+    ]
+    data["MATERIAL PROPERTIES 02 - BASIC MECHANICAL PROPERTIES"] += [
+        {"Material": "CONC", "E1": 25000.0, "U12": 0.2},
+    ]
+
+    json_path = tmp_path / "diaphragm_selection.json"
+    json_path.write_text(json.dumps(data))
+    parser = SAP2000Parser.from_json(json_path)
+    md = parser.get_model_data()
+
+    config = {
+        "create_shells": True,
+        "split_elements": False,
+        "verbose": False,
+        "rigid_diaphragms": [
+            {
+                "name": "roof_diaphragm",
+                "selection": Selection(
+                    element_types=["Area"],
+                    sections=["SLAB"],
+                ),
+            }
+        ],
+    }
+    mm = preprocess_model(md, config)
+
+    # Selection resolves the slab's vertex nodes (4,5,6,9) into one group
+    assert len(mm.diaphragm_components) == 1
+    _z, node_ids = mm.diaphragm_components[0]
+    assert set(node_ids) == {"4", "5", "6", "9"}
+
+    builder = AnalysisBuilder(mm, {"verbose": False})
+    try:
+        _make_in_memory_domain(builder, md)
+        n = builder._apply_rigid_diaphragms()
+        assert n == 1  # one group from the slab selection
+    finally:
+        ops.wipe()
+
+
+def test_rigid_diaphragms_true_forces_storey_fallback(tmp_path):
+    """``rigid_diaphragms: True`` skips S2K constraints and derives one
+    diaphragm per identified storey instead."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    md, _mm0 = _parse_diaphragm_s2k(tmp_path)
+    config = {
+        "split_elements": False,
+        "verbose": False,
+        "rigid_diaphragms": True,
+    }
+    mm = preprocess_model(md, config)
+
+    # S2K constraints are ignored; storey detection clusters Z=10000/20000.
+    # identify_stories returns one storey per distinct node Z cluster.
+    assert set(mm.diaphragm_levels) == {10000.0, 20000.0}
+    assert len(mm.diaphragm_components) == 2
+
+    builder = AnalysisBuilder(mm, {"verbose": False})
+    try:
+        _make_in_memory_domain(builder, md)
+        n = builder._apply_rigid_diaphragms()
+        assert n == 2  # one per storey
+    finally:
+        ops.wipe()
+
+
+def test_legacy_z_list_merges_and_warns(tmp_path, caplog):
+    """A legacy ``rigid_diaphragms: [z1, z2, ...]`` list logs a warning when
+    the model recorded per-group components, then merges all nodes near each
+    elevation into one rigidDiaphragm per elevation."""
+    import logging
+
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    md, mm = _parse_diaphragm_s2k(tmp_path)
+    assert len(mm.diaphragm_components) == 2  # D1, D2 recorded by S2K
+
+    # A plain list is the legacy Z-list form — forces per-elevation merging
+    builder = AnalysisBuilder(mm, {"verbose": False, "rigid_diaphragms": [10000.0, 20000.0]})
+    try:
+        with caplog.at_level(logging.WARNING, logger="fea_toolkit.opensees.analysis_builder"):
+            _make_in_memory_domain(builder, md)
+            n = builder._apply_rigid_diaphragms()
+        assert n == 2  # one merged diaphragm per elevation
+        assert any("legacy [z1, z2, ...] list will merge" in r.message for r in caplog.records)
+    finally:
+        ops.wipe()
+
+
+def test_diaphragm_missing_node_raises_runtime_error(tmp_path):
+    """A diaphragm component whose nodes are absent from the OpenSees domain
+    raises RuntimeError instead of silently building a reduced diaphragm."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    md, mm = _parse_diaphragm_s2k(tmp_path)
+    builder = AnalysisBuilder(mm, {"verbose": False})
+    try:
+        _make_in_memory_domain(builder, md)
+        # Remove D2's two domain nodes.  D1's group (1,2,3) stays present, so
+        # the first component applies and the D2 component (["4","5","6"])
+        # hits node tag 4 — no longer in the domain — triggering the guard.
+        # (Joint "6" is an orphan dropped by remove_floating_nodes, so it is
+        # already absent from ``mesh_model.nodes`` and skipped by the builder.)
+        for nid in ("4", "5"):
+            ops.remove("node", mm.nodes[nid].node_tag)
+        with pytest.raises(RuntimeError, match="does not exist in the OpenSees domain"):
+            builder._apply_rigid_diaphragms()
+    finally:
+        ops.wipe()
+
+
+def test_diaphragm_z_tolerance_propagates_to_mesh_model(tmp_path):
+    """``diaphragm_z_tolerance`` flows from config onto MeshModel (default
+    0.01), so the builder uses the same unit-consistent tolerance."""
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    md, _mm0 = _parse_diaphragm_s2k(tmp_path)
+
+    # Default
+    mm = preprocess_model(md, {"split_elements": False, "verbose": False})
+    assert mm.diaphragm_z_tolerance == 0.01
+
+    # Config override
+    mm2 = preprocess_model(
+        md,
+        {"split_elements": False, "verbose": False, "diaphragm_z_tolerance": 0.05},
+    )
+    assert mm2.diaphragm_z_tolerance == 0.05
+
+
+def test_area_diaphragm_z_span_uses_diaphragm_z_tolerance(tmp_path):
+    """Nearly-horizontal slabs drive Source-3 diaphragm detection; the Z-span
+    threshold follows ``diaphragm_z_tolerance`` (default 0.5 for detection)."""
+    import json
+
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    data = _diaphragm_constraint_s2k_data()
+    # Drop the DIAPHRAGM constraint tables so only area elements remain
+    data.pop("CONSTRAINT DEFINITIONS - DIAPHRAGM")
+    data.pop("JOINT CONSTRAINT ASSIGNMENTS")
+    # A1: flush slab at Z=10000.  A2: skewed slab with Z-span 0.4.
+    data["JOINT COORDINATES"] += [
+        {"Joint": 9, "XorR": 5000.0, "Y": 5000.0, "Z": 10000.0},
+        {"Joint": 10, "XorR": 5000.0, "Y": 5000.0, "Z": 20000.4},
+        {"Joint": 11, "XorR": 0.0, "Y": 5000.0, "Z": 20000.4},
+    ]
+    data["AREA SECTION PROPERTIES"] = [
+        {"Section": "SLAB", "Material": "CONC", "Thickness": 150.0},
+    ]
+    data["AREA SECTION ASSIGNMENTS"] = [
+        {"Area": "A1", "Section": "SLAB"},
+        {"Area": "A2", "Section": "SLAB"},
+    ]
+    data["CONNECTIVITY - AREA"] = [
+        {"Area": "A1", "Joint1": 1, "Joint2": 2, "Joint3": 9, "Joint4": 3},
+        {"Area": "A2", "Joint1": 4, "Joint2": 5, "Joint3": 10, "Joint4": 11},
+    ]
+    data["MATERIAL PROPERTIES 01 - GENERAL"] += [
+        {"Material": "CONC", "Type": "Concrete"},
+    ]
+    data["MATERIAL PROPERTIES 02 - BASIC MECHANICAL PROPERTIES"] += [
+        {"Material": "CONC", "E1": 25000.0, "U12": 0.2},
+    ]
+
+    def _levels(tol):
+        cfg = {"create_shells": True, "split_elements": False, "verbose": False}
+        if tol is not None:
+            cfg["diaphragm_z_tolerance"] = tol
+        json_path = tmp_path / f"slab_tol_{tol}.json"
+        json_path.write_text(json.dumps(data))
+        parser = SAP2000Parser.from_json(json_path)
+        return preprocess_model(parser.get_model_data(), cfg).diaphragm_levels
+
+    # Default detection tolerance 0.5: both slabs count (0.4 < 0.5)
+    assert len(_levels(None)) == 2
+    # Tight tolerance 0.1: the 0.4-span slab is no longer "horizontal"
+    assert len(_levels(0.1)) == 1
 
 
 def test_cardinal_points_default_when_missing(tmp_path):
