@@ -254,12 +254,12 @@ affecting accuracy.
    for RC + LayeredShell this gives the Cholesky zero-pivot path
    enough Newton iterations to converge in the primary solver so the
    algorithm-switching fallback is not needed.
-2. **Do NOT** set ``gravity_num_substeps`` manually for LayeredShell
-   models — the ``AnalysisBuilder`` **auto-detects** the layered shell
-   sections and uses ``gravity_num_substeps = 10`` automatically
-   (``AnalysisBuilder.LAYERED_SHELL_GRAVITY_SUBSTEPS``).  Setting the
-   key explicitly is appropriate **only** to override that automatic
-   default (e.g. to a different substep count).
+2. ``gravity_num_substeps`` — omit the key to accept the
+   ``AnalysisBuilder`` automatic value: 1 for frame-only models, and
+   ``AnalysisBuilder.LAYERED_SHELL_GRAVITY_SUBSTEPS`` (= 10) when the
+   mesh contains LayeredShell sections (auto-detected).  Set the key
+   explicitly **only** to choose a different substep count (e.g.
+   ``"gravity_num_substeps": 20``).
 3. **Verify** the run log shows zero failures:
    `grep -c "analyze failed" run.log  # → 0`.
 4. If a run still fails after these settings, the builder's built-in
