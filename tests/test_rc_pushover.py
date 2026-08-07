@@ -202,7 +202,7 @@ class TestPushoverTclFormat:
         # base reactions are written to ``wall_bs.out`` every displacement
         # step (one line per step) — not a single final line.
         assert "for {set i 1} {$i <= 30} {incr i}" in tcl_s
-        assert "analyze 1" in tcl_s
+        assert "    set ok [analyze 1]" in tcl_s
         assert 'puts $bs_file "$rx $ry $rz"' in tcl_s
 
     # Note: test_element_type_param_documented was removed because
@@ -388,13 +388,30 @@ class TestParsePushoverResults:
         )
 
         assert len(result["control_disp"]) == 3
-        assert len(result["base_shear"]) == 3
         assert len(result["step"]) == 3
         assert len(result["reaction_rx"]) == 3
         # Sum of both base nodes at each step: -40 + -60 = -100, etc.
         assert abs(result["reaction_rx"][0] - (-100.0)) < 1e-6
         assert abs(result["reaction_rx"][1] - (-200.0)) < 1e-6
         assert abs(result["reaction_rx"][2] - (-300.0)) < 1e-6
+
+        # ── Base-shear values ─────────────────────────────────────
+        # The per-step bs.out rows ``(rx, ry, rz)`` are passed through
+        # verbatim (multi-row branch of parse_pushover_results), so
+        # base_shear has shape (n_steps, 3), not a single 1-D column.
+        assert isinstance(result["base_shear"], np.ndarray)
+        assert result["base_shear"].shape == (3, 3)
+        # Column 0 = Rx (push-direction reaction, opposes +X load)
+        assert abs(result["base_shear"][0, 0] - (-100.0)) < 1e-6
+        assert abs(result["base_shear"][1, 0] - (-200.0)) < 1e-6
+        assert abs(result["base_shear"][2, 0] - (-300.0)) < 1e-6
+        # Column 1 = Ry (zero for a pure-X push)
+        assert abs(result["base_shear"][0, 1] - 0.0) < 1e-6
+        assert abs(result["base_shear"][2, 1] - 0.0) < 1e-6
+        # Column 2 = Rz (vertical base reactions grow with drift)
+        assert abs(result["base_shear"][0, 2] - 400.0) < 1e-6
+        assert abs(result["base_shear"][1, 2] - 800.0) < 1e-6
+        assert abs(result["base_shear"][2, 2] - 1200.0) < 1e-6
 
         # ── 3. Mismatched time grids ─────────────────────────────────
         # Different recorder grids: reaction_1 covers only the first
