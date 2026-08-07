@@ -16,6 +16,7 @@ from ..model.sap_data import (
     AreaMesh,
     AreaUniformLoad,
     ConcreteRectangularSection,
+    Constraint,
     FrameDistributedLoad,
     FrameElement,
     FrameEndOffset,
@@ -273,6 +274,8 @@ class SAP2000Parser:
         frame_end_offsets = self._get_frame_end_offsets()
         area_mesh = self._get_area_mesh_assignments()
         area_edge_constraints = self._get_area_edge_constraints()
+        constraints = self._get_constraints()
+        constraint_assignments = self._get_constraint_assignments()
         load_patterns = self._get_load_patterns()
         mass_sources = self._get_mass_sources()
         joint_loads = self._get_joint_loads()
@@ -319,6 +322,8 @@ class SAP2000Parser:
             frame_end_offsets=frame_end_offsets,
             area_mesh=area_mesh,
             area_edge_constraints=area_edge_constraints,
+            constraints=constraints,
+            constraint_assignments=constraint_assignments,
             load_patterns=load_patterns,
             mass_sources=mass_sources,
             joint_loads=joint_loads,
@@ -655,6 +660,64 @@ class SAP2000Parser:
             )
             constraints.setdefault(aid, []).append(c)
         return constraints
+
+    def _get_constraints(self) -> dict[str, Constraint]:
+        """Parse joint constraint definitions from ``CONSTRAINT DEFINITIONS - *``.
+
+        Reads every ``CONSTRAINT DEFINITIONS - <TYPE>`` table (BODY,
+        DIAPHRAGM, EQUAL, BEAM, ROD, PLATE, WELD, LOCAL) and stores the
+        result keyed by constraint name.  The table suffix (e.g.
+        ``"DIAPHRAGM"``) becomes ``Constraint.constraint_type``.
+
+        For diaphragm constraints the ``constraint_data`` dict holds the
+        axis (``{"Axis": "Z"}``) so downstream consumers (Preprocessor /
+        AnalysisBuilder) can derive rigid-diaphragm storey levels.
+
+        Returns
+        -------
+        Dict[str, Constraint]
+            Mapping from constraint name (e.g. ``"D1"``, ``"BODY1"``)
+            to its :class:`Constraint` definition.
+        """
+        constraints: dict[str, Constraint] = {}
+        for table_name, records in self._raw_tables.items():
+            if not table_name.startswith("CONSTRAINT DEFINITIONS - "):
+                continue
+            ctype = table_name[len("CONSTRAINT DEFINITIONS - ") :].upper()
+            for rec in records:
+                name = str(rec.get("Name", "")).strip()
+                if not name:
+                    continue
+                # Keep any column other than Name/CoordSys as constraint_data
+                data = {k: v for k, v in rec.items() if k not in ("Name", "CoordSys")}
+                if ctype == "DIAPHRAGM":
+                    # Normalise axis to uppercase string for uniform lookup
+                    axis = data.get("Axis")
+                    if axis is not None:
+                        data["Axis"] = str(axis).upper()
+                constraints[name] = Constraint(
+                    name=name,
+                    constraint_type=ctype,
+                    coord_sys=str(rec.get("CoordSys", "GLOBAL")),
+                    constraint_data=data,
+                )
+        return constraints
+
+    def _get_constraint_assignments(self) -> dict[str, str]:
+        """Parse ``JOINT CONSTRAINT ASSIGNMENTS`` table.
+
+        Returns
+        -------
+        Dict[str, str]
+            Mapping from SAP joint ID (string) → constraint name.
+        """
+        assignments: dict[str, str] = {}
+        for rec in self._raw_tables.get("JOINT CONSTRAINT ASSIGNMENTS", []):
+            joint = str(rec.get("Joint", ""))
+            cname = str(rec.get("Constraint", "")).strip()
+            if joint and cname:
+                assignments[joint] = cname
+        return assignments
 
     def _get_frame_elements(self) -> dict[str, FrameElement]:
         elements = {}
