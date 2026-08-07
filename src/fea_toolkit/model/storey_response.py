@@ -1272,9 +1272,9 @@ def group_shell_forces_by_section(
             # parent.  Children without the suffix collapse to a
             # whole-parent section.
             row = ""
-            head, sep, tail = sid.partition("_sub_")
-            if sep and head == pid:
-                row = tail.split("_", 1)[0]
+            suffix = sid.removeprefix(f"{pid}_sub_")
+            if suffix != sid:
+                row = suffix.split("_", 1)[0]
             section = f"{pid}_section_{row}" if row else pid
             key = (section, pid, row)
         else:
