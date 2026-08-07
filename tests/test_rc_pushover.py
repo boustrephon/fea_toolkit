@@ -396,6 +396,75 @@ class TestParsePushoverResults:
         assert abs(result["reaction_rx"][1] - (-200.0)) < 1e-6
         assert abs(result["reaction_rx"][2] - (-300.0)) < 1e-6
 
+        # ── 3. Mismatched time grids ─────────────────────────────────
+        # Different recorder grids: reaction_1 covers only the first
+        # three steps while reaction_2 extends to t=0.8.  The parser
+        # picks the longest grid as the reference, interpolates the
+        # shorter series onto it, sums within the overlap, and returns
+        # NaN for steps outside the shorter series' range.
+        disp_mm = tmp_path / "disp_mm.out"
+        np.savetxt(
+            str(disp_mm),
+            [
+                [0.0, 0.001],
+                [0.1, 0.003],
+                [0.2, 0.005],
+                [0.4, 0.012],
+                [0.6, 0.020],
+                [0.8, 0.030],
+            ],
+        )
+        bs_mm = tmp_path / "bs_mm.out"
+        np.savetxt(
+            str(bs_mm),
+            [
+                [-100.0, 0.0, 400.0],
+                [-150.0, 0.0, 600.0],
+                [-200.0, 0.0, 800.0],
+                [-300.0, 0.0, 1200.0],
+                [-300.0, 0.0, 1200.0],
+                [-300.0, 0.0, 1200.0],
+            ],
+        )
+
+        # Shorter reaction grid: [0.0, 0.2, 0.4]
+        react_mm_1 = tmp_path / "reaction_mm_1.out"
+        np.savetxt(str(react_mm_1), [[0.0, -40.0], [0.2, -80.0], [0.4, -120.0]])
+        # Longer reaction grid (becomes the reference): [0.0, 0.1, 0.2, 0.4, 0.6, 0.8]
+        react_mm_2 = tmp_path / "reaction_mm_2.out"
+        np.savetxt(
+            str(react_mm_2),
+            [
+                [0.0, -60.0],
+                [0.1, -90.0],
+                [0.2, -120.0],
+                [0.4, -180.0],
+                [0.6, -240.0],
+                [0.8, -300.0],
+            ],
+        )
+
+        result_mm = parse_pushover_results(
+            str(disp_mm),
+            str(bs_mm),
+            [str(react_mm_1), str(react_mm_2)],
+        )
+
+        assert len(result_mm["control_disp"]) == 6
+        assert len(result_mm["base_shear"]) == 6
+        assert len(result_mm["step"]) == 6
+        assert len(result_mm["reaction_rx"]) == 6
+        # Overlap [0.0, 0.4]: reaction_1 is interpolated onto the longer
+        # grid (e.g. -60 at t=0.1) and summed with reaction_2.
+        assert abs(result_mm["reaction_rx"][0] - (-100.0)) < 1e-6  # -40 + -60
+        assert abs(result_mm["reaction_rx"][1] - (-150.0)) < 1e-6  # -60 + -90 (interp)
+        assert abs(result_mm["reaction_rx"][2] - (-200.0)) < 1e-6  # -80 + -120
+        assert abs(result_mm["reaction_rx"][3] - (-300.0)) < 1e-6  # -120 + -180
+        # Beyond reaction_1's range [0.6, 0.8] the parser returns NaN for
+        # steps where a series has no data.
+        assert np.isnan(result_mm["reaction_rx"][4])
+        assert np.isnan(result_mm["reaction_rx"][5])
+
     def test_file_not_found_raises(self, tmp_path):
         """Missing file should raise OSError."""
         from fea_toolkit.opensees.recorder import parse_pushover_results
