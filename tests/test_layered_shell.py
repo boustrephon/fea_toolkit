@@ -24,7 +24,7 @@ from fea_toolkit.model.sap_data import (
     ShellFiberLayer,
     ShellSection,
 )
-from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder, _normalise_frame_response
 from fea_toolkit.opensees.preprocessor import Preprocessor
 
 
@@ -60,6 +60,43 @@ def _minimal_mesh(nd_materials=None, layered_sections=None):
         units={"F": "N", "L": "m", "T": "C"},
         nd_materials=nd_materials or {},
         layered_shell_sections=layered_sections or {},
+    )
+
+
+def _minimal_quad_mesh(materials, sections, area_elements):
+    """Build a MeshModel with a single four-node unit quad area element.
+
+    Args:
+        materials: ``{name: Material}``.
+        sections: ``{name: ShellSection}``.
+        area_elements: ``{area_id: AreaElement}`` — assigned to ``"WSec"``.
+    """
+    return MeshModel(
+        nodes={
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=1.0, y=0.0, z=0.0),
+            "3": Node(node_id="3", node_tag=3, x=1.0, y=1.0, z=0.0),
+            "4": Node(node_id="4", node_tag=4, x=0.0, y=1.0, z=0.0),
+        },
+        materials=materials,
+        sections=sections,
+        frame_elements={},
+        frame_assignments={},
+        area_elements=area_elements,
+        area_assignments={"A1": "WSec"},
+        frame_dist_loads=[],
+        material_tags={},
+        section_tags={},
+        shell_sec_tags={},  # NOT pre-seeded — builder must create the shell section
+        shell_sec_variants={},
+        frame_element_types={},
+        area_element_types={},
+        offset_rigid_links=[],
+        edge_constraint_args=[],
+        edge_loads_from_areas=[],
+        loads_only_area_ids=set(),
+        base_z=0.0,
+        units={"F": "N", "L": "m", "T": "C"},
     )
 
 
@@ -149,12 +186,6 @@ class TestShellForceResultants:
         eps_x = 1.0e-4
         expected_Nx = E * t * eps_x
 
-        nodes = {
-            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
-            "2": Node(node_id="2", node_tag=2, x=1.0, y=0.0, z=0.0),
-            "3": Node(node_id="3", node_tag=3, x=1.0, y=1.0, z=0.0),
-            "4": Node(node_id="4", node_tag=4, x=0.0, y=1.0, z=0.0),
-        }
         mat = {"Conc": Material(name="Conc", type="Concrete", E_mod=E, nu=nu)}
         sec = {
             "WSec": ShellSection(
@@ -171,28 +202,7 @@ class TestShellForceResultants:
         area = {
             "A1": AreaElement(area_id="A1", area_tag=10, node_ids=["1", "2", "3", "4"], thickness=t)
         }
-        mm = MeshModel(
-            nodes=nodes,
-            materials=mat,
-            sections=sec,
-            frame_elements={},
-            frame_assignments={},
-            area_elements=area,
-            area_assignments={"A1": "WSec"},
-            frame_dist_loads=[],
-            material_tags={},
-            section_tags={},
-            shell_sec_tags={},  # NOT pre-seeded — builder must create the shell section
-            shell_sec_variants={},
-            frame_element_types={},
-            area_element_types={},
-            offset_rigid_links=[],
-            edge_constraint_args=[],
-            edge_loads_from_areas=[],
-            loads_only_area_ids=set(),
-            base_z=0.0,
-            units={"F": "N", "L": "m", "T": "C"},
-        )
+        mm = _minimal_quad_mesh(mat, sec, area)
 
         ab = AnalysisBuilder(mm, {"create_shells": True, "verbose": False})
         ab.build_domain()
@@ -247,12 +257,6 @@ class TestShellForceResultants:
         eps_x = 1.0e-4
         expected_Nx = E * t * eps_x
 
-        nodes = {
-            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
-            "2": Node(node_id="2", node_tag=2, x=1.0, y=0.0, z=0.0),
-            "3": Node(node_id="3", node_tag=3, x=1.0, y=1.0, z=0.0),
-            "4": Node(node_id="4", node_tag=4, x=0.0, y=1.0, z=0.0),
-        }
         mat = {"Conc": Material(name="Conc", type="Concrete", E_mod=E, nu=nu)}
         sec = {
             "WSec": ShellSection(
@@ -269,28 +273,7 @@ class TestShellForceResultants:
         area = {
             "A1": AreaElement(area_id="A1", area_tag=10, node_ids=["1", "2", "3", "4"], thickness=t)
         }
-        mm = MeshModel(
-            nodes=nodes,
-            materials=mat,
-            sections=sec,
-            frame_elements={},
-            frame_assignments={},
-            area_elements=area,
-            area_assignments={"A1": "WSec"},
-            frame_dist_loads=[],
-            material_tags={},
-            section_tags={},
-            shell_sec_tags={},
-            shell_sec_variants={},
-            frame_element_types={},
-            area_element_types={},
-            offset_rigid_links=[],
-            edge_constraint_args=[],
-            edge_loads_from_areas=[],
-            loads_only_area_ids=set(),
-            base_z=0.0,
-            units={"F": "N", "L": "m", "T": "C"},
-        )
+        mm = _minimal_quad_mesh(mat, sec, area)
 
         ab = AnalysisBuilder(mm, {"create_shells": True, "verbose": False})
         ab.build_domain()
@@ -327,6 +310,57 @@ class TestShellForceResultants:
         assert abs(sh["Nxy"]) < expected_Nx * 1e-6, (
             f"recorded Nxy={sh['Nxy']:.6g} != 0 — this is what inflated wall τ DCRs"
         )
+
+    def test_normalise_frame_response_with_none_input(self):
+        """_normalise_frame_response() must tolerate None responses.
+
+        ``ops.eleResponse(tag, 'localForces')`` can return ``None`` on
+        failed queries (not just raise).  The helper's return annotation
+        is ``Optional[list[float]]`` and both call sites in
+        ``extract_static_element_forces()`` / ``_record_step()`` guard
+        with ``if f is None: continue`` — so a raw ``None`` input should
+        map to ``None`` (the caller's existing skip path) rather than
+        crashing on ``len(None)``.
+        """
+        assert _normalise_frame_response(None) is None
+
+    def test_normalise_frame_response_lengths(self):
+        """The documented length→expansion rules still hold."""
+        # 1-value truss axial response → 12-vector with ±P axial pair.
+        assert _normalise_frame_response([5.0]) == [
+            -5.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            5.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ]
+        # 6-value 3D truss end forces → 12-vector with zero moments.
+        assert _normalise_frame_response([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) == [
+            1.0,
+            2.0,
+            3.0,
+            0.0,
+            0.0,
+            0.0,
+            4.0,
+            5.0,
+            6.0,
+            0.0,
+            0.0,
+            0.0,
+        ]
+        # Unsupported short length (not 1 or 6) → None (caller skips).
+        assert _normalise_frame_response([1.0, 2.0]) is None
+        # >= 12 values → first 12 preserved.
+        twelve = list(range(12))
+        assert _normalise_frame_response([*twelve, 99.0]) == twelve
 
     def test_record_step_layered_shell_shear_resultant(self):
         """_record_step() returns true composite-shear resultants for a 5-layer
