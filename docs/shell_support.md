@@ -147,7 +147,7 @@ The Preprocessor populates ``mesh_model.diaphragm_levels`` and
 | absent / ``None`` | Auto‑detect (default) — S2K Z‑axis DIAPHRAGM constraints; falls back to horizontal area‑element mean‑Z levels when no constraints exist |
 | ``False`` | Explicitly **disable** all rigid diaphragms |
 | ``True`` | Force storey‑based detection via ``identify_stories()`` — one component per identified storey, skipping S2K constraints |
-| ``[z1, z2, ...]`` | Legacy override — use the explicit elevations and merge all nodes within 0.01 of each level into one diaphragm |
+| ``[z1, z2, ...]`` | Legacy override — use the explicit elevations and merge all nodes within the configurable ``diaphragm_z_tolerance`` (default ``0.01``) of each level into one diaphragm |
 | ``[{name, nodes\|selection}, ...]`` | **Explicit named groups** — bypass all detection; each dict is one independent diaphragm |
 
 ### Explicit named groups

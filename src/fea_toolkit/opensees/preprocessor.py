@@ -56,12 +56,13 @@ class Preprocessor:
             preprocessing‑specific options that must be supplied **before**
             constructing the ``AnalysisBuilder``:
             ``detect_wall_slab_intersections`` (default ``True``),
-            ``split_slabs_at_walls`` (default ``False``), and
-            ``diaphragm_z_tolerance`` — the Z tolerance (in model length
-            units) used when (a) treating an area element as horizontal for
-            storey-level detection (default ``0.5``) and (b) matching nodes
-            to a detected diaphragm elevation in the AnalysisBuilder
-            (default ``0.01``).  Stored on the ``MeshModel`` as
+            ``split_slabs_at_walls`` (default ``False``), and the two
+            independent Z tolerances (in model length units):
+            ``area_diaphragm_z_tolerance`` (default ``0.5``) for treating
+            an area element as horizontal during storey-level detection,
+            and ``diaphragm_z_tolerance`` (default ``0.01``) for matching
+            nodes to a detected diaphragm elevation in the AnalysisBuilder.
+            The latter is stored on the ``MeshModel`` as
             ``diaphragm_z_tolerance`` for the builder to consume.
     """
 
@@ -1022,7 +1023,7 @@ class Preprocessor:
             explicit constraints are present (area-only fallback).
         """
         levels: set[float] = set()
-        z_tol = float(self.config.get("diaphragm_z_tolerance", 0.5))
+        z_tol = float(self.config.get("area_diaphragm_z_tolerance", 0.5))
         components: list[tuple[float, list[str]]] = []
 
         config_val = self.config.get("rigid_diaphragms", None)
@@ -1062,9 +1063,17 @@ class Preprocessor:
                 if not zs:
                     continue
                 z_mean = round(sum(zs) / len(zs), 4)
-                levels.add(z_mean)
                 # Keep only joints that survive topology preprocessing.
-                components.append((z_mean, [jid for jid in joint_ids if jid in md.nodes]))
+                surviving = [jid for jid in joint_ids if jid in md.nodes]
+                components.append((z_mean, surviving))
+                if len(surviving) >= 2:
+                    levels.add(z_mean)
+                else:
+                    # A diaphragm needs at least two surviving joints; if the
+                    # topology pass removed too many, drop the component so the
+                    # horizontal-area fallback (Source 3 below) can still run.
+                    components.pop()
+                    levels.discard(z_mean)
 
         # ── Source 3: horizontal area elements ────────────────────
         if not components:
