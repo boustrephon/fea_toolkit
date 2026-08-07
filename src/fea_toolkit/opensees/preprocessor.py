@@ -331,6 +331,11 @@ class Preprocessor:
                     next_sec_tag += 1
 
         # ── 9. Remove orphan nodes (not referenced by any element) ──
+        # Nodes that carry joint loads are retained even when they are not
+        # referenced by any frame/area element — the MASS SOURCE → JOINT
+        # LOADS flow lumps mass onto those nodes, so dropping them would
+        # silently discard all seismic mass (and the eigen problem would
+        # have no mass).
         referenced: set[str] = set()
         for fe in new_elems.values():
             if not getattr(fe, "inactive", False):
@@ -342,6 +347,8 @@ class Preprocessor:
             if aid in loads_only_area_ids:
                 continue  # these areas have no shells, skip their nodes
             referenced.update(ae.node_ids)
+        for jl in getattr(md, "joint_loads", []):
+            referenced.add(str(jl.node_id))
         orphan_nodes: dict[str, Node] = {}
         for nid in list(md.nodes.keys()):
             if nid not in referenced:
@@ -964,9 +971,45 @@ class Preprocessor:
         return raw_edges
 
     def _detect_diaphragm_levels(self, md) -> list[float]:
-        """Detect storey levels from horizontal area elements."""
+        """Detect storey levels from horizontal area elements and S2K constraints.
+
+        Two sources are merged:
+
+        1. **Joint constraints** — Z-axis DIAPHRAGM constraints parsed from
+           the ``.s2k`` file (``CONSTRAINT DEFINITIONS - DIAPHRAGM`` +
+           ``JOINT CONSTRAINT ASSIGNMENTS``).  For each Z-axis diaphragm,
+           the storey elevation is the rounded mean Z of its assigned
+           joints.  This is the canonical source for frame-only models
+           that carry explicit diaphragm definitions (e.g. the
+           SeismoStruct Ex12 verification model).
+        2. **Horizontal area elements** — each nearly-horizontal shell's
+           mean Z (backward-compatible fallback for models without
+           explicit constraints, e.g. slab-only models).
+        """
         levels: set[float] = set()
         z_tol = 0.5
+
+        # ── Source 1: explicit Z-axis diaphragm constraints ──────────
+        constraints = getattr(md, "constraints", {})
+        assignments = getattr(md, "constraint_assignments", {})
+        for cname, con in constraints.items():
+            if con.constraint_type != "DIAPHRAGM":
+                continue
+            axis = str(con.constraint_data.get("Axis", "")).upper()
+            if axis and axis != "Z":
+                continue
+            # Group assigned joints for this constraint
+            joint_ids = [jid for jid, c in assignments.items() if c == cname]
+            zs = []
+            for jid in joint_ids:
+                nd = md.nodes.get(jid)
+                if nd is not None:
+                    zs.append(nd.z)
+            if not zs:
+                continue
+            levels.add(round(sum(zs) / len(zs), 4))
+
+        # ── Source 2: horizontal area elements ────────────────────
         for ae in md.area_elements.values():
             if getattr(ae, "inactive", False):
                 continue
