@@ -746,6 +746,143 @@ def test_cardinal_points_alternative_column_names(tmp_path):
     assert md.frame_elements["1"].cardinal_point == 10
 
 
+# ============================================================================
+# S2K diaphragm constraint tables drive the AnalysisBuilder with no config
+# ============================================================================
+
+
+def _diaphragm_constraint_s2k_data() -> dict:
+    """Minimal frame-only S2K fixture with DIAPHRAGM constraints at
+    Z = 10000 / 20000 (model units ``N, mm, C``).
+    """
+    return {
+        "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25", "CurrUnits": "N, mm, C"}],
+        "JOINT COORDINATES": [
+            {"Joint": 1, "XorR": 0.0, "Y": 0.0, "Z": 10000.0},
+            {"Joint": 2, "XorR": 5000.0, "Y": 0.0, "Z": 10000.0},
+            {"Joint": 3, "XorR": 0.0, "Y": 5000.0, "Z": 10000.0},
+            {"Joint": 4, "XorR": 0.0, "Y": 0.0, "Z": 20000.0},
+            {"Joint": 5, "XorR": 5000.0, "Y": 0.0, "Z": 20000.0},
+            {"Joint": 6, "XorR": 0.0, "Y": 5000.0, "Z": 20000.0},
+        ],
+        "CONNECTIVITY - FRAME": [
+            {"Frame": 1, "JointI": 1, "JointJ": 2},
+            {"Frame": 2, "JointI": 4, "JointJ": 5},
+        ],
+        "FRAME SECTION PROPERTIES 01 - GENERAL": [
+            {
+                "Section": "COL",
+                "Material": "STEEL",
+                "Shape": "Rectangular",
+                "t3": 400.0,
+                "t2": 400.0,
+                "Area": 160000.0,
+                "I33": 2.133e9,
+                "I22": 2.133e9,
+            },
+        ],
+        "FRAME SECTION ASSIGNMENTS": [
+            {"Frame": 1, "Section": "COL"},
+            {"Frame": 2, "Section": "COL"},
+        ],
+        "MATERIAL PROPERTIES 01 - GENERAL": [
+            {"Material": "STEEL", "Type": "Steel"},
+        ],
+        "MATERIAL PROPERTIES 02 - BASIC MECHANICAL PROPERTIES": [
+            {"Material": "STEEL", "E1": 200000.0, "G12": 76923.0, "U12": 0.3},
+        ],
+        "CONSTRAINT DEFINITIONS - DIAPHRAGM": [
+            {"Name": "D1", "CoordSys": "GLOBAL", "Axis": "Z"},
+            {"Name": "D2", "CoordSys": "GLOBAL", "Axis": "Z"},
+        ],
+        "JOINT CONSTRAINT ASSIGNMENTS": [
+            {"Joint": 1, "Constraint": "D1"},
+            {"Joint": 2, "Constraint": "D1"},
+            {"Joint": 3, "Constraint": "D1"},
+            {"Joint": 4, "Constraint": "D2"},
+            {"Joint": 5, "Constraint": "D2"},
+            {"Joint": 6, "Constraint": "D2"},
+        ],
+    }
+
+
+def _parse_diaphragm_s2k(tmp_path):
+    """Parse the diaphragm fixture and preprocess it into a MeshModel."""
+    import json
+
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    data = _diaphragm_constraint_s2k_data()
+    json_path = tmp_path / "diaphragm_constraints.json"
+    json_path.write_text(json.dumps(data))
+
+    parser = SAP2000Parser.from_json(json_path)
+    md = parser.get_model_data()
+    mm = preprocess_model(md, {"split_elements": False, "verbose": False})
+    return md, mm
+
+
+def _make_in_memory_domain(builder, md):
+    """Create the nodes in the OpenSees domain for _apply_rigid_diaphragms."""
+    import openseespy.opensees as ops
+
+    ops.wipe()
+    ops.model("basic", "-ndm", 3, "-ndf", 6)
+    for nid, node in md.nodes.items():
+        ops.node(int(nid), node.x, node.y, node.z)
+
+
+def test_diaphragm_constraints_drive_diaphragm_levels(tmp_path):
+    """CONSTRAINT DEFINITIONS - DIAPHRAGM + JOINT CONSTRAINT ASSIGNMENTS
+    populate ``MeshModel.diaphragm_levels`` and apply without a config override.
+    """
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    md, mm = _parse_diaphragm_s2k(tmp_path)
+
+    # Constraint definitions are parsed (DIAPHRAGM, Z axis, GLOBAL coords)
+    assert set(md.constraints) == {"D1", "D2"}
+    assert md.constraints["D1"].constraint_type == "DIAPHRAGM"
+    assert md.constraints["D1"].coord_sys == "GLOBAL"
+    assert str(md.constraints["D1"].constraint_data.get("Axis", "")).upper() == "Z"
+
+    # Joint assignments map SAP joint labels to constraint names
+    assert md.constraint_assignments["1"] == "D1"
+    assert md.constraint_assignments["6"] == "D2"
+
+    # Preprocessing derives diaphragm levels from the S2K constraints
+    assert mm.diaphragm_levels == [10000.0, 20000.0]
+
+    # AnalysisBuilder applies rigid diaphragms with NO config override
+    builder = AnalysisBuilder(mm, {"verbose": False})
+    try:
+        _make_in_memory_domain(builder, md)
+        n = builder._apply_rigid_diaphragms()
+        assert n == 2  # one rigidDiaphragm per detected level
+    finally:
+        ops.wipe()
+
+
+def test_rigid_diaphragms_false_disables_detected_levels(tmp_path):
+    """Explicit ``rigid_diaphragms: False`` suppresses detected levels."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    md, mm = _parse_diaphragm_s2k(tmp_path)
+    assert mm.diaphragm_levels == [10000.0, 20000.0]
+
+    builder = AnalysisBuilder(mm, {"verbose": False, "rigid_diaphragms": False})
+    try:
+        _make_in_memory_domain(builder, md)
+        n = builder._apply_rigid_diaphragms()
+        assert n == 0  # explicit opt-out — even though levels were detected
+    finally:
+        ops.wipe()
+
+
 def test_cardinal_points_default_when_missing(tmp_path):
     """No cardinal point column → defaults to 10 (centroid)."""
     import json
