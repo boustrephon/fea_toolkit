@@ -1070,6 +1070,7 @@ def parse_pushover_results(
     disp_path: str,
     bs_path: str,
     reaction_path: Optional[Union[str, list[str]]] = None,
+    dof: int = 0,
 ) -> dict[str, np.ndarray]:
     """Parse pushover Tcl recorder output files into numpy arrays.
 
@@ -1082,17 +1083,20 @@ def parse_pushover_results(
       columns.  The displacement array is the second column.
     - **bs_path**: ``{output_prefix}_bs.out`` — one line per step
       with three values ``rx ry rz`` representing the summed base
-      reactions at that step.  ``base_shear`` is taken from the first
-      value (the push-direction reaction) for each step.  A single
-      scalar or 3-value line (legacy format) is broadcast to match
-      the step count.
-    - **reaction_path**: ``{output_prefix}_reaction.out`` (single base
-      node) or a **list** of paths
-      ``[{output_prefix}_reaction_{tag}.out, ...]`` (multiple base
-      nodes) — optional, one line per step with ``time`` and the
-      base-node reaction in the push direction.  When a list is given,
-      reactions are summed across all base nodes by matching recorded
-      time steps.
+      reactions at that step.  ``base_shear`` is taken from the
+      push-direction reaction selected by *dof* (0=Rx, 1=Ry, 2=Rz)
+      for each step.  A single scalar or 3-value line (legacy format)
+      is broadcast to match the step count.
+
+    Args:
+        disp_path: Path to the control-node displacement recorder file.
+        bs_path: Path to the summed base-reaction recorder file.
+        reaction_path: Optional path, or list of paths, to per-base-node
+            reaction recorder files.
+        dof: Zero-based index of the base-reaction column to use as
+            ``base_shear`` (0=Rx, 1=Ry, 2=Rz).  Defaults to 0 (X-direction
+            push).  Pass ``control_dof - 1`` when the push direction is
+            *control_dof* = 1 (X), 2 (Y) or 3 (Z).
 
     Returns
     -------
@@ -1100,9 +1104,10 @@ def parse_pushover_results(
         Keys:
         - ``"control_disp"`` — 1-D ndarray of control node displacement
           at each converged step (from *disp_path*).
-        - ``"base_shear"`` — 1-D ndarray of base shear (Rx) at each
-          step.  If *disp_path* has N rows and *bs_path* has a single
-          scalar, the single value is broadcast to match *control_disp*.
+        - ``"base_shear"`` — 1-D ndarray of the push-direction base
+          reaction (*dof* column) at each step.  If *disp_path* has N
+          rows and *bs_path* has a single scalar, the single value is
+          broadcast to match *control_disp*.
         - ``"step"`` — 1-D ndarray of step indices (1, 2, ..., N).
         - ``"base_rx"``, ``"base_ry"``, ``"base_rz"`` — scalar final
           base reaction components (from *bs_path*).
@@ -1141,8 +1146,10 @@ def parse_pushover_results(
         # Single scalar value
         base_shear = np.full(n_steps, float(bs_data))
     elif bs_data.ndim == 1 and len(bs_data) == 3:
-        # Three components: rx, ry, rz — use first (push direction)
-        base_shear = np.full(n_steps, float(bs_data[0]))
+        # Three components: rx, ry, rz — use the push-direction one
+        if not 0 <= dof < 3:
+            raise ValueError(f"dof must be in 0..2 for a 3-value base-shear line, got {dof}")
+        base_shear = np.full(n_steps, float(bs_data[dof]))
     elif bs_data.ndim == 1:
         # One value per step
         base_shear = np.asarray(bs_data, dtype=float)

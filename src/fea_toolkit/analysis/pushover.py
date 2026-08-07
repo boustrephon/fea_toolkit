@@ -556,6 +556,7 @@ class PushoverAnalysis(Analysis):
                     disp_path,
                     bs_path,
                     reaction_arg,
+                    dof=control_dof - 1,
                 )
                 result = {
                     "control_disp": _safe_list(parsed.get("control_disp")),
