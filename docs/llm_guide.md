@@ -275,6 +275,35 @@ affecting accuracy.
 Full theory and worked example: `docs/pushover_analysis.md`
 → *Gravity convergence (LayeredShell RC models)*.
 
+### Solver selection: avoid `BandSPD` on fully-constrained patch tests
+
+**Rule (LLMs: follow this)**: when a test or script builds a *single
+element* (or a rigid-body-singular patch) where **every node DOF is
+either fixed or prescribed by an `sp` command** — leaving **zero free
+equations** — do **NOT** use `ops.system("BandSPD")`.  `BandSPD`
+delegates to LAPACK `DPBSV`, which does not check for a zero-equation
+system and fails with the misleading error:
+
+```
+BandSPDLinLapackSolver::solve() - OpenSees code error
+On entry to DPBSV , parameter number  8 had an illegal value
+```
+
+This is a **known OpenSees limitation** (M. Scott, *"Most Solvers Can Be
+Marplots"*, Aug 2020): only `UmfPack` checks for zero equations and
+handles that case.  Use `ops.system("UmfPack")` instead — for a linear
+static analysis the solver choice does not change the results.
+
+This exact situation occurs in
+`tests/test_layered_shell.py::TestShellForceResultants::test_record_step_layered_shell_shear_resultant`:
+all four nodes of the single `ShellNLDKGQ` element are fully constrained
+(`fix` on nodes 1–2, `fix` + `sp` on nodes 3–4) so the solver sees zero
+free equations — the test intentionally uses `UmfPack`.  It also matches
+the real admin shear-wall wall type (`ShellNLDKGQ` + 5-layer
+`LayeredShell`), which needs 6-DOF nodes and drilling stiffness.
+Prescribing the full boundary field (`ux = γ₀·y`, `uy = 0`) on a single
+element therefore requires `UmfPack`.
+
 ---
 
 ## 5. Selection Patterns (for targeted visualisation)
