@@ -67,8 +67,9 @@ Stage 2:  Lock gravity (loadConst), apply lateral loads, push
 
    ```python
    NUM_SUB = 10  # AnalysisBuilder.LAYERED_SHELL_GRAVITY_SUBSTEPS
+   load_step = 1.0 / NUM_SUB
    for i in range(1, NUM_SUB + 1):
-       ops.integrator("LoadControl", i / NUM_SUB)
+       ops.integrator("LoadControl", load_step)
        ops.analysis("Static")
        ok = ops.analyze(1)
        if ok != 0:
