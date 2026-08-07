@@ -1208,6 +1208,7 @@ def parse_pushover_results(
         except Exception:
             continue
     summed_rx = None
+    n_series = len(_series_list)
     if ref_time is not None:
         summed_rx = np.zeros_like(ref_time, dtype=float)
         # Interpolate each series onto that grid.  Times outside a series'
@@ -1223,10 +1224,11 @@ def parse_pushover_results(
                 ref_ncontrib = ref_ncontrib + in_range.astype(int)
             except Exception:
                 continue
-        # Any time step where NO series contributed is set to NaN so it
-        # cannot silently appear as a zero reaction contribution.
+        # Any time step where fewer than ALL series contributed is set to
+        # NaN so an incomplete multi-support sum cannot silently appear as
+        # a valid reaction contribution.
         summed_rx = summed_rx.astype(float)
-        summed_rx[ref_ncontrib == 0] = np.nan
+        summed_rx[ref_ncontrib < n_series] = np.nan
 
     if summed_rx is not None and len(summed_rx) > 0:
         # The recorder emits only the push-direction DOF reaction, so
