@@ -984,15 +984,49 @@ class NDMaterial:
     Args:
         name: Unique material name.
         material_type: ``"ElasticIsotropic"``, ``"J2PlateFibre"``,
-            ``"ConcreteS"``, or ``"PlateFromPlaneStress"``.
+            ``"ConcreteS"``, ``"PlaneStressUserMaterial"``, or
+            ``"PlateFromPlaneStress"``.
         E: Young's modulus (Pa).
         nu: Poisson's ratio.
         fy: Yield stress for J2PlateFibre (Pa).
         Hiso: Isotropic hardening modulus for J2PlateFibre.
         Hkin: Kinematic hardening modulus for J2PlateFibre.
-        fc: Compressive strength for ConcreteS (Pa, positive).
-        ft: Tensile strength for ConcreteS (Pa).
+        fc: Compressive strength for ConcreteS / PlaneStressUserMaterial
+            (Pa, positive magnitude).
+        ft: Tensile strength for ConcreteS / PlaneStressUserMaterial (Pa).
         Es: Steel rebar stiffness for ConcreteS (0 = plain concrete).
+        fcu: Crushing strength for PlaneStressUserMaterial (Pa, positive
+            magnitude; OpenSees stores negative).
+        epsc0: Strain at peak compressive strength for
+            PlaneStressUserMaterial (positive magnitude; OpenSees stores
+            negative).
+        epscu: Crushing strain for PlaneStressUserMaterial (positive
+            magnitude; OpenSees stores negative).
+        epstu: Ultimate tensile strain for PlaneStressUserMaterial.
+        stc: Shear retention factor (0..1) reducing shear stiffness after
+            tensile cracking for PlaneStressUserMaterial.
+        nstatevs: Number of material state variables for
+            PlaneStressUserMaterial (defaults to the OpenSeesPy example
+            value 40).
+        nprops: Number of material properties for PlaneStressUserMaterial
+            (7 for the standard damage/smeared-crack model).
+        Eout: Out-of-plane shear modulus for ``PlateFromPlaneStress`` (Pa).
+            ``None`` derives ``G = E / (2(1+nu))`` automatically.
+        density: Mass density for ``FSAM`` (mass per volume, passed through
+            unit scaling unchanged).  Non-zero is required for dynamic
+            analysis.
+        sx: Name of the uniaxial steel material for the x direction in
+            ``model_data.materials`` (``FSAM`` only).  Resolved to an
+            OpenSees tag at build time.
+        sy: Name of the uniaxial steel material for the y direction in
+            ``model_data.materials`` (``FSAM`` only).
+        conc: Name of the uniaxial concrete material in
+            ``model_data.materials`` (``FSAM`` only).  The concrete law must
+            implement ``getCrackingStrain()`` (e.g. ``ConcreteCM``).
+        rou_x: x-direction reinforcement ratio (dimensionless, ``FSAM`` only).
+        rou_y: y-direction reinforcement ratio (dimensionless, ``FSAM`` only).
+        alfadow: Wall inclination angle (degrees, ``FSAM`` only; 45 is
+            typical).
     """
 
     name: str
@@ -1005,18 +1039,61 @@ class NDMaterial:
     fc: float = 30.0e6
     ft: float = 3.0e6
     Es: float = 0.0
+    fcu: float = 25.5e6
+    epsc0: float = 0.002
+    epscu: float = 0.006
+    epstu: float = 0.001
+    stc: float = 0.2
+    nstatevs: int = 40
+    nprops: int = 7
+    Eout: Optional[float] = None
+    # ── FSAM (fixed-strut-angle model) fields ──
+    density: float = 0.0
+    sx: str = ""
+    sy: str = ""
+    conc: str = ""
+    rou_x: float = 0.0
+    rou_y: float = 0.0
+    alfadow: float = 45.0
 
-    def to_tcl(self, tag: int, wrapper_tag: int = 0) -> str:
+    def fsam_referenced_material_names(self) -> tuple[str, ...]:
+        """Return the uniaxial material names referenced by an FSAM law.
+
+        For ``material_type == "FSAM"`` this is ``(sx, sy, conc)``
+        (empty strings omitted); for all other types it is empty.
+
+        Returns:
+            Tuple of uniaxial material names referenced by this nD
+            material.
+        """
+        if self.material_type != "FSAM":
+            return ()
+        return tuple(n for n in (self.sx, self.sy, self.conc) if n)
+
+    def to_tcl(
+        self,
+        tag: int,
+        wrapper_tag: int = 0,
+        mat_tags: Optional[dict[str, int]] = None,
+    ) -> str:
         """Return the Tcl command to create this nD material in OpenSees.
 
         Args:
             tag: Integer tag for this material.
             wrapper_tag: For ``PlateFromPlaneStress``, the tag for the
-                wrapper section (distinct from the plane-stress material
-                tag).  Ignored for other types.
+                plane-stress material being wrapped.  Ignored for other
+                types.
+            mat_tags: Dict mapping uniaxial material name → integer tag.
+                Required for ``FSAM`` (its ``sx`` / ``sy`` / ``conc``
+                fields reference uniaxial material names, which must be
+                resolved to tags).  Ignored for other types.
 
         Returns:
             Tcl command string.
+
+        Raises:
+            LookupError: If a referenced uniaxial material name for
+                ``FSAM`` is missing from *mat_tags*.
         """
         t = self.material_type
         if t == "ElasticIsotropic":
@@ -1031,9 +1108,42 @@ class NDMaterial:
                 f"nDMaterial ConcreteS {tag} {self.E:g} {self.nu:g}"
                 f" {self.fc:g} {self.ft:g} {self.Es:g}"
             )
+        if t == "PlaneStressUserMaterial":
+            # OpenSees sign convention: fcu/epsc0/epscu are negative.
+            return (
+                f"nDMaterial PlaneStressUserMaterial {tag} {self.nstatevs} {self.nprops} "
+                f"{self.fc:g} {self.ft:g} {-self.fcu:g} "
+                f"{-self.epsc0:g} {-self.epscu:g} {self.epstu:g} {self.stc:g}"
+            )
         if t == "PlateFromPlaneStress":
             src = wrapper_tag or tag
-            return f"nDMaterial PlateFromPlaneStress {tag} {src} 0.0"
+            eout = (
+                self.Eout
+                if self.Eout is not None
+                else (self.E / (2.0 * (1.0 + self.nu)) if self.nu else self.E / 2.6)
+            )
+            return f"nDMaterial PlateFromPlaneStress {tag} {src} {eout:g}"
+        if t == "FSAM":
+            # OpenSees command (verified against the shipped wheel):
+            #   nDMaterial FSAM $mattag $rho $sX $sY $conc $rouX $rouY $nu $alfadow
+            # sX / sY / conc are uniaxial material TAGS resolved from names.
+            if not mat_tags:
+                raise LookupError(
+                    f"FSAM material '{self.name}' requires mat_tags to resolve "
+                    f"uniaxial material names (sx={self.sx!r}, sy={self.sy!r}, "
+                    f"conc={self.conc!r}) to tags"
+                )
+            missing = sorted(n for n in (self.sx, self.sy, self.conc) if n not in mat_tags)
+            if missing:
+                raise LookupError(
+                    f"FSAM material '{self.name}' references uniaxial material(s) "
+                    f"{missing} not present in the model materials"
+                )
+            return (
+                f"nDMaterial FSAM {tag} {self.density:g} "
+                f"{mat_tags[self.sx]} {mat_tags[self.sy]} {mat_tags[self.conc]} "
+                f"{self.rou_x:g} {self.rou_y:g} {self.nu:g} {self.alfadow:g}"
+            )
         return f"nDMaterial {t} {tag} {self.E:g} {self.nu:g}"
 
 

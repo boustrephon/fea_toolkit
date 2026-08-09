@@ -90,6 +90,25 @@ DEFAULT_G_C_PA = 12.5e9  # Shear modulus — computed from E & nu (E / (2 * (1 +
 DEFAULT_EPS_C = 0.002  # Strain at peak Fc (concrete)
 DEFAULT_EPS_CC = 0.005  # Crushing strain (confined concrete)
 
+# ── FSAM uniaxial-law defaults (authored in SI, scaled to model units) ──
+# ConcreteCM requires getCrackingStrain(); ConcreteS/01/04 do not.  The
+# defaults below mirror the verified values in local/probe_mvlem_sfi.py
+# (30 MPa concrete + 420 MPa rebar, kN-m model):
+#   uniaxialMaterial ConcreteCM tag fpc epcc Ec rc xcrn ft et rt xcrp
+#   uniaxialMaterial Steel02   tag Fy  E    b  R0 cR1 cR2
+DEFAULT_FSAM_CONC_FPC_PA = 30.0e6  # fpc (compression, positive)
+DEFAULT_FSAM_CONC_EPCC = 0.002  # strain at peak compression
+DEFAULT_FSAM_CONC_RC = 5.0  # post-peak softening parameter
+DEFAULT_FSAM_CONC_XCRN = 0.0002  # cracking strain (tension, positive)
+DEFAULT_FSAM_CONC_FT_PA = 3.0e6  # tensile strength
+DEFAULT_FSAM_CONC_ET = 0.0001  # strain at peak tension
+DEFAULT_FSAM_CONC_RT = 1.5  # tension-softening parameter
+DEFAULT_FSAM_CONC_XCRP = 0.0001  # post-peak tensile strain
+DEFAULT_FSAM_STEEL_B = 0.01  # strain-hardening ratio
+DEFAULT_FSAM_STEEL_R0 = 18.0  # Steel02 transition parameter
+DEFAULT_FSAM_STEEL_CR1 = 0.925  # Steel02 transition parameter
+DEFAULT_FSAM_STEEL_CR2 = 0.15  # Steel02 transition parameter
+
 # Conventional no-tie-data confined-concrete heuristic (used when Mander
 # confinement data is unavailable): strength multiplier applied to f'c for
 # the confined core, and the strain-at-peak multiplier applied to eps_c.
@@ -518,6 +537,9 @@ _STRESS_KEYS: frozenset = frozenset(
         "fu",  # steel strengths
         "Hiso",
         "Hkin",  # hardening moduli
+        # Out-of-plane shear modulus for nDMaterial PlateFromPlaneStress
+        # (PlaneStressUserMaterial wrapper for layered shells).
+        "Eout",
     }
 )
 
@@ -529,9 +551,18 @@ _NON_STRESS_NUMERIC_KEYS: frozenset = frozenset(
         "strain",
         "eps_c",
         "epscc",
-        "eps_cc",  # strains
+        "eps_cc",
+        "epsc0",
+        "epscu",
+        "epstu",  # strains (incl. PlaneStressUserMaterial)
+        "stc",  # shear retention factor (dimensionless)
+        "nstatevs",
+        "nprops",  # PlaneStressUserMaterial integer counts
         "density",
         "rho",
+        "rou_x",
+        "rou_y",  # FSAM reinforcement ratios (dimensionless)
+        "alfadow",  # FSAM wall inclination angle (degrees)
         "unit_weight",
         "unit_mass",
         "b",

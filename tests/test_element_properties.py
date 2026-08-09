@@ -7,6 +7,7 @@ resolution (``_resolve_element_properties``) — see integration tests
 in ``test_workflows.py`` or add dedicated tests there.
 """
 
+import openseespy.opensees as ops
 import pytest
 
 from fea_toolkit.model.mesh_model import MeshModel
@@ -14,9 +15,13 @@ from fea_toolkit.model.sap_data import (
     AreaElementProperties,
     FrameElementProperties,
     LayeredShellSection,
+    Material,
     NDMaterial,
+    SAPModelData,
     ShellFiberLayer,
 )
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+from fea_toolkit.opensees.builder import export_model_to_tcl
 
 # ═══════════════════════════════════════════════════════════════════
 # FrameElementProperties
@@ -134,6 +139,202 @@ class TestNDMaterial:
         )
         tcl = mat.to_tcl(3)
         assert "J2PlateFibre" in tcl
+
+    def test_fsam_to_tcl(self):
+        mat = NDMaterial(
+            name="wall_fsam",
+            material_type="FSAM",
+            density=2400.0,
+            sx="SteelX",
+            sy="SteelY",
+            conc="ConcreteCM",
+            rou_x=0.004,
+            rou_y=0.004,
+            nu=0.2,
+            alfadow=45.0,
+        )
+        mat_tags = {
+            "SteelX": 1,
+            "SteelY": 2,
+            "ConcreteCM": 3,
+        }
+        tokens = mat.to_tcl(10, mat_tags=mat_tags).split()
+        # Command: nDMaterial FSAM <tag> <rho> <sX> <sY> <conc> <rouX> <rouY> <nu> <alfadow>
+        assert tokens[0] == "nDMaterial"
+        assert tokens[1] == "FSAM"
+        assert tokens[2] == "10"  # tag
+        assert float(tokens[3]) == pytest.approx(2400.0, rel=1e-12)  # rho
+        assert tokens[4] == "1"  # SteelX → tag 1
+        assert tokens[5] == "2"  # SteelY → tag 2
+        assert tokens[6] == "3"  # ConcreteCM → tag 3
+        assert float(tokens[7]) == pytest.approx(0.004, rel=1e-12)  # rouX
+        assert float(tokens[8]) == pytest.approx(0.004, rel=1e-12)  # rouY
+        assert float(tokens[9]) == pytest.approx(0.2, rel=1e-12)  # nu
+        assert float(tokens[10]) == pytest.approx(45.0, rel=1e-12)  # alfadow
+        assert len(tokens) == 11
+
+    def test_fsam_requires_mat_tags(self):
+        mat = NDMaterial(
+            name="wall_fsam",
+            material_type="FSAM",
+            density=2400.0,
+            sx="SteelX",
+            sy="SteelY",
+            conc="ConcreteCM",
+        )
+        # Missing mat_tags entirely → LookupError
+        with pytest.raises(LookupError, match="requires mat_tags"):
+            mat.to_tcl(1)
+        # Referenced material not present → LookupError listing the names
+        with pytest.raises(LookupError, match="SteelX"):
+            mat.to_tcl(1, mat_tags={"SteelY": 2, "ConcreteCM": 3})
+
+
+class TestFSAMUniaxialDispatch:
+    """Verify AnalysisBuilder emits ConcreteCM / Steel02 for FSAM-referenced
+    uniaxial materials (required for getCrackingStrain), and Concrete01 /
+    Steel01 otherwise."""
+
+    def _make_builder(self):
+        """Build a minimal AnalysisBuilder with one concrete + one steel
+        material (both FSAM-referenced) plus a non-FSAM steel material."""
+        # Model units: kN, m → stress factor = kN/m²  (Pa → kN/m² scale 0.001)
+        mm = MeshModel(
+            nodes={},
+            frame_elements={},
+            frame_assignments={},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+            materials={
+                "WallConc": Material(name="WallConc", type="Concrete", Fc=30.0e6, E_mod=30.0e9),
+                "WallSteel": Material(name="WallSteel", type="Rebar", Fy=420.0e6, E_mod=200.0e9),
+                "FrameSteel": Material(name="FrameSteel", type="Steel", Fy=250.0e6, E_mod=200.0e9),
+            },
+            nd_materials={
+                "wall_fsam": NDMaterial(
+                    name="wall_fsam",
+                    material_type="FSAM",
+                    density=2400.0,
+                    sx="WallSteel",
+                    sy="WallSteel",
+                    conc="WallConc",
+                    rou_x=0.004,
+                    rou_y=0.004,
+                    nu=0.2,
+                    alfadow=45.0,
+                ),
+            },
+            units={"F": "kN", "L": "m", "T": "C"},
+        )
+        return AnalysisBuilder(mm, {"verbose": False})
+
+    def test_create_materials_fsam_laws(self):
+        builder = self._make_builder()
+        try:
+            ops.wipe()
+            ops.model("basic", "-ndm", 3, "-ndf", 6)
+            builder._create_materials()
+        finally:
+            ops.wipe()
+
+        # FSAM-referenced materials must exist as ConcreteCM / Steel02.
+        # Tags are auto-assigned: WallConc=1, WallSteel=2, FrameSteel=3.
+        assert builder.material_tags["WallConc"] == 1
+        assert builder.material_tags["WallSteel"] == 2
+        assert builder.material_tags["FrameSteel"] == 3
+
+        # The builder wraps material creation in contextlib.suppress, so
+        # verify the wheel actually accepts ConcreteCM / Steel02 with a
+        # raw non-suppressed call (fails loudly if unsupported).  The
+        # FSAM-referenced materials need to be ConcreteCM / Steel02 —
+        # only these implement getCrackingStrain() (ConcreteS/01 do not).
+        try:
+            ops.wipe()
+            ops.model("basic", "-ndm", 3, "-ndf", 6)
+            # ConcreteCM tag 1 — model units kN,m → 30 MPa = 30e3 kN/m².
+            ops.uniaxialMaterial(
+                "ConcreteCM", 1, 30.0e3, 0.002, 30.0e6, 5.0, 0.0002, 3.0e3, 0.0001, 1.5, 0.0001
+            )
+            # Steel02 tag 2 — 420 MPa = 4.2e5 kN/m².
+            ops.uniaxialMaterial("Steel02", 2, 4.2e5, 200.0e6, 0.01)
+            # Steel01 stays available for non-FSAM materials.
+            ops.uniaxialMaterial("Steel01", 3, 2.5e5, 200.0e6, 0.01)
+        finally:
+            ops.wipe()
+
+    def test_create_materials_non_fsam_elastic(self):
+        """Non-FSAM concrete/steel materials keep the legacy Elastic path."""
+        mm = MeshModel(
+            nodes={},
+            frame_elements={},
+            frame_assignments={},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+            materials={
+                "FrameConc": Material(name="FrameConc", type="Concrete", Fc=30.0e6, E_mod=30.0e9),
+            },
+            units={"F": "kN", "L": "m", "T": "C"},
+        )
+        builder = AnalysisBuilder(mm, {"verbose": False})
+        try:
+            ops.wipe()
+            ops.model("basic", "-ndm", 3, "-ndf", 6)
+            builder._create_materials()
+        finally:
+            ops.wipe()
+        # No FSAM nd_materials → all materials stay Elastic.
+        assert builder.material_tags["FrameConc"] == 1
+
+
+class TestTclExportFSAM:
+    """Verify export_model_to_tcl emits ConcreteCM / Steel02 for
+    FSAM-referenced materials in the generated Tcl file."""
+
+    def test_export_fsam_materials(self, tmp_path):
+        units = {"F": "kN", "L": "m", "T": "C"}
+        md = SAPModelData(
+            nodes={},
+            restraints={},
+            materials={
+                "WallConc": Material(name="WallConc", type="Concrete", Fc=30.0e6, E_mod=30.0e9),
+                "WallSteel": Material(name="WallSteel", type="Rebar", Fy=420.0e6, E_mod=200.0e9),
+            },
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            nd_materials={
+                "wall_fsam": NDMaterial(
+                    name="wall_fsam",
+                    material_type="FSAM",
+                    density=2400.0,
+                    sx="WallSteel",
+                    sy="WallSteel",
+                    conc="WallConc",
+                    rou_x=0.004,
+                    rou_y=0.004,
+                    nu=0.2,
+                    alfadow=45.0,
+                ),
+            },
+            units=units,
+        )
+        out = tmp_path / "fsam.tcl"
+        export_model_to_tcl(md, str(out), config={"create_fiber_sections": False})
+        text = out.read_text()
+
+        # FSAM-referenced walls must use ConcreteCM / Steel02.
+        assert "uniaxialMaterial ConcreteCM 1" in text
+        assert "uniaxialMaterial Steel02 2" in text
+        # The FSAM nD material references the uniaxial tags.
+        assert "nDMaterial FSAM 3" in text
+        assert "uniaxialMaterial Concrete01" not in text
+        assert "uniaxialMaterial Steel01" not in text
 
 
 class TestLayeredShellSection:
