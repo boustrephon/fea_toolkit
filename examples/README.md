@@ -26,7 +26,7 @@ python examples/basic_usage.py /path/to/model.s2k
 | `static_analysis.py` | **Static analysis + force diagrams** — parse, build, run a load combination, extract element forces, plot 2D/3D moment, shear, and axial diagrams. | `.s2k` / `--sample` |
 | `pushover_analysis.py` | **Non-linear pushover** — two-stage gravity + lateral push with fiber sections. Demonstrates all four lateral load patterns (`uniform`, `triangular`, `mode1`, `pattern`). Exports PNG and SVG plots. | `.s2k` / `--sample` |
 | `modal_rs_analysis.py` | **Modal + response spectrum** — seismic masses, eigenvalue analysis, CQC response spectrum (GB 50011), element-level RS forces, missing mass correction. | `.s2k` / `--sample` |
-| `wall_pushover_compare.py` | **RC wall pushover comparison** — runs both LayeredShell/ShellNLDKGQ and SFI_MVLEM_3D approaches on the same 4×3 m RC wall, overlaid capacity curves, optional Tcl export. | None (self-contained) |
+| `wall_pushover_compare.py` | **RC wall pushover comparison** — runs both LayeredShell/ShellNLDKGQ and SFI_MVLEM_3D approaches on the same 4×3 m RC wall, overlaid capacity curves, optional Tcl + OpenSeesPy script export. | None (self-contained) |
 
 ## Sample model
 
