@@ -37,14 +37,17 @@ Produces (all in ``examples/output/``, gitignored):
   (base shear vs top drift).
 * ``wall_layered.tcl`` / ``wall_sfi_mvlem.tcl`` — Tcl exports of both
   models (with ``--tcl``).
+* ``wall_layered.py`` / ``wall_sfi_mvlem.py`` — standalone OpenSeesPy
+  model-building scripts (with ``--py``), captured via the
+  :class:`~fea_toolkit.opensees.recorder.RecordingOpenSees` proxy.
 
 Usage::
 
     # Run both paths, plot the overlaid capacity curves
     python examples/wall_pushover_compare.py
 
-    # Also export Tcl models for both approaches
-    python examples/wall_pushover_compare.py --tcl
+    # Also export Tcl + Python model scripts for both approaches
+    python examples/wall_pushover_compare.py --tcl --py
 
     # Console only (no matplotlib required)
     python examples/wall_pushover_compare.py --no-plot
@@ -385,6 +388,37 @@ def export_tcl(mesh_model, label: str, out_dir: Path) -> None:
     print(f"  Saved → {out}")
 
 
+# ── Python script export ─────────────────────────────────────────────────────
+def export_py(config: dict, label: str, out_dir: Path) -> None:
+    """Export the model to a standalone OpenSeesPy script.
+
+    Rebuilds the domain with the module-level ``ops`` binding swapped for
+    a :class:`~fea_toolkit.opensees.recorder.RecordingOpenSees` proxy,
+    then saves the captured commands as ``build_model()`` in a runnable
+    ``.py`` file.  The generated script imports ``openseespy.opensees``
+    and replays every recorded ``ops.*`` call.
+    """
+    import openseespy.opensees as _real_ops
+
+    import fea_toolkit.opensees.analysis_builder as ab_mod
+    from fea_toolkit.opensees.recorder import RecordingOpenSees
+
+    rec = RecordingOpenSees(_real_ops)
+    ab_mod.ops = rec
+    try:
+        md = wall_model_data()
+        mm = Preprocessor(config).run(md)
+        builder = AnalysisBuilder(mm, config)
+        builder.build_domain()
+    finally:
+        ab_mod.ops = _real_ops
+
+    out = out_dir / f"wall_{label}.py"
+    rec.save_as_python(str(out))
+    print(f"  Saved → {out}")
+    _real_ops.wipe()
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -399,6 +433,11 @@ def main() -> None:
         "--tcl",
         action="store_true",
         help="Also export both models to Tcl.",
+    )
+    parser.add_argument(
+        "--py",
+        action="store_true",
+        help="Also export both models as standalone OpenSeesPy scripts.",
     )
     parser.add_argument(
         "--lateral",
@@ -470,6 +509,12 @@ def main() -> None:
         print("\n── Tcl export ──")
         export_tcl(mm_l, "layered", out_dir)
         export_tcl(mm_s, "sfi_mvlem", out_dir)
+
+    # ── Python script export (optional) ───────────────────────────────────────
+    if args.py:
+        print("\n── Python script export ──")
+        export_py(layered_shell_config(), "layered", out_dir)
+        export_py(sfi_mvlem_config(), "sfi_mvlem", out_dir)
 
     print("\nDone.")
 
