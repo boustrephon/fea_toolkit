@@ -193,3 +193,48 @@ src/fea_toolkit/plotting/viz.py:
   Remaining gaps: none known for the grouping helper itself — the
   sectional-average demand ratios above still need engineering action
   (wall thickening / rho_sh / alternative layout).
+
+
+## CURRENT CONCLUSIONS — 2026-08-08 (Alternative shear-wall model probe)
+
+### J. OpenSeesPy 3.8.0.0 — no working explicit shear-yield RC shell concrete
+- **RESOLVED (2026-08-08) — MVLEM / SFI-MVLEM are usable in the shipped wheel.** Re-probing against the real build with ConcreteCM resolved the earlier "Invalid c" problem. Verified signatures (extracted from `openseespymac/opensees.so` strings + runtime):
+  - **MVLEM (2D)** — `element MVLEM eleTag Dens iNode jNode m c -thick {*bList} -width {*hList} -rho {*rhoList} -matConcrete {*conc} -matSteel {*steel} -matShear {shear}`. `c` is **positional** (6th arg, after `m`) and `Dens` is 2nd; ALL list args must be **expanded as individual scalars** in OpenSeesPy (not passed as a Python list). `Dens`/`-rho` must be non-zero — `Dens=0` leaves the internal node singular (`matrix singular U(i,i)=0`). With `Dens=2.4`, `-rho=2400`, uniaxial ConcreteCM + Steel02 + ElasticPP shear spring, a 4×3 m wall pushover **converges** (ok=0) with exact base-shear equilibrium. ✅
+  - **SFI-MVLEM (2D)** — **BROKEN in this wheel.** The parser accepts the MVLEM-style keywords (`-matConcrete/-matSteel/-matShear`) but the constructor still performs nD-material lookups, aborting with `SFI_MVLEM::SFI_MVLEM() - Null ND material pointer passed` for every tag combination tried (uniaxial tags, FSAM in matShear, FSAM in matConcrete). This is a parser/constructor mismatch in the wheel build. ❌ (Do **not** use the 2D variant; use SFI_MVLEM_3D or MVLEM.)
+  - **SFI_MVLEM_3D** — ✅ **fully works** with the documented nD form: `element SFI_MVLEM_3D eleTag iNode jNode kNode lNode m -thick {*T} -width {*W} -mat {*Mat_tags} <-CoR c>`, where `-mat` holds **FSAM nD material tags** (FSAM needs a uniaxial concrete implementing `getCrackingStrain()`; ConcreteCM works, ConcreteS/D/04/02 do not). A 4×3 m wall pushover converges (ok=0) with exact base-shear equilibrium (162 mm drift @ 100 kN with 2.5%/0.4% rho boundary/interior FSAM — plausible).
+  - `E_SFI_MVLEM` / `MVLEM_3D` / `E_SFI_MVLEM_3D` also ship; the 2D `E_SFI_MVLEM` uses the `-thick -width -mat` (nD) form.
+  - **PSUMAT stays unavailable** even with a rebuild — the stub is in the upstream OpenSees source (`PSUMAT - NOT DEFINED IN THIS VERSION, SOURCE CODE RESTRICTED`). CSMM (`ReinforcedConcretePlaneStress`) still fails to construct. Options C/D1 remain blocked.
+  - Working probe: `local/probe_mvlem_sfi.py` (MVLEM 2D + SFI_MVLEM_3D pushover, kN-m units). Local-build extension recipe: `docs/openseespy_local_build.md`.
+  - So Option B (SFI-MVLEM/MVLEM macro-element wall) is **achievable on the shipped wheel** — earlier "needs custom element" statement was wrong. Remaining caveats: 2D SFI_MVLEM broken (use 3D-in-2D-plane or MVLEM); FSAM/concrete require ConcreteCM; verify against Kolozvari reference results before production use.
+- (Import chain confirmed by inspection: `openseespy.opensees/__init__.py` ->
+  **`openseespymac.opensees`** on Darwin arm64 (installed 3.8.0.0 wheel). The
+  `openseespy/opensees/opensees.so` + `OpenSeesPy.dylib` in site-packages are
+  unmanaged local-build artifacts not in `openseespy-3.8.0.0.dist-info/RECORD`
+  and are never imported. Probes ran against `openseespymac/opensees.so`.)
+- **Smeared-plane-stress shell concretes remain unavailable on this wheel**
+  (probed directly on a 4-node `ShellNLDKGQ` + `LayeredShell` RC wall):
+  | Material path | Registers? | `analyze()` converges? |
+  |---|---|---|
+  | `ConcreteS` (current v5–v8 path) | ✅ | ✅ `ok=0` — working nonlinear RC shell concrete |
+  | `PlaneStressUserMaterial` (PSUMAT) | ⚠️ stub | ❌ no object created — "PSUMAT - NOT DEFINED IN THIS VERSION, SOURCE CODE RESTRICTED" |
+  | `ReinforcedConcretePlaneStress` (CSMM) + `PlateFromPlaneStress` | ❌ | ❌ constructor fails even with documented signature — "failed to set appropriate materials tag" with both `Concrete04` and `Concrete02`+`Steel02` |
+  | `ElasticIsotropic` + `PlateFromPlaneStress` | ✅ | ❌ `ok=-3` — wrapper-in-shell combination not viable in this binary |
+  Options C / D1 from `docs/shell_support.md` still need a full
+  (non-restricted) OpenSees build; the working nonlinear shear paths on this
+  wheel are now **MVLEM / SFI_MVLEM_3D** (Option B) plus D2 (calibrated shear
+  layer) and D3 (post-process shear DCR).
+- **Package support added anyway (correct standard OpenSees API, activates
+  on a non-restricted build)**:
+  - `model/sap_data.NDMaterial` gained `PlaneStressUserMaterial` +
+    `PlateFromPlaneStress` fields: `fcu`, `epsc0`, `epscu`, `epstu`, `stc`,
+    `nstatevs`, `nprops`, `Eout`; `to_tcl()` emits the two-call sequence.
+  - `utils.scale_material_dict` classifies the new fields (`Eout` stress;
+    strains/`stc`/counts non-stress).
+  - `analysis_builder._create_nd_materials()` dispatches the
+    `PlaneStressUserMaterial` + `PlateFromPlaneStress` pair.
+- **`local/CLP_BSDG_Latest_Models/Admin_Building/admin_pushover_v9.py`** is
+  the v8 clone; it retains the verified-working `ConcreteS` smeared-crack
+  wall concrete and documents the PSUMAT restriction in its module
+  docstring.  Outputs renamed `*_v9.*`.
+- Validation: `tests/test_layered_shell.py` + `test_units.py` +
+  `test_model.py` → 359 passed.
