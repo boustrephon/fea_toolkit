@@ -33,6 +33,18 @@ from ..model.sap_data import (
 from ..model.tree_utils import collect_descendants
 from ..utils import (
     DEFAULT_E_S_PA,
+    DEFAULT_FSAM_CONC_EPCC,
+    DEFAULT_FSAM_CONC_ET,
+    DEFAULT_FSAM_CONC_FPC_PA,
+    DEFAULT_FSAM_CONC_FT_PA,
+    DEFAULT_FSAM_CONC_RC,
+    DEFAULT_FSAM_CONC_RT,
+    DEFAULT_FSAM_CONC_XCRN,
+    DEFAULT_FSAM_CONC_XCRP,
+    DEFAULT_FSAM_STEEL_B,
+    DEFAULT_FSAM_STEEL_CR1,
+    DEFAULT_FSAM_STEEL_CR2,
+    DEFAULT_FSAM_STEEL_R0,
     DEFAULT_FY_REBAR_PA,
     RC_NO_TIE_CONFINEMENT_FACTOR,
     RC_NO_TIE_EPSC_FACTOR,
@@ -192,6 +204,26 @@ class AnalysisBuilder:
             "rebar_R0": 18.0,
             "rebar_cR1": 0.925,
             "rebar_cR2": 0.15,
+            # ── FSAM uniaxial concrete (ConcreteCM) ──
+            # ConcreteCM is required for FSAM (it implements
+            # getCrackingStrain()).  Stress-valued keys are authored in
+            # SI (Pa) and scaled to model units; strain/dimensionless
+            # keys are passed through unchanged.
+            "fsam_conc_fpc_override": None,
+            "fsam_conc_ft_override": None,
+            "fsam_conc_epcc": 0.002,
+            "fsam_conc_rc": 5.0,
+            "fsam_conc_xcrn": 0.0002,
+            "fsam_conc_et": 0.0001,
+            "fsam_conc_rt": 1.5,
+            "fsam_conc_xcrp": 0.0001,
+            # ── FSAM uniaxial steel (Steel02) ──
+            "fsam_steel_Fy_override": None,
+            "fsam_steel_Es_override": None,
+            "fsam_steel_b": 0.01,
+            "fsam_steel_R0": 18.0,
+            "fsam_steel_cR1": 0.925,
+            "fsam_steel_cR2": 0.15,
             # ── Pushover recording (opt-in) ──
             "record_pushover_steps": False,
             "pushover_record_selection": None,
@@ -292,8 +324,16 @@ class AnalysisBuilder:
             self._create_nodes()
             self._apply_restraints()
             self._create_nd_materials()
-            self._create_layered_shell_sections()
             self._create_materials()
+            # FSAM must be created after uniaxial materials (it references
+            # their tags), but before layered shell sections (which consume
+            # the FSAM nD tag).
+            self._create_fsam_materials()
+            # SFI_MVLEM_3D wall elements consume the FSAM nD tags resolved
+            # above; they must be created after FSAM materials but do not
+            # depend on LayeredShell sections.
+            self._create_wall_elements()
+            self._create_layered_shell_sections()
             self._create_sections()
             self._create_shell_elements()
             self._create_lumped_hinges()
@@ -1122,13 +1162,62 @@ class AnalysisBuilder:
                     "ConcreteS", current_tag, nd_mat.E, nd_mat.nu, nd_mat.fc, nd_mat.ft, nd_mat.Es
                 )
             elif t == "PlateFromPlaneStress":
-                _w.warn(
-                    f"PlateFromPlaneStress not yet supported for '{name}' — "
-                    f"data model missing wrapped-material and Eout fields — skipping",
-                    UserWarning,
-                    stacklevel=2,
+                # Two OpenSees objects are required to use the smeared-crack
+                # concrete model in a LayeredShell section:
+                #
+                #   1. PlaneStressUserMaterial — the plane-stress damage /
+                #      smeared-crack constitutive law (tension cracking,
+                #      compression crushing, shear retention).
+                #   2. PlateFromPlaneStress — wraps the plane-stress
+                #      material into a plate (adds out-of-plane stiffness)
+                #      so it can be stacked in ops.section('LayeredShell').
+                #
+                # The wrapper tag is what the layered-shell section
+                # references; the base tag is created first and stays
+                # one below the stored wrapper tag.
+                if is_new:
+                    ps_tag = current_tag
+                    wrapper_tag = current_tag + 1
+                else:
+                    # Reusing a previously assigned tag for this name:
+                    # the wrapper tag is the stored one and the base is
+                    # one below.
+                    wrapper_tag = current_tag
+                    ps_tag = current_tag - 1
+                ops.nDMaterial(
+                    "PlaneStressUserMaterial",
+                    ps_tag,
+                    nd_mat.nstatevs,
+                    nd_mat.nprops,
+                    nd_mat.fc,
+                    nd_mat.ft,
+                    -abs(nd_mat.fcu),
+                    -abs(nd_mat.epsc0),
+                    -abs(nd_mat.epscu),
+                    nd_mat.epstu,
+                    nd_mat.stc,
                 )
-                self._skipped_nd_materials.add(name)
+                eout = (
+                    nd_mat.Eout
+                    if nd_mat.Eout is not None
+                    else (nd_mat.E / (2.0 * (1.0 + nd_mat.nu)) if nd_mat.nu else nd_mat.E / 2.6)
+                )
+                ops.nDMaterial("PlateFromPlaneStress", wrapper_tag, ps_tag, eout)
+
+                if not hasattr(self, "_nd_material_tags"):
+                    self._nd_material_tags = {}
+                self._nd_material_tags[name] = wrapper_tag
+                if is_new:
+                    # Two tags consumed (base + wrapper).
+                    tag += 2
+                    while tag in self._nd_material_tags.values():
+                        tag += 1
+                    created += 1
+                continue
+            elif t == "FSAM":
+                # FSAM creation is deferred to _create_fsam_materials(),
+                # which runs after _create_materials() so the uniaxial
+                # steel/concrete material tags exist to reference.
                 continue
             else:
                 _w.warn(
@@ -1152,6 +1241,185 @@ class AnalysisBuilder:
 
         if self.config.get("verbose", False):
             print(f"  Created {created} nD material(s)")
+
+    def _create_fsam_materials(self) -> None:
+        """Create FSAM (fixed-strut-angle model) nD materials.
+
+        FSAM is a smeared fixed-strut-angle concrete model used with
+        nonlinear shear walls (``SFI_MVLEM_3D`` / ``LayeredShell``
+        sections).  Its OpenSees command references three **uniaxial**
+        material tags for the steel and concrete laws::
+
+            nDMaterial FSAM $tag $rho $sX $sY $conc $rouX $rouY $nu $alfadow
+
+        where ``sX`` / ``sY`` / ``conc`` are uniaxial material tags
+        resolved from the names in :attr:`NDMaterial.sx` /
+        :attr:`NDMaterial.sy` / :attr:`NDMaterial.conc`.  Because those
+        uniaxial materials are created by :meth:`_create_materials`, this
+        method runs **after** it (see :meth:`build_domain`) and **before**
+        :meth:`_create_layered_shell_sections`, which consumes the FSAM
+        tag.
+
+        The concrete uniaxial law must implement ``getCrackingStrain()``
+        (e.g. ``ConcreteCM``); ``ConcreteS`` / ``Concrete01`` do not and
+        will fail at runtime.
+
+        The FSAM tag is stored in ``_nd_material_tags`` (keyed by the
+        nD material name) so layered shell sections can reference it via
+        :meth:`_create_layered_shell_sections`.
+        """
+        fsam_mats = {
+            n: m for n, m in self.mesh_model.nd_materials.items() if m.material_type == "FSAM"
+        }
+        if not fsam_mats:
+            return
+
+        import warnings as _w
+
+        _max_mat = max(self.material_tags.values(), default=0)
+        _max_sec = max(self.section_tags.values(), default=0)
+        _max_frame = max(self.frame_tag_map.values(), default=0)
+        _tag_base = max(_max_mat, _max_sec, _max_frame) + 1000
+        # Also start above any tag already stored in the dedicated
+        # _nd_material_tags namespace so newly created materials cannot
+        # collide with tags from a previous build.
+        _nd_existing = getattr(self, "_nd_material_tags", {})
+        if _nd_existing:
+            _tag_base = max(_tag_base, max(_nd_existing.values()) + 1)
+        tag = _tag_base
+
+        if not hasattr(self, "_nd_material_tags"):
+            self._nd_material_tags = {}
+        created = 0
+        for name, nd_mat in fsam_mats.items():
+            # Reuse existing tag if already assigned for this name,
+            # keeping tags stable across repeated build_domain calls.
+            if name in self._nd_material_tags:
+                current_tag = self._nd_material_tags[name]
+            else:
+                current_tag = tag
+                tag += 1
+                while tag in self._nd_material_tags.values():
+                    tag += 1
+                created += 1
+
+            missing = sorted(
+                n for n in (nd_mat.sx, nd_mat.sy, nd_mat.conc) if n not in self.material_tags
+            )
+            if missing:
+                _w.warn(
+                    f"FSAM material '{name}' references uniaxial material(s) "
+                    f"{missing} not present in the model materials — skipping",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                self._skipped_nd_materials.add(name)
+                continue
+
+            ops.nDMaterial(
+                "FSAM",
+                current_tag,
+                nd_mat.density,
+                self.material_tags[nd_mat.sx],
+                self.material_tags[nd_mat.sy],
+                self.material_tags[nd_mat.conc],
+                nd_mat.rou_x,
+                nd_mat.rou_y,
+                nd_mat.nu,
+                nd_mat.alfadow,
+            )
+            self._nd_material_tags[name] = current_tag
+
+        if self.config.get("verbose", False):
+            print(f"  Created {created} FSAM nD material(s)")
+
+    def _create_wall_elements(self) -> None:
+        """Create SFI_MVLEM_3D wall elements from MeshModel.wall_elements.
+
+        Each :class:`~fea_toolkit.model.mesh_model.WallElement` is a
+        single SFI_MVLEM_3D macro-element discretising one wall area
+        into ``m`` macro-fibers.  The OpenSees command is::
+
+            element SFI_MVLEM_3D eleTag iNode jNode kNode lNode m \\
+                -thick *t -width *w -mat *matTags <-CoR c> ...
+
+        Node IDs are resolved to tags via ``mesh_model.nodes``; FSAM
+        nD material names are resolved to tags via ``_nd_material_tags``
+        (populated by :meth:`_create_fsam_materials`).  This method
+        therefore runs **after** :meth:`_create_fsam_materials` and
+        **before** :meth:`_create_shell_elements`.
+
+        Fibers whose FSAM material tag is missing are reported and the
+        element is skipped — a warning is emitted per missing tag.
+        """
+        if not self.mesh_model.wall_elements:
+            return
+
+        if self.config.get("verbose", False):
+            print("Creating SFI_MVLEM_3D wall elements...")
+
+        _nd_tags = getattr(self, "_nd_material_tags", {})
+        created = 0
+        for wall in self.mesh_model.wall_elements.values():
+            # Resolve node IDs → tags
+            node_tags = []
+            skip = False
+            for nid in wall.node_ids:
+                node = self.mesh_model.nodes.get(nid)
+                if node is None:
+                    if self.config.get("verbose", False):
+                        print(
+                            f"  ⚠ Wall element '{wall.elem_id}': node "
+                            f"'{nid}' not found in mesh — skipping"
+                        )
+                    skip = True
+                    break
+                node_tags.append(node.node_tag)
+            if skip:
+                continue
+
+            # Resolve FSAM material names → tags
+            mat_tags = []
+            for name in wall.fsam_material_names:
+                tag = _nd_tags.get(name)
+                if tag is None:
+                    print(
+                        f"  ⚠ Wall element '{wall.elem_id}': FSAM nD material "
+                        f"'{name}' not found in _nd_material_tags — skipping element"
+                    )
+                    skip = True
+                    break
+                mat_tags.append(tag)
+            if skip:
+                continue
+
+            args: list = [
+                wall.elem_tag,
+                *node_tags,
+                wall.m,
+                "-thick",
+                *wall.thick,
+                "-width",
+                *wall.width,
+                "-mat",
+                *mat_tags,
+                "-CoR",
+                wall.CoR,
+            ]
+            if wall.ThickMod is not None:
+                args.extend(["-ThickMod", wall.ThickMod])
+            if wall.Poisson is not None:
+                args.extend(["-Poisson", wall.Poisson])
+            if wall.Density is not None:
+                args.extend(["-Density", wall.Density])
+
+            ops.element("SFI_MVLEM_3D", *args)
+            created += 1
+            if self.config.get("verbose", False):
+                print(f"  SFI_MVLEM_3D tag={wall.elem_tag} nodes={node_tags} m={wall.m}")
+
+        if self.config.get("verbose", False):
+            print(f"  Created {created} SFI_MVLEM_3D wall element(s)")
 
     def _create_layered_shell_sections(self) -> None:
         """Create ``LayeredShell`` sections for nonlinear shell analysis.
@@ -1283,7 +1551,17 @@ class AnalysisBuilder:
                 self.material_tags[mat_name] = next_tag
                 next_tag += 1
 
-        # Create elastic materials for all materials
+        # Create uniaxial materials for all materials.
+        #
+        # Two creation modes are supported:
+        #
+        #   1. Elastic (default) — for regular frame/brace materials.
+        #   2. FSAM uniaxial laws — when the material is referenced by an
+        #      FSAM nD material (via NDMaterial.sx/sy/conc), the required
+        #      ConcreteCM / Steel02 law is emitted instead so FSAM can
+        #      resolve getCrackingStrain() at runtime.  This is opt-in per
+        #      FSAM reference — non-FSAM materials stay Elastic.
+        #
         # Determine which material names are used by brace-truss sections so
         # we can skip Elastic creation for them (the Hysteretic material
         # replaces the Elastic at a distinct tag, but creating both is wasteful).
@@ -1313,6 +1591,20 @@ class AnalysisBuilder:
                     continue
                 _brace_mat_names.add(sec.material)
 
+        # ── FSAM-referenced uniaxial materials ─────────────────────
+        # Collect the set of material names that any FSAM nD material
+        # references as its steel (sx/sy) or concrete (conc) law.  These
+        # receive ConcreteCM / Steel02 below instead of the generic
+        # Elastic fallback, because FSAM requires getCrackingStrain().
+        _fsam_refs_by_name: dict[str, set[str]] = {}
+        for _nd in self.mesh_model.nd_materials.values():
+            if _nd.material_type != "FSAM":
+                continue
+            for _rname in _nd.fsam_referenced_material_names():
+                _fsam_refs_by_name.setdefault(_rname, set()).add(_nd.name)
+
+        ssf = stress_scale_factor(self.mesh_model.units)
+
         for mat_name, mat in self.mesh_model.materials.items():
             tag = self.material_tags.get(mat_name)
             if tag is None:
@@ -1320,6 +1612,67 @@ class AnalysisBuilder:
             E_mod = mat.E_mod or 200e9
             if mat_name in _brace_mat_names:
                 continue  # will be created as Hysteretic in brace-truss section
+            if mat_name in _fsam_refs_by_name:
+                # FSAM concrete law (ConcreteCM) — must implement
+                # getCrackingStrain().  Config keys are in SI (Pa) and
+                # scaled to model units here.
+                if mat.type and "concrete" in mat.type.lower():
+                    fpc = self.config.get("fsam_conc_fpc_override")
+                    fpc = (
+                        fpc * ssf if fpc is not None else (mat.Fc or DEFAULT_FSAM_CONC_FPC_PA * ssf)
+                    )
+                    # Tension strength is a concrete property — always use
+                    # the framework default (or explicit override) rather
+                    # than mat.Fy, which is a steel yield strength.
+                    ft = self.config.get("fsam_conc_ft_override")
+                    ft = ft * ssf if ft is not None else DEFAULT_FSAM_CONC_FT_PA * ssf
+                    # ConcreteCM uses the negative-compression convention:
+                    # fpc, epcc, and xcrn must be NEGATIVE (compression
+                    # stresses/strains are negative in the damaged-concrete
+                    # uniaxial law).  Positive magnitudes break the FSAM
+                    # damage-coefficient initialisation when an
+                    # SFI_MVLEM_3D element consumes the material at
+                    # domain-build time ("Damage Coefficient ErRoR !").
+                    # Tension-side values (ft, et, rt, xcrp) stay positive.
+                    epcc = -abs(float(self.config.get("fsam_conc_epcc", DEFAULT_FSAM_CONC_EPCC)))
+                    xcrn = -abs(float(self.config.get("fsam_conc_xcrn", DEFAULT_FSAM_CONC_XCRN)))
+                    with contextlib.suppress(Exception):
+                        ops.uniaxialMaterial(
+                            "ConcreteCM",
+                            tag,
+                            -abs(fpc),
+                            epcc,
+                            E_mod,
+                            float(self.config.get("fsam_conc_rc", DEFAULT_FSAM_CONC_RC)),
+                            xcrn,
+                            ft,
+                            float(self.config.get("fsam_conc_et", DEFAULT_FSAM_CONC_ET)),
+                            float(self.config.get("fsam_conc_rt", DEFAULT_FSAM_CONC_RT)),
+                            float(self.config.get("fsam_conc_xcrp", DEFAULT_FSAM_CONC_XCRP)),
+                        )
+                    continue
+                # FSAM steel law (Steel02) — Fy/Es resolve in priority
+                # order: config override (SI Pa, scaled) → material Fy /
+                # E_mod (already in model units) → framework defaults.
+                Fy_fsam = self.config.get("fsam_steel_Fy_override")
+                Es_fsam = self.config.get("fsam_steel_Es_override")
+                if Fy_fsam is not None:
+                    Fy_fsam = Fy_fsam * ssf
+                else:
+                    Fy_fsam = mat.Fy or DEFAULT_FY_REBAR_PA * ssf
+                Es_fsam = Es_fsam * ssf if Es_fsam is not None else E_mod
+                with contextlib.suppress(Exception):
+                    ops.uniaxialMaterial(
+                        "Steel02",
+                        tag,
+                        Fy_fsam,
+                        Es_fsam,
+                        float(self.config.get("fsam_steel_b", DEFAULT_FSAM_STEEL_B)),
+                        float(self.config.get("fsam_steel_R0", DEFAULT_FSAM_STEEL_R0)),
+                        float(self.config.get("fsam_steel_cR1", DEFAULT_FSAM_STEEL_CR1)),
+                        float(self.config.get("fsam_steel_cR2", DEFAULT_FSAM_STEEL_CR2)),
+                    )
+                continue
             # May already exist on rebuild — suppress the OpenSees error.
             with contextlib.suppress(Exception):
                 ops.uniaxialMaterial("Elastic", tag, E_mod)

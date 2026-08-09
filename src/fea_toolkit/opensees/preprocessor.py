@@ -21,7 +21,7 @@ from ..model.geometry import (
     split_slabs_at_wall_intersections,
     subdivide_area_mesh,
 )
-from ..model.mesh_model import MeshModel
+from ..model.mesh_model import MeshModel, WallElement
 from ..model.sap_data import (
     AreaElementProperties,
     FrameDistributedLoad,
@@ -32,6 +32,7 @@ from ..model.sap_data import (
     Node,
     SAPModelData,
     ShellFiberLayer,
+    ShellSection,
 )
 from ..model.selection import Selection
 from ..utils import (
@@ -1206,6 +1207,151 @@ class Preprocessor:
             components.append((z_mean, node_ids))
         return components
 
+    def _resolve_wall_elements(
+        self,
+        mesh_model: MeshModel,
+        model_data: SAPModelData,
+    ) -> None:
+        """Generate SFI_MVLEM_3D WallElements from wall-classified areas.
+
+        When ``element_strategies.wall.element_type == "SFI_MVLEM_3D"``,
+        each wall-classified area (corners span more than 0.02 length
+        units in Z) is converted into a single
+        :class:`~fea_toolkit.model.mesh_model.WallElement` macro-element.
+        The area is marked inactive so the AnalysisBuilder skips shell
+        creation for it (the SFI_MVLEM_3D element replaces the shell).
+
+        Fiber discretisation:
+          * ``n_fibers`` (default 5) controls the number of macro-fibers
+            ``m``.
+          * Total wall width is split into ``m`` equal-width strips.
+          * Fiber thickness comes from the wall's assigned shell section
+            ``thickness`` (fallback 0.3 length units).
+          * Each fiber references one FSAM nD material.  The config may
+            list explicit names under ``fsam_materials``; otherwise all
+            FSAM-type ``nd_materials`` (in insertion order) are reused,
+            cycling to fill ``m`` fibers.
+
+        The corner nodes are sorted into OpenSees quad order: bottom
+        pair (lowest Z) then top pair, each ordered left→right by X.
+
+        Args:
+            mesh_model: Prepared MeshModel (mutated in place).
+            model_data: Mutated SAPModelData from the topology pass.
+        """
+        wall_strategy = (self.config.get("element_strategies") or {}).get("wall", {})
+        if wall_strategy.get("element_type") != "SFI_MVLEM_3D":
+            return
+
+        n_fibers = int(wall_strategy.get("n_fibers", 5))
+        cor = float(wall_strategy.get("CoR", 0.4))
+        explicit_mats = wall_strategy.get("fsam_materials") or []
+
+        # Collect FSAM nD material names (insertion order preserved)
+        fsam_names_in_order = [
+            name for name, nd in mesh_model.nd_materials.items() if nd.material_type == "FSAM"
+        ]
+        if not fsam_names_in_order and not explicit_mats:
+            if self.config.get("verbose", False):
+                print(
+                    "  ⚠ [wall_elements] SFI_MVLEM_3D requested but no FSAM "
+                    "nD materials configured — skipping wall element generation"
+                )
+            return
+
+        # Resolve per-fiber material names.  `fsam_materials` may be a list
+        # whose length == n_fibers (per-fiber mapping, e.g. boundary fibers
+        # with higher reinforcement) or shorter (cycled) — otherwise all
+        # fibers cycle through the configured FSAM nD materials.
+        if explicit_mats:
+            fiber_mats = [explicit_mats[i % len(explicit_mats)] for i in range(n_fibers)]
+        else:
+            fiber_mats = [
+                fsam_names_in_order[i % len(fsam_names_in_order)] for i in range(n_fibers)
+            ]
+
+        max_elem_tag = max(
+            (nd.node_tag for nd in mesh_model.nodes.values()),
+            default=0,
+        )
+        next_tag = max(10000, max_elem_tag + 1000)
+
+        wall_idx = 0
+        for aid, area in mesh_model.area_elements.items():
+            if getattr(area, "inactive", False):
+                continue
+            if aid in mesh_model.loads_only_area_ids:
+                continue
+            nids = list(area.node_ids)
+            if len(nids) < 4:
+                continue
+
+            nodes = mesh_model.nodes
+            missing = [nid for nid in nids if nid not in nodes]
+            if missing:
+                continue
+
+            # Classify geometry: wall when corners span > 0.02 in Z
+            zs = [nodes[nid].z for nid in nids]
+            if max(zs) - min(zs) <= 0.02:
+                continue  # horizontal → slab
+
+            # Resolve section thickness
+            sec_name = mesh_model.area_assignments.get(aid, "")
+            sec = mesh_model.sections.get(sec_name) if sec_name else None
+            if isinstance(sec, ShellSection):
+                thickness = sec.thickness if sec.thickness and sec.thickness > 0 else 0.3
+            else:
+                thickness = float(wall_strategy.get("thickness", 0.3))
+            per_fiber_thick = [thickness] * n_fibers
+
+            # Sort corners into OpenSees quad order [i, j, k, l]:
+            # bottom pair (lowest Z) then top pair, each ordered L→R along
+            # the wall's dominant horizontal axis.  The wall width direction
+            # is the axis with the larger horizontal spread — X if the
+            # x-range exceeds the y-range, else Y (e.g. a YZ-plane wall has
+            # x-span 0 so Y is used).  An X-only sort would tie for YZ walls
+            # whose corners share x and z.
+            _xs = [nodes[nid].x for nid in nids]
+            _ys = [nodes[nid].y for nid in nids]
+            _width_axis = "x" if (max(_xs) - min(_xs)) >= (max(_ys) - min(_ys)) else "y"
+            sorted_nodes = sorted(nids, key=lambda nid: (nodes[nid].z, nodes[nid].x, nodes[nid].y))
+            bottom = sorted_nodes[:2]
+            top = sorted_nodes[2:4]
+            bottom.sort(key=lambda nid: getattr(nodes[nid], _width_axis))
+            top.sort(key=lambda nid: getattr(nodes[nid], _width_axis))
+            quad = [bottom[0], bottom[1], top[0], top[1]]
+
+            # Total wall width = bottom edge length
+            bi, bj = nodes[quad[0]], nodes[quad[1]]
+            wall_width = ((bj.x - bi.x) ** 2 + (bj.y - bi.y) ** 2) ** 0.5
+            if wall_width <= 0.0:
+                continue
+            per_fiber_width = [wall_width / n_fibers] * n_fibers
+
+            elem_id = f"W{wall_idx + 1}"
+            mesh_model.wall_elements[elem_id] = WallElement(
+                elem_id=elem_id,
+                elem_tag=next_tag,
+                node_ids=quad,
+                m=n_fibers,
+                thick=per_fiber_thick,
+                width=per_fiber_width,
+                fsam_material_names=list(fiber_mats),
+                CoR=cor,
+            )
+            next_tag += 1
+            wall_idx += 1
+
+            # Mark the area inactive so shell creation skips it.
+            area.inactive = True
+
+            if self.config.get("verbose", False):
+                print(
+                    f"  [wall_elements] {elem_id}: SFI_MVLEM_3D from area '{aid}' "
+                    f"(W={wall_width:.4g}, t={thickness:.4g}, m={n_fibers})"
+                )
+
     def _resolve_element_properties(
         self,
         mesh_model: MeshModel,
@@ -1248,6 +1394,9 @@ class Preprocessor:
             kwargs = scale_material_dict(kwargs, model_data.units, stress_scale=ssf)
             kwargs.setdefault("name", mat_name)
             mesh_model.nd_materials[mat_name] = NDMaterial(**kwargs)
+
+        # ── Resolve SFI_MVLEM_3D wall elements from config ───────
+        self._resolve_wall_elements(mesh_model, model_data)
 
         # ── Resolve layered shell sections from config dicts ─────
         shell_layers_config = config.get("shell_layers", {})

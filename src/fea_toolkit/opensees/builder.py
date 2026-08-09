@@ -40,6 +40,18 @@ from ..utils import (
     DEFAULT_EPS_C,
     DEFAULT_EPS_CC,
     DEFAULT_FC_PA,
+    DEFAULT_FSAM_CONC_EPCC,
+    DEFAULT_FSAM_CONC_ET,
+    DEFAULT_FSAM_CONC_FPC_PA,
+    DEFAULT_FSAM_CONC_FT_PA,
+    DEFAULT_FSAM_CONC_RC,
+    DEFAULT_FSAM_CONC_RT,
+    DEFAULT_FSAM_CONC_XCRN,
+    DEFAULT_FSAM_CONC_XCRP,
+    DEFAULT_FSAM_STEEL_B,
+    DEFAULT_FSAM_STEEL_CR1,
+    DEFAULT_FSAM_STEEL_CR2,
+    DEFAULT_FSAM_STEEL_R0,
     DEFAULT_FY_REBAR_PA,
     DEFAULT_FY_STEEL_PA,
     DEFAULT_G_MOD_FRAC,
@@ -179,11 +191,101 @@ def export_model_to_tcl(
         lines.append(f"fix {nd.node_tag} {tags}")
 
     # Materials (values guaranteed non-None by SAPModelData.apply_material_defaults)
+    #
+    # FSAM-referenced materials are emitted as ConcreteCM / Steel02 so the
+    # fixed-strut-angle wall model can resolve getCrackingStrain() at
+    # runtime (Concrete01/Steel01 cannot).  All other materials keep the
+    # legacy Concrete01/Steel01 output.  Config keys follow the same
+    # flat SI-scaled convention as AnalysisBuilder.
+    _fsam_refs: set = set()
+    for _nd in getattr(model_data, "nd_materials", {}).values():
+        if _nd.material_type == "FSAM":
+            _fsam_refs.update(_nd.fsam_referenced_material_names())
+    _sf_tcl = stress_scale_factor(model_data.units)
+
     if model_data.materials:
         lines.append("")
         lines.append("# ── Materials ──")
         for mat_name, mat in model_data.materials.items():
             tag = _mat_tag[mat_name]
+            if mat_name in _fsam_refs:
+                # FSAM concrete law (ConcreteCM) — getCrackingStrain() required.
+                if mat.type and "concrete" in mat.type.lower():
+                    _fpc_raw = (
+                        config.get("fsam_conc_fpc_override")
+                        if config and config.get("fsam_conc_fpc_override") is not None
+                        else None
+                    )
+                    _fpc = mat.Fc if mat.Fc and mat.Fc > 0 else DEFAULT_FSAM_CONC_FPC_PA * _sf_tcl
+                    fpc = float(float(_fpc_raw) * _sf_tcl) if _fpc_raw is not None else float(_fpc)
+                    _ft_raw = (
+                        config.get("fsam_conc_ft_override")
+                        if config and config.get("fsam_conc_ft_override") is not None
+                        else None
+                    )
+                    ft = (
+                        float(float(_ft_raw) * _sf_tcl)
+                        if _ft_raw is not None
+                        else float(DEFAULT_FSAM_CONC_FT_PA * _sf_tcl)
+                    )
+                    # Resolve FSAM concrete strain/softening defaults.
+                    # ``config.get`` returns ``Any``; wrap in float() to
+                    # narrow for the static checker (values are always numeric).
+                    _cfg = config or {}
+                    _epcc = float(_cfg.get("fsam_conc_epcc", DEFAULT_FSAM_CONC_EPCC))
+                    _rc = float(_cfg.get("fsam_conc_rc", DEFAULT_FSAM_CONC_RC))
+                    _xcrn = float(_cfg.get("fsam_conc_xcrn", DEFAULT_FSAM_CONC_XCRN))
+                    _et = float(_cfg.get("fsam_conc_et", DEFAULT_FSAM_CONC_ET))
+                    _rt = float(_cfg.get("fsam_conc_rt", DEFAULT_FSAM_CONC_RT))
+                    _xcrp = float(_cfg.get("fsam_conc_xcrp", DEFAULT_FSAM_CONC_XCRP))
+                    # ConcreteCM uses the negative-compression convention
+                    # (matching the verified SFI_MVLEM_3D probe): fpc, epcc,
+                    # and xcrn are NEGATIVE.  Positive magnitudes break the
+                    # FSAM damage-coefficient initialisation when an
+                    # SFI_MVLEM_3D element consumes the material.
+                    lines.append(
+                        f"uniaxialMaterial ConcreteCM {tag} {-abs(fpc):g} "
+                        f"{-abs(_epcc):g} {mat.E_mod:g} {_rc:g} "
+                        f"{-abs(_xcrn):g} {ft:g} {_et:g} {_rt:g} {_xcrp:g}"
+                    )
+                    continue
+                # FSAM steel law (Steel02).
+                fy = (
+                    config.get("fsam_steel_Fy_override")
+                    if config and config.get("fsam_steel_Fy_override") is not None
+                    else None
+                )
+                fy = fy * _sf_tcl if fy is not None else (mat.Fy or DEFAULT_FY_REBAR_PA * _sf_tcl)
+                es = (
+                    config.get("fsam_steel_Es_override")
+                    if config and config.get("fsam_steel_Es_override") is not None
+                    else None
+                )
+                es = es * _sf_tcl if es is not None else mat.E_mod
+                _b = (
+                    config.get("fsam_steel_b")
+                    if config and config.get("fsam_steel_b") is not None
+                    else DEFAULT_FSAM_STEEL_B
+                )
+                _R0 = (
+                    config.get("fsam_steel_R0")
+                    if config and config.get("fsam_steel_R0") is not None
+                    else DEFAULT_FSAM_STEEL_R0
+                )
+                _cR1 = (
+                    config.get("fsam_steel_cR1")
+                    if config and config.get("fsam_steel_cR1") is not None
+                    else DEFAULT_FSAM_STEEL_CR1
+                )
+                _cR2 = (
+                    config.get("fsam_steel_cR2")
+                    if config and config.get("fsam_steel_cR2") is not None
+                    else DEFAULT_FSAM_STEEL_CR2
+                )
+                lines.append(
+                    f"uniaxialMaterial Steel02 {tag} {fy:g} {es:g} {_b:g} {_R0:g} {_cR1:g} {_cR2:g}"
+                )
+                continue
             if mat.type and "concrete" in mat.type.lower():
                 Fc = mat.Fc
                 epsc = mat.eFc if mat.eFc and mat.eFc > 0 else DEFAULT_EPS_C
@@ -206,11 +308,14 @@ def export_model_to_tcl(
         _nd_base = max(_mat_tag.values()) + 1 if _mat_tag else 1
         for i, (nd_name, nd_mat) in enumerate(_nd_materials.items(), start=_nd_base):
             _nd_mat_tag[nd_name] = i
-            lines.append(nd_mat.to_tcl(i))
-        # Wrap each nD material as PlateFiber for layered shell use
+            lines.append(nd_mat.to_tcl(i, mat_tags=_mat_tag))
+        # Wrap each nD material as PlateFiber for layered shell use.
+        # FSAM is excluded — it is an nD material used directly by
+        # SFI_MVLEM_3D / LayeredShell sections and cannot be wrapped as
+        # PlateFromPlaneStress.
         for nd_name, nd_mat in _nd_materials.items():
             tag = _nd_mat_tag[nd_name]
-            if nd_mat.material_type != "ElasticIsotropic":
+            if nd_mat.material_type not in ("ElasticIsotropic", "FSAM"):
                 pf_tag = tag + len(_nd_materials)
                 lines.append(f"nDMaterial PlateFromPlaneStress {pf_tag} {tag} 0.0")
 
@@ -340,6 +445,46 @@ def export_model_to_tcl(
                 lines.append(f"element ShellDKGQ {elem.area_tag} " + " ".join(nids) + f" {stag}")
             elif nn == 3:
                 lines.append(f"element ShellDKGT {elem.area_tag} " + " ".join(nids) + f" {stag}")
+
+        # Wall elements (SFI_MVLEM_3D macro-elements) — emitted after shells
+        # so inactive wall-source areas below are skipped while the wall
+        # element replaces them.  FSAM material names resolve to the nD
+        # material tags assigned above in `_nd_mat_tag`.
+        for _wid, _wall in (getattr(model_data, "wall_elements", {})).items():
+            _w_nids = [
+                str(model_data.nodes[_nid].node_tag)
+                for _nid in _wall.node_ids
+                if _nid in model_data.nodes
+            ]
+            if len(_w_nids) != 4:
+                continue
+            _w_mat_tags = [
+                str(_nd_mat_tag[_name])
+                for _name in _wall.fsam_material_names
+                if _name in _nd_mat_tag
+            ]
+            if len(_w_mat_tags) != _wall.m:
+                continue
+            _w_parts = [
+                f"element SFI_MVLEM_3D {_wall.elem_tag}",
+                *_w_nids,
+                str(_wall.m),
+            ]
+            _w_parts.append("-thick")
+            _w_parts.extend(str(v) for v in _wall.thick)
+            _w_parts.append("-width")
+            _w_parts.extend(str(v) for v in _wall.width)
+            _w_parts.append("-mat")
+            _w_parts.extend(_w_mat_tags)
+            _w_parts.append("-CoR")
+            _w_parts.append(str(_wall.CoR))
+            if _wall.ThickMod is not None:
+                _w_parts.extend(["-ThickMod", str(_wall.ThickMod)])
+            if _wall.Poisson is not None:
+                _w_parts.extend(["-Poisson", str(_wall.Poisson)])
+            if _wall.Density is not None:
+                _w_parts.extend(["-Density", str(_wall.Density)])
+            lines.append(" ".join(_w_parts))
 
     # Auto-generate nonlinear materials and fiber sections from config
     nonlinear_tcl = tcl_materials_and_sections(model_data, config)

@@ -32,6 +32,47 @@ from .sap_data import (
 
 
 @dataclass
+class WallElement:
+    """Prepared SFI_MVLEM_3D macro-element for a wall area.
+
+    An SFI_MVLEM_3D element discretises an RC wall into ``m`` macro-
+    fibers stacked along the wall width, each with its own FSAM nD
+    material, thickness, and width.
+
+    The four corner nodes use OpenSees ordering: i→j→k→l defines the
+    quadrilateral with i→j along the bottom edge (L→R) and k→l along
+    the top edge (L→R).
+
+    Args:
+        elem_id: Human-readable identifier (e.g., "W1").
+        elem_tag: Integer OpenSees element tag.
+        node_ids: Four node IDs in [i, j, k, l] order (bottom-left,
+            bottom-right, top-left, top-right).
+        m: Number of macro-fibers.
+        thick: Per-fiber thickness values (length ``m``).
+        width: Per-fiber width values (length ``m``, must sum to
+            total wall width ``W``).
+        fsam_material_names: Per-fiber FSAM nD material names (length ``m``).
+        CoR: Centre of rotation parameter (0..1, default 0.4).
+        ThickMod: Thickness modification factor (optional).
+        Poisson: Poisson's ratio override (optional).
+        Density: Density override (optional).
+    """
+
+    elem_id: str
+    elem_tag: int
+    node_ids: list[str]  # [i, j, k, l]
+    m: int
+    thick: list[float]  # length m
+    width: list[float]  # length m
+    fsam_material_names: list[str]  # FSAM nD material names, length m
+    CoR: float = 0.4
+    ThickMod: Optional[float] = None
+    Poisson: Optional[float] = None
+    Density: Optional[float] = None
+
+
+@dataclass
 class MeshModel:
     """Prepared model topology — the bridge between preprocessor and analysis.
 
@@ -53,6 +94,11 @@ class MeshModel:
     # ── Loads (redistributed to split children) ───────────────────
     frame_dist_loads: list[FrameDistributedLoad]
     edge_loads_from_areas: list = field(default_factory=list)
+    # ── Wall elements (SFI_MVLEM_3D macro-elements) ───────────────
+    # Populated by the Preprocessor from wall-classified areas when
+    # ``element_strategies.wall.element_type == "SFI_MVLEM_3D"``.
+    wall_elements: dict[str, WallElement] = field(default_factory=dict)
+    #   elem_id → WallElement
     # (list of tuples — exact format matches builder's edge_loads_from_areas)
     joint_loads: list[JointLoad] = field(default_factory=list)
     frame_gravity_loads: list[GravityLoad] = field(default_factory=list)
