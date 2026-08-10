@@ -84,6 +84,16 @@ def nodeMass(tag: int, *dofs: int) -> Union[float, Tuple[float, ...]]:
     """
     ...
 
+@overload
+def nodeReaction(tag: int, dof: int) -> float:
+    """Return a single nodal reaction component."""
+    ...
+
+@overload
+def nodeReaction(tag: int, *dofs: int) -> Tuple[float, ...]:
+    """Return nodal reaction forces for multiple or all DOFs."""
+    ...
+
 def nodeReaction(tag: int, *dofs: int) -> Union[float, Tuple[float, ...]]:
     """Return nodal reaction forces.
 
@@ -231,7 +241,7 @@ def pattern(pattern_type: str, tag: int, *args: Any) -> None:
     """
     ...
 
-def loadConst(*args: str) -> None:
+def loadConst(*args: Union[str, float]) -> None:
     """Lock existing load patterns at their current load factor.
 
     Usage::
