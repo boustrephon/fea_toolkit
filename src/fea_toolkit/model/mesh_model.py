@@ -33,11 +33,16 @@ from .sap_data import (
 
 @dataclass
 class WallElement:
-    """Prepared SFI_MVLEM_3D macro-element for a wall area.
+    """Prepared wall macro-element for a wall area.
 
-    An SFI_MVLEM_3D element discretises an RC wall into ``m`` macro-
-    fibers stacked along the wall width, each with its own FSAM nD
-    material, thickness, and width.
+    Supports three wall macro-element families sharing the same
+    open-quad corner layout [i, j, k, l]:
+
+    * **SFI_MVLEM_3D** / **E_SFI_MVLEM_3D** — per-fibre FSAM nD
+      materials (``fsam_material_names``).
+    * **MVLEM_3D** — per-fibre uniaxial concrete + steel tags plus a
+      single horizontal shear spring (``concrete_names`` /
+      ``steel_names`` / ``shear_name``).
 
     The four corner nodes use OpenSees ordering: i→j→k→l defines the
     quadrilateral with i→j along the bottom edge (L→R) and k→l along
@@ -52,7 +57,17 @@ class WallElement:
         thick: Per-fiber thickness values (length ``m``).
         width: Per-fiber width values (length ``m``, must sum to
             total wall width ``W``).
-        fsam_material_names: Per-fiber FSAM nD material names (length ``m``).
+        fsam_material_names: Per-fiber FSAM nD material names (length
+            ``m``); used by SFI_MVLEM_3D / E_SFI_MVLEM_3D.
+        concrete_names: Per-fiber uniaxial concrete material names
+            (length ``m``); used by MVLEM_3D when
+            ``material_type == "uniaxial"``.
+        steel_names: Per-fiber uniaxial steel material names (length
+            ``m``); used by MVLEM_3D.
+        shear_name: Single uniaxial shear-spring material name; used by
+            MVLEM_3D.
+        rho: Per-fiber mass density values (length ``m``); used by
+            MVLEM_3D for the internal-node mass (must be non-zero).
         CoR: Centre of rotation parameter (0..1, default 0.4).
         ThickMod: Thickness modification factor (optional).
         Poisson: Poisson's ratio override (optional).
@@ -66,6 +81,17 @@ class WallElement:
     thick: list[float]  # length m
     width: list[float]  # length m
     fsam_material_names: list[str]  # FSAM nD material names, length m
+    # ── MVLEM_3D (uniaxial) materials ──
+    concrete_names: Optional[list[str]] = None  # length m
+    steel_names: Optional[list[str]] = None  # length m
+    shear_name: Optional[str] = None  # single shear tag
+    dummy_name: Optional[str] = None  # interior steel (tiny-E Elastic)
+    rho: Optional[list[float]] = None  # length m, non-zero
+    # ── Element metadata ──
+    material_type: str = "FSAM"  # "FSAM" | "uniaxial"
+    element_type: Optional[str] = (
+        None  # SFI_MVLEM_3D | E_SFI_MVLEM_3D | MVLEM_3D (None → derive from material_type)
+    )
     CoR: float = 0.4
     ThickMod: Optional[float] = None
     Poisson: Optional[float] = None
