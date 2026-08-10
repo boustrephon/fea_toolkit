@@ -22,6 +22,7 @@ from ..model.sap_data import (
     Group,
     JointLoad,
     Node,
+    Restraint,
     SAPModelData,
 )
 
@@ -1700,6 +1701,82 @@ def _point_uv_on_quad(
     return u, v
 
 
+def _propagate_edge_restraints(
+    node_grid: Sequence[Sequence[Optional[str]]],
+    n_u: int,
+    n_v: int,
+    restraints: dict[str, Restraint],
+) -> None:
+    """Propagate edge-node restraints via bitwise-AND of adjacent corners.
+
+    For each intermediate node on the four edges of an ``n_u×n_v`` mesh
+    grid, looks up the two corner nodes at the ends of that edge in
+    *restraints*.  If both corners are restrained, the intermediate node
+    receives the bitwise AND of the two ``dofs`` lists.  Interior nodes
+    receive any DOF bit that is common to **all four** corners (the
+    bitwise AND across the four corner ``dofs`` lists).  Corners are
+    untouched.
+
+    Example: corner A has ``dofs=[1,0,1,0,0,1]`` and corner B has
+    ``dofs=[1,1,1,1,0,0]`` — a node created between them receives
+    ``[1,0,1,0,0,0]``.
+
+    Args:
+        node_grid: ``(n_v+1)×(n_u+1)`` grid of node IDs (str or None).
+        n_u: Subdivision count in the u-direction (grid columns = n_u+1).
+        n_v: Subdivision count in the v-direction (grid rows = n_v+1).
+        restraints: Model restraints dict, modified in place.
+    """
+    if not restraints or n_u < 2 or n_v < 2:
+        return
+
+    def _and_dofs(r1: Restraint, r2: Restraint) -> list[int]:
+        return [a & b for a, b in zip(r1.dofs, r2.dofs)]
+
+    def _apply(c1_id: Optional[str], c2_id: Optional[str], nid: Optional[str]) -> None:
+        if nid is None or c1_id is None or c2_id is None:
+            return
+        if nid in (c1_id, c2_id):
+            return
+        r1 = restraints.get(c1_id)
+        r2 = restraints.get(c2_id)
+        if r1 is not None and r2 is not None:
+            restraints[nid] = Restraint(dofs=_and_dofs(r1, r2))
+
+    c_bl = node_grid[0][0]  # bottom-left  (u=0, v=0)
+    c_br = node_grid[0][n_u]  # bottom-right (u=n_u, v=0)
+    c_tr = node_grid[n_v][n_u]  # top-right    (u=n_u, v=n_v)
+    c_tl = node_grid[n_v][0]  # top-left     (u=0, v=n_v)
+
+    # bottom edge (j=0): c_bl -- c_br
+    for i in range(1, n_u):
+        _apply(c_bl, c_br, node_grid[0][i])
+    # top edge (j=n_v): c_tl -- c_tr
+    for i in range(1, n_u):
+        _apply(c_tl, c_tr, node_grid[n_v][i])
+    # left edge (i=0): c_bl -- c_tl
+    for j in range(1, n_v):
+        _apply(c_bl, c_tl, node_grid[j][0])
+    # right edge (i=n_u): c_br -- c_tr
+    for j in range(1, n_v):
+        _apply(c_br, c_tr, node_grid[j][n_u])
+
+    # ── Interior nodes: DOFs common to all four corners ──────────
+    r_bl = restraints.get(c_bl)
+    r_br = restraints.get(c_br)
+    r_tr = restraints.get(c_tr)
+    r_tl = restraints.get(c_tl)
+    if all(r is not None for r in (r_bl, r_br, r_tr, r_tl)):
+        common = [r_bl.dofs[k] & r_br.dofs[k] & r_tr.dofs[k] & r_tl.dofs[k] for k in range(6)]
+        if any(common):
+            r_common = Restraint(dofs=common)
+            for j in range(1, n_v):
+                for i in range(1, n_u):
+                    nid = node_grid[j][i]
+                    if nid is not None:
+                        restraints[nid] = r_common
+
+
 def mesh_area_elements(
     area_elements: dict[str, AreaElement],
     area_assignments: dict[str, str],
@@ -1707,6 +1784,7 @@ def mesh_area_elements(
     area_mesh: dict[str, AreaMesh],
     next_tag: int = 1,
     groups: Optional[dict[str, Group]] = None,
+    restraints: Optional[dict[str, Restraint]] = None,
 ) -> tuple[dict[str, AreaElement], dict[str, str], dict[str, Node], int]:
     """Subdivide area elements into a grid of smaller shell elements.
 
@@ -1720,6 +1798,11 @@ def mesh_area_elements(
       * Group membership (if *groups* is provided) — each sub-element is
         added to every group that contained the parent area ID.
 
+    New nodes created on the perimeter edges inherit a restraint equal to
+    the bitwise AND of the two corner-node restraints at the ends of that
+    edge (see :func:`_propagate_edge_restraints`).  Interior nodes inherit
+    any DOF bit that is common to all four corner restraints.
+
     Args:
         area_elements: ``{area_id: AreaElement}`` (modified in place).
         area_assignments: ``{area_id: section_name}`` (modified in place).
@@ -1728,6 +1811,9 @@ def mesh_area_elements(
         next_tag: Next available numeric tag for new nodes and elements.
         groups: Optional ``{group_name: Group}`` — group memberships are
             propagated to sub-elements.
+        restraints: Optional ``{node_id: Restraint}`` — model restraints
+            dict.  Edge-node restraints are propagated here (modified in
+            place).
 
     Returns:
         ``(area_elements, area_assignments, nodes, next_tag)`` with
@@ -2038,6 +2124,11 @@ def mesh_area_elements(
                     for gname in parent_groups:
                         groups[gname].objects.append(sub_ref)
 
+        # Propagate edge-node restraints using bitwise-AND of adjacent
+        # corners (only if both corners are restrained).
+        if restraints is not None:
+            _propagate_edge_restraints(node_grid, n_u, n_v, restraints)
+
     return area_elements, area_assignments, nodes, next_tag
 
 
@@ -2055,6 +2146,7 @@ def subdivide_area_mesh(
     selection: Optional[set[str]] = None,
     next_tag: int = 1,
     groups: Optional[dict[str, Group]] = None,
+    restraints: Optional[dict[str, Restraint]] = None,
 ) -> tuple[dict[str, AreaElement], dict[str, str], dict[str, Node], int]:
     """Subdivide each coarse shell quad into an N×N grid of sub-elements.
 
@@ -2068,6 +2160,11 @@ def subdivide_area_mesh(
     New interior nodes are created with coordinate-based deduplication so
     adjacent subdivided areas share edge nodes.
 
+    New nodes created on the perimeter edges inherit a restraint equal to
+    the bitwise AND of the two corner-node restraints at the ends of that
+    edge (see :func:`_propagate_edge_restraints`).  Interior nodes inherit
+    any DOF bit that is common to all four corner restraints.
+
     Args:
         area_elements: ``{area_id: AreaElement}`` (modified in place).
         area_assignments: ``{area_id: section_name}`` (modified in place).
@@ -2077,6 +2174,9 @@ def subdivide_area_mesh(
         next_tag: Next available numeric tag for new nodes and elements.
         groups: Optional ``{group_name: Group}`` — group memberships are
             propagated to sub-elements.
+        restraints: Optional ``{node_id: Restraint}`` — model restraints
+            dict.  Edge-node restraints are propagated here (modified in
+            place).
 
     Returns:
         ``(area_elements, area_assignments, nodes, next_tag)``.
@@ -2213,6 +2313,11 @@ def subdivide_area_mesh(
                     sub_ref = f"Area:{sub_id}"
                     for gname in parent_groups:
                         groups[gname].objects.append(sub_ref)
+
+        # Propagate edge-node restraints using bitwise-AND of adjacent
+        # corners (only if both corners are restrained).
+        if restraints is not None:
+            _propagate_edge_restraints(node_grid, n, n, restraints)
 
     return area_elements, area_assignments, nodes, next_tag
 

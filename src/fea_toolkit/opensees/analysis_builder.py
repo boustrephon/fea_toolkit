@@ -1333,34 +1333,86 @@ class AnalysisBuilder:
         if self.config.get("verbose", False):
             print(f"  Created {created} FSAM nD material(s)")
 
+    def _create_mvlem3d_support_materials(self) -> None:
+        """Create the MVLEM_3D shear-spring and interior-dummy materials.
+
+        MVLEM_3D fibres reference a single horizontal shear spring plus
+        (usually) a tiny-E elastic dummy steel for fibres without rebar.
+        The framework materials are ordinary ``Material`` dataclasses, but
+        the OpenSees domain needs ``ElasticPP`` for the shear spring (k,
+        yield-strain) and a near-zero-stiffness ``Elastic`` for the dummy.
+
+        Tag stability: the material names are already in
+        ``self.material_tags`` (auto-assigned in ``_create_materials``);
+        the correct law is emitted over the same tag, so repeated
+        ``build_domain()`` calls reuse identical tags.
+        """
+        ssf = stress_scale_factor(self.mesh_model.units)
+        for wall in self.mesh_model.wall_elements.values():
+            if wall.material_type != "uniaxial":
+                continue
+            # ── Shear spring: ElasticPP (k, epsP) ────────────────
+            if wall.shear_name:
+                tag = self.material_tags.get(wall.shear_name)
+                if tag is None:
+                    continue
+                shear_mat = self.mesh_model.materials.get(wall.shear_name)
+                # k = 0.1 × G_cracked × A / h (same recipe as the probe)
+                Ec = (shear_mat.E_mod if shear_mat else None) or 30.0e6 * ssf
+                Gc = 0.4 * Ec
+                # A = sum(width) × mean(thick); h = wall height (max z - min z)
+                A = sum(wall.width) * (sum(wall.thick) / max(len(wall.thick), 1))
+                zs = [
+                    self.mesh_model.nodes[nid].z
+                    for nid in wall.node_ids
+                    if nid in self.mesh_model.nodes
+                ]
+                h = (max(zs) - min(zs)) if zs else 1.0
+                k_shear = 0.1 * Gc * A / max(h, 1e-12)
+                with contextlib.suppress(Exception):
+                    ops.uniaxialMaterial("ElasticPP", tag, k_shear, 1.0e6)
+            # ── Interior dummy steel: tiny-E Elastic ─────────────
+            if wall.dummy_name:
+                tag = self.material_tags.get(wall.dummy_name)
+                if tag is None:
+                    continue
+                with contextlib.suppress(Exception):
+                    ops.uniaxialMaterial("Elastic", tag, 1.0e-3)
+
     def _create_wall_elements(self) -> None:
-        """Create SFI_MVLEM_3D wall elements from MeshModel.wall_elements.
+        """Create wall macro-elements from MeshModel.wall_elements.
 
-        Each :class:`~fea_toolkit.model.mesh_model.WallElement` is a
-        single SFI_MVLEM_3D macro-element discretising one wall area
-        into ``m`` macro-fibers.  The OpenSees command is::
+        Dispatches on each :class:`~fea_toolkit.model.mesh_model.WallElement`
+        ``element_type`` / ``material_type``:
 
-            element SFI_MVLEM_3D eleTag iNode jNode kNode lNode m \\
-                -thick *t -width *w -mat *matTags <-CoR c> ...
+        * ``SFI_MVLEM_3D`` / ``E_SFI_MVLEM_3D`` — per-fibre FSAM nD
+          materials::
 
-        Node IDs are resolved to tags via ``mesh_model.nodes``; FSAM
-        nD material names are resolved to tags via ``_nd_material_tags``
-        (populated by :meth:`_create_fsam_materials`).  This method
-        therefore runs **after** :meth:`_create_fsam_materials` and
-        **before** :meth:`_create_shell_elements`.
+              element <TYPE> eleTag iNode jNode kNode lNode m \\
+                  -thick *t -width *w -mat *matTags <-CoR c> ...
 
-        Fibers whose FSAM material tag is missing are reported and the
-        element is skipped — a warning is emitted per missing tag.
+        * ``MVLEM_3D`` — per-fibre uniaxial concrete + steel + shear::
+
+              element MVLEM_3D eleTag iNode jNode kNode lNode m \\
+                  -thick *t -width *w -rho *rho \\
+                  -matConcrete *concTags -matSteel *steelTags \\
+                  -matShear shearTag <-CoR c> ...
+
+        Node IDs are resolved to tags via ``mesh_model.nodes``.  FSAM
+        names resolve via ``_nd_material_tags`` (populated by
+        :meth:`_create_fsam_materials`); uniaxial names via
+        ``self.material_tags``.  This method runs **after**
+        :meth:`_create_fsam_materials` and **before**
+        :meth:`_create_shell_elements`.
         """
         if not self.mesh_model.wall_elements:
             return
 
-        if self.config.get("verbose", False):
-            print("Creating SFI_MVLEM_3D wall elements...")
-
         _nd_tags = getattr(self, "_nd_material_tags", {})
         created = 0
         for wall in self.mesh_model.wall_elements.values():
+            elem_type = wall.element_type or wall.material_type
+
             # Resolve node IDs → tags
             node_tags = []
             skip = False
@@ -1378,48 +1430,105 @@ class AnalysisBuilder:
             if skip:
                 continue
 
-            # Resolve FSAM material names → tags
-            mat_tags = []
-            for name in wall.fsam_material_names:
-                tag = _nd_tags.get(name)
-                if tag is None:
-                    print(
-                        f"  ⚠ Wall element '{wall.elem_id}': FSAM nD material "
-                        f"'{name}' not found in _nd_material_tags — skipping element"
-                    )
-                    skip = True
-                    break
-                mat_tags.append(tag)
-            if skip:
-                continue
-
-            args: list = [
-                wall.elem_tag,
-                *node_tags,
-                wall.m,
-                "-thick",
-                *wall.thick,
-                "-width",
-                *wall.width,
-                "-mat",
-                *mat_tags,
-                "-CoR",
-                wall.CoR,
-            ]
-            if wall.ThickMod is not None:
-                args.extend(["-ThickMod", wall.ThickMod])
-            if wall.Poisson is not None:
-                args.extend(["-Poisson", wall.Poisson])
-            if wall.Density is not None:
-                args.extend(["-Density", wall.Density])
-
-            ops.element("SFI_MVLEM_3D", *args)
-            created += 1
-            if self.config.get("verbose", False):
-                print(f"  SFI_MVLEM_3D tag={wall.elem_tag} nodes={node_tags} m={wall.m}")
+            if wall.material_type == "uniaxial":
+                created += self._create_mvlem3d_wall(wall, node_tags, elem_type)
+            else:
+                created += self._create_fsam_wall(wall, node_tags, elem_type, _nd_tags)
 
         if self.config.get("verbose", False):
-            print(f"  Created {created} SFI_MVLEM_3D wall element(s)")
+            print(f"  Created {created} wall element(s)")
+
+    def _create_fsam_wall(self, wall, node_tags: list, elem_type: str, _nd_tags: dict) -> int:
+        """Emit an SFI_MVLEM_3D / E_SFI_MVLEM_3D element (per-fibre FSAM)."""
+        mat_tags = []
+        for name in wall.fsam_material_names:
+            tag = _nd_tags.get(name)
+            if tag is None:
+                print(
+                    f"  ⚠ Wall element '{wall.elem_id}': FSAM nD material "
+                    f"'{name}' not found in _nd_material_tags — skipping element"
+                )
+                return 0
+            mat_tags.append(tag)
+
+        args: list = [
+            wall.elem_tag,
+            *node_tags,
+            wall.m,
+            "-thick",
+            *wall.thick,
+            "-width",
+            *wall.width,
+            "-mat",
+            *mat_tags,
+            "-CoR",
+            wall.CoR,
+        ]
+        if wall.ThickMod is not None:
+            args.extend(["-ThickMod", wall.ThickMod])
+        if wall.Poisson is not None:
+            args.extend(["-Poisson", wall.Poisson])
+        if wall.Density is not None:
+            args.extend(["-Density", wall.Density])
+
+        ops.element(elem_type, *args)
+        if self.config.get("verbose", False):
+            print(f"  {elem_type} tag={wall.elem_tag} nodes={node_tags} m={wall.m}")
+        return 1
+
+    def _create_mvlem3d_wall(self, wall, node_tags: list, elem_type: str) -> int:
+        """Emit an MVLEM_3D element (per-fibre uniaxial concrete/steel + shear)."""
+
+        def _resolve(names) -> Optional[list]:
+            tags = []
+            for name in names or []:
+                tag = self.material_tags.get(name)
+                if tag is None:
+                    return None
+                tags.append(tag)
+            return tags
+
+        conc_tags = _resolve(wall.concrete_names)
+        steel_tags = _resolve(wall.steel_names)
+        shear_tag = self.material_tags.get(wall.shear_name) if wall.shear_name else None
+        rho = wall.rho or [2400.0] * wall.m
+        if conc_tags is None or steel_tags is None or shear_tag is None:
+            print(
+                f"  ⚠ Wall element '{wall.elem_id}': missing uniaxial material "
+                "tag (concrete/steel/shear) — skipping element"
+            )
+            return 0
+
+        args: list = [
+            wall.elem_tag,
+            *node_tags,
+            wall.m,
+            "-thick",
+            *wall.thick,
+            "-width",
+            *wall.width,
+            "-rho",
+            *rho,
+            "-matConcrete",
+            *conc_tags,
+            "-matSteel",
+            *steel_tags,
+            "-matShear",
+            shear_tag,
+            "-CoR",
+            wall.CoR,
+        ]
+        if wall.ThickMod is not None:
+            args.extend(["-ThickMod", wall.ThickMod])
+        if wall.Poisson is not None:
+            args.extend(["-Poisson", wall.Poisson])
+        if wall.Density is not None:
+            args.extend(["-Density", wall.Density])
+
+        ops.element(elem_type, *args)
+        if self.config.get("verbose", False):
+            print(f"  {elem_type} tag={wall.elem_tag} nodes={node_tags} m={wall.m}")
+        return 1
 
     def _create_layered_shell_sections(self) -> None:
         """Create ``LayeredShell`` sections for nonlinear shell analysis.
@@ -1603,6 +1712,24 @@ class AnalysisBuilder:
             for _rname in _nd.fsam_referenced_material_names():
                 _fsam_refs_by_name.setdefault(_rname, set()).add(_nd.name)
 
+        # MVLEM_3D wall elements reference uniaxial concrete + steel
+        # per fibre (plus a shear spring / dummy steel handled in
+        # _create_wall_uniaxial_materials).  The concrete must be a
+        # genuine nonlinear law and the steel a Steel02, so route them
+        # through the same ConcreteCM / Steel02 emission used by FSAM.
+        self._wall_uniaxial_special_names: set = set()
+        for _wall in self.mesh_model.wall_elements.values():
+            if _wall.material_type != "uniaxial":
+                continue
+            for _rname in _wall.concrete_names or []:
+                _fsam_refs_by_name.setdefault(_rname, set()).add("<mvlem3d>")
+            for _rname in _wall.steel_names or []:
+                _fsam_refs_by_name.setdefault(_rname, set()).add("<mvlem3d>")
+            if _wall.shear_name:
+                self._wall_uniaxial_special_names.add(_wall.shear_name)
+            if _wall.dummy_name:
+                self._wall_uniaxial_special_names.add(_wall.dummy_name)
+
         ssf = stress_scale_factor(self.mesh_model.units)
 
         for mat_name, mat in self.mesh_model.materials.items():
@@ -1673,9 +1800,18 @@ class AnalysisBuilder:
                         float(self.config.get("fsam_steel_cR2", DEFAULT_FSAM_STEEL_CR2)),
                     )
                 continue
+            if mat_name in self._wall_uniaxial_special_names:
+                # MVLEM_3D shear spring / interior-dummy steel — emitted by
+                # _create_mvlem3d_support_materials() with the correct law
+                # (ElasticPP shear spring, tiny-E Elastic dummy) rather than
+                # the generic elastic fallback.
+                continue
             # May already exist on rebuild — suppress the OpenSees error.
             with contextlib.suppress(Exception):
                 ops.uniaxialMaterial("Elastic", tag, E_mod)
+
+        # MVLEM_3D support materials (shear spring + interior dummy steel)
+        self._create_mvlem3d_support_materials()
 
         # Fiber section materials
         if self.config.get("create_fiber_sections"):

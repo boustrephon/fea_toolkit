@@ -571,6 +571,7 @@ class Preprocessor:
             md.nodes,
             mesh_filtered,
             next_tag=next_tag,
+            restraints=getattr(md, "restraints", None),
         )
         md.area_elements = areas
         md.area_assignments = assignments
@@ -686,6 +687,7 @@ class Preprocessor:
                 n=n,
                 next_tag=next_tag,
                 groups=md.groups if hasattr(md, "groups") else {},
+                restraints=getattr(md, "restraints", None),
             )
             md.area_elements.update(sub_areas)
             md.area_assignments.update(sub_assigns)
@@ -1207,19 +1209,32 @@ class Preprocessor:
             components.append((z_mean, node_ids))
         return components
 
+    _WALL_ELEMENT_TYPES = ("SFI_MVLEM_3D", "E_SFI_MVLEM_3D", "MVLEM_3D")
+
     def _resolve_wall_elements(
         self,
         mesh_model: MeshModel,
         model_data: SAPModelData,
     ) -> None:
-        """Generate SFI_MVLEM_3D WallElements from wall-classified areas.
+        """Generate wall macro-elements from wall-classified areas.
 
-        When ``element_strategies.wall.element_type == "SFI_MVLEM_3D"``,
-        each wall-classified area (corners span more than 0.02 length
-        units in Z) is converted into a single
+        When ``element_strategies.wall.element_type`` is one of
+        ``SFI_MVLEM_3D`` / ``E_SFI_MVLEM_3D`` / ``MVLEM_3D``, each
+        wall-classified area (corners span more than 0.02 length units
+        in Z) is converted into a single
         :class:`~fea_toolkit.model.mesh_model.WallElement` macro-element.
         The area is marked inactive so the AnalysisBuilder skips shell
-        creation for it (the SFI_MVLEM_3D element replaces the shell).
+        creation for it (the macro-element replaces the shell).
+
+        Two material families are supported, selected by
+        ``material_type``:
+
+        * ``"FSAM"`` (default) — SFI_MVLEM_3D / E_SFI_MVLEM_3D per-fibre
+          FSAM nD materials (``fsam_material_names``).
+        * ``"uniaxial"`` — MVLEM_3D per-fibre uniaxial concrete + steel
+          tags plus a single horizontal shear spring
+          (``concrete_names`` / ``steel_names`` / ``shear_name``) and a
+          per-fibre density (``rho``).
 
         Fiber discretisation:
           * ``n_fibers`` (default 5) controls the number of macro-fibers
@@ -1227,10 +1242,17 @@ class Preprocessor:
           * Total wall width is split into ``m`` equal-width strips.
           * Fiber thickness comes from the wall's assigned shell section
             ``thickness`` (fallback 0.3 length units).
-          * Each fiber references one FSAM nD material.  The config may
-            list explicit names under ``fsam_materials``; otherwise all
-            FSAM-type ``nd_materials`` (in insertion order) are reused,
-            cycling to fill ``m`` fibers.
+          * FSAM: each fiber references one FSAM nD material.  The config
+            may list explicit names under ``fsam_materials``; otherwise
+            all FSAM-type ``nd_materials`` (in insertion order) are
+            reused, cycling to fill ``m`` fibers.
+          * Uniaxial: every fiber references the configured
+            ``concrete_material``; ``steel_material`` is assigned to the
+            outermost ``boundary_fibers`` fibers (mirroring the
+            boundary-enriched layout of the converged MVLEM probe) and
+            ``dummy_material`` fills the interior.  ``shear_material`` is
+            the single horizontal shear spring; ``density`` feeds the
+            per-fiber ``-rho`` list.
 
         The corner nodes are sorted into OpenSees quad order: bottom
         pair (lowest Z) then top pair, each ordered left→right by X.
@@ -1240,35 +1262,62 @@ class Preprocessor:
             model_data: Mutated SAPModelData from the topology pass.
         """
         wall_strategy = (self.config.get("element_strategies") or {}).get("wall", {})
-        if wall_strategy.get("element_type") != "SFI_MVLEM_3D":
+        elem_type = wall_strategy.get("element_type")
+        if elem_type not in self._WALL_ELEMENT_TYPES:
             return
 
         n_fibers = int(wall_strategy.get("n_fibers", 5))
         cor = float(wall_strategy.get("CoR", 0.4))
-        explicit_mats = wall_strategy.get("fsam_materials") or []
+        material_type = wall_strategy.get("material_type", "FSAM")
 
-        # Collect FSAM nD material names (insertion order preserved)
-        fsam_names_in_order = [
-            name for name, nd in mesh_model.nd_materials.items() if nd.material_type == "FSAM"
-        ]
-        if not fsam_names_in_order and not explicit_mats:
-            if self.config.get("verbose", False):
-                print(
-                    "  ⚠ [wall_elements] SFI_MVLEM_3D requested but no FSAM "
-                    "nD materials configured — skipping wall element generation"
-                )
-            return
-
-        # Resolve per-fiber material names.  `fsam_materials` may be a list
-        # whose length == n_fibers (per-fiber mapping, e.g. boundary fibers
-        # with higher reinforcement) or shorter (cycled) — otherwise all
-        # fibers cycle through the configured FSAM nD materials.
-        if explicit_mats:
-            fiber_mats = [explicit_mats[i % len(explicit_mats)] for i in range(n_fibers)]
+        # ── Resolve per-fiber material names ──────────────────────
+        if material_type == "uniaxial":
+            # MVLEM_3D: uniaxial concrete + steel + shear spring.
+            concrete_name = wall_strategy.get("concrete_material", "concrete")
+            steel_name = wall_strategy.get("steel_material", "steel")
+            dummy_name = wall_strategy.get("dummy_material", "dummy")
+            shear_name = wall_strategy.get("shear_material", "shear")
+            density = float(wall_strategy.get("density", 2400.0))
+            n_bdry = int(wall_strategy.get("boundary_fibers", 1))
+            concrete_names = [concrete_name] * n_fibers
+            steel_names = [dummy_name] * n_fibers
+            for i in range(min(n_bdry, n_fibers)):
+                steel_names[i] = steel_name
+                steel_names[-(i + 1)] = steel_name
+            rho = [density] * n_fibers
+            if not all(
+                n in mesh_model.materials
+                for n in (concrete_name, steel_name, dummy_name, shear_name)
+            ):
+                if self.config.get("verbose", False):
+                    print(
+                        "  ⚠ [wall_elements] MVLEM_3D requested but one of "
+                        f"concrete/steel/dummy/shear materials "
+                        f"({concrete_name}, {steel_name}, {dummy_name}, "
+                        f"{shear_name}) is missing from the model materials — "
+                        "skipping wall element generation"
+                    )
+                return
         else:
-            fiber_mats = [
-                fsam_names_in_order[i % len(fsam_names_in_order)] for i in range(n_fibers)
+            # FSAM family: resolve explicit or cycled FSAM nD names.
+            explicit_mats = wall_strategy.get("fsam_materials") or []
+            fsam_names_in_order = [
+                name for name, nd in mesh_model.nd_materials.items() if nd.material_type == "FSAM"
             ]
+            if not fsam_names_in_order and not explicit_mats:
+                if self.config.get("verbose", False):
+                    print(
+                        f"  ⚠ [wall_elements] {elem_type} requested but no "
+                        "FSAM nD materials configured — skipping wall "
+                        "element generation"
+                    )
+                return
+            if explicit_mats:
+                fiber_mats = [explicit_mats[i % len(explicit_mats)] for i in range(n_fibers)]
+            else:
+                fiber_mats = [
+                    fsam_names_in_order[i % len(fsam_names_in_order)] for i in range(n_fibers)
+                ]
 
         max_elem_tag = max(
             (nd.node_tag for nd in mesh_model.nodes.values()),
@@ -1330,16 +1379,36 @@ class Preprocessor:
             per_fiber_width = [wall_width / n_fibers] * n_fibers
 
             elem_id = f"W{wall_idx + 1}"
-            mesh_model.wall_elements[elem_id] = WallElement(
-                elem_id=elem_id,
-                elem_tag=next_tag,
-                node_ids=quad,
-                m=n_fibers,
-                thick=per_fiber_thick,
-                width=per_fiber_width,
-                fsam_material_names=list(fiber_mats),
-                CoR=cor,
-            )
+            if material_type == "uniaxial":
+                mesh_model.wall_elements[elem_id] = WallElement(
+                    elem_id=elem_id,
+                    elem_tag=next_tag,
+                    node_ids=quad,
+                    m=n_fibers,
+                    thick=per_fiber_thick,
+                    width=per_fiber_width,
+                    fsam_material_names=[],
+                    concrete_names=concrete_names,
+                    steel_names=steel_names,
+                    shear_name=shear_name,
+                    rho=rho,
+                    material_type="uniaxial",
+                    element_type=elem_type,
+                    CoR=cor,
+                )
+            else:
+                mesh_model.wall_elements[elem_id] = WallElement(
+                    elem_id=elem_id,
+                    elem_tag=next_tag,
+                    node_ids=quad,
+                    m=n_fibers,
+                    thick=per_fiber_thick,
+                    width=per_fiber_width,
+                    fsam_material_names=list(fiber_mats),
+                    material_type="FSAM",
+                    element_type=elem_type,
+                    CoR=cor,
+                )
             next_tag += 1
             wall_idx += 1
 
@@ -1348,8 +1417,9 @@ class Preprocessor:
 
             if self.config.get("verbose", False):
                 print(
-                    f"  [wall_elements] {elem_id}: SFI_MVLEM_3D from area '{aid}' "
-                    f"(W={wall_width:.4g}, t={thickness:.4g}, m={n_fibers})"
+                    f"  [wall_elements] {elem_id}: {elem_type} from area '{aid}' "
+                    f"(W={wall_width:.4g}, t={thickness:.4g}, m={n_fibers}, "
+                    f"material={material_type})"
                 )
 
     def _resolve_element_properties(

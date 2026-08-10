@@ -330,11 +330,17 @@ class TestSFIMVLEM3DWallPushover:
 
     @pytest.mark.xfail(
         reason=(
-            "SFI_MVLEM_3D diverges at the first lateral step when run in "
-            "the X-Z plane through the Preprocessor→AnalysisBuilder pipeline "
-            "(accepted separate issue — converges in Y-Z or via direct ops "
-            "calls).  Geometry conversion to the canonical X-Z layout is "
-            "complete; analysis convergence is deferred."
+            "SFI_MVLEM_3D diverges at the first lateral step through the "
+            "Preprocessor→AnalysisBuilder pipeline.  Root cause is an "
+            "upstream element bug (SFI_MVLEM_3D.cpp block-diagonal tangent "
+            "with discarded D01/D02 coupling — see "
+            "Xara/models/SFI-MVLEM_Walls/sfi_mvlem_stiffness_fix.md, which "
+            "fixes only the 2D SFI_MVLEM), producing a singular stiffness "
+            "matrix (`U(i,i)=0,i=5`).  Verified byte-identical materials "
+            "(Tcl export), identical divergence with crossed AND clean CCW "
+            "node order, and identical failure in every openseespy wheel "
+            "(3.8.0.0, 3.7.1.2, local build) — the element never converges, "
+            "in any orientation or via direct ops calls."
         ),
         strict=False,
     )
@@ -367,11 +373,17 @@ class TestBothWallApproaches:
 
     @pytest.mark.xfail(
         reason=(
-            "SFI_MVLEM_3D diverges at the first lateral step when run in "
-            "the X-Z plane through the Preprocessor→AnalysisBuilder pipeline "
-            "(accepted separate issue — converges in Y-Z or via direct ops "
-            "calls).  Geometry conversion to the canonical X-Z layout is "
-            "complete; analysis convergence is deferred."
+            "SFI_MVLEM_3D diverges at the first lateral step through the "
+            "Preprocessor→AnalysisBuilder pipeline.  Root cause is an "
+            "upstream element bug (SFI_MVLEM_3D.cpp block-diagonal tangent "
+            "with discarded D01/D02 coupling — see "
+            "Xara/models/SFI-MVLEM_Walls/sfi_mvlem_stiffness_fix.md, which "
+            "fixes only the 2D SFI_MVLEM), producing a singular stiffness "
+            "matrix (`U(i,i)=0,i=5`).  Verified byte-identical materials "
+            "(Tcl export), identical divergence with crossed AND clean CCW "
+            "node order, and identical failure in every openseespy wheel "
+            "(3.8.0.0, 3.7.1.2, local build) — the element never converges, "
+            "in any orientation or via direct ops calls."
         ),
         strict=False,
     )
@@ -430,3 +442,118 @@ class TestBothWallApproaches:
         assert str(mm.wall_elements["W1"].elem_tag) in text
         # The 5-fiber thick/width/mat lists are present
         assert "-thick" in text and "-width" in text and "-mat" in text
+
+
+# ── MVLEM_3D (uniaxial) wall path ──────────────────────────────────
+
+
+def _mvlem_3d_model_data() -> SAPModelData:
+    """Wall model data plus the MVLEM_3D shear-spring and dummy-steel materials.
+
+    ``dummy`` is the tiny-E elastic interior steel (boundary fibres get the
+    real ``steel``); ``shear`` carries an ``E_mod`` so the builder computes
+    the ElasticPP shear-spring stiffness ``k = 0.1·G·A/h`` (same recipe as
+    ``local/probe_mvlem_sfi.py``).  Model units kN/m — direct-construction
+    exception of ``.clinerules`` §4.6.
+    """
+    md = _wall_model_data()
+    md.materials["dummy"] = Material(
+        name="dummy",
+        type="Rebar",
+        E_mod=200.0e6,
+        nu=0.3,
+        Fy=420.0e3,
+        unit_weight=0.0,
+    )
+    md.materials["shear"] = Material(
+        name="shear",
+        type="Concrete",
+        E_mod=30.0e6,
+        nu=0.2,
+        Fc=30.0e3,
+        unit_weight=0.0,
+    )
+    return md
+
+
+def _mvlem_3d_config() -> dict:
+    """MVLEM_3D path: 5 macro-fibres, uniaxial concrete/steel + shear spring.
+
+    Boundary fibers (0 and 4) carry the real ``steel`` (Steel02) and
+    interior fibres the ``dummy`` (tiny-E Elastic) — mirroring the converged
+    ``local/probe_mvlem_3d.py`` layout.  ``shear`` is the single horizontal
+    ElasticPP spring; ``density`` feeds the per-fibre ``-rho`` list.
+    """
+    cfg = _base_config()
+    cfg["element_strategies"] = {
+        "wall": {
+            "element_type": "MVLEM_3D",
+            "material_type": "uniaxial",
+            "n_fibers": 5,
+            "CoR": 0.4,
+            "concrete_material": "concrete",
+            "steel_material": "steel",
+            "dummy_material": "dummy",
+            "shear_material": "shear",
+            "density": 2400.0,
+            "boundary_fibers": 1,
+        },
+    }
+    return cfg
+
+
+class TestMVLEM3DWallPushover:
+    """Preprocessor → AnalysisBuilder MVLEM_3D (uniaxial) wall path."""
+
+    def teardown_method(self):
+        ops.wipe()
+
+    def test_preprocessor_generates_wall_element(self):
+        """MVLEM_3D config produces a single WallElement with uniaxial fields."""
+        md = _mvlem_3d_model_data()
+        mm = Preprocessor(_mvlem_3d_config()).run(md)
+        assert len(mm.wall_elements) == 1
+        wall = mm.wall_elements["W1"]
+        assert wall.m == 5
+        assert wall.CoR == 0.4
+        assert wall.material_type == "uniaxial"
+        assert wall.element_type == "MVLEM_3D"
+        assert abs(sum(wall.width) - 4.0) < 1e-6
+        # Concrete: every fibre; steel: real rebar at boundaries, dummy interior
+        assert wall.concrete_names == ["concrete"] * 5
+        assert wall.steel_names[0] == "steel"
+        assert wall.steel_names[-1] == "steel"
+        assert all(n == "dummy" for n in wall.steel_names[1:-1])
+        assert wall.shear_name == "shear"
+        assert wall.rho == [2400.0] * 5
+        assert wall.node_ids == ["1", "2", "4", "3"]
+        assert mm.area_elements["A1"].inactive is True
+
+    def test_build_domain_creates_mvlem_3d(self):
+        """build_domain() emits exactly one MVLEM_3D element."""
+        mm = Preprocessor(_mvlem_3d_config()).run(_mvlem_3d_model_data())
+        builder = AnalysisBuilder(mm, _mvlem_3d_config())
+        builder.build_domain()
+        tags = list(ops.getEleTags())
+        assert mm.wall_elements["W1"].elem_tag in tags
+
+    def test_100kn_pushover_reaction(self):
+        """MVLEM_3D wall carries 100 kN and reacts −100 kN in X (converges)."""
+        md = _mvlem_3d_model_data()
+        mm = Preprocessor(_mvlem_3d_config()).run(md)
+        __, results = _run_pushover(mm, _mvlem_3d_config())
+        rx = _sum_rx(results)
+        assert abs(rx + 100.0) < 1.0, f"rx={rx} expected ≈ −100"
+
+    def test_build_twice_tag_stable(self):
+        """Repeated build_domain() keeps the MVLEM_3D tag stable."""
+        mm = Preprocessor(_mvlem_3d_config()).run(_mvlem_3d_model_data())
+        b1 = AnalysisBuilder(mm, _mvlem_3d_config())
+        b1.build_domain()
+        tag1 = mm.wall_elements["W1"].elem_tag
+        n1 = len(ops.getEleTags())
+        b2 = AnalysisBuilder(mm, _mvlem_3d_config())
+        b2.build_domain()
+        n2 = len(ops.getEleTags())
+        assert b2.mesh_model.wall_elements["W1"].elem_tag == tag1
+        assert n1 == n2

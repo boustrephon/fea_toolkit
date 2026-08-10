@@ -16,13 +16,18 @@ pytest.importorskip("openseespy")
 
 import openseespy.opensees as ops
 
-from fea_toolkit.model.geometry import find_constraint_edges
+from fea_toolkit.model.geometry import (
+    _propagate_edge_restraints,
+    find_constraint_edges,
+    subdivide_area_mesh,
+)
 from fea_toolkit.model.sap_data import (
     AreaElement,
     AreaMesh,
     FrameElement,
     Material,
     Node,
+    Restraint,
     SAPModelData,
     ShellSection,
 )
@@ -554,3 +559,159 @@ class TestFindConstraintEdges:
         edges = _run_builder(md)
         # No tear expected (single element, no incompatible edge)
         assert len(edges) == 0
+
+
+# ========================================================================
+# Edge-node restraint propagation (bitwise-AND of adjacent corners)
+# ========================================================================
+
+
+class TestPropagateEdgeRestraints:
+    """Tests for ``_propagate_edge_restraints`` and its use by the
+    area-meshing functions."""
+
+    def test_bitwise_and_dofs(self):
+        """Mixed corner restraints produce the bitwise-AND on the edge node."""
+        # 2×2 grid → 3×3 node grid with corners c00, c10, c11, c01
+        node_grid = [
+            ["c00", "e_bot", "c10"],
+            ["e_left", "interior", "e_right"],
+            ["c01", "e_top", "c11"],
+        ]
+        restraints = {
+            "c00": Restraint(dofs=[1, 0, 1, 0, 0, 1]),
+            "c10": Restraint(dofs=[1, 1, 1, 1, 0, 0]),
+            # top corners deliberately absent → top-edge nodes unchanged
+        }
+        _propagate_edge_restraints(node_grid, 2, 2, restraints)
+
+        # Bottom edge: AND(c00, c10) = [1,0,1,0,0,0]
+        assert restraints["e_bot"].dofs == [1, 0, 1, 0, 0, 0]
+        # Left edge: c00 restrained but c01 missing → NOT propagated
+        assert "e_left" not in restraints
+        # Right edge: c10 restrained but c11 missing → NOT propagated
+        assert "e_right" not in restraints
+        # Top edge: c01/c11 missing → NOT propagated
+        assert "e_top" not in restraints
+        # Interior node untouched
+        assert "interior" not in restraints
+        # Corners keep their existing restraints
+        assert restraints["c00"].dofs == [1, 0, 1, 0, 0, 1]
+
+    def test_all_corners_fixed_propagates_full_fixity(self):
+        """All four corners fully fixed → every edge and interior node fixed."""
+        node_grid = [
+            ["c00", "e_bot", "c10"],
+            ["e_left", "interior", "e_right"],
+            ["c01", "e_top", "c11"],
+        ]
+        restraints = {
+            "c00": Restraint(dofs=[1, 1, 1, 1, 1, 1]),
+            "c10": Restraint(dofs=[1, 1, 1, 1, 1, 1]),
+            "c11": Restraint(dofs=[1, 1, 1, 1, 1, 1]),
+            "c01": Restraint(dofs=[1, 1, 1, 1, 1, 1]),
+        }
+        _propagate_edge_restraints(node_grid, 2, 2, restraints)
+
+        for eid in ("e_bot", "e_top", "e_left", "e_right"):
+            assert restraints[eid].dofs == [1, 1, 1, 1, 1, 1]
+        assert restraints["interior"].dofs == [1, 1, 1, 1, 1, 1]
+
+    def test_interior_node_gets_common_dof_only(self):
+        """Interior node receives only the DOFs common to ALL four corners."""
+        node_grid = [
+            ["c00", "e_bot", "c10"],
+            ["e_left", "interior", "e_right"],
+            ["c01", "e_top", "c11"],
+        ]
+        # Bottom corners X-only; top corners X+Y → common across all four = X.
+        restraints = {
+            "c00": Restraint(dofs=[1, 0, 0, 0, 0, 0]),
+            "c10": Restraint(dofs=[1, 0, 0, 0, 0, 0]),
+            "c11": Restraint(dofs=[1, 1, 0, 0, 0, 0]),
+            "c01": Restraint(dofs=[1, 1, 0, 0, 0, 0]),
+        }
+        _propagate_edge_restraints(node_grid, 2, 2, restraints)
+
+        assert restraints["interior"].dofs == [1, 0, 0, 0, 0, 0]
+        # Edge ANDs are per-edge — top edge keeps its own Y bit.
+        assert restraints["e_top"].dofs == [1, 1, 0, 0, 0, 0]
+
+    def test_interior_node_skipped_when_no_common_dof(self):
+        """No single DOF present in all four corners → interior stays free."""
+        node_grid = [
+            ["c00", "e_bot", "c10"],
+            ["e_left", "interior", "e_right"],
+            ["c01", "e_top", "c11"],
+        ]
+        # c11 is Y-only → the X bit is lost across the four → no common DOF.
+        restraints = {
+            "c00": Restraint(dofs=[1, 0, 0, 0, 0, 0]),
+            "c10": Restraint(dofs=[1, 0, 0, 0, 0, 0]),
+            "c11": Restraint(dofs=[0, 1, 0, 0, 0, 0]),
+            "c01": Restraint(dofs=[1, 1, 0, 0, 0, 0]),
+        }
+        _propagate_edge_restraints(node_grid, 2, 2, restraints)
+
+        assert "interior" not in restraints
+
+    def test_no_propagation_when_restraints_empty(self):
+        """Empty restraints dict → no keys added."""
+        node_grid = [
+            ["c00", "e_bot", "c10"],
+            ["e_left", "interior", "e_right"],
+            ["c01", "e_top", "c11"],
+        ]
+        restraints: dict = {}
+        _propagate_edge_restraints(node_grid, 2, 2, restraints)
+        assert restraints == {}
+
+    def test_skips_below_2x2(self):
+        """n < 2 → no propagation (single-quad mesh has no edge nodes)."""
+        node_grid = [["c00", "c10"], ["c01", "c11"]]
+        restraints = {
+            "c00": Restraint(dofs=[1, 1, 1, 1, 1, 1]),
+            "c10": Restraint(dofs=[1, 1, 1, 1, 1, 1]),
+        }
+        _propagate_edge_restraints(node_grid, 1, 1, restraints)
+        assert set(restraints) == {"c00", "c10"}
+
+    def test_subdivide_area_mesh_propagates(self):
+        """``subdivide_area_mesh`` wires the helper for a 2×2 wall quad."""
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=0.0, y=4.0, z=0.0),
+            "3": Node(node_id="3", node_tag=3, x=0.0, y=4.0, z=3.0),
+            "4": Node(node_id="4", node_tag=4, x=0.0, y=0.0, z=3.0),
+        }
+        areas = {
+            "A1": AreaElement(
+                area_id="A1", area_tag=100, node_ids=["1", "2", "3", "4"], thickness=0.3
+            ),
+        }
+        restraints = {
+            "1": Restraint(dofs=[1, 1, 1, 1, 1, 1]),
+            "2": Restraint(dofs=[1, 1, 1, 1, 1, 1]),
+        }
+        _, _, new_nodes, _ = subdivide_area_mesh(
+            areas,
+            {"A1": "WALL_SEC"},
+            dict(nodes),
+            n=2,
+            next_tag=1000,
+            restraints=restraints,
+        )
+
+        # Base edge nodes (j=0, i=1), (j=0, i=2), etc. get full fixity
+        # from AND(1,1,1,1,1,1, 1,1,1,1,1,1) = all fixed.
+        # Node id pattern: A1_sub_{j}_{i}.
+        base_mid = new_nodes.get("A1_sub_0_1")
+        assert base_mid is not None
+        assert restraints["A1_sub_0_1"].dofs == [1, 1, 1, 1, 1, 1]
+
+        # Left edge mid (i=0, j=1): corners 1 & 4 → node 4 unrestrained
+        # → no propagation.
+        assert "A1_sub_1_0" not in restraints
+
+        # Interior node (j=1, i=1) untouched.
+        assert "A1_sub_1_1" not in restraints
