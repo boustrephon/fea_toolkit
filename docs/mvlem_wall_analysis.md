@@ -685,19 +685,52 @@ V = 100 kN reference dashed).
    becomes competitive at H/W ≳ 3–5.  For shear-critical walls use
    MVLEM_3D; for slender/flexure-dominated walls the layered path (or
    fiber pier strips, probe-only) is acceptable.
-4. **Material-tangent caution (OpenSeesPy 3.8.0.0).**  ``ConcreteCM``'s
-   initial tangent is ~37× softer than the passed ``Ec``, so the
-   MVLEM_3D gravity stage shows uz_g ≈ −ε₀·H (≈ −20 mm at H = 4 m) and
-   its elastic flexural compliance is inflated.  For a
-   stiffness-converged MVLEM_3D comparison, use ``Concrete01``
-   (E0 = 2·fc/εc0 exact) as in the opt-in fiber reference; the
-   LayeredShell path (ElasticIsotropic, E = 30 GPa) gives the correct
-   elastic uz_g ≈ −3e-4 m.
-5. **Recommendation.**  Compare the two paths at matched material
-   stiffness (``Concrete01``-concrete MVLEM_3D vs elastic LayeredShell),
-   or treat the MVLEM_3D numbers as the *shear-flexible* nonlinear
-   response and LayeredShell as the elastic bound — the bracket is the
-   useful output, not a single "correct" curve.
+4. **MVLEM_3D axial softness is geometric, not a material bug
+   (August 2026 calibration study).**  A calibration study
+   (``local/probe_mvlem_cm_ratio.py``) attempted to match the MVLEM_3D
+   axial stiffness to the elastic LayeredShell by scaling the
+   ``ConcreteCM`` input ``Ec`` (earlier suspected ~37× soft).  The
+   study disproved that hypothesis and established the softness as a
+   **kinematic/geometric property of the macro-element under corner-node
+   forces**:
+
+   * **uz·H is constant**.  Under the identical 7200 kN top-node
+     pre-load, the MVLEM_3D settlement is uz ≈ 0.08/H m at every height
+     (H = 2/4/8 m), whereas a bar-like wall would settle ∝ H.
+   * **Pure axial load produces lateral drift.**  The same axial pre-load
+     drifts the top nodes laterally by ux ≈ 0.02 m at every height — a
+     rigid-body rocking signature, not axial bar response.
+   * **The response is Ec-independent.**  Scaling the ConcreteCM input
+     ``Ec`` by 26.8× (the measured ``ec_factor``) leaves uz_cm
+     **bit-for-bit unchanged** (still −2.0001e-02 m at H = 4 m).  No
+     material-property knob can change the axial response.
+   * **Uncracked == loaded ratio.**  At 10 % of the pre-load the ratio
+     is identical to the full pre-load (100.22/26.76/6.46 vs
+     100.23/26.77/6.47) — the H-dependence scales linearly, which a
+     material (damage-path) explanation would not.
+   * **Concrete01 is a documented dead-end.**  Concrete01's zero-tangent
+     tension branch makes the MVLEM_3D section singular whenever any
+     fibre goes into tension — the model never converges, even on pure
+     axial 7200 kN (KrylovNewton + NewtonLineSearch + ModifiedNewton
+     all fail at ~35–40 % load factor).  The opt-in
+     ``mvlem_3d_concrete_law: "Concrete01"`` remains accepted but is
+     marked unusable; the corresponding integration tests are
+     ``xfail(run=False)``.
+
+   **Consequence:** the earlier "use Concrete01 to fix the stiffness"
+   recommendation (conclusion 4 of a prior revision) is withdrawn, and a
+   material-calibration ``ec_factor`` knob is deliberately **not**
+   implemented (it would be inert).  The 100–150× MVLEM_3D-vs-
+   LayeredShell gap at 100 kN remains dominated by the horizontal
+   ElasticPP shear spring (k = 0.1·G·A/h) plus this geometric axial
+   compliance — the bracket of responses is the useful output.
+5. **Recommendation.**  Treat the MVLEM_3D numbers as the
+   *shear-flexible* nonlinear response and LayeredShell as the elastic
+   bound — the bracket is the useful output, not a single "correct"
+   curve.  If an axially stiffer macro-wall is ever required,
+   investigate sub-dividing the wall vertically into multiple MVLEM_3D
+   elements (untested as of this writing) rather than calibrating
+   materials.
 
 ## 8. Local OpenSeesPy build (macOS arm64)
 
