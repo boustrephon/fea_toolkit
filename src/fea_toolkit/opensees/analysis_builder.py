@@ -1717,7 +1717,20 @@ class AnalysisBuilder:
         # _create_wall_uniaxial_materials).  The concrete must be a
         # genuine nonlinear law and the steel a Steel02, so route them
         # through the same ConcreteCM / Steel02 emission used by FSAM.
+        #
+        # NOTE (August 2026 calibration study, local/probe_mvlem_cm_ratio.py):
+        # the MVLEM_3D axial softness under corner-node pre-load is a
+        # geometric/kinematic property of the macro-element, NOT a
+        # ConcreteCM material-tangent bug.  Verified: uz_cm ∝ 1/H
+        # (uz·H = 0.08 m² constant), a pure-axial load produces lateral
+        # drift, and scaling the ConcreteCM input Ec (26.8×) changes
+        # uz_cm bit-for-bit not at all.  Concrete01 is unusable too (its
+        # zero-tangent tension branch makes the macro-element singular).
+        # Keep the default ConcreteCM — no material-calibration knob can
+        # change the axial response (see docs/mvlem_wall_analysis.md §7.1).
+        _mvlem01_only: set = set()
         self._wall_uniaxial_special_names: set = set()
+        _mvlem_concrete_law = self.config.get("mvlem_3d_concrete_law", "ConcreteCM")
         for _wall in self.mesh_model.wall_elements.values():
             if _wall.material_type != "uniaxial":
                 continue
@@ -1729,6 +1742,33 @@ class AnalysisBuilder:
                 self._wall_uniaxial_special_names.add(_wall.shear_name)
             if _wall.dummy_name:
                 self._wall_uniaxial_special_names.add(_wall.dummy_name)
+            if _mvlem_concrete_law == "Concrete01":
+                _mvlem01_only.update(_wall.concrete_names or [])
+        # Invert: only names that are referenced by at least one MVLEM_3D
+        # wall (not by a genuine FSAM nD law) qualify for Concrete01.
+        # A configured-but-unconsumed FSAM nD material does NOT force
+        # ConcreteCM — only FSAM materials that are actually created
+        # (referenced by a LayeredShell section layer or an
+        # SFI_MVLEM_3D / E_SFI_MVLEM_3D wall element) participate, because
+        # ConcreteCM is required for FSAM's getCrackingStrain() at runtime.
+        _fsam_consumed: set = set()
+        for _lss in self.mesh_model.layered_shell_sections.values():
+            for _layer in _lss.layers:
+                _fsam_consumed.add(_layer.nd_material)
+        for _wall in self.mesh_model.wall_elements.values():
+            if _wall.material_type == "uniaxial":
+                continue
+            _fsam_consumed.update(_wall.fsam_material_names or [])
+        _mvlem01_and_fsam: set = set()
+        for _nd in self.mesh_model.nd_materials.values():
+            if _nd.material_type != "FSAM" or _nd.name not in _fsam_consumed:
+                continue
+            for _rname in _nd.fsam_referenced_material_names():
+                if _rname in _mvlem01_only:
+                    _mvlem01_and_fsam.add(_rname)
+        _mvlem01_only -= _mvlem01_and_fsam
+        self._mvlem01_only = _mvlem01_only
+        self._mvlem_concrete_law = _mvlem_concrete_law
 
         ssf = stress_scale_factor(self.mesh_model.units)
 
@@ -1763,6 +1803,36 @@ class AnalysisBuilder:
                     # Tension-side values (ft, et, rt, xcrp) stay positive.
                     epcc = -abs(float(self.config.get("fsam_conc_epcc", DEFAULT_FSAM_CONC_EPCC)))
                     xcrn = -abs(float(self.config.get("fsam_conc_xcrn", DEFAULT_FSAM_CONC_XCRN)))
+                    # Opt-in Concrete01 for pure MVLEM_3D references:
+                    # epsc0 = 2fc/Ec makes E0 = Ec exactly.  This is a
+                    # documented dead-end for MVLEM_3D (Concrete01's
+                    # zero-tangent tension branch makes the macro-element
+                    # singular — the section goes singular whenever any
+                    # fibre goes into tension; see
+                    # docs/mvlem_wall_analysis.md §7.1 and
+                    # local/probe_mvlem_cm_ratio.py).  Kept as an
+                    # accepted-but-discouraged option.
+                    if mat_name in getattr(self, "_mvlem01_only", set()):
+                        epcc_v = -abs(
+                            float(self.config.get("fsam_conc_epcc", DEFAULT_FSAM_CONC_EPCC))
+                        )
+                        fpc_v = -abs(fpc)
+                        with contextlib.suppress(Exception):
+                            ops.uniaxialMaterial(
+                                "Concrete01",
+                                tag,
+                                fpc_v,
+                                epcc_v,
+                                0.2 * abs(fpc),
+                                epcc_v * 8.0,
+                            )
+                        continue
+                    # Default ConcreteCM emission.  The input Ec is
+                    # intentionally NOT scaled: the calibration study
+                    # (local/probe_mvlem_cm_ratio.py) proved the MVLEM_3D
+                    # axial stiffness is independent of the concrete Ec
+                    # (a 26.8× input scaling changed uz_cm not at all), so
+                    # any mvlem_3d_ec_factor knob would be inert.
                     with contextlib.suppress(Exception):
                         ops.uniaxialMaterial(
                             "ConcreteCM",
