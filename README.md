@@ -684,7 +684,8 @@ all other area loads are ignored.
 
 3. **Load Combinations and Analysis Types**  
    - ~~`MassSource`~~ ✅ Parsed by `_get_mass_sources()` and stored in `SAPModelData.mass_sources`.  
-   - `LoadCase`, `LoadCombination` dataclasses defined in `sap_data.py` — parsing of `LOAD CASES` and `LOAD COMBINATIONS` tables still needed.  
+   - ~~`LoadCase`~~ ✅ Parsed by `get_load_cases()` — `LOAD CASE DEFINITIONS`, `CASE - RESPONSE SPECTRUM` (general + load assignments), `CASE - MODAL`, `CASE - STATIC` (see the "Key Components Implemented" table above).  \
+   - `LoadCombination` dataclass defined in `sap_data.py` — parsing of the `LOAD COMBINATIONS` table still needed.  
    - In `AnalysisBuilder`, allow the user to select which load cases/combinations to run with combination factors (e.g., `1.2 DL + 1.6 LL`).
 
 4. **Advanced Analyses**  
@@ -742,10 +743,10 @@ cross‑reference section.
    - Create a user guide (examples, how to run different analyses).
 
 10. **Testing**  
-    - `test_parser.py` covers basic parsing; `test_model.py` is yet to be populated.  
-    - Add tests for `split_elements` with trapezoidal loads.  
-    - Add unit tests for `SectionLibrary`, `SAPModelData` dataclasses, and geometry utilities.  
-    - Add integration tests for the two-stage pipeline (`Preprocessor` → `AnalysisBuilder`) using small test models.
+    - ~~`test_model.py` is yet to be populated~~ ✅ Populated — CSM/bilinearization, Euler buckling benchmark, load dataclasses, Mander confinement wiring, mesh edge-restraint propagation.  
+    - ~~Add unit tests for `SectionLibrary`, `SAPModelData` dataclasses, and geometry utilities~~ ✅ Covered in `test_model.py`, `test_geometry.py`, `test_units.py`, `test_confinement.py`.  
+    - ~~Add integration tests for the two-stage pipeline~~ ✅ Covered in `test_workflows.py`, `test_rc_pushover.py`, `test_layered_shell.py`, `test_wall_pushover.py`.  
+    - ~~Add tests for `split_elements`~~ ✅ `TestParserModelIntegration::test_split_elements{,_tracking}` and `TestBuildWorkflow::test_build_with_split_elements`; trapezoidal-load decomposition remains an open sub-item.
 
 #### Low Priority
 

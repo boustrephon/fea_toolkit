@@ -60,7 +60,8 @@ src/fea_toolkit/plotting/viz.py:
 - `tests/test_model.py`: removed two stale CSM tests (`test_pushover_to_adrs_missing_control_node`, `test_equal_energy_hardening_converges`) that asserted WIP-diff behavior from an uncommitted csm.py diff; no value retained.
 
 ## OUT OF SCOPE / NOTED
-- The uncommitted `src/fea_toolkit/model/csm.py` WIP diff (63 lines: `_modal_participation` helper, peak_idx clamping, performance-point fallback period, control-node warning) remains uncommitted. Tests that asserted its in-progress behavior were removed; the remaining 27 CSM tests pass against the current state.
+- ~~The uncommitted `src/fea_toolkit/model/csm.py` WIP diff (63 lines: `_modal_participation` helper, peak_idx clamping, performance-point fallback period, control-node warning) remains uncommitted.~~ **RESOLVED (2026-08-16)** — the WIP was subsequently committed
+  (`b29505d` CSM sign folding + performance-point robustness, `18caea7` effective-modal-mass terminology + all-rejected-modes ValueError, `f4a8c3b` require `nodal_masses`, `453ea90` mode-selection docs). The working tree is clean; the ~27 CSM/bilinearization tests in `tests/test_model.py` pass against the committed state. The `_modal_participation` helper, `peak_idx` clamping (`csm.py` `bilinearize_composite`), performance-point fallback period, and control-node warning are all present in `src/fea_toolkit/model/csm.py`.
 
 ## CURRENT CONCLUSIONS — 2026-08-04 (recorded, then confirmed against online docs)
 
