@@ -94,13 +94,28 @@ _PUSHOVER_RC_DEFAULTS: dict = {
     "geom_transf_type": "PDelta",
     "beam_integration": "Lobatto",
     "simplify_distributed_loads": False,
+    # Solver: relaxed RC fibre settings (see docs/_pending_work.md,
+    # 2026-08-04).  forceBeamColumn performs its own internal state
+    # determination on top of the global solver, so the strict generic
+    # defaults (NormDispIncr 1e-6 / 10 / NewtonLineSearch) stall around
+    # 0.006 m control displacement on full RC buildings.  The confirmed
+    # settings (v6 rc_config) are NormDispIncr 1e-4 / 20 / Newton, with
+    # the per-step NormUnbalance + ModifiedNewton(-initial) fallback.
     "solver_test_type": "NormDispIncr",
-    "solver_test_tol": 1e-6,
-    "solver_test_max_iter": 10,
-    "solver_algorithm": "NewtonLineSearch",
+    "solver_test_tol": 1e-4,
+    "solver_test_max_iter": 20,
+    "solver_algorithm": "Newton",
     "solver_constraints": "Transformation",
     "solver_system": "BandGen",
     "gravity_num_substeps": 10,
+    # Explicit per-step fallback chain (also applied by default by the
+    # builder — must stay in sync with
+    # AnalysisBuilder.PUSHOVER_FALLBACK_DEFAULTS).
+    "pushover_fallback_defaults": {
+        "solver_test_type": "NormUnbalance",
+        "solver_test_max_iter": 1000,
+        "solver_algorithm": "ModifiedNewton",
+    },
     "constraint_method": "spring",
     "brace_type": "beam",
 }
