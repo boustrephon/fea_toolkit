@@ -209,9 +209,24 @@ comfortably.  Below is a realistic assessment of what remains.
       capacity (M ≈ 255 kN·m at P ≠ 0 vs ≈ 195 at P = 0).  Tests
       therefore **bracket** the experiment (peak ratio ∈ [1, 2], secant
       stiffness ∈ [0.5, 2] × experimental, first-yield load exceeded) and
-      report the bias.  **Follow-up (not done):** shear-flexible section
-      aggregation (shear spring / `SectionAggregator`) and/or
-      bond-slip springs to close the stiffness gap — tracked in
+      report the bias.  **Second pass (2026-08-16):** the element
+      formulation was part of the bias — re-running the fibre rebuild on
+      ``forceBeamColumn`` (flexibility-based) instead of
+      ``dispBeamColumn`` (displacement-based) drops the peak to ≈ 291 kN
+      (0.88 × experimental) and the secant @ 50 mm to ≈ 5.6 kN/mm
+      (0.93 × experimental), inside the original ±10–15 % band with no
+      calibration.  ``dispBeamColumn`` (Euler-Bernoulli) over-stiffens as
+      the fibre sections soften *and* never engages section shear DOFs, so
+      the new ``aggregate_shear`` / ``SectionAggregator`` option (elastic
+      ``GA_v`` on Vy/Vz, config keys ``aggregate_shear``,
+      ``shear_area_factor``, ``fiber_element_type``) is inert for it and
+      the builder now warns.  The elastic shear term itself contributes
+      only ≈ 0.2 % for these members (the experimental ~20 % shear share is
+      a *cracked*-shear phenomenon).  The forceBeamColumn variant is
+      covered by ``TestVecchioEmaraShearFlexibleVariant`` (peak ratio
+      [0.75, 1.15], secant [0.8, 1.2] × experimental); it still lacks the
+      experimental post-peak descent (the model plateaus), which needs
+      nonlinear cracked-shear / bond-slip modelling — tracked in
       `docs/_pending_work.md`.
    5. Vecchio & Balopoulou (1990) variant (cut-back top reinforcement):
       **not re-run** — deferred with the shear-flexible follow-up.

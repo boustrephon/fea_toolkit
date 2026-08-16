@@ -235,6 +235,24 @@ class AnalysisBuilder:
             # Priestley (1996) formula can predict very large strains;
             # NZSEE C5 uses 0.05.  Mirrors ``ConfinementData.ecu_max``.
             "confined_ecu_max": 0.025,
+            # ── Shear-flexible section aggregation (opt-in) ──
+            # Wrap fiber sections in a SectionAggregator with an elastic
+            # shear material (GA_v on Vy/Vz) so beam-column members gain
+            # the Timoshenko transverse-shear flexibility that plain fiber
+            # sections lack.  Off by default — existing models keep their
+            # shear-rigid Euler-Bernoulli response unchanged.
+            #
+            # NOTE: section shear DOFs are only engaged by flexibility-
+            # based elements — use ``fiber_element_type =
+            # "forceBeamColumn"`` for the shear aggregation to take effect.
+            # ``dispBeamColumn`` (Euler-Bernoulli, displacement-based)
+            # never computes section shear deformation, so aggregation is
+            # silently inert for it.
+            "aggregate_shear": False,
+            "shear_area_factor": 5.0 / 6.0,  # rectangular A_v = f·A
+            # Element type used by the fiber-section pushover rebuild
+            # (rebuild_with_fiber_sections).  Defaults to dispBeamColumn.
+            "fiber_element_type": "dispBeamColumn",
         }
         # Merge solver defaults from the class constant
         defaults.update(self.PUSHOVER_SOLVER_DEFAULTS)
@@ -377,7 +395,7 @@ class AnalysisBuilder:
             buckling to develop under compression.
         """
         overrides: dict[str, Any] = {
-            "element_type": "dispBeamColumn",
+            "element_type": self.config.get("fiber_element_type", "dispBeamColumn"),
             "create_fiber_sections": True,
             "use_elastic_sections": False,
         }
@@ -2142,7 +2160,14 @@ class AnalysisBuilder:
                     ops.section("Elastic", tag, E_mod, _A, _I33, _I22, G_mod, _J)
                     return
 
-                ops.section("Fiber", tag, "-GJ", _J)
+                # When shear aggregation is enabled the fiber section must
+                # live at an internal tag so the SectionAggregator can take
+                # the public ``tag`` (elements keep referencing ``tag``).
+                fiber_tag = tag
+                if self.config.get("aggregate_shear"):
+                    fiber_tag = self._next_fiber_mat_tag
+                    self._next_fiber_mat_tag += 1
+                ops.section("Fiber", fiber_tag, "-GJ", _J)
                 for entry in entries:
                     if entry[0] in ("rect", "circ", "quad"):
                         ops.patch(*entry)
@@ -2150,6 +2175,31 @@ class AnalysisBuilder:
                         ops.layer("straight", *entry[1:])
                     elif entry[0] == "circ_layer":
                         ops.layer("circ", *entry[1:])
+
+                # ── Shear-flexible aggregation (opt-in) ───────────
+                if self.config.get("aggregate_shear"):
+                    # Section shear DOFs are only engaged by flexibility-
+                    # based elements; Euler-Bernoulli (dispBeamColumn /
+                    # elasticBeamColumn) elements never compute section
+                    # shear deformation, so aggregation would be silently
+                    # inert.  Warn once per build.
+                    _etype = self.config.get("element_type", "")
+                    if _etype != "forceBeamColumn" and not getattr(
+                        self, "_warned_shear_element", False
+                    ):
+                        import warnings
+
+                        warnings.warn(
+                            f"aggregate_shear is set but element_type={_etype!r} does not "
+                            "engage section shear DOFs (Euler-Bernoulli element). The "
+                            "shear aggregation will have no effect — set "
+                            "fiber_element_type='forceBeamColumn' so the pushover rebuild "
+                            "uses a flexibility-based element.",
+                            UserWarning,
+                            stacklevel=2,
+                        )
+                        self._warned_shear_element = True
+                    self._wrap_fiber_section_with_shear(tag, fiber_tag, G_mod, _A)
 
                 if self.config.get("verbose", False):
                     print(f"  Section {tag}: {sec.name} (Fiber, {len(entries)} patches)")
@@ -2186,6 +2236,37 @@ class AnalysisBuilder:
             ops.section(
                 "Elastic", tag, E_mod, _A * amod, _I33 * i33mod, _I22 * i22mod, G_mod, _J * jmod
             )
+
+    def _wrap_fiber_section_with_shear(
+        self, agg_tag: int, fiber_tag: int, G_mod: float, A: float
+    ) -> None:
+        """Wrap a fiber section in a SectionAggregator with elastic shear.
+
+        Plain fiber sections are shear-rigid (Euler–Bernoulli): the
+        ``dispBeamColumn`` / ``forceBeamColumn`` elements carrying them have
+        no transverse-shear deformation.  For RC frames with stocky members
+        where shear deformations are non-negligible (e.g. the Vecchio &
+        Emara 1992 benchmark), this method wraps the fiber section in a
+        ``section Aggregator`` that adds an ``Elastic`` uniaxial material on
+        the section's ``Vy``/``Vz`` DOFs with rigidity
+        :math:`GA_v = G_{mod} \\cdot (f \\cdot A)` where ``f`` is the
+        shear-area factor (5/6 for rectangles by default).
+
+        Args:
+            agg_tag: OpenSees tag of the SectionAggregator — the tag the
+                frame elements reference.
+            fiber_tag: OpenSees tag of the base fiber section.
+            G_mod: Shear modulus in model units.
+            A: Gross area of the section (model units²).
+        """
+        Av = float(self.config.get("shear_area_factor", 5.0 / 6.0)) * (A or 0.0)
+        if (G_mod or 0.0) <= 0.0 or Av <= 0.0:
+            return  # nothing to aggregate (degenerate material/area)
+        GAv = G_mod * Av
+        sh_tag = self._next_fiber_mat_tag
+        self._next_fiber_mat_tag += 1
+        ops.uniaxialMaterial("Elastic", sh_tag, GAv)
+        ops.section("Aggregator", agg_tag, sh_tag, "Vy", sh_tag, "Vz", "-section", fiber_tag)
 
     # ── Shell elements ───────────────────────────────────────────
 

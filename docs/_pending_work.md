@@ -96,10 +96,26 @@ src/fea_toolkit/plotting/viz.py:
   confined/hardening section capacity.  Elastic-to-first-yield range and
   section capacity are correct.  `deprecation_plan.md` Gap 4 → 🟡 with
   the measured numbers.
-- **Follow-up (deferred):** shear-flexible section aggregation (shear
-  spring / SectionAggregator) and/or bond-slip springs to close the
-  stiffness gap; Vecchio & Balopoulou (1990) variant re-run.
-- Full suite: **887 passed, 4 xfailed** (882 + 5 benchmark tests).
+- **Second pass (2026-08-16): element formulation was part of the bias.**
+  Re-running the fibre rebuild on `forceBeamColumn` instead of
+  `dispBeamColumn` drops the peak to ≈ 291 kN (0.88 × experimental) and
+  the secant @ 50 mm to ≈ 5.6 kN/mm (0.93 × experimental) — inside the
+  original ±10–15 % band with no calibration.  Added `aggregate_shear` /
+  `shear_area_factor` / `fiber_element_type` config keys
+  (`AnalysisBuilder`): `SectionAggregator` + elastic `GA_v` on Vy/Vz.
+  Discovery: `dispBeamColumn` (Euler-Bernoulli) never engages section
+  shear DOFs, so aggregation is inert for it (builder now warns);
+  `forceBeamColumn` (flexibility-based) engages them.  The elastic shear
+  term contributes only ≈ 0.2 % for these members — the experimental
+  ~20 % shear share is a *cracked*-shear phenomenon.  New tests:
+  `TestVecchioEmaraShearFlexibleVariant` (peak ratio [0.75, 1.15],
+  secant [0.8, 1.2] × experimental, inert-with-warning regression).
+- **Follow-up (deferred):** nonlinear cracked-shear degradation / bond-slip
+  springs to reproduce the experimental *post-peak descent* (the
+  forceBeamColumn model plateaus ≈ 290 kN while the experiment softened
+  after ≈ 50 mm); Vecchio & Balopoulou (1990) variant re-run once the
+  shear model lands.
+- Full suite: **890 passed, 4 xfailed** (882 + 8 benchmark tests).
 
 ## DONE (deprecation-programme Phase 2 — Gap 3, 2026-08-16)
 - **3D-only policy documented** — `.clinerules` §3.11 (analysis is
