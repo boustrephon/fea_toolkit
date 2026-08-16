@@ -3968,12 +3968,19 @@ class TestBuilderAreaMeshing:
             n1 = mm.nodes.get("1_mesh_0_1")  # (6, 0, 0)
             assert n1 is not None, "bottom-edge mesh node missing"
 
-            # No mesh node IDs should appear in MeshModel restraints
+            # Mesh nodes SHOULD appear in MeshModel restraints — the Preprocessor
+            # propagates edge restraints into mm.restraints via
+            # geometry._propagate_edge_restraints (single source of truth for
+            # Tcl export / recorder.py).  The AnalysisBuilder applies them once.
             mesh_ids = {nid for nid in mm.nodes if "_mesh_" in nid}
             restrained_mesh = mesh_ids & set(mm.restraints.keys())
-            assert len(restrained_mesh) == 0, (
-                f"mesh nodes should NOT appear in mm.restraints: {restrained_mesh}"
+            assert len(restrained_mesh) >= 2, (
+                f"expected propagated mesh restraints, got {restrained_mesh}"
             )
+            # Bottom edge (1→2): AND of two fully-fixed corners.
+            assert mm.restraints["1_mesh_0_1"].dofs == [1, 1, 1, 1, 1, 1]
+            # Left edge (1→4): AND of fully-fixed and pinned corners.
+            assert mm.restraints["1_mesh_1_0"].dofs == [1, 1, 1, 0, 0, 0]
 
             # Check the mesh node at (6,0,0) is fixed in OpenSees
             mesh_tag = b._node_tag_from_id("1_mesh_0_1")
