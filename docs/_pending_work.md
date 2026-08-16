@@ -75,6 +75,21 @@ src/fea_toolkit/plotting/viz.py:
   `README.md` / `viewer.md` deprecated-plot examples → replacements.
 
 ## OUT OF SCOPE / NOTED
+
+## DONE (deprecation-programme Phase 2 — Gap 3, 2026-08-16)
+- **3D-only policy documented** — `.clinerules` §3.11 (analysis is
+  `ndm=3`/`ndf=6` by design; no `ndm`/`ndf` dispatch in the main workflow;
+  2D OpenSees is test-only), `docs/llm_guide.md` §2 note + §6 rule,
+  `README.md` overview bullet.  `deprecation_plan.md` Gap 3 corrected
+  (was wrongly marked "code complete" — the 2D/3D dispatch never existed).
+- **3D RC validation** — `make_rc_frame_3d()` (single-storey 2-bay × 2-bay
+  RC moment frame, genuine Y extent) + `tests/test_rc_3d.py`: geometry,
+  symmetric X/Y modal periods, and 3D pushover convergence with yielding.
+- **2D hand-check (tests-only)** — `tests/test_rc_2d_cantilever.py`:
+  standalone `ndm=2` `forceBeamColumn` + `Lobatto` RC cantilever reusing
+  `ConcreteRectangularSection.to_fiber_patches()` + C30/Rebar values;
+  peak base shear within ±15 % of the ACI rectangular-block plastic moment.
+- Full suite: **882 passed, 4 xfailed** (878 + 3 3D tests + 1 2D test).
 - ~~The uncommitted `src/fea_toolkit/model/csm.py` WIP diff (63 lines: `_modal_participation` helper, peak_idx clamping, performance-point fallback period, control-node warning) remains uncommitted.~~ **RESOLVED (2026-08-16)** — the WIP was subsequently committed
   (`b29505d` CSM sign folding + performance-point robustness, `18caea7` effective-modal-mass terminology + all-rejected-modes ValueError, `f4a8c3b` require `nodal_masses`, `453ea90` mode-selection docs). The working tree is clean; the ~27 CSM/bilinearization tests in `tests/test_model.py` pass against the committed state. The `_modal_participation` helper, `peak_idx` clamping (`csm.py` `bilinearize_composite`), performance-point fallback period, and control-node warning are all present in `src/fea_toolkit/model/csm.py`.
 

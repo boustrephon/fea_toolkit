@@ -157,6 +157,20 @@ New analysis code must follow this pattern. Do NOT add analysis methods to the p
 - **Gray-for-missing principle**: dense representations (heatmaps) use gray for missing
   data; sparse representations (3D blobs) simply omit absent elements.
 
+### 3.11 3D-only analysis (main workflows)
+- The toolkit's **analysis workflows are 3D-only** (``ndm=3``, ``ndf=6``).
+  ``AnalysisBuilder.build_domain()`` deliberately emits
+  ``ops.model("basic", "-ndm", 3, "-ndf", 6)`` — do **not** add
+  ``ndm``/``ndf`` dimensionality detection or 2D dispatch to the
+  Preprocessor → AnalysisBuilder path.
+- **"2D" models in the toolkit are planar 3D models**: nodes lie in a
+  plane (e.g. the X–Z vertical plane) and out-of-plane DOFs are restrained
+  (see ``make_rc_frame_model()`` in ``examples/sample_model.py``).
+- **2D OpenSees analyses may be used in tests only** — e.g. standalone
+  ``ndm=2`` hand-check benchmarks that reuse the model-layer section/material
+  code — never as part of the production workflow.  Do not add a 2D
+  element-creation branch to the builder.
+
 
 ## 4. Naming & Style Rules
 

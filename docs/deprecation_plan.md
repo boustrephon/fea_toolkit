@@ -145,14 +145,20 @@ comfortably.  Below is a realistic assessment of what remains.
    (`top_cover` / `bot_cover` fields) would be a small extension but no
    concrete use case demands it yet.  Defer until needed.
 
-3. **2D vs 3D model dispatch** — **🟡 Code complete, needs validation.**
-   The Preprocessor detects model dimensionality from SAP geometry and
-   records `MeshModel.ndm` / `.ndf` (2 or 3); AnalysisBuilder reads
-   those values and applies them to the OpenSees domain (`model Basic
-   -ndm {ndm} -ndf {ndf}`) when constructing the model.
-   `forceBeamColumn` + `Lobatto` + `PDelta` is the default pushover path.
-   The remaining work is running real RC models through both dims and
-   verifying convergence — a validation task, not a code gap.
+3. **2D vs 3D model dispatch** — **✅ Resolved as designed — 3D-only.**
+   Gap closed 2026-08-16.  The toolkit's analysis workflows are **3D-only**
+   by design: ``AnalysisBuilder.build_domain()`` deliberately emits
+   ``ops.model('basic', '-ndm', 3, '-ndf', 6)`` and there is no
+   ``ndm``/``ndf`` detection or 2D dispatch in the Preprocessor (an earlier
+   draft of this plan claimed the opposite — that was incorrect).  "2D"
+   models in the toolkit are **planar 3D models** (nodes in a plane,
+   out-of-plane DOFs restrained; e.g. ``make_rc_frame_model()``).  **2D
+   OpenSees analyses may be used in tests only** (standalone ``ndm=2``
+   hand-check benchmarks) — never as part of the main workflow.  The
+   policy is recorded in ``.clinerules`` §3.11 and ``docs/llm_guide.md``
+   §6.  Validation: the 3D pushover path is exercised for both planar RC
+   frames (``make_rc_frame_model``) and genuinely 3D RC frames
+   (``make_rc_frame_3d``, added 2026-08-16).
 
 4. **End-to-end validation benchmark** — **🔴 Not started — concrete plan
    identified.**  The recommended reference case is the **Vecchio & Emara

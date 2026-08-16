@@ -106,6 +106,12 @@ Returned dict keys for pushover:
   pushover_results: Dict[direction, raw_step_data]
 ```
 
+**3D-only**: all analysis workflows run in the OpenSees 3D domain
+(`ndm=3`, `ndf=6`).  Planar ("2D") frames are modelled as planar 3D models
+with out-of-plane restraints.  **2D OpenSees analyses are used only in
+tests** (standalone hand-check benchmarks), never in the toolkit pipeline —
+see `.clinerules` §3.11.
+
 ### Post-Processing
 
 ```
@@ -347,6 +353,7 @@ subset = sel.filter_model(model)
 | Always call `ops.wipe()` in test teardown | OpenSees global state persists |
 | Use `field(default_factory=...)` for mutable defaults in dataclasses | Prevents shared mutable state |
 | Use `from typing import ...` for type annotations | Python 3.9 compatibility |
+| Never add `ndm`/`ndf` dispatch to the main workflow | Analysis is 3D-only (`ndm=3`, `ndf=6`); 2D OpenSees is test-only (`.clinerules` §3.11) |
 
 ---
 
