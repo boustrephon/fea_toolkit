@@ -23,6 +23,10 @@ The goal is to create a Python package `fea_toolkit` that:
   (`elasticBeamColumn`, `forceBeamColumn`, etc.), applies loads, and runs
   **linear static**, **modal**, **response spectrum**, and **pushover**
   analysis.
+- **3D-only analysis engine** — all analysis runs in the OpenSees 3D
+  domain (`ndm=3`, `ndf=6`); planar ("2D") frames are modelled as planar
+  3D models with out-of-plane restraints.  2D OpenSees analyses are used
+  only in tests, never in the main workflow.
 - **Exports to Rhino 8** for 3-D visualisation with lightweight extrusion
   solids, section-based layers, and FEA metadata for Grasshopper.
 

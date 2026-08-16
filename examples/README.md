@@ -30,9 +30,20 @@ python examples/basic_usage.py /path/to/model.s2k
 
 ## Sample model
 
-`examples/sample_model.py` provides a simple 10 m steel cantilever column
-used by the `--sample` flag.  It has a single I‑section, DEAD and WIND
-load patterns, and a MASS SOURCE — suitable for all example types.
+`examples/sample_model.py` provides three programmatic models (no `.s2k`
+file needed):
+
+- `make_sample_model()` — a simple 10 m steel cantilever column with a
+  single I‑section, DEAD and WIND load patterns, and a MASS SOURCE;
+  used by the `--sample` flag and suitable for all example types.
+- `make_rc_frame_model()` — a single-storey, 1-bay reinforced-concrete
+  moment frame (kN-m units, C30/Rebar/Q355) that yields in pushover with
+  fibre sections; the representative nonlinear model for the CSM
+  performance-point workflow.
+- `make_rc_frame_3d()` — a genuinely **3D** single-storey, 2-bay × 2-bay
+  RC moment frame (nodes with non-zero Y), exercising the full 3D
+  OpenSees domain (`ndm=3`, `ndf=6`); used to validate the 3D-only
+  pushover path (see `docs/deprecation_plan.md` Gap 3).
 
 ## Output directory
 
