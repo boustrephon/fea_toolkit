@@ -167,6 +167,7 @@ class AnalysisBuilder:
         self.load_totals: dict[str, float] = {}
         self._sw_load_totals: dict[str, dict[str, float]] = {}
         self._gravity_load_totals: dict[str, float] = {}
+        self._joint_load_totals: dict[str, dict[str, float]] = {}
 
         # Model log
         self._model_log: Optional[Any] = None
@@ -3092,6 +3093,7 @@ class AnalysisBuilder:
         self.load_totals = {}
         self._sw_load_totals = {}
         self._gravity_load_totals = {}
+        self._joint_load_totals = {}
 
         # ── Pre-compute frame + area self-weight per-node ────────
         # Stored as a list of (node_tag, fz) tuples; applied per-pattern
@@ -3341,6 +3343,37 @@ class AnalysisBuilder:
                     )
                 self._sw_load_totals[pname]["fz"] += _sw_fz_total
                 load_total += sw_total
+
+            # ── Joint loads (SAP2000 "JOINT LOADS - FORCE") ──────────
+            # Point forces/moments at joints are applied as nodal loads.
+            # Previously these were parsed and carried through the
+            # Preprocessor but never emitted to the OpenSees domain
+            # (Gap 4 discovery — the Vecchio & Emara benchmark's 700 kN
+            # column loads were silently dropped).
+            for jl in getattr(self.mesh_model, "joint_loads", []):
+                if jl.pattern != pname:
+                    continue
+                node = self.mesh_model.nodes.get(jl.node_id)
+                if node is None:
+                    continue
+                ops.load(
+                    node.node_tag,
+                    jl.fx * scale,
+                    jl.fy * scale,
+                    jl.fz * scale,
+                    jl.mx * scale,
+                    jl.my * scale,
+                    jl.mz * scale,
+                )
+                load_total += (
+                    abs(jl.fx) + abs(jl.fy) + abs(jl.fz) + abs(jl.mx) + abs(jl.my) + abs(jl.mz)
+                )
+                if pname not in self._joint_load_totals:
+                    self._joint_load_totals[pname] = dict.fromkeys(
+                        ("fx", "fy", "fz", "mx", "my", "mz"), 0.0
+                    )
+                for _k in ("fx", "fy", "fz", "mx", "my", "mz"):
+                    self._joint_load_totals[pname][_k] += getattr(jl, _k) * scale
 
             self.load_totals[pname] = load_total
 
@@ -3866,9 +3899,15 @@ class AnalysisBuilder:
                     continue
 
         # ── Gravity load/reaction sanity check ──────────────────
-        if extract_reactions and self._gravity_load_totals:
+        if extract_reactions and (
+            self._gravity_load_totals or self._joint_load_totals or self._sw_load_totals
+        ):
             total_applied_fz = 0.0
             for totals in self._gravity_load_totals.values():
+                total_applied_fz += totals.get("fz", 0.0)
+            for totals in self._joint_load_totals.values():
+                total_applied_fz += totals.get("fz", 0.0)
+            for totals in self._sw_load_totals.values():
                 total_applied_fz += totals.get("fz", 0.0)
 
             total_reaction_fz = 0.0
