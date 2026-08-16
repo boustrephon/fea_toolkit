@@ -10,6 +10,7 @@ import pytest
 from fea_toolkit.model.csm import (
     bilinearize_composite,
     bilinearize_equal_energy,
+    bilinearize_rc,
     bilinearize_stiffness_change,
 )
 from fea_toolkit.model.geometry import (
@@ -4811,6 +4812,48 @@ class TestCsmModule:
         assert pp["V_base"] > 1e-6
         assert isinstance(pp["converged"], bool)
 
+    def test_compute_performance_point_accepts_de_luca_method(self):
+        """``bilinearize_method='de_luca_10pct'`` / ``'rc'`` dispatch to
+        :func:`bilinearize_rc` without error and report the method used."""
+        from fea_toolkit.model.csm import compute_performance_point
+
+        pushover = {
+            "control_node": 1,
+            "control_disp": [0.0, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05],
+            "base_shear": [0.0, 50.0, 100.0, 180.0, 240.0, 280.0, 300.0],
+        }
+        modal = {
+            "modal_props": {
+                "partiMassRatiosMX": [0.8, 0.15],
+                "partiMassMX": [800.0, 150.0],
+            },
+            "periods": [0.5, 0.12],
+            "nodal_masses": {1: 1000.0},
+        }
+        shapes = {0: {1: (1.0, 0.0, 0.0)}, 1: {1: (0.0, 1.0, 0.0)}}
+        periods = [0.0, 0.1, 0.2, 0.5, 1.0, 2.0, 3.0]
+        accels = [3.0, 3.0, 3.0, 1.5, 0.8, 0.4, 0.2]
+
+        for name in ("de_luca_10pct", "rc"):
+            pp = compute_performance_point(
+                pushover,
+                modal,
+                shapes,
+                periods,
+                accels,
+                direction="X",
+                damping_ratio=0.05,
+                max_iter=20,
+                tol=0.05,
+                bilinearize_method=name,
+            )
+            assert isinstance(pp, dict)
+            assert pp["bilinearize_method"].startswith("de_luca_10pct"), (
+                f"method {name}: expected de_luca_10pct*, got {pp['bilinearize_method']}"
+            )
+            assert pp["S_dy"] > 0
+            assert pp["S_ay"] > 0
+
     def test_compute_performance_point_too_few_points(self):
         """Raises ValueError with fewer than 3 valid data points."""
         from fea_toolkit.model.csm import compute_performance_point
@@ -5017,6 +5060,24 @@ class TestBilinearization:
         S_a = np.where(S_d <= 0.02, 5000.0 * S_d, 100.0 + 500.0 * (S_d - 0.02))
         # Inject small negative noise at a single point
         S_a[3] = -5.0
+        S_a[0] = 0.0
+        return S_d, S_a
+
+    @pytest.fixture
+    def rc_like_curve(self):
+        """Smooth RC-style backbone: tanh saturation + post-peak softening.
+
+        Saturates gradually (cracking → rebar yield) with no sharp yield
+        plateau, then softens after the peak — the shape the De Luca
+        10 %-secant rule is designed for.  Peak at S_d ≈ 0.06 m.
+        """
+        S_d = np.linspace(0.0, 0.12, 61)
+        S_a_peak = 150.0  # m/s²
+        K0 = 6000.0  # initial stiffness
+        S_a = S_a_peak * np.tanh(K0 * S_d / S_a_peak)
+        soft = S_d >= 0.06
+        S_a[soft] = S_a[soft] - 80.0 * (S_d[soft] - 0.06) / 0.06
+        S_a = np.maximum(S_a, 0.0)
         S_a[0] = 0.0
         return S_d, S_a
 
@@ -5347,6 +5408,7 @@ class TestBilinearization:
             (bilinearize_stiffness_change, "stiffness_change"),
             (bilinearize_equal_energy, "equal_energy"),
             (bilinearize_composite, "composite_equal_energy"),
+            (bilinearize_rc, "de_luca_10pct"),
         ]:
             S_dy, S_ay, method = fn(S_d, S_a)
             assert S_dy == 0.0, f"{fn.__name__}: expected S_dy=0.0, got {S_dy}"
@@ -5363,7 +5425,12 @@ class TestBilinearization:
         yield point (the negative point is skipped during peak search).
         """
         S_d, S_a = noisy_curve
-        for fn in (bilinearize_stiffness_change, bilinearize_equal_energy, bilinearize_composite):
+        for fn in (
+            bilinearize_stiffness_change,
+            bilinearize_equal_energy,
+            bilinearize_composite,
+            bilinearize_rc,
+        ):
             S_dy, S_ay, _ = fn(S_d, np.abs(S_a))
             assert S_dy > 0, f"S_dy should be positive, got {S_dy:.6e}"
             assert S_ay > 0, f"S_ay should be positive, got {S_ay:.6e}"
@@ -5390,6 +5457,7 @@ class TestBilinearization:
             "stiffness_change": bilinearize_stiffness_change(S_d, S_a),
             "equal_energy": bilinearize_equal_energy(S_d, S_a),
             "composite": bilinearize_composite(S_d, S_a),
+            "rc": bilinearize_rc(S_d, S_a),
         }
 
         for name, (S_dy, S_ay, method) in results.items():
@@ -5421,7 +5489,11 @@ class TestBilinearization:
         """
         S_d, S_a = bilinear_curve
         peak_idx = int(np.argmax(S_a))
-        for fn in (bilinearize_stiffness_change, bilinearize_equal_energy):
+        for fn in (
+            bilinearize_stiffness_change,
+            bilinearize_equal_energy,
+            bilinearize_rc,
+        ):
             S_dy, _S_ay, _ = fn(S_d, S_a)
             # Find the first index where S_d ≥ S_dy
             if S_dy > 0:
@@ -5452,3 +5524,43 @@ class TestBilinearization:
         assert 0.020 <= S_dy <= S_d[peak_idx], (
             f"Expected S_dy in [0.020, {S_d[peak_idx]:.6f}], got {S_dy:.6f}"
         )
+
+    def test_de_luca_recovers_exact_bilinear_knee(self, bilinear_curve):
+        """On a bilinear curve the 10 %-secant equals the true elastic slope,
+        so the equal-area rule recovers the exact knee: (0.02, 100)."""
+        S_d, S_a = bilinear_curve
+        S_dy, S_ay, method = bilinearize_rc(S_d, S_a)
+        assert method == "de_luca_10pct"
+        assert S_dy == pytest.approx(0.02, abs=1e-9)
+        assert S_ay == pytest.approx(100.0, abs=1e-9)
+
+    def test_de_luca_rc_curve_yield_not_at_cracking(self, rc_like_curve):
+        """The 10 %-secant rule does not snap to the cracking transition.
+
+        For the tanh RC backbone the cracking transition sits at
+        S_d ≈ 0.0025 (the 10 %-secant point); the equal-area yield must
+        land in the rebar-yield band (25–75 % of peak displacement) and
+        preserve the capacity area.
+        """
+        S_d, S_a = rc_like_curve
+        peak_idx = int(np.argmax(S_a))
+        S_d_peak = float(S_d[peak_idx])
+        S_a_peak = float(S_a[peak_idx])
+
+        S_dy, S_ay, method = bilinearize_rc(S_d, S_a)
+
+        assert method == "de_luca_10pct"
+        # Yield well past the cracking transition and below the peak.
+        assert 0.25 * S_d_peak <= S_dy <= 0.75 * S_d_peak, (
+            f"S_dy={S_dy:.6f} outside rebar-yield band "
+            f"[{0.25 * S_d_peak:.6f}, {0.75 * S_d_peak:.6f}]"
+        )
+        # Yield strength within the capacity envelope.
+        assert 0.0 < S_ay <= S_a_peak
+        # Equal-area: bilinear fit preserves the capacity-curve area.
+        integral = 0.0
+        for i in range(1, peak_idx + 1):
+            integral += 0.5 * (S_d[i] - S_d[i - 1]) * (S_a[i] + S_a[i - 1])
+        A_bilin = 0.5 * S_dy * S_ay + 0.5 * (S_ay + S_a_peak) * (S_d_peak - S_dy)
+        rel_err = abs(A_bilin - integral) / max(integral, 1e-12)
+        assert rel_err < 1e-2, f"equal-area error {rel_err:.2%}"

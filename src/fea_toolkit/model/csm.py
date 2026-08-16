@@ -1,7 +1,7 @@
 """
 Capacity Spectrum Method (CSM) — bilinearization and performance‑point detection.
 
-Provides three bilinearization methods for pushover capacity curves:
+Provides four bilinearization methods for pushover capacity curves:
 
 1. **Stiffness-change detection** — yield point where secant stiffness
    drops below a threshold of the initial elastic stiffness.
@@ -9,6 +9,10 @@ Provides three bilinearization methods for pushover capacity curves:
    under the capacity curve.
 3. **Composite** — stiffness‑change primary, equal‑energy fallback,
    with a 10 % of peak displacement clamp (Vamvatsikos 10 % rule).
+4. **De Luca 10 %-secant** (:func:`bilinearize_rc`, method names
+   ``'rc'`` / ``'de_luca_10pct'``) — elastic secant at 10 % of peak
+   strength with equal-area yield, designed for curved RC backbones
+   without a sharp yield plateau.
 
 The `compute_performance_point()` function implements the full ATC‑40
 Capacity Spectrum Method (CSM) with secant iteration: ADRS conversion,
@@ -393,6 +397,141 @@ def bilinearize_composite(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Bilinearization — De Luca 10 %-secant (RC / curved backbones)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def bilinearize_rc(
+    S_d_arr: np.ndarray,
+    S_a_arr: np.ndarray,
+    config: Optional[dict[str, Any]] = None,
+) -> tuple[float, float, str]:
+    """Bilinearise a curved RC backbone with the De Luca 10 %-secant rule.
+
+    FEMA-273/356 60 %-secant and EC8 equal-area fits are biased for curved
+    RC backbones: the fitted yield point snaps to the cracking transition
+    rather than the rebar-yield drift, overestimating displacement demand
+    by ~25 % (De Luca, Vamvatsikos & Iervolino 2013).  Their near-optimal
+    rule:
+
+    1. **Elastic secant** — the elastic branch is the secant from the
+       origin to the point at ``elastic_fraction`` (default 10 %) of the
+       peak strength :math:`S_{a,peak}`, instead of the FEMA 60 % secant.
+    2. **Equal-area yield** — the yield point lies on that secant and the
+       post-yield branch passes through the peak point; the yield
+       displacement is the unique value making the area under the bilinear
+       fit equal the capacity-curve area (minimising the absolute area
+       discrepancy).
+
+    Because the yield point is constrained to the elastic secant line, the
+    equal-area equation is linear in :math:`S_{d,y}` and solved directly:
+    :math:`S_{d,y} = 2(A_{cap} - \\tfrac{1}{2} S_{a,peak} S_{d,peak}) /
+    (K_{el} S_{d,peak} - S_{a,peak})`, where :math:`K_{el}` is the secant
+    stiffness at ``elastic_fraction · S_a,peak`` and :math:`A_{cap}` is
+    the trapezoidal area under the capacity curve up to the peak.
+
+    **When to use**: RC frames/walls whose capacity curves soften
+    gradually (cracking → rebar yield → softening) without a sharp yield
+    plateau.  Registered under the method names ``'rc'`` and
+    ``'de_luca_10pct'``.
+
+    References:
+        - De Luca, F., Vamvatsikos, D., & Iervolino, I. (2013).
+          "Near-optimal piecewise linear fits of static pushover capacity
+          curves." *Earthquake Engineering & Structural Dynamics*, 42(4),
+          589–600.  doi:10.1002/eqe.2225
+
+    Args:
+        S_d_arr: Spectral displacements (m), monotonically increasing,
+            non-negative.
+        S_a_arr: Spectral accelerations (m/s²), same length as
+            ``S_d_arr``.
+        config: Optional dict with keys:
+
+            - ``elastic_fraction`` (float, default 0.10): fraction of
+              peak strength at which the elastic secant is evaluated.
+            - ``peak_idx`` (int, optional): Index of the peak / target
+              displacement.  Auto-detected from ``argmax`` if not given.
+
+    Returns:
+        Tuple ``(S_dy, S_ay, method)`` where *method* is one of:
+
+        - ``'de_luca_10pct'`` — regular fit (yield below 90 % of peak).
+        - ``'de_luca_10pct_elastic'`` — no inelasticity detected; yield
+          placed at the peak (``mu = 1``).
+
+    Edge cases:
+        - Empty arrays → ``(0.0, 0.0, 'de_luca_10pct')``.
+        - Too few points / zero peak / purely linear curve → yield at peak.
+    """
+    config = config or {}
+    S_d_arr = np.asarray(S_d_arr, dtype=float)
+    S_a_arr = np.asarray(S_a_arr, dtype=float)
+
+    if len(S_d_arr) == 0 or len(S_a_arr) == 0:
+        return 0.0, 0.0, "de_luca_10pct"
+
+    peak_idx = config.get("peak_idx")
+    if peak_idx is None:
+        peak_idx = int(np.argmax(S_a_arr))
+    peak_idx = max(0, min(int(peak_idx), len(S_d_arr) - 1))
+
+    S_d_peak = float(S_d_arr[peak_idx])
+    S_a_peak = float(S_a_arr[peak_idx])
+
+    if peak_idx < 2 or S_a_peak <= 0.0 or S_d_peak <= 0.0:
+        return S_d_peak, S_a_peak, "de_luca_10pct_elastic"
+
+    # ── Elastic secant at ``elastic_fraction`` of peak strength ─────
+    frac = config.get("elastic_fraction", 0.10)
+    if frac <= 0.0 or frac >= 1.0:
+        frac = 0.10
+    target = frac * S_a_peak
+
+    # First index where S_a reaches the target strength; interpolate S_d.
+    i_cross = int(np.argmax(S_a_arr >= target))
+    if i_cross > 0 and S_a_arr[i_cross] >= target:
+        s = (target - S_a_arr[i_cross - 1]) / max(S_a_arr[i_cross] - S_a_arr[i_cross - 1], 1e-12)
+        S_d_target = float(S_d_arr[i_cross - 1] + s * (S_d_arr[i_cross] - S_d_arr[i_cross - 1]))
+    else:
+        S_d_target = float(S_d_arr[i_cross])
+
+    K_el = S_a_peak / max(S_d_peak, 1e-12) if S_d_target <= 1e-12 else target / S_d_target
+
+    # ── Area under the capacity curve up to the peak ────────────────
+    integral = np.zeros_like(S_d_arr)
+    for i in range(1, peak_idx + 1):
+        integral[i] = integral[i - 1] + 0.5 * (S_d_arr[i] - S_d_arr[i - 1]) * (
+            S_a_arr[i] + S_a_arr[i - 1]
+        )
+    A_cap = float(integral[peak_idx])
+
+    # ── Equal-area yield on the elastic secant (linear solution) ────
+    denom = K_el * S_d_peak - S_a_peak
+    if abs(denom) <= 1e-12 * max(K_el * S_d_peak, S_a_peak, 1e-12):
+        return S_d_peak, S_a_peak, "de_luca_10pct_elastic"
+
+    S_dy = 2.0 * (A_cap - 0.5 * S_a_peak * S_d_peak) / denom
+
+    # Clamp yield to the physical bracket: at/above the 10 % secant
+    # point, at/below the peak, and at/below the displacement where the
+    # elastic line reaches the peak strength (yield strength ≤ peak).
+    lower = min(S_d_target, S_d_peak)
+    S_dy = min(max(S_dy, lower), S_d_peak)
+    max_strength_disp = S_a_peak / max(K_el, 1e-12)
+    if max_strength_disp > lower:
+        S_dy = min(S_dy, max_strength_disp)
+
+    S_ay = K_el * S_dy
+
+    # Purely elastic curve — no inelasticity detected (mu = 1).
+    if S_dy >= 0.90 * S_d_peak:
+        return S_d_peak, S_a_peak, "de_luca_10pct_elastic"
+
+    return float(S_dy), float(S_ay), "de_luca_10pct"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Equivalent viscous damping — ATC‑40
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -505,8 +644,10 @@ def compute_performance_point(
            computed as ``V / M_eff`` (**m/s²**) — see the module
            docstring for the unit convention.
         2. **Bilinearization** — one of ``'composite'`` (default),
-           ``'stiffness_change'``, or ``'equal_energy'`` methods
-           determines the yield point (S_dy, S_ay).
+           ``'stiffness_change'``, ``'equal_energy'``, or ``'rc'`` /
+           ``'de_luca_10pct'`` methods determines the yield point
+           (S_dy, S_ay).  ``'rc'`` is the De Luca 10 %-secant rule for
+           curved reinforced-concrete backbones.
         3. **Secant iteration** — starting from 20 % of the peak
            spectral displacement, repeatedly:
            a. Compute equivalent secant period T_eq from the trial
@@ -550,7 +691,10 @@ def compute_performance_point(
         max_iter: Maximum iterations for secant convergence (default 50).
         tol: Convergence tolerance on S_d (relative, default 1 %).
         bilinearize_method: One of ``'composite'`` (default),
-            ``'stiffness_change'``, or ``'equal_energy'``.
+            ``'stiffness_change'``, ``'equal_energy'``, ``'rc'``, or
+            ``'de_luca_10pct'`` (both aliases of
+            :func:`bilinearize_rc` — the De Luca 10 %-secant rule for
+            curved RC backbones).
         bilinearize_config: Optional dict passed to the bilinearisation
             function.
 
@@ -666,6 +810,8 @@ def compute_performance_point(
         "composite": bilinearize_composite,
         "stiffness_change": bilinearize_stiffness_change,
         "equal_energy": bilinearize_equal_energy,
+        "rc": bilinearize_rc,
+        "de_luca_10pct": bilinearize_rc,
     }
     if bilinearize_method not in _bilin_map:
         raise ValueError(
