@@ -72,6 +72,11 @@ for automated cross-referencing.
   Tags: `analysis-type`, `storey`, `drift`, `shear`, `displacement`, `post-processing`
   Related: [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Modal Analysis Options](modal_analysis.md) · [Unified Results Schema](results_schema.md)
 
+- [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md) — ✅ Complete
+  > End-to-end validation of the nonlinear RC pushover pipeline against the published large-scale two-storey frame experiment: literature findings, three validation passes, and the rigid joint end-zone (Level 1) modelling that brings the model inside the acceptance band.
+  Tags: `validation`, `benchmark`, `pushover`, `rc`, `fiber-section`, `shear`, `rigid-end-offset`, `joint`
+  Related: [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Deprecation Removal Plan](deprecation_plan.md) · [Report Generation — Design Proposal](report_generation.md) · [Builder Reference — Two-stage Pipeline](builder_reference.md)
+
 
 ## ⚙️ Model Features
 
@@ -193,6 +198,18 @@ for automated cross-referencing.
   Related: [Unified Results Schema](results_schema.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Visualisation Toolkit](viewer.md)
 
 
+## 📦 Uncategorised
+
+- [Mvlem Wall Analysis](mvlem_wall_analysis.md)
+
+
+## 📦 Opensees
+
+- [Custom OpenSeesPy local build — swap recipe](openseespy_local_build.md) — 🚧 Draft
+  > How to build a local OpenSeesPy wheel and swap it into the import chain on macOS arm64.
+  Tags: `openseespy`, `build`, `macos`, `fea-toolkit`
+
+
 ---
 
 ## Tag Index
@@ -208,9 +225,11 @@ Tags across all documentation files:
 - **`architecture`** — [analysis.md](analysis.md), [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md)
 - **`area-elements`** — [shell_support.md](shell_support.md)
 - **`beams`** — [element_classification.md](element_classification.md)
+- **`benchmark`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`bilinearization`** — [csm_bilinearization.md](csm_bilinearization.md)
 - **`brace`** — [pushover_analysis.md](pushover_analysis.md)
 - **`braces`** — [element_classification.md](element_classification.md)
+- **`build`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`capacity-spectrum`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md)
 - **`classification`** — [element_classification.md](element_classification.md)
 - **`cleanup`** — [deprecation_plan.md](deprecation_plan.md), [linting_fix_plan.md](linting_fix_plan.md)
@@ -235,7 +254,9 @@ Tags across all documentation files:
 - **`end-to-end`** — [workflow.md](workflow.md)
 - **`execution`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`export`** — [rhino_export.md](rhino_export.md), [tcl_export.md](tcl_export.md)
+- **`fea-toolkit`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`fiber`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
+- **`fiber-section`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`geometry`** — [rhino_export.md](rhino_export.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`ground-motion`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
@@ -246,10 +267,12 @@ Tags across all documentation files:
 - **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`interactive`** — [viewer.md](viewer.md)
 - **`io`** — [results_schema.md](results_schema.md)
+- **`joint`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`lessons-learned`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`linting`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`llm`** — [llm_guide.md](llm_guide.md)
 - **`load-redistribution`** — [element_splitting.md](element_splitting.md)
+- **`macos`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`manager`** — [analysis.md](analysis.md)
 - **`mander`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`mesh-model`** — [layered_analysis_workflow.md](layered_analysis_workflow.md)
@@ -261,27 +284,29 @@ Tags across all documentation files:
 - **`notes`** — [dev_notes.md](dev_notes.md)
 - **`npz`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`opensees`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
+- **`openseespy`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`orchestration`** — [analysis.md](analysis.md)
 - **`pipeline`** — [workflow.md](workflow.md)
 - **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
 - **`post-processing`** — [storey_response.md](storey_response.md)
 - **`preprocessor`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
-- **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`pyright`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`pyvista`** — [viewer.md](viewer.md)
-- **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
+- **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`reference`** — [builder_reference.md](builder_reference.md), [mander_confinement_validation.md](mander_confinement_validation.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
 - **`results`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`rhino`** — [rhino_export.md](rhino_export.md)
+- **`rigid-end-offset`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`rigidDiaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
 - **`runtime`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`sap2000`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`schema`** — [results_schema.md](results_schema.md)
 - **`scripting`** — [tcl_export.md](tcl_export.md)
 - **`sections`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
-- **`shear`** — [storey_response.md](storey_response.md)
+- **`shear`** — [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`shell`** — [constraint_detection.md](constraint_detection.md), [element_properties_config.md](element_properties_config.md), [shell_support.md](shell_support.md)
 - **`slabs`** — [element_classification.md](element_classification.md)
 - **`solver`** — [modal_analysis.md](modal_analysis.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
@@ -295,7 +320,7 @@ Tags across all documentation files:
 - **`time-history`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
 - **`typed-results`** — [analysis.md](analysis.md)
 - **`usage`** — [llm_guide.md](llm_guide.md)
-- **`validation`** — [mander_confinement_validation.md](mander_confinement_validation.md)
+- **`validation`** — [mander_confinement_validation.md](mander_confinement_validation.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`viewer`** — [viewer.md](viewer.md)
 - **`visualisation`** — [rhino_export.md](rhino_export.md), [viewer.md](viewer.md)
 - **`visualization`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
