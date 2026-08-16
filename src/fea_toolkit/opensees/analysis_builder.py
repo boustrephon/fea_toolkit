@@ -1071,6 +1071,14 @@ class AnalysisBuilder:
                 for nd in list(self.mesh_model.nodes.values()):
                     if mesh_prefix not in nd.node_id:
                         continue
+                    if nd.node_id in self.mesh_model.restraints:
+                        # Already fixed by the explicit-restraint loop above.
+                        # The Preprocessor propagates edge restraints into
+                        # ``mesh_model.restraints`` (geometry's
+                        # ``_propagate_edge_restraints``), so re-applying the
+                        # AND combination here would double-constrain the DOF
+                        # and make OpenSees reject the duplicate SP_Constraint.
+                        continue
                     p = np.array([nd.x, nd.y, nd.z])
                     t = np.dot(p - p_i, edge_vec) / edge_len_sq
                     if t < 1e-6 or t > 1 - 1e-6:
