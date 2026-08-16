@@ -707,8 +707,9 @@ all other area loads are ignored.
    - **Nonlinear Time History (additional integration schemes)** – Python-native integration schemes (e.g. direct OpenSeesPy transient analysis) remain planned.
 
 5. **Joint Modeling** (for concrete frames)  
+   - Level 1 (rigid joint end zones) ✅ — `rigid_end_zones` auto-generates offsets (0.5 x intersecting depth) with `rigid_link_mpc` MPC links.  
    - Extend parser to recognise joint elements (if present in SAP2000).  
-   - Implement `Joint2D` and `beamColumnJoint` elements in `AnalysisBuilder`.
+   - Implement `Joint2D` and `beamColumnJoint` elements in `AnalysisBuilder` (Level 3).
 
 6. **Brace gusset plates / joint offsets**  
    - Model gusset plate flexibility as rotational springs at brace ends.  

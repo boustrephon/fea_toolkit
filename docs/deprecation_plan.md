@@ -224,10 +224,20 @@ comfortably.  Below is a realistic assessment of what remains.
       only ≈ 0.2 % for these members (the experimental ~20 % shear share is
       a *cracked*-shear phenomenon).  The forceBeamColumn variant is
       covered by ``TestVecchioEmaraShearFlexibleVariant`` (peak ratio
-      [0.75, 1.15], secant [0.8, 1.2] × experimental); it still lacks the
-      experimental post-peak descent (the model plateaus), which needs
-      nonlinear cracked-shear / bond-slip modelling — tracked in
-      `docs/_pending_work.md`.
+      [0.75, 1.15], secant [0.8, 1.2] × experimental).
+      **Third pass (2026-08-16): rigid joint end zones close the
+      strength/stiffness gap.**  The 0.88 × result was partly a
+      centreline-modelling artefact — the members span full node-to-node
+      length with no rigid joint zones.  Adding ``rigid_end_zones``
+      (offset = 0.5 × intersecting depth) + ``rigid_link_mpc`` (MPC
+      links — the stiff elastic links ill-condition under PDelta) shortens
+      the flexible members to the joint faces and lifts the peak to
+      ≈ 353 kN (1.07 ×) and the secant @ 50 mm to ≈ 6.3 kN/mm (1.03 ×) —
+      inside the original ±10–15 % acceptance band.  The post-peak shape
+      limitation remains (the model keeps rising instead of descending
+      after ≈ 50 mm), which needs nonlinear cracked-shear / bond-slip
+      modelling — tracked in `docs/_pending_work.md`.
+
    5. Vecchio & Balopoulou (1990) variant (cut-back top reinforcement):
       **not re-run** — deferred with the shear-flexible follow-up.
 

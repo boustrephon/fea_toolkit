@@ -488,14 +488,21 @@ ideally support all of them:
 | Level | Description | Toolkit status |
 |---|---|---|
 | **0 — Simple point** | Members meet at a node, flex from that point. Vertical offsets (storey-level) may apply. | ✅ Implemented via ``FrameEndOffset.end_i`` / ``end_j`` (longitudinal) + ``off_y_i`` / ``off_z_i`` / ``off_y_j`` / ``off_z_j`` (lateral from cardinal point) |
-| **1 — Rigid offset** | Rigid link from node to column face; flexure starts at face. | ⚠️ Partially — ``frame_end_offsets`` create stiff elastic links |
+| **1 — Rigid offset** | Rigid link from node to column face; flexure starts at face. | ✅ Implemented — explicit ``frame_end_offsets`` (stiff elastic links) or auto-generated via ``rigid_end_zones`` (offset = 0.5 × intersecting depth) with ``rigid_link_mpc`` (MPC links) |
 | **2 — Spring offset** | Zero-length spring at the joint adds back some flexibility (% rigidity). | ❌ Not implemented |
 | **3 — Joint element** | Explicit joint element allowing for cracking, reinforcement slip, or steel connection flexibility. | ❌ Not implemented |
 
 The ``frame_end_offsets`` data (parsed from the ``FRAME END OFFSETS``
 table) creates short stiff `elasticBeamColumn` segments between the
-node and the member start.  This works for Level 1 but the rigid
-segments can be too stiff — Level 2 would replace them with
+node and the member start.  For models without explicit offsets,
+``rigid_end_zones=True`` auto-generates them: offset =
+``rigid_offset_factor`` x the intersecting member's depth (default 0.5,
+i.e. flexure from the joint face), ``rigid_offset_absolute`` overrides,
+and ``joint_extents`` subtracts an explicit joint-element panel so Level 1
+and Level 3 never double-count the same region.  ``rigid_link_mpc=True``
+emits ``ops.rigidLink`` MPCs instead of stiff elastic elements — the
+elastic links ill-condition the system under PDelta and can fail at the
+gravity stage.  Level 2 would replace the rigid segments with
 zero-length springs of calibrated stiffness.
 
 ### 3.5 Cardinal Points and Section Insertion

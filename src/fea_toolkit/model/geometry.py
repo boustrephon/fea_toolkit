@@ -1653,6 +1653,121 @@ def apply_frame_end_offsets(
     return elements, assignments, nodes, next_tag, rigid_links
 
 
+def derive_rigid_end_offsets(
+    elements: dict[str, FrameElement],
+    assignments: dict[str, str],
+    nodes: dict[str, Node],
+    sections: dict,
+    factor: float = 0.5,
+    absolute: Optional[float] = None,
+    joint_extents: Optional[dict[str, float]] = None,
+    verbose: bool = False,
+) -> dict[str, FrameEndOffset]:
+    """Auto-derive rigid end offsets from intersecting-member dimensions.
+
+    Models the rigid beam-column joint zone (Level 1 of the joint-fidelity
+    taxonomy): at each end of a frame element the elastic portion is
+    shortened by ``factor x D``, where ``D`` is the largest section depth
+    of the *non-collinear* members meeting at that node - i.e. the
+    intersecting member's dimension in the plane of flexure.  A beam end
+    is offset by (``factor x``) the column depth and vice versa; collinear
+    continuations (e.g. the adjacent beam) are ignored.  The default
+    ``factor = 0.5`` moves flexure out to the joint face (half the
+    intersecting member's depth).
+
+    Args:
+        elements: ``{elem_id: FrameElement}`` - post-split children are
+            fine; each end is considered independently, so only the
+            outermost children (which meet a non-collinear member) receive
+            an offset.
+        assignments: ``{elem_id: section_name}``.
+        nodes: ``{node_id: Node}``.
+        sections: ``{section_name: Section}`` - the ``depth`` (falling
+            back to ``bf`` then ``diameter``) gives the intersecting
+            member's flexural-plane dimension.
+        factor: Fraction of the intersecting member's **full** depth used
+            as the offset (default 0.5 -> flexure starts at the joint face).
+        absolute: Optional fixed offset length; overrides the derived
+            ``factor x D`` when not ``None``.
+        joint_extents: Optional ``{node_id: dimension}`` of an explicit
+            joint-element panel.  Subtracted from the derived offset (never
+            below zero) so a rigid link does not double-count an explicit
+            joint element.
+        verbose: Print each derived offset.
+
+    Returns:
+        ``{elem_id: FrameEndOffset}`` for members with at least one
+        non-zero derived longitudinal offset.
+    """
+    # node -> connected element ids (inactive elements skipped).
+    by_node: dict[str, list[str]] = defaultdict(list)
+    for eid, elem in elements.items():
+        if getattr(elem, "inactive", False):
+            continue
+        by_node[elem.node_i].append(eid)
+        by_node[elem.node_j].append(eid)
+
+    result: dict[str, FrameEndOffset] = {}
+    for eid, elem in elements.items():
+        if getattr(elem, "inactive", False):
+            continue
+        ni = nodes.get(elem.node_i)
+        nj = nodes.get(elem.node_j)
+        if ni is None or nj is None:
+            continue
+        axis = np.array([nj.x - ni.x, nj.y - ni.y, nj.z - ni.z], dtype=float)
+        norm = float(np.linalg.norm(axis))
+        if norm < 1e-12:
+            continue
+        u_e = axis / norm
+
+        derived = {"end_i": 0.0, "end_j": 0.0}
+        for end_key, node_id in (("end_i", elem.node_i), ("end_j", elem.node_j)):
+            d_max = 0.0
+            for cid in by_node.get(node_id, ()):
+                if cid == eid:
+                    continue
+                other = elements.get(cid)
+                if other is None or getattr(other, "inactive", False):
+                    continue
+                ci = nodes.get(other.node_i)
+                cj = nodes.get(other.node_j)
+                if ci is None or cj is None:
+                    continue
+                axis_c = np.array([cj.x - ci.x, cj.y - ci.y, cj.z - ci.z], dtype=float)
+                norm_c = float(np.linalg.norm(axis_c))
+                if norm_c < 1e-12:
+                    continue
+                u_c = axis_c / norm_c
+                # Collinear continuation - not an intersecting member.
+                if abs(float(np.dot(u_e, u_c))) > 0.9999:
+                    continue
+                sec = sections.get(assignments.get(cid))
+                d = (
+                    float(getattr(sec, "depth", 0.0) or 0.0)
+                    or float(getattr(sec, "bf", 0.0) or 0.0)
+                    or float(getattr(sec, "diameter", 0.0) or 0.0)
+                )
+                d_max = max(d_max, d)
+            if d_max <= 0.0:
+                continue
+            length = float(absolute) if absolute is not None else factor * d_max
+            if joint_extents and node_id in joint_extents:
+                length = max(0.0, length - float(joint_extents[node_id]))
+            if length > 0.0:
+                derived[end_key] = length
+
+        if derived["end_i"] > 0.0 or derived["end_j"] > 0.0:
+            result[eid] = FrameEndOffset(end_i=derived["end_i"], end_j=derived["end_j"])
+            if verbose:
+                print(
+                    f"  rigid end zones: {eid} offset_i={derived['end_i']:.4g} "
+                    f"offset_j={derived['end_j']:.4g}"
+                )
+
+    return result
+
+
 # ============================================================================
 # Area meshing — subdivide area quads into a grid of smaller shell elements
 # ============================================================================

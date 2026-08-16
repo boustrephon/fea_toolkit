@@ -253,6 +253,11 @@ class AnalysisBuilder:
             # Element type used by the fiber-section pushover rebuild
             # (rebuild_with_fiber_sections).  Defaults to dispBeamColumn.
             "fiber_element_type": "dispBeamColumn",
+            # MPC-based rigid links (ops.rigidLink) for frame end offsets,
+            # instead of very stiff elasticBeamColumn segments.  Avoids the
+            # ill-conditioning of stiff elastic links under PDelta pushover
+            # (those fail to converge at the gravity stage).
+            "rigid_link_mpc": False,
         }
         # Merge solver defaults from the class constant
         defaults.update(self.PUSHOVER_SOLVER_DEFAULTS)
@@ -2594,7 +2599,8 @@ class AnalysisBuilder:
         # The Preprocessor returns (link_id, node_i, node_j, link_tag) tuples.
         # node_i and node_j are string node IDs — resolve to numeric tags.
         if self._offset_rigid_links:
-            if self._rigid_section_tag is None:
+            _mpc = self.config.get("rigid_link_mpc", False)
+            if not _mpc and self._rigid_section_tag is None:
                 all_sec_tags = set(self.section_tags.values())
                 all_sec_tags.update(self._shell_sec_tags.values())
                 all_sec_tags.update(self._shell_sec_variants.values())
@@ -2620,6 +2626,22 @@ class AnalysisBuilder:
                     continue
                 ni_tag = nd_i.node_tag
                 nj_tag = nd_j.node_tag
+                if _mpc:
+                    # MPC rigid link (ops.rigidLink "beam"): the original
+                    # joint node is the master, the offset node the slave.
+                    # Avoids the ill-conditioning of very stiff elastic
+                    # links under PDelta (which fails at the gravity stage).
+                    _off_i = _node_i_id.endswith(("_off_i", "_off_j"))
+                    _off_j = _node_j_id.endswith(("_off_i", "_off_j"))
+                    if _off_i and not _off_j:
+                        _master_tag, _slave_tag = nj_tag, ni_tag
+                    elif _off_j and not _off_i:
+                        _master_tag, _slave_tag = ni_tag, nj_tag
+                    else:  # defensive: neither id is an offset node
+                        _master_tag, _slave_tag = ni_tag, nj_tag
+                    ops.rigidLink("beam", _master_tag, _slave_tag)
+                    self._rigid_link_elems[_link_id] = _slave_tag
+                    continue
                 # Compute vecxz for vertical/horizontal links (same convention as _add_beam_column)
                 dx = float(nd_j.x - nd_i.x)
                 dy = float(nd_j.y - nd_i.y)
