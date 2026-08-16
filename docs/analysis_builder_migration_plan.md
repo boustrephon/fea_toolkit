@@ -93,7 +93,7 @@ the old `AnalysisDefaults` deprecation path.
 | Rebar material resolution (config override → SAP2000 lookup → framework defaults) | ✅ **Done** | `AnalysisBuilder` + `export_mesh_model_to_tcl` (covered by `tests/test_rebar_material.py`) |
 | Mander confinement wiring | ✅ **Done** | `AnalysisBuilder._create_single_section()` calls `fiber_confinement(Fc, tie_fy)` when the section exposes it, and uses the returned `fcc/ecc/ecu` for the core `Concrete01` patch when confinement data is present; a 1.25× strength / 2.0× strain heuristic is only used as a fallback when no tie data is available. `model/confinement.py` provides `mander_confined()` |
 | End-to-end RC validation benchmark | ✅ **Done** | `examples/sample_model.py` `make_rc_frame_model()` (single-storey RC frame, kN-m units, 3 materials) + `tests/test_workflows.py` `test_compute_performance_point` (strengthened assertions: `mu > 1`, converged, plausible `M_eff`) — see `docs/csm_test_model_plan.md` |
-| Pushover solver tuning for RC | ✅ **Done** | `_PUSHOVER_RC_DEFAULTS` uses `NewtonLineSearch`, `NormDispIncr 1e-6`, 10 substeps |
+| Pushover solver tuning for RC | ✅ **Done** | `_PUSHOVER_RC_DEFAULTS` uses the validated RC contract: `NormDispIncr 1e-4` / 20 iter / `Newton` primary + per-step `NormUnbalance`/`ModifiedNewton`(1000 iter) fallback, 10 gravity substeps (updated 2026-08-16 per `docs/_pending_work.md` — the strict 1e-6/10/NewtonLineSearch settings stalled RC fibre pushovers) |
 
 ### Tcl / Xara nonlinear workflow (was §14.2)
 

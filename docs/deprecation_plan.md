@@ -247,12 +247,13 @@ comfortably.  Below is a realistic assessment of what remains.
    6. After the Vecchio & Emara benchmark (Gap 4) is running, tune these
       defaults empirically and record the final values in the plan.
 
-6. **CSM bilinearisation validation** — **🟡 Validation gap — concrete
-   plan identified.**  The existing `bilinearize_composite()` uses
-   equal-area / equal-energy criteria tuned for steel yield plateaus.
-   RC capacity curves are highly curved (gradual cracking → rebar yield →
-   softening), so the fitted yield point may snap to the **cracking
-   transition** rather than the **rebar-yield drift**.  Research:
+6. **CSM bilinearisation validation** — **🟢 Implemented + synthetic
+   validation done; real-benchmark validation pending.**  The existing
+   `bilinearize_composite()` uses equal-area / equal-energy criteria
+   tuned for steel yield plateaus.  RC capacity curves are highly curved
+   (gradual cracking → rebar yield → softening), so the fitted yield
+   point may snap to the **cracking transition** rather than the
+   **rebar-yield drift**.  Research:
 
    - De Luca, Vamvatsikos & Iervolino (2013, *Earthquake Engineering &
      Structural Dynamics*), "Near-optimal piecewise linear fits of static
@@ -264,17 +265,28 @@ comfortably.  Below is a realistic assessment of what remains.
      chosen to minimise the absolute area discrepancy.
 
    **Measures required:**
-   1. Run `bilinearize_composite()` against synthetic RC-shaped curves
+   1. ~~Run `bilinearize_composite()` against synthetic RC-shaped curves
       (gradual softening, no sharp yield plateau) and compare the fitted
-      yield point against the De Luca 10 %-secant near-optimal fit.
-   2. Implement a `bilinearize_rc()` variant (or a configurable
-      `csm_bilinear_method` key: `"equal_area"` / `"equal_energy"` current
-      default / `"de_luca_10pct"` new) implementing the 10 %-secant rule.
+      yield point against the De Luca 10 %-secant near-optimal fit~~ ✅ **Done (2026-08-16).**
+      `tests/test_model.py::TestBilinearization::test_de_luca_rc_curve_yield_not_at_cracking`
+      validates the new method against a tanh saturation + post-peak
+      softening backbone (yield lands in the rebar-yield band, equal-area
+      exact) and `test_de_luca_recovers_exact_bilinear_knee` verifies it
+      recovers the true knee of a bilinear curve.
+   2. ~~Implement a `bilinearize_rc()` variant (or a configurable
+      `csm_bilinear_method` key) implementing the 10 %-secant rule~~ ✅ **Done (2026-08-16).**
+      `bilinearize_rc()` added to `model/csm.py`, registered in
+      `compute_performance_point(..., bilinearize_method=...)` under the
+      names `"rc"` and `"de_luca_10pct"`; config key `elastic_fraction`
+      (default 0.10).  Closed-form equal-area solution (no iteration);
+      exported via `fea_toolkit.model.__all__`.
    3. Validate against the real RC pushover curve from the Gap 4 benchmark —
       the yield point should sit near the expected rebar-yield drift
       (~0.5–1 % roof drift), not at the premature cracking transition.
-   4. Update `docs/csm_bilinearization.md` documenting the method choice
-      and the calibration results.
+      **(Pending — blocked on Gap 4.)**
+   4. ~~Update `docs/csm_bilinearization.md` documenting the method choice
+      and the calibration results~~ ✅ **Done (2026-08-16)** — §4 documents the
+      method, config keys, references, and the comparison table row.
 
 ### Recommended Validation Sequence
 

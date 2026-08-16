@@ -112,19 +112,64 @@ sanity clamp ensures `S_dy ≥ 10 % of S_d_peak`.
 | FEMA 356 | 60 % secant + area balance | No |
 | Vamvatsikos (2013) | 10 % secant + area minimisation | **Yes** |
 | **fea_toolkit composite** | Stiffness-change + equal-energy + clamp | **Yes** |
+| **fea_toolkit `rc`** | 10 % secant + equal-area (closed-form) | **Yes** |
 
 **When to use**: Default for automated workflows, mixed structural
 types, batch processing.
 
+---
+
+### 4. De Luca 10 %-Secant (RC / Curved Backbones)
+
+**`bilinearize_rc()`** — registered under the method names **`'rc'`** and
+**`'de_luca_10pct'`** in `compute_performance_point(..., bilinearize_method=...)`.
+
+FEMA-273/356's 60 %-secant and EC8's equal-area fits are **biased for
+curved reinforced-concrete backbones**: the fitted yield point snaps to
+the cracking transition (a local stiffness change) rather than the
+rebar-yield drift, which can overestimate displacement demand by ~25 %
+(De Luca, Vamvatsikos & Iervolino 2013).
+
+The method implements their near-optimal rule:
+
+1. **Elastic secant** — the elastic branch is the secant from the origin
+   to the point at `elastic_fraction` (default **10 %**) of the peak
+   strength, instead of the FEMA 60 %-secant.
+2. **Equal-area yield** — the yield point lies on that secant and the
+   post-yield branch passes through the peak point; the yield
+   displacement is the unique value that makes the area under the
+   bilinear fit equal the capacity-curve area (minimising the absolute
+   area discrepancy).
+
+Because the yield point is constrained to the elastic secant line, the
+equal-area equation is linear in `S_dy` and is solved **directly (no
+iteration)**:
+
+    S_dy = 2·(A_cap − ½·S_a_peak·S_d_peak) / (K_el·S_d_peak − S_a_peak)
+
+| Config | Default | Effect |
+|---|---|---|
+| `elastic_fraction` | 0.10 | Fraction of peak strength for the elastic secant |
+| `peak_idx` | auto | Force peak index |
+
+**When to use**: RC frames/walls whose capacity curves soften gradually
+(cracking → rebar yield → softening) without a sharp yield plateau.
+
+**References**: De Luca, F., Vamvatsikos, D., & Iervolino, I. (2013).
+"Near-optimal piecewise linear fits of static pushover capacity curves."
+*Earthquake Engineering & Structural Dynamics*, 42(4), 589–600.
+doi:10.1002/eqe.2225
+
 ## Comparison of Methods
 
-| Aspect | stiffness_change | equal_energy | composite |
-|---|---|---|---|
-| **Iterative?** | No | Yes (≤ 100 iters) | Conditional |
-| **Works on elastic curves?** | Returns peak | Returns 30 % guess or peak | Falls back to equal-energy |
-| **Works on hardening curves?** | May find late yield | Preserves area | Uses stiffness-change |
-| **Works on softening curves?** | Detects drop if before peak | Preserves area up to peak | Falls back to equal-energy |
-| **Config keys** | threshold, min_relative_drop, peak_idx | initial_guess, tolerance, max_iter, peak_idx | All of the above |
+| Aspect | stiffness_change | equal_energy | composite | de_luca_10pct (`rc`) |
+|---|---|---|---|---|
+| **Iterative?** | No | Yes (≤ 100 iters) | Conditional | No (closed-form) |
+| **Works on elastic curves?** | Returns peak | Returns 30 % guess or peak | Falls back to equal-energy | Returns peak (`de_luca_10pct_elastic`) |
+| **Works on hardening curves?** | May find late yield | Preserves area | Uses stiffness-change | Preserves area (10 % secant) |
+| **Works on softening curves?** | Detects drop if before peak | Preserves area up to peak | Falls back to equal-energy | Preserves area up to peak |
+| **Curved RC backbones?** | Snaps to cracking | Snap-prone without 10 % secant | Fallback helps, still 60 %-biased | ✅ Designed for these |
+| **Config keys** | threshold, min_relative_drop, peak_idx | initial_guess, tolerance, max_iter, peak_idx | All of the above | elastic_fraction, peak_idx |
 
 ## Edge Cases
 
