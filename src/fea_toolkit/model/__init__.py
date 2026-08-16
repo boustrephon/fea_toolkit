@@ -32,6 +32,7 @@ from .confinement import (
 from .csm import (
     bilinearize_composite,
     bilinearize_equal_energy,
+    bilinearize_rc,
     bilinearize_stiffness_change,
     compute_performance_point,
     pushover_to_adrs,
@@ -189,6 +190,7 @@ __all__ = [
     "beam_load_to_nodal_loads",
     "bilinearize_composite",
     "bilinearize_equal_energy",
+    "bilinearize_rc",
     "bilinearize_stiffness_change",
     "build_storey_table",
     "check_brace_buckling",
