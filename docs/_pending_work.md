@@ -110,12 +110,24 @@ src/fea_toolkit/plotting/viz.py:
   ~20 % shear share is a *cracked*-shear phenomenon.  New tests:
   `TestVecchioEmaraShearFlexibleVariant` (peak ratio [0.75, 1.15],
   secant [0.8, 1.2] × experimental, inert-with-warning regression).
+- **Third pass (2026-08-16): rigid joint end zones close the strength/
+  stiffness gap.**  Added preprocessor options `rigid_end_zones` /
+  `rigid_offset_factor` / `rigid_offset_absolute` / `joint_extents`
+  (auto-derive offset = 0.5 × intersecting member's depth) and builder
+  option `rigid_link_mpc` (`ops.rigidLink` MPCs instead of stiff elastic
+  links, which ill-condition under PDelta).  Fixed a latent bug: the
+  orphan-node step dropped the joint nodes that only the rigid links
+  reference.  The V&E benchmark (forceBeamColumn + rigid zones) now peaks
+  at ≈ 353 kN (1.07 × experimental) with secant @ 50 mm ≈ 6.3 kN/mm
+  (1.03 ×) — inside the ±10–15 % band.  Tests:
+  `tests/test_rigid_end_zones.py` (8) +
+  `test_rigid_end_zones_lands_in_acceptance_band`.
 - **Follow-up (deferred):** nonlinear cracked-shear degradation / bond-slip
   springs to reproduce the experimental *post-peak descent* (the
   forceBeamColumn model plateaus ≈ 290 kN while the experiment softened
   after ≈ 50 mm); Vecchio & Balopoulou (1990) variant re-run once the
   shear model lands.
-- Full suite: **890 passed, 4 xfailed** (882 + 8 benchmark tests).
+- Full suite: **899 passed, 4 xfailed** (882 + 8 benchmark + 8 rigid-end-zone + 1 rigid-benchmark tests).
 
 ## DONE (deprecation-programme Phase 2 — Gap 3, 2026-08-16)
 - **3D-only policy documented** — `.clinerules` §3.11 (analysis is

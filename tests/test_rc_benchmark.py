@@ -450,6 +450,16 @@ class TestVecchioEmaraShearFlexibleVariant:
        descent) while the experiment softened after ≈ 50 mm — reproducing
        that requires nonlinear cracked-shear degradation / bond-slip
        (deferred, ``docs/_pending_work.md``).
+    5. **Rigid joint end zones close the strength/stiffness gap
+       (2026-08-16).**  The flexure-only ``forceBeamColumn`` run sits at
+       ≈ 0.88 × the experimental peak because the members are modelled
+       centreline-to-centreline.  Auto-generating rigid joint zones
+       (``rigid_end_zones``, offset = 0.5 × the intersecting member's
+       depth) with MPC links (``rigid_link_mpc``) shortens the flexible
+       members to the joint faces and lifts the peak to ≈ 1.07 × and the
+       secant @ 50 mm to ≈ 1.03 × — inside the original ±10-15 %
+       acceptance band.  The post-peak shape limitation remains (the model
+       keeps rising instead of descending after ≈ 50 mm).
 
     The tests below therefore assert the *improved band* (peak ratio
     [0.75, 1.15], secant [0.8, 1.2] × experimental) rather than the loose
@@ -463,6 +473,20 @@ class TestVecchioEmaraShearFlexibleVariant:
         cfg = dict(_BENCH_CONFIG)
         cfg["fiber_element_type"] = "forceBeamColumn"
         cfg["aggregate_shear"] = True
+        mesh = preprocess_model(make_vecchio_emara_frame(), cfg)
+        builder = AnalysisBuilder(mesh, cfg)
+        yield builder
+        wipe()
+
+    @pytest.fixture
+    def ve_builder_fbc_rigid(self):
+        """forceBeamColumn + auto rigid joint end zones (MPC links)."""
+        from openseespy.opensees import wipe
+
+        cfg = dict(_BENCH_CONFIG)
+        cfg["fiber_element_type"] = "forceBeamColumn"
+        cfg["rigid_end_zones"] = True
+        cfg["rigid_link_mpc"] = True
         mesh = preprocess_model(make_vecchio_emara_frame(), cfg)
         builder = AnalysisBuilder(mesh, cfg)
         yield builder
@@ -507,6 +531,33 @@ class TestVecchioEmaraShearFlexibleVariant:
         assert 0.8 * EXP_SECANT_AT_YIELD <= k50 <= 1.2 * EXP_SECANT_AT_YIELD, (
             f"forceBeamColumn secant @50mm {k50:.0f} kN/m outside "
             f"[{0.8 * EXP_SECANT_AT_YIELD:.0f}, {1.2 * EXP_SECANT_AT_YIELD:.0f}]"
+        )
+
+    def test_rigid_end_zones_lands_in_acceptance_band(self, ve_builder_fbc_rigid):
+        """Auto rigid joint end zones put the peak inside the ±10-15 % band.
+
+        With the members shortened to the joint faces (0.5 x connector depth
+        via ``rigid_end_zones``) and MPC rigid links (``rigid_link_mpc``),
+        the peak moves from ≈ 0.88 x experimental (centreline flexure-only)
+        to ≈ 1.07 x and the secant @ 50 mm to ≈ 1.03 x — inside the plan's
+        ±10-15 % acceptance band.  The post-peak shape (the model keeps
+        rising instead of descending after ≈ 50 mm) remains the documented
+        cracked-shear / bond-slip limitation.
+        """
+        res = self._push(ve_builder_fbc_rigid)
+        assert all(s == 0 for s in res["status"]), "non-converged push steps"
+        d = np.asarray(res["control_disp"], dtype=float)
+        v = np.asarray(res["base_shear"], dtype=float)
+        peak = float(np.max(v))
+        ratio = peak / EXP_PEAK_SHEAR
+        v50 = float(np.interp(0.050, d, v))
+        k50 = v50 / 0.050
+        assert 0.95 <= ratio <= 1.15, (
+            f"rigid-end peak {peak:.1f} kN vs experimental {EXP_PEAK_SHEAR:.0f} "
+            f"(ratio {ratio:.2f}) outside acceptance band"
+        )
+        assert 0.9 * EXP_SECANT_AT_YIELD <= k50 <= 1.15 * EXP_SECANT_AT_YIELD, (
+            f"rigid-end secant @50mm {k50:.0f} kN/m outside band"
         )
 
     def test_shear_aggregation_warns_inert_for_dispbeam(self, ve_builder):

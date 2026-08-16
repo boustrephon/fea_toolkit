@@ -12,7 +12,9 @@ from dataclasses import fields
 from typing import Any, Optional
 
 from ..model.geometry import (
+    apply_frame_end_offsets,
     convert_area_loads_to_edge_loads,
+    derive_rigid_end_offsets,
     find_constraint_edges,
     find_wall_nodes_inside_slabs,
     mesh_area_elements,
@@ -27,6 +29,7 @@ from ..model.sap_data import (
     FrameDistributedLoad,
     FrameElement,
     FrameElementProperties,
+    FrameEndOffset,
     LayeredShellSection,
     NDMaterial,
     Node,
@@ -57,7 +60,12 @@ class Preprocessor:
             preprocessing‑specific options that must be supplied **before**
             constructing the ``AnalysisBuilder``:
             ``detect_wall_slab_intersections`` (default ``True``),
-            ``split_slabs_at_walls`` (default ``False``), and the two
+            ``split_slabs_at_walls`` (default ``False``),
+            ``rigid_end_zones`` (default ``False``) to auto-generate rigid
+            joint-zone offsets (``rigid_offset_factor`` x the intersecting
+            member's depth, default 0.5), ``rigid_offset_absolute`` for a
+            fixed-length override, ``joint_extents`` to subtract explicit
+            joint-element panel dimensions, and the two
             independent Z tolerances (in model length units):
             ``area_diaphragm_z_tolerance`` (default ``0.5``) for treating
             an area element as horizontal during storey-level detection,
@@ -131,16 +139,32 @@ class Preprocessor:
 
         # ── 3. Frame end offsets ─────────────────────────────────
         offset_rigid_links: list[tuple] = []
-        if md.frame_end_offsets:
-            from ..model.geometry import apply_frame_end_offsets
+        effective_offsets: dict[str, FrameEndOffset] = dict(
+            getattr(md, "frame_end_offsets", {}) or {}
+        )
+        if self.config.get("rigid_end_zones", False):
+            auto = derive_rigid_end_offsets(
+                new_elems,
+                new_assigns,
+                md.nodes,
+                md.sections,
+                factor=float(self.config.get("rigid_offset_factor", 0.5)),
+                absolute=self.config.get("rigid_offset_absolute"),
+                joint_extents=self.config.get("joint_extents"),
+                verbose=self.config.get("verbose", False),
+            )
+            # Explicit S2K offsets win over auto-derived values.
+            auto.update(effective_offsets)
+            effective_offsets = auto
 
+        if effective_offsets:
             max_node_tag = max((n.node_tag for n in md.nodes.values()), default=0)
             new_elems, new_assigns, md.nodes, _next_tag, offset_rigid_links = (
                 apply_frame_end_offsets(
                     new_elems,
                     new_assigns,
                     md.nodes,
-                    md.frame_end_offsets,
+                    effective_offsets,
                     next_tag=max_node_tag + 1,
                 )
             )
@@ -360,6 +384,13 @@ class Preprocessor:
             referenced.update(ae.node_ids)
         for jl in getattr(md, "joint_loads", []):
             referenced.add(str(jl.node_id))
+        # Joint nodes referenced only by the rigid links (from frame end
+        # offsets) must be retained — the links connect the shortened
+        # member ends back to the original joint node, so dropping them
+        # would leave those nodes (and their slaves) unconnected.
+        for _lid, _n_i, _n_j, _tag in offset_rigid_links:
+            referenced.add(_n_i)
+            referenced.add(_n_j)
         orphan_nodes: dict[str, Node] = {}
         for nid in list(md.nodes.keys()):
             if nid not in referenced:
