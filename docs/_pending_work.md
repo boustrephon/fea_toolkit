@@ -76,6 +76,31 @@ src/fea_toolkit/plotting/viz.py:
 
 ## OUT OF SCOPE / NOTED
 
+## DONE (deprecation-programme Phase 2 — Gap 4, 2026-08-16)
+- **Joint-load application bug FIXED** — SAP2000 "JOINT LOADS - FORCE"
+  were parsed and carried through the Preprocessor but `create_loads()`
+  never emitted them to the OpenSees domain (silently dropped loads).
+  Now applied; the gravity load/reaction sanity check includes joint
+  loads + self-weight.  Regression test in `tests/test_rc_benchmark.py`.
+- **Vecchio & Emara (1992) benchmark implemented** —
+  `tests/test_rc_benchmark.py` `make_vecchio_emara_frame()` (one-bay,
+  two-storey; 3500 mm span; 2000 mm storeys; 300×400 mm members; 4 No.20M
+  top/bottom; No.10M @ 125 mm ties; f'c 30 MPa / fy 418 MPa; 700 kN/col).
+  5 tests: joint-load regression, 155 mm protocol convergence, peak
+  brackets experiment (ratio ≈ 1.5 documented), stiffness band
+  (≈ 8.6 vs 6.1 kN/mm @ 50 mm), BEAM M-φ ≈ 195 kN·m vs Response-2000 206.
+- **Flexure-only bias documented, not ±10%** — the fiber pushover
+  overestimates peak (~1.5×) and stiffness (~1.4×) because it has no
+  bond-slip / shear (~20% share) / distributed-cracking stiffness
+  reduction; the frame-action axial (P ≈ −750 kN in beams) inflates the
+  confined/hardening section capacity.  Elastic-to-first-yield range and
+  section capacity are correct.  `deprecation_plan.md` Gap 4 → 🟡 with
+  the measured numbers.
+- **Follow-up (deferred):** shear-flexible section aggregation (shear
+  spring / SectionAggregator) and/or bond-slip springs to close the
+  stiffness gap; Vecchio & Balopoulou (1990) variant re-run.
+- Full suite: **887 passed, 4 xfailed** (882 + 5 benchmark tests).
+
 ## DONE (deprecation-programme Phase 2 — Gap 3, 2026-08-16)
 - **3D-only policy documented** — `.clinerules` §3.11 (analysis is
   `ndm=3`/`ndf=6` by design; no `ndm`/`ndf` dispatch in the main workflow;
