@@ -49,6 +49,23 @@ Mosalam) §4.5.1/§5.3:
    (deprecation_plan.md Gap 4, measure 4) is honoured by documenting the
    bias.  Closing the remaining gap requires shear-flexible section
    aggregation (e.g. shear springs) — a follow-up, not part of this test.
+
+3. **Second pass (2026-08-16): the element formulation was part of the
+   bias.**  A re-run of the same pipeline with the fibre rebuild on
+   ``forceBeamColumn`` (flexibility-based) instead of ``dispBeamColumn``
+   (displacement-based) drops the peak to ≈ 291 kN (0.88 × experimental)
+   and the secant @ 50 mm to ≈ 5.6 kN/mm (0.93 × experimental) — inside
+   the original ±10–15 % acceptance band with no calibration.
+   ``dispBeamColumn`` (Euler-Bernoulli) both over-stiffens once fibre
+   sections soften *and* never computes section shear deformation, so a
+   ``SectionAggregator`` shear spring is inert for it; ``forceBeamColumn``
+   engages the aggregated shear DOFs.  The elastic ``GA_v`` shear term
+   itself contributes only ≈ 0.2 % for these members (the experimental
+   ~20 % shear share is a cracked-shear phenomenon).  See
+   :class:`TestVecchioEmaraShearFlexibleVariant` — the shape still lacks
+   the experimental post-peak descent (the model plateaus), which needs
+   nonlinear cracked-shear / bond-slip modelling (deferred,
+   ``docs/_pending_work.md``).
 """
 
 import math
@@ -404,3 +421,116 @@ class TestVecchioEmaraBenchmark:
         # Response-2000 section capacity 206 kN·m (Guner 2008 §2.3.5.1);
         # allow a generous band for the confinement/hardening choice.
         assert 150.0 <= peak_m <= 260.0, f"BEAM M-phi peak {peak_m:.1f} kN·m out of band"
+
+
+class TestVecchioEmaraShearFlexibleVariant:
+    """Gap 4 close-out (second pass): element-formulation + shear-flexible variant.
+
+    Re-run of the benchmark with the fibre rebuild using ``forceBeamColumn``
+    (flexibility-based) instead of ``dispBeamColumn`` (displacement-based)
+    and with elastic shear aggregation enabled (``aggregate_shear``).
+    Findings:
+
+    1. **``dispBeamColumn`` was part of the bias.**  The displacement-based
+       element (Euler-Bernoulli) is over-stiff once the fibre sections
+       soften and — critically — never computes section shear deformation,
+       so a ``SectionAggregator`` shear spring is *inert* for it.  The
+       original flexure-only benchmark (peak ≈ 495 kN, ratio 1.5) is
+       dominated by this element-formulation stiffness.
+    2. **``forceBeamColumn`` lands inside the original ±10–15 % acceptance
+       band without calibration**: peak ≈ 291 kN (0.88 × experimental 330),
+       secant @ 50 mm ≈ 5.6 kN/mm (0.93 × experimental 6.1).
+    3. **Elastic shear aggregation contributes little for these members**
+       (≈ 0.2 % — the elastic ``GA_v`` shear share of a 300 × 400 @ 2 m
+       member is only a few percent; the experimental ~20 % shear share is a
+       *cracked*-shear phenomenon).  Its role here is to provide the
+       section-level shear-DOF mechanism for a future nonlinear shear
+       spring.
+    4. **Shape caveat:** the forceBeamColumn curve plateaus (no post-peak
+       descent) while the experiment softened after ≈ 50 mm — reproducing
+       that requires nonlinear cracked-shear degradation / bond-slip
+       (deferred, ``docs/_pending_work.md``).
+
+    The tests below therefore assert the *improved band* (peak ratio
+    [0.75, 1.15], secant [0.8, 1.2] × experimental) rather than the loose
+    flexure-only bracket.
+    """
+
+    @pytest.fixture
+    def ve_builder_fbc(self):
+        from openseespy.opensees import wipe
+
+        cfg = dict(_BENCH_CONFIG)
+        cfg["fiber_element_type"] = "forceBeamColumn"
+        cfg["aggregate_shear"] = True
+        mesh = preprocess_model(make_vecchio_emara_frame(), cfg)
+        builder = AnalysisBuilder(mesh, cfg)
+        yield builder
+        wipe()
+
+    @staticmethod
+    def _push(builder):
+        return builder.run_pushover_analysis(
+            gravity_patterns={"DEAD": 1.0},
+            lateral_load_type="uniform",
+            lateral_direction="X",
+            control_node_tag=5,
+            max_disp=0.155,
+            num_steps=62,
+            print_progress=False,
+        )
+
+    def test_forcebeamcolumn_peak_in_band(self, ve_builder_fbc):
+        """forceBeamColumn peak falls inside the ±15 % acceptance band.
+
+        291 kN / 330 kN = 0.88 — no longer the 1.5× overestimate, and below
+        the experimental peak rather than above it.
+        """
+        res = self._push(ve_builder_fbc)
+        assert all(s == 0 for s in res["status"]), "non-converged push steps"
+        v = np.asarray(res["base_shear"], dtype=float)
+        peak = float(np.max(v))
+        ratio = peak / EXP_PEAK_SHEAR
+        assert 0.75 <= ratio <= 1.15, (
+            f"forceBeamColumn peak {peak:.1f} kN vs experimental "
+            f"{EXP_PEAK_SHEAR:.0f} kN (ratio {ratio:.2f}) outside band"
+        )
+        assert ratio < 1.0, "forceBeamColumn variant must not over-predict the peak"
+
+    def test_forcebeamcolumn_stiffness_in_band(self, ve_builder_fbc):
+        """forceBeamColumn secant stiffness at 50 mm inside [0.8, 1.2]×exp."""
+        res = self._push(ve_builder_fbc)
+        d = np.asarray(res["control_disp"], dtype=float)
+        v = np.asarray(res["base_shear"], dtype=float)
+        v50 = float(np.interp(0.050, d, v))
+        k50 = v50 / 0.050
+        assert 0.8 * EXP_SECANT_AT_YIELD <= k50 <= 1.2 * EXP_SECANT_AT_YIELD, (
+            f"forceBeamColumn secant @50mm {k50:.0f} kN/m outside "
+            f"[{0.8 * EXP_SECANT_AT_YIELD:.0f}, {1.2 * EXP_SECANT_AT_YIELD:.0f}]"
+        )
+
+    def test_shear_aggregation_warns_inert_for_dispbeam(self, ve_builder):
+        """``aggregate_shear`` with ``dispBeamColumn`` warns and is inert.
+
+        Section shear DOFs are only engaged by flexibility-based elements;
+        ``dispBeamColumn`` (Euler-Bernoulli) never computes them.  The
+        SectionAggregator is present in the domain (6-component section
+        deformation) but its shear DOFs stay at zero, so the pushover must
+        reproduce the non-aggregated flexure-only baseline (peak ratio
+        ≈ 1.5 × experimental) and a warning must explain the mismatch.
+        """
+        ve_builder.config["aggregate_shear"] = True
+        import openseespy.opensees as ops
+
+        with pytest.warns(UserWarning, match="aggregate_shear"):
+            ve_builder.rebuild_with_fiber_sections()
+        resp = ops.eleResponse(1, "section", 1, "deformation")
+        assert len(resp) == 6, "SectionAggregator must be present (6 section DOFs)"
+        res = self._push(ve_builder)
+        v = np.asarray(res["base_shear"], dtype=float)
+        peak = float(np.max(v))
+        ratio = peak / EXP_PEAK_SHEAR
+        # Inert ⇒ identical to the flexure-only dispBeamColumn baseline.
+        assert 1.4 <= ratio <= 1.6, (
+            f"expected inert aggregation (peak ratio ≈ 1.5), got {ratio:.2f}"
+        )
