@@ -59,6 +59,21 @@ src/fea_toolkit/plotting/viz.py:
 - `tests/test_workflows.py::test_static_self_weight_consistency`: expected self-weight 6280.0 → 3999.0569 N (UB300 area change: 0.00509434 × 78500 × 10).
 - `tests/test_model.py`: removed two stale CSM tests (`test_pushover_to_adrs_missing_control_node`, `test_equal_energy_hardening_converges`) that asserted WIP-diff behavior from an uncommitted csm.py diff; no value retained.
 
+## DONE (deprecation-programme Phase 2 — Gap 6, 2026-08-16)
+- `model/csm.py`: new `bilinearize_rc()` — De Luca/Vamvatsikos 10 %-secant
+  rule (elastic secant at 10 % of peak strength + closed-form equal-area
+  yield).  Registered in `compute_performance_point(..., bilinearize_method=...)`
+  under `"rc"` and `"de_luca_10pct"`; config key `elastic_fraction` (0.10).
+- Exported via `fea_toolkit.model.__all__`.
+- Tests (`tests/test_model.py`): `test_de_luca_recovers_exact_bilinear_knee`,
+  `test_de_luca_rc_curve_yield_not_at_cracking` (tanh RC backbone — yield in
+  rebar-yield band, equal-area exact), `test_compute_performance_point_accepts_de_luca_method`
+  (dispatch), plus `bilinearize_rc` added to the shared empty/noisy/elastic/
+  yield-before-peak loops.  Full suite: **878 passed, 4 xfailed**.
+- Docs: `csm_bilinearization.md` §4, `deprecation_plan.md` Gap 6 status,
+  `analysis_builder_migration_plan.md` RC-solver row, `llm_guide.md` /
+  `README.md` / `viewer.md` deprecated-plot examples → replacements.
+
 ## OUT OF SCOPE / NOTED
 - ~~The uncommitted `src/fea_toolkit/model/csm.py` WIP diff (63 lines: `_modal_participation` helper, peak_idx clamping, performance-point fallback period, control-node warning) remains uncommitted.~~ **RESOLVED (2026-08-16)** — the WIP was subsequently committed
   (`b29505d` CSM sign folding + performance-point robustness, `18caea7` effective-modal-mass terminology + all-rejected-modes ValueError, `f4a8c3b` require `nodal_masses`, `453ea90` mode-selection docs). The working tree is clean; the ~27 CSM/bilinearization tests in `tests/test_model.py` pass against the committed state. The `_modal_participation` helper, `peak_idx` clamping (`csm.py` `bilinearize_composite`), performance-point fallback period, and control-node warning are all present in `src/fea_toolkit/model/csm.py`.

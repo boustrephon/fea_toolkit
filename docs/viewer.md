@@ -243,9 +243,9 @@ a ``selection`` keyword to restrict visible elements.
 ### 2a. 3D model view
 
 ```python
-from fea_toolkit.plotting import plot_model_3d
+from fea_toolkit.plotting import plot_mesh
 
-plot_model_3d(
+plot_mesh(
     builder,
     show_nodes=True,
     show_labels=False,
