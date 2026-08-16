@@ -6,6 +6,7 @@ import pytest
 
 from fea_toolkit.analysis.base import (
     _MODAL_DEFAULTS,
+    _PUSHOVER_RC_DEFAULTS,
     _PUSHOVER_STEEL_DEFAULTS,
     _RESPONSE_SPECTRUM_DEFAULTS,
     _STATIC_LINEAR_DEFAULTS,
@@ -151,6 +152,34 @@ class TestAnalysisDefaults:
         d = dict(_PUSHOVER_STEEL_DEFAULTS)
         assert "element_type" in d
         assert d["element_type"] == "nonlinearBeamColumn"
+
+    def test_pushover_rc_defaults_relaxed(self):
+        """RC fibre pushover must use the relaxed, validated solver settings.
+
+        ``forceBeamColumn`` carries member loads internally and performs its
+        own state-determination iteration, so the strict generic defaults
+        (``NormDispIncr 1e-6 / 10``) stall around 0.006 m control
+        displacement (see docs/_pending_work.md, 2026-08-04).  The confirmed
+        working contract is ``NormDispIncr 1e-4 / 20 / Newton`` plus the
+        per-step fallback chain.
+        """
+        d = dict(_PUSHOVER_RC_DEFAULTS)
+        assert d["element_type"] == "forceBeamColumn"
+        assert d["solver_test_type"] == "NormDispIncr"
+        assert d["solver_test_tol"] == 1e-4
+        assert d["solver_test_max_iter"] == 20
+        assert d["solver_algorithm"] == "Newton"
+        assert d["gravity_num_substeps"] >= 1
+        assert "pushover_fallback_defaults" in d
+
+    def test_pushover_rc_fallback_matches_builder(self):
+        """The RC-preset fallback must stay in sync with the builder's
+        ``PUSHOVER_FALLBACK_DEFAULTS`` (NormUnbalance / 1000 iter /
+        ModifiedNewton with a runtime-scaled tolerance)."""
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+        fb = dict(_PUSHOVER_RC_DEFAULTS["pushover_fallback_defaults"])
+        assert fb == dict(AnalysisBuilder.PUSHOVER_FALLBACK_DEFAULTS)
 
 
 # ── Analysis ABC ────────────────────────────────────────────────────────────
