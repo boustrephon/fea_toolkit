@@ -202,7 +202,102 @@ nonlinear cracked-shear (DSFM-style) constitutive would close the gap.
 
 ---
 
+## Phase 3 — Elwood & Moehle column limit states (planned 🚧)
+
+Targets the **shear-failure → axial-failure collapse sequence** of
+high-axial-load RC columns (e.g. core / outrigger columns of 500 m towers,
+where a shear failure at moderate drift can shed the gravity load and
+precipitate progressive collapse).  Phase 0 (prototype) is complete and the
+physics is validated; builder integration is next.
+
+### Physics (PEER 2003/01)
+
+Two empirical drift-capacity models bound the column response.  The
+**drift at shear failure** is a function of the current shear `V` and axial
+`P`; OpenSees solves it for the force on the limit surface
+(`ShearCurve::findLimit`):
+
+```
+V = 500·(0.03 + δ + 4·ρ″ − DR − 0.025·P/(b·h·(f′c/1000)))·(b·d·√f′c/1000)   [kip, in, psi]
+```
+
+with a 1%-drift floor.  The **drift at axial failure** comes from the
+shear-friction model (`AxialCurve::findLimit`), crack angle θ = 65°:
+
+```
+P(DR) = ((1+tan²θ)/(25·DR) − tanθ)·F_sw·tanθ,   F_sw = A_st·f_yt·d_c/s
+```
+
+With `ρ″ = A_st/(b·s)` and a **positive** shear `K_deg` (the flexural
+unloading stiffness), the Shear curve sets the post-failure degrading slope
+so the shear capacity reaches zero exactly at the axial-failure drift —
+this is the shear→axial coupling.  After axial failure the axial spring
+degrades along `K_deg = −0.02·E_c·A_g/L` to the residual `F_res`.
+
+### Implementation status
+
+| Piece | Status |
+|---|---|
+| `analysis/elwood_limit_state.py` — parameters (`F_sw`, `ρ″`, `d_c`), unit-agnostic drift equations, ThreePoint surface fit, `LimitState` envelope, spring slopes | ✅ Complete (tests: `tests/test_elwood_limit_state.py`) |
+| Builder centre-spring emission (`limitCurve Shear` + `ThreePoint` + `LimitState` at column mid-height) | 🚧 Planned |
+| `convert_mesh_units()` kip-in enabler (OpenSees `limitCurve` is imperial-embedded) | 🚧 Planned |
+| Column selection (8 RC outrigger columns only) | 🚧 Planned |
+| Dynamic (transient) driver | 🚧 Planned (after the material model) |
+
+### OpenSeesPy 3.8.0 binding constraints (validated in Phase 0)
+
+1. **`ops.limitCurve("Axial", ...)` is broken** — silent `OpenSeesError` for
+   every arg layout (the binding can never produce the C++ handler's
+   required `argc ∈ {9,12,14,15}`).  Hard constraint.
+2. **`ops.limitCurve("Shear", ...)` and `limitCurve("ThreePoint", ...)`
+   work** (the exact arg forms used by the prototype).
+3. **Workaround** — the axial capacity surface is emitted as a ThreePoint
+   curve pinned to the operating gravity load:
+   `(0, plateau) → (DR_a(P_g), P_g) → (8%, P(8%))`, with `forType=2`
+   (beam-column axial force).  Two non-obvious requirements discovered from
+   the C++ source: `ThreePointCurve::findLimit` returns **0 for x < x1**
+   (so `x1` must be 0), and the ordinate must be the **column axial force**
+   (forType=2), not the spring force.
+
+### Validation (Phase-0 prototype, `local/elwood_prototype.py`)
+
+Single-column pushover in kip-in reproducing Elwood's `CenterCol` example
+(Specimen-2 configuration: 9×9 in, L=58 in, f′c=3.52 ksi, P=70 kip):
+
+| Quantity | Prototype | Published (PEER 2003/01) |
+|---|---|---|
+| Drift at shear failure | **2.10%** | **2.1%** (test *and* analytical model) |
+| Drift at axial failure | **4.64%** | 5.2% (3-column frame, live axial redistribution) |
+
+The axial-failure gap is the frame effect: Elwood's beam sheds centre-column
+axial load between 2.1% and 5.2% drift; the isolated column (constant
+P ≈ 69 kip) triggers at 4.64%, matching the constant-P shear-friction value
+(4.58%).  Cyclic response shows the same shear-failure trigger and
+post-failure degradation to the shear residual.
+
+### Units
+
+The OpenSees `limitCurve` equations are imperial-embedded (f′c in psi,
+forces in kip, lengths in in) — the toolkit's unit-agnostic layer rescales
+to this basis internally (the drift ratios returned are dimensionless and
+unit-invariant).  The builder will emit the limit curves in kip-in, which is
+why the `convert_mesh_units()` enabler is planned for SI mega-towers.
+
+### References (additional)
+
+7. Elwood, K.J. & Moehle, J.P. (2003). *Shake Table Tests and Analytical
+   Studies on the Gravity Load Collapse of Reinforced Concrete Frames*,
+   PEER 2003/01, UC Berkeley.
+8. OpenSees source: `SRC/material/uniaxial/limitState/` (`ShearCurve.cpp`,
+   `AxialCurve.cpp`, `ThreePointCurve.cpp`, `LimitStateMaterial.cpp`).
+9. Implementation: `fea_toolkit/analysis/elwood_limit_state.py`,
+   `tests/test_elwood_limit_state.py`, `local/elwood_prototype.py`,
+   `local/elwood_phase0_checkpoint.md`.
+
+---
+
 ## References
+
 
 1. Duong, K.V., Sheikh, S.A. & Vecchio, F.J. (2007). “Seismic Behavior of
    Shear-Critical Reinforced Concrete Frame: Experimental Investigation.”
