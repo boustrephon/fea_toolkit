@@ -67,6 +67,11 @@ for automated cross-referencing.
   Tags: `reporting`, `design-proposal`, `yaml-config`, `hdf5`
   Related: [Unified Results Schema](results_schema.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Modal Analysis Options](modal_analysis.md)
 
+- [RC Shear-Failure Modelling (MCFT Capacity + Nonlinear Shear Backbone)](shear_failure_modelling.md) — ✅ Complete
+  > Two-layer RC shear-failure modelling: a simplified-MCFT member shear-capacity model and mode-of-failure reporter (ASCE 41 force-controlled check), plus a nonlinear shear backbone (SectionAggregator) for reproducing shear-critical frame failures. Validated against the Duong et al. (2007) frame.
+  Tags: `validation`, `shear`, `mcf`, `capacity`, `backbone`, `duong`, `force-controlled`, `reporter`
+  Related: [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Deprecation Removal Plan](deprecation_plan.md)
+
 - [Storey-level Response Methodology](storey_response.md) — ✅ Complete
   > Storey displacement, drift, shear, and modal drift extraction and visualisation.
   Tags: `analysis-type`, `storey`, `drift`, `shear`, `displacement`, `post-processing`
@@ -224,12 +229,14 @@ Tags across all documentation files:
 - **`api-reference`** — [llm_guide.md](llm_guide.md)
 - **`architecture`** — [analysis.md](analysis.md), [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md)
 - **`area-elements`** — [shell_support.md](shell_support.md)
+- **`backbone`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`beams`** — [element_classification.md](element_classification.md)
 - **`benchmark`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`bilinearization`** — [csm_bilinearization.md](csm_bilinearization.md)
 - **`brace`** — [pushover_analysis.md](pushover_analysis.md)
 - **`braces`** — [element_classification.md](element_classification.md)
 - **`build`** — [openseespy_local_build.md](openseespy_local_build.md)
+- **`capacity`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`capacity-spectrum`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md)
 - **`classification`** — [element_classification.md](element_classification.md)
 - **`cleanup`** — [deprecation_plan.md](deprecation_plan.md), [linting_fix_plan.md](linting_fix_plan.md)
@@ -245,6 +252,7 @@ Tags across all documentation files:
 - **`diaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
 - **`displacement`** — [storey_response.md](storey_response.md)
 - **`drift`** — [storey_response.md](storey_response.md)
+- **`duong`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`dynamic`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
 - **`edge-detection`** — [constraint_detection.md](constraint_detection.md)
 - **`eigen`** — [modal_analysis.md](modal_analysis.md)
@@ -257,6 +265,7 @@ Tags across all documentation files:
 - **`fea-toolkit`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`fiber`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`fiber-section`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`force-controlled`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`geometry`** — [rhino_export.md](rhino_export.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`ground-motion`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
@@ -275,6 +284,7 @@ Tags across all documentation files:
 - **`macos`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`manager`** — [analysis.md](analysis.md)
 - **`mander`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
+- **`mcf`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`mesh-model`** — [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`meshing`** — [constraint_detection.md](constraint_detection.md), [element_splitting.md](element_splitting.md), [shell_support.md](shell_support.md)
 - **`migration`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md)
@@ -296,6 +306,7 @@ Tags across all documentation files:
 - **`pyvista`** — [viewer.md](viewer.md)
 - **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`reference`** — [builder_reference.md](builder_reference.md), [mander_confinement_validation.md](mander_confinement_validation.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
+- **`reporter`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
 - **`results`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`rhino`** — [rhino_export.md](rhino_export.md)
@@ -306,7 +317,7 @@ Tags across all documentation files:
 - **`schema`** — [results_schema.md](results_schema.md)
 - **`scripting`** — [tcl_export.md](tcl_export.md)
 - **`sections`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
-- **`shear`** — [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`shear`** — [shear_failure_modelling.md](shear_failure_modelling.md), [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`shell`** — [constraint_detection.md](constraint_detection.md), [element_properties_config.md](element_properties_config.md), [shell_support.md](shell_support.md)
 - **`slabs`** — [element_classification.md](element_classification.md)
 - **`solver`** — [modal_analysis.md](modal_analysis.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
@@ -320,7 +331,7 @@ Tags across all documentation files:
 - **`time-history`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
 - **`typed-results`** — [analysis.md](analysis.md)
 - **`usage`** — [llm_guide.md](llm_guide.md)
-- **`validation`** — [mander_confinement_validation.md](mander_confinement_validation.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`validation`** — [mander_confinement_validation.md](mander_confinement_validation.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`viewer`** — [viewer.md](viewer.md)
 - **`visualisation`** — [rhino_export.md](rhino_export.md), [viewer.md](viewer.md)
 - **`visualization`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md)

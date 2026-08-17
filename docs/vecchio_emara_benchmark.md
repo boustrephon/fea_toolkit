@@ -315,19 +315,43 @@ ratio [0.95, 1.15], secant [0.9, 1.15] × experimental).
 1. **Post-peak shape.**  The model continues to rise after ≈ 50 mm
    instead of descending like the experiment — the peak-to-peak and
    secant metrics are inside the band, but the *shape* of the capacity
-   curve after the experimental peak is not reproduced.  This needs
-   **nonlinear cracked-shear degradation / bond-slip** springs
-   (deferred — ``docs/_pending_work.md``).
+   curve after the experimental peak is not reproduced.  The first
+   increment of the fix — the **nonlinear shear backbone**
+   (``aggregate_shear = "nonlinear"``) — is implemented and validated on
+   the companion shear-critical Duong frame
+   (``docs/shear_failure_modelling.md``); bond-slip remains deferred
+   (``docs/_pending_work.md``).
 2. **Elastic shear aggregation is not enough.**  The ~20 % experimental
    shear-drift share is a cracked-shear phenomenon; the elastic
-   ``GAᵥ`` term adds ≈ 0.2 %.
+   ``GAᵥ`` term adds ≈ 0.2 %.  The nonlinear backbone layer (see above)
+   is the cracked-shear increment.
 3. **No base-beam bottom offsets.**  The model fixes the base nodes at
    the column centreline and does not model the 400-mm base beam, so
    the Level-1 columns lack a bottom rigid zone.
 4. **Level 2 (spring offsets) and Level 3 (joint elements) are
    unimplemented** — but ``joint_extents`` composes with Level 1.
-5. **Vecchio & Balopoulou (1990) variant** re-run once the shear model
-   lands.
+5. **Vecchio & Balopoulou (1990) variant** re-run with the new
+   shear-capacity reporter / backbone layers.
+
+---
+
+## 8a. Companion benchmark — Duong et al. (2007) shear-critical frame
+
+The two-layer shear-failure modelling driven by the **Duong, Sheikh &
+Vecchio (2007)** shear-critical frame is documented in
+``docs/shear_failure_modelling.md``:
+
+- **Phase 1 (reporter)** correctly identifies the **first-storey beam as
+  the shear-governing member** on the Duong frame (matching the
+  experimental mid-span diagonal failure and Guner's beam-1S sequence) and
+  finds **no** shear exceedance on this (flexure-governed) V&E frame.
+- **Phase 2 (nonlinear backbone)** reproduces the Duong **stage-1
+  response** with an explicit backbone: peak ≈ 227 kN (**1.03 ×** the
+  experimental 220 kN) with the classic two-step shear-failure descent.
+- **Known limitation:** the auto simplified-MCFT backbone (V_n ≈ 295 kN)
+  overestimates this beam's capacity (~1.5 × the effective experimental
+  value) — the documented MCFT-vs-Kotsovos difference.  The reporter's
+  *mode* is correct; the *absolute level* is conservative-high.
 
 ---
 

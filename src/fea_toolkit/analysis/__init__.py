@@ -17,6 +17,13 @@ from fea_toolkit.analysis.modal import ModalAnalysis
 from fea_toolkit.analysis.nonlinear_dynamic import NonlinearDynamicAnalysis
 from fea_toolkit.analysis.pushover import PushoverAnalysis
 from fea_toolkit.analysis.rs import ResponseSpectrumAnalysis
+from fea_toolkit.analysis.shear_capacity import (
+    ShearCapacityResult,
+    ShearFailureReport,
+    member_shear_capacity,
+    report_shear_failure,
+    shear_backbone,
+)
 from fea_toolkit.analysis.static import StaticAnalysis
 
 # ── Deprecated compatibility exports ──
@@ -41,5 +48,10 @@ __all__ = [
     "NonlinearDynamicAnalysis",
     "PushoverAnalysis",
     "ResponseSpectrumAnalysis",
+    "ShearCapacityResult",
+    "ShearFailureReport",
     "StaticAnalysis",
+    "member_shear_capacity",
+    "report_shear_failure",
+    "shear_backbone",
 ]
