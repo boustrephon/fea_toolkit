@@ -242,6 +242,13 @@ class AnalysisBuilder:
             # sections lack.  Off by default — existing models keep their
             # shear-rigid Euler-Bernoulli response unchanged.
             #
+            # Accepts:
+            #   False          — no aggregation (default)
+            #   True/"elastic" — Elastic GA_v shear term only
+            #   "nonlinear"    — trilinear simplified-MCFT backbone
+            #                    (cracking → peak V_n → degrading → residual)
+            #                    derived per section via shear_capacity.py.
+            #
             # NOTE: section shear DOFs are only engaged by flexibility-
             # based elements — use ``fiber_element_type =
             # "forceBeamColumn"`` for the shear aggregation to take effect.
@@ -250,6 +257,13 @@ class AnalysisBuilder:
             # silently inert for it.
             "aggregate_shear": False,
             "shear_area_factor": 5.0 / 6.0,  # rectangular A_v = f·A
+            # Explicit nonlinear shear backbone override for
+            # ``aggregate_shear="nonlinear"``: a dict with keys ``v_cr``,
+            # ``g_cr``, ``v_n``, ``g_n``, ``v_r``, ``g_r`` (model units),
+            # applied to every aggregated section.  ``None`` (default)
+            # auto-derives the backbone per section from the MCFT capacity
+            # model in ``fea_toolkit.analysis.shear_capacity``.
+            "shear_backbone": None,
             # Element type used by the fiber-section pushover rebuild
             # (rebuild_with_fiber_sections).  Defaults to dispBeamColumn.
             "fiber_element_type": "dispBeamColumn",
@@ -2187,15 +2201,19 @@ class AnalysisBuilder:
                     # based elements; Euler-Bernoulli (dispBeamColumn /
                     # elasticBeamColumn) elements never compute section
                     # shear deformation, so aggregation would be silently
-                    # inert.  Warn once per build.
-                    _etype = self.config.get("element_type", "")
+                    # inert.  Warn once per build.  The relevant element
+                    # type is the fibre rebuild type (fiber_element_type),
+                    # not the base elastic element_type.
+                    _etype = self.config.get("fiber_element_type", "") or self.config.get(
+                        "element_type", ""
+                    )
                     if _etype != "forceBeamColumn" and not getattr(
                         self, "_warned_shear_element", False
                     ):
                         import warnings
 
                         warnings.warn(
-                            f"aggregate_shear is set but element_type={_etype!r} does not "
+                            f"aggregate_shear is set but fiber_element_type={_etype!r} does not "
                             "engage section shear DOFs (Euler-Bernoulli element). The "
                             "shear aggregation will have no effect — set "
                             "fiber_element_type='forceBeamColumn' so the pushover rebuild "
@@ -2204,7 +2222,7 @@ class AnalysisBuilder:
                             stacklevel=2,
                         )
                         self._warned_shear_element = True
-                    self._wrap_fiber_section_with_shear(tag, fiber_tag, G_mod, _A)
+                    self._wrap_fiber_section_with_shear(tag, fiber_tag, G_mod, _A, sec=sec)
 
                 if self.config.get("verbose", False):
                     print(f"  Section {tag}: {sec.name} (Fiber, {len(entries)} patches)")
@@ -2243,19 +2261,27 @@ class AnalysisBuilder:
             )
 
     def _wrap_fiber_section_with_shear(
-        self, agg_tag: int, fiber_tag: int, G_mod: float, A: float
+        self, agg_tag: int, fiber_tag: int, G_mod: float, A: float, sec=None
     ) -> None:
-        """Wrap a fiber section in a SectionAggregator with elastic shear.
+        """Wrap a fiber section in a SectionAggregator with a shear response.
 
         Plain fiber sections are shear-rigid (Euler–Bernoulli): the
         ``dispBeamColumn`` / ``forceBeamColumn`` elements carrying them have
         no transverse-shear deformation.  For RC frames with stocky members
         where shear deformations are non-negligible (e.g. the Vecchio &
-        Emara 1992 benchmark), this method wraps the fiber section in a
-        ``section Aggregator`` that adds an ``Elastic`` uniaxial material on
-        the section's ``Vy``/``Vz`` DOFs with rigidity
-        :math:`GA_v = G_{mod} \\cdot (f \\cdot A)` where ``f`` is the
-        shear-area factor (5/6 for rectangles by default).
+        Emara 1992 and Duong et al. 2007 benchmarks), this method wraps the
+        fiber section in a ``section Aggregator`` that adds a uniaxial
+        material on the section's ``Vy``/``Vz`` DOFs:
+
+        * ``aggregate_shear = "elastic"`` (or ``True``) — an ``Elastic``
+          material with rigidity :math:`GA_v = G_{mod} \\cdot (f \\cdot A)`
+          where ``f`` is the shear-area factor (5/6 for rectangles).
+        * ``aggregate_shear = "nonlinear"`` — a trilinear ``Hysteretic``
+          material built from the simplified-MCFT backbone
+          (:func:`fea_toolkit.analysis.shear_capacity.shear_backbone`):
+          cracking → peak ``V_n`` → degrading → residual.  If the backbone
+          cannot be derived (missing section/material), the elastic term is
+          used as a fallback.
 
         Args:
             agg_tag: OpenSees tag of the SectionAggregator — the tag the
@@ -2263,6 +2289,8 @@ class AnalysisBuilder:
             fiber_tag: OpenSees tag of the base fiber section.
             G_mod: Shear modulus in model units.
             A: Gross area of the section (model units²).
+            sec: The model ``Section`` — used only by the nonlinear path to
+                derive the MCFT backbone from the section/material data.
         """
         Av = float(self.config.get("shear_area_factor", 5.0 / 6.0)) * (A or 0.0)
         if (G_mod or 0.0) <= 0.0 or Av <= 0.0:
@@ -2270,8 +2298,67 @@ class AnalysisBuilder:
         GAv = G_mod * Av
         sh_tag = self._next_fiber_mat_tag
         self._next_fiber_mat_tag += 1
-        ops.uniaxialMaterial("Elastic", sh_tag, GAv)
+
+        use_nonlinear = self.config.get("aggregate_shear") == "nonlinear"
+        bb = None
+        if use_nonlinear:
+            bb = self._derive_shear_backbone(sec)
+            if bb is None:
+                use_nonlinear = False  # fall back to the elastic term
+
+        if use_nonlinear:
+            ops.uniaxialMaterial(
+                "Hysteretic",
+                sh_tag,
+                bb["v_cr"],
+                bb["g_cr"],
+                bb["v_n"],
+                bb["g_n"],
+                bb["v_r"],
+                bb["g_r"],
+                -bb["v_cr"],
+                -bb["g_cr"],
+                -bb["v_n"],
+                -bb["g_n"],
+                -bb["v_r"],
+                -bb["g_r"],
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+            )
+        else:
+            ops.uniaxialMaterial("Elastic", sh_tag, GAv)
         ops.section("Aggregator", agg_tag, sh_tag, "Vy", sh_tag, "Vz", "-section", fiber_tag)
+
+    def _derive_shear_backbone(self, sec) -> Optional[dict]:
+        """Derive (or read) the nonlinear shear backbone for a section.
+
+        ``config["shear_backbone"]`` may be an explicit dict (applied to
+        every aggregated section); otherwise the simplified-MCFT backbone
+        is derived per section from the mesh model's material data.  Returns
+        ``None`` when no backbone can be produced.
+        """
+        from ..analysis.shear_capacity import shear_backbone
+
+        if sec is None:
+            return None
+        materials = self.mesh_model.materials
+        concrete = materials.get(getattr(sec, "material", ""))
+        if concrete is None:
+            return None
+        override = self.config.get("shear_backbone")
+        if isinstance(override, dict):
+            return dict(override)
+        rebar = materials.get(getattr(sec, "rebar_material", "") or "")
+        tie = materials.get(getattr(sec, "tie_rebar_mat", "") or "")
+        return shear_backbone(
+            sec,
+            concrete,
+            rebar=rebar,
+            tie=tie,
+            units=self.units,
+        )
 
     # ── Shell elements ───────────────────────────────────────────
 
@@ -5366,6 +5453,7 @@ class AnalysisBuilder:
         gravity_patterns: dict[str, float],
         lateral_load_type: str = "uniform",
         lateral_pattern_name: Optional[str] = None,
+        lateral_point_nodes: Optional[list[int]] = None,
         lateral_direction: str = "X",
         control_node_tag: Optional[int] = None,
         max_disp: float = 0.5,
@@ -5375,6 +5463,7 @@ class AnalysisBuilder:
         mode_index: int = 0,
         node_mass_overrides: Optional[dict[str, float]] = None,
         print_progress: bool = True,
+        record_element_forces: bool = False,
     ) -> dict[str, Any]:
         """Run a displacement‑controlled pushover analysis.
 
@@ -5386,7 +5475,7 @@ class AnalysisBuilder:
            push a control node in increments using
            ``DisplacementControl`` integration.
 
-        Four lateral load types are supported:
+        Five lateral load types are supported:
 
         * ``'uniform'`` — mass‑proportional acceleration (uniform
           acceleration of the structure).
@@ -5397,14 +5486,22 @@ class AnalysisBuilder:
           (modal pushover).
         * ``'pattern'`` — read an existing SAP2000 load pattern
           (frame distributed loads) from the model data.
+        * ``'point'`` — a unit point load at the node(s) given by
+          *lateral_point_nodes* (default: the control node).  A single
+          point load reproduces the Duong et al. (2007) and Vecchio &
+          Emara (1992) test setups, which pushed the top beam with one
+          actuator.
 
         Args:
             gravity_patterns: Dict mapping load pattern name → scale
                 factor for gravity loads, e.g. ``{"DEAD": 1.0}``.
             lateral_load_type: ``'uniform'``, ``'triangular'``,
-                ``'mode1'``, or ``'pattern'``.
+                ``'mode1'``, ``'pattern'``, or ``'point'``.
             lateral_pattern_name: SAP2000 load pattern name (required
                 when *lateral_load_type* is ``'pattern'``).
+            lateral_point_nodes: OpenSees node tags loaded by the
+                ``'point'`` type (each receives a unit load in the push
+                direction).  ``None`` → the control node only.
             lateral_direction: Push direction — ``'X'``, ``'Y'``, or
                 ``'Z'``.
             control_node_tag: OpenSees node tag for displacement
@@ -5428,13 +5525,20 @@ class AnalysisBuilder:
                 :attr:`node_masses` keys (string SAP IDs), not
                 OpenSees tags.
             print_progress: Print a progress line per step.
+            record_element_forces: When ``True``, capture the local end
+                forces of every active frame element after each push step
+                and expose them as ``results["element_forces_history"]``
+                (list aligned with ``results["step"]``; index 0 is the
+                post-gravity state).  Required by
+                :func:`fea_toolkit.analysis.shear_capacity.report_shear_failure`.
 
         Returns:
             Dict with keys ``step``, ``control_disp``, ``base_shear``,
             ``status``, ``gravity_displacements``, ``control_node``,
-            ``dof``, ``lateral_load_type``.
+            ``dof``, ``lateral_load_type`` and (when
+            ``record_element_forces=True``) ``element_forces_history``.
         """
-        valid_types = {"uniform", "triangular", "mode1", "pattern"}
+        valid_types = {"uniform", "triangular", "mode1", "pattern", "point"}
         if lateral_load_type not in valid_types:
             raise ValueError(
                 f"Unknown lateral_load_type '{lateral_load_type}'. Choose from {valid_types}."
@@ -5778,6 +5882,9 @@ class AnalysisBuilder:
                     mode_shapes=mode_shapes,
                     mode_index=mode_index,
                 )
+            elif lateral_load_type == "point":
+                _pts = lateral_point_nodes or [int(control_node_tag)]
+                node_loads = {int(t): (1.0, 0.0, 0.0) for t in _pts}
             else:
                 node_loads = {}
 
@@ -5863,12 +5970,15 @@ class AnalysisBuilder:
                     f"{len(record_node_tags)} node(s) per step"
                 )
         step_results: list[dict[str, Any]] = []
+        element_forces_history: list[dict[int, dict[str, float]]] = []
 
         # ── Gravity state (step 0) ───────────────────────────────
         steps: list[int] = [0]
         ctrl_disps: list[float] = [0.0]
         base_shears: list[float] = [0.0]
         statuses: list[int] = [0]
+        if record_element_forces:
+            element_forces_history.append(self.extract_static_element_forces())
 
         try:
             ops.reactions()
@@ -5972,6 +6082,10 @@ class AnalysisBuilder:
             base_shears.append(-bs)
             steps.append(step)
 
+            # ── Per-step element-force recording (Phase 1 reporter) ──
+            if record_element_forces and ok == 0:
+                element_forces_history.append(self.extract_static_element_forces())
+
             # ── Per-step element recording ──────────────────────
             if record and ok == 0:
                 step_data = _record_step(
@@ -6006,6 +6120,7 @@ class AnalysisBuilder:
             "control_node": control_node_tag,
             "dof": dof,
             "lateral_load_type": lateral_load_type,
+            "element_forces_history": element_forces_history,
             "units": self.mesh_model.units,
         }
         if record:
