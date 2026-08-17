@@ -11,6 +11,7 @@ geometry — Element splitting, area meshing, load redistribution, local axes.
 sections — Manufacturer section library (:class:`SectionLibrary`).
 stories — Storey identification and summarisation (:func:`identify_stories`).
 storey_response — Storey displacements, drifts, shears, modal drifts.
+units — Unit-system conversion (:func:`convert_mesh_units`), kip-in enabler.
 checks — Connectivity diagnostics, brace buckling check, self-weight check.
 csm — Capacity Spectrum Method (ADRS conversion, performance point).
 confinement — Mander confined concrete model.
@@ -127,8 +128,14 @@ from .tree_utils import (
     get_element_chain,
     get_root_parent,
 )
+from .units import (
+    KIP_IN_UNITS,
+    convert_mesh_units,
+    unit_multipliers,
+)
 
 __all__ = [
+    "KIP_IN_UNITS",
     "AngleSection",
     "AreaEdgeConstraint",
     "AreaElement",
@@ -204,6 +211,7 @@ __all__ = [
     "compute_linear_storey_responses",
     "compute_performance_point",
     "convert_area_loads_to_edge_loads",
+    "convert_mesh_units",
     "find_constraint_edges",
     "find_wall_nodes_inside_slabs",
     "frame_split_summary",
@@ -237,5 +245,7 @@ __all__ = [
     "stories_dataframe",
     "subdivide_elements",
     "trapezoidal_force_split",
+    # Units
+    "unit_multipliers",
     "warn_frame_overlaps",
 ]

@@ -392,6 +392,35 @@ def uniaxialMaterial(mat_type: str, tag: int, *args: Any) -> None:
     """
     ...
 
+
+def limitCurve(curve_type: str, tag: int, *args: Any) -> None:
+    """Create a limit-state limit curve (Elwood column shear/axial failure).
+
+    Used together with ``uniaxialMaterial('LimitState', ...)`` to trigger
+    drift-based shear / axial failure of RC columns.  The empirical
+    equations embed imperial units (forces kip, lengths in, ``fc`` psi).
+
+    Common forms::
+
+        # Shear: rho, fc(psi), b, h, d, Fsw, Kdeg, Fres, defType, forType,
+        #        ndI, ndJ, dof, perpDirn
+        limitCurve('Shear', tag, curveTag, rho, fc, b, h, d, fsw, kdeg,
+                   fres, defType, forType, ndI, ndJ, dof, perpDirn)
+
+        # ThreePoint: (x1,y1) (x2,y2) (x3,y3) + Kdeg, Fres, defType, forType
+        limitCurve('ThreePoint', tag, eleTag, x1, y1, x2, y2, x3, y3,
+                   kdeg, fres, defType, forType, ndI, ndJ, dof, perpDirn)
+
+    Args:
+        curve_type: ``'Shear'``, ``'Axial'`` (broken in OpenSeesPy 3.8.0 —
+            use a ``'ThreePoint'`` fit), ``'ThreePoint'``, ``'Bilinear'``,
+            ``'Pivot'`` or ``'Degradation'``.
+        tag: Limit-curve tag.
+        *args: Curve-specific arguments (see the OpenSees command manual and
+            ``docs/shear_failure_modelling.md`` Phase 3).
+    """
+    ...
+
 def section(sec_type: str, tag: int, *args: Any) -> None:
     """Create a section.
 
