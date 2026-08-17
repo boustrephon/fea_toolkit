@@ -130,6 +130,11 @@ for automated cross-referencing.
   Tags: `stiffness`, `cracked-section`, `aci-318`, `modifiers`
   Related: [Element Classification](element_classification.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Modal Analysis Options](modal_analysis.md)
 
+- [Units Workflow (kN·m·s → kip·in Limit-State Analysis)](units_conversion.md) — ✅ Complete
+  > Unit-system conversion for MeshModel objects (convert_mesh_units), the kip-in-ksi enabler behind the Elwood column limit-state (Phase 3) analysis of SI models. Round-trip exact, with the full kN·m·s workflow, conversion factors and results back-conversion.
+  Tags: `units`, `conversion`, `kip-in`, `si`, `elwood`, `limit-state`
+  Related: [RC Shear-Failure Modelling (MCFT Capacity + Nonlinear Shear Backbone)](shear_failure_modelling.md)
+
 
 ## 🎨 Export & Visualisation
 
@@ -244,6 +249,7 @@ Tags across all documentation files:
 - **`config`** — [element_properties_config.md](element_properties_config.md)
 - **`confinement`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`constraints`** — [constraint_detection.md](constraint_detection.md), [diaphragm_constraints.md](diaphragm_constraints.md)
+- **`conversion`** — [units_conversion.md](units_conversion.md)
 - **`cracked-section`** — [stiffness_factors.md](stiffness_factors.md)
 - **`csm`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md), [pushover_analysis.md](pushover_analysis.md)
 - **`deprecation`** — [deprecation_plan.md](deprecation_plan.md)
@@ -259,6 +265,7 @@ Tags across all documentation files:
 - **`eigenvalue`** — [modal_analysis.md](modal_analysis.md)
 - **`element-properties`** — [element_properties_config.md](element_properties_config.md)
 - **`elements`** — [element_classification.md](element_classification.md), [element_splitting.md](element_splitting.md), [shell_support.md](shell_support.md)
+- **`elwood`** — [units_conversion.md](units_conversion.md)
 - **`end-to-end`** — [workflow.md](workflow.md)
 - **`execution`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`export`** — [rhino_export.md](rhino_export.md), [tcl_export.md](tcl_export.md)
@@ -277,7 +284,9 @@ Tags across all documentation files:
 - **`interactive`** — [viewer.md](viewer.md)
 - **`io`** — [results_schema.md](results_schema.md)
 - **`joint`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`kip-in`** — [units_conversion.md](units_conversion.md)
 - **`lessons-learned`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
+- **`limit-state`** — [units_conversion.md](units_conversion.md)
 - **`linting`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`llm`** — [llm_guide.md](llm_guide.md)
 - **`load-redistribution`** — [element_splitting.md](element_splitting.md)
@@ -319,6 +328,7 @@ Tags across all documentation files:
 - **`sections`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`shear`** — [shear_failure_modelling.md](shear_failure_modelling.md), [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`shell`** — [constraint_detection.md](constraint_detection.md), [element_properties_config.md](element_properties_config.md), [shell_support.md](shell_support.md)
+- **`si`** — [units_conversion.md](units_conversion.md)
 - **`slabs`** — [element_classification.md](element_classification.md)
 - **`solver`** — [modal_analysis.md](modal_analysis.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`splitting`** — [element_splitting.md](element_splitting.md)
@@ -330,6 +340,7 @@ Tags across all documentation files:
 - **`theory`** — [mander_confinement_validation.md](mander_confinement_validation.md)
 - **`time-history`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
 - **`typed-results`** — [analysis.md](analysis.md)
+- **`units`** — [units_conversion.md](units_conversion.md)
 - **`usage`** — [llm_guide.md](llm_guide.md)
 - **`validation`** — [mander_confinement_validation.md](mander_confinement_validation.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`viewer`** — [viewer.md](viewer.md)

@@ -239,8 +239,8 @@ degrades along `K_deg = −0.02·E_c·A_g/L` to the residual `F_res`.
 | Piece | Status |
 |---|---|
 | `analysis/elwood_limit_state.py` — parameters (`F_sw`, `ρ″`, `d_c`), unit-agnostic drift equations, ThreePoint surface fit, `LimitState` envelope, spring slopes | ✅ Complete (tests: `tests/test_elwood_limit_state.py`) |
+| `convert_mesh_units()` kip-in enabler (`model/units.py`; OpenSees `limitCurve` is imperial-embedded) | ✅ Complete (round-trip test: `tests/test_mesh_units.py`; workflow: `docs/units_conversion.md`) |
 | Builder centre-spring emission (`limitCurve Shear` + `ThreePoint` + `LimitState` at column mid-height) | 🚧 Planned |
-| `convert_mesh_units()` kip-in enabler (OpenSees `limitCurve` is imperial-embedded) | 🚧 Planned |
 | Column selection (8 RC outrigger columns only) | 🚧 Planned |
 | Dynamic (transient) driver | 🚧 Planned (after the material model) |
 
@@ -277,11 +277,15 @@ post-failure degradation to the shear residual.
 
 ### Units
 
-The OpenSees `limitCurve` equations are imperial-embedded (f′c in psi,
-forces in kip, lengths in in) — the toolkit's unit-agnostic layer rescales
-to this basis internally (the drift ratios returned are dimensionless and
-unit-invariant).  The builder will emit the limit curves in kip-in, which is
-why the `convert_mesh_units()` enabler is planned for SI mega-towers.
+The toolkit's unit-agnostic layer rescales to the OpenSees **kip-in-ksi**
+basis internally for the drift equations (the drift ratios returned are
+dimensionless and unit-invariant across kip-in, N-m, kN-m, ...).  At
+``limitCurve Shear`` emission the builder feeds ``fc`` in **psi** (×1000 from
+the model's ksi value) — the only stress input the empirical curve expects.
+For SI models the domain is built in kip-in-ksi via
+:func:`fea_toolkit.model.units.convert_mesh_units`; the complete kN·m·s →
+kip·in workflow (conversion factors, step-by-step, results back-conversion,
+round-trip guarantee) is documented in ``docs/units_conversion.md``.
 
 ### References (additional)
 
