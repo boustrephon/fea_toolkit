@@ -25,6 +25,7 @@ from fea_toolkit.analysis.elwood_limit_state import (
     elwood_column_parameters,
     elwood_limit_state_envelope,
     elwood_shear_drift_at_failure,
+    elwood_shear_limit_force,
     elwood_spring_slopes,
     three_point_axial_surface,
 )
@@ -177,6 +178,61 @@ class TestDriftEquations:
 
 
 # ═════════════════════════════════════════════════════════════════════
+# Direct-form limiting shear force V(DR)
+# ═════════════════════════════════════════════════════════════════════
+
+
+class TestShearLimitForce:
+    def test_inverse_round_trip(self, specimen_kipin):
+        """V(DR) is the exact inverse of the drift-at-shear-failure equation."""
+        sec, conc, tie, units = specimen_kipin
+        g = elwood_column_geometry(sec, conc, tie=tie)
+        for dr in (0.015, 0.02, 0.025, 0.028):
+            v = elwood_shear_limit_force(dr, 69.02, g, units)
+            assert v > 0.0
+            dr_back = elwood_shear_drift_at_failure(v, 69.02, g, units)
+            assert dr_back == pytest.approx(dr, rel=1e-9, abs=1e-12)
+
+    def test_unit_invariance(self, specimen_kipin, specimen_nm):
+        """The same physical column gives the same force in kip or N."""
+        sec_k, conc_k, tie_k, _ = specimen_kipin
+        sec_n, conc_n, tie_n, _ = specimen_nm
+        gk = elwood_column_geometry(sec_k, conc_k, tie=tie_k)
+        gn = elwood_column_geometry(sec_n, conc_n, tie=tie_n)
+        v_k = elwood_shear_limit_force(0.02, 69.02, gk, _KIP_IN)
+        v_n = elwood_shear_limit_force(0.02, 69.02 * 4448.0, gn, _N_M)
+        assert v_n == pytest.approx(v_k * 4448.0, rel=2e-4)
+
+    def test_reproduces_prototype_shear_failure(self, specimen_kipin):
+        """Inverse of the validated Phase-0 failure point (2.1% drift, 20.62 kip)."""
+        sec, conc, tie, units = specimen_kipin
+        g = elwood_column_geometry(sec, conc, tie=tie)
+        v = elwood_shear_limit_force(0.0215, 69.02, g, units)
+        assert v == pytest.approx(20.62, rel=3e-2)
+
+    def test_decreases_with_drift(self, specimen_kipin):
+        """The surface force falls monotonically with drift (until exhaustion)."""
+        sec, conc, tie, units = specimen_kipin
+        g = elwood_column_geometry(sec, conc, tie=tie)
+        vs = [elwood_shear_limit_force(d, 69.02, g, units) for d in (0.012, 0.02, 0.028, 0.035)]
+        assert vs[0] > vs[1] > vs[2] > vs[3] >= 0.0
+
+    def test_one_percent_floor(self, specimen_kipin):
+        """Below the 1% drift floor the surface reports 'no failure' (huge force)."""
+        sec, conc, tie, units = specimen_kipin
+        g = elwood_column_geometry(sec, conc, tie=tie)
+        v_floor = elwood_shear_limit_force(0.005, 69.02, g, units)
+        v_at_floor = elwood_shear_limit_force(0.01, 69.02, g, units)
+        assert v_floor > 1.0e6 * v_at_floor
+
+    def test_zero_geometry_guard(self, specimen_kipin):
+        """Degenerate geometry returns 0.0 rather than dividing by zero."""
+        _, _, _, units = specimen_kipin
+        g0 = ElwoodColumnGeometry()  # b = h = d = 0
+        assert elwood_shear_limit_force(0.03, 10.0, g0, units) == 0.0
+
+
+# ═════════════════════════════════════════════════════════════════════
 # OpenSeesPy bridge helpers
 # ═════════════════════════════════════════════════════════════════════
 
@@ -233,5 +289,6 @@ class TestExports:
             "elwood_column_parameters",
             "three_point_axial_surface",
             "elwood_shear_drift_at_failure",
+            "elwood_shear_limit_force",
         ):
             assert hasattr(an, name)
