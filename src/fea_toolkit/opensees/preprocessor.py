@@ -104,14 +104,19 @@ class Preprocessor:
         md = copy.deepcopy(model_data)
 
         # ── 1. Frame element classification (pre-split) ──────────
+        # Always-on geometric classification: every non-inactive frame gets
+        # a role (beam/column/brace) regardless of whether stiffness_factors
+        # or element_strategies are configured.  The roles are stored on the
+        # MeshModel and consumed by the builder (stiffness-factor section
+        # variants, element-property role defaults, future design-role
+        # detection).
         frame_element_types: dict[str, str] = {}
-        if self.config.get("stiffness_factors"):
-            for eid, elem in md.frame_elements.items():
-                if getattr(elem, "inactive", False):
-                    continue
-                frame_element_types[eid] = self._classify_element_type(
-                    elem, is_area=False, nodes=md.nodes
-                )
+        for eid, elem in md.frame_elements.items():
+            if getattr(elem, "inactive", False):
+                continue
+            frame_element_types[eid] = self._classify_element_type(
+                elem, is_area=False, nodes=md.nodes
+            )
 
         # ── 2. Element splitting ─────────────────────────────────
         split_dist_loads: list[FrameDistributedLoad] = []
@@ -131,11 +136,10 @@ class Preprocessor:
             split_dist_loads = getattr(md, "frame_dist_loads", [])
 
         # Propagate element types to split children
-        if self.config.get("stiffness_factors"):
-            for child_id, child_elem in new_elems.items():
-                parent_id = getattr(child_elem, "parent_id", None)
-                if parent_id and parent_id in frame_element_types:
-                    frame_element_types[child_id] = frame_element_types[parent_id]
+        for child_id, child_elem in new_elems.items():
+            parent_id = getattr(child_elem, "parent_id", None)
+            if parent_id and parent_id in frame_element_types:
+                frame_element_types[child_id] = frame_element_types[parent_id]
 
         # ── 3. Frame end offsets ─────────────────────────────────
         offset_rigid_links: list[tuple] = []
@@ -267,15 +271,14 @@ class Preprocessor:
                 )
                 self._merge_coincident_nodes(md)
 
-            # Classify areas after meshing
+            # Classify areas after meshing (always-on geometric role)
             area_element_types: dict[str, str] = {}
-            if self.config.get("stiffness_factors"):
-                for aid, area in md.area_elements.items():
-                    if getattr(area, "inactive", False):
-                        continue
-                    area_element_types[aid] = self._classify_element_type(
-                        area, is_area=True, nodes=md.nodes
-                    )
+            for aid, area in md.area_elements.items():
+                if getattr(area, "inactive", False):
+                    continue
+                area_element_types[aid] = self._classify_element_type(
+                    area, is_area=True, nodes=md.nodes
+                )
         else:
             area_element_types = {}
 
@@ -449,29 +452,50 @@ class Preprocessor:
     ) -> str:
         """Classify a frame or area element into a structural type.
 
-        This is the **geometry signal** for element classification.
-        The companion **section-type signal** is
+        This is the **geometry signal** for element classification.  The
+        companion **section-type signal** is
         ``Selection.from_brace_sections()``.  Both are documented in
         ``docs/element_classification.md``.
+
+        Classification is **always-on**: it runs for every non-inactive
+        element at preprocess time (not only when ``stiffness_factors`` is
+        configured) and the result is stored on the ``MeshModel`` as
+        ``frame_element_types`` / ``area_element_types``.
+
+        The thresholds are configurable via the flat ``config`` dict
+        (defaults below preserve the historical behaviour):
+
+        * ``column_vertical_ratio`` (default ``4.0``) — column iff the
+          vertical span ``dz`` exceeds ``ratio`` times the horizontal span
+          ``dh``.  Equivalent to ``atan(1/4) ≈ 14°`` from vertical.
+        * ``classification_span_floor`` (default ``0.01``) — length-unit
+          floor applied to ``dh`` in the column rule and to both spans in
+          the brace rule (guards zero-length spans).
+        * ``slab_z_tolerance`` (default ``0.02``) — area horizontality
+          tolerance for the slab-vs-wall decision.
 
         Classification rules
         --------------------
         **Area elements:**
-          ``'slab'`` if all corner Z-coordinates are within 0.02 length
-          units of each other (horizontal); ``'wall'`` otherwise.
+          ``'slab'`` if all corner Z-coordinates are within
+          ``slab_z_tolerance`` length units of each other (horizontal);
+          ``'wall'`` otherwise.
 
         **Frame elements (geometry-based):**
-          * ``'column'`` if the vertical span (dz) exceeds 4\u00d7 the
-            horizontal span (\u221a(dx\u00b2 + dy\u00b2)).  Near-vertical.
+          * ``'column'`` if the vertical span (dz) exceeds
+            ``column_vertical_ratio`` times the horizontal span
+            (√(dx² + dy²)).  Near-vertical.
           * ``'brace'`` if BOTH horizontal span and vertical span exceed
-            0.01 length units (diagonal).
+            ``classification_span_floor`` length units (diagonal).
           * ``'beam'`` otherwise (horizontal or near-horizontal).
 
-        The geometry-only ``'brace'`` label is a **hint** \u2014 the final
+        The geometry-only ``'brace'`` label is a **hint** — the final
         brace decision for pushover also requires the section to be a
         recognised brace shape (Pipe, Angle, etc.).  This two-signal
         approach avoids false positives (e.g. a horizontal pipe handrail
-        classified as a brace).
+        classified as a brace).  The explicit, overridable **design role**
+        that ultimately drives modelling is Phase 2 (see
+        ``docs/element_classification.md``).
 
         Args:
             elem: A ``FrameElement`` or ``AreaElement``.
@@ -486,6 +510,10 @@ class Preprocessor:
         if nodes is None:
             nodes = {}
 
+        column_ratio = float(self.config.get("column_vertical_ratio", 4.0))
+        span_floor = float(self.config.get("classification_span_floor", 0.01))
+        slab_tol = float(self.config.get("slab_z_tolerance", 0.02))
+
         if is_area:
             zs = []
             for nid in elem.node_ids:
@@ -493,7 +521,7 @@ class Preprocessor:
                 if nd is None:
                     return "unknown"
                 zs.append(nd.z)
-            return "slab" if max(zs) - min(zs) < 0.02 else "wall"
+            return "slab" if max(zs) - min(zs) < slab_tol else "wall"
 
         ni = nodes.get(elem.node_i)
         nj = nodes.get(elem.node_j)
@@ -505,9 +533,9 @@ class Preprocessor:
         dy = abs(ni.y - nj.y)
         dh = (dx**2 + dy**2) ** 0.5
 
-        if dz > 4.0 * max(dh, 0.01):
+        if dz > column_ratio * max(dh, span_floor):
             return "column"
-        if dh > 0.01 and dz > 0.01:
+        if dh > span_floor and dz > span_floor:
             return "brace"
         return "beam"
 
