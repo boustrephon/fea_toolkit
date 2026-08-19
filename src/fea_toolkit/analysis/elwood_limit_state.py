@@ -395,6 +395,69 @@ def elwood_shear_drift_at_failure(
     return max(float(dr), 0.01)
 
 
+def elwood_shear_limit_force(
+    drift: float,
+    P: float,
+    geometry: ElwoodColumnGeometry,
+    units: dict,
+    delta: float = 0.0,
+) -> float:
+    """Limiting shear force ``V(DR)`` on the Elwood shear limit surface.
+
+    Direct form of ``ShearCurve::findLimit`` (the inverse of
+    :func:`elwood_shear_drift_at_failure`):
+
+    .. code-block:: text
+
+        V = 500 * (0.03 + delta + 4*rho - DR - 0.025*P/(b*h*(fc/1000)))
+                 * (b*d*sqrt(fc)/1000)
+
+    with everything in the kip-in-psi imperial basis.  ``V`` is returned
+    in **model force units** (converted back from the imperial evaluation).
+    Below the 1%-drift floor the surface returns a near-infinite force
+    (no failure), mirroring ``ShearCurve::findLimit``.
+
+    Args:
+        drift: Drift ratio (dimensionless).
+        P: Axial force, compression positive (model force).
+        geometry: :class:`ElwoodColumnGeometry`.
+        units: Model units dict (required).
+        delta: Drift shift of the limit surface (default 0).
+
+    Returns:
+        Limiting shear force (model force) at the drift, or a large value
+        when ``drift < 0.01``.
+    """
+    if units is None:
+        raise ValueError(
+            "elwood_shear_limit_force requires the model 'units' dict -- "
+            "the OpenSees shear-drift equation is anchored to kip-in-psi."
+        )
+    b_in = _to_inch(geometry.b, units)
+    h_in = _to_inch(geometry.h, units)
+    d_in = _to_inch(geometry.d, units)
+    fc_psi = _to_psi(geometry.fc, units)
+    if b_in <= 0.0 or d_in <= 0.0 or fc_psi <= 0.0:
+        return 0.0
+    if drift < 0.01:
+        return 9.9e9 * _to_kip(1.0, units)  # no failure below 1% drift
+    rho = geometry.rho
+    v_k = (
+        500.0
+        * (
+            0.03
+            + delta
+            + 4.0 * rho
+            - drift
+            - 0.025 * _to_kip(P, units) / (b_in * h_in * (fc_psi / 1000.0))
+        )
+        * (b_in * d_in * math.sqrt(fc_psi) / 1000.0)
+    )
+    v_k = max(v_k, 0.0)
+    # Convert kip -> model force via the same factor used by _to_kip.
+    return v_k / (_KIP_PER_N / force_scale_factor(units))
+
+
 def axial_capacity_surface(
     drift: float,
     fsw: float,

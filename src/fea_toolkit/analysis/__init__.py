@@ -22,6 +22,7 @@ from fea_toolkit.analysis.elwood_limit_state import (
     elwood_column_parameters,
     elwood_limit_state_envelope,
     elwood_shear_drift_at_failure,
+    elwood_shear_limit_force,
     elwood_spring_slopes,
     three_point_axial_surface,
 )
@@ -73,6 +74,7 @@ __all__ = [
     "elwood_column_parameters",
     "elwood_limit_state_envelope",
     "elwood_shear_drift_at_failure",
+    "elwood_shear_limit_force",
     "elwood_spring_slopes",
     "member_shear_capacity",
     "report_shear_failure",
