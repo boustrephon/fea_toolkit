@@ -68,7 +68,7 @@ for automated cross-referencing.
   Related: [Unified Results Schema](results_schema.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Modal Analysis Options](modal_analysis.md)
 
 - [RC Shear-Failure Modelling (MCFT Capacity + Nonlinear Shear Backbone)](shear_failure_modelling.md) — ✅ Complete
-  > Two-layer RC shear-failure modelling: a simplified-MCFT member shear-capacity model and mode-of-failure reporter (ASCE 41 force-controlled check), plus a nonlinear shear backbone (SectionAggregator) for reproducing shear-critical frame failures. Validated against the Duong et al. (2007) frame.
+  > Two-layer RC shear-failure modelling: a simplified-MCFT member shear-capacity model and mode-of-failure reporter (ASCE 41 force-controlled check), plus a nonlinear shear backbone (SectionAggregator) for reproducing shear-critical frame failures. Validated against the Duong et al. (2007) frame. The Elwood & Moehle (PEER 2003/01) column limit-state builder integration (Phase 3 — `limitCurve`/`LimitState` centre-spring emission via `limit_state_columns`) is also complete.
   Tags: `validation`, `shear`, `mcf`, `capacity`, `backbone`, `duong`, `force-controlled`, `reporter`
   Related: [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Deprecation Removal Plan](deprecation_plan.md)
 

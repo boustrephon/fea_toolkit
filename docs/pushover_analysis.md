@@ -91,6 +91,7 @@ failure modes were observed in practice:
 |---|---|---|
 | `Norm ≈ 1.000e-4` vs tol `1e-4` — repeated "analyze failed" | Near-miss tolerance: the residual sits just above `solver_test_tol` | Relax `solver_test_tol` to `2e-4` |
 | `Norm = NaN` during the gravity step | Sudden LayeredShell stiffness shock when shells activate in a single `LoadControl` step | Ramp gravity with `gravity_num_substeps: 10` |
+| `Norm = NaN` during the gravity step (Elwood limit-state columns) | Inflated `P_g` collapses the shear limit surface to a zero `LimitState` backbone, or the `LimitState` material's known fragility | Check `_derive_gravity_axial_loads()` / supply `column_gravity_loads`; use the CenterCol recipe (`solver_constraints: "Penalty"`, `solver_system: "ProfileSPD"`, `gravity_num_substeps: 5`) — see `docs/shear_failure_modelling.md` Phase 3 |
 
 Both settings are configured through the builder `config` dict:
 
