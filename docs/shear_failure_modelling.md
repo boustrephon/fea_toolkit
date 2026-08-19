@@ -202,13 +202,14 @@ nonlinear cracked-shear (DSFM-style) constitutive would close the gap.
 
 ---
 
-## Phase 3 — Elwood & Moehle column limit states (planned 🚧)
+## Phase 3 — Elwood & Moehle column limit states (✅ Complete)
 
 Targets the **shear-failure → axial-failure collapse sequence** of
 high-axial-load RC columns (e.g. core / outrigger columns of 500 m towers,
 where a shear failure at moderate drift can shed the gravity load and
-precipitate progressive collapse).  Phase 0 (prototype) is complete and the
-physics is validated; builder integration is next.
+precipitate progressive collapse).  Phase 0 (prototype) validated the
+physics; the builder integration (centre-spring emission driven by the
+`limit_state_columns` config list) is now complete and tested.
 
 ### Physics (PEER 2003/01)
 
@@ -238,11 +239,76 @@ degrades along `K_deg = −0.02·E_c·A_g/L` to the residual `F_res`.
 
 | Piece | Status |
 |---|---|
-| `analysis/elwood_limit_state.py` — parameters (`F_sw`, `ρ″`, `d_c`), unit-agnostic drift equations, ThreePoint surface fit, `LimitState` envelope, spring slopes | ✅ Complete (tests: `tests/test_elwood_limit_state.py`) |
+| `analysis/elwood_limit_state.py` — parameters (`F_sw`, `ρ″`, `d_c`), unit-agnostic drift equations (incl. the direct-form `elwood_shear_limit_force`), ThreePoint surface fit, `LimitState` envelope, spring slopes | ✅ Complete (tests: `tests/test_elwood_limit_state.py`) |
 | `convert_mesh_units()` kip-in enabler (`model/units.py`; OpenSees `limitCurve` is imperial-embedded) | ✅ Complete (round-trip test: `tests/test_mesh_units.py`; workflow: `docs/units_conversion.md`) |
-| Builder centre-spring emission (`limitCurve Shear` + `ThreePoint` + `LimitState` at column mid-height) | 🚧 Planned |
-| Column selection (8 RC outrigger columns only) | 🚧 Planned |
+| Builder centre-spring emission (`limitCurve Shear` + `ThreePoint` + `LimitState` + zero-length springs at the column top, driven by the `limit_state_columns` config) | ✅ Complete (tests: `tests/test_limit_state_columns.py`) |
+| Column selection | 🚧 Planned — the caller supplies the column list explicitly (`limit_state_columns`); automatic "8 RC outrigger columns" selection is future work |
 | Dynamic (transient) driver | 🚧 Planned (after the material model) |
+
+### Builder configuration (`AnalysisBuilder`)
+
+Columns are instrumented by listing their **SAP frame-element IDs**:
+
+```python
+cfg = {
+    "limit_state_columns": ["COL-45", "COL-88"],          # frame element IDs
+    "column_gravity_loads": {"COL-45": 8500.0},           # optional P_g override (kip)
+    "limit_state_params": {"COL-45": {"tie_legs": 4}},    # optional per-column overrides
+    "limit_state_pinch_x": 0.5, "limit_state_pinch_y": 0.4,
+    "limit_state_damage1": 0.0, "limit_state_damage2": 0.0,
+    "limit_state_beta": 0.4,
+    "limit_state_shear_residual_ratio": 0.10,             # Vr as a fraction of V(0.01) (1%-drift shear capacity)
+    "limit_state_soft_axial_fraction": 2.0e-4,            # soft axial catch-spring stiffness
+    "limit_state_auto_convert_units": True,               # rescale a non-kip-in mesh to kip-in-ksi
+}
+```
+
+* The **domain must run in kip-in-ksi**.  For SI models
+  `limit_state_auto_convert_units` (default `True`) deep-copies the mesh to
+  `KIP_IN_UNITS` internally — the caller's `MeshModel` is untouched.  Models
+  with `nd_materials`/`layered_shell_sections` cannot be auto-converted and
+  must be pre-processed in kip-in-ksi.
+* Selected elements must be straight, global-axis-aligned RC columns
+  (`ConcreteRectangularSection` on a `Concrete` material); anything else is
+  skipped with a warning.
+* Per-column `P_g` is a tributary gravity-axial estimate
+  (`AnalysisBuilder._stack_gravity_axial`; only **Z-aligned** members count
+  as "columns above"); supply `column_gravity_loads` to override (Elwood's
+  example uses `P_g = 0.25·A_g·f'c`).
+
+### Solver & convergence (the `LimitState` material is known-fragile)
+
+The `LimitState` material (and the `9.9e9` rigid-tie zero-length springs)
+is convergence-sensitive.  Elwood's own `CenterCol` example runs it with
+`Penalty` constraints, `ProfileSPD`, a `NormDispIncr` test and a
+`ModifiedNewton -initial` fallback.  A diverged limit-state solve shows the
+toolkit's documented **`Norm = NaN` during the gravity step** signature
+(`docs/pushover_analysis.md` → *Gravity convergence*).  Two conditions must
+hold for the gravity stage to solve:
+
+1. **A realistic operating axial load `P_g`.**  The shear limit surface
+   drops steeply with axial load: an inflated `P_g` collapses `V(0.01)` to
+   zero, giving the `LimitState` material a degenerate zero backbone and a
+   `0/0` NaN tangent.  This is guarded in
+   ``tests/test_limit_state_columns.py``
+   (`test_gravity_axial_load_derivation_is_realistic`).  When the
+   tributary estimate is not representative, supply `column_gravity_loads`
+   overrides.
+2. **Ramped gravity + a robust solver.**  With a realistic `P_g` the
+   builder's defaults (`Transformation`/`BandGen`, single-step gravity)
+   usually converge.  If the gravity stage reports NaN, use the CenterCol
+   recipe:
+
+   ```python
+   cfg = {
+       # ... limit-state keys ...
+       "solver_constraints": "Penalty",
+       "solver_system": "ProfileSPD",
+       "solver_test_type": "NormDispIncr",
+       "solver_test_tol": 1e-4,           # kip-in scale
+       "gravity_num_substeps": 5,         # ramp gravity
+   }
+   ```
 
 ### OpenSeesPy 3.8.0 binding constraints (validated in Phase 0)
 
@@ -295,7 +361,9 @@ round-trip guarantee) is documented in ``docs/units_conversion.md``.
 8. OpenSees source: `SRC/material/uniaxial/limitState/` (`ShearCurve.cpp`,
    `AxialCurve.cpp`, `ThreePointCurve.cpp`, `LimitStateMaterial.cpp`).
 9. Implementation: `fea_toolkit/analysis/elwood_limit_state.py`,
-   `tests/test_elwood_limit_state.py`, `local/elwood_prototype.py`,
+   `fea_toolkit/opensees/analysis_builder.py` (`_prepare_limit_state_columns` /
+   `_create_limit_state_columns`), `tests/test_elwood_limit_state.py`,
+   `tests/test_limit_state_columns.py`, `local/elwood_prototype.py`,
    `local/elwood_phase0_checkpoint.md`.
 
 ---
