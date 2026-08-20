@@ -338,7 +338,7 @@ parsing through analysis to visualisation and reporting.
 | **Deformed shape (PyVista)** | `plot_deformed_displacement_3d()` | Displaced shape with colour-mapped displacements |
 | **Mode shape (PyVista)** | `plot_mode_animation()` | Animate eigenvector displacements per mode |
 | **Moment/force flags (PyVista)** | `plot_force_diagram_3d()` | Flag or tube diagrams in 3D |
-| **Pushover curves** | `plot_pushover_curves()` | 4-direction capacity curve overlay |
+| **Pushover curve** | `plot_pushover_curve()` | Pushover capacity curve (base shear vs control displacement) |
 | **CSM 4-panel** | `plot_csm_4panel()` | 2×2 ADRS plots per push direction |
 | **Rhino import (centreline)** | `RhinoImporter.run(create_centreline=True)` | Joint points, frame lines, shell Breps with SAP metadata |
 | **Rhino import (extrusion)** | `RhinoImporterV2.run()` | Lightweight Extrusion solids (I/Box/Pipe/Channel/Rect/Circular) |

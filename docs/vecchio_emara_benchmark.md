@@ -330,7 +330,7 @@ ratio [0.95, 1.15], secant [0.9, 1.15] × experimental).
    the Level-1 columns lack a bottom rigid zone.
 4. **Level 2 (spring offsets) and Level 3 (joint elements) are
    unimplemented** — but ``joint_extents`` composes with Level 1.
-5. **Vecchio & Balopoulou (1990) variant** re-run with the new
+5. **Vecchio & Balopoulou (1990) variant** — to be re-run with the new
    shear-capacity reporter / backbone layers.
 
 ---

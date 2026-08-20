@@ -41,9 +41,9 @@ target/source ratios of the unit factors in ``fea_toolkit.utils``:
 | Quantity | kN·m·s → kip·in factor | Example |
 |---|---|---|
 | length (node coords, section geometry) | × 39.3701 | 4.0 m → 157.48 in |
-| force (joint loads, axial P) | × 2.2482e-4 | 1000 kN → 224.8 kip |
-| moment (F·L) | × 8.852e-3 | 1000 kN·m → 8.852 kip·in |
-| force/length (distributed loads) | × 5.710e-6 | 100 kN/m → 0.571 kip/in |
+| force (joint loads, axial P) | × 2.2482e-1 | 1000 kN → 224.8 kip |
+| moment (F·L) | × 8.852 | 1000 kN·m → 8852 kip·in |
+| force/length (distributed loads) | × 5.710e-3 | 100 kN/m → 0.571 kip/in |
 | pressure (F/L²) | × 1.4504e-4 | 10 kN/m² → 1.45e-3 kip/in² |
 | **stress** (E, f'c, fy, tie_fy) | × 1.4504e-4 | 40 MPa (=4e4 kPa) → 5.80 ksi |
 | section A / I / J / Z | × L² / L⁴ / L³ | 0.25 m² → 387.5 in² |
@@ -51,6 +51,9 @@ target/source ratios of the unit factors in ``fea_toolkit.utils``:
 
 Dimensionless quantities — strain, reinforcement ratios, gravity load
 multipliers, parametric positions, restraint flags — are left untouched.
+
+**Reverse (kip-in → kN·m·s):** 1 kip = 4.4482 kN, 1 kip·in = 0.11298 kN·m,
+1 kip/in = 175.1 kN/m, 1 ksi = 6.895 MPa.
 
 ## 3. Step-by-step workflow (kN·m·s tower)
 
@@ -86,7 +89,7 @@ multipliers, parametric positions, restraint flags — are left untouched.
    - ``uniaxialMaterial LimitState`` — envelope ``(force kip, deformation in)``
      pairs on the elastic slopes ``G·A_v/L`` and ``99·E_c·A_g/L`` (kip/in).
    - ``zeroLength`` shear + axial springs with MPC rigid links at the column
-     mid-height.
+     top.
 
    Everything downstream of step 3 — materials, ``Concrete01``/``Steel02``,
    ``nonlinearBeamColumn`` fiber sections, gravity (``g_from_units`` now
@@ -97,8 +100,9 @@ multipliers, parametric positions, restraint flags — are left untouched.
    exactly as validated in ``local/elwood_prototype.py``).
 
 6. **Report back in kN·m·s**: multiply displacements (in) by 0.0254,
-   forces (kip) by 4448, moments (kip·in) by 112.98 kN·m/kip·in, stresses
-   (ksi) by 6.895 MPa/ksi.  Drift ratios and DCR values need no conversion.
+   forces (kip) by 4.4482 kN/kip, moments (kip·in) by 0.11298 kN·m/kip·in,
+   stresses (ksi) by 6.895 MPa/ksi.  Drift ratios and DCR values need no
+   conversion.
 
 ## 4. Scope and limitations
 

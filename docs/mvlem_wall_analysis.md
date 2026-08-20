@@ -127,8 +127,15 @@ time via `material_tags`.
 
 The `MeshModel` dataclass carries a new `wall_elements` dict
 (`elem_id → WallElement`) alongside `frame_elements` /
-`area_elements`.  `WallElement` describes one **SFI_MVLEM_3D**
-macro-element in the frozen topology:
+`area_elements`.  `WallElement` describes one wall macro-element in the
+frozen topology, from three supported families (same as the
+`MeshModel` docstring):
+
+* **SFI_MVLEM_3D** / **E_SFI_MVLEM_3D** — per-fibre FSAM nD materials
+  (`fsam_material_names`).
+* **MVLEM_3D** — per-fibre uniaxial concrete + steel names plus a single
+  horizontal shear-spring name (`concrete_names` / `steel_names` /
+  `shear_name`).
 
 ```python
 WallElement(
@@ -144,8 +151,9 @@ WallElement(
 ```
 
 The Preprocessor populates it from wall-classified areas when
-`element_strategies.wall.element_type == "SFI_MVLEM_3D"` (see §5.2)
-and marks the source area `inactive` so no shell is created for it.
+`element_strategies.wall.element_type` is one of `SFI_MVLEM_3D` /
+`E_SFI_MVLEM_3D` / `MVLEM_3D` (see §5.2 / §5.4) and marks the source
+area `inactive` so no shell is created for it.
 
 `AnalysisBuilder._create_wall_elements()` is the dedicated builder
 step.  It runs **after** `_create_fsam_materials()` (so the FSAM nD
@@ -173,7 +181,7 @@ Because FSAM references uniaxial material tags, creation is split:
 _create_nd_materials()      # ElasticIsotropic / J2PlateFibre / ConcreteS / PlateFromPlaneStress
 _create_materials()         # uniaxial materials (assigns material_tags)
 _create_fsam_materials()    # FSAM nD materials (resolves sx/sy/conc → tags)
-_create_wall_elements()     # SFI_MVLEM_3D macro-elements consuming FSAM tag
+_create_wall_elements()     # wall macro-elements (SFI_MVLEM_3D with FSAM, MVLEM_3D uniaxial)
 _create_layered_shell_sections()  # LayeredShell consuming FSAM tag
 ```
 
@@ -198,6 +206,14 @@ fail at domain-build time (`Damage Coefficient ErRoR !`) when an
 tags.  FSAM materials are **not** wrapped as `PlateFromPlaneStress`
 (they are nD materials consumed directly by `SFI_MVLEM_3D` /
 `LayeredShell`), unlike the other nD types.
+
+Wall elements are exported after the shells: uniaxial walls emit
+`element MVLEM_3D` with the per-fibre `-matConcrete` / `-matSteel` /
+`-rho` lists plus the single `-matShear` spring; FSAM walls emit
+`SFI_MVLEM_3D` (or `E_SFI_MVLEM_3D` when `element_type` requests it)
+with `-mat` FSAM tags.  A wall whose material resolution is incomplete
+(e.g. a missing FSAM name, or a missing uniaxial shear spring) is
+reported with a `⚠ [export_model_to_tcl]` warning and skipped.
 
 ### 4.5 Unit scaling
 

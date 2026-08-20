@@ -409,7 +409,7 @@ Priority order for adding docstring examples:
 Example format to follow (from existing docstrings):
 
 ```python
-def plot_mesh(builder, ...):
+def plot_mesh(builder, **kwargs):
     \"\"\"Plot the structural model in 3D.
 
     Args:
