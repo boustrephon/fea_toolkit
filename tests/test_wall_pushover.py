@@ -320,6 +320,32 @@ class TestSFIMVLEM3DWallPushover:
         # The source area is marked inactive so shells are skipped
         assert mm.area_elements["A1"].inactive is True
 
+    def test_wall_generation_respects_slab_z_tolerance(self):
+        """Wall-element generation honours the configured ``slab_z_tolerance``.
+
+        A near-horizontal area (corner Z-span 0.015) is classified as a slab
+        under the default 0.02 tolerance — no macro-element — and as a wall
+        under a 0.01 override — macro-element generated.  This mirrors
+        ``_classify_element_type`` and the stored ``area_element_types``
+        role so wall-element generation stays consistent with them.
+        """
+        md = _wall_model_data()
+        # Squash the top nodes so the area is near-horizontal (0.015 spread).
+        md.nodes["3"].z = 0.015
+        md.nodes["4"].z = 0.015
+
+        # Default tolerance 0.02 > 0.015 spread → slab → no macro-element.
+        mm_default = Preprocessor(_sfi_mvlem_config()).run(md)
+        assert len(mm_default.wall_elements) == 0
+        assert mm_default.area_element_types["A1"] == "slab"
+
+        # Tightened tolerance 0.01 < 0.015 spread → wall → macro-element.
+        tight = _sfi_mvlem_config()
+        tight["slab_z_tolerance"] = 0.01
+        mm_tight = Preprocessor(tight).run(md)
+        assert len(mm_tight.wall_elements) == 1
+        assert mm_tight.area_element_types["A1"] == "wall"
+
     def test_build_domain_creates_sfi_mvlem_3d(self):
         """build_domain() emits exactly one SFI_MVLEM_3D element."""
         mm = Preprocessor(_sfi_mvlem_config()).run(_wall_model_data())
@@ -588,6 +614,89 @@ class TestMVLEM3DWallPushover:
         n2 = len(ops.getEleTags())
         assert b2.mesh_model.wall_elements["W1"].elem_tag == tag1
         assert n1 == n2
+
+    def test_tcl_export_contains_mvlem_3d(self, tmp_path):
+        """Tcl export emits the MVLEM_3D element command."""
+        from fea_toolkit.opensees.builder import export_model_to_tcl
+
+        mm = Preprocessor(_mvlem_3d_config()).run(_mvlem_3d_model_data())
+        out = tmp_path / "wall_mvlem.tcl"
+        # export_model_to_tcl accepts MeshModel at runtime (docstring states
+        # "Also accepts MeshModel"); the annotation is the narrower
+        # SAPModelData type — ignore for this documented use.
+        export_model_to_tcl(mm, str(out))  # type: ignore[arg-type]
+        text = out.read_text()
+        assert "element MVLEM_3D" in text
+        assert str(mm.wall_elements["W1"].elem_tag) in text
+        # The 5-fiber thick/width/rho/concrete/steel/shear lists are present
+        assert "-thick" in text and "-width" in text and "-rho" in text
+        assert "-matConcrete" in text and "-matSteel" in text and "-matShear" in text
+
+    def test_mvlem_3d_supported_by_wheel(self):
+        """Fail loudly if the wheel lacks MVLEM_3D element support.
+
+        The Tcl export only serialises topology/metadata — it would emit an
+        ``element MVLEM_3D`` command even on a wheel that cannot parse it.
+        This raw, non-suppressed call either raises or leaves the element
+        out of the domain, so the assertion below fails loudly on a wheel
+        without MVLEM_3D support.
+        """
+        try:
+            ops.wipe()
+            ops.model("basic", "-ndm", 3, "-ndf", 6)
+            # Wall in the X-Z plane (same layout as local/probe_mvlem_3d.py).
+            ops.node(1, 0.0, 0.0, 0.0)
+            ops.node(2, 4.0, 0.0, 0.0)
+            ops.node(3, 0.0, 0.0, 3.0)
+            ops.node(4, 4.0, 0.0, 3.0)
+            # Model units kN, m → 30 MPa = 30e3 kN/m², 420 MPa = 4.2e5 kN/m².
+            ops.uniaxialMaterial(
+                "ConcreteCM",
+                1,
+                -30.0e3,
+                -0.002,
+                30.0e6,
+                5.0,
+                -0.0002,
+                3.0e3,
+                0.0001,
+                1.5,
+                0.0001,
+            )
+            ops.uniaxialMaterial("Steel02", 2, 4.2e5, 200.0e6, 0.01)
+            # Shear spring: k = 0.1·Gc·A/h with Gc = 0.4·Ec (kN/m).
+            ops.uniaxialMaterial("ElasticPP", 3, 0.1 * 0.4 * 30.0e6 * 0.3 * 4.0 / 3.0, 1.0e6)
+            ops.uniaxialMaterial("Elastic", 4, 1.0e-3)
+            ops.element(
+                "MVLEM_3D",
+                1,
+                1,
+                2,
+                3,
+                4,
+                5,
+                "-thick",
+                *([0.3] * 5),
+                "-width",
+                *([0.8] * 5),
+                "-rho",
+                *([2400.0] * 5),
+                "-matConcrete",
+                *([1] * 5),
+                "-matSteel",
+                2,
+                4,
+                4,
+                4,
+                2,
+                "-matShear",
+                3,
+                "-CoR",
+                0.4,
+            )
+            assert 1 in ops.getEleTags(), "MVLEM_3D element not created"
+        finally:
+            ops.wipe()
 
     @pytest.mark.xfail(
         reason=(
