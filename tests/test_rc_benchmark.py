@@ -235,8 +235,11 @@ def ve_builder():
     """Preprocessed Vecchio & Emara frame wrapped in an AnalysisBuilder."""
     from openseespy.opensees import wipe
 
-    mesh_model = preprocess_model(make_vecchio_emara_frame(), _BENCH_CONFIG)
-    builder = AnalysisBuilder(mesh_model, _BENCH_CONFIG)
+    # Deep-copy the module-level config so fixture-specific mutations
+    # (e.g. aggregate_shear) cannot leak into other tests.
+    cfg = dict(_BENCH_CONFIG)
+    mesh_model = preprocess_model(make_vecchio_emara_frame(), cfg)
+    builder = AnalysisBuilder(mesh_model, cfg)
     yield builder
     wipe()
 
@@ -414,6 +417,7 @@ class TestVecchioEmaraBenchmark:
                     break
                 ops.reactions()
                 moments.append(abs(ops.nodeReaction(1, 3)))
+            assert moments, "M-phi pushover produced no converged steps — max() undefined"
             peak_m = max(moments)
         finally:
             wipe()

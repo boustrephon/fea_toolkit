@@ -156,24 +156,28 @@ def _assert_mesh_close(a: MeshModel, b: MeshModel, rel: float = 1e-9) -> None:
             if isinstance(va, float):
                 assert va == pytest.approx(vb, rel=rel), f"{mname}.{f.name}"
 
+    assert len(a.frame_dist_loads) == len(b.frame_dist_loads)
     for la, lb in zip(a.frame_dist_loads, b.frame_dist_loads):
         for f in dc_fields(la):
             va, vb = getattr(la, f.name), getattr(lb, f.name)
             if isinstance(va, float):
                 assert va == pytest.approx(vb, rel=rel), f"dl.{f.name}"
 
+    assert len(a.joint_loads) == len(b.joint_loads)
     for la, lb in zip(a.joint_loads, b.joint_loads):
         for f in dc_fields(la):
             va, vb = getattr(la, f.name), getattr(lb, f.name)
             if isinstance(va, float):
                 assert va == pytest.approx(vb, rel=rel), f"jl.{f.name}"
 
+    assert len(a.area_uniform_loads) == len(b.area_uniform_loads)
     for la, lb in zip(a.area_uniform_loads, b.area_uniform_loads):
         for f in dc_fields(la):
             va, vb = getattr(la, f.name), getattr(lb, f.name)
             if isinstance(va, float):
                 assert va == pytest.approx(vb, rel=rel), f"aul.{f.name}"
 
+    assert len(a.area_elements) == len(b.area_elements)
     for la, lb in zip(a.area_elements.values(), b.area_elements.values()):
         assert la.thickness == pytest.approx(lb.thickness, rel=rel)
 
@@ -209,7 +213,8 @@ class TestUnitMultipliers:
 class TestConvertMeshUnits:
     def test_nodes_and_metadata(self, si_mesh):
         out = convert_mesh_units(si_mesh, _KIP_IN)
-        assert out.units == _KIP_IN
+        # target units merged over the source (source-only keys survive)
+        assert out.units == {"L": "in", "F": "kip", "T": "C"}
         assert out.nodes["2"].z == pytest.approx(4.0 * 39.37007874)
         assert out.diaphragm_levels == pytest.approx([4.0 * 39.37007874])
 
