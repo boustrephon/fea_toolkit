@@ -1830,7 +1830,10 @@ def _propagate_edge_restraints(
     receives the bitwise AND of the two ``dofs`` lists.  Interior nodes
     receive any DOF bit that is common to **all four** corners (the
     bitwise AND across the four corner ``dofs`` lists).  Corners are
-    untouched.
+    untouched.  Nodes that already carry an explicit restraint (for
+    example, pre-existing nodes reused via coordinate deduplication) are
+    never overwritten — only newly created nodes inherit the propagated
+    restraints.
 
     Example: corner A has ``dofs=[1,0,1,0,0,1]`` and corner B has
     ``dofs=[1,1,1,1,0,0]`` — a node created between them receives
@@ -1852,6 +1855,10 @@ def _propagate_edge_restraints(
         if nid is None or c1_id is None or c2_id is None:
             return
         if nid in (c1_id, c2_id):
+            return
+        # Nodes that already carry an explicit restraint (e.g. existing
+        # nodes reused via coordinate deduplication) keep it unchanged.
+        if nid in restraints:
             return
         r1 = restraints.get(c1_id)
         r2 = restraints.get(c2_id)
@@ -1884,12 +1891,11 @@ def _propagate_edge_restraints(
     if all(r is not None for r in (r_bl, r_br, r_tr, r_tl)):
         common = [r_bl.dofs[k] & r_br.dofs[k] & r_tr.dofs[k] & r_tl.dofs[k] for k in range(6)]
         if any(common):
-            r_common = Restraint(dofs=common)
             for j in range(1, n_v):
                 for i in range(1, n_u):
                     nid = node_grid[j][i]
-                    if nid is not None:
-                        restraints[nid] = r_common
+                    if nid is not None and nid not in restraints:
+                        restraints[nid] = Restraint(dofs=list(common))
 
 
 def mesh_area_elements(
