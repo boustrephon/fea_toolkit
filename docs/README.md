@@ -52,6 +52,11 @@ for automated cross-referencing.
   Tags: `analysis-type`, `modal`, `eigen`, `eigenvalue`, `solver`
   Related: [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Report Generation — Design Proposal](report_generation.md) · [Storey-level Response Methodology](storey_response.md)
 
+- [MVLEM / SFI-MVLEM Shear-Wall Analysis](mvlem_wall_analysis.md) — ✅ Complete
+  > MVLEM / SFI-MVLEM reinforced-concrete shear-wall macro-element modelling: verified element signatures against the shipped openseespy wheel, FSAM nD-material support, WallElement builder integration, and end-to-end pushover recipes (LayeredShell, SFI_MVLEM_3D, MVLEM_3D).
+  Tags: `analysis-type`, `wall`, `mvlem`, `sfi-mvlem`, `fsam`, `shear`, `nonlinear`, `validation`
+  Related: [Shell Element Support](shell_support.md) · [Element Properties Configuration](element_properties_config.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Custom OpenSeesPy local build — swap recipe](openseespy_local_build.md)
+
 - [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md) — ✅ Complete
   > Ground-motion-driven transient analysis via the complete Tcl export + Xara/OpenSeesRT path (with Rayleigh damping from a preceding modal analysis). Additional Python-native integration schemes remain planned.
   Tags: `analysis-type`, `nonlinear`, `dynamic`, `time-history`, `ground-motion`, `tcl`, `xara`
@@ -68,7 +73,7 @@ for automated cross-referencing.
   Related: [Unified Results Schema](results_schema.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Modal Analysis Options](modal_analysis.md)
 
 - [RC Shear-Failure Modelling (MCFT Capacity + Nonlinear Shear Backbone)](shear_failure_modelling.md) — ✅ Complete
-  > Two-layer RC shear-failure modelling: a simplified-MCFT member shear-capacity model and mode-of-failure reporter (ASCE 41 force-controlled check), plus a nonlinear shear backbone (SectionAggregator) for reproducing shear-critical frame failures. Validated against the Duong et al. (2007) frame. The Elwood & Moehle (PEER 2003/01) column limit-state builder integration (Phase 3 — `limitCurve`/`LimitState` centre-spring emission via `limit_state_columns`) is also complete.
+  > Two-layer RC shear-failure modelling: a simplified-MCFT member shear-capacity model and mode-of-failure reporter (ASCE 41 force-controlled check), plus a nonlinear shear backbone (SectionAggregator) for reproducing shear-critical frame failures. Validated against the Duong et al. (2007) frame.
   Tags: `validation`, `shear`, `mcf`, `capacity`, `backbone`, `duong`, `force-controlled`, `reporter`
   Related: [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Deprecation Removal Plan](deprecation_plan.md)
 
@@ -208,11 +213,6 @@ for automated cross-referencing.
   Related: [Unified Results Schema](results_schema.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Visualisation Toolkit](viewer.md)
 
 
-## 📦 Uncategorised
-
-- [Mvlem Wall Analysis](mvlem_wall_analysis.md)
-
-
 ## 📦 Opensees
 
 - [Custom OpenSeesPy local build — swap recipe](openseespy_local_build.md) — 🚧 Draft
@@ -230,7 +230,7 @@ Tags across all documentation files:
 - **`ai`** — [llm_guide.md](llm_guide.md)
 - **`analysis`** — [analysis.md](analysis.md)
 - **`analysis-builder`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
-- **`analysis-type`** — [modal_analysis.md](modal_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [storey_response.md](storey_response.md)
+- **`analysis-type`** — [modal_analysis.md](modal_analysis.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [storey_response.md](storey_response.md)
 - **`api-reference`** — [llm_guide.md](llm_guide.md)
 - **`architecture`** — [analysis.md](analysis.md), [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md)
 - **`area-elements`** — [shell_support.md](shell_support.md)
@@ -273,6 +273,7 @@ Tags across all documentation files:
 - **`fiber`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`fiber-section`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`force-controlled`** — [shear_failure_modelling.md](shear_failure_modelling.md)
+- **`fsam`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`geometry`** — [rhino_export.md](rhino_export.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`ground-motion`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
@@ -299,7 +300,8 @@ Tags across all documentation files:
 - **`migration`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md)
 - **`modal`** — [modal_analysis.md](modal_analysis.md)
 - **`modifiers`** — [stiffness_factors.md](stiffness_factors.md)
-- **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
+- **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`notes`** — [dev_notes.md](dev_notes.md)
 - **`npz`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`opensees`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
@@ -326,7 +328,8 @@ Tags across all documentation files:
 - **`schema`** — [results_schema.md](results_schema.md)
 - **`scripting`** — [tcl_export.md](tcl_export.md)
 - **`sections`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
-- **`shear`** — [shear_failure_modelling.md](shear_failure_modelling.md), [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`sfi-mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
+- **`shear`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`shell`** — [constraint_detection.md](constraint_detection.md), [element_properties_config.md](element_properties_config.md), [shell_support.md](shell_support.md)
 - **`si`** — [units_conversion.md](units_conversion.md)
 - **`slabs`** — [element_classification.md](element_classification.md)
@@ -342,10 +345,11 @@ Tags across all documentation files:
 - **`typed-results`** — [analysis.md](analysis.md)
 - **`units`** — [units_conversion.md](units_conversion.md)
 - **`usage`** — [llm_guide.md](llm_guide.md)
-- **`validation`** — [mander_confinement_validation.md](mander_confinement_validation.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`validation`** — [mander_confinement_validation.md](mander_confinement_validation.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`viewer`** — [viewer.md](viewer.md)
 - **`visualisation`** — [rhino_export.md](rhino_export.md), [viewer.md](viewer.md)
 - **`visualization`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
+- **`wall`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`walls`** — [element_classification.md](element_classification.md)
 - **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [workflow.md](workflow.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`xara`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
