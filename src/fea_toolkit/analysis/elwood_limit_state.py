@@ -440,7 +440,10 @@ def elwood_shear_limit_force(
     if b_in <= 0.0 or d_in <= 0.0 or fc_psi <= 0.0:
         return 0.0
     if drift < 0.01:
-        return 9.9e9 * _to_kip(1.0, units)  # no failure below 1% drift
+        # No failure below 1% drift — a near-infinite force in model units.
+        # Convert the kip-anchored sentinel via the same kip -> model-force
+        # factor used by the main return path below.
+        return 9.9e9 / (_KIP_PER_N / force_scale_factor(units))
     rho = geometry.rho
     v_k = (
         500.0
@@ -519,7 +522,7 @@ def elwood_axial_drift_at_failure(
     p_k = _to_kip(P, units) if units is not None else float(P)
     fsw_k = _to_kip(fsw, units) if units is not None else float(fsw)
     if fsw_k <= 0.0 or t <= 0.0:
-        return 0.10  # no ties -> near-zero axial-failure drift capacity
+        return 0.10  # fsw <= 0 (no ties) -> 0.10 fallback drift
     return float((1.0 + t * t) / (25.0 * (t + p_k / (fsw_k * t))) + delta)
 
 

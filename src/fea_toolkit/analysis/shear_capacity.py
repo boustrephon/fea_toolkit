@@ -185,7 +185,11 @@ def member_shear_capacity(
         moment: |bending moment| at the section (model force × length).
         aggregate_size_mm: Coarse-aggregate size in mm (default 19).
         theta_deg: Angle of the diagonal compression field in degrees
-            (default 35 — CSA General Method).
+            (default 35 — CSA General Method).  Used in the mid-depth
+            longitudinal strain term; the transverse-steel contribution
+            ``V_s = A_v·f_yv·d_v/s`` deliberately keeps the 45°-truss
+            (ACI-318) form, as documented in
+            ``docs/shear_failure_modelling.md``.
         epsilon_x: Explicit mid-depth longitudinal strain to use instead of
             the force-derived value (overrides the ``axial``/``shear``/
             ``moment`` strain term).
@@ -246,6 +250,10 @@ def member_shear_capacity(
     if g.av > 0.0 and g.s > 0.0:
         fyv = float(getattr(section, "tie_fy", 0.0) or 0.0) or float(getattr(tie, "Fy", 0.0) or 0.0)
         if fyv > 0.0:
+            # V_s uses the 45°-truss (ACI-318) form A_v·f_yv·d_v/s —
+            # cot θ = 1 — matching the formula documented in
+            # docs/shear_failure_modelling.md.  θ only enters the
+            # mid-depth longitudinal strain term above.
             vs = g.av * fyv * g.dv / g.s
 
     vn = min(vc + vs, vn_upper)
@@ -463,6 +471,9 @@ def report_shear_failure(
         report.max_dcr[eid] = float(peak_dcr)
 
     if report.entries:
+        # Entries are appended in element loop order; sort by step so the
+        # governing (earliest) failure is deterministic.
+        report.entries.sort(key=lambda e: (e.step, e.elem_id))
         first = report.entries[0]
         report.governing_elem = first.elem_id
         report.governing_step = first.step
