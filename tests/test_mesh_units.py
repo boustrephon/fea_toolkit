@@ -11,7 +11,7 @@ from dataclasses import fields as dc_fields
 
 import pytest
 
-from fea_toolkit.model.mesh_model import MeshModel
+from fea_toolkit.model.mesh_model import MeshModel, WallElement
 from fea_toolkit.model.sap_data import (
     AreaElement,
     AreaGravityLoad,
@@ -19,6 +19,7 @@ from fea_toolkit.model.sap_data import (
     ConcreteRectangularSection,
     FrameDistributedLoad,
     FrameElement,
+    FrameElementProperties,
     GravityLoad,
     JointLoad,
     Material,
@@ -41,7 +42,12 @@ _KIP_IN = dict(KIP_IN_UNITS)
 
 @pytest.fixture(scope="module")
 def si_mesh():
-    """Minimal 1-column frame mesh in N-m with one of every load type."""
+    """Minimal 1-column frame mesh in N-m with one of every load type.
+
+    Also carries one wall macro-element and one set of resolved frame
+    element properties (with ``hinge_params``) so :func:`convert_mesh_units`
+    exercises its wall-fibre and hinge-parameter scaling paths.
+    """
     n1 = Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0)
     n2 = Node(node_id="2", node_tag=2, x=0.0, y=0.0, z=4.0)
     sec = ConcreteRectangularSection(
@@ -80,6 +86,30 @@ def si_mesh():
     tie = Material(name="REBAR-T", type="Rebar", Fy=420.0e6, E_mod=200.0e9)
     frame = FrameElement(elem_id="COL1", elem_tag=10, node_i="1", node_j="2")
     area = AreaElement(area_id="S1", area_tag=20, node_ids=["1", "2"], thickness=0.2)
+    # 3-fiber wall macro-element — fibre ``thick``/``width`` are lengths,
+    # ``rho``/``Density`` are mass densities (both wall scaling branches).
+    # node_ids are illustrative: convert_mesh_units never resolves them.
+    wall = WallElement(
+        elem_id="W1",
+        elem_tag=30,
+        node_ids=["1", "2", "4", "3"],  # [i, j, k, l]
+        m=3,
+        thick=[0.2, 0.2, 0.2],
+        width=[1.0, 1.0, 1.0],
+        fsam_material_names=["FSAM_bdry", "FSAM_core", "FSAM_bdry"],
+        rho=[2450.0, 2450.0, 2450.0],
+        Density=2400.0,
+        CoR=0.4,
+    )
+    # Resolved frame properties — hinge_params cover all three key kinds:
+    # lpI/lpJ (length, ×L), My/Mc_neg (moment, ×F·L), theta_p (dimensionless).
+    col_props = FrameElementProperties(
+        element_type="nonlinearBeamColumn",
+        material_strategy="fiber_rc",
+        integration_type="HingeRadau",
+        num_integration_points=4,
+        hinge_params={"lpI": 0.15, "lpJ": 0.15, "My": 180.0e3, "Mc_neg": 150.0e3, "theta_p": 0.03},
+    )
     return MeshModel(
         nodes={"1": n1, "2": n2},
         frame_elements={"COL1": frame},
@@ -125,6 +155,8 @@ def si_mesh():
         ],
         base_z=0.0,
         diaphragm_levels=[4.0],
+        wall_elements={"W1": wall},
+        frame_element_properties={"COL1": col_props},
         units=dict(_N_M),
     )
 
@@ -180,6 +212,39 @@ def _assert_mesh_close(a: MeshModel, b: MeshModel, rel: float = 1e-9) -> None:
     assert len(a.area_elements) == len(b.area_elements)
     for la, lb in zip(a.area_elements.values(), b.area_elements.values()):
         assert la.thickness == pytest.approx(lb.thickness, rel=rel)
+
+    # ── Wall macro-elements (thick/width lengths, rho/Density scaled) ──
+    assert len(a.wall_elements) == len(b.wall_elements)
+    for wid in a.wall_elements:
+        wa, wb = a.wall_elements[wid], b.wall_elements[wid]
+        for f in dc_fields(wa):
+            va, vb = getattr(wa, f.name), getattr(wb, f.name)
+            if isinstance(va, float):
+                assert va == pytest.approx(vb, rel=rel), f"wall {wid}.{f.name}"
+            elif isinstance(va, int):
+                assert va == vb, f"wall {wid}.{f.name}"
+            elif isinstance(va, list):
+                if va and isinstance(va[0], float):
+                    assert va == pytest.approx(vb, rel=rel), f"wall {wid}.{f.name}"
+                else:
+                    assert va == vb, f"wall {wid}.{f.name}"
+            else:
+                assert va == vb, f"wall {wid}.{f.name}"
+
+    # ── Frame element properties (incl. hinge_params) ──────────────
+    assert a.frame_element_properties.keys() == b.frame_element_properties.keys()
+    for eid in a.frame_element_properties:
+        pa, pb = a.frame_element_properties[eid], b.frame_element_properties[eid]
+        for f in dc_fields(pa):
+            va, vb = getattr(pa, f.name), getattr(pb, f.name)
+            if f.name == "hinge_params":
+                assert (va or {}).keys() == (vb or {}).keys(), f"fep.{eid}.hinge_params"
+                for k in va or {}:
+                    assert va[k] == pytest.approx(vb[k], rel=rel), f"fep.{eid}.hinge_params.{k}"
+            elif isinstance(va, float):
+                assert va == pytest.approx(vb, rel=rel), f"fep.{eid}.{f.name}"
+            else:
+                assert va == vb, f"fep.{eid}.{f.name}"
 
 
 # ═════════════════════════════════════════════════════════════════════
