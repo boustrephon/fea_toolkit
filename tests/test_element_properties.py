@@ -10,6 +10,7 @@ in ``test_workflows.py`` or add dedicated tests there.
 import openseespy.opensees as ops
 import pytest
 
+import fea_toolkit.opensees.analysis_builder as ab_mod
 from fea_toolkit.model.mesh_model import MeshModel
 from fea_toolkit.model.sap_data import (
     AreaElementProperties,
@@ -22,6 +23,7 @@ from fea_toolkit.model.sap_data import (
 )
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.opensees.builder import export_model_to_tcl
+from fea_toolkit.opensees.recorder import RecordingOpenSees
 
 # ═══════════════════════════════════════════════════════════════════
 # FrameElementProperties
@@ -192,8 +194,8 @@ class TestNDMaterial:
 
 class TestFSAMUniaxialDispatch:
     """Verify AnalysisBuilder emits ConcreteCM / Steel02 for FSAM-referenced
-    uniaxial materials (required for getCrackingStrain), and Concrete01 /
-    Steel01 otherwise."""
+    uniaxial materials (required for getCrackingStrain), and Elastic for
+    non-FSAM materials."""
 
     def _make_builder(self):
         """Build a minimal AnalysisBuilder with one concrete + one steel
@@ -231,35 +233,45 @@ class TestFSAMUniaxialDispatch:
 
     def test_create_materials_fsam_laws(self):
         builder = self._make_builder()
+        rec = RecordingOpenSees(ops)
+        ab_mod.ops = rec
         try:
-            ops.wipe()
-            ops.model("basic", "-ndm", 3, "-ndf", 6)
             builder._create_materials()
         finally:
+            ab_mod.ops = ops
             ops.wipe()
 
-        # FSAM-referenced materials must exist as ConcreteCM / Steel02.
         # Tags are auto-assigned: WallConc=1, WallSteel=2, FrameSteel=3.
         assert builder.material_tags["WallConc"] == 1
         assert builder.material_tags["WallSteel"] == 2
         assert builder.material_tags["FrameSteel"] == 3
 
-        # The builder wraps material creation in contextlib.suppress, so
-        # verify the wheel actually accepts ConcreteCM / Steel02 with a
-        # raw non-suppressed call (fails loudly if unsupported).  The
-        # FSAM-referenced materials need to be ConcreteCM / Steel02 —
-        # only these implement getCrackingStrain() (ConcreteS/01 do not).
+        # FSAM-referenced materials must be emitted as ConcreteCM / Steel02
+        # (only these implement getCrackingStrain() for FSAM); the non-FSAM
+        # steel keeps the legacy Elastic path.
+        laws = {
+            args[1]: args[0] for name, args, _kwargs in rec.commands if name == "uniaxialMaterial"
+        }
+        assert laws[1] == "ConcreteCM"  # WallConc
+        assert laws[2] == "Steel02"  # WallSteel
+        assert laws[3] == "Elastic"  # FrameSteel
+
+    def test_fsam_laws_supported_by_wheel(self):
+        """Fail loudly if the wheel lacks ConcreteCM / Steel02 support.
+
+        ``_create_materials`` wraps every ``uniaxialMaterial`` call in
+        ``contextlib.suppress``, so the emission assertions above would
+        pass even on an OpenSeesPy build that cannot actually create
+        these laws.  This raw, non-suppressed call raises (fails loudly)
+        on a wheel that lacks ConcreteCM or Steel02.
+        """
         try:
             ops.wipe()
-            ops.model("basic", "-ndm", 3, "-ndf", 6)
-            # ConcreteCM tag 1 — model units kN,m → 30 MPa = 30e3 kN/m².
+            # Model units kN, m → 30 MPa = 30e3 kN/m², 420 MPa = 4.2e5 kN/m².
             ops.uniaxialMaterial(
                 "ConcreteCM", 1, 30.0e3, 0.002, 30.0e6, 5.0, 0.0002, 3.0e3, 0.0001, 1.5, 0.0001
             )
-            # Steel02 tag 2 — 420 MPa = 4.2e5 kN/m².
             ops.uniaxialMaterial("Steel02", 2, 4.2e5, 200.0e6, 0.01)
-            # Steel01 stays available for non-FSAM materials.
-            ops.uniaxialMaterial("Steel01", 3, 2.5e5, 200.0e6, 0.01)
         finally:
             ops.wipe()
 
@@ -278,14 +290,19 @@ class TestFSAMUniaxialDispatch:
             units={"F": "kN", "L": "m", "T": "C"},
         )
         builder = AnalysisBuilder(mm, {"verbose": False})
+        rec = RecordingOpenSees(ops)
+        ab_mod.ops = rec
         try:
-            ops.wipe()
-            ops.model("basic", "-ndm", 3, "-ndf", 6)
             builder._create_materials()
         finally:
+            ab_mod.ops = ops
             ops.wipe()
         # No FSAM nd_materials → all materials stay Elastic.
         assert builder.material_tags["FrameConc"] == 1
+        laws = {
+            args[1]: args[0] for name, args, _kwargs in rec.commands if name == "uniaxialMaterial"
+        }
+        assert laws[1] == "Elastic"
 
 
 class TestTclExportFSAM:

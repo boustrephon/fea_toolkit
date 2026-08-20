@@ -234,6 +234,7 @@ class TestBuilderRigidEndZones:
             # The joint node the orphan-node fix protects is in the domain.
             assert mesh.nodes["2"].node_tag in ops.getNodeTags()
             tip = mesh.nodes["3"].node_tag
+            base = mesh.nodes["1"].node_tag
             ops.timeSeries("Linear", 1)
             ops.pattern("Plain", 1, 1)
             ops.load(tip, 100.0, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -247,7 +248,7 @@ class TestBuilderRigidEndZones:
             assert ops.analyze(1) == 0
             # Load path through the MPCs: tip load equilibrated at the base.
             ops.reactions()
-            assert abs(ops.nodeReaction(1, 1) + 100.0) < 1e-4
+            assert abs(ops.nodeReaction(base, 1) + 100.0) < 1e-4
         finally:
             wipe()
 
