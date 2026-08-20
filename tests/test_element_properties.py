@@ -199,7 +199,12 @@ class TestFSAMUniaxialDispatch:
 
     def _make_builder(self):
         """Build a minimal AnalysisBuilder with one concrete + one steel
-        material (both FSAM-referenced) plus a non-FSAM steel material."""
+        material (both FSAM-referenced) plus a non-FSAM steel material.
+
+        The FSAM nD material is *consumed* by a LayeredShell section layer
+        — only consumed FSAM materials force ConcreteCM / Steel02 for
+        their referenced uniaxial laws (see the unconsumed-FSAM test).
+        """
         # Model units: kN, m → stress factor = kN/m²  (Pa → kN/m² scale 0.001)
         mm = MeshModel(
             nodes={},
@@ -225,6 +230,12 @@ class TestFSAMUniaxialDispatch:
                     rou_y=0.004,
                     nu=0.2,
                     alfadow=45.0,
+                ),
+            },
+            layered_shell_sections={
+                "wall_layer": LayeredShellSection(
+                    name="wall_layer",
+                    layers=[ShellFiberLayer(0.3, "wall_fsam")],
                 ),
             },
             units={"F": "kN", "L": "m", "T": "C"},
@@ -256,6 +267,29 @@ class TestFSAMUniaxialDispatch:
         assert laws[2] == "Steel02"  # WallSteel
         assert laws[3] == "Elastic"  # FrameSteel
 
+    def test_create_materials_unconsumed_fsam_uses_elastic(self):
+        """A configured-but-unconsumed FSAM nD material does NOT force
+        ConcreteCM/Steel02 for its referenced uniaxial laws — those keep
+        the generic Elastic path (only *consumed* FSAM participates, i.e.
+        FSAM referenced by a LayeredShell layer or wall element)."""
+        builder = self._make_builder()
+        # Drop the consuming LayeredShell section → the FSAM is unconsumed.
+        builder.mesh_model.layered_shell_sections = {}
+        rec = RecordingOpenSees(ops)
+        ab_mod.ops = rec
+        try:
+            builder._create_materials()
+        finally:
+            ab_mod.ops = ops
+            ops.wipe()
+
+        laws = {
+            args[1]: args[0] for name, args, _kwargs in rec.commands if name == "uniaxialMaterial"
+        }
+        assert laws[1] == "Elastic"  # WallConc — not forced to ConcreteCM
+        assert laws[2] == "Elastic"  # WallSteel — not forced to Steel02
+        assert laws[3] == "Elastic"  # FrameSteel
+
     def test_fsam_laws_supported_by_wheel(self):
         """Fail loudly if the wheel lacks ConcreteCM / Steel02 support.
 
@@ -268,8 +302,11 @@ class TestFSAMUniaxialDispatch:
         try:
             ops.wipe()
             # Model units kN, m → 30 MPa = 30e3 kN/m², 420 MPa = 4.2e5 kN/m².
+            # Production emits the negative-compression convention (fpc,
+            # epcc, xcrn negative) — matching _create_materials and
+            # test_mvlem_3d_supported_by_wheel in test_wall_pushover.py.
             ops.uniaxialMaterial(
-                "ConcreteCM", 1, 30.0e3, 0.002, 30.0e6, 5.0, 0.0002, 3.0e3, 0.0001, 1.5, 0.0001
+                "ConcreteCM", 1, -30.0e3, -0.002, 30.0e6, 5.0, -0.0002, 3.0e3, 0.0001, 1.5, 0.0001
             )
             ops.uniaxialMaterial("Steel02", 2, 4.2e5, 200.0e6, 0.01)
         finally:

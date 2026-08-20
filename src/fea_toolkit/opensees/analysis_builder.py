@@ -47,10 +47,12 @@ from ..utils import (
     DEFAULT_FSAM_STEEL_CR2,
     DEFAULT_FSAM_STEEL_R0,
     DEFAULT_FY_REBAR_PA,
+    DEFAULT_RHO_MC_SI,
     RC_NO_TIE_CONFINEMENT_FACTOR,
     RC_NO_TIE_EPSC_FACTOR,
     cqc_combine,
     g_from_units,
+    mass_density_scale_factor,
     stress_scale_factor,
 )
 
@@ -1356,6 +1358,16 @@ class AnalysisBuilder:
         }
         if not fsam_mats:
             return
+        # Only FSAM materials actually *consumed* (referenced by a
+        # LayeredShell section layer or an SFI/E_SFI wall element) are
+        # created.  Unconsumed FSAM would reference the generic Elastic
+        # uniaxial laws — which lack getCrackingStrain() — and crash the
+        # OpenSees FSAM constructor ("failed to get cracking strain").
+        _fsam_consumed = getattr(self, "_fsam_consumed", set())
+        if _fsam_consumed:
+            fsam_mats = {n: m for n, m in fsam_mats.items() if n in _fsam_consumed}
+            if not fsam_mats:
+                return
 
         import warnings as _w
 
@@ -1576,7 +1588,21 @@ class AnalysisBuilder:
         conc_tags = _resolve(wall.concrete_names)
         steel_tags = _resolve(wall.steel_names)
         shear_tag = self.material_tags.get(wall.shear_name) if wall.shear_name else None
-        rho = wall.rho or [2400.0] * wall.m
+        if wall.rho:
+            rho = wall.rho
+        else:
+            # Unit-aware fallback density: prefer the wall's concrete
+            # material unit weight (mass density = unit_weight / g), else
+            # the SI default scaled to model units — never a
+            # unit-specific literal like 2400 kg/m³.
+            _conc_name = (wall.concrete_names or [None])[0]
+            _conc_mat = self.mesh_model.materials.get(_conc_name) if _conc_name else None
+            _uw = float(getattr(_conc_mat, "unit_weight", 0.0) or 0.0)
+            if _uw > 0.0:
+                _rho_default = _uw / g_from_units(self.mesh_model.units)
+            else:
+                _rho_default = DEFAULT_RHO_MC_SI * mass_density_scale_factor(self.mesh_model.units)
+            rho = [_rho_default] * wall.m
         if conc_tags is None or steel_tags is None or shear_tag is None:
             logger.warning(
                 "  ⚠ Wall element '%s': missing uniaxial material "
@@ -1787,13 +1813,36 @@ class AnalysisBuilder:
                 _brace_mat_names.add(sec.material)
 
         # ── FSAM-referenced uniaxial materials ─────────────────────
-        # Collect the set of material names that any FSAM nD material
-        # references as its steel (sx/sy) or concrete (conc) law.  These
-        # receive ConcreteCM / Steel02 below instead of the generic
-        # Elastic fallback, because FSAM requires getCrackingStrain().
+        # Collect the set of FSAM nD materials that are actually
+        # *consumed* by the domain — referenced by a LayeredShell
+        # section layer or an SFI_MVLEM_3D / E_SFI_MVLEM_3D wall
+        # element.  A configured-but-unconsumed FSAM nD material does
+        # NOT force ConcreteCM/Steel02 for its referenced laws; only
+        # consumed FSAM materials participate, because ConcreteCM is
+        # required for FSAM's getCrackingStrain() at runtime.
+        _fsam_consumed: set = set()
+        for _lss in self.mesh_model.layered_shell_sections.values():
+            for _layer in _lss.layers:
+                _fsam_consumed.add(_layer.nd_material)
+        for _wall in self.mesh_model.wall_elements.values():
+            if _wall.material_type == "uniaxial":
+                continue
+            _fsam_consumed.update(_wall.fsam_material_names or [])
+        # Stash for _create_fsam_materials(), which only creates consumed
+        # FSAM materials (unconsumed FSAM would reference Elastic uniaxial
+        # laws and crash the OpenSees FSAM constructor).
+        self._fsam_consumed = _fsam_consumed
+
+        # Collect the set of material names that any *consumed* FSAM nD
+        # material references as its steel (sx/sy) or concrete (conc)
+        # law.  These receive ConcreteCM / Steel02 below instead of the
+        # generic Elastic fallback, because FSAM requires
+        # getCrackingStrain().
         _fsam_refs_by_name: dict[str, set[str]] = {}
         for _nd in self.mesh_model.nd_materials.values():
             if _nd.material_type != "FSAM":
+                continue
+            if _nd.name not in _fsam_consumed:
                 continue
             for _rname in _nd.fsam_referenced_material_names():
                 _fsam_refs_by_name.setdefault(_rname, set()).add(_nd.name)
@@ -1832,19 +1881,6 @@ class AnalysisBuilder:
                 _mvlem01_only.update(_wall.concrete_names or [])
         # Invert: only names that are referenced by at least one MVLEM_3D
         # wall (not by a genuine FSAM nD law) qualify for Concrete01.
-        # A configured-but-unconsumed FSAM nD material does NOT force
-        # ConcreteCM — only FSAM materials that are actually created
-        # (referenced by a LayeredShell section layer or an
-        # SFI_MVLEM_3D / E_SFI_MVLEM_3D wall element) participate, because
-        # ConcreteCM is required for FSAM's getCrackingStrain() at runtime.
-        _fsam_consumed: set = set()
-        for _lss in self.mesh_model.layered_shell_sections.values():
-            for _layer in _lss.layers:
-                _fsam_consumed.add(_layer.nd_material)
-        for _wall in self.mesh_model.wall_elements.values():
-            if _wall.material_type == "uniaxial":
-                continue
-            _fsam_consumed.update(_wall.fsam_material_names or [])
         _mvlem01_and_fsam: set = set()
         for _nd in self.mesh_model.nd_materials.values():
             if _nd.material_type != "FSAM" or _nd.name not in _fsam_consumed:
@@ -2406,24 +2442,30 @@ class AnalysisBuilder:
         """
         from ..analysis.shear_capacity import shear_backbone
 
+        # Explicit override wins for every aggregated section.
+        override = self.config.get("shear_backbone")
+        if isinstance(override, dict):
+            return dict(override)
         if sec is None:
             return None
         materials = self.mesh_model.materials
         concrete = materials.get(getattr(sec, "material", ""))
         if concrete is None:
             return None
-        override = self.config.get("shear_backbone")
-        if isinstance(override, dict):
-            return dict(override)
         rebar = materials.get(getattr(sec, "rebar_material", "") or "")
         tie = materials.get(getattr(sec, "tie_rebar_mat", "") or "")
-        return shear_backbone(
-            sec,
-            concrete,
-            rebar=rebar,
-            tie=tie,
-            units=self.units,
-        )
+        try:
+            return shear_backbone(
+                sec,
+                concrete,
+                rebar=rebar,
+                tie=tie,
+                units=self.units,
+            )
+        except ValueError:
+            # Degenerate geometry (e.g. a section missing depth/bf) — no
+            # backbone, the caller falls back to the elastic aggregator.
+            return None
 
     # ── Shell elements ───────────────────────────────────────────
 
@@ -2992,7 +3034,16 @@ class AnalysisBuilder:
         such models the user must pre-convert and re-parse, or raise.
         """
         if not self.config.get("limit_state_auto_convert_units", True):
-            return
+            units = self.mesh_model.units
+            if units.get("L") == "in" and units.get("F") == "kip":
+                return
+            raise ValueError(
+                "limit_state_columns require a kip-in-ksi model, but the "
+                f"mesh is in {units} and 'limit_state_auto_convert_units' "
+                "is False. Convert the model to L='in', F='kip' before "
+                "running the analysis, or leave "
+                "'limit_state_auto_convert_units' = True."
+            )
         units = self.mesh_model.units
         if units.get("L") == "in" and units.get("F") == "kip":
             return

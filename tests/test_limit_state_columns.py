@@ -102,13 +102,17 @@ class TestUnitAutoConversion:
         assert builder._limit_state_plan
 
     def test_auto_convert_opt_out(self):
-        builder, _ = _limit_state_builder(
-            {
-                "limit_state_columns": ["1"],
-                "limit_state_auto_convert_units": False,
-            }
-        )
-        assert builder.mesh_model.units.get("L") == "m"
+        # Opting out of the automatic rescale with a non-kip-in mesh is a
+        # misconfiguration: the Elwood limitCurve equations are
+        # hard-anchored to kip-in-ksi, so the builder refuses to proceed
+        # instead of silently building an incompatible domain.
+        with pytest.raises(ValueError, match="kip-in"):
+            _limit_state_builder(
+                {
+                    "limit_state_columns": ["1"],
+                    "limit_state_auto_convert_units": False,
+                }
+            )
 
 
 # ═════════════════════════════════════════════════════════════════════

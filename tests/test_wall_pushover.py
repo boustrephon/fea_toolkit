@@ -3,7 +3,7 @@
 Exercises the two supported nonlinear RC wall discretisations through the
 full Preprocessor → AnalysisBuilder pipeline on the same wall geometry:
 
-* **LayeredShell** — ShellNLDKGQ quad with through-thickness FSAM layers.
+* **LayeredShell** — ShellNLDKGQ quad with through-thickness layers using the elastic core material.
 * **SFI_MVLEM_3D** — single macro-element with ``m`` macro-fibers, each
   carrying its own FSAM nD material.
 
