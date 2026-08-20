@@ -558,8 +558,6 @@ _NON_STRESS_NUMERIC_KEYS: frozenset = frozenset(
         "stc",  # shear retention factor (dimensionless)
         "nstatevs",
         "nprops",  # PlaneStressUserMaterial integer counts
-        "density",
-        "rho",
         "rou_x",
         "rou_y",  # FSAM reinforcement ratios (dimensionless)
         "alfadow",  # FSAM wall inclination angle (degrees)
@@ -575,6 +573,12 @@ _NON_STRESS_NUMERIC_KEYS: frozenset = frozenset(
     }
 )
 
+# Mass-density fields (M/L³) authored in SI (kg/m³) — rescaled to model
+# mass-density units via ``mass_density_scale_factor`` (e.g. 2400 kg/m³
+# concrete → 2.4 t/m³ in a kN-m model).  ``rou_x`` / ``rou_y`` stay in
+# the non-stress set above: they are dimensionless reinforcement ratios.
+_MASS_DENSITY_KEYS: frozenset = frozenset({"density", "rho"})
+
 
 def scale_material_dict(
     mat_dict: dict,
@@ -584,8 +588,11 @@ def scale_material_dict(
     """Scale stress-valued fields in a material dict from SI Pa to model units.
 
     Returns a new dict with stress fields multiplied by
-    ``stress_scale_factor(units)``.  Non-stress fields (Poisson's ratio,
-    density, strain values, string flags) are passed through unchanged.
+    ``stress_scale_factor(units)``.  Mass-density fields
+    (``density``/``rho``) are rescaled from SI (kg/m³) via
+    ``mass_density_scale_factor(units)``.  Other non-stress fields
+    (Poisson's ratio, strain values, string flags) are passed through
+    unchanged.
 
     Numeric fields that are not classified as stress-valued and not in
     the known non-stress set emit a :class:`UserWarning` identifying the
@@ -608,10 +615,13 @@ def scale_material_dict(
     # below must always run so unclassified numeric fields still emit
     # UserWarning for SI models (values are unchanged, multiplied by 1.0).
     result = {}
+    mdsf = mass_density_scale_factor(units)
     for k, v in mat_dict.items():
         if isinstance(v, (int, float)):
             if k in _STRESS_KEYS:
                 result[k] = v * ssf
+            elif k in _MASS_DENSITY_KEYS:
+                result[k] = v * mdsf
             elif k not in _NON_STRESS_NUMERIC_KEYS:
                 _w.warn(
                     f"scale_material_dict: numeric field '{k}' is not "
