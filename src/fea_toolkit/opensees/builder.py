@@ -325,7 +325,18 @@ def export_model_to_tcl(
             tag = _nd_mat_tag[nd_name]
             if nd_mat.material_type not in ("ElasticIsotropic", "FSAM"):
                 pf_tag = tag + len(_nd_materials)
-                lines.append(f"nDMaterial PlateFromPlaneStress {pf_tag} {tag} 0.0")
+                # Out-of-plane shear modulus: honor Eout, else derive G from
+                # E and nu exactly as NDMaterial.to_tcl does.
+                eout = (
+                    nd_mat.Eout
+                    if nd_mat.Eout is not None
+                    else (
+                        nd_mat.E / (2.0 * (1.0 + nd_mat.nu))
+                        if nd_mat.nu is not None
+                        else nd_mat.E / 2.6
+                    )
+                )
+                lines.append(f"nDMaterial PlateFromPlaneStress {pf_tag} {tag} {eout:g}")
 
     # Sections
     if model_data.sections:
@@ -478,9 +489,18 @@ def export_model_to_tcl(
                 _w_shear = _mat_tag.get(_wall.shear_name) if _wall.shear_name else None
                 _w_rho = _wall.rho or [2400.0] * _wall.m
                 if len(_w_conc) != _wall.m or len(_w_steel) != _wall.m or _w_shear is None:
+                    print(
+                        f"  ⚠ [export_model_to_tcl] wall '{_wall.elem_id}': "
+                        f"uniaxial MVLEM_3D material resolution incomplete "
+                        f"(concrete {len(_w_conc)}/{_wall.m}, steel "
+                        f"{len(_w_steel)}/{_wall.m}, shear "
+                        f"{'ok' if _w_shear is not None else 'missing'}) — "
+                        f"element skipped"
+                    )
                     continue
+                _w_elem = getattr(_wall, "element_type", None) or "MVLEM_3D"
                 _w_parts = [
-                    f"element MVLEM_3D {_wall.elem_tag}",
+                    f"element {_w_elem} {_wall.elem_tag}",
                     *_w_nids,
                     str(_wall.m),
                 ]
@@ -512,9 +532,15 @@ def export_model_to_tcl(
                 if _name in _nd_mat_tag
             ]
             if len(_w_mat_tags) != _wall.m:
+                print(
+                    f"  ⚠ [export_model_to_tcl] wall '{_wall.elem_id}': FSAM "
+                    f"material resolution incomplete "
+                    f"({len(_w_mat_tags)}/{_wall.m} tags) — element skipped"
+                )
                 continue
+            _w_elem = getattr(_wall, "element_type", None) or "SFI_MVLEM_3D"
             _w_parts = [
-                f"element SFI_MVLEM_3D {_wall.elem_tag}",
+                f"element {_w_elem} {_wall.elem_tag}",
                 *_w_nids,
                 str(_wall.m),
             ]
