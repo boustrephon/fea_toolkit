@@ -191,6 +191,41 @@ class TestNDMaterial:
         with pytest.raises(LookupError, match="SteelX"):
             mat.to_tcl(1, mat_tags={"SteelY": 2, "ConcreteCM": 3})
 
+    def test_fsam_rejects_unset_references(self):
+        mat = NDMaterial(
+            name="wall_fsam",
+            material_type="FSAM",
+            density=2400.0,
+            sx="SteelX",
+            sy="",  # unset
+            conc="ConcreteCM",
+        )
+        # Empty reference names (the dataclass default) are unset fields —
+        # reported per-field, not as missing tags.
+        with pytest.raises(LookupError) as exc:
+            mat.to_tcl(1, mat_tags={"SteelX": 1, "ConcreteCM": 3})
+        msg = str(exc.value)
+        assert "unset" in msg
+        assert "sy" in msg
+        assert "sx" not in msg  # set reference is not reported
+
+    def test_fsam_rejects_multiple_unset_references(self):
+        mat = NDMaterial(
+            name="wall_fsam",
+            material_type="FSAM",
+            density=2400.0,
+            sx="SteelX",
+            sy="",
+            conc="",
+        )
+        with pytest.raises(LookupError) as exc:
+            mat.to_tcl(1, mat_tags={"SteelX": 1})
+        msg = str(exc.value)
+        assert "unset" in msg
+        assert "sy" in msg
+        assert "conc" in msg
+        assert "sx" not in msg
+
 
 class TestFSAMUniaxialDispatch:
     """Verify AnalysisBuilder emits ConcreteCM / Steel02 for FSAM-referenced

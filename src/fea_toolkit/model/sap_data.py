@@ -1098,8 +1098,9 @@ class NDMaterial:
             Tcl command string.
 
         Raises:
-            LookupError: If a referenced uniaxial material name for
-                ``FSAM`` is missing from *mat_tags*.
+            LookupError: If any of ``sx`` / ``sy`` / ``conc`` is empty (an
+                unset FSAM reference) or if a referenced uniaxial material
+                name for ``FSAM`` is missing from *mat_tags*.
         """
         t = self.material_type
         if t == "ElasticIsotropic":
@@ -1138,6 +1139,19 @@ class NDMaterial:
                     f"FSAM material '{self.name}' requires mat_tags to resolve "
                     f"uniaxial material names (sx={self.sx!r}, sy={self.sy!r}, "
                     f"conc={self.conc!r}) to tags"
+                )
+            # Validate the references are set before resolving tags.  Empty
+            # names (the dataclass default) are unset references, reported
+            # per-field rather than as missing tags.
+            unset = [
+                fld
+                for fld, val in (("sx", self.sx), ("sy", self.sy), ("conc", self.conc))
+                if not val
+            ]
+            if unset:
+                raise LookupError(
+                    f"FSAM material '{self.name}' has unset uniaxial material "
+                    f"reference(s): {', '.join(unset)}"
                 )
             missing = sorted(n for n in (self.sx, self.sy, self.conc) if n not in mat_tags)
             if missing:
