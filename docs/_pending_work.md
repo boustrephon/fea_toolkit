@@ -74,8 +74,6 @@ src/fea_toolkit/plotting/viz.py:
   `analysis_builder_migration_plan.md` RC-solver row, `llm_guide.md` /
   `README.md` / `viewer.md` deprecated-plot examples → replacements.
 
-## OUT OF SCOPE / NOTED
-
 ## DONE (deprecation-programme Phase 2 — Gap 4, 2026-08-16)
 - **Joint-load application bug FIXED** — SAP2000 "JOINT LOADS - FORCE"
   were parsed and carried through the Preprocessor but `create_loads()`
@@ -120,7 +118,7 @@ src/fea_toolkit/plotting/viz.py:
   reference.  The V&E benchmark (forceBeamColumn + rigid zones) now peaks
   at ≈ 353 kN (1.07 × experimental) with secant @ 50 mm ≈ 6.3 kN/mm
   (1.03 ×) — inside the ±10–15 % band.  Tests:
-  `tests/test_rigid_end_zones.py` (8) +
+  `tests/test_rigid_end_zones.py` (14) +
   `test_rigid_end_zones_lands_in_acceptance_band`.
 - **Follow-up (deferred):** nonlinear cracked-shear degradation / bond-slip
   springs to reproduce the experimental *post-peak descent* (the

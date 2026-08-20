@@ -44,6 +44,13 @@ manual build that nobody hooked up.
 
 ## Two swap strategies
 
+> **Notation used below:** `$SITE_PACKAGES` is the active virtualenv's
+> site-packages directory (typically
+> `$VIRTUAL_ENV/lib/python3.12/site-packages`); `$CONAN_HOME` is the conan
+> cache root used by the build (the shipped wheel's rpath points there —
+> `/Users/minjiezhu/.conan2/` for the wheel author).  Adjust both to your
+> own machine.
+
 ### Strategy A — redirect the dispatch (cleanest, no wheel surgery)
 
 Patch `openseespy/opensees/__init__.py` to prefer the local build over the
@@ -54,18 +61,18 @@ platform wheel, so both the wheel and the local build coexist. macOS arm64:
 elif sys.platform.startswith('darwin'):
     if _arch != 'arm64':
         raise RuntimeError(...)
-    try:
-        # Local custom build first: opensees/opensees.so defines all the
-        # ops.* names. Importing the local .so directly (rather than going
-        # through this __init__ again) avoids recursion.
-        from os.path import dirname, join, isfile
-        _local_so = join(dirname(__file__), "opensees.so")
-        if isfile(_local_so):
-            from openseespy.opensees.opensees import *
-        else:
-            from openseespymac.opensees import *
-    except Exception:
-        from openseespymac.opensees import *     # fall back to wheel
+    # Local custom build first: opensees/opensees.so defines all the
+    # ops.* names. Importing the local .so directly (rather than going
+    # through this __init__ again) avoids recursion.
+    from os.path import dirname, join, isfile
+    _local_so = join(dirname(__file__), "opensees.so")
+    if isfile(_local_so):
+        from openseespy.opensees.opensees import *
+    else:
+        # Wheel fallback ONLY when no local build is present.  If a local
+        # .so exists but fails to import, the error propagates (the wheel
+        # is not silently substituted) so a broken local build is obvious.
+        from openseespymac.opensees import *
 ```
 
 > Note: `openseespy/opensees/opensees.so` is the *compiled module*; the
@@ -84,7 +91,7 @@ build must be installed *next to* the wheel, i.e. its `.so` + bundled
 
 1. Back up the wheel:
    ```bash
-   cd /Users/andrew/Projects/OpenSeesPy/venv_opensees/lib/python3.12/site-packages
+   cd $SITE_PACKAGES
    mv openseespymac/opensees.so openseespymac/opensees.so.wheel-backup
    ```
 2. Copy the local build into the platform package:
@@ -108,15 +115,17 @@ The cleanest path is to build from the OpenSeesPy source that fetches and
 compiles the upstream OpenSees:
 
 ```bash
-GIT_SSL_NO_VERIFY=true \
 git clone --recursive https://github.com/OpenSees/OpenSees
 #  └─ includes the mvlem/FSAM element + material sources (open-source)
+#  (Do NOT set GIT_SSL_NO_VERIFY=true — if your clone fails TLS
+#   verification, fix your local CA trust configuration instead of
+#   disabling certificate checks.)
 
 cd OpenSees
 # follow the OpenSeesPy build instructions for your platform.
 # On macOS arm64 you typically need a conan toolchain (the wheel author used
-# /Users/minjiezhu/.conan2/...). The rpath of the shipped wheel points there,
-# confirming the wheel was built with conan.
+# $CONAN_HOME, e.g. /Users/minjiezhu/.conan2/...). The rpath of the shipped
+# wheel points there, confirming the wheel was built with conan.
 ```
 
 The Kolozvari **MVLEM/SFI-MVLEM/FSAM** sources live in the official OpenSees

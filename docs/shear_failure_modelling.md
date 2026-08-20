@@ -2,7 +2,7 @@
 title: "RC Shear-Failure Modelling (MCFT Capacity + Nonlinear Shear Backbone)"
 description: "Two-layer RC shear-failure modelling: a simplified-MCFT member shear-capacity model and mode-of-failure reporter (ASCE 41 force-controlled check), plus a nonlinear shear backbone (SectionAggregator) for reproducing shear-critical frame failures. Validated against the Duong et al. (2007) frame."
 status: "complete"
-tags: [validation, shear, mcf, capacity, backbone, duong, force-controlled, reporter]
+tags: [validation, shear, mcft, capacity, backbone, duong, force-controlled, reporter]
 category: [analysis-types]
 related: [vecchio_emara_benchmark.md, pushover_analysis.md, deprecation_plan.md]
 ---

@@ -16,9 +16,9 @@ results are post-processed.
 
 ## Principles
 
-1. **Classification happens once**, immediately after parsing the `.s2k`
-   file, and is stored as first-class data on the model — not buried in
-   report-script config dicts.
+1. **Classification happens once**, during preprocessing, and is stored as
+   first-class data on the `MeshModel` (`frame_element_types` /
+   `area_element_types`) — not buried in report-script config dicts.
 
 2. **Two independent signals** feed into the classification:
    - **Section type** — does the section look like a brace section?
@@ -107,32 +107,32 @@ non-inactive element at preprocess time (not only when
 consumes these for stiffness-factor section variants and element-property
 role defaults.
 
-### The brace decision (section-type signal + overrides)
+### The brace decision (section-type signal, geometry gate + overrides)
 
-The geometry-based `'brace'` role is a **hint**, not the modelling
-decision.  For the steel pushover, whether a frame element is modelled as
-a **brace** (`Truss` + `Hysteretic`) is decided by the section-type signal
-and the explicit overrides:
+For the steel pushover, whether a frame element is modelled as a **brace**
+(`Truss` + `Hysteretic`) is decided from the section-type signal, the
+always-on geometric role, and the explicit overrides:
 
 1. **Section type** — a section is a recognised brace section if it is a
    `PipeSection`, `AngleSection`, `DoubleAngleSection`, `TeeSection` or
    `ChannelSection` (the same list exposed by
    `Selection.from_brace_sections()`).
-2. **Section-name override** — `config["brace_sections"] = ["BRB-100", ...]`
+2. **Geometry gate (default)** — with no explicit override, the
+   section-type signal only turns an element into a brace when its
+   geometric role (`frame_element_types[eid]`) is also `'brace'`.  A
+   horizontal pipe (handrail, service duct) or a vertical tee (stiffener,
+   girt) is geometrically a beam/column and stays flexural (beam-column
+   element), even though its section is a recognised brace shape.
+3. **Section-name override** — `config["brace_sections"] = ["BRB-100", ...]`
    replaces the type check: every element using one of those section names
-   is a brace.
-3. **Per-element override** — `AnalysisBuilder.set_brace_selection({...})`
+   is a brace (the override is explicit, so it is not subject to the
+   geometric-role gate).
+4. **Per-element override** — `AnalysisBuilder.set_brace_selection({...})`
    (or the `brace_selection` argument of `rebuild_with_fiber_sections`)
-   overrides individual element IDs and enables `subdivide_braces`
-   (Approach A subdivision with an initial imperfection, so buckling
-   develops under compression).
-
-Today the brace→Truss path is **section-driven only** — geometry does not
-gate it.  A horizontal pipe (handrail, service duct) with a `PipeSection`
-would still become a truss; a vertical tee (stiffener, girt) is
-geometrically a `column`.  Making the brace decision geometry-aware and
-per-element overridable (a single design-role signal) is the Phase 2
-proposal below.
+   is authoritative: the elements in the set become braces regardless of
+   section type or geometry (custom BRBs, diagonal I-section braces), and
+   it enables `subdivide_braces` (Approach A subdivision with an initial
+   imperfection, so buckling develops under compression).
 
 ### Manual override by element ID
 
@@ -186,7 +186,9 @@ builder = AnalysisBuilder(mesh_model, cfg)
 
 `brace_sections` replaces the type-based check (`PipeSection`/`AngleSection`/
 etc.) for the brace→Truss path: every element whose section name is listed
-becomes a brace.
+becomes a brace.  Because it is an explicit override, it is **not** gated
+by the geometric role (unlike the type-based default signal) — an explicit
+`"GUSSET-PLATE"` selection applies even if that element is horizontal.
 
 ## Verification & diagnostics
 
@@ -230,25 +232,37 @@ area_element_types: dict[str, str]    # aid -> 'slab' / 'wall'
 The `AnalysisBuilder` consumes the roles for per-type section variants
 (stiffness factors) and element-property role defaults
 (`element_strategies`).  The pushover brace→Truss decision is made in
-`_add_beam_column` from the **section** signal, not the stored role:
+`_add_beam_column` from the geometric role gated by the section signal,
+with explicit overrides taking precedence:
 
 ```python
-if (
-    self.config.get("brace_truss")
-    and hasattr(self, "_truss_mat_tags")
-    and sec_name in self._truss_mat_tags
-):
-    # Truss element with a per-element Hysteretic material whose
-    # compression branch uses the actual Euler buckling load P_cr.
-    ops.element("Truss", tag, ni.node_tag, nj.node_tag, A, mat_tag)
-    return
+if self.config.get("brace_truss"):
+    if self._brace_selection is not None:
+        # Explicit per-element selection is authoritative.
+        is_brace = (
+            elem.elem_id in self._brace_selection
+            or getattr(elem, "parent_id", None) in self._brace_selection
+        )
+    else:
+        # Default: recognised brace section AND geometric role 'brace'
+        # (horizontal pipes / ordinary beams stay flexural).  An explicit
+        # brace_sections name skips the geometry gate.
+        explicit_sec = self.config.get("brace_sections") is not None
+        is_brace = sec_name in self._truss_mat_tags and (
+            explicit_sec or self._frame_element_types.get(elem.elem_id) == "brace"
+        )
+    if is_brace:
+        # Truss element with a per-element Hysteretic material whose
+        # compression branch uses the actual Euler buckling load P_cr.
+        ops.element("Truss", tag, ni.node_tag, nj.node_tag, A, mat_tag)
+        return
 # ... create beam-column as normal ...
 ```
 
 `_truss_mat_tags` is populated in `_create_truss_materials` from
 `brace_sections` (explicit section names) or the recognised brace section
-types.  Making this brace decision geometry-aware and per-element
-overridable (a single design-role signal) is the Phase 2 proposal below.
+types; sections used by explicitly-selected brace elements are registered
+too, so custom BRBs / diagonal I-section braces resolve.
 
 ### Analysis types and their treatment of braces
 
@@ -277,12 +291,12 @@ Nonlinearity is reserved for the pushover rebuild.
       run_static_analysis()
       run_response_spectrum_analysis()
 4.  Pushover (automatic rebuild with fibre sections + brace trusses):
-      cfg["brace_truss"] = True      ← brace sections → Truss + Hysteretic
+      cfg["brace_truss"] = True      ← brace-role sections → Truss + Hysteretic
       run_pushover_analysis(gravity_patterns=..., lateral_load_type='uniform')
       # Optional per-element brace overrides (Approach A subdivision):
       builder.set_brace_selection({"B-101", "B-102"})
       → DispBeamColumn3d + Steel01 fibres for beams/columns
-      → Truss + Hysteretic for brace sections
+      → Truss + Hysteretic for brace-role elements
 ```
 
 ## Standard workflow for RC models
@@ -348,9 +362,10 @@ determines the **modelling choice** in pushover:
 | `column` | beam-column + fibre (P-M), plus `stiffness_factors` / limit-state springs |
 | `beam` | beam-column + fibre (flexure) |
 
-Today the brace set comes from `Selection.from_brace_sections()` plus the
-`brace_selection` / `brace_sections` overrides on the `AnalysisBuilder`.
-Phase 2 would derive it from `frame_design_roles['brace']`, keeping the
+Today the brace set comes from `Selection.from_brace_sections()` gated by
+the geometric role, plus the `brace_selection` / `brace_sections` overrides
+on the `AnalysisBuilder` (see *The brace decision* above).  Phase 2 would
+derive it from a first-class `frame_design_roles['brace']`, keeping the
 `brace_selection` per-element override as a back-compat explicit override.
 The Approach A/B mechanics (subdivision + imperfection, or truss +
 Hysteretic) stay unchanged — only *how the brace set is decided* changes.

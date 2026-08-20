@@ -74,7 +74,7 @@ for automated cross-referencing.
 
 - [RC Shear-Failure Modelling (MCFT Capacity + Nonlinear Shear Backbone)](shear_failure_modelling.md) — ✅ Complete
   > Two-layer RC shear-failure modelling: a simplified-MCFT member shear-capacity model and mode-of-failure reporter (ASCE 41 force-controlled check), plus a nonlinear shear backbone (SectionAggregator) for reproducing shear-critical frame failures. Validated against the Duong et al. (2007) frame.
-  Tags: `validation`, `shear`, `mcf`, `capacity`, `backbone`, `duong`, `force-controlled`, `reporter`
+  Tags: `validation`, `shear`, `mcft`, `capacity`, `backbone`, `duong`, `force-controlled`, `reporter`
   Related: [Vecchio & Emara (1992) RC-Frame Pushover Benchmark](vecchio_emara_benchmark.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Deprecation Removal Plan](deprecation_plan.md)
 
 - [Storey-level Response Methodology](storey_response.md) — ✅ Complete
@@ -294,7 +294,7 @@ Tags across all documentation files:
 - **`macos`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`manager`** — [analysis.md](analysis.md)
 - **`mander`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
-- **`mcf`** — [shear_failure_modelling.md](shear_failure_modelling.md)
+- **`mcft`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`mesh-model`** — [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`meshing`** — [constraint_detection.md](constraint_detection.md), [element_splitting.md](element_splitting.md), [shell_support.md](shell_support.md)
 - **`migration`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md)
