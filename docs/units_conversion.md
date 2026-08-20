@@ -97,7 +97,8 @@ multipliers, parametric positions, restraint flags — are left untouched.
 
 5. **Run** the pushover / transient (drift-based failure triggers are
    dimensionless, so the published 2.1 % / 5.2 % drift sequence reproduces
-   exactly as validated in ``local/elwood_prototype.py``).
+   exactly as validated in ``tests/test_elwood_limit_state.py``
+   (``test_shear_drift_reproduces_prototype_failure``)).
 
 6. **Report back in kN·m·s**: multiply displacements (in) by 0.0254,
    forces (kip) by 4.4482 kN/kip, moments (kip·in) by 0.11298 kN·m/kip·in,
