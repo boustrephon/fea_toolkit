@@ -282,7 +282,13 @@ def convert_mesh_units(
 
     Raises:
         ValueError: If ``target_units`` lacks a length or force unit.
-        UserWarning: If unsupported (non-converted) data is present.
+
+    Warns:
+        UserWarning: If unsupported (non-converted) data is present —
+            ``nd_materials`` (FSAM nD materials) and ``layered_shell_sections``
+            / ``area_element_properties.layer_stack`` layers are not fully
+            rescaled and may be wrong when the target units differ from the
+            source.
     """
     if not target_units.get("L") or not target_units.get("F"):
         raise ValueError(
