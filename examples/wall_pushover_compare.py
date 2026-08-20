@@ -76,12 +76,13 @@ Usage::
     python examples/wall_pushover_compare.py --no-plot
     python examples/wall_pushover_compare.py --tcl --py
 
-See also ``docs/mvlem_wall_analysis.md`` §8 (results and interpretation),
+See also ``docs/mvlem_wall_analysis.md`` §7.1 (results and interpretation),
 ``tests/test_wall_pushover.py`` (integration tests for the paths), and
 ``local/probe_fiber_beam_wall.py`` (the fiber probe this example builds on).
 """
 
 import argparse
+import contextlib
 import sys
 from pathlib import Path
 
@@ -110,15 +111,15 @@ from fea_toolkit.opensees.preprocessor import Preprocessor
 OUT_DIR = Path(__file__).parent / "output"
 
 # ── Geometry / loads ─────────────────────────────────────────────────────────
-W, TW = 4.0, 0.3          # wall width (m), thickness (m)
+W, TW = 4.0, 0.3  # wall width (m), thickness (m)
 HEIGHTS = [2.0, 4.0, 8.0]  # H/W = 0.5, 1.0, 2.0
-FC = 30.0e3               # kN/m² (30 MPa)
-AXIAL_FACTOR = 0.20       # P = 20 % fc*Ag
-P_AXIAL = AXIAL_FACTOR * FC * W * TW   # 7200 kN (constant across heights)
-REF_LATERAL = 100.0       # kN — reference shear for stiffness interpolation
-U_MAX = 0.20              # m — displacement-controlled push target
-N_PUSH = 100              # push steps (du = 0.002 m)
-SHELL_SUBDIVIDE = 4       # 4x4 structured sub-division for the layered path
+FC = 30.0e3  # kN/m² (30 MPa)
+AXIAL_FACTOR = 0.20  # P = 20 % fc*Ag
+P_AXIAL = AXIAL_FACTOR * FC * W * TW  # 7200 kN (constant across heights)
+REF_LATERAL = 100.0  # kN — reference shear for stiffness interpolation
+U_MAX = 0.20  # m — displacement-controlled push target
+N_PUSH = 100  # push steps (du = 0.002 m)
+SHELL_SUBDIVIDE = 4  # 4x4 structured sub-division for the layered path
 
 # Fiber beam-column mesh refinement swept separately (user-selected):
 # number of concrete fibres across the width (8 / 16).
@@ -331,16 +332,8 @@ def _top_base_tags(mesh_model) -> tuple[list[int], list[int]]:
     """Return (top-most node tags, fully-fixed base node tags)."""
     top_z = max(nd.z for nd in mesh_model.nodes.values())
     base_z = min(nd.z for nd in mesh_model.nodes.values())
-    top_tags = [
-        nd.node_tag
-        for nid, nd in mesh_model.nodes.items()
-        if abs(nd.z - top_z) < 1e-9
-    ]
-    base_tags = [
-        nd.node_tag
-        for nid, nd in mesh_model.nodes.items()
-        if abs(nd.z - base_z) < 1e-9
-    ]
+    top_tags = [nd.node_tag for nid, nd in mesh_model.nodes.items() if abs(nd.z - top_z) < 1e-9]
+    base_tags = [nd.node_tag for nid, nd in mesh_model.nodes.items() if abs(nd.z - base_z) < 1e-9]
     return top_tags, base_tags
 
 
@@ -438,10 +431,8 @@ def run_mvlem_pushover(config, height, axial_kN=P_AXIAL, max_disp=U_MAX, num_ste
         ops.load(int(t), 0.0, 0.0, -axial_kN / n_top, 0.0, 0.0, 0.0)
     builder.run_static_analysis(extract_reactions=True)
     uz_g = None
-    try:
+    with contextlib.suppress(Exception):
         uz_g = float(ops.nodeDisp(int(control_tag), 3))  # type: ignore[arg-type]
-    except Exception:
-        pass
 
     ops.wipeAnalysis()
     ops.loadConst("-time", 0.0)
@@ -496,8 +487,12 @@ def _make_materials():
     # 7200 kN pre-load.  Concrete01 fixes E0 = 2*fpc/epsc0 = 30e6 kPa exactly,
     # giving the intended Euler (flexure-only) reference stiffness.
     ops.uniaxialMaterial(
-        "Concrete01", 1,
-        -30.0e3, -0.002, -3.0e3, -0.02,
+        "Concrete01",
+        1,
+        -30.0e3,
+        -0.002,
+        -3.0e3,
+        -0.02,
     )
     ops.uniaxialMaterial("Steel02", 2, 420.0e3, 200.0e6, 0.01)
 
@@ -610,7 +605,7 @@ def run_fiber_pushover(height, n_strips, axial_kN=500.0, ref_force=REF_LATERAL, 
     Returns ``(results, master, base_nodes)`` with the usual
     ``control_disp`` / ``base_shear`` / ``status`` keys.
     """
-    base_nodes, top_nodes, master = _build_fiber_wall(height, n_strips)
+    base_nodes, _top_nodes, master = _build_fiber_wall(height, n_strips)
 
     # ── Gravity ──
     ops.timeSeries("Linear", 1)
@@ -669,7 +664,7 @@ def run_fiber_pushover(height, n_strips, axial_kN=500.0, ref_force=REF_LATERAL, 
     n = len(ctrl)
     results = {
         "control_disp": np.array(ctrl, dtype=float),
-        "base_shear": np.array([ref_force * i / (steps - 1) for i in range(n)], dtype=float),
+        "base_shear": np.array([ref_force * i / steps for i in range(n)], dtype=float),
         "status": np.array(status, dtype=int),
         "control_node": master,
         "dof": 1,
@@ -733,7 +728,7 @@ def _report_case(label: str, height: float, res: dict) -> None:
 def _print_height_table(height: float, per_h, meta: dict) -> None:
     """Print a per-height metric table across all approaches."""
     rows = [
-        ("Steps (of %d)" % N_PUSH, lambda m: f"{m['steps_ok']:3d}"),
+        (f"Steps (of {N_PUSH})", lambda m: f"{m['steps_ok']:3d}"),
         (
             "ux @ 100 kN (m)",
             lambda m: f"{m['ux_100']:.6f}" if m["ux_100"] is not None else "   n/a   ",
@@ -775,9 +770,7 @@ def shear_share(meta: dict) -> None:
     if not has_fiber:
         return
     print("── Shear contribution vs Fiber N=16 (flexure-only) @ V=100 kN ──")
-    print(
-        f"  {'H (m)':>6s}  {'H/W':>5s}  {'MVLEM_3D':>12s}  {'Layered':>12s}  {'Fiber N=8':>12s}"
-    )
+    print(f"  {'H (m)':>6s}  {'H/W':>5s}  {'MVLEM_3D':>12s}  {'Layered':>12s}  {'Fiber N=8':>12s}")
     for h in HEIGHTS:
         u_m = meta[f"MVLEM_3D@{h:g}"]["ux_100"]
         u_l = meta[f"{lay_lbl}@{h:g}"]["ux_100"]
@@ -785,11 +778,13 @@ def shear_share(meta: dict) -> None:
         u_f16 = meta[f"Fiber N=16@{h:g}"]["ux_100"]
         sh_m = (u_m - u_f16) / u_m * 100.0 if (u_m and u_f16 and abs(u_m) > 1e-12) else float("nan")
         sh_l = (u_l - u_f16) / u_l * 100.0 if (u_l and u_f16 and abs(u_l) > 1e-12) else float("nan")
-        sh_g = (u_f8 - u_f16) / u_f8 * 100.0 if (u_f8 and u_f16 and abs(u_f8) > 1e-12) else float("nan")
-        print(
-            f"  {h:6.1f}  {h / W:5.2f}  {sh_m:11.1f}%  {sh_l:11.1f}%  {sh_g:11.1f}%"
+        sh_g = (
+            (u_f8 - u_f16) / u_f8 * 100.0
+            if (u_f8 and u_f16 and abs(u_f8) > 1e-12)
+            else float("nan")
         )
-    print("  (positive share = extra drift vs the flexure-only reference;")
+        print(f"  {h:6.1f}  {h / W:5.2f}  {sh_m:11.1f}%  {sh_l:11.1f}%  {sh_g:11.1f}%")
+    print("  (positive share = extra drift vs the flexure-only reference)")
 
 
 # ── Plotting ────────────────────────────────────────────────────────────────
@@ -811,9 +806,7 @@ def plot_height_overlay(cases: dict, out_dir: Path) -> None:
 
     heights = list(cases.keys())
     n = len(heights)
-    fig, axes = plt.subplots(
-        1, n, figsize=(6.2 * n, 5.2), sharey=True, squeeze=False
-    )
+    fig, axes = plt.subplots(1, n, figsize=(6.2 * n, 5.2), sharey=True, squeeze=False)
     for ax, h in zip(axes[0], heights):
         for label, res in cases[h]:
             ax.plot(res["control_disp"], res["base_shear"], label=label, lw=2)
@@ -832,8 +825,7 @@ def plot_height_overlay(cases: dict, out_dir: Path) -> None:
         ax.legend(loc="best", fontsize=8)
     axes[0][0].set_ylabel("Base shear (kN)")
     fig.suptitle(
-        f"RC wall pushover — 3 approaches × 3 heights "
-        f"(constant axial P = {P_AXIAL:.0f} kN)",
+        f"RC wall pushover — 3 approaches × 3 heights (constant axial P = {P_AXIAL:.0f} kN)",
         y=0.98,
         fontsize=12,
     )
@@ -930,8 +922,7 @@ def main() -> None:
     print(f"OpenSees Version: {ops_version()}")
     print(f"Wall: {W:g} m wide × {TW:g} m thick, units kN/m/C")
     print(f"Gravity: constant axial P = {P_AXIAL:.0f} kN (20 % fc·Ag) at top")
-    print(f"Lateral: displacement-controlled to {U_MAX:g} m "
-          f"({N_PUSH} steps, KrylovNewton)")
+    print(f"Lateral: displacement-controlled to {U_MAX:g} m ({N_PUSH} steps, KrylovNewton)")
     print(f"LayeredShell: {SHELL_SUBDIVIDE}×{SHELL_SUBDIVIDE} sub-division")
     print(f"Fiber beam-column: fibres across width = {N_FIB_X}\n")
 
@@ -1001,5 +992,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-
     main()

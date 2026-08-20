@@ -74,7 +74,7 @@ convert to model units:
 
     ConcreteS:  fc  = 30e6   (30 MPa),  ft  = 2.5e6   (tension)
                 E   = 30e9   (30 GPa),  nu  = 0.2
-    J2PlateFibre: Es = 200e9,  fy = 420e6,  hiso = 1.0e-2
+    J2PlateFibre: E = 200e9,  nu = 0.3,  fy = 420e6,  Hiso = 1.0e-2
 
 To promote to a working example
 -------------------------------
@@ -178,12 +178,13 @@ def nonlinear_shell_config() -> dict:
                 "fc": 30.0e6,
                 "ft": 2.5e6,
             },
-            # Smeared rebar (J2-plasticity plate fibre): Es, fy, hiso — SI Pa.
+            # Smeared rebar (J2-plasticity plate fibre): E, nu, fy, Hiso — SI Pa.
             "rebar_plate": {
                 "material_type": "J2PlateFibre",
-                "Es": 200.0e9,
+                "E": 200.0e9,
+                "nu": 0.3,
                 "fy": 420.0e6,
-                "hiso": 1.0e-2,
+                "Hiso": 1.0e-2,
             },
         },
         "shell_layers": {
@@ -222,10 +223,7 @@ def main() -> None:
     print("  - local/CLP_BSDG_Latest_Models/Admin_Building/admin_pushover_v4.py")
     print("  - examples/wall_pushover_compare.py (runnable comparison)")
     print("  - examples/wall_pushover_fsam_layered.py (FSAM-layered failure)\n")
-    print(
-        f"Indicative config (module-level, named "
-        f"{nonlinear_shell_config.__name__}()):"
-    )
+    print(f"Indicative config (module-level, named {nonlinear_shell_config.__name__}()):")
     import pprint
 
     pprint.pprint(nonlinear_shell_config(), width=100, sort_dicts=False)
