@@ -270,12 +270,16 @@ class TestScaleMaterialDict:
         assert result["fy"] == pytest.approx(500.0e3)
 
     def test_unknown_keys_pass_through(self):
-        """Keys not in _STRESS_KEYS are not scaled."""
+        """Keys not in _STRESS_KEYS are not scaled (mass density is)."""
         mat = {"E": 200.0e9, "E_mod": 200.0e9, "rho": 7850.0, "notes": "test"}
         result = utils.scale_material_dict(mat, {"F": "kN", "L": "m"})
         assert result["E"] == pytest.approx(200.0e6)  # stress key → scaled
         assert result["E_mod"] == pytest.approx(200.0e9)  # NOT in _STRESS_KEYS → unchanged
-        assert result["rho"] == pytest.approx(7850.0)  # not stress → unchanged
+        # Mass density is authored in SI (kg/m³) and rescaled to model
+        # mass-density units (t/m³ for kN-m): 7850 kg/m³ → 7.85 t/m³.
+        assert result["rho"] == pytest.approx(
+            7850.0 * utils.mass_density_scale_factor({"F": "kN", "L": "m"})
+        )
         assert result["notes"] == "test"  # string → unchanged
 
     def test_empty_dict(self):

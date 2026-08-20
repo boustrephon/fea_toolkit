@@ -221,13 +221,25 @@ def _scale_material(mat: Any, m: dict[str, float]) -> None:
 def _scale_loads(mesh: MeshModel, m: dict[str, float]) -> None:
     """Rescale the load lists in place."""
     for ld in mesh.frame_dist_loads:
-        ld.val_a *= m["force_per_length"]
-        ld.val_b *= m["force_per_length"]
+        # 'Moment' distributed loads are moment-per-length (a force), so
+        # they rescale by the force factor; force loads by force/length.
+        _val_scale = (
+            m["force"]
+            if str(getattr(ld, "load_type", "")).lower() == "moment"
+            else m["force_per_length"]
+        )
+        ld.val_a *= _val_scale
+        ld.val_b *= _val_scale
         ld.dist_a *= m["length"]
         ld.dist_b *= m["length"]
     for ld in mesh.edge_loads_from_areas:  # list[FrameDistributedLoad]
-        ld.val_a *= m["force_per_length"]
-        ld.val_b *= m["force_per_length"]
+        _val_scale = (
+            m["force"]
+            if str(getattr(ld, "load_type", "")).lower() == "moment"
+            else m["force_per_length"]
+        )
+        ld.val_a *= _val_scale
+        ld.val_b *= _val_scale
         ld.dist_a *= m["length"]
         ld.dist_b *= m["length"]
     for ld in mesh.joint_loads:
@@ -322,6 +334,16 @@ def convert_mesh_units(
                 for k, v in props.hinge_params.items()
             }
 
+    # ── Area element properties (shell section overrides) ────────
+    for props in out.area_element_properties.values():
+        _thick = getattr(props, "thickness", None)
+        if isinstance(_thick, (int, float)):
+            props.thickness = _thick * m["length"]
+        for _layer in getattr(props, "layer_stack", None) or []:
+            _lt = getattr(_layer, "thickness", None)
+            if isinstance(_lt, (int, float)):
+                _layer.thickness = _lt * m["length"]
+
     # ── Unsupported surfaces ─────────────────────────────────────
     if out.nd_materials:
         warnings.warn(
@@ -331,10 +353,14 @@ def convert_mesh_units(
             UserWarning,
             stacklevel=2,
         )
-    if out.layered_shell_sections:
+    if out.layered_shell_sections or any(
+        getattr(p, "layer_stack", None) for p in out.area_element_properties.values()
+    ):
         warnings.warn(
-            "convert_mesh_units: 'layered_shell_sections' are not rescaled — "
-            "their layer thicknesses/strengths need a dedicated pass.",
+            "convert_mesh_units: 'layered_shell_sections' / "
+            "'area_element_properties.layer_stack' layers are not fully "
+            "rescaled — their layer material strengths need a dedicated "
+            "pass (layer thicknesses are length-scaled).",
             UserWarning,
             stacklevel=2,
         )
