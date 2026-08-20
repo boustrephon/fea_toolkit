@@ -655,6 +655,61 @@ class TestPropagateEdgeRestraints:
 
         assert "interior" not in restraints
 
+    def test_edge_node_skipped_when_and_is_all_zero(self):
+        """Edge AND with no surviving DOF → node not stored (matches interior)."""
+        node_grid = [
+            ["c00", "e_bot", "c10"],
+            ["e_left", "interior", "e_right"],
+            ["c01", "e_top", "c11"],
+        ]
+        # Bottom corners have disjoint DOFs → AND is all zeros.
+        restraints = {
+            "c00": Restraint(dofs=[1, 0, 0, 0, 0, 0]),
+            "c10": Restraint(dofs=[0, 1, 0, 0, 0, 0]),
+        }
+        _propagate_edge_restraints(node_grid, 2, 2, restraints)
+
+        assert "e_bot" not in restraints
+        assert "interior" not in restraints
+
+    def test_one_row_mesh_propagates_edge_nodes(self):
+        """n_v=1, n_u>=2: intermediate bottom/top edge nodes are still
+        propagated (the early return requires BOTH directions to lack
+        intermediate edge nodes)."""
+        node_grid = [
+            ["c00", "e_bot", "c10"],
+            ["c01", "e_top", "c11"],
+        ]
+        fixed = [1, 1, 1, 1, 1, 1]
+        restraints = {
+            "c00": Restraint(dofs=list(fixed)),
+            "c10": Restraint(dofs=list(fixed)),
+            "c01": Restraint(dofs=list(fixed)),
+            "c11": Restraint(dofs=list(fixed)),
+        }
+        _propagate_edge_restraints(node_grid, 2, 1, restraints)
+
+        assert restraints["e_bot"].dofs == fixed
+        assert restraints["e_top"].dofs == fixed
+
+    def test_single_cell_mesh_returns_early(self):
+        """n_u == n_v == 1: no intermediate edge nodes in either direction
+        → nothing is propagated beyond the corners."""
+        node_grid = [
+            ["c00", "c10"],
+            ["c01", "c11"],
+        ]
+        fixed = [1, 1, 1, 1, 1, 1]
+        restraints = {
+            "c00": Restraint(dofs=list(fixed)),
+            "c10": Restraint(dofs=list(fixed)),
+            "c01": Restraint(dofs=list(fixed)),
+            "c11": Restraint(dofs=list(fixed)),
+        }
+        _propagate_edge_restraints(node_grid, 1, 1, restraints)
+
+        assert set(restraints) == {"c00", "c10", "c01", "c11"}
+
     def test_interior_restraints_are_independent_instances(self):
         """Each interior node gets its own Restraint + dofs list (no shared mutation)."""
         # 3×3 grid → 2×2 interior nodes; all four corners fully fixed.

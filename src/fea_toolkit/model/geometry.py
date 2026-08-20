@@ -1828,7 +1828,8 @@ def _propagate_edge_restraints(
     For each intermediate node on the four edges of an ``n_u×n_v`` mesh
     grid, looks up the two corner nodes at the ends of that edge in
     *restraints*.  If both corners are restrained, the intermediate node
-    receives the bitwise AND of the two ``dofs`` lists.  Interior nodes
+    receives the bitwise AND of the two ``dofs`` lists, provided at least
+    one DOF survives the AND (an all-zero result is not stored).  Interior nodes
     receive any DOF bit that is common to **all four** corners (the
     bitwise AND across the four corner ``dofs`` lists).  Corners are
     untouched.  Nodes that already carry an explicit restraint (for
@@ -1840,13 +1841,20 @@ def _propagate_edge_restraints(
     ``dofs=[1,1,1,1,0,0]`` — a node created between them receives
     ``[1,0,1,0,0,0]``.
 
+    The function returns immediately when there are no restraints to
+    propagate or when neither mesh direction has intermediate edge nodes
+    (``n_u < 2`` **and** ``n_v < 2``).  A one-row mesh (``n_u >= 2``,
+    ``n_v == 1``) is still processed: the intermediate nodes of its
+    bottom and top edges inherit the corner restraints, while its
+    left/right edges have no intermediate nodes.
+
     Args:
         node_grid: ``(n_v+1)×(n_u+1)`` grid of node IDs (str or None).
         n_u: Subdivision count in the u-direction (grid columns = n_u+1).
         n_v: Subdivision count in the v-direction (grid rows = n_v+1).
         restraints: Model restraints dict, modified in place.
     """
-    if not restraints or n_v < 2:
+    if not restraints or (n_u < 2 and n_v < 2):
         return
 
     def _and_dofs(r1: Restraint, r2: Restraint) -> list[int]:
@@ -1864,7 +1872,12 @@ def _propagate_edge_restraints(
         r1 = restraints.get(c1_id)
         r2 = restraints.get(c2_id)
         if r1 is not None and r2 is not None:
-            restraints[nid] = Restraint(dofs=_and_dofs(r1, r2))
+            dofs = _and_dofs(r1, r2)
+            # Skip all-zero intersections — a Restraint with no fixed DOF is
+            # a no-op that would otherwise clutter later propagation and the
+            # Tcl/OpenSees fix commands.  Matches the interior block below.
+            if any(dofs):
+                restraints[nid] = Restraint(dofs=dofs)
 
     c_bl = node_grid[0][0]  # bottom-left  (u=0, v=0)
     c_br = node_grid[0][n_u]  # bottom-right (u=n_u, v=0)
