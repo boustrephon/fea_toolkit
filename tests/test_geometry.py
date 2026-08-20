@@ -655,6 +655,37 @@ class TestPropagateEdgeRestraints:
 
         assert "interior" not in restraints
 
+    def test_interior_restraints_are_independent_instances(self):
+        """Each interior node gets its own Restraint + dofs list (no shared mutation)."""
+        # 3×3 grid → 2×2 interior nodes; all four corners fully fixed.
+        node_grid = [
+            ["c00", "e_bot0", "e_bot1", "c10"],
+            ["e_left0", "i00", "i01", "e_right0"],
+            ["e_left1", "i10", "i11", "e_right1"],
+            ["c01", "e_top0", "e_top1", "c11"],
+        ]
+        fixed = [1, 1, 1, 1, 1, 1]
+        restraints = {
+            "c00": Restraint(dofs=list(fixed)),
+            "c10": Restraint(dofs=list(fixed)),
+            "c11": Restraint(dofs=list(fixed)),
+            "c01": Restraint(dofs=list(fixed)),
+        }
+        _propagate_edge_restraints(node_grid, 3, 3, restraints)
+
+        interiors = ["i00", "i01", "i10", "i11"]
+        for nid in interiors:
+            assert restraints[nid].dofs == fixed
+
+        # Distinct instances AND distinct dofs lists per node.
+        assert len({id(restraints[nid]) for nid in interiors}) == len(interiors)
+        assert len({id(restraints[nid].dofs) for nid in interiors}) == len(interiors)
+
+        # Mutating one node's dofs must not leak into its neighbours.
+        restraints["i00"].dofs[0] = 0
+        for nid in interiors[1:]:
+            assert restraints[nid].dofs[0] == 1
+
     def test_no_propagation_when_restraints_empty(self):
         """Empty restraints dict → no keys added."""
         node_grid = [
@@ -715,3 +746,55 @@ class TestPropagateEdgeRestraints:
 
         # Interior node (j=1, i=1) untouched.
         assert "A1_sub_1_1" not in restraints
+
+    def test_subdivide_area_mesh_preserves_existing_restraint_on_dedup(self):
+        """Dedup reuse keeps an existing edge-midpoint node's own restraint.
+
+        Node 5 sits at (0, 2, 0) — the midpoint of A1's base edge (1→2) —
+        and is a corner of the adjacent quad A2, so it is registered in the
+        coordinate dedup table.  ``subdivide_area_mesh`` must reuse it for
+        the base-edge midpoint instead of creating ``A1_sub_0_1``, and must
+        NOT overwrite its explicit user restraint with the bitwise-AND of
+        the two corner restraints (full fixity).
+        """
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+            "2": Node(node_id="2", node_tag=2, x=0.0, y=4.0, z=0.0),
+            "3": Node(node_id="3", node_tag=3, x=0.0, y=4.0, z=3.0),
+            "4": Node(node_id="4", node_tag=4, x=0.0, y=0.0, z=3.0),
+            # Existing node at A1's base-edge midpoint — also a corner of A2.
+            "5": Node(node_id="5", node_tag=5, x=0.0, y=2.0, z=0.0),
+            "6": Node(node_id="6", node_tag=6, x=2.0, y=2.0, z=0.0),
+            "7": Node(node_id="7", node_tag=7, x=2.0, y=3.0, z=0.0),
+            "8": Node(node_id="8", node_tag=8, x=0.0, y=3.0, z=0.0),
+        }
+        areas = {
+            "A1": AreaElement(
+                area_id="A1", area_tag=100, node_ids=["1", "2", "3", "4"], thickness=0.3
+            ),
+            "A2": AreaElement(
+                area_id="A2", area_tag=200, node_ids=["5", "6", "7", "8"], thickness=0.3
+            ),
+        }
+        restraints = {
+            "1": Restraint(dofs=[1, 1, 1, 1, 1, 1]),
+            "2": Restraint(dofs=[1, 1, 1, 1, 1, 1]),
+            # Explicit user restraint on the existing midpoint node — must
+            # survive subdivision (AND of corners 1 & 2 would be full fixity).
+            "5": Restraint(dofs=[1, 1, 0, 0, 0, 0]),
+        }
+        _, _, new_nodes, _ = subdivide_area_mesh(
+            areas,
+            {"A1": "WALL_SEC"},
+            dict(nodes),
+            n=2,
+            next_tag=1000,
+            selection={"A1"},
+            restraints=restraints,
+        )
+
+        # Dedup path: the existing node 5 is reused, so no A1_sub_0_1 is created.
+        assert "A1_sub_0_1" not in new_nodes
+        assert new_nodes["5"] is not None
+        # The reused node's original restraint remains unchanged.
+        assert restraints["5"].dofs == [1, 1, 0, 0, 0, 0]
