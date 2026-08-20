@@ -33,8 +33,11 @@ Coverage
   area uniform loads (F/L2), joint loads (forces F, moments F.L).  Gravity
   load multipliers are dimensionless and unchanged.
 * Mesh metadata — ``base_z``, ``diaphragm_levels``,
-  ``diaphragm_z_tolerance``, diaphragm-component elevations, hinge-parameter
-  values (treated as lengths).
+  ``diaphragm_z_tolerance``, diaphragm-component elevations, and
+  ``hinge_params`` entries by dimension: hinge-length keys (``lpI``/``lpJ``)
+  scale by L, hinge-moment keys (``My``/``Mc``/``Mp``, ``_pos``/``_neg``
+  variants) by F·L, and rotation/ratio/other keys are unit-independent and
+  preserved as-is.
 
 Out of scope (left as-is, a ``UserWarning`` is emitted when present)
 --------------------------------------------------------------------
@@ -100,6 +103,30 @@ _STRESS_FIELDS: frozenset[str] = frozenset(
         "fy",
     }
 )
+# ── Hinge length-named keys (x L) ──────────────────────────────────
+# ``FrameElementProperties.hinge_params`` entries that carry a physical
+# length (plastic hinge lengths at the I/J ends).
+_HINGE_LENGTH_KEYS: frozenset[str] = frozenset(
+    {
+        "lpI",
+        "lpJ",
+    }
+)
+# ── Hinge moment-named keys (x F·L) ────────────────────────────────
+# Yield/capping/plastic-moment backbone values, expressed in the model's
+# force·length unit system (e.g. N·m for an N-m model).  Directional
+# ModIMK-style variants (``_pos``/``_neg``) are included.
+_HINGE_MOMENT_KEYS: frozenset[str] = frozenset(
+    {
+        "My",
+        "Mc",
+        "My_pos",
+        "My_neg",
+        "Mc_pos",
+        "Mc_neg",
+        "Mp",
+    }
+)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -146,6 +173,21 @@ def _scale_named_fields(obj: Any, fields_to_factors: dict[str, float]) -> None:
         value = getattr(obj, f.name)
         if isinstance(value, (int, float)):
             setattr(obj, f.name, value * fields_to_factors[f.name])
+
+
+def _hinge_param_multiplier(key: str, m: dict[str, float]) -> float:
+    """Unit multiplier for a single ``hinge_params`` entry (1.0 = unchanged).
+
+    Length keys (``lpI``/``lpJ``) rescale by ``m["length"]``; moment keys
+    (``My``/``Mc``/``Mp`` and ``_pos``/``_neg`` variants) rescale by
+    ``m["force_times_length"]``; every other key (plastic rotations,
+    ratios, …) is unit-independent and returns ``1.0``.
+    """
+    if key in _HINGE_LENGTH_KEYS:
+        return m["length"]
+    if key in _HINGE_MOMENT_KEYS:
+        return m["force_times_length"]
+    return 1.0
 
 
 def _scale_section(sec: Any, m: dict[str, float]) -> None:
@@ -274,7 +316,7 @@ def convert_mesh_units(
     for props in out.frame_element_properties.values():
         if props.hinge_params:
             props.hinge_params = {
-                k: v * m["length"] if isinstance(v, (int, float)) else v
+                k: v * _hinge_param_multiplier(k, m) if isinstance(v, (int, float)) else v
                 for k, v in props.hinge_params.items()
             }
 
