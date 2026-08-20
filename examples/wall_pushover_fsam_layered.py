@@ -115,6 +115,9 @@ Usage::
     # Export the failing model to Tcl / OpenSeesPy for offline inspection
     python examples/wall_pushover_fsam_layered.py --tcl --py
 
+    # Treat convergence as the expected outcome (e.g. after a fix attempt)
+    python examples/wall_pushover_fsam_layered.py --no-expect-failure
+
 See also:
 
 - ``docs/mvlem_wall_analysis.md`` — element signatures, §4.3 FSAM
@@ -157,9 +160,6 @@ OUT_DIR = Path(__file__).parent / "output"
 
 # Mesh refinement for the layered-shell path (4 × 4 = 16 quads).
 SHELL_SUBDIVIDE = 4
-
-# This is an extracted, documented failure — expect zero converged steps.
-EXPECTED_FAILURE = True
 
 
 # ── Model data ──────────────────────────────────────────────────────────────
@@ -353,22 +353,28 @@ def run_wall_pushover(config: dict, lateral: float, num_steps: int):
     # Ramp the wall self-weight via the builder's NaN-proof static solver
     # chain, then lock gravity with ``loadConst`` before the lateral push.
     builder.create_loads(pattern_scales={"DEAD": 1.0})
-    grav_results = builder.run_static_analysis(extract_reactions=True)
+    try:
+        grav_results = builder.run_static_analysis(extract_reactions=True)
+    except RuntimeError as exc:
+        # FSAM-in-LayeredShell is a documented near-singular path — the
+        # gravity phase cannot converge.  Mirror the handling in
+        # ``pushover.py`` (catch the ``RuntimeError`` and continue) so the
+        # lateral loop still runs, fails, and leaves ``results`` empty for
+        # the expected-failure summary below.
+        print(f"    [note] gravity phase did not converge: {exc}")
+        grav_results = {}
     ops.loadConst("-time", 0.0)
-    _fz = sum(
-        float(r.get("fz", 0.0)) for r in grav_results.get("reactions", {}).values()
-    )
-    print(f"    Gravity converged — vertical reaction = {_fz:.1f} kN")
+    _fz = sum(float(r.get("fz", 0.0)) for r in grav_results.get("reactions", {}).values())
+    if grav_results:
+        print(f"    Gravity converged — vertical reaction = {_fz:.1f} kN")
+    else:
+        print("    Gravity phase did not converge (documented FSAM near-singularity).")
 
     # ── Identify top / base edges from the (possibly sub-divided) mesh ──
     top_z = max(nd.z for nd in mm.nodes.values())
     base_z = min(nd.z for nd in mm.nodes.values())
-    top_node_ids = sorted(
-        nid for nid, nd in mm.nodes.items() if abs(nd.z - top_z) < 1e-9
-    )
-    base_node_ids = sorted(
-        nid for nid, nd in mm.nodes.items() if abs(nd.z - base_z) < 1e-9
-    )
+    top_node_ids = sorted(nid for nid, nd in mm.nodes.items() if abs(nd.z - top_z) < 1e-9)
+    base_node_ids = sorted(nid for nid, nd in mm.nodes.items() if abs(nd.z - base_z) < 1e-9)
     control_id = "3" if "3" in mm.nodes else top_node_ids[0]
     control_tag = mm.nodes[control_id].node_tag
 
@@ -416,8 +422,7 @@ def run_wall_pushover(config: dict, lateral: float, num_steps: int):
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "RC wall FSAM-layered pushover — extracted, documented, "
-            "non-converging reproduction."
+            "RC wall FSAM-layered pushover — extracted, documented, non-converging reproduction."
         ),
     )
     parser.add_argument(
@@ -442,6 +447,17 @@ def main() -> None:
         default=200,
         help="Number of load-control steps (default: 200).",
     )
+    parser.add_argument(
+        "--expect-failure",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Treat zero converged steps as the expected outcome (default). "
+            "Pass --no-expect-failure to treat convergence as expected — "
+            "e.g. when checking whether the FSAM-in-LayeredShell path has "
+            "been fixed."
+        ),
+    )
     args = parser.parse_args()
 
     out_dir = OUT_DIR
@@ -451,7 +467,10 @@ def main() -> None:
     print(f"OpenSees Version: {ops_version()}")
     print("Wall: 4.0 m × 3.0 m × 0.3 m, units kN/m/C")
     print("⚠  EXPERIMENTAL: FSAM-in-LayeredShell is NOT validated.")
-    print("   Expected outcome: no converged steps (documented failure).")
+    if args.expect_failure:
+        print("   Expected outcome: no converged steps (documented failure).")
+    else:
+        print("   Expected outcome: converged steps (checking for a fix).")
     print(f"Lateral push: {args.lateral:.1f} kN in +X at top edge\n")
 
     cfg = layered_shell_fsam_config()
@@ -465,12 +484,12 @@ def main() -> None:
         print(f"  Steps completed : {n_steps}")
         print(f"  Peak base shear : {peak:.1f} kN")
         print(f"  Top displacement: {drift:.6f} m")
-        if EXPECTED_FAILURE:
+        if args.expect_failure:
             print("\n  ⚠  Unexpected: steps DID converge (this was supposed to fail).")
             print("     If you are reading this, the FSAM-in-LayeredShell path")
             print("     may have been fixed — see the module docstring for the")
             print("     investigation summary before promoting it.")
-    elif EXPECTED_FAILURE:
+    elif args.expect_failure:
         print("  [expected] no converged steps — this is the documented failure.")
     else:
         print("  ⚠  Unexpected: no converged steps — this model was expected to run.")
@@ -502,7 +521,12 @@ def main() -> None:
         print(f"  Saved → {out}")
         _real_ops.wipe()
 
-    print("\nDone (documented failure reproduced).")
+    if args.expect_failure:
+        print("\nDone (documented failure reproduced).")
+    elif n_steps:
+        print("\nDone (converged — the documented failure did NOT reproduce).")
+    else:
+        print("\nDone (expected convergence, but none occurred).")
 
 
 if __name__ == "__main__":

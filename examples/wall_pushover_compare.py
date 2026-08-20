@@ -1,9 +1,12 @@
 #!/usr/bin/env python
-"""RC wall pushover: three modelling approaches compared over three heights.
+"""RC wall pushover: two modelling approaches compared over three heights.
 
-Compares the **converging** nonlinear RC wall discretisations in
-fea_toolkit on the same wall cross-section (4.0 m wide x 0.3 m thick),
-at three aspect ratios, with a unified gravity-then-post-yield protocol.
+The default comparison runs the two pipeline approaches below (MVLEM_3D
+and LayeredShell); the optional ``--fiber`` flag adds the two fiber
+beam-column reference curves (N = 8 and 16).  The **converging**
+nonlinear RC wall discretisations in fea_toolkit are compared on the
+same wall cross-section (4.0 m wide x 0.3 m thick), at three aspect
+ratios, with a unified gravity-then-post-yield protocol.
 
 Approaches (docs/mvlem_wall_analysis.md §7):
 
@@ -65,14 +68,16 @@ Pipeline notes:
 Output (all in ``examples/output/``, gitignored):
 
 * ``wall_pushover_compare.png`` / ``.svg`` — one figure, three subplots
-  (one per height), each overlaying the four capacity curves.
+  (one per height), each overlaying the two default capacity curves
+  (four with ``--fiber``, which adds the two fiber reference curves).
 * ``wall_layered_elastic.tcl`` / ``.py`` and ``wall_mvlem_3d.tcl`` / ``.py``
   — optional Tcl / Python exports for the two pipeline paths
   (``--tcl`` / ``--py``).
 
 Usage::
 
-    python examples/wall_pushover_compare.py          # full comparison
+    python examples/wall_pushover_compare.py          # default (2 approaches)
+    python examples/wall_pushover_compare.py --fiber  # + 2 fiber reference curves
     python examples/wall_pushover_compare.py --no-plot
     python examples/wall_pushover_compare.py --tcl --py
 
@@ -582,7 +587,7 @@ def _build_fiber_wall(height, n_fibers_x):
     return base_nodes, top_nodes, master
 
 
-def run_fiber_pushover(height, n_strips, axial_kN=500.0, ref_force=REF_LATERAL, steps=10):
+def run_fiber_pushover(height, n_fibers_x, axial_kN=500.0, ref_force=REF_LATERAL, steps=10):
     """Fiber beam-column path at ``openseespy`` level — force-controlled.
 
     Gravity: **500 kN** at the diaphragm master — the pre-load validated in
@@ -605,7 +610,7 @@ def run_fiber_pushover(height, n_strips, axial_kN=500.0, ref_force=REF_LATERAL, 
     Returns ``(results, master, base_nodes)`` with the usual
     ``control_disp`` / ``base_shear`` / ``status`` keys.
     """
-    base_nodes, _top_nodes, master = _build_fiber_wall(height, n_strips)
+    base_nodes, _top_nodes, master = _build_fiber_wall(height, n_fibers_x)
 
     # ── Gravity ──
     ops.timeSeries("Linear", 1)
@@ -814,6 +819,7 @@ def plot_height_overlay(cases: dict, out_dir: Path) -> None:
 
     heights = list(cases.keys())
     n = len(heights)
+    n_curves = len(cases[heights[0]]) if heights else 0
     fig, axes = plt.subplots(1, n, figsize=(6.2 * n, 5.2), sharey=True, squeeze=False)
     for ax, h in zip(axes[0], heights):
         for label, res in cases[h]:
@@ -833,7 +839,8 @@ def plot_height_overlay(cases: dict, out_dir: Path) -> None:
         ax.legend(loc="best", fontsize=8)
     axes[0][0].set_ylabel("Base shear (kN)")
     fig.suptitle(
-        f"RC wall pushover — 3 approaches × 3 heights (constant axial P = {P_AXIAL:.0f} kN)",
+        f"RC wall pushover — {n_curves} approaches × {n} heights "
+        f"(constant axial P = {P_AXIAL:.0f} kN)",
         y=0.98,
         fontsize=12,
     )
@@ -893,7 +900,8 @@ def export_py(config: dict, label: str, out_dir: Path, height: float) -> None:
 # ── Main ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="RC wall non-linear pushover: 3 approaches × 3 heights.",
+        description="RC wall non-linear pushover: 2 approaches × 3 heights "
+        "(4 approaches with --fiber).",
     )
     parser.add_argument(
         "--no-plot",
