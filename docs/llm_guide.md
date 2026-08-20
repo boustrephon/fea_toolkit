@@ -2,7 +2,7 @@
 title: "LLM & AI Assistant Guide"
 description: "Canonical goal-to-code mapping, full public API surface by domain, and key technical constraints — structured for language model consumption."
 status: "complete"
-tags: [llm, ai, guide, api-reference, usage]
+tags: [llm, ai, guide, api-reference, usage, environment]
 category: [core-pipeline]
 ---
 # LLM / AI Assistant Guide for fea_toolkit
@@ -355,6 +355,7 @@ subset = sel.filter_model(model)
 | Use `field(default_factory=...)` for mutable defaults in dataclasses | Prevents shared mutable state |
 | Use `from typing import ...` for type annotations | Python 3.9 compatibility |
 | Never add `ndm`/`ndf` dispatch to the main workflow | Analysis is 3D-only (`ndm=3`, `ndf=6`); 2D OpenSees is test-only (`.clinerules` §3.11) |
+| Always catch `RuntimeError` from `AnalysisBuilder.run_static_analysis()` when non-convergence is acceptable | Raises on non-convergence (since commit `ba891f50`); never returns empty dicts on failure — see §7 |
 
 ---
 
@@ -385,6 +386,62 @@ print(ops_version())
 ```python
 # Install optional deps:
 pip install pyvista matplotlib
+```
+
+### Wrong interpreter / environment (LLM tool shells)
+
+Tool shells do **not** inherit an activated venv — ``python3`` may resolve to a
+base/miniforge interpreter rather than the project environment.  For any
+OpenSeesPy-dependent run or validation, use the canonical environment
+explicitly:
+
+```bash
+# The project's dev/validation environment (Python 3.12, openseespy 3.8.0.0).
+# Point at the project venv explicitly — $VIRTUAL_ENV resolves to it once
+# activated; substitute your own venv path otherwise:
+"$VIRTUAL_ENV/bin/python" examples/foo.py
+
+# ...or activate it first:
+source "$VIRTUAL_ENV/bin/activate"
+```
+
+Confirm the interpreter and OpenSeesPy version actually in use before trusting
+results (identical openseespy version across environments → equivalent FEA
+results; differing versions → re-validate):
+
+```python
+import sys, fea_toolkit
+print(sys.executable)
+print(fea_toolkit.ops_version())   # e.g. "3.8.0.0"
+```
+
+### `run_static_analysis()` raises `RuntimeError` on non-convergence
+
+Since commit ``ba891f50``, ``AnalysisBuilder.run_static_analysis()`` **raises
+``RuntimeError``** when the solve does not converge (it used to return an empty
+dict).  Do **not** assume empty dicts on failure.  Where non-convergence is an
+expected/acceptable outcome (failure-reproduction examples, per-direction
+pushover sweeps), catch it explicitly:
+
+```python
+try:
+    grav = builder.run_static_analysis(extract_reactions=True)
+except RuntimeError as exc:
+    # documented non-convergence — handle and continue
+```
+
+Reference pattern: ``src/fea_toolkit/opensees/pushover.py`` and
+``examples/wall_pushover_fsam_layered.py``.
+
+### Stale installed `fea_toolkit`
+
+Examples import the package from source via a ``sys.path`` shim, which can mask
+an outdated pip-installed copy.  If behaviour looks stale, verify which copy is
+loaded and resync:
+
+```bash
+python -c "import fea_toolkit; print(fea_toolkit.__file__); print(fea_toolkit.__version__)"
+python -m pip install -e .   # editable — tracks the working tree; run pip via the venv interpreter
 ```
 
 ---
@@ -420,3 +477,4 @@ def plot_mesh(builder, **kwargs):
         >>> builder = AnalysisBuilder(mesh, {}).build_domain()
         >>> plot_mesh(builder)
     \"\"\"
+```
