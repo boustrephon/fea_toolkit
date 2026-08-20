@@ -38,7 +38,31 @@ flowchart LR
 | `material_strategy` | `str` | `"elastic"` | Material approach: `elastic`, `fiber_steel`, `fiber_rc`, `steel02` |
 | `integration_type` | `Optional[str]` | `None` | Integration rule: `Lobatto`, `Legendre`, `Radau`, `NewtonCotes`, `HingeRadau`, `HingeMidpoint`, `HingeRadauTwo`, `UserHinge` |
 | `num_integration_points` | `int` | `0` | Number of integration points (`0` = element default) |
-| `hinge_params` | `Optional[dict]` | `None` | Hinge lengths e.g. `{"lpI": 0.1, "lpJ": 0.1}` |
+| `hinge_params` | `Optional[dict]` | `None` | Hinge parameters keyed by name — see [hinge_params keys & units](#hinge_params-keys-and-assumed-units) |
+
+#### `hinge_params` keys and assumed units
+
+`hinge_params` is a free-form dict whose entries are interpreted by their
+**key name**: each supported key has an assumed unit type, and
+:func:`fea_toolkit.model.units.convert_mesh_units` rescales values on unit
+conversion accordingly.  Values are authored in the **model's unit system**
+(e.g. for an N-m model: lengths in m, moments in N·m).
+
+| Key | Assumed units | Meaning |
+|---|---|---|
+| `lpI` | length (L) | Plastic hinge length at the element I-end |
+| `lpJ` | length (L) | Plastic hinge length at the element J-end |
+| `My` | force · length (F·L) | Yield moment |
+| `My_pos` | force · length (F·L) | Positive yield moment |
+| `My_neg` | force · length (F·L) | Negative yield moment |
+| `Mc` | force · length (F·L) | Capping moment |
+| `Mc_pos` | force · length (F·L) | Positive capping moment |
+| `Mc_neg` | force · length (F·L) | Negative capping moment |
+| `Mp` | force · length (F·L) | Plastic moment |
+
+Any other key (plastic rotations, ratios, modifiers, …) is treated as
+unit-independent (dimensionless) and passes through unit conversion
+unchanged.
 
 ### `AreaElementProperties`
 
