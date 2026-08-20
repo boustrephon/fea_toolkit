@@ -1350,6 +1350,16 @@ class AnalysisBuilder:
         The FSAM tag is stored in ``_nd_material_tags`` (keyed by the
         nD material name) so layered shell sections can reference it via
         :meth:`_create_layered_shell_sections`.
+
+        Only FSAM materials that are actually *consumed* by the domain —
+        referenced by a
+        :class:`~fea_toolkit.model.sap_data.LayeredShellSection` layer
+        or an SFI/E_SFI wall element — are created.  A
+        configured-but-unconsumed FSAM nD material is skipped
+        (``_create_materials`` stashes the consumed-name set in
+        ``_fsam_consumed``, which may be empty); creating it would
+        reference the generic Elastic uniaxial laws, which lack
+        ``getCrackingStrain()`` and crash the OpenSees FSAM constructor.
         """
         fsam_mats = {
             n: m for n, m in self.mesh_model.nd_materials.items() if m.material_type == "FSAM"
@@ -1361,8 +1371,12 @@ class AnalysisBuilder:
         # created.  Unconsumed FSAM would reference the generic Elastic
         # uniaxial laws — which lack getCrackingStrain() — and crash the
         # OpenSees FSAM constructor ("failed to get cracking strain").
-        _fsam_consumed = getattr(self, "_fsam_consumed", set())
-        if _fsam_consumed:
+        # ``_fsam_consumed`` is always stashed by ``_create_materials()``
+        # (possibly empty when no FSAM is consumed) — distinguish
+        # "exists but empty" from "absent" so a configured-but-unconsumed
+        # FSAM is also skipped.
+        _fsam_consumed = getattr(self, "_fsam_consumed", None)
+        if _fsam_consumed is not None:
             fsam_mats = {n: m for n, m in fsam_mats.items() if n in _fsam_consumed}
             if not fsam_mats:
                 return
@@ -1572,7 +1586,14 @@ class AnalysisBuilder:
         return 1
 
     def _create_mvlem3d_wall(self, wall, node_tags: list, elem_type: str) -> int:
-        """Emit an MVLEM_3D element (per-fibre uniaxial concrete/steel + shear)."""
+        """Emit an MVLEM_3D element (per-fibre uniaxial concrete/steel + shear).
+
+        When ``wall.rho`` is absent, the per-fibre mass density defaults
+        to the referenced concrete's ``unit_weight`` divided by
+        :func:`~fea_toolkit.utils.g_from_units` (unit-consistent with the
+        model), else ``DEFAULT_RHO_MC_SI`` scaled to model units — never
+        a hardcoded SI literal.
+        """
 
         def _resolve(names) -> Optional[list]:
             tags = []

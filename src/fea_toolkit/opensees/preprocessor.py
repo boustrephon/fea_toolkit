@@ -1280,7 +1280,6 @@ class Preprocessor:
     def _resolve_wall_elements(
         self,
         mesh_model: MeshModel,
-        model_data: SAPModelData,
     ) -> None:
         """Generate wall macro-elements from wall-classified areas.
 
@@ -1325,7 +1324,6 @@ class Preprocessor:
 
         Args:
             mesh_model: Prepared MeshModel (mutated in place).
-            model_data: Mutated SAPModelData from the topology pass.
         """
         wall_strategy = (self.config.get("element_strategies") or {}).get("wall", {})
         elem_type = wall_strategy.get("element_type")
@@ -1438,6 +1436,9 @@ class Preprocessor:
                 thickness = sec.thickness if sec.thickness and sec.thickness > 0 else 0.3
             else:
                 thickness = float(wall_strategy.get("thickness", 0.3))
+            # Per-fibre thickness list — deliberately rebuilt on every loop
+            # iteration so each WallElement owns an independent list (no
+            # aliasing across walls; same for per_fiber_width below).
             per_fiber_thick = [thickness] * n_fibers
 
             # Sort corners into OpenSees quad order [i, j, k, l]:
@@ -1476,10 +1477,13 @@ class Preprocessor:
                     thick=per_fiber_thick,
                     width=per_fiber_width,
                     fsam_material_names=[],
-                    concrete_names=concrete_names,
-                    steel_names=steel_names,
+                    # Independent per-fibre copies per element (mirrors the
+                    # FSAM branch's ``list(fiber_mats)``) — the shared
+                    # template lists must not be aliased across walls.
+                    concrete_names=list(concrete_names),
+                    steel_names=list(steel_names),
                     shear_name=shear_name,
-                    rho=rho,
+                    rho=list(rho),
                     material_type="uniaxial",
                     element_type=elem_type,
                     CoR=cor,
@@ -1554,7 +1558,7 @@ class Preprocessor:
             mesh_model.nd_materials[mat_name] = NDMaterial(**kwargs)
 
         # ── Resolve SFI_MVLEM_3D wall elements from config ───────
-        self._resolve_wall_elements(mesh_model, model_data)
+        self._resolve_wall_elements(mesh_model)
 
         # ── Resolve layered shell sections from config dicts ─────
         shell_layers_config = config.get("shell_layers", {})

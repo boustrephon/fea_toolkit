@@ -97,6 +97,13 @@ def export_model_to_tcl(
     generated as part of the Tcl output (placed at the end of the
     preamble, before any user-supplied *tcl_prefix*).
 
+    MVLEM_3D walls are exported with a unit-aware ``-rho`` fallback
+    matching :meth:`AnalysisBuilder._create_mvlem3d_wall`: explicit
+    ``WallElement.rho`` values are preserved, otherwise the density is
+    derived from the referenced concrete's ``unit_weight`` divided by
+    ``g_from_units(model_data.units)``, or from ``DEFAULT_RHO_MC_SI``
+    scaled to model units when the concrete has no unit weight.
+
     The generated Tcl file can be run via :class:`XaraTclRunner`::
 
         from fea_toolkit.opensees.recorder import XaraTclRunner
@@ -474,12 +481,32 @@ def export_model_to_tcl(
             if _nid in model_data.nodes
         ]
         if len(_w_nids) != 4:
+            print(
+                f"  ⚠ [export_model_to_tcl] wall '{_wall.elem_id}': node "
+                f"resolution incomplete "
+                f"({len(_w_nids)}/4 nodes resolved) — element skipped"
+            )
             continue
         if getattr(_wall, "material_type", "FSAM") == "uniaxial":
             _w_conc = [str(_mat_tag[_n]) for _n in (_wall.concrete_names or []) if _n in _mat_tag]
             _w_steel = [str(_mat_tag[_n]) for _n in (_wall.steel_names or []) if _n in _mat_tag]
             _w_shear = _mat_tag.get(_wall.shear_name) if _wall.shear_name else None
-            _w_rho = _wall.rho or [2400.0] * _wall.m
+            if _wall.rho:
+                _w_rho = _wall.rho
+            else:
+                # Unit-aware fallback density: prefer the referenced
+                # concrete's unit weight (mass density = unit_weight / g),
+                # else the SI default scaled to model units — matching
+                # AnalysisBuilder._create_mvlem3d_wall().  Never a
+                # unit-specific literal like 2400 kg/m³.
+                _conc_name = (_wall.concrete_names or [None])[0]
+                _conc_mat = model_data.materials.get(_conc_name) if _conc_name else None
+                _uw = float(getattr(_conc_mat, "unit_weight", 0.0) or 0.0)
+                if _uw > 0.0:
+                    _rho_default = _uw / g_from_units(model_data.units)
+                else:
+                    _rho_default = DEFAULT_RHO_MC_SI * mass_density_scale_factor(model_data.units)
+                _w_rho = [_rho_default] * _wall.m
             if len(_w_conc) != _wall.m or len(_w_steel) != _wall.m or _w_shear is None:
                 print(
                     f"  ⚠ [export_model_to_tcl] wall '{_wall.elem_id}': "
