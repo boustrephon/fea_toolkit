@@ -28,6 +28,7 @@ from .sap_data import (
     Node,
     Restraint,
     Section,
+    apply_material_defaults,
 )
 
 
@@ -253,3 +254,11 @@ class MeshModel:
             "Distributed loads": len(self.frame_dist_loads),
             "Units": str(self.units),
         }
+
+    def apply_material_defaults(self) -> None:
+        """Fill missing material properties with SI defaults scaled to units.
+
+        Delegates to :func:`~fea_toolkit.model.sap_data.apply_material_defaults`
+        using this model's ``materials`` and ``units`` (idempotent).
+        """
+        apply_material_defaults(self.materials, self.units)

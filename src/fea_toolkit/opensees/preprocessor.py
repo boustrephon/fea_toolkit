@@ -36,6 +36,7 @@ from ..model.sap_data import (
     SAPModelData,
     ShellFiberLayer,
     ShellSection,
+    apply_material_defaults,
 )
 from ..model.selection import Selection
 from ..utils import (
@@ -102,6 +103,12 @@ class Preprocessor:
         """
         # Work on a copy so the original SAPModelData is not mutated
         md = copy.deepcopy(model_data)
+
+        # Apply material defaults (SI → model units) so the MeshModel always
+        # carries fully-populated materials.  Idempotent — the parser may
+        # already have applied them.  Single source of truth:
+        # sap_data.apply_material_defaults.
+        apply_material_defaults(md.materials, md.units)
 
         # ── 1. Frame element classification (pre-split) ──────────
         # Always-on geometric classification: every non-inactive frame gets

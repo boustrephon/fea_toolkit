@@ -125,9 +125,17 @@ class TestNDMaterial:
         mat = NDMaterial(
             name="concrete_s", material_type="ConcreteS", E=30e9, nu=0.2, fc=30e6, ft=3e6, Es=200e9
         )
-        tcl = mat.to_tcl(2)
-        assert "ConcreteS" in tcl
-        assert "3e+07" in tcl  # fc
+        tokens = mat.to_tcl(2).split()
+        # nDMaterial ConcreteS <tag> <E> <nu> <fc> <ft> <Es>
+        assert tokens[0] == "nDMaterial"
+        assert tokens[1] == "ConcreteS"
+        assert tokens[2] == "2"  # tag
+        assert float(tokens[3]) == pytest.approx(30e9, rel=1e-12)  # E
+        assert float(tokens[4]) == pytest.approx(0.2, rel=1e-12)  # nu
+        assert float(tokens[5]) == pytest.approx(30e6, rel=1e-12)  # fc
+        assert float(tokens[6]) == pytest.approx(3e6, rel=1e-12)  # ft
+        assert float(tokens[7]) == pytest.approx(200e9, rel=1e-12)  # Es
+        assert len(tokens) == 8
 
     def test_j2_plate_fibre(self):
         mat = NDMaterial(
@@ -139,8 +147,47 @@ class TestNDMaterial:
             Hiso=0.0,
             Hkin=0.5e9,
         )
-        tcl = mat.to_tcl(3)
-        assert "J2PlateFibre" in tcl
+        tokens = mat.to_tcl(3).split()
+        # nDMaterial J2PlateFibre <tag> <E> <nu> <fy> <Hiso> <Hkin>
+        assert tokens[0] == "nDMaterial"
+        assert tokens[1] == "J2PlateFibre"
+        assert tokens[2] == "3"  # tag
+        assert float(tokens[3]) == pytest.approx(200e9, rel=1e-12)  # E
+        assert float(tokens[4]) == pytest.approx(0.3, rel=1e-12)  # nu
+        assert float(tokens[5]) == pytest.approx(400e6, rel=1e-12)  # fy
+        assert float(tokens[6]) == pytest.approx(0.0, rel=1e-12)  # Hiso
+        assert float(tokens[7]) == pytest.approx(0.5e9, rel=1e-12)  # Hkin
+        assert len(tokens) == 8
+
+    def test_plate_from_plane_stress(self):
+        mat = NDMaterial(
+            name="wall_ps",
+            material_type="PlateFromPlaneStress",
+            E=30e9,
+            nu=0.2,
+        )
+        tokens = mat.to_tcl(5, wrapper_tag=3).split()
+        # nDMaterial PlateFromPlaneStress <tag> <src> <eout>
+        assert tokens[0] == "nDMaterial"
+        assert tokens[1] == "PlateFromPlaneStress"
+        assert tokens[2] == "5"  # tag
+        assert tokens[3] == "3"  # src = wrapper_tag
+        # eout = G = E / (2(1+nu)) when Eout is not set
+        assert float(tokens[4]) == pytest.approx(30e9 / (2.0 * (1.0 + 0.2)), rel=1e-12)
+        assert len(tokens) == 5
+
+    def test_plate_from_plane_stress_eout_and_src(self):
+        mat = NDMaterial(
+            name="wall_ps",
+            material_type="PlateFromPlaneStress",
+            E=30e9,
+            nu=0.2,
+            Eout=12e9,
+        )
+        tcl = mat.to_tcl(5, wrapper_tag=3)
+        assert float(tcl.split()[-1]) == pytest.approx(12e9, rel=1e-12)  # Eout override
+        # Without wrapper_tag, src falls back to the material tag.
+        assert mat.to_tcl(5).split()[3] == "5"
 
     def test_fsam_to_tcl(self):
         mat = NDMaterial(
@@ -424,6 +471,57 @@ class TestTclExportFSAM:
         assert "nDMaterial FSAM 3" in text
         assert "uniaxialMaterial Concrete01" not in text
         assert "uniaxialMaterial Steel01" not in text
+
+
+class TestTclExportPlateFromPlaneStress:
+    """Verify export_model_to_tcl emits the PlateFromPlaneStress wrapper
+    with the derived out-of-plane shear modulus G = E / (2(1+nu))."""
+
+    def _model(self, eout=None) -> SAPModelData:
+        units = {"F": "kN", "L": "m", "T": "C"}
+        return SAPModelData(
+            nodes={},
+            restraints={},
+            materials={
+                "WallConc": Material(name="WallConc", type="Concrete", Fc=30.0e6, E_mod=30.0e9),
+            },
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            nd_materials={
+                "wall_cs": NDMaterial(
+                    name="wall_cs",
+                    material_type="ConcreteS",
+                    E=30.0e9,
+                    nu=0.2,
+                    fc=30.0e6,
+                    ft=3.0e6,
+                    Eout=eout,
+                ),
+            },
+            units=units,
+        )
+
+    def _plate_line(self, tmp_path, md) -> str:
+        out = tmp_path / "plate.tcl"
+        export_model_to_tcl(md, str(out), config={"create_fiber_sections": False})
+        return next(
+            line
+            for line in out.read_text().splitlines()
+            if "nDMaterial PlateFromPlaneStress" in line
+        )
+
+    def test_export_derives_eout(self, tmp_path):
+        line = self._plate_line(tmp_path, self._model())
+        assert float(line.split()[-1]) == pytest.approx(30e9 / (2.0 * (1.0 + 0.2)), rel=1e-12)
+
+    def test_export_honors_eout(self, tmp_path):
+        line = self._plate_line(tmp_path, self._model(eout=12.0e9))
+        assert float(line.split()[-1]) == pytest.approx(12.0e9, rel=1e-12)
 
 
 class TestLayeredShellSection:

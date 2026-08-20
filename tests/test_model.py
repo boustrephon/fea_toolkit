@@ -129,6 +129,29 @@ class TestMaterial:
         assert m.Fc == 4e7
         assert m.Fy is None
 
+    def test_shear_modulus_uses_g_mod(self):
+        m = Material(name="Steel", type="Steel", E_mod=200e9, G_mod=80e9, nu=0.3)
+        assert m.shear_modulus() == 80e9
+
+    def test_shear_modulus_derives_from_nu(self):
+        m = Material(name="Steel", type="Steel", E_mod=200e9, nu=0.2)
+        assert m.shear_modulus() == pytest.approx(200e9 / (2.0 * (1.0 + 0.2)))
+
+    def test_shear_modulus_default_nu_concrete(self):
+        # Concrete ν default 0.2 → G = E / 2.4
+        m = Material(name="Conc", type="Concrete", E_mod=30e9)
+        assert m.shear_modulus() == pytest.approx(30e9 / 2.4)
+
+    def test_shear_modulus_default_nu_steel(self):
+        # Steel ν default 0.3 → G = E / 2.6
+        m = Material(name="Steel", type="Steel", E_mod=200e9)
+        assert m.shear_modulus() == pytest.approx(200e9 / 2.6)
+
+    def test_shear_modulus_e_override(self):
+        # Caller-supplied E is used when E_mod is missing on the material.
+        m = Material(name="Steel", type="Steel", E_mod=0.0)
+        assert m.shear_modulus(E_mod=200e9) == pytest.approx(200e9 / 2.6)
+
 
 class TestSection:
     def test_defaults(self):
