@@ -465,12 +465,15 @@ def main() -> None:
         print(f"  Steps completed : {n_steps}")
         print(f"  Peak base shear : {peak:.1f} kN")
         print(f"  Top displacement: {drift:.6f} m")
-        print("\n  ⚠  Unexpected: steps DID converge (this was supposed to fail).")
-        print("     If you are reading this, the FSAM-in-LayeredShell path")
-        print("     may have been fixed — see the module docstring for the")
-        print("     investigation summary before promoting it.")
-    else:
+        if EXPECTED_FAILURE:
+            print("\n  ⚠  Unexpected: steps DID converge (this was supposed to fail).")
+            print("     If you are reading this, the FSAM-in-LayeredShell path")
+            print("     may have been fixed — see the module docstring for the")
+            print("     investigation summary before promoting it.")
+    elif EXPECTED_FAILURE:
         print("  [expected] no converged steps — this is the documented failure.")
+    else:
+        print("  ⚠  Unexpected: no converged steps — this model was expected to run.")
 
     if args.tcl:
         from fea_toolkit.opensees.builder import export_model_to_tcl

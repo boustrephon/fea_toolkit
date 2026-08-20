@@ -94,6 +94,22 @@ To promote to a working example
 5. Update ``docs/mvlem_wall_analysis.md`` and this docstring to mark the
    recipe ✅ complete, and remove the placeholder cross-reference here.
 
+Module-level scaffold (intentional, not dead code)
+--------------------------------------------------
+
+The ``sys.path.insert(...)`` / ``OUT_DIR`` block below the imports is the
+**standard example scaffold**: every script in ``examples/`` carries the
+identical block (see ``examples/README.md`` § "Running from anywhere" and
+§ "Output directory") so that examples run from any working directory and
+write results to ``examples/output/``.
+
+It is kept in this placeholder even though the module currently imports no
+``fea_toolkit`` symbols and writes no output.  This module is a *documented
+placeholder* by design — nothing imports it yet (including ``local/``), and
+that is expected.  When the recipe is promoted (steps 1–5 above), the
+runner will import ``fea_toolkit`` and write results to ``OUT_DIR`` exactly
+as ``examples/wall_pushover_compare.py`` does, consuming this scaffold.
+
 See also:
 
 - ``docs/layered_analysis_workflow.md`` §14.1 — the canonical recipe
@@ -111,6 +127,19 @@ See also:
 import argparse
 import sys
 from pathlib import Path
+
+# ─────────────────────────────────────────────────────────────────────
+# Standard example scaffold — intentional, not dead code.
+#
+# This `sys.path` / `OUT_DIR` block is the standard template shared by
+# every script in `examples/` (see `examples/README.md` § "Running from
+# anywhere" and § "Output directory").  It is kept in this placeholder
+# even though the module currently imports no `fea_toolkit` symbols and
+# writes no output: on promotion (module docstring → "To promote to a
+# working example") the runner will import `fea_toolkit` and write
+# results to `OUT_DIR`, exactly as `examples/wall_pushover_compare.py`
+# already does.  Removing it would only be re-added verbatim then.
+# ─────────────────────────────────────────────────────────────────────
 
 # Make `fea_toolkit` importable when running from anywhere.
 sys.path.insert(0, str(Path(__file__).parent.parent))  # project root
