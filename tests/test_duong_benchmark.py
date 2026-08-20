@@ -422,6 +422,7 @@ class TestDuongNonlinearShear:
         assert all(s == 0 for s in results["status"]), "pushover must fully converge"
         return results["base_shear"], results["control_disp"]
 
+    @pytest.mark.slow
     def test_nonlinear_shear_engages_in_force_beam_column(self):
         """The backbone controls the peak: explicit ≪ auto ≲ flexure-only."""
         flex = dict(_DUONG_CONFIG)
@@ -443,6 +444,7 @@ class TestDuongNonlinearShear:
         assert peak_auto <= peak_flex * 1.01
         assert peak_exp < peak_auto * 0.85
 
+    @pytest.mark.slow
     def test_duong_peak_with_experimental_backbone(self):
         """Peak within ±15 % of 220 kN + a clear post-peak shear loss."""
         cfg = dict(

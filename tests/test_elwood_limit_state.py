@@ -172,8 +172,9 @@ class TestDriftEquations:
         p2 = axial_capacity_surface(0.06, 11.87)
         assert p1 > p2 > 0.0
 
-    def test_axial_drift_requires_ties(self):
-        # No transverse steel -> the axial-failure drift is near-zero.
+    def test_axial_drift_no_ties_uses_fallback_drift(self):
+        # fsw <= 0 (no ties) -> the 0.10 fallback drift, not the near-zero
+        # value the shear-friction surface itself would give.
         assert elwood_axial_drift_at_failure(70.0, 0.0) > 0.05
 
 

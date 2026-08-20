@@ -60,9 +60,13 @@ def _build_2d_rc_cantilever(ops) -> list[float]:
     ops.uniaxialMaterial("Concrete01", 2, -1.25 * fpc, -0.0025, -0.3 * 1.25 * fpc, -0.012)
     ops.uniaxialMaterial("Steel01", 3, fy, es, 0.005)
     ops.section("Fiber", 1)
-    for patch in patches:
-        kind, *args = patch
-        (ops.patch if kind == "rect" else ops.layer)(kind, *args)
+    for entry in patches:
+        if entry[0] in ("rect", "circ", "quad"):
+            ops.patch(*entry)
+        elif entry[0] == "straight":
+            ops.layer("straight", *entry[1:])
+        elif entry[0] == "circ_layer":
+            ops.layer("circ", *entry[1:])
     ops.geomTransf("PDelta", 1)
     ops.beamIntegration("Lobatto", 10001, 1, 5)
     ops.element("forceBeamColumn", 1, 1, 2, 1, 10001)
