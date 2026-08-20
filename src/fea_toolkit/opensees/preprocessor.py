@@ -1378,14 +1378,23 @@ class Preprocessor:
                     fsam_names_in_order[i % len(fsam_names_in_order)] for i in range(n_fibers)
                 ]
 
-        # Wall elements are tagged past the maximum *node* tag: the
-        # generated elem_tags must not collide with any node tag in the
+        # Wall elements are tagged past the maximum *node* tag (with a
+        # 1000 offset) and past every existing element tag: the generated
+        # elem_tags must not collide with any node or element tag in the
         # OpenSees domain (nodes and elements share the tag namespace).
         max_node_tag = max(
             (nd.node_tag for nd in mesh_model.nodes.values()),
             default=0,
         )
-        next_tag = max(10000, max_node_tag + 1000)
+        max_frame_tag = max(
+            (fe.elem_tag for fe in mesh_model.frame_elements.values()),
+            default=0,
+        )
+        max_area_tag = max(
+            (ae.area_tag for ae in mesh_model.area_elements.values()),
+            default=0,
+        )
+        next_tag = max(10000, max_node_tag + 1000, max_frame_tag + 1, max_area_tag + 1)
 
         # Wall-vs-slab horizontality tolerance — same config key and default
         # as Preprocessor._classify_element_type so wall-element generation
@@ -1441,9 +1450,11 @@ class Preprocessor:
             top.sort(key=lambda nid: getattr(nodes[nid], _width_axis))
             quad = [bottom[0], bottom[1], top[0], top[1]]
 
-            # Total wall width = bottom edge length
+            # Total wall width = bottom edge length (full 3D length, so
+            # the width is correct even for walls not aligned to a
+            # global axis)
             bi, bj = nodes[quad[0]], nodes[quad[1]]
-            wall_width = ((bj.x - bi.x) ** 2 + (bj.y - bi.y) ** 2) ** 0.5
+            wall_width = ((bj.x - bi.x) ** 2 + (bj.y - bi.y) ** 2 + (bj.z - bi.z) ** 2) ** 0.5
             if wall_width <= 0.0:
                 continue
             per_fiber_width = [wall_width / n_fibers] * n_fibers
