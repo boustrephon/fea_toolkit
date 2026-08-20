@@ -1126,7 +1126,7 @@ class NDMaterial:
             eout = (
                 self.Eout
                 if self.Eout is not None
-                else (self.E / (2.0 * (1.0 + self.nu)) if self.nu else self.E / 2.6)
+                else (self.E / (2.0 * (1.0 + self.nu)) if self.nu is not None else self.E / 2.6)
             )
             return f"nDMaterial PlateFromPlaneStress {tag} {src} {eout:g}"
         if t == "FSAM":

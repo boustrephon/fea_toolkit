@@ -255,8 +255,10 @@ def convert_mesh_units(
 
     The source unit system is read from ``mesh.units`` (force/length basis
     — time is always seconds, so only ``L`` and ``F`` drive the scaling).
-    The returned model has ``units == target_units`` and every supported
-    quantity rescaled accordingly; the input model is untouched.
+    The returned model has ``units`` equal to ``target_units`` merged over
+    the source units (source-only keys such as ``"T"`` are preserved) and
+    every supported quantity rescaled accordingly; the input model is
+    untouched.
 
     Args:
         mesh: Model to convert (not mutated).
@@ -337,5 +339,5 @@ def convert_mesh_units(
             stacklevel=2,
         )
 
-    out.units = dict(target_units)
+    out.units = {**out.units, **target_units}
     return out
