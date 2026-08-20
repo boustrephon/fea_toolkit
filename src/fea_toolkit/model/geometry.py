@@ -1846,7 +1846,7 @@ def _propagate_edge_restraints(
         n_v: Subdivision count in the v-direction (grid rows = n_v+1).
         restraints: Model restraints dict, modified in place.
     """
-    if not restraints or n_u < 2 or n_v < 2:
+    if not restraints or n_v < 2:
         return
 
     def _and_dofs(r1: Restraint, r2: Restraint) -> list[int]:

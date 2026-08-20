@@ -473,9 +473,21 @@ def bilinearize_rc(
     if len(S_d_arr) == 0 or len(S_a_arr) == 0:
         return 0.0, 0.0, "de_luca_10pct"
 
+    # Prepend the origin so the capacity curve always starts at (0, 0):
+    # the elastic-secant slope, area integral and peak detection all
+    # assume a curve anchored at zero displacement/acceleration.
+    _prepended = bool(S_d_arr[0] > 0.0 or S_a_arr[0] > 0.0)
+    if _prepended:
+        S_d_arr = np.concatenate([[0.0], S_d_arr])
+        S_a_arr = np.concatenate([[0.0], S_a_arr])
+
     peak_idx = config.get("peak_idx")
     if peak_idx is None:
         peak_idx = int(np.argmax(S_a_arr))
+    else:
+        # A caller-supplied index refers to the original (un-prepended)
+        # curve — shift by one when the origin was inserted.
+        peak_idx = int(peak_idx) + (1 if _prepended else 0)
     peak_idx = max(0, min(int(peak_idx), len(S_d_arr) - 1))
 
     S_d_peak = float(S_d_arr[peak_idx])
