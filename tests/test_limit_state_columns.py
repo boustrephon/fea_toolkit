@@ -64,6 +64,20 @@ def limit_state_builder():
     ops.wipe()
 
 
+@pytest.fixture(autouse=True)
+def _wipe_opensees_after_each_test():
+    """Guarantee ``ops.wipe()`` after every test in this module.
+
+    Several tests (``test_auto_convert_opt_out``, the planning overrides,
+    ``TestLimitStateAnalysis``) build the domain through ``_limit_state_builder``
+    directly and never request the ``limit_state_builder`` fixture, so the
+    committed OpenSees global state would otherwise leak into the next test.
+    The ``yield`` defers the wipe until after the test body.
+    """
+    yield
+    ops.wipe()
+
+
 # ═════════════════════════════════════════════════════════════════════
 # Unit auto-conversion (kip-in-ksi enabler)
 # ═════════════════════════════════════════════════════════════════════

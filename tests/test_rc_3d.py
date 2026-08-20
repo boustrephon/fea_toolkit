@@ -57,11 +57,15 @@ class TestRC3DFrame:
     def test_pushover_3d_rc_frame_yields_and_converges(self, rc3d_builder):
         """Full 3D RC frame converges through the 3D pushover path and yields."""
         rc3d_builder.compute_seismic_masses()
+        # Control node: roof node "12" (leading corner, max X at top storey).
+        # Derive its OpenSees tag from the MeshModel rather than hard-coding
+        # it, so the tag follows the mesh node's identifier (ID → tag map).
+        control_node_tag = rc3d_builder.mesh_model.nodes["12"].node_tag
         res = rc3d_builder.run_pushover_analysis(
             gravity_patterns={"DEAD": 1.0},
             lateral_load_type="uniform",
             lateral_direction="X",
-            control_node_tag=12,
+            control_node_tag=control_node_tag,
             max_disp=0.15,
             num_steps=50,
             print_progress=False,
