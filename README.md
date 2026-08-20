@@ -749,7 +749,7 @@ cross‑reference section.
 
 10. **Testing**  
     - ~~`test_model.py` is yet to be populated~~ ✅ Populated — CSM/bilinearization, Euler buckling benchmark, load dataclasses, Mander confinement wiring, mesh edge-restraint propagation.  
-    - ~~Add unit tests for `SectionLibrary`, `SAPModelData` dataclasses, and geometry utilities~~ ✅ Covered in `test_model.py`, `test_geometry.py`, `test_units.py`, `test_confinement.py`.  
+    - ~~Add unit tests for `SectionLibrary`, `SAPModelData` dataclasses, and geometry utilities~~ ✅ Covered in `test_model.py`, `test_geometry.py`, `test_mesh_units.py`, `test_confinement.py`.  
     - ~~Add integration tests for the two-stage pipeline~~ ✅ Covered in `test_workflows.py`, `test_rc_pushover.py`, `test_layered_shell.py`, `test_wall_pushover.py`.  
     - ~~Add tests for `split_elements`~~ ✅ `TestParserModelIntegration::test_split_elements{,_tracking}` and `TestBuildWorkflow::test_build_with_split_elements`; trapezoidal-load decomposition remains an open sub-item.
 

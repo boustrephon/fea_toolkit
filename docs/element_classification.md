@@ -29,10 +29,11 @@ results are post-processed.
      / wall, from the chord spans and configurable thresholds — see
      *Classification logic* below)
 
-3. **Both signals are visible** in a printed summary so the user can
-   verify the classification before running analyses.  Mismatches
-   (e.g. a diagonal PipeSection that should NOT be a brace) are
-   caught early.
+3. **Both signals are verifiable** through the role maps stored on the
+   `MeshModel` (`frame_element_types` / `area_element_types`) so the
+   user can inspect the classification before running analyses.
+   Mismatches (e.g. a diagonal PipeSection that should NOT be a brace)
+   are caught early.
 
 4. **The same classification feeds both v1 and v2 paths** — no config
    drift between legacy and two-stage workflows.

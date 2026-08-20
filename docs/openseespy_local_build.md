@@ -81,7 +81,6 @@ elif sys.platform.startswith('darwin'):
 > module and skips this `__init__.py` (the import machinery treats
 > `openseespy.opensees.opensees` as a submodule, not a re-entry).
 > If the local `.so` is absent, fall back to the wheel.
-```
 
 This keeps the wheel intact for rollback (just revert the patch). The local
 build must be installed *next to* the wheel, i.e. its `.so` + bundled

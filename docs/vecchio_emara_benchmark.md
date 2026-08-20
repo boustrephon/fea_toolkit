@@ -116,8 +116,10 @@ the geometry and material values used in the toolkit model.
 
 ### 3.5 Kotsovos & Zygouris (2019)
 
-An **independent** analysis of the same specimen (reference PDF in
-`local/references/`) predicts ≈ **300 kN** peak (0.91 × experimental).
+An **independent** analysis of the same specimen (Kotsovos & Zygouris
+2019, *Magazine of Concrete Research*, 71(3), 109–125,
+doi:10.1680/jmacr.17.00092) predicts ≈ **300 kN** peak (0.91 ×
+experimental).
 That the toolkit's uncalibrated final model (1.07 ×) lands within a few
 percent of this independent state-of-the-art prediction is strong
 evidence that the remaining discrepancy is model-physics, not a toolkit
@@ -368,9 +370,9 @@ Vecchio (2007)** shear-critical frame is documented in
    frame in the validation suite).
 4. Lowes, L. / Mosalam, K. et al. — PEER Report 2006/04 (frame
    specimen documentation, §4.5.1/§5.3).
-5. Kotsovos, G.M. & Zygouris, N.S. (2019). “Reinforced Concrete Frame
-   Analysis with Mode of Failure Recognition.” (reference PDF in
-   `local/references/`).
+5. Kotsovos, G.M. & Zygouris, N.S. (2019). “Reinforced concrete frame
+   analysis with mode of failure prediction capability.” *Magazine of
+   Concrete Research*, 71(3), 109–125. doi:10.1680/jmacr.17.00092
 6. Implementation: ``tests/test_rc_benchmark.py``,
    ``tests/test_rigid_end_zones.py``, ``docs/deprecation_plan.md``
    (Gap 4), ``docs/report_generation.md`` §3.4.

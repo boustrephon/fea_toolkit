@@ -157,7 +157,7 @@ iteration)**:
 
 **References**: De Luca, F., Vamvatsikos, D., & Iervolino, I. (2013).
 "Near-optimal piecewise linear fits of static pushover capacity curves."
-*Earthquake Engineering & Structural Dynamics*, 42(4), 589–600.
+*Earthquake Engineering & Structural Dynamics*, 42(4), 523–543.
 doi:10.1002/eqe.2225
 
 ## Comparison of Methods
@@ -201,7 +201,7 @@ doi:10.1002/eqe.2225
 5. **Vamvatsikos, D., De Luca, F., & Iervolino, I.** (2013).
    "Near-optimal piecewise linear fits of static pushover capacity
    curves for equivalent SDOF analysis." *Earthquake Engineering &
-   Structural Dynamics*, 42(4), 589–600. doi:10.1002/eqe.2225
+   Structural Dynamics*, 42(4), 523–543. doi:10.1002/eqe.2225
 
 6. **Faella, G., Giordano, A., & Mezzi, M.** (2004). "Definition of
    Suitable Bilinear Pushover Curves in Nonlinear Static Analyses."

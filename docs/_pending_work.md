@@ -125,7 +125,7 @@ src/fea_toolkit/plotting/viz.py:
   forceBeamColumn model plateaus ≈ 290 kN while the experiment softened
   after ≈ 50 mm); Vecchio & Balopoulou (1990) variant re-run once the
   shear model lands.
-- Full suite: **899 passed, 4 xfailed** (882 + 8 benchmark + 8 rigid-end-zone + 1 rigid-benchmark tests).
+- Full suite: **905 passed, 4 xfailed** (882 + 8 benchmark + 14 rigid-end-zone + 1 rigid-benchmark tests).
 
 ## DONE (deprecation-programme Phase 2 — Gap 3, 2026-08-16)
 - **3D-only policy documented** — `.clinerules` §3.11 (analysis is

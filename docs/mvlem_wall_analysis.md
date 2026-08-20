@@ -241,7 +241,6 @@ in `tests/test_wall_pushover.py`.
 config = {
     "create_shells": True,
     "nd_materials": {
-        "WallConcCM": {"material_type": "ConcreteS", "E": 30.0e9, "nu": 0.2, "fc": 30.0e6, "ft": 3.0e6},
         "wall_fsam": {
             "material_type": "FSAM",
             "density": 2400.0,
@@ -263,10 +262,11 @@ config = {
 }
 ```
 
-`RebarX` / `RebarY` / `WallConcCM` are model materials; the FSAM
-uniaxial dispatcher emits `ConcreteCM` / `Steel02` for them
-automatically (see §4.3).  The layered stack is consumed by
-`ShellNLDKGQ` quads.
+`RebarX` / `RebarY` are steel and `WallConcCM` is the concrete
+uniaxial model material (declared in ``model_data.materials`` — not
+``nd_materials``); the FSAM uniaxial dispatcher emits `ConcreteCM` /
+`Steel02` for them automatically (see §4.3).  The layered stack is
+consumed by `ShellNLDKGQ` quads.
 
 #### 5.2 SFI_MVLEM_3D path (macro-element)
 
@@ -613,6 +613,7 @@ adds the linear-elastic Kirchhoff out-of-plane plate).
 
 **Verdict: Option C is infeasible in the shipped wheel.**  No
 substitute for MVLEM_3D.
+
 ## 7. Working-path summary
 
 | Path | Wall type | Shear interaction | Material stack | Comp. cost | Status |
