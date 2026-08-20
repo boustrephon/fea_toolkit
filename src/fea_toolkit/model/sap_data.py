@@ -927,8 +927,14 @@ class FrameElementProperties:
             ``"HingeRadauTwo"``, ``"UserHinge"``.
         num_integration_points: Number of integration points.
             0 = use element default (3 for elastic, 4-5 for fiber).
-        hinge_params: Dict of hinge parameters, e.g.
+        hinge_params: Dict of hinge parameters keyed by name, e.g.
             ``{"lpI": 0.1, "lpJ": 0.1}`` for hinge plasticity models.
+            Each supported key has an assumed unit type (values authored in
+            the model's unit system): ``lpI``/``lpJ`` are lengths (L);
+            ``My``/``My_pos``/``My_neg``/``Mc``/``Mc_pos``/``Mc_neg``/``Mp``
+            are moments (F·L); any other key (plastic rotations, ratios, …)
+            is dimensionless and left unchanged by unit conversion.  See
+            ``docs/element_properties_config.md``.
     """
 
     element_type: str = "elasticBeamColumn"
