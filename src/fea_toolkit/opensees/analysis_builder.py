@@ -140,21 +140,21 @@ class AnalysisBuilder:
 
         # Domain state (built during build_domain)
         self.frame_tag_map: dict[str, int] = {}
-        self.material_tags: dict[str, int] = dict(mesh_model.material_tags)
-        self.section_tags: dict[str, int] = dict(mesh_model.section_tags)
-        self._shell_sec_tags: dict[str, int] = dict(mesh_model.shell_sec_tags)
-        self._shell_sec_variants: dict[str, int] = dict(mesh_model.shell_sec_variants)
-        self._frame_element_types: dict[str, str] = dict(mesh_model.frame_element_types)
-        self._area_element_types: dict[str, str] = dict(mesh_model.area_element_types)
-        self._offset_rigid_links: list[tuple] = list(mesh_model.offset_rigid_links)
+        self.material_tags: dict[str, int] = dict(self.mesh_model.material_tags)
+        self.section_tags: dict[str, int] = dict(self.mesh_model.section_tags)
+        self._shell_sec_tags: dict[str, int] = dict(self.mesh_model.shell_sec_tags)
+        self._shell_sec_variants: dict[str, int] = dict(self.mesh_model.shell_sec_variants)
+        self._frame_element_types: dict[str, str] = dict(self.mesh_model.frame_element_types)
+        self._area_element_types: dict[str, str] = dict(self.mesh_model.area_element_types)
+        self._offset_rigid_links: list[tuple] = list(self.mesh_model.offset_rigid_links)
         self._edge_constraint_method: Optional[str] = None
         # NOTE: mesh_model.edge_constraint_args is always [] today
         # (the Preprocessor stores detected pairs in detected_edge_pairs,
         # not constraint arguments).  The list is overwritten when
         # apply_edge_constraints() is first called at analysis time.
-        self._saved_edge_constraints: list[tuple] = list(mesh_model.edge_constraint_args)
-        self.edge_loads_from_areas: list = list(mesh_model.edge_loads_from_areas)
-        self._base_z = mesh_model.base_z
+        self._saved_edge_constraints: list[tuple] = list(self.mesh_model.edge_constraint_args)
+        self.edge_loads_from_areas: list = list(self.mesh_model.edge_loads_from_areas)
+        self._base_z = self.mesh_model.base_z
 
         # Per-build tracking
         self._created_node_tags: set = set()
@@ -1527,9 +1527,11 @@ class AnalysisBuilder:
         for name in wall.fsam_material_names:
             tag = _nd_tags.get(name)
             if tag is None:
-                print(
-                    f"  ⚠ Wall element '{wall.elem_id}': FSAM nD material "
-                    f"'{name}' not found in _nd_material_tags — skipping element"
+                logger.warning(
+                    "  ⚠ Wall element '%s': FSAM nD material '%s' not found in "
+                    "_nd_material_tags — skipping element",
+                    wall.elem_id,
+                    name,
                 )
                 return 0
             mat_tags.append(tag)
@@ -1576,9 +1578,10 @@ class AnalysisBuilder:
         shear_tag = self.material_tags.get(wall.shear_name) if wall.shear_name else None
         rho = wall.rho or [2400.0] * wall.m
         if conc_tags is None or steel_tags is None or shear_tag is None:
-            print(
-                f"  ⚠ Wall element '{wall.elem_id}': missing uniaxial material "
-                "tag (concrete/steel/shear) — skipping element"
+            logger.warning(
+                "  ⚠ Wall element '%s': missing uniaxial material "
+                "tag (concrete/steel/shear) — skipping element",
+                wall.elem_id,
             )
             return 0
 
@@ -2036,6 +2039,31 @@ class AnalysisBuilder:
                 self._truss_Fy[sec_name] = Fy
                 self._truss_E[sec_name] = E_sec
                 truss_tag += 1
+
+            # Sections used by explicitly-selected brace elements (custom
+            # BRB, diagonal I-section) may not be recognised brace shapes —
+            # register truss data for them so the per-element override in
+            # _add_beam_column can resolve area/Fy/E.
+            if self._brace_selection:
+                _assignments = self.mesh_model.frame_assignments
+                for _eid in self._brace_selection:
+                    _sec_name = _assignments.get(_eid)
+                    if not _sec_name or _sec_name in self._truss_mat_tags:
+                        continue
+                    _sec = self.mesh_model.sections.get(_sec_name)
+                    if _sec is None:
+                        continue
+                    _area = getattr(_sec, "A", 0.0) or 0.0
+                    if _area < 1e-12:
+                        continue
+                    _mat = self.mesh_model.materials.get(_sec.material)
+                    _E = _mat.E_mod if _mat else 200e9
+                    _Fy = getattr(_sec, "Fy", None) or getattr(_mat, "Fy", 250e6) if _mat else 250e6
+                    self._truss_mat_tags[_sec_name] = truss_tag
+                    self._truss_areas[_sec_name] = _area
+                    self._truss_Fy[_sec_name] = _Fy
+                    self._truss_E[_sec_name] = _E
+                    truss_tag += 1
 
     # ── Sections ─────────────────────────────────────────────────
 
@@ -2812,14 +2840,26 @@ class AnalysisBuilder:
             return
 
         # ── Brace truss elements ────────────────────────────────
-        # When brace_truss is active, sections matching _truss_mat_tags
-        # become Truss elements with Hysteretic material instead of
-        # beam-column elements (matching the legacy Builder behaviour).
-        if (
-            self.config.get("brace_truss")
-            and hasattr(self, "_truss_mat_tags")
-            and sec_name in self._truss_mat_tags
-        ):
+        # When brace_truss is active, an element becomes a Truss with a
+        # per-element Hysteretic material when (a) it is explicitly
+        # selected via set_brace_selection / rebuild_with_fiber_sections
+        # (authoritative — custom BRBs, diagonal I-sections), or (b) its
+        # section is a recognised brace section / brace_sections name AND
+        # its geometric role is 'brace' (so horizontal pipes and ordinary
+        # beams stay flexural).
+        _is_brace_truss = False
+        if self.config.get("brace_truss") and hasattr(self, "_truss_mat_tags"):
+            if self._brace_selection is not None:
+                _is_brace_truss = (
+                    elem.elem_id in self._brace_selection
+                    or getattr(elem, "parent_id", None) in self._brace_selection
+                )
+            else:
+                _explicit_sec = self.config.get("brace_sections") is not None
+                _is_brace_truss = sec_name in self._truss_mat_tags and (
+                    _explicit_sec or self._frame_element_types.get(elem.elem_id) == "brace"
+                )
+        if _is_brace_truss:
             A = self._truss_areas[sec_name]
             Fy = self._truss_Fy[sec_name]
             E_sec = self._truss_E[sec_name]
@@ -3358,6 +3398,8 @@ class AnalysisBuilder:
             # ── Topology: control + anchor nodes at the column top ──
             top_id = self._top_node_id(elem)
             top_node = nodes[top_id]
+            bottom_id = elem.node_j if top_id == elem.node_i else elem.node_i
+            bottom_node = nodes.get(bottom_id, ni)
             control_id = f"{eid}_limit_top"
             anchor_id = f"{eid}_limit_anchor"
             control_tag = next_node_tag
@@ -3389,7 +3431,7 @@ class AnalysisBuilder:
                 {
                     "eid": eid,
                     "elem_tag": self.frame_tag_map.get(eid),
-                    "bottom_tag": ni.node_tag,
+                    "bottom_tag": bottom_node.node_tag,
                     "top_tag": top_node.node_tag,
                     "control_tag": control_tag,
                     "anchor_tag": anchor_tag,
@@ -4290,7 +4332,7 @@ class AnalysisBuilder:
                     jl.my * scale,
                     jl.mz * scale,
                 )
-                load_total += (
+                load_total += scale * (
                     abs(jl.fx) + abs(jl.fy) + abs(jl.fz) + abs(jl.mx) + abs(jl.my) + abs(jl.mz)
                 )
                 if pname not in self._joint_load_totals:
@@ -6619,7 +6661,11 @@ class AnalysisBuilder:
                 )
             elif lateral_load_type == "point":
                 _pts = lateral_point_nodes or [int(control_node_tag)]
-                node_loads = {int(t): (1.0, 0.0, 0.0) for t in _pts}
+                # Load along the push direction's global axis (dof 1/2/3
+                # for X/Y/Z) instead of a hardcoded X-only unit load.
+                _vec = [0.0, 0.0, 0.0]
+                _vec[dof - 1] = 1.0
+                node_loads = {int(t): tuple(_vec) for t in _pts}
             else:
                 node_loads = {}
 
