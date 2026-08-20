@@ -1,3 +1,12 @@
+---
+title: "MVLEM / SFI-MVLEM Shear-Wall Analysis"
+description: "MVLEM / SFI-MVLEM reinforced-concrete shear-wall macro-element modelling: verified element signatures against the shipped openseespy wheel, FSAM nD-material support, WallElement builder integration, and end-to-end pushover recipes (LayeredShell, SFI_MVLEM_3D, MVLEM_3D)."
+status: "complete"
+tags: [analysis-type, wall, mvlem, sfi-mvlem, fsam, shear, nonlinear, validation]
+category: [analysis-types]
+related: [shell_support.md, element_properties_config.md, pushover_analysis.md, openseespy_local_build.md]
+---
+
 # MVLEM / SFI-MVLEM Shear-Wall Analysis
 
 > Status: **✅ Complete** — verified against the shipped
@@ -358,6 +367,14 @@ The builder dispatches to `element MVLEM_3D ... -matConcrete -matSteel
 -matShear` (verified against the shipped wheel binary) and creates the
 shear spring as `ElasticPP (k = 0.1·G·A/h, 1e6)` plus the interior
 dummy as a tiny-E `Elastic`.
+
+`export_model_to_tcl` also serialises the `element MVLEM_3D ...`
+command for completeness, but note that Xara's `libOpenSeesRT` runtime
+does not currently ship `MVLEM_3D` / `SFI_MVLEM_3D` or `ElasticPP` (its
+verified extensions are `ConcreteCM`, `SteelMPF`, `FSAM` and the 2D
+`E_SFI` — see `examples/verify_openseespy.py`).  The Tcl path is
+therefore **serialization-only** for these wall elements; run actual
+MVLEM_3D analysis through the OpenSeesPy `AnalysisBuilder` instead.
 
 ## 6. Axial-load (gravity) experiment — July 2026
 
