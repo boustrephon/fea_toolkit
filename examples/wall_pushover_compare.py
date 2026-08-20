@@ -772,10 +772,18 @@ def shear_share(meta: dict) -> None:
     print("── Shear contribution vs Fiber N=16 (flexure-only) @ V=100 kN ──")
     print(f"  {'H (m)':>6s}  {'H/W':>5s}  {'MVLEM_3D':>12s}  {'Layered':>12s}  {'Fiber N=8':>12s}")
     for h in HEIGHTS:
+        f8_h = f"Fiber N=8@{h:g}"
+        f16_h = f"Fiber N=16@{h:g}"
+        if f8_h not in meta or f16_h not in meta:
+            print(
+                f"  ⚠ H={h:g} m: Fiber N=8 / Fiber N=16 row missing from "
+                "meta — skipping shear-share row"
+            )
+            continue
         u_m = meta[f"MVLEM_3D@{h:g}"]["ux_100"]
         u_l = meta[f"{lay_lbl}@{h:g}"]["ux_100"]
-        u_f8 = meta[f"Fiber N=8@{h:g}"]["ux_100"]
-        u_f16 = meta[f"Fiber N=16@{h:g}"]["ux_100"]
+        u_f8 = meta[f8_h]["ux_100"]
+        u_f16 = meta[f16_h]["ux_100"]
         sh_m = (u_m - u_f16) / u_m * 100.0 if (u_m and u_f16 and abs(u_m) > 1e-12) else float("nan")
         sh_l = (u_l - u_f16) / u_l * 100.0 if (u_l and u_f16 and abs(u_l) > 1e-12) else float("nan")
         sh_g = (
@@ -866,7 +874,7 @@ def export_py(config: dict, label: str, out_dir: Path, height: float) -> None:
     rec = RecordingOpenSees(_real_ops)
     ab_mod.ops = rec
     try:
-        if label.startswith("mvlem"):
+        if label.lower().startswith("mvlem"):
             md = mvlem_3d_model_data(height=height)
         else:
             md = wall_model_data(height=height)
