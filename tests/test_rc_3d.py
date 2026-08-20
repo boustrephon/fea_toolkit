@@ -28,8 +28,11 @@ def rc3d_builder():
     """Preprocessed genuinely-3D RC frame wrapped in an AnalysisBuilder."""
     from openseespy.opensees import wipe
 
-    mesh_model = preprocess_model(make_rc_frame_3d(), _CFG)
-    builder = AnalysisBuilder(mesh_model, _CFG)
+    # Copy the module-level config so derived/default keys (written in
+    # place by AnalysisBuilder._set_defaults) cannot persist across tests.
+    cfg = dict(_CFG)
+    mesh_model = preprocess_model(make_rc_frame_3d(), cfg)
+    builder = AnalysisBuilder(mesh_model, cfg)
     builder.build_domain()
     yield builder
     wipe()

@@ -235,8 +235,9 @@ def ve_builder():
     """Preprocessed Vecchio & Emara frame wrapped in an AnalysisBuilder."""
     from openseespy.opensees import wipe
 
-    # Deep-copy the module-level config so fixture-specific mutations
+    # Shallow-copy the module-level config so fixture-specific mutations
     # (e.g. aggregate_shear) cannot leak into other tests.
+    # All _BENCH_CONFIG values are immutable scalars, so dict() is fully isolating.
     cfg = dict(_BENCH_CONFIG)
     mesh_model = preprocess_model(make_vecchio_emara_frame(), cfg)
     builder = AnalysisBuilder(mesh_model, cfg)
@@ -276,17 +277,41 @@ class TestVecchioEmaraBenchmark:
             f"joint loads missing: applied_fz={check['applied_fz']:.1f}"
         )
 
-    def test_pushover_converges_to_155mm(self, ve_builder):
+    @pytest.fixture(scope="class")
+    @classmethod
+    def pushover_results(cls):
+        """62-step flexure-only pushover, run once for the whole class.
+
+        ``test_pushover_converges_to_155mm``,
+        ``test_flexure_only_peak_brackets_experiment`` and
+        ``test_stiffness_band`` share the identical 62-step push to 155 mm
+        at Level 2; running it once per class avoids repeating the domain
+        build and 62 push steps three times.  The returned result dict
+        holds plain Python/numpy data captured during the run, so the
+        OpenSees domain is wiped before any test body executes and the
+        function-scoped ``ve_builder`` tests still start from clean state.
+        """
+        from openseespy.opensees import wipe
+
+        cfg = dict(_BENCH_CONFIG)
+        mesh_model = preprocess_model(make_vecchio_emara_frame(), cfg)
+        builder = AnalysisBuilder(mesh_model, cfg)
+        try:
+            return builder.run_pushover_analysis(
+                gravity_patterns={"DEAD": 1.0},
+                lateral_load_type="uniform",
+                lateral_direction="X",
+                control_node_tag=5,
+                max_disp=0.155,
+                num_steps=62,
+                print_progress=False,
+            )
+        finally:
+            wipe()
+
+    def test_pushover_converges_to_155mm(self, pushover_results):
         """The experimental loading protocol (155 mm at Level 2) is reached."""
-        res = ve_builder.run_pushover_analysis(
-            gravity_patterns={"DEAD": 1.0},
-            lateral_load_type="uniform",
-            lateral_direction="X",
-            control_node_tag=5,
-            max_disp=0.155,
-            num_steps=62,
-            print_progress=False,
-        )
+        res = pushover_results
         d = np.asarray(res["control_disp"], dtype=float)
         v = np.asarray(res["base_shear"], dtype=float)
         assert all(s == 0 for s in res["status"]), "non-converged push steps"
@@ -294,7 +319,7 @@ class TestVecchioEmaraBenchmark:
         assert np.all(np.diff(d) > 0), "control displacement must ramp monotonically"
         assert np.all(v[1:] > 0), "base shear must stay positive"
 
-    def test_flexure_only_peak_brackets_experiment(self, ve_builder):
+    def test_flexure_only_peak_brackets_experiment(self, pushover_results):
         """Peak base shear brackets the experiment (documented flexure-only bias).
 
         The pure flexure fiber model overestimates the peak (~1.5×) because
@@ -303,15 +328,7 @@ class TestVecchioEmaraBenchmark:
         soften as the real frame did.  We assert the model brackets the
         experimental peak and report the ratio for traceability.
         """
-        res = ve_builder.run_pushover_analysis(
-            gravity_patterns={"DEAD": 1.0},
-            lateral_load_type="uniform",
-            lateral_direction="X",
-            control_node_tag=5,
-            max_disp=0.155,
-            num_steps=62,
-            print_progress=False,
-        )
+        res = pushover_results
         v = np.asarray(res["base_shear"], dtype=float)
         peak = float(np.max(v))
         ratio = peak / EXP_PEAK_SHEAR
@@ -326,17 +343,9 @@ class TestVecchioEmaraBenchmark:
             f"V@30mm {v30:.1f} kN below hand-calc first yield {HAND_FIRST_YIELD_LOAD:.0f} kN"
         )
 
-    def test_stiffness_band(self, ve_builder):
+    def test_stiffness_band(self, pushover_results):
         """Secant stiffness at 50 mm within [0.5, 2] × experimental 6.1 kN/mm."""
-        res = ve_builder.run_pushover_analysis(
-            gravity_patterns={"DEAD": 1.0},
-            lateral_load_type="uniform",
-            lateral_direction="X",
-            control_node_tag=5,
-            max_disp=0.155,
-            num_steps=62,
-            print_progress=False,
-        )
+        res = pushover_results
         d = np.asarray(res["control_disp"], dtype=float)
         v = np.asarray(res["base_shear"], dtype=float)
         v50 = float(np.interp(0.050, d, v))
