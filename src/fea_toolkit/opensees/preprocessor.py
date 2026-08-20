@@ -1279,8 +1279,8 @@ class Preprocessor:
 
         When ``element_strategies.wall.element_type`` is one of
         ``SFI_MVLEM_3D`` / ``E_SFI_MVLEM_3D`` / ``MVLEM_3D``, each
-        wall-classified area (corners span more than 0.02 length units
-        in Z) is converted into a single
+        wall-classified area (corners span more than the configured
+        ``slab_z_tolerance`` length units in Z) is converted into a single
         :class:`~fea_toolkit.model.mesh_model.WallElement` macro-element.
         The area is marked inactive so the AnalysisBuilder skips shell
         creation for it (the macro-element replaces the shell).
@@ -1378,11 +1378,19 @@ class Preprocessor:
                     fsam_names_in_order[i % len(fsam_names_in_order)] for i in range(n_fibers)
                 ]
 
-        max_elem_tag = max(
+        # Wall elements are tagged past the maximum *node* tag: the
+        # generated elem_tags must not collide with any node tag in the
+        # OpenSees domain (nodes and elements share the tag namespace).
+        max_node_tag = max(
             (nd.node_tag for nd in mesh_model.nodes.values()),
             default=0,
         )
-        next_tag = max(10000, max_elem_tag + 1000)
+        next_tag = max(10000, max_node_tag + 1000)
+
+        # Wall-vs-slab horizontality tolerance — same config key and default
+        # as Preprocessor._classify_element_type so wall-element generation
+        # agrees with the area_element_types role stored on the MeshModel.
+        slab_z_tol = float(self.config.get("slab_z_tolerance", 0.02))
 
         wall_idx = 0
         for aid, area in mesh_model.area_elements.items():
@@ -1399,9 +1407,12 @@ class Preprocessor:
             if missing:
                 continue
 
-            # Classify geometry: wall when corners span > 0.02 in Z
+            # Classify geometry: slab when the corner Z-span is below
+            # slab_z_tolerance — strict '<' mirrors _classify_element_type,
+            # keeping wall-element generation consistent with the
+            # area_element_types role computed for the same areas.
             zs = [nodes[nid].z for nid in nids]
-            if max(zs) - min(zs) <= 0.02:
+            if max(zs) - min(zs) < slab_z_tol:
                 continue  # horizontal → slab
 
             # Resolve section thickness

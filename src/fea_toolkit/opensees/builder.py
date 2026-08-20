@@ -197,6 +197,14 @@ def export_model_to_tcl(
     # runtime (Concrete01/Steel01 cannot).  All other materials keep the
     # legacy Concrete01/Steel01 output.  Config keys follow the same
     # flat SI-scaled convention as AnalysisBuilder.
+    #
+    # The MVLEM_3D wall's shear-spring ("shear") and interior-dummy
+    # ("dummy") materials deliberately keep those legacy laws here rather
+    # than the ElasticPP / tiny-E Elastic used by the OpenSeesPy
+    # AnalysisBuilder path: this Tcl script targets Xara's libOpenSeesRT
+    # runtime, whose verified material set is Concrete01/Steel02/
+    # ConcreteCM/SteelMPF (see examples/verify_openseespy.py) — it does
+    # not ship ElasticPP.
     _fsam_refs: set = set()
     for _nd in getattr(model_data, "nd_materials", {}).values():
         if _nd.material_type == "FSAM":
@@ -446,10 +454,14 @@ def export_model_to_tcl(
             elif nn == 3:
                 lines.append(f"element ShellDKGT {elem.area_tag} " + " ".join(nids) + f" {stag}")
 
-        # Wall elements (SFI_MVLEM_3D macro-elements) — emitted after shells
-        # so inactive wall-source areas below are skipped while the wall
-        # element replaces them.  FSAM material names resolve to the nD
-        # material tags assigned above in `_nd_mat_tag`.
+        # Wall elements — emitted after shells so inactive wall-source areas
+        # below are skipped while the wall element replaces them.  Two
+        # families are supported:
+        #   * MVLEM_3D (material_type == "uniaxial") — per-fibre uniaxial
+        #     concrete/steel names plus a single shear-spring name resolve
+        #     via `_mat_tag`.
+        #   * SFI_MVLEM_3D / E_SFI_MVLEM_3D — per-fibre FSAM nD material
+        #     names resolve via `_nd_mat_tag` (assigned above).
         for _wid, _wall in (getattr(model_data, "wall_elements", {})).items():
             _w_nids = [
                 str(model_data.nodes[_nid].node_tag)
@@ -457,6 +469,42 @@ def export_model_to_tcl(
                 if _nid in model_data.nodes
             ]
             if len(_w_nids) != 4:
+                continue
+            if getattr(_wall, "material_type", "FSAM") == "uniaxial":
+                _w_conc = [
+                    str(_mat_tag[_n]) for _n in (_wall.concrete_names or []) if _n in _mat_tag
+                ]
+                _w_steel = [str(_mat_tag[_n]) for _n in (_wall.steel_names or []) if _n in _mat_tag]
+                _w_shear = _mat_tag.get(_wall.shear_name) if _wall.shear_name else None
+                _w_rho = _wall.rho or [2400.0] * _wall.m
+                if len(_w_conc) != _wall.m or len(_w_steel) != _wall.m or _w_shear is None:
+                    continue
+                _w_parts = [
+                    f"element MVLEM_3D {_wall.elem_tag}",
+                    *_w_nids,
+                    str(_wall.m),
+                ]
+                _w_parts.append("-thick")
+                _w_parts.extend(str(v) for v in _wall.thick)
+                _w_parts.append("-width")
+                _w_parts.extend(str(v) for v in _wall.width)
+                _w_parts.append("-rho")
+                _w_parts.extend(str(v) for v in _w_rho)
+                _w_parts.append("-matConcrete")
+                _w_parts.extend(_w_conc)
+                _w_parts.append("-matSteel")
+                _w_parts.extend(_w_steel)
+                _w_parts.append("-matShear")
+                _w_parts.append(str(_w_shear))
+                _w_parts.append("-CoR")
+                _w_parts.append(str(_wall.CoR))
+                if _wall.ThickMod is not None:
+                    _w_parts.extend(["-ThickMod", str(_wall.ThickMod)])
+                if _wall.Poisson is not None:
+                    _w_parts.extend(["-Poisson", str(_wall.Poisson)])
+                if _wall.Density is not None:
+                    _w_parts.extend(["-Density", str(_wall.Density)])
+                lines.append(" ".join(_w_parts))
                 continue
             _w_mat_tags = [
                 str(_nd_mat_tag[_name])
