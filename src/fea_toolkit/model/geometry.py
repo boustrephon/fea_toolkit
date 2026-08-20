@@ -1535,6 +1535,7 @@ def subdivide_elements(
                 node_i=prev_node_id,
                 node_j=j_node_id,
                 angle=elem.angle,
+                parent_id=eid,
             )
             seg_tags.append(sub_elem_id)
             if eid in assignments:
