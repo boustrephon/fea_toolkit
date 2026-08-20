@@ -181,6 +181,9 @@ class TestPreprocessorRigidEndZones:
         link_ids = {link[0] for link in mesh.offset_rigid_links}
         assert "1_rigid_j" in link_ids
         assert "2_rigid_i" in link_ids
+        # Column top offset node at z = 2.0 - 0.3 = 1.7 (explicit end_j wins
+        # over the auto-derived 0.2).
+        assert mesh.nodes["1_off_j"].z == pytest.approx(1.7)
 
     def test_orphan_joint_node_retained(self):
         """The joint node survives the orphan-node step (singularity fix).
