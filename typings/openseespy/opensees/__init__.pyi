@@ -404,7 +404,7 @@ def limitCurve(curve_type: str, tag: int, *args: Any) -> None:
 
         # Shear: rho, fc(psi), b, h, d, Fsw, Kdeg, Fres, defType, forType,
         #        ndI, ndJ, dof, perpDirn
-        limitCurve('Shear', tag, curveTag, rho, fc, b, h, d, fsw, kdeg,
+        limitCurve('Shear', tag, eleTag, rho, fc, b, h, d, fsw, kdeg,
                    fres, defType, forType, ndI, ndJ, dof, perpDirn)
 
         # ThreePoint: (x1,y1) (x2,y2) (x3,y3) + Kdeg, Fres, defType, forType
