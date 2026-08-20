@@ -387,7 +387,7 @@ def elwood_shear_drift_at_failure(
     fc_psi = _to_psi(geometry.fc, units)
     v_k = _to_kip(V, units)
     p_k = _to_kip(P, units)
-    if b_in <= 0.0 or d_in <= 0.0 or fc_psi <= 0.0:
+    if b_in <= 0.0 or h_in <= 0.0 or d_in <= 0.0 or fc_psi <= 0.0:
         return 0.01
     rho = geometry.rho
     k_slope = 500.0 * (b_in * d_in * math.sqrt(fc_psi) / 1000.0)
@@ -437,7 +437,7 @@ def elwood_shear_limit_force(
     h_in = _to_inch(geometry.h, units)
     d_in = _to_inch(geometry.d, units)
     fc_psi = _to_psi(geometry.fc, units)
-    if b_in <= 0.0 or d_in <= 0.0 or fc_psi <= 0.0:
+    if b_in <= 0.0 or h_in <= 0.0 or d_in <= 0.0 or fc_psi <= 0.0:
         return 0.0
     if drift < 0.01:
         # No failure below 1% drift — a near-infinite force in model units.
