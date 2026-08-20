@@ -328,13 +328,7 @@ def export_model_to_tcl(
                 # Out-of-plane shear modulus: honor Eout, else derive G from
                 # E and nu exactly as NDMaterial.to_tcl does.
                 eout = (
-                    nd_mat.Eout
-                    if nd_mat.Eout is not None
-                    else (
-                        nd_mat.E / (2.0 * (1.0 + nd_mat.nu))
-                        if nd_mat.nu is not None
-                        else nd_mat.E / 2.6
-                    )
+                    nd_mat.Eout if nd_mat.Eout is not None else nd_mat.E / (2.0 * (1.0 + nd_mat.nu))
                 )
                 lines.append(f"nDMaterial PlateFromPlaneStress {pf_tag} {tag} {eout:g}")
 
@@ -813,11 +807,7 @@ def tcl_materials_and_sections(
             if mat
             else DEFAULT_E_S_PA * _sf
         )
-        _G = (
-            (mat.G_mod if mat and mat.G_mod and mat.G_mod > 0 else DEFAULT_G_MOD_FRAC * _E)
-            if mat
-            else DEFAULT_G_MOD_FRAC * _E
-        )
+        _G = mat.shear_modulus(_E) if mat else DEFAULT_G_MOD_FRAC * _E
 
         # ── Fiber section ──
         gj = _G * sec.J

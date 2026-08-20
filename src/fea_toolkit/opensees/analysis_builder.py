@@ -1283,9 +1283,7 @@ class AnalysisBuilder:
                     nd_mat.stc,
                 )
                 eout = (
-                    nd_mat.Eout
-                    if nd_mat.Eout is not None
-                    else (nd_mat.E / (2.0 * (1.0 + nd_mat.nu)) if nd_mat.nu else nd_mat.E / 2.6)
+                    nd_mat.Eout if nd_mat.Eout is not None else nd_mat.E / (2.0 * (1.0 + nd_mat.nu))
                 )
                 ops.nDMaterial("PlateFromPlaneStress", wrapper_tag, ps_tag, eout)
 
@@ -2135,11 +2133,15 @@ class AnalysisBuilder:
             if not isinstance(sec, _ShellSec):
                 mat = self.mesh_model.materials.get(sec.material)
                 if mat is None:
-                    E_mod = 200e9
-                    G_mod = 80e9
+                    # Missing material reference — generic steel SI defaults
+                    # scaled to model units (same convention as
+                    # apply_material_defaults).
+                    _ssf = stress_scale_factor(self.units)
+                    E_mod = 200e9 * _ssf
+                    G_mod = 80e9 * _ssf
                 else:
                     E_mod = mat.E_mod or 200e9
-                    G_mod = mat.G_mod or (E_mod / 2.6)
+                    G_mod = mat.shear_modulus(E_mod)
 
                 _A = getattr(sec, "A", 0.0) or 0.0
                 _I33 = getattr(sec, "I33", 0.0) or 0.0
@@ -2336,14 +2338,14 @@ class AnalysisBuilder:
                 print(
                     f"  ⚠ Section {sec.name}: material '{sec.material}' not found, using defaults"
                 )
-            E_mod = 200e9
-            G_mod = 80e9
+            # Missing material reference — generic steel SI defaults scaled
+            # to model units (same convention as apply_material_defaults).
+            _ssf = stress_scale_factor(self.units)
+            E_mod = 200e9 * _ssf
+            G_mod = 80e9 * _ssf
         else:
             E_mod = mat.E_mod
-            if mat.G_mod and mat.G_mod > 0:
-                G_mod = mat.G_mod
-            else:
-                G_mod = E_mod / (2 * (1 + mat.nu)) if mat.nu else E_mod / 2.6
+            G_mod = mat.shear_modulus()
 
         _A = getattr(sec, "A", 0.0) or 0.0
         _I33 = getattr(sec, "I33", 0.0) or 0.0
@@ -2751,6 +2753,11 @@ class AnalysisBuilder:
             rigid_E = 2.0e14
             rigid_A = 1.0
             rigid_I = 1.0
+            # Arbitrary large shear modulus — the exact ratio is irrelevant
+            # for a numerical rigid link (an artificial stiffener, not a
+            # physical material).  Keep G large so shear/torsion never become
+            # the soft DOFs of the link.
+            rigid_G = rigid_E / 2.6
             ops.section(
                 "Elastic",
                 rigid_section_tag,
@@ -2758,7 +2765,7 @@ class AnalysisBuilder:
                 rigid_A,
                 rigid_I,
                 rigid_I,
-                rigid_E / 2.6,
+                rigid_G,
                 rigid_I,
             )
             self._rigid_section_tag = rigid_section_tag
@@ -2802,6 +2809,11 @@ class AnalysisBuilder:
                 rigid_E = 2.0e14
                 rigid_A = 1.0
                 rigid_I = 1.0
+                # Arbitrary large shear modulus — the exact ratio is irrelevant
+                # for a numerical rigid link (an artificial stiffener, not a
+                # physical material).  Keep G large so shear/torsion never
+                # become the soft DOFs of the link.
+                rigid_G = rigid_E / 2.6
                 ops.section(
                     "Elastic",
                     rigid_section_tag,
@@ -2809,7 +2821,7 @@ class AnalysisBuilder:
                     rigid_A,
                     rigid_I,
                     rigid_I,
-                    rigid_E / 2.6,
+                    rigid_G,
                     rigid_I,
                 )
                 self._rigid_section_tag = rigid_section_tag

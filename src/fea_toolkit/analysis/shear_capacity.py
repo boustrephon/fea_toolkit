@@ -335,11 +335,11 @@ def shear_backbone(
         epsilon_x=epsilon_x,
     )
 
-    e_mod = float(getattr(concrete, "E_mod", 0.0) or 0.0)
-    g_mod = float(getattr(concrete, "G_mod", 0.0) or 0.0)
-    if g_mod <= 0.0:
-        nu = float(getattr(concrete, "nu", 0.0) or 0.0)
-        g_mod = e_mod / (2.0 * (1.0 + nu)) if nu else e_mod / 2.6
+    g_mod = (
+        concrete.shear_modulus()
+        if hasattr(concrete, "shear_modulus")
+        else float(getattr(concrete, "G_mod", 0.0) or 0.0)
+    )
     a_gross = float(getattr(section, "A", 0.0) or 0.0)
     if not a_gross:
         a_gross = cap.bw * cap.d

@@ -13,6 +13,8 @@ from ..utils import (
     DEFAULT_FY_STEEL_PA,
     DEFAULT_G_C_PA,
     DEFAULT_G_MOD_FRAC,
+    DEFAULT_NU_C,
+    DEFAULT_NU_S,
     DEFAULT_RHO_MC_SI,
     DEFAULT_RHO_MS_SI,
     DEFAULT_RHO_WC_SI,
@@ -212,6 +214,25 @@ class Material:
     # Hysteretic stress-strain curve parameters (from MATERIAL PROPERTIES 03X)
     ss_curve: Optional[StressStrainCurve] = None
     extra: dict[str, Any] = field(default_factory=dict)  # all other properties
+
+    def shear_modulus(self, E_mod: Optional[float] = None) -> float:
+        """Elastic shear modulus (model units).
+
+        Returns ``G_mod`` when set; otherwise derives ``G = E / (2·(1+ν))``,
+        defaulting ν by material type (concrete ``DEFAULT_NU_C``, else
+        ``DEFAULT_NU_S``) when ν is missing.
+
+        Args:
+            E_mod: Optional E override used instead of ``self.E_mod`` when
+                deriving G (callers that apply their own E fallback pass it).
+        """
+        if self.G_mod and self.G_mod > 0:
+            return self.G_mod
+        E = self.E_mod if E_mod is None else E_mod
+        nu = self.nu
+        if not nu:
+            nu = DEFAULT_NU_C if (self.type or "").lower() == "concrete" else DEFAULT_NU_S
+        return E / (2.0 * (1.0 + nu))
 
 
 # ============================================================================
@@ -1124,11 +1145,7 @@ class NDMaterial:
             )
         if t == "PlateFromPlaneStress":
             src = wrapper_tag or tag
-            eout = (
-                self.Eout
-                if self.Eout is not None
-                else (self.E / (2.0 * (1.0 + self.nu)) if self.nu is not None else self.E / 2.6)
-            )
+            eout = self.Eout if self.Eout is not None else self.E / (2.0 * (1.0 + self.nu))
             return f"nDMaterial PlateFromPlaneStress {tag} {src} {eout:g}"
         if t == "FSAM":
             # OpenSees command (verified against the shipped wheel):
@@ -1532,6 +1549,76 @@ def _force_factor_from_units(fu: str) -> float:
     return force_to_si_factor({"F": fu})
 
 
+def apply_material_defaults(materials: dict[str, Material], units: dict[str, str]) -> None:
+    """Fill missing material properties with SI defaults scaled to model units.
+
+    Material-property defaults are authored in SI (Pa, N/m³, kg/m³) and
+    scaled to the target unit system by the canonical ``utils`` factors:
+
+        model_value = SI_default * scale_factor(units)
+
+    After calling this, all materials are guaranteed to have non-zero
+    values for E_mod, Fy, Fc, unit_weight, unit_mass, etc.  Consumers
+    can read these values directly — no fallback logic needed.
+
+    This is the **single source of truth** for material defaulting.
+    :meth:`SAPModelData.apply_material_defaults` and
+    :meth:`MeshModel.apply_material_defaults` delegate here, and the
+    Preprocessor invokes it at the MeshModel boundary.
+
+    Args:
+        materials: Materials to fill in-place.
+        units: Model unit dict (``{"F": ..., "L": ..., "T": ...}``).
+    """
+    ssf = stress_scale_factor(units)  # Pa → model stress
+    wdsf = weight_density_scale_factor(units)  # N/m³ → model W-density
+    mdsf = mass_density_scale_factor(units)  # kg/m³ → model M-density
+
+    for mat in materials.values():
+        is_concrete = mat.type and mat.type.lower() == "concrete"
+
+        # E_mod — use concrete modulus for concrete, steel modulus otherwise
+        if not mat.E_mod or mat.E_mod <= 0:
+            if is_concrete:
+                mat.E_mod = DEFAULT_E_C_PA * ssf
+            else:
+                mat.E_mod = DEFAULT_E_S_PA * ssf
+
+        # Fy — use rebar default for rebar/tendon, steel default otherwise
+        if not mat.Fy or mat.Fy <= 0:
+            if mat.type and mat.type.lower() in ("rebar", "tendon"):
+                mat.Fy = DEFAULT_FY_REBAR_PA * ssf
+            else:
+                mat.Fy = DEFAULT_FY_STEEL_PA * ssf
+
+        # Fc (concrete compressive strength) — only for concrete materials
+        if is_concrete and (not mat.Fc or mat.Fc <= 0):
+            mat.Fc = DEFAULT_FC_PA * ssf
+
+        # G_mod — derive from E_mod via Poisson's ratio if missing
+        if not mat.G_mod or mat.G_mod <= 0:
+            if mat.nu and abs(mat.nu) > 1e-12:
+                mat.G_mod = mat.E_mod / (2.0 * (1.0 + abs(mat.nu)))
+            elif is_concrete:
+                mat.G_mod = DEFAULT_G_C_PA * ssf
+            else:
+                mat.G_mod = DEFAULT_G_MOD_FRAC * mat.E_mod
+
+        # unit_weight (N/m³ → model units)
+        if not mat.unit_weight or abs(mat.unit_weight) < 1e-12:
+            if is_concrete:
+                mat.unit_weight = DEFAULT_RHO_WC_SI * wdsf
+            else:
+                mat.unit_weight = DEFAULT_RHO_WS_SI * wdsf
+
+        # unit_mass (kg/m³ → model units)
+        if not mat.unit_mass or abs(mat.unit_mass) < 1e-12:
+            if is_concrete:
+                mat.unit_mass = DEFAULT_RHO_MC_SI * mdsf
+            else:
+                mat.unit_mass = DEFAULT_RHO_MS_SI * mdsf
+
+
 @dataclass
 class SAPModelData:
     """Complete SAP2000 model data for export to OpenSees or Rhino."""
@@ -1681,55 +1768,11 @@ class SAPModelData:
         After calling this, all materials are guaranteed to have non-zero
         values for E_mod, Fy, Fc, unit_weight, unit_mass, etc.  Consumers
         can read these values directly — no fallback logic needed.
+
+        Delegates to the module-level :func:`apply_material_defaults`
+        (the single source of truth shared with :class:`MeshModel`).
         """
-        ssf = stress_scale_factor(self.units)  # Pa → model stress
-        wdsf = weight_density_scale_factor(self.units)  # N/m³ → model W-density
-        mdsf = mass_density_scale_factor(self.units)  # kg/m³ → model M-density
-
-        for mat in self.materials.values():
-            is_concrete = mat.type and mat.type.lower() == "concrete"
-            mat.type and mat.type.lower() in ("steel", "rebar", "tendon")
-
-            # E_mod — use concrete modulus for concrete, steel modulus otherwise
-            if not mat.E_mod or mat.E_mod <= 0:
-                if is_concrete:
-                    mat.E_mod = DEFAULT_E_C_PA * ssf
-                else:
-                    mat.E_mod = DEFAULT_E_S_PA * ssf
-
-            # Fy — use rebar default for rebar/tendon, steel default otherwise
-            if not mat.Fy or mat.Fy <= 0:
-                if mat.type and mat.type.lower() in ("rebar", "tendon"):
-                    mat.Fy = DEFAULT_FY_REBAR_PA * ssf
-                else:
-                    mat.Fy = DEFAULT_FY_STEEL_PA * ssf
-
-            # Fc (concrete compressive strength) — only for concrete materials
-            if is_concrete and (not mat.Fc or mat.Fc <= 0):
-                mat.Fc = DEFAULT_FC_PA * ssf
-
-            # G_mod — derive from E_mod via Poisson's ratio if missing
-            if not mat.G_mod or mat.G_mod <= 0:
-                if mat.nu and abs(mat.nu) > 1e-12:
-                    mat.G_mod = mat.E_mod / (2.0 * (1.0 + abs(mat.nu)))
-                elif is_concrete:
-                    mat.G_mod = DEFAULT_G_C_PA * ssf
-                else:
-                    mat.G_mod = DEFAULT_G_MOD_FRAC * mat.E_mod
-
-            # unit_weight (N/m³ → model units)
-            if not mat.unit_weight or abs(mat.unit_weight) < 1e-12:
-                if is_concrete:
-                    mat.unit_weight = DEFAULT_RHO_WC_SI * wdsf
-                else:
-                    mat.unit_weight = DEFAULT_RHO_WS_SI * wdsf
-
-            # unit_mass (kg/m³ → model units)
-            if not mat.unit_mass or abs(mat.unit_mass) < 1e-12:
-                if is_concrete:
-                    mat.unit_mass = DEFAULT_RHO_MC_SI * mdsf
-                else:
-                    mat.unit_mass = DEFAULT_RHO_MS_SI * mdsf
+        apply_material_defaults(self.materials, self.units)
 
     # ── Utility methods ──────────────────────────────────────────
 
