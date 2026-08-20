@@ -11,19 +11,25 @@ import openseespy.opensees as ops
 import pytest
 
 import fea_toolkit.opensees.analysis_builder as ab_mod
-from fea_toolkit.model.mesh_model import MeshModel
+from fea_toolkit.model.mesh_model import MeshModel, WallElement
 from fea_toolkit.model.sap_data import (
     AreaElementProperties,
     FrameElementProperties,
     LayeredShellSection,
     Material,
     NDMaterial,
+    Node,
     SAPModelData,
     ShellFiberLayer,
 )
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.opensees.builder import export_model_to_tcl
 from fea_toolkit.opensees.recorder import RecordingOpenSees
+from fea_toolkit.utils import (
+    DEFAULT_RHO_MC_SI,
+    g_from_units,
+    mass_density_scale_factor,
+)
 
 # ═══════════════════════════════════════════════════════════════════
 # FrameElementProperties
@@ -287,7 +293,11 @@ class TestFSAMUniaxialDispatch:
         — only consumed FSAM materials force ConcreteCM / Steel02 for
         their referenced uniaxial laws (see the unconsumed-FSAM test).
         """
-        # Model units: kN, m → stress factor = kN/m²  (Pa → kN/m² scale 0.001)
+        # Model units: kN, m → stress in kN/m².  Fc/Fy and E_mod are authored
+        # directly in model units (30 MPa → 30.0e3, 420 MPa → 420.0e3,
+        # 250 MPa → 250.0e3 kN/m²; 30/200 GPa → 30.0e6/200.0e6 kN/m²) —
+        # _create_materials consumes material Fc/Fy/E_mod unscaled, treating
+        # them as already in model units.
         mm = MeshModel(
             nodes={},
             frame_elements={},
@@ -296,9 +306,9 @@ class TestFSAMUniaxialDispatch:
             area_assignments={},
             frame_dist_loads=[],
             materials={
-                "WallConc": Material(name="WallConc", type="Concrete", Fc=30.0e6, E_mod=30.0e9),
-                "WallSteel": Material(name="WallSteel", type="Rebar", Fy=420.0e6, E_mod=200.0e9),
-                "FrameSteel": Material(name="FrameSteel", type="Steel", Fy=250.0e6, E_mod=200.0e9),
+                "WallConc": Material(name="WallConc", type="Concrete", Fc=30.0e3, E_mod=30.0e6),
+                "WallSteel": Material(name="WallSteel", type="Rebar", Fy=420.0e3, E_mod=200.0e6),
+                "FrameSteel": Material(name="FrameSteel", type="Steel", Fy=250.0e3, E_mod=200.0e6),
             },
             nd_materials={
                 "wall_fsam": NDMaterial(
@@ -371,6 +381,35 @@ class TestFSAMUniaxialDispatch:
         assert laws[1] == "Elastic"  # WallConc — not forced to ConcreteCM
         assert laws[2] == "Elastic"  # WallSteel — not forced to Steel02
         assert laws[3] == "Elastic"  # FrameSteel
+
+    def test_build_domain_unconsumed_fsam_skipped(self):
+        """``build_domain()`` must not create a configured-but-unconsumed FSAM
+        nD material.
+
+        ``_create_fsam_materials()`` only creates FSAM materials actually
+        consumed by a LayeredShell layer or an SFI/E_SFI wall element.  When
+        ``_fsam_consumed`` exists but is empty (configured FSAM, no consumer),
+        it must still return early — otherwise the FSAM nD material is
+        created against the generic Elastic uniaxial laws, which lack
+        ``getCrackingStrain()`` and crash the OpenSees FSAM constructor.
+        """
+        builder = self._make_builder()
+        # Drop the consuming LayeredShell section → the FSAM is unconsumed.
+        builder.mesh_model.layered_shell_sections = {}
+        rec = RecordingOpenSees(ops)
+        ab_mod.ops = rec
+        try:
+            builder.build_domain()
+        finally:
+            ab_mod.ops = ops
+            ops.wipe()
+
+        fsam_calls = [
+            args
+            for name, args, _kwargs in rec.commands
+            if name == "nDMaterial" and args and args[0] == "FSAM"
+        ]
+        assert fsam_calls == []
 
     def test_fsam_laws_supported_by_wheel(self):
         """Fail loudly if the wheel lacks ConcreteCM / Steel02 support.
@@ -522,6 +561,81 @@ class TestTclExportPlateFromPlaneStress:
     def test_export_honors_eout(self, tmp_path):
         line = self._plate_line(tmp_path, self._model(eout=12.0e9))
         assert float(line.split()[-1]) == pytest.approx(12.0e9, rel=1e-12)
+
+
+class TestTclExportMVLEMRho:
+    """Verify export_model_to_tcl emits a unit-aware ``-rho`` fallback for
+    MVLEM_3D walls, matching ``AnalysisBuilder._create_mvlem3d_wall``."""
+
+    def _wall_line(self, tmp_path, rho=None, unit_weight=24.0) -> str:
+        mm = MeshModel(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0.0, y=0.0, z=0.0),
+                "2": Node(node_id="2", node_tag=2, x=4.0, y=0.0, z=0.0),
+                "3": Node(node_id="3", node_tag=3, x=4.0, y=0.0, z=4.0),
+                "4": Node(node_id="4", node_tag=4, x=0.0, y=0.0, z=4.0),
+            },
+            frame_elements={},
+            frame_assignments={},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+            materials={
+                "concrete": Material(
+                    name="concrete",
+                    type="Concrete",
+                    Fc=30.0e3,
+                    E_mod=30.0e6,
+                    unit_weight=unit_weight,
+                ),
+                "steel": Material(
+                    name="steel",
+                    type="Rebar",
+                    Fy=420.0e3,
+                    E_mod=200.0e6,
+                ),
+            },
+            wall_elements={
+                "W1": WallElement(
+                    elem_id="W1",
+                    elem_tag=10,
+                    node_ids=["1", "2", "3", "4"],
+                    m=2,
+                    thick=[0.3, 0.3],
+                    width=[2.0, 2.0],
+                    fsam_material_names=[],
+                    material_type="uniaxial",
+                    concrete_names=["concrete", "concrete"],
+                    steel_names=["steel", "steel"],
+                    shear_name="concrete",
+                    rho=rho,
+                ),
+            },
+            units={"F": "kN", "L": "m", "T": "C"},
+        )
+        out = tmp_path / "wall_mvlem.tcl"
+        export_model_to_tcl(mm, str(out), config={"create_fiber_sections": False})
+        return next(line for line in out.read_text().splitlines() if "element MVLEM_3D" in line)
+
+    @staticmethod
+    def _rho_values(line: str) -> list[float]:
+        return [
+            float(v) for v in line.split("-rho")[1].split("-matConcrete", maxsplit=1)[0].split()
+        ]
+
+    def test_fallback_derives_from_concrete_unit_weight(self, tmp_path):
+        line = self._wall_line(tmp_path, unit_weight=24.0)
+        expect = 24.0 / g_from_units({"F": "kN", "L": "m", "T": "C"})
+        assert all(abs(v - expect) < 1e-9 for v in self._rho_values(line))
+
+    def test_explicit_rho_preserved(self, tmp_path):
+        line = self._wall_line(tmp_path, rho=[2400.0, 2400.0])
+        assert self._rho_values(line) == [2400.0, 2400.0]
+
+    def test_fallback_scales_si_default_when_no_unit_weight(self, tmp_path):
+        line = self._wall_line(tmp_path, unit_weight=0.0)
+        expect = DEFAULT_RHO_MC_SI * mass_density_scale_factor({"F": "kN", "L": "m", "T": "C"})
+        assert all(abs(v - expect) < 1e-9 for v in self._rho_values(line))
 
 
 class TestLayeredShellSection:

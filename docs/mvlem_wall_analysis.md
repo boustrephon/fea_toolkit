@@ -150,6 +150,10 @@ WallElement(
 )
 ```
 
+`WallElement.__post_init__` validates every per-fibre list against `m`
+and rejects `m < 1` with a `ValueError`, so an invalid wall (zero or
+negative fibre count) cannot reach domain construction.
+
 The Preprocessor populates it from wall-classified areas when
 `element_strategies.wall.element_type` is one of `SFI_MVLEM_3D` /
 `E_SFI_MVLEM_3D` / `MVLEM_3D` (see §5.2 / §5.4) and marks the source
@@ -199,6 +203,15 @@ positive magnitudes causes the FSAM damage-coefficient initialiser to
 fail at domain-build time (`Damage Coefficient ErRoR !`) when an
 `SFI_MVLEM_3D` element consumes the material.
 
+Only FSAM nD materials that are actually **consumed** — referenced by a
+`LayeredShell` layer or an `SFI_MVLEM_3D` / `E_SFI_MVLEM_3D` wall
+element — are created by `_create_fsam_materials()`.  A
+configured-but-unconsumed FSAM is skipped (the consumed-name set is
+stashed by `_create_materials()` in `_fsam_consumed`, which may be
+empty); creating it would reference the generic Elastic uniaxial laws,
+which lack `getCrackingStrain()` and crash the OpenSees FSAM
+constructor.
+
 ### 4.4 Tcl export
 
 `export_model_to_tcl()` passes the material-tag map (`_mat_tag`) to
@@ -214,6 +227,13 @@ Wall elements are exported after the shells: uniaxial walls emit
 with `-mat` FSAM tags.  A wall whose material resolution is incomplete
 (e.g. a missing FSAM name, or a missing uniaxial shear spring) is
 reported with a `⚠ [export_model_to_tcl]` warning and skipped.
+
+For uniaxial MVLEM_3D walls the `-rho` list uses the same unit-aware
+fallback as `AnalysisBuilder._create_mvlem3d_wall()`: an explicit
+`WallElement.rho` is preserved; otherwise the density is derived from
+the referenced concrete's `unit_weight / g` (via `g_from_units`), or
+from `DEFAULT_RHO_MC_SI` scaled to model units when the concrete has no
+unit weight — never a hardcoded SI literal.
 
 ### 4.5 Unit scaling
 

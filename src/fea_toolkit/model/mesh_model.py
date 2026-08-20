@@ -98,6 +98,45 @@ class WallElement:
     Poisson: Optional[float] = None
     Density: Optional[float] = None
 
+    def __post_init__(self) -> None:
+        """Validate per-fibre list lengths before OpenSees command generation.
+
+        Every per-fibre list supplied for this wall must contain exactly
+        ``m`` entries so the builder can emit balanced ``-thick`` /
+        ``-width`` / ``-mat`` / ``-matConcrete`` / ``-matSteel`` / ``-rho``
+        argument lists.  ``fsam_material_names`` is validated only for the
+        FSAM family (``material_type != "uniaxial"``): MVLEM_3D walls carry
+        an intentionally empty list because their per-fibre materials live
+        in ``concrete_names`` / ``steel_names`` instead.
+
+        Raises:
+            ValueError: If ``m`` is less than 1, or if ``m`` mismatches the
+                length of ``thick``, ``width``, ``fsam_material_names``
+                (FSAM family), or any supplied ``concrete_names`` /
+                ``steel_names`` / ``rho``.
+        """
+        if self.m < 1:
+            raise ValueError(f"WallElement '{self.elem_id}': m must be at least 1, got {self.m}.")
+        per_fibre_fields: list[tuple[str, Optional[list]]] = [
+            ("thick", self.thick),
+            ("width", self.width),
+            ("fsam_material_names", self.fsam_material_names),
+            ("concrete_names", self.concrete_names),
+            ("steel_names", self.steel_names),
+            ("rho", self.rho),
+        ]
+        for field_name, values in per_fibre_fields:
+            if values is None:
+                continue
+            if field_name == "fsam_material_names" and self.material_type == "uniaxial":
+                continue
+            if len(values) != self.m:
+                raise ValueError(
+                    f"WallElement '{self.elem_id}': per-fibre field "
+                    f"'{field_name}' has length {len(values)} but m={self.m} "
+                    f"— expected exactly {self.m} entries."
+                )
+
 
 @dataclass
 class MeshModel:
@@ -121,9 +160,10 @@ class MeshModel:
     # ── Loads (redistributed to split children) ───────────────────
     frame_dist_loads: list[FrameDistributedLoad]
     edge_loads_from_areas: list = field(default_factory=list)
-    # ── Wall elements (SFI_MVLEM_3D macro-elements) ───────────────
+    # ── Wall elements (SFI_MVLEM_3D / E_SFI_MVLEM_3D / MVLEM_3D) ──
     # Populated by the Preprocessor from wall-classified areas when
-    # ``element_strategies.wall.element_type == "SFI_MVLEM_3D"``.
+    # ``element_strategies.wall.element_type`` is one of the supported
+    # wall macro-element types (SFI_MVLEM_3D, E_SFI_MVLEM_3D, MVLEM_3D).
     wall_elements: dict[str, WallElement] = field(default_factory=dict)
     #   elem_id → WallElement
     # (list of tuples — exact format matches builder's edge_loads_from_areas)
