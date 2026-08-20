@@ -349,7 +349,10 @@ per the `AreaMesh` settings (`max_size`, `MeshType`).
   a base frame edge whose endpoints are fully fixed will inherit
   ``ops.fix(1,1,1,1,1,1)``.  Interior mesh nodes and nodes on unsupported
   edges are **not** automatically restrained — they remain free unless
-  explicitly fixed elsewhere.
+  explicitly fixed elsewhere.  A one-row mesh (``n_u >= 2``, ``n_v == 1``)
+  is still processed: its bottom/top-edge intermediate nodes inherit the
+  corner restraints.  Propagation returns early only when there are no
+  restraints or when neither mesh direction has intermediate edge nodes.
 
 #### 2k — `_create_shell_elements()`
 
