@@ -419,6 +419,13 @@ def report_shear_failure(
         concrete = mesh.materials.get(getattr(sec, "material", ""))
         if concrete is None or str(getattr(concrete, "type", "")).lower() != "concrete":
             continue  # steel members are not shear-checked
+        # Skip sections with degenerate concrete shear geometry (fc, bw or
+        # dv non-positive — e.g. a section missing depth/bf), so
+        # member_shear_capacity cannot raise and abort the whole report.
+        _g = section_shear_geometry(sec)
+        _fc = float(getattr(concrete, "Fc", 0.0) or 0.0)
+        if _fc <= 0.0 or _g.bw <= 0.0 or _g.dv <= 0.0:
+            continue
         rebar = mesh.materials.get(getattr(sec, "rebar_material", "") or "")
         tie = mesh.materials.get(getattr(sec, "tie_rebar_mat", "") or "")
         tag = builder.frame_tag_map.get(eid, getattr(elem, "elem_tag", eid))
