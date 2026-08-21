@@ -50,6 +50,12 @@ plugins:
         python:
           options:
             docstring_style: google
+            # griffe 1.x/2.x warns on every unannotated parameter/return;
+            # that is pervasive styling noise in this codebase, so keep the
+            # gate focused on real docstring bugs (unknown params, malformed
+            # sections) instead. Indentation/unknown-param warnings stay on.
+            docstring_options:
+              warn_missing_types: false
             show_source: true
             show_root_heading: true
             show_category_heading: true
@@ -84,6 +90,7 @@ nav:
       - Constraint Edge Detection: constraint_detection.md
       - Diaphragm Constraints & Storey ID: diaphragm_constraints.md
       - Mander Confinement Validation: mander_confinement_validation.md
+      - Capacity Modules (GB 50010): capacity.md
   - Export & Visualisation:
       - Rhino 3-D Export: rhino_export.md
       - Tcl Export: tcl_export.md
@@ -102,6 +109,7 @@ nav:
       - io: api/io.md
       - opensees: api/opensees.md
       - analysis: api/analysis.md
+      - capacity: api/capacity.md
       - mesh: api/mesh.md
       - plotting: api/plotting.md
       - rhino: api/rhino.md
