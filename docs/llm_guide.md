@@ -397,22 +397,22 @@ explicitly:
 
 ```bash
 # The project's dev/validation environment (Python 3.12, openseespy 3.8.0.0).
-# Point at the project venv explicitly — $VIRTUAL_ENV resolves to it once
-# activated; substitute your own venv path otherwise:
-"$VIRTUAL_ENV/bin/python" examples/foo.py
+# Point VENV at the project virtualenv explicitly (substitute your own path):
+VENV="/path/to/your/venv"
+
+# Run the example with the venv interpreter:
+"$VENV/bin/python" examples/foo.py
 
 # ...or activate it first:
-source "$VIRTUAL_ENV/bin/activate"
+source "$VENV/bin/activate"
 ```
 
 Confirm the interpreter and OpenSeesPy version actually in use before trusting
 results (identical openseespy version across environments → equivalent FEA
 results; differing versions → re-validate):
 
-```python
-import sys, fea_toolkit
-print(sys.executable)
-print(fea_toolkit.ops_version())   # e.g. "3.8.0.0"
+```bash
+"$VENV/bin/python" -c "import sys, fea_toolkit; print(sys.executable); print(fea_toolkit.ops_version())"
 ```
 
 ### `run_static_analysis()` raises `RuntimeError` on non-convergence
@@ -440,8 +440,8 @@ an outdated pip-installed copy.  If behaviour looks stale, verify which copy is
 loaded and resync:
 
 ```bash
-python -c "import fea_toolkit; print(fea_toolkit.__file__); print(fea_toolkit.__version__)"
-python -m pip install -e .   # editable — tracks the working tree; run pip via the venv interpreter
+"$VENV/bin/python" -c "import fea_toolkit; print(fea_toolkit.__file__); print(fea_toolkit.__version__)"
+"$VENV/bin/python" -m pip install -e .   # editable — tracks the working tree
 ```
 
 ---
