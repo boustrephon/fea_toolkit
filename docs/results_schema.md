@@ -41,7 +41,7 @@ This means every NPZ array can be mapped 1:1 to an xarray DataArray.
 ## Canonical runtime contract
 
 The repository-owned general analysis/report engine is the
-`generate_report()` entry point in [src/fea_toolkit/report.py](../src/fea_toolkit/report.py).
+`generate_report()` entry point in `src/fea_toolkit/report.py`.
 That function is the canonical runtime contract for the two‑stage pipeline.
 
 Its responsibilities are to:
@@ -301,13 +301,13 @@ For the admin building: `Admin_0.7E_short term_results.npz`
 
 ## Immediate implementation checklist
 
-1. Lock the shared per-case runtime contract in [src/fea_toolkit/analysis/base.py](../src/fea_toolkit/analysis/base.py) with a minimal `AnalysisCaseSpec` dataclass.
-2. Re-export that contract from [src/fea_toolkit/analysis/__init__.py](../src/fea_toolkit/analysis/__init__.py) so all callers use the same package-level API.
-3. Keep [src/fea_toolkit/report.py](../src/fea_toolkit/report.py) as the canonical repository-owned `generate_report()` / `run_all()` entry point.
-4. Make the report result dictionary the stable bundle consumed by [src/fea_toolkit/io/npz_writer.py](../src/fea_toolkit/io/npz_writer.py).
-5. Keep [src/fea_toolkit/model/mesh_model.py](../src/fea_toolkit/model/mesh_model.py) as the shared frozen `MeshModel` handoff object between preprocessing and analysis.
-6. Treat [src/fea_toolkit/opensees/builder.py](../src/fea_toolkit/opensees/builder.py) as a Tcl-export helper only; do not route the active v3 runtime through it.
-7. Keep private Pumphouse files under [local/CLP_BSDG_Latest_Models/Pumphouse](../local/CLP_BSDG_Latest_Models/Pumphouse) as thin wrappers that call the shared report engine.
+1. Lock the shared per-case runtime contract in `src/fea_toolkit/analysis/base.py` with a minimal `AnalysisCaseSpec` dataclass.
+2. Re-export that contract from `src/fea_toolkit/analysis/__init__.py` so all callers use the same package-level API.
+3. Keep `src/fea_toolkit/report.py` as the canonical repository-owned `generate_report()` / `run_all()` entry point.
+4. Make the report result dictionary the stable bundle consumed by `src/fea_toolkit/io/npz_writer.py`.
+5. Keep `src/fea_toolkit/model/mesh_model.py` as the shared frozen `MeshModel` handoff object between preprocessing and analysis.
+6. Treat `src/fea_toolkit/opensees/builder.py` as a Tcl-export helper only; do not route the active v3 runtime through it.
+7. Keep private Pumphouse files under `local/CLP_BSDG_Latest_Models/Pumphouse` as thin wrappers that call the shared report engine.
 
 ## Mapping to opstool ODB
 
@@ -346,16 +346,16 @@ ds_modal = xr.Dataset(
 
 The schema should therefore be implemented with this ownership split:
 
-1. **Shared report orchestration** — [src/fea_toolkit/report.py](../src/fea_toolkit/report.py)
+1. **Shared report orchestration** — `src/fea_toolkit/report.py`
    * owns the result dict contract and the `run_all()` pipeline
 2. **Shared preprocessing and analysis realization** —
-   [src/fea_toolkit/opensees/preprocessor.py](../src/fea_toolkit/opensees/preprocessor.py),
-   [src/fea_toolkit/model/mesh_model.py](../src/fea_toolkit/model/mesh_model.py),
-   [src/fea_toolkit/opensees/analysis_builder.py](../src/fea_toolkit/opensees/analysis_builder.py)
+   `src/fea_toolkit/opensees/preprocessor.py`,
+   `src/fea_toolkit/model/mesh_model.py`,
+   `src/fea_toolkit/opensees/analysis_builder.py`
    * provide the data objects consumed by the report engine
-3. **Result serialisation** — [src/fea_toolkit/io/npz_writer.py](../src/fea_toolkit/io/npz_writer.py)
+3. **Result serialisation** — `src/fea_toolkit/io/npz_writer.py`
    * turns the standard dict output into the unified NPZ arrays
-4. **Private local wrappers** — [local/CLP_BSDG_Latest_Models/Pumphouse](../local/CLP_BSDG_Latest_Models/Pumphouse)
+4. **Private local wrappers** — `local/CLP_BSDG_Latest_Models/Pumphouse`
    * supply private paths and presentation-specific wrappers
    * do not contain the general analytical heart
 

@@ -97,7 +97,7 @@ The implementation should now be split into two distinct responsibilities.
 
 ### 6.1 Canonical repository-owned report entry point
 
-The repository-owned orchestration heart should live in [src/fea_toolkit/report.py](../src/fea_toolkit/report.py), specifically in the shared `generate_report()` / `run_all()`-style flow.
+The repository-owned orchestration heart should live in `src/fea_toolkit/report.py`, specifically in the shared `generate_report()` / `run_all()`-style flow.
 
 That file is the correct place for the generalised, reusable analysis pipeline because it owns the sequence:
 
@@ -111,7 +111,7 @@ The shared `report` package entry point should therefore be the canonical “run
 
 ### 6.2 Private local wrappers
 
-Private project-specific drivers, such as those under [local/CLP_BSDG_Latest_Models/Pumphouse](../local/CLP_BSDG_Latest_Models/Pumphouse), should remain thin wrappers.
+Private project-specific drivers, such as those under `local/CLP_BSDG_Latest_Models/Pumphouse`, should remain thin wrappers.
 
 Their role is not to host the general engine. Instead, they should:
 
@@ -465,7 +465,7 @@ The Pumphouse v3 flow should be structured as:
 
 ### 13.2 How the shared report layer should consume this
 
-The shared report layer in [src/fea_toolkit/report.py](../src/fea_toolkit/report.py) should remain the canonical orchestration point.
+The shared report layer in `src/fea_toolkit/report.py` should remain the canonical orchestration point.
 
 That means the generalised “run all” flow should be implemented once in the repository and then reused from private local drivers.  The local Pumphouse wrapper should not duplicate the engine; it should delegate to the shared report entry point.
 
@@ -593,7 +593,7 @@ The work should be broken into the following tasks.
 
 ### Task 5 — Align the local v3 scripts
 
-- use [local/CLP_BSDG_Latest_Models/Admin_Building/admin_linear_v3.py](../local/CLP_BSDG_Latest_Models/Admin_Building/admin_linear_v3.py) as the canonical reference
+- use `local/CLP_BSDG_Latest_Models/Admin_Building/admin_linear_v3.py` as the canonical reference
 - align the Pumphouse v3 path to that same architecture
 - keep the old v1/v2 report flows out of scope for the migration
 
@@ -608,12 +608,12 @@ Yes — in the current implementation, the original super-elements are preserved
 
 This is already reflected in the dataclasses:
 
-- `FrameElement` in [src/fea_toolkit/model/sap_data.py](../src/fea_toolkit/model/sap_data.py#L766-L805)
-- `AreaElement` in [src/fea_toolkit/model/sap_data.py](../src/fea_toolkit/model/sap_data.py#L779-L805)
+- `FrameElement` in `src/fea_toolkit/model/sap_data.py`
+- `AreaElement` in `src/fea_toolkit/model/sap_data.py`
 
 and in the subdivision logic:
 
-- the original frame element is marked `inactive = True` and the child elements are created with `inactive = False` in [src/fea_toolkit/model/geometry.py](../src/fea_toolkit/model/geometry.py#L919-L958)
+- the original frame element is marked `inactive = True` and the child elements are created with `inactive = False` in `src/fea_toolkit/model/geometry.py`
 - the same pattern is used for subdivision of the original area super-elements in the mesh routines
 
 So the intended meaning is:
