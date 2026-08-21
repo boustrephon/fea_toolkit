@@ -1686,9 +1686,9 @@ force/moment diagram on the structure, with two display modes:
 * ``mode='tube'`` — colour‑coded tubes along each element (red = +ve,
   blue = −ve).
 
-**All forces are transformed to local coordinates** via
-:func:`_get_local_end_forces` before plotting, so the moment sign and
-direction are correct regardless of member orientation:
+**All forces are transformed to local coordinates** before plotting
+(using the element's local axes), so the moment sign and direction are
+correct regardless of member orientation:
 
 * ``'Mz'`` — major‑axis bending (flags extend in local **y** direction)
 * ``'My'`` — minor‑axis bending (flags extend in local **z** direction)
@@ -1734,15 +1734,15 @@ force.
 
 ### 2D force diagrams (Matplotlib)
 
-:func:`~fea_toolkit.plotting.viz.plot_static_force_diagram` produces a
-2D line plot of any end‑force quantity against elevation:
+:func:`~fea_toolkit.plotting.viz.plot_npz_force_diagram` produces a
+2D line plot of any end-force quantity against elevation:
 
 ```python
-from fea_toolkit.plotting.viz import plot_static_force_diagram
+from fea_toolkit.plotting import plot_npz_force_diagram
 
 # Local Mz (major-axis bending) — default use_local=True
-fig = plot_static_force_diagram(builder, forces, quantity="Mz",
-                                title="Major-axis moment vs elevation")
+fig = plot_npz_force_diagram("results.npz", quantity="Mz",
+                             title="Major-axis moment vs elevation")
 fig.savefig("moment.png")
 ```
 

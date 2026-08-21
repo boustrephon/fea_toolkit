@@ -36,16 +36,8 @@ jobs:
       - name: Regenerate documentation index
         run: python docs/_generate_index.py
 
-      # Check strict first (non-blocking) — builds into temp dir so the
-      # relaxed build below is always the final writer to site/.
-      # TODO: restore `--strict` as the gate by v0.3
-
-      - name: Check strict (non-blocking)
-        run: mkdocs build --strict --site-dir /tmp/mkdocs-strict
-        continue-on-error: true
-
-      - name: Build MkDocs site (relaxed)
-        run: mkdocs build
+      - name: Build MkDocs site (strict)
+        run: mkdocs build --strict
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

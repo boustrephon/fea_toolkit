@@ -2548,18 +2548,35 @@ class TestCqcCombineUtils:
 
 
 class TestPlottingImports:
-    def test_force_diagram_no_data(self):
-        from fea_toolkit.plotting import plot_force_diagram
+    def test_rs_force_diagram_no_data(self):
+        from fea_toolkit.plotting import plot_rs_force_diagram
 
-        fig = plot_force_diagram([], "My_i")
+        fig = plot_rs_force_diagram([], "My_i")
         assert fig is None
 
-    def test_static_force_diagram_missing_matplotlib(self):
-        """Just verify the import path resolves; actual plotting
-        requires matplotlib which may not be available in CI."""
-        from fea_toolkit.plotting import plot_static_force_diagram
+    def test_rs_force_diagram_unwraps_result_dict(self):
+        """plot_rs_force_diagram accepts the full extract_element_rs_forces dict."""
+        from fea_toolkit.plotting import plot_rs_force_diagram
 
-        assert callable(plot_static_force_diagram)
+        # Empty dict unwraps to no element results → None (no matplotlib needed)
+        assert plot_rs_force_diagram({}, "My_i") is None
+
+    def test_deprecated_plot_names_removed(self):
+        """The deprecated plot functions are no longer part of the public API."""
+        from fea_toolkit import plotting
+
+        for name in (
+            "plot_model_3d",
+            "plot_deformed_3d",
+            "plot_rs_deformed_3d",
+            "plot_mode_3d",
+            "plot_static_moment_3d",
+            "plot_static_shear_3d",
+            "plot_static_axial_3d",
+            "plot_static_force_diagram",
+            "plot_force_diagram",
+        ):
+            assert not hasattr(plotting, name), f"{name} should have been removed"
 
     def test_force_diagram_3d_import(self):
         """plot_force_diagram_3d is callable from the plotting package."""

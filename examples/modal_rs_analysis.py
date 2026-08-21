@@ -18,8 +18,8 @@ Usage::
     python examples/modal_rs_analysis.py --sample
 """
 
-import sys
 import argparse
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))  # project root
@@ -27,8 +27,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from fea_toolkit import __version__, ops_version
 from fea_toolkit.io.s2k_parser import SAP2000Parser
-from fea_toolkit.opensees.preprocessor import preprocess_model
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
 
 
 def gb50011_spectrum(T, A=0.16, Tg=0.35, zeta=0.05):
@@ -40,12 +40,12 @@ def gb50011_spectrum(T, A=0.16, Tg=0.35, zeta=0.05):
     eta2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))
     if T <= 0.1:
         beta = 0.45 + (eta2 - 0.45) * 10.0 * T
-    elif T <= Tg:
+    elif Tg >= T:
         beta = eta2
-    elif T <= 5.0 * Tg:
+    elif 5.0 * Tg >= T:
         beta = eta2 * (Tg / T) ** gamma
     else:
-        beta = eta2 * (0.2 ** gamma) - eta1 * (T - 5.0 * Tg)
+        beta = eta2 * (0.2**gamma) - eta1 * (T - 5.0 * Tg)
     return max(0.0, A * beta) * 9.81
 
 
@@ -54,15 +54,19 @@ def main():
         description="Modal + response spectrum analysis from a .s2k file.",
     )
     parser.add_argument(
-        "s2k_file", nargs="?",
+        "s2k_file",
+        nargs="?",
         help="Path to the SAP2000 text file (.s2k, .$2k). Omit when using --sample.",
     )
     parser.add_argument(
-        "--sample", action="store_true",
+        "--sample",
+        action="store_true",
         help="Use the built‑in cantilever sample model (no external file needed).",
     )
     parser.add_argument(
-        "--num-modes", type=int, default=30,
+        "--num-modes",
+        type=int,
+        default=30,
         help="Number of modes for eigenvalue analysis (default 30).",
     )
     args = parser.parse_args()
@@ -70,6 +74,7 @@ def main():
     # Determine input source
     if args.sample:
         from examples.sample_model import make_sample_model
+
         md = make_sample_model()
         source_name = "built‑in cantilever sample"
         print(f"FEA Toolkit Version: {__version__}")
@@ -93,23 +98,28 @@ def main():
     print(f"Frames: {len(md.frame_elements)}")
     print(f"Mass sources: {len(md.mass_sources)}")
     for name, ms in md.mass_sources.items():
-        print(f"  {name}: elements={ms.elements}, masses={ms.masses}, "
-              f"loads={ms.loads}, load_pattern={ms.load_pattern}")
+        print(
+            f"  {name}: elements={ms.elements}, masses={ms.masses}, "
+            f"loads={ms.loads}, load_pattern={ms.load_pattern}"
+        )
 
     if not md.mass_sources:
         sys.exit("Error: no MASS SOURCE defined in the model — cannot run modal analysis.")
 
     # ── 2. Build (two-stage) ─────────────────────────────────────────────────
     config = {
-        'element_type': 'elasticBeamColumn',
-        'split_elements': True,
-        'verbose': False,
+        "element_type": "elasticBeamColumn",
+        "split_elements": True,
+        "verbose": False,
     }
     mesh_model = preprocess_model(md, config)
-    builder = AnalysisBuilder(mesh_model, {
-        'element_type': 'elasticBeamColumn',
-        'verbose': False,
-    })
+    builder = AnalysisBuilder(
+        mesh_model,
+        {
+            "element_type": "elasticBeamColumn",
+            "verbose": False,
+        },
+    )
     builder.build_domain()
 
     # ── 3. Seismic masses ────────────────────────────────────────────────────
@@ -123,8 +133,8 @@ def main():
     print(f"\n── Modal analysis ({args.num_modes} modes) ──")
     modal = builder.run_modal_analysis(num_modes=args.num_modes, print_results=True)
 
-    periods = modal['periods']
-    n = modal['num_modes']
+    periods = modal["periods"]
+    n = modal["num_modes"]
     if n == 0:
         sys.exit("Error: no modes converged.")
 
@@ -132,7 +142,7 @@ def main():
     g = 9.81
     T_max = max(periods[:n])
     dT = 0.01
-    T_curve = [i * dT for i in range(0, int(T_max / dT) + 2)]
+    T_curve = [i * dT for i in range(int(T_max / dT) + 2)]
     Sa_curve = [gb50011_spectrum(T, A=0.16, Tg=0.4, zeta=0.04) for T in T_curve]
 
     print(f"\n── Response spectrum analysis (X direction, {n} modes) ──")
@@ -141,19 +151,19 @@ def main():
         modal_periods=periods[:n],
         spectrum_periods=T_curve,
         spectrum_accels=Sa_curve,
-        direction='X',
+        direction="X",
         damping_ratio=0.04,
         print_results=True,
     )
 
     # ── 6. Element-level RS forces ───────────────────────────────────────────
-    print(f"\n── Element-level RS forces ──")
+    print("\n── Element-level RS forces ──")
     elem_rs = builder.extract_element_rs_forces(
         num_modes=n,
         modal_periods=periods[:n],
         spectrum_periods=T_curve,
         spectrum_accels=Sa_curve,
-        direction='X',
+        direction="X",
         damping_ratio=0.04,
         print_results=True,
     )
@@ -168,37 +178,39 @@ def main():
 
     # ── Force diagrams ───────────────────────────────────────────────────────
     try:
-        from fea_toolkit.plotting import plot_force_diagram
+        from fea_toolkit.plotting import plot_rs_force_diagram
 
-        fig_m = plot_force_diagram(
-            elem_rs['element_results'], 'My_i',
-            title='My (CQC combined) — UX excitation',
+        fig_m = plot_rs_force_diagram(
+            elem_rs["element_results"],
+            "My_i",
+            title="My (CQC combined) — UX excitation",
         )
         if fig_m:
-            fig_m.savefig(out / 'rs_moment_diagram.png', dpi=300)
-            fig_m.savefig(out / 'rs_moment_diagram.svg')
-            print(f"\n  Saved → rs_moment_diagram.png / .svg")
+            fig_m.savefig(out / "rs_moment_diagram.png", dpi=300)
+            fig_m.savefig(out / "rs_moment_diagram.svg")
+            print("\n  Saved → rs_moment_diagram.png / .svg")
 
-        fig_v = plot_force_diagram(
-            elem_rs['element_results'], 'Vz_i',
-            title='Vz (CQC combined) — UX excitation',
+        fig_v = plot_rs_force_diagram(
+            elem_rs["element_results"],
+            "Vz_i",
+            title="Vz (CQC combined) — UX excitation",
         )
         if fig_v:
-            fig_v.savefig(out / 'rs_shear_diagram.png', dpi=300)
-            fig_v.savefig(out / 'rs_shear_diagram.svg')
-            print(f"  Saved → rs_shear_diagram.png / .svg")
+            fig_v.savefig(out / "rs_shear_diagram.png", dpi=300)
+            fig_v.savefig(out / "rs_shear_diagram.svg")
+            print("  Saved → rs_shear_diagram.png / .svg")
     except Exception as e:
         print(f"\n  Plotting skipped: {e}")
 
     # ── RS deformed shape ────────────────────────────────────────────────────
     try:
-        print(f"\n── RS deformed shape ──")
+        print("\n── RS deformed shape ──")
         disp = builder.compute_rs_nodal_displacements(
             num_modes=n,
             modal_periods=periods[:n],
-            eigenvalues=modal['eigenvalues'],
+            eigenvalues=modal["eigenvalues"],
             spectrum_func=gb50011_spectrum,
-            direction='X',
+            direction="X",
             damping_ratio=0.04,
         )
         top_tag = max(disp.keys(), key=lambda t: disp[t][0])
@@ -206,16 +218,19 @@ def main():
         print(f"  Max displacement: node {top_tag} dx = {top_dx:.4f} m")
 
         from fea_toolkit.plotting import plot_deformed_displacement_3d
+
         plotter = plot_deformed_displacement_3d(
-            builder, disp, scale=max(50, int(0.5 / max(top_dx, 1e-6))),
+            builder,
+            disp,
+            scale=max(50, int(0.5 / max(top_dx, 1e-6))),
             show_undeformed=True,
         )
         if plotter is not None:
-            plotter.screenshot(str(out / 'rs_deformed.png'), scale=2)
-            print(f"  Saved → rs_deformed.png")
+            plotter.screenshot(str(out / "rs_deformed.png"), scale=2)
+            print("  Saved → rs_deformed.png")
             try:
-                plotter.save_graphic(str(out / 'rs_deformed.svg'), raster=False)
-                print(f"  Saved → rs_deformed.svg")
+                plotter.save_graphic(str(out / "rs_deformed.svg"), raster=False)
+                print("  Saved → rs_deformed.svg")
             except Exception:
                 pass
     except Exception as e:

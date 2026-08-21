@@ -1793,8 +1793,8 @@ class TestAnimationTimerCallbackArity:
     positional arguments ``(step, plotter)``, while older versions pass
     ``(step,)`` or nothing.  The toolkit's callbacks accept ``()``
     (``_timer_callback`` in ``animate_pushover_deformation``) or
-    ``(step)`` (mode-shape callbacks in ``plot_mode_animation`` and
-    ``plot_mode_3d``).  ``_add_animation_timer`` must adapt the callback
+    ``(step)`` (mode-shape callbacks in ``plot_mode_animation``).
+    ``_add_animation_timer`` must adapt the callback
     so the correct number of arguments is forwarded regardless of the
     installed PyVista version — otherwise the classic
     ``TypeError: callback() takes N positional arguments but M were given``

@@ -203,12 +203,11 @@ def summarise_load_patterns(md) -> pd.DataFrame:
 def load_pattern_totals(md) -> pd.DataFrame:
     """Build the model and return a DataFrame of total applied load per pattern.
 
-    .. deprecated::
-       This function builds an ``OpenSeesBuilder`` via the legacy single-stage
-       path.  Load totals under the two-stage ``AnalysisBuilder`` are stored
-       as scalar magnitudes rather than per-component dicts; prefer
-       ``AnalysisBuilder.check_load_equilibrium()`` or direct access to
-       ``builder.load_totals`` for new workflows.
+    Note:
+        Load totals under the two-stage ``AnalysisBuilder`` are stored as
+        scalar magnitudes rather than per-component dicts; for new
+        workflows prefer ``AnalysisBuilder.check_load_equilibrium()`` or
+        direct access to ``builder.load_totals``.
 
     Sums all joint loads, frame distributed loads, and self-weight for each
     load pattern defined in the model (as computed by the builder's
@@ -562,10 +561,9 @@ def area_section_summary(md) -> pd.DataFrame:
 def modal_table(md, n_modes: int = 12, print_results: bool = False) -> pd.DataFrame:
     """Run elastic modal analysis and return a DataFrame of mode properties.
 
-    .. deprecated::
-       This function builds an ``OpenSeesBuilder`` via the legacy single-stage
-       path.  For new code, run modal analysis on an ``AnalysisBuilder`` and
-       build the DataFrame from its result dict directly.
+    Note:
+        For new code, run modal analysis on an ``AnalysisBuilder`` and
+        build the DataFrame from its result dict directly.
 
     Columns: Mode, Period (s), Freq (Hz), Mx (%), My (%), Mz (%).
     """
@@ -603,10 +601,9 @@ def modal_table(md, n_modes: int = 12, print_results: bool = False) -> pd.DataFr
 def modal_table_enhanced(md, n_modes: int = 12, print_results: bool = False):
     """Run elastic modal analysis and return a DataFrame with 6 DOF participation.
 
-    .. deprecated::
-       This function builds an ``OpenSeesBuilder`` via the legacy single-stage
-       path.  For new code, run modal analysis on an ``AnalysisBuilder`` and
-       build the DataFrame from its result dict directly.
+    Note:
+        For new code, run modal analysis on an ``AnalysisBuilder`` and
+        build the DataFrame from its result dict directly.
 
     Columns: Mode, Period, Mx%, My%, Mz%, Rx%, Ry%, Rz%  + a SUM row.
     """

@@ -71,8 +71,9 @@ class AnalysisBuilder:
 
     Args:
         mesh_model: Prepared topology from the Preprocessor.
-        config: Configuration dict (same keys as
-            :class:`~fea_toolkit.opensees.builder.OpenSeesBuilder`).
+        config: Flat builder-scoped configuration dict — the same keys
+            accepted by :class:`~fea_toolkit.opensees.preprocessor.Preprocessor`
+            and the analysis runners (see ``docs/builder_reference.md``).
     """
 
     # ── Solver defaults for pushover / nonlinear analysis ────────────
@@ -6278,8 +6279,7 @@ class AnalysisBuilder:
         Args:
             filepath: Output file path (``.npz`` or ``.h5``).
             static_results: Dict from :meth:`run_static_analysis`.
-            modal_result: Dict from
-                :meth:`~fea_toolkit.opensees.builder.OpenSeesBuilder.run_modal_analysis`.
+            modal_result: Dict from :meth:`run_modal_analysis`.
             mode_shapes: Mode shape eigenvectors ``{mode_idx: {tag: (dx,dy,dz)}}``.
             rs_results: Response-spectrum results dict.
             rs_element_forces: Dict from :meth:`extract_element_rs_forces`.

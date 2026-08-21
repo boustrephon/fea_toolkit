@@ -32,19 +32,11 @@ visualisation stacks:
 | `ModelViewer(...).overlay_forces()` | PyVista | Force/moment flag diagram | Static element forces |
 | `ModelViewer(...).highlight_elements()` | PyVista | Highlighted elements | Marking braces, issues, discussion topics |
 | `ModelViewer(...).annotate()` | PyVista | Text annotation | Labelling features |
-| `plot_model_3d(builder)` | PyVista | 3D model (nodes, labels, section colours) — *deprecated, use plot_mesh* | Quick model preview |
 | `plot_mesh(source)` | PyVista | 3D mesh from builder **or** NPZ dict | Unified mesh viewing |
 | `plot_deformed_displacement_3d(source, disp)` | PyVista | Displaced shape with node colouring and value labels — unified replacement | Static / RS / modal displacement |
-| `plot_deformed_3d(builder, results)` | PyVista | Deformed + undeformed overlay — *deprecated, use plot_deformed_displacement_3d* | Static analysis displacement |
-| `plot_rs_deformed_3d(builder, disp)` | PyVista | RS CQC‑combined deformed shape — *deprecated, use plot_deformed_displacement_3d* | Response‑spectrum results |
-| `plot_mode_3d(builder, shapes, mode)` | PyVista | Mode shape (with animation) — *deprecated, use plot_mode_animation* | Modal analysis |
 | `plot_mode_animation(source, shapes, mode)` | PyVista | Mode shape animation from builder **or** NPZ | Unified modal viz |
-| `plot_static_moment_3d(builder, forces)` | PyVista | 3D force/moment flag or tube diagram — *deprecated, use plot_force_diagram_3d* | Static element forces |
 | `plot_force_diagram_3d(source, forces)` | PyVista | 3D force/moment diagram from builder **or** NPZ | Unified force viz |
-| `plot_static_shear_3d(builder, forces)` | PyVista | 3D shear force diagram — *deprecated* | Shear results |
-| `plot_static_axial_3d(builder, forces)` | PyVista | 3D axial force diagram — *deprecated* | Axial results |
-| `plot_static_force_diagram(builder, forces)` | Matplotlib | 2D force vs elevation — *deprecated* | Column / wall forces |
-| `plot_force_diagram(elem_results)` | Matplotlib | 2D CQC‑combined force vs elevation | RS element results |
+| `plot_rs_force_diagram(elem_results)` | Matplotlib | 2D CQC‑combined force vs elevation | RS element results |
 | `plot_pushover_curve(results)` | Matplotlib | Capacity curve | Pushover summary |
 | `plot_pushover_curve_enhanced(results)` | Matplotlib | Capacity curve + stiffness lines | Detailed pushover review |
 | `plot_capacity_spectrum(adrs, spec, pt)` | Matplotlib | ADRS format capacity + demand + performance point | CSM (ATC‑40) |
@@ -314,20 +306,13 @@ plot_deformed_displacement_3d(
 )
 ```
 
-**Legacy (builder only — deprecated):**
-
-```python
-from fea_toolkit.plotting import plot_deformed_3d   # → use plot_deformed_displacement_3d
-plot_deformed_3d(builder, results, scale=10.0)
-```
-
 ### 2c. RS deformed shape (CQC‑combined)
 
 ```python
-from fea_toolkit.plotting import plot_rs_deformed_3d  # deprecated → use plot_deformed_displacement_3d
+from fea_toolkit.plotting import plot_deformed_displacement_3d
 
 disp = builder.compute_rs_nodal_displacements(...)
-plot_rs_deformed_3d(builder, disp, scale=10.0)
+plot_deformed_displacement_3d(builder, disp, scale=10.0)
 ```
 
 Coloured by displacement magnitude (blue–white–red scale).
@@ -335,23 +320,9 @@ Coloured by displacement magnitude (blue–white–red scale).
 ### 2d. Mode shape
 
 ```python
-from fea_toolkit.plotting import plot_mode_3d  # deprecated, use plot_mode_animation
-
-shapes = builder.extract_mode_shapes(num_modes=6)
-plot_mode_3d(
-    builder, shapes,
-    mode=0,               # 0‑based mode index
-    scale=10.0,
-    animate=True,         # oscillating amplitude
-    periods=modal["periods"],
-)```
-
-Use the unified ``plot_mode_animation`` instead — it supports builder,
-AnalysisBuilder, and NPZ dicts, plus ``shrink``:
-
-```python
 from fea_toolkit.plotting import plot_mode_animation
 
+shapes = builder.extract_mode_shapes(num_modes=6)
 pl = plot_mode_animation(
     builder, shapes, mode=0,
     scale=10.0,
@@ -364,26 +335,14 @@ pl = plot_mode_animation(
 ### 2e. 3D force / moment diagram
 
 ```python
-from fea_toolkit.plotting import plot_static_moment_3d
+from fea_toolkit.plotting import plot_force_diagram_3d
 
-plot_static_moment_3d(
+plot_force_diagram_3d(
     builder,
-    elem_forces,          # from builder.extract_static_element_forces()
-    quantity="Mz",        # Mz, My, Mx, Fx, Fy, Fz
-    mode="flag",          # "flag" or "tube"
-    show_original=True,
-    show_reactions=False,
-    static_results=None,  # required for reactions
+    force_data=elem_forces,   # from builder.extract_static_element_forces()
+    quantity="Mz",            # Mz, My, Mx, Fx, Fy, Fz
+    mode="flag",              # "flag" or "tube"
 )
-```
-
-Convenience wrappers:
-
-```python
-from fea_toolkit.plotting import plot_static_shear_3d, plot_static_axial_3d
-
-plot_static_shear_3d(builder, elem_forces, quantity="Fz")
-plot_static_axial_3d(builder, elem_forces)
 ```
 
 ---
@@ -396,16 +355,17 @@ These produce publication‑quality 2D figures and return the
 
 ### 3a. Force / moment vs elevation
 
-```python
-from fea_toolkit.plotting import plot_static_force_diagram
+Standalone 2D force-vs-elevation plots are produced from an NPZ results
+file via ``plot_npz_force_diagram``:
 
-fig = plot_static_force_diagram(
-    builder,
-    elem_forces,
+```python
+from fea_toolkit.plotting import plot_npz_force_diagram
+
+fig = plot_npz_force_diagram(
+    "results.npz",        # from builder.export_results_to_npz()
     quantity="Mz",        # Fx, Fy, Fz, Mx, My, Mz
     use_local=True,       # local or global coordinates
-    selection=None,
-    figsize=(6, 8),
+    title="Major-axis moment vs elevation",
 )
 fig.savefig("moment.png")
 ```
@@ -413,10 +373,10 @@ fig.savefig("moment.png")
 For CQC‑combined results:
 
 ```python
-from fea_toolkit.plotting import plot_force_diagram
+from fea_toolkit.plotting import plot_rs_force_diagram
 
 rs_forces = builder.extract_element_rs_forces(...)
-fig = plot_force_diagram(
+fig = plot_rs_force_diagram(
     rs_forces["element_results"],
     quantity="My_i",
 )
@@ -635,9 +595,9 @@ specific section types.
   Use ``selection=Selection(...)`` to restrict to specific elements
   (builder source only).  Use ``shrink=0.05`` to create gaps between
   connected frame elements.
-- **Static (builder only, deprecated):** ``plot_deformed_3d(builder, results)`` or
+- **Static / RS/CQC:** ``plot_deformed_displacement_3d(source, disp, ...)``
+  (builder, AnalysisBuilder, or NPZ/HDF5 dict) or
   ``ModelViewer(builder).overlay_deformed()``
-- **RS/CQC (builder only, deprecated):** ``plot_rs_deformed_3d(builder, rs_displacements)``
 - **Modal:** ``plot_mode_animation(source, shapes, mode, ...)``
 
 When loading from a results file, nodal displacements live at
@@ -650,14 +610,10 @@ displacement arrays.
   ``plot_force_diagram_3d(source, force_data, quantity="Mz")``
   — 3D flag or tube diagram on the structure.
   Use ``selection=Selection(...)`` to isolate specific elements.
-- **3D flags on structure (builder only, deprecated):**
-  ``plot_static_moment_3d(builder, elem_forces, quantity="Mz")``
-- **3D shear:** ``plot_static_shear_3d(builder, elem_forces)``
-- **3D axial:** ``plot_static_axial_3d(builder, elem_forces)``
-- **2D vs elevation (columns):**
-  ``plot_static_force_diagram(builder, elem_forces, quantity="Mz")``
+- **3D flags on structure (unified):**
+  ``plot_force_diagram_3d(source, force_data, quantity="Mz")``
 - **CQC‑combined 2D:**
-  ``plot_force_diagram(rs_results["element_results"], quantity="My_i")``
+  ``plot_rs_force_diagram(rs_results["element_results"], quantity="My_i")``
 
 When loading from a results file, element forces are accessed per
 static case: ``data["static/{case}/fx_i"]``, ``data["static/{case}/my_j"]``,
@@ -670,7 +626,6 @@ etc.  Pass the loaded dict directly as *source* and set
   — animated or static mode shape.
   Use ``selection=Selection(...)`` to focus on elements of interest.
   Use ``shrink=0.05`` to visualise element connections.
-- **Builder only, deprecated:** ``plot_mode_3d(builder, shapes, mode=0, ...)``
 
 When loading from a results file, pass ``mode_shapes=None`` — the
 shapes are extracted automatically from the ``modal/mode_dx``,
@@ -722,8 +677,7 @@ The ``ModelViewer`` also supports ``highlight_nodes()`` and
 
 ### "Show me reactions"
 → ``ModelViewer(builder).overlay_forces(..., show_reactions=True)``
-or ``plot_static_moment_3d(builder, forces, show_reactions=True,
-   static_results=results)``
+or ``plot_force_diagram_3d(source, force_data, quantity="Mz")``
 
 ### "Check element connectivity / mesh quality"
 → ``plot_mesh(source, show_nodes=True, shrink=0.05)``
@@ -764,26 +718,18 @@ from fea_toolkit.plotting import ModelViewer
 
 # Standalone 3D plots (PyVista)
 from fea_toolkit.plotting import (
-    plot_model_3d,
     plot_mesh,                          # unified (builder or NPZ)
     compare_meshes,                     # side-by-side comparison
     plot_deformed_displacement_3d,      # unified (builder, AnalysisBuilder, or NPZ)
-    plot_deformed_3d,                   # deprecated → use plot_deformed_displacement_3d
-    plot_rs_deformed_3d,                # deprecated → use plot_deformed_displacement_3d
-    plot_mode_3d,                       # deprecated → use plot_mode_animation
     plot_mode_animation,                # unified (builder or NPZ)
-    plot_static_moment_3d,              # deprecated → use plot_force_diagram_3d
     plot_force_diagram_3d,              # unified (builder or NPZ)
-    plot_static_shear_3d,
-    plot_static_axial_3d,
     plot_building_views,                # four-view layout
     plot_model_comparison,              # top-down variant comparison
 )
 
 # Standalone 2D plots (Matplotlib)
 from fea_toolkit.plotting import (
-    plot_static_force_diagram,
-    plot_force_diagram,
+    plot_rs_force_diagram,              # CQC-combined RS forces vs elevation
     plot_pushover_curve,
     plot_pushover_curve_enhanced,
     plot_capacity_spectrum,

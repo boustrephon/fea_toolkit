@@ -613,11 +613,11 @@ new_pt = rg.Point3d(pt.X + dx * scale, pt.Y + dy * scale, pt.Z + dz * scale)
 - For pushover results, export the final step's forces/displacements
   using the same method after `run_pushover_analysis()` returns.
 - **End forces in the NPZ are in global coordinates**. To get local
-  forces for colour‑coding (e.g. local Mz for major‑axis bending,
+  forces for colour-coding (e.g. local Mz for major-axis bending,
   independent of member orientation), transform using the element's
-  local axes — see ``_get_local_end_forces()`` in ``viz.py`` for the
+  local axes — see ``get_local_axes()`` in ``model/geometry.py`` for the
   rotation matrix approach, or use the ``plot_force_diagram_3d`` and
-  ``plot_static_force_diagram`` functions which handle this automatically.
+  ``plot_npz_force_diagram`` functions which handle this automatically.
 
 ---
 
