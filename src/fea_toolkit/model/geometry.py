@@ -2974,16 +2974,16 @@ def find_constraint_edges(
     Returns:
         List of tuples.  Each tuple has:
         - ``merged_nodes`` — all unique nodes along the shared edge,
-          sorted by position.
+            sorted by position.
         - ``master_chain`` — ``[(node_id, t_param), ...]`` — the nodes
-          belonging to the coarsest element along the edge.  These
-          define the master edge for constraint application.
+            belonging to the coarsest element along the edge.  These
+            define the master edge for constraint application.
         - ``slave_nodes`` — ``[(node_id, t_param), ...]`` — all
-          remaining nodes from finer-meshed elements, sorted by
-          t-parameter.  These need to be constrained to the master
-          edge.
+            remaining nodes from finer-meshed elements, sorted by
+            t-parameter.  These need to be constrained to the master
+            edge.
         - ``type_a``, ``type_b`` — the two most common section names
-          (for backward compatibility).
+            (for backward compatibility).
 
         The t-parameters are in the range [0, 1] along the edge from
         the first merged node to the last.
