@@ -147,8 +147,9 @@ class TestAlwaysOnPreprocess:
             {"element_type": "elasticBeamColumn", "verbose": False, "create_shells": False},
         )
         roles = Counter(mm.frame_element_types.values())
-        # Coverage: every frame element is present in the classification map.
-        assert len(mm.frame_element_types) == len(mm.frame_elements)
+        # Coverage: the classification map keys match the frame IDs exactly —
+        # every expected frame has a classification and no unexpected IDs.
+        assert set(mm.frame_element_types) == set(mm.frame_elements)
         # Every frame element has a meaningful role (no 'unknown'/empty).
         assert set(roles) <= {"column", "beam", "brace"}
         # Both vertical (column) and horizontal (beam) roles are present.
