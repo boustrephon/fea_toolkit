@@ -47,9 +47,9 @@ manual build that nobody hooked up.
 > **Notation used below:** `$SITE_PACKAGES` is the active virtualenv's
 > site-packages directory (typically
 > `$VIRTUAL_ENV/lib/python3.12/site-packages`); `$CONAN_HOME` is the conan
-> cache root used by the build (the shipped wheel's rpath points there —
-> the wheel author's `$CONAN_HOME`).  Adjust both to your
-> own machine.
+> cache root used by the build (the shipped wheel's rpath references a
+> Conan-cache path — an observation only, not proof the wheel was built
+> with conan).  Adjust both to your own machine.
 
 ### Strategy A — redirect the dispatch (cleanest, no wheel surgery)
 
@@ -122,9 +122,11 @@ git clone --recursive https://github.com/OpenSees/OpenSees
 
 cd OpenSees
 # follow the OpenSeesPy build instructions for your platform.
-# On macOS arm64 you typically need a conan toolchain (the wheel author used
-# $CONAN_HOME). The rpath of the shipped wheel points there, confirming the
-# wheel was built with conan.
+# On macOS arm64 you typically need a conan toolchain.  The shipped wheel's
+# rpath references a Conan-cache path, but that is an observation only — not
+# proof the wheel was built with conan.  Verify the actual embedded path
+# yourself with the documented inspection command (`otool -L` on the .so /
+# OpenSeesPy.dylib).
 ```
 
 The Kolozvari **MVLEM/SFI-MVLEM/FSAM** sources live in the official OpenSees

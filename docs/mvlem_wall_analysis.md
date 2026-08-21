@@ -150,9 +150,13 @@ WallElement(
 )
 ```
 
-`WallElement.__post_init__` validates every per-fibre list against `m`
-and rejects `m < 1` with a `ValueError`, so an invalid wall (zero or
-negative fibre count) cannot reach domain construction.
+`WallElement.__post_init__` validates every relevant per-fibre list
+(`thick`, `width`, `concrete_names`, `steel_names`, `rho`, and — for the
+FSAM family only — `fsam_material_names`) against `m`, and rejects
+`m < 1` with a `ValueError`.  `fsam_material_names` is skipped when
+`material_type` is `"uniaxial"` (MVLEM_3D walls carry an intentionally
+empty FSAM list), so an invalid wall (zero or negative fibre count, or a
+per-fibre list of the wrong length) cannot reach domain construction.
 
 The Preprocessor populates it from wall-classified areas when
 `element_strategies.wall.element_type` is one of `SFI_MVLEM_3D` /
