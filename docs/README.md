@@ -28,7 +28,7 @@ for automated cross-referencing.
 
 - [LLM & AI Assistant Guide](llm_guide.md) — ✅ Complete
   > Canonical goal-to-code mapping, full public API surface by domain, and key technical constraints — structured for language model consumption.
-  Tags: `llm`, `ai`, `guide`, `api-reference`, `usage`
+  Tags: `llm`, `ai`, `guide`, `api-reference`, `usage`, `environment`
 
 - [SAP IDs vs OpenSees Tags](sap_ids_vs_tags.md) — ✅ Complete
   > The two distinct identifier systems (SAP2000 string IDs vs OpenSees integer tags), who creates each, NPZ storage conventions, and common pitfalls.
@@ -89,6 +89,11 @@ for automated cross-referencing.
 
 
 ## ⚙️ Model Features
+
+- [Code-Specific Member Capacity Modules](capacity.md) — ✅ Complete
+  > Naming convention for statutory-code capacity modules plus the GB 50010-2010 implementation (flexural, axial, shear and wall checks). The module-per-code layout allows additional codes (ASCE 41, Eurocode 2/8, ACI 318, ...) to be added without name clashes.
+  Tags: `capacity`, `gb50010`, `asce41`, `design`, `dcr`, `codes`, `unit-aware`
+  Related: [RC Shear-Failure Modelling (MCFT Capacity + Nonlinear Shear Backbone)](shear_failure_modelling.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Analysis Workflow](workflow.md)
 
 - [Constraint Edge Detection](constraint_detection.md) — ✅ Complete
   > Detecting and applying edge constraints for shell element connectivity.
@@ -234,6 +239,7 @@ Tags across all documentation files:
 - **`api-reference`** — [llm_guide.md](llm_guide.md)
 - **`architecture`** — [analysis.md](analysis.md), [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md)
 - **`area-elements`** — [shell_support.md](shell_support.md)
+- **`asce41`** — [capacity.md](capacity.md)
 - **`backbone`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`beams`** — [element_classification.md](element_classification.md)
 - **`benchmark`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
@@ -241,10 +247,11 @@ Tags across all documentation files:
 - **`brace`** — [pushover_analysis.md](pushover_analysis.md)
 - **`braces`** — [element_classification.md](element_classification.md)
 - **`build`** — [openseespy_local_build.md](openseespy_local_build.md)
-- **`capacity`** — [shear_failure_modelling.md](shear_failure_modelling.md)
+- **`capacity`** — [capacity.md](capacity.md), [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`capacity-spectrum`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md)
 - **`classification`** — [element_classification.md](element_classification.md)
 - **`cleanup`** — [deprecation_plan.md](deprecation_plan.md), [linting_fix_plan.md](linting_fix_plan.md)
+- **`codes`** — [capacity.md](capacity.md)
 - **`columns`** — [element_classification.md](element_classification.md)
 - **`config`** — [element_properties_config.md](element_properties_config.md)
 - **`confinement`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
@@ -252,7 +259,9 @@ Tags across all documentation files:
 - **`conversion`** — [units_conversion.md](units_conversion.md)
 - **`cracked-section`** — [stiffness_factors.md](stiffness_factors.md)
 - **`csm`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md), [pushover_analysis.md](pushover_analysis.md)
+- **`dcr`** — [capacity.md](capacity.md)
 - **`deprecation`** — [deprecation_plan.md](deprecation_plan.md)
+- **`design`** — [capacity.md](capacity.md)
 - **`design-proposal`** — [report_generation.md](report_generation.md)
 - **`development`** — [dev_notes.md](dev_notes.md)
 - **`diaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
@@ -267,6 +276,7 @@ Tags across all documentation files:
 - **`elements`** — [element_classification.md](element_classification.md), [element_splitting.md](element_splitting.md), [shell_support.md](shell_support.md)
 - **`elwood`** — [units_conversion.md](units_conversion.md)
 - **`end-to-end`** — [workflow.md](workflow.md)
+- **`environment`** — [llm_guide.md](llm_guide.md)
 - **`execution`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`export`** — [rhino_export.md](rhino_export.md), [tcl_export.md](tcl_export.md)
 - **`fea-toolkit`** — [openseespy_local_build.md](openseespy_local_build.md)
@@ -274,6 +284,7 @@ Tags across all documentation files:
 - **`fiber-section`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`force-controlled`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`fsam`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
+- **`gb50010`** — [capacity.md](capacity.md)
 - **`geometry`** — [rhino_export.md](rhino_export.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`ground-motion`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
@@ -343,6 +354,7 @@ Tags across all documentation files:
 - **`theory`** — [mander_confinement_validation.md](mander_confinement_validation.md)
 - **`time-history`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
 - **`typed-results`** — [analysis.md](analysis.md)
+- **`unit-aware`** — [capacity.md](capacity.md)
 - **`units`** — [units_conversion.md](units_conversion.md)
 - **`usage`** — [llm_guide.md](llm_guide.md)
 - **`validation`** — [mander_confinement_validation.md](mander_confinement_validation.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)

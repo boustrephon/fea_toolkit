@@ -40,6 +40,7 @@ builder = AnalysisBuilder(mesh, {}).build_domain()
 | OpenSees | `from fea_toolkit.opensees import ...` | Preprocessor, AnalysisBuilder, Tcl export |
 | Plotting | `from fea_toolkit.plotting import ...` | 3D views, deformed shapes, force diagrams |
 | Analysis | `from fea_toolkit.analysis import ...` | Typed analysis objects + manager |
+| Capacity | `from fea_toolkit.capacity import ...` | Code-specified member capacities (GB 50010, ASCE 41) + DCR |
 | Model | `from fea_toolkit.model import ...` | Geometry, stories, checks, CSM |
 
 ---
@@ -132,6 +133,10 @@ see `.clinerules` §3.11.
 "Check mesh connectivity"           → check with after-mesh model
 "Check self-weight consistency"     → from fea_toolkit.model import check_self_weight_consistency
 "Check brace buckling (Euler)"      → from fea_toolkit.model import check_brace_buckling
+"GB 50010 member capacity"          → from fea_toolkit.capacity import moment_capacity, shear_capacity
+"GB 50010 wall stress check"        → from fea_toolkit.capacity import wall_shear_check
+"ASCE 41 plastic hinge length"      → from fea_toolkit.capacity import hinge_length
+"Demand/capacity ratio (DCR)"       → from fea_toolkit.capacity import capacity_dcr
 "Singularity diagnosis"             → builder.diagnose_singularity()
 ```
 

@@ -10,15 +10,8 @@ from collections import defaultdict
 from typing import Any, Optional
 
 from fea_toolkit.model.sap_data import (
-    ConcreteRectangularSection,
     SAPModelData,
     ShellSection,
-)
-from fea_toolkit.utils import (
-    DEFAULT_FC_PA,
-    DEFAULT_FY_STEEL_PA,
-    length_to_si_factor,
-    stress_to_si_factor,
 )
 
 
@@ -413,117 +406,18 @@ def compute_hinge_length(
         return 0.1 * elem_length
 
 
-def _get_conversion_factors(md: Any) -> tuple:
-    """Extract stress_factor and length_factor from any model-like object.
-
-    Works with both ``SAPModelData`` (has ``stress_factor`` /
-    ``length_factor`` properties) and ``MeshModel`` (needs units dict).
-
-    Returns
-    -------
-    tuple
-        ``(stress_factor, length_factor)`` as floats (SI → model units).
-    """
-    if hasattr(md, "stress_factor") and hasattr(md, "length_factor"):
-        return md.stress_factor, md.length_factor
-    # Fallback: compute from units dict using the canonical utils factors.
-    units = getattr(md, "units", {}) or {}
-    sf = stress_to_si_factor(units)
-    lf = length_to_si_factor(units)
-    return sf, lf
-
-
 def compute_asce41_hinge_length(
     md: "SAPModelData",
     sec_name: str,
     elem_length: float,
 ) -> float:
-    """Plastic hinge length Lp per ASCE 41-17 §10.8.
+    """Plastic hinge length ``L_p`` per ASCE 41-17 §10.8 (model length units).
 
-    Computes Lp based on material and section properties.  Falls back
-    to 0.1 * L when section data is unavailable.
-
-    All material values are guaranteed non-None by
-    SAPModelData.apply_material_defaults() but manually-constructed
-    fixtures may still have None values — these are handled by
-    falling back to hardcoded SI defaults within the formula.
-
-    Code-based formulae convert to SI internally using the model's
-    conversion factors, then return results in model length units.
-
-    Parameters
-    ----------
-    md : SAPModelData
-        The parsed model data (for section/material lookup).
-    sec_name : str
-        Section name for material and geometry lookup.
-    elem_length : float
-        Element length in model units.
-
-    Returns
-    -------
-    float
-        Plastic hinge length in model length units.
+    Legacy alias — the canonical implementation now lives in
+    :func:`fea_toolkit.capacity.asce41.hinge_length` (moved verbatim from
+    this module).  This wrapper delegates to it unchanged, so behaviour is
+    preserved for existing callers.
     """
-    sec = md.sections.get(sec_name)
-    if sec is None:
-        return max(0.05, elem_length * 0.1)
+    from ..capacity.asce41 import hinge_length
 
-    mat = md.materials.get(sec.material)
-    if mat is None:
-        return max(0.05, elem_length * 0.1)
-
-    # ── Get conversion factors (works with SAPModelData and MeshModel) ──
-    sf, lf = _get_conversion_factors(md)
-
-    # ── Convert material strengths from model stress units → Pa → MPa ──
-    # Model-provided values are in model stress units and need sf;
-    # fallback constants are already in Pa and bypass sf.
-    fy_pa = mat.Fy * sf if (mat.Fy or 0) > 0 else DEFAULT_FY_STEEL_PA
-    fc_pa = mat.Fc * sf if (mat.Fc or 0) > 0 else DEFAULT_FC_PA
-    fy_mpa = fy_pa / 1e6
-    fc_mpa = fc_pa / 1e6
-
-    # ── Convert section dimensions from model length units → mm ──
-    # Use explicit ConcreteRectangularSection check rather than generic
-    # attribute-based detection which can misidentify sections.
-    is_concrete = isinstance(sec, ConcreteRectangularSection)
-    is_brace = hasattr(sec, "od") or hasattr(sec, "t")
-
-    def _to_mm(val: float) -> float:
-        """Convert a value in model length units to mm."""
-        return val * lf * 1000.0
-
-    if is_concrete:
-        # ASCE 41-17 d_b = longitudinal rebar diameter (mm)
-        if (getattr(sec, "top_bar_dia", None) or 0) > 0:
-            db = _to_mm(sec.top_bar_dia)
-        elif (getattr(sec, "bar_dia", None) or 0) > 0:
-            db = _to_mm(sec.bar_dia)
-        else:
-            db = 20.0  # fallback rebar diameter in mm
-    # Steel: db = section depth in the loading direction (mm)
-    # ASCE 41-17 §9.3.3.2 uses overall section depth or OD for steel
-    # members — flange thickness (tf) and wall thickness (t) are not
-    # valid d_b terms.
-    elif (getattr(sec, "depth", None) or 0) > 0:
-        db = _to_mm(sec.depth)
-    elif (getattr(sec, "od", None) or 0) > 0:
-        db = _to_mm(sec.od)
-    else:
-        db = 20.0  # fallback in mm
-
-    # ── ASCE 41-17 formula §10.8 ──
-    # Convert elem_length to metres for the formula
-    L_m = elem_length * lf
-
-    if is_concrete:
-        Lp = 0.05 * L_m + 0.1 * db * fy_mpa / max(fc_mpa, 1.0) ** 0.5 / 1000.0
-    elif is_brace:
-        Lp = 0.08 * L_m + 0.015 * db * fy_mpa / 1000.0
-    else:
-        Lp = 0.08 * L_m + 0.022 * db * fy_mpa / 1000.0
-
-    # Lp from formula is in metres — clamp and convert back to model units
-    Lp_m = min(Lp, 0.33 * L_m)
-    return Lp_m / lf if lf != 0 else Lp_m
+    return hinge_length(md, sec_name, elem_length)

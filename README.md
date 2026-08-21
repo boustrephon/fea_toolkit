@@ -127,6 +127,7 @@ the "Package tree (abbreviated)" section below for the full subpackage list
 | **Rhino Export** | ✅ Complete | Centreline + lightweight Extrusion geometry with section profiles, section-based layers, UserString metadata, groups. See [`docs/rhino_export.md`](docs/rhino_export.md). |
 | **Frame Member Types (Steel)** | ✅ Complete | All steel section shapes (I, Box, Pipe, Channel, Angle, etc.) with `Steel01` fiber sections or elastic sections. |
 | **Frame Member Types (RC)** | ⚠️ Partial | Concrete materials and section shapes supported; rebar auto-placement implemented; confined concrete (Mander) wired via `fiber_confinement()`. See [`docs/pushover_analysis.md`](docs/pushover_analysis.md). |
+| **Code-Specific Capacity Modules** | ✅ Complete | `fea_toolkit.capacity` — GB 50010-2010 flexure/axial/shear/wall checks and ASCE 41-17 plastic hinge length, unit-aware (strengths authored in SI Pa, scaled to model units exactly once). See [`docs/capacity.md`](docs/capacity.md). |
 | **Storey Identification** | ✅ Complete | `identify_stories()` — 4 strategies: S2K story table → diaphragm constraints → horizontal area elements → node Z clustering. Returns sorted `StoryLevel` list with confidence ratings. See [`docs/storey_response.md`](docs/storey_response.md). |
 | **Storey Response Analysis** | ✅ Complete | `storey_displacements()` (rigid-body fit with outlier rejection), `storey_drifts()` (inter-storey drift ratios), `storey_shears()` (summed element-end forces), `modal_storey_drifts()` (CQC-combined modal drifts). |
 | **Rigid Diaphragms** | ✅ Complete | `ops.rigidDiaphragm()` per detected group — S2K Z‑axis constraints, horizontal‑area fallback, or forced storey detection; config override via `rigid_diaphragms` (`True`/`False`/Z-list/**explicit node- or selection-based groups**). See [`docs/shell_support.md`](docs/shell_support.md). |
@@ -504,8 +505,8 @@ Key implementation details:
 * **``Aggregator`` section** couples axial (P) and moment (Mz, My) responses
   using a ``Hysteretic`` backbone material calibrated from the section's yield
   moment and ASCE 41 rotation limits.
-* **ASCE 41-17 §10.8 hinge length**: the ``_compute_asce41_hinge_length()``
-  method implements Eq 10-1 / 10-2 / ACI formulas for steel, brace, and RC
+* **ASCE 41-17 §10.8 hinge length**: ``fea_toolkit.capacity.asce41.hinge_length``
+  implements Eq 10-1 / 10-2 / ACI formulas for steel, brace, and RC
   members.
 
 Configure with::
@@ -517,8 +518,9 @@ Configure with::
 
 #### 10.3 ASCE 41 Hinge Lengths
 
-The ``_compute_asce41_hinge_length(sec_tag, elem_length, sec_name)`` method
-returns the plastic hinge length per ASCE 41-17:
+``fea_toolkit.capacity.asce41.hinge_length(md, sec_name, elem_length)``
+(legacy alias: ``model.checks.compute_asce41_hinge_length``) returns the
+plastic hinge length per ASCE 41-17:
 
 | Member type | Formula (Lp) | Reference |
 |---|---|---|
