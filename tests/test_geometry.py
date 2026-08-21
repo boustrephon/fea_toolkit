@@ -692,6 +692,30 @@ class TestPropagateEdgeRestraints:
         assert restraints["e_bot"].dofs == fixed
         assert restraints["e_top"].dofs == fixed
 
+    def test_one_column_mesh_propagates_edge_nodes(self):
+        """n_u=1, n_v>=2: intermediate left/right edge nodes are still
+        propagated (mirror of the one-row case — the early return
+        requires BOTH directions to lack intermediate edge nodes)."""
+        node_grid = [
+            ["c00", "c10"],
+            ["e_left", "e_right"],
+            ["c01", "c11"],
+        ]
+        # Distinct per-edge corner restraints make each expected AND
+        # unambiguous (left edge differs from right edge).
+        left_fixed = [1, 0, 1, 0, 0, 0]
+        right_fixed = [1, 1, 0, 0, 0, 0]
+        restraints = {
+            "c00": Restraint(dofs=list(left_fixed)),
+            "c01": Restraint(dofs=list(left_fixed)),
+            "c10": Restraint(dofs=list(right_fixed)),
+            "c11": Restraint(dofs=list(right_fixed)),
+        }
+        _propagate_edge_restraints(node_grid, 1, 2, restraints)
+
+        assert restraints["e_left"].dofs == left_fixed
+        assert restraints["e_right"].dofs == right_fixed
+
     def test_single_cell_mesh_returns_early(self):
         """n_u == n_v == 1: no intermediate edge nodes in either direction
         → nothing is propagated beyond the corners."""
