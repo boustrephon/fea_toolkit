@@ -5355,7 +5355,7 @@ class AnalysisBuilder:
             * ``'modal_props'`` — the full ``ops.modalProperties()`` dict.
             * ``'num_modes'`` — number of converged modes.
             * ``'nodal_masses'`` — dict of nodal masses ``{tag: (mx, my, mz)}``
-              in model units (tonnes for kN-m models).
+                in model units (tonnes for kN-m models).
         """
         if self.config.get("verbose"):
             print(f"Running modal analysis for {num_modes} modes...")
@@ -5580,9 +5580,9 @@ class AnalysisBuilder:
             - ``modal_periods``
             - ``modal_base_reactions`` (list of 6-DoF dicts per mode)
             - ``base_reactions_cqc`` / ``base_reactions_srss`` (6-DoF combined)
-              where Mx/My include overturning from Fz × lever-arm about
-              the fixed geometric centroid (bounding-box midpoint).
-              This fixed reference ensures CQC validity across modes.
+                where Mx/My include overturning from Fz × lever-arm about
+                the fixed geometric centroid (bounding-box midpoint).
+                This fixed reference ensures CQC validity across modes.
         """
         if self.config.get("verbose"):
             print(f"Running response spectrum analysis (dir={direction})...")
@@ -5777,15 +5777,14 @@ class AnalysisBuilder:
         Mz_i, Mz_j) and the corresponding shears derived from the moment
         gradient (Vy = dMz/dx, Vz = dMy/dx).
 
-        Args:
-            Same as :meth:`run_response_spectrum_analysis`.
+        The parameters mirror :meth:`run_response_spectrum_analysis`.
 
         Returns:
             Dictionary with keys:
 
             * ``'element_results'`` — list of dicts sorted by elevation, each
-              containing ``elem_id``, ``z_bot``, ``z_mid``, ``Vy_i``, ``Vy_j``,
-              ``Vz_i``, ``Vz_j``, ``My_i``, ``My_j``, ``Mz_i``, ``Mz_j``.
+                containing ``elem_id``, ``z_bot``, ``z_mid``, ``Vy_i``, ``Vy_j``,
+                ``Vz_i``, ``Vz_j``, ``My_i``, ``My_j``, ``Mz_i``, ``Mz_j``.
             * ``'modal_periods'``, ``'omega'`` — for diagnostics.
         """
         if self.config.get("verbose"):

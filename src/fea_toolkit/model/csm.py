@@ -166,9 +166,9 @@ def bilinearize_equal_energy(
 
         - ``'equal_energy'`` — converged to tolerance.
         - ``'equal_energy_degenerate'`` — yield acceleration collapsed
-          to zero (degenerate capacity curve).
+            to zero (degenerate capacity curve).
         - ``'equal_energy_not_converged'`` — ``max_iter`` exhausted
-          without reaching tolerance (a warning is emitted).
+            without reaching tolerance (a warning is emitted).
 
     Edge cases:
         - No clear yield (S_dy >= 90 % of peak) → yield at peak (mu = 1).
@@ -460,7 +460,7 @@ def bilinearize_rc(
 
         - ``'de_luca_10pct'`` — regular fit (yield below 90 % of peak).
         - ``'de_luca_10pct_elastic'`` — no inelasticity detected; yield
-          placed at the peak (``mu = 1``).
+            placed at the peak (``mu = 1``).
 
     Edge cases:
         - Empty arrays → ``(0.0, 0.0, 'de_luca_10pct')``.
@@ -728,11 +728,11 @@ def compute_performance_point(
         * ``'Gamma'`` — participation factor.
         * ``'M_eff'`` — effective modal mass.
         * ``'beta_eq'`` — equivalent viscous damping ratio at the
-          performance point (β₀ + hysteretic contribution).
+            performance point (β₀ + hysteretic contribution).
         * ``'B'`` — damping reduction factor applied to the demand
-          spectrum at the performance point.
+            spectrum at the performance point.
         * ``'capacity_adrs'`` — dict with ``'S_a'`` (m/s²) and
-          ``'S_d'`` lists.
+            ``'S_d'`` lists.
 
     Raises:
         ValueError: If the capacity spectrum has fewer than 3 valid
@@ -1125,15 +1125,15 @@ def pushover_to_adrs(
         * ``'M_eff'`` — effective modal mass.
         * ``'phi_control'`` — control-node mode shape ordinate.
         * ``'best_mode'`` — index of the mode with the highest
-          push-direction participation, measured by ``L² / M_star``
-          (equivalently ``M_eff``).  For mass-normalized eigenvectors —
-          the standard output of
-          :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.extract_mode_shapes` —
-          ``M_star = 1`` for every mode, so this reduces to the mode with
-          the largest ``L = Σ mᵢ φᵢ`` in the push direction.  The index
-          follows the ``mode_shapes`` key space (0‑based for
-          ``extract_mode_shapes()`` output, where OpenSees mode number =
-          ``best_mode + 1``).
+            push-direction participation, measured by ``L² / M_star``
+            (equivalently ``M_eff``).  For mass-normalized eigenvectors —
+            the standard output of
+            :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.extract_mode_shapes` —
+            ``M_star = 1`` for every mode, so this reduces to the mode with
+            the largest ``L = Σ mᵢ φᵢ`` in the push direction.  The index
+            follows the ``mode_shapes`` key space (0‑based for
+            ``extract_mode_shapes()`` output, where OpenSees mode number =
+            ``best_mode + 1``).
     """
     # Use best mode (highest mass participation in push direction).
     # ``nodal_masses`` is part of the required modal-result contract

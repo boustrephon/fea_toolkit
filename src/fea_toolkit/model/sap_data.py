@@ -340,7 +340,7 @@ class Section:
         Args:
             mat_tag: OpenSees material tag.
             nfy: Number of fibres along the local y direction.
-            nz: Number of fibres along the local z direction.
+            nfz: Number of fibres along the local z direction.
 
         Returns:
             List of ``('rect', mat_tag, nfy, nfz, y1, z1, y2, z2)`` tuples.

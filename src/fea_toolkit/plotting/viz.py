@@ -3412,8 +3412,12 @@ def plot_mesh(
         show_constraints: Draw edge constraint lines (yellow).
         show_orphan_nodes: Show orphan nodes (darkorange).
         shrink: Fraction to shrink quads/lines toward centroid.
-        xlim, ylim, zlim: ``(lo, hi)`` bounding‑box filters.
-        show_node_labels, show_frame_labels, show_area_labels: Add labels.
+        xlim: ``(lo, hi)`` bounding-box filter.
+        ylim: ``(lo, hi)`` bounding-box filter.
+        zlim: ``(lo, hi)`` bounding-box filter.
+        show_node_labels: Add node labels.
+        show_frame_labels: Add frame labels.
+        show_area_labels: Add area labels.
         notebook: Return plotter for Jupyter embedding.
         **kwargs: Passed to ``pyvista.Plotter()``.
 
@@ -3797,7 +3801,9 @@ def plot_mode_animation(
             (0.0 = full length, 0.1 = 10 percent gap at each end).
         animate: Oscillate amplitude sinusoidally.
         periods: List of modal periods (s).  The period for *mode* is shown.
-        font_size, anim_speed, anim_amplitude: Display tuning.
+        font_size: Display font size.
+        anim_speed: Animation speed factor.
+        anim_amplitude: Animation amplitude factor.
         selection: Optional Selection to filter elements (builder only).
         notebook: Return plotter for Jupyter.
         **kwargs: Passed to ``pyvista.Plotter()``.
