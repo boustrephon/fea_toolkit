@@ -1,12 +1,62 @@
 ---
 title: "Deprecation Removal Plan"
 description: "Plan for removing deprecated APIs after the RC nonlinear static analysis release."
-status: "draft"
+status: "complete"
 tags: [planning, deprecation, cleanup]
 category: [planning]
 ---
 
 # Deprecation Removal Plan
+
+**Status:** ✅ **Complete — implemented 2026-08-21.**
+
+## Summary of removal
+
+All items in the inventory below have been actioned:
+
+- **Plotting (`viz.py`)** — the 9 deprecated functions were removed
+  (`plot_model_3d`, `plot_deformed_3d`, `plot_rs_deformed_3d`,
+  `plot_mode_3d`, `plot_static_moment_3d`, `plot_static_shear_3d`,
+  `plot_static_axial_3d`, `plot_static_force_diagram`,
+  `plot_force_diagram`) together with the private helpers used only by
+  them (`_get_local_end_forces`, `_plot_moment_flags`, `_plot_moment_tubes`,
+  `_add_reaction_arrows`, `_build_shell_geometry`).  `_build_deformed_mesh`
+  is retained — it is used by the replacement `plot_mode_animation()`.
+- **`plot_force_diagram` → `plot_rs_force_diagram`** — renamed (it has no
+  direct replacement) and modernised: accepts the RS `element_results`
+  list **or** the full `extract_element_rs_forces()` dict, plus
+  `force_unit` / `length_unit` / `both_ends` options.
+- **Exports** — `plotting/__init__.py` and the root `__init__.py` no
+  longer expose the deprecated names; the canonical quick-start now uses
+  `plot_mesh` / `plot_deformed_displacement_3d`.
+- **`model/sap_data.py`** — the 4 deprecated unit-conversion aliases were
+  removed.
+- **Stale `OpenSeesBuilder` references** — corrected in `io/report.py`,
+  `analysis_builder.py`, and `viz.py`.
+- **RC pushover Tcl path** — reorganised: the orchestration moved to
+  `analysis/pushover_tcl.py` (`run_rc_pushover_tcl`), `analysis/pushover.py`
+  is a thin dispatcher, and `use_tcl_fallback` is kept as an **alternate
+  backend** (its `DeprecationWarning` was removed).
+- **CI** — `mkdocs build --strict` is restored as the gate in
+  `.github/workflows/docs.yml`.
+
+## Phase B — future consolidation (recorded, not yet done)
+
+Combine `plot_rs_force_diagram()`, `plot_force_diagram_3d()` and
+`plot_npz_force_diagram()` into a **single unified, unit-aware** force-diagram
+entry point that:
+
+1. Covers **all inputs** — `AnalysisBuilder`, in-memory result dicts
+   (including RS `element_results`), and NPZ paths.
+2. Is **unit-aware** — reads units from builder/result metadata/NPZ rather
+   than hardcoding `kN`/`m`.
+3. **Dispatches 2D vs 3D** and **static vs CQC-RS** from the input shape.
+
+Naming decision deferred: either reuse `plot_force_diagram` as the unified
+dispatcher, or keep `plot_force_diagram_3d` for the 3D path with a 2D
+sibling.  The three functions above remain in place (with
+`plot_rs_force_diagram` as the renamed stopgap) until the unified function
+lands.
 
 ## Trigger
 

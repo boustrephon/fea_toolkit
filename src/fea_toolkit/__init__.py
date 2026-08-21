@@ -8,7 +8,7 @@ The canonical pipeline is::
         SAP2000Parser,           # parser
         preprocess_model,        # topology prep
         AnalysisBuilder,         # OpenSees domain + analysis
-        plot_model_3d,           # visualisation
+        plot_mesh,               # visualisation
     )
     from fea_toolkit.io import write_results_npz  # NPZ serialisation
 
@@ -24,8 +24,8 @@ The canonical pipeline is::
     results = builder.run_static_analysis()
 
     # 4. Visualise
-    plot_model_3d(builder)
-    plot_deformed_3d(builder, results, scale=100.0)
+    plot_mesh(builder)
+    plot_deformed_displacement_3d(builder, results, scale=100.0)
 
 Task → Function reference
 -------------------------
@@ -39,8 +39,8 @@ Task → Function reference
 | Run response spectrum (CQC)                      | ``AnalysisBuilder(...).run_response_spectrum_analysis()`` |
 | Run pushover (non-linear) analysis               | ``AnalysisBuilder(...).run_pushover_analysis()`` |
 | Print a modal summary table                      | ``from fea_toolkit.io import modal_table``      |
-| Plot the 3D model                                | ``plot_model_3d(builder)``                      |
-| Plot deformed shape                              | ``plot_deformed_3d(builder, results, scale=100)`` |
+| Plot the 3D model                                | ``plot_mesh(builder)``                           |
+| Plot deformed shape                              | ``plot_deformed_displacement_3d(builder, results, scale=100)`` |
 | Plot force/moment diagrams                       | ``plot_force_diagram_3d(builder, results, quantity='Mz')`` |
 | Plot pushover capacity curve                     | ``plot_pushover_curve(results)``                |
 | Plot storey displacements / drifts               | ``from fea_toolkit.model import storey_displacements`` |
@@ -119,11 +119,10 @@ from fea_toolkit.plotting.viz import (
     compare_meshes,
     plot_building_views,
     plot_capacity_spectrum,
-    plot_deformed_3d,
+    plot_deformed_displacement_3d,
     plot_force_diagram_3d,
     plot_mesh,
     plot_mode_animation,
-    plot_model_3d,
     plot_model_comparison,
     plot_pushover_curve,
 )
@@ -165,13 +164,12 @@ __all__ = [
     "ops_version",
     "plot_building_views",
     "plot_capacity_spectrum",
-    "plot_deformed_3d",
+    "plot_deformed_displacement_3d",
     "plot_force_diagram_3d",
     "plot_interactive_viewer",
     "plot_mesh",
     "plot_mode_animation",
     # Visualisation
-    "plot_model_3d",
     "plot_model_comparison",
     "plot_pushover_curve",
     "preprocess_model",

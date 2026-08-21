@@ -94,10 +94,9 @@ related: [analysis_builder_migration_plan.md]
 - colour_frame_by_npz_ratio() colours by ratio of two quantities
 - Runs inside Rhino CPython environment
 
-## Shear + axial 3D plots (plotting/viz.py)
-- _plot_moment_flags and _plot_moment_tubes generalized for any M* or F* quantity
-- plot_static_moment_3d accepts M* (moment) or F* (force) quantities
-- plot_static_shear_3d() and plot_static_axial_3d() convenience wrappers
+## Force diagrams (plotting/viz.py)
+- plot_force_diagram_3d renders flags or tubes for any M* or F* quantity
+  (builder, AnalysisBuilder, or NPZ sources)
 - Force flags use world-perpendicular direction (not local axes)
 
 ## PyVista widgets available (viz.py)

@@ -194,7 +194,7 @@ for automated cross-referencing.
   Tags: `csm`, `test-model`, `planning`, `capacity-spectrum`
   Related: [CSM Bilinearization](csm_bilinearization.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md)
 
-- [Deprecation Removal Plan](deprecation_plan.md) — 🚧 Draft
+- [Deprecation Removal Plan](deprecation_plan.md) — ✅ Complete
   > Plan for removing deprecated APIs after the RC nonlinear static analysis release.
   Tags: `planning`, `deprecation`, `cleanup`
 

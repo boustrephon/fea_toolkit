@@ -7,6 +7,34 @@ category: [planning]
 ---
 # Pending work — fea_toolkit (2026-08-01 continued)
 
+## DONE (deprecation-programme Phase 3 — removal PR, 2026-08-21)
+- Removed the 9 deprecated plotting functions from `plotting/viz.py`
+  (`plot_model_3d`, `plot_deformed_3d`, `plot_rs_deformed_3d`,
+  `plot_mode_3d`, `plot_static_moment_3d`, `plot_static_shear_3d`,
+  `plot_static_axial_3d`, `plot_static_force_diagram`, `plot_force_diagram`)
+  and the private helpers used only by them (`_get_local_end_forces`,
+  `_plot_moment_flags`, `_plot_moment_tubes`, `_add_reaction_arrows`,
+  `_build_shell_geometry`).  `_build_deformed_mesh` kept (used by
+  `plot_mode_animation`).
+- Renamed `plot_force_diagram` → `plot_rs_force_diagram` (multi-format
+  input — list or full `extract_element_rs_forces()` dict; unit-aware
+  `force_unit` / `length_unit`; optional `both_ends`).
+- Cleaned exports: `plotting/__init__.py` + root `__init__.py` no longer
+  expose deprecated names; quick-start uses `plot_mesh` /
+  `plot_deformed_displacement_3d`.
+- Removed the 4 deprecated unit aliases from `model/sap_data.py`.
+- Fixed stale `OpenSeesBuilder` docstring refs in `io/report.py`,
+  `analysis_builder.py`, `viz.py`.
+- RC pushover Tcl path reorganised: new `analysis/pushover_tcl.py`
+  (`run_rc_pushover_tcl`); `analysis/pushover.py` is a thin dispatcher;
+  `use_tcl_fallback` kept as an alternate backend (DeprecationWarning
+  removed); shared `_build_rc_config` / `_resolve_modal_data` helpers.
+- Restored `mkdocs build --strict` gate in `.github/workflows/docs.yml`.
+- Updated `docs/deprecation_plan.md` → complete (records Phase B:
+  unify `plot_rs_force_diagram` + `plot_force_diagram_3d` +
+  `plot_npz_force_diagram` into one unit-aware entry point).
+- Validation: full suite `1010 passed, 4 xfailed`.
+
 ## DONE (documentation findings 1–10)
 - analysis_builder_migration_plan.md: rows 92 & 94 updated (UserWarning fallback; Mander ✅ Done).
 - csm_bilinearization.md: S_dp print now "model length units".

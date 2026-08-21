@@ -12,8 +12,8 @@ Modules
 preprocessor — Topology preparation: element splitting, area meshing, edge constraints.
 analysis_builder — OpenSees domain construction, loads, modal/static/pushover/RS analysis.
 recorder — Tcl script export (:class:`RecordingOpenSees` proxy), Xara Tcl runtime runner.
-builder — Legacy Tcl export functions (:func:`export_model_to_tcl`, :func:`pushover_tcl`).
-pushover — 4-direction pushover runner with gravity gravity + lateral load sequences.
+builder — Tcl export functions (:func:`export_model_to_tcl`, :func:`pushover_tcl`).
+pushover — 4-direction pushover runner with gravity + lateral load sequences.
 """
 
 from .analysis_builder import AnalysisBuilder, run_modal
@@ -46,7 +46,7 @@ __all__ = [
     "compute_lateral_loads",
     "dynamic_time_history_tcl",
     "export_mesh_model_to_tcl",
-    # Legacy builder (Tcl export)
+    # Builder (Tcl export)
     "export_model_to_tcl",
     "modal_to_lateral_loads",
     "parse_pushover_results",
