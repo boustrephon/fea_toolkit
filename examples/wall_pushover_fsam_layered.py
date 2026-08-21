@@ -419,7 +419,7 @@ def run_wall_pushover(config: dict, lateral: float, num_steps: int):
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "RC wall FSAM-layered pushover — extracted, documented, non-converging reproduction."
@@ -521,13 +521,24 @@ def main() -> None:
         print(f"  Saved → {out}")
         _real_ops.wipe()
 
+    converged = n_steps > 0
+    expectation_met = (args.expect_failure and not converged) or (
+        not args.expect_failure and converged
+    )
+
+    if expectation_met:
+        if args.expect_failure:
+            print("\nDone (documented failure reproduced).")
+        else:
+            print("\nDone (converged — the documented failure did NOT reproduce).")
+        return 0
+
     if args.expect_failure:
-        print("\nDone (documented failure reproduced).")
-    elif n_steps:
-        print("\nDone (converged — the documented failure did NOT reproduce).")
+        print("\n⚠ Unexpected convergence — the documented failure did NOT reproduce.")
     else:
         print("\nDone (expected convergence, but none occurred).")
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
