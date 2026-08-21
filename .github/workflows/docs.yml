@@ -38,6 +38,10 @@ jobs:
 
       - name: Build MkDocs site (strict)
         run: mkdocs build --strict
+        env:
+          # mkdocs 1.6 prints a Python-level "2.0 may break plugins" notice that
+          # is not strict-failing but is noisy; documented suppression switch.
+          DISABLE_MKDOCS_2_WARNING: "true"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
