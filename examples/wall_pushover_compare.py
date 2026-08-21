@@ -6,7 +6,11 @@ and LayeredShell); the optional ``--fiber`` flag adds the two fiber
 beam-column reference curves (N = 8 and 16).  The **converging**
 nonlinear RC wall discretisations in fea_toolkit are compared on the
 same wall cross-section (4.0 m wide x 0.3 m thick), at three aspect
-ratios, with a unified gravity-then-post-yield protocol.
+ratios.  The two pipeline approaches share a gravity-then-post-yield
+protocol (constant axial pre-load P = 0.20 f_c A_g = 7,200 kN, then a
+displacement-controlled lateral push); the fiber reference instead uses
+a 500 kN axial pre-load and a force-controlled 100 kN ramp (see
+``run_fiber_pushover``).
 
 Approaches (docs/mvlem_wall_analysis.md §7):
 
@@ -69,7 +73,8 @@ Output (all in ``examples/output/``, gitignored):
 
 * ``wall_pushover_compare.png`` / ``.svg`` — one figure, three subplots
   (one per height), each overlaying the two default capacity curves
-  (four with ``--fiber``, which adds the two fiber reference curves).
+  (up to four with ``--fiber``, which adds the two fiber reference
+  curves — failed fiber cases are skipped and may not appear).
 * ``wall_layered_elastic.tcl`` / ``.py`` and ``wall_mvlem_3d.tcl`` / ``.py``
   — optional Tcl / Python exports for the two pipeline paths
   (``--tcl`` / ``--py``).
@@ -77,7 +82,7 @@ Output (all in ``examples/output/``, gitignored):
 Usage::
 
     python examples/wall_pushover_compare.py          # default (2 approaches)
-    python examples/wall_pushover_compare.py --fiber  # + 2 fiber reference curves
+    python examples/wall_pushover_compare.py --fiber  # up to 4 approaches (2 + 2 fiber refs)
     python examples/wall_pushover_compare.py --no-plot
     python examples/wall_pushover_compare.py --tcl --py
 
@@ -819,7 +824,10 @@ def plot_height_overlay(cases: dict, out_dir: Path) -> None:
 
     heights = list(cases.keys())
     n = len(heights)
-    n_curves = len(cases[heights[0]]) if heights else 0
+    if n == 0:
+        print("  Note: no cases to plot — skipping plots.")
+        return
+    n_curves = max(len(v) for v in cases.values())
     fig, axes = plt.subplots(1, n, figsize=(6.2 * n, 5.2), sharey=True, squeeze=False)
     for ax, h in zip(axes[0], heights):
         for label, res in cases[h]:
@@ -838,9 +846,14 @@ def plot_height_overlay(cases: dict, out_dir: Path) -> None:
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize=8)
     axes[0][0].set_ylabel("Base shear (kN)")
+    fiber_present = any(label.startswith("Fiber") for h in heights for label, _ in cases[h])
+    if fiber_present:
+        protocol = f"(pipeline: axial P = {P_AXIAL:.0f} kN, DC push; fiber: 500 kN, 100 kN ramp)"
+    else:
+        protocol = f"(constant axial P = {P_AXIAL:.0f} kN, DC push)"
+    n_label = f"up to {n_curves}" if fiber_present else f"{n_curves}"
     fig.suptitle(
-        f"RC wall pushover — {n_curves} approaches × {n} heights "
-        f"(constant axial P = {P_AXIAL:.0f} kN)",
+        f"RC wall pushover — {n_label} approaches × {n} heights {protocol}",
         y=0.98,
         fontsize=12,
     )
@@ -901,7 +914,7 @@ def export_py(config: dict, label: str, out_dir: Path, height: float) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="RC wall non-linear pushover: 2 approaches × 3 heights "
-        "(4 approaches with --fiber).",
+        "(up to 4 approaches with --fiber).",
     )
     parser.add_argument(
         "--no-plot",
