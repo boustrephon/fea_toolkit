@@ -168,12 +168,12 @@ Yes — in the current implementation, the original super-elements are preserved
 
 This is already reflected in the dataclasses:
 
-- `FrameElement` in [src/fea_toolkit/model/sap_data.py](../src/fea_toolkit/model/sap_data.py#L766-L805)
-- `AreaElement` in [src/fea_toolkit/model/sap_data.py](../src/fea_toolkit/model/sap_data.py#L779-L805)
+- `FrameElement` in `src/fea_toolkit/model/sap_data.py`
+- `AreaElement` in `src/fea_toolkit/model/sap_data.py`
 
 and in the subdivision logic:
 
-- the original frame element is marked `inactive = True` and the child elements are created with `inactive = False` in [src/fea_toolkit/model/geometry.py](../src/fea_toolkit/model/geometry.py#L919-L958)
+- the original frame element is marked `inactive = True` and the child elements are created with `inactive = False` in `src/fea_toolkit/model/geometry.py`
 - the same pattern is used for subdivision of the original area super-elements in the mesh routines
 
 So the intended meaning is:
