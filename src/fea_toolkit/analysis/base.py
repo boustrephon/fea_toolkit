@@ -1,54 +1,19 @@
-"""Base classes for the analysis framework."""
+"""Base containers for the analysis framework.
 
-from abc import ABC, abstractmethod
+Holds the shared :class:`AnalysisResult` / :class:`AnalysisCaseSpec`
+containers and the per-type default config dicts used by the module-level
+analysis functions in :mod:`fea_toolkit.analysis`.
+"""
+
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any, Optional
-
-if TYPE_CHECKING:
-    from fea_toolkit.model.mesh_model import MeshModel
-
+from typing import Any
 
 # ── Per-type defaults (simple dicts, no dataclass overhead) ──────────
+# Linear-elastic defaults (static / modal / response spectrum): a single
+# shared dict — the three analysis types use identical solver and element
+# settings; they differ only in what they execute.
 
-_STATIC_LINEAR_DEFAULTS: dict = {
-    "element_type": "elasticBeamColumn",
-    "num_int_pts": 3,
-    "use_elastic_sections": True,
-    "create_fiber_sections": False,
-    "geom_transf_type": "Linear",
-    "beam_integration": "Lobatto",
-    "simplify_distributed_loads": False,
-    "solver_test_type": "NormDispIncr",
-    "solver_test_tol": 1e-8,
-    "solver_test_max_iter": 10,
-    "solver_algorithm": "Newton",
-    "solver_constraints": "Transformation",
-    "solver_system": "BandGen",
-    "gravity_num_substeps": 1,
-    "constraint_method": "spring",
-    "brace_type": "beam",
-}
-
-_MODAL_DEFAULTS: dict = {
-    "element_type": "elasticBeamColumn",
-    "num_int_pts": 3,
-    "use_elastic_sections": True,
-    "create_fiber_sections": False,
-    "geom_transf_type": "Linear",
-    "beam_integration": "Lobatto",
-    "simplify_distributed_loads": False,
-    "solver_test_type": "NormDispIncr",
-    "solver_test_tol": 1e-8,
-    "solver_test_max_iter": 10,
-    "solver_algorithm": "Newton",
-    "solver_constraints": "Transformation",
-    "solver_system": "BandGen",
-    "gravity_num_substeps": 1,
-    "constraint_method": "spring",
-    "brace_type": "beam",
-}
-
-_RESPONSE_SPECTRUM_DEFAULTS: dict = {
+_LINEAR_ELASTIC_DEFAULTS: dict = {
     "element_type": "elasticBeamColumn",
     "num_int_pts": 3,
     "use_elastic_sections": True,
@@ -212,80 +177,7 @@ class AnalysisResult:
 
 
 # ────────────────────────────────────────────────────────────────────
-# Analysis — abstract base
+# (Analysis ABC removed — the analysis subpackage now exposes
+# module-level functions returning AnalysisResult, composed explicitly
+# by the caller instead of via a dependency-graph manager.)
 # ────────────────────────────────────────────────────────────────────
-
-
-class Analysis(ABC):
-    """One analysis case — owns config, knows how to run itself.
-
-    Subclasses must implement :meth:`defaults` and :meth:`run`.
-
-    Parameters
-    ----------
-    mesh_model : MeshModel
-        Pre-processed topology from the Preprocessor.
-    name : str, optional
-        Human-readable label.  Defaults to the class name.
-    config : dict, optional
-        Overrides for analysis-type defaults.  Deep-merged on top of
-        :meth:`defaults` so callers only need to provide differences.
-    """
-
-    def __init__(
-        self,
-        mesh_model: "MeshModel",
-        name: Optional[str] = None,
-        config: Optional[dict] = None,
-    ):
-        self.mesh_model = mesh_model
-        self.name = name or type(self).__name__
-        # Start from analysis-type defaults (fresh copy every call)
-        self.config: dict = dict(self.defaults())
-        # Overlay caller overrides
-        if config:
-            self.config.update(config)
-        self._result: Optional[AnalysisResult] = None
-
-    @classmethod
-    @abstractmethod
-    def defaults(cls) -> dict:
-        """Return the default config dict for this analysis type.
-
-        Subclasses should return e.g. ``dict(_STATIC_LINEAR_DEFAULTS)``.
-        """
-        ...
-
-    @abstractmethod
-    def run(self) -> AnalysisResult:
-        """Execute the analysis and return a result."""
-        ...
-
-    @property
-    def requires(self) -> list[type["Analysis"]]:
-        """Analysis classes that must run before this one.
-
-        Override to declare dependencies (e.g. ``[ModalAnalysis]``).
-        The :class:`AnalysisManager` uses this for topological ordering.
-        """
-        return []
-
-    @property
-    def provides(self) -> set[str]:
-        """Data keys this analysis writes into its result."""
-        return set()
-
-    def _accept_dependency(  # noqa: B027 — intentional no-op default
-        self, dep_result: AnalysisResult, dep_type: type["Analysis"]
-    ) -> None:
-        """Wire a completed dependency result into this analysis.
-
-        Called by :class:`AnalysisManager` once per entry in
-        :meth:`requires`.  Subclasses override to store the dependency
-        in the appropriate instance attribute.  The default
-        implementation is a no-op.
-        """
-
-    @property
-    def result(self) -> Optional[AnalysisResult]:
-        return self._result

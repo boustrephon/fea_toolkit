@@ -28,7 +28,7 @@ import openseespy.opensees as ops
 import pytest
 
 from examples.sample_model import make_rc_frame_3d
-from fea_toolkit.analysis.elwood_limit_state import elwood_shear_limit_force
+from fea_toolkit.capacity.elwood_limit_state import elwood_shear_limit_force
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.opensees.preprocessor import preprocess_model
 

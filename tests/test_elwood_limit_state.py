@@ -16,7 +16,7 @@ import math
 
 import pytest
 
-from fea_toolkit.analysis.elwood_limit_state import (
+from fea_toolkit.capacity.elwood_limit_state import (
     ElwoodColumnGeometry,
     axial_capacity_surface,
     elwood_axial_deg_slope,

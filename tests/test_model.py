@@ -3304,6 +3304,17 @@ class TestBraceBucklingCheck:
         assert r["P_demand"] == 50000.0
         assert r["ratio"] > 0
 
+    def test_buckling_table_auto_detect(self, brace_model):
+        """brace_buckling_check auto-detects Pipe sections and returns a DataFrame."""
+        from fea_toolkit.model.checks import brace_buckling_check
+
+        df = brace_buckling_check(brace_model, n_longest=2, K=1.0)
+        assert next(iter(df.columns)) == "Element"
+        assert df["Element"].iloc[0] == "B1"
+        pcr_col = [c for c in df.columns if c.startswith("P_cr")]
+        assert pcr_col, "P_cr column missing from buckling table"
+        assert df[pcr_col[0]].iloc[0] > 0
+
     def test_from_brace_sections(self):
         """Selection.from_brace_sections detects Pipe, Angle, etc."""
         from fea_toolkit.model.selection import Selection

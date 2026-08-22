@@ -9,6 +9,8 @@ import math
 from collections import defaultdict
 from typing import Any, Optional
 
+import pandas as pd
+
 from fea_toolkit.model.sap_data import (
     SAPModelData,
     ShellSection,
@@ -248,6 +250,99 @@ def check_brace_buckling(
             else:
                 print("\n  ✅ All braces with demand < 50% of P_cr")
     return results
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Brace buckling table (auto-detect + report)
+# ═══════════════════════════════════════════════════════════════════
+
+
+def brace_buckling_check(md: "SAPModelData", n_longest: int = 2, K: float = 1.0) -> pd.DataFrame:
+    """Identify the longest braces and compute their Euler buckling capacity.
+
+    Braces are identified by their section shape (Pipe, Angle, Double Angle,
+    Tee, or Channel).  For each brace, the Euler buckling load is:
+
+        P_cr = π² E I_22 / (K L)²
+
+    where I_22 is the minor-axis moment of inertia, L is the element length,
+    and K is the effective length factor.
+
+    This is the DataFrame variant of :func:`check_brace_buckling` (which
+    takes explicit brace IDs and returns a dict).  It auto-detects braces by
+    section shape, delegates the P_cr computation to the shared engine, and
+    reports the *n_longest* members.
+
+    Args:
+        md: The parsed SAPModelData.
+        n_longest: Number of longest braces to report (default 2).
+        K: Effective length factor (default 1.0 — pinned-pinned).
+
+    Returns:
+        DataFrame with columns: ``Element`` (SAP2000 frame ID),
+        ``Section``, ``Shape``, ``Material``,
+        ``Length ({lu})`` (with the model's length unit),
+        ``A ({lu}²)`` (cross-section area),
+        ``I22 ({lu}⁴)`` (minor-axis second moment),
+        ``Slenderness`` (λ = KL/r), and
+        ``P_cr ({fu})`` (Euler buckling load, in force units).
+    """
+    from fea_toolkit.model.sap_data import (
+        AngleSection,
+        ChannelSection,
+        DoubleAngleSection,
+        PipeSection,
+        TeeSection,
+    )
+
+    brace_shape_types = (
+        PipeSection,
+        AngleSection,
+        DoubleAngleSection,
+        TeeSection,
+        ChannelSection,
+    )
+    fu = md.units.get("F", "N")
+    lu = md.units.get("L", "m")
+
+    # Auto-identify brace frame IDs by section shape
+    brace_ids: set = set()
+    for eid, elem in md.frame_elements.items():
+        if getattr(elem, "inactive", False):
+            continue
+        sec_name = md.frame_assignments.get(eid)
+        if not sec_name or sec_name not in md.sections:
+            continue
+        if isinstance(md.sections[sec_name], brace_shape_types):
+            brace_ids.add(eid)
+
+    # Delegate the Euler computation to the shared engine
+    engine = check_brace_buckling(md, brace_ids=brace_ids, K=K, print_results=False)
+
+    rows = []
+    for eid in sorted(engine):
+        r = engine[eid]
+        sec = md.sections[r["section"]]
+        rows.append(
+            {
+                "Element": eid,
+                "Section": r["section"],
+                "Shape": type(sec).__name__.replace("Section", ""),
+                "Material": sec.material,
+                f"Length ({lu})": round(r["length"], 3),
+                f"A ({lu}²)": round((sec.A or 0) if (sec.A or 0) > 0 else 1e-4, 6),
+                f"I22 ({lu}⁴)": round((sec.I22 or 0) if (sec.I22 or 0) > 0 else (sec.I33 or 0), 8),
+                "Slenderness": round(r["slenderness"], 1),
+                f"P_cr ({fu})": round(r["P_cr"], 0),
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame({"Note": ["No brace sections found in model."]})
+
+    df = pd.DataFrame(rows)
+    df = df.sort_values(f"Length ({lu})", ascending=False).head(n_longest).reset_index(drop=True)
+    return df
 
 
 # ═══════════════════════════════════════════════════════════════════

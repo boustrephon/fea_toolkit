@@ -175,7 +175,7 @@ def elwood_column_geometry(
 ) -> ElwoodColumnGeometry:
     """Build :class:`ElwoodColumnGeometry` from a frame section.
 
-    Reuses :func:`fea_toolkit.analysis.shear_capacity.section_shear_geometry`
+    Reuses :func:`fea_toolkit.capacity.shear_capacity.section_shear_geometry`
     for the web/depth/effective-depth/spacing/transverse-area extraction and
     reads the concrete and tie strengths from the supplied materials.
 

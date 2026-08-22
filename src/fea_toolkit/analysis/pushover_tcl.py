@@ -13,7 +13,7 @@ pushover:
 
 Returns a plain ``(data, metadata)`` pair ready to be wrapped in an
 :class:`~fea_toolkit.analysis.base.AnalysisResult` by
-:class:`~fea_toolkit.analysis.pushover.PushoverAnalysis`.
+:func:`~fea_toolkit.analysis.pushover.run_pushover_analysis`.
 
 Recorder output files (``*_disp.out``, ``*_bs.out``, ``*_reaction.out``)
 are written alongside the Tcl script in the ``output/`` directory, which
@@ -173,7 +173,7 @@ def run_rc_pushover_tcl(
             wrapped in ``{"modal": ...}``).
         config: Merged RC config — user overrides over
             ``_PUSHOVER_RC_DEFAULTS`` with ``create_fiber_sections``
-            forced on (see ``PushoverAnalysis._build_rc_config``).
+            forced on (see ``run_pushover_analysis._build_rc_config``).
         lateral_load_type: One of ``'uniform'``, ``'triangular'``,
             ``'mode1'`` (default).
         max_disp_val: Maximum control displacement (model units).

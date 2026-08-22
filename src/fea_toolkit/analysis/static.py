@@ -1,85 +1,54 @@
 """Static (linear) analysis — auto-detected load cases.
 
-Wraps :func:`~fea_toolkit.io.report.run_linear_cases`.
+Wraps :func:`~fea_toolkit.analysis.linear.run_linear_cases`.
 """
 
 from typing import TYPE_CHECKING, Any, Optional
 
-from fea_toolkit.analysis.base import (
-    _STATIC_LINEAR_DEFAULTS,
-    Analysis,
-    AnalysisResult,
-)
+from fea_toolkit.analysis.base import AnalysisResult
 
 if TYPE_CHECKING:
     from fea_toolkit.model.mesh_model import MeshModel
 
 
-class StaticAnalysis(Analysis):
+def run_static_analysis(
+    mesh_model: "MeshModel",
+    md: Any,
+    spec_cfg: Optional[dict] = None,
+    linear_cfg: Optional[dict] = None,
+    name: str = "StaticAnalysis",
+    config: Optional[dict] = None,
+) -> AnalysisResult:
     """Run static linear analysis cases.
 
-    Auto-detects static load cases from the SAP2000 model, or uses
-    the *cases* parameter to specify which to run.
+    Auto-detects static load cases from the SAP2000 model, or uses the
+    *linear_cfg* ``cases`` parameter to specify which to run.
 
-    Parameters
-    ----------
-    mesh_model : MeshModel
-    spec_cfg : dict, optional
-        Spectrum config passed through to ``run_linear_cases()``
-        for response-spectrum-related static verification.
-    linear_cfg : dict, optional
-        Linear analysis config (e.g. ``{"cases": [...]}``).
-    name : str, optional
-    config : dict, optional
+    Args:
+        mesh_model: Pre-processed topology from the Preprocessor.
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
+        spec_cfg: Spectrum config passed through to ``run_linear_cases()``
+            for response-spectrum-related static verification.
+        linear_cfg: Linear analysis config (e.g. ``{"cases": [...]}``).
+        name: Result label (default ``"StaticAnalysis"``).
+        config: Optional config dict, recorded in the result metadata.
+
+    Returns:
+        :class:`AnalysisResult` whose ``data`` holds ``df_linear``.
     """
+    from fea_toolkit.analysis.linear import run_linear_cases
 
-    def __init__(
-        self,
-        mesh_model: "MeshModel",
-        spec_cfg: Optional[dict] = None,
-        linear_cfg: Optional[dict] = None,
-        name: Optional[str] = None,
-        config: Optional[dict] = None,
-    ):
-        super().__init__(mesh_model, name, config)
-        self.spec_cfg = spec_cfg
-        self.linear_cfg = linear_cfg
-        self._md: Optional[Any] = None
-
-    def bind_md(self, md: Any) -> "StaticAnalysis":
-        """Bind the parsed SAPModelData (required before run)."""
-        self._md = md
-        return self
-
-    @classmethod
-    def defaults(cls) -> dict:
-        return dict(_STATIC_LINEAR_DEFAULTS)
-
-    @property
-    def requires(self) -> list:
-        return []
-
-    @property
-    def provides(self) -> set:
-        return {"df_linear", "rs_modal_x", "rs_modal_y"}
-
-    def run(self) -> AnalysisResult:
-        from fea_toolkit.io.report import run_linear_cases
-
-        if self._md is None:
-            raise RuntimeError("StaticAnalysis requires md to be bound via bind_md()")
-
-        df_linear = run_linear_cases(
-            self._md,
-            self.mesh_model,
-            spec_cfg=self.spec_cfg,
-            linear_cfg=self.linear_cfg,
-        )
-        return AnalysisResult(
-            name=self.name,
-            analysis_type="StaticAnalysis",
-            data={
-                "df_linear": df_linear,
-            },
-            metadata={"spec_cfg": self.spec_cfg, "linear_cfg": self.linear_cfg},
-        )
+    df_linear = run_linear_cases(
+        md,
+        mesh_model,
+        spec_cfg=spec_cfg,
+        linear_cfg=linear_cfg,
+    )
+    return AnalysisResult(
+        name=name,
+        analysis_type="StaticAnalysis",
+        data={
+            "df_linear": df_linear,
+        },
+        metadata={"spec_cfg": spec_cfg, "linear_cfg": linear_cfg, "config": config or {}},
+    )

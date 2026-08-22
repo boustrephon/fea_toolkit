@@ -33,7 +33,7 @@ failure location.
 
 import pytest
 
-from fea_toolkit.analysis.shear_capacity import (
+from fea_toolkit.capacity.shear_capacity import (
     member_shear_capacity,
     report_shear_failure,
     shear_backbone,
