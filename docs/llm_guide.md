@@ -39,7 +39,7 @@ builder = AnalysisBuilder(mesh, {}).build_domain()
 | I/O | `from fea_toolkit.io import ...` | Parser, NPZ, reports, ground motion |
 | OpenSees | `from fea_toolkit.opensees import ...` | Preprocessor, AnalysisBuilder, Tcl export |
 | Plotting | `from fea_toolkit.plotting import ...` | 3D views, deformed shapes, force diagrams |
-| Analysis | `from fea_toolkit.analysis import ...` | Typed analysis objects + manager |
+| Analysis | `from fea_toolkit.analysis import ...` | Analysis functions returning typed `AnalysisResult` (modal, static, RS, pushover, NLD) |
 | Capacity | `from fea_toolkit.capacity import ...` | Code-specified member capacities (GB 50010, ASCE 41) + DCR |
 | Model | `from fea_toolkit.model import ...` | Geometry, stories, checks, CSM |
 
@@ -174,7 +174,7 @@ see `.clinerules` §3.11.
 "Modal summary table"               → from fea_toolkit.io import modal_table
 "Section summary"                   → from fea_toolkit.io import section_summary
 "Load pattern totals"               → from fea_toolkit.io import load_pattern_totals
-"Brace buckling table"              → from fea_toolkit.io import brace_buckling_check
+"Brace buckling table"              → from fea_toolkit.model import brace_buckling_check
 ```
 
 ---

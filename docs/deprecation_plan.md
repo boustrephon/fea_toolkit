@@ -42,6 +42,10 @@ All items in the inventory below have been actioned:
 
 ## Phase B — future consolidation (recorded, not yet done)
 
+> **Moved to `docs/_pending_work.md` (PENDING section, 2026-08-21)** so it
+> stays visible as active work rather than being buried in this complete doc.
+> A **detailed design** now lives in `docs/force_diagram_unification.md`.
+
 Combine `plot_rs_force_diagram()`, `plot_force_diagram_3d()` and
 `plot_npz_force_diagram()` into a **single unified, unit-aware** force-diagram
 entry point that:

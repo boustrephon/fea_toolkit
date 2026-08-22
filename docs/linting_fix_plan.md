@@ -12,6 +12,18 @@ category: [planning]
 >
 > If starting a fresh task, read this document first — all line-level diagnostics
 > are reproduced below so you don't need to re-run pyright.
+>
+> **Status update (2026-08-21):** re-running `python -m pyright src/fea_toolkit/`
+> now reports **219 errors / 109 warnings** (down from 537).  The Phase 1 real
+> bugs listed below are **all fixed** — verified against the current code
+> (`io/log.py`, `stories.py`, `colour_from_npz.py`, `renderers/pyvista.py`,
+> `analysis/nonlinear_dynamic.py`, `analysis_builder.py`, `storey_response.py`).
+> `analysis/manager.py` no longer exists (removed with the analysis-manager
+> simplification — see `docs/analysis_builder_migration_plan.md`).  The
+> remaining 219 errors are overwhelmingly Phase 3 typing noise (pandas/pyvista
+> overloads, `Optional`-access) — the benign categories listed in `.clinerules`
+> §11 — not runtime bugs.  Phase 2 (`pyrightconfig.json`) was not committed;
+> the recommended next step is a fresh per-file triage of the Phase 3 count.
 
 ## Quick Start (for a fresh task)
 
