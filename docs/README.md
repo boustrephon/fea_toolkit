@@ -11,9 +11,9 @@ for automated cross-referencing.
 
 ## 🚀 Core Pipeline
 
-- [Typed Analysis Orchestration](analysis.md) — ✅ Complete
-  > The fea_toolkit.analysis subpackage: typed, configurable, dependency-aware analysis objects composed via AnalysisManager.
-  Tags: `analysis`, `manager`, `orchestration`, `typed-results`, `architecture`
+- [Analysis Helpers](analysis.md) — ✅ Complete
+  > The fea_toolkit.analysis subpackage: module-level analysis functions returning typed AnalysisResult containers, composed explicitly by the caller.
+  Tags: `analysis`, `orchestration`, `typed-results`, `architecture`
   Related: [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Analysis Workflow](workflow.md) · [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md)
 
 - [Builder Reference — Two-stage Pipeline](builder_reference.md) — ✅ Complete
@@ -60,7 +60,7 @@ for automated cross-referencing.
 - [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md) — ✅ Complete
   > Ground-motion-driven transient analysis via the complete Tcl export + Xara/OpenSeesRT path (with Rayleigh damping from a preceding modal analysis). Additional Python-native integration schemes remain planned.
   Tags: `analysis-type`, `nonlinear`, `dynamic`, `time-history`, `ground-motion`, `tcl`, `xara`
-  Related: [Modal Analysis Options](modal_analysis.md) · [Tcl Export for Nonlinear Analysis](tcl_export.md) · [Xara/OpenSeesRT Tcl Runtime Guide](xara_tcl_runtime_guide.md) · [Typed Analysis Orchestration](analysis.md)
+  Related: [Modal Analysis Options](modal_analysis.md) · [Tcl Export for Nonlinear Analysis](tcl_export.md) · [Xara/OpenSeesRT Tcl Runtime Guide](xara_tcl_runtime_guide.md) · [Analysis Helpers](analysis.md)
 
 - [Pushover (Non-linear Static) Analysis](pushover_analysis.md) — ✅ Complete
   > Pushover analysis: fiber sections, lumped hinges, brace buckling approaches, ADRS conversion, and CSM.
@@ -208,6 +208,10 @@ for automated cross-referencing.
   Tags: `architecture`, `development`, `notes`
   Related: [AnalysisBuilder Migration Plan](analysis_builder_migration_plan.md)
 
+- [Force-Diagram Unification (Phase B)](force_diagram_unification.md) — 🚧 Draft
+  > Detailed design for unifying the three force-diagram plotting entry points into one unit-aware API.
+  Tags: `planning`, `refactor`, `plotting`, `phase-b`
+
 - [Linting Fix Plan](linting_fix_plan.md) — 🚧 Draft
   > Pyright error baseline and phased fix strategy for src/fea_toolkit (reference for cleanup work).
   Tags: `planning`, `linting`, `pyright`, `cleanup`
@@ -303,7 +307,6 @@ Tags across all documentation files:
 - **`llm`** — [llm_guide.md](llm_guide.md)
 - **`load-redistribution`** — [element_splitting.md](element_splitting.md)
 - **`macos`** — [openseespy_local_build.md](openseespy_local_build.md)
-- **`manager`** — [analysis.md](analysis.md)
 - **`mander`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`mcft`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`mesh-model`** — [layered_analysis_workflow.md](layered_analysis_workflow.md)
@@ -319,14 +322,17 @@ Tags across all documentation files:
 - **`openseespy`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`orchestration`** — [analysis.md](analysis.md)
+- **`phase-b`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`pipeline`** — [workflow.md](workflow.md)
-- **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
+- **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [force_diagram_unification.md](force_diagram_unification.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
+- **`plotting`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`post-processing`** — [storey_response.md](storey_response.md)
 - **`preprocessor`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`pyright`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`pyvista`** — [viewer.md](viewer.md)
 - **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`refactor`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`reference`** — [builder_reference.md](builder_reference.md), [mander_confinement_validation.md](mander_confinement_validation.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`reporter`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`reporting`** — [report_generation.md](report_generation.md)

@@ -683,10 +683,11 @@ all other area loads are ignored.
    - Implement `AtFrames=True` splitting at intersections between frames.  
    - Requires finding intersection points (grid‑based) and inserting new nodes, then splitting both elements and redistributing loads.
 
-2. **ETABS Parser**  
-   - Add `ETABSParser` class (following `SAP2000Parser` interface) to parse `.$ET` / `.E2K` files.  
-   - Map ETABS‑specific table names to `SAPModelData` fields.  
-   - ETABS uses different load nomenclature – adapt accordingly.
+2. **ETABS `.E2K` input**  
+   - ✅ `SAP2000Parser` already reads E2K table conventions (concrete
+     column/beam tables, load/mass tables) — see `io/s2k_parser.py`.  
+   - Open: validate a full `.e2k` export end-to-end and add ETABS-specific
+     load-nomenclature mapping if needed.
 
 3. **Load Combinations and Analysis Types**  
    - ~~`MassSource`~~ ✅ Parsed by `_get_mass_sources()` and stored in `SAPModelData.mass_sources`.  
@@ -705,7 +706,7 @@ all other area loads are ignored.
    - ~~Brace detection~~ ✅ `Selection.from_brace_sections()`.  
    - ~~Buckling eigenvalue benchmark~~ ✅ SciPy-based independent validation — subdivided column buckling matches Euler within 0.01 %.  
    - ~~Capacity Spectrum Method~~ ✅ `pushover_to_adrs()` + `compute_performance_point()` + `plot_capacity_spectrum()` — see [`docs/pushover_analysis.md`](docs/pushover_analysis.md).  
-   - ~~Nonlinear Time History (Tcl/Xara ground-motion path)~~ ✅ `NonlinearDynamicAnalysis` implemented — ground-motion input + transient analysis via Tcl export and Xara/OpenSeesRT, with Rayleigh damping from a preceding modal analysis (see [`docs/nonlinear_dynamic_analysis.md`](docs/nonlinear_dynamic_analysis.md)).  
+   - ~~Nonlinear Time History (Tcl/Xara ground-motion path)~~ ✅ `run_nonlinear_dynamic_analysis()` implemented — ground-motion input + transient analysis via Tcl export and Xara/OpenSeesRT, with Rayleigh damping from a preceding modal analysis (see [`docs/nonlinear_dynamic_analysis.md`](docs/nonlinear_dynamic_analysis.md)).  
    - **Nonlinear Time History (additional integration schemes)** – Python-native integration schemes (e.g. direct OpenSeesPy transient analysis) remain planned.
 
 5. **Joint Modeling** (for concrete frames)  
@@ -718,10 +719,10 @@ all other area loads are ignored.
    - Add rigid offset segments between working point and brace physical end.  
    - See `docs/pushover_analysis.md` for discussion of approaches.
 
-7. **Rhino Importer Refactoring**  
-   - The `rhino/` package stub exists at `src/fea_toolkit/rhino/`.  
-   - Move `sap2000_import_v8.py` into `src/fea_toolkit/rhino/importer.py`.  
-   - Adapt it to read `SAPModelData` (instead of raw JSON) and use the split data for visualisation.
+7. **Rhino Importer Refactoring** ✅ — `rhino/importer.py` (`RhinoImporter`)
+   reads `SAPModelData` directly and creates lightweight Extrusions;
+   `rhino/layers.py` + `rhino/colors.py` handle section-based layers and
+   FEA metadata.
 
 ### Getting started
 
@@ -895,30 +896,40 @@ The following items are the highest-impact improvements identified during a code
 
 ### High Priority
 
-1. **Create `fea_toolkit/spectrum.py`**
-   Extract `_gb50011_spectrum()`, `_build_spectrum()`, `_interp_sa()`, and `plot_seismic_spectrum()` from `local/pumphouse_report.py` into a new reusable module. Then refactor `builder.py` to use these shared functions instead of computing gamma/η₁/η₂ inline in `run_pushover_analysis()` and `pushover_to_adrs()`.
+1. **Create `fea_toolkit/spectrum.py`** — ✅ **Done**: `_gb50011_spectrum()`,
+   `_build_spectrum()`, `_interp_sa()`, and `plot_seismic_spectrum()` live in
+   `src/fea_toolkit/spectrum.py`; `AnalysisBuilder` consumes them for RS and CSM.
 
-2. **Create `fea_toolkit/io/report.py`**
-   Move the generic SAP2000→pandas summary functions (`summarise_load_cases`, `summarise_load_patterns`, `summarise_mass_sources`, `load_pattern_totals`, `section_summary`, `area_section_summary`, `material_summary`, `modal_table`, `modal_table_enhanced`, `format_linear_table`, `bounding_box`) out of `local/pumphouse_report.py`. This shrinks the 2,177-line report module by ~50 % and makes the utilities importable by any project.
+2. **Create `fea_toolkit/io/report.py`** — ✅ **Done**: the generic
+   SAP2000→pandas summary functions live in `src/fea_toolkit/io/report.py`.
 
-3. **Create `fea_toolkit/utils.py`**
-   Extract `_deep_merge()`, `_infer_loads()`, `_build_gravity_patterns()`, `_pick_wind()`, and `brace_buckling_check()` from `pumphouse_report.py`. The Euler buckling check is an analytical computation independent of OpenSees and should be importable without a builder instance.
+3. **Create `fea_toolkit/utils.py`** — ✅ **Done**: `deep_merge()`, `infer_loads()`,
+   `build_gravity_patterns()`, `pick_wind()`, `g_from_units()` etc. live in
+   `src/fea_toolkit/utils.py`.  The Euler buckling check was consolidated into
+   `model/checks.py` (`check_brace_buckling()` + DataFrame variant
+   `brace_buckling_check()`), importable without an OpenSees builder.
 
-### Medium Priority
+4. **Create `fea_toolkit/plotting/report.py`** — ✅ **Done**: matplotlib report
+   figures live in `src/fea_toolkit/plotting/report.py`.
 
-4. **Create `fea_toolkit/plotting/report.py`**
-   Move `plot_pushover_curves()`, `plot_modal_participation()`, `plot_rs_modal_analysis()`, and `plot_csm_4panel()` from `pumphouse_report.py` into the plotting subpackage alongside the existing `viz.py`.
+5. **Split `builder.py`** — ✅ **Done**: replaced by the two-stage pipeline.
+   Topology mutation lives in `opensees/preprocessor.py` (produces a frozen
+   `MeshModel`); OpenSees domain construction + analysis execution live in
+   `opensees/analysis_builder.py`; `opensees/builder.py` now only exports
+   standalone Tcl-export functions.
 
-5. **Split `builder.py`** — ✅ Done: replaced by the two-stage pipeline.
-   Topology mutation lives in `opensees/preprocessor.py` (produces a frozen `MeshModel`);
-   OpenSees domain construction + analysis execution live in `opensees/analysis_builder.py`
-   (`build_domain`, `run_static_analysis`, `run_modal_analysis`, `run_pushover_analysis`,
-   `pushover_to_adrs`, `compute_performance_point`, `compute_seismic_masses`, etc.);
-   `opensees/builder.py` now only exports standalone Tcl-export functions.
+6. **Add unit tests** — ✅ **Largely done**: `tests/` mirrors `src/` with
+   1,000+ tests covering the pipeline, pushover, CSM, capacity, storey
+   response, meshing, and the extracted modules.
 
-6. **Add unit tests**
-   Critical paths with zero coverage: `compute_seismic_masses()` area-element paths, truss brace pushover (Approach B), response spectrum CQC combination, ADRS conversion, CSM performance point iteration, and all extracted `spectrum.py` / `io/report.py` functions.
+### Remaining consolidation (Phase B)
 
+- **Force-diagram unification** — combine `plot_rs_force_diagram()`,
+  `plot_force_diagram_3d()` and `plot_npz_force_diagram()` into a single
+  unit-aware entry point (detailed design →
+  `docs/force_diagram_unification.md`).
+- **Split the large modules** — `opensees/analysis_builder.py` (~7.4k
+  lines), `plotting/viz.py` (~5.7k), `model/geometry.py` (~3.9k).
 ### Completed
 
 - ✅ **Deleted stale files**: `src/fea_toolkit/opensees/builder_ss.py` and `src/fea_toolkit/model/geometry_ss.py` — old versions, never imported anywhere.

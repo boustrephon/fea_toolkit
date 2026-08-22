@@ -7,6 +7,65 @@ category: [planning]
 ---
 # Pending work — fea_toolkit (2026-08-01 continued)
 
+## PENDING (active — not yet done)
+
+### Phase B — force-diagram unification
+Detailed design → `docs/force_diagram_unification.md`.
+- Unify `plot_rs_force_diagram()`, `plot_force_diagram_3d()`,
+  `plot_npz_force_diagram()`, `plot_npz_moment_3d()` into one unit-aware
+  `plot_force_diagram()` covering all inputs (AnalysisBuilder, in-memory
+  result dicts incl. RS `element_results`, NPZ paths), dispatching 2D vs 3D
+  and static vs CQC-RS from the input shape.
+- Legacy names become thin wrappers, removed after one release cycle.
+- Do this *before* splitting `plotting/viz.py` so the split works on the
+  smaller post-unification module.
+
+### Large-file splits (suggested order: viz → geometry → analysis_builder)
+- `plotting/viz.py` (~5.7k lines) — PyVista viewers.  Proposed split (after
+  Phase B lands):
+  - `viz.py` — model / deflected-shape viewers, section viewers.
+  - `viz_forces.py` — force diagrams (the Phase B family).
+  - `viz_modal.py` — mode shapes, animations (`plot_mode_animation`).
+  - `viz_mesh.py` — mesh-quality views if distinct from model viewers.
+- `model/geometry.py` (~3.9k) — split into `geometry.py` (core vector/line
+  math), `geometry_sections.py` (section geometric properties: area,
+  inertia, torsion constants), `geometry_mesh.py` (meshing/refinement
+  helpers).
+- `opensees/analysis_builder.py` (~7.4k, last) — keep the class as the
+  public facade; extract private helper modules:
+  - `_sections.py` — frame/shell/fiber section creation.
+  - `_materials.py` — uniaxial + nD material creation (incl. the
+    `PlaneStressUserMaterial` pair).
+  - `_elements.py` — frame/wall/shell element creation.
+  - `_runners.py` — per-analysis-type runners (modal, RS, pushover, ND).
+- Each split keeps `__all__` + re-exports stable; no public-name churn.
+
+### Tcl-exporter merge — deferred
+- `export_model_to_tcl()` (`opensees/builder.py`, SAPModelData-based) vs
+  `export_mesh_model_to_tcl()` (`opensees/recorder.py`, MeshModel-aware).
+  **Verification (2026-08-21):** independent implementations, no trivial
+  delegation.  If merged: one `isinstance` dispatcher + deduplicated shared
+  preamble/recorder emission.  Cross-refs added; larger dedicated refactor,
+  deferred.
+
+## DONE (2026-08-21 — analysis-manager simplification)
+
+- Removed the `Analysis` ABC + `AnalysisManager` (incl. `analysis/manager.py`).
+- Converted the five wrapper classes to module-level functions
+  (`run_modal_analysis`, `run_static_analysis`, `run_response_spectrum_analysis`,
+  `run_pushover_analysis`, `run_nonlinear_dynamic_analysis`).
+- Collapsed the triplicated linear-elastic default dicts into
+  `_LINEAR_ELASTIC_DEFAULTS`.
+- Relocated capacity code: `shear_capacity.py` + `elwood_limit_state.py`
+  moved into `capacity/`; `brace_buckling_check()` moved to `model/checks.py`
+  (now delegates to `check_brace_buckling()`).
+- Moved the analysis runners out of `io/report.py` into
+  `analysis/linear.py` (`run_linear_cases`, `static_load_verification`,
+  `wind_sanity_check`).
+- Consolidated `io/analysis_log.py::AnalysisLog` into `io/log.py`.
+- Rewrote `generate_report()` as an explicit pipeline sequence.
+- Full suite: 1038 passed, 4 xfailed.
+
 ## DONE (deprecation-programme Phase 3 — removal PR, 2026-08-21)
 - Removed the 9 deprecated plotting functions from `plotting/viz.py`
   (`plot_model_3d`, `plot_deformed_3d`, `plot_rs_deformed_3d`,
