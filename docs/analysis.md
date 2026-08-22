@@ -1,52 +1,69 @@
 ---
-title: "Typed Analysis Orchestration"
-description: "The fea_toolkit.analysis subpackage: typed, configurable, dependency-aware analysis objects composed via AnalysisManager."
+title: "Analysis Helpers"
+description: "The fea_toolkit.analysis subpackage: module-level analysis functions returning typed AnalysisResult containers, composed explicitly by the caller."
 status: "complete"
-tags: [analysis, manager, orchestration, typed-results, architecture]
+tags: [analysis, orchestration, typed-results, architecture]
 category: [core-pipeline]
 related: [builder_reference.md, workflow.md, nonlinear_dynamic_analysis.md]
 ---
 
-# Typed Analysis Orchestration (`fea_toolkit.analysis`)
+# Analysis Helpers (`fea_toolkit.analysis`)
 
-The `fea_toolkit.analysis` subpackage provides a typed, dependency-aware layer above OpenSees domain construction. Each analysis type is a self-contained `Analysis` subclass that owns its configuration, knows its dependencies, and returns a typed `AnalysisResult`. Analyses are composed via `AnalysisManager`, which handles topological ordering and result passing.
+The `fea_toolkit.analysis` subpackage provides **module-level functions** that
+run the toolkit's analyses and return a typed `AnalysisResult` container.
+There is no dependency-graph manager: the caller composes the steps in an
+explicit, readable order (see `generate_report()` for the reference pipeline).
 
-## Core abstractions (`base.py`)
+## Core containers (`base.py`)
 
-- `Analysis` (ABC) — base class: `run()`, `requires()`, `provides()`, `defaults()`.
 - `AnalysisCaseSpec` — declarative case specification.
 - `AnalysisResult` — typed result container: `name`, `analysis_type`, `data`, `metadata`.
 
-## AnalysisManager (`manager.py`)
+## Analysis functions
 
-```python
-from fea_toolkit.analysis import AnalysisManager, ModalAnalysis, ResponseSpectrumAnalysis
-
-manager = AnalysisManager(mesh_model)
-manager.add(ModalAnalysis(mesh_model, num_modes=6))
-manager.add(ResponseSpectrumAnalysis(mesh_model))
-results = manager.run_all()
-```
-
-Methods: `add()` / `run_all()` / `run_one()` / `_inject_dependencies()` / `_topological_sort()`.
-
-## Analysis types
-
-| Class | Module | Requires | Provides |
+| Function | Module | Requires | Returns (`data`) |
 |---|---|---|---|
-| `StaticAnalysis` | `static.py` | — | Displacements, reactions, element forces |
-| `ModalAnalysis` | `modal.py` | — | Periods, frequencies, mass participation, mode shapes |
-| `ResponseSpectrumAnalysis` | `rs.py` | `ModalAnalysis` | CQC-combined RS results |
-| `PushoverAnalysis` | `pushover.py` | — | Capacity curve, ADRS, performance point |
-| `NonlinearDynamicAnalysis` | `nonlinear_dynamic.py` | `ModalAnalysis` | Time histories, envelope, peak drift |
+| `run_modal_analysis(mesh_model, n_modes=12, ...)` | `modal.py` | — | Periods, frequencies, mass participation, mode shapes |
+| `run_static_analysis(mesh_model, md, spec_cfg, linear_cfg, ...)` | `static.py` | — | `df_linear` (displacements, reactions, element forces) |
+| `run_response_spectrum_analysis(mesh_model, modal_result, direction, T_spec, Sa_spec, ...)` | `rs.py` | `run_modal_analysis` | CQC-combined RS results + per-mode `modal_base_shear` |
+| `run_pushover_analysis(mesh_model, modal_result, material_type, ...)` | `pushover.py` | `run_modal_analysis` | Capacity curve, ADRS, performance point |
+| `run_nonlinear_dynamic_analysis(mesh_model, modal_result, ground_motion_file, ...)` | `nonlinear_dynamic.py` | `run_modal_analysis` | Time histories, envelope, peak drift |
+
+Only the response-spectrum, pushover, and nonlinear-dynamic functions depend
+on a preceding modal result — that dependency is expressed as a
+`modal_result` argument, not as an injected dependency graph.
 
 ## Relationship to the pipeline
 
 ```
-SAP2000Parser → SAPModelData → Preprocessor → MeshModel → AnalysisManager → results
+SAP2000Parser → SAPModelData → Preprocessor → MeshModel → analysis functions → results
                                     (drives AnalysisBuilder)
 ```
 
-`AnalysisManager` consumes a frozen `MeshModel` (Preprocessor output) — it never mutates topology. It dispatches each analysis implementation (modal, static, RS, pushover, NLD) to its type-specific runner, wraps raw dict results in typed `AnalysisResult` objects, and — for builder-backed analyses (e.g. modal, static, RS) — the runner creates and configures an `AnalysisBuilder` internally for domain creation and execution.
+The functions consume a frozen `MeshModel` (Preprocessor output) — they never
+mutate topology.  Modal / static / RS / pushover run via `AnalysisBuilder`
+(or `io.report.run_linear_cases` for the static linear table); the
+nonlinear-dynamic function uses the Tcl export + `XaraTclRunner` backend.
 
-See [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md) for the time-history runner.
+## Example — explicit pipeline
+
+```python
+from fea_toolkit.analysis import (
+    run_modal_analysis,
+    run_response_spectrum_analysis,
+    run_pushover_analysis,
+)
+
+modal = run_modal_analysis(mesh_model, n_modes=6)
+rs_x = run_response_spectrum_analysis(
+    mesh_model,
+    modal_result=modal,
+    direction="X",
+    T_spec=[0.05, 1.0, 2.0],
+    Sa_spec=[2.0, 0.4, 0.1],
+)
+push = run_pushover_analysis(mesh_model, modal_result=modal, lateral_load_type="mode1")
+```
+
+See [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md)
+for the time-history runner.

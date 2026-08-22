@@ -94,9 +94,9 @@ signature for behaviour-preserving migration; aligning it to the unit-aware
 
 ## Relationship to other modules
 
-* `analysis/shear_capacity.py` — simplified-**MCFT** shear model (CSA/ACI,
+* `capacity/shear_capacity.py` — simplified-**MCFT** shear model (CSA/ACI,
   not code-specific); complementary to the code-specified formulas here.
-* `analysis/elwood_limit_state.py` — Elwood (1994/2002) limit-state model.
+* `capacity/elwood_limit_state.py` — Elwood (1994/2002) limit-state model.
 * `model/checks.py::compute_asce41_hinge_length` — legacy alias delegating to
   `capacity.asce41.hinge_length` (migrated verbatim; kept for existing callers
   per the deprecation rules).
