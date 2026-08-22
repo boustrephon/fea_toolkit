@@ -6,6 +6,10 @@ matplotlib is unavailable) and are designed for direct display in Quarto
 notebooks.
 
 See also :mod:`fea_toolkit.plotting.viz` for PyVista 3D views.
+
+Not to be confused with :mod:`fea_toolkit.io.report` (pandas summary
+tables) or :mod:`fea_toolkit.report` (report orchestration) — this module
+produces figures only.
 """
 
 import math

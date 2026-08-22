@@ -1,18 +1,26 @@
-"""Analysis objects — typed, configurable, dependency-aware.
+"""Analysis helpers — module-level functions returning typed results.
 
-Each analysis type is a self-contained :class:`Analysis` subclass that
-owns its configuration, knows its dependencies, and returns a typed
-:class:`AnalysisResult`.  Analyses are composed via
-:class:`AnalysisManager` which handles topological ordering and
-result passing.
+Each analysis type is a module-level function that owns its configuration
+arguments and returns a typed :class:`AnalysisResult`.  Results are
+composed explicitly by the caller (e.g. :func:`fea_toolkit.report.generate_report`)
+in a readable order — no dependency-graph machinery.
 """
 
 from fea_toolkit.analysis.base import (
-    Analysis,
     AnalysisCaseSpec,
     AnalysisResult,
 )
-from fea_toolkit.analysis.elwood_limit_state import (
+from fea_toolkit.analysis.linear import (
+    run_linear_cases,
+    static_load_verification,
+    wind_sanity_check,
+)
+from fea_toolkit.analysis.modal import run_modal_analysis
+from fea_toolkit.analysis.nonlinear_dynamic import run_nonlinear_dynamic_analysis
+from fea_toolkit.analysis.pushover import run_pushover_analysis
+from fea_toolkit.analysis.rs import run_response_spectrum_analysis
+from fea_toolkit.analysis.static import run_static_analysis
+from fea_toolkit.capacity.elwood_limit_state import (
     ElwoodColumnGeometry,
     ElwoodColumnParameters,
     axial_capacity_surface,
@@ -26,19 +34,13 @@ from fea_toolkit.analysis.elwood_limit_state import (
     elwood_spring_slopes,
     three_point_axial_surface,
 )
-from fea_toolkit.analysis.manager import AnalysisManager
-from fea_toolkit.analysis.modal import ModalAnalysis
-from fea_toolkit.analysis.nonlinear_dynamic import NonlinearDynamicAnalysis
-from fea_toolkit.analysis.pushover import PushoverAnalysis
-from fea_toolkit.analysis.rs import ResponseSpectrumAnalysis
-from fea_toolkit.analysis.shear_capacity import (
+from fea_toolkit.capacity.shear_capacity import (
     ShearCapacityResult,
     ShearFailureReport,
     member_shear_capacity,
     report_shear_failure,
     shear_backbone,
 )
-from fea_toolkit.analysis.static import StaticAnalysis
 
 # ── Deprecated compatibility exports ──
 
@@ -54,19 +56,12 @@ def __getattr__(name):
 
 
 __all__ = [
-    "Analysis",
     "AnalysisCaseSpec",
-    "AnalysisManager",
     "AnalysisResult",
     "ElwoodColumnGeometry",
     "ElwoodColumnParameters",
-    "ModalAnalysis",
-    "NonlinearDynamicAnalysis",
-    "PushoverAnalysis",
-    "ResponseSpectrumAnalysis",
     "ShearCapacityResult",
     "ShearFailureReport",
-    "StaticAnalysis",
     "axial_capacity_surface",
     "elwood_axial_deg_slope",
     "elwood_axial_drift_at_failure",
@@ -78,6 +73,14 @@ __all__ = [
     "elwood_spring_slopes",
     "member_shear_capacity",
     "report_shear_failure",
+    "run_linear_cases",
+    "run_modal_analysis",
+    "run_nonlinear_dynamic_analysis",
+    "run_pushover_analysis",
+    "run_response_spectrum_analysis",
+    "run_static_analysis",
     "shear_backbone",
+    "static_load_verification",
     "three_point_axial_surface",
+    "wind_sanity_check",
 ]

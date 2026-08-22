@@ -3,6 +3,10 @@ Report generation orchestration — config-driven pipeline.
 
 Uses the two-stage Preprocessor + AnalysisBuilder architecture.
 
+Not to be confused with :mod:`fea_toolkit.io.report` (pandas summary
+tables) or :mod:`fea_toolkit.plotting.report` (matplotlib figures) — this
+module orchestrates the whole report run.
+
 The central entry point is :func:`generate_report`, which accepts a
 parsed ``SAPModelData``, an optional pre-computed ``MeshModel``, and a
 configuration dict, then runs all enabled analyses and returns a
@@ -29,20 +33,18 @@ from typing import Optional
 import pandas as pd
 
 from fea_toolkit.analysis import (
-    AnalysisManager,
-    ModalAnalysis,
-    PushoverAnalysis,
-    ResponseSpectrumAnalysis,
-    StaticAnalysis,
+    run_modal_analysis,
+    run_pushover_analysis,
+    run_response_spectrum_analysis,
+    run_static_analysis,
 )
-from fea_toolkit.io.analysis_log import AnalysisLog
+from fea_toolkit.analysis.linear import static_load_verification, wind_sanity_check
+from fea_toolkit.io.log import AnalysisLog
 from fea_toolkit.io.report import (
     bounding_box,
     material_summary,
     pushover_comparison_table,
     section_summary,
-    static_load_verification,
-    wind_sanity_check,
 )
 from fea_toolkit.model.mesh_model import MeshModel
 from fea_toolkit.model.sap_data import SAPModelData
@@ -165,7 +167,7 @@ def generate_report(
         * ``fig_storey_forces`` / ``fig_storey_disp`` — storey figures
         * ``df_load_verify`` — static load verification table
         * ``brace_ids`` — list of brace-element IDs
-        * ``analysis_log`` — :class:`~fea_toolkit.io.analysis_log.AnalysisLog`
+        * ``analysis_log`` — :class:`~fea_toolkit.io.log.AnalysisLog`
           instance (only present when logging was enabled)
     """
     # ── Config merging ───────────────────────────────────────────
@@ -340,70 +342,66 @@ def generate_report(
         push_alpha_max, push_tg, push_zeta = alpha_max, tg, zeta
 
     # ── Core analyses (modal, linear, RS, pushover) ──────────────
+    # Explicit pipeline order: modal first (feeds RS, pushover, CSM),
+    # then static linear, response spectrum, and pushover.  Each step
+    # is a module-level function returning an AnalysisResult.
     if verbose:
-        print("Running analyses via AnalysisManager...")
+        print("Running analyses...")
 
-    mgr = AnalysisManager(mesh_model)
+    _man_results: dict = {}
 
-    # Modal
-    mgr.add(
-        ModalAnalysis(
-            mesh_model, n_modes=n_modes, name="ModalAnalysis", config={"verbose": verbose}
-        )
+    # Modal (always required)
+    _man_results["ModalAnalysis"] = run_modal_analysis(
+        mesh_model, n_modes=n_modes, name="ModalAnalysis", config={"verbose": verbose}
     )
+    modal_result = _man_results["ModalAnalysis"].data
+    modal = modal_result["modal"]
 
     # Static linear (if enabled)
     if cfg.get("linear", {}).get("run", True):
-        mgr.add(
-            StaticAnalysis(
-                mesh_model, spec_cfg=spec_cfg, linear_cfg=cfg.get("linear"), name="StaticAnalysis"
-            ).bind_md(md)
+        _man_results["StaticAnalysis"] = run_static_analysis(
+            mesh_model,
+            md,
+            spec_cfg=spec_cfg,
+            linear_cfg=cfg.get("linear"),
+            name="StaticAnalysis",
         )
 
     # Response spectrum (one per direction)
     if T_spec and Sa_spec:
         for rs_dir in ("X", "Y"):
-            mgr.add(
-                ResponseSpectrumAnalysis(
-                    mesh_model,
-                    modal_result=None,
-                    direction=rs_dir,
-                    T_spec=T_spec,
-                    Sa_spec=Sa_spec,
-                    damping=0.05,
-                    n_modes=n_modes,
-                    name=f"RS-{rs_dir}",
-                )
+            _man_results[f"RS-{rs_dir}"] = run_response_spectrum_analysis(
+                mesh_model,
+                modal_result=_man_results["ModalAnalysis"],
+                direction=rs_dir,
+                T_spec=T_spec,
+                Sa_spec=Sa_spec,
+                damping=0.05,
+                n_modes=n_modes,
+                name=f"RS-{rs_dir}",
             )
 
     # Pushover (one per pattern)
-    # Note: rs_modal_base_shear is not available until after
-    # run_all(), so it's omitted here.  The mode1 pattern
-    # diagnostic warning is skipped in the manager path.
+    # Note: rs_modal_base_shear is not available until after modal + RS
+    # run, so it's omitted here (the mode1 diagnostic is skipped).
     if cfg.get("pushover") and push_cfg.get("patterns") and push_cfg.get("directions"):
         for pattern in push_cfg["patterns"]:
-            mgr.add(
-                PushoverAnalysis(
-                    mesh_model,
-                    modal_result=None,
-                    gravity_patterns=load_cfg["gravity"],
-                    lateral_load_type=pattern,
-                    max_disp_val=push_cfg["max_disp"],
-                    num_steps=push_cfg["num_steps"],
-                    brace_type=push_cfg.get("brace_type", "beam"),
-                    brace_sections=push_cfg.get("brace_sections"),
-                    name=f"Pushover-{pattern}",
-                )
+            _man_results[f"Pushover-{pattern}"] = run_pushover_analysis(
+                mesh_model,
+                modal_result=_man_results["ModalAnalysis"],
+                gravity_patterns=load_cfg["gravity"],
+                lateral_load_type=pattern,
+                max_disp_val=push_cfg["max_disp"],
+                num_steps=push_cfg["num_steps"],
+                brace_type=push_cfg.get("brace_type", "beam"),
+                brace_sections=push_cfg.get("brace_sections"),
+                name=f"Pushover-{pattern}",
             )
 
-    # Run all
-    _man_results = mgr.run_all()
     if log:
-        log.info("manager", f"ran {len(_man_results)} analyses")
+        log.info("analyses", f"ran {len(_man_results)} analyses")
 
     # ── Extract results ──────────────────────────────────────
-    modal_result = _man_results["ModalAnalysis"].data
-    modal = modal_result["modal"]
     if log:
         log.info("modal", f"{n_modes} modes, T1={modal['periods'][0]:.3f}s")
 

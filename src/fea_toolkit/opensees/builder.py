@@ -92,6 +92,10 @@ def export_model_to_tcl(
     Tcl commands, avoiding the scoping issues that arise when replaying
     flat ``ops.*`` call sequences.
 
+    Prefer :func:`~fea_toolkit.opensees.recorder.export_mesh_model_to_tcl`
+    when you already have a preprocessed ``MeshModel`` — that path is
+    MeshModel-aware and does not re-derive preprocessor state.
+
     When *config* is provided with ``create_fiber_sections=True``,
     nonlinear materials and fiber sections are automatically
     generated as part of the Tcl output (placed at the end of the

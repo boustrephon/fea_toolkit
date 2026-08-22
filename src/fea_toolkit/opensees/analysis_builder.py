@@ -275,7 +275,7 @@ class AnalysisBuilder:
             # ``g_cr``, ``v_n``, ``g_n``, ``v_r``, ``g_r`` (model units),
             # applied to every aggregated section.  ``None`` (default)
             # auto-derives the backbone per section from the MCFT capacity
-            # model in ``fea_toolkit.analysis.shear_capacity``.
+            # model in ``fea_toolkit.capacity.shear_capacity``.
             "shear_backbone": None,
             # Element type used by the fiber-section pushover rebuild
             # (rebuild_with_fiber_sections).  Defaults to dispBeamColumn.
@@ -2403,7 +2403,7 @@ class AnalysisBuilder:
           where ``f`` is the shear-area factor (5/6 for rectangles).
         * ``aggregate_shear = "nonlinear"`` — a trilinear ``Hysteretic``
           material built from the simplified-MCFT backbone
-          (:func:`fea_toolkit.analysis.shear_capacity.shear_backbone`):
+          (:func:`fea_toolkit.capacity.shear_capacity.shear_backbone`):
           cracking → peak ``V_n`` → degrading → residual.  If the backbone
           cannot be derived (missing section/material), the elastic term is
           used as a fallback.
@@ -2464,7 +2464,7 @@ class AnalysisBuilder:
         is derived per section from the mesh model's material data.  Returns
         ``None`` when no backbone can be produced.
         """
-        from ..analysis.shear_capacity import shear_backbone
+        from ..capacity.shear_capacity import shear_backbone
 
         # Explicit override wins for every aggregated section.
         override = self.config.get("shear_backbone")
@@ -3362,7 +3362,7 @@ class AnalysisBuilder:
                 "joint_loads": [copy.copy(jl) for jl in self.mesh_model.joint_loads],
             }
 
-        from ..analysis.elwood_limit_state import (
+        from ..capacity.elwood_limit_state import (
             elwood_column_geometry,
             elwood_column_parameters,
             elwood_shear_limit_force,
@@ -3558,7 +3558,7 @@ class AnalysisBuilder:
         plan = getattr(self, "_limit_state_plan", None)
         if not plan:
             return
-        from ..analysis.elwood_limit_state import (
+        from ..capacity.elwood_limit_state import (
             elwood_limit_state_envelope,
             elwood_shear_limit_force,
             three_point_axial_surface,
@@ -6390,7 +6390,7 @@ class AnalysisBuilder:
                 and expose them as ``results["element_forces_history"]``
                 (list aligned with ``results["step"]``; index 0 is the
                 post-gravity state).  Required by
-                :func:`fea_toolkit.analysis.shear_capacity.report_shear_failure`.
+                :func:`fea_toolkit.capacity.shear_capacity.report_shear_failure`.
 
         Returns:
             Dict with keys ``step``, ``control_disp``, ``base_shear``,

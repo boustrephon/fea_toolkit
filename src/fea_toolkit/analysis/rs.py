@@ -1,129 +1,89 @@
 """Response spectrum analysis — CQC combination.
 
 Wraps :class:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder`
-RS execution.
+RS execution.  Requires the result of a :func:`run_modal_analysis` call.
 """
 
 from typing import TYPE_CHECKING, Optional
 
-from fea_toolkit.analysis.base import (
-    _RESPONSE_SPECTRUM_DEFAULTS,
-    Analysis,
-    AnalysisResult,
-)
-from fea_toolkit.analysis.modal import ModalAnalysis
+from fea_toolkit.analysis.base import AnalysisResult
 
 if TYPE_CHECKING:
     from fea_toolkit.model.mesh_model import MeshModel
 
 
-class ResponseSpectrumAnalysis(Analysis):
+def run_response_spectrum_analysis(
+    mesh_model: "MeshModel",
+    modal_result: AnalysisResult,
+    direction: str,
+    T_spec: list[float],
+    Sa_spec: list[float],
+    damping: float = 0.05,
+    n_modes: int = 12,
+    name: str = "ResponseSpectrum",
+    config: Optional[dict] = None,
+) -> AnalysisResult:
     """Run response spectrum analysis for one direction.
 
-    Requires the result of a :class:`ModalAnalysis` for periods,
-    eigenvalues, and mode shapes.
+    Args:
+        mesh_model: Pre-processed topology.
+        modal_result: Result from a preceding :func:`run_modal_analysis`.
+        direction: ``"X"`` or ``"Y"``.
+        T_spec: Period axis of the demand spectrum.
+        Sa_spec: Spectral accelerations corresponding to *T_spec*.
+        damping: Damping ratio for CQC (default 0.05).
+        n_modes: Number of modes to include (default 12).
+        name: Result label (default ``"ResponseSpectrum"``).
+        config: Optional config dict, recorded in the result metadata.
 
-    Parameters
-    ----------
-    mesh_model : MeshModel
-    modal_result : AnalysisResult
-        Result from a preceding :class:`ModalAnalysis`.
-    direction : str
-        ``"X"`` or ``"Y"``.
-    T_spec : list of float
-        Period axis of the demand spectrum.
-    Sa_spec : list of float
-        Spectral accelerations (m/s²) corresponding to *T_spec*.
-    damping : float
-        Damping ratio for CQC (default 0.05).
-    n_modes : int
-        Number of modes to include (default 12).
-    name : str, optional
-    config : dict, optional
+    Returns:
+        :class:`AnalysisResult` whose ``data`` holds the RS result dict,
+        the per-mode ``modal_base_shear``, and the ``direction``.
     """
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
-    def __init__(
-        self,
-        mesh_model: "MeshModel",
-        modal_result: AnalysisResult,
-        direction: str,
-        T_spec: list[float],
-        Sa_spec: list[float],
-        damping: float = 0.05,
-        n_modes: int = 12,
-        name: Optional[str] = None,
-        config: Optional[dict] = None,
-    ):
-        super().__init__(mesh_model, name, config)
-        self._modal_result = modal_result
-        self.direction = direction
-        self.T_spec = T_spec
-        self.Sa_spec = Sa_spec
-        self.damping = damping
-        self.n_modes = n_modes
-
-    @classmethod
-    def defaults(cls) -> dict:
-        return dict(_RESPONSE_SPECTRUM_DEFAULTS)
-
-    def _accept_dependency(self, dep_result: AnalysisResult, dep_type: type["Analysis"]) -> None:
-        if dep_type is ModalAnalysis and self._modal_result is None:
-            self._modal_result = dep_result
-
-    @property
-    def requires(self) -> list:
-        return [ModalAnalysis]
-
-    @property
-    def provides(self) -> set:
-        return {"rs_nodal_displacements", "rs_element_forces", "rs_base_shear", "modal_base_shear"}
-
-    def run(self) -> AnalysisResult:
-        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
-
-        modal_data = self._modal_result.data
-        if not isinstance(modal_data, dict):
-            # Already a dict from run_modal()
-            pass
-        modal = modal_data.get("modal", modal_data)
-        periods = modal.get("periods", [])
-        if not periods:
-            raise RuntimeError(
-                "ModalAnalysis result has no periods; "
-                "run ModalAnalysis before ResponseSpectrumAnalysis."
-            )
-
-        config = {"element_type": "elasticBeamColumn", "verbose": False}
-        ab = AnalysisBuilder(self.mesh_model, config)
-        ab.build_domain()
-        ab.compute_seismic_masses()
-        # Must run modal on the builder's domain before RS
-        ab.run_modal_analysis(num_modes=self.n_modes, print_results=False)
-
-        rs_result = ab.run_response_spectrum_analysis(
-            self.n_modes,
-            periods,
-            self.T_spec,
-            self.Sa_spec,
-            self.direction,
-            self.damping,
-            print_results=False,
+    modal_data = modal_result.data
+    if not isinstance(modal_data, dict):
+        modal_data = {"modal": modal_data}
+    modal = modal_data.get("modal", modal_data)
+    periods = modal.get("periods", [])
+    if not periods:
+        raise RuntimeError(
+            "ModalAnalysis result has no periods; "
+            "run ModalAnalysis before ResponseSpectrumAnalysis."
         )
 
-        # Also collect per-mode base shear
-        modal_base_shear = list(rs_result.get("modal_base_shear", []))
+    builder_config = {"element_type": "elasticBeamColumn", "verbose": False}
+    ab = AnalysisBuilder(mesh_model, builder_config)
+    ab.build_domain()
+    ab.compute_seismic_masses()
+    # Must run modal on the builder's domain before RS
+    ab.run_modal_analysis(num_modes=n_modes, print_results=False)
 
-        return AnalysisResult(
-            name=self.name,
-            analysis_type="ResponseSpectrumAnalysis",
-            data={
-                "rs_result": rs_result,
-                "modal_base_shear": modal_base_shear,
-                "direction": self.direction,
-            },
-            metadata={
-                "direction": self.direction,
-                "damping": self.damping,
-                "n_modes": self.n_modes,
-            },
-        )
+    rs_result = ab.run_response_spectrum_analysis(
+        n_modes,
+        periods,
+        T_spec,
+        Sa_spec,
+        direction,
+        damping,
+        print_results=False,
+    )
+
+    # Also collect per-mode base shear
+    modal_base_shear = list(rs_result.get("modal_base_shear", []))
+
+    return AnalysisResult(
+        name=name,
+        analysis_type="ResponseSpectrumAnalysis",
+        data={
+            "rs_result": rs_result,
+            "modal_base_shear": modal_base_shear,
+            "direction": direction,
+        },
+        metadata={
+            "direction": direction,
+            "damping": damping,
+            "n_modes": n_modes,
+        },
+    )

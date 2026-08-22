@@ -19,6 +19,7 @@ tree_utils — Parent-child tree traversal for split elements.
 """
 
 from .checks import (
+    brace_buckling_check,
     check_brace_buckling,
     check_model_connectivity,
     check_self_weight_consistency,
@@ -199,6 +200,7 @@ __all__ = [
     "bilinearize_equal_energy",
     "bilinearize_rc",
     "bilinearize_stiffness_change",
+    "brace_buckling_check",
     "build_storey_table",
     "check_brace_buckling",
     # Checks
