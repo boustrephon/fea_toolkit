@@ -28,7 +28,7 @@ shear**, driven by the shear-critical Duong et al. (2007) benchmark:
    force redistribution of a shear-governed frame.
 
 Both layers share one physics module:
-`fea_toolkit/analysis/shear_capacity.py`.
+`fea_toolkit/capacity/shear_capacity.py`.
 
 ---
 
@@ -239,7 +239,7 @@ degrades along `K_deg = −0.02·E_c·A_g/L` to the residual `F_res`.
 
 | Piece | Status |
 |---|---|
-| `analysis/elwood_limit_state.py` — parameters (`F_sw`, `ρ″`, `d_c`), unit-agnostic drift equations (incl. the direct-form `elwood_shear_limit_force`), ThreePoint surface fit, `LimitState` envelope, spring slopes | ✅ Complete (tests: `tests/test_elwood_limit_state.py`) |
+| `capacity/elwood_limit_state.py` — parameters (`F_sw`, `ρ″`, `d_c`), unit-agnostic drift equations (incl. the direct-form `elwood_shear_limit_force`), ThreePoint surface fit, `LimitState` envelope, spring slopes | ✅ Complete (tests: `tests/test_elwood_limit_state.py`) |
 | `convert_mesh_units()` kip-in enabler (`model/units.py`; OpenSees `limitCurve` is imperial-embedded) | ✅ Complete (round-trip test: `tests/test_mesh_units.py`; workflow: `docs/units_conversion.md`) |
 | Builder centre-spring emission (`limitCurve Shear` + `ThreePoint` + `LimitState` + zero-length springs at the column top, driven by the `limit_state_columns` config) | ✅ Complete (tests: `tests/test_limit_state_columns.py`) |
 | Column selection | 🚧 Planned — the caller supplies the column list explicitly (`limit_state_columns`); automatic "8 RC outrigger columns" selection is future work |
@@ -360,7 +360,7 @@ round-trip guarantee) is documented in ``docs/units_conversion.md``.
    PEER 2003/01, UC Berkeley.
 8. OpenSees source: `SRC/material/uniaxial/limitState/` (`ShearCurve.cpp`,
    `AxialCurve.cpp`, `ThreePointCurve.cpp`, `LimitStateMaterial.cpp`).
-9. Implementation: `fea_toolkit/analysis/elwood_limit_state.py`,
+9. Implementation: `fea_toolkit/capacity/elwood_limit_state.py`,
    `fea_toolkit/opensees/analysis_builder.py` (`_prepare_limit_state_columns` /
    `_create_limit_state_columns`), `tests/test_elwood_limit_state.py`,
    `tests/test_limit_state_columns.py`, `local/elwood_prototype.py`,
@@ -381,7 +381,7 @@ round-trip guarantee) is documented in ``docs/units_conversion.md``.
    §4.8, Table 2.7).
 5. Kotsovos, G.M. & Zygouris, N.S. (2019). *Magazine of Concrete Research*
    71(3) 109–125.
-6. Implementation: `fea_toolkit/analysis/shear_capacity.py`,
+6. Implementation: `fea_toolkit/capacity/shear_capacity.py`,
    `tests/test_duong_benchmark.py`.
 
 

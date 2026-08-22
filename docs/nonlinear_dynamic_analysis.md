@@ -9,30 +9,27 @@ related: [modal_analysis.md, tcl_export.md, xara_tcl_runtime_guide.md, analysis.
 
 # Nonlinear Dynamic (Time-History) Analysis
 
-The :class:`~fea_toolkit.analysis.nonlinear_dynamic.NonlinearDynamicAnalysis`
-class runs a ground-motion-driven transient analysis through the **Tcl export +
-Xara/OpenSeesRT** path. It requires a preceding
-:class:`~fea_toolkit.analysis.modal.ModalAnalysis` to supply periods for
+The :func:`~fea_toolkit.analysis.nonlinear_dynamic.run_nonlinear_dynamic_analysis`
+function runs a ground-motion-driven transient analysis through the **Tcl export +
+Xara/OpenSeesRT** path. It requires the result of a preceding
+:func:`~fea_toolkit.analysis.modal.run_modal_analysis` to supply periods for
 Rayleigh damping.
 
 ## Usage
 
 ```python
-from fea_toolkit.analysis import AnalysisManager, ModalAnalysis, NonlinearDynamicAnalysis
+from fea_toolkit.analysis import run_modal_analysis, run_nonlinear_dynamic_analysis
 
-manager = AnalysisManager(mesh_model)
-manager.add(ModalAnalysis(mesh_model, num_modes=6))
-manager.add(
-    NonlinearDynamicAnalysis(
-        mesh_model,
-        ground_motion_file="gm_accel.txt",
-        dt=0.005,
-        num_steps=1000,
-        direction="X",
-        damping_ratio=0.05,
-    )
-)
-result = manager.run_all()["NonlinearDynamicAnalysis"]
+modal = run_modal_analysis(mesh_model, n_modes=6)
+result = run_nonlinear_dynamic_analysis(
+    mesh_model,
+    modal_result=modal,
+    ground_motion_file="gm_accel.txt",
+    dt=0.005,
+    num_steps=1000,
+    direction="X",
+    damping_ratio=0.05,
+).data
 ```
 
 ## Parameters
@@ -44,7 +41,7 @@ result = manager.run_all()["NonlinearDynamicAnalysis"]
 | `num_steps` | `1000` | Number of analysis steps |
 | `direction` | `"X"` | Excitation direction (`"X"`, `"Y"`, `"Z"`) |
 | `damping_ratio` | `0.05` | Rayleigh damping ratio |
-| `modal_result` | - | Injected by `AnalysisManager` from the preceding `ModalAnalysis` |
+| `modal_result` | required | Result of a preceding `run_modal_analysis()` (supplies periods for Rayleigh damping) |
 
 ## Result keys
 

@@ -13,6 +13,14 @@ related: [layered_analysis_workflow.md, workflow.md, dev_notes.md]
 **Last updated:** 2026-08-01
 **Total test count:** 533
 
+> **2026-08-21 follow-up:** the `analysis/` layer was subsequently simplified.
+> The `Analysis` ABC and `AnalysisManager` were removed and replaced by
+> module-level functions (`run_modal_analysis`, `run_static_analysis`,
+> `run_response_spectrum_analysis`, `run_pushover_analysis`,
+> `run_nonlinear_dynamic_analysis`) returning `AnalysisResult`.  Dependencies
+> (modal → RS / pushover / NLD) are now explicit function arguments.  The
+> table below is retained as the historical migration record.
+
 ## Overview
 
 The `OpenSeesBuilder` class has been deleted from ``builder.py``.

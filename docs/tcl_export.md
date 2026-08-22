@@ -243,10 +243,10 @@ Since the two-stage pipeline (Preprocessor → MeshModel → AnalysisBuilder)
 matured, RC pushover no longer needs the Tcl round-trip:
 
 ```python
-from fea_toolkit.analysis.pushover import PushoverAnalysis
+from fea_toolkit.analysis.pushover import run_pushover_analysis
 
 # material_type="rc" now defaults to the OpenSeesPy path.
-push = PushoverAnalysis(
+result = run_pushover_analysis(
     mesh_model=mm,
     modal_result=modal_result,
     material_type="rc",
@@ -257,8 +257,7 @@ push = PushoverAnalysis(
         # "nd_materials": {...},
         # "shell_layers": {...},
     },
-)
-result = push.run().data   # {direction: {results, adrs, pp, ...}}
+).data   # {direction: {results, adrs, pp, ...}}
 ```
 
 The same return shape as the Tcl path, but executed in-process with
