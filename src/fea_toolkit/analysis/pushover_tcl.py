@@ -28,7 +28,6 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Union
 
-from fea_toolkit.analysis.base import _PUSHOVER_RC_DEFAULTS
 from fea_toolkit.opensees.builder import pushover_tcl
 from fea_toolkit.opensees.recorder import (
     XaraTclRunner,
@@ -173,7 +172,7 @@ def run_rc_pushover_tcl(
             wrapped in ``{"modal": ...}``).
         config: Merged RC config — user overrides over
             ``_PUSHOVER_RC_DEFAULTS`` with ``create_fiber_sections``
-            forced on (see ``run_pushover_analysis._build_rc_config``).
+            forced on (see :func:`~fea_toolkit.analysis.pushover._build_rc_config`).
         lateral_load_type: One of ``'uniform'``, ``'triangular'``,
             ``'mode1'`` (default).
         max_disp_val: Maximum control displacement (model units).
@@ -215,10 +214,11 @@ def run_rc_pushover_tcl(
     # Gravity loads — use MeshModel's computed mass when available
     gravity_loads = _build_gravity_loads(mm)
 
-    # RC config (overrides for fiber sections)
-    rc_config = dict(_PUSHOVER_RC_DEFAULTS)
-    rc_config.update(config or {})
-    rc_config["create_fiber_sections"] = True
+    # RC config — already resolved by the dispatcher
+    # (``_build_rc_config`` merges ``_PUSHOVER_RC_DEFAULTS`` over user
+    # overrides and forces ``create_fiber_sections=True``).  Passed through
+    # unchanged so the resolved values reach the Tcl exporter/runner.
+    rc_config = config or {}
 
     output_prefix = "pushover_rc"
 

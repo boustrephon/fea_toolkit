@@ -376,7 +376,7 @@ def generate_report(
                 direction=rs_dir,
                 T_spec=T_spec,
                 Sa_spec=Sa_spec,
-                damping=0.05,
+                damping=zeta,
                 n_modes=n_modes,
                 name=f"RS-{rs_dir}",
             )
@@ -395,6 +395,7 @@ def generate_report(
                 num_steps=push_cfg["num_steps"],
                 brace_type=push_cfg.get("brace_type", "beam"),
                 brace_sections=push_cfg.get("brace_sections"),
+                directions=push_cfg["directions"],
                 name=f"Pushover-{pattern}",
             )
 

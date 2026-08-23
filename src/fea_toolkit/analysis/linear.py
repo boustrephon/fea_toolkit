@@ -8,13 +8,14 @@ The pandas *summary* helpers they depend on (``bounding_box``,
 ``load_pattern_totals``) remain in :mod:`fea_toolkit.io.report`.
 """
 
+import math
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 from fea_toolkit.io.report import bounding_box, load_pattern_totals
-from fea_toolkit.model.sap_data import SAPModelData
+from fea_toolkit.model.sap_data import SAPModelData, patterns_from_case
 
 
 def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: str = "Wind+Y"):
@@ -61,8 +62,8 @@ def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: s
         "",
         f"| Face | Area ({lu}²) | Total {fu} | Pressure ({fu}/{lu}²) |",
         "|---|---|---|---|",
-        f"| Wind +{wind_case_x[-1]} (Y‑Z face) | {x_face:.0f} | {fx:,.0f} | {p_x:.2f} |",
-        f"| Wind +{wind_case_y[-1]} (X‑Z face) | {y_face:.0f} | {fy:,.0f} | {p_y:.2f} |",
+        f"| Wind +X (Y‑Z face) | {x_face:.0f} | {fx:,.0f} | {p_x:.2f} |",
+        f"| Wind +Y (X‑Z face) | {y_face:.0f} | {fy:,.0f} | {p_y:.2f} |",
     ]
 
     if max(p_x, p_y) > 0 and abs(p_x - p_y) / max(p_x, p_y) < 0.1:
@@ -75,7 +76,7 @@ def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: s
     return "\n".join(lines)
 
 
-def static_load_verification(md, mesh_model, config: dict = None):
+def static_load_verification(md, mesh_model, config: Optional[dict] = None):
     """Check equilibrium between applied loads and reactions.
 
     Combines the applied loads (from
@@ -109,17 +110,26 @@ def static_load_verification(md, mesh_model, config: dict = None):
     df_rxn = ab.check_load_equilibrium()
 
     merged = df_applied.merge(df_rxn, on="Load Pattern", how="outer", suffixes=("_applied", "_rxn"))
+
+    def _clean(v):
+        """Coerce a merged-cell value to a finite float, else 0.0."""
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            return 0.0
+        return fv if math.isfinite(fv) else 0.0
+
     rows = []
     for _, row in merged.iterrows():
         pname = row["Load Pattern"]
         pat = md.load_patterns.get(pname)
         pat_type = pat.pattern_type if pat else "?"
-        ax = row.get(f"Fx ({fu})", 0.0) or 0.0
-        ay = row.get(f"Fy ({fu})", 0.0) or 0.0
-        az = row.get(f"Fz ({fu})", 0.0) or 0.0
-        rx = row.get(f"Reaction Fx ({fu})", 0.0) or 0.0
-        ry = row.get(f"Reaction Fy ({fu})", 0.0) or 0.0
-        rz = row.get(f"Reaction Fz ({fu})", 0.0) or 0.0
+        ax = _clean(row.get(f"Fx ({fu})", 0.0))
+        ay = _clean(row.get(f"Fy ({fu})", 0.0))
+        az = _clean(row.get(f"Fz ({fu})", 0.0))
+        rx = _clean(row.get(f"Reaction Fx ({fu})", 0.0))
+        ry = _clean(row.get(f"Reaction Fy ({fu})", 0.0))
+        rz = _clean(row.get(f"Reaction Fz ({fu})", 0.0))
         dx = round(ax + rx, 1)
         dy = round(ay + ry, 1)
         dz = round(az + rz, 1)
@@ -158,7 +168,6 @@ def run_linear_cases(
     """
     rows = []
     config = {"element_type": "elasticBeamColumn", "verbose": False}
-    import math
 
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 
@@ -168,13 +177,7 @@ def run_linear_cases(
     for cname, lc in md.load_cases.items():
         if lc.case_type != "LinStatic":
             continue
-        sd = lc.case_data.get("CASE - STATIC 1 - LOAD ASSIGNMENTS", [])
-        if isinstance(sd, list):
-            pats = {a["LoadName"]: a["LoadSF"] for a in sd if "LoadName" in a}
-        elif isinstance(sd, dict):
-            pats = {sd["LoadName"]: sd["LoadSF"]}
-        else:
-            pats = {}
+        pats = patterns_from_case(lc)
         if pats:
             static_cases[cname] = pats
 
@@ -186,13 +189,7 @@ def run_linear_cases(
                 if lc is None:
                     print(f"  Warning: load case '{entry}' not found, skipping")
                     continue
-                sd = lc.case_data.get("CASE - STATIC 1 - LOAD ASSIGNMENTS", [])
-                if isinstance(sd, list):
-                    pats = {a["LoadName"]: a["LoadSF"] for a in sd if "LoadName" in a}
-                elif isinstance(sd, dict):
-                    pats = {sd["LoadName"]: sd["LoadSF"]}
-                else:
-                    pats = {}
+                pats = patterns_from_case(lc)
                 if pats:
                     static_cases[entry] = pats
             elif isinstance(entry, dict):
@@ -200,21 +197,21 @@ def run_linear_cases(
                     static_cases[cname] = pat_dict
 
     # ── Filter out cases whose constituent patterns have zero loads ──
-    def _pattern_has_loads(m, pname: str) -> bool:
-        lp = m.load_patterns.get(pname)
+    def _pattern_has_loads(pname: str) -> bool:
+        lp = md.load_patterns.get(pname)
         if lp is not None and lp.self_weight_factor > 0:
             return True
         return (
-            any(ld.pattern == pname for ld in m.frame_dist_loads)
-            or any(ld.pattern == pname for ld in m.joint_loads)
-            or any(ld.pattern == pname for ld in m.area_gravity_loads)
-            or any(ld.pattern == pname for ld in m.edge_loads_from_areas)
+            any(ld.pattern == pname for ld in md.frame_dist_loads)
+            or any(ld.pattern == pname for ld in md.joint_loads)
+            or any(ld.pattern == pname for ld in md.area_gravity_loads)
+            or any(ld.pattern == pname for ld in mesh_model.edge_loads_from_areas)
         )
 
     static_cases = {
         cname: pats
         for cname, pats in static_cases.items()
-        if any(_pattern_has_loads(mesh_model, p) for p in pats)
+        if any(_pattern_has_loads(p) for p in pats)
     }
 
     from fea_toolkit.utils import sum_reactions_with_overturning
@@ -258,21 +255,26 @@ def run_linear_cases(
         )
 
     # ── Response spectrum cases ─────────────────────────────────
+    n_modes = 12
+    if linear_cfg and "n_modes" in linear_cfg:
+        n_modes = int(linear_cfg["n_modes"])
+    elif spec_cfg and "n_modes" in spec_cfg:
+        n_modes = int(spec_cfg["n_modes"])
+
     if spec_cfg:
         from fea_toolkit.spectrum import _build_spectrum
 
-        T_spec_built, Sa_spec_built, alpha_max, tg, _zeta_eff, _ = _build_spectrum(spec_cfg)
+        T_spec_built, Sa_spec_built, _, _, zeta_eff, _ = _build_spectrum(spec_cfg)
         T_spec = T_spec_built
         Sa_spec = Sa_spec_built
     else:
         # Fallback: rare spectrum with 5% damping
         from fea_toolkit.spectrum import _gb50011_spectrum
 
-        zeta = 0.05
-        gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
-        eta_1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
-        eta_2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))
-        md.units.get("L", "m")
+        zeta_eff = 0.05
+        gamma = 0.9 + (0.05 - zeta_eff) / (0.3 + 6.0 * zeta_eff)
+        eta_1 = max(0.0, 0.02 + (0.05 - zeta_eff) / (4.0 + 32.0 * zeta_eff))
+        eta_2 = max(0.55, 1.0 + (0.05 - zeta_eff) / (0.08 + 1.6 * zeta_eff))
         from ..utils import g_from_units
 
         gravity = g_from_units(md.units)
@@ -288,22 +290,20 @@ def run_linear_cases(
         ab.build_domain()
         ab.compute_seismic_masses()
         try:
-            modal = ab.run_modal_analysis(num_modes=12, print_results=False)
+            modal = ab.run_modal_analysis(num_modes=n_modes, print_results=False)
 
             def spectrum_func(T):
                 return float(np.interp(T, T_spec, Sa_spec))
 
             rs = ab.run_response_spectrum_analysis(
-                num_modes=12,
+                num_modes=n_modes,
                 modal_periods=modal["periods"],
                 spectrum_periods=T_spec,
                 spectrum_accels=Sa_spec,
                 direction=rs_dir,
-                damping_ratio=0.05,
+                damping_ratio=zeta_eff,
                 print_results=False,
             )
-            rs.get("base_shear_cqc", 0.0)
-            rs.get("base_moment_cqc", 0.0)
             v_srss = rs.get("base_shear_srss", 0.0)
             m_srss = rs.get("base_moment_srss", 0.0)
             # Full 6-DoF reactions with overturning (from new centralized
@@ -311,12 +311,12 @@ def run_linear_cases(
             r_cqc = rs.get("base_reactions_cqc", {})
 
             rs_disp_cqc, rs_disp_srss = ab.compute_rs_nodal_displacements(
-                num_modes=12,
+                num_modes=n_modes,
                 modal_periods=modal["periods"],
                 eigenvalues=modal["eigenvalues"],
                 spectrum_func=spectrum_func,
                 direction=rs_dir,
-                damping_ratio=0.05,
+                damping_ratio=zeta_eff,
                 return_srss=True,
             )
             roof_tag = max(md.nodes.values(), key=lambda n: n.z).node_tag

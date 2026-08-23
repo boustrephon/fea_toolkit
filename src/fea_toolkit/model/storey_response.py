@@ -92,6 +92,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from fea_toolkit.model.sap_data import patterns_from_case
+
 # ========================================================================
 # Dataclasses
 # ========================================================================
@@ -924,11 +926,7 @@ def compute_linear_storey_responses(
             lc = md.load_cases.get(cname)
             if lc is None:
                 continue
-            sd = lc.case_data.get("CASE - STATIC 1 - LOAD ASSIGNMENTS", [])
-            if isinstance(sd, list):
-                pats = {a["LoadName"]: a["LoadSF"] for a in sd if "LoadName" in a}
-            elif isinstance(sd, dict):
-                pats = {sd["LoadName"]: sd["LoadSF"]}
+            pats = patterns_from_case(lc)
         elif isinstance(entry, dict):
             cname = next(iter(entry.keys()))
             pats = entry[cname]
