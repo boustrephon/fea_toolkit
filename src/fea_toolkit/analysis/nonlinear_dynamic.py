@@ -6,7 +6,6 @@ the result of :func:`~fea_toolkit.analysis.modal.run_modal_analysis` for
 Rayleigh damping periods.
 """
 
-import contextlib
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -57,7 +56,11 @@ def run_nonlinear_dynamic_analysis(
 
     Returns:
         :class:`AnalysisResult` holding time-history results
-        (times, displacements, envelope, peak displacement).
+        (times, displacements, envelope, peak displacement).  Output-file
+        parse failures (``np.loadtxt`` on the displacement / envelope
+        recorders) are surfaced under ``metadata["parse_error"]`` (``None``
+        when all recorder outputs parse cleanly) instead of being silently
+        dropped.
     """
     import os
     import re
@@ -160,6 +163,10 @@ def run_nonlinear_dynamic_analysis(
                     "direction": direction,
                     "num_steps": num_steps,
                     "dt": dt,
+                    "damping_ratio": damping_ratio,
+                    "period_1": period_1,
+                    "period_2": period_2,
+                    "config": config,
                     "error": f"XaraTclRunner returned status {ret}",
                 },
             )
@@ -180,18 +187,21 @@ def run_nonlinear_dynamic_analysis(
         peak_displacement = 0.0
         disp_data = None
         env_data = None
+        parse_errors = []
 
         if os.path.exists(disp_file):
             try:
                 disp_data = np.loadtxt(disp_file)
                 if disp_data.ndim > 1 and disp_data.shape[1] >= 2:
                     peak_displacement = float(np.max(np.abs(disp_data[:, 1:])))
-            except Exception:
-                pass
+            except Exception as e:
+                parse_errors.append(f"displacement output ({disp_file}): {e}")
 
         if os.path.exists(env_disp_file):
-            with contextlib.suppress(Exception):
+            try:
                 env_data = np.loadtxt(env_disp_file)
+            except Exception as e:
+                parse_errors.append(f"envelope output ({env_disp_file}): {e}")
         # tmp_dir cleaned up on context exit
 
     # Derive times from recorded data rows when available
@@ -210,6 +220,7 @@ def run_nonlinear_dynamic_analysis(
         "gm_file": ground_motion_file,
         "direction": direction,
         "output_raw": output,
+        "return_code": ret,
     }
 
     return AnalysisResult(
@@ -225,5 +236,7 @@ def run_nonlinear_dynamic_analysis(
             "period_1": period_1,
             "period_2": period_2,
             "config": config,
+            "error": None,
+            "parse_error": "; ".join(parse_errors) if parse_errors else None,
         },
     )
