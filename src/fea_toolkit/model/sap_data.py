@@ -1361,7 +1361,11 @@ def patterns_from_case(lc: LoadCase) -> dict[str, float]:
     """
     sd = lc.case_data.get("CASE - STATIC 1 - LOAD ASSIGNMENTS", [])
     if isinstance(sd, list):
-        return {a["LoadName"]: a.get("LoadSF", 1.0) for a in sd if "LoadName" in a}
+        return {
+            a["LoadName"]: a.get("LoadSF", 1.0)
+            for a in sd
+            if isinstance(a, dict) and "LoadName" in a
+        }
     if isinstance(sd, dict) and "LoadName" in sd:
         return {sd["LoadName"]: sd.get("LoadSF", 1.0)}
     return {}

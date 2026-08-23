@@ -61,6 +61,7 @@ from fea_toolkit.model.sap_data import (
     ShellSection,
     TeeSection,
     default_coord_sys,
+    patterns_from_case,
 )
 from fea_toolkit.model.selection import Selection
 from fea_toolkit.model.stories import StoryLevel
@@ -332,6 +333,39 @@ class TestLoadCase:
             design_action="Non-Composite",
         )
         assert lc.run_case is False
+
+    def test_patterns_from_case_skips_malformed_entries(self):
+        """Non-dict assignment entries are filtered without erroring."""
+        lc = LoadCase(
+            case_name="EQLX",
+            case_type="Linear Static",
+            design_type_option="Prog Det",
+            design_type="QUAKE",
+            design_action_option="Prog Det",
+            design_action="Non-Composite",
+            case_data={
+                "CASE - STATIC 1 - LOAD ASSIGNMENTS": [
+                    {"LoadName": "DEAD", "LoadSF": 1.0},
+                    "malformed",
+                    42,
+                    {"LoadSF": 0.5},  # no LoadName -> skipped
+                ]
+            },
+        )
+        assert patterns_from_case(lc) == {"DEAD": 1.0}
+
+    def test_patterns_from_case_empty_when_all_malformed(self):
+        """A list of only malformed entries yields an empty mapping."""
+        lc = LoadCase(
+            case_name="EQLX",
+            case_type="Linear Static",
+            design_type_option="Prog Det",
+            design_type="QUAKE",
+            design_action_option="Prog Det",
+            design_action="Non-Composite",
+            case_data={"CASE - STATIC 1 - LOAD ASSIGNMENTS": ["bad", 123]},
+        )
+        assert patterns_from_case(lc) == {}
 
 
 class TestLoadCombination:
@@ -3347,6 +3381,15 @@ class TestBraceBucklingCheck:
         assert len(df) == 1
         assert "No brace sections found" in df["Note"].iloc[0]
 
+    def test_buckling_table_type_hints_resolve(self):
+        """Return annotation is runtime-resolvable (no function-local pandas)."""
+        import typing
+
+        from fea_toolkit.model.checks import brace_buckling_check
+
+        hints = typing.get_type_hints(brace_buckling_check)
+        assert "return" in hints
+
     def test_from_brace_sections(self):
         """Selection.from_brace_sections detects Pipe, Angle, etc."""
         from fea_toolkit.model.selection import Selection
@@ -3393,6 +3436,91 @@ class TestBraceBucklingCheck:
         assert sel.sections is not None
         assert "PIP4" in sel.sections
         assert "UB300" not in sel.sections
+
+    # ── Non-positive A / fallback I22 regression tests ─────────────
+
+    @pytest.mark.parametrize("bad_A", [0.0, -1.0])
+    def test_non_positive_area_warns_and_clamps_a(self, brace_model, bad_A):
+        """A<=0 → UserWarning + A clamped to 1e-4; P_cr stays exact."""
+        from fea_toolkit.model.checks import check_brace_buckling
+
+        sec = brace_model.sections["PIP4"]
+        sec.A = bad_A
+
+        with pytest.warns(UserWarning, match="no positive cross-sectional area: 'PIP4'"):
+            results = check_brace_buckling(
+                brace_model, brace_ids={"B1"}, K=1.0, print_results=False
+            )
+
+        r = results["B1"]
+        assert r["A"] == 1e-4
+        L = math.hypot(6.0, 6.0)
+        # Slenderness recomputed from the clamped area
+        assert r["slenderness"] == pytest.approx((1.0 * L) / math.sqrt(sec.I22 / 1e-4), rel=1e-9)
+        # P_cr only depends on I22 (unchanged) — the clamp must not leak in
+        assert r["P_cr"] == pytest.approx((math.pi**2 * 2e11 * sec.I22) / (L**2), rel=1e-9)
+
+    @pytest.mark.parametrize("bad_I22", [0.0, -1e-6])
+    def test_non_positive_i22_falls_back_to_i33(self, brace_model, bad_I22, recwarn):
+        """I22<=0 → I33 used as the minor-axis fallback (no fabricated-area warning)."""
+        from fea_toolkit.model.checks import check_brace_buckling
+
+        sec = brace_model.sections["PIP4"]
+        sec.I22 = bad_I22
+
+        results = check_brace_buckling(brace_model, brace_ids={"B1"}, K=1.0, print_results=False)
+
+        r = results["B1"]
+        assert r["I22"] == sec.I33
+        L = math.hypot(6.0, 6.0)
+        assert r["P_cr"] == pytest.approx((math.pi**2 * 2e11 * sec.I33) / (L**2), rel=1e-9)
+        # Positive A → nothing is fabricated, so no UserWarning is emitted
+        assert not any(
+            "Brace buckling" in str(w.message)
+            for w in recwarn
+            if issubclass(w.category, UserWarning)
+        )
+
+    def test_zero_inertia_skipped_without_warning(self, brace_model, recwarn):
+        """I22<=0 AND I33<=0 → element skipped; no result row and no warning."""
+        from fea_toolkit.model.checks import check_brace_buckling
+
+        sec = brace_model.sections["PIP4"]
+        sec.I22 = 0.0
+        sec.I33 = 0.0
+
+        results = check_brace_buckling(brace_model, brace_ids={"B1"}, K=1.0, print_results=False)
+        assert results == {}
+        assert not any(
+            "Brace buckling" in str(w.message)
+            for w in recwarn
+            if issubclass(w.category, UserWarning)
+        )
+
+    def test_buckling_table_effective_columns_match_engine(self, brace_model):
+        """DataFrame A/I22 columns echo the engine's effective (clamped/fallback) values."""
+        from fea_toolkit.model.checks import brace_buckling_check, check_brace_buckling
+
+        sec = brace_model.sections["PIP4"]
+        sec.A = 0.0  # non-positive → clamped to 1e-4
+        sec.I22 = -1e-6  # non-positive → falls back to I33
+
+        with pytest.warns(UserWarning, match="no positive cross-sectional area"):
+            engine = check_brace_buckling(brace_model, brace_ids={"B1"}, K=1.0, print_results=False)
+            df = brace_buckling_check(brace_model, n_longest=2, K=1.0)
+
+        r = engine["B1"]
+        assert r["A"] == 1e-4
+        assert r["I22"] == sec.I33
+
+        lu = brace_model.units.get("L", "m")
+        a_col = f"A ({lu}²)"
+        i22_col = f"I22 ({lu}⁴)"
+        assert a_col in df.columns and i22_col in df.columns
+        assert df.loc[0, a_col] == round(r["A"], 6)
+        assert df.loc[0, i22_col] == round(r["I22"], 8)
+        # Capacity/slenderness columns derive from the same effective values
+        assert df.loc[0, "Slenderness"] == round(r["slenderness"], 1)
 
 
 # ============================================================================

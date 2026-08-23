@@ -11,9 +11,15 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
-    # Only referenced in the ``"pd.DataFrame"`` string annotation below;
+    # Only referenced in the ``"DataFrame"`` string annotation below;
     # pandas stays a lazy (function-local) runtime import.
     import pandas as pd
+
+    DataFrame = pd.DataFrame
+else:  # pragma: no cover - runtime branch
+    # Runtime-resolvable alias so ``typing.get_type_hints(brace_buckling_check)``
+    # succeeds without importing pandas at module load time.
+    DataFrame = Any
 
 from fea_toolkit.model.sap_data import (
     SAPModelData,
@@ -296,7 +302,7 @@ def check_brace_buckling(
 # ═══════════════════════════════════════════════════════════════════
 
 
-def brace_buckling_check(md: "SAPModelData", n_longest: int = 2, K: float = 1.0) -> "pd.DataFrame":
+def brace_buckling_check(md: "SAPModelData", n_longest: int = 2, K: float = 1.0) -> "DataFrame":
     """Identify the longest braces and compute their Euler buckling capacity.
 
     Braces are identified by their section shape (Pipe, Angle, Double Angle,
