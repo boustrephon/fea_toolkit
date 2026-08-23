@@ -209,7 +209,7 @@ for automated cross-referencing.
   Related: [AnalysisBuilder Migration Plan](analysis_builder_migration_plan.md)
 
 - [Force-Diagram Unification (Phase B)](force_diagram_unification.md) — 🚧 Draft
-  > Detailed design for unifying the three force-diagram plotting entry points into one unit-aware API.
+  > Detailed design for unifying the four force-diagram plotting entry points into one unit-aware API.
   Tags: `planning`, `refactor`, `plotting`, `phase-b`
 
 - [Linting Fix Plan](linting_fix_plan.md) — 🚧 Draft

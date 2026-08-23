@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Auto-generate docs/README.md from YAML frontmatter.
+"""Auto-generate docs/documentation_index.md from YAML frontmatter.
 
 Scans all *.md files in this directory, parses their YAML frontmatter,
 and produces a categorised index grouped by ``category`` (in display order).
@@ -8,14 +8,14 @@ Usage:
     python docs/_generate_index.py
 
 Output:
-    docs/README.md  (overwritten)
+    docs/documentation_index.md  (overwritten)
 """
 
 import re
 from pathlib import Path
 
 DOCS_DIR = Path(__file__).parent
-INDEX_PATH = DOCS_DIR / "README.md"
+INDEX_PATH = DOCS_DIR / "documentation_index.md"
 
 # ── Category display settings ────────────────────────────────────
 
@@ -100,7 +100,7 @@ def main():
     docs: list[tuple[str, dict]] = []
 
     for f in md_files:
-        if f.name.startswith("_") or f.name == "README.md":
+        if f.name.startswith("_") or f.name in ("README.md", "documentation_index.md", "index.md"):
             continue
         content = f.read_text(encoding="utf-8")
         fm = parse_frontmatter(content)

@@ -376,7 +376,7 @@ from fea_toolkit import SAP2000Parser  # now works from repo root
 ### Document missing
 ```
 # docs/llm_guide.md  ← you are here
-# docs/README.md     ← full documentation index with tags
+# docs/documentation_index.md ← full documentation index with tags
 # examples/README.md ← example scripts index
 ```
 

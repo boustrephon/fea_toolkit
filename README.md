@@ -272,7 +272,7 @@ plot_npz_force_diagram(data, quantity="fx_i", case="DEAD")  # axial force diagra
 See also:
 - `local/admin_linear.py` — full end‑to‑end workflow (parse → mesh → split →
   static → modal → RS → plots → animate)
-- `src/fea_toolkit/io/README.md` — NPZ schema reference (also indexed from [`docs/README.md`](docs/README.md))
+- `src/fea_toolkit/io/README.md` — NPZ schema reference (also indexed from [`docs/documentation_index.md`](docs/documentation_index.md))
 
 ## Available Workflows
 
@@ -732,7 +732,7 @@ See [`examples/README.md`](examples/README.md) for quick-start examples.
 
 All feature‑specific documentation (analysis types, model features, export,
 visualisation, tool‑specific workflows) is indexed in
-[`docs/README.md`](docs/README.md) — grouped by category with a tag‑based
+[`docs/documentation_index.md`](docs/documentation_index.md) — grouped by category with a tag‑based
 cross‑reference section.
 
 #### Medium Priority
