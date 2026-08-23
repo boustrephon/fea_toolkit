@@ -87,7 +87,10 @@ def run_pushover_analysis(
             OpenSeesPy directly with Hysteretic hinges.  RC runs in
             OpenSeesPy with ``forceBeamColumn`` + fiber sections, unless
             ``config["use_tcl_fallback"]`` is set to export to Tcl and
-            run via Xara (alternate backend).
+            run via Xara (alternate backend).  The Tcl fallback ignores
+            ``spectrum``, ``rs_modal_base_shear``, ``directions``,
+            ``brace_type``, and ``brace_sections`` (these are
+            OpenSeesPy-path only).
         gravity_patterns: Dict mapping pattern name → scale factor.
         lateral_load_type: One of ``"uniform"``, ``"triangular"``,
             ``"mode1"`` (default).
@@ -135,7 +138,10 @@ def run_pushover_analysis(
 
         modal_data = _resolve_modal_data(modal_result)
         rc_config = _build_rc_config(config)
-        dirs = rc_config.get("directions", directions)
+        # The explicit *directions* argument takes precedence over any
+        # ``directions`` value inside *config*; fall back to config (then
+        # ``"4dir"``) only when the argument is left at its default.
+        dirs = directions if directions != "4dir" else rc_config.get("directions", "4dir")
 
         result = pushover_rc_openseespy(
             mesh_model,

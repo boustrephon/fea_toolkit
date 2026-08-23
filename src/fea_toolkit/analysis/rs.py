@@ -49,11 +49,16 @@ def run_response_spectrum_analysis(
     periods = modal.get("periods", [])
     if not periods:
         raise RuntimeError(
-            "ModalAnalysis result has no periods; "
-            "run ModalAnalysis before ResponseSpectrumAnalysis."
+            "run_modal_analysis result has no periods; run "
+            "run_modal_analysis before run_response_spectrum_analysis."
         )
 
+    # Clamp the mode count to the periods actually available so the RS
+    # analysis never requests more modes than the modal result provides.
+    n_modes = min(n_modes, len(periods))
+
     builder_config = {"element_type": "elasticBeamColumn", "verbose": False}
+    builder_config.update(config or {})
     ab = AnalysisBuilder(mesh_model, builder_config)
     ab.build_domain()
     ab.compute_seismic_masses()
@@ -85,5 +90,6 @@ def run_response_spectrum_analysis(
             "direction": direction,
             "damping": damping,
             "n_modes": n_modes,
+            "config": config or {},
         },
     )

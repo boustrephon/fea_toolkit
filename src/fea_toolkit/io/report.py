@@ -6,9 +6,11 @@ either a ``pd.DataFrame`` suitable for HTML/Quarto display or a simple
 dict/string.  They are independent of any specific project — the same
 functions can be used for any model parsed with ``SAP2000Parser``.
 
-This module only *formats* data — the analysis runners that execute the
-OpenSees solver live in :mod:`fea_toolkit.analysis.linear`.  Not to be
-confused with :mod:`fea_toolkit.report` (report orchestration) or
+This module only *formats* data — the **linear** analysis runners that
+execute the OpenSees solver live in :mod:`fea_toolkit.analysis.linear`;
+the other runners (modal, response-spectrum, pushover, nonlinear-dynamic)
+live in their respective modules under :mod:`fea_toolkit.analysis`.  Not
+to be confused with :mod:`fea_toolkit.report` (report orchestration) or
 :mod:`fea_toolkit.plotting.report` (matplotlib figures).
 """
 

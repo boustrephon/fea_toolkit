@@ -1342,6 +1342,31 @@ class LoadCase:
     )  # "CASE - MODAL ..." or "CASE - RESPONSE SPECTRUM ..." etc
 
 
+def patterns_from_case(lc: LoadCase) -> dict[str, float]:
+    """Extract ``{LoadName: LoadSF}`` assignments from a static load case.
+
+    Reads the ``CASE - STATIC 1 - LOAD ASSIGNMENTS`` block of *lc*.
+
+    Parameters
+    ----------
+    lc : LoadCase
+        Static load case whose pattern assignments are to be extracted.
+
+    Returns
+    -------
+    dict[str, float]
+        Mapping of load-pattern name to its scale factor.  Records that
+        lack an explicit ``LoadSF`` default to ``1.0``; a missing or
+        malformed assignment block yields an empty dict.
+    """
+    sd = lc.case_data.get("CASE - STATIC 1 - LOAD ASSIGNMENTS", [])
+    if isinstance(sd, list):
+        return {a["LoadName"]: a.get("LoadSF", 1.0) for a in sd if "LoadName" in a}
+    if isinstance(sd, dict) and "LoadName" in sd:
+        return {sd["LoadName"]: sd.get("LoadSF", 1.0)}
+    return {}
+
+
 @dataclass
 class LoadPattern:
     """SAP2000 load pattern."""
