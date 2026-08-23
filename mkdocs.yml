@@ -4,6 +4,15 @@ site_url: https://boustrephon.github.io/fea_toolkit/
 repo_url: https://github.com/boustrephon/fea_toolkit
 edit_uri: blob/main/docs/
 
+# MkDocs hooks — rewrite repo-root-relative links in the mirrored README
+# home page (docs/index.md) so they resolve on the built site.
+hooks:
+  - docs/_link_mapper.py
+
+# Don't ship helper scripts to the rendered site.
+exclude_docs: |
+  _*.py
+
 theme:
   name: material
   features:
@@ -13,6 +22,7 @@ theme:
     - toc.integrate
     - search.suggest
     - search.highlight
+    - content.action.edit
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -67,8 +77,8 @@ plugins:
         - docs/_generate_index.py
 
 nav:
-  - Home: README.md
-  - Documentation Index: README.md
+  - Home: index.md
+  - Documentation Index: documentation_index.md
   - LLM / AI Assistant Guide: llm_guide.md
   - Core Pipeline:
       - Analysis Workflow: workflow.md
