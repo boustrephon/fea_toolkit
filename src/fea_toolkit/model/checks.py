@@ -6,10 +6,14 @@ to detect model issues before running any analysis.
 """
 
 import math
+import warnings
 from collections import defaultdict
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-import pandas as pd
+if TYPE_CHECKING:
+    # Only referenced in the ``"pd.DataFrame"`` string annotation below;
+    # pandas stays a lazy (function-local) runtime import.
+    import pandas as pd
 
 from fea_toolkit.model.sap_data import (
     SAPModelData,
@@ -163,7 +167,20 @@ def check_brace_buckling(
     -------
     dict
         ``{elem_id: {'P_cr': ..., 'P_demand': ..., 'ratio': ...,
-                     'slenderness': ..., 'length': ..., 'section': ...}}``
+                     'slenderness': ..., 'length': ..., 'section': ...,
+                     'A': ..., 'I22': ...}}``
+
+        ``A`` and ``I22`` are the *effective* values used in the
+        ``P_cr``/``Slenderness`` computations (``I33`` used as the
+        minor-axis fallback when ``I22`` is non-positive, ``A`` clamped
+        to ``1e-4``).  Report consumers should use these returned values
+        rather than re-deriving fallbacks from the section.
+
+    Warns:
+        UserWarning: If any checked section has no positive cross-sectional
+        area (``A``).  The fabricated ``A``/``Slenderness`` values are
+        flagged because they are not physical and could be misread
+        downstream (e.g. as a real stocky-member slenderness).
     """
     if not brace_ids:
         if print_results:
@@ -174,6 +191,7 @@ def check_brace_buckling(
     assignments = md.frame_assignments
 
     results: dict[str, dict[str, float]] = {}
+    missing_a_sections: dict[str, list] = {}  # sec_name -> [elem_id, ...]
     for eid in brace_ids:
         elem = elements.get(eid)
         if elem is None:
@@ -201,6 +219,7 @@ def check_brace_buckling(
         E = mat.E_mod if (mat.E_mod or 0) > 0 else DEFAULT_E_S_PA
         I22 = (sec.I22 or 0) if (sec.I22 or 0) > 0 else (sec.I33 or 0)
         A = (sec.A or 0) if (sec.A or 0) > 0 else 1e-4
+        a_missing = (sec.A or 0) <= 0
 
         # Skip elements with no positive moment of inertia — fabricating
         # a zero-based buckling result is misleading (division by zero
@@ -223,7 +242,27 @@ def check_brace_buckling(
             "slenderness": slenderness,
             "length": L,
             "section": sec_name,
+            "A": A,
+            "I22": I22,
         }
+        # Only braces that actually produced a result row can leak a
+        # fabricated A/slenderness into the report, so track those.
+        if a_missing:
+            missing_a_sections.setdefault(sec_name, []).append(eid)
+
+    if missing_a_sections:
+        affected = ", ".join(
+            f"'{s}' (elements: {', '.join(sorted(ids))})"
+            for s, ids in sorted(missing_a_sections.items())
+        )
+        warnings.warn(
+            f"Brace buckling: {len(missing_a_sections)} section(s) have no positive "
+            f"cross-sectional area: {affected}. The reported A and Slenderness for "
+            "these braces are fabricated (A clamped to 1e-4) and are NOT physical; "
+            "P_cr is unaffected, but check the section data before relying on the "
+            "slenderness/area columns.",
+            UserWarning,
+        )
 
     if print_results and results:
         force_unit = md.units.get("F", "N")
@@ -257,7 +296,7 @@ def check_brace_buckling(
 # ═══════════════════════════════════════════════════════════════════
 
 
-def brace_buckling_check(md: "SAPModelData", n_longest: int = 2, K: float = 1.0) -> pd.DataFrame:
+def brace_buckling_check(md: "SAPModelData", n_longest: int = 2, K: float = 1.0) -> "pd.DataFrame":
     """Identify the longest braces and compute their Euler buckling capacity.
 
     Braces are identified by their section shape (Pipe, Angle, Double Angle,
@@ -286,7 +325,12 @@ def brace_buckling_check(md: "SAPModelData", n_longest: int = 2, K: float = 1.0)
         ``I22 ({lu}⁴)`` (minor-axis second moment),
         ``Slenderness`` (λ = KL/r), and
         ``P_cr ({fu})`` (Euler buckling load, in force units).
+
+        When no brace sections are found in the model, returns a
+        single-column DataFrame containing only ``Note``.
     """
+    import pandas as pd
+
     from fea_toolkit.model.sap_data import (
         AngleSection,
         ChannelSection,
@@ -330,8 +374,10 @@ def brace_buckling_check(md: "SAPModelData", n_longest: int = 2, K: float = 1.0)
                 "Shape": type(sec).__name__.replace("Section", ""),
                 "Material": sec.material,
                 f"Length ({lu})": round(r["length"], 3),
-                f"A ({lu}²)": round((sec.A or 0) if (sec.A or 0) > 0 else 1e-4, 6),
-                f"I22 ({lu}⁴)": round((sec.I22 or 0) if (sec.I22 or 0) > 0 else (sec.I33 or 0), 8),
+                # Effective values returned by the engine — identical to the
+                # A/I22 used in the P_cr and Slenderness columns above.
+                f"A ({lu}²)": round(r["A"], 6),
+                f"I22 ({lu}⁴)": round(r["I22"], 8),
                 "Slenderness": round(r["slenderness"], 1),
                 f"P_cr ({fu})": round(r["P_cr"], 0),
             }
