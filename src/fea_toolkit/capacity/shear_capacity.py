@@ -89,6 +89,30 @@ class ShearCapacityResult:
 
 
 @dataclass
+class _ShearContext:
+    """Step-invariant simplified-MCFT terms for one section/material/units key.
+
+    Everything in :func:`member_shear_capacity` that does not depend on the
+    per-step demand forces (``axial`` / ``shear`` / ``moment``) is precomputed
+    here — section geometry, unit rescaling, crack-spacing parameter, stirrup
+    and upper-bound terms — so the per-step evaluation only recomputes the
+    strain-dependent ``eps_x`` → ``beta`` → ``vc`` → ``vn`` chain.
+    """
+
+    g: ShearGeometry
+    es: Optional[float]  # rebar E_mod, or None when the strain term is disabled
+    cot: float  # cot(θ) for the mid-depth longitudinal strain term
+    fsf: float  # force scale factor (model units → N)
+    sqrt_fc_mpa: float  # √(f'c) with f'c rescaled to MPa
+    bw_mm: float  # web width rescaled to mm
+    dv_mm: float  # effective shear depth rescaled to mm
+    s_ze_mm: float  # equivalent crack-spacing parameter (mm)
+    vcr: float  # diagonal-cracking shear (model force)
+    vn_upper: float  # 0.25·f'c·b_w·d_v cap (model force)
+    vs: float  # transverse-reinforcement contribution (model force)
+
+
+@dataclass
 class ShearFailureEntry:
     """A shear-capacity exceedance at one member/step."""
 
@@ -153,6 +177,171 @@ def section_shear_geometry(
     return ShearGeometry(bw=bw, h=h, d=d, dv=dv, av=av, s=s, asl=asl)
 
 
+# ── Memoised MCFT setup (per-section, step-invariant) ──────────
+
+
+_SHEAR_CONTEXT_CACHE: dict[tuple, tuple] = {}
+
+
+def _shear_capacity_setup_uncached(
+    section: Section,
+    concrete: Any,
+    rebar: Optional[Any] = None,
+    tie: Optional[Any] = None,
+    units: Optional[dict[str, str]] = None,
+    aggregate_size_mm: float = DEFAULT_AGGREGATE_SIZE_MM,
+    theta_deg: float = DEFAULT_SHEAR_THETA_DEG,
+) -> _ShearContext:
+    """Compute the step-invariant simplified-MCFT terms (no memoisation)."""
+    g = section_shear_geometry(section)
+    fc = float(getattr(concrete, "Fc", 0.0) or 0.0)
+    if fc <= 0.0 or g.bw <= 0.0 or g.dv <= 0.0:
+        raise ValueError(
+            "member_shear_capacity requires a concrete section with f'c, "
+            f"b_w and d_v — got fc={fc}, bw={g.bw}, dv={g.dv}"
+        )
+    if units is None:
+        raise ValueError(
+            "member_shear_capacity requires the model 'units' dict — the "
+            "empirical √f'c·b·d term and the crack-spacing parameter are "
+            "anchored to the MPa/mm convention and must be rescaled."
+        )
+
+    # ── Longitudinal-steel data (strain term) ───────────────────
+    es = float(getattr(rebar, "E_mod", 0.0) or 0.0)
+    if es <= 0.0:
+        es = None  # strain term disabled
+    cot = 1.0 / np.tan(np.deg2rad(theta_deg))
+
+    # ── Unit rescaling + crack-spacing parameter s_ze (mm) ──────
+    lsf = length_scale_factor(units)
+    fsf = force_scale_factor(units)
+    ssf = stress_scale_factor(units)
+
+    # Unknown or zero tie spacing: fall back to the effective shear depth
+    # as the crack-spacing parameter.
+    s_mm = g.s / lsf * 1000.0 if g.s > 0.0 else g.dv / lsf * 1000.0
+    s_ze_mm = s_mm * 35.0 / (15.0 + max(aggregate_size_mm, 5.0))
+
+    # Concrete contribution terms — CSA A23.3-04, Clause 11.  The empirical
+    # β·√f'c·b_w·d_v term uses f'c in MPa and b,d in mm (giving N), then
+    # rescales to model force units.
+    fc_mpa = fc / (ssf * 1.0e6)
+    bw_mm = g.bw / lsf * 1000.0
+    dv_mm = g.dv / lsf * 1000.0
+    sqrt_fc_mpa = np.sqrt(fc_mpa)
+    vcr = 0.33 * sqrt_fc_mpa * bw_mm * dv_mm * fsf
+    vn_upper = 0.25 * fc_mpa * bw_mm * dv_mm * fsf
+
+    vs = 0.0
+    if g.av > 0.0 and g.s > 0.0:
+        fyv = float(getattr(section, "tie_fy", 0.0) or 0.0) or float(getattr(tie, "Fy", 0.0) or 0.0)
+        if fyv > 0.0:
+            # V_s uses the 45°-truss (ACI-318) form A_v·f_yv·d_v/s —
+            # cot θ = 1 — matching the formula documented in
+            # docs/shear_failure_modelling.md.  θ only enters the
+            # mid-depth longitudinal strain term above.
+            vs = g.av * fyv * g.dv / g.s
+
+    return _ShearContext(
+        g=g,
+        es=es,
+        cot=cot,
+        fsf=fsf,
+        sqrt_fc_mpa=sqrt_fc_mpa,
+        bw_mm=bw_mm,
+        dv_mm=dv_mm,
+        s_ze_mm=s_ze_mm,
+        vcr=vcr,
+        vn_upper=vn_upper,
+        vs=vs,
+    )
+
+
+def _shear_capacity_setup(
+    section: Section,
+    concrete: Any,
+    rebar: Optional[Any] = None,
+    tie: Optional[Any] = None,
+    units: Optional[dict[str, str]] = None,
+    aggregate_size_mm: float = DEFAULT_AGGREGATE_SIZE_MM,
+    theta_deg: float = DEFAULT_SHEAR_THETA_DEG,
+) -> _ShearContext:
+    """Memoised :func:`_shear_capacity_setup_uncached` per section/material/units.
+
+    Sections and materials are mutable dataclasses (unhashable), so the cache
+    key is built from ``id()`` plus the scalar inputs, and the key objects are
+    retained with the cached context and verified by identity on lookup to
+    guard against ``id()`` reuse after garbage collection.
+    """
+    key = (
+        id(section),
+        id(concrete),
+        id(rebar),
+        id(tie),
+        tuple(sorted((units or {}).items())),
+        aggregate_size_mm,
+        theta_deg,
+    )
+    hit = _SHEAR_CONTEXT_CACHE.get(key)
+    if hit is not None and all(a is b for a, b in zip(hit[0], (section, concrete, rebar, tie))):
+        return hit[1]
+    ctx = _shear_capacity_setup_uncached(
+        section,
+        concrete,
+        rebar=rebar,
+        tie=tie,
+        units=units,
+        aggregate_size_mm=aggregate_size_mm,
+        theta_deg=theta_deg,
+    )
+    _SHEAR_CONTEXT_CACHE[key] = ((section, concrete, rebar, tie), ctx)
+    return ctx
+
+
+def _shear_capacity_from_setup(
+    ctx: _ShearContext,
+    axial: float = 0.0,
+    shear: float = 0.0,
+    moment: float = 0.0,
+    epsilon_x: Optional[float] = None,
+) -> ShearCapacityResult:
+    """Evaluate the strain-dependent capacity terms from a cached setup.
+
+    Only the mid-depth strain ``eps_x`` and its dependents (``beta`` → ``vc``
+    → ``vn``) are recomputed here; all other terms come from ``ctx``.
+    """
+    g = ctx.g
+    asl = g.asl
+
+    # ── Longitudinal strain at mid-depth (CSA General Method) ──
+    if epsilon_x is not None:
+        eps_x = max(float(epsilon_x), 0.0)
+    else:
+        eps_x = 0.0
+        if ctx.es is not None and asl > 0.0:
+            num = abs(moment) / g.dv + 0.5 * (-axial) + 0.5 * abs(shear) * ctx.cot
+            eps_x = max(num, 0.0) / (2.0 * ctx.es * asl)
+
+    beta = (0.4 / (1.0 + 1500.0 * eps_x)) * (1300.0 / (1000.0 + ctx.s_ze_mm))
+    vc = beta * ctx.sqrt_fc_mpa * ctx.bw_mm * ctx.dv_mm * ctx.fsf
+    vn = min(vc + ctx.vs, ctx.vn_upper)
+
+    return ShearCapacityResult(
+        vc=float(vc),
+        vs=float(ctx.vs),
+        vn=float(vn),
+        vn_upper=float(ctx.vn_upper),
+        vcr=float(ctx.vcr),
+        beta=float(beta),
+        epsilon_x=float(eps_x),
+        dv=g.dv,
+        d=g.d,
+        bw=g.bw,
+        s_ze_mm=float(ctx.s_ze_mm),
+    )
+
+
 def member_shear_capacity(
     section: Section,
     concrete: Any,
@@ -197,78 +386,17 @@ def member_shear_capacity(
     Returns:
         :class:`ShearCapacityResult` with all forces in model units.
     """
-    g = section_shear_geometry(section)
-    fc = float(getattr(concrete, "Fc", 0.0) or 0.0)
-    if fc <= 0.0 or g.bw <= 0.0 or g.dv <= 0.0:
-        raise ValueError(
-            "member_shear_capacity requires a concrete section with f'c, "
-            f"b_w and d_v — got fc={fc}, bw={g.bw}, dv={g.dv}"
-        )
-
-    # ── Longitudinal strain at mid-depth (CSA General Method) ──
-    es = float(getattr(rebar, "E_mod", 0.0) or 0.0)
-    if es <= 0.0:
-        es = None  # strain term disabled
-    asl = g.asl
-    cot = 1.0 / np.tan(np.deg2rad(theta_deg))
-    if epsilon_x is not None:
-        eps_x = max(float(epsilon_x), 0.0)
-    else:
-        eps_x = 0.0
-        if es is not None and asl > 0.0:
-            num = abs(moment) / g.dv + 0.5 * (-axial) + 0.5 * abs(shear) * cot
-            eps_x = max(num, 0.0) / (2.0 * es * asl)
-
-    # ── Equivalent crack-spacing parameter s_ze (mm) ───────────
-    if units is None:
-        raise ValueError(
-            "member_shear_capacity requires the model 'units' dict — the "
-            "empirical √f'c·b·d term and the crack-spacing parameter are "
-            "anchored to the MPa/mm convention and must be rescaled."
-        )
-    lsf = length_scale_factor(units)
-    fsf = force_scale_factor(units)
-    ssf = stress_scale_factor(units)
-
-    s_mm = g.s / lsf * 1000.0
-    s_ze_mm = s_mm * 35.0 / (15.0 + max(aggregate_size_mm, 5.0))
-
-    beta = (0.4 / (1.0 + 1500.0 * eps_x)) * (1300.0 / (1000.0 + s_ze_mm))
-
-    # Concrete contribution — CSA A23.3-04, Clause 11.  The empirical
-    # β·√f'c·b_w·d_v term uses f'c in MPa and b,d in mm (giving N), then
-    # rescales to model force units.
-    fc_mpa = fc / (ssf * 1.0e6)
-    bw_mm = g.bw / lsf * 1000.0
-    dv_mm = g.dv / lsf * 1000.0
-
-    vc = beta * np.sqrt(fc_mpa) * bw_mm * dv_mm * fsf
-    vcr = 0.33 * np.sqrt(fc_mpa) * bw_mm * dv_mm * fsf
-    vn_upper = 0.25 * fc_mpa * bw_mm * dv_mm * fsf
-
-    vs = 0.0
-    if g.av > 0.0 and g.s > 0.0:
-        fyv = float(getattr(section, "tie_fy", 0.0) or 0.0) or float(getattr(tie, "Fy", 0.0) or 0.0)
-        if fyv > 0.0:
-            # V_s uses the 45°-truss (ACI-318) form A_v·f_yv·d_v/s —
-            # cot θ = 1 — matching the formula documented in
-            # docs/shear_failure_modelling.md.  θ only enters the
-            # mid-depth longitudinal strain term above.
-            vs = g.av * fyv * g.dv / g.s
-
-    vn = min(vc + vs, vn_upper)
-    return ShearCapacityResult(
-        vc=float(vc),
-        vs=float(vs),
-        vn=float(vn),
-        vn_upper=float(vn_upper),
-        vcr=float(vcr),
-        beta=float(beta),
-        epsilon_x=float(eps_x),
-        dv=g.dv,
-        d=g.d,
-        bw=g.bw,
-        s_ze_mm=float(s_ze_mm),
+    ctx = _shear_capacity_setup(
+        section,
+        concrete,
+        rebar=rebar,
+        tie=tie,
+        units=units,
+        aggregate_size_mm=aggregate_size_mm,
+        theta_deg=theta_deg,
+    )
+    return _shear_capacity_from_setup(
+        ctx, axial=axial, shear=shear, moment=moment, epsilon_x=epsilon_x
     )
 
 
@@ -351,6 +479,12 @@ def shear_backbone(
     g_cr = v_cr / gav
     v_n = cap.vn
     g_n = g_cr + (v_n - v_cr) / max(post_crack_ratio * gav, 1e-12 * gav)
+    if g_n <= g_cr:
+        # cap.vn <= cap.vcr collapses the post-crack branch onto the
+        # cracking point; enforce a strictly increasing peak strain so the
+        # Hysteretic material never receives coincident cracking/peak
+        # abscissae.
+        g_n = g_cr + abs(v_n) / max(post_crack_ratio * gav, 1e-12 * gav)
     v_r = residual_ratio * v_n
     g_r = g_n + (v_n - v_r) / max((-post_peak_ratio) * gav, 1e-12 * gav)
 
@@ -430,6 +564,20 @@ def report_shear_failure(
         tie = mesh.materials.get(getattr(sec, "tie_rebar_mat", "") or "")
         tag = builder.frame_tag_map.get(eid, getattr(elem, "elem_tag", eid))
 
+        # The simplified-MCFT setup (geometry, unit rescaling, crack-spacing
+        # parameter, stirrup/upper-bound terms) is step-invariant — compute it
+        # once per section (memoised by section/material/units) and reuse it
+        # for every history step.  Only the eps_x-dependent chain
+        # (beta → vc → vn) is evaluated per step.
+        ctx = _shear_capacity_setup(
+            sec,
+            concrete,
+            rebar=rebar,
+            tie=tie,
+            units=builder.units,
+            aggregate_size_mm=aggregate_size_mm,
+            theta_deg=theta_deg,
+        )
         report.members_checked.append(eid)
         peak_dcr = 0.0
         for step, forces in enumerate(history):
@@ -445,18 +593,7 @@ def report_shear_failure(
                 np.hypot(f.get("My_j", 0.0), f.get("Mz_j", 0.0)),
             )
             n_comp = -float(f.get("Fx", 0.0))
-            cap = member_shear_capacity(
-                sec,
-                concrete,
-                rebar=rebar,
-                tie=tie,
-                units=builder.units,
-                axial=n_comp,
-                shear=v_dem,
-                moment=m_dem,
-                aggregate_size_mm=aggregate_size_mm,
-                theta_deg=theta_deg,
-            )
+            cap = _shear_capacity_from_setup(ctx, axial=n_comp, shear=v_dem, moment=m_dem)
             if cap.vn <= 0.0:
                 continue
             dcr = v_dem / cap.vn

@@ -55,6 +55,7 @@ from fea_toolkit.capacity.gb50010 import (
 )
 from fea_toolkit.capacity.shear_capacity import (
     ShearCapacityResult,
+    ShearFailureEntry,
     ShearFailureReport,
     member_shear_capacity,
     report_shear_failure,
@@ -66,6 +67,7 @@ __all__ = [
     "ElwoodColumnGeometry",
     "ElwoodColumnParameters",
     "ShearCapacityResult",
+    "ShearFailureEntry",
     "ShearFailureReport",
     "WallShearCheckResult",
     "axial_capacity",
