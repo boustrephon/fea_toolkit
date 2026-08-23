@@ -3315,6 +3315,38 @@ class TestBraceBucklingCheck:
         assert pcr_col, "P_cr column missing from buckling table"
         assert df[pcr_col[0]].iloc[0] > 0
 
+    def test_buckling_table_n_longest_ordering(self, brace_model):
+        """brace_buckling_check sorts by length (desc) and truncates to n_longest."""
+        from fea_toolkit.model.checks import brace_buckling_check
+
+        # Add a second, longer brace (B2 length 12 > B1 length ≈ 8.49)
+        brace_model.nodes["3"] = Node(node_id="3", node_tag=3, x=0, y=0, z=12)
+        brace_model.frame_elements["B2"] = FrameElement(
+            elem_id="B2", elem_tag=2, node_i="1", node_j="3"
+        )
+        brace_model.frame_assignments["B2"] = "PIP4"
+
+        # Both braces reported, longest first
+        df = brace_buckling_check(brace_model, n_longest=2, K=1.0)
+        assert list(df["Element"]) == ["B2", "B1"]
+        length_col = next(c for c in df.columns if c.startswith("Length"))
+        assert df.loc[0, length_col] > df.loc[1, length_col]
+
+        # Truncation: only the longest brace survives n_longest=1
+        df_top = brace_buckling_check(brace_model, n_longest=1, K=1.0)
+        assert len(df_top) == 1
+        assert list(df_top["Element"]) == ["B2"]
+
+    def test_buckling_table_empty_model_note_schema(self, brace_model):
+        """No brace sections (cleared assignments) → Note-only DataFrame schema."""
+        from fea_toolkit.model.checks import brace_buckling_check
+
+        brace_model.frame_assignments = {}
+        df = brace_buckling_check(brace_model, n_longest=2, K=1.0)
+        assert list(df.columns) == ["Note"]
+        assert len(df) == 1
+        assert "No brace sections found" in df["Note"].iloc[0]
+
     def test_from_brace_sections(self):
         """Selection.from_brace_sections detects Pipe, Angle, etc."""
         from fea_toolkit.model.selection import Selection
