@@ -184,9 +184,9 @@ def check_brace_buckling(
 
     Warns:
         UserWarning: If any checked section has no positive cross-sectional
-        area (``A``).  The fabricated ``A``/``Slenderness`` values are
-        flagged because they are not physical and could be misread
-        downstream (e.g. as a real stocky-member slenderness).
+                area (``A``).  The fabricated ``A``/``Slenderness`` values are
+                flagged because they are not physical and could be misread
+                downstream (e.g. as a real stocky-member slenderness).
     """
     if not brace_ids:
         if print_results:

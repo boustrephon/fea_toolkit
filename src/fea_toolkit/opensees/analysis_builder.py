@@ -7306,7 +7306,7 @@ def _normalise_frame_response(f) -> Optional[list[float]]:
 
     Args:
         f: Raw response from ``ops.eleResponse`` (list or array-like).
-           May be ``None`` when OpenSees fails to produce a response.
+            May be ``None`` when OpenSees fails to produce a response.
 
     Returns:
         List of 12 values, or ``None`` when the response length is not
@@ -7349,7 +7349,7 @@ def _record_step(
         Dict with keys:
         * ``"step"`` — int
         * ``"frame_forces"`` — ``{eid: {fx_i, fy_i, fz_i, mx_i, my_i, mz_i,
-          fx_j, fy_j, fz_j, mx_j, my_j, mz_j}}``
+            fx_j, fy_j, fz_j, mx_j, my_j, mz_j}}``
         * ``"shell_forces"`` — ``{aid: {Nx, Ny, Nxy, Mx, My, Mxy}}``
         * ``"node_displacements"`` — ``{tag: (dx, dy, dz)}`` (when *node_tags* is provided)
     """
