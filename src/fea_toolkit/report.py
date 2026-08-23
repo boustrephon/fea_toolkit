@@ -26,6 +26,7 @@ Typical usage::
     })
 """
 
+import copy
 import pickle
 from pathlib import Path
 from typing import Optional
@@ -125,7 +126,7 @@ def _merge_report_config(config: Optional[dict] = None, overrides: Optional[dict
         A new merged configuration dict; the module-level
         ``_DEFAULT_CONFIG`` is never mutated.
     """
-    cfg = deep_merge(_DEFAULT_CONFIG.copy(), config or {})
+    cfg = deep_merge(copy.deepcopy(_DEFAULT_CONFIG), config or {})
 
     flat: dict = {}
     for k, v in (overrides or {}).items():

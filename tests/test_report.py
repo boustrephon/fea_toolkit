@@ -79,6 +79,14 @@ class TestMergeReportConfig:
         assert cfg["pushover"]["num_steps"] == 10
         assert cfg["pushover"]["max_disp"] == _DEFAULT_CONFIG["pushover"]["max_disp"]
 
+    def test_returned_config_is_independent_of_defaults(self):
+        # Nested dicts of the merged result must not alias the module-level
+        # ``_DEFAULT_CONFIG`` — mutating a returned config would otherwise
+        # corrupt every subsequent ``generate_report()`` call.
+        cfg = _merge_report_config()
+        cfg["general"]["n_modes"] = 99
+        assert _DEFAULT_CONFIG["general"]["n_modes"] == 12
+
 
 class TestGenerateReportSignature:
     """Public contract of the orchestrator entry point."""
