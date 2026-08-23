@@ -278,6 +278,37 @@ class TestShearCapacityPhysics:
         assert bb["g_cr"] < bb["g_n"] < bb["g_r"]
         assert bb["gav"] > 0.0
 
+    def test_cached_setup_reused_and_matches_public_api(self):
+        """Step-invariant MCFT setup is memoised and matches the public API."""
+        from fea_toolkit.capacity.shear_capacity import (
+            _shear_capacity_from_setup,
+            _shear_capacity_setup,
+        )
+
+        md = make_duong_frame()
+        sec = md.sections["BEAM"]
+        concrete = md.materials["C43"]
+        rebar = md.materials["RebarL"]
+        tie = md.materials["RebarT"]
+        ctx = _shear_capacity_setup(sec, concrete, rebar=rebar, tie=tie, units=md.units)
+        ctx_again = _shear_capacity_setup(sec, concrete, rebar=rebar, tie=tie, units=md.units)
+        # Same section/material/units key → the identical cached context object.
+        assert ctx is ctx_again
+        # The cached path reproduces the public capacity result exactly.
+        cap = member_shear_capacity(
+            sec,
+            concrete,
+            rebar=rebar,
+            tie=tie,
+            units=md.units,
+            axial=420.0,
+            shear=250.0,
+            moment=150.0,
+        )
+        cap_cached = _shear_capacity_from_setup(ctx, axial=420.0, shear=250.0, moment=150.0)
+        assert cap == cap_cached
+        assert cap_cached.epsilon_x == cap.epsilon_x
+
 
 # ═══════════════════════════════════════════════════════════════
 # Phase 1 — mode-of-failure reporter (end-to-end)
