@@ -108,6 +108,37 @@ _DEFAULT_CONFIG: dict = {
 # ────────────────────────────────────────────────────────────────────
 
 
+def _merge_report_config(config: Optional[dict] = None, overrides: Optional[dict] = None) -> dict:
+    """Merge *config* and flat *overrides* on top of ``_DEFAULT_CONFIG``.
+
+    ``overrides`` uses ``__`` as a nesting separator — e.g.
+    ``{"general__n_modes": 6}`` becomes ``{"general": {"n_modes": 6}}``.
+    Precedence (highest wins): ``_DEFAULT_CONFIG`` < *config* < *overrides*.
+
+    Args:
+        config: Nested configuration overrides (keys follow
+            ``_DEFAULT_CONFIG``).  ``None`` is treated as no overrides.
+        overrides: Flat override keys using ``__`` as the nesting
+            separator.  ``None`` is treated as no overrides.
+
+    Returns:
+        A new merged configuration dict; the module-level
+        ``_DEFAULT_CONFIG`` is never mutated.
+    """
+    cfg = deep_merge(_DEFAULT_CONFIG.copy(), config or {})
+
+    flat: dict = {}
+    for k, v in (overrides or {}).items():
+        parts = k.split("__", 1)
+        if len(parts) == 2:
+            flat.setdefault(parts[0], {})[parts[1]] = v
+        else:
+            flat[k] = v
+    if flat:
+        cfg = deep_merge(cfg, flat)
+    return cfg
+
+
 def generate_report(
     md: SAPModelData,
     mesh_model: Optional[MeshModel] = None,
@@ -171,17 +202,7 @@ def generate_report(
           instance (only present when logging was enabled)
     """
     # ── Config merging ───────────────────────────────────────────
-    cfg = deep_merge(_DEFAULT_CONFIG.copy(), config or {})
-
-    flat = {}
-    for k, v in overrides.items():
-        parts = k.split("__", 1)
-        if len(parts) == 2:
-            flat.setdefault(parts[0], {})[parts[1]] = v
-        else:
-            flat[k] = v
-    if flat:
-        cfg = deep_merge(cfg, flat)
+    cfg = _merge_report_config(config, overrides)
 
     gen_cfg = cfg.get("general", {})
     verbose = gen_cfg.get("verbose", True)
