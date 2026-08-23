@@ -30,7 +30,7 @@ category: [planning]
 1. **Read this document** to understand the overall strategy.
 2. **Check the current state**: `python -m pyright src/ --outputjson > /tmp/pyright_src.json`
 3. **Compare** against the baseline counts below to see what's already been fixed.
-4. **Work through Phase 1 (real bugs)** first (9 findings → 13 diagnostics), then **Phase 2 (config)**, then **Phase 3 (optional type improvements)**.
+4. **Phase 1 (real bugs) is already fixed** (was (9 findings → 13 diagnostics), then **Phase 2 (config)**, then **Phase 3 (optional type improvements)**.
 
 ---
 
@@ -45,6 +45,10 @@ category: [planning]
 ---
 
 ## Phase 1: Real Bugs (Must Fix — Actual Runtime Errors)
+
+> **Historical (fixed as of 2026-08-21)** - all findings below are already
+> fixed in the current code and retained for reference only; see the status
+> update at the top of this document.
 
 These are errors that pyright is **correct** about and will cause runtime failures.
 
@@ -105,7 +109,6 @@ These are errors that pyright is **correct** about and will cause runtime failur
 Pyright doesn't resolve string annotations (`"MeshModel"`). These are in:
 
 - `src/fea_toolkit/analysis/base.py` line 219
-- `src/fea_toolkit/analysis/manager.py` line 24
 - `src/fea_toolkit/analysis/modal.py` line 30
 - `src/fea_toolkit/analysis/rs.py` line 46
 - `src/fea_toolkit/analysis/static.py` line 38
@@ -212,7 +215,7 @@ Using int/float as dict keys — runtime duck-typing, but the type checker can't
 ## Execution Order
 
 ```
-1. Fix Phase 1 bugs (9 findings → 13 diagnostics)  ←  run pyright, verify ~13 drop
+1. Phase 1 bugs are fixed (9 findings → 13 diagnostics)  ←  run pyright, verify ~13 drop
 2. Create pyrightconfig.json  ←  run pyright, verify ~342 drop (Phase 2 baseline)
 3. Run full test suite  ←  confirm no regressions
 4. (Future) Phase 3 improvements  ←  per-file triage

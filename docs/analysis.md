@@ -42,7 +42,7 @@ SAP2000Parser → SAPModelData → Preprocessor → MeshModel → analysis funct
 
 The functions consume a frozen `MeshModel` (Preprocessor output) — they never
 mutate topology.  Modal / static / RS / pushover run via `AnalysisBuilder`
-(or `io.report.run_linear_cases` for the static linear table); the
+(or `fea_toolkit.analysis.linear.run_linear_cases` for the static linear table); the
 nonlinear-dynamic function uses the Tcl export + `XaraTclRunner` backend.
 
 ## Example — explicit pipeline

@@ -29,7 +29,7 @@ result = run_nonlinear_dynamic_analysis(
     num_steps=1000,
     direction="X",
     damping_ratio=0.05,
-).data
+)
 ```
 
 ## Parameters

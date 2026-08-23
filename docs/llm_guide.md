@@ -81,10 +81,10 @@ builder = AnalysisBuilder(mesh, {}).build_domain()
 ### Analysis
 
 ```
-"Run linear static"                  → AnalysisBuilder(...).run_static_analysis()
-"Run modal / eigenvalue"             → AnalysisBuilder(...).run_modal_analysis()
-"Run response spectrum (CQC)"        → AnalysisBuilder(...).run_response_spectrum_analysis()
-"Run pushover"                       → AnalysisBuilder(...).run_pushover_analysis()
+"Run linear static"                  → run_static_analysis(mesh_model, md)
+"Run modal / eigenvalue"             → run_modal_analysis(mesh_model)
+"Run response spectrum (CQC)"        → run_response_spectrum_analysis(mesh_model, modal_result, direction, T_spec, Sa_spec)
+"Run pushover"                       → run_pushover_analysis(mesh_model, modal_result)
 "Run 4-direction pushover"           → from fea_toolkit.opensees import run_pushover_4dir
 "Compute seismic masses (from units)" → from fea_toolkit.utils import g_from_units; builder.compute_seismic_masses(g=g_from_units(md.units))
 "Extract element RS forces"          → builder.extract_element_rs_forces()
