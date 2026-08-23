@@ -264,6 +264,14 @@ class TestOpenSeesBridge:
         pts = three_point_axial_surface(70.0, g.fsw, units)
         assert pts[1][1] == pytest.approx(70.0)
 
+    def test_three_point_surface_rejects_invalid_drift_bounds(self, specimen_kipin):
+        sec, conc, tie, units = specimen_kipin
+        g = elwood_column_geometry(sec, conc, tie=tie)
+        with pytest.raises(ValueError, match="low_drift"):
+            three_point_axial_surface(70.0, g.fsw, units, low_drift=0.09, high_drift=0.08)
+        with pytest.raises(ValueError, match="low_drift"):
+            three_point_axial_surface(70.0, g.fsw, units, low_drift=0.0, high_drift=0.08)
+
     def test_limit_state_envelope_on_elastic_slope(self):
         env = elwood_limit_state_envelope([25.0, 30.0, 45.0], 1700.0)
         assert len(env) == 3
