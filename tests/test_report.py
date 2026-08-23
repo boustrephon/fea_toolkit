@@ -79,6 +79,12 @@ class TestMergeReportConfig:
         assert cfg["pushover"]["num_steps"] == 10
         assert cfg["pushover"]["max_disp"] == _DEFAULT_CONFIG["pushover"]["max_disp"]
 
+    def test_multi_level_override_nests(self):
+        """Multi-``__`` keys build nested dicts for every component."""
+        cfg = _merge_report_config({}, {"pushover__spectrum__damping": 0.03})
+        assert cfg["pushover"]["spectrum"]["damping"] == 0.03
+        assert cfg["pushover"]["max_disp"] == _DEFAULT_CONFIG["pushover"]["max_disp"]
+
     def test_returned_config_is_independent_of_defaults(self):
         # Nested dicts of the merged result must not alias the module-level
         # ``_DEFAULT_CONFIG`` — mutating a returned config would otherwise

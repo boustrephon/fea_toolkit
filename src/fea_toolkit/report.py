@@ -130,9 +130,12 @@ def _merge_report_config(config: Optional[dict] = None, overrides: Optional[dict
 
     flat: dict = {}
     for k, v in (overrides or {}).items():
-        parts = k.split("__", 1)
-        if len(parts) == 2:
-            flat.setdefault(parts[0], {})[parts[1]] = v
+        parts = k.split("__")
+        if len(parts) > 1:
+            node = flat
+            for part in parts[:-1]:
+                node = node.setdefault(part, {})
+            node[parts[-1]] = v
         else:
             flat[k] = v
     if flat:
@@ -381,11 +384,17 @@ def generate_report(
 
     # Static linear (if enabled)
     if cfg.get("linear", {}).get("run", True):
+        # Propagate the resolved n_modes (general.n_modes, default 12) into
+        # linear_cfg so run_linear_cases' RS pass stays consistent with the
+        # report-level RS pass when linear.n_modes is absent.  linear.n_modes
+        # remains the higher-priority override.
+        linear_cfg = dict(cfg.get("linear") or {})
+        linear_cfg.setdefault("n_modes", n_modes)
         _man_results["StaticAnalysis"] = run_static_analysis(
             mesh_model,
             md,
             spec_cfg=spec_cfg,
-            linear_cfg=cfg.get("linear"),
+            linear_cfg=linear_cfg,
             name="StaticAnalysis",
         )
 
@@ -570,6 +579,7 @@ def generate_report(
                 T_spec if spec_cfg else None,
                 Sa_spec if spec_cfg else None,
                 n_modes=n_modes,
+                damping=zeta,
             )
             df_storey_disp = sr["df_disp"]
             df_storey_drift = sr["df_drift"]
