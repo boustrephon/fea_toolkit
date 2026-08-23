@@ -73,10 +73,10 @@ def _resolve_pushover_data(
     Returns:
         ``(step_results, node_coords, node_tags, frame_eid_to_nodes)`` where:
         - *step_results* — list of dicts, each with ``"frame_forces"``,
-          ``"shell_forces"``, and optionally ``"node_displacements"``.
+            ``"shell_forces"``, and optionally ``"node_displacements"``.
         - *node_coords* — ``{node_tag: (x, y, z)}`` dict from geometry.
         - *frame_eid_to_nodes* — ``{sap_id: (ni_tag, nj_tag)}`` or ``None``
-          if not available from the source type.
+            if not available from the source type.
     """
     if isinstance(data, _NPZ_TYPES):
         # NPZ data path

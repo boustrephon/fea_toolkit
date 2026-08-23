@@ -1022,7 +1022,7 @@ def check_modal_pushover_mode(
         Tuple ``(best_mode_idx, rs_dominant_mode, warning)`` where:
 
         * ``best_mode_idx`` — 0‑based index of the mode with highest
-          mass participation.
+            mass participation.
         * ``rs_dominant_mode`` — RS-dominant mode index, or ``None``.
         * ``warning`` — warning string if modes differ, else ``None``.
     """

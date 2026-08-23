@@ -1033,13 +1033,13 @@ class SAP2000Parser:
             ``(column_reinf, beam_reinf, area_rebar_mat, rebar_diameters)``
 
             * ``column_reinf`` — from ``FRAME SECTION PROPERTIES 02 - CONCRETE COLUMN``:
-              ``{SectionName: {rebar_mat, bar_size_along3, bar_size_along2}}``
+                ``{SectionName: {rebar_mat, bar_size_along3, bar_size_along2}}``
             * ``beam_reinf`` — from ``FRAME SECTION PROPERTIES 03 - CONCRETE BEAM``:
-              ``{SectionName: {rebar_mat, bar_size_top, bar_size_bot}}``
+                ``{SectionName: {rebar_mat, bar_size_top, bar_size_bot}}``
             * ``area_rebar_mat`` — from ``AREA SECTION PROPERTY DESIGN PARAMETERS``:
-              ``{Section: rebar_mat_name_or_None}``
+                ``{Section: rebar_mat_name_or_None}``
             * ``rebar_diameters`` — from ``REBAR SIZES``:
-              ``{RebarID: Diameter}`` (model length units)
+                ``{RebarID: Diameter}`` (model length units)
         """
         # ── REBAR SIZES: RebarID → Diameter (model units) ────────────
         rebar_diameters: dict[str, float] = {}
