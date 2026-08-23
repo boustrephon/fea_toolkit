@@ -227,10 +227,11 @@ class TestShearLimitForce:
         assert v_floor > 1.0e6 * v_at_floor
 
     def test_zero_geometry_guard(self, specimen_kipin):
-        """Degenerate geometry returns 0.0 rather than dividing by zero."""
+        """Degenerate geometry raises ValueError rather than returning 0.0."""
         _, _, _, units = specimen_kipin
         g0 = ElwoodColumnGeometry()  # b = h = d = 0
-        assert elwood_shear_limit_force(0.03, 10.0, g0, units) == 0.0
+        with pytest.raises(ValueError):
+            elwood_shear_limit_force(0.03, 10.0, g0, units)
 
 
 # ═════════════════════════════════════════════════════════════════════

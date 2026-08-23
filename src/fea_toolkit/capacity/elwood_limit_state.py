@@ -305,11 +305,13 @@ def elwood_column_parameters(
         axial_factor: Axial-spring stiffness factor (default 99).
         kdeg_axial_ratio: Axial degrading-slope ratio (default -0.02).
         kdeg_shear: Shear post-failure slope (model F/L); ``None`` -> 0.
-        fres_shear: Residual shear capacity (model force); ``None`` ->
-            ``shear_residual_ratio * G*A_v/L``.
+        fres_shear: Residual shear capacity (model force); ``None`` -> 0.0
+            (matching ``fres_axial``).
         fres_axial: Residual axial capacity (model force); ``None`` -> 0.
-        shear_residual_ratio: Default shear-residual fraction of the elastic
-            shear slope (default 0.20).
+        shear_residual_ratio: Deprecated - no longer used.  The shear
+            residual is supplied explicitly as ``fres_shear`` (defaulting to
+            ``0.0`` when omitted); this fraction is retained only for
+            backward compatibility.
 
     Returns:
         :class:`ElwoodColumnParameters`.
@@ -325,7 +327,7 @@ def elwood_column_parameters(
             concrete, geom, column_length, axial_factor=axial_factor
         )
         kdeg_ax = elwood_axial_deg_slope(concrete, geom, column_length, ratio=kdeg_axial_ratio)
-    fr_sh = fres_shear if fres_shear is not None else shear_residual_ratio * shear_slope
+    fr_sh = fres_shear if fres_shear is not None else 0.0
     return ElwoodColumnParameters(
         geometry=geom,
         fsw=geom.fsw,
@@ -427,6 +429,10 @@ def elwood_shear_limit_force(
     Returns:
         Limiting shear force (model force) at the drift, or a large value
         when ``drift < 0.01``.
+
+    Raises:
+        ValueError: When the column geometry or concrete strength is
+            degenerate (``b``, ``h``, ``d``, or ``f'c`` non-positive).
     """
     if units is None:
         raise ValueError(
@@ -438,7 +444,11 @@ def elwood_shear_limit_force(
     d_in = _to_inch(geometry.d, units)
     fc_psi = _to_psi(geometry.fc, units)
     if b_in <= 0.0 or h_in <= 0.0 or d_in <= 0.0 or fc_psi <= 0.0:
-        return 0.0
+        raise ValueError(
+            "elwood_shear_limit_force requires non-zero column geometry "
+            "(b, h, d) and concrete strength (f'c) - got a degenerate "
+            "section; skip this member rather than emitting a zero limit."
+        )
     if drift < 0.01:
         # No failure below 1% drift — a near-infinite force in model units.
         # Convert the kip-anchored sentinel via the same kip -> model-force
@@ -555,7 +565,7 @@ def three_point_axial_surface(
 
         (x1, y1) = (0, P(0.5% drift) plateau)   -- no failure at low drift
         (x2, y2) = (DR_a(P_gravity), P_gravity) -- the axial-failure point
-        (x3, y3) = (8%, P(8% drift))            -- low-drift residual region
+        (x3, y3) = (8%, P(8% drift))            -- high-drift end of the fit
 
     Args:
         p_gravity: Operating gravity axial load (model force, positive
@@ -590,6 +600,7 @@ def three_point_axial_surface(
     y_high = max(y_high, 2.0 * p_k)
     x_fail = elwood_axial_drift_at_failure(p_k, fsw_k, None, theta_deg=theta_deg)
     x_fail = max(x_fail, low_drift)
+    x_fail = min(x_fail, high_drift - 1e-9)  # keep x2 strictly below x3
     return [(0.0, y_high), (x_fail, p_k), (high_drift, y_low)]
 
 
