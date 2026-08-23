@@ -581,11 +581,20 @@ def three_point_axial_surface(
     Returns:
         List of three ``(drift, force_kips)`` tuples for the OpenSees
         command.
+
+    Raises:
+        ValueError: If ``units`` is ``None``, or if the drift bounds are
+            invalid (``low_drift <= 0`` or ``low_drift >= high_drift``).
     """
     if units is None:
         raise ValueError(
             "three_point_axial_surface requires the model 'units' dict -- the "
             "ThreePoint curve is emitted in kip-in."
+        )
+    if not (0.0 < low_drift < high_drift):
+        raise ValueError(
+            "three_point_axial_surface requires 0 < low_drift < high_drift — "
+            f"got low_drift={low_drift}, high_drift={high_drift}."
         )
     fsw_k = _to_kip(fsw, units)
     p_k = _to_kip(p_gravity, units)
