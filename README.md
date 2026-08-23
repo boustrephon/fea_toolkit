@@ -820,6 +820,12 @@ Run `Developer: Reload Window` in VS Code so Pylance picks up the changes.
 
 ### Nonlinear Dynamic (Time‑History) Analysis
 
+> **Status note (2026-08-23):** `run_nonlinear_dynamic_analysis()` is now
+> implemented via the **Tcl export + Xara/OpenSeesRT** path (see
+> [`docs/nonlinear_dynamic_analysis.md`](docs/nonlinear_dynamic_analysis.md)).
+> The outstanding item is a **Python-native** transient integration (no
+> Tcl/Xara dependency); the building blocks below describe that native path.
+
 A `run_time_history_analysis()` method is needed.  Below are the building blocks required, along with recommendations based on published OpenSees practice.
 
 | Item | Detail | Priority |
@@ -922,14 +928,27 @@ The following items are the highest-impact improvements identified during a code
    1,000+ tests covering the pipeline, pushover, CSM, capacity, storey
    response, meshing, and the extracted modules.
 
-### Remaining consolidation (Phase B)
+### Remaining consolidation (pending)
 
-- **Force-diagram unification** — combine `plot_rs_force_diagram()`,
-  `plot_force_diagram_3d()` and `plot_npz_force_diagram()` into a single
-  unit-aware entry point (detailed design →
-  `docs/force_diagram_unification.md`).
+The **priority-ordered pending-work register** lives in
+[`docs/_pending_work.md`](docs/_pending_work.md) ("PENDING — active"), with
+detailed designs in `docs/force_diagram_unification.md` and the deprecation
+plan.  In summary:
+
+- **Phase B — force-diagram unification** — combine `plot_rs_force_diagram()`,
+  `plot_force_diagram_3d()`, `plot_npz_force_diagram()` and
+  `plot_npz_moment_3d()` into a single unit-aware entry point (detailed
+  design → `docs/force_diagram_unification.md`).  **Prerequisite** for the
+  `viz.py` split.
 - **Split the large modules** — `opensees/analysis_builder.py` (~7.4k
   lines), `plotting/viz.py` (~5.7k), `model/geometry.py` (~3.9k).
+- **Pushover solver tuning (empirical pass)** + **CSM Gap-4 benchmark
+  validation** + **shear-failure / post-peak modelling** — see
+  `docs/deprecation_plan.md` §5–6 and the Tier-2 items in
+  `docs/_pending_work.md`.
+- **Section fiber patches** (`Channel`/`Angle`/`DoubleAngle`/`Tee`/`SD`/
+  `Encased`) and **Python-native nonlinear dynamic integration** — see the
+  Tier-3 items in `docs/_pending_work.md`.
 ### Completed
 
 - ✅ **Deleted stale files**: `src/fea_toolkit/opensees/builder_ss.py` and `src/fea_toolkit/model/geometry_ss.py` — old versions, never imported anywhere.
