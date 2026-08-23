@@ -3467,7 +3467,15 @@ class AnalysisBuilder:
                 tie_legs=kwargs.get("tie_legs", 2),
                 core_depth=kwargs.get("core_depth"),
             )
-            v_ref = elwood_shear_limit_force(0.01, p_g, geom, units)
+            try:
+                v_ref = elwood_shear_limit_force(0.01, p_g, geom, units)
+            except ValueError as exc:
+                logger.warning(
+                    "limit-state: degenerate geometry for '%s' - skipped (%s)",
+                    eid,
+                    exc,
+                )
+                continue
             kwargs.setdefault("kdeg_shear", self._default_limit_state_shear_kdeg(sec, concrete, L))
             # Post-failure shear residual as a fraction of the 1%-drift shear
             # capacity V(0.01) (Elwood's Vr ~ 10 % of the peak).  The config key

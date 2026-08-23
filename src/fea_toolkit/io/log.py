@@ -443,6 +443,10 @@ class AnalysisLog:
             }
         )
 
+    def warning(self, step: str, msg: str) -> None:
+        """Record a warning (alias of :meth:`warn` for ``generate_report()``)."""
+        self.warn(step, msg)
+
     def error(self, step: str, msg: str) -> None:
         """Record an error (analysis step failed or was skipped)."""
         self._entries.append(
