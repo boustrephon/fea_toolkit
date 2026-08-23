@@ -1,6 +1,6 @@
 ---
 title: "Force-Diagram Unification (Phase B)"
-description: "Detailed design for unifying the three force-diagram plotting entry points into one unit-aware API."
+description: "Detailed design for unifying the four force-diagram plotting entry points into one unit-aware API."
 status: "draft"
 tags: [planning, refactor, plotting, phase-b]
 category: [planning]
@@ -12,7 +12,7 @@ category: [planning]
 
 ## Goal
 
-Replace the three overlapping force-diagram entry points with **one unified,
+Replace the four overlapping force-diagram entry points with **one unified,
 unit-aware** function that covers every input the toolkit already supports
 (`AnalysisBuilder`, in-memory result dicts including RS `element_results`,
 and NPZ paths) and dispatches 2D-vs-3D and static-vs-CQC-RS from the input
@@ -104,8 +104,9 @@ def plot_force_diagram(
 
 Dispatch rules:
 
-- `kind` is inferred when `None`: `"rs"` if `force_data` has `z_mid` or the
-  source is an RS results dict; `"static"` otherwise.
+- `kind` is inferred when `None`: `"rs"` if `force_data` is a full RS
+  results dict or a list of per-element RS records (any element carries
+  the `z_mid` marker); `"static"` otherwise.
 - `dimension` is inferred when `None`: `"3d"` if PyVista is available and
   geometry is present; `"2d"` (matplotlib) otherwise.  Callers may pin it.
 - `quantity` accepts both the RS key style (`'My_i'`, `'Vz_i'`) and the
@@ -132,8 +133,9 @@ Dispatch rules:
   `extract_element_rs_forces()` dict give the same figure.
 - **Unit propagation**: NPZ metadata `kN`/`m` vs `N`/`mm` produce the
   correct axis labels; explicit `force_unit` overrides metadata.
-- **Dispatcher**: static vs RS classification, 2D vs 3D selection, and
-  manual overrides behave as specified.
+- **Dispatcher**: static vs RS classification (covering both the RS
+  `element_results` list form and the full `extract_element_rs_forces()`
+  dict form), 2D vs 3D selection, and manual overrides behave as specified.
 - **Wrappers**: each legacy name still passes its current call patterns.
 
 ## Milestones
