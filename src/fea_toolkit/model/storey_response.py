@@ -900,6 +900,7 @@ def compute_linear_storey_responses(
     T_spec,
     Sa_spec,
     n_modes=12,
+    damping: float = 0.05,
     rigid_body_fit_threshold: float = 0.05,
 ) -> dict[str, pd.DataFrame]:
     """Compute storey-level displacements, drifts, shears, and moments.
@@ -907,6 +908,11 @@ def compute_linear_storey_responses(
     See :func:`pumphouse_report.compute_linear_storey_responses` for
     full documentation — the logic is identical but uses the shared
     *mesh_model* instead of creating new builders per case.
+
+    Args:
+        damping: Damping ratio used for the storey response-spectrum
+            displacement combination (CQC).  Kept consistent with the
+            primary RS analysis damping via ``generate_report()``.
     """
     config = {"element_type": "elasticBeamColumn", "verbose": False}
     modal = modal_result["modal"]
@@ -1041,7 +1047,7 @@ def compute_linear_storey_responses(
                     eigenvalues=eigenvalues,
                     spectrum_func=_spectrum_func,
                     direction=rs_dir,
-                    damping_ratio=0.05,
+                    damping_ratio=damping,
                 )
                 if rs_disp:
                     assign = assign_nodes_to_storeys(md, stories, 0.5)
