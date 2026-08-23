@@ -170,9 +170,10 @@ def run_rc_pushover_tcl(
         mesh_model: Frozen topology from the Preprocessor.
         modal_data: Modal result dict (a bare value is tolerated and
             wrapped in ``{"modal": ...}``).
-        config: Merged RC config — user overrides over
+        config: Optional RC config overrides — merged over
             ``_PUSHOVER_RC_DEFAULTS`` with ``create_fiber_sections``
             forced on (see :func:`~fea_toolkit.analysis.pushover._build_rc_config`).
+            ``None`` resolves the defaults unchanged, matching the dispatcher.
         lateral_load_type: One of ``'uniform'``, ``'triangular'``,
             ``'mode1'`` (default).
         max_disp_val: Maximum control displacement (model units).
@@ -214,11 +215,14 @@ def run_rc_pushover_tcl(
     # Gravity loads — use MeshModel's computed mass when available
     gravity_loads = _build_gravity_loads(mm)
 
-    # RC config — already resolved by the dispatcher
-    # (``_build_rc_config`` merges ``_PUSHOVER_RC_DEFAULTS`` over user
-    # overrides and forces ``create_fiber_sections=True``).  Passed through
-    # unchanged so the resolved values reach the Tcl exporter/runner.
-    rc_config = config or {}
+    # Resolve the RC config here (not only in the dispatcher) so direct calls
+    # with config=None still get ``_PUSHOVER_RC_DEFAULTS`` merged in with
+    # ``create_fiber_sections=True`` forced on.  Idempotent when the dispatcher
+    # already passed a resolved config — ``_build_rc_config`` simply re-merges
+    # it over the same defaults.
+    from fea_toolkit.analysis.pushover import _build_rc_config
+
+    rc_config = _build_rc_config(config)
 
     output_prefix = "pushover_rc"
 
