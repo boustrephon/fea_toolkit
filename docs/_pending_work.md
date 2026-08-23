@@ -9,28 +9,76 @@ category: [planning]
 
 ## PENDING (active — not yet done)
 
-### Phase B — force-diagram unification
-Detailed design → `docs/force_diagram_unification.md`.
-- Unify `plot_rs_force_diagram()`, `plot_force_diagram_3d()`,
-  `plot_npz_force_diagram()`, `plot_npz_moment_3d()` into one unit-aware
-  `plot_force_diagram()` covering all inputs (AnalysisBuilder, in-memory
-  result dicts incl. RS `element_results`, NPZ paths), dispatching 2D vs 3D
-  and static vs CQC-RS from the input shape.
-- Legacy names become thin wrappers, removed after one release cycle.
-- Do this *before* splitting `plotting/viz.py` so the split works on the
-  smaller post-unification module.
+> Priority-ordered register (maintained 2026-08-23).  Every pending item
+> below is cross-referenced to its source document.  **Sequencing notes:**
+> Tier 1 is gated — P1 (force-diagram unification) must land *before* the
+> P2 `viz.py` split.  The Tier 2 physics items cluster around the Vecchio &
+> Emara benchmark — P3/P4 are blocked on that benchmark being final.  Tiers
+> 3–4 are independent feature gaps and deferred housekeeping.
 
-### Large-file splits (suggested order: viz → geometry → analysis_builder)
-- `plotting/viz.py` (~5.7k lines) — PyVista viewers.  Proposed split (after
-  Phase B lands):
+### Tier 1 — Active refactors (sequenced, design ready)
+
+#### P1 — Force-diagram unification (Phase B) — top priority
+Detailed design → `docs/force_diagram_unification.md`.
+
+**What.** Unify `plot_rs_force_diagram()`, `plot_force_diagram_3d()`,
+`plot_npz_force_diagram()`, `plot_npz_moment_3d()` (all currently in
+`plotting/viz.py`) into a single unit-aware `plot_force_diagram()` covering
+every input the toolkit already supports — `AnalysisBuilder`, in-memory
+result dicts (incl. RS `element_results`), and NPZ paths — and dispatching
+**2D vs 3D** and **static vs CQC-RS** from the input shape, so callers never
+have to pick the "right" function or know the backend in advance.
+
+**Why now.** The four entry points duplicate input resolution and unit
+handling: two hardcode `kN`/`m` defaults while the NPZ path reads units from
+metadata and the Builder path surfaces none.  The unification is also the
+**prerequisite for the P2 `viz.py` split** — the split then operates on the
+smaller post-unification module.
+
+**Outline steps.**
+1. Add `plotting/force_diagram.py` with the canonical intermediate
+   `ForceDiagramData` dataclass (`nodes`, `elements`, `series`, `quantity`,
+   `force_unit`, `length_unit`, `kind`) and the `_resolve_source()` input
+   normaliser.  Rewire `plot_npz_force_diagram` + `plot_npz_moment_3d`
+   through it (NPZ-only slice, reusing `_load_npz_for_plotting()`).
+2. Add Builder/dict resolvers (reusing `_resolve_mesh_data()`); rewire
+   `plot_force_diagram_3d` + `plot_rs_force_diagram` through the same layer.
+3. Land the unified `plot_force_diagram()` — infer `kind` (`"rs"` when any
+   element record carries the `z_mid` marker) and `dimension` (PyVista
+   available + geometry present → 3D, else 2D) unless pinned; normalise
+   `quantity` key styles (`'My_i'`/`'My'`).  Convert the four legacy names
+   to thin wrappers.
+4. Next release cycle: remove the wrappers in a single cleanup PR (same
+   pattern as the deprecation-removal Phase 3 PR).
+
+**Test plan.** Table-driven input equivalence (same model via Builder,
+in-memory dict, NPZ path → identical series data); RS list-vs-dict
+equivalence (`element_results` list vs full `extract_element_rs_forces()`
+dict); unit propagation (`kN`/`m` vs `N`/`mm` axis labels; explicit
+`force_unit` overrides metadata); dispatcher classification (static vs RS,
+2D vs 3D, manual overrides); each wrapper keeps passing its current call
+patterns.
+
+**Constraints.** Never hardcode `kN`/`m` — units always derive from
+builder/model units → in-memory dict `"units"` key → NPZ metadata.  The 2D
+matplotlib path must never import PyVista.  Do **not** change the NPZ schema
+(`io/results_schema.py`).  RS `element_results` key names (`z_mid`,
+quantity suffixes) are a de-facto contract — document them as such.
+
+#### P2 — Large-file splits (suggested order: viz → geometry → analysis_builder)
+**Gated on P1** — the `viz.py` split runs only after Phase B lands.
+
+**Split map.**
+- `plotting/viz.py` (~5.7k lines, PyVista viewers):
   - `viz.py` — model / deflected-shape viewers, section viewers.
-  - `viz_forces.py` — force diagrams (the Phase B family).
+  - `viz_forces.py` — the Phase B force-diagram family.
   - `viz_modal.py` — mode shapes, animations (`plot_mode_animation`).
   - `viz_mesh.py` — mesh-quality views if distinct from model viewers.
-- `model/geometry.py` (~3.9k) — split into `geometry.py` (core vector/line
-  math), `geometry_sections.py` (section geometric properties: area,
-  inertia, torsion constants), `geometry_mesh.py` (meshing/refinement
-  helpers).
+- `model/geometry.py` (~3.9k):
+  - `geometry.py` — core vector/line math.
+  - `geometry_sections.py` — section geometric properties (area, inertia,
+    torsion constants).
+  - `geometry_mesh.py` — meshing/refinement helpers.
 - `opensees/analysis_builder.py` (~7.4k, last) — keep the class as the
   public facade; extract private helper modules:
   - `_sections.py` — frame/shell/fiber section creation.
@@ -38,15 +86,189 @@ Detailed design → `docs/force_diagram_unification.md`.
     `PlaneStressUserMaterial` pair).
   - `_elements.py` — frame/wall/shell element creation.
   - `_runners.py` — per-analysis-type runners (modal, RS, pushover, ND).
-- Each split keeps `__all__` + re-exports stable; no public-name churn.
 
-### Tcl-exporter merge — deferred
-- `export_model_to_tcl()` (`opensees/builder.py`, SAPModelData-based) vs
-  `export_mesh_model_to_tcl()` (`opensees/recorder.py`, MeshModel-aware).
-  **Verification (2026-08-21):** independent implementations, no trivial
-  delegation.  If merged: one `isinstance` dispatcher + deduplicated shared
-  preamble/recorder emission.  Cross-refs added; larger dedicated refactor,
-  deferred.
+**Outline steps.** 1) Pure move-refactor, no signature changes; 2) keep
+`__all__` + re-exports stable in the original module (no public-name churn);
+3) run the full suite (~1,000 tests) after each individual split; 4) update
+`typings/` only if a new module introduces new `ops.*` calls; 5) each split
+lands as its own commit/PR for reviewability.
+
+**Constraints.** Behaviour-preserving moves only; per-split green suite;
+no new dependencies.
+
+### Tier 2 — Correctness / physics follow-ups
+
+#### P3 — Pushover solver tuning — empirical pass (🟡 high priority)
+Source: `docs/deprecation_plan.md` §5; implemented contract documented in
+`docs/pushover_analysis.md`.
+
+**What.** The pushover solver contract is implemented — primary
+`NormDispIncr 1e-4 / 20 / Newton`; per-step fallback to `NormUnbalance` +
+`ModifiedNewton -initial` with a runtime-scaled relaxed tolerance (derived
+from characteristic weight × g via `g_from_units`, ≈2e-4 for kN-m
+full-building models) and 1000 iterations; automatic
+`gravity_num_substeps = 10` for LayeredShell models; the
+`RC_PUSHOVER_SOLVER_DEFAULTS` preset.  The remaining work is **empirical
+calibration** against the benchmark + regression-proofing.
+
+**Outline steps.**
+1. Re-confirm the documented flow end-to-end (measures 1–5 in the source):
+   primary test settings, per-step fallback + restore, LayeredShell gravity
+   ramping, RC preset wiring.
+2. Guard against the stale `1e-12` fallback tolerance re-appearing anywhere
+   in the pushover path.
+3. Once the Vecchio & Emara benchmark (P5) is running, tune the defaults
+   empirically and record the final values in `docs/deprecation_plan.md` and
+   `docs/pushover_analysis.md`.
+
+**Validation.** Existing pushover tests (RC, steel, LayeredShell) stay green;
+the tuned values are recorded alongside the benchmark results.
+
+#### P4 — CSM bilinearisation — real-benchmark (Gap 4) validation
+Source: `docs/deprecation_plan.md` §6; `docs/csm_bilinearization.md` §4.
+
+**What.** `bilinearize_rc()` (De Luca 10 %-secant rule, `elastic_fraction`
+0.10) is implemented and synthetic-validated
+(`test_de_luca_rc_curve_yield_not_at_cracking`).  The one open item:
+validate the fitted yield point against a **real RC pushover curve** from
+the Gap 4 (Vecchio & Emara) benchmark — the yield point should sit near the
+rebar-yield drift (~0.5–1 % roof drift), not the premature cracking
+transition.
+
+**Outline steps.**
+1. Run the Gap 4 RC frame pushover (see `docs/vecchio_emara_benchmark.md`).
+2. Apply `bilinearize_rc()` to the capacity curve; assert the fitted yield
+   lands in the rebar-yield band with an exact equal-area fit.
+3. Record the outcome in `docs/csm_bilinearization.md`.
+
+**Validation.** New regression test against the benchmark curve, or a
+strengthened assertion in
+`tests/test_workflows.py::test_compute_performance_point`.
+
+#### P5 — Shear-failure / post-peak modelling (Vecchio & Emara follow-up)
+Source: 2026-08-16 rigid-end-zone batch (DONE, below);
+`docs/vecchio_emara_benchmark.md`; `docs/shear_failure_modelling.md`.
+
+**What.** The flexure-only forceBeamColumn + rigid-end-zone model lands
+inside the ±10–15 % acceptance band (peak ≈ 353 kN = 1.07 × experimental;
+secant @ 50 mm ≈ 6.3 kN/mm = 1.03 ×) but **plateaus ≈ 290 kN while the
+experiment softens after ≈ 50 mm**.  Reproduce the experimental *post-peak
+descent* with nonlinear cracked-shear degradation and/or bond-slip springs.
+The Vecchio & Balopoulou (1990) cut-back-top-reinforcement variant is
+deferred together with this follow-up.
+
+**Outline steps.**
+1. Investigate a nonlinear cracked-shear law for `SectionAggregator`
+   (currently an elastic `GA_v` term) and/or zero-length bond-slip springs
+   at member ends.
+2. Re-run the V&E benchmark and the V&B (1990) variant; target the
+   experimental post-peak softening branch.
+3. Update `docs/shear_failure_modelling.md` + the benchmark doc with the
+   adopted model and results.
+
+**Validation.** Extend the rigid-end-zone acceptance-band tests with a
+post-peak-descent assertion (or a dedicated benchmark test).
+
+### Tier 3 — Feature gaps (placeholders / partial)
+
+#### P6 — Section fiber patches (placeholders) + RC partial
+Source: `README.md` §5 "Section Types and Properties" table.
+
+**What.** `to_fiber_patches()` is `🚧 Placeholder` for `ChannelSection`,
+`AngleSection`, `DoubleAngleSection`, `TeeSection`, `SDSection` (needs
+polygon meshing), and `EncasedSection` (embedded section + concrete
+encasement).  "Frame Member Types (RC)" is `⚠️ Partial` in the README —
+materials, RC section shapes, rebar auto-placement and Mander confinement
+are wired; the remaining gaps are these shape patches plus benchmark
+validation (see P3–P5).
+
+**Outline steps.**
+1. Channel / Angle / DoubleAngle / Tee: decompose into `patch('rect')`
+   sub-regions mirroring the existing `ISection` (3-rect) / `BoxSection`
+   (4-rect) / `PipeSection` (annular `circ`) pattern.
+2. `SDSection`: mesh the multi-material `polygons` into fibre patches
+   (arbitrary-polygon meshing).
+3. `EncasedSection`: emit the embedded steel-section patches + concrete
+   encasement patches.
+4. Add per-section `to_fiber_patches()` tests (total area ≈ section `A`,
+   first-moment checks); update the README table status from 🚧 → ✅.
+
+**Constraints.** Section geometric properties stay as-authored (from the
+S2K text); patches must integrate with both `AnalysisBuilder` fiber sections
+and Tcl export (`export_model_to_tcl`).
+
+#### P7 — Python-native nonlinear dynamic (time-history) integration
+Source: `docs/nonlinear_dynamic_analysis.md` (frontmatter + Notes);
+`README.md` "TODO / Future Work".
+
+**What.** `run_nonlinear_dynamic_analysis()` is complete **via the Tcl
+export + Xara/OpenSeesRT path**.  A **Python-native** transient integration
+(no Tcl/Xara dependency) remains planned: `Newmark` (γ=0.5, β=0.25) or
+`HHT` (α=−0.1) integrator, Rayleigh damping from the preceding modal result,
+`Path` time-series + `UniformExcitation` for base excitation,
+`loadConst('-time', 0.0)` gravity hand-off, Node/Element recorders.
+
+**Outline steps.**
+1. Add a native transient runner alongside the Tcl path with the same public
+   API and result keys (`times`, `displacements`, `envelope`,
+   `peak_displacement`, `converged_steps`).
+2. Brace materials per README recommendation: `Hysteretic` + `Fatigue`
+   (`brace_fatigue=True`) for the truss approach; `Steel02` + `Fatigue` if
+   the Approach A subdivision ever resolves.
+3. Solver fallbacks for dynamics: `KrylovNewton`/`NewtonLineSearch`,
+   test tolerance 1e-4–1e-5.
+
+**Validation.** Ground-motion smoke test on `make_rc_frame_3d()` /
+`make_sample_model()`; compare `peak_displacement` + envelope against the
+Tcl/Xara path on the same record; cover the runner-failure metadata path
+(`converged_steps=0` + `metadata["error"]`).
+
+### Tier 4 — Deferred / low-priority
+
+#### P8 — Tcl-exporter merge (deferred)
+`export_model_to_tcl()` (`opensees/builder.py`, SAPModelData-based) vs
+`export_mesh_model_to_tcl()` (`opensees/recorder.py`, MeshModel-aware).
+**Verification (2026-08-21):** independent implementations, no trivial
+delegation.  If merged: one `isinstance` dispatcher + deduplicated shared
+preamble/recorder emission.  Larger dedicated refactor — intentionally
+deferred; keep the cross-references between `docs/tcl_export.md` and the
+recorder doc current in the meantime.
+
+#### P9 — Linting Phase 3 triage
+Source: `docs/linting_fix_plan.md` (status update 2026-08-21).
+
+**What.** Phase 1 real bugs are fixed; the remaining ~219 errors / 109
+warnings are overwhelmingly Phase 3 typing noise (pandas/pyvista overloads,
+`Optional`-access) — the benign categories in `.clinerules` §11.  The
+Phase 2 `pyrightconfig.json` was never committed.
+
+**Outline steps.** 1) Optionally commit `pyrightconfig.json` (exclude
+Rhino host-only modules; relax `reportOptional*` rules); 2) fresh per-file
+triage of the Phase 3 count, starting with the top-3 files by error count
+(`model/geometry.py` → `plotting/viz.py` → `opensees/analysis_builder.py`);
+3) prefer a project-wide `pd.Series.to_numpy()` convention over scattered
+casts (§11.2).
+
+#### P10 — Pushover fiber-level output (Phase 5, future/deferred)
+Source: `docs/pushover_results_storage_viz.md` §Phase 5.
+
+**What.** Per-element, per-integration-point, per-step fiber stress/strain
+output via `pushover_record_fiber: True` (requires an explicit
+`pushover_record_selection`).  Deferred until the envelope/step-recorder
+layers (Phases 1–4) are stable.
+
+#### P11 — Misc documented follow-ups
+- **`compute_hinge_length()` signature** — align to the unit-aware
+  `(section, concrete, steel, units, ...)` form; currently keeps the
+  model-data-coupled `(md, sec_name, elem_length)` signature for
+  behaviour-preserving migration.  Source: `docs/capacity.md`.
+- **PSUMAT / CSMM smeared-plane-stress shell concretes** — package support
+  (`PlaneStressUserMaterial` + `PlateFromPlaneStress` fields in
+  `sap_data.py`, dispatch in `_create_nd_materials()`, `to_tcl()` emission)
+  is in place and activates on a non-restricted OpenSees build; the shipped
+  wheel's PSUMAT is a stub ("PSUMAT - NOT DEFINED IN THIS VERSION, SOURCE
+  CODE RESTRICTED") and CSMM construction still fails.  Blocked on a full
+  (non-restricted) build — see `docs/shell_support.md` Options C/D1.
 
 ## DONE (2026-08-21 — analysis-manager simplification)
 
