@@ -7,6 +7,7 @@ import openseespy.opensees as ops
 
 from ..utils import (
     DEFAULT_E_S_PA,
+    DEFAULT_FSAM_CONC_FT_PA,
     DEFAULT_FY_REBAR_PA,
     RC_NO_TIE_CONFINEMENT_FACTOR,
     RC_NO_TIE_EPSC_FACTOR,
@@ -203,7 +204,13 @@ class SectionMixin:
                     Fc = getattr(mat, "Fc", 0.0) or 3.0e7
                     epsc = getattr(mat, "eFc", 0.0) or 0.002
                     # Unconfined cover concrete
-                    ops.uniaxialMaterial("Concrete01", mat_tag, -Fc, -abs(epsc), -0.2 * Fc, -0.006)
+                    self._emit_fiber_concrete(
+                        mat_tag,
+                        Fc,
+                        epsc,
+                        float(self.config.get("core_residual_factor", 0.2)) * Fc,
+                        0.006,
+                    )
                     # Confined core concrete — use Mander confinement when
                     # tie data is present on the section, else fall back
                     # to the conventional no-tie-data heuristic defined by
@@ -247,8 +254,12 @@ class SectionMixin:
                     # below epsc_core still yields a valid curve.
                     _ecu_max = float(self.config.get("confined_ecu_max", 0.025))
                     ecu_core = max(min(ecu_core, _ecu_max), epsc_core)
-                    ops.uniaxialMaterial(
-                        "Concrete01", mat_tag + 1, -Fc_core, -epsc_core, -0.2 * Fc_core, -ecu_core
+                    self._emit_fiber_concrete(
+                        mat_tag + 1,
+                        Fc_core,
+                        epsc_core,
+                        float(self.config.get("core_residual_factor", 0.2)) * Fc_core,
+                        ecu_core,
                     )
                     # Steel rebar — resolve Fy/Es in priority order:
                     #   1) config override (SI Pa, scaled to model units)
@@ -393,6 +404,54 @@ class SectionMixin:
             ops.section(
                 "Elastic", tag, E_mod, _A * amod, _I33 * i33mod, _I22 * i22mod, G_mod, _J * jmod
             )
+
+    def _emit_fiber_concrete(
+        self, tag: int, Fc: float, epsc0: float, fpcu: float, epsU: float
+    ) -> None:
+        """Emit the fiber concrete law — ``Concrete01`` (default) or ``Concrete02``.
+
+        Both laws share the Kent–Scott–Park compression backbone: peak
+        ``Fc`` at ``epsc0``, descending to ``fpcu`` at ``epsU``.
+        ``Concrete01`` has no tension and stays **flat** at ``fpcu`` past
+        ``epsU``; ``Concrete02`` adds a genuinely descending post-crushing
+        branch plus linear tension softening (``ft`` / ``Ets``), letting a
+        flexure-critical frame shed strength after the peak instead of
+        rising monotonically to the push end.
+
+        Config:
+            * ``concrete_material`` — ``"Concrete01"`` (default) or
+              ``"Concrete02"``.
+            * ``core_residual_factor`` — ``fpcu`` as a fraction of ``Fc``
+              (default 0.2, matching the classic 0.2·f'c residual).
+              Lowering it makes the concrete shed compressive stress as it
+              crushes — the "core-residual reduction" lever that produces
+              the post-peak descent.
+            * ``concrete02_lambda`` — post-peak unloading slope ratio.
+            * ``concrete02_ft_override`` / ``concrete02_Ets_override`` —
+              Concrete02 tension branch, authored in SI (Pa) and scaled to
+              model units.  ``None`` → ``ft`` = :data:`DEFAULT_FSAM_CONC_FT_PA`
+              (3 MPa) and ``Ets`` = ``ft / 0.001``.
+
+        Args:
+            tag: OpenSees material tag.
+            Fc: Compressive peak strength, model units (positive).
+            epsc0: Strain at peak (positive magnitude).
+            fpcu: Crushing (residual) stress, model units (positive).
+            epsU: Ultimate/crushing strain (positive magnitude).
+        """
+        law = self.config.get("concrete_material", "Concrete01")
+        if law == "Concrete02":
+            lam = float(self.config.get("concrete02_lambda", 0.1))
+            ssf = stress_scale_factor(self.mesh_model.units)
+            ft = self.config.get("concrete02_ft_override")
+            ft = DEFAULT_FSAM_CONC_FT_PA * ssf if ft is None else float(ft) * ssf
+            ets = self.config.get("concrete02_Ets_override")
+            ets = ft / 0.001 if ets is None else float(ets) * ssf
+            ops.uniaxialMaterial(
+                "Concrete02", tag, -Fc, -abs(epsc0), -fpcu, -abs(epsU), lam, ft, ets
+            )
+        else:
+            ops.uniaxialMaterial("Concrete01", tag, -Fc, -abs(epsc0), -fpcu, -abs(epsU))
 
     def _wrap_fiber_section_with_shear(
         self, agg_tag: int, fiber_tag: int, G_mod: float, A: float, sec=None
