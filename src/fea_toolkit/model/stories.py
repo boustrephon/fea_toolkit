@@ -579,13 +579,18 @@ def plot_stories(
         logging.getLogger(__name__).warning("Could not build visualisation model: %s", exc)
         return None
     finally:
+        # Restore OFF_SCREEN first so a cleanup-import failure cannot
+        # leave the caller's PyVista state mutated.
+        pv.OFF_SCREEN = _prev_off_screen
         # Function-local import — the model subpackage stays OpenSees-free
         # at module level; plot_stories() builds an OpenSees domain via
         # AnalysisBuilder, so openseespy is required at call time only.
-        import openseespy.opensees as ops
-
-        ops.wipe()
-        pv.OFF_SCREEN = _prev_off_screen
+        try:
+            import openseespy.opensees as ops
+        except ImportError:
+            ops = None
+        if ops is not None:
+            ops.wipe()
 
     pl = plot_mesh(b, notebook=True, window_size=window_size)
     if pl is None:
