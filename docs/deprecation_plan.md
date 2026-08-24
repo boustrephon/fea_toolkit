@@ -40,15 +40,14 @@ All items in the inventory below have been actioned:
 - **CI** — `mkdocs build --strict` is restored as the gate in
   `.github/workflows/docs.yml`.
 
-## Phase B — future consolidation (recorded, not yet done)
+## Phase B — force-diagram unification (implemented 2026-08-24)
 
-> **Moved to `docs/_pending_work.md` (PENDING section, 2026-08-21)** so it
-> stays visible as active work rather than being buried in this complete doc.
-> A **detailed design** now lives in `docs/force_diagram_unification.md`.
+> Design and status → `docs/force_diagram_unification.md`; tracked in
+> `docs/_pending_work.md` (P1, DONE).
 
-Combine `plot_rs_force_diagram()`, `plot_force_diagram_3d()` and
-`plot_npz_force_diagram()` into a **single unified, unit-aware** force-diagram
-entry point that:
+Combined `plot_rs_force_diagram()`, `plot_force_diagram_3d()`,
+`plot_npz_force_diagram()` and `plot_npz_moment_3d()` into a **single
+unified, unit-aware** `plot_force_diagram()` entry point that:
 
 1. Covers **all inputs** — `AnalysisBuilder`, in-memory result dicts
    (including RS `element_results`), and NPZ paths.
@@ -56,11 +55,10 @@ entry point that:
    than hardcoding `kN`/`m`.
 3. **Dispatches 2D vs 3D** and **static vs CQC-RS** from the input shape.
 
-Naming decision deferred: either reuse `plot_force_diagram` as the unified
-dispatcher, or keep `plot_force_diagram_3d` for the 3D path with a 2D
-sibling.  The three functions above remain in place (with
-`plot_rs_force_diagram` as the renamed stopgap) until the unified function
-lands.
+Naming decision: **`plot_force_diagram`** is the unified dispatcher.  The
+four legacy names remain as thin signature-preserving wrappers for one
+release cycle, then are removed in a single cleanup PR (same pattern as the
+Phase 3 removal above).
 
 ## Trigger
 

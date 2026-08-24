@@ -11,62 +11,16 @@ category: [planning]
 
 > Priority-ordered register (maintained 2026-08-24).  Every pending item
 > below is cross-referenced to its source document.  **Sequencing notes:**
-> Tier 1 is gated — P1 (force-diagram unification) must land *before* the
+> Tier 1 — P1 (force-diagram unification) landed 2026-08-24, unblocking the
 > P2 `viz.py` split.  The Tier 2 physics items cluster around the Vecchio &
 > Emara benchmark — P3/P4 are blocked on that benchmark being final.  Tiers
 > 3–4 are independent feature gaps and deferred housekeeping.
 
 ### Tier 1 — Active refactors (sequenced, design ready)
 
-#### P1 — Force-diagram unification (Phase B) — top priority
-Detailed design → `docs/force_diagram_unification.md`.
-
-**What.** Unify `plot_rs_force_diagram()`, `plot_force_diagram_3d()`,
-`plot_npz_force_diagram()`, `plot_npz_moment_3d()` (all currently in
-`plotting/viz.py`) into a single unit-aware `plot_force_diagram()` covering
-every input the toolkit already supports — `AnalysisBuilder`, in-memory
-result dicts (incl. RS `element_results`), and NPZ paths — and dispatching
-**2D vs 3D** and **static vs CQC-RS** from the input shape, so callers never
-have to pick the "right" function or know the backend in advance.
-
-**Why now.** The four entry points duplicate input resolution and unit
-handling: two hardcode `kN`/`m` defaults while the NPZ path reads units from
-metadata and the Builder path surfaces none.  The unification is also the
-**prerequisite for the P2 `viz.py` split** — the split then operates on the
-smaller post-unification module.
-
-**Outline steps.**
-1. Add `plotting/force_diagram.py` with the canonical intermediate
-   `ForceDiagramData` dataclass (`nodes`, `elements`, `series`, `quantity`,
-   `force_unit`, `length_unit`, `kind`) and the `_resolve_source()` input
-   normaliser.  Rewire `plot_npz_force_diagram` + `plot_npz_moment_3d`
-   through it (NPZ-only slice, reusing `_load_npz_for_plotting()`).
-2. Add Builder/dict resolvers (reusing `_resolve_mesh_data()`); rewire
-   `plot_force_diagram_3d` + `plot_rs_force_diagram` through the same layer.
-3. Land the unified `plot_force_diagram()` — infer `kind` (`"rs"` when any
-   element record carries the `z_mid` marker) and `dimension` (PyVista
-   available + geometry present → 3D, else 2D) unless pinned; normalise
-   `quantity` key styles (`'My_i'`/`'My'`).  Convert the four legacy names
-   to thin wrappers.
-4. Next release cycle: remove the wrappers in a single cleanup PR (same
-   pattern as the deprecation-removal Phase 3 PR).
-
-**Test plan.** Table-driven input equivalence (same model via Builder,
-in-memory dict, NPZ path → identical series data); RS list-vs-dict
-equivalence (`element_results` list vs full `extract_element_rs_forces()`
-dict); unit propagation (`kN`/`m` vs `N`/`mm` axis labels; explicit
-`force_unit` overrides metadata); dispatcher classification (static vs RS,
-2D vs 3D, manual overrides); each wrapper keeps passing its current call
-patterns.
-
-**Constraints.** Never hardcode `kN`/`m` — units always derive from
-builder/model units → in-memory dict `"units"` key → NPZ metadata.  The 2D
-matplotlib path must never import PyVista.  Do **not** change the NPZ schema
-(`io/results_schema.py`).  RS `element_results` key names (`z_mid`,
-quantity suffixes) are a de-facto contract — document them as such.
-
 #### P2 — Large-file splits (suggested order: viz → geometry → analysis_builder)
-**Gated on P1** — the `viz.py` split runs only after Phase B lands.
+**Unblocked** — P1 (force-diagram unification, Phase B) landed 2026-08-24; the
+split now operates on the smaller post-unification module.
 
 **Split map.**
 - `plotting/viz.py` (~5.7k lines, PyVista viewers):
@@ -269,6 +223,34 @@ layers (Phases 1–4) are stable.
   wheel's PSUMAT is a stub ("PSUMAT - NOT DEFINED IN THIS VERSION, SOURCE
   CODE RESTRICTED") and CSMM construction still fails.  Blocked on a full
   (non-restricted) build — see `docs/shell_support.md` Options C/D1.
+
+## DONE (2026-08-24 — P1 force-diagram unification, Phase B)
+
+Milestones 1–3 of `docs/force_diagram_unification.md` landed; milestone 4
+(wrapper removal) is deferred to the next release cycle.
+
+- New `plotting/force_diagram.py` (642 lines): `ForceDiagramData` canonical
+  intermediate, `_resolve_source()` input normaliser, unit resolution
+  (explicit args → builder/model units → in-memory `"units"` → NPZ
+  metadata), and the unified `plot_force_diagram()` dispatcher — infers
+  `kind` (`"rs"` via the `z_mid` marker) and 2D-vs-3D from the input shape,
+  with manual overrides; normalises `quantity` key styles (`'My_i'`/`'My'`).
+- Naming decision (resolves `docs/deprecation_plan.md` Phase B):
+  **`plot_force_diagram`** is the unified dispatcher; `plot_force_diagram_3d`,
+  `plot_rs_force_diagram`, `plot_npz_force_diagram`, `plot_npz_moment_3d`
+  are now thin signature-preserving wrappers over it.
+- The hardcoded `kN`/`m` axis fallbacks in the 2D/3D paths are gone — units
+  always derive from the source; the 2D matplotlib path imports no PyVista.
+- Tests: 11 `TestForceDiagramUnified` cases (input equivalence Builder/dict/
+  NPZ, RS list-vs-dict, unit propagation incl. explicit override, dispatcher
+  classification, wrapper call patterns) in `tests/test_plotting.py`.
+- Docs: `docs/force_diagram_unification.md` status → implemented; the NPZ
+  force-array orientation contract (component-keyed arrays vs the
+  element-keyed `extract_static_element_forces()` dict, key-rename table,
+  transpose recipe) documented in the doc + the `plot_force_diagram` module
+  docstring.
+- Validation: full suite `1090 passed, 4 xfailed`; `mkdocs build --strict`
+  green; ruff clean.
 
 ## DONE (2026-08-24 — docs build repair + site restructure)
 
