@@ -1000,6 +1000,20 @@ class TestUnifiedNpzPipeline:
         assert str(data["length_unit"][0]) == "m"
         assert str(data["forces_coordinate_system"][0]) == "local"
 
+        # Explicit force_unit/length_unit overrides take precedence over the
+        # model-derived units and must be reflected consistently in both the
+        # top-level unit arrays and metadata_json.
+        npz_override = str(tmp_path / "test_units_override.npz")
+        write_results(npz_override, model=md, force_unit="MN", length_unit="mm")
+        data2 = read_results_npz(npz_override)
+        assert str(data2["force_unit"][0]) == "MN"
+        assert str(data2["length_unit"][0]) == "mm"
+        import json as _json
+
+        meta2 = _json.loads(str(data2["metadata_json"][0]))
+        assert meta2["force_unit"] == "MN"
+        assert meta2["length_unit"] == "mm"
+
     def test_hdf5_units(self, tmp_path):
         """HDF5 output carries the same canonical unit keys as NPZ."""
         pytest.importorskip("h5py")
