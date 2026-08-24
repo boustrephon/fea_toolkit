@@ -24,8 +24,6 @@ import numpy as np
 if TYPE_CHECKING:
     import pandas as pd
 
-import openseespy.opensees as ops
-
 # ========================================================================
 # StoryLevel dataclass
 # ========================================================================
@@ -581,6 +579,11 @@ def plot_stories(
         logging.getLogger(__name__).warning("Could not build visualisation model: %s", exc)
         return None
     finally:
+        # Function-local import — the model subpackage stays OpenSees-free
+        # at module level; plot_stories() builds an OpenSees domain via
+        # AnalysisBuilder, so openseespy is required at call time only.
+        import openseespy.opensees as ops
+
         ops.wipe()
         pv.OFF_SCREEN = _prev_off_screen
 

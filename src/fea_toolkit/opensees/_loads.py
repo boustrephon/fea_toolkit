@@ -850,3 +850,53 @@ class LoadMixin:
                 )
                 continue
         return applied
+
+
+# ── Standalone load-transform helpers ───────────────────────────────
+
+
+def global_to_local_distributed_load(ele_tag, global_force_vector):
+    """Transform a global distributed load vector into OpenSees local coordinates
+    and applies it to a 3D beam element.
+
+    global_force_vector: list/array [Wx, Wy, Wz] (Force per unit true length)
+
+    Apply to OpenSees 3D beam (Format: wy, wz, wx)
+        ops.eleLoad('-ele', ele_tag, '-type', '-beamUniform', wy, wz, wx)
+    """
+    # 1. Fetch node coordinates for the element
+    node_tags = ops.eleNodes(ele_tag)
+    i_node, j_node = node_tags[0], node_tags[1]
+
+    pos_i = np.array(ops.nodeCoord(i_node))
+    pos_j = np.array(ops.nodeCoord(j_node))
+
+    # 2. Get local X-axis (element vector)
+    element_vector = pos_j - pos_i
+    true_length = np.linalg.norm(element_vector)
+    local_x = element_vector / true_length
+
+    # 3. Retrieve the cross-product vector used in the element's geometric transformation
+    # OpenSees stores geomTransf tags. Here, we fetch the defined local Y/Z or look it up.
+    # Note: If OpenSees 'eleResponse' doesn't support 'yaxis' directly for your element type,
+    # extract the vecxz vector used when you defined the geomTransf.
+    try:
+        local_y = np.array(ops.eleResponse(ele_tag, "yaxis"))
+        local_z = np.array(ops.eleResponse(ele_tag, "zaxis"))
+    except Exception:
+        # Fallback manual calculation if eleResponse isn't available for the element type.
+        # Note: OpenSees beam-column elements (elasticBeamColumn, forceBeamColumn, etc.)
+        # delegate 'yaxis'/'zaxis' to CrdTransf::setResponse, which supports them.
+        # This fallback exists for element types where the delegation may not apply.
+        v = np.array([0.0, 0.0, 1.0]) if abs(local_x[1]) < 0.999 else np.array([1.0, 0.0, 0.0])
+        local_z = np.cross(local_x, v)
+        local_z = local_z / np.linalg.norm(local_z)
+        local_y = np.cross(local_z, local_x)
+
+    # 4. Project global load onto local axes via dot products
+    W = np.array(global_force_vector)
+    wx = np.dot(W, local_x)
+    wy = np.dot(W, local_y)
+    wz = np.dot(W, local_z)
+
+    return wx, wy, wz
