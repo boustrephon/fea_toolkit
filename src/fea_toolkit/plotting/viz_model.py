@@ -614,9 +614,11 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
 def _resolve_frame_node(nodes, fr, side="i"):
     """Resolve a frame endpoint node from resolved mesh data.
 
-    Tries ``ni_id``/``nj_id`` (string key) first, then falls back to
-    searching by ``ni_tag``/``nj_tag`` (integer tag).  Returns the node
-    dict or ``None``.
+    Tries ``ni_id``/``nj_id`` (string key) first, then attempts a direct
+    ``nodes`` lookup by ``ni_tag``/``nj_tag`` (integer tag) for mappings
+    that are dual-keyed by tag (NPZ-derived data).  Returns the directly
+    matched node when available, and retains a linear scan by tag value
+    as a fallback for node mappings without tag keys.
     """
     key_id = f"n{side}_id"
     key_tag = f"n{side}_tag"
@@ -627,6 +629,11 @@ def _resolve_frame_node(nodes, fr, side="i"):
             return nd
     tag = fr.get(key_tag)
     if tag is not None:
+        # Direct hit for dual-keyed mappings (int tag as a dict key).
+        nd = nodes.get(tag)
+        if nd is not None:
+            return nd
+        # Fallback: linear scan for mappings keyed by SAP ID only.
         for nd in nodes.values():
             if nd["tag"] == tag:
                 return nd
