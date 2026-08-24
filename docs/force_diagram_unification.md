@@ -125,6 +125,63 @@ Dispatch rules:
 - After the release, the wrappers are removed in a single cleanup PR (same
   pattern as the deprecation-removal Phase 3 PR).
 
+## NPZ input — force-array orientation
+
+Unified NPZ files store static frame forces as **component-keyed** arrays —
+one array per force component, indexed by frame order:
+
+```python
+static/{case}/fx_i   # shape (n_frame,) — Fx at the I-end
+...
+static/{case}/mz_j   # Mz at the J-end
+```
+
+The in-memory extraction API, `AnalysisBuilder.extract_static_element_forces()`,
+returns the same data **element-keyed** — one dict per element:
+
+```python
+{elem_tag: {"Fx": ..., "Fy": ..., "Mz": ..., "Fx_j": ..., "Mz_j": ...}}
+```
+
+`plot_force_diagram` reads the component-keyed arrays, so a caller writing a
+force-bearing NPZ must **transpose** the element-keyed dict into
+component-keyed arrays before export.
+
+Key mapping:
+
+| `extract_static_element_forces()` key | NPZ array key |
+|---|---|
+| `Fx` … `Mz` (I-end) | `fx_i` … `mz_i` |
+| `Fx_j` … `Mz_j` (J-end) | `fx_j` … `mz_j` |
+
+Transpose example (array order aligned with `mesh_model.frame_elements`):
+
+```python
+results = builder.run_static_analysis(pattern_scales={"DEAD": 1.0})
+elem_forces = builder.extract_static_element_forces()  # element-keyed
+
+force_arrays: dict[str, list[float]] = {}
+for eid, elem in builder.mesh_model.frame_elements.items():
+    if getattr(elem, "inactive", False):
+        continue
+    tag = builder.frame_tag_map.get(eid, elem.elem_tag)
+    fe = elem_forces.get(tag)
+    if fe is None:
+        continue
+    for key, value in fe.items():
+        # I-end ("Fx") -> "fx_i"; J-end ("Fx_j") -> "fx_j"
+        out = key.lower() + ("" if key.endswith("_j") else "_i")
+        force_arrays.setdefault(out, []).append(float(value))
+
+case = dict(results)
+case["element_forces"] = force_arrays
+builder.export_results("results.npz", static_results={"DEAD": case})
+```
+
+Unit metadata: files written after the unit-canonicalisation work carry
+top-level `force_unit` / `length_unit` arrays; older files without them still
+plot but fall back to `"?"` axis labels.
+
 ## Test plan
 
 - **Table-driven input equivalence**: the same model plotted via Builder,
