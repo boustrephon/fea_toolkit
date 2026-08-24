@@ -752,27 +752,37 @@ class ElementMixin:
         for eid, elem in list(elements.items()):
             if elem.inactive:
                 new_elements[eid] = elem
+                if eid in assignments:
+                    new_assignments[eid] = assignments[eid]
                 continue
 
             sec_name = assignments.get(eid) if assignments else None
             if not sec_name or sec_name not in self.section_tags:
                 new_elements[eid] = elem
+                if eid in assignments:
+                    new_assignments[eid] = assignments[eid]
                 continue
 
             ni = self.mesh_model.nodes.get(elem.node_i)
             nj = self.mesh_model.nodes.get(elem.node_j)
             if ni is None or nj is None:
                 new_elements[eid] = elem
+                if eid in assignments:
+                    new_assignments[eid] = assignments[eid]
                 continue
 
             L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
             if L < 1e-12:
                 new_elements[eid] = elem
+                if eid in assignments:
+                    new_assignments[eid] = assignments[eid]
                 continue
 
             sec = self.mesh_model.sections.get(sec_name)
             if sec is None:
                 new_elements[eid] = elem
+                if eid in assignments:
+                    new_assignments[eid] = assignments[eid]
                 continue
 
             # --- Create coincident hinge nodes ---
