@@ -5,6 +5,7 @@ from .diagnostics import (
     plot_disconnected_nodes,
     print_disconnect_report,
 )
+from .force_diagram import plot_force_diagram
 from .interactive_viewer import plot_interactive_viewer
 from .report import plot_storey_forces
 from .viewer import ModelViewer
@@ -44,6 +45,7 @@ __all__ = [
     "plot_capacity_spectrum",
     "plot_deformed_displacement_3d",
     "plot_disconnected_nodes",
+    "plot_force_diagram",
     "plot_force_diagram_3d",
     "plot_frame_force_evolution",
     # Interactive
