@@ -40,8 +40,9 @@ architecture = platform.machine()
 
 print(f"Operating System: {os_name}")
 print(f"Chipset Architecture: {architecture}")
-print(f'FEA Toolkit Version: {__version__}')
-print(f'OpenSees Version: {ops_version()}')
+print(f"FEA Toolkit Version: {__version__}")
+print(f"OpenSees Version: {ops_version()}")
+
 
 def pick_file() -> Path:
     """Open a native file chooser dialog appropriate for the platform."""
@@ -53,20 +54,25 @@ def pick_file() -> Path:
         sys.exit("No file selected.")
     return Path(path)
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Parse a SAP2000 .s2k / .e2k file and optionally run an OpenSees analysis.",
     )
     parser.add_argument(
-        "s2k_file", nargs="?", default=None,
+        "s2k_file",
+        nargs="?",
+        default=None,
         help="Path to the SAP2000 text file (.s2k, .$2k, .e2k).",
     )
     parser.add_argument(
-        "--sample", action="store_true",
+        "--sample",
+        action="store_true",
         help="Use the bundled sample file instead of a file chooser.",
     )
     parser.add_argument(
-        "--no-analysis", action="store_true",
+        "--no-analysis",
+        action="store_true",
         help="Skip the OpenSees analysis step (only parse and enrich).",
     )
     args = parser.parse_args()
@@ -114,12 +120,12 @@ def main():
     print(f"Distributed Loads: {len(model_data.frame_dist_loads)}")
 
     if len(model_data.load_patterns) > 0:
-        print('\nLoad Patterns:')
+        print("\nLoad Patterns:")
         _ = [print(pat) for pat in model_data.load_patterns.keys()]
 
     # Enrich sections if database available
     if section_db_path.exists():
-        section_db = SectionLibrary(section_db_path, target_units=model_data.units['L'])
+        section_db = SectionLibrary(section_db_path, target_units=model_data.units["L"])
         for sec in model_data.sections.values():
             section_db.enrich_section(sec)
             if sec.Z33:
@@ -131,36 +137,40 @@ def main():
 
     # ── Build the OpenSees model (two-stage) ──────────────────────────────
     config = {
-        'element_type': 'elasticBeamColumn',
-        'split_elements': True,
-        'verbose': True,
+        "element_type": "elasticBeamColumn",
+        "split_elements": True,
+        "verbose": True,
     }
     mesh_model = preprocess_model(model_data, config)
     builder = AnalysisBuilder(mesh_model, config)
     builder.build_domain()
 
     # Load totals are always computed after build_domain() — print a summary
-    unit_F = model_data.units.get('F', '?')
-    unit_L = model_data.units.get('L', '?')
+    unit_F = model_data.units.get("F", "?")
+    unit_L = model_data.units.get("L", "?")
     print(f"\n── Applied load totals per pattern ({unit_F}) ──")
     for pname, totals in builder.load_totals.items():
         print(f"  {pname}:")
-        print(f"    Forces:  Fx = {totals['fx']:>12.3f}  Fy = {totals['fy']:>12.3f}  Fz = {totals['fz']:>12.3f}")
-        print(f"    Moments: Mx = {totals['mx']:>12.3f}  My = {totals['my']:>12.3f}  Mz = {totals['mz']:>12.3f}")
+        print(
+            f"    Forces:  Fx = {totals['fx']:>12.3f}  Fy = {totals['fy']:>12.3f}  Fz = {totals['fz']:>12.3f}"
+        )
+        print(
+            f"    Moments: Mx = {totals['mx']:>12.3f}  My = {totals['my']:>12.3f}  Mz = {totals['mz']:>12.3f}"
+        )
 
     # ── Run analysis and compare with reactions ───────────────────────────
     if ANALYSE:
         odb_tag = 0
-        print('\n', 80*'=')
+        print("\n", 80 * "=")
         print(f"── Running OpenSees static analysis (all patterns combined) (ODB tag {odb_tag}) ──")
         results = builder.run_static_analysis(odb_tag=odb_tag, extract_reactions=True)
-        disp = results.get('nodal_displacements', {})
+        disp = results.get("nodal_displacements", {})
 
         # Unit scaling for display
-        if unit_L == 'm':
-            unit_L2, scale = 'mm', 1000.0
-        elif unit_L == 'ft':
-            unit_L2, scale = 'in', 12.0
+        if unit_L == "m":
+            unit_L2, scale = "mm", 1000.0
+        elif unit_L == "ft":
+            unit_L2, scale = "in", 12.0
         else:
             unit_L2, scale = unit_L, 1.0
 
@@ -178,47 +188,56 @@ def main():
             print("  (no displacement data)")
 
         # ── Equilibrium check: applied loads vs reactions ──
-        summed_rx = results.get('summed_reactions')
-        if summed_rx and hasattr(builder, 'load_totals'):
+        summed_rx = results.get("summed_reactions")
+        if summed_rx and hasattr(builder, "load_totals"):
             print(f"\n── Equilibrium check ({unit_F}, {unit_F}·{unit_L}) ──")
             # Sum all applied loads across all patterns
-            total_applied = {'fx': 0.0, 'fy': 0.0, 'fz': 0.0,
-                             'mx': 0.0, 'my': 0.0, 'mz': 0.0}
+            total_applied = {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": 0.0, "my": 0.0, "mz": 0.0}
             for totals in builder.load_totals.values():
                 for k in total_applied:
                     total_applied[k] += totals[k]
 
             print(f"  {'':>15}  {'Fx':>12}  {'Fy':>12}  {'Fz':>12}")
-            print(f"  {'Applied':>15}  {total_applied['fx']:12.3f}  {total_applied['fy']:12.3f}  {total_applied['fz']:12.3f}")
-            print(f"  {'Reactions':>15}  {summed_rx['fx']:12.3f}  {summed_rx['fy']:12.3f}  {summed_rx['fz']:12.3f}")
-            print(f"  {'Difference':>15}  {total_applied['fx'] + summed_rx['fx']:12.3f}"
-                  f"  {total_applied['fy'] + summed_rx['fy']:12.3f}"
-                  f"  {total_applied['fz'] + summed_rx['fz']:12.3f}")
+            print(
+                f"  {'Applied':>15}  {total_applied['fx']:12.3f}  {total_applied['fy']:12.3f}  {total_applied['fz']:12.3f}"
+            )
+            print(
+                f"  {'Reactions':>15}  {summed_rx['fx']:12.3f}  {summed_rx['fy']:12.3f}  {summed_rx['fz']:12.3f}"
+            )
+            print(
+                f"  {'Difference':>15}  {total_applied['fx'] + summed_rx['fx']:12.3f}"
+                f"  {total_applied['fy'] + summed_rx['fy']:12.3f}"
+                f"  {total_applied['fz'] + summed_rx['fz']:12.3f}"
+            )
 
         # ── Per-pattern equilibrium checks ──
-        if hasattr(builder, 'load_totals') and len(builder.load_totals) > 1:
-            print('\n', 80*'=')
+        if hasattr(builder, "load_totals") and len(builder.load_totals) > 1:
+            print("\n", 80 * "=")
             print(f"── Per-pattern equilibrium checks ({unit_F}) ──")
             for pname in builder.load_totals:
-                print('\n', 80*'-')
+                print("\n", 80 * "-")
                 pat_results = builder.run_static_analysis(
                     extract_reactions=True,
                     pattern_scales={pname: 1.0},
                 )
-                pat_rx = pat_results.get('summed_reactions', {})
-                pat_app = pat_results.get('load_totals', {}).get(pname, {})
+                pat_rx = pat_results.get("summed_reactions", {})
+                pat_app = pat_results.get("load_totals", {}).get(pname, {})
                 if pat_rx:
                     print(f"  {pname}:")
-                    print(f"    Applied: Fx={pat_app.get('fx',0):12.3f}  "
-                          f"Fy={pat_app.get('fy',0):12.3f}  "
-                          f"Fz={pat_app.get('fz',0):12.3f}")
-                    print(f"    Reactn:  Fx={pat_rx.get('fx',0):12.3f}  "
-                          f"Fy={pat_rx.get('fy',0):12.3f}  "
-                          f"Fz={pat_rx.get('fz',0):12.3f}")
+                    print(
+                        f"    Applied: Fx={pat_app.get('fx', 0):12.3f}  "
+                        f"Fy={pat_app.get('fy', 0):12.3f}  "
+                        f"Fz={pat_app.get('fz', 0):12.3f}"
+                    )
+                    print(
+                        f"    Reactn:  Fx={pat_rx.get('fx', 0):12.3f}  "
+                        f"Fy={pat_rx.get('fy', 0):12.3f}  "
+                        f"Fz={pat_rx.get('fz', 0):12.3f}"
+                    )
 
         # ── Modal analysis ──
         if model_data.mass_sources:
-            print('\n', 80*'=')
+            print("\n", 80 * "=")
             print("── Modal analysis ──")
             # Rebuild (the static analysis above may have wiped the model)
             builder.build()
@@ -229,6 +248,6 @@ def main():
 
         print("\nDone. See also: examples/modal_rs_analysis.py for response spectrum.")
 
+
 if __name__ == "__main__":
     main()
-

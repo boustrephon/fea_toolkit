@@ -167,9 +167,7 @@ def main():
     tag_map = get_tag_map(docs)
     tag_lines = []
     for tag in sorted(tag_map):
-        linked = ", ".join(
-            f"[{f}]({f})" for f in sorted(tag_map[tag])
-        )
+        linked = ", ".join(f"[{f}]({f})" for f in sorted(tag_map[tag]))
         tag_lines.append(f"- **`{tag}`** — {linked}")
     tag_section = "\n".join(tag_lines)
     footer = FOOTER.replace("{{TAGS_TABLE}}", tag_section)

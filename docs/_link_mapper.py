@@ -71,4 +71,3 @@ def on_page_markdown(markdown: str, *, page, config, files) -> str:
             )
         out.append(line)
     return "\n".join(out)
-

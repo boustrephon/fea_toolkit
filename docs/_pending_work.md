@@ -179,7 +179,8 @@ Rhino host-only modules; relax `reportOptional*` rules); 2) fresh per-file
 triage of the Phase 3 count, starting with the top-3 files by error count
 post-P2-split (the original top-3 `model/geometry.py` → `plotting/viz.py` →
 `opensees/analysis_builder.py` are now 81/136/476-line facades — the errors
-now live in `geometry_core/frames/mesh`, `viz_*`, and `_runners.py`);
+now live in `geometry_core/frames/mesh`, `viz_*`, and the `_runner_*`
+modules);
 3) prefer a project-wide `pd.Series.to_numpy()` convention over scattered
 casts (§11.2).
 
@@ -203,6 +204,32 @@ layers (Phases 1–4) are stable.
   wheel's PSUMAT is a stub ("PSUMAT - NOT DEFINED IN THIS VERSION, SOURCE
   CODE RESTRICTED") and CSMM construction still fails.  Blocked on a full
   (non-restricted) build — see `docs/shell_support.md` Options C/D1.
+
+## DONE (2026-08-24 — review round 2: runner split, solver-test restore, material-key docs)
+
+Second code-review round (remaining findings M1/M3/M4/L1–L6) — commit `4b53a0f`.
+
+- **M4 — `_runners.py` split (2,645 → 27-line facade).**  Runner logic is
+  split into per-analysis-type mixins: `_runner_static.py` (885 lines —
+  static analysis, seismic masses, extraction), `_runner_modal.py` (236),
+  `_runner_rs.py` (505), `_runner_pushover.py` (1,074); `_runners.py` is now
+  a facade combining `RunnerMixin(Static, Modal, Rs, Pushover)`.  All 28
+  methods extracted byte-identically (verified via AST diff; only the M3
+  edit differs).
+- **M3 — pushover honours a configured `solver_test_type`.**  The primary
+  setup and the post-fallback restore in `run_pushover_analysis()` now use
+  `_test_type` (from config, default `NormDispIncr`) instead of hardcoding.
+- **M1 — material key convention documented.**  `scale_material_dict()`
+  docstring now spells out the SI-lowercase key style vs the camelCase
+  `Material` dataclass trap and the SI(Pa)→model-units value convention.
+- **L1 — `_mass_g` initialised to `None`** (was hardcoded `9.81`; overwritten
+  by `compute_seismic_masses()` via `g_from_units`).
+- **L2 — stale README typings prose removed** (Approach A section).
+- **L3 — `readme = "README.md"` restored** in `pyproject.toml`.
+- **L4 — nested `src/fea_toolkit/fea_toolkit.egg-info` removed.**
+- **L5 — `examples/`, `docs/_*.py`, `docs/references/` ruff-formatted.**
+- **L6 — empty `tests/data/` directory removed.**
+- Validation: full suite `1096 passed, 4 xfailed`; ruff clean; mkdocs strict green.
 
 ## DONE (2026-08-24 — review-driven fixes: ground-motion units, model-layer ops)
 
