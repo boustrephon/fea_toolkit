@@ -50,6 +50,7 @@ except ImportError as exc:
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
+
 def _wipe_model():
     """Wipe OpenSees model state, ignoring errors if none exists."""
     try:
@@ -70,68 +71,69 @@ def check(seq: int, name: str, ok: bool, detail: str = ""):
 
 # ── Check 1: Model setup (basic) ──────────────────────────────────────
 
+
 def _build_cantilever_model():
     """Build a 3D RC cantilever wall (Concrete01 + Steel01 fiber)."""
-    ops.model('basic', '-ndm', 3, '-ndf', 6)
+    ops.model("basic", "-ndm", 3, "-ndf", 6)
     ops.node(1, 0.0, 0.0, 0.0)
     ops.node(2, 0.0, 0.0, 3000.0)
     ops.fix(1, 1, 1, 1, 1, 1, 1)
-    ops.uniaxialMaterial('Concrete01', 1, -30.0, -0.002, -5.0, -0.006)
-    ops.uniaxialMaterial('Steel01', 2, 400.0, 200000.0, 0.01)
-    ops.section('Fiber', 1, '-GJ', 1.0e10)
-    ops.patch('rect', 1, 8, 8, -200.0, -200.0, 200.0, 200.0)
-    ops.layer('straight', 2, 4, 490.9, -180.0, -180.0, 180.0, -180.0)
-    ops.layer('straight', 2, 4, 490.9, -180.0, 180.0, 180.0, 180.0)
-    ops.geomTransf('PDelta', 1, 1, 0, 0)
-    ops.beamIntegration('Lobatto', 1, 1, 5)
-    ops.element('dispBeamColumn', 1, 1, 2, 1, 1)
+    ops.uniaxialMaterial("Concrete01", 1, -30.0, -0.002, -5.0, -0.006)
+    ops.uniaxialMaterial("Steel01", 2, 400.0, 200000.0, 0.01)
+    ops.section("Fiber", 1, "-GJ", 1.0e10)
+    ops.patch("rect", 1, 8, 8, -200.0, -200.0, 200.0, 200.0)
+    ops.layer("straight", 2, 4, 490.9, -180.0, -180.0, 180.0, -180.0)
+    ops.layer("straight", 2, 4, 490.9, -180.0, 180.0, 180.0, 180.0)
+    ops.geomTransf("PDelta", 1, 1, 0, 0)
+    ops.beamIntegration("Lobatto", 1, 1, 5)
+    ops.element("dispBeamColumn", 1, 1, 2, 1, 1)
 
 
 def _run_gravity() -> float:
     """Run gravity load-control analysis, return axial shortening (mm)."""
-    ops.timeSeries('Linear', 1)
-    ops.pattern('Plain', 1, 1)
+    ops.timeSeries("Linear", 1)
+    ops.pattern("Plain", 1, 1)
     ops.load(2, 0.0, 0.0, -500000.0, 0.0, 0.0, 0.0)
-    ops.constraints('Transformation')
-    ops.numberer('RCM')
-    ops.system('BandGeneral')
-    ops.test('NormDispIncr', 1.0e-6, 10, 0)
-    ops.algorithm('Newton')
-    ops.integrator('LoadControl', 0.1)
-    ops.analysis('Static')
+    ops.constraints("Transformation")
+    ops.numberer("RCM")
+    ops.system("BandGeneral")
+    ops.test("NormDispIncr", 1.0e-6, 10, 0)
+    ops.algorithm("Newton")
+    ops.integrator("LoadControl", 0.1)
+    ops.analysis("Static")
     ok = ops.analyze(10)
     if ok != 0:
         raise RuntimeError(f"Gravity analysis failed (analyze returned {ok})")
-    ops.loadConst('-time', 0.0)
+    ops.loadConst("-time", 0.0)
     return ops.nodeDisp(2, 3)
 
 
 def _run_pushover(num_steps: int = 300):
     """Run displacement-controlled pushover to 150 mm drift."""
-    ops.timeSeries('Linear', 2)
-    ops.pattern('Plain', 2, 2)
+    ops.timeSeries("Linear", 2)
+    ops.pattern("Plain", 2, 2)
     ops.load(2, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     dU = 0.5
-    ops.integrator('DisplacementControl', 2, 1, dU)
-    ops.analysis('Static')
+    ops.integrator("DisplacementControl", 2, 1, dU)
+    ops.analysis("Static")
     target = 150.0
     step = 0
     current = 0.0
     while step < num_steps:
-        ops.test('NormDispIncr', 1.0e-5, 200, 0)
-        ops.algorithm('Newton')
+        ops.test("NormDispIncr", 1.0e-5, 200, 0)
+        ops.algorithm("Newton")
         ok = ops.analyze(1)
         if ok != 0:
-            ops.test('NormDispIncr', 1.0e-5, 500, 0)
-            ops.algorithm('KrylovNewton')
+            ops.test("NormDispIncr", 1.0e-5, 500, 0)
+            ops.algorithm("KrylovNewton")
             ok = ops.analyze(1)
         if ok != 0:
-            ops.algorithm('ModifiedNewton', '-initial')
+            ops.algorithm("ModifiedNewton", "-initial")
             ok = ops.analyze(1)
         if ok != 0:
             dU *= 0.1
-            ops.integrator('DisplacementControl', 2, 1, dU)
-            ops.algorithm('Newton')
+            ops.integrator("DisplacementControl", 2, 1, dU)
+            ops.algorithm("Newton")
             ok = ops.analyze(1)
         if ok != 0:
             raise RuntimeError(f"Pushover failed at step {step}")
@@ -150,53 +152,57 @@ def _run_pushover(num_steps: int = 300):
 
 # ── Check 4: Elastic frame element ──────────────────────────────────
 
+
 def _check_elastic_frame():
     """Create an elasticBeamColumn with Linear transformation."""
     _wipe_model()
-    ops.model('basic', '-ndm', 2, '-ndf', 3)
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
     ops.node(1, 0.0, 0.0)
     ops.node(2, 0.0, 3000.0)
     ops.fix(1, 1, 1, 1)
-    ops.geomTransf('Linear', 1)
+    ops.geomTransf("Linear", 1)
     # elasticBeamColumn: tag, iNode, jNode, A, E, Iz, transfTag
-    ops.element('elasticBeamColumn', 1, 1, 2, 40000.0, 200000.0, 1.333e9, 1)
+    ops.element("elasticBeamColumn", 1, 1, 2, 40000.0, 200000.0, 1.333e9, 1)
 
 
 # ── Check 5: Force-based frame element ──────────────────────────────
 
+
 def _check_force_beam_column():
     """Create a forceBeamColumn with fiber section and Lobatto integration."""
     _wipe_model()
-    ops.model('basic', '-ndm', 2, '-ndf', 3)
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
     ops.node(1, 0.0, 0.0)
     ops.node(2, 0.0, 3000.0)
     ops.fix(1, 1, 1, 1)
-    ops.uniaxialMaterial('Concrete01', 1, -30.0, -0.002, -5.0, -0.006)
-    ops.uniaxialMaterial('Steel01', 2, 400.0, 200000.0, 0.01)
-    ops.section('Fiber', 1, '-GJ', 1.0e10)
-    ops.patch('rect', 1, 4, 4, -100.0, -100.0, 100.0, 100.0)
-    ops.layer('straight', 2, 2, 200.0, -90.0, -90.0, 90.0, -90.0)
-    ops.geomTransf('PDelta', 1)
-    ops.beamIntegration('Lobatto', 1, 1, 5)
-    ops.element('forceBeamColumn', 1, 1, 2, 1, 1)
+    ops.uniaxialMaterial("Concrete01", 1, -30.0, -0.002, -5.0, -0.006)
+    ops.uniaxialMaterial("Steel01", 2, 400.0, 200000.0, 0.01)
+    ops.section("Fiber", 1, "-GJ", 1.0e10)
+    ops.patch("rect", 1, 4, 4, -100.0, -100.0, 100.0, 100.0)
+    ops.layer("straight", 2, 2, 200.0, -90.0, -90.0, 90.0, -90.0)
+    ops.geomTransf("PDelta", 1)
+    ops.beamIntegration("Lobatto", 1, 1, 5)
+    ops.element("forceBeamColumn", 1, 1, 2, 1, 1)
 
 
 # ── Check 6: Steel02 material ───────────────────────────────────────
 
+
 def _check_steel02():
     """Create a Steel02 (Giuffré-Menegotto-Pinto) material."""
     _wipe_model()
-    ops.model('basic', '-ndm', 2, '-ndf', 3)
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
     # Steel02: tag, Fy, E, b, R0, cR1, cR2
-    ops.uniaxialMaterial('Steel02', 1, 400.0, 200000.0, 0.01, 18.5, 0.925, 0.15)
+    ops.uniaxialMaterial("Steel02", 1, 400.0, 200000.0, 0.01, 18.5, 0.925, 0.15)
 
 
 # ── Check 7: nD materials + LayeredShell + ShellMITC4 ───────────────
 
+
 def _check_nd_materials_and_layered_shell():
     """Create nD materials, LayeredShell section, and ShellMITC4 element."""
     _wipe_model()
-    ops.model('basic', '-ndm', 3, '-ndf', 6)
+    ops.model("basic", "-ndm", 3, "-ndf", 6)
 
     # Four nodes for a single ShellMITC4 element (4×4 m shell at z = 4000 mm)
     ops.node(5, 0.0, 0.0, 4000.0)
@@ -206,11 +212,11 @@ def _check_nd_materials_and_layered_shell():
 
     # nD materials (mimics a reinforced concrete shear wall layup)
     # ConcreteS: tag, E, nu, fc, ft, Es
-    ops.nDMaterial('ConcreteS', 1, 30000.0, 0.2, -30.0, 3.0, 0.0)
+    ops.nDMaterial("ConcreteS", 1, 30000.0, 0.2, -30.0, 3.0, 0.0)
     # J2PlateFibre: tag, E, nu, fy, Hiso, Hkin
-    ops.nDMaterial('J2PlateFibre', 2, 200000.0, 0.3, 400.0, 0.0, 0.0)
+    ops.nDMaterial("J2PlateFibre", 2, 200000.0, 0.3, 400.0, 0.0, 0.0)
     # ElasticIsotropic: tag, E, nu
-    ops.nDMaterial('ElasticIsotropic', 3, 30000.0, 0.2)
+    ops.nDMaterial("ElasticIsotropic", 3, 30000.0, 0.2)
 
     # LayeredShell section: tag, nLayers, matTag1, t1, matTag2, t2, ...
     # Wall cross-section (outside → inside):
@@ -219,56 +225,85 @@ def _check_nd_materials_and_layered_shell():
     #   3. Core concrete:    300 mm, ConcreteS (tag 1)
     #   4. Smeared rebar:     2 mm,  J2PlateFibre (tag 2)
     #   5. Cover concrete:   40 mm,  ConcreteS (tag 3)
-    ops.section('LayeredShell', 1, 5,
-                3, 40.0,   # cover (elastic)
-                2, 2.0,    # rebar layer
-                1, 300.0,  # core
-                2, 2.0,    # rebar layer
-                3, 40.0)   # cover (elastic)
+    ops.section(
+        "LayeredShell",
+        1,
+        5,
+        3,
+        40.0,  # cover (elastic)
+        2,
+        2.0,  # rebar layer
+        1,
+        300.0,  # core
+        2,
+        2.0,  # rebar layer
+        3,
+        40.0,
+    )  # cover (elastic)
 
     # ShellMITC4 element: tag, n1, n2, n3, n4, secTag
-    ops.element('ShellMITC4', 1, 5, 6, 7, 8, 1)
+    ops.element("ShellMITC4", 1, 5, 6, 7, 8, 1)
 
 
 # ── Check 8: Hysteretic material ────────────────────────────────────
 
+
 def _check_hysteretic():
     """Create a Hysteretic uniaxial material (brace buckling modelling)."""
     _wipe_model()
-    ops.model('basic', '-ndm', 2, '-ndf', 3)
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
     # Hysteretic: tag, s1p, e1p, s2p, e2p, s3p, e3p,
     #                   s1n, e1n, s2n, e2n, s3n, e3n,
     #                   pinchX, pinchY, damage1, damage2, beta
     #
     # Tension:  elastic to 400 MPa @ 0.002, hardening to 440 MPa @ 0.01
     # Compression: buckling at -200 MPa @ -0.002, softening to -50 MPa @ -0.02
-    ops.uniaxialMaterial('Hysteretic', 1,
-                         400.0, 0.002, 440.0, 0.01, 440.0, 0.02,
-                         -200.0, -0.002, -100.0, -0.01, -50.0, -0.02,
-                         0.5, 0.5, 0.0, 0.0, 0.0)
+    ops.uniaxialMaterial(
+        "Hysteretic",
+        1,
+        400.0,
+        0.002,
+        440.0,
+        0.01,
+        440.0,
+        0.02,
+        -200.0,
+        -0.002,
+        -100.0,
+        -0.01,
+        -50.0,
+        -0.02,
+        0.5,
+        0.5,
+        0.0,
+        0.0,
+        0.0,
+    )
 
 
 # ── Check 9: Truss element ──────────────────────────────────────────
 
+
 def _check_truss():
     """Create a Truss element with a Hysteretic material."""
     _wipe_model()
-    ops.model('basic', '-ndm', 2, '-ndf', 3)
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
     ops.node(1, 0.0, 0.0)
     ops.node(2, 5000.0, 0.0)
     ops.fix(1, 1, 1, 1)
     ops.fix(2, 1, 1, 0)
-    ops.uniaxialMaterial('Elastic', 1, 200000.0)
+    ops.uniaxialMaterial("Elastic", 1, 200000.0)
     # Truss: tag, iNode, jNode, A, matTag
-    ops.element('Truss', 1, 1, 2, 1000.0, 1)
+    ops.element("Truss", 1, 1, 2, 1000.0, 1)
 
 
 # ── Check 10: Rigid diaphragm ───────────────────────────────────────
 
+
 def _check_rigid_diaphragm():
     """Create a rigidDiaphragm constraint at a storey level."""
     _wipe_model()
-    ops.model('basic', '-ndm', 3, '-ndf', 6)
+    ops.model("basic", "-ndm", 3, "-ndf", 6)
     ops.node(1, 0.0, 0.0, 0.0)
     ops.node(2, 6000.0, 0.0, 0.0)
     ops.node(3, 6000.0, 4000.0, 0.0)
@@ -287,17 +322,20 @@ def _check_rigid_diaphragm():
 
 # ── Main ───────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Verify OpenSeesPy installation with a nonlinear RC cantilever."
     )
     parser.add_argument(
-        '--quick', action='store_true',
-        help='Run only checks 1-3 (setup, gravity, pushover).',
+        "--quick",
+        action="store_true",
+        help="Run only checks 1-3 (setup, gravity, pushover).",
     )
     parser.add_argument(
-        '--verify-all', action='store_true',
-        help='Run all checks explicitly (default when --quick is not set).',
+        "--verify-all",
+        action="store_true",
+        help="Run all checks explicitly (default when --quick is not set).",
     )
     args = parser.parse_args()
     run_all = not args.quick or args.verify_all
@@ -309,7 +347,7 @@ def main():
 
     # ── Check 1: Setup ────────────────────────────────────────────────
     _wipe_model()
-    print(f"{c}. Model setup...", end=' ')
+    print(f"{c}. Model setup...", end=" ")
     try:
         _build_cantilever_model()
         check(c, "Concrete01, Steel01, Fiber section, dispBeamColumn, PDelta", True)
@@ -320,7 +358,7 @@ def main():
     # ── Check 2: Gravity ──────────────────────────────────────────────
     _wipe_model()
     _build_cantilever_model()
-    print(f"{c}. Gravity analysis...", end=' ')
+    print(f"{c}. Gravity analysis...", end=" ")
     try:
         dz = _run_gravity()
         check(c, f"Converged. Axial shortening dz = {dz:.4f} mm (compression)", True)
@@ -332,7 +370,7 @@ def main():
     _wipe_model()
     _build_cantilever_model()
     _run_gravity()
-    print(f"{c}. Pushover analysis...", end=' ')
+    print(f"{c}. Pushover analysis...", end=" ")
     try:
         total_steps, final_disp = _run_pushover()
         check(c, f"{total_steps} steps to {final_disp:.1f} mm drift", True)
@@ -347,7 +385,7 @@ def main():
         return 0
 
     # ── Check 4: Elastic frame ────────────────────────────────────────
-    print(f"{c}. Elastic frame element...", end=' ')
+    print(f"{c}. Elastic frame element...", end=" ")
     try:
         _check_elastic_frame()
         check(c, "elasticBeamColumn with Linear geomTransf", True)
@@ -356,7 +394,7 @@ def main():
     c += 1
 
     # ── Check 5: Force-based frame ────────────────────────────────────
-    print(f"{c}. Force-based frame element...", end=' ')
+    print(f"{c}. Force-based frame element...", end=" ")
     try:
         _check_force_beam_column()
         check(c, "forceBeamColumn with Lobatto integration + fiber section", True)
@@ -365,7 +403,7 @@ def main():
     c += 1
 
     # ── Check 6: Steel02 material ─────────────────────────────────────
-    print(f"{c}. Steel02 material...", end=' ')
+    print(f"{c}. Steel02 material...", end=" ")
     try:
         _check_steel02()
         check(c, "Steel02 (Giuffré-Menegotto-Pinto) with isotropic hardening", True)
@@ -374,7 +412,7 @@ def main():
     c += 1
 
     # ── Check 7: nD materials + LayeredShell ──────────────────────────
-    print(f"{c}. nD materials + LayeredShell + ShellMITC4...", end=' ')
+    print(f"{c}. nD materials + LayeredShell + ShellMITC4...", end=" ")
     try:
         _check_nd_materials_and_layered_shell()
         check(c, "ConcreteS, J2PlateFibre, ElasticIsotropic, LayeredShell, ShellMITC4", True)
@@ -383,7 +421,7 @@ def main():
     c += 1
 
     # ── Check 8: Hysteretic material ──────────────────────────────────
-    print(f"{c}. Hysteretic material...", end=' ')
+    print(f"{c}. Hysteretic material...", end=" ")
     try:
         _check_hysteretic()
         check(c, "Hysteretic (pinching) material for brace buckling modelling", True)
@@ -392,7 +430,7 @@ def main():
     c += 1
 
     # ── Check 9: Truss element ────────────────────────────────────────
-    print(f"{c}. Truss element...", end=' ')
+    print(f"{c}. Truss element...", end=" ")
     try:
         _check_truss()
         check(c, "Truss element with Elastic material", True)
@@ -401,7 +439,7 @@ def main():
     c += 1
 
     # ── Check 10: Rigid diaphragm ─────────────────────────────────────
-    print(f"{c}. Rigid diaphragm constraint...", end=' ')
+    print(f"{c}. Rigid diaphragm constraint...", end=" ")
     try:
         _check_rigid_diaphragm()
         check(c, "rigidDiaphragm(perpDirn=3, master=5, slaves=6,7,8)", True)
@@ -416,55 +454,113 @@ def main():
     # wall analysis).  Standard ``pip install openseespy`` will report
     # these as "not available"; that is expected.
 
-    print(f"{c}. Xara: ConcreteCM (hysteretic concrete)...", end=' ')
+    print(f"{c}. Xara: ConcreteCM (hysteretic concrete)...", end=" ")
     _wipe_model()
-    ops.model('basic', '-ndm', 2, '-ndf', 3)
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
     try:
-        ops.uniaxialMaterial('ConcreteCM', 1, -30.0, -0.002, 25000.0,
-                             4.0, 1.0, 2.0, 0.00008, 1.0, 10000.0, '-GapClose', 0)
+        ops.uniaxialMaterial(
+            "ConcreteCM",
+            1,
+            -30.0,
+            -0.002,
+            25000.0,
+            4.0,
+            1.0,
+            2.0,
+            0.00008,
+            1.0,
+            10000.0,
+            "-GapClose",
+            0,
+        )
         print(f"  ✅ Check {c}: available")
     except Exception as exc:
         print(f"  ℹ️ Check {c}: not available (Xara build required: {exc})")
     c += 1
 
-    print(f"{c}. Xara: SteelMPF (Menegotto-Pinto steel with fatigue)...", end=' ')
+    print(f"{c}. Xara: SteelMPF (Menegotto-Pinto steel with fatigue)...", end=" ")
     _wipe_model()
-    ops.model('basic', '-ndm', 2, '-ndf', 3)
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
     try:
-        ops.uniaxialMaterial('SteelMPF', 1, 400.0, 400.0, 2.0e5, 0.01, 0.01, 18.5, 0.925, 0.15)
+        ops.uniaxialMaterial("SteelMPF", 1, 400.0, 400.0, 2.0e5, 0.01, 0.01, 18.5, 0.925, 0.15)
         print(f"  ✅ Check {c}: available")
     except Exception as exc:
         print(f"  ℹ️ Check {c}: not available (Xara build required: {exc})")
     c += 1
 
-    print(f"{c}. Xara: FSAM (Fixed-Strut Angle Model)...", end=' ')
+    print(f"{c}. Xara: FSAM (Fixed-Strut Angle Model)...", end=" ")
     _wipe_model()
-    ops.model('basic', '-ndm', 2, '-ndf', 3)
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
     try:
-        ops.uniaxialMaterial('ConcreteCM', 1, -30.0, -0.002, 25000.0,
-                             4.0, 1.0, 2.0, 0.00008, 1.0, 10000.0, '-GapClose', 0)
-        ops.uniaxialMaterial('SteelMPF', 2, 400.0, 400.0, 2.0e5, 0.01, 0.01, 18.5, 0.925, 0.15)
-        ops.nDMaterial('FSAM', 3, 0.0, 2, 2, 1, 0.006, 0.006, 0.25, 0.5)
+        ops.uniaxialMaterial(
+            "ConcreteCM",
+            1,
+            -30.0,
+            -0.002,
+            25000.0,
+            4.0,
+            1.0,
+            2.0,
+            0.00008,
+            1.0,
+            10000.0,
+            "-GapClose",
+            0,
+        )
+        ops.uniaxialMaterial("SteelMPF", 2, 400.0, 400.0, 2.0e5, 0.01, 0.01, 18.5, 0.925, 0.15)
+        ops.nDMaterial("FSAM", 3, 0.0, 2, 2, 1, 0.006, 0.006, 0.25, 0.5)
         print(f"  ✅ Check {c}: available")
     except Exception as exc:
         print(f"  ℹ️ Check {c}: not available (Xara build required: {exc})")
     c += 1
 
-    print(f"{c}. Xara: E_SFI (Efficient Shear-Flexure Interaction element)...", end=' ')
+    print(f"{c}. Xara: E_SFI (Efficient Shear-Flexure Interaction element)...", end=" ")
     _wipe_model()
-    ops.model('basic', '-ndm', 2, '-ndf', 3)
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
     try:
-        ops.uniaxialMaterial('ConcreteCM', 1, -30.0, -0.002, 25000.0,
-                             4.0, 1.0, 2.0, 0.00008, 1.0, 10000.0, '-GapClose', 0)
-        ops.uniaxialMaterial('SteelMPF', 2, 400.0, 400.0, 2.0e5, 0.01, 0.01, 18.5, 0.925, 0.15)
-        ops.nDMaterial('FSAM', 3, 0.0, 2, 2, 1, 0.006, 0.006, 0.25, 0.5)
+        ops.uniaxialMaterial(
+            "ConcreteCM",
+            1,
+            -30.0,
+            -0.002,
+            25000.0,
+            4.0,
+            1.0,
+            2.0,
+            0.00008,
+            1.0,
+            10000.0,
+            "-GapClose",
+            0,
+        )
+        ops.uniaxialMaterial("SteelMPF", 2, 400.0, 400.0, 2.0e5, 0.01, 0.01, 18.5, 0.925, 0.15)
+        ops.nDMaterial("FSAM", 3, 0.0, 2, 2, 1, 0.006, 0.006, 0.25, 0.5)
         ops.node(1, 0.0, 0.0)
         ops.node(2, 0.0, 1500.0)
         ops.fix(1, 1, 1, 1)
-        ops.element('E_SFI', 1, 1, 2, 4, 0.4,
-                    '-thick', 200.0, 200.0, 200.0, 200.0,
-                    '-width', 500.0, 500.0, 500.0, 500.0,
-                    '-mat', 3, 3, 3, 3)
+        ops.element(
+            "E_SFI",
+            1,
+            1,
+            2,
+            4,
+            0.4,
+            "-thick",
+            200.0,
+            200.0,
+            200.0,
+            200.0,
+            "-width",
+            500.0,
+            500.0,
+            500.0,
+            500.0,
+            "-mat",
+            3,
+            3,
+            3,
+            3,
+        )
         print(f"  ✅ Check {c}: available")
     except Exception as exc:
         print(f"  ℹ️ Check {c}: not available (Xara build required: {exc})")
@@ -478,5 +574,5 @@ def main():
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

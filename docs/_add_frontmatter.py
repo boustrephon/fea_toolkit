@@ -54,7 +54,12 @@ FRONTMATTER: dict[str, dict] = {
         "category": ["model-features"],
         "status": "complete",
         "description": "How frame and area elements are classified into structural roles (beam, column, brace, wall, slab).",
-        "related": ["element_splitting.md", "stiffness_factors.md", "element_properties_config.md", "builder_reference.md"],
+        "related": [
+            "element_splitting.md",
+            "stiffness_factors.md",
+            "element_properties_config.md",
+            "builder_reference.md",
+        ],
     },
     "element_properties_config.md": {
         "title": "Element Properties Configuration",
@@ -62,7 +67,12 @@ FRONTMATTER: dict[str, dict] = {
         "category": ["model-features"],
         "status": "complete",
         "description": "Config-driven per-element creation property system: integration rules, fiber sections, hinges, layered shells.",
-        "related": ["element_classification.md", "pushover_analysis.md", "shell_support.md", "layered_analysis_workflow.md"],
+        "related": [
+            "element_classification.md",
+            "pushover_analysis.md",
+            "shell_support.md",
+            "layered_analysis_workflow.md",
+        ],
     },
     "element_splitting.md": {
         "title": "Element Splitting",
@@ -94,7 +104,13 @@ FRONTMATTER: dict[str, dict] = {
         "category": ["analysis-types"],
         "status": "complete",
         "description": "Pushover analysis: fiber sections, lumped hinges, brace buckling approaches, ADRS conversion, and CSM.",
-        "related": ["modal_analysis.md", "tcl_export.md", "stiffness_factors.md", "element_properties_config.md", "storey_response.md"],
+        "related": [
+            "modal_analysis.md",
+            "tcl_export.md",
+            "stiffness_factors.md",
+            "element_properties_config.md",
+            "storey_response.md",
+        ],
     },
     "report_generation.md": {
         "title": "Report Generation — Design Proposal",
@@ -126,7 +142,12 @@ FRONTMATTER: dict[str, dict] = {
         "category": ["model-features"],
         "status": "complete",
         "description": "Shell element types, meshing strategies, and layered shell support for nonlinear wall analysis.",
-        "related": ["constraint_detection.md", "element_classification.md", "element_properties_config.md", "builder_reference.md"],
+        "related": [
+            "constraint_detection.md",
+            "element_classification.md",
+            "element_properties_config.md",
+            "builder_reference.md",
+        ],
     },
     "stiffness_factors.md": {
         "title": "Per-type Stiffness Factors (ACI 318 Cracked-Section Simulation)",
@@ -150,7 +171,12 @@ FRONTMATTER: dict[str, dict] = {
         "category": ["export-viz"],
         "status": "complete",
         "description": "Exporting models to standalone OpenSees Tcl scripts for nonlinear analysis and Xara/OpenSeesRT runtime.",
-        "related": ["xara_tcl_runtime_guide.md", "xara_pushover_workflow.md", "xara_gravity_and_solver.md", "pushover_analysis.md"],
+        "related": [
+            "xara_tcl_runtime_guide.md",
+            "xara_pushover_workflow.md",
+            "xara_gravity_and_solver.md",
+            "pushover_analysis.md",
+        ],
     },
     "viewer.md": {
         "title": "Visualisation Toolkit",
@@ -166,7 +192,12 @@ FRONTMATTER: dict[str, dict] = {
         "category": ["core-pipeline"],
         "status": "complete",
         "description": "End-to-end analysis pipeline: parsing, preprocessing, domain construction, analysis execution, post-processing.",
-        "related": ["builder_reference.md", "layered_analysis_workflow.md", "element_classification.md", "element_splitting.md"],
+        "related": [
+            "builder_reference.md",
+            "layered_analysis_workflow.md",
+            "element_classification.md",
+            "element_splitting.md",
+        ],
     },
     "xara_gravity_and_solver.md": {
         "title": "Xara/OpenSeesRT Gravity & Solver Lessons Learned",
@@ -182,7 +213,12 @@ FRONTMATTER: dict[str, dict] = {
         "category": ["tool-specific"],
         "status": "complete",
         "description": "Pushover analysis workflow for Xara/OpenSeesRT via Tcl script generation and execution.",
-        "related": ["xara_gravity_and_solver.md", "xara_tcl_runtime_guide.md", "tcl_export.md", "pushover_analysis.md"],
+        "related": [
+            "xara_gravity_and_solver.md",
+            "xara_tcl_runtime_guide.md",
+            "tcl_export.md",
+            "pushover_analysis.md",
+        ],
     },
     "xara_tcl_runtime_guide.md": {
         "title": "Xara/OpenSeesRT Tcl Runtime Guide",

@@ -1,7 +1,7 @@
 print("==========================")
 print("Start RCFramePushover Example")
 
-# Units: kips, in, sec  
+# Units: kips, in, sec
 #
 # Written: GLF/MHS/fmk
 # Date: January 2001
@@ -14,10 +14,11 @@ wipe()
 
 # Do operations of Example3.1 by sourcing in the tcl file
 import RCFrameGravity_v2
+
 print("Gravity Analysis Completed")
 
 # Set the gravity loads to be constant & reset the time in the domain
-loadConst('-time', 0.0)
+loadConst("-time", 0.0)
 
 # ----------------------------------------------------
 # End of Model Generation & Initial Gravity Analysis
@@ -35,7 +36,7 @@ loadConst('-time', 0.0)
 H = 10.0  # Reference lateral load
 
 # Set lateral load pattern with a Linear TimeSeries
-pattern('Plain', 2, 1)
+pattern("Plain", 2, 1)
 
 # Create nodal loads at nodes 3 & 4
 #    nd    FX  FY  MZ
@@ -56,7 +57,7 @@ dU = 0.1  # Displacement increment
 
 # Change the integration scheme to be displacement control
 #                             node dof init Jd min max
-integrator('DisplacementControl', 3, 1, dU, 1, dU, dU)
+integrator("DisplacementControl", 3, 1, dU, 1, dU, dU)
 
 # ----------------------------------------------------
 # End of modifications to analysis for push over
@@ -90,11 +91,10 @@ maxU = 15.0  # Max displacement
 currentDisp = 0.0
 ok = 0
 
-test('NormDispIncr', 1.0e-12, 1000)
-algorithm('ModifiedNewton', '-initial')
+test("NormDispIncr", 1.0e-12, 1000)
+algorithm("ModifiedNewton", "-initial")
 
 while ok == 0 and currentDisp < maxU:
-
     ok = analyze(1)
 
     # if the analysis fails try initial tangent iteration
@@ -113,13 +113,13 @@ while ok == 0 and currentDisp < maxU:
 
     currentDisp = nodeDisp(3, 1)
 
-results = open('results.out', 'a+')
+results = open("results.out", "a+")
 
 if ok == 0:
-    results.write('PASSED : RCFramePushover.py\n')
+    results.write("PASSED : RCFramePushover.py\n")
     print("Passed!")
 else:
-    results.write('FAILED : RCFramePushover.py\n')
+    results.write("FAILED : RCFramePushover.py\n")
     print("Failed!")
 
 results.close()

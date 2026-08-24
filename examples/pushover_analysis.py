@@ -41,11 +41,13 @@ def main():
         description="Non‑linear pushover analysis using fiber sections.",
     )
     parser.add_argument(
-        "s2k_file", nargs="?",
+        "s2k_file",
+        nargs="?",
         help="Path to the SAP2000 text file (.s2k, .$2k). Omit when using --sample.",
     )
     parser.add_argument(
-        "--sample", action="store_true",
+        "--sample",
+        action="store_true",
         help="Use the built‑in cantilever sample model (no external file needed).",
     )
     args = parser.parse_args()
@@ -53,6 +55,7 @@ def main():
     # Determine input source
     if args.sample:
         from examples.sample_model import make_sample_model
+
         md = make_sample_model()
         source_name = "built‑in cantilever sample"
         print(f"FEA Toolkit Version: {__version__}")
@@ -82,6 +85,7 @@ def main():
     print(f"Frame sections: {len(md.sections)}")
     for name, sec in md.sections.items():
         from fea_toolkit.model.sap_data import ISection, PipeSection
+
         if isinstance(sec, ISection):
             dims = f"{sec.depth:.3f}x{sec.bf:.3f}x{sec.tf:.4f}x{sec.tw:.4f}  (d x bf x tf x tw)"
         elif isinstance(sec, PipeSection):
@@ -93,28 +97,32 @@ def main():
 
     # ── 2. Modal analysis (elastic, two-stage) ──────────────────────────────
     print("\n── Modal analysis ──")
-    cfg = {'element_type': 'elasticBeamColumn', 'split_elements': True,
-           'verbose': False}
+    cfg = {"element_type": "elasticBeamColumn", "split_elements": True, "verbose": False}
     mm = preprocess_model(md, cfg)
-    b_elastic = AnalysisBuilder(mm, {'element_type': 'elasticBeamColumn',
-                                     'verbose': False})
+    b_elastic = AnalysisBuilder(mm, {"element_type": "elasticBeamColumn", "verbose": False})
     b_elastic.build_domain()
     b_elastic.compute_seismic_masses()
     modal = b_elastic.run_modal_analysis(num_modes=6, print_results=True)
-    n_modes = modal['num_modes']
+    n_modes = modal["num_modes"]
 
     # Extract mode shapes for visualisation
     shapes = b_elastic.extract_mode_shapes(n_modes)
 
     for m in range(min(3, n_modes)):
         import pyvista as pv
+
         pv.OFF_SCREEN = True
 
         # PNG: consistent font at 2× resolution
         pl_png = plot_mode_animation(
-            b_elastic, shapes, mode=m, scale=15.0,
-            periods=modal['periods'], font_size=22,
-            animate=False, notebook=True,
+            b_elastic,
+            shapes,
+            mode=m,
+            scale=15.0,
+            periods=modal["periods"],
+            font_size=22,
+            animate=False,
+            notebook=True,
         )
         if pl_png is not None:
             pl_png.screenshot(str(out / f"pushover_mode{m}.png"), scale=2)
@@ -123,9 +131,14 @@ def main():
 
         # SVG: large window for high-res output, same font
         pl_svg = plot_mode_animation(
-            b_elastic, shapes, mode=m, scale=15.0,
-            periods=modal['periods'], font_size=22,
-            animate=False, notebook=True,
+            b_elastic,
+            shapes,
+            mode=m,
+            scale=15.0,
+            periods=modal["periods"],
+            font_size=22,
+            animate=False,
+            notebook=True,
             window_size=[3840, 2880],
         )
         if pl_svg is not None:
@@ -138,16 +151,16 @@ def main():
 
     # ── 3. Non‑linear pushover ───────────────────────────────────────────────
     print("\n── Pushover analysis (fiber sections, forceBeamColumn) ──")
-    mm_push = preprocess_model(md, {'element_type': 'elasticBeamColumn',
-                                    'split_elements': True, 'verbose': False})
-    b_push = AnalysisBuilder(mm_push, {'element_type': 'elasticBeamColumn',
-                                       'verbose': False})
+    mm_push = preprocess_model(
+        md, {"element_type": "elasticBeamColumn", "split_elements": True, "verbose": False}
+    )
+    b_push = AnalysisBuilder(mm_push, {"element_type": "elasticBeamColumn", "verbose": False})
     b_push.build_domain()
 
     results = b_push.run_pushover_analysis(
-        gravity_patterns={'DEAD': 1.0, 'DEAD SDL': 1.0, 'LL': 1.0},
-        lateral_load_type='uniform',
-        lateral_direction='X',
+        gravity_patterns={"DEAD": 1.0, "DEAD SDL": 1.0, "LL": 1.0},
+        lateral_load_type="uniform",
+        lateral_direction="X",
         max_disp=0.5,
         num_steps=50,
         print_progress=True,
@@ -156,17 +169,17 @@ def main():
     # ── 4. Capacity curve ────────────────────────────────────────────────────
     fig = plot_pushover_curve(
         results,
-        title='BPPS Pumphouse — Non-linear Pushover (DEAD + SDL + Uniform)',
+        title="BPPS Pumphouse — Non-linear Pushover (DEAD + SDL + Uniform)",
     )
     if fig is not None:
-        fig.savefig(out / 'pushover_curve.png', dpi=300)
+        fig.savefig(out / "pushover_curve.png", dpi=300)
         print(f"\n  Saved → {out / 'pushover_curve.png'}  (300 dpi)")
-        fig.savefig(out / 'pushover_curve.svg')
+        fig.savefig(out / "pushover_curve.svg")
         print(f"  Saved → {out / 'pushover_curve.svg'}")
 
     # Print summary
-    bs = [abs(v) for v in results['base_shear']]
-    cd = results['control_disp']
+    bs = [abs(v) for v in results["base_shear"]]
+    cd = results["control_disp"]
     print(f"\n  Control node: {results['control_node']}, DOF={results['dof']} (X)")
     print(f"  Steps completed: {len(results['control_disp']) - 1}")
     print(f"  Peak base shear: {max(bs):.1f} kN")
@@ -188,21 +201,23 @@ def main():
     # Rebuild the pushover to get the final state for visualisation
     # (run it again with fewer steps but capture final displacements)
     import numpy as np
+
     try:
         import pyvista as pv
+
         pv.OFF_SCREEN = True
 
         # Extract nodal displacements at the last push step
         # Re-run and capture via ops.nodeDisp after the final step
-        mm_viz = preprocess_model(md, {'element_type': 'elasticBeamColumn',
-                                       'split_elements': True, 'verbose': False})
-        b_viz = AnalysisBuilder(mm_viz, {'element_type': 'elasticBeamColumn',
-                                        'verbose': False})
+        mm_viz = preprocess_model(
+            md, {"element_type": "elasticBeamColumn", "split_elements": True, "verbose": False}
+        )
+        b_viz = AnalysisBuilder(mm_viz, {"element_type": "elasticBeamColumn", "verbose": False})
         b_viz.build_domain()
         b_viz.run_pushover_analysis(
-            gravity_patterns={'DEAD': 1.0, 'DEAD SDL': 1.0, 'LL': 1.0},
-            lateral_load_type='uniform',
-            lateral_direction='X',
+            gravity_patterns={"DEAD": 1.0, "DEAD SDL": 1.0, "LL": 1.0},
+            lateral_load_type="uniform",
+            lateral_direction="X",
             max_disp=0.5,
             num_steps=50,
             print_progress=False,
@@ -216,11 +231,14 @@ def main():
         z_mid = (z_min + z_max) * 0.5
 
         # Build deformed mesh
-        elements = (b_viz.mesh_model.frame_elements if b_viz.mesh_model.frame_elements
-                    else b_viz.model.frame_elements)
+        elements = (
+            b_viz.mesh_model.frame_elements
+            if b_viz.mesh_model.frame_elements
+            else b_viz.model.frame_elements
+        )
         segments = []
         for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
             ni = b_viz.mesh_model.nodes.get(elem.node_i)
             nj = b_viz.mesh_model.nodes.get(elem.node_j)
@@ -238,7 +256,7 @@ def main():
         # Determine max displacement magnitude for annotation
         max_d = 0.0
         for eid, elem in elements.items():
-            if getattr(elem, 'inactive', False):
+            if getattr(elem, "inactive", False):
                 continue
             for nid in (elem.node_i, elem.node_j):
                 nd = b_viz.mesh_model.nodes.get(nid)
@@ -260,39 +278,43 @@ def main():
         z_top = z_max
         model_height = z_max - min(all_z)
         model_width = max(all_x) - min(all_x)
-        load_type = results.get('lateral_load_type', 'uniform')
+        load_type = results.get("lateral_load_type", "uniform")
 
         # ── Arrow geometry (much thicker stems for visibility) ──
-        grav_shaft_r = model_height * 0.06    # 6% of model height
+        grav_shaft_r = model_height * 0.06  # 6% of model height
         grav_tip_r = model_height * 0.10
         grav_tip_l = model_height * 0.25
         grav_start = [cx, cy, z_top + model_height * 0.3]
         grav_dir = [0, 0, -model_height * 1.5]
-        grav_mid = [cx, cy, z_top - model_height * 0.6]   # label near mid-shaft
+        grav_mid = [cx, cy, z_top - model_height * 0.6]  # label near mid-shaft
 
         cn_info = None  # (pos, tag)
         push_geo = None  # (start, dir, shaft_r, tip_r, tip_l, label_pos)
         try:
-            cn_tag = results['control_node']
+            cn_tag = results["control_node"]
             cn_node = [n for n in b_viz.mesh_model.nodes.values() if n.node_tag == cn_tag][0]
             cn_info = ([cn_node.x, cn_node.y, cn_node.z], cn_tag)
             ps = [cn_node.x - model_width * 0.2, cn_node.y, cn_node.z]
             pd = [model_width * 1.05, 0, 0]
-            push_geo = (ps, pd,
-                        model_width * 0.05,     # shaft radius
-                        model_width * 0.08,     # tip radius
-                        model_width * 0.20,     # tip length
-                        [ps[0] + pd[0] * 0.4, ps[1], ps[2]])  # label pos
+            push_geo = (
+                ps,
+                pd,
+                model_width * 0.05,  # shaft radius
+                model_width * 0.08,  # tip radius
+                model_width * 0.20,  # tip length
+                [ps[0] + pd[0] * 0.4, ps[1], ps[2]],
+            )  # label pos
         except Exception:
             pass
 
         # ── Helper: renders one output ──
-        def _render_deformed(plotter, corner_font, label_font,
-                             png_path=None, png_scale=1, svg_path=None):
+        def _render_deformed(
+            plotter, corner_font, label_font, png_path=None, png_scale=1, svg_path=None
+        ):
             """Add meshes, arrows, point-labels, and corner text."""
             # Undeformed (grey)
             for eid, elem in elements.items():
-                if getattr(elem, 'inactive', False):
+                if getattr(elem, "inactive", False):
                     continue
                 ni = b_viz.mesh_model.nodes.get(elem.node_i)
                 nj = b_viz.mesh_model.nodes.get(elem.node_j)
@@ -302,63 +324,79 @@ def main():
                 p2 = np.array([nj.x, nj.y, nj.z])
                 n = max(2, int(np.linalg.norm(p2 - p1) * 2))
                 poly = pv.lines_from_points(np.linspace(p1, p2, n))
-                plotter.add_mesh(poly, color='lightgrey', line_width=2, opacity=0.3)
+                plotter.add_mesh(poly, color="lightgrey", line_width=2, opacity=0.3)
             # Deformed (red)
             for p1, p2 in segments:
                 n = max(2, int(np.linalg.norm(p2 - p1) * 2))
                 poly = pv.lines_from_points(np.linspace(p1, p2, n))
-                plotter.add_mesh(poly, color='#c44e52', line_width=5)
+                plotter.add_mesh(poly, color="#c44e52", line_width=5)
             # ── Gravity arrow + point label ──
-            grav_arrow = pv.Arrow(start=grav_start, direction=grav_dir,
-                                  tip_length=grav_tip_l,
-                                  tip_radius=grav_tip_r,
-                                  shaft_radius=grav_shaft_r)
-            plotter.add_mesh(grav_arrow, color='green')
+            grav_arrow = pv.Arrow(
+                start=grav_start,
+                direction=grav_dir,
+                tip_length=grav_tip_l,
+                tip_radius=grav_tip_r,
+                shaft_radius=grav_shaft_r,
+            )
+            plotter.add_mesh(grav_arrow, color="green")
             plotter.add_point_labels(
                 [grav_mid],
                 ["Gravity loads  (DEAD+SDL+LL)"],
-                point_size=0, font_size=label_font,
-                text_color='green', shape=None,
+                point_size=0,
+                font_size=label_font,
+                text_color="green",
+                shape=None,
                 always_visible=True,
             )
             # ── Push arrow + point label + corner text ──
             if push_geo is not None:
                 ps, pd, shr, tir, til, lp = push_geo
-                push_arrow = pv.Arrow(start=ps, direction=pd,
-                                      tip_length=til, tip_radius=tir,
-                                      shaft_radius=shr)
-                plotter.add_mesh(push_arrow, color='blue')
+                push_arrow = pv.Arrow(
+                    start=ps, direction=pd, tip_length=til, tip_radius=tir, shaft_radius=shr
+                )
+                plotter.add_mesh(push_arrow, color="blue")
                 plotter.add_point_labels(
                     [lp],
                     [f"Lateral push  ({load_type})  →X"],
-                    point_size=0, font_size=label_font,
-                    text_color='blue', shape=None,
+                    point_size=0,
+                    font_size=label_font,
+                    text_color="blue",
+                    shape=None,
                     always_visible=True,
                 )
             # ── Corner text summary ──
-            plotter.add_text("Gravity loads: DEAD + SDL + LL",
-                             position='upper_left',
-                             font_size=corner_font, color='green')
-            plotter.add_text(f"Lateral push: {load_type}  (→X)",
-                             position='upper_right',
-                             font_size=corner_font, color='blue')
+            plotter.add_text(
+                "Gravity loads: DEAD + SDL + LL",
+                position="upper_left",
+                font_size=corner_font,
+                color="green",
+            )
+            plotter.add_text(
+                f"Lateral push: {load_type}  (→X)",
+                position="upper_right",
+                font_size=corner_font,
+                color="blue",
+            )
             # ── Control node marker ──
             if cn_info is not None:
                 cn_pos, cn_tag = cn_info
                 sphere = pv.Sphere(radius=model_height * 0.025, center=cn_pos)
-                plotter.add_mesh(sphere, color='gold', specular=0.5)
+                plotter.add_mesh(sphere, color="gold", specular=0.5)
                 plotter.add_point_labels(
                     [cn_pos],
                     [f"Control node {cn_tag}"],
-                    point_size=0, font_size=label_font,
-                    text_color='gold', shape=None,
+                    point_size=0,
+                    font_size=label_font,
+                    text_color="gold",
+                    shape=None,
                     always_visible=True,
                 )
             # ── Peak displacement text ──
-            plotter.add_text(f"Peak displacement = {max_d:.3f} m",
-                             position='lower_edge',
-                             font_size=corner_font)
+            plotter.add_text(
+                f"Peak displacement = {max_d:.3f} m", position="lower_edge", font_size=corner_font
+            )
             from fea_toolkit.plotting.viz import _set_isometric_view
+
             _set_isometric_view(plotter)
             # Export
             if png_path:
@@ -371,16 +409,21 @@ def main():
 
         # ── PNG: 2× resolution, larger corner text, same label size ──
         p = pv.Plotter(notebook=True, off_screen=True)
-        _render_deformed(p, corner_font=22, label_font=22,
-                         png_path=str(out / 'pushover_deformed.png'), png_scale=2)
+        _render_deformed(
+            p,
+            corner_font=22,
+            label_font=22,
+            png_path=str(out / "pushover_deformed.png"),
+            png_scale=2,
+        )
         p.close()
         print(f"  Saved → {out / 'pushover_deformed.png'}  (2×, 22pt)")
 
         # ── SVG: large window for high-res output, corner text at ⅔ size (15pt) ──
-        s = pv.Plotter(notebook=True, off_screen=True,
-                       window_size=[3840, 2880])
-        _render_deformed(s, corner_font=15, label_font=22,
-                         svg_path=str(out / 'pushover_deformed.svg'))
+        s = pv.Plotter(notebook=True, off_screen=True, window_size=[3840, 2880])
+        _render_deformed(
+            s, corner_font=15, label_font=22, svg_path=str(out / "pushover_deformed.svg")
+        )
         s.close()
         print(f"  Saved → {out / 'pushover_deformed.svg'}  (corner=15pt, labels=22pt, 3840×2880)")
 

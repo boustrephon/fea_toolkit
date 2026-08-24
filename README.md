@@ -892,8 +892,6 @@ The subdivided element approach (subdivided `dispBeamColumn` + fiber sections + 
 
 The root cause appears to be the shared‑node connectivity between subdivided braces and existing frame elements — the PDelta geometric stiffness contributions from multiple subdivided elements at the same node create an ill‑conditioned system matrix.
 
-Hovering over `ops.node(...)`, `ops.element(...)`, `ops.analyze(...)`, etc. will now show parameter names, types, and descriptions — and all false‑positive attribute‑access squiggles will disappear.
-
 ---
 
 ## Refactoring Roadmap
