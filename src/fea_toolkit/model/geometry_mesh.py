@@ -1056,9 +1056,6 @@ def warn_frame_overlaps(
         exclude_types: Section name patterns to skip (case-insensitive
             substring match).
     """
-    from collections import defaultdict
-
-    import numpy as np
 
     COSINE_TOL = 0.9999
 
@@ -1213,9 +1210,6 @@ def find_constraint_edges(
         The t-parameters are in the range [0, 1] along the edge from
         the first merged node to the last.
     """
-    from collections import defaultdict
-
-    import numpy as np
 
     COSINE_TOL = 0.9999
 
@@ -1425,7 +1419,6 @@ def find_constraint_edges(
     merged: list[tuple[list[str], list[tuple], str, str]] = []
     # (merged_nodes, [(chain_with_t, type), ...], type_a, type_b)
     used = [False] * len(tears)
-    from collections import defaultdict
 
     for i in range(len(tears)):
         if used[i]:
