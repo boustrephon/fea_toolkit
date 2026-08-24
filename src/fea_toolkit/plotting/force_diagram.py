@@ -292,16 +292,18 @@ def _resolve_source(
         ValueError: If an NPZ source has no static cases.
     """
     from ..utils import force_unit_label, length_unit_label
-    from .viz import (
-        _extract_npz_frame_forces,
-        _resolve_mesh_data,
-        _resolve_npz_static_case,
-    )
+    from .viz_forces import _extract_npz_frame_forces, _resolve_npz_static_case
+    from .viz_model import _resolve_mesh_data
 
     quantity = _normalise_quantity(quantity) or "My"
 
     # ── RS list / dict ────────────────────────────────────────────────
-    if isinstance(source, list) or (isinstance(source, dict) and "element_results" in source):
+    # A pinned kind="rs" keeps dict sources in the RS branch (empty dict →
+    # no records → None); builders are not dicts so they fall through to
+    # the Builder+RS handling below.
+    if isinstance(source, list) or (
+        isinstance(source, dict) and ("element_results" in source or kind == "rs")
+    ):
         units = None
         if isinstance(source, dict):
             records = source.get("element_results") or []
@@ -506,7 +508,8 @@ def _render_static_3d(
     **kwargs,
 ) -> Any:
     """Render the static 3D diagram via the shared frame renderer."""
-    from .viz import _render_frame_force_diagram, _set_isometric_view
+    from .viz_common import _set_isometric_view
+    from .viz_forces import _render_frame_force_diagram
 
     try:
         import pyvista as pv
