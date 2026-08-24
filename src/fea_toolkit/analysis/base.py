@@ -66,6 +66,10 @@ _PUSHOVER_RC_DEFAULTS: dict = {
     # 0.006 m control displacement on full RC buildings.  The confirmed
     # settings (v6 rc_config) are NormDispIncr 1e-4 / 20 / Newton, with
     # the per-step NormUnbalance + ModifiedNewton(-initial) fallback.
+    # Empirical caveat (2026-08-24): 1e-4/20 is NOT universally safe — it
+    # breaks the Duong flexure-only forceBeamColumn pushover
+    # (tests/test_duong_benchmark.py); the direct AnalysisBuilder path
+    # defaults to the general 1e-6/10 (P3 empirical pass).
     "solver_test_type": "NormDispIncr",
     "solver_test_tol": 1e-4,
     "solver_test_max_iter": 20,
