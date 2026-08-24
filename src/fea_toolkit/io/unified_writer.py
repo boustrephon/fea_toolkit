@@ -395,13 +395,19 @@ def collect_rs_nodal_displacement_arrays(
 
 
 def _build_metadata(
-    model, static_results=None, modal_result=None, config=None, forces_coordinate_system="local"
+    model,
+    static_results=None,
+    modal_result=None,
+    config=None,
+    forces_coordinate_system="local",
+    force_unit=None,
+    length_unit=None,
 ) -> str:
     """Build JSON metadata string."""
     meta = {
         "created": datetime.datetime.now().isoformat(),
-        "force_unit": force_unit_label(getattr(model, "units", {})),
-        "length_unit": length_unit_label(getattr(model, "units", {})),
+        "force_unit": force_unit or force_unit_label(getattr(model, "units", {})),
+        "length_unit": length_unit or length_unit_label(getattr(model, "units", {})),
         "forces_coordinate_system": forces_coordinate_system,
         "model_name": getattr(model, "model_name", ""),
         "num_nodes": len(model.nodes),
@@ -592,7 +598,17 @@ def write_results(
 
     # Metadata
     arrays["metadata_json"] = np.array(
-        [_build_metadata(src, static_results, modal_result, config, forces_coordinate_system)]
+        [
+            _build_metadata(
+                src,
+                static_results,
+                modal_result,
+                config,
+                forces_coordinate_system,
+                force_unit=force_unit,
+                length_unit=length_unit,
+            )
+        ]
     )
 
     # Write — validate fmt explicitly
