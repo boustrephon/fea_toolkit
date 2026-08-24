@@ -27,8 +27,9 @@ category: [planning]
 Source: 2026-08-16 rigid-end-zone batch (DONE, below);
 `docs/vecchio_emara_benchmark.md`; `docs/shear_failure_modelling.md`.
 
-**Status: partial — the nonlinear-shear mechanism is validated (Duong),
-the V&E post-peak descent is still open.**
+**Status: partial — the nonlinear-shear mechanism is validated (Duong);
+the fiber-concrete softening lever is implemented (Phase A, default-off);
+the V&E post-peak descent is still open (needs bond-slip, Phase B).**
 
 **What.** The flexure-only forceBeamColumn + rigid-end-zone model lands
 inside the ±10–15 % acceptance band (peak ≈ 353 kN = 1.07 × experimental;
@@ -79,7 +80,9 @@ post-peak *shape* without regressing the in-band strength/stiffness:
    config-gated off by default so existing fibre models are unchanged.
    Already ruled out (documented): elastic `GA_v` shear (inert) and the
    nonlinear MCFT shear backbone (inert on this shear-strong frame;
-   validated on the Duong frame).
+   validated on the Duong frame).  Fiber-concrete softening alone
+   (Concrete02 + core-residual reduction) trims the peak but cannot
+   sustain the ≥ 10 % descent (see Phase A status below).
 2. **Peak location** — the peak base shear moves off the 155 mm push end to
    the experimental peak band (≈ 40–70 mm), instead of the current
    monotonic rise to 155 mm.
@@ -97,6 +100,29 @@ post-peak *shape* without regressing the in-band strength/stiffness:
 7. **V&B (1990) variant** — re-run the cut-back-top-reinforcement variant
    and document its peak + descent (numeric gate deferred until the data
    is transcribed).
+
+   **Transcription (2026-08-24), from
+   `local/references/JP2_Guner_Vecchio_2010b.pdf` (Guner & Vecchio 2010,
+   §"third frame", Fig. 12 + Table 2):** the V&B (1990) frame is
+   **almost identical to the V&E (1992) frame** (same geometry: 3.5 m
+   span, 2 m storeys, 300 × 400 mm members, 4 No. 20M top/bottom).  The
+   only significant difference is that the **top reinforcement is cut
+   back to two No. 20 bars over the central 500 mm of the first-story
+   beam**, and the loading is a **monotonically increasing concentrated
+   vertical load at the first-story beam midspan** (not a lateral
+   pushover); the reported response is the first-story **midspan
+   load-deflection** curve, terminated before failure for equipment
+   safety.  JP2's model: half-frame by symmetry, member lengths ≈ half
+   the section depth (200 mm) at member ends, four member types + three
+   stiffened-end-zone types, shrinkage −0.5×10⁻³, ~40 concrete layers.
+   A first-order three-hinge estimate gives **Pu = 380 kN (≈ 30 % below
+   the actual failure load ≈ 543 kN)**; the JP2 nonlinear model matched
+   the experimental curve.  Modelling implication: the variant needs a
+   **midspan-load analysis on the first-story beam** (a different
+   protocol from the lateral pushover runner) and a **section
+   subdivision** so the beam's top bars drop from 4 to 2 over the
+   central 500 mm — both non-trivial; the model itself is deferred, the
+   transcription is recorded here and in the V&B pending item.
 8. **Regression + docs** — existing V&E band tests, the Duong shear test
    and `test_bilinearize_rc_real_curve` stay green; add a dedicated
    post-peak test; update `docs/shear_failure_modelling.md` and
@@ -107,6 +133,41 @@ the two mechanisms are trialled and the ≥ 10 % descent is still not
 reached, P5 closes as "documented, not reproduced" — recording the
 best-achieved curve, the specific residual gap, and a recommendation for
 the next increment.
+
+**Phase A status (2026-08-24):** the fiber-concrete softening lever is
+implemented, config-gated **off by default** (existing models unchanged):
+
+- **New config keys** (defaults in brackets): `concrete_material`
+  (`"Concrete01"` / opt-in `"Concrete02"`), `core_residual_factor`
+  (crushing residual as a fraction of f′c, `0.2`),
+  `concrete02_lambda` (`0.1`), `concrete02_ft_override` /
+  `concrete02_Ets_override` (tension branch, SI Pa; `None` → 3 MPa and
+  ft/0.001).  Hook: `SectionMixin._emit_fiber_concrete()` in
+  `_sections.py` — both the cover and the confined core go through it.
+- **Sweep** on the accepted rigid-end-zone config (`forceBeamColumn` +
+  `rigid_end_zones` + `rigid_link_mpc`, 62-step push to 155 mm):
+
+  | concrete / knobs | peak kN (×330) | @disp | secant@50 (×6.1) | end-drop |
+  |---|---|---|---|---|
+  | Concrete01 rf=0.2 (baseline) | 353 (1.07) | 155 mm | 6.29 (1.03) | 0 % |
+  | Concrete02 rf=0.2 | 354 (1.07) | 155 mm | 6.31 (1.03) | 0 % |
+  | Concrete02 rf=0.02, ecu=0.010 | **321 (0.97)** | **132 mm** | 5.89 (0.97) | **6.9 %** |
+  | Concrete02 rf=0.02, ecu=0.008 | 308 (0.93) | 108 mm | 5.71 (0.94) | 1.9 % (11 % windowed) |
+  | Concrete02 rf=0.02, ecu=0.006 | 308 (0.93) | 25 mm | 5.67 (0.93) | 0.3 % (17 % windowed, re-hardens) |
+
+- **Achieved:** the residual-reduction lever trims the 1.07× peak into the
+  strength band, keeps the secant in band, and moves the peak off the push
+  end with a genuine ~7 % descent — locked in by
+  `test_concrete02_strain_softening_trims_peak_with_descent`.
+- **Not achieved (completion gate):** a monotonic ≥ 10 % descent from the
+  40–70 mm band.  Aggressive `core_residual_factor` / `confined_ecu_max`
+  pulls the peak earlier, but the response **re-hardens** toward the end
+  (steel strain-hardening + P-Δ stabilisation).  The experimental
+  post-peak branch is dominated by **bond-slip** (~20 % shear share + bar
+  slip), which a fiber section cannot represent — the next increment is
+  **P5 Phase B: zero-length `bond_sp01` slip springs** at member ends
+  (precedents: the lumped-hinge `zeroLengthSection` and the Elwood
+  limit-state `zeroLength` springs).
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 

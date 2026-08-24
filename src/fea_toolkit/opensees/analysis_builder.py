@@ -253,6 +253,30 @@ class AnalysisBuilder(
             # Priestley (1996) formula can predict very large strains;
             # NZSEE C5 uses 0.05.  Mirrors ``ConfinementData.ecu_max``.
             "confined_ecu_max": 0.025,
+            # ── Fiber concrete law (post-peak / P5) ─────────────────
+            # Concrete01 (Kent-Scott-Park; no tension, flat post-crushing
+            # plateau at ``core_residual_factor · f'c``) is the default and
+            # reproduces the accepted benchmarks unchanged.
+            #
+            # ``"Concrete02"`` (Kent-Scott-Park + linear tension softening)
+            # adds a *genuine* post-crushing descending branch and a
+            # tension-stiffening branch, letting flexure-critical frames
+            # shed strength after the peak instead of rising to the push
+            # end.  The ``core_residual_factor`` lever (fraction of the
+            # concrete strength retained at the crushing strain) applies
+            # identically to both laws — lowering it from 0.2 makes the
+            # core shed compressive stress as it crushes, producing the
+            # post-peak descent.  Both knobs are off by default
+            # (Concrete01 / 0.2), so existing models are unchanged.
+            "concrete_material": "Concrete01",
+            "core_residual_factor": 0.2,
+            # Concrete02 post-peak unloading slope ratio (lambda).
+            "concrete02_lambda": 0.1,
+            # Concrete02 tension branch, authored in SI (Pa) and scaled to
+            # model units.  None → ft = DEFAULT_FSAM_CONC_FT_PA (3 MPa),
+            # Ets = ft / 0.001 (tension capacity gone at 1e-3 strain).
+            "concrete02_ft_override": None,
+            "concrete02_Ets_override": None,
             # ── Shear-flexible section aggregation (opt-in) ──
             # Wrap fiber sections in a SectionAggregator with an elastic
             # shear material (GA_v on Vy/Vz) so beam-column members gain

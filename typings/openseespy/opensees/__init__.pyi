@@ -379,6 +379,10 @@ def uniaxialMaterial(mat_type: str, tag: int, *args: Any) -> None:
         # Concrete01 (no tension): fc, epsc0, fcU, epsU
         uniaxialMaterial('Concrete01', tag, -30e6, -0.002, -6e6, -0.006)
 
+        # Concrete02 (Kent-Scott-Park + tension softening):
+        # fc, epsc0, fcU, epsU, lambda, ft, Ets
+        uniaxialMaterial('Concrete02', tag, -30e6, -0.002, -3e6, -0.006, 0.1, 3e6, 3e9)
+
         # Steel01 (bilinear): Fy, E, b (strain-hardening ratio)
         uniaxialMaterial('Steel01', tag, 250e6, 200e9, 0.01)
 

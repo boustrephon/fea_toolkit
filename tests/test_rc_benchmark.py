@@ -629,6 +629,67 @@ class TestVecchioEmaraShearFlexibleVariant:
         )
 
     @pytest.fixture
+    def ve_builder_fbc_concrete02(self):
+        """forceBeamColumn + rigid end zones + Concrete02 strain-softening.
+
+        P5 Phase A: the config-gated concrete law (``concrete_material`` =
+        ``"Concrete02"``) with core-residual reduction
+        (``core_residual_factor`` = 0.02) and an earlier core crushing cap
+        (``confined_ecu_max`` = 0.010).  All three knobs default to the
+        accepted Concrete01 behaviour, so existing models are unchanged.
+        """
+        from openseespy.opensees import wipe
+
+        cfg = dict(_BENCH_CONFIG)
+        cfg["fiber_element_type"] = "forceBeamColumn"
+        cfg["rigid_end_zones"] = True
+        cfg["rigid_link_mpc"] = True
+        cfg["concrete_material"] = "Concrete02"
+        cfg["core_residual_factor"] = 0.02
+        cfg["confined_ecu_max"] = 0.010
+        mesh = preprocess_model(make_vecchio_emara_frame(), cfg)
+        builder = AnalysisBuilder(mesh, cfg)
+        yield builder
+        wipe()
+
+    def test_concrete02_strain_softening_trims_peak_with_descent(self, ve_builder_fbc_concrete02):
+        """P5 Phase A: Concrete02 + core-residual reduction (default-off gate).
+
+        The accepted rigid-end-zone model overestimates the peak (≈ 1.07×)
+        and rises monotonically to the 155 mm end.  With Concrete02 and the
+        residual-reduction lever, the confined core sheds stress as it
+        crushes: the peak lands inside the strength band (≈ 0.97 × 330),
+        the secant @ 50 mm stays in band (≈ 0.97 × 6.1), and a real
+        post-peak descent appears (peak ≈ 132 mm, ≈ 7 % end drop by
+        155 mm).  The full experimental post-peak branch (monotonic ≥ 10 %
+        descent from the 40–70 mm band) is NOT yet reproduced — that needs
+        the bond-slip / shear-degradation increment (P5 Phase B), tracked
+        in ``docs/_pending_work.md``.
+        """
+        res = self._push(ve_builder_fbc_concrete02)
+        assert all(s == 0 for s in res["status"]), "non-converged push steps"
+        d = np.asarray(res["control_disp"], dtype=float)
+        v = np.asarray(res["base_shear"], dtype=float)
+        peak_i = int(np.argmax(v))
+        peak = float(v[peak_i])
+        peak_d = float(d[peak_i])
+        ratio = peak / EXP_PEAK_SHEAR
+        v50 = float(np.interp(0.050, d, v))
+        k50 = v50 / 0.050
+        # Strength in band — the trim moves the 1.07× peak into the band.
+        assert 0.9 <= ratio <= 1.05, (
+            f"Concrete02 peak {peak:.1f} kN vs experimental "
+            f"{EXP_PEAK_SHEAR:.0f} kN (ratio {ratio:.2f}) outside band"
+        )
+        # Stiffness not regressed by the tension-softening branch.
+        assert 0.9 * EXP_SECANT_AT_YIELD <= k50 <= 1.15 * EXP_SECANT_AT_YIELD, (
+            f"Concrete02 secant @50mm {k50:.0f} kN/m outside band"
+        )
+        # Peak moved off the push end (a real descent is present).
+        assert peak_d < 0.9 * 0.155, f"peak still at the push end ({peak_d * 1000:.1f} mm)"
+        assert v[-1] < peak, "no post-peak descent (V_end >= peak)"
+
+    @pytest.fixture
     def ve_builder_fbc_nlshear(self):
         """forceBeamColumn + auto rigid joint end zones + nonlinear
         simplified-MCFT shear backbone.
