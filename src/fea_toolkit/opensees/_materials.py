@@ -269,7 +269,6 @@ class MaterialMixin:
                 tag += 1
                 while tag in self._nd_material_tags.values():
                     tag += 1
-                created += 1
 
             missing = sorted(
                 n for n in (nd_mat.sx, nd_mat.sy, nd_mat.conc) if n not in self.material_tags
@@ -297,6 +296,7 @@ class MaterialMixin:
                 nd_mat.alfadow,
             )
             self._nd_material_tags[name] = current_tag
+            created += 1
 
         if self.config.get("verbose", False):
             print(f"  Created {created} FSAM nD material(s)")
@@ -594,24 +594,6 @@ class MaterialMixin:
 
         # MVLEM_3D support materials (shear spring + interior dummy steel)
         self._create_mvlem3d_support_materials()
-
-        # Fiber section materials
-        if self.config.get("create_fiber_sections"):
-            from ..model.sap_data import (
-                AngleSection,
-                ChannelSection,
-                DoubleAngleSection,
-                PipeSection,
-                TeeSection,
-            )
-
-            for sec_name, sec in self.mesh_model.sections.items():
-                mat_name = sec.material
-                mat_tag = self.material_tags.get(mat_name)
-                if mat_tag is None:
-                    continue
-                # Section-specific nonlinear materials created by
-                # sec.to_fiber_patches(mat_tag, ...) in _create_single_section
 
         # Brace truss materials
         if self.config.get("brace_truss"):
