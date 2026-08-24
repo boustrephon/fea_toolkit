@@ -8,6 +8,13 @@ category: [planning]
 
 # Force-Diagram Unification (deprecation-plan Phase B)
 
+> **Status (2026-08-24):** implemented.  `plot_force_diagram()` is the
+> single unit-aware dispatcher; the four legacy wrappers
+> (`plot_force_diagram_3d`, `plot_rs_force_diagram`,
+> `plot_npz_force_diagram`, `plot_npz_moment_3d`) were removed in the
+> deprecation cleanup.  The sections below are the historical design
+> record.
+
 **Status:** implemented (2026-08-24) — milestones 1–3 landed; milestone 4
 (wrapper removal) scheduled for the next release cycle.
 

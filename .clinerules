@@ -142,7 +142,7 @@ New analysis code must follow this pattern. Do NOT add analysis methods to the p
 - `ModelViewer` uses the backend abstraction for 3D rendering or HTML export.
 - Plotting APIs accept ``AnalysisBuilder`` instances, result data dicts, **or** NPZ file paths — enabling standalone plotting without model objects.
 - Interactive multi-combo viewers accept ``AnalysisBuilder`` + result/force dicts.
-- NPZ‑only plot functions (``plot_npz_force_diagram``, ``plot_npz_moment_3d``) load serialized data without any builder.
+- NPZ‑only plot functions (``plot_force_diagram`` on NPZ inputs) load serialized data without any builder.
 
 ### 3.9 RecordingOpenSees proxy
 - For capturing `ops.*` calls as replayable Tcl or Python scripts, use the `RecordingOpenSees` proxy.

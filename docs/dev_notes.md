@@ -84,9 +84,8 @@ related: [analysis_builder_migration_plan.md]
 - Stores element connectivity: sub_node_i_tag, sub_node_j_tag (OpenSees node tags)
 - metadata_json key in NPZ arrays
 
-## Standalone NPZ plotter (plotting/viz.py)
-- plot_npz_force_diagram() — 2D matplotlib force vs elevation from NPZ
-- plot_npz_moment_3d() — 3D PyVista force/moment diagram from NPZ
+## Standalone NPZ plotting (plotting/force_diagram.py)
+- plot_force_diagram() — unified 2D/3D force/moment diagram from Builder, dict, or NPZ
 - _load_npz_for_plotting() helper — loads NPZ, builds element-centric dict with coordinates and forces
 
 ## NPZ → Rhino colouring (rhino/colour_from_npz.py)
@@ -94,8 +93,8 @@ related: [analysis_builder_migration_plan.md]
 - colour_frame_by_npz_ratio() colours by ratio of two quantities
 - Runs inside Rhino CPython environment
 
-## Force diagrams (plotting/viz.py)
-- plot_force_diagram_3d renders flags or tubes for any M* or F* quantity
+## Force diagrams (plotting/force_diagram.py)
+- plot_force_diagram renders flags or tubes for any M* or F* quantity
   (builder, AnalysisBuilder, or NPZ sources)
 - Force flags use world-perpendicular direction (not local axes)
 

@@ -616,8 +616,8 @@ new_pt = rg.Point3d(pt.X + dx * scale, pt.Y + dy * scale, pt.Z + dz * scale)
   forces for colour-coding (e.g. local Mz for major-axis bending,
   independent of member orientation), transform using the element's
   local axes — see ``get_local_axes()`` in ``model/geometry.py`` for the
-  rotation matrix approach, or use the ``plot_force_diagram_3d`` and
-  ``plot_npz_force_diagram`` functions which handle this automatically.
+  rotation matrix approach, or use the unified ``plot_force_diagram``
+  function which handles this automatically.
 
 ---
 

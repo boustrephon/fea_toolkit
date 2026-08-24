@@ -139,14 +139,13 @@ def main():
         sys.exit("Error: no modes converged.")
 
     # ── 5. Build spectrum curve ──────────────────────────────────────────────
-    g = 9.81
     T_max = max(periods[:n])
     dT = 0.01
     T_curve = [i * dT for i in range(int(T_max / dT) + 2)]
     Sa_curve = [gb50011_spectrum(T, A=0.16, Tg=0.4, zeta=0.04) for T in T_curve]
 
     print(f"\n── Response spectrum analysis (X direction, {n} modes) ──")
-    rs = builder.run_response_spectrum_analysis(
+    builder.run_response_spectrum_analysis(
         num_modes=n,
         modal_periods=periods[:n],
         spectrum_periods=T_curve,
@@ -178,11 +177,13 @@ def main():
 
     # ── Force diagrams ───────────────────────────────────────────────────────
     try:
-        from fea_toolkit.plotting import plot_rs_force_diagram
+        from fea_toolkit.plotting import plot_force_diagram
 
-        fig_m = plot_rs_force_diagram(
+        fig_m = plot_force_diagram(
             elem_rs["element_results"],
-            "My_i",
+            quantity="My_i",
+            kind="rs",
+            dimension="2d",
             title="My (CQC combined) — UX excitation",
         )
         if fig_m:
@@ -190,9 +191,11 @@ def main():
             fig_m.savefig(out / "rs_moment_diagram.svg")
             print("\n  Saved → rs_moment_diagram.png / .svg")
 
-        fig_v = plot_rs_force_diagram(
+        fig_v = plot_force_diagram(
             elem_rs["element_results"],
-            "Vz_i",
+            quantity="Vz_i",
+            kind="rs",
+            dimension="2d",
             title="Vz (CQC combined) — UX excitation",
         )
         if fig_v:

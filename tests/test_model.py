@@ -2583,17 +2583,17 @@ class TestCqcCombineUtils:
 
 class TestPlottingImports:
     def test_rs_force_diagram_no_data(self):
-        from fea_toolkit.plotting import plot_rs_force_diagram
+        from fea_toolkit.plotting import plot_force_diagram
 
-        fig = plot_rs_force_diagram([], "My_i")
+        fig = plot_force_diagram([], quantity="My_i", kind="rs", dimension="2d")
         assert fig is None
 
     def test_rs_force_diagram_unwraps_result_dict(self):
-        """plot_rs_force_diagram accepts the full extract_element_rs_forces dict."""
-        from fea_toolkit.plotting import plot_rs_force_diagram
+        """plot_force_diagram accepts the full extract_element_rs_forces dict."""
+        from fea_toolkit.plotting import plot_force_diagram
 
         # Empty dict unwraps to no element results → None (no matplotlib needed)
-        assert plot_rs_force_diagram({}, "My_i") is None
+        assert plot_force_diagram({}, quantity="My_i", kind="rs", dimension="2d") is None
 
     def test_deprecated_plot_names_removed(self):
         """The deprecated plot functions are no longer part of the public API.
@@ -2615,25 +2615,30 @@ class TestPlottingImports:
             "plot_static_shear_3d",
             "plot_static_axial_3d",
             "plot_static_force_diagram",
+            # Phase-B unified-dispatcher cleanup (removed 2026-08-24)
+            "plot_force_diagram_3d",
+            "plot_rs_force_diagram",
+            "plot_npz_force_diagram",
+            "plot_npz_moment_3d",
         ):
             assert not hasattr(plotting, name), f"{name} should have been removed"
 
-    def test_force_diagram_3d_import(self):
-        """plot_force_diagram_3d is callable from the plotting package."""
-        from fea_toolkit.plotting import plot_force_diagram_3d
+    def test_force_diagram_unified_import(self):
+        """The unified plot_force_diagram dispatcher is importable."""
+        from fea_toolkit.plotting import plot_force_diagram
 
-        assert callable(plot_force_diagram_3d)
+        assert callable(plot_force_diagram)
 
-    def test_force_diagram_3d_invalid_quantity(self):
+    def test_force_diagram_invalid_quantity(self):
         """Invalid quantity returns None."""
-        from fea_toolkit.plotting import plot_force_diagram_3d
+        from fea_toolkit.plotting import plot_force_diagram
 
-        result = plot_force_diagram_3d({}, quantity="ZZ")
+        result = plot_force_diagram({}, quantity="ZZ")
         assert result is None
 
-    def test_force_diagram_3d_no_data_builder(self):
+    def test_force_diagram_no_data_builder(self):
         """Builder without force_data returns None."""
-        from fea_toolkit.plotting import plot_force_diagram_3d
+        from fea_toolkit.plotting import plot_force_diagram
 
         # Use a minimal mock that satisfies _resolve_mesh_data
         class MockModel:
@@ -2649,17 +2654,17 @@ class TestPlottingImports:
             split_assignments: ClassVar = {}
             _mesh_model = None
 
-        result = plot_force_diagram_3d(MockBuilder())
+        result = plot_force_diagram(MockBuilder())
         assert result is None
 
-    def test_force_diagram_3d_npz_no_static(self):
+    def test_force_diagram_npz_no_static(self):
         """NPZ dict without static cases raises ValueError."""
         import pytest
 
-        from fea_toolkit.plotting import plot_force_diagram_3d
+        from fea_toolkit.plotting import plot_force_diagram
 
         with pytest.raises(ValueError, match="No static cases found"):
-            plot_force_diagram_3d({}, quantity="Mz")
+            plot_force_diagram({}, quantity="Mz", kind="static", dimension="3d")
 
     def test_unified_functions_import(self):
         """All unified functions are importable from the plotting package."""

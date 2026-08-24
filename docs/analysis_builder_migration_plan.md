@@ -58,7 +58,7 @@ called for, what was implemented, and what remains as a known limitation.
 |---------|--------|----------|
 | Keep `MeshModel` as the canonical shared state | ✅ **Done** | `model/mesh_model.py` — Preprocessor output, frozen topology |
 | Add `AnalysisCaseSpec` to the analysis layer | ✅ **Done** | `analysis/base.py` — `name`, `analysis_type`, `config`, `kwargs` |
-| Add `AnalysisManager` with dependency resolution | ✅ **Done** | `analysis/manager.py` — Kahn's algorithm topological sort, `_inject_dependencies()` for modal→RS / modal→pushover |
+| Add `AnalysisManager` with dependency resolution | ✅ **Done, then removed 2026-08-21** | `analysis/manager.py` (Kahn's algorithm topological sort, `_inject_dependencies()`) — superseded by module-level `run_*_analysis()` functions with explicit dependency arguments |
 | Add `Analysis` ABC with `defaults()`, `run()`, `requires`, `provides` | ✅ **Done** | `analysis/base.py` |
 | Add `analysis_variant_map` / `analysis_property_overrides` / `analysis_load_overrides` metadata to `MeshModel` | ⚠️ **Superseded** | Replaced by the simpler `AnalysisCaseSpec.config` dict — case-specific overrides live on the case spec, not on the shared model |
 

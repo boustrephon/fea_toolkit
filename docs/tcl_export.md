@@ -264,8 +264,8 @@ The same return shape as the Tcl path, but executed in-process with
 the standard `AnalysisBuilder` — no subprocess, no ``tclsh8.6``.
 
 To opt back into the legacy Tcl export, pass
-``config={"use_tcl_fallback": True}`` — a ``DeprecationWarning`` is
-emitted.
+``config={"use_tcl_fallback": True}`` — kept as an **alternate backend**
+(no ``DeprecationWarning`` is emitted).
 
 ## Current limitations
 

@@ -570,8 +570,8 @@ class TestResolveMeshData:
         pl.close()
 
     def test_force_diagram_collapse_to_parents(self):
-        """plot_force_diagram_3d accepts collapse_to_parents parameter."""
-        from fea_toolkit.plotting.viz import plot_force_diagram_3d
+        """plot_force_diagram accepts collapse_to_parents parameter."""
+        from fea_toolkit.plotting import plot_force_diagram
 
         # Build a minimal NPZ with static data so the force path works
         npz = {
@@ -595,12 +595,13 @@ class TestResolveMeshData:
             "static/DEAD/mz_i": np.array([0.0, 0.0]),
             "static/DEAD/mz_j": np.array([0.0, 0.0]),
         }
-        pl = plot_force_diagram_3d(
+        pl = plot_force_diagram(
             npz,
             force_data=None,
             collapse_to_parents=False,
             quantity="Mx",
             mode="flag",
+            dimension="3d",
             notebook=True,
         )
         assert pl is not None
@@ -784,15 +785,15 @@ class TestShrinkParameter:
         pl.close()
 
     def test_force_diagram_no_shrink(self, sample_npz_data):
-        """plot_force_diagram_3d does not accept shrink (flags unaffected).
+        """plot_force_diagram does not accept shrink (flags unaffected).
 
         Confirms the function signature has no ``shrink`` parameter.
         """
         import inspect
 
-        from fea_toolkit.plotting import plot_force_diagram_3d
+        from fea_toolkit.plotting import plot_force_diagram
 
-        sig = inspect.signature(plot_force_diagram_3d)
+        sig = inspect.signature(plot_force_diagram)
         assert "shrink" not in sig.parameters
 
 
@@ -2202,24 +2203,26 @@ class TestForceDiagramUnified:
 
         assert plot_force_diagram(_minimal_npz_dict(), quantity="ZZ", dimension="2d") is None
 
-    def test_npz_path_wrappers(self):
-        """plot_npz_force_diagram / plot_npz_moment_3d wrap the dispatcher."""
+    def test_npz_path_sources(self):
+        """plot_force_diagram accepts NPZ paths for 2D and 3D rendering."""
         import os
         import tempfile
 
-        from fea_toolkit.plotting import plot_npz_force_diagram, plot_npz_moment_3d
+        from fea_toolkit.plotting import plot_force_diagram
 
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as f:
             path = f.name
         np.savez(path, **_minimal_npz_dict())
         try:
-            fig = plot_npz_force_diagram(path, quantity="My")
+            fig = plot_force_diagram(path, quantity="My", kind="static", dimension="2d")
             assert fig is not None
             import matplotlib.pyplot as plt
 
             plt.close(fig)
 
-            pl = plot_npz_moment_3d(path, quantity="My", return_plotter=True)
+            pl = plot_force_diagram(
+                path, quantity="My", kind="static", dimension="3d", notebook=True
+            )
             assert pl is not None
             pl.close()
         finally:

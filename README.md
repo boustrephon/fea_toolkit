@@ -61,7 +61,7 @@ import fea_toolkit
 | Filter elements | ``Selection(element_types=['Frame'], groups=['Lateral'])`` |
 | Plot 3D model | ``plot_mesh(builder)`` |
 | Plot deformed shape | ``plot_deformed_displacement_3d(builder, results, scale=100)`` |
-| Plot force diagram | ``plot_force_diagram_3d(builder, results, quantity='Mz')`` |
+| Plot force diagram | ``plot_force_diagram(builder, results, quantity='Mz')`` |
 | Export to NPZ | ``from fea_toolkit.io import write_results_npz`` |
 | Export to Tcl | ``from fea_toolkit.opensees import export_mesh_model_to_tcl`` |
 
@@ -245,7 +245,7 @@ from fea_toolkit.opensees.preprocessor import preprocess_model
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.io.npz_writer import write_results_npz
 from fea_toolkit.io.npz_reader import read_results_npz, npz_to_pyvista_frame_mesh
-from fea_toolkit.plotting.viz import plot_deformed_displacement_3d, plot_npz_force_diagram
+from fea_toolkit.plotting import plot_deformed_displacement_3d, plot_force_diagram
 
 # 1. Parse
 md = SAP2000Parser("model.s2k").parse().get_model_data()
@@ -266,7 +266,7 @@ write_results_npz("results.npz", md, static_results=cases)
 
 # 5. Visualise from NPZ
 data = read_results_npz("results.npz")
-plot_npz_force_diagram(data, quantity="fx_i", case="DEAD")  # axial force diagram
+plot_force_diagram(data, quantity="Fx", combo="DEAD")  # axial force diagram
 ```
 
 See also:
@@ -338,7 +338,7 @@ parsing through analysis to visualisation and reporting.
 | **3D model (PyVista)** | `plot_mesh()` | Interactive structural model view |
 | **Deformed shape (PyVista)** | `plot_deformed_displacement_3d()` | Displaced shape with colour-mapped displacements |
 | **Mode shape (PyVista)** | `plot_mode_animation()` | Animate eigenvector displacements per mode |
-| **Moment/force flags (PyVista)** | `plot_force_diagram_3d()` | Flag or tube diagrams in 3D |
+| **Moment/force flags (PyVista)** | `plot_force_diagram()` | Flag or tube diagrams in 3D |
 | **Pushover curve** | `plot_pushover_curve()` | Pushover capacity curve (base shear vs control displacement) |
 | **CSM 4-panel** | `plot_csm_4panel()` | 2×2 ADRS plots per push direction |
 | **Rhino import (centreline)** | `RhinoImporter.run(create_centreline=True)` | Joint points, frame lines, shell Breps with SAP metadata |
@@ -933,11 +933,12 @@ The **priority-ordered pending-work register** lives in
 detailed designs in `docs/force_diagram_unification.md` and the deprecation
 plan.  In summary:
 
-- **Phase B — force-diagram unification** — combine `plot_rs_force_diagram()`,
-  `plot_force_diagram_3d()`, `plot_npz_force_diagram()` and
-  `plot_npz_moment_3d()` into a single unit-aware entry point (detailed
-  design → `docs/force_diagram_unification.md`).  **Prerequisite** for the
-  `viz.py` split.
+- **Phase B — force-diagram unification** — the four legacy entry points
+  (`plot_rs_force_diagram()`, `plot_force_diagram_3d()`,
+  `plot_npz_force_diagram()`, `plot_npz_moment_3d()`) are now a single
+  unit-aware `plot_force_diagram()` dispatcher (detailed design →
+  `docs/force_diagram_unification.md`); the legacy wrappers were removed
+  2026-08-24.  **Prerequisite** for the `viz.py` split.
 - **Split the large modules** — `opensees/analysis_builder.py` (~7.4k
   lines), `plotting/viz.py` (~5.7k), `model/geometry.py` (~3.9k).
 - **Pushover solver tuning (empirical pass)** + **CSM Gap-4 benchmark

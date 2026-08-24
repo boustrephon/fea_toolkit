@@ -8,7 +8,8 @@ category: [planning]
 
 # Deprecation Removal Plan
 
-**Status:** ✅ **Complete — implemented 2026-08-21.**
+**Status:** ✅ **Complete — implemented 2026-08-21; Phase B legacy-wrapper
+removal completed 2026-08-24.**
 
 ## Summary of removal
 
@@ -59,9 +60,9 @@ unified, unit-aware** `plot_force_diagram()` entry point that:
 3. **Dispatches 2D vs 3D** and **static vs CQC-RS** from the input shape.
 
 Naming decision: **`plot_force_diagram`** is the unified dispatcher.  The
-four legacy names remain as thin signature-preserving wrappers for one
-release cycle, then are removed in a single cleanup PR (same pattern as the
-Phase 3 removal above).
+four legacy names were kept as thin signature-preserving wrappers for one
+release cycle, then **removed in a single cleanup PR on 2026-08-24** (same
+pattern as the Phase 3 removal above).
 
 **Follow-up hardening (2026-08-24 — same change-set as the doc
 clarifications above):**

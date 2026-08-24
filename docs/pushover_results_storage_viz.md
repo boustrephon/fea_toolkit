@@ -35,7 +35,7 @@ All components follow existing project patterns:
 | **Writer** | `_collect_static()`, `_collect_modal()`, `_collect_rs()` in `npz_writer.py` | `_collect_pushover()` |
 | **Selection** | `Selection` class with `element_types`, `sections`, `materials`, `groups`, `element_ids` | Add `elevation_range`, `story` fields |
 | **Engine** | `AnalysisBuilder.run_pushover_analysis()` returns global dict | Optional per-step `eleResponse()` recording |
-| **Plotting** | `plot_pushover_curve()`, `plot_npz_force_diagram()` accept Builder/dict/NPZ | New functions accept same three sources |
+| **Plotting** | `plot_pushover_curve()`, `plot_force_diagram()` accept Builder/dict/NPZ | New functions accept same three sources |
 | **Viewer** | `ModelViewer` with `RenderBackend` abstraction (PyVista) | Animated deformation via timer callback + HTML export |
 
 ---

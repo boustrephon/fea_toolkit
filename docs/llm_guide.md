@@ -146,7 +146,7 @@ see `.clinerules` §3.11.
 "Plot 3D model (undisplaced)"       → plot_mesh(builder)
 "Plot deformed shape"               → plot_deformed_displacement_3d(builder, results, scale=100)
 "Plot mode shape animation"         → plot_mode_animation(builder, modal_result)
-"Plot force/moment diagrams"         → plot_force_diagram_3d(builder, results, quantity='Mz')
+"Plot force/moment diagrams"         → plot_force_diagram(builder, results, quantity='Mz')
 "Plot pushover capacity curves"     → plot_pushover_curve(results)
 "Plot capacity spectrum (ADRS)"     → plot_capacity_spectrum(adrs_result)
 "Plot storey forces"                → from fea_toolkit.plotting import plot_storey_forces
@@ -154,7 +154,7 @@ see `.clinerules` §3.11.
 "Export 3D scene to HTML"           → ModelViewer(...).export_html(path)
 "Compare two meshes"                → compare_meshes(mesh1, mesh2)
 "Plot model from NPZ"               → from fea_toolkit.io import npz_to_pyvista_frame_mesh
-"NPZ force diagram"                 → from fea_toolkit.plotting import plot_npz_force_diagram
+"NPZ force diagram"                 → from fea_toolkit.plotting import plot_force_diagram
 ```
 
 ### Export
@@ -184,7 +184,7 @@ see `.clinerules` §3.11.
 | Input type | What to call |
 |------------|-------------|
 | `AnalysisBuilder` instance + results dict | `plot_mesh(builder)`, `plot_deformed_displacement_3d(builder, results)` |
-| NPZ file path | `read_results_npz(path)` → data dict → `npz_to_pyvista_frame_mesh(data)`, `plot_npz_force_diagram(data, ...)` |
+| NPZ file path | `read_results_npz(path)` → data dict → `npz_to_pyvista_frame_mesh(data)`, `plot_force_diagram(data, quantity="Mz")` |
 | Results dict only (no builder) | Use NPZ path as intermediate — write to NPZ, then read back for plotting |
 | `MeshModel` + `SAPModelData` | `plot_mesh(builder)` (builder wraps both) |
 
