@@ -87,6 +87,16 @@ _FORCE_LABELS = {
     "tonf": "tonf",
 }
 
+# Supported length-unit display labels — the canonical short forms
+# recognised by the scaling functions (see ``length_scale_factor``).
+_LENGTH_LABELS = {
+    "m": "m",
+    "cm": "cm",
+    "mm": "mm",
+    "ft": "ft",
+    "in": "in",
+}
+
 
 def force_unit_label(units: dict) -> str:
     """Return the display label for the model's force unit.
@@ -115,7 +125,7 @@ def length_unit_label(units: dict) -> str:
         Canonical length-unit label (e.g. ``"m"``, ``"mm"``, ``"in"``).
         Defaults to ``"m"`` when missing or unrecognised.
     """
-    return _normalise_unit((units or {}).get("L"), "m")
+    return _LENGTH_LABELS.get(_normalise_unit((units or {}).get("L"), "m"), "m")
 
 
 # ── Material-property defaults (SI Pa units) ──────────────────────────
