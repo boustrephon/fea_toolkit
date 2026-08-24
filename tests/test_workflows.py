@@ -967,6 +967,78 @@ class TestUnifiedNpzPipeline:
         assert "length_unit" in data
         assert "created" in data
         assert len(str(data["created"])) > 0
+        # Unit labels derive from the model's unit system (N-m sample model)
+        assert str(data["force_unit"][0]) == "N"
+        assert str(data["length_unit"][0]) == "m"
+        assert str(data["forces_coordinate_system"][0]) == "local"
+
+    def test_unified_writer_emits_canonical_units(self, tmp_path):
+        """unified_writer output carries canonical top-level unit keys."""
+        from fea_toolkit.io.npz_reader import read_results_npz
+        from fea_toolkit.io.unified_writer import write_results
+        from fea_toolkit.model.sap_data import SAPModelData
+
+        # Explicit kN-m model so the assertions are deterministic
+        md = SAPModelData(
+            nodes={},
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            units={"F": "KN", "L": "m", "T": "C"},
+        )
+        npz_path = str(tmp_path / "test_units.npz")
+        write_results(npz_path, model=md)
+
+        data = read_results_npz(npz_path)
+        assert str(data["force_unit"][0]) == "kN"
+        assert str(data["length_unit"][0]) == "m"
+        assert str(data["forces_coordinate_system"][0]) == "local"
+
+    def test_hdf5_units(self, tmp_path):
+        """HDF5 output carries the same canonical unit keys as NPZ."""
+        pytest.importorskip("h5py")
+        from fea_toolkit.io.npz_reader import read_results_hdf5
+        from fea_toolkit.io.unified_writer import write_results
+        from fea_toolkit.model.sap_data import SAPModelData
+
+        md = SAPModelData(
+            nodes={},
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            units={"F": "kip", "L": "in", "T": "C"},
+        )
+        h5_path = str(tmp_path / "test_units.h5")
+        write_results(h5_path, model=md, fmt="h5")
+
+        data = read_results_hdf5(h5_path)
+        assert str(data["force_unit"][0]) == "kip"
+        assert str(data["length_unit"][0]) == "in"
+        assert str(data["forces_coordinate_system"][0]) == "local"
+
+    def test_export_results_units_plotting(self, sample_ab, tmp_path):
+        """Builder export_results is unit-aware for the unified plotting path."""
+        from fea_toolkit.plotting.viz import _load_npz_for_plotting
+
+        npz_path = str(tmp_path / "test_export.npz")
+        sample_ab.export_results(npz_path)
+
+        info = _load_npz_for_plotting(npz_path)
+        # Sample model is N-m (SI default)
+        assert info["force_unit"] == "N"
+        assert info["length_unit"] == "m"
 
 
 # ============================================================================
