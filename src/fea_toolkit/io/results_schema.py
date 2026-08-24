@@ -152,6 +152,7 @@ PUSHOVER_NODE_DISP_ARRAYS: dict[str, tuple] = {
 META_ARRAYS: dict[str, tuple] = {
     "force_unit": ("", "str"),
     "length_unit": ("", "str"),
+    "forces_coordinate_system": ("", "str"),
     "created": ("", "str"),
     "analysis_types": ("N_analysis", "str"),
 }
