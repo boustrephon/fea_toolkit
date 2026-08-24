@@ -55,10 +55,12 @@ reproduced.
 
 **Outline steps (remaining).**
 1. Trial a strain-softening concrete option (e.g. `Concrete02` crushing
-   branch for the fiber cover/core) and/or zero-length bond-slip springs at
-   member ends.
+   branch for the fiber cover/core, confined-core hardening capped) and/or
+   zero-length bond-slip springs at member ends (`bond_sp01` or a
+   simplified slip-rotation spring), config-gated off by default.
 2. Re-run the V&E benchmark targeting the experimental post-peak branch
-   (peak ≈ 330 kN near 50 mm, descent to ≈ 250–280 kN by 155 mm).
+   (peak ≈ 330 kN near 50 mm, then a descent — see the completion
+   requirements below for the shape-based targets).
 3. **P4 re-check:** with a real peak on the curve, re-validate
    `bilinearize_rc()` — the equal-area yield should move up toward the
    rebar-yield drift (~0.5–1 % roof drift ≈ 20–40 mm).
@@ -66,9 +68,45 @@ reproduced.
    this follow-up).
 5. Update `docs/shear_failure_modelling.md` + the benchmark doc.
 
-**Validation.** Extend the rigid-end-zone acceptance-band tests with a
-post-peak-descent assertion (peak followed by a descent, e.g. ≥ 10 % drop
-by the 155 mm end).
+**Completion requirements (definition of done).**  P5 is complete when a
+config-gated post-peak mechanism reproduces the experimental V&E
+post-peak *shape* without regressing the in-band strength/stiffness:
+
+1. **Mechanism** — strain-softening concrete (e.g. a `Concrete02` crushing
+   branch for the fiber cover/core, with the confined-core hardening
+   capped) and/or zero-length bond-slip springs at member ends
+   (`bond_sp01` Zhao–Sritharan, or a simplified slip-rotation spring),
+   config-gated off by default so existing fibre models are unchanged.
+   Already ruled out (documented): elastic `GA_v` shear (inert) and the
+   nonlinear MCFT shear backbone (inert on this shear-strong frame;
+   validated on the Duong frame).
+2. **Peak location** — the peak base shear moves off the 155 mm push end to
+   the experimental peak band (≈ 40–70 mm), instead of the current
+   monotonic rise to 155 mm.
+3. **Strength & stiffness** — peak stays in 0.85–1.15 × 330 kN and the
+   secant @ 50 mm stays in 0.9–1.15 × 6.1 kN/mm (no regression vs the
+   accepted rigid-end-zone model).
+4. **Post-peak descent** — a monotonic descent after the peak with ≥ 10 %
+   peak-to-end drop by 155 mm (first target for this flexure-critical
+   frame; trending toward the experimental softening branch).
+5. **Convergence** — the full 155 mm push converges (no non-converged
+   steps) under the default solver.
+6. **P4 re-check** — with a real peak, `bilinearize_rc()` yield moves into
+   the ~0.5–1 % roof-drift band (≈ 20–40 mm), still not at the cracking
+   transition and equal-area exact.
+7. **V&B (1990) variant** — re-run the cut-back-top-reinforcement variant
+   and document its peak + descent (numeric gate deferred until the data
+   is transcribed).
+8. **Regression + docs** — existing V&E band tests, the Duong shear test
+   and `test_bilinearize_rc_real_curve` stay green; add a dedicated
+   post-peak test; update `docs/shear_failure_modelling.md` and
+   `docs/vecchio_emara_benchmark.md`.
+
+**Documented-partial fallback.**  This is a research-grade physics item; if
+the two mechanisms are trialled and the ≥ 10 % descent is still not
+reached, P5 closes as "documented, not reproduced" — recording the
+best-achieved curve, the specific residual gap, and a recommendation for
+the next increment.
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 
@@ -81,7 +119,7 @@ polygon meshing), and `EncasedSection` (embedded section + concrete
 encasement).  "Frame Member Types (RC)" is `⚠️ Partial` in the README —
 materials, RC section shapes, rebar auto-placement and Mander confinement
 are wired; the remaining gaps are these shape patches plus benchmark
-validation (see P3–P5).
+validation (see P5).
 
 **Outline steps.**
 1. Channel / Angle / DoubleAngle / Tee: decompose into `patch('rect')`
