@@ -5193,12 +5193,12 @@ def plot_npz_moment_3d(
 
     # ── Draw original structure wireframe ───────────────────────────
     raw = info["raw_data"]
-    n_tags = raw.get("node_tags")
+    n_tags = raw.get("node_tag")
     n_x = raw.get("node_x")
     n_y = raw.get("node_y")
     n_z = raw.get("node_z")
-    sub_n_i = raw.get("sub_node_i_tag")
-    sub_n_j = raw.get("sub_node_j_tag")
+    sub_n_i = raw.get("frame_node_i")
+    sub_n_j = raw.get("frame_node_j")
     if all(a is not None for a in (n_tags, n_x, n_y, n_z, sub_n_i, sub_n_j)):
         node_map = {
             int(n_tags[k]): (float(n_x[k]), float(n_y[k]), float(n_z[k]))
