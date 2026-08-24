@@ -63,6 +63,25 @@ four legacy names remain as thin signature-preserving wrappers for one
 release cycle, then are removed in a single cleanup PR (same pattern as the
 Phase 3 removal above).
 
+**Follow-up hardening (2026-08-24 — same change-set as the doc
+clarifications above):**
+
+- `io/unified_writer.py::write_results` now validates
+  `forces_coordinate_system` before serialising — only `"local"` /
+  `"global"` accepted, casing variants (e.g. `"Local"`) rejected, so NPZ
+  readers never interpret an invalid value as global forces.
+- `plotting/force_diagram.py::_npz_unit` takes an explicit default;
+  legacy NPZ files without `force_unit` / `length_unit` metadata now fall
+  back to `"kN"` / `"m"` instead of `"?"`.
+- `_render_rs` labels `Fx` / `Fy` / `Fz` with `force_unit` (previously an
+  empty string), matching the 2D static renderer; moment/shear unchanged.
+- `_resolve_source` runs the RS branch only when `source` is a list or a
+  dict carrying `element_results` — builder sources with `kind="rs"` now
+  reach the documented Builder+RS handling later in the function.
+- The NPZ array contract is clarified in
+  `docs/force_diagram_unification.md`: arrays are indexed in frame-element
+  order (`n_frame_elements` = active `mesh_model.frame_elements`).
+
 ## Trigger
 
 The **next release** ships with RC nonlinear static analysis working
