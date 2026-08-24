@@ -10,7 +10,12 @@ The toolkit uses a **two-stage pipeline** (see docs/workflow.md):
 Modules
 -------
 preprocessor — Topology preparation: element splitting, area meshing, edge constraints.
-analysis_builder — OpenSees domain construction, loads, modal/static/pushover/RS analysis.
+analysis_builder — Public :class:`AnalysisBuilder` facade (domain construction,
+    loads, limit-state columns) composed from domain mixins:
+    _materials — uniaxial + nD material creation.
+    _sections — frame/shell section creation.
+    _elements — frame/wall/shell element creation, braces, lumped hinges.
+    _runners — analysis execution and result extraction (static/modal/RS/pushover).
 recorder — Tcl script export (:class:`RecordingOpenSees` proxy), Xara Tcl runtime runner.
 builder — Tcl export functions (:func:`export_model_to_tcl`, :func:`pushover_tcl`).
 pushover — 4-direction pushover runner with gravity + lateral load sequences.

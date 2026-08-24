@@ -1,4 +1,19 @@
-"""Visualisation helpers for fea_toolkit models and results."""
+"""Visualisation helpers for fea_toolkit models and results.
+
+Modules
+-------
+viz — Re-export facade over the viewer modules (kept for import stability).
+viz_common — Shared low-level helpers (isometric view, colour, legends, timers).
+viz_model — Model/mesh/deformed/modal/building/comparison viewers.
+viz_pushover — Pushover hinge/damage/envelope/animation/capacity-curve plots.
+viz_forces — 3D force-diagram renderer and legacy 3D entry points.
+force_diagram — Unified 2D/RS force-diagram dispatcher (:func:`plot_force_diagram`).
+viewer — Backend-agnostic :class:`ModelViewer`.
+renderers — Render-backend abstraction (PyVista backend).
+diagnostics — Connectivity diagnostics.
+interactive_viewer — Browser/interactive viewer.
+report — Storey force/displacement plots.
+"""
 
 from .diagnostics import (
     find_disconnected_nodes,

@@ -7,7 +7,13 @@ Modules
 sap_data — All dataclass types: SAPModelData, Node, FrameElement, Section, etc.
 selection — Composable element filtering (:class:`Selection`).
 mesh_model — Frozen topology after preprocessing (:class:`MeshModel`).
-geometry — Element splitting, area meshing, load redistribution, local axes.
+geometry — Re-export facade for the geometry helpers:
+    geometry_core — Vector/orientation math (local axes, interpolation,
+        :class:`SpatialGrid`, polygon area).
+    geometry_frames — Frame-element splitting, load redistribution, rigid
+        end offsets.
+    geometry_mesh — Area meshing, overlap/constraint-edge detection,
+        wall/slab intersection.
 sections — Manufacturer section library (:class:`SectionLibrary`).
 stories — Storey identification and summarisation (:func:`identify_stories`).
 storey_response — Storey displacements, drifts, shears, modal drifts.

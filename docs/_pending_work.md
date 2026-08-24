@@ -11,44 +11,17 @@ category: [planning]
 
 > Priority-ordered register (maintained 2026-08-24).  Every pending item
 > below is cross-referenced to its source document.  **Sequencing notes:**
-> Tier 1 — P1 (force-diagram unification) landed 2026-08-24, unblocking the
-> P2 `viz.py` split.  The Tier 2 physics items cluster around the Vecchio &
+> Tier 1 — P1 (force-diagram unification) and P2 (large-file splits) both
+> landed 2026-08-24.  The Tier 2 physics items cluster around the Vecchio &
 > Emara benchmark — P3/P4 are blocked on that benchmark being final.  Tiers
 > 3–4 are independent feature gaps and deferred housekeeping.
 
 ### Tier 1 — Active refactors (sequenced, design ready)
 
-#### P2 — Large-file splits (suggested order: viz → geometry → analysis_builder)
-**Unblocked** — P1 (force-diagram unification, Phase B) landed 2026-08-24; the
-split now operates on the smaller post-unification module.
-
-**Split map.**
-- `plotting/viz.py` (~5.7k lines, PyVista viewers):
-  - `viz.py` — model / deflected-shape viewers, section viewers.
-  - `viz_forces.py` — the Phase B force-diagram family.
-  - `viz_modal.py` — mode shapes, animations (`plot_mode_animation`).
-  - `viz_mesh.py` — mesh-quality views if distinct from model viewers.
-- `model/geometry.py` (~3.9k):
-  - `geometry.py` — core vector/line math.
-  - `geometry_sections.py` — section geometric properties (area, inertia,
-    torsion constants).
-  - `geometry_mesh.py` — meshing/refinement helpers.
-- `opensees/analysis_builder.py` (~7.4k, last) — keep the class as the
-  public facade; extract private helper modules:
-  - `_sections.py` — frame/shell/fiber section creation.
-  - `_materials.py` — uniaxial + nD material creation (incl. the
-    `PlaneStressUserMaterial` pair).
-  - `_elements.py` — frame/wall/shell element creation.
-  - `_runners.py` — per-analysis-type runners (modal, RS, pushover, ND).
-
-**Outline steps.** 1) Pure move-refactor, no signature changes; 2) keep
-`__all__` + re-exports stable in the original module (no public-name churn);
-3) run the full suite (~1,000 tests) after each individual split; 4) update
-`typings/` only if a new module introduces new `ops.*` calls; 5) each split
-lands as its own commit/PR for reviewability.
-
-**Constraints.** Behaviour-preserving moves only; per-split green suite;
-no new dependencies.
+#### P2 — Large-file splits ✅ **Done 2026-08-24** (commits `4fb28b4`,
+`e5b0382`, `a4ff43f`)
+The three largest modules were split behaviour-preservingly.  Final layout
+and validation → the DONE register below.
 
 ### Tier 2 — Correctness / physics follow-ups
 
@@ -251,6 +224,44 @@ Milestones 1–3 of `docs/force_diagram_unification.md` landed; milestone 4
   docstring.
 - Validation: full suite `1090 passed, 4 xfailed`; `mkdocs build --strict`
   green; ruff clean.
+
+## DONE (2026-08-24 — P2 large-file splits)
+
+The three largest modules were split behaviour-preservingly — pure
+move-refactor, one commit per split, full suite green after each, no
+public-name churn (facade modules re-export every moved name).
+
+- **`plotting/viz.py` (5.4k → 139-line facade)** — commits `4fb28b4`:
+  - `viz_common.py` — shared low-level helpers (isometric view, colour
+    mapping/legends, animation timers, `_NPZ_TYPES`/`_DEFAULT_HINGE_CMAP`).
+  - `viz_model.py` — model / mesh / deformed / modal / building /
+    comparison viewers (`plot_mesh`, `plot_deformed_displacement_3d`,
+    `plot_mode_animation`, `plot_model_comparison`, …).
+  - `viz_pushover.py` — hinge / shell-damage / envelope / animation /
+    capacity-curve plots.
+  - `viz_forces.py` — 3D force-diagram renderer + legacy 3D entry points.
+  - `force_diagram.py` keeps the unified 2D/RS dispatcher; its lazy imports
+    now target the new modules (both sides function-local → no cycle).
+- **`model/geometry.py` (3.9k → 83-line facade)** — commit `e5b0382`:
+  - `geometry_core.py` — vector/orientation math (local axes, interp,
+    `SpatialGrid`, polygon area).
+  - `geometry_frames.py` — frame-element splitting, load redistribution,
+    rigid end offsets.
+  - `geometry_mesh.py` — area meshing, overlap/constraint-edge detection,
+    wall/slab intersection.
+- **`opensees/analysis_builder.py` (7.4k → 2.6k facade)** — commit
+  `a4ff43f`: `AnalysisBuilder` is now a facade class with mixin bases:
+  - `_materials.py` — `MaterialMixin` (uniaxial + nD materials).
+  - `_sections.py` — `SectionMixin` (frame/shell sections, layered shell).
+  - `_elements.py` — `ElementMixin` (frame/wall/shell elements, braces,
+    lumped hinges).
+  - `_runners.py` — `RunnerMixin` (analysis execution, mass computation,
+    result extraction/serialization) + `_normalise_frame_response` /
+    `_record_step`.
+- Tests: `tests/test_element_properties.py` patches `_materials.ops` (the
+  `RecordingOpenSees` capture target moved with the code).
+- Validation: full suite `1091 passed, 4 xfailed` after each split; ruff
+  clean.
 
 ## DONE (2026-08-24 — docs build repair + site restructure)
 
