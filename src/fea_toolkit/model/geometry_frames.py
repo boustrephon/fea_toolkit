@@ -7,20 +7,10 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from collections.abc import Sequence
 from typing import Any, Optional
 
 import numpy as np
 
-from ..model.sap_data import (
-    AreaElement,
-    AreaUniformLoad,
-    FrameDistributedLoad,
-    FrameElement,
-    FrameEndOffset,
-    Node,
-    Restraint,
-)
 from .geometry_core import (
     SpatialGrid,
     _segment_intersection_3d,
@@ -29,6 +19,14 @@ from .geometry_core import (
     list_interp,
     point_on_segment,
     polygon_area_3d,
+)
+from .sap_data import (
+    AreaElement,
+    AreaUniformLoad,
+    FrameDistributedLoad,
+    FrameElement,
+    FrameEndOffset,
+    Node,
 )
 
 
@@ -1272,141 +1270,3 @@ def derive_rigid_end_offsets(
                 )
 
     return result
-
-
-def _point_uv_on_quad(
-    pt: np.ndarray,
-    corners: list[np.ndarray],
-) -> Optional[tuple[float, float]]:
-    """Estimate parametric (u, v) of *pt* on a bilinear quad.
-
-    Uses Newton iteration on the bilinear surface
-    ``p(u,v) = (1-v)[(1-u)c0 + u*c1] + v[(1-u)c3 + u*c2]``.
-
-    Returns:
-        ``(u, v)`` clamped to ``[0, 1]``, or ``None`` if the point is
-        not on the quad (residual exceeds 1 % of the quad diagonal).
-    """
-    c0, c1, c2, c3 = corners
-    diag = float(np.linalg.norm(c2 - c0))
-    tol = max(1e-8, 0.01 * diag)
-    u, v = 0.5, 0.5
-    for _ in range(20):
-        top = c0 * (1.0 - u) + c1 * u
-        bot = c3 * (1.0 - u) + c2 * u
-        p = top * (1.0 - v) + bot * v
-        dp_du = (c1 - c0) * (1.0 - v) + (c2 - c3) * v
-        dp_dv = bot - top
-        r = p - pt
-        J = np.column_stack([dp_du, dp_dv])  # (3, 2)
-        JTJ = J.T @ J
-        try:
-            delta = np.linalg.solve(JTJ, -J.T @ r)
-        except np.linalg.LinAlgError:
-            break
-        u = float(np.clip(u + delta[0], 0.0, 1.0))
-        v = float(np.clip(v + delta[1], 0.0, 1.0))
-        if float(np.linalg.norm(delta)) < 1e-8:
-            break
-    # Residual check: reject points that aren't actually on the quad
-    top = c0 * (1.0 - u) + c1 * u
-    bot = c3 * (1.0 - u) + c2 * u
-    p_final = top * (1.0 - v) + bot * v
-    if float(np.linalg.norm(p_final - pt)) > tol:
-        return None
-    return u, v
-
-
-def _propagate_edge_restraints(
-    node_grid: Sequence[Sequence[Optional[str]]],
-    n_u: int,
-    n_v: int,
-    restraints: dict[str, Restraint],
-) -> None:
-    """Propagate edge-node restraints via bitwise-AND of adjacent corners.
-
-    For each intermediate node on the four edges of an ``n_u×n_v`` mesh
-    grid, looks up the two corner nodes at the ends of that edge in
-    *restraints*.  If both corners are restrained, the intermediate node
-    receives the bitwise AND of the two ``dofs`` lists, provided at least
-    one DOF survives the AND (an all-zero result is not stored).  Interior nodes
-    receive any DOF bit that is common to **all four** corners (the
-    bitwise AND across the four corner ``dofs`` lists).  Corners are
-    untouched.  Nodes that already carry an explicit restraint (for
-    example, pre-existing nodes reused via coordinate deduplication) are
-    never overwritten — only newly created nodes inherit the propagated
-    restraints.
-
-    Example: corner A has ``dofs=[1,0,1,0,0,1]`` and corner B has
-    ``dofs=[1,1,1,1,0,0]`` — a node created between them receives
-    ``[1,0,1,0,0,0]``.
-
-    The function returns immediately when there are no restraints to
-    propagate or when neither mesh direction has intermediate edge nodes
-    (``n_u < 2`` **and** ``n_v < 2``).  A one-row mesh (``n_u >= 2``,
-    ``n_v == 1``) is still processed: the intermediate nodes of its
-    bottom and top edges inherit the corner restraints, while its
-    left/right edges have no intermediate nodes.
-
-    Args:
-        node_grid: ``(n_v+1)×(n_u+1)`` grid of node IDs (str or None).
-        n_u: Subdivision count in the u-direction (grid columns = n_u+1).
-        n_v: Subdivision count in the v-direction (grid rows = n_v+1).
-        restraints: Model restraints dict, modified in place.
-    """
-    if not restraints or (n_u < 2 and n_v < 2):
-        return
-
-    def _and_dofs(r1: Restraint, r2: Restraint) -> list[int]:
-        return [a & b for a, b in zip(r1.dofs, r2.dofs)]
-
-    def _apply(c1_id: Optional[str], c2_id: Optional[str], nid: Optional[str]) -> None:
-        if nid is None or c1_id is None or c2_id is None:
-            return
-        if nid in (c1_id, c2_id):
-            return
-        # Nodes that already carry an explicit restraint (e.g. existing
-        # nodes reused via coordinate deduplication) keep it unchanged.
-        if nid in restraints:
-            return
-        r1 = restraints.get(c1_id)
-        r2 = restraints.get(c2_id)
-        if r1 is not None and r2 is not None:
-            dofs = _and_dofs(r1, r2)
-            # Skip all-zero intersections — a Restraint with no fixed DOF is
-            # a no-op that would otherwise clutter later propagation and the
-            # Tcl/OpenSees fix commands.  Matches the interior block below.
-            if any(dofs):
-                restraints[nid] = Restraint(dofs=dofs)
-
-    c_bl = node_grid[0][0]  # bottom-left  (u=0, v=0)
-    c_br = node_grid[0][n_u]  # bottom-right (u=n_u, v=0)
-    c_tr = node_grid[n_v][n_u]  # top-right    (u=n_u, v=n_v)
-    c_tl = node_grid[n_v][0]  # top-left     (u=0, v=n_v)
-
-    # bottom edge (j=0): c_bl -- c_br
-    for i in range(1, n_u):
-        _apply(c_bl, c_br, node_grid[0][i])
-    # top edge (j=n_v): c_tl -- c_tr
-    for i in range(1, n_u):
-        _apply(c_tl, c_tr, node_grid[n_v][i])
-    # left edge (i=0): c_bl -- c_tl
-    for j in range(1, n_v):
-        _apply(c_bl, c_tl, node_grid[j][0])
-    # right edge (i=n_u): c_br -- c_tr
-    for j in range(1, n_v):
-        _apply(c_br, c_tr, node_grid[j][n_u])
-
-    # ── Interior nodes: DOFs common to all four corners ──────────
-    r_bl = restraints.get(c_bl)
-    r_br = restraints.get(c_br)
-    r_tr = restraints.get(c_tr)
-    r_tl = restraints.get(c_tl)
-    if all(r is not None for r in (r_bl, r_br, r_tr, r_tl)):
-        common = [r_bl.dofs[k] & r_br.dofs[k] & r_tr.dofs[k] & r_tl.dofs[k] for k in range(6)]
-        if any(common):
-            for j in range(1, n_v):
-                for i in range(1, n_u):
-                    nid = node_grid[j][i]
-                    if nid is not None and nid not in restraints:
-                        restraints[nid] = Restraint(dofs=list(common))

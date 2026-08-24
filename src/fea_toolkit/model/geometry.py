@@ -19,8 +19,6 @@ from .geometry_core import (
     rotate_about_axis,
 )
 from .geometry_frames import (
-    _point_uv_on_quad,
-    _propagate_edge_restraints,
     apply_frame_end_offsets,
     beam_load_to_nodal_loads,
     child_length,
@@ -33,6 +31,8 @@ from .geometry_frames import (
     trapezoidal_force_split,
 )
 from .geometry_mesh import (
+    _point_uv_on_quad,
+    _propagate_edge_restraints,
     find_constraint_edges,
     find_wall_nodes_inside_slabs,
     mesh_area_elements,
