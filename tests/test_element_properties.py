@@ -10,7 +10,7 @@ in ``test_workflows.py`` or add dedicated tests there.
 import openseespy.opensees as ops
 import pytest
 
-import fea_toolkit.opensees.analysis_builder as ab_mod
+import fea_toolkit.opensees._materials as mat_mod
 from fea_toolkit.model.mesh_model import MeshModel, WallElement
 from fea_toolkit.model.sap_data import (
     AreaElementProperties,
@@ -337,11 +337,11 @@ class TestFSAMUniaxialDispatch:
     def test_create_materials_fsam_laws(self):
         builder = self._make_builder()
         rec = RecordingOpenSees(ops)
-        ab_mod.ops = rec
+        mat_mod.ops = rec
         try:
             builder._create_materials()
         finally:
-            ab_mod.ops = ops
+            mat_mod.ops = ops
             ops.wipe()
 
         # Tags are auto-assigned: WallConc=1, WallSteel=2, FrameSteel=3.
@@ -368,11 +368,11 @@ class TestFSAMUniaxialDispatch:
         # Drop the consuming LayeredShell section → the FSAM is unconsumed.
         builder.mesh_model.layered_shell_sections = {}
         rec = RecordingOpenSees(ops)
-        ab_mod.ops = rec
+        mat_mod.ops = rec
         try:
             builder._create_materials()
         finally:
-            ab_mod.ops = ops
+            mat_mod.ops = ops
             ops.wipe()
 
         laws = {
@@ -397,11 +397,11 @@ class TestFSAMUniaxialDispatch:
         # Drop the consuming LayeredShell section → the FSAM is unconsumed.
         builder.mesh_model.layered_shell_sections = {}
         rec = RecordingOpenSees(ops)
-        ab_mod.ops = rec
+        mat_mod.ops = rec
         try:
             builder.build_domain()
         finally:
-            ab_mod.ops = ops
+            mat_mod.ops = ops
             ops.wipe()
 
         fsam_calls = [
@@ -449,11 +449,11 @@ class TestFSAMUniaxialDispatch:
         )
         builder = AnalysisBuilder(mm, {"verbose": False})
         rec = RecordingOpenSees(ops)
-        ab_mod.ops = rec
+        mat_mod.ops = rec
         try:
             builder._create_materials()
         finally:
-            ab_mod.ops = ops
+            mat_mod.ops = ops
             ops.wipe()
         # No FSAM nd_materials → all materials stay Elastic.
         assert builder.material_tags["FrameConc"] == 1
