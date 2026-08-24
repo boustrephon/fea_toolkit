@@ -22,10 +22,13 @@ All items in the inventory below have been actioned:
   them (`_get_local_end_forces`, `_plot_moment_flags`, `_plot_moment_tubes`,
   `_add_reaction_arrows`, `_build_shell_geometry`).  `_build_deformed_mesh`
   is retained — it is used by the replacement `plot_mode_animation()`.
-- **`plot_force_diagram` → `plot_rs_force_diagram`** — renamed (it has no
-  direct replacement) and modernised: accepts the RS `element_results`
+- **`plot_force_diagram` → `plot_rs_force_diagram`** — the pre-unification
+  2D CQC diagram implementation was removed and its behaviour folded into
+  a modernised `plot_rs_force_diagram` (accepts the RS `element_results`
   list **or** the full `extract_element_rs_forces()` dict, plus
-  `force_unit` / `length_unit` / `both_ends` options.
+  `force_unit` / `length_unit` / `both_ends` options).  The
+  `plot_force_diagram` **name** was later reclaimed in Phase B as the
+  unified dispatcher — see the next section.
 - **Exports** — `plotting/__init__.py` and the root `__init__.py` no
   longer expose the deprecated names; the canonical quick-start now uses
   `plot_mesh` / `plot_deformed_displacement_3d`.
@@ -88,7 +91,7 @@ documentation CI.
 | `plot_static_shear_3d` | thin wrapper | ~5 |
 | `plot_static_axial_3d` | thin wrapper | ~5 |
 | `plot_static_force_diagram` | `plot_npz_force_diagram` | ~110 |
-| `plot_force_diagram` | (no direct replacement — 2D CQC diagram) | ~50 |
+| `plot_force_diagram` (pre-unification 2D CQC impl) | (no direct replacement — 2D CQC diagram; name now the Phase B unified dispatcher) | ~50 |
 | Private helpers: `_get_local_end_forces`, `_plot_moment_flags`, `_plot_moment_tubes`, `_add_reaction_arrows` (used only by deprecated fns) | — | ~150 |
 
 **Total removed: ~820 lines**

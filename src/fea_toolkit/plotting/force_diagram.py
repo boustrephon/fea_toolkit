@@ -253,12 +253,15 @@ def _build_static_force_map(source, geometry: dict, force_data: dict) -> dict:
     return force_map
 
 
-def _npz_unit(source: dict, key: str) -> str:
-    """Read a length-1 string array from NPZ data (e.g. ``force_unit``)."""
+def _npz_unit(source: dict, key: str, default: str = "?") -> str:
+    """Read a length-1 string array from NPZ data (e.g. ``force_unit``).
+
+    Returns *default* when the requested unit is missing or empty.
+    """
     arr = source.get(key)
     if arr is not None and len(arr):
         return str(arr[0])
-    return "?"
+    return default
 
 
 # ── Input resolution ─────────────────────────────────────────────────
@@ -298,7 +301,7 @@ def _resolve_source(
     quantity = _normalise_quantity(quantity) or "My"
 
     # ── RS list / dict ────────────────────────────────────────────────
-    if kind == "rs" or isinstance(source, list):
+    if isinstance(source, list) or (isinstance(source, dict) and "element_results" in source):
         units = None
         if isinstance(source, dict):
             records = source.get("element_results") or []
@@ -337,8 +340,8 @@ def _resolve_source(
         return ForceDiagramData(
             kind="static",
             quantity=quantity or "My",
-            force_unit=_npz_unit(source, "force_unit"),
-            length_unit=_npz_unit(source, "length_unit"),
+            force_unit=_npz_unit(source, "force_unit", "kN"),
+            length_unit=_npz_unit(source, "length_unit", "m"),
             nodes=geometry["nodes"],
             frames=geometry["frames"],
             force_map=force_map,
@@ -419,7 +422,7 @@ def _render_rs(
     z = [r["z_mid"] for r in sorted_res]
 
     q = quantity.lower()
-    unit = force_unit if q.startswith(("m", "v")) else ""
+    unit = force_unit if q.startswith(("m", "v", "f")) else ""
 
     fig, ax = plt.subplots(figsize=figsize)
     if both_ends:

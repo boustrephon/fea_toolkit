@@ -538,6 +538,12 @@ def write_results(
     Returns:
         Absolute path to the written file.
     """
+    if forces_coordinate_system not in ("local", "global"):
+        raise ValueError(
+            f"forces_coordinate_system must be 'local' or 'global', "
+            f"got {forces_coordinate_system!r}"
+        )
+
     # Resolve model source (MeshModel or SAPModelData — both have .nodes)
     src = mesh_model or model
     if src is None:
