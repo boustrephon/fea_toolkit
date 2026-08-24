@@ -361,7 +361,7 @@ round-trip guarantee) is documented in ``docs/units_conversion.md``.
 8. OpenSees source: `SRC/material/uniaxial/limitState/` (`ShearCurve.cpp`,
    `AxialCurve.cpp`, `ThreePointCurve.cpp`, `LimitStateMaterial.cpp`).
 9. Implementation: `fea_toolkit/capacity/elwood_limit_state.py`,
-   `fea_toolkit/opensees/analysis_builder.py` (`_prepare_limit_state_columns` /
+   `fea_toolkit/opensees/_limit_state.py` (`_prepare_limit_state_columns` /
    `_create_limit_state_columns`), `tests/test_elwood_limit_state.py`,
    `tests/test_limit_state_columns.py`, `local/elwood_prototype.py`,
    `local/elwood_phase0_checkpoint.md`.

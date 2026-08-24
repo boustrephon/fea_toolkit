@@ -24,6 +24,14 @@ category: [planning]
 > overloads, `Optional`-access) — the benign categories listed in `.clinerules`
 > §11 — not runtime bugs.  Phase 2 (`pyrightconfig.json`) was not committed;
 > the recommended next step is a fresh per-file triage of the Phase 3 count.
+>
+> **Status update (2026-08-24):** the historical file paths in this document
+> are pre-split.  Post-P2 + runner-split: `model/geometry.py` is a 79-line
+> facade (errors moved to `geometry_core/frames/mesh`), `plotting/viz.py` is a
+> 136-line facade (errors in `viz_*`), and the runner errors moved from
+> `opensees/analysis_builder.py` into the `_runner_*` modules.  Re-run
+> `python -m pyright src/` for a fresh per-file triage before using the
+> counts below.
 
 ## Quick Start (for a fresh task)
 
@@ -94,7 +102,8 @@ These are errors that pyright is **correct** about and will cause runtime failur
 
 - **Line 1748**: `"get_SAP_vecxz" is unbound`
 - **Fix**: This is likely a missing import from `..model.geometry`. Add the import.
-- **File**: `src/fea_toolkit/opensees/analysis_builder.py`
+- **File (baseline)**: `src/fea_toolkit/opensees/analysis_builder.py` — the
+  symbol now lives in `model/geometry_core.py`; the bug was fixed.
 
 ### 1.8 Possibly-unbound `np` in `src/fea_toolkit/model/storey_response.py`
 

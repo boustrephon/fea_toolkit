@@ -37,7 +37,7 @@ now complete.
 
 | Fix | File | Rationale |
 |---|---|---|
-| `run_modal_analysis()` now returns `'nodal_masses'` (keyed by node tag) via new `_query_nodal_masses()` helper | `src/fea_toolkit/opensees/analysis_builder.py` | The ADRS conversion in `csm.pushover_to_adrs()` reads `modal_results['nodal_masses']`; without it the conversion degenerated to `Gamma = M_eff = 1.0` |
+| `run_modal_analysis()` now returns `'nodal_masses'` (keyed by node tag) via new `_query_nodal_masses()` helper | `src/fea_toolkit/opensees/_runner_static.py` | The ADRS conversion in `csm.pushover_to_adrs()` reads `modal_results['nodal_masses']`; without it the conversion degenerated to `Gamma = M_eff = 1.0` |
 | Best-mode selection rejects degenerate modes (`M_star < 1e-8·M_total`) | `src/fea_toolkit/model/csm.py` | For the symmetric 1-storey frame, the orthogonal mode's machine-noise ratio `L²/M_star` spuriously out-ranked the true push-direction mode, giving `Gamma ≈ 1.8e16` |
 | Control-node lookup accepts `'control_node'` (and `'control_node_tag'` fallback) | `src/fea_toolkit/model/csm.py` | `run_pushover_analysis()` emits `'control_node'`; the lookup previously missed it so `phi_control` fell back to 1.0 |
 | ADRS `S_d` uses `abs(Gamma)` | `src/fea_toolkit/model/csm.py` | Eigenvector sign is arbitrary; a negative `Gamma` flipped `S_d` negative, masking all capacity points |
