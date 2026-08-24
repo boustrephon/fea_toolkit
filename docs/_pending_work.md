@@ -9,7 +9,7 @@ category: [planning]
 
 ## PENDING (active — not yet done)
 
-> Priority-ordered register (maintained 2026-08-23).  Every pending item
+> Priority-ordered register (maintained 2026-08-24).  Every pending item
 > below is cross-referenced to its source document.  **Sequencing notes:**
 > Tier 1 is gated — P1 (force-diagram unification) must land *before* the
 > P2 `viz.py` split.  The Tier 2 physics items cluster around the Vecchio &
@@ -172,7 +172,7 @@ post-peak-descent assertion (or a dedicated benchmark test).
 ### Tier 3 — Feature gaps (placeholders / partial)
 
 #### P6 — Section fiber patches (placeholders) + RC partial
-Source: `README.md` §5 "Section Types and Properties" table.
+Source: repo-root `README.md` §5 "Section Types and Properties" table.
 
 **What.** `to_fiber_patches()` is `🚧 Placeholder` for `ChannelSection`,
 `AngleSection`, `DoubleAngleSection`, `TeeSection`, `SDSection` (needs
@@ -199,7 +199,7 @@ and Tcl export (`export_model_to_tcl`).
 
 #### P7 — Python-native nonlinear dynamic (time-history) integration
 Source: `docs/nonlinear_dynamic_analysis.md` (frontmatter + Notes);
-`README.md` "TODO / Future Work".
+repo-root `README.md` "TODO / Future Work" section.
 
 **What.** `run_nonlinear_dynamic_analysis()` is complete **via the Tcl
 export + Xara/OpenSeesRT path**.  A **Python-native** transient integration
@@ -269,6 +269,27 @@ layers (Phases 1–4) are stable.
   wheel's PSUMAT is a stub ("PSUMAT - NOT DEFINED IN THIS VERSION, SOURCE
   CODE RESTRICTED") and CSMM construction still fails.  Blocked on a full
   (non-restricted) build — see `docs/shell_support.md` Options C/D1.
+
+## DONE (2026-08-24 — docs build repair + site restructure)
+
+- **Strict docs build green again** (`mkdocs build --strict`): the
+  `check_brace_buckling()` `Warns:` docstring had its continuation lines at
+  the same indent as the `UserWarning:` entry, so griffe parsed each line as
+  a new `'warning: description'` item and failed the CI gate.  Re-indented
+  them, plus four more latent "Confusing indentation" docstring sections
+  (`s2k_parser.SAP2000Parser` reinf tables, `csm.check_modal_pushover_mode`,
+  `analysis_builder._normalise_frame_response` / `_record_step`,
+  `viz._resolve_pushover_data`).
+- **CI**: Actions bumped to node24 (checkout@v7, setup-python@v7,
+  upload-pages-artifact@v5, deploy-pages@v5) + `actions: read` permission.
+- **Site restructure**: `docs/_link_mapper.py` hook now renders the
+  repo-root `README.md` as the site home (repo-root-relative links remapped
+  for the built site); the auto-generated docs index was renamed
+  `docs/README.md` → `docs/documentation_index.md`; `docs/index.md` added;
+  helper scripts (`_*.py`) excluded from the rendered site.
+- **Register note**: `docs/_pending_work.md` remains an internal (non-nav)
+  doc excluded from the auto-generated index; `README.md` filename
+  references in P6/P7 now mean the **repo-root** README.
 
 ## DONE (2026-08-21 — analysis-manager simplification)
 
