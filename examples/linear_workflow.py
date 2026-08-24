@@ -1623,9 +1623,9 @@ def main():
     parser.add_argument(
         "--cache",
         action="store_true",
-        help="Save modal results + mode shapes to "
-        "examples/output/modal_results.pkl "
-        "and examples/output/mode_shapes.npz for fast reload.",
+        help="Save modal results to examples/output/results.npz "
+        "(mode shapes are included only when --shapes/--animate/--gif "
+        "request their extraction) for fast reload with --from-cache.",
     )
     parser.add_argument(
         "--from-cache",
