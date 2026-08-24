@@ -770,13 +770,6 @@ class ElementMixin:
                 new_elements[eid] = elem
                 continue
 
-            # Type-specific section tag lookup
-            etype = self._frame_element_types.get(eid)
-            type_key = f"{sec_name}__{etype}" if etype else None
-            if type_key and type_key in self.section_tags:
-                self.section_tags[type_key]
-            else:
-                self.section_tags[sec_name]
             sec = self.mesh_model.sections.get(sec_name)
             if sec is None:
                 new_elements[eid] = elem
