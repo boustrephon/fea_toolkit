@@ -26,6 +26,7 @@ from typing import Any, Optional
 import numpy as np
 
 from ..model.mesh_model import MeshModel
+from ..utils import force_unit_label, length_unit_label
 from .results_schema import make_static_key
 
 # ═══════════════════════════════════════════════════════════════════
@@ -393,10 +394,15 @@ def collect_rs_nodal_displacement_arrays(
 # ═══════════════════════════════════════════════════════════════════
 
 
-def _build_metadata(model, static_results=None, modal_result=None, config=None) -> str:
+def _build_metadata(
+    model, static_results=None, modal_result=None, config=None, forces_coordinate_system="local"
+) -> str:
     """Build JSON metadata string."""
     meta = {
         "created": datetime.datetime.now().isoformat(),
+        "force_unit": force_unit_label(getattr(model, "units", {})),
+        "length_unit": length_unit_label(getattr(model, "units", {})),
+        "forces_coordinate_system": forces_coordinate_system,
         "model_name": getattr(model, "model_name", ""),
         "num_nodes": len(model.nodes),
         "num_frames": len(
@@ -500,6 +506,9 @@ def write_results(
     rs_nodal_displacements: Optional[dict[int, tuple]] = None,
     fmt: str = "npz",
     config: Optional[dict] = None,
+    force_unit: Optional[str] = None,
+    length_unit: Optional[str] = None,
+    forces_coordinate_system: str = "local",
 ) -> str:
     """Write model geometry + analysis results to a unified output file.
 
@@ -516,6 +525,15 @@ def write_results(
         rs_results: Dict with keys ``rs_x``, ``rs_y`` from ``run_rs()``.
         fmt: ``"npz"`` (default) or ``"h5"``.
         config: Builder config dict (included in metadata).
+        force_unit: Optional force-unit label override.  ``None`` derives
+            it from ``model.units`` via
+            :func:`fea_toolkit.utils.force_unit_label`.
+        length_unit: Optional length-unit label override.  ``None`` derives
+            it from ``model.units`` via
+            :func:`fea_toolkit.utils.length_unit_label`.
+        forces_coordinate_system: Coordinate system of the recorded frame
+            end-force arrays (``"local"`` or ``"global"``).  Defaults to
+            ``"local"`` — the OpenSees ``localForces`` recorder convention.
 
     Returns:
         Absolute path to the written file.
@@ -557,8 +575,19 @@ def write_results(
     if rs_nodal_displacements:
         arrays.update(collect_rs_nodal_displacement_arrays(rs_nodal_displacements))
 
+    # ── Canonical unit / local-force metadata (same keys as npz_writer) ──
+    # Length-1 string arrays so the unified plotting readers
+    # (``_load_npz_for_plotting`` etc.) resolve units from either writer.
+    _fu = force_unit or force_unit_label(getattr(src, "units", {}))
+    _lu = length_unit or length_unit_label(getattr(src, "units", {}))
+    arrays["force_unit"] = np.array([_fu], dtype=str)
+    arrays["length_unit"] = np.array([_lu], dtype=str)
+    arrays["forces_coordinate_system"] = np.array([forces_coordinate_system], dtype=str)
+
     # Metadata
-    arrays["metadata_json"] = np.array([_build_metadata(src, static_results, modal_result, config)])
+    arrays["metadata_json"] = np.array(
+        [_build_metadata(src, static_results, modal_result, config, forces_coordinate_system)]
+    )
 
     # Write — validate fmt explicitly
     if fmt == "h5":
