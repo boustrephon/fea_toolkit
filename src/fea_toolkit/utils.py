@@ -38,6 +38,8 @@ _UNIT_ALIASES = {
     "kilonewtons": "kn",
     "meganewton": "mn",
     "meganewtons": "mn",
+    "giganewton": "gn",
+    "giganewtons": "gn",
     "kilogramforce": "kgf",
     "kg": "kgf",
     "pound": "lb",
@@ -70,6 +72,50 @@ def _normalise_unit(raw: Optional[str], default: str) -> str:
     if not isinstance(raw, str) or not raw:
         return default
     return _UNIT_ALIASES.get(raw.lower(), raw.lower())
+
+
+# ── Unit display labels (for axis/legend text) ────────────────────────
+
+_FORCE_LABELS = {
+    "n": "N",
+    "kn": "kN",
+    "mn": "MN",
+    "gn": "GN",
+    "kgf": "kgf",
+    "lb": "lb",
+    "kip": "kip",
+    "tonf": "tonf",
+}
+
+
+def force_unit_label(units: dict) -> str:
+    """Return the display label for the model's force unit.
+
+    Derives a conventional force-unit label (e.g. ``"kN"``) from a model
+    units dict ``{"F": ..., "L": ...}``, normalising SAP2000 short forms
+    (``"KN"``) and full names (``"kilonewton"``) alike.
+
+    Args:
+        units: Model units dict, e.g. ``{"F": "KN", "L": "m", "T": "C"}``.
+
+    Returns:
+        Canonical force-unit label (e.g. ``"kN"``, ``"MN"``, ``"kip"``).
+        Defaults to ``"kN"`` when missing or unrecognised.
+    """
+    return _FORCE_LABELS.get(_normalise_unit((units or {}).get("F"), "kn"), "kN")
+
+
+def length_unit_label(units: dict) -> str:
+    """Return the display label for the model's length unit.
+
+    Args:
+        units: Model units dict, e.g. ``{"F": "KN", "L": "m", "T": "C"}``.
+
+    Returns:
+        Canonical length-unit label (e.g. ``"m"``, ``"mm"``, ``"in"``).
+        Defaults to ``"m"`` when missing or unrecognised.
+    """
+    return _normalise_unit((units or {}).get("L"), "m")
 
 
 # ── Material-property defaults (SI Pa units) ──────────────────────────
@@ -245,6 +291,7 @@ def force_scale_factor(units: dict) -> float:
         "n": 1.0,
         "kn": 0.001,
         "mn": 0.000001,
+        "gn": 1e-9,
         "kgf": 1 / 9.80665,
         "tonf": 1 / 9806.65,
         "lb": 1 / 4.448,
