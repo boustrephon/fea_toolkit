@@ -380,8 +380,6 @@ Performance: **500 steps, ~60 seconds**, all Newton-converged, 50% stiffness los
 
 ## Pushover Curve
 
-![Project B pushover curve](/tmp/project_b_po_curve.png)
-
 | Metric | Value |
 |---|---|
 | Initial stiffness | 413,000 kN/m |
