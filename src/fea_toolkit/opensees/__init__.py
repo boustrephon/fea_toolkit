@@ -10,12 +10,15 @@ The toolkit uses a **two-stage pipeline** (see docs/workflow.md):
 Modules
 -------
 preprocessor — Topology preparation: element splitting, area meshing, edge constraints.
-analysis_builder — Public :class:`AnalysisBuilder` facade (domain construction,
-    loads, limit-state columns) composed from domain mixins:
+analysis_builder — Public :class:`AnalysisBuilder` facade composed from
+    domain mixins:
     _materials — uniaxial + nD material creation.
     _sections — frame/shell section creation.
     _elements — frame/wall/shell element creation, braces, lumped hinges.
     _runners — analysis execution and result extraction (static/modal/RS/pushover).
+    _constraints — edge constraints, nodes/restraints, connectivity diagnostics.
+    _loads — load-pattern creation, gravity axial loads, rigid diaphragms.
+    _limit_state — Elwood & Moehle column limit-state columns.
 recorder — Tcl script export (:class:`RecordingOpenSees` proxy), Xara Tcl runtime runner.
 builder — Tcl export functions (:func:`export_model_to_tcl`, :func:`pushover_tcl`).
 pushover — 4-direction pushover runner with gravity + lateral load sequences.
