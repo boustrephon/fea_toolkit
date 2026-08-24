@@ -366,8 +366,10 @@ comfortably.  Below is a realistic assessment of what remains.
    5. Keep the `RC_PUSHOVER_SOLVER_DEFAULTS` convenience preset combining
       all of the above; `docs/pushover_analysis.md` documents the
       recommended RC settings.
-   6. After the Vecchio & Emara benchmark (Gap 4) is running, tune these
-      defaults empirically and record the final values in the plan.
+   6. The Gap 4 Vecchio & Emara benchmark is complete (peak 1.07×, secant
+      1.03× — `docs/vecchio_emara_benchmark.md`), so tune these defaults
+      empirically against it and record the final values in the plan
+      (tracked as P3 in `docs/_pending_work.md`).
 
 6. **CSM bilinearisation validation** — **🟢 Implemented + synthetic
    validation done; real-benchmark validation pending.**  The existing

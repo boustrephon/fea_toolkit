@@ -13,8 +13,11 @@ category: [planning]
 > below is cross-referenced to its source document.  **Sequencing notes:**
 > Tier 1 — P1 (force-diagram unification) and P2 (large-file splits) both
 > landed 2026-08-24.  The Tier 2 physics items cluster around the Vecchio &
-> Emara benchmark — P3/P4 are blocked on that benchmark being final.  Tiers
-> 3–4 are independent feature gaps and deferred housekeeping.
+> Emara benchmark — the Gap 4 benchmark itself is complete (acceptance band
+> 1.07×/1.03×, `tests/test_rc_benchmark.py`), so P3 (solver calibration) and
+> P4 (bilinearisation on a real curve) are now actionable; P5 (shear
+> failure / post-peak) remains the open physics item.  Tiers 3–4 are
+> independent feature gaps and deferred housekeeping.
 
 ### Tier 1 — Active refactors (sequenced, design ready)
 
@@ -44,9 +47,10 @@ calibration** against the benchmark + regression-proofing.
    ramping, RC preset wiring.
 2. Guard against the stale `1e-12` fallback tolerance re-appearing anywhere
    in the pushover path.
-3. Once the Vecchio & Emara benchmark (P5) is running, tune the defaults
-   empirically and record the final values in `docs/deprecation_plan.md` and
-   `docs/pushover_analysis.md`.
+3. The Gap 4 Vecchio & Emara benchmark is complete (peak 1.07×, secant
+   1.03× — `docs/vecchio_emara_benchmark.md`, `tests/test_rc_benchmark.py`),
+   so tune the defaults empirically against it and record the final values
+   in `docs/deprecation_plan.md` and `docs/pushover_analysis.md`.
 
 **Validation.** Existing pushover tests (RC, steel, LayeredShell) stay green;
 the tuned values are recorded alongside the benchmark results.
@@ -56,9 +60,10 @@ Source: `docs/deprecation_plan.md` §6; `docs/csm_bilinearization.md` §4.
 
 **What.** `bilinearize_rc()` (De Luca 10 %-secant rule, `elastic_fraction`
 0.10) is implemented and synthetic-validated
-(`test_de_luca_rc_curve_yield_not_at_cracking`).  The one open item:
-validate the fitted yield point against a **real RC pushover curve** from
-the Gap 4 (Vecchio & Emara) benchmark — the yield point should sit near the
+(`test_de_luca_rc_curve_yield_not_at_cracking`).  The one open item —
+validate the fitted yield point against a **real RC pushover curve** — is
+now actionable: the Gap 4 (Vecchio & Emara) benchmark is complete
+(`tests/test_rc_benchmark.py`).  The yield point should sit near the
 rebar-yield drift (~0.5–1 % roof drift), not the premature cracking
 transition.
 
@@ -172,7 +177,9 @@ Phase 2 `pyrightconfig.json` was never committed.
 **Outline steps.** 1) Optionally commit `pyrightconfig.json` (exclude
 Rhino host-only modules; relax `reportOptional*` rules); 2) fresh per-file
 triage of the Phase 3 count, starting with the top-3 files by error count
-(`model/geometry.py` → `plotting/viz.py` → `opensees/analysis_builder.py`);
+post-P2-split (the original top-3 `model/geometry.py` → `plotting/viz.py` →
+`opensees/analysis_builder.py` are now 81/136/476-line facades — the errors
+now live in `geometry_core/frames/mesh`, `viz_*`, and `_runners.py`);
 3) prefer a project-wide `pd.Series.to_numpy()` convention over scattered
 casts (§11.2).
 
@@ -196,6 +203,27 @@ layers (Phases 1–4) are stable.
   wheel's PSUMAT is a stub ("PSUMAT - NOT DEFINED IN THIS VERSION, SOURCE
   CODE RESTRICTED") and CSMM construction still fails.  Blocked on a full
   (non-restricted) build — see `docs/shell_support.md` Options C/D1.
+
+## DONE (2026-08-24 — review-driven fixes: ground-motion units, model-layer ops)
+
+Code-review round (findings H1/H2/M2) — commit `f1c278f`.
+
+- **H1 — `io/ground_motion.py` canonical SI units.**  PEER
+  `read_peer_record()` converts g → m/s² at read (`DEFAULT_GRAVITY_MS2`);
+  `record_summary()` Arias intensity uses the SI constant instead of a
+  hardcoded `9.81`.  All record readers/processors now share one unit
+  system (m/s²).  New `tests/test_ground_motion.py` (5 tests) locks in the
+  conversion and the Arias/PGV magnitudes.
+- **H2 — model subpackage restored to OpenSees-free.**  `model/stories.py`
+  no longer imports `ops` at module level (`plot_stories()` uses a
+  function-local import for its `ops.wipe()`); the dead-but-exported
+  `global_to_local_distributed_load` moved from `model/geometry_core.py` to
+  `opensees/_loads.py` and is re-exported from `fea_toolkit.opensees`.
+- **M2 — `numpy>=2.0`** declared in `pyproject.toml` (the codebase uses the
+  NumPy 2.0 `np.trapezoid` API).
+- Sequencing update: the Gap 4 Vecchio & Emara benchmark is complete, so
+  P3/P4 are unblocked (their wording above is updated).
+- Validation: full suite `1096 passed, 4 xfailed`; ruff clean.
 
 ## DONE (2026-08-24 — P1 force-diagram unification, Phase B)
 
