@@ -2159,7 +2159,7 @@ def plot_capacity_spectrum(
             K_init = S_ay / S_dy
             ax.plot(sd_bilin, K_init * sd_bilin, "-", color="tab:orange", linewidth=1.5, alpha=0.7)
             # Post-yield line
-            if S_dp > S_dy and S_dp > 0:
+            if S_dp is not None and S_dp > S_dy and S_dp > 0:
                 sd_post = np.linspace(S_dy, max(S_dp * 1.2, S_d.max()), 20)
                 K_post = (S_ap - S_ay) / (S_dp - S_dy) if S_dp != S_dy else 0
                 ax.plot(

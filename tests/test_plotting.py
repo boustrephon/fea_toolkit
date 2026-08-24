@@ -2151,6 +2151,7 @@ class TestForceDiagramUnified:
 
         plt.close(fig)
 
+    @pytest.mark.skipif(not _has_pyvista, reason="pyvista not installed")
     def test_dispatcher_static_3d_notebook(self):
         from fea_toolkit.plotting.force_diagram import plot_force_diagram
 
@@ -2171,6 +2172,7 @@ class TestForceDiagramUnified:
 
         plt.close(fig)
 
+    @pytest.mark.skipif(not _has_pyvista, reason="pyvista not installed")
     def test_dispatcher_dimension_inference_3d(self):
         """With PyVista available + geometry present, 3D is inferred."""
         from fea_toolkit.plotting.force_diagram import plot_force_diagram
@@ -2187,6 +2189,21 @@ class TestForceDiagramUnified:
         d2 = _resolve_source(_minimal_npz_dict(), quantity="My_i")
         assert d1.series == d2.series
         assert d1.quantity == d2.quantity == "My"
+
+    def test_shear_alias_vz_accepted_for_static(self):
+        """'Vz'/'Vz_i' shear aliases plot the local Fz shear on static 2D."""
+        import matplotlib.pyplot as plt
+
+        from fea_toolkit.plotting.force_diagram import plot_force_diagram
+
+        npz = _minimal_npz_dict()
+        npz["static/DEAD/fz_i"] = np.array([12.0, -6.0])
+        npz["static/DEAD/fz_j"] = np.array([-12.0, 6.0])
+        for quantity in ("Vz", "Vz_i"):
+            fig = plot_force_diagram(npz, quantity=quantity, dimension="2d", figsize=(6, 4))
+            assert fig is not None, f"{quantity} rejected by the quantity gate"
+            assert len(fig.axes[0].lines) > 0, f"{quantity} produced no lines"
+            plt.close(fig)
 
     def test_unit_propagation_from_metadata(self):
         from fea_toolkit.plotting.force_diagram import _resolve_source

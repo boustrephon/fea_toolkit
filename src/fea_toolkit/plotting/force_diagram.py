@@ -613,8 +613,9 @@ def plot_force_diagram(
         ``matplotlib.figure.Figure`` (2D), or ``None``.
     """
     q = _normalise_quantity(quantity)
-    if kind != "rs" and (q is None or not q.startswith(("M", "F"))):
-        print(f"Unsupported quantity '{quantity}'.  Use 'M*' or 'F*'.")
+    _is_shear_alias = q in ("Vz", "Vy")
+    if kind != "rs" and (q is None or not (q.startswith(("M", "F")) or _is_shear_alias)):
+        print(f"Unsupported quantity '{quantity}'.  Use 'M*', 'F*', 'Vz', or 'Vy'.")
         return None
 
     data = _resolve_source(source, force_data, combo, collapse_to_parents, kind, q)
@@ -642,8 +643,14 @@ def plot_force_diagram(
             has_pv = False
         dimension = "3d" if has_pv and data.nodes else "2d"
 
+    # Static force diagrams expose the shear aliases "Vz"/"Vy" as the
+    # corresponding local shear-force components "Fz"/"Fy" (the force-map
+    # keys used by the 2D/3D static renderers).  RS series keep their own
+    # "Vz"/"Vy" key names.
+    q_static = {"Vz": "Fz", "Vy": "Fy"}.get(q, q)
+
     if dimension == "3d":
         return _render_static_3d(
-            data, q, mode, moment_scale, show_original, notebook, title, **kwargs
+            data, q_static, mode, moment_scale, show_original, notebook, title, **kwargs
         )
-    return _render_static_2d(data.series, q, fu, lu, use_local, title, figsize or (8, 6))
+    return _render_static_2d(data.series, q_static, fu, lu, use_local, title, figsize or (8, 6))
