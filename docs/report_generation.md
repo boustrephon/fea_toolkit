@@ -346,7 +346,7 @@ This is simpler than the proposed class-based design because:
 * The reading side is just ``dict(np.load(...))`` or recursively walking
   HDF5 groups; no ``DataFrame``/``JSON`` convenience methods were needed
   in practice.
-* All unified plotting functions (``plot_mesh``, ``plot_force_diagram_3d``,
+* All unified plotting functions (``plot_mesh``, ``plot_force_diagram``,
   etc.) check ``isinstance(source, dict)``, so they consume HDF5-read
   dicts without any changes.
 

@@ -1,10 +1,10 @@
 """3D force / moment diagram rendering and NPZ force-data helpers.
 
-The unified 2D/RS force-diagram dispatcher lives in
+The unified 2D/RS/3D force-diagram dispatcher lives in
 :mod:`fea_toolkit.plotting.force_diagram`; this module provides the 3D
-renderer and the legacy 3D entry points."""
+renderer and the NPZ element-data loader."""
 
-from typing import Any, Optional
+from typing import Optional
 
 import numpy as np
 
@@ -97,48 +97,6 @@ def _render_frame_force_diagram(
             _add_coloured_tube(plotter, p_i, p_j, val, max_abs_val)
 
     return model_height, max_abs_val
-
-
-def plot_force_diagram_3d(
-    source,
-    force_data=None,
-    *,
-    collapse_to_parents=False,
-    quantity="My",
-    mode="flag",
-    moment_scale=None,
-    show_original=True,
-    combo=None,
-    notebook=False,
-    title=None,
-    **kwargs,
-):
-    """3D force/moment diagram from a builder or NPZ data (unified dispatcher).
-
-    Thin wrapper over
-    :func:`~fea_toolkit.plotting.force_diagram.plot_force_diagram` pinned to
-    the 3D PyVista rendering.
-
-    Returns:
-        ``pyvista.Plotter`` if *notebook* else ``None``.
-    """
-    from .force_diagram import plot_force_diagram
-
-    return plot_force_diagram(
-        source,
-        force_data,
-        quantity=quantity,
-        kind="static",
-        dimension="3d",
-        combo=combo,
-        collapse_to_parents=collapse_to_parents,
-        mode=mode,
-        moment_scale=moment_scale,
-        show_original=show_original,
-        notebook=notebook,
-        title=title,
-        **kwargs,
-    )
 
 
 def _resolve_npz_static_case(source: dict, combo: str = None) -> str:
@@ -363,42 +321,6 @@ def _add_coloured_tube(plotter, p_i, p_j, val, max_abs_val):
     plotter.add_mesh(cyl, color=colour, opacity=0.5, show_edges=False, lighting=False)
 
 
-def plot_rs_force_diagram(
-    elem_results,
-    quantity: str = "My_i",
-    title: str = None,
-    figsize=(6, 8),
-    force_unit: str = "kN",
-    length_unit: str = "m",
-    both_ends: bool = False,
-    **kwargs,
-) -> Optional[Any]:
-    """Plot a CQC-combined RS force/moment quantity vs elevation.
-
-    Thin wrapper over the unified
-    :func:`~fea_toolkit.plotting.force_diagram.plot_force_diagram` pinned to
-    the 2D RS line rendering.  Accepts the ``element_results`` list or the
-    full ``extract_element_rs_forces()`` dict.
-
-    Returns:
-        The ``matplotlib.figure.Figure``, or ``None`` if no results.
-    """
-    from .force_diagram import plot_force_diagram
-
-    return plot_force_diagram(
-        elem_results,
-        quantity=quantity,
-        kind="rs",
-        dimension="2d",
-        force_unit=force_unit,
-        length_unit=length_unit,
-        both_ends=both_ends,
-        title=title,
-        figsize=figsize,
-        **kwargs,
-    )
-
-
 def _load_npz_for_plotting(npz_path: str, combo: str = None) -> dict:
     """Load a unified-format NPZ results file and build element‑centric arrays.
 
@@ -520,69 +442,3 @@ def _load_npz_for_plotting(npz_path: str, combo: str = None) -> dict:
         "length_unit": length_unit,
         "raw_data": d,
     }
-
-
-def plot_npz_force_diagram(
-    npz_path: str,
-    quantity: str = "Mz",
-    use_local: bool = True,
-    combo: str = None,
-    title: Optional[str] = None,
-    figsize: tuple = (8, 6),
-) -> Any:
-    """2D diagram of a local force quantity vs elevation from an NPZ file.
-
-    Thin wrapper over the unified
-    :func:`~fea_toolkit.plotting.force_diagram.plot_force_diagram` pinned to
-    the 2D static rendering with an NPZ path input.
-
-    Returns:
-        matplotlib.figure.Figure
-    """
-    from .force_diagram import plot_force_diagram
-
-    return plot_force_diagram(
-        npz_path,
-        quantity=quantity,
-        kind="static",
-        dimension="2d",
-        use_local=use_local,
-        combo=combo,
-        title=title,
-        figsize=figsize,
-    )
-
-
-def plot_npz_moment_3d(
-    npz_path: str,
-    quantity: str = "Mz",
-    use_local: bool = True,
-    combo: str = None,
-    mode: str = "flag",
-    title: Optional[str] = None,
-    show_scale: bool = True,
-    return_plotter: bool = False,
-) -> Any:
-    """3D force diagram from an NPZ results file using PyVista.
-
-    Thin wrapper over the unified
-    :func:`~fea_toolkit.plotting.force_diagram.plot_force_diagram` pinned to
-    the 3D static rendering with an NPZ path input.
-
-    Returns:
-        pyvista.Plotter or None
-    """
-    from .force_diagram import plot_force_diagram
-
-    return plot_force_diagram(
-        npz_path,
-        quantity=quantity,
-        kind="static",
-        dimension="3d",
-        use_local=use_local,
-        combo=combo,
-        mode=mode,
-        title=title,
-        notebook=return_plotter,
-        show_original=True,
-    )

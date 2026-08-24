@@ -1694,7 +1694,7 @@ The toolkit provides interactive 3D plots of analysis results using
 
 ### Moment diagrams
 
-:func:`~fea_toolkit.plotting.viz.plot_force_diagram_3d` draws a 3D
+:func:`~fea_toolkit.plotting.force_diagram.plot_force_diagram` draws a 3D
 force/moment diagram on the structure, with two display modes:
 
 * ``mode='flag'`` — planar quadrilaterals extruded perpendicular to each
@@ -1714,25 +1714,25 @@ The unified function accepts an ``AnalysisBuilder``, a model builder,
 or an NPZ data dict as its *source* parameter.
 
 ```python
-from fea_toolkit.plotting import plot_force_diagram_3d
+from fea_toolkit.plotting import plot_force_diagram
 
 forces = builder.extract_static_element_forces()
 
 # Interactive flag diagram — opens a PyVista window
-plot_force_diagram_3d(builder, forces, quantity="Mz",
-                      mode="flag", show_original=True)
+plot_force_diagram(builder, forces, quantity="Mz",
+                   dimension="3d", mode="flag", show_original=True)
 
 # With reaction arrows and title
 results = builder.run_static_analysis(extract_reactions=True)
-plot_force_diagram_3d(builder, forces, quantity="Mz",
-                      mode="flag", show_original=True,
-                      show_reactions=True, static_results=results,
-                      title="My Model — Mz (Wind +X)")
+plot_force_diagram(builder, forces, quantity="Mz",
+                   dimension="3d", mode="flag", show_original=True,
+                   show_reactions=True, static_results=results,
+                   title="My Model — Mz (Wind +X)")
 
 # Off‑screen screenshot (for batch scripts)
-plotter = plot_force_diagram_3d(builder, forces, quantity="Mz",
-                                mode="flag", show_original=True,
-                                off_screen=True)
+plotter = plot_force_diagram(builder, forces, quantity="Mz",
+                             dimension="3d", mode="flag", show_original=True,
+                             off_screen=True)
 if plotter is not None:
     plotter.screenshot("moment_diagram.png")
 ```
@@ -1751,15 +1751,16 @@ force.
 
 ### 2D force diagrams (Matplotlib)
 
-:func:`~fea_toolkit.plotting.viz.plot_npz_force_diagram` produces a
+:func:`~fea_toolkit.plotting.force_diagram.plot_force_diagram` produces a
 2D line plot of any end-force quantity against elevation:
 
 ```python
-from fea_toolkit.plotting import plot_npz_force_diagram
+from fea_toolkit.plotting import plot_force_diagram
 
 # Local Mz (major-axis bending) — default use_local=True
-fig = plot_npz_force_diagram("results.npz", quantity="Mz",
-                             title="Major-axis moment vs elevation")
+fig = plot_force_diagram("results.npz", quantity="Mz",
+                         dimension="2d",
+                         title="Major-axis moment vs elevation")
 fig.savefig("moment.png")
 ```
 

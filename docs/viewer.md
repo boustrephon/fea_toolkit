@@ -35,14 +35,12 @@ visualisation stacks:
 | `plot_mesh(source)` | PyVista | 3D mesh from builder **or** NPZ dict | Unified mesh viewing |
 | `plot_deformed_displacement_3d(source, disp)` | PyVista | Displaced shape with node colouring and value labels — unified replacement | Static / RS / modal displacement |
 | `plot_mode_animation(source, shapes, mode)` | PyVista | Mode shape animation from builder **or** NPZ | Unified modal viz |
-| `plot_force_diagram_3d(source, forces)` | PyVista | 3D force/moment diagram from builder **or** NPZ | Unified force viz |
-| `plot_rs_force_diagram(elem_results)` | Matplotlib | 2D CQC‑combined force vs elevation | RS element results |
+| `plot_force_diagram(source, forces)` | PyVista/Matplotlib | Unified 2D/3D force/moment diagram from builder, dict **or** NPZ | Unified force viz |
 | `plot_pushover_curve(results)` | Matplotlib | Capacity curve | Pushover summary |
 | `plot_pushover_curve_enhanced(results)` | Matplotlib | Capacity curve + stiffness lines | Detailed pushover review |
 | `plot_capacity_spectrum(adrs, spec, pt)` | Matplotlib | ADRS format capacity + demand + performance point | CSM (ATC‑40) |
 | `plot_interactive_viewer(builder, forces)` | PyVista + widgets | Full interactive viewer | Exploration, demos |
-| `plot_npz_force_diagram(path)` | Matplotlib | 2D force from saved NPZ | Post‑hoc analysis |
-| `plot_npz_moment_3d(path)` | PyVista | 3D force from saved NPZ | Post‑hoc analysis |
+| `plot_force_diagram(path)` | Matplotlib/PyVista | 2D/3D force from saved NPZ | Post‑hoc analysis |
 | `compare_meshes(a, b, collapse_to_parents=True)` | PyVista | Side‑by‑side mesh comparison with collapsed parents | Model diffing (unsplit) |
 | `plot_building_views(md)` | PyVista | Four‑view layout (plan, elevation, 3D, section‑coloured) | Model overview, reports |
 | `plot_model_comparison(md, labels)` | PyVista | Top‑down comparison of two model variants | Design iterations, mesh variants |
@@ -60,7 +58,7 @@ overlay results, highlight problem areas, and annotate specific elements.
 ### Source types and the ``collapse_to_parents`` option
 
 ``ModelViewer`` and all unified plot functions (``plot_mesh``, ``compare_meshes``,
-``plot_deformed_displacement_3d``, ``plot_mode_animation``, ``plot_force_diagram_3d``)
+``plot_deformed_displacement_3d``, ``plot_mode_animation``, ``plot_force_diagram``)
 accept three source types:
 
 1. **``SAPModelData``** — raw importer output, before any preprocessing.
@@ -335,13 +333,14 @@ pl = plot_mode_animation(
 ### 2e. 3D force / moment diagram
 
 ```python
-from fea_toolkit.plotting import plot_force_diagram_3d
+from fea_toolkit.plotting import plot_force_diagram
 
-plot_force_diagram_3d(
+plot_force_diagram(
     builder,
     force_data=elem_forces,   # from builder.extract_static_element_forces()
     quantity="Mz",            # Mz, My, Mx, Fx, Fy, Fz
     mode="flag",              # "flag" or "tube"
+    dimension="3d",
 )
 ```
 
@@ -356,14 +355,15 @@ These produce publication‑quality 2D figures and return the
 ### 3a. Force / moment vs elevation
 
 Standalone 2D force-vs-elevation plots are produced from an NPZ results
-file via ``plot_npz_force_diagram``:
+file via ``plot_force_diagram``:
 
 ```python
-from fea_toolkit.plotting import plot_npz_force_diagram
+from fea_toolkit.plotting import plot_force_diagram
 
-fig = plot_npz_force_diagram(
+fig = plot_force_diagram(
     "results.npz",        # from builder.export_results_to_npz()
     quantity="Mz",        # Fx, Fy, Fz, Mx, My, Mz
+    kind="static", dimension="2d",
     use_local=True,       # local or global coordinates
     title="Major-axis moment vs elevation",
 )
@@ -373,12 +373,13 @@ fig.savefig("moment.png")
 For CQC‑combined results:
 
 ```python
-from fea_toolkit.plotting import plot_rs_force_diagram
+from fea_toolkit.plotting import plot_force_diagram
 
 rs_forces = builder.extract_element_rs_forces(...)
-fig = plot_rs_force_diagram(
+fig = plot_force_diagram(
     rs_forces["element_results"],
     quantity="My_i",
+    kind="rs", dimension="2d",
 )
 ```
 
@@ -485,20 +486,22 @@ and produce plots **without** needing the original ``AnalysisBuilder``
 or model objects.
 
 ```python
-from fea_toolkit.plotting import plot_npz_force_diagram, plot_npz_moment_3d
+from fea_toolkit.plotting import plot_force_diagram
 
 # 2D force vs elevation (Matplotlib)
-fig = plot_npz_force_diagram(
+fig = plot_force_diagram(
     "results.npz",
     quantity="Mz",
+    kind="static", dimension="2d",
     use_local=True,
     combo=None,           # combo prefix, or None for primary
 )
 
 # 3D force diagram (PyVista)
-plot_npz_moment_3d(
+plot_force_diagram(
     "results.npz",
     quantity="Mz",
+    kind="static", dimension="3d",
     mode="flag",          # "flag" or "tube"
     use_local=True,
     combo=None,
@@ -607,13 +610,13 @@ displacement arrays.
 
 ### "Show me the forces / moments"
 - **Unified (builder, AnalysisBuilder, or NPZ/HDF5 dict):**
-  ``plot_force_diagram_3d(source, force_data, quantity="Mz")``
+  ``plot_force_diagram(source, force_data, quantity="Mz")``
   — 3D flag or tube diagram on the structure.
   Use ``selection=Selection(...)`` to isolate specific elements.
 - **3D flags on structure (unified):**
-  ``plot_force_diagram_3d(source, force_data, quantity="Mz")``
+  ``plot_force_diagram(source, force_data, quantity="Mz")``
 - **CQC‑combined 2D:**
-  ``plot_rs_force_diagram(rs_results["element_results"], quantity="My_i")``
+  ``plot_force_diagram(rs_results["element_results"], quantity="My_i", kind="rs", dimension="2d")``
 
 When loading from a results file, element forces are accessed per
 static case: ``data["static/{case}/fx_i"]``, ``data["static/{case}/my_j"]``,
@@ -657,9 +660,9 @@ data = read_results("results.npz")   # or "results.h5"
 - **Mesh:** ``plot_mesh(data)``
 - **Deformed shape:** ``plot_deformed_displacement_3d(data, displacements_dict)``
 - **Mode shapes:** ``plot_mode_animation(data, None, mode=0)``
-- **Forces:** ``plot_force_diagram_3d(data, force_data=None, combo="DEAD", quantity="Mz")``
-- **2D force (matplotlib):** ``plot_npz_force_diagram("path.npz", quantity="Mz")``
-- **3D force (legacy):** ``plot_npz_moment_3d("path.npz", quantity="Mz")``
+- **Forces (3D flags):** ``plot_force_diagram(data, force_data=None, combo="DEAD", quantity="Mz")``
+- **2D force (matplotlib):** ``plot_force_diagram("path.npz", quantity="Mz", dimension="2d")``
+- **3D force:** ``plot_force_diagram("path.npz", quantity="Mz", dimension="3d")``
 
 ### "Compare two models"
 → ``compare_meshes(source_a, source_b)``
@@ -677,7 +680,7 @@ The ``ModelViewer`` also supports ``highlight_nodes()`` and
 
 ### "Show me reactions"
 → ``ModelViewer(builder).overlay_forces(..., show_reactions=True)``
-or ``plot_force_diagram_3d(source, force_data, quantity="Mz")``
+or ``plot_force_diagram(source, force_data, quantity="Mz")``
 
 ### "Check element connectivity / mesh quality"
 → ``plot_mesh(source, show_nodes=True, shrink=0.05)``
@@ -722,14 +725,14 @@ from fea_toolkit.plotting import (
     compare_meshes,                     # side-by-side comparison
     plot_deformed_displacement_3d,      # unified (builder, AnalysisBuilder, or NPZ)
     plot_mode_animation,                # unified (builder or NPZ)
-    plot_force_diagram_3d,              # unified (builder or NPZ)
+    plot_force_diagram,                  # unified (builder or NPZ)
     plot_building_views,                # four-view layout
     plot_model_comparison,              # top-down variant comparison
 )
 
-# Standalone 2D plots (Matplotlib)
+# Standalone 2D plots (Matplotlib) — use plot_force_diagram(..., kind="rs") for
+# CQC-combined RS forces vs elevation
 from fea_toolkit.plotting import (
-    plot_rs_force_diagram,              # CQC-combined RS forces vs elevation
     plot_pushover_curve,
     plot_pushover_curve_enhanced,
     plot_capacity_spectrum,
@@ -738,9 +741,6 @@ from fea_toolkit.plotting import (
 # Interactive widget viewer (PyVista)
 from fea_toolkit.plotting import plot_interactive_viewer
 
-# NPZ standalone plots
-from fea_toolkit.plotting import (
-    plot_npz_force_diagram,
-    plot_npz_moment_3d,
-)
+# NPZ standalone plots — plot_force_diagram("path.npz", quantity="Mz")
+# (already imported in the 3D block above)
 ```

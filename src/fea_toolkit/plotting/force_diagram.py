@@ -4,8 +4,8 @@ Unified force/moment diagram plotting.
 The single unit-aware entry point :func:`plot_force_diagram` replaces the
 four legacy force-diagram functions (``plot_force_diagram_3d``,
 ``plot_rs_force_diagram``, ``plot_npz_force_diagram``,
-``plot_npz_moment_3d``), which are now thin wrappers over it (see
-``plotting.viz``).
+``plot_npz_moment_3d``), which were thin wrappers over it and were
+removed in the deprecation cleanup (2026-08-24).
 
 Inputs
 ------

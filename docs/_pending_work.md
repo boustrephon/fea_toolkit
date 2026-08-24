@@ -431,7 +431,8 @@ Milestones 1–3 of `docs/force_diagram_unification.md` landed; milestone 4
 - Naming decision (resolves `docs/deprecation_plan.md` Phase B):
   **`plot_force_diagram`** is the unified dispatcher; `plot_force_diagram_3d`,
   `plot_rs_force_diagram`, `plot_npz_force_diagram`, `plot_npz_moment_3d`
-  are now thin signature-preserving wrappers over it.
+  were thin signature-preserving wrappers over it and were **removed
+  2026-08-24** (deprecation cleanup — `docs/deprecation_plan.md` Phase B).
 - The hardcoded `kN`/`m` axis fallbacks in the 2D/3D paths are gone — units
   always derive from the source; the 2D matplotlib path imports no PyVista.
 - Tests: 11 `TestForceDiagramUnified` cases (input equivalence Builder/dict/

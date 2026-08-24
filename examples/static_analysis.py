@@ -143,14 +143,15 @@ def main():
 
     # ── Force diagrams (3D flags) ──
     try:
-        from fea_toolkit.plotting import plot_force_diagram_3d
+        from fea_toolkit.plotting import plot_force_diagram
 
         # Axial forces (Fz)
-        plotter = plot_force_diagram_3d(
+        plotter = plot_force_diagram(
             builder,
             elem_forces,
             quantity="Fz",
             mode="flag",
+            dimension="3d",
             notebook=True,
         )
         if plotter is not None:
@@ -158,11 +159,12 @@ def main():
             print(f"  Saved → {out / 'static_axial.png'}")
 
         # Shear in X (Fx)
-        plotter = plot_force_diagram_3d(
+        plotter = plot_force_diagram(
             builder,
             elem_forces,
             quantity="Fx",
             mode="flag",
+            dimension="3d",
             notebook=True,
         )
         if plotter is not None:
@@ -170,11 +172,12 @@ def main():
             print(f"  Saved → {out / 'static_shear.png'}")
 
         # Moment about Y (My)
-        plotter = plot_force_diagram_3d(
+        plotter = plot_force_diagram(
             builder,
             elem_forces,
             quantity="My",
             mode="flag",
+            dimension="3d",
             notebook=True,
         )
         if plotter is not None:
@@ -186,21 +189,23 @@ def main():
 
     # ── 3D moment diagram (flags) ──
     try:
-        from fea_toolkit.plotting import plot_force_diagram_3d
+        from fea_toolkit.plotting import plot_force_diagram
 
         print("\n── 3D moment diagram (flags) ──")
-        plot_force_diagram_3d(
+        plot_force_diagram(
             builder,
             elem_forces,
             quantity="My",
             mode="flag",
+            dimension="3d",
         )
         # Also save a tube‑mode screenshot
-        plotter_tube = plot_force_diagram_3d(
+        plotter_tube = plot_force_diagram(
             builder,
             elem_forces,
             quantity="My",
             mode="tube",
+            dimension="3d",
             notebook=True,
         )
         if plotter_tube is not None:

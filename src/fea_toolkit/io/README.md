@@ -107,10 +107,9 @@ SAP2000Parser ──→ SAPModelData
     ├── RhinoImporter ──→ Rhino geometry (SAP_FrameID UserStrings)
     │
     ├── read_results() ────→ unified plotting functions
-    │               (dict, NPZ or HDF5)  (plot_mesh, plot_force_diagram_3d, …)
+    │               (dict, NPZ or HDF5)  (plot_mesh, plot_force_diagram, …)
     │
-    └── plot_npz_force_diagram() ──→ matplotlib 2D (file path, NPZ only)
-        plot_npz_moment_3d()   ──→ PyVista 3D    (file path, NPZ only)
+    └── plot_force_diagram() ──→ matplotlib 2D / PyVista 3D (path, dict or NPZ)
         colour_from_npz()      ──→ Rhino colour  (file path, NPZ/HDF5)
 ```
 
