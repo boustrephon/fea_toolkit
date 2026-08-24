@@ -155,6 +155,18 @@ iteration)**:
 **When to use**: RC frames/walls whose capacity curves soften gradually
 (cracking → rebar yield → softening) without a sharp yield plateau.
 
+**Real-benchmark validation (Gap 4 — 2026-08-24):** applied to the actual
+Vecchio & Emara capacity curve (`tests/test_rc_benchmark.py::test_bilinearize_rc_real_curve`).
+**Result: `S_dy ≈ 14 mm` (≈ 0.36 % roof drift), `S_ay ≈ 2.01 m/s²`, exact
+equal-area fit.**  The key claim holds — the yield does **not** snap to the
+cracking transition (~2 mm).  It lands *below* the nominal 0.5–1 %
+rebar-yield drift band (and below the model's own first-yield ≈ 31 mm)
+because the current model curve keeps hardening to the 155 mm end with no
+post-peak peak (see `docs/_pending_work.md` P5): on a hardening-only
+backbone the equal-area constraint pushes the yield earlier, in the
+conservative direction.  Re-validate the band once the post-peak descent
+gives the curve a real peak.
+
 **References**: De Luca, F., Vamvatsikos, D., & Iervolino, I. (2013).
 "Near-optimal piecewise linear fits of static pushover capacity curves."
 *Earthquake Engineering & Structural Dynamics*, 42(4), 523–543.

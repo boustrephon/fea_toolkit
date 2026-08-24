@@ -12,89 +12,63 @@ category: [planning]
 > Priority-ordered register (maintained 2026-08-24).  Every pending item
 > below is cross-referenced to its source document.  **Sequencing notes:**
 > Tier 1 (P1 force-diagram unification, P2 large-file splits) landed
-> 2026-08-24 — see the DONE register.  The physics items (Tier 2) cluster
-> around the Vecchio & Emara benchmark — the Gap 4 benchmark itself is
-> complete (acceptance band 1.07×/1.03×, `tests/test_rc_benchmark.py`), so
-> P3 (solver calibration) and P4 (bilinearisation on a real curve) are now
-> actionable; P5 (shear failure / post-peak) remains the open physics item.
-> Tiers 3–4 are independent feature gaps and deferred housekeeping.
+> 2026-08-24 — see the DONE register.  The Tier 2 physics items (P3 solver
+> calibration, P4 bilinearisation on a real curve) also landed 2026-08-24 —
+> see the DONE register.  **P5 (shear failure / post-peak) remains the open
+> physics item**, refined by the P3/P4/P5 batch findings: the V&E descent
+> is a *flexure-softening* phenomenon (the nonlinear-shear mechanism is
+> validated on the shear-critical Duong frame, not on the shear-strong
+> V&E frame).  Tiers 3–4 are independent feature gaps and deferred
+> housekeeping.
 
 ### Tier 2 — Correctness / physics follow-ups
 
-#### P3 — Pushover solver tuning — empirical pass (🟡 high priority)
-Source: `docs/deprecation_plan.md` §5; implemented contract documented in
-`docs/pushover_analysis.md`.
-
-**What.** The pushover solver contract is implemented — primary
-`NormDispIncr 1e-4 / 20 / Newton` (the test type is configurable via
-`solver_test_type` since review-round-2 M3; the default is unchanged);
-per-step fallback to `NormUnbalance` +
-`ModifiedNewton -initial` with a runtime-scaled relaxed tolerance (derived
-from characteristic weight × g via `g_from_units`, ≈2e-4 for kN-m
-full-building models) and 1000 iterations; automatic
-`gravity_num_substeps = 10` for LayeredShell models; the
-`RC_PUSHOVER_SOLVER_DEFAULTS` preset.  The remaining work is **empirical
-calibration** against the benchmark + regression-proofing.
-
-**Outline steps.**
-1. Re-confirm the documented flow end-to-end (measures 1–5 in the source):
-   primary test settings, per-step fallback + restore, LayeredShell gravity
-   ramping, RC preset wiring.
-2. Guard against the stale `1e-12` fallback tolerance re-appearing anywhere
-   in the pushover path.
-3. The Gap 4 Vecchio & Emara benchmark is complete (peak 1.07×, secant
-   1.03× — `docs/vecchio_emara_benchmark.md`, `tests/test_rc_benchmark.py`),
-   so tune the defaults empirically against it and record the final values
-   in `docs/deprecation_plan.md` and `docs/pushover_analysis.md`.
-
-**Validation.** Existing pushover tests (RC, steel, LayeredShell) stay green;
-the tuned values are recorded alongside the benchmark results.
-
-#### P4 — CSM bilinearisation — real-benchmark (Gap 4) validation
-Source: `docs/deprecation_plan.md` §6; `docs/csm_bilinearization.md` §4.
-
-**What.** `bilinearize_rc()` (De Luca 10 %-secant rule, `elastic_fraction`
-0.10) is implemented and synthetic-validated
-(`test_de_luca_rc_curve_yield_not_at_cracking`).  The one open item —
-validate the fitted yield point against a **real RC pushover curve** — is
-now actionable: the Gap 4 (Vecchio & Emara) benchmark is complete
-(`tests/test_rc_benchmark.py`).  The yield point should sit near the
-rebar-yield drift (~0.5–1 % roof drift), not the premature cracking
-transition.
-
-**Outline steps.**
-1. Run the Gap 4 RC frame pushover (see `docs/vecchio_emara_benchmark.md`).
-2. Apply `bilinearize_rc()` to the capacity curve; assert the fitted yield
-   lands in the rebar-yield band with an exact equal-area fit.
-3. Record the outcome in `docs/csm_bilinearization.md`.
-
-**Validation.** New regression test against the benchmark curve, or a
-strengthened assertion in
-`tests/test_workflows.py::test_compute_performance_point`.
-
-#### P5 — Shear-failure / post-peak modelling (Vecchio & Emara follow-up)
+#### P5 — Post-peak / shear-failure modelling (Vecchio & Emara follow-up)
 Source: 2026-08-16 rigid-end-zone batch (DONE, below);
 `docs/vecchio_emara_benchmark.md`; `docs/shear_failure_modelling.md`.
 
+**Status: partial — the nonlinear-shear mechanism is validated (Duong),
+the V&E post-peak descent is still open.**
+
 **What.** The flexure-only forceBeamColumn + rigid-end-zone model lands
 inside the ±10–15 % acceptance band (peak ≈ 353 kN = 1.07 × experimental;
-secant @ 50 mm ≈ 6.3 kN/mm = 1.03 ×) but **plateaus ≈ 290 kN while the
-experiment softens after ≈ 50 mm**.  Reproduce the experimental *post-peak
-descent* with nonlinear cracked-shear degradation and/or bond-slip springs.
-The Vecchio & Balopoulou (1990) cut-back-top-reinforcement variant is
-deferred together with this follow-up.
+secant @ 50 mm ≈ 6.3 kN/mm = 1.03 ×) but the curve **keeps rising after
+≈ 50 mm** while the experiment softens — the post-peak *shape* is not
+reproduced.
 
-**Outline steps.**
-1. Investigate a nonlinear cracked-shear law for `SectionAggregator`
-   (currently an elastic `GA_v` term) and/or zero-length bond-slip springs
-   at member ends.
-2. Re-run the V&E benchmark and the V&B (1990) variant; target the
-   experimental post-peak softening branch.
-3. Update `docs/shear_failure_modelling.md` + the benchmark doc with the
-   adopted model and results.
+**2026-08-24 empirical findings (P3/P4/P5 batch):**
+1. The nonlinear cracked-shear law for `SectionAggregator`
+   (`aggregate_shear = "nonlinear"`, simplified-MCFT trilinear backbone) is
+   **implemented and validated** on the shear-critical Duong frame (≥ 15 %
+   post-peak drop — `tests/test_duong_benchmark.py`).
+2. Applied to the V&E frame it is **inert for the post-peak shape** — peak
+   348 kN (1.05×) vs 353 kN (1.07×) with elastic shear, curve still rising
+   at 155 mm — because the V&E frame is **shear-strong (flexure-critical)**:
+   member shear never reaches the backbone's degrading branch.
+3. A centreline (no-rigid-zones) nonlinear-shear variant does not converge
+   at the gravity stage (ill-conditioned first gravity increment); the
+   rigid-end-zone configuration converges cleanly.
+4. Conclusion: the V&E descent is a **flexure-softening** phenomenon
+   (concrete crushing / bond-slip), not shear.  The remaining increment is
+   strain-softening concrete (e.g. a `Concrete02` crushing branch for the
+   fiber cover/core) and/or zero-length bond-slip springs at member ends.
+
+**Outline steps (remaining).**
+1. Trial a strain-softening concrete option (e.g. `Concrete02` crushing
+   branch for the fiber cover/core) and/or zero-length bond-slip springs at
+   member ends.
+2. Re-run the V&E benchmark targeting the experimental post-peak branch
+   (peak ≈ 330 kN near 50 mm, descent to ≈ 250–280 kN by 155 mm).
+3. **P4 re-check:** with a real peak on the curve, re-validate
+   `bilinearize_rc()` — the equal-area yield should move up toward the
+   rebar-yield drift (~0.5–1 % roof drift ≈ 20–40 mm).
+4. Re-run the V&B (1990) cut-back-top-reinforcement variant (deferred with
+   this follow-up).
+5. Update `docs/shear_failure_modelling.md` + the benchmark doc.
 
 **Validation.** Extend the rigid-end-zone acceptance-band tests with a
-post-peak-descent assertion (or a dedicated benchmark test).
+post-peak-descent assertion (peak followed by a descent, e.g. ≥ 10 % drop
+by the 155 mm end).
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 
@@ -199,6 +173,44 @@ layers (Phases 1–4) are stable.
   wheel's PSUMAT is a stub ("PSUMAT - NOT DEFINED IN THIS VERSION, SOURCE
   CODE RESTRICTED") and CSMM construction still fails.  Blocked on a full
   (non-restricted) build — see `docs/shell_support.md` Options C/D1.
+
+## DONE (2026-08-24 — Tier 2 batch: pushover solver tuning P3, CSM bilinearisation P4)
+
+- **P3 — pushover solver tuning (empirical pass).**  Empirically
+  re-validated the pushover primary solver settings against both Gap-4
+  benchmarks.  Findings: (1) the documented `1e-4 / 20` contract was
+  **never actually effective** — `PUSHOVER_SOLVER_DEFAULTS` (1e-6/10)
+  pre-fills the config, so the `.get(key, 1e-4)` fallback could not fire;
+  (2) making `1e-4/20` effective **breaks the Duong flexure-only
+  forceBeamColumn pushover** (element state-determination divergence),
+  while `1e-6/10` converges every validated benchmark (V&E, Duong,
+  RC/steel/LayeredShell).  **Conclusion:** the validated pushover default
+  is the general `NormDispIncr 1e-6 / 10 / Newton`; looser tolerances
+  (e.g. 2e-4/1000) remain an explicit per-model opt-in.  The stale
+  `1e-12` fallback-tolerance guard was audited (clean — only benign
+  geometry guards).  The `_PUSHOVER_RC_DEFAULTS` (analysis/base.py) RC
+  preset now carries an empirical caveat.  Docs corrected in
+  `docs/deprecation_plan.md` §5 and the `run_pushover_analysis` comment.
+- **P4 — CSM bilinearisation real-benchmark validation.**  Applied
+  `bilinearize_rc()` to the real V&E capacity curve: **S_dy ≈ 14 mm
+  (≈ 0.36 % roof drift), equal-area exact**, and — the key claim — the
+  yield does **not** snap to the cracking transition (~2 mm).  It lands
+  below the nominal 0.5–1 % rebar-yield band because the current model
+  curve keeps hardening to 155 mm (no peak; conservative direction).  The
+  band re-check is folded into P5 (once the post-peak descent gives the
+  curve a real peak).  Regression test
+  `tests/test_rc_benchmark.py::test_bilinearize_rc_real_curve`.  Recorded
+  in `docs/deprecation_plan.md` §6 and `docs/csm_bilinearization.md`.
+- **P5 partial — nonlinear-shear mechanism validated; V&E descent open.**
+  Empirically confirmed `aggregate_shear = "nonlinear"` is inert on the
+  shear-strong (flexure-critical) V&E frame (peak 348 vs 353 kN, curve
+  still rising), while the same mechanism reproduces ≥ 15 % post-peak drop
+  on the shear-critical Duong frame.  The V&E descent is a flexure-
+  softening (concrete crushing / bond-slip) phenomenon — documented as the
+  remaining P5 increment.  New test
+  `tests/test_rc_benchmark.py::test_nonlinear_shear_variant_stays_in_band`
+  locks in the in-band, converged nonlinear-shear result (with the
+  documented centreline-variant gravity fragility).
 
 ## DONE (2026-08-24 — review round 2: runner split, solver-test restore, material-key docs)
 
