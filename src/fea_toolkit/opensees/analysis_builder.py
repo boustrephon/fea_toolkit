@@ -163,7 +163,9 @@ class AnalysisBuilder(
 
         # Mass tracking
         self.node_masses: dict[str, float] = {}
-        self._mass_g: float = 9.81
+        # No hardcoded gravity constant: compute_seismic_masses()
+        # overwrites this via g_from_units(units).  None until derived.
+        self._mass_g: Optional[float] = None
 
         # Load totals
         self.load_totals: dict[str, float] = {}
