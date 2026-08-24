@@ -277,6 +277,20 @@ class AnalysisBuilder(
             # Ets = ft / 0.001 (tension capacity gone at 1e-3 strain).
             "concrete02_ft_override": None,
             "concrete02_Ets_override": None,
+            # ── Bond-slip end springs (P5 Phase B) ───────────────────
+            # Zero-length Bond_SP01 slip-rotation springs at fiber member
+            # ends, in series with the flexural fiber element (off by
+            # default).  Bar slip at yield is authored in SI (m) and scaled
+            # to model units; the other knobs are dimensionless or
+            # multiples.  ``bond_slip_backbone`` may override the derived
+            # moment-rotation backbone per member (model units).
+            "bond_slip": False,
+            "bond_slip_sy_m": 0.000254,  # 0.01 in — Zhao-Sritharan default
+            "bond_slip_su_factor": 35.0,  # Su = 35 × Sy (Zhao-Sritharan)
+            "bond_slip_mu_factor": 1.4,  # Mu = 1.4 × My
+            "bond_slip_b": 0.5,  # strain-hardening ratio
+            "bond_slip_R": 0.7,  # pinching factor
+            "bond_slip_backbone": None,
             # ── Shear-flexible section aggregation (opt-in) ──
             # Wrap fiber sections in a SectionAggregator with an elastic
             # shear material (GA_v on Vy/Vz) so beam-column members gain
@@ -417,6 +431,9 @@ class AnalysisBuilder(
             # Restore canonical hinge state before any nodes are created,
             # preventing stale *_hinge_* nodes from being recreated.
             self._restore_hinge_canonical_state()
+            # Restore canonical bond-slip state (endpoints + *_bond_* nodes)
+            # so repeated builds re-instrument the original elements.
+            self._restore_bond_canonical_state()
             # Restore canonical brace state so repeated build_domain() /
             # rebuild_with_fiber_sections() always subdivide the original
             # (un‑subdivided) elements rather than already-subdivided ones.
@@ -443,6 +460,7 @@ class AnalysisBuilder(
             self._create_sections()
             self._create_shell_elements()
             self._create_lumped_hinges()
+            self._create_bond_slip_springs()
             self._create_elements()
             self._create_limit_state_columns()
             self._apply_rigid_diaphragms()

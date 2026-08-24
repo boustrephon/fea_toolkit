@@ -10,7 +10,12 @@ import openseespy.opensees as ops
 
 from ..model.geometry import get_SAP_vecxz
 from ..model.sap_data import FrameElement, Node
-from ..utils import DEFAULT_RHO_MC_SI, g_from_units, mass_density_scale_factor
+from ..utils import (
+    DEFAULT_RHO_MC_SI,
+    g_from_units,
+    length_scale_factor,
+    mass_density_scale_factor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -610,6 +615,28 @@ class ElementMixin:
                 elem.node_j = nj
         self.mesh_model.frame_assignments = dict(self._hinge_canonical_assignments)
 
+    def _restore_bond_canonical_state(self) -> None:
+        """Restore canonical frame element endpoints and remove stale bond nodes.
+
+        Called at the start of :meth:`build_domain` (before
+        :meth:`_create_nodes`) to prevent stale ``*_bond_*`` nodes from a
+        previous build cycle from being recreated, and to re-point elements
+        to their original endpoints before ``_create_bond_slip_springs``
+        re-instruments them.
+        """
+        if not hasattr(self, "_bond_canonical_elements"):
+            return
+        # Remove any *_bond_* nodes left from a previous build
+        for nid in list(self.mesh_model.nodes.keys()):
+            if nid.endswith(("_bond_i", "_bond_j")):
+                del self.mesh_model.nodes[nid]
+        # Restore canonical element endpoints
+        for eid, elem in self.mesh_model.frame_elements.items():
+            if eid in self._bond_canonical_elements:
+                ni, nj = self._bond_canonical_elements[eid]
+                elem.node_i = ni
+                elem.node_j = nj
+
     def set_brace_selection(self, brace_ids: set, end_offset: float = 0.0) -> None:
         """Mark specific frame elements as braces for subdivision.
 
@@ -977,3 +1004,332 @@ class ElementMixin:
         # Update collections
         self.mesh_model.frame_elements = new_elements
         self.mesh_model.frame_assignments = new_assignments
+
+    def _create_bond_slip_springs(self) -> None:
+        """Insert zero-length ``Bond_SP01`` slip-rotation springs at member ends.
+
+        Activated via ``config['bond_slip'] = True`` (off by default; only
+        meaningful when ``create_fiber_sections`` is on, i.e. the pushover
+        fiber rebuild).  Each fibre frame member is split into::
+
+            structural_node_i → zeroLength(bond spring) → bond_i
+                              … fibre element bond_i → bond_j …
+              bond_j → zeroLength(bond spring) → structural_node_j
+
+        The bond nodes are coincident with the member ends and their
+        translation DOFs (1,2,3) are tied with ``equalDOF``, so only the
+        end **rotations** are released across the zero-length springs.  Each
+        spring is a ``section Aggregator`` with ``Bond_SP01`` (Zhao &
+        Sritharan strain-penetration backbone, configured as a
+        moment-rotation law) on the ``Mz``/``My`` DOFs plus elastic
+        ``P``/``T`` terms — the bar-slip end rotation is added in series
+        with the flexural fibre element, softening the post-peak response
+        of flexure-critical frames.  The backbone is derived per member
+        from the section rebar (:meth:`_derive_bond_slip_backbone`);
+        ``config['bond_slip_backbone']`` may override it.
+
+        .. note::
+           OpenSeesPy 3.8.0.0 registers the material under its class name
+           ``Bond_SP01`` (the Tcl command ``bond_sp01`` is not exported);
+           the input values are used directly, so the moment/rotation
+           backbone is fed in the model's own units.
+        """
+        if not self.config.get("bond_slip"):
+            return
+        if self.config.get("hinge_model") == "lumped":
+            import warnings
+
+            warnings.warn(
+                "bond_slip and hinge_model='lumped' both re-point member ends — "
+                "bond_slip skipped (lumped hinges win).",
+                stacklevel=2,
+            )
+            return
+        if not self.config.get("create_fiber_sections", False):
+            # Only meaningful for fibre elements; elastic domains skip.
+            return
+
+        # ── Idempotency: preserve canonical state on first call ────────
+        # Restoration is handled by _restore_bond_canonical_state() in
+        # build_domain().
+        if not hasattr(self, "_bond_canonical_elements"):
+            self._bond_canonical_elements = {
+                eid: (elem.node_i, elem.node_j)
+                for eid, elem in self.mesh_model.frame_elements.items()
+                if not getattr(elem, "inactive", False)
+            }
+
+        elements = self.mesh_model.frame_elements
+        assignments = self.mesh_model.frame_assignments or {}
+
+        next_node_tag = max((nd.node_tag for nd in self.mesh_model.nodes.values()), default=0) + 1
+        try:
+            max_ops_tag = max(ops.getEleTags(), default=0)
+        except Exception:
+            max_ops_tag = 0
+        max_rigid_tag = max(
+            (r[3] for r in getattr(self, "_offset_rigid_links", None) or []), default=0
+        )
+        next_tag = (
+            max(
+                max((e.elem_tag for e in elements.values() if not e.inactive), default=0),
+                max_ops_tag,
+                max_rigid_tag,
+                max(self.frame_tag_map.values(), default=0),
+            )
+            + 1
+        )
+        # Separate counters for bond section/material tags, seeded high to
+        # avoid collision with existing tags.
+        bond_tag_base = (
+            max((v for v in self.section_tags.values()), default=0) + len(self.section_tags) + 100
+        )
+        bond_mat_tag = bond_tag_base + len(self.section_tags) + 1
+
+        units = self.mesh_model.units
+        sy_m = float(self.config.get("bond_slip_sy_m", 0.000254)) * length_scale_factor(units)
+        su_m = float(self.config.get("bond_slip_su_factor", 35.0)) * sy_m
+        mu_factor = float(self.config.get("bond_slip_mu_factor", 1.4))
+        b_ratio = float(self.config.get("bond_slip_b", 0.5))
+        pinch = float(self.config.get("bond_slip_R", 0.7))
+        override = self.config.get("bond_slip_backbone")
+
+        n_spring = 0
+        for eid, elem in list(elements.items()):
+            if getattr(elem, "inactive", False):
+                continue
+            sec_name = assignments.get(eid)
+            if not sec_name or sec_name not in self.section_tags:
+                continue
+            sec = self.mesh_model.sections.get(sec_name)
+            if sec is None:
+                continue
+            ni = self.mesh_model.nodes.get(elem.node_i)
+            nj = self.mesh_model.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+            if L < 1e-12:
+                continue
+
+            bb = self._derive_bond_slip_backbone(
+                sec, sy_m, su_m, mu_factor, b_ratio, pinch, override
+            )
+            if bb is None:
+                continue
+
+            # ── Coincident bond nodes ────────────────────────────────
+            bond_i_id = f"{eid}_bond_i"
+            bond_j_id = f"{eid}_bond_j"
+            bond_i_tag = next_node_tag
+            next_node_tag += 1
+            bond_j_tag = next_node_tag
+            next_node_tag += 1
+            self.mesh_model.nodes[bond_i_id] = Node(
+                node_id=bond_i_id, node_tag=bond_i_tag, x=ni.x, y=ni.y, z=ni.z
+            )
+            self.mesh_model.nodes[bond_j_id] = Node(
+                node_id=bond_j_id, node_tag=bond_j_tag, x=nj.x, y=nj.y, z=nj.z
+            )
+            self._created_node_tags.update([bond_i_tag, bond_j_tag])
+            ops.node(bond_i_tag, ni.x, ni.y, ni.z)
+            ops.node(bond_j_tag, nj.x, nj.y, nj.z)
+
+            # ── Spring materials ─────────────────────────────────────
+            mat = self.mesh_model.materials.get(sec.material)
+            E_mod = mat.E_mod if mat and mat.E_mod else 1.0
+            A_val = getattr(sec, "A", None) or 0.0
+            # Rigid terms for the non-slip DOFs (axial, shear, torsion) —
+            # a unit-consistent 100× the member axial stiffness, so only
+            # the end rotations are released across the spring.
+            rigid_k = 100.0 * max(A_val, 1e-6) * E_mod / L
+
+            rigid_tag = bond_mat_tag
+            bond_mat_tag += 1
+            mz_tag = bond_mat_tag
+            bond_mat_tag += 1
+            my_tag = bond_mat_tag
+            bond_mat_tag += 1
+            ops.uniaxialMaterial("Elastic", rigid_tag, rigid_k)
+            ops.uniaxialMaterial(
+                "Bond_SP01",
+                mz_tag,
+                bb["my"],
+                bb["theta_y"],
+                bb["mu"],
+                bb["theta_u"],
+                bb["b"],
+                bb["R"],
+            )
+            ops.uniaxialMaterial(
+                "Bond_SP01",
+                my_tag,
+                bb["my_w"],
+                bb["theta_y_w"],
+                bb["mu_w"],
+                bb["theta_u_w"],
+                bb["b"],
+                bb["R"],
+            )
+
+            # ── Zero-length spring elements ──────────────────────────
+            # Plain zeroLength with per-DOF materials (mirrors the Elwood
+            # limit-state springs): dirs 1-4 rigid (axial/shear/torsion),
+            # dir 5 = My (weak-axis slip), dir 6 = Mz (strong-axis slip).
+            # No equalDOF — the element itself carries every DOF, keeping
+            # the Transformation constraint handler compatible with the
+            # rigidLink MPC joint offsets.
+            try:
+                vx, vy, _vz = self._get_local_axes(elem)
+                orient = (vx[0], vx[1], vx[2], vy[0], vy[1], vy[2])
+            except Exception:
+                orient = None
+            zl_i_tag = next_tag
+            next_tag += 1
+            zl_j_tag = next_tag
+            next_tag += 1
+            _mats = [rigid_tag, rigid_tag, rigid_tag, rigid_tag, my_tag, mz_tag]
+            if orient:
+                ops.element(
+                    "zeroLength",
+                    zl_i_tag,
+                    ni.node_tag,
+                    bond_i_tag,
+                    "-mat",
+                    *_mats,
+                    "-dir",
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6,
+                    "-orient",
+                    *orient,
+                )
+                ops.element(
+                    "zeroLength",
+                    zl_j_tag,
+                    bond_j_tag,
+                    nj.node_tag,
+                    "-mat",
+                    *_mats,
+                    "-dir",
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6,
+                    "-orient",
+                    *orient,
+                )
+            else:
+                ops.element(
+                    "zeroLength",
+                    zl_i_tag,
+                    ni.node_tag,
+                    bond_i_tag,
+                    "-mat",
+                    *_mats,
+                    "-dir",
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6,
+                )
+                ops.element(
+                    "zeroLength",
+                    zl_j_tag,
+                    bond_j_tag,
+                    nj.node_tag,
+                    "-mat",
+                    *_mats,
+                    "-dir",
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6,
+                )
+
+            # ── Shorten the fibre element to span the bond nodes ─────
+            elem.node_i = bond_i_id
+            elem.node_j = bond_j_id
+            n_spring += 1
+
+        if n_spring and self.config.get("verbose", False):
+            print(f"  Inserted bond-slip springs on {n_spring} member(s)")
+
+    def _derive_bond_slip_backbone(
+        self,
+        sec,
+        sy_m: float,
+        su_m: float,
+        mu_factor: float,
+        b_ratio: float,
+        pinch: float,
+        override,
+    ) -> Optional[dict]:
+        """Derive (or read) the ``Bond_SP01`` moment-rotation backbone.
+
+        ``config['bond_slip_backbone']`` may be an explicit dict (model
+        units, keys ``my``, ``theta_y``, ``mu``, ``theta_u`` with optional
+        weak-axis ``*_w`` variants and ``b``/``R``); otherwise the backbone
+        is derived per section from the rebar:
+
+        * ``My = A_s · f_y · jd`` (tension steel × lever arm)
+        * ``θ_y = sy / jd`` (yield slip over the lever arm)
+        * ``Mu = bond_slip_mu_factor · My``; ``θ_u = su / jd``
+
+        Returns ``None`` when the section lacks rebar data (no spring is
+        inserted for that member).
+        """
+        if isinstance(override, dict):
+            return {
+                "my": float(override["my"]),
+                "theta_y": float(override["theta_y"]),
+                "mu": float(override["mu"]),
+                "theta_u": float(override["theta_u"]),
+                "my_w": float(override.get("my_w", override["my"])),
+                "theta_y_w": float(override.get("theta_y_w", override["theta_y"])),
+                "mu_w": float(override.get("mu_w", override["mu"])),
+                "theta_u_w": float(override.get("theta_u_w", override["theta_u"])),
+                "b": float(override.get("b", b_ratio)),
+                "R": float(override.get("R", pinch)),
+            }
+
+        depth = float(getattr(sec, "depth", None) or 0.0)
+        bf = float(getattr(sec, "bf", None) or 0.0)
+        cover = float(getattr(sec, "cover", None) or 0.0)
+        top_bars = int(getattr(sec, "top_bars", None) or 0)
+        dia = float(getattr(sec, "top_bar_dia", None) or 0.0)
+        rebar_mat_name = getattr(sec, "rebar_material", None)
+        rebar_mat = self.mesh_model.materials.get(rebar_mat_name) if rebar_mat_name else None
+        fy = float(getattr(rebar_mat, "Fy", 0.0) or 0.0)
+        if top_bars <= 0 or dia <= 0.0 or fy <= 0.0 or depth <= 0.0 or cover < 0.0:
+            return None
+        As = math.pi / 4.0 * dia * dia * float(top_bars)
+
+        def _backbone(dim: float) -> tuple:
+            jd = max(dim - 2.0 * cover, 1e-6)
+            my = As * fy * jd
+            return my, sy_m / jd, my * mu_factor, su_m / jd
+
+        my, theta_y, mu, theta_u = _backbone(depth)
+        my_w, theta_y_w, mu_w, theta_u_w = _backbone(bf if bf > 0.0 else depth)
+        return {
+            "my": my,
+            "theta_y": theta_y,
+            "mu": mu,
+            "theta_u": theta_u,
+            "my_w": my_w,
+            "theta_y_w": theta_y_w,
+            "mu_w": mu_w,
+            "theta_u_w": theta_u_w,
+            "b": b_ratio,
+            "R": pinch,
+        }

@@ -329,6 +329,25 @@ ratio [0.95, 1.15], secant [0.9, 1.15] × experimental).
    drop).  Reproducing the V&E descent therefore requires the next
    increment — flexure softening (strain-softening concrete) and/or
    bond-slip springs — tracked in ``docs/_pending_work.md`` (P5).
+
+   **2026-08-24 update (Phase A + B):** both increments are now
+   implemented and trialled — ``concrete_material = "Concrete02"`` +
+   ``core_residual_factor`` (flexure softening) and ``bond_slip``
+   (``Bond_SP01`` end springs); details in ``docs/_pending_work.md``
+   (P5, Phase A + Phase B status).  The best curve after both phases is
+   ``Concrete02`` / ``core_residual_factor=0.02`` /
+   ``confined_ecu_max=0.012`` → peak **331.7 kN (1.005×)** @ 152.5 mm,
+   secant **5.92 (0.97×)**, **9.9 % end drop**: the peak magnitude is
+   essentially exact and the drop nearly meets the 10 % gate, but the peak
+   sits at the push end.  The sustained ≥ 10 % descent from the 40–70 mm
+   band is **not reproducible** with the fibre + ``Bond_SP01`` mechanism
+   set — ``Bond_SP01`` plateaus at its ultimate moment (no degrading
+   branch) and a forceBeamColumn fibre section cannot represent the
+   member-level degradation (cracked-shear / bond) that drives the
+   experimental softening.  P5 closes as **"documented, not reproduced"**;
+   the recommended next increment is a degrading lumped hinge (Hysteretic
+   with a descending post-cap branch) or a shear-flexible element with
+   degrading shear.
 2. **Elastic shear aggregation is not enough.**  The ~20 % experimental
    shear-drift share is a cracked-shear phenomenon; the elastic
    ``GAᵥ`` term adds ≈ 0.2 %.  The nonlinear backbone layer (see above)
