@@ -15,7 +15,9 @@ analysis_builder — Public :class:`AnalysisBuilder` facade composed from
     _materials — uniaxial + nD material creation.
     _sections — frame/shell section creation.
     _elements — frame/wall/shell element creation, braces, lumped hinges.
-    _runners — analysis execution and result extraction (static/modal/RS/pushover).
+    _runners — analysis runner facade; the implementation is split into
+        per-analysis-type mixins: _runner_static (static + seismic masses +
+        extraction), _runner_modal, _runner_rs, _runner_pushover.
     _constraints — edge constraints, nodes/restraints, connectivity diagnostics.
     _loads — load-pattern creation, gravity axial loads, rigid diaphragms.
     _limit_state — Elwood & Moehle column limit-state columns.
