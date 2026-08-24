@@ -786,7 +786,7 @@ current limitations.
 | Confined concrete (Mander, etc.) | ❌ Not implemented | Only unconfined `Concrete01` |
 | Nonlinear beam-column behaviour | ✅ Implemented | Via fiber sections with `forceBeamColumn` + `Lobatto` integration |
 | Shear failure modelling | ❌ Not implemented | Not available in standard OpenSees beam-column elements |
-| Bond-slip | ❌ Not implemented | Requires `beamWithHinges` or `bond_sp01` material |
+| Bond-slip | ✅ Implemented (opt-in) | `config["bond_slip"] = True` inserts zero-length `Bond_SP01` slip springs at fibre member ends (P5 Phase B; OpenSeesPy registers the material as `Bond_SP01` — the Tcl name `bond_sp01` is not exported) |
 
 **How RC sections work today:**
 

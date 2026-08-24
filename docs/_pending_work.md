@@ -57,13 +57,15 @@ reproduced.
    fiber cover/core) and/or zero-length bond-slip springs at member ends.
 
 **Outline steps (remaining).**
-1. Trial a strain-softening concrete option (e.g. `Concrete02` crushing
-   branch for the fiber cover/core, confined-core hardening capped) and/or
-   zero-length bond-slip springs at member ends (`bond_sp01` or a
-   simplified slip-rotation spring), config-gated off by default.
-2. Re-run the V&E benchmark targeting the experimental post-peak branch
-   (peak ≈ 330 kN near 50 mm, then a descent — see the completion
-   requirements below for the shape-based targets).
+1. ~~Trial a strain-softening concrete option and zero-length bond-slip
+   springs at member ends, config-gated off by default~~ — **DONE**: both
+   are implemented — `Concrete02` + `core_residual_factor` (Phase A) and
+   the `Bond_SP01` end springs via `config["bond_slip"]` (Phase B) — with
+   the empirical results in the Phase A/B status blocks below.
+2. ~~Re-run the V&E benchmark targeting the experimental post-peak
+   branch~~ — **DONE**: the full knob sweep is recorded in the Phase A/B
+   status blocks below; the ≥ 10 % sustained-descent gate is not met and
+   P5 closes as "documented, not reproduced".
 3. **P4 re-check:** with a real peak on the curve, re-validate
    `bilinearize_rc()` — the equal-area yield should move up toward the
    rebar-yield drift (~0.5–1 % roof drift ≈ 20–40 mm).
@@ -78,7 +80,8 @@ post-peak *shape* without regressing the in-band strength/stiffness:
 1. **Mechanism** — strain-softening concrete (e.g. a `Concrete02` crushing
    branch for the fiber cover/core, with the confined-core hardening
    capped) and/or zero-length bond-slip springs at member ends
-   (`bond_sp01` Zhao–Sritharan, or a simplified slip-rotation spring),
+   (`Bond_SP01` Zhao–Sritharan slip-rotation springs — OpenSeesPy
+   registers the material as `Bond_SP01`, not the Tcl `bond_sp01`),
    config-gated off by default so existing fibre models are unchanged.
    Already ruled out (documented): elastic `GA_v` shear (inert) and the
    nonlinear MCFT shear backbone (inert on this shear-strong frame;
@@ -171,9 +174,10 @@ implemented, config-gated **off by default** (existing models unchanged):
   (steel strain-hardening + P-Δ stabilisation).  The experimental
   post-peak branch is dominated by **bond-slip** (~20 % shear share + bar
   slip), which a fiber section cannot represent — the next increment is
-  **P5 Phase B: zero-length `bond_sp01` slip springs** at member ends
-  (precedents: the lumped-hinge `zeroLengthSection` and the Elwood
-  limit-state `zeroLength` springs).
+  **P5 Phase B: zero-length `Bond_SP01` slip springs** at member ends
+  (implemented — see the Phase B status below; precedents: the
+  lumped-hinge `zeroLengthSection` and the Elwood limit-state `zeroLength`
+  springs).
 
 **Phase B status (2026-08-24):** the `Bond_SP01` slip-spring mechanism is
 implemented, config-gated **off by default** (existing models unchanged):
