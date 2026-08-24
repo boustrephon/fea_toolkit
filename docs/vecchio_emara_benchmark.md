@@ -317,12 +317,18 @@ ratio [0.95, 1.15], secant [0.9, 1.15] × experimental).
 1. **Post-peak shape.**  The model continues to rise after ≈ 50 mm
    instead of descending like the experiment — the peak-to-peak and
    secant metrics are inside the band, but the *shape* of the capacity
-   curve after the experimental peak is not reproduced.  The first
-   increment of the fix — the **nonlinear shear backbone**
-   (``aggregate_shear = "nonlinear"``) — is implemented and validated on
-   the companion shear-critical Duong frame
-   (``docs/shear_failure_modelling.md``); bond-slip remains deferred
-   (``docs/_pending_work.md``).
+   curve after the experimental peak is not reproduced.  The nonlinear
+   shear backbone (``aggregate_shear = "nonlinear"``) was applied to the
+   V&E frame (2026-08-24) and is **inert for the post-peak shape**: peak
+   348 kN (1.05×) vs 353 kN (1.07×) with elastic shear, and the curve
+   still rises to the 155 mm end.  The V&E frame is **shear-strong
+   (flexure-critical)** by design, so member shear never reaches the MCFT
+   backbone's degrading branch within the push range; the same mechanism
+   *does* reproduce the post-peak descent on the companion **shear-critical
+   Duong frame** (``docs/shear_failure_modelling.md``, ≥ 15 % post-peak
+   drop).  Reproducing the V&E descent therefore requires the next
+   increment — flexure softening (strain-softening concrete) and/or
+   bond-slip springs — tracked in ``docs/_pending_work.md`` (P5).
 2. **Elastic shear aggregation is not enough.**  The ~20 % experimental
    shear-drift share is a cracked-shear phenomenon; the elastic
    ``GAᵥ`` term adds ≈ 0.2 %.  The nonlinear backbone layer (see above)

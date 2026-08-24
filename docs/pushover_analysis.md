@@ -107,8 +107,8 @@ config = {
 
 | Config key | Default | Notes |
 |---|---|---|
-| `solver_test_tol` | `1e-6` (general), `1e-4` (pushover) | Relax to `2e-4` for RC + LayeredShell models. **The `2e-4` value is specific to the documented kN-m unit system** — for other force/length unit systems it should be scaled from `model.units` (e.g. via the model's characteristic weight `total_mass × g_from_units(units) × 1e-6`, as the builder's automatic fallback does) or derived from the typical residual magnitude in those units. |
-| `solver_test_max_iter` | `10` (general), `20` (pushover), `1000` (automatic fallback) | The pushover path auto-falls back to `ModifiedNewton` with 1000 iterations — **only during the lateral pushover loop** |
+| `solver_test_tol` | `1e-6` (general and pushover) | The documented `1e-4` (pushover) intent was **rejected by the 2026-08-24 empirical pass** — it was never effective (the general defaults pre-fill the config) and is not universally safe (breaks the Duong flexure-only `forceBeamColumn` pushover).  Relax to `2e-4` explicitly for RC + LayeredShell models. **The `2e-4` value is specific to the documented kN-m unit system** — for other force/length unit systems it should be scaled from `model.units` (e.g. via the model's characteristic weight `total_mass × g_from_units(units) × 1e-6`, as the builder's automatic fallback does) or derived from the typical residual magnitude in those units. |
+| `solver_test_max_iter` | `10` (general and pushover), `1000` (automatic fallback) | The pushover path auto-falls back to `ModifiedNewton` with 1000 iterations — **only during the lateral pushover loop** |
 | `solver_algorithm` | `"Newton"` | Falls back to `ModifiedNewton` automatically **only during the lateral pushover loop**; the gravity stage adapts the load increment (halving/quartering) rather than switching algorithms |
 | `gravity_num_substeps` | `1` (`10` auto when the model has LayeredShell sections) | Use 5–10 for LayeredShell RC models |
 

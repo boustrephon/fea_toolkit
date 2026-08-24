@@ -347,29 +347,60 @@ comfortably.  Below is a realistic assessment of what remains.
    then restore the primary solver.
 
    **Measures required (confirming/refining the implemented contract):**
-   1. Confirm the documented flow: the pushover path's primary test is
+   1. ~~Confirm the documented flow: the pushover path's primary test is
       `NormDispIncr 1e-4 / 20`, and on failure the per-step fallback
       switches to `NormUnbalance` + `ModifiedNewton -initial` with the
       relaxed runtime-scaled tolerance and 1000 iterations, then restores
-      the primary settings.
+      the primary settings~~ ✅ **Resolved (2026-08-24, P3) — the empirical
+      pass REJECTED the looser contract.**  The documented `1e-4 / 20` was
+      never actually effective (`PUSHOVER_SOLVER_DEFAULTS` 1e-6/10
+      pre-fills the config dict, so the `.get(key, 1e-4)` fallback never
+      fired) and is **NOT universally safe**: 1e-4/20 breaks the Duong
+      flexure-only forceBeamColumn pushover (element state-determination
+      divergence), while 1e-6/10 converges every validated benchmark (V&E,
+      Duong, RC/steel/LayeredShell).  The validated pushover default is
+      therefore the general `NormDispIncr 1e-6 / 10 / Newton`; looser
+      tolerances (e.g. 2e-4/1000) remain an explicit per-model opt-in.
    2. `PUSHOVER_FALLBACK_DEFAULTS` carries
       `{"solver_test_type": "NormUnbalance", "solver_test_max_iter": 1000,
       "solver_algorithm": "ModifiedNewton"}` — the tolerance is computed
       at runtime from the model's characteristic weight (via
       `g_from_units`), so the stale **1e-12** value must not re-appear;
-      the relaxed tolerance for a kN-m full-building model is ~2e-4.
-   3. Confirm per-step fallback logic in `run_pushover_analysis()`:
+      the relaxed tolerance for a kN-m full-building model is ~2e-4.  ✅
+      **Verified (2026-08-24):** audit of the pushover path found only
+      benign geometry/magnitude guards at `1e-12` (uniform-load detection,
+      element-length guards), never a fallback test tolerance.
+   3. ~~Confirm per-step fallback logic in `run_pushover_analysis()`:
       on a failed step with primary settings, retry with the fallback dict,
-      then restore primary settings for subsequent steps.
-   4. Keep the automatic `gravity_num_substeps` = 10 ramping for models
-      with LayeredShell sections (explicit config value always wins).
-   5. Keep the `RC_PUSHOVER_SOLVER_DEFAULTS` convenience preset combining
+      then restore primary settings for subsequent steps~~ ✅ **Done** — the
+      fallback + restore chain (including honouring a configured
+      `solver_test_type` on restore) was verified in the review-round-2
+      M3 fix (commit `4b53a0f`).
+   4. ~~Keep the automatic `gravity_num_substeps` = 10 ramping for models
+      with LayeredShell sections (explicit config value always wins)~~ ✅
+      **Verified** — `LAYERED_SHELL_GRAVITY_SUBSTEPS` auto-detection with
+      explicit-value precedence.
+   5. ~~Keep the `RC_PUSHOVER_SOLVER_DEFAULTS` convenience preset combining
       all of the above; `docs/pushover_analysis.md` documents the
-      recommended RC settings.
-   6. The Gap 4 Vecchio & Emara benchmark is complete (peak 1.07×, secant
+      recommended RC settings~~ ✅ **Reconciled (2026-08-24, P3).**  The RC
+      preset exists as `_PUSHOVER_RC_DEFAULTS` in `analysis/base.py`
+      (NormDispIncr 1e-4 / 20 / Newton, gravity ramping, fallback dict) for
+      the typed-runner path.  **Empirical caveat (2026-08-24):** 1e-4/20 is
+      not universally safe — it breaks the Duong flexure-only
+      forceBeamColumn pushover; the direct `AnalysisBuilder` path defaults
+      to the general 1e-6/10.  `docs/pushover_analysis.md` documents the
+      recommended RC/LayeredShell settings (`solver_test_tol: 2e-4`,
+      `solver_test_max_iter: 1000`).
+   6. ~~The Gap 4 Vecchio & Emara benchmark is complete (peak 1.07×, secant
       1.03× — `docs/vecchio_emara_benchmark.md`), so tune these defaults
       empirically against it and record the final values in the plan
-      (tracked as P3 in `docs/_pending_work.md`).
+      (tracked as P3 in `docs/_pending_work.md`)~~ ✅ **Done (2026-08-24,
+      P3).**  Empirical comparison: on the V&E benchmark `1e-4/20` ≡
+      `1e-6/10` (peak 353 kN = 1.07×, secant 6.29 kN/mm = 1.03×, all steps
+      converged); on the Duong benchmark `1e-4/20` **fails** the
+      flexure-only forceBeamColumn pushover while `1e-6/10` converges.
+      Final recorded pushover primary values: `NormDispIncr 1e-6 / 10 /
+      Newton` (the general default — looser tolerances opt-in per model).
 
 6. **CSM bilinearisation validation** — **🟢 Implemented + synthetic
    validation done; real-benchmark validation pending.**  The existing
@@ -404,10 +435,21 @@ comfortably.  Below is a realistic assessment of what remains.
       names `"rc"` and `"de_luca_10pct"`; config key `elastic_fraction`
       (default 0.10).  Closed-form equal-area solution (no iteration);
       exported via `fea_toolkit.model.__all__`.
-   3. Validate against the real RC pushover curve from the Gap 4 benchmark —
+   3. ~~Validate against the real RC pushover curve from the Gap 4 benchmark —
       the yield point should sit near the expected rebar-yield drift
       (~0.5–1 % roof drift), not at the premature cracking transition.
-      **(Pending — blocked on Gap 4.)**
+      **(Pending — blocked on Gap 4.)**~~ ✅ **Done (2026-08-24, P4).**  Applied
+      `bilinearize_rc()` to the real V&E capacity curve
+      (`tests/test_rc_benchmark.py::test_bilinearize_rc_real_curve`).
+      **Result: S_dy ≈ 14 mm (≈ 0.36 % roof drift), equal-area exact.**  The
+      key claim holds — the yield does **not** snap to the cracking
+      transition (~2 mm) — but it lands *below* the nominal 0.5–1 %
+      rebar-yield band (and below the model's own first-yield ≈ 31 mm)
+      because the current model curve keeps hardening to the 155 mm end
+      (no post-peak peak, see P5): the equal-area constraint on a
+      hardening-only backbone pushes the yield earlier, in the
+      conservative direction.  Re-validate the rebar-yield band once the
+      P5 post-peak descent gives the curve a real peak.
    4. ~~Update `docs/csm_bilinearization.md` documenting the method choice
       and the calibration results~~ ✅ **Done (2026-08-16)** — §4 documents the
       method, config keys, references, and the comparison table row.
