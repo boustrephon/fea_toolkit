@@ -2063,3 +2063,164 @@ class TestAnimationTimerCallbackArity:
         _add_animation_timer(fp, callback, max_steps=10, interval_ms=17)
         self._invoke_registered_callback(fp, "vtek", ("caller", "TimerEvent"))
         assert received == [(1, ())]
+
+
+# ============================================================================
+# Unified force-diagram dispatcher (plotting/force_diagram.py)
+# ============================================================================
+
+
+def _minimal_npz_dict() -> dict:
+    """Minimal NPZ-style dict with static frame forces + kN-m metadata."""
+    return {
+        "node_tag": np.array([1, 2, 3]),
+        "node_sap_id": np.array(["1", "2", "3"]),
+        "node_x": np.array([0.0, 4.0, 4.0]),
+        "node_y": np.array([0.0, 0.0, 0.0]),
+        "node_z": np.array([0.0, 0.0, 3.0]),
+        "frame_eid": np.array([0, 1]),
+        "frame_sap_id": np.array(["1", "2"]),
+        "frame_node_i": np.array([1, 2]),
+        "frame_node_j": np.array([2, 3]),
+        "frame_sec_name": np.array(["COL", "BEAM"]),
+        "frame_parent_sap_id": np.array(["", ""]),
+        "analysis_types": np.array(["static"]),
+        "static_case_labels": np.array(["DEAD"]),
+        "force_unit": np.array(["kN"]),
+        "length_unit": np.array(["m"]),
+        "forces_coordinate_system": np.array(["local"]),
+        "static/DEAD/my_i": np.array([10.0, -5.0]),
+        "static/DEAD/my_j": np.array([-10.0, 5.0]),
+    }
+
+
+class TestForceDiagramUnified:
+    """Table-driven coverage for the unified ``plot_force_diagram``."""
+
+    def test_resolve_source_npz(self):
+        from fea_toolkit.plotting.force_diagram import _resolve_source
+
+        data = _resolve_source(_minimal_npz_dict())
+        assert data is not None
+        assert data.kind == "static"
+        assert data.quantity == "My"
+        assert data.force_unit == "kN"
+        assert data.length_unit == "m"
+        assert len(data.series) == 2
+        # frame 0 spans nodes 1-2 (z 0..0), frame 1 spans nodes 2-3 (z 0..3)
+        assert data.series[0]["z_mid"] == pytest.approx(0.0)
+        assert data.series[1]["z_mid"] == pytest.approx(1.5)
+        # canonical uppercase force keys, incl. local variants
+        assert data.series[0]["forces"]["MY"] == pytest.approx(10.0)
+        assert data.series[0]["forces"]["MY_j"] == pytest.approx(-10.0)
+        assert data.series[0]["forces"]["MY_i_local"] == pytest.approx(10.0)
+
+    def test_resolve_source_rs_list(self):
+        from fea_toolkit.plotting.force_diagram import _resolve_source
+
+        records = [
+            {"z_mid": 1.0, "My_i": 100.0, "My_j": -50.0},
+            {"z_mid": 3.0, "My_i": 200.0, "My_j": -100.0},
+        ]
+        data = _resolve_source(records, kind="rs", quantity="My")
+        assert data.kind == "rs"
+        assert len(data.series) == 2
+        assert data.series[0]["forces"]["MY"] == pytest.approx(100.0)
+        assert data.series[0]["forces"]["MY_j"] == pytest.approx(-50.0)
+        assert data.series[0]["z_mid"] == pytest.approx(1.0)
+
+    def test_resolve_source_rs_dict_unwraps_units(self):
+        from fea_toolkit.plotting.force_diagram import _resolve_source
+
+        full = {
+            "element_results": [{"z_mid": 2.0, "My_i": 5.0}],
+            "units": {"F": "kN", "L": "m"},
+        }
+        data = _resolve_source(full, kind="rs", quantity="My")
+        assert data.kind == "rs"
+        assert data.force_unit == "kN"
+        assert data.series[0]["forces"]["MY"] == pytest.approx(5.0)
+
+    def test_dispatcher_static_2d(self):
+        from fea_toolkit.plotting.force_diagram import plot_force_diagram
+
+        fig = plot_force_diagram(_minimal_npz_dict(), quantity="My", dimension="2d", figsize=(6, 4))
+        assert fig is not None
+        import matplotlib.pyplot as plt
+
+        plt.close(fig)
+
+    def test_dispatcher_static_3d_notebook(self):
+        from fea_toolkit.plotting.force_diagram import plot_force_diagram
+
+        pl = plot_force_diagram(_minimal_npz_dict(), quantity="My", dimension="3d", notebook=True)
+        assert pl is not None
+        pl.close()
+
+    def test_dispatcher_rs_2d(self):
+        from fea_toolkit.plotting.force_diagram import plot_force_diagram
+
+        records = [
+            {"z_mid": 1.0, "My_i": 100.0, "My_j": -50.0},
+            {"z_mid": 3.0, "My_i": 200.0, "My_j": -100.0},
+        ]
+        fig = plot_force_diagram(records, quantity="My_i", kind="rs", figsize=(6, 4))
+        assert fig is not None
+        import matplotlib.pyplot as plt
+
+        plt.close(fig)
+
+    def test_dispatcher_dimension_inference_3d(self):
+        """With PyVista available + geometry present, 3D is inferred."""
+        from fea_toolkit.plotting.force_diagram import plot_force_diagram
+
+        pl = plot_force_diagram(_minimal_npz_dict(), quantity="My", notebook=True)
+        assert pl is not None
+        pl.close()
+
+    def test_quantity_key_styles_equivalent(self):
+        """'My_i' and 'My' resolve to the same series data."""
+        from fea_toolkit.plotting.force_diagram import _resolve_source
+
+        d1 = _resolve_source(_minimal_npz_dict(), quantity="My")
+        d2 = _resolve_source(_minimal_npz_dict(), quantity="My_i")
+        assert d1.series == d2.series
+        assert d1.quantity == d2.quantity == "My"
+
+    def test_unit_propagation_from_metadata(self):
+        from fea_toolkit.plotting.force_diagram import _resolve_source
+
+        npz = _minimal_npz_dict()
+        npz["force_unit"] = np.array(["N"])
+        npz["length_unit"] = np.array(["mm"])
+        data = _resolve_source(npz, quantity="My")
+        assert data.force_unit == "N"
+        assert data.length_unit == "mm"
+
+    def test_invalid_quantity_returns_none(self):
+        from fea_toolkit.plotting.force_diagram import plot_force_diagram
+
+        assert plot_force_diagram(_minimal_npz_dict(), quantity="ZZ", dimension="2d") is None
+
+    def test_npz_path_wrappers(self):
+        """plot_npz_force_diagram / plot_npz_moment_3d wrap the dispatcher."""
+        import os
+        import tempfile
+
+        from fea_toolkit.plotting import plot_npz_force_diagram, plot_npz_moment_3d
+
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as f:
+            path = f.name
+        np.savez(path, **_minimal_npz_dict())
+        try:
+            fig = plot_npz_force_diagram(path, quantity="My")
+            assert fig is not None
+            import matplotlib.pyplot as plt
+
+            plt.close(fig)
+
+            pl = plot_npz_moment_3d(path, quantity="My", return_plotter=True)
+            assert pl is not None
+            pl.close()
+        finally:
+            os.remove(path)

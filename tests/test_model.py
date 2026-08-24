@@ -2596,7 +2596,14 @@ class TestPlottingImports:
         assert plot_rs_force_diagram({}, "My_i") is None
 
     def test_deprecated_plot_names_removed(self):
-        """The deprecated plot functions are no longer part of the public API."""
+        """The deprecated plot functions are no longer part of the public API.
+
+        Note: ``plot_force_diagram`` is intentionally absent from this list —
+        the name was reintroduced as the *unified* force-diagram dispatcher
+        (``fea_toolkit.plotting.force_diagram.plot_force_diagram``), which is
+        a different function from the deprecated 3D-static plotter removed in
+        the Phase-3 cleanup.
+        """
         from fea_toolkit import plotting
 
         for name in (
@@ -2608,7 +2615,6 @@ class TestPlottingImports:
             "plot_static_shear_3d",
             "plot_static_axial_3d",
             "plot_static_force_diagram",
-            "plot_force_diagram",
         ):
             assert not hasattr(plotting, name), f"{name} should have been removed"
 

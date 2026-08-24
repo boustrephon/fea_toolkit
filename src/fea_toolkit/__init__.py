@@ -41,7 +41,7 @@ Task → Function reference
 | Print a modal summary table                      | ``from fea_toolkit.io import modal_table``      |
 | Plot the 3D model                                | ``plot_mesh(builder)``                           |
 | Plot deformed shape                              | ``plot_deformed_displacement_3d(builder, results, scale=100)`` |
-| Plot force/moment diagrams                       | ``plot_force_diagram_3d(builder, results, quantity='Mz')`` |
+| Plot force/moment diagrams                       | ``plot_force_diagram(builder, results, quantity='Mz')`` |
 | Plot pushover capacity curve                     | ``plot_pushover_curve(results)``                |
 | Plot storey displacements / drifts               | ``from fea_toolkit.model import storey_displacements`` |
 | Export results to NPZ                            | ``from fea_toolkit.io import write_results_npz`` |
@@ -111,10 +111,11 @@ from fea_toolkit.model.selection import Selection
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder, run_modal
 from fea_toolkit.opensees.preprocessor import Preprocessor, preprocess_model
 from fea_toolkit.opensees.pushover import pushover_rc_openseespy
-from fea_toolkit.plotting.interactive_viewer import plot_interactive_viewer
-from fea_toolkit.plotting.viewer import ModelViewer
 
 # ── Visualisation ─────────────────────────────────────────────────
+from fea_toolkit.plotting.force_diagram import plot_force_diagram
+from fea_toolkit.plotting.interactive_viewer import plot_interactive_viewer
+from fea_toolkit.plotting.viewer import ModelViewer
 from fea_toolkit.plotting.viz import (
     compare_meshes,
     plot_building_views,
@@ -165,6 +166,7 @@ __all__ = [
     "plot_building_views",
     "plot_capacity_spectrum",
     "plot_deformed_displacement_3d",
+    "plot_force_diagram",
     "plot_force_diagram_3d",
     "plot_interactive_viewer",
     "plot_mesh",

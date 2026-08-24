@@ -4080,7 +4080,6 @@ def _render_frame_force_diagram(
     except ImportError:
         print("pyvista not installed — install with: pip install pyvista")
         return 0.0, 0.0
-    from ..utils import compute_flag_parts
 
     model_height = 0.0
     max_abs_val = 0.0
@@ -4158,145 +4157,32 @@ def plot_force_diagram_3d(
     title=None,
     **kwargs,
 ):
-    """Draw a 3D force/moment diagram from a builder or NPZ/HDF5 data.
+    """3D force/moment diagram from a builder or NPZ data (unified dispatcher).
 
-    Works with either:
-
-    * An ``AnalysisBuilder`` (built) + a force dict
-      from ``extract_static_element_forces()``.
-    * An NPZ data dict (from ``np.load()``) — forces are read from the
-      ``static/{combo}/`` arrays automatically.
-
-    Geometry is resolved from *source* via :func:`_resolve_mesh_data`:
-    the NPZ file already caches node coordinates and element connectivity,
-    so no separate model file is needed.
-
-    Args:
-        source: Builder instance or NPZ data dict.
-        force_data:
-            *Builder path:* dict ``{elem_tag: {Fx, Fy, Fz, Mx, My, Mz,
-            Fx_j, ...}}`` from ``extract_static_element_forces()``.
-            *NPZ path:* ``None`` (forces extracted automatically), or a
-            string naming the static combo (e.g. ``"DEAD"``) — equivalent
-            to passing via the *combo* parameter.
-        quantity: ``'My'``, ``'Mz'``, ``'Mx'``, ``'Fx'``, ``'Fy'``, ``'Fz'``.
-        mode: ``'flag'`` (planar quadrilaterals) or ``'tube'`` (coloured
-            cylinders).
-        moment_scale: Extrusion length per unit quantity.  ``None`` =
-            auto‑scale so the largest flag is 20 % of model height.
-        show_original: Draw the centreline in grey.
-        combo: For NPZ source, the static case name (e.g. ``"DEAD"``).
-            ``None`` = first available case.
-        notebook: Return plotter for Jupyter.
-        title: Optional plot title.
-        **kwargs: Passed to ``pyvista.Plotter()``.
+    Thin wrapper over
+    :func:`~fea_toolkit.plotting.force_diagram.plot_force_diagram` pinned to
+    the 3D PyVista rendering.
 
     Returns:
-        ``pv.Plotter`` if *notebook* else ``None``.
+        ``pyvista.Plotter`` if *notebook* else ``None``.
     """
-    try:
-        import pyvista as pv
-    except ImportError:
-        print("pyvista is required.  pip install pyvista")
-        return None
+    from .force_diagram import plot_force_diagram
 
-    is_moment = quantity.startswith("M")
-    if not is_moment and not quantity.startswith("F"):
-        print(f"Unsupported quantity '{quantity}'.  Use 'M*' or 'F*'.")
-        return None
-
-    # ── Resolve geometry ──────────────────────────────────────────
-    data = _resolve_mesh_data(source, collapse_to_parents=collapse_to_parents)
-    nodes = data["nodes"]
-    frames = data["frames"]
-
-    # ── Resolve force data ────────────────────────────────────────
-    # force_map: {(ni_tag, nj_tag, idx): {Fx, Fy, Fz, Mx, My, Mz,
-    #                                      Fx_j, Fy_j, Fz_j, Mx_j, My_j, Mz_j}}
-    # The idx is the frame index in the resolved data for traceability.
-    is_npz = isinstance(source, _NPZ_TYPES)
-
-    if is_npz:
-        # Extract static case name
-        _combo = force_data if isinstance(force_data, str) else combo
-        case_prefix = _resolve_npz_static_case(source, _combo)
-        force_map = _extract_npz_frame_forces(source, case_prefix, frames)
-    else:
-        # Builder path — use provided force_data
-        if force_data is None:
-            print("force_data is required when source is a builder.")
-            return None
-        # Hoist invariant builder/model/elements resolution
-        builder = source
-        model = builder.model if hasattr(builder, "model") else builder.mesh_model
-        elements = (
-            builder.split_elements
-            if hasattr(builder, "split_elements") and builder.split_elements
-            else model.frame_elements
-        )
-        # Build a {(ni_tag, nj_tag): elem_tag} lookup once
-        elem_by_node_pair: dict[tuple[int, int], int] = {}
-        for eid, elem in elements.items():
-            if getattr(elem, "inactive", False):
-                continue
-            eni = model.nodes.get(elem.node_i)
-            enj = model.nodes.get(elem.node_j)
-            if eni is None or enj is None:
-                continue
-            elem_by_node_pair[(eni.node_tag, enj.node_tag)] = elem.elem_tag
-
-        force_map = {}
-        for idx, fr in enumerate(frames):
-            ni_tag = fr.get("ni_tag")
-            nj_tag = fr.get("nj_tag")
-            if ni_tag is None:
-                # Builder path uses ni_id/nj_id (string ids)
-                nid_i = fr["ni_id"]
-                nid_j = fr["nj_id"]
-                nd_i = model.nodes.get(nid_i)
-                nd_j = model.nodes.get(nid_j)
-                if nd_i is None or nd_j is None:
-                    continue
-                ni_tag = nd_i.node_tag
-                nj_tag = nd_j.node_tag
-
-            target_tag = elem_by_node_pair.get((ni_tag, nj_tag))
-            if target_tag is not None and target_tag in force_data:
-                force_map[idx] = force_data[target_tag]
-
-    if not force_map:
-        print(f"No {quantity} data to plot.")
-        return None
-
-    # ── Render via shared helper ──────────────────────────────────
-    pv.set_plot_theme("document")
-    plotter = pv.Plotter(notebook=notebook, **kwargs)
-
-    model_height, max_abs_val = _render_frame_force_diagram(
-        plotter,
+    return plot_force_diagram(
         source,
-        frames,
-        nodes,
-        force_map,
-        quantity,
-        mode,
-        show_original=show_original,
+        force_data,
+        quantity=quantity,
+        kind="static",
+        dimension="3d",
+        combo=combo,
+        collapse_to_parents=collapse_to_parents,
+        mode=mode,
         moment_scale=moment_scale,
+        show_original=show_original,
+        notebook=notebook,
+        title=title,
+        **kwargs,
     )
-
-    if max_abs_val < 1e-15 and model_height < 1e-15:
-        print(f"No {quantity} data to plot.")
-        return None
-
-    plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)", position="lower_edge", font_size=10)
-    if title:
-        plotter.add_text(title, position="upper_edge", font_size=12)
-    _set_isometric_view(plotter)
-
-    if notebook:
-        return plotter
-    plotter.show()
-    return None
 
 
 # ── Internal helpers for unified force diagram ────────────────────────────
@@ -4541,78 +4427,28 @@ def plot_rs_force_diagram(
 ) -> Optional[Any]:
     """Plot a CQC-combined RS force/moment quantity vs elevation.
 
-    Produces a 2D line plot of the chosen response-spectrum quantity
-    (e.g. ``'My_i'``, ``'Mz_i'``, ``'Vz_i'``, ``'Vy_i'``) against element
-    elevation.  Accepts the element-results list returned by
-    :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.extract_element_rs_forces`
-    or the full result dict (the ``'element_results'`` key is unwrapped
-    automatically).
-
-    Args:
-        elem_results: List of per-element result dicts (each with ``z_mid``
-            and the chosen *quantity*), or the full dict from
-            ``extract_element_rs_forces()``.
-        quantity: The result key to plot (e.g. ``'My_i'``, ``'Vz_i'``).
-        title: Optional plot title.  Auto‑generated if omitted.
-        figsize: Matplotlib figure size ``(width, height)``.
-        force_unit: Unit label for the force/moment quantity (default
-            ``'kN'`` — pass the model's force unit for unit‑aware plots).
-        length_unit: Unit label for elevation (default ``'m'`` — pass the
-            model's length unit for unit‑aware plots).
-        both_ends: If ``True`` plot both I‑ and J‑end values per element;
-            otherwise only the I‑end envelope (default).
-        **kwargs: Passed to ``matplotlib.pyplot.plot()``.
+    Thin wrapper over the unified
+    :func:`~fea_toolkit.plotting.force_diagram.plot_force_diagram` pinned to
+    the 2D RS line rendering.  Accepts the ``element_results`` list or the
+    full ``extract_element_rs_forces()`` dict.
 
     Returns:
-        The ``matplotlib.figure.Figure`` (so the caller can ``.savefig()`` or
-        ``.show()``), or ``None`` if matplotlib is unavailable or no element
-        results are provided.
+        The ``matplotlib.figure.Figure``, or ``None`` if no results.
     """
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("Warning: matplotlib not installed.  Install with: pip install matplotlib")
-        return None
+    from .force_diagram import plot_force_diagram
 
-    if isinstance(elem_results, dict):
-        elem_results = elem_results.get("element_results") or []
-
-    if not elem_results:
-        print("No element results to plot.")
-        return None
-
-    # Sort by elevation and extract
-    sorted_res = sorted(elem_results, key=lambda r: r["z_mid"])
-    z = [r["z_mid"] for r in sorted_res]
-
-    # Determine unit label
-    q = quantity.lower()
-    if q.startswith(("m", "v")):
-        unit = force_unit
-        quantity_label = quantity
-    else:
-        unit = ""
-        quantity_label = quantity
-
-    fig, ax = plt.subplots(figsize=figsize)
-    if both_ends:
-        q_j = quantity.replace("_i", "_j")
-        for r in sorted_res:
-            v_i = r.get(quantity, 0.0)
-            v_j = r.get(q_j, v_i)
-            ax.plot([v_i, v_j], [r["z_mid"], r["z_mid"]], "-o", **kwargs or {})
-    else:
-        vals = [r.get(quantity, 0.0) for r in sorted_res]
-        ax.plot(vals, z, "-o", **kwargs or {})
-
-    ax.set_xlabel(f"{quantity_label} ({unit})")
-    ax.set_ylabel(f"Elevation ({length_unit})")
-    ax.set_title(title or f"{quantity_label} vs Elevation (CQC combined)")
-    ax.grid(True, alpha=0.3)
-    ax.axvline(0, color="grey", linewidth=0.5)
-
-    fig.tight_layout()
-    return fig
+    return plot_force_diagram(
+        elem_results,
+        quantity=quantity,
+        kind="rs",
+        dimension="2d",
+        force_unit=force_unit,
+        length_unit=length_unit,
+        both_ends=both_ends,
+        title=title,
+        figsize=figsize,
+        **kwargs,
+    )
 
 
 # ============================================================================
@@ -5058,63 +4894,25 @@ def plot_npz_force_diagram(
 ) -> Any:
     """2D diagram of a local force quantity vs elevation from an NPZ file.
 
-    This is a **standalone** function — it does **not** require any
-    ``AnalysisBuilder`` or model objects.  Just pass the path to a
-    ``.npz`` file created by :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.export_results_to_npz`.
+    Thin wrapper over the unified
+    :func:`~fea_toolkit.plotting.force_diagram.plot_force_diagram` pinned to
+    the 2D static rendering with an NPZ path input.
 
-    Parameters
-    ----------
-    npz_path : str
-        Path to the ``.npz`` results file.
-    quantity : str
-        Force quantity to plot.  Prefix with ``'M'`` for moment or
-        ``'F'`` for axial/shear.  Examples: ``'Mz'``, ``'My'``, ``'Mx'``,
-        ``'Fx'``, ``'Fy'``, ``'Fz'``.
-    use_local : bool
-        If ``True`` (default) use local‑coordinate forces.
-    title : str or None
-        Plot title.  Auto‑generated from the quantity if *None*.
-    figsize : tuple
-        Figure size ``(width, height)`` in inches.
-
-    Returns
-    -------
-    matplotlib.figure.Figure
+    Returns:
+        matplotlib.figure.Figure
     """
-    from matplotlib import pyplot as plt
+    from .force_diagram import plot_force_diagram
 
-    info = _load_npz_for_plotting(npz_path, combo=combo)
-    elem_data = info["elem_data"]
-    force_unit = info["force_unit"]
-    length_unit = info["length_unit"]
-
-    suffix = "_local" if use_local else ""
-    q_i = f"{quantity.lower()}_i{suffix}"
-    q_j = f"{quantity.lower()}_j{suffix}"
-
-    fig, ax = plt.subplots(figsize=figsize)
-
-    for ed in elem_data:
-        v_i = ed.get(q_i, np.nan)
-        v_j = ed.get(q_j, np.nan)
-        if np.isnan(v_i) or np.isnan(v_j):
-            continue
-        z_i = ed["z_i"]
-        z_j = ed["z_j"]
-        # Negate J‑end for forces only (axial/shear satisfy F_j = –F_i)
-        if not quantity.startswith("M"):
-            v_j = -v_j
-        ax.plot([v_i, v_j], [z_i, z_j], color="tab:blue", lw=1.0, alpha=0.7)
-
-    ax.axvline(0, color="grey", lw=0.5, ls="--")
-    kind = "Bending moment" if quantity.startswith("M") else "Force"
-    ax.set_xlabel(f"{kind} {quantity} [{force_unit}]" + (" (local)" if use_local else ""))
-    ax.set_ylabel(f"Elevation [{length_unit}]")
-    ax.set_title(title or f"{kind} {quantity} vs elevation — standalone NPZ")
-    ax.grid(True, alpha=0.3)
-
-    fig.tight_layout()
-    return fig
+    return plot_force_diagram(
+        npz_path,
+        quantity=quantity,
+        kind="static",
+        dimension="2d",
+        use_local=use_local,
+        combo=combo,
+        title=title,
+        figsize=figsize,
+    )
 
 
 def plot_npz_moment_3d(
@@ -5129,168 +4927,27 @@ def plot_npz_moment_3d(
 ) -> Any:
     """3D force diagram from an NPZ results file using PyVista.
 
-    Standalone function — no ``AnalysisBuilder`` or model objects needed.
+    Thin wrapper over the unified
+    :func:`~fea_toolkit.plotting.force_diagram.plot_force_diagram` pinned to
+    the 3D static rendering with an NPZ path input.
 
-    Parameters
-    ----------
-    npz_path : str
-        Path to the ``.npz`` results file.
-    quantity : str
-        Quantity to plot, e.g. ``'Mz'``, ``'My'``, ``'Fx'``, ``'Fy'``, ``'Fz'``.
-    use_local : bool
-        Use local‑coordinate forces (default ``True``).
-    mode : str
-        ``'flag'`` (default) for thin perpendicular rectangles, ``'tube'``
-        for extruded circles.
-    title : str or None
-        Plot title (auto‑generated if *None*).
-    show_scale : bool
-        Deprecated — ignored.  A text legend is shown instead.
-    return_plotter : bool
-        If ``True`` return the ``pyvista.Plotter`` instead of calling
-        ``plotter.show()``.
-
-    Returns
-    -------
-    pyvista.Plotter or None
+    Returns:
+        pyvista.Plotter or None
     """
-    try:
-        import pyvista as pv
-    except ImportError:
-        print("pyvista is required.  pip install pyvista")
-        return None
+    from .force_diagram import plot_force_diagram
 
-    info = _load_npz_for_plotting(npz_path, combo=combo)
-    elem_data = info["elem_data"]
-
-    suffix = "_local" if use_local else ""
-    q_i = f"{quantity.lower()}_i{suffix}"
-    q_j = f"{quantity.lower()}_j{suffix}"
-
-    # ── Collect non‑NaN values for scaling ─────────────────────────
-    max_abs_val = 0.0
-    for ed in elem_data:
-        v_i = ed.get(q_i, np.nan)
-        v_j = ed.get(q_j, np.nan)
-        if not np.isnan(v_i) and not np.isnan(v_j):
-            max_abs_val = max(max_abs_val, abs(v_i), abs(v_j))
-
-    if max_abs_val < 1e-15:
-        print(f"All {quantity} values are zero — nothing to plot.")
-        return None
-
-    # Compute model height from element coordinates for auto-scaling
-    model_height = max(max(ed["z_i"], ed["z_j"]) for ed in elem_data) - min(
-        min(ed["z_i"], ed["z_j"]) for ed in elem_data
+    return plot_force_diagram(
+        npz_path,
+        quantity=quantity,
+        kind="static",
+        dimension="3d",
+        use_local=use_local,
+        combo=combo,
+        mode=mode,
+        title=title,
+        notebook=return_plotter,
+        show_original=True,
     )
-    model_height = max(model_height, 1.0)
-    # Flag scale: largest flag = 20 % of model height (same as builder version)
-    moment_scale = (model_height * 0.2) / max(max_abs_val, 1.0)
-
-    plotter = pv.Plotter()
-    plotter.set_background("white")
-    plotter.title = title or f"{quantity} 3D — standalone NPZ"
-
-    # ── Draw original structure wireframe ───────────────────────────
-    raw = info["raw_data"]
-    n_tags = raw.get("node_tag")
-    n_x = raw.get("node_x")
-    n_y = raw.get("node_y")
-    n_z = raw.get("node_z")
-    sub_n_i = raw.get("frame_node_i")
-    sub_n_j = raw.get("frame_node_j")
-    if all(a is not None for a in (n_tags, n_x, n_y, n_z, sub_n_i, sub_n_j)):
-        node_map = {
-            int(n_tags[k]): (float(n_x[k]), float(n_y[k]), float(n_z[k]))
-            for k in range(len(n_tags))
-        }
-        lines = []
-        for k in range(len(sub_n_i)):
-            ci = node_map.get(int(sub_n_i[k]))
-            cj = node_map.get(int(sub_n_j[k]))
-            if ci and cj:
-                lines.append([ci, cj])
-        if lines:
-            first = True
-            for seg in lines:
-                plotter.add_lines(
-                    np.array(seg), color="grey", width=1, label="Structure" if first else None
-                )
-                first = False
-
-    for idx, ed in enumerate(elem_data):
-        v_i = ed.get(q_i, np.nan)
-        v_j = ed.get(q_j, np.nan)
-        if np.isnan(v_i) or np.isnan(v_j):
-            continue
-        p_i = np.array([ed["x_i"], ed["y_i"], ed["z_i"]])
-        p_j = np.array([ed["x_j"], ed["y_j"], ed["z_j"]])
-        p_mid = (p_i + p_j) / 2.0
-        axis = p_j - p_i
-        axis_len = np.linalg.norm(axis)
-        if axis_len < 1e-12:
-            continue
-        axis = axis / axis_len
-
-        # Flag offset direction (vn) based on quantity
-        _, vec_y, vec_z = get_local_axes(axis)
-        if quantity == "Fx":
-            vn = vec_z
-        elif quantity == "Fy":
-            vn = vec_y
-        elif quantity == "Fz":
-            vn = vec_z
-        elif quantity == "Mx":
-            vn = vec_y
-        elif quantity == "My":
-            vn = -vec_z
-        elif quantity == "Mz":
-            vn = vec_y
-        else:
-            vn = vec_z
-
-        if mode == "flag":
-            for verts, col_val in compute_flag_parts(
-                p_i,
-                p_j,
-                vn,
-                v_i,
-                v_j,
-                moment_scale,
-            ):
-                pts_arr = np.array(verts)
-                n = len(verts)
-                surf = pv.PolyData(pts_arr, faces=[n, *list(range(n))])
-                t = min(abs(col_val) / max_abs_val, 1.0)
-                if col_val >= 0:
-                    c = (0.3 + 0.7 * t, 0.3 - 0.2 * t, 0.3 - 0.3 * t)
-                else:
-                    c = (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
-                plotter.add_mesh(surf, color=c, opacity=0.6, show_edges=False, lighting=False)
-        else:
-            # tube mode — colour-coded radius (fixed fraction of element length)
-            avg = (abs(v_i) + abs(v_j)) * 0.5
-            radius = max(axis_len * 0.02, 0.05)
-            if radius < 1e-6:
-                continue
-            cyl = pv.Cylinder(center=p_mid, direction=axis, radius=radius, height=axis_len * 0.9)
-            t = min(avg / max_abs_val, 1.0)
-            if v_i >= 0:
-                c = (0.3 + 0.7 * t, 0.3 - 0.2 * t, 0.3 - 0.3 * t)
-            else:
-                c = (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
-            plotter.add_mesh(cyl, color=c, opacity=0.5, show_edges=False, lighting=False)
-
-    # Legend (text, not scalar bar — colours are explicit RGB, not a colormap)
-    plotter.add_text(f"{quantity}  (red = +ve, blue = −ve)", position="lower_edge", font_size=14)
-
-    plotter.add_axes()
-    _set_isometric_view(plotter)
-
-    if return_plotter:
-        return plotter
-    plotter.show()
-    return None
 
 
 # ═══════════════════════════════════════════════════════════════════
