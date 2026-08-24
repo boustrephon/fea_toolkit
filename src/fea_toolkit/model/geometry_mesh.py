@@ -1880,8 +1880,6 @@ def split_slabs_at_wall_intersections(
         _pos_cache: dict[str, np.ndarray] = {}
         for nid, nd in nodes.items():
             _pos_cache[nid] = np.array([nd.x, nd.y, nd.z])
-        for pt in interior_pts:
-            pass  # already in nodes
 
         # Create grid nodes (reuse existing)
         node_grid = [[None] * (n_u + 1) for _ in range(n_v + 1)]
