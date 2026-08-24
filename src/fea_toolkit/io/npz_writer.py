@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import numpy as np
 
 from ..model.sap_data import SAPModelData
+from ..utils import force_unit_label, length_unit_label
 from .results_schema import make_pushover_key, make_static_key
 
 if TYPE_CHECKING:
@@ -387,8 +388,8 @@ def write_results_npz(
     mode_shapes: Optional[dict] = None,
     rs_results: Optional[dict[str, Any]] = None,
     shell_forces: Optional[dict[str, dict[str, Any]]] = None,
-    force_unit: str = "kN",
-    length_unit: str = "m",
+    force_unit: Optional[str] = None,
+    length_unit: Optional[str] = None,
     forces_coordinate_system: str = "local",
     mesh_model: Optional["MeshModel"] = None,
 ) -> str:
@@ -402,8 +403,10 @@ def write_results_npz(
         mode_shapes: Dict from ``extract_mode_shapes()``.
         rs_results: Dict with keys ``'rs_x'``, ``'rs_y'`` from ``run_rs()``.
         shell_forces: Dict from ``extract_static_shell_forces()``.
-        force_unit: Force unit string for metadata.
-        length_unit: Length unit string for metadata.
+        force_unit: Force-unit label for metadata.  ``None`` derives it
+            from ``md.units`` via :func:`fea_toolkit.utils.force_unit_label`.
+        length_unit: Length-unit label for metadata.  ``None`` derives it
+            from ``md.units`` via :func:`fea_toolkit.utils.length_unit_label`.
         forces_coordinate_system: Coordinate system of the recorded frame
             end-force arrays.  Defaults to ``"local"`` — frame end-forces
             (``static/*/fx_i``, ...) are recorded in the element LOCAL
@@ -429,6 +432,10 @@ def write_results_npz(
 
     # Geometry
     arrays.update(_collect_geometry(md, mesh_model))
+
+    # Derive unit labels from the model when not explicitly overridden
+    force_unit = force_unit or force_unit_label(getattr(md, "units", {}))
+    length_unit = length_unit or length_unit_label(getattr(md, "units", {}))
 
     # Analysis types present
     analysis_types = []
@@ -614,8 +621,8 @@ def write_pushover_results_npz(
     step_results: list[dict[str, Any]],
     direction: str = "+X",
     pushover_results: Optional[dict[str, Any]] = None,
-    force_unit: str = "kN",
-    length_unit: str = "m",
+    force_unit: Optional[str] = None,
+    length_unit: Optional[str] = None,
     forces_coordinate_system: str = "local",
 ) -> str:
     """Write pushover step results to NPZ.
@@ -632,8 +639,12 @@ def write_pushover_results_npz(
         pushover_results: Optional full result dict from
             ``AnalysisBuilder.run_pushover_analysis()``.  When provided,
             global arrays (step, control_disp, base_shear) are included.
-        force_unit: Force unit string for metadata.
-        length_unit: Length unit string for metadata.
+        force_unit: Force-unit label for metadata.  ``None`` derives it
+            from ``mesh_model.units`` via
+            :func:`fea_toolkit.utils.force_unit_label`.
+        length_unit: Length-unit label for metadata.  ``None`` derives it
+            from ``mesh_model.units`` via
+            :func:`fea_toolkit.utils.length_unit_label`.
         forces_coordinate_system: Coordinate system of the recorded frame
             end-force arrays.  Defaults to ``"local"`` — frame end-forces
             (``pushover/{direction}/frame_fx_i``, ...) are recorded in the
@@ -727,6 +738,10 @@ def write_pushover_results_npz(
             )
 
     arrays.update(po_arrays)
+
+    # Derive unit labels from the model when not explicitly overridden
+    force_unit = force_unit or force_unit_label(getattr(mesh_model, "units", {}))
+    length_unit = length_unit or length_unit_label(getattr(mesh_model, "units", {}))
 
     # ── Metadata ──────────────────────────────────────────────
     arrays["analysis_types"] = np.array(analysis_types, dtype=str)
