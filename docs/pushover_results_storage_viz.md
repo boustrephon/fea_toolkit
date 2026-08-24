@@ -124,7 +124,8 @@ def run_pushover_analysis(self, ...):
         # ... existing analysis step ...
         if ok == 0 and record:
             step_data = _record_step(
-                self, step, record_frames, record_areas, dof_idx, direction
+                self, step, record_frames, record_areas,
+                node_tags=record_node_tags,
             )
             step_results.append(step_data)
 
@@ -136,9 +137,15 @@ def run_pushover_analysis(self, ...):
 
 ### 2.3 `_record_step()` helper
 
+Implemented in `opensees/_runner_pushover.py` (part of `PushoverRunnerMixin`).
+The sketch below is a simplified design-intent outline; the real helper
+normalises `ops.eleResponse('localForces')` responses via
+`_normalise_frame_response()` and queries shell resultants through the
+section interface.
+
 ```python
-def _record_step(builder, step, frame_ids, area_ids, dof_idx, direction):
-    """Query ops.eleResponse() for selected elements at current step."""
+def _record_step(builder, step, frame_ids, area_ids, node_tags=None):
+    """Query ops.eleResponse() and ops.nodeDisp() for selected elements at current step."""
     data = {"step": step}
 
     # ── Frame elements ──
@@ -494,15 +501,15 @@ if config.get("pushover_record_fiber") and config.get("pushover_record_selection
 | **1a** | Add `elevation_range`, `story` fields to `Selection` | `model/selection.py` |
 | **1b** | Add `resolve_to_mesh_sets()` to `Selection` | `model/selection.py` |
 | **1c** | Tests for new Selection fields | `tests/test_model.py` |
-| **2a** | Add `record_pushover_steps` + `pushover_record_selection` config keys | `opensees/analysis_builder.py` |
-| **2b** | Implement `_record_step()` and per-step loop | `opensees/analysis_builder.py` |
-| **2c** | Add `export_pushover_results()` convenience method | `opensees/analysis_builder.py` |
+| **2a** | Add `record_pushover_steps` + `pushover_record_selection` config keys | `opensees/analysis_builder.py` (`_set_defaults`) |
+| **2b** | Implement `_record_step()` and per-step loop | `opensees/_runner_pushover.py` |
+| **2c** | Add `export_pushover_results()` convenience method | `opensees/_runner_pushover.py` |
 | **3a** | Define pushover NPZ arrays in schema | `io/results_schema.py` |
 | **3b** | Implement `write_pushover_results_npz()` | `io/npz_writer.py` |
 | **3c** | Test NPZ round-trip | `tests/test_io.py` |
-| **4a** | `plot_plastic_hinge_formation()` | `plotting/viz.py` |
-| **4b** | `plot_shell_damage_map()` (3D) | `plotting/viz.py` |
-| **4c** | `plot_pushover_envelope()` (3D) | `plotting/viz.py` |
+| **4a** | `plot_plastic_hinge_formation()` | `plotting/viz_pushover.py` |
+| **4b** | `plot_shell_damage_map()` (3D) | `plotting/viz_pushover.py` |
+| **4c** | `plot_pushover_envelope()` (3D) | `plotting/viz_pushover.py` |
 | **4d** | `animate_pushover_deformation()` (interactive + HTML) | `plotting/viz.py` |
 | **4e** | `plot_frame_force_evolution()` (2D) | `plotting/viz.py` |
 | **4f** | Re-export from `plotting/__init__.py` | `plotting/__init__.py` |

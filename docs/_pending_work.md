@@ -1,6 +1,6 @@
 ---
 title: "Pending Work Log"
-description: "Internal log of completed and pending work items across documentation and visualization fixes."
+description: "Internal log of completed and pending work items across the fea_toolkit (refactors, physics, features, housekeeping)."
 status: "draft"
 tags: [planning, work-log, internal]
 category: [planning]
@@ -11,20 +11,13 @@ category: [planning]
 
 > Priority-ordered register (maintained 2026-08-24).  Every pending item
 > below is cross-referenced to its source document.  **Sequencing notes:**
-> Tier 1 — P1 (force-diagram unification) and P2 (large-file splits) both
-> landed 2026-08-24.  The Tier 2 physics items cluster around the Vecchio &
-> Emara benchmark — the Gap 4 benchmark itself is complete (acceptance band
-> 1.07×/1.03×, `tests/test_rc_benchmark.py`), so P3 (solver calibration) and
-> P4 (bilinearisation on a real curve) are now actionable; P5 (shear
-> failure / post-peak) remains the open physics item.  Tiers 3–4 are
-> independent feature gaps and deferred housekeeping.
-
-### Tier 1 — Active refactors (sequenced, design ready)
-
-#### P2 — Large-file splits ✅ **Done 2026-08-24** (commits `4fb28b4`,
-`e5b0382`, `a4ff43f`)
-The three largest modules were split behaviour-preservingly.  Final layout
-and validation → the DONE register below.
+> Tier 1 (P1 force-diagram unification, P2 large-file splits) landed
+> 2026-08-24 — see the DONE register.  The physics items (Tier 2) cluster
+> around the Vecchio & Emara benchmark — the Gap 4 benchmark itself is
+> complete (acceptance band 1.07×/1.03×, `tests/test_rc_benchmark.py`), so
+> P3 (solver calibration) and P4 (bilinearisation on a real curve) are now
+> actionable; P5 (shear failure / post-peak) remains the open physics item.
+> Tiers 3–4 are independent feature gaps and deferred housekeeping.
 
 ### Tier 2 — Correctness / physics follow-ups
 
@@ -33,7 +26,9 @@ Source: `docs/deprecation_plan.md` §5; implemented contract documented in
 `docs/pushover_analysis.md`.
 
 **What.** The pushover solver contract is implemented — primary
-`NormDispIncr 1e-4 / 20 / Newton`; per-step fallback to `NormUnbalance` +
+`NormDispIncr 1e-4 / 20 / Newton` (the test type is configurable via
+`solver_test_type` since review-round-2 M3; the default is unchanged);
+per-step fallback to `NormUnbalance` +
 `ModifiedNewton -initial` with a runtime-scaled relaxed tolerance (derived
 from characteristic weight × g via `g_from_units`, ≈2e-4 for kN-m
 full-building models) and 1000 iterations; automatic
@@ -178,9 +173,9 @@ Phase 2 `pyrightconfig.json` was never committed.
 Rhino host-only modules; relax `reportOptional*` rules); 2) fresh per-file
 triage of the Phase 3 count, starting with the top-3 files by error count
 post-P2-split (the original top-3 `model/geometry.py` → `plotting/viz.py` →
-`opensees/analysis_builder.py` are now 81/136/476-line facades — the errors
-now live in `geometry_core/frames/mesh`, `viz_*`, and the `_runner_*`
-modules);
+`opensees/analysis_builder.py` are now thin facades — ≈80/136/≈480 lines —
+and the errors now live in `geometry_core/frames/mesh`, `viz_*`, and the
+`_runner_*` modules);
 3) prefer a project-wide `pd.Series.to_numpy()` convention over scattered
 casts (§11.2).
 
