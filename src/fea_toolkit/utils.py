@@ -657,15 +657,15 @@ def scale_material_dict(
     :data:`_STRESS_KEYS` (or :data:`_NON_STRESS_NUMERIC_KEYS`).
 
     Key conventions:
-        * **Key style** — stress-valued keys are the **SI-lowercase**
-          names (``E``, ``fy``, ``fc``, ``Es``, ``Hiso``, ...) matching
-          the ``NDMaterial`` dataclass fields, **not** the camelCase
-          ``Material`` dataclass fields (``E_mod``, ``Fy``, ``Fc``, ...).
-          A dict authored with camelCase keys passes through **unscaled**
-          (with a :class:`UserWarning`) — silently producing ~1000×
-          under-strength materials in kN-m models.  Always author
-          material dicts with the lowercase SI keys listed in
-          :data:`_STRESS_KEYS`.
+        * **Key style** — stress-valued keys must match the **exact,
+          case-sensitive** names defined in :data:`_STRESS_KEYS`
+          (``E``, ``Es``, ``fc``, ``Hiso``, ...) — the ``NDMaterial``
+          dataclass fields — **not** the camelCase ``Material`` dataclass
+          fields (``E_mod``, ``Fy``, ``Fc``, ...).  A dict authored with
+          camelCase keys passes through **unscaled** (with a
+          :class:`UserWarning`) — silently producing ~1000× under-strength
+          materials in kN-m models.  Always author material dicts with the
+          exact case-sensitive SI keys listed in :data:`_STRESS_KEYS`.
         * **Value style** — author strengths/moduli in SI (Pa) and let
           this function scale them to the model's unit system.  Never
           hand-convert to model units (the framework scales exactly
