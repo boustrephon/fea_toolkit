@@ -12,6 +12,18 @@ related: [shell_support.md, element_properties_config.md, pushover_analysis.md, 
 > Status: **✅ Complete** — verified against the shipped
 > `openseespy` 3.8.0.0 wheel on macOS arm64.
 
+## Status at a glance — RC shear-wall modelling
+
+| Element / mechanism | Status | Notes |
+|---|---|---|
+| **NDMaterial / LayeredShell** | ✅ | `NDMaterial`, `LayeredShellSection`, `ShellFiberLayer` data model + `LayeredShell` sections + `ShellNLDKGQ` / `ShellDKGQ` wall elements; per-unit-width resultant extraction |
+| **MVLEM (2D)** | ✅ | verified signature against the wheel; needs `Dens`/`-rho` ≠ 0; uniaxial `ConcreteCM` + `Steel02` + shear spring |
+| **SFI_MVLEM_3D** | ✅ | FSAM nD materials; `ConcreteCM` (implements `getCrackingStrain()`) |
+| **SFI-MVLEM (2D)** | ❌ | parser/constructor mismatch in the shipped wheel — do not use; use `SFI_MVLEM_3D` or `MVLEM` |
+| **FSAM** | ✅ | `ConcreteCM` wired; `ConcreteS/D/04/02` cannot be used in FSAM (no `getCrackingStrain()`) |
+| **Wall pushover** | ✅ | end-to-end recipes documented below; regression coverage in `tests/test_wall_pushover.py`, `tests/test_layered_shell.py`, `tests/test_wall_slab_intersection.py` |
+| **Wall capacity** | ✅ | GB 50010 wall checks in `fea_toolkit.capacity`; τ/τ_cap DCR extraction verified (genuine base-section demand) |
+
 This document describes the MVLEM / SFI-MVLEM reinforced-concrete
 shear-wall modelling workflow for fea_toolkit.  MVLEM (Multiple-Vertical-
 Line-Element Model) and its fixed-strut-angle variant SFI-MVLEM capture
