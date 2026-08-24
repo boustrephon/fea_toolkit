@@ -8,6 +8,23 @@ related: [modal_analysis.md, tcl_export.md, stiffness_factors.md, element_proper
 ---
 # Pushover (Non‑linear Static) Analysis
 
+## Status at a glance — RC frame modelling
+
+| Layer | Status | Notes |
+|---|---|---|
+| **RC sections** | ✅ mostly complete | `RectangularSection` / `CircularSection` with `to_fiber_patches()`, rebar auto-placement, Mander confinement (`fiber_confinement()`).  ⚠️ `Channel` / `Angle` / `Tee` / `SD` / `Encased` shapes are placeholders (P6) |
+| **Pipeline** | ✅ | Preprocessor → AnalysisBuilder → fiber rebuild (`forceBeamColumn` + Lobatto, PDelta); static / modal / response-spectrum / pushover |
+| **Concrete law** | ✅ (opt-in) | `concrete_material="Concrete02"` — strain-softening + tension stiffening; `core_residual_factor` (crushing-residual lever); both default-off |
+| **Bond-slip** | ✅ (opt-in) | `bond_slip=True` — zero-length `Bond_SP01` end springs on fiber members; default-off |
+| **Shear** | ✅ (opt-in) | simplified-MCFT capacity reporter + nonlinear trilinear shear backbone (`aggregate_shear="nonlinear"`) |
+| **Column limit states** | ✅ (opt-in) | Elwood zero-length springs (`limit_state_columns`) |
+| **Lumped hinges** | ✅ (opt-in) | `hinge_model="lumped"` (Hysteretic backbones) |
+| **Validation** | ⚠️ | **Vecchio & Emara 1992**: peak 1.07×, secant 1.03× in band — post-peak descent not reproduced (documented).  **Duong 2007**: shear-critical failure reproduced (≈ 1.03× peak, ≥ 15 % post-peak drop) |
+
+See also [`vecchio_emara_benchmark.md`](vecchio_emara_benchmark.md),
+[`shear_failure_modelling.md`](shear_failure_modelling.md) and
+[`_pending_work.md`](_pending_work.md).
+
 ## Overview
 
 Pushover analysis is a non‑linear static procedure used to evaluate the
