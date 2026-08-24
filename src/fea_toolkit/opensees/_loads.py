@@ -874,6 +874,11 @@ def global_to_local_distributed_load(ele_tag, global_force_vector):
     # 2. Get local X-axis (element vector)
     element_vector = pos_j - pos_i
     true_length = np.linalg.norm(element_vector)
+    if true_length <= 0.0:
+        raise ValueError(
+            f"global_to_local_distributed_load: element {ele_tag} has zero "
+            "length (coincident end nodes); cannot normalise the element axis."
+        )
     local_x = element_vector / true_length
 
     # 3. Retrieve the cross-product vector used in the element's geometric transformation
@@ -888,7 +893,7 @@ def global_to_local_distributed_load(ele_tag, global_force_vector):
         # Note: OpenSees beam-column elements (elasticBeamColumn, forceBeamColumn, etc.)
         # delegate 'yaxis'/'zaxis' to CrdTransf::setResponse, which supports them.
         # This fallback exists for element types where the delegation may not apply.
-        v = np.array([0.0, 0.0, 1.0]) if abs(local_x[1]) < 0.999 else np.array([1.0, 0.0, 0.0])
+        v = np.array([0.0, 0.0, 1.0]) if abs(local_x[2]) < 0.999 else np.array([1.0, 0.0, 0.0])
         local_z = np.cross(local_x, v)
         local_z = local_z / np.linalg.norm(local_z)
         local_y = np.cross(local_z, local_x)

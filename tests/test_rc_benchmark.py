@@ -363,9 +363,10 @@ class TestVecchioEmaraBenchmark:
         FEMA/EC8 bias the De Luca method removes), must sit below the peak
         (ductility > 1), and must be an exact equal-area fit.
 
-        Empirical result (2026-08-24): S_dy ≈ 14 mm (≈ 0.36 % roof drift) —
-        past cracking (~2 mm), below the model's rebar-yield drift (~31 mm)
-        and conservative for the experiment's ~51 mm yield.  The curve is
+        Empirical result (2026-08-24): S_dy ≈ 14 mm (spectral displacement,
+        model length units) — past the cracking transition (~2 mm), below
+        the model's first-yield roof displacement (~31 mm), and
+        conservative for the experiment's ~51 mm yield.  The curve is
         still hardening at the 155 mm end, so the equal-area yield lands
         earlier than a peaked curve would give.
         """
@@ -687,7 +688,13 @@ class TestVecchioEmaraShearFlexibleVariant:
         )
         # Peak moved off the push end (a real descent is present).
         assert peak_d < 0.9 * 0.155, f"peak still at the push end ({peak_d * 1000:.1f} mm)"
-        assert v[-1] < peak, "no post-peak descent (V_end >= peak)"
+        # Post-peak descent: the end-drop ratio (peak -> V_end) must meet
+        # the recorded ~7 % benchmark descent for this Concrete02
+        # core-residual configuration (see docs/_pending_work.md Phase A).
+        end_drop = (peak - float(v[-1])) / peak
+        assert end_drop >= 0.03, (
+            f"post-peak end drop {end_drop:.1%} below the recorded ~7 % benchmark"
+        )
 
     @pytest.fixture
     def ve_builder_fbc_bondslip(self):
@@ -743,8 +750,13 @@ class TestVecchioEmaraShearFlexibleVariant:
         )
         # Peak moved off the push end.
         assert peak_d < 0.9 * 0.155, f"peak still at the push end ({peak_d * 1000:.1f} mm)"
-        # A real (if small) descent is present.
-        assert v[-1] < peak, "no post-peak descent (V_end >= peak)"
+        # A real (if small) descent is present — the end-drop ratio must
+        # meet the recorded ~1.4 % benchmark descent for the Bond_SP01
+        # configuration (see docs/_pending_work.md Phase B).
+        end_drop = (peak - float(v[-1])) / peak
+        assert end_drop >= 0.005, (
+            f"post-peak end drop {end_drop:.1%} below the recorded ~1.4 % benchmark"
+        )
 
     @pytest.fixture
     def ve_builder_fbc_nlshear(self):

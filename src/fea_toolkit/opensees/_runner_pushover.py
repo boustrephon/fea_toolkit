@@ -361,6 +361,13 @@ class PushoverRunnerMixin:
 
         # ── Apply lateral loads ──────────────────────────────────
         if lateral_load_type == "pattern":
+            # Create a dedicated lateral time series + load pattern so
+            # DisplacementControl scales these lateral loads independently of
+            # the locked gravity patterns (matching the other lateral-load-type
+            # branch).
+            ops.timeSeries("Linear", _pat_tag)
+            ops.pattern("Plain", _pat_tag, _pat_tag)
+
             # Use existing SAP2000 frame distributed loads projected
             # onto the push direction.
             dir_map = {"Gravity": (0, 0, -1), "X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}
@@ -667,8 +674,13 @@ class PushoverRunnerMixin:
             steps.append(step)
 
             # ── Per-step element-force recording (Phase 1 reporter) ──
-            if record_element_forces and ok == 0:
-                element_forces_history.append(self.extract_static_element_forces())
+            if record_element_forces:
+                if ok == 0:
+                    element_forces_history.append(self.extract_static_element_forces())
+                else:
+                    # Failed step — keep the history positionally aligned with
+                    # results["step"] by recording an empty placeholder.
+                    element_forces_history.append({})
 
             # ── Per-step element recording ──────────────────────
             if record and ok == 0:
@@ -683,7 +695,7 @@ class PushoverRunnerMixin:
 
             if print_progress:
                 s = "✓" if ok == 0 else "✗"
-                print(f"    Step {step:4d}/{num_steps}: u={cd:.6f} m  V={bs:.2f} kN  {s}")
+                print(f"    Step {step:4d}/{num_steps}: u={cd:.6f} m  V={-bs:.2f} kN  {s}")
 
             if ok != 0:
                 if print_progress:

@@ -88,7 +88,9 @@ class RsRunnerMixin:
         if num_modes == 0:
             raise ValueError("No modal periods available for RS analysis")
 
-        omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods]
+        # num_modes is clamped above; omega must match damp_ratios and the
+        # value list consumed by the CQC combination, so slice to num_modes.
+        omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods[:num_modes]]
         damp_ratios = [damping_ratio] * num_modes
 
         SPECTRUM_TS_TAG = 9999

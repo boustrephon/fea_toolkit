@@ -194,9 +194,11 @@ class SectionMixin:
                     self._next_fiber_mat_tag = max(_max_all, 1000000) + 1
                 mat_tag = self._next_fiber_mat_tag
                 self._next_fiber_mat_tag += (
-                    3 if (mat is not None and mat.type.lower() == "concrete") else 1
+                    3
+                    if (mat is not None and mat.type is not None and mat.type.lower() == "concrete")
+                    else 1
                 )
-                if mat is not None and mat.type.lower() == "concrete":
+                if mat is not None and mat.type is not None and mat.type.lower() == "concrete":
                     # Concrete section: to_fiber_patches() uses three tags:
                     #   mat_tag     → unconfined concrete  (Concrete01)
                     #   mat_tag + 1 → confined core        (Concrete01)

@@ -676,6 +676,9 @@ class StaticRunnerMixin:
                 f = ops.eleResponse(elem_tag, "section", 1, "forces")
             except Exception:
                 continue
+            if not f or len(f) < 6:
+                # Missing/short response — skip this element before indexing f[0..5].
+                continue
             # Shell section forces: [Nx, Ny, Nxy, Mx, My, Mxy, ?, ?]
             # (per-unit-width resultants — "forces" alone returns the raw
             # 24-entry local nodal-force vector for shells, not resultants.)
