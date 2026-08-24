@@ -83,6 +83,14 @@ class TestForceScaleFactor:
         f = utils.force_scale_factor({"F": "MN"})
         assert 1.0 * f == pytest.approx(1e-6)
 
+    def test_n_to_GN(self):
+        """1 N → 1e-9 GN."""
+        f = utils.force_scale_factor({"F": "GN"})
+        assert 1.0 * f == pytest.approx(1e-9)
+
+    def test_alias_giganewton(self):
+        assert utils.force_scale_factor({"F": "giganewton"}) == pytest.approx(1e-9)
+
     def test_n_to_lbf(self):
         """1 N → 0.2248 lbf."""
         f = utils.force_scale_factor({"F": "lb"})
@@ -465,3 +473,49 @@ class TestApplyMaterialDefaultsScaleFactors:
         assert (
             abs(multiplication_value * mdsi / utils.DEFAULT_RHO_MC_SI - 1.0) < 1e-12
         )  # multiplication round-trips exactly
+
+
+class TestUnitLabels:
+    """Display labels derived from model units dicts (force_unit_label /
+    length_unit_label)."""
+
+    def test_kn_m(self):
+        assert utils.force_unit_label({"F": "KN", "L": "m"}) == "kN"
+        assert utils.length_unit_label({"F": "KN", "L": "m"}) == "m"
+
+    def test_si_n_m(self):
+        assert utils.force_unit_label({"F": "N", "L": "m"}) == "N"
+        assert utils.length_unit_label({"F": "N", "L": "m"}) == "m"
+
+    def test_mn(self):
+        assert utils.force_unit_label({"F": "MN"}) == "MN"
+
+    def test_gn(self):
+        assert utils.force_unit_label({"F": "GN"}) == "GN"
+
+    def test_kgf(self):
+        assert utils.force_unit_label({"F": "kgf"}) == "kgf"
+
+    def test_lb(self):
+        assert utils.force_unit_label({"F": "lb"}) == "lb"
+        assert utils.force_unit_label({"F": "lbf"}) == "lb"
+
+    def test_kip_in(self):
+        assert utils.force_unit_label({"F": "kip"}) == "kip"
+        assert utils.length_unit_label({"L": "in"}) == "in"
+
+    def test_cm_ft_mm(self):
+        assert utils.length_unit_label({"L": "cm"}) == "cm"
+        assert utils.length_unit_label({"L": "ft"}) == "ft"
+        assert utils.length_unit_label({"L": "mm"}) == "mm"
+
+    def test_long_forms(self):
+        assert utils.force_unit_label({"F": "kilonewton", "L": "metre"}) == "kN"
+        assert utils.force_unit_label({"F": "giganewton"}) == "GN"
+        assert utils.length_unit_label({"L": "millimetre"}) == "mm"
+
+    def test_defaults(self):
+        assert utils.force_unit_label({}) == "kN"
+        assert utils.length_unit_label({}) == "m"
+        assert utils.force_unit_label(None) == "kN"
+        assert utils.length_unit_label(None) == "m"
