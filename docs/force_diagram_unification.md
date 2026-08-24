@@ -129,12 +129,16 @@ Dispatch rules:
 ## NPZ input — force-array orientation
 
 Unified NPZ files store static frame forces as **component-keyed** arrays —
-one array per force component, indexed by frame order:
+one array per force component, indexed in **frame-element order** — the
+same order as the geometry arrays `frame_sap_id` / `frame_node_i` /
+`frame_node_j` (the active `mesh_model.frame_elements` in iteration order):
 
 ```python
-static/{case}/fx_i   # shape (n_frame,) — Fx at the I-end
+# n_frame_elements = number of active frame elements in
+# builder.mesh_model.frame_elements (the writer's geometry order)
+static/{case}/fx_i   # shape (n_frame_elements,) — Fx at the I-end
 ...
-static/{case}/mz_j   # Mz at the J-end
+static/{case}/mz_j   # shape (n_frame_elements,) — Mz at the J-end
 ```
 
 The in-memory extraction API, `AnalysisBuilder.extract_static_element_forces()`,
@@ -155,13 +159,16 @@ Key mapping:
 | `Fx` … `Mz` (I-end) | `fx_i` … `mz_i` |
 | `Fx_j` … `Mz_j` (J-end) | `fx_j` … `mz_j` |
 
-Transpose example (array order aligned with `mesh_model.frame_elements`):
+Transpose example (array order follows the active `mesh_model.frame_elements`
+in iteration order — the same order the writer emits the geometry arrays):
 
 ```python
 results = builder.run_static_analysis(pattern_scales={"DEAD": 1.0})
 elem_forces = builder.extract_static_element_forces()  # element-keyed
 
 force_arrays: dict[str, list[float]] = {}
+# Skip inactive parents exactly like the writer, so each appended value
+# lands at the frame-element index matching frame_sap_id / frame_node_i.
 for eid, elem in builder.mesh_model.frame_elements.items():
     if getattr(elem, "inactive", False):
         continue
@@ -181,7 +188,7 @@ builder.export_results("results.npz", static_results={"DEAD": case})
 
 Unit metadata: files written after the unit-canonicalisation work carry
 top-level `force_unit` / `length_unit` arrays; older files without them still
-plot but fall back to `"?"` axis labels.
+plot, falling back to the documented `"kN"` / `"m"` axis labels.
 
 ## Test plan
 
