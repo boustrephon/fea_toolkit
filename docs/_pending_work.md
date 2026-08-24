@@ -258,6 +258,14 @@ public-name churn (facade modules re-export every moved name).
   - `_runners.py` — `RunnerMixin` (analysis execution, mass computation,
     result extraction/serialization) + `_normalise_frame_response` /
     `_record_step`.
+  - Follow-up (commit `2dc86b4`): the facade was further slimmed to a
+    476-line facade class — `_constraints.py` (`ConstraintMixin`),
+    `_loads.py` (`LoadMixin`) and `_limit_state.py` (`LimitStateMixin`)
+    now host edge constraints/nodes/restraints, load creation/gravity
+    axial derivation/rigid diaphragms, and the Elwood limit-state columns
+    respectively.  Final bases: `AnalysisBuilder(RunnerMixin, ElementMixin,
+    SectionMixin, MaterialMixin, LoadMixin, LimitStateMixin,
+    ConstraintMixin)`.
 - Tests: `tests/test_element_properties.py` patches `_materials.ops` (the
   `RecordingOpenSees` capture target moved with the code).
 - Validation: full suite `1091 passed, 4 xfailed` after each split; ruff
