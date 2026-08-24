@@ -2,7 +2,7 @@
 title: "MVLEM / SFI-MVLEM Shear-Wall Analysis"
 description: "MVLEM / SFI-MVLEM reinforced-concrete shear-wall macro-element modelling: verified element signatures against the shipped openseespy wheel, FSAM nD-material support, WallElement builder integration, and end-to-end pushover recipes (LayeredShell, SFI_MVLEM_3D, MVLEM_3D)."
 status: "complete"
-tags: [analysis-type, wall, mvlem, sfi-mvlem, fsam, shear, nonlinear, validation]
+tags: [analysis-type, pushover, nonlinear, wall, mvlem, sfi-mvlem, fsam, shear, validation]
 category: [analysis-types]
 related: [shell_support.md, element_properties_config.md, pushover_analysis.md, openseespy_local_build.md]
 ---
