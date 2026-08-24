@@ -514,6 +514,13 @@ class TestUnitLabels:
         assert utils.force_unit_label({"F": "giganewton"}) == "GN"
         assert utils.length_unit_label({"L": "millimetre"}) == "mm"
 
+    def test_unrecognised_length_falls_back_to_m(self):
+        assert utils.length_unit_label({"L": "yard"}) == "m"
+        assert utils.length_unit_label({"L": "cubit"}) == "m"
+        # A force unit (or its alias) in the length slot is not a length label
+        assert utils.length_unit_label({"L": "kn"}) == "m"
+        assert utils.length_unit_label({"L": "kg"}) == "m"
+
     def test_defaults(self):
         assert utils.force_unit_label({}) == "kN"
         assert utils.length_unit_label({}) == "m"
