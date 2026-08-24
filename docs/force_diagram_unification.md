@@ -1,14 +1,15 @@
 ---
 title: "Force-Diagram Unification (Phase B)"
 description: "Detailed design for unifying the four force-diagram plotting entry points into one unit-aware API."
-status: "draft"
+status: "implemented"
 tags: [planning, refactor, plotting, phase-b]
 category: [planning]
 ---
 
 # Force-Diagram Unification (deprecation-plan Phase B)
 
-**Status:** draft — no code yet.
+**Status:** implemented (2026-08-24) — milestones 1–3 landed; milestone 4
+(wrapper removal) scheduled for the next release cycle.
 
 ## Goal
 
@@ -197,13 +198,13 @@ plot but fall back to `"?"` axis labels.
 
 ## Milestones
 
-1. Add `plotting/force_diagram.py` with `ForceDiagramData` +
+1. ✅ Add `plotting/force_diagram.py` with `ForceDiagramData` +
    `_resolve_source`; rewire `plot_npz_force_diagram` +
    `plot_npz_moment_3d` through it (NPZ-only slice).
-2. Add Builder/dict resolvers; rewire `plot_force_diagram_3d` +
+2. ✅ Add Builder/dict resolvers; rewire `plot_force_diagram_3d` +
    `plot_rs_force_diagram` through the same layer.
-3. Land `plot_force_diagram()`; convert the four legacy names to wrappers.
-4. (Next release) remove the wrappers in a cleanup PR.
+3. ✅ Land `plot_force_diagram()`; convert the four legacy names to wrappers.
+4. ⏳ (Next release) remove the wrappers in a cleanup PR.
 
 ## Out of scope
 
