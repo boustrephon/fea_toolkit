@@ -476,10 +476,14 @@ class PushoverRunnerMixin:
         # ── Displacement‑controlled push analysis setup ──────────
         disp_inc = max_disp / max(num_steps, 1)
 
-        # Use looser tolerances matching v1 (builder.py) pushover —
-        # NormDispIncr with 1e-4 tolerance, 20 iterations, energy
-        # norm.  Tight tolerances (1e-6/10 iter) prevent convergence
-        # for mode-shape-based pushover patterns.
+        # Primary solver settings: the pushover uses the general
+        # PUSHOVER_SOLVER_DEFAULTS (NormDispIncr 1e-6 / 10 / Newton)
+        # pre-filled by _set_defaults() — the documented 1e-4/20 contract
+        # was never effective (the .get fallback cannot fire once the
+        # general defaults pre-fill the config) and the 2026-08-24
+        # empirical pass (P3) showed 1e-4/20 is NOT universally safe
+        # (breaks the Duong flexure-only forceBeamColumn pushover).
+        # Looser tolerances are an explicit per-model opt-in.
         _algo = self.config.get("solver_algorithm", "Newton")
         _test_type = self.config.get("solver_test_type", "NormDispIncr")
         _test_tol = self.config.get("solver_test_tol", 1e-4)

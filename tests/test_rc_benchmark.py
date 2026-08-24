@@ -355,6 +355,61 @@ class TestVecchioEmaraBenchmark:
             f"[{0.5 * EXP_SECANT_AT_YIELD:.0f}, {2.0 * EXP_SECANT_AT_YIELD:.0f}]"
         )
 
+    def test_bilinearize_rc_real_curve(self, ve_builder, pushover_results):
+        """P4: De Luca 10 %-secant fit on the real V&E capacity curve.
+
+        Apply :func:`bilinearize_rc` to the actual Gap 4 pushover curve.
+        The fitted yield must NOT snap to the cracking transition (the
+        FEMA/EC8 bias the De Luca method removes), must sit below the peak
+        (ductility > 1), and must be an exact equal-area fit.
+
+        Empirical result (2026-08-24): S_dy ≈ 14 mm (≈ 0.36 % roof drift) —
+        past cracking (~2 mm), below the model's rebar-yield drift (~31 mm)
+        and conservative for the experiment's ~51 mm yield.  The curve is
+        still hardening at the 155 mm end, so the equal-area yield lands
+        earlier than a peaked curve would give.
+        """
+        from fea_toolkit.model.csm import bilinearize_rc
+
+        ve_builder.build_domain()
+        ve_builder.compute_seismic_masses()
+        modal = ve_builder.run_modal_analysis(num_modes=3)
+        shapes = ve_builder.extract_mode_shapes(3)
+        adrs = ve_builder.pushover_to_adrs(pushover_results, modal, shapes, direction="X")
+        S_d = np.asarray(adrs["S_d"], dtype=float)
+        S_a = np.asarray(adrs["S_a"], dtype=float)
+        S_dy, S_ay, method = bilinearize_rc(S_d, S_a)
+
+        peak_idx = int(np.argmax(S_a))
+        S_d_peak = S_d[peak_idx]
+        S_a_peak = S_a[peak_idx]
+
+        # Regular fit, not the degenerate elastic fallback.
+        assert method == "de_luca_10pct", method
+        # Yield before the peak → ductility > 1.
+        assert S_dy < 0.9 * S_d_peak, f"yield at/near peak (S_dy={S_dy:.4g})"
+        assert S_ay < S_a_peak, f"yield strength at peak (S_ay={S_ay:.4g})"
+        # NOT the cracking transition: yield sits well past the ADRS
+        # displacement where strength first reaches 10 % of peak.
+        target = 0.1 * S_a_peak
+        i_cross = int(np.argmax(S_a >= target))
+        S_d_crack = S_d[i_cross]
+        assert S_dy > 2.0 * max(S_d_crack, 1e-9), (
+            f"yield snapped to cracking transition (S_dy={S_dy:.4g}, cracking at {S_d_crack:.4g})"
+        )
+        # Exact equal-area fit: relative area error under 1 %.
+        A_cap = sum(
+            0.5 * (S_d[i] - S_d[i - 1]) * (S_a[i] + S_a[i - 1]) for i in range(1, peak_idx + 1)
+        )
+        A_bil = (
+            0.5 * S_ay * S_dy
+            + S_ay * (S_d_peak - S_dy)
+            + 0.5 * (S_a_peak - S_ay) * (S_d_peak - S_dy)
+        )
+        assert abs(A_bil - A_cap) / A_cap < 0.01, (
+            f"equal-area error {(A_bil - A_cap) / A_cap:.3%} > 1 %"
+        )
+
     def test_section_moment_matches_response2000(self):
         """The BEAM section alone reproduces the published flexural capacity.
 
@@ -571,6 +626,59 @@ class TestVecchioEmaraShearFlexibleVariant:
         )
         assert 0.9 * EXP_SECANT_AT_YIELD <= k50 <= 1.15 * EXP_SECANT_AT_YIELD, (
             f"rigid-end secant @50mm {k50:.0f} kN/m outside band"
+        )
+
+    @pytest.fixture
+    def ve_builder_fbc_nlshear(self):
+        """forceBeamColumn + auto rigid joint end zones + nonlinear
+        simplified-MCFT shear backbone.
+
+        Matches the accepted benchmark configuration (rigid end zones + MPC
+        links, as in ``ve_builder_fbc_rigid`` and the Duong benchmark) with
+        the nonlinear shear backbone added.  A centreline (no-rigid-zones)
+        nonlinear-shear variant does not converge at the gravity stage —
+        the nonlinear spring's initial tangent combined with the 700 kN
+        column axial makes the first gravity increment ill-conditioned.
+        """
+        from openseespy.opensees import wipe
+
+        cfg = dict(_BENCH_CONFIG)
+        cfg["fiber_element_type"] = "forceBeamColumn"
+        cfg["rigid_end_zones"] = True
+        cfg["rigid_link_mpc"] = True
+        cfg["aggregate_shear"] = "nonlinear"
+        mesh = preprocess_model(make_vecchio_emara_frame(), cfg)
+        builder = AnalysisBuilder(mesh, cfg)
+        yield builder
+        wipe()
+
+    def test_nonlinear_shear_variant_stays_in_band(self, ve_builder_fbc_nlshear):
+        """Nonlinear MCFT shear on the flexure-critical V&E frame is in-band.
+
+        P5 empirical finding (2026-08-24): the V&E frame is shear-strong
+        (flexure-critical by design), so the nonlinear shear backbone is
+        essentially inert for the post-peak shape — peak ≈ 348 kN (1.05×)
+        vs 353 kN elastic-shear (1.07×), and the curve still rises after
+        ≈ 50 mm instead of descending like the experiment.  The nonlinear
+        shear mechanism itself is validated on the shear-critical Duong
+        frame (``test_duong_benchmark.py`` asserts a ≥ 15 % post-peak
+        drop).  This test locks in the in-band, converged result for the
+        nonlinear-shear V&E variant.
+        """
+        res = self._push(ve_builder_fbc_nlshear)
+        assert all(s == 0 for s in res["status"]), "non-converged push steps"
+        d = np.asarray(res["control_disp"], dtype=float)
+        v = np.asarray(res["base_shear"], dtype=float)
+        peak = float(np.max(v))
+        ratio = peak / EXP_PEAK_SHEAR
+        v50 = float(np.interp(0.050, d, v))
+        k50 = v50 / 0.050
+        assert 0.9 <= ratio <= 1.15, (
+            f"nonlinear-shear peak {peak:.1f} kN vs experimental "
+            f"{EXP_PEAK_SHEAR:.0f} kN (ratio {ratio:.2f}) outside band"
+        )
+        assert 0.85 * EXP_SECANT_AT_YIELD <= k50 <= 1.2 * EXP_SECANT_AT_YIELD, (
+            f"nonlinear-shear secant @50mm {k50:.0f} kN/m outside band"
         )
 
     def test_shear_aggregation_warns_inert_for_dispbeam(self, ve_builder):

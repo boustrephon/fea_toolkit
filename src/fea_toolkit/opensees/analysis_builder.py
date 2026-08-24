@@ -97,6 +97,20 @@ class AnalysisBuilder(
         "solver_algorithm": "ModifiedNewton",
     }
 
+    # ── Pushover primary solver settings (P3 empirical finding) ───────
+    # The pushover uses the general PUSHOVER_SOLVER_DEFAULTS (NormDispIncr
+    # 1e-6 / 10 / Newton) pre-filled by _set_defaults().  An earlier
+    # documented contract claimed "NormDispIncr 1e-4 / 20" (see the stale
+    # comment in run_pushover_analysis), but that looser setting was never
+    # actually effective (the .get(key, 1e-4) fallback cannot fire once the
+    # general defaults pre-fill the config), and the 2026-08-24 empirical
+    # pass (P3) showed it is NOT universally safe: 1e-4/20 breaks the Duong
+    # flexure-only pushover (forceBeamColumn element state-determination
+    # divergence) while 1e-6/10 converges every validated benchmark (V&E,
+    # Duong, RC/steel/LayeredShell).  Looser tolerances (e.g. 2e-4/1000)
+    # remain available as an explicit per-model opt-in — see
+    # docs/pushover_analysis.md.
+
     # ── LayeredShell gravity substeps (auto-detection) ───────────────
     # RC models with LayeredShell walls (resolved via the Preprocessor's
     # ``shell_layers`` config) can fail the gravity stage with a NaN
