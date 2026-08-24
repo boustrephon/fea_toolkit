@@ -24,6 +24,7 @@ builder — Tcl export functions (:func:`export_model_to_tcl`, :func:`pushover_t
 pushover — 4-direction pushover runner with gravity + lateral load sequences.
 """
 
+from ._loads import global_to_local_distributed_load
 from .analysis_builder import AnalysisBuilder, run_modal
 from .builder import (
     compute_lateral_loads,
@@ -56,6 +57,7 @@ __all__ = [
     "export_mesh_model_to_tcl",
     # Builder (Tcl export)
     "export_model_to_tcl",
+    "global_to_local_distributed_load",
     "modal_to_lateral_loads",
     "parse_pushover_results",
     "preprocess_model",

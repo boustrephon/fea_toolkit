@@ -3,9 +3,15 @@
 Provides readers for common ground motion formats (PEER NGA, simple
 time-history CSV) and utility functions for scaling, baseline
 correction, and spectral matching.
+
+All record functions use the **canonical SI system** — acceleration in
+m/s².  PEER ``.AT2`` files store acceleration in g; the values are
+converted to m/s² at read time (see :func:`read_peer_record`).
 """
 
 import numpy as np
+
+from ..utils import DEFAULT_GRAVITY_MS2
 
 # ── PEER NGA record reader ───────────────────────────────────────
 
@@ -28,8 +34,10 @@ def read_peer_record(path: str) -> tuple[np.ndarray, np.ndarray]:
     times : ndarray
         Time points (s).
     accel : ndarray
-        Acceleration values (g).  Convert to m/s² by multiplying by
-        ``9.81``.
+        Acceleration values in **m/s²**.  PEER ``.AT2`` files store
+        acceleration in g; values are converted to the module's canonical
+        SI system at read time using
+        :data:`fea_toolkit.utils.DEFAULT_GRAVITY_MS2` (9.80665).
 
     Raises
     ------
@@ -75,6 +83,9 @@ def read_peer_record(path: str) -> tuple[np.ndarray, np.ndarray]:
     accel = np.array([float(v) for v in data_lines], dtype=np.float64)
     npts = len(accel)
     times = np.arange(npts, dtype=np.float64) * dt
+    # PEER NGA .AT2 stores acceleration in g — convert to the module's
+    # canonical SI system (m/s²) so every reader/processor shares one unit.
+    accel = accel * DEFAULT_GRAVITY_MS2
     return times, accel
 
 
@@ -241,6 +252,9 @@ def baseline_correct(times: np.ndarray, accel: np.ndarray, order: int = 3) -> np
 def record_summary(times: np.ndarray, accel: np.ndarray) -> dict:
     """Return summary statistics for a ground motion record.
 
+    ``accel`` must be in m/s² — the canonical unit of this module (see
+    :func:`read_peer_record` / :func:`read_time_history_csv`).
+
     Returns
     -------
     dict
@@ -256,8 +270,9 @@ def record_summary(times: np.ndarray, accel: np.ndarray) -> dict:
     vel = np.cumsum(accel) * dt
     pgv = np.max(np.abs(vel))
 
-    # Arias intensity (integral of a² dt)
-    ai = (np.pi / (2.0 * 9.81)) * np.trapezoid(accel**2, times)
+    # Arias intensity (integral of a² dt) — accel is in m/s², so the SI
+    # gravitational constant normalises the squared-m/s² integrand.
+    ai = (np.pi / (2.0 * DEFAULT_GRAVITY_MS2)) * np.trapezoid(accel**2, times)
 
     # Cumulative absolute velocity
     cav = np.trapezoid(np.abs(accel), times)
