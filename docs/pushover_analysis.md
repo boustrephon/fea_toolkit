@@ -115,7 +115,7 @@ Both settings are configured through the builder `config` dict:
 ```python
 config = {
     # ... pushover / section / shell settings ...
-    "solver_test_tol": 2e-4,        # default 1e-6 (general), 1e-4 (pushover)
+    "solver_test_tol": 2e-4,        # documented pushover default is 1e-6; 2e-4 is an RC+LayeredShell relaxation
     "solver_test_max_iter": 1000,   # sufficient for the fiber/LayeredShell chain
     "solver_algorithm": "Newton",   # falls back to ModifiedNewton only during the lateral pushover loop; gravity handles failures by adapting the load increment, not switching algorithms
     "gravity_num_substeps": 10,     # ramp gravity in 10 LoadControl increments

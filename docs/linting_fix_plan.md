@@ -27,7 +27,8 @@ category: [planning]
 >
 > **Status update (2026-08-24):** the historical file paths in this document
 > are pre-split.  Post-P2 + runner-split: `model/geometry.py` is a 79-line
-> facade (errors moved to `geometry_core/frames/mesh`), `plotting/viz.py` is a
+> facade (errors moved to `model/geometry_core.py`,
+> `model/geometry_frames.py`, and `model/geometry_mesh.py`), `plotting/viz.py` is a
 > 136-line facade (errors in `viz_*`), and the runner errors moved from
 > `opensees/analysis_builder.py` into the `_runner_*` modules.  Re-run
 > `python -m pyright src/` for a fresh per-file triage before using the

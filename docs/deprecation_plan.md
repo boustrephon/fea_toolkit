@@ -442,10 +442,13 @@ comfortably.  Below is a realistic assessment of what remains.
       **(Pending — blocked on Gap 4.)**~~ ✅ **Done (2026-08-24, P4).**  Applied
       `bilinearize_rc()` to the real V&E capacity curve
       (`tests/test_rc_benchmark.py::test_bilinearize_rc_real_curve`).
-      **Result: S_dy ≈ 14 mm (≈ 0.36 % roof drift), equal-area exact.**  The
-      key claim holds — the yield does **not** snap to the cracking
-      transition (~2 mm) — but it lands *below* the nominal 0.5–1 %
-      rebar-yield band (and below the model's own first-yield ≈ 31 mm)
+      **Result: S_dy ≈ 14 mm (spectral displacement, model length units),
+      equal-area exact.**  The key claim holds — the yield does **not** snap
+      to the cracking transition (~2 mm spectral displacement) — but the
+      0.5–1 % rebar-yield threshold is a **roof-drift** band and is not
+      compared directly against the spectral `S_dy`; the yield sits below the
+      model's own first-yield roof drift (≈ 31 mm) in the corresponding
+      roof-displacement coordinates
       because the current model curve keeps hardening to the 155 mm end
       (no post-peak peak, see P5): the equal-area constraint on a
       hardening-only backbone pushes the yield earlier, in the

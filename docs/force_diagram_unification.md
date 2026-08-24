@@ -15,8 +15,8 @@ category: [planning]
 > deprecation cleanup.  The sections below are the historical design
 > record.
 
-**Status:** implemented (2026-08-24) — milestones 1–3 landed; milestone 4
-(wrapper removal) scheduled for the next release cycle.
+**Status:** implemented (2026-08-24) — milestones 1–4 landed; the four legacy
+wrappers were removed in the deprecation cleanup.
 
 ## Goal
 

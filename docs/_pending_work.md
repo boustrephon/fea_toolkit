@@ -351,9 +351,11 @@ layers (Phases 1–4) are stable.
   `docs/deprecation_plan.md` §5 and the `run_pushover_analysis` comment.
 - **P4 — CSM bilinearisation real-benchmark validation.**  Applied
   `bilinearize_rc()` to the real V&E capacity curve: **S_dy ≈ 14 mm
-  (≈ 0.36 % roof drift), equal-area exact**, and — the key claim — the
-  yield does **not** snap to the cracking transition (~2 mm).  It lands
-  below the nominal 0.5–1 % rebar-yield band because the current model
+  (spectral displacement, model length units), equal-area exact**, and — the
+  key claim — the yield does **not** snap to the cracking transition (~2 mm
+  spectral displacement).  The 0.5–1 % rebar-yield band is a roof-drift
+  threshold, so it is not compared directly against spectral `S_dy`; the
+  yield sits below it because the current model
   curve keeps hardening to 155 mm (no peak; conservative direction).  The
   band re-check is folded into P5 (once the post-peak descent gives the
   curve a real peak).  Regression test
@@ -419,8 +421,9 @@ Code-review round (findings H1/H2/M2) — commit `f1c278f`.
 
 ## DONE (2026-08-24 — P1 force-diagram unification, Phase B)
 
-Milestones 1–3 of `docs/force_diagram_unification.md` landed; milestone 4
-(wrapper removal) is deferred to the next release cycle.
+Milestones 1–4 of `docs/force_diagram_unification.md` landed; milestone 4
+(wrapper removal) was completed on 2026-08-24 (the four legacy wrappers were
+removed in the deprecation cleanup).
 
 - New `plotting/force_diagram.py` (642 lines): `ForceDiagramData` canonical
   intermediate, `_resolve_source()` input normaliser, unit resolution
