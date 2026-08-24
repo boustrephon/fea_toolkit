@@ -690,6 +690,63 @@ class TestVecchioEmaraShearFlexibleVariant:
         assert v[-1] < peak, "no post-peak descent (V_end >= peak)"
 
     @pytest.fixture
+    def ve_builder_fbc_bondslip(self):
+        """forceBeamColumn + rigid end zones + Bond_SP01 slip springs.
+
+        P5 Phase B: ``config['bond_slip'] = True`` adds zero-length
+        ``Bond_SP01`` moment-rotation springs at the fiber member ends (in
+        series with the flexural fiber element).
+        """
+        from openseespy.opensees import wipe
+
+        cfg = dict(_BENCH_CONFIG)
+        cfg["fiber_element_type"] = "forceBeamColumn"
+        cfg["rigid_end_zones"] = True
+        cfg["rigid_link_mpc"] = True
+        cfg["bond_slip"] = True
+        mesh = preprocess_model(make_vecchio_emara_frame(), cfg)
+        builder = AnalysisBuilder(mesh, cfg)
+        yield builder
+        wipe()
+
+    def test_bond_slip_end_springs_in_band_with_peak_off_end(self, ve_builder_fbc_bondslip):
+        """P5 Phase B: Bond_SP01 slip springs (default-off gate).
+
+        The bar-slip end springs soften the accepted 1.07× peak into the
+        band (≈ 0.91 × 330 kN), keep the secant @ 50 mm in band (≈ 0.94 ×
+        6.1 kN/mm) and move the peak off the 155 mm push end (≈ 117 mm).
+        A small real descent (V_end < peak) appears, but the sustained
+        ≥ 10 % experimental post-peak branch is NOT reproduced — ``Bond_SP01``
+        plateaus at its ultimate moment (no degrading branch), so a
+        member-level descent needs a degrading mechanism (shear / bond
+        degradation) beyond the fiber model.  Documented in
+        ``docs/_pending_work.md`` (P5 Phase B status).
+        """
+        res = self._push(ve_builder_fbc_bondslip)
+        assert all(s == 0 for s in res["status"]), "non-converged push steps"
+        d = np.asarray(res["control_disp"], dtype=float)
+        v = np.asarray(res["base_shear"], dtype=float)
+        peak_i = int(np.argmax(v))
+        peak = float(v[peak_i])
+        peak_d = float(d[peak_i])
+        ratio = peak / EXP_PEAK_SHEAR
+        v50 = float(np.interp(0.050, d, v))
+        k50 = v50 / 0.050
+        # Slip springs trim the 1.07× peak below the experimental peak.
+        assert 0.85 <= ratio <= 1.0, (
+            f"bond-slip peak {peak:.1f} kN vs experimental "
+            f"{EXP_PEAK_SHEAR:.0f} kN (ratio {ratio:.2f}) outside band"
+        )
+        # Stiffness softened by the slip springs but still in band.
+        assert 0.9 * EXP_SECANT_AT_YIELD <= k50 <= 1.15 * EXP_SECANT_AT_YIELD, (
+            f"bond-slip secant @50mm {k50:.0f} kN/m outside band"
+        )
+        # Peak moved off the push end.
+        assert peak_d < 0.9 * 0.155, f"peak still at the push end ({peak_d * 1000:.1f} mm)"
+        # A real (if small) descent is present.
+        assert v[-1] < peak, "no post-peak descent (V_end >= peak)"
+
+    @pytest.fixture
     def ve_builder_fbc_nlshear(self):
         """forceBeamColumn + auto rigid joint end zones + nonlinear
         simplified-MCFT shear backbone.

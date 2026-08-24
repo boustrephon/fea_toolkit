@@ -383,6 +383,10 @@ def uniaxialMaterial(mat_type: str, tag: int, *args: Any) -> None:
         # fc, epsc0, fcU, epsU, lambda, ft, Ets
         uniaxialMaterial('Concrete02', tag, -30e6, -0.002, -3e6, -0.006, 0.1, 3e6, 3e9)
 
+        # Bond_SP01 (Zhao-Sritharan strain penetration, used as a
+        # moment-rotation law at member ends): Fy, Sy, Fu, Su, b, R
+        uniaxialMaterial('Bond_SP01', tag, 150e3, 8e-4, 210e3, 0.028, 0.5, 0.7)
+
         # Steel01 (bilinear): Fy, E, b (strain-hardening ratio)
         uniaxialMaterial('Steel01', tag, 250e6, 200e9, 0.01)
 

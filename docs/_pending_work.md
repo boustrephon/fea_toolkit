@@ -27,9 +27,11 @@ category: [planning]
 Source: 2026-08-16 rigid-end-zone batch (DONE, below);
 `docs/vecchio_emara_benchmark.md`; `docs/shear_failure_modelling.md`.
 
-**Status: partial — the nonlinear-shear mechanism is validated (Duong);
-the fiber-concrete softening lever is implemented (Phase A, default-off);
-the V&E post-peak descent is still open (needs bond-slip, Phase B).**
+**Status: documented, not reproduced — the nonlinear-shear mechanism is
+validated (Duong); the fiber-concrete softening (Phase A) and `Bond_SP01`
+slip springs (Phase B) are implemented (both default-off) but cannot
+produce the sustained ≥ 10 % post-peak descent; P5 closes per the
+documented-partial fallback.**
 
 **What.** The flexure-only forceBeamColumn + rigid-end-zone model lands
 inside the ±10–15 % acceptance band (peak ≈ 353 kN = 1.07 × experimental;
@@ -82,7 +84,11 @@ post-peak *shape* without regressing the in-band strength/stiffness:
    nonlinear MCFT shear backbone (inert on this shear-strong frame;
    validated on the Duong frame).  Fiber-concrete softening alone
    (Concrete02 + core-residual reduction) trims the peak but cannot
-   sustain the ≥ 10 % descent (see Phase A status below).
+   sustain the ≥ 10 % descent (see Phase A status below).  `Bond_SP01`
+   slip springs soften the response and move the peak off the push end
+   but plateau at their ultimate moment (the material has no degrading
+   branch), so they cannot produce the descent either (see Phase B
+   status below).
 2. **Peak location** — the peak base shear moves off the 155 mm push end to
    the experimental peak band (≈ 40–70 mm), instead of the current
    monotonic rise to 155 mm.
@@ -168,6 +174,55 @@ implemented, config-gated **off by default** (existing models unchanged):
   **P5 Phase B: zero-length `bond_sp01` slip springs** at member ends
   (precedents: the lumped-hinge `zeroLengthSection` and the Elwood
   limit-state `zeroLength` springs).
+
+**Phase B status (2026-08-24):** the `Bond_SP01` slip-spring mechanism is
+implemented, config-gated **off by default** (existing models unchanged):
+
+- **Key facts found during implementation:** OpenSeesPy 3.8.0.0 registers
+  the material under its C++ class name **`Bond_SP01`** (the Tcl command
+  `bond_sp01` is not exported), and the input values are used directly —
+  the backbone is fed in the model's own moment/rotation units (the
+  "ksi and in" warning is informational).
+- **New config keys** (defaults in brackets): `bond_slip` (`False`),
+  `bond_slip_sy_m` (0.000254 m — Zhao-Sritharan 0.01 in, scaled via
+  `length_scale_factor`), `bond_slip_su_factor` (35), `bond_slip_mu_factor`
+  (1.4), `bond_slip_b` (0.5), `bond_slip_R` (0.7), `bond_slip_backbone`
+  (`None` — optional explicit backbone in model units).
+- **Hook:** `ElementMixin._create_bond_slip_springs()` in `_elements.py`
+  inserts plain `zeroLength` elements at every fibre member end (dirs 1–4
+  rigid, dir 5 = weak-axis slip, dir 6 = strong-axis slip) and shortens the
+  fibre element to span the new bond nodes.  Uses the limit-state's
+  `zeroLength -mat/-dir` pattern (no `equalDOF`) so the Transformation
+  constraint handler stays compatible with `rigidLink` MPC joint offsets —
+  the naive `zeroLengthSection` + `equalDOF` version was singular with the
+  MPC links (DOF 48) and only converged under the Penalty handler.
+  Backbone: `My = A_s·f_y·jd`, `θ_y = sy/jd`, `Mu = 1.4·My`, `θ_u = su/jd`
+  (COL: My=149 kN·m, θy=0.00085; BEAM: My=159 kN·m, θy=0.00080).
+- **Empirical result** (accepted rigid-end-zone config + `bond_slip=True`):
+  peak **300.8 kN (0.91×)** @ 117.5 mm, secant @ 50 mm **5.76 (0.94×)**,
+  full convergence, small real descent (V_end < peak, ~1.4 %).
+- **Limitation (why the gate is not met):** `Bond_SP01` **plateaus at its
+  ultimate moment** past `θ_u` — it never degrades (verified by probing the
+  material envelope).  So the slip springs cap/soften the member but cannot
+  produce a sustained ≥ 10 % post-peak descent; combined with Concrete02
+  (Phase A) the response flattens near 300 kN instead of descending.
+- **Best documented curve after both phases** (Phase A only, no bond-slip):
+  `concrete_material="Concrete02"`, `core_residual_factor=0.02`,
+  `confined_ecu_max=0.012` → peak **331.7 kN (1.005×)** @ 152.5 mm, secant
+  **5.92 (0.97×)**, **9.9 % end drop** — the peak magnitude is essentially
+  exact and the drop nearly meets the 10 % gate, but the peak sits at the
+  push end (the sustained post-peak branch from 40–70 mm is not
+  reproduced).
+- **Conclusion:** with the fibre + `Bond_SP01` mechanism set, the V&E
+  post-peak descent is **not reproducible** — the experimental softening is
+  driven by member-level **degradation** (cracked-shear / bond degradation)
+  that a forceBeamColumn fibre section cannot represent.  P5 closes as
+  **"documented, not reproduced"** per the fallback: the best-achieved
+  curves, the residual gap (peak location stuck near the push end; max
+  ~10 % drop), and the recommendation (a degrading lumped hinge — Hysteretic
+  with a descending post-cap branch — or a flexibility-based shear-flexible
+  element with degrading shear) are recorded here and in
+  `docs/vecchio_emara_benchmark.md`.
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 
