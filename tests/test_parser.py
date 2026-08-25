@@ -504,6 +504,85 @@ def test_area_mesh_parsed(tmp_path):
     assert m.max_size == 1.0
 
 
+def test_frame_auto_mesh_at_frames_roundtrip(tmp_path):
+    """``AtFrames=Yes`` in FRAME AUTO MESH ASSIGNMENTS round-trips to True.
+
+    The ``sample.s2k`` fixture only ever carries ``AtFrames=No``, so this
+    proves the text parser's Yes/No → bool conversion (``s2k_parser.py``
+    ``_parse_sap2000_table_file``) and the ``_get_frame_auto_mesh()``
+    extraction preserve an ``AtFrames`` flag as a boolean ``True``.
+    """
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "FRAME AUTO MESH ASSIGNMENTS"
+   Frame=1   AutoMesh=Yes   AtJoints=No   AtFrames=Yes   NumSegments=0   MaxLength=0   MaxDegrees=0
+   Frame=2   AutoMesh=Yes   AtJoints=Yes   AtFrames=No   NumSegments=0   MaxLength=0   MaxDegrees=0
+"""
+    s2k = tmp_path / "test_at_frames_flag.s2k"
+    s2k.write_text(content)
+    parser = SAP2000Parser(s2k)
+    parser.parse()
+    md = parser.get_model_data()
+    assert md.frame_auto_mesh["1"]["AtFrames"] is True
+    assert md.frame_auto_mesh["1"]["AtJoints"] is False
+    assert md.frame_auto_mesh["2"]["AtFrames"] is False
+    assert md.frame_auto_mesh["2"]["AtJoints"] is True
+
+
+def test_at_frames_parsed_model_splits_at_intersection(tmp_path):
+    """Parser → split_elements round-trip for crossing ``AtFrames`` frames.
+
+    Builds a minimal .s2k with two perpendicular frames both flagged
+    ``AtFrames=Yes``, parses it, and runs ``split_elements`` on the parsed
+    model data — asserting the crossing produces inactive parents with two
+    children each and a new ``split_n_*`` node at the intersection.
+    """
+    from fea_toolkit.model.geometry import split_elements
+
+    content = """File test.s2k was saved on m/d/yy at h:mm:ss
+TABLE:  "JOINT COORDINATES"
+   Joint=1   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=0
+   Joint=2   CoordSys=GLOBAL   CoordType=Cartesian   XorR=10   Y=0   Z=0
+   Joint=3   CoordSys=GLOBAL   CoordType=Cartesian   XorR=5   Y=-5   Z=0
+   Joint=4   CoordSys=GLOBAL   CoordType=Cartesian   XorR=5   Y=5   Z=0
+TABLE:  "CONNECTIVITY - FRAME"
+   Frame=1   JointI=1   JointJ=2   IsCurved=No
+   Frame=2   JointI=3   JointJ=4   IsCurved=No
+TABLE:  "FRAME AUTO MESH ASSIGNMENTS"
+   Frame=1   AutoMesh=Yes   AtJoints=No   AtFrames=Yes   NumSegments=0   MaxLength=0   MaxDegrees=0
+   Frame=2   AutoMesh=Yes   AtJoints=No   AtFrames=Yes   NumSegments=0   MaxLength=0   MaxDegrees=0
+"""
+    s2k = tmp_path / "test_crossing_at_frames.s2k"
+    s2k.write_text(content)
+    parser = SAP2000Parser(s2k)
+    parser.parse()
+    md = parser.get_model_data()
+
+    # The flag must round-trip through the text parser as a boolean.
+    assert md.frame_auto_mesh["1"]["AtFrames"] is True
+    assert md.frame_auto_mesh["2"]["AtFrames"] is True
+
+    new_elems, _, _ = split_elements(
+        nodes=md.nodes,
+        elements=md.frame_elements,
+        assignments=md.frame_assignments,
+        dist_loads=md.frame_dist_loads,
+        auto_mesh=md.frame_auto_mesh,
+        tol=1e-6,
+        verbose=False,
+    )
+    # Both crossing parents are split with two children each.
+    assert new_elems["1"].inactive
+    assert len(new_elems["1"].child_ids) == 2
+    assert new_elems["2"].inactive
+    assert len(new_elems["2"].child_ids) == 2
+    # A new split node was created at the (5, 0, 0) intersection.
+    split_nodes = [nd for nid, nd in md.nodes.items() if nid.startswith("split_n_")]
+    assert len(split_nodes) == 1
+    assert split_nodes[0].x == pytest.approx(5.0)
+    assert split_nodes[0].y == pytest.approx(0.0)
+    assert split_nodes[0].z == pytest.approx(0.0)
+
+
 def test_area_edge_constraints_parsed(tmp_path):
     """AREA EDGE CONSTRAINT ASSIGNMENTS table is parsed correctly."""
     json_data = {
