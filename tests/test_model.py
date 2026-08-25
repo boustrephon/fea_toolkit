@@ -1828,6 +1828,130 @@ class TestBoxSectionFiberPatches:
         assert abs(patches[1][6] + 0.28) < 1e-12
 
 
+def _assert_rect_patch_geometry(patches, expected_area, mat_tag, nfy, nfz):
+    """Shared assertions for centroid-shifted rectangular fiber patches."""
+    total_area = 0.0
+    first_y = 0.0
+    first_z = 0.0
+    for p in patches:
+        assert p[0] == "rect"
+        assert p[1] == mat_tag
+        assert p[2] == nfy
+        assert p[3] == nfz
+        y1, z1, y2, z2 = p[4], p[5], p[6], p[7]
+        area = abs(y2 - y1) * abs(z2 - z1)
+        total_area += area
+        first_y += area * (y1 + y2) / 2.0
+        first_z += area * (z1 + z2) / 2.0
+    assert total_area == pytest.approx(expected_area, rel=1e-9)
+    assert first_y == pytest.approx(0.0, abs=1e-12)
+    assert first_z == pytest.approx(0.0, abs=1e-12)
+
+
+class TestChannelSectionFiberPatches:
+    """Centroid-shifted 3-rect fiber patches for ChannelSection."""
+
+    def test_three_rect_patches_centered_on_centroid(self):
+        from fea_toolkit.model.sap_data import ChannelSection
+
+        sec = ChannelSection(
+            name="CH",
+            shape="Channel",
+            material="STEEL",
+            A=0.00264,
+            depth=0.2,
+            bf=0.06,
+            tf=0.01,
+            tw=0.008,
+        )
+        patches = sec.to_fiber_patches(mat_tag=5, nfy=3, nfz=2)
+        assert len(patches) == 3
+        _assert_rect_patch_geometry(patches, expected_area=0.00264, mat_tag=5, nfy=3, nfz=2)
+        # Bottom flange -> web -> top flange in y (channel is symmetric about y).
+        assert patches[0][6] == pytest.approx(-0.09)  # web y1 (bottom flange y2)
+        assert patches[1][4] == pytest.approx(-0.09)  # web y1
+        assert patches[1][6] == pytest.approx(0.09)  # web y2
+        assert patches[2][4] == pytest.approx(0.09)  # top flange y1
+        assert (patches[1][7] - patches[1][5]) == pytest.approx(0.008)  # web z-width = tw
+        assert (patches[2][7] - patches[2][5]) == pytest.approx(0.06)  # flange z-width = B
+
+
+class TestTeeSectionFiberPatches:
+    """Centroid-shifted 2-rect fiber patches for TeeSection."""
+
+    def test_two_rect_patches_centered_on_centroid(self):
+        from fea_toolkit.model.sap_data import TeeSection
+
+        sec = TeeSection(
+            name="T",
+            shape="Tee",
+            material="STEEL",
+            A=0.00308,
+            depth=0.2,
+            bf=0.1,
+            tf=0.012,
+            tw=0.01,
+        )
+        patches = sec.to_fiber_patches(mat_tag=6, nfy=3, nfz=2)
+        assert len(patches) == 2
+        _assert_rect_patch_geometry(patches, expected_area=0.00308, mat_tag=6, nfy=3, nfz=2)
+        # Flange on top (positive y after centroid shift), stem below.
+        assert patches[0][4] >= patches[1][6] - 1e-12  # flange y1 at/above stem y2
+        assert (patches[0][7] - patches[0][5]) == pytest.approx(0.1)  # flange z-width = B
+        assert (patches[1][7] - patches[1][5]) == pytest.approx(0.01)  # stem z-width = tw
+
+
+class TestAngleSectionFiberPatches:
+    """Centroid-shifted 2-rect fiber patches for AngleSection."""
+
+    def test_two_rect_patches_centered_on_centroid(self):
+        from fea_toolkit.model.sap_data import AngleSection
+
+        sec = AngleSection(
+            name="L",
+            shape="Angle",
+            material="STEEL",
+            A=0.0019,
+            depth=0.1,
+            bf=0.1,
+            tf=0.01,
+            tw=0.01,
+        )
+        patches = sec.to_fiber_patches(mat_tag=7, nfy=3, nfz=2)
+        assert len(patches) == 2
+        _assert_rect_patch_geometry(patches, expected_area=0.0019, mat_tag=7, nfy=3, nfz=2)
+        # Vertical leg is tw thick in z; horizontal leg is tf thick in y.
+        assert (patches[0][7] - patches[0][5]) == pytest.approx(0.01)  # vertical leg z-width = tw
+        assert (patches[1][6] - patches[1][4]) == pytest.approx(0.01)  # horizontal leg y-width = tf
+
+
+class TestDoubleAngleSectionFiberPatches:
+    """Centroid-shifted 4-rect fiber patches for DoubleAngleSection."""
+
+    def test_four_rect_patches_centered_on_centroid(self):
+        from fea_toolkit.model.sap_data import DoubleAngleSection
+
+        sec = DoubleAngleSection(
+            name="2L",
+            shape="Double Angle",
+            material="STEEL",
+            A=0.004,
+            depth=0.1,
+            bf=0.23,
+            tf=0.01,
+            tw=0.01,
+            dis=0.01,
+        )
+        patches = sec.to_fiber_patches(mat_tag=8, nfy=3, nfz=2)
+        assert len(patches) == 4
+        _assert_rect_patch_geometry(patches, expected_area=0.004, mat_tag=8, nfy=3, nfz=2)
+        # z-symmetric assembly: left and right legs mirror about z = 0.
+        assert patches[1][5] == pytest.approx(-0.115)  # left horizontal leg z1 (tip)
+        assert patches[3][7] == pytest.approx(0.115)  # right horizontal leg z2 (tip)
+        assert patches[1][7] == pytest.approx(-0.015)  # left horizontal leg z2
+        assert patches[3][5] == pytest.approx(0.015)  # right horizontal leg z1
+
+
 # ============================================================================
 # Selection tests
 # ============================================================================

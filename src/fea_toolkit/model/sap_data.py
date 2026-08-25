@@ -352,6 +352,53 @@ class Section:
         raise NotImplementedError(f"Fiber conversion not implemented for {type(self).__name__}")
 
 
+def _rect_patches_from_regions(
+    mat_tag: int,
+    nfy: int,
+    nfz: int,
+    regions: list[tuple[float, float, float, float]],
+) -> list[tuple]:
+    """Build centroid-shifted rectangular fiber patches from (y1, z1, y2, z2) regions.
+
+    Regions are expressed in a local frame (y = depth / strong axis, z = width /
+    weak axis).  The helper computes the composite-area centroid of all regions
+    and re-centres them on the origin so the emitted fiber section has vanishing
+    first moments (sum A*ybar = sum A*zbar = 0).  This matters for asymmetric
+    shapes (channel, tee, angle, double angle): the SAP2000 section properties
+    (A, I33, I22) are centroidal, so the fibre mesh must be centred on the
+    centroid, not the bounding-box centre.
+
+    Args:
+        mat_tag: OpenSees material tag.
+        nfy: Number of fibres along the y (depth) direction per patch.
+        nfz: Number of fibres along the z (width) direction per patch.
+        regions: ``(y1, z1, y2, z2)`` rectangles, mutually disjoint.
+
+    Returns:
+        List of ``('rect', mat_tag, nfy, nfz, y1, z1, y2, z2)`` tuples,
+        centroid-shifted.  An empty list is returned when the total area is
+        non-positive (degenerate / zero-dimension input).
+    """
+    total_area = 0.0
+    first_y = 0.0
+    first_z = 0.0
+    for y1, z1, y2, z2 in regions:
+        height = abs(y2 - y1)
+        width = abs(z2 - z1)
+        area = height * width
+        total_area += area
+        first_y += area * (y1 + y2) / 2.0
+        first_z += area * (z1 + z2) / 2.0
+    if total_area <= 0.0:
+        return []
+    cy = first_y / total_area
+    cz = first_z / total_area
+    return [
+        ("rect", mat_tag, nfy, nfz, y1 - cy, z1 - cz, y2 - cy, z2 - cz)
+        for (y1, z1, y2, z2) in regions
+    ]
+
+
 # --- Shape‑specific subclasses -------------------------------------------------
 
 
@@ -826,8 +873,28 @@ class ChannelSection(Section):
     tw: float = 0.0  # Web thickness
 
     def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
-        """Placeholder — channel patches not yet implemented."""
-        raise NotImplementedError("Fiber conversion for ChannelSection not yet implemented")
+        """Three rectangular patches (bottom flange -> web -> top flange), centroid-shifted.
+
+        The web sits at one edge (z in [0, tw]) with both flanges extending to
+        the other side (z in [0, bf]); the web spans only the depth between the
+        flanges so the three patches are disjoint.  The composite centroid is
+        re-centred on the origin by :func:`_rect_patches_from_regions`.
+        """
+        D, B, tf, tw = self.depth, self.bf, self.tf, self.tw
+        half = D / 2.0
+        return _rect_patches_from_regions(
+            mat_tag,
+            nfy,
+            nfz,
+            [
+                # Bottom flange
+                (-half, 0.0, -half + tf, B),
+                # Web (between the flanges)
+                (-half + tf, 0.0, half - tf, tw),
+                # Top flange
+                (half - tf, 0.0, half, B),
+            ],
+        )
 
 
 @dataclass
@@ -840,8 +907,26 @@ class AngleSection(Section):
     tw: float = 0.0  # Web thickness
 
     def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
-        """Placeholder — angle patches not yet implemented."""
-        raise NotImplementedError("Fiber conversion for AngleSection not yet implemented")
+        """Two rectangular patches (vertical + horizontal leg), centroid-shifted.
+
+        The vertical leg runs along y (z in [0, tw]) and the horizontal leg
+        along z (y in [0, tf]); the horizontal leg starts at the outer face of
+        the vertical leg so the patches are disjoint.  The heel sits at the
+        origin of the local frame; the composite centroid is re-centred on the
+        origin by :func:`_rect_patches_from_regions`.
+        """
+        D, B, tf, tw = self.depth, self.bf, self.tf, self.tw
+        return _rect_patches_from_regions(
+            mat_tag,
+            nfy,
+            nfz,
+            [
+                # Vertical leg
+                (0.0, 0.0, D, tw),
+                # Horizontal (outstanding) leg
+                (0.0, tw, tf, B),
+            ],
+        )
 
 
 @dataclass
@@ -855,8 +940,31 @@ class DoubleAngleSection(Section):
     dis: float = 0.0  # Gap between angles
 
     def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
-        """Placeholder — double‑angle patches not yet implemented."""
-        raise NotImplementedError("Fiber conversion for DoubleAngleSection not yet implemented")
+        """Four rectangular patches (two back-to-back angles), centroid-shifted.
+
+        The two angles face each other with their heel planes separated by
+        ``dis``; each outstanding horizontal leg spans to the overall width
+        ``bf``.  The assembly is symmetric about z; the composite centroid is
+        re-centred on the origin by :func:`_rect_patches_from_regions`.
+        """
+        D, B, tf, tw = self.depth, self.bf, self.tf, self.tw
+        gap = max(0.0, min(self.dis, B))
+        half_gap = gap / 2.0
+        return _rect_patches_from_regions(
+            mat_tag,
+            nfy,
+            nfz,
+            [
+                # Left vertical leg
+                (0.0, -half_gap - tw, D, -half_gap),
+                # Left horizontal (outstanding) leg
+                (0.0, -B / 2.0, tf, -half_gap - tw),
+                # Right vertical leg
+                (0.0, half_gap, D, half_gap + tw),
+                # Right horizontal (outstanding) leg
+                (0.0, half_gap + tw, tf, B / 2.0),
+            ],
+        )
 
 
 @dataclass
@@ -869,8 +977,26 @@ class TeeSection(Section):
     tw: float = 0.0  # Web (stem) thickness
 
     def to_fiber_patches(self, mat_tag: int, nfy: int = 8, nfz: int = 4) -> list[tuple]:
-        """Placeholder — tee patches not yet implemented."""
-        raise NotImplementedError("Fiber conversion for TeeSection not yet implemented")
+        """Two rectangular patches (flange + stem), centroid-shifted.
+
+        The flange sits at the top (y in [D - tf, D], z in [-B/2, B/2]) and the
+        stem hangs below (y in [0, D - tf], z in [-tw/2, tw/2]); the patches are
+        disjoint.  The composite centroid is re-centred on the origin by
+        :func:`_rect_patches_from_regions` (the flange makes the tee asymmetric
+        about y).
+        """
+        D, B, tf, tw = self.depth, self.bf, self.tf, self.tw
+        return _rect_patches_from_regions(
+            mat_tag,
+            nfy,
+            nfz,
+            [
+                # Flange
+                (D - tf, -B / 2.0, D, B / 2.0),
+                # Stem
+                (0.0, -tw / 2.0, D - tf, tw / 2.0),
+            ],
+        )
 
 
 @dataclass
