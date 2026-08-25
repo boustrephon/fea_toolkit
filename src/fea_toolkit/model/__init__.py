@@ -38,12 +38,15 @@ from .confinement import (
     mander_confined,
 )
 from .csm import (
+    BILINEARIZE_METHODS,
     bilinearize_composite,
     bilinearize_equal_energy,
     bilinearize_rc,
     bilinearize_stiffness_change,
     compute_performance_point,
+    get_bilinearize_method,
     pushover_to_adrs,
+    register_bilinearize_method,
 )
 from .geometry import (
     SpatialGrid,
@@ -142,6 +145,7 @@ from .units import (
 )
 
 __all__ = [
+    "BILINEARIZE_METHODS",
     "KIP_IN_UNITS",
     "AngleSection",
     "AreaEdgeConstraint",
@@ -224,6 +228,7 @@ __all__ = [
     "find_wall_nodes_inside_slabs",
     "frame_split_summary",
     "get_SAP_vecxz",
+    "get_bilinearize_method",
     "get_element_chain",
     "get_local_axes",
     "get_root_parent",
@@ -240,6 +245,7 @@ __all__ = [
     "print_wall_inside_slab_report",
     # CSM
     "pushover_to_adrs",
+    "register_bilinearize_method",
     "remove_floating_nodes",
     "rigid_body_fit",
     "split_areas_at_frame_edges",

@@ -525,6 +525,62 @@ spectrum, the converged point is `μ = 3.00`, `T_eq = 0.574 s`,
 
 ---
 
+## Pluggable methods (registry)
+
+The built-in methods above are held in the module-level
+``BILINEARIZE_METHODS`` registry in `model/csm.py`.  Third-party code can
+plug in its own yield-point rule **without editing the package** via
+:func:`~fea_toolkit.model.csm.register_bilinearize_method`, then select it
+with `compute_performance_point(..., bilinearize_method=name)`.
+
+### Contract
+
+A registered callable must satisfy::
+
+    fn(S_d_arr, S_a_arr, config=None) -> (S_dy, S_ay, method_name)
+
+- `S_d_arr`, `S_a_arr` — ADRS spectral arrays (matching lengths,
+  monotonically increasing displacement).
+- `S_dy`, `S_ay` — the fitted yield point in model units.
+- `method_name` — string echoed back into the result's
+  `'bilinearize_method'` field.
+
+### Example
+
+```python
+from fea_toolkit.model.csm import (
+    register_bilinearize_method,
+    compute_performance_point,
+)
+
+def bilinearize_my_rule(S_d_arr, S_a_arr, config=None):
+    ...
+    return S_dy, S_ay, "my_rule"
+
+register_bilinearize_method("my_rule", bilinearize_my_rule)
+
+pp = compute_performance_point(
+    pushover_results, modal_results, mode_shapes,
+    spectrum_periods, spectrum_accels,
+    bilinearize_method="my_rule",        # third-party name
+    bilinearize_config={"param": 0.10},  # forwarded to the callable
+)
+```
+
+### Semantics
+
+- Registering a name that already exists (including built-ins) raises
+  `ValueError` unless `overwrite=True` is passed.
+- Registering a non-callable raises `TypeError`.
+- Aliases are plain multi-key mappings — register the same function under
+  several names (as `'rc'` / `'de_luca_10pct'` do).
+- The registry is read at call time, so registration must happen before
+  the `compute_performance_point` call (typically at import/startup).
+- `get_bilinearize_method(name)` returns the registered callable and
+  raises `ValueError` for unknown names.
+
+---
+
 ## See Also
 
 - [Pushover (Non-linear Static) Analysis](pushover_analysis.md)

@@ -38,13 +38,20 @@ with no explicit gravitational constant), which is exact in any
 consistent unit system: kN / t = m/s², N / kg = m/s².  It does **not**
 divide by ``g`` — dividing by ``g`` would produce g-units and silently
 corrupt every downstream quantity (T_eq, ductility, intersection).
+
+**Pluggable methods**
+
+The built-in methods above are held in the module-level
+``BILINEARIZE_METHODS`` registry.  Third-party code can add its own rule
+via :func:`register_bilinearize_method` and select it with
+``compute_performance_point(..., bilinearize_method=...)``.
 """
 
 from __future__ import annotations
 
 import math
 import warnings
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 
@@ -546,6 +553,80 @@ def bilinearize_rc(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Bilinearization registry (pluggable)
+# ═══════════════════════════════════════════════════════════════════════════
+
+BILINEARIZE_METHODS: dict[str, Callable[..., tuple[float, float, str]]] = {
+    "composite": bilinearize_composite,
+    "stiffness_change": bilinearize_stiffness_change,
+    "equal_energy": bilinearize_equal_energy,
+    "rc": bilinearize_rc,
+    "de_luca_10pct": bilinearize_rc,  # alias of 'rc'
+}
+
+
+def register_bilinearize_method(
+    name: str,
+    fn: Callable[..., tuple[float, float, str]],
+    *,
+    overwrite: bool = False,
+) -> None:
+    """Register a custom bilinearization method under *name*.
+
+    Third-party code can plug its own yield-point rule into
+    :func:`compute_performance_point` without editing this module.  The
+    callable must satisfy the bilinearization contract::
+
+        fn(S_d_arr, S_a_arr, config=None) -> (S_dy, S_ay, method_name)
+
+    where ``S_d_arr`` / ``S_a_arr`` are the ADRS spectral arrays (matching
+    lengths, monotonically increasing displacement) and the returned
+    ``method_name`` string is echoed back in the performance-point result's
+    ``'bilinearize_method'`` field.
+
+    Args:
+        name: Method name used with
+            ``compute_performance_point(..., bilinearize_method=name)``.
+        fn: Callable satisfying the bilinearization contract above.
+        overwrite: If True, replace an already-registered name (including
+            built-ins).  Default False raises on collisions.
+
+    Raises:
+        TypeError: If *fn* is not callable.
+        ValueError: If *name* is already registered and *overwrite* is
+            False.
+    """
+    if not callable(fn):
+        raise TypeError(f"bilinearize method '{name}' must be callable")
+    if name in BILINEARIZE_METHODS and not overwrite:
+        raise ValueError(
+            f"bilinearize method '{name}' is already registered; pass overwrite=True to replace it."
+        )
+    BILINEARIZE_METHODS[name] = fn
+
+
+def get_bilinearize_method(name: str) -> Callable[..., tuple[float, float, str]]:
+    """Return the registered bilinearization callable for *name*.
+
+    Args:
+        name: Method name as passed to
+            ``compute_performance_point(..., bilinearize_method=name)``.
+
+    Returns:
+        The registered callable.
+
+    Raises:
+        ValueError: If *name* is not registered.
+    """
+    try:
+        return BILINEARIZE_METHODS[name]
+    except KeyError:
+        raise ValueError(
+            f"Unknown bilinearize_method '{name}'. Expected one of {sorted(BILINEARIZE_METHODS)}."
+        ) from None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Equivalent viscous damping — ATC‑40
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -657,11 +738,13 @@ def compute_performance_point(
            participation factor and effective modal mass.  ``S_a`` is
            computed as ``V / M_eff`` (**m/s²**) — see the module
            docstring for the unit convention.
-        2. **Bilinearization** — one of ``'composite'`` (default),
-           ``'stiffness_change'``, ``'equal_energy'``, or ``'rc'`` /
-           ``'de_luca_10pct'`` methods determines the yield point
-           (S_dy, S_ay).  ``'rc'`` is the De Luca 10 %-secant rule for
-           curved reinforced-concrete backbones.
+        2. **Bilinearization** — a registered method name from
+           ``BILINEARIZE_METHODS`` (built-ins: ``'composite'`` default,
+           ``'stiffness_change'``, ``'equal_energy'``, ``'rc'`` /
+           ``'de_luca_10pct'``, or any name added via
+           :func:`register_bilinearize_method`) determines the yield
+           point (S_dy, S_ay).  ``'rc'`` is the De Luca 10 %-secant rule
+           for curved reinforced-concrete backbones.
         3. **Secant iteration** — starting from 20 % of the peak
            spectral displacement, repeatedly:
            a. Compute equivalent secant period T_eq from the trial
@@ -704,11 +787,12 @@ def compute_performance_point(
         damping_ratio: Elastic damping ratio (default 0.05).
         max_iter: Maximum iterations for secant convergence (default 50).
         tol: Convergence tolerance on S_d (relative, default 1 %).
-        bilinearize_method: One of ``'composite'`` (default),
-            ``'stiffness_change'``, ``'equal_energy'``, ``'rc'``, or
-            ``'de_luca_10pct'`` (both aliases of
-            :func:`bilinearize_rc` — the De Luca 10 %-secant rule for
-            curved RC backbones).
+        bilinearize_method: Registered bilinearization method name.
+            Built-ins: ``'composite'`` (default), ``'stiffness_change'``,
+            ``'equal_energy'``, ``'rc'``, or ``'de_luca_10pct'`` (both
+            aliases of :func:`bilinearize_rc` — the De Luca 10 %-secant
+            rule for curved RC backbones).  Custom names can be registered
+            via :func:`register_bilinearize_method`.
         bilinearize_config: Optional dict passed to the bilinearisation
             function.
 
@@ -735,6 +819,8 @@ def compute_performance_point(
             ``'S_d'`` lists.
 
     Raises:
+        ValueError: If *bilinearize_method* is not a registered method
+            name (see :func:`register_bilinearize_method`).
         ValueError: If the capacity spectrum has fewer than 3 valid
             data points after filtering.
 
@@ -820,19 +906,7 @@ def compute_performance_point(
     base_shear = base_shear_orig
 
     # 2. Bilinearise the capacity spectrum (find yield point)
-    _bilin_map = {
-        "composite": bilinearize_composite,
-        "stiffness_change": bilinearize_stiffness_change,
-        "equal_energy": bilinearize_equal_energy,
-        "rc": bilinearize_rc,
-        "de_luca_10pct": bilinearize_rc,
-    }
-    if bilinearize_method not in _bilin_map:
-        raise ValueError(
-            f"Unknown bilinearize_method '{bilinearize_method}'. "
-            f"Expected one of {list(_bilin_map.keys())}."
-        )
-    _bilin_fn = _bilin_map[bilinearize_method]
+    _bilin_fn = get_bilinearize_method(bilinearize_method)
     S_dy, S_ay, _bilin_name = _bilin_fn(S_d_arr, S_a_arr, config=bilinearize_config)
 
     # 3. Capacity spectrum demand method (secant iteration)
