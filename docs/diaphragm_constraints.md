@@ -188,7 +188,7 @@ mm = preprocess_model(md, config)
 print(mm.diaphragm_levels)
 print(mm.diaphragm_components)
 
-# Analysis — rigidDiaphragm constraints applied automatically
+# Analysis — rigidDiaphragm constraints created (True ⇒ storey detection)
 builder = AnalysisBuilder(mm, config)
 builder.build_domain()
 ```

@@ -1073,8 +1073,10 @@ class Preprocessor:
            that carry explicit diaphragm definitions (e.g. the
            SeismoStruct Ex12 verification model).
         3. **Horizontal area elements** — each nearly-horizontal shell's
-           mean Z (backward-compatible fallback for models without
-           explicit constraints, e.g. slab-only models).
+           mean Z, recorded as slab-derived levels (slab-only models).
+           These levels are detected but never auto-applied — the
+           builder uses them only when explicitly requested
+           (``rigid_diaphragms: True`` fallback or a legacy Z-list).
         4. **Storey detection** (``rigid_diaphragms: True``) — force
            :func:`fea_toolkit.model.stories.identify_stories` even when the
            model carries explicit S2K diaphragm constraints.  The storey
