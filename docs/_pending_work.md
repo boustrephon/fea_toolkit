@@ -66,12 +66,23 @@ reproduced.
    branch~~ — **DONE**: the full knob sweep is recorded in the Phase A/B
    status blocks below; the ≥ 10 % sustained-descent gate is not met and
    P5 closes as "documented, not reproduced".
-3. **P4 re-check:** with a real peak on the curve, re-validate
-   `bilinearize_rc()` — the equal-area yield should move up toward the
-   rebar-yield drift (~0.5–1 % roof drift ≈ 20–40 mm).
-4. Re-run the V&B (1990) cut-back-top-reinforcement variant (deferred with
-   this follow-up).
-5. Update `docs/shear_failure_modelling.md` + the benchmark doc.
+3. ~~**P4 re-check**~~ — **DEFERRED (2026-08-25, with the P5 closure)**:
+   re-validating `bilinearize_rc()` against a *real peak* requires a
+   post-peak peak on the V&E curve, which the fibre + `Bond_SP01`
+   mechanism set could not produce (the peak stays stuck near the push
+   end).  Re-run once the recommended degrading mechanism (a lumped hinge
+   with a descending post-cap branch, or a shear-flexible element with
+   degrading shear) gives the curve a real peak.
+4. ~~Re-run the V&B (1990) cut-back-top-reinforcement variant~~ —
+   **DEFERRED (2026-08-25, with the P5 closure)**: the variant is
+   transcribed (Guner & Vecchio 2010b — near-identical frame to V&E with
+   the first-story top bars cut back over the central 500 mm and a
+   midspan vertical-load protocol); it needs the same degrading mechanism
+   before a re-run adds signal.
+5. ~~Update `docs/shear_failure_modelling.md` + the benchmark doc~~ —
+   **DONE (2026-08-25)**: the closure and both deferrals are recorded in
+   `docs/shear_failure_modelling.md` (Phase-2 scope note) and
+   `docs/vecchio_emara_benchmark.md` (known limitation #5).
 
 **Completion requirements (definition of done).**  P5 is complete when a
 config-gated post-peak mechanism reproduces the experimental V&E
