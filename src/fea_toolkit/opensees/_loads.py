@@ -711,28 +711,34 @@ class LoadMixin:
         2. **Horizontal area elements** — fallback for models without explicit
            constraints.
 
-        When explicit S2K constraints are present, the Preprocessor records
-        them as ``mesh_model.diaphragm_components`` — one ``(mean_z, [node_id,
-        ...])`` tuple per constraint.  This preserves the S2K constraint
-        grouping so **independent diaphragms at the same elevation are not
-        merged** (e.g. two building wings separated by a seismic gap).  The
-        builder emits one ``rigidDiaphragm`` per group, picking the centroid
-        node inside each group as its master.
+        Explicit S2K constraints are recorded as
+        ``mesh_model.diaphragm_components`` — one ``(mean_z, [node_id, ...])``
+        tuple per constraint.  This preserves the S2K constraint grouping so
+        **independent diaphragms at the same elevation are not merged** (e.g.
+        two building wings separated by a seismic gap).  The builder emits one
+        ``rigidDiaphragm`` per group, picking the centroid node inside each
+        group as its master.  ``mesh_model.diaphragm_levels`` is the storey
+        elevation list derived from horizontal areas / constraints.
 
-        When no explicit constraints exist (area-only fallback), the builder
-        falls back to per-elevation merging: all nodes near a detected ``z``
-        are grouped into a single diaphragm.
+        Rigid diaphragms are created **only** when explicitly required — by
+        the model declaring S2K constraint groups, or by the config asking for
+        them.  The ``rigid_diaphragms`` config is the contract:
 
-        The ``rigid_diaphragms`` config is an optional tri-state override:
-
-        * **absent** — apply constraints detected from the S2K file / area
-          elements.  No config entry is required when the model declares its
-          diaphragms.
+        * **absent** — apply **only** the explicit S2K constraint groups
+          (``diaphragm_components``).  Slab-derived ``diaphragm_levels`` are
+          **never** auto-applied: shell elements already provide in-plane
+          diaphragm stiffness, and auto-applying to slab levels regressed
+          gravity convergence (bisect: ``1cf374d``).
+        * ``True`` — explicitly **create** rigid diaphragms.  The Preprocessor
+          forces storey-based detection (``identify_stories()``); the builder
+          applies those components, falling back to per-elevation slab levels
+          only when no components were detected (avoids double application).
         * ``False`` — explicitly **disable** all rigid diaphragms, even when
-          levels are otherwise detected.
-        * ``[z1, z2, ...]`` — override the detected levels with explicit
-          ones.  When this list is given, per-group components are ignored
-          and the per-elevation merge behaviour is used.
+          the model declares its own constraints.
+        * ``[z1, z2, ...]`` — explicit Z levels, merged per elevation
+          (legacy form; per-group components are ignored).
+        * ``[{name, nodes|selection}, ...]`` — explicit named groups (resolved
+          to ``diaphragm_components`` by the Preprocessor).
         """
         levels = self.mesh_model.diaphragm_levels
         config_val = self.config.get("rigid_diaphragms", None)
@@ -772,19 +778,23 @@ class LoadMixin:
                 )
 
         components = getattr(self.mesh_model, "diaphragm_components", [])
-        # Per-group path is used whenever the Preprocessor recorded explicit
-        # components (S2K constraint groups, explicit named groups, or forced
-        # storey detection).  Only a legacy Z-list override forces the
-        # per-elevation merge behaviour.
-        use_groups = not is_legacy_z_list and bool(components)
+        # Per-group path runs for explicit S2K constraint groups / named
+        # groups / forced storey detection (components).  It is blocked only
+        # by a legacy Z-list override, which forces per-elevation merging.
+        apply_groups = bool(components) and not is_legacy_z_list
+        # Slab-derived levels are applied ONLY when explicitly requested:
+        # a legacy Z-list always forces per-elevation; `rigid_diaphragms: True`
+        # falls back to per-elevation only when no components were detected
+        # (storey detection / S2K constraints), avoiding double application.
+        apply_levels = is_legacy_z_list or (config_val is True and not apply_groups)
 
-        if not use_groups and not levels:
+        if not apply_groups and not apply_levels:
             return 0
 
         applied = 0
 
         # ── Per-group path: preserve S2K constraint identity ──────
-        if use_groups:
+        if apply_groups:
             for _z, node_ids in components:
                 tags = []
                 for nid in node_ids:
@@ -818,37 +828,37 @@ class LoadMixin:
                         exc,
                     )
                     continue
-            return applied
 
-        # ── Per-elevation fallback: merge all nodes near each level ──
-        z_tol = float(getattr(self.mesh_model, "diaphragm_z_tolerance", 0.01))
-        for z in levels:
-            tags_at_z = []
-            for nid, nd in self.mesh_model.nodes.items():
-                if abs(nd.z - float(z)) > z_tol:
+        # ── Per-elevation path: merge all nodes near each level ──
+        if apply_levels:
+            z_tol = float(getattr(self.mesh_model, "diaphragm_z_tolerance", 0.01))
+            for z in levels:
+                tags_at_z = []
+                for nid, nd in self.mesh_model.nodes.items():
+                    if abs(nd.z - float(z)) > z_tol:
+                        continue
+                    try:
+                        ops.nodeCoord(nd.node_tag)
+                        tags_at_z.append(nd.node_tag)
+                    except Exception:
+                        continue
+                if len(tags_at_z) < 2:
                     continue
+
+                master = self._select_diaphragm_master(tags_at_z)
+                slaves = [t for t in tags_at_z if t != master]
                 try:
-                    ops.nodeCoord(nd.node_tag)
-                    tags_at_z.append(nd.node_tag)
-                except Exception:
+                    ops.rigidDiaphragm(3, master, *slaves)
+                    applied += 1
+                except Exception as exc:
+                    logger.warning(
+                        "rigidDiaphragm failed for elevation z=%.3f (master=%d, %d slaves): %s",
+                        float(z),
+                        master,
+                        len(slaves),
+                        exc,
+                    )
                     continue
-            if len(tags_at_z) < 2:
-                continue
-
-            master = self._select_diaphragm_master(tags_at_z)
-            slaves = [t for t in tags_at_z if t != master]
-            try:
-                ops.rigidDiaphragm(3, master, *slaves)
-                applied += 1
-            except Exception as exc:
-                logger.warning(
-                    "rigidDiaphragm failed for elevation z=%.3f (master=%d, %d slaves): %s",
-                    float(z),
-                    master,
-                    len(slaves),
-                    exc,
-                )
-                continue
         return applied
 
 
