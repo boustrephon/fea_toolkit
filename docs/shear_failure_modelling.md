@@ -200,6 +200,24 @@ peak).  Consequences:
 Post-peak *shape* also depends on the degrading branch slope — a future
 nonlinear cracked-shear (DSFM-style) constitutive would close the gap.
 
+### Scope note — validated on shear-critical frames only (2026-08-25)
+
+The nonlinear backbone layer is validated on the deliberately
+**shear-critical** Duong frame.  On **flexure-critical / shear-strong**
+frames (e.g. the Vecchio & Emara benchmark, `docs/vecchio_emara_benchmark.md`)
+member shear never reaches the backbone's degrading branch within the push
+range, so the layer is **inert for the post-peak shape** there: applying it
+to the V&E frame changes the peak by ≈ 1 % and the curve still rises to the
+push end.  The V&E descent is a *flexure-softening* phenomenon
+(strain-softening concrete / bond slip), tracked as P5 in
+`docs/_pending_work.md` — the fibre (`Concrete02` residual reduction) and
+`Bond_SP01` end-spring increments were implemented and trialled (2026-08-24)
+but **closed as "documented, not reproduced"** (2026-08-25): the best curve
+reaches ≈ 331.7 kN (1.005×) with a 9.9 % end drop, but the sustained ≥ 10 %
+descent from the 40–70 mm band requires member-level degradation (a lumped
+hinge with a descending post-cap branch, or a shear-flexible element with
+degrading shear) that a forceBeamColumn fibre section cannot represent.
+
 ---
 
 ## Phase 3 — Elwood & Moehle column limit states (✅ Complete)

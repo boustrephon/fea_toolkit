@@ -357,8 +357,20 @@ ratio [0.95, 1.15], secant [0.9, 1.15] × experimental).
    the Level-1 columns lack a bottom rigid zone.
 4. **Level 2 (spring offsets) and Level 3 (joint elements) are
    unimplemented** — but ``joint_extents`` composes with Level 1.
-5. **Vecchio & Balopoulou (1990) variant** — to be re-run with the new
-   shear-capacity reporter / backbone layers.
+5. **Vecchio & Balopoulou (1990) variant** — **deferred (2026-08-25, with
+   the P5 closure)**.  Transcribed from Guner & Vecchio (2010b) §"third
+   frame": the frame is near-identical to the V&E frame (3.5 m span, 2 m
+   storeys, 300 × 400 mm members, 4 No. 20M top/bottom) with the
+   first-story top reinforcement **cut back to two No. 20 bars** over the
+   central 500 mm, and the loading is a **monotonically increasing
+   concentrated vertical load at the beam midspan** (a midspan
+   load-deflection response, terminated before failure for equipment
+   safety).  A re-run only makes sense once the recommended degrading
+   mechanism — a lumped hinge with a descending post-cap branch, or a
+   shear-flexible element with degrading shear — is available; the
+   nonlinear shear backbone is inert on this flexure-critical frame
+   (tracked in `docs/_pending_work.md` P5, closed as "documented, not
+   reproduced").
 
 ---
 
