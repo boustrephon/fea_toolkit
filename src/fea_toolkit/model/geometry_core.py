@@ -427,5 +427,7 @@ class SpatialGrid:
         for i in range(min_cell[0], max_cell[0] + 1):
             for j in range(min_cell[1], max_cell[1] + 1):
                 for k in range(min_cell[2], max_cell[2] + 1):
-                    result.extend(self.grid[(i, j, k)])
+                    cell = self.grid.get((i, j, k))
+                    if cell:
+                        result.extend(cell)
         return result
