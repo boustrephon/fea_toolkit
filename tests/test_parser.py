@@ -975,6 +975,95 @@ def test_rigid_diaphragms_explicit_node_groups(tmp_path):
         ops.wipe()
 
 
+def _make_slab_levels_model():
+    """MeshModel with slab-derived levels and NO explicit constraint groups.
+
+    Mirrors the Admin Building scenario that regressed in commit 1cf374d:
+    ``diaphragm_levels`` populated from horizontal slab areas,
+    ``diaphragm_components`` empty.
+    """
+    from fea_toolkit.model.mesh_model import MeshModel
+    from fea_toolkit.model.sap_data import Node
+
+    coords = [
+        (0.0, 0.0, 4.0),
+        (6.0, 0.0, 4.0),
+        (6.0, 6.0, 4.0),
+        (0.0, 6.0, 4.0),  # slab 1
+        (0.0, 0.0, 8.0),
+        (6.0, 0.0, 8.0),
+        (6.0, 6.0, 8.0),
+        (0.0, 6.0, 8.0),  # slab 2
+    ]
+    nodes = {str(i): Node(str(i), i, x, y, z) for i, (x, y, z) in enumerate(coords, 1)}
+    return MeshModel(
+        nodes=nodes,
+        frame_elements={},
+        frame_assignments={},
+        area_elements={},
+        area_assignments={},
+        frame_dist_loads=[],
+        diaphragm_levels=[4.0, 8.0],
+        diaphragm_components=[],
+    )
+
+
+def test_rigid_diaphragms_absent_slab_levels_not_applied():
+    """Absent ``rigid_diaphragms`` + slab-derived levels only ⇒ no rigid
+    diaphragms.  Regression guard for commit 1cf374d, which auto-applied to
+    slab levels and regressed gravity convergence on the Admin building."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    mm = _make_slab_levels_model()
+    assert mm.diaphragm_levels == [4.0, 8.0]
+    assert mm.diaphragm_components == []
+
+    builder = AnalysisBuilder(mm, {"verbose": False})
+    try:
+        _make_in_memory_domain(builder, mm)
+        n = builder._apply_rigid_diaphragms()
+        assert n == 0  # slab-derived levels must NOT be auto-applied
+    finally:
+        ops.wipe()
+
+
+def test_rigid_diaphragms_true_creates_from_levels():
+    """``rigid_diaphragms: True`` explicitly creates from slab levels."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    mm = _make_slab_levels_model()
+    builder = AnalysisBuilder(mm, {"verbose": False, "rigid_diaphragms": True})
+    try:
+        _make_in_memory_domain(builder, mm)
+        n = builder._apply_rigid_diaphragms()
+        assert n == 2  # one rigidDiaphragm per slab level
+    finally:
+        ops.wipe()
+
+
+def test_rigid_diaphragms_false_wins_over_explicit_constraints(tmp_path):
+    """``rigid_diaphragms: False`` suppresses even explicit S2K constraint
+    groups — the explicit opt-out always wins."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    md, mm = _parse_diaphragm_s2k(tmp_path)
+    assert mm.diaphragm_components  # explicit S2K groups present
+
+    builder = AnalysisBuilder(mm, {"verbose": False, "rigid_diaphragms": False})
+    try:
+        _make_in_memory_domain(builder, md)
+        n = builder._apply_rigid_diaphragms()
+        assert n == 0
+    finally:
+        ops.wipe()
+
+
 def test_rigid_diaphragms_explicit_selection_groups(tmp_path):
     """``rigid_diaphragms: [ {name, selection}, ... ]`` resolves nodes from
     matching area elements and emits one rigidDiaphragm per group."""
