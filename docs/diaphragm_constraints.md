@@ -98,19 +98,24 @@ component becomes one `rigidDiaphragm`.  This is the recommended path —
 it preserves the S2K constraint grouping so independent diaphragms at
 the same elevation are **not** merged.
 
-### 4.2 Per-elevation fallback (merges by Z)
+### 4.2 Per-elevation path (merges by Z)
 
-When no explicit components exist (area-only fallback) or when a legacy
-`rigid_diaphragms: [z1, z2, ...]` list overrides the levels, all nodes
-near each detected elevation are merged into a single diaphragm.
-Nodes are matched with a Z tolerance — see §5.
+The per-elevation path runs only when explicitly requested: a legacy
+`rigid_diaphragms: [z1, z2, ...]` list always forces it, and
+`rigid_diaphragms: True` falls back to it when no components were
+detected.  All nodes near each elevation are merged into a single
+diaphragm.  Nodes are matched with a Z tolerance — see §5.
 
-### 4.3 `rigid_diaphragms` tri-state config
+### 4.3 `rigid_diaphragms` config contract
+
+Rigid diaphragms are created **only** when explicitly required — by the
+model declaring S2K constraint groups, or by the config asking for them.
 
 | Value | Effect |
 |---|---|
-| *absent* | Apply constraints detected from the S2K file / area elements |
-| `False` | Explicitly disable all rigid diaphragms, even when levels are detected |
+| *absent* | Apply **only** the explicit S2K constraint groups (`diaphragm_components`).  Slab-derived `diaphragm_levels` are **never** auto-applied — shell elements already provide in-plane stiffness (bisect `1cf374d`). |
+| `True` | Explicitly **create** rigid diaphragms: forces storey-based detection; falls back to per-elevation slab levels only when no components were detected |
+| `False` | Explicitly disable all rigid diaphragms, even when the model declares its own constraints |
 | `[z1, z2, ...]` | Legacy explicit Z-list override — forces per-elevation merging |
 | `[{name, nodes\|selection}, ...]` | Explicit named groups — one `rigidDiaphragm` per component |
 
