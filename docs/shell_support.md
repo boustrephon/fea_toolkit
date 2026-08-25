@@ -198,7 +198,7 @@ its resolved nodes.
 - **S2K joint constraints** — each Z‑axis ``DIAPHRAGM`` constraint in
   ``CONSTRAINT DEFINITIONS - DIAPHRAGM`` + ``JOINT CONSTRAINT ASSIGNMENTS``
   becomes one component, preserving the S2K constraint grouping.
-- **Area fallback** — when no explicit constraints exist and
+- **Area-derived levels** — when no explicit constraints exist and
   ``rigid_diaphragms`` is absent, the Preprocessor records only mean‑Z
   levels (no components) and the builder applies **no** rigid diaphragms
   (shell elements already provide in‑plane stiffness).  Slab levels are

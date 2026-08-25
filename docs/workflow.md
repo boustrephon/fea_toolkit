@@ -140,7 +140,7 @@ mesh_model = preprocessor.run(md, selection=sel)
 
 | Step | Method | Description |
 |------|--------|-------------|
-| 1 | `_detect_diaphragm_levels()` | Identifies horizontal area Z‑levels for rigid diaphragms |
+| 1 | `_detect_diaphragm_levels()` | Detects storey Z‑levels and per‑group diaphragm components |
 | 2 | `_classify_element_type()` | Classifies frames (beam/column/brace) and areas (slab/wall) |
 | 3 | `_split_elements()` | Splits frames at intermediate joints; redistributes distributed loads |
 | 4 | `_apply_frame_end_offsets()` | Creates offset nodes and rigid‑link records |
@@ -227,7 +227,7 @@ results = builder.run_static_analysis()
 | 6 | `_create_lumped_hinges()` | Zero‑length hinge elements |
 | 7 | `_create_elements()` | ``ops.element('elasticBeamColumn', …)`` with geom transforms |
 | 8 | `_create_loads()` | ``ops.pattern()`` + ``ops.eleLoad()`` / ``ops.load()`` |
-| 9 | `_apply_rigid_diaphragms()` | ``ops.rigidDiaphragm()`` at detected levels |
+| 9 | `_apply_rigid_diaphragms()` | ``ops.rigidDiaphragm()`` per explicit component / requested level |
 | — | `compute_seismic_masses()` | Lumped mass from element self-weight + load patterns |
 | — | `run_modal_analysis()` | Eigenvalue solve (4 solver strategies, Ritz pre-step) |
 | — | `run_response_spectrum_analysis()` | Mode-by-mode RS with CQC/SRSS combination |
