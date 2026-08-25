@@ -6,6 +6,8 @@ minimal (the workflow completed, returned a dict with expected keys, etc.)
 so they don't break when new features are added.
 """
 
+import warnings
+
 import numpy as np
 import openseespy.opensees as ops
 import pytest
@@ -14,6 +16,13 @@ from examples.sample_model import (
     make_nonlinear_sample_model,
     make_rc_frame_model,
     make_sample_model,
+)
+from fea_toolkit.io.s2k_parser import SAP2000Parser
+from fea_toolkit.model.sap_data import (
+    AngleSection,
+    ChannelSection,
+    DoubleAngleSection,
+    TeeSection,
 )
 
 # The pushover tests use the base "UB300" Section (no fiber patches), so the
@@ -460,6 +469,141 @@ class TestPushoverWorkflow:
         assert len(results["control_disp"]) > 1, "pattern: control_disp empty"
         assert len(results["base_shear"]) > 1, "pattern: base_shear empty"
         assert abs(results["base_shear"][-1]) > 1e-6, "pattern: final base_shear near zero"
+
+
+# ============================================================================
+# Workflow: P6a steel-shape fiber sections end-to-end (parser → builder)
+# ============================================================================
+#
+# The four `to_fiber_patches()` implementations added 2026-08-25
+# (Channel / Angle / DoubleAngle / Tee) are unit-tested in
+# tests/test_model.py; this class proves they flow through the real `.s2k`
+# parser (shape dispatch + dimension extraction), the Preprocessor, and the
+# AnalysisBuilder fiber-section rebuild without tripping the
+# NotImplementedError → elastic-fallback warning.
+
+# (shape, Section class, FRAME SECTION PROPERTIES 01 - GENERAL row columns)
+_STEEL_SHAPE_SECTIONS = [
+    (
+        "Channel",
+        ChannelSection,
+        "SectionName=SEC1   Shape=Channel   Material=Steel   t3=0.2   t2=0.1   tf=0.01   tw=0.008   Area=0.00264   I33=1.19E-05   I22=4.53E-07   TorsConst=1.0E-06",
+    ),
+    (
+        "Angle",
+        AngleSection,
+        "SectionName=SEC1   Shape=Angle   Material=Steel   t3=0.1   t2=0.1   tf=0.01   tw=0.01   Area=0.0019   I33=2.4E-06   I22=2.4E-06   TorsConst=1.0E-06",
+    ),
+    (
+        "Double Angle",
+        DoubleAngleSection,
+        'SectionName=SEC1   Shape="Double Angle"   Material=Steel   t3=0.1   t2=0.1   tf=0.01   tw=0.01   DIS=0.01   Area=0.004   I33=4.8E-06   I22=4.8E-06   TorsConst=1.0E-06',
+    ),
+    (
+        "Tee",
+        TeeSection,
+        "SectionName=SEC1   Shape=Tee   Material=Steel   t3=0.2   t2=0.1   tf=0.01   tw=0.008   Area=0.00308   I33=1.5E-05   I22=2.0E-06   TorsConst=1.0E-06",
+    ),
+]
+
+
+def _parse_steel_shape_cantilever(tmp_path, section_row):
+    """Parse a minimal 10 m steel cantilever whose frame section is the given row.
+
+    The row carries the ``FRAME SECTION PROPERTIES 01 - GENERAL`` columns
+    for the shape under test; the rest of the model mirrors
+    ``make_sample_model()`` — a single fixed-base 10 m column with DEAD
+    gravity and a uniform WIND lateral load (the pattern pushover source).
+    """
+    content = (
+        "File steel_shape.s2k was saved on m/d/yy at h:mm:ss\n"
+        'TABLE:  "JOINT COORDINATES"\n'
+        "   Joint=1   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=0\n"
+        "   Joint=2   CoordSys=GLOBAL   CoordType=Cartesian   XorR=10   Y=0   Z=0\n"
+        'TABLE:  "JOINT RESTRAINT ASSIGNMENTS"\n'
+        "   Joint=1   U1=Yes   U2=Yes   U3=Yes   R1=Yes   R2=Yes   R3=Yes\n"
+        'TABLE:  "MATERIAL PROPERTIES 01 - GENERAL"\n'
+        "   Material=Steel   Type=Steel   SymType=Isotropic\n"
+        'TABLE:  "MATERIAL PROPERTIES 02 - BASIC MECHANICAL PROPERTIES"\n'
+        "   Material=Steel   UnitWeight=78500   UnitMass=8000   E1=2.0E+11   G12=7.7E+10   U12=0.3\n"
+        'TABLE:  "FRAME SECTION PROPERTIES 01 - GENERAL"\n'
+        f"   {section_row}\n"
+        'TABLE:  "CONNECTIVITY - FRAME"\n'
+        "   Frame=1   JointI=1   JointJ=2   IsCurved=No\n"
+        'TABLE:  "FRAME SECTION ASSIGNMENTS"\n'
+        "   Frame=1   AnalSect=SEC1\n"
+        'TABLE:  "LOAD PATTERN DEFINITIONS"\n'
+        "   LoadPat=DEAD   DesignType=Dead   SelfWtMult=1\n"
+        "   LoadPat=WIND   DesignType=Wind   SelfWtMult=0\n"
+        'TABLE:  "FRAME LOADS - DISTRIBUTED"\n'
+        "   Frame=1   LoadPat=WIND   Type=Force   Dir=X   DistType=Uniform   RelDistA=0   RelDistB=1   AbsDistA=0   AbsDistB=10   FOverLA=1.0E+04   FOverLB=1.0E+04\n"
+    )
+    s2k = tmp_path / "steel_shape.s2k"
+    s2k.write_text(content)
+    parser = SAP2000Parser(s2k)
+    parser.parse()
+    return parser.get_model_data()
+
+
+class TestSteelShapeFiberSectionsEndToEnd:
+    """P6a shapes through the full parser → Preprocessor → builder path.
+
+    Each case parses a real ``.s2k`` file whose frame section is one of the
+    four shapes implemented 2026-08-25, asserts the parser dispatched to the
+    right subclass, then runs a fiber-section pushover asserting no
+    ``NotImplementedError`` → elastic-fallback warning was emitted and the
+    capacity curve is non-trivial.
+    """
+
+    @pytest.mark.parametrize(
+        "shape,sec_class,section_row",
+        _STEEL_SHAPE_SECTIONS,
+        ids=["channel", "angle", "double-angle", "tee"],
+    )
+    def test_parsed_shape_pushover_uses_fiber_sections(
+        self, tmp_path, shape, sec_class, section_row
+    ):
+        """Parsed shape builds a domain and pushes over without a fallback warning."""
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        md = _parse_steel_shape_cantilever(tmp_path, section_row)
+        assert isinstance(md.sections["SEC1"], sec_class), (
+            f"Parser dispatched Shape={shape!r} to {type(md.sections['SEC1']).__name__}, "
+            f"expected {sec_class.__name__}"
+        )
+
+        mm = preprocess_model(
+            md, {"split_elements": False, "create_shells": False, "verbose": False}
+        )
+        b = AnalysisBuilder(
+            mm,
+            {"element_type": "elasticBeamColumn", "verbose": False, "create_shells": False},
+        )
+        try:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                results = b.run_pushover_analysis(
+                    gravity_patterns={"DEAD": 1.0},
+                    lateral_load_type="pattern",
+                    lateral_pattern_name="WIND",
+                    lateral_direction="X",
+                    control_node_tag=2,
+                    max_disp=0.05,
+                    num_steps=5,
+                    print_progress=False,
+                )
+            fallback = [
+                str(w.message)
+                for w in caught
+                if "fiber" in str(w.message).lower() and "not support" in str(w.message).lower()
+            ]
+            assert not fallback, f"{shape}: elastic-fallback warning was emitted — {fallback}"
+            assert len(results["control_disp"]) > 1, f"{shape}: control_disp empty"
+            assert len(results["base_shear"]) > 1, f"{shape}: base_shear empty"
+            assert abs(results["base_shear"][-1]) > 1e-6, f"{shape}: final base_shear zero"
+        finally:
+            ops.wipe()
 
 
 # ============================================================================
@@ -1208,6 +1352,29 @@ class TestCSMWorkflow:
             f"First non-zero base shear out of kN range: {first_nz:.2f} kN"
         )
 
+        # ── bilinearize_method forwarding (P4-follow-up) ─────────────
+        # Default stays on the composite path (guard against an
+        # accidental default change).
+        assert "composite" in str(pp["bilinearize_method"]), (
+            f"Default bilinearize_method changed: {pp['bilinearize_method']}"
+        )
+        # Requesting 'rc' must forward through the AnalysisBuilder wrapper
+        # to the De Luca 10 %-secant rule and report the method actually
+        # used ('de_luca_10pct' / 'de_luca_10pct_elastic').
+        pp_rc = sample_rc_ab.compute_performance_point(
+            results,
+            modal,
+            shapes,
+            periods,
+            accels,
+            direction="X",
+            damping_ratio=0.05,
+            bilinearize_method="rc",
+        )
+        assert str(pp_rc["bilinearize_method"]).startswith("de_luca_10pct"), (
+            f"bilinearize_method='rc' not forwarded: {pp_rc['bilinearize_method']}"
+        )
+
     def test_pushover_rc_openseespy_single_direction(self, sample_rc_md):
         """RC fiber pushover orchestration runs in a single direction.
 
@@ -1253,6 +1420,7 @@ class TestCSMWorkflow:
             num_steps=15,
             config={
                 "beam_integration": "HingeRadau",
+                "bilinearize_method": "rc",
             },
             verbose=False,
         )
@@ -1279,6 +1447,13 @@ class TestCSMWorkflow:
         # Performance point keys are present (values may be elastic).
         for key in ("S_dp", "S_ap", "mu"):
             assert key in entry["pp"]
+
+        # ── config->bilinearize_method threading (P4-follow-up) ──────
+        # 'rc' in the config dict must reach the CSM performance point and
+        # be reported as the method actually used.
+        assert str(entry["pp"]["bilinearize_method"]).startswith("de_luca_10pct"), (
+            f"config['bilinearize_method']='rc' not threaded: {entry['pp']['bilinearize_method']}"
+        )
 
 
 # ============================================================================
