@@ -28,6 +28,8 @@ def run_pushover_4dir(
     brace_sections: Optional[list] = None,
     rs_modal_base_shear: Optional[dict[str, list[float]]] = None,
     spectrum: Optional[ResponseSpectrum] = None,
+    bilinearize_method: str = "composite",
+    bilinearize_config: Optional[dict] = None,
 ) -> dict:
     """Run pushover in all 4 directions with CSM (two-stage path).
 
@@ -58,6 +60,13 @@ def run_pushover_4dir(
     spectrum : ResponseSpectrum, optional
         Pre-computed demand spectrum (T/Sa).  When ``None`` a GB 50011
         rare-event spectrum is built from *tg* / *alpha_max_rare*.
+    bilinearize_method : str
+        Bilinearisation method for the CSM performance point:
+        ``'composite'`` (default), ``'stiffness_change'``,
+        ``'equal_energy'``, or ``'rc'`` / ``'de_luca_10pct'`` (the
+        De Luca 10 %-secant rule for curved RC backbones).
+    bilinearize_config : dict, optional
+        Optional dict passed to the bilinearisation function.
     verbose : bool
         Print progress.
     brace_type : str
@@ -179,6 +188,8 @@ def run_pushover_4dir(
                 T_spec,
                 Sa_spec,
                 direction=cfg["dir"],
+                bilinearize_method=bilinearize_method,
+                bilinearize_config=bilinearize_config,
             )
         except ValueError as e:
             logger.warning("Pushover %s skipped — no valid capacity spectrum: %s", label, e)
@@ -266,6 +277,11 @@ def pushover_rc_openseespy(
         RC builder config overrides merged over
         ``_PUSHOVER_RC_DEFAULTS`` — e.g. ``beam_integration``,
         ``nd_materials``, ``shell_layers``, ``rebar_Fy_override``.
+        CSM-level option: ``bilinearize_method`` (default
+        ``'composite'``; ``'rc'`` / ``'de_luca_10pct'`` selects the
+        De Luca 10 %-secant rule for curved RC backbones) and
+        ``bilinearize_config`` (dict passed to the bilinearisation
+        function).
     verbose : bool
         Print progress.
     rs_modal_base_shear : dict, optional
@@ -385,6 +401,8 @@ def pushover_rc_openseespy(
                 T_spec,
                 Sa_spec,
                 direction=cfg["dir"],
+                bilinearize_method=(config or {}).get("bilinearize_method", "composite"),
+                bilinearize_config=(config or {}).get("bilinearize_config"),
             )
         except ValueError as e:
             logger.warning("Pushover %s skipped — no valid capacity spectrum: %s", label, e)

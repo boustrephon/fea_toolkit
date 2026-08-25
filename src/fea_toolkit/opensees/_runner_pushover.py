@@ -958,6 +958,8 @@ class PushoverRunnerMixin:
         damping_ratio: float = 0.05,
         max_iter: int = 50,
         tol: float = 0.01,
+        bilinearize_method: str = "composite",
+        bilinearize_config: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Find the performance point using the Capacity Spectrum Method.
 
@@ -973,6 +975,12 @@ class PushoverRunnerMixin:
             damping_ratio: Elastic damping ratio (default 0.05).
             max_iter: Maximum iterations (default 50).
             tol: Convergence tolerance on S_d (default 0.01).
+            bilinearize_method: Bilinearisation method — ``'composite'``
+                (default), ``'stiffness_change'``, ``'equal_energy'``, or
+                ``'rc'`` / ``'de_luca_10pct'`` (the De Luca 10 %-secant
+                rule for curved RC backbones).
+            bilinearize_config: Optional dict passed to the bilinearisation
+                function.
 
         Returns:
             Dict with ``'S_dp'``, ``'S_ap'``, ``'V_base'``, ``'D_roof'``,
@@ -991,6 +999,8 @@ class PushoverRunnerMixin:
             damping_ratio=damping_ratio,
             max_iter=max_iter,
             tol=tol,
+            bilinearize_method=bilinearize_method,
+            bilinearize_config=bilinearize_config,
         )
 
 
