@@ -230,32 +230,44 @@ implemented, config-gated **off by default** (existing models unchanged):
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 
-#### P6 — Section fiber patches (placeholders) + RC partial
+#### P6 — Section fiber patches (P6a done — Channel/Angle/DoubleAngle/Tee; P6b deferred)
 Source: repo-root `README.md` §5 "Section Types and Properties" table.
 
-**What.** `to_fiber_patches()` is `🚧 Placeholder` for `ChannelSection`,
-`AngleSection`, `DoubleAngleSection`, `TeeSection`, `SDSection` (needs
-polygon meshing), and `EncasedSection` (embedded section + concrete
-encasement).  "Frame Member Types (RC)" is `⚠️ Partial` in the README —
-materials, RC section shapes, rebar auto-placement and Mander confinement
-are wired; the remaining gaps are these shape patches plus benchmark
-validation (see P5).
+**What.** `to_fiber_patches()` is implemented for `ChannelSection`,
+`AngleSection`, `DoubleAngleSection`, and `TeeSection` (P6a, 2026-08-25 -
+centroid-shifted `patch('rect')` decompositions + per-shape tests); still
+`🚧 Placeholder` for `SDSection` (needs polygon meshing) and
+`EncasedSection` (embedded section + concrete encasement) - see P6b below.
+"Frame Member Types (RC)" is `⚠️ Partial` in the README - materials, RC
+section shapes, rebar auto-placement and Mander confinement are wired; the
+remaining gaps are the P6b shape patches plus benchmark validation (see P5).
 
-**Outline steps.**
-1. Channel / Angle / DoubleAngle / Tee: decompose into `patch('rect')`
-   sub-regions mirroring the existing `ISection` (3-rect) / `BoxSection`
-   (4-rect) / `PipeSection` (annular `circ`) pattern.
-2. `SDSection`: mesh the multi-material `polygons` into fibre patches
-   (arbitrary-polygon meshing).
-3. `EncasedSection`: emit the embedded steel-section patches + concrete
-   encasement patches.
-4. Add per-section `to_fiber_patches()` tests (total area ≈ section `A`,
-   first-moment checks); update the README table status from 🚧 → ✅.
+**Done (P6a, 2026-08-25).**
+1. Channel / Angle / DoubleAngle / Tee decomposed into disjoint
+   `patch('rect')` sub-regions mirroring the `ISection` (3-rect) /
+   `BoxSection` (4-rect) pattern, re-centred on the elastic centroid via
+   the shared `_rect_patches_from_regions()` helper so the fibre section
+   has vanishing first moments (sum A*ybar = sum A*zbar = 0).
+2. Per-shape tests in `tests/test_model.py`
+   (`TestChannelSectionFiberPatches`, `TestAngleSectionFiberPatches`,
+   `TestDoubleAngleSectionFiberPatches`, `TestTeeSectionFiberPatches`):
+   patch count/type, `mat_tag` + `nfy`/`nfz` propagation, total area ≈
+   section `A`, first moments ≈ 0.
+3. README §5 table status flipped 🚧 → ✅ for the four shapes.
+
+**Deferred (P6b).**
+1. `SDSection`: mesh the multi-material `polygons` into fibre patches
+   (arbitrary-polygon meshing) - blocked: the parser constructs
+   `SDSection(**common)` with empty `polygons` (no `SECTION DESIGNER`
+   table parsing), so only caller-provided polygons would be actionable.
+2. `EncasedSection`: emit the embedded steel-section patches + concrete
+   encasement patches - blocked: no parser path populates the section,
+   and the single-`mat_tag` `to_fiber_patches()` signature cannot carry
+   two materials (steel + encasement concrete) without an API change.
 
 **Constraints.** Section geometric properties stay as-authored (from the
 S2K text); patches must integrate with both `AnalysisBuilder` fiber sections
 and Tcl export (`export_model_to_tcl`).
-
 #### P7 — Python-native nonlinear dynamic (time-history) integration
 Source: `docs/nonlinear_dynamic_analysis.md` (frontmatter + Notes);
 repo-root `README.md` "TODO / Future Work" section.
@@ -331,6 +343,56 @@ layers (Phases 1–4) are stable.
   wheel's PSUMAT is a stub ("PSUMAT - NOT DEFINED IN THIS VERSION, SOURCE
   CODE RESTRICTED") and CSMM construction still fails.  Blocked on a full
   (non-restricted) build — see `docs/shell_support.md` Options C/D1.
+
+#### P12 — LoadCombination table parsing (README §3 reconciliation)
+Source: repo-root `README.md` §3 "Load Combinations and Analysis Types";
+`LoadCombination` dataclass + `TestLoadCombination` in `model/sap_data.py` /
+`tests/test_model.py`.
+
+**What.** The `LoadCombination` dataclass exists and is tested, but
+`io/s2k_parser.py` reads **nothing** from the `LOAD COMBINATIONS` table —
+load cases (`CASE - STATIC` / `CASE - MODAL` / `CASE - RESPONSE SPECTRUM`)
+are parsed, but combinations are not.  The `AnalysisBuilder` step to run a
+named combination with factors (e.g. `1.2 DL + 1.6 LL`) also remains open.
+
+**Outline steps.** 1) Parse `LOAD COMBINATIONS` rows into `LoadCombination`
+instances (combo type + case/factor pairs); 2) expose
+`SAPModelData.load_combinations`; 3) builder support to run a named
+combination with combination factors.
+
+#### P13 — Joint Level 3 elements (Joint2D / beamColumnJoint)
+Source: repo-root `README.md` §5 "Joint Modeling";
+`docs/vecchio_emara_benchmark.md` §6.6.
+
+**What.** Level 1 rigid end zones are implemented (`rigid_end_zones` /
+`rigid_link_mpc`); **Level 3** joint elements (`Joint2D`,
+`beamColumnJoint`) remain unimplemented.  `joint_extents` already composes
+with Level 1, so the two features will not double-count regions once Level
+3 lands.  Level 2 (zero-length springs restoring a fraction of the rigid
+connection) also remains open.
+
+**Outline steps.** 1) Extend the parser to recognise joint elements if
+present in SAP2000; 2) implement `Joint2D` / `beamColumnJoint` emission in
+the builder; 3) verify interaction with `joint_extents` and Level-1
+offsets.
+
+#### P14 — FRAME LOADS - POINT point loads + temperature loads
+Source: repo-root `README.md` §7 (Medium) "Improved Load Handling".
+
+**What.** The parser handles frame distributed and gravity loads but not
+the `FRAME LOADS - POINT` table (point loads on frames) or temperature
+loads.  Note: the pushover `lateral_load_pattern='point'` is a synthetic
+unit point load for benchmark pushes — distinct from parsing user-supplied
+`FRAME LOADS - POINT` data.
+
+**Outline steps.** 1) Add `FRAME LOADS - POINT` parsing to a new
+`frame_point_loads` field; 2) propagate to OpenSees `eleLoad` point loads;
+3) temperature loads only if needed (no current demand).
+
+#### Closed items (README reconciliation, 2026-08-25)
+- **Deeper opstool result-post-processing integration** — closed as **no
+  current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
+  converter deferred until demand exists.
 
 ## DONE (2026-08-24 — Tier 2 batch: pushover solver tuning P3, CSM bilinearisation P4)
 

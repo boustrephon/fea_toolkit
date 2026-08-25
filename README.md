@@ -606,10 +606,10 @@ SAP2000/ETABS models use a variety of cross‑section shapes. The `Section` data
 |---|---|---|---|
 | **`Section`** (base) | (generic / unknown) | — | ❌ `NotImplementedError` |
 | **`ISection`** | `I/Wide Flange`, `WIDE FLANGE`, `Steel I/Wide Flange` | `depth`, `bf`, `tf`, `tw` | ✅ 3 rect patches (bot flange → web → top flange) |
-| **`ChannelSection`** | `Channel`, `Steel Channel`, `Concrete Channel` | `depth`, `bf`, `tf`, `tw` | 🚧 Placeholder |
-| **`AngleSection`** | `Angle`, `Steel Angle`, `Concrete Angle` | `depth`, `bf`, `tf`, `tw` | 🚧 Placeholder |
-| **`DoubleAngleSection`** | `Double Angle`, `Steel Double Angle` | `depth`, `bf`, `tf`, `tw`, `dis` | 🚧 Placeholder |
-| **`TeeSection`** | `Tee` | `depth`, `bf`, `tf`, `tw` | 🚧 Placeholder |
+| **`ChannelSection`** | `Channel`, `Steel Channel`, `Concrete Channel` | `depth`, `bf`, `tf`, `tw` | ✅ 3 rect patches (web + 2 flanges, centroid-shifted) |
+| **`AngleSection`** | `Angle`, `Steel Angle`, `Concrete Angle` | `depth`, `bf`, `tf`, `tw` | ✅ 2 rect patches (2 legs, centroid-shifted) |
+| **`DoubleAngleSection`** | `Double Angle`, `Steel Double Angle` | `depth`, `bf`, `tf`, `tw`, `dis` | ✅ 4 rect patches (2 back-to-back angles, centroid-shifted) |
+| **`TeeSection`** | `Tee` | `depth`, `bf`, `tf`, `tw` | ✅ 2 rect patches (flange + stem, centroid-shifted) |
 | **`PipeSection`** | `Pipe`, `Steel Pipe`, `Concrete Pipe`, `Filled Steel Pipe` | `od`, `t` | ✅ 1 annular `circ` patch |
 | **`BoxSection`** | `Box/Tube`, `Steel Tube`, `Concrete Tube`, `Filled Steel Tube` | `depth`, `bf`, `tf`, `tw` | ✅ 4 `rect` patches (flanges + webs) |
 | **`RectangularSection`** | `Rectangular`, `Rectangle`, `Steel Plate`, `Concrete Rectangular` | `depth`, `bf` | ✅ 1 `rect` patch |
@@ -677,11 +677,14 @@ all other area loads are ignored.
 
 ### What Remains to Be Done (Next Steps)
 
+> The canonical, priority-ordered backlog lives in
+> [`docs/_pending_work.md`](docs/_pending_work.md).  Items below are
+> reconciled with that register; P-item cross-references are in brackets.
+
 #### High Priority
 
-1. **Frame‑Frame Intersection Splitting**  
-   - Implement `AtFrames=True` splitting at intersections between frames.  
-   - Requires finding intersection points (grid‑based) and inserting new nodes, then splitting both elements and redistributing loads.
+1. **Frame‑Frame Intersection Splitting** ✅  
+   - `AtFrames=True` splitting at frame-frame intersections is implemented (`model/geometry_frames.py` `split_elements()`), parser-wired (`FRAME AUTO MESH ASSIGNMENTS` → `SAPModelData.frame_auto_mesh`), and unit-tested (`TestSplitElementsAtFrames` + parser round-trip tests).  
 
 2. **ETABS `.E2K` input**  
    - ✅ `SAP2000Parser` already reads E2K table conventions (concrete
@@ -692,7 +695,7 @@ all other area loads are ignored.
 3. **Load Combinations and Analysis Types**  
    - ~~`MassSource`~~ ✅ Parsed by `_get_mass_sources()` and stored in `SAPModelData.mass_sources`.  
    - ~~`LoadCase`~~ ✅ Parsed by `get_load_cases()` — `LOAD CASE DEFINITIONS`, `CASE - RESPONSE SPECTRUM` (general + load assignments), `CASE - MODAL`, `CASE - STATIC` (see the "Key Components Implemented" table above).  \
-   - `LoadCombination` dataclass defined in `sap_data.py` — parsing of the `LOAD COMBINATIONS` table still needed.  
+   - `LoadCombination` dataclass defined in `sap_data.py` — parsing of the `LOAD COMBINATIONS` table still needed (tracked as **P12** in `docs/_pending_work.md`).  
    - In `AnalysisBuilder`, allow the user to select which load cases/combinations to run with combination factors (e.g., `1.2 DL + 1.6 LL`).
 
 4. **Advanced Analyses**  
@@ -711,12 +714,12 @@ all other area loads are ignored.
 
 5. **Joint Modeling** (for concrete frames)  
    - Level 1 (rigid joint end zones) ✅ — `rigid_end_zones` auto-generates offsets (0.5 x intersecting depth) with `rigid_link_mpc` MPC links.  
-   - Extend parser to recognise joint elements (if present in SAP2000).  
-   - Implement `Joint2D` and `beamColumnJoint` elements in `AnalysisBuilder` (Level 3).
+   - Extend parser to recognise joint elements (if present in SAP2000) — tracked as **P13** in `docs/_pending_work.md`.  
+   - Implement `Joint2D` and `beamColumnJoint` elements in `AnalysisBuilder` (Level 3) — P13.
 
 6. **Brace gusset plates / joint offsets**  
-   - Model gusset plate flexibility as rotational springs at brace ends.  
-   - Add rigid offset segments between working point and brace physical end.  
+   - ✅ Rigid offset segments between working point and brace physical end (`brace_end_offset` / `subdivide_elements(end_offset=...)`).  
+   - Open: gusset plate flexibility as rotational springs at brace ends.  
    - See `docs/pushover_analysis.md` for discussion of approaches.
 
 7. **Rhino Importer Refactoring** ✅ — `rhino/importer.py` (`RhinoImporter`)
@@ -738,13 +741,13 @@ cross‑reference section.
 #### Medium Priority
 
 7. **Improved Load Handling**  
-   - Support for **point loads** on frames (`FRAME LOADS - POINT`).  
-   - Support for **temperature loads** (if needed).  
+   - **Point loads** on frames (`FRAME LOADS - POINT`) — tracked as **P14** in `docs/_pending_work.md`.  
+   - **Temperature loads** — only if needed (no current demand; P14).  
    - Option to convert linear loads to uniform (simplification) via config flag.
 
 8. **Result Extraction**  
-   - Extend `run_analysis` to return reactions, internal forces, and mode shapes.  
-   - Integrate `opstool` more fully for result post‑processing.
+   - Extend the analysis runners to return reactions, internal forces, and mode shapes where not already returned.  
+   - Deeper `opstool` integration — closed as **no current demand** (see `docs/report_generation.md`; NPZ ↔ opstool ODB converter deferred).
 
 9. **Documentation**  
    - Write full API docs (Google style already in code).  
@@ -758,15 +761,15 @@ cross‑reference section.
 
 #### Low Priority
 
-11. **Parallel Processing** – For large models, consider splitting/analysis parallelisation.
-12. **Graphical User Interface** – Not planned, but could be added later.
-13. **Other FEA Formats** – Abaqus `.inp`, Ansys `.cdb` – future extensions.
+11. **Parallel Processing** – Not planned (large-model splitting/analysis parallelisation).
+12. **Graphical User Interface** – Not planned.
+13. **Other FEA Formats** – Abaqus `.inp`, Ansys `.cdb` – not planned.
 
 ---
 
 ### Conclusion
 
-The **SAP2000 → OpenSees pipeline** is now **largely functional**. You can parse a model, split elements and loads, build an OpenSees model, and run a linear static analysis. The code is modular, well‑structured, and ready for the next phases: frame‑frame intersections, ETABS support, and advanced analyses.
+The **SAP2000 → OpenSees pipeline** is now **largely functional**. You can parse a model, split elements and loads (including frame-frame intersections), build an OpenSees model, and run linear static, modal, response-spectrum, and pushover analyses. The code is modular and well‑structured; the priority-ordered backlog lives in `docs/_pending_work.md`.
 
 The project is well on track to meet your original goals. Let me know which of the remaining tasks you would like to tackle next, and I will provide the necessary code and guidance.
 
