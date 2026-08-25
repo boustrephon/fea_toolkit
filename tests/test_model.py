@@ -5077,6 +5077,23 @@ class TestRSBaseReactionsTwoStage:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
+@pytest.fixture
+def clean_bilinearize_registry():
+    """Snapshot and restore the global ``BILINEARIZE_METHODS`` registry.
+
+    The CSM bilinearization registry is process-global mutable state; this
+    fixture guarantees tests that register/override methods cannot leak
+    into one another (mirrors the ``ops.wipe()`` teardown hygiene used for
+    OpenSees global state).
+    """
+    from fea_toolkit.model.csm import BILINEARIZE_METHODS
+
+    saved = dict(BILINEARIZE_METHODS)
+    yield BILINEARIZE_METHODS
+    BILINEARIZE_METHODS.clear()
+    BILINEARIZE_METHODS.update(saved)
+
+
 class TestCsmModule:
     """Test the standalone CSM utility functions in model/csm.py."""
 
@@ -5303,6 +5320,131 @@ class TestCsmModule:
         # Effective modal mass can never exceed the total physical mass.
         assert adrs["M_eff"] < 600.0
         assert adrs["phi_control"] == 1.0
+
+    def test_bilinearize_registry_builtins_present(self):
+        """The five built-in method names are pre-registered."""
+        from fea_toolkit.model.csm import (
+            BILINEARIZE_METHODS,
+            bilinearize_composite,
+            bilinearize_equal_energy,
+            bilinearize_rc,
+            bilinearize_stiffness_change,
+            get_bilinearize_method,
+        )
+
+        assert set(BILINEARIZE_METHODS) == {
+            "composite",
+            "stiffness_change",
+            "equal_energy",
+            "rc",
+            "de_luca_10pct",
+        }
+        assert get_bilinearize_method("composite") is bilinearize_composite
+        assert get_bilinearize_method("stiffness_change") is bilinearize_stiffness_change
+        assert get_bilinearize_method("equal_energy") is bilinearize_equal_energy
+        assert get_bilinearize_method("rc") is bilinearize_rc
+        assert get_bilinearize_method("de_luca_10pct") is bilinearize_rc
+
+    def test_bilinearize_registry_register_and_dispatch_custom(self, clean_bilinearize_registry):
+        """A third-party registered name flows through the full CSM."""
+        from fea_toolkit.model.csm import (
+            bilinearize_rc,
+            compute_performance_point,
+            register_bilinearize_method,
+        )
+
+        register_bilinearize_method("my_rc", bilinearize_rc)
+
+        pushover = {
+            "control_node": 1,
+            "control_disp": [0.0, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05],
+            "base_shear": [0.0, 50.0, 100.0, 180.0, 240.0, 280.0, 300.0],
+        }
+        modal = {
+            "modal_props": {
+                "partiMassRatiosMX": [0.8, 0.15],
+                "partiMassMX": [800.0, 150.0],
+            },
+            "periods": [0.5, 0.12],
+            "nodal_masses": {1: 1000.0},
+        }
+        shapes = {0: {1: (1.0, 0.0, 0.0)}, 1: {1: (0.0, 1.0, 0.0)}}
+        periods = [0.0, 0.1, 0.2, 0.5, 1.0, 2.0, 3.0]
+        accels = [3.0, 3.0, 3.0, 1.5, 0.8, 0.4, 0.2]
+
+        pp = compute_performance_point(
+            pushover,
+            modal,
+            shapes,
+            periods,
+            accels,
+            direction="X",
+            damping_ratio=0.05,
+            max_iter=20,
+            tol=0.05,
+            bilinearize_method="my_rc",
+        )
+        assert pp["bilinearize_method"].startswith("de_luca_10pct")
+        assert pp["S_dy"] > 0
+        assert pp["S_ay"] > 0
+
+    def test_bilinearize_registry_unknown_method_raises(self):
+        """Unknown names raise ValueError listing the registered keys."""
+        from fea_toolkit.model.csm import get_bilinearize_method
+
+        with pytest.raises(ValueError, match=r"Unknown bilinearize_method 'nope'"):
+            get_bilinearize_method("nope")
+
+    def test_compute_performance_point_rejects_unknown_method(self):
+        """An unregistered ``bilinearize_method`` propagates ValueError in CSM."""
+        from fea_toolkit.model.csm import compute_performance_point
+
+        pushover = {
+            "control_node": 1,
+            "control_disp": [0.0, 0.01, 0.02, 0.03, 0.04],
+            "base_shear": [0.0, 50.0, 100.0, 150.0, 180.0],
+        }
+        modal = {
+            "modal_props": {"partiMassRatiosMX": [0.8], "partiMassMX": [800.0]},
+            "periods": [0.5],
+            "nodal_masses": {1: 1000.0},
+        }
+        shapes = {0: {1: (1.0, 0.0, 0.0)}}
+
+        with pytest.raises(ValueError, match=r"Unknown bilinearize_method 'nope'"):
+            compute_performance_point(
+                pushover,
+                modal,
+                shapes,
+                [0.0, 0.5, 1.0],
+                [3.0, 1.5, 0.8],
+                bilinearize_method="nope",
+            )
+
+    def test_bilinearize_registry_overwrite_guard(self, clean_bilinearize_registry):
+        """Re-registering a built-in requires overwrite=True."""
+        from fea_toolkit.model.csm import (
+            BILINEARIZE_METHODS,
+            get_bilinearize_method,
+            register_bilinearize_method,
+        )
+
+        def _stub(S_d_arr, S_a_arr, config=None):
+            return (0.05, 100.0, "stub")
+
+        with pytest.raises(ValueError, match=r"already registered"):
+            register_bilinearize_method("composite", _stub)
+
+        register_bilinearize_method("composite", _stub, overwrite=True)
+        assert get_bilinearize_method("composite") is _stub
+        assert "composite" in BILINEARIZE_METHODS
+
+    def test_bilinearize_registry_non_callable_raises(self):
+        """Registering a non-callable raises TypeError."""
+        from fea_toolkit.model.csm import register_bilinearize_method
+
+        with pytest.raises(TypeError, match=r"must be callable"):
+            register_bilinearize_method("bad", "not-a-callable")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
