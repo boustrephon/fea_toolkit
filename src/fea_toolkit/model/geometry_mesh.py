@@ -211,6 +211,13 @@ def mesh_area_elements(
     # Populated per-area from corner nodes only, so adjacent areas'
     # shared edges are still deduplicated without collapsing
     # intentionally separate nodes at the same coordinate.
+    #
+    # Role A — exact-coincident dedup: this tight key (1e-6) reuses a
+    # node only when the grid point is essentially bit-identical to an
+    # existing corner/shared-edge node, so release/offset/duplicate
+    # nodes that legitimately share a coordinate are never collapsed.
+    # Interior wall-slab seed nodes are reconnected by explicit node-id
+    # reuse in the interior_seeds block below, not by loosening this key.
     def _coord_key(x, y, z):
         return (round(x, 6), round(y, 6), round(z, 6))
 
@@ -357,7 +364,7 @@ def mesh_area_elements(
         # ── Check for interior seed nodes (e.g. wall edge nodes that ──
         # ── lie inside this slab area).  When found, switch to an    ──
         # ── irregular subdivision so the mesh passes through them.   ──
-        interior_seeds: list[tuple[float, float]] = []  # (u, v)
+        interior_seeds: list[tuple[float, float, str]] = []  # (u, v, node_id)
         _corner_set = set(corner_ids)
         # Reverse map from _coord_to_id to check seeded nodes
         seeded_ids = set(_coord_to_id.values())
@@ -376,9 +383,10 @@ def mesh_area_elements(
             at_corner = (u <= 1e-6 or u >= 1.0 - 1e-6) and (v <= 1e-6 or v >= 1.0 - 1e-6)
             if at_corner:
                 continue
-            interior_seeds.append((u, v))
+            interior_seeds.append((u, v, nid))
 
         # Fold interior seeds into the division lists
+        seed_at: dict[tuple[int, int], str] = {}  # (j, i) -> seed node id
         if interior_seeds:
             # Merge near-duplicates and sort
             _tol_uv = 1e-6
@@ -413,6 +421,17 @@ def mesh_area_elements(
                     f"interior seed nodes."
                 )
             use_irregular = True
+
+            # Map each seed to its grid cell so the mesh reuses the seed
+            # node id directly (Role B reconnection).  A seed's (u, v) is
+            # the *projection* onto the quad surface; the original node
+            # may sit up to ~_tol off it, so a rounded-coordinate key
+            # lookup alone could miss it.
+            for u, v, nid in sorted(interior_seeds, key=lambda s: (s[0], s[1], s[2])):
+                j = min(range(n_v + 1), key=lambda k: abs(v_vals[k] - v))
+                i = min(range(n_u + 1), key=lambda k: abs(u_vals[k] - u))
+                if abs(u_vals[i] - u) <= _tol_uv and abs(v_vals[j] - v) <= _tol_uv:
+                    seed_at.setdefault((j, i), nid)
         else:
             u_vals = [i / n_u for i in range(n_u + 1)]
             v_vals = [j / n_v for j in range(n_v + 1)]
@@ -453,6 +472,14 @@ def mesh_area_elements(
                     continue
                 new_id = f"{aid}_mesh_{j}_{i}"
                 pt = grid[j, i]
+                # Reuse a seed node by id first (Role B): the grid point
+                # is the seed's on-plane projection, which may be up to
+                # ~_tol away from the node's actual position, so a
+                # coordinate-key lookup alone could miss it.
+                seed_nid = seed_at.get((j, i))
+                if seed_nid is not None:
+                    node_grid[j][i] = seed_nid
+                    continue
                 # Reuse existing node at the same coordinates so
                 # adjacent meshed areas share edge/interior nodes.
                 ck = _coord_key(float(pt[0]), float(pt[1]), float(pt[2]))
@@ -565,6 +592,10 @@ def subdivide_area_mesh(
     if n < 2:
         return area_elements, area_assignments, nodes, next_tag
 
+    # Role A — exact-coincident dedup: this tight key (1e-6) reuses a
+    # node only when the grid point is essentially bit-identical to an
+    # existing corner node.  Deliberate: coincident offset/release/
+    # duplicate nodes must not be collapsed (see seeding below).
     def _coord_key(x, y, z):
         return (round(x, 6), round(y, 6), round(z, 6))
 
@@ -744,6 +775,19 @@ def split_areas_at_frame_edges(
     """
     from .sap_data import AreaElement as _AreaElement
     from .sap_data import Node as _Node
+
+    # Rounded-coordinate key for O(1) node reuse at grid points.
+    #
+    # Role B — reconnection to detected connection nodes: grid lines
+    # are forced through frame edge-node projections, and a frame node
+    # is accepted as "on the edge" up to ~1e-4 (model units) of
+    # perpendicular offset (the cross_len/edge_len cutoff below).  The
+    # grid point is the on-edge projection, so a 1e-4 key (round to 4
+    # decimals) is required for it to round back to the original frame
+    # node.  Deliberately looser than mesh_area_elements' Role-A key
+    # (1e-6), which only dedups exact-coincident corner/edge nodes.
+    def _coord_key(x, y, z):
+        return (round(x, 4), round(y, 4), round(z, 4))
 
     # Collect all frame node IDs
     frame_node_ids: set = set()
@@ -942,26 +986,23 @@ def split_areas_at_frame_edges(
                 bot = corner_coords[3] * (1 - u) + corner_coords[2] * u
                 grid[j, i] = top * (1 - v) + bot * v
 
-        # Build spatial coordinate cache once (reuse across grid points)
-        _pos_cache_np: dict[str, np.ndarray] = {
-            nid: np.array([nd.x, nd.y, nd.z], dtype=float) for nid, nd in nodes.items()
-        }
-        # Merge frame node coords into cache
-        for nid, npos in frame_node_coords.items():
-            _pos_cache_np[nid] = npos
+        # Rounded-coordinate registry — O(1) lookup with 1e-4 matching
+        # semantics (each coordinate rounded to 4 decimals), using the
+        # Role-B ``_coord_key`` defined above.
+        _coord_to_id: dict[tuple, str] = {}
+        for nid, nd in nodes.items():
+            # setdefault keeps the first node per coordinate bin —
+            # matches the linear scan's first-match-wins behaviour.
+            _coord_to_id.setdefault(_coord_key(nd.x, nd.y, nd.z), nid)
         # Create nodes for grid points (reusing frame nodes at same coords)
         node_grid = [[None] * (n_u + 1) for _ in range(n_v + 1)]
         for j in range(n_v + 1):
             for i in range(n_u + 1):
                 pt = grid[j, i]
-                # Check spatial cache for existing node at this position
-                found = None
-                for nid, npos in _pos_cache_np.items():
-                    if np.linalg.norm(npos - pt) < 1e-4:
-                        found = nid
-                        break
-                if found is not None:
-                    node_grid[j][i] = found
+                # Check registry for existing node at this position
+                existing = _coord_to_id.get(_coord_key(float(pt[0]), float(pt[1]), float(pt[2])))
+                if existing is not None:
+                    node_grid[j][i] = existing
                     continue
                 # Create new node
                 new_id = f"{aid}_af_{j}_{i}"
@@ -975,7 +1016,9 @@ def split_areas_at_frame_edges(
                     z=float(pt[2]),
                 )
                 nodes[new_id] = nd
-                _pos_cache_np[new_id] = np.array([pt[0], pt[1], pt[2]], dtype=float)
+                _coord_to_id.setdefault(
+                    _coord_key(float(pt[0]), float(pt[1]), float(pt[2])), new_id
+                )
                 node_grid[j][i] = new_id
 
         # Mark original as inactive and record parent-child
@@ -1798,6 +1841,18 @@ def split_slabs_at_wall_intersections(
     from .sap_data import AreaElement as _AreaElement
     from .sap_data import Node as _Node
 
+    # Rounded-coordinate key for O(1) node reuse at grid points.
+    #
+    # Role B — reconnection to detected connection nodes:
+    # find_wall_nodes_inside_slabs() matches wall nodes to the slab Z
+    # level via round(z, 4), so a wall node may sit up to ~1e-4 (model
+    # units) off the slab plane; the grid point is its on-plane
+    # projection.  A 1e-4 key (round to 4 decimals) makes that
+    # projection round back to the original wall node.  Deliberately
+    # looser than mesh_area_elements' Role-A key (1e-6).
+    def _coord_key(x, y, z):
+        return (round(x, 4), round(y, 4), round(z, 4))
+
     # ── 1. Find intersections ───────────────────────────────────
     findings = find_wall_nodes_inside_slabs(
         area_elements,
@@ -1876,10 +1931,14 @@ def split_slabs_at_wall_intersections(
                 bot = c3 * (1.0 - u) + c2 * u
                 grid[j, i] = top * (1.0 - v) + bot * v
 
-        # Build coordinate cache
-        _pos_cache: dict[str, np.ndarray] = {}
+        # Rounded-coordinate registry — O(1) lookup with 1e-4 matching
+        # semantics (each coordinate rounded to 4 decimals), using the
+        # Role-B ``_coord_key`` defined above.
+        _coord_to_id: dict[tuple, str] = {}
         for nid, nd in nodes.items():
-            _pos_cache[nid] = np.array([nd.x, nd.y, nd.z])
+            # setdefault keeps the first node per coordinate bin —
+            # matches the linear scan's first-match-wins behaviour.
+            _coord_to_id.setdefault(_coord_key(nd.x, nd.y, nd.z), nid)
 
         # Create grid nodes (reuse existing)
         node_grid = [[None] * (n_u + 1) for _ in range(n_v + 1)]
@@ -1899,14 +1958,10 @@ def split_slabs_at_wall_intersections(
                     node_grid[j][i] = corner_ids[3]
                     continue
                 pt = grid[j, i]
-                # Reuse existing node within tolerance
-                found = None
-                for nid, npos in _pos_cache.items():
-                    if np.linalg.norm(npos - pt) < 1e-4:
-                        found = nid
-                        break
-                if found is not None:
-                    node_grid[j][i] = found
+                # Reuse existing node at the same coordinates
+                existing = _coord_to_id.get(_coord_key(float(pt[0]), float(pt[1]), float(pt[2])))
+                if existing is not None:
+                    node_grid[j][i] = existing
                     continue
                 new_id = f"{sid}_wi_{j}_{i}"
                 new_tag = next_tag
@@ -1918,7 +1973,9 @@ def split_slabs_at_wall_intersections(
                     y=float(pt[1]),
                     z=float(pt[2]),
                 )
-                _pos_cache[new_id] = np.array([pt[0], pt[1], pt[2]])
+                _coord_to_id.setdefault(
+                    _coord_key(float(pt[0]), float(pt[1]), float(pt[2])), new_id
+                )
                 node_grid[j][i] = new_id
 
         # Mark original slab inactive

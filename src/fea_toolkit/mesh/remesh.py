@@ -109,6 +109,11 @@ def remesh_areas(
         # nodes only, so adjacent areas' shared edges are still
         # deduplicated without collapsing intentionally separate
         # nodes at the same coordinate. ──
+        # Role A — exact-coincident dedup: this tight key (1e-6)
+        # reuses a node only when the grid point is essentially
+        # bit-identical to an existing corner node.  Deliberate:
+        # distinct coincident nodes (release/offset/duplicate) must
+        # not be collapsed during Gmsh remeshing.
         def _coord_key(x, y, z):
             return (round(x, 6), round(y, 6), round(z, 6))
 

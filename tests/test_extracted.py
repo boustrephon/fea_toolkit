@@ -616,6 +616,55 @@ class TestMeshAreaElements:
         assert nodes == orig_nodes, "nodes dict mutated"
         assert assign == orig_assign, "assignments dict mutated"
 
+    def test_interior_wall_node_off_plane_reused(self):
+        """Interior wall nodes slightly off the slab plane are reused, not duplicated.
+
+        The seed-detection plane tolerance is ~1e-3
+        (``max(max_size*0.001, 0.001)``), so wall bottom nodes at
+        z=5e-4 are detected as interior seeds.  Their on-plane grid
+        projection is ~5e-4 away — far beyond a 1e-6 rounded-coordinate
+        key — so the mesh must reuse the seed node id explicitly for
+        the wall and slab sub-areas to share nodes.
+        """
+        from fea_toolkit.model.geometry import mesh_area_elements
+        from fea_toolkit.model.sap_data import AreaMesh
+
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 4.0, 0.0, 0.0),
+            "3": Node("3", 3, 4.0, 4.0, 0.0),
+            "4": Node("4", 4, 0.0, 4.0, 0.0),
+            # Wall bottom nodes slightly ABOVE the slab plane (z=5e-4).
+            "5": Node("5", 5, 1.0, 1.0, 5e-4),
+            "6": Node("6", 6, 3.0, 3.0, 5e-4),
+            "7": Node("7", 7, 1.0, 1.0, 3.0),
+            "8": Node("8", 8, 3.0, 3.0, 3.0),
+        }
+        areas = {
+            "Slab": AreaElement("Slab", 10, ["1", "2", "3", "4"]),
+            "Wall": AreaElement("Wall", 20, ["5", "6", "8", "7"]),
+        }
+        assigns = {"Slab": "Slab200", "Wall": "Wall300"}
+        mesh = {"Slab": AreaMesh(auto_mesh=True, max_size=1.0)}
+
+        areas, assigns, nodes, _ntag = mesh_area_elements(areas, assigns, nodes, mesh)
+
+        wall_ids = set(areas["Wall"].node_ids)
+        slab_sub_ids = [
+            aid for aid, ae in areas.items() if getattr(ae, "parent_id", None) == "Slab"
+        ]
+        assert slab_sub_ids, "slab was not subdivided"
+        shared = [aid for aid in slab_sub_ids if set(areas[aid].node_ids) & wall_ids]
+        assert shared, (
+            "No slab sub-area shares the off-plane wall nodes — they were "
+            "duplicated instead of reused"
+        )
+        used_ids = {nid for aid in slab_sub_ids for nid in areas[aid].node_ids}
+        assert "5" in used_ids and "6" in used_ids, (
+            "wall bottom nodes were not reused; mesh-created projection "
+            f"nodes: {sorted(nid for nid in nodes if nid.startswith('Slab_mesh'))}"
+        )
+
 
 # ============================================================================
 # Confinement model tests
