@@ -144,9 +144,9 @@ The Preprocessor populates ``mesh_model.diaphragm_levels`` and
 
 | Config value | Behaviour |
 |---|---|
-| absent / ``None`` | Auto‑detect (default) — S2K Z‑axis DIAPHRAGM constraints; falls back to horizontal area‑element mean‑Z levels when no constraints exist |
-| ``False`` | Explicitly **disable** all rigid diaphragms |
-| ``True`` | Force storey‑based detection via ``identify_stories()`` — one component per identified storey, skipping S2K constraints |
+| absent / ``None`` | Apply **only** explicit S2K Z‑axis DIAPHRAGM constraint groups.  Horizontal area‑element mean‑Z levels are detected but **never** auto‑applied — shell elements already provide in‑plane stiffness (bisect ``1cf374d``) |
+| ``False`` | Explicitly **disable** all rigid diaphragms, even when the model declares its own constraints |
+| ``True`` | Explicitly **create** rigid diaphragms — force storey‑based detection via ``identify_stories()`` (one component per identified storey, skipping S2K constraints); falls back to per‑elevation slab levels only when no components were detected |
 | ``[z1, z2, ...]`` | Legacy override — use the explicit elevations and merge all nodes within the configurable ``diaphragm_z_tolerance`` (default ``0.01``) of each level into one diaphragm |
 | ``[{name, nodes\|selection}, ...]`` | **Explicit named groups** — bypass all detection; each dict is one independent diaphragm |
 
@@ -200,7 +200,10 @@ its resolved nodes.
   becomes one component, preserving the S2K constraint grouping.
 - **Area fallback** — when no explicit constraints exist and
   ``rigid_diaphragms`` is absent, the Preprocessor records only mean‑Z
-  levels (no components).  The builder then falls back to per‑elevation
-  merging: all nodes near each level form a single diaphragm.
+  levels (no components) and the builder applies **no** rigid diaphragms
+  (shell elements already provide in‑plane stiffness).  Slab levels are
+  applied only with an explicit ``rigid_diaphragms: True`` (or a legacy
+  ``[z1, z2, ...]`` list): all nodes near each level form a single
+  diaphragm.
 - **Storey detection (``True``)** — each ``StoryLevel`` from
   ``identify_stories()`` becomes one component.

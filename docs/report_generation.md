@@ -651,10 +651,13 @@ AnalysisBuilder now apply them:
   tuple per S2K constraint, preserving the constraint grouping.
 - The builder emits one `ops.rigidDiaphragm(3, master, *slaves)` per
   component, picking the group centroid node as master.
-- The `rigid_diaphragms` config overrides behaviour: `False` disables,
-  `True` forces storey-based detection, `[z1, z2, ...]` overrides levels
-  with per-elevation merging, and `[{name, nodes|selection}, ...]`
-  supplies explicit named groups (see `docs/shell_support.md`).
+- The `rigid_diaphragms` config governs when diaphragms are created:
+  *absent* applies only the explicit S2K constraint groups (slab-derived
+  levels are never auto-applied — shells provide in-plane stiffness),
+  `False` disables even with S2K constraints, `True` forces storey-based
+  detection, `[z1, z2, ...]` overrides levels with per-elevation merging,
+  and `[{name, nodes|selection}, ...]` supplies explicit named groups
+  (see `docs/shell_support.md`).
 
 This matches SAP2000 results for models where SAP2000 uses rigid
 diaphragms by default.  Without them (config `False`), lateral load
