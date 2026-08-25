@@ -167,15 +167,22 @@ def run_pushover_4dir(
             logger.warning("Pushover %s skipped — gravity analysis failed: %s", label, e)
             continue
 
-        adrs = ab.pushover_to_adrs(results, modal, shapes, direction=cfg["dir"])
-        pp = ab.compute_performance_point(
-            results,
-            modal,
-            shapes,
-            T_spec,
-            Sa_spec,
-            direction=cfg["dir"],
-        )
+        # A degenerate capacity curve (e.g. gravity produced too few valid
+        # steps) must skip the direction, not abort the whole 4-direction
+        # run — mirrors the gravity-failure skip above.
+        try:
+            adrs = ab.pushover_to_adrs(results, modal, shapes, direction=cfg["dir"])
+            pp = ab.compute_performance_point(
+                results,
+                modal,
+                shapes,
+                T_spec,
+                Sa_spec,
+                direction=cfg["dir"],
+            )
+        except ValueError as e:
+            logger.warning("Pushover %s skipped — no valid capacity spectrum: %s", label, e)
+            continue
 
         # Validate mode selection against RS
         rs_warning = None
@@ -366,15 +373,22 @@ def pushover_rc_openseespy(
             logger.warning("Pushover %s skipped — gravity analysis failed: %s", label, e)
             continue
 
-        adrs = ab.pushover_to_adrs(results, modal, shapes, direction=cfg["dir"])
-        pp = ab.compute_performance_point(
-            results,
-            modal,
-            shapes,
-            T_spec,
-            Sa_spec,
-            direction=cfg["dir"],
-        )
+        # A degenerate capacity curve (e.g. gravity produced too few valid
+        # steps) must skip the direction, not abort the whole 4-direction
+        # run — mirrors the gravity-failure skip above.
+        try:
+            adrs = ab.pushover_to_adrs(results, modal, shapes, direction=cfg["dir"])
+            pp = ab.compute_performance_point(
+                results,
+                modal,
+                shapes,
+                T_spec,
+                Sa_spec,
+                direction=cfg["dir"],
+            )
+        except ValueError as e:
+            logger.warning("Pushover %s skipped — no valid capacity spectrum: %s", label, e)
+            continue
 
         # Validate mode selection against RS
         rs_warning = None
