@@ -1236,21 +1236,28 @@ def plot_pushover_envelope(
             existing = envelope_global.get(eid, {})
             prev_mag = existing.get("_peak_mag", -1.0)
             if step_mag > prev_mag:
-                new_entry = {
-                    "Fx": entry.get("fx_i", 0.0),
-                    "Fy": entry.get("fy_i", 0.0),
-                    "Fz": entry.get("fz_i", 0.0),
-                    "Mx": entry.get("mx_i", 0.0),
-                    "My": entry.get("my_i", 0.0),
-                    "Mz": entry.get("mz_i", 0.0),
-                    "Fx_j": entry.get("fx_j", 0.0),
-                    "Fy_j": entry.get("fy_j", 0.0),
-                    "Fz_j": entry.get("fz_j", 0.0),
-                    "Mx_j": entry.get("mx_j", 0.0),
-                    "My_j": entry.get("my_j", 0.0),
-                    "Mz_j": entry.get("mz_j", 0.0),
-                    "_peak_mag": step_mag,
-                }
+                # Canonical uppercase force keys — the same names consumed
+                # by _compute_local_forces (via _g) and emitted by
+                # _extract_npz_frame_forces / _build_static_force_map.
+                # Title-case keys ("Fx", "Mz_j") would read as zero there,
+                # so the envelope would render nothing.
+                #
+                # Recorded pushover forces are already in the element LOCAL
+                # coordinate system (ops 'localForces'), so each component
+                # is ALSO exposed under the *_i_local / *_j_local variant
+                # keys — matching _extract_npz_frame_forces' local-array
+                # path — and _compute_local_forces uses those verbatim
+                # (no second rotation, which would corrupt non-aligned
+                # members).
+                new_entry = {"_peak_mag": step_mag}
+                for _q in ("fx", "fy", "fz", "mx", "my", "mz"):
+                    _v_i = entry.get(f"{_q}_i", 0.0)
+                    _v_j = entry.get(f"{_q}_j", 0.0)
+                    _Q = _q.upper()
+                    new_entry[_Q] = _v_i
+                    new_entry[f"{_Q}_j"] = _v_j
+                    new_entry[f"{_Q}_i_local"] = _v_i
+                    new_entry[f"{_Q}_j_local"] = _v_j
                 envelope_global[eid] = new_entry
 
     # ── Compute shell envelope (peak damage per shell) ────────────

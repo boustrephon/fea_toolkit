@@ -2225,6 +2225,10 @@ class TestForceDiagramUnified:
         import os
         import tempfile
 
+        # The 3D half of this test needs PyVista — skip the whole test when
+        # it is unavailable (assertions below still run when it is present).
+        pytest.importorskip("pyvista")
+
         from fea_toolkit.plotting import plot_force_diagram
 
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as f:

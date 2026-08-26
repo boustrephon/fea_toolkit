@@ -159,10 +159,15 @@ def _extract_npz_frame_forces(source, case_prefix, frames):
             else:
                 loc_i = f"{case_prefix}{q}_i_local"
                 loc_j = f"{case_prefix}{q}_j_local"
-                if loc_i in source:
-                    entry[f"{q.upper()}_i_local"] = float(source[loc_i][idx])
-                if loc_j in source:
-                    entry[f"{q.upper()}_j_local"] = float(source[loc_j][idx])
+                arr_loc_i = source.get(loc_i)
+                arr_loc_j = source.get(loc_j)
+                # Guard the local arrays exactly like the bare arrays above:
+                # skip a component whose *_i_local / *_j_local array is
+                # shorter than the frame list, preserving valid entries.
+                if arr_loc_i is not None and idx < len(arr_loc_i):
+                    entry[f"{q.upper()}_i_local"] = float(arr_loc_i[idx])
+                if arr_loc_j is not None and idx < len(arr_loc_j):
+                    entry[f"{q.upper()}_j_local"] = float(arr_loc_j[idx])
         if entry:
             force_map[idx] = entry
     return force_map
