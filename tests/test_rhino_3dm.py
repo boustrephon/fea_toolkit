@@ -468,6 +468,22 @@ class TestColourDocObjects:
         )
         assert n2 == 0
 
+    def test_colour_frames_from_pushover(self, rhino_env):
+        """Frame colouring can source from pushover per-step forces
+        (``pushover/{direction}/frame_{q}_i``), matching SAP_FrameID."""
+        from fea_toolkit.rhino.results import colour_frames_from_results
+
+        doc = rhino_env
+        self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", "B1-0")
+        self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", "B1-1")
+        data = {
+            "pushover/+X/frame_sap_id": np.array(["B1-0", "B1-1"]),
+            "pushover/+X/frame_mz_i": np.array([[1.0, -2.0], [1.5, -2.5]]),
+        }
+        n = colour_frames_from_results(data, quantity="Mz", direction="+X", verbose=False)
+        assert n == 2
+        assert doc.Objects._items[0].Attributes.ColorSource == "ColorFromObject"
+
 
 # ── Deformed-shape overlay construction ──────────────────────────────────
 
