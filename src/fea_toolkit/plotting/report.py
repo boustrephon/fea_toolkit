@@ -401,6 +401,11 @@ def plot_csm_4panel(
 
     for idx, label in enumerate(dirs):
         ax = axes_flat[idx]
+        if label not in all_out:
+            # Direction skipped (e.g. no converged pushover) — leave the
+            # subplot blank rather than crashing the whole report.
+            ax.set_visible(False)
+            continue
         data = all_out[label]
         adrs = data["adrs"]
         pp = data["pp"]
