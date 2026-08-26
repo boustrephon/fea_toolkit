@@ -540,6 +540,55 @@ file** — format and stage are auto-detected.  ``aggregate_parents=True``
 maps child-element results back to parent SAP IDs, so SAP-stage geometry
 can be coloured from meshed-stage results.
 
+### Controlling result colouring
+
+The imported Mesh geometry is recoloured *in place* by default.  Because
+the diverging scale is auto-normalised to the data's own min/max, only
+the global extreme members saturate while the bulk maps to a pale/white
+tint — which often reads as "uncoloured".  Two options control this:
+
+| Option | Values | Effect |
+|---|---|---|
+| ``colour_members`` | ``True`` (default) / ``False`` | **Master switch** for recolouring the frame/shell geometry.  ``False`` leaves the Mesh members in their section/layer colours; the deformed overlay and the result flags are still created. |
+| ``scale_mode`` | ``"continuous"`` (default) / ``"stepped"`` | ``"continuous"`` — smooth diverging blue→white→red ramp (only the global min/max saturate).  ``"stepped"`` — ``n_steps`` discrete bands so mid-range magnitudes get clearly distinct colours. |
+| ``n_steps`` | odd int ≥ 3 (default ``9``) | Band count for ``scale_mode="stepped"``.  Zero is always the central (white) band; even values are bumped up to the next odd count. |
+| ``clip_pct`` | ``0`` (default) / ``0 < p < 50`` | Percent clipped off each end of the value range.  ``0`` uses the raw min/max — a few extreme members then wash the bulk out to near-white.  Clipping to the inner percentiles spreads the scale over the bulk (values beyond the clip saturate at the anchors); genuinely-zero members stay white. |
+
+Leave the Mesh geometry in its section/layer colours:
+
+```python
+summary = apply_results(
+    r"C:/models/model_results.h5",
+    stage="mesh",
+    deformed=True,
+    deformed_source="pushover",
+    colour_members=False,   # keep section/layer colours on the Mesh members
+)
+```
+
+Stepped (discrete) colour scale when member colouring is on:
+
+```python
+summary = apply_results(
+    r"C:/models/model_results.h5",
+    stage="mesh",
+    frames=True,
+    shells=True,
+    deformed=True,
+    colour_members=True,    # (default) colour the Mesh members
+    scale_mode="stepped",   # discrete bands instead of a smooth ramp
+    n_steps=9,              # band count (odd ≥ 3)
+    clip_pct=10,            # clip the range to the 10th–90th percentiles
+)
+```
+
+The same ``scale_mode`` / ``n_steps`` / ``clip_pct`` arguments are accepted
+by the individual helpers — ``colour_from_npz()``,
+``colour_frames_from_results()``, ``colour_shells_from_results()``, and
+``colour_frame_by_npz_ratio()``.
+The moment-diagram flags (``create_result_flags()``) always use the
+symmetric ``±max|value|`` diverging scale and are unaffected.
+
 ### Unified file contents
 
 The full unified schema is documented in

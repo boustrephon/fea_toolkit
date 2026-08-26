@@ -148,7 +148,7 @@ the "Package tree (abbreviated)" section below for the full subpackage list
 | **Constrained Remeshing** | ✅ Complete | `mesh/remesh.py` — Gmsh-based constrained quadrilateral remeshing with line constraints from frame edges. |
 | **NDMaterial / LayeredShell** | ✅ Complete | Data model for nonlinear shear walls: `NDMaterial` (uniaxial/multiaxial), `LayeredShellSection`, `ShellFiberLayer` — parsed from SAP2000 area sections. |
 | **Backend-Agnostic Viewer** | ✅ Complete | `ModelViewer` + `RenderBackend` abstraction — renders via PyVista or exports to standalone HTML. `plot_interactive_viewer()` adds radio buttons, sliders, click-to-inspect. |
-| **NPZ/H5 Rhino Colouring** | ✅ Complete | `apply_results()`, `colour_from_npz()`, `colour_shells_from_results()`, `create_deformed_geometry()` — colour frames/shells and overlay deformed shapes from `.npz`/`.h5` results or stage files. |
+| **NPZ/H5 Rhino Colouring** | ✅ Complete | `apply_results()`, `colour_from_npz()`, `colour_shells_from_results()`, `create_deformed_geometry()` — colour frames/shells and overlay deformed shapes from `.npz`/`.h5` results or stage files. `colour_members=False` keeps the Mesh geometry in its section/layer colours; `scale_mode="stepped"` colours by discrete bands; `clip_pct` clips the scale to the inner percentiles so outliers don't wash the bulk out. |
 | **Brace Buckling (Approach A)** | ✅ Implemented | Subdivided element with imperfection + `Corotational`. |
 | **Brace Buckling (Approach B)** | ✅ Implemented | Truss + `Hysteretic` material — robust for pushover. |
 | **Brace Fatigue** | ✅ Implemented | `Fatigue` material wrapper for cyclic degradation. |

@@ -85,6 +85,26 @@ class FakeObjectAttributes:
         return self._strings.get(key)
 
 
+class _NoOpObjectAttributes(FakeObjectAttributes):
+    """Attributes whose colour assignment never sticks (no-op setter).
+
+    Simulates a Rhino commit that silently ignores ``ObjectColor`` so the
+    read-back verification in ``_colour_doc_objects`` can be tested.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._colour = None
+
+    @property
+    def ObjectColor(self):
+        return self._colour
+
+    @ObjectColor.setter
+    def ObjectColor(self, value):
+        self._colour = None  # commit is a no-op — the colour never sticks
+
+
 class FakeLayer:
     def __init__(self):
         self.Name = ""
@@ -474,6 +494,23 @@ class TestColourDocObjects:
         )
         assert n2 == 0
 
+    def test_colour_commit_readback_filters_noop(self, rhino_env):
+        """Objects whose colour commit does not stick are not counted."""
+        doc = rhino_env
+        attrs = _NoOpObjectAttributes()
+        attrs.LayerIndex = create_or_get_layer("SAP2000/Mesh/Frames/CL/UB300")
+        attrs.SetUserString("SAP_FrameID", "B1")
+        doc.Objects.AddLine(None, attrs)
+
+        n = _colour_doc_objects(
+            {"B1": 5.0},
+            "SAP_FrameID",
+            0.0,
+            5.0,
+            layer_filter="SAP2000/Mesh/*",
+        )
+        assert n == 0
+
     def test_colour_frames_from_pushover(self, rhino_env):
         """Frame colouring can source from pushover per-step forces
         (``pushover/{direction}/frame_{q}_i``), matching SAP_FrameID."""
@@ -489,6 +526,64 @@ class TestColourDocObjects:
         n = colour_frames_from_results(data, quantity="Mz", direction="+X", verbose=False)
         assert n == 2
         assert doc.Objects._items[0].Attributes.ColorSource == "ColorFromObject"
+
+    def test_colour_frames_stepped_scale(self, rhino_env):
+        """``scale_mode='stepped'`` quantises frame colours to discrete bands."""
+        from fea_toolkit.rhino.results import colour_frames_from_results
+
+        doc = rhino_env
+        for sap_id in ("B-A", "B-B", "B-C"):
+            self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", sap_id)
+        data = {
+            "pushover/+X/frame_sap_id": np.array(["B-A", "B-B", "B-C"]),
+            "pushover/+X/frame_mz_i": np.array([[-100.0, 20.0, 100.0]]),
+        }
+        n = colour_frames_from_results(
+            data,
+            quantity="Mz",
+            direction="+X",
+            scale_mode="stepped",
+            n_steps=9,
+            verbose=False,
+        )
+        assert n == 3
+        # Extremes saturate; +20 sits on the 0.25 band (255,197,191) — not
+        # the continuous tint (255,209,204) it would otherwise receive.
+        assert doc.Objects._items[0].Attributes.ObjectColor.rgb() == (0, 25, 255)
+        assert doc.Objects._items[1].Attributes.ObjectColor.rgb() == (255, 197, 191)
+        assert doc.Objects._items[2].Attributes.ObjectColor.rgb() == (255, 25, 0)
+
+    def test_colour_frames_percentile_clip(self, rhino_env):
+        """``clip_pct`` clips the value range so mid-range values get a
+        visible continuous tint instead of washing out to near-white."""
+        from fea_toolkit.rhino.results import colour_frames_from_results
+
+        doc = rhino_env
+        for sap_id in ("B-100", "B-50", "B-10", "B10", "B50", "B100"):
+            self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", sap_id)
+        data = {
+            "pushover/+X/frame_sap_id": np.array(["B-100", "B-50", "B-10", "B10", "B50", "B100"]),
+            "pushover/+X/frame_mz_i": np.array([[-100.0, -50.0, -10.0, 10.0, 50.0, 100.0]]),
+        }
+        # Without clipping the range is [-100, 100]; +10 maps near-white.
+        n = colour_frames_from_results(data, quantity="Mz", direction="+X", verbose=False)
+        assert n == 6
+        rgb_unclipped = doc.Objects._items[3].Attributes.ObjectColor.rgb()
+        assert min(rgb_unclipped) >= 200
+        # With 20% clipping the range is [-50, 50]; +10 now gets a tint.
+        colour_frames_from_results(
+            data,
+            quantity="Mz",
+            direction="+X",
+            clip_pct=20.0,
+            verbose=False,
+        )
+        rgb_clipped = doc.Objects._items[3].Attributes.ObjectColor.rgb()
+        assert rgb_clipped != rgb_unclipped
+        assert min(rgb_clipped) < min(rgb_unclipped)
+        # Extremes still saturate: -100 → blue, +100 → red in both modes.
+        assert doc.Objects._items[0].Attributes.ObjectColor.rgb() == (0, 25, 255)
+        assert doc.Objects._items[5].Attributes.ObjectColor.rgb() == (255, 25, 0)
 
 
 # ── Deformed-shape overlay construction ──────────────────────────────────

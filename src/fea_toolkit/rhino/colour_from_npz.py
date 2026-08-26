@@ -27,6 +27,10 @@ Each Rhino object with a ``SAP_FrameID`` UserString (matching a
 based on the force/moment magnitude at the element's I‑end.
 """
 
+import contextlib
+from collections import Counter
+from typing import Optional
+
 import numpy as np
 
 # ---------------------------------------------------------------------------
@@ -34,16 +38,39 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 
-def _value_to_rgb(val: float, vmin: float, vmax: float) -> tuple[int, int, int]:
+def _value_to_rgb(
+    val: float,
+    vmin: float,
+    vmax: float,
+    bands: Optional[int] = None,
+) -> tuple[int, int, int]:
     """Map *val* in [*vmin*, *vmax*] to an (R, G, B) tuple (0‑255).
 
     Uses a diverging red‑white‑blue scheme:
         negative → blue, zero → white, positive → red.
 
+    When *bands* is set (odd int ≥ 3) the scale is *stepped*: values are
+    snapped to the nearest of ``bands`` discrete band centres instead of
+    sliding along the continuous ramp.  A whole magnitude range then
+    shares one clearly distinct colour rather than only the global
+    min/max saturating while everything else washes out to a pale tint.
+    Zero is always the central (white) band.
+
     The white midpoint is the whole point of a diverging scale: values
     near zero render as light tints, not mid‑grey, so a low‑magnitude
     result stays visually distinct from an uncoloured (layer‑coloured)
     object.
+
+    Args:
+        val: Value to colour.
+        vmin, vmax: Value range (each half is normalised to its own
+            extreme, so asymmetric ranges still saturate).
+        bands: Optional discrete band count for a stepped scale.  Even
+            values are bumped up to the next odd count so zero stays the
+            central white band.
+
+    Returns:
+        ``(r, g, b)`` — 0‑255 tuple.
     """
     if abs(vmax - vmin) < 1e-15:
         return (255, 255, 255)  # white
@@ -53,6 +80,17 @@ def _value_to_rgb(val: float, vmin: float, vmax: float) -> tuple[int, int, int]:
     else:
         t = val / abs(vmin) if vmin < 0 else 0.0
     t = max(-1.0, min(1.0, t))
+
+    if bands is not None and bands > 1:
+        # Stepped mode: snap to the nearest band centre.  Odd band counts
+        # give an exact central white band at zero.
+        n = max(3, bands)
+        if n % 2 == 0:
+            n += 1
+        idx = int(round((t + 1.0) * (n - 1) / 2.0))
+        idx = max(0, min(n - 1, idx))
+        t = -1.0 + 2.0 * idx / (n - 1)
+
     if t < 0:
         # blue (-1) -> white (0)
         f = -t
@@ -66,6 +104,60 @@ def _value_to_rgb(val: float, vmin: float, vmax: float) -> tuple[int, int, int]:
         g = int(255 - 230 * f)
         b = int(255 - 255 * f)
     return (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
+
+
+def _bands_from_scale_mode(scale_mode: str, n_steps: int = 9) -> Optional[int]:
+    """Translate a ``scale_mode`` string into a stepped band count.
+
+    ``"continuous"`` → ``None`` (smooth ramp).  ``"stepped"`` → an odd
+    band count ≥ 3 (even values are bumped to odd so zero is the central
+    white band).  Raises ``ValueError`` for unknown modes.
+
+    Args:
+        scale_mode: ``"continuous"`` or ``"stepped"``.
+        n_steps: Requested number of bands for ``"stepped"``.
+
+    Returns:
+        Band count for the stepped scale, or ``None`` for continuous.
+    """
+    mode = (scale_mode or "continuous").lower().strip()
+    if mode == "continuous":
+        return None
+    if mode == "stepped":
+        n = max(3, int(n_steps))
+        if n % 2 == 0:
+            n += 1
+        return n
+    raise ValueError(f"Unknown scale_mode {scale_mode!r} — expected 'continuous' or 'stepped'")
+
+
+def _percentile_range(values: dict, clip_pct: float) -> tuple[float, float]:
+    """Clip a value range to the inner ``clip_pct``..``100-clip_pct`` percentiles.
+
+    A min/max-normalised diverging scale is dominated by its outliers: if a
+    few members carry far larger moments than the rest, the bulk maps to
+    near-white and looks uncoloured.  Clipping the range to the inner
+    percentiles spreads the scale over the bulk of the data; values beyond
+    the clip saturate at the blue/red anchors while genuinely-zero members
+    stay white.
+
+    Args:
+        values: ``{sap_id: value}`` map.
+        clip_pct: Percent clipped off each end of the range (0 → the raw
+            min/max, ``< 50``).  E.g. ``10`` uses the 10th–90th percentiles.
+
+    Returns:
+        ``(vmin, vmax)`` — the (possibly clipped) range.
+    """
+    arr = np.fromiter(values.values(), dtype=float)
+    if arr.size == 0:
+        return 0.0, 0.0
+    p = max(0.0, min(float(clip_pct), 49.0))
+    lo = float(np.percentile(arr, p))
+    hi = float(np.percentile(arr, 100.0 - p))
+    if lo >= hi:
+        return float(np.min(arr)), float(np.max(arr))
+    return lo, hi
 
 
 def _load_pushover_flag_values(
@@ -230,6 +322,34 @@ def _load_npz_quantities(
     return values, (vmin, vmax), {}
 
 
+def _applied_colour_matches(attrs, rgb) -> bool:
+    """Best-effort read-back of an object's colour after ``CommitChanges``.
+
+    Rhino's CPython binding can silently drop attribute commits on some
+    object types, so the colouring code verifies the colour actually stuck
+    instead of trusting the call count.  When the colour cannot be
+    introspected we assume it applied (no false alarms).
+
+    Args:
+        attrs: The object's ``ObjectAttributes``.
+        rgb: The ``(r, g, b)`` tuple that was just assigned.
+
+    Returns:
+        ``True`` when the read-back colour matches *rgb* (or cannot be
+        checked), ``False`` when it is provably different or absent.
+    """
+    try:
+        applied = attrs.ObjectColor
+    except Exception:
+        return True
+    if applied is None:
+        return False
+    try:
+        return (int(applied.R), int(applied.G), int(applied.B)) == rgb
+    except Exception:
+        return True
+
+
 def _colour_doc_objects(
     values: dict,
     id_key: str,
@@ -237,6 +357,7 @@ def _colour_doc_objects(
     vmax: float,
     layer_filter: str = "",
     skip_locked: bool = True,
+    bands: Optional[int] = None,
 ) -> int:
     """Colour Rhino objects whose ``id_key`` UserString is in *values*.
 
@@ -250,6 +371,8 @@ def _colour_doc_objects(
         vmin, vmax: Value range for the diverging colour scale.
         layer_filter: Optional glob filter on the layer full path.
         skip_locked: Skip objects on locked layers (default ``True``).
+        bands: Optional discrete band count for a stepped scale (``None``
+            → continuous ramp).
 
     Returns:
         Number of objects coloured.
@@ -262,6 +385,8 @@ def _colour_doc_objects(
 
     doc = sc.doc
     coloured = 0
+    failed_apply = 0
+    failed_kinds: Counter = Counter()
 
     # Iterate the ObjectTable directly — pythonnet does not expose the
     # ``ObjectTable`` indexer as ``__getitem__`` in Rhino 8's CPython, so
@@ -292,13 +417,35 @@ def _colour_doc_objects(
             continue
 
         val = values[us]
-        rgb = _value_to_rgb(val, vmin, vmax)
+        rgb = _value_to_rgb(val, vmin, vmax, bands=bands)
         colour = Rhino.Display.ColorRGBA(rgb[0], rgb[1], rgb[2], 255)
 
         attrs.ObjectColor = colour
         attrs.ColorSource = ObjectColorSource.ColorFromObject
         rh_obj.CommitChanges()
-        coloured += 1
+        if not _applied_colour_matches(attrs, rgb):
+            # Some Rhino 8 CPython builds silently drop the attribute
+            # commit on Extrusion/Brep objects — retry through the document
+            # API, which replaces the object's attributes wholesale (attrs
+            # is a full copy, so the SAP_*/FEA_* UserStrings survive).
+            with contextlib.suppress(Exception):
+                sc.doc.Objects.ModifyAttributes(rh_obj.Id, attrs)
+        # Read back: only count colours that actually stuck.
+        if _applied_colour_matches(attrs, rgb):
+            coloured += 1
+        else:
+            failed_apply += 1
+            failed_kinds[type(rh_obj).__name__] += 1
+
+    if failed_apply:
+        kinds = ", ".join(f"{k}={n}" for k, n in failed_kinds.most_common())
+        print(
+            f"WARNING: {failed_apply} object colour(s) did not stick after "
+            "CommitChanges/ModifyAttributes — Rhino ignored the attribute "
+            f"update (failed by type: {kinds}).  Re-run with "
+            "_SUPPRESS_REDRAW = False in the smoke test, or check the "
+            "viewport display mode (Object Colors)."
+        )
 
     doc.Views.Redraw()
     return coloured
@@ -314,6 +461,9 @@ def colour_from_npz(
     verbose: bool = True,
     stage: str = None,
     aggregate_parents: bool = False,
+    scale_mode: str = "continuous",
+    n_steps: int = 9,
+    clip_pct: float = 0.0,
 ) -> int:
     """Colour Rhino frame objects by a force/moment quantity from an NPZ file.
 
@@ -340,6 +490,16 @@ def colour_from_npz(
         Map child-element values back to their parent frame IDs
         (max-abs envelope) so SAP-stage geometry can be coloured from
         meshed-stage results.
+    scale_mode : str
+        ``"continuous"`` (default — smooth diverging ramp, only the global
+        min/max saturate) or ``"stepped"`` (discrete bands so mid-range
+        magnitudes get distinct colours).
+    n_steps : int
+        Number of bands for ``scale_mode="stepped"`` (odd ≥ 3).
+    clip_pct : float
+        Percent clipped off each end of the value range before colouring
+        (``0`` = raw min/max).  Clipping to the inner percentiles stops a
+        few extreme members from washing the bulk out to near-white.
 
     Returns
     -------
@@ -364,6 +524,12 @@ def colour_from_npz(
         print(f"{label}Loaded {len(sap_values)} elements from results")
         print(f"  {quantity} range: [{vmin:.4g}, {vmax:.4g}]")
 
+    if clip_pct:
+        vmin, vmax = _percentile_range(sap_values, clip_pct)
+        if verbose:
+            label = f"[{combo}] " if combo else ""
+            print(f"{label}  clipped to inner {clip_pct:g}% percentiles: [{vmin:.4g}, {vmax:.4g}]")
+
     coloured = _colour_doc_objects(
         sap_values,
         "SAP_FrameID",
@@ -371,11 +537,14 @@ def colour_from_npz(
         vmax,
         layer_filter=layer_filter,
         skip_locked=skip_locked,
+        bands=_bands_from_scale_mode(scale_mode, n_steps),
     )
 
     label = f"[{combo}] " if combo else ""
     if verbose:
-        print(f"{label}Coloured {coloured} objects by {quantity}")
+        bands = _bands_from_scale_mode(scale_mode, n_steps)
+        mode = f"stepped ({bands} bands)" if bands else "continuous"
+        print(f"{label}Coloured {coloured} objects by {quantity} ({mode})")
 
     return coloured
 
@@ -391,6 +560,9 @@ def colour_frame_by_npz_ratio(
     denominator: str = "My",
     use_local: bool = True,
     stage: str = None,
+    scale_mode: str = "continuous",
+    n_steps: int = 9,
+    clip_pct: float = 0.0,
     **kwargs,
 ) -> int:
     """Colour by the ratio of two force/moment quantities.
@@ -437,6 +609,9 @@ def colour_frame_by_npz_ratio(
                 vmin = min(vmin, r)
                 vmax = max(vmax, r)
 
+    if clip_pct:
+        vmin, vmax = _percentile_range(ratios, clip_pct)
+
     coloured = _colour_doc_objects(
         ratios,
         "SAP_FrameID",
@@ -444,6 +619,7 @@ def colour_frame_by_npz_ratio(
         vmax,
         layer_filter=kwargs.get("layer_filter", ""),
         skip_locked=kwargs.get("skip_locked", True),
+        bands=_bands_from_scale_mode(scale_mode, n_steps),
     )
 
     if kwargs.get("verbose", True):
@@ -704,12 +880,11 @@ def _create_flag_meshes(
     import Rhino
 
     created = 0
+    failed_ids: list[str] = []
 
     for i in range(len(sub_sap_ids)):
-        v_i = float(val_i_arr[i]) if not np.isnan(float(val_i_arr[i])) else 0.0
-        v_j = float(val_j_arr[i]) if not np.isnan(float(val_j_arr[i])) else 0.0
-        if abs(v_i) < 1e-12 and abs(v_j) < 1e-12:
-            continue
+        # Note: zero/negligible-force skipping lives inside
+        # compute_flag_parts (relative tolerance) — do not duplicate it.
 
         # Get element end points
         n_i_tag = int(sub_n_i[i])
@@ -761,11 +936,11 @@ def _create_flag_meshes(
         else:
             vn = np.array([vec_z[0], vec_z[1], vec_z[2]])
 
-        # Use original (un-negated) values
+        # Use original (un-negated) values — compute_flag_parts applies the
+        # relative zero-snap (a pinned end's ~1e-16 residual is treated as
+        # zero), so a degenerate flag is never handed to Rhino.
         Fi = float(val_i_arr[i]) if not np.isnan(float(val_i_arr[i])) else 0.0
         Fj = float(val_j_arr[i]) if not np.isnan(float(val_j_arr[i])) else 0.0
-        if abs(Fi) < 1e-12 and abs(Fj) < 1e-12:
-            continue
 
         from ..utils import compute_flag_parts
 
@@ -775,7 +950,14 @@ def _create_flag_meshes(
             return _value_to_rgb(float(val), -max_abs, max_abs)
 
         def _add_flag_mesh(verts, col_val, fid, vi_t, vj_t):
-            """Add a coloured Mesh flag with attributes and UserText."""
+            """Add a coloured Mesh flag with attributes and UserText.
+
+            Returns:
+                ``True`` when a valid mesh object was actually added to the
+                document.  Rhino's ``AddMesh`` silently rejects degenerate
+                geometry (e.g. a face with coincident vertices), so only
+                confirmed adds may be counted.
+            """
             mesh = rg.Mesh()
             for v in verts:
                 mesh.Vertices.Add(float(v[0]), float(v[1]), float(v[2]))
@@ -795,7 +977,8 @@ def _create_flag_meshes(
             a.SetUserString("SAP_FrameID", str(fid))
             a.SetUserString(f"{quantity}_i", f"{vi_t:.4g}")
             a.SetUserString(f"{quantity}_j", f"{vj_t:.4g}")
-            doc.Objects.AddMesh(mesh, a)
+            guid = doc.Objects.AddMesh(mesh, a)
+            return guid is not None
 
         # ── Build flag geometry via shared utility ─────────────────
         try:
@@ -807,10 +990,19 @@ def _create_flag_meshes(
                 Fj,
                 scale_factor,
             ):
-                _add_flag_mesh(verts, col_val, str(sub_sap_ids[i]), Fi, Fj)
-                created += 1
+                if _add_flag_mesh(verts, col_val, str(sub_sap_ids[i]), Fi, Fj):
+                    created += 1
+                else:
+                    failed_ids.append(str(sub_sap_ids[i]))
         except Exception:
+            failed_ids.append(str(sub_sap_ids[i]))
             continue
+
+    if failed_ids:
+        print(
+            f"WARNING: {len(failed_ids)} flag mesh(es) rejected by Rhino — "
+            f"skipped SAP IDs: {', '.join(sorted(set(failed_ids)))}"
+        )
 
     return created
 
