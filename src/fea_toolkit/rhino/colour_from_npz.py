@@ -210,12 +210,14 @@ def _colour_doc_objects(
             # subclass in Rhino 8's CPython — ``ExtrusionObject`` raises
             # AttributeError — so resolve the layer path from the object's
             # ``Attributes.LayerIndex`` instead (``doc.Layers[i]`` works,
-            # unlike ``doc.Objects[i]``).
+            # unlike ``doc.Objects[i]``).  ``Layer.FullPath`` uses ``::``
+            # as its separator in real Rhino, while the filter API uses
+            # ``/`` — normalise both sides before matching.
             layer_idx = rh_obj.Attributes.LayerIndex
             if layer_idx < 0:
                 continue
-            layer_path = doc.Layers[layer_idx].FullPath
-            if not fnmatch.fnmatch(layer_path, layer_filter):
+            layer_path = doc.Layers[layer_idx].FullPath.replace("::", "/")
+            if not fnmatch.fnmatch(layer_path, layer_filter.replace("::", "/")):
                 continue
 
         attrs = rh_obj.Attributes

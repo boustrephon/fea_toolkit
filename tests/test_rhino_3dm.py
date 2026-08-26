@@ -114,6 +114,10 @@ class FakeLayerTable:
     def __len__(self):
         return len(self._layers)
 
+    @property
+    def Count(self):
+        return len(self._layers)
+
     def __getitem__(self, idx):
         return self._layers[idx]
 
@@ -434,6 +438,36 @@ class TestColourDocObjects:
         assert n == 1
         assert doc.Objects._items[idx].Attributes.ColorSource == "ColorFromObject"
 
+    def test_layer_filter_handles_rhino_separator(self, rhino_env):
+        """Rhino 8's ``Layer.FullPath`` uses ``::`` while the filter API
+        uses ``/`` — colouring must normalise both sides before matching."""
+        doc = rhino_env
+        layer = types.SimpleNamespace(FullPath="SAP2000::Mesh::Frames::CL::UB300")
+        doc.Layers._layers.append(layer)
+        lidx = len(doc.Layers._layers) - 1
+        attrs = FakeObjectAttributes()
+        attrs.LayerIndex = lidx
+        attrs.SetUserString("SAP_FrameID", "B1")
+        doc.Objects.AddLine(None, attrs)
+
+        n = _colour_doc_objects(
+            {"B1": 5.0},
+            "SAP_FrameID",
+            0.0,
+            5.0,
+            layer_filter="SAP2000/Mesh/*",
+        )
+        assert n == 1
+        # The same object must NOT match a filter outside its layer tree.
+        n2 = _colour_doc_objects(
+            {"B1": 5.0},
+            "SAP_FrameID",
+            0.0,
+            5.0,
+            layer_filter="SAP2000/SAP/*",
+        )
+        assert n2 == 0
+
 
 # ── Deformed-shape overlay construction ──────────────────────────────────
 
@@ -464,6 +498,27 @@ class TestDeformedGeometry:
         assert (line.p0.X, line.p0.Y, line.p0.Z) == (0.5, 0.0, 0.0)
         assert (line.p1.X, line.p1.Y, line.p1.Z) == (10.0, 0.0, 0.0)
         assert rhino_env.Objects._items[0].Attributes.GetUserString("SAP_FrameID") == "1"
+
+
+class TestFindLayer:
+    def test_rhino_separator_not_duplicated(self, rhino_env):
+        """Real Rhino layers report ``FullPath`` with ``::`` separators, so
+        ``LayerTable.Find`` misses ``/``-paths.  ``create_or_get_layer``
+        must still find an existing layer instead of duplicating it."""
+        doc = rhino_env
+        existing = types.SimpleNamespace(
+            Name="UB300",
+            FullPath="SAP2000::Mesh::Frames::CL::UB300",
+            ParentLayerId=None,
+        )
+        doc.Layers._layers.append(existing)
+        n_before = len(doc.Layers._layers)
+
+        from fea_toolkit.rhino.layers import create_or_get_layer
+
+        got = create_or_get_layer("SAP2000/Mesh/Frames/CL/UB300")
+        assert got == n_before - 1
+        assert len(doc.Layers._layers) == n_before  # found, not duplicated
 
 
 class _BrokenIndexObjects:

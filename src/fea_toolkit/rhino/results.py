@@ -384,7 +384,9 @@ def create_deformed_geometry(
     import scriptcontext as sc
 
     doc = sc.doc
-    layer_name = f"{layer_root}/Deformed/{label}"
+    # The label embeds a source separator (e.g. "static/DEAD"); flatten it
+    # to "_" so it forms a single layer segment rather than nested layers.
+    layer_name = f"{layer_root}/Deformed/{label.replace('/', '_')}"
     layer_idx = create_or_get_layer(layer_name)
 
     coords = []
