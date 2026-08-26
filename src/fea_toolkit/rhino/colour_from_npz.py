@@ -195,14 +195,14 @@ def _colour_doc_objects(
     from Rhino.DocObjects import ObjectColorSource
 
     doc = sc.doc
-    objs = doc.Objects
     coloured = 0
 
-    for i in range(objs.Count):
-        rh_obj = objs[i]
-        if rh_obj is None:
-            continue
-        if rh_obj.IsDeleted or (skip_locked and rh_obj.IsLocked):
+    # Iterate the ObjectTable directly — pythonnet does not expose the
+    # ``ObjectTable`` indexer as ``__getitem__`` in Rhino 8's CPython, so
+    # ``range(objs.Count)`` + ``objs[i]`` hits the abstract
+    # ``_collections_abc.Sequence.__getitem__`` and always raises IndexError.
+    for rh_obj in doc.Objects:
+        if rh_obj is None or rh_obj.IsDeleted or (skip_locked and rh_obj.IsLocked):
             continue
 
         if layer_filter:
@@ -533,12 +533,10 @@ def create_result_flags(
     del_idx = layer_table.Find(layer_name, True)
     if del_idx >= 0:
         objs_to_del = []
-        for i in range(doc.Objects.Count):
-            try:
-                rh_obj = doc.Objects[i]
-            except Exception:
-                continue
-            if rh_obj is None:
+        # Iterate directly — see ``_colour_doc_objects``: pythonnet does
+        # not expose the ObjectTable indexer in Rhino 8's CPython.
+        for rh_obj in doc.Objects:
+            if rh_obj is None or rh_obj.IsDeleted:
                 continue
             if rh_obj.Attributes.LayerIndex == del_idx:
                 objs_to_del.append(rh_obj.Id)

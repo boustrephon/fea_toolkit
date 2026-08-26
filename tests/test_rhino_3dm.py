@@ -362,6 +362,46 @@ class TestColourDocObjects:
         assert n == 0
         assert doc.Objects[0].Attributes.ObjectColor is None
 
+    def test_rhino_8_broken_indexer_uses_iteration(self, rhino_env):
+        """Rhino 8 CPython regression: ``doc.Objects[i]`` always raises
+        IndexError (pythonnet routes it to the abstract
+        ``_collections_abc.Sequence.__getitem__``).  Colouring must iterate
+        the ObjectTable instead of ``range(Count)`` + indexing.
+        """
+        doc = rhino_env
+        self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", "B1")
+        items = list(doc.Objects._items)
+        doc.Objects = _BrokenIndexObjects(items)
+
+        n = _colour_doc_objects(
+            {"B1": 5.0},
+            "SAP_FrameID",
+            0.0,
+            5.0,
+            layer_filter="SAP2000/Mesh/*",
+        )
+        assert n == 1
+        assert items[0].Attributes.ColorSource == "ColorFromObject"
+
+
+class _BrokenIndexObjects:
+    """Mirror of Rhino 8's ``ObjectTable`` as seen by pythonnet: ``Count``
+    works but the indexer is unusable; only iteration (``IEnumerable``)
+    yields objects."""
+
+    def __init__(self, items):
+        self._items = items
+
+    @property
+    def Count(self):
+        return len(self._items)
+
+    def __getitem__(self, index):
+        raise IndexError
+
+    def __iter__(self):
+        return iter(self._items)
+
 
 # ── Optional rhino3dm .3dm round-trip ────────────────────────────────────
 
