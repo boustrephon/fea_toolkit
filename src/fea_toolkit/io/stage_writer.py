@@ -367,6 +367,7 @@ def write_model_stages(
     config: t.Optional[dict] = None,
     static_results: t.Optional[dict] = None,
     modal_result: t.Optional[dict] = None,
+    mode_shapes: t.Optional[dict] = None,
     pushover_results: t.Optional[dict] = None,
     fmt: str = "npz",
     geometry: bool = True,
@@ -391,6 +392,9 @@ def write_model_stages(
         static_results: Static analysis results dict (same shape accepted
             by :func:`fea_toolkit.io.unified_writer.write_results`).
         modal_result: Modal analysis results dict.
+        mode_shapes: Mode-shape eigenvectors ``{mode_idx: {tag: (dx,dy,dz)}}``
+            — written under ``modal/mode_dx`` … ``modal/mode_dz`` (required
+            for modal deformed-shape overlays in Rhino).
         pushover_results: Pushover results per direction, as
             ``{direction: (step_results, results)}`` where *step_results*
             is the builder's ``pushover_step_results`` list and *results*
@@ -480,7 +484,7 @@ def write_model_stages(
         analysis_types.append("modal")
         from .npz_writer import _collect_modal
 
-        arrays.update(_collect_modal(modal_result))
+        arrays.update(_collect_modal(modal_result, mode_shapes=mode_shapes))
     if pushover_results:
         analysis_types.append("pushover")
         from .npz_writer import collect_pushover_arrays
