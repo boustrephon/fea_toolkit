@@ -115,18 +115,6 @@ from .sap_data import (
 from .sections import SectionLibrary
 from .selection import Selection
 from .source_resolver import ResolvedSource, resolve_model_source
-from .storey_response import (
-    StoreyRigidBody,
-    build_storey_table,
-    compute_linear_storey_responses,
-    group_shell_forces_by_section,
-    modal_storey_drifts,
-    peak_displacement,
-    rigid_body_fit,
-    storey_displacements,
-    storey_drifts,
-    storey_shears,
-)
 from .stories import (
     StoryLevel,
     identify_stories,
@@ -144,6 +132,42 @@ from .units import (
     convert_mesh_units,
     unit_multipliers,
 )
+
+# ── Lazy re-exports (PEP 562) ─────────────────────────────────────
+# ``storey_response`` imports pandas, which is NOT a required dependency
+# (see ``pyproject.toml`` core deps) and is absent from Rhino 8's bundled
+# CPython.  ``import fea_toolkit`` must work without pandas, so the
+# storey-response names are resolved lazily here instead of eagerly.
+# ``from fea_toolkit.model import storey_displacements`` and
+# ``fea_toolkit.model.storey_displacements`` work exactly as before.
+_STOREY_RESPONSE_NAMES = frozenset(
+    {
+        "StoreyRigidBody",
+        "build_storey_table",
+        "compute_linear_storey_responses",
+        "group_shell_forces_by_section",
+        "modal_storey_drifts",
+        "peak_displacement",
+        "rigid_body_fit",
+        "storey_displacements",
+        "storey_drifts",
+        "storey_shears",
+    }
+)
+
+
+def __getattr__(name: str):
+    """PEP 562 lazy resolution for the pandas-dependent storey-response API."""
+    if name in _STOREY_RESPONSE_NAMES:
+        from . import storey_response
+
+        return getattr(storey_response, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_STOREY_RESPONSE_NAMES))
+
 
 __all__ = [
     "BILINEARIZE_METHODS",
