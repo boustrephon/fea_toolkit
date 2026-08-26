@@ -303,6 +303,50 @@ class TestValueToRgb:
 
         assert _value_to_rgb(5.0, 5.0, 5.0) == (255, 255, 255)
 
+    def test_stepped_quantises_to_bands(self):
+        from fea_toolkit.rhino.colour_from_npz import _value_to_rgb
+
+        # 9 bands → band centres at -1, -0.75, ..., 0, ..., 0.75, 1.
+        assert _value_to_rgb(0.0, -100, 100, bands=9) == (255, 255, 255)
+        assert _value_to_rgb(-100.0, -100, 100, bands=9) == (0, 25, 255)
+        assert _value_to_rgb(100.0, -100, 100, bands=9) == (255, 25, 0)
+        # Values inside one band share a colour (stepped, not continuous)…
+        assert _value_to_rgb(20.0, -100, 100, bands=9) == (255, 197, 191)
+        assert _value_to_rgb(24.0, -100, 100, bands=9) == (255, 197, 191)
+        # …and differ from the continuous tint for the same value.
+        assert _value_to_rgb(20.0, -100, 100) != (255, 197, 191)
+        # Even band counts are normalised to odd (zero stays the central
+        # white band).
+        assert _value_to_rgb(0.0, -100, 100, bands=8) == (255, 255, 255)
+
+    def test_stepped_negative_side_bands(self):
+        from fea_toolkit.rhino.colour_from_npz import _value_to_rgb
+
+        # -20 → t=-0.2 → snapped to the -0.25 band → pale blue.
+        assert _value_to_rgb(-20.0, -100, 100, bands=9) == (191, 197, 255)
+
+    def test_bands_from_scale_mode(self):
+        from fea_toolkit.rhino.colour_from_npz import _bands_from_scale_mode
+
+        assert _bands_from_scale_mode("continuous") is None
+        assert _bands_from_scale_mode("stepped", n_steps=9) == 9
+        assert _bands_from_scale_mode("stepped", n_steps=8) == 9  # even → odd
+        assert _bands_from_scale_mode("stepped", n_steps=2) == 3  # floor of 3
+        with pytest.raises(ValueError):
+            _bands_from_scale_mode("rainbow")
+
+    def test_percentile_range_clips_outliers(self):
+        from fea_toolkit.rhino.colour_from_npz import _percentile_range
+
+        vals = {str(i): v for i, v in enumerate([0.0, 1.0, 2.0, 3.0, 100.0])}
+        lo, hi = _percentile_range(vals, 10.0)
+        assert lo >= 0.0 and hi < 100.0  # the 100 outlier is clipped out
+        assert lo < hi
+        # clip_pct=0 → raw min/max
+        assert _percentile_range(vals, 0.0) == (0.0, 100.0)
+        # degenerate clip (lo >= hi) falls back to the raw min/max
+        assert _percentile_range(vals, 49.0)[0] < _percentile_range(vals, 49.0)[1]
+
 
 # ── Pushover flag force rebasing (_load_pushover_flag_values) ─────────────
 

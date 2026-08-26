@@ -165,6 +165,9 @@ see `.clinerules` §3.11.
 "Export model to Tcl script"        → from fea_toolkit.opensees import export_mesh_model_to_tcl
 "Export to Rhino 8"                 → from fea_toolkit.rhino import RhinoImporter
 "Colour Rhino from NPZ"             → from fea_toolkit.rhino import colour_from_npz
+"Keep Mesh geometry uncoloured"     → apply_results(..., colour_members=False)
+"Stepped result colour scale"       → apply_results(..., scale_mode="stepped", n_steps=9)
+"Clip result colour outliers"       → apply_results(..., clip_pct=10)
 ```
 
 ### Reporting

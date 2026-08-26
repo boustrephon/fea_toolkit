@@ -220,6 +220,9 @@ def colour_shells_from_results(
     layer_filter: str = "",
     stage: str = None,
     aggregate_parents: bool = False,
+    scale_mode: str = "continuous",
+    n_steps: int = 9,
+    clip_pct: float = 0.0,
     verbose: bool = True,
 ) -> int:
     """Colour Rhino shell objects by a pushover in-plane force quantity.
@@ -238,12 +241,23 @@ def colour_shells_from_results(
         layer_filter: Optional glob filter on the layer full path.
         stage: Stage to promote for stage files (``None`` → auto).
         aggregate_parents: Map child-shell values to parent area IDs.
+        scale_mode: ``"continuous"`` (default) or ``"stepped"`` (discrete
+            bands so mid-range magnitudes get distinct colours).
+        n_steps: Number of bands for ``scale_mode="stepped"`` (odd ≥ 3).
+        clip_pct: Percent clipped off each end of the value range before
+            colouring (``0`` = raw min/max).  Clipping to the inner
+            percentiles stops extreme outliers from washing the bulk out.
         verbose: Print progress messages.
 
     Returns:
         Number of shell objects coloured.
     """
-    from .colour_from_npz import _colour_doc_objects, _load_unified
+    from .colour_from_npz import (
+        _bands_from_scale_mode,
+        _colour_doc_objects,
+        _load_unified,
+        _percentile_range,
+    )
 
     data = _load_unified(source, stage=stage)
     values, (vmin, vmax) = _load_pushover_shell_quantities(
@@ -262,9 +276,24 @@ def colour_shells_from_results(
         print(f"{label}Loaded {len(values)} shells from results")
         print(f"  {quantity} range: [{vmin:.4g}, {vmax:.4g}]")
 
-    coloured = _colour_doc_objects(values, "SAP_AreaID", vmin, vmax, layer_filter=layer_filter)
+    if clip_pct:
+        vmin, vmax = _percentile_range(values, clip_pct)
+        if verbose:
+            label = f"[{direction}] " if direction else ""
+            print(f"{label}  clipped to inner {clip_pct:g}% percentiles: [{vmin:.4g}, {vmax:.4g}]")
+
+    bands = _bands_from_scale_mode(scale_mode, n_steps)
+    coloured = _colour_doc_objects(
+        values,
+        "SAP_AreaID",
+        vmin,
+        vmax,
+        layer_filter=layer_filter,
+        bands=bands,
+    )
     if verbose:
-        print(f"Coloured {coloured} shell objects by {quantity}")
+        mode = f"stepped ({bands} bands)" if bands else "continuous"
+        print(f"Coloured {coloured} shell objects by {quantity} ({mode})")
     return coloured
 
 
@@ -340,6 +369,9 @@ def colour_frames_from_results(
     layer_filter: str = "",
     stage: str = None,
     aggregate_parents: bool = False,
+    scale_mode: str = "continuous",
+    n_steps: int = 9,
+    clip_pct: float = 0.0,
     verbose: bool = True,
 ) -> int:
     """Colour Rhino frame objects by a pushover frame force/moment quantity.
@@ -357,12 +389,23 @@ def colour_frames_from_results(
         layer_filter: Optional glob filter on the layer full path.
         stage: Stage to promote for stage files (``None`` → auto).
         aggregate_parents: Map child-frame values to parent frame IDs.
+        scale_mode: ``"continuous"`` (default) or ``"stepped"`` (discrete
+            bands so mid-range magnitudes get distinct colours).
+        n_steps: Number of bands for ``scale_mode="stepped"`` (odd ≥ 3).
+        clip_pct: Percent clipped off each end of the value range before
+            colouring (``0`` = raw min/max).  Clipping to the inner
+            percentiles stops extreme outliers from washing the bulk out.
         verbose: Print progress messages.
 
     Returns:
         Number of frame objects coloured.
     """
-    from .colour_from_npz import _colour_doc_objects, _load_unified
+    from .colour_from_npz import (
+        _bands_from_scale_mode,
+        _colour_doc_objects,
+        _load_unified,
+        _percentile_range,
+    )
 
     data = _load_unified(source, stage=stage)
     values, (vmin, vmax) = _load_pushover_frame_quantities(
@@ -381,9 +424,24 @@ def colour_frames_from_results(
         print(f"{label}Loaded {len(values)} frames from results")
         print(f"  {quantity} range: [{vmin:.4g}, {vmax:.4g}]")
 
-    coloured = _colour_doc_objects(values, "SAP_FrameID", vmin, vmax, layer_filter=layer_filter)
+    if clip_pct:
+        vmin, vmax = _percentile_range(values, clip_pct)
+        if verbose:
+            label = f"[{direction}] " if direction else ""
+            print(f"{label}  clipped to inner {clip_pct:g}% percentiles: [{vmin:.4g}, {vmax:.4g}]")
+
+    bands = _bands_from_scale_mode(scale_mode, n_steps)
+    coloured = _colour_doc_objects(
+        values,
+        "SAP_FrameID",
+        vmin,
+        vmax,
+        layer_filter=layer_filter,
+        bands=bands,
+    )
     if verbose:
-        print(f"Coloured {coloured} frame objects by {quantity}")
+        mode = f"stepped ({bands} bands)" if bands else "continuous"
+        print(f"Coloured {coloured} frame objects by {quantity} ({mode})")
     return coloured
 
 
@@ -596,6 +654,10 @@ def apply_results(
     deformed_scale: float = None,
     layer_filter: str = "",
     aggregate_parents: bool = False,
+    colour_members: bool = True,
+    scale_mode: str = "continuous",
+    n_steps: int = 9,
+    clip_pct: float = 0.0,
     verbose: bool = True,
 ) -> dict:
     """One-call results application for a Rhino document.
@@ -612,6 +674,17 @@ def apply_results(
       quantity (``shell_quantity``, ``shell_direction``, ``shell_step``);
     * ``deformed=True`` — create a deformed-shape overlay
       (``deformed_source``, ``deformed_mode``, ``deformed_scale``).
+
+    ``colour_members`` is a master switch for the *frame/shell geometry*
+    recolouring above.  When ``False`` the imported Mesh geometry keeps
+    its section/layer colours (recommended when the result scale is only
+    going to saturate a few extreme members) while the deformed overlay
+    and flags are still created.  ``scale_mode`` selects the colour scale:
+    ``"continuous"`` (default — smooth diverging ramp where only the
+    global min/max saturate) or ``"stepped"`` (discrete bands so
+    mid-range magnitudes get distinct colours).  ``clip_pct`` clips the
+    value range to the inner percentiles before colouring, so a few
+    extreme members no longer wash the bulk out to near-white.
 
     ``aggregate_parents=True`` maps child-element results back to their
     parent SAP IDs (max-abs envelope) so SAP-stage geometry can be
@@ -641,6 +714,13 @@ def apply_results(
         deformed_scale: Deformed-shape scale (``None`` → auto).
         layer_filter: Optional glob filter on the layer full path.
         aggregate_parents: Map child results to parent IDs.
+        colour_members: Master switch — ``False`` leaves the imported
+            frame/shell geometry in its section/layer colours (no result
+            recolouring), even when ``frames``/``shells`` are ``True``.
+        scale_mode: ``"continuous"`` (default) or ``"stepped"``.
+        n_steps: Number of bands for ``scale_mode="stepped"`` (odd ≥ 3).
+        clip_pct: Percent clipped off each end of the value range before
+            colouring (``0`` = raw min/max).
         verbose: Print progress messages.
 
     Returns:
@@ -650,7 +730,7 @@ def apply_results(
     from .colour_from_npz import colour_from_npz
 
     out: dict = {"coloured_frames": 0, "coloured_shells": 0, "deformed_objects": 0}
-    if frames:
+    if frames and colour_members:
         if frame_direction is not None:
             out["coloured_frames"] = colour_frames_from_results(
                 source,
@@ -660,6 +740,9 @@ def apply_results(
                 layer_filter=layer_filter,
                 stage=stage,
                 aggregate_parents=aggregate_parents,
+                scale_mode=scale_mode,
+                n_steps=n_steps,
+                clip_pct=clip_pct,
                 verbose=verbose,
             )
         else:
@@ -672,9 +755,12 @@ def apply_results(
                 verbose=verbose,
                 stage=stage,
                 aggregate_parents=aggregate_parents,
+                scale_mode=scale_mode,
+                n_steps=n_steps,
+                clip_pct=clip_pct,
             )
 
-    if shells:
+    if shells and colour_members:
         out["coloured_shells"] = colour_shells_from_results(
             source,
             quantity=shell_quantity,
@@ -683,7 +769,16 @@ def apply_results(
             layer_filter=layer_filter,
             stage=stage,
             aggregate_parents=aggregate_parents,
+            scale_mode=scale_mode,
+            n_steps=n_steps,
+            clip_pct=clip_pct,
             verbose=verbose,
+        )
+
+    if not colour_members and (frames or shells) and verbose:
+        print(
+            "apply_results: colour_members=False — mesh geometry left in its "
+            "section/layer colours (deformed overlay + flags still created)."
         )
 
     if deformed:
