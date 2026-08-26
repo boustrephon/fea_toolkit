@@ -621,6 +621,11 @@ def create_result_flags(
 
     layer_table = doc.Layers
     layer_index = create_or_get_layer(layer_name)
+    # Defensive: trust the on-disk layer table over the creation return
+    # value (pythonnet can mask Add()/Find() quirks on some builds).
+    _verified = _find_layer(layer_table, layer_name)
+    if _verified >= 0:
+        layer_index = _verified
 
     # ── Delete old flags on this layer ──────────────────────────────
     del_idx = _find_layer(layer_table, layer_name)
