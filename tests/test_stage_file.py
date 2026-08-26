@@ -84,6 +84,87 @@ class TestStageFile:
         data = read_results(p)
         assert get_schema_version(data) >= 2
 
+    def test_pushover_results_round_trip(self, prepared, tmp_path, fmt):
+        """Pushover step arrays for multiple directions survive the round-trip."""
+        from fea_toolkit.io import flatten_stage
+        from fea_toolkit.rhino.results import (
+            _load_deformed_arrays,
+            _load_pushover_shell_quantities,
+        )
+
+        md, mesh, config = prepared
+        fids = list(mesh.frame_elements)[:2]
+        step_results = [
+            {
+                "step": s,
+                "frame_forces": {
+                    str(f): {
+                        "fx": float(s),
+                        "fy": 0.0,
+                        "fz": 0.0,
+                        "mx": 0.0,
+                        "my": 0.0,
+                        "mz": float(s) * 10,
+                    }
+                    for f in fids
+                },
+                "shell_forces": {
+                    "S1": {
+                        "Nx": float(s) * 5,
+                        "Ny": 0.0,
+                        "Nxy": 0.0,
+                        "Mx": 0.0,
+                        "My": 0.0,
+                        "Mxy": 0.0,
+                    }
+                },
+                "node_displacements": {
+                    nd.node_tag: (0.0, 0.0, float(s) * 0.01) for nd in list(mesh.nodes.values())[:1]
+                },
+            }
+            for s in (1, 2, 3)
+        ]
+        po_results = {
+            "step": [0, 1, 2, 3],
+            "control_disp": [0.0, 0.1, 0.2, 0.3],
+            "base_shear": [0.0, 5.0, 10.0, 15.0],
+        }
+
+        p = str(tmp_path / f"model_po.{fmt}")
+        write_model_stages(
+            p,
+            sap=md,
+            mesh=mesh,
+            config=config,
+            fmt=fmt,
+            static_results={"DEAD": {"nodal_displacements": {}, "element_forces": {}}},
+            modal_result={"periods": [1.0, 0.5], "modal_props": {}},
+            pushover_results={
+                "+X": (step_results, po_results),
+                "-Y": (step_results, po_results),
+            },
+        )
+
+        data = read_results(p)
+        assert "pushover/+X/shell_Nx" in data
+        assert "pushover/-Y/shell_Nx" in data
+        assert "pushover/+X/control_disp" in data
+        assert list(data["analysis_types"]) == ["static", "modal", "pushover"]
+
+        # Global arrays are aligned to the *recorded* (converged) steps.
+        assert list(data["pushover/+X/control_disp"]) == [0.1, 0.2, 0.3]
+        assert list(data["pushover/+X/step"]) == [1, 2, 3]
+
+        # The Rhino results helpers read it back directly.
+        values, _range = _load_pushover_shell_quantities(data, "Nx", direction="+X")
+        assert values == {"S1": 15.0}  # last step
+        assert _load_deformed_arrays(data, "pushover", direction="+X")[3] == "pushover/+X/step2"
+
+        # flatten_stage exposes the geometry to legacy consumers.
+        flat = flatten_stage(p, stage="mesh")
+        assert "frame_sap_id" in flat
+        assert "shell_parent_sap_id" in flat
+
 
 class TestFormatParity:
     def test_same_payload_reads_back_identically(self, prepared, tmp_path):
