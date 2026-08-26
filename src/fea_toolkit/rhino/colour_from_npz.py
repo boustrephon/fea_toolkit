@@ -514,7 +514,6 @@ def create_result_flags(
         Number of flags created.
     """
     # ── Rhino imports ──────────────────────────────────────────────
-    import Rhino
     import Rhino.DocObjects as rd
     import Rhino.Geometry as rg
     import scriptcontext as sc
@@ -642,6 +641,68 @@ def create_result_flags(
             doc.Objects.Delete(objs_to_del, True)
 
     # ── Create flags ───────────────────────────────────────────────
+    # Viewport redraw is suppressed for the whole batch — with hundreds
+    # of AddMesh calls the per-object redraw dominates runtime otherwise.
+    from .layers import suppress_redraw
+
+    with suppress_redraw():
+        created = _create_flag_meshes(
+            doc,
+            rd,
+            rg,
+            node_coords,
+            sub_sap_ids,
+            sub_n_i,
+            sub_n_j,
+            val_i_arr,
+            val_j_arr,
+            quantity,
+            max_abs,
+            scale_factor,
+            layer_index,
+        )
+
+    doc.Views.Redraw()
+    # Reset CPlane to World XY
+    try:
+        import rhinoscriptsyntax as rs
+
+        rs.Command("_-CPlane _World _XY", 0)
+    except Exception:
+        pass
+
+    if verbose:
+        print(f"Created {created} flag(s) on layer '{layer_name}' for {quantity}")
+
+    return created
+
+
+def _create_flag_meshes(
+    doc,
+    rd,
+    rg,
+    node_coords,
+    sub_sap_ids,
+    sub_n_i,
+    sub_n_j,
+    val_i_arr,
+    val_j_arr,
+    quantity,
+    max_abs,
+    scale_factor,
+    layer_index,
+) -> int:
+    """Build the coloured flag meshes for one quantity.
+
+    Called with viewport redraw suppressed (see :func:`create_result_flags`)
+    because each ``AddMesh`` otherwise invalidates the viewport; with
+    hundreds of elements that per-object redraw dominates runtime.
+
+    Returns:
+        Number of flag meshes added to the document.
+    """
+    import Rhino
+
     created = 0
 
     for i in range(len(sub_sap_ids)):
@@ -750,18 +811,6 @@ def create_result_flags(
                 created += 1
         except Exception:
             continue
-
-    doc.Views.Redraw()
-    # Reset CPlane to World XY
-    try:
-        import rhinoscriptsyntax as rs
-
-        rs.Command("_-CPlane _World _XY", 0)
-    except Exception:
-        pass
-
-    if verbose:
-        print(f"Created {created} flag(s) on layer '{layer_name}' for {quantity}")
 
     return created
 
