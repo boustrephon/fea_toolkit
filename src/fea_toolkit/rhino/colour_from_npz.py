@@ -613,23 +613,17 @@ def create_result_flags(
     doc = sc.doc
     if layer_name is None:
         layer_name = f"{_FLAGS_LAYER}/{quantity}"
-    # Create layer path if needed (matching layers.py pattern)
+    # Reuse the layers.py helpers — the inline path here used
+    # ``layer_table.Find(name, True)`` with a ``/``-separated full path,
+    # which Rhino's Find does not match (FullPath uses ``::``), so it
+    # returned -1 and every flag fell through to the default layer.
+    from .layers import _find_layer, create_or_get_layer
+
     layer_table = doc.Layers
-    parts = layer_name.split("/")
-    for j in range(1, len(parts) + 1):
-        sub = "/".join(parts[:j])
-        if layer_table.Find(sub, True) < 0:
-            new_layer = rd.Layer()
-            new_layer.Name = parts[j - 1]
-            new_layer.Color = Rhino.Display.ColorRGBA(200, 200, 200, 255)
-            if j > 1:
-                parent_idx = layer_table.Find("/".join(parts[: j - 1]), True)
-                if parent_idx >= 0:
-                    new_layer.ParentLayerId = layer_table[parent_idx].Id
-            layer_table.Add(new_layer)
+    layer_index = create_or_get_layer(layer_name)
 
     # ── Delete old flags on this layer ──────────────────────────────
-    del_idx = layer_table.Find(layer_name, True)
+    del_idx = _find_layer(layer_table, layer_name)
     if del_idx >= 0:
         objs_to_del = []
         # Iterate directly — see ``_colour_doc_objects``: pythonnet does
@@ -709,21 +703,10 @@ def create_result_flags(
 
         from ..utils import compute_flag_parts
 
-        # Colour helper
+        # Colour helper — diverging blue→white→red across ±max_abs (same
+        # ramp as the frame/shell colouring, so zero reads white, not grey).
         def _c(val):
-            t = min(abs(val) / max_abs, 1.0) if max_abs > 0 else 0.0
-            if val >= 0:
-                return (
-                    int(255 * (0.3 + 0.7 * t)),
-                    int(255 * (0.3 - 0.2 * t)),
-                    int(255 * (0.3 - 0.3 * t)),
-                )
-            else:
-                return (
-                    int(255 * (0.3 - 0.3 * t)),
-                    int(255 * (0.3 - 0.2 * t)),
-                    int(255 * (0.3 + 0.7 * t)),
-                )
+            return _value_to_rgb(float(val), -max_abs, max_abs)
 
         def _add_flag_mesh(verts, col_val, fid, vi_t, vj_t):
             """Add a coloured Mesh flag with attributes and UserText."""
@@ -740,9 +723,7 @@ def create_result_flags(
             for _ in range(len(verts)):
                 mesh.VertexColors.Add(r, g, b)
             a = rd.ObjectAttributes()
-            lidx = layer_table.Find(layer_name, True)
-            if lidx >= 0:
-                a.LayerIndex = lidx
+            a.LayerIndex = layer_index
             a.ObjectColor = Rhino.Display.ColorRGBA(r, g, b, 255)
             a.ColorSource = rd.ObjectColorSource.ColorFromObject
             a.SetUserString("SAP_FrameID", str(fid))
@@ -890,24 +871,9 @@ def mark_unconnected_edges(
     doc = sc.doc
 
     # ── Ensure debug layer ──────────────────────────────────────────
-    layer_table = doc.Layers
-    parts = layer_name.split("/")
-    for j in range(1, len(parts) + 1):
-        sub = "/".join(parts[:j])
-        idx = layer_table.Find(sub, True)
-        if idx < 0:
-            new_layer = rd.Layer()
-            new_layer.Name = parts[j - 1]
-            new_layer.Color = Rhino.Display.ColorRGBA(200, 50, 50, 255)
-            if j > 1:
-                parent = layer_table.Find("/".join(parts[: j - 1]), True)
-                if parent >= 0:
-                    new_layer.ParentLayerId = layer_table[parent].Id
-            layer_table.Add(new_layer)
+    from .layers import create_or_get_layer
 
-    layer_idx = layer_table.Find(layer_name, True)
-    if layer_idx < 0:
-        layer_idx = -1
+    layer_idx = create_or_get_layer(layer_name)
 
     # ── Deduplicate edges ───────────────────────────────────────────
     seen: set = set()

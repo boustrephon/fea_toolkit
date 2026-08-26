@@ -363,3 +363,58 @@ class TestPushoverFlagValues:
         _sap, vi, vj = _load_pushover_flag_values(data, "+X", "Mz")
         assert vi[0] == 1.0 and np.isnan(vi[1])
         assert vj[0] == 0.5 and np.isnan(vj[1])
+
+
+# ── Flag geometry shape (moment vs shear) ──────────────────────────────────
+
+
+class TestFlagGeometry:
+    """Moment-diagram flags must be triangular / trapezoidal with offsets
+    perpendicular to the member axis — never shear-like rectangles."""
+
+    @staticmethod
+    def _perp(v, axis):
+        axis = np.asarray(axis, dtype=float)
+        return abs(np.dot(np.asarray(v, dtype=float), axis / np.linalg.norm(axis))) < 1e-9
+
+    def test_double_curvature_moment_is_trapezoid(self):
+        from fea_toolkit.utils import compute_flag_parts
+
+        pt1 = np.array([0.0, 0.0, 0.0])
+        pt2 = np.array([0.0, 3.0, 0.0])  # member along Y
+        vn = np.array([1.0, 0.0, 0.0])  # local-2 direction (X)
+        parts = list(compute_flag_parts(pt1, pt2, vn, 3000.0, -3000.0, 1.0))
+        assert len(parts) == 1
+        verts, _col = parts[0]
+        assert len(verts) == 4  # trapezoid spanning the zero crossing
+        assert self._perp(verts[3] - verts[0], pt2 - pt1)
+        assert self._perp(verts[2] - verts[1], pt2 - pt1)
+
+    def test_cantilever_moment_is_triangle(self):
+        from fea_toolkit.utils import compute_flag_parts
+
+        pt1 = np.array([0.0, 0.0, 0.0])
+        pt2 = np.array([0.0, 3.0, 0.0])
+        vn = np.array([1.0, 0.0, 0.0])
+        parts = list(compute_flag_parts(pt1, pt2, vn, 0.0, -2000.0, 1.0))
+        assert len(parts) == 1
+        verts, _col = parts[0]
+        assert len(verts) == 3  # apex at the pinned end
+
+    def test_constant_shear_is_rectangle(self):
+        """A constant shear along a member (Fi == -Fj, from static equilibrium)
+        yields a uniform-height parallelogram — this is the visual signature
+        that distinguishes shear diagrams from moment (triangular) diagrams."""
+        from fea_toolkit.utils import compute_flag_parts
+
+        pt1 = np.array([0.0, 0.0, 0.0])
+        pt2 = np.array([0.0, 3.0, 0.0])
+        vn = np.array([1.0, 0.0, 0.0])
+        parts = list(compute_flag_parts(pt1, pt2, vn, -500.0, 500.0, 1.0))
+        verts, _col = parts[0]
+        # both ends offset in the SAME direction -> uniform-height quad
+        assert len(verts) == 4
+        h1 = np.linalg.norm(verts[3] - verts[0])
+        h2 = np.linalg.norm(verts[2] - verts[1])
+        assert abs(h1 - h2) < 1e-9
+        assert h1 == 500.0
