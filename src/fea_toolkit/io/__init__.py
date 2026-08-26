@@ -35,20 +35,6 @@ from .npz_reader import (
     read_results_npz,
 )
 from .npz_writer import write_results_npz
-from .report import (
-    area_section_summary,
-    bounding_box,
-    format_linear_table,
-    load_pattern_totals,
-    material_summary,
-    modal_participation_df,
-    modal_table,
-    modal_table_enhanced,
-    section_summary,
-    summarise_load_cases,
-    summarise_load_patterns,
-    summarise_mass_sources,
-)
 from .results_schema import SCHEMA_VERSION, SCHEMA_VERSION_LEGACY, make_static_key, validate_npz
 from .s2k_parser import SAP2000Parser
 from .stage_reader import (
@@ -67,6 +53,44 @@ from .unified_writer import (
     collect_static_arrays,
     write_results,
 )
+
+# ── Lazy re-exports (PEP 562) ─────────────────────────────────────
+# ``report`` imports pandas, which is NOT a required dependency (see
+# ``pyproject.toml`` core deps) and is absent from Rhino 8's bundled
+# CPython.  ``import fea_toolkit.io`` must work without pandas, so the
+# report helper names are resolved lazily here instead of eagerly.
+# ``from fea_toolkit.io import bounding_box`` and
+# ``fea_toolkit.io.bounding_box`` work exactly as before.
+_REPORT_NAMES = frozenset(
+    {
+        "area_section_summary",
+        "bounding_box",
+        "format_linear_table",
+        "load_pattern_totals",
+        "material_summary",
+        "modal_participation_df",
+        "modal_table",
+        "modal_table_enhanced",
+        "section_summary",
+        "summarise_load_cases",
+        "summarise_load_patterns",
+        "summarise_mass_sources",
+    }
+)
+
+
+def __getattr__(name: str):
+    """PEP 562 lazy resolution for the pandas-dependent report API."""
+    if name in _REPORT_NAMES:
+        from . import report
+
+        return getattr(report, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_REPORT_NAMES))
+
 
 __all__ = [
     "SCHEMA_VERSION",
