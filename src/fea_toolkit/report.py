@@ -101,6 +101,19 @@ _DEFAULT_CONFIG: dict = {
     "static_verification": {"run": True},
     "model_viewer": {"enabled": False, "off_screen": True},
     "analysis_log": {"enabled": True},
+    # ── Unified results export (single self-contained .h5/.npz) ──
+    # When enabled, generate_report() writes a stage file bundling the
+    # sap/mesh model stages + modal + static + pushover results — the
+    # file RhinoImporter/apply_results consume.  Requires a full run
+    # (force_recompute=True if a stale cache exists).
+    "export": {
+        "enabled": False,
+        "path": None,  # None → {out_dir}/{model_stem}_results.{fmt}
+        "fmt": "h5",
+        "stages": ["sap", "mesh"],
+        "static": True,  # raw per-case static results (extra analysis)
+        "pushover": True,  # per-step frame/shell/node results (recording)
+    },
 }
 
 
@@ -218,6 +231,7 @@ def generate_report(
     push_spec_cfg = push_cfg.get("spectrum") or spec_cfg
     zeta_cfg = spec_cfg.get("damping", 0.05)
     log_cfg = cfg.get("analysis_log", {"enabled": True})
+    export_cfg = cfg.get("export") or {}
 
     log = AnalysisLog() if log_cfg.get("enabled", True) else None
 
@@ -234,7 +248,19 @@ def generate_report(
         if log:
             log.info("cache", "reusing cached results")
         with open(cache_path, "rb") as f:
-            return dict(pickle.load(f))
+            cached = dict(pickle.load(f))
+        # A cache hit must not silently skip a requested export: if the
+        # previous run exported a file that is now missing, the cache is
+        # stale with respect to the deliverable.
+        if export_cfg.get("enabled") and cached.get("export_path"):
+            ep = Path(cached["export_path"])
+            if not ep.exists():
+                print(
+                    f"WARNING: results export file {ep} is missing but cached "
+                    "results were reused — set general.force_recompute=True "
+                    "to regenerate it."
+                )
+        return cached
 
     if log:
         log.info("config", f"Model: {model_stem}")
@@ -396,6 +422,7 @@ def generate_report(
             spec_cfg=spec_cfg,
             linear_cfg=linear_cfg,
             name="StaticAnalysis",
+            collect_raw=bool(export_cfg.get("static", False)),
         )
 
     # Response spectrum (one per direction)
@@ -428,6 +455,10 @@ def generate_report(
                 brace_sections=push_cfg.get("brace_sections"),
                 directions=push_cfg["directions"],
                 name=f"Pushover-{pattern}",
+                config={"record_pushover_steps": True}
+                if export_cfg.get("pushover", False)
+                else None,
+                return_builders=bool(export_cfg.get("pushover", False)),
             )
 
     if log:
@@ -483,6 +514,78 @@ def generate_report(
     for _name, _ar in _man_results.items():
         if _name.startswith("Pushover-"):
             all_out[_name.split("-", 1)[1]] = _ar.data
+
+    # ── Unified results export (single self-contained file) ──────
+    # Bundles sap/mesh stages + modal + static + pushover results so
+    # RhinoImporter / apply_results consume one file.  Must run while the
+    # AnalysisBuilders are still in scope (they cannot be pickled), and
+    # before downstream plotting so a plot failure never loses the
+    # deliverable.
+    export_path = None
+    if export_cfg.get("enabled"):
+        if verbose:
+            print("Exporting unified results file...")
+        try:
+            from fea_toolkit.io.stage_writer import write_model_stages
+
+            _static_ar = _man_results.get("StaticAnalysis")
+            static_raw = _static_ar.data.get("static_raw") if _static_ar else None
+
+            po_export: dict = {}
+            if export_cfg.get("pushover", True):
+                for _pat, _dirs in all_out.items():
+                    for label, out in _dirs.items():
+                        ab = out.get("builder")
+                        if ab is not None and getattr(ab, "pushover_step_results", None):
+                            po_export[label] = (
+                                ab.pushover_step_results,
+                                out.get("results", {}),
+                            )
+
+            _fmt = export_cfg.get("fmt", "h5")
+            _stages = export_cfg.get("stages") or ["sap", "mesh"]
+            _path = export_cfg.get("path")
+            if not _path:
+                _path = str(resolved_out / f"{model_stem}_results.{_fmt}")
+            _modal_flat = modal_result.get("modal") if isinstance(modal_result, dict) else None
+            write_model_stages(
+                _path,
+                sap=md if "sap" in _stages else None,
+                mesh=mesh_model if "mesh" in _stages else None,
+                static_results=static_raw if export_cfg.get("static", True) else None,
+                modal_result=_modal_flat if export_cfg.get("modal", True) else None,
+                mode_shapes=(
+                    modal_result.get("shapes")
+                    if export_cfg.get("modal", True) and isinstance(modal_result, dict)
+                    else None
+                ),
+                pushover_results=po_export,
+                config=cfg.get("builder") or cfg.get("preprocessor") or {},
+                source_file=cfg.get("model", {}).get("path"),
+                fmt=_fmt,
+            )
+            export_path = _path
+            if verbose:
+                print(f"  Export written: {export_path}")
+                print(
+                    f"    stages={_stages}; static cases={len(static_raw or {})}; "
+                    f"pushover directions={sorted(po_export)}"
+                )
+            if log:
+                log.info("export", f"wrote {export_path}")
+        except Exception as exc:
+            print(f"  Results export failed: {exc}")
+            if log:
+                log.error("export", str(exc))
+
+    # AnalysisBuilders hold live OpenSees state and are not picklable —
+    # strip them from the manager results before the cache is written.
+    for _ar in _man_results.values():
+        _data = getattr(_ar, "data", None)
+        if isinstance(_data, dict):
+            for _v in _data.values():
+                if isinstance(_v, dict):
+                    _v.pop("builder", None)
 
     # CSM plots + comparison table
     fig_csm_plots: dict = {}
@@ -675,6 +778,7 @@ def generate_report(
         "alpha_max": alpha_max,
         "tg": tg,
         "out_dir": str(resolved_out),
+        "export_path": export_path,
         "model_comparison": model_comparison,
         "model_stories": model_stories,
         "df_stories": df_stories,

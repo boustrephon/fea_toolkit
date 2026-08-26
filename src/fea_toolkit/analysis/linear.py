@@ -157,6 +157,7 @@ def run_linear_cases(
     mesh_model,
     spec_cfg: Optional[dict] = None,
     linear_cfg: Optional[dict] = None,
+    raw_out: Optional[dict] = None,
 ) -> pd.DataFrame:
     """Run linear analysis cases and return a summary table.
 
@@ -165,6 +166,23 @@ def run_linear_cases(
 
     Auto-detects static load cases from the SAP2000 model, or uses
     the ``linear_cfg["cases"]`` list.
+
+    Args:
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
+        mesh_model: Pre-processed :class:`~fea_toolkit.model.mesh_model.MeshModel`.
+        spec_cfg: Spectrum config passed through to the RS pass.
+        linear_cfg: Linear config (``cases``, ``n_modes``).
+        raw_out: Optional dict filled with the raw per-case results as
+            ``raw_out[case_name] = {"nodal_displacements": ...,
+            "element_forces": {...}}`` — the shape accepted by
+            :func:`fea_toolkit.io.stage_writer.write_model_stages` /
+            :func:`fea_toolkit.io.unified_writer.write_results` (static
+            results).  Element forces are extracted in the element
+            **local** coordinate system and stored under the plain
+            ``fx_i`` … ``mz_j`` keys (aligned with the geometry arrays).
+
+    Returns:
+        Summary table (DataFrame) — one row per analysis case.
     """
     rows = []
     config = {"element_type": "elasticBeamColumn", "verbose": False}
@@ -236,6 +254,38 @@ def run_linear_cases(
                 if roof_id in disp:
                     d = disp[roof_id]
                     max_roof_disp = math.hypot(d[0], d[1], d[2])
+
+            # ── Raw per-case results (optional export) ─────────────
+            # Filled in the same order as the summary row so the caller
+            # can build unified/stage files with static frame forces and
+            # nodal displacements.
+            if raw_out is not None:
+                entry = {"nodal_displacements": results.get("nodal_displacements", {})}
+                try:
+                    ef = ab.extract_static_element_forces()
+                    if ef:
+                        force_pairs = [
+                            ("Fx", "fx_i"),
+                            ("Fy", "fy_i"),
+                            ("Fz", "fz_i"),
+                            ("Mx", "mx_i"),
+                            ("My", "my_i"),
+                            ("Mz", "mz_i"),
+                            ("Fx_j", "fx_j"),
+                            ("Fy_j", "fy_j"),
+                            ("Fz_j", "fz_j"),
+                            ("Mx_j", "mx_j"),
+                            ("My_j", "my_j"),
+                            ("Mz_j", "mz_j"),
+                        ]
+                        elem_forces = {out_key: [] for _, out_key in force_pairs}
+                        for fr in ef.values():
+                            for in_key, out_key in force_pairs:
+                                elem_forces[out_key].append(fr.get(in_key, float("nan")))
+                        entry["element_forces"] = elem_forces
+                except Exception:
+                    pass
+                raw_out[case_name] = entry
         except Exception as e:
             fx = fy = fz = mx = my = mz = max_roof_disp = 0.0
             print(f"  Warning: {case_name} failed — {e}")

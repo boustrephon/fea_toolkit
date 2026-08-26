@@ -126,6 +126,8 @@ class TestAnalysisFunctions:
         params = inspect.signature(run_static_analysis).parameters
         assert "md" in params
         assert "mesh_model" in params
+        assert "collect_raw" in params
+        assert params["collect_raw"].default is False
 
     def test_run_rs_requires_modal_result(self):
         params = inspect.signature(run_response_spectrum_analysis).parameters
@@ -138,6 +140,8 @@ class TestAnalysisFunctions:
         assert "material_type" in params
         assert "lateral_load_type" in params
         assert params["material_type"].default == "steel"
+        assert "return_builders" in params
+        assert params["return_builders"].default is False
 
     def test_run_nonlinear_dynamic_signature(self):
         params = inspect.signature(run_nonlinear_dynamic_analysis).parameters

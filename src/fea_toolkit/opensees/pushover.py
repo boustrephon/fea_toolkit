@@ -80,6 +80,8 @@ def run_pushover_4dir(
     bilinearize_config: Optional[dict] = None,
     control_node_tag: Optional[int] = None,
     control_node_id: Optional[str] = None,
+    config: Optional[dict] = None,
+    return_builders: bool = False,
 ) -> dict:
     """Run pushover in all 4 directions with CSM (two-stage path).
 
@@ -134,6 +136,14 @@ def run_pushover_4dir(
     control_node_id : str, optional
         SAP2000 node ID (string label) for the control node, alternative
         to *control_node_tag*.
+    config : dict, optional
+        Builder config overrides merged over the direction's default
+        (e.g. ``record_pushover_steps=True`` to retain per-step results
+        for :func:`fea_toolkit.io.stage_writer.write_model_stages`).
+    return_builders : bool
+        When ``True``, each direction's ``AnalysisBuilder`` is retained
+        under ``all_out[label]["builder"]`` (needed to export per-step
+        frame/shell/node results).
 
     Returns
     -------
@@ -196,6 +206,11 @@ def run_pushover_4dir(
             "brace_imperfection_ratio": 0.001,
             "verbose": False,
         }
+
+    # Builder config overrides (e.g. ``record_pushover_steps=True`` to
+    # enable per-step export via :func:`write_model_stages`).
+    if config:
+        builder_cfg.update(config)
 
     all_out = {}
     for label in dirs:
@@ -275,6 +290,8 @@ def run_pushover_4dir(
             "mode_index": best_mode_idx,
             "rs_warning": rs_warning,
         }
+        if return_builders:
+            all_out[label]["builder"] = ab
 
     return all_out
 

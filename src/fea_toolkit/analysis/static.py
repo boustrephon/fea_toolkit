@@ -19,6 +19,7 @@ def run_static_analysis(
     linear_cfg: Optional[dict] = None,
     name: str = "StaticAnalysis",
     config: Optional[dict] = None,
+    collect_raw: bool = False,
 ) -> AnalysisResult:
     """Run static linear analysis cases.
 
@@ -33,23 +34,32 @@ def run_static_analysis(
         linear_cfg: Linear analysis config (e.g. ``{"cases": [...]}``).
         name: Result label (default ``"StaticAnalysis"``).
         config: Optional config dict, recorded in the result metadata.
+        collect_raw: When ``True``, also retain the raw per-case results
+            (nodal displacements + local element forces) under
+            ``data["static_raw"]`` — the shape accepted by the unified
+            writers.  ``False`` (default) keeps the existing behaviour.
 
     Returns:
         :class:`AnalysisResult` whose ``data`` holds ``df_linear``.
     """
     from fea_toolkit.analysis.linear import run_linear_cases
 
+    raw_out: dict = {} if collect_raw else None
     df_linear = run_linear_cases(
         md,
         mesh_model,
         spec_cfg=spec_cfg,
         linear_cfg=linear_cfg,
+        raw_out=raw_out,
     )
+    data: dict = {
+        "df_linear": df_linear,
+    }
+    if raw_out:
+        data["static_raw"] = raw_out
     return AnalysisResult(
         name=name,
         analysis_type="StaticAnalysis",
-        data={
-            "df_linear": df_linear,
-        },
+        data=data,
         metadata={"spec_cfg": spec_cfg, "linear_cfg": linear_cfg, "config": config or {}},
     )

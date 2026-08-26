@@ -31,8 +31,17 @@ class TestDefaultConfig:
             "static_verification",
             "model_viewer",
             "analysis_log",
+            "export",
         ):
             assert key in _DEFAULT_CONFIG
+
+    def test_export_defaults_disabled_and_complete(self):
+        export = _DEFAULT_CONFIG["export"]
+        assert export["enabled"] is False  # opt-in — never on by default
+        for key in ("path", "fmt", "stages", "static", "pushover"):
+            assert key in export
+        assert export["fmt"] == "h5"
+        assert set(export["stages"]) == {"sap", "mesh"}
 
     def test_spectrum_defaults_project_agnostic(self):
         # Generic defaults must never carry project-specific settings
