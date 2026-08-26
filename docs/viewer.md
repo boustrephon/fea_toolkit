@@ -14,10 +14,10 @@ visualisation stacks:
 | Stack | Backend | Purpose |
 |---|---|---|
 | **``ModelViewer``** | PyVista (pluggable) | Backend‑agnostic 3D model viewer — show model, overlay deformed shape / force flags, highlight elements, annotate. |
-| **Standalone 3D plots** (`plot_*_3d`) | PyVista | Direct‑call 3D plots — deformed shape (unified), mode shapes, force/moment diagrams. |
+| **Standalone 3D plots** (unified) | PyVista | Direct‑call 3D plots — mesh, deformed shape, mode shapes, force/moment diagrams. |
 | **Standalone 2D plots** (`plot_*`) | Matplotlib | Elevation‑based force diagrams, pushover capacity curves, ADRS spectra. |
 | **Interactive viewer** (`plot_interactive_viewer`) | PyVista + widgets | Widget‑driven viewer with radio buttons, combo selector, click‑to‑inspect elements. |
-| **NPZ standalone** (`plot_npz_*`) | PyVista / Matplotlib | Plot from a saved ``.npz`` file without needing the original builder. |
+| **NPZ standalone** (`plot_force_diagram`) | PyVista / Matplotlib | Plot from a saved ``.npz`` file without needing the original builder. |
 
 ---
 
@@ -529,10 +529,15 @@ isolate critical elements (e.g. braces in a buckling check, columns
 in a drift review) or to hide distracting detail.  This works for
 mesh viewing, deformed shape, mode animation, and force diagrams.
 
-**Prefer unified functions.** Functions named ``plot_*_3d`` without
-a ``source`` parameter are builder-only and deprecated.  Use the
-``plot_*_3d(source, ...)`` variants instead — they accept a builder,
-AnalysisBuilder, **or** a data dict loaded from a results file.
+**Use the unified functions.** The unified entry points — ``plot_mesh``,
+``plot_deformed_displacement_3d``, ``plot_mode_animation``, and
+``plot_force_diagram`` — each accept a builder, AnalysisBuilder, **or** a
+data dict loaded from a results file (NPZ/HDF5); ``plot_force_diagram``
+additionally dispatches 2D-vs-3D and static-vs-RS from the input shape.
+The legacy ``plot_*_3d`` / ``plot_npz_*`` function families were removed
+in the 2026-08 deprecation cleanup — ``plot_force_diagram`` is the single
+force/moment-diagram entry point, and the unified mesh/deformed/mode
+functions replace the old source-based variants.
 
 **Load results from NPZ or HDF5.** Results can be saved and loaded
 independently of the builder, which is useful for headless/batch runs

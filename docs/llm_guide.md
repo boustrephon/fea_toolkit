@@ -146,7 +146,7 @@ see `.clinerules` §3.11.
 "Plot 3D model (undisplaced)"       → plot_mesh(builder)
 "Plot deformed shape"               → plot_deformed_displacement_3d(builder, results, scale=100)
 "Plot mode shape animation"         → plot_mode_animation(builder, modal_result)
-"Plot force/moment diagrams"         → plot_force_diagram(builder, results, quantity='Mz')
+"Plot force/moment diagrams"         → plot_force_diagram(builder, builder.extract_static_element_forces(), quantity='Mz')
 "Plot pushover capacity curves"     → plot_pushover_curve(results)
 "Plot capacity spectrum (ADRS)"     → plot_capacity_spectrum(adrs_result)
 "Plot storey forces"                → from fea_toolkit.plotting import plot_storey_forces

@@ -117,6 +117,27 @@ def run_pushover_analysis(self, ...):
                              if not getattr(e, 'inactive', False)}
             record_areas = {eid for eid, a in self.mesh_model.area_elements.items()
                             if not getattr(a, 'inactive', False)}
+        # Node tags for displacement recording: derive them from the
+        # selected frames/areas here, next to the other recording
+        # selections, so `_record_step(..., node_tags=record_node_tags)`
+        # below never references an undefined name.
+        record_node_tags: Set[int] = set()
+        for eid in record_frames:
+            fe = self.mesh_model.frame_elements.get(eid)
+            if fe is None:
+                continue
+            for nid in (fe.node_i, fe.node_j):
+                nd = self.mesh_model.nodes.get(nid)
+                if nd is not None:
+                    record_node_tags.add(nd.node_tag)
+        for aid in record_areas:
+            ae = self.mesh_model.area_elements.get(aid)
+            if ae is None:
+                continue
+            for nid in ae.node_ids:
+                nd = self.mesh_model.nodes.get(nid)
+                if nd is not None:
+                    record_node_tags.add(nd.node_tag)
 
     # ── Per-step loop ──
     step_results = []

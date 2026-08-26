@@ -107,10 +107,10 @@ documentation CI.
 | `plot_deformed_3d` | `plot_deformed_displacement_3d` | ~80 |
 | `plot_rs_deformed_3d` | `plot_deformed_displacement_3d` | ~70 |
 | `plot_mode_3d` | `plot_mode_animation` | ~180 |
-| `plot_static_moment_3d` | `plot_force_diagram_3d` | ~70 |
+| `plot_static_moment_3d` | `plot_force_diagram` (unified dispatcher) | ~70 |
 | `plot_static_shear_3d` | thin wrapper | ~5 |
 | `plot_static_axial_3d` | thin wrapper | ~5 |
-| `plot_static_force_diagram` | `plot_npz_force_diagram` | ~110 |
+| `plot_static_force_diagram` | `plot_force_diagram` (unified dispatcher) | ~110 |
 | `plot_force_diagram` (pre-unification 2D CQC impl) | (no direct replacement — 2D CQC diagram; name now the Phase B unified dispatcher) | ~50 |
 | Private helpers: `_get_local_end_forces`, `_plot_moment_flags`, `_plot_moment_tubes`, `_add_reaction_arrows` (used only by deprecated fns) | — | ~150 |
 
@@ -120,7 +120,10 @@ documentation CI.
 
 Remove 9 deprecated names from imports and `__all__`.  The replacements
 (`plot_mesh`, `plot_deformed_displacement_3d`, `plot_mode_animation`,
-`plot_force_diagram_3d`, `plot_npz_force_diagram`) are already exported.
+`plot_force_diagram`) are already exported.  (The historical
+`plot_force_diagram_3d` / `plot_npz_force_diagram` names were folded into
+the Phase B unified `plot_force_diagram` dispatcher and removed
+2026-08-24.)
 Also remove `_build_deformed_mesh` from the public re-export list — it is
 an internal helper, not part of the public API.
 

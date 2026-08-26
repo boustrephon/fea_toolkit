@@ -788,11 +788,14 @@ Steel members are the primary target and are fully supported.
   or Approach B (truss + Hysteretic material with compression degradation).
 - See the [Brace Modelling](#brace-modelling) section above.
 
-### Concrete Members (Reinforced) — Planned
+### Concrete Members (Reinforced) — status
 
-Support for reinforced concrete (RC) sections is **planned** but not yet
-fully implemented.  The following describes the intended design and
-current limitations.
+> **Historical status table.**  The canonical, up-to-date status summary
+> for RC frame modelling is the **"Status at a glance — RC frame
+> modelling"** table at the top of this document.  The table below is
+> retained as the historical record: it predates the 2026-08 rebar
+> auto-placement, Mander confinement wiring, and opt-in shear-modelling
+> work, so its "not implemented" entries are stale.
 
 **Current status:**
 
@@ -800,11 +803,10 @@ current limitations.
 |---|---|---|
 | Concrete materials (`Concrete01`) | ✅ Implemented | `Material.type == "Concrete"` triggers `Concrete01` material in fiber sections |
 | RC section shapes (Rect, Circle) | ✅ Implemented | `RectangularSection`, `CircularSection` with `to_fiber_patches()` |
-| RC beam/column fibre sections | ⚠️ Partial | Patches use a single concrete material — rebar layers not yet implemented |
-| Rebar material (`Steel01`) | ✅ Available | `Steel01` can be used for rebar, but automatic rebar placement in sections is not coded |
-| Confined concrete (Mander, etc.) | ❌ Not implemented | Only unconfined `Concrete01` |
+| Rebar auto-placement | ✅ Implemented | The S2K parser promotes `RectangularSection` → `ConcreteRectangularSection` with a bar count estimate (`A × 1% / bar_area`, min 4) |
+| Mander confined concrete | ✅ Wired | `sec.fiber_confinement()` (with `tie_fy` resolved `RebarMatT` → `RebarMatL` → framework defaults) feeds the confined-core `Concrete01`; the no-tie-data fallback uses `RC_NO_TIE_CONFINEMENT_FACTOR` (1.25×) |
 | Nonlinear beam-column behaviour | ✅ Implemented | Via fiber sections with `forceBeamColumn` + `Lobatto` integration |
-| Shear failure modelling | ❌ Not implemented | Not available in standard OpenSees beam-column elements |
+| Shear failure modelling | ✅ (opt-in) | simplified-MCFT capacity reporter + nonlinear trilinear shear backbone (`aggregate_shear="nonlinear"`); Elwood zero-length column limit states (`limit_state_columns`) |
 | Bond-slip | ✅ Implemented (opt-in) | `config["bond_slip"] = True` inserts zero-length `Bond_SP01` slip springs at fibre member ends (P5 Phase B; OpenSeesPy registers the material as `Bond_SP01` — the Tcl name `bond_sp01` is not exported) |
 
 **How RC sections work today:**
@@ -825,19 +827,24 @@ section = RectangularSection(
 When `create_fiber_sections=True`, the builder creates:
 - A `Concrete01` uniaxial material (if `Material.type == "Concrete"`)
   with `Fc` and `epsc0` from `Material.Fc` and `Material.eFc`.
-- A `Steel01` material for longitudinal rebar *(not yet auto-placed)*.
+- A `Steel01` material for longitudinal rebar — auto-placed as fibres by
+  `ConcreteRectangularSection.to_fiber_patches()` for promoted RC
+  sections.
 
-**Planned enhancements (roadmap):**
+**Roadmap (remaining / completed):**
 
-1. **Rebar layer placement** — automatic generation of rebar fibres
+1. ~~**Rebar layer placement** — automatic generation of rebar fibres
    within rectangular and circular sections, with configurable cover
-   and bar diameter.
-2. **Confined concrete** — Mander or Chang-Mander model for core
-   concrete, with unconfined cover concrete.
+   and bar diameter~~ ✅ Implemented.
+2. ~~**Confined concrete** — Mander or Chang-Mander model for core
+   concrete, with unconfined cover concrete~~ ✅ Implemented — Mander
+   via `fiber_confinement()`, wired in `_create_single_section()`.
 3. **PM interaction** — axial‑flexural interaction checks using the
-   fiber section's P‑M diagram.
-4. **Shear springs** — zero‑length shear spring elements at member
-   ends with degrading backbone (ASCE 41).
+   fiber section's P‑M diagram — open.
+4. ~~**Shear springs** — zero‑length shear spring elements at member
+   ends with degrading backbone (ASCE 41)~~ ✅ Implemented — the
+   `aggregate_shear="nonlinear"` trilinear shear backbone and Elwood
+   `limit_state_columns` springs.
 
 **Contributions welcome** — see the ``model/sap_data.py`` section
 hierarchy for the extension points.

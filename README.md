@@ -223,7 +223,7 @@ SAP2000 .s2k / .json
        │  │  read_results_npz()  │  Stage 5 — Visualisation
        │  │  → npz_to_pyvista_*  │     (PyVista 3D plots)
        │  │  → npz_to_rhino_*    │     (Rhino colouring)
-       │  │  → plot_npz_*        │     (force diagrams, moments)
+       │  │  → plot_force_diagram │     (force diagrams, moments)
        │  └──────────────────────┘
        │
        └──┬──────────────────────┐
