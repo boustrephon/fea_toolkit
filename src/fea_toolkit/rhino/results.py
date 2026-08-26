@@ -136,8 +136,12 @@ def _load_deformed_arrays(
             ``source_type="pushover"`` (step ``None`` → last step).
 
     Returns:
-        ``(dx, dy, dz, label)`` float arrays aligned with the geometry
-        node arrays, or ``None`` when the data is unavailable.
+        ``(dx, dy, dz, tags, label)`` where *dx/dy/dz* are float arrays
+        whose rows are ordered by ascending node tag, *tags* is the
+        explicit node-tag list paired with those rows (``None`` for
+        static, whose arrays are written already tag-sorted without a tag
+        list), and *label* names the source.  Returns ``None`` when the
+        data is unavailable.
     """
     from ..io.npz_reader import _get_static_cases
     from ..io.results_schema import make_pushover_key
@@ -151,6 +155,7 @@ def _load_deformed_arrays(
         dx = data.get(f"{pre}node_dx")
         dy = data.get(f"{pre}node_dy")
         dz = data.get(f"{pre}node_dz")
+        tags = None
         label = f"static/{case_name}"
     elif source_type == "modal":
         mdx = data.get("modal/mode_dx")
@@ -162,11 +167,13 @@ def _load_deformed_arrays(
         n_modes = mdx.shape[1] if mdx.ndim > 1 else 1
         mode_idx = max(0, min(mode_idx, n_modes - 1))
         dx, dy, dz = mdx[:, mode_idx], mdy[:, mode_idx], mdz[:, mode_idx]
+        tags = data.get("modal/node_tag")
         label = f"modal/{mode_idx + 1}"
     elif source_type == "rs":
         dx = data.get("rs/node_dx")
         dy = data.get("rs/node_dy")
         dz = data.get("rs/node_dz")
+        tags = data.get("rs/node_tag")
         label = "rs"
     elif source_type == "pushover":
         directions = _get_pushover_directions(data)
@@ -181,6 +188,7 @@ def _load_deformed_arrays(
         n_steps = pdx.shape[0] if pdx.ndim > 1 else 1
         step_idx = max(0, min(step if step is not None else n_steps - 1, n_steps - 1))
         dx, dy, dz = pdx[step_idx], pdy[step_idx], pdz[step_idx]
+        tags = data.get(make_pushover_key(dirname, "pushover/{direction}/node_tag"))
         label = f"pushover/{dirname}/step{step_idx}"
     else:
         raise ValueError(
@@ -194,6 +202,7 @@ def _load_deformed_arrays(
         np.asarray(dx, dtype=float),
         np.asarray(dy, dtype=float),
         np.asarray(dz, dtype=float),
+        tags,
         label,
     )
 
@@ -312,7 +321,7 @@ def create_deformed_geometry(
     if loaded is None:
         print(f"No {source_type} displacements found in {source}")
         return 0
-    dx, dy, dz, label = loaded
+    dx, dy, dz, disp_tags, label = loaded
 
     node_x = data.get("node_x")
     node_y = data.get("node_y")
@@ -329,6 +338,30 @@ def create_deformed_geometry(
     if len(dx) != n or len(dy) != n or len(dz) != n:
         print("Displacement arrays do not match the geometry node count")
         return 0
+
+    # ── Node tag ↔ geometry-row mapping ─────────────────────────────
+    # ``node_x/y/z`` rows are in MeshModel dict order, but the frame /
+    # shell endpoint arrays store 1-based OpenSees node TAGS and the
+    # displacement rows are ordered by ascending node tag.  Map every tag
+    # to its geometry row so all three stay aligned.
+    node_tag = data.get("node_tag")
+    if node_tag is not None and len(node_tag) == n:
+        tag_to_row = {int(t): i for i, t in enumerate(node_tag)}
+        row_tags = [int(t) for t in node_tag]
+    else:
+        # Legacy files without a node_tag array: assume sequential 1-based
+        # tags in row order.
+        tag_to_row = {int(i + 1): i for i in range(n)}
+        row_tags = list(range(1, n + 1))
+
+    # Displacement rows are paired with an explicit tag list for modal /
+    # rs / pushover; static is written already tag-sorted (no list).
+    if disp_tags is None:
+        disp_tags = sorted(tag_to_row)
+    disp_by_tag: dict = {}
+    for i, tag in enumerate(disp_tags):
+        if i < len(dx):
+            disp_by_tag[int(tag)] = (float(dx[i]), float(dy[i]), float(dz[i]))
 
     # ── Auto-scale from the model bounding box ────────────────────
     if scale is None:
@@ -354,14 +387,16 @@ def create_deformed_geometry(
     layer_name = f"{layer_root}/Deformed/{label}"
     layer_idx = create_or_get_layer(layer_name)
 
-    coords = [
-        rg.Point3d(
-            float(node_x[i]) + float(dx[i]) * scale,
-            float(node_y[i]) + float(dy[i]) * scale,
-            float(node_z[i]) + float(dz[i]) * scale,
+    coords = []
+    for r in range(n):
+        d = disp_by_tag.get(row_tags[r], (0.0, 0.0, 0.0))
+        coords.append(
+            rg.Point3d(
+                float(node_x[r]) + d[0] * scale,
+                float(node_y[r]) + d[1] * scale,
+                float(node_z[r]) + d[2] * scale,
+            )
         )
-        for i in range(n)
-    ]
 
     def _attributes(kind: str) -> rd.ObjectAttributes:
         attrs = rd.ObjectAttributes()
@@ -376,8 +411,9 @@ def create_deformed_geometry(
     # ── Displaced frame lines ─────────────────────────────────────
     if frame_sap is not None and frame_i is not None and frame_j is not None:
         for i in range(len(frame_sap)):
-            ni, nj = int(frame_i[i]), int(frame_j[i])
-            if ni >= n or nj >= n:
+            ni = tag_to_row.get(int(frame_i[i]))
+            nj = tag_to_row.get(int(frame_j[i]))
+            if ni is None or nj is None:
                 continue
             attrs = _attributes("Frame")
             attrs.SetUserString("SAP_FrameID", str(frame_sap[i]))
@@ -387,9 +423,12 @@ def create_deformed_geometry(
     # ── Displaced shell quads ─────────────────────────────────────
     if shell_sap is not None and all(x is not None for x in shell_nodes):
         for i in range(len(shell_sap)):
-            idxs = [int(shell_nodes[k][i]) for k in range(4)]
+            idxs = []
+            for k in range(4):
+                ridx = tag_to_row.get(int(shell_nodes[k][i]))
+                if ridx is not None and 0 <= ridx < n:
+                    idxs.append(ridx)
             # Triangles leave node 4 as -1 / equal to node 3.
-            idxs = [idx for idx in idxs if 0 <= idx < n]
             if len(idxs) < 3:
                 continue
             mesh = rg.Mesh()

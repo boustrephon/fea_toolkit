@@ -158,7 +158,7 @@ class TestStageFile:
         # The Rhino results helpers read it back directly.
         values, _range = _load_pushover_shell_quantities(data, "Nx", direction="+X")
         assert values == {"S1": 15.0}  # last step
-        assert _load_deformed_arrays(data, "pushover", direction="+X")[3] == "pushover/+X/step2"
+        assert _load_deformed_arrays(data, "pushover", direction="+X")[4] == "pushover/+X/step2"
 
         # flatten_stage exposes the geometry to legacy consumers.
         flat = flatten_stage(p, stage="mesh")

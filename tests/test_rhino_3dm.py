@@ -11,6 +11,7 @@ write/read round-trip validates the nested-layer pattern in an actual
 import sys
 import types
 
+import numpy as np
 import pytest
 
 from fea_toolkit.rhino.colour_from_npz import _colour_doc_objects
@@ -21,6 +22,7 @@ from fea_toolkit.rhino.layers import (
     create_root_layer,
     create_shell_layers,
 )
+from fea_toolkit.rhino.results import create_deformed_geometry
 
 # ── Minimal fake Rhino API ───────────────────────────────────────────────
 
@@ -31,6 +33,34 @@ class FakeColorRGBA:
 
     def rgb(self):
         return (self.R, self.G, self.B)
+
+
+class FakeLine:
+    """Fake ``Rhino.Geometry.Line`` — stores the two endpoints."""
+
+    def __init__(self, p0, p1):
+        self.p0 = p0
+        self.p1 = p1
+
+
+class FakePoint3d:
+    """Fake ``Rhino.Geometry.Point3d``."""
+
+    def __init__(self, x, y, z):
+        self.X, self.Y, self.Z = float(x), float(y), float(z)
+
+    def __eq__(self, other):
+        return isinstance(other, FakePoint3d) and (self.X, self.Y, self.Z) == (
+            other.X,
+            other.Y,
+            other.Z,
+        )
+
+    def __hash__(self):
+        return hash((self.X, self.Y, self.Z))
+
+    def __repr__(self):
+        return f"FakePoint3d({self.X}, {self.Y}, {self.Z})"
 
 
 class FakeSystemColor:
@@ -123,22 +153,23 @@ class FakeObjects:
     def __getitem__(self, i):
         return self._items[i]
 
-    def _add(self, attrs, kind):
+    def _add(self, attrs, kind, geom=None):
         obj = FakeObject(kind=kind)
         obj.Attributes = attrs or FakeObjectAttributes()
+        obj.geom = geom
         idx = getattr(obj.Attributes, "LayerIndex", -1)
         obj.Layer = self._doc.Layers[idx] if idx is not None and idx >= 0 else None
         self._items.append(obj)
         return len(self._items) - 1
 
     def AddLine(self, line, attrs=None):
-        return self._add(attrs, "Line")
+        return self._add(attrs, "Line", line)
 
     def AddMesh(self, mesh, attrs=None):
-        return self._add(attrs, "Mesh")
+        return self._add(attrs, "Mesh", mesh)
 
     def AddPoint(self, pt, attrs=None):
-        return self._add(attrs, "Point")
+        return self._add(attrs, "Point", pt)
 
 
 class FakeViews:
@@ -168,8 +199,8 @@ def _install_fake_rhino(doc):
     Rhino.DocObjects = docobjects
 
     geometry = types.ModuleType("Rhino.Geometry")
-    geometry.Point3d = tuple
-    geometry.Line = tuple
+    geometry.Point3d = FakePoint3d
+    geometry.Line = FakeLine
     geometry.Mesh = object
     Rhino.Geometry = geometry
 
@@ -402,6 +433,37 @@ class TestColourDocObjects:
         )
         assert n == 1
         assert doc.Objects._items[idx].Attributes.ColorSource == "ColorFromObject"
+
+
+# ── Deformed-shape overlay construction ──────────────────────────────────
+
+
+class TestDeformedGeometry:
+    def test_static_frame_line_tag_mapping(self, rhino_env):
+        """Deformed overlays must map the 1-based frame endpoint node TAGS
+        to geometry rows via ``node_tag`` (rows are dict-ordered, not
+        tag-ordered) and pair the tag-sorted displacement arrays with the
+        right rows.  Row 0 here is tag 2, row 1 is tag 1."""
+        data = {
+            "node_x": np.array([10.0, 0.0]),  # row 0 = tag 2, row 1 = tag 1
+            "node_y": np.array([0.0, 0.0]),
+            "node_z": np.array([0.0, 0.0]),
+            "node_tag": np.array([2, 1]),
+            "frame_sap_id": np.array(["1"]),
+            "frame_node_i": np.array([1]),  # tags, not rows
+            "frame_node_j": np.array([2]),
+            "static_case_labels": np.array(["DEAD"]),
+            "static/DEAD/node_dx": np.array([0.5, 0.0]),  # tag 1, tag 2
+            "static/DEAD/node_dy": np.array([0.0, 0.0]),
+            "static/DEAD/node_dz": np.array([0.0, 0.0]),
+        }
+        n = create_deformed_geometry(data, source_type="static", case="DEAD", scale=1.0)
+        assert n == 1
+        line = rhino_env.Objects._items[0].geom
+        # tag 1 -> row 1 (base x=0.0) + dx=0.5; tag 2 -> row 0 (base x=10.0) + 0.0
+        assert (line.p0.X, line.p0.Y, line.p0.Z) == (0.5, 0.0, 0.0)
+        assert (line.p1.X, line.p1.Y, line.p1.Z) == (10.0, 0.0, 0.0)
+        assert rhino_env.Objects._items[0].Attributes.GetUserString("SAP_FrameID") == "1"
 
 
 class _BrokenIndexObjects:
