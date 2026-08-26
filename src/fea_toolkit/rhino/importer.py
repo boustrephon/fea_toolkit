@@ -106,6 +106,7 @@ class RhinoImporter:
         color_code_joints: bool = True,
         create_groups: bool = True,
         create_meshed: bool = False,
+        root_layer: t.Optional[str] = None,
         verbose: bool = True,
     ) -> dict[str, t.Any]:
         """Execute the full import sequence.
@@ -116,8 +117,12 @@ class RhinoImporter:
             color_code_joints: Colour joints by restraint type.
             create_groups: Rhino groups from SAP groups.
             create_meshed: If True, also import meshed geometry (areas
-                sub‑divided, frames split at joints) under a
-                ``SAP2000/Meshed`` layer tree.
+                sub‑divided, frames split at joints) under a ``Meshed``
+                sub‑tree of the stage root.
+            root_layer: Full path of the layer under which all geometry
+                is created.  ``None`` → derived from the stage:
+                ``SAP2000/Mesh`` for a meshed model, ``SAP2000/SAP``
+                otherwise.  Pass ``\"SAP2000\"`` for the legacy flat tree.
             verbose: Print progress.
 
         Returns:
@@ -139,8 +144,9 @@ class RhinoImporter:
         # 1. Layer tree
         if verbose:
             print("Creating layer structure...")
-        root_idx = create_root_layer()
-        joint_layer = create_joints_layer(root_idx)
+        root = root_layer or ("SAP2000/Mesh" if self.stage == "mesh" else "SAP2000/SAP")
+        root_idx = create_root_layer(name=root)
+        joint_layer = create_joints_layer(root_idx, root_name=root)
 
         frame_section_props: dict[str, dict] = {}
         shell_section_props: dict[str, dict] = {}
@@ -152,8 +158,8 @@ class RhinoImporter:
             else:
                 frame_section_props[sname] = props
 
-        frame_layers = create_frame_layers(root_idx, frame_section_props)
-        shell_layers = create_shell_layers(root_idx, shell_section_props)
+        frame_layers = create_frame_layers(root_idx, frame_section_props, root_name=root)
+        shell_layers = create_shell_layers(root_idx, shell_section_props, root_name=root)
 
         joint_obj_ids: list[str] = []
         frame_obj_ids: list[str] = []
@@ -287,12 +293,12 @@ class RhinoImporter:
                     md_mesh = None
 
             if md_mesh is not None:
-                meshed_root = create_root_layer(name="Meshed", parent=root_idx)
+                meshed_root = create_root_layer(name=f"{root}/Meshed", parent=root_idx)
                 meshed_frame_layers = create_frame_layers(
-                    meshed_root, frame_section_props, prefix="Meshed/"
+                    meshed_root, frame_section_props, prefix="Meshed/", root_name=root
                 )
                 meshed_shell_layers = create_shell_layers(
-                    meshed_root, shell_section_props, prefix="Meshed/"
+                    meshed_root, shell_section_props, prefix="Meshed/", root_name=root
                 )
 
                 if create_centreline:
