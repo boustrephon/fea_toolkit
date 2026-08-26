@@ -13,6 +13,54 @@ from ..utils import g_from_units
 logger = logging.getLogger(__name__)
 
 
+def _select_control_node(mesh_model, control_node_tag=None, control_node_id=None):
+    """Pick the pushover control node.
+
+    An explicit ``control_node_tag`` (OpenSees integer tag) or
+    ``control_node_id`` (SAP string label) wins when given.  Otherwise the
+    default is the node nearest the plan centroid of the highest
+    *significant* floor level — a naive ``max(z)`` selection can land on an
+    isolated rooftop appendage (e.g. a penthouse holding < 25 % of the node
+    count of the floor below), whose local flexibility distorts the
+    capacity curve and the CSM/ADRS conversion.
+
+    Returns:
+        The chosen :class:`~fea_toolkit.model.sap_data.Node`.
+    """
+    nodes = list(mesh_model.nodes.values())
+    if not nodes:
+        raise ValueError("cannot select control node — model has no nodes")
+
+    if control_node_tag is not None:
+        for n in nodes:
+            if n.node_tag == int(control_node_tag):
+                return n
+        raise ValueError(f"control_node_tag {control_node_tag} not found in the mesh model")
+    if control_node_id is not None:
+        n = mesh_model.nodes.get(str(control_node_id))
+        if n is None:
+            raise ValueError(f"control_node_id {control_node_id} not found in the mesh model")
+        return n
+
+    levels: dict[float, list] = {}
+    for n in nodes:
+        levels.setdefault(round(n.z, 3), []).append(n)
+    ordered = sorted(levels.items(), key=lambda kv: -kv[0])
+    max_count = max(len(v) for v in levels.values())
+    chosen = None
+    for _z, level_nodes in ordered:
+        # Skip appendage levels (very few nodes relative to the busiest
+        # floor).  The guard `>= max(4, ...)` keeps tiny flat models safe.
+        if len(level_nodes) >= max(4, 0.25 * max_count):
+            chosen = level_nodes
+            break
+    if chosen is None:
+        chosen = ordered[0][1]
+    cx = sum(n.x for n in chosen) / len(chosen)
+    cy = sum(n.y for n in chosen) / len(chosen)
+    return min(chosen, key=lambda n: (n.x - cx) ** 2 + (n.y - cy) ** 2)
+
+
 def run_pushover_4dir(
     mesh_model,
     modal_result: dict,
@@ -30,6 +78,8 @@ def run_pushover_4dir(
     spectrum: Optional[ResponseSpectrum] = None,
     bilinearize_method: str = "composite",
     bilinearize_config: Optional[dict] = None,
+    control_node_tag: Optional[int] = None,
+    control_node_id: Optional[str] = None,
 ) -> dict:
     """Run pushover in all 4 directions with CSM (two-stage path).
 
@@ -76,6 +126,14 @@ def run_pushover_4dir(
     rs_modal_base_shear : dict, optional
         Per-direction RS base shear for mode validation
         ``{"X": [...], "Y": [...]}``.
+    control_node_tag : int, optional
+        OpenSees node tag to use as the displacement-control node.  When
+        ``None`` the node nearest the plan centroid of the highest
+        significant floor level is selected (a naive ``max(z)`` can pick an
+        isolated rooftop appendage).
+    control_node_id : str, optional
+        SAP2000 node ID (string label) for the control node, alternative
+        to *control_node_tag*.
 
     Returns
     -------
@@ -102,7 +160,9 @@ def run_pushover_4dir(
     # Derive gravity acceleration from the model's unit system.
     g = g_from_units(mesh_model.units)
 
-    roof_node = max(mesh_model.nodes.values(), key=lambda n: n.z)
+    roof_node = _select_control_node(
+        mesh_model, control_node_tag=control_node_tag, control_node_id=control_node_id
+    )
     roof_tag = roof_node.node_tag
 
     if spectrum is None:
@@ -170,7 +230,7 @@ def run_pushover_4dir(
                 num_steps=num_steps,
                 mode_shapes=shapes if lateral_load_type == "mode1" else None,
                 mode_index=best_mode_idx,
-                print_progress=False,
+                print_progress=verbose,
             )
         except RuntimeError as e:
             logger.warning("Pushover %s skipped — gravity analysis failed: %s", label, e)
@@ -237,6 +297,8 @@ def pushover_rc_openseespy(
     spectrum: Optional[ResponseSpectrum] = None,
     node_mass_overrides: Optional[dict[str, float]] = None,
     return_builders: bool = False,
+    control_node_tag: Optional[int] = None,
+    control_node_id: Optional[str] = None,
 ) -> dict:
     """Run RC pushover in one or all 4 directions (OpenSeesPy path).
 
@@ -296,6 +358,14 @@ def pushover_rc_openseespy(
         ``"builder"`` key holding the ``AnalysisBuilder`` instance so
         callers can export recorded per-step results with
         ``AnalysisBuilder.export_pushover_results()``.
+    control_node_tag : int, optional
+        OpenSees node tag to use as the displacement-control node.  When
+        ``None`` the node nearest the plan centroid of the highest
+        significant floor level is selected (a naive ``max(z)`` can pick an
+        isolated rooftop appendage).
+    control_node_id : str, optional
+        SAP2000 node ID (string label) for the control node, alternative
+        to *control_node_tag*.
 
     Returns
     -------
@@ -333,7 +403,9 @@ def pushover_rc_openseespy(
     # Derive gravity acceleration from the model's unit system.
     g = g_from_units(mesh_model.units)
 
-    roof_node = max(mesh_model.nodes.values(), key=lambda n: n.z)
+    roof_node = _select_control_node(
+        mesh_model, control_node_tag=control_node_tag, control_node_id=control_node_id
+    )
     roof_tag = roof_node.node_tag
 
     if spectrum is None:
@@ -382,7 +454,7 @@ def pushover_rc_openseespy(
                 num_steps=num_steps,
                 mode_shapes=shapes if lateral_load_type == "mode1" else None,
                 mode_index=best_mode_idx,
-                print_progress=False,
+                print_progress=verbose,
                 node_mass_overrides=node_mass_overrides,
             )
         except RuntimeError as e:

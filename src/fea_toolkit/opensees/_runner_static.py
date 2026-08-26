@@ -83,7 +83,12 @@ class StaticRunnerMixin:
         _g = g_from_units(self.units)
         _fb_total_mass = sum(self.node_masses.values()) if self.node_masses else 0.0
         if _fb_total_mass > 0:
-            fb_test_tol = max(_fb_total_mass * _g * 1e-6, test_tol * 10.0)
+            # 1e-4 of the total weight — a relative NormUnbalance budget
+            # that large shell-meshed buildings can actually satisfy.  The
+            # previous 1e-6 factor produced ~0.06 kN on a ~51,500 kN model,
+            # which the fallback could never reach (it burned its whole
+            # iteration budget on every failed step).
+            fb_test_tol = max(_fb_total_mass * _g * 1e-4, test_tol * 10.0)
         else:
             fb_test_tol = test_tol * 10.0
         fb_test_iter = max(_fallback.get("solver_test_max_iter", 1000), test_iter * 10)
@@ -232,8 +237,15 @@ class StaticRunnerMixin:
 
             total_reaction_fz = 0.0
             for nid, restraint in self.mesh_model.restraints.items():
-                # Full fixity only (6 DOFs all True)
-                if not all(restraint.dofs):
+                # Vertical equilibrium is checked against every node that
+                # restrains the vertical DOF (index 2 = Fz).  Requiring full
+                # six-DOF fixity undercounts gravity reactions on models
+                # whose bases are pinned rather than fixed (e.g. the Admin
+                # Building's 90 pinned column bases, of which only the 17
+                # shell-only nodes carry rotational fixity) and raises a
+                # spurious "load/reaction mismatch" warning on an
+                # equilibrated model.
+                if len(restraint.dofs) < 3 or not restraint.dofs[2]:
                     continue
                 rxn = result.get("reactions", {}).get(nid, {})
                 total_reaction_fz += rxn.get("fz", 0.0)

@@ -245,10 +245,12 @@ class PushoverRunnerMixin:
         if print_progress:
             _reac = grav_results.get("reactions", {})
             _sum_fz = sum(float(r.get("fz", 0.0)) for r in _reac.values())
-            _n_full = sum(1 for r in self.mesh_model.restraints.values() if all(r.dofs))
+            _n_v = sum(
+                1 for r in self.mesh_model.restraints.values() if len(r.dofs) > 2 and r.dofs[2]
+            )
             print(
                 f"  Gravity converged — total vertical reaction = {_sum_fz:.1f} "
-                f"({_n_full} fully-fixed base node(s))"
+                f"({_n_v} vertically-restrained base node(s))"
             )
 
         # ── Gravity diagnostic: concrete/rbar strain check ──────
@@ -610,11 +612,23 @@ class PushoverRunnerMixin:
                 ok = ops.analyze(1)
                 if ok == 0:
                     break
+                if ok == -2:
+                    # Integrator failure (-2): the tangent became singular
+                    # (capacity limit reached, e.g. ``numeric analysis
+                    # returns 1`` from UmfPack then ``DisplacementControl::
+                    # newStep`` fails).  Trying further algorithms on a
+                    # singular tangent can hard-crash the OpenSees C
+                    # library (verified on the Admin Building full model,
+                    # 2026-08-25), so stop the pushover loop here.
+                    break
 
             # Per-step fallback (Gap 5): on failure, retry once with
             # relaxed NormUnbalance + ModifiedNewton(-initial), then
             # restore the primary test settings for subsequent steps.
-            if ok != 0:
+            # Skipped for the singular-tangent integrator failure (-2) —
+            # the system is genuinely at capacity, no solver settings
+            # will help and the extra attempts risk a C crash.
+            if ok not in (0, -2):
                 _fallback = self.config.get(
                     "pushover_fallback_defaults", self.PUSHOVER_FALLBACK_DEFAULTS
                 )
@@ -622,7 +636,11 @@ class PushoverRunnerMixin:
                 _g = g_from_units(self.units)
                 _fb_total_mass = sum(self.node_masses.values()) if self.node_masses else 0.0
                 if _fb_total_mass > 0:
-                    _fb_tol = max(_fb_total_mass * _g * 1e-6, _test_tol * 10.0)
+                    # 1e-4 of total weight — a relative NormUnbalance budget
+                    # a large model can actually satisfy (the 1e-6 factor
+                    # produced ~0.06 kN on the ~51,500 kN Admin Building,
+                    # which the fallback could never reach).
+                    _fb_tol = max(_fb_total_mass * _g * 1e-4, _test_tol * 10.0)
                 else:
                     _fb_tol = _test_tol * 10.0
                 ops.test(

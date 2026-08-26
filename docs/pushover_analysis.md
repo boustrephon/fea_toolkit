@@ -109,6 +109,8 @@ failure modes were observed in practice:
 | `Norm ≈ 1.000e-4` vs tol `1e-4` — repeated "analyze failed" | Near-miss tolerance: the residual sits just above `solver_test_tol` | Relax `solver_test_tol` to `2e-4` |
 | `Norm = NaN` during the gravity step | Sudden LayeredShell stiffness shock when shells activate in a single `LoadControl` step | Ramp gravity with `gravity_num_substeps: 10` |
 | `Norm = NaN` during the gravity step (Elwood limit-state columns) | Inflated `P_g` collapses the shear limit surface to a zero `LimitState` backbone, or the `LimitState` material's known fragility | Check `_derive_gravity_axial_loads()` / supply `column_gravity_loads`; use the CenterCol recipe (`solver_constraints: "Penalty"`, `solver_system: "ProfileSPD"`, `gravity_num_substeps: 5`) — see `docs/shear_failure_modelling.md` Phase 3 |
+| `Norm = NaN` at push step 1 on a **large** model (> ~5,000 equations, e.g. the uncropped Admin Building) | `solver_system: "BandGen"` (the default) banded LAPACK factorisation breaks down: wide RCM bandwidth makes it slow *and* numerically fragile, Newton stalls a hair above the tolerance then emits NaN at `load factor nan` | Set `solver_system: "UmfPack"` (sparse direct solver) — identical model, 42/100 steps to 0.126 m in ~100 s with zero failures. The `AnalysisBuilder` now auto-selects `UmfPack` above 600 nodes unless `solver_system` is set explicitly. See Portwood Digital, "Stop Cargo Culting BandGeneral and Plain Numberer" (Feb 2026) |
+| `numeric analysis returns 1` / `Integrator failed (-2)` at **random** steps on a large model with LayeredShell smeared-crack walls | The `ConcreteS`/`J2PlateFibre` smeared-crack tangent becomes **exactly singular** at crack-formation states (perfectly plastic `J2PlateFibre` with `Hiso=Hkin=0` has a zero eigenvalue after yield), so UmfPack's strict pivot check bails — run-to-run variability on the uncropped Admin Building | Two levers: (1) give the wall rebar a small kinematic hardening (`Hkin ≈ 1 % E`, physically real for HRB400); (2) if the run is still marginal, model the walls **elastically** (keep the nonlinear fibre frames) — reliable (3/3 complete) but overestimates wall strength. The `pushover` facade skips a direction gracefully if its gravity stage fails, and the push loop stops cleanly on a `-2` integrator failure instead of crashing |
 
 Both settings are configured through the builder `config` dict:
 
@@ -1274,6 +1276,16 @@ alternative might be considered.
 > ``'Mumps'`` are sparse direct solvers that handle larger models more
 > efficiently. Choose ``'UmfPack'`` or ``'Mumps'`` when the model has many
 > degrees of freedom or the banded solvers run out of memory.
+>
+> **Important (large models):** ``'BandGen'`` is *not* just slow on big
+> shell-meshed buildings — it can fail outright.  The banded LAPACK
+> factorisation degrades numerically as the RCM bandwidth grows, so Newton
+> iterations stall a hair above the convergence tolerance and then emit
+> ``Norm: nan`` at every pushover step (``load factor nan``).  The sparse
+> ``UmfPack`` solver converges the identical model.  The ``AnalysisBuilder``
+> now defaults to ``UmfPack`` whenever the mesh has 600+ nodes and
+> ``solver_system`` was not set explicitly — you should still set it
+> explicitly in your config for large models so the intent is documented.
 
 ### Approach B — Truss elements with Hysteretic material
 
