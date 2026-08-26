@@ -102,6 +102,7 @@ nav:
       - Mander Confinement Validation: mander_confinement_validation.md
       - Capacity Modules (GB 50010): capacity.md
   - Export & Visualisation:
+      - Model Stage File: model_stage_file.md
       - Rhino 3-D Export: rhino_export.md
       - Tcl Export: tcl_export.md
       - Visualisation Toolkit: viewer.md
