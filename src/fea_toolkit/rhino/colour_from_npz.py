@@ -39,20 +39,32 @@ def _value_to_rgb(val: float, vmin: float, vmax: float) -> tuple[int, int, int]:
 
     Uses a diverging red‑white‑blue scheme:
         negative → blue, zero → white, positive → red.
+
+    The white midpoint is the whole point of a diverging scale: values
+    near zero render as light tints, not mid‑grey, so a low‑magnitude
+    result stays visually distinct from an uncoloured (layer‑coloured)
+    object.
     """
     if abs(vmax - vmin) < 1e-15:
         return (255, 255, 255)  # white
-    # Normalise to [-1, 1]
+    # Normalise to [-1, 1] (negative half-scaled to |vmin|, positive to vmax)
     if val >= 0:
         t = val / max(vmax, 1e-15) if vmax > 0 else 0.0
-        r = int(255 * (0.3 + 0.7 * t))
-        g = int(255 * (0.3 - 0.2 * t))
-        b = int(255 * (0.3 - 0.3 * t))
     else:
-        t = val / min(vmin, -1e-15) if vmin < 0 else 0.0
-        r = int(255 * (0.3 - 0.3 * t))
-        g = int(255 * (0.3 - 0.2 * t))
-        b = int(255 * (0.3 + 0.7 * t))
+        t = val / abs(vmin) if vmin < 0 else 0.0
+    t = max(-1.0, min(1.0, t))
+    if t < 0:
+        # blue (-1) -> white (0)
+        f = -t
+        r = int(255 * (1.0 - f))
+        g = int(255 - 230 * f)
+        b = 255
+    else:
+        # white (0) -> red (+1)
+        f = t
+        r = 255
+        g = int(255 - 230 * f)
+        b = int(255 - 255 * f)
     return (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
 
 

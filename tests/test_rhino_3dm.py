@@ -343,7 +343,7 @@ class TestColourDocObjects:
         assert doc.Objects[1].Attributes.ObjectColor.rgb() == (0, 25, 255)
         assert doc.Objects[0].Attributes.ColorSource == "ColorFromObject"
 
-    def test_zero_maps_light_gray(self, rhino_env):
+    def test_zero_maps_white(self, rhino_env):
         doc = rhino_env
         self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", "B1")
         n = _colour_doc_objects(
@@ -354,7 +354,10 @@ class TestColourDocObjects:
             layer_filter="SAP2000/Mesh/*",
         )
         assert n == 1
-        assert doc.Objects[0].Attributes.ObjectColor.rgb() == (76, 76, 76)
+        # Diverging scale midpoint is white (light tint), NOT mid-grey —
+        # otherwise near-zero results are indistinguishable from uncoloured
+        # layer-coloured objects.
+        assert doc.Objects[0].Attributes.ObjectColor.rgb() == (255, 255, 255)
 
     def test_layer_filter_excludes_other_layers(self, rhino_env):
         doc = rhino_env

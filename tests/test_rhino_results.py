@@ -254,3 +254,51 @@ def test_flatten_stage_real_file(tmp_path, fmt):
     # The colouring loader also reads stage files in both formats.
     data = _load_unified(path, stage="sap")
     assert "frame_sap_id" in data
+
+
+# ── Diverging colour scale (_value_to_rgb) ───────────────────────────────
+
+
+class TestValueToRgb:
+    """The diverging blue–white–red ramp used for result colouring.
+
+    Zero must map to *white* — not mid-grey — so low-magnitude results
+    stay visually distinct from uncoloured (layer-coloured) objects.
+    """
+
+    def test_zero_is_white(self):
+        from fea_toolkit.rhino.colour_from_npz import _value_to_rgb
+
+        assert _value_to_rgb(0.0, -100, 100) == (255, 255, 255)
+
+    def test_extremes_are_blue_and_red(self):
+        from fea_toolkit.rhino.colour_from_npz import _value_to_rgb
+
+        assert _value_to_rgb(-100.0, -100, 100) == (0, 25, 255)  # blue
+        assert _value_to_rgb(100.0, -100, 100) == (255, 25, 0)  # red
+
+    def test_asymmetric_range(self):
+        from fea_toolkit.rhino.colour_from_npz import _value_to_rgb
+
+        # Half-range normalised independently per side (min -200, max +100).
+        assert _value_to_rgb(-200.0, -200, 100) == (0, 25, 255)
+        assert _value_to_rgb(100.0, -200, 100) == (255, 25, 0)
+        assert _value_to_rgb(0.0, -200, 100) == (255, 255, 255)
+
+    def test_monotonic_tints(self):
+        from fea_toolkit.rhino.colour_from_npz import _value_to_rgb
+
+        # More negative → more blue (b saturated, r and g fall towards the
+        # blue anchor); more positive → more red (g and b fall, r saturated).
+        r_neg, g_neg, _b_neg = _value_to_rgb(-50.0, -100, 100)
+        r_mid, g_mid, _b_mid = _value_to_rgb(-10.0, -100, 100)
+        assert r_neg < r_mid and g_neg < g_mid
+
+        r_lo, g_lo, b_lo = _value_to_rgb(10.0, -100, 100)
+        r_hi, g_hi, b_hi = _value_to_rgb(50.0, -100, 100)
+        assert r_hi == r_lo == 255 and g_hi < g_lo and b_hi < b_lo
+
+    def test_degenerate_range_is_white(self):
+        from fea_toolkit.rhino.colour_from_npz import _value_to_rgb
+
+        assert _value_to_rgb(5.0, 5.0, 5.0) == (255, 255, 255)
