@@ -64,6 +64,7 @@ for the full set of stubbed functions. Known limitations:
   See ``docs/pushover_analysis.md`` for details.
 """
 
+import importlib
 import importlib.metadata
 
 try:
@@ -85,11 +86,42 @@ def ops_version() -> str:
         return "unknown (openseespy not installed)"
 
 
-# ── Core model types ───────────────────────────────────────────────
+# ── Lazy re-exports (PEP 562) ──────────────────────────────────────
+# The toolkit is used inside Rhino 8 (CPython 3.9), where ``openseespy``
+# cannot be installed (it requires Python ≥ 3.10).  Subpackages that are
+# guaranteed OpenSees-free — ``fea_toolkit.io``, ``fea_toolkit.model``,
+# ``fea_toolkit.rhino`` — must import without pulling the solver into
+# the process.  Eagerly importing ``AnalysisBuilder`` / ``plotting`` at
+# package import time loads ``openseespy`` / ``pyvista``, so those names
+# are resolved lazily here.  ``from fea_toolkit import X`` and
+# ``fea_toolkit.X`` work exactly as before; ``__all__`` is unchanged.
+_LAZY_IMPORTS: dict[str, str] = {
+    # Pipeline
+    "SAP2000Parser": "fea_toolkit.io.s2k_parser",
+    "MeshModel": "fea_toolkit.model.mesh_model",
+    "Preprocessor": "fea_toolkit.opensees.preprocessor",
+    "preprocess_model": "fea_toolkit.opensees.preprocessor",
+    "AnalysisBuilder": "fea_toolkit.opensees.analysis_builder",
+    "run_modal": "fea_toolkit.opensees.analysis_builder",
+    "pushover_rc_openseespy": "fea_toolkit.opensees.pushover",
+    # Visualisation
+    "plot_force_diagram": "fea_toolkit.plotting.force_diagram",
+    "plot_interactive_viewer": "fea_toolkit.plotting.interactive_viewer",
+    "ModelViewer": "fea_toolkit.plotting.viewer",
+    "compare_meshes": "fea_toolkit.plotting.viz",
+    "plot_building_views": "fea_toolkit.plotting.viz",
+    "plot_capacity_spectrum": "fea_toolkit.plotting.viz",
+    "plot_deformed_displacement_3d": "fea_toolkit.plotting.viz",
+    "plot_mesh": "fea_toolkit.plotting.viz",
+    "plot_mode_animation": "fea_toolkit.plotting.viz",
+    "plot_model_comparison": "fea_toolkit.plotting.viz",
+    "plot_pushover_curve": "fea_toolkit.plotting.viz",
+    # Report
+    "generate_report": "fea_toolkit.report",
+    "ResponseSpectrum": "fea_toolkit.spectrum",
+}
 
-# ── Pipeline ───────────────────────────────────────────────────────
-from fea_toolkit.io.s2k_parser import SAP2000Parser
-from fea_toolkit.model.mesh_model import MeshModel
+# Model-layer names that are cheap and importable without the solver.
 from fea_toolkit.model.sap_data import (
     AreaElement,
     BoxSection,
@@ -108,28 +140,6 @@ from fea_toolkit.model.sap_data import (
 )
 from fea_toolkit.model.sections import SectionLibrary
 from fea_toolkit.model.selection import Selection
-from fea_toolkit.opensees.analysis_builder import AnalysisBuilder, run_modal
-from fea_toolkit.opensees.preprocessor import Preprocessor, preprocess_model
-from fea_toolkit.opensees.pushover import pushover_rc_openseespy
-
-# ── Visualisation ─────────────────────────────────────────────────
-from fea_toolkit.plotting.force_diagram import plot_force_diagram
-from fea_toolkit.plotting.interactive_viewer import plot_interactive_viewer
-from fea_toolkit.plotting.viewer import ModelViewer
-from fea_toolkit.plotting.viz import (
-    compare_meshes,
-    plot_building_views,
-    plot_capacity_spectrum,
-    plot_deformed_displacement_3d,
-    plot_mesh,
-    plot_mode_animation,
-    plot_model_comparison,
-    plot_pushover_curve,
-)
-
-# ── Report ─────────────────────────────────────────────────────────
-from fea_toolkit.report import generate_report
-from fea_toolkit.spectrum import ResponseSpectrum
 
 __all__ = [
     "AnalysisBuilder",
@@ -176,3 +186,15 @@ __all__ = [
     "pushover_rc_openseespy",
     "run_modal",
 ]
+
+
+def __getattr__(name: str):
+    """PEP 562 lazy attribute resolution for the re-exported API."""
+    module = _LAZY_IMPORTS.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return getattr(importlib.import_module(module), name)
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_LAZY_IMPORTS) | set(__all__))
