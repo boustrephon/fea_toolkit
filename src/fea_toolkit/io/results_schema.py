@@ -7,6 +7,15 @@ is a direct rename.  See ``docs/results_schema.md`` for the full specification.
 
 import numpy as np
 
+# ── File schema version ──────────────────────────────────────────────
+# Legacy files written before versioning was introduced carry no
+# ``schema_version`` array and are treated as ``SCHEMA_VERSION_LEGACY``.
+SCHEMA_VERSION_LEGACY = 1
+#: Version of the unified results-file layout.  Bump on a
+#: backward-incompatible change (consumers read the array and may warn
+#: or adapt).  Written by :func:`fea_toolkit.io.stage_writer.write_model_stages`.
+SCHEMA_VERSION = 2
+
 # ── Required array names per result type ──────────────────────────────────
 
 GEOMETRY_ARRAYS: dict[str, tuple] = {
