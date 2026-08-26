@@ -529,41 +529,46 @@ def create_deformed_geometry(
 
     count = 0
 
-    # ── Displaced frame lines ─────────────────────────────────────
-    if frame_sap is not None and frame_i is not None and frame_j is not None:
-        for i in range(len(frame_sap)):
-            ni = tag_to_row.get(int(frame_i[i]))
-            nj = tag_to_row.get(int(frame_j[i]))
-            if ni is None or nj is None:
-                continue
-            attrs = _attributes("Frame")
-            attrs.SetUserString("SAP_FrameID", str(frame_sap[i]))
-            doc.Objects.AddLine(rg.Line(coords[ni], coords[nj]), attrs)
-            count += 1
+    # Viewport redraw is suppressed for the whole batch — with ~1000
+    # AddLine/AddMesh calls the per-object redraw dominates runtime.
+    from .layers import suppress_redraw
 
-    # ── Displaced shell quads ─────────────────────────────────────
-    if shell_sap is not None and all(x is not None for x in shell_nodes):
-        for i in range(len(shell_sap)):
-            idxs = []
-            for k in range(4):
-                ridx = tag_to_row.get(int(shell_nodes[k][i]))
-                if ridx is not None and 0 <= ridx < n:
-                    idxs.append(ridx)
-            # Triangles leave node 4 as -1 / equal to node 3.
-            if len(idxs) < 3:
-                continue
-            mesh = rg.Mesh()
-            for idx in idxs:
-                mesh.Vertices.Add(coords[idx].X, coords[idx].Y, coords[idx].Z)
-            if len(idxs) == 4:
-                mesh.Faces.AddFace(0, 1, 2, 3)
-            else:
-                mesh.Faces.AddFace(0, 1, 2)
-            mesh.Normals.ComputeNormals()
-            attrs = _attributes("Shell")
-            attrs.SetUserString("SAP_AreaID", str(shell_sap[i]))
-            doc.Objects.AddMesh(mesh, attrs)
-            count += 1
+    with suppress_redraw():
+        # ── Displaced frame lines ─────────────────────────────────────
+        if frame_sap is not None and frame_i is not None and frame_j is not None:
+            for i in range(len(frame_sap)):
+                ni = tag_to_row.get(int(frame_i[i]))
+                nj = tag_to_row.get(int(frame_j[i]))
+                if ni is None or nj is None:
+                    continue
+                attrs = _attributes("Frame")
+                attrs.SetUserString("SAP_FrameID", str(frame_sap[i]))
+                doc.Objects.AddLine(rg.Line(coords[ni], coords[nj]), attrs)
+                count += 1
+
+        # ── Displaced shell quads ─────────────────────────────────────
+        if shell_sap is not None and all(x is not None for x in shell_nodes):
+            for i in range(len(shell_sap)):
+                idxs = []
+                for k in range(4):
+                    ridx = tag_to_row.get(int(shell_nodes[k][i]))
+                    if ridx is not None and 0 <= ridx < n:
+                        idxs.append(ridx)
+                # Triangles leave node 4 as -1 / equal to node 3.
+                if len(idxs) < 3:
+                    continue
+                mesh = rg.Mesh()
+                for idx in idxs:
+                    mesh.Vertices.Add(coords[idx].X, coords[idx].Y, coords[idx].Z)
+                if len(idxs) == 4:
+                    mesh.Faces.AddFace(0, 1, 2, 3)
+                else:
+                    mesh.Faces.AddFace(0, 1, 2)
+                mesh.Normals.ComputeNormals()
+                attrs = _attributes("Shell")
+                attrs.SetUserString("SAP_AreaID", str(shell_sap[i]))
+                doc.Objects.AddMesh(mesh, attrs)
+                count += 1
 
     doc.Views.Redraw()
     if verbose:

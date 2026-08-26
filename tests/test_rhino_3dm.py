@@ -177,6 +177,9 @@ class FakeObjects:
 
 
 class FakeViews:
+    def __init__(self):
+        self.RedrawEnabled = True
+
     def Redraw(self):
         pass
 
@@ -538,6 +541,40 @@ class TestFindLayer:
         got = create_or_get_layer("SAP2000/Mesh/Frames/CL/UB300")
         assert got == n_before - 1
         assert len(doc.Layers._layers) == n_before  # found, not duplicated
+
+
+class TestSuppressRedraw:
+    """``suppress_redraw`` must disable redraw for the batch, restore it on
+    exit, and issue a single redraw — including when the batch raises."""
+
+    def test_disables_and_restores(self, rhino_env):
+        from fea_toolkit.rhino.layers import suppress_redraw
+
+        assert rhino_env.Views.RedrawEnabled is True
+        with suppress_redraw():
+            assert rhino_env.Views.RedrawEnabled is False
+        assert rhino_env.Views.RedrawEnabled is True
+
+    def test_restores_on_exception(self, rhino_env):
+        from fea_toolkit.rhino.layers import suppress_redraw
+
+        assert rhino_env.Views.RedrawEnabled is True
+        try:
+            with suppress_redraw():
+                raise RuntimeError("boom")
+        except RuntimeError:
+            pass
+        assert rhino_env.Views.RedrawEnabled is True
+
+    def test_nested_batches_restore_correctly(self, rhino_env):
+        from fea_toolkit.rhino.layers import suppress_redraw
+
+        with suppress_redraw():
+            assert rhino_env.Views.RedrawEnabled is False
+            with suppress_redraw():
+                assert rhino_env.Views.RedrawEnabled is False
+            assert rhino_env.Views.RedrawEnabled is False
+        assert rhino_env.Views.RedrawEnabled is True
 
 
 class _BrokenIndexObjects:

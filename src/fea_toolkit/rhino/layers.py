@@ -40,8 +40,43 @@ the importer derives ``SAP2000/SAP`` / ``SAP2000/Mesh`` from the stage.
 """
 
 import typing as t
+from contextlib import contextmanager
 
 from .colors import FRAME_PALETTE, SHELL_PALETTE, get_sap2000_color, safe_str
+
+
+@contextmanager
+def suppress_redraw():
+    """Temporarily disable viewport redraws during bulk document changes.
+
+    Rhino invalidates/redraws viewports after every ``Add*`` and attribute
+    commit; with thousands of objects (frame/shell geometry, result flags,
+    deformed overlays) that per-object redraw dominates runtime.  Wrapping
+    a batch in this context manager is the canonical McNeel-documented
+    speed-up (``doc.Views.RedrawEnabled = False``): the document change
+    notifications are skipped until the batch completes.
+
+    Redraw is restored and a single ``Views.Redraw()`` is issued on exit,
+    in a ``try/finally`` so a crash mid-batch never leaves Rhino's
+    viewport frozen.
+
+    Example::
+
+        with suppress_redraw():
+            for ... in range(1000):
+                doc.Objects.AddExtrusion(ext, attrs)
+        # one viewport refresh happens here
+    """
+    import scriptcontext as sc
+
+    doc = sc.doc
+    was_enabled = bool(doc.Views.RedrawEnabled)
+    doc.Views.RedrawEnabled = False
+    try:
+        yield
+    finally:
+        doc.Views.RedrawEnabled = was_enabled
+        doc.Views.Redraw()
 
 
 def _ensure_rhino():
