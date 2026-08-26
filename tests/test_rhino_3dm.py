@@ -368,17 +368,30 @@ class TestColourDocObjects:
 
 class TestRhino3dmRoundTrip:
     def test_nested_layers_write_read(self, tmp_path):
-        """Nested stage layers survive a real .3dm write/read (skipped w/o rhino3dm)."""
+        """Nested stage layers survive a real .3dm write/read (skipped w/o rhino3dm).
+
+        Uses the rhino3dm 8.x API verified against the shipped type stubs:
+        ``Layer()`` takes no constructor args (set ``Name`` after), the
+        layer table method is ``Add`` (capital A) and the file writer is
+        ``Write(path, version)``.
+        """
         rhino3dm = pytest.importorskip("rhino3dm")
         path = str(tmp_path / "layers.3dm")
 
         model = rhino3dm.File3dm()
-        root_idx = model.Layers.add(rhino3dm.Layer("SAP2000"))
-        sap = rhino3dm.Layer("SAP")
+        root = rhino3dm.Layer()
+        root.Name = "SAP2000"
+        root_idx = model.Layers.Add(root)
+        sap = rhino3dm.Layer()
+        sap.Name = "SAP"
         sap.ParentLayerId = model.Layers[root_idx].Id
-        model.Layers.add(sap)
-        model.write(path)
+        model.Layers.Add(sap)
+        model.Write(path, 6)
 
         loaded = rhino3dm.File3dm.Read(path)
+        by_name = {layer.Name: layer for layer in loaded.Layers}
+        assert {"SAP2000", "SAP"} <= set(by_name)
+        # Nesting survives the round-trip: SAP's parent is the SAP2000 root.
+        assert by_name["SAP"].ParentLayerId == by_name["SAP2000"].Id
         names = {layer.Name for layer in loaded.Layers}
         assert {"SAP2000", "SAP"} <= names
