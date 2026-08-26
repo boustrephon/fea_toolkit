@@ -159,14 +159,15 @@ class TestPushoverShellQuantities:
 
 class TestDeformedArrays:
     def test_static(self, flat_results):
-        dx, dy, dz, label = _load_deformed_arrays(flat_results, "static", case="DEAD")
+        dx, dy, dz, tags, label = _load_deformed_arrays(flat_results, "static", case="DEAD")
         assert label == "static/DEAD"
+        assert tags is None  # static rows are written already tag-sorted
         assert list(dx) == [0.0, 0.1, 0.2, 0.1]
         assert list(dy) == [0.0] * 4
         assert list(dz) == [0.0] * 4
 
     def test_static_first_case(self, flat_results):
-        _, _, _, label = _load_deformed_arrays(flat_results, "static")
+        _, _, _, _, label = _load_deformed_arrays(flat_results, "static")
         assert label == "static/DEAD"
 
     def test_modal_mode_clamped(self):
@@ -175,12 +176,13 @@ class TestDeformedArrays:
             "modal/mode_dy": np.zeros((4, 2)),
             "modal/mode_dz": np.ones((4, 2)),
         }
-        _dx, _dy, dz, label = _load_deformed_arrays(data, "modal", mode=5)
+        _dx, _dy, dz, tags, label = _load_deformed_arrays(data, "modal", mode=5)
         assert label == "modal/2"  # clamped to last mode
+        assert tags is None  # no explicit modal/node_tag in this fixture
         assert list(dz) == [1.0] * 4
 
     def test_pushover_last_step(self, flat_results):
-        _, _, _, label = _load_deformed_arrays(flat_results, "pushover", direction="+X")
+        _, _, _, _, label = _load_deformed_arrays(flat_results, "pushover", direction="+X")
         assert label == "pushover/+X/step0"
 
     def test_rs_and_modal_missing(self, flat_results):
