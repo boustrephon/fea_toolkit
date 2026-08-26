@@ -636,28 +636,27 @@ def beam_load_to_nodal_loads(
     # --- Fixed-end forces for a trapezoidal load on a prismatic beam ---
     # Reference:  Gere & Timoshenko, "Mechanics of Materials"
     #
-    # Decompose into: uniform(w_avg) + antisymmetric(w_var)
-    #   w_avg = (w_a + w_b) / 2      — constant part
-    #   w_var = (w_b - w_a) / 2      — linearly varying part (triangular)
+    # Decompose into: uniform(w_start) + triangular(w_tri)
+    #   w_tri = w_end - w_start       — linearly varying part (triangular)
     #
-    # For uniform load w_avg over [aL, bL]:
-    #   V_i += w_avg * span * L * (1 - (aL + bL) / 2)
-    #   V_j += w_avg * span * L * (aL + bL) / 2
-    #   M_i += w_avg * (span * L)² / 12
-    #   M_j -= w_avg * (span * L)² / 12
+    # For uniform load w_start over [aL, bL]:
+    #   V_i += w_start * span * L * (1 - (aL + bL) / 2)
+    #   V_j += w_start * span * L * (aL + bL) / 2
+    #   M_i += w_start * (span * L)² / 12
+    #   M_j -= w_start * (span * L)² / 12
     #
-    # For triangular load w_var (0 at aL, w_var at bL):
-    #   V_i += w_var * span * L / 2 * (1 - (2*aL + bL) / 3)
-    #   V_j += w_var * span * L / 2 * (2*aL + bL) / 3
-    #   M_i += w_var * (span * L)² / 30
-    #   M_j -= w_var * (span * L)² / 20
+    # For triangular load w_tri (0 at aL, w_tri at bL):
+    #   V_i += w_tri * span * L / 2 * (1 - (2*aL + bL) / 3)
+    #   V_j += w_tri * span * L / 2 * (2*aL + bL) / 3
+    #   M_i += w_tri * (span * L)² / 30
+    #   M_j -= w_tri * (span * L)² / 20
 
     def fixed_end_forces(
         w_start: float, w_end: float, a_frac: float, b_frac: float, L_total: float
     ) -> tuple[float, float, float, float]:
         """Return (V_i, V_j, M_i, M_j) for one load component.
 
-        Decomposes a trapezoid into a uniform part (``w_min``) plus a
+        Decomposes a trapezoid into a uniform part (``w_start``) plus a
         triangular part (0 → ``w_tri``) and computes fixed-end forces
         using standard beam formulae.
         """
@@ -668,12 +667,18 @@ def beam_load_to_nodal_loads(
         sL = s * L_total  # loaded length
         centre = (a_frac + b_frac) * 0.5  # mid-point of loaded region
 
-        # --- Uniform part (value closer to zero over full loaded span) ---
-        w_min = w_start if abs(w_start) < abs(w_end) else w_end
-        V_i_uni = w_min * sL * (1.0 - centre)
-        V_j_uni = w_min * sL * centre
-        M_i_uni = w_min * sL * sL / 12.0
-        M_j_uni = -w_min * sL * sL / 12.0
+        # --- Uniform part (w_start over the full loaded span) ---
+        # Using w_start (not the value closer to zero) is required so the
+        # decomposition reconstructs the trapezoid exactly:
+        #   w(a_frac) = w_start + 0      = w_start
+        #   w(b_frac) = w_start + w_tri  = w_end
+        # The "closer to zero" choice breaks this for decreasing loads
+        # (e.g. 10 -> 4 would decompose to 4 + (-6) and reconstruct
+        # 10 -> -2).
+        V_i_uni = w_start * sL * (1.0 - centre)
+        V_j_uni = w_start * sL * centre
+        M_i_uni = w_start * sL * sL / 12.0
+        M_j_uni = -w_start * sL * sL / 12.0
 
         # --- Triangular part (0 at a_frac, w_tri at b_frac) ---
         w_tri = w_end - w_start

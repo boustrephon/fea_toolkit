@@ -2055,19 +2055,25 @@ def remove_floating_nodes(
         if not getattr(ae, "inactive", False):
             connected.update(ae.node_ids)
 
-    joint_loads: dict[str, list[float]] = {}
+    # Accumulate joint loads keyed by (node_id, pattern) so each source
+    # load's pattern is preserved when the load is transferred to the
+    # nearest connected node — never aggregated into a patternless entry
+    # (the JointLoad dataclass requires a pattern and a node_id).
+    joint_loads: dict[tuple[str, str], list[float]] = {}
     for jl in getattr(md, "joint_loads", []):
         nid = getattr(jl, "node_id", "") or getattr(jl, "node", "")
         if not nid:
             continue
-        if nid not in joint_loads:
-            joint_loads[nid] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        joint_loads[nid][0] += getattr(jl, "fx", 0.0) or 0.0
-        joint_loads[nid][1] += getattr(jl, "fy", 0.0) or 0.0
-        joint_loads[nid][2] += getattr(jl, "fz", 0.0) or 0.0
-        joint_loads[nid][3] += getattr(jl, "mx", 0.0) or 0.0
-        joint_loads[nid][4] += getattr(jl, "my", 0.0) or 0.0
-        joint_loads[nid][5] += getattr(jl, "mz", 0.0) or 0.0
+        pat = getattr(jl, "pattern", "") or ""
+        key = (nid, pat)
+        if key not in joint_loads:
+            joint_loads[key] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        joint_loads[key][0] += getattr(jl, "fx", 0.0) or 0.0
+        joint_loads[key][1] += getattr(jl, "fy", 0.0) or 0.0
+        joint_loads[key][2] += getattr(jl, "fz", 0.0) or 0.0
+        joint_loads[key][3] += getattr(jl, "mx", 0.0) or 0.0
+        joint_loads[key][4] += getattr(jl, "my", 0.0) or 0.0
+        joint_loads[key][5] += getattr(jl, "mz", 0.0) or 0.0
 
     ms_has_masses = any(
         getattr(src, "masses", False) for src in getattr(md, "mass_sources", {}).values()
@@ -2084,7 +2090,14 @@ def remove_floating_nodes(
 
     for nid in floating:
         nd = md.nodes[nid]
-        loads = joint_loads.get(nid, [0.0] * 6)
+        # Aggregate the per-pattern vectors for this node (report only —
+        # the transfer below keeps the per-pattern split).
+        loads = [0.0] * 6
+        for (nid_key, _pat), vec in joint_loads.items():
+            if nid_key != nid:
+                continue
+            for k in range(6):
+                loads[k] += vec[k]
         has_loads = any(abs(v) > 1e-12 for v in loads)
         has_restraint = nid in restraints
         has_mass = ms_has_masses
@@ -2115,17 +2128,25 @@ def remove_floating_nodes(
         if has_loads and best_nid:
             if not hasattr(md, "joint_loads") or md.joint_loads is None:
                 md.joint_loads = []
-            md.joint_loads.append(
-                JointLoad(
-                    node=best_nid,
-                    fx=loads[0],
-                    fy=loads[1],
-                    fz=loads[2],
-                    mx=loads[3],
-                    my=loads[4],
-                    mz=loads[5],
+            # One transferred JointLoad per source pattern, so
+            # `_create_loads` can include it for the matching pattern.
+            for (nid_key, pat), vec in joint_loads.items():
+                if nid_key != nid:
+                    continue
+                if not any(abs(v) > 1e-12 for v in vec):
+                    continue
+                md.joint_loads.append(
+                    JointLoad(
+                        pattern=pat,
+                        node_id=best_nid,
+                        fx=vec[0],
+                        fy=vec[1],
+                        fz=vec[2],
+                        mx=vec[3],
+                        my=vec[4],
+                        mz=vec[5],
+                    )
                 )
-            )
 
         if has_restraint and best_nid and best_nid not in restraints:
             restraints[best_nid] = restraints.pop(nid)

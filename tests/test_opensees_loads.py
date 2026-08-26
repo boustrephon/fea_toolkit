@@ -88,5 +88,9 @@ def test_z_aligned_fallback_axis_is_finite(monkeypatch):
     monkeypatch.setattr(loads_mod.ops, "eleResponse", _raise)
     wx, wy, wz = global_to_local_distributed_load(1, [0.0, 0.0, -1.0])
     assert np.isfinite(wx) and np.isfinite(wy) and np.isfinite(wz)
-    # Gravity on a vertical member must project onto the axial (local x) axis.
-    assert abs(wx) > 0.0 or abs(wz) > 0.0
+    # A +Z-aligned member's local x is the global Z axis, so gravity
+    # (0, 0, -1) must project fully onto the axial direction:
+    # wx == -1.0 with zero transverse components (wy == wz == 0.0).
+    assert wx == pytest.approx(-1.0)
+    assert wy == pytest.approx(0.0)
+    assert wz == pytest.approx(0.0)
