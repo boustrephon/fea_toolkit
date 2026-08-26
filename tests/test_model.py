@@ -4824,6 +4824,52 @@ class TestSAPModelDataMethods:
         # Restraint should have transferred
         assert "1" in md.restraints or "2" in md.restraints
 
+    def test_remove_floating_nodes_transfers_joint_loads_per_pattern(self):
+        """Floating node's joint loads transfer per source pattern.
+
+        Regression test: the transferred ``JointLoad`` must use the
+        dataclass's real ``node_id`` field and preserve each source
+        load's ``pattern`` — the previous patternless
+        ``JointLoad(node=...)`` construction raised ``TypeError`` and
+        aggregated every pattern into one anonymous entry.
+        """
+        from fea_toolkit.model.geometry import remove_floating_nodes
+
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+                "2": Node(node_id="2", node_tag=2, x=6, y=0, z=0),
+                "3": Node(node_id="3", node_tag=3, x=3, y=0, z=0),  # floating
+            },
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={
+                "F1": FrameElement(elem_id="F1", elem_tag=10, node_i="1", node_j="2"),
+            },
+            area_elements={},
+            frame_assignments={"F1": "SEC1"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            joint_loads=[
+                JointLoad(pattern="DEAD", node_id="3", fz=-100.0),
+                JointLoad(pattern="LIVE", node_id="3", fz=-50.0),
+            ],
+        )
+        rows = remove_floating_nodes(md)
+        assert len(rows) == 1
+        transferred = [jl for jl in md.joint_loads if jl.node_id != "3"]
+        # Both patterns transferred independently, keeping their own
+        # pattern names and the nearest connected node's id.
+        assert len(transferred) == 2
+        by_pattern = {jl.pattern: jl for jl in transferred}
+        assert set(by_pattern) == {"DEAD", "LIVE"}
+        for jl in transferred:
+            assert jl.node_id in ("1", "2")
+        assert by_pattern["DEAD"].fz == pytest.approx(-100.0)
+        assert by_pattern["LIVE"].fz == pytest.approx(-50.0)
+
 
 # ═══════════════════════════════════════════════════════════════════
 # CQC combination engine
