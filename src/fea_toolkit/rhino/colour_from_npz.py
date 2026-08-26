@@ -1,7 +1,11 @@
 """Colour Rhino objects by force/moment quantities from an NPZ results file.
 
 This is a **Rhino-only** script — it runs inside Rhino's CPython
-environment and uses ``rhinoscriptsyntax`` and ``Rhino.Geometry``.
+environment.  Attribute and geometry work uses the direct ``Rhino`` SDK
+(``scriptcontext`` / ``Rhino.DocObjects`` / ``Rhino.Geometry``);
+``rhinoscriptsyntax`` is deliberately avoided in the attribute path
+because its convenience wrappers (e.g. ``rs.GetUserText``) can silently
+return empty data for objects whose direct reads work.
 
 Usage in Rhino's Python editor (or ``RunPythonScript``)::
 
@@ -27,11 +31,13 @@ Each Rhino object with a ``SAP_FrameID`` UserString (matching a
 based on the force/moment magnitude at the element's I‑end.
 """
 
-import contextlib
-from collections import Counter
 from typing import Optional
 
 import numpy as np
+
+# Strategy battery version.  Bump whenever the colour-apply strategy changes
+# so Rhino smoke tests can detect a stale loaded module unambiguously.
+_COLOUR_STRATEGY_VERSION = 18
 
 # ---------------------------------------------------------------------------
 # Colour mapping helpers (pure NumPy — no Rhino dependency on import)
@@ -322,6 +328,30 @@ def _load_npz_quantities(
     return values, (vmin, vmax), {}
 
 
+def _as_sd_color_rgb(rgb):
+    """Build an explicit ``System.Drawing.Color`` from an ``(r, g, b)`` tuple.
+
+    ``ObjectAttributes.ObjectColor`` is typed ``System.Drawing.Color``, but the
+    toolkit hands it a ``Rhino.Display.ColorRGBA`` built from Python ints.
+    pythonnet's overload resolution for the ``ColorRGBA`` constructor is
+    ambiguous between its byte (0-255) and float (0-1) overloads; when it
+    binds the float overload the ints are clamped to 1.0 and every colour
+    silently becomes white — exactly the symptom seen on recreated frames
+    (``ColorSource`` sticks, ``ObjectColor`` reads back white, read-back
+    verification fails).  Building the ``System.Drawing.Color`` directly
+    removes the ambiguity.
+
+    Args:
+        rgb: ``(r, g, b)`` 0-255 tuple.
+
+    Returns:
+        ``System.Drawing.Color`` (opaque) for assignment to ``ObjectColor``.
+    """
+    from System.Drawing import Color as _SDColor
+
+    return _SDColor.FromArgb(255, int(rgb[0]), int(rgb[1]), int(rgb[2]))
+
+
 def _applied_colour_matches(attrs, rgb) -> bool:
     """Best-effort read-back of an object's colour after ``CommitChanges``.
 
@@ -348,6 +378,155 @@ def _applied_colour_matches(attrs, rgb) -> bool:
         return (int(applied.R), int(applied.G), int(applied.B)) == rgb
     except Exception:
         return True
+
+
+def _snapshot_user_strings(attrs) -> dict:
+    """Copy every UserString off *attrs* into a plain ``{key: str}`` dict.
+
+    Rhino 8's ``rs.GetUserText`` is unreliable in the CPython build — it can
+    return an empty dict for objects whose ``Attributes.GetUserString()``
+    demonstrably works — so the colouring snapshot reads the
+    ``ObjectAttributes`` directly.  ``Attributes.GetUserStrings()`` returns a
+    ``Rhino.Runtime.StringTable``; enumerate it through every plausible
+    CPython shape (``AllKeys`` / ``GetKeys`` / ``Keys`` / iteration) as well
+    as the dict-shaped test doubles.  The caller still re-stamps ``id_key``
+    when this returns empty, so the match key always survives a recreate.
+
+    Args:
+        attrs: The object's ``ObjectAttributes``.
+
+    Returns:
+        ``{key: value}`` snapshot of the object's UserStrings.
+    """
+    out: dict = {}
+    try:
+        table = attrs.GetUserStrings()
+    except Exception:
+        return out
+
+    keys: list = []
+    if hasattr(table, "keys"):  # plain dict / dict-like (test doubles)
+        try:
+            keys = list(table.keys())
+        except Exception:
+            keys = []
+    else:  # Rhino.StringTable
+        for _fn in ("AllKeys", "GetKeys", "Keys"):
+            if not keys and hasattr(table, _fn):
+                try:
+                    keys = list(getattr(table, _fn)())
+                except Exception:
+                    keys = []
+        if not keys:
+            try:
+                keys = list(table)
+            except Exception:
+                keys = []
+
+    for _k in keys:
+        _v = None
+        try:
+            _v = table[_k]
+        except Exception:
+            try:
+                _v = table.GetString(_k)
+            except Exception:
+                _v = None
+        if _v is not None:
+            out[str(_k)] = str(_v)
+    return out
+
+
+def _apply_object_colour(rh_obj, rgb, id_key, us) -> str:
+    """Apply *rgb* to *rh_obj*'s ``ObjectColor``, returning the strategy used.
+
+    Rhino 8 CPython can drop post-creation attribute commits on some
+    objects, so the colour is always verified by read-back and only counted
+    when it sticks.  Strategies, in order:
+
+      1. ``doc.Objects.ModifyAttributes(id, dup, True)`` — the proven path.
+         ``ObjectColor`` is built explicitly via ``System.Drawing.Color``
+         (``_as_sd_color_rgb``) because ``ColorRGBA``'s ambiguous int/float
+         constructors silently clamp 0-255 ints to 0-1 (white).
+      2. Recreate — snapshot the UserStrings first, then ``Delete`` +
+         ``Add`` with FRESH creation-time attributes carrying the colour and
+         the re-stamped UserStrings.  Host-safety fallback for builds that
+         still drop in-place commits; changes the object's Id.
+
+    Args:
+        rh_obj: The ``RhinoObject`` to recolour.
+        rgb: ``(r, g, b)`` tuple for the colour and the read-back.
+        id_key: UserString key the caller matched on (``SAP_FrameID`` etc.) —
+            re-stamped by the Recreate fallback so the object stays findable.
+        us: The matched UserString value for *id_key*.
+
+    Returns:
+        The strategy name that produced a matching read-back, or ``"none"``.
+    """
+    import scriptcontext as sc
+    from Rhino.DocObjects import ObjectAttributes, ObjectColorSource
+
+    # ── Snapshot everything the Recreate fallback needs BEFORE any ──
+    # strategy mutates the object (read from the attributes directly —
+    # ``rs.GetUserText`` can return empty here).
+    layer_index = None
+    obj_name = None
+    user_strings: dict = {}
+    try:
+        live_attrs = rh_obj.Attributes
+        layer_index = live_attrs.LayerIndex
+        try:
+            obj_name = live_attrs.Name
+        except Exception:
+            obj_name = None
+        user_strings = _snapshot_user_strings(live_attrs)
+    except Exception:
+        pass
+
+    # ── 1. Quick path: Duplicate + quiet ModifyAttributes ───────────────
+    try:
+        new_attrs = rh_obj.Attributes.Duplicate()
+        new_attrs.ObjectColor = _as_sd_color_rgb(rgb)
+        new_attrs.ColorSource = ObjectColorSource.ColorFromObject
+        sc.doc.Objects.ModifyAttributes(rh_obj.Id, new_attrs, True)
+        if _applied_colour_matches(rh_obj.Attributes, rgb):
+            return "ModifyAttributes(quiet)"
+    except Exception:
+        pass
+
+    # ── 2. Recreate: FRESH creation-time attributes + Delete/Add ────────
+    # Build a fresh ObjectAttributes (never the Duplicate) with the colour
+    # and the UserStrings snapshot, then add it like any other
+    # creation-time object.
+    new_id = None
+    try:
+        fresh = ObjectAttributes()
+        if layer_index is not None and layer_index >= 0:
+            fresh.LayerIndex = layer_index
+        if obj_name:
+            fresh.Name = obj_name
+        fresh.ObjectColor = _as_sd_color_rgb(rgb)
+        fresh.ColorSource = ObjectColorSource.ColorFromObject
+        for _k, _v in user_strings.items():
+            fresh.SetUserString(_k, _v)
+        # Guarantee: even if the UserString snapshot failed, the match key
+        # the caller selected on must survive the recreate.
+        if id_key not in user_strings and us is not None:
+            fresh.SetUserString(id_key, us)
+        geom = rh_obj.Geometry.Duplicate()
+        if sc.doc.Objects.Delete(rh_obj.Id, True):
+            new_id = sc.doc.Objects.Add(geom, fresh)
+    except Exception:
+        new_id = None
+    if new_id is not None:
+        try:
+            new_obj = sc.doc.Objects.Find(new_id)
+            if new_obj is not None and _applied_colour_matches(new_obj.Attributes, rgb):
+                return "Recreate"
+        except Exception:
+            pass
+
+    return "none"
 
 
 def _colour_doc_objects(
@@ -379,19 +558,21 @@ def _colour_doc_objects(
     """
     import fnmatch
 
-    import Rhino
     import scriptcontext as sc
-    from Rhino.DocObjects import ObjectColorSource
 
     doc = sc.doc
     coloured = 0
     failed_apply = 0
-    failed_kinds: Counter = Counter()
+    failed_ids_sample: list = []
 
+    # ── Pass 1: collect matching objects ──────────────────────────────
     # Iterate the ObjectTable directly — pythonnet does not expose the
     # ``ObjectTable`` indexer as ``__getitem__`` in Rhino 8's CPython, so
     # ``range(objs.Count)`` + ``objs[i]`` hits the abstract
     # ``_collections_abc.Sequence.__getitem__`` and always raises IndexError.
+    # Collection must be a separate pass from applying: the Recreate
+    # fallback deletes/re-adds objects, which would corrupt the iterator.
+    targets: list = []
     for rh_obj in doc.Objects:
         if rh_obj is None or rh_obj.IsDeleted or (skip_locked and rh_obj.IsLocked):
             continue
@@ -418,33 +599,24 @@ def _colour_doc_objects(
 
         val = values[us]
         rgb = _value_to_rgb(val, vmin, vmax, bands=bands)
-        colour = Rhino.Display.ColorRGBA(rgb[0], rgb[1], rgb[2], 255)
+        targets.append((rh_obj, us, rgb))
 
-        attrs.ObjectColor = colour
-        attrs.ColorSource = ObjectColorSource.ColorFromObject
-        rh_obj.CommitChanges()
-        if not _applied_colour_matches(attrs, rgb):
-            # Some Rhino 8 CPython builds silently drop the attribute
-            # commit on Extrusion/Brep objects — retry through the document
-            # API, which replaces the object's attributes wholesale (attrs
-            # is a full copy, so the SAP_*/FEA_* UserStrings survive).
-            with contextlib.suppress(Exception):
-                sc.doc.Objects.ModifyAttributes(rh_obj.Id, attrs)
-        # Read back: only count colours that actually stuck.
-        if _applied_colour_matches(attrs, rgb):
+    # ── Pass 2: apply (may mutate the ObjectTable — never while iterating) ──
+    for rh_obj, us, rgb in targets:
+        strategy = _apply_object_colour(rh_obj, rgb, id_key, us)
+        if strategy != "none":
             coloured += 1
         else:
             failed_apply += 1
-            failed_kinds[type(rh_obj).__name__] += 1
+            if len(failed_ids_sample) < 12:
+                failed_ids_sample.append(us)
 
     if failed_apply:
-        kinds = ", ".join(f"{k}={n}" for k, n in failed_kinds.most_common())
+        sample = ", ".join(str(s) for s in failed_ids_sample) if failed_ids_sample else "(none)"
         print(
-            f"WARNING: {failed_apply} object colour(s) did not stick after "
-            "CommitChanges/ModifyAttributes — Rhino ignored the attribute "
-            f"update (failed by type: {kinds}).  Re-run with "
-            "_SUPPRESS_REDRAW = False in the smoke test, or check the "
-            "viewport display mode (Object Colors)."
+            f"WARNING: {failed_apply} object colour(s) could not be applied "
+            f"(read-back mismatch after ModifyAttributes + Recreate).  "
+            f"Sample SAP IDs: {sample}."
         )
 
     doc.Views.Redraw()
@@ -877,8 +1049,6 @@ def _create_flag_meshes(
     Returns:
         Number of flag meshes added to the document.
     """
-    import Rhino
-
     created = 0
     failed_ids: list[str] = []
 
@@ -972,7 +1142,7 @@ def _create_flag_meshes(
                 mesh.VertexColors.Add(r, g, b)
             a = rd.ObjectAttributes()
             a.LayerIndex = layer_index
-            a.ObjectColor = Rhino.Display.ColorRGBA(r, g, b, 255)
+            a.ObjectColor = _as_sd_color_rgb((r, g, b))
             a.ColorSource = rd.ObjectColorSource.ColorFromObject
             a.SetUserString("SAP_FrameID", str(fid))
             a.SetUserString(f"{quantity}_i", f"{vi_t:.4g}")
