@@ -104,6 +104,7 @@ def _get_frames(model) -> tuple:
 def _get_shells(model) -> tuple:
     """Extract shell element arrays."""
     shell_eid, shell_sap_id, shell_sec_name = [], [], []
+    shell_parent = []
     s1, s2, s3, s4 = [], [], [], []
 
     for aid, area in model.area_elements.items():
@@ -124,6 +125,8 @@ def _get_shells(model) -> tuple:
             tags.append(tags[-1])
         shell_eid.append(len(shell_eid))
         shell_sap_id.append(str(aid))
+        pid = getattr(area, "parent_id", None)
+        shell_parent.append(str(pid) if pid else "")
         sec = model.area_assignments.get(aid, "")
         shell_sec_name.append(sec)
         s1.append(tags[0])
@@ -131,7 +134,7 @@ def _get_shells(model) -> tuple:
         s3.append(tags[2])
         s4.append(tags[3])
 
-    return shell_eid, shell_sap_id, shell_sec_name, s1, s2, s3, s4
+    return shell_eid, shell_sap_id, shell_sec_name, shell_parent, s1, s2, s3, s4
 
 
 def collect_geometry_arrays(model) -> dict[str, np.ndarray]:
@@ -161,9 +164,10 @@ def collect_geometry_arrays(model) -> dict[str, np.ndarray]:
     arrays["frame_t_end"] = np.array(fte, dtype=float)
 
     # Shells
-    (seid, ssid, ssec, sn1, sn2, sn3, sn4) = _get_shells(model)
+    (seid, ssid, ssec, sparent, sn1, sn2, sn3, sn4) = _get_shells(model)
     arrays["shell_eid"] = np.array(seid, dtype=int)
     arrays["shell_sap_id"] = np.array(ssid, dtype=str)
+    arrays["shell_parent_sap_id"] = np.array(sparent, dtype=str)
     arrays["shell_sec_name"] = np.array(ssec, dtype=str)
     arrays["shell_node_1"] = np.array(sn1, dtype=int)
     arrays["shell_node_2"] = np.array(sn2, dtype=int)
@@ -510,6 +514,7 @@ def write_results(
     rs_results: Optional[dict[str, dict]] = None,
     rs_element_forces: Optional[dict[str, Any]] = None,
     rs_nodal_displacements: Optional[dict[int, tuple]] = None,
+    pushover_results: Optional[dict[str, tuple]] = None,
     fmt: str = "npz",
     config: Optional[dict] = None,
     force_unit: Optional[str] = None,
@@ -529,6 +534,11 @@ def write_results(
         modal_result: Dict from ``run_modal_analysis()``.
         mode_shapes: Dict of mode shape eigenvectors ``{mode_idx: {tag: (dx,dy,dz)}}``.
         rs_results: Dict with keys ``rs_x``, ``rs_y`` from ``run_rs()``.
+        pushover_results: Pushover per-step results per direction as
+            ``{direction: (step_results, results)}`` — written under
+            ``pushover/{direction}/...`` via
+            :func:`fea_toolkit.io.npz_writer.collect_pushover_arrays`
+            (requires *mesh_model* for the node tags).
         fmt: ``"npz"`` (default) or ``"h5"``.
         config: Builder config dict (included in metadata).
         force_unit: Optional force-unit label override.  ``None`` derives
@@ -586,6 +596,30 @@ def write_results(
     # RS nodal displacements
     if rs_nodal_displacements:
         arrays.update(collect_rs_nodal_displacement_arrays(rs_nodal_displacements))
+
+    # Pushover per-step results (per direction)
+    analysis_types: list[str] = []
+    if pushover_results and mesh_model is not None:
+        from .npz_writer import collect_pushover_arrays
+
+        for direction, (step_results, po_results) in pushover_results.items():
+            if step_results:
+                arrays.update(
+                    collect_pushover_arrays(
+                        mesh_model,
+                        step_results,
+                        direction=direction,
+                        pushover_results=po_results,
+                    )
+                )
+    if static_results:
+        analysis_types.append("static")
+    if modal_result:
+        analysis_types.append("modal")
+    if pushover_results:
+        analysis_types.append("pushover")
+    if analysis_types:
+        arrays["analysis_types"] = np.array(analysis_types, dtype=str)
 
     # ── Canonical unit / local-force metadata (same keys as npz_writer) ──
     # Length-1 string arrays so the unified plotting readers

@@ -246,6 +246,7 @@ def build_metadata(
     config: t.Optional[dict] = None,
     static_results: t.Optional[dict] = None,
     modal_result: t.Optional[dict] = None,
+    pushover_results: t.Optional[dict] = None,
     force_unit: t.Optional[str] = None,
     length_unit: t.Optional[str] = None,
     forces_coordinate_system: str = "local",
@@ -290,6 +291,8 @@ def build_metadata(
         meta["static_cases"] = list(static_results.keys())
     if modal_result:
         meta["num_modes"] = len(modal_result.get("periods", []))
+    if pushover_results:
+        meta["pushover_directions"] = list(pushover_results.keys())
     return meta
 
 
@@ -364,6 +367,7 @@ def write_model_stages(
     config: t.Optional[dict] = None,
     static_results: t.Optional[dict] = None,
     modal_result: t.Optional[dict] = None,
+    pushover_results: t.Optional[dict] = None,
     fmt: str = "npz",
     geometry: bool = True,
     dictionaries: bool = True,
@@ -387,6 +391,13 @@ def write_model_stages(
         static_results: Static analysis results dict (same shape accepted
             by :func:`fea_toolkit.io.unified_writer.write_results`).
         modal_result: Modal analysis results dict.
+        pushover_results: Pushover results per direction, as
+            ``{direction: (step_results, results)}`` where *step_results*
+            is the builder's ``pushover_step_results`` list and *results*
+            the direction result dict (provides the global
+            ``step`` / ``control_disp`` / ``base_shear`` arrays).  Arrays
+            are written under ``pushover/{direction}/...`` via
+            :func:`fea_toolkit.io.npz_writer.collect_pushover_arrays`.
         fmt: ``\"npz\"`` (default) or ``\"h5\"``.
         geometry: Write the lightweight geometry arrays (Rhino / PyVista
             fast path).
@@ -427,6 +438,7 @@ def write_model_stages(
         config=config,
         static_results=static_results,
         modal_result=modal_result,
+        pushover_results=pushover_results,
         force_unit=force_unit,
         length_unit=length_unit,
         forces_coordinate_system=forces_coordinate_system,
@@ -469,6 +481,20 @@ def write_model_stages(
         from .npz_writer import _collect_modal
 
         arrays.update(_collect_modal(modal_result))
+    if pushover_results:
+        analysis_types.append("pushover")
+        from .npz_writer import collect_pushover_arrays
+
+        for direction, (step_results, po_results) in pushover_results.items():
+            if step_results:
+                arrays.update(
+                    collect_pushover_arrays(
+                        mesh,
+                        step_results,
+                        direction=direction,
+                        pushover_results=po_results,
+                    )
+                )
     if analysis_types:
         arrays["analysis_types"] = np.array(analysis_types, dtype=str)
 

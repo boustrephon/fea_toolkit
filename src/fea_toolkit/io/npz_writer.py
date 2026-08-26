@@ -615,6 +615,87 @@ def _collect_pushover(
     return arrays
 
 
+def collect_pushover_arrays(
+    mesh_model: "MeshModel",
+    step_results: list[dict[str, Any]],
+    direction: str = "+X",
+    pushover_results: Optional[dict[str, Any]] = None,
+) -> dict[str, np.ndarray]:
+    """Collect per-step pushover arrays for one direction.
+
+    Wraps :func:`_collect_pushover` and adds the aligned global arrays
+    (``step`` / ``control_disp`` / ``base_shear``) from *pushover_results*
+    when provided.  Shared by :func:`write_pushover_results_npz` and the
+    stage writer (:func:`fea_toolkit.io.stage_writer.write_model_stages`)
+    so multi-direction stage files and per-direction NPZs agree exactly
+    on the converged-step alignment.
+
+    Args:
+        mesh_model: MeshModel the pushover ran on (geometry arrays).
+        step_results: List of per-step dicts from
+            ``AnalysisBuilder.pushover_step_results`` (converged steps only).
+        direction: Push direction label (e.g. ``"+X"``).
+        pushover_results: Optional full result dict from
+            ``AnalysisBuilder.run_pushover_analysis()`` — contributes the
+            global ``step`` / ``control_disp`` / ``base_shear`` arrays.
+
+    Returns:
+        Dict of ``{array_name: np.ndarray}`` keyed per the
+        ``PUSHOVER_*_ARRAYS`` schema.
+    """
+    po_arrays = _collect_pushover(mesh_model, step_results, direction=direction)
+
+    # Add global arrays from pushover_results if provided
+    if pushover_results is not None:
+        steps_full = pushover_results.get("step", [])
+        n_full = len(steps_full)
+        if n_full > 0:
+            # Align global arrays with recorded step_results.
+            # step_results only contains entries for converged steps
+            # (ok == 0), while the global arrays (step, control_disp,
+            # base_shear) may contain entries for every iteration.  The
+            # per-element force arrays in po_arrays are indexed by the
+            # recorded steps, so the global arrays must always have
+            # exactly ``n_aligned`` entries — trim to the recorded-step
+            # ordering and NaN-pad any recorded step missing from the
+            # full arrays.
+            recorded_steps = [int(sd.get("step", 0)) for sd in step_results]
+            step_to_idx_full = {int(s): i for i, s in enumerate(steps_full)}
+            full_disp = pushover_results.get("control_disp", [0.0] * n_full)
+            full_shear = pushover_results.get("base_shear", [0.0] * n_full)
+
+            aligned_steps = []
+            aligned_disp = []
+            aligned_shear = []
+            for rs in recorded_steps:
+                idx = step_to_idx_full.get(rs)
+                if idx is not None:
+                    aligned_steps.append(int(steps_full[idx]))
+                    aligned_disp.append(float(full_disp[idx]))
+                    aligned_shear.append(float(full_shear[idx]))
+                else:
+                    # Recorded step missing from the full arrays — pad
+                    # with NaN to preserve the aligned length.
+                    aligned_steps.append(rs)
+                    aligned_disp.append(float("nan"))
+                    aligned_shear.append(float("nan"))
+
+            # Write aligned arrays directly into po_arrays so the
+            # aligned values are actually used rather than being
+            # shadowed by the step array from ``_collect_pushover``.
+            po_arrays[make_pushover_key(direction, "pushover/{direction}/step")] = np.array(
+                aligned_steps, dtype=int
+            )
+            po_arrays[make_pushover_key(direction, "pushover/{direction}/control_disp")] = np.array(
+                aligned_disp, dtype=float
+            )
+            po_arrays[make_pushover_key(direction, "pushover/{direction}/base_shear")] = np.array(
+                aligned_shear, dtype=float
+            )
+
+    return po_arrays
+
+
 def write_pushover_results_npz(
     path: str,
     mesh_model: "MeshModel",
@@ -686,58 +767,11 @@ def write_pushover_results_npz(
 
     # ── Pushover arrays ───────────────────────────────────────
     analysis_types: list[str] = ["pushover"]
-    po_arrays = _collect_pushover(mesh_model, step_results, direction=direction)
-
-    # Add global arrays from pushover_results if provided
-    if pushover_results is not None:
-        steps_full = pushover_results.get("step", [])
-        n_full = len(steps_full)
-        if n_full > 0:
-            # Align global arrays with recorded step_results.
-            # step_results only contains entries for converged steps
-            # (ok == 0), while the global arrays (step, control_disp,
-            # base_shear) may contain entries for every iteration.  The
-            # per-element force arrays in po_arrays are indexed by the
-            # recorded steps, so the global arrays must always have
-            # exactly ``n_aligned`` entries — trim to the recorded-step
-            # ordering and NaN-pad any recorded step missing from the
-            # full arrays.
-            recorded_steps = [int(sd.get("step", 0)) for sd in step_results]
-            len(recorded_steps)
-            step_to_idx_full = {int(s): i for i, s in enumerate(steps_full)}
-            full_disp = pushover_results.get("control_disp", [0.0] * n_full)
-            full_shear = pushover_results.get("base_shear", [0.0] * n_full)
-
-            aligned_steps = []
-            aligned_disp = []
-            aligned_shear = []
-            for rs in recorded_steps:
-                idx = step_to_idx_full.get(rs)
-                if idx is not None:
-                    aligned_steps.append(int(steps_full[idx]))
-                    aligned_disp.append(float(full_disp[idx]))
-                    aligned_shear.append(float(full_shear[idx]))
-                else:
-                    # Recorded step missing from the full arrays — pad
-                    # with NaN to preserve the aligned length.
-                    aligned_steps.append(rs)
-                    aligned_disp.append(float("nan"))
-                    aligned_shear.append(float("nan"))
-
-            # Write aligned arrays directly into po_arrays so the
-            # aligned values are actually used rather than being
-            # shadowed by the step array from ``_collect_pushover``.
-            po_arrays[make_pushover_key(direction, "pushover/{direction}/step")] = np.array(
-                aligned_steps, dtype=int
-            )
-            po_arrays[make_pushover_key(direction, "pushover/{direction}/control_disp")] = np.array(
-                aligned_disp, dtype=float
-            )
-            po_arrays[make_pushover_key(direction, "pushover/{direction}/base_shear")] = np.array(
-                aligned_shear, dtype=float
-            )
-
-    arrays.update(po_arrays)
+    arrays.update(
+        collect_pushover_arrays(
+            mesh_model, step_results, direction=direction, pushover_results=pushover_results
+        )
+    )
 
     # Derive unit labels from the model when not explicitly overridden
     force_unit = force_unit or force_unit_label(getattr(mesh_model, "units", {}))
