@@ -70,6 +70,7 @@ def run_pushover_analysis(
     directions: str = "4dir",
     name: str = "Pushover",
     config: Optional[dict] = None,
+    return_builders: bool = False,
 ) -> AnalysisResult:
     """Run pushover analysis with CSM evaluation.
 
@@ -110,6 +111,10 @@ def run_pushover_analysis(
         name: Result label (default ``"Pushover"``).
         config: Builder config overrides (merged over the
             material-type defaults).
+        return_builders: When ``True``, each direction's ``AnalysisBuilder``
+            is retained under ``all_out[label]["builder"]`` so per-step
+            results can be exported (e.g. to a stage file via
+            :func:`fea_toolkit.io.stage_writer.write_model_stages`).
 
     Returns:
         :class:`AnalysisResult` whose ``data`` holds the pushover result
@@ -156,6 +161,7 @@ def run_pushover_analysis(
             spectrum=spectrum,
             verbose=rc_config.get("verbose", False),
             node_mass_overrides=rc_config.get("node_mass_overrides"),
+            return_builders=return_builders,
         )
         return AnalysisResult(
             name=name,
@@ -189,6 +195,8 @@ def run_pushover_analysis(
         rs_modal_base_shear=rs_modal_base_shear,
         spectrum=spectrum,
         verbose=config.get("verbose", False),
+        config=config,
+        return_builders=return_builders,
     )
 
     return AnalysisResult(
