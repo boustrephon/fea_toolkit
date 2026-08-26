@@ -229,17 +229,19 @@ def summarise_load_patterns(md) -> pd.DataFrame:
 
 
 def load_pattern_totals(md) -> pd.DataFrame:
-    """Build the model and return a DataFrame of total applied load per pattern.
+    """Return a DataFrame of total applied load per pattern.
+
+    Builds the two-stage model and applies all load patterns via
+    ``AnalysisBuilder.create_loads()``, then reports the per-pattern
+    per-component applied totals accumulated by the builder
+    (self-weight + gravity + joint + distributed loads).
 
     Note:
         Load totals under the two-stage ``AnalysisBuilder`` are stored as
-        scalar magnitudes rather than per-component dicts; for new
-        workflows prefer ``AnalysisBuilder.check_load_equilibrium()`` or
-        direct access to ``builder.load_totals``.
-
-    Sums all joint loads, frame distributed loads, and self-weight for each
-    load pattern defined in the model (as computed by the builder's
-    ``load_totals`` attribute).
+        per-component dicts on the builder (``_sw_load_totals``,
+        ``_gravity_load_totals``, ``_joint_load_totals``,
+        ``_dist_load_totals``).  For per-pattern reaction comparison prefer
+        ``AnalysisBuilder.check_load_equilibrium()``.
     """
     from ..opensees.analysis_builder import AnalysisBuilder
     from ..opensees.preprocessor import preprocess_model
@@ -249,7 +251,7 @@ def load_pattern_totals(md) -> pd.DataFrame:
     )
     b = AnalysisBuilder(_mm, {"element_type": "elasticBeamColumn", "verbose": False})
     b.build_domain()
-    lt = getattr(b, "load_totals", {})
+    b.create_loads()  # apply all patterns so per-pattern totals are populated
 
     # Determine which patterns are referenced by LinStatic load cases
     linstatic_patterns: set = set()
@@ -264,29 +266,34 @@ def load_pattern_totals(md) -> pd.DataFrame:
         elif isinstance(sd, dict) and "LoadName" in sd:
             linstatic_patterns.add(sd["LoadName"])
 
+    # Per-pattern per-component applied totals
+    totals: dict[str, dict[str, float]] = {}
+    for _src in (
+        getattr(b, "_sw_load_totals", {}),
+        getattr(b, "_gravity_load_totals", {}),
+        getattr(b, "_joint_load_totals", {}),
+        getattr(b, "_dist_load_totals", {}),
+    ):
+        for pname, t in _src.items():
+            d = totals.setdefault(pname, dict.fromkeys(("fx", "fy", "fz"), 0.0))
+            for k in ("fx", "fy", "fz"):
+                d[k] += float(t.get(k, 0.0) or 0.0)
+
     rows = []
     fu = md.units.get("F", "?")
-    for pname in sorted(lt, key=str.casefold):
+    for pname in sorted(totals, key=str.casefold):
         if pname not in linstatic_patterns:
             continue
-        t = lt[pname]
-        if isinstance(t, dict):
-            fx = round(t.get("fx", 0), 2)
-            fy = round(t.get("fy", 0), 2)
-            fz = round(t.get("fz", 0), 2)
-        else:
-            fx = round(float(t), 2)
-            fy = 0.0
-            fz = 0.0
+        t = totals[pname]
         # Skip patterns with zero load in all directions
-        if fx == 0.0 and fy == 0.0 and fz == 0.0:
+        if abs(t["fx"]) < 1e-9 and abs(t["fy"]) < 1e-9 and abs(t["fz"]) < 1e-9:
             continue
         rows.append(
             {
                 "Load Pattern": pname,
-                f"Fx ({fu})": fx,
-                f"Fy ({fu})": fy,
-                f"Fz ({fu})": fz,
+                f"Fx ({fu})": round(t["fx"], 2),
+                f"Fy ({fu})": round(t["fy"], 2),
+                f"Fz ({fu})": round(t["fz"], 2),
             }
         )
     return pd.DataFrame(rows)

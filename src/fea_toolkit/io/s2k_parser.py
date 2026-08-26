@@ -1000,6 +1000,24 @@ class SAP2000Parser:
                         )
                     )
 
+            elif load_type == "UNIFORM TO FRAME":
+                # SAP "AREA LOADS - UNIFORM TO FRAME" — pressure applied to
+                # the frame elements along the panel edges, with an explicit
+                # OneWay/TwoWay distribution flag (routed to the edge-load
+                # conversion rather than the shell-object path).
+                for rec in self._raw_tables[table_name]:
+                    uniform_loads.append(
+                        AreaUniformLoad(
+                            pattern=str(rec.get("LoadPat", "")),
+                            area_id=str(rec.get("Area", "")),
+                            coord_sys=str(rec.get("CoordSys", "GLOBAL")),
+                            direction=str(rec.get("Dir", "Gravity")),
+                            value=float(rec.get("UnifLoad", 0.0)),
+                            to_frame=True,
+                            distribution=str(rec.get("Distribution", "TwoWay")).capitalize(),
+                        )
+                    )
+
             elif load_type == "GRAVITY":
                 for rec in self._raw_tables[table_name]:
                     gravity_loads.append(

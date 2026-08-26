@@ -14,7 +14,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from fea_toolkit.io.report import bounding_box, load_pattern_totals
+from fea_toolkit.io.report import bounding_box
 from fea_toolkit.model.sap_data import SAPModelData, patterns_from_case
 
 
@@ -79,8 +79,9 @@ def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: s
 def static_load_verification(md, mesh_model, config: Optional[dict] = None):
     """Check equilibrium between applied loads and reactions.
 
-    Combines the applied loads (from
-    :func:`load_pattern_totals`) with the reactions (from
+    Combines the applied loads (per-pattern per-component totals
+    accumulated by ``AnalysisBuilder.create_loads()``) with the
+    reactions (from
     :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.check_load_equilibrium`)
     into a single table with Applied, Reaction, and Δ columns.
 
@@ -103,13 +104,13 @@ def static_load_verification(md, mesh_model, config: Optional[dict] = None):
     if config is None:
         config = {"verbose": False}
 
-    df_applied = load_pattern_totals(md)
     fu = md.units.get("F", "?")
 
     ab = AnalysisBuilder(mesh_model, config)
-    df_rxn = ab.check_load_equilibrium()
-
-    merged = df_applied.merge(df_rxn, on="Load Pattern", how="outer", suffixes=("_applied", "_rxn"))
+    ab.build_domain()
+    # Apply ALL load patterns once so the per-pattern applied totals
+    # (_sw/_gravity/_joint/_dist) are populated for every pattern.
+    ab.create_loads()
 
     def _clean(v):
         """Coerce a merged-cell value to a finite float, else 0.0."""
@@ -119,20 +120,36 @@ def static_load_verification(md, mesh_model, config: Optional[dict] = None):
             return 0.0
         return fv if math.isfinite(fv) else 0.0
 
+    # ── Applied totals: per-pattern per-component ─────────────────
+    applied: dict[str, dict[str, float]] = {}
+    for _src in (
+        getattr(ab, "_sw_load_totals", {}),
+        getattr(ab, "_gravity_load_totals", {}),
+        getattr(ab, "_joint_load_totals", {}),
+        getattr(ab, "_dist_load_totals", {}),
+    ):
+        for pname, t in _src.items():
+            d = applied.setdefault(pname, dict.fromkeys(("fx", "fy", "fz", "mx", "my", "mz"), 0.0))
+            for _k in d:
+                d[_k] += _clean(t.get(_k, 0.0))
+
+    # ── Reactions: per-pattern static runs ────────────────────────
+    df_rxn = ab.check_load_equilibrium()
+
     rows = []
-    for _, row in merged.iterrows():
-        pname = row["Load Pattern"]
+    all_names = set(applied) | set(df_rxn["Load Pattern"])
+    for pname in sorted(all_names, key=str.casefold):
         pat = md.load_patterns.get(pname)
         pat_type = pat.pattern_type if pat else "?"
-        ax = _clean(row.get(f"Fx ({fu})", 0.0))
-        ay = _clean(row.get(f"Fy ({fu})", 0.0))
-        az = _clean(row.get(f"Fz ({fu})", 0.0))
-        rx = _clean(row.get(f"Reaction Fx ({fu})", 0.0))
-        ry = _clean(row.get(f"Reaction Fy ({fu})", 0.0))
-        rz = _clean(row.get(f"Reaction Fz ({fu})", 0.0))
-        dx = round(ax + rx, 1)
-        dy = round(ay + ry, 1)
-        dz = round(az + rz, 1)
+        a = applied.get(pname, dict.fromkeys(("fx", "fy", "fz", "mx", "my", "mz"), 0.0))
+        rr = df_rxn[df_rxn["Load Pattern"] == pname]
+        r = rr.iloc[0] if len(rr) else {}
+        ax = _clean(a["fx"])
+        ay = _clean(a["fy"])
+        az = _clean(a["fz"])
+        rx = _clean(r.get(f"Reaction Fx ({fu})", 0.0))
+        ry = _clean(r.get(f"Reaction Fy ({fu})", 0.0))
+        rz = _clean(r.get(f"Reaction Fz ({fu})", 0.0))
         rows.append(
             {
                 "Load Pattern": pname,
@@ -143,9 +160,9 @@ def static_load_verification(md, mesh_model, config: Optional[dict] = None):
                 f"Reaction Fx ({fu})": round(rx, 1),
                 f"Reaction Fy ({fu})": round(ry, 1),
                 f"Reaction Fz ({fu})": round(rz, 1),
-                f"\u0394Fx ({fu})": dx,
-                f"\u0394Fy ({fu})": dy,
-                f"\u0394Fz ({fu})": dz,
+                f"\u0394Fx ({fu})": round(ax + rx, 1),
+                f"\u0394Fy ({fu})": round(ay + ry, 1),
+                f"\u0394Fz ({fu})": round(az + rz, 1),
             }
         )
 
@@ -223,6 +240,7 @@ def run_linear_cases(
             any(ld.pattern == pname for ld in md.frame_dist_loads)
             or any(ld.pattern == pname for ld in md.joint_loads)
             or any(ld.pattern == pname for ld in md.area_gravity_loads)
+            or any(ld.pattern == pname for ld in md.area_uniform_loads)
             or any(ld.pattern == pname for ld in mesh_model.edge_loads_from_areas)
         )
 

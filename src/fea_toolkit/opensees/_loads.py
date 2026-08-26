@@ -13,6 +13,17 @@ from ..model.tree_utils import collect_descendants
 
 logger = logging.getLogger(__name__)
 
+# Global-direction unit vectors for area uniform load "Dir" values.
+_AREA_LOAD_DIR = {
+    "Gravity": (0.0, 0.0, -1.0),
+    "X": (1.0, 0.0, 0.0),
+    "Y": (0.0, 1.0, 0.0),
+    "Z": (0.0, 0.0, 1.0),
+    "-X": (-1.0, 0.0, 0.0),
+    "-Y": (0.0, -1.0, 0.0),
+    "-Z": (0.0, 0.0, -1.0),
+}
+
 
 class LoadMixin:
     """Load-pattern creation, gravity axial-load derivation, and rigid-diaphragm application."""
@@ -248,6 +259,7 @@ class LoadMixin:
         self._sw_load_totals = {}
         self._gravity_load_totals = {}
         self._joint_load_totals = {}
+        self._dist_load_totals = {}
 
         # ── Pre-compute frame + area self-weight per-node ────────
         # Stored as a list of (node_tag, fz) tuples; applied per-pattern
@@ -322,6 +334,8 @@ class LoadMixin:
             all_patterns.add(gl.pattern)
         for agl in getattr(self.mesh_model, "area_gravity_loads", []):
             all_patterns.add(agl.pattern)
+        for aul in getattr(self.mesh_model, "area_uniform_loads", []):
+            all_patterns.add(aul.pattern)
         # Include patterns with self_weight_factor > 0 so their self-weight
         # can be activated even when they have no explicit load entries.
         for pn, lp in self.mesh_model.load_patterns.items():
@@ -399,6 +413,23 @@ class LoadMixin:
 
                 load_total += abs(wa + wb) * 0.5 * abs(bL - aL)
 
+                # Per-component applied total (for equilibrium verification).
+                # val_a/b are intensities (force/length); the total force is
+                # the average intensity over the parametric span, multiplied
+                # by the element length, projected on the global direction.
+                if getattr(ld, "load_type", "Force") != "Moment":
+                    _L_elem = math.sqrt(
+                        (nj.x - ni.x) ** 2 + (nj.y - ni.y) ** 2 + (nj.z - ni.z) ** 2
+                    )
+                    if pname not in self._dist_load_totals:
+                        self._dist_load_totals[pname] = dict.fromkeys(
+                            ("fx", "fy", "fz", "mx", "my", "mz"), 0.0
+                        )
+                    _avg = (wa + wb) * 0.5 * abs(bL - aL) * _L_elem
+                    self._dist_load_totals[pname]["fx"] += _avg * gx
+                    self._dist_load_totals[pname]["fy"] += _avg * gy
+                    self._dist_load_totals[pname]["fz"] += _avg * gz
+
             # Edge loads (from area-to-frame conversion)
             for ld in edge_loads:
                 if ld.pattern != pname:
@@ -410,6 +441,10 @@ class LoadMixin:
                 # its local axes for projecting the global direction.
                 elem = self.mesh_model.frame_elements.get(ld.frame_id)
                 if elem is None or getattr(elem, "inactive", False):
+                    continue
+                ni = self.mesh_model.nodes.get(elem.node_i)
+                nj = self.mesh_model.nodes.get(elem.node_j)
+                if ni is None or nj is None:
                     continue
                 try:
                     vx, vy, vz = self.get_local_axes(elem)
@@ -475,6 +510,20 @@ class LoadMixin:
                             seg_b,
                         )
                 load_total += abs(wa) * abs(b_overL - a_overL)
+
+                # Per-component applied total (for equilibrium verification).
+                # Edge loads are intensities (force/length); the total force
+                # is the average intensity over the parametric span times the
+                # element length, projected on the global direction.
+                _L_elem = math.sqrt((nj.x - ni.x) ** 2 + (nj.y - ni.y) ** 2 + (nj.z - ni.z) ** 2)
+                if pname not in self._dist_load_totals:
+                    self._dist_load_totals[pname] = dict.fromkeys(
+                        ("fx", "fy", "fz", "mx", "my", "mz"), 0.0
+                    )
+                _avg = (wa + wb) * 0.5 * abs(b_overL - a_overL) * _L_elem
+                self._dist_load_totals[pname]["fx"] += _avg * float(gdir[0])
+                self._dist_load_totals[pname]["fy"] += _avg * float(gdir[1])
+                self._dist_load_totals[pname]["fz"] += _avg * float(gdir[2])
 
             # ── Self-weight for this pattern ────────────────────────
             # Apply if the pattern has self_weight_factor > 0 (e.g. DEAD swf=1).
@@ -632,6 +681,14 @@ class LoadMixin:
                     tfx = sw_per_area * area_mag * agl.multiplier_x * scale
                     tfy = sw_per_area * area_mag * agl.multiplier_y * scale
                     tfz = sw_per_area * area_mag * agl.multiplier_z * scale
+                    # Per-component applied total (for equilibrium verification)
+                    if pname not in self._gravity_load_totals:
+                        self._gravity_load_totals[pname] = dict.fromkeys(
+                            ("fx", "fy", "fz", "mx", "my", "mz"), 0.0
+                        )
+                    self._gravity_load_totals[pname]["fx"] += tfx
+                    self._gravity_load_totals[pname]["fy"] += tfy
+                    self._gravity_load_totals[pname]["fz"] += tfz
                     n_c = len(sub_elem.node_ids)
                     for nid in sub_elem.node_ids:
                         nd = self.mesh_model.nodes.get(nid)
@@ -666,11 +723,92 @@ class LoadMixin:
             tfx = sw_per_area * area_mag * agl.multiplier_x * scale
             tfy = sw_per_area * area_mag * agl.multiplier_y * scale
             tfz = sw_per_area * area_mag * agl.multiplier_z * scale
+            # Per-component applied total (for equilibrium verification)
+            if pname not in self._gravity_load_totals:
+                self._gravity_load_totals[pname] = dict.fromkeys(
+                    ("fx", "fy", "fz", "mx", "my", "mz"), 0.0
+                )
+            self._gravity_load_totals[pname]["fx"] += tfx
+            self._gravity_load_totals[pname]["fy"] += tfy
+            self._gravity_load_totals[pname]["fz"] += tfz
             n_c = len(area_elem.node_ids)
             for nid in area_elem.node_ids:
                 nd = self.mesh_model.nodes.get(nid)
                 if nd is not None:
                     ops.load(nd.node_tag, tfx / n_c, tfy / n_c, tfz / n_c, 0.0, 0.0, 0.0)
+
+        # ── Area uniform loads → panel/shell nodes (SAP Uniform-Shell) ──
+        # SAP2000 "AREA LOADS - UNIFORM" applies the pressure to the shell
+        # object itself; the load reaches the structure through the panel's
+        # joints.  When shells are enabled (create_shells=True) the
+        # Preprocessor skips the perimeter edge-load conversion, so apply the
+        # pressure here as consistent nodal loads on the panel's own nodes
+        # (P·A/n_c per node), mirroring the area-gravity path above.
+        # Loads-only panels (loads_only_area_ids) and explicit ``to_frame``
+        # loads are handled by the edge-load conversion instead.
+        if self.config.get("create_shells", False):
+            loads_only = set(getattr(self.mesh_model, "loads_only_area_ids", set()))
+            for aul in getattr(self.mesh_model, "area_uniform_loads", []):
+                if getattr(aul, "to_frame", False):
+                    continue
+                pname = aul.pattern
+                if pattern_scales is not None and pname not in pattern_scales:
+                    continue
+                scale = pattern_scales.get(pname, 1.0) if pattern_scales else 1.0
+                if abs(scale) < 1e-12:
+                    continue
+                if aul.area_id in loads_only:
+                    continue
+                dir_unit = _AREA_LOAD_DIR.get(aul.direction)
+                if dir_unit is None:
+                    logger.warning(
+                        "Area uniform load on %s has unhandled direction %r — "
+                        "skipped (no nodal-pressure path)",
+                        aul.area_id,
+                        aul.direction,
+                    )
+                    continue
+                area_elem = self.mesh_model.area_elements.get(aul.area_id)
+                if area_elem is None:
+                    continue
+                if getattr(area_elem, "inactive", False):
+                    leaf_ids = collect_descendants(aul.area_id, self.mesh_model.area_elements)
+                    if not leaf_ids:
+                        continue
+                else:
+                    leaf_ids = [aul.area_id]
+                for sub_id in leaf_ids:
+                    sub = self.mesh_model.area_elements[sub_id]
+                    nds = [self.mesh_model.nodes.get(nid) for nid in sub.node_ids]
+                    nds = [nd for nd in nds if nd is not None]
+                    if len(nds) < 3:
+                        continue
+                    pts = [(nd.x, nd.y, nd.z) for nd in nds]
+                    area_mag = polygon_area_3d(pts)
+                    if area_mag < 1e-12:
+                        continue
+                    tf = aul.value * area_mag * scale
+                    tfx = tf * dir_unit[0]
+                    tfy = tf * dir_unit[1]
+                    tfz = tf * dir_unit[2]
+                    if pname not in self._dist_load_totals:
+                        self._dist_load_totals[pname] = dict.fromkeys(
+                            ("fx", "fy", "fz", "mx", "my", "mz"), 0.0
+                        )
+                    self._dist_load_totals[pname]["fx"] += tfx
+                    self._dist_load_totals[pname]["fy"] += tfy
+                    self._dist_load_totals[pname]["fz"] += tfz
+                    n_c = len(nds)
+                    for nd in nds:
+                        ops.load(
+                            nd.node_tag,
+                            tfx / n_c,
+                            tfy / n_c,
+                            tfz / n_c,
+                            0.0,
+                            0.0,
+                            0.0,
+                        )
 
     @staticmethod
     def _select_diaphragm_master(tags):

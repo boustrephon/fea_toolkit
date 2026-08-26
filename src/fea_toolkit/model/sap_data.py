@@ -1548,13 +1548,26 @@ class JointLoad:
 
 @dataclass
 class AreaUniformLoad:
-    """Uniform pressure load on an area element."""
+    """Uniform pressure load on an area element.
+
+    ``value`` is the pressure (force/area) in ``direction`` (global or
+    local axis).  ``to_frame`` marks SAP2000's *"AREA LOADS - UNIFORM TO
+    FRAME"* assignment — the load is applied to the frame elements along
+    the panel edges (``distribution`` OneWay/TwoWay) rather than to the
+    shell object itself.  ``to_frame=False`` (the plain *"AREA LOADS -
+    UNIFORM"* table) is a shell-object pressure, applied to the panel's
+    own joints when the panel is meshed as a shell element, and to its
+    perimeter frames only when it is a loads-only panel.
+    """
 
     pattern: str  # load pattern name
     area_id: str  # area element ID
     coord_sys: str = "GLOBAL"  # 'GLOBAL' or 'Local'
     direction: str = "Gravity"  # 'Gravity', 'X', 'Y', 'Z'
     value: float = 0.0  # pressure (force/area)
+    # ── Uniform-to-Frame (SAP) extension ──────────────────────────
+    to_frame: bool = False  # True → apply to panel edge frames
+    distribution: str = "TwoWay"  # 'OneWay' | 'TwoWay'
 
 
 @dataclass
