@@ -77,6 +77,29 @@ def sanitize_layer_name(name: str) -> str:
     return name
 
 
+def _find_layer(layer_table, path: str) -> int:
+    """Find a layer index by full path, tolerant of the Rhino separator.
+
+    Rhino exposes ``Layer.FullPath`` with a ``::`` separator while the
+    toolkit API uses ``/`` (``LayerTable.Find`` matches the native form,
+    so a ``/``-path misses multi-segment layers).  Try both forms, then
+    fall back to a manual scan over the table.
+    """
+    idx = layer_table.Find(path, True)
+    if idx >= 0:
+        return idx
+    if "/" in path:
+        idx = layer_table.Find(path.replace("/", "::"), True)
+        if idx >= 0:
+            return idx
+    target = path.replace("::", "/")
+    for i in range(layer_table.Count):
+        layer = layer_table[i]
+        if layer is not None and layer.FullPath.replace("::", "/") == target:
+            return i
+    return -1
+
+
 def create_or_get_layer(
     layer_name: str, parent_layer_index: t.Optional[int] = None, color=None
 ) -> int:
@@ -101,7 +124,7 @@ def create_or_get_layer(
     layer_table = doc.Layers
 
     # Check if layer already exists
-    layer_index = layer_table.Find(layer_name, True)
+    layer_index = _find_layer(layer_table, layer_name)
     if layer_index >= 0:
         return layer_index
 
@@ -120,7 +143,7 @@ def create_or_get_layer(
     parent_index: t.Optional[int] = None
     for i, part in enumerate(parts):
         path = "/".join(parts[: i + 1])
-        idx = layer_table.Find(path, True)
+        idx = _find_layer(layer_table, path)
         if idx < 0:
             new_layer = rd.Layer()
             new_layer.Name = part
@@ -129,6 +152,13 @@ def create_or_get_layer(
             if parent_index is not None:
                 new_layer.ParentLayerId = layer_table[parent_index].Id
             idx = layer_table.Add(new_layer)
+            if idx < 0:
+                # Duplicate-name rejection (e.g. when Find missed an
+                # existing "::"-separated layer) — recover by re-finding.
+                idx = _find_layer(layer_table, path)
+                if idx < 0:
+                    # Cannot recover; return the last known good ancestor.
+                    return parent_index if parent_index is not None else -1
         parent_index = idx
     return parent_index
 
