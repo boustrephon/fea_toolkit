@@ -124,8 +124,24 @@ Source labels follow `static/{case}`, `modal/{n}` (1-based),
 
 | Key | Example | Notes |
 |---|---|---|
-| `SAP_FrameID` | `1` | element the flag belongs to |
+| `SAP_FrameID` | `1-0` | element the flag belongs to |
 | `{quantity}_i` / `{quantity}_j` | `-12.34` | I- and J-end values (e.g. `Mz_i`) |
+
+Flags land on `SAP2000/Results/Flags/{quantity}` (re-running the same
+quantity replaces only that layer).  Quantities draw on the element's
+local axes — `Mz`/`My` are the bending moments and produce
+triangular/trapezoidal flags, while the axial/shear quantities
+(`Fx`/`Fy`/`Fz`) produce uniform rectangles; all use the same
+diverging blue→white→red ramp as the frame/shell colouring.
+
+When the stage file's only per-element forces live in the pushover
+arrays (e.g. `admin_v13.h5` — its static cases are synthetic summaries),
+pass the direction to read those instead:
+
+```python
+create_result_flags(path, quantity="Mz", pushover_direction="+X",
+                    stage="mesh", step=None)   # step None -> last (peak)
+```
 
 ### Coloured objects
 
