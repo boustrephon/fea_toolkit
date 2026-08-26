@@ -331,10 +331,27 @@ in step 2m.
 
 #### 2i — `_convert_area_loads()`
 
-For loads‑only areas (those matching the selection), area uniform
-loads are converted to equivalent beam‑edge distributed loads.
-This is done by finding the frame element that shares each area edge
-and allocating the load proportionally.
+For loads‑only areas (those matching the selection) and for explicit
+SAP *"AREA LOADS - UNIFORM TO FRAME"* assignments, area uniform loads
+are converted to equivalent beam‑edge distributed loads using the
+**nearest‑supported‑edge** partition (`convert_area_loads_to_edge_loads`):
+
+- every point of the panel is assigned to the supported edge (the frame
+  sharing that edge) it is closest to — for a fully‑supported rectangle
+  this reproduces the classic 45° yield‑line pattern (trapezoids on the
+  long edges, triangles on the short edges, long edges ≈ 75 % of the
+  load on a 2:1 panel);
+- two opposite supported edges give the one‑way half‑and‑half split;
+- an edge without a matching frame contributes nothing and its share is
+  redistributed to the remaining supported edges, so the transferred
+  force always equals exactly `pressure × panel area` (no lost or
+  doubled load);
+- a panel with **no** supported edge raises a `RuntimeWarning` and the
+  load is dropped (mesh it as a shell or add a perimeter frame).
+
+When `create_shells=True`, plain *"AREA LOADS - UNIFORM"* pressures are
+**not** converted — they are applied to the panel's own shell nodes by
+the AnalysisBuilder, matching SAP's Uniform-(Shell) semantics.
 
 #### 2j — `_mesh_areas()`  *(Connectivity Check C)*
 

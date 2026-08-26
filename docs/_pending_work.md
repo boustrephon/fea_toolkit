@@ -405,6 +405,44 @@ unit point load for benchmark pushes — distinct from parsing user-supplied
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-08-26 — area-load distribution fix + load-verification restore)
+
+**Pumphouse v3 report / static-load verification.** The two-stage
+migration broke `load_pattern_totals()`/`static_load_verification()`:
+`load_totals` became a scalar magnitude populated only by
+`create_loads()`, which was never called → the verification always raised
+`KeyError: 'Load Pattern'` and the self-weight check passed vacuously
+(0/0).  Restored v1 semantics (per-pattern per-component applied totals
+= self-weight + gravity + joint + distributed) and re-verified against
+the legacy builder's formula.  Also fixed a stale-`ni`/`nj` bug that
+made the distributed-load applied totals omit the element-length factor.
+
+**Area-load distribution (nearest-supported-edge partition).**
+`convert_area_loads_to_edge_loads()` used a centroid rule that produced
+exactly **2×** the panel load on fully-supported panels and silently
+dropped load on panels with unmatched edges (Pumphouse Wind +X was
+carried at +78 %).  Replaced with a Voronoi / nearest-supported-edge
+partition that reproduces the standard 45° yield-line pattern for
+rectangles (long edges 75 % / short edges 25 % on a 2:1 panel), reduces
+to the one-way rule for two opposite edges, honours SAP's `OneWay` flag,
+conserves the total exactly (Σ tributary areas ≡ panel area) for any
+combination of supported edges, and warns when a panel has no supported
+edge.  Area gravity loads are now accumulated into the applied-load
+totals (they were applied via `ops.load` but never recorded → spurious
+2.1 % / 19.7 % gravity "mismatch" warnings); DEAD/DEAD SDL/LL now show
+Δ = 0.0 and the Pumphouse wind loads are exact `P × A`
+(2953 kN = 3.04 kN/m² × 971 m²).  SAP "AREA LOADS - UNIFORM TO FRAME"
+(OneWay/TwoWay) is now parsed and routed to the edge partition;
+plain "AREA LOADS - UNIFORM" on shell elements goes to the panel's own
+nodes (create_shells=True), matching SAP's Uniform-(Shell) semantics.
+
+**Impact on published results:** Pumphouse Wind ±X 5265 → 2953 kN,
+Wind ±Y 587 → 395 kN; Admin Building LL (all 124 loads are area-uniform
+`Gravity`) reduces accordingly.  `pumphouse_v3.h5` and `admin_v13.h5`
+re-exported.  Tests: `tests/test_area_load_distribution.py`
+(conservation for 4/3/2/1 supported edges, 45° split, OneWay flag,
+no-edge warning, shell nodal-pressure path).
+
 ## DONE (2026-08-24 — Tier 2 batch: pushover solver tuning P3, CSM bilinearisation P4)
 
 - **P3 — pushover solver tuning (empirical pass).**  Empirically

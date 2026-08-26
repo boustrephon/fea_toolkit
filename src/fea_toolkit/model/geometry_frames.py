@@ -6,6 +6,7 @@ and their private helpers.  Re-exported by :mod:`fea_toolkit.model.geometry`."""
 from __future__ import annotations
 
 import math
+import warnings
 from collections import defaultdict
 from typing import Any, Optional
 
@@ -741,14 +742,26 @@ def convert_area_loads_to_edge_loads(
 ) -> list[FrameDistributedLoad]:
     """Convert uniform area loads to equivalent frame edge loads.
 
-    For each area element with a uniform pressure load, the total force
-    is distributed to the frame elements forming its edges using the
-    tributary‑width method (force on each edge = pressure × distance
-    from edge to centroid × edge length).
+    The pressure on each panel is split among the frame elements matching
+    the panel's edges using the **nearest-supported-edge** partition -- a
+    generalisation of the classic 45 degree yield-line / tributary method:
 
-    The resulting distributed loads are returned as
-    :class:`FrameDistributedLoad` instances that can be appended to
-    the existing frame load list.
+    * every point of the panel is assigned to the *supported* edge it is
+      closest to -- for a fully-supported rectangle this reproduces the
+      standard two-way pattern (trapezoids on the long edges, triangles
+      on the short edges);
+    * a panel with ``distribution == "OneWay"`` spans between its two
+      opposite supported edges, each carrying half the panel load
+      (matching SAP2000's ``OneWay`` flag);
+    * edges without a matching frame contribute nothing, and their share
+      is redistributed to the remaining supported edges -- the transferred
+      force always sums to exactly ``pressure x panel_area`` (sum of
+      tributary areas is the panel area), so load is neither silently
+      lost nor doubled.
+
+    If a panel has *no* supported edge, a ``RuntimeWarning`` is raised and
+    the load is dropped -- the model should mesh the panel as a shell
+    element or add a frame along its edge.
 
     Args:
         nodes: Node dict from ``SAPModelData.nodes``.
@@ -759,13 +772,13 @@ def convert_area_loads_to_edge_loads(
     Returns:
         List of ``FrameDistributedLoad`` objects for the edge frame elements.
     """
-    # Build lookup: pair of node IDs → frame element ID
-    edge_map = {}  # (node_i, node_j) sorted → frame_id
+    # Build lookup: pair of node IDs -> frame element ID
+    edge_map = {}  # (node_i, node_j) sorted -> frame_id
     for eid, elem in frame_elements.items():
         if getattr(elem, "inactive", False):
             continue
         key = tuple(sorted((elem.node_i, elem.node_j)))
-        edge_map[key] = eid
+        edge_map.setdefault(key, eid)
 
     # Also need node coords
     node_coords = {nid: np.array([n.x, n.y, n.z]) for nid, n in nodes.items()}
@@ -779,20 +792,15 @@ def convert_area_loads_to_edge_loads(
         nids = area.node_ids
         if len(nids) < 3:
             continue
-
-        # Compute area centroid
         pts = np.array([node_coords[nid] for nid in nids])
-        centroid = pts.mean(axis=0)
-
-        # Compute area via shared helper
         area_val = polygon_area_3d([pts[i] for i in range(len(nids))])
-
         if area_val < 1e-12:
             continue
 
         P = al.value  # pressure
 
-        # For each edge of the area, find the matching frame element
+        # Supported edges (those with a matching frame element)
+        supported: list = []
         for k in range(len(nids)):
             n_a = nids[k]
             n_b = nids[(k + 1) % len(nids)]
@@ -800,34 +808,41 @@ def convert_area_loads_to_edge_loads(
             frame_id = edge_map.get(key)
             if frame_id is None:
                 continue
-
-            # Midpoint of this edge
-            p_a = node_coords[n_a]
-            p_b = node_coords[n_b]
-            mid = (p_a + p_b) * 0.5
-
-            # Perpendicular distance from centroid to the edge line
-            edge_vec = p_b - p_a
-            edge_len = np.linalg.norm(edge_vec)
+            p_a = pts[k]
+            p_b = pts[(k + 1) % len(nids)]
+            edge_len = float(np.linalg.norm(p_b - p_a))
             if edge_len < 1e-12:
                 continue
-            edge_dir = edge_vec / edge_len
+            supported.append((k, frame_id, p_a, p_b, edge_len))
 
-            # Vector from midpoint to centroid
-            to_cent = centroid - mid
-            # Perpendicular distance (remove component parallel to edge)
-            perp_vec = to_cent - np.dot(to_cent, edge_dir) * edge_dir
-            perp_dist = np.linalg.norm(perp_vec)
+        if not supported:
+            warnings.warn(
+                f"Area load on panel {al.area_id} has no supported edge -- "
+                "load dropped; mesh the panel as a shell element or add a "
+                "frame along its edge.",
+                RuntimeWarning,
+            )
+            continue
 
-            # Tributary load intensity: w = P × perp_dist (kN/m)
-            w = P * perp_dist
-            if abs(w) < 1e-12:
+        # Tributary area per supported edge (sum is the panel area)
+        distribution = str(getattr(al, "distribution", "TwoWay") or "TwoWay")
+        if distribution.lower() == "oneway":
+            trib = _one_way_tributary(pts, supported, area_val)
+        else:
+            trib = _nearest_edge_tributary(pts, supported, area_val)
+
+        direction = "Z" if al.direction == "Gravity" else al.direction
+
+        by_k = {
+            k: (frame_id, p_a, p_b, edge_len) for (k, frame_id, p_a, p_b, edge_len) in supported
+        }
+        for kidx, tarea in trib.items():
+            if tarea < 1e-12:
                 continue
+            frame_id, p_a, p_b, edge_len = by_k[kidx]
+            w = P * tarea / edge_len
 
-            # Determine load direction from the area load
-            direction = "Z" if al.direction == "Gravity" else al.direction
-
-            # Create the edge load — uniform over the full span
+            # Create the edge load -- uniform over the full span
             result_loads.append(
                 FrameDistributedLoad(
                     pattern=al.pattern,
@@ -846,6 +861,119 @@ def convert_area_loads_to_edge_loads(
             )
 
     return result_loads
+
+
+def _nearest_edge_tributary(
+    pts: np.ndarray,
+    supported: list,
+    area_val: float,
+) -> dict:
+    """Partition a convex panel among its supported edges by nearest-edge.
+
+    Points in the panel are assigned to the closest *supported* edge
+    segment (a Voronoi partition that reproduces the 45 degree yield-line
+    pattern for rectangles).  Returns ``{edge_index_in_supported:
+    tributary_area}`` summing to exactly ``area_val``.
+
+    Sampling is vectorised: a uniform lattice is placed over the
+    centroid-fan triangulation and each lattice point is assigned to the
+    nearest supported edge segment, then the counts are normalised so the
+    tributary areas sum to exactly the panel area.
+    """
+    e0 = pts[1] - pts[0]
+    nrm = np.cross(e0, pts[2] - pts[0])
+    nrm = nrm / np.linalg.norm(nrm)
+    x_axis = e0 / np.linalg.norm(e0)
+    y_axis = np.cross(nrm, x_axis)
+
+    p2 = np.column_stack([pts @ x_axis, pts @ y_axis])  # (n, 2)
+    c = p2.mean(axis=0)
+
+    segs = [(p2[k], p2[(k + 1) % len(p2)]) for (k, *_rest) in supported]
+
+    max_dim = float(max(np.ptp(p2[:, 0]), np.ptp(p2[:, 1])))
+    n = int(np.clip(np.ceil(max_dim / 0.05), 24, 200))
+
+    cells = []
+    for k in range(len(p2)):
+        a = p2[k]
+        b = p2[(k + 1) % len(p2)]
+        tri_area = 0.5 * abs((a[0] - c[0]) * (b[1] - c[1]) - (a[1] - c[1]) * (b[0] - c[0]))
+        if tri_area < 1e-12:
+            continue
+        ii, jj = np.meshgrid(np.arange(n), np.arange(n), indexing="ij")
+        mask = (ii + jj) < n
+        i = ii[mask].astype(float)
+        j = jj[mask].astype(float)
+        u = (i + 0.5) / n
+        v = (j + 0.5) / n
+        w = 1.0 - u - v
+        pts_t = u[:, None] * a[None, :] + v[:, None] * b[None, :] + w[:, None] * c[None, :]
+        cells.append(pts_t)
+
+    if not cells:
+        raise ValueError("panel could not be sampled for tributary partition")
+
+    P = np.concatenate(cells, axis=0)  # (m, 2)
+
+    def _seg_dists(P):
+        cols = []
+        for (ax, ay), (bx, by) in segs:
+            a = np.array([ax, ay])
+            b = np.array([bx, by])
+            ab = b - a
+            denom = float(np.dot(ab, ab))
+            if denom < 1e-18:
+                cols.append(np.linalg.norm(P - a, axis=1))
+                continue
+            t = np.clip((P - a) @ ab / denom, 0.0, 1.0)
+            proj = a[None, :] + t[:, None] * ab[None, :]
+            cols.append(np.linalg.norm(P - proj, axis=1))
+        return np.column_stack(cols)
+
+    idx = _seg_dists(P).argmin(axis=1)
+    counts = np.bincount(idx, minlength=len(segs))
+    n_samples = int(counts.sum())
+    if n_samples == 0:
+        raise ValueError("panel could not be sampled for tributary partition")
+
+    trib = {supported[i][0]: float(cnt) / n_samples * area_val for i, cnt in enumerate(counts)}
+    return trib
+
+
+def _one_way_tributary(
+    pts: np.ndarray,
+    supported: list,
+    area_val: float,
+) -> dict:
+    """SAP ``OneWay`` distribution: span between two opposite supported edges.
+
+    The panel spans across its short direction onto the two opposite
+    supported edges with the *smallest* midpoint separation (for a
+    rectangle: the two long edges); each carries half the panel load.
+    """
+    mids = [(k, (p_a + p_b) * 0.5) for (k, _fid, p_a, p_b, _len) in supported]
+
+    if len(mids) == 1:
+        return {mids[0][0]: area_val}
+
+    best_pair = None
+    best_d = np.inf
+    for i in range(len(mids)):
+        for j in range(i + 1, len(mids)):
+            ki, kj = mids[i][0], mids[j][0]
+            if (ki + 1) % len(pts) == kj or (kj + 1) % len(pts) == ki:
+                continue  # adjacent edges
+            d = float(np.linalg.norm(mids[i][1] - mids[j][1]))
+            if d < best_d:
+                best_d = d
+                best_pair = (i, j)
+
+    if best_pair is None:
+        return _nearest_edge_tributary(pts, supported, area_val)
+
+    i, j = best_pair
+    return {mids[i][0]: area_val / 2.0, mids[j][0]: area_val / 2.0}
 
 
 def subdivide_elements(

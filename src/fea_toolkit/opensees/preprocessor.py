@@ -214,13 +214,23 @@ class Preprocessor:
             loads_only_area_ids = set(load_shell_selection.get_area_ids(md))
         elif not create_shells:
             # No shell mode + no selection → convert all area loads
+            # (areas are loads-only; loads reach the frames via their edges).
             edge_loads_from_areas = self._convert_area_loads(
                 md,
                 load_shell_selection,
                 new_elems,
             )
-        # else: create_shells=True + selection=None → all areas become shells
-        #       → no load conversion (handled by shell elements)
+        else:
+            # create_shells=True + selection=None → all areas become shells,
+            # which carry their area-uniform pressure directly (applied to
+            # panel nodes by the builder).  Only explicit SAP "UNIFORM TO
+            # FRAME" assignments still need the perimeter edge-load conversion.
+            edge_loads_from_areas = self._convert_area_loads(
+                md,
+                load_shell_selection,
+                new_elems,
+                only_to_frame=True,
+            )
 
         # ── 5. Mesh area elements ─────────────────────────────────
         if create_shells:
@@ -546,8 +556,19 @@ class Preprocessor:
             return "brace"
         return "beam"
 
-    def _convert_area_loads(self, md, selection, frame_elements) -> list:
-        """Convert area uniform loads to frame edge loads."""
+    def _convert_area_loads(
+        self, md, selection, frame_elements, only_to_frame: bool = False
+    ) -> list:
+        """Convert area uniform loads to frame edge loads.
+
+        When ``selection`` is provided, only areas matching the selection
+        (loads-only panels) are converted.  When ``only_to_frame`` is set,
+        only explicit SAP ``UNIFORM TO FRAME`` loads are converted — the
+        plain ``AREA LOADS - UNIFORM`` loads are carried by shell elements.
+        Otherwise all area uniform loads are converted (no shell mode: the
+        panels are loads-only and their loads reach the frames via the
+        edges).
+        """
         sel_area_ids: set[str] = set()
         if selection is not None:
             sel_area_ids = set(selection.get_area_ids(md))
@@ -555,6 +576,8 @@ class Preprocessor:
         area_loads = getattr(md, "area_uniform_loads", [])
         if selection is not None:
             area_loads = [ld for ld in area_loads if ld.area_id in sel_area_ids]
+        elif only_to_frame:
+            area_loads = [ld for ld in area_loads if getattr(ld, "to_frame", False)]
         if not area_loads:
             return []
 

@@ -234,6 +234,8 @@ class StaticRunnerMixin:
                 total_applied_fz += totals.get("fz", 0.0)
             for totals in self._sw_load_totals.values():
                 total_applied_fz += totals.get("fz", 0.0)
+            for totals in getattr(self, "_dist_load_totals", {}).values():
+                total_applied_fz += totals.get("fz", 0.0)
 
             total_reaction_fz = 0.0
             for nid, restraint in self.mesh_model.restraints.items():
