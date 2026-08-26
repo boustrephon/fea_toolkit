@@ -10,6 +10,9 @@ Reads files written by :func:`fea_toolkit.io.stage_writer.write_model_stages`
   (no codec involved); the fast path for Rhino / PyVista.
 * :func:`read_dictionary_arrays` — the self-describing dictionary
   blocks (sections, materials, ...).
+* :func:`flatten_stage` — promote one stage's geometry to the top level
+  so legacy consumers (result colouring, PyVista) work against a single
+  stage file.
 
 Format detection mirrors :func:`fea_toolkit.io.npz_reader.read_results`
 (by file extension).  This module never imports ``openseespy`` and only
@@ -123,6 +126,48 @@ def read_metadata(path: str) -> dict[str, t.Any]:
     data = _read_flat(path)
     meta = _json_scalar(data, "metadata_json")
     return meta if isinstance(meta, dict) else {}
+
+
+def flatten_stage(
+    source: t.Union[str, dict[str, np.ndarray]],
+    stage: t.Optional[str] = None,
+) -> dict[str, np.ndarray]:
+    """Promote one stage's arrays to the top level of a stage file.
+
+    Stage files namespace their geometry under ``stage/<stage>/...`` (see
+    :func:`fea_toolkit.io.stage_writer.write_model_stages`), but legacy
+    consumers — e.g. :func:`fea_toolkit.rhino.colour_from_npz.colour_from_npz`
+    — expect unprefixed keys such as ``frame_sap_id``.  This helper
+    overlays the requested stage's arrays onto the base namespace so a
+    single stage file feeds both the model-review path and the
+    result-colouring path.
+
+    Args:
+        source: A stage-file path (``.h5`` / ``.npz``) or a flat dict
+            already loaded with
+            :func:`fea_toolkit.io.npz_reader.read_results`.
+        stage: Stage to promote (``\"sap\"`` / ``\"mesh\"``).  ``None`` →
+            auto-detect, preferring ``\"mesh\"`` then ``\"sap\"``.
+
+    Returns:
+        Flat ``{key: array}`` dict with the selected stage's arrays at
+        the top level, overlaying any same-named base arrays.
+
+    Raises:
+        ValueError: If *stage* is not present in the file.
+    """
+    data = _read_flat(source) if isinstance(source, str) else source
+    available = _get_stage_names(data)
+    if stage is None:
+        stage = "mesh" if "mesh" in available else ("sap" if "sap" in available else None)
+    if stage is None or stage not in available:
+        raise ValueError(
+            f"flatten_stage: stage {stage!r} not present (available stages: {available or 'none'})"
+        )
+    prefix = f"{STAGE_PREFIX}{stage}/"
+    flat = {k: v for k, v in data.items() if not k.startswith(STAGE_PREFIX)}
+    flat.update({k[len(prefix) :]: v for k, v in data.items() if k.startswith(prefix)})
+    return flat
 
 
 def read_model_stages(
