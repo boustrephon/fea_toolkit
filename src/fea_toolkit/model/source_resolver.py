@@ -133,11 +133,22 @@ def _section_from_dict(name: str, d: dict[str, t.Any]) -> t.Optional[Section]:
 
 def _resolve_from_dict(data: dict[str, t.Any], stage: str) -> ResolvedSource:
     """Resolve from a flat stage-file dict (keys as written by
-    :func:`fea_toolkit.io.stage_writer.write_model_stages`)."""
+    :func:`fea_toolkit.io.stage_writer.write_model_stages`).
+
+    The geometry arrays store node references as OpenSees node **tags**
+    (``frame_node_i`` / ``frame_node_j`` / ``shell_node_*``), while the
+    node dictionary is keyed by SAP2000 node **ID** (``node_sap_id``).
+    Those identifier spaces differ whenever a mesh-created sub-node has a
+    SAP ID that is not its tag, so the tag references are translated back
+    to SAP IDs here (the lossless ``model_json`` codec path stores SAP IDs
+    directly and is not affected).
+    """
     nodes: dict[str, Node] = {}
     tags = data.get("node_tag", [])
+    tag_to_sap: dict[int, str] = {}
     for i in range(len(tags)):
         nid = str(data.get("node_sap_id", [""] * len(tags))[i])
+        tag_to_sap[int(tags[i])] = nid
         nodes[nid] = Node(
             node_id=nid,
             node_tag=int(tags[i]),
@@ -145,6 +156,13 @@ def _resolve_from_dict(data: dict[str, t.Any], stage: str) -> ResolvedSource:
             y=float(data["node_y"][i]),
             z=float(data["node_z"][i]),
         )
+
+    def _sap_id(tag: t.Any) -> str:
+        """Translate a stored node tag to its SAP node ID (tag fallback)."""
+        try:
+            return tag_to_sap.get(int(tag), str(tag))
+        except (TypeError, ValueError):
+            return str(tag)
 
     frame_elements: dict[str, FrameElement] = {}
     frame_assignments: dict[str, str] = {}
@@ -154,8 +172,8 @@ def _resolve_from_dict(data: dict[str, t.Any], stage: str) -> ResolvedSource:
         frame_elements[eid] = FrameElement(
             elem_id=eid,
             elem_tag=int(data.get("frame_elem_tag", [0] * len(sap_ids))[i]),
-            node_i=str(data.get("frame_node_i", [0] * len(sap_ids))[i]),
-            node_j=str(data.get("frame_node_j", [0] * len(sap_ids))[i]),
+            node_i=_sap_id(data.get("frame_node_i", [0] * len(sap_ids))[i]),
+            node_j=_sap_id(data.get("frame_node_j", [0] * len(sap_ids))[i]),
             angle=float(data.get("frame_angle", [0.0] * len(sap_ids))[i]),
             cardinal_point=int(data.get("frame_cardinal_point", [10] * len(sap_ids))[i]),
         )
@@ -170,7 +188,7 @@ def _resolve_from_dict(data: dict[str, t.Any], stage: str) -> ResolvedSource:
         aid = str(shell_ids[i])
         if len(offsets) > i:
             start, end = int(offsets[i]), int(offsets[i + 1])
-            node_ids = [str(t) for t in flat[start:end]]
+            node_ids = [_sap_id(t) for t in flat[start:end]]
         else:
             node_ids = []
         area_elements[aid] = AreaElement(
