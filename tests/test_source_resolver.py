@@ -68,6 +68,42 @@ class TestResolveFromStageFile:
         src = resolve_model_source(p, stage="sap")
         assert src.units == md.units
 
+    def test_tag_refs_translated_to_sap_ids(self):
+        """The geometry arrays store node refs as OpenSees tags while the
+        node dict is keyed by SAP ID — they differ when a mesh-created
+        sub-node's ID is not its tag.  Frames/shells must resolve to the
+        SAP IDs (regression: admin_v13 sub-nodes like '265_af_0_0_wi_1_0'
+        with tag 1015 were previously connected to the wrong node)."""
+        import numpy as np
+
+        data = {
+            "node_tag": np.array([1, 2, 1015]),
+            "node_sap_id": np.array(["A", "B", "265_af_0_0_wi_1_0"]),
+            "node_x": np.array([0.0, 5.0, 10.0]),
+            "node_y": np.zeros(3),
+            "node_z": np.zeros(3),
+            "frame_sap_id": np.array(["F1", "F2"]),
+            "frame_node_i": np.array([1, 1015]),
+            "frame_node_j": np.array([2, 2]),
+            "frame_elem_tag": np.array([10, 11]),
+            "shell_sap_id": np.array(["S1"]),
+            "shell_elem_tag": np.array([5]),
+            "shell_node_ids_flat": np.array([1, 2, 1015, 1]),
+            "shell_node_offsets": np.array([0, 4]),
+            "shell_thickness": np.array([0.2]),
+        }
+        src = resolve_model_source(data, stage="mesh")
+        assert src.nodes["265_af_0_0_wi_1_0"].node_tag == 1015
+        # frame refs are translated tags -> SAP IDs
+        assert src.frame_elements["F1"].node_i == "A"
+        assert src.frame_elements["F1"].node_j == "B"
+        assert src.frame_elements["F2"].node_i == "265_af_0_0_wi_1_0"
+        # every frame/shell node ref resolves into the node dict
+        assert all(
+            f.node_i in src.nodes and f.node_j in src.nodes for f in src.frame_elements.values()
+        )
+        assert all(n in src.nodes for n in src.area_elements["S1"].node_ids)
+
 
 class TestResolveErrors:
     def test_unsupported_source(self):
