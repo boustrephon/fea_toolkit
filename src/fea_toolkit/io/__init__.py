@@ -52,6 +52,7 @@ from .report import (
 from .results_schema import SCHEMA_VERSION, SCHEMA_VERSION_LEGACY, make_static_key, validate_npz
 from .s2k_parser import SAP2000Parser
 from .stage_reader import (
+    flatten_stage,
     get_schema_version,
     read_dictionary_arrays,
     read_metadata,
@@ -78,6 +79,7 @@ __all__ = [
     "collect_modal_arrays",
     "collect_rs_arrays",
     "collect_static_arrays",
+    "flatten_stage",
     "format_linear_table",
     "get_schema_version",
     "load_pattern_totals",
