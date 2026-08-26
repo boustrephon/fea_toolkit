@@ -638,7 +638,11 @@ class MaterialMixin:
                     continue
                 mat = self.mesh_model.materials.get(sec.material)
                 E_sec = mat.E_mod if mat else 200e9
-                Fy = getattr(sec, "Fy", None) or getattr(mat, "Fy", 250e6) if mat else 250e6
+                # Section Fy wins; a material Fy of None falls back to the
+                # framework default (250e6 in model stress units).
+                Fy = (
+                    getattr(sec, "Fy", None) or (getattr(mat, "Fy", None) if mat else None) or 250e6
+                )
 
                 self._truss_mat_tags[sec_name] = truss_tag
                 self._truss_areas[sec_name] = area
@@ -666,7 +670,13 @@ class MaterialMixin:
                         continue
                     _mat = self.mesh_model.materials.get(_sec.material)
                     _E = _mat.E_mod if _mat else 200e9
-                    _Fy = getattr(_sec, "Fy", None) or getattr(_mat, "Fy", 250e6) if _mat else 250e6
+                    # Section Fy wins; a material Fy of None falls back to
+                    # the framework default (250e6 in model stress units).
+                    _Fy = (
+                        getattr(_sec, "Fy", None)
+                        or (getattr(_mat, "Fy", None) if _mat else None)
+                        or 250e6
+                    )
                     self._truss_mat_tags[_sec_name] = truss_tag
                     self._truss_areas[_sec_name] = _area
                     self._truss_Fy[_sec_name] = _Fy

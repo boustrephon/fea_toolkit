@@ -83,7 +83,9 @@ class LimitStateMixin:
                 elem.node_i, elem.node_j = snap["frame_elements"][eid]
         self.mesh_model.frame_assignments = dict(snap["frame_assignments"])
         self.mesh_model.restraints = dict(snap["restraints"])
-        self.mesh_model.joint_loads = list(snap["joint_loads"])
+        # Independent copies each restore cycle, so subsequent builds can
+        # re-point node_id values without mutating the canonical snapshot.
+        self.mesh_model.joint_loads = copy.deepcopy(snap["joint_loads"])
         self._limit_state_plan = None
 
     def _default_limit_state_shear_kdeg(self, sec: Any, concrete: Any, L: float) -> float:
@@ -121,9 +123,11 @@ class LimitStateMixin:
                 },
                 "frame_assignments": dict(self.mesh_model.frame_assignments),
                 "restraints": dict(self.mesh_model.restraints),
-                # Shallow copies: ``_prepare_limit_state_columns`` re-points
-                # the joint loads' node_id in place; restoring must undo it.
-                "joint_loads": [copy.copy(jl) for jl in self.mesh_model.joint_loads],
+                # Deep copies: ``_prepare_limit_state_columns`` mutates the
+                # joint loads' node_id in place, so the canonical snapshot
+                # must not share objects with the live mesh (shallow
+                # copies would let those mutations corrupt the snapshot).
+                "joint_loads": copy.deepcopy(self.mesh_model.joint_loads),
             }
 
         from ..capacity.elwood_limit_state import (

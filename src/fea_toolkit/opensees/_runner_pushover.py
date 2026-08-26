@@ -1094,15 +1094,18 @@ def _record_step(
         # Section forces return [Nx, Ny, Nxy, Mx, My, Mxy, ?, ?] — the
         # per-unit-width membrane/bending resultants.  (Plain "forces" on a
         # shell returns 24 local nodal forces, which must NOT be used here.)
-        if len(f) >= 6:
-            shell_forces[aid] = {
-                "Nx": f[0],
-                "Ny": f[1],
-                "Nxy": f[2],
-                "Mx": f[3],
-                "My": f[4],
-                "Mxy": f[5],
-            }
+        if not f or len(f) < 6:
+            # None or short unsupported response — skip this element before
+            # indexing f[0..5] (same guard as extract_static_shell_forces).
+            continue
+        shell_forces[aid] = {
+            "Nx": f[0],
+            "Ny": f[1],
+            "Nxy": f[2],
+            "Mx": f[3],
+            "My": f[4],
+            "Mxy": f[5],
+        }
     data["shell_forces"] = shell_forces
 
     # ── Node displacements ──

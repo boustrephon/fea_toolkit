@@ -112,7 +112,12 @@ class RsRunnerMixin:
         }
 
         elements = self.mesh_model.frame_elements
-        base_elements = []
+        # Pre-compute base-element node coordinates for lever-arm inside
+        # the base-element loop, so every frame-map identifier resolves to
+        # its *actual* element.  Split-frame children are addressed by
+        # their frame_tag_map ops-tag (not elem.elem_tag) — an elem_tag-
+        # keyed index would silently drop them from _base_elem_coords.
+        _base_elem_coords = []
         for eid, elem in elements.items():
             if getattr(elem, "inactive", False):
                 continue
@@ -124,9 +129,9 @@ class RsRunnerMixin:
             # split-frame children are addressed by their correct tag.
             ops_tag = self.frame_tag_map.get(eid, elem.elem_tag)
             if elem.node_i in base_nodes and elem.node_j not in base_nodes:
-                base_elements.append((ops_tag, "i"))
+                _base_elem_coords.append((ops_tag, "i", nd_i.x, nd_i.y, nd_i.z))
             elif elem.node_j in base_nodes and elem.node_i not in base_nodes:
-                base_elements.append((ops_tag, "j"))
+                _base_elem_coords.append((ops_tag, "j", nd_j.x, nd_j.y, nd_j.z))
 
         # ── Pre-compute fixed reference point for overturning moment ──
         # Compute from base (support) nodes only — the centre of the base
@@ -144,23 +149,6 @@ class RsRunnerMixin:
             _z_base = sum(n.z for n in _base_nds) / len(_base_nds)
         else:
             _cx = _cy = _z_base = 0.0
-
-        # Pre-compute base-element node coordinates for lever-arm
-        # Build a one-time tag-to-element index (ops tag → element)
-        _elem_by_tag: dict = {}
-        for _e in elements.values():
-            _elem_by_tag[_e.elem_tag] = _e
-
-        _base_elem_coords = []
-        for eid, end in base_elements:
-            elem = elements.get(str(eid)) or _elem_by_tag.get(eid)
-            if elem is None:
-                continue
-            nid = elem.node_i if end == "i" else elem.node_j
-            nd = self.mesh_model.nodes.get(nid)
-            if nd is None:
-                continue
-            _base_elem_coords.append((eid, end, nd.x, nd.y, nd.z))
 
         modal_base_reactions = []
         for mode in range(1, num_modes + 1):
@@ -292,6 +280,15 @@ class RsRunnerMixin:
         dof = {"X": 1, "Y": 2, "Z": 3}[direction]
 
         SPECTRUM_TS_TAG = 9999
+
+        # Create the Path time series before the mode loop so standalone
+        # calls work — matching run_response_spectrum_analysis (which
+        # registers it under the same tag from the same inputs).
+        with contextlib.suppress(Exception):
+            ops.remove("timeSeries", SPECTRUM_TS_TAG)
+        ops.timeSeries(
+            "Path", SPECTRUM_TS_TAG, "-time", *spectrum_periods, "-values", *spectrum_accels
+        )
 
         elements = self.mesh_model.frame_elements
 
@@ -461,7 +458,9 @@ class RsRunnerMixin:
         )
         eff_masses = mp.get(mass_key, [0.0] * num_modes)
 
-        omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods]
+        # omega must stay aligned with the num_modes entries appended to
+        # per_mode[tag][d] below — slice modal_periods to num_modes first.
+        omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods[:num_modes]]
         damp = [damping_ratio] * num_modes
 
         node_tags = list(ops.getNodeTags())
