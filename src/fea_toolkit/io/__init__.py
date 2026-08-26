@@ -49,8 +49,16 @@ from .report import (
     summarise_load_patterns,
     summarise_mass_sources,
 )
-from .results_schema import make_static_key, validate_npz
+from .results_schema import SCHEMA_VERSION, SCHEMA_VERSION_LEGACY, make_static_key, validate_npz
 from .s2k_parser import SAP2000Parser
+from .stage_reader import (
+    get_schema_version,
+    read_dictionary_arrays,
+    read_metadata,
+    read_model_stages,
+    read_stage_arrays,
+)
+from .stage_writer import write_model_stages
 from .unified_writer import (
     collect_geometry_arrays,
     collect_modal_arrays,
@@ -60,17 +68,18 @@ from .unified_writer import (
 )
 
 __all__ = [
-    # Parser
+    "SCHEMA_VERSION",
+    "SCHEMA_VERSION_LEGACY",
     "SAP2000Parser",
     "area_section_summary",
     "baseline_correct",
-    # Reporting
     "bounding_box",
     "collect_geometry_arrays",
     "collect_modal_arrays",
     "collect_rs_arrays",
     "collect_static_arrays",
     "format_linear_table",
+    "get_schema_version",
     "load_pattern_totals",
     "make_static_key",
     "material_summary",
@@ -84,10 +93,13 @@ __all__ = [
     "npz_to_pyvista_modal_mesh",
     "npz_to_pyvista_shell_mesh",
     "npz_to_rhino_colour_data",
-    # Ground motion
+    "read_dictionary_arrays",
+    "read_metadata",
+    "read_model_stages",
     "read_peer_record",
     "read_results",
     "read_results_npz",
+    "read_stage_arrays",
     "read_time_history_csv",
     "record_summary",
     "scale_to_pga",
@@ -96,10 +108,8 @@ __all__ = [
     "summarise_load_cases",
     "summarise_load_patterns",
     "summarise_mass_sources",
-    # Schema
     "validate_npz",
-    # Unified writer
+    "write_model_stages",
     "write_results",
-    # NPZ I/O
     "write_results_npz",
 ]
