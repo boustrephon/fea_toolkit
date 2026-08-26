@@ -87,10 +87,20 @@ the "Package tree (abbreviated)" section below for the full subpackage list
 │   ├── __init__.py
 │   ├── io/
 │   │   ├── s2k_parser.py     # SAP2000Parser with string IDs, numeric tags
+│   │   ├── npz_writer.py     # Analysis results → NPZ archives
+│   │   ├── npz_reader.py     # NPZ / HDF5 readers (unified, auto-detect)
+│   │   ├── unified_writer.py # Combined NPZ/HDF5 writer
+│   │   ├── model_codec.py    # Lossless dataclass ⟷ JSON codec (round-trip)
+│   │   ├── stage_writer.py   # Self-describing model-stage file (SAP + mesh)
+│   │   ├── stage_reader.py   # read_model_stages() lossless round-trip
+│   │   ├── results_schema.py # NPZ key layout + SCHEMA_VERSION
+│   │   ├── report.py         # pandas summary tables
 │   │   └── helper.py         # File‑chooser utilities (tkinter/macOS)
 │   ├── model/
 │   │   ├── sap_data.py       # Dataclasses: Node, FrameElement, LoadPattern, JointLoad, FrameDistributedLoad, SAPModelData, and others
 │   │   ├── sections.py       # SectionLibrary with unit conversion (mm/in)
+│   │   ├── mesh_model.py     # Frozen post-preprocessor topology
+│   │   ├── source_resolver.py # SAPModelData / MeshModel / AnalysisBuilder / stage-file → ResolvedSource
 │   │   └── geometry.py       # SpatialGrid, point_on_segment, trapezoidal_force_split, split_elements (joint splitting + load redistribution)
 │   ├── opensees/
 │   │   ├── preprocessor.py   # Preprocessor: topology mutations → MeshModel
