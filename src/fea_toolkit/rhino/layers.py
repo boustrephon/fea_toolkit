@@ -2,31 +2,41 @@
 Rhino layer management for SAP2000 model export.
 
 Creates a hierarchical layer structure under a ``SAP2000`` root layer,
-with separate sub-trees for **centreline** geometry (lines / surfaces)
-and **extrusion** geometry (3-D solids):
+with separate sub-trees for each pipeline stage (``SAP`` and ``Mesh``)
+so geometry from the two stages never overlays in the same layers:
 
 .. code::
 
     SAP2000
-    ├── Joints
-    ├── Frames
-    │   ├── Centreline
-    │   │   ├── {SectionName_1}
-    │   │   ├── {SectionName_2}
-    │   │   └── ...
-    │   └── Extrusion
-    │       ├── {SectionName_1}
-    │       ├── {SectionName_2}
-    │       └── ...
-    └── Shells
-        ├── Centreline
-        │   ├── {SectionName_1}
-        │   ├── {SectionName_2}
-        │   └── ...
-        └── Extrusion
-            ├── {SectionName_1}
-            ├── {SectionName_2}
-            └── ...
+    ├── SAP
+    │   ├── Joints
+    │   ├── Frames
+    │   │   ├── Centreline
+    │   │   │   ├── {SectionName_1}
+    │   │   │   ├── {SectionName_2}
+    │   │   │   └── ...
+    │   │   └── Extrusion
+    │   │       ├── {SectionName_1}
+    │   │       ├── {SectionName_2}
+    │   │       └── ...
+    │   └── Shells
+    │       ├── Centreline
+    │       │   ├── {SectionName_1}
+    │       │   ├── {SectionName_2}
+    │       │   └── ...
+    │       └── Extrusion
+    │           ├── {SectionName_1}
+    │           ├── {SectionName_2}
+    │           └── ...
+    └── Mesh
+        ├── Joints
+        ├── Frames
+        │   ├── Centreline ...
+        │   └── Extrusion ...
+        └── Shells ...
+
+The root name is configurable via ``root_name`` (default ``SAP2000``);
+the importer derives ``SAP2000/SAP`` / ``SAP2000/Mesh`` from the stage.
 """
 
 import typing as t
@@ -72,8 +82,14 @@ def create_or_get_layer(
 ) -> int:
     """Find or create a Rhino layer.
 
+    Nested paths (``'SAP2000/SAP/Frames'``) create any missing ancestor
+    layers along the way.  When *parent_layer_index* is given, only the
+    final segment is created beneath that parent (the ancestors are
+    assumed to exist); when it is ``None``, the full ancestor chain is
+    created as a nested root tree.
+
     Args:
-        layer_name: Full layer name (e.g. ``'SAP2000/Frames/UB300'``).
+        layer_name: Full layer name (e.g. ``'SAP2000/SAP/Frames/UB300'``).
         parent_layer_index: Index of the parent layer, or ``None`` for root.
         color: ``System.Drawing.Color`` for the layer.
 
@@ -89,17 +105,32 @@ def create_or_get_layer(
     if layer_index >= 0:
         return layer_index
 
-    # Create new layer — use only the last segment as the layer name
-    new_layer = rd.Layer()
-    new_layer.Name = layer_name.rsplit("/", maxsplit=1)[-1]
-    if color is not None:
-        new_layer.Color = color
-
     if parent_layer_index is not None:
+        # Only the final segment is new — create it beneath the parent.
+        new_layer = rd.Layer()
+        new_layer.Name = layer_name.rsplit("/", maxsplit=1)[-1]
+        if color is not None:
+            new_layer.Color = color
         parent_layer = layer_table[parent_layer_index]
         new_layer.ParentLayerId = parent_layer.Id
+        return layer_table.Add(new_layer)
 
-    return layer_table.Add(new_layer)
+    # Root-level nested path — create the ancestor chain first.
+    parts = layer_name.split("/")
+    parent_index: t.Optional[int] = None
+    for i, part in enumerate(parts):
+        path = "/".join(parts[: i + 1])
+        idx = layer_table.Find(path, True)
+        if idx < 0:
+            new_layer = rd.Layer()
+            new_layer.Name = part
+            if color is not None and i == len(parts) - 1:
+                new_layer.Color = color
+            if parent_index is not None:
+                new_layer.ParentLayerId = layer_table[parent_index].Id
+            idx = layer_table.Add(new_layer)
+        parent_index = idx
+    return parent_index
 
 
 # ── Top-level layer structure ────────────────────────────────────────────
@@ -109,7 +140,8 @@ def create_root_layer(name: str = "SAP2000", parent: t.Optional[int] = None) -> 
     """Create a root layer (default: ``SAP2000``).
 
     When *parent* is provided, the layer is created as a sub‑layer of that
-    parent (used for the ``SAP2000/Meshed`` tree).
+    parent (used for the ``SAP2000/Mesh/Meshed`` tree).  Nested *name*
+    paths (e.g. ``'SAP2000/SAP'``) create the ancestor chain as needed.
 
     Args:
         name: Layer name (default ``'SAP2000'``).
@@ -126,16 +158,17 @@ def create_root_layer(name: str = "SAP2000", parent: t.Optional[int] = None) -> 
     return create_or_get_layer(name, parent_layer_index=parent, color=root_color)
 
 
-def create_joints_layer(root_layer_index: int) -> int:
-    """Create the ``SAP2000/Joints`` sub-layer.
+def create_joints_layer(root_layer_index: int, root_name: str = "SAP2000") -> int:
+    """Create the ``{root_name}/Joints`` sub-layer.
 
     Args:
         root_layer_index: Index of the ``SAP2000`` root layer.
+        root_name: Full path of the root layer (default ``SAP2000``).
 
     Returns:
         Layer index of the Joints layer.
     """
-    return create_or_get_layer("SAP2000/Joints", parent_layer_index=root_layer_index)
+    return create_or_get_layer(f"{root_name}/Joints", parent_layer_index=root_layer_index)
 
 
 # ── Helper: build section sub-layers under a parent path ─────────────────
@@ -205,28 +238,33 @@ class FrameLayerSet:
 
 
 def create_frame_layers(
-    root_layer_index: int, frame_sections: dict[str, dict], prefix: str = ""
+    root_layer_index: int,
+    frame_sections: dict[str, dict],
+    prefix: str = "",
+    root_name: str = "SAP2000",
 ) -> FrameLayerSet:
     """Create the frame layer tree.
 
     Layout::
 
-        {prefix}SAP2000/Frames/Centreline/{Section}
-        {prefix}SAP2000/Frames/Extrusion/{Section}
+        {root_name}/Frames/Centreline/{Section}
+        {root_name}/Frames/Extrusion/{Section}
 
-    When *prefix* is ``'Meshed/'`` the layers become::
+    When *prefix* is ``'Meshed/'`` and *root_name* is ``'SAP2000/SAP'``
+    the layers become::
 
-        SAP2000/Meshed/Frames/Centreline/{Section}
+        SAP2000/SAP/Meshed/Frames/Centreline/{Section}
 
     Args:
         root_layer_index: Index of the root layer.
         frame_sections: Dict of ``{section_name: props_dict}``.
         prefix: Optional path prefix (e.g. ``'Meshed/'``).
+        root_name: Full path of the root layer (default ``SAP2000``).
 
     Returns:
         A :class:`FrameLayerSet` with centreline and extrusion dicts.
     """
-    base = "SAP2000" + ("/" + prefix.rstrip("/") if prefix else "")
+    base = root_name + ("/" + prefix.rstrip("/") if prefix else "")
     frames_parent = create_or_get_layer(f"{base}/Frames", parent_layer_index=root_layer_index)
 
     cl_parent = create_or_get_layer(f"{base}/Frames/Centreline", parent_layer_index=frames_parent)
@@ -267,28 +305,33 @@ class ShellLayerSet:
 
 
 def create_shell_layers(
-    root_layer_index: int, shell_sections: dict[str, dict], prefix: str = ""
+    root_layer_index: int,
+    shell_sections: dict[str, dict],
+    prefix: str = "",
+    root_name: str = "SAP2000",
 ) -> ShellLayerSet:
     """Create the shell layer tree.
 
     Layout::
 
-        {prefix}SAP2000/Shells/Centreline/{Section}
-        {prefix}SAP2000/Shells/Extrusion/{Section}
+        {root_name}/Shells/Centreline/{Section}
+        {root_name}/Shells/Extrusion/{Section}
 
-    When *prefix* is ``'Meshed/'`` the layers become::
+    When *prefix* is ``'Meshed/'`` and *root_name* is ``'SAP2000/SAP'``
+    the layers become::
 
-        SAP2000/Meshed/Shells/Centreline/{Section}
+        SAP2000/SAP/Meshed/Shells/Centreline/{Section}
 
     Args:
         root_layer_index: Index of the root layer.
         shell_sections: Dict of ``{section_name: props_dict}``.
         prefix: Optional path prefix (e.g. ``'Meshed/'``).
+        root_name: Full path of the root layer (default ``SAP2000``).
 
     Returns:
         A :class:`ShellLayerSet` with centreline and extrusion dicts.
     """
-    base = "SAP2000" + ("/" + prefix.rstrip("/") if prefix else "")
+    base = root_name + ("/" + prefix.rstrip("/") if prefix else "")
     shells_parent = create_or_get_layer(f"{base}/Shells", parent_layer_index=root_layer_index)
 
     cl_parent = create_or_get_layer(f"{base}/Shells/Centreline", parent_layer_index=shells_parent)

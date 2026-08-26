@@ -56,14 +56,66 @@ def _value_to_rgb(val: float, vmin: float, vmax: float) -> tuple[int, int, int]:
     return (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
 
 
-def _load_npz_quantities(npz_path: str, quantity: str, use_local: bool = True, case: str = None):
-    """Load a unified NPZ and return a dict {sap_id: value}."""
-    from ..io.npz_reader import _get_static_cases, read_results_npz
+def _load_unified(source, stage: str = None) -> dict:
+    """Load a unified results file (path or dict) into a flat array dict.
 
-    d = read_results_npz(npz_path)
+    Stage files written by
+    :func:`~fea_toolkit.io.stage_writer.write_model_stages` namespace
+    their geometry under ``stage/<stage>/...``; those arrays are promoted
+    to the top level via
+    :func:`~fea_toolkit.io.stage_reader.flatten_stage` so the result-
+    colouring code sees unprefixed keys (``frame_sap_id``, ...).  Legacy
+    NPZ files (no ``stage/`` keys) pass through unchanged.
+
+    Args:
+        source: Results-file path (``.npz`` / ``.h5``) or a flat dict
+            already loaded with
+            :func:`~fea_toolkit.io.npz_reader.read_results`.
+        stage: Stage to promote for stage files (``None`` → auto,
+            preferring ``mesh``).
+
+    Returns:
+        Flat ``{key: array}`` dict.
+    """
+    from ..io.npz_reader import read_results
+    from ..io.stage_reader import flatten_stage
+
+    d = read_results(source) if isinstance(source, str) else source
+    if any(k.startswith("stage/") and k.count("/") >= 2 for k in d):
+        return flatten_stage(d, stage=stage)
+    return d
+
+
+def _load_npz_quantities(
+    source,
+    quantity: str,
+    use_local: bool = True,
+    case: str = None,
+    stage: str = None,
+    aggregate_parents: bool = False,
+):
+    """Load a unified results file and return a dict ``{sap_id: value}``.
+
+    Args:
+        source: Results-file path (``.npz`` / ``.h5``) or a flat dict.
+        quantity: Force/moment quantity, e.g. ``'Mz'``, ``'Fx'``.
+        use_local: Use local-coordinate forces (default ``True``).
+        case: Static-case key.  ``None`` = first available case.
+        stage: Stage to promote for stage files (``None`` → auto).
+        aggregate_parents: When ``True``, map child-element values back
+            to their parent frame IDs (max-abs envelope over children)
+            so SAP-stage geometry can be coloured from meshed-stage
+            results.
+
+    Returns:
+        ``(values, (vmin, vmax), {})``.
+    """
+    from ..io.npz_reader import _get_static_cases, npz_build_parent_map
+
+    d = _load_unified(source, stage=stage)
     cases = _get_static_cases(d)
     if case is not None and case not in cases:
-        raise ValueError(f"Case '{case}' not found in NPZ. Available: {cases}")
+        raise ValueError(f"Case '{case}' not found in results. Available: {cases}")
     case_name = case if case and case in cases else (cases[0] if cases else None)
     if case_name is None:
         return {}, (0.0, 0.0), {}
@@ -81,9 +133,9 @@ def _load_npz_quantities(npz_path: str, quantity: str, use_local: bool = True, c
     arr_i = d.get(key_i)
     arr_j = d.get(key_j)
     if arr_i is None or arr_j is None:
-        raise ValueError(f"Quantity arrays '{key_i}' not found in NPZ")
+        raise ValueError(f"Quantity arrays '{key_i}' not found in results")
 
-    values = {}
+    values: dict = {}
     vmin, vmax = 0.0, 0.0
     sap_ids = d.get("frame_sap_id")
     if sap_ids is not None:
@@ -95,7 +147,85 @@ def _load_npz_quantities(npz_path: str, quantity: str, use_local: bool = True, c
                 vmin = min(vmin, v)
                 vmax = max(vmax, v)
 
+    if aggregate_parents:
+        parent_map = npz_build_parent_map(d)
+        for child, parent in parent_map.items():
+            v = values.get(str(child))
+            if v is None:
+                continue
+            cur = values.get(str(parent))
+            if cur is None or abs(v) > abs(cur):
+                values[str(parent)] = v
+        vals = list(values.values())
+        if vals:
+            vmin = min(vals)
+            vmax = max(vals)
+
     return values, (vmin, vmax), {}
+
+
+def _colour_doc_objects(
+    values: dict,
+    id_key: str,
+    vmin: float,
+    vmax: float,
+    layer_filter: str = "",
+    skip_locked: bool = True,
+) -> int:
+    """Colour Rhino objects whose ``id_key`` UserString is in *values*.
+
+    Shared by the frame and shell colouring entry points.  Only runs
+    inside the Rhino process (imports ``scriptcontext`` at call time).
+
+    Args:
+        values: ``{sap_id: value}`` map.
+        id_key: UserString attribute name to match (``SAP_FrameID`` /
+            ``SAP_AreaID``).
+        vmin, vmax: Value range for the diverging colour scale.
+        layer_filter: Optional glob filter on the layer full path.
+        skip_locked: Skip objects on locked layers (default ``True``).
+
+    Returns:
+        Number of objects coloured.
+    """
+    import fnmatch
+
+    import Rhino
+    import scriptcontext as sc
+    from Rhino.DocObjects import ObjectColorSource
+
+    doc = sc.doc
+    objs = doc.Objects
+    coloured = 0
+
+    for i in range(objs.Count):
+        rh_obj = objs[i]
+        if rh_obj is None:
+            continue
+        if rh_obj.IsDeleted or (skip_locked and rh_obj.IsLocked):
+            continue
+
+        if layer_filter:
+            layer_path = rh_obj.Layer.FullPath
+            if not fnmatch.fnmatch(layer_path, layer_filter):
+                continue
+
+        attrs = rh_obj.Attributes
+        us = attrs.GetUserString(id_key)
+        if us is None or us not in values:
+            continue
+
+        val = values[us]
+        rgb = _value_to_rgb(val, vmin, vmax)
+        colour = Rhino.Display.ColorRGBA(rgb[0], rgb[1], rgb[2], 255)
+
+        attrs.ObjectColor = colour
+        attrs.ColorSource = ObjectColorSource.ColorFromObject
+        rh_obj.CommitChanges()
+        coloured += 1
+
+    doc.Views.Redraw()
+    return coloured
 
 
 def colour_from_npz(
@@ -106,6 +236,8 @@ def colour_from_npz(
     layer_filter: str = "",
     skip_locked: bool = True,
     verbose: bool = True,
+    stage: str = None,
+    aggregate_parents: bool = False,
 ) -> int:
     """Colour Rhino frame objects by a force/moment quantity from an NPZ file.
 
@@ -126,20 +258,26 @@ def colour_from_npz(
         Skip objects on locked layers (default ``True``).
     verbose : bool
         Print progress messages.
+    stage : str or None
+        Stage to promote for stage files (``None`` → auto, ``mesh``).
+    aggregate_parents : bool
+        Map child-element values back to their parent frame IDs
+        (max-abs envelope) so SAP-stage geometry can be coloured from
+        meshed-stage results.
 
     Returns
     -------
     int
         Number of objects coloured.
     """
-    # Rhino imports — must happen at call time inside Rhino
-    import Rhino
-    import scriptcontext as sc
-    from Rhino.DocObjects import ObjectColorSource
-
-    # Load NPZ data
+    # Load results
     sap_values, (vmin, vmax), _meta = _load_npz_quantities(
-        npz_path, quantity, use_local, case=combo
+        npz_path,
+        quantity,
+        use_local,
+        case=combo,
+        stage=stage,
+        aggregate_parents=aggregate_parents,
     )
     if not sap_values:
         print(f"No {quantity} data found in {npz_path}")
@@ -147,52 +285,22 @@ def colour_from_npz(
 
     if verbose:
         label = f"[{combo}] " if combo else ""
-        print(f"{label}Loaded {len(sap_values)} elements from NPZ")
+        print(f"{label}Loaded {len(sap_values)} elements from results")
         print(f"  {quantity} range: [{vmin:.4g}, {vmax:.4g}]")
 
-    # Find all frame objects with SAP_FrameID UserString
-    doc = sc.doc
-    objs = doc.Objects
-    coloured = 0
-
-    for i in range(objs.Count):
-        rh_obj = objs[i]
-        if rh_obj is None:
-            continue
-        if rh_obj.IsDeleted or (skip_locked and rh_obj.IsLocked):
-            continue
-
-        # Layer filter
-        if layer_filter:
-            import fnmatch
-
-            layer_path = rh_obj.Layer.FullPath
-            if not fnmatch.fnmatch(layer_path, layer_filter):
-                continue
-
-        # Check for SAP_FrameID UserString
-        attrs = rh_obj.Attributes
-        us = attrs.GetUserString("SAP_FrameID")
-        if us is None or us not in sap_values:
-            continue
-
-        val = sap_values[us]
-        rgb = _value_to_rgb(val, vmin, vmax)
-        colour = Rhino.Display.ColorRGBA(rgb[0], rgb[1], rgb[2], 255)
-
-        # Apply object colour
-        attrs.ObjectColor = colour
-        attrs.ColorSource = ObjectColorSource.ColorFromObject
-        rh_obj.CommitChanges()
-
-        coloured += 1
+    coloured = _colour_doc_objects(
+        sap_values,
+        "SAP_FrameID",
+        vmin,
+        vmax,
+        layer_filter=layer_filter,
+        skip_locked=skip_locked,
+    )
 
     label = f"[{combo}] " if combo else ""
     if verbose:
         print(f"{label}Coloured {coloured} objects by {quantity}")
 
-    # Force viewport redraw
-    doc.Views.Redraw()
     return coloured
 
 
@@ -206,6 +314,7 @@ def colour_frame_by_npz_ratio(
     numerator: str = "Mz",
     denominator: str = "My",
     use_local: bool = True,
+    stage: str = None,
     **kwargs,
 ) -> int:
     """Colour by the ratio of two force/moment quantities.
@@ -217,12 +326,14 @@ def colour_frame_by_npz_ratio(
     ----------
     numerator, denominator : str
         Quantity names (e.g. ``'Mz'``, ``'My'``).
+    use_local : bool
+        Use local-coordinate forces (default ``True``).
+    stage : str or None
+        Stage to promote for stage files (``None`` → auto).
     **kwargs
-        Passed through to :func:`colour_from_npz`.
+        Passed through to :func:`colour_from_npz` (e.g. ``layer_filter``).
     """
-    import numpy as np
-
-    data = np.load(npz_path, allow_pickle=True)
+    data = _load_unified(npz_path, stage=stage)
     suffix = "_local" if use_local else ""
 
     def _get(key):
@@ -235,7 +346,7 @@ def colour_frame_by_npz_ratio(
     den_arr = _get(denominator)
     sap_ids = data.get("sub_sap_ids")
     if num_arr is None or den_arr is None or sap_ids is None:
-        print("Required arrays not found in NPZ")
+        print("Required arrays not found in results")
         return 0
 
     ratios: dict = {}
@@ -250,33 +361,18 @@ def colour_frame_by_npz_ratio(
                 vmin = min(vmin, r)
                 vmax = max(vmax, r)
 
-    # Re-use colouring logic with a temporary value map
-    import Rhino
-    import scriptcontext as sc
-    from Rhino.DocObjects import ObjectColorSource
-
-    coloured = 0
-    doc = sc.doc
-    for i in range(doc.Objects.Count):
-        rh_obj = doc.Objects[i]
-        if rh_obj is None or rh_obj.IsDeleted:
-            continue
-        us = rh_obj.Attributes.GetUserString("SAP_FrameID")
-        if us is None or us not in ratios:
-            continue
-        val = ratios[us]
-        rgb = _value_to_rgb(val, vmin, vmax)
-        colour = Rhino.Display.ColorRGBA(rgb[0], rgb[1], rgb[2], 255)
-        attrs = rh_obj.Attributes
-        attrs.ObjectColor = colour
-        attrs.ColorSource = ObjectColorSource.ColorFromObject
-        rh_obj.CommitChanges()
-        coloured += 1
+    coloured = _colour_doc_objects(
+        ratios,
+        "SAP_FrameID",
+        vmin,
+        vmax,
+        layer_filter=kwargs.get("layer_filter", ""),
+        skip_locked=kwargs.get("skip_locked", True),
+    )
 
     if kwargs.get("verbose", True):
         print(f"Coloured {coloured} objects by ratio {numerator}/{denominator}")
 
-    doc.Views.Redraw()
     return coloured
 
 
@@ -295,6 +391,7 @@ def create_result_flags(
     scale_factor: float = None,
     layer_name: str = None,
     verbose: bool = True,
+    stage: str = None,
 ) -> int:
     """Create 3D flag geometry in Rhino from an NPZ results file.
 
@@ -334,14 +431,19 @@ def create_result_flags(
     import Rhino.Geometry as rg
     import scriptcontext as sc
 
-    # ── Load NPZ data (auto-detect format) ─────────────────────────
-    raw = np.load(npz_path, allow_pickle=True)
-    is_unified = "analysis_types" in raw or "frame_eid" in raw
+    # ── Load results data (auto-detect .npz / .h5 / stage file) ────
+    is_h5 = str(npz_path).lower().endswith((".h5", ".hdf5"))
+    if is_h5:
+        data = _load_unified(npz_path, stage=stage)
+        is_unified = True
+    else:
+        raw = np.load(npz_path, allow_pickle=True)
+        is_unified = "analysis_types" in raw or "frame_eid" in raw
 
     if is_unified:
-        from ..io.npz_reader import _get_static_cases, read_results_npz
+        from ..io.npz_reader import _get_static_cases
 
-        data = read_results_npz(npz_path)
+        data = _load_unified(npz_path, stage=stage)
         cases = _get_static_cases(data)
         case = combo if combo and combo in cases else (cases[0] if cases else None)
         pre = f"static/{case}/" if case else ""
@@ -601,6 +703,7 @@ def create_all_result_flags(
     combo: str = None,
     scale_factor: float = None,
     verbose: bool = True,
+    stage: str = None,
 ) -> int:
     """Create flag diagrams for all six force/moment quantities at once.
 
@@ -611,7 +714,7 @@ def create_all_result_flags(
     Parameters
     ----------
     npz_path : str
-        Path to the ``.npz`` results file.
+        Path to the ``.npz`` / ``.h5`` results file.
     use_local : bool
         Use local‑coordinate forces (default ``True``).
     combo : str or None
@@ -620,6 +723,8 @@ def create_all_result_flags(
         Flag height per unit force/moment.  ``None`` = auto‑scale.
     verbose : bool
         Print progress messages.
+    stage : str or None
+        Stage to promote for stage files (``None`` → auto).
 
     Returns
     -------
@@ -635,6 +740,7 @@ def create_all_result_flags(
             combo=combo,
             scale_factor=scale_factor,
             verbose=verbose,
+            stage=stage,
         )
         total += n
     if verbose:

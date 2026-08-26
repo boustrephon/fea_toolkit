@@ -1,0 +1,384 @@
+"""Rhino-behaviour tests via a fake Rhino API + optional rhino3dm round-trip.
+
+The real Rhino 8 API is only importable inside Rhinoceros, so these tests
+inject a minimal fake ``Rhino`` / ``scriptcontext`` / ``System.Drawing``
+into ``sys.modules`` and exercise the layer-tree builders and the object
+colouring helper against it — no new required dependency.  A ``rhino3dm``
+write/read round-trip validates the nested-layer pattern in an actual
+``.3dm`` file and is skipped when ``rhino3dm`` is not installed.
+"""
+
+import sys
+import types
+
+import pytest
+
+from fea_toolkit.rhino.colour_from_npz import _colour_doc_objects
+from fea_toolkit.rhino.layers import (
+    create_frame_layers,
+    create_joints_layer,
+    create_or_get_layer,
+    create_root_layer,
+    create_shell_layers,
+)
+
+# ── Minimal fake Rhino API ───────────────────────────────────────────────
+
+
+class FakeColorRGBA:
+    def __init__(self, r, g, b, a=255):
+        self.R, self.G, self.B, self.A = int(r), int(g), int(b), int(a)
+
+    def rgb(self):
+        return (self.R, self.G, self.B)
+
+
+class FakeSystemColor:
+    @staticmethod
+    def FromArgb(r, g, b, a=None):
+        return (int(r), int(g), int(b))
+
+    LightGray = (192, 192, 192)
+
+
+class FakeObjectAttributes:
+    def __init__(self):
+        self.ObjectColor = None
+        self.ColorSource = None
+        self.LayerIndex = -1
+        self._strings = {}
+
+    def SetUserString(self, key, value):
+        self._strings[key] = value
+
+    def GetUserString(self, key):
+        return self._strings.get(key)
+
+
+class FakeLayer:
+    def __init__(self):
+        self.Name = ""
+        self.ParentLayerId = None
+        self.Color = None
+        self._table = None
+
+    @property
+    def Id(self):
+        return self._table._layers.index(self)
+
+    @property
+    def FullPath(self):
+        parts = [self.Name]
+        parent_id = self.ParentLayerId
+        while parent_id is not None:
+            parent = self._table[parent_id]
+            parts.insert(0, parent.Name)
+            parent_id = parent.ParentLayerId
+        return "/".join(parts)
+
+
+class FakeLayerTable:
+    def __init__(self):
+        self._layers = []
+
+    def __len__(self):
+        return len(self._layers)
+
+    def __getitem__(self, idx):
+        return self._layers[idx]
+
+    def Add(self, layer):
+        layer._table = self
+        self._layers.append(layer)
+        return len(self._layers) - 1
+
+    def Find(self, path, ignore_case=False):
+        for i, layer in enumerate(self._layers):
+            if layer.FullPath == path:
+                return i
+        return -1
+
+
+class FakeObject:
+    def __init__(self, kind="Line"):
+        self.kind = kind
+        self.Attributes = FakeObjectAttributes()
+        self.Layer = None
+        self.IsDeleted = False
+        self.IsLocked = False
+
+    def CommitChanges(self):
+        pass
+
+
+class FakeObjects:
+    def __init__(self, doc):
+        self._doc = doc
+        self._items = []
+
+    @property
+    def Count(self):
+        return len(self._items)
+
+    def __getitem__(self, i):
+        return self._items[i]
+
+    def _add(self, attrs, kind):
+        obj = FakeObject(kind=kind)
+        obj.Attributes = attrs or FakeObjectAttributes()
+        idx = getattr(obj.Attributes, "LayerIndex", -1)
+        obj.Layer = self._doc.Layers[idx] if idx is not None and idx >= 0 else None
+        self._items.append(obj)
+        return len(self._items) - 1
+
+    def AddLine(self, line, attrs=None):
+        return self._add(attrs, "Line")
+
+    def AddMesh(self, mesh, attrs=None):
+        return self._add(attrs, "Mesh")
+
+    def AddPoint(self, pt, attrs=None):
+        return self._add(attrs, "Point")
+
+
+class FakeViews:
+    def Redraw(self):
+        pass
+
+
+class FakeDoc:
+    def __init__(self):
+        self.Layers = FakeLayerTable()
+        self.Objects = FakeObjects(self)
+        self.Views = FakeViews()
+
+
+def _install_fake_rhino(doc):
+    """Install fake ``Rhino`` / ``scriptcontext`` / ``System.Drawing`` modules."""
+    Rhino = types.ModuleType("Rhino")
+
+    display = types.ModuleType("Rhino.Display")
+    display.ColorRGBA = FakeColorRGBA
+    Rhino.Display = display
+
+    docobjects = types.ModuleType("Rhino.DocObjects")
+    docobjects.Layer = FakeLayer
+    docobjects.ObjectAttributes = FakeObjectAttributes
+    docobjects.ObjectColorSource = types.SimpleNamespace(ColorFromObject="ColorFromObject")
+    Rhino.DocObjects = docobjects
+
+    geometry = types.ModuleType("Rhino.Geometry")
+    geometry.Point3d = tuple
+    geometry.Line = tuple
+    geometry.Mesh = object
+    Rhino.Geometry = geometry
+
+    scriptcontext = types.ModuleType("scriptcontext")
+    scriptcontext.doc = doc
+
+    system = types.ModuleType("System")
+    drawing = types.ModuleType("System.Drawing")
+    drawing.Color = FakeSystemColor
+    system.Drawing = drawing
+
+    sys.modules["Rhino"] = Rhino
+    sys.modules["Rhino.Display"] = display
+    sys.modules["Rhino.DocObjects"] = docobjects
+    sys.modules["Rhino.Geometry"] = geometry
+    sys.modules["scriptcontext"] = scriptcontext
+    sys.modules["System"] = system
+    sys.modules["System.Drawing"] = drawing
+    return Rhino
+
+
+_FAKE_MODULES = [
+    "Rhino",
+    "Rhino.Display",
+    "Rhino.DocObjects",
+    "Rhino.Geometry",
+    "scriptcontext",
+    "System",
+    "System.Drawing",
+]
+
+
+@pytest.fixture
+def rhino_env():
+    """Install the fake Rhino API and yield the fake document."""
+    from fea_toolkit.rhino.colors import _Color as _cached_color
+
+    doc = FakeDoc()
+    saved = {name: sys.modules.pop(name, None) for name in _FAKE_MODULES}
+    _install_fake_rhino(doc)
+    try:
+        yield doc
+    finally:
+        # Restore the lazy `System.Drawing.Color` cache so later tests do
+        # not see the fake `Color` object.
+        from fea_toolkit.rhino import colors as _colors_module
+
+        _colors_module._Color = _cached_color
+        for name in _FAKE_MODULES:
+            sys.modules.pop(name, None)
+            if saved[name] is not None:
+                sys.modules[name] = saved[name]
+
+
+# ── Layer namespacing ────────────────────────────────────────────────────
+
+
+class TestLayerNamespacing:
+    def test_nested_root_layer(self, rhino_env):
+        idx = create_root_layer(name="SAP2000/SAP")
+        assert idx == 1
+        assert rhino_env.Layers[0].Name == "SAP2000"
+        assert rhino_env.Layers[1].FullPath == "SAP2000/SAP"
+        # Idempotent — re-creating returns the same index.
+        assert create_root_layer(name="SAP2000/SAP") == idx
+
+    def test_joints_layer_under_stage_root(self, rhino_env):
+        root = create_root_layer(name="SAP2000/Mesh")
+        joints = create_joints_layer(root, root_name="SAP2000/Mesh")
+        assert rhino_env.Layers[joints].FullPath == "SAP2000/Mesh/Joints"
+
+    def test_frame_layers_namespaced(self, rhino_env):
+        root = create_root_layer(name="SAP2000/SAP")
+        layers = create_frame_layers(
+            root, {"UB300": {"Material": "STEEL"}}, root_name="SAP2000/SAP"
+        )
+        paths = {
+            rhino_env.Layers[i].FullPath
+            for i in list(layers.centreline.values()) + list(layers.extrusion.values())
+        }
+        assert "SAP2000/SAP/Frames/Centreline/UB300" in paths
+        assert "SAP2000/SAP/Frames/Extrusion/UB300" in paths
+
+    def test_shell_layers_namespaced(self, rhino_env):
+        root = create_root_layer(name="SAP2000/Mesh")
+        layers = create_shell_layers(
+            root, {"SHELL": {"Material": "CONC"}}, root_name="SAP2000/Mesh"
+        )
+        paths = {
+            rhino_env.Layers[i].FullPath
+            for i in list(layers.centreline.values()) + list(layers.extrusion.values())
+        }
+        assert "SAP2000/Mesh/Shells/Centreline/SHELL" in paths
+
+    def test_meshed_subtree(self, rhino_env):
+        root = create_root_layer(name="SAP2000/SAP")
+        meshed = create_root_layer(name="SAP2000/SAP/Meshed", parent=root)
+        layers = create_frame_layers(
+            meshed, {"UB300": {}}, prefix="Meshed/", root_name="SAP2000/SAP"
+        )
+        paths = {rhino_env.Layers[i].FullPath for i in layers.centreline.values()}
+        assert "SAP2000/SAP/Meshed/Frames/Centreline/UB300" in paths
+
+    def test_flat_root_legacy_default(self, rhino_env):
+        root = create_root_layer()
+        joints = create_joints_layer(root)
+        assert rhino_env.Layers[0].FullPath == "SAP2000"
+        assert rhino_env.Layers[joints].FullPath == "SAP2000/Joints"
+
+
+# ── Object colouring via _colour_doc_objects ─────────────────────────────
+
+
+class TestColourDocObjects:
+    def _add_frame(self, doc, layer_path, sap_id):
+        idx = create_or_get_layer(layer_path)
+        attrs = FakeObjectAttributes()
+        attrs.LayerIndex = idx
+        attrs.SetUserString("SAP_FrameID", sap_id)
+        return doc.Objects.AddLine(None, attrs)
+
+    def test_positive_red_negative_blue(self, rhino_env):
+        doc = rhino_env
+        self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", "B1")
+        self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", "B2")
+
+        n = _colour_doc_objects(
+            {"B1": 10.0, "B2": -10.0},
+            "SAP_FrameID",
+            -10.0,
+            10.0,
+            layer_filter="SAP2000/Mesh/Frames/*",
+        )
+        assert n == 2
+        assert doc.Objects[0].Attributes.ObjectColor.rgb() == (255, 25, 0)
+        assert doc.Objects[1].Attributes.ObjectColor.rgb() == (0, 25, 255)
+        assert doc.Objects[0].Attributes.ColorSource == "ColorFromObject"
+
+    def test_zero_maps_light_gray(self, rhino_env):
+        doc = rhino_env
+        self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", "B1")
+        n = _colour_doc_objects(
+            {"B1": 0.0},
+            "SAP_FrameID",
+            -1.0,
+            1.0,
+            layer_filter="SAP2000/Mesh/*",
+        )
+        assert n == 1
+        assert doc.Objects[0].Attributes.ObjectColor.rgb() == (76, 76, 76)
+
+    def test_layer_filter_excludes_other_layers(self, rhino_env):
+        doc = rhino_env
+        self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", "B1")
+        self._add_frame(doc, "SAP2000/SAP/Frames/CL/UB300", "B1")
+        n = _colour_doc_objects(
+            {"B1": 5.0},
+            "SAP_FrameID",
+            0.0,
+            5.0,
+            layer_filter="SAP2000/Mesh/*",
+        )
+        assert n == 1
+        assert doc.Objects[0].Attributes.ObjectColor is not None
+        assert doc.Objects[1].Attributes.ObjectColor is None
+
+    def test_locked_object_skipped(self, rhino_env):
+        doc = rhino_env
+        obj = self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", "B1")
+        doc.Objects[obj].IsLocked = True
+        n = _colour_doc_objects(
+            {"B1": 5.0},
+            "SAP_FrameID",
+            0.0,
+            5.0,
+            layer_filter="SAP2000/Mesh/*",
+        )
+        assert n == 0
+
+    def test_unmatched_id_untouched(self, rhino_env):
+        doc = rhino_env
+        self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", "B-OTHER")
+        n = _colour_doc_objects(
+            {"B1": 5.0},
+            "SAP_FrameID",
+            0.0,
+            5.0,
+            layer_filter="SAP2000/Mesh/*",
+        )
+        assert n == 0
+        assert doc.Objects[0].Attributes.ObjectColor is None
+
+
+# ── Optional rhino3dm .3dm round-trip ────────────────────────────────────
+
+
+class TestRhino3dmRoundTrip:
+    def test_nested_layers_write_read(self, tmp_path):
+        """Nested stage layers survive a real .3dm write/read (skipped w/o rhino3dm)."""
+        rhino3dm = pytest.importorskip("rhino3dm")
+        path = str(tmp_path / "layers.3dm")
+
+        model = rhino3dm.File3dm()
+        root_idx = model.Layers.add(rhino3dm.Layer("SAP2000"))
+        sap = rhino3dm.Layer("SAP")
+        sap.ParentLayerId = model.Layers[root_idx].Id
+        model.Layers.add(sap)
+        model.write(path)
+
+        loaded = rhino3dm.File3dm.Read(path)
+        names = {layer.Name for layer in loaded.Layers}
+        assert {"SAP2000", "SAP"} <= names
