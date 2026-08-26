@@ -206,7 +206,15 @@ def _colour_doc_objects(
             continue
 
         if layer_filter:
-            layer_path = rh_obj.Layer.FullPath
+            # ``rh_obj.Layer`` is not available on every ``RhinoObject``
+            # subclass in Rhino 8's CPython — ``ExtrusionObject`` raises
+            # AttributeError — so resolve the layer path from the object's
+            # ``Attributes.LayerIndex`` instead (``doc.Layers[i]`` works,
+            # unlike ``doc.Objects[i]``).
+            layer_idx = rh_obj.Attributes.LayerIndex
+            if layer_idx < 0:
+                continue
+            layer_path = doc.Layers[layer_idx].FullPath
             if not fnmatch.fnmatch(layer_path, layer_filter):
                 continue
 

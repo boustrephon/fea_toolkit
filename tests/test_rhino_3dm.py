@@ -383,6 +383,26 @@ class TestColourDocObjects:
         assert n == 1
         assert items[0].Attributes.ColorSource == "ColorFromObject"
 
+    def test_layer_filter_without_obj_layer_attr(self, rhino_env):
+        """Rhino 8 CPython regression: ``ExtrusionObject`` has no ``Layer``
+        attribute (AttributeError).  The layer filter must resolve the
+        path via ``Attributes.LayerIndex`` + ``doc.Layers`` instead."""
+        doc = rhino_env
+        idx = self._add_frame(doc, "SAP2000/Mesh/Frames/CL/UB300", "B1")
+        # Simulate the Rhino 8 ExtrusionObject: strip the ``Layer`` attr,
+        # keep ``Attributes.LayerIndex`` intact.
+        del doc.Objects._items[idx].Layer
+
+        n = _colour_doc_objects(
+            {"B1": 5.0},
+            "SAP_FrameID",
+            0.0,
+            5.0,
+            layer_filter="SAP2000/Mesh/*",
+        )
+        assert n == 1
+        assert doc.Objects._items[idx].Attributes.ColorSource == "ColorFromObject"
+
 
 class _BrokenIndexObjects:
     """Mirror of Rhino 8's ``ObjectTable`` as seen by pythonnet: ``Count``
