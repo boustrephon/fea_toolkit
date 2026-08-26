@@ -230,6 +230,8 @@ OpenSees error signatures:
 | `Norm ≈ 1.000e-4` vs tol `1e-4` — repeated "analyze failed" | Near-miss tolerance: the residual sits just above `solver_test_tol` due to floating-point noise at the `LayeredShell` stiffness floor | Relax `solver_test_tol` to `2e-4` |
 | `Norm = NaN` during the gravity step | Sudden LayeredShell stiffness shock when shells activate in a single `LoadControl` step | Ramp gravity with `gravity_num_substeps: 10` |
 | `Norm = NaN` during the gravity step (Elwood limit-state columns) | Inflated `P_g` collapses the shear limit surface to a zero `LimitState` backbone, or the `LimitState` material's known fragility | Check `_derive_gravity_axial_loads()` / supply `column_gravity_loads`; use the CenterCol recipe (`solver_constraints: "Penalty"`, `solver_system: "ProfileSPD"`, `gravity_num_substeps: 5`) — see `docs/shear_failure_modelling.md` Phase 3 |
+| `Norm = NaN` at push step 1 on a **large** model (> ~5,000 equations) | `solver_system: "BandGen"` banded factorisation breaks down (wide bandwidth → slow AND numerically fragile; Newton stalls then NaN) | Set `solver_system: "UmfPack"`. The builder auto-selects `UmfPack` above 600 nodes unless set explicitly. See `docs/pushover_analysis.md` and Portwood Digital (Feb 2026) |
+| `numeric analysis returns 1` (UmfPack zero pivot) at **random** steps — LayeredShell smeared-crack walls | The `ConcreteS`/`J2PlateFibre` tangent is exactly singular at crack formation (perfectly plastic `J2PlateFibre` with `Hkin=0` → zero eigenvalue after yield) | Rebar hardening `Hkin ≈ 1 % E`; if still marginal, model walls elastically (nonlinear fibre frames retained). Push loop stops cleanly on `-2` integrator failure. See `docs/pushover_analysis.md` |
 
 **Theory**
 

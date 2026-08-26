@@ -121,6 +121,18 @@ class AnalysisBuilder(
     # config dict — the explicit value wins.
     LAYERED_SHELL_GRAVITY_SUBSTEPS: ClassVar[int] = 10
 
+    # ── Sparse solver auto-selection threshold ───────────────────────
+    # ``BandGen`` (LAPACK DGBSV) stores the full band and becomes both
+    # slow and numerically fragile as the model grows (wide RCM bandwidth
+    # after shell meshing): the banded factorisation can stall Newton
+    # iterations just above the tolerance or emit NaN, failing every
+    # pushover/static step, while the sparse ``UmfPack`` solver converges
+    # the identical model cleanly (Portwood Digital, "Stop Cargo Culting
+    # BandGeneral and Plain Numberer", Feb 2026).  Above this node-count
+    # threshold — and only when the user has NOT set ``solver_system``
+    # explicitly — the builder defaults to ``UmfPack``.
+    SPARSE_SOLVER_NODE_THRESHOLD: ClassVar[int] = 600
+
     def __init__(self, mesh_model: MeshModel, config: Optional[dict[str, Any]] = None):
         self.mesh_model = mesh_model
         self.units = mesh_model.units
@@ -130,6 +142,10 @@ class AnalysisBuilder(
         # config omits it (see LAYERED_SHELL_GRAVITY_SUBSTEPS and
         # run_static_analysis).  An explicit value always wins.
         self._user_set_gravity_substeps = "gravity_num_substeps" in self.config
+        # Same convention for the linear-equation solver: when the user has
+        # not chosen one explicitly, _set_defaults() auto-selects a sparse
+        # solver for large models (SPARSE_SOLVER_NODE_THRESHOLD).
+        self._user_set_solver_system = "solver_system" in self.config
         self._set_defaults()
 
         # ── Elwood limit-state unit policy ──────────────────────────
@@ -376,6 +392,19 @@ class AnalysisBuilder(
         _mesh = getattr(self, "mesh_model", None)
         if not _user_set and _mesh is not None and _mesh.layered_shell_sections:
             self.config["gravity_num_substeps"] = self.LAYERED_SHELL_GRAVITY_SUBSTEPS
+
+        # ── Sparse solver auto-selection for large models ─────────────
+        # ``BandGen`` is robust for small/medium models but breaks down on
+        # large shell-meshed buildings (wide bandwidth → slow AND
+        # numerically fragile factorisation; Newton stalls or emits NaN).
+        # When the user has not explicitly chosen a solver and the mesh is
+        # large, fall back to the sparse ``UmfPack`` direct solver — same
+        # solution, dramatically faster and more stable.  An explicit
+        # ``solver_system`` config value always wins.
+        if not getattr(self, "_user_set_solver_system", True):
+            _mesh = getattr(self, "mesh_model", None)
+            if _mesh is not None and len(_mesh.nodes) >= self.SPARSE_SOLVER_NODE_THRESHOLD:
+                self.config["solver_system"] = "UmfPack"
 
     # ═══════════════════════════════════════════════════════════════
     # Domain construction

@@ -35,6 +35,17 @@ related: [xara_tcl_runtime_guide.md, xara_pushover_workflow.md, tcl_export.md]
 | 7 | dispBeamColumn | Linear | UmfPack | 3 | No | Yes | modal (Mode 1) | 1800s timeout |
 | 8 | dispBeamColumn | Linear | UmfPack | 3 | Yes | No | modal (Mode 1) | killed |
 | 9 | dispBeamColumn | Linear | UmfPack | 3 | **Yes** | **No** | **triangular** | **(running)** |
+| 10 | forceBeamColumn + LayeredShell | PDelta (HingeRadau) | **UmfPack** | — | Yes | Yes | triangular | **42/100 steps to 0.126 m in ~100 s, zero failures** |
+
+**2026-08-25 (Run #10 — uncropped full model, ~6,834 equations):** the same
+fiber + LayeredShell model that fails every push step with the default
+`solver_system: "BandGen"` (Newton stalls just above the tolerance then
+emits `Norm: nan` / `load factor nan`) converges cleanly with
+`solver_system: "UmfPack"` — 42/100 displacement-controlled steps to
+0.126 m at the main-roof control node in ~103 s with zero `analyze failed`,
+then a graceful non-converged step at ~0.126 m.  **Lesson:** on large
+shell-meshed buildings `BandGen` is both the speed bottleneck *and* the
+convergence problem; use a sparse direct solver (`UmfPack` / `Mumps`).
 
 **Note:** Runs 1–8 all used `modal_to_lateral_loads()` which had two bugs:
 - **Wrong mode**: always picked `shapes.get(0)` = Mode 1 (Y-direction, 53.43% Y mass), even for X-direction pushover. The X-direction needs Mode 2 (54.88% X mass).
