@@ -14,10 +14,32 @@ to be confused with :mod:`fea_toolkit.report` (report orchestration) or
 :mod:`fea_toolkit.plotting.report` (matplotlib figures).
 """
 
+from __future__ import annotations
+
 import math
 from typing import Any, Optional
 
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError:  # pragma: no cover — pandas is optional (Rhino 8 CPython)
+
+    class _MissingPandas:
+        """Raise a clear error when a report helper needs pandas.
+
+        pandas is not a required dependency of the toolkit (see
+        ``pyproject.toml`` core deps) and is absent from Rhino 8's
+        bundled CPython.  The module must still import so that
+        ``import fea_toolkit.io`` works without it; only actually calling
+        a report helper raises.
+        """
+
+        def __getattr__(self, _name: str):
+            raise RuntimeError(
+                "report helpers require pandas, which is not "
+                "installed in this Python environment (pip install pandas)."
+            )
+
+    pd = _MissingPandas()  # type: ignore[assignment]
 
 from ..model.sap_data import ShellSection
 
