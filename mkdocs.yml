@@ -104,6 +104,7 @@ nav:
   - Export & Visualisation:
       - Model Stage File: model_stage_file.md
       - Rhino 3-D Export: rhino_export.md
+      - Rhino Attributes Reference: rhino_attributes.md
       - Tcl Export: tcl_export.md
       - Visualisation Toolkit: viewer.md
       - Results Schema: results_schema.md

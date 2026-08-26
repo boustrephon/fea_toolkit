@@ -148,7 +148,7 @@ the "Package tree (abbreviated)" section below for the full subpackage list
 | **Constrained Remeshing** | ✅ Complete | `mesh/remesh.py` — Gmsh-based constrained quadrilateral remeshing with line constraints from frame edges. |
 | **NDMaterial / LayeredShell** | ✅ Complete | Data model for nonlinear shear walls: `NDMaterial` (uniaxial/multiaxial), `LayeredShellSection`, `ShellFiberLayer` — parsed from SAP2000 area sections. |
 | **Backend-Agnostic Viewer** | ✅ Complete | `ModelViewer` + `RenderBackend` abstraction — renders via PyVista or exports to standalone HTML. `plot_interactive_viewer()` adds radio buttons, sliders, click-to-inspect. |
-| **NPZ-based Rhino Colouring** | ✅ Complete | `colour_from_npz()`, `colour_frame_by_npz_ratio()`, `create_result_flags()` — colour Rhino objects by analysis results from NPZ archives. |
+| **NPZ/H5 Rhino Colouring** | ✅ Complete | `apply_results()`, `colour_from_npz()`, `colour_shells_from_results()`, `create_deformed_geometry()` — colour frames/shells and overlay deformed shapes from `.npz`/`.h5` results or stage files. |
 | **Brace Buckling (Approach A)** | ✅ Implemented | Subdivided element with imperfection + `Corotational`. |
 | **Brace Buckling (Approach B)** | ✅ Implemented | Truss + `Hysteretic` material — robust for pushover. |
 | **Brace Fatigue** | ✅ Implemented | `Fatigue` material wrapper for cyclic degradation. |
@@ -353,7 +353,7 @@ parsing through analysis to visualisation and reporting.
 | **CSM 4-panel** | `plot_csm_4panel()` | 2×2 ADRS plots per push direction |
 | **Rhino import (centreline)** | `RhinoImporter.run(create_centreline=True)` | Joint points, frame lines, shell Breps with SAP metadata |
 | **Rhino import (extrusion)** | `RhinoImporterV2.run()` | Lightweight Extrusion solids (I/Box/Pipe/Channel/Rect/Circular) |
-| **Rhino colour from NPZ** | `colour_from_npz()` | Colour frame objects by analysis results from NPZ archives |
+| **Rhino colour from results** | `apply_results()` / `colour_from_npz()` | Colour frames/shells and overlay deformed shapes from `.npz`/`.h5`/stage files |
 | **Rhino result flags** | `create_result_flags()` | 3D flag annotations for peak response values |
 | **Interactive 3D viewer** | `plot_interactive_viewer()` | Radio buttons, sliders, click-to-inspect in browser |
 | **Backend-agnostic HTML export** | `ModelViewer.export_html()` | Self-contained HTML with 3D scene |
