@@ -653,7 +653,7 @@ class ConstraintMixin:
 
                 mesh_prefix = f"{aid}_mesh_"
                 for nd in list(self.mesh_model.nodes.values()):
-                    if mesh_prefix not in nd.node_id:
+                    if not nd.node_id.startswith(mesh_prefix):
                         continue
                     if nd.node_id in self.mesh_model.restraints:
                         # Already fixed by the explicit-restraint loop above.

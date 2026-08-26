@@ -600,9 +600,9 @@ class StaticRunnerMixin:
 
         Returns:
             Dict mapping ``elem_tag`` → dict with keys ``'Fx'``, ``'Fy'``,
-            ``'Fz'``, ``'Mx'``, ``'My'``, ``'Mz'`` (global forces at the
+            ``'Fz'``, ``'Mx'``, ``'My'``, ``'Mz'`` (local forces at the
             I‑end of the element) and ``'Fx_j'``, ``'Fy_j'``, ``'Fz_j'``,
-            ``'Mx_j'``, ``'My_j'``, ``'Mz_j'`` (J‑end).
+            ``'Mx_j'``, ``'My_j'``, ``'Mz_j'`` (local forces at the J‑end).
         """
         elements = self.mesh_model.frame_elements
         results = {}
@@ -744,21 +744,17 @@ class StaticRunnerMixin:
     def check_load_equilibrium(self) -> "pd.DataFrame":
         """Check equilibrium between applied loads and reactions.
 
-        For each load pattern in the model, runs a static analysis
-        with that pattern alone and compares the applied load totals
-        (from :attr:`load_totals`) against the summed reactions.
-
-        Reaction moments include the force × lever‑arm overturning
-        contribution via
-        :func:`~fea_toolkit.utils.sum_reactions_with_overturning`
-        (same fixed centroid approach used for RS analysis in
-        :meth:`run_response_spectrum_analysis`).
+        For each load pattern in the model, runs a static analysis with
+        that pattern alone and reports the summed reaction forces.
 
         Returns:
-            A ``pandas.DataFrame`` with one row per pattern and
-            columns for applied force, reaction force, and
-            the equilibrium imbalance ``Δ = applied + reaction``
-            (should be near zero for a correctly built model).
+            A ``pandas.DataFrame`` with one row per load pattern and the
+            columns ``Load Pattern`` plus the summed reaction forces
+            ``Reaction Fx/Fy/Fz (<force unit>)``.  Applied-load totals and
+            the applied-vs-reaction imbalance are not returned by this
+            method (see :attr:`load_totals` and the
+            ``load_reaction_check`` result key of
+            :meth:`run_static_analysis` for those).
         """
         # TODO: Move `import pandas as pd` to module-level when the
         # optional dependency is declared in pyproject.toml (currently `pandas`

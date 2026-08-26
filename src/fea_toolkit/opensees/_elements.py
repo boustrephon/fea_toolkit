@@ -503,6 +503,18 @@ class ElementMixin:
                 _is_brace_truss = sec_name in self._truss_mat_tags and (
                     _explicit_sec or self._frame_element_types.get(elem.elem_id) == "brace"
                 )
+            # The truss branch indexes _truss_areas / _truss_Fy / _truss_E
+            # by section name — only proceed when sec_name is registered
+            # with valid truss properties.  An unregistered section (e.g.
+            # skipped by the registration guard for a near-zero area) falls
+            # through to the normal beam-column handling below, while
+            # registered brace sections keep the truss + Hysteretic path.
+            _is_brace_truss = _is_brace_truss and (
+                sec_name in self._truss_areas
+                and self._truss_areas.get(sec_name, 0.0) > 1e-12
+                and sec_name in self._truss_Fy
+                and sec_name in self._truss_E
+            )
         if _is_brace_truss:
             A = self._truss_areas[sec_name]
             Fy = self._truss_Fy[sec_name]
