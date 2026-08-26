@@ -13,6 +13,7 @@ from fea_toolkit.rhino.colour_from_npz import _load_npz_quantities, _load_unifie
 from fea_toolkit.rhino.results import (
     _get_pushover_directions,
     _load_deformed_arrays,
+    _load_pushover_frame_quantities,
     _load_pushover_shell_quantities,
 )
 
@@ -43,6 +44,9 @@ def flat_results():
         "static/DEAD/mz_j": np.array([0.5, -1.0]),
         "pushover/+X/shell_sap_id": np.array(["S1-0", "S1-1"]),
         "pushover/+X/shell_Nx": np.array([[10.0, -20.0], [12.0, -25.0]]),
+        "pushover/+X/frame_sap_id": np.array(["B1-0", "B1-1"]),
+        "pushover/+X/frame_mz_i": np.array([[1.0, -2.0], [1.5, -2.5]]),
+        "pushover/+X/frame_mz_j": np.array([[0.5, -1.0], [0.7, -1.2]]),
         "pushover/+X/node_disp_x": np.array([[0.0, 0.5, 1.0, 0.5]]),
         "pushover/+X/node_disp_y": np.zeros((1, 4)),
         "pushover/+X/node_disp_z": np.zeros((1, 4)),
@@ -152,6 +156,41 @@ class TestPushoverShellQuantities:
 
     def test_directions(self, flat_results):
         assert _get_pushover_directions(flat_results) == ["+X"]
+
+
+# ── Pushover frame-force extraction ──────────────────────────────────────
+
+
+class TestPushoverFrameQuantities:
+    def test_last_step(self, flat_results):
+        values, (vmin, vmax) = _load_pushover_frame_quantities(flat_results, "Mz", direction="+X")
+        # last step: B1-0 -> 1.5, B1-1 -> -2.5
+        assert values == {"B1-0": 1.5, "B1-1": -2.5}
+        assert (vmin, vmax) == (-2.5, 1.5)
+
+    def test_explicit_step(self, flat_results):
+        values, _ = _load_pushover_frame_quantities(flat_results, "Mz", direction="+X", step=0)
+        assert values == {"B1-0": 1.0, "B1-1": -2.0}
+
+    def test_first_direction_auto(self, flat_results):
+        values, _ = _load_pushover_frame_quantities(flat_results, "Mz")
+        assert values == {"B1-0": 1.5, "B1-1": -2.5}
+
+    def test_aggregate_parents(self, flat_results):
+        # frame_parent_sap_id maps B1-0/B1-1 -> B1 (max-abs envelope)
+        values, (vmin, vmax) = _load_pushover_frame_quantities(
+            flat_results, "Mz", direction="+X", aggregate_parents=True
+        )
+        assert values["B1"] == -2.5  # max-abs of children
+        assert vmin == -2.5 and vmax == 1.5
+
+    def test_missing_quantity_is_empty(self, flat_results):
+        values, _ = _load_pushover_frame_quantities(flat_results, "Fx", direction="+X")
+        assert values == {}
+
+    def test_no_directions_is_empty(self):
+        values, _ = _load_pushover_frame_quantities({"node_x": [0.0]}, "Mz")
+        assert values == {}
 
 
 # ── Deformed-shape displacement loading ──────────────────────────────────

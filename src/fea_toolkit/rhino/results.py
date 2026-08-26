@@ -268,6 +268,125 @@ def colour_shells_from_results(
     return coloured
 
 
+def _load_pushover_frame_quantities(
+    data: dict,
+    quantity: str = "Mz",
+    direction: str = None,
+    step: int = None,
+    aggregate_parents: bool = False,
+):
+    """Extract a per-frame value map from pushover frame end forces.
+
+    Args:
+        data: Flat results dict (already stage-flattened).
+        quantity: Frame force/moment quantity — ``Fx`` … ``Mz``.
+        direction: Pushover direction (``+X`` / ``-X`` / ``+Y`` / ``-Y``).
+            ``None`` → first available.
+        step: Pushover step index.  ``None`` → last step (peak).
+        aggregate_parents: Map child-frame values back to their parent
+            frame IDs (max-abs envelope over children).
+
+    Returns:
+        ``(values, (vmin, vmax))`` where ``values`` maps frame SAP ID →
+        scalar value (the I-end force at the selected step).  Empty when
+        the quantity is unavailable.
+    """
+    from ..io.npz_reader import npz_build_parent_map
+    from ..io.results_schema import make_pushover_key
+
+    directions = _get_pushover_directions(data)
+    dirname = direction or (directions[0] if directions else None)
+    if dirname is None:
+        return {}, (0.0, 0.0)
+
+    q = quantity.lower()
+    ids = data.get(make_pushover_key(dirname, "pushover/{direction}/frame_sap_id"))
+    arr = data.get(make_pushover_key(dirname, f"pushover/{{direction}}/frame_{q}_i"))
+    if ids is None or arr is None:
+        return {}, (0.0, 0.0)
+
+    n_steps = arr.shape[0] if arr.ndim > 1 else 1
+    step_idx = max(0, min(step if step is not None else n_steps - 1, n_steps - 1))
+
+    values: dict = {}
+    for i in range(len(ids)):
+        v = float(arr[step_idx, i]) if arr.ndim > 1 else float(arr[i])
+        if not np.isnan(v):
+            values[str(ids[i])] = v
+
+    if aggregate_parents:
+        parent_map = npz_build_parent_map(data)
+        for child, parent in parent_map.items():
+            v = values.get(str(child))
+            if v is None:
+                continue
+            cur = values.get(str(parent))
+            if cur is None or abs(v) > abs(cur):
+                values[str(parent)] = v
+
+    if values:
+        vmin = min(values.values())
+        vmax = max(values.values())
+    else:
+        vmin = vmax = 0.0
+    return values, (vmin, vmax)
+
+
+def colour_frames_from_results(
+    source,
+    quantity: str = "Mz",
+    direction: str = None,
+    step: int = None,
+    layer_filter: str = "",
+    stage: str = None,
+    aggregate_parents: bool = False,
+    verbose: bool = True,
+) -> int:
+    """Colour Rhino frame objects by a pushover frame force/moment quantity.
+
+    Mirrors :func:`colour_shells_from_results` for the per-step frame
+    end-force arrays (``pushover/{direction}/frame_{q}_i``).  Matches
+    objects carrying a ``SAP_FrameID`` UserString; uses the last pushover
+    step by default, or the explicit *step*.
+
+    Args:
+        source: Results-file path (``.npz`` / ``.h5``) or a flat dict.
+        quantity: Frame force/moment quantity — ``Fx`` … ``Mz``.
+        direction: Pushover direction (``None`` → first available).
+        step: Pushover step index (``None`` → last step, i.e. peak).
+        layer_filter: Optional glob filter on the layer full path.
+        stage: Stage to promote for stage files (``None`` → auto).
+        aggregate_parents: Map child-frame values to parent frame IDs.
+        verbose: Print progress messages.
+
+    Returns:
+        Number of frame objects coloured.
+    """
+    from .colour_from_npz import _colour_doc_objects, _load_unified
+
+    data = _load_unified(source, stage=stage)
+    values, (vmin, vmax) = _load_pushover_frame_quantities(
+        data,
+        quantity,
+        direction=direction,
+        step=step,
+        aggregate_parents=aggregate_parents,
+    )
+    if not values:
+        print(f"No {quantity} data found for frames in {source}")
+        return 0
+
+    if verbose:
+        label = f"[{direction}] " if direction else ""
+        print(f"{label}Loaded {len(values)} frames from results")
+        print(f"  {quantity} range: [{vmin:.4g}, {vmax:.4g}]")
+
+    coloured = _colour_doc_objects(values, "SAP_FrameID", vmin, vmax, layer_filter=layer_filter)
+    if verbose:
+        print(f"Coloured {coloured} frame objects by {quantity}")
+    return coloured
+
+
 def create_deformed_geometry(
     source,
     *,
@@ -464,6 +583,8 @@ def apply_results(
     shell_quantity: str = "Nx",
     shell_direction: str = None,
     shell_step: int = None,
+    frame_direction: str = None,
+    frame_step: int = None,
     deformed: bool = False,
     deformed_source: str = "static",
     deformed_mode: int = None,
@@ -478,7 +599,10 @@ def apply_results(
     then applies the requested actions:
 
     * ``frames=True`` — colour frame objects by a static force/moment
-      quantity (``quantity``, ``case``, ``use_local``);
+      quantity (``quantity``, ``case``, ``use_local``).  Pass
+      ``frame_direction`` to colour instead from the pushover per-step
+      frame forces (``pushover/{direction}/frame_{q}_i``, at ``frame_step``
+      or the last step);
     * ``shells=True`` — colour shell objects by a pushover in-plane
       quantity (``shell_quantity``, ``shell_direction``, ``shell_step``);
     * ``deformed=True`` — create a deformed-shape overlay
@@ -500,6 +624,11 @@ def apply_results(
             ``Mx``, ``My``, ``Mxy`` (default ``'Nx'``).
         shell_direction: Pushover direction (``None`` → first).
         shell_step: Pushover step index (``None`` → last step).
+        frame_direction: When set, colour frames from the pushover
+            per-step frame forces for this direction instead of the
+            static case.
+        frame_step: Pushover step index for ``frame_direction``
+            (``None`` → last step, i.e. peak).
         deformed: Create a deformed-shape overlay (default ``False``).
         deformed_source: ``"static"`` / ``"modal"`` / ``"rs"`` /
             ``"pushover"``.
@@ -516,18 +645,29 @@ def apply_results(
     from .colour_from_npz import colour_from_npz
 
     out: dict = {"coloured_frames": 0, "coloured_shells": 0, "deformed_objects": 0}
-
     if frames:
-        out["coloured_frames"] = colour_from_npz(
-            source,
-            quantity=quantity,
-            use_local=use_local,
-            combo=case,
-            layer_filter=layer_filter,
-            verbose=verbose,
-            stage=stage,
-            aggregate_parents=aggregate_parents,
-        )
+        if frame_direction is not None:
+            out["coloured_frames"] = colour_frames_from_results(
+                source,
+                quantity=quantity,
+                direction=frame_direction,
+                step=frame_step,
+                layer_filter=layer_filter,
+                stage=stage,
+                aggregate_parents=aggregate_parents,
+                verbose=verbose,
+            )
+        else:
+            out["coloured_frames"] = colour_from_npz(
+                source,
+                quantity=quantity,
+                use_local=use_local,
+                combo=case,
+                layer_filter=layer_filter,
+                verbose=verbose,
+                stage=stage,
+                aggregate_parents=aggregate_parents,
+            )
 
     if shells:
         out["coloured_shells"] = colour_shells_from_results(
