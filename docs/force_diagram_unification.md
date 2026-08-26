@@ -173,7 +173,13 @@ in iteration order — the same order the writer emits the geometry arrays):
 results = builder.run_static_analysis(pattern_scales={"DEAD": 1.0})
 elem_forces = builder.extract_static_element_forces()  # element-keyed
 
-force_arrays: dict[str, list[float]] = {}
+# The NPZ contract is strict: every active frame element must have an
+# entry, and every component array must have the same length.  Failing
+# fast beats silently misaligning forces with the geometry arrays.
+expected_components = ["Fx", "Fy", "Fz", "Mx", "My", "Mz"]
+force_arrays: dict[str, list[float]] = {f"{c.lower()}_i": [] for c in expected_components}
+force_arrays.update({f"{c.lower()}_j": [] for c in expected_components})
+
 # Skip inactive parents exactly like the writer, so each appended value
 # lands at the frame-element index matching frame_sap_id / frame_node_i.
 for eid, elem in builder.mesh_model.frame_elements.items():
@@ -182,11 +188,23 @@ for eid, elem in builder.mesh_model.frame_elements.items():
     tag = builder.frame_tag_map.get(eid, elem.elem_tag)
     fe = elem_forces.get(tag)
     if fe is None:
-        continue
-    for key, value in fe.items():
+        # An active element with no force data would break index alignment
+        # (the arrays are frame-element-ordered) — fail instead of skipping.
+        raise ValueError(
+            f"Active frame element {eid} (tag {tag}) has no force data — "
+            "every active element must be present so the NPZ component "
+            "arrays stay aligned with frame_sap_id / frame_node_i."
+        )
+    for key in expected_components:
         # I-end ("Fx") -> "fx_i"; J-end ("Fx_j") -> "fx_j"
-        out = key.lower() + ("" if key.endswith("_j") else "_i")
-        force_arrays.setdefault(out, []).append(float(value))
+        force_arrays[key.lower() + "_i"].append(float(fe[key]))
+        force_arrays[key.lower() + "_j"].append(float(fe[f"{key}_j"]))
+
+# All component arrays are built in the same loop, so their lengths are
+# guaranteed equal; assert the contract defensively before export.
+lengths = {k: len(v) for k, v in force_arrays.items()}
+if len(set(lengths.values())) != 1:
+    raise ValueError(f"Inconsistent force-array lengths: {lengths}")
 
 case = dict(results)
 case["element_forces"] = force_arrays
@@ -208,7 +226,13 @@ plot, falling back to the documented `"kN"` / `"m"` axis labels.
 - **Dispatcher**: static vs RS classification (covering both the RS
   `element_results` list form and the full `extract_element_rs_forces()`
   dict form), 2D vs 3D selection, and manual overrides behave as specified.
-- **Wrappers**: each legacy name still passes its current call patterns.
+- **Unified dispatcher**: `plot_force_diagram` covers all input forms —
+  Builder + static force dict, in-memory result dict, NPZ path (2D and
+  3D), and the RS `element_results` list / full
+  `extract_element_rs_forces()` dict.  The legacy wrapper names
+  (`plot_force_diagram_3d`, `plot_rs_force_diagram`,
+  `plot_npz_force_diagram`, `plot_npz_moment_3d`) were removed in the
+  2026-08-24 cleanup — no legacy call patterns remain.
 
 ## Milestones
 
@@ -218,7 +242,7 @@ plot, falling back to the documented `"kN"` / `"m"` axis labels.
 2. ✅ Add Builder/dict resolvers; rewire `plot_force_diagram_3d` +
    `plot_rs_force_diagram` through the same layer.
 3. ✅ Land `plot_force_diagram()`; convert the four legacy names to wrappers.
-4. ⏳ (Next release) remove the wrappers in a cleanup PR.
+4. ✅ (2026-08-24) wrappers removed in the deprecation cleanup PR.
 
 ## Out of scope
 
