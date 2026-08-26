@@ -68,6 +68,60 @@ def _value_to_rgb(val: float, vmin: float, vmax: float) -> tuple[int, int, int]:
     return (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
 
 
+def _load_pushover_flag_values(
+    data: dict,
+    direction: str,
+    quantity: str,
+    step: int = None,
+):
+    """Rebase per-step pushover frame forces onto the mesh geometry order.
+
+    The pushover force arrays are ordered by the pushover writer's frame
+    list, which is *not* the same order as the mesh-stage geometry arrays
+    (``frame_sap_id`` / ``frame_node_i`` / ``frame_node_j``) that carry the
+    node tags used for flag geometry.  This helper pairs values by SAP ID
+    so flag drawing can index positionally.
+
+    Args:
+        data: Flat stage-results dict (already ``flatten_stage``-promoted).
+        direction: Pushover direction (``+X``, ``-X``, ``+Y``, ``-Y``).
+        quantity: Frame force/moment quantity, e.g. ``Mz``.
+        step: Step index (``None`` → last step, i.e. peak).
+
+    Returns:
+        ``(sap_ids, val_i, val_j)`` aligned with the geometry ``frame_sap_id``
+        ordering (``NaN`` where a frame has no pushover result).  Empty
+        tuples when the pushover arrays are unavailable.
+    """
+    from ..io.results_schema import make_pushover_key
+
+    q = quantity.lower()
+    pids = data.get(make_pushover_key(direction, "pushover/{direction}/frame_sap_id"))
+    arr_i = data.get(make_pushover_key(direction, f"pushover/{{direction}}/frame_{q}_i"))
+    arr_j = data.get(make_pushover_key(direction, f"pushover/{{direction}}/frame_{q}_j"))
+    if pids is None or arr_i is None:
+        return [], [], []
+
+    n_steps = arr_i.shape[0] if arr_i.ndim > 1 else 1
+    step_idx = max(0, min(step if step is not None else n_steps - 1, n_steps - 1))
+    row_i = arr_i[step_idx] if arr_i.ndim > 1 else arr_i
+    row_j = (
+        arr_j[step_idx]
+        if arr_j is not None and arr_j.ndim > 1
+        else (arr_j if arr_j is not None else row_i)
+    )
+
+    val_i_map = {str(pids[k]): float(row_i[k]) for k in range(len(pids))}
+    val_j_map = {str(pids[k]): float(row_j[k]) for k in range(len(pids))}
+
+    geom = data.get("frame_sap_id")
+    if geom is None:
+        return [], [], []
+    val_i = [val_i_map.get(str(s), float("nan")) for s in geom]
+    val_j = [val_j_map.get(str(s), float("nan")) for s in geom]
+    return list(geom), val_i, val_j
+
+
 def _load_unified(source, stage: str = None) -> dict:
     """Load a unified results file (path or dict) into a flat array dict.
 
@@ -414,6 +468,8 @@ def create_result_flags(
     layer_name: str = None,
     verbose: bool = True,
     stage: str = None,
+    pushover_direction: str = None,
+    step: int = None,
 ) -> int:
     """Create 3D flag geometry in Rhino from an NPZ results file.
 
@@ -441,6 +497,16 @@ def create_result_flags(
         ``"SAP2000/Results/Flags/{quantity}"``.
     verbose : bool
         Print progress messages.
+    stage : str or None
+        Stage to promote for stage files (``None`` → auto).
+    pushover_direction : str or None
+        When set (e.g. ``\"+X\"``), source the flags from the per‑step
+        pushover frame forces for that direction instead of a static
+        case — useful for stage files whose only per‑element forces live
+        in the pushover arrays.
+    step : int or None
+        Pushover step index for *pushover_direction* (``None`` → last
+        step, i.e. peak).
 
     Returns
     -------
@@ -507,6 +573,17 @@ def create_result_flags(
         n_z = data.get("node_z")
         val_i_arr = data.get(key_i)
         val_j_arr = data.get(key_j)
+
+    # ── Pushover per-step frame forces (optional override) ─────────
+    if pushover_direction:
+        sub_sap_ids, val_i_arr, val_j_arr = _load_pushover_flag_values(
+            data, pushover_direction, quantity, step
+        )
+        if not sub_sap_ids:
+            print(f"No pushover '{pushover_direction}' frame {quantity} forces in {npz_path}")
+            return 0
+        sub_n_i = data.get("frame_node_i")
+        sub_n_j = data.get("frame_node_j")
 
     # ── Build node coordinate lookup ───────────────────────────────
     node_coords: dict[int, rg.Point3d] = {}
@@ -683,7 +760,7 @@ def create_result_flags(
                 Fj,
                 scale_factor,
             ):
-                _add_flag_mesh(verts, col_val, int(sub_sap_ids[i]), Fi, Fj)
+                _add_flag_mesh(verts, col_val, str(sub_sap_ids[i]), Fi, Fj)
                 created += 1
         except Exception:
             continue

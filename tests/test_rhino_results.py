@@ -302,3 +302,64 @@ class TestValueToRgb:
         from fea_toolkit.rhino.colour_from_npz import _value_to_rgb
 
         assert _value_to_rgb(5.0, 5.0, 5.0) == (255, 255, 255)
+
+
+# ── Pushover flag force rebasing (_load_pushover_flag_values) ─────────────
+
+
+class TestPushoverFlagValues:
+    """Pushover frame forces must be paired to the mesh geometry frame
+    ordering by SAP ID (the two writers order frames differently)."""
+
+    def test_rebases_by_id_onto_geometry_order(self):
+        from fea_toolkit.rhino.colour_from_npz import _load_pushover_flag_values
+
+        data = {
+            "frame_sap_id": np.array(["B1-0", "B1-1"]),
+            "frame_node_i": np.array([0, 1]),
+            "frame_node_j": np.array([1, 2]),
+            # pushover order is the REVERSE of the geometry order
+            "pushover/+X/frame_sap_id": np.array(["B1-1", "B1-0"]),
+            "pushover/+X/frame_mz_i": np.array([[10.0, 100.0]]),
+            "pushover/+X/frame_mz_j": np.array([[1.0, 2.0]]),
+        }
+        sap, vi, vj = _load_pushover_flag_values(data, "+X", "Mz")
+        assert sap == ["B1-0", "B1-1"]
+        assert vi == [100.0, 10.0]  # geometry order: B1-0 -> 100
+        assert vj == [2.0, 1.0]
+
+    def test_step_selection(self):
+        from fea_toolkit.rhino.colour_from_npz import _load_pushover_flag_values
+
+        data = {
+            "frame_sap_id": np.array(["B1-0"]),
+            "pushover/+X/frame_sap_id": np.array(["B1-0"]),
+            "pushover/+X/frame_mz_i": np.array([[1.0], [5.0]]),
+            "pushover/+X/frame_mz_j": np.array([[0.5], [4.0]]),
+        }
+        _s, vi0, vj0 = _load_pushover_flag_values(data, "+X", "Mz", step=0)
+        _s, vi1, vj1 = _load_pushover_flag_values(data, "+X", "Mz", step=1)
+        assert vi0 == [1.0] and vj0 == [0.5]
+        assert vi1 == [5.0] and vj1 == [4.0]
+        # None defaults to the last step
+        _s, vi_none, _vj = _load_pushover_flag_values(data, "+X", "Mz")
+        assert vi_none == [5.0]
+
+    def test_missing_pushover_returns_empty(self):
+        from fea_toolkit.rhino.colour_from_npz import _load_pushover_flag_values
+
+        sap, vi, vj = _load_pushover_flag_values({"frame_sap_id": np.array(["A"])}, "+X", "Mz")
+        assert sap == [] and vi == [] and vj == []
+
+    def test_missing_frame_is_nan(self):
+        from fea_toolkit.rhino.colour_from_npz import _load_pushover_flag_values
+
+        data = {
+            "frame_sap_id": np.array(["B1-0", "B1-NO-RESULT"]),
+            "pushover/+X/frame_sap_id": np.array(["B1-0"]),
+            "pushover/+X/frame_mz_i": np.array([[1.0]]),
+            "pushover/+X/frame_mz_j": np.array([[0.5]]),
+        }
+        _sap, vi, vj = _load_pushover_flag_values(data, "+X", "Mz")
+        assert vi[0] == 1.0 and np.isnan(vi[1])
+        assert vj[0] == 0.5 and np.isnan(vj[1])
