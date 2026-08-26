@@ -23,12 +23,33 @@ To switch Rhino to CPython:
 
 1. `Tools → PythonScript → Options`
 2. Set ``Python Interpreter`` to a Python 3.9+ installation
-   (e.g. ``/usr/local/bin/python3`` on Mac, or the Python from your
-   ``venv_opensees`` at
-   ``/Users/andrew/Projects/OpenSeesPy/venv_opensees/bin/python3``)
+   (e.g. ``/usr/local/bin/python3`` on Mac)
 3. Click ``OK`` and restart the PythonScript editor
 
 All examples in this guide assume CPython 3.9+.
+
+### Required packages
+
+Rhino 8 ships NumPy with its bundled CPython, but the unified results
+loader additionally uses **h5py** to read HDF5 (``.h5``) stage and
+results files.  Install it once for the interpreter selected above::
+
+    /path/to/python3 -m pip install "h5py==3.13.0" "numpy==2.0.2"
+
+``h5py 3.13.0`` is the last release with macOS-arm64 wheels for CPython
+3.9 — the fixed Python inside Rhino 8 — and ``numpy==2.0.2`` is pinned to
+the same wheel set.
+
+Scripts that need h5py declare it with ``# r:`` reference comments so the
+Rhino editor installs them on demand:
+
+```python
+#! python 3
+# r: numpy==2.0.2
+# r: h5py==3.13.0
+import sys
+sys.path.insert(0, r"/Users/andrew/Projects/fea_toolkit/src")
+```
 
 ---
 
@@ -202,33 +223,43 @@ report = importer.run()
 
 ## Layer Structure
 
+The importer derives a **stage-namespaced** root from the model's pipeline
+stage (pass ``root_layer=...`` to :meth:`RhinoImporter.run` to override),
+so geometry from the two stages never overlays in the same layers:
+
 ```
 SAP2000/
-├── Joints                          ← point objects
-├── Frames/
-│   ├── Centreline/                 ← line objects
-│   │   ├── Default
-│   │   ├── UB300                  (coloured by section)
-│   │   └── ...
-    └── Extrusion/                  ← 3-D Brep solids
-│       ├── Default
-│       ├── UB300                  (same colour as centreline)
-│       └── ...
-└── Shells/
-    ├── Centreline/                 ← planar Brep surfaces
-    │   ├── Default
-│   │   ├── Slab200
-│   │   └── ...
-    └── Extrusion/                  ← extruded by thickness
-        ├── Default
-│       ├── Slab200
-│       └── ...
+├── SAP/                              ← unsplit SAP2000 geometry
+│   ├── Joints                        ← point objects
+│   ├── Frames/
+│   │   ├── Centreline/               ← line objects
+│   │   │   ├── UB300                (coloured by section)
+│   │   │   └── ...
+│   │   └── Extrusion/                ← 3-D solids
+│   │       ├── UB300                (same colour as centreline)
+│   │       └── ...
+│   └── Shells/
+│       ├── Centreline/               ← planar Brep surfaces
+│       │   ├── Slab200
+│       │   └── ...
+│       └── Extrusion/                ← extruded by thickness
+│           ├── Slab200
+│           └── ...
+└── Mesh/                             ← meshed stage (split frames, subdivided areas)
+    ├── Joints
+    ├── Frames/  ├── Centreline/  └── Extrusion/
+    └── Shells/  ├── Centreline/  └── Extrusion/
 ```
+
+A ``SAPModelData`` import lands under ``SAP2000/SAP``; a ``MeshModel``
+under ``SAP2000/Mesh``.  Pass ``root_layer="SAP2000"`` to ``run()`` for
+the legacy flat tree.  Results overlays (deformed shapes, flags) live
+under ``SAP2000/Results`` — see
+[Rhino Attributes](rhino_attributes.md) for the full UserString
+reference.
 
 The centreline and extrusion layers let you toggle between a schematic
 view and a detailed solid model by turning layer groups on/off.
-
----
 
 ## Geometry Representations
 
@@ -254,8 +285,11 @@ view and a detailed solid model by turning layer groups on/off.
 
 ## Metadata (Rhino UserStrings)
 
-Every object carries `SAP_*` attributes accessible via Rhino's
-`Properties → Notes` panel, Grasshopper's `Hops` component, or Python:
+Every object carries `SAP_*` (model) / `FEA_*` (stage) / `RES_*`
+(results) attributes accessible via Rhino's `Properties → Notes` panel,
+Grasshopper's `Hops` component, or Python.  The tables below summarise
+the `SAP_*` set; the complete cross-stage reference (including `FEA_*`
+and `RES_*`) lives in [Rhino Attributes](rhino_attributes.md).
 
 ### Joints
 
@@ -398,6 +432,8 @@ The `RhinoImporter.run()` method accepts these keyword arguments:
 | `create_extrusions` | `True` | Create 3‑D extrusion solids |
 | `color_code_joints` | `True` | Colour joints by restraint type |
 | `create_groups` | `True` | Create Rhino groups from SAP groups |
+| `create_meshed` | `False` | Also import meshed geometry under a `Meshed` sub-tree |
+| `root_layer` | `None` | Root layer path (default derived from stage: `SAP2000/Mesh` / `SAP2000/SAP`; pass `"SAP2000"` for the legacy flat tree) |
 | `verbose` | `True` | Print progress to command line |
 
 ---
@@ -419,19 +455,20 @@ The `RhinoImporter` creates Brep polysurfaces (not lightweight
 
 ## Results Visualisation (OpenSees → Rhino)
 
-Analysis results from `AnalysisBuilder` (end forces, section forces,
-fiber stresses, nodal displacements) can be exported to a **NumPy .npz**
-file and loaded back into Rhino for colour-coding geometry.
+Analysis results (frame end forces, shell membrane forces, nodal
+displacements) are written to a unified results file (``.npz`` **or**
+``.h5`` — optionally a **stage file** that also stores the model) and
+applied inside Rhino with a single call.
 
 ### Workflow
 
 ```
 1. PARSING             SAP2000Parser → SAPModelData
-2. SPLITTING           geometry.split_elements() → sub-elements at intermediate nodes
+2. SPLITTING           preprocess_model() → MeshModel
 3. ANALYSIS            AnalysisBuilder.build_domain() + run_static_analysis()
-4. EXPORT (.npz)       builder.export_results_to_npz("results.npz", results)
-5. RHINO IMPORT        RhinoImporterV2(md).run()  ← unsplit geometry with SAP_* UserStrings
-6. RHINO VISUALISE     np.load("results.npz") → colour by force/stress/displacement
+4. EXPORT (unified)    write_model_stages("model.h5", sap=md, mesh=mm)
+5. RHINO IMPORT        RhinoImporter(mesh_model).run()  ← SAP_*/FEA_* UserStrings
+6. RHINO VISUALISE     apply_results("model.h5", stage="mesh") → colour + deform
 ```
 
 ### Step-by-step
@@ -442,7 +479,7 @@ file and loaded back into Rhino for colour-coding geometry.
 from fea_toolkit.io.s2k_parser import SAP2000Parser
 from fea_toolkit.opensees.preprocessor import preprocess_model
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
-from fea_toolkit.io.npz_writer import write_results_npz
+from fea_toolkit.io.stage_writer import write_model_stages
 
 parser = SAP2000Parser("model.s2k")
 parser.parse()
@@ -453,173 +490,105 @@ builder = AnalysisBuilder(mm, {"verbose": True})
 builder.build_domain()
 builder.create_loads({"DEAD": 1.0})
 static = builder.run_static_analysis()
-write_results_npz("results.npz", md, static_results=static)
+
+write_model_stages("model_results.h5", sap=md, mesh=mm, fmt="h5")
 ```
 
-.. note::
-   The ``write_results_npz()`` invocation above exports **only** nodal
-   displacements and frame-element end forces by default.  To include
-   section-level integration-point results (``sec_*`` arrays), pass
-   ``section_results=True`` and/or ``fiber_results=True`` keyword
-   arguments to the builder's analysis runner, then pass the enriched
-   results dict to ``write_results_npz()``.
+The stage file holds **both** model stages, so the Rhino side reads a
+single file for geometry and results.
 
-**Inside Rhino** (load .npz and colour by results):
+**Inside Rhino** — one call for frame colouring, shell colouring and a
+deformed-shape overlay:
 
 ```python
 #! python 3
-
+# r: numpy==2.0.2
+# r: h5py==3.13.0
 import sys
-sys.path.append(r'/path/to/fea_toolkit/src')
+sys.path.insert(0, r"/path/to/fea_toolkit/src")
 
-import numpy as np
-import Rhino
-import scriptcontext as sc
-import Rhino.DocObjects as rd
+from fea_toolkit.rhino.results import apply_results
 
-data = np.load("results.npz")
-
-# ── Colour extrusions by major-axis moment (Mz) ──────────────────────
-# Each row in data['sub_sap_ids'] belongs to one sub-element.
-# Match by SAP_FrameID on Rhino objects.
-
-# Build a lookup: SAP FrameID → list of (t_start, t_end, Mz)
-from collections import defaultdict
-elem_map = defaultdict(list)
-for i in range(len(data["sub_sap_ids"])):
-    sap_id = data["sub_sap_ids"][i]
-    mz = data["sub_mz_j"][i]  # J-end moment (or use sub_mx_i etc.)
-    t0 = data["sub_t_start"][i]
-    t1 = data["sub_t_end"][i]
-    elem_map[sap_id].append((t0, t1, mz))
-
-# Scan Rhino objects and colour by moment
-for obj in sc.doc.Objects:
-    attrs = obj.Attributes
-    sap_id = attrs.GetUserString("SAP_FrameID")
-    if sap_id is None or sap_id not in elem_map:
-        continue
-
-    segs = elem_map[sap_id]
-    # Use the absolute max moment across sub-elements
-    max_mz = max(abs(s[2]) for s in segs)
-
-    # Map to a colour gradient (blue=0 → red=max)
-    # (simplified — use a proper colour map for real work)
-    t = min(max_mz / 1e5, 1.0)  # normalise; adjust scale to your model
-    r = int(255 * t)
-    b = int(255 * (1 - t))
-    colour = System.Drawing.Color.FromArgb(r, 0, b)
-
-    attrs.ObjectColor = colour
-    attrs.ColorSource = rd.ObjectColorSource.ColorFromObject
-    obj.CommitChanges()
-
-sc.doc.Views.Redraw()
+summary = apply_results(
+    r"C:/models/model_results.h5",
+    stage="mesh",          # geometry stage the imported objects match
+    frames=True,           # colour frame objects by static Mz (local)
+    quantity="Mz",
+    case="DEAD",
+    shells=True,           # colour shell objects by pushover Nx (last step)
+    shell_quantity="Nx",
+    shell_direction="+X",
+    deformed=True,         # deformed-shape overlay (static, auto-scaled)
+    deformed_source="static",
+    layer_filter="SAP2000/Mesh/*",   # only touch the meshed geometry
+)
+print(summary)
 ```
 
-### .npz file contents
+The individual helpers are also public:
 
-When loaded with ``np.load("results.npz", allow_pickle=True)``, the file
-contains:
+| Function | Purpose |
+|---|---|
+| ``colour_from_npz(path, quantity=...)`` | Colour frame objects by a static quantity |
+| ``colour_shells_from_results(path, quantity="Nx", ...)`` | Colour shell objects by a pushover in-plane quantity |
+| ``create_deformed_geometry(path, source_type=...)`` | Overlay deformed frame lines + shell quads |
+| ``create_result_flags(path, quantity=...)`` | 3-D flag annotations for peak response values |
+| ``colour_frame_by_npz_ratio(path, numerator, denominator)`` | Colour by a force ratio |
 
-**Frame sub‑elements** (one row per sub‑element):
+All of these accept a **plain results file, a stage file, or an HDF5
+file** — format and stage are auto-detected.  ``aggregate_parents=True``
+maps child-element results back to parent SAP IDs, so SAP-stage geometry
+can be coloured from meshed-stage results.
 
-| Array | Type | Description |
-|---|---|---|
-| `sub_elem_tags` | int32 | OpenSees `elem_tag` |
-| `sub_sap_ids` | object (str) | Original SAP FrameID, matches `SAP_FrameID` UserString |
-| `sub_t_start`, `sub_t_end` | float64 | Parametric position `t ∈ [0,1]` along the original SAP frame |
-| `sub_fx_i` … `sub_mz_i` | float64 | I‑end forces in **global** coordinates (Fx, Fy, Fz, Mx, My, Mz) |
-| `sub_fx_j` … `sub_mz_j` | float64 | J‑end forces in **global** coordinates |
+### Unified file contents
 
-**Nodes** (one row per model node):
-
-| Array | Type | Description |
-|---|---|---|
-| `node_tags` | int32 | OpenSees `node_tag` |
-| `node_sap_ids` | object (str) | SAP node ID, matches `SAP_JointID` UserString |
-| `node_x`, `node_y`, `node_z` | float64 | Original nodal coordinates |
-| `node_dx`, `node_dy`, `node_dz` | float64 | Nodal displacements |
-
-**Section responses** (one row per integration point, only present when
-`section_responses` is provided):
+The full unified schema is documented in
+[Results Schema](results_schema.md).  Key arrays for Rhino colouring:
 
 | Array | Description |
 |---|---|
-| `sec_ip` | Integration point index (1‑based) |
-| `sec_sub_idx` | Index into the sub-element arrays above |
-| `sec_N` … `sec_T` | Section forces in **local** coordinates (N, Mz, My, Vz, Vy, T) |
-| `sec_sig_max` / `sec_sig_min` | Max/min fiber stress at this IP |
-| `sec_eps_max` / `sec_eps_min` | Max/min fiber strain at this IP |
-
-**Metadata**:
-
-| Array | Description |
-|---|---|
-| `force_unit` | e.g. `"N"`, `"kN"` |
-| `length_unit` | e.g. `"m"`, `"mm"` |
+| ``node_x``, ``node_y``, ``node_z`` | Node coordinates (N_node) |
+| ``frame_sap_id`` | Frame SAP IDs — matches the ``SAP_FrameID`` UserString |
+| ``frame_node_i``, ``frame_node_j`` | Frame endpoint node indices |
+| ``shell_sap_id`` | Shell/area SAP IDs — matches the ``SAP_AreaID`` UserString |
+| ``static/{case}/mz_i_local`` | Local I-end moments (also fx/fy/fz/mx/my, _j) |
+| ``static/{case}/node_dx`` … ``node_dz`` | Nodal displacements |
+| ``pushover/{dir}/shell_Nx`` … ``shell_Mxy`` | Pushover shell membrane forces (N_step × N_shell) |
+| ``pushover/{dir}/node_disp_x`` … ``node_disp_z`` | Pushover nodal displacements |
 
 ### Displaced shape
 
-To visualise the displaced shape, move Rhino joint points by their
-displacements and update frame objects accordingly:
+``create_deformed_geometry()`` builds a displaced copy of the frame
+lines and shell quads on a dedicated
+``SAP2000/Results/Deformed/{label}`` layer.  Use ``deformed_source=
+"static"`` (default, ``case=...``), ``"modal"`` (``mode=...``),
+``"rs"``, or ``"pushover"`` (``direction=...``, ``step=...``).  *scale*
+defaults to an automatic value (5 % of the largest model dimension per
+unit displacement):
 
 ```python
-import Rhino.Geometry as rg
+from fea_toolkit.rhino.results import create_deformed_geometry
 
-data = np.load("results.npz")
-
-# Build node lookup: SAP node ID → (dx, dy, dz)
-disp_map = {}
-for i in range(len(data["node_sap_ids"])):
-    disp_map[data["node_sap_ids"][i]] = (
-        data["node_dx"][i],
-        data["node_dy"][i],
-        data["node_dz"][i],
-    )
-
-# Move joint points
-for obj in sc.doc.Objects:
-    if obj.Attributes.GetUserString("SAP_Type") != "Joint":
-        continue
-    sap_id = obj.Attributes.GetUserString("SAP_JointID")
-    if sap_id not in disp_map:
-        continue
-    dx, dy, dz = disp_map[sap_id]
-    pt = obj.Geometry.Location
-    new_pt = rg.Point3d(pt.X + dx, pt.Y + dy, pt.Z + dz)
-    sc.doc.Objects.ModifyGeometry(obj.Id, lambda g: g.Morph([(pt, new_pt)]))
-```
-
-### Scaling factor for visualisation
-
-Structural displacements are often millimetres on a metre-scale model.
-Apply a scale factor for visibility:
-
-```python
-scale = 50  # exaggerate displacements 50×
-dx, dy, dz = disp_map[sap_id]
-new_pt = rg.Point3d(pt.X + dx * scale, pt.Y + dy * scale, pt.Z + dz * scale)
+n = create_deformed_geometry(
+    "model_results.h5",
+    source_type="modal",
+    mode=1,
+    scale=50,          # exaggerate 50× (None → auto)
+)
 ```
 
 ### Notes
 
-- NumPy ships with Rhino 8 CPython — no additional packages required.
-- The `.npz` is a compressed ZIP file; use `allow_pickle=True` when
-  loading because string arrays are stored as Python objects.
-- Section responses (`sec_*` arrays) are only present when
-  `section_responses` is passed to `export_results_to_npz`.
-- For pushover results, export the final step's forces/displacements
-  using the same method after `run_pushover_analysis()` returns.
-- **End forces in the NPZ are in global coordinates**. To get local
-  forces for colour-coding (e.g. local Mz for major-axis bending,
-  independent of member orientation), transform using the element's
-  local axes — see ``get_local_axes()`` in ``model/geometry.py`` for the
-  rotation matrix approach, or use the unified ``plot_force_diagram``
-  function which handles this automatically.
-
----
+- NumPy ships with Rhino 8 CPython; **h5py** is required only for
+  ``.h5`` files (see [Required packages](#required-packages)).
+- Section responses (``sec_*`` arrays) are only present when the analysis
+  runner is asked to collect them.
+- **End forces are stored in global coordinates**.  For local forces
+  (e.g. local ``Mz`` for major-axis bending, independent of member
+  orientation) the colouring helpers prefer the ``*_i_local`` /
+  ``_j_local`` arrays automatically when ``use_local=True`` (the default).
+- The deformed overlay is **file-driven**: it works whether or not the
+  original geometry was imported into the document.
 
 ## Technical Notes
 
