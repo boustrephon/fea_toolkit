@@ -202,8 +202,16 @@ def _local_axes(
 def create_joint_points(
     md: SAPModelData,
     joint_layer_index: int,
+    stage: str = "sap",
 ) -> tuple[int, list[str]]:
-    """Create point objects for each node — same API as ``geometry.py``."""
+    """Create point objects for each node — same API as ``geometry.py``.
+
+    Args:
+        md: Model source (``SAPModelData`` / ``MeshModel`` /
+            :class:`~fea_toolkit.model.source_resolver.ResolvedSource`).
+        joint_layer_index: Rhino layer index for the points.
+        stage: Pipeline stage label stamped as ``FEA_Stage``.
+    """
     doc = sc.doc
     count = 0
     obj_ids: list[str] = []
@@ -231,6 +239,9 @@ def create_joint_points(
             attrs.SetUserString("SAP_X", str(node.x))
             attrs.SetUserString("SAP_Y", str(node.y))
             attrs.SetUserString("SAP_Z", str(node.z))
+            attrs.SetUserString("FEA_Stage", stage)
+            attrs.SetUserString("FEA_Kind", "Joint")
+            attrs.SetUserString("FEA_NodeTag", str(node.node_tag))
 
             restraint = md.restraints.get(nid)
             if restraint is not None:
@@ -320,6 +331,7 @@ def _get_frame_points(md: SAPModelData, eid: str, elem):
 def create_frame_lines(
     md: SAPModelData,
     frame_section_layers: dict[str, int],
+    stage: str = "sap",
 ) -> int:
     """Create line objects for frame centrelines (elastic portion)."""
     doc = sc.doc
@@ -357,6 +369,11 @@ def create_frame_lines(
             attrs.SetUserString("SAP_JointI", str(elem.node_i))
             attrs.SetUserString("SAP_JointJ", str(elem.node_j))
             attrs.SetUserString("SAP_Angle", str(elem.angle))
+            attrs.SetUserString("FEA_Stage", stage)
+            attrs.SetUserString("FEA_Kind", "Frame")
+            attrs.SetUserString("FEA_ElemTag", str(getattr(elem, "elem_tag", "")))
+            if getattr(elem, "parent_id", None):
+                attrs.SetUserString("FEA_ParentID", str(elem.parent_id))
 
             if sec_name and sec_name in md.sections:
                 sec = md.sections[sec_name]
@@ -627,6 +644,7 @@ def _create_brep_from_points(points, area_id: str, layer_index: int, doc):
 def create_shell_breps(
     md: SAPModelData,
     shell_section_layers: dict[str, int],
+    stage: str = "sap",
 ) -> int:
     """Create planar Brep surfaces for shell elements."""
     doc = sc.doc
@@ -662,6 +680,11 @@ def create_shell_breps(
             attrs.SetUserString("SAP_Section", sec_name)
             attrs.SetUserString("SAP_NodeCount", str(len(points)))
             attrs.SetUserString("SAP_JointIDs", ",".join(area.node_ids))
+            attrs.SetUserString("FEA_Stage", stage)
+            attrs.SetUserString("FEA_Kind", "Shell")
+            attrs.SetUserString("FEA_ElemTag", str(getattr(area, "area_tag", "")))
+            if getattr(area, "parent_id", None):
+                attrs.SetUserString("FEA_ParentID", str(area.parent_id))
 
             if sec_name and sec_name in md.sections:
                 sec = md.sections[sec_name]

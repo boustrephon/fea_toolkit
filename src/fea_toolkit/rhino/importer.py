@@ -25,6 +25,7 @@ Inside Rhino::
 import copy
 import typing as t
 
+from ..model.sap_data import SAPModelData
 from .colors import RESTRAINT_COLORS
 from .geometry import (
     create_frame_extrusions,
@@ -45,14 +46,29 @@ __all__ = ["RhinoImporter"]
 
 
 class RhinoImporter:
-    """Export ``SAPModelData`` or ``MeshModel`` into Rhino using lightweight Extrusions.
+    """Export model stages into Rhino using lightweight Extrusions.
+
+    Accepts any source supported by
+    :func:`fea_toolkit.model.source_resolver.resolve_model_source`:
+    ``SAPModelData``, ``MeshModel``, ``AnalysisBuilder``, or a stage-file
+    path/dict (``.h5`` / ``.npz``).
 
     Args:
-        model_data: A ``SAPModelData`` or ``MeshModel`` instance.
+        model_data: A ``SAPModelData``, ``MeshModel``, ``AnalysisBuilder``,
+            a stage-file path, or a stage-file dict.
+        stage: Pipeline stage label (``sap`` / ``mesh``).  ``None`` →
+            inferred from the source type.
     """
 
-    def __init__(self, model_data):
-        self.md = model_data
+    def __init__(self, model_data, stage: t.Optional[str] = None):
+        from ..model.source_resolver import resolve_model_source
+
+        self.stage = stage
+        self.md = resolve_model_source(model_data, stage=stage)
+        self.stage = self.md.stage
+        # Keep the original object when it is a raw SAPModelData so the
+        # legacy ``create_meshed`` path can still run.
+        self._raw_sap_model = model_data if isinstance(model_data, SAPModelData) else None
         self._ensure_rhino()
 
     @classmethod
@@ -146,7 +162,7 @@ class RhinoImporter:
         # 2. Joints
         if verbose:
             print("Creating joint points...")
-        n_joints, joint_obj_ids = create_joint_points(self.md, joint_layer)
+        n_joints, joint_obj_ids = create_joint_points(self.md, joint_layer, stage=self.stage)
         results["joints"] = n_joints
 
         # 3. Centreline
@@ -154,11 +170,15 @@ class RhinoImporter:
             if self.md.frame_elements:
                 if verbose:
                     print("Creating frame centreline lines...")
-                results["frame_centrelines"] = create_frame_lines(self.md, frame_layers.centreline)
+                results["frame_centrelines"] = create_frame_lines(
+                    self.md, frame_layers.centreline, stage=self.stage
+                )
             if self.md.area_elements:
                 if verbose:
                     print("Creating shell centreline Breps...")
-                results["shell_centrelines"] = create_shell_breps(self.md, shell_layers.centreline)
+                results["shell_centrelines"] = create_shell_breps(
+                    self.md, shell_layers.centreline, stage=self.stage
+                )
 
         # 4. Extrusions (lightweight Extrusion objects)
         if create_extrusions:
@@ -176,84 +196,95 @@ class RhinoImporter:
                 )
 
         # 5. Meshed geometry (areas sub‑divided, frames split)
+        # NOTE: the Preprocessor is the only sanctioned topology mutator
+        # (§3.1/.clinerules).  The legacy in-importer meshing below is kept
+        # only for raw ``SAPModelData`` inputs; stage-file / MeshModel
+        # sources are imported directly.
         if create_meshed:
-            if verbose:
-                print("Pre-processing meshed model...")
-
-            try:
-                from ..model.geometry import (
-                    mesh_area_elements,
-                    split_areas_at_frame_edges,
-                    split_elements,
-                )
-
-                md_mesh = copy.deepcopy(self.md)
-
-                max_tag = 0
-                for nd in md_mesh.nodes.values():
-                    max_tag = max(max_tag, nd.node_tag)
-                next_tag = max_tag + 1
-
-                dist_loads = getattr(md_mesh, "frame_dist_loads", [])
-                frame_auto_mesh = getattr(md_mesh, "frame_auto_mesh", {})
-                area_mesh = getattr(md_mesh, "area_mesh", {})
-
-                md_mesh.area_elements, md_mesh.area_assignments, md_mesh.nodes, next_tag = (
-                    mesh_area_elements(
-                        md_mesh.area_elements,
-                        md_mesh.area_assignments,
-                        md_mesh.nodes,
-                        area_mesh,
-                        next_tag=next_tag,
-                    )
-                )
-
-                md_mesh.frame_elements, md_mesh.frame_assignments, _ = split_elements(
-                    md_mesh.nodes,
-                    md_mesh.frame_elements,
-                    md_mesh.frame_assignments,
-                    dist_loads,
-                    frame_auto_mesh,
-                )
-
-                # Remap frame_end_offsets to split children
-                if hasattr(md_mesh, "frame_end_offsets") and md_mesh.frame_end_offsets:
-                    new_offsets = {}
-                    for eid, elem in md_mesh.frame_elements.items():
-                        if getattr(elem, "inactive", False):
-                            continue
-                        parent = getattr(elem, "parent_id", None)
-                        if parent and parent in md_mesh.frame_end_offsets:
-                            parent_elem = md_mesh.frame_elements.get(parent)
-                            if parent_elem and getattr(parent_elem, "child_ids", None):
-                                children = parent_elem.child_ids
-                                orig = md_mesh.frame_end_offsets[parent]
-                                if eid == children[0] or eid == children[-1]:
-                                    new_offsets[eid] = orig
-                        elif eid in md_mesh.frame_end_offsets:
-                            new_offsets[eid] = md_mesh.frame_end_offsets[eid]
-                    md_mesh.frame_end_offsets = new_offsets
-
-                md_mesh.area_elements, md_mesh.area_assignments, md_mesh.nodes, next_tag = (
-                    split_areas_at_frame_edges(
-                        md_mesh.area_elements,
-                        md_mesh.area_assignments,
-                        md_mesh.nodes,
-                        md_mesh.frame_elements,
-                        next_tag=next_tag,
-                    )
-                )
-
+            if self._raw_sap_model is None:
                 if verbose:
                     print(
-                        f"  Meshed: {len(md_mesh.area_elements)} shells, "
-                        f"{len(md_mesh.frame_elements)} frames"
+                        "  create_meshed ignored: the source is already a MeshModel / "
+                        "stage file. Import that stage directly (e.g. stage='mesh')."
+                    )
+            else:
+                if verbose:
+                    print("Pre-processing meshed model...")
+
+                try:
+                    from ..model.geometry import (
+                        mesh_area_elements,
+                        split_areas_at_frame_edges,
+                        split_elements,
                     )
 
-            except Exception as exc:
-                if verbose:
-                    print(f"  Meshing skipped ({exc})")
-                md_mesh = None
+                    md_mesh = copy.deepcopy(self._raw_sap_model)
+
+                    max_tag = 0
+                    for nd in md_mesh.nodes.values():
+                        max_tag = max(max_tag, nd.node_tag)
+                    next_tag = max_tag + 1
+
+                    dist_loads = getattr(md_mesh, "frame_dist_loads", [])
+                    frame_auto_mesh = getattr(md_mesh, "frame_auto_mesh", {})
+                    area_mesh = getattr(md_mesh, "area_mesh", {})
+
+                    md_mesh.area_elements, md_mesh.area_assignments, md_mesh.nodes, next_tag = (
+                        mesh_area_elements(
+                            md_mesh.area_elements,
+                            md_mesh.area_assignments,
+                            md_mesh.nodes,
+                            area_mesh,
+                            next_tag=next_tag,
+                        )
+                    )
+
+                    md_mesh.frame_elements, md_mesh.frame_assignments, _ = split_elements(
+                        md_mesh.nodes,
+                        md_mesh.frame_elements,
+                        md_mesh.frame_assignments,
+                        dist_loads,
+                        frame_auto_mesh,
+                    )
+
+                    # Remap frame_end_offsets to split children
+                    if hasattr(md_mesh, "frame_end_offsets") and md_mesh.frame_end_offsets:
+                        new_offsets = {}
+                        for eid, elem in md_mesh.frame_elements.items():
+                            if getattr(elem, "inactive", False):
+                                continue
+                            parent = getattr(elem, "parent_id", None)
+                            if parent and parent in md_mesh.frame_end_offsets:
+                                parent_elem = md_mesh.frame_elements.get(parent)
+                                if parent_elem and getattr(parent_elem, "child_ids", None):
+                                    children = parent_elem.child_ids
+                                    orig = md_mesh.frame_end_offsets[parent]
+                                    if eid == children[0] or eid == children[-1]:
+                                        new_offsets[eid] = orig
+                            elif eid in md_mesh.frame_end_offsets:
+                                new_offsets[eid] = md_mesh.frame_end_offsets[eid]
+                        md_mesh.frame_end_offsets = new_offsets
+
+                    md_mesh.area_elements, md_mesh.area_assignments, md_mesh.nodes, next_tag = (
+                        split_areas_at_frame_edges(
+                            md_mesh.area_elements,
+                            md_mesh.area_assignments,
+                            md_mesh.nodes,
+                            md_mesh.frame_elements,
+                            next_tag=next_tag,
+                        )
+                    )
+
+                    if verbose:
+                        print(
+                            f"  Meshed: {len(md_mesh.area_elements)} shells, "
+                            f"{len(md_mesh.frame_elements)} frames"
+                        )
+
+                except Exception as exc:
+                    if verbose:
+                        print(f"  Meshing skipped ({exc})")
+                    md_mesh = None
 
             if md_mesh is not None:
                 meshed_root = create_root_layer(name="Meshed", parent=root_idx)

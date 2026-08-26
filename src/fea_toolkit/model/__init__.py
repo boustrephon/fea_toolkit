@@ -114,6 +114,7 @@ from .sap_data import (
 )
 from .sections import SectionLibrary
 from .selection import Selection
+from .source_resolver import ResolvedSource, resolve_model_source
 from .storey_response import (
     StoreyRigidBody,
     build_storey_table,
@@ -188,6 +189,8 @@ __all__ = [
     "Node",
     "PipeSection",
     "RectangularSection",
+    # Source resolution
+    "ResolvedSource",
     "Restraint",
     # Core model
     "SAPModelData",
@@ -247,6 +250,8 @@ __all__ = [
     "pushover_to_adrs",
     "register_bilinearize_method",
     "remove_floating_nodes",
+    # Source resolution
+    "resolve_model_source",
     "rigid_body_fit",
     "split_areas_at_frame_edges",
     # Geometry
