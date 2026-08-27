@@ -5,6 +5,8 @@ Aligns with opstool's ODB (NetCDF) dimension naming so NPZ ↔ ODB conversion
 is a direct rename.  See ``docs/results_schema.md`` for the full specification.
 """
 
+import typing as t
+
 import numpy as np
 
 # ── File schema version ──────────────────────────────────────────────
@@ -185,17 +187,218 @@ def make_pushover_key(direction: str, template: str) -> str:
     return template.replace("{direction}", direction)
 
 
+def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
+    """Validate a flat array mapping against the schema.
+
+    This is the shared validation core behind :func:`validate_npz` — it
+    accepts any ``{key: np.ndarray}`` mapping (a loaded NPZ file, or a
+    plain dict in tests / in-process consumers).
+
+    Returns a list of error/warning messages (empty = fully valid).
+    """
+    messages: list[str] = []
+
+    # ── Resolve dimensions from present arrays ──────────────────────
+    dims: dict[str, int] = {}
+    tag_arr = data.get("node_tag")
+    if tag_arr is not None:
+        dims["N_node"] = len(tag_arr)
+    for key in ("frame_eid", "frame_sap_id"):
+        arr = data.get(key)
+        if arr is not None:
+            dims["N_frame"] = len(arr)
+            break
+    for key in ("shell_eid", "shell_sap_id"):
+        arr = data.get(key)
+        if arr is not None:
+            dims["N_shell"] = len(arr)
+            break
+    for key in ("modal/period", "modal/frequency"):
+        arr = data.get(key)
+        if arr is not None:
+            dims["N_mode"] = len(arr)
+            break
+    at = data.get("analysis_types")
+    if at is not None:
+        dims["N_analysis"] = len(at)
+
+    def _check_shape(arr_name: str, arr, shape_desc: str, dtype_str: str):
+        """Validate shape and dtype of a single array."""
+        if arr is None:
+            return
+        expected = shape_desc.strip()
+        actual_shape = arr.shape
+        if expected:
+            parts = expected.split()
+            resolved_parts = []
+            unresolved: list[str] = []
+            for p in parts:
+                part = p.strip()
+                if part.startswith("N_") and part in dims:
+                    resolved_parts.append(str(dims[part]))
+                elif part.startswith("N_"):
+                    unresolved.append(part)
+                else:
+                    resolved_parts.append(part)
+            for u in unresolved:
+                messages.append(f"  Missing dimension {u} for array {arr_name}")
+            if unresolved:
+                return
+            expected_shape = tuple(int(x) for x in resolved_parts if x)
+            # An expected shape of (0,) is tolerated only when the
+            # actual shape is exactly (0,) as well — any non-empty
+            # one-dimensional actual array (e.g. (5,)) is still a
+            # mismatch.  All other shape combinations use exact
+            # tuple comparison.
+            if (
+                not (expected_shape == (0,) and actual_shape == (0,))
+                and expected_shape != actual_shape
+            ):
+                messages.append(
+                    f"  Shape mismatch for {arr_name}: "
+                    f"expected {expected_shape}, got {actual_shape}"
+                )
+
+    # ── Check geometry ─────────────────────────────────────────────
+    optional_geo = {
+        "frame_t_start",
+        "frame_t_end",
+        "frame_parent_node_i",
+        "frame_parent_node_j",
+        "shell_parent_sap_id",
+        # Ragged shell form is accepted as an alternative to the
+        # fixed-quad ``shell_node_1..4`` layout (see
+        # ``io/_serial.py::collect_geometry_arrays``).
+        "shell_elem_tag",
+        "shell_thickness",
+        "shell_node_ids_flat",
+        "shell_node_offsets",
+    }
+    # Ragged connectivity replaces the fixed-quad schema — require the
+    # flat/offsets pair when present and skip the quad arrays.
+    if data.get("shell_node_ids_flat") is not None:
+        if data.get("shell_node_offsets") is None or len(data["shell_node_offsets"]) == 0:
+            messages.append("Missing geometry array: shell_node_offsets")
+        optional_geo |= {"shell_node_1", "shell_node_2", "shell_node_3", "shell_node_4"}
+    for key, (shape_desc, dtype_str) in GEOMETRY_ARRAYS.items():
+        arr = data.get(key)
+        if arr is None:
+            if key not in optional_geo:
+                messages.append(f"Missing geometry array: {key}")
+            continue
+        _check_shape(key, arr, shape_desc, dtype_str)
+
+    # ── Check analysis types discriminator ─────────────────────────
+    analysis_types = data.get("analysis_types")
+    if analysis_types is None:
+        messages.append("Missing metadata array: analysis_types")
+    else:
+        types = list(analysis_types)
+        if "static" in types:
+            case_labels = data.get("static_case_labels")
+            if case_labels is None:
+                messages.append(
+                    "analysis_types declares 'static' but static_case_labels is missing"
+                )
+            else:
+                for case in case_labels:
+                    for arr_name in STATIC_ARRAYS:
+                        key = make_static_key(str(case), arr_name)
+                        arr = data.get(key)
+                        if arr is None:
+                            messages.append(f"Missing static array: {key}")
+                        else:
+                            _check_shape(key, arr, "N_frame", "float")
+        if "modal" in types:
+            # modal/node_tag is an optional row-alignment convenience
+            # (added 2026-08 for the NPZ mode-plotting path) — legacy
+            # modal NPZ files predating it must still validate.
+            _optional_modal = {"modal/node_tag"}
+            for key, (shape_desc, dtype_str) in MODAL_ARRAYS.items():
+                arr = data.get(key)
+                if arr is None:
+                    if key not in _optional_modal:
+                        messages.append(f"Missing modal array: {key}")
+                    continue
+                _check_shape(key, arr, shape_desc, dtype_str)
+        if "rs" in types:
+            for key, (shape_desc, dtype_str) in RS_ARRAYS.items():
+                arr = data.get(key)
+                if arr is None:
+                    messages.append(f"Missing RS array: {key}")
+                    continue
+                _check_shape(key, arr, shape_desc, dtype_str)
+        if "pushover" in types:
+            # Detect directions from arrays present
+            directions: set[str] = set()
+            for key in data:
+                if key.startswith("pushover/") and "/step" in key:
+                    parts = key.split("/")
+                    if len(parts) >= 2:
+                        directions.add(parts[1])
+            for direction in sorted(directions):
+                # ── Resolve N_step / N_recorded_* per direction ──
+                # Clear the shared dims first so each direction is
+                # validated only against its own arrays — stale dims
+                # from a previous direction must not leak through.
+                for dk in ("N_step", "N_recorded_frame", "N_recorded_shell"):
+                    dims.pop(dk, None)
+                step_arr = data.get(make_pushover_key(direction, "pushover/{direction}/step"))
+                if step_arr is not None:
+                    dims["N_step"] = len(step_arr)
+                frame_id_arr = data.get(
+                    make_pushover_key(direction, "pushover/{direction}/frame_sap_id")
+                )
+                if frame_id_arr is not None:
+                    dims["N_recorded_frame"] = len(frame_id_arr)
+                shell_id_arr = data.get(
+                    make_pushover_key(direction, "pushover/{direction}/shell_sap_id")
+                )
+                if shell_id_arr is not None:
+                    dims["N_recorded_shell"] = len(shell_id_arr)
+
+                # ── Required: global arrays ──
+                for template, (shape_desc, dtype_str) in PUSHOVER_GLOBAL_ARRAYS.items():
+                    key = make_pushover_key(direction, template)
+                    arr = data.get(key)
+                    if arr is None:
+                        messages.append(f"Missing pushover array: {key}")
+                        continue
+                    _check_shape(key, arr, shape_desc, dtype_str)
+
+                # ── Optional: node-disp arrays (only present when
+                #    displacement data was recorded — see has_disp in
+                #    ``_collect_pushover``) ──
+                for template, (shape_desc, dtype_str) in PUSHOVER_NODE_DISP_ARRAYS.items():
+                    key = make_pushover_key(direction, template)
+                    arr = data.get(key)
+                    if arr is None:
+                        continue  # not recorded for this model
+                    _check_shape(key, arr, shape_desc, dtype_str)
+
+                # ── Optional: frame + shell arrays ──
+                for schema_set in (PUSHOVER_FRAME_ARRAYS, PUSHOVER_SHELL_ARRAYS):
+                    for template, (shape_desc, dtype_str) in schema_set.items():
+                        key = make_pushover_key(direction, template)
+                        arr = data.get(key)
+                        if arr is None:
+                            continue  # not recorded for this model
+                        _check_shape(key, arr, shape_desc, dtype_str)
+
+    return messages
+
+
 def validate_npz(path: str) -> list[str]:
     """Validate an NPZ file against the schema.
 
-    Checks that required geometry and analysis arrays exist and that
+    Loads the archive and delegates to :func:`validate_arrays`, which
+    checks that required geometry and analysis arrays exist and that
     their shapes match the declared dimensions.  Dtype mismatches are
     reported as warnings (prefixed with ``[WARN]``) but do not block
     validation.
 
     Returns a list of error/warning messages (empty = fully valid).
     """
-    messages: list[str] = []
     data = None
     try:
         data = np.load(path, allow_pickle=False)
@@ -203,183 +406,9 @@ def validate_npz(path: str) -> list[str]:
         return [f"Cannot load: {exc}"]
 
     try:
-        # ── Resolve dimensions from present arrays ────────────────
-        dims: dict[str, int] = {}
-        tag_arr = data.get("node_tag")
-        if tag_arr is not None:
-            dims["N_node"] = len(tag_arr)
-        for key in ("frame_eid", "frame_sap_id"):
-            arr = data.get(key)
-            if arr is not None:
-                dims["N_frame"] = len(arr)
-                break
-        for key in ("shell_eid", "shell_sap_id"):
-            arr = data.get(key)
-            if arr is not None:
-                dims["N_shell"] = len(arr)
-                break
-        for key in ("modal/period", "modal/frequency"):
-            arr = data.get(key)
-            if arr is not None:
-                dims["N_mode"] = len(arr)
-                break
-        at = data.get("analysis_types")
-        if at is not None:
-            dims["N_analysis"] = len(at)
-
-        def _check_shape(arr_name: str, arr, shape_desc: str, dtype_str: str):
-            """Validate shape and dtype of a single array."""
-            if arr is None:
-                return
-            expected = shape_desc.strip()
-            actual_shape = arr.shape
-            if expected:
-                parts = expected.split()
-                resolved_parts = []
-                unresolved: list[str] = []
-                for p in parts:
-                    part = p.strip()
-                    if part.startswith("N_") and part in dims:
-                        resolved_parts.append(str(dims[part]))
-                    elif part.startswith("N_"):
-                        unresolved.append(part)
-                    else:
-                        resolved_parts.append(part)
-                for u in unresolved:
-                    messages.append(f"  Missing dimension {u} for array {arr_name}")
-                if unresolved:
-                    return
-                expected_shape = tuple(int(x) for x in resolved_parts if x)
-                # An expected shape of (0,) is tolerated only when the
-                # actual shape is exactly (0,) as well — any non-empty
-                # one-dimensional actual array (e.g. (5,)) is still a
-                # mismatch.  All other shape combinations use exact
-                # tuple comparison.
-                if (
-                    not (expected_shape == (0,) and actual_shape == (0,))
-                    and expected_shape != actual_shape
-                ):
-                    messages.append(
-                        f"  Shape mismatch for {arr_name}: "
-                        f"expected {expected_shape}, got {actual_shape}"
-                    )
-
-        # ── Check geometry ────────────────────────────────────────
-        optional_geo = {
-            "frame_t_start",
-            "frame_t_end",
-            "frame_parent_node_i",
-            "frame_parent_node_j",
-            "shell_parent_sap_id",
-        }
-        for key, (shape_desc, dtype_str) in GEOMETRY_ARRAYS.items():
-            arr = data.get(key)
-            if arr is None:
-                if key not in optional_geo:
-                    messages.append(f"Missing geometry array: {key}")
-                continue
-            _check_shape(key, arr, shape_desc, dtype_str)
-
-        # ── Check analysis types discriminator ────────────────────
-        analysis_types = data.get("analysis_types")
-        if analysis_types is None:
-            messages.append("Missing metadata array: analysis_types")
-        else:
-            types = list(analysis_types)
-            if "static" in types:
-                case_labels = data.get("static_case_labels")
-                if case_labels is None:
-                    messages.append(
-                        "analysis_types declares 'static' but static_case_labels is missing"
-                    )
-                else:
-                    for case in case_labels:
-                        for arr_name in STATIC_ARRAYS:
-                            key = make_static_key(str(case), arr_name)
-                            arr = data.get(key)
-                            if arr is None:
-                                messages.append(f"Missing static array: {key}")
-                            else:
-                                _check_shape(key, arr, "N_frame", "float")
-            if "modal" in types:
-                # modal/node_tag is an optional row-alignment convenience
-                # (added 2026-08 for the NPZ mode-plotting path) — legacy
-                # modal NPZ files predating it must still validate.
-                _optional_modal = {"modal/node_tag"}
-                for key, (shape_desc, dtype_str) in MODAL_ARRAYS.items():
-                    arr = data.get(key)
-                    if arr is None:
-                        if key not in _optional_modal:
-                            messages.append(f"Missing modal array: {key}")
-                        continue
-                    _check_shape(key, arr, shape_desc, dtype_str)
-            if "rs" in types:
-                for key, (shape_desc, dtype_str) in RS_ARRAYS.items():
-                    arr = data.get(key)
-                    if arr is None:
-                        messages.append(f"Missing RS array: {key}")
-                        continue
-                    _check_shape(key, arr, shape_desc, dtype_str)
-            if "pushover" in types:
-                # Detect directions from arrays present
-                directions: set[str] = set()
-                for key in data:
-                    if key.startswith("pushover/") and "/step" in key:
-                        parts = key.split("/")
-                        if len(parts) >= 2:
-                            directions.add(parts[1])
-                for direction in sorted(directions):
-                    # ── Resolve N_step / N_recorded_* per direction ──
-                    # Clear the shared dims first so each direction is
-                    # validated only against its own arrays — stale dims
-                    # from a previous direction must not leak through.
-                    for dk in ("N_step", "N_recorded_frame", "N_recorded_shell"):
-                        dims.pop(dk, None)
-                    step_arr = data.get(make_pushover_key(direction, "pushover/{direction}/step"))
-                    if step_arr is not None:
-                        dims["N_step"] = len(step_arr)
-                    frame_id_arr = data.get(
-                        make_pushover_key(direction, "pushover/{direction}/frame_sap_id")
-                    )
-                    if frame_id_arr is not None:
-                        dims["N_recorded_frame"] = len(frame_id_arr)
-                    shell_id_arr = data.get(
-                        make_pushover_key(direction, "pushover/{direction}/shell_sap_id")
-                    )
-                    if shell_id_arr is not None:
-                        dims["N_recorded_shell"] = len(shell_id_arr)
-
-                    # ── Required: global arrays ──
-                    for template, (shape_desc, dtype_str) in PUSHOVER_GLOBAL_ARRAYS.items():
-                        key = make_pushover_key(direction, template)
-                        arr = data.get(key)
-                        if arr is None:
-                            messages.append(f"Missing pushover array: {key}")
-                            continue
-                        _check_shape(key, arr, shape_desc, dtype_str)
-
-                    # ── Optional: node-disp arrays (only present when
-                    #    displacement data was recorded — see has_disp in
-                    #    ``_collect_pushover``) ──
-                    for template, (shape_desc, dtype_str) in PUSHOVER_NODE_DISP_ARRAYS.items():
-                        key = make_pushover_key(direction, template)
-                        arr = data.get(key)
-                        if arr is None:
-                            continue  # not recorded for this model
-                        _check_shape(key, arr, shape_desc, dtype_str)
-
-                    # ── Optional: frame + shell arrays ──
-                    for schema_set in (PUSHOVER_FRAME_ARRAYS, PUSHOVER_SHELL_ARRAYS):
-                        for template, (shape_desc, dtype_str) in schema_set.items():
-                            key = make_pushover_key(direction, template)
-                            arr = data.get(key)
-                            if arr is None:
-                                continue  # not recorded for this model
-                            _check_shape(key, arr, shape_desc, dtype_str)
-
+        return validate_arrays(data)
     except Exception as exc:
-        messages.append(f"Error accessing NPZ data: {exc}")
+        return [f"Error accessing NPZ data: {exc}"]
     finally:
         if data is not None:
             data.close()
-    return messages

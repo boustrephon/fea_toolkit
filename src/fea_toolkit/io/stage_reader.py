@@ -43,7 +43,7 @@ def _read_flat(path: str) -> dict[str, np.ndarray]:
 def _get_stage_names(data: dict[str, np.ndarray]) -> list[str]:
     """Return the stage names present in a loaded file, in pipeline order."""
     names = [k.split("/")[1] for k in data if k.startswith(STAGE_PREFIX) and k.count("/") >= 2]
-    from .stage_writer import STAGE_NAMES
+    from ._serial import STAGE_NAMES
 
     return [n for n in STAGE_NAMES if n in names]
 

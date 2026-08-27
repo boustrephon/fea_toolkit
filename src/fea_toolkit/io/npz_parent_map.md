@@ -56,9 +56,7 @@ parent_map = npz_build_parent_map(data)
 When colouring original (un-split) geometry from NPZ results:
 
 ```python
-from fea_toolkit.io.npz_reader import (
-    read_results_npz, npz_build_child_map
-)
+from fea_toolkit.io.npz_reader import read_results_npz, npz_build_child_map
 
 data = read_results_npz("results.npz")
 child_map = npz_build_child_map(data)

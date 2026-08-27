@@ -88,9 +88,9 @@ Use helpers from `npz_reader.py`:
 
 ```python
 from fea_toolkit.io.npz_reader import (
-    npz_build_id_tag_map,     # {"1": 1, "2": 2, ...}
-    npz_build_child_map,      # {"1": ["1-0", "1-1"], ...}
-    npz_build_parent_map,     # {"1-0": "1", "1-1": "1", ...}
+    npz_build_id_tag_map,  # {"1": 1, "2": 2, ...}
+    npz_build_child_map,  # {"1": ["1-0", "1-1"], ...}
+    npz_build_parent_map,  # {"1-0": "1", "1-1": "1", ...}
 )
 ```
 
@@ -135,8 +135,7 @@ modal = builder.run_modal_analysis(num_modes=6)
 shapes = builder.extract_mode_shapes(6)
 
 # 3. Save to unified NPZ
-write_results_npz("results.npz", md, static_results=static,
-                   modal_result=modal, mode_shapes=shapes)
+write_results_npz("results.npz", md, static_results=static, modal_result=modal, mode_shapes=shapes)
 
 # 4. Load and visualise
 data = read_results_npz("results.npz")
@@ -146,9 +145,9 @@ data = read_results("results.h5")
 
 # Or explicitly
 from fea_toolkit.io.npz_reader import read_results_hdf5
+
 data = read_results_hdf5("results.h5")
-points, lines, disp, sap_ids = npz_to_pyvista_frame_mesh(
-    data, deformed_case="DEAD", scale=20.0)
+points, lines, disp, sap_ids = npz_to_pyvista_frame_mesh(data, deformed_case="DEAD", scale=20.0)
 ```
 
 See also the `local/admin_linear.py` script for a complete workflow

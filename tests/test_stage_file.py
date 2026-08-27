@@ -183,6 +183,55 @@ class TestStageFileValidation:
         with pytest.raises(ValueError, match="at least one"):
             write_model_stages(str(tmp_path / "x.npz"))
 
+    def test_validate_arrays_accepts_ragged_and_fixed_shells(self):
+        """The schema validator accepts both fixed-quad and ragged shell layouts."""
+        import numpy as np
+
+        from fea_toolkit.io.results_schema import validate_arrays
+
+        base = {
+            "node_tag": np.array([1, 2, 3, 4], dtype=int),
+            "node_sap_id": np.array(["1", "2", "3", "4"], dtype=str),
+            "node_x": np.zeros(4),
+            "node_y": np.zeros(4),
+            "node_z": np.zeros(4),
+            "frame_eid": np.array([0], dtype=int),
+            "frame_sap_id": np.array(["1"], dtype=str),
+            "frame_parent_sap_id": np.array([""], dtype=str),
+            "frame_sec_name": np.array(["B1"], dtype=str),
+            "frame_node_i": np.array([1], dtype=int),
+            "frame_node_j": np.array([2], dtype=int),
+            "shell_eid": np.array([0], dtype=int),
+            "shell_sap_id": np.array(["S1"], dtype=str),
+            "shell_parent_sap_id": np.array([""], dtype=str),
+            "shell_sec_name": np.array(["ST1"], dtype=str),
+            "analysis_types": np.array(["geometry"], dtype=str),
+        }
+
+        # Fixed-quad layout validates cleanly.
+        fixed = dict(base)
+        fixed.update(
+            shell_node_1=np.array([1], dtype=int),
+            shell_node_2=np.array([2], dtype=int),
+            shell_node_3=np.array([3], dtype=int),
+            shell_node_4=np.array([4], dtype=int),
+        )
+        assert validate_arrays(fixed) == []
+
+        # Ragged layout validates cleanly and does not require the quads.
+        ragged = dict(base)
+        ragged.update(
+            shell_node_ids_flat=np.array([1, 2, 3, 4], dtype=int),
+            shell_node_offsets=np.array([0, 4], dtype=int),
+        )
+        assert validate_arrays(ragged) == []
+
+        # Ragged without the offsets partner is reported.
+        bad = dict(ragged)
+        bad["shell_node_offsets"] = np.array([], dtype=int)
+        msgs = validate_arrays(bad)
+        assert any("shell_node_offsets" in m for m in msgs)
+
     def test_bad_format(self, tmp_path):
         with pytest.raises(ValueError, match="Unsupported format"):
             write_model_stages(str(tmp_path / "x.json"), sap=make_sample_model(), fmt="json")
