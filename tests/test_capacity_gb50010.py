@@ -230,6 +230,24 @@ def _beam_section_for_units(units):
     )
 
 
+class TestCapacityUnitLabels:
+    """Unit labels in capacity results go through the canonical normaliser."""
+
+    def test_force_unit_label_normalises_sap_short_form(self):
+        """``"KN"`` (SAP2000 short form) renders as ``"kN"`` in capacity results."""
+        from fea_toolkit.capacity._common import force_unit_label
+
+        assert force_unit_label({"F": "KN", "L": "m", "T": "C"}) == "kN"
+        assert force_unit_label({"F": "N", "L": "m", "T": "C"}) == "N"
+        assert force_unit_label({"F": "kilonewton", "L": "metre"}) == "kN"
+
+    def test_force_length_unit_label_uses_length_label(self):
+        from fea_toolkit.capacity._common import force_length_unit_label
+
+        assert force_length_unit_label({"F": "KN", "L": "M"}) == "kN·m"
+        assert force_length_unit_label({"F": "kn", "L": "mm"}) == "kN·mm"
+
+
 class TestUnitMatrixScaling:
     """Capacities must scale exactly with the model's force/length units.
 

@@ -9,16 +9,11 @@ The reverted utils.py returns factors where length_scale_factor values
 are model-unit-per-SI-metre (0.001 for mm, 0.0254 for in).
 """
 
-import importlib.util
 from typing import ClassVar
 
 import pytest
 
-# Load module directly to avoid package-level pandas dependency
-_spec = importlib.util.spec_from_file_location("utils", "src/fea_toolkit/utils.py")
-utils = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(utils)
-
+from fea_toolkit import utils
 from fea_toolkit.model.sap_data import Material, SAPModelData
 
 
