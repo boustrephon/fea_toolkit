@@ -10,6 +10,7 @@ import inspect
 
 from fea_toolkit.report import (
     _DEFAULT_CONFIG,
+    _config_differences,
     _merge_report_config,
     generate_report,
 )
@@ -113,3 +114,72 @@ class TestGenerateReportSignature:
         assert sig.parameters["mesh_model"].default is None
         assert sig.parameters["config"].default is None
         assert sig.parameters["out_dir"].default is None
+
+
+class TestConfigDifferences:
+    """``_config_differences`` flags analysis-relevant config changes only."""
+
+    def test_identical_configs_no_diffs(self):
+        cfg = {"spectrum": {"intensity": 8}, "pushover": {"num_steps": 50}}
+        assert _config_differences(cfg, cfg) == []
+
+    def test_spectrum_change_reported(self):
+        diffs = _config_differences({"spectrum": {"intensity": 8}}, {"spectrum": {"intensity": 7}})
+        assert diffs == ["spectrum.intensity: 8 → 7"]
+
+    def test_nested_path_reported(self):
+        diffs = _config_differences(
+            {"pushover": {"spectrum": {"level": "frequent"}}},
+            {"pushover": {"spectrum": {"level": "rare"}}},
+        )
+        assert diffs == ["pushover.spectrum.level: 'frequent' → 'rare'"]
+
+    def test_inert_paths_ignored(self):
+        cached = {"general": {"verbose": True, "force_recompute": False}, "spectrum": {}}
+        current = {"general": {"verbose": False, "force_recompute": True}, "spectrum": {}}
+        assert _config_differences(cached, current) == []
+
+    def test_key_added_reported_as_absent(self):
+        assert _config_differences({}, {"linear": {"run": True}}) == ["linear.run: <absent> → True"]
+
+    def test_key_removed_reported_as_absent(self):
+        assert _config_differences({"linear": {"run": True}}, {}) == ["linear.run: True → <absent>"]
+
+    def test_sibling_change_keeps_untouched_paths_quiet(self):
+        cached = {"spectrum": {"intensity": 8, "damping": 0.03}}
+        current = {"spectrum": {"intensity": 8, "damping": 0.05}}
+        assert _config_differences(cached, current) == ["spectrum.damping: 0.03 → 0.05"]
+
+    def test_absent_vs_none_is_unset(self):
+        # deep_merge drops None overrides, so a stored config legitimately
+        # lacks keys that the fresh merge carries as None.  Not a real diff.
+        assert _config_differences({}, {"loads": {"wind_x": None}}) == []
+        assert _config_differences({"loads": {"wind_x": 1.0}}, {"loads": {"wind_x": None}}) == [
+            "loads.wind_x: 1.0 → None"
+        ]
+
+    def test_none_vs_empty_dict_is_unset(self):
+        # auto-detected gravity is stored as {} while the fresh merge shows
+        # the None default — both mean "no explicit value".
+        assert _config_differences({"loads": {"gravity": {}}}, {"loads": {"gravity": None}}) == []
+        assert _config_differences(
+            {"loads": {"gravity": {"DEAD": 1.0}}}, {"loads": {"gravity": {}}}
+        ) == ["loads.gravity.DEAD: 1.0 → <absent>"]
+
+    def test_stored_vs_fresh_loads_no_noise(self):
+        # Regression: the exact shape seen when a stored config (post-run,
+        # post deep_merge None-drop) is compared with a fresh merge.
+        stored = {
+            "loads": {"auto_detect": True, "gravity": {}},
+            "pushover": {"brace_type": "truss"},
+        }
+        fresh = {
+            "loads": {
+                "auto_detect": True,
+                "gravity": None,
+                "wind_x": None,
+                "wind_y": None,
+            },
+            "pushover": {"brace_type": "truss", "brace_sections": None},
+        }
+        assert _config_differences(stored, fresh) == []

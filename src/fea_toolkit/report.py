@@ -29,9 +29,29 @@ Typical usage::
 import copy
 import pickle
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError:  # pragma: no cover — pandas is optional (Rhino 8 CPython)
+
+    class _MissingPandas:
+        """Raise a clear error when report generation needs pandas.
+
+        pandas is not a required dependency of the toolkit (see
+        ``pyproject.toml`` core deps) and is absent from Rhino 8's
+        bundled CPython.  The module must still import so that
+        ``import fea_toolkit`` works without it; only actually calling
+        :func:`generate_report` raises.
+        """
+
+        def __getattr__(self, _name: str):
+            raise RuntimeError(
+                "generate_report requires pandas, which is not "
+                "installed in this Python environment (pip install pandas)."
+            )
+
+    pd = _MissingPandas()  # type: ignore[assignment]
 
 from fea_toolkit.analysis import (
     run_modal_analysis,
@@ -115,6 +135,57 @@ _DEFAULT_CONFIG: dict = {
         "pushover": True,  # per-step frame/shell/node results (recording)
     },
 }
+
+
+# Config paths that affect no analysis number, table value or plot, so a
+# difference in them alone must not mark a cache stale.
+_CACHE_INERT_CONFIG_PATHS = frozenset(
+    {"general.verbose", "general.force_recompute", "general.out_dir", "analysis_log"}
+)
+
+
+def _config_differences(cached: Any, current: Any, _path: str = "") -> list:
+    """Return dotted paths of analysis-relevant differences between two configs.
+
+    Walks *cached* and *current* recursively and reports any value change at a
+    path not listed in :data:`_CACHE_INERT_CONFIG_PATHS`.  Missing keys are
+    reported as ``<absent>`` on either side.  The ``deep_merge`` contract that
+    feeds this function drops ``None`` overrides, so ``None``, an empty dict
+    and an absent key are all treated as equivalent ``unset`` values.
+
+    Args:
+        cached: Configuration recorded in the results cache
+            (``results["config"]``).
+        current: Configuration the current run is using.
+        _path: Internal — dotted path of the current recursion point.
+
+    Returns:
+        Sorted list of ``"path: cached_value → current_value"`` descriptions.
+    """
+
+    def _is_unset(v: Any) -> bool:
+        return v is None or v == {}
+
+    diffs: list = []
+    if isinstance(cached, dict) and isinstance(current, dict):
+        for key in sorted(set(cached) | set(current)):
+            sub = f"{_path}.{key}" if _path else key
+            if sub in _CACHE_INERT_CONFIG_PATHS:
+                continue
+            if key in cached and key in current:
+                diffs.extend(_config_differences(cached[key], current[key], sub))
+            elif key not in cached:
+                if isinstance(current[key], dict):
+                    diffs.extend(_config_differences({}, current[key], sub))
+                elif not _is_unset(current[key]):
+                    diffs.append(f"{sub}: <absent> → {current[key]!r}")
+            elif isinstance(cached[key], dict):
+                diffs.extend(_config_differences(cached[key], {}, sub))
+            elif not _is_unset(cached[key]):
+                diffs.append(f"{sub}: {cached[key]!r} → <absent>")
+    elif not (cached == current or (_is_unset(cached) and _is_unset(current))):
+        diffs.append(f"{_path}: {cached!r} → {current!r}")
+    return diffs
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -249,10 +320,34 @@ def generate_report(
             log.info("cache", "reusing cached results")
         with open(cache_path, "rb") as f:
             cached = dict(pickle.load(f))
+        # A cache hit must be config-aware: warn when the cached results were
+        # computed with a different analysis configuration so a stale pickle
+        # can never silently stand in for a changed analysis.
+        cached_cfg = cached.get("config")
+        if isinstance(cached_cfg, dict):
+            diffs = _config_differences(cached_cfg, cfg)
+            if diffs:
+                print(
+                    f"WARNING: cached results at {cache_path} were computed with a "
+                    "different configuration; reusing them may be wrong — set "
+                    "general.force_recompute=True to regenerate."
+                )
+                for d in diffs[:20]:
+                    print(f"    - {d}")
+                if len(diffs) > 20:
+                    print(f"    - … and {len(diffs) - 20} more differences")
+                if log:
+                    log.warning("cache", f"config mismatch: {', '.join(diffs[:5])}")
         # A cache hit must not silently skip a requested export: if the
-        # previous run exported a file that is now missing, the cache is
-        # stale with respect to the deliverable.
-        if export_cfg.get("enabled") and cached.get("export_path"):
+        # previous run exported a file that is now missing — or never
+        # exported at all — the cache is stale w.r.t. the deliverable.
+        if export_cfg.get("enabled") and not cached.get("export_path"):
+            print(
+                "WARNING: export is enabled but the cached results contain no "
+                "export_path (cache predates the unified export) — set "
+                "general.force_recompute=True to generate the export file."
+            )
+        elif export_cfg.get("enabled") and cached.get("export_path"):
             ep = Path(cached["export_path"])
             if not ep.exists():
                 print(
