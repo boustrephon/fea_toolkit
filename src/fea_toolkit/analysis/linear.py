@@ -12,7 +12,28 @@ import math
 from typing import Optional
 
 import numpy as np
-import pandas as pd
+
+try:
+    import pandas as pd
+except ImportError:  # pragma: no cover — pandas is optional (Rhino 8 CPython)
+
+    class _MissingPandas:
+        """Raise a clear error when a linear-analysis helper needs pandas.
+
+        pandas is not a required dependency of the toolkit (see
+        ``pyproject.toml`` core deps) and is absent from Rhino 8's
+        bundled CPython.  The module must still import so that
+        ``import fea_toolkit.analysis`` works without it; only actually
+        calling a helper that needs a DataFrame raises.
+        """
+
+        def __getattr__(self, _name: str):
+            raise RuntimeError(
+                "linear analysis helpers require pandas, which is not "
+                "installed in this Python environment (pip install pandas)."
+            )
+
+    pd = _MissingPandas()  # type: ignore[assignment]
 
 from fea_toolkit.io.report import bounding_box
 from fea_toolkit.model.sap_data import SAPModelData, patterns_from_case
