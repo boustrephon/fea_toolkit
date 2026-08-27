@@ -406,6 +406,11 @@ Two optional subpackages provide mesh quality diagnostics and Gmsh-based
 constrained quadrilateral remeshing.  Neither is imported by the core
 workflow — they must be explicitly imported after a build.
 
+Report orchestration and the pandas summary/figure helpers are also
+optional: ``pip install fea_toolkit[report]``.  The rest of the toolkit
+imports cleanly without pandas (the report modules raise a clear
+``RuntimeError`` only when a pandas-dependent helper is actually called).
+
 ```python
 # Mesh quality checks (NumPy only — no extra install needed)
 from fea_toolkit.mesh import checks as mesh_check
@@ -951,9 +956,15 @@ plan.  In summary:
   `plot_npz_force_diagram()`, `plot_npz_moment_3d()`) are now a single
   unit-aware `plot_force_diagram()` dispatcher (detailed design →
   `docs/force_diagram_unification.md`); the legacy wrappers were removed
-  2026-08-24.  **Prerequisite** for the `viz.py` split.
-- **Split the large modules** — `opensees/analysis_builder.py` (~7.4k
-  lines), `plotting/viz.py` (~5.7k), `model/geometry.py` (~3.9k).
+  2026-08-24.
+- **Module splits (done 2026-08-27)** — `opensees/analysis_builder.py`
+  (previously ~7.4k lines) is now a 563-line facade over domain/runner
+  mixins; `plotting/viz.py` and `model/geometry.py` are pure re-export
+  facades over the split implementation modules; `utils.py` is a re-export
+  facade over `_unit_scaling.py`, `_loads_infer.py`, `_flags.py` and
+  `_cqc.py`; `plot_seismic_spectrum` moved to
+  `plotting/seismic_spectrum.py`; the IO writers share `io/_serial.py`;
+  `tests/test_model.py` (6.1k lines) was split into four mirror files.
 - **Pushover solver tuning (empirical pass)** + **CSM Gap-4 benchmark
   validation** + **shear-failure / post-peak modelling** — see
   `docs/deprecation_plan.md` §5–6 and the Tier-2 items in
