@@ -882,6 +882,40 @@ def tcl_materials_and_sections(
     return ""
 
 
+def _gravity_tcl_block(gravity_loads) -> list[str]:
+    """Emit the Step-A gravity-analysis Tcl block as a list of lines.
+
+    Shared by :func:`pushover_tcl` and :func:`dynamic_time_history_tcl`
+    (the two exporters that begin with a locked gravity stage): a plain
+    ``Pattern 1`` with nodal loads, a static gravity solve in 20
+    sub-steps, then ``loadConst -time 0.0`` to freeze the gravity state
+    before the lateral/transient stage.
+    """
+    lines: list[str] = []
+    if gravity_loads:
+        lines.append("")
+        lines.append("# ── Step A: Gravity analysis ──")
+        lines.append('pattern Plain 1 "Linear" {')
+        for nid, (fx, fy, fz) in gravity_loads.items():
+            lines.append(f"    load {nid} {fx:g} {fy:g} {fz:g} 0 0 0")
+        lines.append("}")
+        lines.extend(
+            [
+                "constraints Transformation",
+                "numberer RCM",
+                "system BandGeneral",
+                "test NormDispIncr 1.0e-3 20 0",
+                "algorithm Newton",
+                "integrator LoadControl 0.05",
+                "analysis Static",
+                "analyze 20",
+                "loadConst -time 0.0",
+                'puts "-> Gravity loads locked."',
+            ]
+        )
+    return lines
+
+
 def pushover_tcl(
     *,
     control_node: int,
@@ -935,27 +969,7 @@ def pushover_tcl(
     lines: list[str] = []
 
     # ── Step A: Gravity ──
-    if gravity_loads:
-        lines.append("")
-        lines.append("# ── Step A: Gravity analysis ──")
-        lines.append('pattern Plain 1 "Linear" {')
-        for nid, (fx, fy, fz) in gravity_loads.items():
-            lines.append(f"    load {nid} {fx:g} {fy:g} {fz:g} 0 0 0")
-        lines.append("}")
-        lines.extend(
-            [
-                "constraints Transformation",
-                "numberer RCM",
-                "system BandGeneral",
-                "test NormDispIncr 1.0e-3 20 0",
-                "algorithm Newton",
-                "integrator LoadControl 0.05",
-                "analysis Static",
-                "analyze 20",
-                "loadConst -time 0.0",
-                'puts "-> Gravity loads locked."',
-            ]
-        )
+    lines.extend(_gravity_tcl_block(gravity_loads))
 
     # ── Step B: Lateral pushover ──
     if lateral_loads:
@@ -1218,28 +1232,9 @@ def dynamic_time_history_tcl(
     lines: list[str] = []
 
     # ── Step A: Gravity ──
+    lines.extend(_gravity_tcl_block(gravity_loads))
     if gravity_loads:
-        lines.append("")
-        lines.append("# ── Step A: Gravity analysis ──")
-        lines.append('pattern Plain 1 "Linear" {')
-        for nid, (fx, fy, fz) in gravity_loads.items():
-            lines.append(f"    load {nid} {fx:g} {fy:g} {fz:g} 0 0 0")
-        lines.append("}")
-        lines.extend(
-            [
-                "constraints Transformation",
-                "numberer RCM",
-                "system BandGeneral",
-                "test NormDispIncr 1.0e-3 20 0",
-                "algorithm Newton",
-                "integrator LoadControl 0.05",
-                "analysis Static",
-                "analyze 20",
-                "loadConst -time 0.0",
-                'puts "-> Gravity loads locked."',
-                "flush stdout",
-            ]
-        )
+        lines.append("flush stdout")
 
     # ── Step B: Transient analysis ──
     lines.extend(
