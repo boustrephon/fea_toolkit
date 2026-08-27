@@ -113,8 +113,8 @@ RhinoImporter("model.h5", stage="mesh").run()
 `inactive` (split/meshed parent) elements — the imported mesh view now
 matches what is actually analysed.  Geometry objects carry `FEA_Stage`,
 `FEA_Kind`, `FEA_NodeTag` / `FEA_ElemTag` and `FEA_ParentID` attributes
-in addition to the existing `SAP_*` keys, so result colouring can filter
-by stage.
+in addition to the existing `SAP_*` keys, so that result colouring can 
+filter by stage.
 
 ## Performance notes
 
