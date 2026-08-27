@@ -42,6 +42,7 @@ builder = AnalysisBuilder(mesh, {}).build_domain()
 | Analysis | `from fea_toolkit.analysis import ...` | Analysis functions returning typed `AnalysisResult` (modal, static, RS, pushover, NLD) |
 | Capacity | `from fea_toolkit.capacity import ...` | Code-specified member capacities (GB 50010, ASCE 41) + DCR |
 | Model | `from fea_toolkit.model import ...` | Geometry, stories, checks, CSM |
+| Utilities | `from fea_toolkit.utils import ...` | Facade over `_unit_scaling`, `_loads_infer`, `_flags`, `_cqc` — units, load inference, CQC |
 
 ---
 

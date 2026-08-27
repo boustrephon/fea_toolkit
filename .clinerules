@@ -21,12 +21,26 @@ Each subpackage has a clear domain. Do not cross-contaminate:
 | Subpackage | Purpose |
 |---|---|
 | `model/` | Data models, dataclass hierarchies, geometry utilities. No OpenSees imports. |
-| `io/` | File I/O: parsing (`.s2k`, JSON), NPZ read/write, reporting. |
+| `io/` | File I/O: parsing (`.s2k`, JSON), NPZ read/write, reporting. Shared NPZ/H5 serialisation lives in `io/_serial.py`. |
 | `opensees/` | OpenSees domain construction and analysis execution. Imports `ops`. |
 | `analysis/` | Analysis orchestration (`manager.py`) and type-specific runners. |
 | `mesh/` | Mesh quality checks and Gmsh remeshing. Optional dependency. |
 | `plotting/` | PyVista/Matplotlib visualization. Backend-agnostic viewer via `renderers/`. |
 | `rhino/` | Rhino 8 geometry export, layers, colouring. |
+
+**Root-level modules** form a small third tier and are deliberate: `utils.py`
+is a **re-export facade** over the single-concern modules `_unit_scaling.py`
+(unit aliases, SI defaults, `*_scale_factor` / `*_to_si_factor`,
+`scale_material_dict`), `_loads_infer.py` (`deep_merge`, `infer_loads`,
+`build_gravity_patterns`, `pick_wind`), `_flags.py` (`compute_flag_parts`)
+and `_cqc.py` (`cqc_combine`, `sum_reactions_with_overturning`).
+`spectrum.py` holds `ResponseSpectrum` and the GB 50011 / IEC spectrum
+builders; `plot_seismic_spectrum` lives in `plotting/seismic_spectrum.py`
+(re-exported lazily). `report.py` orchestrates the config-driven report run.
+
+Keep the root facade contract: new callers should import from the
+single-concern module (e.g. `from fea_toolkit._unit_scaling import ...`) or
+from the facade — never add new logic to `utils.py` itself.
 
 ### 1.3 `local/` is private
 - `local/` is gitignored. It contains project-specific analysis scripts.
