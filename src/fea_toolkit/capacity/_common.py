@@ -24,7 +24,11 @@ model's force (or force × length) units.
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from ..utils import stress_scale_factor
+from ..utils import (
+    force_unit_label,  # re-exported canonical label (normalises "KN"→"kN")
+    length_unit_label,
+    stress_scale_factor,
+)
 
 
 @dataclass
@@ -74,14 +78,14 @@ def safe_float(value: Any) -> float:
         return 0.0
 
 
-def force_unit_label(units: Optional[dict]) -> str:
-    """Short label for the model's force unit (e.g. ``"kN"``)."""
-    return str((units or {}).get("F", "N"))
-
-
 def force_length_unit_label(units: Optional[dict]) -> str:
-    """Short label for the model's force × length unit (e.g. ``"kN·m"``)."""
-    return f"{force_unit_label(units)}·{(units or {}).get('L', 'm')}"
+    """Short label for the model's force × length unit (e.g. ``"kN·m"``).
+
+    The force part goes through :func:`fea_toolkit.utils.force_unit_label`
+    so SAP2000 short forms (``"KN"``) and full names (``"kilonewton"``) are
+    normalised to the canonical display label (``"kN"``).
+    """
+    return f"{force_unit_label(units)}·{length_unit_label(units)}"
 
 
 __all__ = [
