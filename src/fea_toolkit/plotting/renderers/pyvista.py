@@ -13,27 +13,6 @@ from .base import (
     ShellGeom,
 )
 
-# ── Colour palette for section-based colouring ────────────────────────
-# Matplotlib "tab10" palette, RGB in 0..1 range.
-_SECTION_PALETTE = [
-    (0.122, 0.467, 0.706),  # blue
-    (0.839, 0.153, 0.157),  # red
-    (0.173, 0.627, 0.173),  # green
-    (0.580, 0.404, 0.741),  # purple
-    (0.549, 0.337, 0.294),  # brown
-    (0.890, 0.467, 0.122),  # orange
-    (0.737, 0.741, 0.133),  # yellow-green
-    (0.094, 0.745, 0.765),  # cyan
-    (0.314, 0.314, 0.314),  # grey
-    (0.859, 0.373, 0.522),  # pink
-]
-
-
-def _section_color(sec_name: str, palette: list[tuple] = _SECTION_PALETTE) -> tuple:
-    """Deterministic colour for a section name."""
-    idx = hash(sec_name) % len(palette)
-    return palette[idx]
-
 
 def _unit_vec(v: np.ndarray) -> np.ndarray:
     n = np.linalg.norm(v)

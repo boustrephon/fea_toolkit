@@ -135,6 +135,88 @@ def _ratio_to_color(
         )
 
 
+def _add_color_legend(
+    plotter,
+    *,
+    title: str,
+    position_x: float,
+    position_y: float,
+    width: float,
+    height: float,
+    n_colors: int,
+    ramp: Any,
+) -> None:
+    """Attach a scalar bar / colour legend built from a ramp function.
+
+    Builds a :class:`pyvista.LookupTable` with ``n_values`` discrete steps
+    interpolating *ramp* over the normalised range [0, 1].  *ramp* is a
+    callable ``ramp(t) -> (r, g, b)`` with ``t`` in [0, 1] returning
+    floats in 0..1 — exactly the signature used by the legend helpers'
+    colour functions (e.g. :func:`_ratio_to_color`).
+
+    Internally uses ``pyvista.LookupTable`` with ``n_values`` and ``values``
+    attributes (not ``number_of_colors`` or ``table``, which were removed
+    in PyVista v0.44+).  The ``lookup_table`` kwarg to
+    ``plotter.add_scalar_bar()`` is also version-dependent — a
+    ``TypeError`` fallback omits it for older PyVista installations.
+
+    Args:
+        plotter: PyVista Plotter to add the legend to.
+        title: Title text above the scalar bar.
+        position_x, position_y: Normalised position of the scalar bar.
+        width, height: Normalised size of the scalar bar.
+        n_colors: Number of discrete colour steps in the lookup table
+            (sets ``LookupTable.n_values``).
+        ramp: Callable ``t -> (r, g, b)`` mapping normalised position
+            to an RGB triple (0..1 floats).
+    """
+    import numpy as np
+
+    try:
+        import pyvista as pv
+    except ImportError:
+        return
+
+    lut = pv.LookupTable()
+    lut.n_values = n_colors
+    lut.scalar_range = (0.0, 1.0)
+    colors = np.zeros((n_colors, 4), dtype=np.uint8)
+    for i in range(n_colors):
+        t = i / (n_colors - 1)
+        r, g, b = ramp(t)
+        colors[i] = (int(r * 255), int(g * 255), int(b * 255), 255)
+    lut.values = colors
+
+    try:
+        plotter.add_scalar_bar(
+            title=title,
+            position_x=position_x,
+            position_y=position_y,
+            width=width,
+            height=height,
+            lookup_table=lut,
+            title_font_size=10,
+            label_font_size=8,
+            bold=False,
+            italic=False,
+            shadow=False,
+        )
+    except TypeError:
+        # Older PyVista versions don't accept lookup_table as a kwarg
+        plotter.add_scalar_bar(
+            title=title,
+            position_x=position_x,
+            position_y=position_y,
+            width=width,
+            height=height,
+            title_font_size=10,
+            label_font_size=8,
+            bold=False,
+            italic=False,
+            shadow=False,
+        )
+
+
 def _add_hinge_color_legend(
     plotter,
     title: str = "Relative Moment Demand (peak-normalized)",
@@ -160,12 +242,6 @@ def _add_hinge_color_legend(
     :data:`_DEFAULT_HINGE_CMAP` — ``"plasma"``, which is perceptually
     uniform and colour-blind safe).
 
-    Internally uses ``pyvista.LookupTable`` with ``n_values`` and ``values``
-    attributes (not ``number_of_colors`` or ``table``, which were removed
-    in PyVista v0.44+).  The ``lookup_table`` kwarg to
-    ``plotter.add_scalar_bar()`` is also version-dependent — a
-    ``TypeError`` fallback omits it for older PyVista installations.
-
     Args:
         plotter: PyVista Plotter to add the legend to.
         title: Title text above the scalar bar.
@@ -175,62 +251,35 @@ def _add_hinge_color_legend(
             (sets ``LookupTable.n_values``).
         cmap_name: Matplotlib colormap name for the colour scale.
     """
-    import numpy as np
 
-    try:
-        import pyvista as pv
-    except ImportError:
-        return
-
-    # Build lookup table using same sampled-colormap logic as _ratio_to_color
-    lut = pv.LookupTable()
-    lut.n_values = n_colors
-    lut.scalar_range = (0.0, 1.0)
-    c0, c1, c2 = _sample_cmap([0.0, 0.5, 1.0], cmap_name)
-    colors = np.zeros((n_colors, 4), dtype=np.uint8)
-    for i in range(n_colors):
-        t = i / (n_colors - 1)
+    def _hinge_ramp(t: float) -> tuple:
+        # Same three-point sampled-colormap logic as _ratio_to_color:
+        # the ramp passes through the cmap samples at 0.0 / 0.5 / 1.0.
+        c0, c1, c2 = _sample_cmap([0.0, 0.5, 1.0], cmap_name)
         if t < 0.5:
             s = t * 2.0
-            r = c0[0] + (c1[0] - c0[0]) * s
-            g = c0[1] + (c1[1] - c0[1]) * s
-            b = c0[2] + (c1[2] - c0[2]) * s
-        else:
-            s = (t - 0.5) * 2.0
-            r = c1[0] + (c2[0] - c1[0]) * s
-            g = c1[1] + (c2[1] - c1[1]) * s
-            b = c1[2] + (c2[2] - c1[2]) * s
-        colors[i] = (int(r * 255), int(g * 255), int(b * 255), 255)
-    lut.values = colors
+            return (
+                c0[0] + (c1[0] - c0[0]) * s,
+                c0[1] + (c1[1] - c0[1]) * s,
+                c0[2] + (c1[2] - c0[2]) * s,
+            )
+        s = (t - 0.5) * 2.0
+        return (
+            c1[0] + (c2[0] - c1[0]) * s,
+            c1[1] + (c2[1] - c1[1]) * s,
+            c1[2] + (c2[2] - c1[2]) * s,
+        )
 
-    try:
-        plotter.add_scalar_bar(
-            title=title,
-            position_x=position_x,
-            position_y=position_y,
-            width=width,
-            height=height,
-            lookup_table=lut,
-            title_font_size=10,
-            label_font_size=8,
-            bold=False,
-            italic=False,
-            shadow=False,
-        )
-    except TypeError:
-        # Older PyVista versions don't accept lookup_table as a kwarg
-        plotter.add_scalar_bar(
-            title=title,
-            position_x=position_x,
-            position_y=position_y,
-            width=width,
-            height=height,
-            title_font_size=10,
-            label_font_size=8,
-            bold=False,
-            italic=False,
-            shadow=False,
-        )
+    _add_color_legend(
+        plotter,
+        title=title,
+        position_x=position_x,
+        position_y=position_y,
+        width=width,
+        height=height,
+        n_colors=n_colors,
+        ramp=_hinge_ramp,
+    )
 
 
 def _add_shell_color_legend(
@@ -254,12 +303,6 @@ def _add_shell_color_legend(
     * **Red** (ratio ≥ 1.0) — damaged / crushed.
     * **Gray** — no data (NaN).
 
-    Internally uses ``pyvista.LookupTable`` with ``n_values`` and ``values``
-    attributes (not ``number_of_colors`` or ``table``, which were removed
-    in PyVista v0.44+).  The ``lookup_table`` kwarg to
-    ``plotter.add_scalar_bar()`` is also version-dependent — a
-    ``TypeError`` fallback omits it for older PyVista installations.
-
     Args:
         plotter: PyVista Plotter to add the legend to.
         title: Title text above the scalar bar.
@@ -268,57 +311,25 @@ def _add_shell_color_legend(
         n_colors: Number of discrete colour steps in the lookup table
             (sets ``LookupTable.n_values``).
     """
-    import numpy as np
 
-    try:
-        import pyvista as pv
-    except ImportError:
-        return
-
-    # Build lookup table using same green→yellow→red logic as _ratio_to_shell_color
-    lut = pv.LookupTable()
-    lut.n_values = n_colors
-    lut.scalar_range = (0.0, 1.0)
-    colors = np.zeros((n_colors, 4), dtype=np.uint8)
-    for i in range(n_colors):
-        t = i / (n_colors - 1)
+    def _shell_ramp(t: float) -> tuple:
+        # Same green→yellow→red logic as _ratio_to_shell_color.
         if t < 0.7:
             s = t / 0.7
-            r, g, b = s, 1.0, 0.0
-        else:
-            s = (t - 0.7) / 0.3
-            r, g, b = 1.0, 1.0 - s, 0.0
-        colors[i] = (int(r * 255), int(g * 255), int(b * 255), 255)
-    lut.values = colors
+            return (s, 1.0, 0.0)
+        s = (t - 0.7) / 0.3
+        return (1.0, 1.0 - s, 0.0)
 
-    try:
-        plotter.add_scalar_bar(
-            title=title,
-            position_x=position_x,
-            position_y=position_y,
-            width=width,
-            height=height,
-            lookup_table=lut,
-            title_font_size=10,
-            label_font_size=8,
-            bold=False,
-            italic=False,
-            shadow=False,
-        )
-    except TypeError:
-        # Older PyVista versions don't accept lookup_table as a kwarg
-        plotter.add_scalar_bar(
-            title=title,
-            position_x=position_x,
-            position_y=position_y,
-            width=width,
-            height=height,
-            title_font_size=10,
-            label_font_size=8,
-            bold=False,
-            italic=False,
-            shadow=False,
-        )
+    _add_color_legend(
+        plotter,
+        title=title,
+        position_x=position_x,
+        position_y=position_y,
+        width=width,
+        height=height,
+        n_colors=n_colors,
+        ramp=_shell_ramp,
+    )
 
 
 def _add_animation_timer(
