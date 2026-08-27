@@ -1,5 +1,9 @@
-def test_func():
-    print("Test is working")
+"""Interactive file-selection helpers (tkinter / macOS native dialogs).
+
+Used by standalone scripts to pick an SAP2000 file path without typing.
+``mac_file_chooser`` uses AppleScript; ``tkinter_file_chooser`` uses a
+plain Tk dialog and works on any platform with Tk.
+"""
 
 
 def tkinter_file_chooser(verbose=False):

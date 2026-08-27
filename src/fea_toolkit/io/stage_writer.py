@@ -37,117 +37,8 @@ import numpy as np
 
 from ..model.sap_data import SAPModelData
 from ..utils import force_unit_label, length_unit_label
+from ._serial import _write_h5, _write_npz, collect_geometry_arrays
 from .model_codec import model_to_json
-
-# ═══════════════════════════════════════════════════════════════════
-# Geometry array extraction (shared by both formats)
-# ═══════════════════════════════════════════════════════════════════
-
-#: Allowed stage names, in logical pipeline order.
-STAGE_NAMES = ("sap", "mesh")
-
-
-def collect_geometry_arrays(model: t.Any) -> dict[str, np.ndarray]:
-    """Extract lightweight geometry arrays from a ``SAPModelData`` or
-    ``MeshModel``.
-
-    Inactive (split/meshed parent) elements are skipped, matching
-    :func:`fea_toolkit.io.npz_writer._collect_geometry`.
-
-    Returns:
-        Dict with ``node_*``, ``frame_*`` and ``shell_*`` arrays.
-        Shell connectivity is **ragged** (``shell_node_ids_flat`` +
-        ``shell_node_offsets``) so triangles, quads and N-gons survive
-        without padding.
-    """
-    nodes = getattr(model, "nodes", {})
-    arrays: dict[str, np.ndarray] = {}
-
-    # ── Nodes ──────────────────────────────────────────────────────
-    n_tags, n_ids, n_x, n_y, n_z, n_special = [], [], [], [], [], []
-    for nid, nd in nodes.items():
-        n_tags.append(nd.node_tag)
-        n_ids.append(str(nid))
-        n_x.append(nd.x)
-        n_y.append(nd.y)
-        n_z.append(nd.z)
-        n_special.append(int(bool(getattr(nd, "is_special", False))))
-    arrays["node_tag"] = np.array(n_tags, dtype=int)
-    arrays["node_sap_id"] = np.array(n_ids, dtype=str)
-    arrays["node_x"] = np.array(n_x, dtype=float)
-    arrays["node_y"] = np.array(n_y, dtype=float)
-    arrays["node_z"] = np.array(n_z, dtype=float)
-    arrays["node_is_special"] = np.array(n_special, dtype=int)
-
-    # ── Frames ─────────────────────────────────────────────────────
-    f_ids, f_sap, f_parent, f_sec, f_ni, f_nj = [], [], [], [], [], []
-    f_t0, f_t1, f_angle, f_card, f_tag = [], [], [], [], []
-    for eid, elem in getattr(model, "frame_elements", {}).items():
-        if getattr(elem, "inactive", False):
-            continue
-        ni = nodes.get(elem.node_i)
-        nj = nodes.get(elem.node_j)
-        if ni is None or nj is None:
-            continue
-        f_ids.append(len(f_ids))
-        f_sap.append(str(eid))
-        f_parent.append(str(elem.parent_id) if elem.parent_id else "")
-        f_sec.append(getattr(model, "frame_assignments", {}).get(eid, ""))
-        f_ni.append(ni.node_tag)
-        f_nj.append(nj.node_tag)
-        f_t0.append(float(elem.t_locations[0]) if elem.t_locations else 0.0)
-        f_t1.append(float(elem.t_locations[-1]) if len(elem.t_locations) > 1 else 1.0)
-        f_angle.append(float(getattr(elem, "angle", 0.0)))
-        f_card.append(int(getattr(elem, "cardinal_point", 10)))
-        f_tag.append(int(getattr(elem, "elem_tag", 0)))
-    arrays["frame_eid"] = np.array(f_ids, dtype=int)
-    arrays["frame_sap_id"] = np.array(f_sap, dtype=str)
-    arrays["frame_parent_sap_id"] = np.array(f_parent, dtype=str)
-    arrays["frame_sec_name"] = np.array(f_sec, dtype=str)
-    arrays["frame_node_i"] = np.array(f_ni, dtype=int)
-    arrays["frame_node_j"] = np.array(f_nj, dtype=int)
-    arrays["frame_t_start"] = np.array(f_t0, dtype=float)
-    arrays["frame_t_end"] = np.array(f_t1, dtype=float)
-    arrays["frame_angle"] = np.array(f_angle, dtype=float)
-    arrays["frame_cardinal_point"] = np.array(f_card, dtype=int)
-    arrays["frame_elem_tag"] = np.array(f_tag, dtype=int)
-
-    # ── Shells (ragged connectivity) ────────────────────────────────
-    s_ids, s_sap, s_parent, s_sec, s_tag, s_thick = [], [], [], [], [], []
-    flat: list[int] = []
-    offsets: list[int] = []
-    for aid, area in getattr(model, "area_elements", {}).items():
-        if getattr(area, "inactive", False):
-            continue
-        nids = list(area.node_ids)
-        tags = []
-        for nid in nids:
-            nd = nodes.get(nid)
-            if nd is None:
-                break
-            tags.append(nd.node_tag)
-        if len(tags) < 3:
-            continue
-        s_ids.append(len(s_ids))
-        s_sap.append(str(aid))
-        s_parent.append(str(area.parent_id) if getattr(area, "parent_id", None) else "")
-        s_sec.append(getattr(model, "area_assignments", {}).get(aid, ""))
-        s_tag.append(int(getattr(area, "area_tag", 0)))
-        s_thick.append(float(getattr(area, "thickness", 0.0)))
-        offsets.append(len(flat))
-        flat.extend(tags)
-    offsets.append(len(flat))
-    arrays["shell_eid"] = np.array(s_ids, dtype=int)
-    arrays["shell_sap_id"] = np.array(s_sap, dtype=str)
-    arrays["shell_parent_sap_id"] = np.array(s_parent, dtype=str)
-    arrays["shell_sec_name"] = np.array(s_sec, dtype=str)
-    arrays["shell_elem_tag"] = np.array(s_tag, dtype=int)
-    arrays["shell_thickness"] = np.array(s_thick, dtype=float)
-    arrays["shell_node_ids_flat"] = np.array(flat, dtype=int)
-    arrays["shell_node_offsets"] = np.array(offsets, dtype=int)
-
-    return arrays
-
 
 # ═══════════════════════════════════════════════════════════════════
 # Dictionary blocks + metadata
@@ -296,46 +187,6 @@ def build_metadata(
     return meta
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Format writers
-# ═══════════════════════════════════════════════════════════════════
-
-
-def _write_npz(path: str, arrays: dict[str, np.ndarray]) -> None:
-    np.savez_compressed(path, **arrays)
-
-
-def _write_h5(path: str, arrays: dict[str, np.ndarray]) -> None:
-    """Write flat arrays into an HDF5 file, creating groups for ``/``
-    paths (matching :func:`fea_toolkit.io.unified_writer._write_h5`)."""
-    try:
-        import h5py
-    except ImportError:
-        raise ImportError("HDF5 output requires h5py. Install with: pip install h5py") from None
-
-    with h5py.File(path, "w") as f:
-        for key, arr in arrays.items():
-            parts = key.split("/")
-            name = parts[-1]
-            group_path = "/".join(parts[:-1]) if len(parts) > 1 else ""
-            if arr.dtype.kind in {"U", "S"}:
-                dt = h5py.string_dtype()
-                arr_obj = arr.astype(object)
-                if arr.ndim == 0:
-                    ds = f.create_dataset(key, shape=(), dtype=dt)
-                    ds[()] = str(arr.item())
-                elif group_path:
-                    g = f.require_group(group_path)
-                    g.create_dataset(name, data=arr_obj, dtype=dt)
-                else:
-                    f.create_dataset(name, data=arr_obj, dtype=dt)
-            elif group_path:
-                g = f.require_group(group_path)
-                g.create_dataset(name, data=arr)
-            else:
-                f.create_dataset(name, data=arr)
-
-
 def _stage_arrays(
     model: t.Any,
     *,
@@ -350,7 +201,7 @@ def _stage_arrays(
     if dictionaries:
         arrays.update(collect_dictionary_arrays(model))
     if geometry:
-        arrays.update(collect_geometry_arrays(model))
+        arrays.update(collect_geometry_arrays(model, ragged=True))
     return arrays
 
 

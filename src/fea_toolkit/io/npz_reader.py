@@ -122,13 +122,6 @@ def _get_static_cases(data: dict[str, Any]) -> list[str]:
     return []
 
 
-def _get_analysis_types(data: dict[str, Any]) -> list[str]:
-    types = data.get("analysis_types")
-    if types is not None:
-        return [str(t) for t in types]
-    return []
-
-
 # ── PyVista adapter ───────────────────────────────────────────────────────
 
 

@@ -15,6 +15,7 @@ ground_motion — PEER record reading, scaling, baseline correction.
 helper — File-chooser dialogs (tkinter / macOS native).
 """
 
+from ._serial import collect_geometry_arrays
 from .ground_motion import (
     baseline_correct,
     read_peer_record,
@@ -47,7 +48,6 @@ from .stage_reader import (
 )
 from .stage_writer import write_model_stages
 from .unified_writer import (
-    collect_geometry_arrays,
     collect_modal_arrays,
     collect_rs_arrays,
     collect_static_arrays,
