@@ -132,104 +132,65 @@ class ModelViewer:
         md = self._model
         self._section_colors = _section_palette(md.sections)
 
-        if self._collapse_to_parents:
-            # Include inactive parents instead of active children.
-            # Walk all elements: include inactive parents and unsplit
-            # elements (those without parent_id).  Skip active children.
-            for eid, elem in md.frame_elements.items():
-                is_inactive = getattr(elem, "inactive", False)
-                has_parent = getattr(elem, "parent_id", None) is not None
-                if not is_inactive and has_parent:
-                    continue  # active child — skip
-                sec = md.frame_assignments.get(eid, "")
-                ni = md.nodes.get(elem.node_i)
-                nj = md.nodes.get(elem.node_j)
-                if ni is None or nj is None:
-                    continue
-                self._frames.append(
-                    FrameGeom(
-                        elem_id=eid,
-                        section=sec,
-                        node_i=elem.node_i,
-                        node_j=elem.node_j,
-                        start=np.array([ni.x, ni.y, ni.z], dtype=float),
-                        end=np.array([nj.x, nj.y, nj.z], dtype=float),
-                    )
-                )
+        # Collapse-to-parents: include inactive parents and unsplit
+        # elements (those without a parent); skip active children.
+        # Otherwise: active elements only.
+        collapse = self._collapse_to_parents
 
-            # Shells — include inactive parents
-            for aid, ae in md.area_elements.items():
-                is_inactive = getattr(ae, "inactive", False)
-                has_parent = getattr(ae, "parent_id", None) is not None
-                if not is_inactive and has_parent:
-                    continue
-                sec = md.area_assignments.get(aid, "")
-                verts = []
-                for nid in ae.node_ids:
-                    nd = md.nodes.get(nid)
-                    if nd is None:
-                        break
-                    verts.append([nd.x, nd.y, nd.z])
-                if len(verts) < 3:
-                    continue
-                self._shells.append(
-                    ShellGeom(
-                        area_id=aid,
-                        section=sec,
-                        vertices=np.array(verts, dtype=float),
-                    )
+        def include(_eid, elem) -> bool:
+            if getattr(elem, "inactive", False):
+                return collapse and getattr(elem, "parent_id", None) is None
+            return collapse or getattr(elem, "parent_id", None) is None
+
+        elements = (
+            self._builder.split_elements
+            if self._builder and self._builder.split_elements
+            else md.frame_elements
+        )
+        assignments = (
+            self._builder.split_assignments
+            if self._builder and self._builder.split_elements
+            else md.frame_assignments
+        )
+
+        for eid, elem in elements.items():
+            if not include(eid, elem):
+                continue
+            sec = assignments.get(eid, "")
+            ni = md.nodes.get(elem.node_i)
+            nj = md.nodes.get(elem.node_j)
+            if ni is None or nj is None:
+                continue
+            self._frames.append(
+                FrameGeom(
+                    elem_id=eid,
+                    section=sec,
+                    node_i=elem.node_i,
+                    node_j=elem.node_j,
+                    start=np.array([ni.x, ni.y, ni.z], dtype=float),
+                    end=np.array([nj.x, nj.y, nj.z], dtype=float),
                 )
-        else:
-            # Normal path: active elements only
-            elements = (
-                self._builder.split_elements
-                if self._builder and self._builder.split_elements
-                else md.frame_elements
-            )
-            assignments = (
-                self._builder.split_assignments
-                if self._builder and self._builder.split_elements
-                else md.frame_assignments
             )
 
-            for eid, elem in elements.items():
-                if getattr(elem, "inactive", False):
-                    continue
-                sec = assignments.get(eid, "")
-                ni = md.nodes.get(elem.node_i)
-                nj = md.nodes.get(elem.node_j)
-                if ni is None or nj is None:
-                    continue
-                self._frames.append(
-                    FrameGeom(
-                        elem_id=eid,
-                        section=sec,
-                        node_i=elem.node_i,
-                        node_j=elem.node_j,
-                        start=np.array([ni.x, ni.y, ni.z], dtype=float),
-                        end=np.array([nj.x, nj.y, nj.z], dtype=float),
-                    )
+        for aid, ae in md.area_elements.items():
+            if not include(aid, ae):
+                continue
+            sec = md.area_assignments.get(aid, "")
+            verts = []
+            for nid in ae.node_ids:
+                nd = md.nodes.get(nid)
+                if nd is None:
+                    break
+                verts.append([nd.x, nd.y, nd.z])
+            if len(verts) < 3:
+                continue
+            self._shells.append(
+                ShellGeom(
+                    area_id=aid,
+                    section=sec,
+                    vertices=np.array(verts, dtype=float),
                 )
-
-            for aid, ae in md.area_elements.items():
-                if getattr(ae, "inactive", False):
-                    continue
-                sec = md.area_assignments.get(aid, "")
-                verts = []
-                for nid in ae.node_ids:
-                    nd = md.nodes.get(nid)
-                    if nd is None:
-                        break
-                    verts.append([nd.x, nd.y, nd.z])
-                if len(verts) < 3:
-                    continue
-                self._shells.append(
-                    ShellGeom(
-                        area_id=aid,
-                        section=sec,
-                        vertices=np.array(verts, dtype=float),
-                    )
-                )
+            )
 
         # Nodes
         for nid, nd in md.nodes.items():
