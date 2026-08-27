@@ -391,30 +391,6 @@ class ElementMixin:
         # node_i and node_j are string node IDs — resolve to numeric tags.
         if self._offset_rigid_links:
             _mpc = self.config.get("rigid_link_mpc", False)
-            if not _mpc and self._rigid_section_tag is None:
-                all_sec_tags = set(self.section_tags.values())
-                all_sec_tags.update(self._shell_sec_tags.values())
-                all_sec_tags.update(self._shell_sec_variants.values())
-                rigid_section_tag = max(all_sec_tags, default=0) + 1
-                rigid_E = 2.0e14
-                rigid_A = 1.0
-                rigid_I = 1.0
-                # Arbitrary large shear modulus — the exact ratio is irrelevant
-                # for a numerical rigid link (an artificial stiffener, not a
-                # physical material).  Keep G large so shear/torsion never
-                # become the soft DOFs of the link.
-                rigid_G = rigid_E / 2.6
-                ops.section(
-                    "Elastic",
-                    rigid_section_tag,
-                    rigid_E,
-                    rigid_A,
-                    rigid_I,
-                    rigid_I,
-                    rigid_G,
-                    rigid_I,
-                )
-                self._rigid_section_tag = rigid_section_tag
             for _link_id, _node_i_id, _node_j_id, link_tag in self._offset_rigid_links:
                 nd_i = self.mesh_model.nodes.get(_node_i_id)
                 nd_j = self.mesh_model.nodes.get(_node_j_id)
@@ -449,7 +425,7 @@ class ElementMixin:
                     link_tag,
                     ni_tag,
                     nj_tag,
-                    rigid_section_tag,
+                    self._rigid_section_tag,
                     link_tag,
                     "-mass",
                     0.0,
