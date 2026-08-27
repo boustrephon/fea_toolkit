@@ -1,0 +1,83 @@
+# CodeRabbit configuration — https://docs.coderabbit.ai/configuration
+#
+# Keeps CodeRabbit reviews aligned with the project's own guardrails in
+# `.clinerules` (also registered explicitly under `knowledge_base` below, since
+# CodeRabbit's built-in auto-detection only matches `**/.clinerules/*` as a
+# directory pattern, not a single root file).  `reviews.path_instructions` are a
+# second lever: they inject repo conventions into every review without
+# disabling any default checks.
+#
+# Scope: every tracked file is eligible for review; this repo contains no
+# tracked generated/build artifacts, so no `path_filters` excludes are needed.
+
+language: "en-US"
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - ".clinerules"
+
+reviews:
+  profile: "quiet"
+  path_instructions:
+    - path: "src/fea_toolkit/**"
+      instructions: |
+        Review against the project guardrails in `.clinerules` (read the top-level
+        `docs/llm_guide.md` first). In particular:
+
+        - **Two-stage pipeline is mandatory**: topology mutations belong only in
+          `opensees/preprocessor.py`; OpenSees domain construction and analysis
+          execution belong only in `opensees/analysis_builder.py`. Flag any new
+          analysis logic added to `opensees/builder.py` (Tcl export only) or to
+          the preprocessor.
+        - `opensees/` code may `import ops` (OpenSeesPy); `model/` code must NOT —
+          the model subpackage must stay OpenSees-free.
+        - Data models are `@dataclass` classes in `model/sap_data.py`, with
+          `field(default_factory=...)` for mutable defaults. Flag mutable default
+          arguments.
+        - Imports: stdlib -> third-party -> project-relative, with relative
+          project imports (e.g. `from ..model.sap_data import SAPModelData`).
+        - Google-style docstrings with `Args:` / `Returns:` / `Raises:` sections.
+        - **Unit handling is critical**: never hardcode physical constants
+          (gravity `g`, E, fy, fc, density). Everything must derive from the
+          model data or `g_from_units(units)`. Materials are authored in SI (Pa)
+          and scaled exactly once via `scale_material_dict()` / the Preprocessor's
+          `nd_materials` flow — never hand-converted and never double-scaled.
+        - OpenSees constraints: never use the 8-arg trapezoidal `eleLoad` form
+          (silently broken in OpenSeesPy 3.8.0.0); Corotational transformations
+          do not support `eleLoad` in 3D; new `ops.*` calls should update the
+          `typings/openseespy` stubs.
+        - The analysis workflows are 3D-only (`ndm=3`, `ndf=6`). Do not add
+          `ndm`/`ndf` dimensionality detection or 2D dispatch to the
+          Preprocessor -> AnalysisBuilder path.
+        - Naming: `*_id` are SAP2000 string labels, `*_tag` are OpenSees integer
+          tags; never feed SAP IDs directly to `ops` commands.
+        - `inactive = True` marks split/meshed parents; builders must skip them.
+
+    - path: "tests/**"
+      instructions: |
+        Tests use pytest (`test_*.py`, `Test*` classes, `test_*` functions).
+        - Tests mirror `src/` structure (e.g. `model/geometry.py` ->
+          `tests/test_geometry.py`); fixtures live in `tests/fixtures/`.
+        - Any test that drives OpenSees must call `ops.wipe()` in teardown
+          (fixture `yield` or `finally`) — global state persists across tests.
+        - Integration tests should use the built-in `make_sample_model()` from
+          `examples/sample_model.py` rather than external file dependencies.
+        - 2D OpenSees analyses are permitted ONLY in standalone test benchmarks
+          (e.g. `ndm=2` hand-checks reusing the model-layer section/material
+          code); never as part of the production workflow.
+        - Flag flaky patterns: tests depending on execution order, hardcoded
+          paths, or stale fixtures.
+
+    - path: "docs/**"
+      instructions: |
+        Documentation follows `README.md` as canonical overview.
+        - One markdown file per feature/analysis type; update the README status
+          notation (`✅ Complete`, `⚠️ Partial`, `🚧 Placeholder`) to stay in sync
+          with implementation reality.
+        - Keep code examples runnable and consistent with the current public API
+          in `src/fea_toolkit/__init__.py` — flag references to renamed or
+          removed functions.
+        - Reference design decisions and formulas (LaTeX where helpful); do not
+          duplicate large code blocks that already live in `examples/`.
