@@ -28,18 +28,6 @@ def _check_gmsh() -> bool:
         return False
 
 
-def _newell_area(pts: list[tuple[float, float, float]]) -> float:
-    """3D polygon area via Newell's method."""
-    nx = ny = nz = 0.0
-    for i in range(len(pts)):
-        x1, y1, z1 = pts[i]
-        x2, y2, z2 = pts[(i + 1) % len(pts)]
-        nx += (y1 - y2) * (z1 + z2)
-        ny += (z1 - z2) * (x1 + x2)
-        nz += (x1 - x2) * (y1 + y2)
-    return 0.5 * np.sqrt(nx * nx + ny * ny + nz * nz)
-
-
 # ========================================================================
 # Public API
 # ========================================================================

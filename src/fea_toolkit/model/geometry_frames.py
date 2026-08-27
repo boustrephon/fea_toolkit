@@ -200,28 +200,6 @@ def trapezoidal_force_split(
     return data_list
 
 
-def split_elements_ss(
-    nodes: dict[str, dict[str, float]],
-    elements: dict[str, dict[str, Any]],
-    assignments: dict[str, Any],
-    dist_loads: dict[str, Any],
-    auto_mesh: dict[str, dict[str, Any]],
-    frame_dist_loads: dict[str, Any],
-    tol: float = 1e-6,
-    verbose: bool = False,
-) -> tuple[dict[str, dict], dict[str, Any], dict[str, Any]]:
-    """Main entry point for element splitting (currently only at joints).
-
-    .. deprecated::
-       Use :func:`split_elements` instead, which handles both AtJoints
-       and AtFrames splitting.  This wrapper will be removed in a future
-       version.
-    """
-    return split_elements_at_joints(
-        nodes, elements, assignments, dist_loads, auto_mesh, frame_dist_loads, tol, verbose
-    )
-
-
 def split_elements(
     nodes: dict[str, Node],
     elements: dict[str, FrameElement],
