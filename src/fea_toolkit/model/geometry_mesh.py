@@ -25,6 +25,60 @@ from ..model.sap_data import (
     SAPModelData,
 )
 
+# ── Shared coordinate / node helpers ──────────────────────────────────
+# These were historically defined as inner functions inside each mesh
+# routine (sometimes several times per module).  Hoisted here so the
+# deduplication and chain-following semantics live in one place.
+
+#: Coordinate key precision used for exact-coincident node dedup (1e-6).
+#: Reuses a node only when the grid point is essentially bit-identical
+#: to an existing corner/shared-edge node — release/offset/duplicate
+#: nodes that legitimately share a coordinate are never collapsed.
+_COORD_KEY_TIGHT = 6
+
+#: Coordinate key precision used for grid reconnection (1e-4): grid
+#: lines are forced through frame edge-node projections, and a frame
+#: node is accepted as "on the edge" up to ~1e-4 perpendicular offset.
+_COORD_KEY_LOOSE = 4
+
+
+def _coord_key(x, y, z, *, precision: int = _COORD_KEY_TIGHT):
+    """Round a coordinate triple to *precision* decimals for registry keys."""
+    return (round(x, precision), round(y, precision), round(z, precision))
+
+
+def _is_excluded(name: str, exclude_types) -> bool:
+    """Case-insensitive substring match of *name* against *exclude_types*.
+
+    SAP2000 section names vary in case (e.g. "Brick Wall", "BRICK WALL",
+    "BrickInfill"); each entry in ``exclude_types`` is matched as a
+    case-insensitive substring of the section name.
+    """
+    name_lower = name.lower()
+    return any(excl.lower() in name_lower for excl in exclude_types)
+
+
+def _pos_key(nid: str, nodes) -> tuple:
+    """Position-based sort key for an edge endpoint (X → Y → Z → id)."""
+    nd = nodes[nid]
+    return (nd.x, nd.y, nd.z, nid)
+
+
+def _cos_match(d1, d2, cosine_tol: float) -> bool:
+    """True when the unit directions *d1* / *d2* agree within *cosine_tol*."""
+    return float(np.dot(d1, d2)) > cosine_tol
+
+
+def _chain_dir(key, from_node, node_arr):
+    """Unit vector from *from_node* toward the other end of *key*.
+
+    Returns ``None`` when the two endpoints coincide.
+    """
+    other = key[1] if key[0] == from_node else key[0]
+    vec = node_arr[other] - node_arr[from_node]
+    nrm = float(np.linalg.norm(vec))
+    return vec / nrm if nrm > 1e-12 else None
+
 
 def _point_uv_on_quad(
     pt: np.ndarray,
@@ -218,9 +272,6 @@ def mesh_area_elements(
     # nodes that legitimately share a coordinate are never collapsed.
     # Interior wall-slab seed nodes are reconnected by explicit node-id
     # reuse in the interior_seeds block below, not by loosening this key.
-    def _coord_key(x, y, z):
-        return (round(x, 6), round(y, 6), round(z, 6))
-
     _coord_to_id: dict[tuple, str] = {}
 
     # ── Pre-build vectorised cache of real SAP2000 nodes ──────────
@@ -596,9 +647,6 @@ def subdivide_area_mesh(
     # node only when the grid point is essentially bit-identical to an
     # existing corner node.  Deliberate: coincident offset/release/
     # duplicate nodes must not be collapsed (see seeding below).
-    def _coord_key(x, y, z):
-        return (round(x, 6), round(y, 6), round(z, 6))
-
     # Seed coordinate registry from active quadrilateral area corner
     # nodes only — not from every node in the model — so that
     # coincident offset/release/disconnected nodes are not spuriously
@@ -786,9 +834,6 @@ def split_areas_at_frame_edges(
     # decimals) is required for it to round back to the original frame
     # node.  Deliberately looser than mesh_area_elements' Role-A key
     # (1e-6), which only dedups exact-coincident corner/edge nodes.
-    def _coord_key(x, y, z):
-        return (round(x, 4), round(y, 4), round(z, 4))
-
     # Collect all frame node IDs
     frame_node_ids: set = set()
     for fe in frame_elements.values():
@@ -993,14 +1038,16 @@ def split_areas_at_frame_edges(
         for nid, nd in nodes.items():
             # setdefault keeps the first node per coordinate bin —
             # matches the linear scan's first-match-wins behaviour.
-            _coord_to_id.setdefault(_coord_key(nd.x, nd.y, nd.z), nid)
+            _coord_to_id.setdefault(_coord_key(nd.x, nd.y, nd.z, precision=_COORD_KEY_LOOSE), nid)
         # Create nodes for grid points (reusing frame nodes at same coords)
         node_grid = [[None] * (n_u + 1) for _ in range(n_v + 1)]
         for j in range(n_v + 1):
             for i in range(n_u + 1):
                 pt = grid[j, i]
                 # Check registry for existing node at this position
-                existing = _coord_to_id.get(_coord_key(float(pt[0]), float(pt[1]), float(pt[2])))
+                existing = _coord_to_id.get(
+                    _coord_key(float(pt[0]), float(pt[1]), float(pt[2]), precision=_COORD_KEY_LOOSE)
+                )
                 if existing is not None:
                     node_grid[j][i] = existing
                     continue
@@ -1017,7 +1064,10 @@ def split_areas_at_frame_edges(
                 )
                 nodes[new_id] = nd
                 _coord_to_id.setdefault(
-                    _coord_key(float(pt[0]), float(pt[1]), float(pt[2])), new_id
+                    _coord_key(
+                        float(pt[0]), float(pt[1]), float(pt[2]), precision=_COORD_KEY_LOOSE
+                    ),
+                    new_id,
                 )
                 node_grid[j][i] = new_id
 
@@ -1105,35 +1155,17 @@ def warn_frame_overlaps(
     assign = frame_assignments or {}
     _node_arr = {nid: np.array([nd.x, nd.y, nd.z], dtype=float) for nid, nd in nodes.items()}
 
-    def _is_excluded(name: str) -> bool:
-        name_lower = name.lower()
-        return any(excl.lower() in name_lower for excl in exclude_types)
-
-    def _pos_key(nid: str) -> tuple:
-        nd = nodes[nid]
-        return (nd.x, nd.y, nd.z, nid)
-
-    def _cos_match(d1, d2):
-        return float(np.dot(d1, d2)) > COSINE_TOL
-
-    def _chain_dir(key, from_node):
-        """Unit vector from from_node toward the other end of key."""
-        other = key[1] if key[0] == from_node else key[0]
-        vec = _node_arr[other] - _node_arr[from_node]
-        nrm = float(np.linalg.norm(vec))
-        return vec / nrm if nrm > 1e-12 else None
-
     # Build frame-only edge registry
     frame_reg: dict[tuple[str, str], list[str]] = defaultdict(list)
     for fid, felem in frame_elements.items():
         if getattr(felem, "inactive", False) or felem is None:
             continue
-        if _is_excluded(assign.get(fid, "")):
+        if _is_excluded(assign.get(fid, ""), exclude_types):
             continue
         nA, nB = felem.node_i, felem.node_j
         if nA == nB:
             continue
-        key = (nA, nB) if _pos_key(nA) <= _pos_key(nB) else (nB, nA)
+        key = (nA, nB) if _pos_key(nA, nodes) <= _pos_key(nB, nodes) else (nB, nA)
         frame_reg[key].append(fid)
 
     # ── 1. Identical overlaps (same key, 2+ frame elements) ────
@@ -1169,11 +1201,11 @@ def warn_frame_overlaps(
                 if pair in checked:
                     continue
                 checked.add(pair)
-                d_i = _chain_dir(ki, _node)
-                d_j = _chain_dir(kj, _node)
+                d_i = _chain_dir(ki, _node, _node_arr)
+                d_j = _chain_dir(kj, _node, _node_arr)
                 if d_i is None or d_j is None:
                     continue
-                if not _cos_match(d_i, d_j):
+                if not _cos_match(d_i, d_j, COSINE_TOL):
                     continue
                 if abs(leni - lenj) > 1e-9:
                     ni = assign.get(fidi, "?")
@@ -1256,22 +1288,10 @@ def find_constraint_edges(
 
     COSINE_TOL = 0.9999
 
-    # ── Helper: case-insensitive substring matching ─────────────
-    # SAP2000 section names vary in case (e.g. "Brick Wall",
-    # "BRICK WALL", "BrickInfill").  Each entry in exclude_types is
-    # matched as a case-insensitive substring of the section name.
-    def _is_excluded(name: str) -> bool:
-        name_lower = name.lower()
-        return any(excl.lower() in name_lower for excl in exclude_types)
-
     # ── 0. Node arrays & position sort key ──────────────────────
     _node_arr: dict[str, np.ndarray] = {}
     for nid, nd in nodes.items():
         _node_arr[nid] = np.array([nd.x, nd.y, nd.z], dtype=float)
-
-    def _pos_key(nid: str) -> tuple:
-        nd = nodes[nid]
-        return (nd.x, nd.y, nd.z, nid)
 
     # ── 1. Build sorted-tuple edge registry ─────────────────────
     # {(nA, nB): [elem_id, ...]}  where nA ≤ nB by position (X→Y→Z).
@@ -1286,7 +1306,7 @@ def find_constraint_edges(
     for aid, elem in area_elements.items():
         if getattr(elem, "inactive", False) or elem is None or len(elem.node_ids) < 3:
             continue
-        if _is_excluded(area_assignments.get(aid, "")):
+        if _is_excluded(area_assignments.get(aid, ""), exclude_types):
             continue
         nids = list(elem.node_ids)
         n = len(nids)
@@ -1295,7 +1315,7 @@ def find_constraint_edges(
             nA, nB = nids[i], nids[j]
             if nA == nB:
                 continue
-            key = (nA, nB) if _pos_key(nA) <= _pos_key(nB) else (nB, nA)
+            key = (nA, nB) if _pos_key(nA, nodes) <= _pos_key(nB, nodes) else (nB, nA)
             edge_reg[key].append(aid)
             area_keys.add(key)
 
@@ -1305,12 +1325,12 @@ def find_constraint_edges(
         for fid, felem in frame_elements.items():
             if getattr(felem, "inactive", False) or felem is None:
                 continue
-            if _is_excluded(assign.get(fid, "")):
+            if _is_excluded(assign.get(fid, ""), exclude_types):
                 continue
             nA, nB = felem.node_i, felem.node_j
             if nA == nB:
                 continue
-            key = (nA, nB) if _pos_key(nA) <= _pos_key(nB) else (nB, nA)
+            key = (nA, nB) if _pos_key(nA, nodes) <= _pos_key(nB, nodes) else (nB, nA)
             edge_reg[key].append(fid)
             frame_keys.add(key)
 
@@ -1322,15 +1342,6 @@ def find_constraint_edges(
         node_keys[nB].append((nA, nB))
 
     # ── Helpers ─────────────────────────────────────────────────
-    def _cos_match(d1: np.ndarray, d2: np.ndarray) -> bool:
-        return float(np.dot(d1, d2)) > COSINE_TOL
-
-    def _chain_dir(key: tuple, from_node: str) -> np.ndarray:
-        """Unit vector from from_node to the other end of the key."""
-        other = key[1] if key[0] == from_node else key[0]
-        vec = _node_arr[other] - _node_arr[from_node]
-        nrm = float(np.linalg.norm(vec))
-        return vec / nrm if nrm > 1e-12 else None
 
     def _follow(start_node: str, key: tuple) -> list[str]:
         """Follow a single chain from start_node through key."""
@@ -1347,8 +1358,8 @@ def find_constraint_edges(
         while cur in node_keys:
             found = None
             for k in node_keys[cur]:
-                d = _chain_dir(k, cur)
-                if d is not None and _cos_match(d, acc_dir):
+                d = _chain_dir(k, cur, _node_arr)
+                if d is not None and _cos_match(d, acc_dir, COSINE_TOL):
                     found = k
                     break
             if found is None:
@@ -1423,11 +1434,11 @@ def find_constraint_edges(
                 if not shared:
                     continue
                 sn = next(iter(shared))
-                d1 = _chain_dir((nA, nB), sn)
-                d2 = _chain_dir(k, sn)
+                d1 = _chain_dir((nA, nB), sn, _node_arr)
+                d2 = _chain_dir(k, sn, _node_arr)
                 if d1 is None or d2 is None:
                     continue
-                if not _cos_match(d1, d2):
+                if not _cos_match(d1, d2, COSINE_TOL):
                     continue
                 # Skip frame-vs-frame comparisons — overlapping frame
                 # elements should be fixed in the source model, not
@@ -1850,9 +1861,6 @@ def split_slabs_at_wall_intersections(
     # projection.  A 1e-4 key (round to 4 decimals) makes that
     # projection round back to the original wall node.  Deliberately
     # looser than mesh_area_elements' Role-A key (1e-6).
-    def _coord_key(x, y, z):
-        return (round(x, 4), round(y, 4), round(z, 4))
-
     # ── 1. Find intersections ───────────────────────────────────
     findings = find_wall_nodes_inside_slabs(
         area_elements,
@@ -1938,7 +1946,7 @@ def split_slabs_at_wall_intersections(
         for nid, nd in nodes.items():
             # setdefault keeps the first node per coordinate bin —
             # matches the linear scan's first-match-wins behaviour.
-            _coord_to_id.setdefault(_coord_key(nd.x, nd.y, nd.z), nid)
+            _coord_to_id.setdefault(_coord_key(nd.x, nd.y, nd.z, precision=_COORD_KEY_LOOSE), nid)
 
         # Create grid nodes (reuse existing)
         node_grid = [[None] * (n_u + 1) for _ in range(n_v + 1)]
@@ -1959,7 +1967,9 @@ def split_slabs_at_wall_intersections(
                     continue
                 pt = grid[j, i]
                 # Reuse existing node at the same coordinates
-                existing = _coord_to_id.get(_coord_key(float(pt[0]), float(pt[1]), float(pt[2])))
+                existing = _coord_to_id.get(
+                    _coord_key(float(pt[0]), float(pt[1]), float(pt[2]), precision=_COORD_KEY_LOOSE)
+                )
                 if existing is not None:
                     node_grid[j][i] = existing
                     continue
@@ -1974,7 +1984,10 @@ def split_slabs_at_wall_intersections(
                     z=float(pt[2]),
                 )
                 _coord_to_id.setdefault(
-                    _coord_key(float(pt[0]), float(pt[1]), float(pt[2])), new_id
+                    _coord_key(
+                        float(pt[0]), float(pt[1]), float(pt[2]), precision=_COORD_KEY_LOOSE
+                    ),
+                    new_id,
                 )
                 node_grid[j][i] = new_id
 

@@ -477,11 +477,6 @@ def _bbox_for_nodes(md, node_ids: list[str]):
     return (min(xs), max(xs), min(ys), max(ys))
 
 
-def _round_z(z: float, precision: int = 3) -> float:
-    """Round Z to avoid floating-point grouping noise."""
-    return round(z, precision)
-
-
 def _safe_float(v) -> Optional[float]:
     try:
         return float(v)

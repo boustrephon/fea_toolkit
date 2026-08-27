@@ -26,7 +26,6 @@ from .geometry_frames import (
     derive_rigid_end_offsets,
     split_elements,
     split_elements_at_joints,
-    split_elements_ss,
     subdivide_elements,
     trapezoidal_force_split,
 )
@@ -70,7 +69,6 @@ __all__ = [
     "split_areas_at_frame_edges",
     "split_elements",
     "split_elements_at_joints",
-    "split_elements_ss",
     "split_slabs_at_wall_intersections",
     "subdivide_area_mesh",
     "subdivide_elements",
