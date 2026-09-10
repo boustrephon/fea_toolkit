@@ -95,6 +95,7 @@ nav:
       - Element Classification: element_classification.md
       - Element Splitting: element_splitting.md
       - Element Properties Config: element_properties_config.md
+      - Member End Releases & Partial Fixity: member_releases.md
       - Shell Element Support: shell_support.md
       - Stiffness Factors: stiffness_factors.md
       - Constraint Edge Detection: constraint_detection.md
@@ -102,6 +103,7 @@ nav:
       - Mander Confinement Validation: mander_confinement_validation.md
       - Capacity Modules (GB 50010): capacity.md
       - SAP2000 IDs vs OpenSees Tags: sap_ids_vs_tags.md
+      - SAP2000 Model Review & Checks: model_review.md
       - Shear Failure Modelling: shear_failure_modelling.md
       - Unit Conversion: units_conversion.md
       - RC Rectangular Section Workflow: rc_rectangular_section_workflow.md

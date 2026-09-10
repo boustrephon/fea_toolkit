@@ -115,6 +115,11 @@ for automated cross-referencing.
   Tags: `config`, `element-properties`, `fiber`, `hinges`, `nonlinear`, `shell`
   Related: [Element Classification](element_classification.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Shell Element Support](shell_support.md) · [Layered Analysis Workflow for the v3 Architecture](layered_analysis_workflow.md)
 
+- [Member End Releases & Partial Fixity](member_releases.md) — ✅ Complete
+  > Converting SAP2000 frame end releases and partial-fixity springs to OpenSees zero-length release elements (and Tcl): local-DOF mapping, formulation-aware rigid/soft stiffnesses, and closed-form validation.
+  Tags: `releases`, `partial-fixity`, `connections`, `zeroLength`, `frames`, `tcl`, `sap2000`
+  Related: [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Element Properties Configuration](element_properties_config.md) · [Tcl Export](tcl_export.md) · [Analysis Workflow](workflow.md)
+
 - [Element Splitting](element_splitting.md) — ✅ Complete
   > Splitting frame elements at joints and intersections with parent-child tracking and load redistribution.
   Tags: `elements`, `splitting`, `meshing`, `load-redistribution`
@@ -129,6 +134,11 @@ for automated cross-referencing.
   > SAP2000 → OpenSees fiber workflow for rectangular RC beam/column sections: parser defaults, promotion, Mander confinement, and user overrides.
   Tags: `rc`, `sections`, `fiber`, `mander`, `confinement`, `workflow`
   Related: [Element Classification](element_classification.md) · [Element Properties Configuration](element_properties_config.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Report Generation — Design Proposal](report_generation.md)
+
+- [SAP2000 Model Review & Checks](model_review.md) — ✅ Complete
+  > Solver-free first-pass review of a parsed `.s2k` model: inventory, connectivity (loose nodes, floating sub-structures), element releases, data-integrity checks, and an optional OpenSees modal/static confirmation pass.
+  Tags: `review`, `checks`, `s2k`, `connectivity`, `integrity`, `diagnostics`, `cli`
+  Related: [Analysis Workflow](workflow.md) · [Element Classification](element_classification.md) · [Report Generation](report_generation.md)
 
 - [Shell Element Support](shell_support.md) — ✅ Complete
   > Shell element types, meshing strategies, and layered shell support for nonlinear wall analysis.
