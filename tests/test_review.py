@@ -67,6 +67,21 @@ def sample_review():
     return md, review_model(md, file=FIXTURES_DIR / "sample.s2k")
 
 
+@pytest.fixture(scope="module")
+def clean_model_file():
+    """Path to a minimal, purpose-built clean ``.s2k`` fixture.
+
+    ``clean_model.s2k`` is a two-node, fixed-base single frame whose
+    material/section are both defined and referenced, so the review finds
+    no blocking issues.  It is deliberately independent of ``sample.s2k``
+    so CLI exit-code checks do not depend on the larger model's review
+    status.
+    """
+    path = FIXTURES_DIR / "clean_model.s2k"
+    assert review_s2k_file(path)["ok"] is True
+    return path
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Inventory
 # ═══════════════════════════════════════════════════════════════════
@@ -469,6 +484,12 @@ class TestModeDisplay:
         assert "_6 further mode(s) not shown._" in md_text
 
     def test_cli_accepts_mode_display_flags(self, tmp_path):
+        """The mode-display flags must parse without a usage error.
+
+        Exit code ``2`` is the CLI's usage / file-error code, so this test
+        only requires that argument parsing succeeded — ``sample.s2k`` may
+        legitimately gain blocking issues later and return ``1``.
+        """
         out_file = tmp_path / "review.md"
         code = main(
             [
@@ -483,5 +504,24 @@ class TestModeDisplay:
                 str(out_file),
             ]
         )
-        assert code == 0
+        assert code in (0, 1)  # not 2 -> no usage / argument-parsing failure
         assert out_file.exists()
+
+    def test_cli_mode_display_flags_clean_model_exit_code(self, clean_model_file, tmp_path):
+        """The same flags exit ``0`` for a guaranteed-clean model fixture."""
+        out_file = tmp_path / "review.md"
+        code = main(
+            [
+                str(clean_model_file),
+                "--format",
+                "markdown",
+                "--min-participation",
+                "1",
+                "--max-modes",
+                "3",
+                "--out",
+                str(out_file),
+            ]
+        )
+        assert code == 0
+        assert out_file.read_text(encoding="utf-8").startswith("# SAP2000 Model Review")

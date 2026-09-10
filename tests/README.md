@@ -106,6 +106,7 @@ Tests for `SAP2000Parser` — parsing `.s2k` files and converting to `SAPModelDa
 | `fixtures/sample.json` | Pre-parsed raw table dump for faster test loading. |
 | `fixtures/sample_2.s2k` | Second model variant for additional parser coverage. |
 | `fixtures/sample.split.json` | Split-element version of the sample model. |
+| `fixtures/clean_model.s2k` | Minimal, purpose-built clean model (two-node fixed-base frame) used for CLI exit-code checks. |
 
 ---
 

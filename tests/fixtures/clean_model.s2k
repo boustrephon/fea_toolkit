@@ -1,0 +1,26 @@
+File clean_model.s2k was saved on m/d/yy at h:mm:ss
+
+TABLE:  "PROGRAM CONTROL"
+   CurrUnits="N, mm, C"
+
+TABLE:  "MATERIAL PROPERTIES 01 - GENERAL"
+   Material=STEEL   Type=Steel   SymType=Isotropic
+
+TABLE:  "MATERIAL PROPERTIES 02 - BASIC MECHANICAL PROPERTIES"
+   Material=STEEL   UnitWeight=78500   UnitMass=8000   E1=2.0E+05   G12=7.7E+04   U12=0.3
+
+TABLE:  "FRAME SECTION PROPERTIES 01 - GENERAL"
+   SectionName=SEC1   Shape="I/Wide Flange"   Material=STEEL   t3=0.2   t2=0.1   tf=0.01   tw=0.008   Area=0.00308   I33=1.5E-05   I22=2.0E-06   TorsConst=1.0E-06
+
+TABLE:  "JOINT COORDINATES"
+   Joint=1   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=0
+   Joint=2   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=5000
+
+TABLE:  "JOINT RESTRAINT ASSIGNMENTS"
+   Joint=1   U1=Yes   U2=Yes   U3=Yes   R1=Yes   R2=Yes   R3=Yes
+
+TABLE:  "CONNECTIVITY - FRAME"
+   Frame=1   JointI=1   JointJ=2   IsCurved=No
+
+TABLE:  "FRAME SECTION ASSIGNMENTS"
+   Frame=1   AnalSect=SEC1
