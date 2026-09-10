@@ -17,6 +17,9 @@ dependencies = [
     "opsvis",
     ]
 
+[project.scripts]
+fea-review = "fea_toolkit.model.review:main"
+
 [project.optional-dependencies]
 mesh-remesh = [
     "gmsh>=4.12",

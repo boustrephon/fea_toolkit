@@ -1,0 +1,1065 @@
+"""Standalone review and integrity checks for parsed SAP2000 (.s2k) models.
+
+This module provides a **solver-free first-pass review** of a
+:class:`~fea_toolkit.model.sap_data.SAPModelData` instance: an inventory
+of the model contents, connectivity diagnostics (loose nodes, duplicate
+coordinates, independent/floating sub-structures) and a collection of
+data-integrity checks that catch the issues which typically precede a
+singular stiffness matrix or a silently wrong analysis.
+
+The review never builds an OpenSees domain.  An optional second phase
+(``include_analysis=True``) runs a modal and a linear-static analysis via
+the normal Preprocessor → AnalysisBuilder pipeline to confirm static and
+dynamic behaviour (periods, mass participation, reactions and
+singularity detection).
+
+Public API
+----------
+review_model
+    Run the full review on a :class:`SAPModelData` instance.
+review_s2k_file
+    Parse a ``.s2k`` path and review it in one call.
+print_review_report
+    Print a human-readable console summary.
+format_review_markdown
+    Render the review as a Markdown document.
+main
+    Command-line entry point — ``python -m fea_toolkit.model.review <path>``.
+
+The core review has **no pandas dependency** (it returns plain dicts and
+lists) so it stays importable in dependency-light environments.
+"""
+
+import argparse
+import contextlib
+import math
+import sys
+from collections import defaultdict
+from pathlib import Path
+from typing import Any, Optional
+
+from .checks import check_model_connectivity
+from .sap_data import FRAME_RELEASE_DOF_LABELS, SAPModelData, patterns_from_case
+
+__all__ = [
+    "format_review_markdown",
+    "format_review_report",
+    "main",
+    "print_review_report",
+    "review_model",
+    "review_s2k_file",
+]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Disjoint-set union (union-find) for connectivity analysis
+# ═══════════════════════════════════════════════════════════════════
+
+
+class _DisjointSet:
+    """Minimal union-find with path compression (iterative)."""
+
+    def __init__(self, items):
+        self._parent: dict[Any, Any] = {item: item for item in items}
+
+    def find(self, item: Any) -> Any:
+        """Return the representative (root) of *item*'s set."""
+        root = item
+        while self._parent[root] != root:
+            root = self._parent[root]
+        while self._parent[item] != root:
+            self._parent[item], item = root, self._parent[item]
+        return root
+
+    def union(self, a: Any, b: Any) -> None:
+        """Merge the sets containing *a* and *b*."""
+        root_a, root_b = self.find(a), self.find(b)
+        if root_a != root_b:
+            self._parent[root_b] = root_a
+
+
+def _analyse_components(md: SAPModelData) -> list[dict[str, Any]]:
+    """Group nodes into connected components and characterise each one.
+
+    Nodes are connected through (i) active frame/area elements and
+    (ii) joint constraints (rigid bodies / diaphragms tie joints
+    together).  Each returned component records its node/element counts
+    and whether it reaches a support (restraint).
+
+    Args:
+        md: Parsed model data.
+
+    Returns:
+        Component dicts sorted largest-first, each with keys ``n_nodes``,
+        ``n_frames``, ``n_areas``, ``n_restrained_nodes``, ``is_supported``,
+        ``nodes`` and ``frames``.
+    """
+    node_ids = list(md.nodes.keys())
+    dsu = _DisjointSet(node_ids)
+
+    for elem in md.frame_elements.values():
+        if getattr(elem, "inactive", False):
+            continue
+        if elem.node_i in dsu._parent and elem.node_j in dsu._parent:
+            dsu.union(elem.node_i, elem.node_j)
+
+    for area in md.area_elements.values():
+        if getattr(area, "inactive", False):
+            continue
+        present = [nid for nid in area.node_ids if nid in dsu._parent]
+        for nid in present[1:]:
+            dsu.union(present[0], nid)
+
+    constraint_groups: dict[str, list[str]] = defaultdict(list)
+    for nid, cname in md.constraint_assignments.items():
+        if nid in dsu._parent:
+            constraint_groups[cname].append(nid)
+    for group in constraint_groups.values():
+        for nid in group[1:]:
+            dsu.union(group[0], nid)
+
+    buckets: dict[Any, list[str]] = defaultdict(list)
+    for nid in node_ids:
+        buckets[dsu.find(nid)].append(nid)
+
+    components: list[dict[str, Any]] = []
+    for nids in buckets.values():
+        nset = set(nids)
+        frames = [
+            eid
+            for eid, elem in md.frame_elements.items()
+            if not getattr(elem, "inactive", False) and elem.node_i in nset
+        ]
+        areas = [
+            aid
+            for aid, area in md.area_elements.items()
+            if not getattr(area, "inactive", False) and all(n in nset for n in area.node_ids)
+        ]
+        restrained = [nid for nid in nids if nid in md.restraints]
+        components.append(
+            {
+                "n_nodes": len(nids),
+                "n_frames": len(frames),
+                "n_areas": len(areas),
+                "n_restrained_nodes": len(restrained),
+                "is_supported": bool(restrained),
+                "nodes": nids,
+                "frames": frames,
+            }
+        )
+
+    components.sort(key=lambda c: (c["n_nodes"], c["n_frames"]), reverse=True)
+    return components
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Inventory / breakdown
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _count_by(values) -> dict[str, int]:
+    """Count a stream of hashable values into a frequency-sorted dict."""
+    counts: dict[str, int] = defaultdict(int)
+    for value in values:
+        counts[str(value)] += 1
+    return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def _inventory(md: SAPModelData) -> dict[str, int]:
+    """Return a flat count of every model object category."""
+    return {
+        "nodes": len(md.nodes),
+        "restraints": len(md.restraints),
+        "frame_elements": len(md.frame_elements),
+        "area_elements": len(md.area_elements),
+        "materials": len(md.materials),
+        "sections": len(md.sections),
+        "frame_section_assignments": len(md.frame_assignments),
+        "area_section_assignments": len(md.area_assignments),
+        "frame_releases": len(md.frame_releases),
+        "groups": len(md.groups),
+        "constraints": len(md.constraints),
+        "constraint_assignments": len(md.constraint_assignments),
+        "load_cases": len(md.load_cases),
+        "load_patterns": len(md.load_patterns),
+        "joint_loads": len(md.joint_loads),
+        "frame_distributed_loads": len(md.frame_dist_loads),
+        "frame_gravity_loads": len(md.frame_gravity_loads),
+        "area_uniform_loads": len(md.area_uniform_loads),
+        "area_gravity_loads": len(md.area_gravity_loads),
+        "mass_sources": len(md.mass_sources),
+        "frame_auto_mesh": len(md.frame_auto_mesh),
+        "frame_end_offsets": len(md.frame_end_offsets),
+    }
+
+
+def _breakdown(md: SAPModelData) -> dict[str, dict[str, int]]:
+    """Return per-type breakdowns for restraints, materials and loads."""
+    return {
+        "restraint_dof_patterns": _count_by(
+            "".join(str(d) for d in r.dofs) for r in md.restraints.values()
+        ),
+        "material_types": _count_by(m.type for m in md.materials.values()),
+        "section_types": _count_by(type(s).__name__ for s in md.sections.values()),
+        "load_case_types": _count_by(lc.case_type for lc in md.load_cases.values()),
+        "load_pattern_types": _count_by(lp.pattern_type for lp in md.load_patterns.values()),
+    }
+
+
+def _bounds(md: SAPModelData) -> Optional[dict[str, float]]:
+    """Return the model bounding box, or ``None`` for an empty model."""
+    if not md.nodes:
+        return None
+    xs = [n.x for n in md.nodes.values()]
+    ys = [n.y for n in md.nodes.values()]
+    zs = [n.z for n in md.nodes.values()]
+    return {
+        "x_min": min(xs),
+        "x_max": max(xs),
+        "x_span": max(xs) - min(xs),
+        "y_min": min(ys),
+        "y_max": max(ys),
+        "y_span": max(ys) - min(ys),
+        "z_min": min(zs),
+        "z_max": max(zs),
+        "z_span": max(zs) - min(zs),
+    }
+
+
+def _natural_key(value: str):
+    """Sort key that orders numeric-looking IDs naturally (``"2"`` < ``"10"``)."""
+    return tuple((0, int(part)) if part.isdigit() else (1, part) for part in str(value).split("-"))
+
+
+def _release_summary(md: SAPModelData) -> dict[str, Any]:
+    """Summarise frame end releases parsed from the FRAME RELEASE table(s)."""
+    by_dof: dict[str, int] = dict.fromkeys(FRAME_RELEASE_DOF_LABELS, 0)
+    rows: list[dict[str, Any]] = []
+    for frame_id, release in md.frame_releases.items():
+        end_i = release.released_labels("I")
+        end_j = release.released_labels("J")
+        for label in set(end_i) | set(end_j):
+            by_dof[label] += 1
+        rows.append({"frame_id": frame_id, "end_i": end_i, "end_j": end_j})
+    rows.sort(key=lambda r: _natural_key(r["frame_id"]))
+    return {"n_frames_with_releases": len(rows), "by_dof": by_dof, "releases": rows}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Integrity checks
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _integrity(md: SAPModelData, tol: float) -> dict[str, Any]:
+    """Run data-integrity checks on the parsed model.
+
+    Args:
+        md: Parsed model data.
+        tol: Length tolerance for degenerate-element detection.
+
+    Returns:
+        Dict of issue lists plus a ``counts`` summary mapping each issue
+        category to the number of offenders found.
+    """
+    # ── Elements referencing missing nodes ──
+    missing_node_refs = []
+    for eid, elem in md.frame_elements.items():
+        missing = [n for n in (elem.node_i, elem.node_j) if n not in md.nodes]
+        if missing:
+            missing_node_refs.append({"element": eid, "kind": "Frame", "missing_nodes": missing})
+    for aid, area in md.area_elements.items():
+        missing = [n for n in area.node_ids if n not in md.nodes]
+        if missing:
+            missing_node_refs.append({"element": aid, "kind": "Area", "missing_nodes": missing})
+
+    # ── Unassigned (active) elements ──
+    unassigned_frames = [
+        eid
+        for eid, elem in md.frame_elements.items()
+        if not getattr(elem, "inactive", False) and eid not in md.frame_assignments
+    ]
+    unassigned_areas = [
+        aid
+        for aid, area in md.area_elements.items()
+        if not getattr(area, "inactive", False) and aid not in md.area_assignments
+    ]
+
+    # ── Sections referencing missing materials ──
+    missing_material_refs = [
+        {"section": name, "material": sec.material}
+        for name, sec in md.sections.items()
+        if sec.material and sec.material not in md.materials
+    ]
+
+    # ── Degenerate (zero / near-zero length) frames ──
+    zero_length_elements = []
+    for eid, elem in md.frame_elements.items():
+        ni, nj = md.nodes.get(elem.node_i), md.nodes.get(elem.node_j)
+        if ni is None or nj is None:
+            continue
+        length = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z)
+        if length <= tol:
+            zero_length_elements.append({"element": eid, "length": length})
+
+    # ── Duplicate / overlapping frames (same unordered node pair) ──
+    pair_map: dict[frozenset, list[str]] = defaultdict(list)
+    for eid, elem in md.frame_elements.items():
+        if getattr(elem, "inactive", False):
+            continue
+        pair_map[frozenset((elem.node_i, elem.node_j))].append(eid)
+    duplicate_elements = [
+        {"nodes": sorted(pair), "elements": elems}
+        for pair, elems in pair_map.items()
+        if len(elems) > 1
+    ]
+
+    # ── Unreferenced assets ──
+    used_sections = set(md.frame_assignments.values()) | set(md.area_assignments.values())
+    unreferenced_sections = [name for name in md.sections if name not in used_sections]
+    used_materials = {sec.material for sec in md.sections.values() if sec.material}
+    unreferenced_materials = [name for name in md.materials if name not in used_materials]
+
+    # ── Loads pointing at missing targets / undefined patterns ──
+    dangling = {"joints": [], "frames": [], "areas": []}
+    used_patterns: set[str] = set()
+    for jl in md.joint_loads:
+        used_patterns.add(jl.pattern)
+        if jl.node_id not in md.nodes:
+            dangling["joints"].append(jl.node_id)
+    for dl in md.frame_dist_loads:
+        used_patterns.add(dl.pattern)
+        if dl.frame_id not in md.frame_elements:
+            dangling["frames"].append(dl.frame_id)
+    for gl in md.frame_gravity_loads:
+        used_patterns.add(gl.pattern)
+        if gl.frame_id not in md.frame_elements:
+            dangling["frames"].append(gl.frame_id)
+    for al in md.area_uniform_loads:
+        used_patterns.add(al.pattern)
+        if al.area_id not in md.area_elements:
+            dangling["areas"].append(al.area_id)
+    for agl in md.area_gravity_loads:
+        used_patterns.add(agl.pattern)
+        if agl.area_id not in md.area_elements:
+            dangling["areas"].append(agl.area_id)
+
+    referenced_in_cases: set[str] = set()
+    for lc in md.load_cases.values():
+        referenced_in_cases |= set(patterns_from_case(lc).keys())
+    active_patterns = used_patterns | referenced_in_cases
+    unknown_patterns = sorted(p for p in active_patterns if p not in md.load_patterns)
+    unreferenced_patterns = [name for name in md.load_patterns if name not in active_patterns]
+
+    result: dict[str, Any] = {
+        "missing_node_refs": missing_node_refs,
+        "unassigned_frames": unassigned_frames,
+        "unassigned_areas": unassigned_areas,
+        "missing_material_refs": missing_material_refs,
+        "zero_length_elements": zero_length_elements,
+        "duplicate_elements": duplicate_elements,
+        "unreferenced_sections": unreferenced_sections,
+        "unreferenced_materials": unreferenced_materials,
+        "unreferenced_patterns": unreferenced_patterns,
+        "dangling_loads": dangling,
+        "unknown_patterns": unknown_patterns,
+    }
+    result["counts"] = {
+        key: len(value) if isinstance(value, list) else sum(len(v) for v in value.values())
+        for key, value in result.items()
+    }
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Engineering observations
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _observations(md: SAPModelData) -> dict[str, Any]:
+    """Derive engineering-review observations from the model data.
+
+    These are not pass/fail checks — they surface modelling choices a
+    reviewer should consciously confirm (support fixity, insertion
+    points, mass source and auto-mesh usage).
+    """
+    restraint_patterns: dict[tuple, int] = defaultdict(int)
+    for restraint in md.restraints.values():
+        restraint_patterns[tuple(restraint.dofs)] += 1
+
+    translation_only = bool(restraint_patterns) and all(
+        pattern[:3] == (1, 1, 1) and pattern[3:] == (0, 0, 0) for pattern in restraint_patterns
+    )
+    fully_fixed = bool(restraint_patterns) and all(all(pattern) for pattern in restraint_patterns)
+
+    non_default_cardinal = [
+        {"element": eid, "cardinal_point": elem.cardinal_point}
+        for eid, elem in md.frame_elements.items()
+        if elem.cardinal_point != 10
+    ]
+
+    mass_source = None
+    for name, ms in md.mass_sources.items():
+        mass_source = {
+            "name": name,
+            "is_default": ms.is_default,
+            "from_elements": ms.elements,
+            "from_masses": ms.masses,
+            "from_loads": ms.loads,
+            "n_patterns": len(ms.load_pattern),
+        }
+        break
+
+    return {
+        "restraint_patterns": {
+            "".join(str(d) for d in pattern): count
+            for pattern, count in sorted(restraint_patterns.items(), key=lambda kv: -kv[1])
+        },
+        "all_translation_only": translation_only,
+        "all_fully_fixed": fully_fixed,
+        "non_default_cardinal_points": non_default_cardinal,
+        "auto_mesh_assigned": len(md.frame_auto_mesh),
+        "mass_source": mass_source,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Optional OpenSees analysis phase
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _run_analysis(md: SAPModelData, config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Run a modal and linear-static analysis to confirm model behaviour.
+
+    This is the optional second phase of the review.  It builds an
+    OpenSees domain via the normal Preprocessor → AnalysisBuilder pipeline
+    and reports dynamic (periods, mass participation) and static
+    (reactions, convergence) results.  Any failure — e.g. a singular
+    stiffness matrix — is captured rather than raised, so a review of a
+    broken model still completes with a diagnostic.
+
+    Args:
+        md: Parsed model data.
+        config: Optional builder config dict.
+
+    Returns:
+        Dict with ``ok``, ``periods``, ``mass_participation``, ``static``
+        and ``error`` keys.
+    """
+    result: dict[str, Any] = {
+        "ok": False,
+        "periods": [],
+        "mass_participation": [],
+        "static": None,
+        "error": None,
+    }
+    try:
+        import openseespy.opensees as ops
+
+        from ..opensees.analysis_builder import AnalysisBuilder
+        from ..opensees.preprocessor import preprocess_model
+    except Exception as exc:  # pragma: no cover - optional environment
+        result["error"] = f"OpenSees not available: {exc}"
+        return result
+
+    builder_config = dict(config or {})
+    builder_config.setdefault("element_type", "elasticBeamColumn")
+    builder_config.setdefault("verbose", False)
+
+    try:
+        mesh = preprocess_model(md, builder_config)
+        builder = AnalysisBuilder(mesh, builder_config)
+        builder.build_domain()
+        builder.compute_seismic_masses()
+
+        modal = builder.run_modal_analysis(
+            num_modes=int(builder_config.get("num_modes", 12)),
+            print_results=False,
+        )
+        periods = list(modal.get("periods", []))
+        props = modal.get("modal_props", {})
+        ratios_mx = props.get("partiMassRatiosMX", [0.0] * len(periods))
+        ratios_my = props.get("partiMassRatiosMY", [0.0] * len(periods))
+        ratios_mz = props.get("partiMassRatiosMZ", [0.0] * len(periods))
+        result["periods"] = periods
+        result["mass_participation"] = [
+            {
+                "mode": i + 1,
+                "period": periods[i],
+                "mx": ratios_mx[i],
+                "my": ratios_my[i],
+                "mz": ratios_mz[i],
+            }
+            for i in range(len(periods))
+        ]
+
+        # Apply gravity load patterns (or all patterns as a fallback) so the
+        # static pass produces a meaningful, non-zero reaction set.
+        gravity = [
+            name for name, lp in md.load_patterns.items() if str(lp.pattern_type).lower() == "dead"
+        ]
+        applied_patterns = gravity or list(md.load_patterns.keys())
+        if applied_patterns:
+            builder.create_loads(pattern_scales=dict.fromkeys(applied_patterns, 1.0))
+
+        static = builder.run_static_analysis(extract_reactions=True)
+        node_reactions = static.get("reactions", {})
+        summed = {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": 0.0, "my": 0.0, "mz": 0.0}
+        for rxn in node_reactions.values():
+            for component in summed:
+                summed[component] += rxn.get(component, 0.0)
+        result["static"] = {
+            "summed_reactions": summed,
+            "n_supports": len(node_reactions),
+            "n_nodes_with_displacement": len(static.get("nodal_displacements", {})),
+            "patterns_applied": applied_patterns,
+        }
+        result["ok"] = True
+    except Exception as exc:
+        result["error"] = f"{type(exc).__name__}: {exc}"
+    finally:
+        with contextlib.suppress(Exception):
+            ops.wipe()
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Public review API
+# ═══════════════════════════════════════════════════════════════════
+
+_BLOCKING_INTEGRITY = (
+    "missing_node_refs",
+    "unassigned_frames",
+    "unassigned_areas",
+    "missing_material_refs",
+    "zero_length_elements",
+    "unknown_patterns",
+)
+
+
+def _is_clean(result: dict[str, Any]) -> bool:
+    """Return True when the review found no blocking issues."""
+    conn = result["connectivity"]
+    if conn["orphan_nodes"] or conn["duplicate_coords"] or conn["floating_components"]:
+        return False
+    counts = result["integrity"]["counts"]
+    if any(counts.get(key) for key in _BLOCKING_INTEGRITY):
+        return False
+    analysis = result.get("analysis")
+    return analysis is None or bool(analysis.get("ok"))
+
+
+def review_model(
+    md: SAPModelData,
+    *,
+    file: Optional[Any] = None,
+    tol: float = 1e-6,
+    include_analysis: bool = False,
+    analysis_config: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Run the full model review on parsed SAP2000 data.
+
+    Args:
+        md: Parsed model data (:class:`SAPModelData`).
+        file: Optional source path recorded in the result.
+        tol: Coordinate / length tolerance for duplicate-coordinate and
+            degenerate-element detection.
+        include_analysis: When True, run the optional OpenSees
+            modal + linear-static phase (requires openseespy; slow).
+        analysis_config: Optional builder config for the analysis phase.
+
+    Returns:
+        A nested dict with keys ``file``, ``units``, ``inventory``,
+        ``breakdown``, ``bounds``, ``connectivity``, ``releases``,
+        ``integrity``, ``observations``, ``analysis`` and ``ok``.
+    """
+    connectivity_report = check_model_connectivity(md, tol=tol)
+    components = _analyse_components(md)
+    floating = [
+        comp
+        for comp in components
+        if not comp["is_supported"] and (comp["n_frames"] + comp["n_areas"]) > 0
+    ]
+
+    result: dict[str, Any] = {
+        "file": str(file) if file is not None else None,
+        "units": dict(md.units),
+        "inventory": _inventory(md),
+        "breakdown": _breakdown(md),
+        "bounds": _bounds(md),
+        "connectivity": {
+            "orphan_nodes": connectivity_report["orphan_nodes"],
+            "duplicate_coords": connectivity_report["duplicate_coords"],
+            "shell_only_base_nodes": connectivity_report["shell_only_base_nodes"],
+            "zero_area_sections": connectivity_report["zero_area_sections"],
+            "n_components": len(components),
+            "components": components,
+            "floating_components": floating,
+        },
+        "releases": _release_summary(md),
+        "integrity": _integrity(md, tol),
+        "observations": _observations(md),
+        "analysis": _run_analysis(md, analysis_config) if include_analysis else None,
+    }
+    result["ok"] = _is_clean(result)
+    return result
+
+
+def review_s2k_file(
+    path: Any,
+    *,
+    tol: float = 1e-6,
+    include_analysis: bool = False,
+    analysis_config: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Parse a ``.s2k`` file and run the full review on it.
+
+    Args:
+        path: Path to the ``.s2k`` / ``.e2k`` file.
+        tol: Forwarded to :func:`review_model`.
+        include_analysis: Forwarded to :func:`review_model`.
+        analysis_config: Forwarded to :func:`review_model`.
+
+    Returns:
+        The review result dict (see :func:`review_model`).
+    """
+    from ..io.s2k_parser import SAP2000Parser
+
+    source = Path(path)
+    parser = SAP2000Parser(source)
+    parser.parse()
+    md = parser.get_model_data()
+    return review_model(
+        md,
+        file=source,
+        tol=tol,
+        include_analysis=include_analysis,
+        analysis_config=analysis_config,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Reporting
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _display_modes(
+    analysis: dict[str, Any],
+    max_modes: int = 0,
+    min_participation: float = 0.0,
+) -> tuple[list[dict[str, Any]], int]:
+    """Select the modal rows a report should display.
+
+    Args:
+        analysis: The ``analysis`` sub-dict of a review result.
+        max_modes: Cap on the number of rows displayed; ``0`` (or ``None``)
+            shows every mode.
+        min_participation: Drop modes whose largest translational mass
+            participation (the max of ``MX`` / ``MY`` / ``MZ``, in percent)
+            falls below this value.  ``0.0`` keeps every mode.
+
+    Returns:
+        ``(rows, hidden)`` — the rows to display, in mode order, and the
+        number of rows suppressed by the two filters combined.
+    """
+    rows = list(analysis.get("mass_participation") or [])
+    total = len(rows)
+    if min_participation and min_participation > 0.0:
+        rows = [
+            row
+            for row in rows
+            if max(
+                abs(float(row.get("mx", 0.0))),
+                abs(float(row.get("my", 0.0))),
+                abs(float(row.get("mz", 0.0))),
+            )
+            >= min_participation
+        ]
+    if max_modes and max_modes > 0:
+        rows = rows[:max_modes]
+    return rows, total - len(rows)
+
+
+def format_review_report(
+    result: dict[str, Any],
+    max_modes: int = 0,
+    min_participation: float = 0.0,
+) -> str:
+    """Render a review result as a plain-text report.
+
+    Args:
+        result: Review dict returned by :func:`review_model`.
+        max_modes: Cap on the number of modal rows displayed; ``0`` shows
+            every computed mode (the default).
+        min_participation: Hide modes whose largest translational mass
+            participation is below this percentage (``0.0`` = show all).
+
+    Returns:
+        A multi-line plain-text report.
+    """
+    inv = result["inventory"]
+    breakdown = result["breakdown"]
+    conn = result["connectivity"]
+    releases = result["releases"]
+    integrity = result["integrity"]
+    observations = result["observations"]
+    units = result["units"]
+    lu = units.get("L", "m")
+
+    lines: list[str] = []
+    add = lines.append
+
+    add("=" * 70)
+    add("SAP2000 MODEL REVIEW")
+    if result.get("file"):
+        add(f"  File : {result['file']}")
+    add(f"  Units: {units.get('F')}, {units.get('L')}, {units.get('T')}")
+    add(f"  Status: {'PASS - no blocking issues' if result['ok'] else 'ISSUES FOUND'}")
+    add("=" * 70)
+
+    add("")
+    add("-- Inventory " + "-" * 57)
+    for key, value in inv.items():
+        add(f"  {key:<34}{value:>10}")
+
+    add("")
+    add("-- Breakdown " + "-" * 57)
+    for name, counts in breakdown.items():
+        if not counts:
+            continue
+        add(f"  {name}:")
+        for key, value in counts.items():
+            add(f"      {key:<26}{value:>8}")
+
+    bounds = result.get("bounds")
+    if bounds:
+        add("")
+        add("-- Bounding box " + "-" * 54)
+        add(
+            f"  X: {bounds['x_min']:.3f} .. {bounds['x_max']:.3f}  (span {bounds['x_span']:.3f} {lu})"
+        )
+        add(
+            f"  Y: {bounds['y_min']:.3f} .. {bounds['y_max']:.3f}  (span {bounds['y_span']:.3f} {lu})"
+        )
+        add(
+            f"  Z: {bounds['z_min']:.3f} .. {bounds['z_max']:.3f}  (span {bounds['z_span']:.3f} {lu})"
+        )
+
+    add("")
+    add("-- Connectivity " + "-" * 54)
+    add(f"  Connected components:                {conn['n_components']:>8}")
+    add(f"  Orphan (loose) nodes:                {len(conn['orphan_nodes']):>8}")
+    add(f"  Duplicate coordinates:               {len(conn['duplicate_coords']):>8}")
+    add(f"  Floating sub-structures (unsupported):{len(conn['floating_components']):>7}")
+    for comp in conn["floating_components"]:
+        add(f"      - nodes={comp['n_nodes']} frames={comp['n_frames']} areas={comp['n_areas']}")
+
+    add("")
+    add("-- Element releases " + "-" * 50)
+    add(f"  Frames with releases: {releases['n_frames_with_releases']}")
+    if releases["n_frames_with_releases"]:
+        for key, value in releases["by_dof"].items():
+            if value:
+                add(f"      {key:<6}{value:>8}")
+
+    add("")
+    add("-- Integrity " + "-" * 57)
+    for key, value in integrity["counts"].items():
+        add(f"  {key:<34}{value:>7}  [{'OK' if value == 0 else 'REVIEW'}]")
+
+    add("")
+    add("-- Observations " + "-" * 54)
+    add(f"  Support DOF patterns: {observations['restraint_patterns']}")
+    if observations["all_translation_only"]:
+        add("  All supports are translation-only (pinned / simply supported bases).")
+    if observations["all_fully_fixed"]:
+        add("  All supports are fully fixed.")
+    add(
+        f"  Non-default insertion (cardinal) points: {len(observations['non_default_cardinal_points'])}"
+    )
+    add(f"  Frames with auto-mesh assignment: {observations['auto_mesh_assigned']}")
+    ms = observations["mass_source"]
+    if ms is None:
+        add("  Mass source: NONE DEFINED")
+    else:
+        add(
+            f"  Mass source: '{ms['name']}' (default={ms['is_default']}, "
+            f"elements={ms['from_elements']}, masses={ms['from_masses']}, "
+            f"loads={ms['from_loads']}, patterns={ms['n_patterns']})"
+        )
+
+    analysis = result.get("analysis")
+    if analysis is not None:
+        add("")
+        add("-- Analysis (OpenSees) " + "-" * 47)
+        if analysis["ok"]:
+            add(f"  Static + modal: OK ({len(analysis['periods'])} modes)")
+            rows, hidden = _display_modes(analysis, max_modes, min_participation)
+            for row in rows:
+                add(
+                    f"      mode {row['mode']}: T={row['period']:.4f}s  "
+                    f"MX={row['mx']:.1f}% MY={row['my']:.1f}% MZ={row['mz']:.1f}%"
+                )
+            if hidden:
+                add(f"      ... {hidden} further mode(s) not shown")
+            reactions = analysis.get("static", {}).get("summed_reactions")
+            add(f"  Patterns applied: {analysis.get('static', {}).get('patterns_applied')}")
+            add(f"  Supports with reactions: {analysis.get('static', {}).get('n_supports')}")
+            add(f"  Summed reactions: {reactions}")
+        else:
+            add(f"  FAILED: {analysis['error']}")
+
+    add("")
+    add("=" * 70)
+    return "\n".join(lines)
+
+
+def print_review_report(
+    result: dict[str, Any],
+    max_modes: int = 0,
+    min_participation: float = 0.0,
+) -> None:
+    """Print the plain-text review report (see :func:`format_review_report`).
+
+    Args:
+        result: Review dict returned by :func:`review_model`.
+        max_modes: Cap on the number of modal rows displayed (``0`` = all).
+        min_participation: Hide modes below this mass-participation
+            percentage (``0.0`` = show all).
+    """
+    print(format_review_report(result, max_modes=max_modes, min_participation=min_participation))
+
+
+def format_review_markdown(
+    result: dict[str, Any],
+    max_modes: int = 0,
+    min_participation: float = 0.0,
+) -> str:
+    """Render a review result as a Markdown document.
+
+    Args:
+        result: Review dict returned by :func:`review_model`.
+        max_modes: Cap on the number of modal rows displayed; ``0`` shows
+            every computed mode (the default).
+        min_participation: Hide modes whose largest translational mass
+            participation is below this percentage (``0.0`` = show all).
+
+    Returns:
+        A Markdown string with inventory, connectivity, releases,
+        integrity and observation sections.
+    """
+    inv = result["inventory"]
+    units = result["units"]
+    conn = result["connectivity"]
+    releases = result["releases"]
+    integrity = result["integrity"]
+    observations = result["observations"]
+
+    md: list[str] = []
+    add = md.append
+    add("# SAP2000 Model Review")
+    add("")
+    if result.get("file"):
+        add(f"**File:** `{result['file']}`  ")
+    add(f"**Units:** {units.get('F')}, {units.get('L')}, {units.get('T')}  ")
+    add(f"**Status:** {'PASS - no blocking issues' if result['ok'] else 'ISSUES FOUND'}")
+    add("")
+
+    add("## Inventory")
+    add("")
+    add("| Object | Count |")
+    add("|---|---:|")
+    for key, value in inv.items():
+        add(f"| {key.replace('_', ' ')} | {value} |")
+    add("")
+
+    add("## Breakdown")
+    add("")
+    for name, counts in result["breakdown"].items():
+        if not counts:
+            continue
+        joined = ", ".join(f"`{key}`={value}" for key, value in counts.items())
+        add(f"**{name.replace('_', ' ')}:** {joined}")
+        add("")
+
+    add("## Connectivity")
+    add("")
+    add(f"- Connected components: **{conn['n_components']}**")
+    add(f"- Orphan (loose) nodes: **{len(conn['orphan_nodes'])}**")
+    add(f"- Duplicate coordinates: **{len(conn['duplicate_coords'])}**")
+    add(f"- Floating sub-structures (no support): **{len(conn['floating_components'])}**")
+    add("")
+
+    add("## Element releases")
+    add("")
+    add(f"Frames with releases: **{releases['n_frames_with_releases']}**")
+    add("")
+    if releases["n_frames_with_releases"]:
+        add("| Frame | End I | End J |")
+        add("|---|---|---|")
+        for row in releases["releases"][:100]:
+            end_i = ", ".join(row["end_i"]) or "—"
+            end_j = ", ".join(row["end_j"]) or "—"
+            add(f"| {row['frame_id']} | {end_i} | {end_j} |")
+        add("")
+
+    add("## Integrity")
+    add("")
+    add("| Check | Count | Status |")
+    add("|---|---:|---|")
+    for key, value in integrity["counts"].items():
+        add(f"| {key.replace('_', ' ')} | {value} | {'OK' if value == 0 else 'REVIEW'} |")
+    add("")
+
+    add("## Observations")
+    add("")
+    add(f"- Support DOF patterns (U1U2U3R1R2R3): `{observations['restraint_patterns']}`")
+    add(f"- All supports translation-only: **{observations['all_translation_only']}**")
+    add(f"- All supports fully fixed: **{observations['all_fully_fixed']}**")
+    add(f"- Non-default insertion points: **{len(observations['non_default_cardinal_points'])}**")
+    add(f"- Frames with auto-mesh: **{observations['auto_mesh_assigned']}**")
+    ms = observations["mass_source"]
+    add(f"- Mass source: **{ms['name'] if ms else 'NONE'}**")
+    add("")
+
+    analysis = result.get("analysis")
+    if analysis is not None:
+        add("## Analysis (OpenSees)")
+        add("")
+        if analysis["ok"]:
+            add(f"Static + modal completed ({len(analysis['periods'])} modes).")
+            add("")
+            add("| Mode | Period (s) | Mx % | My % | Mz % |")
+            add("|---:|---:|---:|---:|---:|")
+            rows, hidden = _display_modes(analysis, max_modes, min_participation)
+            for row in rows:
+                add(
+                    f"| {row['mode']} | {row['period']:.4f} | "
+                    f"{row['mx']:.1f} | {row['my']:.1f} | {row['mz']:.1f} |"
+                )
+            if hidden:
+                add("")
+                add(f"_{hidden} further mode(s) not shown._")
+            reactions = analysis.get("static", {}).get("summed_reactions")
+            if reactions:
+                add("")
+                add(f"Summed reactions: `{reactions}`")
+        else:
+            add(f"**FAILED:** {analysis['error']}")
+        add("")
+
+    return "\n".join(md)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Command-line interface
+# ═══════════════════════════════════════════════════════════════════
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    """Command-line entry point for the SAP2000 model review.
+
+    The model file is always supplied by the caller — nothing is
+    hard-coded to a project directory.
+
+    Usage::
+
+        python -m fea_toolkit.model.review path/to/model.s2k
+        python -m fea_toolkit.model.review model.s2k --analysis
+        python -m fea_toolkit.model.review model.s2k --format markdown --out review.md
+        python -m fea_toolkit.model.review model.s2k --analysis --min-participation 1
+        python -m fea_toolkit.model.review model.s2k --analysis --max-modes 3
+
+    Args:
+        argv: Optional argument list (defaults to ``sys.argv[1:]``).
+
+    Returns:
+        Process exit code: ``0`` when the review is clean, ``1`` when
+        issues were found, ``2`` on a usage/file error.
+    """
+    parser = argparse.ArgumentParser(
+        prog="fea_toolkit.model.review",
+        description="Review and check a SAP2000 .s2k model file.",
+    )
+    parser.add_argument("path", help="Path to the .s2k / .e2k file to review.")
+    parser.add_argument(
+        "--analysis",
+        action="store_true",
+        help="Run the optional OpenSees modal + linear-static pass.",
+    )
+    parser.add_argument(
+        "--tol",
+        type=float,
+        default=1e-6,
+        help="Coordinate / length tolerance (default: 1e-6).",
+    )
+    parser.add_argument(
+        "--format",
+        choices=("text", "markdown"),
+        default="text",
+        help="Report format (default: text).",
+    )
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="Write the report to this file instead of stdout.",
+    )
+    parser.add_argument(
+        "--num-modes",
+        type=int,
+        default=12,
+        help="Number of modes to compute in the analysis pass (default: 12).",
+    )
+    parser.add_argument(
+        "--max-modes",
+        type=int,
+        default=0,
+        help="Cap the number of modal rows shown in the report (default: 0 = all).",
+    )
+    parser.add_argument(
+        "--min-participation",
+        type=float,
+        default=0.0,
+        metavar="PCT",
+        help=(
+            "Hide modes whose largest translational mass participation "
+            "(max of MX/MY/MZ) is below PCT percent (default: 0 = show all)."
+        ),
+    )
+    args = parser.parse_args(argv)
+
+    source = Path(args.path)
+    if not source.is_file():
+        print(f"error: file not found: {source}", file=sys.stderr)
+        return 2
+
+    result = review_s2k_file(
+        source,
+        tol=args.tol,
+        include_analysis=args.analysis,
+        analysis_config={"num_modes": args.num_modes} if args.analysis else None,
+    )
+    report = (
+        format_review_markdown(
+            result,
+            max_modes=args.max_modes,
+            min_participation=args.min_participation,
+        )
+        if args.format == "markdown"
+        else format_review_report(
+            result,
+            max_modes=args.max_modes,
+            min_participation=args.min_participation,
+        )
+    )
+
+    if args.out:
+        Path(args.out).write_text(report, encoding="utf-8")
+        print(f"Report written to {args.out}")
+    else:
+        print(report)
+
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

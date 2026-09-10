@@ -155,18 +155,36 @@ _STOREY_RESPONSE_NAMES = frozenset(
     }
 )
 
+# The ``review`` module is the ``python -m fea_toolkit.model.review`` entry
+# point.  It is resolved lazily so that importing the ``model`` package never
+# eagerly imports the module that runpy is about to execute as ``__main__``
+# (which would emit a RuntimeWarning).
+_REVIEW_NAMES = frozenset(
+    {
+        "format_review_markdown",
+        "format_review_report",
+        "print_review_report",
+        "review_model",
+        "review_s2k_file",
+    }
+)
+
 
 def __getattr__(name: str):
-    """PEP 562 lazy resolution for the pandas-dependent storey-response API."""
+    """PEP 562 lazy resolution for the storey-response and review APIs."""
     if name in _STOREY_RESPONSE_NAMES:
         from . import storey_response
 
         return getattr(storey_response, name)
+    if name in _REVIEW_NAMES:
+        from . import review
+
+        return getattr(review, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def __dir__():
-    return sorted(set(globals()) | set(_STOREY_RESPONSE_NAMES))
+    return sorted(set(globals()) | set(_STOREY_RESPONSE_NAMES) | set(_REVIEW_NAMES))
 
 
 __all__ = [
@@ -253,6 +271,8 @@ __all__ = [
     "convert_mesh_units",
     "find_constraint_edges",
     "find_wall_nodes_inside_slabs",
+    "format_review_markdown",
+    "format_review_report",
     "frame_split_summary",
     "get_SAP_vecxz",
     "get_bilinearize_method",
@@ -269,6 +289,7 @@ __all__ = [
     "peak_displacement",
     "plot_stories",
     "polygon_area_3d",
+    "print_review_report",
     "print_wall_inside_slab_report",
     # CSM
     "pushover_to_adrs",
@@ -276,6 +297,8 @@ __all__ = [
     "remove_floating_nodes",
     # Source resolution
     "resolve_model_source",
+    "review_model",
+    "review_s2k_file",
     "rigid_body_fit",
     "split_areas_at_frame_edges",
     # Geometry

@@ -119,6 +119,9 @@ _LAZY_IMPORTS: dict[str, str] = {
     # Report
     "generate_report": "fea_toolkit.report",
     "ResponseSpectrum": "fea_toolkit.spectrum",
+    # Model review
+    "review_model": "fea_toolkit.model.review",
+    "review_s2k_file": "fea_toolkit.model.review",
 }
 
 # Model-layer names that are cheap and importable without the solver.
@@ -184,6 +187,8 @@ __all__ = [
     "plot_pushover_curve",
     "preprocess_model",
     "pushover_rc_openseespy",
+    "review_model",
+    "review_s2k_file",
     "run_modal",
 ]
 
