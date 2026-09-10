@@ -20,6 +20,7 @@ from ..model.sap_data import (
     FrameDistributedLoad,
     FrameElement,
     FrameEndOffset,
+    FrameRelease,
     GravityLoad,
     Group,
     JointLoad,
@@ -272,6 +273,7 @@ class SAP2000Parser:
         model_units = self.get_model_units()
         frame_auto_mesh = self._get_frame_auto_mesh()
         frame_end_offsets = self._get_frame_end_offsets()
+        frame_releases = self._get_frame_releases()
         area_mesh = self._get_area_mesh_assignments()
         area_edge_constraints = self._get_area_edge_constraints()
         constraints = self._get_constraints()
@@ -320,6 +322,7 @@ class SAP2000Parser:
             groups=groups,
             frame_auto_mesh=frame_auto_mesh,
             frame_end_offsets=frame_end_offsets,
+            frame_releases=frame_releases,
             area_mesh=area_mesh,
             area_edge_constraints=area_edge_constraints,
             constraints=constraints,
@@ -738,6 +741,117 @@ class SAP2000Parser:
             )
             tag += 1
         return elements
+
+    # DOF columns in SAP2000's "FRAME RELEASE ASSIGNMENTS 1 - GENERAL" table.
+    _RELEASE_END_I_KEYS = ("PI", "V2I", "V3I", "TI", "M2I", "M3I")
+    _RELEASE_END_J_KEYS = ("PJ", "V2J", "V3J", "TJ", "M2J", "M3J")
+    # Table names that carry frame end-release data (modern + legacy).
+    _RELEASE_TABLE_NAMES = (
+        "FRAME RELEASE ASSIGNMENTS 1 - GENERAL",
+        "FRAME RELEASES",
+        "FRAME RELEASE ASSIGNMENTS",
+    )
+    # Companion table carrying partial-fixity spring stiffnesses.
+    _PARTIAL_FIXITY_TABLE_NAMES = ("FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY",)
+
+    @staticmethod
+    def _coerce_release_flag(value: Any) -> int:
+        """Coerce a release cell to ``1`` (released) / ``0`` (connected).
+
+        The generic table parser already turns ``Yes``/``No`` into booleans,
+        but this also tolerates numeric ``0``/``1`` and raw strings.
+        """
+        if isinstance(value, bool):
+            return 1 if value else 0
+        if isinstance(value, (int, float)):
+            return 1 if value else 0
+        if isinstance(value, str):
+            return 1 if value.strip().lower() in ("yes", "true", "1") else 0
+        return 0
+
+    @staticmethod
+    def _coerce_release_spring(value: Any) -> Optional[float]:
+        """Coerce a partial-fixity cell to a positive stiffness, else ``None``.
+
+        SAP2000 writes ``0`` (or omits the value) for a full release; a
+        positive value is the semi-rigid spring stiffness (force/length for
+        translational DOFs, moment/radian for rotational DOFs) in model
+        units.  Non-positive / unparsable entries return ``None`` so they
+        are treated as full releases.
+        """
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, str):
+            text = value.strip()
+            if not text or text.lower() in ("no", "none", "n.a.", "na"):
+                return None
+            try:
+                value = float(text)
+            except ValueError:
+                return None
+        try:
+            stiffness = float(value)
+        except (TypeError, ValueError):
+            return None
+        return stiffness if stiffness > 0 else None
+
+    def _get_frame_releases(self) -> dict[str, FrameRelease]:
+        """Extract frame end releases from the FRAME RELEASE table(s).
+
+        Supports the modern ``"FRAME RELEASE ASSIGNMENTS 1 - GENERAL"``
+        table (columns ``PI, V2I, V3I, TI, M2I, M3I`` / ``PJ, V2J, ...``)
+        and the legacy ``"FRAME RELEASES"`` table.  Rows for the same frame
+        are merged, so a model that lists the I-end and J-end columns in
+        separate blocks is handled correctly.
+
+        Only frames with at least one released DOF are returned.
+        """
+        releases: dict[str, FrameRelease] = {}
+        for table_name in self._RELEASE_TABLE_NAMES:
+            for rec in self._raw_tables.get(table_name, []):
+                raw_id = rec.get("Frame")
+                if raw_id is None:
+                    continue
+                fid = str(raw_id)
+                rel = releases.get(fid)
+                if rel is None:
+                    rel = FrameRelease(frame_id=fid)
+                    releases[fid] = rel
+                for idx, key in enumerate(self._RELEASE_END_I_KEYS):
+                    if key in rec:
+                        rel.end_i[idx] = self._coerce_release_flag(rec[key])
+                for idx, key in enumerate(self._RELEASE_END_J_KEYS):
+                    if key in rec:
+                        rel.end_j[idx] = self._coerce_release_flag(rec[key])
+
+        # ── Partial-fixity springs (semi-rigid connections) ──────────
+        # A non-zero spring value marks a released DOF as semi-rigid.  The
+        # DOF is force-released so downstream consumers always see
+        # "released + spring", matching SAP2000's requirement.
+        for table_name in self._PARTIAL_FIXITY_TABLE_NAMES:
+            for rec in self._raw_tables.get(table_name, []):
+                raw_id = rec.get("Frame")
+                if raw_id is None:
+                    continue
+                fid = str(raw_id)
+                rel = releases.get(fid)
+                if rel is None:
+                    rel = FrameRelease(frame_id=fid)
+                    releases[fid] = rel
+                for idx, key in enumerate(self._RELEASE_END_I_KEYS):
+                    if key in rec:
+                        stiffness = self._coerce_release_spring(rec[key])
+                        if stiffness is not None:
+                            rel.end_i_k[idx] = stiffness
+                            rel.end_i[idx] = 1
+                for idx, key in enumerate(self._RELEASE_END_J_KEYS):
+                    if key in rec:
+                        stiffness = self._coerce_release_spring(rec[key])
+                        if stiffness is not None:
+                            rel.end_j_k[idx] = stiffness
+                            rel.end_j[idx] = 1
+
+        return {fid: rel for fid, rel in releases.items() if rel.has_releases}
 
     def _get_area_elements(self) -> dict[str, AreaElement]:
         """Extract area elements from CONNECTIVITY - AREA table.

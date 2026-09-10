@@ -101,6 +101,81 @@ class FrameEndOffset:
     off_z_j: float = 0.0  # Lateral z-offset at J-end (from cardinal pt)
 
 
+# Local DOF order used by SAP2000 frame end releases.
+# P = axial, V2/V3 = shear (local 2/3), T = torsion, M2/M3 = moment (local 2/3).
+FRAME_RELEASE_DOF_LABELS = ("P", "V2", "V3", "T", "M2", "M3")
+
+
+@dataclass
+class FrameRelease:
+    """Frame element end-release and partial-fixity assignment.
+
+    Mirrors SAP2000's *"FRAME RELEASE ASSIGNMENTS 1 - GENERAL"* table
+    (columns ``PI, V2I, V3I, TI, M2I, M3I`` for End I and
+    ``PJ, V2J, V3J, TJ, M2J, M3J`` for End J — each a Yes/No release
+    flag) plus the companion *"... 2 - PARTIAL FIXITY"* table which
+    supplies a spring stiffness for released DOFs.
+
+    ``end_i`` / ``end_j`` are 6-element int lists ordered
+    ``[P, V2, V3, T, M2, M3]`` where ``1`` = released (freed) and
+    ``0`` = connected (rigid).
+
+    ``end_i_k`` / ``end_j_k`` carry the partial-fixity spring stiffness
+    (model units — force/length for translational DOFs, moment/radian for
+    rotational DOFs) for each local DOF, parallel to ``end_i``/``end_j``.
+    ``None`` means "no spring" (a full release, or a fully connected
+    DOF); a positive value marks semi-rigid (partial-fixity) behaviour.
+    SAP2000 requires the DOF to be released before a partial-fixity
+    spring may be specified.
+    """
+
+    frame_id: str
+    end_i: list[int] = field(default_factory=lambda: [0] * 6)
+    end_j: list[int] = field(default_factory=lambda: [0] * 6)
+    end_i_k: list[Optional[float]] = field(default_factory=lambda: [None] * 6)
+    end_j_k: list[Optional[float]] = field(default_factory=lambda: [None] * 6)
+
+    def _flags(self, end: str) -> list[int]:
+        return self.end_i if end.upper() == "I" else self.end_j
+
+    def released_labels(self, end: str) -> list[str]:
+        """Return released local-DOF labels for ``end`` (``"I"`` or ``"J"``).
+
+        Args:
+            end: ``"I"`` or ``"J"`` (case-insensitive) selecting the end.
+
+        Returns:
+            List of released DOF labels, e.g. ``["M2", "M3"]``.  Empty when
+            the end is fully connected.
+        """
+        return [lab for lab, flag in zip(FRAME_RELEASE_DOF_LABELS, self._flags(end)) if flag]
+
+    def released_indices(self, end: str) -> list[int]:
+        """Return 0-based indices of released DOFs for ``end``.
+
+        Index ``i`` corresponds to OpenSees local DOF ``i + 1``
+        (see :data:`FRAME_RELEASE_DOF_LABELS`).  **All** released DOFs are
+        returned, including those carrying a partial-fixity spring — use
+        ``end_i_k`` / ``end_j_k`` (or :attr:`has_partial_fixity`) to
+        distinguish a fully released DOF (no spring) from a semi-rigid one.
+        """
+        return [i for i, flag in enumerate(self._flags(end)) if flag]
+
+    def retained_indices(self, end: str) -> list[int]:
+        """Return 0-based indices of retained (rigidly connected) DOFs."""
+        return [i for i, flag in enumerate(self._flags(end)) if not flag]
+
+    @property
+    def has_releases(self) -> bool:
+        """True when at least one DOF is released at either end."""
+        return any(self.end_i) or any(self.end_j)
+
+    @property
+    def has_partial_fixity(self) -> bool:
+        """True when any released DOF carries a partial-fixity spring."""
+        return any(k for k in self.end_i_k if k) or any(k for k in self.end_j_k if k)
+
+
 @dataclass
 class AreaMesh:
     """Auto-mesh settings for an area element (from AREA MESH ASSIGNMENTS).
@@ -1725,6 +1800,8 @@ class SAPModelData:
     groups: dict[str, Group]
     frame_auto_mesh: dict[str, dict[str, Any]]  # frame_id -> auto mesh settings
     frame_end_offsets: dict[str, FrameEndOffset] = field(default_factory=dict)
+    # Frame end releases keyed by frame ID (frames with no release are absent).
+    frame_releases: dict[str, FrameRelease] = field(default_factory=dict)
     area_mesh: dict[str, AreaMesh] = field(default_factory=dict)
     area_edge_constraints: dict[str, list[AreaEdgeConstraint]] = field(default_factory=dict)
     # Joint constraint definitions keyed by constraint name (e.g. "D1", "BODY1").
