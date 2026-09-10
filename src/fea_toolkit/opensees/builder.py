@@ -442,11 +442,22 @@ def export_model_to_tcl(
                 )
 
     # ── Member end releases / partial fixity ─────────────────────
+    # Release elements must not clash with any element tag emitted by this
+    # exporter: frame elements, area (shell) elements and wall macro-elements
+    # all share the OpenSees element-tag namespace.
+    _release_start_elem_tag = (
+        max(
+            [e.elem_tag for e in model_data.frame_elements.values()]
+            + [ae.area_tag for ae in model_data.area_elements.values()]
+            + [w.elem_tag for w in getattr(model_data, "wall_elements", {}).values()],
+            default=0,
+        )
+        + 1
+    )
     lines.extend(
         emit_release_tcl(
             _release_plan,
-            start_elem_tag=max((e.elem_tag for e in model_data.frame_elements.values()), default=0)
-            + 1,
+            start_elem_tag=_release_start_elem_tag,
             start_mat_tag=max(_mat_tag.values(), default=0) + 1000,
         )
     )

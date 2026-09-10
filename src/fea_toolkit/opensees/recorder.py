@@ -704,6 +704,16 @@ def export_mesh_model_to_tcl(
         if sn:
             _assigned_to_frames.add(sn)
 
+    # ── Material-tag allocation counter (shared by sections + releases) ──
+    # _rc_mat_tags[mat_name] = (concrete_unconf, concrete_conf, rebar_tag)
+    # _next_mat_tag starts one past the highest pre-computed material tag and
+    # is advanced as nonlinear fiber materials are emitted, so it always points
+    # one past the highest material tag actually allocated.  The member-end
+    # release springs reuse it (see ``start_mat_tag`` below) so their Elastic
+    # tags cannot collide with any earlier ``uniaxialMaterial`` definition.
+    _rc_mat_tags: dict[str, tuple[int, int, int]] = {}
+    _next_mat_tag = max(mat_tags.values(), default=0) + 1
+
     lines.append('puts "-> Materials defined, creating frame sections..."')
     lines.append("flush stdout")
 
@@ -723,11 +733,6 @@ def export_mesh_model_to_tcl(
                     fiber_sec_names.add(sec_name)
                 except NotImplementedError:
                     pass
-
-        # ── Track which (material, is_rc) groups have emitted nonlinear mats ──
-        # _rc_mat_tags[mat_name] = (concrete_unconf, concrete_conf, rebar_tag)
-        _rc_mat_tags: dict[str, tuple[int, int, int]] = {}
-        _next_mat_tag = max(mat_tags.values(), default=0) + 1
 
         for sec_name, sec in mesh_model.sections.items():
             tag = sec_tags.get(sec_name)
@@ -1072,7 +1077,7 @@ def export_mesh_model_to_tcl(
             emit_release_tcl(
                 _release_plan,
                 start_elem_tag=max(frame_tag_map.values(), default=0) + 1,
-                start_mat_tag=max(mat_tags.values(), default=0) + 1000,
+                start_mat_tag=_next_mat_tag,
             )
         )
 
