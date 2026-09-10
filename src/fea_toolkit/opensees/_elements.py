@@ -1071,12 +1071,20 @@ class ElementMixin:
 
         # ── Idempotency: preserve canonical endpoints on first call ──
         # Restoration is handled by _restore_release_canonical_state().
+        # When bond-slip springs have already run (they precede this method
+        # in build_domain), the frame elements are re-pointed to their
+        # *_bond_i / *_bond_j nodes, so capture the true pre-instrumentation
+        # endpoints from the bond canonical map instead of the current
+        # (bond) node ids.
         if not hasattr(self, "_release_canonical_elements"):
-            self._release_canonical_elements = {
-                eid: (elem.node_i, elem.node_j)
-                for eid, elem in self.mesh_model.frame_elements.items()
-                if not getattr(elem, "inactive", False)
-            }
+            if hasattr(self, "_bond_canonical_elements"):
+                self._release_canonical_elements = dict(self._bond_canonical_elements)
+            else:
+                self._release_canonical_elements = {
+                    eid: (elem.node_i, elem.node_j)
+                    for eid, elem in self.mesh_model.frame_elements.items()
+                    if not getattr(elem, "inactive", False)
+                }
 
         # Shared planner (also used by the Tcl export paths).  It owns the
         # η/μ scaling, the partial-fixity springs, the zero-length guard and
