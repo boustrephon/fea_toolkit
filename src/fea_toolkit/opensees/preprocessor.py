@@ -220,10 +220,12 @@ class Preprocessor:
             if parent_id and parent_id in frame_element_types:
                 frame_element_types[child_id] = frame_element_types[parent_id]
 
-        # ── 2b. Re-map frame end releases onto active leaves ──────
-        # A release is an end property of the original member; after
-        # splitting it belongs to the first/last leaf of the chain.
-        frame_releases = _remap_frame_releases(getattr(md, "frame_releases", {}) or {}, new_elems)
+        # ── 2b. Frame end releases ────────────────────────────────
+        # NOTE: releases are re-mapped onto the final active leaves *after*
+        # every frame-splitting pass (interior joints, frame end offsets and
+        # shell-node subdivision) — see step 7b below — so a release keyed to
+        # an inactive parent ends up on the correct ultimate leaf before
+        # ``plan_releases`` consumes it.
 
         # ── 3. Frame end offsets ─────────────────────────────────
         offset_rigid_links: list[tuple] = []
@@ -386,6 +388,15 @@ class Preprocessor:
         # The per-group components preserve S2K constraint identity so
         # independent diaphragms at the same elevation stay separate.
         diaphragm_levels, diaphragm_components = self._detect_diaphragm_levels(md)
+
+        # ── 7b. Re-map frame end releases onto final active leaves ──
+        # A release is an end property of the original member; after all
+        # splitting it belongs to the first/last leaf of the chain.  This
+        # runs on the final ``new_elems`` (post shell-node split) so releases
+        # keyed to parents deactivated by any splitting pass are transferred
+        # to the correct ultimate leaves before ``plan_releases`` consumes
+        # them.
+        frame_releases = _remap_frame_releases(getattr(md, "frame_releases", {}) or {}, new_elems)
 
         # ── 8. Build MeshModel ───────────────────────────────────
         base_z = min((nd.z for nd in md.nodes.values()), default=None)
@@ -1050,11 +1061,15 @@ class Preprocessor:
                 angle=elem.angle,
                 inactive=False,
                 parent_id=eid,
-                child_ids=child_ids,
             )
             new_assigns[child_id] = frame_assignments.get(eid, "")
             if eid in updated_types:
                 updated_types[child_id] = updated_types[eid]
+
+            # Record the immediate children on the parent so tree traversal
+            # (``collect_descendants()``) can reach the active leaves after
+            # the parent is marked inactive below.
+            elem.child_ids = child_ids
 
             # Compute per-child parametric boundaries from split-node positions
             boundaries = [0.0] + [t for t, _ in t_values] + [1.0]
@@ -1109,11 +1124,15 @@ class Preprocessor:
             elem.inactive = True
             _split_frame_ids.add(eid)
 
-        # Include non-split frames and remaining loads
+        # Include every frame — active elements, parents newly deactivated by
+        # this pass, and inactive parents from earlier splitting passes.
+        # Retaining inactive parents keeps the parent→child tree intact so
+        # ``collect_descendants()`` (release re-mapping, NPZ parent lookup)
+        # can still reach the ultimate active leaves; the AnalysisBuilder
+        # skips inactive elements.
         for eid, elem in frame_elements.items():
-            if not getattr(elem, "inactive", False):
-                new_frames[eid] = elem
-                new_assigns[eid] = frame_assignments.get(eid, "")
+            new_frames[eid] = elem
+            new_assigns[eid] = frame_assignments.get(eid, "")
         # Append every source load whose frame was not split.  Multiple
         # load records for the same unsplit frame (different patterns,
         # directions, or spans) are all preserved — no frame_id-based

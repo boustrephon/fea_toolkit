@@ -4,6 +4,7 @@ import pytest
 
 from fea_toolkit import SAP2000Parser, preprocess_model
 from fea_toolkit.model.sap_data import (
+    AreaElement,
     FrameElement,
     FrameRelease,
     Material,
@@ -342,6 +343,63 @@ class TestSplitRemap:
         rel = FrameRelease("S1", end_i=[0, 0, 0, 0, 0, 1])
         remapped = _remap_frame_releases({"S1": rel}, {"S1": elem})
         assert remapped["S1"] is rel
+
+    def test_release_remapped_when_frame_split_by_shell_subdiv(self):
+        """Full ``Preprocessor.run`` keeps releases on active leaves.
+
+        A released column passes through an N×N-subdivided wall panel.  The
+        subdivision nodes fall on the column segment, so
+        ``_split_frames_at_shell_subdiv`` deactivates the parent and creates
+        child elements.  The end release must be re-mapped onto the first
+        active leaf — ``MeshModel.frame_releases`` is only ever keyed by
+        active elements.
+        """
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, -1.0),  # column I-end
+            "2": Node("2", 2, 0.0, 0.0, 3.0),  # column J-end
+            "3": Node("3", 3, -1.0, 0.0, 0.0),  # wall corner
+            "4": Node("4", 4, 1.0, 0.0, 0.0),  # wall corner
+            "5": Node("5", 5, 1.0, 0.0, 2.0),  # wall corner
+            "6": Node("6", 6, -1.0, 0.0, 2.0),  # wall corner
+        }
+        md = SAPModelData(
+            nodes=nodes,
+            restraints={},
+            materials={"STEEL": _material()},
+            sections={"S": _section(), "WALL": _section()},
+            frame_elements={"1": FrameElement("1", 1, "1", "2")},
+            area_elements={"S1": AreaElement("S1", 20, ["3", "4", "5", "6"], thickness=0.2)},
+            frame_assignments={"1": "S"},
+            area_assignments={"S1": "WALL"},
+            groups={},
+            frame_auto_mesh={"1": {"AutoMesh": True, "AtJoints": True}},
+            frame_releases={"1": FrameRelease("1", end_i=[0, 0, 0, 0, 0, 1])},
+            units=dict(UNITS),
+        )
+
+        mesh = preprocess_model(
+            md,
+            {
+                "element_type": "elasticBeamColumn",
+                "split_elements": False,
+                "create_shells": True,
+                "subdivide_shells": 2,
+                "verbose": False,
+            },
+        )
+
+        # The wall subdivision placed nodes on the column segment, so the
+        # parent frame was split by ``_split_frames_at_shell_subdiv``.
+        assert mesh.frame_elements["1"].inactive is True
+
+        # Every release key must reference an active OpenSees element.
+        assert mesh.frame_releases
+        for key in mesh.frame_releases:
+            assert key in mesh.frame_elements, f"{key!r} is not a frame element"
+            assert not mesh.frame_elements[key].inactive, f"{key!r} is inactive"
+
+        # The I-end release landed on the first leaf of the split chain.
+        assert mesh.frame_releases["1-0"].end_i[5] == 1
 
 
 # ═══════════════════════════════════════════════════════════════════
