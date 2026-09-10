@@ -31,7 +31,6 @@ lists) so it stays importable in dependency-light environments.
 """
 
 import argparse
-import contextlib
 import math
 import sys
 from collections import defaultdict
@@ -284,6 +283,24 @@ def _integrity(md: SAPModelData, tol: float) -> dict[str, Any]:
         if not getattr(area, "inactive", False) and aid not in md.area_assignments
     ]
 
+    # ── Active elements assigned to undefined sections ──
+    # Every assignment value must resolve to a section defined in
+    # ``md.sections``; a dangling reference would abort section creation
+    # (or silently drop the element) downstream, so it is blocking.
+    undefined_section_refs = []
+    for eid, elem in md.frame_elements.items():
+        if getattr(elem, "inactive", False):
+            continue
+        sec_name = md.frame_assignments.get(eid)
+        if sec_name is not None and sec_name not in md.sections:
+            undefined_section_refs.append({"element": eid, "kind": "Frame", "section": sec_name})
+    for aid, area in md.area_elements.items():
+        if getattr(area, "inactive", False):
+            continue
+        sec_name = md.area_assignments.get(aid)
+        if sec_name is not None and sec_name not in md.sections:
+            undefined_section_refs.append({"element": aid, "kind": "Area", "section": sec_name})
+
     # ── Sections referencing missing materials ──
     missing_material_refs = [
         {"section": name, "material": sec.material}
@@ -354,6 +371,7 @@ def _integrity(md: SAPModelData, tol: float) -> dict[str, Any]:
         "missing_node_refs": missing_node_refs,
         "unassigned_frames": unassigned_frames,
         "unassigned_areas": unassigned_areas,
+        "undefined_section_refs": undefined_section_refs,
         "missing_material_refs": missing_material_refs,
         "zero_length_elements": zero_length_elements,
         "duplicate_elements": duplicate_elements,
@@ -397,9 +415,8 @@ def _observations(md: SAPModelData) -> dict[str, Any]:
         if elem.cardinal_point != 10
     ]
 
-    mass_source = None
-    for name, ms in md.mass_sources.items():
-        mass_source = {
+    def _mass_source_entry(name, ms) -> dict[str, Any]:
+        return {
             "name": name,
             "is_default": ms.is_default,
             "from_elements": ms.elements,
@@ -407,7 +424,20 @@ def _observations(md: SAPModelData) -> dict[str, Any]:
             "from_loads": ms.loads,
             "n_patterns": len(ms.load_pattern),
         }
-        break
+
+    # Prefer the entry flagged as the model default — a model may list
+    # several sources in arbitrary dictionary order, so stopping at the
+    # first item can surface a non-default source.  When no source is
+    # flagged default, fall back to the first entry (reported with
+    # ``is_default=False``) so a source is still surfaced.
+    mass_source = None
+    for name, ms in md.mass_sources.items():
+        if ms.is_default:
+            mass_source = _mass_source_entry(name, ms)
+            break
+    if mass_source is None and md.mass_sources:
+        name, ms = next(iter(md.mass_sources.items()))
+        mass_source = _mass_source_entry(name, ms)
 
     return {
         "restraint_patterns": {
@@ -428,14 +458,13 @@ def _observations(md: SAPModelData) -> dict[str, Any]:
 
 
 def _run_analysis(md: SAPModelData, config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-    """Run a modal and linear-static analysis to confirm model behaviour.
+    """Run the optional OpenSees modal + linear-static phase.
 
-    This is the optional second phase of the review.  It builds an
-    OpenSees domain via the normal Preprocessor → AnalysisBuilder pipeline
-    and reports dynamic (periods, mass participation) and static
-    (reactions, convergence) results.  Any failure — e.g. a singular
-    stiffness matrix — is captured rather than raised, so a review of a
-    broken model still completes with a diagnostic.
+    Thin adapter delegating to
+    :func:`~fea_toolkit.opensees.analysis_builder.run_review_analysis`,
+    which owns the OpenSees domain construction and analysis execution.
+    The import is lazy so this module stays importable without an OpenSees
+    runtime.
 
     Args:
         md: Parsed model data.
@@ -445,81 +474,17 @@ def _run_analysis(md: SAPModelData, config: Optional[dict[str, Any]] = None) -> 
         Dict with ``ok``, ``periods``, ``mass_participation``, ``static``
         and ``error`` keys.
     """
-    result: dict[str, Any] = {
-        "ok": False,
-        "periods": [],
-        "mass_participation": [],
-        "static": None,
-        "error": None,
-    }
     try:
-        import openseespy.opensees as ops
-
-        from ..opensees.analysis_builder import AnalysisBuilder
-        from ..opensees.preprocessor import preprocess_model
+        from ..opensees.analysis_builder import run_review_analysis
     except Exception as exc:  # pragma: no cover - optional environment
-        result["error"] = f"OpenSees not available: {exc}"
-        return result
-
-    builder_config = dict(config or {})
-    builder_config.setdefault("element_type", "elasticBeamColumn")
-    builder_config.setdefault("verbose", False)
-
-    try:
-        mesh = preprocess_model(md, builder_config)
-        builder = AnalysisBuilder(mesh, builder_config)
-        builder.build_domain()
-        builder.compute_seismic_masses()
-
-        modal = builder.run_modal_analysis(
-            num_modes=int(builder_config.get("num_modes", 12)),
-            print_results=False,
-        )
-        periods = list(modal.get("periods", []))
-        props = modal.get("modal_props", {})
-        ratios_mx = props.get("partiMassRatiosMX", [0.0] * len(periods))
-        ratios_my = props.get("partiMassRatiosMY", [0.0] * len(periods))
-        ratios_mz = props.get("partiMassRatiosMZ", [0.0] * len(periods))
-        result["periods"] = periods
-        result["mass_participation"] = [
-            {
-                "mode": i + 1,
-                "period": periods[i],
-                "mx": ratios_mx[i],
-                "my": ratios_my[i],
-                "mz": ratios_mz[i],
-            }
-            for i in range(len(periods))
-        ]
-
-        # Apply gravity load patterns (or all patterns as a fallback) so the
-        # static pass produces a meaningful, non-zero reaction set.
-        gravity = [
-            name for name, lp in md.load_patterns.items() if str(lp.pattern_type).lower() == "dead"
-        ]
-        applied_patterns = gravity or list(md.load_patterns.keys())
-        if applied_patterns:
-            builder.create_loads(pattern_scales=dict.fromkeys(applied_patterns, 1.0))
-
-        static = builder.run_static_analysis(extract_reactions=True)
-        node_reactions = static.get("reactions", {})
-        summed = {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": 0.0, "my": 0.0, "mz": 0.0}
-        for rxn in node_reactions.values():
-            for component in summed:
-                summed[component] += rxn.get(component, 0.0)
-        result["static"] = {
-            "summed_reactions": summed,
-            "n_supports": len(node_reactions),
-            "n_nodes_with_displacement": len(static.get("nodal_displacements", {})),
-            "patterns_applied": applied_patterns,
+        return {
+            "ok": False,
+            "periods": [],
+            "mass_participation": [],
+            "static": None,
+            "error": f"OpenSees not available: {exc}",
         }
-        result["ok"] = True
-    except Exception as exc:
-        result["error"] = f"{type(exc).__name__}: {exc}"
-    finally:
-        with contextlib.suppress(Exception):
-            ops.wipe()
-    return result
+    return run_review_analysis(md, config)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -530,9 +495,11 @@ _BLOCKING_INTEGRITY = (
     "missing_node_refs",
     "unassigned_frames",
     "unassigned_areas",
+    "undefined_section_refs",
     "missing_material_refs",
     "zero_length_elements",
     "unknown_patterns",
+    "dangling_loads",
 )
 
 
@@ -572,6 +539,8 @@ def review_model(
         ``breakdown``, ``bounds``, ``connectivity``, ``releases``,
         ``integrity``, ``observations``, ``analysis`` and ``ok``.
     """
+    if not math.isfinite(tol) or tol < 0:
+        raise ValueError(f"tol must be a finite, non-negative number, got {tol!r}")
     connectivity_report = check_model_connectivity(md, tol=tol)
     components = _analyse_components(md)
     floating = [
@@ -1032,12 +1001,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"error: file not found: {source}", file=sys.stderr)
         return 2
 
-    result = review_s2k_file(
-        source,
-        tol=args.tol,
-        include_analysis=args.analysis,
-        analysis_config={"num_modes": args.num_modes} if args.analysis else None,
-    )
+    try:
+        result = review_s2k_file(
+            source,
+            tol=args.tol,
+            include_analysis=args.analysis,
+            analysis_config={"num_modes": args.num_modes} if args.analysis else None,
+        )
+    except (OSError, ValueError) as exc:
+        print(f"error: cannot review {source}: {exc}", file=sys.stderr)
+        return 2
     report = (
         format_review_markdown(
             result,
@@ -1053,7 +1026,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
 
     if args.out:
-        Path(args.out).write_text(report, encoding="utf-8")
+        try:
+            Path(args.out).write_text(report, encoding="utf-8")
+        except OSError as exc:
+            print(f"error: cannot write {args.out}: {exc}", file=sys.stderr)
+            return 2
         print(f"Report written to {args.out}")
     else:
         print(report)

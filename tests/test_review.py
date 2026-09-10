@@ -16,9 +16,11 @@ from fea_toolkit.model.sap_data import (
     FRAME_RELEASE_DOF_LABELS,
     FrameElement,
     FrameRelease,
+    Material,
     Node,
     Restraint,
     SAPModelData,
+    Section,
 )
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -37,12 +39,18 @@ def _parse(name: str) -> SAPModelData:
 
 
 def _synthetic(nodes, frames, restraints, assignments=None) -> SAPModelData:
-    """Build a minimal SAPModelData around the supplied nodes/frames."""
+    """Build a minimal SAPModelData around the supplied nodes/frames.
+
+    A concrete ``"S"`` section (backed by material ``"M"``) is defined so
+    the default ``"S"`` frame assignment resolves to a real section — the
+    integrity review treats assignment values that reference undefined
+    sections as blocking.
+    """
     return SAPModelData(
         nodes=nodes,
         restraints=restraints,
-        materials={},
-        sections={},
+        materials={"M": Material(name="M", type="Steel", E_mod=2.0e11)},
+        sections={"S": Section(name="S", shape="I/Wide Flange", material="M")},
         frame_elements=frames,
         area_elements={},
         frame_assignments=(dict.fromkeys(frames, "S") if assignments is None else assignments),
@@ -475,5 +483,5 @@ class TestModeDisplay:
                 str(out_file),
             ]
         )
-        assert code in (0, 1)
+        assert code == 0
         assert out_file.exists()

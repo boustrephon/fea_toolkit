@@ -6,6 +6,7 @@ and creates the OpenSees domain objects.  It handles all analysis execution
 and result extraction — no topology mutations occur here.
 """
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar, Optional
 
@@ -38,6 +39,7 @@ __all__ = [
     "_normalise_frame_response",
     "_record_step",
     "run_modal",
+    "run_review_analysis",
 ]
 
 
@@ -581,3 +583,98 @@ def run_modal(mesh_model, n_modes: int = 12, config: dict = None):
     modal = ab.run_modal_analysis(num_modes=n_modes, print_results=False)
     shapes = ab.extract_mode_shapes(n_modes)
     return {"modal": modal, "shapes": shapes}
+
+
+def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Run a modal and linear-static analysis to confirm model behaviour.
+
+    This is the optional analysis phase of the solver-free model review
+    (:mod:`fea_toolkit.model.review`).  It builds an OpenSees domain via the
+    normal Preprocessor → AnalysisBuilder pipeline and reports dynamic
+    (periods, mass participation) and static (reactions, convergence)
+    results.  Any failure — e.g. a singular stiffness matrix — is captured
+    rather than raised, so a review of a broken model still completes with a
+    diagnostic.
+
+    Args:
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
+        config: Optional builder config dict.
+
+    Returns:
+        Dict with ``ok``, ``periods``, ``mass_participation``, ``static``
+        and ``error`` keys.
+    """
+    # Lazy import avoids a hard dependency cycle (preprocessor → model only)
+    # and keeps the module importable in dependency-light environments.
+    from .preprocessor import preprocess_model
+
+    result: dict[str, Any] = {
+        "ok": False,
+        "periods": [],
+        "mass_participation": [],
+        "static": None,
+        "error": None,
+    }
+
+    builder_config = dict(config or {})
+    builder_config.setdefault("element_type", "elasticBeamColumn")
+    builder_config.setdefault("verbose", False)
+
+    try:
+        mesh = preprocess_model(md, builder_config)
+        builder = AnalysisBuilder(mesh, builder_config)
+        builder.build_domain()
+        builder.compute_seismic_masses()
+
+        modal = builder.run_modal_analysis(
+            num_modes=int(builder_config.get("num_modes", 12)),
+            print_results=False,
+        )
+        periods = list(modal.get("periods", []))
+        props = modal.get("modal_props", {})
+        ratios_mx = props.get("partiMassRatiosMX", [0.0] * len(periods))
+        ratios_my = props.get("partiMassRatiosMY", [0.0] * len(periods))
+        ratios_mz = props.get("partiMassRatiosMZ", [0.0] * len(periods))
+        result["periods"] = periods
+        result["mass_participation"] = [
+            {
+                "mode": i + 1,
+                "period": periods[i],
+                "mx": ratios_mx[i],
+                "my": ratios_my[i],
+                "mz": ratios_mz[i],
+            }
+            for i in range(len(periods))
+        ]
+
+        # Apply gravity (DEAD) load patterns only.  When the model defines no
+        # DEAD pattern, apply no loads rather than silently substituting every
+        # load pattern, so the static pass reflects the model's actual gravity
+        # loading; the (possibly empty) selection is reported via
+        # ``patterns_applied``.
+        gravity = [
+            name for name, lp in md.load_patterns.items() if str(lp.pattern_type).lower() == "dead"
+        ]
+        applied_patterns = gravity
+        if applied_patterns:
+            builder.create_loads(pattern_scales=dict.fromkeys(applied_patterns, 1.0))
+
+        static = builder.run_static_analysis(extract_reactions=True)
+        node_reactions = static.get("reactions", {})
+        summed = {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": 0.0, "my": 0.0, "mz": 0.0}
+        for rxn in node_reactions.values():
+            for component in summed:
+                summed[component] += rxn.get(component, 0.0)
+        result["static"] = {
+            "summed_reactions": summed,
+            "n_supports": len(node_reactions),
+            "n_nodes_with_displacement": len(static.get("nodal_displacements", {})),
+            "patterns_applied": applied_patterns,
+        }
+        result["ok"] = True
+    except Exception as exc:
+        result["error"] = f"{type(exc).__name__}: {exc}"
+    finally:
+        with contextlib.suppress(Exception):
+            ops.wipe()
+    return result
