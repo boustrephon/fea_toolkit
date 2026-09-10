@@ -3,6 +3,7 @@
 import copy
 import logging
 import math
+import warnings
 from typing import Optional
 
 import numpy as np
@@ -16,6 +17,7 @@ from ..utils import (
     length_scale_factor,
     mass_density_scale_factor,
 )
+from .releases import plan_releases
 
 logger = logging.getLogger(__name__)
 
@@ -995,6 +997,167 @@ class ElementMixin:
         # Update collections
         self.mesh_model.frame_elements = new_elements
         self.mesh_model.frame_assignments = new_assignments
+
+    # ── Member end releases / partial fixity ─────────────────────────
+    # The retained-DOF rigidity factor (η) and the fully-released softness
+    # factor (μ) are the canonical module-level constants in
+    # :mod:`fea_toolkit.opensees.releases` — imported here (and by
+    # ``AnalysisBuilder._set_defaults()``) so a single definition drives the
+    # OpenSeesPy domain, the Tcl export and the config defaults.
+
+    def _restore_release_canonical_state(self) -> None:
+        """Restore canonical frame endpoints and drop stale release nodes.
+
+        Called at the start of :meth:`build_domain` (before
+        :meth:`_create_nodes`) so repeated builds re-instrument the original
+        elements rather than already-instrumented ones.
+        """
+        if not hasattr(self, "_release_canonical_elements"):
+            return
+        for nid in list(self.mesh_model.nodes.keys()):
+            if nid.endswith(("_rel_i", "_rel_j")):
+                del self.mesh_model.nodes[nid]
+        for eid, elem in self.mesh_model.frame_elements.items():
+            if eid in self._release_canonical_elements:
+                ni, nj = self._release_canonical_elements[eid]
+                elem.node_i = ni
+                elem.node_j = nj
+
+    def _create_member_releases(self) -> None:
+        """Insert zero-length release elements at released frame ends.
+
+        Activated by ``config['apply_releases']`` (default ``True``).
+        SAP2000 member end releases (``FRAME RELEASE ASSIGNMENTS 1 -
+        GENERAL``) free selected local DOFs at a member end; partial fixity
+        (``... 2 - PARTIAL FIXITY``) replaces a freed DOF with a semi-rigid
+        spring.
+
+        The release topology and the per-DOF stiffnesses are produced by the
+        shared, OpenSees-free
+        :func:`~fea_toolkit.opensees.releases.plan_releases` — the **same**
+        planner the Tcl exporters use — so this method only translates the
+        plan into ``ops`` calls and the OpenSeesPy domain is identical to the
+        Tcl domain by construction.
+
+        Each released end is modelled with the OpenSees "extra node +
+        ``zeroLength``" pattern (M. Scott, OpenSeesDigital 2022)::
+
+            structural_node_i → zeroLength(release) → {eid}_rel_i … member
+
+        The ``zeroLength`` is given the **member's local axes** (``-orient``)
+        so the release acts on the element's *local* DOFs (not global).
+        Retained DOFs get a rigid ``Elastic`` material (η × the member's own
+        section/material stiffness); fully released DOFs get a soft spring
+        (μ × member stiffness), or are omitted from ``-dir`` when
+        ``release_softness_factor`` is ``0``; partial-fixity DOFs use the
+        SAP2000 spring stiffness directly.
+
+        Using ``-mat``/``-dir`` rather than ``equalDOF`` keeps the
+        ``Transformation`` constraint handler compatible with ``rigidLink``
+        MPC end offsets — the same rationale as the bond-slip springs.
+        """
+        if not self.config.get("apply_releases", True):
+            return
+        releases = getattr(self.mesh_model, "frame_releases", None) or {}
+        if not releases:
+            return
+        if self.config.get("hinge_model") == "lumped":
+            warnings.warn(
+                "apply_releases and hinge_model='lumped' both re-point member "
+                "ends — releases skipped (lumped hinges win).",
+                stacklevel=2,
+            )
+            return
+
+        # ── Idempotency: preserve canonical endpoints on first call ──
+        # Restoration is handled by _restore_release_canonical_state().
+        if not hasattr(self, "_release_canonical_elements"):
+            self._release_canonical_elements = {
+                eid: (elem.node_i, elem.node_j)
+                for eid, elem in self.mesh_model.frame_elements.items()
+                if not getattr(elem, "inactive", False)
+            }
+
+        # Shared planner (also used by the Tcl export paths).  It owns the
+        # η/μ scaling, the partial-fixity springs, the zero-length guard and
+        # the warning messages — nothing release-specific is recomputed here.
+        plan = plan_releases(self.mesh_model, self.config)
+        if not plan["ends"]:
+            return
+
+        # ── Coincident release nodes ─────────────────────────────────
+        release_node_tags: dict[str, int] = {}
+        for rn in plan["release_nodes"]:
+            self.mesh_model.nodes[rn["node_id"]] = Node(
+                node_id=rn["node_id"],
+                node_tag=rn["node_tag"],
+                x=rn["x"],
+                y=rn["y"],
+                z=rn["z"],
+            )
+            ops.node(rn["node_tag"], rn["x"], rn["y"], rn["z"])
+            self._created_node_tags.add(rn["node_tag"])
+            release_node_tags[rn["node_id"]] = rn["node_tag"]
+
+        # ── Element / material tag bases ─────────────────────────────
+        # Element tags must clear every tag already in play: frame elements
+        # (including any hinge/bond re-pointing), rigid end-offset links, and
+        # anything already registered with OpenSees.
+        try:
+            max_ops_tag = max(ops.getEleTags(), default=0)
+        except Exception:
+            max_ops_tag = 0
+        max_rigid_tag = max((r[3] for r in self._offset_rigid_links), default=0)
+        next_tag = (
+            max(
+                max(
+                    (e.elem_tag for e in self.mesh_model.frame_elements.values() if not e.inactive),
+                    default=0,
+                ),
+                max_ops_tag,
+                max_rigid_tag,
+                max(self.frame_tag_map.values(), default=0),
+            )
+            + 1
+        )
+        next_mat_tag = max(self.material_tags.values(), default=0) + 1000
+        mat_cache: dict[float, int] = {}
+
+        for end in plan["ends"]:
+            dirs: list[int] = []
+            mats: list[int] = []
+            for dof, stiffness in end["dofs"]:
+                cache_key = round(stiffness, 6)
+                mat_tag = mat_cache.get(cache_key)
+                if mat_tag is None:
+                    mat_tag = next_mat_tag
+                    next_mat_tag += 1
+                    ops.uniaxialMaterial("Elastic", mat_tag, stiffness)
+                    mat_cache[cache_key] = mat_tag
+                dirs.append(dof)
+                mats.append(mat_tag)
+
+            args: list = [
+                "zeroLength",
+                next_tag,
+                end["struct_node_tag"],
+                release_node_tags[end["node_id"]],
+                "-mat",
+                *mats,
+                "-dir",
+                *dirs,
+            ]
+            if end["orient"]:
+                args += ["-orient", *end["orient"]]
+            ops.element(*args)
+            next_tag += 1
+
+        # ── Re-point member ends to their release nodes ──────────────
+        for eid, (node_i, node_j) in plan["endpoints"].items():
+            elem = self.mesh_model.frame_elements.get(eid)
+            if elem is not None:
+                elem.node_i = node_i
+                elem.node_j = node_j
 
     def _create_bond_slip_springs(self) -> None:
         """Insert zero-length ``Bond_SP01`` slip-rotation springs at member ends.

@@ -582,6 +582,22 @@ def export_mesh_model_to_tcl(
         for i, sn in enumerate(mesh_model.sections, start=sec_offset):
             sec_tags[sn] = i
 
+    # ── Member end releases / partial fixity plan ────────────────
+    # Shared with the AnalysisBuilder so the Tcl domain matches the
+    # OpenSeesPy domain exactly.
+    from ..model.sap_data import Node as _Node
+    from .releases import emit_release_tcl
+    from .releases import plan_releases as _plan_releases
+
+    _release_plan = _plan_releases(mesh_model, config)
+    _release_nodes = _release_plan["release_nodes"]
+    _release_endpoints = _release_plan["endpoints"]
+    _node_lookup: dict = dict(mesh_model.nodes)
+    for _rn in _release_nodes:
+        _node_lookup[_rn["node_id"]] = _Node(
+            _rn["node_id"], _rn["node_tag"], _rn["x"], _rn["y"], _rn["z"]
+        )
+
     # ── Determine which nodes are referenced by exported elements ──
     export_shells = config.get("export_shells", True) if config else True
     _exported_node_tags: set[int] = set()
@@ -619,6 +635,13 @@ def export_mesh_model_to_tcl(
         if nd.node_tag not in _exported_node_tags:
             continue
         lines.append(f"node {nd.node_tag} {nd.x:g} {nd.y:g} {nd.z:g}")
+
+    # Coincident release nodes (member end releases / partial fixity)
+    if _release_nodes:
+        lines.append("")
+        lines.append("# ── Release nodes (coincident with member ends) ──")
+        for _rn in _release_nodes:
+            lines.append(f"node {_rn['node_tag']} {_rn['x']:g} {_rn['y']:g} {_rn['z']:g}")
 
     # ── Restraints ───────────────────────────────────────────────
     if mesh_model.restraints:
@@ -972,8 +995,9 @@ def export_mesh_model_to_tcl(
             sec_name = mesh_model.frame_assignments.get(eid, "")
             if not sec_name:
                 continue
-            ni = mesh_model.nodes.get(elem.node_i)
-            nj = mesh_model.nodes.get(elem.node_j)
+            _i_id, _j_id = _release_endpoints.get(eid, (elem.node_i, elem.node_j))
+            ni = _node_lookup.get(_i_id)
+            nj = _node_lookup.get(_j_id)
             if ni is None or nj is None:
                 continue
 
@@ -1042,6 +1066,15 @@ def export_mesh_model_to_tcl(
                     f"element elasticBeamColumn {el_tag} "
                     f"{ni.node_tag} {nj.node_tag} {sec_tag} {transf_tag}"
                 )
+
+        # ── Member end releases / partial fixity ─────────────────
+        lines.extend(
+            emit_release_tcl(
+                _release_plan,
+                start_elem_tag=max(frame_tag_map.values(), default=0) + 1,
+                start_mat_tag=max(mat_tags.values(), default=0) + 1000,
+            )
+        )
 
     lines.append(
         f'puts "-> Domain building complete ({len(mesh_model.nodes)} nodes, {len(mesh_model.frame_elements)} frames, {len(mesh_model.area_elements)} shells)"'

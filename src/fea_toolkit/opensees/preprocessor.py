@@ -30,6 +30,7 @@ from ..model.sap_data import (
     FrameElement,
     FrameElementProperties,
     FrameEndOffset,
+    FrameRelease,
     LayeredShellSection,
     NDMaterial,
     Node,
@@ -43,6 +44,77 @@ from ..utils import (
     scale_material_dict,
     stress_scale_factor,
 )
+
+
+def _remap_frame_releases(
+    releases: dict[str, FrameRelease],
+    elements: dict[str, FrameElement],
+) -> dict[str, FrameRelease]:
+    """Re-key frame releases onto the active leaf element at each end.
+
+    A release is an **end** property of the original member, so after the
+    Preprocessor splits frames at interior joints it belongs to the first
+    leaf (I-end) and/or the last leaf (J-end) of the split chain.  Releases
+    on unsplit (active) frames are passed through unchanged.
+
+    Args:
+        releases: Releases keyed by the original (pre-split) frame id.
+        elements: Post-split frame elements (may contain inactive parents).
+
+    Returns:
+        Releases re-keyed by active leaf frame ids.
+    """
+    if not releases:
+        return {}
+    from ..model.tree_utils import collect_descendants
+
+    remapped: dict[str, FrameRelease] = {}
+    for frame_id, release in releases.items():
+        parent = elements.get(frame_id)
+        if parent is not None and not getattr(parent, "inactive", False):
+            remapped[frame_id] = release
+            continue
+
+        leaves = collect_descendants(frame_id, elements)
+        if not leaves:
+            continue
+
+        i_leaf: Optional[str] = None
+        j_leaf: Optional[str] = None
+        if parent is not None:
+            for leaf_id in leaves:
+                leaf = elements[leaf_id]
+                if i_leaf is None and leaf.node_i == parent.node_i:
+                    i_leaf = leaf_id
+                if j_leaf is None and leaf.node_j == parent.node_j:
+                    j_leaf = leaf_id
+        # ``collect_descendants()`` walks ``child_ids`` depth-first in order,
+        # so the leaf list runs I→J along the split chain: ``leaves[0]`` is
+        # the first leaf and ``leaves[-1]`` the last.  The coordinate match
+        # above is the primary path; these are the fallback for a parent
+        # whose coordinates are unavailable.
+        if i_leaf is None:
+            i_leaf = leaves[0]
+        if j_leaf is None:
+            j_leaf = leaves[-1]
+
+        if any(release.end_i):
+            entry = remapped.get(i_leaf)
+            if entry is None:
+                entry = FrameRelease(frame_id=i_leaf)
+                remapped[i_leaf] = entry
+            entry.end_i = list(release.end_i)
+            entry.end_i_k = list(release.end_i_k)
+
+        if any(release.end_j):
+            entry = remapped.get(j_leaf)
+            if entry is None:
+                entry = FrameRelease(frame_id=j_leaf)
+                remapped[j_leaf] = entry
+            entry.end_j = list(release.end_j)
+            entry.end_j_k = list(release.end_j_k)
+
+    return remapped
 
 
 class Preprocessor:
@@ -147,6 +219,11 @@ class Preprocessor:
             parent_id = getattr(child_elem, "parent_id", None)
             if parent_id and parent_id in frame_element_types:
                 frame_element_types[child_id] = frame_element_types[parent_id]
+
+        # ── 2b. Re-map frame end releases onto active leaves ──────
+        # A release is an end property of the original member; after
+        # splitting it belongs to the first/last leaf of the chain.
+        frame_releases = _remap_frame_releases(getattr(md, "frame_releases", {}) or {}, new_elems)
 
         # ── 3. Frame end offsets ─────────────────────────────────
         offset_rigid_links: list[tuple] = []
@@ -426,6 +503,7 @@ class Preprocessor:
             nodes=md.nodes,
             frame_elements=new_elems,
             frame_assignments=new_assigns,
+            frame_releases=frame_releases,
             area_elements=md.area_elements,
             area_assignments=md.area_assignments,
             frame_dist_loads=split_dist_loads,

@@ -31,6 +31,7 @@ from ._loads import LoadMixin
 from ._materials import MaterialMixin
 from ._runners import RunnerMixin, _normalise_frame_response, _record_step
 from ._sections import SectionMixin
+from .releases import DEFAULT_RIGIDITY_FACTOR, DEFAULT_SOFTNESS_FACTOR
 
 __all__ = [
     "AnalysisBuilder",
@@ -227,6 +228,21 @@ class AnalysisBuilder(
             "simplify_distributed_loads": False,
             "constraint_method": "spring",
             "hinge_model": "fiber",  # Distributed plasticity by default
+            # ── Member end releases / partial fixity ──
+            # Honour SAP2000 frame end releases (and partial-fixity springs)
+            # by inserting zero-length release elements at member ends.  On by
+            # default — a release is a real property of the source model.
+            "apply_releases": True,
+            # Rigidity factor for the retained (non-released) DOFs on the
+            # release element — must be much stiffer than the member it
+            # terminates so the release does not soften the member.
+            # (Canonical constant in fea_toolkit.opensees.releases.)
+            "release_rigidity_factor": DEFAULT_RIGIDITY_FACTOR,
+            # Softness factor for fully released DOFs (× member stiffness).
+            # Keeps an otherwise-floating released DOF non-singular (e.g. a
+            # pinned base whose only member is released); 0.0 = exact release.
+            # (Canonical constant in fea_toolkit.opensees.releases.)
+            "release_softness_factor": DEFAULT_SOFTNESS_FACTOR,
             # ── RC rebar material (fiber sections) ──
             # Config overrides in SI (Pa): user may override the yield
             # strength / elastic modulus / hardening of the Steel02 rebar
@@ -467,6 +483,9 @@ class AnalysisBuilder(
             # rebuild_with_fiber_sections() always subdivide the original
             # (un‑subdivided) elements rather than already-subdivided ones.
             self._restore_brace_canonical_state()
+            # Restore canonical release topology (endpoints + *_rel_* nodes)
+            # so repeated builds re-instrument the original elements.
+            self._restore_release_canonical_state()
             # Restore canonical limit-state column topology (control/anchor
             # nodes, re-pointed beams) so repeated builds instrument the
             # original elements rather than previously-instrumented ones.
@@ -490,6 +509,7 @@ class AnalysisBuilder(
             self._create_shell_elements()
             self._create_lumped_hinges()
             self._create_bond_slip_springs()
+            self._create_member_releases()
             self._create_elements()
             self._create_limit_state_columns()
             self._apply_rigid_diaphragms()

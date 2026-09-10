@@ -184,9 +184,30 @@ def export_model_to_tcl(
     for i, sn in enumerate(model_data.sections, start=sec_tag_offset):
         _sec_tag[sn] = i
 
+    # ── Member end releases / partial fixity plan ────────────────
+    from ..model.sap_data import Node as _Node
+    from .releases import emit_release_tcl
+    from .releases import plan_releases as _plan_releases
+
+    _release_plan = _plan_releases(model_data, config)
+    _release_nodes = _release_plan["release_nodes"]
+    _release_endpoints = _release_plan["endpoints"]
+    _node_lookup: dict = dict(model_data.nodes)
+    for _rn in _release_nodes:
+        _node_lookup[_rn["node_id"]] = _Node(
+            _rn["node_id"], _rn["node_tag"], _rn["x"], _rn["y"], _rn["z"]
+        )
+
     # Nodes
     for nid, nd in model_data.nodes.items():
         lines.append(f"node {nd.node_tag} {nd.x:g} {nd.y:g} {nd.z:g}")
+
+    # Coincident release nodes (member end releases / partial fixity)
+    if _release_nodes:
+        lines.append("")
+        lines.append("# ── Release nodes (coincident with member ends) ──")
+        for _rn in _release_nodes:
+            lines.append(f"node {_rn['node_tag']} {_rn['x']:g} {_rn['y']:g} {_rn['z']:g}")
 
     # Restraints
     restraints_added = False
@@ -384,8 +405,9 @@ def export_model_to_tcl(
             sec_name = model_data.frame_assignments.get(eid, "")
             if not sec_name:
                 continue
-            ni = model_data.nodes.get(elem.node_i)
-            nj = model_data.nodes.get(elem.node_j)
+            _i_id, _j_id = _release_endpoints.get(eid, (elem.node_i, elem.node_j))
+            ni = _node_lookup.get(_i_id)
+            nj = _node_lookup.get(_j_id)
             if ni is None or nj is None:
                 continue
             # Geometric transformation
@@ -418,6 +440,16 @@ def export_model_to_tcl(
                     f"element elasticBeamColumn {elem.elem_tag} "
                     f"{ni.node_tag} {nj.node_tag} {sec_tag} {transf_tag}"
                 )
+
+    # ── Member end releases / partial fixity ─────────────────────
+    lines.extend(
+        emit_release_tcl(
+            _release_plan,
+            start_elem_tag=max((e.elem_tag for e in model_data.frame_elements.values()), default=0)
+            + 1,
+            start_mat_tag=max(_mat_tag.values(), default=0) + 1000,
+        )
+    )
 
     # Area elements (shells) — unique shell sections only
     if model_data.area_elements:

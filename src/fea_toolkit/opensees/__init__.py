@@ -57,9 +57,17 @@ _LAZY_IMPORTS: dict[str, str] = {
     "XaraTclRunner": "fea_toolkit.opensees.recorder",
     "export_mesh_model_to_tcl": "fea_toolkit.opensees.recorder",
     "parse_pushover_results": "fea_toolkit.opensees.recorder",
+    # Member end releases / partial fixity
+    "DEFAULT_RIGIDITY_FACTOR": "fea_toolkit.opensees.releases",
+    "DEFAULT_SOFTNESS_FACTOR": "fea_toolkit.opensees.releases",
+    "member_end_stiffness": "fea_toolkit.opensees.releases",
+    "plan_releases": "fea_toolkit.opensees.releases",
 }
 
 __all__ = [
+    # Member end releases / partial fixity
+    "DEFAULT_RIGIDITY_FACTOR",
+    "DEFAULT_SOFTNESS_FACTOR",
     # Analysis builder
     "AnalysisBuilder",
     # Preprocessor
@@ -73,8 +81,10 @@ __all__ = [
     # Builder (Tcl export)
     "export_model_to_tcl",
     "global_to_local_distributed_load",
+    "member_end_stiffness",
     "modal_to_lateral_loads",
     "parse_pushover_results",
+    "plan_releases",
     "preprocess_model",
     "pushover_tcl",
     "run_modal",
