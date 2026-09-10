@@ -600,6 +600,10 @@ def export_mesh_model_to_tcl(
 
     # ── Determine which nodes are referenced by exported elements ──
     export_shells = config.get("export_shells", True) if config else True
+    # Shell elements are emitted at a fixed offset so their tags cannot
+    # collide with frame element tags; the release-block start tag below
+    # also accounts for this offset.
+    _shell_elem_tag_offset = 100_000
     _exported_node_tags: set[int] = set()
     for eid, elem in mesh_model.frame_elements.items():
         if getattr(elem, "inactive", False):
@@ -705,13 +709,17 @@ def export_mesh_model_to_tcl(
             _assigned_to_frames.add(sn)
 
     # ── Material-tag allocation counter (shared by sections + releases) ──
-    # _rc_mat_tags[mat_name] = (concrete_unconf, concrete_conf, rebar_tag)
+    # _rc_mat_tags[(mat_name, rebar_mat_name)] =
+    #     (concrete_unconf, concrete_conf, rebar_tag)
+    # The cache is keyed by the concrete/rebar material pair so RC sections
+    # that share concrete but use different rebar grades receive distinct
+    # rebar tags, while identical pairs reuse the same three tags.
     # _next_mat_tag starts one past the highest pre-computed material tag and
     # is advanced as nonlinear fiber materials are emitted, so it always points
     # one past the highest material tag actually allocated.  The member-end
     # release springs reuse it (see ``start_mat_tag`` below) so their Elastic
     # tags cannot collide with any earlier ``uniaxialMaterial`` definition.
-    _rc_mat_tags: dict[str, tuple[int, int, int]] = {}
+    _rc_mat_tags: dict[tuple[str, Optional[str]], tuple[int, int, int]] = {}
     _next_mat_tag = max(mat_tags.values(), default=0) + 1
 
     lines.append('puts "-> Materials defined, creating frame sections..."')
@@ -759,13 +767,17 @@ def export_mesh_model_to_tcl(
                 )
 
                 if is_rc:
-                    # Emit RC fiber materials ONCE per material, not per section
-                    if sec.material not in _rc_mat_tags:
+                    # Emit RC fiber materials ONCE per (material, rebar) pair,
+                    # not per section - so sections sharing concrete but using
+                    # different rebar grades get distinct rebar tags, while
+                    # identical pairs reuse the same three tags.
+                    _rc_key = (sec.material, getattr(sec, "rebar_material", None))
+                    if _rc_key not in _rc_mat_tags:
                         concrete_unconf = _next_mat_tag
                         concrete_conf = _next_mat_tag + 1
                         rebar_tag = _next_mat_tag + 2
                         _next_mat_tag += 3
-                        _rc_mat_tags[sec.material] = (concrete_unconf, concrete_conf, rebar_tag)
+                        _rc_mat_tags[_rc_key] = (concrete_unconf, concrete_conf, rebar_tag)
 
                         # Concrete fallback strengths are authored in SI
                         # (Pa) and scaled to model units via _ssf — never
@@ -833,13 +845,14 @@ def export_mesh_model_to_tcl(
                             f"{Fy_rebar:g} {Es_rebar:g} 0.01 18.5 0.925 0.15"
                         )
                     else:
-                        concrete_unconf, concrete_conf, rebar_tag = _rc_mat_tags[sec.material]
+                        concrete_unconf, concrete_conf, rebar_tag = _rc_mat_tags[_rc_key]
                     fiber_mat_tag = concrete_unconf
                 else:
                     # Steel fiber section — emit Steel01 if not already done
-                    if sec.material not in _rc_mat_tags:
+                    _steel_key = (sec.material, getattr(sec, "rebar_material", None))
+                    if _steel_key not in _rc_mat_tags:
                         tag_for_steel = mat_tags.get(sec.material, 1)
-                        _rc_mat_tags[sec.material] = (tag_for_steel, 0, 0)
+                        _rc_mat_tags[_steel_key] = (tag_for_steel, 0, 0)
                         if (
                             mat is not None
                             and hasattr(mat, "type")
@@ -946,7 +959,6 @@ def export_mesh_model_to_tcl(
                 )
 
         # Area elements — use offset tag to avoid colliding with frame elements
-        _shell_elem_tag_offset = 100_000
         for aid, elem in mesh_model.area_elements.items():
             if getattr(elem, "inactive", False):
                 continue
@@ -1073,10 +1085,31 @@ def export_mesh_model_to_tcl(
                 )
 
         # ── Member end releases / partial fixity ─────────────────
+        # Release elements share the OpenSees element-tag namespace with
+        # frame elements and (when exported) shell elements - the latter
+        # emitted at _shell_elem_tag_offset + area_tag.  Start the
+        # zeroLength releases past the larger maximum so their tags cannot
+        # collide with either family, defaulting to 1 when none exist.
+        _release_start_elem_tag = (
+            max(
+                list(frame_tag_map.values())
+                + (
+                    [
+                        _shell_elem_tag_offset + ae.area_tag
+                        for ae in mesh_model.area_elements.values()
+                        if not getattr(ae, "inactive", False)
+                    ]
+                    if export_shells
+                    else []
+                ),
+                default=0,
+            )
+            + 1
+        )
         lines.extend(
             emit_release_tcl(
                 _release_plan,
-                start_elem_tag=max(frame_tag_map.values(), default=0) + 1,
+                start_elem_tag=_release_start_elem_tag,
                 start_mat_tag=_next_mat_tag,
             )
         )

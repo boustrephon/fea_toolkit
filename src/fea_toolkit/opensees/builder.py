@@ -454,11 +454,41 @@ def export_model_to_tcl(
         )
         + 1
     )
+    # ── Release-spring material tags ─────────────────────────────
+    # The release springs emit ``uniaxialMaterial Elastic`` tags that must
+    # not collide with the ``uniaxialMaterial`` tags produced elsewhere:
+    # the materials block uses 1..M and tcl_materials_and_sections() uses
+    # M+S+1 .. M+S+3*num_rc (three tags per RC fiber section, plus steel
+    # sections reusing their section tag M+1..M+S).  Derive the release
+    # start from the final nonlinear material tag rather than a fixed
+    # +1000 margin so large models cannot overlap.
+    _release_start_mat_tag = max(_mat_tag.values(), default=0) + 1000
+    if config and config.get("create_fiber_sections", False):
+        from ..model.sap_data import (
+            ConcreteCircularSection,
+            ConcreteRectangularSection,
+            RectangularSection,
+            ShellSection,
+        )
+
+        _num_rc = sum(
+            1
+            for sec in model_data.sections.values()
+            if not isinstance(sec, ShellSection)
+            and isinstance(
+                sec,
+                (ConcreteRectangularSection, ConcreteCircularSection, RectangularSection),
+            )
+        )
+        _final_nonlinear_mat_tag = (
+            max(len(model_data.materials), 1) + len(model_data.sections) + 3 * _num_rc
+        )
+        _release_start_mat_tag = max(_release_start_mat_tag, _final_nonlinear_mat_tag + 1)
     lines.extend(
         emit_release_tcl(
             _release_plan,
             start_elem_tag=_release_start_elem_tag,
-            start_mat_tag=max(_mat_tag.values(), default=0) + 1000,
+            start_mat_tag=_release_start_mat_tag,
         )
     )
 
