@@ -166,8 +166,17 @@ Key mapping:
 | `Fx` … `Mz` (I-end) | `fx_i` … `mz_i` |
 | `Fx_j` … `Mz_j` (J-end) | `fx_j` … `mz_j` |
 
-Transpose example (array order follows the active `mesh_model.frame_elements`
-in iteration order — the same order the writer emits the geometry arrays):
+Prefer the built-in convenience — `AnalysisBuilder.export_static_results()`
+extracts the forces and performs this transpose for you in one call:
+
+```python
+results = builder.run_static_analysis(pattern_scales={"DEAD": 1.0})
+builder.export_static_results("results.npz", results, case_name="DEAD")
+```
+
+The manual transpose (array order follows the active
+`mesh_model.frame_elements` in iteration order — the same order the writer
+emits the geometry arrays) is:
 
 ```python
 results = builder.run_static_analysis(pattern_scales={"DEAD": 1.0})

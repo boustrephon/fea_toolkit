@@ -87,15 +87,16 @@ builder = AnalysisBuilder(mesh, {}).build_domain()
 "Run response spectrum (CQC)"        → run_response_spectrum_analysis(mesh_model, modal_result, direction, T_spec, Sa_spec)
 "Run pushover"                       → run_pushover_analysis(mesh_model, modal_result)
 "Run 4-direction pushover"           → from fea_toolkit.opensees import run_pushover_4dir
-"Compute seismic masses (from units)" → from fea_toolkit.utils import g_from_units; builder.compute_seismic_masses(g=g_from_units(md.units))
+"Compute seismic masses (from units)" → builder.compute_seismic_masses()  # g derived from model units
 "Extract element RS forces"          → builder.extract_element_rs_forces()
 
-Returned dict keys for static:
-  nodal_displacements: Dict[node_tag, (dx, dy, dz, rx, ry, rz)]
-  load_totals:         Dict[pattern_name, {fx, fy, fz, mx, my, mz}]
-  summed_reactions:    {fx, fy, fz, mx, my, mz} (if extract_reactions=True)
-  element_forces:      Dict[elem_tag, [N, Vy, Vz, Mz, My, T]] (global)
-  shell_forces:        Dict[elem_tag, {...}] (if shells present)
+Returned dict keys for run_static_analysis():
+  nodal_displacements: Dict[node_id, (dx, dy, dz, rx, ry, rz)]
+  reactions:           Dict[node_id, {fx, fy, fz, mx, my, mz}] (if extract_reactions=True)
+  load_reaction_check: {applied_fz, reaction_fz, delta} (if extract_reactions=True)
+  # Element end forces are NOT returned here.  Use
+  # builder.extract_static_element_forces() (element-keyed), or
+  # builder.export_static_results(path, results) for a force-bearing NPZ.
 
 Returned dict keys for modal:
   periods:     List[float]
