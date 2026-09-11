@@ -923,6 +923,15 @@ class StaticRunnerMixin:
         force-bearing NPZ/H5 archive that
         :func:`~fea_toolkit.plotting.plot_force_diagram` can read directly.
 
+        .. warning::
+            Call this **immediately** after the
+            :meth:`run_static_analysis` invocation that produced *results*,
+            and before any other analysis runs on the same builder.  Element
+            forces are read from the **current** OpenSees domain state (via
+            :meth:`static_element_force_arrays` / ``ops.eleResponse``), so a
+            subsequent static, modal, or pushover run would overwrite the
+            domain and corrupt the exported forces.
+
         Args:
             filepath: Output file path (``.npz`` or ``.h5``).
             results: Dict from :meth:`run_static_analysis`.

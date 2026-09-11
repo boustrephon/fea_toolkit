@@ -146,7 +146,6 @@ def main():
     builder = AnalysisBuilder(mesh_model, config)
     builder.build_domain()
 
-    # Load totals are always computed after build_domain()
     unit_F = model_data.units.get("F", "?")
     unit_L = model_data.units.get("L", "?")
 
