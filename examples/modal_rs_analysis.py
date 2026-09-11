@@ -20,6 +20,7 @@ Usage::
 
 import argparse
 import sys
+from functools import partial
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))  # project root
@@ -29,12 +30,18 @@ from fea_toolkit import __version__, ops_version
 from fea_toolkit.io.s2k_parser import SAP2000Parser
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.opensees.preprocessor import preprocess_model
+from fea_toolkit.utils import g_from_units
 
 
-def gb50011_spectrum(T, A=0.16, Tg=0.35, zeta=0.05):
-    """GB 50011-2010 design spectrum — returns Sa in m/s²."""
+def gb50011_spectrum(T, A=0.16, Tg=0.35, zeta=0.05, g=9.81):
+    """GB 50011-2010 design spectrum.
+
+    Returns Sa in acceleration units.  *g* defaults to 9.81 (SI) but callers
+    should pass ``g_from_units(md.units)`` so the spectrum is consistent with
+    the model's unit system.
+    """
     if T <= 0.0:
-        return A * 9.81
+        return A * g
     gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
     eta1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
     eta2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))
@@ -46,7 +53,7 @@ def gb50011_spectrum(T, A=0.16, Tg=0.35, zeta=0.05):
         beta = eta2 * (Tg / T) ** gamma
     else:
         beta = eta2 * (0.2**gamma) - eta1 * (T - 5.0 * Tg)
-    return max(0.0, A * beta) * 9.81
+    return max(0.0, A * beta) * g
 
 
 def main():
@@ -123,11 +130,13 @@ def main():
     builder.build_domain()
 
     # ── 3. Seismic masses ────────────────────────────────────────────────────
-    print("\n── Computing seismic masses (g=9.81) ──")
-    node_masses = builder.compute_seismic_masses(g=9.81)
+    # g is derived from the model's unit system (never hardcoded).
+    g = g_from_units(md.units)
+    print(f"\n── Computing seismic masses (g={g:g}) ──")
+    node_masses = builder.compute_seismic_masses()
     total_mass = sum(node_masses.values())
     print(f"  Total seismic mass: {total_mass:.2f} tonnes")
-    print(f"  Total seismic weight: {total_mass * 9.81 / 1000:.2f} MN")
+    print(f"  Total seismic weight: {total_mass * g / 1000:.2f} MN")
 
     # ── 4. Modal analysis ────────────────────────────────────────────────────
     print(f"\n── Modal analysis ({args.num_modes} modes) ──")
@@ -142,30 +151,41 @@ def main():
     T_max = max(periods[:n])
     dT = 0.01
     T_curve = [i * dT for i in range(int(T_max / dT) + 2)]
-    Sa_curve = [gb50011_spectrum(T, A=0.16, Tg=0.4, zeta=0.04) for T in T_curve]
+    Sa_curve = [gb50011_spectrum(T, A=0.16, Tg=0.4, zeta=0.04, g=g) for T in T_curve]
 
     print(f"\n── Response spectrum analysis (X direction, {n} modes) ──")
-    builder.run_response_spectrum_analysis(
-        num_modes=n,
-        modal_periods=periods[:n],
-        spectrum_periods=T_curve,
-        spectrum_accels=Sa_curve,
-        direction="X",
-        damping_ratio=0.04,
-        print_results=True,
-    )
+    try:
+        builder.run_response_spectrum_analysis(
+            num_modes=n,
+            modal_periods=periods[:n],
+            spectrum_periods=T_curve,
+            spectrum_accels=Sa_curve,
+            direction="X",
+            damping_ratio=0.04,
+            print_results=True,
+        )
 
-    # ── 6. Element-level RS forces ───────────────────────────────────────────
-    print("\n── Element-level RS forces ──")
-    elem_rs = builder.extract_element_rs_forces(
-        num_modes=n,
-        modal_periods=periods[:n],
-        spectrum_periods=T_curve,
-        spectrum_accels=Sa_curve,
-        direction="X",
-        damping_ratio=0.04,
-        print_results=True,
-    )
+        # ── 6. Element-level RS forces ───────────────────────────────────────
+        print("\n── Element-level RS forces ──")
+        elem_rs = builder.extract_element_rs_forces(
+            num_modes=n,
+            modal_periods=periods[:n],
+            spectrum_periods=T_curve,
+            spectrum_accels=Sa_curve,
+            direction="X",
+            damping_ratio=0.04,
+            print_results=True,
+        )
+    except Exception as e:
+        # Very small / under-constrained models produce numerically
+        # degenerate modes (near-zero stiffness -> near-infinite frequency)
+        # that overflow the CQC combination.  Skip the RS stage rather than
+        # aborting with a raw traceback.
+        print(f"\n  Response-spectrum analysis failed: {e}")
+        print("  Degenerate modes can overflow the CQC combination on tiny models")
+        print("  - retry with a smaller --num-modes (e.g. --num-modes 3).")
+        print("\nDone.")
+        return
 
     # ── 7. Missing mass correction (requires add_missing_mass_correction
     #     which is not yet ported to AnalysisBuilder) ─────────────────────────
@@ -212,7 +232,7 @@ def main():
             num_modes=n,
             modal_periods=periods[:n],
             eigenvalues=modal["eigenvalues"],
-            spectrum_func=gb50011_spectrum,
+            spectrum_func=partial(gb50011_spectrum, A=0.16, Tg=0.4, zeta=0.04, g=g),
             direction="X",
             damping_ratio=0.04,
         )
