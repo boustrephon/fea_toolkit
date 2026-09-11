@@ -696,6 +696,53 @@ class TestExportWorkflow:
             assert "frame_sap_id" in data
             assert "node_tag" in data
 
+    def test_export_static_results_with_forces(self, sample_ab, tmp_path):
+        """``export_static_results`` writes a force-bearing NPZ in one call.
+
+        Regression test for the element-keyed -> component-keyed force
+        transpose that callers previously had to hand-write (the arrays must
+        stay aligned with ``frame_sap_id`` / ``frame_node_i``).
+        """
+        import numpy as np
+
+        sample_ab.build_domain()
+        results = sample_ab.run_static_analysis(
+            pattern_scales={"DEAD": 1.0, "WIND": 1.0},
+        )
+
+        # run_static_analysis returns global/nodal results only.
+        assert "element_forces" not in results
+
+        arrays = sample_ab.static_element_force_arrays()
+        assert set(arrays) == {
+            "fx_i",
+            "fy_i",
+            "fz_i",
+            "mx_i",
+            "my_i",
+            "mz_i",
+            "fx_j",
+            "fy_j",
+            "fz_j",
+            "mx_j",
+            "my_j",
+            "mz_j",
+        }
+
+        npz_path = str(tmp_path / "static_export.npz")
+        sample_ab.export_static_results(npz_path, results, case_name="DEAD+WIND")
+
+        with np.load(npz_path, allow_pickle=True) as data:
+            n_frames = len(data["frame_sap_id"])
+            assert n_frames > 0
+            # Every component array is present and length-matched to geometry.
+            for key in arrays:
+                assert len(data[f"static/DEAD+WIND/{key}"]) == n_frames
+            # Non-zero forces survived the export, and match the in-memory
+            # transpose exactly.
+            assert np.any(data["static/DEAD+WIND/mz_i"] != 0.0)
+            np.testing.assert_allclose(data["static/DEAD+WIND/mz_i"], np.array(arrays["mz_i"]))
+
     def test_export_with_section_responses(self, sample_ab, tmp_path):
         """NPZ export includes geometry arrays when requested."""
         sample_ab.build_domain()

@@ -301,26 +301,10 @@ def run_linear_cases(
             if raw_out is not None:
                 entry = {"nodal_displacements": results.get("nodal_displacements", {})}
                 try:
-                    ef = ab.extract_static_element_forces()
-                    if ef:
-                        force_pairs = [
-                            ("Fx", "fx_i"),
-                            ("Fy", "fy_i"),
-                            ("Fz", "fz_i"),
-                            ("Mx", "mx_i"),
-                            ("My", "my_i"),
-                            ("Mz", "mz_i"),
-                            ("Fx_j", "fx_j"),
-                            ("Fy_j", "fy_j"),
-                            ("Fz_j", "fz_j"),
-                            ("Mx_j", "mx_j"),
-                            ("My_j", "my_j"),
-                            ("Mz_j", "mz_j"),
-                        ]
-                        elem_forces = {out_key: [] for _, out_key in force_pairs}
-                        for fr in ef.values():
-                            for in_key, out_key in force_pairs:
-                                elem_forces[out_key].append(fr.get(in_key, float("nan")))
+                    # Component-keyed arrays ordered to match the exported
+                    # geometry (see AnalysisBuilder.static_element_force_arrays).
+                    elem_forces = ab.static_element_force_arrays()
+                    if elem_forces:
                         entry["element_forces"] = elem_forces
                 except Exception:
                     pass

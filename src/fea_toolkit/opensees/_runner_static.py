@@ -35,8 +35,17 @@ class StaticRunnerMixin:
         When *pattern_scales* is ``None`` (default), the existing domain
         is analysed as-is.
 
-        Returns a dict with nodal_displacements, reactions, element_forces,
-        and load_totals.
+        Returns:
+            Dict with ``"nodal_displacements"`` (``{node_id: [dx,dy,dz,rx,ry,rz]}``)
+            and - when *extract_reactions* is true - ``"reactions"``
+            (``{node_id: {fx, fy, fz, mx, my, mz}}``) plus
+            ``"load_reaction_check"``.
+
+        Note:
+            Element end forces are **not** returned here.  Call
+            :meth:`extract_static_element_forces` afterwards, or
+            :meth:`export_static_results` to write a force-bearing archive in
+            one step.
         """
         # Rebuild domain with new pattern scales if requested
         if pattern_scales is not None:
@@ -643,6 +652,60 @@ class StaticRunnerMixin:
             }
         return results
 
+    def static_element_force_arrays(self) -> dict[str, list[float]]:
+        """Transpose element-keyed static forces into component-keyed arrays.
+
+        Converts the element-keyed output of
+        :meth:`extract_static_element_forces` into the component-keyed arrays
+        (``fx_i`` ... ``mz_j``) that the unified NPZ/H5 schema stores, ordered
+        to match the exported geometry (active ``mesh_model.frame_elements``,
+        skipping inactive parents) so the force series line up with
+        ``frame_sap_id`` / ``frame_node_i``.
+
+        Must be called after :meth:`run_static_analysis`.
+
+        Returns:
+            Dict mapping NPZ array keys (``"fx_i"`` ... ``"mz_j"``) to
+            per-active-element lists of floats.
+
+        Raises:
+            ValueError: If an active frame element has no force data, which
+                would silently misalign the component arrays with the
+                geometry arrays.
+        """
+        # (element-keyed key, component-keyed NPZ array key)
+        pairs = (
+            ("Fx", "fx_i"),
+            ("Fy", "fy_i"),
+            ("Fz", "fz_i"),
+            ("Mx", "mx_i"),
+            ("My", "my_i"),
+            ("Mz", "mz_i"),
+            ("Fx_j", "fx_j"),
+            ("Fy_j", "fy_j"),
+            ("Fz_j", "fz_j"),
+            ("Mx_j", "mx_j"),
+            ("My_j", "my_j"),
+            ("Mz_j", "mz_j"),
+        )
+        elem_forces = self.extract_static_element_forces()
+        arrays: dict[str, list[float]] = {out_key: [] for _, out_key in pairs}
+        for eid, elem in self.mesh_model.frame_elements.items():
+            if getattr(elem, "inactive", False):
+                continue
+            tag = self.frame_tag_map.get(eid, elem.elem_tag)
+            fe = elem_forces.get(tag)
+            if fe is None:
+                raise ValueError(
+                    f"Active frame element {eid} (tag {tag}) has no static force "
+                    "data - every active element must be present so the NPZ "
+                    "component arrays stay aligned with frame_sap_id / "
+                    "frame_node_i."
+                )
+            for in_key, out_key in pairs:
+                arrays[out_key].append(float(fe[in_key]))
+        return arrays
+
     def extract_static_shell_forces(self) -> dict[str, dict[str, Any]]:
         """Extract shell element forces after a static analysis.
 
@@ -843,6 +906,39 @@ class StaticRunnerMixin:
             fmt=fmt,
             config=self.config,
         )
+
+    def export_static_results(
+        self,
+        filepath: str,
+        results: dict[str, Any],
+        case_name: str = "Static",
+        shell_forces: Optional[dict[str, Any]] = None,
+        fmt: str = "npz",
+    ) -> str:
+        """Export a static case together with its element forces.
+
+        Convenience wrapper over :meth:`export_results` that packages the
+        element-keyed :meth:`extract_static_element_forces` output into the
+        component-keyed arrays the writer expects, so a single call produces a
+        force-bearing NPZ/H5 archive that
+        :func:`~fea_toolkit.plotting.plot_force_diagram` can read directly.
+
+        Args:
+            filepath: Output file path (``.npz`` or ``.h5``).
+            results: Dict from :meth:`run_static_analysis`.
+            case_name: Static case name recorded in the archive.
+            shell_forces: Optional dict from
+                :meth:`extract_static_shell_forces`.
+            fmt: ``"npz"`` (default) or ``"h5"``.
+
+        Returns:
+            Absolute path to the written file.
+        """
+        case = dict(results)
+        case["element_forces"] = self.static_element_force_arrays()
+        if shell_forces is not None:
+            case["shell_forces"] = shell_forces
+        return self.export_results(filepath, static_results={case_name: case}, fmt=fmt)
 
 
 # ── Module-level helper: response normalisation ────────────────
