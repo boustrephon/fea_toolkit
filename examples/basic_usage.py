@@ -17,21 +17,21 @@ Run this script from the project root (where the 'fea_toolkit/' folder lives):
 
 """
 
-import sys
 import argparse
-from pathlib import Path
 import platform
+import sys
+from pathlib import Path
 
 # Add project root to Python path so that 'fea_toolkit' can be imported
 sys.path.insert(0, str(Path(__file__).parent.parent))  # project root
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from fea_toolkit import __version__, ops_version
+from fea_toolkit.io.helper import mac_file_chooser, tkinter_file_chooser
 from fea_toolkit.io.s2k_parser import SAP2000Parser
 from fea_toolkit.model.sections import SectionLibrary
-from fea_toolkit.opensees.preprocessor import preprocess_model
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
-from fea_toolkit.io.helper import mac_file_chooser, tkinter_file_chooser
+from fea_toolkit.opensees.preprocessor import preprocess_model
 
 # Get Operating System
 os_name = platform.system()
@@ -119,9 +119,10 @@ def main():
     print(f"Node Loads: {len(model_data.joint_loads)}")
     print(f"Distributed Loads: {len(model_data.frame_dist_loads)}")
 
-    if len(model_data.load_patterns) > 0:
+    if model_data.load_patterns:
         print("\nLoad Patterns:")
-        _ = [print(pat) for pat in model_data.load_patterns.keys()]
+        for pat in model_data.load_patterns:
+            print(f"  {pat}")
 
     # Enrich sections if database available
     if section_db_path.exists():
@@ -145,25 +146,20 @@ def main():
     builder = AnalysisBuilder(mesh_model, config)
     builder.build_domain()
 
-    # Load totals are always computed after build_domain() — print a summary
+    # Load totals are always computed after build_domain()
     unit_F = model_data.units.get("F", "?")
     unit_L = model_data.units.get("L", "?")
-    print(f"\n── Applied load totals per pattern ({unit_F}) ──")
-    for pname, totals in builder.load_totals.items():
-        print(f"  {pname}:")
-        print(
-            f"    Forces:  Fx = {totals['fx']:>12.3f}  Fy = {totals['fy']:>12.3f}  Fz = {totals['fz']:>12.3f}"
-        )
-        print(
-            f"    Moments: Mx = {totals['mx']:>12.3f}  My = {totals['my']:>12.3f}  Mz = {totals['mz']:>12.3f}"
-        )
 
     # ── Run analysis and compare with reactions ───────────────────────────
     if ANALYSE:
-        odb_tag = 0
         print("\n", 80 * "=")
-        print(f"── Running OpenSees static analysis (all patterns combined) (ODB tag {odb_tag}) ──")
-        results = builder.run_static_analysis(odb_tag=odb_tag, extract_reactions=True)
+        print("── Running OpenSees static analysis (all patterns combined) ──")
+        avail = list(model_data.load_patterns.keys())
+        combo = dict.fromkeys(avail, 1.0)
+        results = builder.run_static_analysis(
+            extract_reactions=True,
+            pattern_scales=combo,
+        )
         disp = results.get("nodal_displacements", {})
 
         # Unit scaling for display
@@ -177,72 +173,56 @@ def main():
         # ── Displacements ──
         print(f"\n── Displacements (first 5 nodes, {unit_L2}) ──")
         if isinstance(disp, dict) and disp:
-            count = 0
-            for node_tag, d in disp.items():
-                if count >= 5:
+            for i, (node_tag, d) in enumerate(disp.items()):
+                if i >= 5:
                     break
                 dx, dy, dz = d[0] * scale, d[1] * scale, d[2] * scale
                 print(f"  Node {node_tag:>4}: dx = {dx:8.3f}  dy = {dy:8.3f}  dz = {dz:8.3f}")
-                count += 1
         else:
             print("  (no displacement data)")
 
         # ── Equilibrium check: applied loads vs reactions ──
-        summed_rx = results.get("summed_reactions")
-        if summed_rx and hasattr(builder, "load_totals"):
-            print(f"\n── Equilibrium check ({unit_F}, {unit_F}·{unit_L}) ──")
-            # Sum all applied loads across all patterns
-            total_applied = {"fx": 0.0, "fy": 0.0, "fz": 0.0, "mx": 0.0, "my": 0.0, "mz": 0.0}
-            for totals in builder.load_totals.values():
-                for k in total_applied:
-                    total_applied[k] += totals[k]
+        from fea_toolkit.utils import sum_reactions_with_overturning
 
-            print(f"  {'':>15}  {'Fx':>12}  {'Fy':>12}  {'Fz':>12}")
+        summed_rx = sum_reactions_with_overturning(results.get("reactions", {}), model_data.nodes)
+        if summed_rx:
+            print(f"\n── Base reactions ({unit_F}, {unit_F}·{unit_L}) ──")
             print(
-                f"  {'Applied':>15}  {total_applied['fx']:12.3f}  {total_applied['fy']:12.3f}  {total_applied['fz']:12.3f}"
+                f"  Fx = {summed_rx['fx']:>12.3f}   Fy = {summed_rx['fy']:>12.3f}   "
+                f"Fz = {summed_rx['fz']:>12.3f}"
             )
             print(
-                f"  {'Reactions':>15}  {summed_rx['fx']:12.3f}  {summed_rx['fy']:12.3f}  {summed_rx['fz']:12.3f}"
+                f"  Mx = {summed_rx['mx']:>12.3f}   My = {summed_rx['my']:>12.3f}   "
+                f"Mz = {summed_rx['mz']:>12.3f}"
             )
-            print(
-                f"  {'Difference':>15}  {total_applied['fx'] + summed_rx['fx']:12.3f}"
-                f"  {total_applied['fy'] + summed_rx['fy']:12.3f}"
-                f"  {total_applied['fz'] + summed_rx['fz']:12.3f}"
-            )
+
+        # Vertical (Fz) equilibrium: applied load vs summed reaction.
+        lrc = results.get("load_reaction_check")
+        if lrc:
+            print(f"\n── Vertical equilibrium ({unit_F}) ──")
+            print(f"  Applied  Fz = {lrc['applied_fz']:>12.3f}")
+            print(f"  Reaction Fz = {lrc['reaction_fz']:>12.3f}")
+            print(f"  Residual    = {lrc['delta']:>12.3f}")
 
         # ── Per-pattern equilibrium checks ──
-        if hasattr(builder, "load_totals") and len(builder.load_totals) > 1:
+        if len(avail) > 1:
             print("\n", 80 * "=")
             print(f"── Per-pattern equilibrium checks ({unit_F}) ──")
-            for pname in builder.load_totals:
-                print("\n", 80 * "-")
-                pat_results = builder.run_static_analysis(
-                    extract_reactions=True,
-                    pattern_scales={pname: 1.0},
-                )
-                pat_rx = pat_results.get("summed_reactions", {})
-                pat_app = pat_results.get("load_totals", {}).get(pname, {})
-                if pat_rx:
-                    print(f"  {pname}:")
-                    print(
-                        f"    Applied: Fx={pat_app.get('fx', 0):12.3f}  "
-                        f"Fy={pat_app.get('fy', 0):12.3f}  "
-                        f"Fz={pat_app.get('fz', 0):12.3f}"
-                    )
-                    print(
-                        f"    Reactn:  Fx={pat_rx.get('fx', 0):12.3f}  "
-                        f"Fy={pat_rx.get('fy', 0):12.3f}  "
-                        f"Fz={pat_rx.get('fz', 0):12.3f}"
-                    )
+            try:
+                eq = builder.check_load_equilibrium()
+                if eq is not None and len(eq):
+                    print(eq.to_string(index=False))
+            except Exception as e:
+                print(f"  Per-pattern check skipped: {e}")
 
         # ── Modal analysis ──
         if model_data.mass_sources:
             print("\n", 80 * "=")
             print("── Modal analysis ──")
             # Rebuild (the static analysis above may have wiped the model)
-            builder.build()
-            builder.compute_seismic_masses(g=9.81)
-            modal_results = builder.run_modal_analysis(num_modes=15, print_results=True)
+            builder.build_domain()
+            builder.compute_seismic_masses()
+            builder.run_modal_analysis(num_modes=15, print_results=True)
         else:
             print("\n── No MASS SOURCE defined — skipping modal analysis. ──")
 

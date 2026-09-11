@@ -113,28 +113,27 @@ def main():
         tags = sorted(disp.keys())
         print("\nDisplacements (first 5 nodes):")
         for tag in tags[:5]:
-            dx, dy, dz = disp[tag]
+            dx, dy, dz = disp[tag][:3]
             print(f"  Node {tag}: dx = {dx:+.6f}  dy = {dy:+.6f}  dz = {dz:+.6f}")
 
-    # Equilibrium
-    summed = results.get("summed_reactions")
+    # Equilibrium — summed base reactions (incl. overturning moments)
+    from fea_toolkit.utils import sum_reactions_with_overturning
+
+    summed = sum_reactions_with_overturning(results.get("reactions", {}), md.nodes)
     if summed:
         print("\nBase reactions (should balance applied loads):")
         print(f"  Fx: {summed['fx']:+.3f}  Fy={summed['fy']:+.3f}  Fz={summed['fz']:+.3f}")
         print(f"  Mx: {summed['mx']:+.3f}  My={summed['my']:+.3f}  Mz={summed['mz']:+.3f}")
 
-    # Load totals
-    if "load_totals" in results:
-        print("\nApplied load totals per pattern:")
-        for pname, totals in results["load_totals"].items():
-            print(
-                f"  {pname}: Fx={totals['fx']:>12.3f}  Fy={totals['fy']:>12.3f}  Fz={totals['fz']:>12.3f}  "
-                f"Mx={totals['mx']:>10.3f}  My={totals['my']:>10.3f}  Mz={totals['mz']:>10.3f}"
-            )
+    # Applied vs reaction vertical equilibrium (Fz)
+    lrc = results.get("load_reaction_check")
+    if lrc:
+        print("\nVertical equilibrium (Fz):")
+        print(f"  Applied:  {lrc['applied_fz']:+.3f}")
+        print(f"  Reaction: {lrc['reaction_fz']:+.3f}")
+        print(f"  Residual: {lrc['delta']:+.3f}")
 
-    print(
-        f"\nDone. {len(disp)} node displacements, {len(results.get('nodal_reactions', {}))} reactions."
-    )
+    print(f"\nDone. {len(disp)} node displacements, {len(results.get('reactions', {}))} reactions.")
 
     # ── Extract element forces ──
     print("\n── Extracting element forces ──")

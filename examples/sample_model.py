@@ -30,7 +30,8 @@ def make_sample_model() -> SAPModelData:
     """Build a simple 10 m steel cantilever column with gravity + lateral loads.
 
     Returns:
-        SAPModelData ready to be passed to ``OpenSeesBuilder``.
+        SAPModelData ready to be passed to the Preprocessor + AnalysisBuilder
+        two-stage pipeline.
     """
     # ── Nodes ──
     nodes = {
