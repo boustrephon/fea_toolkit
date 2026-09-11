@@ -36,9 +36,9 @@ required.  The model is a simple 2-node, 1-element cantilever built
 entirely from scratch.
 """
 
-import sys
-import os
 import argparse
+import contextlib
+import sys
 
 try:
     import openseespy.opensees as ops
@@ -53,10 +53,8 @@ except ImportError as exc:
 
 def _wipe_model():
     """Wipe OpenSees model state, ignoring errors if none exists."""
-    try:
+    with contextlib.suppress(Exception):
         ops.wipe()
-    except Exception:
-        pass
 
 
 def check(seq: int, name: str, ok: bool, detail: str = ""):

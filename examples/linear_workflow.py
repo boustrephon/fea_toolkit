@@ -16,11 +16,11 @@ Usage::
     python examples/linear_workflow.py --no-analysis           # parse + enrich only
 """
 
-import sys
 import argparse
+import sys
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -30,39 +30,28 @@ sys.path.insert(0, str(_REPO_ROOT))  # project root (for `examples.sample_model`
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from fea_toolkit import __version__, ops_version
-from fea_toolkit.io.s2k_parser import SAP2000Parser
-from fea_toolkit.opensees.preprocessor import preprocess_model as ft_preprocess_model
-from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
-from fea_toolkit.model.geometry import (
-    mesh_area_elements,
-    split_elements,
-    split_areas_at_frame_edges,
-    split_slabs_at_wall_intersections,
-    find_constraint_edges,
-    warn_frame_overlaps,
-    remove_floating_nodes,
-)
 from fea_toolkit.io.report import (
-    summarise_mass_sources,
-    summarise_load_cases,
-    summarise_load_patterns,
+    area_section_summary,
     load_pattern_totals,
     material_summary,
     section_summary,
-    area_section_summary,
-    modal_table_enhanced,
-    format_linear_table,
+    summarise_load_cases,
+    summarise_load_patterns,
+    summarise_mass_sources,
+)
+from fea_toolkit.io.s2k_parser import SAP2000Parser
+from fea_toolkit.model.geometry import (
+    find_constraint_edges,
+    mesh_area_elements,
+    split_areas_at_frame_edges,
+    split_elements,
+    warn_frame_overlaps,
 )
 from fea_toolkit.model.sap_data import (
     SAPModelData,
-    Node,
-    Restraint,
-    Material,
-    Section,
-    FrameElement,
-    AreaElement,
-    ShellSection,
 )
+from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model as ft_preprocess_model
 from fea_toolkit.spectrum import _build_spectrum
 
 # ═══════════════════════════════════════════════════════════════════
@@ -70,7 +59,7 @@ from fea_toolkit.spectrum import _build_spectrum
 # ═══════════════════════════════════════════════════════════════════
 
 
-def load_model(s2k_path: str) -> Tuple[SAPModelData, Dict[str, Any]]:
+def load_model(s2k_path: str) -> tuple[SAPModelData, dict[str, Any]]:
     """Parse a SAP2000 .s2k file and return model data + raw tables."""
     p = Path(s2k_path)
     if not p.exists():
@@ -89,7 +78,7 @@ def load_model(s2k_path: str) -> Tuple[SAPModelData, Dict[str, Any]]:
 
 def plot_building_views(
     md: SAPModelData,
-    window_size: Tuple[int, int] = (800, 600),
+    window_size: tuple[int, int] = (800, 600),
 ) -> Any:
     """Return a 2×2 matplotlib figure with plan, two elevations, isometric.
 
@@ -105,14 +94,13 @@ def plot_building_views(
 # ═══════════════════════════════════════════════════════════════════
 
 
-def preprocess_model(md: SAPModelData) -> Dict[str, Any]:
+def preprocess_model(md: SAPModelData) -> dict[str, Any]:
     """Apply meshing, splitting, and constraint detection.
 
     Returns a dict of pre-processing stats.
     """
-    import openseespy.opensees as ops
 
-    stats: Dict[str, Any] = {}
+    stats: dict[str, Any] = {}
 
     # ── Mesh area elements (use tags past max existing) ───────────
     n_area_before = len(md.area_elements)
@@ -246,7 +234,7 @@ def remove_floating_nodes(
 # ═══════════════════════════════════════════════════════════════════
 
 
-def _auto_detect_cases(md: SAPModelData) -> List[str]:
+def _auto_detect_cases(md: SAPModelData) -> list[str]:
     """Auto-detect static load cases from the SAP2000 model.
 
     Delegates to :meth:`SAPModelData.auto_detect_static_cases`.
@@ -334,8 +322,8 @@ def _build_and_constrain(md: SAPModelData) -> AnalysisBuilder:
 
 def run_linear_cases(
     md: SAPModelData,
-    cases: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    cases: Optional[list[str]] = None,
+) -> dict[str, Any]:
     """Run static analysis for each load case individually via the builder.
 
     Returns a dict keyed by case name, each with displacements,
@@ -347,7 +335,7 @@ def run_linear_cases(
         print("  (no static load cases found)")
         return {}
 
-    results: Dict[str, Any] = {}
+    results: dict[str, Any] = {}
     for case in cases:
         b = _build_and_constrain(md)
         try:
@@ -381,7 +369,7 @@ def run_modal(
     num_modes: int = 12,
     extract_shapes: bool = False,
     eigen_solver: str = "genBandArpack",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run eigenvalue modal analysis via the builder.
 
     Parameters
@@ -423,10 +411,10 @@ def run_modal(
 
 def run_rs(
     md: SAPModelData,
-    modal_result: Dict[str, Any],
+    modal_result: dict[str, Any],
     direction: str = "X",
     T_rigid: Optional[float] = None,
-) -> Optional[Dict[str, Any]]:
+) -> Optional[dict[str, Any]]:
     """Compute CQC-combined response spectrum base shear from modal results.
 
     Post-processes modal participation factors against a GB 50011 spectrum
@@ -491,9 +479,9 @@ def run_rs(
 
 def visualize_mode_shapes(
     builder,
-    mode_shapes: Dict[int, Dict[int, tuple]],
-    modal_result: Dict[str, Any],
-    mode_indices: Optional[List[int]] = None,
+    mode_shapes: dict[int, dict[int, tuple]],
+    modal_result: dict[str, Any],
+    mode_indices: Optional[list[int]] = None,
     scale: float = 50.0,
     out_dir: str = "examples/output",
     save_gif: bool = False,
@@ -534,7 +522,6 @@ def visualize_mode_shapes(
 
     if save_gif:
         import pyvista as pv
-        import math as _math
 
         pv.set_plot_theme("document")
         out = Path(out_dir)
@@ -560,9 +547,10 @@ def visualize_mode_shapes(
 
 def _save_mode_gif(builder, mode_shapes, mode_idx, periods, scale, out_dir):
     """Record a single mode animation as a GIF file (frames + shells)."""
-    import pyvista as pv
     import math as _math
+
     import imageio
+    import pyvista as pv
 
     disp = mode_shapes[mode_idx]
     pv.set_plot_theme("document")
@@ -710,7 +698,7 @@ CACHE_DIR = Path("examples/output")
 CACHE_NPZ = CACHE_DIR / "results.npz"
 
 
-def _build_cache_data(modal_result: Dict[str, Any], md: SAPModelData) -> Dict[str, Any]:
+def _build_cache_data(modal_result: dict[str, Any], md: SAPModelData) -> dict[str, Any]:
     """Extract data needed for visualisation into a cacheable dict.
 
     Strips out the builder (OpenSees state) and keeps only what
@@ -775,11 +763,11 @@ def _build_cache_data(modal_result: Dict[str, Any], md: SAPModelData) -> Dict[st
 
 
 def save_cache(
-    modal_result: Dict[str, Any],
+    modal_result: dict[str, Any],
     md: SAPModelData,
-    static_results: Optional[Dict] = None,
-    rs_x: Optional[Dict] = None,
-    rs_y: Optional[Dict] = None,
+    static_results: Optional[dict] = None,
+    rs_x: Optional[dict] = None,
+    rs_y: Optional[dict] = None,
 ) -> None:
     """Save modal results + mode shapes + mesh data to a unified NPZ cache."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -798,7 +786,7 @@ def save_cache(
     print(f"  Cached to {path}")
 
 
-def load_cache() -> Optional[Dict[str, Any]]:
+def load_cache() -> Optional[dict[str, Any]]:
     """Load cached results for visualisation from unified NPZ file."""
     if not CACHE_NPZ.exists():
         # Fallback: old pickle format
@@ -913,7 +901,7 @@ _SECTION_COLORS_CACHE = [
 ]
 
 
-def _make_plotter_from_cache(data: Dict[str, Any], mode_idx: int, scale: float):
+def _make_plotter_from_cache(data: dict[str, Any], mode_idx: int, scale: float):
     """Build a PyVista plotter from cached mesh/shape data (no builder needed)."""
     import pyvista as pv
 
@@ -949,7 +937,7 @@ def _make_plotter_from_cache(data: Dict[str, Any], mode_idx: int, scale: float):
 
     # Group shell quads by section name
     # quads_by_sec[sec_name] = [(p1,p2,p3,p4,d1,d2,d3,d4), ...]
-    quads_by_sec: Dict[str, list] = {}
+    quads_by_sec: dict[str, list] = {}
     for idx, tags in enumerate(shell_quads):
         pts = []
         ds = []
@@ -977,8 +965,8 @@ def _make_plotter_from_cache(data: Dict[str, Any], mode_idx: int, scale: float):
         _seg_npoints.append(n)
 
     # Per-section shell mesh builders (used for animation)
-    _shell_fn_by_sec: Dict[str, callable] = {}
-    _shell_mesh_by_sec: Dict[str, pv.PolyData] = {}
+    _shell_fn_by_sec: dict[str, callable] = {}
+    _shell_mesh_by_sec: dict[str, pv.PolyData] = {}
     for sec_name, quads in quads_by_sec.items():
 
         def _make_sec_shell(amp, qs=quads):
@@ -1065,7 +1053,7 @@ def _make_plotter_from_cache(data: Dict[str, Any], mode_idx: int, scale: float):
 
 
 def visualize_from_cache(
-    mode_indices: Optional[List[int]] = None,
+    mode_indices: Optional[list[int]] = None,
     scale: float = 50.0,
     save_gif: bool = False,
     out_dir: str = "examples/output",
@@ -1086,7 +1074,6 @@ def visualize_from_cache(
 
     import pyvista as pv
 
-    n_modes = len(shapes)
     indices = mode_indices if mode_indices is not None else sorted(shapes.keys())
 
     for idx in indices:
@@ -1095,8 +1082,11 @@ def visualize_from_cache(
             continue
 
         if save_gif:
+            import math as _math
+
+            import imageio
+
             from fea_toolkit.plotting.viz import _build_deformed_mesh, _set_isometric_view
-            import math as _math, imageio
 
             pv.set_plot_theme("document")
 
@@ -1219,10 +1209,18 @@ def visualize_from_cache(
 
             import math as _math
 
-            step_counter = [0]
-
-            def callback(step):
-                step_counter[0] = step
+            # Bind the loop-local plot objects as default arguments so the
+            # timer callback cannot pick up the *next* iteration's values
+            # (late-binding closure; ruff B023).
+            def callback(
+                step,
+                fm=fm,
+                fm_fn=fm_fn,
+                has_shells=has_shells,
+                sm_by_sec=sm_by_sec,
+                sm_fn_by_sec=sm_fn_by_sec,
+                plotter=plotter,
+            ):
                 amp = _math.sin(2.0 * _math.pi * step / 60.0)
                 fm.points = fm_fn(amp).points
                 if has_shells:
@@ -1247,7 +1245,7 @@ SPECTRUM_CFG = {
 }
 
 
-def _df_modal_from_results(modal_result: Dict[str, Any]) -> Optional[pd.DataFrame]:
+def _df_modal_from_results(modal_result: dict[str, Any]) -> Optional[pd.DataFrame]:
     """Build a modal participation DataFrame from existing analysis results.
 
     Delegates to :func:`fea_toolkit.io.report.modal_participation_df`.
@@ -1258,7 +1256,7 @@ def _df_modal_from_results(modal_result: Dict[str, Any]) -> Optional[pd.DataFram
 
 
 def save_modal_table(
-    modal_result: Dict[str, Any],
+    modal_result: dict[str, Any],
     out_dir: str = "examples/output",
 ) -> Optional[str]:
     """Build an HTML modal-participation table from existing results and save it.
@@ -1271,22 +1269,23 @@ def save_modal_table(
 
 
 def plot_results(
-    modal_result: Dict[str, Any],
-    rs_x: Optional[Dict[str, Any]] = None,
-    rs_y: Optional[Dict[str, Any]] = None,
+    modal_result: dict[str, Any],
+    rs_x: Optional[dict[str, Any]] = None,
+    rs_y: Optional[dict[str, Any]] = None,
     out_dir: str = "examples/output",
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Generate modal participation, spectrum, and RS plots.
 
     Saves PNG files to *out_dir* and returns a dict mapping plot name
     to file path.
     """
+    import matplotlib
+
     from fea_toolkit.plotting.report import (
         plot_modal_participation,
         plot_rs_modal_analysis,
     )
     from fea_toolkit.spectrum import plot_seismic_spectrum
-    import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -1365,11 +1364,11 @@ def run_all(
     num_modes: int = 32,
     skip_analysis: bool = False,
     extract_shapes: bool = False,
-    visualize_modes: Union[bool, List[int]] = False,
+    visualize_modes: Union[bool, list[int]] = False,
     save_gif: bool = False,
     eigen_solver: str = "genBandArpack",
     cache: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run all analyses and return compiled results dict.
 
     *s2k_path* may be ``None`` when a pre-parsed model is supplied via *md*
@@ -1395,7 +1394,7 @@ def run_all(
     print(f"  Materials: {len(md.materials)}  |  Sections: {len(md.sections)}")
     print(f"  Units: {md.units}\n")
 
-    results: Dict[str, Any] = {
+    results: dict[str, Any] = {
         "md": md,
         "raw": raw,
         "model_summary": model_summary(md),
@@ -1500,7 +1499,7 @@ def run_all(
 
     # ── Response spectrum ─────────────────────────────────────────
     if modal and "periods" in modal and len(modal["periods"]) > 0:
-        print(f"\n--- Response spectrum analysis ---")
+        print("\n--- Response spectrum analysis ---")
         for d in ("X", "Y"):
             try:
                 rs = run_rs(md, modal, direction=d)
@@ -1674,7 +1673,7 @@ def main():
         extract_shapes=args.shapes or args.animate or args.gif,
         visualize_modes=args.mode_index
         if args.mode_index is not None
-        else (True if args.animate or args.gif else False),
+        else bool(args.animate or args.gif),
         save_gif=args.gif,
         eigen_solver=args.solver,
         cache=auto_cache,
