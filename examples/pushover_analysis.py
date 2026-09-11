@@ -19,8 +19,8 @@ Usage::
     python examples/pushover_analysis.py --sample
 """
 
-import sys
 import argparse
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))  # project root
@@ -28,11 +28,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from fea_toolkit import __version__, ops_version
 from fea_toolkit.io.s2k_parser import SAP2000Parser
-from fea_toolkit.opensees.preprocessor import preprocess_model
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+from fea_toolkit.opensees.preprocessor import preprocess_model
 from fea_toolkit.plotting import (
-    plot_pushover_curve,
     plot_mode_animation,
+    plot_pushover_curve,
 )
 
 
@@ -227,15 +227,10 @@ def main():
 
         # Model extents for annotation placement
         all_z = [n.z for n in b_viz.mesh_model.nodes.values()]
-        z_min, z_max = min(all_z), max(all_z)
-        z_mid = (z_min + z_max) * 0.5
+        z_max = max(all_z)
 
         # Build deformed mesh
-        elements = (
-            b_viz.mesh_model.frame_elements
-            if b_viz.mesh_model.frame_elements
-            else b_viz.model.frame_elements
-        )
+        elements = b_viz.mesh_model.frame_elements or b_viz.model.frame_elements
         segments = []
         for eid, elem in elements.items():
             if getattr(elem, "inactive", False):
@@ -265,8 +260,7 @@ def main():
                 try:
                     d = ops.nodeDisp(nd.node_tag)
                     mag = np.linalg.norm(d[:3])
-                    if mag > max_d:
-                        max_d = mag
+                    max_d = max(max_d, mag)
                 except Exception:
                     pass
 
@@ -281,27 +275,35 @@ def main():
         load_type = results.get("lateral_load_type", "uniform")
 
         # ── Arrow geometry (much thicker stems for visibility) ──
-        grav_shaft_r = model_height * 0.06  # 6% of model height
-        grav_tip_r = model_height * 0.10
-        grav_tip_l = model_height * 0.25
-        grav_start = [cx, cy, z_top + model_height * 0.3]
-        grav_dir = [0, 0, -model_height * 1.5]
-        grav_mid = [cx, cy, z_top - model_height * 0.6]  # label near mid-shaft
+        # Guard against degenerate extents: a purely vertical model has
+        # model_width == 0, a flat one has model_height == 0.  A zero-length
+        # arrow direction normalises to NaN and breaks the PyVista transform.
+        ref_len = max(model_width, model_height, 1.0)
+        _h = model_height if model_height > 0 else ref_len
+        grav_shaft_r = _h * 0.06  # 6% of model height
+        grav_tip_r = _h * 0.10
+        grav_tip_l = _h * 0.25
+        grav_start = [cx, cy, z_top + _h * 0.3]
+        grav_dir = [0, 0, -_h * 1.5]
+        grav_mid = [cx, cy, z_top - _h * 0.6]  # label near mid-shaft
 
         cn_info = None  # (pos, tag)
         push_geo = None  # (start, dir, shaft_r, tip_r, tip_l, label_pos)
         try:
             cn_tag = results["control_node"]
-            cn_node = [n for n in b_viz.mesh_model.nodes.values() if n.node_tag == cn_tag][0]
+            cn_node = next(n for n in b_viz.mesh_model.nodes.values() if n.node_tag == cn_tag)
             cn_info = ([cn_node.x, cn_node.y, cn_node.z], cn_tag)
-            ps = [cn_node.x - model_width * 0.2, cn_node.y, cn_node.z]
-            pd = [model_width * 1.05, 0, 0]
+            # Lateral extent for sizing the push arrow — falls back to the
+            # model height when the model has no lateral extent.
+            lateral = model_width if model_width > 0 else ref_len
+            ps = [cn_node.x - lateral * 0.2, cn_node.y, cn_node.z]
+            pd = [lateral * 1.05, 0, 0]
             push_geo = (
                 ps,
                 pd,
-                model_width * 0.05,  # shaft radius
-                model_width * 0.08,  # tip radius
-                model_width * 0.20,  # tip length
+                lateral * 0.05,  # shaft radius
+                lateral * 0.08,  # tip radius
+                lateral * 0.20,  # tip length
                 [ps[0] + pd[0] * 0.4, ps[1], ps[2]],
             )  # label pos
         except Exception:
