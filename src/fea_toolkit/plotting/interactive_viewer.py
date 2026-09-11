@@ -204,14 +204,19 @@ def _build_structure_tubes(builder, elements, assignments, model):
         cyl = pv.Cylinder(
             center=mid, direction=direction, radius=radius, height=length * 0.95, resolution=8
         )
-        # Triangulate to handle mixed quad/triangle capped cylinders
-        cyl.triangulate()
+        # Triangulate to handle mixed quad/triangle capped cylinders.
+        # NOTE: PolyData.triangulate() returns a *new* mesh (it is not
+        # in-place), so the result must be reassigned — otherwise the face
+        # array stays mixed quad/triangle and the reshape(-1, 4) below
+        # raises "cannot reshape array".
+        cyl = cyl.triangulate()
         n_pts = cyl.n_points
         n_cells = cyl.n_cells
 
         all_verts.append(cyl.points)
-        # Shift face indices — now all faces are triangles (4 values each: 3 + 3 indices)
-        faces = cyl.faces.reshape(-1, 4)
+        # Shift face indices — all faces are triangles (4 values: count + 3
+        # indices).  Copy because PolyData.faces is a read-only view.
+        faces = cyl.faces.reshape(-1, 4).copy()
         faces[:, 1:] += offset
         all_faces.append(faces.ravel())
         all_elem_tags.append(np.full(n_cells, elem.elem_tag, dtype=int))
@@ -324,10 +329,10 @@ def plot_interactive_viewer(
     # ------------------------------------------------------------------
     # 1. Data preparation
     # ------------------------------------------------------------------
-    elements = builder.split_elements or builder.model.frame_elements
-    assignments = (
-        builder.split_assignments if builder.split_elements else builder.model.frame_assignments
-    )
+    # Topology is fully prepared by the Preprocessor, so the builder's
+    # MeshModel already carries the split elements and their assignments.
+    elements = builder.model.frame_elements
+    assignments = builder.model.frame_assignments
 
     if selection is not None:
         sel_ids = set(selection.get_frame_ids(builder.model))
@@ -423,12 +428,20 @@ def plot_interactive_viewer(
     # -- Structure tubes --
     # Colour tubes by section
     n_sec = len(sec_names)
+    n_colors = max(n_sec, 1)
     lut = pv.LookupTable()
-    lut.table = np.array([pv.Color(cmap[i % len(cmap)]).int_rgba for i in range(max(n_sec, 1))])
+    # Discrete per-section colour table.  ``LookupTable.table`` is no longer
+    # writable in PyVista >= 0.44, so populate it through the VTK API.
+    lut.scalar_range = (0.0, float(max(n_colors - 1, 0)))
+    lut.SetNumberOfTableValues(n_colors)
+    for i in range(n_colors):
+        r, g, b, a = pv.Color(cmap[i % len(cmap)]).int_rgba
+        lut.SetTableValue(i, r / 255.0, g / 255.0, b / 255.0, a / 255.0)
+    lut.Build()
     plotter.add_mesh(
         tube_mesh,
         scalars="section_idx",
-        lookup_table=lut,
+        cmap=lut,
         pickable=True,
         name="structure_tubes",
         show_scalar_bar=False,
@@ -471,13 +484,15 @@ def plot_interactive_viewer(
 
         # Build a colour LUT: red (+ve) → white (0) → blue (-ve)
         clim = [-max_val, max_val]
+        # Diverging red/white/blue map centred on zero.  ``divergent`` is not
+        # a settable attribute in PyVista >= 0.44; the symmetric
+        # ``scalar_range`` already centres the map on 0.
         lut2 = pv.LookupTable(cmap="RdBu", scalar_range=(-max_val, max_val))
-        lut2.divergent = True
 
         actor = plotter.add_mesh(
             flag_mesh,
             scalars="col_val",
-            lookup_table=lut2,
+            cmap=lut2,
             clim=clim,
             name="force_flags",
             pickable=True,

@@ -217,6 +217,21 @@ class AnalysisBuilder(
         # Transf tags
         self._transf_tags: dict[int, int] = {}
 
+    @property
+    def model(self) -> MeshModel:
+        """The frozen :class:`MeshModel` this builder was created from.
+
+        The two-stage architecture keeps all topology (nodes, split frame
+        elements, sections, assignments) in ``mesh_model``.  The plotting
+        layer accesses that topology through ``.model`` — e.g.
+        :func:`~fea_toolkit.plotting.plot_interactive_viewer` reads
+        ``builder.model.frame_elements`` / ``.frame_assignments``.
+
+        Returns:
+            The :class:`MeshModel` passed to :meth:`__init__`.
+        """
+        return self.mesh_model
+
     def _set_defaults(self) -> None:
         """Set default configuration values."""
         defaults = {

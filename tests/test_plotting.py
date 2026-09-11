@@ -362,6 +362,52 @@ class TestResolveMeshData:
         assert data["nodes"][2]["x"] == 4.0
         assert data["nodes"][3]["z"] == 3.0
 
+    def test_builder_model_alias(self):
+        """``AnalysisBuilder.model`` exposes the frozen ``MeshModel``.
+
+        Regression test: ``plot_interactive_viewer`` reads ``builder.model``,
+        which the two-stage :class:`AnalysisBuilder` previously did not
+        provide (it only exposed ``mesh_model``), so the viewer raised
+        ``AttributeError``.
+        """
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        md = make_sample_model()
+        config = {"element_type": "elasticBeamColumn", "split_elements": True, "verbose": False}
+        mesh_model = preprocess_model(md, config)
+        builder = AnalysisBuilder(mesh_model, config)
+
+        assert builder.model is builder.mesh_model
+        assert builder.model.frame_elements is mesh_model.frame_elements
+        assert builder.model.frame_assignments is mesh_model.frame_assignments
+
+    def test_interactive_viewer_accepts_builder(self):
+        """``plot_interactive_viewer`` accepts a two-stage ``AnalysisBuilder``.
+
+        Regression test: the viewer read the legacy
+        ``builder.split_elements`` / ``builder.split_assignments`` attributes,
+        which ``AnalysisBuilder`` no longer exposes.
+        """
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+        from fea_toolkit.plotting import plot_interactive_viewer
+
+        md = make_sample_model()
+        config = {"element_type": "elasticBeamColumn", "split_elements": True, "verbose": False}
+        mesh_model = preprocess_model(md, config)
+        builder = AnalysisBuilder(mesh_model, config)
+
+        plotter = plot_interactive_viewer(
+            builder,
+            combo_forces={"All": {}},
+            combo_results={"All": {}},
+            notebook=True,
+        )
+        assert plotter is not None
+
     def test_dict_source_frames(self, sample_npz_data):
         """Resolving an NPZ-like dict produces correct frame entries."""
         from fea_toolkit.plotting.viz import _resolve_mesh_data
