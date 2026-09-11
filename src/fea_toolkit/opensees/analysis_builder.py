@@ -647,17 +647,17 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
         )
         periods = list(modal.get("periods", []))
         props = modal.get("modal_props", {})
-        ratios_mx = props.get("partiMassRatiosMX", [0.0] * len(periods))
-        ratios_my = props.get("partiMassRatiosMY", [0.0] * len(periods))
-        ratios_mz = props.get("partiMassRatiosMZ", [0.0] * len(periods))
+        ratios_mx = props.get("partiMassRatiosMX", [])
+        ratios_my = props.get("partiMassRatiosMY", [])
+        ratios_mz = props.get("partiMassRatiosMZ", [])
         result["periods"] = periods
         result["mass_participation"] = [
             {
                 "mode": i + 1,
                 "period": periods[i],
-                "mx": ratios_mx[i],
-                "my": ratios_my[i],
-                "mz": ratios_mz[i],
+                "mx": ratios_mx[i] if i < len(ratios_mx) else 0.0,
+                "my": ratios_my[i] if i < len(ratios_my) else 0.0,
+                "mz": ratios_mz[i] if i < len(ratios_mz) else 0.0,
             }
             for i in range(len(periods))
         ]
