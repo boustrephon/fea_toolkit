@@ -7,10 +7,10 @@ TABLE:  "MATERIAL PROPERTIES 01 - GENERAL"
    Material=STEEL   Type=Steel   SymType=Isotropic
 
 TABLE:  "MATERIAL PROPERTIES 02 - BASIC MECHANICAL PROPERTIES"
-   Material=STEEL   UnitWeight=78500   UnitMass=8000   E1=2.0E+05   G12=7.7E+04   U12=0.3
+   Material=STEEL   UnitWeight=7.85E-05   UnitMass=8.0E-09   E1=2.0E+05   G12=7.7E+04   U12=0.3
 
 TABLE:  "FRAME SECTION PROPERTIES 01 - GENERAL"
-   SectionName=SEC1   Shape="I/Wide Flange"   Material=STEEL   t3=0.2   t2=0.1   tf=0.01   tw=0.008   Area=0.00308   I33=1.5E-05   I22=2.0E-06   TorsConst=1.0E-06
+   SectionName=SEC1   Shape="I/Wide Flange"   Material=STEEL   t3=200   t2=100   tf=10   tw=8   Area=3080   I33=1.5E+07   I22=2.0E+06   TorsConst=1.0E+06
 
 TABLE:  "JOINT COORDINATES"
    Joint=1   CoordSys=GLOBAL   CoordType=Cartesian   XorR=0   Y=0   Z=0

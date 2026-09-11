@@ -407,6 +407,7 @@ class TestResolveMeshData:
             notebook=True,
         )
         assert plotter is not None
+        plotter.close()
 
     def test_dict_source_frames(self, sample_npz_data):
         """Resolving an NPZ-like dict produces correct frame entries."""
