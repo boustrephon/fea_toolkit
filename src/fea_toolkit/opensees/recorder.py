@@ -600,10 +600,6 @@ def export_mesh_model_to_tcl(
 
     # ── Determine which nodes are referenced by exported elements ──
     export_shells = config.get("export_shells", True) if config else True
-    # Shell elements are emitted at a fixed offset so their tags cannot
-    # collide with frame element tags; the release-block start tag below
-    # also accounts for this offset.
-    _shell_elem_tag_offset = 100_000
     _exported_node_tags: set[int] = set()
     for eid, elem in mesh_model.frame_elements.items():
         if getattr(elem, "inactive", False):
@@ -924,6 +920,27 @@ def export_mesh_model_to_tcl(
     lines.append('puts "-> Frame sections created, creating shell sections..."')
     lines.append("flush stdout")
 
+    # ── Element tag allocation ────────────────────────────────────
+    # Build the frame tag map up-front so shell element tags can be
+    # allocated sequentially after the highest frame tag, guaranteeing the
+    # two element families cannot collide.  The map is reused by both the
+    # shell emission below and the release-block tag allocation further on.
+    frame_tag_map: dict[str, int] = {}
+    _frame_next_tag = 1
+    _used_frame_tags: set[int] = set()
+    for _eid, _elem in mesh_model.frame_elements.items():
+        if getattr(_elem, "inactive", False):
+            continue
+        if _elem.elem_tag in _used_frame_tags:
+            _tag = _frame_next_tag
+            _frame_next_tag += 1
+        else:
+            _tag = _elem.elem_tag if _elem.elem_tag > 0 else _frame_next_tag
+            _frame_next_tag = max(_frame_next_tag, _tag + 1)
+        _used_frame_tags.add(_tag)
+        frame_tag_map[_eid] = _tag
+    shell_elem_tag_map: dict[str, int] = {}
+
     # ── Shell sections ───────────────────────────────────────────
     if mesh_model.area_elements and config.get("export_shells", True):
         lines.append("")
@@ -958,7 +975,16 @@ def export_mesh_model_to_tcl(
                     f"section ElasticMembranePlateSection {shell_sec_tags[sec_name]} 2.0e11 0.2 0.2"
                 )
 
-        # Area elements — use offset tag to avoid colliding with frame elements
+        # Allocate shell element tags sequentially after the highest frame
+        # tag so shell elements can never collide with frame elements.
+        _next_shell_tag = max(frame_tag_map.values(), default=0) + 1
+        for aid, elem in mesh_model.area_elements.items():
+            if getattr(elem, "inactive", False):
+                continue
+            shell_elem_tag_map[aid] = _next_shell_tag
+            _next_shell_tag += 1
+
+        # Area elements
         for aid, elem in mesh_model.area_elements.items():
             if getattr(elem, "inactive", False):
                 continue
@@ -970,7 +996,7 @@ def export_mesh_model_to_tcl(
             if len(n_tags) < 3:
                 continue
             stag = shell_sec_tags.get(mesh_model.area_assignments.get(aid, ""), 1)
-            el_tag = _shell_elem_tag_offset + elem.area_tag
+            el_tag = shell_elem_tag_map[aid]
             nn = len(n_tags)
             if nn == 4:
                 lines.append(f"element ShellDKGQ {el_tag} {' '.join(n_tags)} {stag}")
@@ -989,22 +1015,7 @@ def export_mesh_model_to_tcl(
         lines.append("")
         lines.append("# ── Frame elements ──")
 
-        # Build frame tag map
-        frame_tag_map: dict[str, int] = {}
         _created_transf_tags: set[int] = set()
-        next_tag = 1
-        used_tags: set[int] = set()
-        for eid, elem in mesh_model.frame_elements.items():
-            if getattr(elem, "inactive", False):
-                continue
-            if elem.elem_tag in used_tags:
-                tag = next_tag
-                next_tag += 1
-            else:
-                tag = elem.elem_tag if elem.elem_tag > 0 else next_tag
-                next_tag = max(next_tag, tag + 1)
-            used_tags.add(tag)
-            frame_tag_map[eid] = tag
 
         for eid, elem in mesh_model.frame_elements.items():
             if getattr(elem, "inactive", False):
@@ -1086,22 +1097,14 @@ def export_mesh_model_to_tcl(
 
         # ── Member end releases / partial fixity ─────────────────
         # Release elements share the OpenSees element-tag namespace with
-        # frame elements and (when exported) shell elements - the latter
-        # emitted at _shell_elem_tag_offset + area_tag.  Start the
-        # zeroLength releases past the larger maximum so their tags cannot
-        # collide with either family, defaulting to 1 when none exist.
+        # frame elements and (when exported) shell elements.  Start the
+        # zeroLength releases past the larger of the two families' maxima
+        # (shell tags are allocated sequentially after the frame tags), so
+        # their tags cannot collide with either family, defaulting to 1
+        # when none exist.
         _release_start_elem_tag = (
             max(
-                list(frame_tag_map.values())
-                + (
-                    [
-                        _shell_elem_tag_offset + ae.area_tag
-                        for ae in mesh_model.area_elements.values()
-                        if not getattr(ae, "inactive", False)
-                    ]
-                    if export_shells
-                    else []
-                ),
+                list(frame_tag_map.values()) + list(shell_elem_tag_map.values()),
                 default=0,
             )
             + 1
