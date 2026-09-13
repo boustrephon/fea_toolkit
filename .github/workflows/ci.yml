@@ -22,6 +22,33 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      - name: Install system libraries
+        # ubuntu-latest does not ship two shared libraries the suite dlopens:
+        #   libGLU.so.1 -> libglu1-mesa  (gmsh, imported by tests/test_mesh.py)
+        #   libEGL.so.1 -> libegl1       (VTK >= 9.5 headless off-screen
+        #                                 rendering; Xvfb is not required)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libglu1-mesa \
+            libegl1
+
+      - name: Register OpenSeesPy bundled libraries
+        # The Linux OpenSeesPy wheel bundles libblas/liblapack/libgfortran
+        # (and libgomp/libquadmath) beside opensees.so and relies on
+        # DT_RUNPATH=$ORIGIN/lib.  RUNPATH is *not* inherited by the bundled
+        # libraries, so liblapack's own dependency on libblas/libgfortran is
+        # resolved only via LD_LIBRARY_PATH (or the system ldconfig cache).
+        # ubuntu-latest has neither a system BLAS nor libgfortran.so.4, so
+        # `import openseespy.opensees` fails with
+        # "libblas.so.3: cannot open shared object file" and pytest aborts
+        # with 15 collection errors (exit code 2).
+        run: |
+          OSLIB="$(python -c 'import importlib.util, os; s = importlib.util.find_spec("openseespylinux"); print(os.path.join(os.path.dirname(s.origin), "lib"))')"
+          test -d "$OSLIB"
+          echo "OpenSeesPy bundled libraries: $OSLIB"
+          echo "LD_LIBRARY_PATH=$OSLIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
