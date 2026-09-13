@@ -17,8 +17,9 @@ confuse.
 
 The parser reads **SAP2000 text exports** — `.s2k`, and the `.$2k` variant
 of the same text format. **ETABS `.e2k` / `.$et` parsing is not implemented
-yet**; those extensions are offered by the CLI help and file dialogs as the
-intended target, but no ETABS-specific handling exists in the parser.
+yet**; the CLI help documents those extensions as planned but not yet
+supported, and the file dialogs do not offer them, since no ETABS-specific
+handling exists in the parser.
 
 ## 1. Parser raw-table cache — `SAP2000Parser.to_json()` / `from_json()`
 

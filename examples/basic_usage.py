@@ -117,6 +117,10 @@ def main():
     if s2k_file.suffix.lower() == ".json":
         print(f"\nLoading JSON cache: {s2k_file}")
         parser = SAP2000Parser.from_json(s2k_file)
+    elif s2k_file.suffix.lower() in (".e2k", ".$et"):
+        # ETABS text exports are not implemented by the parser yet — reject
+        # them up front rather than silently parsing an empty model.
+        sys.exit(f"Error: ETABS (.e2k / .$et) input is not yet supported — {s2k_file}")
     else:
         if s2k_file.suffix.lower() not in (".s2k", ".$2k"):
             print(

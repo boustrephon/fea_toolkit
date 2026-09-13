@@ -158,7 +158,34 @@ class RhinoImporter:
         root_layer: t.Optional[str],
         verbose: bool,
     ) -> dict[str, t.Any]:
-        """Run the import steps inside a redraw-suppressed batch."""
+        """Run the import steps inside a redraw-suppressed batch.
+
+        Called by :meth:`run` from within
+        :func:`~fea_toolkit.rhino.layers.suppress_redraw`, so the whole
+        sequence executes without the per-object viewport invalidation that
+        dominates runtime for large models.
+
+        Args:
+            create_centreline: Lines / planar Breps (joint points are
+                always created).
+            create_extrusions: Lightweight ``Extrusion`` solids.
+            color_code_joints: Colour joints by restraint type.
+            create_groups: Rhino groups from SAP groups.
+            create_meshed: If True, also import meshed geometry (areas
+                sub-divided, frames split at joints) under a ``Meshed``
+                sub-tree of the stage root.
+            root_layer: Full path of the layer under which all geometry
+                is created.  ``None`` -> derived from the stage:
+                ``SAP2000/Mesh`` for a meshed model, ``SAP2000/SAP``
+                otherwise.
+            verbose: Print progress.
+
+        Returns:
+            Dict with counts per geometry type: ``joints``,
+            ``frame_centrelines``, ``shell_centrelines``,
+            ``frame_extrusions``, ``shell_extrusions``, ``sap_groups``,
+            and the ``meshed_*`` variants when ``create_meshed`` ran.
+        """
         results: dict[str, t.Any] = {
             "joints": 0,
             "frame_centrelines": 0,
@@ -401,9 +428,11 @@ class RhinoImporter:
                 attrs = obj.Attributes
 
                 # SAP2000 group colour takes precedence: skip points that
-                # belong to a SAP2000 group so the colour applied by
-                # ``create_sap_groups`` is not overwritten here.
-                if attrs.GetUserString("SAP_Groups"):
+                # were assigned a colour-bearing SAP2000 group so the colour
+                # applied by ``create_sap_groups`` is not overwritten here.
+                # ``SAP_Group`` (singular) is set only when a group colour was
+                # applied; ``SAP_Groups`` (plural) is stamped on every member.
+                if attrs.GetUserString("SAP_Group"):
                     continue
 
                 constraint = attrs.GetUserString("SAP_Constraint")

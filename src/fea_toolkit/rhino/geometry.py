@@ -410,6 +410,9 @@ def create_frame_extrusions(
         md: Model source.
         frame_extrusion_layers: ``{section_name: layer_index}``.
         stage: Pipeline stage label stamped as ``FEA_Stage``.
+
+    Returns:
+        Number of Rhino objects created for the frame elements.
     """
     doc = sc.doc
     count = 0
@@ -517,39 +520,42 @@ def create_frame_extrusions(
                     cap1 = extrusion.PathTop.Copy()
                     if cap0 and cap1:
                         cap1.Translate(path_vec)
-                        brep = rg.Brep.CreateFromSweep(
+                        breps = rg.Brep.CreateFromSweep(
                             rg.Line(origin_i, origin_j).ToNurbsCurve(), cap0, True, 0.001
                         )
-                        if brep:
+                        if breps:
                             extrusion.Dispose()
                             # Differing I/J lateral offsets cannot be expressed
-                            # as a lightweight Extrusion — add the swept Brep
-                            # solid directly (documented "Brep solid" geometry).
-                            attr_local = rd.ObjectAttributes()
-                            attr_local.LayerIndex = layer_index
-                            attr_local.Name = f"SAP_FrameExt_{eid}"
-                            obj_id = doc.Objects.AddBrep(brep, attr_local)
-                            if obj_id:
-                                count += 1
-                                obj = doc.Objects.Find(obj_id)
-                                if obj:
-                                    attrs = obj.Attributes
-                                    attrs.SetUserString("SAP_Type", "FrameExtrusion")
-                                    attrs.SetUserString("SAP_FrameID", str(eid))
-                                    attrs.SetUserString("SAP_Section", sec_name)
-                                    attrs.SetUserString("SAP_JointI", str(elem.node_i))
-                                    attrs.SetUserString("SAP_JointJ", str(elem.node_j))
-                                    attrs.SetUserString("SAP_Material", sec.material)
-                                    attrs.SetUserString("SAP_Shape", sec.shape)
-                                    attrs.SetUserString("SAP_Angle", str(elem.angle))
-                                    attrs.SetUserString("FEA_Stage", stage)
-                                    attrs.SetUserString("FEA_Kind", "FrameExtrusion")
-                                    attrs.SetUserString(
-                                        "FEA_ElemTag", str(getattr(elem, "elem_tag", ""))
-                                    )
-                                    if getattr(elem, "parent_id", None):
-                                        attrs.SetUserString("FEA_ParentID", str(elem.parent_id))
-                                    obj.CommitChanges()
+                            # as a lightweight Extrusion.  CreateFromSweep
+                            # returns a Brep[] array, so add each swept Brep
+                            # solid individually (documented "Brep solid"
+                            # geometry) — AddBrep must never receive the array.
+                            for brep in breps:
+                                attr_local = rd.ObjectAttributes()
+                                attr_local.LayerIndex = layer_index
+                                attr_local.Name = f"SAP_FrameExt_{eid}"
+                                obj_id = doc.Objects.AddBrep(brep, attr_local)
+                                if obj_id:
+                                    count += 1
+                                    obj = doc.Objects.Find(obj_id)
+                                    if obj:
+                                        attrs = obj.Attributes
+                                        attrs.SetUserString("SAP_Type", "FrameExtrusion")
+                                        attrs.SetUserString("SAP_FrameID", str(eid))
+                                        attrs.SetUserString("SAP_Section", sec_name)
+                                        attrs.SetUserString("SAP_JointI", str(elem.node_i))
+                                        attrs.SetUserString("SAP_JointJ", str(elem.node_j))
+                                        attrs.SetUserString("SAP_Material", sec.material)
+                                        attrs.SetUserString("SAP_Shape", sec.shape)
+                                        attrs.SetUserString("SAP_Angle", str(elem.angle))
+                                        attrs.SetUserString("FEA_Stage", stage)
+                                        attrs.SetUserString("FEA_Kind", "FrameExtrusion")
+                                        attrs.SetUserString(
+                                            "FEA_ElemTag", str(getattr(elem, "elem_tag", ""))
+                                        )
+                                        if getattr(elem, "parent_id", None):
+                                            attrs.SetUserString("FEA_ParentID", str(elem.parent_id))
+                                        obj.CommitChanges()
                             continue
 
             # Use I-end offsets (or common offsets if no difference)
@@ -735,6 +741,9 @@ def create_shell_extrusions(
         md: Model source.
         shell_extrusion_layers: ``{section_name: layer_index}``.
         stage: Pipeline stage label stamped as ``FEA_Stage``.
+
+    Returns:
+        Number of Rhino objects created for the shell elements.
     """
     doc = sc.doc
     count = 0
