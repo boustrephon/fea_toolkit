@@ -63,7 +63,7 @@ def main():
     parser.add_argument(
         "s2k_file",
         nargs="?",
-        help="Path to the SAP2000 text file (.s2k, .$2k, .e2k, .$et). Omit when using --sample.",
+        help="Path to the SAP2000 text file (.s2k, .$2k); ETABS (.e2k, .$et) planned, not yet supported. Omit when using --sample.",
     )
     parser.add_argument(
         "--sample",

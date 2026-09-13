@@ -703,10 +703,10 @@ all other area loads are ignored.
 1. **Frame‑Frame Intersection Splitting** ✅  
    - `AtFrames=True` splitting at frame-frame intersections is implemented (`model/geometry_frames.py` `split_elements()`), parser-wired (`FRAME AUTO MESH ASSIGNMENTS` → `SAPModelData.frame_auto_mesh`), and unit-tested (`TestSplitElementsAtFrames` + parser round-trip tests).  
 
-2. **ETABS `.E2K` input**  
-   - ✅ `SAP2000Parser` already reads E2K table conventions (concrete
-     column/beam tables, load/mass tables) — see `io/s2k_parser.py`.  
-   - Open: validate a full `.e2k` export end-to-end and add ETABS-specific
+2. **ETABS `.E2K` / `.$ET` input**  
+   - 🚧 Not yet supported — `SAP2000Parser` reads SAP2000 text exports
+     (`.s2k` / `.$2k`) only; no ETABS-specific handling exists — see `io/s2k_parser.py`.  
+   - Planned: read a full `.e2k` / `.$et` export end-to-end and add ETABS-specific
      load-nomenclature mapping if needed.
 
 3. **Load Combinations and Analysis Types**  
