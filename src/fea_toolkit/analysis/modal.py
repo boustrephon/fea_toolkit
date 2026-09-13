@@ -5,7 +5,7 @@ Wraps :func:`~fea_toolkit.opensees.analysis_builder.run_modal`.
 
 from typing import TYPE_CHECKING, Optional
 
-from fea_toolkit.analysis.base import AnalysisResult
+from .base import AnalysisResult
 
 if TYPE_CHECKING:
     from fea_toolkit.model.mesh_model import MeshModel

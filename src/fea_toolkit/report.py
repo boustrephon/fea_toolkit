@@ -53,34 +53,34 @@ except ImportError:  # pragma: no cover — pandas is optional (Rhino 8 CPython)
 
     pd = _MissingPandas()  # type: ignore[assignment]
 
-from fea_toolkit.analysis import (
+from .analysis import (
     run_modal_analysis,
     run_pushover_analysis,
     run_response_spectrum_analysis,
     run_static_analysis,
 )
-from fea_toolkit.analysis.linear import static_load_verification, wind_sanity_check
-from fea_toolkit.io.log import AnalysisLog
-from fea_toolkit.io.report import (
+from .analysis.linear import static_load_verification, wind_sanity_check
+from .io.log import AnalysisLog
+from .io.report import (
     bounding_box,
     material_summary,
     pushover_comparison_table,
     section_summary,
 )
-from fea_toolkit.model.mesh_model import MeshModel
-from fea_toolkit.model.sap_data import SAPModelData
-from fea_toolkit.model.selection import Selection
-from fea_toolkit.model.storey_response import compute_linear_storey_responses
-from fea_toolkit.model.stories import identify_stories, plot_stories, stories_dataframe
-from fea_toolkit.opensees.preprocessor import preprocess_model
-from fea_toolkit.plotting.report import (
+from .model.mesh_model import MeshModel
+from .model.sap_data import SAPModelData
+from .model.selection import Selection
+from .model.storey_response import compute_linear_storey_responses
+from .model.stories import identify_stories, plot_stories, stories_dataframe
+from .opensees.preprocessor import preprocess_model
+from .plotting.report import (
     plot_csm_4panel,
     plot_storey_displacements,
     plot_storey_forces,
 )
-from fea_toolkit.plotting.viz import plot_model_comparison
-from fea_toolkit.spectrum import _build_spectrum, plot_seismic_spectrum
-from fea_toolkit.utils import (
+from .plotting.viz import plot_model_comparison
+from .spectrum import _build_spectrum, plot_seismic_spectrum
+from .utils import (
     build_gravity_patterns,
     deep_merge,
     infer_loads,

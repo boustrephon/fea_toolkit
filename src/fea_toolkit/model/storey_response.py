@@ -113,7 +113,7 @@ except ImportError:  # pragma: no cover — pandas is optional (Rhino 8 CPython)
 
     pd = _MissingPandas()  # type: ignore[assignment]
 
-from fea_toolkit.model.sap_data import patterns_from_case
+from .sap_data import patterns_from_case
 
 # ========================================================================
 # Dataclasses

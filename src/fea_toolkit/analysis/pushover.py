@@ -26,11 +26,11 @@ RC path (Tcl/Xara export, alternate backend)
 
 from typing import TYPE_CHECKING, Optional
 
-from fea_toolkit.analysis.base import (
+from ..spectrum import ResponseSpectrum
+from .base import (
     _PUSHOVER_RC_DEFAULTS,
     AnalysisResult,
 )
-from fea_toolkit.spectrum import ResponseSpectrum
 
 if TYPE_CHECKING:
     from fea_toolkit.model.mesh_model import MeshModel

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
-from fea_toolkit.analysis.base import (
+from .base import (
     _NONLINEAR_DYNAMIC_DEFAULTS,
     AnalysisResult,
 )

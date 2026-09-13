@@ -6,21 +6,7 @@ composed explicitly by the caller (e.g. :func:`fea_toolkit.report.generate_repor
 in a readable order — no dependency-graph machinery.
 """
 
-from fea_toolkit.analysis.base import (
-    AnalysisCaseSpec,
-    AnalysisResult,
-)
-from fea_toolkit.analysis.linear import (
-    run_linear_cases,
-    static_load_verification,
-    wind_sanity_check,
-)
-from fea_toolkit.analysis.modal import run_modal_analysis
-from fea_toolkit.analysis.nonlinear_dynamic import run_nonlinear_dynamic_analysis
-from fea_toolkit.analysis.pushover import run_pushover_analysis
-from fea_toolkit.analysis.rs import run_response_spectrum_analysis
-from fea_toolkit.analysis.static import run_static_analysis
-from fea_toolkit.capacity.elwood_limit_state import (
+from ..capacity.elwood_limit_state import (
     ElwoodColumnGeometry,
     ElwoodColumnParameters,
     axial_capacity_surface,
@@ -34,13 +20,27 @@ from fea_toolkit.capacity.elwood_limit_state import (
     elwood_spring_slopes,
     three_point_axial_surface,
 )
-from fea_toolkit.capacity.shear_capacity import (
+from ..capacity.shear_capacity import (
     ShearCapacityResult,
     ShearFailureReport,
     member_shear_capacity,
     report_shear_failure,
     shear_backbone,
 )
+from .base import (
+    AnalysisCaseSpec,
+    AnalysisResult,
+)
+from .linear import (
+    run_linear_cases,
+    static_load_verification,
+    wind_sanity_check,
+)
+from .modal import run_modal_analysis
+from .nonlinear_dynamic import run_nonlinear_dynamic_analysis
+from .pushover import run_pushover_analysis
+from .rs import run_response_spectrum_analysis
+from .static import run_static_analysis
 
 # ── Deprecated compatibility exports ──
 

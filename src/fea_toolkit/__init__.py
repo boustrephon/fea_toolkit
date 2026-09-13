@@ -125,7 +125,7 @@ _LAZY_IMPORTS: dict[str, str] = {
 }
 
 # Model-layer names that are cheap and importable without the solver.
-from fea_toolkit.model.sap_data import (
+from .model.sap_data import (
     AreaElement,
     BoxSection,
     CircularSection,
@@ -141,8 +141,8 @@ from fea_toolkit.model.sap_data import (
     SAPModelData,
     Section,
 )
-from fea_toolkit.model.sections import SectionLibrary
-from fea_toolkit.model.selection import Selection
+from .model.sections import SectionLibrary
+from .model.selection import Selection
 
 __all__ = [
     "AnalysisBuilder",

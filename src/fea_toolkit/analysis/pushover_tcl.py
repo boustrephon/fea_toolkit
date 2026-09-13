@@ -28,13 +28,13 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Union
 
-from fea_toolkit.opensees.builder import pushover_tcl
-from fea_toolkit.opensees.recorder import (
+from ..opensees.builder import pushover_tcl
+from ..opensees.recorder import (
     XaraTclRunner,
     export_mesh_model_to_tcl,
     parse_pushover_results,
 )
-from fea_toolkit.utils import g_from_units
+from ..utils import g_from_units
 
 if TYPE_CHECKING:
     from fea_toolkit.model.mesh_model import MeshModel

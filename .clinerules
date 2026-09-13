@@ -68,6 +68,11 @@ from the facade — never add new logic to `utils.py` itself.
   from ..model.sap_data import SAPModelData, Node
   from ..model.geometry import get_SAP_vecxz
   ```
+- ``__main__.py`` is the one deliberate exception: it may reference the
+  package object itself with an absolute ``import fea_toolkit`` (needed for
+  ``getattr`` lookups and the ``__all__`` / ``__version__`` metadata); do
+  not use ``sys.modules[__package__]`` or a relative import for this
+  self-reference.
 - Use `from typing import Dict, List, Optional, Any, Tuple, Union` for type annotations.
 
 ### 2.2 Docstrings

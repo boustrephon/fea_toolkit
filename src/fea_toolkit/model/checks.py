@@ -21,7 +21,7 @@ else:  # pragma: no cover - runtime branch
     # succeeds without importing pandas at module load time.
     DataFrame = Any
 
-from fea_toolkit.model.sap_data import (
+from .sap_data import (
     SAPModelData,
     ShellSection,
 )

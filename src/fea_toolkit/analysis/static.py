@@ -5,7 +5,7 @@ Wraps :func:`~fea_toolkit.analysis.linear.run_linear_cases`.
 
 from typing import TYPE_CHECKING, Optional
 
-from fea_toolkit.analysis.base import AnalysisResult
+from .base import AnalysisResult
 
 if TYPE_CHECKING:
     from fea_toolkit.model.mesh_model import MeshModel

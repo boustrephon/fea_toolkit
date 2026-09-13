@@ -25,14 +25,14 @@ and demands are in model units.  Capacities are returned in the model's force
 (or force × length) units.
 """
 
-from fea_toolkit.capacity._common import (
+from ._common import (
     CapacityResult,
     capacity_dcr,
     force_length_unit_label,
     force_unit_label,
 )
-from fea_toolkit.capacity.asce41 import hinge_length
-from fea_toolkit.capacity.elwood_limit_state import (
+from .asce41 import hinge_length
+from .elwood_limit_state import (
     ElwoodColumnGeometry,
     ElwoodColumnParameters,
     axial_capacity_surface,
@@ -46,14 +46,14 @@ from fea_toolkit.capacity.elwood_limit_state import (
     elwood_spring_slopes,
     three_point_axial_surface,
 )
-from fea_toolkit.capacity.gb50010 import (
+from .gb50010 import (
     WallShearCheckResult,
     axial_capacity,
     moment_capacity,
     shear_capacity,
     wall_shear_check,
 )
-from fea_toolkit.capacity.shear_capacity import (
+from .shear_capacity import (
     ShearCapacityResult,
     ShearFailureEntry,
     ShearFailureReport,

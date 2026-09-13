@@ -35,8 +35,8 @@ except ImportError:  # pragma: no cover — pandas is optional (Rhino 8 CPython)
 
     pd = _MissingPandas()  # type: ignore[assignment]
 
-from fea_toolkit.io.report import bounding_box
-from fea_toolkit.model.sap_data import SAPModelData, patterns_from_case
+from ..io.report import bounding_box
+from ..model.sap_data import SAPModelData, patterns_from_case
 
 
 def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: str = "Wind+Y"):
