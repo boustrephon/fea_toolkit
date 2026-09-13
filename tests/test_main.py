@@ -79,7 +79,10 @@ class TestMain:
         assert "Tip: pass --details" in out
 
     def test_details_listing_prints_signatures(self, capsys):
-        assert main(["--details"]) == 0
+        # ``Node`` is an eager, backend-independent name, so ``--details``
+        # exercises signatures and docstrings without importing the optional
+        # openseespy / pyvista-backed names.
+        assert main(["Node", "--details"]) == 0
         out = capsys.readouterr().out
         assert "signature:" in out
         assert "doc:" in out
