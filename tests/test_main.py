@@ -114,6 +114,22 @@ class TestEntryPointLaziness:
         assert out.returncode == 0, out.stderr
         assert "clean" in out.stdout
 
+    def test_filtered_details_needs_no_backends(self):
+        """``--details`` filtered to an eager name imports no optional backends."""
+        code = (
+            f"import sys; sys.path.insert(0, {SRC!r}); "
+            "from fea_toolkit.__main__ import main; "
+            "assert main(['Node', '--details']) == 0; "
+            "assert 'openseespy' not in sys.modules, 'openseespy loaded'; "
+            "assert 'pyvista' not in sys.modules, 'pyvista loaded'; "
+            "print('clean')"
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, check=False
+        )
+        assert out.returncode == 0, out.stderr
+        assert "clean" in out.stdout
+
     def test_module_invocation(self):
         env = dict(os.environ)
         env["PYTHONPATH"] = SRC + os.pathsep + env.get("PYTHONPATH", "")
