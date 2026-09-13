@@ -252,10 +252,18 @@ scaled to model units by the framework:
 ### 5.1 Python version
 - `requires-python = ">=3.9"` in `pyproject.toml`.
 - Do not use Python 3.10+ syntax (match/case, `|` union types) without updating the minimum.
+- Python 3.9 is the **Rhino 8 embedded-interpreter syntax floor**, not a CI
+  target: the CI matrix is `["3.10", "3.12"]` (see `.github/workflows/ci.yml`).
 
 ### 5.2 Dependencies
-- **Core** (non-optional): `numpy`, `openseespy`, `opstool`, `opsvis`.
-- **Optional**: `gmsh>=4.12` (via `[mesh-remesh]` extra).
+- **Core** (non-optional): `numpy>=2.0`, `openseespy`, `matplotlib>=3.9`, `pyvista>=0.44`.
+- **Optional**: `gmsh>=4.12` (`[mesh-remesh]`), `pandas>=1.5` + `imageio>=2.36`
+  (`[report]`), `h5py` (HDF5 stage/result files, lazy import).
+- `opstool` and `opsvis` are **not** dependencies — the NPZ results schema is
+  merely *aligned* with opstool's ODB dimension naming. Both were unused
+  dead weight (and both GPL-3.0); do not re-add them without discussion.
+- `matplotlib` and `pyvista` are declared explicitly: they were previously
+  pulled in only transitively through `opstool`.
 - Do not add new required dependencies without discussion — keep core lightweight.
 
 ### 5.3 OpenSeesPy
@@ -285,6 +293,24 @@ scaled to model units by the framework:
   Non-uniform loads must be decomposed into 4 partial-span uniform segments.
 - `Corotational` geometric transformation does **not** support `eleLoad` in 3D — emit a warning if used.
 - Solver settings are configured via the `config` dict: `solver_test_tol`, `solver_test_max_iter`, `solver_algorithm`, `gravity_num_substeps`.
+
+### 5.8 Licensing
+- The project is **GPL-3.0-or-later**. `pyproject.toml` declares it the PEP 639
+  way: `license = "GPL-3.0-or-later"` + `license-files = ["LICENSE"]`.
+  setuptools >= 80 **hard-errors** if a `License :: …` classifier is also
+  present — never re-add one.
+- Distribution is **source-only, by git clone**; the project is *not* on PyPI.
+  Do not write `pip install fea_toolkit`; use `pip install -e ".[report]"` from
+  a clone.
+- Do not change the declared licence without the copyright holder's decision.
+  Note that `mesh/remesh.py` imports `gmsh` (GPL-2.0-or-later) in-process, so a
+  permissive licence for the package is not available as-is.
+- **OpenSeesPy is not redistributable commercially**: its licence permits
+  research, education and internal use, but any application or cloud service
+  that imports it needs a commercial licence from Oregon State University.
+  Never bundle or redistribute the OpenSeesPy binary from this project.
+- User-facing licence/disclaimer text lives in `README.md` ("Licence and
+  Disclaimer") and `docs/licence.md` — keep the two in step.
 
 
 ## 6. Git & File Conventions
