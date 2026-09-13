@@ -28,7 +28,7 @@ from .viz_model import _render_scene, _resolve_mesh_data
 def _resolve_pushover_data(
     data,
     direction="+X",
-) -> "tuple[list, list, list, Optional[dict]]":
+) -> "tuple[list, dict, list, Optional[dict]]":
     """Normalise pushover data from any source into standard Python structures.
 
     Accepts three input types:

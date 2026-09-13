@@ -44,7 +44,7 @@ def run_static_analysis(
     """
     from fea_toolkit.analysis.linear import run_linear_cases
 
-    raw_out: dict = {} if collect_raw else None
+    raw_out: Optional[dict] = {} if collect_raw else None
     df_linear = run_linear_cases(
         md,
         mesh_model,

@@ -72,12 +72,14 @@ class _LazyTarget:
 
     @property
     def cls(self) -> type:
-        if self._cls is None:
+        cls = self._cls
+        if cls is None:
             import importlib
 
             mod_name, _, attr = self._dotted_path.rpartition(".")
-            self._cls = getattr(importlib.import_module(mod_name), attr)
-        return self._cls
+            cls = getattr(importlib.import_module(mod_name), attr)
+            self._cls = cls
+        return cls
 
 
 def _resolve(cls: t.Any) -> type:

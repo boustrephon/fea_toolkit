@@ -594,7 +594,6 @@ def plot_stories(
     # Determine global bounding box for plane extents
     xs = [n.x for n in md.nodes.values()]
     ys = [n.y for n in md.nodes.values()]
-    zs = [n.z for n in md.nodes.values()]
     if not xs:
         return None
 
@@ -602,7 +601,6 @@ def plot_stories(
     global_ymin, global_ymax = min(ys), max(ys)
     x_span = global_xmax - global_xmin
     y_span = global_ymax - global_ymin
-    max(zs) - min(zs)
 
     # Add a semi-transparent plane for each storey
     for i, s in enumerate(stories):
