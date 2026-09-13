@@ -491,16 +491,12 @@ def _resolve_mesh_data(source, collapse_to_parents=False):
         model = builder.mesh_model
     else:
         model = builder  # assume it's already a MeshModel
-    elements = (
-        builder.split_elements
-        if hasattr(builder, "split_elements") and builder.split_elements
-        else model.frame_elements
-    )
-    assignments = (
-        builder.split_assignments
-        if hasattr(builder, "split_assignments") and builder.split_assignments
-        else model.frame_assignments
-    )
+    # ``MeshModel`` (or the builder's ``mesh_model``) always holds the
+    # post-split topology, so its ``frame_elements`` / ``frame_assignments``
+    # are the single source of truth.  The legacy ``builder.split_elements``
+    # / ``builder.split_assignments`` attributes no longer exist.
+    elements = model.frame_elements
+    assignments = model.frame_assignments
 
     # Nodes
     for nid, nd in model.nodes.items():
@@ -1988,7 +1984,10 @@ def _add_meshed_geometry(plotter, md, builder, LOADS_ONLY, mesh_model=None):
         mesh_frames = mm.frame_elements
         mesh_coords = {nid: (nd.x, nd.y, nd.z) for nid, nd in mm.nodes.items()}
     else:
-        mesh_frames = builder.split_elements or builder.model.frame_elements
+        # Fallback for a builder-like object with no ``mesh_model``: read the
+        # base model topology directly (the legacy ``builder.split_elements``
+        # attribute no longer exists).
+        mesh_frames = builder.model.frame_elements
         mesh_coords = {nid: (nd.x, nd.y, nd.z) for nid, nd in builder.model.nodes.items()}
 
     FRAME_SHRINK = 0.9

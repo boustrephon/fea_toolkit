@@ -225,7 +225,10 @@ def _build_static_force_map(source, geometry: dict, force_data: dict) -> dict:
         ``{frame_idx: canonical_force_dict}``.
     """
     model = getattr(source, "model", None) or getattr(source, "mesh_model", None) or source
-    elements = getattr(source, "split_elements", None) or model.frame_elements
+    # The resolved model always holds the post-split topology, so its
+    # ``frame_elements`` is the single source of truth; the legacy
+    # ``source.split_elements`` fallback no longer exists.
+    elements = model.frame_elements
 
     elem_by_node_pair: dict[tuple[int, int], int] = {}
     for eid, elem in elements.items():
