@@ -311,6 +311,16 @@ scaled to model units by the framework:
   Never bundle or redistribute the OpenSeesPy binary from this project.
 - User-facing licence/disclaimer text lives in `README.md` ("Licence and
   Disclaimer") and `docs/licence.md` — keep the two in step.
+- **Never reproduce CSI documentation.** SAP2000® and CSi® are registered
+  trademarks of Computers and Structures, Inc. Cite or link to CSI material
+  (e.g. `help.csiamerica.com`) — never paste manual text, tables or figures.
+  This is an independent interoperability tool: do not imply CSI affiliation,
+  sponsorship or endorsement, and do not add CSI logos.
+- **Never commit client or proprietary model data.** `.s2k` fixtures must be
+  synthetic, or scrubbed of company/client/project names, job numbers and
+  machine paths. `local/` and `data/` are private for the same reason.
+- `.vscode/settings.json` is gitignored and must stay **untracked** — it holds
+  user-specific interpreter paths and command approvals.
 
 
 ## 6. Git & File Conventions
