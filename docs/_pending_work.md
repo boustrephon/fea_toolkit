@@ -400,6 +400,27 @@ unit point load for benchmark pushes — distinct from parsing user-supplied
 `frame_point_loads` field; 2) propagate to OpenSees `eleLoad` point loads;
 3) temperature loads only if needed (no current demand).
 
+#### P15 — Docs toolchain: MkDocs 2.0 / ProperDocs decision
+Source: `mkdocs.yml` header comment; `.github/workflows/docs.yml`.
+
+**What.** The docs site builds from a pinned MkDocs 1.x toolchain
+(`mkdocs==1.6.1`, `mkdocs-material==9.7.7`, `mkdocstrings[python]==1.0.6`,
+`mkdocstrings-python==2.0.5`, `mkdocs-gen-files==0.6.1`).  Two independent
+packages now print advisory "MkDocs 2.0" notices at build start (neither is
+strict-failing):
+- `mkdocs-gen-files` via its `properdocs` dependency → silenced with
+  `DISABLE_MKDOCS_2_WARNING=true`.
+- the `mkdocs-material` theme → silenced with `NO_MKDOCS_2_WARNING=true`.
+Both are suppressed in CI and documented for local builds; the exact pins keep
+the build reproducible, so no action is needed today.
+
+**Open decision (not urgent).** Revisit when a docs-package bump is needed or
+MkDocs 1.x becomes unmaintained: (a) stay pinned on 1.x; (b) migrate to
+*ProperDocs* (`properdocs build` — a drop-in 1.x continuation that
+`mkdocs-gen-files` already depends on); (c) follow `mkdocs-material`'s 2.0
+guidance
+(https://squidfunk.github.io/mkdocs-material/blog/2026/02/18/mkdocs-2.0/).
+
 #### Closed items (README reconciliation, 2026-08-25)
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
