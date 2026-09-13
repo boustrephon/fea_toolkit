@@ -7,14 +7,24 @@ name = "fea_toolkit"
 dynamic = ["version"]
 description = "FEA to OpenSees/Rhino conversion toolkit"
 authors = [{name = "Andrew Mole"}]
-license = "MIT"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
 dependencies = [
     "numpy>=2.0",
     "openseespy",
-    "opstool",
-    "opsvis",
+    "matplotlib>=3.9",
+    "pyvista>=0.44",
     ]
 
 [project.scripts]
@@ -26,6 +36,7 @@ mesh-remesh = [
     ]
 report = [
     "pandas>=1.5",
+    "imageio>=2.36",   # animated GIF export (report figures / examples)
     ]
 docs = [
     "mkdocs==1.6.1",
