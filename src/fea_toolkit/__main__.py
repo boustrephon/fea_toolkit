@@ -55,7 +55,11 @@ class _Resolved(NamedTuple):
 
 
 def _package_root() -> Path:
-    """Return the on-disk directory of the installed ``fea_toolkit`` package."""
+    """Return the on-disk directory of the installed ``fea_toolkit`` package.
+
+    Returns:
+        Absolute path to the directory containing the package's source files.
+    """
     return Path(fea_toolkit.__file__).resolve().parent
 
 
@@ -80,7 +84,14 @@ def _module_path(dotted: str) -> Optional[Path]:
 
 
 def _dotted_name(path: Path) -> str:
-    """Return the dotted module name for a source file inside the package."""
+    """Return the dotted module name for a source file inside the package.
+
+    Args:
+        path: Source file located inside the package directory.
+
+    Returns:
+        The fully-qualified module name, e.g. ``"fea_toolkit.plotting.viz"``.
+    """
     parts = list(path.relative_to(_package_root()).parts)
     if parts[-1] == "__init__.py":
         parts = parts[:-1]
@@ -90,7 +101,17 @@ def _dotted_name(path: Path) -> str:
 
 
 def _resolve_import(path: Path, current: str, node: ast.ImportFrom) -> Optional[str]:
-    """Return the absolute dotted module targeted by an ``ImportFrom`` node."""
+    """Return the absolute dotted module targeted by an ``ImportFrom`` node.
+
+    Args:
+        path: Source file containing ``node``.
+        current: Dotted name of the module being scanned.
+        node: ``ImportFrom`` node whose target module should be resolved.
+
+    Returns:
+        The absolute dotted module name, or ``None`` when it cannot be
+        resolved (e.g. a relative import that climbs above the package root).
+    """
     if node.level == 0:
         return node.module
     parts = current.split(".")
@@ -151,7 +172,15 @@ _MODULE_CACHE: dict[Path, _ModuleInfo] = {}
 
 
 def _scan(path: Path) -> _ModuleInfo:
-    """Return the cached :func:`_scan_module` result for ``path``."""
+    """Return the cached :func:`_scan_module` result for ``path``.
+
+    Args:
+        path: Source file to parse.
+
+    Returns:
+        The :class:`_ModuleInfo` for ``path``, parsed on first access and
+        reused from :data:`_MODULE_CACHE` afterwards.
+    """
     if path not in _MODULE_CACHE:
         _MODULE_CACHE[path] = _scan_module(path)
     return _MODULE_CACHE[path]
@@ -189,7 +218,15 @@ def _resolve(dotted: str, name: str) -> _Resolved:
 
 
 def _resolve_name(name: str) -> _Resolved:
-    """Resolve one public name lazily, importing only already-cheap names."""
+    """Resolve one public name lazily, importing only already-cheap names.
+
+    Args:
+        name: Public name exported by the package root.
+
+    Returns:
+        A :class:`_Resolved` describing where ``name`` is defined; the eager
+        fallback classifies ``name`` from the already-imported object.
+    """
     dotted = fea_toolkit._LAZY_IMPORTS.get(name)
     if dotted is not None:
         return _resolve(dotted, name)
@@ -208,7 +245,14 @@ def _resolve_name(name: str) -> _Resolved:
 
 
 def _rows_for(names: list[str]) -> list[tuple[str, str, str]]:
-    """Return ``(name, kind, module)`` rows for ``names`` (lazy resolution)."""
+    """Return ``(name, kind, module)`` rows for ``names`` (lazy resolution).
+
+    Args:
+        names: Public names to describe.
+
+    Returns:
+        One ``(name, kind, module)`` tuple per entry of ``names``, in order.
+    """
     rows: list[tuple[str, str, str]] = []
     for name in names:
         resolved = _resolve_name(name)
@@ -250,7 +294,16 @@ def _select_names(pattern: Optional[str]) -> list[str]:
 
 
 def _definition_source(resolved: _Resolved) -> str:
-    """Return the source text of a resolved definition (decorators included)."""
+    """Return the source text of a resolved definition (decorators included).
+
+    Args:
+        resolved: Resolved public name, optionally carrying a source path and
+            the defining :mod:`ast` node.
+
+    Returns:
+        The definition's source text including any decorators, or an empty
+        string when no source location is known.
+    """
     if resolved.path is None or resolved.node is None:
         return ""
     lines = resolved.path.read_text(encoding="utf-8").splitlines()
@@ -262,7 +315,15 @@ def _definition_source(resolved: _Resolved) -> str:
 
 
 def _format_source(names: list[str]) -> str:
-    """Render the ``--source`` listing: each definition's source text."""
+    """Render the ``--source`` listing: each definition's source text.
+
+    Args:
+        names: Public names to render.
+
+    Returns:
+        Blank-line-separated blocks, one header plus source text per name
+        (or a placeholder when no source definition is found).
+    """
     blocks: list[str] = []
     for name in names:
         resolved = _resolve_name(name)
@@ -274,7 +335,14 @@ def _format_source(names: list[str]) -> str:
 
 
 def _format_table(rows: list[tuple[str, str, str]]) -> str:
-    """Render the lazy listing as an aligned ``name / kind / module`` table."""
+    """Render the lazy listing as an aligned ``name / kind / module`` table.
+
+    Args:
+        rows: ``(name, kind, module)`` rows to render; must not be empty.
+
+    Returns:
+        The header, separator and aligned rows joined by newlines.
+    """
     name_w = max(len(name) for name, _, _ in rows)
     kind_w = max(len(kind) for _, kind, _ in rows)
     lines = [
@@ -287,7 +355,15 @@ def _format_table(rows: list[tuple[str, str, str]]) -> str:
 
 
 def _format_details(rows: list[tuple[str, str, str]]) -> str:
-    """Render the ``--details`` listing with signatures and docstrings."""
+    """Render the ``--details`` listing with signatures and docstrings.
+
+    Args:
+        rows: ``(name, kind, module)`` rows to render.
+
+    Returns:
+        Blank-line-separated blocks, one per row, each showing the module and
+        (for callables) the signature and the docstring's first line.
+    """
     blocks: list[str] = []
     for name, kind, module in rows:
         obj = getattr(fea_toolkit, name)
