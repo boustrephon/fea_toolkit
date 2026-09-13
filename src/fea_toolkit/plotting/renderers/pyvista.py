@@ -20,7 +20,12 @@ def _unit_vec(v: np.ndarray) -> np.ndarray:
     return v / n if n > 1e-12 else np.array([1.0, 0.0, 0.0])
 
 
-def _flag_direction(quantity: str, start: np.ndarray, end: np.ndarray) -> Optional[np.ndarray]:
+def _flag_direction(
+    quantity: str,
+    start: np.ndarray,
+    end: np.ndarray,
+    angle: float = 0.0,
+) -> Optional[np.ndarray]:
     """Return the flag-diagram extrusion direction (unit normal) for a frame.
 
     Mirrors :func:`fea_toolkit.plotting.viz_forces._compute_flag_direction`
@@ -32,6 +37,9 @@ def _flag_direction(quantity: str, start: np.ndarray, end: np.ndarray) -> Option
         quantity: Force/moment quantity name.
         start: I-end global coordinates, shape ``(3,)``.
         end: J-end global coordinates, shape ``(3,)``.
+        angle: SAP2000 section rotation (degrees) about the local x-axis.
+            A nonzero value rotates the local y/z axes used to place the
+            flag plane.
 
     Returns:
         Unit normal vector, or ``None`` for a zero-length member.
@@ -43,7 +51,7 @@ def _flag_direction(quantity: str, start: np.ndarray, end: np.ndarray) -> Option
     if norm < 1e-12:
         return None
     try:
-        _, vy, vz = get_local_axes(axis / norm)
+        _, vy, vz = get_local_axes(axis / norm, angle)
     except Exception:
         # Mirror ``viz_forces._compute_flag_direction``: fall back to the
         # global-frame vy/vz and still apply the quantity mapping below.
@@ -446,7 +454,7 @@ class PyVistaRenderer(RenderBackend):
             if fij is None:
                 continue
             vi, vj = fij
-            vn = _flag_direction(quantity, f.start, f.end)
+            vn = _flag_direction(quantity, f.start, f.end, getattr(f, "angle", 0.0))
             if vn is None:
                 continue
             for verts, col_val in compute_flag_parts(f.start, f.end, vn, vi, vj, scale_factor):

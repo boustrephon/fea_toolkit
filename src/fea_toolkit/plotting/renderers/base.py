@@ -19,6 +19,7 @@ class FrameGeom:
     node_j: str
     start: np.ndarray  # shape (3,) — global coordinates
     end: np.ndarray  # shape (3,) — global coordinates
+    angle: float = 0.0  # SAP2000 section rotation about local x-axis (degrees)
 
 
 @dataclass

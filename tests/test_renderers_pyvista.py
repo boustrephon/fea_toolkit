@@ -136,6 +136,20 @@ class TestFlagDirectionFallback:
         assert np.allclose(_flag_direction("My", start, end), [0.0, 0.0, -1.0])
 
 
+class TestFlagDirectionAngle:
+    """A nonzero SAP section rotation rotates the flag plane's local axes."""
+
+    def test_nonzero_angle_rotates_direction(self):
+        from fea_toolkit.plotting.renderers.pyvista import _flag_direction
+
+        start = np.array([0.0, 0.0, 0.0])
+        end = np.array([1.0, 0.0, 0.0])
+
+        # Axis along +X: angle 0 -> vy = +Z; a 90° rotation swaps vy and vz.
+        assert np.allclose(_flag_direction("Mz", start, end, 0.0), [0.0, 0.0, 1.0])
+        assert np.allclose(_flag_direction("Mz", start, end, 90.0), [0.0, -1.0, 0.0])
+
+
 class TestEndForceValues:
     """``_end_force_values`` tolerates the toolkits' key conventions."""
 

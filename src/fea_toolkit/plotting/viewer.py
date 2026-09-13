@@ -210,6 +210,7 @@ class ModelViewer:
                     node_j=elem.node_j,
                     start=np.array([ni.x, ni.y, ni.z], dtype=float),
                     end=np.array([nj.x, nj.y, nj.z], dtype=float),
+                    angle=float(getattr(elem, "angle", 0.0)),
                 )
             )
 
