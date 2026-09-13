@@ -13,10 +13,12 @@ import openseespy.opensees as ops
 import pytest
 
 try:
-    import pyvista as pv
+    # Imported only to probe availability; the renderers under test are always
+    # constructed with ``off_screen=True``, so no process-wide ``pv.OFF_SCREEN``
+    # override is set here (it would leak into unrelated tests).
+    import pyvista  # noqa: F401
 
     _has_pyvista = True
-    pv.OFF_SCREEN = True  # prevent interactive windows during tests
 except ImportError:
     _has_pyvista = False
 
