@@ -1,4 +1,4 @@
-File example.s2k was saved on m/d/yy at h:mm:ss
+File sample_2.s2k was saved on m/d/yy at h:mm:ss
  
 TABLE:  "ACTIVE DEGREES OF FREEDOM"
    UX=Yes   UY=Yes   UZ=Yes   RX=Yes   RY=Yes   RZ=Yes
@@ -582,7 +582,7 @@ TABLE:  "PROGRAM CONTROL"
    ProgramName=SAP2000   Version=25.1.0   CurrUnits="KN, m, C"   SteelCode="AISC 360-16"   ConcCode="ACI 318-19"   AlumCode="AA 2015"   ColdCode=AISI-16   RegenHinge=Yes
  
 TABLE:  "PROJECT INFORMATION"
-   Item="Company Name"   Data="Example Company"
+   Item="Company Name"
    Item="Client Name"
    Item="Project Name"
    Item="Project Number"

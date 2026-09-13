@@ -1,7 +1,7 @@
 {
   "METADATA": [
     {
-      "FileName": "example.s2k",
+      "FileName": "sample.s2k",
       "DateSaved": ""
     }
   ],
@@ -3045,8 +3045,7 @@
   ],
   "PROJECT INFORMATION": [
     {
-      "Item": "Company Name",
-      "Data": "Example Company"
+      "Item": "Company Name"
     },
     {
       "Item": "Client Name"
