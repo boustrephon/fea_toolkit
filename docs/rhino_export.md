@@ -57,8 +57,8 @@ sys.path.insert(0, r"/path/to/fea_toolkit/src")
 
 ### Inside Rhino 8 (Mac or Windows) — file picker (recommended)
 
-This script opens a native file dialog to pick a `.s2k` or `.json` file,
-then imports it into the Rhino document.
+This script opens a native file dialog to pick a `.s2k`, `.$2k` or `.json`
+file, then imports it into the Rhino document.
 
 IMPORTANT: edit the path to the fea_toolkit.
 
@@ -67,7 +67,7 @@ IMPORTANT: edit the path to the fea_toolkit.
 """
 Import a SAP2000 model into Rhino via a native file dialog.
 
-Opens a system file picker filtered for ``.s2k`` and ``.json`` files.
+Opens a system file picker filtered for ``.s2k``, ``.$2k`` and ``.json`` files.
 The selected model is parsed and imported with full layer structure,
 UserText metadata (NodeID, FrameID, SAP_* properties), and Rhino groups.
 
@@ -125,7 +125,7 @@ else:
     Rhino.RhinoApp.RunScript("_Zoom _Extents", False)
 ```
 
-The dialog filters for `.s2k` and `.json` files.  Pick a file and the
+The dialog filters for `.s2k`, `.$2k` and `.json` files.  Pick a file and the
 model is imported with full layer structure, metadata, and groups.
 
 ### Direct path (alternative)

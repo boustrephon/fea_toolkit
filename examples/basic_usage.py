@@ -65,13 +65,13 @@ def pick_file() -> Path:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Parse a SAP2000 .s2k / .$2k file and optionally run an OpenSees analysis. ETABS .e2k / .$et input is planned, not yet supported.",
+        description="Parse a SAP2000 .s2k / .$2k / .json file and optionally run an OpenSees analysis. ETABS .e2k / .$et input is planned, not yet supported.",
     )
     parser.add_argument(
         "s2k_file",
         nargs="?",
         default=None,
-        help="Path to the SAP2000 text file (.s2k, .$2k); ETABS (.e2k, .$et) planned, not yet supported.",
+        help="Path to the SAP2000 file (.s2k, .$2k, .json); ETABS (.e2k, .$et) planned, not yet supported.",
     )
     parser.add_argument(
         "--sample",

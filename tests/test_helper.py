@@ -100,6 +100,12 @@ class TestApplescriptCommand:
         assert '"$2k"' in cmd
         assert cmd.startswith("osascript -e '")
 
+    def test_title_is_escaped_for_applescript_and_shell(self):
+        """Quotes in the prompt cannot alter the AppleScript/shell syntax."""
+        cmd = helper.applescript_choose_file_cmd(prompt='Say "hi"')
+        assert cmd.startswith("osascript -e '")
+        assert 'prompt "Say \\"hi\\""' in cmd
+
 
 # ═══════════════════════════════════════════════════════════════════
 # mac_file_chooser — stubbed subprocess
@@ -107,6 +113,14 @@ class TestApplescriptCommand:
 
 
 class TestMacFileChooser:
+    @pytest.fixture(autouse=True)
+    def _force_darwin(self, monkeypatch):
+        """Force ``sys.platform`` to ``darwin`` so the subprocess path runs.
+
+        The off-macOS test overrides this with an explicit ``linux`` patch.
+        """
+        monkeypatch.setattr(sys, "platform", "darwin")
+
     def test_returns_stripped_path(self, monkeypatch):
         monkeypatch.setattr(subprocess, "check_output", lambda cmd, **kw: b"/tmp/model.s2k\n")
         assert helper.mac_file_chooser() == "/tmp/model.s2k"
