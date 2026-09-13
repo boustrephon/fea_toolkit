@@ -1047,3 +1047,16 @@ In short: **internal use is free**, but shipping an application — or running a
 cloud-based service — that imports `openseespy` requires a **commercial
 licence from Oregon State University**.  That obligation is independent of, and
 additional to, `fea_toolkit`'s GPL-3.0 terms.
+
+## SAP2000 and CSI
+
+`fea_toolkit` reads `.s2k` text files exported from SAP2000.  **SAP2000® and
+CSi® are registered trademarks of Computers and Structures, Inc.**  This
+project is an independent interoperability tool and is not affiliated with,
+authorised by, sponsored by or endorsed by CSI; no CSI branding is used.
+Imported data is converted as-is — unrecognised tables and records may be
+silently skipped and units default silently — so always cross-check the
+converted model against the source.  Parsing is entirely local: there is no
+network access and no telemetry, and you are responsible for having the right
+to process the files you supply.  Never commit client or proprietary model
+data.  Full details: [`docs/licence.md`](docs/licence.md).

@@ -121,6 +121,52 @@ If you intend to distribute a product or run a service built on this toolkit,
 confirm your OpenSeesPy licensing position with Oregon State University before
 release.
 
+## Third-party software, data and trademarks
+
+### SAP2000 and CSi
+
+**SAP2000® and CSi® are registered trademarks of Computers and Structures,
+Inc. (CSI).** `fea_toolkit` is an **independent interoperability tool**: it is
+not affiliated with, authorised by, sponsored by, or endorsed by CSI. The
+SAP2000 name is used only to identify the `.s2k` text file format that this
+project reads — a nominative use. No CSI logo or other CSI branding is used or
+redistributed by this project.
+
+The toolkit **reads** `.s2k` text files that you export from SAP2000. It does
+not decompile, modify, redistribute or embed SAP2000, and it does not
+circumvent any technical protection measure. Your own SAP2000 licence terms
+govern your use of SAP2000 and of its output.
+
+CSI's software and its **documentation** are copyrighted, and CSI states that
+reproduction of its documentation without written authorisation is prohibited.
+This project therefore **cites or links to** CSI material instead of copying
+it, and contributors must not paste CSI manual text, tables or figures into
+this repository.
+
+### Imported data
+
+Data read from third-party files is converted **as-is**:
+
+- tables and records that the importer does not recognise may be **silently
+  skipped** (an unrecognised area load type, for example);
+- units default silently (to `mm`) when the `PROGRAM CONTROL` table is absent
+  or unrecognised.
+
+The converted model must therefore be cross-checked against the source model —
+mass, reactions, load totals and section properties — before its results are
+relied upon. See the warranty notice at the top of this page.
+
+### Your data stays local
+
+Parsing, analysis and export run entirely on your machine. `fea_toolkit` makes
+**no network calls and transmits no telemetry**, so model data never leaves the
+machine it is processed on.
+
+You are responsible for having the right to process the files you supply
+(client confidentiality, NDAs, export control). Do not commit client or
+proprietary model data to this repository — `local/` and `data/` are excluded
+from version control for exactly that reason.
+
 ## Support and verification
 
 The toolkit is provided as-is, with no support, maintenance or
