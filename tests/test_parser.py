@@ -42,6 +42,35 @@ def test_get_model_data():
     # Add more assertions based on your sample content
 
 
+def test_parse_returns_self_for_chaining():
+    """``parse()`` returns the parser so the canonical one-liner works.
+
+    Regression test: the documented pipeline
+    ``SAP2000Parser(path).parse().get_model_data()`` previously raised
+    ``AttributeError`` because ``parse()`` returned ``None``.
+    """
+    if not SAMPLE_S2K.exists():
+        pytest.skip(f"Sample file not found: {SAMPLE_S2K}")
+
+    parser = SAP2000Parser(SAMPLE_S2K)
+    assert parser.parse() is parser
+
+    # The full chained form used throughout the docs must work.
+    model = SAP2000Parser(SAMPLE_S2K).parse().get_model_data()
+    assert model.nodes is not None
+
+
+def test_get_model_data_before_parse_raises():
+    """``get_model_data()`` before ``parse()`` raises a clear error.
+
+    Regression test: an un-parsed parser silently produced an empty
+    ``SAPModelData`` (0 nodes / 0 frames), a classic fail-silent trap.
+    """
+    parser = SAP2000Parser("does-not-need-to-exist.s2k")
+    with pytest.raises(RuntimeError, match="call parse"):
+        parser.get_model_data()
+
+
 def test_parse_from_example(tmp_path):
     """Test parsing using the built-in example content."""
     from fea_toolkit.io.s2k_parser import SAP2000Parser

@@ -47,6 +47,10 @@ class SAP2000Parser:
         parser.parse()
         model_data = parser.get_model_data()
 
+    :meth:`parse` returns ``self``, so the two calls can be chained::
+
+        model_data = SAP2000Parser("model.s2k").parse().get_model_data()
+
     The raw table data can be saved to JSON for later reuse:
         parser.to_json("model.json")
         parser2 = SAP2000Parser.from_json("model.json")
@@ -71,10 +75,16 @@ class SAP2000Parser:
     # -------------------------------------------------------------------------
     # Parsing (adapted from your parse_sap2000_table_file / parse_file)
     # -------------------------------------------------------------------------
-    def parse(self) -> None:
-        """Parse the .S2K file and store raw tables internally."""
+    def parse(self) -> "SAP2000Parser":
+        """Parse the .S2K file and store raw tables internally.
+
+        Returns:
+            ``self``, so the call can be chained — e.g.
+            ``SAP2000Parser("model.s2k").parse().get_model_data()``.
+        """
         content = self._read_file_with_encodings(self.file_path)
         self._raw_tables = self._parse_sap2000_table_file(content)
+        return self
 
     @staticmethod
     def _read_file_with_encodings(path: Path) -> str:
@@ -258,7 +268,17 @@ class SAP2000Parser:
     # Conversion to SAPModelData (extraction functions)
     # -------------------------------------------------------------------------
     def get_model_data(self) -> SAPModelData:
-        """Convert raw parsed tables into SAPModelData."""
+        """Convert raw parsed tables into SAPModelData.
+
+        Raises:
+            RuntimeError: If no data has been loaded — call :meth:`parse`
+                (or :meth:`from_json`) first.  Without this guard an
+                un-parsed parser silently yields an empty model.
+        """
+        if not self._raw_tables:
+            raise RuntimeError(
+                "No model data loaded — call parse() (or from_json()) before get_model_data()."
+            )
         # Call all extraction functions
         nodes = self._get_all_nodes()
 
