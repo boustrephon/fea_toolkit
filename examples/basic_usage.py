@@ -44,12 +44,20 @@ print(f"FEA Toolkit Version: {__version__}")
 print(f"OpenSees Version: {ops_version()}")
 
 
+#: Extensions the example can read: SAP2000 text exports, plus the
+#: raw-table JSON caches written by ``SAP2000Parser.to_json()``.  ETABS
+#: (``.e2k`` / ``.$et``) is deliberately omitted — the parser cannot read
+#: it yet, and offering it would yield a silently empty model.
+MODEL_FILE_TYPES = ("s2k", "S2K", "$2k", "json", "JSON")
+
+
 def pick_file() -> Path:
     """Open a native file chooser dialog appropriate for the platform."""
+    prompt = "Select a SAP2000 model file"
     if os_name == "Darwin" and architecture == "arm64":
-        path = mac_file_chooser()
+        path = mac_file_chooser(file_types=MODEL_FILE_TYPES, prompt=prompt)
     else:
-        path = tkinter_file_chooser()
+        path = tkinter_file_chooser(file_types=MODEL_FILE_TYPES, prompt=prompt)
     if path is None:
         sys.exit("No file selected.")
     return Path(path)
@@ -57,13 +65,13 @@ def pick_file() -> Path:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Parse a SAP2000 .s2k / .$2k / .e2k / .$et file and optionally run an OpenSees analysis.",
+        description="Parse a SAP2000 .s2k / .$2k file and optionally run an OpenSees analysis. ETABS .e2k / .$et input is planned, not yet supported.",
     )
     parser.add_argument(
         "s2k_file",
         nargs="?",
         default=None,
-        help="Path to the SAP2000 text file (.s2k, .$2k, .e2k, .$et).",
+        help="Path to the SAP2000 text file (.s2k, .$2k); ETABS (.e2k, .$et) planned, not yet supported.",
     )
     parser.add_argument(
         "--sample",
@@ -104,12 +112,23 @@ def main():
         print("Please place section_dict.pkl in the data/ folder at project root.")
         return
 
-    # Parse the model
-    print(f"\nParsing SAP2000 file: {s2k_file}")
-    parser = SAP2000Parser(s2k_file)
-    parser.parse()
-    json_file = s2k_file.with_suffix(".json")
-    parser.to_json(json_file)
+    # Load the model.  A .json input is a raw-table cache and must be read
+    # with from_json(); anything else is parsed as a SAP2000 text export.
+    if s2k_file.suffix.lower() == ".json":
+        print(f"\nLoading JSON cache: {s2k_file}")
+        parser = SAP2000Parser.from_json(s2k_file)
+    else:
+        if s2k_file.suffix.lower() not in (".s2k", ".$2k"):
+            print(
+                f"Warning: {s2k_file.suffix or 'no extension'} is not a known SAP2000 "
+                "text extension (.s2k / .$2k) — attempting to parse it as text anyway."
+            )
+        print(f"\nParsing SAP2000 file: {s2k_file}")
+        parser = SAP2000Parser(s2k_file)
+        parser.parse()
+        # Refresh the raw-table JSON cache beside the model.  Text input
+        # only: for a .json input this would overwrite the source file.
+        parser.to_json(s2k_file.with_suffix(".json"))
     model_data = parser.get_model_data()
     print(f"Model units: {model_data.units}")
     print(f"Nodes: {len(model_data.nodes)}")
