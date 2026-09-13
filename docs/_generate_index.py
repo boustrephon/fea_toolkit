@@ -26,6 +26,7 @@ CATEGORIES = [
     ("export-viz", "🎨 Export & Visualisation"),
     ("tool-specific", "🛠️ Tool-Specific Workflows"),
     ("planning", "📋 Planning & Historical"),
+    ("about", "📜 Licence & Legal"),
 ]
 
 STATUS_BADGE = {

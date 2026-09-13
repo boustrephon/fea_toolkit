@@ -407,9 +407,11 @@ constrained quadrilateral remeshing.  Neither is imported by the core
 workflow — they must be explicitly imported after a build.
 
 Report orchestration and the pandas summary/figure helpers are also
-optional: ``pip install fea_toolkit[report]``.  The rest of the toolkit
-imports cleanly without pandas (the report modules raise a clear
-``RuntimeError`` only when a pandas-dependent helper is actually called).
+optional: ``pip install -e ".[report]"`` (from the cloned source — the toolkit
+is not on PyPI; see [Licence and Disclaimer](#licence-and-disclaimer)).  The
+rest of the toolkit imports cleanly without pandas (the report modules raise a
+clear ``RuntimeError`` only when a pandas-dependent helper is actually
+called).
 
 ```python
 # Mesh quality checks (NumPy only — no extra install needed)
@@ -989,3 +991,59 @@ plan.  In summary:
 * [Tutorial](https://github.com/cslotboom/OpenSeesPyTutorials)
 * [AmirHosseinNamadchi - OpenSeesPy-Examples](https://github.com/AmirHosseinNamadchi/OpenSeesPy-Examples)
 * [Brainery Examples (Silvia Mazzoni)](https://github.com/silviamazzoni/OpenSeesPy_ExamplesManual/)
+
+---
+
+# Licence and Disclaimer
+
+`fea_toolkit` is free software, licensed under the **GNU General Public
+License, version 3 or later** (SPDX: `GPL-3.0-or-later`).  The full licence
+text is in
+[`LICENSE`](https://github.com/boustrephon/fea_toolkit/blob/main/LICENSE); a
+complete breakdown of the terms, the third-party dependency licences and the
+distribution position is in [`docs/licence.md`](docs/licence.md).
+
+> **No warranty.**  This software is distributed in the hope that it will be
+> useful, but **without any warranty, express or implied**, including without
+> limitation the implied warranties of merchantability, fitness for a
+> particular purpose and non-infringement.  The entire risk as to the quality
+> and performance of the software is with you (GPL-3.0 §§15–16).
+
+> **Engineering judgement is required.**  The toolkit performs finite-element
+> analysis and design checks.  Every result must be independently verified by a
+> suitably qualified engineer before it is relied upon for design, construction
+> or assessment.  Nothing produced by this software is a substitute for
+> engineering judgement or for the applicable design code.
+
+## Distribution
+
+`fea_toolkit` is currently distributed **as source, by git clone only**:
+
+```bash
+git clone https://github.com/boustrephon/fea_toolkit.git
+cd fea_toolkit
+pip install -e ".[report]"       # add [mesh-remesh] for Gmsh remeshing
+```
+
+It is **not published on PyPI** — `pip install fea_toolkit` will not find it,
+and there is no released wheel to install.  Because distribution is
+source-only, GPL-3.0 obligations arise only if *you* redistribute the source or
+a modified copy: keep the copyright notice and licence text, mark modified
+versions as changed, make the corresponding source available, and state the
+absence of warranty.
+
+## OpenSeesPy — commercial redistribution requires a licence
+
+`fea_toolkit` drives OpenSees models but does **not** bundle or redistribute
+OpenSeesPy, which carries its own licence:
+
+> OpenSeesPy is free for research, education, and internal use. Commercial
+> redistribution of OpenSeesPy, such as, but not limited to, an application or
+> cloud-based service that uses `import openseespy`, requires a license similar
+> to that required for commercial redistribution of OpenSees.exe. Contact
+> Dr. Minjie Zhu (zhum@oregonstate.edu) for commercial licensing details.
+
+In short: **internal use is free**, but shipping an application — or running a
+cloud-based service — that imports `openseespy` requires a **commercial
+licence from Oregon State University**.  That obligation is independent of, and
+additional to, `fea_toolkit`'s GPL-3.0 terms.

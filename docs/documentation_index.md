@@ -54,7 +54,7 @@ for automated cross-referencing.
 
 - [MVLEM / SFI-MVLEM Shear-Wall Analysis](mvlem_wall_analysis.md) — ✅ Complete
   > MVLEM / SFI-MVLEM reinforced-concrete shear-wall macro-element modelling: verified element signatures against the shipped openseespy wheel, FSAM nD-material support, WallElement builder integration, and end-to-end pushover recipes (LayeredShell, SFI_MVLEM_3D, MVLEM_3D).
-  Tags: `analysis-type`, `wall`, `mvlem`, `sfi-mvlem`, `fsam`, `shear`, `nonlinear`, `validation`
+  Tags: `analysis-type`, `pushover`, `nonlinear`, `wall`, `mvlem`, `sfi-mvlem`, `fsam`, `shear`, `validation`
   Related: [Shell Element Support](shell_support.md) · [Element Properties Configuration](element_properties_config.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Custom OpenSeesPy local build — swap recipe](openseespy_local_build.md)
 
 - [Nonlinear Dynamic (Time-History) Analysis](nonlinear_dynamic_analysis.md) — ✅ Complete
@@ -115,11 +115,6 @@ for automated cross-referencing.
   Tags: `config`, `element-properties`, `fiber`, `hinges`, `nonlinear`, `shell`
   Related: [Element Classification](element_classification.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Shell Element Support](shell_support.md) · [Layered Analysis Workflow for the v3 Architecture](layered_analysis_workflow.md)
 
-- [Member End Releases & Partial Fixity](member_releases.md) — ✅ Complete
-  > Converting SAP2000 frame end releases and partial-fixity springs to OpenSees zero-length release elements (and Tcl): local-DOF mapping, formulation-aware rigid/soft stiffnesses, and closed-form validation.
-  Tags: `releases`, `partial-fixity`, `connections`, `zeroLength`, `frames`, `tcl`, `sap2000`
-  Related: [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Element Properties Configuration](element_properties_config.md) · [Tcl Export](tcl_export.md) · [Analysis Workflow](workflow.md)
-
 - [Element Splitting](element_splitting.md) — ✅ Complete
   > Splitting frame elements at joints and intersections with parent-child tracking and load redistribution.
   Tags: `elements`, `splitting`, `meshing`, `load-redistribution`
@@ -130,15 +125,20 @@ for automated cross-referencing.
   Tags: `mander`, `confinement`, `validation`, `theory`, `reference`
   Related: [Rectangular Concrete Section Workflow](rc_rectangular_section_workflow.md) · [Element Properties Configuration](element_properties_config.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md)
 
+- [Member End Releases & Partial Fixity](member_releases.md) — ✅ Complete
+  > How SAP2000 frame end releases and partial-fixity springs are converted to OpenSees zero-length release elements (and Tcl), including the DOF mapping, formulation-aware stiffness selection, and validation.
+  Tags: `releases`, `partial-fixity`, `connections`, `zeroLength`, `frames`, `tcl`, `sap2000`
+  Related: [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Element Properties Configuration](element_properties_config.md) · [Tcl Export for Nonlinear Analysis](tcl_export.md) · [Analysis Workflow](workflow.md)
+
+- [SAP2000 Model Review & Checks](model_review.md) — ✅ Complete
+  > Standalone solver-free review of a parsed SAP2000 (.s2k) model: inventory, connectivity, element releases, data-integrity checks and an optional OpenSees modal/static confirmation pass.
+  Tags: `review`, `checks`, `s2k`, `sap2000`, `connectivity`, `integrity`, `diagnostics`, `cli`
+  Related: [Analysis Workflow](workflow.md) · [Element Classification](element_classification.md) · [Report Generation — Design Proposal](report_generation.md)
+
 - [Rectangular Concrete Section Workflow](rc_rectangular_section_workflow.md) — ✅ Complete
   > SAP2000 → OpenSees fiber workflow for rectangular RC beam/column sections: parser defaults, promotion, Mander confinement, and user overrides.
   Tags: `rc`, `sections`, `fiber`, `mander`, `confinement`, `workflow`
   Related: [Element Classification](element_classification.md) · [Element Properties Configuration](element_properties_config.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Report Generation — Design Proposal](report_generation.md)
-
-- [SAP2000 Model Review & Checks](model_review.md) — ✅ Complete
-  > Solver-free first-pass review of a parsed `.s2k` model: inventory, connectivity (loose nodes, floating sub-structures), element releases, data-integrity checks, and an optional OpenSees modal/static confirmation pass.
-  Tags: `review`, `checks`, `s2k`, `connectivity`, `integrity`, `diagnostics`, `cli`
-  Related: [Analysis Workflow](workflow.md) · [Element Classification](element_classification.md) · [Report Generation](report_generation.md)
 
 - [Shell Element Support](shell_support.md) — ✅ Complete
   > Shell element types, meshing strategies, and layered shell support for nonlinear wall analysis.
@@ -158,10 +158,20 @@ for automated cross-referencing.
 
 ## 🎨 Export & Visualisation
 
+- [Model Stage File](model_stage_file.md) — ✅ Complete
+  > Self-describing NPZ/HDF5 export of SAPModelData + MeshModel stages, with lossless round-trip and Rhino/analysis consumption.
+  Tags: `io`, `serialisation`, `rhino`, `round-trip`, `hdf5`, `npz`
+  Related: [Unified Results Schema](results_schema.md) · [Rhino 3-D Export](rhino_export.md) · [Analysis Workflow](workflow.md)
+
 - [Unified Results Schema](results_schema.md) — ✅ Complete
   > The canonical unified NPZ results schema — the on-disk exchange format implemented by fea_toolkit.io.npz_writer.
   Tags: `schema`, `npz`, `results`, `io`
   Related: [Report Generation — Design Proposal](report_generation.md) · [Visualisation Toolkit](viewer.md) · [Rhino 3-D Export](rhino_export.md) · [Storey-level Response Methodology](storey_response.md)
+
+- [Rhino Attributes Reference](rhino_attributes.md) — ✅ Complete
+  > The SAP_*, FEA_* and RES_* Rhino UserString namespaces stamped on imported geometry and results overlays.
+  Tags: `rhino`, `metadata`, `userstrings`, `attributes`
+  Related: [Rhino 3-D Export](rhino_export.md) · [Unified Results Schema](results_schema.md)
 
 - [Rhino 3-D Export](rhino_export.md) — ✅ Complete
   > Export to Rhino 8: centreline and extrusion geometry, layers, colours, and Grasshopper metadata.
@@ -218,7 +228,7 @@ for automated cross-referencing.
   Tags: `architecture`, `development`, `notes`
   Related: [AnalysisBuilder Migration Plan](analysis_builder_migration_plan.md)
 
-- [Force-Diagram Unification (Phase B)](force_diagram_unification.md) — 🚧 Draft
+- [Force-Diagram Unification (Phase B)](force_diagram_unification.md)
   > Detailed design for unifying the four force-diagram plotting entry points into one unit-aware API.
   Tags: `planning`, `refactor`, `plotting`, `phase-b`
 
@@ -230,6 +240,22 @@ for automated cross-referencing.
   > Implementation plan and status for per-element pushover result recording (frame end forces, shell stress resultants, plasticity indicators) and nonlinear visualization.
   Tags: `pushover`, `results`, `storage`, `visualization`, `npz`, `planning`
   Related: [Unified Results Schema](results_schema.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Visualisation Toolkit](viewer.md)
+
+
+## 📜 Licence & Legal
+
+- [Licence and Disclaimer](licence.md) — ✅ Complete
+  > Licensing terms for fea_toolkit (GPL-3.0-or-later), the absence of any warranty, how the toolkit is distributed (source, by git clone, not PyPI), and the third-party dependency licences — including OpenSeesPy's commercial-redistribution clause.
+  Tags: `licence`, `gpl`, `warranty`, `disclaimer`, `distribution`, `openseespy`, `legal`
+  Related: [Custom OpenSeesPy local build — swap recipe](openseespy_local_build.md) · [Rhino 3-D Export](rhino_export.md) · [Analysis Workflow](workflow.md)
+
+
+## 📦 Io
+
+- [Model Stage File](model_stage_file.md) — ✅ Complete
+  > Self-describing NPZ/HDF5 export of SAPModelData + MeshModel stages, with lossless round-trip and Rhino/analysis consumption.
+  Tags: `io`, `serialisation`, `rhino`, `round-trip`, `hdf5`, `npz`
+  Related: [Unified Results Schema](results_schema.md) · [Rhino 3-D Export](rhino_export.md) · [Analysis Workflow](workflow.md)
 
 
 ## 📦 Opensees
@@ -254,6 +280,7 @@ Tags across all documentation files:
 - **`architecture`** — [analysis.md](analysis.md), [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md)
 - **`area-elements`** — [shell_support.md](shell_support.md)
 - **`asce41`** — [capacity.md](capacity.md)
+- **`attributes`** — [rhino_attributes.md](rhino_attributes.md)
 - **`backbone`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`beams`** — [element_classification.md](element_classification.md)
 - **`benchmark`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
@@ -263,12 +290,16 @@ Tags across all documentation files:
 - **`build`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`capacity`** — [capacity.md](capacity.md), [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`capacity-spectrum`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md)
+- **`checks`** — [model_review.md](model_review.md)
 - **`classification`** — [element_classification.md](element_classification.md)
 - **`cleanup`** — [deprecation_plan.md](deprecation_plan.md), [linting_fix_plan.md](linting_fix_plan.md)
+- **`cli`** — [model_review.md](model_review.md)
 - **`codes`** — [capacity.md](capacity.md)
 - **`columns`** — [element_classification.md](element_classification.md)
 - **`config`** — [element_properties_config.md](element_properties_config.md)
 - **`confinement`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
+- **`connections`** — [member_releases.md](member_releases.md)
+- **`connectivity`** — [model_review.md](model_review.md)
 - **`constraints`** — [constraint_detection.md](constraint_detection.md), [diaphragm_constraints.md](diaphragm_constraints.md)
 - **`conversion`** — [units_conversion.md](units_conversion.md)
 - **`cracked-section`** — [stiffness_factors.md](stiffness_factors.md)
@@ -278,8 +309,11 @@ Tags across all documentation files:
 - **`design`** — [capacity.md](capacity.md)
 - **`design-proposal`** — [report_generation.md](report_generation.md)
 - **`development`** — [dev_notes.md](dev_notes.md)
+- **`diagnostics`** — [model_review.md](model_review.md)
 - **`diaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
+- **`disclaimer`** — [licence.md](licence.md)
 - **`displacement`** — [storey_response.md](storey_response.md)
+- **`distribution`** — [licence.md](licence.md)
 - **`drift`** — [storey_response.md](storey_response.md)
 - **`duong`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`dynamic`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
@@ -297,21 +331,26 @@ Tags across all documentation files:
 - **`fiber`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`fiber-section`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`force-controlled`** — [shear_failure_modelling.md](shear_failure_modelling.md)
+- **`frames`** — [member_releases.md](member_releases.md)
 - **`fsam`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`gb50010`** — [capacity.md](capacity.md)
 - **`geometry`** — [rhino_export.md](rhino_export.md)
+- **`gpl`** — [licence.md](licence.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`ground-motion`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
 - **`guide`** — [llm_guide.md](llm_guide.md)
-- **`hdf5`** — [report_generation.md](report_generation.md)
+- **`hdf5`** — [model_stage_file.md](model_stage_file.md), [report_generation.md](report_generation.md)
 - **`hinges`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md)
 - **`html-export`** — [viewer.md](viewer.md)
 - **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
+- **`integrity`** — [model_review.md](model_review.md)
 - **`interactive`** — [viewer.md](viewer.md)
-- **`io`** — [results_schema.md](results_schema.md)
+- **`io`** — [model_stage_file.md](model_stage_file.md), [results_schema.md](results_schema.md)
 - **`joint`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`kip-in`** — [units_conversion.md](units_conversion.md)
+- **`legal`** — [licence.md](licence.md)
 - **`lessons-learned`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
+- **`licence`** — [licence.md](licence.md)
 - **`limit-state`** — [units_conversion.md](units_conversion.md)
 - **`linting`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`llm`** — [llm_guide.md](llm_guide.md)
@@ -321,40 +360,47 @@ Tags across all documentation files:
 - **`mcft`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`mesh-model`** — [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`meshing`** — [constraint_detection.md](constraint_detection.md), [element_splitting.md](element_splitting.md), [shell_support.md](shell_support.md)
+- **`metadata`** — [rhino_attributes.md](rhino_attributes.md)
 - **`migration`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md)
 - **`modal`** — [modal_analysis.md](modal_analysis.md)
 - **`modifiers`** — [stiffness_factors.md](stiffness_factors.md)
 - **`mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`notes`** — [dev_notes.md](dev_notes.md)
-- **`npz`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
+- **`npz`** — [model_stage_file.md](model_stage_file.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`opensees`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [tcl_export.md](tcl_export.md)
-- **`openseespy`** — [openseespy_local_build.md](openseespy_local_build.md)
+- **`openseespy`** — [licence.md](licence.md), [openseespy_local_build.md](openseespy_local_build.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`orchestration`** — [analysis.md](analysis.md)
+- **`partial-fixity`** — [member_releases.md](member_releases.md)
 - **`phase-b`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`pipeline`** — [workflow.md](workflow.md)
 - **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [force_diagram_unification.md](force_diagram_unification.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
 - **`plotting`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`post-processing`** — [storey_response.md](storey_response.md)
 - **`preprocessor`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
-- **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [pushover_analysis.md](pushover_analysis.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
+- **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [pushover_analysis.md](pushover_analysis.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`pyright`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`pyvista`** — [viewer.md](viewer.md)
 - **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`refactor`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`reference`** — [builder_reference.md](builder_reference.md), [mander_confinement_validation.md](mander_confinement_validation.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
+- **`releases`** — [member_releases.md](member_releases.md)
 - **`reporter`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
 - **`results`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
-- **`rhino`** — [rhino_export.md](rhino_export.md)
+- **`review`** — [model_review.md](model_review.md)
+- **`rhino`** — [model_stage_file.md](model_stage_file.md), [rhino_attributes.md](rhino_attributes.md), [rhino_export.md](rhino_export.md)
 - **`rigid-end-offset`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`rigidDiaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
+- **`round-trip`** — [model_stage_file.md](model_stage_file.md)
 - **`runtime`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
-- **`sap2000`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
+- **`s2k`** — [model_review.md](model_review.md)
+- **`sap2000`** — [member_releases.md](member_releases.md), [model_review.md](model_review.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`schema`** — [results_schema.md](results_schema.md)
 - **`scripting`** — [tcl_export.md](tcl_export.md)
 - **`sections`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
+- **`serialisation`** — [model_stage_file.md](model_stage_file.md)
 - **`sfi-mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`shear`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`shell`** — [constraint_detection.md](constraint_detection.md), [element_properties_config.md](element_properties_config.md), [shell_support.md](shell_support.md)
@@ -365,7 +411,7 @@ Tags across all documentation files:
 - **`stiffness`** — [stiffness_factors.md](stiffness_factors.md)
 - **`storage`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
 - **`storey`** — [diaphragm_constraints.md](diaphragm_constraints.md), [storey_response.md](storey_response.md)
-- **`tcl`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
+- **`tcl`** — [member_releases.md](member_releases.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`test-model`** — [csm_test_model_plan.md](csm_test_model_plan.md)
 - **`theory`** — [mander_confinement_validation.md](mander_confinement_validation.md)
 - **`time-history`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
@@ -373,17 +419,20 @@ Tags across all documentation files:
 - **`unit-aware`** — [capacity.md](capacity.md)
 - **`units`** — [units_conversion.md](units_conversion.md)
 - **`usage`** — [llm_guide.md](llm_guide.md)
+- **`userstrings`** — [rhino_attributes.md](rhino_attributes.md)
 - **`validation`** — [mander_confinement_validation.md](mander_confinement_validation.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`viewer`** — [viewer.md](viewer.md)
 - **`visualisation`** — [rhino_export.md](rhino_export.md), [viewer.md](viewer.md)
 - **`visualization`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
 - **`wall`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`walls`** — [element_classification.md](element_classification.md)
+- **`warranty`** — [licence.md](licence.md)
 - **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [workflow.md](workflow.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`xara`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`yaml-config`** — [report_generation.md](report_generation.md)
 - **`yield-point`** — [csm_bilinearization.md](csm_bilinearization.md)
 - **`z-tolerance`** — [diaphragm_constraints.md](diaphragm_constraints.md)
+- **`zeroLength`** — [member_releases.md](member_releases.md)
 
 To regenerate this index, run:
 

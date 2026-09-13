@@ -140,3 +140,5 @@ nav:
       - mesh: api/mesh.md
       - plotting: api/plotting.md
       - rhino: api/rhino.md
+  - About:
+      - Licence and Disclaimer: licence.md
