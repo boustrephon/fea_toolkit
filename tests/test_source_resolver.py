@@ -35,6 +35,12 @@ class TestResolveFromModel:
         assert src.stage == "mesh"
         assert len(src.nodes) == len(mesh.nodes)
 
+    def test_constraint_assignments_propagated(self):
+        md = make_sample_model()
+        md.constraint_assignments = {"1": "BODY1"}
+        src = resolve_model_source(md)
+        assert src.constraint_assignments == {"1": "BODY1"}
+
 
 class TestResolveFromStageFile:
     def test_from_dict_and_path(self, tmp_path):
@@ -72,6 +78,41 @@ class TestResolveFromStageFile:
         write_model_stages(p, sap=md, fmt="h5")
         src = resolve_model_source(p, stage="sap")
         assert src.units == md.units
+
+    def test_restraints_groups_and_model_name_from_dict_blocks(self):
+        """``restraints_json`` / ``groups_json`` / ``model_name`` must be read."""
+        import json
+
+        import numpy as np
+
+        from fea_toolkit.model.sap_data import Group, Restraint
+
+        data = {
+            "restraints_json": np.array(
+                [json.dumps({"1": {"dofs": [1, 1, 1, 1, 1, 1]}})], dtype=str
+            ),
+            "groups_json": np.array(
+                [json.dumps({"G1": {"name": "G1", "color": "Red", "objects": ["Frame:1"]}})],
+                dtype=str,
+            ),
+            "model_name": np.array(["TestModel"], dtype=str),
+        }
+        src = resolve_model_source(data, stage="sap")
+        assert isinstance(src.restraints["1"], Restraint)
+        assert src.restraints["1"].dofs == [1, 1, 1, 1, 1, 1]
+        assert isinstance(src.groups["G1"], Group)
+        assert src.groups["G1"].objects == ["Frame:1"]
+        assert src.model_name == "TestModel"
+
+    def test_restraints_survive_stage_file_round_trip(self, tmp_path):
+        """A stage file must reproduce the model's restraints (regression)."""
+        md = make_sample_model()
+        p = str(tmp_path / "m.npz")
+        write_model_stages(p, sap=md, fmt="npz")
+        src = resolve_model_source(p, stage="sap")
+        assert set(src.restraints) == set(md.restraints)
+        for nid, r in md.restraints.items():
+            assert src.restraints[nid].dofs == r.dofs
 
     def test_tag_refs_translated_to_sap_ids(self):
         """The geometry arrays store node refs as OpenSees tags while the

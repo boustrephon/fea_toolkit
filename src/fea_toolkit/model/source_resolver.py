@@ -30,6 +30,7 @@ from ..model.sap_data import (
     AreaElement,
     FrameElement,
     FrameEndOffset,
+    Group,
     Material,
     Node,
     Restraint,
@@ -58,6 +59,9 @@ class ResolvedSource:
     groups: dict[str, t.Any] = dataclasses.field(default_factory=dict)
     restraints: dict[str, Restraint] = dataclasses.field(default_factory=dict)
     frame_end_offsets: dict[str, FrameEndOffset] = dataclasses.field(default_factory=dict)
+    #: Joint constraint assignments (``{joint_id: constraint_name}``), when
+    #: the source carries them (``SAPModelData.constraint_assignments``).
+    constraint_assignments: dict[str, str] = dataclasses.field(default_factory=dict)
     units: dict[str, str] = dataclasses.field(default_factory=dict)
     model_name: str = ""
     #: Stage file raw dict (when resolved from NPZ/H5), else None.
@@ -99,6 +103,7 @@ def _resolve_from_model(source: t.Any, stage: str) -> ResolvedSource:
         groups=dict(getattr(source, "groups", {})),
         restraints=dict(getattr(source, "restraints", {})),
         frame_end_offsets=dict(getattr(source, "frame_end_offsets", {})),
+        constraint_assignments=dict(getattr(source, "constraint_assignments", {})),
         units=dict(getattr(source, "units", {})),
         model_name=str(getattr(source, "model_name", "")),
     )
@@ -186,7 +191,7 @@ def _resolve_from_dict(data: dict[str, t.Any], stage: str) -> ResolvedSource:
     shell_ids = data.get("shell_sap_id", [])
     for i in range(len(shell_ids)):
         aid = str(shell_ids[i])
-        if len(offsets) > i:
+        if len(offsets) > i + 1:
             start, end = int(offsets[i]), int(offsets[i + 1])
             node_ids = [_sap_id(t) for t in flat[start:end]]
         else:
@@ -235,6 +240,35 @@ def _resolve_from_dict(data: dict[str, t.Any], stage: str) -> ResolvedSource:
     except Exception:
         pass
 
+    # ── Restraints / groups / model name (persisted by stage_writer) ──
+    restraints: dict[str, Restraint] = {}
+    groups: dict[str, t.Any] = {}
+    model_name = ""
+    try:
+        import json
+
+        from ..io.model_codec import dict_to_model
+
+        raw_restraints = _block_lookup(data, stage, "restraints_json")
+        if raw_restraints is not None and len(raw_restraints):
+            for name, d in json.loads(raw_restraints[0]).items():
+                try:
+                    restraints[name] = dict_to_model(dict(d), cls=Restraint)
+                except Exception:
+                    continue
+        raw_groups = _block_lookup(data, stage, "groups_json")
+        if raw_groups is not None and len(raw_groups):
+            for name, d in json.loads(raw_groups[0]).items():
+                try:
+                    groups[name] = dict_to_model(dict(d), cls=Group)
+                except Exception:
+                    continue
+        raw_name = _block_lookup(data, stage, "model_name")
+        if raw_name is not None and len(raw_name):
+            model_name = str(raw_name[0])
+    except Exception:
+        pass
+
     return ResolvedSource(
         stage=stage,
         nodes=nodes,
@@ -244,7 +278,10 @@ def _resolve_from_dict(data: dict[str, t.Any], stage: str) -> ResolvedSource:
         area_assignments=area_assignments,
         sections=sections,
         materials=materials,
+        groups=groups,
+        restraints=restraints,
         units=units,
+        model_name=model_name,
         raw=data,
     )
 

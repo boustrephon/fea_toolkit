@@ -945,6 +945,70 @@ class _BrokenIndexObjects:
 # ── Optional rhino3dm .3dm round-trip ────────────────────────────────────
 
 
+class TestRhinoImporterMeshedGuard:
+    """Regression: ``create_meshed`` on a non-SAPModelData source must not crash."""
+
+    def test_create_meshed_on_mesh_source_is_ignored(self, rhino_env, monkeypatch):
+        """Source is a ``MeshModel`` (``_raw_sap_model is None``); the meshed
+        branch must print-and-skip rather than hit ``UnboundLocalError``."""
+        from fea_toolkit.model.mesh_model import MeshModel
+        from fea_toolkit.rhino import importer as imp
+        from fea_toolkit.rhino.layers import FrameLayerSet, ShellLayerSet
+
+        monkeypatch.setattr(imp, "create_root_layer", lambda **kw: 0)
+        monkeypatch.setattr(imp, "create_joints_layer", lambda *a, **kw: 0)
+        monkeypatch.setattr(imp, "create_frame_layers", lambda *a, **kw: FrameLayerSet({}, {}))
+        monkeypatch.setattr(imp, "create_shell_layers", lambda *a, **kw: ShellLayerSet({}, {}))
+        monkeypatch.setattr(imp, "create_joint_points", lambda *a, **kw: (0, []))
+        monkeypatch.setattr(imp, "create_selection_groups", lambda *a, **kw: None)
+
+        mesh = MeshModel(
+            nodes={},
+            frame_elements={},
+            frame_assignments={},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+        )
+        importer = imp.RhinoImporter(mesh)
+        result = importer.run(create_meshed=True, verbose=False)
+        assert result["meshed_frame_centrelines"] == 0
+        assert result["meshed_shell_centrelines"] == 0
+
+    def test_run_suppresses_and_restores_redraw(self, rhino_env, monkeypatch):
+        """The bulk import disables viewport redraw, then restores it."""
+        from fea_toolkit.model.mesh_model import MeshModel
+        from fea_toolkit.rhino import importer as imp
+        from fea_toolkit.rhino.layers import FrameLayerSet, ShellLayerSet
+
+        seen: dict = {}
+
+        monkeypatch.setattr(imp, "create_root_layer", lambda **kw: 0)
+        monkeypatch.setattr(imp, "create_joints_layer", lambda *a, **kw: 0)
+        monkeypatch.setattr(imp, "create_frame_layers", lambda *a, **kw: FrameLayerSet({}, {}))
+        monkeypatch.setattr(imp, "create_shell_layers", lambda *a, **kw: ShellLayerSet({}, {}))
+        monkeypatch.setattr(imp, "create_selection_groups", lambda *a, **kw: None)
+
+        def _record_redraw(*args, **kwargs):
+            seen["enabled_during_batch"] = rhino_env.Views.RedrawEnabled
+            return 0, []
+
+        monkeypatch.setattr(imp, "create_joint_points", _record_redraw)
+
+        mesh = MeshModel(
+            nodes={},
+            frame_elements={},
+            frame_assignments={},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+        )
+        assert rhino_env.Views.RedrawEnabled is True
+        imp.RhinoImporter(mesh).run(verbose=False)
+        assert seen["enabled_during_batch"] is False  # suppressed for the batch
+        assert rhino_env.Views.RedrawEnabled is True  # restored on exit
+
+
 class TestRhino3dmRoundTrip:
     def test_nested_layers_write_read(self, tmp_path):
         """Nested stage layers survive a real .3dm write/read (skipped w/o rhino3dm).

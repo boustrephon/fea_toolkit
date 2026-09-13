@@ -253,6 +253,10 @@ def create_joint_points(
                         attrs.SetUserString(f"SAP_Restraint_{dof}", "True")
                 if active:
                     attrs.SetUserString("SAP_Restraints", ",".join(active))
+
+            constraint_name = getattr(md, "constraint_assignments", {}).get(nid)
+            if constraint_name:
+                attrs.SetUserString("SAP_Constraint", str(constraint_name))
             obj.CommitChanges()
         except Exception:
             continue
@@ -391,12 +395,21 @@ def create_frame_lines(
 def create_frame_extrusions(
     md: SAPModelData,
     frame_extrusion_layers: dict[str, int],
+    stage: str = "sap",
 ) -> int:
     """Create lightweight ``Extrusion`` objects for frame elements.
 
     Accounts for longitudinal rigid offsets and lateral cardinal‑point
     offsets.  Uses ``rg.Extrusion.Create()`` which produces true
-    lightweight Extrusion objects.
+    lightweight Extrusion objects; when the I/J lateral offsets differ
+    the element cannot be a lightweight Extrusion, so a swept Brep solid
+    (``doc.Objects.AddBrep``) is created instead — both are stamped with
+    the same ``SAP_*`` / ``FEA_*`` metadata.
+
+    Args:
+        md: Model source.
+        frame_extrusion_layers: ``{section_name: layer_index}``.
+        stage: Pipeline stage label stamped as ``FEA_Stage``.
     """
     doc = sc.doc
     count = 0
@@ -509,27 +522,34 @@ def create_frame_extrusions(
                         )
                         if brep:
                             extrusion.Dispose()
-                            # Store as extrusion-compatible (use a mesh representation)
-                            mesh = rg.Mesh.CreateFromBrep(brep, rg.MeshingParameters.Default)
-                            if mesh and len(mesh) > 0:
-                                attr_local = rd.ObjectAttributes()
-                                attr_local.LayerIndex = layer_index
-                                attr_local.Name = f"SAP_FrameExt_{eid}"
-                                obj_id = doc.Objects.AddMesh(mesh[0], attr_local)
-                                if obj_id:
-                                    count += 1
-                                    obj = doc.Objects.Find(obj_id)
-                                    if obj:
-                                        attrs = obj.Attributes
-                                        attrs.SetUserString("SAP_Type", "FrameExtrusion")
-                                        attrs.SetUserString("SAP_FrameID", str(eid))
-                                        attrs.SetUserString("SAP_Section", sec_name)
-                                        attrs.SetUserString("SAP_JointI", str(elem.node_i))
-                                        attrs.SetUserString("SAP_JointJ", str(elem.node_j))
-                                        attrs.SetUserString("SAP_Material", sec.material)
-                                        attrs.SetUserString("SAP_Shape", sec.shape)
-                                        attrs.SetUserString("SAP_Angle", str(elem.angle))
-                                        obj.CommitChanges()
+                            # Differing I/J lateral offsets cannot be expressed
+                            # as a lightweight Extrusion — add the swept Brep
+                            # solid directly (documented "Brep solid" geometry).
+                            attr_local = rd.ObjectAttributes()
+                            attr_local.LayerIndex = layer_index
+                            attr_local.Name = f"SAP_FrameExt_{eid}"
+                            obj_id = doc.Objects.AddBrep(brep, attr_local)
+                            if obj_id:
+                                count += 1
+                                obj = doc.Objects.Find(obj_id)
+                                if obj:
+                                    attrs = obj.Attributes
+                                    attrs.SetUserString("SAP_Type", "FrameExtrusion")
+                                    attrs.SetUserString("SAP_FrameID", str(eid))
+                                    attrs.SetUserString("SAP_Section", sec_name)
+                                    attrs.SetUserString("SAP_JointI", str(elem.node_i))
+                                    attrs.SetUserString("SAP_JointJ", str(elem.node_j))
+                                    attrs.SetUserString("SAP_Material", sec.material)
+                                    attrs.SetUserString("SAP_Shape", sec.shape)
+                                    attrs.SetUserString("SAP_Angle", str(elem.angle))
+                                    attrs.SetUserString("FEA_Stage", stage)
+                                    attrs.SetUserString("FEA_Kind", "FrameExtrusion")
+                                    attrs.SetUserString(
+                                        "FEA_ElemTag", str(getattr(elem, "elem_tag", ""))
+                                    )
+                                    if getattr(elem, "parent_id", None):
+                                        attrs.SetUserString("FEA_ParentID", str(elem.parent_id))
+                                    obj.CommitChanges()
                             continue
 
             # Use I-end offsets (or common offsets if no difference)
@@ -571,6 +591,11 @@ def create_frame_extrusions(
             attrs.SetUserString("SAP_Material", sec.material)
             attrs.SetUserString("SAP_Shape", sec.shape)
             attrs.SetUserString("SAP_Angle", str(elem.angle))
+            attrs.SetUserString("FEA_Stage", stage)
+            attrs.SetUserString("FEA_Kind", "FrameExtrusion")
+            attrs.SetUserString("FEA_ElemTag", str(getattr(elem, "elem_tag", "")))
+            if getattr(elem, "parent_id", None):
+                attrs.SetUserString("FEA_ParentID", str(elem.parent_id))
             obj.CommitChanges()
         except Exception:
             continue
@@ -702,8 +727,15 @@ def create_shell_breps(
 def create_shell_extrusions(
     md: SAPModelData,
     shell_extrusion_layers: dict[str, int],
+    stage: str = "sap",
 ) -> int:
-    """Create solid Breps for shell elements by offsetting the face."""
+    """Create solid Breps for shell elements by offsetting the face.
+
+    Args:
+        md: Model source.
+        shell_extrusion_layers: ``{section_name: layer_index}``.
+        stage: Pipeline stage label stamped as ``FEA_Stage``.
+    """
     doc = sc.doc
     count = 0
     default_layer = shell_extrusion_layers.get("Default", 0)
@@ -766,6 +798,11 @@ def create_shell_extrusions(
             attrs.SetUserString("SAP_Thickness", str(thickness))
             attrs.SetUserString("SAP_Material", sec.material)
             attrs.SetUserString("SAP_JointIDs", ",".join(area.node_ids))
+            attrs.SetUserString("FEA_Stage", stage)
+            attrs.SetUserString("FEA_Kind", "ShellExtrusion")
+            attrs.SetUserString("FEA_ElemTag", str(getattr(area, "area_tag", "")))
+            if getattr(area, "parent_id", None):
+                attrs.SetUserString("FEA_ParentID", str(area.parent_id))
             obj.CommitChanges()
         except Exception:
             continue

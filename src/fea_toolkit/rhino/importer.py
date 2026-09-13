@@ -40,6 +40,7 @@ from .layers import (
     create_joints_layer,
     create_root_layer,
     create_shell_layers,
+    suppress_redraw,
 )
 
 __all__ = ["RhinoImporter"]
@@ -112,7 +113,8 @@ class RhinoImporter:
         """Execute the full import sequence.
 
         Args:
-            create_centreline: Points / lines / planar Breps.
+            create_centreline: Lines / planar Breps (joint points are
+                always created).
             create_extrusions: Lightweight ``Extrusion`` solids.
             color_code_joints: Colour joints by restraint type.
             create_groups: Rhino groups from SAP groups.
@@ -127,7 +129,36 @@ class RhinoImporter:
 
         Returns:
             Dict with counts per geometry type.
+
+        Note:
+            The whole batch runs inside
+            :func:`~fea_toolkit.rhino.layers.suppress_redraw` — Rhino
+            invalidates/redraws viewports after every ``Add*`` and attribute
+            commit, which dominates runtime for large models.  Redraw is
+            restored (with a single refresh) on exit, even on error.
         """
+        with suppress_redraw():
+            return self._run_import(
+                create_centreline=create_centreline,
+                create_extrusions=create_extrusions,
+                color_code_joints=color_code_joints,
+                create_groups=create_groups,
+                create_meshed=create_meshed,
+                root_layer=root_layer,
+                verbose=verbose,
+            )
+
+    def _run_import(
+        self,
+        create_centreline: bool,
+        create_extrusions: bool,
+        color_code_joints: bool,
+        create_groups: bool,
+        create_meshed: bool,
+        root_layer: t.Optional[str],
+        verbose: bool,
+    ) -> dict[str, t.Any]:
+        """Run the import steps inside a redraw-suppressed batch."""
         results: dict[str, t.Any] = {
             "joints": 0,
             "frame_centrelines": 0,
@@ -192,13 +223,13 @@ class RhinoImporter:
                 if verbose:
                     print("Creating frame extrusion solids...")
                 results["frame_extrusions"] = create_frame_extrusions(
-                    self.md, frame_layers.extrusion
+                    self.md, frame_layers.extrusion, stage=self.stage
                 )
             if self.md.area_elements:
                 if verbose:
                     print("Creating shell extrusion solids...")
                 results["shell_extrusions"] = create_shell_extrusions(
-                    self.md, shell_layers.extrusion
+                    self.md, shell_layers.extrusion, stage=self.stage
                 )
 
         # 5. Meshed geometry (areas sub‑divided, frames split)
@@ -206,6 +237,7 @@ class RhinoImporter:
         # (§3.1/.clinerules).  The legacy in-importer meshing below is kept
         # only for raw ``SAPModelData`` inputs; stage-file / MeshModel
         # sources are imported directly.
+        md_mesh = None
         if create_meshed:
             if self._raw_sap_model is None:
                 if verbose:
@@ -306,13 +338,13 @@ class RhinoImporter:
                         if verbose:
                             print("Creating meshed frame centreline lines...")
                         results["meshed_frame_centrelines"] = create_frame_lines(
-                            md_mesh, meshed_frame_layers.centreline
+                            md_mesh, meshed_frame_layers.centreline, stage="mesh"
                         )
                     if md_mesh.area_elements:
                         if verbose:
                             print("Creating meshed shell centreline Breps...")
                         results["meshed_shell_centrelines"] = create_shell_breps(
-                            md_mesh, meshed_shell_layers.centreline
+                            md_mesh, meshed_shell_layers.centreline, stage="mesh"
                         )
 
                 if create_extrusions:
@@ -320,13 +352,13 @@ class RhinoImporter:
                         if verbose:
                             print("Creating meshed frame extrusions...")
                         results["meshed_frame_extrusions"] = create_frame_extrusions(
-                            md_mesh, meshed_frame_layers.extrusion
+                            md_mesh, meshed_frame_layers.extrusion, stage="mesh"
                         )
                     if md_mesh.area_elements:
                         if verbose:
                             print("Creating meshed shell extrusions...")
                         results["meshed_shell_extrusions"] = create_shell_extrusions(
-                            md_mesh, meshed_shell_layers.extrusion
+                            md_mesh, meshed_shell_layers.extrusion, stage="mesh"
                         )
 
         # 6. Groups
@@ -367,6 +399,12 @@ class RhinoImporter:
                 if obj is None:
                     continue
                 attrs = obj.Attributes
+
+                # SAP2000 group colour takes precedence: skip points that
+                # belong to a SAP2000 group so the colour applied by
+                # ``create_sap_groups`` is not overwritten here.
+                if attrs.GetUserString("SAP_Groups"):
+                    continue
 
                 constraint = attrs.GetUserString("SAP_Constraint")
                 restraints = attrs.GetUserString("SAP_Restraints")

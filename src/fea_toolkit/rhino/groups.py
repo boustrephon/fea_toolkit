@@ -12,7 +12,7 @@ Three kinds of groups are created:
 """
 
 from ..model.sap_data import SAPModelData
-from .colors import get_sap2000_color
+from .colors import color_from_name
 
 
 def _ensure_rhino():
@@ -128,7 +128,10 @@ def create_sap_groups(
     groups_created = 0
     for gname, group in md.groups.items():
         member_ids: list[str] = []
-        group_color = get_sap2000_color(group.color, None)
+        # Only recolour objects when the SAP2000 group actually defines a
+        # colour — ``color_from_name`` returns ``None`` otherwise, so the
+        # section/layer palette is preserved for uncoloured groups.
+        group_color = color_from_name(group.color)
         for ref in group.objects:
             parts = ref.split(":", 1)
             if len(parts) != 2:

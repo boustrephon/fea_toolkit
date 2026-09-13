@@ -93,7 +93,7 @@ Set on **every** geometry object (joints, frames, shells):
 | Key | Example | Notes |
 |---|---|---|
 | `FEA_Stage` | `sap` / `mesh` | pipeline stage of the object |
-| `FEA_Kind` | `Joint` / `Frame` / `Shell` | object kind |
+| `FEA_Kind` | `Joint` / `Frame` / `Shell` / `FrameExtrusion` / `ShellExtrusion` | object kind |
 | `FEA_NodeTag` | `3` | OpenSees node tag (joints) |
 | `FEA_ElemTag` | `7` | OpenSees element tag (frames/shells) |
 | `FEA_ParentID` | `1` | parent element ID (meshed children only) |
@@ -139,8 +139,9 @@ arrays (e.g. `project_b_v13.h5` — its static cases are synthetic summaries),
 pass the direction to read those instead:
 
 ```python
-create_result_flags(path, quantity="Mz", pushover_direction="+X",
-                    stage="mesh", step=None)   # step None -> last (peak)
+create_result_flags(
+    path, quantity="Mz", pushover_direction="+X", stage="mesh", step=None
+)  # step None -> last (peak)
 ```
 
 ### Coloured objects
@@ -155,13 +156,16 @@ existing geometry, keyed off the `SAP_FrameID` / `SAP_AreaID` attributes.
 
 ```python
 # Inside Rhino — select all meshed child frames
-objs = [o for o in sc.doc.Objects
-        if o.Attributes.GetUserString("FEA_Stage") == "mesh"
-        and o.Attributes.GetUserString("FEA_Kind") == "Frame"
-        and o.Attributes.GetUserString("FEA_ParentID")]
+objs = [
+    o
+    for o in sc.doc.Objects
+    if o.Attributes.GetUserString("FEA_Stage") == "mesh"
+    and o.Attributes.GetUserString("FEA_Kind") == "Frame"
+    and o.Attributes.GetUserString("FEA_ParentID")
+]
 
 # Grasshopper — select shells by section
 import rhinoscriptsyntax as rs
-walls = [o for o in rs.AllObjects()
-         if rs.GetUserText(o, "SAP_Section") == "Slab200"]
+
+walls = [o for o in rs.AllObjects() if rs.GetUserText(o, "SAP_Section") == "Slab200"]
 ```
