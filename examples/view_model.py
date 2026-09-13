@@ -237,6 +237,8 @@ def show_interactive(builder, md):
 def show_npz(path, args):
     """Display a saved .npz archive directly (no solver run)."""
     data = np.load(path, allow_pickle=True)
+    if args.result in ("static", "modal") and (args.zlim or args.labels or args.highlight_section):
+        print("Note: --zlim / --labels / --highlight-section apply to --result mesh only.")
     if args.result == "static":
         plot_force_diagram(str(path), quantity=args.quantity)
     elif args.result == "modal":
