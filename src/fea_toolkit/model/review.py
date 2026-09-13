@@ -583,7 +583,7 @@ def review_s2k_file(
     """Parse a ``.s2k`` file and run the full review on it.
 
     Args:
-        path: Path to the ``.s2k`` / ``.e2k`` file.
+        path: Path to the ``.s2k`` / ``.$2k`` / ``.e2k`` / ``.$et`` file.
         tol: Forwarded to :func:`review_model`.
         include_analysis: Forwarded to :func:`review_model`.
         analysis_config: Forwarded to :func:`review_model`.
@@ -949,7 +949,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         prog="fea_toolkit.model.review",
         description="Review and check a SAP2000 .s2k model file.",
     )
-    parser.add_argument("path", help="Path to the .s2k / .e2k file to review.")
+    parser.add_argument("path", help="Path to the .s2k / .$2k / .e2k / .$et file to review.")
     parser.add_argument(
         "--analysis",
         action="store_true",

@@ -10,7 +10,7 @@ Run this script from the project root (where the 'fea_toolkit/' folder lives):
     $ python examples/basic_usage.py --sample
 
     # Use a specific SAP2000 text file
-    $ python examples/basic_usage.py /path/to/model.$2k
+    $ python examples/basic_usage.py /path/to/model.s2k
 
     # Parse only (skip OpenSees analysis)
     $ python examples/basic_usage.py /path/to/model.s2k --no-analysis
@@ -57,13 +57,13 @@ def pick_file() -> Path:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Parse a SAP2000 .s2k / .e2k file and optionally run an OpenSees analysis.",
+        description="Parse a SAP2000 .s2k / .$2k / .e2k / .$et file and optionally run an OpenSees analysis.",
     )
     parser.add_argument(
         "s2k_file",
         nargs="?",
         default=None,
-        help="Path to the SAP2000 text file (.s2k, .$2k, .e2k).",
+        help="Path to the SAP2000 text file (.s2k, .$2k, .e2k, .$et).",
     )
     parser.add_argument(
         "--sample",

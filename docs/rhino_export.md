@@ -83,7 +83,7 @@ Requirements
 ------------
 - Must run **inside Rhino 8** under CPython 3.9+
 - ``fea_toolkit`` must be on ``sys.path`` (adjust the line below)
-- A parsed SAP2000 model file (``.s2k`` or ``.json``)
+- A parsed SAP2000 model file (``.s2k``, ``.$2k``, ``.e2k``, ``.$et`` or ``.json``)
 """
 
 import sys
@@ -95,7 +95,7 @@ from fea_toolkit.rhino import RhinoImporter
 
 # --- File picker (native Rhino dialog) -----------------------------------
 dialog = Rhino.UI.OpenFileDialog()
-dialog.Filter = "SAP2000 files (*.s2k;*.S2K;*.$2k;*.json)|*.s2k;*.S2K;*.$2k;*.json|All files (*.*)|*.*"
+dialog.Filter = "SAP2000/ETABS files (*.s2k;*.S2K;*.$2k;*.e2k;*.$et;*.json)|*.s2k;*.S2K;*.$2k;*.e2k;*.$et;*.json|All files (*.*)|*.*"
 dialog.Title = "Select SAP2000 model file"
 
 if not dialog.ShowDialog():
