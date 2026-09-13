@@ -53,8 +53,11 @@ jobs:
           # Test-only tools.  h5py is an optional *runtime* dependency used
           # only by the HDF5 stage/results paths; installing it here keeps
           # those tests running instead of skipping.  The tests guard with
-          # pytest.importorskip("h5py"), so a minimal install still passes.
-          pip install ruff pytest h5py
+          # pytest.importorskip, so a minimal install still passes.
+          # IPython backs the *notebook* display path (pyvista's static-image
+          # fallback) exercised by the notebook-mode plotting tests; a real
+          # Jupyter session already provides it.
+          pip install ruff pytest h5py ipython
 
       - name: Register OpenSeesPy bundled libraries
         # The Linux OpenSeesPy wheel bundles libblas/liblapack/libgfortran

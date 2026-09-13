@@ -600,6 +600,7 @@ class TestResolveMeshData:
 
     def test_mode_animation_collapse_to_parents(self, sample_npz_data):
         """plot_mode_animation accepts collapse_to_parents."""
+        pytest.importorskip("IPython")  # notebook display needs IPython
         from fea_toolkit.plotting import plot_mode_animation
 
         disp = {1: (0.0, 0.0, 0.0), 2: (0.1, 0.0, 0.0), 3: (0.2, 0.0, 0.0)}
@@ -760,6 +761,7 @@ class TestPlotDeformedDisplacement3d:
 
     def test_screenshot_export(self, sample_npz_data, sample_displacements, tmp_path):
         """Saving a screenshot to a temp path does not crash."""
+        pytest.importorskip("IPython")  # notebook display needs IPython
         from fea_toolkit.plotting.viz import plot_deformed_displacement_3d
 
         png_path = str(tmp_path / "test_disp.png")
@@ -841,6 +843,7 @@ class TestShrinkParameter:
         Uses fixture data (no real mode shapes) — only checks the
         shrink parameter is accepted without error.
         """
+        pytest.importorskip("IPython")  # notebook display needs IPython
         from fea_toolkit.plotting import plot_mode_animation
 
         # Minimal mode shape data matching the 3-node fixture
