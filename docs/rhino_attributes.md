@@ -106,7 +106,7 @@ Set on **every** geometry object (joints, frames, shells):
 ## `RES_*` attributes
 
 Set by the results helpers in
-[`fea_toolkit.rhino.results`](rhino_export.md#results-visualisation-opensees--rhino)
+[`fea_toolkit.rhino.results`](rhino_export.md#results-visualisation-opensees-rhino)
 and `colour_from_npz`.
 
 ### Deformed-shape overlays (`create_deformed_geometry`)

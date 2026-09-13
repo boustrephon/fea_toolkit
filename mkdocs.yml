@@ -1,3 +1,8 @@
+# Local build (both env vars silence the MkDocs 2.0 notices from
+# mkdocs-gen-files/properdocs and the mkdocs-material theme; CI sets the same
+# two vars in .github/workflows/docs.yml):
+#   DISABLE_MKDOCS_2_WARNING=true NO_MKDOCS_2_WARNING=true mkdocs build --strict
+
 site_name: fea_toolkit
 site_description: FEA to OpenSees/Rhino conversion toolkit
 site_url: https://boustrephon.github.io/fea_toolkit/

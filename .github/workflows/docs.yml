@@ -40,9 +40,14 @@ jobs:
       - name: Build MkDocs site (strict)
         run: mkdocs build --strict
         env:
-          # mkdocs 1.6 prints a Python-level "2.0 may break plugins" notice that
-          # is not strict-failing but is noisy; documented suppression switch.
+          # Two independent MkDocs 2.0 notices appear during a build; both are
+          # noisy but not strict-failing, and each package has its own opt-out:
+          #   - mkdocs-gen-files (via its `properdocs` dependency)
+          #       -> DISABLE_MKDOCS_2_WARNING
+          #   - mkdocs-material theme (the boxed "Material for MkDocs team" notice)
+          #       -> NO_MKDOCS_2_WARNING
           DISABLE_MKDOCS_2_WARNING: "true"
+          NO_MKDOCS_2_WARNING: "true"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
