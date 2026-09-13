@@ -46,6 +46,11 @@ class StaticRunnerMixin:
             :meth:`extract_static_element_forces` afterwards, or
             :meth:`export_static_results` to write a force-bearing archive in
             one step.
+
+            The returned dict is also cached on ``self._last_static_results``
+            so result-aware viewers (e.g.
+            :meth:`ModelViewer.overlay_deformed`) can read it without the
+            caller re-running the extraction.
         """
         # Rebuild domain with new pattern scales if requested
         if pattern_scales is not None:
@@ -290,6 +295,10 @@ class StaticRunnerMixin:
                 "delta": delta,
             }
 
+        # Cache the latest results so result-aware viewers
+        # (``ModelViewer.overlay_deformed``) can read them without the
+        # caller re-running the extraction.
+        self._last_static_results = result
         return result
 
     def compute_seismic_masses(self) -> dict[str, float]:

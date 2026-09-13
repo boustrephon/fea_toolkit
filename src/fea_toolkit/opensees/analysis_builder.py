@@ -163,6 +163,10 @@ class AnalysisBuilder(
         # Pushover step results (populated by run_pushover_analysis)
         self.pushover_step_results: list[dict[str, Any]] = []
 
+        # Last static-analysis result dict (populated by run_static_analysis;
+        # read by result-aware viewers, e.g. ModelViewer.overlay_deformed).
+        self._last_static_results: Optional[dict[str, Any]] = None
+
         # Domain state (built during build_domain)
         self.frame_tag_map: dict[str, int] = {}
         self.material_tags: dict[str, int] = dict(self.mesh_model.material_tags)
@@ -446,7 +450,7 @@ class AnalysisBuilder(
     def build_domain(
         self,
         config_overrides: Optional[dict[str, Any]] = None,
-    ) -> None:
+    ) -> "AnalysisBuilder":
         """Create the full OpenSees domain from the MeshModel.
 
         Creates nodes, restraints, materials, sections, frame elements,
@@ -457,6 +461,10 @@ class AnalysisBuilder(
                 override ``self.config`` for this build cycle.  Useful for
                 pushover rebuilds that need fiber sections or different
                 element types.  The overrides are reset after the build.
+
+        Returns:
+            ``self``, so the call can be chained — e.g.
+            ``AnalysisBuilder(mesh, {}).build_domain().run_static_analysis()``.
         """
         # Apply temporary config overrides
         _saved_overrides: dict[str, Any] = {}
@@ -530,6 +538,7 @@ class AnalysisBuilder(
             self._create_elements()
             self._create_limit_state_columns()
             self._apply_rigid_diaphragms()
+            return self
         finally:
             # Restore any overridden config values
             for k, old_v in _saved_overrides.items():

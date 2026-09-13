@@ -149,10 +149,15 @@ def sample_rc_ab(sample_rc_md):
 class TestBuildWorkflow:
     """Verify model building completes and produces expected structure."""
 
-    def test_build_domain_returns_none(self, sample_ab):
-        """Builder can construct a complete OpenSees domain from MeshModel."""
-        sample_ab.build_domain()
-        assert True
+    def test_build_domain_returns_self(self, sample_ab):
+        """``build_domain()`` returns the builder for fluent chaining.
+
+        Regression test: the documented canonical one-liner
+        ``AnalysisBuilder(mesh, {}).build_domain()`` previously yielded
+        ``None`` (the method returned nothing), so the chained form broke
+        at the next call.
+        """
+        assert sample_ab.build_domain() is sample_ab
 
     def test_build_creates_frame_tag_map(self, sample_ab):
         """Build produces an element-tag mapping for load application."""
