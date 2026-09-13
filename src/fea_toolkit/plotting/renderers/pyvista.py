@@ -1,6 +1,7 @@
 """PyVista render backend for ModelViewer."""
 
 import contextlib
+from typing import Optional
 
 import numpy as np
 
@@ -17,6 +18,60 @@ from .base import (
 def _unit_vec(v: np.ndarray) -> np.ndarray:
     n = np.linalg.norm(v)
     return v / n if n > 1e-12 else np.array([1.0, 0.0, 0.0])
+
+
+def _flag_direction(quantity: str, start: np.ndarray, end: np.ndarray) -> Optional[np.ndarray]:
+    """Return the flag-diagram extrusion direction (unit normal) for a frame.
+
+    Mirrors :func:`fea_toolkit.plotting.viz_forces._compute_flag_direction`
+    so ``ModelViewer.overlay_forces`` produces the same diagram as the
+    :func:`plot_force_diagram` path.  The mapping operates on the local
+    force/moment quantity (``Fx``/``Fy``/``Fz``/``Mx``/``My``/``Mz``).
+
+    Args:
+        quantity: Force/moment quantity name.
+        start: I-end global coordinates, shape ``(3,)``.
+        end: J-end global coordinates, shape ``(3,)``.
+
+    Returns:
+        Unit normal vector, or ``None`` for a zero-length member.
+    """
+    from ...model.geometry import get_local_axes
+
+    axis = np.asarray(end, dtype=float) - np.asarray(start, dtype=float)
+    norm = np.linalg.norm(axis)
+    if norm < 1e-12:
+        return None
+    try:
+        _, vy, vz = get_local_axes(axis / norm)
+    except Exception:
+        # Mirror ``viz_forces._compute_flag_direction``: fall back to the
+        # global-frame vy/vz and still apply the quantity mapping below.
+        vy = np.array([0.0, 1.0, 0.0])
+        vz = np.array([0.0, 0.0, 1.0])
+
+    direction = {
+        "Fx": vz,
+        "Fy": vy,
+        "Fz": vz,
+        "Mx": vy,
+        "My": -vz,
+        "Mz": vy,
+    }.get(quantity, vz)
+    return np.array(direction, dtype=float).copy()
+
+
+def _flag_rgb(col_val: float, max_abs: float) -> tuple[float, float, float]:
+    """Map a signed flag value to a diverging RGB colour in ``0..1``.
+
+    Identical colour mapping to
+    :func:`fea_toolkit.plotting.viz_forces._add_coloured_poly`: positive →
+    warm (red), negative → cool (blue), saturated by ``|col_val| / max_abs``.
+    """
+    t = min(abs(col_val) / max(max_abs, 1e-12), 1.0)
+    if col_val >= 0:
+        return (0.3 + 0.7 * t, 0.3 - 0.2 * t, 0.3 - 0.3 * t)
+    return (0.3 - 0.3 * t, 0.3 - 0.2 * t, 0.3 + 0.7 * t)
 
 
 class PyVistaRenderer(RenderBackend):
@@ -352,16 +407,38 @@ class PyVistaRenderer(RenderBackend):
         quantity: str = "Mz",
         scale_factor: float = 1.0,
     ) -> None:
+        """Draw force/moment flag diagrams as one merged mesh.
+
+        Args:
+            frames: Frame geometries (undeformed) providing the member axes.
+            forces: ``{elem_id: (value_at_i, value_at_j)}``.  Values must be
+                **local** force/moment components — the flag plane is defined
+                by the element's local transverse axis.
+            quantity: Local component name (``'Mz'``, ``'My'``, ``'Fx'`` …).
+                Also selects the extrusion direction (see
+                :func:`_flag_direction`).
+            scale_factor: Display scale (length per force/moment unit).
+        """
         if not frames or not forces:
             return
         p = self.plotter
         import pyvista as pv
 
-        from ..utils import compute_flag_parts
+        from ...utils import compute_flag_parts
 
-        flag_verts: list[np.ndarray] = []
-        flag_faces: list[np.ndarray] = []
-        flag_colors: list[tuple] = []
+        # Peak |force| for diverging colour normalisation.
+        max_abs = 0.0
+        for f in frames:
+            fij = forces.get(f.elem_id)
+            if fij is not None:
+                max_abs = max(max_abs, abs(fij[0]), abs(fij[1]))
+
+        # ``compute_flag_parts`` yields ``(vertices, col_val)`` per polygon
+        # part (3 or 4 corners), so accumulate a flat VTK face buffer and
+        # one RGB colour per polygon (cell data).
+        verts_acc: list[np.ndarray] = []
+        faces_acc: list[int] = []
+        colors_acc: list[tuple[float, float, float]] = []
         vert_offset = 0
 
         for f in frames:
@@ -369,34 +446,29 @@ class PyVistaRenderer(RenderBackend):
             if fij is None:
                 continue
             vi, vj = fij
-            parts = compute_flag_parts(f.start, f.end, vi, vj, scale_factor)
-            if parts is None:
+            vn = _flag_direction(quantity, f.start, f.end)
+            if vn is None:
                 continue
-            verts, tris, colors = parts  # (V, 3), (T, 3), (T, 3)
-            nv = len(verts)
-            flag_verts.append(verts)
-            for tri in tris:
-                flag_faces.append(
-                    np.array([3, tri[0] + vert_offset, tri[1] + vert_offset, tri[2] + vert_offset])
-                )
-            flag_colors.extend(colors)
-            vert_offset += nv
+            for verts, col_val in compute_flag_parts(f.start, f.end, vn, vi, vj, scale_factor):
+                n = len(verts)
+                verts_acc.append(np.asarray(verts, dtype=float))
+                faces_acc.extend([n, *range(vert_offset, vert_offset + n)])
+                colors_acc.append(_flag_rgb(col_val, max_abs))
+                vert_offset += n
 
-        if not flag_verts:
+        if not verts_acc:
             return
 
-        all_verts = np.vstack(flag_verts)
-        all_faces = np.hstack(flag_faces) if flag_faces else np.array([], dtype=int)
-        mesh = pv.PolyData(all_verts, faces=all_faces)
-        mesh.cell_data["rgb"] = np.array(flag_colors)
+        all_verts = np.vstack(verts_acc)
+        mesh = pv.PolyData(all_verts, faces=np.asarray(faces_acc, dtype=int))
+        mesh.cell_data["rgb"] = np.asarray(colors_acc, dtype=float)
         actor = p.add_mesh(
             mesh,
             scalars="rgb",
             rgb=True,
             opacity=0.85,
             lighting=False,
-            show_scalar_bar=True,
-            scalar_bar_args={"title": quantity, "n_colors": 10},
+            show_scalar_bar=False,
         )
         self._actors.append(actor)
 

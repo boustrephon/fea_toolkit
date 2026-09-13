@@ -134,8 +134,10 @@ viewer.overlay_deformed(displacements=None, scale=1.0,
                         color=(0.3, 0.6, 1.0))
 ```
 
-Overlays the deformed shape.  If *displacements* is ``None``, reads from
-the builder's ``_last_static_results``.
+Overlays the deformed shape.  If *displacements* is ``None``, reads
+``nodal_displacements`` from the builder's cached static results
+(populated by ``run_static_analysis()``); otherwise pass
+``{node_id: (dx, dy, dz)}``.
 
 ```python
 viewer.overlay_forces(elem_forces=None, quantity="Mz",
@@ -145,6 +147,26 @@ viewer.overlay_forces(elem_forces=None, quantity="Mz",
 Overlays force/moment flag diagrams.  Quantities: ``'Mz'``, ``'My'``,
 ``'Mx'``, ``'Fx'``, ``'Fz'``, ``'Fy'``.  Auto-scales flags to ~10 %
 of the model diagonal.
+
+The flag diagram is a **local-quantity** visualisation — geometry is
+extruded in the member's local transverse direction — so the driving
+values must be local components:
+
+* If *elem_forces* is ``None`` and the viewer was built from a builder,
+  the forces are read via ``builder.extract_static_element_forces()``
+  (run ``run_static_analysis()`` first).
+* Otherwise pass a dict.  Two shapes are accepted:
+
+  * ``{elem_id: {"mz_i_local": v_i, "mz_j_local": v_j}}`` — keyed by SAP
+    element id or OpenSees tag, using ``{q}_i`` / ``{q}_j`` keys;
+  * the tag-keyed, upper-case form returned by
+    ``builder.extract_static_element_forces()``, e.g.
+    ``{1: {"Mz": v_i, "Mz_j": v_j, ...}}``.
+
+``use_local=False`` reads the base (non-``_local``) keys; since the flag
+plane is local, global components are only geometrically consistent when
+the global and local axes coincide (e.g. planar frames), and a
+``UserWarning`` is emitted.
 
 ### Highlighting
 
@@ -684,8 +706,10 @@ The ``ModelViewer`` also supports ``highlight_nodes()`` and
 ``annotate()`` for marking discussion points directly on the model.
 
 ### "Show me reactions"
-→ ``ModelViewer(builder).overlay_forces(..., show_reactions=True)``
-or ``plot_force_diagram(source, force_data, quantity="Mz")``
+→ ``builder.run_static_analysis()["reactions"]``
+(``{node_id: {fx, fy, fz, mx, my, mz}}``), or
+``plot_force_diagram(source, force_data, quantity="Mz")`` for internal
+force diagrams.
 
 ### "Check element connectivity / mesh quality"
 → ``plot_mesh(source, show_nodes=True, shrink=0.05)``

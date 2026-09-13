@@ -179,10 +179,15 @@ class RenderBackend(ABC):
     ) -> None:
         """Draw force/moment flag diagrams.
 
+        The flag plane is the member's local transverse axis, so ``forces``
+        must carry **local** force/moment components.
+
         Args:
             frames: List of frame geometries.
-            forces: ``{elem_id: (value_at_i, value_at_j)}``.
-            quantity: Display name (e.g. ``'Mz'``, ``'Fx'``).
+            forces: ``{elem_id: (value_at_i, value_at_j)}`` — local force/
+                moment components.
+            quantity: Local component name (e.g. ``'Mz'``, ``'Fx'``).  Also
+                selects the flag extrusion direction.
             scale_factor: Scaling for flag size.
         """
         ...

@@ -23,6 +23,7 @@ Usage::
     viewer.export_html("report.html")
 """
 
+import warnings
 from typing import Any, Optional
 
 import numpy as np
@@ -60,6 +61,44 @@ def _section_palette(
     ]
     names = sorted(sections.keys())
     return {n: palette[i % len(palette)] for i, n in enumerate(names)}
+
+
+def _end_force_values(entry: dict, quantity: str, use_local: bool) -> Optional[tuple[float, float]]:
+    """Extract ``(value_at_i, value_at_j)`` for *quantity* from one element entry.
+
+    Tolerates the key conventions used across the toolkit:
+
+    * ``{q}_i`` / ``{q}_j`` keys (with a ``_local`` suffix when *use_local*),
+      e.g. ``mz_i_local`` / ``Mz_j`` — lower- and upper-case spellings;
+    * the bare ``{quantity}`` (I-end) + ``{quantity}_j`` (J-end) form produced
+      by :meth:`AnalysisBuilder.extract_static_element_forces`, which is
+      always in local coordinates.
+
+    Returns:
+        ``(value_i, value_j)``, or ``None`` when no matching key is present.
+    """
+    q_low = quantity.lower()
+    if use_local:
+        pairs = (
+            (f"{q_low}_i_local", f"{q_low}_j_local"),
+            (f"{quantity}_i_local", f"{quantity}_j_local"),
+            (f"{q_low}_i", f"{q_low}_j"),
+            (quantity, f"{quantity}_j"),
+            (f"{quantity}_i", f"{quantity}_j"),
+        )
+    else:
+        pairs = (
+            (f"{q_low}_i", f"{q_low}_j"),
+            (quantity, f"{quantity}_j"),
+            (f"{quantity}_i", f"{quantity}_j"),
+        )
+    for i_key, j_key in pairs:
+        # Match on the I-end key: it identifies the key convention, and in
+        # the builder form the I-end key is the bare quantity (``"Mz"``) whose
+        # J-end partner is ``"Mz_j"``.
+        if i_key in entry:
+            return float(entry[i_key]), float(entry.get(j_key, 0.0))
+    return None
 
 
 class ModelViewer:
@@ -138,20 +177,22 @@ class ModelViewer:
         collapse = self._collapse_to_parents
 
         def include(_eid, elem) -> bool:
-            if getattr(elem, "inactive", False):
-                return collapse and getattr(elem, "parent_id", None) is None
-            return collapse or getattr(elem, "parent_id", None) is None
+            inactive = getattr(elem, "inactive", False)
+            has_parent = getattr(elem, "parent_id", None) is not None
+            if collapse:
+                # Collapsed view: unsplit originals (active, no parent) plus
+                # the inactive parents they were subdivided into.
+                return inactive or not has_parent
+            # Default view: every active element, including split children.
+            return not inactive
 
-        elements = (
-            self._builder.split_elements
-            if self._builder and self._builder.split_elements
-            else md.frame_elements
-        )
-        assignments = (
-            self._builder.split_assignments
-            if self._builder and self._builder.split_elements
-            else md.frame_assignments
-        )
+        # ``self._model`` is the frozen ``MeshModel`` when a builder is
+        # supplied (``builder.model is builder.mesh_model``) and the
+        # ``SAPModelData`` otherwise.  Both expose ``frame_elements`` /
+        # ``frame_assignments`` directly, so no legacy ``split_elements``
+        # attributes are needed.
+        elements = md.frame_elements
+        assignments = md.frame_assignments
 
         for eid, elem in elements.items():
             if not include(eid, elem):
@@ -263,12 +304,17 @@ class ModelViewer:
         """
         self._extract_geometry()
         if displacements is None and self._builder is not None:
+            # ``run_static_analysis()`` caches its result dict on the
+            # builder; ``nodal_displacements`` is keyed by node id.
             results = getattr(self._builder, "_last_static_results", None)
             if results is not None:
                 raw = results.get("nodal_displacements", {})
                 displacements = {}
                 for nid, nd in self._model.nodes.items():
-                    raw_d = raw.get(nd.node_tag)
+                    raw_d = raw.get(nid)
+                    if raw_d is None:
+                        # Tolerate a tag-keyed dict as well.
+                        raw_d = raw.get(str(nd.node_tag))
                     if raw_d is not None:
                         displacements[nid] = np.array(raw_d[:3], dtype=float)
         if displacements is None:
@@ -292,50 +338,82 @@ class ModelViewer:
     ) -> "ModelViewer":
         """Overlay force/moment flag diagram.
 
+        The flag diagram is a **local-quantity** visualisation — its geometry
+        is extruded in the member's local transverse direction — so local
+        components should drive it (see *use_local*).
+
         Args:
-            elem_forces: Element force dict from static analysis.
-                If ``None``, reads from the builder's last results.
+            elem_forces: Element force data.  Two shapes are accepted:
+
+                * ``{elem_id: {component_key: value}}`` — keyed by SAP element
+                  id or OpenSees tag, with ``{q}_i`` / ``{q}_j`` keys (the
+                  ``_local`` suffix is read when ``use_local=True``);
+                * the tag-keyed, upper-case ``{"Mz", "Mz_j", ...}`` dict from
+                  :meth:`~fea_toolkit.opensees.AnalysisBuilder.extract_static_element_forces`.
+
+                If ``None`` (and a builder is available), the builder is
+                queried via ``extract_static_element_forces()``.
             quantity: Force/moment quantity (e.g. ``'Mz'``, ``'Fx'``).
-            use_local: Use local-coordinate values.
+            use_local: Read local-coordinate values (default ``True``).  The
+                flag plane is local, so ``False`` (global components) is only
+                geometrically consistent when the global and local axes
+                coincide (e.g. planar frames); a warning is emitted.
             scale_factor: Flag size scaling.  Auto-computed if ``None``.
 
         Returns:
             ``self`` for chaining.
         """
         self._extract_geometry()
-        if elem_forces is None and self._builder is not None:
-            results = getattr(self._builder, "_last_static_results", None)
-            if results is not None:
-                elem_forces = results.get("element_forces")
 
-        if elem_forces is None:
+        # Resolve the builder's element forces on demand: element forces are
+        # not cached on ``_last_static_results`` (which holds nodal
+        # displacements and reactions only), so extract them via the
+        # two-stage API.
+        if elem_forces is None and self._builder is not None:
+            try:
+                elem_forces = self._builder.extract_static_element_forces()
+            except Exception as exc:  # pragma: no cover - defensive
+                print(f"Warning: could not read element forces from builder: {exc}")
+                elem_forces = None
+
+        if not elem_forces:
             print("Warning: no element force data available.")
             return self
 
-        suffix = "_local" if use_local else ""
-        q_i = f"{quantity.lower()}_i{suffix}"
-        q_j = f"{quantity.lower()}_j{suffix}"
+        tag_map = getattr(self._builder, "frame_tag_map", {}) if self._builder else {}
 
         forces: dict[str, tuple[float, float]] = {}
         vals = []
         for f in self._frames:
             ef = elem_forces.get(f.elem_id)
-            if ef is None and self._builder is not None:
-                # Try numeric tag
-                tag_map = getattr(self._builder, "frame_tag_map", {})
+            if ef is None and tag_map:
                 ops_tag = tag_map.get(f.elem_id)
                 if ops_tag is not None:
-                    ef = elem_forces.get(str(ops_tag))
+                    ef = elem_forces.get(ops_tag)
+                    if ef is None:
+                        ef = elem_forces.get(str(ops_tag))
             if ef is None:
                 continue
-            vi = ef.get(q_i, 0.0)
-            vj = ef.get(q_j, 0.0)
+            values = _end_force_values(ef, quantity, use_local)
+            if values is None:
+                continue
+            vi, vj = values
             forces[f.elem_id] = (vi, vj)
             vals.extend([abs(vi), abs(vj)])
 
         if not forces:
             print(f"Warning: no {quantity} data found.")
             return self
+
+        if not use_local:
+            warnings.warn(
+                "overlay_forces(use_local=False): the flag diagram is a "
+                "local-quantity visualisation — global components are only "
+                "consistent when the global and local axes coincide (e.g. "
+                "planar frames).",
+                UserWarning,
+                stacklevel=2,
+            )
 
         # Auto-scale: target flag height ≈ 10% of model diagonal
         if scale_factor is None:
