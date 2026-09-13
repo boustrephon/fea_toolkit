@@ -14,6 +14,12 @@ source with :mod:`ast`, so it never imports ``openseespy`` or ``pyvista``.
 ``--details`` opts into importing each name for exact signatures and
 docstrings; ``--source`` stays lazy by reading the definition from the module
 source instead.
+
+Because ``--details`` is the one mode that imports names, it can also hit a
+name whose optional backend is not installed.  That failure is reported
+inline for that single name (``import failed: ...``) and the listing
+continues, so one missing optional dependency never hides the rest of the
+public API — the command stays useful as an inventory on a partial install.
 """
 
 import argparse
@@ -359,16 +365,32 @@ def _format_table(rows: list[tuple[str, str, str]]) -> str:
 def _format_details(rows: list[tuple[str, str, str]]) -> str:
     """Render the ``--details`` listing with signatures and docstrings.
 
+    ``--details`` is the only mode that imports each name, so a name backed by
+    an optional dependency (``openseespy``, ``pandas``, ...) can fail with
+    :exc:`ModuleNotFoundError`.  The failure is confined to that name's block
+    rather than aborting the whole listing: every other name is still reported,
+    which keeps the command useful as an API inventory on a partial install.
+
     Args:
         rows: ``(name, kind, module)`` rows to render.
 
     Returns:
         Blank-line-separated blocks, one per row, each showing the module and
-        (for callables) the signature and the docstring's first line.
+        (for callables) the signature and the docstring's first line. A row
+        whose name fails to import (``ModuleNotFoundError``) is reported
+        inline, and the remaining rows are still listed.
     """
     blocks: list[str] = []
     for name, kind, module in rows:
-        obj = getattr(fea_toolkit, name)
+        try:
+            obj = getattr(fea_toolkit, name)
+        except ModuleNotFoundError as exc:
+            # A lazy name imports an optional backend; report the failure for
+            # this row only so one missing dependency cannot abort the listing.
+            # Names always come from ``__all__``, so a missing module (never an
+            # ``AttributeError``) is the only realistic failure here.
+            blocks.append(f"{name}  [{kind}]\n    module:    {module}\n    import failed: {exc}")
+            continue
         block = [f"{name}  [{kind}]", f"    module:    {module}"]
         if callable(obj):
             try:

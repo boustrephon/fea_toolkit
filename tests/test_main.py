@@ -87,6 +87,29 @@ class TestMain:
         assert "signature:" in out
         assert "doc:" in out
 
+    def test_details_reports_failed_import_and_continues(self, monkeypatch):
+        """A name whose lazy import fails is reported inline; other rows list on."""
+        import fea_toolkit
+
+        monkeypatch.setitem(
+            fea_toolkit._LAZY_IMPORTS,
+            "missing_public_name",
+            "fea_toolkit._no_such_module",
+        )
+        rows = [
+            ("missing_public_name", "function", "fea_toolkit._no_such_module"),
+            ("Node", "class", "fea_toolkit"),
+        ]
+
+        out = cli._format_details(rows)
+
+        assert "missing_public_name  [function]" in out
+        assert "import failed:" in out
+        assert "fea_toolkit._no_such_module" in out
+        # The failing row must not stop the successfully imported row.
+        assert "Node  [class]" in out
+        assert "signature:" in out
+
     def test_version_flag(self, capsys):
         import fea_toolkit
 

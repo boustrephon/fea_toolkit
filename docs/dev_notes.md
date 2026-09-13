@@ -141,3 +141,23 @@ related: [analysis_builder_migration_plan.md]
 - **Render order**: shells bottom → frames middle → nodes top
 - **Materials coloured**: concrete (blue), brick (red)
 - Text positioning with `add_text(..., position=tuple)` uses top-left origin on macOS (not bottom-left as documented)
+
+## CLI — `python -m fea_toolkit` API listing (`src/fea_toolkit/__main__.py`)
+- **Lazy by default.** Names come from `fea_toolkit.__all__`; lazy names
+  (declared in `_LAZY_IMPORTS`) are classified by parsing module source with
+  `ast`, so the default listing never imports `openseespy` or `pyvista`.
+  `--source` stays lazy too — it prints the definition text from the module
+  file (decorators included) without importing anything.
+- **`--details` is the one exception** — it imports each name to report the
+  exact `inspect.signature()` and the docstring's first line. Those imports can
+  pull in optional backends (`openseespy`, `pandas`, ...), so a
+  `ModuleNotFoundError` is caught **per row**: the failed import is reported
+  inline (`import failed: No module named ...`) and the loop continues.  This
+  is deliberate — one absent optional dependency must not hide the rest of the
+  public API, which keeps `--details` usable as an inventory on a partial
+  install.
+- Only `ModuleNotFoundError` is caught, not `AttributeError`: every row's name
+  comes from `__all__`, so the only realistic failure mode is a missing module
+  behind a lazy re-export, never an unknown attribute.
+- `NAME` filtering (exact / substring / glob) is case-insensitive and applies
+  to every mode; `--source` requires a `NAME`.
