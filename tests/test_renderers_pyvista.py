@@ -215,6 +215,32 @@ class TestOverlayForcesBuilderPath:
             viewer._backend.clear()
             viewer._backend.plotter.close()
 
+    def test_build_domain_invalidates_cached_results(self):
+        """Rebuilding the domain drops stale cached static results.
+
+        Regression: ``_last_static_results`` was only ever assigned on a
+        successful run, so a rebuilt (or wiped) domain still exposed the
+        previous run's displacements to result-aware viewers.
+        """
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        md = make_sample_model()
+        cfg = {"element_type": "elasticBeamColumn", "verbose": False, "create_shells": False}
+        mesh = preprocess_model(md, cfg)
+        builder = AnalysisBuilder(mesh, cfg)
+        try:
+            builder.build_domain()
+            builder.create_loads({"DEAD": 1.0})
+            builder.run_static_analysis()
+            assert builder._last_static_results is not None
+
+            builder.build_domain()
+            assert builder._last_static_results is None
+        finally:
+            ops.wipe()
+
     def test_builder_overlay_deformed_uses_cached_results(self):
         """``overlay_deformed()`` reads the builder's cached static results.
 

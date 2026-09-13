@@ -52,6 +52,12 @@ class StaticRunnerMixin:
             :meth:`ModelViewer.overlay_deformed`) can read it without the
             caller re-running the extraction.
         """
+        # Invalidate any previously cached result up-front: a failed run must
+        # not leave stale displacements readable via
+        # ``ModelViewer.overlay_deformed``.  The cache is only re-populated
+        # after a successful extraction below.
+        self._last_static_results = None
+
         # Rebuild domain with new pattern scales if requested
         if pattern_scales is not None:
             self.build_domain()

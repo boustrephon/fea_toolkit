@@ -475,6 +475,9 @@ class AnalysisBuilder(
 
         try:
             ops.wipe()
+            # The domain has been reset — drop any cached static results so a
+            # rebuilt domain cannot expose stale displacements.
+            self._last_static_results = None
             self._edge_constraint_method = None
             self._rigid_link_elems = {}
             # Reset skipped-material/section sets so supported materials
