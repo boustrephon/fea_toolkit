@@ -368,7 +368,7 @@ subset = sel.filter_model(model)
 | Never hardcode `9.81` for gravity | Must derive from model units |
 | Always call `ops.wipe()` in test teardown | OpenSees global state persists |
 | Use `field(default_factory=...)` for mutable defaults in dataclasses | Prevents shared mutable state |
-| Use `from typing import ...` for type annotations | Python 3.9 compatibility |
+| Use PEP 585 built-in generics (`dict`, `list`, `tuple`, `set`) in annotations; import only `Optional`/`Union`/`Any`/`ClassVar`/`NamedTuple`/`TYPE_CHECKING` from `typing` | Python 3.9 floor already supports PEP 585; ruff `UP006`/`UP035` flag `typing.Dict`/`List`/`Tuple`/`Set` |
 | Never add `ndm`/`ndf` dispatch to the main workflow | Analysis is 3D-only (`ndm=3`, `ndf=6`); 2D OpenSees is test-only (`.clinerules` §3.11) |
 | Always catch `RuntimeError` from `AnalysisBuilder.run_static_analysis()` when non-convergence is acceptable | Raises on non-convergence (since commit `ba891f50`); never returns empty dicts on failure — see §7 |
 

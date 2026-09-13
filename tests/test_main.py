@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import fea_toolkit.__main__ as cli
 from fea_toolkit.__main__ import describe_public_api, main
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +45,24 @@ class TestDescribePublicApi:
         rows = _rows_by_name()
         assert rows["plot_mesh"][1] == "fea_toolkit.plotting.viz_model"
         assert rows["plot_capacity_spectrum"][1] == "fea_toolkit.plotting.viz_pushover"
+
+    def test_resolves_aliased_reexport(self, tmp_path, monkeypatch):
+        """An aliased ``from .impl import original as renamed`` re-export
+        resolves to the defining module via the original imported name."""
+        root = tmp_path / "fea_toolkit"
+        pkg = root / "pkg"
+        pkg.mkdir(parents=True)
+        (pkg / "__init__.py").write_text("", encoding="utf-8")
+        (pkg / "impl.py").write_text("def original():\n    pass\n", encoding="utf-8")
+        (pkg / "facade.py").write_text("from .impl import original as renamed\n", encoding="utf-8")
+        monkeypatch.setattr(cli, "_package_root", lambda: root)
+        monkeypatch.setattr(cli, "_MODULE_CACHE", {})
+
+        resolved = cli._resolve("fea_toolkit.pkg.facade", "renamed")
+
+        assert resolved.kind == "function"
+        assert resolved.module == "fea_toolkit.pkg.impl"
+        assert resolved.node is not None and resolved.node.name == "original"
 
     def test_modules_are_within_package(self):
         for _, _, module in describe_public_api():

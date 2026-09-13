@@ -41,7 +41,7 @@ class _ModuleInfo(NamedTuple):
     """Parsed view of one module source file."""
 
     kinds: dict[str, str]
-    reexports: dict[str, str]
+    reexports: dict[str, tuple[str, str]]
     nodes: dict[str, ast.AST]
 
 
@@ -131,11 +131,12 @@ def _scan_module(path: Path) -> _ModuleInfo:
 
     Returns:
         A :class:`_ModuleInfo` holding the top-level definition names, their
-        kinds (``"class"`` / ``"function"``), the module each imported name
-        is re-exported from, and the defining :mod:`ast` nodes.
+        kinds (``"class"`` / ``"function"``), the ``(module, original name)``
+        each imported name is re-exported from, and the defining :mod:`ast`
+        nodes.
     """
     kinds: dict[str, str] = {}
-    reexports: dict[str, str] = {}
+    reexports: dict[str, tuple[str, str]] = {}
     nodes: dict[str, ast.AST] = {}
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -161,10 +162,11 @@ def _scan_module(path: Path) -> _ModuleInfo:
             if target:
                 for alias in node.names:
                     if alias.name != "*":
-                        reexports.setdefault(alias.asname or alias.name, target)
+                        reexports.setdefault(alias.asname or alias.name, (target, alias.name))
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                reexports.setdefault(alias.asname or alias.name.split(".")[0], alias.name)
+                local = alias.asname or alias.name.split(".")[0]
+                reexports.setdefault(local, (alias.name, local))
     return _ModuleInfo(kinds, reexports, nodes)
 
 
@@ -213,7 +215,7 @@ def _resolve(dotted: str, name: str) -> _Resolved:
         target = info.reexports.get(name)
         if target is None:
             break
-        current = target
+        current, name = target
     return _Resolved(_UNKNOWN, dotted)
 
 

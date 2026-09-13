@@ -73,7 +73,12 @@ from the facade — never add new logic to `utils.py` itself.
   ``getattr`` lookups and the ``__all__`` / ``__version__`` metadata); do
   not use ``sys.modules[__package__]`` or a relative import for this
   self-reference.
-- Use `from typing import Dict, List, Optional, Any, Tuple, Union` for type annotations.
+- **Type annotations**: use PEP 585 built-in generics — ``dict[...]``, ``list[...]``,
+  ``tuple[...]``, ``set[...]``.  ``typing`` is only for names with no built-in form
+  (``Optional``, ``Union``, ``Any``, ``ClassVar``, ``NamedTuple``, ``TYPE_CHECKING``);
+  ``typing.Dict`` / ``List`` / ``Tuple`` / ``Set`` are legacy and must **not** be used
+  (``requires-python = ">=3.9"`` already supports PEP 585; ruff ``UP006`` / ``UP035``
+  enforce this at ``target-version = "py39"``).
 
 ### 2.2 Docstrings
 - **Google-style** with `Args:`, `Returns:`, `Raises:`, `Yields:` sections.
@@ -132,7 +137,7 @@ New analysis code must follow this pattern. Do NOT add analysis methods to the p
 - Use `Optional[type]` with `None` default for fields that may be absent.
 
 ### 3.4 Config dict pattern
-- Builder/configurable classes accept an optional `config: Dict[str, Any]` parameter.
+- Builder/configurable classes accept an optional `config: dict[str, Any]` parameter.
 - Defaults are applied via `_set_defaults()` with `dict.setdefault()`.
 - Class-level constants (e.g., `PUSHOVER_SOLVER_DEFAULTS`) hold solver defaults.
 - For **builder-scoped config** (AnalysisBuilder, Preprocessor), the dict is flat — no nested config objects.
@@ -403,7 +408,10 @@ cleared between attempts.
 
 1. **Do not** import `ops` in `model/` subpackage — model code must be OpenSees-free.
 2. **Do not** add new mutable default arguments to dataclass fields without `field(default_factory=...)`.
-3. **Do not** use `typing.Dict`/`List` if migrating to Python 3.10+ built-ins — but stay consistent with the existing codebase style.
+3. **Do not** use ``typing.Dict`` / ``List`` / ``Tuple`` / ``Set`` in annotations —
+   use PEP 585 built-in generics instead (``dict``, ``list``, ``tuple``, ``set``).
+   They are available from Python 3.9 (the project floor) and enforced by ruff
+   ``UP006``; see §2.1.
 4. **Do not** add analysis logic to `opensees/builder.py` — this file is now a thin Tcl export module.
 5. **Do not** commit files that match `.gitignore` patterns, particularly `local/`, `data/`, `*.pkl`, `output/`.
 6. **Do not** use 8-arg `eleLoad` trapezoidal form — it is silently broken in OpenSeesPy 3.8.0.0.

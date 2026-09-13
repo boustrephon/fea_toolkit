@@ -81,10 +81,15 @@ These are errors that pyright is **correct** about and will cause runtime failur
 - **Fix**: Add `import pandas as pd` at the top of the file.
 - **File**: `src/fea_toolkit/model/stories.py`
 
-### 1.4 Missing `Dict` in imports in `src/fea_toolkit/rhino/colour_from_npz.py`
+### 1.4 `Dict` annotation in `src/fea_toolkit/rhino/colour_from_npz.py`
 
-- **Line 390**: `"Dict" is not defined`
-- **Fix**: Add `Dict` to the `from typing import ...` line.
+- **Line 390** (baseline): `"Dict" is not defined`
+- **Fix (as applied)**: the annotation now uses the PEP 585 built-in `dict`
+  (e.g. `-> dict`), and the module imports only `Optional` from `typing`.
+  The original advice — *"Add `Dict` to the `from typing import ...` line"* —
+  is **superseded** and must not be followed: the project floor is Python 3.9
+  (PEP 585) and ruff `UP006`/`UP035` forbid `typing.Dict`/`List`/`Tuple`/`Set`
+  (`.clinerules` §2.1).
 - **File**: `src/fea_toolkit/rhino/colour_from_npz.py`
 
 ### 1.5 Broken relative import in `src/fea_toolkit/plotting/renderers/pyvista.py`

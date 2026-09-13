@@ -38,6 +38,11 @@ reviews:
           arguments.
         - Imports: stdlib -> third-party -> project-relative, with relative
           project imports (e.g. `from ..model.sap_data import SAPModelData`).
+        - Type annotations use PEP 585 built-in generics (`dict[...]`, `list[...]`,
+          `tuple[...]`, `set[...]`); import only `Optional`/`Union`/`Any`/`ClassVar`/
+          `NamedTuple`/`TYPE_CHECKING` from `typing`. Do NOT suggest replacing
+          built-in generics with `typing.Dict`/`List`/`Tuple`/`Set` — the project
+          floor is Python 3.9 and ruff `UP006`/`UP035` enforce this (`.clinerules` §2.1).
         - Google-style docstrings with `Args:` / `Returns:` / `Raises:` sections.
         - **Unit handling is critical**: never hardcode physical constants
           (gravity `g`, E, fy, fc, density). Everything must derive from the
@@ -58,6 +63,8 @@ reviews:
     - path: "tests/**"
       instructions: |
         Tests use pytest (`test_*.py`, `Test*` classes, `test_*` functions).
+        - Type annotations use PEP 585 built-in generics (`dict`, `list`, `tuple`,
+          `set`), not `typing.Dict`/`List`/`Tuple`/`Set` (`.clinerules` §2.1).
         - Tests mirror `src/` structure (e.g. `model/geometry.py` ->
           `tests/test_geometry.py`); fixtures live in `tests/fixtures/`.
         - Any test that drives OpenSees must call `ops.wipe()` in teardown
