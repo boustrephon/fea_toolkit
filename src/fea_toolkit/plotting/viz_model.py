@@ -986,6 +986,7 @@ def plot_mesh(
     show_node_labels=False,
     show_frame_labels=False,
     show_area_labels=False,
+    section_colors=None,
     notebook=False,
     **kwargs,
 ):
@@ -1016,6 +1017,9 @@ def plot_mesh(
         show_node_labels: Add node labels.
         show_frame_labels: Add frame labels.
         show_area_labels: Add area labels.
+        section_colors: Optional ``{section_name: color}`` overrides.  Sections
+            absent from the mapping fall back to the default palette (frames)
+            or the next palette colour (shells).
         notebook: Return plotter for Jupyter embedding.
         **kwargs: Passed to ``pyvista.Plotter()``.
 
@@ -1043,6 +1047,7 @@ def plot_mesh(
         show_node_labels=show_node_labels,
         show_frame_labels=show_frame_labels,
         show_area_labels=show_area_labels,
+        section_colors=section_colors,
     )
     _set_isometric_view(plotter)
     if notebook:

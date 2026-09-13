@@ -11,6 +11,10 @@ Usage::
     # Show the bare model geometry
     python examples/view_model.py /path/to/model.s2k --result mesh
 
+    # Mesh view: highlight a section, restrict to a storey band, label frames
+    python examples/view_model.py /path/to/model.s2k --result mesh \
+        --highlight-section 2xR3 2xR4 --zlim 3.4 4.5 --labels
+
     # Static analysis - deformed shape, then a force diagram
     python examples/view_model.py /path/to/model.s2k --result static --quantity Mz
 
@@ -53,6 +57,51 @@ from fea_toolkit.spectrum import ResponseSpectrum
 from fea_toolkit.utils import g_from_units
 
 RESULT_TYPES = ("mesh", "static", "modal", "rs", "pushover", "interactive")
+
+
+def mesh_view_kwargs(args, section_names):
+    """Translate the mesh-view CLI options into ``plot_mesh`` keyword arguments.
+
+    Args:
+        args: Parsed CLI namespace (uses ``zlim``, ``labels`` and
+            ``highlight_section``).
+        section_names: Section names present in the model, used to validate
+            ``--highlight-section`` and to build the colour map.
+
+    Returns:
+        Dict of extra ``plot_mesh`` keyword arguments (empty when no
+        mesh-view option was requested).
+    """
+    kwargs = {}
+    if args.zlim is not None:
+        lo, hi = args.zlim
+        kwargs["zlim"] = (lo, hi)
+    if args.labels:
+        kwargs["show_frame_labels"] = True
+    if args.highlight_section:
+        wanted = set(args.highlight_section)
+        available = set(section_names)
+        missing = wanted - available
+        if missing:
+            print(f"Warning: section(s) not found in the model: {sorted(missing)}")
+        matched = wanted & available
+        if matched:
+            # Matched sections red, every other section dimmed grey.
+            kwargs["section_colors"] = {
+                name: ("#ff2d2d" if name in matched else "#c8c8c8") for name in available
+            }
+            print(f"Highlighting {sorted(matched)} in red; other sections dimmed grey.")
+        else:
+            print("Warning: --highlight-section matched no sections; ignoring.")
+    return kwargs
+
+
+def _npz_section_names(data):
+    """Return the set of section names present in a loaded NPZ data dict."""
+    try:
+        return {str(s) for s in data["frame_sec_name"]}
+    except Exception:
+        return set()
 
 
 def build_builder(md, element_type="elasticBeamColumn"):
@@ -185,16 +234,20 @@ def show_interactive(builder, md):
     plot_interactive_viewer(builder, {"All": forces}, {"All": results})
 
 
-def show_npz(path, result_type, quantity, mode):
+def show_npz(path, args):
     """Display a saved .npz archive directly (no solver run)."""
     data = np.load(path, allow_pickle=True)
-    if result_type == "static":
-        plot_force_diagram(str(path), quantity=quantity)
-    elif result_type == "modal":
-        plot_mode_animation(data, None, mode=mode)
+    if args.result == "static":
+        plot_force_diagram(str(path), quantity=args.quantity)
+    elif args.result == "modal":
+        plot_mode_animation(data, None, mode=args.mode)
     else:
         # mesh / rs / pushover / interactive - just show the archived geometry.
-        plot_mesh(data, collapse_to_parents=True)
+        plot_mesh(
+            data,
+            collapse_to_parents=True,
+            **mesh_view_kwargs(args, _npz_section_names(data)),
+        )
 
 
 def run_s2k(md, args):
@@ -205,8 +258,15 @@ def run_s2k(md, args):
     )
     print(f"Load patterns: {list(md.load_patterns.keys())}")
 
+    if args.result != "mesh" and (args.zlim or args.labels or args.highlight_section):
+        print("Note: --zlim / --labels / --highlight-section apply to --result mesh only.")
+
     if args.result == "mesh":
-        plot_mesh(md, collapse_to_parents=True)
+        plot_mesh(
+            md,
+            collapse_to_parents=True,
+            **mesh_view_kwargs(args, set(md.sections)),
+        )
         return
 
     builder = build_builder(md, args.element_type)
@@ -224,7 +284,19 @@ def run_s2k(md, args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="View a model or a saved results archive.")
+    parser = argparse.ArgumentParser(
+        description="View a model or a saved results archive.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  %(prog)s model.s2k                                  # whole model\n"
+            "  %(prog)s model.s2k -r mesh --labels                 # mesh view, frame IDs\n"
+            "  %(prog)s model.s2k -r mesh --zlim 3.4 4.5 \\\n"
+            "      --highlight-section 2xR3 2xR4                   # highlight braces in a band\n"
+            "  %(prog)s results.npz -r static --quantity Mz        # saved archive\n"
+            "  %(prog)s --sample -r modal --mode 0                 # built-in sample\n"
+        ),
+    )
     parser.add_argument("model_file", nargs="?", help="Path to a .s2k model or .npz archive.")
     parser.add_argument(
         "-r",
@@ -250,7 +322,35 @@ def main():
     parser.add_argument("--alpha-max", type=float, default=0.16, help="GB 50011 alpha_max (rs).")
     parser.add_argument("--tg", type=float, default=0.40, help="GB 50011 Tg (rs).")
     parser.add_argument("--damping", type=float, default=0.05, help="Damping ratio (rs).")
+    parser.add_argument(
+        "--zlim",
+        type=float,
+        nargs=2,
+        metavar=("LO", "HI"),
+        default=None,
+        help="Mesh view: only draw elements whose midpoint lies in this Z band.",
+    )
+    parser.add_argument(
+        "--labels",
+        action="store_true",
+        help="Mesh view: label frame (element) IDs.",
+    )
+    parser.add_argument(
+        "--highlight-section",
+        nargs="+",
+        metavar="SECTION",
+        default=None,
+        help=(
+            "Mesh view: draw frames of these section name(s) in red and dim the "
+            "rest, e.g. --highlight-section 2xR3 2xR4."
+        ),
+    )
     args = parser.parse_args()
+
+    if not args.model_file and not args.sample:
+        # No input given - show the full options instead of a bare message.
+        parser.print_help()
+        sys.exit("\nNo model file given - provide a .s2k / .npz path, or use --sample.")
 
     print(f"FEA Toolkit {__version__} / OpenSees {ops_version()}")
 
@@ -260,15 +360,12 @@ def main():
         run_s2k(make_sample_model(), args)
         return
 
-    if not args.model_file:
-        sys.exit("Provide a .s2k file path, a .npz archive, or use --sample.")
-
     path = Path(args.model_file)
     if not path.exists():
         sys.exit(f"Error: file not found - {path}")
 
     if path.suffix.lower() == ".npz":
-        show_npz(path, args.result, args.quantity, args.mode)
+        show_npz(path, args)
         return
 
     print(f"Loading: {path}")
