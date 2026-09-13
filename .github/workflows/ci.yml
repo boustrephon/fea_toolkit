@@ -10,8 +10,21 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
     strategy:
+      # Report every leg.  With fail-fast a single job failure cancels the
+      # others mid-flight and hides their results — which is how the
+      # OpenSeesPy and h5py failures stayed invisible for five runs.
+      fail-fast: false
       matrix:
-        python-version: ["3.9", "3.11"]
+        # 3.9 is deliberately absent from this matrix: ``opstool`` (a *core*
+        # dependency) declares ``Requires-Python: >=3.10``, so on 3.9 pip
+        # backtracks to an ancient opstool that pulls in matplotlib 3.0.3 and
+        # dies building it from source.  Python 3.9 *syntax* compatibility is
+        # still enforced for the Rhino 8 embedded interpreter through ruff
+        # ``target-version = "py39"``.
+        # 3.12 resolves OpenSeesPy 3.8.0.0 (``openseespylinux`` 3.8.0.0 needs
+        # Python >= 3.12), the build that provides ``ops.equationConstraint``
+        # for the penalty edge constraints — 3.10 gets OpenSeesPy 3.7.1.2.
+        python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v4
         with:
