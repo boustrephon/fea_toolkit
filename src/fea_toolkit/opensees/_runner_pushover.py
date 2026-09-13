@@ -618,7 +618,7 @@ class PushoverRunnerMixin:
                     # returns 1`` from UmfPack then ``DisplacementControl::
                     # newStep`` fails).  Trying further algorithms on a
                     # singular tangent can hard-crash the OpenSees C
-                    # library (verified on the Project B Building full model,
+                    # library (verified on the Project B full model,
                     # 2026-08-25), so stop the pushover loop here.
                     break
 
@@ -638,7 +638,7 @@ class PushoverRunnerMixin:
                 if _fb_total_mass > 0:
                     # 1e-4 of total weight — a relative NormUnbalance budget
                     # a large model can actually satisfy (the 1e-6 factor
-                    # produced ~0.06 kN on the ~51,500 kN Project B Building,
+                    # produced ~0.06 kN on the ~51,500 kN Project B,
                     # which the fallback could never reach).
                     _fb_tol = max(_fb_total_mass * _g * 1e-4, _test_tol * 10.0)
                 else:

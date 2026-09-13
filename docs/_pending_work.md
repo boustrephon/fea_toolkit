@@ -437,7 +437,7 @@ plain "AREA LOADS - UNIFORM" on shell elements goes to the panel's own
 nodes (create_shells=True), matching SAP's Uniform-(Shell) semantics.
 
 **Impact on published results:** Project A Wind ±X 5265 → 2953 kN,
-Wind ±Y 587 → 395 kN; Project B Building LL (all 124 loads are area-uniform
+Wind ±Y 587 → 395 kN; Project B LL (all 124 loads are area-uniform
 `Gravity`) reduces accordingly.  `project_a_v3.h5` and `project_b_v13.h5`
 re-exported.  Tests: `tests/test_area_load_distribution.py`
 (conservation for 4/3/2/1 supported edges, 45° split, OneWay flag,
@@ -813,7 +813,7 @@ src/fea_toolkit/plotting/viz.py:
 ## CURRENT CONCLUSIONS — 2026-08-04 (recorded, then confirmed against online docs)
 
 ### A. RC pushover convergence — tolerance sensitivity is real and expected
-- v4/v5 hand-rolled push loop for the Project B Building stalls at ~0.006 m control
+- v4/v5 hand-rolled push loop for the Project B stalls at ~0.006 m control
   displacement under the strict RC defaults (`NormDispIncr 1e-6`, 10 iter,
   `NewtonLineSearch`).  Relaxing to `NormDispIncr 1e-4` / 20 iter / `Newton`
   (as used by v4/v5/v6) converges reliably.

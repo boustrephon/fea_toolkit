@@ -2725,7 +2725,7 @@ class TestCsmModule:
     def test_pushover_to_adrs_rejects_ill_conditioned_modes(self):
         """Low-participation torsional modes must not win ADRS selection.
 
-        Regression test for the Project B Building CSM flattening bug: a
+        Regression test for the Project B CSM flattening bug: a
         torsional eigenvector whose residual X components are all ~0.002
         same-sign noise produces a tiny ``M_star_x`` (~0.003) while
         ``L_x / M_star_x`` is ill-conditioned, so ``L_x²/M_star_x``

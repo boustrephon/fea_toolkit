@@ -297,7 +297,7 @@ column *j* is the eigenvector for mode *j* (0‑based) and row *i* matches
 {model_stem}_results.npz
 ```
 
-For the Project B: `project_b_results.npz`
+For the Project B building: `project_b_results.npz`
 
 ## Immediate implementation checklist
 

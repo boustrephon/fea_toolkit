@@ -1102,7 +1102,7 @@ def test_rigid_diaphragms_explicit_node_groups(tmp_path):
 def _make_slab_levels_model():
     """MeshModel with slab-derived levels and NO explicit constraint groups.
 
-    Mirrors the Project B Building scenario that regressed in commit 1cf374d:
+    Mirrors the Project B scenario that regressed in commit 1cf374d:
     ``diaphragm_levels`` populated from horizontal slab areas,
     ``diaphragm_components`` empty.
     """
@@ -1135,7 +1135,7 @@ def _make_slab_levels_model():
 def test_rigid_diaphragms_absent_slab_levels_not_applied():
     """Absent ``rigid_diaphragms`` + slab-derived levels only ⇒ no rigid
     diaphragms.  Regression guard for commit 1cf374d, which auto-applied to
-    slab levels and regressed gravity convergence on the Project B."""
+    slab levels and regressed gravity convergence on the Project B building."""
     import openseespy.opensees as ops
 
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder

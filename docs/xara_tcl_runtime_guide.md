@@ -241,7 +241,7 @@ for aid in list(md.area_elements.keys()):
 mm = preprocess_model(md, cfg)
 ```
 
-### Results from Project B Building crop (X ≤ 18, Z ≤ 13.275)
+### Results from Project B crop (X ≤ 18, Z ≤ 13.275)
 
 | Metric | Full (v1) | Cropped (v2) | Reduction |
 |--------|-----------|---------------|-----------|

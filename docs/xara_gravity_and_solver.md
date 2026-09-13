@@ -10,7 +10,7 @@ related: [xara_tcl_runtime_guide.md, xara_pushover_workflow.md, tcl_export.md]
 
 ## Model Profile
 
-**Project B Building** (0.7E): 8-storey RC frame with brick infill walls (no structural shear walls).
+**Project B** (0.7E): 8-storey RC frame with brick infill walls (no structural shear walls).
 
 | Metric | Value |
 |--------|-------|
@@ -55,7 +55,7 @@ Neither bug caused the timeouts (displacement-controlled pushover scales the ref
 
 ## Critical Discovery: No Gravity in the Tcl
 
-`mesh_model_to_gravity_loads()` was returning an **empty dict** for the Project B Building. The function only iterated over `mesh_model.frame_gravity_loads` — but this model's DEAD loads are applied via **area** elements (wall self-weight, slab uniform loads), not frame gravity loads. Result: `pushover_tcl()` checks `if gravity_loads:` and skips Step A entirely.
+`mesh_model_to_gravity_loads()` was returning an **empty dict** for the Project B. The function only iterated over `mesh_model.frame_gravity_loads` — but this model's DEAD loads are applied via **area** elements (wall self-weight, slab uniform loads), not frame gravity loads. Result: `pushover_tcl()` checks `if gravity_loads:` and skips Step A entirely.
 
 The generated Tcl went straight from material/section definitions into Step B (lateral pushover) with no gravity phase at all. The `gravity_reaction.out` recorder was never created.
 

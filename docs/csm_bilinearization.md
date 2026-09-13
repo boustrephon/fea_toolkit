@@ -370,7 +370,7 @@ procedure to estimate seismic demands for unsymmetric-plan buildings"*,
    **heuristic** based on the highest surviving ``L² / M*``: the 1 %
    ``M*`` threshold does not itself identify lateral versus torsional
    modes, so the non-fundamental-mode choice should be validated before
-   being relied upon.  This is the situation in the Project B Building
+   being relied upon.  This is the situation in the Project B
    test model.
 - **Torsionally-similarly-stiff (TSS)** — the first two (or more)
   modes have **closely-spaced periods and strongly coupled

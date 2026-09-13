@@ -34,7 +34,7 @@ CQC combination, pushover analysis, brace subdivision, and plotting imports.
 | **CQC** | `TestCqcCombine` | Single-mode, two uncorrelated modes, and identical-mode CQC combination. |
 | **Plotting imports** | `TestPlottingImports` | Import resolution and graceful fallback for plotting functions. |
 | **Mass source parsing** | `TestMassSourceParser` | Integration test verifying MASS SOURCE parsing from the sample `.s2k` file. |
-| **Builder integration** | `TestChimneyStatic`, `TestChimneyModal`, `TestChimneyRS`, `TestMissingMass`, `TestSeismicMasses`, `TestChimneyPlotting` | End-to-end tests using the chimney model: static analysis equilibrium, modal properties, response spectrum, missing mass correction, and force extraction. |
+| **Builder integration** | `TestStaticAnalysisWorkflow`, `TestModalAnalysisWorkflow`, `TestResponseSpectrumWorkflow` | End-to-end tests on the sample fixtures: static analysis equilibrium, modal properties, response spectrum, missing mass correction, and force extraction. |
 | **Pushover analysis** | `TestPushoverBuild`, `TestPushoverRun` | Two-stage pushover (gravity + displacement-controlled lateral push) with fiber sections.  Tests correct results keys, zero lateral shear after gravity, linear monotonic pushover, and nonlinear pushover convergence. |
 | **HingeRadau integration** | `TestHingeRadauIntegration` | 3 tests — plastic hinge length *Lp* computed correctly for I-sections, Pipe sections, and unknown section fallback. |
 | **Brace subdivision** | `TestSubdivideElements` | 5 tests — element count after subdivision, internal node creation, sinusoidal imperfection offset, end-offset rigid link creation, and offset clamped to half-length. |
@@ -102,7 +102,7 @@ Tests for `SAP2000Parser` — parsing `.s2k` files and converting to `SAPModelDa
 
 | File | Purpose |
 |---|---|
-| `fixtures/sample.s2k` | A real SAP2000 export of a lattice frame model (used by parser integration tests). |
+| `fixtures/sample.s2k` | A SAP2000 export fixture with real project identifiers scrubbed (used by parser integration tests). |
 | `fixtures/sample.json` | Pre-parsed raw table dump for faster test loading. |
 | `fixtures/sample_2.s2k` | Second model variant for additional parser coverage. |
 | `fixtures/sample.split.json` | Split-element version of the sample model. |

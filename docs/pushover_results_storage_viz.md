@@ -316,7 +316,7 @@ Per-direction fields come from
 | `converged` | CSM convergence flag | bool |
 | `bilinearize_method` | Yield-point detection method | str |
 
-Example keys in a v8 Project B NPZ:
+Example keys in a v8 Project B-building NPZ:
 
 ```
 static/pp/+X/D_roof      shape (1,) float   [0.0191]
@@ -364,7 +364,7 @@ in `docs/results_schema.md` §PP authoring.
 {model_stem}_pushover_{direction}.npz
 ```
 
-For the Project B: `project_b_pushover_+X.npz`
+For the Project B building: `project_b_pushover_+X.npz`
 (one such file per direction: `+X`, `-X`, `+Y`, `-Y`).
 
 ---

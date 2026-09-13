@@ -1380,7 +1380,7 @@ def plot_mode_animation(
     When drawing shells, each SAP section type gets its own colour from a
     fixed palette, with a legend in the lower-right corner (model-specific
     colours, not section-index cycling — required for visualising shells
-    by material/assignment in mixed models like the Project B).
+    by material/assignment in mixed models like the Project B building).
 
     Args:
         source: Builder or NPZ dict.

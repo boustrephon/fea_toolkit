@@ -8,7 +8,7 @@ Covers:
    default to ``UmfPack`` unless the user set ``solver_system`` explicitly.
 3. Gravity load/reaction check on a *pinned-base* model — the check must
    count every vertically-restrained node, not just fully-fixed (6-DOF)
-   restraints (regression: the Project B Building's 90 pinned column bases
+   restraints (regression: the Project B's 90 pinned column bases
    produced a spurious 78.9 % "mismatch" on an equilibrated model).
 """
 
@@ -251,7 +251,7 @@ class TestPinnedBaseReactionCheck:
 
         The base nodes are pinned (not fully fixed) — the check must still
         balance, otherwise it falsely reports a load/reaction mismatch on an
-        equilibrated model (regression from the Project B Building run).
+        equilibrated model (regression from the Project B run).
         """
         cfg = {
             "element_type": "elasticBeamColumn",

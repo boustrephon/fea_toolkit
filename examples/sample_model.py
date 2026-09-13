@@ -253,7 +253,7 @@ def make_rc_frame_model() -> SAPModelData:
     nonlinear fibre columns), expressed through the toolkit's
     programmatic ``SAPModelData`` path rather than a raw OpenSees
     script — mirroring how a real SAP2000 ``.s2k`` model (e.g. the
-    Project B Building) flows through the parser → preprocessor →
+    Project B) flows through the parser → preprocessor →
     ``AnalysisBuilder`` pipeline.
 
     It follows the production RC path:

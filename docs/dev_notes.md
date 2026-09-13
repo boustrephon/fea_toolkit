@@ -70,7 +70,7 @@ related: [analysis_builder_migration_plan.md]
 - **`pattern`** requires braced body: `pattern Plain $tag $tsTag { load ... }` — RecordingOpenSees flat output doesn't group.
 - **`beamIntegration Lobatto`** needs explicit section tags per integration point: `beamIntegration Lobatto $tag 5 $s $s $s $s $s` (not the abbreviated `$tag 5 $s` form).
 - **`UmfPack`** segfaults on large models → use `ProfileSPD` instead.
-- **Area-only nodes** (not connected to frames) cause singular stiffness → filter them out (29 orphans in Project B).
+- **Area-only nodes** (not connected to frames) cause singular stiffness → filter them out (29 orphans in Project B building).
 - **Query commands** (`nodeCoord`, `getNodeTags`, etc.) produce errors if nodes don't exist → skip in Tcl output.
 - **Fiber sections**: `section Fiber`, `uniaxialMaterial Concrete01/Steel02`, `patch`, `layer ALL work`.
 - **`ElasticMembranePlateSection`** NOT supported in Xara's OpenSeesRT.

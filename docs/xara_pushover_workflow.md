@@ -148,7 +148,7 @@ modal = builder.run_modal_analysis(num_modes=12, print_results=False)
 df = modal_table_enhanced(builder, n_modes=12)
 ```
 
-**Project B modal results** (12 modes):
+**Project B building modal results** (12 modes):
 
 | Mode | Period (s) | Mass X (%) | Mass Y (%) | Participation |
 |---|---|---|---|---|
@@ -358,7 +358,7 @@ for line in Path(OUT_PATH).read_text().splitlines():
 | Shear walls (shell elements) | ❌ not supported in Xara |
 | `geomTransf PDelta` | ⚠️ currently using `Linear` |
 
-## Sample: Project B Building Pushover
+## Sample: Project B Pushover
 
 Generated Tcl file: `/tmp/project_b_po_xara.tcl` (147 KB, 4850 lines)
 
