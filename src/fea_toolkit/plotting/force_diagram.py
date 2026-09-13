@@ -230,6 +230,12 @@ def _build_static_force_map(source, geometry: dict, force_data: dict) -> dict:
     # ``source.split_elements`` fallback no longer exists.
     elements = model.frame_elements
 
+    # Match the keying used by ``extract_static_element_forces()``: the
+    # generated OpenSees tag comes from ``frame_tag_map`` (falling back to the
+    # element's own ``elem_tag``) so forces are not silently dropped when the
+    # Preprocessor assigned deterministic tags.
+    frame_tag_map = getattr(source, "frame_tag_map", {}) or {}
+
     elem_by_node_pair: dict[tuple[int, int], int] = {}
     for eid, elem in elements.items():
         if getattr(elem, "inactive", False):
@@ -238,7 +244,7 @@ def _build_static_force_map(source, geometry: dict, force_data: dict) -> dict:
         enj = model.nodes.get(elem.node_j)
         if eni is None or enj is None:
             continue
-        elem_by_node_pair[(eni.node_tag, enj.node_tag)] = elem.elem_tag
+        elem_by_node_pair[(eni.node_tag, enj.node_tag)] = frame_tag_map.get(eid, elem.elem_tag)
 
     force_map = {}
     for idx, fr in enumerate(geometry["frames"]):

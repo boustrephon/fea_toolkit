@@ -666,6 +666,33 @@ class TestResolveMeshData:
         # Should have same length
         assert len(sorted_children) == len(children)
 
+    def test_static_force_map_uses_frame_tag_map(self):
+        """``_build_static_force_map`` resolves tags via ``frame_tag_map``.
+
+        Regression: the map used ``elem.elem_tag`` directly, so forces keyed
+        by the generated OpenSees tag (as returned by
+        ``extract_static_element_forces()``) were silently dropped whenever
+        ``frame_tag_map`` assigned a different tag.
+        """
+        from types import SimpleNamespace
+
+        from examples.sample_model import make_sample_model
+        from fea_toolkit.plotting.force_diagram import _build_static_force_map
+
+        md = make_sample_model()
+        elem = next(iter(md.frame_elements.values()))
+        ni = md.nodes[elem.node_i]
+        nj = md.nodes[elem.node_j]
+
+        source = SimpleNamespace(model=md, frame_tag_map={elem.elem_id: 99})
+        geometry = {"frames": [{"ni_tag": ni.node_tag, "nj_tag": nj.node_tag}]}
+        force_data = {99: {"Fx": 1.0, "Fx_j": -1.0}}
+
+        force_map = _build_static_force_map(source, geometry, force_data)
+        assert list(force_map) == [0]
+        assert force_map[0]["FX"] == 1.0
+        assert force_map[0]["FX_j"] == -1.0
+
 
 # ============================================================================
 # plot_deformed_displacement_3d — unified displaced shape
