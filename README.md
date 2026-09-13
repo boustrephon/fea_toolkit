@@ -968,13 +968,22 @@ plan.  In summary:
   `_cqc.py`; `plot_seismic_spectrum` moved to
   `plotting/seismic_spectrum.py`; the IO writers share `io/_serial.py`;
   `tests/test_model.py` (6.1k lines) was split into four mirror files.
-- **Pushover solver tuning (empirical pass)** + **CSM Gap-4 benchmark
-  validation** + **shear-failure / post-peak modelling** — see
-  `docs/deprecation_plan.md` §5–6 and the Tier-2 items in
+- **Pushover solver tuning (empirical pass)** ✅ **P3** and **CSM Gap-4
+  benchmark validation** ✅ **P4** landed 2026-08-24.  The follow-on
+  **shear-failure / post-peak modelling** **P5** closed 2026-08-25 as
+  *"documented, not reproduced"* (documented-partial fallback — the V&E
+  descent is flexure-softening, not shear; the P4 re-check and the V&B
+  (1990) variant are deferred).  See `docs/deprecation_plan.md` §5–6 and the
+  Tier-2 record in `docs/_pending_work.md`.
+- **Section fiber patches** — ✅ **P6a done 2026-08-25** for
+  `Channel`/`Angle`/`DoubleAngle`/`Tee`; 🚧 **P6b pending** for `SDSection`
+  (polygon meshing) and `EncasedSection` (embedded steel + concrete
+  encasement).
+- **Python-native nonlinear dynamic integration** 🚧 **P7 pending** — the
+  Tcl/Xara ground-motion path is complete; a native OpenSeesPy transient
+  runner remains planned.  See the Tier-3 items in
   `docs/_pending_work.md`.
-- **Section fiber patches** (`Channel`/`Angle`/`DoubleAngle`/`Tee`/`SD`/
-  `Encased`) and **Python-native nonlinear dynamic integration** — see the
-  Tier-3 items in `docs/_pending_work.md`.
+
 ### Completed
 
 - ✅ **Deleted stale files**: `src/fea_toolkit/opensees/builder_ss.py` and `src/fea_toolkit/model/geometry_ss.py` — old versions, never imported anywhere.

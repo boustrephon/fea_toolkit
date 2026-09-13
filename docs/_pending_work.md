@@ -5,21 +5,22 @@ status: "draft"
 tags: [planning, work-log, internal]
 category: [planning]
 ---
-# Pending work — fea_toolkit (2026-08-01 continued)
+# Pending work — fea_toolkit (2026-09-13)
 
 ## PENDING (active — not yet done)
 
-> Priority-ordered register (maintained 2026-08-24).  Every pending item
+> Priority-ordered register (maintained 2026-09-13).  Every pending item
 > below is cross-referenced to its source document.  **Sequencing notes:**
 > Tier 1 (P1 force-diagram unification, P2 large-file splits) landed
 > 2026-08-24 — see the DONE register.  The Tier 2 physics items (P3 solver
 > calibration, P4 bilinearisation on a real curve) also landed 2026-08-24 —
-> see the DONE register.  **P5 (shear failure / post-peak) remains the open
-> physics item**, refined by the P3/P4/P5 batch findings: the V&E descent
-> is a *flexure-softening* phenomenon (the nonlinear-shear mechanism is
-> validated on the shear-critical Duong frame, not on the shear-strong
-> V&E frame).  Tiers 3–4 are independent feature gaps and deferred
-> housekeeping.
+> see the DONE register.  **P5 (shear failure / post-peak) closed
+> 2026-08-25 as "documented, not reproduced"** via the documented-partial
+> fallback: the V&E descent is a *flexure-softening* phenomenon (the
+> nonlinear-shear mechanism is validated on the shear-critical Duong frame,
+> not on the shear-strong V&E frame), and the P4 re-check plus the V&B
+> (1990) variant are deferred alongside it.  Tiers 3–4 are independent
+> feature gaps and deferred housekeeping.
 
 ### Tier 2 — Correctness / physics follow-ups
 
@@ -425,6 +426,30 @@ guidance
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
+
+## DONE (2026-09-13 — CLI API listing, rhino/io/plotting hardening)
+
+**CLI (`python -m fea_toolkit`).** Added a lazy API listing that enumerates
+`__all__` across the package and subpackages without importing the optional
+backends (`8131293`, `ca2fb82`); alias re-exports are resolved by their
+original imported name (`5637ac5`), filtered `--details` listings stay
+lazily loaded (`7a326e4`, `0094683`), and a failed `--details` import is
+reported inline and skipped rather than aborting the run (`ed25e90`).
+
+**Rhino export.** Added swept-Brep handling, docstrings and ETABS guards
+(`c785738`) and corrected the model-import data flow (`be0dbaa`).
+
+**I/O.** File choosers now offer the accepted model formats and no longer
+clobber the JSON cache (`2750dac`); docs/CLI help aligned with the accepted
+formats (`533e253`) and covered by tests (`34b623b`).
+
+**Plotting.** `view_model()` gained mesh-view options and a
+`section_colors` passthrough (`15afbd8`); mesh-only options now warn when
+ignored for static/modal NPZ inputs (`aa7df29`).
+
+**Docs.** Silenced both MkDocs 2.0 notices and fixed a broken
+`rhino_export` anchor (`e0acae0`); recorded the pinned docs toolchain and
+the MkDocs 2.0 / ProperDocs decision as P15 (`5df3144`).
 
 ## DONE (2026-08-26 — area-load distribution fix + load-verification restore)
 
