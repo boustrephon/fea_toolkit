@@ -5,7 +5,7 @@ and :mod:`fea_toolkit.io.results_schema`).
 
 Modules
 -------
-s2k_parser — Parse SAP2000 .S2K / .E2K text files into SAPModelData.
+s2k_parser — Parse SAP2000 .S2K / .$2K text files into SAPModelData.
 npz_writer — Serialise analysis results to NPZ archives.
 npz_reader — Deserialise NPZ archives and convert to PyVista meshes.
 results_schema — NPZ key layout and validation.

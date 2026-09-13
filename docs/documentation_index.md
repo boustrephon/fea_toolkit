@@ -158,6 +158,11 @@ for automated cross-referencing.
 
 ## 🎨 Export & Visualisation
 
+- [JSON Serialization: Raw Tables vs Model Codec](json_serialization.md) — ✅ Complete
+  > The two independent JSON representations in fea_toolkit — the parser raw-table cache and the dataclass model codec — and when to use each.
+  Tags: `json`, `io`, `serialization`, `parser`, `model-codec`
+  Related: [Model Stage File](model_stage_file.md) · [Unified Results Schema](results_schema.md) · [Development Notes](dev_notes.md) · [LLM & AI Assistant Guide](llm_guide.md)
+
 - [Model Stage File](model_stage_file.md) — ✅ Complete
   > Self-describing NPZ/HDF5 export of SAPModelData + MeshModel stages, with lossless round-trip and Rhino/analysis consumption.
   Tags: `io`, `serialisation`, `rhino`, `round-trip`, `hdf5`, `npz`
@@ -345,8 +350,9 @@ Tags across all documentation files:
 - **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`integrity`** — [model_review.md](model_review.md)
 - **`interactive`** — [viewer.md](viewer.md)
-- **`io`** — [model_stage_file.md](model_stage_file.md), [results_schema.md](results_schema.md)
+- **`io`** — [json_serialization.md](json_serialization.md), [model_stage_file.md](model_stage_file.md), [results_schema.md](results_schema.md)
 - **`joint`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`json`** — [json_serialization.md](json_serialization.md)
 - **`kip-in`** — [units_conversion.md](units_conversion.md)
 - **`legal`** — [licence.md](licence.md)
 - **`lessons-learned`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
@@ -363,6 +369,7 @@ Tags across all documentation files:
 - **`metadata`** — [rhino_attributes.md](rhino_attributes.md)
 - **`migration`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md)
 - **`modal`** — [modal_analysis.md](modal_analysis.md)
+- **`model-codec`** — [json_serialization.md](json_serialization.md)
 - **`modifiers`** — [stiffness_factors.md](stiffness_factors.md)
 - **`mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`nonlinear`** — [element_properties_config.md](element_properties_config.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
@@ -372,6 +379,7 @@ Tags across all documentation files:
 - **`openseespy`** — [licence.md](licence.md), [openseespy_local_build.md](openseespy_local_build.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`orchestration`** — [analysis.md](analysis.md)
+- **`parser`** — [json_serialization.md](json_serialization.md)
 - **`partial-fixity`** — [member_releases.md](member_releases.md)
 - **`phase-b`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`pipeline`** — [workflow.md](workflow.md)
@@ -401,6 +409,7 @@ Tags across all documentation files:
 - **`scripting`** — [tcl_export.md](tcl_export.md)
 - **`sections`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`serialisation`** — [model_stage_file.md](model_stage_file.md)
+- **`serialization`** — [json_serialization.md](json_serialization.md)
 - **`sfi-mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`shear`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`shell`** — [constraint_detection.md](constraint_detection.md), [element_properties_config.md](element_properties_config.md), [shell_support.md](shell_support.md)

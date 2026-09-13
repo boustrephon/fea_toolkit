@@ -112,6 +112,7 @@ nav:
       - CSM Test-Model Plan: csm_test_model_plan.md
   - Export & Visualisation:
       - Model Stage File: model_stage_file.md
+      - JSON Serialization: json_serialization.md
       - Rhino 3-D Export: rhino_export.md
       - Rhino Attributes Reference: rhino_attributes.md
       - Tcl Export: tcl_export.md
