@@ -6,6 +6,7 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "src"))
 
+import openseespy.opensees as ops
 import pytest
 
 from fea_toolkit.model.sap_data import (
@@ -231,6 +232,17 @@ class TestApplyEdgeConstraints:
         ops.wipe()
 
 
+# ``ops.equationConstraint`` only exists in OpenSeesPy >= 3.8.0.0.  On Linux
+# that build (openseespylinux 3.8.0.0) is published for Python >= 3.12 only,
+# so Python 3.9-3.11 resolves OpenSeesPy 3.7.1.2, which lacks the command.
+_HAS_EQUATION_CONSTRAINT = hasattr(ops, "equationConstraint")
+
+
+@pytest.mark.skipif(
+    not _HAS_EQUATION_CONSTRAINT,
+    reason="ops.equationConstraint requires OpenSeesPy >= 3.8.0.0 "
+    "(on Linux that build needs Python >= 3.12)",
+)
 class TestApplyEdgeConstraintsPenalty:
     """Tests for AnalysisBuilder.apply_edge_constraints() with penalty method."""
 

@@ -362,6 +362,13 @@ class ConstraintMixin:
         The Penalty handler is required — ``Transformation`` cannot
         process ``equationConstraint`` MPCs.
 
+        Note:
+            ``ops.equationConstraint`` requires OpenSeesPy >= 3.8.0.0.
+            On Linux that build (``openseespylinux`` 3.8.0.0) is only
+            published for Python >= 3.12, so Python 3.9-3.11 resolves
+            OpenSeesPy 3.7.1.2, which does not provide the command.
+            Use ``constraint_method="spring"`` in that case.
+
         Args:
             coarse_edges: Explicit master edge node pairs.
             fine_nodes: Slave node IDs.  ``None`` = all shell nodes.
@@ -372,7 +379,20 @@ class ConstraintMixin:
 
         Returns:
             Number of multi-point constraints applied.
+
+        Raises:
+            RuntimeError: If the installed OpenSeesPy does not provide
+                ``ops.equationConstraint``.
         """
+        if not hasattr(ops, "equationConstraint"):
+            raise RuntimeError(
+                "constraint_method='penalty' requires ops.equationConstraint(), which the "
+                "installed OpenSeesPy does not provide.  That command needs OpenSeesPy "
+                ">= 3.8.0.0; on Linux the 3.8.0.0 build (openseespylinux) requires "
+                "Python >= 3.12, so Python 3.9-3.11 resolves OpenSeesPy 3.7.1.2 without "
+                "it.  Use constraint_method='spring', or run on Python >= 3.12."
+            )
+
         # ── Resolve master edges ────────────────────────────────────
         edge_set: set = set()
         if coarse_elements is not None:
