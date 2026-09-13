@@ -168,6 +168,18 @@ class TestEndForceValues:
 
         assert _end_force_values({"mz_i": 4.0, "mz_j": 1.0}, "Mz", False) == (4.0, 1.0)
 
+    def test_local_rejects_global_keys(self):
+        """``use_local=True`` must not read documented global ``{q}_i`` keys."""
+        from fea_toolkit.plotting.viewer import _end_force_values
+
+        assert _end_force_values({"mz_i": 4.0, "mz_j": 1.0}, "Mz", True) is None
+
+    def test_global_rejects_bare_local_keys(self):
+        """``use_local=False`` must not read the bare local builder form."""
+        from fea_toolkit.plotting.viewer import _end_force_values
+
+        assert _end_force_values({"Mz": 7.0, "Mz_j": -2.0}, "Mz", False) is None
+
     def test_missing_quantity_returns_none(self):
         from fea_toolkit.plotting.viewer import _end_force_values
 

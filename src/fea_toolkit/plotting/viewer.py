@@ -79,17 +79,21 @@ def _end_force_values(entry: dict, quantity: str, use_local: bool) -> Optional[t
     """
     q_low = quantity.lower()
     if use_local:
+        # Local values only: an explicit ``_local`` suffix, or the bare
+        # ``{quantity}`` / ``{quantity}_j`` form produced by
+        # :meth:`AnalysisBuilder.extract_static_element_forces` (always local).
+        # The bare ``{q}_i`` / ``{q}_j`` keys are documented **global** results
+        # and must not be read as local values.
         pairs = (
             (f"{q_low}_i_local", f"{q_low}_j_local"),
             (f"{quantity}_i_local", f"{quantity}_j_local"),
-            (f"{q_low}_i", f"{q_low}_j"),
             (quantity, f"{quantity}_j"),
-            (f"{quantity}_i", f"{quantity}_j"),
         )
     else:
+        # Global values only: ``{q}_i`` / ``{q}_j`` (lower- and upper-case
+        # spellings).  The bare local form must not be read as a global value.
         pairs = (
             (f"{q_low}_i", f"{q_low}_j"),
-            (quantity, f"{quantity}_j"),
             (f"{quantity}_i", f"{quantity}_j"),
         )
     for i_key, j_key in pairs:
