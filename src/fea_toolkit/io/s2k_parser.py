@@ -59,7 +59,10 @@ class SAP2000Parser:
     def __init__(self, file_path: Union[str, Path]):
         """Initialise parser with path to .S2K file."""
         self.file_path = Path(file_path)
-        self._raw_tables: dict[str, list[dict[str, Any]]] = {}
+        # ``None`` means "not loaded yet"; an empty dict means "loaded, but the
+        # file contained no tables".  The ``is None`` guard in
+        # :meth:`get_model_data` relies on this distinction.
+        self._raw_tables: Optional[dict[str, list[dict[str, Any]]]] = None
 
     @property
     def raw_tables(self) -> dict[str, list[dict[str, Any]]]:
@@ -69,8 +72,12 @@ class SAP2000Parser:
         ``"JOINT COORDINATES"``) to lists of row dicts.  Used by
         :func:`~fea_toolkit.model.stories.identify_stories` for
         storey detection and by downstream diagnostic tools.
+
+        Returns an empty dict when nothing has been loaded yet (the internal
+        sentinel is ``None`` so :meth:`get_model_data` can tell "not loaded"
+        apart from "loaded with no tables").
         """
-        return self._raw_tables
+        return self._raw_tables if self._raw_tables is not None else {}
 
     # -------------------------------------------------------------------------
     # Parsing (adapted from your parse_sap2000_table_file / parse_file)
@@ -275,7 +282,7 @@ class SAP2000Parser:
                 (or :meth:`from_json`) first.  Without this guard an
                 un-parsed parser silently yields an empty model.
         """
-        if not self._raw_tables:
+        if self._raw_tables is None:
             raise RuntimeError(
                 "No model data loaded — call parse() (or from_json()) before get_model_data()."
             )

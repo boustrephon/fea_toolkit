@@ -71,6 +71,22 @@ def test_get_model_data_before_parse_raises():
         parser.get_model_data()
 
 
+def test_get_model_data_accepts_empty_tables(tmp_path):
+    """A loaded-but-empty table set is not treated as "not loaded".
+
+    ``_raw_tables`` uses ``None`` as the "never loaded" sentinel, so a source
+    that parses to zero tables (``{}``) must still build a model rather than
+    raise the "call parse()" RuntimeError.
+    """
+    empty = tmp_path / "empty.s2k"
+    empty.write_text("")
+    parser = SAP2000Parser(empty).parse()
+    assert parser.raw_tables == {}
+    md = parser.get_model_data()
+    assert md.nodes == {}
+    assert md.frame_elements == {}
+
+
 def test_parse_from_example(tmp_path):
     """Test parsing using the built-in example content."""
     from fea_toolkit.io.s2k_parser import SAP2000Parser
