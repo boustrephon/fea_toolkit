@@ -111,7 +111,7 @@ The shared `report` package entry point should therefore be the canonical “run
 
 ### 6.2 Private local wrappers
 
-Private project-specific drivers, such as those under `local/<private_project>/Project A`, should remain thin wrappers.
+Private project-specific drivers, such as those under `local/<private_project>/`, should remain thin wrappers.
 
 Their role is not to host the general engine. Instead, they should:
 
@@ -521,7 +521,7 @@ supported for both steel and RC pushover:
 - **RC walls / nonlinear shells** — concrete + smeared rebar via
   ``ConcreteS`` and ``J2PlateFibre`` nD materials with ``ShellMITC4`` /
   ``ShellNLDKGQ`` layered shells (see
-  ``local/<private_project>/Project_B/project_b_pushover_v4.py``
+  ``local/<private_project>/<driver>.py``
   for a working end-to-end example in the stock ``pip`` OpenSeesPy).
 
 The stock ``pip install openseespy`` distribution **does** include these
@@ -593,7 +593,7 @@ The work should be broken into the following tasks.
 
 ### Task 5 — Align the local v3 scripts
 
-- use `local/<private_project>/Project_B/project_b_linear_v3.py` as the canonical reference
+- use `local/<private_project>/<driver>.py` as the canonical reference
 - align the Project A v3 path to that same architecture
 - keep the old v1/v2 report flows out of scope for the migration
 

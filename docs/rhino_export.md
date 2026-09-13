@@ -48,7 +48,7 @@ Rhino editor installs them on demand:
 # r: numpy==2.0.2
 # r: h5py==3.13.0
 import sys
-sys.path.insert(0, r"/Users/<user>/Projects/fea_toolkit/src")
+sys.path.insert(0, r"/path/to/fea_toolkit/src")
 ```
 
 ---

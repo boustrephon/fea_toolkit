@@ -237,8 +237,8 @@ Using int/float as dict keys — runtime duck-typing, but the type checker can't
 
 To re-run pyright and save the output:
 ```bash
-cd /Users/<user>/Projects/fea_toolkit
-source /Users/<user>/Projects/OpenSeesPy/venv_opensees/bin/activate
+cd /path/to/fea_toolkit
+source /path/to/venv/bin/activate
 python -m pyright src/ --outputjson > /tmp/pyright_src.json 2>/dev/null
 ```
 

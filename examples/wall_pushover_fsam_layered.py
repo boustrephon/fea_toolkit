@@ -100,7 +100,7 @@ What might work (future directions)
    ``ConcreteS`` + smeared rebar ``J2PlateFibre`` nD materials in a
    LayeredShell / ShellMITC4 or ShellNLDKGQ stack.  This is the
    approach used end-to-end in
-   ``local/<private_project>/Project_B/project_b_pushover_v4.py``
+   ``local/<private_project>/<driver>.py``
    and described in ``docs/layered_analysis_workflow.md`` §14.1.
    See ``examples/wall_layered_nonlinear.py`` for the placeholder.
 

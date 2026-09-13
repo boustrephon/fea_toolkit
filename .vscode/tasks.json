@@ -4,7 +4,7 @@
     {
       "label": "MkDocs: Serve",
       "type": "shell",
-      "command": "command -v mkdocs >/dev/null 2>&1 && mkdocs serve || /Users/<user>/miniforge3/bin/mkdocs serve",
+      "command": "command -v mkdocs >/dev/null 2>&1 && mkdocs serve",
       "isBackground": true,
       "problemMatcher": [],
       "presentation": {

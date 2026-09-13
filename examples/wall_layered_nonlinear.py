@@ -21,14 +21,14 @@ non-converging FSAM-in-LayeredShell combination (see
 
 It is used end-to-end in:
 
-- ``local/<private_project>/Project_B/project_b_pushover_v4.py``
+- ``local/<private_project>/<driver>.py``
   (working example in the stock ``pip`` OpenSeesPy), and
 - described in ``docs/layered_analysis_workflow.md`` §14.1:
 
     "RC walls / nonlinear shells — concrete + smeared rebar via
     ``ConcreteS`` and ``J2PlateFibre`` nD materials with ``ShellMITC4`` /
     ``ShellNLDKGQ`` layered shells (see
-    ``local/<private_project>/Project_B/project_b_pushover_v4.py``
+    ``local/<private_project>/<driver>.py``
     for a working end-to-end example in the stock ``pip`` OpenSeesPy)."
 
 Compared with FSAM:
@@ -116,7 +116,7 @@ See also:
   reference.
 - ``docs/mvlem_wall_analysis.md`` — FSAM limitations and the
   SFI_MVLEM_3D alternative.
-- ``local/<private_project>/Project_B/project_b_pushover_v4.py`` —
+- ``local/<private_project>/<driver>.py`` —
   working end-to-end ConcreteS + J2PlateFibre example.
 - ``examples/wall_pushover_compare.py`` — the runnable validated
   comparison (elastic layered shell vs SFI_MVLEM_3D).
@@ -220,7 +220,7 @@ def main() -> None:
     )
     print("References:")
     print("  - docs/layered_analysis_workflow.md §14.1")
-    print("  - local/<private_project>/Project_B/project_b_pushover_v4.py")
+    print("  - local/<private_project>/<driver>.py")
     print("  - examples/wall_pushover_compare.py (runnable comparison)")
     print("  - examples/wall_pushover_fsam_layered.py (FSAM-layered failure)\n")
     print(f"Indicative config (module-level, named {nonlinear_shell_config.__name__}()):")

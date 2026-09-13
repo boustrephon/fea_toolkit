@@ -307,7 +307,7 @@ For the Project B: `project_b_results.npz`
 4. Make the report result dictionary the stable bundle consumed by `src/fea_toolkit/io/npz_writer.py`.
 5. Keep `src/fea_toolkit/model/mesh_model.py` as the shared frozen `MeshModel` handoff object between preprocessing and analysis.
 6. Treat `src/fea_toolkit/opensees/builder.py` as a Tcl-export helper only; do not route the active v3 runtime through it.
-7. Keep private Project A files under `local/<private_project>/Project A` as thin wrappers that call the shared report engine.
+7. Keep private Project A files under `local/<private_project>/` as thin wrappers that call the shared report engine.
 
 ## Mapping to opstool ODB
 
@@ -355,7 +355,7 @@ The schema should therefore be implemented with this ownership split:
    * provide the data objects consumed by the report engine
 3. **Result serialisation** — `src/fea_toolkit/io/npz_writer.py`
    * turns the standard dict output into the unified NPZ arrays
-4. **Private local wrappers** — `local/<private_project>/Project A`
+4. **Private local wrappers** — `local/<private_project>/`
    * supply private paths and presentation-specific wrappers
    * do not contain the general analytical heart
 

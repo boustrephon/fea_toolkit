@@ -11,7 +11,7 @@ of Concrete Structures*:
   strut limit.
 * §6.3.1 / §7.3 — in-plane wall shear / normal stress checks.
 
-The formulas mirror ``local/<private_project>/Project_B/
+The formulas mirror ``local/<private_project>/
 project_b_pushover_checks_v8.py`` but are **unit-aware**: material strengths are
 authored in SI (Pa) and scaled to the model unit system with
 :func:`fea_toolkit.utils.stress_scale_factor`; section dimensions and demands
