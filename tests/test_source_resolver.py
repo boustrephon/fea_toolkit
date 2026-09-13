@@ -1,5 +1,7 @@
 """Tests for :func:`fea_toolkit.model.source_resolver.resolve_model_source`."""
 
+import pytest
+
 from examples.sample_model import make_rc_frame_model, make_sample_model
 from fea_toolkit.io.stage_writer import write_model_stages
 from fea_toolkit.model.source_resolver import resolve_model_source
@@ -36,6 +38,7 @@ class TestResolveFromModel:
 
 class TestResolveFromStageFile:
     def test_from_dict_and_path(self, tmp_path):
+        pytest.importorskip("h5py")  # HDF5 stage files are an optional feature
         md = make_rc_frame_model()
         mesh = preprocess_model(md, {"element_type": "elasticBeamColumn", "mesh_areas": True})
         p = str(tmp_path / "m.h5")
@@ -47,6 +50,7 @@ class TestResolveFromStageFile:
         assert src_path.stage == "mesh"
 
     def test_sections_reconstructed_from_dict_blocks(self, tmp_path):
+        pytest.importorskip("h5py")  # HDF5 stage files are an optional feature
         from fea_toolkit.model.sap_data import Section
 
         md = make_rc_frame_model()
@@ -62,6 +66,7 @@ class TestResolveFromStageFile:
         assert all(isinstance(s, Section) for s in src.sections.values())
 
     def test_units_reconstructed(self, tmp_path):
+        pytest.importorskip("h5py")  # HDF5 stage files are an optional feature
         md = make_sample_model()
         p = str(tmp_path / "m.h5")
         write_model_stages(p, sap=md, fmt="h5")
@@ -107,7 +112,5 @@ class TestResolveFromStageFile:
 
 class TestResolveErrors:
     def test_unsupported_source(self):
-        import pytest
-
         with pytest.raises(TypeError, match="unsupported source type"):
             resolve_model_source(42)

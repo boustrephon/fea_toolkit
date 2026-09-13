@@ -239,6 +239,8 @@ class TestDeformedArrays:
 @pytest.mark.parametrize("fmt", ["npz", "h5"])
 def test_flatten_stage_real_file(tmp_path, fmt):
     """A real stage file flattens to unprefixed geometry for colouring."""
+    if fmt == "h5":
+        pytest.importorskip("h5py")  # HDF5 is an optional dependency
     from examples.sample_model import make_sample_model
     from fea_toolkit.io.stage_writer import write_model_stages
 
