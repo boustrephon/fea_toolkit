@@ -132,8 +132,10 @@ def _load_deformed_arrays(
             ``"pushover"``.
         case: Static case name (``None`` → first available).
         mode: Modal mode index (0-based) for ``source_type="modal"``.
-        direction, step: Pushover direction / step index for
-            ``source_type="pushover"`` (step ``None`` → last step).
+        direction: Pushover direction (``+X`` / ``-X`` / ``+Y`` / ``-Y``)
+            for ``source_type="pushover"``.
+        step: Pushover step index (0-based) for ``source_type="pushover"``
+            (``None`` → last step).
 
     Returns:
         ``(dx, dy, dz, tags, label)`` where *dx/dy/dz* are float arrays
@@ -473,7 +475,10 @@ def create_deformed_geometry(
             ``"pushover"``.
         case: Static case name (``None`` → first available).
         mode: Modal mode index (0-based) for ``source_type="modal"``.
-        direction, step: Pushover direction / step for ``"pushover"``.
+        direction: Pushover direction (``+X`` / ``-X`` / ``+Y`` / ``-Y``)
+            for ``source_type="pushover"``.
+        step: Pushover step index (0-based) for ``source_type="pushover"``
+            (``None`` → last step).
         scale: Displacement scale factor.  ``None`` → auto-scale (5% of
             the largest model dimension per unit displacement).
         stage: Stage to promote for stage files (``None`` → auto).
