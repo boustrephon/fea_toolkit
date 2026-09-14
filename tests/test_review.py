@@ -21,6 +21,7 @@ from fea_toolkit.model.sap_data import (
     FRAME_RELEASE_DOF_LABELS,
     FrameElement,
     FrameRelease,
+    MassSource,
     Material,
     Node,
     Restraint,
@@ -342,6 +343,43 @@ class TestObservations:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Mass source reporting
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestMassSource:
+    def _model_with_mass_source(self) -> SAPModelData:
+        nodes = {"1": Node("1", 1, 0.0, 0.0, 0.0), "2": Node("2", 2, 0.0, 0.0, 3.0)}
+        frames = {"1": FrameElement("1", 1, "1", "2")}
+        md = _synthetic(nodes, frames, {"1": Restraint([1, 1, 1, 1, 1, 1])})
+        md.mass_sources = {
+            "MS": MassSource(
+                name="MS",
+                elements=True,
+                loads=True,
+                is_default=True,
+                load_pattern={"DEAD": 1.0, "SDL": 0.5},
+            )
+        }
+        return md
+
+    def test_mass_source_patterns_in_observations(self):
+        result = review_model(self._model_with_mass_source())
+        ms = result["observations"]["mass_source"]
+        assert ms["name"] == "MS"
+        assert ms["load_patterns"] == {"DEAD": 1.0, "SDL": 0.5}
+        assert ms["n_patterns"] == 2
+
+    def test_formatters_report_mass_source_patterns(self):
+        result = review_model(self._model_with_mass_source())
+        text = format_review_report(result)
+        assert "Mass source load patterns: DEAD x1, SDL x0.5" in text
+        md_text = format_review_markdown(result)
+        assert "Mass source load patterns:" in md_text
+        assert "`DEAD` \u00d71" in md_text
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Formatters
 # ═══════════════════════════════════════════════════════════════════
 
@@ -442,6 +480,10 @@ def _fake_analysis(n_modes: int = 8) -> dict:
         },
         "mass_source": {
             "name": "MS",
+            "from_elements": True,
+            "from_masses": False,
+            "from_loads": True,
+            "load_patterns": {"DEAD": 1.0, "SDL": 0.5},
             "total_mass": 100.0,
             "total_weight": 980.665,
             "gravity": 9.80665,
@@ -491,13 +533,15 @@ class TestModeDisplay:
 
     def test_text_mass_source_totals(self, result):
         text = format_review_report(result)
-        assert "Seismic mass (mass source)" in text
+        assert "Seismic mass (mass source 'MS'" in text
+        assert "patterns: DEAD x1, SDL x0.5" in text
         assert "100.000" in text  # total_mass
         assert "980.7" in text  # total_weight
 
     def test_markdown_mass_source_totals(self, result):
         md_text = format_review_markdown(result)
-        assert "Seismic mass (mass source)" in md_text
+        assert "Seismic mass (mass source **MS**" in md_text
+        assert "`DEAD` \u00d71" in md_text
         assert "980.7" in md_text
 
     def test_text_min_participation_filters(self, result):

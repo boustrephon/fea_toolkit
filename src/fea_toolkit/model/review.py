@@ -428,6 +428,7 @@ def _observations(md: SAPModelData) -> dict[str, Any]:
             "from_masses": ms.masses,
             "from_loads": ms.loads,
             "n_patterns": len(ms.load_pattern),
+            "load_patterns": dict(ms.load_pattern),
         }
 
     # Prefer the entry flagged as the model default — a model may list
@@ -1103,6 +1104,12 @@ def format_review_report(
             f"elements={ms['from_elements']}, masses={ms['from_masses']}, "
             f"loads={ms['from_loads']}, patterns={ms['n_patterns']})"
         )
+        patterns = ms.get("load_patterns") or {}
+        if patterns:
+            add(
+                "  Mass source load patterns: "
+                + ", ".join(f"{name} x{mult:g}" for name, mult in patterns.items())
+            )
 
     force_unit = units.get("F", "N")
 
@@ -1174,8 +1181,15 @@ def format_review_report(
                 add(_apply_indent(_format_table(_reaction_table_rows(reactions, force_unit, lu))))
             mass = analysis.get("mass_source")
             if mass:
+                src = mass.get("name") or "default"
+                patterns = ", ".join(
+                    f"{name} x{mult:g}" for name, mult in (mass.get("load_patterns") or {}).items()
+                )
+                detail = f"mass source '{src}'"
+                if patterns:
+                    detail += f", patterns: {patterns}"
                 add(
-                    f"  Seismic mass (mass source): {mass['total_mass']:,.3f} "
+                    f"  Seismic mass ({detail}): {mass['total_mass']:,.3f} "
                     f"{_mass_unit_label(units)}  =  weight "
                     f"{mass['total_weight']:,.1f} {force_unit}"
                 )
@@ -1337,6 +1351,9 @@ def format_review_markdown(
     add(f"- Frames with auto-mesh: **{observations['auto_mesh_assigned']}**")
     ms = observations["mass_source"]
     add(f"- Mass source: **{ms['name'] if ms else 'NONE'}**")
+    if ms and ms.get("load_patterns"):
+        joined = ", ".join(f"`{name}` \u00d7{mult:g}" for name, mult in ms["load_patterns"].items())
+        add(f"- Mass source load patterns: {joined}")
     add("")
 
     force_unit = units.get("F", "N")
@@ -1431,8 +1448,16 @@ def format_review_markdown(
                 add("")
             mass = analysis.get("mass_source")
             if mass:
+                src = mass.get("name") or "default"
+                patterns = ", ".join(
+                    f"`{name}` \u00d7{mult:g}"
+                    for name, mult in (mass.get("load_patterns") or {}).items()
+                )
+                detail = f"mass source **{src}**"
+                if patterns:
+                    detail += f" (patterns: {patterns})"
                 add(
-                    f"Seismic mass (mass source): **{mass['total_mass']:,.3f} "
+                    f"Seismic mass ({detail}): **{mass['total_mass']:,.3f} "
                     f"{_mass_unit_label(units)}** \u2014 weight "
                     f"**{mass['total_weight']:,.1f} {force_unit}**."
                 )

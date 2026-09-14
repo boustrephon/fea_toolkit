@@ -128,7 +128,10 @@ a non-zero count in a *blocking* category sets `result["ok"] = False`.
 
 ### Observations (not pass/fail)
 Support fixity summary (e.g. all-pinned vs all-fixed), non-default
-insertion (cardinal) points, auto-mesh usage and mass-source completeness.
+insertion (cardinal) points, auto-mesh usage, and the **mass source** —
+its name, whether it draws on elements / added masses / load patterns, and
+the **load patterns it includes** with their multipliers (e.g.
+`Mass source load patterns: Pipe Dead Load x1`).
 
 ### Self-weight (analytical) — `--self-weight`
 The expected self-weight derived from element geometry and material unit
@@ -278,7 +281,9 @@ result = {
 model has no braces).  Each `analysis["mass_participation"]` entry carries
 `mode`, `period`, `frequency` and the six ratios `mx`/`my`/`mz`/`rx`/`ry`/`rz`.
 `analysis["mass_source"]` reports the seismic mass totals
-(`name`, `total_mass`, `total_weight`, `gravity`, `n_nodes_with_mass`).
+(`name`, `total_mass`, `total_weight`, `gravity`, `n_nodes_with_mass`, plus
+the `from_elements` / `from_masses` / `from_loads` flags and the
+`load_patterns` it includes).
 The `analysis` sub-dict's `load_verification` (a list of per-pattern
 applied-vs-reaction records) and `wind` (structured data from
 `wind_sanity_data()`: `rows` and `within_10pct`, plus the raw values) are

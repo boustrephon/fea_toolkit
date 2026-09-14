@@ -712,11 +712,17 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
 
             total_mass = float(sum(node_masses.values()))
             gravity = g_from_units(md.units)
+            src_name = next(
+                (n for n, ms in md.mass_sources.items() if ms.is_default),
+                next(iter(md.mass_sources), None),
+            )
+            src = md.mass_sources.get(src_name) if src_name else None
             result["mass_source"] = {
-                "name": next(
-                    (n for n, ms in md.mass_sources.items() if ms.is_default),
-                    next(iter(md.mass_sources), None),
-                ),
+                "name": src_name,
+                "from_elements": bool(src.elements) if src else False,
+                "from_masses": bool(src.masses) if src else False,
+                "from_loads": bool(src.loads) if src else False,
+                "load_patterns": dict(src.load_pattern) if src else {},
                 "total_mass": total_mass,
                 "total_weight": total_mass * gravity,
                 "gravity": gravity,
