@@ -235,7 +235,9 @@ Preprocessor → AnalysisBuilder pipeline and reports:
   tables — a **per-direction** summary of the CQC/SRSS base shear and
   overturning moment plus the CQC/SRSS roof displacement, and the
   **per-mode** base shear so the modal make-up of the total is visible.
-  Runs for `X` and `Y` by default.
+  The per-mode table ends with a footer row carrying the **combined** base
+  shear for the active rule only, titled `CQC` or `SRSS` to match
+  `--rs-combination` (default `cqc`).  Runs for `X` and `Y` by default.
 
   | CLI flag | Config key | Default | Meaning |
   |---|---|---|---|

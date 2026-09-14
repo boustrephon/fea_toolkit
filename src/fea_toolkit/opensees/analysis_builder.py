@@ -763,6 +763,10 @@ def _run_rs_pass(
             "directions": directions,
         },
         "directions": out,
+        # Modal combination rule used for the RS pass ('cqc' | 'srss'), from
+        # ``spectrum.combination``.  Read by the per-mode base-shear table
+        # footer so the reader can see which rule the combined values use.
+        "combination": elem_combination,
         "nodal_displacements": nodal_disp,
         "nodal_displacements_direction": nodal_disp_direction,
         # Per-element combined forces (single direction, opt-in) and their

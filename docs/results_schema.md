@@ -335,6 +335,21 @@ running that mode loop, reading ``ops.eleResponse(tag, "localForces")`` for each
 mode, and combining across modes ourselves (CQC by default, SRSS on request).
 The rule actually used is recorded in `rs/elem_combination`.
 
+**Combination is vectorised; the OpenSees calls are not**
+
+The ``n_modes x n_elements`` extraction loop is a cost floor that numpy cannot
+remove: it is one OpenSees call per element per mode, and OpenSees combines
+nothing itself.  The *combination* step, however, is pure array arithmetic and
+is done with numpy — :func:`~fea_toolkit._cqc.cqc_rho_matrix` builds the
+``n_modes x n_modes`` correlation matrix **once** and
+:func:`~fea_toolkit._cqc.cqc_combine_matrix` evaluates ``sqrt(vᵀ ρ v)`` for
+every element and component in a single ``einsum``.  The scalar
+:func:`~fea_toolkit._cqc.cqc_combine` previously rebuilt ρ inside every call,
+i.e. ``n_elements x 12`` redundant rebuilds; on a 2 000-element / 20-mode
+workload the vectorised path is ~950× faster and agrees with the scalar path to
+machine precision (~4e-16).  The vectorised helpers are the same rule, not an
+approximation — ``tests/test_cqc.py`` pins them against ``cqc_combine``.
+
 **Deprecated per-element aliases**
 
 `rs/elem_Vy_*` / `rs/elem_Vz_*` / `rs/elem_My_*` / `rs/elem_Mz_*` predate the

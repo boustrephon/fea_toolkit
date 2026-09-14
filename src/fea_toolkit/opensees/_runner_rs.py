@@ -4,9 +4,10 @@ import contextlib
 import math
 from typing import Any, Optional, Union
 
+import numpy as np
 import openseespy.opensees as ops
 
-from ..utils import cqc_combine
+from .._cqc import cqc_combine_matrix, cqc_rho_matrix, srss_combine_matrix
 from ._runner_static import _normalise_frame_response
 
 #: Local end-force component order produced by
@@ -43,23 +44,6 @@ _RS_FORCE_COMPONENTS = (
 #:    its ``force_map`` reader are the only RS consumers.  See
 #:    ``docs/deprecation_plan.md``.
 _RS_LEGACY_ALIASES = {"Vy_i": "Fy_i", "Vy_j": "Fy_j", "Vz_i": "Fz_i", "Vz_j": "Fz_j"}
-
-
-def _combine_modal(values: list[float], omega: list[float], damp: list[float], rule: str) -> float:
-    """Combine per-mode values with the CQC or SRSS rule.
-
-    Args:
-        values: Per-mode response values (one entry per mode).
-        omega: Circular frequencies (rad/s) for the CQC correlation.
-        damp: Damping ratios for the CQC correlation.
-        rule: ``'cqc'`` or ``'srss'``.
-
-    Returns:
-        The combined (non-negative) peak value.
-    """
-    if rule == "srss":
-        return math.sqrt(sum(v * v for v in values))
-    return cqc_combine(values, omega, damp)
 
 
 class RsRunnerMixin:
@@ -257,12 +241,15 @@ class RsRunnerMixin:
         modal_base_shear = [r[comp_order[f_idx]] for r in modal_base_reactions]
         modal_base_moment = [r[comp_order[m_idx]] for r in modal_base_reactions]
 
-        base_reactions_cqc = {}
-        base_reactions_srss = {}
-        for comp in comp_order:
-            vals = [r[comp] for r in modal_base_reactions]
-            base_reactions_cqc[comp] = cqc_combine(vals, omega, damp_ratios)
-            base_reactions_srss[comp] = math.sqrt(sum(v * v for v in vals))
+        # Vectorised combination: ρ is built once and shared by all six
+        # components (the scalar path rebuilt it per component).
+        reaction_values = np.array(
+            [[r[comp] for r in modal_base_reactions] for comp in comp_order], dtype=float
+        )
+        cqc_vec = cqc_combine_matrix(reaction_values, cqc_rho_matrix(omega, damp_ratios))
+        srss_vec = srss_combine_matrix(reaction_values)
+        base_reactions_cqc = {comp: float(cqc_vec[i]) for i, comp in enumerate(comp_order)}
+        base_reactions_srss = {comp: float(srss_vec[i]) for i, comp in enumerate(comp_order)}
 
         base_shear_cqc = base_reactions_cqc[comp_order[f_idx]]
         base_shear_srss = base_reactions_srss[comp_order[f_idx]]
@@ -353,7 +340,14 @@ class RsRunnerMixin:
         if self.config.get("verbose"):
             print("Extracting element RS forces...")
 
-        omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods]
+        # Mirror run_response_spectrum_analysis: a model can yield fewer
+        # converged modes than requested, and the mode loop, ``omega`` /
+        # ``damp_ratios`` and the per-mode force array must stay aligned.
+        num_modes = min(num_modes, len(modal_periods))
+        if num_modes == 0:
+            raise ValueError("No modal periods available for RS element forces")
+
+        omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods[:num_modes]]
         damp_ratios = [damping_ratio] * num_modes
 
         dof = {"X": 1, "Y": 2, "Z": 3}[direction]
@@ -371,7 +365,9 @@ class RsRunnerMixin:
 
         elements = self.mesh_model.frame_elements
 
-        # Pre-compute element info + storage
+        # Pre-compute element info.  ``elem_order`` fixes the row ordering
+        # shared by the force array below and the result records assembled
+        # from it (dict insertion order is preserved).
         elem_data = {}
         for eid, elem in elements.items():
             if getattr(elem, "inactive", False):
@@ -389,13 +385,21 @@ class RsRunnerMixin:
                 "elem_id": eid,
                 "z_bot": z_i,
                 "z_mid": (z_i + z_j) * 0.5,
-                # One per-mode value list per local end-force component.
-                **{comp: [] for comp in _RS_FORCE_COMPONENTS},
             }
+        elem_order = list(elem_data)
+        row_of = {eid: i for i, eid in enumerate(elem_order)}
+
+        # Per-mode forces stored as ``(n_elements, n_components, n_modes)``:
+        # one vectorised row write per element per mode instead of 12 list
+        # appends.  Unsupported or failed responses stay zero.
+        forces = np.zeros((len(elem_order), len(_RS_FORCE_COMPONENTS), num_modes), dtype=float)
 
         # Mode-by-mode extraction.  ``responseSpectrumAnalysis -mode n`` sets
         # the modal displacement field for mode n only; the per-mode element
-        # forces are read here and combined below.
+        # forces are read here and combined below.  This loop is the cost
+        # floor — one OpenSees call per element per mode that numpy cannot
+        # replace, because OpenSees combines nothing itself (see
+        # docs/results_schema.md).
         for mode in range(1, num_modes + 1):
             ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, "-mode", mode)
             for eid, ed in elem_data.items():
@@ -405,33 +409,31 @@ class RsRunnerMixin:
                     raw = None
                 f = _normalise_frame_response(raw)
                 if f is None:
-                    f = [0.0] * 12
-                for comp, value in zip(_RS_FORCE_COMPONENTS, f):
-                    ed[comp].append(value)
+                    continue
+                forces[row_of[eid], :, mode - 1] = f
 
-        # Combine per element across modes, then assemble the result records.
+        # ── Modal combination (vectorised) ──────────────────────────────
+        # ρ depends only on omega/damping, so it is built once and shared by
+        # every element and component — the scalar path rebuilt it
+        # ``n_elements × 12`` times.
+        if combination == "srss":
+            combined = srss_combine_matrix(forces)
+        else:
+            combined = cqc_combine_matrix(forces, cqc_rho_matrix(omega, damp_ratios))
+
         element_results = []
-        for eid, ed in elem_data.items():
-            ne = len(ed["My_i"])
-            n_use = min(ne, num_modes)
-            o_use = omega[:n_use]
-            d_use = damp_ratios[:n_use]
-
-            combined = {
-                comp: _combine_modal(ed[comp][:n_use], o_use, d_use, combination)
-                for comp in _RS_FORCE_COMPONENTS
-            }
-
+        for row, eid in enumerate(elem_order):
+            ed = elem_data[eid]
             record = {
                 "elem_id": ed["elem_id"],
                 "z_bot": ed["z_bot"],
                 "z_mid": ed["z_mid"],
-                **combined,
+                **{comp: float(combined[row, c]) for c, comp in enumerate(_RS_FORCE_COMPONENTS)},
             }
             # ── Legacy aliases (DEPRECATED — see _RS_LEGACY_ALIASES) ──
             # Kept so the 2D RS renderer and pre-existing archives keep working.
             for alias, target in _RS_LEGACY_ALIASES.items():
-                record[alias] = combined[target]
+                record[alias] = record[target]
             element_results.append(record)
 
         # Sort by height
@@ -542,13 +544,12 @@ class RsRunnerMixin:
         omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods[:num_modes]]
         damp = [damping_ratio] * num_modes
 
-        per_mode = {tag: {d: [] for d in range(3)} for tag in node_tags}
+        # (n_nodes, 3, n_modes) — only the excited direction is populated, so
+        # the two orthogonal components stay zero exactly as before.
+        disp = np.zeros((len(node_tags), 3, num_modes), dtype=float)
 
         for m in range(num_modes):
             if eigenvalues[m] <= 1e-12 or omega[m] <= 1e-12:
-                for tag in node_tags:
-                    for d in range(3):
-                        per_mode[tag][d].append(0.0)
                 continue
 
             T = modal_periods[m]
@@ -557,25 +558,20 @@ class RsRunnerMixin:
             factor = Gamma * Sa / (omega[m] ** 2)
 
             if abs(factor) < 1e-15:
-                for tag in node_tags:
-                    for d in range(3):
-                        per_mode[tag][d].append(0.0)
                 continue
 
-            for tag in node_tags:
-                phi = ops.nodeEigenvector(tag, m + 1, dof)
-                per_mode[tag][dof_idx].append(phi * factor)
-                for d in range(3):
-                    if d != dof_idx:
-                        per_mode[tag][d].append(0.0)
+            # One OpenSees eigenvector call per node per mode — the cost floor.
+            disp[:, dof_idx, m] = (
+                np.array([ops.nodeEigenvector(tag, m + 1, dof) for tag in node_tags], dtype=float)
+                * factor
+            )
 
-        cqc_result = {}
-        srss_result = {}
-        for tag in node_tags:
-            cqc_vals = tuple(cqc_combine(per_mode[tag][d], omega, damp) for d in range(3))
-            cqc_result[tag] = cqc_vals
-            srss_vals = tuple(math.sqrt(sum(v * v for v in per_mode[tag][d])) for d in range(3))
-            srss_result[tag] = srss_vals
+        # ρ is built once and shared by both combinations (the scalar path
+        # rebuilt it per node per direction).
+        cqc_matrix = cqc_combine_matrix(disp, cqc_rho_matrix(omega, damp))
+        srss_matrix = srss_combine_matrix(disp)
+        cqc_result = {tag: tuple(cqc_matrix[i]) for i, tag in enumerate(node_tags)}
+        srss_result = {tag: tuple(srss_matrix[i]) for i, tag in enumerate(node_tags)}
 
         if return_srss:
             return cqc_result, srss_result

@@ -1,5 +1,7 @@
 import math
 
+import numpy as np
+
 #: Maximum circular-frequency ratio (ω_i/ω_j) treated as correlated.
 #:
 #: The CQC correlation coefficient decays as ``bij**-5``, so beyond this
@@ -7,6 +9,9 @@ import math
 #: floating-point overflow in the ``(1 - bij**2)**2`` denominator when a
 #: near-degenerate or sentinel mode produces an extreme ratio.
 _MAX_FREQ_RATIO = 1.0e8
+
+#: Damping ratio assumed when a ``damp_ratios`` entry is missing.
+_DEFAULT_DAMP = 0.05
 
 
 def cqc_combine(modal_values: list[float], omega: list[float], damp_ratios: list[float]) -> float:
@@ -37,8 +42,8 @@ def cqc_combine(modal_values: list[float], omega: list[float], damp_ratios: list
     total = 0.0
     for i in range(n):
         for j in range(n):
-            di = damp_ratios[i] if i < len(damp_ratios) else 0.05
-            dj = damp_ratios[j] if j < len(damp_ratios) else 0.05
+            di = damp_ratios[i] if i < len(damp_ratios) else _DEFAULT_DAMP
+            dj = damp_ratios[j] if j < len(damp_ratios) else _DEFAULT_DAMP
             om_i = omega[i] if i < len(omega) else 1.0
             om_j = omega[j] if j < len(omega) else 1.0
             bij = om_i / om_j if om_j > 0 else 1.0
@@ -55,6 +60,104 @@ def cqc_combine(modal_values: list[float], omega: list[float], damp_ratios: list
             )
             total += modal_values[i] * modal_values[j] * rho
     return math.sqrt(max(total, 0.0))
+
+
+def cqc_rho_matrix(omega: list[float], damp_ratios: list[float]) -> np.ndarray:
+    """Build the CQC cross‑modal correlation matrix ``ρ``.
+
+    ``ρ`` depends only on the modal circular frequencies and damping ratios —
+    not on the response quantity being combined — so the ``n × n`` matrix is
+    built **once** and then reused for every response (each element force
+    component, each nodal displacement, each base reaction).  The scalar
+    :func:`cqc_combine` rebuilds it inside every call, which for element‑level
+    results means ``n_elements × 12`` redundant rebuilds.
+
+    The entries reproduce :func:`cqc_combine` exactly, including its
+    ``_MAX_FREQ_RATIO`` short‑circuit: widely separated (or non‑finite)
+    frequency ratios yield ``ρ = 0`` rather than an overflowed value.
+
+    Args:
+        omega: Circular frequencies of each mode (rad/s).
+        damp_ratios: Damping ratio for each mode.
+
+    Returns:
+        ``(n, n)`` correlation matrix, where ``n = len(omega)``.
+    """
+    n = len(omega)
+    if n == 0:
+        return np.zeros((0, 0), dtype=float)
+
+    n_damp = len(damp_ratios)
+    di = np.array([damp_ratios[i] if i < n_damp else _DEFAULT_DAMP for i in range(n)], dtype=float)
+    om = np.array([omega[i] if i < len(omega) else 1.0 for i in range(n)], dtype=float)
+
+    # Ratio r_ij = ω_i / ω_j, with the scalar path's ω_j <= 0 → 1.0 fallback.
+    positive = om > 0.0
+    om_safe = np.where(positive, om, 1.0)
+    ratio = om[:, None] / om_safe[None, :]
+    ratio = np.where(positive[None, :], ratio, 1.0)
+
+    # Mirror the scalar guard: widely separated modes are uncorrelated
+    # (ρ ~ r**-5), so they contribute nothing — and skipping them avoids
+    # overflow in the ``(1 - r**2)**2`` denominator.
+    correlated = np.isfinite(ratio) & (ratio <= _MAX_FREQ_RATIO) & (ratio >= 1.0 / _MAX_FREQ_RATIO)
+
+    d_i = di[:, None]
+    d_j = di[None, :]
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        numerator = 8.0 * np.sqrt(d_i * d_j) * (d_i + ratio * d_j) * ratio**1.5
+        denominator = (
+            (1.0 - ratio**2.0) ** 2.0
+            + 4.0 * d_i * d_j * ratio * (1.0 + ratio**2.0)
+            + 4.0 * (d_i**2.0 + d_j**2.0) * ratio**2.0
+        )
+        rho = numerator / denominator
+
+    rho = np.where(correlated, rho, 0.0)
+    return np.nan_to_num(rho, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def cqc_combine_matrix(values: np.ndarray, rho: np.ndarray) -> np.ndarray:
+    """Combine modal responses with a precomputed CQC correlation matrix.
+
+    Evaluates the CQC rule ``sqrt(Σᵢ Σⱼ vᵢ ρᵢⱼ vⱼ)`` for every response in
+    *values* at once — the vectorised equivalent of calling
+    :func:`cqc_combine` once per response, sharing a single
+    :func:`cqc_rho_matrix` result.
+
+    Args:
+        values: Per‑mode responses with the **mode axis last**, e.g.
+            ``(n_elements, n_components, n_modes)``.
+        rho: Correlation matrix from :func:`cqc_rho_matrix`, shape
+            ``(n_modes, n_modes)``.
+
+    Returns:
+        Array with the mode axis removed, e.g. ``(n_elements, n_components)``.
+        Negative quadratic sums are clipped to zero, matching the scalar
+        ``max(total, 0.0)``.
+    """
+    n_modes = values.shape[-1]
+    if n_modes == 0:
+        # No modes — matches the scalar ``cqc_combine`` returning 0.0.
+        return np.zeros(values.shape[:-1], dtype=float)
+    flat = np.reshape(values, (-1, n_modes))
+    quadratic = np.einsum("im,mn,in->i", flat, rho, flat)
+    return np.sqrt(np.maximum(quadratic, 0.0)).reshape(values.shape[:-1])
+
+
+def srss_combine_matrix(values: np.ndarray) -> np.ndarray:
+    """Combine modal responses with the SRSS rule.
+
+    Computes ``sqrt(Σₘ vₘ²)`` over the mode axis — the vectorised equivalent
+    of ``math.sqrt(sum(v * v for v in values))``.
+
+    Args:
+        values: Per‑mode responses with the **mode axis last**.
+
+    Returns:
+        Array with the mode axis removed.
+    """
+    return np.sqrt(np.sum(values * values, axis=-1))
 
 
 def sum_reactions_with_overturning(

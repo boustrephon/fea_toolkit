@@ -17,7 +17,13 @@ import ...`` keeps working unchanged.
   and :func:`sum_reactions_with_overturning`.
 """
 
-from ._cqc import cqc_combine, sum_reactions_with_overturning  # noqa: F401
+from ._cqc import (  # noqa: F401
+    cqc_combine,
+    cqc_combine_matrix,
+    cqc_rho_matrix,
+    srss_combine_matrix,
+    sum_reactions_with_overturning,
+)
 from ._flags import (
     _FLAG_COINCIDE_TOL,  # noqa: F401
     _FLAG_ZERO_SNAP_TOL,  # noqa: F401

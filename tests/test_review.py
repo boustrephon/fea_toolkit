@@ -908,10 +908,29 @@ class TestResponseSpectrumFormatting:
             ]
         }
         rows = _response_spectrum_mode_rows(self._block(), analysis, "kN")
-        assert [r["Mode"] for r in rows] == ["1", "2"]
+        # Per-mode rows first, then the single combined-summary footer row.
+        assert [r["Mode"] for r in rows] == ["1", "2", "CQC"]
         assert rows[0]["Period (s)"] == "0.5000"
         assert rows[0]["V X (kN)"] == "100.0"
         assert rows[1]["V Y (kN)"] == "5.0"
+
+    def test_mode_rows_footer_uses_active_combination(self):
+        """The footer carries only the active rule, titled with that rule."""
+        analysis = {"mass_participation": [{"mode": 1, "period": 0.5}]}
+
+        # Default (no ``combination`` key) is CQC.
+        rows = _response_spectrum_mode_rows(self._block(), analysis, "kN")
+        assert rows[-1]["Mode"] == "CQC"
+        assert rows[-1]["Period (s)"] == "\u2014"
+        assert rows[-1]["V X (kN)"] == "120.5"
+        assert rows[-1]["V Y (kN)"] == "60.0"
+
+        srss_block = self._block()
+        srss_block["combination"] = "srss"
+        rows = _response_spectrum_mode_rows(srss_block, analysis, "kN")
+        assert rows[-1]["Mode"] == "SRSS"
+        assert rows[-1]["V X (kN)"] == "118.0"
+        assert rows[-1]["V Y (kN)"] == "58.0"
 
     def test_missing_block_renders_nothing(self):
         assert _response_spectrum_rows({}, "kN", "m") == []

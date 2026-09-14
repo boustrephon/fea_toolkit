@@ -1051,6 +1051,11 @@ def _response_spectrum_mode_rows(
     mass-participation table.  Mode numbers and periods come from the modal
     pass (``analysis["mass_participation"]``) rather than being duplicated.
 
+    A final footer row carries the **combined** base shear for the active
+    combination rule (``rs["combination"]``, i.e. the ``--rs-combination``
+    value, default ``cqc``) and is titled with that rule — ``CQC`` or
+    ``SRSS`` — so the table shows how the per-mode shears add up.
+
     Args:
         rs: The ``response_spectrum`` block of a review result.
         analysis: The ``analysis`` sub-dict of the same review result.
@@ -1076,6 +1081,19 @@ def _response_spectrum_mode_rows(
                 f"{float(shear[i]):,.1f}" if i < len(shear) else "\u2014"
             )
         rows.append(row)
+
+    # Footer: the combined base shear for the *active* combination rule only
+    # (``--rs-combination``, default CQC), titled with that rule.
+    combination = str(rs.get("combination") or "cqc").lower()
+    if rows and directions:
+        shear_key = "base_shear_srss" if combination == "srss" else "base_shear_cqc"
+        summary: dict[str, Any] = {
+            "Mode": combination.upper(),
+            "Period (s)": "\u2014",
+        }
+        for direction, data in directions.items():
+            summary[f"V {direction} ({force_unit})"] = f"{float(data.get(shear_key, 0.0)):,.1f}"
+        rows.append(summary)
     return rows
 
 
