@@ -135,12 +135,17 @@ the **load patterns it includes** with their multipliers (e.g.
 
 ### Self-weight (analytical) — `--self-weight`
 The expected self-weight derived from element geometry and material unit
-weights (via `check_self_weight_consistency()`), broken down by section.
-A `Total` row closes the table (equal to the headline *Expected
-self-weight*).  This is **solver-free** and reported only: `applied`,
-`discrepancy` and `passed` stay `None` because confirming the applied load
-against the reactions is the analysis phase's job (see *Load verification*
-below).
+weights (via `check_self_weight_consistency()`), presented as two tables:
+
+- **By section** — one row per section (the resolved frame/area assignment).
+- **By material** — the same weight regrouped by each section's material,
+  so the total per material is visible.
+
+A `Total` row closes each table (equal to the headline *Expected
+self-weight*), and the two groupings always sum to the same total.  This is
+**solver-free** and reported only: `applied`, `discrepancy` and `passed`
+stay `None` because confirming the applied load against the reactions is
+the analysis phase's job (see *Load verification* below).
 
 ### Brace buckling — `--brace-buckling`
 The Euler buckling capacity `P_cr = π²EI₂₂/(KL)²` of the model's braces,
@@ -283,7 +288,8 @@ result = {
   "observations": {restraint_patterns, all_translation_only,
                    all_fully_fixed, non_default_cardinal_points,
                    auto_mesh_assigned, mass_source},
-  "self_weight": None | {expected, by_section, applied, discrepancy, passed},
+  "self_weight": None | {expected, by_section, by_material, applied,
+                         discrepancy, passed},
   "brace_buckling": None | {detected, k_factor, members},
   "analysis": None | {ok, periods, mass_participation, static,
                       load_verification, wind, mass_source, error},

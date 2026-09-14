@@ -726,6 +726,57 @@ class TestSelfWeight:
         md_text = format_review_markdown(result)
         assert "| Total" in md_text and expected in md_text
 
+    def _two_material_model(self) -> SAPModelData:
+        """Two frames on different materials, for the by-material table."""
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 0.0, 0.0, 2.0),
+            "3": Node("3", 3, 0.0, 0.0, 4.0),
+        }
+        frames = {
+            "F1": FrameElement("F1", 1, "1", "2"),
+            "F2": FrameElement("F2", 2, "2", "3"),
+        }
+        return SAPModelData(
+            nodes=nodes,
+            restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+            materials={
+                "STEEL": Material(name="STEEL", type="Steel", E_mod=2.0e11, unit_weight=7850.0),
+                "ALU": Material(name="ALU", type="Aluminium", E_mod=7.0e10, unit_weight=2700.0),
+            },
+            sections={
+                "S1": Section(name="S1", shape="I/Wide Flange", material="STEEL", A=0.01),
+                "S2": Section(name="S2", shape="Pipe", material="ALU", A=0.02),
+            },
+            frame_elements=frames,
+            area_elements={},
+            frame_assignments={"F1": "S1", "F2": "S2"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+        )
+
+    def test_material_weights_aggregate_sections(self):
+        md = self._two_material_model()
+        sw = review_model(md, self_weight=True)["self_weight"]
+        # F1: A 0.01 m² × 7850 N/m³ × 2 m = 157 N
+        # F2: A 0.02 m² × 2700 N/m³ × 2 m = 108 N
+        assert sw["by_material"]["STEEL"] == pytest.approx(157.0)
+        assert sw["by_material"]["ALU"] == pytest.approx(108.0)
+        # Grouping must conserve the total.
+        assert sum(sw["by_material"].values()) == pytest.approx(sw["expected"])
+        assert sum(sw["by_section"].values()) == pytest.approx(sw["expected"])
+
+    def test_formatters_render_material_table(self):
+        md = self._two_material_model()
+        result = review_model(md, self_weight=True)
+        text = format_review_report(result)
+        assert "By material:" in text
+        assert "STEEL" in text and "ALU" in text
+        md_text = format_review_markdown(result)
+        assert "**By material**" in md_text
+        assert "| STEEL" in md_text
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Brace buckling check (skipped when no braces are present)

@@ -427,13 +427,18 @@ def check_self_weight_consistency(
     -------
     dict
         Keys ``expected``, ``applied``, ``discrepancy``, ``passed``,
-        ``tolerance``, ``by_section``.
+        ``tolerance``, ``by_section`` (expected weight per section) and
+        ``by_material`` (the same weight grouped by each section's
+        material).
     """
     from fea_toolkit.model.sap_data import ShellSection
 
     # ── Compute expected self-weight from geometry ──
+    # Accumulated both by section (resolved assignment) and by material
+    # (the section's material), so a report can group the weight either way.
     expected = 0.0
     by_section: dict[str, float] = {}
+    by_material: dict[str, float] = {}
 
     for eid, elem in md.frame_elements.items():
         if getattr(elem, "inactive", False):
@@ -453,6 +458,7 @@ def check_self_weight_consistency(
         w = sec.A * mat.unit_weight * L
         expected += w
         by_section[sec_name] = by_section.get(sec_name, 0.0) + w
+        by_material[sec.material] = by_material.get(sec.material, 0.0) + w
 
     for aid, area in md.area_elements.items():
         if getattr(area, "inactive", False):
@@ -484,6 +490,7 @@ def check_self_weight_consistency(
         w = area_val * thickness * mat.unit_weight
         expected += w
         by_section[sec_name] = by_section.get(sec_name, 0.0) + w
+        by_material[sec.material] = by_material.get(sec.material, 0.0) + w
 
     # ── Applied load from load_totals ──
     applied = 0.0
@@ -511,6 +518,7 @@ def check_self_weight_consistency(
         "passed": passed,
         "tolerance": atol,
         "by_section": by_section,
+        "by_material": by_material,
     }
 
 

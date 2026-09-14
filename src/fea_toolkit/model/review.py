@@ -469,7 +469,7 @@ def _self_weight(md: SAPModelData) -> dict[str, Any]:
     Delegates to
     :func:`~fea_toolkit.model.checks.check_self_weight_consistency`, which
     derives the expected weight from element geometry and material unit
-    weights and returns it broken down by section.
+    weights and returns it broken down by section **and** by material.
 
     Confirming the *applied* load against the support reactions is the
     analysis phase's job (the ``load_verification`` block of the OpenSees
@@ -481,13 +481,14 @@ def _self_weight(md: SAPModelData) -> dict[str, Any]:
         md: Parsed model data.
 
     Returns:
-        Dict with ``expected``, ``by_section``, ``applied``,
-        ``discrepancy`` and ``passed``.
+        Dict with ``expected``, ``by_section``, ``by_material``,
+        ``applied``, ``discrepancy`` and ``passed``.
     """
     sw = check_self_weight_consistency(md, verbose=False)
     return {
         "expected": sw["expected"],
         "by_section": sw["by_section"],
+        "by_material": sw.get("by_material", {}),
         "applied": None,
         "discrepancy": None,
         "passed": None,
@@ -1201,12 +1202,24 @@ def format_review_report(
             )
         by_section = self_weight.get("by_section") or {}
         if by_section:
+            add("  By section:")
             rows = [
                 {"Section": name, f"Weight ({force_unit})": f"{weight:.1f}"}
                 for name, weight in sorted(by_section.items(), key=lambda kv: -kv[1])
             ]
             rows.append(
                 {"Section": "Total", f"Weight ({force_unit})": f"{self_weight['expected']:.1f}"}
+            )
+            add(_apply_indent(_format_table(rows)))
+        by_material = self_weight.get("by_material") or {}
+        if by_material:
+            add("  By material:")
+            rows = [
+                {"Material": name, f"Weight ({force_unit})": f"{weight:.1f}"}
+                for name, weight in sorted(by_material.items(), key=lambda kv: -kv[1])
+            ]
+            rows.append(
+                {"Material": "Total", f"Weight ({force_unit})": f"{self_weight['expected']:.1f}"}
             )
             add(_apply_indent(_format_table(rows)))
 
@@ -1455,12 +1468,27 @@ def format_review_markdown(
             add("")
         by_section = self_weight.get("by_section") or {}
         if by_section:
+            add("**By section**")
+            add("")
             rows = [
                 {"Section": name, f"Weight ({force_unit})": f"{weight:.1f}"}
                 for name, weight in sorted(by_section.items(), key=lambda kv: -kv[1])
             ]
             rows.append(
                 {"Section": "Total", f"Weight ({force_unit})": f"{self_weight['expected']:.1f}"}
+            )
+            add(_format_table(rows, tablefmt="github"))
+            add("")
+        by_material = self_weight.get("by_material") or {}
+        if by_material:
+            add("**By material**")
+            add("")
+            rows = [
+                {"Material": name, f"Weight ({force_unit})": f"{weight:.1f}"}
+                for name, weight in sorted(by_material.items(), key=lambda kv: -kv[1])
+            ]
+            rows.append(
+                {"Material": "Total", f"Weight ({force_unit})": f"{self_weight['expected']:.1f}"}
             )
             add(_format_table(rows, tablefmt="github"))
             add("")

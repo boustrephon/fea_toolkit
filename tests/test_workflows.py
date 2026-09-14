@@ -360,6 +360,11 @@ class TestStaticAnalysisWorkflow:
         # 10 m cantilever with real UB305×165×40 section (A = 0.00509434 m²,
         # steel unit_weight 78500 N/m³): 0.00509434 × 78500 × 10 ≈ 3999.06 N.
         assert abs(report["expected"] - 3999.0569) < 1.0
+        # Weight is grouped by section and by material — both conserve the
+        # total expected weight.
+        assert report["by_material"]
+        assert sum(report["by_section"].values()) == pytest.approx(report["expected"])
+        assert sum(report["by_material"].values()) == pytest.approx(report["expected"])
 
 
 # ============================================================================

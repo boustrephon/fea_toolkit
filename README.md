@@ -314,7 +314,7 @@ parsing through analysis to visualisation and reporting.
 | **Split connectivity check** | `check_split_connectivity()` | After splitting: zero-length elements, duplicate nodes |
 | **Mesh connectivity check** | `check_mesh_connectivity()` | After meshing: unrestrained base mesh, low-connectivity nodes |
 | **Singularity diagnosis** | `diagnose_singularity()` | After build: scan OpenSees node DOF, tree-plot distribution |
-| **Self-weight consistency** | `check_self_weight_consistency()` | Compare analytical vs applied weight per section |
+| **Self-weight consistency** | `check_self_weight_consistency()` | Compare analytical vs applied weight, grouped by section and by material |
 | **Export to Tcl** | `export_model_to_tcl()` | Direct SAPModelData → standalone OpenSees Tcl script |
 
 ### 3. Analysis Types
