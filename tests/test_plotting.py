@@ -2172,6 +2172,33 @@ def _minimal_npz_dict() -> dict:
     }
 
 
+def _minimal_rs_npz_dict() -> dict:
+    """Minimal NPZ-style dict carrying the flat ``rs/elem_*`` force block.
+
+    Derived from :func:`_minimal_npz_dict`'s geometry so the RS reader and the
+    geometry resolver can both be exercised; the static payload is replaced by
+    the response-spectrum element block.
+    """
+    data = _minimal_npz_dict()
+    data.pop("static/DEAD/my_i")
+    data.pop("static/DEAD/my_j")
+    data["analysis_types"] = np.array(["rs"])
+    data.pop("static_case_labels")
+    data["rs/elem_sap_id"] = np.array(["1", "2"])
+    data["rs/elem_z_bot"] = np.array([0.0, 0.0])
+    data["rs/elem_z_mid"] = np.array([0.0, 1.5])
+    data["rs/elem_combination"] = np.array(["cqc"])
+    data["rs/elem_direction"] = np.array(["X"])
+    data["rs/elem_fy_i"] = np.array([2.0, 4.0])
+    data["rs/elem_fy_j"] = np.array([-2.0, -4.0])
+    data["rs/elem_mz_i"] = np.array([6.0, 12.0])
+    data["rs/elem_mz_j"] = np.array([-6.0, -12.0])
+    # Deprecated aliases, as written by collect_rs_element_force_arrays.
+    data["rs/elem_Vy_i"] = np.array([2.0, 4.0])
+    data["rs/elem_My_i"] = np.array([0.0, 0.0])
+    return data
+
+
 class TestForceDiagramUnified:
     """Table-driven coverage for the unified ``plot_force_diagram``."""
 
@@ -2192,6 +2219,52 @@ class TestForceDiagramUnified:
         assert data.series[0]["forces"]["MY"] == pytest.approx(10.0)
         assert data.series[0]["forces"]["MY_j"] == pytest.approx(-10.0)
         assert data.series[0]["forces"]["MY_i_local"] == pytest.approx(10.0)
+
+    def test_extract_npz_rs_forces(self):
+        """``_extract_npz_rs_forces`` rebuilds records from the rs/elem_* block."""
+        from fea_toolkit.plotting.viz_forces import _extract_npz_rs_forces
+
+        data = _minimal_rs_npz_dict()
+        records = _extract_npz_rs_forces(data)
+        assert len(records) == 2
+        assert records[0]["elem_id"] == "1"
+        assert records[0]["z_mid"] == pytest.approx(0.0)
+        # Canonical components are reconstructed from the lower-case NPZ keys.
+        assert records[0]["Mz_i"] == pytest.approx(6.0)
+        assert records[1]["Mz_i"] == pytest.approx(12.0)
+        assert records[0]["Fy_i"] == pytest.approx(2.0)
+        # Components absent from the archive default to zero (no KeyError).
+        assert records[0]["Fx_i"] == pytest.approx(0.0)
+        # An archive without the block yields no records.
+        assert _extract_npz_rs_forces(_minimal_npz_dict()) == []
+
+    def test_resolve_source_rs_element_block(self):
+        """An rs/elem_* archive resolves to an RS diagram (series + force_map)."""
+        from fea_toolkit.plotting.force_diagram import _resolve_source
+
+        # Auto-detected from the presence of the rs/elem_* block (no kind pin).
+        data = _resolve_source(_minimal_rs_npz_dict(), None, None, False, None, "Mz")
+        assert data.kind == "rs"
+        assert data.force_unit == "kN"
+        assert data.length_unit == "m"
+        assert len(data.series) == 2
+        assert data.series[0]["forces"]["MZ"] == pytest.approx(6.0)
+        assert data.series[0]["forces"]["MZ_j"] == pytest.approx(-6.0)
+        # Geometry came along, so the per-element 3D view is available: the
+        # force map is keyed by frame index and exposes local variant keys
+        # (the stored RS forces are already local).
+        assert len(data.force_map) == 2
+        assert data.force_map[0]["MZ_i_local"] == pytest.approx(6.0)
+        assert data.frames  # geometry present for the 3D renderer
+
+    def test_resolve_source_rs_explicit_kind_on_dict(self):
+        """A pinned kind='rs' also reads the rs/elem_* block from a dict."""
+        from fea_toolkit.plotting.force_diagram import _resolve_source
+
+        data = _resolve_source(_minimal_rs_npz_dict(), None, None, False, "rs", "Fy")
+        assert data.kind == "rs"
+        assert len(data.series) == 2
+        assert data.series[0]["forces"]["FY"] == pytest.approx(2.0)
 
     def test_resolve_source_rs_list(self):
         from fea_toolkit.plotting.force_diagram import _resolve_source

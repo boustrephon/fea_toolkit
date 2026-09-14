@@ -677,10 +677,65 @@ class TestResponseSpectrumWorkflow:
         assert "element_results" in rs_forces, "element_results missing from RS element forces"
         er = rs_forces["element_results"]
         assert len(er) > 0, "element_results is empty"
+        assert rs_forces["combination"] == "cqc", "default combination should be CQC"
         first = er[0]
-        for key in ("Vz_i", "My_i", "Mz_i"):
+        # Full local end-force set, canonical names (matches static fx_i … mz_j).
+        for key in (
+            "Fx_i",
+            "Fy_i",
+            "Fz_i",
+            "Mx_i",
+            "My_i",
+            "Mz_i",
+            "Fx_j",
+            "Fy_j",
+            "Fz_j",
+            "Mx_j",
+            "My_j",
+            "Mz_j",
+        ):
             assert key in first, f"{key} missing from RS element result"
-        assert abs(first["Vz_i"]) > 1e-6, "Vz_i is zero in RS element result"
+        # Deprecated aliases mirror the local shears (Vy == local Fy).
+        assert first["Vy_i"] == first["Fy_i"]
+        assert first["Vz_i"] == first["Fz_i"]
+        # The cantilever bends about its local z axis, so the lateral shear
+        # appears as local Fy and the bending moment as local Mz.
+        assert abs(first["Mz_i"]) > 1e-6, "Mz_i is zero in RS element result"
+        assert abs(first["Fy_i"]) > 1e-6, "Fy_i is zero in RS element result"
+
+    def test_element_rs_forces_srss(self, sample_ab, spectrum):
+        """``combination='srss'`` is selectable and reported in the result."""
+        sample_ab.build_domain()
+        sample_ab.compute_seismic_masses()
+        modal = sample_ab.run_modal_analysis(num_modes=3)
+        periods, accels = spectrum
+        rs_forces = sample_ab.extract_element_rs_forces(
+            num_modes=3,
+            modal_periods=modal["periods"],
+            spectrum_periods=periods,
+            spectrum_accels=accels,
+            direction="X",
+            combination="srss",
+        )
+        assert rs_forces["combination"] == "srss"
+        first = rs_forces["element_results"][0]
+        # SRSS is the root-sum-square of the per-mode values, so it is
+        # finite, real and non-negative.
+        assert first["Mz_i"] > 0.0
+        assert np.isfinite(first["Mz_i"])
+
+    def test_element_rs_forces_rejects_unknown_combination(self, sample_ab, spectrum):
+        """An unsupported combination rule fails loudly rather than silently."""
+        periods, accels = spectrum
+        with pytest.raises(ValueError, match="combination must be"):
+            sample_ab.extract_element_rs_forces(
+                num_modes=3,
+                modal_periods=[1.0, 0.5, 0.25],
+                spectrum_periods=periods,
+                spectrum_accels=accels,
+                direction="X",
+                combination="abssum",
+            )
 
 
 # ============================================================================

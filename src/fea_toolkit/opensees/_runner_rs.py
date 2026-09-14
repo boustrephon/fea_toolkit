@@ -7,6 +7,59 @@ from typing import Any, Optional, Union
 import openseespy.opensees as ops
 
 from ..utils import cqc_combine
+from ._runner_static import _normalise_frame_response
+
+#: Local end-force component order produced by
+#: ``ops.eleResponse(tag, "localForces")`` after
+#: :func:`~fea_toolkit.opensees._runner_static._normalise_frame_response` —
+#: six components at the I-end followed by the same six at the J-end.  The
+#: names mirror ``STATIC_ARRAYS``' ``fx_i`` … ``mz_j`` (canonical RS element
+#: keys are the lower-case ``rs/elem_fx_i`` … ``rs/elem_mz_j``).
+_RS_FORCE_COMPONENTS = (
+    "Fx_i",
+    "Fy_i",
+    "Fz_i",
+    "Mx_i",
+    "My_i",
+    "Mz_i",
+    "Fx_j",
+    "Fy_j",
+    "Fz_j",
+    "Mx_j",
+    "My_j",
+    "Mz_j",
+)
+
+#: Legacy per-element RS record keys kept for backward compatibility.
+#:
+#: ``Vy`` / ``Vz`` were previously *derived* from the moment gradient
+#: (``Vy = dMz/dx``); they are now taken directly from the local response
+#: (``Vy == local Fy``, ``Vz == local Fz``) but the key names are retained
+#: because the 2D RS plot (``_build_series_from_rs`` / ``_render_rs``) and
+#: archives predating the full-component block read them.
+#:
+#: .. deprecated::
+#:    Delete once the full-component ``rs/elem_fx_i … rs/elem_mz_j`` block and
+#:    its ``force_map`` reader are the only RS consumers.  See
+#:    ``docs/deprecation_plan.md``.
+_RS_LEGACY_ALIASES = {"Vy_i": "Fy_i", "Vy_j": "Fy_j", "Vz_i": "Fz_i", "Vz_j": "Fz_j"}
+
+
+def _combine_modal(values: list[float], omega: list[float], damp: list[float], rule: str) -> float:
+    """Combine per-mode values with the CQC or SRSS rule.
+
+    Args:
+        values: Per-mode response values (one entry per mode).
+        omega: Circular frequencies (rad/s) for the CQC correlation.
+        damp: Damping ratios for the CQC correlation.
+        rule: ``'cqc'`` or ``'srss'``.
+
+    Returns:
+        The combined (non-negative) peak value.
+    """
+    if rule == "srss":
+        return math.sqrt(sum(v * v for v in values))
+    return cqc_combine(values, omega, damp)
 
 
 class RsRunnerMixin:
@@ -253,24 +306,50 @@ class RsRunnerMixin:
         spectrum_accels: list[float],
         direction: str = "X",
         damping_ratio: float = 0.05,
+        combination: str = "cqc",
         print_results: bool = True,
     ) -> dict[str, Any]:
-        """Run RS analysis and return CQC‑combined element forces sorted by height.
+        """Run RS analysis and return combined element forces sorted by height.
 
-        For each element this returns the CQC‑combined moments (My_i, My_j,
-        Mz_i, Mz_j) and the corresponding shears derived from the moment
-        gradient (Vy = dMz/dx, Vz = dMy/dx).
+        OpenSees' ``responseSpectrumAnalysis`` command computes the response of
+        **one mode at a time** — it "computes only the modal displacements, any
+        modal combination is up to the user" (OpenSees command manual).  This
+        method therefore runs the mode-by-mode loop, reads the element end
+        forces for each mode, and performs the modal combination itself (CQC by
+        default, SRSS on request).
 
-        The parameters mirror :meth:`run_response_spectrum_analysis`.
+        Forces are read with ``ops.eleResponse(tag, "localForces")`` — the
+        **element-local** system, matching the static and pushover recorders —
+        and normalised through ``_normalise_frame_response`` so the 12-component
+        layout is the standard ``[Fx, Fy, Fz, Mx, My, Mz]`` at the I-end
+        followed by the same six at the J-end.  Shears are taken **directly**
+        from the response (local ``Fy`` / ``Fz``); they are no longer derived
+        from the moment gradient.
+
+        Args:
+            num_modes: Number of modes to include.
+            modal_periods: Natural periods of each mode (s).
+            spectrum_periods: Period axis of the response spectrum (s).
+            spectrum_accels: Spectral acceleration values (m/s^2).
+            direction: Excitation direction — ``'X'``, ``'Y'``, or ``'Z'``.
+            damping_ratio: Damping ratio for the CQC correlation coefficient.
+            combination: Modal combination rule — ``'cqc'`` (default) or
+                ``'srss'``.
+            print_results: If True, print a summary table.
 
         Returns:
             Dictionary with keys:
 
             * ``'element_results'`` — list of dicts sorted by elevation, each
-                containing ``elem_id``, ``z_bot``, ``z_mid``, ``Vy_i``, ``Vy_j``,
-                ``Vz_i``, ``Vz_j``, ``My_i``, ``My_j``, ``Mz_i``, ``Mz_j``.
-            * ``'modal_periods'``, ``'omega'`` — for diagnostics.
+                carrying the full local end-force set (``Fx_i`` … ``Mz_j``,
+                canonical names matching the static ``fx_i`` … ``mz_j``
+                convention), plus ``elem_id``, ``z_bot``, ``z_mid``.
+            * ``'modal_periods'``, ``'omega'``, ``'combination'`` — diagnostics.
         """
+        combination = str(combination or "cqc").lower()
+        if combination not in ("cqc", "srss"):
+            raise ValueError(f"combination must be 'cqc' or 'srss', got {combination!r}")
+
         if self.config.get("verbose"):
             print("Extracting element RS forces...")
 
@@ -310,26 +389,27 @@ class RsRunnerMixin:
                 "elem_id": eid,
                 "z_bot": z_i,
                 "z_mid": (z_i + z_j) * 0.5,
-                "My_i": [],
-                "My_j": [],
-                "Mz_i": [],
-                "Mz_j": [],
+                # One per-mode value list per local end-force component.
+                **{comp: [] for comp in _RS_FORCE_COMPONENTS},
             }
 
-        # Mode-by-mode extraction
+        # Mode-by-mode extraction.  ``responseSpectrumAnalysis -mode n`` sets
+        # the modal displacement field for mode n only; the per-mode element
+        # forces are read here and combined below.
         for mode in range(1, num_modes + 1):
             ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, "-mode", mode)
             for eid, ed in elem_data.items():
                 try:
-                    forces = ops.eleResponse(ed["tag"], "forces")
+                    raw = ops.eleResponse(ed["tag"], "localForces")
                 except Exception:
-                    forces = [0.0] * 12
-                ed["My_i"].append(forces[4])
-                ed["My_j"].append(forces[10])
-                ed["Mz_i"].append(forces[5])
-                ed["Mz_j"].append(forces[11])
+                    raw = None
+                f = _normalise_frame_response(raw)
+                if f is None:
+                    f = [0.0] * 12
+                for comp, value in zip(_RS_FORCE_COMPONENTS, f):
+                    ed[comp].append(value)
 
-        # CQC combine per element and compute shears
+        # Combine per element across modes, then assemble the result records.
         element_results = []
         for eid, ed in elem_data.items():
             ne = len(ed["My_i"])
@@ -337,52 +417,34 @@ class RsRunnerMixin:
             o_use = omega[:n_use]
             d_use = damp_ratios[:n_use]
 
-            My_i = cqc_combine(ed["My_i"][:n_use], o_use, d_use)
-            My_j = cqc_combine(ed["My_j"][:n_use], o_use, d_use)
-            Mz_i = cqc_combine(ed["Mz_i"][:n_use], o_use, d_use)
-            Mz_j = cqc_combine(ed["Mz_j"][:n_use], o_use, d_use)
+            combined = {
+                comp: _combine_modal(ed[comp][:n_use], o_use, d_use, combination)
+                for comp in _RS_FORCE_COMPONENTS
+            }
 
-            # Element length
-            elem = elements.get(eid)
-            if elem:
-                ni = self.mesh_model.nodes.get(elem.node_i)
-                nj = self.mesh_model.nodes.get(elem.node_j)
-                L = math.hypot(nj.x - ni.x, nj.y - ni.y, nj.z - ni.z) if ni and nj else 1.0
-            else:
-                L = 1.0
-
-            # Shear from moment gradient
-            Vy_i = (Mz_i - Mz_j) / L if L > 1e-12 else 0.0
-            Vy_j = Vy_i
-            Vz_i = (My_i - My_j) / L if L > 1e-12 else 0.0
-            Vz_j = Vz_i
-
-            element_results.append(
-                {
-                    "elem_id": ed["elem_id"],
-                    "z_bot": ed["z_bot"],
-                    "z_mid": ed["z_mid"],
-                    "Vy_i": Vy_i,
-                    "Vy_j": Vy_j,
-                    "Vz_i": Vz_i,
-                    "Vz_j": Vz_j,
-                    "My_i": My_i,
-                    "My_j": My_j,
-                    "Mz_i": Mz_i,
-                    "Mz_j": Mz_j,
-                }
-            )
+            record = {
+                "elem_id": ed["elem_id"],
+                "z_bot": ed["z_bot"],
+                "z_mid": ed["z_mid"],
+                **combined,
+            }
+            # ── Legacy aliases (DEPRECATED — see _RS_LEGACY_ALIASES) ──
+            # Kept so the 2D RS renderer and pre-existing archives keep working.
+            for alias, target in _RS_LEGACY_ALIASES.items():
+                record[alias] = combined[target]
+            element_results.append(record)
 
         # Sort by height
         element_results.sort(key=lambda r: r["z_mid"])
 
         if print_results:
             print(
-                f"\n===== RESPONSE SPECTRUM RESULTS ({direction} only, CQC) FOR ALL ELEMENTS ====="
+                f"\n===== RESPONSE SPECTRUM RESULTS ({direction}, "
+                f"{combination.upper()}) FOR ALL ELEMENTS ====="
             )
             header = (
                 f"{'Elem':>30} {'Z_bot(m)':>10} {'Z_mid(m)':>10} {'End':>5} "
-                f"{'Vy (kN)':>12} {'Vz (kN)':>12} {'My (kN-m)':>12} {'Mz (kN-m)':>12}"
+                f"{'Fy (kN)':>12} {'Fz (kN)':>12} {'My (kN-m)':>12} {'Mz (kN-m)':>12}"
             )
             print(header)
             print("-" * len(header))
@@ -390,17 +452,18 @@ class RsRunnerMixin:
                 eid_str = f"{r['elem_id']:30s}"
                 print(
                     f"{eid_str} {r['z_bot']:10.2f} {r['z_mid']:10.2f} {'I':>5} "
-                    f"{r['Vy_i']:12.2f} {r['Vz_i']:12.2f} {r['My_i']:12.2f} {r['Mz_i']:12.2f}"
+                    f"{r['Fy_i']:12.2f} {r['Fz_i']:12.2f} {r['My_i']:12.2f} {r['Mz_i']:12.2f}"
                 )
                 print(
                     f"{eid_str} {r['z_bot']:10.2f} {r['z_mid']:10.2f} {'J':>5} "
-                    f"{r['Vy_j']:12.2f} {r['Vz_j']:12.2f} {r['My_j']:12.2f} {r['Mz_j']:12.2f}"
+                    f"{r['Fy_j']:12.2f} {r['Fz_j']:12.2f} {r['My_j']:12.2f} {r['Mz_j']:12.2f}"
                 )
 
         return {
             "element_results": element_results,
             "modal_periods": modal_periods,
             "omega": omega,
+            "combination": combination,
         }
 
     def compute_rs_nodal_displacements(

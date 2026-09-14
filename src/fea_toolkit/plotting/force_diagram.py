@@ -262,6 +262,44 @@ def _build_static_force_map(source, geometry: dict, force_data: dict) -> dict:
     return force_map
 
 
+def _build_rs_force_map(records: list, geometry: dict) -> dict:
+    """Map RS ``element_results`` records onto resolved frame indices.
+
+    RS records are keyed by SAP element id (``frame_sap_id`` in the archive
+    geometry), not by node pair, so this matches on ``frame["id"]`` rather than
+    the static path's node-pair lookup.
+
+    The stored RS forces are already in the element **local** system, so each
+    component is exposed under the ``*_i_local`` / ``*_j_local`` variant keys.
+    That makes :func:`_compute_local_forces` take its verbatim fast path instead
+    of rotating already-local values a second time.
+
+    Args:
+        records: Per-element RS records (see ``extract_element_rs_forces``).
+        geometry: Output of ``_resolve_mesh_data`` (uses ``frames``).
+
+    Returns:
+        ``{frame_idx: {"FX_i_local": …, "MY_i_local": …, "MY_j_local": …}}``.
+    """
+    by_id = {str(r.get("elem_id")): r for r in records}
+    force_map = {}
+    for idx, fr in enumerate(geometry.get("frames", [])):
+        record = by_id.get(str(fr.get("id")))
+        if record is None:
+            continue
+        entry = {}
+        for comp in ("Fx", "Fy", "Fz", "Mx", "My", "Mz"):
+            v_i = record.get(f"{comp}_i")
+            v_j = record.get(f"{comp}_j")
+            if v_i is not None:
+                entry[f"{comp.upper()}_i_local"] = float(v_i)
+            if v_j is not None:
+                entry[f"{comp.upper()}_j_local"] = float(v_j)
+        if entry:
+            force_map[idx] = entry
+    return force_map
+
+
 def _npz_unit(source: dict, key: str, default: str = "?") -> str:
     """Read a length-1 string array from NPZ data (e.g. ``force_unit``).
 
@@ -301,7 +339,11 @@ def _resolve_source(
         ValueError: If an NPZ source has no static cases.
     """
     from ..utils import force_unit_label, length_unit_label
-    from .viz_forces import _extract_npz_frame_forces, _resolve_npz_static_case
+    from .viz_forces import (
+        _extract_npz_frame_forces,
+        _extract_npz_rs_forces,
+        _resolve_npz_static_case,
+    )
     from .viz_model import _resolve_mesh_data
 
     quantity = _normalise_quantity(quantity) or "My"
@@ -314,9 +356,16 @@ def _resolve_source(
         isinstance(source, dict) and ("element_results" in source or kind == "rs")
     ):
         units = None
+        geometry = None
         if isinstance(source, dict):
             records = source.get("element_results") or []
+            if not records and "rs/elem_sap_id" in source:
+                # NPZ archive — the per-element forces live in the flat
+                # ``rs/elem_*`` block, so rebuild the record list from it.
+                records = _extract_npz_rs_forces(source)
             units = source.get("units")
+            if records:
+                geometry = _resolve_mesh_data(source, collapse_to_parents=collapse_to_parents)
         else:
             records = list(source)
         if not records:
@@ -325,14 +374,23 @@ def _resolve_source(
             )
         if units is None and isinstance(force_data, dict):
             units = force_data.get("units")
-        fu = force_unit_label(units) if units else "kN"
-        lu = length_unit_label(units) if units else "m"
+        if units is not None:
+            fu, lu = force_unit_label(units), length_unit_label(units)
+        elif isinstance(source, dict) and "force_unit" in source:
+            # NPZ metadata carries the archive's model units.
+            fu = _npz_unit(source, "force_unit", "kN")
+            lu = _npz_unit(source, "length_unit", "m")
+        else:
+            fu, lu = "kN", "m"
         series = _build_series_from_rs(records, quantity or "My")
         return ForceDiagramData(
             kind="rs",
             quantity=quantity or "My",
             force_unit=fu,
             length_unit=lu,
+            nodes=(geometry or {}).get("nodes", {}),
+            frames=(geometry or {}).get("frames", []),
+            force_map=_build_rs_force_map(records, geometry) if geometry else {},
             series=series,
         )
 
@@ -341,6 +399,29 @@ def _resolve_source(
         from ..io.npz_reader import read_results
 
         source = read_results(str(source))
+
+    # ── NPZ data dict: RS element forces (flat rs/elem_* block) ───────
+    # Reached for a *path* input (the branch above only matches dicts), and for
+    # dicts whose ``kind`` was not pinned — RS is inferred from the presence of
+    # the ``rs/elem_sap_id`` array.
+    if (
+        isinstance(source, (dict, np.lib.npyio.NpzFile))
+        and "element_results" not in source
+        and "rs/elem_sap_id" in source
+    ):
+        records = _extract_npz_rs_forces(source)
+        if records:
+            geometry = _resolve_mesh_data(source, collapse_to_parents=collapse_to_parents)
+            return ForceDiagramData(
+                kind="rs",
+                quantity=quantity or "My",
+                force_unit=_npz_unit(source, "force_unit", "kN"),
+                length_unit=_npz_unit(source, "length_unit", "m"),
+                nodes=geometry.get("nodes", {}),
+                frames=geometry.get("frames", []),
+                force_map=_build_rs_force_map(records, geometry),
+                series=_build_series_from_rs(records, quantity or "My"),
+            )
 
     # ── NPZ data dict ─────────────────────────────────────────────────
     if isinstance(source, (dict, np.lib.npyio.NpzFile)) and "element_results" not in source:
@@ -639,7 +720,18 @@ def plot_force_diagram(
     fu = force_unit or data.force_unit or "kN"
     lu = length_unit or data.length_unit or "m"
 
+    # Shear aliases resolve to the local shear components used by the
+    # geometry-based renderers: static 3D and RS 3D both key off "Fy"/"Fz".
+    q_static = {"Vz": "Fz", "Vy": "Fy"}.get(q, q)
+
     if eff_kind == "rs":
+        # 2D quantity-vs-elevation stays the default.  The per-element 3D view
+        # is opt-in via ``dimension="3d"`` and needs geometry + a force map
+        # (only available for builder/archive sources, not bare RS lists).
+        if dimension == "3d" and data.force_map:
+            return _render_static_3d(
+                data, q_static, mode, moment_scale, show_original, notebook, title, **kwargs
+            )
         return _render_rs(data.series, q, fu, lu, both_ends, title, figsize, **kwargs)
 
     # Static — infer dimension unless pinned
@@ -651,12 +743,6 @@ def plot_force_diagram(
         except ImportError:
             has_pv = False
         dimension = "3d" if has_pv and data.nodes else "2d"
-
-    # Static force diagrams expose the shear aliases "Vz"/"Vy" as the
-    # corresponding local shear-force components "Fz"/"Fy" (the force-map
-    # keys used by the 2D/3D static renderers).  RS series keep their own
-    # "Vz"/"Vy" key names.
-    q_static = {"Vz": "Fz", "Vy": "Fy"}.get(q, q)
 
     if dimension == "3d":
         return _render_static_3d(

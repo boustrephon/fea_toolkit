@@ -272,25 +272,41 @@ re-run:
   `rs/v_base_*`.  The single-direction CQC displacement field is written
   as `rs/node_*` (see below).
 
-**What the review deliberately does not export**
+***Element-level RS forces (opt-in)***
 
-The review is a *quality-control* pass, not a full force-extraction
-pipeline.  Two optional parts of the results schema are therefore left
-unpopulated, and `validate_npz()` accepts their absence:
+Passing `--rs-element-forces` (API: `analysis_config["spectrum"]["element_forces"] = True`)
+additionally records the per-element combined forces as the `rs/elem_*` block —
+one row per element, the full local end-force set (`rs/elem_fx_i` …
+`rs/elem_mz_j`), the rule used (`rs/elem_combination`) and the direction
+(`rs/elem_direction`).  This is what enables per-element RS force diagrams:
+
+```bash
+python -m fea_toolkit.model.review model.s2k --response-spectrum \
+    --rs-element-forces --rs-combination cqc --npz review.npz
+python examples/view_model.py review.npz --result rs --quantity Mz          # 2D
+python examples/view_model.py review.npz --result rs --quantity Mz --dimension 3d
+```
+
+`--rs-combination` selects `cqc` (default) or `srss`.  OpenSees does not combine
+modes for us — `responseSpectrumAnalysis -mode n` processes one mode at a time —
+so the toolkit performs the combination itself.
+
+It is **off by default** because the extraction costs an extra mode loop over
+every element (`O(n_modes × n_elements)`), which would slow down the default
+quality-control pass on large models.
+
+**What the review still does not export**
 
 | Not exported | Why | Consumer that needs it |
 |---|---|---|
 | `static/{case}/*_local` | The 12 required force arrays already hold local-frame forces, flagged by the `forces_coordinate_system` metadata; visualisers synthesise the `*_local` aliases on read | none — derivable |
-| `rs/elem_*` | Element-level CQC RS forces are only needed for a full element-force review, which would cost an extra RS pass per direction | none in `plotting/` or `rhino/` |
+| `rs/storey_*` | Per-storey RS aggregation is not yet implemented | storey-level RS force plots |
 
-> **Possible future enhancement — an "enhanced QC" stage.**  Element-level
-> RS forces (`rs/elem_*`, via
-> `AnalysisBuilder.extract_element_rs_forces()`) would let the review
-> compare demand/capacity per element and flag overstressed members
-> directly, rather than relying on the model-level base shear and
-> self-weight checks.  The unified writer already supports the block
-> (`rs_element_forces=`), so enabling it later is a wiring change, not a
-> schema change.
+> **Possible future enhancement — an "enhanced QC" stage.**  With
+> `--rs-element-forces` the review now carries element demand, so a later stage
+> could compare demand/capacity per element and flag overstressed members
+> directly.  Summing the `rs/elem_*` rows by elevation into a persisted
+> `rs/storey_*` block (per-storey RS forces) is the natural next step.
 
 The written path is reported under `result["npz"]`; an export failure is
 captured under `result["npz_error"]` and never aborts the review.

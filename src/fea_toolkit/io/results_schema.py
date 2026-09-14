@@ -130,13 +130,36 @@ RS_ARRAYS: dict[str, tuple] = {
     "rs/roof_disp_cqc_y": ("", "float"),
     "rs/roof_disp_srss_x": ("", "float"),
     "rs/roof_disp_srss_y": ("", "float"),
-    # Element-level CQC-combined forces (N_frame) — OPTIONAL: written only
-    # when a producer supplies ``rs_element_forces``.  The model review
-    # does not compute these; see docs/model_review.md for the planned
-    # enhanced QC stage.
+    # Element-level combined forces (N_frame) — OPTIONAL: written only when a
+    # producer supplies ``rs_element_forces``.  Forces are in the element
+    # **local** system (``ops.eleResponse(tag, "localForces")``), matching the
+    # static ``fx_i`` … ``mz_j`` convention, and are combined across modes with
+    # the rule named by ``rs/elem_combination`` (CQC by default, or SRSS).
     "rs/elem_sap_id": ("N_frame", "str"),
     "rs/elem_z_bot": ("N_frame", "float"),
     "rs/elem_z_mid": ("N_frame", "float"),
+    #: Modal combination rule used for the element block ('cqc' or 'srss').
+    "rs/elem_combination": ("", "str"),
+    #: Excitation direction the element block refers to ('X' / 'Y' / 'Z').
+    "rs/elem_direction": ("", "str"),
+    "rs/elem_fx_i": ("N_frame", "float"),
+    "rs/elem_fy_i": ("N_frame", "float"),
+    "rs/elem_fz_i": ("N_frame", "float"),
+    "rs/elem_mx_i": ("N_frame", "float"),
+    "rs/elem_my_i": ("N_frame", "float"),
+    "rs/elem_mz_i": ("N_frame", "float"),
+    "rs/elem_fx_j": ("N_frame", "float"),
+    "rs/elem_fy_j": ("N_frame", "float"),
+    "rs/elem_fz_j": ("N_frame", "float"),
+    "rs/elem_mx_j": ("N_frame", "float"),
+    "rs/elem_my_j": ("N_frame", "float"),
+    "rs/elem_mz_j": ("N_frame", "float"),
+    # ── Legacy aliases (DEPRECATED — delete with the 2D-only RS readers) ──
+    # ``Vy``/``Vz`` were historically *derived* from the moment gradient and
+    # are now simply the local shears (``Vy == rs/elem_fy_*``,
+    # ``Vz == rs/elem_fz_*``).  They are retained because the 2D RS renderer
+    # (``_build_series_from_rs`` / ``_render_rs``) and archives predating the
+    # full-component block read these keys.  See ``docs/deprecation_plan.md``.
     "rs/elem_Vy_i": ("N_frame", "float"),
     "rs/elem_Vy_j": ("N_frame", "float"),
     "rs/elem_Vz_i": ("N_frame", "float"),

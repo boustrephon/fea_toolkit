@@ -290,6 +290,12 @@ column *j* is the eigenvector for mode *j* (0‑based) and row *i* matches
 | `rs/elem_sap_id` | `(N_frame,)` | `str` | SAP2000 frame element ID — **optional block** |
 | `rs/elem_z_bot` | `(N_frame,)` | `float` | Z‑coordinate of element bottom node (m) |
 | `rs/elem_z_mid` | `(N_frame,)` | `float` | Z‑coordinate of element mid‑height (m) |
+| `rs/elem_combination` | `()` | `str` | Modal combination rule used: `"cqc"` (default) or `"srss"` |
+| `rs/elem_direction` | `()` | `str` | Excitation direction the block refers to (`"X"` / `"Y"` / `"Z"`) |
+| `rs/elem_fx_i` … `rs/elem_mz_i` | `(N_frame,)` | `float` | I‑end **local** forces/moments: `Fx`, `Fy`, `Fz`, `Mx`, `My`, `Mz` |
+| `rs/elem_fx_j` … `rs/elem_mz_j` | `(N_frame,)` | `float` | Same at the J‑end |
+| `rs/elem_Vy_i` / `_j`, `rs/elem_Vz_i` / `_j` | `(N_frame,)` | `float` | **Deprecated aliases** of `fy` / `fz` (see below) |
+| `rs/elem_My_i` / `_j`, `rs/elem_Mz_i` / `_j` | `(N_frame,)` | `float` | **Deprecated aliases** of `my` / `mz` (see below) |
 | `rs/elem_Vy_i` | `(N_frame,)` | `float` | I‑end local Vy (kN) |
 | `rs/elem_Vz_i` | `(N_frame,)` | `float` | I‑end local Vz (kN) |
 | `rs/elem_My_i` | `(N_frame,)` | `float` | I‑end local My (kN·m) |
@@ -303,6 +309,24 @@ column *j* is the eigenvector for mode *j* (0‑based) and row *i* matches
 | `rs/node_dy` | `(N_node,)` | `float` | CQC‑combined nodal displacement Y (m) |
 | `rs/node_dz` | `(N_node,)` | `float` | CQC‑combined nodal displacement Z (m) |
 
+**Modal combination is performed by the toolkit, not by OpenSees**
+
+OpenSees' ``responseSpectrumAnalysis`` command "computes only the modal
+displacements, any modal combination is up to the user" — the ``-mode $n`` flag
+processes **one mode at a time**.  Per-element RS forces are therefore built by
+running that mode loop, reading ``ops.eleResponse(tag, "localForces")`` for each
+mode, and combining across modes ourselves (CQC by default, SRSS on request).
+The rule actually used is recorded in `rs/elem_combination`.
+
+**Deprecated per-element aliases**
+
+`rs/elem_Vy_*` / `rs/elem_Vz_*` / `rs/elem_My_*` / `rs/elem_Mz_*` predate the
+full-component block.  `Vy`/`Vz` were originally *derived* from the moment
+gradient (`Vy = dMz/dx`); they now simply mirror the local shears
+(`Vy == rs/elem_fy_*`, `Vz == rs/elem_fz_*`).  They are retained only because
+the 2D RS renderer and archives written before this change read them.  They are
+**scheduled for deletion** — see `docs/deprecation_plan.md`.
+
 **Which RS arrays are optional**
 
 `rs/period`, `rs/v_base_*`, the combined `rs/v_*`, `rs/m_*` and
@@ -313,7 +337,9 @@ and appear only when the producer supplies the corresponding data:
 
 * `rs/elem_*` — written when `rs_element_forces` (from
   ``AnalysisBuilder.extract_element_rs_forces()``) is passed to
-  ``write_results()`` / ``write_model_stages()``.
+  ``write_results()`` / ``write_model_stages()``, or when the model review is
+  run with ``--rs-element-forces``.  Also **single‑direction** (the first
+  configured direction), recorded in `rs/elem_direction`.
 * `rs/node_*` — written when `rs_nodal_displacements` (from
   ``AnalysisBuilder.compute_rs_nodal_displacements()``) is passed.  The block
   is **single‑direction** by schema: the Rhino RS deformed‑shape overlay
@@ -321,11 +347,12 @@ and appear only when the producer supplies the corresponding data:
   multi‑direction producers should export one direction (the model review
   exports the first configured direction, X by default).
 
-> **Not yet computed by the model review.**  The review's RS export writes
-> the combined scalars plus the single‑direction `rs/node_*` block; it does
-> **not** compute element‑level RS forces (`rs/elem_*`).  See
-> ``docs/model_review.md`` — element‑level RS forces and local‑frame static
-> forces are candidates for a future *enhanced QC* stage.
+> **Model review support is opt-in.**  The review's RS export always writes the
+> combined scalars and the single‑direction `rs/node_*` block.  Element‑level
+> forces (`rs/elem_*`) are recorded only with `--rs-element-forces`, because the
+> extraction is `O(n_modes × n_elements)` on top of the base-shear pass.  See
+> ``docs/model_review.md``; per-storey RS aggregation remains a future
+> *enhanced QC* item.
 
 **Validation dimensions**
 

@@ -173,6 +173,79 @@ def _extract_npz_frame_forces(source, case_prefix, frames):
     return force_map
 
 
+#: Full local end-force component set, matching the ``rs/elem_<lower>`` NPZ keys
+#: written by ``collect_rs_element_force_arrays``.
+_RS_NPZ_FORCE_COMPONENTS = (
+    "Fx_i",
+    "Fy_i",
+    "Fz_i",
+    "Mx_i",
+    "My_i",
+    "Mz_i",
+    "Fx_j",
+    "Fy_j",
+    "Fz_j",
+    "Mx_j",
+    "My_j",
+    "Mz_j",
+)
+
+
+def _extract_npz_rs_forces(source) -> list:
+    """Reconstruct RS ``element_results`` records from an NPZ ``rs/elem_*`` block.
+
+    :func:`~fea_toolkit.io.unified_writer.write_results` stores per-element
+    response-spectrum forces as flat ``rs/elem_*`` arrays (see
+    ``collect_rs_element_force_arrays``), whereas the in-memory builder path
+    yields an ``element_results`` list of dicts.  This reader bridges the two so
+    a saved RS archive can be plotted directly by ``plot_force_diagram`` — both
+    the 2D quantity-vs-elevation view and the 3D per-element view.
+
+    The block is optional in the schema: an archive written without
+    element-level RS forces has no ``rs/elem_sap_id`` array, and ``[]`` is
+    returned.
+
+    Args:
+        source: Flat NPZ data dict (from ``read_results()`` /
+            ``read_results_npz()``) or an open ``NpzFile``.
+
+    Returns:
+        List of per-element records with ``elem_id``, ``z_bot``, ``z_mid`` and
+        the full local end-force set (``Fx_i`` … ``Mz_j``), mirroring
+        ``AnalysisBuilder.extract_element_rs_forces()``.
+    """
+    import numpy as np
+
+    ids = source.get("rs/elem_sap_id")
+    if ids is None:
+        return []
+    ids = list(ids)
+    n = len(ids)
+
+    def _col(name: str) -> list:
+        """Return one numeric column, padded to *n* rows (empty when absent)."""
+        arr = source.get(f"rs/elem_{name.lower()}")
+        if arr is None:
+            # Tolerate the deprecated alias spelling (e.g. ``rs/elem_My_i``).
+            arr = source.get(f"rs/elem_{name}")
+        if arr is None:
+            return [0.0] * n
+        vals = [float(v) for v in np.asarray(arr).ravel()]
+        return (vals + [0.0] * n)[:n]
+
+    z_bot = _col("z_bot")
+    z_mid = _col("z_mid")
+    columns = {comp: _col(comp) for comp in _RS_NPZ_FORCE_COMPONENTS}
+
+    records = []
+    for i in range(n):
+        record = {"elem_id": str(ids[i]), "z_bot": z_bot[i], "z_mid": z_mid[i]}
+        for comp, vals in columns.items():
+            record[comp] = vals[i]
+        records.append(record)
+    return records
+
+
 def _compute_local_forces(source, fr, nodes, force_entry, quantity):
     """Transform global forces to local for one frame element.
 

@@ -27,6 +27,10 @@ Usage::
     # Display a previously saved results archive (no solver run)
     python examples/view_model.py /path/to/results.npz --result static
 
+    # Per-element response-spectrum forces from an archive that has them
+    python examples/view_model.py /path/to/review.npz --result rs --quantity Mz
+    python examples/view_model.py /path/to/review.npz --result rs --quantity Mz --dimension 3d
+
     # Built-in sample (no external file needed)
     python examples/view_model.py --sample --result static
 """
@@ -243,8 +247,27 @@ def show_npz(path, args):
         plot_force_diagram(str(path), quantity=args.quantity)
     elif args.result == "modal":
         plot_mode_animation(data, None, mode=args.mode)
+    elif args.result == "rs":
+        # Per-element response-spectrum forces require the rs/elem_* block,
+        # which only archives written with element-level RS forces carry.
+        if "rs/elem_sap_id" not in data:
+            print(
+                "This archive has no element-level RS forces (no rs/elem_* block).\n"
+                "Write one with rs_element_forces=... (or "
+                "'model.review --response-spectrum --rs-element-forces --npz ...')."
+            )
+        else:
+            fig = plot_force_diagram(
+                str(path), quantity=args.quantity, kind="rs", dimension=args.dimension
+            )
+            # The 2D RS renderer returns a Figure without displaying it; the
+            # 3D path shows its own window and returns None.
+            if fig is not None and hasattr(fig, "show"):
+                import matplotlib.pyplot as plt
+
+                plt.show()
     else:
-        # mesh / rs / pushover / interactive - just show the archived geometry.
+        # mesh / pushover / interactive - just show the archived geometry.
         plot_mesh(
             data,
             collapse_to_parents=True,
@@ -312,7 +335,17 @@ def main():
         action="store_true",
         help="Use the built-in cantilever sample model.",
     )
-    parser.add_argument("--quantity", default="Mz", help="Force quantity (static/NPZ).")
+    parser.add_argument("--quantity", default="Mz", help="Force quantity (static/NPZ/rs).")
+    parser.add_argument(
+        "--dimension",
+        choices=("2d", "3d"),
+        default=None,
+        help=(
+            "Force-diagram view: '2d' (quantity vs elevation) or '3d' "
+            "(per-element tubes/flags).  Default: 2D for --result rs, "
+            "auto (3D when PyVista is available) for static."
+        ),
+    )
     parser.add_argument("--mode", type=int, default=0, help="Mode index (modal).")
     parser.add_argument("--num-modes", type=int, default=12, help="Number of modes.")
     parser.add_argument("--scale", type=float, default=50.0, help="Deformation magnification.")

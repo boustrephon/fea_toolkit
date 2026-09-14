@@ -950,6 +950,66 @@ class TestResponseSpectrumFormatting:
         assert bare["rs/m_srss_x"][0] == 0.0
         assert bare["rs/roof_disp_cqc_x"][0] == 0.0
 
+    def test_collect_rs_element_force_arrays_full_block(self):
+        """The RS element block carries the full local set, labels and aliases."""
+        from fea_toolkit.io.unified_writer import collect_rs_element_force_arrays
+
+        rs_forces = {
+            "combination": "srss",
+            "direction": "X",
+            "element_results": [
+                {
+                    "elem_id": "1",
+                    "z_bot": 0.0,
+                    "z_mid": 1.5,
+                    "Fx_i": 1.0,
+                    "Fy_i": 2.0,
+                    "Fz_i": 3.0,
+                    "Mx_i": 4.0,
+                    "My_i": 5.0,
+                    "Mz_i": 6.0,
+                    "Fx_j": 7.0,
+                    "Fy_j": 8.0,
+                    "Fz_j": 9.0,
+                    "Mx_j": 10.0,
+                    "My_j": 11.0,
+                    "Mz_j": 12.0,
+                    # Deprecated aliases written alongside the canonical keys.
+                    "Vy_i": 2.0,
+                    "Vy_j": 8.0,
+                    "Vz_i": 3.0,
+                    "Vz_j": 9.0,
+                }
+            ],
+        }
+        arrays = collect_rs_element_force_arrays(rs_forces)
+        # Full canonical set, lower-case keys mirroring static fx_i … mz_j.
+        for key in (
+            "rs/elem_fx_i",
+            "rs/elem_fy_i",
+            "rs/elem_fz_i",
+            "rs/elem_mx_i",
+            "rs/elem_my_i",
+            "rs/elem_mz_i",
+            "rs/elem_fx_j",
+            "rs/elem_fy_j",
+            "rs/elem_fz_j",
+            "rs/elem_mx_j",
+            "rs/elem_my_j",
+            "rs/elem_mz_j",
+        ):
+            assert key in arrays, key
+        assert arrays["rs/elem_mz_i"][0] == 6.0
+        assert arrays["rs/elem_fx_j"][0] == 7.0
+        # Self-describing labels.
+        assert arrays["rs/elem_combination"][0] == "srss"
+        assert arrays["rs/elem_direction"][0] == "X"
+        # ── Deprecated aliases (DEPRECATED — delete with the 2D-only readers).
+        assert arrays["rs/elem_Vy_i"][0] == 2.0
+        assert arrays["rs/elem_My_i"][0] == 5.0
+        # A producer without element forces writes nothing at all.
+        assert collect_rs_element_force_arrays(None) == {}
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Unified-writer schema coverage — solver-free

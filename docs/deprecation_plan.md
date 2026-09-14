@@ -483,6 +483,40 @@ comfortably.  Below is a realistic assessment of what remains.
 
 ---
 
+## Scheduled: per-element RS alias keys (added 2026-09)
+
+**What:** the deprecated per-element response-spectrum key aliases
+
+| Alias (delete) | Canonical replacement |
+|---|---|
+| `rs/elem_Vy_i`, `rs/elem_Vy_j` | `rs/elem_fy_i`, `rs/elem_fy_j` |
+| `rs/elem_Vz_i`, `rs/elem_Vz_j` | `rs/elem_fz_i`, `rs/elem_fz_j` |
+| `rs/elem_My_i`, `rs/elem_My_j` | `rs/elem_my_i`, `rs/elem_my_j` |
+| `rs/elem_Mz_i`, `rs/elem_Mz_j` | `rs/elem_mz_i`, `rs/elem_mz_j` |
+
+…and the matching in-memory record keys (`Vy_i` … `Mz_j`) in
+`AnalysisBuilder.extract_element_rs_forces`.
+
+**Why they exist.**  Before the full-component block, `extract_element_rs_forces`
+read **global** forces and reported only `My`/`Mz` (CQC-combined) plus `Vy`/`Vz`
+**derived** from the moment gradient (`Vy = dMz/dx`).  The block now stores the
+complete **local** end-force set (`ops.eleResponse(tag, "localForces")`), with
+the shears taken directly from the response.  The `Vy`/`Vz` names are kept as
+aliases of the local shears so that the 2D RS renderer
+(`_build_series_from_rs` / `_render_rs`) and archives written before the change
+keep working.
+
+**Marked in code at:** `_RS_LEGACY_ALIASES` (`opensees/_runner_rs.py`),
+`_RS_ELEMENT_LEGACY_ALIASES` (`io/unified_writer.py`), the legacy block in
+`io/results_schema.py::RS_ARRAYS`, and the alias block in
+`plotting/viz_forces.py::_extract_npz_rs_forces`.
+
+**Deletion trigger:** once the full-component `rs/elem_fx_i … rs/elem_mz_j` block
+and its `force_map` reader are the only RS consumers — i.e. the 2D renderer reads
+the canonical keys and no supported archive predates the change.
+
+---
+
 ## Risk Assessment
 
 | Risk | Mitigation |

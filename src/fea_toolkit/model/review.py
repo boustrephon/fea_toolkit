@@ -1781,6 +1781,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         python -m fea_toolkit.model.review model.s2k --response-spectrum
         python -m fea_toolkit.model.review model.s2k --response-spectrum \\
             --spectrum-level rare --spectrum-intensity 7 --spectrum-site-class II
+        python -m fea_toolkit.model.review model.s2k --response-spectrum \\
+            --rs-element-forces --rs-combination cqc --npz review.npz
         python -m fea_toolkit.model.review model.s2k --analysis --npz results.npz
 
     Args:
@@ -1917,6 +1919,21 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Damping ratio for --response-spectrum (default: 0.05).",
     )
     parser.add_argument(
+        "--rs-element-forces",
+        action="store_true",
+        help=(
+            "Also record per-element response-spectrum forces in the NPZ "
+            "archive (implies --response-spectrum).  Enables per-element RS "
+            "force diagrams; costs an extra mode loop over every element."
+        ),
+    )
+    parser.add_argument(
+        "--rs-combination",
+        choices=("cqc", "srss"),
+        default="cqc",
+        help="Modal combination rule for --rs-element-forces (default: cqc).",
+    )
+    parser.add_argument(
         "--npz",
         default=None,
         metavar="PATH",
@@ -1934,19 +1951,27 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"error: file not found: {source}", file=sys.stderr)
         return 2
 
-    run_analysis = args.analysis or args.load_verify or args.wind_check or args.response_spectrum
+    run_analysis = (
+        args.analysis
+        or args.load_verify
+        or args.wind_check
+        or args.response_spectrum
+        or args.rs_element_forces
+    )
     analysis_config = (
         {
             "num_modes": args.num_modes,
             "load_verify": args.load_verify,
             "wind_check": args.wind_check,
-            "response_spectrum": args.response_spectrum,
+            "response_spectrum": args.response_spectrum or args.rs_element_forces,
             "spectrum": {
                 "level": args.spectrum_level,
                 "intensity": args.spectrum_intensity,
                 "site_class": args.spectrum_site_class,
                 "acceleration": args.spectrum_acceleration,
                 "damping": args.spectrum_damping,
+                "element_forces": args.rs_element_forces,
+                "combination": args.rs_combination,
             },
         }
         if run_analysis

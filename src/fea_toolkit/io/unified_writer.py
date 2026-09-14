@@ -193,10 +193,39 @@ def collect_rs_arrays(
     return arrays
 
 
+#: Element end-force components written by
+#: :func:`collect_rs_element_force_arrays`, matching the record keys produced by
+#: ``AnalysisBuilder.extract_element_rs_forces``.  NPZ keys are the lower-case
+#: forms (``rs/elem_fx_i`` … ``rs/elem_mz_j``), mirroring the static
+#: ``fx_i`` … ``mz_j`` convention.
+_RS_ELEMENT_FORCE_COMPONENTS = (
+    "Fx_i",
+    "Fy_i",
+    "Fz_i",
+    "Mx_i",
+    "My_i",
+    "Mz_i",
+    "Fx_j",
+    "Fy_j",
+    "Fz_j",
+    "Mx_j",
+    "My_j",
+    "Mz_j",
+)
+
+#: Deprecated per-element alias keys (see ``RS_ARRAYS`` in results_schema.py).
+#:
+#: ``Vy``/``Vz`` used to be derived from the moment gradient; they now hold the
+#: local shears.  Written so the 2D RS renderer and older consumers keep
+#: working.  Delete alongside the schema aliases — see
+#: ``docs/deprecation_plan.md``.
+_RS_ELEMENT_LEGACY_ALIASES = ("Vy_i", "Vy_j", "Vz_i", "Vz_j", "My_i", "My_j", "Mz_i", "Mz_j")
+
+
 def collect_rs_element_force_arrays(
     rs_element_forces: Optional[dict[str, Any]] = None,
 ) -> dict[str, np.ndarray]:
-    """Extract element-level RS force arrays (CQC-combined).
+    """Extract element-level RS force arrays (combined across modes).
 
     Expects *rs_element_forces* to have the structure returned by
     ``extract_element_rs_forces()``::
@@ -204,14 +233,16 @@ def collect_rs_element_force_arrays(
         {
             "element_results": [
                 {"elem_id": "1", "z_bot": 0.0, "z_mid": 5.0,
-                 "Vy_i": 10.0, "Vy_j": -10.0, ...},
+                 "Fx_i": 3.0, "Fy_i": 10.0, ..., "Mz_j": -12.0},
                 ...
             ],
-            ...
+            "combination": "cqc",
         }
 
-    Writes ``rs/elem_sap_id``, ``rs/elem_z_bot``, ``rs/elem_z_mid``,
-    ``rs/elem_Vy_i`` … ``rs/elem_Mz_j`` (one row per element).
+    Writes ``rs/elem_sap_id``, ``rs/elem_z_bot``, ``rs/elem_z_mid``, the
+    combination rule (``rs/elem_combination``) and the full local end-force set
+    ``rs/elem_fx_i`` … ``rs/elem_mz_j`` — one row per element — plus the
+    deprecated ``rs/elem_Vy_i`` … ``rs/elem_Mz_j`` aliases.
     """
     arrays: dict[str, np.ndarray] = {}
     if not rs_element_forces:
@@ -224,10 +255,19 @@ def collect_rs_element_force_arrays(
     arrays["rs/elem_sap_id"] = np.array([r["elem_id"] for r in results], dtype=str)
     arrays["rs/elem_z_bot"] = np.array([r["z_bot"] for r in results], dtype=float)
     arrays["rs/elem_z_mid"] = np.array([r["z_mid"] for r in results], dtype=float)
+    arrays["rs/elem_combination"] = np.array(
+        [str(rs_element_forces.get("combination") or "cqc")], dtype=str
+    )
+    arrays["rs/elem_direction"] = np.array(
+        [str(rs_element_forces.get("direction") or "")], dtype=str
+    )
 
-    for qty in ("Vy_i", "Vy_j", "Vz_i", "Vz_j", "My_i", "My_j", "Mz_i", "Mz_j"):
-        key = f"rs/elem_{qty}"
-        arrays[key] = np.array([r.get(qty, 0.0) for r in results], dtype=float)
+    for qty in _RS_ELEMENT_FORCE_COMPONENTS:
+        arrays[f"rs/elem_{qty.lower()}"] = np.array([r.get(qty, 0.0) for r in results], dtype=float)
+
+    # ── Legacy aliases (DEPRECATED — see _RS_ELEMENT_LEGACY_ALIASES) ──
+    for alias in _RS_ELEMENT_LEGACY_ALIASES:
+        arrays[f"rs/elem_{alias}"] = np.array([r.get(alias, 0.0) for r in results], dtype=float)
 
     return arrays
 

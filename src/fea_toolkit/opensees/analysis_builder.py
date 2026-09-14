@@ -682,6 +682,13 @@ def _run_rs_pass(
     # CQC nodal displacements of the first configured direction are kept.
     nodal_disp: dict[int, tuple] = {}
     nodal_disp_direction = directions[0] if directions else ""
+    # Element-level forces are likewise single-direction in the schema
+    # (``rs/elem_*`` has no direction axis), and are opt-in because the
+    # extraction is O(n_modes × n_elements) on top of the base-shear pass.
+    want_elem_forces = bool(cfg.get("element_forces"))
+    elem_forces: Optional[dict[str, Any]] = None
+    elem_forces_error: Optional[str] = None
+    elem_combination = str(cfg.get("combination") or "cqc").lower()
     for direction in directions:
         rs = builder.run_response_spectrum_analysis(
             num_modes=n_modes,
@@ -709,6 +716,26 @@ def _run_rs_pass(
             roof_srss = _roof_disp(disp_srss)
             if direction == nodal_disp_direction:
                 nodal_disp = disp_cqc
+        if want_elem_forces and direction == nodal_disp_direction:
+            # Per-element combined forces (local system) for the first
+            # configured direction — mirrors the single-direction nodal block.
+            try:
+                elem_forces = dict(
+                    builder.extract_element_rs_forces(
+                        num_modes=n_modes,
+                        modal_periods=periods,
+                        spectrum_periods=T_spec,
+                        spectrum_accels=Sa_spec,
+                        direction=direction,
+                        damping_ratio=zeta,
+                        combination=elem_combination,
+                        print_results=False,
+                    )
+                )
+                elem_forces["direction"] = direction
+            except Exception as exc:  # reported, never fatal to the review
+                elem_forces = None
+                elem_forces_error = f"{type(exc).__name__}: {exc}"
         out[direction] = {
             "base_shear_cqc": rs.get("base_shear_cqc", 0.0),
             "base_shear_srss": rs.get("base_shear_srss", 0.0),
@@ -738,6 +765,11 @@ def _run_rs_pass(
         "directions": out,
         "nodal_displacements": nodal_disp,
         "nodal_displacements_direction": nodal_disp_direction,
+        # Per-element combined forces (single direction, opt-in) and their
+        # diagnostics.  ``None`` when ``spectrum.element_forces`` was not set.
+        "element_forces": elem_forces,
+        "element_forces_direction": nodal_disp_direction if elem_forces else "",
+        "element_forces_error": elem_forces_error,
     }
 
 
@@ -795,7 +827,9 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
             ``response_spectrum`` (bool — run the GB 50011
             response-spectrum pass), ``spectrum`` (nested spectrum options:
             ``level``, ``intensity``, ``site_class``, ``acceleration``,
-            ``damping``, ``n_modes`` and ``directions``) and
+            ``damping``, ``n_modes``, ``directions``, ``element_forces`` —
+            opt-in per-element forces for the ``rs/elem_*`` block — and
+            ``combination`` — ``'cqc'`` (default) or ``'srss'``) and
             ``export_npz`` (output path for a unified geometry + modal +
             static NPZ via
             :func:`~fea_toolkit.io.npz_writer.write_results_npz`).
@@ -1021,6 +1055,11 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
                     rs_nodal_displacements=(result.get("response_spectrum") or {}).get(
                         "nodal_displacements"
                     )
+                    or None,
+                    # Per-element local forces for the ``rs/elem_*`` block
+                    # (opt-in via ``spectrum.element_forces``) — enables the
+                    # per-element RS force diagrams from the archive.
+                    rs_element_forces=(result.get("response_spectrum") or {}).get("element_forces")
                     or None,
                     fmt="npz",
                 )

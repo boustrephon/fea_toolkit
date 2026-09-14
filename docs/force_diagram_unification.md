@@ -95,6 +95,33 @@ class ForceDiagramData:
   `"element_results"` key (same rule as today's
   `plot_rs_force_diagram`).
 
+#### RS element forces from an NPZ archive
+
+`write_results()` stores per-element RS forces as the flat `rs/elem_*` block
+(`collect_rs_element_force_arrays`) rather than the `element_results` list of
+dicts the in-memory builder path yields.  `_extract_npz_rs_forces()`
+(`plotting/viz_forces.py`) bridges the two: it zips `rs/elem_sap_id`,
+`rs/elem_z_bot`, `rs/elem_z_mid` and the twelve `rs/elem_<component>` arrays
+back into records, tolerating the deprecated alias spellings, and returns `[]`
+when the block is absent (it is optional in the schema).
+
+`_resolve_source()` then builds both representations:
+
+- `series` — 2D quantity-vs-elevation data (via `_build_series_from_rs`), the
+  historical RS view;
+- `force_map` + `nodes` + `frames` — per-element geometry-matched forces
+  (via `_build_rs_force_map`, matched on `frame["id"]` ↔ `elem_id`), which the
+  3D renderer consumes.
+
+Because the stored RS forces are already in the element **local** system, the
+force-map entries expose them under the `*_i_local` / `*_j_local` variant keys,
+so `_compute_local_forces` takes its verbatim fast path instead of rotating
+already-local values a second time.
+
+Dispatch: RS renders **2D by default**; pass `dimension="3d"` (CLI:
+`--dimension 3d`) to get the per-element tube/flag view, which reuses the
+shared `_render_static_3d` renderer.
+
 Resolution order for units (first hit wins): explicit `force_unit` /
 `length_unit` args → builder/model units → in-memory dict `"units"` key →
 NPZ metadata.  **Never hardcode `kN`/`m`.**
