@@ -2224,6 +2224,39 @@ class TestAnimationTimerCallbackArity:
         assert len(fp.method_calls) == 1, fp.method_calls
         assert fp.method_calls[0][2].get("duration") == 17
 
+    def test_real_pyvista_signature_uses_duration(self):
+        """Pin the upstream contract that the helper depends on.
+
+        Guards against a regression *here* (someone "fixing" a ``TypeError`` by
+        switching to ``interval``) and against an upstream rename.  PyVista's
+        ``add_timer_event`` has taken ``duration`` since the method was added in
+        0.43, and its timer passes a single ``step`` argument — assertions
+        against the installed package, not a fake, are what make that explicit.
+        """
+        import inspect
+
+        import pyvista as pv
+
+        params = list(inspect.signature(pv.Plotter.add_timer_event).parameters)
+        assert params == ["self", "max_steps", "duration", "callback"], (
+            f"PyVista changed the add_timer_event signature: {params}"
+        )
+
+    def test_real_pyvista_timer_renders_and_passes_step(self):
+        """PyVista's ``Timer.execute`` passes one arg and renders itself.
+
+        If upstream ever stops calling ``Render()``, the explicit-render rule in
+        ``plot_mode_animation`` has to be revisited — so read the real source
+        rather than trusting the docstring.
+        """
+        import inspect
+
+        import pyvista as pv
+
+        src = inspect.getsource(pv.Timer.execute)
+        assert "self.callback(self.step)" in src, "Timer no longer passes a single step"
+        assert "Render()" in src, "PyVista's timer no longer renders — revisit the helper"
+
     def test_pyvista_signature_mismatch_falls_back_to_vtk(self):
         """A ``TypeError`` from the documented call falls back to VTK.
 

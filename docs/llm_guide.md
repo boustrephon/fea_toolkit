@@ -198,6 +198,18 @@ see `.clinerules` §3.11.
 
 All plot functions gracefully degrade to a warning if PyVista is not installed.
 
+### PyVista animation timer — verified contract
+
+`plotter.add_timer_event(max_steps, duration, callback)` — the keyword is
+**`duration`**, never `interval`, and the callback always receives exactly one
+argument (`step`).  PyVista renders each frame itself, so a callback registered
+through `add_timer_event` must **not** call `plotter.render()`.
+`_add_animation_timer` (in `plotting/viz_common.py`) returns `True` when PyVista
+owns the timer and `False` on the raw VTK `AddObserver("TimerEvent")` fallback —
+that path does not render, so the caller renders there.  Read
+`docs/dev_notes.md` → *PyVista animation timer* before changing it: this API has
+already caused one frozen-animation bug by a guessed keyword.
+
 ---
 
 ## 4. Known OpenSeesPy Constraints
@@ -402,6 +414,15 @@ print(ops_version())
 # Install optional deps:
 pip install pyvista matplotlib
 ```
+
+### Animation runs but the window only redraws on click
+
+The timer fell back to the raw VTK observer, which never repaints.  Check
+`_add_animation_timer` in `plotting/viz_common.py`: the PyVista call must pass
+`duration=`, not `interval=` — no PyVista release has ever accepted `interval`.
+A `True` return means PyVista's timer took it (and renders each frame); `False`
+means the caller must call `plotter.render()` itself.  See
+`docs/dev_notes.md` → *PyVista animation timer*.
 
 ### Wrong interpreter / environment (LLM tool shells)
 

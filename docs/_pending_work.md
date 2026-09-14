@@ -467,7 +467,19 @@ kept but re-documented honestly — its only load-bearing rule is truncating
 the `step` PyVista always supplies so `animate_pushover_deformation`'s
 zero-argument `_timer_callback` does not raise `TypeError`.
 
-**Validation.**  Full suite `1506 passed, 1 skipped, 4 xfailed`;
+**Prevention (round 2).**  The fix was only half the job — the contract also
+had to land where contributors and agents actually look.  `docs/dev_notes.md`
+holds the evidence table and the two lessons; `.clinerules` gains anti-pattern
+13 (*never guess a keyword to satisfy a `TypeError`*) plus a new §12
+*Third-Party API Assumptions*, whose §12.1 pins the timer contract; and
+`docs/llm_guide.md` gains the same summary under Visualisation plus a
+Quick-Debugging entry for "animation only redraws on click".  Two tests now
+assert the contract against the **installed PyVista** rather than a fake
+(`test_real_pyvista_signature_uses_duration`,
+`test_real_pyvista_timer_renders_and_passes_step`), so an upstream rename or a
+dropped `Render()` fails loudly instead of silently degrading onto the VTK path.
+
+**Validation.**  Full suite `1508 passed, 1 skipped, 4 xfailed`;
 `mkdocs build --strict` exit 0; ruff clean.  New tests assert *which keyword*
 is passed (`test_modern_pyvista_uses_duration_kwarg`,
 `test_pyvista_signature_mismatch_falls_back_to_vtk`) — the gap that let the

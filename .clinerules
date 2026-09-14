@@ -435,6 +435,11 @@ cleared between attempts.
 > and double-scaling of model-unit values (1000× weak relative to a
 > kN-m model's force unit),
 > while preserving the existing SI/scaling rule for all other paths.
+13. **Do not** guess a third-party keyword name to satisfy a `TypeError`.  A
+    chain of speculative spellings — as `_add_animation_timer` once had for
+    PyVista's `add_timer_event` — hides the failure it was meant to absorb and
+    silently lands on a degraded path.  Verify the signature from the installed
+    source, the versioned docs or the upstream example first.  See §12.
 
 ## 10. Tool-Call Hygiene (prevent malformed tool-call XML)
 
@@ -510,3 +515,43 @@ suspected.  Do not re-audit these without a concrete reason:
   ``"Elevation"`` column; otherwise the first column containing
   ``"Elevation"``; otherwise ``None``.  Do not reintroduce inline
   ``any(...)`` / nested-ternary checks.
+
+## 12. Third-Party API Assumptions (verify — do not guess)
+
+The toolkit's one recurring, self-inflicted failure mode is **writing a
+version-compatibility shim against an API nobody read**.  Two behaviours are
+banned:
+
+1. **Inventing a keyword name.**  If a call raises `TypeError`, do *not* add a
+   fallback spelling to see what sticks.  Confirm the real signature first —
+   `inspect.signature()` on the installed object, the version-specific docs, or
+   the upstream example — then use that name.
+2. **Asserting library behaviour in a docstring without evidence.**  A wrong
+   docstring is worse than none: it is believed, and then re-implemented and
+   re-tested around (which is exactly how the `(step, plotter)` myth below
+   survived into an entire test class).
+
+When a genuine version fallback *is* needed (e.g. PyVista's
+`add_scalar_bar(lookup_table=...)`), keep it to the documented call plus one
+honest fallback, state in a comment which version it serves, and add a test
+asserting **which keyword was actually passed** — fakes that accept any
+keyword cannot catch a wrong call.
+
+### 12.1 PyVista animation timer — do not re-litigate
+
+Verified against `pyvista/plotting/render_window_interactor.py` at v0.43, v0.44
+and `main`, plus the 0.43.1 API docs and the gallery animation example:
+
+| Fact | Detail |
+|---|---|
+| Signature is `add_timer_event(max_steps, duration, callback)` | the keyword is **`duration`**; `interval` was never a parameter name in any release |
+| The callback receives **exactly one** argument, `step` | `Timer.execute` is `self.callback(self.step)`; nothing ever passes `(step, plotter)` |
+| PyVista renders each frame itself | `Timer.execute` ends in `iren.GetRenderWindow().Render()` (PyVista PR #5618) |
+| The project floors PyVista at `>=0.44` | two releases *after* the method was added in 0.43, so `duration` is always available |
+
+Consequence: a callback registered through `add_timer_event` must **not** call
+`plotter.render()`.  Only the raw VTK `AddObserver("TimerEvent")` fallback
+needs that — which is why `_add_animation_timer` returns a bool telling the
+caller whether PyVista owns the timer (`True`, it renders) or not (`False`,
+caller renders).  Full write-up, bug history and lessons:
+`docs/dev_notes.md` → *PyVista animation timer — verified contract*.
