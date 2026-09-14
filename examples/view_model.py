@@ -132,7 +132,7 @@ def show_static(builder, md, quantity, scale):
     plot_force_diagram(builder, elem_forces, quantity=quantity, mode="flag", dimension="3d")
 
 
-def show_modal(builder, num_modes, mode):
+def show_modal(builder, num_modes, mode, mode_scale=10.0):
     """Modal analysis with an animated mode shape."""
     builder.compute_seismic_masses()
     modal = builder.run_modal_analysis(num_modes=num_modes, print_results=True)
@@ -145,11 +145,12 @@ def show_modal(builder, num_modes, mode):
         shapes,
         mode=min(mode, n - 1),
         periods=modal["periods"],
+        scale=mode_scale,
         animate=True,
     )
 
 
-def show_rs(builder, md, num_modes, alpha_max, tg, damping, scale):
+def show_rs(builder, md, num_modes, alpha_max, tg, damping, scale, mode_scale=10.0):
     """Response-spectrum analysis (GB 50011) with the CQC deformed shape."""
     builder.compute_seismic_masses()
     modal = builder.run_modal_analysis(num_modes=num_modes, print_results=True)
@@ -195,7 +196,9 @@ def show_rs(builder, md, num_modes, alpha_max, tg, damping, scale):
         print(f"\nResponse-spectrum analysis failed ({e}).")
         print("Falling back to the mode-shape view - try a smaller --num-modes.")
         shapes = builder.extract_mode_shapes(n)
-        plot_mode_animation(builder, shapes, mode=0, periods=periods, animate=True)
+        plot_mode_animation(
+            builder, shapes, mode=0, periods=periods, scale=mode_scale, animate=True
+        )
         return
 
     plot_deformed_displacement_3d(builder, disp, scale=scale, show_undeformed=True)
@@ -246,7 +249,7 @@ def show_npz(path, args):
     if args.result == "static":
         plot_force_diagram(str(path), quantity=args.quantity)
     elif args.result == "modal":
-        plot_mode_animation(data, None, mode=args.mode)
+        plot_mode_animation(data, None, mode=args.mode, scale=args.mode_scale)
     elif args.result == "rs":
         # Per-element response-spectrum forces require the rs/elem_* block,
         # which only archives written with element-level RS forces carry.
@@ -299,9 +302,18 @@ def run_s2k(md, args):
     if args.result == "static":
         show_static(builder, md, args.quantity, args.scale)
     elif args.result == "modal":
-        show_modal(builder, args.num_modes, args.mode)
+        show_modal(builder, args.num_modes, args.mode, args.mode_scale)
     elif args.result == "rs":
-        show_rs(builder, md, args.num_modes, args.alpha_max, args.tg, args.damping, args.scale)
+        show_rs(
+            builder,
+            md,
+            args.num_modes,
+            args.alpha_max,
+            args.tg,
+            args.damping,
+            args.scale,
+            args.mode_scale,
+        )
     elif args.result == "pushover":
         show_pushover(builder, md)
     elif args.result == "interactive":
@@ -349,6 +361,17 @@ def main():
     parser.add_argument("--mode", type=int, default=0, help="Mode index (modal).")
     parser.add_argument("--num-modes", type=int, default=12, help="Number of modes.")
     parser.add_argument("--scale", type=float, default=50.0, help="Deformation magnification.")
+    parser.add_argument(
+        "--mode-scale",
+        type=float,
+        default=10.0,
+        help=(
+            "Mode-shape exaggeration for --result modal, as a percentage of the "
+            "model's largest dimension (default: 10).  Mode shapes are "
+            "mass-normalised by OpenSees, so their magnitudes are not "
+            "displacements and are normalised to unit peak before scaling."
+        ),
+    )
     parser.add_argument(
         "--element-type",
         default="elasticBeamColumn",

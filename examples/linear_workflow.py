@@ -1535,7 +1535,7 @@ def run_all(
                     shapes,
                     modal,
                     mode_indices=visualize_modes if isinstance(visualize_modes, list) else None,
-                    scale=50.0,
+                    scale=15.0,
                     out_dir="examples/output",
                     save_gif=save_gif,
                 )

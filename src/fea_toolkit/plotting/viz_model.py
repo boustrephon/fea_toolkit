@@ -1361,7 +1361,7 @@ def plot_mode_animation(
     mode=0,
     *,
     collapse_to_parents=False,
-    scale=30.0,
+    scale=10.0,
     show_original=True,
     shrink=0.0,
     animate=True,
@@ -1393,7 +1393,19 @@ def plot_mode_animation(
             ``extract_mode_shapes()``, OR ``None`` to extract from NPZ.
         mode: 0‑based mode index.
         collapse_to_parents: Show unsplit parent elements (default ``False``).
-        scale: Displacement magnification factor.
+        scale: Mode-shape exaggeration as a **percentage of the model's
+            largest bounding-box dimension** (default ``10.0`` = 10%).
+
+            The shape is normalised to unit peak before scaling, so the
+            displayed amplitude is comparable across modes.  This matters
+            because ``ops.nodeEigenvector`` returns *mass-normalised*
+            eigenvectors (``phiᵀM phi = 1``): their components are not
+            displacements and vary by orders of magnitude between modes — a
+            local mode with a small modal mass has far larger components than
+            a global sway mode.  Scaling the raw components by a fixed factor
+            made global modes look reasonable while local modes exploded.
+            This matches the convention already used by the Rhino deformed
+            overlay (see ``rhino.results`` auto-scale).
         show_original: Show undeformed model in grey.
         shrink: Fraction to shrink frame lines toward their midpoint
             (0.0 = full length, 0.1 = 10 percent gap at each end).
@@ -1464,6 +1476,34 @@ def plot_mode_animation(
 
     # Resolve mesh geometry into common format
     data = _resolve_mesh_data(source, collapse_to_parents=collapse_to_parents)
+
+    # ── Mode-shape normalisation and display amplitude ──────────────
+    # ``ops.nodeEigenvector`` returns *mass-normalised* eigenvectors
+    # (phiᵀM phi = 1), so their components are not displacements and their
+    # magnitude depends on the modal mass.  A local mode (tiny modal mass)
+    # therefore has far larger components than a global sway mode: on the
+    # pipe-rack model the peak component is ~0.23 for modes 1-3 but ~4.5 for
+    # mode 4 — a ~20x spread.  Multiplying those raw values by a fixed factor
+    # made the global modes look right and the local modes explode.
+    #
+    # Normalise the shape to unit peak, then express the exaggeration as a
+    # percentage of the model span — the same convention the Rhino deformed
+    # overlay uses (``rhino.results``: peak = 5% of span when auto-scaling).
+    peak = max((abs(c) for d in disp.values() for c in d), default=0.0)
+    if peak > 0.0:
+        disp = {tag: tuple(c / peak for c in d) for tag, d in disp.items()}
+
+    _node_xyz = list(data["nodes"].values())
+    _span = (
+        max(
+            (max(nd[k] for nd in _node_xyz) - min(nd[k] for nd in _node_xyz))
+            for k in ("x", "y", "z")
+        )
+        if _node_xyz
+        else 0.0
+    )
+    # ``scale`` is a percentage of the span; convert to a displacement factor.
+    scale = (float(scale) / 100.0) * max(_span, 1e-12)
 
     # ── Separate inactive (parent) shells from active shells ──
     # Also group active shells by section name for per-section colouring.

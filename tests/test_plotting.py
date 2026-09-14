@@ -617,6 +617,46 @@ class TestResolveMeshData:
         assert pl is not None
         pl.close()
 
+    def test_mode_amplitude_is_normalised(self, sample_npz_data):
+        """Mode-shape amplitude must not depend on the eigenvector magnitude.
+
+        ``ops.nodeEigenvector`` returns *mass-normalised* eigenvectors
+        (``phiᵀM phi = 1``), so a local mode with a small modal mass has far
+        larger components than a global sway mode — ~20x on the pipe-rack
+        model.  Two shapes differing only by a constant factor must therefore
+        render identically, which is what normalising to unit peak achieves.
+        """
+        pytest.importorskip("IPython")  # notebook display needs IPython
+        from fea_toolkit.plotting import plot_mode_animation
+
+        base = {1: (0.0, 0.0, 0.0), 2: (0.25, 0.0, 0.0), 3: (0.5, 0.0, 0.0)}
+
+        def _render(disp, scale):
+            pl = plot_mode_animation(
+                sample_npz_data,
+                {0: disp},
+                mode=0,
+                scale=scale,
+                animate=False,
+                notebook=True,
+            )
+            bounds = pl.bounds
+            pl.close()
+            return bounds
+
+        # 100% of span, so the deformed mesh dominates the plotter bounds.
+        small = _render(base, 100.0)
+        big = _render({k: tuple(c * 20.0 for c in v) for k, v in base.items()}, 100.0)
+        assert small == pytest.approx(big, rel=1e-9, abs=1e-9)
+
+        # ...and a 20x smaller shape does NOT shrink the display either.
+        shrunk = _render({k: tuple(c / 20.0 for c in v) for k, v in base.items()}, 100.0)
+        assert shrunk == pytest.approx(small, rel=1e-9, abs=1e-9)
+
+        # ``scale`` itself still controls the exaggeration.
+        doubled = _render(base, 200.0)
+        assert doubled != pytest.approx(small, rel=1e-6, abs=1e-6)
+
     def test_force_diagram_collapse_to_parents(self):
         """plot_force_diagram accepts collapse_to_parents parameter."""
         from fea_toolkit.plotting import plot_force_diagram

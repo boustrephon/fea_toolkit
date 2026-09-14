@@ -133,15 +133,35 @@ from fea_toolkit.plotting import plot_mode_animation
 # Animate mode 4 (0‑based) interactively
 plot_mode_animation(
     builder, shapes, mode=4,
-    scale=50.0, animate=True, periods=modal_result["periods"],
+    scale=15.0, animate=True, periods=modal_result["periods"],
 )
 
 # Static (non‑animated) display with section‑coloured shells
 plot_mode_animation(
     builder, shapes, mode=4,
-    scale=50.0, animate=False, periods=modal_result["periods"],
+    scale=15.0, animate=False, periods=modal_result["periods"],
 )
 ```
+
+**Amplitude and `scale`**
+
+``scale`` is the mode-shape exaggeration expressed as a **percentage of the
+model's largest bounding-box dimension** (default ``10`` = 10%).
+
+The shape is normalised to unit peak before scaling, and that normalisation is
+essential.  ``ops.nodeEigenvector`` returns *mass-normalised* eigenvectors
+(:math:`\phi^T M \phi = 1`), so their components are **not displacements** —
+the magnitude depends on the modal mass, and a local mode with a small modal
+mass has far larger components than a global sway mode.  Scaling the raw
+components by a fixed factor therefore looks reasonable for the global modes
+and explodes for the local ones.  On the BPPS pipe-rack model, for example,
+the peak component is 0.23 for modes 1–3 but 4.50 for mode 4 — a ~20× spread —
+so a fixed factor of 30 displayed a **135 m** peak displacement on a 78 m
+model.  After normalisation every mode shows the same peak (10% of span
+= 7.8 m).
+
+This is the same convention the Rhino deformed overlay uses — see
+``fea_toolkit.rhino.results``, which auto-scales to 5% of the model span.
 
 The ``project_b_linear.py`` pipeline also supports a ``--solver`` flag for
 selecting the eigenvalue solver used during modal analysis:
