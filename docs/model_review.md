@@ -292,7 +292,8 @@ result = {
                          discrepancy, passed},
   "brace_buckling": None | {detected, k_factor, members},
   "analysis": None | {ok, periods, mass_participation, static,
-                      load_verification, wind, mass_source, error},
+                      load_verification, wind, mass_source, error,
+                      load_verification_error?, wind_error?},
   "npz": str | None,
   "npz_error": str | None,
   "npz_contents": dict | None,
@@ -311,7 +312,10 @@ the `from_elements` / `from_masses` / `from_loads` flags and the
 The `analysis` sub-dict's `load_verification` (a list of per-pattern
 applied-vs-reaction records) and `wind` (structured data from
 `wind_sanity_data()`: `rows` and `within_10pct`, plus the raw values) are
-populated by `--load-verify` / `--wind-check` respectively.
+populated by `--load-verify` / `--wind-check` respectively.  A failure in
+either check leaves the corresponding `load_verification_error` /
+`wind_error` string in place instead (both keys are optional and appear
+only when that check raised).
 `npz` holds the path written by `--npz` (with any failure in `npz_error`);
 `npz_contents` holds the archive manifest (geometry + analysis results)
 from `describe_results_npz()`.
