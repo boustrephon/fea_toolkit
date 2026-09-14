@@ -39,8 +39,18 @@ from ..io.report import bounding_box
 from ..model.sap_data import SAPModelData, patterns_from_case
 
 
-def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: str = "Wind+Y"):
-    """Return a markdown paragraph checking wind loads against face area.
+def wind_sanity_data(
+    md,
+    df_linear,
+    wind_case_x: str = "Wind+X",
+    wind_case_y: str = "Wind+Y",
+) -> dict:
+    """Return structured wind-load sanity-check data.
+
+    Computes the wind base shear as a pressure over the bounding-box face
+    areas for the X and Y wind cases.  This is the structured form of
+    :func:`wind_sanity_check`, so callers that build their own tables (e.g.
+    the model review) can reuse the same numbers.
 
     Parameters
     ----------
@@ -53,8 +63,11 @@ def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: s
 
     Returns
     -------
-    str
-        Markdown paragraph with bounding-box summary and wind-pressure table.
+    dict
+        Keys ``rows`` (unit-labelled table rows: ``Face``, ``Area``,
+        ``Total``, ``Pressure``), ``within_10pct`` (bool), the raw values
+        ``x_face`` / ``y_face`` / ``fx`` / ``fy`` / ``p_x`` / ``p_y``, the
+        ``force_unit`` / ``length_unit`` labels and the ``bounding_box``.
     """
     bb = bounding_box(md)
 
@@ -72,6 +85,64 @@ def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: s
     p_x = fx / x_face if x_face > 0 else 0
     p_y = fy / y_face if y_face > 0 else 0
 
+    rows = [
+        {
+            "Face": "Wind +X (Y-Z face)",
+            f"Area ({lu}\u00b2)": f"{x_face:.0f}",
+            f"Total ({fu})": f"{fx:,.0f}",
+            f"Pressure ({fu}/{lu}\u00b2)": f"{p_x:.2f}",
+        },
+        {
+            "Face": "Wind +Y (X-Z face)",
+            f"Area ({lu}\u00b2)": f"{y_face:.0f}",
+            f"Total ({fu})": f"{fy:,.0f}",
+            f"Pressure ({fu}/{lu}\u00b2)": f"{p_y:.2f}",
+        },
+    ]
+
+    return {
+        "rows": rows,
+        "within_10pct": bool(max(p_x, p_y) > 0 and abs(p_x - p_y) / max(p_x, p_y) < 0.1),
+        "x_face": x_face,
+        "y_face": y_face,
+        "fx": fx,
+        "fy": fy,
+        "p_x": p_x,
+        "p_y": p_y,
+        "force_unit": fu,
+        "length_unit": lu,
+        "bounding_box": bb,
+    }
+
+
+def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: str = "Wind+Y"):
+    """Return a markdown paragraph checking wind loads against face area.
+
+    Parameters
+    ----------
+    md : SAPModelData
+        Model data (for node coordinates and units).
+    df_linear : pd.DataFrame
+        Linear analysis results; must contain ``Case``, ``Fx``, ``Fy`` columns.
+    wind_case_x, wind_case_y : str
+        Case names for the X and Y wind load patterns.
+
+    Returns
+    -------
+    str
+        Markdown paragraph with bounding-box summary and wind-pressure table.
+    """
+    data = wind_sanity_data(md, df_linear, wind_case_x, wind_case_y)
+    bb = data["bounding_box"]
+    fu = data["force_unit"]
+    lu = data["length_unit"]
+    x_face = data["x_face"]
+    y_face = data["y_face"]
+    fx = data["fx"]
+    fy = data["fy"]
+    p_x = data["p_x"]
+    p_y = data["p_y"]
+
     lines = [
         f"**Bounding box:** "
         f"{bb['x_span']:.1f} {lu} (X) × "
@@ -87,7 +158,7 @@ def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: s
         f"| Wind +Y (X‑Z face) | {y_face:.0f} | {fy:,.0f} | {p_y:.2f} |",
     ]
 
-    if max(p_x, p_y) > 0 and abs(p_x - p_y) / max(p_x, p_y) < 0.1:
+    if data["within_10pct"]:
         lines.append("")
         lines.append(
             "✅ Pressures are within 10 % — wind loads are consistent "

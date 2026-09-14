@@ -37,6 +37,7 @@ mesh-remesh = [
 report = [
     "pandas>=1.5",
     "imageio>=2.36",   # animated GIF export (report figures / examples)
+    "tabulate>=0.9",   # gridded/pipe tables in model.review (optional)
     ]
 docs = [
     "mkdocs==1.6.1",

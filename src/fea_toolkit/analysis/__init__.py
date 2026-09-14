@@ -35,6 +35,7 @@ from .linear import (
     run_linear_cases,
     static_load_verification,
     wind_sanity_check,
+    wind_sanity_data,
 )
 from .modal import run_modal_analysis
 from .nonlinear_dynamic import run_nonlinear_dynamic_analysis
@@ -83,4 +84,5 @@ __all__ = [
     "static_load_verification",
     "three_point_axial_surface",
     "wind_sanity_check",
+    "wind_sanity_data",
 ]

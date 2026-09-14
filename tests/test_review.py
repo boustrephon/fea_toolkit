@@ -11,7 +11,7 @@ from fea_toolkit.model import (
     review_model,
     review_s2k_file,
 )
-from fea_toolkit.model.review import main
+from fea_toolkit.model.review import _format_table, main
 from fea_toolkit.model.sap_data import (
     FRAME_RELEASE_DOF_LABELS,
     FrameElement,
@@ -409,7 +409,9 @@ def _fake_analysis(n_modes: int = 8) -> dict:
     """A synthetic ``analysis`` block — no OpenSees required.
 
     Mode ``i`` (1-based) carries ``mx = i - 1`` percent, so mode 1 sits at
-    0 % participation and every later mode clears a 1 % threshold.
+    0 % participation and every later mode clears a 1 % threshold.  The
+    rotational ratios carry distinctive constants (``Rx = 10 + i`` etc.)
+    so the 6-DOF columns are unambiguous in the rendered tables.
     """
     return {
         "ok": True,
@@ -418,9 +420,13 @@ def _fake_analysis(n_modes: int = 8) -> dict:
             {
                 "mode": i + 1,
                 "period": 1.0 / (i + 1),
+                "frequency": float(i + 1),
                 "mx": float(i),
                 "my": 0.0,
                 "mz": 0.0,
+                "rx": 10.0 + i,
+                "ry": 20.0 + i,
+                "rz": 30.0 + i,
             }
             for i in range(n_modes)
         ],
@@ -444,43 +450,49 @@ class TestModeDisplay:
 
     def test_text_default_shows_every_mode(self, result):
         text = format_review_report(result)
-        assert "mode 8:" in text  # no longer truncated to the first five
+        assert "0.1250" in text  # mode 8, T = 1/8 s — no longer truncated
         assert "not shown" not in text
+
+    def test_text_includes_rotational_columns(self, result):
+        text = format_review_report(result)
+        for header in ("Mx (%)", "My (%)", "Mz (%)", "Rx (%)", "Ry (%)", "Rz (%)"):
+            assert header in text
+        # Cumulative participation is summed over all modes.
+        assert "Rx=108.00%" in text  # sum(10..17)
 
     def test_text_min_participation_filters(self, result):
         # Mode 1 has mx = 0 % -> dropped; modes 2..8 all clear 1 %.
         text = format_review_report(result, min_participation=1.0)
-        assert "mode 1:" not in text
-        assert "mode 2:" in text
-        assert "mode 8:" in text
+        assert "1.0000" not in text  # mode 1 period
+        assert "0.5000" in text  # mode 2 period
+        assert "0.1250" in text  # mode 8 period
         assert "1 further mode(s) not shown" in text
 
     def test_text_max_modes_caps(self, result):
         text = format_review_report(result, max_modes=3)
-        assert "mode 3:" in text
-        assert "mode 4:" not in text
+        assert "0.3333" in text  # mode 3 period
+        assert "0.2500" not in text  # mode 4 period beyond the cap
         assert "5 further mode(s) not shown" in text
 
     def test_text_filters_combine(self, result):
         # min_participation keeps modes 2..8, then max_modes keeps two.
         text = format_review_report(result, max_modes=2, min_participation=1.0)
-        assert "mode 2:" in text
-        assert "mode 3:" in text
-        assert "mode 4:" not in text
+        assert "0.5000" in text
+        assert "0.3333" in text
+        assert "0.2500" not in text  # beyond --max-modes
         assert "6 further mode(s) not shown" in text
 
     def test_markdown_default_shows_every_mode(self, result):
         md_text = format_review_markdown(result)
-        # mode 8 has T = 1/8 = 0.125 s -> its table row must be present.
-        assert "| 8 | 0.1250 |" in md_text
+        assert "0.1250" in md_text  # mode 8, T = 1/8 s
         assert "not shown" not in md_text
 
     def test_markdown_honours_limits(self, result):
         md_text = format_review_markdown(result, max_modes=2, min_participation=1.0)
         # min_participation keeps modes 2..8, then max_modes keeps two.
-        assert "| 2 | 0.5000 |" in md_text
-        assert "| 3 | 0.3333 |" in md_text
-        assert "| 4 | 0.2500 |" not in md_text  # beyond --max-modes
+        assert "0.5000" in md_text
+        assert "0.3333" in md_text
+        assert "0.2500" not in md_text  # beyond --max-modes
         assert "_6 further mode(s) not shown._" in md_text
 
     def test_cli_accepts_mode_display_flags(self, tmp_path):
@@ -525,3 +537,289 @@ class TestModeDisplay:
         )
         assert code == 0
         assert out_file.read_text(encoding="utf-8").startswith("# SAP2000 Model Review")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Table formatting (tabulate-backed, with a dependency-free fallback)
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _no_tabulate_import(monkeypatch) -> None:
+    """Force ``import tabulate`` to fail (exercise the fallback paths)."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _import(name, *args, **kwargs):
+        if name == "tabulate":
+            raise ImportError("simulated: tabulate not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _import)
+
+
+class TestFormatTable:
+    def test_empty_rows_render_empty(self):
+        assert _format_table([]) == ""
+
+    def test_rows_render_values(self):
+        text = _format_table([{"A": "x", "B": "1"}, {"A": "yy", "B": "2"}])
+        for token in ("A", "B", "x", "yy"):
+            assert token in text
+
+    def test_grid_format_when_tabulate_available(self):
+        pytest.importorskip("tabulate")
+        text = _format_table([{"A": "1", "B": "2"}], tablefmt="grid")
+        assert "+" in text and "|" in text
+
+    def test_markdown_fallback_is_a_pipe_table(self, monkeypatch):
+        _no_tabulate_import(monkeypatch)
+        lines = _format_table([{"A": "1", "B": "2"}], tablefmt="github").splitlines()
+        assert lines[0] == "| A | B |"
+        assert lines[1] == "|---|---|"
+        assert lines[2] == "| 1 | 2 |"
+
+    def test_fixed_width_fallback_when_no_tabulate(self, monkeypatch):
+        _no_tabulate_import(monkeypatch)
+        text = _format_table([{"A": "1", "Long": "2"}])
+        assert "A" in text and "Long" in text
+        assert "|" not in text  # not a pipe table
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Solver-free self-weight check
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestSelfWeight:
+    def test_absent_by_default(self, sample_review):
+        _md, result = sample_review
+        assert result["self_weight"] is None
+
+    def test_expected_weight_reported(self):
+        md = _parse("clean_model.s2k")
+        sw = review_model(md, self_weight=True)["self_weight"]
+        assert sw is not None
+        assert sw["expected"] > 0
+        assert sw["by_section"]
+        # Solver-free: applied / discrepancy / passed stay unset.
+        assert sw["applied"] is None
+        assert sw["discrepancy"] is None
+        assert sw["passed"] is None
+
+    def test_formatters_render_self_weight(self):
+        md = _parse("clean_model.s2k")
+        result = review_model(md, self_weight=True)
+        assert "Self-weight" in format_review_report(result)
+        assert "## Self-weight" in format_review_markdown(result)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Brace buckling check (skipped when no braces are present)
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestBraceBuckling:
+    def test_absent_by_default(self, sample_review):
+        _md, result = sample_review
+        assert result["brace_buckling"] is None
+
+    def test_skipped_when_no_braces(self):
+        md = _parse("clean_model.s2k")
+        block = review_model(md, brace_buckling=True)["brace_buckling"]
+        assert block["detected"] is False
+        assert block["members"] == {}
+
+    def test_detected_when_braces_present(self, sample_review):
+        md, _result = sample_review
+        block = review_model(md, brace_buckling=True, brace_k=0.8)["brace_buckling"]
+        assert block["detected"] is True
+        assert block["k_factor"] == 0.8
+        assert block["members"]
+        member = next(iter(block["members"].values()))
+        assert member["P_cr"] > 0
+        assert member["slenderness"] > 0
+
+    def test_text_shows_no_brace_note(self):
+        md = _parse("clean_model.s2k")
+        text = format_review_report(review_model(md, brace_buckling=True))
+        assert "No brace sections found in model." in text
+
+    def test_markdown_shows_no_brace_note(self):
+        md = _parse("clean_model.s2k")
+        md_text = format_review_markdown(review_model(md, brace_buckling=True))
+        assert "_No brace sections found in model._" in md_text
+
+    def test_num_braces_caps_rows(self, sample_review):
+        md, _result = sample_review
+        result = review_model(md, brace_buckling=True)
+        total = len(result["brace_buckling"]["members"])
+        assert total > 2
+        text = format_review_report(result, num_braces=2)
+        assert f"{total - 2} further brace(s) not shown" in text
+
+    def test_cli_brace_and_self_weight_flags(self, tmp_path):
+        out_file = tmp_path / "review.md"
+        code = main(
+            [
+                str(FIXTURES_DIR / "sample.s2k"),
+                "--brace-buckling",
+                "--k-factor",
+                "0.7",
+                "--num-braces",
+                "2",
+                "--self-weight",
+                "--format",
+                "markdown",
+                "--out",
+                str(out_file),
+            ]
+        )
+        assert code in (0, 1)  # parsed successfully (2 would be a usage error)
+        text = out_file.read_text(encoding="utf-8")
+        assert "## Self-weight" in text
+        assert "## Brace buckling" in text
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Analysis-phase checks (load verification / wind) — require OpenSees
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _wipe() -> None:
+    from openseespy.opensees import wipe
+
+    wipe()
+
+
+class TestAnalysisChecks:
+    def test_run_review_analysis_exposes_optional_keys(self):
+        pytest.importorskip("openseespy.opensees")
+        from fea_toolkit.opensees.analysis_builder import run_review_analysis
+
+        md = _parse("sample.s2k")
+        try:
+            result = run_review_analysis(md, {"num_modes": 2, "load_verify": True})
+        finally:
+            _wipe()
+        assert "load_verification" in result
+        assert "wind" in result
+        # sample.s2k defines a DEAD pattern -> one verification row.
+        assert result["load_verification"]
+        assert result["load_verification"][0]["Load Pattern"] == "DEAD"
+
+    def test_no_pattern_model_reports_empty_verification(self):
+        pytest.importorskip("openseespy.opensees")
+        from fea_toolkit.opensees.analysis_builder import run_review_analysis
+
+        md = _parse("clean_model.s2k")
+        try:
+            result = run_review_analysis(md, {"num_modes": 2, "load_verify": True})
+        finally:
+            _wipe()
+        assert result["load_verification"] == []
+        assert "load_verification_error" not in result
+
+    def test_review_model_threads_analysis_checks(self):
+        pytest.importorskip("openseespy.opensees")
+        md = _parse("sample.s2k")
+        try:
+            result = review_model(
+                md,
+                include_analysis=True,
+                analysis_config={"num_modes": 2, "load_verify": True, "wind_check": True},
+            )
+        finally:
+            _wipe()
+        analysis = result["analysis"]
+        assert analysis["load_verification"]
+        # Structured wind-sanity data (rendered as a table by the formatters).
+        assert isinstance(analysis["wind"], dict)
+        assert analysis["wind"]["rows"]
+        # 6-DOF participation is present on every modal row.
+        for row in analysis["mass_participation"]:
+            assert {"mx", "my", "mz", "rx", "ry", "rz"} <= set(row)
+        # Both formatters surface the analysis-phase tables.
+        text = format_review_report(result)
+        assert "Load verification" in text
+        assert "Wind sanity check" in text
+        md_text = format_review_markdown(result)
+        assert "### Load verification" in md_text
+        assert "### Wind sanity check" in md_text
+
+
+# ═══════════════════════════════════════════════════════════════════
+# NPZ export (geometry, and optionally modal + static results)
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestNpzExport:
+    def test_absent_by_default(self, sample_review):
+        _md, result = sample_review
+        assert result["npz"] is None
+        assert result["npz_error"] is None
+
+    def test_geometry_only_export(self, tmp_path, sample_review):
+        md, _result = sample_review
+        npz_path = tmp_path / "geometry.npz"
+        result = review_model(md, export_npz=npz_path)
+        assert result["npz_error"] is None
+        assert result["npz"] is not None
+        assert npz_path.exists()
+
+        from fea_toolkit.io.npz_reader import read_results_npz
+
+        data = read_results_npz(str(npz_path))
+        assert "node_tag" in data
+        assert len(data["node_tag"]) > 0
+        # Geometry-only: no analysis results recorded.
+        assert list(data["analysis_types"]) == []
+
+    def test_analysis_export_includes_results(self, tmp_path):
+        pytest.importorskip("openseespy.opensees")
+        md = _parse("sample.s2k")
+        npz_path = tmp_path / "results.npz"
+        try:
+            result = review_model(
+                md,
+                include_analysis=True,
+                analysis_config={"num_modes": 2},
+                export_npz=npz_path,
+            )
+        finally:
+            _wipe()
+        assert result["npz_error"] is None
+        assert npz_path.exists()
+
+        from fea_toolkit.io.npz_reader import read_results_npz
+
+        data = read_results_npz(str(npz_path))
+        analysis_types = {str(t) for t in data["analysis_types"]}
+        assert {"static", "modal"} <= analysis_types
+        assert "modal/period" in data
+        assert list(data["static_case_labels"]) == ["DEAD"]
+
+    def test_formatter_reports_npz(self, tmp_path, sample_review):
+        md, _result = sample_review
+        npz_path = tmp_path / "geometry.npz"
+        result = review_model(md, export_npz=npz_path)
+        assert "NPZ" in format_review_report(result)
+        assert "**NPZ:**" in format_review_markdown(result)
+
+    def test_cli_npz_flag_writes_geometry(self, tmp_path):
+        out_file = tmp_path / "review.md"
+        npz_path = tmp_path / "cli.npz"
+        code = main(
+            [
+                str(FIXTURES_DIR / "clean_model.s2k"),
+                "--npz",
+                str(npz_path),
+                "--format",
+                "markdown",
+                "--out",
+                str(out_file),
+            ]
+        )
+        assert code == 0
+        assert npz_path.exists()
+        assert "**NPZ:**" in out_file.read_text(encoding="utf-8")

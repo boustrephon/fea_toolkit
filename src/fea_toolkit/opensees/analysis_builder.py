@@ -625,11 +625,25 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
 
     Args:
         md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
-        config: Optional builder config dict.
+        config: Optional builder config dict.  Recognised keys:
+            ``num_modes``, ``load_verify``, ``wind_check`` and
+            ``export_npz`` (output path for a unified geometry + modal +
+            static NPZ via
+            :func:`~fea_toolkit.io.npz_writer.write_results_npz`).
 
     Returns:
         Dict with ``ok``, ``periods``, ``mass_participation``, ``static``
-        and ``error`` keys.
+        and ``error`` keys.  Each ``mass_participation`` entry carries the
+        translational (``mx`` / ``my`` / ``mz``) **and** rotational
+        (``rx`` / ``ry`` / ``rz``) mass-participation ratios plus the
+        ``frequency`` — the 6-DOF presentation used by the report
+        pipeline.  When ``config["load_verify"]`` or
+        ``config["wind_check"]`` are set, ``load_verification`` (a list of
+        per-pattern applied-vs-reaction records) and ``wind`` (structured
+        wind-sanity data from :func:`~fea_toolkit.analysis.linear.
+        wind_sanity_data`) are added respectively.  When
+        ``config["export_npz"]`` is set, ``npz`` holds the written path
+        (or ``npz_error`` holds the captured failure).
     """
     # Lazy import avoids a hard dependency cycle (preprocessor → model only)
     # and keeps the module importable in dependency-light environments.
@@ -640,6 +654,10 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
         "periods": [],
         "mass_participation": [],
         "static": None,
+        "load_verification": None,
+        "wind": None,
+        "npz": None,
+        "npz_error": None,
         "error": None,
     }
 
@@ -649,6 +667,35 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
 
     try:
         mesh = preprocess_model(md, builder_config)
+
+        # ── Optional richer checks (opt-in) ──────────────────────────
+        # Each helper builds its own OpenSees domain, but build_domain()
+        # starts with ops.wipe(), so the runs stay isolated.  Failures are
+        # captured individually so they never abort the modal/static pass.
+        if builder_config.get("load_verify"):
+            # ``static_load_verification`` requires at least one load
+            # pattern; skip cleanly rather than surfacing a spurious
+            # KeyError from its DataFrame path.
+            if md.load_patterns:
+                try:
+                    from ..analysis.linear import static_load_verification
+
+                    df_lv = static_load_verification(md, mesh, builder_config)
+                    result["load_verification"] = df_lv.to_dict("records")
+                except Exception as exc:  # captured, never raised
+                    result["load_verification_error"] = f"{type(exc).__name__}: {exc}"
+            else:
+                result["load_verification"] = []
+
+        if builder_config.get("wind_check"):
+            try:
+                from ..analysis.linear import run_linear_cases, wind_sanity_data
+
+                df_linear = run_linear_cases(md, mesh)
+                result["wind"] = wind_sanity_data(md, df_linear)
+            except Exception as exc:  # captured, never raised
+                result["wind_error"] = f"{type(exc).__name__}: {exc}"
+
         builder = AnalysisBuilder(mesh, builder_config)
         builder.build_domain()
         builder.compute_seismic_masses()
@@ -658,21 +705,41 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
             print_results=False,
         )
         periods = list(modal.get("periods", []))
+        frequencies = list(modal.get("frequencies", []))
         props = modal.get("modal_props", {})
-        ratios_mx = props.get("partiMassRatiosMX", [])
-        ratios_my = props.get("partiMassRatiosMY", [])
-        ratios_mz = props.get("partiMassRatiosMZ", [])
+
+        def _ratio(key: str, idx: int) -> float:
+            """Mass-participation ratio for mode *idx* (0.0 when absent)."""
+            lst = props.get(key) or []
+            return float(lst[idx]) if idx < len(lst) else 0.0
+
         result["periods"] = periods
+        # 6-DOF participation — translational (Mx/My/Mz) plus rotational
+        # (Rx/Ry/Rz) — matching the report pipeline's modal_table_enhanced().
         result["mass_participation"] = [
             {
                 "mode": i + 1,
                 "period": periods[i],
-                "mx": ratios_mx[i] if i < len(ratios_mx) else 0.0,
-                "my": ratios_my[i] if i < len(ratios_my) else 0.0,
-                "mz": ratios_mz[i] if i < len(ratios_mz) else 0.0,
+                "frequency": frequencies[i] if i < len(frequencies) else 0.0,
+                "mx": _ratio("partiMassRatiosMX", i),
+                "my": _ratio("partiMassRatiosMY", i),
+                "mz": _ratio("partiMassRatiosMZ", i),
+                "rx": _ratio("partiMassRatiosRMX", i),
+                "ry": _ratio("partiMassRatiosRMY", i),
+                "rz": _ratio("partiMassRatiosRMZ", i),
             }
             for i in range(len(periods))
         ]
+
+        # Capture mode shapes immediately — ``ops.nodeEigenvector`` reads the
+        # eigen state produced by run_modal_analysis, which the later static
+        # pass would otherwise invalidate.
+        mode_shapes = None
+        if builder_config.get("export_npz"):
+            try:
+                mode_shapes = builder.extract_mode_shapes(int(builder_config.get("num_modes", 12)))
+            except Exception:  # keep modal results even if shapes fail
+                mode_shapes = None
 
         # Apply gravity (DEAD) load patterns only.  When the model defines no
         # DEAD pattern, apply no loads rather than silently substituting every
@@ -698,6 +765,34 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
             "n_nodes_with_displacement": len(static.get("nodal_displacements", {})),
             "patterns_applied": applied_patterns,
         }
+
+        # ── Optional NPZ export (meshed geometry + modal + static) ───
+        export_npz = builder_config.get("export_npz")
+        if export_npz:
+            try:
+                from ..io.npz_writer import write_results_npz
+
+                case = applied_patterns[0] if applied_patterns else "GRAVITY"
+                static_case: dict[str, Any] = {
+                    "nodal_displacements": static.get("nodal_displacements", {}),
+                }
+                try:
+                    elem_forces = builder.static_element_force_arrays()
+                except Exception:  # element forces are optional
+                    elem_forces = None
+                if elem_forces:
+                    static_case["element_forces"] = elem_forces
+                result["npz"] = write_results_npz(
+                    str(export_npz),
+                    md,
+                    static_results={case: static_case},
+                    modal_result=modal,
+                    mode_shapes=mode_shapes,
+                    mesh_model=mesh,
+                )
+            except Exception as exc:  # captured, never raised
+                result["npz_error"] = f"{type(exc).__name__}: {exc}"
+
         result["ok"] = True
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"

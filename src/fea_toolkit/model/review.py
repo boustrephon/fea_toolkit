@@ -37,7 +37,11 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional
 
-from .checks import check_model_connectivity
+from .checks import (
+    check_brace_buckling,
+    check_model_connectivity,
+    check_self_weight_consistency,
+)
 from .sap_data import FRAME_RELEASE_DOF_LABELS, SAPModelData, patterns_from_case
 
 __all__ = [
@@ -453,6 +457,73 @@ def _observations(md: SAPModelData) -> dict[str, Any]:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Optional solver-free checks (self-weight / brace buckling)
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _self_weight(md: SAPModelData) -> dict[str, Any]:
+    """Compute the model's analytical self-weight (solver-free).
+
+    Delegates to
+    :func:`~fea_toolkit.model.checks.check_self_weight_consistency`, which
+    derives the expected weight from element geometry and material unit
+    weights and returns it broken down by section.
+
+    Confirming the *applied* load against the support reactions is the
+    analysis phase's job (the ``load_verification`` block of the OpenSees
+    pass), so the ``applied`` / ``discrepancy`` / ``passed`` keys are left
+    as ``None`` here rather than reporting a misleading zero-applied
+    comparison.
+
+    Args:
+        md: Parsed model data.
+
+    Returns:
+        Dict with ``expected``, ``by_section``, ``applied``,
+        ``discrepancy`` and ``passed``.
+    """
+    sw = check_self_weight_consistency(md, verbose=False)
+    return {
+        "expected": sw["expected"],
+        "by_section": sw["by_section"],
+        "applied": None,
+        "discrepancy": None,
+        "passed": None,
+    }
+
+
+def _brace_buckling(md: SAPModelData, k_factor: float = 1.0) -> dict[str, Any]:
+    """Run the Euler brace-buckling check when the model has braces.
+
+    Braces are auto-detected by section shape (Pipe / Angle / Double
+    Angle / Tee / Channel) through
+    :meth:`~fea_toolkit.model.selection.Selection.from_brace_sections`.
+    When the model contains no brace sections the check is skipped and
+    ``detected`` is ``False`` — no Euler capacity is fabricated for
+    non-brace members.
+
+    Args:
+        md: Parsed model data.
+        k_factor: Effective length factor ``K`` (default 1.0 —
+            pinned-pinned).
+
+    Returns:
+        Dict with ``detected`` (bool), ``k_factor`` (float) and
+        ``members`` (``{elem_id: {P_cr, P_demand, ratio, slenderness,
+        length, section, A, I22}}`` — empty when no braces are present).
+    """
+    from .selection import Selection
+
+    brace_ids = set(Selection.from_brace_sections(md).get_frame_ids(md))
+    if not brace_ids:
+        return {"detected": False, "k_factor": k_factor, "members": {}}
+    members = check_brace_buckling(md, brace_ids=brace_ids, K=k_factor, print_results=False)
+    if not members:
+        return {"detected": False, "k_factor": k_factor, "members": {}}
+    return {"detected": True, "k_factor": k_factor, "members": members}
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Optional OpenSees analysis phase
 # ═══════════════════════════════════════════════════════════════════
 
@@ -485,6 +556,31 @@ def _run_analysis(md: SAPModelData, config: Optional[dict[str, Any]] = None) -> 
             "error": f"OpenSees not available: {exc}",
         }
     return run_review_analysis(md, config)
+
+
+def _write_geometry_npz(md: SAPModelData, path: Any) -> tuple[Optional[str], Optional[str]]:
+    """Write a geometry-only NPZ (no OpenSees required).
+
+    Used when ``export_npz`` is requested **without** the analysis phase.
+    The canonical :func:`~fea_toolkit.io.npz_writer.write_results_npz`
+    writer is imported lazily so the review module stays importable
+    without the I/O stack loaded.
+
+    Args:
+        md: Parsed model data.
+        path: Output ``.npz`` file path.
+
+    Returns:
+        ``(npz_path, error)`` — the resolved path (or ``None``) and an
+        ``"ExcType: message"`` string (or ``None``).  Failures are captured
+        rather than raised so a review never aborts on an export error.
+    """
+    try:
+        from ..io.npz_writer import write_results_npz
+
+        return write_results_npz(str(path), md), None
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -522,6 +618,10 @@ def review_model(
     tol: float = 1e-6,
     include_analysis: bool = False,
     analysis_config: Optional[dict[str, Any]] = None,
+    self_weight: bool = False,
+    brace_buckling: bool = False,
+    brace_k: float = 1.0,
+    export_npz: Optional[Any] = None,
 ) -> dict[str, Any]:
     """Run the full model review on parsed SAP2000 data.
 
@@ -533,11 +633,30 @@ def review_model(
         include_analysis: When True, run the optional OpenSees
             modal + linear-static phase (requires openseespy; slow).
         analysis_config: Optional builder config for the analysis phase.
+            Additional keys ``load_verify`` and ``wind_check`` (bool)
+            enable the applied-vs-reaction equilibrium table and the
+            wind-load sanity check respectively.
+        self_weight: When True, add the solver-free analytical
+            self-weight block (element weight by section) under
+            ``result["self_weight"]``.
+        brace_buckling: When True, run the Euler brace-buckling check
+            under ``result["brace_buckling"]``.  The check is skipped
+            (``detected=False``) when the model has no brace sections.
+        brace_k: Effective length factor ``K`` for the brace-buckling
+            check (default 1.0).
+        export_npz: Optional output ``.npz`` path.  When given, a unified
+            NPZ archive (geometry, per :func:`~fea_toolkit.io.npz_writer.
+            write_results_npz`) is written under ``result["npz"]``.
+            With ``include_analysis=True`` the archive also carries the
+            meshed geometry plus the modal and static results; without it
+            only the raw model geometry is written.
 
     Returns:
         A nested dict with keys ``file``, ``units``, ``inventory``,
         ``breakdown``, ``bounds``, ``connectivity``, ``releases``,
-        ``integrity``, ``observations``, ``analysis`` and ``ok``.
+        ``integrity``, ``observations``, ``self_weight``,
+        ``brace_buckling``, ``analysis``, ``npz``, ``npz_error`` and
+        ``ok``.
     """
     if not math.isfinite(tol) or tol < 0:
         raise ValueError(f"tol must be a finite, non-negative number, got {tol!r}")
@@ -567,8 +686,25 @@ def review_model(
         "releases": _release_summary(md),
         "integrity": _integrity(md, tol),
         "observations": _observations(md),
-        "analysis": _run_analysis(md, analysis_config) if include_analysis else None,
+        "self_weight": _self_weight(md) if self_weight else None,
+        "brace_buckling": _brace_buckling(md, brace_k) if brace_buckling else None,
+        "analysis": None,
+        "npz": None,
+        "npz_error": None,
     }
+
+    if include_analysis:
+        analysis_cfg = dict(analysis_config or {})
+        if export_npz and not analysis_cfg.get("export_npz"):
+            analysis_cfg["export_npz"] = str(export_npz)
+        result["analysis"] = _run_analysis(md, analysis_cfg or None)
+        # Surface the export result at the top level for both paths.
+        result["npz"] = result["analysis"].get("npz")
+        result["npz_error"] = result["analysis"].get("npz_error")
+    elif export_npz:
+        # Geometry-only export — no OpenSees domain required.
+        result["npz"], result["npz_error"] = _write_geometry_npz(md, export_npz)
+
     result["ok"] = _is_clean(result)
     return result
 
@@ -579,6 +715,10 @@ def review_s2k_file(
     tol: float = 1e-6,
     include_analysis: bool = False,
     analysis_config: Optional[dict[str, Any]] = None,
+    self_weight: bool = False,
+    brace_buckling: bool = False,
+    brace_k: float = 1.0,
+    export_npz: Optional[Any] = None,
 ) -> dict[str, Any]:
     """Parse a ``.s2k`` file and run the full review on it.
 
@@ -588,6 +728,10 @@ def review_s2k_file(
         tol: Forwarded to :func:`review_model`.
         include_analysis: Forwarded to :func:`review_model`.
         analysis_config: Forwarded to :func:`review_model`.
+        self_weight: Forwarded to :func:`review_model`.
+        brace_buckling: Forwarded to :func:`review_model`.
+        brace_k: Forwarded to :func:`review_model`.
+        export_npz: Forwarded to :func:`review_model`.
 
     Returns:
         The review result dict (see :func:`review_model`).
@@ -604,6 +748,10 @@ def review_s2k_file(
         tol=tol,
         include_analysis=include_analysis,
         analysis_config=analysis_config,
+        self_weight=self_weight,
+        brace_buckling=brace_buckling,
+        brace_k=brace_k,
+        export_npz=export_npz,
     )
 
 
@@ -649,10 +797,146 @@ def _display_modes(
     return rows, total - len(rows)
 
 
+def _format_table(rows: list[dict[str, Any]], tablefmt: str = "grid") -> str:
+    """Render a list of row dicts as a table string.
+
+    Uses :mod:`tabulate` — an *optional* dependency (``pip install -e
+    ".[report]"``) — when it is importable, so the plain-text report gains
+    bordered/gridded tables without making the solver-free review depend on
+    a third-party library.  When ``tabulate`` is absent the function falls
+    back to a dependency-free fixed-width layout (or, for Markdown formats,
+    a native pipe table), keeping the review importable everywhere.
+
+    Values are rendered verbatim, so callers should pre-format numbers
+    (e.g. ``f"{value:.1f}"``) to control precision and unit suffixes.
+
+    Args:
+        rows: Row dicts.  The keys of the first row define the columns
+            and their order.
+        tablefmt: ``tabulate`` table format (default ``"grid"``).  The
+            Markdown formats ``"github"`` / ``"pipe"`` / ``"markdown"``
+            also select a pipe table in the dependency-free fallback.
+
+    Returns:
+        The rendered table, or an empty string when *rows* is empty.
+    """
+    if not rows:
+        return ""
+    cols = list(rows[0].keys())
+
+    try:
+        from tabulate import tabulate as _tabulate
+    except ImportError:
+        _tabulate = None
+    if _tabulate is not None:
+        # ``disable_numparse`` keeps caller-formatted values verbatim (e.g.
+        # "0.1250" is not collapsed to 0.125) and left-aligns them, so the
+        # rendered table matches the strings the formatters built.
+        return _tabulate(rows, headers="keys", tablefmt=tablefmt, disable_numparse=True)
+
+    # ── Dependency-free fallback ──────────────────────────────────
+    if tablefmt in ("github", "pipe", "markdown"):
+        header = "| " + " | ".join(str(c) for c in cols) + " |"
+        separator = "|" + "|".join("---" for _ in cols) + "|"
+        body = ["| " + " | ".join(str(row.get(c, "")) for c in cols) + " |" for row in rows]
+        return "\n".join([header, separator, *body])
+
+    widths = {c: len(str(c)) for c in cols}
+    for row in rows:
+        for c in cols:
+            widths[c] = max(widths[c], len(str(row.get(c, ""))))
+    lines = ["  ".join(str(c).ljust(widths[c]) for c in cols)]
+    lines.append("  ".join("-" * widths[c] for c in cols))
+    lines.extend("  ".join(str(row.get(c, "")).ljust(widths[c]) for c in cols) for row in rows)
+    return "\n".join(lines)
+
+
+def _apply_indent(text: str, prefix: str = "  ") -> str:
+    """Indent every non-empty line of *text* by *prefix*."""
+    return "\n".join((prefix + line) if line else line for line in text.splitlines())
+
+
+def _limit_rows(rows: list[Any], limit: int = 0) -> tuple[list[Any], int]:
+    """Apply an optional display cap, mirroring ``_display_modes``.
+
+    Args:
+        rows: Rows to display.
+        limit: Maximum rows to keep; ``0`` (or ``None``) keeps every row.
+
+    Returns:
+        ``(shown, hidden)`` — the capped rows and the number suppressed.
+    """
+    if limit and limit > 0 and len(rows) > limit:
+        return rows[:limit], len(rows) - limit
+    return rows, 0
+
+
+# (result key, column label) for the six mass-participation ratios.
+_MODAL_RATIO_COLS = (
+    ("mx", "Mx"),
+    ("my", "My"),
+    ("mz", "Mz"),
+    ("rx", "Rx"),
+    ("ry", "Ry"),
+    ("rz", "Rz"),
+)
+
+
+def _modal_table_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build table rows for modal participation entries.
+
+    Renders the rotational (Rx/Ry/Rz) as well as the translational
+    (Mx/My/Mz) mass-participation ratios — the 6-DOF presentation used by
+    the report pipeline's ``modal_table_enhanced()``.
+
+    Args:
+        rows: ``mass_participation`` entries from a review result.
+
+    Returns:
+        Row dicts with pre-formatted string values (see
+        :func:`_format_table`).
+    """
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        entry: dict[str, Any] = {
+            "Mode": str(row.get("mode", "")),
+            "Period (s)": f"{float(row.get('period', 0.0)):.4f}",
+        }
+        for key, label in _MODAL_RATIO_COLS:
+            entry[f"{label} (%)"] = f"{float(row.get(key, 0.0)):.2f}"
+        out.append(entry)
+    return out
+
+
+def _modal_totals(analysis: dict[str, Any]) -> str:
+    """Return a one-line sum of mass participation across **all** modes.
+
+    Mirrors the SUM row of ``modal_table_enhanced()`` but sums every mode
+    (not just the displayed subset), so a filtered table still reports the
+    full cumulative participation.
+
+    Args:
+        analysis: The ``analysis`` sub-dict of a review result.
+
+    Returns:
+        A ``"Mx=.. My=.. Mz=.. Rx=.. Ry=.. Rz=.."`` string, or ``""`` when
+        there are no modal rows.
+    """
+    rows = analysis.get("mass_participation") or []
+    if not rows:
+        return ""
+    parts = []
+    for key, label in _MODAL_RATIO_COLS:
+        total = sum(float(row.get(key, 0.0)) for row in rows)
+        parts.append(f"{label}={total:.2f}%")
+    return "  ".join(parts)
+
+
 def format_review_report(
     result: dict[str, Any],
     max_modes: int = 0,
     min_participation: float = 0.0,
+    num_braces: int = 0,
 ) -> str:
     """Render a review result as a plain-text report.
 
@@ -662,6 +946,8 @@ def format_review_report(
             every computed mode (the default).
         min_participation: Hide modes whose largest translational mass
             participation is below this percentage (``0.0`` = show all).
+        num_braces: Cap on the number of brace rows displayed in the
+            brace-buckling section; ``0`` shows every brace.
 
     Returns:
         A multi-line plain-text report.
@@ -684,6 +970,10 @@ def format_review_report(
         add(f"  File : {result['file']}")
     add(f"  Units: {units.get('F')}, {units.get('L')}, {units.get('T')}")
     add(f"  Status: {'PASS - no blocking issues' if result['ok'] else 'ISSUES FOUND'}")
+    if result.get("npz"):
+        add(f"  NPZ  : {result['npz']}")
+    if result.get("npz_error"):
+        add(f"  NPZ  : FAILED - {result['npz_error']}")
     add("=" * 70)
 
     add("")
@@ -757,6 +1047,51 @@ def format_review_report(
             f"loads={ms['from_loads']}, patterns={ms['n_patterns']})"
         )
 
+    force_unit = units.get("F", "N")
+
+    self_weight = result.get("self_weight")
+    if self_weight is not None:
+        add("")
+        add("-- Self-weight (analytical) " + "-" * 42)
+        add(f"  Expected self-weight: {self_weight['expected']:.1f} {force_unit}")
+        if self_weight.get("passed") is not None:
+            status = "PASS" if self_weight["passed"] else "FAIL"
+            add(
+                f"  Applied {self_weight.get('applied')} {force_unit} / "
+                f"discrepancy {self_weight.get('discrepancy')}  [{status}]"
+            )
+        by_section = self_weight.get("by_section") or {}
+        if by_section:
+            rows = [
+                {"Section": name, f"Weight ({force_unit})": f"{weight:.1f}"}
+                for name, weight in sorted(by_section.items(), key=lambda kv: -kv[1])
+            ]
+            add(_apply_indent(_format_table(rows)))
+
+    brace = result.get("brace_buckling")
+    if brace is not None:
+        add("")
+        add("-- Brace buckling " + "-" * 51)
+        if not brace.get("detected"):
+            add("  No brace sections found in model.")
+        else:
+            members = brace["members"]
+            rows = [
+                {
+                    "Element": eid,
+                    "Section": r["section"],
+                    f"Length ({lu})": f"{r['length']:.3f}",
+                    "Slenderness": f"{r['slenderness']:.1f}",
+                    f"P_cr ({force_unit})": f"{r['P_cr']:.0f}",
+                }
+                for eid, r in sorted(members.items(), key=lambda kv: -kv[1]["length"])
+            ]
+            shown, hidden = _limit_rows(rows, num_braces)
+            add(f"  Effective length factor K = {brace['k_factor']}   braces = {len(members)}")
+            add(_apply_indent(_format_table(shown)))
+            if hidden:
+                add(f"      ... {hidden} further brace(s) not shown")
+
     analysis = result.get("analysis")
     if analysis is not None:
         add("")
@@ -764,19 +1099,39 @@ def format_review_report(
         if analysis["ok"]:
             add(f"  Static + modal: OK ({len(analysis['periods'])} modes)")
             rows, hidden = _display_modes(analysis, max_modes, min_participation)
-            for row in rows:
-                add(
-                    f"      mode {row['mode']}: T={row['period']:.4f}s  "
-                    f"MX={row['mx']:.1f}% MY={row['my']:.1f}% MZ={row['mz']:.1f}%"
-                )
+            add(_apply_indent(_format_table(_modal_table_rows(rows))))
             if hidden:
                 add(f"      ... {hidden} further mode(s) not shown")
+            totals = _modal_totals(analysis)
+            if totals:
+                add(f"  \u03a3 over {len(analysis['periods'])} modes: {totals}")
             reactions = analysis.get("static", {}).get("summed_reactions")
             add(f"  Patterns applied: {analysis.get('static', {}).get('patterns_applied')}")
             add(f"  Supports with reactions: {analysis.get('static', {}).get('n_supports')}")
             add(f"  Summed reactions: {reactions}")
         else:
             add(f"  FAILED: {analysis['error']}")
+
+        lv = analysis.get("load_verification")
+        if lv:
+            add("")
+            add("  -- Load verification (applied vs reactions) --")
+            add(_apply_indent(_format_table(lv)))
+        elif analysis.get("load_verification_error"):
+            add(f"  Load verification FAILED: {analysis['load_verification_error']}")
+
+        wind = analysis.get("wind")
+        if wind:
+            add("")
+            add("  -- Wind sanity check --")
+            if isinstance(wind, dict):
+                add(_apply_indent(_format_table(wind.get("rows") or [])))
+                if wind.get("within_10pct"):
+                    add("  Pressures are within 10 % of each other.")
+            else:
+                add(_apply_indent(str(wind)))
+        elif analysis.get("wind_error"):
+            add(f"  Wind check FAILED: {analysis['wind_error']}")
 
     add("")
     add("=" * 70)
@@ -787,6 +1142,7 @@ def print_review_report(
     result: dict[str, Any],
     max_modes: int = 0,
     min_participation: float = 0.0,
+    num_braces: int = 0,
 ) -> None:
     """Print the plain-text review report (see :func:`format_review_report`).
 
@@ -795,14 +1151,23 @@ def print_review_report(
         max_modes: Cap on the number of modal rows displayed (``0`` = all).
         min_participation: Hide modes below this mass-participation
             percentage (``0.0`` = show all).
+        num_braces: Cap on the number of brace rows displayed (``0`` = all).
     """
-    print(format_review_report(result, max_modes=max_modes, min_participation=min_participation))
+    print(
+        format_review_report(
+            result,
+            max_modes=max_modes,
+            min_participation=min_participation,
+            num_braces=num_braces,
+        )
+    )
 
 
 def format_review_markdown(
     result: dict[str, Any],
     max_modes: int = 0,
     min_participation: float = 0.0,
+    num_braces: int = 0,
 ) -> str:
     """Render a review result as a Markdown document.
 
@@ -812,13 +1177,17 @@ def format_review_markdown(
             every computed mode (the default).
         min_participation: Hide modes whose largest translational mass
             participation is below this percentage (``0.0`` = show all).
+        num_braces: Cap on the number of brace rows displayed in the
+            brace-buckling section; ``0`` shows every brace.
 
     Returns:
         A Markdown string with inventory, connectivity, releases,
-        integrity and observation sections.
+        integrity, observation, self-weight, brace-buckling and analysis
+        sections.
     """
     inv = result["inventory"]
     units = result["units"]
+    lu = units.get("L", "m")
     conn = result["connectivity"]
     releases = result["releases"]
     integrity = result["integrity"]
@@ -831,7 +1200,11 @@ def format_review_markdown(
     if result.get("file"):
         add(f"**File:** `{result['file']}`  ")
     add(f"**Units:** {units.get('F')}, {units.get('L')}, {units.get('T')}  ")
-    add(f"**Status:** {'PASS - no blocking issues' if result['ok'] else 'ISSUES FOUND'}")
+    add(f"**Status:** {'PASS - no blocking issues' if result['ok'] else 'ISSUES FOUND'}  ")
+    if result.get("npz"):
+        add(f"**NPZ:** `{result['npz']}`  ")
+    if result.get("npz_error"):
+        add(f"**NPZ export failed:** {result['npz_error']}  ")
     add("")
 
     add("## Inventory")
@@ -891,6 +1264,61 @@ def format_review_markdown(
     add(f"- Mass source: **{ms['name'] if ms else 'NONE'}**")
     add("")
 
+    force_unit = units.get("F", "N")
+
+    self_weight = result.get("self_weight")
+    if self_weight is not None:
+        add("## Self-weight (analytical)")
+        add("")
+        add(f"Expected self-weight: **{self_weight['expected']:.1f} {force_unit}**")
+        add("")
+        if self_weight.get("passed") is not None:
+            status = "PASS" if self_weight["passed"] else "FAIL"
+            add(
+                f"Applied: `{self_weight.get('applied')}` {force_unit} — "
+                f"discrepancy `{self_weight.get('discrepancy')}` — **{status}**"
+            )
+            add("")
+        by_section = self_weight.get("by_section") or {}
+        if by_section:
+            rows = [
+                {"Section": name, f"Weight ({force_unit})": f"{weight:.1f}"}
+                for name, weight in sorted(by_section.items(), key=lambda kv: -kv[1])
+            ]
+            add(_format_table(rows, tablefmt="github"))
+            add("")
+
+    brace = result.get("brace_buckling")
+    if brace is not None:
+        add("## Brace buckling")
+        add("")
+        if not brace.get("detected"):
+            add("_No brace sections found in model._")
+            add("")
+        else:
+            members = brace["members"]
+            add(
+                f"Effective length factor K = {brace['k_factor']}. "
+                f"Braces checked: **{len(members)}**."
+            )
+            add("")
+            rows = [
+                {
+                    "Element": eid,
+                    "Section": r["section"],
+                    f"Length ({lu})": f"{r['length']:.3f}",
+                    "Slenderness": f"{r['slenderness']:.1f}",
+                    f"P_cr ({force_unit})": f"{r['P_cr']:.0f}",
+                }
+                for eid, r in sorted(members.items(), key=lambda kv: -kv[1]["length"])
+            ]
+            shown, hidden = _limit_rows(rows, num_braces)
+            add(_format_table(shown, tablefmt="github"))
+            add("")
+            if hidden:
+                add(f"_{hidden} further brace(s) not shown._")
+                add("")
+
     analysis = result.get("analysis")
     if analysis is not None:
         add("## Analysis (OpenSees)")
@@ -898,24 +1326,50 @@ def format_review_markdown(
         if analysis["ok"]:
             add(f"Static + modal completed ({len(analysis['periods'])} modes).")
             add("")
-            add("| Mode | Period (s) | Mx % | My % | Mz % |")
-            add("|---:|---:|---:|---:|---:|")
             rows, hidden = _display_modes(analysis, max_modes, min_participation)
-            for row in rows:
-                add(
-                    f"| {row['mode']} | {row['period']:.4f} | "
-                    f"{row['mx']:.1f} | {row['my']:.1f} | {row['mz']:.1f} |"
-                )
+            add(_format_table(_modal_table_rows(rows), tablefmt="github"))
+            add("")
             if hidden:
-                add("")
                 add(f"_{hidden} further mode(s) not shown._")
+                add("")
+            totals = _modal_totals(analysis)
+            if totals:
+                add(f"\u03a3 over {len(analysis['periods'])} modes: {totals}")
+                add("")
             reactions = analysis.get("static", {}).get("summed_reactions")
             if reactions:
-                add("")
                 add(f"Summed reactions: `{reactions}`")
+                add("")
         else:
             add(f"**FAILED:** {analysis['error']}")
         add("")
+
+        lv = analysis.get("load_verification")
+        if lv:
+            add("### Load verification (applied vs reactions)")
+            add("")
+            add(_format_table(lv, tablefmt="github"))
+            add("")
+        elif analysis.get("load_verification_error"):
+            add(f"**Load verification FAILED:** {analysis['load_verification_error']}")
+            add("")
+
+        wind = analysis.get("wind")
+        if wind:
+            add("### Wind sanity check")
+            add("")
+            if isinstance(wind, dict):
+                add(_format_table(wind.get("rows") or [], tablefmt="github"))
+                add("")
+                if wind.get("within_10pct"):
+                    add("_Pressures are within 10 % of each other._")
+                    add("")
+            else:
+                add(str(wind))
+                add("")
+        elif analysis.get("wind_error"):
+            add(f"**Wind check FAILED:** {analysis['wind_error']}")
+            add("")
 
     return "\n".join(md)
 
@@ -938,6 +1392,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         python -m fea_toolkit.model.review model.s2k --format markdown --out review.md
         python -m fea_toolkit.model.review model.s2k --analysis --min-participation 1
         python -m fea_toolkit.model.review model.s2k --analysis --max-modes 3
+        python -m fea_toolkit.model.review model.s2k --self-weight --brace-buckling
+        python -m fea_toolkit.model.review model.s2k --load-verify --wind-check
+        python -m fea_toolkit.model.review model.s2k --analysis --npz results.npz
 
     Args:
         argv: Optional argument list (defaults to ``sys.argv[1:]``).
@@ -998,6 +1455,52 @@ def main(argv: Optional[list[str]] = None) -> int:
             "(max of MX/MY/MZ) is below PCT percent (default: 0 = show all)."
         ),
     )
+    parser.add_argument(
+        "--self-weight",
+        action="store_true",
+        help="Report the analytical self-weight (element weight by section).",
+    )
+    parser.add_argument(
+        "--brace-buckling",
+        action="store_true",
+        help=(
+            "Run the Euler brace-buckling check.  Skipped automatically when "
+            "the model contains no brace sections."
+        ),
+    )
+    parser.add_argument(
+        "--k-factor",
+        type=float,
+        default=1.0,
+        help="Effective length factor K for --brace-buckling (default: 1.0).",
+    )
+    parser.add_argument(
+        "--num-braces",
+        type=int,
+        default=0,
+        help="Cap the number of brace rows shown in the report (default: 0 = all).",
+    )
+    parser.add_argument(
+        "--load-verify",
+        action="store_true",
+        help="Run applied-vs-reaction load verification (implies --analysis).",
+    )
+    parser.add_argument(
+        "--wind-check",
+        action="store_true",
+        help="Run the wind load sanity check (implies --analysis).",
+    )
+    parser.add_argument(
+        "--npz",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Write a unified NPZ archive to PATH.  Without --analysis the "
+            "archive contains the model geometry only; with --analysis it "
+            "also contains the meshed geometry plus the modal and static "
+            "results."
+        ),
+    )
     args = parser.parse_args(argv)
 
     source = Path(args.path)
@@ -1005,12 +1508,26 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"error: file not found: {source}", file=sys.stderr)
         return 2
 
+    run_analysis = args.analysis or args.load_verify or args.wind_check
+    analysis_config = (
+        {
+            "num_modes": args.num_modes,
+            "load_verify": args.load_verify,
+            "wind_check": args.wind_check,
+        }
+        if run_analysis
+        else None
+    )
     try:
         result = review_s2k_file(
             source,
             tol=args.tol,
-            include_analysis=args.analysis,
-            analysis_config={"num_modes": args.num_modes} if args.analysis else None,
+            include_analysis=run_analysis,
+            analysis_config=analysis_config,
+            self_weight=args.self_weight,
+            brace_buckling=args.brace_buckling,
+            brace_k=args.k_factor,
+            export_npz=args.npz,
         )
     except (OSError, ValueError) as exc:
         print(f"error: cannot review {source}: {exc}", file=sys.stderr)
@@ -1020,12 +1537,14 @@ def main(argv: Optional[list[str]] = None) -> int:
             result,
             max_modes=args.max_modes,
             min_participation=args.min_participation,
+            num_braces=args.num_braces,
         )
         if args.format == "markdown"
         else format_review_report(
             result,
             max_modes=args.max_modes,
             min_participation=args.min_participation,
+            num_braces=args.num_braces,
         )
     )
 
