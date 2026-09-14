@@ -347,6 +347,9 @@ pl = plot_mode_animation(
     builder, shapes, mode=0,
     scale=5.0,             # % of model's largest dimension (default 5)
     shrink=0.05,           # gap between frame elements
+    periods=modal["periods"],
+    # Six-DOF mass participation, read from OpenSees modalProperties()
+    participation=mass_participation_ratios(modal["modal_props"]),
     animate=True,
     notebook=True,
 )

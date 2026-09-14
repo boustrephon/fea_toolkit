@@ -2278,6 +2278,198 @@ class TestAnimationTimerCallbackArity:
         assert fp.method_calls[0][2].get("duration") == 17
 
 
+def _minimal_modal_npz_dict() -> dict:
+    """Minimal NPZ-style dict carrying the ``modal/*`` block.
+
+    The ratios mimic ``ops.modalProperties()`` output written verbatim by
+    ``npz_writer._collect_modal`` — the display reads them, it does not
+    compute them.
+    """
+    return {
+        "node_tag": np.array([1, 2, 3]),
+        "node_sap_id": np.array(["1", "2", "3"]),
+        "node_x": np.array([0.0, 4.0, 4.0]),
+        "node_y": np.zeros(3),
+        "node_z": np.array([0.0, 0.0, 3.0]),
+        "frame_eid": np.array([0, 1]),
+        "frame_sap_id": np.array(["1", "2"]),
+        "frame_node_i": np.array([1, 2]),
+        "frame_node_j": np.array([2, 3]),
+        "frame_sec_name": np.array(["COL", "BEAM"]),
+        "frame_parent_sap_id": np.array(["", ""]),
+        "modal/period": np.array([0.35523676, 0.28321302]),
+        "modal/mx_ratio": np.array([0.0319629, 12.329605]),
+        "modal/my_ratio": np.array([25.298915, 6.733203]),
+        "modal/mz_ratio": np.array([2.794e-06, 5.819e-09]),
+        "modal/rx_ratio": np.array([1.5, 2.5]),
+        "modal/ry_ratio": np.array([3.5, 4.5]),
+        "modal/rz_ratio": np.array([5.5, 6.5]),
+        "modal/mode_dx": np.array([[0.5, 0.0], [0.6, 0.0], [0.7, 0.0]]),
+        "modal/mode_dy": np.zeros((3, 2)),
+        "modal/mode_dz": np.zeros((3, 2)),
+    }
+
+
+#: Representative ``ops.modalProperties()`` ratios, in percent.  Used to pin
+#: that the display passes OpenSees's values through verbatim.
+_MODAL_PARTICIPATION_PROPS = {
+    "partiMassRatiosMX": [0.0319629006, 12.32960535],
+    "partiMassRatiosMY": [25.29891542, 6.73320313],
+    "partiMassRatiosMZ": [2.794e-06, 5.818e-09],
+    "partiMassRatiosRMX": [1.5, 2.5],
+    "partiMassRatiosRMY": [3.5, 4.5],
+    "partiMassRatiosRMZ": [5.5, 6.5],
+}
+
+
+class TestModalParticipationAnnotation:
+    """Modal annotation: period plus six-DOF mass participation.
+
+    The ratios must be OpenSees ``modalProperties()`` values passed through
+    verbatim — the toolkit never recomputes participation factors.
+    """
+
+    def test_ratios_pass_through_verbatim(self):
+        """The OpenSees values reach the caller unmodified."""
+        from fea_toolkit.plotting.viz_model import mass_participation_ratios
+
+        ratios = mass_participation_ratios(_MODAL_PARTICIPATION_PROPS)
+        assert len(ratios) == 2
+        assert ratios[0] == (0.0319629006, 25.29891542, 2.794e-06, 1.5, 3.5, 5.5)
+
+    def test_missing_dof_is_none_not_zero(self):
+        """An absent DOF is ``None``, not a misleading ``0.0``."""
+        from fea_toolkit.plotting.viz_model import mass_participation_ratios
+
+        ratios = mass_participation_ratios({"partiMassRatiosMX": [10.0]})
+        assert ratios == [(10.0, None, None, None, None, None)]
+
+    def test_empty_modal_props(self):
+        from fea_toolkit.plotting.viz_model import mass_participation_ratios
+
+        assert mass_participation_ratios({}) == []
+        assert mass_participation_ratios(None) == []
+
+    def test_annotation_has_translation_and_rotation_rows(self):
+        from fea_toolkit.plotting.viz_model import (
+            _format_mass_participation,
+            mass_participation_ratios,
+        )
+
+        text = _format_mass_participation(mass_participation_ratios(_MODAL_PARTICIPATION_PROPS)[0])
+        lines = text.split("\n")
+        assert lines[0] == "Mass participation (%):"
+        assert all(lbl in lines[1] for lbl in ("X", "Y", "Z"))
+        assert all(lbl in lines[2] for lbl in ("RX", "RY", "RZ"))
+        assert "25.30%" in lines[1]
+
+    def test_annotation_legacy_translation_only(self):
+        """A pre-rotational record yields a single row, no ``RX`` padding."""
+        from fea_toolkit.plotting.viz_model import _format_mass_participation
+
+        text = _format_mass_participation((0.03, 25.30, 0.0, None, None, None))
+        assert text.count("\n") == 1
+        assert "RX" not in text
+
+    def test_annotation_empty_when_nothing_available(self):
+        from fea_toolkit.plotting.viz_model import _format_mass_participation
+
+        assert _format_mass_participation(None) == ""
+        assert _format_mass_participation((None,) * 6) == ""
+
+    def test_npz_ratios_read_from_archive(self):
+        """The NPZ path reads the archived ratios verbatim."""
+        from fea_toolkit.plotting.viz_model import _npz_mass_participation
+
+        data = _minimal_modal_npz_dict()
+        ratios = _npz_mass_participation(data)
+        assert ratios[0] == pytest.approx((0.0319629, 25.298915, 2.794e-06, 1.5, 3.5, 5.5))
+        # An archive without the rotational keys leaves those DOFs as None.
+        for key in ("modal/rx_ratio", "modal/ry_ratio", "modal/rz_ratio"):
+            data.pop(key)
+        legacy = _npz_mass_participation(data)
+        assert legacy[0][:3] == pytest.approx((0.0319629, 25.298915, 2.794e-06))
+        assert legacy[0][3:] == (None, None, None)
+
+    def test_plot_adds_period_and_participation_text(self):
+        """The plotter receives the mode title, period and six-DOF block."""
+        from unittest.mock import patch
+
+        import pyvista as pv
+
+        from fea_toolkit.plotting.viz_model import plot_mode_animation
+
+        added = []
+        orig = pv.Plotter.add_text
+
+        def _spy(self, text, *args, **kwargs):
+            added.append((text, kwargs.get("position")))
+            return orig(self, text, *args, **kwargs)
+
+        with patch.object(pv.Plotter, "add_text", _spy):
+            pl = plot_mode_animation(
+                _minimal_modal_npz_dict(), None, mode=0, animate=False, notebook=True
+            )
+        pl.close()
+
+        assert any("Mode 1" in t for t, _ in added), added
+        assert any("0.3552" in t for t, _ in added), "period missing from the annotation"
+        annotation = [t for t, _ in added if "Mass participation" in t]
+        assert annotation, added
+        assert all(lbl in annotation[0] for lbl in ("X", "Y", "Z", "RX", "RY", "RZ"))
+
+    def test_plot_still_titles_mode_without_participation(self):
+        """A 3-DOF-only archive still gets the title, minus rotational rows."""
+        from unittest.mock import patch
+
+        import pyvista as pv
+
+        from fea_toolkit.plotting.viz_model import plot_mode_animation
+
+        data = _minimal_modal_npz_dict()
+        for key in ("modal/rx_ratio", "modal/ry_ratio", "modal/rz_ratio"):
+            data.pop(key)
+
+        added = []
+        orig = pv.Plotter.add_text
+
+        def _spy(self, text, *args, **kwargs):
+            added.append(text)
+            return orig(self, text, *args, **kwargs)
+
+        with patch.object(pv.Plotter, "add_text", _spy):
+            pl = plot_mode_animation(data, None, mode=0, animate=False, notebook=True)
+        pl.close()
+
+        assert any("Mode 1" in t for t in added), added
+        annotation = [t for t in added if "Mass participation" in t]
+        assert annotation, added
+        assert "RX" not in annotation[0]
+
+
+class TestViewModelModeIndex:
+    """``examples/view_model.py`` presents modes 1-based to the user."""
+
+    @staticmethod
+    def _args(mode):
+        from argparse import Namespace
+
+        return Namespace(mode=mode)
+
+    def test_first_mode_is_one(self):
+        from examples.view_model import mode_index
+
+        assert mode_index(self._args(1)) == 0
+        assert mode_index(self._args(3)) == 2
+
+    def test_zero_or_negative_mode_exits(self):
+        from examples.view_model import mode_index
+
+        for bad in (0, -1):
+            with pytest.raises(SystemExit):
+                mode_index(self._args(bad))
+
+
 # ============================================================================
 # Unified force-diagram dispatcher (plotting/force_diagram.py)
 # ============================================================================

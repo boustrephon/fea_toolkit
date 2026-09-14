@@ -1137,6 +1137,11 @@ class TestUnifiedNpzPipeline:
         assert "modal/mx_ratio" in data
         assert "modal/my_ratio" in data
         assert "modal/mz_ratio" in data
+        # Rotational ratios travel with the archive so the six-DOF annotation
+        # still works when viewing an NPZ rather than a live builder.
+        assert "modal/rx_ratio" in data
+        assert "modal/ry_ratio" in data
+        assert "modal/rz_ratio" in data
 
         # --- Adapter: PyVista modal mesh ---
         f_pts, f_lines, _s_pts, _s_faces = npz_to_pyvista_modal_mesh(

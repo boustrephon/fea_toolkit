@@ -307,6 +307,12 @@ def _collect_modal(
         ("partiMassRatiosMX", "modal/mx_ratio"),
         ("partiMassRatiosMY", "modal/my_ratio"),
         ("partiMassRatiosMZ", "modal/mz_ratio"),
+        # Rotational participating-mass ratios — the same OpenSees
+        # ``modalProperties()`` source as the translational trio, so the
+        # six-DOF annotation survives a round-trip through the archive.
+        ("partiMassRatiosRMX", "modal/rx_ratio"),
+        ("partiMassRatiosRMY", "modal/ry_ratio"),
+        ("partiMassRatiosRMZ", "modal/rz_ratio"),
         ("partiMassMX", "modal/mx_eff"),
         ("partiMassMY", "modal/my_eff"),
         ("partiMassMZ", "modal/mz_eff"),

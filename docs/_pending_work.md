@@ -427,6 +427,46 @@ guidance
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-14 — modal annotation: period + six-DOF participation, 1-based `--mode`)
+
+**On-plot annotation.**  `plot_mode_animation` now draws the mode period and the
+six-DOF mass-participation ratios as percentages, alongside the existing
+`Mode N  T = … s` title:
+
+```
+Mass participation (%):
+  X   0.03%    Y  25.30%    Z   0.00%
+ RX   1.50%   RY   3.50%   RZ   5.50%
+```
+
+**Source of the numbers — OpenSees, never recomputed.**  `run_modal_analysis()`
+stores `ops.modalProperties("-return", "-unorm")` as
+`modal_result["modal_props"]`; the new public
+`plotting.mass_participation_ratios()` reads the six `partiMassRatiosMX/MY/MZ`
+and `partiMassRatiosRMX/RMY/RMZ` entries straight out of it.  No participation
+factor, effective modal mass or `phiᵀMι` is computed anywhere in the display
+path, and a test pins verbatim pass-through — a wrong reading here would be a
+physics bug, not a cosmetic one.
+
+**NPZ archives can carry all six ratios.**  `npz_writer._collect_modal`
+previously wrote only the translational trio; it now also writes
+`modal/{rx,ry,rz}_ratio` from the same `modalProperties()` source, and
+`results_schema.MODAL_ARRAYS` lists them.  **Archives written before this
+change omit the rotational keys** — the annotation then shows only X/Y/Z
+(absent DOFs render `--`, never a misleading `0.00%`).  Re-export an archive to
+get all six through the NPZ path; viewing a `.s2k` directly reads live
+`modalProperties()` output and always shows all six.
+
+**1-based `--mode`.**  `examples/view_model.py` now presents modes 1-based
+(`--mode 1` = first mode, and the default), matching the `Mode N` label and the
+1-based `mode` field of the mass-participation records.  `mode_index()` converts
+at the CLI boundary and rejects `--mode 0`; the Python API stays 0-based.
+
+**Validation.**  Full suite `1519 passed, 1 skipped, 4 xfailed`; `ruff check` +
+`ruff format --check` clean; `mkdocs build --strict` exit 0.  Verified against
+the real pipe-rack archive: `--mode 1` → `Mode 1  T = 0.3552 s` with
+`X 0.03% / Y 25.30% / Z 0.00%`; `--mode 5` → `T = 0.2272 s`.
+
 ## DONE (2026-09-14 — mode-shape amplitude + frozen animation fix, PyVista API audit)
 
 **Two viewer bugs reported together.**  The `84d747b` mode-shape normalisation

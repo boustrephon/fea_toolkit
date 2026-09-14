@@ -27,6 +27,7 @@ from .viewer import ModelViewer
 from .viz import (
     animate_pushover_deformation,
     compare_meshes,
+    mass_participation_ratios,
     plot_building_views,
     plot_capacity_spectrum,
     # Deformed shape (unified replacement for the legacy static/RS viewers)
@@ -52,6 +53,8 @@ __all__ = [
     "compare_meshes",
     # Diagnostics
     "find_disconnected_nodes",
+    # Modal annotation
+    "mass_participation_ratios",
     "plot_building_views",
     "plot_capacity_spectrum",
     "plot_deformed_displacement_3d",

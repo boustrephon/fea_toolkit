@@ -19,7 +19,7 @@ Usage::
     python examples/view_model.py /path/to/model.s2k --result static --quantity Mz
 
     # Modal / response-spectrum / pushover / interactive
-    python examples/view_model.py /path/to/model.s2k --result modal --mode 0
+    python examples/view_model.py /path/to/model.s2k --result modal --mode 1
     python examples/view_model.py /path/to/model.s2k --result rs
     python examples/view_model.py /path/to/model.s2k --result pushover
     python examples/view_model.py /path/to/model.s2k --result interactive
@@ -50,6 +50,7 @@ from fea_toolkit.io.s2k_parser import SAP2000Parser
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.opensees.preprocessor import preprocess_model
 from fea_toolkit.plotting import (
+    mass_participation_ratios,
     plot_deformed_displacement_3d,
     plot_force_diagram,
     plot_interactive_viewer,
@@ -61,6 +62,24 @@ from fea_toolkit.spectrum import ResponseSpectrum
 from fea_toolkit.utils import g_from_units
 
 RESULT_TYPES = ("mesh", "static", "modal", "rs", "pushover", "interactive")
+
+
+def mode_index(args):
+    """Convert the 1-based ``--mode`` CLI option to a 0-based index.
+
+    Modes are presented 1-based to the user (mode 1 is the first mode), which
+    matches both the ``Mode N`` label on the plot and the 1-based ``mode``
+    field of the modal ``mass_participation`` records.
+
+    Args:
+        args: Parsed CLI namespace (uses ``mode``).
+
+    Returns:
+        The 0-based mode index expected by the plotting / analysis APIs.
+    """
+    if args.mode < 1:
+        sys.exit(f"Error: --mode is 1-based (mode 1 is the first mode); got {args.mode}.")
+    return args.mode - 1
 
 
 def mesh_view_kwargs(args, section_names):
@@ -133,7 +152,16 @@ def show_static(builder, md, quantity, scale):
 
 
 def show_modal(builder, num_modes, mode, mode_scale=5.0):
-    """Modal analysis with an animated mode shape."""
+    """Modal analysis with an animated mode shape.
+
+    *mode* is a **0-based** index; the CLI converts its 1-based ``--mode`` via
+    :func:`mode_index`.
+
+    The period and the six-DOF mass-participation ratios drawn on the plot are
+    OpenSees ``modalProperties()`` results, read through
+    :func:`~fea_toolkit.plotting.mass_participation_ratios` — they are not
+    recomputed here.
+    """
     builder.compute_seismic_masses()
     modal = builder.run_modal_analysis(num_modes=num_modes, print_results=True)
     n = modal["num_modes"]
@@ -145,6 +173,7 @@ def show_modal(builder, num_modes, mode, mode_scale=5.0):
         shapes,
         mode=min(mode, n - 1),
         periods=modal["periods"],
+        participation=mass_participation_ratios(modal["modal_props"]),
         scale=mode_scale,
         animate=True,
     )
@@ -197,7 +226,13 @@ def show_rs(builder, md, num_modes, alpha_max, tg, damping, scale, mode_scale=5.
         print("Falling back to the mode-shape view - try a smaller --num-modes.")
         shapes = builder.extract_mode_shapes(n)
         plot_mode_animation(
-            builder, shapes, mode=0, periods=periods, scale=mode_scale, animate=True
+            builder,
+            shapes,
+            mode=0,
+            periods=periods,
+            participation=mass_participation_ratios(modal["modal_props"]),
+            scale=mode_scale,
+            animate=True,
         )
         return
 
@@ -249,7 +284,7 @@ def show_npz(path, args):
     if args.result == "static":
         plot_force_diagram(str(path), quantity=args.quantity)
     elif args.result == "modal":
-        plot_mode_animation(data, None, mode=args.mode, scale=args.mode_scale)
+        plot_mode_animation(data, None, mode=mode_index(args), scale=args.mode_scale)
     elif args.result == "rs":
         # Per-element response-spectrum forces require the rs/elem_* block,
         # which only archives written with element-level RS forces carry.
@@ -302,7 +337,7 @@ def run_s2k(md, args):
     if args.result == "static":
         show_static(builder, md, args.quantity, args.scale)
     elif args.result == "modal":
-        show_modal(builder, args.num_modes, args.mode, args.mode_scale)
+        show_modal(builder, args.num_modes, mode_index(args), args.mode_scale)
     elif args.result == "rs":
         show_rs(
             builder,
@@ -331,7 +366,7 @@ def main():
             "  %(prog)s model.s2k -r mesh --zlim 3.4 4.5 \\\n"
             "      --highlight-section 2xR3 2xR4                   # highlight braces in a band\n"
             "  %(prog)s results.npz -r static --quantity Mz        # saved archive\n"
-            "  %(prog)s --sample -r modal --mode 0                 # built-in sample\n"
+            "  %(prog)s --sample -r modal --mode 1                 # built-in sample\n"
         ),
     )
     parser.add_argument("model_file", nargs="?", help="Path to a .s2k model or .npz archive.")
@@ -358,7 +393,12 @@ def main():
             "auto (3D when PyVista is available) for static."
         ),
     )
-    parser.add_argument("--mode", type=int, default=0, help="Mode index (modal).")
+    parser.add_argument(
+        "--mode",
+        type=int,
+        default=1,
+        help="Mode number for --result modal, 1-based (default: 1 = first mode).",
+    )
     parser.add_argument("--num-modes", type=int, default=12, help="Number of modes.")
     parser.add_argument("--scale", type=float, default=50.0, help="Deformation magnification.")
     parser.add_argument(

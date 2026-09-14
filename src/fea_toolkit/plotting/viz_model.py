@@ -1355,6 +1355,106 @@ def plot_deformed_displacement_3d(
     return None
 
 
+#: Six-DOF order used for modal mass participation, matching the order
+#: OpenSees reports: three translations, then three rotations.
+_MASS_DOF_LABELS = ("X", "Y", "Z", "RX", "RY", "RZ")
+
+#: ``ops.modalProperties()`` keys for the six mass-participation ratios, in
+#: ``_MASS_DOF_LABELS`` order.  These are read **verbatim** — the toolkit never
+#: recomputes modal participation itself (no hand-rolled phi^T M iota).
+_MASS_RATIO_OPS_KEYS = (
+    "partiMassRatiosMX",
+    "partiMassRatiosMY",
+    "partiMassRatiosMZ",
+    "partiMassRatiosRMX",
+    "partiMassRatiosRMY",
+    "partiMassRatiosRMZ",
+)
+
+#: NPZ archive keys carrying the same six ratios, written by
+#: ``npz_writer._collect_modal``.
+_MASS_RATIO_NPZ_KEYS = (
+    "modal/mx_ratio",
+    "modal/my_ratio",
+    "modal/mz_ratio",
+    "modal/rx_ratio",
+    "modal/ry_ratio",
+    "modal/rz_ratio",
+)
+
+
+def mass_participation_ratios(modal_props: Any) -> list:
+    """Per-mode six-DOF mass-participation ratios from OpenSees output.
+
+    The values are read straight out of the ``modalProperties()`` dict — they
+    are OpenSees's own result, surfaced by
+    :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.run_modal_analysis`
+    as ``modal_result["modal_props"]``.  The toolkit does **not** recompute
+    participation factors or effective modal masses.
+
+    Args:
+        modal_props: An ``ops.modalProperties()`` return dict.  May be empty.
+
+    Returns:
+        ``[(X, Y, Z, RX, RY, RZ), ...]`` — one tuple per mode, in percent (the
+        scale OpenSees reports).  A DOF absent from *modal_props* (e.g. a model
+        with no rotational participation) is ``None`` rather than ``0.0``, so an
+        annotation can omit it instead of printing a misleading zero.
+    """
+    props = modal_props or {}
+    arrays = [list(props.get(key) or []) for key in _MASS_RATIO_OPS_KEYS]
+    n_modes = max((len(a) for a in arrays), default=0)
+    return [tuple(float(a[i]) if i < len(a) else None for a in arrays) for i in range(n_modes)]
+
+
+def _npz_mass_participation(data: Any) -> list:
+    """Per-mode ``(X, Y, Z, RX, RY, RZ)`` ratios stored in an NPZ archive.
+
+    Archives written before the rotational keys existed simply lack them; those
+    DOFs come back as ``None`` so the annotation shows only what is present.
+    """
+    arrays = [data.get(key) for key in _MASS_RATIO_NPZ_KEYS]
+    n_modes = max((len(a) for a in arrays if a is not None), default=0)
+    return [
+        tuple(float(a[i]) if a is not None and i < len(a) else None for a in arrays)
+        for i in range(n_modes)
+    ]
+
+
+def _format_mass_participation(ratios: Any) -> str:
+    """Format six-DOF mass-participation ratios as a two-row text block.
+
+    Args:
+        ratios: Six values in :data:`_MASS_DOF_LABELS` order, in percent.
+            ``None`` at a position renders as ``--``; a ``None`` *ratios* or a
+            row with no values at all yields an empty string.
+
+    Returns:
+        A ``"Mass participation (%):"`` header plus translation/rotation rows,
+        or ``""`` when nothing is available.
+    """
+    if ratios is None:
+        return ""
+    rows = []
+    for start in (0, 3):
+        cells = []
+        has_value = False
+        for i in range(3):
+            label = _MASS_DOF_LABELS[start + i]
+            idx = start + i
+            val = ratios[idx] if idx < len(ratios) else None
+            if val is None:
+                cells.append(f"{label:>3s}      --")
+            else:
+                has_value = True
+                cells.append(f"{label:>3s} {val:6.2f}%")
+        if has_value:
+            rows.append("  ".join(cells))
+    if not rows:
+        return ""
+    return "Mass participation (%):\n" + "\n".join(rows)
+
+
 def plot_mode_animation(
     source,
     mode_shapes,
@@ -1366,6 +1466,7 @@ def plot_mode_animation(
     shrink=0.0,
     animate=True,
     periods=None,
+    participation=None,
     font_size=14,
     anim_speed=2.0,
     anim_amplitude=1.5,
@@ -1411,6 +1512,12 @@ def plot_mode_animation(
             (0.0 = full length, 0.1 = 10 percent gap at each end).
         animate: Oscillate amplitude sinusoidally.
         periods: List of modal periods (s).  The period for *mode* is shown.
+        participation: Optional per-mode six-DOF mass-participation ratios,
+            ``[(X, Y, Z, RX, RY, RZ), ...]`` in percent — build them with
+            :func:`mass_participation_ratios`.  These are OpenSees
+            ``modalProperties()`` values and are never recomputed here.  When
+            *source* is an NPZ dict and this is omitted, the ratios are read
+            from the archive's ``modal/*_ratio`` arrays.
         font_size: Display font size.
         anim_speed: Animation speed factor.
         anim_amplitude: Animation amplitude factor.
@@ -1441,6 +1548,16 @@ def plot_mode_animation(
         "#ccb974",
         "#64b5cd",
     ]
+
+    # ── Period / participation annotation ────────────────────────────
+    # Both are OpenSees ``modalProperties()`` results: passed in directly for
+    # a builder source, or read from the archive's verbatim copy of them for
+    # an NPZ source.  Nothing is recomputed here.
+    if isinstance(source, _NPZ_TYPES):
+        if periods is None:
+            periods = source.get("modal/period")
+        if participation is None:
+            participation = _npz_mass_participation(source)
 
     # Resolve mode shape displacements for this mode
     if isinstance(source, _NPZ_TYPES) and mode_shapes is None:
@@ -1648,11 +1765,21 @@ def plot_mode_animation(
                 loc="lower right",
             )
 
-    # ── Title ──
+    # ── Title and modal annotation ──
+    # Period (s) from the modal analysis; participation ratios from OpenSees
+    # ``modalProperties()`` (see ``mass_participation_ratios``).  Neither is
+    # derived here.
     period_str = ""
     if periods is not None and mode < len(periods):
         period_str = f"  T = {periods[mode]:.4f} s"
     plotter.add_text(f"Mode {mode + 1}  {period_str}", position="upper_edge", font_size=font_size)
+
+    ratios = (
+        participation[mode] if participation is not None and mode < len(participation) else None
+    )
+    part_text = _format_mass_participation(ratios)
+    if part_text:
+        plotter.add_text(part_text, position="upper_left", font_size=max(8, font_size - 4))
     plotter.show_grid()
     _set_isometric_view(plotter)
 

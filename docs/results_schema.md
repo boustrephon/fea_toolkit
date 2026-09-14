@@ -244,12 +244,26 @@ always compare against ``abs(control_disp)``.
 | `modal/mx_ratio` | `(N_mode,)` | `float` | Modal participating mass ratio — X (%) |
 | `modal/my_ratio` | `(N_mode,)` | `float` | Modal participating mass ratio — Y (%) |
 | `modal/mz_ratio` | `(N_mode,)` | `float` | Modal participating mass ratio — Z (%) |
+| `modal/rx_ratio` | `(N_mode,)` | `float` | Modal participating mass ratio — RX (%) |
+| `modal/ry_ratio` | `(N_mode,)` | `float` | Modal participating mass ratio — RY (%) |
+| `modal/rz_ratio` | `(N_mode,)` | `float` | Modal participating mass ratio — RZ (%) |
 | `modal/mx_eff` | `(N_mode,)` | `float` | Effective modal mass — X (tonnes) |
 | `modal/my_eff` | `(N_mode,)` | `float` | Effective modal mass — Y (tonnes) |
 | `modal/mz_eff` | `(N_mode,)` | `float` | Effective modal mass — Z (tonnes) |
 | `modal/mode_dx` | `(N_node, N_mode)` | `float` | Eigenvector X component per node × mode |
 | `modal/mode_dy` | `(N_node, N_mode)` | `float` | Eigenvector Y component per node × mode |
 | `modal/mode_dz` | `(N_node, N_mode)` | `float` | Eigenvector Z component per node × mode |
+
+The six ``modal/*_ratio`` arrays are **OpenSees's own values**, copied verbatim
+from ``ops.modalProperties("-return", "-unorm")``
+(``partiMassRatiosMX/MY/MZ`` and ``partiMassRatiosRMX/RMY/RMZ``) by
+``npz_writer._collect_modal``.  The toolkit does not recompute participation
+factors, and the plotting layer only reads these arrays — see
+``fea_toolkit.plotting.mass_participation_ratios()``, which turns the live
+``modal_props`` dict into the per-mode ``(X, Y, Z, RX, RY, RZ)`` tuples drawn
+on the mode-shape animation.  Archives written before the rotational keys
+existed simply omit ``modal/{rx,ry,rz}_ratio``; readers must treat them as
+optional.
 
 Mode shape arrays (``modal/mode_d{x,y,z}``) are stored as 2D matrices where
 column *j* is the eigenvector for mode *j* (0‑based) and row *i* matches

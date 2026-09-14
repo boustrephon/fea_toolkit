@@ -128,12 +128,15 @@ Requirements:
 # After running modal analysis with extract_shapes=True
 shapes = builder.extract_mode_shapes(num_modes)
 
-from fea_toolkit.plotting import plot_mode_animation
+from fea_toolkit.plotting import mass_participation_ratios, plot_mode_animation
 
-# Animate mode 4 (0‑based) interactively
+# Animate mode 4 (0‑based) interactively.  The period and the six-DOF mass
+# participation are read from OpenSees's modalProperties() output.
 plot_mode_animation(
     builder, shapes, mode=4,
-    scale=5.0, animate=True, periods=modal_result["periods"],
+    scale=5.0, animate=True,
+    periods=modal_result["periods"],
+    participation=mass_participation_ratios(modal_result["modal_props"]),
 )
 
 # Static (non‑animated) display with section‑coloured shells
@@ -142,6 +145,35 @@ plot_mode_animation(
     scale=5.0, animate=False, periods=modal_result["periods"],
 )
 ```
+
+From the command line (modes are **1‑based**, so ``--mode 1`` is the first mode):
+
+```bash
+python examples/view_model.py results.npz --result modal --mode 1
+```
+
+**On-plot annotation — period and six-DOF mass participation**
+
+The title shows the mode number and its natural period, and a second text block
+lists the six mass-participation ratios as percentages:
+
+```
+Mode 1    T = 0.3552 s                      Mass participation (%):
+                                              X   0.03%    Y  25.30%    Z   0.00%
+                                             RX   1.50%   RY   3.50%   RZ   5.50%
+```
+
+Both values come **straight from OpenSees**.  ``run_modal_analysis()`` stores the
+``ops.modalProperties("-return", "-unorm")`` dict as ``modal_result["modal_props"]``,
+and ``mass_participation_ratios()`` reads the six ``partiMassRatiosMX/MY/MZ`` and
+``partiMassRatiosRMX/RMY/RMZ`` entries from it — the toolkit never recomputes
+participation factors or effective modal masses.
+
+For an NPZ source the same values are read from the archive, where
+``npz_writer`` stored them verbatim as ``modal/{mx,my,mz,rx,ry,rz}_ratio`` (see
+``docs/results_schema.md``).  Archives written before the rotational keys
+existed omit ``modal/{rx,ry,rz}_ratio``; those DOFs are then shown as ``--``
+rather than a misleading ``0.00%``.
 
 **Amplitude and `scale`**
 
