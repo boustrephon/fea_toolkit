@@ -340,37 +340,43 @@ def _add_animation_timer(
 ) -> bool:
     """Attach a repeating timer to a PyVista plotter for animation.
 
-    Handles PyVista version differences in **both** the registration API
-    and the callback signature:
+    The registration API and the callback contract below were verified
+    against the upstream source, not assumed:
 
-    * PyVista < 0.44: ``add_timer_event`` invokes the callback with no
-      arguments (or a single ``step`` argument depending on version).
-    * PyVista >= 0.44: ``add_timer_event`` invokes the callback with two
-      positional arguments ``(step, plotter)``.
+    * ``Plotter.add_timer_event(max_steps, duration, callback)`` — the
+      interval keyword is **``duration``**, and has been since the method
+      was introduced (PyVista 0.43, PR #4839).  ``interval`` was never a
+      valid parameter name in any release.
+    * The callback is passed **exactly one** argument, ``step`` — upstream
+      ``Timer.execute`` is ``self.callback(self.step)`` in 0.43, 0.44 and
+      current ``main`` alike.  Nothing ever passes ``(step, plotter)``.
+    * PyVista renders for us: ``Timer.execute`` calls
+      ``iren.GetRenderWindow().Render()`` after each tick (PR #5618), so a
+      callback on this path must **not** call ``plotter.render()``.
 
-    The caller's callback may accept 0, 1, or 2 positional arguments
-    (``f()``, ``f(step)``, or ``f(step, plotter)``).  This helper adapts
-    the callback so the correct number of arguments is forwarded no
-    matter what the installed PyVista version passes — preventing the
-    classic ``TypeError: callback() takes N positional arguments but M
-    were given`` that otherwise breaks mode-shape and pushover
-    animations on newer PyVista.
+    What does vary is the toolkit's own callbacks: ``plot_mode_animation``
+    declares ``callback(step)`` while ``animate_pushover_deformation``
+    declares ``callback()``.  The adapter below forwards exactly as many
+    arguments as each callback declares, so the ``step`` PyVista always
+    supplies does not raise ``TypeError`` for the zero-argument one.
 
     Registration strategies (in order):
-      1. Modern PyVista: ``plotter.add_timer_event(max_steps=...,
-         duration=..., callback=...)``.
-      2. Versions that spell the interval ``interval``.
-      3. Older PyVista without an interval/duration kwarg.
-      4. Low-level VTK ``iren.AddObserver("TimerEvent", ...)``.
+      1. ``plotter.add_timer_event(max_steps=..., duration=..., callback=...)``
+         — available in every release the project allows
+         (``pyproject.toml`` floors PyVista at 0.44, two releases after the
+         method was added).
+      2. Low-level VTK ``iren.AddObserver("TimerEvent", ...)`` — a safety
+         net if the call above ever raises (e.g. a future signature change).
 
     If none succeed, a brief message is printed and animation proceeds
     via the slider widget alone.
 
     Args:
         plotter: A PyVista ``Plotter`` instance.
-        callback: Callback invoked on each timer tick.  May accept 0, 1,
-            or 2 positional arguments (``()``, ``(step,)``, or
-            ``(step, plotter)``).
+        callback: Callback invoked on each timer tick.  PyVista always
+            supplies the ``step`` count; the adapter forwards only as many
+            arguments as the callback declares, so both ``callback(step)``
+            and the pushover animation's ``callback()`` work.
         max_steps: Maximum timer events before auto-stopping.
         interval_ms: Timer interval in milliseconds.
 
@@ -409,10 +415,10 @@ def _add_animation_timer(
         )
     except (TypeError, ValueError):  # not introspectable (e.g. C-bound)
         # Conservative bound: treat as a bare ``callback(step)``.  Varargs is
-        # *not* assumed, so surplus PyVista args (e.g. ``(step, plotter)``)
-        # are truncated to ``(step,)`` instead of being forwarded and raising
-        # ``TypeError: callback() takes 1 positional argument but 2 were
-        # given``.  The step slot stays pad-able from the internal counter.
+        # *not* assumed, so surplus args are truncated to ``(step,)`` instead
+        # of being forwarded and raising ``TypeError: callback() takes 0
+        # positional arguments but 1 was given``.  The step slot stays
+        # pad-able from the internal counter.
         _n_pos = 1
         _n_pos_total = 1
         _has_varargs = False
@@ -422,23 +428,27 @@ def _add_animation_timer(
     def _adapted(*args: Any) -> Any:
         """Forward the right number of positional args to the user callback.
 
-        PyVista's ``add_timer_event`` invokes the callback with
-        ``(step, plotter)`` on v0.44+ and ``(step,)`` (or nothing) on
-        older versions.
+        PyVista calls the timer callback with a single argument, ``step``
+        (``Timer.execute`` is ``self.callback(self.step)`` from 0.43
+        onward).  Toolkit callbacks differ in what they declare, so
+        arguments are matched to the callback's signature instead of being
+        forwarded blindly.
 
         Three adaptation rules apply:
 
         1. **Truncate surplus args** when the callback has no ``*args`` to
-           absorb them (e.g. a one-argument ``callback(step)`` receiving
-           ``(step, plotter)``).  ``_has_varargs`` only suppresses this
-           truncation — it never affects the other two rules.
+           absorb them — the pushover animation's ``callback()`` would
+           otherwise raise ``TypeError`` on the ``step`` PyVista always
+           supplies.  This rule is the one that earns its keep.
+           ``_has_varargs`` only suppresses the truncation — it never
+           affects the other two rules.
         2. **Supply a missing step** from the internal counter when the
            timer passes nothing at all and the callback needs at least one
-           positional argument (e.g. ``callback(step)`` or
-           ``callback(step, *extra)`` on a legacy no-argument timer).
-        3. **Pad trailing gaps** with ``None`` when the timer passes fewer
-           args than the callback's required positional parameters (e.g.
-           ``callback(step, plotter)`` receiving only ``(step,)``).
+           positional argument.  Defensive only: no supported PyVista
+           invokes the callback with zero arguments.
+        3. **Pad trailing gaps** with ``None`` when the callback declares
+           more required positionals than the timer supplies.  Defensive
+           only — no supported PyVista passes a plotter.
         """
         # Rule 1 — drop surplus positional args unless the callback's
         # *args can absorb them.
@@ -463,9 +473,9 @@ def _add_animation_timer(
         (e.g. ``plot_mode_animation``'s ``callback(step)``, which computes
         a sine phase), an internal incrementing counter is supplied so the
         oscillation actually progresses; zero-argument callbacks (e.g. the
-        pushover ``_timer_callback``) are invoked with no arguments, and
-        two-argument callbacks ``callback(step, plotter)`` receive ``None``
-        for the plotter since no plotter object exists on this path.
+        pushover ``_timer_callback``) are invoked with no arguments, and a
+        callback declaring a second parameter receives ``None`` for it
+        since no plotter object exists on this path.
         """
         if _n_pos >= 1:
             # Supply the incrementing counter (plus ``None`` placeholders
@@ -474,10 +484,15 @@ def _add_animation_timer(
             return callback(_vtk_step[0], *([None] * (_n_pos - 1)))
         return callback()
 
-    # Strategy 1: modern PyVista — the interval kwarg is spelled ``duration``
-    # (``add_timer_event(max_steps, duration, callback)``).  PyVista's timer
-    # calls ``Render()`` after each tick, so this path needs no explicit
-    # render from the callback.
+    # Strategy 1 — the documented API (PyVista >= 0.43; the project floors it
+    # at 0.44).  PyVista's timer renders each frame, so this path needs no
+    # explicit render from the callback — hence ``True``.
+    #
+    # Note the keyword is ``duration``, not ``interval``: passing ``interval``
+    # raised TypeError on every release, silently dropping the helper onto the
+    # non-rendering VTK path below, so animations appeared frozen until the
+    # user clicked.  Do not "fix" a future TypeError by guessing another
+    # keyword name — check the upstream signature first.
     try:
         plotter.add_timer_event(max_steps=max_steps, duration=interval_ms, callback=_adapted)
         return True
@@ -486,27 +501,9 @@ def _add_animation_timer(
     except AttributeError:
         pass  # fall through
 
-    # Strategy 2: any version that spells it ``interval``.
-    try:
-        plotter.add_timer_event(max_steps=max_steps, interval=interval_ms, callback=_adapted)
-        return True
-    except TypeError:
-        pass  # fall through
-    except AttributeError:
-        pass  # fall through
-
-    # Strategy 3: oldest — no interval/duration kwarg at all.
-    try:
-        plotter.add_timer_event(max_steps=max_steps, callback=_adapted)
-        return True
-    except TypeError:
-        pass
-    except AttributeError:
-        pass
-
-    # Strategy 4: VTK-level observer (most compatible).  This observer does
-    # NOT render on its own, so report False and let the caller drive
-    # ``plotter.render()`` from its callback.
+    # Strategy 2 — VTK-level observer.  This observer does NOT render on its
+    # own, so report ``False`` and let the caller drive ``plotter.render()``
+    # from its callback.
     try:
         iren = plotter.render_window.GetInteractor()
         iren.AddObserver("TimerEvent", _vtk_adapted)

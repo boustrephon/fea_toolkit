@@ -427,6 +427,52 @@ guidance
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-14 — mode-shape amplitude + frozen animation fix, PyVista API audit)
+
+**Two viewer bugs reported together.**  The `84d747b` mode-shape normalisation
+left the exaggeration too large, and the mode-shape animation only repainted
+when the user clicked or dragged.
+
+**Amplitude** (`f1f092f`).  `plot_mode_animation`'s `scale` is a percentage of
+the model's largest bounding-box dimension; the default moves **10 → 5 %**
+(3.9 m peak on the 78 m pipe rack, previously 7.8 m).  `--mode-scale`,
+`show_modal` and `show_rs` follow.  Verified exactly: the default gives a
+0.200 peak on the 4-unit test span (5.00 %) versus 0.400 (10.00 %) before.
+
+**Frozen animation** (`f1f092f`).  `_add_animation_timer` called
+`plotter.add_timer_event(max_steps=..., interval=..., callback=...)`.  No
+PyVista release ever accepted `interval` — the keyword has been `duration`
+since `add_timer_event` was introduced in 0.43 (PR #4839) — so the call raised
+`TypeError` on every version, the fallback chain swallowed it, and the helper
+silently landed on the low-level VTK `AddObserver("TimerEvent")` path.
+PyVista's own `Timer.execute` calls `iren.GetRenderWindow().Render()` after
+each tick (PR #5618); the raw VTK observer does not, so mesh geometry was
+updated in memory but never repainted — hence "redraws only on click".
+
+Fix: call the documented `duration=` keyword, and return whether PyVista's
+timer took over (`True`) or the non-rendering VTK path was used (`False`) so
+`plot_mode_animation` renders explicitly only in the latter case — no
+redundant render at 60 Hz on the happy path.  Verified against the installed
+PyVista 0.48.1: a single `add_timer_event` call with kwargs
+`['callback', 'duration', 'max_steps']` succeeds and the helper returns `True`.
+
+**Upstream API audit (this is the second time this API bit us).**  Read the
+real source rather than inferring: the callback receives **exactly one**
+argument, `step`, in 0.43, 0.44 and `main` — the `(step, plotter)` claim in
+`viz_common.py` and `TestAnimationTimerCallbackArity` was **never true**, and
+the two phantom strategies (`interval`, and "no duration kwarg") defended
+against APIs that do not exist.  Both are removed; the verified contract,
+with citations, is now recorded in `docs/dev_notes.md`.  The arity adapter is
+kept but re-documented honestly — its only load-bearing rule is truncating
+the `step` PyVista always supplies so `animate_pushover_deformation`'s
+zero-argument `_timer_callback` does not raise `TypeError`.
+
+**Validation.**  Full suite `1506 passed, 1 skipped, 4 xfailed`;
+`mkdocs build --strict` exit 0; ruff clean.  New tests assert *which keyword*
+is passed (`test_modern_pyvista_uses_duration_kwarg`,
+`test_pyvista_signature_mismatch_falls_back_to_vtk`) — the gap that let the
+original bug through, since the old fakes accepted any keyword.
+
 ## DONE (2026-09-13 — CLI API listing, rhino/io/plotting hardening)
 
 **CLI (`python -m fea_toolkit`).** Added a lazy API listing that enumerates

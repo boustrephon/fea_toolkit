@@ -345,7 +345,7 @@ from fea_toolkit.plotting import plot_mode_animation
 shapes = builder.extract_mode_shapes(num_modes=6)
 pl = plot_mode_animation(
     builder, shapes, mode=0,
-    scale=10.0,
+    scale=5.0,             # % of model's largest dimension (default 5)
     shrink=0.05,           # gap between frame elements
     animate=True,
     notebook=True,

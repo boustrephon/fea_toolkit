@@ -115,6 +115,52 @@ related: [analysis_builder_migration_plan.md]
 - Labels: `add_point_labels(..., always_visible=True)` — permanent overlay labels
 - Export to interactive HTML: `export_html()`
 
+## PyVista animation timer — verified contract (`_add_animation_timer`)
+
+The toolkit has twice shipped a wrong assumption about `add_timer_event`.
+The facts below were read off the upstream source, not inferred:
+
+| Fact | Evidence |
+|---|---|
+| Signature is `add_timer_event(max_steps, duration, callback)` — the interval keyword is **`duration`** | PyVista 0.43.1 API docs (method introduced in PR #4839); still `duration` on `main` |
+| **`interval` was never a parameter name** in any release | same |
+| The callback receives **exactly one** argument, `step` (`Timer.execute` is `self.callback(self.step)`) | `render_window_interactor.py` at v0.43, v0.44 and `main` |
+| PyVista **renders each frame itself** — `Timer.execute` ends in `iren.GetRenderWindow().Render()` | PR #5618 |
+| The project floors PyVista at `>=0.44`, two releases after the method was added | `pyproject.toml` |
+
+Consequences:
+
+- A callback registered through `add_timer_event` must **not** call
+  `plotter.render()`.  Only the low-level VTK `AddObserver("TimerEvent")`
+  fallback needs the callback to render, so `_add_animation_timer` returns
+  `True` when PyVista took the timer (it renders) and `False` on the VTK
+  path (the caller must render).  `plot_mode_animation` reads that flag.
+- Toolkit callbacks are not uniform: `plot_mode_animation` declares
+  `(step)` while `animate_pushover_deformation`'s `_timer_callback`
+  declares `()`.  The adapter truncates the `step` PyVista always supplies
+  so the zero-argument one does not raise `TypeError`.  That truncation is
+  the adapter's only load-bearing rule; the "supply a missing step" and
+  "pad with `None`" rules are defensive against behaviour no supported
+  PyVista exhibits (see `TestAnimationTimerCallbackArity`).
+
+**The bug this documents (fixed in `f1f092f`).**  `_add_animation_timer`
+called `add_timer_event(max_steps=..., interval=..., callback=...)`.  Since
+no release ever accepted `interval`, the call raised `TypeError` on *every*
+version, the fallback chain swallowed it, and the non-rendering VTK
+observer was used silently — so mode-shape geometry updated in memory but
+the window only repainted when the user clicked or dragged.  Two lessons:
+
+1. **Never invent a keyword name to satisfy a `TypeError`.**  A chain of
+   speculative spellings hides the failure it is meant to absorb and lands
+   on a degraded path instead.  Check the upstream signature first — the
+   installed source, the version-specific docs, or the gallery example.
+2. **A green test suite does not mean the API call was right.**  The arity
+   tests used fakes that accepted any keyword, so they passed while the
+   real call raised.  Asserting *which keyword was passed*
+   (`test_modern_pyvista_uses_duration_kwarg`,
+   `test_pyvista_signature_mismatch_falls_back_to_vtk`) is what catches
+   this class of bug.
+
 ## Interactive viewer (plotting/interactive_viewer.py)
 - `plot_interactive_viewer(builder, combo_forces, combo_results, ...)` — PyVista widget-driven viewer
 - Radio buttons for quantity (Mz/My/Mx/Fz/Fy/Fx)

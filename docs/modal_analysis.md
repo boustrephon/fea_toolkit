@@ -173,6 +173,10 @@ fallback observer never renders, so ``plot_mode_animation`` calls
 updated in memory but never repainted, and the animation appears frozen until
 the user clicks or drags in the window.
 
+The timer keyword is ``duration`` (not ``interval``), and the callback is
+passed a single ``step`` argument — see the verified upstream contract and
+the history of this bug in ``docs/dev_notes.md`` → *PyVista animation timer*.
+
 The ``project_b_linear.py`` pipeline also supports a ``--solver`` flag for
 selecting the eigenvalue solver used during modal analysis:
 
