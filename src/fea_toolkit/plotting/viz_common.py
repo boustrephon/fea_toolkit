@@ -337,7 +337,7 @@ def _add_animation_timer(
     callback,
     max_steps: int = 1000,
     interval_ms: int = 200,
-) -> None:
+) -> bool:
     """Attach a repeating timer to a PyVista plotter for animation.
 
     Handles PyVista version differences in **both** the registration API
@@ -358,9 +358,10 @@ def _add_animation_timer(
 
     Registration strategies (in order):
       1. Modern PyVista: ``plotter.add_timer_event(max_steps=...,
-         interval=..., callback=...)``.
-      2. Older PyVista without ``interval`` kwarg support.
-      3. Low-level VTK ``iren.AddObserver("TimerEvent", ...)``.
+         duration=..., callback=...)``.
+      2. Versions that spell the interval ``interval``.
+      3. Older PyVista without an interval/duration kwarg.
+      4. Low-level VTK ``iren.AddObserver("TimerEvent", ...)``.
 
     If none succeed, a brief message is printed and animation proceeds
     via the slider widget alone.
@@ -372,6 +373,14 @@ def _add_animation_timer(
             ``(step, plotter)``).
         max_steps: Maximum timer events before auto-stopping.
         interval_ms: Timer interval in milliseconds.
+
+    Returns:
+        ``True`` when PyVista's own timer was registered — it calls
+        ``Render()`` after every tick, so the callback must **not** render.
+        ``False`` on the low-level VTK path (and when no timer is
+        available): that observer never renders, so the caller **must**
+        call ``plotter.render()`` in its callback or the animation will
+        only repaint when the user interacts with the window.
     """
     import inspect
 
@@ -465,32 +474,47 @@ def _add_animation_timer(
             return callback(_vtk_step[0], *([None] * (_n_pos - 1)))
         return callback()
 
-    # Strategy 1: modern PyVista with named kwargs
+    # Strategy 1: modern PyVista — the interval kwarg is spelled ``duration``
+    # (``add_timer_event(max_steps, duration, callback)``).  PyVista's timer
+    # calls ``Render()`` after each tick, so this path needs no explicit
+    # render from the callback.
+    try:
+        plotter.add_timer_event(max_steps=max_steps, duration=interval_ms, callback=_adapted)
+        return True
+    except TypeError:
+        pass  # fall through
+    except AttributeError:
+        pass  # fall through
+
+    # Strategy 2: any version that spells it ``interval``.
     try:
         plotter.add_timer_event(max_steps=max_steps, interval=interval_ms, callback=_adapted)
-        return
+        return True
     except TypeError:
         pass  # fall through
     except AttributeError:
         pass  # fall through
 
-    # Strategy 2: older PyVista — try positional args, or without interval
+    # Strategy 3: oldest — no interval/duration kwarg at all.
     try:
         plotter.add_timer_event(max_steps=max_steps, callback=_adapted)
-        return
+        return True
     except TypeError:
         pass
     except AttributeError:
         pass
 
-    # Strategy 3: VTK-level observer (most compatible)
+    # Strategy 4: VTK-level observer (most compatible).  This observer does
+    # NOT render on its own, so report False and let the caller drive
+    # ``plotter.render()`` from its callback.
     try:
         iren = plotter.render_window.GetInteractor()
         iren.AddObserver("TimerEvent", _vtk_adapted)
         iren.CreateRepeatingTimer(interval_ms)
-        return
+        return False
     except Exception:
         pass
 
     # No timer available — animation will use slider only
     print("  [Timer not available — animation via slider widget only]")
+    return False

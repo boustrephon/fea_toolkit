@@ -132,7 +132,7 @@ def show_static(builder, md, quantity, scale):
     plot_force_diagram(builder, elem_forces, quantity=quantity, mode="flag", dimension="3d")
 
 
-def show_modal(builder, num_modes, mode, mode_scale=10.0):
+def show_modal(builder, num_modes, mode, mode_scale=5.0):
     """Modal analysis with an animated mode shape."""
     builder.compute_seismic_masses()
     modal = builder.run_modal_analysis(num_modes=num_modes, print_results=True)
@@ -150,7 +150,7 @@ def show_modal(builder, num_modes, mode, mode_scale=10.0):
     )
 
 
-def show_rs(builder, md, num_modes, alpha_max, tg, damping, scale, mode_scale=10.0):
+def show_rs(builder, md, num_modes, alpha_max, tg, damping, scale, mode_scale=5.0):
     """Response-spectrum analysis (GB 50011) with the CQC deformed shape."""
     builder.compute_seismic_masses()
     modal = builder.run_modal_analysis(num_modes=num_modes, print_results=True)
@@ -364,10 +364,10 @@ def main():
     parser.add_argument(
         "--mode-scale",
         type=float,
-        default=10.0,
+        default=5.0,
         help=(
             "Mode-shape exaggeration for --result modal, as a percentage of the "
-            "model's largest dimension (default: 10).  Mode shapes are "
+            "model's largest dimension (default: 5).  Mode shapes are "
             "mass-normalised by OpenSees, so their magnitudes are not "
             "displacements and are normalised to unit peak before scaling."
         ),

@@ -133,20 +133,20 @@ from fea_toolkit.plotting import plot_mode_animation
 # Animate mode 4 (0‑based) interactively
 plot_mode_animation(
     builder, shapes, mode=4,
-    scale=15.0, animate=True, periods=modal_result["periods"],
+    scale=5.0, animate=True, periods=modal_result["periods"],
 )
 
 # Static (non‑animated) display with section‑coloured shells
 plot_mode_animation(
     builder, shapes, mode=4,
-    scale=15.0, animate=False, periods=modal_result["periods"],
+    scale=5.0, animate=False, periods=modal_result["periods"],
 )
 ```
 
 **Amplitude and `scale`**
 
 ``scale`` is the mode-shape exaggeration expressed as a **percentage of the
-model's largest bounding-box dimension** (default ``10`` = 10%).
+model's largest bounding-box dimension** (default ``5`` = 5%).
 
 The shape is normalised to unit peak before scaling, and that normalisation is
 essential.  ``ops.nodeEigenvector`` returns *mass-normalised* eigenvectors
@@ -157,11 +157,21 @@ components by a fixed factor therefore looks reasonable for the global modes
 and explodes for the local ones.  On the BPPS pipe-rack model, for example,
 the peak component is 0.23 for modes 1–3 but 4.50 for mode 4 — a ~20× spread —
 so a fixed factor of 30 displayed a **135 m** peak displacement on a 78 m
-model.  After normalisation every mode shows the same peak (10% of span
-= 7.8 m).
+model.  After normalisation every mode shows the same peak (5% of span
+= 3.9 m).
 
 This is the same convention the Rhino deformed overlay uses — see
 ``fea_toolkit.rhino.results``, which auto-scales to 5% of the model span.
+
+**Animation and rendering**
+
+``_add_animation_timer`` registers a repeating timer and returns whether
+PyVista's own timer took it.  PyVista's ``Timer`` calls ``Render()`` after
+every tick, so on that path the callback must not render.  The low-level VTK
+fallback observer never renders, so ``plot_mode_animation`` calls
+``plotter.render()`` itself only on that path — otherwise the mesh geometry is
+updated in memory but never repainted, and the animation appears frozen until
+the user clicks or drags in the window.
 
 The ``project_b_linear.py`` pipeline also supports a ``--solver`` flag for
 selecting the eigenvalue solver used during modal analysis:

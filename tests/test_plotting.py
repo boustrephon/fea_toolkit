@@ -1927,9 +1927,13 @@ class TestAnimationTimerCallbackArity:
 
         - ``"pyvista_2arg"`` — modern PyVista: ``add_timer_event`` succeeds on
           the first attempt (callback accepted as keyword).
-        - ``"pyvista_no_interval"`` — older PyVista: the first call with the
-          ``interval`` kwarg raises ``TypeError``; the retry without it succeeds.
-        - ``"vtek"`` — both ``add_timer_event`` attempts raise, so the helper
+        - ``"pyvista_interval_only"`` — a version whose interval kwarg is
+          spelled ``interval``: the first attempt with ``duration`` raises
+          ``TypeError``; the retry with ``interval`` succeeds.
+        - ``"pyvista_no_interval"`` — older PyVista: the calls with the
+          ``interval`` kwarg raise ``TypeError``; the retry without it
+          succeeds.
+        - ``"vtek"`` — every ``add_timer_event`` attempt raises, so the helper
           falls through to the low-level VTK ``AddObserver`` path.
         """
 
@@ -1961,8 +1965,13 @@ class TestAnimationTimerCallbackArity:
                 if self.mode == "vtek":
                     # No timer API available — force VTK fallback.
                     raise AttributeError("no add_timer_event")
-                if self.mode == "pyvista_no_interval" and "interval" in kwargs:
-                    # Older PyVista rejects the interval kwarg.
+                if self.mode == "pyvista_interval_only" and "duration" in kwargs:
+                    # This version spells the interval ``interval``.
+                    raise TypeError("duration not supported")
+                if self.mode == "pyvista_no_interval" and (
+                    "interval" in kwargs or "duration" in kwargs
+                ):
+                    # Older PyVista rejects both interval kwargs.
                     raise TypeError("interval not supported")
                 self.registered_callback = kwargs.get("callback")
 
@@ -2181,6 +2190,67 @@ class TestAnimationTimerCallbackArity:
         _add_animation_timer(fp, callback, max_steps=10, interval_ms=17)
         self._invoke_registered_callback(fp, "vtek", ("caller", "TimerEvent"))
         assert received == [(1, ())]
+
+    def test_returns_true_when_pyvista_timer_registered(self):
+        """PyVista's timer renders for us, so the helper reports ``True``."""
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        def callback(step):
+            return step
+
+        fp = self._make_fake_plotter("pyvista_2arg")
+        assert _add_animation_timer(fp, callback, max_steps=10, interval_ms=17) is True
+
+    def test_returns_false_on_vtk_fallback(self):
+        """The raw VTK observer never renders, so the helper reports ``False``.
+
+        The caller must then drive ``plotter.render()`` from its callback,
+        otherwise the animation only repaints on user interaction.
+        """
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        def callback(step):
+            return step
+
+        fp = self._make_fake_plotter("vtek")
+        assert _add_animation_timer(fp, callback, max_steps=10, interval_ms=17) is False
+        assert fp.observer_added
+        assert fp.timer_created
+
+    def test_modern_pyvista_uses_duration_kwarg(self):
+        """The interval kwarg is spelled ``duration`` on modern PyVista.
+
+        PyVista >= 0.44 declares ``add_timer_event(max_steps, duration,
+        callback)``.  Passing ``interval`` instead raised ``TypeError`` and
+        silently dropped the helper onto the VTK fallback path, which does
+        not render — so the mode animation appeared frozen until the user
+        clicked in the window.
+        """
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        def callback(step):
+            return step
+
+        fp = self._make_fake_plotter("pyvista_2arg")
+        _add_animation_timer(fp, callback, max_steps=10, interval_ms=17)
+        assert len(fp.method_calls) == 1, fp.method_calls
+        assert fp.method_calls[0][2].get("duration") == 17
+
+    def test_interval_only_pyvista_falls_back_to_interval_kwarg(self):
+        """A PyVista that only accepts ``interval`` still gets a timer.
+
+        Strategy 1 (``duration``) is rejected, strategy 2 (``interval``)
+        registers — and it still auto-renders, so ``True`` is returned.
+        """
+        from fea_toolkit.plotting.viz import _add_animation_timer
+
+        def callback(step):
+            return step
+
+        fp = self._make_fake_plotter("pyvista_interval_only")
+        assert _add_animation_timer(fp, callback, max_steps=10, interval_ms=17) is True
+        assert [c[2].get("duration") is not None for c in fp.method_calls] == [True, False]
+        assert fp.method_calls[1][2].get("interval") == 17
 
 
 # ============================================================================

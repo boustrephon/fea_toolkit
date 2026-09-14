@@ -1361,7 +1361,7 @@ def plot_mode_animation(
     mode=0,
     *,
     collapse_to_parents=False,
-    scale=10.0,
+    scale=5.0,
     show_original=True,
     shrink=0.0,
     animate=True,
@@ -1394,7 +1394,7 @@ def plot_mode_animation(
         mode: 0‑based mode index.
         collapse_to_parents: Show unsplit parent elements (default ``False``).
         scale: Mode-shape exaggeration as a **percentage of the model's
-            largest bounding-box dimension** (default ``10.0`` = 10%).
+            largest bounding-box dimension** (default ``5.0`` = 5%).
 
             The shape is normalised to unit peak before scaling, so the
             displayed amplitude is comparable across modes.  This matters
@@ -1660,6 +1660,13 @@ def plot_mode_animation(
     if animate:
         import math as _math
 
+        # PyVista's own timer renders after every tick; the low-level VTK
+        # fallback in ``_add_animation_timer`` does not.  Render explicitly
+        # only on that path, otherwise the mesh geometry is updated in memory
+        # but never repainted — the animation then appears frozen until the
+        # user clicks or drags in the window.
+        _timer_renders = [True]
+
         def callback(step):
             amp = _math.sin(anim_speed * 2.0 * _math.pi * step / 60.0) * anim_amplitude
             nfm, nsm = _build_deformed_mesh(
@@ -1669,8 +1676,10 @@ def plot_mode_animation(
                 frame_mesh.points = nfm.points
             if shell_mesh is not None and nsm is not None and nsm.n_points:
                 shell_mesh.points = nsm.points
+            if not _timer_renders[0]:
+                plotter.render()
 
-        _add_animation_timer(
+        _timer_renders[0] = _add_animation_timer(
             plotter,
             callback,
             max_steps=3600,
