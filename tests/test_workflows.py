@@ -652,6 +652,49 @@ class TestResponseSpectrumWorkflow:
             f"base_shear_cqc is near zero ({results['base_shear_cqc']})"
         )
 
+    def test_local_forces_component_order(self):
+        """``localForces`` is [Fx, Fy, Fz, Mx, My, Mz] per end — Fy/Fz are shears.
+
+        Pins the assumption behind ``extract_element_rs_forces`` (and the static
+        recorder): indices 1 and 2 hold the member shears along the local y and
+        z axes, not bending moments.  A vertical cantilever with a tip load in
+        global Y develops a base shear of magnitude ``P`` and a base moment of
+        magnitude ``P·L``; under the alternative *interleaved* layout
+        ``[Fx, Fy, Mz, Fz, My, Mx]`` that moment would land at index 5 (torsion)
+        with index 2 zero — physically impossible for a planar bend.
+        """
+        L, P = 4.0, 10.0
+        ops.wipe()
+        try:
+            ops.model("basic", "-ndm", 3, "-ndf", 6)
+            ops.node(1, 0.0, 0.0, 0.0)
+            ops.fix(1, 1, 1, 1, 1, 1, 1)
+            ops.node(2, 0.0, 0.0, L)
+            # vecxz = global X → local x = +Z (member), local y = −Y, local z = +X
+            ops.geomTransf("Linear", 1, 1.0, 0.0, 0.0)
+            ops.element("elasticBeamColumn", 1, 1, 2, 0.01, 2.0e8, 7.7e7, 1e-6, 1e-5, 2e-5, 1)
+            ops.timeSeries("Constant", 1)
+            ops.pattern("Plain", 1, 1)
+            ops.load(2, 0.0, P, 0.0, 0.0, 0.0, 0.0)
+            ops.system("FullGeneral")
+            ops.numberer("RCM")
+            ops.constraints("Transformation")
+            ops.integrator("LoadControl", 1.0)
+            ops.algorithm("Linear")
+            ops.analysis("Static")
+            assert ops.analyze(1) == 0
+            loc = [float(v) for v in ops.eleResponse(1, "localForces")]
+        finally:
+            ops.wipe()
+
+        i_end = loc[:6]
+        # Index 1 = Fy (shear along local y); index 5 = Mz (moment about local z).
+        assert abs(abs(i_end[1]) - P) < 1e-6, f"expected shear P at index 1, got {i_end}"
+        assert abs(abs(i_end[5]) - P * L) < 1e-6, f"expected moment P·L at index 5, got {i_end}"
+        # Torsion (index 3) and the moment about local y (index 4) remain zero.
+        assert abs(i_end[3]) < 1e-9
+        assert abs(i_end[4]) < 1e-9
+
     def test_element_rs_forces(self, sample_ab, spectrum):
         """Element-level RS forces are available after spectrum analysis."""
         sample_ab.build_domain()

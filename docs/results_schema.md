@@ -309,6 +309,23 @@ column *j* is the eigenvector for mode *j* (0‑based) and row *i* matches
 | `rs/node_dy` | `(N_node,)` | `float` | CQC‑combined nodal displacement Y (m) |
 | `rs/node_dz` | `(N_node,)` | `float` | CQC‑combined nodal displacement Z (m) |
 
+**Local end-force layout**
+
+`rs/elem_*` values come from `ops.eleResponse(tag, "localForces")`, which
+returns the 12-component vector in the **grouped** order
+
+```
+[Fx_i, Fy_i, Fz_i, Mx_i, My_i, Mz_i, Fx_j, Fy_j, Fz_j, Mx_j, My_j, Mz_j]
+```
+
+— three forces then three moments per end.  **`Fy` and `Fz` are the member
+shears** along the element's local y and z axes (paired with the bending
+moments `Mz` and `My` respectively); they are taken straight from the response
+rather than derived from a moment gradient.  This ordering is *not* the
+interleaved `[Fx, Fy, Mz, Fz, My, Mx]` arrangement some older OpenSees sources
+show; it is pinned by
+`tests/test_workflows.py::TestResponseSpectrumWorkflow::test_local_forces_component_order`.
+
 **Modal combination is performed by the toolkit, not by OpenSees**
 
 OpenSees' ``responseSpectrumAnalysis`` command "computes only the modal
