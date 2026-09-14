@@ -52,6 +52,12 @@ python -m fea_toolkit.model.review model.s2k --response-spectrum \
 
 # Write a unified NPZ archive (geometry + modal + static results)
 python -m fea_toolkit.model.review model.s2k --analysis --npz results.npz
+
+# Per-element response-spectrum forces into the NPZ archive, for later
+# viewing (implies --response-spectrum; costs an extra mode loop over
+# every element, so it is opt-in)
+python -m fea_toolkit.model.review model.s2k --analysis \
+    --rs-element-forces --rs-combination cqc --npz results.npz
 ```
 
 A console entry point is also installed as `fea-review` (after
@@ -64,6 +70,32 @@ fea-review model.s2k --analysis
 The process exit code is `0` when the model is clean, `1` when blocking
 issues were found, and `2` on a file/usage error — so the command can gate
 a CI step.
+
+### Element-level response-spectrum forces
+
+`--rs-element-forces` records the **element-local** end forces of every mode
+and combines them across modes — CQC by default, SRSS with
+`--rs-combination srss` — into the `rs/elem_*` block of the NPZ archive.
+OpenSees combines nothing itself: `responseSpectrumAnalysis -mode n` processes
+one mode at a time, so the combination is performed by the toolkit.
+
+Writing is the review's job; **rendering is not**.  `model.review` produces no
+plots at all, so view the archive with `examples/view_model.py`:
+
+```bash
+python examples/view_model.py results.npz --result rs --quantity Mz
+python examples/view_model.py results.npz --result rs --quantity fy --dimension 3d
+```
+
+The response-spectrum diagram is **2D by default** (quantity vs elevation);
+`--dimension 3d` draws the per-element tubes/flags instead.  Both take
+`--quantity` in either the local force names (`fx`, `fy`, `fz`, `mx`, `my`,
+`mz`) or the moment names (`Mz`, `My`, …).
+
+Because the extra pass is `O(modes × elements)`, an archive written *without*
+the flag simply has no `rs/elem_*` block — the viewer reports that rather than
+failing.  See [`results_schema`](results_schema.md) for the local-force
+component ordering and the full key list.
 
 ### Python API
 

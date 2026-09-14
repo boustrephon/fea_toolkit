@@ -102,8 +102,7 @@ def describe_results_npz(path: str) -> dict[str, Any]:
 
         * ``path`` — resolved file path
         * ``n_arrays`` — total number of arrays in the archive
-        * ``geometry`` — ``{"present", "n_nodes", "n_frames", "n_shells",
-          "arrays"}``
+        * ``geometry`` — presence flags, node/frame/shell counts and ``arrays``
         * ``analysis_types`` — recorded types (e.g. ``["static", "modal"]``)
         * ``static_cases`` — static case labels
         * ``n_modes`` — number of stored modal periods
