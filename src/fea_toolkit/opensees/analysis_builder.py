@@ -637,7 +637,10 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
         translational (``mx`` / ``my`` / ``mz``) **and** rotational
         (``rx`` / ``ry`` / ``rz``) mass-participation ratios plus the
         ``frequency`` — the 6-DOF presentation used by the report
-        pipeline.  When ``config["load_verify"]`` or
+        pipeline.  ``mass_source`` reports the summed seismic mass and
+        weight (``total_mass`` / ``total_weight`` / ``gravity`` /
+        ``n_nodes_with_mass``) from the model's MASS SOURCE.
+        When ``config["load_verify"]`` or
         ``config["wind_check"]`` are set, ``load_verification`` (a list of
         per-pattern applied-vs-reaction records) and ``wind`` (structured
         wind-sanity data from :func:`~fea_toolkit.analysis.linear.
@@ -658,6 +661,7 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
         "wind": None,
         "npz": None,
         "npz_error": None,
+        "mass_source": None,
         "error": None,
     }
 
@@ -698,7 +702,28 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
 
         builder = AnalysisBuilder(mesh, builder_config)
         builder.build_domain()
-        builder.compute_seismic_masses()
+        node_masses = builder.compute_seismic_masses() or {}
+
+        # ── Seismic mass totals (from the model's MASS SOURCE) ───────
+        # The nodal masses are in the model's consistent mass unit; the
+        # weight is mass × g (g_from_units, never a hardcoded 9.81).
+        try:
+            from ..utils import g_from_units
+
+            total_mass = float(sum(node_masses.values()))
+            gravity = g_from_units(md.units)
+            result["mass_source"] = {
+                "name": next(
+                    (n for n, ms in md.mass_sources.items() if ms.is_default),
+                    next(iter(md.mass_sources), None),
+                ),
+                "total_mass": total_mass,
+                "total_weight": total_mass * gravity,
+                "gravity": gravity,
+                "n_nodes_with_mass": sum(1 for m in node_masses.values() if m > 0),
+            }
+        except Exception as exc:  # captured, never raised
+            result["mass_source_error"] = f"{type(exc).__name__}: {exc}"
 
         modal = builder.run_modal_analysis(
             num_modes=int(builder_config.get("num_modes", 12)),

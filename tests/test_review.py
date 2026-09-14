@@ -11,7 +11,12 @@ from fea_toolkit.model import (
     review_model,
     review_s2k_file,
 )
-from fea_toolkit.model.review import _format_table, main
+from fea_toolkit.model.review import (
+    _format_table,
+    _mass_unit_label,
+    _reaction_table_rows,
+    main,
+)
 from fea_toolkit.model.sap_data import (
     FRAME_RELEASE_DOF_LABELS,
     FrameElement,
@@ -435,6 +440,13 @@ def _fake_analysis(n_modes: int = 8) -> dict:
             "n_supports": 2,
             "patterns_applied": ["DEAD"],
         },
+        "mass_source": {
+            "name": "MS",
+            "total_mass": 100.0,
+            "total_weight": 980.665,
+            "gravity": 9.80665,
+            "n_nodes_with_mass": 2,
+        },
     }
 
 
@@ -457,8 +469,36 @@ class TestModeDisplay:
         text = format_review_report(result)
         for header in ("Mx (%)", "My (%)", "Mz (%)", "Rx (%)", "Ry (%)", "Rz (%)"):
             assert header in text
-        # Cumulative participation is summed over all modes.
-        assert "Rx=108.00%" in text  # sum(10..17)
+        # A final SUM row carries the cumulative participation (all modes).
+        assert "SUM" in text
+        assert "28.00" in text  # sum(0..7) in the Mx (%) column
+        assert "108.00" in text  # sum(10..17) in the Rx (%) column
+
+    def test_markdown_includes_sum_row(self, result):
+        md_text = format_review_markdown(result)
+        assert "SUM" in md_text
+        assert "108.00" in md_text
+
+    def test_text_reactions_table(self, result):
+        text = format_review_report(result)
+        assert "Summed (all supports)" in text
+        # Translational and rotational components carry their own units.
+        assert "Fz (" in text and "Mz (" in text
+
+    def test_markdown_reactions_table(self, result):
+        md_text = format_review_markdown(result)
+        assert "Summed (all supports)" in md_text
+
+    def test_text_mass_source_totals(self, result):
+        text = format_review_report(result)
+        assert "Seismic mass (mass source)" in text
+        assert "100.000" in text  # total_mass
+        assert "980.7" in text  # total_weight
+
+    def test_markdown_mass_source_totals(self, result):
+        md_text = format_review_markdown(result)
+        assert "Seismic mass (mass source)" in md_text
+        assert "980.7" in md_text
 
     def test_text_min_participation_filters(self, result):
         # Mode 1 has mx = 0 % -> dropped; modes 2..8 all clear 1 %.
@@ -586,6 +626,26 @@ class TestFormatTable:
         assert "|" not in text  # not a pipe table
 
 
+class TestReviewTableHelpers:
+    def test_mass_unit_label_known_pairs(self):
+        assert _mass_unit_label({"F": "KN", "L": "m"}) == "t"
+        assert _mass_unit_label({"F": "N", "L": "m"}) == "kg"
+
+    def test_mass_unit_label_fallback(self):
+        assert _mass_unit_label({"F": "kN", "L": "in"}) == "kN\u00b7s\u00b2/in"
+
+    def test_reaction_table_units(self):
+        rows = _reaction_table_rows(
+            {"fx": 1.0, "fy": 2.0, "fz": -3.0, "mx": 0.0, "my": 0.0, "mz": 4.0},
+            "kN",
+            "m",
+        )
+        assert len(rows) == 1
+        assert rows[0]["Reaction"] == "Summed (all supports)"
+        assert "Fz (kN)" in rows[0]
+        assert "Mz (kN\u00b7m)" in rows[0]
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Solver-free self-weight check
 # ═══════════════════════════════════════════════════════════════════
@@ -612,6 +672,15 @@ class TestSelfWeight:
         result = review_model(md, self_weight=True)
         assert "Self-weight" in format_review_report(result)
         assert "## Self-weight" in format_review_markdown(result)
+
+    def test_section_table_has_total_row(self):
+        md = _parse("clean_model.s2k")
+        result = review_model(md, self_weight=True)
+        expected = f"{result['self_weight']['expected']:.1f}"
+        text = format_review_report(result)
+        assert "Total" in text and expected in text
+        md_text = format_review_markdown(result)
+        assert "| Total" in md_text and expected in md_text
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -743,9 +812,12 @@ class TestAnalysisChecks:
         text = format_review_report(result)
         assert "Load verification" in text
         assert "Wind sanity check" in text
+        # The wind table states where its numbers come from.
+        assert "Basis:" in text
         md_text = format_review_markdown(result)
         assert "### Load verification" in md_text
         assert "### Wind sanity check" in md_text
+        assert "Basis:" in md_text
 
 
 # ═══════════════════════════════════════════════════════════════════

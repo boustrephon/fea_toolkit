@@ -133,9 +133,11 @@ insertion (cardinal) points, auto-mesh usage and mass-source completeness.
 ### Self-weight (analytical) — `--self-weight`
 The expected self-weight derived from element geometry and material unit
 weights (via `check_self_weight_consistency()`), broken down by section.
-This is **solver-free** and reported only: `applied`, `discrepancy` and
-`passed` stay `None` because confirming the applied load against the
-reactions is the analysis phase's job (see *Load verification* below).
+A `Total` row closes the table (equal to the headline *Expected
+self-weight*).  This is **solver-free** and reported only: `applied`,
+`discrepancy` and `passed` stay `None` because confirming the applied load
+against the reactions is the analysis phase's job (see *Load verification*
+below).
 
 ### Brace buckling — `--brace-buckling`
 The Euler buckling capacity `P_cr = π²EI₂₂/(KL)²` of the model's braces,
@@ -150,10 +152,14 @@ Builds the OpenSees domain via the normal
 Preprocessor → AnalysisBuilder pipeline and reports:
 - **Modal**: periods and the **6-DOF** mass-participation ratios —
   translational `Mx`/`My`/`Mz` **and** rotational `Rx`/`Ry`/`Rz` — set out
-  in a table, with a cumulative-participation line summed over all modes
-  (the `modal_table_enhanced()` presentation used by the report pipeline).
-- **Static**: convergence (catches a singular stiffness matrix) and
-  summed support reactions for the applied gravity patterns.
+  in a table that ends with a `SUM` row (cumulative participation summed
+  over **all** modes, even when the displayed rows are filtered), matching
+  the `modal_table_enhanced()` presentation used by the report pipeline.
+- **Static**: convergence (catches a singular stiffness matrix) and the
+  summed support reactions as a table (`Fx`/`Fy`/`Fz` plus `Mx`/`My`/`Mz`),
+  alongside the total **seismic mass and weight** derived from the model's
+  MASS SOURCE (`total_mass` in the model's consistent mass unit — tonnes
+  for a kN‑m model — and `total_weight` = mass × `g_from_units()`).
 - **Load verification** (`analysis_config["load_verify"]` / `--load-verify`):
   per-pattern **applied vs reaction** equilibrium (`Applied`, `Reaction`
   and `Δ` components) via `static_load_verification()`, as a table.
@@ -161,12 +167,31 @@ Preprocessor → AnalysisBuilder pipeline and reports:
   wind loads against the bounding-box face areas, as a table — the
   structured `wind_sanity_data()` feeds the table, while
   `wind_sanity_check()` remains the Markdown form for the report pipeline.
+  The report prints the basis for the numbers (see below).
 
 Failures are captured into `result["analysis"]["error"]` rather than
 raised, so a review of a broken model still completes.  The optional
 analysis-phase checks are captured individually
 (`result["analysis"]["load_verification_error"]` / `["wind_error"]`) and
 never abort the modal/static pass.
+
+#### Wind sanity check — basis
+
+The wind check is a **plausibility test that the applied wind load scales
+with the building envelope** — it is *not* a code or wind-tunnel pressure.
+Every number comes from the model itself:
+
+| Quantity | Source |
+|---|---|
+| `x_face` | bounding-box `y_span × z_span` — the face normal to global X (windward for the +X wind case) |
+| `y_face` | bounding-box `x_span × z_span` — the face normal to global Y |
+| `fx`, `fy` | absolute base reaction (`Fx` of the `Wind+X` case, `Fy` of `Wind+Y`) from the linear analysis results |
+| `p_x`, `p_y` | `fx / x_face`, `fy / y_face` — the implied **mean pressure** on each face |
+
+The check passes when `|p_x − p_y| / max(p_x, p_y) < 0.1` — the two implied
+pressures agree, the signature of a consistent wind load set.  A large
+mismatch usually flags a missing/duplicated wind area or a load applied to
+the wrong face.  All quantities are in the model's own unit system.
 
 ### NPZ export (`--npz`)
 
@@ -211,7 +236,8 @@ knobs (CLI flags and formatter keyword arguments) trim the listing:
 When rows are suppressed the report prints a
 `… N further mode(s) not shown` note, so a filtered listing is never
 ambiguous.  `--num-modes` sets how many modes are **computed**;
-`--max-modes` sets how many are **displayed**.
+`--max-modes` sets how many are **displayed**.  The `SUM` row always sums
+**all** computed modes, even when rows are filtered.
 
 ```python
 from fea_toolkit.model import format_review_report
@@ -240,7 +266,7 @@ result = {
   "self_weight": None | {expected, by_section, applied, discrepancy, passed},
   "brace_buckling": None | {detected, k_factor, members},
   "analysis": None | {ok, periods, mass_participation, static,
-                      load_verification, wind, error},
+                      load_verification, wind, mass_source, error},
   "npz": str | None,
   "npz_error": str | None,
   "ok": bool,
@@ -251,9 +277,11 @@ result = {
 `--brace-buckling` (with `detected=False` and empty `members` when the
 model has no braces).  Each `analysis["mass_participation"]` entry carries
 `mode`, `period`, `frequency` and the six ratios `mx`/`my`/`mz`/`rx`/`ry`/`rz`.
+`analysis["mass_source"]` reports the seismic mass totals
+(`name`, `total_mass`, `total_weight`, `gravity`, `n_nodes_with_mass`).
 The `analysis` sub-dict's `load_verification` (a list of per-pattern
 applied-vs-reaction records) and `wind` (structured data from
-`wind_sanity_data()`: `rows`, `within_10pct`, plus the raw values) are
+`wind_sanity_data()`: `rows` and `within_10pct`, plus the raw values) are
 populated by `--load-verify` / `--wind-check` respectively.
 `npz` holds the path written by `--npz` (with any failure in `npz_error`).
 

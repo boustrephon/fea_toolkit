@@ -47,10 +47,29 @@ def wind_sanity_data(
 ) -> dict:
     """Return structured wind-load sanity-check data.
 
-    Computes the wind base shear as a pressure over the bounding-box face
-    areas for the X and Y wind cases.  This is the structured form of
-    :func:`wind_sanity_check`, so callers that build their own tables (e.g.
-    the model review) can reuse the same numbers.
+    **Basis** — this is a plausibility test that the applied wind load
+    scales with the building envelope, not a code/wind-tunnel pressure.
+    Every number derives from the model itself:
+
+    - ``x_face`` = bounding-box ``y_span`` × ``z_span`` — the face normal to
+      global X (the windward face for the +X wind case);
+    - ``y_face`` = bounding-box ``x_span`` × ``z_span`` — the face normal to
+      global Y;
+    - ``fx`` / ``fy`` = the absolute base reaction (``Fx`` from the
+      ``Wind+X`` case, ``Fy`` from ``Wind+Y``) read from the linear
+      analysis results;
+    - ``p_x`` = ``fx / x_face`` and ``p_y`` = ``fy / y_face`` — the implied
+      **mean pressure** on each face.
+
+    ``within_10pct`` is ``True`` when ``|p_x - p_y| / max(p_x, p_y) < 0.1``
+    — the two implied pressures agree, the signature of a consistent wind
+    load set.  A large mismatch usually flags a missing/duplicated wind
+    area or a load applied to the wrong face.  All quantities are in the
+    model's own unit system.
+
+    This is the structured form of :func:`wind_sanity_check`, so callers
+    that build their own tables (e.g. the model review) can reuse the same
+    numbers.
 
     Parameters
     ----------

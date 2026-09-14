@@ -37,6 +37,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional
 
+from .._unit_scaling import force_unit_label, length_unit_label
 from .checks import (
     check_brace_buckling,
     check_model_connectivity,
@@ -882,15 +883,21 @@ _MODAL_RATIO_COLS = (
 )
 
 
-def _modal_table_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _modal_table_rows(
+    rows: list[dict[str, Any]],
+    totals: Optional[dict[str, float]] = None,
+) -> list[dict[str, Any]]:
     """Build table rows for modal participation entries.
 
     Renders the rotational (Rx/Ry/Rz) as well as the translational
     (Mx/My/Mz) mass-participation ratios — the 6-DOF presentation used by
-    the report pipeline's ``modal_table_enhanced()``.
+    the report pipeline's ``modal_table_enhanced()`` — and, when *totals*
+    is supplied, appends a final ``SUM`` row.
 
     Args:
         rows: ``mass_participation`` entries from a review result.
+        totals: Optional per-ratio sums (see :func:`_modal_totals`), added
+            as a trailing ``SUM`` row.
 
     Returns:
         Row dicts with pre-formatted string values (see
@@ -905,11 +912,16 @@ def _modal_table_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for key, label in _MODAL_RATIO_COLS:
             entry[f"{label} (%)"] = f"{float(row.get(key, 0.0)):.2f}"
         out.append(entry)
+    if totals:
+        entry = {"Mode": "SUM", "Period (s)": "\u2014"}
+        for key, label in _MODAL_RATIO_COLS:
+            entry[f"{label} (%)"] = f"{float(totals.get(key, 0.0)):.2f}"
+        out.append(entry)
     return out
 
 
-def _modal_totals(analysis: dict[str, Any]) -> str:
-    """Return a one-line sum of mass participation across **all** modes.
+def _modal_totals(analysis: dict[str, Any]) -> dict[str, float]:
+    """Sum mass participation across **all** modes.
 
     Mirrors the SUM row of ``modal_table_enhanced()`` but sums every mode
     (not just the displayed subset), so a filtered table still reports the
@@ -919,17 +931,62 @@ def _modal_totals(analysis: dict[str, Any]) -> str:
         analysis: The ``analysis`` sub-dict of a review result.
 
     Returns:
-        A ``"Mx=.. My=.. Mz=.. Rx=.. Ry=.. Rz=.."`` string, or ``""`` when
-        there are no modal rows.
+        Dict of per-ratio sums keyed ``mx``/``my``/``mz``/``rx``/``ry``/
+        ``rz``; empty when there are no modal rows.
     """
     rows = analysis.get("mass_participation") or []
     if not rows:
-        return ""
-    parts = []
-    for key, label in _MODAL_RATIO_COLS:
-        total = sum(float(row.get(key, 0.0)) for row in rows)
-        parts.append(f"{label}={total:.2f}%")
-    return "  ".join(parts)
+        return {}
+    return {key: sum(float(row.get(key, 0.0)) for row in rows) for key, _ in _MODAL_RATIO_COLS}
+
+
+def _reaction_table_rows(
+    reactions: dict[str, float],
+    force_unit: str,
+    length_unit: str,
+) -> list[dict[str, Any]]:
+    """Build a single-row table for the summed support reactions.
+
+    Args:
+        reactions: ``{"fx": ..., ..., "mz": ...}`` summed reactions.
+        force_unit: Force-unit label (e.g. ``"kN"``).
+        length_unit: Length-unit label (e.g. ``"m"``).
+
+    Returns:
+        A one-row list of pre-formatted values (see :func:`_format_table`).
+    """
+    row: dict[str, Any] = {"Reaction": "Summed (all supports)"}
+    for comp, label in (("fx", "Fx"), ("fy", "Fy"), ("fz", "Fz")):
+        row[f"{label} ({force_unit})"] = f"{float(reactions.get(comp, 0.0)):,.3g}"
+    for comp, label in (("mx", "Mx"), ("my", "My"), ("mz", "Mz")):
+        row[f"{label} ({force_unit}\u00b7{length_unit})"] = (
+            f"{float(reactions.get(comp, 0.0)):,.3g}"
+        )
+    return [row]
+
+
+def _mass_unit_label(units: dict[str, Any]) -> str:
+    """Return a display label for the model's consistent mass unit.
+
+    Mass is force·time²/length; SAP2000 analyses always use seconds, so the
+    label derives from the force/length pair (``kN``‑``m`` → tonnes,
+    ``N``‑``m`` → kg, ``lbf``‑``ft`` → slugs).  Unrecognised pairs fall back
+    to the explicit ``F·s²/L`` form.
+
+    Args:
+        units: Model units dict, e.g. ``{"F": "KN", "L": "m"}``.
+
+    Returns:
+        Conventional mass-unit label (e.g. ``"t"``).
+    """
+    fu = force_unit_label(units)
+    lu = length_unit_label(units)
+    return {
+        ("kN", "m"): "t",
+        ("N", "m"): "kg",
+        ("lbf", "ft"): "slug",
+        ("lb", "ft"): "slug",
+    }.get((fu, lu), f"{fu}\u00b7s\u00b2/{lu}")
 
 
 def format_review_report(
@@ -1066,6 +1123,9 @@ def format_review_report(
                 {"Section": name, f"Weight ({force_unit})": f"{weight:.1f}"}
                 for name, weight in sorted(by_section.items(), key=lambda kv: -kv[1])
             ]
+            rows.append(
+                {"Section": "Total", f"Weight ({force_unit})": f"{self_weight['expected']:.1f}"}
+            )
             add(_apply_indent(_format_table(rows)))
 
     brace = result.get("brace_buckling")
@@ -1099,16 +1159,26 @@ def format_review_report(
         if analysis["ok"]:
             add(f"  Static + modal: OK ({len(analysis['periods'])} modes)")
             rows, hidden = _display_modes(analysis, max_modes, min_participation)
-            add(_apply_indent(_format_table(_modal_table_rows(rows))))
+            add(
+                _apply_indent(
+                    _format_table(_modal_table_rows(rows, _modal_totals(analysis) or None))
+                )
+            )
             if hidden:
                 add(f"      ... {hidden} further mode(s) not shown")
-            totals = _modal_totals(analysis)
-            if totals:
-                add(f"  \u03a3 over {len(analysis['periods'])} modes: {totals}")
-            reactions = analysis.get("static", {}).get("summed_reactions")
-            add(f"  Patterns applied: {analysis.get('static', {}).get('patterns_applied')}")
-            add(f"  Supports with reactions: {analysis.get('static', {}).get('n_supports')}")
-            add(f"  Summed reactions: {reactions}")
+            static = analysis.get("static") or {}
+            add(f"  Patterns applied: {static.get('patterns_applied')}")
+            add(f"  Supports with reactions: {static.get('n_supports')}")
+            reactions = static.get("summed_reactions")
+            if reactions:
+                add(_apply_indent(_format_table(_reaction_table_rows(reactions, force_unit, lu))))
+            mass = analysis.get("mass_source")
+            if mass:
+                add(
+                    f"  Seismic mass (mass source): {mass['total_mass']:,.3f} "
+                    f"{_mass_unit_label(units)}  =  weight "
+                    f"{mass['total_weight']:,.1f} {force_unit}"
+                )
         else:
             add(f"  FAILED: {analysis['error']}")
 
@@ -1126,6 +1196,11 @@ def format_review_report(
             add("  -- Wind sanity check --")
             if isinstance(wind, dict):
                 add(_apply_indent(_format_table(wind.get("rows") or [])))
+                add(
+                    "  Basis: pressure = |base reaction| / projected face area "
+                    "(+X wind \u2192 Y\u00b7Z face, +Y wind \u2192 X\u00b7Z face), "
+                    "from the Wind+X / Wind+Y load cases."
+                )
                 if wind.get("within_10pct"):
                     add("  Pressures are within 10 % of each other.")
             else:
@@ -1285,6 +1360,9 @@ def format_review_markdown(
                 {"Section": name, f"Weight ({force_unit})": f"{weight:.1f}"}
                 for name, weight in sorted(by_section.items(), key=lambda kv: -kv[1])
             ]
+            rows.append(
+                {"Section": "Total", f"Weight ({force_unit})": f"{self_weight['expected']:.1f}"}
+            )
             add(_format_table(rows, tablefmt="github"))
             add("")
 
@@ -1327,18 +1405,37 @@ def format_review_markdown(
             add(f"Static + modal completed ({len(analysis['periods'])} modes).")
             add("")
             rows, hidden = _display_modes(analysis, max_modes, min_participation)
-            add(_format_table(_modal_table_rows(rows), tablefmt="github"))
+            add(
+                _format_table(
+                    _modal_table_rows(rows, _modal_totals(analysis) or None),
+                    tablefmt="github",
+                )
+            )
             add("")
             if hidden:
                 add(f"_{hidden} further mode(s) not shown._")
                 add("")
-            totals = _modal_totals(analysis)
-            if totals:
-                add(f"\u03a3 over {len(analysis['periods'])} modes: {totals}")
-                add("")
-            reactions = analysis.get("static", {}).get("summed_reactions")
+            static = analysis.get("static") or {}
+            add(
+                f"Patterns applied: **{static.get('patterns_applied')}** \u00b7 "
+                f"supports with reactions: **{static.get('n_supports')}**"
+            )
+            add("")
+            reactions = static.get("summed_reactions")
             if reactions:
-                add(f"Summed reactions: `{reactions}`")
+                add(
+                    _format_table(
+                        _reaction_table_rows(reactions, force_unit, lu), tablefmt="github"
+                    )
+                )
+                add("")
+            mass = analysis.get("mass_source")
+            if mass:
+                add(
+                    f"Seismic mass (mass source): **{mass['total_mass']:,.3f} "
+                    f"{_mass_unit_label(units)}** \u2014 weight "
+                    f"**{mass['total_weight']:,.1f} {force_unit}**."
+                )
                 add("")
         else:
             add(f"**FAILED:** {analysis['error']}")
@@ -1360,6 +1457,12 @@ def format_review_markdown(
             add("")
             if isinstance(wind, dict):
                 add(_format_table(wind.get("rows") or [], tablefmt="github"))
+                add("")
+                add(
+                    "_Basis: pressure = |base reaction| / projected face area "
+                    "(+X wind \u2192 Y\u00b7Z face, +Y wind \u2192 X\u00b7Z face), "
+                    "from the Wind+X / Wind+Y load cases._"
+                )
                 add("")
                 if wind.get("within_10pct"):
                     add("_Pressures are within 10 % of each other._")
