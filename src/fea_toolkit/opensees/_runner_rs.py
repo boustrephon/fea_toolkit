@@ -2,6 +2,8 @@
 
 import contextlib
 import math
+import os
+import tempfile
 from typing import Any, Optional, Union
 
 import numpy as np
@@ -44,6 +46,206 @@ _RS_FORCE_COMPONENTS = (
 #:    its ``force_map`` reader are the only RS consumers.  See
 #:    ``docs/deprecation_plan.md``.
 _RS_LEGACY_ALIASES = {"Vy_i": "Fy_i", "Vy_j": "Fy_j", "Vz_i": "Fz_i", "Vz_j": "Fz_j"}
+
+#: Significant digits requested from the Element recorder.
+#:
+#: The recorder's default is **6** significant digits — enough for a force
+#: diagram, but it loses ~5e-7 relative accuracy against
+#: ``ops.eleResponse``, so it is not fit for a bit-parity comparison.
+#: Measured on a 3-element frame (max abs error vs ``eleResponse``):
+#: ``6`` (default) → 3.4e-5, ``14`` → 3.3e-13, ``16`` → 2.8e-17,
+#: ``17`` → **0.0 (bit-identical)**.  17 is the smallest float64 round-trip.
+_RS_RECORDER_PRECISION = 17
+
+
+def _rs_forces_per_mode(
+    ts_tag: int,
+    dof: int,
+    num_modes: int,
+    elem_data: dict,
+    elem_order: list,
+    row_of: dict,
+) -> np.ndarray:
+    """Collect RS element forces with one ``responseSpectrumAnalysis`` per mode.
+
+    This is the original extraction path: OpenSees is asked for mode *n*
+    explicitly and the element forces are read back element-by-element with
+    ``ops.eleResponse``.  Cost is ``n_modes × n_elements`` Python/extension
+    calls.
+
+    Args:
+        ts_tag: Tag of the response-spectrum ``Path`` time series.
+        dof: Excited DOF (1 = UX, 2 = UY, 3 = UZ).
+        num_modes: Number of modes to process.
+        elem_data: ``{elem_id: {"tag": ops_tag, ...}}`` for active elements.
+        elem_order: Element ids in output-row order.
+        row_of: ``{elem_id: row index}`` into the output array.
+
+    Returns:
+        ``(n_elements, 12, n_modes)`` per-mode local end forces.  Elements
+        whose response is missing or unsupported stay zero.
+    """
+    forces = np.zeros((len(elem_order), len(_RS_FORCE_COMPONENTS), num_modes), dtype=float)
+    for mode in range(1, num_modes + 1):
+        ops.responseSpectrumAnalysis(ts_tag, dof, "-mode", mode)
+        for eid, ed in elem_data.items():
+            try:
+                raw = ops.eleResponse(ed["tag"], "localForces")
+            except Exception:
+                raw = None
+            f = _normalise_frame_response(raw)
+            if f is None:
+                continue
+            forces[row_of[eid], :, mode - 1] = f
+    return forces
+
+
+def _rs_forces_recorder(
+    ts_tag: int,
+    dof: int,
+    num_modes: int,
+    elem_data: dict,
+    elem_order: list,
+    row_of: dict,
+) -> np.ndarray:
+    """Collect RS element forces with one all-modes pass and an Element recorder.
+
+    ``ops.responseSpectrumAnalysis`` processes **every** mode when ``-mode`` is
+    omitted, and invokes any recorder registered beforehand once per mode
+    ("When the i-th analysis step is complete, all previously defined recorders
+    will be called" — OpenSees command manual).  A single ``Element`` recorder
+    therefore captures the whole ``mode × element × component`` block in one
+    pass, replacing ``n_modes × n_elements`` Python-level ``eleResponse`` calls
+    with one file read.
+
+    The file layout was verified against OpenSeesPy 3.8.0.0 rather than
+    assumed:
+
+    * one line **per mode** (row *i* ↔ mode *i+1*), not per element;
+    * each element contributes its ``setResponse`` vector **contiguously**, in
+      the ``-ele`` order given — 12 values for a beam-column, but only 6 (3D
+      truss) or 1 (1-value truss) for other element types, so the column count
+      is **not** uniformly ``12 × n_elements``;
+    * ``-precision`` must be an ``int`` and must precede the response
+      argument; a string raises and a trailing ``-precision`` is silently
+      ignored (see :data:`_RS_RECORDER_PRECISION`);
+    * with ``-time`` the leading column is the domain time, which
+      ``responseSpectrumAnalysis`` never advances — always ``0.0``, so it
+      carries no mode information and is discarded.
+
+    Args:
+        ts_tag: Tag of the response-spectrum ``Path`` time series.
+        dof: Excited DOF (1 = UX, 2 = UY, 3 = UZ).
+        num_modes: Number of modes to keep (the file may hold more).
+        elem_data: ``{elem_id: {"tag": ops_tag, ...}}`` for active elements.
+        elem_order: Element ids in output-row order.
+        row_of: ``{elem_id: row index}`` into the output array.
+
+    Returns:
+        ``(n_elements, 12, n_modes)`` per-mode local end forces, matching
+        :func:`_rs_forces_per_mode` bit-for-bit.
+
+    Raises:
+        RuntimeError: If no element responds, if the recorded column count
+            contradicts the probed per-element layout, or if fewer mode rows
+            are written than requested.  These flag an unexpected element type
+            rather than a tuning problem, so they are surfaced instead of
+            silently degrading to zeros.
+    """
+    # One query per element fixes the column layout up front and doubles as
+    # the support test, so unsupported elements are excluded rather than
+    # shifting the column offsets of every element after them.
+    lengths: dict = {}
+    for eid in elem_order:
+        try:
+            raw = ops.eleResponse(elem_data[eid]["tag"], "localForces")
+        except Exception:
+            raw = None
+        lengths[eid] = 0 if raw is None else len(raw)
+
+    recorded = [eid for eid in elem_order if lengths[eid] > 0]
+    if not recorded:
+        raise RuntimeError("RS recorder extraction: no element returned a 'localForces' response")
+
+    offsets = np.concatenate(([0], np.cumsum([lengths[eid] for eid in recorded])))
+    expected_cols = int(offsets[-1])
+
+    forces = np.zeros((len(elem_order), len(_RS_FORCE_COMPONENTS), num_modes), dtype=float)
+
+    with tempfile.TemporaryDirectory(prefix="fea_toolkit_rs_") as tmp:
+        path = os.path.join(tmp, "elem_local_force.out")
+        rec_tag = ops.recorder(
+            "Element",
+            "-file",
+            path,
+            "-precision",
+            _RS_RECORDER_PRECISION,
+            "-ele",
+            *[elem_data[eid]["tag"] for eid in recorded],
+            "localForce",
+        )
+        if not isinstance(rec_tag, int) or rec_tag < 0:
+            raise RuntimeError(f"OpenSees rejected the Element recorder (returned {rec_tag!r})")
+        try:
+            ops.responseSpectrumAnalysis(ts_tag, dof)
+        finally:
+            # Remove only our own recorder so a caller's recorders survive.
+            try:
+                ops.remove("recorder", rec_tag)
+            except Exception:
+                with contextlib.suppress(Exception):
+                    ops.remove("recorders")
+
+        body = np.loadtxt(path)
+        if body.ndim == 1:
+            body = body.reshape(1, -1)
+
+    # Drop the always-zero domain-time column written by ``-time``.
+    if body.shape[1] == expected_cols + 1:
+        body = body[:, 1:]
+    if body.shape[1] != expected_cols:
+        raise RuntimeError(
+            f"RS recorder extraction: recorded {body.shape[1]} columns but the "
+            f"per-element layout predicts {expected_cols} — the recorder's "
+            "'localForce' widths differ from 'localForces'. Use "
+            "extraction='per_mode' for this model."
+        )
+    if body.shape[0] < num_modes:
+        raise RuntimeError(
+            f"RS recorder extraction: recorder wrote {body.shape[0]} mode rows "
+            f"but {num_modes} were requested"
+        )
+
+    for k, eid in enumerate(recorded):
+        _store_rs_element_block(
+            forces, row_of[eid], lengths[eid], body[:num_modes, offsets[k] : offsets[k + 1]]
+        )
+    return forces
+
+
+def _store_rs_element_block(forces: np.ndarray, row: int, length: int, blk: np.ndarray) -> None:
+    """Expand one element's recorded per-mode block into its 12-component row.
+
+    Mirrors :func:`_normalise_frame_response`'s length rules so the recorder
+    path is a drop-in for the per-mode path: ``>= 12`` values are truncated to
+    the first 12, a 6-value (3D truss) response keeps its three force
+    components at each end with zero moments, and a 1-value (axial truss)
+    response becomes ``[-P, 0…, +P, 0…]``.  Anything else is left as zero.
+
+    Args:
+        forces: Destination ``(n_elements, 12, n_modes)`` array, modified in place.
+        row: Row of ``forces`` for this element.
+        length: Number of values the element's response provides.
+        blk: ``(n_modes, length)`` recorded block for this element.
+    """
+    if length >= 12:
+        forces[row, :, :] = blk[:, :12].T
+    elif length == 6:
+        forces[row, 0:3, :] = blk[:, 0:3].T
+        forces[row, 6:9, :] = blk[:, 3:6].T
+    elif length == 1:
+        forces[row, 0, :] = -blk[:, 0]
+        forces[row, 6, :] = blk[:, 0]
 
 
 class RsRunnerMixin:
@@ -294,6 +496,7 @@ class RsRunnerMixin:
         direction: str = "X",
         damping_ratio: float = 0.05,
         combination: str = "cqc",
+        extraction: Optional[str] = None,
         print_results: bool = True,
     ) -> dict[str, Any]:
         """Run RS analysis and return combined element forces sorted by height.
@@ -322,6 +525,21 @@ class RsRunnerMixin:
             damping_ratio: Damping ratio for the CQC correlation coefficient.
             combination: Modal combination rule — ``'cqc'`` (default) or
                 ``'srss'``.
+            extraction: Per-mode force extraction strategy.
+
+                ``'per_mode'`` (default)
+                    One ``responseSpectrumAnalysis -mode n`` call per mode and
+                    one ``eleResponse`` per element per mode
+                    (``n_modes × n_elements`` calls).
+                ``'recorder'``
+                    A single all-modes ``responseSpectrumAnalysis`` pass behind
+                    an ``Element`` recorder, read back from one file.  Roughly
+                    ``n_modes`` times fewer Python/extension calls, so it scales
+                    better on large models; verified bit-identical to
+                    ``'per_mode'``.
+
+                ``None`` (the default) falls back to the builder config key
+                ``element_extraction``, then to ``'per_mode'``.
             print_results: If True, print a summary table.
 
         Returns:
@@ -336,6 +554,12 @@ class RsRunnerMixin:
         combination = str(combination or "cqc").lower()
         if combination not in ("cqc", "srss"):
             raise ValueError(f"combination must be 'cqc' or 'srss', got {combination!r}")
+
+        # Extraction strategy: the explicit argument wins, then the builder
+        # config (``rs_element_extraction``), then the original per-mode loop.
+        extraction = str(extraction or self.config.get("element_extraction") or "per_mode").lower()
+        if extraction not in ("per_mode", "recorder"):
+            raise ValueError(f"extraction must be 'per_mode' or 'recorder', got {extraction!r}")
 
         if self.config.get("verbose"):
             print("Extracting element RS forces...")
@@ -389,28 +613,13 @@ class RsRunnerMixin:
         elem_order = list(elem_data)
         row_of = {eid: i for i, eid in enumerate(elem_order)}
 
-        # Per-mode forces stored as ``(n_elements, n_components, n_modes)``:
-        # one vectorised row write per element per mode instead of 12 list
-        # appends.  Unsupported or failed responses stay zero.
-        forces = np.zeros((len(elem_order), len(_RS_FORCE_COMPONENTS), num_modes), dtype=float)
-
-        # Mode-by-mode extraction.  ``responseSpectrumAnalysis -mode n`` sets
-        # the modal displacement field for mode n only; the per-mode element
-        # forces are read here and combined below.  This loop is the cost
-        # floor — one OpenSees call per element per mode that numpy cannot
-        # replace, because OpenSees combines nothing itself (see
-        # docs/results_schema.md).
-        for mode in range(1, num_modes + 1):
-            ops.responseSpectrumAnalysis(SPECTRUM_TS_TAG, dof, "-mode", mode)
-            for eid, ed in elem_data.items():
-                try:
-                    raw = ops.eleResponse(ed["tag"], "localForces")
-                except Exception:
-                    raw = None
-                f = _normalise_frame_response(raw)
-                if f is None:
-                    continue
-                forces[row_of[eid], :, mode - 1] = f
+        # Per-mode forces are stored as ``(n_elements, 12, n_modes)`` and
+        # combined below.  Two interchangeable strategies fill it — see
+        # ``_rs_forces_per_mode`` (one mode at a time) and ``_rs_forces_recorder``
+        # (one all-modes pass behind an Element recorder); they agree
+        # bit-for-bit, so the choice is purely about call count.
+        collector = _rs_forces_recorder if extraction == "recorder" else _rs_forces_per_mode
+        forces = collector(SPECTRUM_TS_TAG, dof, num_modes, elem_data, elem_order, row_of)
 
         # ── Modal combination (vectorised) ──────────────────────────────
         # ρ depends only on omega/damping, so it is built once and shared by

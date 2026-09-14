@@ -781,6 +781,140 @@ class TestResponseSpectrumWorkflow:
             )
 
 
+class TestElementRsForceExtraction:
+    """The bulk ``recorder`` extraction must match the ``per_mode`` loop exactly.
+
+    Both strategies fill the same ``(n_elements, 12, n_modes)`` array; the only
+    difference is who does the looping (Python vs OpenSees) and how the forces
+    come back (one ``eleResponse`` per element per mode vs one recorded file).
+    They are interchangeable, so a divergence is a bug in whichever was changed.
+    """
+
+    @pytest.fixture
+    def spectrum(self):
+        """Simple elastic design spectrum (generic, not code-specific)."""
+        periods = [0.0, 0.1, 0.2, 0.5, 1.0, 2.0, 3.0, 6.0]
+        accels = [0.5, 1.5, 1.5, 1.5, 0.75, 0.375, 0.25, 0.125]
+        return periods, accels
+
+    @staticmethod
+    def _prepare(ab, spectrum):
+        """Build the domain, assign masses and run the modal pass."""
+        ab.build_domain()
+        ab.compute_seismic_masses()
+        modal = ab.run_modal_analysis(num_modes=3, print_results=False)
+        periods, accels = spectrum
+        return modal, periods, accels
+
+    @staticmethod
+    def _run(ab, modal, periods, accels, **kwargs):
+        """Call ``extract_element_rs_forces`` with the shared RS arguments."""
+        return ab.extract_element_rs_forces(
+            num_modes=len(modal["periods"]),
+            modal_periods=modal["periods"],
+            spectrum_periods=periods,
+            spectrum_accels=accels,
+            direction="X",
+            print_results=False,
+            **kwargs,
+        )
+
+    @staticmethod
+    def _records(result):
+        """``{elem_id: record}`` for an extraction result."""
+        return {r["elem_id"]: r for r in result["element_results"]}
+
+    def test_recorder_matches_per_mode(self, sample_ab, spectrum):
+        """Every element and component agrees bit-for-bit between the paths.
+
+        Exact equality is asserted deliberately: the recorder is written at
+        ``_RS_RECORDER_PRECISION`` and then read back, and 17 significant
+        digits round-trip a float64 exactly.  Anything less would hide a
+        change in the recorder's column layout or output precision.
+        """
+        modal, periods, accels = self._prepare(sample_ab, spectrum)
+        per_mode = self._run(sample_ab, modal, periods, accels, extraction="per_mode")
+        recorder = self._run(sample_ab, modal, periods, accels, extraction="recorder")
+
+        ref = self._records(per_mode)
+        got = self._records(recorder)
+        assert ref.keys() == got.keys(), "recorder changed the element set"
+        assert ref, "no element records to compare"
+        for eid, record in ref.items():
+            for key, value in record.items():
+                if isinstance(value, float):
+                    assert got[eid][key] == value, f"{eid}.{key}: {got[eid][key]} != {value}"
+
+    def test_element_extraction_read_from_config(self, sample_ab, spectrum):
+        """``element_extraction`` in the builder config selects the strategy.
+
+        An invalid value is asserted to raise, which proves the config key is
+        actually read — a test that only compared outputs would pass even if
+        the key were ignored, because both strategies agree by design.
+        """
+        modal, periods, accels = self._prepare(sample_ab, spectrum)
+        sample_ab.config["element_extraction"] = "bogus"
+        try:
+            with pytest.raises(ValueError, match="extraction must be"):
+                self._run(sample_ab, modal, periods, accels)
+        finally:
+            sample_ab.config.pop("element_extraction", None)
+
+        sample_ab.config["element_extraction"] = "recorder"
+        try:
+            from_config = self._run(sample_ab, modal, periods, accels)
+        finally:
+            sample_ab.config.pop("element_extraction", None)
+        per_mode = self._run(sample_ab, modal, periods, accels, extraction="per_mode")
+        assert self._records(from_config) == self._records(per_mode)
+
+    def test_element_extraction_rejects_unknown_value(self, sample_ab, spectrum):
+        """An unknown strategy fails loudly rather than defaulting silently."""
+        periods, accels = spectrum
+        with pytest.raises(ValueError, match="extraction must be"):
+            sample_ab.extract_element_rs_forces(
+                num_modes=3,
+                modal_periods=[1.0, 0.5, 0.25],
+                spectrum_periods=periods,
+                spectrum_accels=accels,
+                direction="X",
+                extraction="bulk",
+            )
+
+
+class TestRsRecorderBlockExpansion:
+    """``_store_rs_element_block`` reproduces ``_normalise_frame_response``.
+
+    The recorder writes each element's ``setResponse`` vector verbatim, so a
+    mixed model yields mixed widths (12 values for a beam-column, 6 for a 3D
+    truss, 1 for an axial truss).  The expansion of each recorded block must
+    therefore match ``_normalise_frame_response`` exactly for every length —
+    that equivalence is what lets ``extraction='recorder'`` be a drop-in for
+    the per-mode loop rather than a separate interpretation of the data.
+    """
+
+    @pytest.mark.parametrize("length", [12, 14, 6, 1, 3])
+    def test_matches_normalise_frame_response(self, length):
+        import numpy as np
+
+        from fea_toolkit.opensees._runner_rs import _store_rs_element_block
+        from fea_toolkit.opensees._runner_static import _normalise_frame_response
+
+        n_modes = 3
+        raw = np.arange(1.0, length * n_modes + 1.0).reshape(n_modes, length)
+        forces = np.zeros((1, 12, n_modes))
+        _store_rs_element_block(forces, 0, length, raw)
+
+        for m in range(n_modes):
+            expected = _normalise_frame_response(list(raw[m]))
+            if expected is None:
+                # Unsupported width (e.g. 3 values) stays zero, matching the
+                # per-mode loop's "skip the element" behaviour.
+                assert not forces[0, :, m].any()
+            else:
+                assert list(forces[0, :, m]) == expected
+
+
 # ============================================================================
 # Workflow: Results export
 # ============================================================================

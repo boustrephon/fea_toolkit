@@ -427,6 +427,50 @@ guidance
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-15 — RS element-force extraction: the bulk recorder alternative, measured)
+
+**Question asked.** Is there a bulk alternative to the per-mode extraction loop
+(``n_modes × n_elements`` ``eleResponse`` calls), and what does the current one
+actually cost?
+
+**Answer — it exists, and it is slower.**  ``ops.responseSpectrumAnalysis``
+processes **all** modes when ``-mode`` is omitted, and invokes every previously
+defined recorder after each mode step, so one ``Element`` recorder captures the
+whole ``mode × element × component`` block in a single pass.  That is the
+documented path (OpenSees manual, "Example 3", first variant: *"called for all
+modes.  Results are obtained from a recorder after the analysis."*).
+
+Implemented as ``extract_element_rs_forces(..., extraction="per_mode"|"recorder")``,
+also selectable through the builder config key ``element_extraction`` and the CLI
+flag ``--rs-element-extraction``.  **``per_mode`` remains the default.**
+
+**Measured** (pipe rack, 1263 active frame elements × 20 modes):
+
+| Strategy | Time | Notes |
+|---|---|---|
+| ``per_mode`` | **0.09 – 0.47 s** | 25 260 ``eleResponse`` calls at ~7 µs each |
+| ``recorder`` (text) | 0.72 s | 0.57 s writing 6.9 MB of 17-digit ASCII, 0.15 s parsing |
+
+**Bit-identical.**  Parity is asserted by
+``tests/test_workflows.py::TestElementRsForceExtraction`` (exact equality, both
+``elasticBeamColumn`` and ``forceBeamColumn``), and the block-expansion rules are
+pinned against ``_normalise_frame_response`` for 1/6/12/14-value responses so
+truss models are handled too.
+
+**The earlier "the per-mode extraction loop is the dominant cost" note was
+wrong** — it had never been measured.  At ~0.1–0.5 s the extraction is not a
+bottleneck on these models; the modal (eigen) pass dominates.  The recorder's
+advantage is *call count*, not wall time, so it only pays off if per-call
+overhead grows.
+
+**The ``-binary`` recorder is broken — do not use it.**  20× faster to write
+(0.029 s) but mode 1 is bit-exact while modes 2+ return **uninitialized
+memory** (``-1.3e-152``, diffs to ``1.8e+308``).  Full contract and evidence:
+``docs/dev_notes.md``.
+
+Output is unchanged (same ``rs/elem_*`` block), so no archive re-export is
+needed; the option only changes how the numbers are obtained.
+
 ## DONE (2026-09-14 — modal annotation: period + six-DOF participation, 1-based `--mode`)
 
 **On-plot annotation.**  `plot_mode_animation` now draws the mode period and the

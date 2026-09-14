@@ -684,11 +684,14 @@ def _run_rs_pass(
     nodal_disp_direction = directions[0] if directions else ""
     # Element-level forces are likewise single-direction in the schema
     # (``rs/elem_*`` has no direction axis), and are opt-in because the
-    # extraction is O(n_modes × n_elements) on top of the base-shear pass.
+    # extraction adds a pass over every element per mode.  ``extraction``
+    # selects between the per-mode loop (default) and the bulk recorder;
+    # see ``_runner_rs`` for the measured trade-off.
     want_elem_forces = bool(cfg.get("element_forces"))
     elem_forces: Optional[dict[str, Any]] = None
     elem_forces_error: Optional[str] = None
     elem_combination = str(cfg.get("combination") or "cqc").lower()
+    elem_extraction = cfg.get("element_extraction")
     for direction in directions:
         rs = builder.run_response_spectrum_analysis(
             num_modes=n_modes,
@@ -729,6 +732,7 @@ def _run_rs_pass(
                         direction=direction,
                         damping_ratio=zeta,
                         combination=elem_combination,
+                        extraction=elem_extraction,
                         print_results=False,
                     )
                 )

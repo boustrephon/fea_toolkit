@@ -115,7 +115,63 @@ related: [analysis_builder_migration_plan.md]
 - Labels: `add_point_labels(..., always_visible=True)` — permanent overlay labels
 - Export to interactive HTML: `export_html()`
 
-## Modal participation in NPZ archives — add the key in ONE place
+## OpenSees RS element-force extraction — two strategies, measured
+
+`responseSpectrumAnalysis` processes **all modes** unless `-mode n` restricts it
+to one, and it calls every previously-defined recorder after each mode step
+("When the i-th analysis step is complete, all previously defined recorders
+will be called").  So there are two documented ways to get per-mode element
+forces, and `extract_element_rs_forces` supports both via `extraction=`:
+
+| Strategy | How | 1263 elems × 20 modes |
+|---|---|---|
+| `per_mode` (default) | one `responseSpectrumAnalysis -mode n` per mode + one `eleResponse` per element per mode | **0.09 – 0.47 s** |
+| `recorder` | one all-modes pass behind an `Element` recorder, read from one file | 0.72 s (write 0.57, parse 0.15) |
+
+Both are **bit-identical** (asserted in
+`tests/test_workflows.py::TestElementRsForceExtraction`), so the choice is only
+about call count.  `per_mode` wins on these models: 25 260 `eleResponse` calls
+cost ~0.09 s (~7 µs each), while the recorder's 6.9 MB of 17-digit ASCII costs
+0.57 s to *write*.  The recorder's advantage is call count, not wall time — it
+only pays off if per-call overhead grows (e.g. a Python-free / remote API).
+
+### Verified recorder contract (OpenSeesPy 3.8.0.0)
+
+Do not re-derive these from the docs; they were pinned empirically.
+
+* Response argument is **`localForce`** (singular) for the recorder, while
+  `eleResponse` uses **`localForces`** (plural).  Minefield.
+* `-precision` must be an **`int`** and must appear **before** the response
+  argument.  A *string* raises `OpenSeesError`; a **trailing** `-precision` is
+  **silently ignored** (6 digits still).
+* Precision → max abs error vs `eleResponse` on a 3-element frame:
+  `6` (default) → 3.4e-5, `14` → 3.3e-13, `16` → 2.8e-17, **`17` → 0.0
+  (bit-identical)**.  Hence `_RS_RECORDER_PRECISION = 17`.
+* The file holds **one line per mode** (row *i* ↔ mode *i+1*), **not** one line
+  per element.  Each element's vector is written **contiguously** in `-ele`
+  order, so the column count is `Σ length(elem)` — 12 for a beam-column, but
+  **6** (3D truss) or **1** (axial truss) for others.  `localForce` widths must
+  be probed with `eleResponse(tag, "localForces")` first, which is why
+  `_rs_forces_recorder` does exactly that.
+* With `-time` the leading column is domain time, which
+  `responseSpectrumAnalysis` never advances — always `0.0`, no mode info.
+
+### Binary recorder: DO NOT USE for RS
+
+`-binary` is tempting — 2.4 MB and **0.029 s** to write (20× faster than
+ASCII) — but it is **broken under `responseSpectrumAnalysis`**.  Verified on
+the pipe rack (4 modes × 1263 elements, `[time, data]` per row, sizes exactly
+`n × (12·n_elems + 1)`):
+
+* **mode 1: bit-exact** (0 differing entries);
+* **modes 2, 3, 4: uninitialized memory** — values like `-1.3e-152`, diffs up
+  to `1.8e+308`, 15 149 / 15 149 / 15 150 bad entries.
+
+So the fast path silently returns garbage — the worst possible failure mode.
+Use the text recorder or `per_mode`.  Verify the layout with
+`np.fromfile(path, dtype=np.float64)` if this is ever revisited.
+
+
 
 The `modal/*` block was built by **two near-verbatim copies** of the same
 collector, and they drifted:

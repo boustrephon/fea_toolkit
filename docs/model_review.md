@@ -325,6 +325,19 @@ python examples/view_model.py review.npz --result rs --quantity Mz --dimension 3
 modes for us — `responseSpectrumAnalysis -mode n` processes one mode at a time —
 so the toolkit performs the combination itself.
 
+`--rs-element-extraction` selects how those per-mode forces are read:
+
+| Value | Mechanism | Cost (1263 elements × 20 modes) |
+|---|---|---|
+| `per_mode` (default) | one `responseSpectrumAnalysis -mode n` per mode, then one `eleResponse` per element per mode | **0.09 – 0.47 s** |
+| `recorder` | one all-modes `responseSpectrumAnalysis` behind an `Element` recorder, read from a single file | 0.72 s (0.57 s writing a 6.9 MB text file) |
+
+Both are **bit-identical** — the option exists to make that verifiable, not
+because one is more accurate.  The per-mode loop is currently the faster of the
+two on real models because `eleResponse` is cheap (~7 µs) while the recorder's
+ASCII output is not.  `recorder` is worth measuring again on much larger models,
+or if `eleResponse` ever becomes an expensive call.
+
 It is **off by default** because the extraction costs an extra mode loop over
 every element (`O(n_modes × n_elements)`), which would slow down the default
 quality-control pass on large models.
