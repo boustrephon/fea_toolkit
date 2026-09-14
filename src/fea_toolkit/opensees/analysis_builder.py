@@ -8,6 +8,7 @@ and result extraction — no topology mutations occur here.
 
 import contextlib
 import logging
+import math
 from typing import TYPE_CHECKING, Any, ClassVar, Optional
 
 import openseespy.opensees as ops
@@ -612,6 +613,120 @@ def run_modal(mesh_model, n_modes: int = 12, config: dict = None):
     return {"modal": modal, "shapes": shapes}
 
 
+def _run_rs_pass(
+    builder,
+    md,
+    modal: dict[str, Any],
+    spec_cfg: Optional[dict[str, Any]] = None,
+    num_modes: int = 12,
+) -> dict[str, Any]:
+    """Run the response-spectrum pass for each configured direction.
+
+    Builds a GB 50011 demand spectrum (see
+    :func:`fea_toolkit.spectrum._build_spectrum`), then runs a mode-by-mode
+    RS analysis plus the CQC/SRSS nodal displacements for every requested
+    direction.  The builder's eigen state must still be current — call this
+    immediately after :meth:`AnalysisBuilder.run_modal_analysis`.
+
+    Args:
+        builder: A built ``AnalysisBuilder`` with a live eigen state.
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData` (used
+            for the roof-node lookup).
+        modal: Modal result dict from ``builder.run_modal_analysis()``.
+        spec_cfg: Spectrum configuration — the same keys as the report
+            pipeline (:mod:`fea_toolkit.report`): ``level``,
+            ``intensity``, ``site_class``, ``acceleration``, ``damping``,
+            ``n_modes`` and ``directions``.  An empty dict yields the
+            GB 50011 defaults (rare, intensity 7, site class II, 5 %).
+        num_modes: Number of modes to include (clamped to the periods
+            actually available).
+
+    Returns:
+        Dict with ``spectrum`` (the resolved descriptor) and
+        ``directions`` — a per-direction dict of CQC/SRSS base shear and
+        overturning moment, the 6-DoF ``base_reactions_cqc``, the per-mode
+        ``modal_base_shear`` / ``modal_base_moment`` and the CQC/SRSS roof
+        displacement.
+    """
+    from ..spectrum import _build_spectrum, _interp_sa
+
+    cfg = dict(spec_cfg or {})
+    T_spec, Sa_spec, alpha_max, tg, zeta, label = _build_spectrum(cfg)
+
+    periods = list(modal.get("periods", []))
+    if not periods:
+        raise RuntimeError("no modal periods available for the RS pass")
+    eigenvalues = list(modal.get("eigenvalues", []))
+    n_modes = max(1, min(int(cfg.get("n_modes") or num_modes), len(periods)))
+    directions = list(cfg.get("directions") or ["X", "Y"])
+
+    def spectrum_func(T):
+        """Return Sa(T), interpolated onto the built spectrum axis."""
+        return float(_interp_sa(T, T_spec, Sa_spec))
+
+    roof_tag = max(md.nodes.values(), key=lambda n: n.z).node_tag
+
+    def _roof_disp(disp: dict) -> float:
+        """Magnitude of the RS nodal displacement at the roof node."""
+        d = disp.get(roof_tag)
+        return math.hypot(d[0], d[1], d[2]) if d else 0.0
+
+    out: dict[str, Any] = {}
+    for direction in directions:
+        rs = builder.run_response_spectrum_analysis(
+            num_modes=n_modes,
+            modal_periods=periods,
+            spectrum_periods=T_spec,
+            spectrum_accels=Sa_spec,
+            direction=direction,
+            damping_ratio=zeta,
+            print_results=False,
+        )
+        # Nodal displacements are a secondary (reported) quantity — keep the
+        # base-shear result even when the eigen vectors are unavailable.
+        roof_cqc = roof_srss = 0.0
+        if eigenvalues:
+            disp_cqc, disp_srss = builder.compute_rs_nodal_displacements(
+                num_modes=n_modes,
+                modal_periods=periods,
+                eigenvalues=eigenvalues,
+                spectrum_func=spectrum_func,
+                direction=direction,
+                damping_ratio=zeta,
+                return_srss=True,
+            )
+            roof_cqc = _roof_disp(disp_cqc)
+            roof_srss = _roof_disp(disp_srss)
+        out[direction] = {
+            "base_shear_cqc": rs.get("base_shear_cqc", 0.0),
+            "base_shear_srss": rs.get("base_shear_srss", 0.0),
+            "base_moment_cqc": rs.get("base_moment_cqc", 0.0),
+            "base_moment_srss": rs.get("base_moment_srss", 0.0),
+            "base_reactions_cqc": dict(rs.get("base_reactions_cqc") or {}),
+            "modal_base_shear": list(rs.get("modal_base_shear") or []),
+            "modal_base_moment": list(rs.get("modal_base_moment") or []),
+            "roof_disp_cqc": roof_cqc,
+            "roof_disp_srss": roof_srss,
+        }
+
+    return {
+        "spectrum": {
+            "code": "GB50011",
+            "label": label,
+            "level": cfg.get("level", "rare"),
+            "intensity": cfg.get("intensity", 7),
+            "site_class": cfg.get("site_class", "II"),
+            "acceleration": cfg.get("acceleration", 0.10),
+            "damping": zeta,
+            "alpha_max": alpha_max,
+            "tg": tg,
+            "n_modes": n_modes,
+            "directions": directions,
+        },
+        "directions": out,
+    }
+
+
 def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """Run a modal and linear-static analysis to confirm model behaviour.
 
@@ -626,7 +741,11 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
     Args:
         md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
         config: Optional builder config dict.  Recognised keys:
-            ``num_modes``, ``load_verify``, ``wind_check`` and
+            ``num_modes``, ``load_verify``, ``wind_check``,
+            ``response_spectrum`` (bool — run the GB 50011
+            response-spectrum pass), ``spectrum`` (nested spectrum options:
+            ``level``, ``intensity``, ``site_class``, ``acceleration``,
+            ``damping``, ``n_modes`` and ``directions``) and
             ``export_npz`` (output path for a unified geometry + modal +
             static NPZ via
             :func:`~fea_toolkit.io.npz_writer.write_results_npz`).
@@ -644,7 +763,12 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
         ``config["wind_check"]`` are set, ``load_verification`` (a list of
         per-pattern applied-vs-reaction records) and ``wind`` (structured
         wind-sanity data from :func:`~fea_toolkit.analysis.linear.
-        wind_sanity_data`) are added respectively.  When
+        wind_sanity_data`) are added respectively.  With
+        ``config["response_spectrum"]`` set, ``response_spectrum`` carries
+        the per-direction CQC/SRSS base shear, overturning moment, 6-DoF
+        base reactions, per-mode shears and roof displacement, plus the
+        resolved ``spectrum`` descriptor (or ``response_spectrum_error``
+        holds the captured failure).  When
         ``config["export_npz"]`` is set, ``npz`` holds the written path
         (or ``npz_error`` holds the captured failure).
     """
@@ -659,6 +783,8 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
         "static": None,
         "load_verification": None,
         "wind": None,
+        "response_spectrum": None,
+        "response_spectrum_error": None,
         "npz": None,
         "npz_error": None,
         "mass_source": None,
@@ -771,6 +897,22 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
                 mode_shapes = builder.extract_mode_shapes(int(builder_config.get("num_modes", 12)))
             except Exception:  # keep modal results even if shapes fail
                 mode_shapes = None
+
+        # ── Optional response-spectrum pass (opt-in) ─────────────────
+        # Must run while the modal eigen state is current — the static pass
+        # below replaces the domain's displacement state.  Failures are
+        # captured so a broken model still produces a review.
+        if builder_config.get("response_spectrum"):
+            try:
+                result["response_spectrum"] = _run_rs_pass(
+                    builder,
+                    md,
+                    modal,
+                    builder_config.get("spectrum"),
+                    int(builder_config.get("num_modes", 12)),
+                )
+            except Exception as exc:  # captured, never raised
+                result["response_spectrum_error"] = f"{type(exc).__name__}: {exc}"
 
         # Apply gravity (DEAD) load patterns only.  When the model defines no
         # DEAD pattern, apply no loads rather than silently substituting every

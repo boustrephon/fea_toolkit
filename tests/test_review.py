@@ -15,6 +15,8 @@ from fea_toolkit.model.review import (
     _format_table,
     _mass_unit_label,
     _reaction_table_rows,
+    _response_spectrum_mode_rows,
+    _response_spectrum_rows,
     main,
 )
 from fea_toolkit.model.sap_data import (
@@ -846,6 +848,77 @@ class TestBraceBuckling:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Response-spectrum table rendering — solver-free
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestResponseSpectrumFormatting:
+    """Rendering of the response-spectrum tables (no OpenSees required)."""
+
+    @staticmethod
+    def _block() -> dict:
+        """A fabricated ``response_spectrum`` block with two directions."""
+        return {
+            "spectrum": {
+                "code": "GB50011",
+                "label": "Rare",
+                "level": "rare",
+                "intensity": 7,
+                "site_class": "II",
+                "damping": 0.05,
+                "n_modes": 2,
+                "directions": ["X", "Y"],
+            },
+            "directions": {
+                "X": {
+                    "base_shear_cqc": 120.5,
+                    "base_shear_srss": 118.0,
+                    "base_moment_cqc": 900.0,
+                    "base_moment_srss": 880.0,
+                    "roof_disp_cqc": 0.0123,
+                    "roof_disp_srss": 0.0130,
+                    "modal_base_shear": [100.0, 20.5],
+                    "modal_base_moment": [800.0, 100.0],
+                },
+                "Y": {
+                    "base_shear_cqc": 60.0,
+                    "base_shear_srss": 58.0,
+                    "base_moment_cqc": 400.0,
+                    "base_moment_srss": 390.0,
+                    "roof_disp_cqc": 0.0060,
+                    "roof_disp_srss": 0.0065,
+                    "modal_base_shear": [55.0, 5.0],
+                    "modal_base_moment": [300.0, 25.0],
+                },
+            },
+        }
+
+    def test_direction_rows_cover_every_direction(self):
+        rows = _response_spectrum_rows(self._block(), "kN", "m")
+        assert [r["Direction"] for r in rows] == ["X", "Y"]
+        assert rows[0]["V CQC (kN)"] == "120.5"
+        assert rows[0]["M SRSS (kN·m)"] == "880.0"
+        assert rows[1]["Roof CQC (m)"] == "0.00600"
+
+    def test_mode_rows_align_with_modal_pass(self):
+        analysis = {
+            "mass_participation": [
+                {"mode": 1, "period": 0.5},
+                {"mode": 2, "period": 0.25},
+            ]
+        }
+        rows = _response_spectrum_mode_rows(self._block(), analysis, "kN")
+        assert [r["Mode"] for r in rows] == ["1", "2"]
+        assert rows[0]["Period (s)"] == "0.5000"
+        assert rows[0]["V X (kN)"] == "100.0"
+        assert rows[1]["V Y (kN)"] == "5.0"
+
+    def test_missing_block_renders_nothing(self):
+        assert _response_spectrum_rows({}, "kN", "m") == []
+        assert _response_spectrum_mode_rows({}, {}, "kN") == []
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Analysis-phase checks (load verification / wind) — require OpenSees
 # ═══════════════════════════════════════════════════════════════════
 
@@ -883,6 +956,143 @@ class TestAnalysisChecks:
             _wipe()
         assert result["load_verification"] == []
         assert "load_verification_error" not in result
+
+    def test_response_spectrum_pass_exposes_directions(self):
+        pytest.importorskip("openseespy.opensees")
+        from fea_toolkit.opensees.analysis_builder import run_review_analysis
+
+        md = _parse("sample.s2k")
+        try:
+            result = run_review_analysis(
+                md,
+                {"num_modes": 4, "response_spectrum": True, "spectrum": {"intensity": 7}},
+            )
+        finally:
+            _wipe()
+
+        assert result["ok"]
+        assert result["response_spectrum_error"] is None
+        rs = result["response_spectrum"]
+        assert rs["spectrum"]["code"] == "GB50011"
+        assert rs["spectrum"]["level"] == "rare"
+        assert rs["spectrum"]["intensity"] == 7
+        assert rs["spectrum"]["site_class"] == "II"
+        # The default direction set is X and Y.
+        assert set(rs["directions"]) == {"X", "Y"}
+        n_modes = rs["spectrum"]["n_modes"]
+        assert n_modes >= 1
+        for data in rs["directions"].values():
+            for key in (
+                "base_shear_cqc",
+                "base_shear_srss",
+                "base_moment_cqc",
+                "base_moment_srss",
+                "roof_disp_cqc",
+                "roof_disp_srss",
+            ):
+                assert key in data
+            # One per-mode entry per mode included in the pass.
+            assert len(data["modal_base_shear"]) == n_modes
+            assert len(data["modal_base_moment"]) == n_modes
+        # The static pass still runs after the RS pass.
+        assert result["static"]["patterns_applied"] == ["DEAD"]
+
+    def test_response_spectrum_config_is_respected(self):
+        pytest.importorskip("openseespy.opensees")
+        from fea_toolkit.opensees.analysis_builder import run_review_analysis
+
+        md = _parse("sample.s2k")
+        try:
+            result = run_review_analysis(
+                md,
+                {
+                    "num_modes": 3,
+                    "response_spectrum": True,
+                    "spectrum": {
+                        "level": "frequent",
+                        "intensity": 8,
+                        "site_class": "III",
+                        "damping": 0.02,
+                        "directions": ["X"],
+                    },
+                },
+            )
+        finally:
+            _wipe()
+
+        rs = result["response_spectrum"]
+        assert rs["spectrum"]["level"] == "frequent"
+        assert rs["spectrum"]["intensity"] == 8
+        assert rs["spectrum"]["site_class"] == "III"
+        assert rs["spectrum"]["damping"] == pytest.approx(0.02)
+        assert list(rs["directions"]) == ["X"]
+
+    def test_response_spectrum_failure_is_captured(self):
+        pytest.importorskip("openseespy.opensees")
+        from fea_toolkit.opensees.analysis_builder import run_review_analysis
+
+        md = _parse("sample.s2k")
+        try:
+            # An unknown excitation direction makes the RS pass raise — the
+            # failure must be captured, never propagated.
+            result = run_review_analysis(
+                md,
+                {
+                    "num_modes": 2,
+                    "response_spectrum": True,
+                    "spectrum": {"directions": ["Q"]},
+                },
+            )
+        finally:
+            _wipe()
+
+        assert result["response_spectrum"] is None
+        assert result["response_spectrum_error"]
+        # The modal / static pass still completes.
+        assert result["ok"]
+        assert result["static"]["patterns_applied"] == ["DEAD"]
+
+    def test_review_model_threads_response_spectrum(self):
+        pytest.importorskip("openseespy.opensees")
+        md = _parse("sample.s2k")
+        try:
+            result = review_model(
+                md,
+                include_analysis=True,
+                analysis_config={"num_modes": 3, "response_spectrum": True},
+            )
+        finally:
+            _wipe()
+
+        assert result["analysis"]["response_spectrum"]
+        text = format_review_report(result)
+        assert "-- Response spectrum --" in text
+        assert "Per-mode base shear:" in text
+        md_text = format_review_markdown(result)
+        assert "### Response spectrum" in md_text
+        assert "**Per-mode base shear**" in md_text
+
+    def test_cli_response_spectrum_flag(self, tmp_path):
+        pytest.importorskip("openseespy.opensees")
+        out_file = tmp_path / "review.md"
+        code = main(
+            [
+                str(FIXTURES_DIR / "sample.s2k"),
+                "--response-spectrum",
+                "--num-modes",
+                "3",
+                "--spectrum-intensity",
+                "6",
+                "--format",
+                "markdown",
+                "--out",
+                str(out_file),
+            ]
+        )
+        assert code in (0, 1)  # parsed successfully (2 would be a usage error)
+        text = out_file.read_text(encoding="utf-8")
+        assert "### Response spectrum" in text
+        assert "intensity **6**" in text
 
     def test_review_model_threads_analysis_checks(self):
         pytest.importorskip("openseespy.opensees")

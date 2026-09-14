@@ -1,8 +1,8 @@
 ---
 title: "SAP2000 Model Review & Checks"
-description: "Standalone solver-free review of a parsed SAP2000 (.s2k) model: inventory, connectivity, element releases, data-integrity checks, analytical self-weight and Euler brace buckling, plus an optional OpenSees modal/static confirmation pass with load verification and a wind sanity check."
+description: "Standalone solver-free review of a parsed SAP2000 (.s2k) model: inventory, connectivity, element releases, data-integrity checks, analytical self-weight and Euler brace buckling, plus an optional OpenSees modal/static confirmation pass with load verification, a wind sanity check and a GB 50011 response-spectrum (CQC) pass."
 status: "complete"
-tags: [review, checks, s2k, sap2000, connectivity, integrity, self-weight, buckling, wind, diagnostics, cli]
+tags: [review, checks, s2k, sap2000, connectivity, integrity, self-weight, buckling, wind, response-spectrum, diagnostics, cli]
 category: [model-features]
 related: [workflow.md, element_classification.md, report_generation.md]
 ---
@@ -44,6 +44,12 @@ python -m fea_toolkit.model.review model.s2k --self-weight --brace-buckling --nu
 # pattern and the wind load sanity check (both imply --analysis)
 python -m fea_toolkit.model.review model.s2k --load-verify --wind-check
 
+# GB 50011 response-spectrum pass (CQC/SRSS base shear, overturning moment
+# and roof displacement per direction, plus the per-mode base shear)
+python -m fea_toolkit.model.review model.s2k --response-spectrum
+python -m fea_toolkit.model.review model.s2k --response-spectrum \
+    --spectrum-level rare --spectrum-intensity 7 --spectrum-site-class II
+
 # Write a unified NPZ archive (geometry + modal + static results)
 python -m fea_toolkit.model.review model.s2k --analysis --npz results.npz
 ```
@@ -80,6 +86,20 @@ result = review_model(
     include_analysis=True,
     analysis_config={"num_modes": 6, "load_verify": True, "wind_check": True},
 )
+
+# GB 50011 response-spectrum pass (requires openseespy)
+result = review_model(
+    md,
+    include_analysis=True,
+    analysis_config={
+        "num_modes": 6,
+        "response_spectrum": True,
+        "spectrum": {"level": "rare", "intensity": 7, "site_class": "II"},
+    },
+)
+rs = result["analysis"]["response_spectrum"]
+print(rs["directions"]["X"]["base_shear_cqc"])   # CQC base shear, X direction
+print(rs["directions"]["X"]["roof_disp_cqc"])    # CQC roof displacement, X
 
 # Write a unified NPZ (geometry + modal + static results)
 result = review_model(md, include_analysis=True, export_npz="results.npz")
@@ -176,12 +196,42 @@ Preprocessor → AnalysisBuilder pipeline and reports:
   structured `wind_sanity_data()` feeds the table, while
   `wind_sanity_check()` remains the Markdown form for the report pipeline.
   The report prints the basis for the numbers (see below).
+- **Response spectrum** (`analysis_config["response_spectrum"]` /
+  `--response-spectrum`): a GB 50011 mode-by-mode response-spectrum pass
+  over the modal results already computed (via
+  `AnalysisBuilder.run_response_spectrum_analysis()`), reported as two
+  tables — a **per-direction** summary of the CQC/SRSS base shear and
+  overturning moment plus the CQC/SRSS roof displacement, and the
+  **per-mode** base shear so the modal make-up of the total is visible.
+  Runs for `X` and `Y` by default.
+
+  | CLI flag | Config key | Default | Meaning |
+  |---|---|---|---|
+  | `--spectrum-level` | `spectrum["level"]` | `rare` | GB 50011 level: `frequent` / `fortification` / `rare` |
+  | `--spectrum-intensity` | `spectrum["intensity"]` | `7` | Seismic intensity 6–9 |
+  | `--spectrum-site-class` | `spectrum["site_class"]` | `II` | Site class `I0`–`IV` (sets `T_g`) |
+  | `--spectrum-acceleration` | `spectrum["acceleration"]` | `0.10` | Peak ground acceleration (g) for the fortification level |
+  | `--spectrum-damping` | `spectrum["damping"]` | `0.05` | Damping ratio (drives the γ / η₁ / η₂ shape factors) |
+  | `--num-modes` | `num_modes` | `12` | Modes included (clamped to the periods available) |
+  | — | `spectrum["directions"]` | `["X", "Y"]` | Excitation directions |
+
+  The demand spectrum comes from `spectrum._build_spectrum()` — the same
+  builder the report pipeline and `run_linear_cases()` use — so review and
+  report numbers agree.  Amplitudes are reported in the model's own units
+  (the spectrum uses the fixed `g = 9.81 m/s²` convention of the report
+  pipeline).
+
+  ```bash
+  python -m fea_toolkit.model.review model.s2k --response-spectrum
+  python -m fea_toolkit.model.review model.s2k --response-spectrum \
+      --spectrum-level rare --spectrum-intensity 8 --spectrum-site-class III
+  ```
 
 Failures are captured into `result["analysis"]["error"]` rather than
 raised, so a review of a broken model still completes.  The optional
 analysis-phase checks are captured individually
-(`result["analysis"]["load_verification_error"]` / `["wind_error"]`) and
-never abort the modal/static pass.
+(`result["analysis"]["load_verification_error"]` / `["wind_error"]` /
+`["response_spectrum_error"]`) and never abort the modal/static pass.
 
 #### Wind sanity check — basis
 
@@ -292,8 +342,9 @@ result = {
                          discrepancy, passed},
   "brace_buckling": None | {detected, k_factor, members},
   "analysis": None | {ok, periods, mass_participation, static,
-                      load_verification, wind, mass_source, error,
-                      load_verification_error?, wind_error?},
+                      load_verification, wind, response_spectrum,
+                      mass_source, error, load_verification_error?,
+                      wind_error?, response_spectrum_error?},
   "npz": str | None,
   "npz_error": str | None,
   "npz_contents": dict | None,
@@ -316,6 +367,15 @@ populated by `--load-verify` / `--wind-check` respectively.  A failure in
 either check leaves the corresponding `load_verification_error` /
 `wind_error` string in place instead (both keys are optional and appear
 only when that check raised).
+`response_spectrum` is populated by `--response-spectrum`.  It carries the
+resolved `spectrum` descriptor (`code`, `label`, `level`, `intensity`,
+`site_class`, `acceleration`, `damping`, `alpha_max`, `tg`, `n_modes`,
+`directions`) and a `directions` dict keyed `"X"` / `"Y"`; each entry holds
+`base_shear_cqc`, `base_shear_srss`, `base_moment_cqc`, `base_moment_srss`,
+`base_reactions_cqc` (the 6-DoF combined reactions), the per-mode
+`modal_base_shear` / `modal_base_moment` lists and the roof displacement
+(`roof_disp_cqc` / `roof_disp_srss`).  A failure leaves
+`response_spectrum_error` in place instead.
 `npz` holds the path written by `--npz` (with any failure in `npz_error`);
 `npz_contents` holds the archive manifest (geometry + analysis results)
 from `describe_results_npz()`.

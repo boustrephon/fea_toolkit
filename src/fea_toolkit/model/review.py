@@ -659,7 +659,11 @@ def review_model(
         analysis_config: Optional builder config for the analysis phase.
             Additional keys ``load_verify`` and ``wind_check`` (bool)
             enable the applied-vs-reaction equilibrium table and the
-            wind-load sanity check respectively.
+            wind-load sanity check respectively; ``response_spectrum``
+            (bool) runs the GB 50011 response-spectrum pass, configured by
+            the nested ``spectrum`` dict (``level``, ``intensity``,
+            ``site_class``, ``acceleration``, ``damping``, ``n_modes`` and
+            ``directions``).
         self_weight: When True, add the solver-free analytical
             self-weight block (element weight by section) under
             ``result["self_weight"]``.
@@ -993,6 +997,85 @@ def _reaction_table_rows(
     return [row]
 
 
+def _response_spectrum_rows(
+    rs: dict[str, Any],
+    force_unit: str,
+    length_unit: str,
+) -> list[dict[str, Any]]:
+    """Build the per-direction response-spectrum summary rows.
+
+    One row per excitation direction, carrying the CQC- and SRSS-combined
+    base shear and overturning moment plus the CQC/SRSS roof displacement.
+
+    Args:
+        rs: The ``response_spectrum`` block of a review result.
+        force_unit: Force-unit label (e.g. ``"kN"``).
+        length_unit: Length-unit label (e.g. ``"m"``).
+
+    Returns:
+        Row dicts with pre-formatted string values (see
+        :func:`_format_table`).
+    """
+    rows: list[dict[str, Any]] = []
+    for direction, data in (rs.get("directions") or {}).items():
+        rows.append(
+            {
+                "Direction": direction,
+                f"V CQC ({force_unit})": f"{float(data.get('base_shear_cqc', 0.0)):,.1f}",
+                f"V SRSS ({force_unit})": f"{float(data.get('base_shear_srss', 0.0)):,.1f}",
+                f"M CQC ({force_unit}\u00b7{length_unit})": (
+                    f"{float(data.get('base_moment_cqc', 0.0)):,.1f}"
+                ),
+                f"M SRSS ({force_unit}\u00b7{length_unit})": (
+                    f"{float(data.get('base_moment_srss', 0.0)):,.1f}"
+                ),
+                f"Roof CQC ({length_unit})": f"{float(data.get('roof_disp_cqc', 0.0)):,.5f}",
+                f"Roof SRSS ({length_unit})": f"{float(data.get('roof_disp_srss', 0.0)):,.5f}",
+            }
+        )
+    return rows
+
+
+def _response_spectrum_mode_rows(
+    rs: dict[str, Any],
+    analysis: dict[str, Any],
+    force_unit: str,
+) -> list[dict[str, Any]]:
+    """Build the per-mode response-spectrum base-shear rows.
+
+    One row per mode with one shear column per excitation direction, so the
+    modal make-up of the RS base shear can be read alongside the
+    mass-participation table.  Mode numbers and periods come from the modal
+    pass (``analysis["mass_participation"]``) rather than being duplicated.
+
+    Args:
+        rs: The ``response_spectrum`` block of a review result.
+        analysis: The ``analysis`` sub-dict of the same review result.
+        force_unit: Force-unit label (e.g. ``"kN"``).
+
+    Returns:
+        Row dicts with pre-formatted string values (see
+        :func:`_format_table`).
+    """
+    directions = rs.get("directions") or {}
+    modes = list(analysis.get("mass_participation") or [])
+    n = max((len(d.get("modal_base_shear") or []) for d in directions.values()), default=0)
+    rows: list[dict[str, Any]] = []
+    for i in range(min(n, len(modes))):
+        mode = modes[i]
+        row: dict[str, Any] = {
+            "Mode": str(mode.get("mode", i + 1)),
+            "Period (s)": f"{float(mode.get('period', 0.0)):.4f}",
+        }
+        for direction, data in directions.items():
+            shear = data.get("modal_base_shear") or []
+            row[f"V {direction} ({force_unit})"] = (
+                f"{float(shear[i]):,.1f}" if i < len(shear) else "\u2014"
+            )
+        rows.append(row)
+    return rows
+
+
 def _mass_unit_label(units: dict[str, Any]) -> str:
     """Return a display label for the model's consistent mass unit.
 
@@ -1310,6 +1393,27 @@ def format_review_report(
         elif analysis.get("wind_error"):
             add(f"  Wind check FAILED: {analysis['wind_error']}")
 
+        rs = analysis.get("response_spectrum")
+        if rs:
+            add("")
+            add("  -- Response spectrum --")
+            spec = rs.get("spectrum") or {}
+            add(
+                f"  {spec.get('code', 'GB50011')} {spec.get('label', '')}"
+                f" - intensity {spec.get('intensity')}, site {spec.get('site_class')}, "
+                f"{float(spec.get('damping') or 0.05):.0%} damping, "
+                f"{spec.get('n_modes')} modes"
+            )
+            rows = _response_spectrum_rows(rs, force_unit, lu)
+            if rows:
+                add(_apply_indent(_format_table(rows)))
+            mode_rows = _response_spectrum_mode_rows(rs, analysis, force_unit)
+            if mode_rows:
+                add("  Per-mode base shear:")
+                add(_apply_indent(_format_table(mode_rows)))
+        elif analysis.get("response_spectrum_error"):
+            add(f"  Response spectrum FAILED: {analysis['response_spectrum_error']}")
+
     npz_contents = result.get("npz_contents")
     if npz_contents:
         add("")
@@ -1609,6 +1713,36 @@ def format_review_markdown(
             add(f"**Wind check FAILED:** {analysis['wind_error']}")
             add("")
 
+        rs = analysis.get("response_spectrum")
+        if rs:
+            add("### Response spectrum")
+            add("")
+            spec = rs.get("spectrum") or {}
+            directions = ", ".join(spec.get("directions") or [])
+            add(
+                f"GB 50011 spectrum: **{spec.get('label', '')}** \u00b7 intensity "
+                f"**{spec.get('intensity')}** \u00b7 site class "
+                f"**{spec.get('site_class')}** \u00b7 damping "
+                f"**{float(spec.get('damping') or 0.05):.0%}** \u00b7 "
+                f"{spec.get('n_modes')} modes"
+                + (f" \u00b7 directions {directions}" if directions else "")
+                + "."
+            )
+            add("")
+            rows = _response_spectrum_rows(rs, force_unit, lu)
+            if rows:
+                add(_format_table(rows, tablefmt="github"))
+                add("")
+            mode_rows = _response_spectrum_mode_rows(rs, analysis, force_unit)
+            if mode_rows:
+                add("**Per-mode base shear**")
+                add("")
+                add(_format_table(mode_rows, tablefmt="github"))
+                add("")
+        elif analysis.get("response_spectrum_error"):
+            add(f"**Response spectrum FAILED:** {analysis['response_spectrum_error']}")
+            add("")
+
     npz_contents = result.get("npz_contents")
     if npz_contents:
         add("## NPZ archive")
@@ -1641,6 +1775,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         python -m fea_toolkit.model.review model.s2k --analysis --max-modes 3
         python -m fea_toolkit.model.review model.s2k --self-weight --brace-buckling
         python -m fea_toolkit.model.review model.s2k --load-verify --wind-check
+        python -m fea_toolkit.model.review model.s2k --response-spectrum
+        python -m fea_toolkit.model.review model.s2k --response-spectrum \\
+            --spectrum-level rare --spectrum-intensity 7 --spectrum-site-class II
         python -m fea_toolkit.model.review model.s2k --analysis --npz results.npz
 
     Args:
@@ -1738,6 +1875,45 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Run the wind load sanity check (implies --analysis).",
     )
     parser.add_argument(
+        "--response-spectrum",
+        action="store_true",
+        help="Run the GB 50011 response-spectrum pass (implies --analysis).",
+    )
+    parser.add_argument(
+        "--spectrum-level",
+        choices=("frequent", "fortification", "rare"),
+        default="rare",
+        help="GB 50011 seismic level for --response-spectrum (default: rare).",
+    )
+    parser.add_argument(
+        "--spectrum-intensity",
+        type=int,
+        choices=(6, 7, 8, 9),
+        default=7,
+        help="GB 50011 seismic intensity for --response-spectrum (default: 7).",
+    )
+    parser.add_argument(
+        "--spectrum-site-class",
+        choices=("I0", "I1", "II", "III", "IV"),
+        default="II",
+        help="GB 50011 site class for --response-spectrum (default: II).",
+    )
+    parser.add_argument(
+        "--spectrum-acceleration",
+        type=float,
+        default=0.10,
+        help=(
+            "Peak ground acceleration (g) used for the fortification level "
+            "of --response-spectrum (default: 0.10)."
+        ),
+    )
+    parser.add_argument(
+        "--spectrum-damping",
+        type=float,
+        default=0.05,
+        help="Damping ratio for --response-spectrum (default: 0.05).",
+    )
+    parser.add_argument(
         "--npz",
         default=None,
         metavar="PATH",
@@ -1755,12 +1931,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"error: file not found: {source}", file=sys.stderr)
         return 2
 
-    run_analysis = args.analysis or args.load_verify or args.wind_check
+    run_analysis = args.analysis or args.load_verify or args.wind_check or args.response_spectrum
     analysis_config = (
         {
             "num_modes": args.num_modes,
             "load_verify": args.load_verify,
             "wind_check": args.wind_check,
+            "response_spectrum": args.response_spectrum,
+            "spectrum": {
+                "level": args.spectrum_level,
+                "intensity": args.spectrum_intensity,
+                "site_class": args.spectrum_site_class,
+                "acceleration": args.spectrum_acceleration,
+                "damping": args.spectrum_damping,
+            },
         }
         if run_analysis
         else None
