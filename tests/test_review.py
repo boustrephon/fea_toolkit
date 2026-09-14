@@ -1064,6 +1064,61 @@ class TestUnifiedWriterSchemaCoverage:
         assert list(arrays["modal/node_tag"]) == [1, 3]
         assert arrays["modal/mode_dx"].shape == (2, 2)
 
+    def test_modal_arrays_cover_six_dof_participation(self):
+        """All six participation ratios are archived, not just translations.
+
+        The writer originally copied only ``partiMassRatiosMX/MY/MZ`` — it
+        mirrored the console table, which printed just %X/%Y/%Z.  Six-DOF
+        participation was therefore absent from *every* archive, and the
+        mode-shape annotation had no RX/RY/RZ row to read.
+        """
+        from fea_toolkit.io.unified_writer import collect_modal_arrays
+
+        modal = {
+            "periods": [1.0, 0.5],
+            "modal_props": {
+                "partiMassRatiosMX": [10.0, 1.0],
+                "partiMassRatiosMY": [20.0, 2.0],
+                "partiMassRatiosMZ": [0.1, 0.2],
+                "partiMassRatiosRMX": [3.0, 0.3],
+                "partiMassRatiosRMY": [4.0, 0.4],
+                "partiMassRatiosRMZ": [5.0, 0.5],
+            },
+        }
+        arrays = collect_modal_arrays(modal)
+        for key in (
+            "modal/mx_ratio",
+            "modal/my_ratio",
+            "modal/mz_ratio",
+            "modal/rx_ratio",
+            "modal/ry_ratio",
+            "modal/rz_ratio",
+        ):
+            assert key in arrays, key
+        # OpenSees's own values, copied verbatim.
+        assert list(arrays["modal/rx_ratio"]) == [3.0, 0.3]
+
+    def test_npz_writer_modal_collector_stays_in_sync(self):
+        """``npz_writer._collect_modal`` must not drift from the unified one.
+
+        The two were verbatim copies and drifted: the rotational ratios were
+        added to one and not the other, so archives written through the
+        model-review path (``unified_writer.write_results``) silently lacked
+        them.  ``npz_writer`` now delegates; this pins the two in step.
+        """
+        import numpy as np
+
+        from fea_toolkit.io.npz_writer import _collect_modal
+        from fea_toolkit.io.unified_writer import collect_modal_arrays
+
+        modal = {"periods": [1.0], "modal_props": {"partiMassRatiosRMZ": [7.5]}}
+        shapes = {0: {1: (0.1, 0.2, 0.3)}}
+        unified = collect_modal_arrays(modal, mode_shapes=shapes)
+        delegated = _collect_modal(modal, mode_shapes=shapes)
+        assert set(unified) == set(delegated)
+        for key, value in unified.items():
+            assert np.array_equal(value, delegated[key]), key
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Analysis-phase checks (load verification / wind) — require OpenSees

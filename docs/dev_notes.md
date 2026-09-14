@@ -115,6 +115,33 @@ related: [analysis_builder_migration_plan.md]
 - Labels: `add_point_labels(..., always_visible=True)` — permanent overlay labels
 - Export to interactive HTML: `export_html()`
 
+## Modal participation in NPZ archives — add the key in ONE place
+
+The `modal/*` block was built by **two near-verbatim copies** of the same
+collector, and they drifted:
+
+| Collector | Reached by |
+|---|---|
+| `unified_writer.collect_modal_arrays` | `write_results` — the model-review export (`analysis_builder`, `_runner_static`, `stage_writer`) |
+| `npz_writer._collect_modal` | `write_results_npz`, `stage_writer` |
+
+Both mapped only `partiMassRatiosMX/MY/MZ` → `modal/{mx,my,mz}_ratio`, mirroring
+the console modal table, which printed just `%X %Y %Z`.  OpenSees had always
+returned the rotational trio as well (`partiMassRatiosRMX/RMY/RMZ`), so the
+omission was in the **extraction map, not the data**: six-DOF participation was
+missing from *every* archive, and the mode-shape annotation had no RX/RY/RZ row
+to read.  Patching only `npz_writer` left the review path still writing three
+columns — which is how the duplication surfaced.
+
+`npz_writer._collect_modal` is now a **thin delegate** to
+`unified_writer.collect_modal_arrays`, which owns the mapping;
+`tests/test_review.py::TestUnifiedWriterSchemaCoverage` pins the two in step.
+If you add a modal key, add it to `collect_modal_arrays` only.
+
+General lesson: when a "missing field" bug appears, grep for **every** writer of
+that field before concluding the data is unavailable.  Here
+`grep -rn 'partiMassRatiosMX' src/` would have found both copies immediately.
+
 ## PyVista animation timer — verified contract (`_add_animation_timer`)
 
 The toolkit has twice shipped a wrong assumption about `add_timer_event`.

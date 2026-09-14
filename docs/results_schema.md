@@ -256,12 +256,17 @@ always compare against ``abs(control_disp)``.
 
 The six ``modal/*_ratio`` arrays are **OpenSees's own values**, copied verbatim
 from ``ops.modalProperties("-return", "-unorm")``
-(``partiMassRatiosMX/MY/MZ`` and ``partiMassRatiosRMX/RMY/RMZ``) by
-``npz_writer._collect_modal``.  The toolkit does not recompute participation
-factors, and the plotting layer only reads these arrays — see
-``fea_toolkit.plotting.mass_participation_ratios()``, which turns the live
-``modal_props`` dict into the per-mode ``(X, Y, Z, RX, RY, RZ)`` tuples drawn
-on the mode-shape animation.  Archives written before the rotational keys
+(``partiMassRatiosMX/MY/MZ`` and ``partiMassRatiosRMX/RMY/RMZ``).  The mapping
+lives in
+:func:`fea_toolkit.io.unified_writer.collect_modal_arrays`, which is the
+**single source of truth**: both ``write_results`` (the model-review export)
+and ``npz_writer.write_results_npz`` reach it.  Those two collectors were once
+verbatim copies, and they drifted — the rotational ratios were added to one and
+not the other — so a key is now added in exactly one place.  The toolkit does
+not recompute participation factors, and the plotting layer only reads these
+arrays — see ``fea_toolkit.plotting.mass_participation_ratios()``, which turns
+the live ``modal_props`` dict into the per-mode ``(X, Y, Z, RX, RY, RZ)`` tuples
+drawn on the mode-shape animation.  Archives written before the rotational keys
 existed simply omit ``modal/{rx,ry,rz}_ratio``; readers must treat them as
 optional.
 

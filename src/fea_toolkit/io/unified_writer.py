@@ -114,7 +114,15 @@ def collect_modal_arrays(
     modal_result: dict[str, Any],
     mode_shapes: Optional[dict] = None,
 ) -> dict[str, np.ndarray]:
-    """Extract modal analysis arrays."""
+    """Extract modal analysis arrays.
+
+    Single source of truth for the ``modal/*`` block: :func:`write_results`
+    (the model-review export path) and
+    :func:`fea_toolkit.io.npz_writer.write_results_npz` both reach this
+    function, so a new key is added in exactly one place.  It used to be
+    duplicated verbatim in ``npz_writer._collect_modal``, and the two copies
+    drifted — the rotational ratios existed in one and not the other.
+    """
     arrays: dict[str, np.ndarray] = {}
     mp = modal_result.get("modal_props", {})
     periods = list(modal_result.get("periods", []))
@@ -132,6 +140,15 @@ def collect_modal_arrays(
         ("partiMassRatiosMX", "modal/mx_ratio"),
         ("partiMassRatiosMY", "modal/my_ratio"),
         ("partiMassRatiosMZ", "modal/mz_ratio"),
+        # Rotational participating-mass ratios.  OpenSees always reports
+        # these next to the translational trio (``partiMassRatiosRM*``), but
+        # the writer originally copied only the three translations — it
+        # mirrored the console table, which printed just %X/%Y/%Z.  The
+        # result was that six-DOF participation was absent from *every*
+        # archive, and the mode-shape annotation had no RX/RY/RZ row to show.
+        ("partiMassRatiosRMX", "modal/rx_ratio"),
+        ("partiMassRatiosRMY", "modal/ry_ratio"),
+        ("partiMassRatiosRMZ", "modal/rz_ratio"),
         ("partiMassMX", "modal/mx_eff"),
         ("partiMassMY", "modal/my_eff"),
         ("partiMassMZ", "modal/mz_eff"),

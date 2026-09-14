@@ -289,63 +289,28 @@ def _collect_static(static_results: dict[str, Any]) -> dict[str, np.ndarray]:
 def _collect_modal(
     modal_result: dict[str, Any], mode_shapes: Optional[dict] = None
 ) -> dict[str, np.ndarray]:
-    """Extract modal analysis arrays."""
-    arrays: dict[str, np.ndarray] = {}
-    mp = modal_result.get("modal_props", {})
-    periods = list(modal_result.get("periods", []))
-    n = len(periods)
-    if n == 0:
-        return arrays
+    """Extract modal analysis arrays.
 
-    arrays["modal/period"] = np.array(periods, dtype=float)
-    arrays["modal/frequency"] = np.array([1.0 / p if p > 0 else 0.0 for p in periods], dtype=float)
-    arrays["modal/omega"] = np.array(
-        [2.0 * np.pi / p if p > 0 else 0.0 for p in periods], dtype=float
-    )
+    Thin delegate to
+    :func:`fea_toolkit.io.unified_writer.collect_modal_arrays`, which owns the
+    ``modal/*`` mapping.  This function used to be a verbatim copy of it, and
+    the two drifted: the rotational participating-mass ratios were added to one
+    and not the other, so archives written through the model-review path
+    (``unified_writer.write_results``) silently lacked them.  Keeping a single
+    implementation is what makes that class of bug impossible.
 
-    for key, npz_key in [
-        ("partiMassRatiosMX", "modal/mx_ratio"),
-        ("partiMassRatiosMY", "modal/my_ratio"),
-        ("partiMassRatiosMZ", "modal/mz_ratio"),
-        # Rotational participating-mass ratios — the same OpenSees
-        # ``modalProperties()`` source as the translational trio, so the
-        # six-DOF annotation survives a round-trip through the archive.
-        ("partiMassRatiosRMX", "modal/rx_ratio"),
-        ("partiMassRatiosRMY", "modal/ry_ratio"),
-        ("partiMassRatiosRMZ", "modal/rz_ratio"),
-        ("partiMassMX", "modal/mx_eff"),
-        ("partiMassMY", "modal/my_eff"),
-        ("partiMassMZ", "modal/mz_eff"),
-    ]:
-        vals = mp.get(key, [])
-        padded = (list(vals) + [0.0] * n)[:n]
-        arrays[npz_key] = np.array(padded, dtype=float)
+    Args:
+        modal_result: Output of ``run_modal_analysis()``.
+        mode_shapes: Optional ``{mode_idx: {node_tag: (dx, dy, dz)}}``.
 
-    # Mode shapes (eigenvectors)
-    if mode_shapes is not None and n > 0:
-        # Build N_node × N_mode arrays
-        node_tags = sorted(mode_shapes.get(0, {}).keys())
-        if node_tags:
-            n_nodes = len(node_tags)
-            tag_to_idx = {t: i for i, t in enumerate(node_tags)}
-            for dof_idx, npz_key in enumerate(["modal/mode_dx", "modal/mode_dy", "modal/mode_dz"]):
-                arr = np.zeros((n_nodes, n))
-                for midx in range(n):
-                    node_vals = mode_shapes.get(midx, {})
-                    for tag, disp in node_vals.items():
-                        idx = tag_to_idx.get(tag)
-                        if idx is not None:
-                            arr[idx, midx] = disp[dof_idx]
-                arrays[npz_key] = arr
-            # Row alignment for the N_node × N_mode arrays above.  The
-            # geometry ``node_tag`` array is written in MeshModel dict
-            # order (see _collect_geometry), which is *not* sorted, so
-            # standalone visualizers (plot_mode_animation NPZ path) must
-            # pair row i of mode_dx/y/z against this explicit sorted tag
-            # list rather than the geometry node_tag field.
-            arrays["modal/node_tag"] = np.array(node_tags, dtype=int)
+    Returns:
+        The ``modal/*`` arrays, as documented in ``docs/results_schema.md``.
+    """
+    # Function-local import: avoids any module-level cycle between the two
+    # writers, matching the lazy-import convention used elsewhere in ``io``.
+    from .unified_writer import collect_modal_arrays
 
-    return arrays
+    return collect_modal_arrays(modal_result, mode_shapes=mode_shapes)
 
 
 def _collect_rs(rs_x: Optional[dict] = None, rs_y: Optional[dict] = None) -> dict[str, np.ndarray]:

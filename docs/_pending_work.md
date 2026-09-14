@@ -448,14 +448,22 @@ factor, effective modal mass or `phiᵀMι` is computed anywhere in the display
 path, and a test pins verbatim pass-through — a wrong reading here would be a
 physics bug, not a cosmetic one.
 
-**NPZ archives can carry all six ratios.**  `npz_writer._collect_modal`
-previously wrote only the translational trio; it now also writes
-`modal/{rx,ry,rz}_ratio` from the same `modalProperties()` source, and
-`results_schema.MODAL_ARRAYS` lists them.  **Archives written before this
-change omit the rotational keys** — the annotation then shows only X/Y/Z
-(absent DOFs render `--`, never a misleading `0.00%`).  Re-export an archive to
-get all six through the NPZ path; viewing a `.s2k` directly reads live
-`modalProperties()` output and always shows all six.
+**NPZ archives now carry all six ratios — but the mapping was duplicated.**
+The `modal/*` block was produced by **two near-verbatim copies** of the same
+collector: `unified_writer.collect_modal_arrays` (reached by `write_results`,
+i.e. the model-review export that wrote the pipe-rack archive) and
+`npz_writer._collect_modal` (reached by `write_results_npz` and
+`stage_writer`).  Both mapped only `partiMassRatiosMX/MY/MZ`.  OpenSees had
+always returned the rotational trio as well, so the omission was in the
+extraction map, not the data.  Fixing only `npz_writer` left the review path
+writing three columns, which is how the duplication was found; the two are now
+one — `npz_writer._collect_modal` delegates to
+`unified_writer.collect_modal_arrays`, and a test pins them in step.
+`results_schema.MODAL_ARRAYS` lists the new keys.
+**Archives written before this change omit `modal/{rx,ry,rz}_ratio`** — the
+annotation then shows only X/Y/Z (absent DOFs render `--`, never a misleading
+`0.00%`).  Re-export through the review path to get all six in the archive;
+viewing a `.s2k` directly reads live `modalProperties()` and always shows six.
 
 **1-based `--mode`.**  `examples/view_model.py` now presents modes 1-based
 (`--mode 1` = first mode, and the default), matching the `Mode N` label and the
