@@ -152,6 +152,24 @@ From the command line (modes are **1‑based**, so ``--mode 1`` is the first mod
 python examples/view_model.py results.npz --result modal --mode 1
 ```
 
+**Choosing the input: archive vs model file**
+
+| Input | What happens | Participation rows shown |
+|---|---|---|
+| ``results.npz`` | Reads the archived ``modal/*`` block — no solver run | Whatever the archive holds.  Archives written before ``modal/{rx,ry,rz}_ratio`` existed show the **X/Y/Z row only** |
+| ``model.s2k`` | Parses the SAP2000 model and runs the modal analysis **live**, so ``ops.modalProperties()`` is called in-process | **Always all six DOF** |
+
+So to see the full six-DOF annotation for a model whose archive predates
+the rotational keys, view the model file instead of the archive:
+
+```bash
+python examples/view_model.py BPPS_Pipe_Rack.s2k --result modal --mode 1
+```
+
+Add ``--num-modes N`` when the mode number you want exceeds the default of 12.
+This costs one modal solve (seconds on a ~750-node model), whereas the archive
+path is instant.
+
 **On-plot annotation — period and six-DOF mass participation**
 
 The title shows the mode number and its natural period, and a second text block
