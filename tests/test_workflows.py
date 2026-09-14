@@ -2167,3 +2167,98 @@ class TestHdf5RoundTrip:
                 f"entries for {sid} and {tag} are not the same object"
             )
         assert len(resolved["frames"]) == 2
+
+
+# ============================================================================
+# run_linear_cases — response-spectrum block
+# ============================================================================
+
+
+class TestLinearCasesResponseSpectrum:
+    """``run_linear_cases``' internal RS pass must survive degenerate models.
+
+    ``make_sample_model()`` is a single 10 m column, so it converges far fewer
+    modes than the requested ``n_modes``.  The RS block previously indexed past
+    the end of the (shorter) period/eigenvalue lists, raising
+    ``IndexError: list index out of range`` — which was swallowed by the
+    warn-and-zero ``except``, silently producing empty RS rows.
+    """
+
+    def test_rs_block_clamps_to_available_modes(self, sample_md, capsys):
+        from fea_toolkit.analysis.linear import run_linear_cases
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        mesh = preprocess_model(sample_md, _AB_CONFIG)
+        try:
+            df = run_linear_cases(
+                sample_md,
+                mesh,
+                spec_cfg={"intensity": 8, "site_class": "II", "damping": 0.05},
+                linear_cfg={"n_modes": 12},
+            )
+        finally:
+            ops.wipe()
+
+        out = capsys.readouterr().out
+        # The degenerate path must not surface as a failure.
+        assert "list index out of range" not in out
+        assert "RS-X failed" not in out
+        assert "RS-Y failed" not in out
+
+        rs_rows = df[df["Case"].isin(["RS-X", "RS-Y"])]
+        assert len(rs_rows) == 2
+        # Real results, not the zeroed fallback.
+        assert (rs_rows["Roof disp"] > 0).all()
+
+    def test_modal_filters_over_requested_sentinels(self, sample_md):
+        """Over-requesting modes must not yield DBL_MAX sentinel "modes".
+
+        ``ops.eigen(12)`` on this 3-dynamic-DOF column pads the result with
+        DBL_MAX; those passed the old ``ev > 1e-12`` filter and produced
+        ω ≈ 1e154, which overflowed the CQC denominator downstream.
+        """
+        from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        mesh = preprocess_model(sample_md, _AB_CONFIG)
+        ab = AnalysisBuilder(mesh, _AB_CONFIG)
+        try:
+            ab.build_domain()
+            ab.compute_seismic_masses()
+            modal = ab.run_modal_analysis(num_modes=12, print_results=False)
+        finally:
+            ops.wipe()
+
+        assert 0 < len(modal["periods"]) < 12
+        assert all(np.isfinite(modal["periods"]))
+        assert all(ev < 1e30 for ev in modal["eigenvalues"])
+
+    def test_rs_block_handles_single_mode_requests(self, sample_md, capsys):
+        """A one-mode RS request still produces a usable row.
+
+        The first mode of this cantilever is weak-axis (Y) bending, so requesting
+        a single mode legitimately yields ~zero X roof displacement — the point
+        here is that the request completes instead of indexing past the modal
+        arrays or overflowing CQC.
+        """
+        from fea_toolkit.analysis.linear import run_linear_cases
+        from fea_toolkit.opensees.preprocessor import preprocess_model
+
+        mesh = preprocess_model(sample_md, _AB_CONFIG)
+        try:
+            df = run_linear_cases(
+                sample_md,
+                mesh,
+                spec_cfg={"intensity": 8, "site_class": "II", "damping": 0.05},
+                linear_cfg={"n_modes": 1},
+            )
+        finally:
+            ops.wipe()
+
+        out = capsys.readouterr().out
+        assert "list index out of range" not in out
+        assert "RS-X failed" not in out
+
+        rs_rows = df[df["Case"] == "RS-X"]
+        assert len(rs_rows) == 1
+        assert rs_rows["Roof disp"].iloc[0] >= 0.0

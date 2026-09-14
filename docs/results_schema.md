@@ -160,6 +160,19 @@ use the element geometry to transform to global coordinates if needed.
 | `static/{case}/mz_i` | `(N_frame,)` | `float` | I‑end moment Z |
 | `static/{case}/fx_j` … `mz_j` | `(N_frame,)` | `float` | Same at J‑end |
 
+**Explicit `*_local` alias arrays (optional):**
+
+The 12 arrays above are the required payload.  A producer *may* additionally
+write `static/{case}/fx_i_local` … `mz_j_local` as explicit aliases of the
+same local-frame quantities.  These are **optional**: producers that rely on
+the ``forces_coordinate_system`` metadata do not write them, and visualisers
+(``_extract_npz_frame_forces``) synthesise the ``*_local`` keys on read.
+`validate_npz()` therefore only shape-checks them when present.
+
+> **Not yet computed by the model review.**  The review exports the 12
+> required force arrays; it does not write the explicit `*_local` aliases
+> (the metadata flag makes them derivable).  See ``docs/model_review.md``.
+
 **Load case labels:**
 
 | Array | Shape | dtype | Description |
@@ -274,7 +287,7 @@ column *j* is the eigenvector for mode *j* (0‑based) and row *i* matches
 | `rs/roof_disp_cqc_y` | `()` | `float` | CQC‑combined roof displacement Y (length) |
 | `rs/roof_disp_srss_x` | `()` | `float` | SRSS‑combined roof displacement X (length) |
 | `rs/roof_disp_srss_y` | `()` | `float` | SRSS‑combined roof displacement Y (length) |
-| `rs/elem_sap_id` | `(N_frame,)` | `str` | SAP2000 frame element ID |
+| `rs/elem_sap_id` | `(N_frame,)` | `str` | SAP2000 frame element ID — **optional block** |
 | `rs/elem_z_bot` | `(N_frame,)` | `float` | Z‑coordinate of element bottom node (m) |
 | `rs/elem_z_mid` | `(N_frame,)` | `float` | Z‑coordinate of element mid‑height (m) |
 | `rs/elem_Vy_i` | `(N_frame,)` | `float` | I‑end local Vy (kN) |
@@ -285,10 +298,43 @@ column *j* is the eigenvector for mode *j* (0‑based) and row *i* matches
 | `rs/elem_Vz_j` | `(N_frame,)` | `float` | J‑end local Vz (kN) |
 | `rs/elem_My_j` | `(N_frame,)` | `float` | J‑end local My (kN·m) |
 | `rs/elem_Mz_j` | `(N_frame,)` | `float` | J‑end local Mz (kN·m) |
-| `rs/node_tag` | `(N_node,)` | `int` | OpenSees node tag (see ID conventions) |
+| `rs/node_tag` | `(N_node,)` | `int` | OpenSees node tag (see ID conventions) — **optional block** |
 | `rs/node_dx` | `(N_node,)` | `float` | CQC‑combined nodal displacement X (m) |
 | `rs/node_dy` | `(N_node,)` | `float` | CQC‑combined nodal displacement Y (m) |
 | `rs/node_dz` | `(N_node,)` | `float` | CQC‑combined nodal displacement Z (m) |
+
+**Which RS arrays are optional**
+
+`rs/period`, `rs/v_base_*`, the combined `rs/v_*`, `rs/m_*` and
+`rs/roof_disp_*` scalars are always written by ``collect_rs_arrays()``
+(missing moment/roof inputs default to `0.0`), so they are **required**
+whenever ``"rs"`` appears in `analysis_types`.  Two blocks are **optional**
+and appear only when the producer supplies the corresponding data:
+
+* `rs/elem_*` — written when `rs_element_forces` (from
+  ``AnalysisBuilder.extract_element_rs_forces()``) is passed to
+  ``write_results()`` / ``write_model_stages()``.
+* `rs/node_*` — written when `rs_nodal_displacements` (from
+  ``AnalysisBuilder.compute_rs_nodal_displacements()``) is passed.  The block
+  is **single‑direction** by schema: the Rhino RS deformed‑shape overlay
+  (``_load_deformed_arrays(data, "rs")``) takes no direction argument, so
+  multi‑direction producers should export one direction (the model review
+  exports the first configured direction, X by default).
+
+> **Not yet computed by the model review.**  The review's RS export writes
+> the combined scalars plus the single‑direction `rs/node_*` block; it does
+> **not** compute element‑level RS forces (`rs/elem_*`).  See
+> ``docs/model_review.md`` — element‑level RS forces and local‑frame static
+> forces are candidates for a future *enhanced QC* stage.
+
+**Validation dimensions**
+
+`validate_npz()` / `validate_arrays()` resolve `N_node`, `N_frame`,
+`N_shell`, `N_mode` and `N_analysis` from the arrays present, then check each
+declared array against the **correct** dimension: nodal arrays (`node_*`,
+`rs/node_*`) against `N_node`, element arrays (`fx_i` … `mz_j`,
+`rs/elem_*`) against `N_frame`.  A *missing* required array is reported as
+`Missing … array`; optional arrays are only shape‑checked when present.
 
 ### Metadata
 

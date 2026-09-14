@@ -1,5 +1,13 @@
 import math
 
+#: Maximum circular-frequency ratio (ω_i/ω_j) treated as correlated.
+#:
+#: The CQC correlation coefficient decays as ``bij**-5``, so beyond this
+#: ratio the contribution is ~1e-40 and can be skipped — which also avoids
+#: floating-point overflow in the ``(1 - bij**2)**2`` denominator when a
+#: near-degenerate or sentinel mode produces an extreme ratio.
+_MAX_FREQ_RATIO = 1.0e8
+
 
 def cqc_combine(modal_values: list[float], omega: list[float], damp_ratios: list[float]) -> float:
     """Complete Quadratic Combination of modal results (Der Kiureghian 1980).
@@ -34,6 +42,12 @@ def cqc_combine(modal_values: list[float], omega: list[float], damp_ratios: list
             om_i = omega[i] if i < len(omega) else 1.0
             om_j = omega[j] if j < len(omega) else 1.0
             bij = om_i / om_j if om_j > 0 else 1.0
+            if not math.isfinite(bij) or bij > _MAX_FREQ_RATIO or bij < 1.0 / _MAX_FREQ_RATIO:
+                # Widely separated modes are effectively uncorrelated
+                # (rho ~ bij^-5) — the contribution is negligible, and
+                # short-circuiting avoids overflow in the (1 - bij^2)^2
+                # denominator when Omega_ij is extreme.
+                continue
             rho = (8.0 * math.sqrt(di * dj) * (di + bij * dj) * (bij**1.5)) / (
                 (1.0 - bij**2.0) ** 2.0
                 + 4.0 * di * dj * bij * (1.0 + bij**2.0)

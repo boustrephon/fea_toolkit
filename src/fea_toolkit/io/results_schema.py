@@ -46,10 +46,19 @@ GEOMETRY_ARRAYS: dict[str, tuple] = {
     "shell_node_4": ("N_shell", "int"),
 }
 
-STATIC_ARRAYS = [
+#: Nodal displacement arrays — sized ``N_node`` (not ``N_frame``).
+STATIC_NODAL_ARRAYS = [
     "node_dx",
     "node_dy",
     "node_dz",
+]
+
+#: Element end forces — sized ``N_frame``.  By project convention these are
+#: recorded in the element **local** system, flagged by the
+#: ``forces_coordinate_system`` metadata array (``"local"``);
+#: ``_extract_npz_frame_forces`` derives the ``*_local`` aliases from them at
+#: read time.  Required whenever a static case is present.
+STATIC_FORCE_ARRAYS = [
     "fx_i",
     "fy_i",
     "fz_i",
@@ -62,6 +71,14 @@ STATIC_ARRAYS = [
     "mx_j",
     "my_j",
     "mz_j",
+]
+
+#: Explicit ``*_local`` variant aliases of the force arrays above — sized
+#: ``N_frame``.  Optional: producers that rely on the
+#: ``forces_coordinate_system`` metadata do not write them (visualisers
+#: synthesise the aliases on read), so they are present only when a producer
+#: recorded them explicitly.
+STATIC_LOCAL_FORCE_ARRAYS = [
     "fx_i_local",
     "fy_i_local",
     "fz_i_local",
@@ -75,6 +92,9 @@ STATIC_ARRAYS = [
     "my_j_local",
     "mz_j_local",
 ]
+
+#: Full set of static array names (union) — kept for reference.
+STATIC_ARRAYS = STATIC_NODAL_ARRAYS + STATIC_FORCE_ARRAYS + STATIC_LOCAL_FORCE_ARRAYS
 
 MODAL_ARRAYS: dict[str, tuple] = {
     "modal/period": ("N_mode", "float"),
@@ -110,7 +130,10 @@ RS_ARRAYS: dict[str, tuple] = {
     "rs/roof_disp_cqc_y": ("", "float"),
     "rs/roof_disp_srss_x": ("", "float"),
     "rs/roof_disp_srss_y": ("", "float"),
-    # Element-level CQC-combined forces (N_frame)
+    # Element-level CQC-combined forces (N_frame) — OPTIONAL: written only
+    # when a producer supplies ``rs_element_forces``.  The model review
+    # does not compute these; see docs/model_review.md for the planned
+    # enhanced QC stage.
     "rs/elem_sap_id": ("N_frame", "str"),
     "rs/elem_z_bot": ("N_frame", "float"),
     "rs/elem_z_mid": ("N_frame", "float"),
@@ -122,7 +145,8 @@ RS_ARRAYS: dict[str, tuple] = {
     "rs/elem_My_j": ("N_frame", "float"),
     "rs/elem_Mz_i": ("N_frame", "float"),
     "rs/elem_Mz_j": ("N_frame", "float"),
-    # Nodal CQC-combined displacements (N_node)
+    # Nodal CQC-combined displacements (N_node) — OPTIONAL: written only
+    # when a producer supplies ``rs_nodal_displacements``.
     "rs/node_tag": ("N_node", "int"),
     "rs/node_dx": ("N_node", "float"),
     "rs/node_dy": ("N_node", "float"),
@@ -311,13 +335,28 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                     "analysis_types declares 'static' but static_case_labels is missing"
                 )
             else:
+                # Nodal displacements are N_node-sized; element forces are
+                # N_frame-sized.  Checking every static array against
+                # N_frame produced false shape mismatches on any model where
+                # the node and frame counts differ (the common case).
+                required_static = [(a, "N_node") for a in STATIC_NODAL_ARRAYS] + [
+                    (a, "N_frame") for a in STATIC_FORCE_ARRAYS
+                ]
                 for case in case_labels:
-                    for arr_name in STATIC_ARRAYS:
+                    for arr_name, dim in required_static:
                         key = make_static_key(str(case), arr_name)
                         arr = data.get(key)
                         if arr is None:
                             messages.append(f"Missing static array: {key}")
                         else:
+                            _check_shape(key, arr, dim, "float")
+                    # Optional: explicit ``*_local`` alias arrays — present
+                    # only when a producer recorded them (see
+                    # STATIC_LOCAL_FORCE_ARRAYS).
+                    for arr_name in STATIC_LOCAL_FORCE_ARRAYS:
+                        key = make_static_key(str(case), arr_name)
+                        arr = data.get(key)
+                        if arr is not None:
                             _check_shape(key, arr, "N_frame", "float")
         if "modal" in types:
             # modal/node_tag is an optional row-alignment convenience
@@ -332,10 +371,18 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                     continue
                 _check_shape(key, arr, shape_desc, dtype_str)
         if "rs" in types:
+            # Element-level and nodal CQC arrays are optional: they are
+            # written only when the producer supplies ``rs_element_forces``
+            # / ``rs_nodal_displacements``.  The review exports the nodal
+            # block but does not compute element-level RS forces; a
+            # per-mode/combined-scalars-only producer writes neither.
+            # ``collect_rs_arrays()`` always writes the remaining keys.
+            _optional_rs = {k for k in RS_ARRAYS if k.startswith(("rs/elem_", "rs/node_"))}
             for key, (shape_desc, dtype_str) in RS_ARRAYS.items():
                 arr = data.get(key)
                 if arr is None:
-                    messages.append(f"Missing RS array: {key}")
+                    if key not in _optional_rs:
+                        messages.append(f"Missing RS array: {key}")
                     continue
                 _check_shape(key, arr, shape_desc, dtype_str)
         if "pushover" in types:

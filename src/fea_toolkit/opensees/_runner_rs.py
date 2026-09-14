@@ -444,6 +444,20 @@ class RsRunnerMixin:
         dof = {"X": 1, "Y": 2, "Z": 3}[direction]
         dof_idx = dof - 1
 
+        # A model can yield fewer converged modes than requested — degenerate
+        # / single-element models return only the positive eigenvalues that
+        # exist (see run_modal_analysis), which is typically fewer than the
+        # caller's ``num_modes``.  Clamp so ``omega`` / ``eigenvalues`` /
+        # ``eff_masses`` stay index-aligned with the loop below, mirroring
+        # the clamp already done in run_response_spectrum_analysis.
+        num_modes = min(num_modes, len(modal_periods), len(eigenvalues))
+
+        node_tags = list(ops.getNodeTags())
+        if num_modes <= 0:
+            # No usable modes — every nodal displacement is zero.
+            zero = dict.fromkeys(node_tags, (0.0, 0.0, 0.0))
+            return (dict(zero), dict(zero)) if return_srss else zero
+
         # Get participation factors from modalProperties
         try:
             mp = ops.modalProperties("-return", "-unorm")
@@ -456,14 +470,14 @@ class RsRunnerMixin:
             if direction == "Y"
             else "partiMassMZ"
         )
-        eff_masses = mp.get(mass_key, [0.0] * num_modes)
+        # ``modalProperties`` may return a list shorter than num_modes, so
+        # pad and slice rather than indexing a short list.
+        eff_masses = (list(mp.get(mass_key, [])) + [0.0] * num_modes)[:num_modes]
 
         # omega must stay aligned with the num_modes entries appended to
         # per_mode[tag][d] below — slice modal_periods to num_modes first.
         omega = [2.0 * math.pi / T if T > 0 else 0.0 for T in modal_periods[:num_modes]]
         damp = [damping_ratio] * num_modes
-
-        node_tags = list(ops.getNodeTags())
 
         per_mode = {tag: {d: [] for d in range(3)} for tag in node_tags}
 

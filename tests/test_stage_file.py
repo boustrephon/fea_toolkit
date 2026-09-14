@@ -27,6 +27,45 @@ def prepared(tmp_path_factory):
     return md, mesh, config
 
 
+def _static_validation_fixture(n_node: int, n_frame: int, case: str = "DEAD") -> dict:
+    """Build a minimal geometry + static skeleton for ``validate_arrays``.
+
+    Returns a dict carrying clean geometry arrays, ``analysis_types =
+    ['static']`` and ``static_case_labels``, but **without** any
+    ``static/<case>/*`` payload arrays — callers add the ones under test.
+    Node/frame counts are caller-controlled so the N_node ≠ N_frame case can
+    be exercised.
+    """
+    import numpy as np
+
+    data = {
+        "node_tag": np.arange(1, n_node + 1, dtype=int),
+        "node_sap_id": np.array([str(i) for i in range(1, n_node + 1)], dtype=str),
+        "node_x": np.zeros(n_node),
+        "node_y": np.zeros(n_node),
+        "node_z": np.zeros(n_node),
+        "frame_eid": np.arange(n_frame, dtype=int),
+        "frame_sap_id": np.array([str(i + 1) for i in range(n_frame)], dtype=str),
+        "frame_parent_sap_id": np.array([""] * n_frame, dtype=str),
+        "frame_sec_name": np.array(["B1"] * n_frame, dtype=str),
+        "frame_node_i": np.ones(n_frame, dtype=int),
+        "frame_node_j": np.ones(n_frame, dtype=int),
+        # One quad shell keeps the geometry block satisfied independently of
+        # the frame count under test.
+        "shell_eid": np.array([0], dtype=int),
+        "shell_sap_id": np.array(["S1"], dtype=str),
+        "shell_parent_sap_id": np.array([""], dtype=str),
+        "shell_sec_name": np.array(["ST1"], dtype=str),
+        "shell_node_1": np.array([1], dtype=int),
+        "shell_node_2": np.array([1], dtype=int),
+        "shell_node_3": np.array([1], dtype=int),
+        "shell_node_4": np.array([1], dtype=int),
+        "analysis_types": np.array(["static"], dtype=str),
+        "static_case_labels": np.array([case], dtype=str),
+    }
+    return data
+
+
 @pytest.mark.parametrize("fmt", ["npz", "h5"])
 class TestStageFile:
     def test_model_round_trip(self, prepared, tmp_path, fmt):
@@ -256,6 +295,116 @@ class TestStageFileValidation:
         bad["shell_node_offsets"] = np.array([], dtype=int)
         msgs = validate_arrays(bad)
         assert any("shell_node_offsets" in m for m in msgs)
+
+    def test_validate_arrays_static_displacement_dimension(self):
+        """Nodal displacements are checked against N_node, element forces N_frame.
+
+        Regression: every static array used to be validated against N_frame,
+        which reported a false shape mismatch for ``node_dx``/``dy``/``dz`` on
+        any model where the node and frame counts differ.
+        """
+        import numpy as np
+
+        from fea_toolkit.io.results_schema import (
+            STATIC_FORCE_ARRAYS,
+            STATIC_NODAL_ARRAYS,
+            validate_arrays,
+        )
+
+        n_node, n_frame = 4, 1  # deliberately different
+        data = _static_validation_fixture(n_node, n_frame)
+        for name in STATIC_NODAL_ARRAYS:
+            data[f"static/DEAD/{name}"] = np.zeros(n_node)
+        for name in STATIC_FORCE_ARRAYS:
+            data[f"static/DEAD/{name}"] = np.zeros(n_frame)
+
+        # No local arrays, N_node != N_frame → must still validate clean.
+        assert validate_arrays(data) == []
+
+        # A genuinely wrong-length displacement array is still reported.
+        bad = dict(data)
+        bad["static/DEAD/node_dx"] = np.zeros(n_frame)
+        assert any(
+            "static/DEAD/node_dx" in m and "Shape mismatch" in m for m in validate_arrays(bad)
+        )
+
+        # A missing global force array is still reported.
+        missing = dict(data)
+        missing.pop("static/DEAD/mz_j")
+        assert any("static/DEAD/mz_j" in m for m in validate_arrays(missing))
+
+    def test_validate_arrays_local_forces_optional(self):
+        """Local-frame static forces are optional but validated when present."""
+        import numpy as np
+
+        from fea_toolkit.io.results_schema import (
+            STATIC_FORCE_ARRAYS,
+            STATIC_LOCAL_FORCE_ARRAYS,
+            STATIC_NODAL_ARRAYS,
+            validate_arrays,
+        )
+
+        n_node, n_frame = 2, 3
+        data = _static_validation_fixture(n_node, n_frame)
+        for name in STATIC_NODAL_ARRAYS:
+            data[f"static/DEAD/{name}"] = np.zeros(n_node)
+        for name in STATIC_FORCE_ARRAYS:
+            data[f"static/DEAD/{name}"] = np.zeros(n_frame)
+
+        # Absent local arrays are not reported as "missing" — the standard
+        # writers record global-frame end forces only.
+        assert not any("_local" in m for m in validate_arrays(data))
+
+        # Present-and-correct local arrays validate clean.
+        with_local = dict(data)
+        for name in STATIC_LOCAL_FORCE_ARRAYS:
+            with_local[f"static/DEAD/{name}"] = np.zeros(n_frame)
+        assert validate_arrays(with_local) == []
+
+        # Present-but-wrong-length local arrays are caught.
+        bad_local = dict(with_local)
+        bad_local["static/DEAD/mz_i_local"] = np.zeros(n_node)
+        assert any("mz_i_local" in m for m in validate_arrays(bad_local))
+
+    def test_validate_arrays_rs_element_and_node_blocks_optional(self):
+        """Element/nodal RS arrays are optional; the combined block is required.
+
+        The model review exports the ``rs/node_*`` block but does not compute
+        ``rs/elem_*``; a per-mode-scalars-only producer writes neither.
+        """
+        import numpy as np
+
+        from fea_toolkit.io.results_schema import RS_ARRAYS, validate_arrays
+
+        n_node, n_mode = 2, 2
+        data = _static_validation_fixture(n_node, 1)
+        data["analysis_types"] = np.array(["rs"], dtype=str)
+        data.pop("static_case_labels")
+        # N_mode is resolved from modal/period, so the per-mode rs arrays
+        # share its length.
+        data["modal/period"] = np.zeros(n_mode)
+        for key, (shape_desc, _dtype) in RS_ARRAYS.items():
+            if key.startswith(("rs/elem_", "rs/node_")):
+                continue  # the optional blocks — deliberately absent
+            data[key] = np.zeros(n_mode if shape_desc else 1)
+
+        assert validate_arrays(data) == []
+
+        # A required combined RS array is still reported when absent.
+        missing = dict(data)
+        missing.pop("rs/v_cqc_x")
+        assert any("rs/v_cqc_x" in m for m in validate_arrays(missing))
+
+        # Present optional blocks are shape-checked.
+        with_blocks = dict(data)
+        with_blocks["rs/node_tag"] = np.arange(1, n_node + 1, dtype=int)
+        with_blocks["rs/node_dx"] = np.zeros(n_node)
+        with_blocks["rs/elem_sap_id"] = np.array(["1"], dtype=str)
+        assert validate_arrays(with_blocks) == []
+
+        bad_blocks = dict(with_blocks)
+        bad_blocks["rs/node_dx"] = np.zeros(n_node + 1)
+        assert any("rs/node_dx" in m for m in validate_arrays(bad_blocks))
 
     def test_bad_format(self, tmp_path):
         with pytest.raises(ValueError, match="Unsupported format"):

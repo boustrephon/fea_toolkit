@@ -75,6 +75,27 @@ modal = builder.run_modal_analysis(num_modes=6, g=9806.65)
 
 See :func:`~fea_toolkit.utils.g_from_units` for supported units.
 
+#### Over‑requesting modes
+
+Asking for more modes than the model has free DOFs is safe.  ``ops.eigen(N)``
+pads the result with an uninitialised sentinel (``DBL_MAX``, and OpenSees
+itself warns ``mode <k> is out of range``); ``run_modal_analysis()`` filters
+both non‑positive eigenvalues and those sentinels, so ``periods`` /
+``eigenvalues`` contain only genuine modes and their length may be **less
+than** the requested ``num_modes``.
+
+Always derive downstream mode counts from the returned lists rather than the
+requested value:
+
+```python
+modal = builder.run_modal_analysis(num_modes=12)   # may converge only 3
+n_modes = len(modal["periods"])                     # ← use this
+```
+
+The sentinels matter beyond bookkeeping: their derived ω (≈1e154) overflows
+the CQC correlation denominator, so passing them into a response‑spectrum
+combination raises ``OverflowError: (34, 'Result too large')``.
+
 
 ### Mode shape visualisation
 

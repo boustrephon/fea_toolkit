@@ -461,11 +461,19 @@ def run_linear_cases(
         try:
             modal = ab.run_modal_analysis(num_modes=n_modes, print_results=False)
 
+            # Degenerate / single-element models return fewer converged modes
+            # than requested (run_modal_analysis keeps only positive
+            # eigenvalues).  Use the actual count so the RS pass and the
+            # nodal-displacement superposition stay index-aligned.
+            n_actual = len(modal["periods"])
+            if n_actual == 0:
+                raise ValueError("modal analysis returned no converged modes")
+
             def spectrum_func(T):
                 return float(np.interp(T, T_spec, Sa_spec))
 
             rs = ab.run_response_spectrum_analysis(
-                num_modes=n_modes,
+                num_modes=n_actual,
                 modal_periods=modal["periods"],
                 spectrum_periods=T_spec,
                 spectrum_accels=Sa_spec,
@@ -480,7 +488,7 @@ def run_linear_cases(
             r_cqc = rs.get("base_reactions_cqc", {})
 
             rs_disp_cqc, rs_disp_srss = ab.compute_rs_nodal_displacements(
-                num_modes=n_modes,
+                num_modes=n_actual,
                 modal_periods=modal["periods"],
                 eigenvalues=modal["eigenvalues"],
                 spectrum_func=spectrum_func,

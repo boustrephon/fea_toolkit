@@ -8,6 +8,18 @@ import openseespy.opensees as ops
 # NOTE: modal analysis works directly on OpenSees eigenvalues and
 # eigenvectors — no numpy import is required at module level.
 
+#: Largest eigenvalue (ω², rad²/s²) accepted as a genuine mode.
+#:
+#: ``ops.eigen(N)`` on a model with fewer than ``N`` free DOFs returns the
+#: available eigenvalues **padded with an uninitialised sentinel**
+#: (``DBL_MAX ≈ 1.7976931348623157e+308``) — OpenSees itself warns
+#: "mode <k> is out of range".  Those sentinels are finite, so they survive
+#: a naive ``ev > tol`` filter, and their derived ω (~1e154) then overflows
+#: the CQC correlation denominator.  Genuine eigenvalues span ~1e-6 (very
+#: soft, large-unit models) to ~1e18 (stiff, small-unit models), so 1e30
+#: separates real modes from sentinels with a wide margin.
+_MAX_EIGENVALUE = 1.0e30
+
 
 class ModalRunnerMixin:
     """Modal (eigenvalue) analysis and mode-shape extraction."""
@@ -146,7 +158,12 @@ class ModalRunnerMixin:
                 except Exception:
                     eigenvals_all = []
 
-        eigenvals = [ev for ev in eigenvals_all if ev > 1e-12]
+        # Keep only genuine modes: reject non-positive eigenvalues and the
+        # DBL_MAX sentinels that ``ops.eigen`` pads with when the model has
+        # fewer free DOFs than requested (see _MAX_EIGENVALUE).
+        eigenvals = [
+            ev for ev in eigenvals_all if math.isfinite(ev) and 1e-12 < ev < _MAX_EIGENVALUE
+        ]
         n_modes = len(eigenvals)
         if n_modes < num_modes and self.config.get("verbose"):
             print(

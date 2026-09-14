@@ -84,6 +84,34 @@ class TestCqcCombineUtils:
         result = cqc_combine(vals, omega, damp)
         assert abs(result - 150.0) < 1.0
 
+    def test_extreme_frequency_ratio_does_not_overflow(self):
+        """Sentinel-scale ω must not overflow the ρ denominator.
+
+        ``ops.eigen(N)`` on a model with fewer free DOFs than requested pads
+        the eigenvalues with DBL_MAX, whose derived ω (~1e154) used to raise
+        ``OverflowError: (34, 'Result too large')`` in the ``(1 - bij**2)**2``
+        term.  Such mode pairs are uncorrelated (ρ ~ bij**-5), so they are
+        skipped instead.
+        """
+        from fea_toolkit.utils import cqc_combine
+
+        vals = [100.0, 50.0]
+        omega = [1.3e154, 30.0]  # sentinel-scale vs ordinary
+        damp = [0.05, 0.05]
+        result = cqc_combine(vals, omega, damp)
+        # The pair is uncorrelated (skipped), so the result is the SRSS of the
+        # two diagonal contributions — and crucially finite, not an overflow.
+        assert math.isfinite(result)
+        assert abs(result - math.sqrt(100.0**2 + 50.0**2)) < 0.1
+
+    def test_zero_omega_leaves_result_finite(self):
+        """A zero ω (skipped mode) contributes nothing and must not divide by 0."""
+        from fea_toolkit.utils import cqc_combine
+
+        result = cqc_combine([0.0, 50.0], [0.0, 30.0], [0.05, 0.05])
+        assert math.isfinite(result)
+        assert abs(result - 50.0) < 1e-6
+
 
 # ============================================================================
 # Plotting module import tests
