@@ -585,6 +585,27 @@ def _write_geometry_npz(md: SAPModelData, path: Any) -> tuple[Optional[str], Opt
         return None, f"{type(exc).__name__}: {exc}"
 
 
+def _npz_contents(path: Any) -> Optional[dict[str, Any]]:
+    """Summarise a written NPZ archive (geometry + analysis results).
+
+    Thin, failure-tolerant wrapper over
+    :func:`~fea_toolkit.io.npz_reader.describe_results_npz`, imported
+    lazily so the solver-free review stays import-light.
+
+    Args:
+        path: Path to the written ``.npz`` archive.
+
+    Returns:
+        The archive summary dict, or ``None`` when it cannot be read.
+    """
+    try:
+        from ..io.npz_reader import describe_results_npz
+
+        return describe_results_npz(str(path))
+    except Exception:
+        return None
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Public review API
 # ═══════════════════════════════════════════════════════════════════
@@ -657,8 +678,8 @@ def review_model(
         A nested dict with keys ``file``, ``units``, ``inventory``,
         ``breakdown``, ``bounds``, ``connectivity``, ``releases``,
         ``integrity``, ``observations``, ``self_weight``,
-        ``brace_buckling``, ``analysis``, ``npz``, ``npz_error`` and
-        ``ok``.
+        ``brace_buckling``, ``analysis``, ``npz``, ``npz_error``,
+        ``npz_contents`` and ``ok``.
     """
     if not math.isfinite(tol) or tol < 0:
         raise ValueError(f"tol must be a finite, non-negative number, got {tol!r}")
@@ -693,6 +714,7 @@ def review_model(
         "analysis": None,
         "npz": None,
         "npz_error": None,
+        "npz_contents": None,
     }
 
     if include_analysis:
@@ -706,6 +728,10 @@ def review_model(
     elif export_npz:
         # Geometry-only export — no OpenSees domain required.
         result["npz"], result["npz_error"] = _write_geometry_npz(md, export_npz)
+
+    if result["npz"]:
+        # Manifest of what the archive holds (geometry + analysis results).
+        result["npz_contents"] = _npz_contents(result["npz"])
 
     result["ok"] = _is_clean(result)
     return result
@@ -990,6 +1016,55 @@ def _mass_unit_label(units: dict[str, Any]) -> str:
     }.get((fu, lu), f"{fu}\u00b7s\u00b2/{lu}")
 
 
+def _npz_manifest_rows(contents: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build the NPZ archive manifest table rows.
+
+    Lists what the archive holds — geometry (with counts) and which
+    analysis results (static cases, modal modes, response spectrum, …) —
+    so the report states the contents without the reader opening the file.
+
+    Args:
+        contents: Dict from :func:`_npz_contents`.
+
+    Returns:
+        Row dicts with pre-formatted string values (see
+        :func:`_format_table`).
+    """
+    geo = contents.get("geometry") or {}
+    if geo.get("present"):
+        geometry = (
+            f"{geo.get('n_nodes', 0)} nodes, "
+            f"{geo.get('n_frames', 0)} frames, "
+            f"{geo.get('n_shells', 0)} shells"
+        )
+    else:
+        geometry = "not stored"
+
+    results: list[str] = []
+    if contents.get("static_cases"):
+        results.append(f"static [{', '.join(contents['static_cases'])}]")
+    if contents.get("n_modes"):
+        results.append(f"modal ({contents['n_modes']} modes)")
+    for extra in ("rs", "pushover", "shell_forces"):
+        if extra in (contents.get("analysis_types") or []):
+            results.append(extra)
+
+    units = contents.get("units")
+    return [
+        {"Item": "Geometry", "Detail": geometry},
+        {
+            "Item": "Results",
+            "Detail": "; ".join(results) if results else "none (geometry only)",
+        },
+        {
+            "Item": "Units",
+            "Detail": f"{units.get('force')}, {units.get('length')}" if units else "-",
+        },
+        {"Item": "Arrays", "Detail": str(contents.get("n_arrays", 0))},
+        {"Item": "Created", "Detail": str(contents.get("created") or "-")},
+    ]
+
+
 def format_review_report(
     result: dict[str, Any],
     max_modes: int = 0,
@@ -1221,6 +1296,13 @@ def format_review_report(
                 add(_apply_indent(str(wind)))
         elif analysis.get("wind_error"):
             add(f"  Wind check FAILED: {analysis['wind_error']}")
+
+    npz_contents = result.get("npz_contents")
+    if npz_contents:
+        add("")
+        add("-- NPZ archive contents " + "-" * 46)
+        add(f"  {npz_contents.get('path')}")
+        add(_apply_indent(_format_table(_npz_manifest_rows(npz_contents))))
 
     add("")
     add("=" * 70)
@@ -1498,6 +1580,15 @@ def format_review_markdown(
         elif analysis.get("wind_error"):
             add(f"**Wind check FAILED:** {analysis['wind_error']}")
             add("")
+
+    npz_contents = result.get("npz_contents")
+    if npz_contents:
+        add("## NPZ archive")
+        add("")
+        add(f"`{npz_contents.get('path')}`")
+        add("")
+        add(_format_table(_npz_manifest_rows(npz_contents), tablefmt="github"))
+        add("")
 
     return "\n".join(md)
 

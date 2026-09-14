@@ -211,6 +211,23 @@ be re-plotted standalone (PyVista / Rhino) without the `.s2k` or a re-run:
 The written path is reported under `result["npz"]`; an export failure is
 captured under `result["npz_error"]` and never aborts the review.
 
+When an archive is written the report also prints an **NPZ archive
+contents** manifest, and the same summary is available under
+`result["npz_contents"]` (produced by `describe_results_npz()`):
+
+| Item | Detail |
+|---|---|
+| Geometry | 754 nodes, 1263 frames, 0 shells |
+| Results | static [DEAD]; modal (12 modes) |
+| Units | kN, m |
+| Arrays | 57 |
+| Created | 2026-09-14T15:21:30 |
+
+This states whether **geometry** is present and **which analysis results**
+were recorded — static case labels and the number of modal modes (plus
+`rs` / `pushover` / `shell_forces` when present) — so the archive is
+self-describing without the reader having to open it.
+
 ```bash
 # Geometry only (solver-free)
 python -m fea_toolkit.model.review model.s2k --npz geometry.npz
@@ -272,6 +289,7 @@ result = {
                       load_verification, wind, mass_source, error},
   "npz": str | None,
   "npz_error": str | None,
+  "npz_contents": dict | None,
   "ok": bool,
 }
 ```
@@ -288,7 +306,9 @@ The `analysis` sub-dict's `load_verification` (a list of per-pattern
 applied-vs-reaction records) and `wind` (structured data from
 `wind_sanity_data()`: `rows` and `within_10pct`, plus the raw values) are
 populated by `--load-verify` / `--wind-check` respectively.
-`npz` holds the path written by `--npz` (with any failure in `npz_error`).
+`npz` holds the path written by `--npz` (with any failure in `npz_error`);
+`npz_contents` holds the archive manifest (geometry + analysis results)
+from `describe_results_npz()`.
 
 ## Notes
 

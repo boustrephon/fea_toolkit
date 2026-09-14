@@ -55,6 +55,99 @@ def read_results_npz(path: str) -> dict[str, Any]:
     return dict(np.load(path, allow_pickle=False))
 
 
+#: Geometry array keys written by :func:`fea_toolkit.io.npz_writer.write_results_npz`.
+GEOMETRY_ARRAY_KEYS = frozenset(
+    {
+        "node_tag",
+        "node_sap_id",
+        "node_x",
+        "node_y",
+        "node_z",
+        "frame_eid",
+        "frame_sap_id",
+        "frame_parent_sap_id",
+        "frame_sec_name",
+        "frame_node_i",
+        "frame_node_j",
+        "frame_parent_node_i",
+        "frame_parent_node_j",
+        "frame_t_start",
+        "frame_t_end",
+        "shell_eid",
+        "shell_sap_id",
+        "shell_sec_name",
+        "shell_parent_sap_id",
+        "shell_node_1",
+        "shell_node_2",
+        "shell_node_3",
+        "shell_node_4",
+    }
+)
+
+
+def describe_results_npz(path: str) -> dict[str, Any]:
+    """Summarise the contents of a unified NPZ archive.
+
+    Reads only the small label/metadata arrays — the bulk result arrays are
+    listed by name but not decompressed — so it is cheap even for large
+    models.  Used to report *what* an archive holds (geometry plus which
+    analysis results) without loading the data.
+
+    Args:
+        path: Path to a ``.npz`` written by
+            :func:`fea_toolkit.io.npz_writer.write_results_npz`.
+
+    Returns:
+        dict with keys:
+
+        * ``path`` — resolved file path
+        * ``n_arrays`` — total number of arrays in the archive
+        * ``geometry`` — ``{"present", "n_nodes", "n_frames", "n_shells",
+          "arrays"}``
+        * ``analysis_types`` — recorded types (e.g. ``["static", "modal"]``)
+        * ``static_cases`` — static case labels
+        * ``n_modes`` — number of stored modal periods
+        * ``units`` — ``{"force", "length"}`` (or ``None``)
+        * ``created`` — ISO-8601 timestamp (or ``None``)
+    """
+    resolved = str(Path(path).resolve())
+    with np.load(resolved, allow_pickle=False) as data:
+        names = list(data.files)
+
+        def _size(key: str) -> int:
+            return int(data[key].size) if key in names else 0
+
+        def _labels(key: str) -> list[str]:
+            return [str(v) for v in data[key].tolist()] if key in names else []
+
+        def _scalar(key: str) -> Optional[str]:
+            if key not in names:
+                return None
+            return str(np.asarray(data[key]).reshape(-1)[0])
+
+        geometry_arrays = sorted(name for name in names if name in GEOMETRY_ARRAY_KEYS)
+        force_unit = _scalar("force_unit")
+        length_unit = _scalar("length_unit")
+        return {
+            "path": resolved,
+            "n_arrays": len(names),
+            "geometry": {
+                "present": bool(geometry_arrays),
+                "n_nodes": _size("node_tag"),
+                "n_frames": _size("frame_sap_id"),
+                "n_shells": _size("shell_sap_id"),
+                "arrays": geometry_arrays,
+            },
+            "analysis_types": _labels("analysis_types"),
+            "static_cases": _labels("static_case_labels"),
+            "n_modes": _size("modal/period"),
+            "units": (
+                {"force": force_unit, "length": length_unit} if force_unit or length_unit else None
+            ),
+            "created": _scalar("created"),
+        }
+
+
 def _decode_hdf5_array(arr: np.ndarray) -> np.ndarray:
     """Decode byte-string arrays from h5py back to Unicode.
 

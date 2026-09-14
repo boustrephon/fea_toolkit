@@ -25,6 +25,8 @@ from .ground_motion import (
     scale_to_target_sa,
 )
 from .npz_reader import (
+    GEOMETRY_ARRAY_KEYS,
+    describe_results_npz,
     npz_build_child_map,
     npz_build_id_tag_map,
     npz_build_parent_map,
@@ -93,6 +95,7 @@ def __dir__():
 
 
 __all__ = [
+    "GEOMETRY_ARRAY_KEYS",
     "SCHEMA_VERSION",
     "SCHEMA_VERSION_LEGACY",
     "SAP2000Parser",
@@ -103,6 +106,7 @@ __all__ = [
     "collect_modal_arrays",
     "collect_rs_arrays",
     "collect_static_arrays",
+    "describe_results_npz",
     "flatten_stage",
     "format_linear_table",
     "get_schema_version",

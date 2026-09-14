@@ -874,6 +874,7 @@ class TestNpzExport:
         _md, result = sample_review
         assert result["npz"] is None
         assert result["npz_error"] is None
+        assert result["npz_contents"] is None
 
     def test_geometry_only_export(self, tmp_path, sample_review):
         md, _result = sample_review
@@ -914,6 +915,41 @@ class TestNpzExport:
         assert {"static", "modal"} <= analysis_types
         assert "modal/period" in data
         assert list(data["static_case_labels"]) == ["DEAD"]
+
+    def test_geometry_manifest(self, tmp_path, sample_review):
+        md, _result = sample_review
+        result = review_model(md, export_npz=tmp_path / "geometry.npz")
+        contents = result["npz_contents"]
+        assert contents["geometry"]["present"] is True
+        assert contents["geometry"]["n_nodes"] > 0
+        assert contents["analysis_types"] == []
+        assert contents["static_cases"] == []
+        assert contents["n_modes"] == 0
+        assert contents["n_arrays"] > 0
+        text = format_review_report(result)
+        assert "NPZ archive contents" in text
+        assert "none (geometry only)" in text
+
+    def test_analysis_manifest(self, tmp_path):
+        pytest.importorskip("openseespy.opensees")
+        md = _parse("sample.s2k")
+        try:
+            result = review_model(
+                md,
+                include_analysis=True,
+                analysis_config={"num_modes": 2},
+                export_npz=tmp_path / "results.npz",
+            )
+        finally:
+            _wipe()
+        contents = result["npz_contents"]
+        assert {"static", "modal"} <= set(contents["analysis_types"])
+        assert contents["static_cases"] == ["DEAD"]
+        assert contents["n_modes"] >= 1
+        md_text = format_review_markdown(result)
+        assert "## NPZ archive" in md_text
+        assert "static [DEAD]" in md_text
+        assert "modal (" in md_text
 
     def test_formatter_reports_npz(self, tmp_path, sample_review):
         md, _result = sample_review

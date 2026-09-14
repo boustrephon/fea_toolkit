@@ -10,7 +10,7 @@ opstool ODB.
 |---|---|
 | `results_schema.py` | Array name constants, shape descriptors, `validate_npz()` |
 | `npz_writer.py` | `write_results_npz()` — assemble geometry + results into `.npz` |
-| `npz_reader.py` | `read_results()` / `read_results_npz()` / `read_results_hdf5()` + PyVista/Rhino adapter helpers |
+| `npz_reader.py` | `read_results()` / `read_results_npz()` / `read_results_hdf5()` / `describe_results_npz()` + PyVista/Rhino adapter helpers |
 | `s2k_parser.py` | SAP2000 `.s2k` / JSON model parser |
 | `report.py` | Tabular report formatting (modal table, linear results, etc.) |
 | `helper.py` | Misc I/O utilities |

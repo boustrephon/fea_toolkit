@@ -964,6 +964,43 @@ class TestUnifiedNpzPipeline:
         assert "static/pp/+X/converged" in data
         assert bool(data["static/pp/+X/converged"][0]) is True
 
+    def test_describe_results_npz_manifest(self, sample_md, tmp_path):
+        """``describe_results_npz()`` summarises geometry + analysis results.
+
+        Reads the archive cheaply and reports what it holds — geometry
+        counts, static case labels and the number of stored modes — so the
+        review can list the NPZ contents without loading the bulk arrays.
+        """
+        from fea_toolkit.io.npz_reader import describe_results_npz
+        from fea_toolkit.io.npz_writer import write_results_npz
+
+        # Geometry-only archive
+        geom_path = str(tmp_path / "geom.npz")
+        write_results_npz(geom_path, sample_md)
+        geom = describe_results_npz(geom_path)
+        assert geom["geometry"]["present"] is True
+        assert geom["geometry"]["n_nodes"] > 0
+        assert geom["geometry"]["n_frames"] > 0
+        assert geom["analysis_types"] == []
+        assert geom["static_cases"] == []
+        assert geom["n_modes"] == 0
+        assert geom["n_arrays"] > 0
+        assert geom["units"]["force"]
+        assert geom["created"]
+
+        # Static + modal archive
+        res_path = str(tmp_path / "res.npz")
+        write_results_npz(
+            res_path,
+            sample_md,
+            static_results={"DEAD": {"nodal_displacements": {}}},
+            modal_result={"periods": [1.0, 0.5], "modal_props": {}},
+        )
+        res = describe_results_npz(res_path)
+        assert {"static", "modal"} <= set(res["analysis_types"])
+        assert res["static_cases"] == ["DEAD"]
+        assert res["n_modes"] == 2
+
     def test_write_and_read_modal(self, analysed_builder, tmp_path):
         """Modal results can be written to NPZ, read back, and used for
         mode-shape visualisation.
