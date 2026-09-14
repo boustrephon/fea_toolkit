@@ -68,14 +68,24 @@ def collect_geometry_arrays(
 
     # ── Frames ─────────────────────────────────────────────────────
     # Build parent lookup for t_start/t_end (child i of parent P spans
-    # t_locations[i-1] .. t_locations[i]).
+    # t_locations[i-1] .. t_locations[i]), plus the parent endpoints used
+    # by the ``collapse_to_parents`` visualisation.  Inactive (split)
+    # parents are skipped from the element arrays below, so their
+    # endpoints are captured separately here.
     frame_elements = getattr(model, "frame_elements", {})
     parent_lookup: dict[str, tuple] = {}
+    parent_endpoints: dict[str, tuple] = {}
     for eid, elem in frame_elements.items():
         if elem.t_locations and elem.child_ids:
             parent_lookup[eid] = (elem.t_locations, elem.child_ids)
+        if getattr(elem, "inactive", False):
+            p_ni = nodes.get(elem.node_i)
+            p_nj = nodes.get(elem.node_j)
+            if p_ni is not None and p_nj is not None:
+                parent_endpoints[eid] = (p_ni.node_tag, p_nj.node_tag)
 
     f_ids, f_sap, f_parent, f_sec, f_ni, f_nj = [], [], [], [], [], []
+    f_pni, f_pnj = [], []
     f_t0, f_t1, f_angle, f_card, f_tag = [], [], [], [], []
     frame_assignments = getattr(model, "frame_assignments", {})
     for eid, elem in frame_elements.items():
@@ -91,6 +101,16 @@ def collect_geometry_arrays(
         f_sec.append(frame_assignments.get(eid, ""))
         f_ni.append(ni.node_tag)
         f_nj.append(nj.node_tag)
+
+        # Parent endpoints for collapse_to_parents (0 = no split parent).
+        pid = elem.parent_id
+        if pid and pid in parent_endpoints:
+            p_ni_tag, p_nj_tag = parent_endpoints[pid]
+            f_pni.append(p_ni_tag)
+            f_pnj.append(p_nj_tag)
+        else:
+            f_pni.append(0)
+            f_pnj.append(0)
         if elem.parent_id and elem.parent_id in parent_lookup:
             t_locs, children = parent_lookup[elem.parent_id]
             try:
@@ -112,6 +132,8 @@ def collect_geometry_arrays(
     arrays["frame_sec_name"] = np.array(f_sec, dtype=str)
     arrays["frame_node_i"] = np.array(f_ni, dtype=int)
     arrays["frame_node_j"] = np.array(f_nj, dtype=int)
+    arrays["frame_parent_node_i"] = np.array(f_pni, dtype=int)
+    arrays["frame_parent_node_j"] = np.array(f_pnj, dtype=int)
     arrays["frame_t_start"] = np.array(f_t0, dtype=float)
     arrays["frame_t_end"] = np.array(f_t1, dtype=float)
     arrays["frame_angle"] = np.array(f_angle, dtype=float)

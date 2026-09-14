@@ -642,11 +642,13 @@ def _run_rs_pass(
             actually available).
 
     Returns:
-        Dict with ``spectrum`` (the resolved descriptor) and
-        ``directions`` — a per-direction dict of CQC/SRSS base shear and
-        overturning moment, the 6-DoF ``base_reactions_cqc``, the per-mode
-        ``modal_base_shear`` / ``modal_base_moment`` and the CQC/SRSS roof
-        displacement.
+        Dict with ``spectrum`` (the resolved descriptor), ``directions`` —
+        a per-direction dict of CQC/SRSS base shear and overturning moment,
+        the 6-DoF ``base_reactions_cqc``, the per-mode ``modal_base_shear``
+        / ``modal_base_moment`` and the CQC/SRSS roof displacement — and
+        ``nodal_displacements`` / ``nodal_displacements_direction`` (the
+        CQC nodal displacement field of the first configured direction,
+        for the single-direction unified ``rs/node_*`` block).
     """
     from ..spectrum import _build_spectrum, _interp_sa
     from ..utils import g_from_units
@@ -675,6 +677,11 @@ def _run_rs_pass(
         return math.hypot(d[0], d[1], d[2]) if d else 0.0
 
     out: dict[str, Any] = {}
+    # The unified ``rs/node_*`` block is single-direction (the Rhino RS
+    # deformed-shape overlay reads it without a direction argument), so the
+    # CQC nodal displacements of the first configured direction are kept.
+    nodal_disp: dict[int, tuple] = {}
+    nodal_disp_direction = directions[0] if directions else ""
     for direction in directions:
         rs = builder.run_response_spectrum_analysis(
             num_modes=n_modes,
@@ -700,6 +707,8 @@ def _run_rs_pass(
             )
             roof_cqc = _roof_disp(disp_cqc)
             roof_srss = _roof_disp(disp_srss)
+            if direction == nodal_disp_direction:
+                nodal_disp = disp_cqc
         out[direction] = {
             "base_shear_cqc": rs.get("base_shear_cqc", 0.0),
             "base_shear_srss": rs.get("base_shear_srss", 0.0),
@@ -727,6 +736,8 @@ def _run_rs_pass(
             "directions": directions,
         },
         "directions": out,
+        "nodal_displacements": nodal_disp,
+        "nodal_displacements_direction": nodal_disp_direction,
     }
 
 
@@ -1005,6 +1016,12 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
                     modal_result=modal,
                     mode_shapes=mode_shapes,
                     rs_results=_rs_export_payload(result.get("response_spectrum"), periods),
+                    # Single-direction CQC displacement field for the
+                    # ``rs/node_*`` block (Rhino RS deformed-shape overlay).
+                    rs_nodal_displacements=(result.get("response_spectrum") or {}).get(
+                        "nodal_displacements"
+                    )
+                    or None,
                     fmt="npz",
                 )
             except Exception as exc:  # captured, never raised

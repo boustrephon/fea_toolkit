@@ -952,6 +952,41 @@ class TestResponseSpectrumFormatting:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Unified-writer schema coverage — solver-free
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestUnifiedWriterSchemaCoverage:
+    """The unified collectors must emit every visualiser-consumed key.
+
+    These guard the arrays that the legacy ``write_results_npz`` produced
+    but the unified collectors originally omitted — losing them silently
+    degrades mode-shape animation (row alignment) and parent-collapse
+    visualisation to wrong geometry rather than failing loudly.
+    """
+
+    def test_geometry_arrays_cover_parent_collapse_keys(self):
+        from fea_toolkit.io._serial import collect_geometry_arrays
+
+        arrays = collect_geometry_arrays(_parse("sample.s2k"))
+        # collapse_to_parents reads these (0 = no split parent).
+        assert "frame_parent_node_i" in arrays
+        assert "frame_parent_node_j" in arrays
+        assert len(arrays["frame_parent_node_i"]) == len(arrays["frame_node_i"])
+
+    def test_modal_arrays_cover_row_alignment_key(self):
+        from fea_toolkit.io.unified_writer import collect_modal_arrays
+
+        modal = {"periods": [1.0, 0.5], "modal_props": {}}
+        shapes = {0: {3: (0.1, 0.0, 0.0), 1: (0.2, 0.0, 0.0)}}
+        arrays = collect_modal_arrays(modal, mode_shapes=shapes)
+        # mode_dx/y/z rows are in sorted-tag order while the geometry
+        # node_tag array is not, so the alignment array must be written.
+        assert list(arrays["modal/node_tag"]) == [1, 3]
+        assert arrays["modal/mode_dx"].shape == (2, 2)
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Analysis-phase checks (load verification / wind) — require OpenSees
 # ═══════════════════════════════════════════════════════════════════
 
@@ -1243,8 +1278,15 @@ class TestNpzExport:
             "rs/m_srss_y",
             "rs/roof_disp_cqc_x",
             "rs/roof_disp_srss_y",
+            # Single-direction CQC displacement field (Rhino RS overlay).
+            "rs/node_tag",
+            "rs/node_dx",
         ):
             assert key in data, key
+        # Visualiser row-alignment / parent-collapse keys survive the export.
+        assert "modal/node_tag" in data
+        assert "frame_parent_node_i" in data
+        assert data["rs/node_tag"].shape == data["rs/node_dx"].shape
         # ``rs/period`` is trimmed to the modes the RS pass actually used, so
         # it stays aligned with the per-mode shear arrays.
         n_modes = int(result["analysis"]["response_spectrum"]["spectrum"]["n_modes"])

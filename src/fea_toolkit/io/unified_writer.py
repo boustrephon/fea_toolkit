@@ -154,6 +154,12 @@ def collect_modal_arrays(
                         if idx is not None:
                             arr[idx, midx] = disp[dof_idx]
                 arrays[npz_key] = arr
+            # Row alignment for the N_node × N_mode arrays above.  The
+            # geometry ``node_tag`` array is written in model dict order
+            # (not sorted), so stand-alone visualisers (mode-shape
+            # animation) must pair row i of mode_dx/y/z against this
+            # explicit sorted tag list rather than the geometry field.
+            arrays["modal/node_tag"] = np.array(node_tags, dtype=int)
 
     return arrays
 

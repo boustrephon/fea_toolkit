@@ -274,6 +274,17 @@ re-run:
 The written path is reported under `result["npz"]`; an export failure is
 captured under `result["npz_error"]` and never aborts the review.
 
+The archive is consumable by the standard visualisation helpers — read it
+with `read_results_npz()` / `read_results()` and pass the dict to
+`npz_to_pyvista_frame_mesh()`, `npz_to_rhino_colour_data()`,
+`plot_force_diagram()` or `_load_deformed_arrays()`.  The unified writer
+emits the row-alignment key `modal/node_tag` (mode-shape animation) and the
+`frame_parent_node_i` / `frame_parent_node_j` endpoints
+(`collapse_to_parents`) that those helpers rely on.  The `rs/node_*` block is
+**single-direction**: it carries the CQC displacement field of the first
+configured direction (X by default), because the Rhino RS deformed-shape
+overlay takes no direction argument.
+
 When an archive is written the report also prints an **NPZ archive
 contents** manifest, and the same summary is available under
 `result["npz_contents"]` (produced by `describe_results_npz()`):
