@@ -409,11 +409,19 @@ def _iec_spectrum(T, pga, zeta: float = 0.05):
     return float(Sa[0]) if scalar_in else Sa
 
 
-def _build_spectrum(cfg: dict) -> tuple:
+def _build_spectrum(cfg: dict, *, g: Optional[float] = None) -> tuple:
     """Build a GB 50011 response spectrum from a configuration dict.
 
     The dict should contain keys *intensity*, *acceleration*, *site_class*,
     *damping*, and *level* (``'frequent'`` / ``'fortification'`` / ``'rare'``).
+
+    Args:
+        cfg: Spectrum configuration dict (see above).
+        g: Gravitational acceleration in the model's length-unit per second
+            squared.  ``None`` falls back to the SI value (9.81 m/s²).
+            Pass ``g_from_units(model.units)`` so the returned spectral
+            accelerations are in the model's unit system (e.g. mm/s² for a
+            millimetre model).
 
     Returns
     -------
@@ -458,7 +466,8 @@ def _build_spectrum(cfg: dict) -> tuple:
         alpha_max = alpha_rare.get(intensity, 0.50)
         label = "Rare (罕遇)"
 
-    g = 9.81
+    if g is None:
+        g = 9.81
     gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
     eta1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
     eta2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))

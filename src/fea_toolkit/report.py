@@ -83,6 +83,7 @@ from .spectrum import _build_spectrum, plot_seismic_spectrum
 from .utils import (
     build_gravity_patterns,
     deep_merge,
+    g_from_units,
     infer_loads,
     pick_wind,
 )
@@ -470,8 +471,13 @@ def generate_report(
             print(f"  Self-weight check failed: {e}")
 
     # ── Build spectrum (common to both paths) ────────────────────
+    # g is derived from the model's length unit so the spectral
+    # accelerations come back in the model's own unit system (mm/s² for a
+    # millimetre model), not the SI 9.81 m/s² the builder would otherwise
+    # fall back to.
+    _gravity = g_from_units(md.units)
     if spec_cfg:
-        T_spec, Sa_spec, alpha_max, tg, zeta, spec_label = _build_spectrum(spec_cfg)
+        T_spec, Sa_spec, alpha_max, tg, zeta, spec_label = _build_spectrum(spec_cfg, g=_gravity)
     else:
         T_spec, Sa_spec, alpha_max, tg, zeta, spec_label = (
             [],
@@ -483,7 +489,7 @@ def generate_report(
         )
 
     if push_spec_cfg:
-        (_, _, push_alpha_max, push_tg, push_zeta, _) = _build_spectrum(push_spec_cfg)
+        (_, _, push_alpha_max, push_tg, push_zeta, _) = _build_spectrum(push_spec_cfg, g=_gravity)
     else:
         push_alpha_max, push_tg, push_zeta = alpha_max, tg, zeta
 
@@ -637,6 +643,16 @@ def generate_report(
                                 out.get("results", {}),
                             )
 
+            # Response-spectrum results (one entry per direction), so the
+            # exported file carries the same RS arrays a review writes.
+            rs_export: dict = {}
+            if export_cfg.get("response_spectrum", True):
+                for _dir in ("X", "Y"):
+                    _rs_ar = _man_results.get(f"RS-{_dir}")
+                    _rs = (_rs_ar.data or {}).get("rs_result") if _rs_ar is not None else None
+                    if _rs:
+                        rs_export[f"rs_{_dir.lower()}"] = _rs
+
             _fmt = export_cfg.get("fmt", "h5")
             _stages = export_cfg.get("stages") or ["sap", "mesh"]
             _path = export_cfg.get("path")
@@ -655,6 +671,7 @@ def generate_report(
                     else None
                 ),
                 pushover_results=po_export,
+                rs_results=rs_export or None,
                 config=cfg.get("builder") or cfg.get("preprocessor") or {},
                 source_file=cfg.get("model", {}).get("path"),
                 fmt=_fmt,
@@ -664,7 +681,8 @@ def generate_report(
                 print(f"  Export written: {export_path}")
                 print(
                     f"    stages={_stages}; static cases={len(static_raw or {})}; "
-                    f"pushover directions={sorted(po_export)}"
+                    f"pushover directions={sorted(po_export)}; "
+                    f"RS directions={sorted(rs_export)}"
                 )
             if log:
                 log.info("export", f"wrote {export_path}")

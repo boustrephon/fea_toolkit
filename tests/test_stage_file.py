@@ -165,6 +165,31 @@ class TestStageFile:
         assert "frame_sap_id" in flat
         assert "shell_parent_sap_id" in flat
 
+    def test_response_spectrum_results_round_trip(self, prepared, tmp_path, fmt):
+        """RS arrays are written under the canonical ``rs/*`` keys."""
+        _md, mesh, _config = prepared
+        p = str(tmp_path / f"rs.{fmt}")
+        rs_x = {
+            "modal_periods": [1.0, 0.5],
+            "modal_base_shear": [120.0, 30.0],
+            "base_shear_cqc": 130.0,
+            "base_shear_srss": 125.0,
+            "base_moment_cqc": 900.0,
+            "base_moment_srss": 880.0,
+            "roof_disp_cqc": 0.012,
+            "roof_disp_srss": 0.013,
+        }
+        rs_y = dict(rs_x, modal_base_shear=[0.0, 200.0], base_shear_cqc=205.0)
+        write_model_stages(p, mesh=mesh, rs_results={"rs_x": rs_x, "rs_y": rs_y}, fmt=fmt)
+
+        data = read_results(p)
+        assert "rs" in [str(t) for t in data["analysis_types"]]
+        assert list(data["rs/period"]) == [1.0, 0.5]
+        assert list(data["rs/v_base_x"]) == [120.0, 30.0]
+        assert data["rs/v_cqc_y"][0] == 205.0
+        assert data["rs/m_cqc_x"][0] == 900.0
+        assert data["rs/roof_disp_srss_x"][0] == 0.013
+
 
 class TestFormatParity:
     def test_same_payload_reads_back_identically(self, prepared, tmp_path):

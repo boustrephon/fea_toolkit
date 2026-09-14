@@ -427,7 +427,13 @@ def run_linear_cases(
     if spec_cfg:
         from fea_toolkit.spectrum import _build_spectrum
 
-        T_spec_built, Sa_spec_built, _, _, zeta_eff, _ = _build_spectrum(spec_cfg)
+        from ..utils import g_from_units
+
+        # g from the model's length unit so the spectral accelerations are
+        # in the model's own unit system (matching the fallback branch).
+        T_spec_built, Sa_spec_built, _, _, zeta_eff, _ = _build_spectrum(
+            spec_cfg, g=g_from_units(md.units)
+        )
         T_spec = T_spec_built
         Sa_spec = Sa_spec_built
     else:

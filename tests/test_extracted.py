@@ -147,6 +147,26 @@ def test_build_spectrum_frequent():
     assert "Frequent" in label
 
 
+def test_build_spectrum_g_is_unit_aware():
+    """An explicit model-unit g scales Sa exactly with the length unit."""
+    from fea_toolkit.utils import g_from_units
+
+    cfg = {"intensity": 7, "level": "rare", "site_class": "II", "damping": 0.05}
+    _, sa_m, *_ = _build_spectrum(cfg, g=g_from_units({"F": "N", "L": "m", "T": "C"}))
+    _, sa_mm, *_ = _build_spectrum(cfg, g=g_from_units({"F": "N", "L": "mm", "T": "C"}))
+    # A millimetre model's g is 1000x the metre value, so Sa scales by 1000.
+    np.testing.assert_allclose(np.asarray(sa_mm), np.asarray(sa_m) * 1000.0, rtol=1e-12)
+    assert g_from_units({"L": "mm"}) == pytest.approx(9806.65)
+
+
+def test_build_spectrum_default_g_is_si():
+    """Omitting g keeps the historical 9.81 m/s² default (backward compat)."""
+    cfg = {"intensity": 7, "level": "rare", "site_class": "II", "damping": 0.05}
+    _, sa_default, *_ = _build_spectrum(cfg)
+    _, sa_explicit, *_ = _build_spectrum(cfg, g=9.81)
+    np.testing.assert_allclose(np.asarray(sa_default), np.asarray(sa_explicit), rtol=1e-12)
+
+
 def test_interp_sa():
     """Interpolation should return known values at input points."""
     T = [0.0, 0.5, 1.0]

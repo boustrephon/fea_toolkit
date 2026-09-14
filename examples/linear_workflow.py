@@ -423,6 +423,7 @@ def run_rs(
     by :meth:`AnalysisBuilder.run_modal_analysis`.
     """
     from fea_toolkit.spectrum import cqc_combine as _cqc
+    from fea_toolkit.utils import g_from_units
 
     mp = modal_result.get("modal_props", {})
     if not mp:
@@ -441,7 +442,7 @@ def run_rs(
         "level": "rare",
         "damping": 0.05,
     }
-    T_spec, Sa_spec, _, _, _, _ = _build_spectrum(spec_cfg)
+    T_spec, Sa_spec, _, _, _, _ = _build_spectrum(spec_cfg, g=g_from_units(md.units))
 
     def _sa_fn(T: float) -> float:
         return float(np.interp([T], T_spec, Sa_spec, left=Sa_spec[0], right=Sa_spec[-1])[0])

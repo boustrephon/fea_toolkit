@@ -138,6 +138,7 @@ def build_metadata(
     static_results: t.Optional[dict] = None,
     modal_result: t.Optional[dict] = None,
     pushover_results: t.Optional[dict] = None,
+    rs_results: t.Optional[dict] = None,
     force_unit: t.Optional[str] = None,
     length_unit: t.Optional[str] = None,
     forces_coordinate_system: str = "local",
@@ -184,6 +185,8 @@ def build_metadata(
         meta["num_modes"] = len(modal_result.get("periods", []))
     if pushover_results:
         meta["pushover_directions"] = list(pushover_results.keys())
+    if rs_results:
+        meta["rs_directions"] = list(rs_results.keys())
     return meta
 
 
@@ -220,6 +223,9 @@ def write_model_stages(
     modal_result: t.Optional[dict] = None,
     mode_shapes: t.Optional[dict] = None,
     pushover_results: t.Optional[dict] = None,
+    rs_results: t.Optional[dict] = None,
+    rs_element_forces: t.Optional[dict] = None,
+    rs_nodal_displacements: t.Optional[dict] = None,
     fmt: str = "npz",
     geometry: bool = True,
     dictionaries: bool = True,
@@ -253,6 +259,16 @@ def write_model_stages(
             ``step`` / ``control_disp`` / ``base_shear`` arrays).  Arrays
             are written under ``pushover/{direction}/...`` via
             :func:`fea_toolkit.io.npz_writer.collect_pushover_arrays`.
+        rs_results: Response-spectrum results per direction, as
+            ``{"rs_x": rs_result, "rs_y": rs_result}``.  Arrays are written
+            under ``rs/...`` via
+            :func:`fea_toolkit.io.unified_writer.collect_rs_arrays`.
+        rs_element_forces: Optional element-level CQC-combined RS forces
+            from ``extract_element_rs_forces()`` (written under
+            ``rs/elem_*``).
+        rs_nodal_displacements: Optional CQC-combined RS nodal
+            displacements from ``compute_rs_nodal_displacements()``
+            (written under ``rs/node_*``).
         fmt: ``\"npz\"`` (default) or ``\"h5\"``.
         geometry: Write the lightweight geometry arrays (Rhino / PyVista
             fast path).
@@ -294,6 +310,7 @@ def write_model_stages(
         static_results=static_results,
         modal_result=modal_result,
         pushover_results=pushover_results,
+        rs_results=rs_results,
         force_unit=force_unit,
         length_unit=length_unit,
         forces_coordinate_system=forces_coordinate_system,
@@ -350,6 +367,26 @@ def write_model_stages(
                         pushover_results=po_results,
                     )
                 )
+    # ── Response-spectrum arrays (canonical ``rs/*`` schema) ──────
+    if rs_results or rs_element_forces or rs_nodal_displacements:
+        analysis_types.append("rs")
+        from .unified_writer import (
+            collect_rs_arrays,
+            collect_rs_element_force_arrays,
+            collect_rs_nodal_displacement_arrays,
+        )
+
+        if rs_results:
+            arrays.update(
+                collect_rs_arrays(
+                    rs_x=rs_results.get("rs_x"),
+                    rs_y=rs_results.get("rs_y"),
+                )
+            )
+        if rs_element_forces:
+            arrays.update(collect_rs_element_force_arrays(rs_element_forces))
+        if rs_nodal_displacements:
+            arrays.update(collect_rs_nodal_displacement_arrays(rs_nodal_displacements))
     if analysis_types:
         arrays["analysis_types"] = np.array(analysis_types, dtype=str)
 

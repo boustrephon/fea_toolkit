@@ -562,12 +562,15 @@ def _run_analysis(md: SAPModelData, config: Optional[dict[str, Any]] = None) -> 
 
 
 def _write_geometry_npz(md: SAPModelData, path: Any) -> tuple[Optional[str], Optional[str]]:
-    """Write a geometry-only NPZ (no OpenSees required).
+    """Write a geometry-only archive (no OpenSees required).
 
     Used when ``export_npz`` is requested **without** the analysis phase.
-    The canonical :func:`~fea_toolkit.io.npz_writer.write_results_npz`
-    writer is imported lazily so the review module stays importable
-    without the I/O stack loaded.
+    The canonical
+    :func:`~fea_toolkit.io.unified_writer.write_results` writer is imported
+    lazily so the review module stays importable without the I/O stack
+    loaded.  Using the unified writer (rather than the legacy
+    ``write_results_npz``) keeps every archive the review produces —
+    geometry-only or geometry + results — on the same canonical schema.
 
     Args:
         md: Parsed model data.
@@ -579,9 +582,9 @@ def _write_geometry_npz(md: SAPModelData, path: Any) -> tuple[Optional[str], Opt
         rather than raised so a review never aborts on an export error.
     """
     try:
-        from ..io.npz_writer import write_results_npz
+        from ..io.unified_writer import write_results
 
-        return write_results_npz(str(path), md), None
+        return write_results(str(path), model=md, fmt="npz"), None
     except Exception as exc:
         return None, f"{type(exc).__name__}: {exc}"
 

@@ -33,6 +33,25 @@ Only the response-spectrum, pushover, and nonlinear-dynamic functions depend
 on a preceding modal result — that dependency is expressed as a
 `modal_result` argument, not as an injected dependency graph.
 
+### Spectrum units
+
+`T_spec` / `Sa_spec` are **in the model's own unit system** — the toolkit is
+unit-agnostic (see [Units](units_conversion.md)).  When a spectrum is built
+from a design code rather than supplied explicitly, `spectrum._build_spectrum()`
+takes a `g` argument for exactly this reason:
+
+```python
+from fea_toolkit.spectrum import _build_spectrum
+from fea_toolkit.utils import g_from_units
+
+T_spec, Sa_spec, *_ = _build_spectrum(spec_cfg, g=g_from_units(md.units))
+```
+
+`g_from_units()` scales 9.80665 m/s² to the model's length unit, so a
+millimetre model gets `Sa` in mm/s².  The report pipeline, the review's
+`--response-spectrum` pass and `run_linear_cases()` all pass it; omitting
+`g` keeps the historical SI default (9.81 m/s²) for standalone use.
+
 ## Relationship to the pipeline
 
 ```

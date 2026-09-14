@@ -649,9 +649,12 @@ def _run_rs_pass(
         displacement.
     """
     from ..spectrum import _build_spectrum, _interp_sa
+    from ..utils import g_from_units
 
     cfg = dict(spec_cfg or {})
-    T_spec, Sa_spec, alpha_max, tg, zeta, label = _build_spectrum(cfg)
+    # g follows the model's length unit so the spectral accelerations are
+    # in the model's own unit system (e.g. mm/s² for a millimetre model).
+    T_spec, Sa_spec, alpha_max, tg, zeta, label = _build_spectrum(cfg, g=g_from_units(md.units))
 
     periods = list(modal.get("periods", []))
     if not periods:
@@ -725,6 +728,42 @@ def _run_rs_pass(
         },
         "directions": out,
     }
+
+
+def _rs_export_payload(
+    response_spectrum: Optional[dict[str, Any]],
+    periods: list[float],
+) -> Optional[dict[str, dict]]:
+    """Build the ``rs_results`` payload for the unified results writer.
+
+    Converts a review ``response_spectrum`` block into the
+    ``{"rs_x": ..., "rs_y": ...}`` shape
+    :func:`~fea_toolkit.io.unified_writer.collect_rs_arrays` expects,
+    attaching the modal periods each direction shares.  The period list is
+    trimmed to the mode count actually used by the RS pass so ``rs/period``
+    stays aligned with the per-mode ``rs/v_base_*`` arrays.
+
+    Args:
+        response_spectrum: The ``response_spectrum`` block of a review
+            result (``None`` when the RS pass did not run or failed).
+        periods: Modal periods from the analysis pass.
+
+    Returns:
+        ``{"rs_x": {...}, "rs_y": {...}}`` containing only the directions
+        actually analysed, or ``None`` when there is nothing to export.
+    """
+    if not response_spectrum:
+        return None
+    n_modes = (response_spectrum.get("spectrum") or {}).get("n_modes")
+    modal_periods = list(periods)
+    if n_modes:
+        modal_periods = modal_periods[: int(n_modes)]
+    out: dict[str, dict] = {}
+    for direction, data in (response_spectrum.get("directions") or {}).items():
+        entry = dict(data)
+        entry["modal_periods"] = modal_periods
+        out[f"rs_{str(direction).lower()}"] = entry
+    return out or None
 
 
 def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -939,11 +978,14 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
             "patterns_applied": applied_patterns,
         }
 
-        # ── Optional NPZ export (meshed geometry + modal + static) ───
+        # ── Optional unified export (geometry + modal + static + RS) ──
+        # Uses the canonical unified writer so the archive follows the
+        # ``results_schema`` layout (including the ``rs/*`` block) and can
+        # be read by :func:`~fea_toolkit.io.npz_reader.read_results_npz`.
         export_npz = builder_config.get("export_npz")
         if export_npz:
             try:
-                from ..io.npz_writer import write_results_npz
+                from ..io.unified_writer import write_results
 
                 case = applied_patterns[0] if applied_patterns else "GRAVITY"
                 static_case: dict[str, Any] = {
@@ -955,13 +997,15 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
                     elem_forces = None
                 if elem_forces:
                     static_case["element_forces"] = elem_forces
-                result["npz"] = write_results_npz(
+                result["npz"] = write_results(
                     str(export_npz),
-                    md,
+                    model=md,
+                    mesh_model=mesh,
                     static_results={case: static_case},
                     modal_result=modal,
                     mode_shapes=mode_shapes,
-                    mesh_model=mesh,
+                    rs_results=_rs_export_payload(result.get("response_spectrum"), periods),
+                    fmt="npz",
                 )
             except Exception as exc:  # captured, never raised
                 result["npz_error"] = f"{type(exc).__name__}: {exc}"

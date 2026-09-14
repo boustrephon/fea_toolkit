@@ -917,6 +917,39 @@ class TestResponseSpectrumFormatting:
         assert _response_spectrum_rows({}, "kN", "m") == []
         assert _response_spectrum_mode_rows({}, {}, "kN") == []
 
+    def test_collect_rs_arrays_writes_moment_and_roof(self):
+        """The unified collector emits the extended canonical ``rs/*`` block."""
+        from fea_toolkit.io.unified_writer import collect_rs_arrays
+
+        arrays = collect_rs_arrays(
+            rs_x={
+                "modal_periods": [1.0, 0.5],
+                "modal_base_shear": [100.0, 20.0],
+                "base_shear_cqc": 110.0,
+                "base_shear_srss": 105.0,
+                "base_moment_cqc": 900.0,
+                "base_moment_srss": 880.0,
+                "roof_disp_cqc": 0.0123,
+                "roof_disp_srss": 0.0130,
+            },
+            rs_y=None,
+        )
+        assert list(arrays["rs/period"]) == [1.0, 0.5]
+        assert list(arrays["rs/v_base_x"]) == [100.0, 20.0]
+        assert arrays["rs/v_cqc_x"][0] == 110.0
+        assert arrays["rs/v_srss_x"][0] == 105.0
+        assert arrays["rs/m_cqc_x"][0] == 900.0
+        assert arrays["rs/m_srss_x"][0] == 880.0
+        assert arrays["rs/roof_disp_cqc_x"][0] == 0.0123
+        assert arrays["rs/roof_disp_srss_x"][0] == 0.0130
+        # Only the X direction was supplied.
+        assert "rs/v_cqc_y" not in arrays
+        # A producer without moment/roof data (the scalar ``cqc_base_shear``
+        # path) still yields the keys, defaulted to zero.
+        bare = collect_rs_arrays(rs_x={"modal_periods": [1.0], "base_shear_cqc": 5.0})
+        assert bare["rs/m_srss_x"][0] == 0.0
+        assert bare["rs/roof_disp_cqc_x"][0] == 0.0
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Analysis-phase checks (load verification / wind) — require OpenSees
@@ -1176,6 +1209,49 @@ class TestNpzExport:
         assert {"static", "modal"} <= analysis_types
         assert "modal/period" in data
         assert list(data["static_case_labels"]) == ["DEAD"]
+
+    def test_response_spectrum_export_includes_rs(self, tmp_path):
+        """The unified archive carries the canonical ``rs/*`` block."""
+        pytest.importorskip("openseespy.opensees")
+        md = _parse("sample.s2k")
+        npz_path = tmp_path / "rs.npz"
+        try:
+            result = review_model(
+                md,
+                include_analysis=True,
+                analysis_config={"num_modes": 3, "response_spectrum": True},
+                export_npz=npz_path,
+            )
+        finally:
+            _wipe()
+        assert result["npz_error"] is None
+        assert npz_path.exists()
+
+        from fea_toolkit.io.npz_reader import read_results_npz
+
+        data = read_results_npz(str(npz_path))
+        analysis_types = {str(t) for t in data["analysis_types"]}
+        assert {"static", "modal", "rs"} <= analysis_types
+        # Canonical RS block: per-mode shear + combined shear/moment/roof.
+        for key in (
+            "rs/period",
+            "rs/v_base_x",
+            "rs/v_base_y",
+            "rs/v_cqc_x",
+            "rs/v_srss_y",
+            "rs/m_cqc_x",
+            "rs/m_srss_y",
+            "rs/roof_disp_cqc_x",
+            "rs/roof_disp_srss_y",
+        ):
+            assert key in data, key
+        # ``rs/period`` is trimmed to the modes the RS pass actually used, so
+        # it stays aligned with the per-mode shear arrays.
+        n_modes = int(result["analysis"]["response_spectrum"]["spectrum"]["n_modes"])
+        assert data["rs/period"].shape == (n_modes,)
+        assert data["rs/v_base_x"].shape == (n_modes,)
+        # The archive manifest reports the RS analysis.
+        assert "rs" in result["npz_contents"]["analysis_types"]
 
     def test_geometry_manifest(self, tmp_path, sample_review):
         md, _result = sample_review

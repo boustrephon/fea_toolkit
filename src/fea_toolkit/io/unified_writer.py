@@ -161,10 +161,12 @@ def collect_modal_arrays(
 def collect_rs_arrays(
     rs_x: Optional[dict] = None, rs_y: Optional[dict] = None
 ) -> dict[str, np.ndarray]:
-    """Extract response-spectrum base shear arrays.
+    """Extract response-spectrum arrays (base shear, moment, roof displacement).
 
     ``rs/period`` is taken from the first available result dict
-    (same periods apply to both X and Y directions).
+    (same periods apply to both X and Y directions).  Per-direction scalars
+    default to 0.0 when a producer does not supply them — e.g. the scalar
+    ``cqc_base_shear`` path has no moment or roof displacement.
     """
     arrays: dict[str, np.ndarray] = {}
     first = rs_x or rs_y
@@ -178,6 +180,10 @@ def collect_rs_arrays(
         arrays[f"rs/v_base_{d_key}"] = np.array(rs.get("modal_base_shear", []), dtype=float)
         arrays[f"rs/v_cqc_{d_key}"] = np.array([rs.get("base_shear_cqc", 0.0)])
         arrays[f"rs/v_srss_{d_key}"] = np.array([rs.get("base_shear_srss", 0.0)])
+        arrays[f"rs/m_cqc_{d_key}"] = np.array([rs.get("base_moment_cqc", 0.0)])
+        arrays[f"rs/m_srss_{d_key}"] = np.array([rs.get("base_moment_srss", 0.0)])
+        arrays[f"rs/roof_disp_cqc_{d_key}"] = np.array([rs.get("roof_disp_cqc", 0.0)])
+        arrays[f"rs/roof_disp_srss_{d_key}"] = np.array([rs.get("roof_disp_srss", 0.0)])
     return arrays
 
 
@@ -413,10 +419,14 @@ def write_results(
         analysis_types.append("static")
     if modal_result:
         analysis_types.append("modal")
+    if rs_results or rs_element_forces or rs_nodal_displacements:
+        analysis_types.append("rs")
     if pushover_results:
         analysis_types.append("pushover")
-    if analysis_types:
-        arrays["analysis_types"] = np.array(analysis_types, dtype=str)
+    # Always written — an empty array for a geometry-only file, matching the
+    # legacy ``write_results_npz`` manifest so ``describe_results_npz`` and
+    # the review's archive summary read identically from either writer.
+    arrays["analysis_types"] = np.array(analysis_types, dtype=str)
 
     # ── Canonical unit / local-force metadata (same keys as npz_writer) ──
     # Length-1 string arrays so the unified plotting readers
@@ -426,6 +436,8 @@ def write_results(
     arrays["force_unit"] = np.array([_fu], dtype=str)
     arrays["length_unit"] = np.array([_lu], dtype=str)
     arrays["forces_coordinate_system"] = np.array([forces_coordinate_system], dtype=str)
+    # Creation timestamp — ``describe_results_npz`` reads this scalar.
+    arrays["created"] = np.array([datetime.datetime.now().isoformat()], dtype=str)
 
     # Metadata
     arrays["metadata_json"] = np.array(

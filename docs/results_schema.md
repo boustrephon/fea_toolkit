@@ -266,6 +266,14 @@ column *j* is the eigenvector for mode *j* (0‑based) and row *i* matches
 | `rs/v_cqc_y` | `()` | `float` | CQC‑combined base shear Y (kN) |
 | `rs/v_srss_x` | `()` | `float` | SRSS‑combined base shear X (kN) |
 | `rs/v_srss_y` | `()` | `float` | SRSS‑combined base shear Y (kN) |
+| `rs/m_cqc_x` | `()` | `float` | CQC‑combined base overturning moment X (force·length) |
+| `rs/m_cqc_y` | `()` | `float` | CQC‑combined base overturning moment Y (force·length) |
+| `rs/m_srss_x` | `()` | `float` | SRSS‑combined base overturning moment X (force·length) |
+| `rs/m_srss_y` | `()` | `float` | SRSS‑combined base overturning moment Y (force·length) |
+| `rs/roof_disp_cqc_x` | `()` | `float` | CQC‑combined roof displacement X (length) |
+| `rs/roof_disp_cqc_y` | `()` | `float` | CQC‑combined roof displacement Y (length) |
+| `rs/roof_disp_srss_x` | `()` | `float` | SRSS‑combined roof displacement X (length) |
+| `rs/roof_disp_srss_y` | `()` | `float` | SRSS‑combined roof displacement Y (length) |
 | `rs/elem_sap_id` | `(N_frame,)` | `str` | SAP2000 frame element ID |
 | `rs/elem_z_bot` | `(N_frame,)` | `float` | Z‑coordinate of element bottom node (m) |
 | `rs/elem_z_mid` | `(N_frame,)` | `float` | Z‑coordinate of element mid‑height (m) |

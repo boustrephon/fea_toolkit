@@ -297,6 +297,16 @@ and Pandas DataFrames needed for post-processing and plotting.
 │   ├── missing_mass_correction    # DataFrame: direction, dV, dM
 │   └── storey_response            # DataFrame: storey displacement/drift (CQC)
 │
+│   Note — the *implemented* export writes the flat ``rs/*`` arrays from
+│   ``results_schema.RS_ARRAYS`` (``rs/period``, ``rs/v_base_x``/``_y``,
+│   ``rs/v_cqc_*``/``rs/v_srss_*``, ``rs/m_cqc_*``/``rs/m_srss_*``,
+│   ``rs/roof_disp_cqc_*``/``rs/roof_disp_srss_*``, plus the optional
+│   ``rs/elem_*`` and ``rs/node_*`` blocks) — see
+│   [results_schema.md](results_schema.md).  Both the report export
+│   (``stage_writer.write_model_stages``) and the review export
+│   (``unified_writer.write_results``) write them from the same
+│   ``rs_results={"rs_x": ..., "rs_y": ...}`` payload.
+│
 ├── pushover/                       # Pushover analysis results
 │   ├── X/                         # one group per direction
 │   │   ├── uniform/               # one group per pattern

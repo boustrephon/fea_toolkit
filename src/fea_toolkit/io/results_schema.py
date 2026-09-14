@@ -100,6 +100,16 @@ RS_ARRAYS: dict[str, tuple] = {
     "rs/v_cqc_y": ("", "float"),
     "rs/v_srss_x": ("", "float"),
     "rs/v_srss_y": ("", "float"),
+    # Combined base overturning moment (force × length)
+    "rs/m_cqc_x": ("", "float"),
+    "rs/m_cqc_y": ("", "float"),
+    "rs/m_srss_x": ("", "float"),
+    "rs/m_srss_y": ("", "float"),
+    # Combined roof displacement (length)
+    "rs/roof_disp_cqc_x": ("", "float"),
+    "rs/roof_disp_cqc_y": ("", "float"),
+    "rs/roof_disp_srss_x": ("", "float"),
+    "rs/roof_disp_srss_y": ("", "float"),
     # Element-level CQC-combined forces (N_frame)
     "rs/elem_sap_id": ("N_frame", "str"),
     "rs/elem_z_bot": ("N_frame", "float"),

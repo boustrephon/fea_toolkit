@@ -254,14 +254,22 @@ the wrong face.  All quantities are in the model's own unit system.
 ### NPZ export (`--npz`)
 
 Writes a single compressed NumPy archive through the canonical
-[`write_results_npz()`](results_schema.md) writer, so a reviewed model can
-be re-plotted standalone (PyVista / Rhino) without the `.s2k` or a re-run:
+[`write_results()`](results_schema.md) unified writer, so a reviewed model
+can be re-plotted standalone (PyVista / Rhino) without the `.s2k` or a
+re-run:
 
 - **Without `--analysis`** — model geometry only (nodes, frames, shells,
   sections).  This path is **solver-free** and fast.
 - **With `--analysis`** — the **meshed** geometry plus the modal result
   (periods, mass ratios, mode shapes) and the static gravity result
   (nodal displacements, frame end forces) per the unified NPZ schema.
+- **With `--response-spectrum` too** — the canonical `rs/*` block:
+  `rs/period`, the per-mode `rs/v_base_x` / `rs/v_base_y`, and the
+  combined `rs/v_cqc_*` / `rs/v_srss_*` (base shear), `rs/m_cqc_*` /
+  `rs/m_srss_*` (overturning moment) and `rs/roof_disp_cqc_*` /
+  `rs/roof_disp_srss_*` (roof displacement).  `rs/period` is trimmed to
+  the modes the RS pass actually used, so it stays aligned with
+  `rs/v_base_*`.
 
 The written path is reported under `result["npz"]`; an export failure is
 captured under `result["npz_error"]` and never aborts the review.
@@ -295,7 +303,7 @@ python -m fea_toolkit.model.review model.s2k --analysis --npz results.npz
 from fea_toolkit.io.npz_reader import read_results_npz
 
 data = read_results_npz("results.npz")
-print(list(data["analysis_types"]))   # e.g. ['static', 'modal']
+print(list(data["analysis_types"]))   # e.g. ['static', 'modal', 'rs']
 ```
 
 #### Mode display limits
