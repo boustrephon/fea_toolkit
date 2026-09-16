@@ -1348,12 +1348,19 @@ class Preprocessor:
         table's ``UX``/``UY``/``UZ``/``RX``/``RY``/``RZ`` Yes/No columns).
         The enabled flags are recorded alongside the group so the
         AnalysisBuilder can emit a full ``ops.rigidLink('beam', master,
-        slave)`` MPC per slave node when all six are enabled, or a partial
-        ``ops.equalDOF`` tie for any other combination.  Unlike a
-        ``DIAPHRAGM`` constraint (which couples only the in-plane DOFs), a
-        full ``BODY`` constraint also ties the out-of-plane translation and
-        both out-of-plane rotations — omitting it makes the model softer in
-        torsion and transverse sway.
+        slave)`` MPC per slave node when all six are enabled, or a
+        translation-only ``ops.equalDOF`` tie for a partial set (a partial
+        set that enables a rotational DOF is rejected by the builder).
+        Unlike a ``DIAPHRAGM`` constraint (which couples only the in-plane
+        DOFs), a full ``BODY`` constraint also ties the out-of-plane
+        translation and both out-of-plane rotations — omitting it makes the
+        model softer in torsion and transverse sway.
+
+        Only global-coordinate-system ``BODY`` definitions are supported.  A
+        non-global definition is rejected (with a warning) rather than
+        silently reproduced in global DOFs, because the generated
+        ``rigidLink`` / ``equalDOF`` MPCs are written in global DOFs and the
+        toolkit does not transform them.
 
         Only ``BODY`` constraints are handled here; every other
         non-diaphragm type (``EQUAL``, ``WELD``, ``BEAM``, ``ROD``,
@@ -1391,9 +1398,24 @@ class Preprocessor:
 
         components: list[tuple[str, list[str], list[bool]]] = []
         for name in sorted(groups):
+            con = body_defs[name]
+            coord_sys = str(getattr(con, "coord_sys", "GLOBAL") or "GLOBAL").strip().upper()
+            if coord_sys not in ("", "GLOBAL"):
+                # A non-global BODY definition cannot be reproduced: the
+                # generated rigidLink / equalDOF MPCs are written in global
+                # DOFs and are not transformed.  Reject the definition rather
+                # than silently applying it with global semantics; GLOBAL
+                # bodies are unaffected.
+                warnings.warn(
+                    f"BODY constraint '{name}' uses a non-global coordinate "
+                    f"system ({con.coord_sys!r}) — not applied; only GLOBAL "
+                    "BODY constraints are supported.",
+                    stacklevel=2,
+                )
+                continue
             surviving = [jid for jid in groups[name] if jid in md.nodes]
             if len(surviving) >= 2:
-                components.append((name, surviving, _body_dof_flags(body_defs[name])))
+                components.append((name, surviving, _body_dof_flags(con)))
         return components
 
     def _resolve_explicit_diaphragm_groups(self, md) -> Optional[list[tuple[float, list[str]]]]:

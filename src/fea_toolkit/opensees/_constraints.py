@@ -46,11 +46,18 @@ class ConstraintMixin:
         ``UZ``, ``RX``, ``RY``, ``RZ``) are enabled, the group is reproduced
         with one ``ops.rigidLink('beam', master, slave)`` MPC per slave node
         — the same 6-DOF rigid-link mechanism used for frame end offsets.
-        For any partial flag combination only the enabled DOFs are tied, via
-        ``ops.equalDOF(master, slave, *enabled_dofs)``; a group with no
-        enabled DOFs is skipped.  Omitting the tie leaves the previously
-        coupled joints free to move independently, which makes the model
-        softer (most visibly in torsion and transverse sway).
+        A partial flag set containing only translational DOFs (``UX`` /
+        ``UY`` / ``UZ``) is tied with ``ops.equalDOF(master, slave,
+        *enabled_dofs)``, which is exact for separated joints because no
+        rotation is involved; a group with no enabled DOFs is skipped.  A
+        partial set that enables any rotational DOF is **rejected** (see
+        *Raises*): the rigid-body offset couples the slave's motion to the
+        master's rotation, which ``ops.equalDOF`` ignores and only
+        coordinate-dependent ``ops.equationConstraint`` MPCs can express —
+        and those are incompatible with the active ``Transformation``
+        handler.  Omitting the tie leaves the previously coupled joints free
+        to move independently, which makes the model softer (most visibly in
+        torsion and transverse sway).
 
         The group's master is the node nearest its 3-D centroid, so the
         retained DOFs sit inside the body.  Groups with fewer than two
@@ -67,8 +74,11 @@ class ConstraintMixin:
             Number of rigid bodies applied.
 
         Raises:
-            RuntimeError: If an ``ops.rigidLink`` / ``ops.equalDOF`` call
-                fails — an incomplete domain must never reach analysis.
+            RuntimeError: If a partial ``BODY`` group enables a rotational
+                DOF (its rigid-body offset cannot be represented by
+                ``ops.equalDOF``), or if an ``ops.rigidLink`` /
+                ``ops.equalDOF`` call fails — an incomplete domain must never
+                reach analysis.
         """
         if not self.config.get("apply_rigid_bodies", True):
             return 0
@@ -88,13 +98,32 @@ class ConstraintMixin:
             if len(tags) < 2:
                 continue
             master = self._select_rigid_body_master(tags)
-            # All six flags → full rigid body; otherwise tie only the enabled
-            # DOFs.  ``enumerate(..., start=1)`` maps the flag order
+            # All six flags → full rigid body; a translation-only partial set
+            # is tied with equalDOF (a rotational partial set is rejected
+            # below).  ``enumerate(..., start=1)`` maps the flag order
             # [UX, UY, UZ, RX, RY, RZ] onto OpenSees DOF numbers 1..6.
             full_rigid = all(dof_flags)
             enabled_dofs = [dof for dof, enabled in enumerate(dof_flags, start=1) if enabled]
             if not full_rigid and not enabled_dofs:
                 continue
+            # A partial set that enables any rotational DOF (4-6) cannot be
+            # represented between separated joints: the rigid-body offset
+            # (θ_m × r) couples the slave's motion to the master's rotation,
+            # which ``ops.equalDOF`` ignores and only coordinate-dependent
+            # ``ops.equationConstraint`` MPCs can express — and those are
+            # incompatible with the active ``Transformation`` handler.  Reject
+            # rather than silently changing the tie semantics.
+            rotational = [dof for dof in enabled_dofs if dof >= 4]
+            if not full_rigid and rotational:
+                raise RuntimeError(
+                    f"Partial BODY constraint '{name}' enables rotational DOF(s) "
+                    f"{rotational}, which cannot be represented between separated "
+                    "joints: the rigid-body offset requires coordinate-dependent "
+                    "equationConstraint MPCs that the Transformation constraint "
+                    "handler cannot process (and equalDOF would silently change "
+                    "the tie semantics).  Disable it with apply_rigid_bodies: False "
+                    "or remove the rotational flags."
+                )
             for slave in tags:
                 if slave == master:
                     continue
