@@ -1110,6 +1110,51 @@ def _parse_diaphragm_s2k(tmp_path):
     return md, mm
 
 
+def _body_constraint_s2k_data() -> dict:
+    """Minimal frame-only S2K fixture with a BODY (rigid-body) constraint
+    on joints 1–3 (model units ``N, mm, C``).
+
+    Joint 3 is deliberately unconnected: the body constraint must keep it
+    in the model even though no element references it.
+    """
+    data = _diaphragm_constraint_s2k_data()
+    data.pop("CONSTRAINT DEFINITIONS - DIAPHRAGM")
+    data["CONSTRAINT DEFINITIONS - BODY"] = [
+        {
+            "Name": "Fix",
+            "CoordSys": "GLOBAL",
+            "UX": "Yes",
+            "UY": "Yes",
+            "UZ": "Yes",
+            "RX": "Yes",
+            "RY": "Yes",
+            "RZ": "Yes",
+        },
+    ]
+    data["JOINT CONSTRAINT ASSIGNMENTS"] = [
+        {"Joint": 1, "Constraint": "Fix"},
+        {"Joint": 2, "Constraint": "Fix"},
+        {"Joint": 3, "Constraint": "Fix"},
+    ]
+    return data
+
+
+def _parse_body_s2k(tmp_path):
+    """Parse the BODY fixture and preprocess it into a MeshModel."""
+    import json
+
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    data = _body_constraint_s2k_data()
+    json_path = tmp_path / "body_constraints.json"
+    json_path.write_text(json.dumps(data))
+
+    parser = SAP2000Parser.from_json(json_path)
+    md = parser.get_model_data()
+    mm = preprocess_model(md, {"split_elements": False, "verbose": False})
+    return md, mm
+
+
 def _make_in_memory_domain(builder, md):
     """Create the nodes in the OpenSees domain for _apply_rigid_diaphragms.
 
@@ -1175,6 +1220,69 @@ def test_rigid_diaphragms_false_disables_detected_levels(tmp_path):
         _make_in_memory_domain(builder, md)
         n = builder._apply_rigid_diaphragms()
         assert n == 0  # explicit opt-out — even though levels were detected
+    finally:
+        ops.wipe()
+
+
+def test_body_constraints_detected_and_applied(tmp_path):
+    """``CONSTRAINT DEFINITIONS - BODY`` groups are recorded on the MeshModel
+    and applied as 6-DOF ``rigidLink('beam')`` MPCs."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees import _constraints as _cm
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    md, mm = _parse_body_s2k(tmp_path)
+
+    # Parsed as a BODY constraint and assigned to joints 1-3.
+    assert md.constraints["Fix"].constraint_type == "BODY"
+    assert md.constraint_assignments["1"] == "Fix"
+
+    # Recorded on the MeshModel as one rigid-body group.
+    assert [name for name, _ids in mm.rigid_body_components] == ["Fix"]
+    _name, body_ids = mm.rigid_body_components[0]
+    assert set(body_ids) == {"1", "2", "3"}
+    # Orphan removal must keep every body joint, even unconnected ones.
+    assert {"1", "2", "3"} <= set(mm.nodes)
+
+    # The builder emits one rigidLink per non-master group node.
+    calls: list = []
+    real_ops = _cm.ops
+
+    class _Rec:
+        def __getattr__(self, item):
+            return getattr(real_ops, item)
+
+        def rigidLink(self, *args):
+            calls.append(args)
+            return real_ops.rigidLink(*args)
+
+    builder = AnalysisBuilder(mm, {"verbose": False})
+    try:
+        _make_in_memory_domain(builder, md)
+        _cm.ops = _Rec()
+        assert builder._apply_rigid_bodies() == 1
+        assert len(calls) == 2  # 3 joints -> 1 master + 2 slaves
+        assert all(call[0] == "beam" for call in calls)
+        assert len({call[1] for call in calls}) == 1  # single master
+    finally:
+        _cm.ops = real_ops
+        ops.wipe()
+
+
+def test_rigid_bodies_false_disables(tmp_path):
+    """``apply_rigid_bodies: False`` suppresses BODY constraints."""
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    md, mm = _parse_body_s2k(tmp_path)
+    assert mm.rigid_body_components  # detection is unconditional
+
+    builder = AnalysisBuilder(mm, {"verbose": False, "apply_rigid_bodies": False})
+    try:
+        _make_in_memory_domain(builder, md)
+        assert builder._apply_rigid_bodies() == 0
     finally:
         ops.wipe()
 
