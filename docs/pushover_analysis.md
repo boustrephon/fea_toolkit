@@ -689,7 +689,7 @@ linear algebra solver.
 ### Running the benchmark
 
 ```bash
-pytest tests/test_model.py -k "TestEulerBucklingBenchmark"
+pytest tests/test_buckling.py -k "TestEulerBucklingBenchmark"
 ```
 
 Requires ``scipy`` (not a core dependency — the test skips gracefully
@@ -1390,7 +1390,7 @@ subdivided braces.  ``PDelta`` geometry converges but does not trigger
 local brace buckling.  A two-stage approach (``Linear`` gravity →
 ``Corotational`` push) would require a model rebuild between stages,
 which is not currently implemented.  See the test output at
-``tests/test_model.py`` for the current status of Approach A.
+``tests/test_buckling.py`` for the current status of Approach A.
 
 ### Selecting specific brace sections
 

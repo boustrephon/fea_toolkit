@@ -206,6 +206,41 @@ class TestManderRectangularStandard:
     def test_returns_confinement_result(self):
         assert isinstance(mander_confined(self._data()), ConfinementResult)
 
+    def test_ecu_with_eps_su(self):
+        """Ultimate strain grows with ``eps_su`` and stays capped at 0.025."""
+        low_eps = ConfinementData(
+            fc=30e6,
+            tie_diameter=0.01,
+            tie_spacing=0.1,
+            tie_fy=400e6,
+            core_bc=0.4,
+            core_dc=0.4,
+            long_diameter=0.02,
+            long_count_x=3,
+            long_count_y=3,
+            tie_config="standard",
+            eps_su=0.05,
+        )
+        r_low = mander_confined(low_eps)
+
+        high_eps = ConfinementData(
+            fc=30e6,
+            tie_diameter=0.01,
+            tie_spacing=0.1,
+            tie_fy=400e6,
+            core_bc=0.4,
+            core_dc=0.4,
+            long_diameter=0.02,
+            long_count_x=3,
+            long_count_y=3,
+            tie_config="standard",
+            eps_su=0.15,
+        )
+        r_high = mander_confined(high_eps)
+        assert r_high.ecu > r_low.ecu
+        assert r_low.ecu > 0.004
+        assert r_high.ecu <= 0.025
+
 
 # ============================================================================
 # mander_confined() — rectangular with cross-ties
@@ -355,6 +390,41 @@ class TestManderCircularSpiral:
         assert res.ecc > 0.002
         assert res.ecu <= 0.025
 
+    def test_spiral_ke_uses_rho_cc(self):
+        """Circular spiral ``ke`` uses ``rho_cc`` (Mander Eq. 5-8), not ``rho_s``."""
+        data = ConfinementData(
+            fc=30e6,
+            tie_diameter=0.012,
+            tie_spacing=0.05,
+            tie_fy=400e6,
+            core_bc=0.35,
+            core_dc=0.35,
+            long_diameter=0.02,
+            long_count_x=4,
+            long_count_y=4,
+            tie_config="spiral",
+        )
+        result = mander_confined(data)
+        assert result.fcc > 30e6
+        assert result.ke > 0
+        # Compute expected ke from Mander Eq. 5-8:
+        #   ke = (1 - s'/(2·Ds))² / (1 - ρ_cc)
+        db = data.tie_diameter
+        s = data.tie_spacing
+        Ds = data.core_bc  # core diameter to centreline
+        s_prime = s - db
+        Al = math.pi * data.long_diameter**2 / 4.0
+        # Ring count stored in both long_count_x/y for circular sections
+        # (see ConcreteCircularSection.fiber_confinement) — use either
+        # field directly, never the product.
+        n_longs = data.long_count_x
+        Ac = math.pi * Ds**2 / 4.0
+        rho_cc = (n_longs * Al) / Ac if Ac > 0 else 0.0
+        expected_ke = ((1.0 - s_prime / (2.0 * Ds)) ** 2 / (1.0 - rho_cc)) if Ds > 0 else 0.0
+        assert result.ke == pytest.approx(expected_ke, rel=1e-6), (
+            f"ke={result.ke:.6f}, expected {expected_ke:.6f} (rho_cc={rho_cc:.6f})"
+        )
+
 
 # ============================================================================
 # mander_confined() — unconfined fallback + edge cases
@@ -431,3 +501,22 @@ class TestManderUnconfinedFallback:
         )
         # Spot-check a known value for the derived configuration
         assert mander_confined(derived).fcc == pytest.approx(39529032.48241702, rel=1e-6)
+
+
+# ============================================================================
+# No-tie fallback parity (shared constants)
+# ============================================================================
+
+
+def test_no_tie_confinement_fallback_parity():
+    """Both paths produce identical (fcc, epscc) from shared constants."""
+    from fea_toolkit.utils import (
+        RC_NO_TIE_CONFINEMENT_FACTOR,
+        RC_NO_TIE_EPSC_FACTOR,
+    )
+
+    Fc, epsc = 30e6, 0.002
+    assert RC_NO_TIE_CONFINEMENT_FACTOR == 1.25
+    assert RC_NO_TIE_EPSC_FACTOR == 2.0
+    assert abs(Fc * 1.25 - Fc * RC_NO_TIE_CONFINEMENT_FACTOR) < 1e-12
+    assert abs(epsc * 2.0 - epsc * RC_NO_TIE_EPSC_FACTOR) < 1e-12

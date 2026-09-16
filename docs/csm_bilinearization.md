@@ -587,4 +587,4 @@ pp = compute_performance_point(
 - [Builder Reference — Two-stage Pipeline](builder_reference.md)
 - [Modal Analysis Options](modal_analysis.md)
 - Source: `src/fea_toolkit/model/csm.py`
-- Tests: `tests/test_model.py::TestBilinearization` (24 tests)
+- Tests: `tests/test_csm.py::TestBilinearization` (24 tests)

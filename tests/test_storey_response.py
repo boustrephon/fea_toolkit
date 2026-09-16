@@ -1,9 +1,13 @@
 """Unit tests for storey-response helpers (``fea_toolkit.model.storey_response``).
 
-Focus: :func:`group_shell_forces_by_section`, a pure-function grouping
-helper that averages per-step shell membrane resultants over
-(parent, row-band) sections.  Uses fabricated data only -- no OpenSees.
+Covers :func:`group_shell_forces_by_section` (per-step shell membrane
+resultants averaged over parent/row-band sections), :func:`rigid_body_fit`
+(least-squares rigid-body motion with outlier rejection),
+:func:`_cqc_coeff` (Der Kiureghian modal correlation), and
+:func:`storey_drifts`.  Uses fabricated data only -- no OpenSees.
 """
+
+import math
 
 import numpy as np
 import pytest
@@ -157,3 +161,174 @@ def test_empty_input_returns_empty_dataframe():
 
     assert df.empty
     assert list(df.columns) == ["section", "parent", "row", "n_subs", "Nxy_avg", "Ny_avg"]
+
+
+# ============================================================================
+# Rigid-body fit, modal CQC coefficient, and storey drifts
+# ============================================================================
+
+
+class TestRigidBodyFit:
+    """Tests for model.storey_response.rigid_body_fit."""
+
+    def test_perfect_rigid_body_translation(self):
+        """Pure translation (Ux=0.01, Uy=-0.005, Rz=0) recovers exactly."""
+        from fea_toolkit.model.storey_response import rigid_body_fit
+
+        np = __import__("numpy")
+        x = np.array([0.0, 5.0, 5.0, 0.0])
+        y = np.array([0.0, 0.0, 4.0, 4.0])
+        x_cm, y_cm = 2.5, 2.0
+        Ux_true, Uy_true, Rz_true = 0.01, -0.005, 0.0
+        ux = Ux_true - Rz_true * (y - y_cm)
+        uy = Uy_true + Rz_true * (x - x_cm)
+
+        Ux, Uy, Rz, rms, _n_used, n_out, _ = rigid_body_fit(ux, uy, x, y, x_cm, y_cm)
+        assert abs(Ux - Ux_true) < 1e-12
+        assert abs(Uy - Uy_true) < 1e-12
+        assert abs(Rz - Rz_true) < 1e-12
+        assert rms < 1e-12
+        assert n_out == 0
+
+    def test_rigid_body_translation_and_rotation(self):
+        """Combined translation + rotation recovers exactly."""
+        from fea_toolkit.model.storey_response import rigid_body_fit
+
+        np = __import__("numpy")
+        x = np.array([0.0, 6.0, 6.0, 0.0])
+        y = np.array([0.0, 0.0, 5.0, 5.0])
+        x_cm, y_cm = 3.0, 2.5
+        Ux_true, Uy_true, Rz_true = 0.02, 0.01, 0.005
+        ux = Ux_true - Rz_true * (y - y_cm)
+        uy = Uy_true + Rz_true * (x - x_cm)
+
+        Ux, Uy, Rz, rms, _n_used, n_out, _ = rigid_body_fit(ux, uy, x, y, x_cm, y_cm)
+        assert abs(Ux - Ux_true) < 1e-12
+        assert abs(Uy - Uy_true) < 1e-12
+        assert abs(Rz - Rz_true) < 1e-12
+        assert rms < 1e-12
+        assert n_out == 0
+
+    def test_outlier_rejected(self):
+        """One synthetic outlier is rejected; fit matches remaining nodes."""
+        from fea_toolkit.model.storey_response import rigid_body_fit
+
+        np = __import__("numpy")
+        # 5 nodes in a cross pattern — all follow the same rigid-body field
+        x = np.array([0.0, 6.0, 3.0, 3.0, 3.0])
+        y = np.array([0.0, 0.0, -3.0, 3.0, 0.0])
+        x_cm, y_cm = 3.0, 0.0
+        Ux_true, Uy_true, Rz_true = 0.01, -0.005, 0.003
+
+        # Clean displacements
+        ux = Ux_true - Rz_true * (y - y_cm)
+        uy = Uy_true + Rz_true * (x - x_cm)
+
+        # Corrupt the last node (at CM) with a large offset
+        ux[-1] += 0.10
+        uy[-1] += -0.08
+
+        Ux, Uy, Rz, _rms, n_used, n_out, mask = rigid_body_fit(
+            ux, uy, x, y, x_cm, y_cm, outlier_threshold=3.0
+        )
+
+        # The outlier should be rejected
+        assert n_out == 1, f"Expected 1 outlier, got {n_out}"
+        assert n_used == 4
+        assert not mask[-1], "Corrupted node should be masked as outlier"
+
+        # Fit should be close to the true value (not biased by outlier)
+        assert abs(Ux - Ux_true) < 1e-6
+        assert abs(Uy - Uy_true) < 1e-6
+        assert abs(Rz - Rz_true) < 1e-8
+
+
+class TestCQC:
+    """Tests for CQC correlation coefficient and combined drift."""
+
+    def test_cqc_coeff_identical_modes(self):
+        """Identical frequencies → ρ = 1.0 (fully correlated)."""
+        from fea_toolkit.model.storey_response import _cqc_coeff
+
+        rho = _cqc_coeff(2.0, 2.0, zeta=0.05)
+        assert abs(rho - 1.0) < 1e-12, f"ρ(identical) = {rho}, expected 1.0"
+
+    def test_cqc_coeff_well_separated(self):
+        """Well-separated frequencies → ρ ≈ 0 (uncorrelated)."""
+        from fea_toolkit.model.storey_response import _cqc_coeff
+
+        rho = _cqc_coeff(10.0, 0.5, zeta=0.05)
+        # r = 20, denominator ≈ (1-400)^2 = 159201, numerator ≈ 8*.05^2*21*20^1.5
+        # Very small ≈ 0.0003
+        assert abs(rho) < 0.001, f"ρ(well-separated) = {rho}, expected near 0"
+
+    def test_cqc_coeff_known_pair(self):
+        """Known pair (r=0.8, ζ=0.05) gives ρ ≈ 0.166 per Der Kiureghian."""
+        from fea_toolkit.model.storey_response import _cqc_coeff
+
+        # r = f_i/f_j = 4.0/5.0 = 0.8
+        rho = _cqc_coeff(4.0, 5.0, zeta=0.05)
+        expected = 0.166  # Der Kiureghian (1981) Table 1, ζ=0.05, r=0.8
+        assert abs(rho - expected) < 0.005, f"ρ(0.8, 0.05) = {rho:.4f}, expected {expected:.3f}"
+
+    def test_cqc_combined_drift_two_modes(self):
+        """Two-mode CQC drift verifies the einsum path.
+
+        ρ = [[1.0, ρ₁₂], [ρ₁₂, 1.0]]
+        drifts = [0.010, 0.005]
+        combined = sqrt(ρ₁₁·d₁² + 2·ρ₁₂·d₁·d₂ + ρ₂₂·d₂²)
+        """
+        from fea_toolkit.model.storey_response import _cqc_coeff
+
+        np = __import__("numpy")
+
+        rho_12 = _cqc_coeff(3.0, 5.0, zeta=0.05)
+        rho = np.array([[1.0, rho_12], [rho_12, 1.0]])
+        di = np.array([[0.010, 0.005]])  # shape (1 gap, 2 modes)
+
+        combined = float(np.sqrt(np.abs(np.einsum("sm, mn, sn -> s", di, rho, di))[0]))
+        expected = math.sqrt(1.0 * 0.010**2 + 2 * rho_12 * 0.010 * 0.005 + 1.0 * 0.005**2)
+        assert abs(combined - expected) < 1e-12, (
+            f"CQC combined = {combined:.8f}, expected {expected:.8f}"
+        )
+
+
+class TestStoreyDrifts:
+    """Tests for storey_drifts()."""
+
+    def test_basic_two_storey_drift(self):
+        """Two storeys with known Ux difference gives expected drift."""
+        from fea_toolkit.model.storey_response import storey_drifts
+        from fea_toolkit.model.stories import StoryLevel
+
+        __import__("numpy")
+        pd = __import__("pandas")
+
+        stories = [
+            StoryLevel("Base", 0.0),
+            StoryLevel("Storey 1", 3.0),
+        ]
+        df_disp = pd.DataFrame(
+            [
+                {"Storey": "Base", "Elevation": 0.0, "Ux": 0.0, "Uy": 0.0, "Rz": 0.0, "R_max": 5.0},
+                {
+                    "Storey": "Storey 1",
+                    "Elevation": 3.0,
+                    "Ux": 0.015,
+                    "Uy": 0.0,
+                    "Rz": 0.001,
+                    "R_max": 5.0,
+                },
+            ]
+        )
+        df = storey_drifts(df_disp, stories)
+        assert len(df) == 1
+        row = df.iloc[0]
+        # Drift_X = 0.015 / 3.0 = 0.005
+        assert abs(row["Drift_X"] - 0.005) < 1e-8
+        # Drift_Rz = 0.001 / 3.0 ≈ 0.000333
+        assert abs(row["Drift_Rz"] - 0.001 / 3.0) < 1e-8
+        # Peak drift = sqrt(0.005² + 0²) + |0.000333| * 5.0
+        expected_peak = 0.005 + (0.001 / 3.0) * 5.0  # ≈ 0.006667
+        assert abs(row["Drift_peak"] - expected_peak) < 5e-5
+        assert abs(row["h (m)"] - 3.0) < 1e-8

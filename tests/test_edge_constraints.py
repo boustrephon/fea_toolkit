@@ -1,11 +1,5 @@
 """Tests for shell edge constraint detection and application."""
 
-import sys
-from pathlib import Path
-
-_REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_REPO / "src"))
-
 import openseespy.opensees as ops
 import pytest
 

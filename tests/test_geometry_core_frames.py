@@ -1,7 +1,11 @@
-"""Tests for the model geometry helpers (split, local axes, spatial grid)."""
+"""Tests for the model geometry helpers.
 
-"""Tests for the model layer: dataclasses, geometry utilities, and sections."""
+Covers local axes / vecxz, spatial grid and coordinate helpers, the
+``split_elements_at_frames`` subdivision path, frame end-offset
+application, and area-element meshing.
+"""
 
+import copy
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +16,7 @@ from fea_toolkit.model.geometry import (
     trapezoidal_force_split,
 )
 from fea_toolkit.model.sap_data import (
+    AreaElement,
     FrameElement,
     Node,
     SAPModelData,
@@ -563,3 +568,384 @@ class TestEdgeCases:
         """Should accept plain Python lists as input."""
         vecxz = get_SAP_vecxz([5.0, 0.0, 0.0])
         assert np.allclose(vecxz, [0.0, -1.0, 0.0], atol=1e-6)
+
+
+# ============================================================================
+# Frame end offsets + area meshing
+# ============================================================================
+
+
+class TestApplyFrameEndOffsets:
+    """Tests for geometry.apply_frame_end_offsets()."""
+
+    def _make_elements(self):
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 6.0, 0.0, 0.0),
+        }
+        elements = {
+            "1": FrameElement("1", 10, "1", "2"),
+        }
+        assignments = {"1": "Col600"}
+        return elements, assignments, nodes
+
+    def test_no_offsets_does_nothing(self):
+        """Zero offsets → areas, nodes, assignments unchanged."""
+        from fea_toolkit.model.geometry import apply_frame_end_offsets
+        from fea_toolkit.model.sap_data import FrameEndOffset
+
+        elems, assign, nodes = self._make_elements()
+        orig_elems = copy.deepcopy(elems)
+        orig_assign = copy.deepcopy(assign)
+        orig_nodes = copy.deepcopy(nodes)
+        offsets = {"1": FrameEndOffset(0.0, 0.0)}
+        elems, assign, nodes, ntag, links = apply_frame_end_offsets(elems, assign, nodes, offsets)
+        assert len(links) == 0
+        assert ntag == 1, "next_tag should not advance"
+        assert elems == orig_elems, "elements dict mutated"
+        assert assign == orig_assign, "assignments dict mutated"
+        assert nodes == orig_nodes, "nodes dict mutated"
+        assert elems["1"].node_i == "1"
+        assert elems["1"].node_j == "2"
+
+    def test_i_end_offset_creates_rigid_link(self):
+        """Offset at I-end creates one rigid link and shortens element."""
+        from fea_toolkit.model.geometry import apply_frame_end_offsets
+        from fea_toolkit.model.sap_data import FrameEndOffset
+
+        elems, assign, nodes = self._make_elements()
+        offsets = {"1": FrameEndOffset(0.3, 0.0)}
+        elems, assign, nodes, _ntag, links = apply_frame_end_offsets(elems, assign, nodes, offsets)
+        assert len(links) == 1
+        assert "1_off_i" in nodes
+        # I-end offset → element rewired to offset node
+        assert elems["1"].node_i == "1_off_i"
+        assert links[0][1] == "1"
+        assert links[0][2] == "1_off_i"
+        # J-end has no offset → keeps original node
+        assert elems["1"].node_j == "2"
+        # No duplicate node at J-end
+        j_off_ids = [nid for nid in nodes if "_off_j" in nid]
+        assert len(j_off_ids) == 0
+
+    def test_both_ends_offset(self):
+        """Both-end offsets create two rigid links."""
+        from fea_toolkit.model.geometry import apply_frame_end_offsets
+        from fea_toolkit.model.sap_data import FrameEndOffset
+
+        elems, assign, nodes = self._make_elements()
+        offsets = {"1": FrameEndOffset(0.2, 0.4)}
+        elems, assign, nodes, _ntag, links = apply_frame_end_offsets(elems, assign, nodes, offsets)
+        assert len(links) == 2
+        assert "1_off_i" in nodes
+        assert "1_off_j" in nodes
+
+    def test_offset_clamped_to_half_length(self):
+        """Excessive offset is clamped so the elastic portion doesn't vanish."""
+        from fea_toolkit.model.geometry import apply_frame_end_offsets
+        from fea_toolkit.model.sap_data import FrameEndOffset
+
+        elems, assign, nodes = self._make_elements()
+        offsets = {"1": FrameEndOffset(5.0, 5.0)}
+        elems, assign, nodes, _ntag, links = apply_frame_end_offsets(elems, assign, nodes, offsets)
+        assert len(links) == 2
+        ni = nodes[elems["1"].node_i]
+        nj = nodes[elems["1"].node_j]
+        remaining = np.linalg.norm(np.array([nj.x - ni.x, nj.y - ni.y, nj.z - ni.z]))
+        # 6 m element – each end clamped to 6 × 0.45 = 2.7 m → 0.6 m left
+        assert remaining == pytest.approx(0.6)
+
+    def test_missing_element_skipped(self):
+        """Offset for a non-existent element is silently skipped."""
+        from fea_toolkit.model.geometry import apply_frame_end_offsets
+        from fea_toolkit.model.sap_data import FrameEndOffset
+
+        elems, assign, nodes = self._make_elements()
+        offsets = {"99": FrameEndOffset(0.3, 0.0)}
+        elems, assign, nodes, _ntag, links = apply_frame_end_offsets(elems, assign, nodes, offsets)
+        assert len(links) == 0
+
+
+class TestMeshAreaElements:
+    """Tests for geometry.mesh_area_elements()."""
+
+    def _make_quad_model(self):
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 12.0, 0.0, 0.0),
+            "3": Node("3", 3, 12.0, 8.0, 0.0),
+            "4": Node("4", 4, 0.0, 8.0, 0.0),
+        }
+        areas = {
+            "1": AreaElement("1", 10, ["1", "2", "3", "4"]),
+        }
+        assignments = {"1": "Slab200"}
+        return areas, assignments, nodes
+
+    def test_no_mesh_no_change(self):
+        """No mesh settings → areas, nodes, assignments are unchanged."""
+        from fea_toolkit.model.geometry import mesh_area_elements
+
+        areas, assign, nodes = self._make_quad_model()
+        orig_areas = copy.deepcopy(areas)
+        orig_nodes = copy.deepcopy(nodes)
+        orig_assign = copy.deepcopy(assign)
+        areas, assign, nodes, ntag = mesh_area_elements(areas, assign, nodes, {})
+        assert areas == orig_areas, "areas dict mutated"
+        assert nodes == orig_nodes, "nodes dict mutated"
+        assert assign == orig_assign, "assignments dict mutated"
+        assert ntag == 1, "next_tag should remain default 1"
+
+    def test_mesh_creates_sub_areas(self):
+        """2x2 subdivision produces 4 sub-quads and 1 interior node."""
+        from fea_toolkit.model.geometry import mesh_area_elements
+        from fea_toolkit.model.sap_data import AreaMesh
+
+        areas, assign, nodes = self._make_quad_model()
+        mesh = {"1": AreaMesh(auto_mesh=True, max_size=6.0)}
+        areas, assign, nodes, _ntag = mesh_area_elements(areas, assign, nodes, mesh, next_tag=100)
+        sub_ids = [aid for aid in areas if aid != "1"]
+        assert len(sub_ids) == 4  # ceil(12/6)=2 × ceil(8/6)=2 = 4
+        assert areas["1"].inactive is True
+        assert "1_mesh_1_1" in nodes  # fully interior node
+
+    def test_mesh_preserves_section_assignment(self):
+        """Sub-areas inherit the section from the parent."""
+        from fea_toolkit.model.geometry import mesh_area_elements
+        from fea_toolkit.model.sap_data import AreaMesh
+
+        areas, assign, nodes = self._make_quad_model()
+        mesh = {"1": AreaMesh(auto_mesh=True, max_size=6.0)}
+        areas, assign, nodes, _ntag = mesh_area_elements(areas, assign, nodes, mesh, next_tag=100)
+        for aid in areas:
+            if aid != "1":
+                assert assign.get(aid) == "Slab200"
+
+    def test_no_subdivision_if_max_size_too_large(self):
+        """max_size > element dimension → areas, nodes, assignments unchanged."""
+        from fea_toolkit.model.geometry import mesh_area_elements
+        from fea_toolkit.model.sap_data import AreaMesh
+
+        areas, assign, nodes = self._make_quad_model()
+        orig_areas = copy.deepcopy(areas)
+        orig_nodes = copy.deepcopy(nodes)
+        orig_assign = copy.deepcopy(assign)
+        mesh = {"1": AreaMesh(auto_mesh=True, max_size=100.0)}
+        areas, assign, nodes, _ntag = mesh_area_elements(areas, assign, nodes, mesh, next_tag=100)
+        assert areas == orig_areas, "areas dict mutated"
+        assert nodes == orig_nodes, "nodes dict mutated"
+        assert assign == orig_assign, "assignments dict mutated"
+
+    def test_mesh_auto_mesh_false_skipped(self):
+        """auto_mesh=False → areas, nodes, assignments unchanged."""
+        from fea_toolkit.model.geometry import mesh_area_elements
+        from fea_toolkit.model.sap_data import AreaMesh
+
+        areas, assign, nodes = self._make_quad_model()
+        orig_areas = copy.deepcopy(areas)
+        orig_nodes = copy.deepcopy(nodes)
+        orig_assign = copy.deepcopy(assign)
+        mesh = {"1": AreaMesh(auto_mesh=False, max_size=1.0)}
+        areas, assign, nodes, _ntag = mesh_area_elements(areas, assign, nodes, mesh, next_tag=100)
+        assert areas == orig_areas, "areas dict mutated"
+        assert nodes == orig_nodes, "nodes dict mutated"
+        assert assign == orig_assign, "assignments dict mutated"
+
+    def test_interior_wall_node_off_plane_reused(self):
+        """Interior wall nodes slightly off the slab plane are reused, not duplicated.
+
+        The seed-detection plane tolerance is ~1e-3
+        (``max(max_size*0.001, 0.001)``), so wall bottom nodes at
+        z=5e-4 are detected as interior seeds.  Their on-plane grid
+        projection is ~5e-4 away — far beyond a 1e-6 rounded-coordinate
+        key — so the mesh must reuse the seed node id explicitly for
+        the wall and slab sub-areas to share nodes.
+        """
+        from fea_toolkit.model.geometry import mesh_area_elements
+        from fea_toolkit.model.sap_data import AreaMesh
+
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 4.0, 0.0, 0.0),
+            "3": Node("3", 3, 4.0, 4.0, 0.0),
+            "4": Node("4", 4, 0.0, 4.0, 0.0),
+            # Wall bottom nodes slightly ABOVE the slab plane (z=5e-4).
+            "5": Node("5", 5, 1.0, 1.0, 5e-4),
+            "6": Node("6", 6, 3.0, 3.0, 5e-4),
+            "7": Node("7", 7, 1.0, 1.0, 3.0),
+            "8": Node("8", 8, 3.0, 3.0, 3.0),
+        }
+        areas = {
+            "Slab": AreaElement("Slab", 10, ["1", "2", "3", "4"]),
+            "Wall": AreaElement("Wall", 20, ["5", "6", "8", "7"]),
+        }
+        assigns = {"Slab": "Slab200", "Wall": "Wall300"}
+        mesh = {"Slab": AreaMesh(auto_mesh=True, max_size=1.0)}
+
+        areas, assigns, nodes, _ntag = mesh_area_elements(areas, assigns, nodes, mesh)
+
+        wall_ids = set(areas["Wall"].node_ids)
+        slab_sub_ids = [
+            aid for aid, ae in areas.items() if getattr(ae, "parent_id", None) == "Slab"
+        ]
+        assert slab_sub_ids, "slab was not subdivided"
+        shared = [aid for aid in slab_sub_ids if set(areas[aid].node_ids) & wall_ids]
+        assert shared, (
+            "No slab sub-area shares the off-plane wall nodes — they were "
+            "duplicated instead of reused"
+        )
+        used_ids = {nid for aid in slab_sub_ids for nid in areas[aid].node_ids}
+        assert "5" in used_ids and "6" in used_ids, (
+            "wall bottom nodes were not reused; mesh-created projection "
+            f"nodes: {sorted(nid for nid in nodes if nid.startswith('Slab_mesh'))}"
+        )
+
+
+# ============================================================================
+# Element subdivision (brace meshing)
+# ============================================================================
+
+
+class TestSubdivideElements:
+    """Tests for :func:`fea_toolkit.model.geometry.subdivide_elements`."""
+
+    def test_subdivide_creates_sub_elements(self):
+        """4 segments → 4 child elements, original marked inactive."""
+        from fea_toolkit.model.geometry import subdivide_elements
+
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
+        }
+        elem = FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2")
+        elements = {"B1": elem}
+        assignments = {"B1": "UB300"}
+        result_elems, result_assign, _result_nodes, _, _ = subdivide_elements(
+            elements,
+            assignments,
+            nodes,
+            n_segments=4,
+            brace_ids={"B1"},
+            next_tag=100,
+        )
+        assert elem.inactive is True, "Original should be inactive"
+        assert len(result_elems) == 5  # 1 original + 4 subs
+        sub_ids = [eid for eid in result_elems if eid.startswith("B1_sub")]
+        assert len(sub_ids) == 4
+        for sid in sub_ids:
+            assert sid in result_assign
+            assert result_assign[sid] == "UB300"
+
+    def test_subdivide_creates_internal_nodes(self):
+        """4 segments → 3 new internal nodes."""
+        from fea_toolkit.model.geometry import subdivide_elements
+
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
+        }
+        elem = FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2")
+        elements = {"B1": elem}
+        assignments = {"B1": "UB300"}
+        _, _, result_nodes, _, _ = subdivide_elements(
+            elements,
+            assignments,
+            nodes,
+            n_segments=4,
+            brace_ids={"B1"},
+            next_tag=100,
+        )
+        new_nodes = [nid for nid in result_nodes if nid.startswith("B1_sub")]
+        assert len(new_nodes) == 3  # 4 segments → 3 internal nodes
+
+    def test_imperfection_offsets_mid_node(self):
+        """Mid-node of subdivided brace has lateral offset ≈ L/500."""
+        from fea_toolkit.model.geometry import subdivide_elements
+
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
+        }
+        elem = FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2")
+        elements = {"B1": elem}
+        _, _, result_nodes, _, _ = subdivide_elements(
+            elements,
+            assignments={"B1": "UB300"},
+            nodes=nodes,
+            n_segments=4,
+            imperfection_ratio=1 / 500,
+            brace_ids={"B1"},
+            next_tag=100,
+        )
+        # The middle internal node (at z≈5) should have an x-offset
+        mid_nodes = [
+            n
+            for nid, n in result_nodes.items()
+            if nid.startswith("B1_sub") and abs(n.z - 5.0) < 0.5
+        ]
+        assert len(mid_nodes) > 0, "No midpoint node found — subdivision may have failed"
+        # Imperfection is perpendicular to the brace axis. For a vertical brace
+        # (0,0,0)→(0,0,10) the perpendicular direction is Y.
+        offset = abs(mid_nodes[0].y)
+        assert offset > 0.001, f"Expected imperfection offset, got {offset}"
+
+    def test_end_offset_creates_rigid_links(self):
+        """end_offset > 0 creates offset nodes and rigid link entries."""
+        from fea_toolkit.model.geometry import subdivide_elements
+
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=0, y=0, z=10),
+        }
+        elem = FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2")
+        elements = {"B1": elem}
+        _, _, result_nodes, _, rigid_links = subdivide_elements(
+            elements,
+            assignments={"B1": "UB300"},
+            nodes=nodes,
+            n_segments=4,
+            brace_ids={"B1"},
+            end_offset=0.5,
+            next_tag=100,
+        )
+        # Should have two rigid links (I-end and J-end)
+        assert len(rigid_links) == 2
+        link_i, link_j = rigid_links
+        assert link_i[1] == "1"  # I-end: original node
+        assert link_j[2] == "2"  # J-end: original node
+        # Should have two offset nodes
+        offset_ids = [nid for nid in result_nodes if "_offset_" in nid]
+        assert len(offset_ids) == 2
+        # Sub-elements should connect to offset nodes, not original nodes
+        sub_ids = [eid for eid in elements if "_sub_" in eid]
+        first_sub = elements[sub_ids[0]]
+        last_sub = elements[sub_ids[-1]]
+        assert first_sub.node_i in offset_ids
+        assert last_sub.node_j in offset_ids
+
+    def test_end_offset_clamped_to_half_length(self):
+        """end_offset larger than half length is clamped."""
+        from fea_toolkit.model.geometry import subdivide_elements
+
+        nodes = {
+            "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=2, x=0, y=0, z=5),
+        }
+        elem = FrameElement(elem_id="B1", elem_tag=10, node_i="1", node_j="2")
+        elements = {"B1": elem}
+        _, _, result_nodes, _, _rigid_links = subdivide_elements(
+            elements,
+            assignments={"B1": "UB300"},
+            nodes=nodes,
+            n_segments=2,
+            brace_ids={"B1"},
+            end_offset=3.0,
+            next_tag=100,
+        )
+        # Brace should still have at least some length (clamped to 45%)
+        offset_ids = [nid for nid in result_nodes if "_offset_" in nid]
+        if offset_ids:
+            # Check offset nodes are within bounds
+            for nid in offset_ids:
+                n = result_nodes[nid]
+                assert 0.0 <= n.z <= 5.0

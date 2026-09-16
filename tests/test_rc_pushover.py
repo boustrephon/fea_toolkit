@@ -6,6 +6,7 @@ Tests exercise:
 3. Result parsing (parse_pushover_results)
 4. MeshModel load helpers (mesh_model_to_gravity_loads, modal_to_lateral_loads)
 5. Tcl file syntax generation (export_mesh_model_to_tcl + pushover_tcl)
+6. Standalone Tcl export of fibre sections (export_model_to_tcl)
 """
 
 import os
@@ -792,15 +793,173 @@ class TestTclGeneration:
         assert "ShellDKGQ" in content or "ShellDKGT" in content, "Missing shell element"
 
 
-def test_no_tie_confinement_fallback_parity():
-    """Both paths produce identical (fcc, epscc) from shared constants."""
-    from fea_toolkit.utils import (
-        RC_NO_TIE_CONFINEMENT_FACTOR,
-        RC_NO_TIE_EPSC_FACTOR,
-    )
+# ═══════════════════════════════════════════════════════════════════════════
+# Test 6: standalone Tcl export of fibre sections
+# ═══════════════════════════════════════════════════════════════════════════
 
-    Fc, epsc = 30e6, 0.002
-    assert RC_NO_TIE_CONFINEMENT_FACTOR == 1.25
-    assert RC_NO_TIE_EPSC_FACTOR == 2.0
-    assert abs(Fc * 1.25 - Fc * RC_NO_TIE_CONFINEMENT_FACTOR) < 1e-12
-    assert abs(epsc * 2.0 - epsc * RC_NO_TIE_EPSC_FACTOR) < 1e-12
+
+class TestFibreSectionTclExport:
+    """Tests for export_model_to_tcl with fiber sections."""
+
+    def _make_rc_model(self):
+        """Build minimal SAPModelData with one RC column section."""
+        from fea_toolkit.model.sap_data import (
+            ConcreteRectangularSection,
+            FrameElement,
+            Material,
+            Node,
+            SAPModelData,
+        )
+
+        mat = Material(
+            name="C30",
+            type="Concrete",
+            Fc=30e6,
+            E_mod=25e9,
+        )
+        sec = ConcreteRectangularSection(
+            name="Col400",
+            shape="Concrete Rectangular",
+            material="C30",
+            A=0.16,
+            I33=0.002133,
+            I22=0.002133,
+            J=0.0036,
+            depth=0.4,
+            bf=0.4,
+            cover=0.04,
+            top_bars=4,
+            bot_bars=4,
+            top_bar_dia=0.02,
+            bot_bar_dia=0.02,
+        )
+        return SAPModelData(
+            nodes={
+                "1": Node("1", 1, 0, 0, 0),
+                "2": Node("2", 2, 0, 0, 3),
+            },
+            restraints={},
+            materials={"C30": mat},
+            sections={"Col400": sec},
+            frame_elements={
+                "1": FrameElement("1", 10, "1", "2"),
+            },
+            area_elements={},
+            frame_assignments={"1": "Col400"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            units={"F": "N", "L": "m", "T": "C"},
+        )
+
+    def test_export_fiber_sections_have_braces(self):
+        """Fiber sections in exported Tcl have brace-delimited blocks."""
+        import os
+        import tempfile
+
+        from fea_toolkit.opensees.builder import export_model_to_tcl
+
+        md = self._make_rc_model()
+        config = {"create_fiber_sections": True, "geom_transf_type": "PDelta"}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".tcl", delete=False) as f:
+            path = f.name
+        try:
+            export_model_to_tcl(md, path, config=config)
+            with open(path) as f:
+                tcl = f.read()
+        finally:
+            os.unlink(path)
+
+        assert "section Fiber " in tcl
+        fiber_blocks = 0
+        in_fiber = False
+        depth = 0
+        for line in tcl.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("section Fiber"):
+                in_fiber = True
+            if in_fiber:
+                depth += stripped.count("{")
+                depth -= stripped.count("}")
+                if depth == 0 and in_fiber:
+                    fiber_blocks += 1
+                    in_fiber = False
+        assert fiber_blocks >= 1, "No complete fiber section block found"
+
+    def test_export_no_elastic_for_fiber_sections(self):
+        """No section Elastic emitted for RC sections with fiber sections."""
+        import os
+        import tempfile
+
+        from fea_toolkit.opensees.builder import export_model_to_tcl
+
+        md = self._make_rc_model()
+        config = {"create_fiber_sections": True, "geom_transf_type": "PDelta"}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".tcl", delete=False) as f:
+            path = f.name
+        try:
+            export_model_to_tcl(md, path, config=config)
+            with open(path) as f:
+                tcl = f.read()
+        finally:
+            os.unlink(path)
+
+        elastic_lines = [
+            line for line in tcl.split("\n") if line.strip().startswith("section Elastic")
+        ]
+        assert len(elastic_lines) == 0, f"Expected no section Elastic, found {len(elastic_lines)}"
+
+    def test_export_force_beam_column_for_fiber(self):
+        """Frame elements use forceBeamColumn for fiber sections."""
+        import os
+        import tempfile
+
+        from fea_toolkit.opensees.builder import export_model_to_tcl
+
+        md = self._make_rc_model()
+        config = {"create_fiber_sections": True, "geom_transf_type": "PDelta"}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".tcl", delete=False) as f:
+            path = f.name
+        try:
+            export_model_to_tcl(md, path, config=config)
+            with open(path) as f:
+                tcl = f.read()
+        finally:
+            os.unlink(path)
+
+        assert "forceBeamColumn" in tcl, "Expected forceBeamColumn element in Tcl output"
+        assert "beamIntegration Lobatto" in tcl, "Expected beamIntegration Lobatto in Tcl output"
+        # Verify the full token sequence: tag, sec_tag, n_int_pts
+        for line in tcl.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("beamIntegration Lobatto"):
+                tokens = stripped.split()
+                assert len(tokens) == 5, (
+                    f"Expected 5 tokens in beamIntegration line, got {len(tokens)}: {tokens}"
+                )
+                npts = tokens[4]
+                assert npts == "5", f"Expected 5 integration points, got {npts}"
+                break
+        assert "elasticBeamColumn" not in tcl, (
+            "Unexpected elasticBeamColumn (should be forceBeamColumn)"
+        )
+
+    def test_export_without_fiber_uses_elastic(self):
+        """Without create_fiber_sections, elasticBeamColumn is used."""
+        import os
+        import tempfile
+
+        from fea_toolkit.opensees.builder import export_model_to_tcl
+
+        md = self._make_rc_model()
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".tcl", delete=False) as f:
+            path = f.name
+        try:
+            export_model_to_tcl(md, path, config=None)
+            with open(path) as f:
+                tcl = f.read()
+        finally:
+            os.unlink(path)
+
+        assert "elasticBeamColumn" in tcl, "Expected elasticBeamColumn for non-fibre export"
+        assert "section Elastic" in tcl, "Expected section Elastic for non-fibre export"

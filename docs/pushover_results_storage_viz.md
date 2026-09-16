@@ -521,7 +521,7 @@ if config.get("pushover_record_fiber") and config.get("pushover_record_selection
 |---|---|---|
 | **1a** | Add `elevation_range`, `story` fields to `Selection` | `model/selection.py` |
 | **1b** | Add `resolve_to_mesh_sets()` to `Selection` | `model/selection.py` |
-| **1c** | Tests for new Selection fields | `tests/test_model.py` |
+| **1c** | Tests for new Selection fields | `tests/test_sections_selection.py` |
 | **2a** | Add `record_pushover_steps` + `pushover_record_selection` config keys | `opensees/analysis_builder.py` (`_set_defaults`) |
 | **2b** | Implement `_record_step()` and per-step loop | `opensees/_runner_pushover.py` |
 | **2c** | Add `export_pushover_results()` convenience method | `opensees/_runner_pushover.py` |

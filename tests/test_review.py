@@ -351,7 +351,7 @@ class TestObservations:
 # ═══════════════════════════════════════════════════════════════════
 
 
-class TestMassSource:
+class TestMassSourceReporting:
     def _model_with_mass_source(self) -> SAPModelData:
         nodes = {"1": Node("1", 1, 0.0, 0.0, 0.0), "2": Node("2", 2, 0.0, 0.0, 3.0)}
         frames = {"1": FrameElement("1", 1, "1", "2")}

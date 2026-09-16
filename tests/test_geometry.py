@@ -4,12 +4,6 @@ These tests require ``openseespy`` and the full builder pipeline.
 They are skipped when ``openseespy`` is not installed.
 """
 
-import sys
-from pathlib import Path
-
-_REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_REPO / "src"))
-
 import pytest
 
 pytest.importorskip("openseespy")

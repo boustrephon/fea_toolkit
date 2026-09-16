@@ -772,8 +772,8 @@ cross‑reference section.
    - Create a user guide (examples, how to run different analyses).
 
 10. **Testing**  
-    - ~~`test_model.py` is yet to be populated~~ ✅ Populated — CSM/bilinearization, Euler buckling benchmark, load dataclasses, Mander confinement wiring, mesh edge-restraint propagation.  
-    - ~~Add unit tests for `SectionLibrary`, `SAPModelData` dataclasses, and geometry utilities~~ ✅ Covered in `test_model.py`, `test_geometry.py`, `test_mesh_units.py`, `test_confinement.py`.  
+    - ~~`test_model.py` is yet to be populated~~ ✅ Populated — CSM/bilinearization (`test_csm.py`), Euler buckling benchmark (`test_buckling.py`), load dataclasses (`test_sap_data.py`), Mander confinement wiring (`test_confinement.py`, `test_analysis_csm.py`), mesh edge-restraint propagation.  
+    - ~~Add unit tests for `SectionLibrary`, `SAPModelData` dataclasses, and geometry utilities~~ ✅ Covered in `test_sections_selection.py`, `test_sap_data.py`, `test_geometry_core_frames.py`, `test_mesh_units.py`, `test_confinement.py`.  
     - ~~Add integration tests for the two-stage pipeline~~ ✅ Covered in `test_workflows.py`, `test_rc_pushover.py`, `test_layered_shell.py`, `test_wall_pushover.py`.  
     - ~~Add tests for `split_elements`~~ ✅ `TestParserModelIntegration::test_split_elements{,_tracking}` and `TestBuildWorkflow::test_build_with_split_elements`; trapezoidal-load decomposition remains an open sub-item.
 
@@ -967,7 +967,13 @@ plan.  In summary:
   facade over `_unit_scaling.py`, `_loads_infer.py`, `_flags.py` and
   `_cqc.py`; `plot_seismic_spectrum` moved to
   `plotting/seismic_spectrum.py`; the IO writers share `io/_serial.py`;
-  `tests/test_model.py` (6.1k lines) was split into four mirror files.
+  `tests/test_model.py` (6.1k lines) was split into four mirror files
+  (`test_sap_data.py`, `test_sections_selection.py`,
+  `test_geometry_core_frames.py`, `test_analysis_csm.py`), and the
+  `test_extracted.py` grab-bag was later dissolved into its mirror files
+  (`test_spectrum.py`, `test_loads_infer.py`, `test_flags.py`,
+  `test_csm.py`, `test_buckling.py`) with parser/geometry/confinement
+  classes returned to their owners.
 - **Pushover solver tuning (empirical pass)** ✅ **P3** and **CSM Gap-4
   benchmark validation** ✅ **P4** landed 2026-08-24.  The follow-on
   **shear-failure / post-peak modelling** **P5** closed 2026-08-25 as

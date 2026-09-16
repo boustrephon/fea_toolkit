@@ -427,7 +427,7 @@ comfortably.  Below is a realistic assessment of what remains.
    1. ~~Run `bilinearize_composite()` against synthetic RC-shaped curves
       (gradual softening, no sharp yield plateau) and compare the fitted
       yield point against the De Luca 10 %-secant near-optimal fit~~ ✅ **Done (2026-08-16).**
-      `tests/test_model.py::TestBilinearization::test_de_luca_rc_curve_yield_not_at_cracking`
+      `tests/test_csm.py::TestBilinearization::test_de_luca_rc_curve_yield_not_at_cracking`
       validates the new method against a tanh saturation + post-peak
       softening backbone (yield lands in the rebar-yield band, equal-area
       exact) and `test_de_luca_recovers_exact_bilinear_knee` verifies it

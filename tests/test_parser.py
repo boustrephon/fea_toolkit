@@ -1,3 +1,10 @@
+"""Tests for the SAP2000 parser (``fea_toolkit.io.s2k_parser``).
+
+Covers table parsing, area/frame loads, cardinal points, frame end
+offsets, section geometry (depth/width) and section stiffness modifiers.
+"""
+
+import json
 from pathlib import Path
 
 import pytest
@@ -7,8 +14,18 @@ from fea_toolkit.model.sap_data import (
     AreaElement,
     AreaGravityLoad,
     AreaUniformLoad,
+    BoxSection,
+    ChannelSection,
+    CircularSection,
+    ConcreteCircularSection,
+    ConcreteRectangularSection,
+    FrameElement,
+    FrameEndOffset,
     GravityLoad,
+    ISection,
     Node,
+    PipeSection,
+    RectangularSection,
     Section,
     ShellSection,
 )
@@ -337,7 +354,6 @@ def test_parse_areas_multi_row_consolidation(tmp_path):
             {"Area": 1, "Section": "Slab200"},
         ],
     }
-    import json
 
     json_path = tmp_path / "multi_row.json"
     with open(json_path, "w") as f:
@@ -378,7 +394,6 @@ def test_parse_areas_multi_row_with_duplicates(tmp_path):
             {"Area": 1, "Section": "Slab200"},
         ],
     }
-    import json
 
     json_path = tmp_path / "dup.json"
     with open(json_path, "w") as f:
@@ -466,7 +481,6 @@ def test_frame_end_offsets_parsed(tmp_path):
             {"Frame": 1, "EndI": 0.3, "EndJ": 0.3},
         ],
     }
-    import json
 
     json_path = tmp_path / "offsets.json"
     with open(json_path, "w") as f:
@@ -490,7 +504,6 @@ def test_frame_end_offsets_empty_when_missing(tmp_path):
             {"Joint": 2, "XorR": 6, "Y": 0, "Z": 0},
         ],
     }
-    import json
 
     json_path = tmp_path / "no_offsets.json"
     with open(json_path, "w") as f:
@@ -532,7 +545,6 @@ def test_area_mesh_parsed(tmp_path):
             },
         ],
     }
-    import json
 
     json_path = tmp_path / "mesh.json"
     with open(json_path, "w") as f:
@@ -655,7 +667,6 @@ def test_area_edge_constraints_parsed(tmp_path):
             {"Area": 1, "Edge": 4, "Constraint": "Default"},
         ],
     }
-    import json
 
     json_path = tmp_path / "edge_con.json"
     with open(json_path, "w") as f:
@@ -718,7 +729,6 @@ def test_tolerant_float_parsing_with_empty_cells(tmp_path):
             {"Area": 1, "AutoMesh": "Yes", "MinSize": "", "MaxSize": ""},
         ],
     }
-    import json
 
     json_path = tmp_path / "empty_cells.json"
     with open(json_path, "w") as f:
@@ -747,7 +757,6 @@ def test_new_tables_empty_when_missing(tmp_path):
             {"Joint": 1, "XorR": 0, "Y": 0, "Z": 0},
         ],
     }
-    import json
 
     json_path = tmp_path / "empty.json"
     with open(json_path, "w") as f:
@@ -767,7 +776,6 @@ def test_new_tables_empty_when_missing(tmp_path):
 
 def test_cardinal_points_extracted(tmp_path):
     """CardinalPoint column in FRAME SECTION ASSIGNMENTS is parsed."""
-    import json
 
     data = {
         "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25", "CurrUnits": "N, mm, C"}],
@@ -830,7 +838,6 @@ def test_cardinal_points_extracted(tmp_path):
 
 def test_cardinal_points_alternative_column_names(tmp_path):
     """CARDINALPT column name also works."""
-    import json
 
     data = {
         "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25", "CurrUnits": "N, mm, C"}],
@@ -877,7 +884,6 @@ def test_cardinal_points_alternative_column_names(tmp_path):
 
 def _write_minimal_frame_json(tmp_path, tables: dict, name: str = "model.json") -> Path:
     """Write a minimal single-frame model (units ``N, mm, C``) merging ``tables``."""
-    import json
 
     data = {
         "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "26", "CurrUnits": "N, mm, C"}],
@@ -1096,7 +1102,6 @@ def _diaphragm_constraint_s2k_data() -> dict:
 
 def _parse_diaphragm_s2k(tmp_path):
     """Parse the diaphragm fixture and preprocess it into a MeshModel."""
-    import json
 
     from fea_toolkit.opensees.preprocessor import preprocess_model
 
@@ -1141,7 +1146,6 @@ def _body_constraint_s2k_data() -> dict:
 
 def _parse_body_s2k(tmp_path):
     """Parse the BODY fixture and preprocess it into a MeshModel."""
-    import json
 
     from fea_toolkit.opensees.preprocessor import preprocess_model
 
@@ -1296,7 +1300,6 @@ def test_body_constraints_partial_flags_use_equal_dof(tmp_path):
     ``test_body_constraints_detected_and_applied``); any partial combination
     must fall back to ``ops.equalDOF`` on the enabled DOFs only.
     """
-    import json
 
     import openseespy.opensees as ops
 
@@ -1396,8 +1399,6 @@ def test_diaphragm_same_z_constraints_stay_separate(tmp_path):
         {"Joint": 5, "XorR": 25000.0, "Y": 0.0, "Z": 10000.0},
         {"Joint": 6, "XorR": 20000.0, "Y": 5000.0, "Z": 10000.0},
     ]
-
-    import json
 
     from fea_toolkit.opensees.preprocessor import preprocess_model
 
@@ -1554,7 +1555,6 @@ def test_rigid_diaphragms_false_wins_over_explicit_constraints(tmp_path):
 def test_rigid_diaphragms_explicit_selection_groups(tmp_path):
     """``rigid_diaphragms: [ {name, selection}, ... ]`` resolves nodes from
     matching area elements and emits one rigidDiaphragm per group."""
-    import json
 
     import openseespy.opensees as ops
 
@@ -1718,7 +1718,6 @@ def test_area_diaphragm_z_span_uses_area_diaphragm_z_tolerance(tmp_path):
     """Nearly-horizontal slabs drive Source-3 diaphragm detection; the Z-span
     threshold follows ``area_diaphragm_z_tolerance`` (default 0.5 for
     detection), independent of the builder's ``diaphragm_z_tolerance``."""
-    import json
 
     from fea_toolkit.opensees.preprocessor import preprocess_model
 
@@ -1767,7 +1766,6 @@ def test_area_diaphragm_z_span_uses_area_diaphragm_z_tolerance(tmp_path):
 
 def test_cardinal_points_default_when_missing(tmp_path):
     """No cardinal point column → defaults to 10 (centroid)."""
-    import json
 
     data = {
         "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "25", "CurrUnits": "N, mm, C"}],
@@ -1801,3 +1799,503 @@ def test_cardinal_points_default_when_missing(tmp_path):
     parser = SAP2000Parser.from_json(json_path)
     md = parser.get_model_data()
     assert md.frame_elements["1"].cardinal_point == 10
+
+
+# ============================================================================
+# Cardinal points, section geometry, and stiffness modifiers
+# ============================================================================
+
+
+class TestCardinalPointOffsets:
+    """Tests for SAP2000Parser._cardinal_point_offset()."""
+
+    def _offset(self, num, D=0.4, B=0.3):
+        return SAP2000Parser._cardinal_point_offset(num, D, B)
+
+    def test_centroid_is_zero(self):
+        """Cardinal point 10 (centroid) → (0, 0)."""
+        assert self._offset(10) == (0.0, 0.0)
+
+    def test_shear_center_is_zero(self):
+        """Cardinal point 11 (shear centre) → (0, 0)."""
+        assert self._offset(11) == (0.0, 0.0)
+
+    def test_bottom_left(self):
+        """Cardinal point 1 (bottom left)."""
+        off_y, off_z = self._offset(1, D=0.4, B=0.3)
+        assert off_y == pytest.approx(0.15)  # 0.5 * 0.3
+        assert off_z == pytest.approx(0.2)  # 0.5 * 0.4
+
+    def test_bottom_center(self):
+        """Cardinal point 2 (bottom centre) → y=0, z=+half-depth."""
+        off_y, off_z = self._offset(2, D=0.4, B=0.3)
+        assert off_y == pytest.approx(0.0)
+        assert off_z == pytest.approx(0.2)
+
+    def test_bottom_right(self):
+        """Cardinal point 3 (bottom right) → y=-half-width, z=+half-depth."""
+        off_y, off_z = self._offset(3, D=0.4, B=0.3)
+        assert off_y == pytest.approx(-0.15)
+        assert off_z == pytest.approx(0.2)
+
+    def test_middle_left(self):
+        """Cardinal point 4 (middle left) → y=+half-width, z=0."""
+        off_y, off_z = self._offset(4, D=0.4, B=0.3)
+        assert off_y == pytest.approx(0.15)
+        assert off_z == pytest.approx(0.0)
+
+    def test_middle_center(self):
+        """Cardinal point 5 (middle centre) → (0, 0)."""
+        assert self._offset(5) == (0.0, 0.0)
+
+    def test_middle_right(self):
+        """Cardinal point 6 (middle right) → y=-half-width, z=0."""
+        off_y, off_z = self._offset(6, D=0.4, B=0.3)
+        assert off_y == pytest.approx(-0.15)
+        assert off_z == pytest.approx(0.0)
+
+    def test_top_left(self):
+        """Cardinal point 7 (top left) → y=+half-width, z=-half-depth."""
+        off_y, off_z = self._offset(7, D=0.4, B=0.3)
+        assert off_y == pytest.approx(0.15)
+        assert off_z == pytest.approx(-0.2)
+
+    def test_top_center(self):
+        """Cardinal point 8 (top centre) → y=0, z=-half-depth."""
+        off_y, off_z = self._offset(8, D=0.4, B=0.3)
+        assert off_y == pytest.approx(0.0)
+        assert off_z == pytest.approx(-0.2)
+
+    def test_top_right(self):
+        """Cardinal point 9 (top right) → y=-half-width, z=-half-depth."""
+        off_y, off_z = self._offset(9, D=0.4, B=0.3)
+        assert off_y == pytest.approx(-0.15)
+        assert off_z == pytest.approx(-0.2)
+
+    def test_circular_section_uses_depth_for_both(self):
+        """For circular sections, B is 0 so D is used for both axes."""
+        off_y, off_z = self._offset(1, D=0.5, B=0.0)  # circular
+        assert off_y == pytest.approx(0.25)  # 0.5 * 0.5
+        assert off_z == pytest.approx(0.25)  # 0.5 * 0.5
+
+    def test_invalid_cardinal_point_returns_zero(self):
+        """Cardinal point outside 1–11 → (0, 0)."""
+        assert self._offset(99) == (0.0, 0.0)
+        assert self._offset(0) == (0.0, 0.0)
+
+    def test_centroid_uses_cg_offset(self):
+        """Point 10 shifts the bbox-centred profile onto the true centroid."""
+        off_y, off_z = SAP2000Parser._cardinal_point_offset(
+            10, D=0.4, B=0.3, cg_offset_2=0.02, cg_offset_3=0.05
+        )
+        assert off_y == pytest.approx(-0.02)
+        assert off_z == pytest.approx(-0.05)
+
+    def test_shear_centre_uses_cg_plus_eccentricity(self):
+        """Point 11 = centroid offset + shear-centre eccentricity."""
+        off_y, off_z = SAP2000Parser._cardinal_point_offset(
+            11,
+            D=0.4,
+            B=0.3,
+            cg_offset_2=0.02,
+            cg_offset_3=0.05,
+            ecc_v2=0.01,
+            ecc_v3=-0.03,
+        )
+        assert off_y == pytest.approx(-(0.02 + 0.01))
+        assert off_z == pytest.approx(-(0.05 - 0.03))
+
+    def test_points_1_to_9_ignore_cg_offset(self):
+        """Bounding-box cardinal points are unaffected by the centroid offset."""
+        base = self._offset(8, D=0.4, B=0.3)
+        with_cg = SAP2000Parser._cardinal_point_offset(
+            8, D=0.4, B=0.3, cg_offset_2=0.02, cg_offset_3=0.05
+        )
+        assert base == with_cg
+
+
+class TestParseCardinalPoint:
+    """Tests for SAP2000Parser._parse_cardinal_point()."""
+
+    def test_labelled_string(self):
+        """Modern SAP2000 labelled form → leading integer."""
+        assert SAP2000Parser._parse_cardinal_point("8 (top center)") == 8
+        assert SAP2000Parser._parse_cardinal_point("10 (centroid)") == 10
+        assert SAP2000Parser._parse_cardinal_point("2 (bottom center)") == 2
+
+    def test_bare_integer(self):
+        """Legacy / E2K bare-integer form is accepted."""
+        assert SAP2000Parser._parse_cardinal_point(8) == 8
+        assert SAP2000Parser._parse_cardinal_point("8") == 8
+
+    def test_invalid_returns_none(self):
+        """Unreadable cells → None."""
+        assert SAP2000Parser._parse_cardinal_point(None) is None
+        assert SAP2000Parser._parse_cardinal_point(True) is None
+        assert SAP2000Parser._parse_cardinal_point("centroid") is None
+
+    def test_fractional_labelled_rejected(self):
+        """A fractional labelled value is rejected, not truncated.
+
+        ``"8.7 (top center)"`` must not read as cardinal point 8: the
+        labelled form captures the complete numeric prefix (the bare ``"8.7"``
+        form already did) and the integral check then rejects it.  The
+        signed prefix is captured whole too, so ``"-2.5 (bottom center)"``
+        no longer resolves to cardinal point 2.
+        """
+        assert SAP2000Parser._parse_cardinal_point("8.7 (top center)") is None
+        assert SAP2000Parser._parse_cardinal_point("8.7") is None
+        assert SAP2000Parser._parse_cardinal_point("-2.5 (bottom center)") is None
+
+    def test_exponent_notation_rejected(self):
+        """Exponent notation is consumed whole, never truncated to its mantissa.
+
+        ``"8e-1 (top center)"`` is 0.8, not cardinal point 8: the labelled-form
+        regex consumes the exponent (and requires a token boundary), so the
+        integral check rejects it instead of reading the mantissa.
+        """
+        assert SAP2000Parser._parse_cardinal_point("8e-1 (top center)") is None
+        assert SAP2000Parser._parse_cardinal_point("8e-1") is None
+        # An integral exponent still resolves (1e1 == 10), proving the exponent
+        # is consumed rather than silently dropped.
+        assert SAP2000Parser._parse_cardinal_point("1e1 (centroid)") == 10
+
+    def test_trailing_junk_rejected(self):
+        """A stray alphanumeric suffix is not a token boundary.
+
+        ``"8.7x"`` must not read as cardinal point 8: the previous word-
+        boundary anchor let the regex backtrack to the leading ``8`` (the
+        ``8`` to ``.`` transition *is* a word boundary), so the malformed cell
+        resolved to a valid-looking 8.  The lookahead now requires only
+        optional whitespace before an opening parenthesis or the end of the
+        string after the complete number, rejecting the junk-suffixed cell —
+        including a bare trailing word such as ``"8 invalid"`` — outright
+        while the valid labelled form still parses.
+        """
+        assert SAP2000Parser._parse_cardinal_point("8.7x") is None
+        assert SAP2000Parser._parse_cardinal_point("8x") is None
+        assert SAP2000Parser._parse_cardinal_point("8 invalid") is None
+        assert SAP2000Parser._parse_cardinal_point("8.7 (top center)") is None
+        assert SAP2000Parser._parse_cardinal_point("8 (top center)") == 8
+
+
+class TestSectionDepthWidth:
+    """Tests for SAP2000Parser._get_section_depth_width()."""
+
+    def test_isection(self):
+        sec = ISection("W360", "I/Wide Flange", "Steel", depth=0.36, bf=0.17)
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert pytest.approx(0.36) == D
+        assert pytest.approx(0.17) == B
+
+    def test_pipe_section(self):
+        sec = PipeSection("P200", "Pipe", "Steel", od=0.219)
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert pytest.approx(0.219) == D
+        assert pytest.approx(0.219) == B
+
+    def test_box_section(self):
+        sec = BoxSection("B300", "Box/Tube", "Steel", depth=0.3, bf=0.2)
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert pytest.approx(0.3) == D
+        assert pytest.approx(0.2) == B
+
+    def test_rectangular_section(self):
+        sec = RectangularSection("R400", "Rectangular", "Concrete", depth=0.4, bf=0.3)
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert pytest.approx(0.4) == D
+        assert pytest.approx(0.3) == B
+
+    def test_circular_section(self):
+        sec = CircularSection("C500", "Circle", "Steel", diameter=0.5)
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert pytest.approx(0.5) == D
+        assert pytest.approx(0.5) == B
+
+    def test_concrete_rectangular_section(self):
+        sec = ConcreteRectangularSection(
+            "CR400",
+            "Concrete Rectangular",
+            "C30",
+            A=0.16,
+            I33=0.002133,
+            I22=0.002133,
+            J=0.0036,
+            depth=0.4,
+            bf=0.3,
+            cover=0.04,
+            top_bars=4,
+            bot_bars=4,
+            top_bar_dia=0.02,
+            bot_bar_dia=0.02,
+        )
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert pytest.approx(0.4) == D
+        assert pytest.approx(0.3) == B
+
+    def test_concrete_circular_section(self):
+        sec = ConcreteCircularSection(
+            "CC500",
+            "Concrete Circular",
+            "C30",
+            A=0.196,
+            I33=0.00307,
+            I22=0.00307,
+            J=0.00613,
+            diameter=0.5,
+            cover=0.04,
+            bar_count=8,
+            bar_dia=0.02,
+        )
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert pytest.approx(0.5) == D
+        assert pytest.approx(0.5) == B
+
+    def test_general_section_returns_zero(self):
+        sec = type("GenSection", (), {"depth": 0, "bf": 0})()
+        D, B = SAP2000Parser._get_section_depth_width(sec)
+        assert D == 0.0
+        assert B == 0.0
+
+
+class TestMergeCardinalIntoOffsets:
+    """Tests for SAP2000Parser._merge_cardinal_into_offsets()."""
+
+    def _make_parser(self):
+        return SAP2000Parser.__new__(SAP2000Parser)
+
+    def test_centroid_no_offset(self):
+        """Cardinal point 10 (centroid) → no change to offsets."""
+        parser = self._make_parser()
+        elements = {"1": FrameElement("1", 1, "N1", "N2", cardinal_point=10)}
+        sections = {}
+        assignments = {}
+        offsets = {"1": FrameEndOffset(end_i=0.1, end_j=0.1)}
+        result = parser._merge_cardinal_into_offsets(elements, sections, assignments, offsets)
+        assert result["1"].off_y_i == 0.0
+        assert result["1"].off_z_i == 0.0
+
+    def test_top_center_adds_offset(self):
+        """Cardinal point 8 (top centre) on a 0.4 m deep I-section."""
+        parser = self._make_parser()
+        elements = {"B1": FrameElement("B1", 10, "N1", "N2", cardinal_point=8)}
+        sections = {
+            "Sec1": ISection(
+                "Sec1",
+                "I/Wide Flange",
+                "Steel",
+                depth=0.4,
+                bf=0.2,
+                A=0.01,
+                I33=1e-4,
+                I22=1e-5,
+                J=1e-6,
+            )
+        }
+        assignments = {"B1": "Sec1"}
+        offsets = {}
+        result = parser._merge_cardinal_into_offsets(elements, sections, assignments, offsets)
+        assert result["B1"].off_z_i == pytest.approx(-0.2)
+        assert result["B1"].off_z_j == pytest.approx(-0.2)
+        assert result["B1"].off_y_i == 0.0
+        assert result["B1"].off_y_j == 0.0
+
+    def test_bottom_center_adds_offset(self):
+        """Cardinal point 2 (bottom centre) on a 300 mm deep section."""
+        parser = self._make_parser()
+        elements = {"C1": FrameElement("C1", 5, "N1", "N2", cardinal_point=2)}
+        sections = {
+            "Sec2": RectangularSection(
+                "Sec2",
+                "Rectangular",
+                "Concrete",
+                depth=0.3,
+                bf=0.3,
+                A=0.09,
+                I33=1e-3,
+                I22=1e-3,
+                J=1e-4,
+            )
+        }
+        assignments = {"C1": "Sec2"}
+        offsets = {"C1": FrameEndOffset(end_i=0.05, end_j=0.05)}
+        result = parser._merge_cardinal_into_offsets(elements, sections, assignments, offsets)
+        # Longitudinal offsets preserved
+        assert result["C1"].end_i == pytest.approx(0.05)
+        assert result["C1"].end_j == pytest.approx(0.05)
+        # Cardinal offset added
+        assert result["C1"].off_z_i == pytest.approx(0.15)  # 0.5 * 0.3
+        assert result["C1"].off_z_j == pytest.approx(0.15)
+
+    def test_unknown_section_skipped(self):
+        """Frame with no matching section → no offset added."""
+        parser = self._make_parser()
+        elements = {"X1": FrameElement("X1", 1, "N1", "N2", cardinal_point=8)}
+        sections = {}
+        assignments = {"X1": "MissingSec"}
+        offsets = {}
+        result = parser._merge_cardinal_into_offsets(elements, sections, assignments, offsets)
+        assert "X1" not in result
+
+    def test_asymmetric_section_centroid_shifted(self):
+        """CP 10 on a channel: profile shifted onto the true (CG-offset) centroid."""
+        parser = self._make_parser()
+        elements = {"CH1": FrameElement("CH1", 7, "N1", "N2", cardinal_point=10)}
+        sections = {
+            "Chan": ChannelSection(
+                "Chan",
+                "Channel",
+                "Steel",
+                depth=0.4,
+                bf=0.1,
+                tf=0.01,
+                tw=0.008,
+                A=0.006,
+                I33=1.0e-4,
+                I22=1.0e-5,
+                J=1.0e-6,
+                cg_offset_3=0.03,
+            )
+        }
+        assignments = {"CH1": "Chan"}
+        offsets = {}
+        result = parser._merge_cardinal_into_offsets(elements, sections, assignments, offsets)
+        # Centroid offset along local 3 → bbox-centred profile shifted by -CGOffset3.
+        assert result["CH1"].off_z_i == pytest.approx(-0.03)
+        assert result["CH1"].off_z_j == pytest.approx(-0.03)
+        assert result["CH1"].off_y_i == pytest.approx(0.0)
+        assert result["CH1"].off_y_j == pytest.approx(0.0)
+
+    def test_symmetric_section_centroid_no_offset(self):
+        """CP 10 on a symmetric section → no offset record created (unchanged)."""
+        parser = self._make_parser()
+        elements = {"B1": FrameElement("B1", 1, "N1", "N2", cardinal_point=10)}
+        sections = {
+            "Sec": RectangularSection(
+                "Sec",
+                "Rectangular",
+                "Concrete",
+                depth=0.4,
+                bf=0.3,
+                A=0.12,
+                I33=1.6e-3,
+                I22=9.0e-4,
+                J=1.0e-3,
+            )
+        }
+        assignments = {"B1": "Sec"}
+        result = parser._merge_cardinal_into_offsets(elements, sections, assignments, {})
+        assert "B1" not in result
+
+
+class TestStiffnessModifiers:
+    """Tests for section stiffness modifier parsing and application."""
+
+    def test_modifiers_parsed_from_section_table(self, tmp_path):
+        """AMod/I3Mod/I2Mod/JMod parsed from FRAME SECTION PROPERTIES."""
+
+        data = {
+            "PROGRAM CONTROL": [
+                {"ProgramName": "SAP2000", "Version": "25", "CurrUnits": "N, mm, C"}
+            ],
+            "JOINT COORDINATES": [
+                {"Joint": 1, "XorR": 0, "Y": 0, "Z": 0},
+                {"Joint": 2, "XorR": 6, "Y": 0, "Z": 0},
+            ],
+            "FRAME SECTION PROPERTIES 01 - GENERAL": [
+                {
+                    "SectionName": "CrackedBeam",
+                    "Material": "CONC",
+                    "Shape": "Rectangular",
+                    "t3": 400,
+                    "t2": 200,
+                    "Area": 80000,
+                    "I33": 1.067e9,
+                    "I22": 2.667e8,
+                    "TorsConst": 1.0,
+                    "AMod": 1.0,
+                    "I3Mod": 0.35,
+                    "I2Mod": 0.35,
+                    "JMod": 0.35,
+                }
+            ],
+            "FRAME SECTION ASSIGNMENTS": [
+                {"Frame": 1, "AnalSect": "CrackedBeam"},
+            ],
+            "CONNECTIVITY - FRAME": [
+                {"Frame": 1, "JointI": 1, "JointJ": 2},
+            ],
+        }
+        json_path = tmp_path / "modifiers.json"
+        with open(json_path, "w") as f:
+            json.dump(data, f)
+        parser = SAP2000Parser.from_json(json_path)
+        md = parser.get_model_data()
+        sec = md.sections["CrackedBeam"]
+        assert sec.modifiers.get("AMod") == 1.0
+        assert sec.modifiers.get("I3Mod") == 0.35
+        assert sec.modifiers.get("I2Mod") == 0.35
+        assert sec.modifiers.get("JMod") == 0.35
+
+    def test_default_modifiers_when_missing(self, tmp_path):
+        """Sections without modifier columns get empty modifiers dict."""
+
+        data = {
+            "PROGRAM CONTROL": [
+                {"ProgramName": "SAP2000", "Version": "25", "CurrUnits": "N, mm, C"}
+            ],
+            "JOINT COORDINATES": [
+                {"Joint": 1, "XorR": 0, "Y": 0, "Z": 0},
+                {"Joint": 2, "XorR": 6, "Y": 0, "Z": 0},
+            ],
+            "FRAME SECTION PROPERTIES 01 - GENERAL": [
+                {
+                    "SectionName": "PlainBeam",
+                    "Material": "CONC",
+                    "Shape": "Rectangular",
+                    "t3": 400,
+                    "t2": 200,
+                    "Area": 80000,
+                    "I33": 1.067e9,
+                    "I22": 2.667e8,
+                    "TorsConst": 1.0,
+                    # No modifier columns
+                }
+            ],
+            "FRAME SECTION ASSIGNMENTS": [
+                {"Frame": 1, "AnalSect": "PlainBeam"},
+            ],
+            "CONNECTIVITY - FRAME": [
+                {"Frame": 1, "JointI": 1, "JointJ": 2},
+            ],
+        }
+        json_path = tmp_path / "no_modifiers.json"
+        with open(json_path, "w") as f:
+            json.dump(data, f)
+        parser = SAP2000Parser.from_json(json_path)
+        md = parser.get_model_data()
+        assert md.sections["PlainBeam"].modifiers == {}
+
+
+# ============================================================================
+# Mass-source parsing
+# ============================================================================
+
+
+class TestMassSourceParser:
+    def test_parse_from_s2k(self):
+        """Verify MassSource is parsed from a sample S2K file."""
+        from fea_toolkit.io.s2k_parser import SAP2000Parser
+
+        s2k_file = SAMPLE_S2K
+        if not s2k_file.exists():
+            pytest.skip("sample.s2k not available")
+        parser = SAP2000Parser(s2k_file)
+        parser.parse()
+        md = parser.get_model_data()
+        assert hasattr(md, "mass_sources")
+        # sample.s2k has MSSSRC1 with Elements=True, Masses=True, Loads=False
+        if md.mass_sources:
+            ms = md.mass_sources.get("MSSSRC1")
+            if ms:
+                assert ms.elements is True

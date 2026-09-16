@@ -1,6 +1,8 @@
-"""Tests for sections, SectionLibrary and Selection filtering."""
+"""Tests for sections, SectionLibrary and Selection filtering.
 
-"""Tests for the model layer: dataclasses, geometry utilities, and sections."""
+Covers section-library lookups, ``Selection`` filter composition, and the
+beam-load → nodal-load helpers.
+"""
 
 from pathlib import Path
 

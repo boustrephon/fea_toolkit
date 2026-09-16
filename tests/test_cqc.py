@@ -145,3 +145,36 @@ def test_combine_matrix_clips_negative_quadratic():
     omega = [1.0, 1.0001]
     rho = cqc_rho_matrix(omega, [0.05, 0.05])
     assert cqc_combine_matrix(np.array([[1.0, -1.0]]), rho)[0] >= 0.0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Scalar kernel edge cases + ``fea_toolkit.utils`` facade re-export
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_scalar_combine_guards_sentinel_frequency():
+    """A sentinel-scale ω must not overflow the scalar ρ denominator.
+
+    ``ops.eigen(N)`` on a model with fewer free DOFs than requested pads the
+    eigenvalues with DBL_MAX, whose derived ω (~1e154) used to raise
+    ``OverflowError`` in the ``(1 - bij**2)**2`` term.  Such pairs are
+    uncorrelated (ρ ~ bij**-5) and are skipped, leaving the SRSS of the two
+    diagonal contributions.
+    """
+    result = cqc_combine([100.0, 50.0], [1.3e154, 30.0], [0.05, 0.05])
+    assert np.isfinite(result)
+    assert result == pytest.approx(np.sqrt(100.0**2 + 50.0**2), abs=0.1)
+
+
+def test_scalar_combine_zero_omega_is_finite():
+    """A zero ω (skipped mode) contributes nothing and must not divide by 0."""
+    result = cqc_combine([0.0, 50.0], [0.0, 30.0], [0.05, 0.05])
+    assert np.isfinite(result)
+    assert result == pytest.approx(50.0)
+
+
+def test_utils_facade_reexports_scalar_kernel():
+    """``fea_toolkit.utils.cqc_combine`` is the same object as the kernel."""
+    from fea_toolkit.utils import cqc_combine as facade
+
+    assert facade is cqc_combine

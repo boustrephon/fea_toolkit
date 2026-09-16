@@ -824,7 +824,7 @@ removed in the deprecation cleanup).
   always derive from the source; the 2D matplotlib path imports no PyVista.
 - Tests: 11 `TestForceDiagramUnified` cases (input equivalence Builder/dict/
   NPZ, RS list-vs-dict, unit propagation incl. explicit override, dispatcher
-  classification, wrapper call patterns) in `tests/test_plotting.py`.
+  classification, wrapper call patterns) in `tests/test_force_diagram.py`.
 - Docs: `docs/force_diagram_unification.md` status → implemented; the NPZ
   force-array orientation contract (component-keyed arrays vs the
   element-keyed `extract_static_element_forces()` dict, key-rename table,

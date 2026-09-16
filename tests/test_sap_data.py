@@ -1,6 +1,9 @@
-"""Tests for fea_toolkit.model.sap_data — dataclasses and section dispatch."""
+"""Tests for fea_toolkit.model.sap_data — dataclasses and section dispatch.
 
-"""Tests for the model layer: dataclasses, geometry utilities, and sections."""
+Covers the dataclass layer (nodes, restraints, loads, sections), section
+subclass construction and ``SHAPE_NAMES`` dispatch, concrete fibre patches,
+and ``SAPModelData`` helper methods.
+"""
 
 import math
 from pathlib import Path
@@ -1069,3 +1072,315 @@ class TestSpatialGrid:
 # ============================================================================
 # SectionLibrary tests (requires fixture data file)
 # ============================================================================
+
+
+# ============================================================================
+# Concrete fibre patches + SAPModelData helpers
+# ============================================================================
+
+
+class TestConcreteRectangularSectionFiberPatches:
+    """Fiber patch generation for ConcreteRectangularSection."""
+
+    def test_concrete_rect_basic(self):
+        from fea_toolkit.model.sap_data import ConcreteRectangularSection
+
+        sec = ConcreteRectangularSection(
+            name="CR400",
+            shape="Concrete Rectangular",
+            material="Concrete",
+            A=0.16,
+            I33=0.00213,
+            I22=0.00213,
+            J=0,
+            depth=0.4,
+            bf=0.4,
+            cover=0.04,
+            top_bars=4,
+            bot_bars=4,
+            top_bar_dia=0.02,
+            bot_bar_dia=0.02,
+        )
+        patches = sec.to_fiber_patches(mat_tag=1)
+        # Concrete patches: core, top cover, bottom cover, left cover, right cover
+        # Rebar layers: top (straight), bottom (straight)
+        assert len(patches) == 7
+        # Concrete patches use mat_tag for unconfined, mat_tag+1 for confined
+        assert patches[0][0] == "rect"
+        assert patches[0][1] == 2  # confined core (mat_tag + 1)
+        assert patches[1][1] == 1  # top cover (unconfined)
+        # Rebar layers (last two entries): type "straight", mat_tag + 2 = 3
+        assert patches[-2][0] == "straight"
+        assert patches[-2][1] == 3  # top rebar
+        assert patches[-1][0] == "straight"
+        assert patches[-1][1] == 3  # bottom rebar
+        # Rebar uses area (m²), not diameter
+        expected_area = 3.14159 * (0.01) ** 2  # π * (dia/2)²  with dia=0.02
+        assert patches[-2][3] == pytest.approx(expected_area, rel=1e-3)
+
+    def test_concrete_rect_no_rebar(self):
+        from fea_toolkit.model.sap_data import ConcreteRectangularSection
+
+        sec = ConcreteRectangularSection(
+            name="CR400",
+            shape="Concrete Rectangular",
+            material="Concrete",
+            A=0.16,
+            I33=0.00213,
+            I22=0.00213,
+            J=0,
+            depth=0.4,
+            bf=0.4,
+            cover=0.04,
+        )
+        patches = sec.to_fiber_patches(mat_tag=1)
+        for p in patches:
+            assert p[0] == "rect"
+        assert len(patches) >= 3  # core + 2 covers
+
+
+class TestConcreteCircularSectionFiberPatches:
+    """Fiber patch generation for ConcreteCircularSection."""
+
+    def test_concrete_circ_basic(self):
+        from fea_toolkit.model.sap_data import ConcreteCircularSection
+
+        sec = ConcreteCircularSection(
+            name="CC400",
+            shape="Concrete Circular",
+            material="Concrete",
+            A=0.1256,
+            I33=0.00126,
+            I22=0.00126,
+            J=0,
+            diameter=0.4,
+            cover=0.04,
+            bar_count=8,
+            bar_dia=0.02,
+        )
+        patches = sec.to_fiber_patches(mat_tag=1)
+        # Concrete: confined core (circ), unconfined cover (circ)
+        # Rebar: circ_layer with mat_tag + 2 = 3
+        assert len(patches) == 3
+        assert patches[0][0] == "circ"
+        assert patches[0][1] == 2  # confined core
+        assert patches[1][1] == 1  # unconfined cover
+        # Rebar layer
+        assert patches[2][0] == "circ_layer"
+        assert patches[2][1] == 3  # rebar
+        expected_area = 3.14159 * (0.01) ** 2
+        assert patches[2][3] == pytest.approx(expected_area, rel=1e-3)
+
+    def test_concrete_circ_no_rebar(self):
+        from fea_toolkit.model.sap_data import ConcreteCircularSection
+
+        sec = ConcreteCircularSection(
+            name="CC400",
+            shape="Concrete Circular",
+            material="Concrete",
+            A=0.1256,
+            I33=0.00126,
+            I22=0.00126,
+            J=0,
+            diameter=0.4,
+            cover=0.04,
+        )
+        patches = sec.to_fiber_patches(mat_tag=1)
+        assert len(patches) == 2  # core + cover only, no rebar
+
+
+class TestSAPModelDataMethods:
+    """Tests for the utility methods added to SAPModelData."""
+
+    @pytest.fixture
+    def sample_md(self):
+        nodes = {
+            "1": Node(node_id="1", node_tag=10, x=0, y=0, z=0),
+            "2": Node(node_id="2", node_tag=20, x=6, y=0, z=0),
+            "3": Node(node_id="3", node_tag=30, x=6, y=8, z=0),
+        }
+        frames = {
+            "F1": FrameElement(elem_id="F1", elem_tag=1, node_i="1", node_j="2"),
+        }
+        areas = {
+            "A1": AreaElement(area_id="A1", area_tag=2, node_ids=["1", "2", "3"]),
+        }
+        materials = {"C40": Material(name="C40", type="Concrete", E_mod=3e7)}
+        sections = {"SEC1": Section(name="SEC1", material="C40", shape="Rectangular", A=0.16)}
+        return SAPModelData(
+            nodes=nodes,
+            restraints={},
+            materials=materials,
+            sections=sections,
+            frame_elements=frames,
+            area_elements=areas,
+            frame_assignments={"F1": "SEC1"},
+            area_assignments={"A1": "SEC1"},
+            groups={},
+            frame_auto_mesh={},
+        )
+
+    def test_max_node_tag(self, sample_md):
+        assert sample_md.max_node_tag() == 30
+
+    def test_max_node_tag_empty(self):
+        md = SAPModelData(
+            nodes={},
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+        )
+        assert md.max_node_tag() == 0
+
+    def test_auto_detect_static_cases(self):
+
+        md = SAPModelData(
+            nodes={},
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            load_cases={
+                "DEAD": LoadCase(
+                    case_name="DEAD",
+                    case_type="LinStatic",
+                    design_type_option="Prog Det",
+                    design_type="Dead",
+                    design_action_option="Prog Det",
+                    design_action="Non-Composite",
+                ),
+                "MODAL": LoadCase(
+                    case_name="MODAL",
+                    case_type="LinModal",
+                    design_type_option="Prog Det",
+                    design_type="Other",
+                    design_action_option="Prog Det",
+                    design_action="Other",
+                ),
+            },
+        )
+        cases = md.auto_detect_static_cases()
+        assert cases == ["DEAD"]
+
+    def test_summary_dict(self, sample_md):
+        s = sample_md.summary_dict()
+        assert s["Nodes"] == 3
+        assert s["Frames"] == 1
+        assert s["Areas"] == 1
+        assert s["Materials"] == 1
+        assert s["Sections"] == 1
+        assert s["X span (m)"] == 6.0
+        assert s["Y span (m)"] == 8.0
+        assert s["Z span (m)"] == 0.0
+
+    def test_remove_floating_nodes(self):
+        """remove_floating_nodes eliminates unreferenced nodes."""
+        from fea_toolkit.model.geometry import remove_floating_nodes
+
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+                "2": Node(node_id="2", node_tag=2, x=6, y=0, z=0),
+                "3": Node(node_id="3", node_tag=3, x=3, y=4, z=0),  # floating
+            },
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={
+                "F1": FrameElement(elem_id="F1", elem_tag=10, node_i="1", node_j="2"),
+            },
+            area_elements={},
+            frame_assignments={"F1": "SEC1"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+        )
+        rows = remove_floating_nodes(md)
+        # Inert node is removed silently (no mass/loads/restraint to redistribute)
+        assert len(rows) == 0
+        assert "3" not in md.nodes
+
+    def test_remove_floating_nodes_with_restraint(self):
+        """Floating node with restraint transfers it to nearest neighbour."""
+        from fea_toolkit.model.geometry import remove_floating_nodes
+
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+                "2": Node(node_id="2", node_tag=2, x=6, y=0, z=0),
+                "3": Node(node_id="3", node_tag=3, x=3, y=0, z=0),  # floating
+            },
+            restraints={"3": Restraint([1, 1, 1, 1, 1, 1])},
+            materials={},
+            sections={},
+            frame_elements={
+                "F1": FrameElement(elem_id="F1", elem_tag=10, node_i="1", node_j="2"),
+            },
+            area_elements={},
+            frame_assignments={"F1": "SEC1"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+        )
+        rows = remove_floating_nodes(md)
+        assert len(rows) == 1
+        assert rows[0]["restrained"] is True
+        # Restraint should have transferred
+        assert "1" in md.restraints or "2" in md.restraints
+
+    def test_remove_floating_nodes_transfers_joint_loads_per_pattern(self):
+        """Floating node's joint loads transfer per source pattern.
+
+        Regression test: the transferred ``JointLoad`` must use the
+        dataclass's real ``node_id`` field and preserve each source
+        load's ``pattern`` — the previous patternless
+        ``JointLoad(node=...)`` construction raised ``TypeError`` and
+        aggregated every pattern into one anonymous entry.
+        """
+        from fea_toolkit.model.geometry import remove_floating_nodes
+
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+                "2": Node(node_id="2", node_tag=2, x=6, y=0, z=0),
+                "3": Node(node_id="3", node_tag=3, x=3, y=0, z=0),  # floating
+            },
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={
+                "F1": FrameElement(elem_id="F1", elem_tag=10, node_i="1", node_j="2"),
+            },
+            area_elements={},
+            frame_assignments={"F1": "SEC1"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            joint_loads=[
+                JointLoad(pattern="DEAD", node_id="3", fz=-100.0),
+                JointLoad(pattern="LIVE", node_id="3", fz=-50.0),
+            ],
+        )
+        rows = remove_floating_nodes(md)
+        assert len(rows) == 1
+        transferred = [jl for jl in md.joint_loads if jl.node_id != "3"]
+        # Both patterns transferred independently, keeping their own
+        # pattern names and the nearest connected node's id.
+        assert len(transferred) == 2
+        by_pattern = {jl.pattern: jl for jl in transferred}
+        assert set(by_pattern) == {"DEAD", "LIVE"}
+        for jl in transferred:
+            assert jl.node_id in ("1", "2")
+        assert by_pattern["DEAD"].fz == pytest.approx(-100.0)
+        assert by_pattern["LIVE"].fz == pytest.approx(-50.0)

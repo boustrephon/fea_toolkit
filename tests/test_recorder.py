@@ -1,12 +1,7 @@
 """Tests for RecordingOpenSees proxy."""
 
-import sys
-from pathlib import Path
-
-_REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_REPO / "src"))
-
 import contextlib
+import sys
 
 import openseespy.opensees as _real
 import pytest
