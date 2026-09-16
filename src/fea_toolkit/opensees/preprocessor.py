@@ -388,6 +388,9 @@ class Preprocessor:
         # The per-group components preserve S2K constraint identity so
         # independent diaphragms at the same elevation stay separate.
         diaphragm_levels, diaphragm_components = self._detect_diaphragm_levels(md)
+        # SAP2000 BODY constraints (6-DOF rigid bodies) are applied by the
+        # AnalysisBuilder as `rigidLink('beam')` MPCs — recorded here.
+        rigid_body_components = self._detect_rigid_body_constraints(md)
 
         # ── 7b. Re-map frame end releases onto final active leaves ──
         # A release is an end property of the original member; after all
@@ -499,6 +502,11 @@ class Preprocessor:
         for _lid, _n_i, _n_j, _tag in offset_rigid_links:
             referenced.add(_n_i)
             referenced.add(_n_j)
+        # Joint nodes referenced only by a BODY constraint (no element of
+        # their own) must be retained — the rigidLink MPCs tie them to the
+        # group master, and dropping them would silently drop the body.
+        for _name, _body_ids in rigid_body_components:
+            referenced.update(_body_ids)
         orphan_nodes: dict[str, Node] = {}
         for nid in list(md.nodes.keys()):
             if nid not in referenced:
@@ -522,6 +530,7 @@ class Preprocessor:
             detected_edge_pairs=raw_edges,
             diaphragm_levels=diaphragm_levels,
             diaphragm_components=diaphragm_components,
+            rigid_body_components=rigid_body_components,
             offset_rigid_links=offset_rigid_links,
             frame_element_types=frame_element_types,
             area_element_types=area_element_types,
@@ -1293,6 +1302,58 @@ class Preprocessor:
         # Deterministic ordering: sort components by elevation.
         components.sort(key=lambda item: item[0])
         return sorted(levels), components
+
+    def _detect_rigid_body_constraints(self, md) -> list[tuple[str, list[str]]]:
+        """Detect SAP2000 ``BODY`` (rigid-body) constraint groups.
+
+        A ``CONSTRAINT DEFINITIONS - BODY`` entry ties every assigned joint
+        into a single rigid body (all six DOF coupled).  The toolkit applies
+        it in the OpenSees domain as one ``ops.rigidLink('beam', master,
+        slave)`` MPC per slave node, so the group is recorded here on the
+        ``MeshModel`` for the AnalysisBuilder to consume.  Unlike a
+        ``DIAPHRAGM`` constraint (which couples only the in-plane DOFs), a
+        ``BODY`` constraint also ties the out-of-plane translation and both
+        out-of-plane rotations — omitting it makes the model softer in
+        torsion and transverse sway.
+
+        Only ``BODY`` constraints are handled here; every other
+        non-diaphragm type (``EQUAL``, ``WELD``, ``BEAM``, ``ROD``,
+        ``PLATE``, ``LOCAL``) is left to the model review, which flags it as
+        parsed-but-not-applied.
+
+        Joints removed by the topology passes are dropped; a group needs at
+        least two surviving joints to be meaningful.
+
+        Returns:
+            ``[(constraint_name, [joint_id, ...]), ...]`` — one entry per
+            BODY constraint, sorted by constraint name for deterministic
+            output.
+        """
+        constraints = getattr(md, "constraints", {}) or {}
+        assignments = getattr(md, "constraint_assignments", {}) or {}
+        if not constraints or not assignments:
+            return []
+
+        body_names = {
+            name
+            for name, con in constraints.items()
+            if str(getattr(con, "constraint_type", "") or "").upper() == "BODY"
+        }
+        if not body_names:
+            return []
+
+        groups: dict[str, list[str]] = {name: [] for name in body_names}
+        for jid, cname in assignments.items():
+            bucket = groups.get(cname)
+            if bucket is not None:
+                bucket.append(jid)
+
+        components: list[tuple[str, list[str]]] = []
+        for name in sorted(groups):
+            surviving = [jid for jid in groups[name] if jid in md.nodes]
+            if len(surviving) >= 2:
+                components.append((name, surviving))
+        return components
 
     def _resolve_explicit_diaphragm_groups(self, md) -> Optional[list[tuple[float, list[str]]]]:
         """Resolve the ``rigid_diaphragms: [ {name, nodes|selection}, ... ]``

@@ -259,6 +259,13 @@ class AnalysisBuilder(
             # by inserting zero-length release elements at member ends.  On by
             # default — a release is a real property of the source model.
             "apply_releases": True,
+            # ── SAP2000 BODY constraints (6-DOF rigid bodies) ──
+            # Apply ``CONSTRAINT DEFINITIONS - BODY`` groups as
+            # ``rigidLink('beam')`` MPCs.  A BODY constraint is a real model
+            # property (a rigid body tie between joints), so it is on by
+            # default — omitting it leaves those joints free and makes the
+            # model softer.  Set False to disable.
+            "apply_rigid_bodies": True,
             # Rigidity factor for the retained (non-released) DOFs on the
             # release element — must be much stiffer than the member it
             # terminates so the release does not soften the member.
@@ -546,6 +553,7 @@ class AnalysisBuilder(
             self._create_elements()
             self._create_limit_state_columns()
             self._apply_rigid_diaphragms()
+            self._apply_rigid_bodies()
             return self
         finally:
             # Restore any overridden config values

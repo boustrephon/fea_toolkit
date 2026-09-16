@@ -98,6 +98,8 @@ TUPLE_FIELDS: frozenset[str] = frozenset(
         "edge_constraint_args",
         # ``(z_level, [node_id, ...])`` — outer element is a tuple.
         "diaphragm_components",
+        # ``(constraint_name, [node_id, ...])`` — outer element is a tuple.
+        "rigid_body_components",
     }
 )
 

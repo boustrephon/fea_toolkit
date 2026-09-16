@@ -38,6 +38,87 @@ class ConstraintMixin:
                 verbose=verbose or self.config.get("verbose", False),
             )
 
+    def _apply_rigid_bodies(self) -> int:
+        """Apply SAP2000 ``BODY`` constraints as ``rigidLink`` MPCs.
+
+        Each ``CONSTRAINT DEFINITIONS - BODY`` group ties all of its joints
+        into a single rigid body (six DOF coupled).  It is reproduced with
+        one ``ops.rigidLink('beam', master, slave)`` MPC per slave node —
+        the same 6-DOF rigid-link mechanism used for frame end offsets.
+        Omitting it leaves the previously-tied joints free to move
+        independently, which makes the model softer (most visibly in
+        torsion and transverse sway).
+
+        The group's master is the node nearest its 3-D centroid, so the
+        retained DOFs sit inside the body.  Groups with fewer than two
+        surviving nodes are skipped, as are nodes missing from the domain.
+
+        Disabled with ``apply_rigid_bodies: False`` in the config.
+
+        Returns:
+            Number of rigid bodies applied.
+        """
+        if not self.config.get("apply_rigid_bodies", True):
+            return 0
+        components = getattr(self.mesh_model, "rigid_body_components", None) or []
+        applied = 0
+        for name, node_ids in components:
+            tags: list[int] = []
+            for nid in node_ids:
+                nd = self.mesh_model.nodes.get(nid)
+                if nd is None:
+                    continue
+                try:
+                    ops.nodeCoord(nd.node_tag)
+                except Exception:
+                    continue
+                tags.append(nd.node_tag)
+            if len(tags) < 2:
+                continue
+            master = self._select_rigid_body_master(tags)
+            failed = False
+            for slave in tags:
+                if slave == master:
+                    continue
+                try:
+                    ops.rigidLink("beam", master, slave)
+                except Exception as exc:
+                    logger.warning(
+                        "rigidLink failed for body '%s' (master=%d, slave=%d): %s",
+                        name,
+                        master,
+                        slave,
+                        exc,
+                    )
+                    failed = True
+            if not failed:
+                applied += 1
+        if applied and self.config.get("verbose"):
+            print(f"  Applied {applied} rigid-body constraint(s) (BODY).")
+        return applied
+
+    @staticmethod
+    def _select_rigid_body_master(tags):
+        """Select the node tag nearest the 3-D centroid of the group.
+
+        Args:
+            tags: Sequence of OpenSees node tags in the body group.
+
+        Returns:
+            The tag whose coordinates are nearest the group centroid.
+        """
+        coords = {t: tuple(ops.nodeCoord(t)[:3]) for t in tags}
+        n = len(coords)
+        cx = sum(c[0] for c in coords.values()) / n
+        cy = sum(c[1] for c in coords.values()) / n
+        cz = sum(c[2] for c in coords.values()) / n
+        return min(
+            tags,
+            key=lambda t: (
+                (coords[t][0] - cx) ** 2 + (coords[t][1] - cy) ** 2 + (coords[t][2] - cz) ** 2
+            ),
+        )
+
     def _node_tag_from_id(self, node_id: str) -> Optional[int]:
         """Return numeric tag for a node, or None if not found."""
         node = self.mesh_model.nodes.get(node_id)

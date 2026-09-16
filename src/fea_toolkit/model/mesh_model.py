@@ -253,6 +253,13 @@ class MeshModel:
     diaphragm_components: list[tuple[float, list[str]]] = field(default_factory=list)
     #   [(z_level, [master_node_id, slave_node_id, ...]), ...]
 
+    # ── Rigid-body components (SAP2000 BODY constraints) ─────────
+    # Each entry is a ``(constraint_name, [node_id, ...])`` tuple for one
+    # ``CONSTRAINT DEFINITIONS - BODY`` group — a 6-DOF rigid body tie
+    # between its assigned joints.  Emitted by the AnalysisBuilder as one
+    # ``ops.rigidLink('beam', master, slave)`` MPC per slave node.
+    rigid_body_components: list[tuple[str, list[str]]] = field(default_factory=list)
+
     # ── Diaphragm Z tolerance (per-elevation node matching) ───────
     # Tolerance (in model length units) used when grouping nodes near
     # a detected diaphragm elevation into a single rigidDiaphragm.
