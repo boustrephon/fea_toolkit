@@ -2326,8 +2326,9 @@ class TestMassSourceParser:
         parser.parse()
         md = parser.get_model_data()
         assert hasattr(md, "mass_sources")
-        # sample.s2k has MSSSRC1 with Elements=True, Masses=True, Loads=False
-        if md.mass_sources:
-            ms = md.mass_sources.get("MSSSRC1")
-            if ms:
-                assert ms.elements is True
+        # sample.s2k declares MSSSRC1 with Elements=Yes, Masses=Yes, Loads=No.
+        assert "MSSSRC1" in md.mass_sources
+        ms = md.mass_sources["MSSSRC1"]
+        assert ms.elements is True
+        assert ms.masses is True
+        assert ms.loads is False

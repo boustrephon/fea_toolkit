@@ -873,15 +873,22 @@ class TestFibreSectionTclExport:
         assert "section Fiber " in tcl
         fiber_blocks = 0
         in_fiber = False
+        opened = False
         depth = 0
         for line in tcl.split("\n"):
             stripped = line.strip()
             if stripped.startswith("section Fiber"):
                 in_fiber = True
+                opened = False
             if in_fiber:
+                if "{" in stripped:
+                    opened = True
                 depth += stripped.count("{")
                 depth -= stripped.count("}")
-                if depth == 0 and in_fiber:
+                # A brace-free ``section Fiber`` line never opens a block, so
+                # completion requires an observed opening brace *and* the
+                # nesting depth returning to zero.
+                if opened and depth == 0:
                     fiber_blocks += 1
                     in_fiber = False
         assert fiber_blocks >= 1, "No complete fiber section block found"
