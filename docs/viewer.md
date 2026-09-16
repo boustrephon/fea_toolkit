@@ -340,7 +340,7 @@ Coloured by displacement magnitude (blue–white–red scale).
 ### 2d. Mode shape
 
 ```python
-from fea_toolkit.plotting import plot_mode_animation
+from fea_toolkit.plotting import mass_participation_ratios, plot_mode_animation
 
 shapes = builder.extract_mode_shapes(num_modes=6)
 pl = plot_mode_animation(

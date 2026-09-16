@@ -253,6 +253,7 @@ always compare against ``abs(control_disp)``.
 | `modal/mode_dx` | `(N_node, N_mode)` | `float` | Eigenvector X component per node × mode |
 | `modal/mode_dy` | `(N_node, N_mode)` | `float` | Eigenvector Y component per node × mode |
 | `modal/mode_dz` | `(N_node, N_mode)` | `float` | Eigenvector Z component per node × mode |
+| `modal/node_tag` | `(N_node,)` | `int` | Authoritative node-tag mapping for the mode-shape rows — row *i* of `mode_d{x,y,z}` belongs to the node with this tag |
 
 The six ``modal/*_ratio`` arrays are **OpenSees's own values**, copied verbatim
 from ``ops.modalProperties("-return", "-unorm")``
@@ -272,7 +273,10 @@ optional.
 
 Mode shape arrays (``modal/mode_d{x,y,z}``) are stored as 2D matrices where
 column *j* is the eigenvector for mode *j* (0‑based) and row *i* matches
-``node_tag[i]``.  This layout is compatible with PyVista::
+``modal/node_tag[i]`` — the dedicated ``(N_node,)`` tag list written alongside
+them.  Row order is the **sorted** node-tag order, so do **not** assume it
+matches the geometry ``node_tag`` array (written in model dict order); always
+pair against ``modal/node_tag``.  This layout is compatible with PyVista::
 
     import pyvista as pv
     import numpy as np
