@@ -1038,6 +1038,11 @@ class SAP2000Parser:
         e.g. ``"8 (top center)"`` or ``"10 (centroid)"`` — while legacy and
         E2K exports use a bare integer.  Both forms are accepted.
 
+        Only the real SAP2000 range (**1–11**) is accepted.  A non-integral
+        number, ``0``, or any out-of-range value is not a cardinal point and
+        is rejected rather than coerced (``int(8.7) == 8``; ``0`` and ``12``
+        would previously have been accepted silently).
+
         Args:
             value: Raw cell value (``str``, ``int`` or ``float``).
 
@@ -1046,11 +1051,21 @@ class SAP2000Parser:
         """
         if value is None or isinstance(value, bool):
             return None
-        if isinstance(value, (int, float)):
-            return int(value)
-        # Labelled string form: leading integer, e.g. "8 (top center)".
-        match = re.match(r"^\s*(-?\d+)", str(value))
-        return int(match.group(1)) if match else None
+        # Bare numeric form (int / float / numeric string) takes priority so
+        # that a non-integral value such as "8.7" is rejected rather than
+        # truncated by the leading-integer regex below.
+        try:
+            number = float(str(value).strip())
+        except (TypeError, ValueError):
+            # Labelled string form: leading integer, e.g. "8 (top center)".
+            match = re.match(r"^\s*(-?\d+)", str(value))
+            if match is None:
+                return None
+            number = float(match.group(1))
+        if not number.is_integer():
+            return None
+        point = int(number)
+        return point if 1 <= point <= 11 else None
 
     def _get_frame_insertion_points(self) -> dict[str, dict[str, Any]]:
         """Parse the modern ``FRAME INSERTION POINT ASSIGNMENTS`` table.
@@ -1293,7 +1308,12 @@ class SAP2000Parser:
             if sec is None:
                 continue
             D, B = self._get_section_depth_width(sec)
-            if D == 0.0 and B == 0.0:
+            # Cardinal points 10 (centroid) and 11 (shear centre) are located
+            # by the section's ``CGOffset2/3`` / ``EccV2/3`` data, not by its
+            # bounding-box depth/width, so a section that reports no D/B still
+            # has a meaningful offset there (an asymmetric profile with no
+            # depth/width is unlikely, but the guard must not silently drop it).
+            if D == 0.0 and B == 0.0 and cp not in (10, 11):
                 continue
             off_y, off_z = self._cardinal_point_offset(
                 cp,
