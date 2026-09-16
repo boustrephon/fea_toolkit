@@ -210,8 +210,10 @@ def _extract_npz_rs_forces(source) -> list:
             ``read_results_npz()``) or an open ``NpzFile``.
 
     Returns:
-        List of per-element records with ``elem_id``, ``z_bot``, ``z_mid`` and
-        the full local end-force set (``Fx_i`` … ``Mz_j``), mirroring
+        List of per-element records, one per ``rs/elem_sap_id`` entry.  Each
+        record always carries ``elem_id``; ``z_bot``, ``z_mid`` and each local
+        end-force component (``Fx_i`` … ``Mz_j``) are included **only** when
+        their corresponding ``rs/elem_*`` array exists in *source*, mirroring
         ``AnalysisBuilder.extract_element_rs_forces()``.
     """
     import numpy as np

@@ -21,27 +21,21 @@ def plot_seismic_spectrum(
 ) -> Optional[Any]:
     """Plot GB 50011 design spectra at 3 levels (frequent / fortification / rare).
 
-    Parameters
-    ----------
-    spec : dict
-        Spectrum configuration dict compatible with ``_build_spectrum()``.
-        Keys include *intensity*, *acceleration*, *site_class*, *damping*.
-    modal : dict, optional
-        Modal analysis result (``run_modal_analysis`` output).  When provided,
-        vertical dashed lines mark the dominant period in X and Y directions.
-    g : float, optional
-        Gravitational acceleration in the model's own unit system.  When
-        given it overrides gravity derivation from *units*; ``None`` falls
-        back to *units*, then to the shared SI constant (9.80665 m/s²).
-    units : dict, optional
-        Model units dict (e.g. ``{"F": "N", "L": "mm", "T": "C"}``).  The
-        length unit controls the display label on the acceleration axis
-        (e.g. ``mm/s²``); it also drives gravity derivation when *g* is not
-        supplied.
+    Args:
+        spec: Spectrum configuration dict compatible with ``_build_spectrum()``.
+            Keys include *intensity*, *acceleration*, *site_class*, *damping*.
+        modal: Modal analysis result (``run_modal_analysis`` output).  When
+            provided, vertical dashed lines mark the dominant period in X and
+            Y directions.
+        g: Gravitational acceleration in the model's own unit system.  When
+            given it overrides gravity derivation from *units*; ``None`` falls
+            back to *units*, then to the shared SI constant (9.80665 m/s²).
+        units: Model units dict (e.g. ``{"F": "N", "L": "mm", "T": "C"}``).
+            The length unit controls the display label on the acceleration
+            axis (e.g. ``mm/s²``); it also drives gravity derivation when *g*
+            is not supplied.
 
-    Returns
-    -------
-    matplotlib.figure.Figure or None
+    Returns:
         The figure object, or ``None`` if matplotlib is unavailable.
     """
     try:

@@ -317,28 +317,19 @@ def _gb50011_spectrum(
 ) -> np.ndarray:
     """Return spectral acceleration Sa (m/s²) for a GB 50011 elastic spectrum.
 
-    Parameters
-    ----------
-    T_values : list of float
-        Period values (s) at which to evaluate the spectrum.
-    alpha_max : float
-        Seismic influence coefficient maximum (Table 5.1.4-1).
-    tg : float
-        Characteristic period (s) — Site-class dependent (Table 5.1.4-2).
-    gamma : float
-        Descending-branch exponent (default 0.9 for 5 % damping).
-    eta1 : float
-        Linear-drop correction factor (default 0.02 for 5 % damping).
-    eta2 : float
-        Damping reduction factor (default 1.0 for 5 % damping).
-    g : float, optional
-        Gravitational acceleration in the caller's acceleration unit (e.g.
-        m/s²).  Used verbatim when given; ``None`` falls back to the shared
-        SI constant :data:`fea_toolkit.utils.DEFAULT_GRAVITY_MS2` (9.80665 m/s²).
+    Args:
+        T_values: Period values (s) at which to evaluate the spectrum.
+        alpha_max: Seismic influence coefficient maximum (Table 5.1.4-1).
+        tg: Characteristic period (s) — Site-class dependent (Table 5.1.4-2).
+        gamma: Descending-branch exponent (default 0.9 for 5 % damping).
+        eta1: Linear-drop correction factor (default 0.02 for 5 % damping).
+        eta2: Damping reduction factor (default 1.0 for 5 % damping).
+        g: Gravitational acceleration in the caller's acceleration unit (e.g.
+            m/s²).  Used verbatim when given; ``None`` falls back to the shared
+            SI constant :data:`fea_toolkit.utils.DEFAULT_GRAVITY_MS2`
+            (9.80665 m/s²).
 
-    Returns
-    -------
-    np.ndarray
+    Returns:
         Spectral acceleration values, in the same units as *g*.
     """
     g = _resolve_g(g, None)
