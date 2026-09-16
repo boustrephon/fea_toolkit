@@ -109,6 +109,7 @@ nav:
       - Capacity Modules (GB 50010): capacity.md
       - SAP2000 IDs vs OpenSees Tags: sap_ids_vs_tags.md
       - SAP2000 Model Review & Checks: model_review.md
+      - SAP2000 Parser Table & Keyword Coverage: parser_coverage.md
       - Shear Failure Modelling: shear_failure_modelling.md
       - Unit Conversion: units_conversion.md
       - RC Rectangular Section Workflow: rc_rectangular_section_workflow.md

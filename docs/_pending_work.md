@@ -422,10 +422,84 @@ MkDocs 1.x becomes unmaintained: (a) stay pinned on 1.x; (b) migrate to
 guidance
 (https://squidfunk.github.io/mkdocs-material/blog/2026/02/18/mkdocs-2.0/).
 
+#### P16 — Parsed-but-unconsumed parser keywords
+Source: `docs/parser_coverage.md` (register + reproducible audit method).
+
+**What.** Several `.s2k` values are parsed and stored on the model but reach
+no consumer, so they look implemented while being inert.  The full register,
+with the method to re-derive it, is `docs/parser_coverage.md`.
+
+**Open items.**
+1. `FrameElement.mirror_2` / `mirror_3` — mirror the drawn extrusion (and
+   fibre mesh) for mirrored asymmetric sections.
+2. `FrameElement.transform_stiffness` — apply, or explicitly refuse,
+   SAP2000's stiffness transformation for the centroid offset in the builder.
+3. `FrameEndOffset.rigid_factor` — support partial rigid-zone rigidity
+   (`0 < RigidFactor < 1`) instead of always fully rigid.
+4. `SAPModelData.area_edge_constraints` — consume it or drop it (the
+   preprocessor currently derives edges via `find_constraint_edges()`).
+5. `AreaMesh.no_auto_mesh_at_edges` / `no_sub_mesh` / `min_size` — honour in
+   the area-meshing path, or drop.
+6. Encased / circular-concrete / double-angle section fields — consume once
+   those section types are implemented (overlaps P6b).
+
+**Outline steps.** The items are independent; take them opportunistically.
+When one is wired up, delete its row from `docs/parser_coverage.md` and record
+the change in the DONE register below.
+
+**Tooling.** The *table*-level companion to this register is
+`docs/parser_coverage.md` § *Table coverage* +
+`src/fea_toolkit/io/table_registry.py`: `fea-tables model.s2k` (or
+`python -m fea_toolkit.io.table_registry model.s2k`) reports tables the toolkit
+does not consume, and the review report includes the same section.
+
 #### Closed items (README reconciliation, 2026-08-25)
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
+
+## DONE (2026-09-16 — SAP2000 table-coverage detection: registry + drift guards)
+
+**What.** The parser reads *every* table in a ``.s2k`` / ``.json`` into
+``raw_tables`` and silently ignored anything it did not know — so a table
+SAP2000 newly introduces (or one the toolkit has never handled) left no trace.
+There was also no registry of which tables are deliberately skipped versus
+genuinely missing.
+
+**Delivered.**
+
+1. **`io/table_registry.py`** — the registry and triage engine.  Every table is
+   classified ``handled`` / ``known-gap`` / ``ignored`` / ``unhandled``;
+   ``table_coverage()`` and ``unhandled_tables()`` expose it, and
+   ``format_table_coverage()`` renders it.
+2. **Three surfaces** (per the "Option 3" decision):
+   - **parser warning** — ``SAP2000Parser.parse(warn_unhandled=True)`` logs
+     each unrecognised table (off by default);
+   - **review report** — a ``Table coverage`` section in both the text and
+     Markdown reports, expanded with ``fea-review model.s2k --tables``;
+   - **standalone command** — ``python -m fea_toolkit.io.table_registry
+     model.s2k`` (console script ``fea-tables``); exits ``1`` when
+     unrecognised tables are present, so it works as a CI gate.
+3. **Drift guards** (`tests/test_table_registry.py`, 35 tests):
+   - every table name the parser reads — extracted from `s2k_parser.py` by AST,
+     covering exact reads, variant tuples, prefix families and inline tuples —
+     must be registered.  *This is the same class of bug that let the parser
+     read the cardinal point from the wrong table for several releases*;
+   - every table in the committed fixtures must be known to the registry;
+   - the generated registry block in `docs/parser_coverage.md` must match the
+     code (`docs/_generate_parser_tables.py --check`).
+4. **Docs** — `docs/parser_coverage.md` gained the table-coverage half
+   (bucket definitions, the three surfaces, the drift guards) alongside the
+   existing keyword register; its registry block is generated from the module.
+
+**Found immediately.** Running it on the local models surfaced
+`AREA SECTION PROPERTY - TIME DEPENDENT` as unhandled on the first pass — now
+triaged as *ignored* (creep / shrinkage), which is exactly the intended
+workflow: run the tool, triage the surprise, registry stays current.
+
+**Verification.** All committed ``.s2k`` / ``.json`` fixtures are CLEAN
+(``sample.split.json`` excluded — it is a toolkit-internal split dump, not an
+SAP table export).  Full suite 1577 passed / 2 skipped / 4 xfailed.
 
 ## DONE (2026-09-15 — RS element-force extraction: the bulk recorder alternative, measured)
 

@@ -131,9 +131,14 @@ for automated cross-referencing.
   Related: [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Element Properties Configuration](element_properties_config.md) · [Tcl Export for Nonlinear Analysis](tcl_export.md) · [Analysis Workflow](workflow.md)
 
 - [SAP2000 Model Review & Checks](model_review.md) — ✅ Complete
-  > Standalone solver-free review of a parsed SAP2000 (.s2k) model: inventory, connectivity, element releases, data-integrity checks and an optional OpenSees modal/static confirmation pass.
-  Tags: `review`, `checks`, `s2k`, `sap2000`, `connectivity`, `integrity`, `diagnostics`, `cli`
+  > Standalone solver-free review of a parsed SAP2000 (.s2k) model: inventory, connectivity, element releases, data-integrity checks, analytical self-weight and Euler brace buckling, plus an optional OpenSees modal/static confirmation pass with load verification, a wind sanity check and a GB 50011 response-spectrum (CQC) pass.
+  Tags: `review`, `checks`, `s2k`, `sap2000`, `connectivity`, `integrity`, `self-weight`, `buckling`, `wind`, `response-spectrum`, `diagnostics`, `cli`
   Related: [Analysis Workflow](workflow.md) · [Element Classification](element_classification.md) · [Report Generation — Design Proposal](report_generation.md)
+
+- [SAP2000 Parser — Table & Keyword Coverage](parser_coverage.md) — ⚠️ Partial
+  > Table-level coverage registry (handled / known-gap / ignored / unhandled) with runtime detection for unhandled SAP2000 tables, plus the keyword register of parsed-but-unconsumed fields (e.g. transform_stiffness, rigid_factor).
+  Tags: `parser`, `sap2000`, `data-model`, `traceability`, `internal`
+  Related: [Analysis Workflow](workflow.md) · [SAP2000 Model Review & Checks](model_review.md) · [_pending_work.md](_pending_work.md)
 
 - [Rectangular Concrete Section Workflow](rc_rectangular_section_workflow.md) — ✅ Complete
   > SAP2000 → OpenSees fiber workflow for rectangular RC beam/column sections: parser defaults, promotion, Mander confinement, and user overrides.
@@ -292,6 +297,7 @@ Tags across all documentation files:
 - **`bilinearization`** — [csm_bilinearization.md](csm_bilinearization.md)
 - **`brace`** — [pushover_analysis.md](pushover_analysis.md)
 - **`braces`** — [element_classification.md](element_classification.md)
+- **`buckling`** — [model_review.md](model_review.md)
 - **`build`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`capacity`** — [capacity.md](capacity.md), [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`capacity-spectrum`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md)
@@ -309,6 +315,7 @@ Tags across all documentation files:
 - **`conversion`** — [units_conversion.md](units_conversion.md)
 - **`cracked-section`** — [stiffness_factors.md](stiffness_factors.md)
 - **`csm`** — [csm_bilinearization.md](csm_bilinearization.md), [csm_test_model_plan.md](csm_test_model_plan.md), [pushover_analysis.md](pushover_analysis.md)
+- **`data-model`** — [parser_coverage.md](parser_coverage.md)
 - **`dcr`** — [capacity.md](capacity.md)
 - **`deprecation`** — [deprecation_plan.md](deprecation_plan.md)
 - **`design`** — [capacity.md](capacity.md)
@@ -350,6 +357,7 @@ Tags across all documentation files:
 - **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`integrity`** — [model_review.md](model_review.md)
 - **`interactive`** — [viewer.md](viewer.md)
+- **`internal`** — [parser_coverage.md](parser_coverage.md)
 - **`io`** — [json_serialization.md](json_serialization.md), [model_stage_file.md](model_stage_file.md), [results_schema.md](results_schema.md)
 - **`joint`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`json`** — [json_serialization.md](json_serialization.md)
@@ -379,7 +387,7 @@ Tags across all documentation files:
 - **`openseespy`** — [licence.md](licence.md), [openseespy_local_build.md](openseespy_local_build.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`orchestration`** — [analysis.md](analysis.md)
-- **`parser`** — [json_serialization.md](json_serialization.md)
+- **`parser`** — [json_serialization.md](json_serialization.md), [parser_coverage.md](parser_coverage.md)
 - **`partial-fixity`** — [member_releases.md](member_releases.md)
 - **`phase-b`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`pipeline`** — [workflow.md](workflow.md)
@@ -396,6 +404,7 @@ Tags across all documentation files:
 - **`releases`** — [member_releases.md](member_releases.md)
 - **`reporter`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
+- **`response-spectrum`** — [model_review.md](model_review.md)
 - **`results`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`review`** — [model_review.md](model_review.md)
 - **`rhino`** — [model_stage_file.md](model_stage_file.md), [rhino_attributes.md](rhino_attributes.md), [rhino_export.md](rhino_export.md)
@@ -404,10 +413,11 @@ Tags across all documentation files:
 - **`round-trip`** — [model_stage_file.md](model_stage_file.md)
 - **`runtime`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`s2k`** — [model_review.md](model_review.md)
-- **`sap2000`** — [member_releases.md](member_releases.md), [model_review.md](model_review.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
+- **`sap2000`** — [member_releases.md](member_releases.md), [model_review.md](model_review.md), [parser_coverage.md](parser_coverage.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`schema`** — [results_schema.md](results_schema.md)
 - **`scripting`** — [tcl_export.md](tcl_export.md)
 - **`sections`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
+- **`self-weight`** — [model_review.md](model_review.md)
 - **`serialisation`** — [model_stage_file.md](model_stage_file.md)
 - **`serialization`** — [json_serialization.md](json_serialization.md)
 - **`sfi-mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
@@ -424,6 +434,7 @@ Tags across all documentation files:
 - **`test-model`** — [csm_test_model_plan.md](csm_test_model_plan.md)
 - **`theory`** — [mander_confinement_validation.md](mander_confinement_validation.md)
 - **`time-history`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
+- **`traceability`** — [parser_coverage.md](parser_coverage.md)
 - **`typed-results`** — [analysis.md](analysis.md)
 - **`unit-aware`** — [capacity.md](capacity.md)
 - **`units`** — [units_conversion.md](units_conversion.md)
@@ -436,6 +447,7 @@ Tags across all documentation files:
 - **`wall`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`walls`** — [element_classification.md](element_classification.md)
 - **`warranty`** — [licence.md](licence.md)
+- **`wind`** — [model_review.md](model_review.md)
 - **`workflow`** — [layered_analysis_workflow.md](layered_analysis_workflow.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [workflow.md](workflow.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`xara`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [tcl_export.md](tcl_export.md), [xara_gravity_and_solver.md](xara_gravity_and_solver.md), [xara_pushover_workflow.md](xara_pushover_workflow.md), [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`yaml-config`** — [report_generation.md](report_generation.md)
