@@ -48,9 +48,22 @@ T_spec, Sa_spec, *_ = _build_spectrum(spec_cfg, g=g_from_units(md.units))
 ```
 
 `g_from_units()` scales 9.80665 m/s² to the model's length unit, so a
-millimetre model gets `Sa` in mm/s².  The report pipeline, the review's
-`--response-spectrum` pass and `run_linear_cases()` all pass it; omitting
-`g` keeps the historical SI default (9.81 m/s²) for standalone use.
+millimetre model gets `Sa` in mm/s².  `_build_spectrum()` also accepts the
+model's `units` dict directly, so callers need not import `g_from_units`
+themselves — the two forms are equivalent:
+
+```python
+T_spec, Sa_spec, *_ = _build_spectrum(spec_cfg, units=md.units)
+```
+
+`ResponseSpectrum.from_gb50011()` and `plot_seismic_spectrum()` accept the
+same `g` / `units` pair, which keeps the plotted ordinates in the model's
+unit system too.  The report pipeline, the review's `--response-spectrum`
+pass and `run_linear_cases()` all derive `g` from the model;
+omitting both `g` and `units` falls back to the shared SI gravity constant
+(`fea_toolkit.utils.DEFAULT_GRAVITY_MS2`, 9.80665 m/s²) for standalone use.
+Precedence is explicit `g` → `units` → SI constant, and an explicit `g` is
+used verbatim (never re-derived).
 
 ## Relationship to the pipeline
 

@@ -252,8 +252,9 @@ Preprocessor → AnalysisBuilder pipeline and reports:
   The demand spectrum comes from `spectrum._build_spectrum()` — the same
   builder the report pipeline and `run_linear_cases()` use — so review and
   report numbers agree.  Amplitudes are reported in the model's own units
-  (the spectrum uses the fixed `g = 9.81 m/s²` convention of the report
-  pipeline).
+  (the report pipeline passes `g_from_units(model.units)`; a standalone call
+  with `g=None` falls back to the shared SI constant
+  `fea_toolkit.utils.DEFAULT_GRAVITY_MS2`, 9.80665 m/s²).
 
   ```bash
   python -m fea_toolkit.model.review model.s2k --response-spectrum

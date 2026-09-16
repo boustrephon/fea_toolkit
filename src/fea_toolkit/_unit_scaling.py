@@ -198,7 +198,8 @@ def g_from_units(units: dict) -> float:
 
     SAP2000 analysis always assumes time in seconds.  This function
     scales g from the SI value (9.80665 m/s²) to the model's length
-    unit.  Falls back to 9.81 if the length unit is unrecognised.
+    unit.  An unrecognised length unit falls back to metres
+    (``g = 9.80665 m/s²``).
 
     Args:
         units: Model units dict, e.g. ``{'L': 'm', 'F': 'KN', 'T': 'C'}``.

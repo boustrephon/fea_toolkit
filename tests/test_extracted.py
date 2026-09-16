@@ -33,8 +33,16 @@ from fea_toolkit.spectrum import (
     _gb50011_spectrum,
     _iec_spectrum,
     _interp_sa,
+    _resolve_g,
 )
-from fea_toolkit.utils import build_gravity_patterns, deep_merge, infer_loads, pick_wind
+from fea_toolkit.utils import (
+    DEFAULT_GRAVITY_MS2,
+    build_gravity_patterns,
+    deep_merge,
+    g_from_units,
+    infer_loads,
+    pick_wind,
+)
 
 # ── ResponseSpectrum tests ─────────────────────────────────────────────
 
@@ -72,9 +80,9 @@ class TestResponseSpectrum:
         assert len(s.T) == 200
         assert len(s.Sa) == 200
         # At 5% damping η₂ = 1.0; T=0.05 on the ascending branch:
-        # (0.45 + (1.0 − 0.45)·10·0.05) · α_max · g = 0.725 · 0.5 · 9.81
+        # (0.45 + (1.0 − 0.45)·10·0.05) · α_max · g = 0.725 · 0.5 · 9.80665
         sa_at_005 = s.interpolate([0.05])[0]
-        expected = (0.45 + (1.0 - 0.45) * 10.0 * 0.05) * 0.5 * 9.81
+        expected = (0.45 + (1.0 - 0.45) * 10.0 * 0.05) * 0.5 * DEFAULT_GRAVITY_MS2
         np.testing.assert_allclose(sa_at_005, expected, rtol=1e-10)
 
     def test_from_gb50011_plateau(self):
@@ -97,14 +105,14 @@ class TestResponseSpectrum:
 def test_gb50011_spectrum_zero_period():
     """At T=0, the spectrum should return 0.45 × α_max × g."""
     Sa = _gb50011_spectrum([0.0], alpha_max=0.5, tg=0.35)
-    expected = 0.45 * 0.5 * 9.81
+    expected = 0.45 * 0.5 * DEFAULT_GRAVITY_MS2
     assert abs(Sa[0] - expected) < 1e-10, f"{Sa[0]} != {expected}"
 
 
 def test_gb50011_spectrum_plateau():
     """At T=tg, the spectrum should return η₂ × α_max × g."""
     Sa = _gb50011_spectrum([0.35], alpha_max=0.5, tg=0.35, eta2=1.0)
-    expected = 1.0 * 0.5 * 9.81
+    expected = 1.0 * 0.5 * DEFAULT_GRAVITY_MS2
     assert abs(Sa[0] - expected) < 1e-10, f"{Sa[0]} != {expected}"
 
 
@@ -112,7 +120,7 @@ def test_gb50011_spectrum_descending():
     """At T=5*tg, the spectrum should be on the descending branch."""
     Sa = _gb50011_spectrum([1.75], alpha_max=0.5, tg=0.35)
     # Should be less than plateau value
-    plateau = 1.0 * 0.5 * 9.81
+    plateau = 1.0 * 0.5 * DEFAULT_GRAVITY_MS2
     assert Sa[0] < plateau, f"{Sa[0]} not less than plateau {plateau}"
 
 
@@ -150,8 +158,6 @@ def test_build_spectrum_frequent():
 
 def test_build_spectrum_g_is_unit_aware():
     """An explicit model-unit g scales Sa exactly with the length unit."""
-    from fea_toolkit.utils import g_from_units
-
     cfg = {"intensity": 7, "level": "rare", "site_class": "II", "damping": 0.05}
     _, sa_m, *_ = _build_spectrum(cfg, g=g_from_units({"F": "N", "L": "m", "T": "C"}))
     _, sa_mm, *_ = _build_spectrum(cfg, g=g_from_units({"F": "N", "L": "mm", "T": "C"}))
@@ -161,11 +167,73 @@ def test_build_spectrum_g_is_unit_aware():
 
 
 def test_build_spectrum_default_g_is_si():
-    """Omitting g keeps the historical 9.81 m/s² default (backward compat)."""
+    """Omitting g falls back to the shared SI gravity constant, not a literal."""
     cfg = {"intensity": 7, "level": "rare", "site_class": "II", "damping": 0.05}
     _, sa_default, *_ = _build_spectrum(cfg)
-    _, sa_explicit, *_ = _build_spectrum(cfg, g=9.81)
+    _, sa_explicit, *_ = _build_spectrum(cfg, g=DEFAULT_GRAVITY_MS2)
     np.testing.assert_allclose(np.asarray(sa_default), np.asarray(sa_explicit), rtol=1e-12)
+    # An explicitly provided g is preserved verbatim (no re-derivation).
+    _, sa_9_81, *_ = _build_spectrum(cfg, g=9.81)
+    ratio = np.asarray(sa_9_81) / np.asarray(sa_default)
+    np.testing.assert_allclose(ratio, 9.81 / DEFAULT_GRAVITY_MS2, rtol=1e-12)
+
+
+def test_build_spectrum_units_argument_is_used():
+    """units= scales Sa into the model's unit system (mm → ×1000)."""
+    cfg = {"intensity": 7, "level": "rare", "site_class": "II", "damping": 0.05}
+    _, sa_si, *_ = _build_spectrum(cfg)
+    _, sa_mm, *_ = _build_spectrum(cfg, units={"F": "N", "L": "mm", "T": "C"})
+    np.testing.assert_allclose(np.asarray(sa_mm), np.asarray(sa_si) * 1000.0, rtol=1e-12)
+
+
+def test_build_spectrum_units_matches_g_from_units():
+    """units= is equivalent to g=g_from_units(units)."""
+    cfg = {"intensity": 7, "level": "rare", "site_class": "II", "damping": 0.05}
+    units = {"F": "N", "L": "mm", "T": "C"}
+    _, sa_units, *_ = _build_spectrum(cfg, units=units)
+    _, sa_g, *_ = _build_spectrum(cfg, g=g_from_units(units))
+    np.testing.assert_allclose(np.asarray(sa_units), np.asarray(sa_g), rtol=1e-15)
+
+
+def test_build_spectrum_explicit_g_beats_units():
+    """An explicit g wins over units (silent precedence)."""
+    cfg = {"intensity": 7, "level": "rare", "site_class": "II", "damping": 0.05}
+    _, sa_both, *_ = _build_spectrum(cfg, g=9.81, units={"F": "N", "L": "mm", "T": "C"})
+    _, sa_g_only, *_ = _build_spectrum(cfg, g=9.81)
+    np.testing.assert_allclose(np.asarray(sa_both), np.asarray(sa_g_only), rtol=1e-15)
+
+
+def test_resolve_g_precedence():
+    """_resolve_g: explicit g → units dict → shared SI constant."""
+    assert _resolve_g(None, None) == DEFAULT_GRAVITY_MS2
+    assert _resolve_g(None, {"L": "mm"}) == pytest.approx(9806.65)
+    assert _resolve_g(9.81, {"L": "mm"}) == 9.81
+
+
+def test_from_gb50011_units_argument():
+    """from_gb50011(units=...) yields model-unit ordinates."""
+    units = {"F": "N", "L": "mm", "T": "C"}
+    spec_mm = ResponseSpectrum.from_gb50011(alpha_max=0.5, tg=0.35, units=units)
+    spec_g = ResponseSpectrum.from_gb50011(alpha_max=0.5, tg=0.35, g=g_from_units(units))
+    np.testing.assert_allclose(np.asarray(spec_mm.Sa), np.asarray(spec_g.Sa), rtol=1e-15)
+    spec_si = ResponseSpectrum.from_gb50011(alpha_max=0.5, tg=0.35)
+    np.testing.assert_allclose(np.asarray(spec_mm.Sa), np.asarray(spec_si.Sa) * 1000.0, rtol=1e-12)
+
+
+def test_plot_seismic_spectrum_threads_units():
+    """plot_seismic_spectrum accepts g/units and labels the resolved unit."""
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from fea_toolkit.spectrum import plot_seismic_spectrum
+
+    cfg = {"intensity": 7, "acceleration": 0.10, "site_class": "II", "damping": 0.05}
+    fig = plot_seismic_spectrum(cfg, units={"F": "N", "L": "mm", "T": "C"})
+    assert fig is not None
+    ylabel = fig.axes[0].get_ylabel()
+    plt.close(fig)
+    assert "mm/s" in ylabel
 
 
 def test_interp_sa():

@@ -1054,10 +1054,13 @@ push = b.run_pushover_analysis(
 )
 
 # Define elastic design spectrum (e.g. GB 50011, Site Class II)
+# g = 9.80665 m/s² — the toolkit's shared SI constant (DEFAULT_GRAVITY_MS2);
+# for a model in non-SI length units use g = g_from_units(md.units) instead.
+g = 9.80665
 T = [0.0, 0.1, 0.35, 0.5, 1.0, 2.0, 4.0, 6.0]
-Sa = [0.16*9.81*0.45, 0.16*9.81, 0.16*9.81, 0.16*9.81,
-      0.16*9.81*0.35, 0.16*9.81*0.35/2,
-      0.16*9.81*0.35/4, 0.16*9.81*0.35/6]
+Sa = [0.16*g*0.45, 0.16*g, 0.16*g, 0.16*g,
+      0.16*g*0.35, 0.16*g*0.35/2,
+      0.16*g*0.35/4, 0.16*g*0.35/6]
 
 # ADRS conversion + performance point
 adrs = b.pushover_to_adrs(push, modal, shapes, direction='X')

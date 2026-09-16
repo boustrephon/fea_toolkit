@@ -29,6 +29,7 @@ from typing import Any, Optional
 
 import numpy as np
 
+from .utils import DEFAULT_GRAVITY_MS2, g_from_units
 from .utils import cqc_combine as _cqc_combine_modal
 
 # ── Legacy re-export ──────────────────────────────────────────────────
@@ -44,6 +45,35 @@ def __getattr__(name: str):
 
         return plot_seismic_spectrum
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _resolve_g(g: Optional[float], units: Optional[dict]) -> float:
+    """Resolve gravitational acceleration for a GB 50011 spectrum.
+
+    Precedence, highest first: an explicit *g*, the model's *units* dict
+    (via :func:`fea_toolkit.utils.g_from_units`), then the shared SI
+    constant :data:`fea_toolkit.utils.DEFAULT_GRAVITY_MS2` (9.80665 m/s²).
+    An explicit *g* is returned verbatim — it is never re-derived — so
+    callers may pass an already unit-scaled value.
+
+    Parameters
+    ----------
+    g : float, optional
+        Explicit gravitational acceleration, in the caller's unit system.
+    units : dict, optional
+        Model units dict (e.g. ``{"F": "N", "L": "mm", "T": "C"}``).
+        Ignored when *g* is given.
+
+    Returns
+    -------
+    float
+        Gravitational acceleration in the resolved unit system.
+    """
+    if g is not None:
+        return g
+    if units is not None:
+        return g_from_units(units)
+    return DEFAULT_GRAVITY_MS2
 
 
 @dataclass
@@ -79,6 +109,7 @@ class ResponseSpectrum:
         tg: float,
         zeta: float = 0.05,
         g: Optional[float] = None,
+        units: Optional[dict] = None,
         T_max: float = 6.0,
         n_pts: int = 200,
         description: str = "",
@@ -99,9 +130,13 @@ class ResponseSpectrum:
         zeta : float
             Damping ratio (default 0.05).
         g : float, optional
-            Gravitational acceleration (m/s²).  Defaults to ``9.81`` when
-            ``None`` — override with ``g_from_units(model.units)`` to keep
-            the spectrum in the model's unit system.
+            Gravitational acceleration (m/s²).  Used verbatim when given;
+            ``None`` falls back to *units*, then to the shared SI constant
+            :data:`fea_toolkit.utils.DEFAULT_GRAVITY_MS2` (9.80665 m/s²).
+        units : dict, optional
+            Model units dict (e.g. ``{"F": "N", "L": "mm", "T": "C"}``).
+            Ignored when *g* is given; otherwise the spectrum is scaled into
+            the model's unit system (:func:`fea_toolkit.utils.g_from_units`).
         T_max : float
             Upper period bound (s, default 6.0).
         n_pts : int
@@ -114,8 +149,7 @@ class ResponseSpectrum:
         ResponseSpectrum
             The spectrum ordinates.
         """
-        if g is None:
-            g = 9.81
+        g = _resolve_g(g, units)
 
         gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
         eta_1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
@@ -284,7 +318,7 @@ def _gb50011_spectrum(
     gamma: float = 0.9,
     eta1: float = 0.02,
     eta2: float = 1.0,
-    g: float = 9.81,
+    g: Optional[float] = None,
 ) -> np.ndarray:
     """Return spectral acceleration Sa (m/s²) for a GB 50011 elastic spectrum.
 
@@ -302,14 +336,17 @@ def _gb50011_spectrum(
         Linear-drop correction factor (default 0.02 for 5 % damping).
     eta2 : float
         Damping reduction factor (default 1.0 for 5 % damping).
-    g : float
-        Gravitational acceleration (m/s²).  Default 9.81.
+    g : float, optional
+        Gravitational acceleration (m/s²).  Used verbatim when given;
+        ``None`` falls back to the shared SI constant
+        :data:`fea_toolkit.utils.DEFAULT_GRAVITY_MS2` (9.80665 m/s²).
 
     Returns
     -------
     np.ndarray
         Spectral acceleration values (m/s²).
     """
+    g = _resolve_g(g, None)
     Sa = []
     for T in T_values:
         if T <= 0.0:
@@ -409,7 +446,12 @@ def _iec_spectrum(T, pga, zeta: float = 0.05):
     return float(Sa[0]) if scalar_in else Sa
 
 
-def _build_spectrum(cfg: dict, *, g: Optional[float] = None) -> tuple:
+def _build_spectrum(
+    cfg: dict,
+    *,
+    g: Optional[float] = None,
+    units: Optional[dict] = None,
+) -> tuple:
     """Build a GB 50011 response spectrum from a configuration dict.
 
     The dict should contain keys *intensity*, *acceleration*, *site_class*,
@@ -418,10 +460,16 @@ def _build_spectrum(cfg: dict, *, g: Optional[float] = None) -> tuple:
     Args:
         cfg: Spectrum configuration dict (see above).
         g: Gravitational acceleration in the model's length-unit per second
-            squared.  ``None`` falls back to the SI value (9.81 m/s²).
+            squared.  An explicit value is used as-is; ``None`` falls back
+            to *units*, then to the shared SI constant
+            :data:`fea_toolkit.utils.DEFAULT_GRAVITY_MS2` (9.80665 m/s²).
             Pass ``g_from_units(model.units)`` so the returned spectral
             accelerations are in the model's unit system (e.g. mm/s² for a
             millimetre model).
+        units: Model units dict (e.g. ``{"F": "N", "L": "mm", "T": "C"}``).
+            Ignored when *g* is given; otherwise the returned accelerations
+            are scaled into the model's unit system via
+            :func:`fea_toolkit.utils.g_from_units`.
 
     Returns
     -------
@@ -466,8 +514,9 @@ def _build_spectrum(cfg: dict, *, g: Optional[float] = None) -> tuple:
         alpha_max = alpha_rare.get(intensity, 0.50)
         label = "Rare (罕遇)"
 
-    if g is None:
-        g = 9.81
+    # Resolve g: explicit value → units dict → shared SI constant.  Never a
+    # hardcoded literal (.clinerules §4.6); an explicit g is used verbatim.
+    g = _resolve_g(g, units)
     gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
     eta1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
     eta2 = max(0.55, 1.0 + (0.05 - zeta) / (0.08 + 1.6 * zeta))
