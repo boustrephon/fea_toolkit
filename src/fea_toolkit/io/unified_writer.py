@@ -238,6 +238,16 @@ _RS_ELEMENT_FORCE_COMPONENTS = (
 #: ``docs/deprecation_plan.md``.
 _RS_ELEMENT_LEGACY_ALIASES = ("Vy_i", "Vy_j", "Vz_i", "Vz_j", "My_i", "My_j", "Mz_i", "Mz_j")
 
+#: Canonical component each deprecated alias mirrors.  ``Vy`` / ``Vz`` were once
+#: derived from the moment gradient and now hold the local shears — i.e. the
+#: canonical ``Fy`` / ``Fz`` components (compare ``_RS_LEGACY_ALIASES`` in
+#: ``opensees/_runner_rs.py``); ``My`` / ``Mz`` are canonical names in their
+#: own right.  Reading the canonical key here means the alias arrays do not
+#: depend on the producer having echoed the legacy name back onto the record.
+_RS_ELEMENT_LEGACY_SOURCES: dict[str, str] = {
+    alias: alias.replace("Vy", "Fy").replace("Vz", "Fz") for alias in _RS_ELEMENT_LEGACY_ALIASES
+}
+
 
 def collect_rs_element_force_arrays(
     rs_element_forces: Optional[dict[str, Any]] = None,
@@ -283,8 +293,8 @@ def collect_rs_element_force_arrays(
         arrays[f"rs/elem_{qty.lower()}"] = np.array([r.get(qty, 0.0) for r in results], dtype=float)
 
     # ── Legacy aliases (DEPRECATED — see _RS_ELEMENT_LEGACY_ALIASES) ──
-    for alias in _RS_ELEMENT_LEGACY_ALIASES:
-        arrays[f"rs/elem_{alias}"] = np.array([r.get(alias, 0.0) for r in results], dtype=float)
+    for alias, canonical in _RS_ELEMENT_LEGACY_SOURCES.items():
+        arrays[f"rs/elem_{alias}"] = np.array([r.get(canonical, 0.0) for r in results], dtype=float)
 
     return arrays
 
