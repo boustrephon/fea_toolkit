@@ -155,12 +155,13 @@ def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: s
     bb = data["bounding_box"]
     fu = data["force_unit"]
     lu = data["length_unit"]
-    x_face = data["x_face"]
-    y_face = data["y_face"]
-    fx = data["fx"]
-    fy = data["fy"]
-    p_x = data["p_x"]
-    p_y = data["p_y"]
+
+    # Render the table body from the preformatted ``data["rows"]`` so the
+    # markdown and the structured data used by the model review can never
+    # drift apart.
+    table_rows = [
+        "| " + " | ".join(str(value) for value in row.values()) + " |" for row in data["rows"]
+    ]
 
     lines = [
         f"**Bounding box:** "
@@ -173,8 +174,7 @@ def wind_sanity_check(md, df_linear, wind_case_x: str = "Wind+X", wind_case_y: s
         "",
         f"| Face | Area ({lu}²) | Total {fu} | Pressure ({fu}/{lu}²) |",
         "|---|---|---|---|",
-        f"| Wind +X (Y‑Z face) | {x_face:.0f} | {fx:,.0f} | {p_x:.2f} |",
-        f"| Wind +Y (X‑Z face) | {y_face:.0f} | {fy:,.0f} | {p_y:.2f} |",
+        *table_rows,
     ]
 
     if data["within_10pct"]:
