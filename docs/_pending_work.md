@@ -640,10 +640,13 @@ holds the evidence table and the two lessons; `.clinerules` gains anti-pattern
 *Third-Party API Assumptions*, whose §12.1 pins the timer contract; and
 `docs/llm_guide.md` gains the same summary under Visualisation plus a
 Quick-Debugging entry for "animation only redraws on click".  Two tests now
-assert the contract against the **installed PyVista** rather than a fake
-(`test_real_pyvista_signature_uses_duration`,
-`test_real_pyvista_timer_renders_and_passes_step`), so an upstream rename or a
-dropped `Render()` fails loudly instead of silently degrading onto the VTK path.
+exercise the contract on the **installed PyVista** rather than a fake
+(`test_real_pyvista_native_timer_is_used`,
+`test_real_pyvista_timer_passes_step_and_renders_each_frame`): they register the
+adapter on a real `pv.Plotter`, fire a real `TimerEvent`, and assert that the
+callback receives the step count and that a frame was rendered per step — so a
+renamed `duration` keyword or a dropped `Render()` fails loudly instead of
+silently degrading onto the VTK path.
 
 **Validation.**  Full suite `1508 passed, 1 skipped, 4 xfailed`;
 `mkdocs build --strict` exit 0; ruff clean.  New tests assert *which keyword*

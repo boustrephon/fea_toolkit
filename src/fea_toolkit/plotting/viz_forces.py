@@ -222,16 +222,21 @@ def _extract_npz_rs_forces(source) -> list:
     ids = list(ids)
     n = len(ids)
 
-    def _col(name: str) -> list:
-        """Return one numeric column, padded to *n* rows (empty when absent)."""
+    def _col(name: str):
+        """Return one numeric column, or ``None`` when the array is absent."""
         arr = source.get(f"rs/elem_{name.lower()}")
         if arr is None:
             # Tolerate the deprecated alias spelling (e.g. ``rs/elem_My_i``).
             arr = source.get(f"rs/elem_{name}")
         if arr is None:
-            return [0.0] * n
+            return None
         vals = [float(v) for v in np.asarray(arr).ravel()]
-        return (vals + [0.0] * n)[:n]
+        if len(vals) != n:
+            raise ValueError(
+                f"rs/elem_{name.lower()} has {len(vals)} rows, expected {n} "
+                "(the rs/elem_sap_id count)"
+            )
+        return vals
 
     z_bot = _col("z_bot")
     z_mid = _col("z_mid")
@@ -239,9 +244,14 @@ def _extract_npz_rs_forces(source) -> list:
 
     records = []
     for i in range(n):
-        record = {"elem_id": str(ids[i]), "z_bot": z_bot[i], "z_mid": z_mid[i]}
+        record = {"elem_id": str(ids[i])}
+        if z_bot is not None:
+            record["z_bot"] = z_bot[i]
+        if z_mid is not None:
+            record["z_mid"] = z_mid[i]
         for comp, vals in columns.items():
-            record[comp] = vals[i]
+            if vals is not None:
+                record[comp] = vals[i]
         records.append(record)
     return records
 

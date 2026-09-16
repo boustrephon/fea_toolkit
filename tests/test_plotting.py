@@ -2224,38 +2224,69 @@ class TestAnimationTimerCallbackArity:
         assert len(fp.method_calls) == 1, fp.method_calls
         assert fp.method_calls[0][2].get("duration") == 17
 
-    def test_real_pyvista_signature_uses_duration(self):
-        """Pin the upstream contract that the helper depends on.
+    def test_real_pyvista_native_timer_is_used(self):
+        """A real ``pv.Plotter`` takes PyVista's own (rendering) timer path.
 
-        Guards against a regression *here* (someone "fixing" a ``TypeError`` by
-        switching to ``interval``) and against an upstream rename.  PyVista's
-        ``add_timer_event`` has taken ``duration`` since the method was added in
-        0.43, and its timer passes a single ``step`` argument — assertions
-        against the installed package, not a fake, are what make that explicit.
+        Behavioural replacement for the old signature introspection: if the
+        helper passed a keyword PyVista does not accept (the historical
+        ``interval=``), the real ``add_timer_event`` call would raise
+        ``TypeError`` and the helper would fall back to the low-level VTK
+        observer, returning ``False`` — the non-rendering path that froze the
+        mode animation.  ``True`` therefore means PyVista owns the timer.
         """
-        import inspect
+        from fea_toolkit.plotting.viz import _add_animation_timer
 
-        import pyvista as pv
+        pv = pytest.importorskip("pyvista")
 
-        params = list(inspect.signature(pv.Plotter.add_timer_event).parameters)
-        assert params == ["self", "max_steps", "duration", "callback"], (
-            f"PyVista changed the add_timer_event signature: {params}"
-        )
+        def callback(step):
+            return step
 
-    def test_real_pyvista_timer_renders_and_passes_step(self):
-        """PyVista's ``Timer.execute`` passes one arg and renders itself.
+        plotter = pv.Plotter(off_screen=True)
+        try:
+            assert _add_animation_timer(plotter, callback, max_steps=10, interval_ms=17) is True
+        finally:
+            plotter.close()
 
-        If upstream ever stops calling ``Render()``, the explicit-render rule in
-        ``plot_mode_animation`` has to be revisited — so read the real source
-        rather than trusting the docstring.
+    def test_real_pyvista_timer_passes_step_and_renders_each_frame(self):
+        """Driving PyVista's own timer: the callback gets ``step``, frames render.
+
+        Behavioural replacement for the old source-text assertion.  Firing a
+        ``TimerEvent`` through the real interactor exercises upstream's own
+        timer, which invokes the callback with its step count and renders a
+        frame per invocation.  That is exactly the contract
+        ``plot_mode_animation`` relies on when it skips ``plotter.render()`` —
+        it only renders when the helper reports ``False``.
         """
-        import inspect
+        from fea_toolkit.plotting.viz import _add_animation_timer
 
-        import pyvista as pv
+        pv = pytest.importorskip("pyvista")
 
-        src = inspect.getsource(pv.Timer.execute)
-        assert "self.callback(self.step)" in src, "Timer no longer passes a single step"
-        assert "Render()" in src, "PyVista's timer no longer renders — revisit the helper"
+        steps = []
+        frames = []
+
+        def callback(step):
+            steps.append(step)
+
+        plotter = pv.Plotter(off_screen=True)
+        try:
+            plotter.add_mesh(pv.Sphere())
+            assert _add_animation_timer(plotter, callback, max_steps=3, interval_ms=10) is True
+
+            render_window = plotter.render_window
+            # vtkRenderWindow fires StartEvent once per Render() call.
+            render_window.AddObserver("StartEvent", lambda *_: frames.append(1))
+
+            render_window.GetInteractor().InvokeEvent("TimerEvent")
+
+            # Zero-based and contiguous — one step per timer tick, whether a
+            # release executes a single step per event or drains ``max_steps``
+            # within one event.
+            assert steps, "PyVista's timer never invoked the callback"
+            assert steps == list(range(len(steps))), f"unexpected step sequence: {steps}"
+            # PyVista rendered every frame itself — one render per step.
+            assert len(frames) == len(steps), f"{len(frames)} frames for {len(steps)} steps"
+        finally:
+            plotter.close()
 
     def test_pyvista_signature_mismatch_falls_back_to_vtk(self):
         """A ``TypeError`` from the documented call falls back to VTK.
@@ -2560,8 +2591,8 @@ class TestForceDiagramUnified:
         assert records[0]["Mz_i"] == pytest.approx(6.0)
         assert records[1]["Mz_i"] == pytest.approx(12.0)
         assert records[0]["Fy_i"] == pytest.approx(2.0)
-        # Components absent from the archive default to zero (no KeyError).
-        assert records[0]["Fx_i"] == pytest.approx(0.0)
+        # Components absent from the archive are omitted, not zero-padded.
+        assert "Fx_i" not in records[0]
         # An archive without the block yields no records.
         assert _extract_npz_rs_forces(_minimal_npz_dict()) == []
 
