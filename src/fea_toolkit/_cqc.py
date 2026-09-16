@@ -94,7 +94,11 @@ def cqc_rho_matrix(omega: list[float], damp_ratios: list[float]) -> np.ndarray:
     # Ratio r_ij = ω_i / ω_j, with the scalar path's ω_j <= 0 → 1.0 fallback.
     positive = om > 0.0
     om_safe = np.where(positive, om, 1.0)
-    ratio = om[:, None] / om_safe[None, :]
+    # A sentinel ω yields an ``inf / inf`` self-ratio (NaN) here; suppress the
+    # invalid/divide flag so ``np.seterr(invalid="raise")`` does not abort
+    # before the guard below can drop the non-finite entry.
+    with np.errstate(invalid="ignore", divide="ignore"):
+        ratio = om[:, None] / om_safe[None, :]
     ratio = np.where(positive[None, :], ratio, 1.0)
 
     # Mirror the scalar guard: widely separated modes are uncorrelated

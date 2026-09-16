@@ -58,7 +58,6 @@ def test_rho_matrix_guards_extreme_ratio():
     assert rho[0, 0] == pytest.approx(1.0)
 
 
-@pytest.mark.filterwarnings("ignore:invalid value encountered in divide")
 def test_rho_matrix_non_finite_diagonal_matches_scalar():
     """A non-finite ω makes its diagonal ratio ``inf / inf`` → NaN.
 
@@ -76,7 +75,6 @@ def test_rho_matrix_non_finite_diagonal_matches_scalar():
     assert rho[1, 0] == 0.0
 
 
-@pytest.mark.filterwarnings("ignore:invalid value encountered in divide")
 def test_cqc_matrix_scalar_parity_with_inf_frequency():
     """Scalar and matrix paths agree when one mode has ``ω = inf``.
 
