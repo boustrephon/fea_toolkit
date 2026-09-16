@@ -114,7 +114,13 @@ def cqc_rho_matrix(omega: list[float], damp_ratios: list[float]) -> np.ndarray:
         rho = numerator / denominator
 
     rho = np.where(correlated, rho, 0.0)
-    return np.nan_to_num(rho, nan=0.0, posinf=0.0, neginf=0.0)
+    rho = np.nan_to_num(rho, nan=0.0, posinf=0.0, neginf=0.0)
+    # A mode is always perfectly correlated with itself (rho[i, i] = 1), even
+    # when its own frequency ratio is non-finite (e.g. an inf/inf diagonal from
+    # a sentinel omega), so the sanitised matrix must keep a unit diagonal while
+    # non-finite cross-correlations stay at zero.
+    np.fill_diagonal(rho, 1.0)
+    return rho
 
 
 def cqc_combine_matrix(values: np.ndarray, rho: np.ndarray) -> np.ndarray:
