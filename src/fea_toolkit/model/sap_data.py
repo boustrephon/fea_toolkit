@@ -91,6 +91,12 @@ class FrameEndOffset:
     (insertion point) settings.  These shift the section position relative
     to the reference line.  See :class:`FrameElement` for the cardinal
     point numbering scheme (1–11).
+
+    ``rigid_factor`` is SAP2000's rigid-zone factor for the *longitudinal*
+    offsets — the fraction of the offset length, measured from the node,
+    that is treated as fully rigid (``1.0`` = fully rigid, the default;
+    ``0.0`` = the offset retains the full section flexibility).  It mirrors
+    the ``RigidFactor`` column of SAP2000's frame end-offset table.
     """
 
     end_i: float = 0.0  # Longitudinal offset at I-end
@@ -99,6 +105,7 @@ class FrameEndOffset:
     off_z_i: float = 0.0  # Lateral z-offset at I-end (from cardinal pt)
     off_y_j: float = 0.0  # Lateral y-offset at J-end (from cardinal pt)
     off_z_j: float = 0.0  # Lateral z-offset at J-end (from cardinal pt)
+    rigid_factor: float = 1.0  # Rigid-zone factor (0 = flexible, 1 = rigid)
 
 
 # Local DOF order used by SAP2000 frame end releases.
@@ -403,6 +410,16 @@ class Section:
     # Stiffness modifiers from FRAME SECTION PROPERTIES 01 - GENERAL
     # (AMod, A2Mod, A3Mod, JMod, I2Mod, I3Mod — 1.0 = no modification)
     modifiers: dict[str, float] = field(default_factory=dict)
+    # Section centroid location relative to the section reference point, in
+    # the local 2 / 3 directions (SAP2000 ``CGOffset2`` / ``CGOffset3``).
+    # Zero for doubly-symmetric shapes; non-zero for channel / angle / tee.
+    cg_offset_2: float = 0.0
+    cg_offset_3: float = 0.0
+    # Shear-centre eccentricity in the local 2 / 3 directions (SAP2000
+    # ``EccV2`` / ``EccV3``), measured from the centroid.  Zero for
+    # doubly-symmetric shapes.
+    ecc_v2: float = 0.0
+    ecc_v3: float = 0.0
 
     @property
     def shape_id(self) -> str:
@@ -1476,6 +1493,13 @@ class FrameElement:
     10     Centroid (default)
     11     Shear centre
     =====  ===============
+
+    ``mirror_2`` / ``mirror_3`` and ``transform_stiffness`` mirror the
+    remaining columns of SAP2000's ``FRAME INSERTION POINT ASSIGNMENTS``
+    table.  ``transform_stiffness`` corresponds to the GUI option *"do not
+    transform frame stiffness for offsets from centroid"* in inverted
+    form — ``True`` (SAP2000's ``Transform=Yes`` default) means the
+    stiffness *is* transformed to account for the offset from the centroid.
     """
 
     elem_id: str  # SAP2000 frame label
@@ -1492,6 +1516,10 @@ class FrameElement:
     cardinal_point: int = (
         10  # Insertion point per SAP2000/ETABS (1-11; 10=centroid, 5=middle center)
     )
+    # Insertion-point flags (SAP2000 "FRAME INSERTION POINT ASSIGNMENTS")
+    mirror_2: bool = False  # Mirror the section about local 2
+    mirror_3: bool = False  # Mirror the section about local 3
+    transform_stiffness: bool = True  # Transform stiffness for centroid offset
 
 
 @dataclass

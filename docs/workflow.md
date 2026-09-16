@@ -71,13 +71,14 @@ Converts each raw table into dataclass instances:
 | `"OBJECT GEOMETRY"` | `Node` |
 | `"JOINT RESTRAINTS"` | `Restraint` |
 | `"MATERIAL PROPERTIES"` | `Material` |
-| `"FRAME SECTION PROPERTIES 01 - GENERAL"` | `RectangularSection`, `ISection`, … (also carries ``modifiers`` dict: AMod, I3Mod, I2Mod, JMod) |
+| `"FRAME SECTION PROPERTIES 01 - GENERAL"` | `RectangularSection`, `ISection`, … (also carries ``modifiers`` dict: AMod, I3Mod, I2Mod, JMod, and the section centroid / shear offsets ``CGOffset2``/``CGOffset3``/``EccV2``/``EccV3`` → ``cg_offset_2``/``cg_offset_3``/``ecc_v2``/``ecc_v3``) |
 | `"AREA SECTION PROPERTIES"` | `ShellSection` (stores `thickness`; `A=I33=I22=J=0`) |
 | `"CONNECTIVITY - FRAME"` | `FrameElement` |
-| `"FRAME SECTION ASSIGNMENTS"` | ``{frame_id: section_name}`` mapping + `cardinal_point` (1–11, default 10 = centroid) |
+| `"FRAME SECTION ASSIGNMENTS"` | ``{frame_id: section_name}`` mapping (legacy/E2K exports may also carry a ``CardinalPoint``/``Cardinal``/``CARDINALPT``/``InsertPoint`` column) |
+| `"FRAME INSERTION POINT ASSIGNMENTS"` | `FrameElement.cardinal_point` (1–11, default 10 = centroid; value is a labelled string, e.g. ``"8 (top center)"``) + ``mirror_2``/``mirror_3``/``transform_stiffness``.  Primary source for the insertion point; the ``FRAME SECTION ASSIGNMENTS`` column is the fallback |
 | `"AREA ASSIGNMENTS"` | `AreaElement` + ``{area_id: section_name}`` |
 | `"AREA MESH ASSIGNMENTS"` | `AreaMesh` |
-| `"FRAME END LENGTH OFFSETS"` | `FrameEndOffset` (``end_i``/``end_j`` + ``off_y_i``/``off_z_i``/``off_y_j``/``off_z_j`` from cardinal pt) |
+| `"FRAME END OFFSET ASSIGNMENTS"` (also `"FRAME END LENGTH OFFSETS"`, `"FRAME OFFSET ALONG LENGTH ASSIGNMENTS"`) | `FrameEndOffset` (``end_i``/``end_j`` from ``LengthI``/``LengthJ`` — or legacy ``EndI``/``EndJ`` — plus ``rigid_factor`` from ``RigidFactor``); the lateral ``off_y_i``/``off_z_i``/``off_y_j``/``off_z_j`` are derived from the cardinal point and the section centroid offset |
 | `"JOINT LOADS"` | `JointLoad` |
 | `"FRAME DISTRIBUTED LOADS"` | `FrameDistributedLoad` |
 | `"AREA UNIFORM LOADS"` | `AreaUniformLoad` |

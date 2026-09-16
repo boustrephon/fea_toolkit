@@ -553,7 +553,7 @@ These offsets affect:
 - **Clash detection** in visualisation — cardinal points determine
   where sections appear in 3D views.
 
-**Current status**: ``FrameElement`` now has a ``cardinal_point`` field (default 10 = centroid).  The parser extracts cardinal point values from the ``FRAME SECTION ASSIGNMENTS`` table (columns ``CardinalPoint``, ``Cardinal``, ``CARDINALPT``, or ``InsertPoint``) and computes lateral (y, z) offsets from section dimensions.  These are merged into ``FrameEndOffset`` records at parse time, matching the E2K/ETABS approach.  ``FrameEndOffset`` has been expanded with ``off_y_i``, ``off_z_i``, ``off_y_j``, ``off_z_j`` fields for the lateral components.
+**Current status**: ``FrameElement`` has a ``cardinal_point`` field (default 10 = centroid).  The parser reads the insertion point from SAP2000's modern ``FRAME INSERTION POINT ASSIGNMENTS`` table, where the value is a labelled string (``CardinalPt="8 (top center)"``), and also captures the ``Mirror2`` / ``Mirror3`` / ``Transform`` flags.  A ``CardinalPoint`` / ``Cardinal`` / ``CARDINALPT`` / ``InsertPoint`` column in ``FRAME SECTION ASSIGNMENTS`` is used as a legacy/E2K fallback.  Lateral (y, z) offsets are computed from the section dimensions and merged into ``FrameEndOffset`` records at parse time; for cardinal points 10 (centroid) and 11 (shear centre) the section's ``CGOffset2``/``CGOffset3`` and ``EccV2``/``EccV3`` (from ``FRAME SECTION PROPERTIES 01 - GENERAL``) locate the true centroid / shear centre, which is non-zero for asymmetric shapes (channel, angle, tee).  ``FrameEndOffset`` carries ``off_y_i``, ``off_z_i``, ``off_y_j``, ``off_z_j`` for the lateral components and ``rigid_factor`` for the SAP2000 rigid-zone factor.
 
 ### 3.6 Model Validation
 
@@ -832,7 +832,7 @@ dependency on other items.
 
 | Priority | Issue | Section | Effort | Why now / later | Status |
 |----------|-------|---------|--------|-----------------|--------|
-| **P0** | Cardinal point + offset merging | 3.5, 3.4 | Small | Sections positioned incorrectly for RC beams; affects loads, spans, visualisation. Cardinal point parsed from FRAME SECTION ASSIGNMENTS; offsets combined with longitudinal end offsets at parse time per E2K approach. | ✅ Done |
+| **P0** | Cardinal point + offset merging | 3.5, 3.4 | Small | Sections positioned incorrectly for RC beams; affects loads, spans, visualisation. Cardinal point parsed from `FRAME INSERTION POINT ASSIGNMENTS` (with the `FRAME SECTION ASSIGNMENTS` column as an E2K fallback); the section centroid / shear offsets (`CGOffset2`/`CGOffset3`, `EccV2`/`EccV3`) position cardinal points 10/11; offsets combined with longitudinal end offsets at parse time. | ✅ Done |
 | **P1** | Frame-to-shell drilling DOF | 3.2 | Medium (builder change) | Causes stiffness singularities in combined frame-shell models. Multiple well-known workarounds exist. | ❌ Pending |
 | **P2** | Auto line constraints | 3.1/3.2 | Medium (builder change) | Mesh-density transitions (wall ↔ slab, frame ↔ slab) need automatic detection and MPC application. Implemented as `find_constraint_edges()` — sorted-tuple edge registry + sweep-line chain following. Returns 46 edges for the Project B. | ✅ Done |
 | **P3** | Joint modelling — Level 2 | 3.4 | Medium (builder change) | Enables semi-rigid connection modelling. Level 1 (rigid offset) exists; Level 2 replaces stiff links with calibrated zero-length springs (flexibility %). | ❌ Pending |

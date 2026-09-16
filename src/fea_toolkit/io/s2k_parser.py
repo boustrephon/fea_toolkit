@@ -328,6 +328,19 @@ class SAP2000Parser:
             if cp is not None:
                 fe.cardinal_point = cp
 
+        # ── Apply insertion-point flags (mirror / transform stiffness) ──
+        # Sourced from SAP2000's "FRAME INSERTION POINT ASSIGNMENTS" table.
+        for eid, info in self._get_frame_insertion_points().items():
+            fe = frame_elements.get(eid)
+            if fe is None:
+                continue
+            if "mirror_2" in info:
+                fe.mirror_2 = info["mirror_2"]
+            if "mirror_3" in info:
+                fe.mirror_3 = info["mirror_3"]
+            if "transform_stiffness" in info:
+                fe.transform_stiffness = info["transform_stiffness"]
+
         # ── Compute combined offsets (longitudinal + cardinal point) ──
         frame_end_offsets = self._merge_cardinal_into_offsets(
             frame_elements,
@@ -605,7 +618,21 @@ class SAP2000Parser:
         return auto_mesh
 
     def _get_frame_end_offsets(self) -> dict[str, FrameEndOffset]:
-        """Parse FRAME END LENGTH OFFSETS table.
+        """Parse frame end-length offsets (rigid zones).
+
+        Probes the known SAP2000 table-name variants — see
+        :attr:`_END_OFFSET_TABLE_NAMES` — because the table (and its
+        columns) has been renamed across versions.  The modern table is::
+
+            TABLE: "FRAME END OFFSET ASSIGNMENTS"
+               Frame=1   Type=Defined   LengthI=0.35   LengthJ=0.35   RigidFactor=1
+
+        ``Type`` is ``Automatic`` (derived from section depth) or
+        ``Defined``; ``LengthI``/``LengthJ`` are the longitudinal offset
+        lengths at the I/J ends; ``RigidFactor`` is the fraction of the
+        offset zone treated as fully rigid (0–1).  The alternative column
+        names ``EndI``/``EndJ`` are also accepted.  When a frame appears in
+        more than one variant table the first (newest) table wins.
 
         Returns
         -------
@@ -613,14 +640,19 @@ class SAP2000Parser:
             Mapping from frame ID to its I-end and J-end rigid offsets.
         """
         offsets: dict[str, FrameEndOffset] = {}
-        for rec in self._raw_tables.get("FRAME END LENGTH OFFSETS", []):
-            fid = str(rec.get("Frame", "0"))
-            if fid == "0":
-                continue
-            offsets[fid] = FrameEndOffset(
-                end_i=self._to_float(rec.get("EndI", 0.0)) or 0.0,
-                end_j=self._to_float(rec.get("EndJ", 0.0)) or 0.0,
-            )
+        for table_name in self._END_OFFSET_TABLE_NAMES:
+            for rec in self._raw_tables.get(table_name, []):
+                fid = str(rec.get("Frame", "0"))
+                if fid == "0" or fid in offsets:
+                    continue
+                end_i = rec.get("LengthI", rec.get("EndI", 0.0))
+                end_j = rec.get("LengthJ", rec.get("EndJ", 0.0))
+                rigid = self._to_float(rec.get("RigidFactor"))
+                offsets[fid] = FrameEndOffset(
+                    end_i=self._to_float(end_i) or 0.0,
+                    end_j=self._to_float(end_j) or 0.0,
+                    rigid_factor=rigid if rigid is not None else 1.0,
+                )
         return offsets
 
     def _get_area_mesh_assignments(self) -> dict[str, AreaMesh]:
@@ -780,6 +812,27 @@ class SAP2000Parser:
     )
     # Companion table carrying partial-fixity spring stiffnesses.
     _PARTIAL_FIXITY_TABLE_NAMES = ("FRAME RELEASE ASSIGNMENTS 2 - PARTIAL FIXITY",)
+    # ── End-offset assignment tables (modern → legacy) ─────────────
+    # SAP2000 renamed this table across versions and renamed the columns
+    # too (``LengthI``/``LengthJ`` vs ``EndI``/``EndJ``).  All known
+    # variants are probed so a model from any version parses identically;
+    # the first table that carries a given frame wins.
+    _END_OFFSET_TABLE_NAMES = (
+        "FRAME END OFFSET ASSIGNMENTS",  # modern SAP2000
+        "FRAME END LENGTH OFFSETS",  # alternative naming
+        "FRAME OFFSET ALONG LENGTH ASSIGNMENTS",  # legacy SAP2000
+    )
+    # ── Frame insertion-point table (modern SAP2000) ───────────────
+    # Holds the cardinal point plus the mirror / transform-stiffness flags.
+    _INSERTION_POINT_TABLE_NAMES = ("FRAME INSERTION POINT ASSIGNMENTS",)
+    # Column names that have historically carried the cardinal point in the
+    # ``FRAME SECTION ASSIGNMENTS`` table (legacy / E2K exports).
+    _CARDINAL_POINT_COLUMNS = ("CardinalPoint", "Cardinal", "CARDINALPT", "InsertPoint")
+    # Lateral offsets below this magnitude (model length units) are treated as
+    # zero.  SAP2000 reports tiny floating-point residue for the ``CGOffset`` /
+    # ``EccV`` of doubly-symmetric sections (e.g. ~1e-17 m), which would
+    # otherwise create spurious near-zero offset records for cardinal point 10.
+    _LATERAL_OFFSET_TOL = 1e-9
 
     @staticmethod
     def _coerce_release_flag(value: Any) -> int:
@@ -936,11 +989,79 @@ class SAP2000Parser:
                 assign[eid] = sec
         return assign
 
-    def _get_frame_cardinal_points(self) -> dict[str, int]:
-        """Extract cardinal point (insertion point) from FRAME SECTION ASSIGNMENTS.
+    @staticmethod
+    def _parse_cardinal_point(value: Any) -> Optional[int]:
+        """Extract the cardinal-point integer from an insertion-point cell.
 
-        Looks for columns named ``CardinalPoint``, ``Cardinal``, ``CARDINALPT``,
-        or ``InsertPoint`` in the FRAME SECTION ASSIGNMENTS table.
+        Modern SAP2000 writes the cardinal point as a labelled string —
+        e.g. ``"8 (top center)"`` or ``"10 (centroid)"`` — while legacy and
+        E2K exports use a bare integer.  Both forms are accepted.
+
+        Args:
+            value: Raw cell value (``str``, ``int`` or ``float``).
+
+        Returns:
+            The cardinal point (1–11), or ``None`` when it cannot be read.
+        """
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            return int(value)
+        # Labelled string form: leading integer, e.g. "8 (top center)".
+        match = re.match(r"^\s*(-?\d+)", str(value))
+        return int(match.group(1)) if match else None
+
+    def _get_frame_insertion_points(self) -> dict[str, dict[str, Any]]:
+        """Parse the modern ``FRAME INSERTION POINT ASSIGNMENTS`` table.
+
+        Each row carries the cardinal point plus the mirror / transform
+        flags, e.g.::
+
+            Frame=24   CardinalPt="8 (top center)"   Mirror2=No   Mirror3=No   Transform=Yes
+
+        ``Transform=Yes`` is SAP2000's default and means the stiffness
+        *is* transformed to account for the offset from the centroid (the
+        GUI checkbox *"do not transform frame stiffness for offsets from
+        centroid"* is therefore unchecked).
+
+        Returns:
+            Mapping ``{frame_id: {key: value}}`` where the inner dict may
+            contain ``cardinal_point`` (int), ``mirror_2`` (bool),
+            ``mirror_3`` (bool) and ``transform_stiffness`` (bool).  Only
+            keys actually present in the table are included.
+        """
+        result: dict[str, dict[str, Any]] = {}
+        for table_name in self._INSERTION_POINT_TABLE_NAMES:
+            for rec in self._raw_tables.get(table_name, []):
+                raw_id = rec.get("Frame")
+                if raw_id is None:
+                    continue
+                eid = str(raw_id)
+                info: dict[str, Any] = {}
+                cp = self._parse_cardinal_point(
+                    rec.get("CardinalPt", rec.get("CardinalPoint", rec.get("InsertPoint")))
+                )
+                if cp is not None:
+                    info["cardinal_point"] = cp
+                for key, col in (("mirror_2", "Mirror2"), ("mirror_3", "Mirror3")):
+                    if col in rec:
+                        info[key] = self._to_bool(rec[col])
+                if "Transform" in rec:
+                    info["transform_stiffness"] = self._to_bool(rec["Transform"])
+                if info:
+                    result[eid] = info
+        return result
+
+    def _get_frame_cardinal_points(self) -> dict[str, int]:
+        """Extract the frame insertion point (cardinal point) per frame.
+
+        Primary source is SAP2000's modern
+        ``FRAME INSERTION POINT ASSIGNMENTS`` table, where the value is a
+        labelled string (``CardinalPt="8 (top center)"``).  For legacy /
+        E2K exports the cardinal point may instead appear as a column
+        (``CardinalPoint``, ``Cardinal``, ``CARDINALPT`` or ``InsertPoint``)
+        in the ``FRAME SECTION ASSIGNMENTS`` table; that form is used as a
+        fallback.
 
         Cardinal point numbering (1–11):
 
@@ -964,37 +1085,48 @@ class SAP2000Parser:
         -------
         Dict[str, int]
             Mapping from frame ID to its cardinal point integer (1–11).
-            An empty dict is returned when no cardinal point column is present.
+            An empty dict is returned when no cardinal point is available.
         """
         result: dict[str, int] = {}
-        col_names = ("CardinalPoint", "Cardinal", "CARDINALPT", "InsertPoint")
+
+        # 1) Modern SAP2000 insertion-point table (labelled-string form).
+        for eid, info in self._get_frame_insertion_points().items():
+            cp = info.get("cardinal_point")
+            if cp is not None:
+                result[eid] = cp
+
+        # 2) Legacy / E2K fallback — a cardinal-point column inside
+        #    FRAME SECTION ASSIGNMENTS.  Only fills frames not already
+        #    covered by the insertion-point table above.
         table = self._raw_tables.get("FRAME SECTION ASSIGNMENTS", [])
-        if not table:
-            return result
-        # Scan ALL rows for the first available column among candidates.
-        # This handles tables where column header names vary by row.
         col = None
         for a in table:
-            for c in col_names:
+            for c in self._CARDINAL_POINT_COLUMNS:
                 if c in a:
                     col = c
                     break
             if col is not None:
                 break
-        if col is None:
-            return result
-        for a in table:
-            eid = str(a.get("Frame", "0"))
-            if eid == "0":
-                continue
-            raw = a.get(col)
-            if raw is not None:
-                with contextlib.suppress(ValueError, TypeError):
-                    result[eid] = int(raw)
+        if col is not None:
+            for a in table:
+                eid = str(a.get("Frame", "0"))
+                if eid == "0" or eid in result:
+                    continue
+                cp = self._parse_cardinal_point(a.get(col))
+                if cp is not None:
+                    result[eid] = cp
         return result
 
     @staticmethod
-    def _cardinal_point_offset(num: int, D: float, B: float) -> tuple[float, float]:
+    def _cardinal_point_offset(
+        num: int,
+        D: float,
+        B: float,
+        cg_offset_2: float = 0.0,
+        cg_offset_3: float = 0.0,
+        ecc_v2: float = 0.0,
+        ecc_v3: float = 0.0,
+    ) -> tuple[float, float]:
         """Compute (off_y, off_z) from a cardinal point and section dimensions.
 
         Per SAP2000/ETABS convention (matching E2K_utilities):
@@ -1002,23 +1134,51 @@ class SAP2000Parser:
         =====  ===============  ==================================
         Value  Position         Offset (y, z) relative to centroid
         =====  ===============  ==================================
-        1      Bottom left      (\u00bdB,  \u00bdD)
-        2      Bottom centre    (0,      \u00bdD)
-        3      Bottom right     (-\u00bdB, \u00bdD)
-        4      Middle left      (\u00bdB,  0)
+        1      Bottom left      (½B,  ½D)
+        2      Bottom centre    (0,      ½D)
+        3      Bottom right     (-½B, ½D)
+        4      Middle left      (½B,  0)
         5      Middle centre    (0,      0)
-        6      Middle right     (-\u00bdB, 0)
-        7      Top left         (\u00bdB, -\u00bdD)
-        8      Top centre       (0,     -\u00bdD)
-        9      Top right        (-\u00bdB,-\u00bdD)
-        10     Centroid         (0,      0)
-        11     Shear centre     (0,      0)
+        6      Middle right     (-½B, 0)
+        7      Top left         (½B, -½D)
+        8      Top centre       (0,     -½D)
+        9      Top right        (-½B,-½D)
+        10     Centroid         (-CGOffset2, -CGOffset3)
+        11     Shear centre     (-(CGOffset2+EccV2), -(CGOffset3+EccV3))
         =====  ===============  ==================================
 
         Offsets are relative to the section centroid in the local y-z plane.
         D = depth (local-3 direction), B = width (local-2 direction).
         For circular sections (B = 0), D is used in place of B.
+
+        Points 1–9 sit on the section *bounding box*, which is centred on
+        the profile origin, so they are simple half-dimension offsets
+        (unchanged from the E2K convention).  Points 10 (centroid) and 11
+        (shear centre) instead sit at the section's true centroid / shear
+        centre, which for asymmetric shapes (channel, angle, tee) is *not*
+        the bounding-box centre.  SAP2000 reports those locations as
+        ``CGOffset2``/``CGOffset3`` (centroid relative to the section
+        reference point, in the local 2/3 directions) and
+        ``EccV2``/``EccV3`` (shear-centre eccentricity, measured from the
+        centroid).  The returned offset shifts the bounding-box-centred
+        profile so the centroid / shear centre lands on the member
+        reference line — hence the negation.  All four values are zero for
+        doubly-symmetric shapes, so points 10/11 reduce to ``(0, 0)``
+        (SAP2000's default) exactly as before.
+
+        Args:
+            num: Cardinal-point number (1–11).
+            D: Section depth (local 3).
+            B: Section width (local 2; ``0`` for circular → ``D`` used).
+            cg_offset_2: ``CGOffset2`` — centroid offset along local 2.
+            cg_offset_3: ``CGOffset3`` — centroid offset along local 3.
+            ecc_v2: ``EccV2`` — shear-centre eccentricity along local 2.
+            ecc_v3: ``EccV3`` — shear-centre eccentricity along local 3.
         """
+        if num == 10:  # Centroid — offset the bbox-centred profile onto the CG
+            return (-cg_offset_2, -cg_offset_3)
+        if num == 11:  # Shear centre — centroid plus shear-centre eccentricity
+            return (-(cg_offset_2 + ecc_v2), -(cg_offset_3 + ecc_v3))
         b = D if B == 0 else B  # circular sections: use D for both
         return {
             1: (0.5 * b, 0.5 * D),  # Bottom left
@@ -1030,8 +1190,6 @@ class SAP2000Parser:
             7: (0.5 * b, -0.5 * D),  # Top left
             8: (0.0, -0.5 * D),  # Top centre
             9: (-0.5 * b, -0.5 * D),  # Top right
-            10: (0.0, 0.0),  # Centroid
-            11: (0.0, 0.0),  # Shear centre
         }.get(num, (0.0, 0.0))
 
     @staticmethod
@@ -1075,16 +1233,18 @@ class SAP2000Parser:
     ) -> dict[str, FrameEndOffset]:
         """Merge cardinal point offsets into FrameEndOffset records.
 
-        For each frame element whose cardinal point is not the centroid (10),
-        computes the (y, z) offset from the section dimensions and stores it
-        in the frame's end offset record.  If no offset record exists yet,
-        one is created.
+        For each frame element, computes the lateral (y, z) offset implied by
+        its insertion point and stores it in the frame's end-offset record
+        (creating one when absent).  The offset is derived from the section
+        dimensions; for cardinal points 10 (centroid) and 11 (shear centre)
+        the section's ``CGOffset2/3`` and ``EccV2/3`` (SAP2000
+        ``FRAME SECTION PROPERTIES 01 - GENERAL``) locate the true centroid /
+        shear centre, which is non-zero for asymmetric shapes (channel,
+        angle, tee).  Symmetric shapes yield no offset for points 10/11.
         """
         merged = dict(existing_offsets)  # shallow copy
         for eid, fe in frame_elements.items():
             cp = fe.cardinal_point
-            if cp == 10:  # centroid — no offset needed
-                continue
             sec_name = frame_assignments.get(eid)
             if not sec_name:
                 continue
@@ -1094,10 +1254,19 @@ class SAP2000Parser:
             D, B = self._get_section_depth_width(sec)
             if D == 0.0 and B == 0.0:
                 continue
-            off_y, off_z = self._cardinal_point_offset(cp, D, B)
-            if off_y == 0.0 and off_z == 0.0:
+            off_y, off_z = self._cardinal_point_offset(
+                cp,
+                D,
+                B,
+                getattr(sec, "cg_offset_2", 0.0),
+                getattr(sec, "cg_offset_3", 0.0),
+                getattr(sec, "ecc_v2", 0.0),
+                getattr(sec, "ecc_v3", 0.0),
+            )
+            if abs(off_y) < self._LATERAL_OFFSET_TOL and abs(off_z) < self._LATERAL_OFFSET_TOL:
                 continue
-            # Merge into existing offset or create new
+            # Merge into existing offset or create new (preserves any
+            # longitudinal offsets and rigid-zone factor already present).
             extant = merged.get(eid, FrameEndOffset())
             extant.off_y_i = off_y
             extant.off_z_i = off_z
@@ -1361,6 +1530,21 @@ class SAP2000Parser:
                     with contextlib.suppress(ValueError, TypeError):
                         modifiers[mk] = float(mv)
             common["modifiers"] = modifiers
+
+            # Section centroid offset + shear-centre eccentricity, in the
+            # section's local 2 / 3 directions (SAP2000 ``CGOffset2`` /
+            # ``CGOffset3`` / ``EccV2`` / ``EccV3``).  Zero for
+            # doubly-symmetric shapes; non-zero for channel / angle / tee.
+            # Used to place the true centroid / shear centre for cardinal
+            # points 10 and 11.
+            for _key, _col in (
+                ("cg_offset_2", "CGOffset2"),
+                ("cg_offset_3", "CGOffset3"),
+                ("ecc_v2", "EccV2"),
+                ("ecc_v3", "EccV3"),
+            ):
+                _val = self._to_float(sec.get(_col))
+                common[_key] = _val if _val is not None else 0.0
 
             # Shape‑specific dimensions (SAP2000 t3 = depth, t2 = width)
             t3 = float(sec.get("t3", 0))

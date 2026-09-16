@@ -871,6 +871,170 @@ def test_cardinal_points_alternative_column_names(tmp_path):
 
 
 # ============================================================================
+# P0b — Frame insertion point table (modern SAP2000) + end-offset variants
+# ============================================================================
+
+
+def _write_minimal_frame_json(tmp_path, tables: dict, name: str = "model.json") -> Path:
+    """Write a minimal single-frame model (units ``N, mm, C``) merging ``tables``."""
+    import json
+
+    data = {
+        "PROGRAM CONTROL": [{"ProgramName": "SAP2000", "Version": "26", "CurrUnits": "N, mm, C"}],
+        "JOINT COORDINATES": [
+            {"Joint": 1, "XorR": 0, "Y": 0, "Z": 0},
+            {"Joint": 2, "XorR": 6000, "Y": 0, "Z": 0},
+        ],
+        "CONNECTIVITY - FRAME": [{"Frame": 1, "JointI": 1, "JointJ": 2}],
+        "FRAME SECTION PROPERTIES 01 - GENERAL": [
+            {
+                "SectionName": "B400",
+                "Material": "CONC",
+                "Shape": "Rectangular",
+                "t3": 400,
+                "t2": 200,
+                "Area": 80000,
+                "I33": 1.067e9,
+                "I22": 2.667e8,
+                "TorsConst": 1.0,
+            }
+        ],
+        "FRAME SECTION ASSIGNMENTS": [{"Frame": 1, "AnalSect": "B400"}],
+    }
+    data.update(tables)
+    json_path = tmp_path / name
+    json_path.write_text(json.dumps(data))
+    return json_path
+
+
+def test_insertion_point_table_parsed(tmp_path):
+    """Modern FRAME INSERTION POINT ASSIGNMENTS: labelled-string cardinal pt."""
+    json_path = _write_minimal_frame_json(
+        tmp_path,
+        {
+            "FRAME INSERTION POINT ASSIGNMENTS": [
+                {
+                    "Frame": 1,
+                    "CardinalPt": "8 (top center)",
+                    "Mirror2": "No",
+                    "Mirror3": "No",
+                    "Transform": "Yes",
+                }
+            ]
+        },
+        name="insertion.json",
+    )
+    md = SAP2000Parser.from_json(json_path).get_model_data()
+
+    fe = md.frame_elements["1"]
+    assert fe.cardinal_point == 8  # int extracted from "8 (top center)"
+    assert fe.mirror_2 is False
+    assert fe.mirror_3 is False
+    assert fe.transform_stiffness is True
+
+    # Cardinal point 8 (top centre) on a 400 mm deep section → off_z = -200.
+    off = md.frame_end_offsets["1"]
+    assert off.off_y_i == pytest.approx(0.0)
+    assert off.off_z_i == pytest.approx(-200.0)
+    assert off.off_z_j == pytest.approx(-200.0)
+
+
+def test_insertion_point_transform_flag_captured(tmp_path):
+    """Transform=No (do-not-transform-stiffness) is captured as False."""
+    json_path = _write_minimal_frame_json(
+        tmp_path,
+        {
+            "FRAME INSERTION POINT ASSIGNMENTS": [
+                {"Frame": 1, "CardinalPt": "10 (centroid)", "Transform": "No"}
+            ]
+        },
+        name="insertion_notransform.json",
+    )
+    md = SAP2000Parser.from_json(json_path).get_model_data()
+    assert md.frame_elements["1"].cardinal_point == 10
+    assert md.frame_elements["1"].transform_stiffness is False
+
+
+def test_insertion_point_table_preferred_over_section_column(tmp_path):
+    """Insertion-point table wins over a legacy CardinalPoint column."""
+    json_path = _write_minimal_frame_json(
+        tmp_path,
+        {
+            "FRAME SECTION ASSIGNMENTS": [{"Frame": 1, "AnalSect": "B400", "CardinalPoint": 2}],
+            "FRAME INSERTION POINT ASSIGNMENTS": [{"Frame": 1, "CardinalPt": "8 (top center)"}],
+        },
+        name="insertion_precedence.json",
+    )
+    md = SAP2000Parser.from_json(json_path).get_model_data()
+    assert md.frame_elements["1"].cardinal_point == 8
+
+
+def test_end_offset_assignments_table_parsed(tmp_path):
+    """FRAME END OFFSET ASSIGNMENTS: LengthI/LengthJ/RigidFactor parsed."""
+    json_path = _write_minimal_frame_json(
+        tmp_path,
+        {
+            "FRAME END OFFSET ASSIGNMENTS": [
+                {
+                    "Frame": 1,
+                    "Type": "Defined",
+                    "LengthI": 0.35,
+                    "LengthJ": 0.25,
+                    "RigidFactor": 1,
+                }
+            ]
+        },
+        name="endoff.json",
+    )
+    md = SAP2000Parser.from_json(json_path).get_model_data()
+    off = md.frame_end_offsets["1"]
+    assert off.end_i == pytest.approx(0.35)
+    assert off.end_j == pytest.approx(0.25)
+    assert off.rigid_factor == pytest.approx(1.0)
+
+
+def test_end_offset_assignments_partial_rigidity(tmp_path):
+    """RigidFactor < 1 (partial rigidity) is captured."""
+    json_path = _write_minimal_frame_json(
+        tmp_path,
+        {
+            "FRAME END OFFSET ASSIGNMENTS": [
+                {"Frame": 1, "LengthI": 0.3, "LengthJ": 0.3, "RigidFactor": 0.5}
+            ]
+        },
+        name="endoff_partial.json",
+    )
+    md = SAP2000Parser.from_json(json_path).get_model_data()
+    assert md.frame_end_offsets["1"].rigid_factor == pytest.approx(0.5)
+
+
+def test_end_offset_missing_rigid_factor_defaults_to_rigid(tmp_path):
+    """Absent RigidFactor → 1.0 (fully rigid), matching SAP2000's implicit default."""
+    json_path = _write_minimal_frame_json(
+        tmp_path,
+        {"FRAME END LENGTH OFFSETS": [{"Frame": 1, "EndI": 0.1, "EndJ": 0.1}]},
+        name="endoff_norigid.json",
+    )
+    md = SAP2000Parser.from_json(json_path).get_model_data()
+    off = md.frame_end_offsets["1"]
+    assert off.end_i == pytest.approx(0.1)
+    assert off.rigid_factor == pytest.approx(1.0)
+
+
+def test_end_offset_legacy_table_name(tmp_path):
+    """Legacy FRAME OFFSET ALONG LENGTH ASSIGNMENTS table is accepted."""
+    json_path = _write_minimal_frame_json(
+        tmp_path,
+        {"FRAME OFFSET ALONG LENGTH ASSIGNMENTS": [{"Frame": 1, "LengthI": 0.2, "LengthJ": 0.4}]},
+        name="endoff_legacy.json",
+    )
+    md = SAP2000Parser.from_json(json_path).get_model_data()
+    off = md.frame_end_offsets["1"]
+    assert off.end_i == pytest.approx(0.2)
+    assert off.end_j == pytest.approx(0.4)
+
+
+# ============================================================================
 # S2K diaphragm constraint tables drive the AnalysisBuilder with no config
 # ============================================================================
 

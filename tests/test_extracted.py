@@ -16,6 +16,7 @@ from fea_toolkit.io.s2k_parser import SAP2000Parser
 from fea_toolkit.model.sap_data import (
     AreaElement,
     BoxSection,
+    ChannelSection,
     CircularSection,
     ConcreteCircularSection,
     ConcreteRectangularSection,
@@ -1423,6 +1424,57 @@ class TestCardinalPointOffsets:
         assert self._offset(99) == (0.0, 0.0)
         assert self._offset(0) == (0.0, 0.0)
 
+    def test_centroid_uses_cg_offset(self):
+        """Point 10 shifts the bbox-centred profile onto the true centroid."""
+        off_y, off_z = SAP2000Parser._cardinal_point_offset(
+            10, D=0.4, B=0.3, cg_offset_2=0.02, cg_offset_3=0.05
+        )
+        assert off_y == pytest.approx(-0.02)
+        assert off_z == pytest.approx(-0.05)
+
+    def test_shear_centre_uses_cg_plus_eccentricity(self):
+        """Point 11 = centroid offset + shear-centre eccentricity."""
+        off_y, off_z = SAP2000Parser._cardinal_point_offset(
+            11,
+            D=0.4,
+            B=0.3,
+            cg_offset_2=0.02,
+            cg_offset_3=0.05,
+            ecc_v2=0.01,
+            ecc_v3=-0.03,
+        )
+        assert off_y == pytest.approx(-(0.02 + 0.01))
+        assert off_z == pytest.approx(-(0.05 - 0.03))
+
+    def test_points_1_to_9_ignore_cg_offset(self):
+        """Bounding-box cardinal points are unaffected by the centroid offset."""
+        base = self._offset(8, D=0.4, B=0.3)
+        with_cg = SAP2000Parser._cardinal_point_offset(
+            8, D=0.4, B=0.3, cg_offset_2=0.02, cg_offset_3=0.05
+        )
+        assert base == with_cg
+
+
+class TestParseCardinalPoint:
+    """Tests for SAP2000Parser._parse_cardinal_point()."""
+
+    def test_labelled_string(self):
+        """Modern SAP2000 labelled form → leading integer."""
+        assert SAP2000Parser._parse_cardinal_point("8 (top center)") == 8
+        assert SAP2000Parser._parse_cardinal_point("10 (centroid)") == 10
+        assert SAP2000Parser._parse_cardinal_point("2 (bottom center)") == 2
+
+    def test_bare_integer(self):
+        """Legacy / E2K bare-integer form is accepted."""
+        assert SAP2000Parser._parse_cardinal_point(8) == 8
+        assert SAP2000Parser._parse_cardinal_point("8") == 8
+
+    def test_invalid_returns_none(self):
+        """Unreadable cells → None."""
+        assert SAP2000Parser._parse_cardinal_point(None) is None
+        assert SAP2000Parser._parse_cardinal_point(True) is None
+        assert SAP2000Parser._parse_cardinal_point("centroid") is None
+
 
 class TestSectionDepthWidth:
     """Tests for SAP2000Parser._get_section_depth_width()."""
@@ -1581,6 +1633,56 @@ class TestMergeCardinalIntoOffsets:
         offsets = {}
         result = parser._merge_cardinal_into_offsets(elements, sections, assignments, offsets)
         assert "X1" not in result
+
+    def test_asymmetric_section_centroid_shifted(self):
+        """CP 10 on a channel: profile shifted onto the true (CG-offset) centroid."""
+        parser = self._make_parser()
+        elements = {"CH1": FrameElement("CH1", 7, "N1", "N2", cardinal_point=10)}
+        sections = {
+            "Chan": ChannelSection(
+                "Chan",
+                "Channel",
+                "Steel",
+                depth=0.4,
+                bf=0.1,
+                tf=0.01,
+                tw=0.008,
+                A=0.006,
+                I33=1.0e-4,
+                I22=1.0e-5,
+                J=1.0e-6,
+                cg_offset_3=0.03,
+            )
+        }
+        assignments = {"CH1": "Chan"}
+        offsets = {}
+        result = parser._merge_cardinal_into_offsets(elements, sections, assignments, offsets)
+        # Centroid offset along local 3 → bbox-centred profile shifted by -CGOffset3.
+        assert result["CH1"].off_z_i == pytest.approx(-0.03)
+        assert result["CH1"].off_z_j == pytest.approx(-0.03)
+        assert result["CH1"].off_y_i == pytest.approx(0.0)
+        assert result["CH1"].off_y_j == pytest.approx(0.0)
+
+    def test_symmetric_section_centroid_no_offset(self):
+        """CP 10 on a symmetric section → no offset record created (unchanged)."""
+        parser = self._make_parser()
+        elements = {"B1": FrameElement("B1", 1, "N1", "N2", cardinal_point=10)}
+        sections = {
+            "Sec": RectangularSection(
+                "Sec",
+                "Rectangular",
+                "Concrete",
+                depth=0.4,
+                bf=0.3,
+                A=0.12,
+                I33=1.6e-3,
+                I22=9.0e-4,
+                J=1.0e-3,
+            )
+        }
+        assignments = {"B1": "Sec"}
+        result = parser._merge_cardinal_into_offsets(elements, sections, assignments, {})
+        assert "B1" not in result
 
 
 # ============================================================================
