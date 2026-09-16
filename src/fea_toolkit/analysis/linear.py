@@ -71,18 +71,14 @@ def wind_sanity_data(
     that build their own tables (e.g. the model review) can reuse the same
     numbers.
 
-    Parameters
-    ----------
-    md : SAPModelData
-        Model data (for node coordinates and units).
-    df_linear : pd.DataFrame
-        Linear analysis results; must contain ``Case``, ``Fx``, ``Fy`` columns.
-    wind_case_x, wind_case_y : str
-        Case names for the X and Y wind load patterns.
+    Args:
+        md: Model data (for node coordinates and units).
+        df_linear: Linear analysis results; must contain ``Case``, ``Fx``,
+            ``Fy`` columns.
+        wind_case_x: Case name for the X wind load pattern.
+        wind_case_y: Case name for the Y wind load pattern.
 
-    Returns
-    -------
-    dict
+    Returns:
         Keys ``rows`` (unit-labelled table rows: ``Face``, ``Area``,
         ``Total``, ``Pressure``), ``within_10pct`` (bool), the raw values
         ``x_face`` / ``y_face`` / ``fx`` / ``fy`` / ``p_x`` / ``p_y``, the
