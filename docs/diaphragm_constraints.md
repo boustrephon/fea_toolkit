@@ -58,7 +58,9 @@ storey elevation is the mean Z of its joints.
 (`_detect_rigid_body_constraints`), which records each group's enabled
 `UX`/`UY`/`UZ`/`RX`/`RY`/`RZ` flags.  The AnalysisBuilder applies a full
 6-DOF `rigidLink('beam')` MPC per slave when all six flags are set, or
-`ops.equalDOF` on just the enabled DOFs for a partial flag set — see
+`ops.equalDOF` on just the enabled translation DOFs for a partial flag set
+(a partial set that enables any rotational DOF is rejected — the rigid-body
+offset between separated joints cannot be represented by `equalDOF`) — see
 `docs/model_review.md`.  Every other type (`EQUAL`, `WELD`, `BEAM`,
 `ROD`, `PLATE`, `LOCAL`) is parsed but **not supported**; the model review
 flags it as such.
