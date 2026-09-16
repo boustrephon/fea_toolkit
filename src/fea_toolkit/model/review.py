@@ -249,44 +249,100 @@ def _release_summary(md: SAPModelData) -> dict[str, Any]:
     return {"n_frames_with_releases": len(rows), "by_dof": by_dof, "releases": rows}
 
 
+def _constraint_is_supported(con) -> bool:
+    """Whether a joint constraint definition is supported by the toolkit.
+
+    ``BODY`` groups are always supported.  ``DIAPHRAGM`` groups are
+    supported only for a Z-axis — or unspecified-axis — diaphragm, the only
+    orientation the toolkit models (``ops.rigidDiaphragm`` couples the
+    in-plane DOFs of a horizontal diaphragm).  X- and Y-axis diaphragms are
+    not supported, and every other type (``EQUAL``, ``WELD``, ``BEAM``,
+    ``ROD``, ``PLATE``, ``LOCAL``) is unsupported too.
+
+    Args:
+        con: A :class:`~fea_toolkit.model.sap_data.Constraint` instance.
+
+    Returns:
+        ``True`` when the toolkit can reproduce the constraint.
+    """
+    ctype = str(getattr(con, "constraint_type", "") or "").upper() or "UNKNOWN"
+    if ctype == "BODY":
+        return True
+    if ctype == "DIAPHRAGM":
+        data = getattr(con, "constraint_data", None) or {}
+        axis = str(data.get("Axis", "") or "").upper()
+        return axis in ("", "Z")
+    return False
+
+
+def _constraint_support_label(ctype: str, count: int, supported: dict[str, int]) -> str:
+    """Return the toolkit-support status label for a constraint-type row.
+
+    Args:
+        ctype: Constraint type (already upper-cased).
+        count: Total number of definitions of that type.
+        supported: ``{type: supported_count}`` from
+            :func:`_constraint_summary`.
+
+    Returns:
+        ``"Supported by toolkit"`` when every definition of the type is
+        supported, ``"No"`` when none is, and ``"Partial"`` when only some
+        are (e.g. a mix of Z-axis and X-axis ``DIAPHRAGM`` groups).
+    """
+    n = supported.get(ctype, 0)
+    if n == count:
+        return "Supported by toolkit"
+    if n == 0:
+        return "No"
+    return "Partial"
+
+
 def _constraint_summary(md: SAPModelData) -> dict[str, Any]:
     """Summarise joint constraint definitions and their OpenSees support.
 
     ``CONSTRAINT DEFINITIONS - <TYPE>`` groups are parsed into
     ``md.constraints``.  Only two types are converted to OpenSees
     constraints: Z-axis ``DIAPHRAGM`` groups (``ops.rigidDiaphragm``) and
-    ``BODY`` groups (``ops.rigidLink('beam')`` MPCs).  Every other type —
-    ``EQUAL``, ``WELD``, ``BEAM``, ``ROD``, ``PLATE``, ``LOCAL`` — is
-    parsed but **not applied**, so the analysis silently omits that
-    stiffness.  A missing rigid-body constraint in particular makes the
-    model softer than SAP2000 (most visibly in torsion), so the review
-    surfaces it rather than letting it pass unnoticed.
+    ``BODY`` groups (``ops.rigidLink('beam')`` / ``ops.equalDOF`` MPCs).
+    Every other type — ``EQUAL``, ``WELD``, ``BEAM``, ``ROD``, ``PLATE``,
+    ``LOCAL`` — is parsed but **not applied**, so the analysis silently
+    omits that stiffness.  A missing rigid-body constraint in particular
+    makes the model softer than SAP2000 (most visibly in torsion), so the
+    review surfaces it rather than letting it pass unnoticed.
+
+    Support is classified **per definition** (see
+    :func:`_constraint_is_supported`), so an X- or Y-axis ``DIAPHRAGM`` is
+    reported as unsupported even when other ``DIAPHRAGM`` groups in the
+    same model are supported.
 
     Args:
         md: Parsed model data.
 
     Returns:
-        ``{"by_type": {type: count}, "unsupported": [{name, type,
-        n_joints}, ...], "n_supported": int}``.
+        ``{"by_type": {type: total}, "supported": {type: supported_count},
+        "unsupported": [{name, type, n_joints}, ...], "n_supported": int}``.
     """
-    supported_types = {"DIAPHRAGM", "BODY"}
     assignments = getattr(md, "constraint_assignments", {}) or {}
     joint_counts: dict[str, int] = defaultdict(int)
     for _jid, cname in assignments.items():
         joint_counts[cname] += 1
 
     by_type: dict[str, int] = defaultdict(int)
+    supported: dict[str, int] = defaultdict(int)
     unsupported: list[dict[str, Any]] = []
     for name, con in md.constraints.items():
         ctype = str(getattr(con, "constraint_type", "") or "").upper() or "UNKNOWN"
         by_type[ctype] += 1
-        if ctype not in supported_types:
+        if _constraint_is_supported(con):
+            supported[ctype] += 1
+        else:
             unsupported.append({"name": name, "type": ctype, "n_joints": joint_counts.get(name, 0)})
     unsupported.sort(key=lambda row: _natural_key(row["name"]))
     return {
         "by_type": dict(by_type),
+        "supported": dict(supported),
         "unsupported": unsupported,
-        "n_supported": sum(n for t, n in by_type.items() if t in supported_types),
+        "n_supported": sum(supported.values()),
     }
 
 
@@ -1315,7 +1371,7 @@ def format_review_report(
     releases = result["releases"]
     integrity = result["integrity"]
     observations = result["observations"]
-    constraints = result.get("constraints") or {"by_type": {}, "unsupported": []}
+    constraints = result.get("constraints") or {"by_type": {}, "supported": {}, "unsupported": []}
     units = result["units"]
     lu = units.get("L", "m")
 
@@ -1382,16 +1438,17 @@ def format_review_report(
     add("")
     add("-- Constraints " + "-" * 55)
     by_type = constraints["by_type"]
+    supported = constraints.get("supported", {})
     if not by_type:
         add("  No joint constraint definitions.")
     else:
         for ctype, count in sorted(by_type.items()):
-            tag = "applied" if ctype in ("DIAPHRAGM", "BODY") else "NOT APPLIED"
+            tag = _constraint_support_label(ctype, count, supported)
             add(f"  {ctype:<14}{count:>6}   [{tag}]")
         for row in constraints["unsupported"]:
             add(
                 f"      ! '{row['name']}' ({row['type']}, {row['n_joints']} joints) "
-                f"parsed but NOT applied to OpenSees"
+                f"parsed but not supported by the toolkit"
             )
 
     add("")
@@ -1670,7 +1727,7 @@ def format_review_markdown(
     releases = result["releases"]
     integrity = result["integrity"]
     observations = result["observations"]
-    constraints = result.get("constraints") or {"by_type": {}, "unsupported": []}
+    constraints = result.get("constraints") or {"by_type": {}, "supported": {}, "unsupported": []}
 
     md: list[str] = []
     add = md.append
@@ -1727,20 +1784,21 @@ def format_review_markdown(
     add("## Constraints")
     add("")
     by_type = constraints["by_type"]
+    supported = constraints.get("supported", {})
     if not by_type:
         add("_No joint constraint definitions._")
     else:
-        add("| Type | Count | Applied to OpenSees |")
+        add("| Type | Count | Supported by toolkit |")
         add("|---|---:|:---|")
         for ctype, count in sorted(by_type.items()):
-            applied = "yes" if ctype in ("DIAPHRAGM", "BODY") else "**NO**"
-            add(f"| {ctype} | {count} | {applied} |")
+            status = _constraint_support_label(ctype, count, supported)
+            add(f"| {ctype} | {count} | {status} |")
         add("")
         for row in constraints["unsupported"]:
             add(
                 f"> \u26a0 **`{row['name']}`** ({row['type']}, "
-                f"{row['n_joints']} joints) is parsed but **not applied** — "
-                "the analysis omits this stiffness."
+                f"{row['n_joints']} joints) is parsed but **not supported** "
+                "by the toolkit."
             )
     add("")
 

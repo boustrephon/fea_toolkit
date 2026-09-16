@@ -168,14 +168,22 @@ GENERAL"* (or legacy *"FRAME RELEASES"*) table.
 
 ### Constraints
 Joint constraint definitions (`CONSTRAINT DEFINITIONS - <TYPE>`) with a
-per-type count and whether each type is applied to the OpenSees domain.
-Only **`DIAPHRAGM`** (Z-axis → `ops.rigidDiaphragm`) and **`BODY`**
-(→ `ops.rigidLink('beam')` 6-DOF MPCs, disable with
-`apply_rigid_bodies: False`) are applied; every other type (`EQUAL`,
-`WELD`, `BEAM`, `ROD`, `PLATE`, `LOCAL`) is parsed but **not applied**, so
-the analysis silently omits that stiffness.  Such types are listed under
-`unsupported` — a missing rigid-body tie in particular makes the OpenSees
-model softer than SAP2000, most visibly in torsion.
+per-type count and whether the toolkit supports each type.  Only **Z-axis
+`DIAPHRAGM`** (→ `ops.rigidDiaphragm`) and **`BODY`** (→
+`ops.rigidLink('beam')` 6-DOF MPCs when all six DOF flags are enabled, or
+`ops.equalDOF` on the enabled DOFs for a partial flag set; disable with
+`apply_rigid_bodies: False`) are supported.  X- and Y-axis `DIAPHRAGM`
+groups and every other type (`EQUAL`, `WELD`, `BEAM`, `ROD`, `PLATE`,
+`LOCAL`) are parsed but **not supported**, so the analysis silently omits
+that stiffness.  Such groups are listed under `unsupported` — a missing
+rigid-body tie in particular makes the OpenSees model softer than SAP2000,
+most visibly in torsion.
+
+Support is classified **per definition**, so a model mixing Z-axis and
+X-axis diaphragms reports the `DIAPHRAGM` row as `Partial`, and each
+individual unsupported group is named in the `unsupported` list.  The
+report states toolkit *support*, not that a constraint was applied — the
+review itself runs no analysis.
 
 ### Integrity
 - Elements referencing **missing nodes**.

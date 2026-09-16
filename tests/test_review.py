@@ -12,6 +12,7 @@ from fea_toolkit.model import (
     review_s2k_file,
 )
 from fea_toolkit.model.review import (
+    _constraint_summary,
     _format_table,
     _mass_unit_label,
     _reaction_table_rows,
@@ -21,6 +22,7 @@ from fea_toolkit.model.review import (
 )
 from fea_toolkit.model.sap_data import (
     FRAME_RELEASE_DOF_LABELS,
+    Constraint,
     FrameElement,
     FrameRelease,
     MassSource,
@@ -379,6 +381,53 @@ class TestMassSource:
         md_text = format_review_markdown(result)
         assert "Mass source load patterns:" in md_text
         assert "`DEAD` \u00d71" in md_text
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Joint constraints
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestConstraints:
+    def _model_with_constraints(self) -> SAPModelData:
+        nodes = {"1": Node("1", 1, 0.0, 0.0, 0.0), "2": Node("2", 2, 0.0, 0.0, 3.0)}
+        frames = {"1": FrameElement("1", 1, "1", "2")}
+        md = _synthetic(nodes, frames, {"1": Restraint([1, 1, 1, 1, 1, 1])})
+        md.constraints = {
+            "DZ": Constraint("DZ", "DIAPHRAGM", constraint_data={"Axis": "Z"}),
+            "DX": Constraint("DX", "DIAPHRAGM", constraint_data={"Axis": "X"}),
+            "B": Constraint("B", "BODY"),
+            "E": Constraint("E", "EQUAL"),
+        }
+        md.constraint_assignments = {"1": "DZ", "2": "DX"}
+        return md
+
+    def test_z_axis_diaphragm_supported_x_axis_not(self):
+        summary = _constraint_summary(self._model_with_constraints())
+        # BODY and Z-axis DIAPHRAGM are supported; X-axis DIAPHRAGM and EQUAL
+        # are not.
+        assert summary["n_supported"] == 2
+        assert summary["by_type"] == {"DIAPHRAGM": 2, "BODY": 1, "EQUAL": 1}
+        assert summary["supported"] == {"DIAPHRAGM": 1, "BODY": 1}
+        assert [row["name"] for row in summary["unsupported"]] == ["DX", "E"]
+        assert all(row["type"] in ("DIAPHRAGM", "EQUAL") for row in summary["unsupported"])
+
+    def test_formatters_report_toolkit_support(self):
+        result = review_model(self._model_with_constraints())
+        text = format_review_report(result)
+        assert "Supported by toolkit" in text
+        assert "Applied to OpenSees" not in text
+        assert "NOT APPLIED" not in text
+        assert "parsed but not supported by the toolkit" in text
+
+        md_text = format_review_markdown(result)
+        assert "| Type | Count | Supported by toolkit |" in md_text
+        assert "Applied to OpenSees" not in md_text
+        assert "not supported** by the toolkit" in md_text
+        # The mixed DIAPHRAGM row is reported as partial, not falsely supported.
+        assert "| DIAPHRAGM | 2 | Partial |" in md_text
+        assert "| BODY | 1 | Supported by toolkit |" in md_text
+        assert "| EQUAL | 1 | No |" in md_text
 
 
 # ═══════════════════════════════════════════════════════════════════
