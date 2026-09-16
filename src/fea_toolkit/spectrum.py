@@ -56,17 +56,12 @@ def _resolve_g(g: Optional[float], units: Optional[dict]) -> float:
     An explicit *g* is returned verbatim — it is never re-derived — so
     callers may pass an already unit-scaled value.
 
-    Parameters
-    ----------
-    g : float, optional
-        Explicit gravitational acceleration, in the caller's unit system.
-    units : dict, optional
-        Model units dict (e.g. ``{"F": "N", "L": "mm", "T": "C"}``).
-        Ignored when *g* is given.
+    Args:
+        g: Explicit gravitational acceleration, in the caller's unit system.
+        units: Model units dict (e.g. ``{"F": "N", "L": "mm", "T": "C"}``).
+            Ignored when *g* is given.
 
-    Returns
-    -------
-    float
+    Returns:
         Gravitational acceleration in the resolved unit system.
     """
     if g is not None:
@@ -337,14 +332,14 @@ def _gb50011_spectrum(
     eta2 : float
         Damping reduction factor (default 1.0 for 5 % damping).
     g : float, optional
-        Gravitational acceleration (m/s²).  Used verbatim when given;
-        ``None`` falls back to the shared SI constant
-        :data:`fea_toolkit.utils.DEFAULT_GRAVITY_MS2` (9.80665 m/s²).
+        Gravitational acceleration in the caller's acceleration unit (e.g.
+        m/s²).  Used verbatim when given; ``None`` falls back to the shared
+        SI constant :data:`fea_toolkit.utils.DEFAULT_GRAVITY_MS2` (9.80665 m/s²).
 
     Returns
     -------
     np.ndarray
-        Spectral acceleration values (m/s²).
+        Spectral acceleration values, in the same units as *g*.
     """
     g = _resolve_g(g, None)
     Sa = []

@@ -719,6 +719,7 @@ def generate_report(
                     zeta=push_zeta,
                     alpha_max_rare=push_alpha_max,
                     g=_gravity,
+                    units=md.units,
                     out_dir=str(resolved_out),
                 )
                 if log:
@@ -735,7 +736,7 @@ def generate_report(
     # ── Summary tables (common) ──────────────────────────────────
     df_sections = section_summary(md)
     df_materials = material_summary(md)
-    fig_spec = plot_seismic_spectrum(spec_cfg, modal, g=_gravity)
+    fig_spec = plot_seismic_spectrum(spec_cfg, modal, g=_gravity, units=md.units)
 
     # ── Model viewer ─────────────────────────────────────────────
     viewer_cfg = cfg.get("model_viewer", {"enabled": False})

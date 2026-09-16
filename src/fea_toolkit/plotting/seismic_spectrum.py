@@ -30,13 +30,14 @@ def plot_seismic_spectrum(
         Modal analysis result (``run_modal_analysis`` output).  When provided,
         vertical dashed lines mark the dominant period in X and Y directions.
     g : float, optional
-        Gravitational acceleration in the model's own unit system.  Used
-        verbatim when given; ``None`` falls back to *units*, then to the
-        shared SI constant (9.80665 m/s²).
+        Gravitational acceleration in the model's own unit system.  When
+        given it overrides gravity derivation from *units*; ``None`` falls
+        back to *units*, then to the shared SI constant (9.80665 m/s²).
     units : dict, optional
-        Model units dict (e.g. ``{"F": "N", "L": "mm", "T": "C"}``), so the
-        plotted ordinates come out in the model's own unit system (mm/s² for
-        a millimetre model).  Ignored when *g* is given.
+        Model units dict (e.g. ``{"F": "N", "L": "mm", "T": "C"}``).  The
+        length unit controls the display label on the acceleration axis
+        (e.g. ``mm/s²``); it also drives gravity derivation when *g* is not
+        supplied.
 
     Returns
     -------
