@@ -473,8 +473,8 @@ def generate_report(
     # ── Build spectrum (common to both paths) ────────────────────
     # g is derived from the model's length unit so the spectral
     # accelerations come back in the model's own unit system (mm/s² for a
-    # millimetre model), not the SI 9.81 m/s² the builder would otherwise
-    # fall back to.
+    # millimetre model), not the SI 9.80665 m/s² the builder would
+    # otherwise fall back to.
     _gravity = g_from_units(md.units)
     if spec_cfg:
         T_spec, Sa_spec, alpha_max, tg, zeta, spec_label = _build_spectrum(spec_cfg, g=_gravity)
@@ -718,6 +718,7 @@ def generate_report(
                     tg=push_tg,
                     zeta=push_zeta,
                     alpha_max_rare=push_alpha_max,
+                    g=_gravity,
                     out_dir=str(resolved_out),
                 )
                 if log:
@@ -734,7 +735,7 @@ def generate_report(
     # ── Summary tables (common) ──────────────────────────────────
     df_sections = section_summary(md)
     df_materials = material_summary(md)
-    fig_spec = plot_seismic_spectrum(spec_cfg, modal)
+    fig_spec = plot_seismic_spectrum(spec_cfg, modal, g=_gravity)
 
     # ── Model viewer ─────────────────────────────────────────────
     viewer_cfg = cfg.get("model_viewer", {"enabled": False})

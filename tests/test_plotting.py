@@ -2725,3 +2725,56 @@ class TestForceDiagramUnified:
             pl.close()
         finally:
             os.remove(path)
+
+
+# ============================================================================
+# plot_csm_4panel — unit-aware demand spectrum
+# ============================================================================
+
+
+def _minimal_csm_all_out() -> dict:
+    """Minimal ``run_pushover_4dir()``-shaped output with one converged direction."""
+    return {
+        "+X": {
+            "adrs": {"S_d": [0.0, 0.10, 0.20], "S_a": [0.0, 0.50, 1.00]},
+            "pp": {
+                "S_dy": 0.10,
+                "S_ay": 0.50,
+                "S_dp": 0.20,
+                "S_ap": 1.00,
+                "converged": True,
+                "mu": 2.0,
+            },
+        }
+    }
+
+
+class TestCsmFourPanelUnits:
+    """The CSM demand spectrum and axis labels follow the resolved units."""
+
+    def test_defaults_to_si_labels(self):
+        """Omitting g/units keeps the SI fallback labels (m, m/s²)."""
+        import matplotlib.pyplot as plt
+
+        from fea_toolkit.plotting.report import plot_csm_4panel
+
+        fig = plot_csm_4panel(_minimal_csm_all_out(), {})
+        assert fig is not None
+        ax = fig.axes[0]
+        assert ax.get_xlabel() == "S$_d$ (m)"
+        assert ax.get_ylabel() == "S$_a$ (m/s\u00b2)"
+        plt.close(fig)
+
+    def test_units_argument_scales_and_labels(self):
+        """units= puts the demand spectrum and axis labels in model units."""
+        import matplotlib.pyplot as plt
+
+        from fea_toolkit.plotting.report import plot_csm_4panel
+
+        fig = plot_csm_4panel(_minimal_csm_all_out(), {}, units={"F": "N", "L": "mm", "T": "C"})
+        assert fig is not None
+        ax = fig.axes[0]
+        assert ax.get_xlabel() == "S$_d$ (mm)"
+        assert ax.get_ylabel() == "S$_a$ (mm/s\u00b2)"
+        assert "mm/s" in ax.get_title()
+        plt.close(fig)

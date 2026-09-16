@@ -370,7 +370,8 @@ def plot_csm_4panel(
     tg: float = 0.25,
     zeta: float = 0.05,
     alpha_max_rare: float = 0.50,
-    g: float = 9.81,
+    g: Optional[float] = None,
+    units: Optional[dict] = None,
     out_dir: Optional[str] = None,
 ) -> Optional[Any]:
     """Generate a 2×2 ADRS Capacity Spectrum Method plot for all 4 directions.
@@ -387,8 +388,14 @@ def plot_csm_4panel(
         Damping ratio.
     alpha_max_rare : float
         Rare-earthquake seismic influence coefficient.
-    g : float
-        Gravitational acceleration (m/s²).
+    g : float, optional
+        Gravitational acceleration in the model's own unit system.  Used
+        verbatim when given; ``None`` falls back to *units*, then to the
+        shared SI constant (9.80665 m/s²).
+    units : dict, optional
+        Model units dict (e.g. ``{"F": "N", "L": "mm", "T": "C"}``), so the
+        demand spectrum and the axis labels match the model units of the
+        ADRS capacity arrays.  Ignored when *g* is given.
     out_dir : str, optional
         If provided, save the figure as ``csm_4panel.png`` to this directory.
 
@@ -401,9 +408,14 @@ def plot_csm_4panel(
     except ImportError:
         return None
 
-    from ..spectrum import _gb50011_spectrum
+    from ..spectrum import _gb50011_spectrum, _resolve_g
 
     dirs = ["+X", "-X", "+Y", "-Y"]
+
+    # Resolve g (explicit → units → shared SI constant) so the demand
+    # spectrum matches the model units of the ADRS capacity arrays.
+    g = _resolve_g(g, units)
+    _length_unit = (units or {}).get("L") or "m"
 
     gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
     eta_1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
@@ -453,9 +465,7 @@ def plot_csm_4panel(
             else ""
         )
 
-        title_text = (
-            f"{label}   μ={pp['mu']:.2f}  $S_{{dp}}$=({pp['S_dp']:.3f}m, {pp['S_ap']:.1f}m/s²)"
-        )
+        title_text = f"{label}   μ={pp['mu']:.2f}  $S_{{dp}}$=({pp['S_dp']:.3f}{_length_unit}, {pp['S_ap']:.1f}{_length_unit}/s²)"
 
         ax.plot(
             S_d,
@@ -515,8 +525,8 @@ def plot_csm_4panel(
             )
 
         ax.set_title(title_text, fontsize=10, fontweight="bold")
-        ax.set_xlabel("S$_d$ (m)", fontsize=9)
-        ax.set_ylabel("S$_a$ (m/s\u00b2)", fontsize=9)
+        ax.set_xlabel(f"S$_d$ ({_length_unit})", fontsize=9)
+        ax.set_ylabel(f"S$_a$ ({_length_unit}/s\u00b2)", fontsize=9)
         ax.set_xlim(0, x_lim)
         ax.set_ylim(0, y_lim)
         ax.grid(True, alpha=0.25)

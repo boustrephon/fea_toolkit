@@ -15,6 +15,9 @@ from ..spectrum import _build_spectrum, _interp_sa
 def plot_seismic_spectrum(
     spec: dict,
     modal: Optional[dict] = None,
+    *,
+    g: Optional[float] = None,
+    units: Optional[dict] = None,
 ) -> Optional[Any]:
     """Plot GB 50011 design spectra at 3 levels (frequent / fortification / rare).
 
@@ -26,6 +29,14 @@ def plot_seismic_spectrum(
     modal : dict, optional
         Modal analysis result (``run_modal_analysis`` output).  When provided,
         vertical dashed lines mark the dominant period in X and Y directions.
+    g : float, optional
+        Gravitational acceleration in the model's own unit system.  Used
+        verbatim when given; ``None`` falls back to *units*, then to the
+        shared SI constant (9.80665 m/s²).
+    units : dict, optional
+        Model units dict (e.g. ``{"F": "N", "L": "mm", "T": "C"}``), so the
+        plotted ordinates come out in the model's own unit system (mm/s² for
+        a millimetre model).  Ignored when *g* is given.
 
     Returns
     -------
@@ -57,7 +68,7 @@ def plot_seismic_spectrum(
     fig, ax = plt.subplots(figsize=(9, 5))
 
     for label, cfg in levels_info:
-        T_spec, Sa, amax, _tg, zeta, _lbl = _build_spectrum(cfg)
+        T_spec, Sa, amax, _tg, zeta, _lbl = _build_spectrum(cfg, g=g, units=units)
         ax.plot(
             T_plot,
             _interp_sa(T_plot, T_spec, Sa),
@@ -88,7 +99,8 @@ def plot_seismic_spectrum(
                 )
 
     ax.set_xlabel("Period T (s)")
-    ax.set_ylabel("Spectral acceleration S\u2090 (m/s\u00b2)")
+    _length_unit = (units or {}).get("L") or "m"
+    ax.set_ylabel(f"Spectral acceleration S\u2090 ({_length_unit}/s\u00b2)")
     ax.set_title(f"GB 50011 Design Spectra \u2014 {_int_display}({_accel}g), Site {_site_display}")
     ax.set_xlim(0, T_max)
     ax.grid(True, alpha=0.3)
