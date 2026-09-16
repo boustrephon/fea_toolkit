@@ -784,8 +784,9 @@ V = 100 kN reference dashed).
      axial 7200 kN (KrylovNewton + NewtonLineSearch + ModifiedNewton
      all fail at ~35–40 % load factor).  The opt-in
      ``mvlem_3d_concrete_law: "Concrete01"`` remains accepted but is
-     marked unusable; the corresponding integration tests are
-     ``xfail(run=False)``.
+     marked unusable; the diverging integration probes were removed — they
+     were ``xfail(run=False)`` and therefore never executed, so they pinned
+     nothing.  Only the solver-free *build* path is covered by a test now.
 
    **Consequence:** the earlier "use Concrete01 to fix the stiffness"
    recommendation (conclusion 4 of a prior revision) is withdrawn, and a

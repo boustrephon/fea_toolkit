@@ -173,21 +173,72 @@ class TestBuildWorkflow:
         # they are populated during run_static_analysis().
         # This test just verifies the attribute exists.
 
-    def test_build_with_split_elements(self, sample_md):
-        """Build with element splitting at joints."""
+    def test_build_with_split_elements(self):
+        """A split parent is excluded and its children reach the domain."""
+        from fea_toolkit.model.sap_data import (
+            FrameElement,
+            Material,
+            Node,
+            RectangularSection,
+            Restraint,
+            SAPModelData,
+        )
         from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
         from fea_toolkit.opensees.preprocessor import preprocess_model
 
+        # One 10 m member with a collinear mid-span joint.  Splitting only
+        # happens for elements flagged ``AtJoints``
+        # (see ``geometry.split_elements_at_joints``); the demo sample model is
+        # a single element with nothing on it, so it cannot exercise this path.
+        nodes = {
+            "1": Node("1", 1, 0.0, 0.0, 0.0),
+            "2": Node("2", 2, 5.0, 0.0, 0.0),
+            "3": Node("3", 3, 10.0, 0.0, 0.0),
+        }
+        md = SAPModelData(
+            nodes=nodes,
+            restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
+            materials={"S": Material("S", "Steel", E_mod=200e9, nu=0.3)},
+            sections={
+                "R": RectangularSection(
+                    "R",
+                    "Rectangular",
+                    "S",
+                    A=0.01,
+                    I33=1e-4,
+                    I22=1e-4,
+                    J=1e-4,
+                    depth=0.3,
+                    bf=0.2,
+                )
+            },
+            frame_elements={"1": FrameElement("1", 1, "1", "3")},
+            area_elements={},
+            frame_assignments={"1": "R"},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={"1": {"AtJoints": True}},
+        )
         cfg = {
             "element_type": "elasticBeamColumn",
             "split_elements": True,
             "verbose": False,
             "create_shells": False,
         }
-        mesh_model = preprocess_model(sample_md, cfg)
-        ab = AnalysisBuilder(mesh_model, cfg)
+        mm = preprocess_model(md, cfg)
+
+        parent = mm.frame_elements["1"]
+        assert parent.inactive, "the mid-span joint should have split the element"
+        children = [mm.frame_elements[cid] for cid in parent.child_ids]
+        assert len(children) == 2
+
+        ab = AnalysisBuilder(mm, cfg)
         try:
             ab.build_domain()
+            tags = set(ops.getEleTags())
+            # The inactive parent is not built; both children are.
+            assert parent.elem_tag not in tags
+            assert {c.elem_tag for c in children} == tags
         finally:
             ops.wipe()
 

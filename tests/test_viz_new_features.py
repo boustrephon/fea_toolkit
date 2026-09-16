@@ -211,8 +211,11 @@ class TestColorLegendHelpers:
         dummy = pv.PolyData(np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]))
         dummy["scalars"] = np.array([0.0, 1.0])
         plotter.add_mesh(dummy)
+        bars_before = len(plotter.scalar_bars)
         _add_hinge_color_legend(plotter)
+        assert len(plotter.scalar_bars) == bars_before + 1
         _add_shell_color_legend(plotter)
+        assert len(plotter.scalar_bars) == bars_before + 2
         plotter.close()
 
 

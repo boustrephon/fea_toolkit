@@ -414,10 +414,11 @@ def test_parse_areas_multi_row_with_duplicates(tmp_path):
 
 
 def test_create_single_shell_section():
-    """Verify _create_single_shell_section produces a valid OpenSees section."""
+    """``_create_single_shell_section`` emits the expected OpenSees section."""
     import openseespy.opensees as ops
 
     from fea_toolkit.model.sap_data import Material, SAPModelData
+    from fea_toolkit.opensees import _sections as _sec
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
     from fea_toolkit.opensees.preprocessor import preprocess_model
 
@@ -435,15 +436,21 @@ def test_create_single_shell_section():
     )
     mm = preprocess_model(md)
     ab = AnalysisBuilder(mm, {})
+    # The section is emitted through the module global in ``_sections``.
+    spy = _OpsCallSpy(_sec.ops, watched=("section",))
+    real_ops = _sec.ops
     try:
         ops.wipe()
         ops.model("basic", "-ndm", 3, "-ndf", 6)
         mat = type("Mat", (), {"E_mod": 3.28e10, "nu": 0.2})()
         sec = type("Sec", (), {"thickness": 0.2, "name": "Slab200"})()
-        # Should complete without raising
+        _sec.ops = spy
         ab._create_single_shell_section(sec, mat, 100)
     finally:
+        _sec.ops = real_ops
         ops.wipe()
+
+    assert spy.calls["section"] == [("ElasticMembranePlateSection", 100, 3.28e10, 0.2, 0.2)]
 
 
 # ========================================================================

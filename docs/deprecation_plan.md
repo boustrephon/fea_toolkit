@@ -508,8 +508,9 @@ keep working.
 
 **Marked in code at:** `_RS_LEGACY_ALIASES` (`opensees/_runner_rs.py`),
 `_RS_ELEMENT_LEGACY_ALIASES` (`io/unified_writer.py`), the legacy block in
-`io/results_schema.py::RS_ARRAYS`, and the alias block in
-`plotting/viz_forces.py::_extract_npz_rs_forces`.
+`io/results_schema.py::RS_ARRAYS`, the alias block in
+`plotting/viz_forces.py::_extract_npz_rs_forces`, and the alias fixture
+`_minimal_rs_npz_dict` in `tests/test_force_diagram.py`.
 
 **Deletion trigger:** once the full-component `rs/elem_fx_i … rs/elem_mz_j` block
 and its `force_map` reader are the only RS consumers — i.e. the 2D renderer reads

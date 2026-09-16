@@ -531,12 +531,11 @@ def _mvlem_3d_config() -> dict:
 def _mvlem_3d_concrete01_config() -> dict:
     """MVLEM_3D with opt-in ``Concrete01`` concrete law (documented dead-end).
 
-    Kept only to preserve the negative-result record: Concrete01's
-    zero-tangent tension branch makes the MVLEM_3D macro-element singular
-    whenever any fibre goes into tension — the model never converges, even
-    on pure axial 7200 kN (see local/probe_mvlem_cm_ratio.py and
-    docs/mvlem_wall_analysis.md §7.1).  The corresponding tests are
-    ``xfail(run=False)``.
+    Concrete01's zero-tangent tension branch makes the MVLEM_3D macro-element
+    singular whenever any fibre goes into tension — the model never converges,
+    even on a pure axial 7200 kN pre-load (see local/probe_mvlem_cm_ratio.py
+    and docs/mvlem_wall_analysis.md §7.1).  Only the solver-free *build* path
+    is asserted (see ``TestMVLEM3DWallPushover``).
     """
     cfg = _mvlem_3d_config()
     cfg["mvlem_3d_concrete_law"] = "Concrete01"
@@ -698,104 +697,24 @@ class TestMVLEM3DWallPushover:
         finally:
             ops.wipe()
 
-    @pytest.mark.xfail(
-        reason=(
-            "Concrete01 zero-tangent tension branch is singular for "
-            "MVLEM_3D — the macro-element never converges even on pure "
-            "axial 7200 kN (KrylovNewton+NewtonLineSearch+ModifiedNewton "
-            "all fail at ~35-40 % load in local/probe_mvlem_cm_ratio.py). "
-            "The MVLEM_3D axial softness is geometric (uz·H ≈ const, "
-            "Ec-independent, verified: scaling ConcreteCM's Ec 26.8× "
-            "changes uz_cm not at all), so no concrete-law calibration can "
-            "fix it; see docs/mvlem_wall_analysis.md §7.1."
-        ),
-        strict=False,
-        run=False,
-    )
-    def test_concrete01_variant_builds_and_carries_100kn(self):
-        """MVLEM_3D(Concrete01) carries the 100 kN push under axial preload.
+    def test_concrete01_law_is_accepted_but_solving_is_a_dead_end(self):
+        """The opt-in Concrete01 law builds; solving it does not converge.
 
-        Concrete01 has no tension branch, so the lateral push must follow
-        the protocol-order: gravity (7200 kN preload keeps every fibre in
-        compression) then lateral.  This mirrors the comparison example's
-        gravity-then-push sequence.
+        Concrete01's zero-tangent tension branch makes the MVLEM_3D section
+        singular as soon as any fibre goes into tension, so the macro-element
+        never converges — not even under a pure axial 7200 kN pre-load (see
+        ``local/probe_mvlem_cm_ratio.py`` and ``docs/mvlem_wall_analysis.md``
+        §7.1).  That negative result is recorded in the docs; the two
+        diverging integration probes that used to live here were
+        ``xfail(run=False)`` and therefore never executed, so they covered
+        nothing.  This test pins what *is* verifiable without a solver.
         """
-        P_axial = 0.2 * 30.0e3 * (4.0 * 0.3)  # 7200 kN (= 0.2·fc·Ag)
         md = _mvlem_3d_model_data()
-        mm = Preprocessor(_mvlem_3d_concrete01_config()).run(md)
-        b = AnalysisBuilder(mm, _mvlem_3d_concrete01_config())
-        b.build_domain()
-        _apply_axial(mm, P_axial)
-        b.run_static_analysis(extract_reactions=True)
-        ops.loadConst("-time", 0.0)
-        ops.wipeAnalysis()
-        ops.timeSeries("Linear", 5001)
-        ops.pattern("Plain", 5001, 5001)
-        ops.load(3, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-        ops.load(4, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-        results = b.run_static_analysis()
-        rx = _sum_rx(results)
-        assert abs(rx + 100.0) < 1.0, f"rx={rx} expected ≈ −100"
-
-    @pytest.mark.xfail(
-        reason=(
-            "Concrete01 zero-tangent tension branch is singular for "
-            "MVLEM_3D — even pure-axial 7200 kN does not converge (see "
-            "local/probe_mvlem_cm_ratio.py).  The premise '~37x-soft "
-            "ConcreteCM initial tangent' was disproved: scaling the "
-            "ConcreteCM input Ec by 26.8× leaves uz_cm bit-for-bit "
-            "unchanged, and uz·H ≈ 0.08 m² is constant across heights — "
-            "the MVLEM_3D axial softness is a kinematic/geometric property "
-            "of the macro-element, not a material bug; see "
-            "docs/mvlem_wall_analysis.md §7.1."
-        ),
-        strict=False,
-        run=False,
-    )
-    def test_concrete01_axial_compression_matches_elastic_shell(self):
-        """Concrete01 fixes ConcreteCM's ~37x-soft axial crushing.
-
-        Apply the uniform protocol pre-load P = 0.20·fc·Ag = 7200 kN at
-        the top and compare top-node Z settlement.
-
-        ConcreteCM's crushed initial tangent in OpenSeesPy 3.8.0.0 makes
-        the MVLEM_3D axial settlement ~37x the elastic value; Concrete01
-        (E0 = Ec exact) collapses uz to the elastic LayeredShell value.
-
-        Note: lateral drift at 100 kN is *not* used as the matched-
-        stiffness metric — it is dominated by the MVLEM_3D shear spring
-        (k = 0.1·G·A/h), identical for both concrete laws.
-        """
-        P_axial = 0.2 * 30.0e3 * (4.0 * 0.3)  # 7200 kN (= 0.2·fc·Ag)
-
-        def _axial_settlement(config, model_data) -> tuple[float, float]:
-            mm = Preprocessor(config).run(model_data)
-            b = AnalysisBuilder(mm, config)
-            b.build_domain()
-            _apply_axial(mm, P_axial)
-            res = b.run_static_analysis(extract_reactions=True)
-            uz = res["nodal_displacements"]["3"][2]
-            fz = sum(rx["fz"] for rx in res["reactions"].values())
-            return uz, fz
-
-        ops.wipe()
-        uz_01, fz_01 = _axial_settlement(_mvlem_3d_concrete01_config(), _mvlem_3d_model_data())
-        ops.wipe()
-        uz_cm, fz_cm = _axial_settlement(_mvlem_3d_config(), _mvlem_3d_model_data())
-        ops.wipe()
-        uz_shell, fz_shell = _axial_settlement(_layered_shell_config(), _wall_model_data())
-
-        # All three react the full 7200 kN axial pre-load.
-        assert abs(fz_01 - P_axial) < 1.0, f"Concrete01 axial reaction {fz_01}"
-        assert abs(fz_cm - P_axial) < 1.0, f"ConcreteCM axial reaction {fz_cm}"
-        assert abs(fz_shell - P_axial) < 1.0, f"LayeredShell axial reaction {fz_shell}"
-
-        # ConcreteCM's soft tangent crushes the wall (settlement ~37x the
-        # elastic value); Concrete01 must collapse the gap by > 5x.
-        assert abs(uz_cm) > abs(uz_01) * 5.0, (
-            f"ConcreteCM settlement {uz_cm:.6e} should far exceed Concrete01 {uz_01:.6e}"
-        )
-        # Concrete01 settlement within 2x of the elastic shell reference.
-        assert abs(uz_01) < abs(uz_shell) * 2.0 + 1e-9, (
-            f"Concrete01 settlement {uz_01:.6e} should be near elastic shell {uz_shell:.6e}"
-        )
+        cfg = _mvlem_3d_concrete01_config()
+        builder = AnalysisBuilder(Preprocessor(cfg).run(md), cfg)
+        try:
+            builder.build_domain()
+            tag = builder.mesh_model.wall_elements["W1"].elem_tag
+            assert tag in ops.getEleTags(), "MVLEM_3D element not created"
+        finally:
+            ops.wipe()

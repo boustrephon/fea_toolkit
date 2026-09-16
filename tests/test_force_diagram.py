@@ -64,6 +64,8 @@ def _minimal_rs_npz_dict() -> dict:
     data["rs/elem_mz_i"] = np.array([6.0, 12.0])
     data["rs/elem_mz_j"] = np.array([-6.0, -12.0])
     # Deprecated aliases, as written by collect_rs_element_force_arrays.
+    # Delete with them — see docs/deprecation_plan.md ("Scheduled: per-element
+    # RS alias keys"); the canonical replacements are rs/elem_fy_i, rs/elem_my_i.
     data["rs/elem_Vy_i"] = np.array([2.0, 4.0])
     data["rs/elem_My_i"] = np.array([0.0, 0.0])
     return data

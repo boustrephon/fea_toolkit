@@ -199,15 +199,16 @@ class TestRecordingOpenSees:
             rec.save_as_python(str(out), func_name="return")
 
     def test_save_as_python_valid_names_work(self, tmp_path):
-        """Valid identifiers like 'build_model' and 'run' are accepted."""
+        """Valid identifiers are accepted and emitted as the function name."""
         rec = RecordingOpenSees(_real)
         rec.wipe()
-        out = tmp_path / "m.py"
-        # Should not raise
-        rec.save_as_python(str(out), func_name="build_model")
-        rec.save_as_python(str(out), func_name="run")
-        rec.save_as_python(str(out), func_name="_helper")
-        rec.save_as_python(str(out), func_name="main")
+        for name in ("build_model", "run", "_helper", "main"):
+            out = tmp_path / f"{name}.py"
+            rec.save_as_python(str(out), func_name=name)
+            source = out.read_text()
+            assert f"def {name}(" in source
+            # The emitted module must be valid, importable Python.
+            compile(source, str(out), "exec")
 
     def test_no_recording_without_swap(self):
         """Builder works normally without recorder (no side effects)."""
