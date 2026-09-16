@@ -55,10 +55,13 @@ storey elevation is the mean Z of its joints.
 
 **Non-diaphragm constraints** never contribute storey levels.  `BODY`
 (rigid-body) constraints are handled separately by the Preprocessor
-(`_detect_rigid_body_constraints`) and applied by the AnalysisBuilder as
-6-DOF `rigidLink('beam')` MPCs — see `docs/model_review.md`.  Every other
-type (`EQUAL`, `WELD`, `BEAM`, `ROD`, `PLATE`, `LOCAL`) is parsed but
-**not applied**; the model review flags it as such.
+(`_detect_rigid_body_constraints`), which records each group's enabled
+`UX`/`UY`/`UZ`/`RX`/`RY`/`RZ` flags.  The AnalysisBuilder applies a full
+6-DOF `rigidLink('beam')` MPC per slave when all six flags are set, or
+`ops.equalDOF` on just the enabled DOFs for a partial flag set — see
+`docs/model_review.md`.  Every other type (`EQUAL`, `WELD`, `BEAM`,
+`ROD`, `PLATE`, `LOCAL`) is parsed but **not supported**; the model review
+flags it as such.
 
 > **Historical note:** an earlier version read `raw_tables` directly
 > (`CONSTRAINT DEFINITIONS - DIAPHRAGM`). It now reads the structured

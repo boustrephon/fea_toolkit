@@ -39,30 +39,42 @@ class ConstraintMixin:
             )
 
     def _apply_rigid_bodies(self) -> int:
-        """Apply SAP2000 ``BODY`` constraints as ``rigidLink`` MPCs.
+        """Apply SAP2000 ``BODY`` constraints as rigid MPCs.
 
-        Each ``CONSTRAINT DEFINITIONS - BODY`` group ties all of its joints
-        into a single rigid body (six DOF coupled).  It is reproduced with
-        one ``ops.rigidLink('beam', master, slave)`` MPC per slave node —
-        the same 6-DOF rigid-link mechanism used for frame end offsets.
-        Omitting it leaves the previously-tied joints free to move
-        independently, which makes the model softer (most visibly in
-        torsion and transverse sway).
+        Each ``CONSTRAINT DEFINITIONS - BODY`` group ties its joints into a
+        rigid body.  When all six constraint DOF flags (``UX``, ``UY``,
+        ``UZ``, ``RX``, ``RY``, ``RZ``) are enabled, the group is reproduced
+        with one ``ops.rigidLink('beam', master, slave)`` MPC per slave node
+        — the same 6-DOF rigid-link mechanism used for frame end offsets.
+        For any partial flag combination only the enabled DOFs are tied, via
+        ``ops.equalDOF(master, slave, *enabled_dofs)``; a group with no
+        enabled DOFs is skipped.  Omitting the tie leaves the previously
+        coupled joints free to move independently, which makes the model
+        softer (most visibly in torsion and transverse sway).
 
         The group's master is the node nearest its 3-D centroid, so the
         retained DOFs sit inside the body.  Groups with fewer than two
         surviving nodes are skipped, as are nodes missing from the domain.
 
+        A failed ``ops.rigidLink`` / ``ops.equalDOF`` call is logged and
+        re-raised, so
+        :meth:`~fea_toolkit.opensees.analysis_builder.AnalysisBuilder.build_domain`
+        cannot return a domain with a partially applied body.
+
         Disabled with ``apply_rigid_bodies: False`` in the config.
 
         Returns:
             Number of rigid bodies applied.
+
+        Raises:
+            RuntimeError: If an ``ops.rigidLink`` / ``ops.equalDOF`` call
+                fails — an incomplete domain must never reach analysis.
         """
         if not self.config.get("apply_rigid_bodies", True):
             return 0
         components = getattr(self.mesh_model, "rigid_body_components", None) or []
         applied = 0
-        for name, node_ids in components:
+        for name, node_ids, dof_flags in components:
             tags: list[int] = []
             for nid in node_ids:
                 nd = self.mesh_model.nodes.get(nid)
@@ -76,23 +88,37 @@ class ConstraintMixin:
             if len(tags) < 2:
                 continue
             master = self._select_rigid_body_master(tags)
-            failed = False
+            # All six flags → full rigid body; otherwise tie only the enabled
+            # DOFs.  ``enumerate(..., start=1)`` maps the flag order
+            # [UX, UY, UZ, RX, RY, RZ] onto OpenSees DOF numbers 1..6.
+            full_rigid = all(dof_flags)
+            enabled_dofs = [dof for dof, enabled in enumerate(dof_flags, start=1) if enabled]
+            if not full_rigid and not enabled_dofs:
+                continue
             for slave in tags:
                 if slave == master:
                     continue
                 try:
-                    ops.rigidLink("beam", master, slave)
+                    if full_rigid:
+                        ops.rigidLink("beam", master, slave)
+                    else:
+                        ops.equalDOF(master, slave, *enabled_dofs)
                 except Exception as exc:
                     logger.warning(
-                        "rigidLink failed for body '%s' (master=%d, slave=%d): %s",
+                        "BODY constraint '%s' failed (master=%d, slave=%d, "
+                        "full_rigid=%s, dofs=%s): %s",
                         name,
                         master,
                         slave,
+                        full_rigid,
+                        enabled_dofs,
                         exc,
                     )
-                    failed = True
-            if not failed:
-                applied += 1
+                    raise RuntimeError(
+                        f"Failed to apply BODY constraint '{name}' "
+                        f"(master={master}, slave={slave}): {exc}"
+                    ) from exc
+            applied += 1
         if applied and self.config.get("verbose"):
             print(f"  Applied {applied} rigid-body constraint(s) (BODY).")
         return applied

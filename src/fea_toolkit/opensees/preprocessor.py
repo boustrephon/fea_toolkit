@@ -117,6 +117,43 @@ def _remap_frame_releases(
     return remapped
 
 
+#: BODY-constraint DOF flags, in OpenSees DOF order (1..6).
+_BODY_DOF_KEYS = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+
+
+def _body_dof_flags(con) -> list[bool]:
+    """Return the six enabled-DOF flags of a ``BODY`` constraint.
+
+    SAP2000's ``CONSTRAINT DEFINITIONS - BODY`` table carries one Yes/No
+    column per DOF (``UX``, ``UY``, ``UZ``, ``RX``, ``RY``, ``RZ``), stored
+    on the :class:`~fea_toolkit.model.sap_data.Constraint` as
+    ``constraint_data`` entries.  Values may already have been coerced to
+    ``bool`` during a raw ``.s2k`` parse, or left as the literal
+    ``"Yes"``/``"No"`` strings when the model was loaded from JSON, so both
+    forms are accepted.  A missing flag defaults to enabled — the historic
+    all-six-DOF behaviour.
+
+    Args:
+        con: A :class:`~fea_toolkit.model.sap_data.Constraint` instance.
+
+    Returns:
+        ``[ux, uy, uz, rx, ry, rz]`` booleans, in OpenSees DOF order 1..6.
+    """
+    data = getattr(con, "constraint_data", None) or {}
+
+    def _flag(key: str) -> bool:
+        value = data.get(key)
+        if value is None:
+            return True
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        return str(value).strip().lower() in ("yes", "true", "1")
+
+    return [_flag(key) for key in _BODY_DOF_KEYS]
+
+
 class Preprocessor:
     """Prepare model topology for OpenSees analysis.
 
@@ -505,7 +542,7 @@ class Preprocessor:
         # Joint nodes referenced only by a BODY constraint (no element of
         # their own) must be retained — the rigidLink MPCs tie them to the
         # group master, and dropping them would silently drop the body.
-        for _name, _body_ids in rigid_body_components:
+        for _name, _body_ids, _dof_flags in rigid_body_components:
             referenced.update(_body_ids)
         orphan_nodes: dict[str, Node] = {}
         for nid in list(md.nodes.keys()):
@@ -1303,17 +1340,19 @@ class Preprocessor:
         components.sort(key=lambda item: item[0])
         return sorted(levels), components
 
-    def _detect_rigid_body_constraints(self, md) -> list[tuple[str, list[str]]]:
+    def _detect_rigid_body_constraints(self, md) -> list[tuple[str, list[str], list[bool]]]:
         """Detect SAP2000 ``BODY`` (rigid-body) constraint groups.
 
-        A ``CONSTRAINT DEFINITIONS - BODY`` entry ties every assigned joint
-        into a single rigid body (all six DOF coupled).  The toolkit applies
-        it in the OpenSees domain as one ``ops.rigidLink('beam', master,
-        slave)`` MPC per slave node, so the group is recorded here on the
-        ``MeshModel`` for the AnalysisBuilder to consume.  Unlike a
+        A ``CONSTRAINT DEFINITIONS - BODY`` entry ties its assigned joints
+        into a rigid body, optionally on a subset of the six DOFs (the
+        table's ``UX``/``UY``/``UZ``/``RX``/``RY``/``RZ`` Yes/No columns).
+        The enabled flags are recorded alongside the group so the
+        AnalysisBuilder can emit a full ``ops.rigidLink('beam', master,
+        slave)`` MPC per slave node when all six are enabled, or a partial
+        ``ops.equalDOF`` tie for any other combination.  Unlike a
         ``DIAPHRAGM`` constraint (which couples only the in-plane DOFs), a
-        ``BODY`` constraint also ties the out-of-plane translation and both
-        out-of-plane rotations — omitting it makes the model softer in
+        full ``BODY`` constraint also ties the out-of-plane translation and
+        both out-of-plane rotations — omitting it makes the model softer in
         torsion and transverse sway.
 
         Only ``BODY`` constraints are handled here; every other
@@ -1325,34 +1364,36 @@ class Preprocessor:
         least two surviving joints to be meaningful.
 
         Returns:
-            ``[(constraint_name, [joint_id, ...]), ...]`` — one entry per
-            BODY constraint, sorted by constraint name for deterministic
-            output.
+            ``[(constraint_name, [joint_id, ...], [dof_flag, ...]), ...]`` —
+            one entry per BODY constraint, sorted by constraint name for
+            deterministic output.  ``dof_flag`` is the six-element
+            ``[UX, UY, UZ, RX, RY, RZ]`` enabled-DOF list (OpenSees DOF
+            order 1..6).
         """
         constraints = getattr(md, "constraints", {}) or {}
         assignments = getattr(md, "constraint_assignments", {}) or {}
         if not constraints or not assignments:
             return []
 
-        body_names = {
-            name
+        body_defs = {
+            name: con
             for name, con in constraints.items()
             if str(getattr(con, "constraint_type", "") or "").upper() == "BODY"
         }
-        if not body_names:
+        if not body_defs:
             return []
 
-        groups: dict[str, list[str]] = {name: [] for name in body_names}
+        groups: dict[str, list[str]] = {name: [] for name in body_defs}
         for jid, cname in assignments.items():
             bucket = groups.get(cname)
             if bucket is not None:
                 bucket.append(jid)
 
-        components: list[tuple[str, list[str]]] = []
+        components: list[tuple[str, list[str], list[bool]]] = []
         for name in sorted(groups):
             surviving = [jid for jid in groups[name] if jid in md.nodes]
             if len(surviving) >= 2:
-                components.append((name, surviving))
+                components.append((name, surviving, _body_dof_flags(body_defs[name])))
         return components
 
     def _resolve_explicit_diaphragm_groups(self, md) -> Optional[list[tuple[float, list[str]]]]:

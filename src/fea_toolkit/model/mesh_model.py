@@ -254,11 +254,14 @@ class MeshModel:
     #   [(z_level, [master_node_id, slave_node_id, ...]), ...]
 
     # ── Rigid-body components (SAP2000 BODY constraints) ─────────
-    # Each entry is a ``(constraint_name, [node_id, ...])`` tuple for one
-    # ``CONSTRAINT DEFINITIONS - BODY`` group — a 6-DOF rigid body tie
-    # between its assigned joints.  Emitted by the AnalysisBuilder as one
-    # ``ops.rigidLink('beam', master, slave)`` MPC per slave node.
-    rigid_body_components: list[tuple[str, list[str]]] = field(default_factory=list)
+    # Each entry is a ``(constraint_name, [node_id, ...], [dof_flag, ...])``
+    # tuple for one ``CONSTRAINT DEFINITIONS - BODY`` group — a rigid tie
+    # between its assigned joints on the enabled DOFs.  ``dof_flag`` is the
+    # six-element ``[UX, UY, UZ, RX, RY, RZ]`` enabled-DOF list (OpenSees
+    # DOF order 1..6).  Emitted by the AnalysisBuilder as one
+    # ``ops.rigidLink('beam', master, slave)`` MPC per slave node when all
+    # six flags are set, or ``ops.equalDOF`` on the enabled DOFs otherwise.
+    rigid_body_components: list[tuple[str, list[str], list[bool]]] = field(default_factory=list)
 
     # ── Diaphragm Z tolerance (per-elevation node matching) ───────
     # Tolerance (in model length units) used when grouping nodes near

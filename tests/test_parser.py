@@ -1238,10 +1238,12 @@ def test_body_constraints_detected_and_applied(tmp_path):
     assert md.constraints["Fix"].constraint_type == "BODY"
     assert md.constraint_assignments["1"] == "Fix"
 
-    # Recorded on the MeshModel as one rigid-body group.
-    assert [name for name, _ids in mm.rigid_body_components] == ["Fix"]
-    _name, body_ids = mm.rigid_body_components[0]
+    # Recorded on the MeshModel as one rigid-body group with all six DOFs
+    # enabled (the fixture sets every UX/UY/UZ/RX/RY/RZ flag to Yes).
+    assert [name for name, _ids, _flags in mm.rigid_body_components] == ["Fix"]
+    _name, body_ids, dof_flags = mm.rigid_body_components[0]
     assert set(body_ids) == {"1", "2", "3"}
+    assert dof_flags == [True, True, True, True, True, True]
     # Orphan removal must keep every body joint, even unconnected ones.
     assert {"1", "2", "3"} <= set(mm.nodes)
 
@@ -1284,6 +1286,95 @@ def test_rigid_bodies_false_disables(tmp_path):
         _make_in_memory_domain(builder, md)
         assert builder._apply_rigid_bodies() == 0
     finally:
+        ops.wipe()
+
+
+def test_body_constraints_partial_flags_use_equal_dof(tmp_path):
+    """A BODY constraint with only some DOF flags enabled ties just those DOFs.
+
+    Full all-six-flag groups use ``ops.rigidLink('beam')`` (see
+    ``test_body_constraints_detected_and_applied``); any partial combination
+    must fall back to ``ops.equalDOF`` on the enabled DOFs only.
+    """
+    import json
+
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees import _constraints as _cm
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+    from fea_toolkit.opensees.preprocessor import preprocess_model
+
+    data = _body_constraint_s2k_data()
+    # Tie translations only; leave all three rotations free.
+    data["CONSTRAINT DEFINITIONS - BODY"][0].update({"RX": "No", "RY": "No", "RZ": "No"})
+    json_path = tmp_path / "body_partial.json"
+    json_path.write_text(json.dumps(data))
+
+    md = SAP2000Parser.from_json(json_path).get_model_data()
+    mm = preprocess_model(md, {"split_elements": False, "verbose": False})
+
+    # The enabled-DOF flags survive preprocessing, in OpenSees DOF order.
+    _name, _ids, dof_flags = mm.rigid_body_components[0]
+    assert dof_flags == [True, True, True, False, False, False]
+
+    calls: list = []
+    real_ops = _cm.ops
+
+    class _Rec:
+        def __getattr__(self, item):
+            return getattr(real_ops, item)
+
+        def equalDOF(self, *args):
+            calls.append(args)
+            return real_ops.equalDOF(*args)
+
+        def rigidLink(self, *args):  # pragma: no cover - must not be reached
+            raise AssertionError("partial BODY must not use rigidLink")
+
+    builder = AnalysisBuilder(mm, {"verbose": False})
+    try:
+        _make_in_memory_domain(builder, md)
+        _cm.ops = _Rec()
+        assert builder._apply_rigid_bodies() == 1
+        # 3 joints -> 1 master + 2 slaves, each tied on DOFs 1, 2, 3 only.
+        assert len(calls) == 2
+        assert all(call[2:] == (1, 2, 3) for call in calls)
+        assert len({call[0] for call in calls}) == 1  # single master
+    finally:
+        _cm.ops = real_ops
+        ops.wipe()
+
+
+def test_body_constraint_failure_raises(tmp_path):
+    """A failed rigid MPC call aborts instead of returning a partial body.
+
+    ``build_domain()`` must not receive a domain where some (but not all) of
+    a BODY group's slaves were tied, so ``_apply_rigid_bodies`` re-raises the
+    failure rather than logging it and returning.
+    """
+    import openseespy.opensees as ops
+
+    from fea_toolkit.opensees import _constraints as _cm
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    md, mm = _parse_body_s2k(tmp_path)
+    real_ops = _cm.ops
+
+    class _Failing:
+        def __getattr__(self, item):
+            return getattr(real_ops, item)
+
+        def rigidLink(self, *args):
+            raise RuntimeError("boom")
+
+    builder = AnalysisBuilder(mm, {"verbose": False})
+    try:
+        _make_in_memory_domain(builder, md)
+        _cm.ops = _Failing()
+        with pytest.raises(RuntimeError, match="BODY constraint 'Fix'"):
+            builder._apply_rigid_bodies()
+    finally:
+        _cm.ops = real_ops
         ops.wipe()
 
 
