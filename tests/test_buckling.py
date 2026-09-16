@@ -300,6 +300,14 @@ class TestSubdividedBraceInPushover:
     4. Optionally check critical braces via ``check_brace_buckling()``
     """
 
+    @pytest.fixture(autouse=True)
+    def _wipe_opensees(self):
+        """Wipe OpenSees global state after every test in this class."""
+        yield
+        import openseespy.opensees as ops
+
+        ops.wipe()
+
     @pytest.fixture
     def brace_model(self):
         """A slender 10 m pin-pin pipe column for pushover testing."""
