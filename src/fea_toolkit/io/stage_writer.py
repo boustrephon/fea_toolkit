@@ -32,6 +32,7 @@ import datetime
 import json
 import typing as t
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
@@ -132,17 +133,17 @@ def collect_dictionary_arrays(model: t.Any) -> dict[str, np.ndarray]:
 
 def build_metadata(
     *,
-    sap: t.Optional[SAPModelData] = None,
-    mesh: t.Optional[t.Any] = None,
-    config: t.Optional[dict] = None,
-    static_results: t.Optional[dict] = None,
-    modal_result: t.Optional[dict] = None,
-    pushover_results: t.Optional[dict] = None,
-    rs_results: t.Optional[dict] = None,
-    force_unit: t.Optional[str] = None,
-    length_unit: t.Optional[str] = None,
+    sap: Optional[SAPModelData] = None,
+    mesh: Optional[t.Any] = None,
+    config: Optional[dict] = None,
+    static_results: Optional[dict] = None,
+    modal_result: Optional[dict] = None,
+    pushover_results: Optional[dict] = None,
+    rs_results: Optional[dict] = None,
+    force_unit: Optional[str] = None,
+    length_unit: Optional[str] = None,
     forces_coordinate_system: str = "local",
-    source_file: t.Optional[str] = None,
+    source_file: Optional[str] = None,
 ) -> dict[str, t.Any]:
     """Build the file-level provenance metadata dict."""
     from .. import __version__
@@ -216,24 +217,24 @@ def _stage_arrays(
 def write_model_stages(
     path: str,
     *,
-    sap: t.Optional[SAPModelData] = None,
-    mesh: t.Optional[t.Any] = None,
-    config: t.Optional[dict] = None,
-    static_results: t.Optional[dict] = None,
-    modal_result: t.Optional[dict] = None,
-    mode_shapes: t.Optional[dict] = None,
-    pushover_results: t.Optional[dict] = None,
-    rs_results: t.Optional[dict] = None,
-    rs_element_forces: t.Optional[dict] = None,
-    rs_nodal_displacements: t.Optional[dict] = None,
+    sap: Optional[SAPModelData] = None,
+    mesh: Optional[t.Any] = None,
+    config: Optional[dict] = None,
+    static_results: Optional[dict] = None,
+    modal_result: Optional[dict] = None,
+    mode_shapes: Optional[dict] = None,
+    pushover_results: Optional[dict] = None,
+    rs_results: Optional[dict] = None,
+    rs_element_forces: Optional[dict] = None,
+    rs_nodal_displacements: Optional[dict] = None,
     fmt: str = "npz",
     geometry: bool = True,
     dictionaries: bool = True,
     model_json: bool = True,
-    force_unit: t.Optional[str] = None,
-    length_unit: t.Optional[str] = None,
+    force_unit: Optional[str] = None,
+    length_unit: Optional[str] = None,
     forces_coordinate_system: str = "local",
-    source_file: t.Optional[str] = None,
+    source_file: Optional[str] = None,
 ) -> str:
     """Write model stages (``sap`` / ``mesh``) plus optional results to a
     single NPZ or HDF5 file.
