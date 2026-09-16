@@ -58,6 +58,25 @@ def test_rho_matrix_guards_extreme_ratio():
     assert rho[0, 0] == pytest.approx(1.0)
 
 
+@pytest.mark.filterwarnings("ignore:invalid value encountered in divide")
+def test_rho_matrix_diagonal_survives_non_finite_omega():
+    """A non-finite ω must not zero that mode's self-correlation.
+
+    ``ω = inf`` (a sentinel for a mode whose frequency is unusable) makes the
+    diagonal ratio ``inf / inf`` NaN.  The NaN sanitising step used to zero
+    that entry along with the genuinely uncorrelated cross terms, so ``ρ_ii``
+    became 0 and the mode dropped silently out of the CQC sum.  The diagonal
+    is restored to 1 after sanitising, while the non-finite cross terms stay
+    at 0 rather than NaN.
+    """
+    rho = cqc_rho_matrix([float("inf"), 2.0], [0.05, 0.05])
+    assert np.all(np.isfinite(rho))
+    assert rho[0, 0] == pytest.approx(1.0)
+    assert rho[1, 1] == pytest.approx(1.0)
+    assert rho[0, 1] == 0.0
+    assert rho[1, 0] == 0.0
+
+
 def test_rho_matrix_handles_zero_frequency():
     """ω = 0 falls back to a 1.0 ratio, exactly as the scalar path does."""
     rho = cqc_rho_matrix([0.0, 0.0], [0.05, 0.05])
