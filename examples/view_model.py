@@ -282,7 +282,7 @@ def show_npz(path, args):
     if args.result in ("static", "modal") and (args.zlim or args.labels or args.highlight_section):
         print("Note: --zlim / --labels / --highlight-section apply to --result mesh only.")
     if args.result == "static":
-        plot_force_diagram(str(path), quantity=args.quantity)
+        plot_force_diagram(str(path), quantity=args.quantity, dimension=args.dimension)
     elif args.result == "modal":
         plot_mode_animation(data, None, mode=mode_index(args), scale=args.mode_scale)
     elif args.result == "rs":
