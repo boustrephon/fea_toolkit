@@ -170,17 +170,19 @@ GENERAL"* (or legacy *"FRAME RELEASES"*) table.
 Joint constraint definitions (`CONSTRAINT DEFINITIONS - <TYPE>`) with a
 per-type count and whether the toolkit supports each type.  Only **Z-axis
 `DIAPHRAGM`** (and `DIAPHRAGM` definitions with an unspecified or empty
-`Axis`) (→ `ops.rigidDiaphragm`) and **`BODY`** (→
-`ops.rigidLink('beam')` 6-DOF MPCs when all six DOF flags are enabled, or
-`ops.equalDOF` on the enabled translation DOFs for a partial flag set — a
+`Axis`) (→ `ops.rigidDiaphragm`) and **GLOBAL-coordinate-system `BODY`**
+(→ `ops.rigidLink('beam')` 6-DOF MPCs when all six DOF flags are enabled,
+or `ops.equalDOF` on the enabled translation DOFs for a partial flag set — a
 partial set that enables any rotational DOF is rejected, because the
 rigid-body offset between separated joints cannot be represented by
 `equalDOF`; disable with `apply_rigid_bodies: False`) are supported.
-X- and Y-axis `DIAPHRAGM` groups and every other type (`EQUAL`, `WELD`,
-`BEAM`, `ROD`, `PLATE`, `LOCAL`) are parsed but **not supported**, so the
-analysis silently omits that stiffness.  Such groups are listed under
-`unsupported` — a missing rigid-body tie in particular makes the OpenSees
-model softer than SAP2000, most visibly in torsion.
+X- and Y-axis `DIAPHRAGM` groups, **non-global `BODY`** definitions (the
+preprocessor skips these with a warning, because the generated MPCs are
+written in global DOFs and are not transformed) and every other type
+(`EQUAL`, `WELD`, `BEAM`, `ROD`, `PLATE`, `LOCAL`) are parsed but **not
+supported**, so the analysis silently omits that stiffness.  Such groups are
+listed under `unsupported` — a missing rigid-body tie in particular makes
+the OpenSees model softer than SAP2000, most visibly in torsion.
 
 Support is classified **per definition**, so a model mixing Z-axis and
 X-axis diaphragms reports the `DIAPHRAGM` row as `Partial`, and each
