@@ -1569,6 +1569,22 @@ class TestParseCardinalPoint:
         # is consumed rather than silently dropped.
         assert SAP2000Parser._parse_cardinal_point("1e1 (centroid)") == 10
 
+    def test_trailing_junk_rejected(self):
+        """A stray alphanumeric suffix is not a token boundary.
+
+        ``"8.7x"`` must not read as cardinal point 8: the previous word-
+        boundary anchor let the regex backtrack to the leading ``8`` (the
+        ``8`` to ``.`` transition *is* a word boundary), so the malformed cell
+        resolved to a valid-looking 8.  The lookahead now requires whitespace,
+        an opening parenthesis or the end of the string after the complete
+        number, rejecting the junk-suffixed cell outright while the valid
+        labelled form still parses.
+        """
+        assert SAP2000Parser._parse_cardinal_point("8.7x") is None
+        assert SAP2000Parser._parse_cardinal_point("8x") is None
+        assert SAP2000Parser._parse_cardinal_point("8.7 (top center)") is None
+        assert SAP2000Parser._parse_cardinal_point("8 (top center)") == 8
+
 
 class TestSectionDepthWidth:
     """Tests for SAP2000Parser._get_section_depth_width()."""
