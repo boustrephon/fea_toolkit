@@ -249,6 +249,47 @@ def _release_summary(md: SAPModelData) -> dict[str, Any]:
     return {"n_frames_with_releases": len(rows), "by_dof": by_dof, "releases": rows}
 
 
+def _constraint_summary(md: SAPModelData) -> dict[str, Any]:
+    """Summarise joint constraint definitions and their OpenSees support.
+
+    ``CONSTRAINT DEFINITIONS - <TYPE>`` groups are parsed into
+    ``md.constraints``.  Only two types are converted to OpenSees
+    constraints: Z-axis ``DIAPHRAGM`` groups (``ops.rigidDiaphragm``) and
+    ``BODY`` groups (``ops.rigidLink('beam')`` MPCs).  Every other type —
+    ``EQUAL``, ``WELD``, ``BEAM``, ``ROD``, ``PLATE``, ``LOCAL`` — is
+    parsed but **not applied**, so the analysis silently omits that
+    stiffness.  A missing rigid-body constraint in particular makes the
+    model softer than SAP2000 (most visibly in torsion), so the review
+    surfaces it rather than letting it pass unnoticed.
+
+    Args:
+        md: Parsed model data.
+
+    Returns:
+        ``{"by_type": {type: count}, "unsupported": [{name, type,
+        n_joints}, ...], "n_supported": int}``.
+    """
+    supported_types = {"DIAPHRAGM", "BODY"}
+    assignments = getattr(md, "constraint_assignments", {}) or {}
+    joint_counts: dict[str, int] = defaultdict(int)
+    for _jid, cname in assignments.items():
+        joint_counts[cname] += 1
+
+    by_type: dict[str, int] = defaultdict(int)
+    unsupported: list[dict[str, Any]] = []
+    for name, con in md.constraints.items():
+        ctype = str(getattr(con, "constraint_type", "") or "").upper() or "UNKNOWN"
+        by_type[ctype] += 1
+        if ctype not in supported_types:
+            unsupported.append({"name": name, "type": ctype, "n_joints": joint_counts.get(name, 0)})
+    unsupported.sort(key=lambda row: _natural_key(row["name"]))
+    return {
+        "by_type": dict(by_type),
+        "unsupported": unsupported,
+        "n_supported": sum(n for t, n in by_type.items() if t in supported_types),
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Integrity checks
 # ═══════════════════════════════════════════════════════════════════
@@ -741,6 +782,7 @@ def review_model(
             "floating_components": floating,
         },
         "releases": _release_summary(md),
+        "constraints": _constraint_summary(md),
         "integrity": _integrity(md, tol),
         "observations": _observations(md),
         "self_weight": _self_weight(md) if self_weight else None,
@@ -1273,6 +1315,7 @@ def format_review_report(
     releases = result["releases"]
     integrity = result["integrity"]
     observations = result["observations"]
+    constraints = result.get("constraints") or {"by_type": {}, "unsupported": []}
     units = result["units"]
     lu = units.get("L", "m")
 
@@ -1335,6 +1378,21 @@ def format_review_report(
         for key, value in releases["by_dof"].items():
             if value:
                 add(f"      {key:<6}{value:>8}")
+
+    add("")
+    add("-- Constraints " + "-" * 55)
+    by_type = constraints["by_type"]
+    if not by_type:
+        add("  No joint constraint definitions.")
+    else:
+        for ctype, count in sorted(by_type.items()):
+            tag = "applied" if ctype in ("DIAPHRAGM", "BODY") else "NOT APPLIED"
+            add(f"  {ctype:<14}{count:>6}   [{tag}]")
+        for row in constraints["unsupported"]:
+            add(
+                f"      ! '{row['name']}' ({row['type']}, {row['n_joints']} joints) "
+                f"parsed but NOT applied to OpenSees"
+            )
 
     add("")
     add("-- Integrity " + "-" * 57)
@@ -1612,6 +1670,7 @@ def format_review_markdown(
     releases = result["releases"]
     integrity = result["integrity"]
     observations = result["observations"]
+    constraints = result.get("constraints") or {"by_type": {}, "unsupported": []}
 
     md: list[str] = []
     add = md.append
@@ -1664,6 +1723,26 @@ def format_review_markdown(
             end_j = ", ".join(row["end_j"]) or "—"
             add(f"| {row['frame_id']} | {end_i} | {end_j} |")
         add("")
+
+    add("## Constraints")
+    add("")
+    by_type = constraints["by_type"]
+    if not by_type:
+        add("_No joint constraint definitions._")
+    else:
+        add("| Type | Count | Applied to OpenSees |")
+        add("|---|---:|:---|")
+        for ctype, count in sorted(by_type.items()):
+            applied = "yes" if ctype in ("DIAPHRAGM", "BODY") else "**NO**"
+            add(f"| {ctype} | {count} | {applied} |")
+        add("")
+        for row in constraints["unsupported"]:
+            add(
+                f"> \u26a0 **`{row['name']}`** ({row['type']}, "
+                f"{row['n_joints']} joints) is parsed but **not applied** — "
+                "the analysis omits this stiffness."
+            )
+    add("")
 
     add("## Integrity")
     add("")
