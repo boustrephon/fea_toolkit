@@ -1543,6 +1543,19 @@ class TestParseCardinalPoint:
         assert SAP2000Parser._parse_cardinal_point(True) is None
         assert SAP2000Parser._parse_cardinal_point("centroid") is None
 
+    def test_fractional_labelled_rejected(self):
+        """A fractional labelled value is rejected, not truncated.
+
+        ``"8.7 (top center)"`` must not read as cardinal point 8: the
+        labelled form captures the complete numeric prefix (the bare ``"8.7"``
+        form already did) and the integral check then rejects it.  The
+        signed prefix is captured whole too, so ``"-2.5 (bottom center)"``
+        no longer resolves to cardinal point 2.
+        """
+        assert SAP2000Parser._parse_cardinal_point("8.7 (top center)") is None
+        assert SAP2000Parser._parse_cardinal_point("8.7") is None
+        assert SAP2000Parser._parse_cardinal_point("-2.5 (bottom center)") is None
+
 
 class TestSectionDepthWidth:
     """Tests for SAP2000Parser._get_section_depth_width()."""
