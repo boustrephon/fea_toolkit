@@ -299,10 +299,14 @@ The **global** visualisation-test policy lives in `tests/conftest.py` — do not
 re-declare it per test file (it was previously duplicated seven ways; see the
 consolidation in commit `test: dissolve extracted grab-bag …`).
 
-- **matplotlib `Agg`** is applied by an autouse, module-scoped fixture
-  (`_matplotlib_agg`) for the whole suite. Never add a per-file
-  `matplotlib.use("Agg")` fixture: a forgotten backend is a *silent* failure on
-  a display-less CI runner, not a clean error.
+- **matplotlib `Agg`** is forced by setting `MPLBACKEND="Agg"` in
+  `tests/conftest.py` at import time — *before* pytest collects any test
+  module, since a module-level `import matplotlib.pyplot` during collection
+  would otherwise latch onto a display backend. The autouse, module-scoped
+  `_matplotlib_agg` fixture no longer selects a backend; it only releases
+  figures (`plt.close("all")`). Never add a per-file `matplotlib.use("Agg")`
+  (or `MPLBACKEND`) override: a forgotten backend is a *silent* failure on a
+  display-less CI runner, not a clean error.
 - **PyVista** availability is probed once in conftest. When importable,
   `OFF_SCREEN` is set true suite-wide so no test opens a render window.
 - **`@pytest.mark.needs_pyvista`** marks any test that needs PyVista; conftest

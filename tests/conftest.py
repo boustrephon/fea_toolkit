@@ -5,10 +5,11 @@ that no individual test module has to declare them (and, more importantly,
 cannot forget them) — see ``.clinerules`` §5.5.
 
 matplotlib ``Agg`` backend
-    Set once per test module for the whole suite.  A forgotten ``Agg``
-    switch is a *silent* failure on a display-less CI runner rather than a
-    clean error, so the policy lives in exactly one place.  ``matplotlib``
-    is imported lazily, so non-plotting modules pay nothing.
+    Forced through the ``MPLBACKEND`` environment variable at conftest
+    import time — before pytest collects any test module — so the policy is
+    suite-wide and a forgotten ``Agg`` switch is impossible.  A missing
+    ``Agg`` switch is a *silent* failure on a display-less CI runner rather
+    than a clean error, so the policy lives in exactly one place.
 
 PyVista
     PyVista is a core dependency but cannot be installed inside Rhino 8's
@@ -24,7 +25,16 @@ PyVista
     ``scipy``, ``rhino3dm`` and friends elsewhere in the suite.
 """
 
+import os
+
 import pytest
+
+# Force the non-interactive Agg backend at conftest import time, *before*
+# pytest collects any test module: a module-level ``import matplotlib.pyplot``
+# during collection would otherwise latch onto a display backend and fail
+# silently on a head-less CI runner.  ``_matplotlib_agg`` below therefore
+# only releases figures — it no longer selects a backend.
+os.environ["MPLBACKEND"] = "Agg"
 
 try:  # pyvista is core, but unavailable inside Rhino 8's embedded interpreter
     import pyvista as _pyvista
@@ -38,15 +48,14 @@ else:
 
 @pytest.fixture(autouse=True, scope="module")
 def _matplotlib_agg():
-    """Use the non-interactive matplotlib backend and release figures.
+    """Release matplotlib figures between test modules.
 
-    Module-scoped rather than session-scoped so every plotting module starts
-    from a clean figure registry, matching the per-file fixtures this
-    replaces.
+    The non-interactive ``Agg`` backend is forced via ``MPLBACKEND`` at
+    conftest import time (see above), so this fixture only drops the figure
+    registry.  Module-scoped rather than session-scoped so every plotting
+    module starts from a clean figure registry, matching the per-file
+    fixtures this replaces.
     """
-    import matplotlib
-
-    matplotlib.use("Agg")
     yield
     import matplotlib.pyplot as plt
 
