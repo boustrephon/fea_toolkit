@@ -59,22 +59,42 @@ def test_rho_matrix_guards_extreme_ratio():
 
 
 @pytest.mark.filterwarnings("ignore:invalid value encountered in divide")
-def test_rho_matrix_diagonal_survives_non_finite_omega():
-    """A non-finite ω must not zero that mode's self-correlation.
+def test_rho_matrix_non_finite_diagonal_matches_scalar():
+    """A non-finite ω makes its diagonal ratio ``inf / inf`` → NaN.
 
-    ``ω = inf`` (a sentinel for a mode whose frequency is unusable) makes the
-    diagonal ratio ``inf / inf`` NaN.  The NaN sanitising step used to zero
-    that entry along with the genuinely uncorrelated cross terms, so ``ρ_ii``
-    became 0 and the mode dropped silently out of the CQC sum.  The diagonal
-    is restored to 1 after sanitising, while the non-finite cross terms stay
-    at 0 rather than NaN.
+    The scalar path skips a non-finite self-ratio (``continue``), so the mode
+    contributes nothing to its own CQC self-term.  The matrix path must drop
+    that diagonal to 0 as well — force-preserving it at 1 would inflate the
+    combined result relative to the scalar path it is meant to reproduce.  The
+    non-finite cross terms also stay at 0 rather than NaN.
     """
     rho = cqc_rho_matrix([float("inf"), 2.0], [0.05, 0.05])
     assert np.all(np.isfinite(rho))
-    assert rho[0, 0] == pytest.approx(1.0)
+    assert rho[0, 0] == 0.0
     assert rho[1, 1] == pytest.approx(1.0)
     assert rho[0, 1] == 0.0
     assert rho[1, 0] == 0.0
+
+
+@pytest.mark.filterwarnings("ignore:invalid value encountered in divide")
+def test_cqc_matrix_scalar_parity_with_inf_frequency():
+    """Scalar and matrix paths agree when one mode has ``ω = inf``.
+
+    With ``values = [10, 20]`` and ``omega = [inf, 2]`` the scalar path skips
+    the whole mode-0 row (its ratios are non-finite), leaving only the finite
+    mode's self-term ``20²`` → ``sqrt(400) = 20``.  The matrix path must return
+    the same value, which requires dropping the ``inf / inf`` diagonal to 0.
+    """
+    values = [10.0, 20.0]
+    omega = [float("inf"), 2.0]
+    damp = [0.05, 0.05]
+
+    scalar = cqc_combine(values, omega, damp)
+    matrix = cqc_combine_matrix(np.array(values), cqc_rho_matrix(omega, damp))
+
+    assert scalar == pytest.approx(20.0)
+    assert matrix == pytest.approx(20.0)
+    assert float(matrix) == pytest.approx(scalar)
 
 
 def test_rho_matrix_handles_zero_frequency():

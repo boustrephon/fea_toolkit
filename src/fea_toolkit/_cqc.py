@@ -113,13 +113,14 @@ def cqc_rho_matrix(omega: list[float], damp_ratios: list[float]) -> np.ndarray:
         )
         rho = numerator / denominator
 
+    # A mode is perfectly correlated with itself (rho[i, i] = 1) only when its
+    # self-ratio is finite.  Set the diagonal *before* the guard below so a
+    # non-finite diagonal (e.g. an inf/inf ratio from a sentinel omega) is
+    # zeroed by exactly the same short-circuit the scalar path applies, rather
+    # than force-preserved at 1 and silently inflating the CQC sum.
+    np.fill_diagonal(rho, 1.0)
     rho = np.where(correlated, rho, 0.0)
     rho = np.nan_to_num(rho, nan=0.0, posinf=0.0, neginf=0.0)
-    # A mode is always perfectly correlated with itself (rho[i, i] = 1), even
-    # when its own frequency ratio is non-finite (e.g. an inf/inf diagonal from
-    # a sentinel omega), so the sanitised matrix must keep a unit diagonal while
-    # non-finite cross-correlations stay at zero.
-    np.fill_diagonal(rho, 1.0)
     return rho
 
 
