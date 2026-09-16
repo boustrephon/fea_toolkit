@@ -1148,6 +1148,47 @@ def _mass_unit_label(units: dict[str, Any]) -> str:
     }.get((fu, lu), f"{fu}\u00b7s\u00b2/{lu}")
 
 
+def _mass_component_rows(
+    mass: dict[str, Any], units: dict[str, Any], force_unit: str
+) -> list[dict[str, Any]]:
+    """Build the seismic-mass component breakdown rows.
+
+    One row per contributing source — element self-weight (material
+    density), masses assigned directly to joints, and load patterns — each
+    expressed as a mass and its equivalent weight (mass × g).
+
+    Args:
+        mass: The ``mass_source`` block of a review result.
+        units: Model units dict, e.g. ``{"F": "KN", "L": "m"}``.
+        force_unit: Force-unit label (e.g. ``"KN"``).
+
+    Returns:
+        Row dicts with pre-formatted string values (see
+        :func:`_format_table`), or an empty list when the result carries no
+        ``components`` breakdown.
+    """
+    components = mass.get("components") or {}
+    if not components:
+        return []
+    mu = _mass_unit_label(units)
+    gravity = float(mass.get("gravity", 0.0))
+    rows: list[dict[str, Any]] = []
+    for key, label in (
+        ("elements", "Self-weight (material density)"),
+        ("masses", "Node masses"),
+        ("loads", "Load patterns"),
+    ):
+        m = float(components.get(key, 0.0))
+        rows.append(
+            {
+                "Component": label,
+                f"Mass ({mu})": f"{m:,.3f}",
+                f"Weight ({force_unit})": f"{m * gravity:,.1f}",
+            }
+        )
+    return rows
+
+
 def _npz_manifest_rows(contents: dict[str, Any]) -> list[dict[str, Any]]:
     """Build the NPZ archive manifest table rows.
 
@@ -1440,6 +1481,9 @@ def format_review_report(
                     f"{_mass_unit_label(units)}  =  weight "
                     f"{mass['total_weight']:,.1f} {force_unit}"
                 )
+                component_rows = _mass_component_rows(mass, units, force_unit)
+                if component_rows:
+                    add(_apply_indent(_format_table(component_rows)))
         else:
             add(f"  FAILED: {analysis['error']}")
 
@@ -1799,6 +1843,10 @@ def format_review_markdown(
                     f"{_mass_unit_label(units)}** \u2014 weight "
                     f"**{mass['total_weight']:,.1f} {force_unit}**."
                 )
+                component_rows = _mass_component_rows(mass, units, force_unit)
+                if component_rows:
+                    add("")
+                    add(_format_table(component_rows, tablefmt="github"))
                 add("")
         else:
             add(f"**FAILED:** {analysis['error']}")

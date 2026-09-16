@@ -490,6 +490,7 @@ def _fake_analysis(n_modes: int = 8) -> dict:
             "total_weight": 980.665,
             "gravity": 9.80665,
             "n_nodes_with_mass": 2,
+            "components": {"elements": 60.0, "masses": 0.0, "loads": 40.0},
         },
     }
 
@@ -545,6 +546,37 @@ class TestModeDisplay:
         assert "Seismic mass (mass source **MS**" in md_text
         assert "`DEAD` \u00d71" in md_text
         assert "980.7" in md_text
+
+    def test_text_mass_source_breakdown(self, result):
+        """The breakdown shows each component as a mass and a weight."""
+        text = format_review_report(result)
+        assert "Self-weight (material density)" in text
+        assert "Node masses" in text
+        assert "Load patterns" in text
+        # 60 t x 9.80665 = 588.4 kN, 40 t x 9.80665 = 392.3 kN
+        assert "588.4" in text
+        assert "392.3" in text
+
+    def test_markdown_mass_source_breakdown(self, result):
+        md_text = format_review_markdown(result)
+        assert "Self-weight (material density)" in md_text
+        assert "588.4" in md_text
+        assert "392.3" in md_text
+
+    def test_mass_components_absent_is_graceful(self, result):
+        """A mass_source block without ``components`` still renders its total."""
+        analysis = dict(result["analysis"])
+        mass = dict(analysis["mass_source"])
+        mass.pop("components", None)
+        analysis["mass_source"] = mass
+        out = dict(result)
+        out["analysis"] = analysis
+
+        text = format_review_report(out)
+        assert "Seismic mass (mass source 'MS'" in text
+        assert "Self-weight (material density)" not in text
+        md_text = format_review_markdown(out)
+        assert "Self-weight (material density)" not in md_text
 
     def test_text_min_participation_filters(self, result):
         # Mode 1 has mx = 0 % -> dropped; modes 2..8 all clear 1 %.

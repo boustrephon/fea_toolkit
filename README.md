@@ -133,7 +133,7 @@ the "Package tree (abbreviated)" section below for the full subpackage list
 | **Response Spectrum** | ✅ Complete | `run_response_spectrum_analysis()` — mode‑by‑mode RS analysis using GB50011 (or user‑supplied) spectrum, CQC/SRSS combination, base shear + moment.
 | **Element‑Level RS Forces** | ✅ Complete | `extract_element_rs_forces()` — CQC‑combined moments/shears per element, sorted by elevation.
 | **Missing Mass Correction** | ✅ Complete | `add_missing_mass_correction()` — rigid response from residual modal mass, adds to CQC base shear/moment.
-| **Seismic Masses** | ✅ Complete | `compute_seismic_masses()` — lumps element self‑weight and load‑based masses per MASS SOURCE (Elements/Loads flags). |
+| **Seismic Masses** | ✅ Complete | `compute_seismic_masses()` — lumps element self‑weight and load‑based masses per MASS SOURCE (Elements/Masses/Loads flags). Load patterns contribute only their **global‑Z** component (SAP2000's rule: `Gravity`/`Projected` are downward‑positive, `Z` is sign‑flipped, horizontal `X`/`Y` excluded). Per‑source totals are exposed via `builder.mass_components` and the review's `mass_source["components"]`. |
 | **Rhino Export** | ✅ Complete | Centreline + lightweight Extrusion geometry with section profiles, section-based layers, UserString metadata, groups. See [`docs/rhino_export.md`](docs/rhino_export.md). |
 | **Frame Member Types (Steel)** | ✅ Complete | All steel section shapes (I, Box, Pipe, Channel, Angle, etc.) with `Steel01` fiber sections or elastic sections. |
 | **Frame Member Types (RC)** | ⚠️ Partial | Concrete materials and section shapes supported; rebar auto-placement implemented; confined concrete (Mander) wired via `fiber_confinement()`. See [`docs/pushover_analysis.md`](docs/pushover_analysis.md). |

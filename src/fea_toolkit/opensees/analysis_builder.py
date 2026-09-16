@@ -201,6 +201,10 @@ class AnalysisBuilder(
 
         # Mass tracking
         self.node_masses: dict[str, float] = {}
+        # Per-source mass totals from compute_seismic_masses() —
+        # {"elements": ..., "masses": ..., "loads": ...} in the model's
+        # consistent mass unit.  Empty until masses have been computed.
+        self.mass_components: dict[str, float] = {}
         # No hardcoded gravity constant: compute_seismic_masses()
         # overwrites this via g_from_units(units).  None until derived.
         self._mass_g: Optional[float] = None
@@ -860,7 +864,10 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
         ``frequency`` — the 6-DOF presentation used by the report
         pipeline.  ``mass_source`` reports the summed seismic mass and
         weight (``total_mass`` / ``total_weight`` / ``gravity`` /
-        ``n_nodes_with_mass``) from the model's MASS SOURCE.
+        ``n_nodes_with_mass``) from the model's MASS SOURCE, plus a
+        ``components`` breakdown of that mass by source (``elements`` =
+        material-density self-weight, ``masses`` = joint masses,
+        ``loads`` = load-pattern mass).
         When ``config["load_verify"]`` or
         ``config["wind_check"]`` are set, ``load_verification`` (a list of
         per-pattern applied-vs-reaction records) and ``wind`` (structured
@@ -945,6 +952,7 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
                 next(iter(md.mass_sources), None),
             )
             src = md.mass_sources.get(src_name) if src_name else None
+            _mc = getattr(builder, "mass_components", None) or {}
             result["mass_source"] = {
                 "name": src_name,
                 "from_elements": bool(src.elements) if src else False,
@@ -955,6 +963,13 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
                 "total_weight": total_mass * gravity,
                 "gravity": gravity,
                 "n_nodes_with_mass": sum(1 for m in node_masses.values() if m > 0),
+                # Per-source breakdown: element self-weight, joint masses and
+                # load-pattern mass (all in the model's consistent mass unit).
+                "components": {
+                    "elements": float(_mc.get("elements", 0.0)),
+                    "masses": float(_mc.get("masses", 0.0)),
+                    "loads": float(_mc.get("loads", 0.0)),
+                },
             }
         except Exception as exc:  # captured, never raised
             result["mass_source_error"] = f"{type(exc).__name__}: {exc}"

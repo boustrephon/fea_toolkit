@@ -20,6 +20,46 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ── Mass-source load direction → global-Z (downward-positive) factor ──
+# SAP2000 defines the ``Gravity`` load direction as the negative global Z
+# ("down"), whereas a Global-``Z`` direction load is positive-up.  The MASS
+# SOURCE rule is to use the *net downward* load (downward → positive mass,
+# upward → negative mass), so gravity-family loads are already
+# downward-positive while Global-Z loads must be sign-flipped.  Directions
+# with no global-Z component (horizontal or member-local) contribute no
+# seismic mass.
+_GRAVITY_DIRECTIONS = frozenset({"gravity", "projected"})
+_GLOBAL_Z_DIRECTIONS = frozenset({"z"})
+
+
+def _vertical_load_factor(direction: Optional[str]) -> Optional[float]:
+    """Return the global-Z (downward-positive) factor for a load direction.
+
+    SAP2000's MASS SOURCE derives mass from the **global-Z** component of a
+    load pattern, with *downward loads generating positive mass and upward
+    loads generating negative mass*.  Its ``Gravity`` direction is the
+    negative global Z (a positive value is downward), whereas a Global
+    ``Z`` direction load is positive-up — so the two must be combined with
+    opposite signs.
+
+    Args:
+        direction: The load direction string (e.g. ``"Gravity"``, ``"Z"``,
+            ``"X"``, ``"LocalY"``).
+
+    Returns:
+        ``+1.0`` for gravity-family directions (``Gravity`` / ``Projected``),
+        ``-1.0`` for global ``Z`` loads, or ``None`` when the direction has
+        no global-Z component (horizontal ``X`` / ``Y`` or member-local
+        directions) and therefore contributes no seismic mass.
+    """
+    key = str(direction or "").strip().lower()
+    if key in _GRAVITY_DIRECTIONS:
+        return 1.0
+    if key in _GLOBAL_Z_DIRECTIONS:
+        return -1.0
+    return None
+
+
 class StaticRunnerMixin:
     """Static analysis execution, seismic mass derivation, and result extraction."""
 
@@ -314,6 +354,24 @@ class StaticRunnerMixin:
         :func:`~fea_toolkit.utils.g_from_units` — the model unit system is
         the single source of truth (never a hardcoded 9.81).
 
+        Mass is drawn from up to three sources, mirroring SAP2000's MASS
+        SOURCE definition:
+
+        * **elements** — element self-weight from material density
+          (``Elements=True``), for frame and area elements.
+        * **masses** — masses assigned directly to joints
+          (``Masses=True``).  The toolkit does not yet parse a joint-mass
+          assignment table, so this component is currently always zero.
+        * **loads** — mass derived from the specified load patterns
+          (``Loads=True`` + ``LoadPat`` / ``Multiplier``).  Only the
+          **global-Z** component of each load contributes, per SAP2000's
+          rule: downward loads give positive mass, upward loads negative
+          mass, and horizontal loads none.
+
+        The per-source totals are stored on ``self.mass_components`` (in the
+        model's consistent mass unit), so callers such as the model review
+        can break the seismic mass down into its components.
+
         All mass contributions are lumped to nodes and assigned via
         ``ops.mass(node, m, m, m, 0, 0, 0)``.
 
@@ -328,27 +386,43 @@ class StaticRunnerMixin:
         dist_loads = mm.frame_dist_loads
 
         node_mass: dict[str, float] = {}
+        components: dict[str, float] = {"elements": 0.0, "masses": 0.0, "loads": 0.0}
 
         mass_sources = getattr(mm, "mass_sources", {})
         if not mass_sources:
             # No MASS SOURCE definitions — fallback: element self-weight + DEAD
-            self._mass_from_elements(mm, elements, assignments, node_mass, g)
-            self._mass_from_dist_loads(mm, elements, dist_loads, node_mass, g, ["DEAD"])
+            components["elements"] += self._mass_from_elements(
+                mm, elements, assignments, node_mass, g
+            )
+            components["loads"] += self._mass_from_dist_loads(
+                mm, elements, dist_loads, node_mass, g, ["DEAD"]
+            )
         else:
             for ms in mass_sources.values():
                 if ms.elements:
-                    self._mass_from_elements(mm, elements, assignments, node_mass, g)
+                    components["elements"] += self._mass_from_elements(
+                        mm, elements, assignments, node_mass, g
+                    )
+
+                if ms.masses:
+                    components["masses"] += self._mass_from_added_masses(mm, node_mass)
 
                 if ms.loads and ms.load_pattern:
                     for lp_name, mult in ms.load_pattern.items():
                         if abs(mult) < 1e-12:
                             continue
-                        self._mass_from_dist_loads(
+                        components["loads"] += self._mass_from_dist_loads(
                             mm, elements, dist_loads, node_mass, g, [lp_name], mult
                         )
-                        self._mass_from_joint_loads(mm, node_mass, g, lp_name, mult)
-                        self._mass_from_area_gravity(mm, node_mass, g, lp_name, mult)
-                        self._mass_from_area_uniform(mm, node_mass, g, lp_name, mult)
+                        components["loads"] += self._mass_from_joint_loads(
+                            mm, node_mass, g, lp_name, mult
+                        )
+                        components["loads"] += self._mass_from_area_gravity(
+                            mm, node_mass, g, lp_name, mult
+                        )
+                        components["loads"] += self._mass_from_area_uniform(
+                            mm, node_mass, g, lp_name, mult
+                        )
 
         # Assign masses to OpenSees nodes
         for nid, m in node_mass.items():
@@ -362,6 +436,7 @@ class StaticRunnerMixin:
                 ops.mass(tag, 1e-6, 1e-6, 1e-6, 0, 0, 0)
 
         self.node_masses = node_mass
+        self.mass_components = components
         self._mass_g = g
 
         if self.config.get("verbose"):
@@ -396,7 +471,12 @@ class StaticRunnerMixin:
         return masses
 
     def _mass_from_elements(self, mm, elements, assignments, node_mass, g):
-        """Add mass from element self-weight."""
+        """Add mass from element self-weight (material density × volume).
+
+        Returns:
+            Total mass added (model mass units).
+        """
+        total_mass = 0.0
         for eid, elem in elements.items():
             if getattr(elem, "inactive", False):
                 continue
@@ -420,6 +500,7 @@ class StaticRunnerMixin:
             mass = weight / g
             node_mass[elem.node_i] = node_mass.get(elem.node_i, 0.0) + mass * 0.5
             node_mass[elem.node_j] = node_mass.get(elem.node_j, 0.0) + mass * 0.5
+            total_mass += mass
 
         # Area elements
         for aid, ae in mm.area_elements.items():
@@ -453,14 +534,33 @@ class StaticRunnerMixin:
             n_c = len(ae.node_ids)
             for nid in ae.node_ids:
                 node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_c
+            total_mass += mass
+
+        return total_mass
 
     def _mass_from_dist_loads(
         self, mm, elements, dist_loads, node_mass, g, pattern_names, mult=1.0
     ):
-        """Add mass from frame distributed loads in given patterns."""
+        """Add mass from frame distributed loads in the given patterns.
+
+        Per SAP2000's mass-source rule only the **global-Z** component of a
+        load contributes: ``Gravity`` / ``Projected`` loads are already
+        downward-positive, a Global ``Z`` load is sign-flipped, and
+        horizontal (``X`` / ``Y`` / member-local) directions contribute
+        nothing.  Moment-type loads never contribute to mass.
+
+        Returns:
+            Total mass added (model mass units).
+        """
+        total_mass = 0.0
         for ld in dist_loads or []:
             if ld.pattern not in pattern_names:
                 continue
+            if str(getattr(ld, "load_type", "Force")).strip().lower() != "force":
+                continue  # moments carry no mass
+            sign = _vertical_load_factor(getattr(ld, "direction", "Gravity"))
+            if sign is None:
+                continue  # no global-Z component
             elem = elements.get(ld.frame_id)
             if elem is None or getattr(elem, "inactive", False):
                 continue
@@ -472,24 +572,71 @@ class StaticRunnerMixin:
             if L < 1e-12:
                 continue
             load_len = ld.dist_b - ld.dist_a
+            if str(getattr(ld, "direction", "")).strip().lower() == "projected":
+                # Projected loads are specified per unit *horizontal*
+                # projected length — scale by the member's horizontal extent.
+                load_len *= math.hypot(nj.x - ni.x, nj.y - ni.y) / L
             avg = (ld.val_a + ld.val_b) * 0.5
-            total_force = avg * load_len * mult
+            total_force = avg * load_len * mult * sign
             mass = total_force / g
             node_mass[elem.node_i] = node_mass.get(elem.node_i, 0.0) + mass * 0.5
             node_mass[elem.node_j] = node_mass.get(elem.node_j, 0.0) + mass * 0.5
+            total_mass += mass
+        return total_mass
 
     def _mass_from_joint_loads(self, mm, node_mass, g, lp_name, mult):
-        """Add mass from joint loads in the given pattern."""
+        """Add mass from joint loads in the given pattern.
+
+        Only the global-Z force component contributes, sign-preserved: a
+        downward joint load (``fz`` negative, SAP2000's convention) gives
+        positive mass and an upward load negative mass, matching the
+        mass-source rule.
+
+        Returns:
+            Total mass added (model mass units).
+        """
+        total_mass = 0.0
         for jl in getattr(mm, "joint_loads", []):
             if jl.pattern != lp_name:
                 continue
-            total_force = abs(jl.fz) * mult
-            mass = total_force / g
+            mass = -jl.fz * mult / g
             node_mass[jl.node_id] = node_mass.get(jl.node_id, 0.0) + mass
+            total_mass += mass
+        return total_mass
+
+    def _mass_from_added_masses(self, mm, node_mass):
+        """Add masses assigned directly to joints (the ``Masses`` flag).
+
+        SAP2000's MASS SOURCE ``Masses`` flag draws on masses assigned
+        directly to joints (added joint mass).  The toolkit does not yet
+        parse a joint-mass assignment table, so nothing is added today;
+        this hook lumps ``mm.added_masses`` (an optional ``{node_id: mass}``
+        mapping) should such a collection ever be populated on the
+        :class:`~fea_toolkit.model.mesh_model.MeshModel`.
+
+        Returns:
+            Total mass added (model mass units); ``0.0`` until joint
+            masses are parsed.
+        """
+        added = getattr(mm, "added_masses", None) or {}
+        total_mass = 0.0
+        for nid, m in added.items():
+            value = float(m)
+            node_mass[nid] = node_mass.get(nid, 0.0) + value
+            total_mass += value
+        return total_mass
 
     def _mass_from_area_gravity(self, mm, node_mass, g, lp_name, mult):
-        """Add mass from area gravity loads in the given pattern."""
+        """Add mass from area gravity loads in the given pattern.
 
+        Uses only the ``MultiplierZ`` component (gravity is global-Z); the
+        ``MultiplierX`` / ``MultiplierY`` plane components carry no seismic
+        mass.
+
+        Returns:
+            Total mass added (model mass units).
+        """
+        total_mass = 0.0
         for agl in getattr(mm, "area_gravity_loads", []):
             if agl.pattern != lp_name:
                 continue
@@ -533,6 +680,7 @@ class StaticRunnerMixin:
                     n_c = len(sub_elem.node_ids)
                     for nid in sub_elem.node_ids:
                         node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_c
+                    total_mass += mass
                 continue
             sec_name = mm.area_assignments.get(agl.area_id, "")
             if not sec_name:
@@ -563,13 +711,28 @@ class StaticRunnerMixin:
             n_c = len(ae.node_ids)
             for nid in ae.node_ids:
                 node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_c
+            total_mass += mass
+
+        return total_mass
 
     def _mass_from_area_uniform(self, mm, node_mass, g, lp_name, mult):
-        """Add mass from area uniform loads in the given pattern."""
+        """Add mass from area uniform (pressure) loads in the given pattern.
 
+        Only the **global-Z** component contributes, sign-aware: a
+        ``Gravity``-direction pressure is downward-positive, a Global ``Z``
+        pressure is sign-flipped, and horizontal (``X`` / ``Y``) pressures
+        carry no seismic mass.
+
+        Returns:
+            Total mass added (model mass units).
+        """
+        total_mass = 0.0
         for aul in getattr(mm, "area_uniform_loads", []):
             if aul.pattern != lp_name:
                 continue
+            sign = _vertical_load_factor(getattr(aul, "direction", "Gravity"))
+            if sign is None:
+                continue  # no global-Z component
             ae = mm.area_elements.get(aul.area_id)
             if ae is None:
                 continue
@@ -592,12 +755,13 @@ class StaticRunnerMixin:
                     area_mag = polygon_area_3d(corner_pts)
                     if area_mag < 1e-12:
                         continue
-                    pressure = abs(aul.value)
+                    pressure = aul.value * sign
                     total_force = pressure * area_mag * mult
                     mass = total_force / g
                     n_c = len(sub_elem.node_ids)
                     for nid in sub_elem.node_ids:
                         node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_c
+                    total_mass += mass
                 continue
             corner_pts = []
             for nid in ae.node_ids:
@@ -610,12 +774,15 @@ class StaticRunnerMixin:
             area_mag = polygon_area_3d(corner_pts)
             if area_mag < 1e-12:
                 continue
-            pressure = abs(aul.value)
+            pressure = aul.value * sign
             total_force = pressure * area_mag * mult
             mass = total_force / g
             n_c = len(ae.node_ids)
             for nid in ae.node_ids:
                 node_mass[nid] = node_mass.get(nid, 0.0) + mass / n_c
+            total_mass += mass
+
+        return total_mass
 
     def extract_static_element_forces(self) -> dict[int, dict[str, float]]:
         """Extract element end forces in the **local** coordinate system.

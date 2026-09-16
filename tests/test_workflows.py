@@ -372,6 +372,83 @@ class TestStaticAnalysisWorkflow:
 # ============================================================================
 
 
+class TestSeismicMassComponents:
+    """Load-pattern mass obeys SAP2000's global-Z (downward-positive) rule."""
+
+    def test_vertical_load_factor(self):
+        """Gravity-family directions are +1, Global Z is -1, others None."""
+        from fea_toolkit.opensees._runner_static import _vertical_load_factor
+
+        assert _vertical_load_factor("Gravity") == 1.0
+        assert _vertical_load_factor("gravity") == 1.0
+        assert _vertical_load_factor("Projected") == 1.0
+        assert _vertical_load_factor("Z") == -1.0
+        for no_vertical in ("X", "Y", "LocalX", "LocalY", "LocalZ", "", None):
+            assert _vertical_load_factor(no_vertical) is None
+
+    def test_horizontal_loads_excluded_and_z_sign_flipped(self):
+        """Only global-Z frame loads contribute; Z loads are sign-flipped."""
+        from fea_toolkit.model.sap_data import FrameDistributedLoad
+        from fea_toolkit.opensees._runner_static import StaticRunnerMixin
+
+        class _Node:
+            def __init__(self, x, y, z):
+                self.x, self.y, self.z = x, y, z
+
+        class _Elem:
+            inactive = False
+            node_i = "1"
+            node_j = "2"
+
+        class _Mesh:
+            def __init__(self):
+                self.nodes = {"1": _Node(0.0, 0.0, 0.0), "2": _Node(0.0, 0.0, 1.0)}
+
+        class _Runner(StaticRunnerMixin):
+            pass
+
+        def _load(direction, val, load_type="Force"):
+            return FrameDistributedLoad(
+                pattern="DEAD",
+                frame_id="F1",
+                direction=direction,
+                load_type=load_type,
+                shape="Uniform",
+                val_a=val,
+                val_b=val,
+                rdist_a=0.0,
+                rdist_b=1.0,
+                dist_a=0.0,
+                dist_b=1.0,
+            )
+
+        runner = _Runner()
+        elements = {"F1": _Elem()}
+        g = 10.0  # simple round number so the expected mass is obvious
+
+        def _mass(load):
+            return runner._mass_from_dist_loads(_Mesh(), elements, [load], {}, g, ["DEAD"])
+
+        assert _mass(_load("Gravity", 20.0)) == pytest.approx(2.0)
+        assert _mass(_load("Z", 20.0)) == pytest.approx(-2.0)  # +Z is up
+        assert _mass(_load("Z", -20.0)) == pytest.approx(2.0)  # downward
+        assert _mass(_load("X", 20.0)) == pytest.approx(0.0)
+        assert _mass(_load("Y", 20.0)) == pytest.approx(0.0)
+        assert _mass(_load("Gravity", 20.0, load_type="Moment")) == pytest.approx(0.0)
+
+    def test_mass_components_populated(self, sample_ab):
+        """compute_seismic_masses() records a per-source breakdown."""
+        sample_ab.build_domain()
+        sample_ab.compute_seismic_masses()
+        components = sample_ab.mass_components
+        assert set(components) == {"elements", "masses", "loads"}
+        # The sample model's MASS SOURCE draws on element self-weight.
+        assert components["elements"] > 0.0
+        # The component totals must add up to the lumped nodal mass.
+        total = sum(sample_ab.node_masses.values())
+        assert sum(components.values()) == pytest.approx(total, rel=1e-9)
+
+
 class TestModalAnalysisWorkflow:
     """End-to-end eigenvalue / modal analysis."""
 

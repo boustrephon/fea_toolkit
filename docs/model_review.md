@@ -219,7 +219,11 @@ Preprocessor → AnalysisBuilder pipeline and reports:
   summed support reactions as a table (`Fx`/`Fy`/`Fz` plus `Mx`/`My`/`Mz`),
   alongside the total **seismic mass and weight** derived from the model's
   MASS SOURCE (`total_mass` in the model's consistent mass unit — tonnes
-  for a kN‑m model — and `total_weight` = mass × `g_from_units()`).
+  for a kN‑m model — and `total_weight` = mass × `g_from_units()`), broken
+  down into its components: element self‑weight (material density), masses
+  assigned to joints, and load‑pattern mass (each shown as both a mass and
+  a weight).  Only the **global‑Z** component of a load pattern
+  contributes, per SAP2000's mass‑source rule.
 - **Load verification** (`analysis_config["load_verify"]` / `--load-verify`):
   per-pattern **applied vs reaction** equilibrium (`Applied`, `Reaction`
   and `Δ` components) via `static_load_verification()`, as a table.
@@ -463,7 +467,10 @@ model has no braces).  Each `analysis["mass_participation"]` entry carries
 `analysis["mass_source"]` reports the seismic mass totals
 (`name`, `total_mass`, `total_weight`, `gravity`, `n_nodes_with_mass`, plus
 the `from_elements` / `from_masses` / `from_loads` flags and the
-`load_patterns` it includes).
+`load_patterns` it includes) and a `components` breakdown of that mass by
+source — `elements` (material-density self-weight), `masses` (masses
+assigned directly to joints; not yet parsed, so currently `0.0`) and
+`loads` (load-pattern mass, global-Z component only, per SAP2000).
 The `analysis` sub-dict's `load_verification` (a list of per-pattern
 applied-vs-reaction records) and `wind` (structured data from
 `wind_sanity_data()`: `rows` and `within_10pct`, plus the raw values) are
