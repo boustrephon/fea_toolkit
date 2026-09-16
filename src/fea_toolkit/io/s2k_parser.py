@@ -875,13 +875,13 @@ class SAP2000Parser:
     # otherwise create spurious near-zero offset records for cardinal point 10.
     _LATERAL_OFFSET_TOL = 1e-9
     # ── Table-name prefixes scanned by family ──────────────────────
-    # Held as attributes (not inline string literals) so the
-    # ``tests/test_table_registry.py`` AST drift guard — which extracts
-    # ``.startswith("LITERAL")`` calls — does not treat the bare family
-    # prefix as a table the parser consumes.  The concrete member names are
-    # registered individually in :mod:`fea_toolkit.io.table_registry`, so an
-    # unrecognised member surfaces as ``unhandled`` instead of being
-    # swallowed by a broad prefix.
+    # The concrete member names are registered individually in
+    # :mod:`fea_toolkit.io.table_registry`, so an unrecognised member surfaces
+    # as ``unhandled`` instead of being swallowed by a broad prefix.  The
+    # ``tests/test_table_registry.py`` AST drift guard resolves these class
+    # constants, checks every member the suffix dispatch selects, and treats
+    # the bare prefix as a family (``extract_parser_family_prefixes``) rather
+    # than as a table name.
     _AREA_LOADS_PREFIX = "AREA LOADS - "
     _AUTO_PREFIX = "AUTO"
 
@@ -1063,12 +1063,15 @@ class SAP2000Parser:
             return None
         # Bare numeric form (int / float / numeric string) takes priority so
         # that a non-integral value such as "8.7" is rejected rather than
-        # truncated by the leading-integer regex below.
+        # truncated to its leading integer by the labelled-form regex below.
         try:
             number = float(str(value).strip())
         except (TypeError, ValueError):
-            # Labelled string form: leading integer, e.g. "8 (top center)".
-            match = re.match(r"^\s*(-?\d+)", str(value))
+            # Labelled string form: complete numeric prefix, e.g. "8 (top center)".
+            # Capture the *whole* number (including any fractional part) so a
+            # value like "8.7 (top center)" is rejected rather than truncated
+            # to the leading integer "8".
+            match = re.match(r"^\s*(-?\d+(?:\.\d+)?)", str(value))
             if match is None:
                 return None
             number = float(match.group(1))

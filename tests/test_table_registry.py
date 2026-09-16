@@ -18,11 +18,13 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
 from fea_toolkit.io.s2k_parser import SAP2000Parser
 from fea_toolkit.io.table_registry import (
+    HANDLED_PREFIXES,
     HANDLED_TABLES,
     TableCoverage,
     classify,
@@ -66,10 +68,104 @@ def _references_raw_tables(node: ast.AST) -> bool:
     )
 
 
+def _class_string_constants(tree: ast.AST) -> dict[str, str]:
+    """Map class-level string constants (``_AREA_LOADS_PREFIX``) to their values.
+
+    The parser holds family prefixes as class attributes rather than inline
+    literals, so a prefix scan must resolve ``self.<CONST>`` if the drift guard
+    is to see which table families it touches.
+    """
+    constants: dict[str, str] = {}
+    for cls in ast.walk(tree):
+        if not isinstance(cls, ast.ClassDef):
+            continue
+        for stmt in cls.body:
+            if isinstance(stmt, ast.Assign):
+                targets, value = stmt.targets, stmt.value
+            elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+                targets, value = [stmt.target], stmt.value
+            else:
+                continue
+            if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    constants[target.id] = value.value
+    return constants
+
+
+def _resolved_self_constant(node: ast.AST, self_constants: dict[str, str]) -> Optional[str]:
+    """Resolve ``self.<NAME>`` to the class-level string constant it names."""
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+    ):
+        return self_constants.get(node.attr)
+    return None
+
+
+def _startswith_prefixes(node: ast.Call, self_constants: dict[str, str]) -> set[str]:
+    """Return the prefixes a ``startswith(...)`` call scans.
+
+    Both literal arguments (``.startswith("CASE -")``) and class constants
+    (``.startswith(self._AUTO_PREFIX)``) count.
+    """
+    prefixes = _string_constants(node)
+    for sub in ast.walk(node):
+        resolved = _resolved_self_constant(sub, self_constants)
+        if resolved is not None:
+            prefixes.add(resolved)
+    return prefixes
+
+
+def _sliced_table_prefix(node: ast.AST, self_constants: dict[str, str]) -> Optional[str]:
+    """Return the prefix in ``<var>[len(self.<CONST>) :]``, else ``None``."""
+    if not isinstance(node, ast.Subscript) or not isinstance(node.slice, ast.Slice):
+        return None
+    lower = node.slice.lower
+    if (
+        not isinstance(lower, ast.Call)
+        or not isinstance(lower.func, ast.Name)
+        or lower.func.id != "len"
+        or len(lower.args) != 1
+    ):
+        return None
+    return _resolved_self_constant(lower.args[0], self_constants)
+
+
 def extract_parser_table_names() -> set[str]:
-    """Return every table name the parser source reads (any dispatch style)."""
+    """Return every table name the parser source reads (any dispatch style).
+
+    Includes class-constant family prefixes such as ``self._AREA_LOADS_PREFIX``
+    / ``self._AUTO_PREFIX`` and the concrete members the suffix-dispatch
+    branches select from them (``AREA LOADS - GRAVITY`` …), so the drift guard
+    covers those dispatch branches.  Use
+    :func:`extract_parser_family_prefixes` to tell the two apart.
+    """
+    names, _ = _extract_parser_references()
+    return names
+
+
+def extract_parser_family_prefixes() -> set[str]:
+    """Return the ``.startswith(...)`` prefixes — families, not table names.
+
+    ``AREA LOADS - `` / ``AUTO`` are deliberately not registered as handled
+    *prefix families* in :mod:`fea_toolkit.io.table_registry` — their members
+    are mixed, so registration is per-member and an unrecognised member must
+    surface as ``unhandled``.  The guard therefore checks these prefixes
+    against the registered members rather than through ``classify()``.
+    """
+    _, prefixes = _extract_parser_references()
+    return prefixes
+
+
+def _extract_parser_references() -> tuple[set[str], set[str]]:
+    """Return ``(table names, startswith family prefixes)`` read by the parser."""
     tree = ast.parse(PARSER_SRC.read_text(encoding="utf-8"))
+    self_constants = _class_string_constants(tree)
     names: set[str] = set()
+    prefixes: set[str] = set()
 
     # 1. Variant tuples: class/module assignments named *_TABLE_NAMES.
     #    (Name + tuple/list value are both required so an unrelated
@@ -96,8 +192,9 @@ def extract_parser_table_names() -> set[str]:
         if isinstance(node, ast.Subscript) and _is_raw_tables(node.value):
             names |= _string_constants(node.slice)
 
-    # 3. Prefix-scan families: .startswith("PREFIX") inside a function that
-    #    reads _raw_tables (scoping excludes unrelated startswith calls).
+    # 3. Prefix-scan families: ``.startswith("PREFIX")`` and
+    #    ``.startswith(self._SOME_PREFIX)`` inside a function that reads
+    #    _raw_tables (scoping excludes unrelated startswith calls).
     for fn in ast.walk(tree):
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -109,14 +206,41 @@ def extract_parser_table_names() -> set[str]:
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr == "startswith"
             ):
-                names |= _string_constants(node)
+                prefixes |= _startswith_prefixes(node, self_constants)
+
+        # 3a. Suffix dispatch: ``<var> = table_name[len(self._PREFIX):]`` joined
+        #     with the literals its branches compare against, e.g. "GRAVITY"
+        #     under ``_AREA_LOADS_PREFIX`` -> "AREA LOADS - GRAVITY".
+        slice_prefixes: dict[str, str] = {}
+        for node in ast.walk(fn):
+            if (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+            ):
+                prefix = _sliced_table_prefix(node.value, self_constants)
+                if prefix is not None:
+                    slice_prefixes[node.targets[0].id] = prefix
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Compare) and isinstance(node.left, ast.Name):
+                slice_prefix = slice_prefixes.get(node.left.id)
+                if slice_prefix is None:
+                    continue
+                for comparator in node.comparators:
+                    names |= {slice_prefix + suffix for suffix in _string_constants(comparator)}
+
         # 4. Inline tuples iterated by a loop whose body reads _raw_tables
         #    (e.g. AREA MESH ASSIGNMENTS / AREA AUTO MESH ASSIGNMENTS).
         for node in ast.walk(fn):
             if isinstance(node, ast.For) and _references_raw_tables(node):
                 names |= _string_constants(node.iter)
 
-    return names
+    # A family prefix is not a table name, but keeping it in ``names`` gives a
+    # single inventory of what the parser's scans touch.  The drift guard
+    # subtracts ``prefixes`` before applying ``classify()``, so a bare prefix
+    # cannot mask a genuinely unregistered table read.
+    names |= prefixes
+    return names, prefixes
 
 
 def test_extractor_finds_tables():
@@ -125,14 +249,52 @@ def test_extractor_finds_tables():
     assert len(names) > 25, f"extractor found only {len(names)} names: {sorted(names)}"
 
 
+def test_extractor_resolves_class_constant_prefixes():
+    """Family prefixes held as class attributes resolve to their values."""
+    names = extract_parser_table_names()
+    assert {"AREA LOADS - ", "AUTO"} <= names
+    # … and the suffix-dispatch branches expand to the members they select.
+    assert {
+        "AREA LOADS - UNIFORM",
+        "AREA LOADS - UNIFORM TO FRAME",
+        "AREA LOADS - GRAVITY",
+    } <= names
+
+
 def test_parser_table_names_are_registered():
-    """Every table name the parser reads must be in the coverage registry."""
-    unregistered = sorted(n for n in extract_parser_table_names() if classify(n) == "unhandled")
+    """Every concrete table name the parser reads must be in the coverage registry."""
+    family_prefixes = extract_parser_family_prefixes()
+    unregistered = sorted(
+        n for n in extract_parser_table_names() - family_prefixes if classify(n) == "unhandled"
+    )
     assert not unregistered, (
         "These table names are read by s2k_parser.py but are absent from the "
         f"table_coverage registry: {unregistered}\n"
         "Add them to HANDLED_TABLES (or KNOWN_GAP_TABLES / IGNORED_TABLES) in "
         "src/fea_toolkit/io/table_registry.py."
+    )
+
+
+def test_family_prefixes_have_registered_members():
+    """A scanned family prefix must match at least one registered member.
+
+    ``AREA LOADS - `` / ``AUTO`` are families, not table names: the registry
+    registers their members individually so an unrecognised member surfaces as
+    ``unhandled`` instead of being swallowed by a broad prefix (see
+    :mod:`fea_toolkit.io.table_registry`).  A prefix is therefore covered when
+    it is a registered prefix family, or when at least one handled member is
+    registered.  A *new* dispatch branch is caught individually by the suffix
+    expansion in :func:`extract_parser_table_names`.
+    """
+    uncovered = sorted(
+        prefix
+        for prefix in extract_parser_family_prefixes()
+        if prefix not in HANDLED_PREFIXES
+        and not any(name.startswith(prefix) for name in HANDLED_TABLES)
+    )
+    assert not uncovered, (
+        "These startswith() prefixes scanned by s2k_parser.py have no registered "
+        f"member in the table_coverage registry: {uncovered}"
     )
 
 
