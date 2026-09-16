@@ -17,12 +17,18 @@ import numpy as np
 def get_SAP_vecxz(vec_x: Union[Sequence[float], np.ndarray], angle: float = 0.0) -> np.ndarray:
     """Generate default vecxz vector for OpenSees geometric transformation.
 
+    For a member parallel to global Z the default reference is ±global Y
+    (``+Y`` for an upward member); otherwise it is
+    ``normalize(local_x × global_Z)``.  The optional ``angle`` rotates that
+    default about the local x‑axis in **both** cases, so a vertical member
+    still honours the requested rotation.
+
     Args:
         vec_x: Vector from node I to node J (local x‑axis).
         angle: Rotation (degrees) about the local x‑axis from default.
 
     Returns:
-        Unit vector in the local x‑z plane (vecxz).
+        Unit vector in the local x‑z plane (vecxz), orthogonal to ``vec_x``.
     """
     if isinstance(vec_x, Sequence):
         vec_x = np.array(vec_x, dtype=float)
@@ -38,17 +44,23 @@ def get_SAP_vecxz(vec_x: Union[Sequence[float], np.ndarray], angle: float = 0.0)
     # Check if element is vertical (parallel to global Z)
     cos_sim = np.dot(v1_norm, globalZ)
     if abs(cos_sim) > 0.9999:
-        return globalY if cos_sim > 0 else -globalY
-
-    # Default vecxz = cross(local_x, global_Z) normalized
-    v3 = np.cross(v1_norm, globalZ)
-    v3_norm = v3 / np.linalg.norm(v3)
+        # Default vecxz for a vertical member is ±global Y.  A *slightly*
+        # leaning axis is not exactly perpendicular to that reference, so
+        # project out the axial component: without this the returned vecxz is
+        # not orthogonal to the member and get_local_axes()'s orthonormality
+        # guard rejects an otherwise valid near-vertical member.
+        v3_norm = globalY if cos_sim > 0 else -globalY
+        v3_norm = v3_norm - np.dot(v3_norm, v1_norm) * v1_norm
+        v3_norm = v3_norm / np.linalg.norm(v3_norm)
+    else:
+        # Default vecxz = cross(local_x, global_Z) normalized
+        v3 = np.cross(v1_norm, globalZ)
+        v3_norm = v3 / np.linalg.norm(v3)
 
     if angle == 0.0:
         return v3_norm
-    else:
-        theta = math.radians(angle)
-        return rotate_about_axis(v3_norm, v1_norm, theta)
+    theta = math.radians(angle)
+    return rotate_about_axis(v3_norm, v1_norm, theta)
 
 
 def get_local_axes(

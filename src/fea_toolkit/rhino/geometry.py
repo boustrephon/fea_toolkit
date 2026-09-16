@@ -157,7 +157,11 @@ def _build_profile_curve(sec) -> t.Optional[t.Any]:
 def _local_axes(
     p_i: rg.Point3d, p_j: rg.Point3d, angle_deg: float = 0.0
 ) -> t.Optional[tuple[rg.Vector3d, rg.Vector3d, rg.Vector3d]]:
-    """Compute local (x, y, z) unit vectors — matches OpenSees convention."""
+    """Compute local (x, y, z) unit vectors — matches OpenSees convention.
+
+    Mirrors :func:`fea_toolkit.model.geometry.get_local_axes`; the returned
+    triplet is always orthonormal.  Returns ``None`` for a zero-length member.
+    """
     x_axis = rg.Vector3d(p_j.X - p_i.X, p_j.Y - p_i.Y, p_j.Z - p_i.Z)
     length = x_axis.Length
     if length < 1e-12:
@@ -172,6 +176,11 @@ def _local_axes(
         vecxz = rg.Vector3d(global_y.X, global_y.Y, global_y.Z)
         if cos_sim < 0:
             vecxz = -vecxz
+        # A slightly-leaning axis is not exactly perpendicular to global Y;
+        # project out the axial component so the frame stays orthonormal
+        # (mirrors get_SAP_vecxz).
+        vecxz = vecxz - (vecxz * x_axis) * x_axis
+        vecxz.Unitize()
     else:
         vecxz = rg.Vector3d.CrossProduct(x_axis, global_z)
         vecxz.Unitize()

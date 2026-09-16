@@ -454,7 +454,11 @@ def rhino_local_axes(monkeypatch):
     return _axes
 
 
-#: ``(axis, angle)`` pairs on which both implementations agree numerically.
+#: ``(axis, angle)`` pairs on which both implementations must agree.
+#:
+#: Includes the cases the two used to get wrong: a vertical member with a
+#: rotation angle (the model used to ignore ``angle``) and *near*-vertical
+#: members (whose default vecxz was not orthogonal to the axis).
 _AGREEING_CASES = [
     ((5.0, 0.0, 0.0), 0.0),
     ((0.0, 4.0, 0.0), 0.0),
@@ -470,6 +474,17 @@ _AGREEING_CASES = [
     ((0.0, 4.0, 0.0), -30.0),
     ((1.0, 2.0, 3.0), 30.0),
     ((1.0, -2.0, 3.0), 15.0),
+    # Vertical member + rotation (angle must not be discarded).
+    ((0.0, 0.0, 5.0), 30.0),
+    ((0.0, 0.0, 5.0), 45.0),
+    ((0.0, 0.0, 5.0), 90.0),
+    ((0.0, 0.0, -5.0), 30.0),
+    ((0.0, 0.0, -5.0), -45.0),
+    # Near-vertical: default vecxz must be orthogonalised, not returned raw.
+    ((0.0, 0.02, 5.0), 0.0),
+    ((0.02, 0.0, 5.0), 30.0),
+    ((0.01, -0.01, 5.0), 0.0),
+    ((0.0, -0.02, -5.0), 0.0),
 ]
 
 
@@ -499,24 +514,3 @@ class TestLocalAxesVsModel:
     def test_zero_length_member_returns_none(self, rhino_local_axes):
         """A zero-length member yields ``None`` (the model raises instead)."""
         assert rhino_local_axes((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)) is None
-
-    @pytest.mark.parametrize("angle", [30.0, 45.0, 90.0])
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Known divergence, unresolved: for a vertical member the model's "
-            "get_SAP_vecxz() early-returns the global-Y default and ignores "
-            "``angle``, whereas rhino._local_axes() rotates that default about "
-            "the local x-axis.  Which matches SAP2000 has not been verified. "
-            "Under ``strict`` this becomes an XPASS failure once the two are "
-            "reconciled, prompting removal of this marker."
-        ),
-    )
-    def test_vertical_member_with_angle_diverges(self, rhino_local_axes, angle):
-        """Vertical member + rotation: the two implementations disagree."""
-        from fea_toolkit.model.geometry import get_local_axes
-
-        got = rhino_local_axes((0.0, 0.0, 0.0), (0.0, 0.0, 5.0), angle)
-        want = get_local_axes(np.array([0.0, 0.0, 5.0]), angle=angle)
-        for name, got_i, want_i in zip("xyz", got, want):
-            np.testing.assert_allclose(got_i, want_i, atol=1e-9, err_msg=f"{name}-axis")
