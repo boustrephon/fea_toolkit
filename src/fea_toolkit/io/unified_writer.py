@@ -441,6 +441,17 @@ def write_results(
     if src is None:
         raise ValueError("Either mesh_model or model must be provided")
 
+    # ``rs_element_forces`` / ``rs_nodal_displacements`` are supplementary
+    # sub-blocks of the response-spectrum stage: they only make sense with the
+    # core ``rs_results`` block (which supplies ``rs/period`` and the
+    # per-direction base shears).  Rejecting the combination up front keeps the
+    # ``analysis_types`` manifest honest — a force-only call must not advertise
+    # an ``"rs"`` stage that has no base data behind it.
+    if (rs_element_forces or rs_nodal_displacements) and not rs_results:
+        raise ValueError(
+            "rs_results is required when rs_element_forces or rs_nodal_displacements are provided"
+        )
+
     # Collect all arrays
     arrays: dict[str, np.ndarray] = {}
 
@@ -492,7 +503,7 @@ def write_results(
         analysis_types.append("static")
     if modal_result:
         analysis_types.append("modal")
-    if rs_results or rs_element_forces or rs_nodal_displacements:
+    if rs_results:
         analysis_types.append("rs")
     if pushover_results:
         analysis_types.append("pushover")

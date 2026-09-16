@@ -290,13 +290,23 @@ def write_model_stages(
         Absolute path to the written file.
 
     Raises:
-        ValueError: If neither *sap* nor *mesh* is provided, or *fmt* is
-            not ``\"npz\"`` / ``\"h5\"``.
+        ValueError: If neither *sap* nor *mesh* is provided, *fmt* is
+            not ``\"npz\"`` / ``\"h5\"``, or *rs_element_forces* /
+            *rs_nodal_displacements* are supplied without *rs_results*
+            (they are sub-blocks of the ``rs/*`` stage).
     """
     if sap is None and mesh is None:
         raise ValueError("write_model_stages requires at least one of 'sap' or 'mesh'")
     if fmt not in ("npz", "h5"):
         raise ValueError(f"Unsupported format '{fmt}'; expected 'npz' or 'h5'")
+    # ``rs_results`` is the required core of the ``rs/*`` stage — the element
+    # force / nodal displacement blocks are only meaningful alongside it.
+    # Rejecting the combination keeps both the ``"rs"`` analysis type and the
+    # written arrays honest (mirrors ``unified_writer.write_results``).
+    if (rs_element_forces or rs_nodal_displacements) and not rs_results:
+        raise ValueError(
+            "rs_results is required when rs_element_forces or rs_nodal_displacements are provided"
+        )
 
     from .results_schema import SCHEMA_VERSION
 
@@ -368,7 +378,11 @@ def write_model_stages(
                     )
                 )
     # ── Response-spectrum arrays (canonical ``rs/*`` schema) ──────
-    if rs_results or rs_element_forces or rs_nodal_displacements:
+    # ``rs_results`` (carrying ``rs_x`` / ``rs_y``) is the required core block:
+    # the ``"rs"`` analysis type and the element-force / nodal-displacement
+    # sub-blocks are only meaningful alongside it, so a force-only or
+    # displacement-only call must not advertise an RS stage it cannot write.
+    if rs_results:
         analysis_types.append("rs")
         from .unified_writer import (
             collect_rs_arrays,
