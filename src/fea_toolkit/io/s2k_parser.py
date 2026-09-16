@@ -1067,11 +1067,12 @@ class SAP2000Parser:
         try:
             number = float(str(value).strip())
         except (TypeError, ValueError):
-            # Labelled string form: complete numeric prefix, e.g. "8 (top center)".
-            # Capture the *whole* number (including any fractional part) so a
-            # value like "8.7 (top center)" is rejected rather than truncated
-            # to the leading integer "8".
-            match = re.match(r"^\s*(-?\d+(?:\.\d+)?)", str(value))
+            # Labelled string form: complete numeric token, e.g. "8 (top center)".
+            # Capture the *whole* number — fractional part and exponent notation
+            # included, with a token boundary — so "8.7 (top center)" and
+            # "8e-1 (top center)" are rejected rather than truncated to the
+            # leading integer "8".
+            match = re.match(r"^\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b", str(value))
             if match is None:
                 return None
             number = float(match.group(1))

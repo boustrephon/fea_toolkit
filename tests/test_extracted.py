@@ -1556,6 +1556,19 @@ class TestParseCardinalPoint:
         assert SAP2000Parser._parse_cardinal_point("8.7") is None
         assert SAP2000Parser._parse_cardinal_point("-2.5 (bottom center)") is None
 
+    def test_exponent_notation_rejected(self):
+        """Exponent notation is consumed whole, never truncated to its mantissa.
+
+        ``"8e-1 (top center)"`` is 0.8, not cardinal point 8: the labelled-form
+        regex consumes the exponent (and requires a token boundary), so the
+        integral check rejects it instead of reading the mantissa.
+        """
+        assert SAP2000Parser._parse_cardinal_point("8e-1 (top center)") is None
+        assert SAP2000Parser._parse_cardinal_point("8e-1") is None
+        # An integral exponent still resolves (1e1 == 10), proving the exponent
+        # is consumed rather than silently dropped.
+        assert SAP2000Parser._parse_cardinal_point("1e1 (centroid)") == 10
+
 
 class TestSectionDepthWidth:
     """Tests for SAP2000Parser._get_section_depth_width()."""
