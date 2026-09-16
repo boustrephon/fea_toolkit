@@ -315,7 +315,7 @@ def _gb50011_spectrum(
     eta2: float = 1.0,
     g: Optional[float] = None,
 ) -> np.ndarray:
-    """Return spectral acceleration Sa (m/s²) for a GB 50011 elastic spectrum.
+    """Return spectral acceleration Sa (in the same units as *g*) for a GB 50011 elastic spectrum.
 
     Args:
         T_values: Period values (s) at which to evaluate the spectrum.
