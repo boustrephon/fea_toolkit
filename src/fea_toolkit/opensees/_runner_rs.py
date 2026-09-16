@@ -556,7 +556,8 @@ class RsRunnerMixin:
             raise ValueError(f"combination must be 'cqc' or 'srss', got {combination!r}")
 
         # Extraction strategy: the explicit argument wins, then the builder
-        # config (``rs_element_extraction``), then the original per-mode loop.
+        # config key (``element_extraction``, set by the review CLI's
+        # ``--rs-element-extraction``), then the original per-mode loop.
         extraction = str(extraction or self.config.get("element_extraction") or "per_mode").lower()
         if extraction not in ("per_mode", "recorder"):
             raise ValueError(f"extraction must be 'per_mode' or 'recorder', got {extraction!r}")
