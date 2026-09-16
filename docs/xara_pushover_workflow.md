@@ -168,7 +168,7 @@ from fea_toolkit.spectrum import _gb50011_spectrum
 from fea_toolkit.utils import g_from_units
 
 # Derive g from model units so the workflow is unit‑aware
-g = g_from_units(md) or 9.80665
+g = g_from_units(md.units)
 T_spec = list(np.linspace(0.01, 6.0, 600))
 Sa_spec = list(_gb50011_spectrum(T_spec, alpha_max=alpha_max, tg=tg, g=g))
 rs = builder.run_response_spectrum_analysis(
