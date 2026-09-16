@@ -664,6 +664,16 @@ def _run_rs_pass(
     eigenvalues = list(modal.get("eigenvalues", []))
     n_modes = max(1, min(int(cfg.get("n_modes") or num_modes), len(periods)))
     directions = list(cfg.get("directions") or ["X", "Y"])
+    # Only X and Y are analysed.  ``_rs_export_payload`` writes ``rs_{dir}``
+    # keys and :func:`~fea_toolkit.io.unified_writer.collect_rs_arrays` reads
+    # only ``rs_x`` / ``rs_y``, so a ``Z`` (or any other) direction would be
+    # computed and then silently dropped from the archive.  Reject it up front.
+    unsupported = [d for d in directions if str(d).upper() not in ("X", "Y")]
+    if unsupported:
+        raise ValueError(
+            f"unsupported response-spectrum direction(s) {unsupported!r} — "
+            "only 'X' and 'Y' are supported"
+        )
 
     def spectrum_func(T):
         """Return Sa(T), interpolated onto the built spectrum axis."""
