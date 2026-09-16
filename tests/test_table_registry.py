@@ -105,17 +105,63 @@ def _resolved_self_constant(node: ast.AST, self_constants: dict[str, str]) -> Op
     return None
 
 
-def _startswith_prefixes(node: ast.Call, self_constants: dict[str, str]) -> set[str]:
+def _local_prefix_scope(fn: ast.AST) -> dict[str, set[str]]:
+    """Resolve names in *fn* to the string constants they carry.
+
+    Two shapes are supported, both needed to see the ``CASE - RESPONSE
+    SPECTRUM`` scan hidden behind a local variable:
+
+    * a local constant assignment — ``handled_prefixes = ("CASE - ...",)``;
+    * a comprehension / loop target iterating such a name —
+      ``any(t.startswith(p) for p in handled_prefixes)``.
+
+    Returns:
+        Mapping from local name to its resolved string constants.
+    """
+    assigned: dict[str, set[str]] = {}
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        vals = _string_constants(value)
+        if not vals:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                assigned.setdefault(target.id, set()).update(vals)
+
+    scope: dict[str, set[str]] = dict(assigned)
+    for node in ast.walk(fn):
+        if not isinstance(node, (ast.comprehension, ast.For)):
+            continue
+        target, iterable = node.target, node.iter
+        if isinstance(target, ast.Name) and isinstance(iterable, ast.Name):
+            scope[target.id] = assigned.get(iterable.id, set())
+    return scope
+
+
+def _startswith_prefixes(
+    node: ast.Call,
+    self_constants: dict[str, str],
+    local_scope: dict[str, set[str]],
+) -> set[str]:
     """Return the prefixes a ``startswith(...)`` call scans.
 
-    Both literal arguments (``.startswith("CASE -")``) and class constants
-    (``.startswith(self._AUTO_PREFIX)``) count.
+    Literal arguments (``.startswith("CASE -")``), class constants
+    (``.startswith(self._AUTO_PREFIX)``), and local names — a bare constant or
+    a comprehension / loop variable such as ``p`` from ``handled_prefixes`` —
+    all count.
     """
     prefixes = _string_constants(node)
     for sub in ast.walk(node):
         resolved = _resolved_self_constant(sub, self_constants)
         if resolved is not None:
             prefixes.add(resolved)
+        if isinstance(sub, ast.Name):
+            prefixes |= local_scope.get(sub.id, set())
     return prefixes
 
 
@@ -200,13 +246,14 @@ def _extract_parser_references() -> tuple[set[str], set[str]]:
             continue
         if not _references_raw_tables(fn):
             continue
+        local_scope = _local_prefix_scope(fn)
         for node in ast.walk(fn):
             if (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr == "startswith"
             ):
-                prefixes |= _startswith_prefixes(node, self_constants)
+                prefixes |= _startswith_prefixes(node, self_constants, local_scope)
 
         # 3a. Suffix dispatch: ``<var> = table_name[len(self._PREFIX):]`` joined
         #     with the literals its branches compare against, e.g. "GRAVITY"
@@ -261,6 +308,19 @@ def test_extractor_resolves_class_constant_prefixes():
     } <= names
 
 
+def test_extractor_resolves_local_prefix_iterables():
+    """Family prefixes reached through a local iterable are resolved too.
+
+    ``get_load_cases()`` skips already-handled tables with
+    ``any(t.startswith(p) for p in handled_prefixes)`` where
+    ``handled_prefixes = ("CASE - RESPONSE SPECTRUM",)``.  That prefix must
+    appear in the inventory, otherwise a drift in that skip guard would go
+    unnoticed by :func:`test_parser_table_names_are_registered`.
+    """
+    assert "CASE - RESPONSE SPECTRUM" in extract_parser_family_prefixes()
+    assert "CASE - RESPONSE SPECTRUM" in extract_parser_table_names()
+
+
 def test_parser_table_names_are_registered():
     """Every concrete table name the parser reads must be in the coverage registry."""
     family_prefixes = extract_parser_family_prefixes()
@@ -282,15 +342,18 @@ def test_family_prefixes_have_registered_members():
     registers their members individually so an unrecognised member surfaces as
     ``unhandled`` instead of being swallowed by a broad prefix (see
     :mod:`fea_toolkit.io.table_registry`).  A prefix is therefore covered when
-    it is a registered prefix family, or when at least one handled member is
-    registered.  A *new* dispatch branch is caught individually by the suffix
-    expansion in :func:`extract_parser_table_names`.
+    it is a registered prefix family, when at least one handled member is
+    registered, or when it is a *narrower* scan of a registered family
+    (``CASE - RESPONSE SPECTRUM`` under the registered ``CASE -`` — the skip
+    guard in ``get_load_cases()``).  A *new* dispatch branch is caught
+    individually by the suffix expansion in :func:`extract_parser_table_names`.
     """
     uncovered = sorted(
         prefix
         for prefix in extract_parser_family_prefixes()
         if prefix not in HANDLED_PREFIXES
         and not any(name.startswith(prefix) for name in HANDLED_TABLES)
+        and not any(prefix.startswith(handled) for handled in HANDLED_PREFIXES)
     )
     assert not uncovered, (
         "These startswith() prefixes scanned by s2k_parser.py have no registered "
