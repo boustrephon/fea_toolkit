@@ -53,8 +53,12 @@ tries four strategies in priority order:
 Joints sharing a Z-axis diaphragm constraint are grouped; each group's
 storey elevation is the mean Z of its joints.
 
-**Non-diaphragm constraints** (`BODY`, `EQUAL`, `WELD`, …) are simply
-skipped by the type filter — they never contribute storey levels.
+**Non-diaphragm constraints** never contribute storey levels.  `BODY`
+(rigid-body) constraints are handled separately by the Preprocessor
+(`_detect_rigid_body_constraints`) and applied by the AnalysisBuilder as
+6-DOF `rigidLink('beam')` MPCs — see `docs/model_review.md`.  Every other
+type (`EQUAL`, `WELD`, `BEAM`, `ROD`, `PLATE`, `LOCAL`) is parsed but
+**not applied**; the model review flags it as such.
 
 > **Historical note:** an earlier version read `raw_tables` directly
 > (`CONSTRAINT DEFINITIONS - DIAPHRAGM`). It now reads the structured

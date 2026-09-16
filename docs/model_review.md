@@ -166,6 +166,17 @@ Frames with end releases (partial or full), per local DOF (`P, V2, V3, T,
 M2, M3`) at each end, parsed from SAP2000's *"FRAME RELEASE ASSIGNMENTS 1 -
 GENERAL"* (or legacy *"FRAME RELEASES"*) table.
 
+### Constraints
+Joint constraint definitions (`CONSTRAINT DEFINITIONS - <TYPE>`) with a
+per-type count and whether each type is applied to the OpenSees domain.
+Only **`DIAPHRAGM`** (Z-axis → `ops.rigidDiaphragm`) and **`BODY`**
+(→ `ops.rigidLink('beam')` 6-DOF MPCs, disable with
+`apply_rigid_bodies: False`) are applied; every other type (`EQUAL`,
+`WELD`, `BEAM`, `ROD`, `PLATE`, `LOCAL`) is parsed but **not applied**, so
+the analysis silently omits that stiffness.  Such types are listed under
+`unsupported` — a missing rigid-body tie in particular makes the OpenSees
+model softer than SAP2000, most visibly in torsion.
+
 ### Integrity
 - Elements referencing **missing nodes**.
 - Frames/areas with **no section assignment**.
@@ -443,6 +454,7 @@ result = {
                    zero_area_sections, n_components, components,
                    floating_components},
   "releases": {n_frames_with_releases, by_dof, releases},
+  "constraints": {by_type, unsupported, n_supported},
   "integrity": {..., "counts": {category: count}},
   "observations": {restraint_patterns, all_translation_only,
                    all_fully_fixed, non_default_cardinal_points,
