@@ -626,6 +626,25 @@ _BLOCKING_INTEGRITY = (
 )
 
 
+def _table_coverage_dict(raw_tables: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """Triage parsed tables into handled / known-gap / ignored / unhandled.
+
+    Args:
+        raw_tables: The parser's ``raw_tables`` mapping, or ``None`` when the
+            caller has no access to it (e.g. a hand-built ``SAPModelData``).
+
+    Returns:
+        The coverage summary dict (see
+        :meth:`fea_toolkit.io.table_registry.TableCoverage.to_dict`), or
+        ``None`` when ``raw_tables`` is ``None``.
+    """
+    if raw_tables is None:
+        return None
+    from ..io.table_registry import table_coverage
+
+    return table_coverage(raw_tables).to_dict()
+
+
 def _is_clean(result: dict[str, Any]) -> bool:
     """Return True when the review found no blocking issues."""
     conn = result["connectivity"]
@@ -642,6 +661,7 @@ def review_model(
     md: SAPModelData,
     *,
     file: Optional[Any] = None,
+    raw_tables: Optional[dict[str, Any]] = None,
     tol: float = 1e-6,
     include_analysis: bool = False,
     analysis_config: Optional[dict[str, Any]] = None,
@@ -655,6 +675,11 @@ def review_model(
     Args:
         md: Parsed model data (:class:`SAPModelData`).
         file: Optional source path recorded in the result.
+        raw_tables: Optional parser ``raw_tables`` mapping.  When given, the
+            result gains a ``table_coverage`` section that triages every table
+            in the file into handled / known-gap / ignored / unhandled (see
+            :mod:`fea_toolkit.io.table_registry`).  ``None`` (the default)
+            leaves the section as ``None``.
         tol: Coordinate / length tolerance for duplicate-coordinate and
             degenerate-element detection.
         include_analysis: When True, run the optional OpenSees
@@ -701,6 +726,7 @@ def review_model(
 
     result: dict[str, Any] = {
         "file": str(file) if file is not None else None,
+        "table_coverage": _table_coverage_dict(raw_tables),
         "units": dict(md.units),
         "inventory": _inventory(md),
         "breakdown": _breakdown(md),
@@ -781,6 +807,7 @@ def review_s2k_file(
     return review_model(
         md,
         file=source,
+        raw_tables=parser.raw_tables,
         tol=tol,
         include_analysis=include_analysis,
         analysis_config=analysis_config,
@@ -1175,6 +1202,7 @@ def format_review_report(
     max_modes: int = 0,
     min_participation: float = 0.0,
     num_braces: int = 0,
+    show_ignored_tables: bool = False,
 ) -> str:
     """Render a review result as a plain-text report.
 
@@ -1186,6 +1214,9 @@ def format_review_report(
             participation is below this percentage (``0.0`` = show all).
         num_braces: Cap on the number of brace rows displayed in the
             brace-buckling section; ``0`` shows every brace.
+        show_ignored_tables: When ``True``, also list the deliberately-ignored
+            tables in the table-coverage section (off by default — that bucket
+            is typically the largest and least interesting).
 
     Returns:
         A multi-line plain-text report.
@@ -1290,6 +1321,30 @@ def format_review_report(
                 "  Mass source load patterns: "
                 + ", ".join(f"{name} x{mult:g}" for name, mult in patterns.items())
             )
+
+    table_cov = result.get("table_coverage")
+    if table_cov is not None:
+        counts = table_cov["counts"]
+        add("")
+        add("-- Table coverage " + "-" * 52)
+        if table_cov["clean"]:
+            add("  No unrecognised tables.")
+        else:
+            add(f"  UNHANDLED (unrecognised): {counts['unhandled']}")
+            for name, rows in sorted(table_cov["unhandled"].items()):
+                add(f"      {name:<46}{rows:>7} rows")
+        if table_cov["known_gaps"]:
+            add(f"  Known gaps (tracked, not parsed): {counts['known_gaps']}")
+            for name, info in sorted(table_cov["known_gaps"].items()):
+                add(f"      {name:<46}{info['rows']:>7} rows")
+        add(
+            f"  Handled {counts['handled']}   Known gaps {counts['known_gaps']}   "
+            f"Ignored {counts['ignored']}   Unhandled {counts['unhandled']}"
+        )
+        if show_ignored_tables and table_cov["ignored"]:
+            add("  Ignored (deliberately skipped):")
+            for name, rows in sorted(table_cov["ignored"].items()):
+                add(f"      {name:<46}{rows:>7} rows")
 
     force_unit = units.get("F", "N")
 
@@ -1452,6 +1507,7 @@ def print_review_report(
     max_modes: int = 0,
     min_participation: float = 0.0,
     num_braces: int = 0,
+    show_ignored_tables: bool = False,
 ) -> None:
     """Print the plain-text review report (see :func:`format_review_report`).
 
@@ -1461,6 +1517,8 @@ def print_review_report(
         min_participation: Hide modes below this mass-participation
             percentage (``0.0`` = show all).
         num_braces: Cap on the number of brace rows displayed (``0`` = all).
+        show_ignored_tables: Also list deliberately-ignored tables in the
+            table-coverage section.
     """
     print(
         format_review_report(
@@ -1468,6 +1526,7 @@ def print_review_report(
             max_modes=max_modes,
             min_participation=min_participation,
             num_braces=num_braces,
+            show_ignored_tables=show_ignored_tables,
         )
     )
 
@@ -1477,6 +1536,7 @@ def format_review_markdown(
     max_modes: int = 0,
     min_participation: float = 0.0,
     num_braces: int = 0,
+    show_ignored_tables: bool = False,
 ) -> str:
     """Render a review result as a Markdown document.
 
@@ -1488,11 +1548,13 @@ def format_review_markdown(
             participation is below this percentage (``0.0`` = show all).
         num_braces: Cap on the number of brace rows displayed in the
             brace-buckling section; ``0`` shows every brace.
+        show_ignored_tables: When ``True``, also list the deliberately-ignored
+            tables in the table-coverage section.
 
     Returns:
         A Markdown string with inventory, connectivity, releases,
-        integrity, observation, self-weight, brace-buckling and analysis
-        sections.
+        integrity, observation, table-coverage, self-weight, brace-buckling
+        and analysis sections.
     """
     inv = result["inventory"]
     units = result["units"]
@@ -1575,6 +1637,47 @@ def format_review_markdown(
         joined = ", ".join(f"`{name}` \u00d7{mult:g}" for name, mult in ms["load_patterns"].items())
         add(f"- Mass source load patterns: {joined}")
     add("")
+
+    table_cov = result.get("table_coverage")
+    if table_cov is not None:
+        counts = table_cov["counts"]
+        add("## Table coverage")
+        add("")
+        if table_cov["clean"]:
+            add("No unrecognised tables.")
+            add("")
+        else:
+            add(
+                f"**{counts['unhandled']} unrecognised table(s)** — SAP2000 may "
+                "have added a table, or the toolkit has never handled it."
+            )
+            add("")
+            add("| Table | Rows |")
+            add("|---|---:|")
+            for name, rows in sorted(table_cov["unhandled"].items()):
+                add(f"| `{name}` | {rows} |")
+            add("")
+        if table_cov["known_gaps"]:
+            add(f"**Known gaps** ({counts['known_gaps']}) — tracked, not parsed:")
+            add("")
+            add("| Table | Rows | Reason |")
+            add("|---|---:|---|")
+            for name, info in sorted(table_cov["known_gaps"].items()):
+                add(f"| `{name}` | {info['rows']} | {info['reason']} |")
+            add("")
+        add(
+            f"Handled **{counts['handled']}** \u00b7 Known gaps **{counts['known_gaps']}** "
+            f"\u00b7 Ignored **{counts['ignored']}** \u00b7 Unhandled **{counts['unhandled']}**"
+        )
+        add("")
+        if show_ignored_tables and table_cov["ignored"]:
+            add("**Ignored** (deliberately skipped):")
+            add("")
+            add("| Table | Rows |")
+            add("|---|---:|")
+            for name, rows in sorted(table_cov["ignored"].items()):
+                add(f"| `{name}` | {rows} |")
+            add("")
 
     force_unit = units.get("F", "N")
 
@@ -1841,6 +1944,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Write the report to this file instead of stdout.",
     )
     parser.add_argument(
+        "--tables",
+        action="store_true",
+        help=(
+            "Expand the table-coverage section: also list the deliberately-ignored "
+            "SAP2000 tables (unrecognised tables are always shown)."
+        ),
+    )
+    parser.add_argument(
         "--num-modes",
         type=int,
         default=12,
@@ -2029,6 +2140,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             max_modes=args.max_modes,
             min_participation=args.min_participation,
             num_braces=args.num_braces,
+            show_ignored_tables=args.tables,
         )
         if args.format == "markdown"
         else format_review_report(
@@ -2036,6 +2148,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             max_modes=args.max_modes,
             min_participation=args.min_participation,
             num_braces=args.num_braces,
+            show_ignored_tables=args.tables,
         )
     )
 

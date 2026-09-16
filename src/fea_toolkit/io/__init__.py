@@ -6,6 +6,7 @@ and :mod:`fea_toolkit.io.results_schema`).
 Modules
 -------
 s2k_parser — Parse SAP2000 .S2K / .$2K text files into SAPModelData.
+table_registry — SAP2000 table-coverage registry + unhandled-table detection.
 npz_writer — Serialise analysis results to NPZ archives.
 npz_reader — Deserialise NPZ archives and convert to PyVista meshes.
 results_schema — NPZ key layout and validation.
@@ -63,6 +64,12 @@ from .unified_writer import (
 # report helper names are resolved lazily here instead of eagerly.
 # ``from fea_toolkit.io import bounding_box`` and
 # ``fea_toolkit.io.bounding_box`` work exactly as before.
+#
+# ``table_registry`` is lazy for a different reason: eagerly importing the
+# submodule here would place it in ``sys.modules`` before
+# ``python -m fea_toolkit.io.table_registry`` runs, which makes runpy emit a
+# RuntimeWarning.  Lazy resolution keeps the ``-m`` entry point clean while
+# still exposing ``from fea_toolkit.io import table_coverage``.
 _REPORT_NAMES = frozenset(
     {
         "area_section_summary",
@@ -80,18 +87,31 @@ _REPORT_NAMES = frozenset(
     }
 )
 
+# Public names resolved from ``io.table_registry`` (SAP2000 table coverage).
+_TABLE_REGISTRY_NAMES = frozenset(
+    {
+        "TableCoverage",
+        "table_coverage",
+        "unhandled_tables",
+    }
+)
+
 
 def __getattr__(name: str):
-    """PEP 562 lazy resolution for the pandas-dependent report API."""
+    """PEP 562 lazy resolution for the report API and the table registry."""
     if name in _REPORT_NAMES:
         from . import report
 
         return getattr(report, name)
+    if name in _TABLE_REGISTRY_NAMES:
+        from . import table_registry
+
+        return getattr(table_registry, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def __dir__():
-    return sorted(set(globals()) | set(_REPORT_NAMES))
+    return sorted(set(globals()) | set(_REPORT_NAMES) | set(_TABLE_REGISTRY_NAMES))
 
 
 __all__ = [
@@ -99,6 +119,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "SCHEMA_VERSION_LEGACY",
     "SAP2000Parser",
+    "TableCoverage",
     "area_section_summary",
     "baseline_correct",
     "bounding_box",
@@ -138,6 +159,8 @@ __all__ = [
     "summarise_load_cases",
     "summarise_load_patterns",
     "summarise_mass_sources",
+    "table_coverage",
+    "unhandled_tables",
     "validate_npz",
     "write_model_stages",
     "write_results",

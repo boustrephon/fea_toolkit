@@ -29,6 +29,7 @@ dependencies = [
 
 [project.scripts]
 fea-review = "fea_toolkit.model.review:main"
+fea-tables = "fea_toolkit.io.table_registry:main"
 
 [project.optional-dependencies]
 mesh-remesh = [

@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import logging
 import math
 import re
 from pathlib import Path
@@ -82,8 +83,15 @@ class SAP2000Parser:
     # -------------------------------------------------------------------------
     # Parsing (adapted from your parse_sap2000_table_file / parse_file)
     # -------------------------------------------------------------------------
-    def parse(self) -> "SAP2000Parser":
+    def parse(self, warn_unhandled: bool = False) -> "SAP2000Parser":
         """Parse the .S2K file and store raw tables internally.
+
+        Args:
+            warn_unhandled: When ``True``, emit a :mod:`logging` warning for
+                every table in the file that the toolkit does not recognise
+                (see :mod:`fea_toolkit.io.table_registry`).  Off by default,
+                because a full SAP2000 export always carries design / output /
+                bookkeeping tables that are deliberately ignored.
 
         Returns:
             ``self``, so the call can be chained — e.g.
@@ -91,7 +99,40 @@ class SAP2000Parser:
         """
         content = self._read_file_with_encodings(self.file_path)
         self._raw_tables = self._parse_sap2000_table_file(content)
+        if warn_unhandled:
+            self._warn_unhandled_tables()
         return self
+
+    def _warn_unhandled_tables(self) -> None:
+        """Log a warning for each unrecognised table in the parsed file."""
+        from .table_registry import unhandled_tables
+
+        for name, rows in sorted(unhandled_tables(self.raw_tables).items()):
+            logging.warning(
+                "SAP2000 table %r (%d rows) is not recognised by fea_toolkit — "
+                "it may be a table SAP2000 has newly introduced, or one the "
+                "toolkit has never handled.",
+                name,
+                rows,
+            )
+
+    def table_coverage(self):
+        """Triage the parsed tables into handled / known-gap / ignored / unhandled.
+
+        Returns:
+            A :class:`~fea_toolkit.io.table_registry.TableCoverage` result.
+
+        Raises:
+            RuntimeError: If no data has been loaded — call :meth:`parse`
+                (or :meth:`from_json`) first.
+        """
+        from .table_registry import table_coverage
+
+        if self._raw_tables is None:
+            raise RuntimeError(
+                "No model data loaded — call parse() (or from_json()) before table_coverage()."
+            )
+        return table_coverage(self._raw_tables)
 
     @staticmethod
     def _read_file_with_encodings(path: Path) -> str:
