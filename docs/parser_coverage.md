@@ -104,7 +104,7 @@ python -m fea_toolkit.io.table_registry model.s2k --json   # machine-readable
 
 *Generated from `src/fea_toolkit/io/table_registry.py` — do not edit by hand.  Regenerate with `python docs/_generate_parser_tables.py`.*
 
-### Handled (43 exact names)
+### Handled (46 exact names)
 
 - `AREA AUTO MESH ASSIGNMENTS`
 - `AREA EDGE CONSTRAINT ASSIGNMENTS`
@@ -115,6 +115,9 @@ python -m fea_toolkit.io.table_registry model.s2k --json   # machine-readable
 - `AREA SECTION ASSIGNMENTS`
 - `AREA SECTION PROPERTIES`
 - `AREA SECTION PROPERTY DESIGN PARAMETERS`
+- `AUTO SEISMIC - LOAD PATTERN`
+- `AUTO WIND - CHINESE 2010`
+- `AUTO WIND EXPOSURE FOR HORIZONTAL DIAPHRAGMS`
 - `CONNECTIVITY - AREA`
 - `CONNECTIVITY - FRAME`
 - `FRAME AUTO MESH ASSIGNMENTS`
@@ -154,9 +157,7 @@ python -m fea_toolkit.io.table_registry model.s2k --json   # machine-readable
 
 - `MATERIAL PROPERTIES*`
 - `CONSTRAINT DEFINITIONS - *`
-- `AREA LOADS - *`
 - `CASE -*`
-- `AUTO*`
 
 ### Known gaps (3 exact names)
 
@@ -168,11 +169,12 @@ python -m fea_toolkit.io.table_registry model.s2k --json   # machine-readable
 
 - `SECTION DESIGNER PROPERTIES*` — SD section geometry not parsed
 
-### Ignored (11 exact names)
+### Ignored (12 exact names)
 
 - `ACTIVE DEGREES OF FREEDOM` — analysis DOF configuration
 - `ANALYSIS OPTIONS` — solver options
 - `AREA SECTION PROPERTY - TIME DEPENDENT` — creep / shrinkage (area sections)
+- `AUTO WAVE 3 - WAVE CHARACTERISTICS - GENERAL` — wave loading not supported
 - `COORDINATE SYSTEMS` — named coordinate systems (only GLOBAL is used)
 - `FRAME DESIGN PROCEDURES` — design configuration
 - `FRAME LOAD TRANSFER OPTIONS` — load-transfer settings

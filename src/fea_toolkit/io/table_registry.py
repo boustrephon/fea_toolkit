@@ -127,6 +127,15 @@ HANDLED_TABLES: frozenset[str] = frozenset(
         "AREA LOADS - GRAVITY",
         "MASS SOURCE",
         "MASSES 1 - MASS SOURCE",
+        # ── auto load-pattern generators ──
+        # The AUTO family is open-ended (its suffix names the design code), so
+        # the members the toolkit consumes are registered individually rather
+        # than matched by a broad ``AUTO`` prefix — that would swallow tables
+        # the toolkit does *not* read (e.g. ``AUTO WAVE 3 - ...``), hiding them
+        # from the coverage report.
+        "AUTO SEISMIC - LOAD PATTERN",
+        "AUTO WIND - CHINESE 2010",
+        "AUTO WIND EXPOSURE FOR HORIZONTAL DIAPHRAGMS",
     }
 )
 
@@ -134,15 +143,14 @@ HANDLED_TABLES: frozenset[str] = frozenset(
 #: ``str.startswith`` over ``raw_tables``).  Any table matching one of these is
 #: treated as handled.
 #:
-#: ``AUTO`` is included because ``_get_load_patterns()`` explicitly scans the
-#: ``AUTO*`` family for load-pattern data; only members carrying a ``LoadPat``
-#: column actually yield data (e.g. ``AUTO WAVE 3 - ...`` does not).
+#: Only families whose members are *all* consumed belong here.  ``AREA LOADS``
+#: and ``AUTO`` were deliberately removed: their members are mixed (``AUTO
+#: WAVE`` is not read) and are now registered individually in
+#: :data:`HANDLED_TABLES`, so an unrecognised member surfaces as ``unhandled``.
 HANDLED_PREFIXES: tuple[str, ...] = (
     "MATERIAL PROPERTIES",  # 01/02/03A/03B/03E/03F/03J/06/09 merged in _get_all_materials()
     "CONSTRAINT DEFINITIONS - ",  # BODY / DIAPHRAGM / EQUAL / BEAM / ROD / PLATE / WELD / LOCAL
-    "AREA LOADS - ",  # UNIFORM / UNIFORM TO FRAME / GRAVITY (+ future variants)
     "CASE -",  # every load-case table, merged into LoadCase.case_data
-    "AUTO",  # AUTO SEISMIC / AUTO WIND ... load-pattern generators
 )
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -162,6 +170,11 @@ IGNORED_TABLES: dict[str, str] = {
     "AREA SECTION PROPERTY - TIME DEPENDENT": "creep / shrinkage (area sections)",
     "GRID LINES": "grid geometry",
     "PROJECT INFORMATION": "project metadata",
+    # Auto wave-loading characteristics: no ``LoadPat`` column, so it is not a
+    # load-pattern generator (the toolkit has no wave-loading support).  Listed
+    # explicitly so ``_get_load_patterns()`` can tell a deliberate skip from a
+    # new, unhandled AUTO variant.
+    "AUTO WAVE 3 - WAVE CHARACTERISTICS - GENERAL": "wave loading not supported",
 }
 
 #: Table-name prefixes deliberately skipped, mapped to a short reason.  These

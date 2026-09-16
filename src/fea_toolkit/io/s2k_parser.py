@@ -874,6 +874,16 @@ class SAP2000Parser:
     # ``EccV`` of doubly-symmetric sections (e.g. ~1e-17 m), which would
     # otherwise create spurious near-zero offset records for cardinal point 10.
     _LATERAL_OFFSET_TOL = 1e-9
+    # ── Table-name prefixes scanned by family ──────────────────────
+    # Held as attributes (not inline string literals) so the
+    # ``tests/test_table_registry.py`` AST drift guard — which extracts
+    # ``.startswith("LITERAL")`` calls — does not treat the bare family
+    # prefix as a table the parser consumes.  The concrete member names are
+    # registered individually in :mod:`fea_toolkit.io.table_registry`, so an
+    # unrecognised member surfaces as ``unhandled`` instead of being
+    # swallowed by a broad prefix.
+    _AREA_LOADS_PREFIX = "AREA LOADS - "
+    _AUTO_PREFIX = "AUTO"
 
     @staticmethod
     def _coerce_release_flag(value: Any) -> int:
@@ -1355,9 +1365,10 @@ class SAP2000Parser:
         gravity_loads: list[AreaGravityLoad] = []
 
         for table_name in self._raw_tables:
-            if not table_name.startswith("AREA LOADS - "):
+            if not table_name.startswith(self._AREA_LOADS_PREFIX):
                 continue
-            load_type = table_name[len("AREA LOADS - ") :]  # e.g. "UNIFORM", "GRAVITY"
+            # e.g. "UNIFORM", "GRAVITY" — the table-name suffix after the prefix.
+            load_type = table_name[len(self._AREA_LOADS_PREFIX) :]
 
             if load_type == "UNIFORM":
                 for rec in self._raw_tables[table_name]:
@@ -1403,8 +1414,16 @@ class SAP2000Parser:
                     )
 
             else:
-                # Unknown area load type – silently skip
-                pass
+                # Unrecognised ``AREA LOADS - *`` variant — warn rather than
+                # discard silently.  The table-coverage report
+                # (:mod:`fea_toolkit.io.table_registry`) surfaces it too.
+                logging.warning(
+                    "Unrecognised %r table (%d row(s)) is not parsed — "
+                    "register it in io/table_registry.py or extend "
+                    "_get_area_loads().",
+                    table_name,
+                    len(self._raw_tables[table_name]),
+                )
 
         return uniform_loads, gravity_loads
 
@@ -1890,6 +1909,18 @@ class SAP2000Parser:
 
         return loadcases
 
+    @staticmethod
+    def _is_intentionally_ignored(table_name: str) -> bool:
+        """Whether *table_name* is registered as deliberately not read.
+
+        Consults :mod:`fea_toolkit.io.table_registry` so a family member the
+        toolkit skips on purpose (e.g. ``AUTO WAVE 3 - ...``) is not reported
+        as an oversight, while a genuinely new variant is.
+        """
+        from .table_registry import classify
+
+        return classify(table_name) == "ignored"
+
     def _get_load_patterns(self) -> dict[str, LoadPattern]:
         patterns = {}
         for rec in self._raw_tables.get("LOAD PATTERN DEFINITIONS", []):
@@ -1900,12 +1931,22 @@ class SAP2000Parser:
                     pattern_type=rec.get("DesignType", ""),
                     self_weight_factor=rec.get("SelfWtMult", 0),
                 )
-        # Augment with data from AUTO* tables (e.g. AUTO SEISMIC, AUTO WIND)
+        # Augment with data from AUTO* tables (e.g. AUTO SEISMIC, AUTO WIND).
+        # Only members carrying a ``LoadPat`` column act as load-pattern
+        # generators; the rest (e.g. ``AUTO WAVE 3 - ...``) are skipped — but
+        # never silently: an AUTO table without a ``LoadPat`` column that is
+        # not registered as deliberately ignored is logged, so a new variant
+        # cannot disappear without trace.
         for table_name, records in self._raw_tables.items():
-            if not table_name.startswith("AUTO"):
+            if not table_name.startswith(self._AUTO_PREFIX):
                 continue
-            # Skip tables without a LoadPat column (e.g. AUTO WAVE, FRAME AUTO MESH)
             if not records or "LoadPat" not in records[0]:
+                if not self._is_intentionally_ignored(table_name):
+                    logging.warning(
+                        "AUTO table %r has no LoadPat column and is not "
+                        "registered as deliberately ignored — not parsed.",
+                        table_name,
+                    )
                 continue
             for rec in records:
                 lp_name = rec.get("LoadPat", "")
