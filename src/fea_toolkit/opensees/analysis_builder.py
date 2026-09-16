@@ -1011,7 +1011,10 @@ def run_review_analysis(md, config: Optional[dict[str, Any]] = None) -> dict[str
         mode_shapes = None
         if builder_config.get("export_npz"):
             try:
-                mode_shapes = builder.extract_mode_shapes(int(builder_config.get("num_modes", 12)))
+                # Request the number of converged modes actually returned
+                # (``periods``), not the requested ``num_modes``, so a model
+                # that converged fewer modes still exports a shape per period.
+                mode_shapes = builder.extract_mode_shapes(len(periods))
             except Exception:  # keep modal results even if shapes fail
                 mode_shapes = None
 

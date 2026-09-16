@@ -759,6 +759,11 @@ def review_model(
         # Surface the export result at the top level for both paths.
         result["npz"] = result["analysis"].get("npz")
         result["npz_error"] = result["analysis"].get("npz_error")
+        # When an export was requested but the analysis produced no archive
+        # (e.g. it failed before the export step), fall back to a
+        # geometry-only write so the requested path is still honoured.
+        if export_npz and not result["npz"]:
+            result["npz"], result["npz_error"] = _write_geometry_npz(md, export_npz)
     elif export_npz:
         # Geometry-only export — no OpenSees domain required.
         result["npz"], result["npz_error"] = _write_geometry_npz(md, export_npz)

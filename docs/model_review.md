@@ -434,6 +434,7 @@ text = format_review_report(result, max_modes=3, min_participation=1.0)
 ```
 result = {
   "file": str | None,
+  "table_coverage": dict | None,
   "units": {"F": ..., "L": ..., "T": ...},
   "inventory": {category: count},
   "breakdown": {category: {key: count}},
@@ -489,7 +490,10 @@ resolved `spectrum` descriptor (`code`, `label`, `level`, `intensity`,
 `response_spectrum_error` in place instead.
 `npz` holds the path written by `--npz` (with any failure in `npz_error`);
 `npz_contents` holds the archive manifest (geometry + analysis results)
-from `describe_results_npz()`.
+from `describe_results_npz()`.  `table_coverage` holds the triage of the
+parsed SAP2000 tables (handled / known-gap / ignored / unhandled) as a
+dict when the caller supplied ``raw_tables``, and ``None`` otherwise (e.g.
+for a hand-built ``SAPModelData``).
 
 ## Notes
 
