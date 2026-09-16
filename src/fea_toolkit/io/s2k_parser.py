@@ -1069,14 +1069,15 @@ class SAP2000Parser:
         except (TypeError, ValueError):
             # Labelled string form: complete numeric token, e.g. "8 (top center)".
             # Capture the *whole* number — fractional part and exponent notation
-            # included — and require whitespace, an opening parenthesis or the
-            # end of the string immediately after it.  A bare ``\b`` boundary
-            # is not enough: on "8.7x" the engine backtracks to the leading "8"
-            # (the "8"→"." transition is a word boundary), so the malformed cell
-            # would read as cardinal point 8.  The lookahead rejects both
-            # "8.7 (top center)" / "8e-1 (top center)" and trailing-junk forms
-            # such as "8.7x" / "8x" rather than truncating them.
-            match = re.match(r"^\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?=\s|\(|$)", str(value))
+            # included — then require only optional whitespace before either an
+            # opening parenthesis or the end of the string.  A bare ``\b``
+            # boundary is not enough: on "8.7x" the engine backtracks to the
+            # leading "8" (the "8"→"." transition is a word boundary), so the
+            # malformed cell would read as cardinal point 8.  Consuming the
+            # whitespace *before* the lookahead is what rejects a bare trailing
+            # word such as "8 invalid": the old ``(?=\s|\(|$)`` matched the
+            # first space and accepted the junk that followed.
+            match = re.match(r"^\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(?=\(|$)", str(value))
             if match is None:
                 return None
             number = float(match.group(1))

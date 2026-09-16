@@ -1575,13 +1575,15 @@ class TestParseCardinalPoint:
         ``"8.7x"`` must not read as cardinal point 8: the previous word-
         boundary anchor let the regex backtrack to the leading ``8`` (the
         ``8`` to ``.`` transition *is* a word boundary), so the malformed cell
-        resolved to a valid-looking 8.  The lookahead now requires whitespace,
-        an opening parenthesis or the end of the string after the complete
-        number, rejecting the junk-suffixed cell outright while the valid
-        labelled form still parses.
+        resolved to a valid-looking 8.  The lookahead now requires only
+        optional whitespace before an opening parenthesis or the end of the
+        string after the complete number, rejecting the junk-suffixed cell —
+        including a bare trailing word such as ``"8 invalid"`` — outright
+        while the valid labelled form still parses.
         """
         assert SAP2000Parser._parse_cardinal_point("8.7x") is None
         assert SAP2000Parser._parse_cardinal_point("8x") is None
+        assert SAP2000Parser._parse_cardinal_point("8 invalid") is None
         assert SAP2000Parser._parse_cardinal_point("8.7 (top center)") is None
         assert SAP2000Parser._parse_cardinal_point("8 (top center)") == 8
 
