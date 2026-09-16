@@ -6,36 +6,8 @@ shrink-parameter override, and modal mass-participation annotation.
 Uses synthetic NPZ-like data dicts — no OpenSees.
 """
 
-import warnings
-
-import matplotlib
 import numpy as np
 import pytest
-
-try:
-    import pyvista as pv
-
-    _has_pyvista = True
-    pv.OFF_SCREEN = True  # prevent interactive windows during tests
-except ImportError:
-    _has_pyvista = False
-
-# Suppress PyVista's Jupyter backend warning — fires spuriously when
-# pv.Plotter(notebook=True) is constructed in a non-Jupyter environment.
-# This is a PyVista issue where it attempts to load its trame/Jupyter
-# backend even in OFF_SCREEN mode.
-warnings.filterwarnings("ignore", message="Failed to use notebook backend")
-
-
-@pytest.fixture(autouse=True, scope="module")
-def _configure_matplotlib():
-    """Set the Agg backend once per module and close all figures on exit."""
-    matplotlib.use("Agg")
-    yield
-    import matplotlib.pyplot as plt
-
-    plt.close("all")
-
 
 # ============================================================================
 # Fixtures — synthetic NPZ-like data dicts
@@ -75,13 +47,9 @@ def sample_displacements():
 # ============================================================================
 
 
+@pytest.mark.needs_pyvista
 class TestBuildDeformedMesh:
     """Verify the shared deformed-mesh constructor."""
-
-    @pytest.fixture(autouse=True)
-    def _skip_if_no_pyvista(self):
-        if not _has_pyvista:
-            pytest.skip("pyvista not installed")
 
     # ── Fixtures ─────────────────────────────────────────────────────
 
@@ -329,14 +297,10 @@ class TestBuildDeformedMesh:
 # ============================================================================
 
 
+@pytest.mark.needs_pyvista
 class TestResolveMeshData:
     """Verify the mesh-data resolver works for dict (NPZ), SAPModelData,
     and builder sources."""
-
-    @pytest.fixture(autouse=True)
-    def _skip_if_no_pyvista(self):
-        if not _has_pyvista:
-            pytest.skip("pyvista not installed")
 
     def test_dict_source_nodes(self, sample_npz_data):
         """Resolving an NPZ-like dict produces correct node entries.
@@ -738,13 +702,9 @@ class TestResolveMeshData:
 # ============================================================================
 
 
+@pytest.mark.needs_pyvista
 class TestPlotDeformedDisplacement3d:
     """Smoke tests for the unified displaced-shape viewer."""
-
-    @pytest.fixture(autouse=True)
-    def _skip_if_no_pyvista(self):
-        if not _has_pyvista:
-            pytest.skip("pyvista not installed")
 
     def test_import(self):
         """Verify function is exposed and callable."""
@@ -841,13 +801,9 @@ class TestPlotDeformedDisplacement3d:
 # ============================================================================
 
 
+@pytest.mark.needs_pyvista
 class TestShrinkParameter:
     """Verify ``shrink`` parameter works in all functions that support it."""
-
-    @pytest.fixture(autouse=True)
-    def _skip_if_no_pyvista(self):
-        if not _has_pyvista:
-            pytest.skip("pyvista not installed")
 
     def test_plot_mesh_shrink(self, sample_npz_data):
         """plot_mesh accepts shrink and returns a plotter."""
@@ -965,6 +921,7 @@ _MODAL_PARTICIPATION_PROPS = {
 # ============================================================================
 
 
+@pytest.mark.needs_pyvista
 class TestModalParticipationAnnotation:
     """Modal annotation: period plus six-DOF mass participation.
 

@@ -294,6 +294,35 @@ scaled to model units by the framework:
 - Test classes group related workflow tests (e.g., `TestBuildWorkflow`).
 - Integration tests use the built-in `make_sample_model()` from `examples/sample_model.py` to avoid external file dependencies.
 
+#### Shared visualisation infrastructure (`tests/conftest.py`)
+The **global** visualisation-test policy lives in `tests/conftest.py` — do not
+re-declare it per test file (it was previously duplicated seven ways; see the
+consolidation in commit `test: dissolve extracted grab-bag …`).
+
+- **matplotlib `Agg`** is applied by an autouse, module-scoped fixture
+  (`_matplotlib_agg`) for the whole suite. Never add a per-file
+  `matplotlib.use("Agg")` fixture: a forgotten backend is a *silent* failure on
+  a display-less CI runner, not a clean error.
+- **PyVista** availability is probed once in conftest. When importable,
+  `OFF_SCREEN` is set true suite-wide so no test opens a render window.
+- **`@pytest.mark.needs_pyvista`** marks any test that needs PyVista; conftest
+  turns it into a skip when the package is unavailable (registered in
+  `[tool.pytest.ini_options] markers` next to `slow`). PyVista is a core
+  dependency, but it cannot be installed inside Rhino 8's embedded
+  interpreter, which is why the marker exists.
+  - Prefer the marker for a whole class or module.
+  - For a single test that needs the **module object** inline, use
+    `pv = pytest.importorskip("pyvista")` — the same idiom already used for
+    `h5py`, `scipy`, `rhino3dm` and friends.
+- **Do not re-introduce** `_has_pyvista` flags, `_skip_if_no_pyvista` autouse
+  fixtures, `_needs_pyvista` aliases, or per-file
+  `warnings.filterwarnings(...)` for the PyVista notebook-backend warning —
+  that suppression is already declared in `pyproject.toml` `filterwarnings`.
+- **Scenario data stays local.** Synthetic model/NPZ builders (e.g.
+  `_minimal_npz_dict`, `_make_pushover_data`) are each test's specification of
+  its scenario, not shared infrastructure — keep them in the file that owns
+  the scenario rather than centralising them.
+
 ### 5.6 `ops.wipe()` hygiene
 - Always call `ops.wipe()` in test teardown (via `finally` or fixture `yield`).
 - OpenSees global state must be clean between tests.

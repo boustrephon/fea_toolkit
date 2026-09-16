@@ -12,17 +12,8 @@ import numpy as np
 import openseespy.opensees as ops
 import pytest
 
-try:
-    # Imported only to probe availability; the renderers under test are always
-    # constructed with ``off_screen=True``, so no process-wide ``pv.OFF_SCREEN``
-    # override is set here (it would leak into unrelated tests).
-    import pyvista  # noqa: F401
-
-    _has_pyvista = True
-except ImportError:
-    _has_pyvista = False
-
-pytestmark = pytest.mark.skipif(not _has_pyvista, reason="pyvista not installed")
+#: Every test here drives the PyVista render backend.
+pytestmark = pytest.mark.needs_pyvista
 
 
 def _frame(elem_id="1", start=(0.0, 0.0, 0.0), end=(0.0, 0.0, 3.0)):

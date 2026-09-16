@@ -6,37 +6,10 @@ figure.  Function-level viz tests live in the mirror files
 and ``test_force_diagram.py``.
 """
 
-import warnings
 from typing import ClassVar
 
-import matplotlib
 import numpy as np
 import pytest
-
-try:
-    import pyvista as pv
-
-    _has_pyvista = True
-    pv.OFF_SCREEN = True  # prevent interactive windows during tests
-except ImportError:
-    _has_pyvista = False
-
-# Suppress PyVista's Jupyter backend warning — fires spuriously when
-# pv.Plotter(notebook=True) is constructed in a non-Jupyter environment.
-# This is a PyVista issue where it attempts to load its trame/Jupyter
-# backend even in OFF_SCREEN mode.
-warnings.filterwarnings("ignore", message="Failed to use notebook backend")
-
-
-@pytest.fixture(autouse=True, scope="module")
-def _configure_matplotlib():
-    """Set the Agg backend once per module and close all figures on exit."""
-    matplotlib.use("Agg")
-    yield
-    import matplotlib.pyplot as plt
-
-    plt.close("all")
-
 
 # ============================================================================
 # CSM four-panel report figure
@@ -253,6 +226,7 @@ class TestPlottingImports:
         a = AnnotationDef(text="Hello", position=np.zeros(3))
         assert a.text == "Hello"
 
+    @pytest.mark.needs_pyvista
     def test_model_viewer_from_sample(self):
         """ModelViewer extracts geometry from sample model data."""
         from examples.sample_model import make_sample_model

@@ -5,36 +5,8 @@ pushover envelope, deformation animation, and frame force evolution.
 Uses synthetic NPZ-like data dicts — no OpenSees.
 """
 
-import warnings
-
-import matplotlib
 import numpy as np
 import pytest
-
-try:
-    import pyvista as pv
-
-    _has_pyvista = True
-    pv.OFF_SCREEN = True  # prevent interactive windows during tests
-except ImportError:
-    _has_pyvista = False
-
-# Suppress PyVista's Jupyter backend warning — fires spuriously when
-# pv.Plotter(notebook=True) is constructed in a non-Jupyter environment.
-# This is a PyVista issue where it attempts to load its trame/Jupyter
-# backend even in OFF_SCREEN mode.
-warnings.filterwarnings("ignore", message="Failed to use notebook backend")
-
-
-@pytest.fixture(autouse=True, scope="module")
-def _configure_matplotlib():
-    """Set the Agg backend once per module and close all figures on exit."""
-    matplotlib.use("Agg")
-    yield
-    import matplotlib.pyplot as plt
-
-    plt.close("all")
-
 
 # ============================================================================
 # Plastic-hinge heatmap
@@ -190,13 +162,9 @@ class TestPushoverHeatmap:
 # ============================================================================
 
 
+@pytest.mark.needs_pyvista
 class TestShellDamageMap:
     """Tests for plot_shell_damage_map (Phase 4b)."""
-
-    @pytest.fixture(autouse=True)
-    def _skip_if_no_pyvista(self):
-        if not _has_pyvista:
-            pytest.skip("pyvista not installed")
 
     @pytest.fixture
     def npz_with_shells(self):
@@ -372,13 +340,9 @@ class TestShellDamageMap:
 # ============================================================================
 
 
+@pytest.mark.needs_pyvista
 class TestPushoverEnvelope:
     """Tests for plot_pushover_envelope (Phase 4c)."""
-
-    @pytest.fixture(autouse=True)
-    def _skip_if_no_pyvista(self):
-        if not _has_pyvista:
-            pytest.skip("pyvista not installed")
 
     @pytest.fixture
     def npz_with_frames(self):
@@ -596,13 +560,9 @@ class TestPushoverEnvelope:
 # ============================================================================
 
 
+@pytest.mark.needs_pyvista
 class TestPlasticHingeFormation:
     """Tests for plot_plastic_hinge_formation (Phase 4a1)."""
-
-    @pytest.fixture(autouse=True)
-    def _skip_if_no_pyvista(self):
-        if not _has_pyvista:
-            pytest.skip("pyvista not installed")
 
     @pytest.fixture
     def npz_hinge_data(self):
@@ -709,13 +669,9 @@ class TestPlasticHingeFormation:
 # ============================================================================
 
 
+@pytest.mark.needs_pyvista
 class TestAnimatePushoverDeformation:
     """Tests for animate_pushover_deformation (Phase 4d)."""
-
-    @pytest.fixture(autouse=True)
-    def _skip_if_no_pyvista(self):
-        if not _has_pyvista:
-            pytest.skip("pyvista not installed")
 
     @pytest.fixture
     def npz_anim_data(self):

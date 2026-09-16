@@ -5,36 +5,8 @@ Covers source resolution (builder / in-memory dict / NPZ path), static vs
 CQC-RS dispatch, and 2D vs 3D selection.
 """
 
-import warnings
-
-import matplotlib
 import numpy as np
 import pytest
-
-try:
-    import pyvista as pv
-
-    _has_pyvista = True
-    pv.OFF_SCREEN = True  # prevent interactive windows during tests
-except ImportError:
-    _has_pyvista = False
-
-# Suppress PyVista's Jupyter backend warning — fires spuriously when
-# pv.Plotter(notebook=True) is constructed in a non-Jupyter environment.
-# This is a PyVista issue where it attempts to load its trame/Jupyter
-# backend even in OFF_SCREEN mode.
-warnings.filterwarnings("ignore", message="Failed to use notebook backend")
-
-
-@pytest.fixture(autouse=True, scope="module")
-def _configure_matplotlib():
-    """Set the Agg backend once per module and close all figures on exit."""
-    matplotlib.use("Agg")
-    yield
-    import matplotlib.pyplot as plt
-
-    plt.close("all")
-
 
 # ============================================================================
 # Shared synthetic data
@@ -204,7 +176,7 @@ class TestForceDiagramUnified:
 
         plt.close(fig)
 
-    @pytest.mark.skipif(not _has_pyvista, reason="pyvista not installed")
+    @pytest.mark.needs_pyvista
     def test_dispatcher_static_3d_notebook(self):
         from fea_toolkit.plotting.force_diagram import plot_force_diagram
 
@@ -225,7 +197,7 @@ class TestForceDiagramUnified:
 
         plt.close(fig)
 
-    @pytest.mark.skipif(not _has_pyvista, reason="pyvista not installed")
+    @pytest.mark.needs_pyvista
     def test_dispatcher_dimension_inference_3d(self):
         """With PyVista available + geometry present, 3D is inferred."""
         from fea_toolkit.plotting.force_diagram import plot_force_diagram
@@ -273,14 +245,11 @@ class TestForceDiagramUnified:
 
         assert plot_force_diagram(_minimal_npz_dict(), quantity="ZZ", dimension="2d") is None
 
+    @pytest.mark.needs_pyvista
     def test_npz_path_sources(self):
         """plot_force_diagram accepts NPZ paths for 2D and 3D rendering."""
         import os
         import tempfile
-
-        # The 3D half of this test needs PyVista — skip the whole test when
-        # it is unavailable (assertions below still run when it is present).
-        pytest.importorskip("pyvista")
 
         from fea_toolkit.plotting import plot_force_diagram
 

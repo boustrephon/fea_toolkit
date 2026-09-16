@@ -5,17 +5,6 @@ import math
 import numpy as np
 import pytest
 
-try:
-    import pyvista as pv
-
-    _has_pyvista = True
-    pv.OFF_SCREEN = True
-except ImportError:
-    _has_pyvista = False
-
-# Module-level skip marker for pyvista-dependent tests
-_needs_pyvista = pytest.mark.skipif(not _has_pyvista, reason="pyvista not installed")
-
 
 def _make_pushover_data(frame_my_i, frame_mz_i, frame_my_j, frame_mz_j):
     """Build a minimal pushover NPZ-like data dict for viz smoke tests.
@@ -114,7 +103,7 @@ class TestHingeRatiosBiaxial:
         ratios = _compute_hinge_ratios(forces, use_biaxial=True)
         assert abs(ratios["F1"][0] - math.sqrt(0.5)) < 1e-9
 
-    @_needs_pyvista
+    @pytest.mark.needs_pyvista
     def test_biaxial_kwarg_threaded_to_plot(self):
         """use_biaxial kwarg is accepted by plot_plastic_hinge_formation."""
         from fea_toolkit.plotting.viz import plot_plastic_hinge_formation
@@ -129,7 +118,7 @@ class TestHingeRatiosBiaxial:
         assert pl is not None
         pl.close()
 
-    @_needs_pyvista
+    @pytest.mark.needs_pyvista
     def test_animate_accepts_biaxial_kwarg(self):
         """animate_pushover_deformation accepts use_biaxial kwarg."""
         from fea_toolkit.plotting.viz import animate_pushover_deformation
@@ -206,9 +195,11 @@ class TestColorLegendHelpers:
 
         assert callable(_add_shell_color_legend)
 
-    @_needs_pyvista
+    @pytest.mark.needs_pyvista
     def test_legends_dont_raise_with_pyvista_plotter(self):
         """Adding both legends to a plotter does not raise."""
+        import pyvista as pv
+
         from fea_toolkit.plotting.viz import (
             _add_hinge_color_legend,
             _add_shell_color_legend,
@@ -319,7 +310,7 @@ class TestHingeColormap:
 class TestAnimationInterval:
     """Tests for animation_interval_ms parameter."""
 
-    @_needs_pyvista
+    @pytest.mark.needs_pyvista
     def test_animate_accepts_interval_param(self):
         """animate_pushover_deformation accepts animation_interval_ms."""
         from fea_toolkit.plotting.viz import animate_pushover_deformation

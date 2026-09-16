@@ -776,6 +776,7 @@ cross‑reference section.
     - ~~Add unit tests for `SectionLibrary`, `SAPModelData` dataclasses, and geometry utilities~~ ✅ Covered in `test_sections_selection.py`, `test_sap_data.py`, `test_geometry_core_frames.py`, `test_mesh_units.py`, `test_confinement.py`.  
     - ~~Add integration tests for the two-stage pipeline~~ ✅ Covered in `test_workflows.py`, `test_rc_pushover.py`, `test_layered_shell.py`, `test_wall_pushover.py`.  
     - ~~Add tests for `split_elements`~~ ✅ `TestParserModelIntegration::test_split_elements{,_tracking}` and `TestBuildWorkflow::test_build_with_split_elements`; trapezoidal-load decomposition remains an open sub-item.
+    - ~~De-duplicate repeated visualisation-test boilerplate~~ ✅ Centralised in `tests/conftest.py`: the matplotlib **Agg** backend (autouse, module-scoped) and the suite-wide PyVista probe + `OFF_SCREEN`; per-file `_has_pyvista` / `_skip_if_no_pyvista` / `_needs_pyvista` guards and duplicate notebook-warning filters were replaced by the **`@pytest.mark.needs_pyvista`** marker (registered in `pyproject.toml`). See `.clinerules` §5.5.
 
 #### Low Priority
 
@@ -944,8 +945,11 @@ The following items are the highest-impact improvements identified during a code
    standalone Tcl-export functions.
 
 6. **Add unit tests** — ✅ **Largely done**: `tests/` mirrors `src/` with
-   1,000+ tests covering the pipeline, pushover, CSM, capacity, storey
-   response, meshing, and the extracted modules.
+   1,600+ tests covering the pipeline, pushover, CSM, capacity, storey
+   response, meshing, and the extracted modules.  Shared visualisation-test
+   infrastructure (matplotlib `Agg`, the suite-wide PyVista probe and the
+   `needs_pyvista` marker) lives in `tests/conftest.py` — see `.clinerules`
+   §5.5.
 
 ### Remaining consolidation (pending)
 

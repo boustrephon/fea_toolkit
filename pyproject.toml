@@ -63,6 +63,7 @@ python_functions = "test_*"
 addopts = "-v --tb=short"
 markers = [
     "slow: long-running multi-pushover benchmark; exclude with `-m 'not slow'`",
+    "needs_pyvista: skip when pyvista is unavailable (e.g. Rhino 8 embedded interpreter)",
 ]
 filterwarnings = [
     "ignore::UserWarning:pyvista.jupyter.notebook",

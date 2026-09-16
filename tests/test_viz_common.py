@@ -6,19 +6,11 @@ contract (callback arity, who renders) and the raw VTK fallback — see
 ``.clinerules`` §12.1 and ``docs/dev_notes.md``.
 """
 
-import warnings
-
 import pytest
 
-try:
-    import pyvista as pv
-
-    _has_pyvista = True
-    pv.OFF_SCREEN = True  # prevent interactive windows during tests
-except ImportError:
-    _has_pyvista = False
-
-warnings.filterwarnings("ignore", message="Failed to use notebook backend")
+#: The whole module exercises the PyVista animation-timer path, so skip it
+#: outright when PyVista is unavailable (e.g. Rhino 8's embedded interpreter).
+pv = pytest.importorskip("pyvista")
 
 
 # ============================================================================

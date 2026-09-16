@@ -198,8 +198,6 @@ def test_from_gb50011_units_argument():
 
 def test_plot_seismic_spectrum_threads_units():
     """plot_seismic_spectrum accepts g/units and labels the resolved unit."""
-    matplotlib = pytest.importorskip("matplotlib")
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     from fea_toolkit.spectrum import plot_seismic_spectrum
