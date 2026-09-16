@@ -314,19 +314,30 @@ def _collect_modal(
 
 
 def _collect_rs(rs_x: Optional[dict] = None, rs_y: Optional[dict] = None) -> dict[str, np.ndarray]:
-    """Extract response-spectrum arrays with directional keys."""
-    arrays: dict[str, np.ndarray] = {}
-    for direction, d_key in [("X", "x"), ("Y", "y")]:
-        rs = rs_x if direction == "X" else rs_y
-        if rs is None:
-            continue
-        len(rs.get("modal_periods", []))
-        arrays[f"rs/sa_{d_key}"] = np.array(rs.get("spectral_accels", []), dtype=float)
-        arrays[f"rs/eff_mass_{d_key}"] = np.array(rs.get("effective_masses", []), dtype=float)
-        arrays[f"rs/v_base_{d_key}"] = np.array(rs.get("modal_base_shear", []), dtype=float)
-        arrays[f"rs/v_cqc_{d_key}"] = np.array([rs.get("base_shear_cqc", 0.0)])
-        arrays[f"rs/v_total_{d_key}"] = np.array([rs.get("base_shear_total", 0.0)])
-    return arrays
+    """Extract response-spectrum arrays with directional keys.
+
+    Thin delegate to
+    :func:`fea_toolkit.io.unified_writer.collect_rs_arrays`, which owns the
+    ``rs/*`` mapping.  This function used to be a second, divergent copy: it
+    wrote the per-mode ``rs/sa_*`` / ``rs/eff_mass_*`` / ``rs/v_total_*`` keys
+    but neither ``rs/period`` nor the combined ``rs/v_srss_*`` / ``rs/m_*`` /
+    ``rs/roof_disp_*`` scalars, so an archive from this writer carried a
+    different RS block from the model-review path and failed
+    ``results_schema.validate_arrays``.  Keeping a single implementation is
+    what makes that class of bug impossible.
+
+    Args:
+        rs_x: ``rs_x`` entry of an ``rs_results`` payload.
+        rs_y: ``rs_y`` entry of an ``rs_results`` payload.
+
+    Returns:
+        The ``rs/*`` arrays, as documented in ``docs/results_schema.md``.
+    """
+    # Function-local import: avoids any module-level cycle between the two
+    # writers, matching the lazy-import convention used elsewhere in ``io``.
+    from .unified_writer import collect_rs_arrays
+
+    return collect_rs_arrays(rs_x=rs_x, rs_y=rs_y)
 
 
 def _collect_shell_forces(shell_forces: dict[str, dict[str, Any]]) -> dict[str, np.ndarray]:

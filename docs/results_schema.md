@@ -319,14 +319,6 @@ pair against ``modal/node_tag``.  This layout is compatible with PyVista::
 | `rs/elem_fx_j` … `rs/elem_mz_j` | `(N_frame,)` | `float` | Same at the J‑end |
 | `rs/elem_Vy_i` / `_j`, `rs/elem_Vz_i` / `_j` | `(N_frame,)` | `float` | **Deprecated aliases** of `fy` / `fz` (see below) |
 | `rs/elem_My_i` / `_j`, `rs/elem_Mz_i` / `_j` | `(N_frame,)` | `float` | **Deprecated aliases** of `my` / `mz` (see below) |
-| `rs/elem_Vy_i` | `(N_frame,)` | `float` | I‑end local Vy (kN) |
-| `rs/elem_Vz_i` | `(N_frame,)` | `float` | I‑end local Vz (kN) |
-| `rs/elem_My_i` | `(N_frame,)` | `float` | I‑end local My (kN·m) |
-| `rs/elem_Mz_i` | `(N_frame,)` | `float` | I‑end local Mz (kN·m) |
-| `rs/elem_Vy_j` | `(N_frame,)` | `float` | J‑end local Vy (kN) |
-| `rs/elem_Vz_j` | `(N_frame,)` | `float` | J‑end local Vz (kN) |
-| `rs/elem_My_j` | `(N_frame,)` | `float` | J‑end local My (kN·m) |
-| `rs/elem_Mz_j` | `(N_frame,)` | `float` | J‑end local Mz (kN·m) |
 | `rs/node_tag` | `(N_node,)` | `int` | OpenSees node tag (see ID conventions) — **optional block** |
 | `rs/node_dx` | `(N_node,)` | `float` | CQC‑combined nodal displacement X (m) |
 | `rs/node_dy` | `(N_node,)` | `float` | CQC‑combined nodal displacement Y (m) |
@@ -401,6 +393,13 @@ and appear only when the producer supplies the corresponding data:
   (``_load_deformed_arrays(data, "rs")``) takes no direction argument, so
   multi‑direction producers should export one direction (the model review
   exports the first configured direction, X by default).
+
+The legacy per-mode `rs/sa_*` (spectral acceleration), `rs/eff_mass_*`
+(effective mass) and `rs/v_total_*` (total base shear: SRSS of CQC + rigid +
+missing) arrays are still written for compatibility with the pre-unification
+`npz_writer` key set.  They are **not** declared in `RS_ARRAYS`, so
+`validate_arrays()` neither requires nor shape-checks them; a producer that
+omits the source fields gets empty per-mode arrays and a zero total.
 
 > **Model review support is opt-in.**  The review's RS export always writes the
 > combined scalars and the single‑direction `rs/node_*` block.  Element‑level

@@ -191,7 +191,7 @@ columns — which is how the duplication surfaced.
 
 `npz_writer._collect_modal` is now a **thin delegate** to
 `unified_writer.collect_modal_arrays`, which owns the mapping;
-`tests/test_review.py::TestUnifiedWriterSchemaCoverage` pins the two in step.
+`tests/test_stage_file.py::TestUnifiedWriterSchemaCoverage` pins the two in step.
 If you add a modal key, add it to `collect_modal_arrays` only.
 
 General lesson: when a "missing field" bug appears, grep for **every** writer of

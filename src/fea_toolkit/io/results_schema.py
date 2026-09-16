@@ -386,9 +386,17 @@ def validate_arrays(data: t.Mapping[str, t.Any]) -> list[str]:
                             _check_shape(key, arr, "N_frame", "float")
         if "modal" in types:
             # modal/node_tag is an optional row-alignment convenience
-            # (added 2026-08 for the NPZ mode-plotting path) — legacy
-            # modal NPZ files predating it must still validate.
-            _optional_modal = {"modal/node_tag"}
+            # (added 2026-08 for the NPZ mode-plotting path), and the
+            # rotational ratios (rx/ry/rz) post-date the original modal
+            # schema — legacy modal NPZ files predating them must still
+            # validate, so all four are exempt from the required-array
+            # check.
+            _optional_modal = {
+                "modal/node_tag",
+                "modal/rx_ratio",
+                "modal/ry_ratio",
+                "modal/rz_ratio",
+            }
             for key, (shape_desc, dtype_str) in MODAL_ARRAYS.items():
                 arr = data.get(key)
                 if arr is None:

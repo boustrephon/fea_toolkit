@@ -186,10 +186,24 @@ def collect_rs_arrays(
 ) -> dict[str, np.ndarray]:
     """Extract response-spectrum arrays (base shear, moment, roof displacement).
 
+    Single source of truth for the flat ``rs/*`` block:
+    :func:`write_results` (the model-review export path),
+    :func:`fea_toolkit.io.npz_writer.write_results_npz` (through
+    ``_collect_rs``) and :func:`fea_toolkit.io.stage_writer.write_model_stages`
+    all reach this function, so a new key is added in exactly one place.  It
+    used to be duplicated in ``npz_writer._collect_rs``, and the two copies
+    drifted — the per-mode ``rs/sa_*`` / ``rs/eff_mass_*`` / ``rs/v_total_*``
+    keys existed in one and the combined ``rs/v_srss_*`` / ``rs/m_*`` /
+    ``rs/roof_disp_*`` keys in the other, so neither writer archived a
+    complete block.
+
     ``rs/period`` is taken from the first available result dict
     (same periods apply to both X and Y directions).  Per-direction scalars
     default to 0.0 when a producer does not supply them — e.g. the scalar
-    ``cqc_base_shear`` path has no moment or roof displacement.
+    ``cqc_base_shear`` path has no moment or roof displacement.  The per-mode
+    ``rs/sa_*`` / ``rs/eff_mass_*`` arrays come from the
+    ``spectrum.cqc_base_shear`` payload (``spectral_accels`` /
+    ``effective_masses``) and are written empty when a producer omits them.
     """
     arrays: dict[str, np.ndarray] = {}
     first = rs_x or rs_y
@@ -200,9 +214,15 @@ def collect_rs_arrays(
         rs = rs_x if direction == "X" else rs_y
         if rs is None:
             continue
+        # Per-mode arrays: spectral acceleration and effective mass (the
+        # legacy ``_collect_rs`` pair), plus the per-mode base shear.
+        arrays[f"rs/sa_{d_key}"] = np.array(rs.get("spectral_accels", []), dtype=float)
+        arrays[f"rs/eff_mass_{d_key}"] = np.array(rs.get("effective_masses", []), dtype=float)
         arrays[f"rs/v_base_{d_key}"] = np.array(rs.get("modal_base_shear", []), dtype=float)
+        # Combined scalars — defaulted to 0.0 so the keys are always present.
         arrays[f"rs/v_cqc_{d_key}"] = np.array([rs.get("base_shear_cqc", 0.0)])
         arrays[f"rs/v_srss_{d_key}"] = np.array([rs.get("base_shear_srss", 0.0)])
+        arrays[f"rs/v_total_{d_key}"] = np.array([rs.get("base_shear_total", 0.0)])
         arrays[f"rs/m_cqc_{d_key}"] = np.array([rs.get("base_moment_cqc", 0.0)])
         arrays[f"rs/m_srss_{d_key}"] = np.array([rs.get("base_moment_srss", 0.0)])
         arrays[f"rs/roof_disp_cqc_{d_key}"] = np.array([rs.get("roof_disp_cqc", 0.0)])
