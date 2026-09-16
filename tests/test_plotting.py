@@ -2778,3 +2778,29 @@ class TestCsmFourPanelUnits:
         assert ax.get_ylabel() == "S$_a$ (mm/s\u00b2)"
         assert "mm/s" in ax.get_title()
         plt.close(fig)
+
+    def test_suptitle_reflects_plotted_parameters(self):
+        """The suptitle names the parameters used, not stale placeholders."""
+        import matplotlib.pyplot as plt
+
+        from fea_toolkit.plotting.report import plot_csm_4panel
+
+        fig = plot_csm_4panel(_minimal_csm_all_out(), {}, tg=0.35, alpha_max_rare=0.50)
+        assert fig is not None
+        suptitle = fig.get_suptitle()
+        assert "Tg=0.35s" in suptitle
+        assert "0.50" in suptitle
+        assert "Project A" not in suptitle
+        assert "Site I" not in suptitle
+        plt.close(fig)
+
+    def test_explicit_title_overrides_the_default(self):
+        """A caller-supplied title replaces the derived suptitle."""
+        import matplotlib.pyplot as plt
+
+        from fea_toolkit.plotting.report import plot_csm_4panel
+
+        fig = plot_csm_4panel(_minimal_csm_all_out(), {}, title="Custom CSM Title")
+        assert fig is not None
+        assert fig.get_suptitle() == "Custom CSM Title"
+        plt.close(fig)

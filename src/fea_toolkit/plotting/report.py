@@ -373,6 +373,7 @@ def plot_csm_4panel(
     g: Optional[float] = None,
     units: Optional[dict] = None,
     out_dir: Optional[str] = None,
+    title: Optional[str] = None,
 ) -> Optional[Any]:
     """Generate a 2×2 ADRS Capacity Spectrum Method plot for all 4 directions.
 
@@ -398,6 +399,10 @@ def plot_csm_4panel(
         ADRS capacity arrays.  Ignored when *g* is given.
     out_dir : str, optional
         If provided, save the figure as ``csm_4panel.png`` to this directory.
+    title : str, optional
+        Figure suptitle override (a project label, for example).  ``None``
+        derives one from *alpha_max_rare*, *tg* and *zeta*, so the default
+        always names the demand actually plotted.
 
     Returns
     -------
@@ -416,6 +421,13 @@ def plot_csm_4panel(
     # spectrum matches the model units of the ADRS capacity arrays.
     g = _resolve_g(g, units)
     _length_unit = (units or {}).get("L") or "m"
+
+    # Default suptitle names the demand actually plotted; callers holding a
+    # project label can override it via ``title``.
+    _default_title = (
+        f"Capacity Spectrum Method \u2014 GB\u200950011 Rare Earthquake\n"
+        f"(α_max={alpha_max_rare:.2f}, Tg={tg}s, ζ={zeta})"
+    )
 
     gamma = 0.9 + (0.05 - zeta) / (0.3 + 6.0 * zeta)
     eta_1 = max(0.0, 0.02 + (0.05 - zeta) / (4.0 + 32.0 * zeta))
@@ -534,8 +546,7 @@ def plot_csm_4panel(
         ax.tick_params(labelsize=8)
 
     fig.suptitle(
-        f"Project A \u2014 Capacity Spectrum Method\n"
-        f"GB\u200950011 Rare Earthquake, Intensity VII(0.10g), Site I\u2081 (Tg={tg}s)",
+        _default_title if title is None else title,
         fontsize=12,
         fontweight="bold",
         y=0.98,
