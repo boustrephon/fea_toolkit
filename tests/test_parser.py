@@ -1228,6 +1228,48 @@ def test_rigid_diaphragms_false_disables_detected_levels(tmp_path):
         ops.wipe()
 
 
+# ============================================================================
+# BODY-constraint MPC emission — ops call spy
+# ============================================================================
+
+
+class _OpsCallSpy:
+    """Proxy ``ops``, recording (and optionally forbidding) selected calls.
+
+    The builder reaches OpenSees through its own module global (``_cm.ops``),
+    so tests swap in this spy to observe the MPCs it emits without inspecting
+    the real domain.  Attributes that are neither watched nor forbidden are
+    proxied straight through to the real module.
+
+    Args:
+        real_ops: The real ``openseespy.opensees`` module.
+        watched: Call names to record in :attr:`calls`.
+        forbidden: Call names that must never be invoked (they raise
+            ``AssertionError`` if they are).
+    """
+
+    def __init__(self, real_ops, watched=(), forbidden=()):
+        self._real = real_ops
+        self._forbidden = frozenset(forbidden)
+        self.calls = {name: [] for name in watched}
+
+    def __getattr__(self, item):
+        if item in self._forbidden:
+
+            def _must_not_be_called(*args):
+                raise AssertionError(f"{item} must not be called")
+
+            return _must_not_be_called
+        if item in self.calls:
+
+            def _record(*args):
+                self.calls[item].append(args)
+                return getattr(self._real, item)(*args)
+
+            return _record
+        return getattr(self._real, item)
+
+
 def test_body_constraints_detected_and_applied(tmp_path):
     """``CONSTRAINT DEFINITIONS - BODY`` groups are recorded on the MeshModel
     and applied as 6-DOF ``rigidLink('beam')`` MPCs."""
@@ -1252,22 +1294,15 @@ def test_body_constraints_detected_and_applied(tmp_path):
     assert {"1", "2", "3"} <= set(mm.nodes)
 
     # The builder emits one rigidLink per non-master group node.
-    calls: list = []
     real_ops = _cm.ops
-
-    class _Rec:
-        def __getattr__(self, item):
-            return getattr(real_ops, item)
-
-        def rigidLink(self, *args):
-            calls.append(args)
-            return real_ops.rigidLink(*args)
+    spy = _OpsCallSpy(real_ops, watched=("rigidLink",))
 
     builder = AnalysisBuilder(mm, {"verbose": False})
     try:
         _make_in_memory_domain(builder, md)
-        _cm.ops = _Rec()
+        _cm.ops = spy
         assert builder._apply_rigid_bodies() == 1
+        calls = spy.calls["rigidLink"]
         assert len(calls) == 2  # 3 joints -> 1 master + 2 slaves
         assert all(call[0] == "beam" for call in calls)
         assert len({call[1] for call in calls}) == 1  # single master
@@ -1320,26 +1355,16 @@ def test_body_constraints_partial_flags_use_equal_dof(tmp_path):
     _name, _ids, dof_flags = mm.rigid_body_components[0]
     assert dof_flags == [True, True, True, False, False, False]
 
-    calls: list = []
     real_ops = _cm.ops
-
-    class _Rec:
-        def __getattr__(self, item):
-            return getattr(real_ops, item)
-
-        def equalDOF(self, *args):
-            calls.append(args)
-            return real_ops.equalDOF(*args)
-
-        def rigidLink(self, *args):  # pragma: no cover - must not be reached
-            raise AssertionError("partial BODY must not use rigidLink")
+    spy = _OpsCallSpy(real_ops, watched=("equalDOF",), forbidden=("rigidLink",))
 
     builder = AnalysisBuilder(mm, {"verbose": False})
     try:
         _make_in_memory_domain(builder, md)
-        _cm.ops = _Rec()
+        _cm.ops = spy
         assert builder._apply_rigid_bodies() == 1
         # 3 joints -> 1 master + 2 slaves, each tied on DOFs 1, 2, 3 only.
+        calls = spy.calls["equalDOF"]
         assert len(calls) == 2
         assert all(call[2:] == (1, 2, 3) for call in calls)
         assert len({call[0] for call in calls}) == 1  # single master

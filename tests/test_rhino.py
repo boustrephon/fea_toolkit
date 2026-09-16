@@ -6,6 +6,7 @@ layer-name sanitisation logic.  Full Rhino-integration tests require
 running inside the Rhino process (IronPython) and are not automated here.
 """
 
+import numpy as np
 import pytest
 
 # ====================================================================
@@ -352,70 +353,170 @@ class TestProfilePoints:
 
 
 # ====================================================================
-# _local_axes vs get_SAP_vecxz — orientation cross-check
+# _local_axes (Rhino) vs get_local_axes (model) — orientation parity
 # ====================================================================
+#
+# ``fea_toolkit.rhino.geometry`` re-implements the SAP2000/OpenSees local-axis
+# convention for Rhino display.  Two copies of one convention can drift apart
+# silently, so the tests below drive the *Rhino* implementation through a
+# minimal stand-in for the Rhino geometry API and compare it with the model's
+# ``get_local_axes`` — the implementation the OpenSees builder actually uses.
+
+
+class _FakeVector3d:
+    """Minimal ``Rhino.Geometry.Vector3d`` stand-in.
+
+    ``fea_toolkit.rhino.geometry`` imports the Rhino API at module scope and
+    falls back to ``rg = None`` outside Rhino, so exercising ``_local_axes``
+    needs a vector type supplying exactly the surface it touches:
+    ``.X/.Y/.Z``, ``Length``, ``Unitize()``, dot product via ``*``, scaling in
+    both orders, subtraction, negation and ``CrossProduct``.
+    """
+
+    def __init__(self, x=0.0, y=0.0, z=0.0):
+        self._v = np.array([float(x), float(y), float(z)])
+
+    @property
+    def X(self):
+        return float(self._v[0])
+
+    @property
+    def Y(self):
+        return float(self._v[1])
+
+    @property
+    def Z(self):
+        return float(self._v[2])
+
+    @property
+    def Length(self):
+        return float(np.linalg.norm(self._v))
+
+    def Unitize(self):
+        norm = np.linalg.norm(self._v)
+        if norm:
+            self._v = self._v / norm
+
+    def __mul__(self, other):
+        if isinstance(other, _FakeVector3d):
+            return float(np.dot(self._v, other._v))
+        return _FakeVector3d(*(self._v * float(other)))
+
+    __rmul__ = __mul__
+
+    def __sub__(self, other):
+        return _FakeVector3d(*(self._v - other._v))
+
+    def __neg__(self):
+        return _FakeVector3d(*(-self._v))
+
+    @staticmethod
+    def CrossProduct(a, b):
+        return _FakeVector3d(*np.cross(a._v, b._v))
+
+    def to_array(self):
+        """Return a copy of the backing ``(3,)`` array."""
+        return self._v.copy()
+
+
+class _FakePoint3d:
+    """Minimal ``Rhino.Geometry.Point3d`` stand-in."""
+
+    def __init__(self, x=0.0, y=0.0, z=0.0):
+        self.X, self.Y, self.Z = float(x), float(y), float(z)
+
+
+class _FakeRhinoGeometry:
+    """Namespace matching ``import Rhino.Geometry as rg``."""
+
+    Vector3d = _FakeVector3d
+    Point3d = _FakePoint3d
+
+
+@pytest.fixture
+def rhino_local_axes(monkeypatch):
+    """Bind ``rhino.geometry._local_axes`` to the fake Rhino geometry API.
+
+    Returns:
+        Callable ``(p_i, p_j, angle=0.0)`` → ``(vx, vy, vz)`` numpy arrays,
+        or ``None`` for a zero-length member.
+    """
+    from fea_toolkit.rhino import geometry
+
+    monkeypatch.setattr(geometry, "rg", _FakeRhinoGeometry())
+
+    def _axes(p_i, p_j, angle=0.0):
+        result = geometry._local_axes(_FakePoint3d(*p_i), _FakePoint3d(*p_j), angle)
+        if result is None:
+            return None
+        return tuple(v.to_array() for v in result)
+
+    return _axes
+
+
+#: ``(axis, angle)`` pairs on which both implementations agree numerically.
+_AGREEING_CASES = [
+    ((5.0, 0.0, 0.0), 0.0),
+    ((0.0, 4.0, 0.0), 0.0),
+    ((0.0, 0.0, 5.0), 0.0),
+    ((0.0, 0.0, -5.0), 0.0),
+    ((1.0, 1.0, 0.0), 0.0),
+    ((1.0, 2.0, 3.0), 0.0),
+    ((5.0, 0.0, 0.0), 45.0),
+    ((5.0, 0.0, 0.0), 90.0),
+    ((5.0, 0.0, 0.0), 180.0),
+    ((3.0, 4.0, 0.0), -45.0),
+    ((0.0, 4.0, 0.0), 30.0),
+    ((0.0, 4.0, 0.0), -30.0),
+    ((1.0, 2.0, 3.0), 30.0),
+    ((1.0, -2.0, 3.0), 15.0),
+]
 
 
 class TestLocalAxesVsModel:
-    """Verify Rhino _local_axes matches the model's get_local_axes."""
+    """``rhino.geometry._local_axes`` must reproduce ``get_local_axes``."""
 
-    def test_horizontal_beam(self):
-        """Beam along X: y=vertical, z=horizontal."""
-        import numpy as np
-
+    @pytest.mark.parametrize("axis,angle", _AGREEING_CASES)
+    def test_rhino_axes_match_model(self, rhino_local_axes, axis, angle):
+        """Both implementations return the same orthonormal triplet."""
         from fea_toolkit.model.geometry import get_local_axes
 
-        # Beam from (0,0,0) to (5,0,0)
-        _, expected_y, expected_z = get_local_axes(np.array([5.0, 0.0, 0.0]))
+        got = rhino_local_axes((0.0, 0.0, 0.0), axis, angle)
+        want = get_local_axes(np.array(axis), angle=angle)
+        for name, got_i, want_i in zip("xyz", got, want):
+            np.testing.assert_allclose(got_i, want_i, atol=1e-9, err_msg=f"{name}-axis")
 
-        # Expected: z=(0,-1,0), y=(0,0,1)
-        np.testing.assert_array_almost_equal(expected_z, [0, -1, 0])
-        np.testing.assert_array_almost_equal(expected_y, [0, 0, 1])
+    def test_rhino_axes_are_orthonormal(self, rhino_local_axes):
+        """The triplets are unit-length and mutually perpendicular."""
+        for axis, angle in _AGREEING_CASES:
+            vx, vy, vz = rhino_local_axes((0.0, 0.0, 0.0), axis, angle)
+            for vector in (vx, vy, vz):
+                assert abs(np.linalg.norm(vector) - 1.0) < 1e-9
+            assert abs(np.dot(vx, vy)) < 1e-9
+            assert abs(np.dot(vx, vz)) < 1e-9
+            assert abs(np.dot(vy, vz)) < 1e-9
 
-    def test_vertical_column(self):
-        """Column along Z: y=global X, z=global Y."""
-        import numpy as np
+    def test_zero_length_member_returns_none(self, rhino_local_axes):
+        """A zero-length member yields ``None`` (the model raises instead)."""
+        assert rhino_local_axes((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)) is None
 
+    @pytest.mark.parametrize("angle", [30.0, 45.0, 90.0])
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "Known divergence, unresolved: for a vertical member the model's "
+            "get_SAP_vecxz() early-returns the global-Y default and ignores "
+            "``angle``, whereas rhino._local_axes() rotates that default about "
+            "the local x-axis.  Which matches SAP2000 has not been verified. "
+            "Under ``strict`` this becomes an XPASS failure once the two are "
+            "reconciled, prompting removal of this marker."
+        ),
+    )
+    def test_vertical_member_with_angle_diverges(self, rhino_local_axes, angle):
+        """Vertical member + rotation: the two implementations disagree."""
         from fea_toolkit.model.geometry import get_local_axes
 
-        _, expected_y, expected_z = get_local_axes(np.array([0.0, 0.0, 5.0]))
-
-        # For vertical column: vecxz = global Y
-        np.testing.assert_array_almost_equal(expected_z, [0, 1, 0])
-        # y = cross(Y, Z) = X
-        np.testing.assert_array_almost_equal(expected_y, [1, 0, 0])
-
-    def test_horizontal_with_angle(self):
-        """Beam along X with 45° rotation."""
-        import numpy as np
-
-        from fea_toolkit.model.geometry import get_local_axes
-
-        _, expected_y, expected_z = get_local_axes(np.array([5.0, 0.0, 0.0]), angle=45.0)
-
-        # With 45° rotation, y rotates from (0,0,1) about x by 45°
-        np.testing.assert_array_almost_equal(expected_y, [0, -0.70710678, 0.70710678], decimal=6)
-        np.testing.assert_array_almost_equal(expected_z, [0, -0.70710678, -0.70710678], decimal=6)
-
-    def test_angle_roundtrip(self):
-        """Angle=90° swaps y and z."""
-        import numpy as np
-
-        from fea_toolkit.model.geometry import get_local_axes
-
-        _, _, z0 = get_local_axes(np.array([5.0, 0.0, 0.0]), angle=0.0)
-        _, _, z90 = get_local_axes(np.array([5.0, 0.0, 0.0]), angle=90.0)
-
-        dot = np.dot(z0, z90)
-        # 90° rotation: z0 and z90 should be perpendicular
-        assert abs(dot) < 1e-10
-
-    def test_vertical_downward(self):
-        """Column pointing downward: vecxz = -global Y."""
-        import numpy as np
-
-        from fea_toolkit.model.geometry import get_local_axes
-
-        _, _, vz = get_local_axes(np.array([0.0, 0.0, -5.0]))
-        # Downward column: vz = -global Y
-        np.testing.assert_array_almost_equal(vz, [0, -1, 0])
+        got = rhino_local_axes((0.0, 0.0, 0.0), (0.0, 0.0, 5.0), angle)
+        want = get_local_axes(np.array([0.0, 0.0, 5.0]), angle=angle)
+        for name, got_i, want_i in zip("xyz", got, want):
+            np.testing.assert_allclose(got_i, want_i, atol=1e-9, err_msg=f"{name}-axis")

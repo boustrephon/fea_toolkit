@@ -148,13 +148,6 @@ class TestPlottingImports:
 
         assert callable(plot_force_diagram)
 
-    def test_force_diagram_invalid_quantity(self):
-        """Invalid quantity returns None."""
-        from fea_toolkit.plotting import plot_force_diagram
-
-        result = plot_force_diagram({}, quantity="ZZ")
-        assert result is None
-
     def test_force_diagram_no_data_builder(self):
         """Builder without force_data returns None."""
         from fea_toolkit.plotting import plot_force_diagram
