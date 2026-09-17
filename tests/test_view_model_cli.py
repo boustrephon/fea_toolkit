@@ -187,6 +187,159 @@ class TestViewModelConstraintHighlight:
 
 
 # ============================================================================
+# Window title
+# ============================================================================
+
+
+class TestViewModelWindowTitle:
+    """Every PyVista window is titled with the input file's base name.
+
+    The title travels through the ``title=`` keyword the plot functions
+    forward to ``pyvista.Plotter()`` — or ``window_title=`` for the
+    force-diagram dispatcher, whose own ``title`` is an *in-plot* caption.
+    """
+
+    @staticmethod
+    def _mesh_args():
+        from argparse import Namespace
+
+        return Namespace(
+            result="mesh",
+            zlim=None,
+            labels=False,
+            node_labels=False,
+            highlight_section=None,
+            highlight_constraint=None,
+            select=None,
+        )
+
+    def test_uses_the_base_name_only(self):
+        from pathlib import Path
+
+        from examples.view_model import window_title
+
+        path = Path("/deep/path/to/260917 BPPS_Aux. Structure Update.s2k")
+
+        assert window_title(path) == "PyVista - 260917 BPPS_Aux. Structure Update.s2k"
+        assert window_title(str(path)) == "PyVista - 260917 BPPS_Aux. Structure Update.s2k"
+
+    def test_no_input_file_falls_back_to_sample(self):
+        from examples.view_model import window_title
+
+        assert window_title() == "PyVista - sample"
+        assert window_title(None) == "PyVista - sample"
+
+    def test_override_replaces_the_file_title(self):
+        from examples.view_model import window_title
+
+        assert window_title("/deep/path/tower.s2k", "Pipe rack - Fix body") == (
+            "Pipe rack - Fix body"
+        )
+        assert window_title(None, "Just this") == "Just this"
+
+    def test_empty_override_is_honoured(self):
+        """``--title ""`` clears the caption; it is not read as "unset"."""
+        from examples.view_model import window_title
+
+        assert window_title("/deep/path/tower.s2k", "") == ""
+
+    @staticmethod
+    def _npz_static_args(title=None):
+        from argparse import Namespace
+
+        return Namespace(
+            result="static",
+            quantity="Mz",
+            dimension=None,
+            zlim=None,
+            labels=False,
+            node_labels=False,
+            highlight_section=None,
+            highlight_constraint=None,
+            select=None,
+            title=title,
+        )
+
+    def test_npz_view_honours_the_override(self, tmp_path, monkeypatch):
+        import numpy as np
+
+        import examples.view_model as vm
+
+        path = tmp_path / "results.npz"
+        np.savez(path)  # contents unused — plotting is patched out
+        captured = {}
+        monkeypatch.setattr(
+            vm, "plot_force_diagram", lambda *args, **kwargs: captured.update(kwargs)
+        )
+
+        vm.show_npz(path, self._npz_static_args(title="Archive A"))
+
+        assert captured["window_title"] == "Archive A"
+
+    def test_npz_view_defaults_to_the_file_name(self, tmp_path, monkeypatch):
+        import numpy as np
+
+        import examples.view_model as vm
+
+        path = tmp_path / "results.npz"
+        np.savez(path)
+        captured = {}
+        monkeypatch.setattr(
+            vm, "plot_force_diagram", lambda *args, **kwargs: captured.update(kwargs)
+        )
+
+        vm.show_npz(path, self._npz_static_args())
+
+        assert captured["window_title"] == "PyVista - results.npz"
+
+    def test_cli_title_option_overrides_a_model_file(self, tmp_path, monkeypatch):
+        """``--title`` replaces the file-derived caption; omission keeps it."""
+        import sys
+
+        import examples.view_model as vm
+
+        model_file = tmp_path / "tower.s2k"
+        model_file.write_text("* dummy: load_model is patched out\n", encoding="utf-8")
+        captured = {}
+        monkeypatch.setattr(vm, "run_s2k", lambda md, args, title: captured.update(title=title))
+        monkeypatch.setattr(vm, "load_model", lambda path: _selection_model())
+
+        monkeypatch.setattr(sys, "argv", ["view_model.py", str(model_file)])
+        vm.main()
+        assert captured["title"] == "PyVista - tower.s2k"
+
+        monkeypatch.setattr(
+            sys, "argv", ["view_model.py", str(model_file), "--title", "Overridden"]
+        )
+        vm.main()
+        assert captured["title"] == "Overridden"
+
+    def test_cli_title_option_applies_to_the_sample(self, monkeypatch):
+        import sys
+
+        import examples.view_model as vm
+
+        captured = {}
+        monkeypatch.setattr(vm, "run_s2k", lambda md, args, title: captured.update(title=title))
+        monkeypatch.setattr(sys, "argv", ["view_model.py", "--sample", "--title", "Sample A"])
+
+        vm.main()
+
+        assert captured["title"] == "Sample A"
+
+    def test_mesh_view_passes_the_title_to_the_plotter(self, monkeypatch):
+        """The mesh branch forwards the title to ``plot_mesh`` (→ ``pv.Plotter``)."""
+        import examples.view_model as vm
+
+        captured = {}
+        monkeypatch.setattr(vm, "plot_mesh", lambda *args, **kwargs: captured.update(kwargs))
+
+        vm.run_s2k(_selection_model(), self._mesh_args(), "PyVista - tower.s2k")
+
+        assert captured["title"] == "PyVista - tower.s2k"
+
+
+# ============================================================================
 # Model-viewer selection expressions (--select)
 # ============================================================================
 

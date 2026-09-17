@@ -55,6 +55,15 @@ Usage::
     #   raw-table JSON  - SAP2000Parser(...).parse().to_json("model.json")
     #   model-codec JSON - model_codec.model_to_json(md)
     python examples/view_model.py /path/to/model.json --result mesh
+
+Every PyVista window this script opens is titled
+``PyVista - <input file name>`` -- the base name only, e.g.
+``PyVista - tower.s2k`` -- so a screen full of windows still says which
+model or archive each one belongs to.  ``--title TITLE`` replaces that
+caption outright::
+
+    python examples/view_model.py /path/to/model.s2k -r mesh \
+        --highlight-constraint Fix --title "Pipe rack - Fix body"
 """
 
 import argparse
@@ -86,6 +95,32 @@ from fea_toolkit.spectrum import ResponseSpectrum
 from fea_toolkit.utils import g_from_units
 
 RESULT_TYPES = ("mesh", "static", "modal", "rs", "pushover", "interactive")
+
+
+def window_title(path=None, override=None):
+    """Return the PyVista window title for a model / archive input.
+
+    Only the file's base name is used, so the title bar reads
+    ``PyVista - tower.s2k`` rather than the whole path.  ``PyVista`` is the
+    prefix PyVista itself gives its render windows, so the library name is
+    kept and the input file appended to it.
+
+    Args:
+        path: Path to the loaded ``.s2k`` / ``.json`` / ``.npz`` file, or
+            ``None`` for the built-in ``--sample`` model (which has no file;
+            it is titled ``PyVista - sample``).  Ignored when *override* is
+            given.
+        override: Explicit ``--title`` value from the CLI.  When it is not
+            ``None`` it is used **verbatim**, replacing the file-derived
+            title.  An empty string is therefore honoured (it clears the
+            caption) rather than being treated as "unset".
+
+    Returns:
+        The window title string.
+    """
+    if override is not None:
+        return override
+    return f"PyVista - {Path(path).name if path else 'sample'}"
 
 
 def mode_index(args):
@@ -263,7 +298,7 @@ def build_builder(md, element_type="elasticBeamColumn"):
     return builder
 
 
-def show_static(builder, md, quantity, scale):
+def show_static(builder, md, quantity, scale, title=None):
     """Static analysis: deformed shape, then a 3D force diagram."""
     avail = list(md.load_patterns.keys())
     combo = dict.fromkeys(avail, 1.0) if avail else None
@@ -271,14 +306,21 @@ def show_static(builder, md, quantity, scale):
     disp = results.get("nodal_displacements", {})
     if not disp:
         print("No displacements produced - showing the bare mesh instead.")
-        plot_mesh(builder)
+        plot_mesh(builder, title=title)
         return
-    plot_deformed_displacement_3d(builder, disp, scale=scale, show_undeformed=True)
+    plot_deformed_displacement_3d(builder, disp, scale=scale, show_undeformed=True, title=title)
     elem_forces = builder.extract_static_element_forces()
-    plot_force_diagram(builder, elem_forces, quantity=quantity, mode="flag", dimension="3d")
+    plot_force_diagram(
+        builder,
+        elem_forces,
+        quantity=quantity,
+        mode="flag",
+        dimension="3d",
+        window_title=title,
+    )
 
 
-def show_modal(builder, num_modes, mode, mode_scale=5.0):
+def show_modal(builder, num_modes, mode, mode_scale=5.0, title=None):
     """Modal analysis with an animated mode shape.
 
     *mode* is a **0-based** index; the CLI converts its 1-based ``--mode`` via
@@ -303,10 +345,11 @@ def show_modal(builder, num_modes, mode, mode_scale=5.0):
         participation=mass_participation_ratios(modal["modal_props"]),
         scale=mode_scale,
         animate=True,
+        title=title,
     )
 
 
-def show_rs(builder, md, num_modes, alpha_max, tg, damping, scale, mode_scale=5.0):
+def show_rs(builder, md, num_modes, alpha_max, tg, damping, scale, mode_scale=5.0, title=None):
     """Response-spectrum analysis (GB 50011) with the CQC deformed shape."""
     builder.compute_seismic_masses()
     modal = builder.run_modal_analysis(num_modes=num_modes, print_results=True)
@@ -360,10 +403,11 @@ def show_rs(builder, md, num_modes, alpha_max, tg, damping, scale, mode_scale=5.
             participation=mass_participation_ratios(modal["modal_props"]),
             scale=mode_scale,
             animate=True,
+            title=title,
         )
         return
 
-    plot_deformed_displacement_3d(builder, disp, scale=scale, show_undeformed=True)
+    plot_deformed_displacement_3d(builder, disp, scale=scale, show_undeformed=True, title=title)
 
 
 def show_pushover(builder, md):
@@ -394,18 +438,23 @@ def show_pushover(builder, md):
         plt.show()
 
 
-def show_interactive(builder, md):
+def show_interactive(builder, md, title=None):
     """Interactive widget viewer (radio buttons, sliders, click-to-inspect)."""
     avail = list(md.load_patterns.keys())
     combo = dict.fromkeys(avail, 1.0) if avail else None
     results = builder.run_static_analysis(extract_reactions=True, pattern_scales=combo)
     forces = builder.extract_static_element_forces()
-    plot_interactive_viewer(builder, {"All": forces}, {"All": results})
+    plot_interactive_viewer(builder, {"All": forces}, {"All": results}, title=title)
 
 
 def show_npz(path, args):
-    """Display a saved .npz archive directly (no solver run)."""
+    """Display a saved .npz archive directly (no solver run).
+
+    The window title is ``args.title`` when the CLI ``--title`` override was
+    given, otherwise :func:`window_title` of the archive path.
+    """
     data = np.load(path, allow_pickle=True)
+    title = window_title(path, args.title)
     if args.result in ("static", "modal") and (
         args.zlim or args.labels or args.node_labels or args.highlight_section
     ):
@@ -426,9 +475,11 @@ def show_npz(path, args):
             "archive does not carry."
         )
     if args.result == "static":
-        plot_force_diagram(str(path), quantity=args.quantity, dimension=args.dimension)
+        plot_force_diagram(
+            str(path), quantity=args.quantity, dimension=args.dimension, window_title=title
+        )
     elif args.result == "modal":
-        plot_mode_animation(data, None, mode=mode_index(args), scale=args.mode_scale)
+        plot_mode_animation(data, None, mode=mode_index(args), scale=args.mode_scale, title=title)
     elif args.result == "rs":
         # Per-element response-spectrum forces require the rs/elem_* block,
         # which only archives written with element-level RS forces carry.
@@ -440,7 +491,11 @@ def show_npz(path, args):
             )
         else:
             fig = plot_force_diagram(
-                str(path), quantity=args.quantity, kind="rs", dimension=args.dimension
+                str(path),
+                quantity=args.quantity,
+                kind="rs",
+                dimension=args.dimension,
+                window_title=title,
             )
             # The 2D RS renderer returns a Figure without displaying it; the
             # 3D path shows its own window and returns None.
@@ -453,6 +508,7 @@ def show_npz(path, args):
         plot_mesh(
             data,
             collapse_to_parents=True,
+            title=title,
             **mesh_view_kwargs(args, _npz_section_names(data)),
         )
 
@@ -502,8 +558,16 @@ def check_result_supported(model, result):
         )
 
 
-def run_s2k(md, args):
-    """Run the requested analysis on a parsed model and display the result."""
+def run_s2k(md, args, title=None):
+    """Run the requested analysis on a parsed model and display the result.
+
+    Args:
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData` (or a
+            ``MeshModel`` snapshot, for ``--result mesh``).
+        args: Parsed CLI namespace.
+        title: PyVista window title for the windows opened from this run
+            (see :func:`window_title`); ``None`` keeps PyVista's default.
+    """
     print(f"Model units: {md.units}")
     print(
         f"Nodes: {len(md.nodes)}; frames: {len(md.frame_elements)}; areas: {len(md.area_elements)}"
@@ -532,6 +596,7 @@ def run_s2k(md, args):
         plot_mesh(
             md,
             collapse_to_parents=True,
+            title=title,
             highlight_selection=selection_highlights(args),
             **kwargs,
         )
@@ -540,9 +605,9 @@ def run_s2k(md, args):
     builder = build_builder(md, args.element_type)
 
     if args.result == "static":
-        show_static(builder, md, args.quantity, args.scale)
+        show_static(builder, md, args.quantity, args.scale, title)
     elif args.result == "modal":
-        show_modal(builder, args.num_modes, mode_index(args), args.mode_scale)
+        show_modal(builder, args.num_modes, mode_index(args), args.mode_scale, title)
     elif args.result == "rs":
         show_rs(
             builder,
@@ -553,11 +618,12 @@ def run_s2k(md, args):
             args.damping,
             args.scale,
             args.mode_scale,
+            title,
         )
     elif args.result == "pushover":
         show_pushover(builder, md)
     elif args.result == "interactive":
-        show_interactive(builder, md)
+        show_interactive(builder, md, title)
 
 
 def main():
@@ -607,6 +673,19 @@ def main():
             "Force-diagram view: '2d' (quantity vs elevation) or '3d' "
             "(per-element tubes/flags).  Default: 2D for --result rs, "
             "auto (3D when PyVista is available) for static."
+        ),
+    )
+    parser.add_argument(
+        "--title",
+        default=None,
+        metavar="TITLE",
+        help=(
+            "PyVista window title, replacing the default "
+            "'PyVista - <input file name>' (base name only, e.g. "
+            "'PyVista - tower.s2k'; --sample gives 'PyVista - sample').  "
+            'Applies to every window opened; use --title "" to clear it.  '
+            "Not applied to --result pushover, which draws a Matplotlib "
+            "figure rather than a PyVista window."
         ),
     )
     parser.add_argument(
@@ -710,7 +789,7 @@ def main():
     if args.sample:
         from examples.sample_model import make_sample_model
 
-        run_s2k(make_sample_model(), args)
+        run_s2k(make_sample_model(), args, window_title(None, args.title))
         return
 
     path = Path(args.model_file)
@@ -724,7 +803,7 @@ def main():
     print(f"Loading: {path}")
     model = load_model(path)
     check_result_supported(model, args.result)
-    run_s2k(model, args)
+    run_s2k(model, args, window_title(path, args.title))
 
 
 if __name__ == "__main__":

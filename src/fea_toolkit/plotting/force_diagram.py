@@ -595,9 +595,22 @@ def _render_static_3d(
     show_original: bool,
     notebook: bool,
     title,
+    window_title=None,
     **kwargs,
 ) -> Any:
-    """Render the static 3D diagram via the shared frame renderer."""
+    """Render the static 3D diagram via the shared frame renderer.
+
+    Args:
+        data: Resolved force-diagram data.
+        quantity: Normalised quantity key (``My``, ``Fz``, ...).
+        mode: ``'flag'`` or ``'tube'``.
+        moment_scale: Extrusion length per unit quantity (``None`` = auto).
+        show_original: Draw the undeformed centreline in grey.
+        notebook: Return the plotter instead of showing it.
+        title: Optional in-plot caption (drawn at the upper edge).
+        window_title: Optional PyVista window (title-bar) caption.
+        **kwargs: Passed to ``pyvista.Plotter()``.
+    """
     from .viz_common import _set_isometric_view
     from .viz_forces import _render_frame_force_diagram
 
@@ -611,7 +624,7 @@ def _render_static_3d(
         return None
 
     pv.set_plot_theme("document")
-    plotter = pv.Plotter(notebook=notebook, **kwargs)
+    plotter = pv.Plotter(notebook=notebook, title=window_title, **kwargs)
 
     model_height, max_abs_val = _render_frame_force_diagram(
         plotter,
@@ -661,6 +674,7 @@ def plot_force_diagram(
     show_original=True,
     notebook=False,
     title=None,
+    window_title=None,
     figsize=None,
     **kwargs,
 ) -> Any:
@@ -693,7 +707,12 @@ def plot_force_diagram(
         moment_scale: Extrusion length per unit quantity (3D).
         show_original: Draw the centreline in grey (3D).
         notebook: Return the PyVista plotter (3D).
-        title: Optional plot title.
+        title: Optional plot title, drawn **inside** the plot (the 2D axes
+            title / the 3D upper-edge text).
+        window_title: Optional PyVista render-window (title-bar) caption for
+            the 3D paths — e.g. the source model's file name, so the open
+            window identifies itself.  Ignored by the 2D Matplotlib paths,
+            which own no such window.
         figsize: Matplotlib figure size (2D paths).
         **kwargs: Passed to ``pyvista.Plotter()`` (3D) or
             ``matplotlib.pyplot.plot()`` (RS 2D).
@@ -730,7 +749,15 @@ def plot_force_diagram(
         # (only available for builder/archive sources, not bare RS lists).
         if dimension == "3d" and data.force_map:
             return _render_static_3d(
-                data, q_static, mode, moment_scale, show_original, notebook, title, **kwargs
+                data,
+                q_static,
+                mode,
+                moment_scale,
+                show_original,
+                notebook,
+                title,
+                window_title=window_title,
+                **kwargs,
             )
         return _render_rs(data.series, q, fu, lu, both_ends, title, figsize, **kwargs)
 
@@ -746,6 +773,14 @@ def plot_force_diagram(
 
     if dimension == "3d":
         return _render_static_3d(
-            data, q_static, mode, moment_scale, show_original, notebook, title, **kwargs
+            data,
+            q_static,
+            mode,
+            moment_scale,
+            show_original,
+            notebook,
+            title,
+            window_title=window_title,
+            **kwargs,
         )
     return _render_static_2d(data.series, q_static, fu, lu, use_local, title, figsize or (8, 6))

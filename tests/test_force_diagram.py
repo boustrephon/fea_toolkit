@@ -186,6 +186,66 @@ class TestForceDiagramUnified:
         assert pl is not None
         pl.close()
 
+    @pytest.mark.needs_pyvista
+    def test_window_title_reaches_the_plotter(self):
+        """``window_title`` is the VTK window caption; ``title`` stays in-plot.
+
+        ``plot_force_diagram``'s ``title`` is drawn *inside* the plot
+        (``add_text``), so the window caption needs its own keyword — this
+        asserts which one actually reaches ``pyvista.Plotter()``.
+        """
+        from unittest.mock import patch
+
+        import pyvista as pv
+
+        from fea_toolkit.plotting.force_diagram import plot_force_diagram
+
+        captured = {}
+        real_init = pv.Plotter.__init__
+
+        def _spy(self, *args, **kwargs):
+            captured.update(kwargs)
+            return real_init(self, *args, **kwargs)
+
+        with patch.object(pv.Plotter, "__init__", _spy):
+            pl = plot_force_diagram(
+                _minimal_npz_dict(),
+                quantity="My",
+                dimension="3d",
+                notebook=True,
+                title="in-plot caption",
+                window_title="PyVista - tower.s2k",
+            )
+        try:
+            assert captured["title"] == "PyVista - tower.s2k"
+        finally:
+            pl.close()
+
+    @pytest.mark.needs_pyvista
+    def test_window_title_is_optional(self):
+        """Omitting ``window_title`` passes ``None``, i.e. PyVista's default."""
+        from unittest.mock import patch
+
+        import pyvista as pv
+
+        from fea_toolkit.plotting.force_diagram import plot_force_diagram
+
+        captured = {}
+        real_init = pv.Plotter.__init__
+
+        def _spy(self, *args, **kwargs):
+            captured.update(kwargs)
+            return real_init(self, *args, **kwargs)
+
+        with patch.object(pv.Plotter, "__init__", _spy):
+            pl = plot_force_diagram(
+                _minimal_npz_dict(), quantity="My", dimension="3d", notebook=True
+            )
+        try:
+            assert captured["title"] is None
+        finally:
+            pl.close()
+
     def test_dispatcher_rs_2d(self):
         from fea_toolkit.plotting.force_diagram import plot_force_diagram
 

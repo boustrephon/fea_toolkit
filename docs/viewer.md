@@ -385,8 +385,15 @@ plot_force_diagram(
     quantity="Mz",            # Mz, My, Mx, Fx, Fy, Fz
     mode="flag",              # "flag" or "tube"
     dimension="3d",
+    window_title="PyVista - tower.s2k",   # render-window caption (3D only)
 )
 ```
+
+``title`` and ``window_title`` are different things: ``title`` is drawn
+**inside** the plot (2D axes title / 3D upper-edge text), while
+``window_title`` sets the PyVista render window's title bar — used by
+``examples/view_model.py`` to stamp the input file's base name on every
+window it opens.  ``None`` (the default) keeps PyVista's own title.
 
 ---
 

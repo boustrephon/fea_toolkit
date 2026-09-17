@@ -497,6 +497,52 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-17 — `view_model`: stamp the input file name on every PyVista window)
+
+**What.** A screen with several PyVista windows open gave no clue which model or
+archive each one belonged to — every window carried PyVista's default `PyVista`
+title, so a `--highlight-constraint` view of one pipe-rack `.s2k` was
+indistinguishable from another's.
+
+- **CLI.** `examples/view_model.py`: new `window_title(path, override)` →
+  `PyVista - <base name>` (base name only, extension kept; `--sample` →
+  `PyVista - sample`).  `main()` computes it and threads it through `run_s2k` /
+  `show_static` / `show_modal` / `show_rs` / `show_interactive`; `show_npz`
+  derives it from the archive path.  Every PyVista window the script opens is
+  titled.  New `--title TITLE` replaces the caption outright — the override is
+  applied **verbatim** (`is not None`, not truthiness, so `--title ""` clears
+  it rather than silently falling back to the file name), and it is resolved in
+  the single `window_title()` helper so the default and the override cannot
+  drift.
+- **Plotting.** `plotting/force_diagram.py`: `plot_force_diagram()` (and
+  `_render_static_3d`) gain `window_title` — the **render-window** caption,
+  distinct from its existing `title`, which is drawn *inside* the plot
+  (`ax.set_title` / `add_text(position="upper_edge")`).  It is forwarded as
+  `pv.Plotter(title=...)`; `None` (default) keeps PyVista's own title.  The
+  other viewers (`plot_mesh`, `plot_deformed_displacement_3d`,
+  `plot_mode_animation`, `plot_interactive_viewer`) already forward `**kwargs`
+  to `pv.Plotter()`, so there the CLI passes `title=` directly — no library
+  change needed.
+- **Checked against the PyVista source, not guessed** (§12):
+  `Plotter.__init__` takes `title: str | None`, stores `self.title`, and
+  `show()` calls `render_window.SetWindowName(title)`; the theme default is the
+  literal string `'PyVista'` (`themes.py`) — hence the `PyVista - <file>`
+  prefix.
+
+**Validation.** `tests/test_view_model_cli.py` gains `TestViewModelWindowTitle`
+(base name only / directory stripped / `--sample` fallback / the mesh branch
+really forwards the title to `plot_mesh` / the override wins and `--title ""`
+is honoured / `main()` wiring for both a model file and `--sample` via
+`sys.argv` / the NPZ path honours it and defaults to the archive name);
+`tests/test_force_diagram.py` gains two tests spying on `pv.Plotter.__init__`
+to assert *which* keyword is passed (`window_title` → `title=`, `title` stays
+in-plot) and that the default is `None`.  End-to-end with the real
+`260917 BPPS_Pipe_Rack_SAP2000_v25_1_0_Aux. Structure Update.s2k`, the captured
+`pv.Plotter` title is exactly
+`PyVista - 260917 BPPS_Pipe_Rack_SAP2000_v25_1_0_Aux. Structure Update.s2k`,
+and the mesh view still reports `Fix (BODY): 65 of 65 assigned joint(s)`.
+
+
 ## DONE (2026-09-17 — results NPZ schema-version marker (P18))
 
 **What.** The **stage file** stamped itself with a top-level
