@@ -50,9 +50,15 @@ Usage::
 
     # Built-in sample (no external file needed)
     python examples/view_model.py --sample --result static
+
+    # Pre-parsed inputs instead of the .s2k text:
+    #   raw-table JSON  - SAP2000Parser(...).parse().to_json("model.json")
+    #   model-codec JSON - model_codec.model_to_json(md)
+    python examples/view_model.py /path/to/model.json --result mesh
 """
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -65,6 +71,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from fea_toolkit import __version__, ops_version
 from fea_toolkit.io.s2k_parser import SAP2000Parser
+from fea_toolkit.model.mesh_model import MeshModel
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.opensees.preprocessor import preprocess_model
 from fea_toolkit.plotting import (
@@ -555,6 +562,91 @@ def show_npz(path, args):
         )
 
 
+def load_model(path):
+    """Load a model from a ``.s2k``, raw-table JSON or model-codec JSON file.
+
+    Three inputs are recognised, all producing the same
+    :class:`~fea_toolkit.model.sap_data.SAPModelData` that a ``.s2k`` parse
+    would (so every viewer option — including ``--select`` and
+    ``--highlight-constraint`` — behaves identically):
+
+    * **``.s2k`` / ``.$2k``** — the SAP2000 text export, parsed directly.
+    * **Raw-table JSON** — as written by
+      :meth:`~fea_toolkit.io.s2k_parser.SAP2000Parser.to_json`: the parsed
+      tables are restored and the model rebuilt exactly as from text.
+    * **Model-codec JSON** — as written by
+      :func:`~fea_toolkit.io.model_codec.model_to_json`: a snapshot of a
+      built dataclass model, tagged with a top-level ``__type__`` key.
+
+    Args:
+        path: Path to the model file.
+
+    Returns:
+        A ``SAPModelData``, or — for a codec snapshot of a post-preprocessing
+        model — the ``MeshModel`` itself (mesh view only; see
+        :func:`check_result_supported`).
+
+    Raises:
+        SystemExit: If the file cannot be read, or is not a recognised model.
+    """
+    if path.suffix.lower() == ".json":
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            sys.exit(f"Error: could not read {path}: {exc}")
+
+        if isinstance(payload, dict) and "__type__" in payload:
+            # Model-codec snapshot — the __type__ discriminator selects the
+            # class (SAPModelData or MeshModel), so no cls= is needed.
+            from fea_toolkit.io.model_codec import json_to_model
+
+            try:
+                return json_to_model(json.dumps(payload))
+            except (ValueError, KeyError, TypeError) as exc:
+                sys.exit(f"Error: {path} is not a decodable model snapshot: {exc}")
+
+        # Raw-table cache: ``{table_name: [row, ...]}``.  Parsing such a file
+        # as *text* silently yields an empty model, so validate the shape.
+        looks_like_tables = (
+            isinstance(payload, dict)
+            and bool(payload)
+            and all(isinstance(rows, list) for rows in payload.values())
+        )
+        if not looks_like_tables:
+            sys.exit(
+                f"Error: {path} holds neither a model snapshot (no '__type__') nor "
+                "SAP2000 tables — was it written by SAP2000Parser.to_json() or "
+                "model_codec.model_to_json()?"
+            )
+        return SAP2000Parser.from_json(path).get_model_data()
+
+    parser = SAP2000Parser(path)
+    parser.parse()
+    return parser.get_model_data()
+
+
+def check_result_supported(model, result):
+    """Reject a ``MeshModel`` snapshot for results that need a parsed model.
+
+    A model-codec snapshot of a post-preprocessing ``MeshModel`` is already
+    meshed: it can be *viewed* (``--result mesh``) but carries no SAP2000
+    input for the analyses to build from.
+
+    Args:
+        model: The loaded model (``SAPModelData`` or ``MeshModel``).
+        result: The requested ``--result`` value.
+
+    Raises:
+        SystemExit: If *model* is a ``MeshModel`` and *result* is not ``mesh``.
+    """
+    if isinstance(model, MeshModel) and result != "mesh":
+        sys.exit(
+            f"Error: MeshModel snapshots support --result mesh only (got {result!r}). "
+            "A MeshModel is already meshed, so it carries no input for an analysis — "
+            "use the .s2k or a SAPModelData snapshot instead."
+        )
+
+
 def run_s2k(md, args):
     """Run the requested analysis on a parsed model and display the result."""
     print(f"Model units: {md.units}")
@@ -631,7 +723,14 @@ def main():
             "  %(prog)s --sample -r modal --mode 1                 # built-in sample\n"
         ),
     )
-    parser.add_argument("model_file", nargs="?", help="Path to a .s2k model or .npz archive.")
+    parser.add_argument(
+        "model_file",
+        nargs="?",
+        help=(
+            "Path to a .s2k model, a parsed-model .json (raw tables from "
+            "SAP2000Parser.to_json() or a model_codec snapshot) or a .npz archive."
+        ),
+    )
     parser.add_argument(
         "-r",
         "--result",
@@ -766,10 +865,9 @@ def main():
         return
 
     print(f"Loading: {path}")
-    parser_s2k = SAP2000Parser(path)
-    parser_s2k.parse()
-    md = parser_s2k.get_model_data()
-    run_s2k(md, args)
+    model = load_model(path)
+    check_result_supported(model, args.result)
+    run_s2k(model, args)
 
 
 if __name__ == "__main__":

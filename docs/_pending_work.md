@@ -497,7 +497,43 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
-## DONE (2026-09-17 — `Selection(constraints=[...])`: select by SAP2000 joint constraint)
+## DONE (2026-09-17 — `view_model`: accept pre-parsed JSON model inputs)
+
+**What.** The viewer ingested only `.s2k` (text) and `.npz` (archived results),
+so the two JSON model representations the toolkit already produces were
+unreachable from the CLI.  Handing one to `view_model` was worse than a
+refusal: it fell through the text path, found no `TABLE:` lines and produced an
+**empty model silently** — the trap `docs/json_serialization.md` warns about.
+
+- **`examples/view_model.py`**: new `load_model(path)` recognises
+  - `.s2k` / `.$2k` — parsed as before;
+  - **raw-table JSON** (`SAP2000Parser.to_json()`), whose tables are restored
+    and the model rebuilt exactly as from text, so constraints, sections,
+    loads and every viewer option behave identically;
+  - **model-codec JSON** (`model_codec.model_to_json()`), decoded with
+    `json_to_model()`, which selects `SAPModelData` or `MeshModel` from the
+    payload's top-level `__type__` key (no `cls=` needed).
+  The payload shape is validated before dispatch: a dict that is neither a
+  `__type__` snapshot nor a `{table: [rows]}` cache exits with a message
+  naming both writers, instead of silently loading nothing.
+- **`check_result_supported()`**: a `MeshModel` snapshot is already meshed, so
+  it is accepted for `--result mesh` and refused (with an explanatory message)
+  for the analyses, which need SAP2000 input to build from.
+- CLI help, the module docstring and `examples/README.md` document the three
+  model inputs; `docs/json_serialization.md` gains the viewer row.
+
+**Tests.** `tests/test_viz_model.py::TestViewModelJsonInput`: raw-table cache
+(loads the `sample.json` fixture), codec round-trip of an `SAPModelData`
+(loads back `==`), codec `MeshModel` snapshot, unrecognised JSON, malformed
+JSON, and the mesh-only restriction.
+
+**Validation.** Full suite 1687 passed, 2 skipped, 2 xfailed; ruff clean.
+End-to-end off-screen on the BPPS pipe-rack: the raw-table JSON, the
+`SAPModelData` snapshot and the `.s2k` all report
+`Selection overlay (yellow): 0 frame(s), 65 node(s), 0 area(s).` for
+`--select "constraint=Fix"`; the `MeshModel` snapshot renders the 1261-element
+mesh and refuses `--result static`.
+
 
 **What.** Constraint groups were viewable only through the bespoke
 `--highlight-constraint` (red), not through the toolkit's general query

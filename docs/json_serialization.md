@@ -93,7 +93,14 @@ clone = json_to_model(payload, cls=SAPModelData)     # field-for-field equal
 |---|---|---|
 | Rebuild a model without re-parsing `.s2k` | `parser.to_json()` / `parser.from_json()` | raw tables |
 | Snapshot / diff a built model object | `model_to_json()` / `json_to_model()` | `SAPModelData` / `MeshModel` |
+| View a JSON model without re-parsing `.s2k` | `python examples/view_model.py model.json` | either form, auto-detected |
 | Archive analysis *results* | `write_results_npz()` — not JSON | NPZ, see [`results_schema.md`](results_schema.md) |
+
+Both JSON forms are accepted directly by `examples/view_model.py`: a
+model-codec snapshot is detected by its top-level `__type__` key, and anything
+else is read as a raw-table cache. A `MeshModel` snapshot is already meshed, so
+the viewer offers it with `--result mesh` only — the analyses need the `.s2k`
+or an `SAPModelData` snapshot.
 
 ## Related
 

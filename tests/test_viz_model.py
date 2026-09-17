@@ -6,6 +6,8 @@ shrink-parameter override, and modal mass-participation annotation.
 Uses synthetic NPZ-like data dicts — no OpenSees.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -1731,3 +1733,104 @@ class TestViewModelSelectionExpression:
         selection_highlights(self._args(["constraint=Fix; section=2xR3"]))
 
         assert "Node-only Selection" in capsys.readouterr().out
+
+
+# ============================================================================
+# View-model input formats (.s2k / raw-table JSON / model-codec JSON)
+# ============================================================================
+
+
+class TestViewModelJsonInput:
+    """``view_model.load_model()`` accepts pre-parsed JSON besides ``.s2k``."""
+
+    FIXTURES = Path(__file__).parent / "fixtures"
+
+    @staticmethod
+    def _mesh_snapshot():
+        """A post-preprocessing MeshModel — codec-serialisable, not analysable."""
+        from fea_toolkit.model.mesh_model import MeshModel
+        from fea_toolkit.model.sap_data import FrameElement, Node
+
+        return MeshModel(
+            nodes={"1": Node("1", 1, 0.0, 0.0, 0.0)},
+            frame_elements={"1": FrameElement("1", 1, "1", "1")},
+            frame_assignments={},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+        )
+
+    def test_raw_table_json_rebuilds_the_model(self):
+        """A ``SAP2000Parser.to_json()`` cache loads as a full SAPModelData."""
+        from examples.view_model import load_model
+        from fea_toolkit.model.sap_data import SAPModelData
+
+        model = load_model(self.FIXTURES / "sample.json")
+
+        assert isinstance(model, SAPModelData)
+        assert model.nodes and model.frame_elements
+
+    def test_codec_json_round_trips_an_sap_model(self, tmp_path):
+        """A ``model_to_json(SAPModelData)`` snapshot loads back equal."""
+        from examples.view_model import load_model
+        from fea_toolkit.io.model_codec import model_to_json
+        from fea_toolkit.model.sap_data import SAPModelData
+
+        original = _selection_model()
+        path = tmp_path / "model.json"
+        path.write_text(model_to_json(original), encoding="utf-8")
+
+        model = load_model(path)
+
+        assert isinstance(model, SAPModelData)
+        assert model == original
+
+    def test_codec_json_of_a_mesh_model(self, tmp_path):
+        """A MeshModel snapshot loads as a MeshModel — already meshed."""
+        from examples.view_model import load_model
+        from fea_toolkit.io.model_codec import model_to_json
+        from fea_toolkit.model.mesh_model import MeshModel
+
+        path = tmp_path / "mesh.json"
+        path.write_text(model_to_json(self._mesh_snapshot()), encoding="utf-8")
+
+        assert isinstance(load_model(path), MeshModel)
+
+    def test_unrecognised_json_exits(self, tmp_path):
+        """A JSON dict that is neither snapshot nor tables fails loudly."""
+        from examples.view_model import load_model
+
+        path = tmp_path / "bad.json"
+        path.write_text('{"a": 1}', encoding="utf-8")
+
+        with pytest.raises(SystemExit) as exc:
+            load_model(path)
+
+        assert "neither a model snapshot" in str(exc.value)
+
+    def test_malformed_json_exits(self, tmp_path):
+        from examples.view_model import load_model
+
+        path = tmp_path / "broken.json"
+        path.write_text("{not json", encoding="utf-8")
+
+        with pytest.raises(SystemExit) as exc:
+            load_model(path)
+
+        assert "could not read" in str(exc.value)
+
+    def test_mesh_snapshot_only_supports_the_mesh_view(self):
+        """An already-meshed snapshot has no input for an analysis."""
+        from examples.view_model import check_result_supported
+
+        check_result_supported(self._mesh_snapshot(), "mesh")  # no raise
+
+        with pytest.raises(SystemExit) as exc:
+            check_result_supported(self._mesh_snapshot(), "static")
+
+        assert "mesh only" in str(exc.value)
+
+    def test_sap_model_snapshot_supports_every_result(self):
+        from examples.view_model import check_result_supported
+
+        check_result_supported(_selection_model(), "static")  # no raise
