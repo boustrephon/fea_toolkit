@@ -299,3 +299,66 @@ the window only repainted when the user clicked or dragged.  Two lessons:
   behind a lazy re-export, never an unknown attribute.
 - `NAME` filtering (exact / substring / glob) is case-insensitive and applies
   to every mode; `--source` requires a `NAME`.
+
+## Optional dependencies in tests — the pandas policy
+
+`pandas` is **not** a core dependency: it is the optional ``[report]`` extra
+in `pyproject.toml` and is absent from Rhino 8's bundled CPython.  The policy
+therefore splits in two — a *library* rule and a *test* rule.
+
+**Library side — never import pandas eagerly.**  Every pandas-using module
+(`io/report.py`, `model/storey_response.py`, `analysis/linear.py`) wraps the
+import:
+
+```python
+try:
+    import pandas as pd
+except ImportError:  # pragma: no cover — pandas is optional (Rhino 8 CPython)
+
+    class _MissingPandas:
+        "Raise a clear error when a helper needs pandas."
+
+        def __getattr__(self, _name: str):
+            raise RuntimeError(
+                "... require pandas, which is not installed in this Python "
+                "environment (pip install pandas)."
+            )
+
+    pd = _MissingPandas()  # type: ignore[assignment]
+```
+
+The sentinel's docstring and message text vary per module (each names the
+helper family it backs); the parts that matter are the guard, the
+`_MissingPandas` name and the `# type: ignore[assignment]`.
+
+Consequences to preserve:
+
+* `import fea_toolkit` and every subpackage import work without pandas — only
+  *calling* a pandas-backed helper raises, and the message carries the pip
+  hint.
+* pandas-backed public names stay behind the PEP 562 lazy re-exports
+  (`fea_toolkit/__init__.py`, `io/__init__.py`, `model/__init__.py`), so a
+  missing pandas never breaks `__all__` or `python -m fea_toolkit`.
+* A new pandas-using module copies the pattern above; a bare module-scope
+  `import pandas as pd` under `src/` is not allowed.
+
+**Test side — two sanctioned forms, chosen by collection environment.**
+
+| Collection environment | Form |
+|---|---|
+| The normal suite — CI installs `pip install -e ".[report,mesh-remesh]"`, so pandas is always present. | Plain module-level `import pandas as pd` beside `import numpy as np`, e.g. `tests/test_storey_response.py`. |
+| A module that must *also* collect on a minimal `pip install -e .` (no extras). | `pd = pytest.importorskip("pandas")` at the point of use — the same idiom as `h5py`, `scipy`, `rhino3dm` and `IPython`. |
+
+Not sanctioned in a test body: a bare function-local `import pandas` with no
+skip guard, or `pd = __import__("pandas")`.  Six `__import__` calls were
+removed from `tests/test_storey_response.py` on 2026-09-17 — five of `numpy`
+(four tests shadowed the already-present module-level `import numpy as np` with
+`np = __import__("numpy")`, harmless but invisible to isort/lint and to a
+reader scanning the import block, plus one dead discarded call in
+`test_basic_two_storey_drift`) and the unguarded pandas equivalent.  The
+module-level `import pandas as pd` makes all six redundant; because CI installs
+the extra, a missing pandas in a *local* minimal environment now fails at
+collection rather than at the first test that touches pandas.  If pandas-free
+collection is ever needed, switch the module to `pytest.importorskip("pandas")`
+(the second sanctioned form) — do not reinstate `__import__`.
+

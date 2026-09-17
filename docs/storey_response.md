@@ -147,6 +147,23 @@ engineer can derive it as ``RMS_residual / Peak_disp`` from the
 returned DataFrame.  If the rigid-body fit is poor, consider using
 peak nodal displacement instead of the fitted rigid-body values.
 
+## 9. Dependencies
+
+The storey-response helpers return (and accept) `pandas.DataFrame` objects, so
+**pandas must be installed to use them** — it ships in the optional `[report]`
+extra:
+
+```bash
+pip install -e ".[report]"
+```
+
+The module itself imports without pandas (the import is guarded by a
+`_MissingPandas` sentinel, see `src/fea_toolkit/model/storey_response.py`), so
+`import fea_toolkit` keeps working in Rhino 8's pandas-free CPython —
+`RuntimeError: ... require pandas ...` appears only when a storey-response
+function is actually called.  The test-suite half of the same policy is in
+`docs/dev_notes.md` → *Optional dependencies in tests — the pandas policy*.
+
 ## References
 
 - Der Kiureghian, A. (1981). "A response spectrum method for random

@@ -420,6 +420,27 @@ print(ops_version())
 pip install pyvista matplotlib
 ```
 
+### `ModuleNotFoundError: No module named 'pandas'`
+
+pandas is an **optional** extra (`[report]`), so the library never imports it
+eagerly: `import fea_toolkit` works in a pandas-free interpreter and only a
+pandas-backed helper raises `RuntimeError` naming the missing package.
+
+```bash
+# Library use — install the extra you need:
+pip install -e ".[report]"
+```
+
+* **Tests**: CI installs `".[report,mesh-remesh]"`, so a test module that
+  exercises pandas-backed helpers imports `pandas` at module level (e.g.
+  `tests/test_storey_response.py`); a test that must *also* collect on a
+  minimal install uses `pytest.importorskip("pandas")` at the point of use.
+* **Do not** work around it with `__import__("pandas")` or an unguarded
+  function-local `import pandas`.
+
+Full policy: `docs/dev_notes.md` → *Optional dependencies in tests — the pandas
+policy*.
+
 ### Animation runs but the window only redraws on click
 
 The timer fell back to the raw VTK observer, which never repaints.  Check

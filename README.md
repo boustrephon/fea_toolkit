@@ -413,6 +413,15 @@ rest of the toolkit imports cleanly without pandas (the report modules raise a
 clear ``RuntimeError`` only when a pandas-dependent helper is actually
 called).
 
+The test suite, by contrast, runs with the extra installed — CI does
+``pip install -e ".[report,mesh-remesh]"`` — so a test module that exercises
+pandas-backed helpers imports ``pandas`` at module level; a test that must
+*also* collect on a minimal ``pip install -e .`` uses
+``pytest.importorskip("pandas")`` at the point of use.  Never
+``__import__("pandas")`` or an unguarded function-local ``import pandas`` in a
+test body.  See ``docs/dev_notes.md`` → *Optional dependencies in tests — the
+pandas policy*.
+
 ```python
 # Mesh quality checks (NumPy only — no extra install needed)
 from fea_toolkit.mesh import checks as mesh_check

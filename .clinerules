@@ -326,6 +326,20 @@ consolidation in commit `test: dissolve extracted grab-bag …`).
   `_minimal_npz_dict`, `_make_pushover_data`) are each test's specification of
   its scenario, not shared infrastructure — keep them in the file that owns
   the scenario rather than centralising them.
+- **pandas is optional in `src/`, assumed in `tests/`.**  `pandas` is the
+  ``[report]`` extra (§5.2) and is absent from Rhino 8's bundled CPython, so
+  every *library* module that uses it (`io/report.py`,
+  `model/storey_response.py`, `analysis/linear.py`) wraps the import in
+  ``try/except ImportError`` with a ``_MissingPandas`` sentinel — do not add a
+  bare module-scope ``import pandas`` under `src/`.  *Test* modules that
+  exercise pandas-backed helpers may use a plain module-level
+  ``import pandas as pd`` beside ``import numpy as np``, because CI installs
+  ``pip install -e ".[report,mesh-remesh]"``; a test that must *also* collect on
+  a minimal ``pip install -e .`` uses ``pytest.importorskip("pandas")`` at the
+  point of use.  Never ``pd = __import__("pandas")``, a dead discarded
+  ``__import__("numpy")``, or an unguarded function-local ``import pandas``
+  inside a test body — full write-up in ``docs/dev_notes.md`` →
+  *Optional dependencies in tests — the pandas policy*.
 
 ### 5.6 `ops.wipe()` hygiene
 - Always call `ops.wipe()` in test teardown (via `finally` or fixture `yield`).
