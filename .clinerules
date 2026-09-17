@@ -473,6 +473,24 @@ cleared between attempts.
     PyVista's `add_timer_event` — hides the failure it was meant to absorb and
     silently lands on a degraded path.  Verify the signature from the installed
     source, the versioned docs or the upstream example first.  See §12.
+14. **Do not** let `examples/` accumulate reusable logic.  A helper another
+    entry point could want — a parser, a file loader, a resolver — belongs in
+    the package (`src/fea_toolkit/…`) from the first line, with the example
+    calling it; §1.3 and §7.3 both point this way.  Observed 2026-09-17:
+    `parse_selection` and `load_model` were written into
+    `examples/view_model.py` and promoted two commits later (to
+    `Selection.from_string` and `io/model_loader.py`), costing a write
+    commit, a relocation commit and two test relocations for each.  Ask "is
+    this reusable — would another entry point want it?" *before* writing,
+    not after.  The example itself should stay a thin workflow script.
+15. **Do not** mix a move/rename/extraction with edits to the code being
+    moved when a plan contains both.  The churn compounds: the edits must be
+    repeated in the new location, tests are relocated twice, and review sees
+    a rename and a behaviour change in one diff.  Land the relocation first,
+    then change behaviour in the new home.  Observed 2026-09-17: the
+    `view_model` CLI tests were edited in `tests/test_viz_model.py` and moved
+    to `tests/test_view_model_cli.py` one commit later; doing the split first
+    would have made the second commit a pure move with no follow-on edits.
 
 ## 10. Tool-Call Hygiene (prevent malformed tool-call XML)
 
