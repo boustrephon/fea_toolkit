@@ -421,6 +421,7 @@ declared array against the **correct** dimension: nodal arrays (`node_*`,
 
 | Array | Shape | dtype | Description |
 |---|---|---|---|
+| `schema_version` | `()` | `int` | File-level results-layout version (`results_schema.SCHEMA_VERSION`, currently 2).  Absent in legacy files — read as `SCHEMA_VERSION_LEGACY` (1) via `fea_toolkit.io.get_schema_version()`. |
 | `force_unit` | `()` | `str` | e.g. ``"kN"``, ``"N"`` |
 | `length_unit` | `()` | `str` | e.g. ``"m"``, ``"mm"`` |
 | `created` | `()` | `str` | ISO‑8601 timestamp |

@@ -28,7 +28,7 @@ import numpy as np
 from ..model.mesh_model import MeshModel
 from ..utils import force_unit_label, length_unit_label
 from ._serial import _write_h5, _write_npz, collect_geometry_arrays
-from .results_schema import make_static_key
+from .results_schema import SCHEMA_VERSION, make_static_key
 
 # ═══════════════════════════════════════════════════════════════════
 # Results collection
@@ -557,6 +557,12 @@ def write_results(
             )
         ]
     )
+
+    # File-level schema marker — mirrors the stage file and
+    # ``write_results_npz`` so a standalone results archive is
+    # self-describing.  Read back by
+    # :func:`fea_toolkit.io.npz_reader.get_schema_version`.
+    arrays["schema_version"] = np.array([SCHEMA_VERSION], dtype=int)
 
     # Write — validate fmt explicitly
     if fmt == "h5":

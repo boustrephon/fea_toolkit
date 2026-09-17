@@ -55,6 +55,36 @@ def read_results_npz(path: str) -> dict[str, Any]:
     return dict(np.load(path, allow_pickle=False))
 
 
+def get_schema_version(data: dict[str, Any]) -> int:
+    """Return the file-level ``schema_version`` of a loaded results dict.
+
+    The marker is written by
+    :func:`fea_toolkit.io.npz_writer.write_results_npz`,
+    :func:`fea_toolkit.io.unified_writer.write_results` and
+    :func:`fea_toolkit.io.stage_writer.write_model_stages`.  Files written
+    before versioning was introduced carry no ``schema_version`` array and are
+    treated as :data:`~fea_toolkit.io.results_schema.SCHEMA_VERSION_LEGACY`.
+
+    Args:
+        data: Flat ``{key: array}`` dict, e.g. from
+            :func:`read_results_npz` or
+            :func:`fea_toolkit.io.read_results`.
+
+    Returns:
+        The recorded schema version, or ``SCHEMA_VERSION_LEGACY`` (1) when the
+        array is absent, empty or unreadable.
+    """
+    from .results_schema import SCHEMA_VERSION_LEGACY
+
+    arr = data.get("schema_version")
+    if arr is None or len(arr) == 0:
+        return SCHEMA_VERSION_LEGACY
+    try:
+        return int(arr[0])
+    except (TypeError, ValueError):
+        return SCHEMA_VERSION_LEGACY
+
+
 #: Geometry array keys written by :func:`fea_toolkit.io.npz_writer.write_results_npz`.
 GEOMETRY_ARRAY_KEYS = frozenset(
     {

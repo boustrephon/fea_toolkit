@@ -62,19 +62,6 @@ def _json_scalar(data: dict[str, np.ndarray], key: str) -> t.Any:
         return str(raw)
 
 
-def get_schema_version(data: dict[str, np.ndarray]) -> int:
-    """Return the file ``schema_version`` (1 for legacy files without one)."""
-    from .results_schema import SCHEMA_VERSION_LEGACY
-
-    arr = data.get("schema_version")
-    if arr is None or len(arr) == 0:
-        return SCHEMA_VERSION_LEGACY
-    try:
-        return int(arr[0])
-    except (TypeError, ValueError):
-        return SCHEMA_VERSION_LEGACY
-
-
 def read_stage_arrays(path: str, stage: str) -> dict[str, np.ndarray]:
     """Read the lightweight geometry arrays for one stage.
 

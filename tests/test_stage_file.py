@@ -648,6 +648,62 @@ class TestUnifiedWriterSchemaCoverage:
         )
         assert validate_npz(p) == []
 
+    def test_npz_writer_stamps_schema_version(self, tmp_path):
+        """``write_results_npz`` stamps the file-level marker readers see.
+
+        P18: a standalone results archive must be self-describing, like the
+        stage file, so a consumer can tell which array layout it holds.
+        """
+        from fea_toolkit.io import get_schema_version, read_results_npz
+        from fea_toolkit.io.npz_writer import write_results_npz
+        from fea_toolkit.io.results_schema import SCHEMA_VERSION, validate_npz
+
+        md = make_sample_model()
+        p = str(tmp_path / "plain_results.npz")
+        write_results_npz(p, md)
+
+        data = read_results_npz(p)
+        assert list(data["schema_version"]) == [SCHEMA_VERSION]
+        assert get_schema_version(data) == SCHEMA_VERSION
+        # A metadata-only addition must not break schema validation.
+        assert validate_npz(p) == []
+
+    def test_unified_writer_stamps_schema_version(self, tmp_path):
+        """``write_results`` (unified) carries the same file-level marker."""
+        from fea_toolkit.io import get_schema_version
+        from fea_toolkit.io.results_schema import SCHEMA_VERSION
+        from fea_toolkit.io.unified_writer import write_results
+
+        md = make_sample_model()
+        p = write_results(str(tmp_path / "unified.npz"), model=md)
+
+        assert get_schema_version(read_results(p)) == SCHEMA_VERSION
+
+    def test_pushover_writer_stamps_schema_version(self, prepared, tmp_path):
+        """``write_pushover_results_npz`` carries the same file marker."""
+        from fea_toolkit.io import get_schema_version
+        from fea_toolkit.io.npz_writer import write_pushover_results_npz
+        from fea_toolkit.io.results_schema import SCHEMA_VERSION
+
+        _, mesh, _ = prepared
+        p = write_pushover_results_npz(str(tmp_path / "po.npz"), mesh, [], direction="+X")
+
+        assert get_schema_version(read_results(p)) == SCHEMA_VERSION
+
+    def test_get_schema_version_legacy_default(self):
+        """An archive without the marker reads as ``SCHEMA_VERSION_LEGACY``."""
+        import numpy as np
+
+        from fea_toolkit.io import get_schema_version
+        from fea_toolkit.io.results_schema import SCHEMA_VERSION_LEGACY
+
+        assert get_schema_version({}) == SCHEMA_VERSION_LEGACY
+        assert (
+            get_schema_version({"schema_version": np.array([], dtype=int)}) == SCHEMA_VERSION_LEGACY
+        )
+        # An unreadable marker degrades to legacy rather than raising.
+        assert get_schema_version({"schema_version": np.array(["bad"])}) == SCHEMA_VERSION_LEGACY
+
     def test_collect_rs_arrays_writes_moment_and_roof(self):
         """The unified collector emits the extended canonical ``rs/*`` block."""
         from fea_toolkit.io.unified_writer import collect_rs_arrays

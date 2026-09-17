@@ -15,7 +15,10 @@ import numpy as np
 SCHEMA_VERSION_LEGACY = 1
 #: Version of the unified results-file layout.  Bump on a
 #: backward-incompatible change (consumers read the array and may warn
-#: or adapt).  Written by :func:`fea_toolkit.io.stage_writer.write_model_stages`.
+#: or adapt).  Written as a ``schema_version`` array by
+#: :func:`fea_toolkit.io.stage_writer.write_model_stages`,
+#: :func:`fea_toolkit.io.npz_writer.write_results_npz` and
+#: :func:`fea_toolkit.io.unified_writer.write_results`.
 SCHEMA_VERSION = 2
 
 # ── Required array names per result type ──────────────────────────────────

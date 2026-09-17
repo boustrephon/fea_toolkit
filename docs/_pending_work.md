@@ -492,29 +492,41 @@ the former docs claim ("negative values skipped") true and lets the test feed
 `src/fea_toolkit/model/csm.py`, flip `test_noisy_curve_with_negative_sa` to
 pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
 
-#### P18 — `.npz` results archive carries no schema-version marker
-Source: `src/fea_toolkit/io/results_schema.py`;
-`docs/json_serialization.md` § *Which one do I want?*.
-
-**What.** The **stage file** (HDF5/NPZ written by `write_model_stages`) stamps
-itself with a top-level `schema_version` array (2), and the model-codec payload
-now carries `__schema_version__` — but the **plain `.npz` results archive**
-(`write_results_npz()` / `npz_writer.py`) carries **no version marker at all**.
-A consumer reading one must infer the layout from the presence of optional
-arrays.  The codec `__schema_version__` added 2026-09-17 (and this P-item)
-cover the model-object layer, leaving the results-file layer unversioned for
-the standalone `.npz` path.
-
-**Next step.** Mirror the stage file: write a `schema_version` array in
-`npz_writer.write_results_npz()` and read it back in `npz_reader`
-(`get_schema_version`), bumping `results_schema.SCHEMA_VERSION` only on a
-backward-incompatible array-layout change.  Keep the *model* marker
-(`__schema_version__`) distinct from the *file* marker (`schema_version`).
-
 #### Closed items (README reconciliation, 2026-08-25)
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
+
+## DONE (2026-09-17 — results NPZ schema-version marker (P18))
+
+**What.** The **stage file** stamped itself with a top-level
+`schema_version` array, and the model-codec payload carried
+`__schema_version__` — but a **plain `.npz` results archive** was
+unversioned, so a consumer had to infer the layout from the presence of
+optional arrays.
+
+- **Writers.** `write_results_npz()` and `write_pushover_results_npz()`
+  (`npz_writer.py`) plus `write_results()` (`unified_writer.py`) now write
+  `arrays["schema_version"] = np.array([SCHEMA_VERSION], dtype=int)` — the
+  same key/dtype the stage file already used.  All three plain-results
+  writers are stamped, so the marker is uniform across writers.
+- **Reader.** `get_schema_version(data)` moved from `stage_reader.py` to
+  `npz_reader.py` (its natural home — it reads a `schema_version` array
+  from any flat results dict) and is still exported from `fea_toolkit.io`;
+  `stage_reader` no longer owns it.  Files with no marker still read as
+  `SCHEMA_VERSION_LEGACY` (1).
+- **Distinction kept.** The *model-object* marker
+  (`model_codec.MODEL_SCHEMA_VERSION` / `__schema_version__`) stays distinct
+  from the *file-level* marker (`results_schema.SCHEMA_VERSION` /
+  `schema_version`).  `SCHEMA_VERSION` was **not** bumped — the change is
+  additive; bump only on a backward-incompatible array-layout change.
+
+**Tests.** `tests/test_stage_file.py::TestUnifiedWriterSchemaCoverage`:
+the marker is stamped and read back for all three writers, `validate_npz`
+stays clean, and the legacy / empty / unreadable-marker defaults.
+
+**Validation.** `tests/test_stage_file.py` 34 passed;
+`tests/test_stage_file.py tests/test_rhino_results.py` 79 passed; ruff clean.
 
 ## DONE (2026-09-17 — split the `examples/view_model.py` tests into their own file)
 
@@ -654,8 +666,9 @@ actually embedded.  This stamps the codec payload and validates it on read.
   `docs/model_stage_file.md` (and the codec module docstring).
 - **`view_model.load_model()`** now routes to the codec on
   `__schema_version__` **or** `__type__` (legacy codec files keep working).
-- **Follow-up flagged as P18**: the plain `.npz` results archive still carries
-  no version marker (the stage file does).
+- **Follow-up flagged as P18** (resolved 2026-09-17 — see the *results NPZ
+  schema-version marker* DONE entry): the plain `.npz` results archive carried
+  no version marker (the stage file did).
 
 **Tests.** `tests/test_model_codec.py::TestSchemaVersioning` (marker present,
 absent on nested dataclasses, legacy decodes, newer + invalid rejected);

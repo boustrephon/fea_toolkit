@@ -23,7 +23,7 @@ import numpy as np
 
 from ..model.sap_data import SAPModelData
 from ..utils import force_unit_label, length_unit_label
-from .results_schema import make_pushover_key, make_static_key
+from .results_schema import SCHEMA_VERSION, make_pushover_key, make_static_key
 
 if TYPE_CHECKING:
     from ..model.mesh_model import MeshModel
@@ -444,6 +444,10 @@ def write_results_npz(
     arrays["length_unit"] = np.array([length_unit], dtype=str)
     arrays["created"] = np.array([datetime.datetime.now().isoformat()], dtype=str)
     arrays["forces_coordinate_system"] = np.array([forces_coordinate_system], dtype=str)
+    # File-level schema marker — mirrors the stage file so a standalone
+    # results archive is self-describing.  Read back by
+    # :func:`fea_toolkit.io.npz_reader.get_schema_version`.
+    arrays["schema_version"] = np.array([SCHEMA_VERSION], dtype=int)
 
     path = str(Path(path).resolve())
     # Pyright's numpy stub declares ``allow_pickle`` before ``**kwds``;
@@ -765,6 +769,8 @@ def write_pushover_results_npz(
     arrays["length_unit"] = np.array([length_unit], dtype=str)
     arrays["created"] = np.array([datetime.datetime.now().isoformat()], dtype=str)
     arrays["forces_coordinate_system"] = np.array([forces_coordinate_system], dtype=str)
+    # File-level schema marker — same key as ``write_results_npz``.
+    arrays["schema_version"] = np.array([SCHEMA_VERSION], dtype=int)
 
     path = str(Path(path).resolve())
     # Pyright's numpy stub declares ``allow_pickle`` before ``**kwds``;

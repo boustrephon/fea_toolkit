@@ -70,6 +70,7 @@ Keys follow the pattern `static/{case_name}/{array_name}`.
 
 | Array | Shape | dtype | Description |
 |---|---|---|---|
+| `schema_version` | `()` | `int` | File-level results-layout version (`SCHEMA_VERSION`, currently 2); absent in legacy files → read as 1 |
 | `analysis_types` | `(N_analysis,)` | `str` | e.g. `["static", "modal", "rs"]` |
 | `force_unit` | `()` | `str` | `"kN"` |
 | `length_unit` | `()` | `str` | `"m"` |

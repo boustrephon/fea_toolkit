@@ -29,6 +29,7 @@ from .model_loader import load_model_data
 from .npz_reader import (
     GEOMETRY_ARRAY_KEYS,
     describe_results_npz,
+    get_schema_version,
     npz_build_child_map,
     npz_build_id_tag_map,
     npz_build_parent_map,
@@ -44,7 +45,6 @@ from .results_schema import SCHEMA_VERSION, SCHEMA_VERSION_LEGACY, make_static_k
 from .s2k_parser import SAP2000Parser
 from .stage_reader import (
     flatten_stage,
-    get_schema_version,
     read_dictionary_arrays,
     read_metadata,
     read_model_stages,
