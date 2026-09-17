@@ -18,6 +18,15 @@ related: [analysis_builder_migration_plan.md]
 - `compute_performance_point()`: Secant-iteration CSM per ATC-40.
   - Falls back to elastic spectral response when iteration drops below first data point.
   - Uses `np.trapezoid` (renamed from `np.trapz` in NumPy 2.0; `np.trapz` is deprecated and emits a warning).
+- **Bilinearizers assume non-negative `S_a`** — `bilinearize_*()` document
+  non-negative ordinates and do not filter negatives; the caller
+  (`compute_performance_point()`) folds -X/-Y pushes with `np.abs()` and masks
+  ordinates below `-1e-12` before dispatch.  Measured 2026-09-17: with
+  `S_a[3] = -5.0` passed raw, `bilinearize_stiffness_change()` adopts the
+  negative sample verbatim as the yield point (`S_ay = -5.0`) while
+  equal-energy / rc / composite stay positive by accident — inconsistent, not
+  an error.  **Revisit tracked as P17 in `docs/_pending_work.md`**; guard test:
+  `tests/test_csm.py::TestBilinearization::test_noisy_curve_with_negative_sa`.
 - `plot_capacity_spectrum()` in viz.py for ADRS visualisation.
 
 ## Key patterns

@@ -190,7 +190,7 @@ doi:10.1002/eqe.2225
 |---|---|
 | **Empty arrays** | All methods return (0.0, 0.0, method_name) |
 | **2 data points** | Peak at index 1 → secant stiffness computed, falls through to peak |
-| **Negative S_a (numerical noise)** | Peak search via argmax still works; negative values skipped |
+| **Negative S_a (out of contract)** | Not filtered by the bilinearizers: peak search via argmax tolerates negatives, but stiffness-change adopts a raw negative ordinate verbatim as the yield point. :func:`~fea_toolkit.model.csm.compute_performance_point` folds -X/-Y pushes with ``np.abs`` and masks ordinates below ``-1e-12`` before dispatch, so only origin machine noise reaches the methods.  **Revisit tracked as P17 (`docs/_pending_work.md`).** |
 | **Yield ≥ 90% of peak** | Equal-energy resets to peak (mu=1); composite falls back |
 | **Yield < 10% of peak** | Composite clamps to 10 % |
 

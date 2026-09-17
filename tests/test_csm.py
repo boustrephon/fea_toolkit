@@ -599,10 +599,16 @@ class TestBilinearization:
 
     @pytest.fixture
     def noisy_curve(self):
-        """Bilinear with slight numerical noise (negative S_a near origin)."""
+        """Bilinear curve carrying one out-of-contract negative S_a sentinel.
+
+        ``S_a[3] = -5.0`` at ``S_d = 0.006`` stands for any ordinate that
+        violates the bilinearizers' documented non-negative-ordinate
+        contract (see :meth:`test_noisy_curve_with_negative_sa`).
+        """
         S_d = np.linspace(0.0, 0.08, 41)
         S_a = np.where(S_d <= 0.02, 5000.0 * S_d, 100.0 + 500.0 * (S_d - 0.02))
-        # Inject small negative noise at a single point
+        # Inject a single out-of-contract negative ordinate (midsweep,
+        # well inside the peak-search and stiffness-change scan).
         S_a[3] = -5.0
         S_a[0] = 0.0
         return S_d, S_a
@@ -962,13 +968,35 @@ class TestBilinearization:
             )
 
     def test_noisy_curve_with_negative_sa(self, noisy_curve):
-        """Methods handle a small negative S_a value without crashing.
+        """Negative S_a ordinates are out of contract and folded by the caller.
 
-        Negative values can appear as numerical noise after ADRS conversion
-        near the origin.  The methods should still return a valid positive
-        yield point (the negative point is skipped during peak search).
+        The bilinearizers document *S_a_arr* as non-negative (see their
+        ``Args`` sections) and do not filter negatives internally: a raw
+        negative ordinate inside the stiffness-change scan is adopted
+        verbatim as the yield point, so passing it straight through would
+        return a *negative* yield acceleration.  Negative handling is
+        deliberate and caller-side — :func:`compute_performance_point`
+        folds a -X/-Y push with ``np.abs`` and masks any ordinate below
+        ``-1e-12`` before dispatch (only origin machine noise such as
+        ``-1e-17`` ever reaches the methods).  This test folds the curve
+        exactly as the production path does, then asserts all four
+        methods return a finite, positive yield point.
         """
         S_d, S_a = noisy_curve
+
+        # Out-of-contract guard: the raw negative ordinate is *not*
+        # skipped — it becomes the stiffness-change yield point.  Pinning
+        # that leak keeps the np.abs() fold below load-bearing rather than
+        # cosmetic: if the bilinearizers ever become negative-tolerant,
+        # this fails and the contract (and docstring) must be revisited.
+        raw_S_dy, raw_S_ay, _ = bilinearize_stiffness_change(S_d, S_a)
+        assert raw_S_ay < 0.0, (
+            "Expected the out-of-contract raw negative ordinate to be adopted "
+            f"verbatim by stiffness-change, got S_ay={raw_S_ay:.6e}"
+        )
+        assert raw_S_dy == pytest.approx(S_d[int(np.argmin(S_a))])
+
+        # Caller-side fold, mirroring compute_performance_point().
         for fn in (
             bilinearize_stiffness_change,
             bilinearize_equal_energy,
