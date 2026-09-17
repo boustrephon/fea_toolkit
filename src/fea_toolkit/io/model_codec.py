@@ -22,6 +22,11 @@ Design rules (see ``docs/model_stage_file.md``):
   exactly.
 * **Deterministic** — dicts are written with ``sort_keys=True`` so the
   same model yields byte-identical JSON (stage files can be diffed).
+* **Versioned** — the top-level payload carries
+  :const:`MODEL_SCHEMA_VERSION` under :const:`SCHEMA_KEY`;
+  :func:`dict_to_model` rejects a payload from a newer build before
+  decoding it, so a future layout change fails loudly rather than being
+  silently mis-read.
 
 This module imports nothing from the ``opensees`` package and never
 imports ``openseespy``, so it is safe to import inside Rhino 8.
@@ -44,14 +49,21 @@ from ..model.sap_data import SAPModelData, Section
 # Schema versioning
 # ═══════════════════════════════════════════════════════════════════
 
-#: Version of the ``stage/*/model_json`` payload.  Bump only on a
-#: backward-incompatible layout change; the file-level
-#: ``schema_version`` (see :mod:`fea_toolkit.io.results_schema`) tracks
-#: the whole results-file schema.
+#: Version of the model-object layout (the ``model_json`` / codec payload).
+#: Bump only on a backward-incompatible layout change.  It is embedded in
+#: every payload as the top-level ``__schema_version__`` key (see
+#: :const:`SCHEMA_KEY`), so a reader can reject a payload written by a newer
+#: build before mis-decoding it.  Distinct from the *file-level*
+#: ``schema_version`` array in :mod:`fea_toolkit.io.results_schema`, which
+#: tracks the results-file layout.
 MODEL_SCHEMA_VERSION = 1
 
 #: Marker key carrying the runtime class name of an encoded dataclass.
 TYPE_KEY = "__type__"
+
+#: Top-level key carrying :const:`MODEL_SCHEMA_VERSION`.  Dunder-prefixed so
+#: it can never collide with a real dataclass field name in the flat payload.
+SCHEMA_KEY = "__schema_version__"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -432,12 +444,34 @@ def model_to_dict(model: t.Any) -> dict[str, t.Any]:
         model: A ``SAPModelData`` or ``MeshModel`` instance.
 
     Returns:
-        Dict with a ``__type__`` key and one entry per dataclass field,
-        recursively encoded.
+        Dict with a ``__type__`` key, a ``__schema_version__`` key, and one
+        entry per dataclass field, recursively encoded.
     """
     if not dataclasses.is_dataclass(model):
         raise TypeError(f"model_to_dict expects a dataclass model, got {type(model).__name__}")
-    return _encode_dataclass(model)
+    out = _encode_dataclass(model)
+    out[SCHEMA_KEY] = MODEL_SCHEMA_VERSION
+    return out
+
+
+def _check_schema_version(data: dict[str, t.Any]) -> None:
+    """Validate the top-level model-schema marker, when present.
+
+    Payloads written before versioning carry no marker and are treated as
+    ``MODEL_SCHEMA_VERSION`` (the layout has not changed since they were
+    written).  A marker from a *newer* build is rejected before decoding so
+    a future file fails loudly instead of being silently mis-decoded.
+    """
+    marker = data.get(SCHEMA_KEY)
+    if marker is None:
+        return
+    if isinstance(marker, bool) or not isinstance(marker, int) or marker < 1:
+        raise ValueError(f"model snapshot has an invalid {SCHEMA_KEY} {marker!r}")
+    if marker > MODEL_SCHEMA_VERSION:
+        raise ValueError(
+            f"model snapshot was written with {SCHEMA_KEY} {marker}, but this build "
+            f"supports up to {MODEL_SCHEMA_VERSION} — upgrade fea_toolkit to read it"
+        )
 
 
 def dict_to_model(data: dict[str, t.Any], cls: t.Optional[type] = None) -> t.Any:
@@ -451,7 +485,13 @@ def dict_to_model(data: dict[str, t.Any], cls: t.Optional[type] = None) -> t.Any
     Returns:
         A new model instance, field-for-field equal to the original
         (``==`` passes for ``dataclasses``).
+
+    Raises:
+        ValueError: If ``__schema_version__`` is invalid or newer than this
+            build supports, or if ``cls`` is ``None`` and ``__type__`` cannot
+            be resolved.
     """
+    _check_schema_version(data)
     if cls is None:
         type_name = data.get(TYPE_KEY)
         cls = _CLASS_REGISTRY.get(type_name) if isinstance(type_name, str) else None

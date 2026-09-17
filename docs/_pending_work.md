@@ -492,12 +492,60 @@ the former docs claim ("negative values skipped") true and lets the test feed
 `src/fea_toolkit/model/csm.py`, flip `test_noisy_curve_with_negative_sa` to
 pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
 
+#### P18 — `.npz` results archive carries no schema-version marker
+Source: `src/fea_toolkit/io/results_schema.py`;
+`docs/json_serialization.md` § *Which one do I want?*.
+
+**What.** The **stage file** (HDF5/NPZ written by `write_model_stages`) stamps
+itself with a top-level `schema_version` array (2), and the model-codec payload
+now carries `__schema_version__` — but the **plain `.npz` results archive**
+(`write_results_npz()` / `npz_writer.py`) carries **no version marker at all**.
+A consumer reading one must infer the layout from the presence of optional
+arrays.  The codec `__schema_version__` added 2026-09-17 (and this P-item)
+cover the model-object layer, leaving the results-file layer unversioned for
+the standalone `.npz` path.
+
+**Next step.** Mirror the stage file: write a `schema_version` array in
+`npz_writer.write_results_npz()` and read it back in `npz_reader`
+(`get_schema_version`), bumping `results_schema.SCHEMA_VERSION` only on a
+backward-incompatible array-layout change.  Keep the *model* marker
+(`__schema_version__`) distinct from the *file* marker (`schema_version`).
+
 #### Closed items (README reconciliation, 2026-08-25)
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
-## DONE (2026-09-17 — `view_model`: accept pre-parsed JSON model inputs)
+## DONE (2026-09-17 — codec payload is stamped with a schema-version marker)
+
+**What.** The model-codec JSON was identifiable only by its `__type__` key and
+carried no version, so a future layout change could be silently mis-decoded —
+and the `MODEL_SCHEMA_VERSION` docstring claimed a version that was never
+actually embedded.  This stamps the codec payload and validates it on read.
+
+- **`io/model_codec.py`**: new `SCHEMA_KEY = "__schema_version__"`;
+  `model_to_dict()` adds it (top level only, so nested dataclasses stay
+  clean), and `dict_to_model()` / `json_to_model()` validate it via
+  `_check_schema_version()` — absent → treated as v1 (layout unchanged);
+  invalid (non-int / < 1) or newer than `MODEL_SCHEMA_VERSION` → `ValueError`
+  naming the newer version.  The key is dunder-prefixed so it can never
+  collide with a real model field in the flat payload.
+- **Layering**: the codec `__schema_version__` versions the *model-object*
+  layout; the stage/results `schema_version` array versions the *file*
+  layout.  Documented in `docs/json_serialization.md` and
+  `docs/model_stage_file.md` (and the codec module docstring).
+- **`view_model.load_model()`** now routes to the codec on
+  `__schema_version__` **or** `__type__` (legacy codec files keep working).
+- **Follow-up flagged as P18**: the plain `.npz` results archive still carries
+  no version marker (the stage file does).
+
+**Tests.** `tests/test_model_codec.py::TestSchemaVersioning` (marker present,
+absent on nested dataclasses, legacy decodes, newer + invalid rejected);
+`tests/test_viz_model.py` (header in a codec JSON, newer snapshot refused by
+`load_model`).
+
+**Validation.** Full suite 1694 passed, 2 skipped, 2 xfailed; ruff clean.
+
 
 **What.** The viewer ingested only `.s2k` (text) and `.npz` (archived results),
 so the two JSON model representations the toolkit already produces were

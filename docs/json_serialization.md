@@ -81,8 +81,11 @@ clone = json_to_model(payload, cls=SAPModelData)     # field-for-field equal
   `model_to_json()` / `json_to_model()` wrap them with `json.dumps` /
   `json.loads`.
 - See [`model_stage_file.md`](model_stage_file.md) for the codec design and
-  the stage-file format. The payload carries `MODEL_SCHEMA_VERSION`
-  (`model_codec.py`, currently `1`).
+  the stage-file format. The payload is stamped with its own
+  `__schema_version__` (currently `1`, `model_codec.MODEL_SCHEMA_VERSION`),
+  independent of the file-level `schema_version` array in the results /
+  stage format (see `results_schema.py`): the former versions the *model
+  object layout*, the latter the *results-file layout*.
 - `check_round_trip_types()` guards against silently lossy round-trips: it
   reports any `SAPModelData` / `MeshModel` field whose type has no codec
   rule, and the corresponding test asserts the list is empty.
@@ -97,8 +100,9 @@ clone = json_to_model(payload, cls=SAPModelData)     # field-for-field equal
 | Archive analysis *results* | `write_results_npz()` — not JSON | NPZ, see [`results_schema.md`](results_schema.md) |
 
 Both JSON forms are accepted directly by `examples/view_model.py`: a
-model-codec snapshot is detected by its top-level `__type__` key, and anything
-else is read as a raw-table cache. A `MeshModel` snapshot is already meshed, so
+model-codec snapshot is detected by its top-level `__type__` /
+`__schema_version__` keys, and anything else is read as a raw-table cache. A
+`MeshModel` snapshot is already meshed, so
 the viewer offers it with `--result mesh` only — the analyses need the `.s2k`
 or an `SAPModelData` snapshot.
 

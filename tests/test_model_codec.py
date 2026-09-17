@@ -2,9 +2,13 @@
 
 import dataclasses
 
+import pytest
+
 from examples.sample_model import make_rc_frame_model, make_sample_model
 from fea_toolkit.io.model_codec import (
     BARE_LIST_TYPES,
+    MODEL_SCHEMA_VERSION,
+    SCHEMA_KEY,
     TUPLE_FIELDS,
     check_round_trip_types,
     dict_to_model,
@@ -190,3 +194,41 @@ class TestMeshRoundTrip:
         mesh_fields = {f.name for f in dataclasses.fields(MeshModel)}
         assert set(TUPLE_FIELDS) <= mesh_fields
         assert set(BARE_LIST_TYPES) <= mesh_fields
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Schema-version marker
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestSchemaVersioning:
+    """The codec payload is stamped with ``__schema_version__``; readers
+    validate it so a newer layout fails loudly instead of mis-decoding."""
+
+    def test_payload_carries_schema_version(self):
+        md = make_sample_model()
+        assert model_to_dict(md)[SCHEMA_KEY] == MODEL_SCHEMA_VERSION
+
+    def test_nested_dataclasses_are_unversioned(self):
+        """Only the top-level payload is stamped — not sections or nodes."""
+        payload = model_to_dict(make_sample_model())
+        assert SCHEMA_KEY not in next(iter(payload["nodes"].values()))
+        assert SCHEMA_KEY not in next(iter(payload["sections"].values()))
+
+    def test_legacy_payload_without_marker_decodes(self):
+        """Files written before versioning still read (layout unchanged)."""
+        md = make_sample_model()
+        legacy = {k: v for k, v in model_to_dict(md).items() if k != SCHEMA_KEY}
+        assert dict_to_model(legacy) == md
+
+    def test_newer_schema_version_is_rejected(self):
+        payload = model_to_dict(make_sample_model())
+        payload[SCHEMA_KEY] = MODEL_SCHEMA_VERSION + 1
+        with pytest.raises(ValueError, match="upgrade fea_toolkit"):
+            dict_to_model(payload)
+
+    def test_invalid_schema_version_is_rejected(self):
+        payload = model_to_dict(make_sample_model())
+        payload[SCHEMA_KEY] = "2"
+        with pytest.raises(ValueError, match="invalid"):
+            dict_to_model(payload)

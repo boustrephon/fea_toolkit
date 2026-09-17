@@ -1834,3 +1834,29 @@ class TestViewModelJsonInput:
         from examples.view_model import check_result_supported
 
         check_result_supported(_selection_model(), "static")  # no raise
+
+    def test_codec_json_carries_schema_header(self, tmp_path):
+        """A model_codec snapshot is stamped with __schema_version__."""
+        import json as _json
+
+        from fea_toolkit.io.model_codec import MODEL_SCHEMA_VERSION, SCHEMA_KEY, model_to_json
+
+        data = _json.loads(model_to_json(_selection_model()))
+        assert data[SCHEMA_KEY] == MODEL_SCHEMA_VERSION
+
+    def test_newer_schema_version_is_rejected(self, tmp_path):
+        """A snapshot from a newer build is refused, not mis-decoded."""
+        import json as _json
+
+        from examples.view_model import load_model
+        from fea_toolkit.io.model_codec import SCHEMA_KEY, model_to_dict
+
+        payload = model_to_dict(_selection_model())
+        payload[SCHEMA_KEY] = 999
+        path = tmp_path / "future.json"
+        path.write_text(_json.dumps(payload), encoding="utf-8")
+
+        with pytest.raises(SystemExit) as exc:
+            load_model(path)
+
+        assert "upgrade fea_toolkit" in str(exc.value)

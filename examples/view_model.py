@@ -576,7 +576,8 @@ def load_model(path):
       tables are restored and the model rebuilt exactly as from text.
     * **Model-codec JSON** — as written by
       :func:`~fea_toolkit.io.model_codec.model_to_json`: a snapshot of a
-      built dataclass model, tagged with a top-level ``__type__`` key.
+      built dataclass model, tagged with a top-level ``__type__`` key and
+      stamped with ``__schema_version__`` (validated on read).
 
     Args:
         path: Path to the model file.
@@ -595,7 +596,9 @@ def load_model(path):
         except (OSError, json.JSONDecodeError) as exc:
             sys.exit(f"Error: could not read {path}: {exc}")
 
-        if isinstance(payload, dict) and "__type__" in payload:
+        if isinstance(payload, dict) and (
+            "__schema_version__" in payload or "__type__" in payload
+        ):
             # Model-codec snapshot — the __type__ discriminator selects the
             # class (SAPModelData or MeshModel), so no cls= is needed.
             from fea_toolkit.io.model_codec import json_to_model
@@ -614,7 +617,8 @@ def load_model(path):
         )
         if not looks_like_tables:
             sys.exit(
-                f"Error: {path} holds neither a model snapshot (no '__type__') nor "
+                f"Error: {path} holds neither a model snapshot "
+                "(no '__type__' / '__schema_version__') nor "
                 "SAP2000 tables — was it written by SAP2000Parser.to_json() or "
                 "model_codec.model_to_json()?"
             )

@@ -77,7 +77,11 @@ stage reader expose one flat, format-independent view.
 | `read_stage_arrays(path, stage)` | Geometry arrays only (fast path). |
 | `read_dictionary_arrays(path, stage)` | Decoded dictionary blocks. |
 | `read_metadata(path)` | Provenance / config / units. |
-| `get_schema_version(data)` | 2 for stage files; 1 for legacy files. |
+| `get_schema_version(data)` | 2 for stage files; 1 for legacy files — the *file-level* results layout. |
+
+The embedded `model_json` carries its own `__schema_version__` (the
+*model-object* layout version, `model_codec.MODEL_SCHEMA_VERSION`), distinct
+from the file-level `schema_version` above.
 
 ## The codec (`fea_toolkit.io.model_codec`)
 
