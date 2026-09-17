@@ -77,7 +77,12 @@ def get_schema_version(data: dict[str, Any]) -> int:
     from .results_schema import SCHEMA_VERSION_LEGACY
 
     arr = data.get("schema_version")
-    if arr is None or len(arr) == 0:
+    if arr is None:
+        return SCHEMA_VERSION_LEGACY
+    # Normalise scalars / 0-d arrays to 1-D before the emptiness check:
+    # ``len(np.array(2))`` raises TypeError ("len() of unsized object").
+    arr = np.asarray(arr).reshape(-1)
+    if arr.size == 0:
         return SCHEMA_VERSION_LEGACY
     try:
         return int(arr[0])

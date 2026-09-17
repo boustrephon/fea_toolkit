@@ -92,6 +92,23 @@ class TestTextAndTableInputs:
         with pytest.raises(FileNotFoundError):
             load_model_data(tmp_path / "nope.s2k")
 
+    def test_missing_json_file_is_file_not_found(self, tmp_path):
+        """A missing JSON path still raises FileNotFoundError from the read."""
+        with pytest.raises(FileNotFoundError, match="could not read"):
+            load_model_data(tmp_path / "nope.json")
+
+    def test_directory_path_propagates_its_io_error(self, tmp_path):
+        """A directory is an I/O error, not a missing file.
+
+        ``IsADirectoryError`` is an ``OSError`` subclass but not a
+        ``FileNotFoundError``; the loader must not relabel it as "missing".
+        """
+        directory = tmp_path / "model.json"
+        directory.mkdir()
+
+        with pytest.raises(IsADirectoryError):
+            load_model_data(directory)
+
 
 class TestCodecJsonInputs:
     """Model-codec snapshots (``model_codec.model_to_json``)."""

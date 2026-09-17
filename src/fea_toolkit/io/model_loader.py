@@ -59,6 +59,10 @@ def load_model_data(path: Union[str, Path]) -> Union[SAPModelData, MeshModel]:
             parsing a raw-table JSON as *text* would silently yield an empty
             model, so an unrecognised payload is an error here rather than an
             empty result.
+
+    Other :class:`OSError` subclasses raised while reading the file — for
+    example :class:`PermissionError` or :class:`IsADirectoryError` — propagate
+    unchanged, so callers can tell an unreadable path from a missing one.
     """
     path = Path(path)
     suffix = path.suffix.lower()
@@ -76,7 +80,7 @@ def load_model_data(path: Union[str, Path]) -> Union[SAPModelData, MeshModel]:
 
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except OSError as exc:
+    except FileNotFoundError as exc:
         raise FileNotFoundError(f"could not read {path}: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise ValueError(f"{path} is not valid JSON: {exc}") from exc

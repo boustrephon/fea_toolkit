@@ -703,6 +703,9 @@ class TestUnifiedWriterSchemaCoverage:
         )
         # An unreadable marker degrades to legacy rather than raising.
         assert get_schema_version({"schema_version": np.array(["bad"])}) == SCHEMA_VERSION_LEGACY
+        # A 0-d marker is normalised before the emptiness check — ``len()``
+        # on a 0-d array raises ``TypeError`` ("len() of unsized object").
+        assert get_schema_version({"schema_version": np.array(2)}) == 2
 
     def test_collect_rs_arrays_writes_moment_and_roof(self):
         """The unified collector emits the extended canonical ``rs/*`` block."""

@@ -2048,6 +2048,11 @@ def remove_floating_nodes(
       5. Delete the floating node's own joint-load entries, so no load
          references a node that no longer exists.
 
+    A floating node that carries joint loads or a restraint but has no
+    connected node to receive them (``connected`` is empty, so the
+    nearest-neighbour search finds nothing) is preserved rather than
+    removed, so its loads are never silently deleted.
+
     Modifies *md* in‑place (removes nodes, transfers restraints and
     joint loads to the nearest connected neighbour, and drops the
     removed nodes' own load entries).
@@ -2166,6 +2171,13 @@ def remove_floating_nodes(
 
         if has_restraint and best_nid and best_nid not in restraints:
             restraints[best_nid] = restraints.pop(nid)
+
+        # No connected node exists to receive this node's loads/restraint
+        # (``best_nid is None`` — e.g. ``connected`` is empty).  Preserve
+        # the node and its data rather than removing it and silently
+        # dropping its joint loads below.
+        if best_nid is None and (has_loads or has_restraint):
+            continue
 
         rows.append(
             {

@@ -1402,3 +1402,41 @@ class TestSAPModelDataMethods:
         assert set(by_pattern) == {"DEAD", "LIVE"}
         assert by_pattern["DEAD"].fz == pytest.approx(-100.0)
         assert by_pattern["LIVE"].fz == pytest.approx(-50.0)
+
+    def test_remove_floating_nodes_preserves_loads_without_destination(self):
+        """A loaded floating node with no connected neighbour is kept.
+
+        Regression: when ``connected`` is empty every node is floating, so
+        the nearest-neighbour search finds no destination.  Removing the
+        node would silently delete its joint loads, so the node and its
+        loads must be preserved instead.
+        """
+        from fea_toolkit.model.geometry import remove_floating_nodes
+
+        md = SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+                "2": Node(node_id="2", node_tag=2, x=6, y=0, z=0),
+            },
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={},
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={},
+            frame_auto_mesh={},
+            joint_loads=[
+                JointLoad(pattern="DEAD", node_id="1", fz=-100.0),
+                JointLoad(pattern="LIVE", node_id="2", fz=-50.0),
+            ],
+        )
+        rows = remove_floating_nodes(md)
+
+        assert rows == []
+        assert set(md.nodes) == {"1", "2"}
+        assert {(jl.node_id, jl.pattern) for jl in md.joint_loads} == {
+            ("1", "DEAD"),
+            ("2", "LIVE"),
+        }
