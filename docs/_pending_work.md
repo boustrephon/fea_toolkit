@@ -318,22 +318,32 @@ deferred; keep the cross-references between `docs/tcl_export.md` and the
 recorder doc current in the meantime.
 
 #### P9 — Linting Phase 3 triage
-Source: `docs/linting_fix_plan.md` (status update 2026-08-21).
+Source: `docs/linting_fix_plan.md` (status updates 2026-08-21 / 2026-09-17).
 
-**What.** Phase 1 real bugs are fixed; the remaining ~219 errors / 109
-warnings are overwhelmingly Phase 3 typing noise (pandas/pyvista overloads,
-`Optional`-access) — the benign categories in `.clinerules` §11.  The
-Phase 2 `pyrightconfig.json` was never committed.
+**What.** Phase 1 real bugs are fixed.  **The Phase 2 `pyrightconfig.json` is
+committed** (added 2026-08-02 in `2a0063d`, refined the same day in `8754551`);
+this register's earlier "was never committed" note was incorrect and is
+superseded — see the 2026-09-17 status update in `docs/linting_fix_plan.md`.
+The committed rule set is exactly the Phase 2 strategy
+(`src/fea_toolkit/rhino` excluded; `reportOptional*` /
+`reportAttributeAccessIssue` → `warning`), so **Phase 2 is complete** and the
+item reduces to the Phase 3 triage.  The ~219 errors / 109 warnings are
+overwhelmingly Phase 3 typing noise (pandas/pyvista overloads,
+`Optional`-access) — the benign categories in `.clinerules` §11 — and are a
+**stale baseline** (2026-08-21, pre-dating the post-P2 / runner splits), so
+re-run `python -m pyright src/` before triaging.
 
-**Outline steps.** 1) Optionally commit `pyrightconfig.json` (exclude
-Rhino host-only modules; relax `reportOptional*` rules); 2) fresh per-file
-triage of the Phase 3 count, starting with the top-3 files by error count
-post-P2-split (the original top-3 `model/geometry.py` → `plotting/viz.py` →
-`opensees/analysis_builder.py` are now thin facades — ≈80/136/≈480 lines —
-and the errors now live in `geometry_core/frames/mesh`, `viz_*`, and the
-`_runner_*` modules);
-3) prefer a project-wide `pd.Series.to_numpy()` convention over scattered
-casts (§11.2).
+**Outline steps.**
+1. ~~Optionally commit `pyrightconfig.json` (exclude Rhino host-only modules;
+   relax `reportOptional*` rules)~~ — **DONE (2026-08-02)**: committed with
+   exactly that content.
+2. Fresh per-file triage of the Phase 3 count, starting with the top-3 files
+   by error count post-P2-split (the original top-3 `model/geometry.py` →
+   `plotting/viz.py` → `opensees/analysis_builder.py` are now thin facades —
+   ≈80/136/≈480 lines — and the errors now live in
+   `geometry_core/frames/mesh`, `viz_*`, and the `_runner_*` modules).
+3. Prefer a project-wide `pd.Series.to_numpy()` convention over scattered
+   casts (§11.2).
 
 #### P10 — Pushover fiber-level output (Phase 5, future/deferred)
 Source: `docs/pushover_results_storage_viz.md` §Phase 5.
@@ -423,7 +433,8 @@ guidance
 (https://squidfunk.github.io/mkdocs-material/blog/2026/02/18/mkdocs-2.0/).
 
 #### P16 — Parsed-but-unconsumed parser keywords
-Source: `docs/parser_coverage.md` (register + reproducible audit method).
+Source: `docs/parser_coverage.md` (register + reproducible audit method;
+re-checked 2026-09-17).
 
 **What.** Several `.s2k` values are parsed and stored on the model but reach
 no consumer, so they look implemented while being inert.  The full register,
@@ -438,6 +449,10 @@ with the method to re-derive it, is `docs/parser_coverage.md`.
    (`0 < RigidFactor < 1`) instead of always fully rigid.
 4. `SAPModelData.area_edge_constraints` — consume it or drop it (the
    preprocessor currently derives edges via `find_constraint_edges()`).
+   *Re-checked 2026-09-17:* `Selection.filter_model` now carries the selected
+   areas' entries through a subset (`model/selection.py`), but that is subset
+   round-trip preservation only — no geometry/meshing consumer reads it, so
+   this item stands.
 5. `AreaMesh.no_auto_mesh_at_edges` / `no_sub_mesh` / `min_size` — honour in
    the area-meshing path, or drop.
 6. Encased / circular-concrete / double-angle section fields — consume once
@@ -496,6 +511,56 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
+
+## DONE (2026-09-17 — docs: enable strikethrough so `~~done~~` markers render)
+
+**What.** This register and three other docs mark superseded items with
+`~~…~~`, but `mkdocs.yml` never enabled a strikethrough extension, so those
+markers rendered as literal tildes on the built site.
+
+- **`mkdocs.yml`**: added `pymdownx.tilde` to `markdown_extensions` with
+  `subscript: false` (`~~…~~` → `<del>`; subscript off so the pervasive `~NNN`
+  approximation tildes — `~342`, `~5,000`, `~100 s` — can never render as
+  `<sub>`).  `smart_delete` stays at its default (`true`).
+- **Compatibility**: `pymdownx.tilde` ships with the already-pinned
+  `pymdown-extensions` 11.0.1 (the project already uses `pymdownx.details` /
+  `superfences` / `tabbed` / `highlight` / `inlinehilite` / `snippets`), and the
+  installed `markdown` 3.10.2 satisfies its `markdown>=3.6` requirement.  No new
+  dependency and no MkDocs-specific interaction — MkDocs passes
+  `markdown_extensions` straight through to Python-Markdown.
+- **Pre-checked before enabling** (read-only render of every `docs/*.md`): 19
+  prose `~~…~~` pairs → `<del>`, **zero** `<sub>` introduced, every `~NNN`
+  approximation preserved, and the lone `~~~~~~~` tilde code fence left intact.
+- **`docs/linting_fix_plan.md`**: the two spots written without `~~` during the
+  P9 correction now use the `~~superseded~~` convention, consistent with this
+  register.
+
+**Validation.** `python -m mkdocs build --strict` green (58.58 s); built HTML
+spot-checked — `<del>` in `_pending_work` (7), `deprecation_plan` (9),
+`pushover_analysis` (3), `linting_fix_plan` (2); **no `<sub>` anywhere**; the
+`~NNN` approximations intact.
+
+## DONE (2026-09-17 — P9/P16 re-check: the "pyrightconfig.json not committed" claim was wrong)
+
+**What.** Re-checking the two open items (P9, P16) against the repo found one
+factual error and one bookkeeping gap.
+
+- **P9 (linting).** `docs/_pending_work.md` and `docs/linting_fix_plan.md`
+  both claimed Phase 2 `pyrightconfig.json` "was never committed".  It **is**
+  tracked — added 2026-08-02 in `2a0063d`, refined the same day in `8754551`
+  — and its rule set is exactly the Phase 2 strategy (`src/fea_toolkit/rhino`
+  excluded; `reportOptional*` / `reportAttributeAccessIssue` → `warning`).
+  Both registers corrected: Phase 2 is marked complete/committed, and the
+  `219 / 109` counts are flagged as a stale pre-split baseline needing a fresh
+  `python -m pyright src/`.
+- **P16 (parser coverage).** All six fields remain unconsumed in the semantic
+  sense.  One nuance recorded: `area_edge_constraints` gained a subset
+  round-trip reference in `model/selection.py` (`filter_model`, from the
+  constraint-selection work), which is not a geometry/meshing consumer, so the
+  item stands.
+
+**Docs only** — no code change and no tests affected.  `pyrightconfig.json`
+verified tracked via `git ls-files` and byte-identical to `HEAD`.
 
 ## DONE (2026-09-17 — `view_model`: stamp the input file name on every PyVista window)
 

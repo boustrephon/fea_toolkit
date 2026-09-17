@@ -22,8 +22,11 @@ category: [planning]
 > simplification — see `docs/analysis_builder_migration_plan.md`).  The
 > remaining 219 errors are overwhelmingly Phase 3 typing noise (pandas/pyvista
 > overloads, `Optional`-access) — the benign categories listed in `.clinerules`
-> §11 — not runtime bugs.  Phase 2 (`pyrightconfig.json`) was not committed;
-> the recommended next step is a fresh per-file triage of the Phase 3 count.
+> §11 — not runtime bugs.  The original claim that Phase 2
+> (`pyrightconfig.json`) ~~was not committed~~ was **incorrect** — the config
+> *is* committed (added 2026-08-02 in `2a0063d`, refined the same day in
+> `8754551`); see the 2026-09-17 status update below.  The recommended next
+> step remains a fresh per-file triage of the Phase 3 count.
 >
 > **Status update (2026-08-24):** the historical file paths in this document
 > are pre-split.  Post-P2 + runner-split: `model/geometry.py` is a 79-line
@@ -33,6 +36,18 @@ category: [planning]
 > `opensees/analysis_builder.py` into the `_runner_*` modules.  Re-run
 > `python -m pyright src/` for a fresh per-file triage before using the
 > counts below.
+>
+> **Status update (2026-09-17):** the 2026-08-21 note that Phase 2
+> (`pyrightconfig.json`) "was not committed" was **incorrect**.  The file is
+> tracked (added 2026-08-02 in `2a0063d`; refined the same day in `8754551`)
+> and its rule set *is* the Phase 2 strategy: `src/fea_toolkit/rhino` excluded,
+> `reportOptional*` / `reportAttributeAccessIssue` → `warning`, with
+> `reportMissingImports` / `reportUndefinedVariable` / `reportUnboundVariable`
+> left at `error`.  **Phase 2 is complete and committed**; only the Phase 3
+> triage remains open (plus the `pd.Series.to_numpy()` convention cleanup,
+> `.clinerules` §11.2).  The `219 / 109` counts remain a **stale baseline** —
+> re-run `python -m pyright src/` after the P2 / runner splits before using
+> them.
 
 ## Quick Start (for a fresh task)
 
@@ -138,6 +153,11 @@ Pyright doesn't resolve string annotations (`"MeshModel"`). These are in:
 
 ## Phase 2: pyrightconfig.json (One-Time Config)
 
+> **Status (2026-09-17): committed.**  The config below is in the repo — added
+> 2026-08-02 in `2a0063d` and refined the same day in `8754551` — so this phase
+> is complete.  (An earlier note in this document claimed it was "not
+> committed"; that was incorrect.)
+
 Create `pyrightconfig.json` at the repo root with:
 
 ```json
@@ -172,7 +192,10 @@ Create `pyrightconfig.json` at the repo root with:
 | `reportOptionalIterable` | ~1 | Iterating Optional |
 | `reportAttributeAccessIssue` | ~91 | Subclass attrs on base type, RecordingOpenSees proxy |
 
-**Commit**: Commit `pyrightconfig.json` to the repo (it's project-level config, not user-specific).
+**Commit**: ~~Commit `pyrightconfig.json` to the repo~~ — **Done** (2026-08-02
+in `2a0063d`; refined the same day in `8754551`).  It is project-level config,
+not user-specific, so it belongs in the repo; verify with
+`git ls-files pyrightconfig.json`.
 
 ---
 
