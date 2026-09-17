@@ -1017,6 +1017,70 @@ class TestResponseSpectrumFormatting:
         assert _response_spectrum_rows({}, "kN", "m") == []
         assert _response_spectrum_mode_rows({}, {}, "kN") == []
 
+    def test_mode_rows_add_base_shear_coefficients(self):
+        """alpha = per-mode V / seismic weight, dimensionless."""
+        analysis = {
+            "mass_participation": [
+                {"mode": 1, "period": 0.5},
+                {"mode": 2, "period": 0.25},
+            ],
+            "mass_source": {"total_weight": 200.0},
+        }
+        rows = _response_spectrum_mode_rows(self._block(), analysis, "kN")
+        # Shears first, then the coefficients.
+        assert list(rows[0]) == [
+            "Mode",
+            "Period (s)",
+            "V X (kN)",
+            "V Y (kN)",
+            "α X",
+            "α Y",
+        ]
+        # Mode 1: V X = 100.0 -> 100/200; V Y = 55.0 -> 55/200.
+        assert rows[0]["α X"] == "0.50000"
+        assert rows[0]["α Y"] == "0.27500"
+        # Footer: the CQC combined shear, same normalisation.
+        assert rows[-1]["Mode"] == "CQC"
+        assert rows[-1]["α X"] == "0.60250"
+        assert rows[-1]["α Y"] == "0.30000"
+
+    def test_mode_rows_add_spectral_acceleration_before_shear(self):
+        """Sa(T) sits after the period, before the shears, and is in g."""
+        block = self._block()
+        for direction in ("X", "Y"):
+            # Model units (m/s²); 9.80665 -> 1.0 g.
+            block["directions"][direction]["spectral_accels"] = [9.80665, 4.903325]
+        analysis = {
+            "mass_participation": [
+                {"mode": 1, "period": 0.5},
+                {"mode": 2, "period": 0.25},
+            ],
+            "mass_source": {"gravity": 9.80665},
+        }
+        rows = _response_spectrum_mode_rows(block, analysis, "kN")
+        assert list(rows[0]) == [
+            "Mode",
+            "Period (s)",
+            "Sa X (g)",
+            "Sa Y (g)",
+            "V X (kN)",
+            "V Y (kN)",
+        ]
+        assert rows[0]["Sa X (g)"] == "1.0000"
+        assert rows[1]["Sa Y (g)"] == "0.5000"
+        # The combined footer has no single modal Sa.
+        assert rows[-1]["Sa X (g)"] == "—"
+
+    def test_mode_rows_omit_optional_columns_without_mass_source(self):
+        """No mass source -> neither Sa nor alpha columns are added."""
+        analysis = {"mass_participation": [{"mode": 1, "period": 0.5}]}
+        rows = _response_spectrum_mode_rows(self._block(), analysis, "kN")
+        assert list(rows[0]) == ["Mode", "Period (s)", "V X (kN)", "V Y (kN)"]
+        # A present-but-zero mass source behaves the same way.
+        analysis["mass_source"] = {"total_weight": 0.0, "gravity": 0.0}
+        rows = _response_spectrum_mode_rows(self._block(), analysis, "kN")
+        assert list(rows[0]) == ["Mode", "Period (s)", "V X (kN)", "V Y (kN)"]
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Analysis-phase checks (load verification / wind) — require OpenSees

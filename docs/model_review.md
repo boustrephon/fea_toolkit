@@ -263,6 +263,12 @@ Preprocessor → AnalysisBuilder pipeline and reports:
   tables — a **per-direction** summary of the CQC/SRSS base shear and
   overturning moment plus the CQC/SRSS roof displacement, and the
   **per-mode** base shear so the modal make-up of the total is visible.
+  When the seismic mass is known, the per-mode table also carries, per
+  direction, the demand **spectral acceleration** at the modal period
+  (`Sa X` / `Sa Y`, in `g`) and the **base-shear coefficient** `α = V / W`
+  (the per-mode shear divided by the total seismic weight, dimensionless) —
+  so each mode's demand and its share of the base shear can be read
+  directly.
   The per-mode table ends with a footer row carrying the **combined** base
   shear for the active rule only, titled `CQC` or `SRSS` to match
   `--rs-combination` (default `cqc`).  Runs for `X` and `Y` by default.

@@ -657,7 +657,8 @@ def _run_rs_pass(
         Dict with ``spectrum`` (the resolved descriptor), ``directions`` —
         a per-direction dict of CQC/SRSS base shear and overturning moment,
         the 6-DoF ``base_reactions_cqc``, the per-mode ``modal_base_shear``
-        / ``modal_base_moment`` and the CQC/SRSS roof displacement — and
+        / ``modal_base_moment`` / ``spectral_accels`` and the CQC/SRSS roof
+        displacement — and
         ``nodal_displacements`` / ``nodal_displacements_direction`` (the
         CQC nodal displacement field of the first configured direction,
         for the single-direction unified ``rs/node_*`` block).
@@ -697,6 +698,12 @@ def _run_rs_pass(
         """Magnitude of the RS nodal displacement at the roof node."""
         d = disp.get(roof_tag)
         return math.hypot(d[0], d[1], d[2]) if d else 0.0
+
+    # Per-mode demand ordinates Sa(T_n) in the model's acceleration unit.
+    # The GB 50011 spectrum is direction-independent, so X and Y coincide
+    # here; the review reports them per direction for symmetry with the
+    # shear columns and converts to units of g.
+    sa_per_mode = [spectrum_func(T) for T in periods[:n_modes]]
 
     out: dict[str, Any] = {}
     # The unified ``rs/node_*`` block is single-direction (the Rhino RS
@@ -770,6 +777,7 @@ def _run_rs_pass(
             "base_reactions_cqc": dict(rs.get("base_reactions_cqc") or {}),
             "modal_base_shear": list(rs.get("modal_base_shear") or []),
             "modal_base_moment": list(rs.get("modal_base_moment") or []),
+            "spectral_accels": list(sa_per_mode),
             "roof_disp_cqc": roof_cqc,
             "roof_disp_srss": roof_srss,
         }

@@ -1181,6 +1181,17 @@ def _response_spectrum_mode_rows(
     mass-participation table.  Mode numbers and periods come from the modal
     pass (``analysis["mass_participation"]``) rather than being duplicated.
 
+    When the analysis carries the seismic mass (``analysis["mass_source"]``)
+    two groups of columns are added per direction, each omitted when its
+    input is absent or zero so the table degrades gracefully:
+
+    * ``Sa X`` / ``Sa Y`` — the demand spectral acceleration at the modal
+      period, in units of *g* (the per-mode ``spectral_accels`` scaled by
+      the model gravity), placed after the period and before the shears;
+    * ``α X`` / ``α Y`` — the **base-shear coefficient** ``V / W``, i.e. the
+      per-mode base shear divided by the total seismic weight
+      (dimensionless).
+
     A final footer row carries the **combined** base shear for the active
     combination rule (``rs["combination"]``, i.e. the ``--rs-combination``
     value, default ``cqc``) and is titled with that rule — ``CQC`` or
@@ -1198,6 +1209,9 @@ def _response_spectrum_mode_rows(
     directions = rs.get("directions") or {}
     modes = list(analysis.get("mass_participation") or [])
     n = max((len(d.get("modal_base_shear") or []) for d in directions.values()), default=0)
+    mass = analysis.get("mass_source") or {}
+    total_weight = float(mass.get("total_weight", 0.0) or 0.0)
+    gravity = float(mass.get("gravity", 0.0) or 0.0)
     rows: list[dict[str, Any]] = []
     for i in range(min(n, len(modes))):
         mode = modes[i]
@@ -1205,11 +1219,23 @@ def _response_spectrum_mode_rows(
             "Mode": str(mode.get("mode", i + 1)),
             "Period (s)": f"{float(mode.get('period', 0.0)):.4f}",
         }
+        if gravity > 0.0:
+            for direction, data in directions.items():
+                sa = data.get("spectral_accels") or []
+                row[f"Sa {direction} (g)"] = (
+                    f"{float(sa[i]) / gravity:,.4f}" if i < len(sa) else "—"
+                )
         for direction, data in directions.items():
             shear = data.get("modal_base_shear") or []
             row[f"V {direction} ({force_unit})"] = (
                 f"{float(shear[i]):,.1f}" if i < len(shear) else "\u2014"
             )
+        if total_weight > 0.0:
+            for direction, data in directions.items():
+                shear = data.get("modal_base_shear") or []
+                row[f"α {direction}"] = (
+                    f"{float(shear[i]) / total_weight:,.5f}" if i < len(shear) else "—"
+                )
         rows.append(row)
 
     # Footer: the combined base shear for the *active* combination rule only
@@ -1221,8 +1247,15 @@ def _response_spectrum_mode_rows(
             "Mode": combination.upper(),
             "Period (s)": "\u2014",
         }
+        if gravity > 0.0:
+            # The combined row has no single modal period, so no Sa.
+            for direction in directions:
+                summary[f"Sa {direction} (g)"] = "—"
         for direction, data in directions.items():
             summary[f"V {direction} ({force_unit})"] = f"{float(data.get(shear_key, 0.0)):,.1f}"
+        if total_weight > 0.0:
+            for direction, data in directions.items():
+                summary[f"α {direction}"] = f"{float(data.get(shear_key, 0.0)) / total_weight:,.5f}"
         rows.append(summary)
     return rows
 
