@@ -272,6 +272,9 @@ Preprocessor → AnalysisBuilder pipeline and reports:
   The per-mode table ends with a footer row carrying the **combined** base
   shear for the active rule only, titled `CQC` or `SRSS` to match
   `--rs-combination` (default `cqc`).  Runs for `X` and `Y` by default.
+  `--min-participation` also trims this table (keeping the footer): a mode
+  survives when either direction's shear exceeds that percentage of the
+  direction's total base shear.
 
   | CLI flag | Config key | Default | Meaning |
   |---|---|---|---|
@@ -444,13 +447,19 @@ knobs (CLI flags and formatter keyword arguments) trim the listing:
 | CLI flag | Formatter kwarg | Effect |
 |---|---|---|
 | `--max-modes N` | `max_modes=N` | Show at most the first `N` modes (applied after filtering). `0` = all. |
-| `--min-participation PCT` | `min_participation=PCT` | Hide modes whose largest translational mass participation (max of `Mx`/`My`/`Mz`, in percent) is below `PCT`. |
+| `--min-participation PCT` | `min_participation=PCT` | Hide modes whose largest translational mass participation (max of `Mx`/`My`/`Mz`, in percent) is below `PCT`; also trims the per-mode base-shear table (see below). |
 
 When rows are suppressed the report prints a
 `… N further mode(s) not shown` note, so a filtered listing is never
 ambiguous.  `--num-modes` sets how many modes are **computed**;
 `--max-modes` sets how many are **displayed**.  The `SUM` row always sums
 **all** computed modes, even when rows are filtered.
+
+The **per-mode base-shear** table is trimmed by the same
+`--min-participation` value, but with its own measure: a mode is kept when
+**either** direction's per-mode base shear exceeds `PCT` percent of that
+direction's combined (total) base shear — the value in the table's footer
+row, which is always shown so the share denominator stays visible.
 
 ```python
 from fea_toolkit.model import format_review_report

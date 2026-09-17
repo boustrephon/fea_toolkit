@@ -1169,10 +1169,79 @@ def _response_spectrum_rows(
     return rows
 
 
+def _rs_shear_key(rs: dict[str, Any]) -> str:
+    """Return the combined base-shear key for the active combination rule.
+
+    Args:
+        rs: The ``response_spectrum`` block of a review result.
+
+    Returns:
+        ``"base_shear_srss"`` when the active rule is SRSS, else
+        ``"base_shear_cqc"`` (the default).
+    """
+    combination = str(rs.get("combination") or "cqc").lower()
+    return "base_shear_srss" if combination == "srss" else "base_shear_cqc"
+
+
+def _display_rs_modes(
+    rs: dict[str, Any],
+    analysis: dict[str, Any],
+    min_participation: float = 0.0,
+) -> tuple[list[int], int]:
+    """Select the per-mode base-shear rows a report should display.
+
+    The response-spectrum counterpart of :func:`_display_modes`: a mode is
+    kept when **either** direction's per-mode base shear exceeds
+    ``min_participation`` percent of that direction's combined (total) base
+    shear — the value the table footer reports, so the share is measured
+    against the same number the reader sees.  Magnitudes are compared,
+    because the shears carry a sign convention.
+
+    Args:
+        rs: The ``response_spectrum`` block of a review result.
+        analysis: The ``analysis`` sub-dict of the same review result.
+        min_participation: Drop modes whose base shear is below this
+            percentage of the direction total.  ``0.0`` keeps every mode.
+
+    Returns:
+        ``(indices, hidden)`` — the **original** mode positions to display
+        (so the per-mode shear and ``Sa`` arrays stay aligned when rows are
+        dropped), and the number of modes suppressed.  Every mode is kept
+        when the threshold is zero, or when no direction has a non-zero
+        total to take a share of.
+    """
+    directions = rs.get("directions") or {}
+    modes = list(analysis.get("mass_participation") or [])
+    n_rows = min(
+        max((len(d.get("modal_base_shear") or []) for d in directions.values()), default=0),
+        len(modes),
+    )
+    if min_participation <= 0.0 or n_rows == 0:
+        return list(range(n_rows)), 0
+    shear_key = _rs_shear_key(rs)
+    totals = {
+        direction: abs(float((data or {}).get(shear_key, 0.0) or 0.0))
+        for direction, data in directions.items()
+    }
+    if not any(totals.values()):
+        return list(range(n_rows)), 0
+    threshold = min_participation / 100.0
+    kept: list[int] = []
+    for i in range(n_rows):
+        for direction, data in directions.items():
+            total = totals[direction]
+            shear = data.get("modal_base_shear") or []
+            if total > 0.0 and i < len(shear) and abs(float(shear[i])) > threshold * total:
+                kept.append(i)
+                break
+    return kept, n_rows - len(kept)
+
+
 def _response_spectrum_mode_rows(
     rs: dict[str, Any],
     analysis: dict[str, Any],
     force_unit: str,
+    indices: Optional[list[int]] = None,
 ) -> list[dict[str, Any]]:
     """Build the per-mode response-spectrum base-shear rows.
 
@@ -1201,10 +1270,13 @@ def _response_spectrum_mode_rows(
         rs: The ``response_spectrum`` block of a review result.
         analysis: The ``analysis`` sub-dict of the same review result.
         force_unit: Force-unit label (e.g. ``"kN"``).
+        indices: Original mode positions to render, as returned by
+            :func:`_display_rs_modes`.  ``None`` renders every mode.
 
     Returns:
         Row dicts with pre-formatted string values (see
-        :func:`_format_table`).
+        :func:`_format_table`).  The trailing combined row is present
+        whenever the block carries directions.
     """
     directions = rs.get("directions") or {}
     modes = list(analysis.get("mass_participation") or [])
@@ -1213,7 +1285,9 @@ def _response_spectrum_mode_rows(
     total_weight = float(mass.get("total_weight", 0.0) or 0.0)
     gravity = float(mass.get("gravity", 0.0) or 0.0)
     rows: list[dict[str, Any]] = []
-    for i in range(min(n, len(modes))):
+    if indices is None:
+        indices = list(range(min(n, len(modes))))
+    for i in indices:
         mode = modes[i]
         row: dict[str, Any] = {
             "Mode": str(mode.get("mode", i + 1)),
@@ -1241,8 +1315,11 @@ def _response_spectrum_mode_rows(
     # Footer: the combined base shear for the *active* combination rule only
     # (``--rs-combination``, default CQC), titled with that rule.
     combination = str(rs.get("combination") or "cqc").lower()
-    if rows and directions:
-        shear_key = "base_shear_srss" if combination == "srss" else "base_shear_cqc"
+    # The footer is the direction total, so it is always shown — even when
+    # the min-participation filter drops every mode — which also keeps the
+    # share denominator visible.
+    if directions:
+        shear_key = _rs_shear_key(rs)
         summary: dict[str, Any] = {
             "Mode": combination.upper(),
             "Period (s)": "\u2014",
@@ -1388,7 +1465,9 @@ def format_review_report(
         max_modes: Cap on the number of modal rows displayed; ``0`` shows
             every computed mode (the default).
         min_participation: Hide modes whose largest translational mass
-            participation is below this percentage (``0.0`` = show all).
+            participation is below this percentage, and per-mode base-shear
+            rows below this percentage of the direction total
+            (``0.0`` = show all).
         num_braces: Cap on the number of brace rows displayed in the
             brace-buckling section; ``0`` shows every brace.
         show_ignored_tables: When ``True``, also list the deliberately-ignored
@@ -1680,10 +1759,13 @@ def format_review_report(
             rows = _response_spectrum_rows(rs, force_unit, lu)
             if rows:
                 add(_apply_indent(_format_table(rows)))
-            mode_rows = _response_spectrum_mode_rows(rs, analysis, force_unit)
+            indices, hidden = _display_rs_modes(rs, analysis, min_participation)
+            mode_rows = _response_spectrum_mode_rows(rs, analysis, force_unit, indices)
             if mode_rows:
                 add("  Per-mode base shear:")
                 add(_apply_indent(_format_table(mode_rows)))
+                if hidden:
+                    add(f"      ... {hidden} further mode(s) not shown")
         elif analysis.get("response_spectrum_error"):
             add(f"  Response spectrum FAILED: {analysis['response_spectrum_error']}")
 
@@ -1742,7 +1824,9 @@ def format_review_markdown(
         max_modes: Cap on the number of modal rows displayed; ``0`` shows
             every computed mode (the default).
         min_participation: Hide modes whose largest translational mass
-            participation is below this percentage (``0.0`` = show all).
+            participation is below this percentage, and per-mode base-shear
+            rows below this percentage of the direction total
+            (``0.0`` = show all).
         num_braces: Cap on the number of brace rows displayed in the
             brace-buckling section; ``0`` shows every brace.
         show_ignored_tables: When ``True``, also list the deliberately-ignored
@@ -2080,12 +2164,16 @@ def format_review_markdown(
             if rows:
                 add(_format_table(rows, tablefmt="github"))
                 add("")
-            mode_rows = _response_spectrum_mode_rows(rs, analysis, force_unit)
+            indices, hidden = _display_rs_modes(rs, analysis, min_participation)
+            mode_rows = _response_spectrum_mode_rows(rs, analysis, force_unit, indices)
             if mode_rows:
                 add("**Per-mode base shear**")
                 add("")
                 add(_format_table(mode_rows, tablefmt="github"))
                 add("")
+                if hidden:
+                    add(f"_{hidden} further mode(s) not shown._")
+                    add("")
         elif analysis.get("response_spectrum_error"):
             add(f"**Response spectrum FAILED:** {analysis['response_spectrum_error']}")
             add("")
@@ -2193,7 +2281,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         metavar="PCT",
         help=(
             "Hide modes whose largest translational mass participation "
-            "(max of MX/MY/MZ) is below PCT percent (default: 0 = show all)."
+            "(max of MX/MY/MZ) is below PCT percent, and per-mode base-shear "
+            "rows whose shear is below PCT percent of the direction total "
+            "(default: 0 = show all)."
         ),
     )
     parser.add_argument(

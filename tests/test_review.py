@@ -13,6 +13,7 @@ from fea_toolkit.model import (
 )
 from fea_toolkit.model.review import (
     _constraint_summary,
+    _display_rs_modes,
     _format_table,
     _mass_unit_label,
     _reaction_table_rows,
@@ -662,6 +663,32 @@ class TestModeDisplay:
         assert "0.2500" not in md_text  # beyond --max-modes
         assert "_6 further mode(s) not shown._" in md_text
 
+    def test_text_rs_table_shares_the_min_participation_threshold(self, result):
+        """The base-shear table is trimmed by the same flag, with its own rule."""
+        analysis = dict(result["analysis"])
+        analysis["response_spectrum"] = {
+            "combination": "cqc",
+            "directions": {
+                d: {
+                    "base_shear_cqc": 100.0,
+                    "modal_base_shear": [50.0, 1.0],
+                    "spectral_accels": [9.80665, 4.903325],
+                }
+                for d in ("X", "Y")
+            },
+        }
+        out = dict(result)
+        out["analysis"] = analysis
+
+        # 99 % of the 100 kN total clears neither mode (50 and 1 kN), and no
+        # modal participation ratio reaches 99 % either.
+        text = format_review_report(out, min_participation=99.0)
+        assert "8 further mode(s) not shown" in text  # participation table
+        assert "2 further mode(s) not shown" in text  # base-shear table
+
+        md_text = format_review_markdown(out, min_participation=99.0)
+        assert "_2 further mode(s) not shown._" in md_text
+
     def test_cli_accepts_mode_display_flags(self, tmp_path):
         """The mode-display flags must parse without a usage error.
 
@@ -1080,6 +1107,41 @@ class TestResponseSpectrumFormatting:
         analysis["mass_source"] = {"total_weight": 0.0, "gravity": 0.0}
         rows = _response_spectrum_mode_rows(self._block(), analysis, "kN")
         assert list(rows[0]) == ["Mode", "Period (s)", "V X (kN)", "V Y (kN)"]
+
+    def test_display_rs_modes_filters_by_base_shear_share(self):
+        """A mode survives only if its shear clears the share in a direction."""
+        analysis = {
+            "mass_participation": [
+                {"mode": 1, "period": 0.5},
+                {"mode": 2, "period": 0.25},
+            ]
+        }
+        # ``_block``: X modal [100.0, 20.5] / total CQC 120.5,
+        # Y modal [55.0, 5.0] / total CQC 60.0.
+        block = self._block()
+        # 2 % thresholds are tiny, so both modes stay.
+        assert _display_rs_modes(block, analysis, 2.0) == ([0, 1], 0)
+        # 30 % of X (36.15) keeps mode 1; mode 2 misses Y's 30 % (18.0) too.
+        assert _display_rs_modes(block, analysis, 30.0) == ([0], 1)
+        # Zero threshold keeps every mode.
+        assert _display_rs_modes(block, analysis, 0.0) == ([0, 1], 0)
+        # Magnitudes are compared, so a large negative shear still counts.
+        block["directions"]["X"]["modal_base_shear"] = [-100.0, -20.5]
+        assert _display_rs_modes(block, analysis, 30.0) == ([0], 1)
+
+    def test_mode_rows_footer_survives_full_filter(self):
+        """The combined row stays even when every mode is filtered out."""
+        analysis = {
+            "mass_participation": [
+                {"mode": 1, "period": 0.5},
+                {"mode": 2, "period": 0.25},
+            ]
+        }
+        block = self._block()
+        indices, hidden = _display_rs_modes(block, analysis, 99.0)
+        assert (indices, hidden) == ([], 2)
+        rows = _response_spectrum_mode_rows(block, analysis, "kN", indices)
+        assert [r["Mode"] for r in rows] == ["CQC"]
 
 
 # ═══════════════════════════════════════════════════════════════════
