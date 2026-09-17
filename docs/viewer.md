@@ -249,23 +249,37 @@ and register it in ``viewer._resolve_backend()``.
 
 These are direct‑call functions in :mod:`fea_toolkit.plotting.viz` that
 create a PyVista window (or return a plotter for Jupyter) for a specific
-result type.  All accept a ``notebook=True`` keyword for Jupyter, and
-a ``selection`` keyword to restrict visible elements.
+result type.  All accept a ``notebook=True`` keyword for Jupyter.
+``plot_deformed_displacement_3d`` accepts ``selection=``, which *restricts*
+the elements drawn; ``plot_mesh`` accepts ``highlight_selection=``, which
+**overdraws** what a ``Selection`` matches without hiding anything.
 
 ### 2a. 3D model view
 
 ```python
 from fea_toolkit.plotting import plot_mesh
+from fea_toolkit.model.selection import Selection
+
+sel = Selection(element_types=["Frame"], sections=["2xR3"])   # or ['Node'], ...
 
 plot_mesh(
     builder,
     show_nodes=True,
-    show_labels=False,
-    color_by_section=True,
-    selection=None,       # restrict to a Selection
+    show_node_labels=False,            # show_frame_labels / show_area_labels too
+    collapse_to_parents=True,          # unsplit engineer-drawn elements
+    node_colors={"298": "#ff2d2d"},    # per-node colour overrides (SAP joint IDs)
+    highlight_selection=sel,           # overdraw a Selection: yellow lines / dots
+    selection_color="yellow",
     notebook=False,
 )
 ```
+
+``highlight_selection`` **overdraws** (never hides) the elements a
+:class:`~fea_toolkit.model.selection.Selection` matches — thick half-opaque
+lines over frames, large dots over nodes, translucent faces over areas.  Pass
+a single ``Selection``, a list of them, or explicit IDs
+(``highlight_selection={"frames": ["1"], "nodes": ["5"]}``) for a model-less
+NPZ source.  See also ``--select`` in ``examples/view_model.py``.
 
 ### 2b. Deformed shape (unified)
 

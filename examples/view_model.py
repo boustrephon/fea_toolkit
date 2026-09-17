@@ -15,6 +15,18 @@ Usage::
     python examples/view_model.py /path/to/model.s2k --result mesh \
         --highlight-section 2xR3 2xR4 --zlim 3.4 4.5 --labels
 
+    # Mesh view: highlight the joints of a SAP2000 constraint group
+    # (any type: BODY, DIAPHRAGM, EQUAL, ...) and label them with their
+    # SAP joint labels
+    python examples/view_model.py /path/to/model.s2k --result mesh \
+        --highlight-constraint Fix --node-labels
+
+    # Mesh view: overdraw a Selection (frames in yellow, or nodes as dots)
+    python examples/view_model.py /path/to/model.s2k --result mesh \
+        --select "type=Frame; section=2xR3,2xR4"
+    python examples/view_model.py /path/to/model.s2k --result mesh \
+        --select "type=Node; group=Deck" --select "id=10,11,12"
+
     # Static analysis - deformed shape, then a force diagram
     python examples/view_model.py /path/to/model.s2k --result static --quantity Mz
 
@@ -36,6 +48,7 @@ Usage::
 """
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -86,8 +99,8 @@ def mesh_view_kwargs(args, section_names):
     """Translate the mesh-view CLI options into ``plot_mesh`` keyword arguments.
 
     Args:
-        args: Parsed CLI namespace (uses ``zlim``, ``labels`` and
-            ``highlight_section``).
+        args: Parsed CLI namespace (uses ``zlim``, ``labels``, ``node_labels``
+            and ``highlight_section``).
         section_names: Section names present in the model, used to validate
             ``--highlight-section`` and to build the colour map.
 
@@ -101,6 +114,8 @@ def mesh_view_kwargs(args, section_names):
         kwargs["zlim"] = (lo, hi)
     if args.labels:
         kwargs["show_frame_labels"] = True
+    if args.node_labels:
+        kwargs["show_node_labels"] = True
     if args.highlight_section:
         wanted = set(args.highlight_section)
         available = set(section_names)
@@ -117,6 +132,194 @@ def mesh_view_kwargs(args, section_names):
         else:
             print("Warning: --highlight-section matched no sections; ignoring.")
     return kwargs
+
+
+SELECT_KEYS = {
+    "type": "element_types",
+    "types": "element_types",
+    "element_types": "element_types",
+    "section": "sections",
+    "sections": "sections",
+    "material": "materials",
+    "materials": "materials",
+    "group": "groups",
+    "groups": "groups",
+    "id": "element_ids",
+    "ids": "element_ids",
+    "element_ids": "element_ids",
+    "z": "elevation_range",
+    "elevation": "elevation_range",
+    "elevation_range": "elevation_range",
+}
+
+SELECT_KEYS_HELP = "type, section, material, group, id, z"
+
+# One ``KEY=VALUE`` clause: the value runs until the next ``KEY=`` (which may
+# be separated by whitespace or a semicolon) or the end of the expression, so
+# values may contain spaces and commas (``section=Slab 200mm``).
+_SELECT_CLAUSE_RE = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)(?=\s+[A-Za-z_][A-Za-z0-9_]*\s*=|\s*;|$)",
+    re.DOTALL,
+)
+
+
+def parse_selection(expr):
+    """Parse a ``--select`` expression into a :class:`Selection`.
+
+    Grammar (clauses are separated by a semicolon **or whitespace**; within a
+    clause, values are separated by commas)::
+
+        KEY=VALUE[,VALUE ...][; KEY=VALUE ...]
+
+    Recognised keys (case-insensitive) — the plural and the
+    :class:`Selection` field name are accepted aliases:
+
+    ==================  =========================================
+    ``type``            ``element_types`` — ``Frame``, ``Area``, ``Node``
+    ``section``         ``sections``
+    ``material``        ``materials``
+    ``group``           ``groups``
+    ``id``              ``element_ids``
+    ``z``               ``elevation_range`` — ``LO:HI``
+    ==================  =========================================
+
+    Examples::
+
+        --select "type=Frame; section=2xR3,2xR4"
+        --select "id=10,11,12"
+        --select "type=Node; group=Deck"
+        --select "z=3.4:4.5"
+
+    Args:
+        expr: The raw expression string (one ``--select`` occurrence).
+
+    Returns:
+        The corresponding :class:`~fea_toolkit.model.selection.Selection`.
+
+    Raises:
+        ValueError: If a clause has no ``=``, names an unknown key, or gives a
+            ``z`` value that is not a pair of numbers.
+    """
+    from fea_toolkit.model.selection import Selection
+
+    kwargs = {}
+    clauses = list(_SELECT_CLAUSE_RE.finditer(expr))
+    # Anything the clause pattern did not consume is malformed input — most
+    # often a bare value with no ``KEY=``.
+    leftovers = _SELECT_CLAUSE_RE.sub("", expr).strip().strip(";").strip()
+    if leftovers:
+        raise ValueError(f"expected KEY=VALUE in {leftovers!r} (keys: {SELECT_KEYS_HELP})")
+
+    for clause in clauses:
+        key, value = clause.group(1), clause.group(2).strip()
+        field = SELECT_KEYS.get(key.lower())
+        if field is None:
+            raise ValueError(f"unknown selection key {key!r} (keys: {SELECT_KEYS_HELP})")
+        if field == "elevation_range":
+            bounds = [b for b in re.split(r"[:,]", value) if b.strip()]
+            if len(bounds) != 2:
+                raise ValueError(
+                    f"selection key 'z' takes exactly two numbers, e.g. z=3.4:4.5 — got {value!r}"
+                )
+            kwargs[field] = (float(bounds[0]), float(bounds[1]))
+        else:
+            values = [v.strip() for v in value.split(",") if v.strip()]
+            if not values:
+                raise ValueError(f"selection key {key!r} has no values")
+            if field == "element_types":
+                # Selection matches these case-sensitively against
+                # 'Frame' / 'Area' / 'Node' — canonicalise so 'frame' works.
+                values = [_canonical_element_type(v) for v in values]
+            kwargs[field] = values
+    return Selection(**kwargs)
+
+
+def _canonical_element_type(value):
+    """Title-case a ``type=`` value against ``Frame`` / ``Area`` / ``Node``."""
+    for known in ("Frame", "Area", "Node"):
+        if value.lower() == known.lower():
+            return known
+    print(f"Warning: --select: unknown element type {value!r} (expected Frame, Area or Node).")
+    return value
+
+
+def selection_highlights(args):
+    """Build the ``--select`` :class:`Selection` objects for the mesh view.
+
+    Args:
+        args: Parsed CLI namespace (uses ``select``).
+
+    Returns:
+        List of :class:`Selection` objects, or ``None`` when the option was
+        not used (which :func:`plot_mesh` reads as "no overlay").
+    """
+    if not args.select:
+        return None
+    selections = []
+    for expr in args.select:
+        try:
+            sel = parse_selection(expr)
+        except ValueError as exc:
+            sys.exit(f"Error: --select {expr!r}: {exc}")
+        if sel.element_types == ["Node"] and (
+            sel.sections or sel.materials or sel.elevation_range
+        ):
+            # Selection matches nodes on type / id / group only, so a node-only
+            # selection silently ignores every other criterion.
+            print(
+                "Warning: --select: a Node-only Selection is matched by type, "
+                "id and group — its section / material / z criteria are ignored."
+            )
+        selections.append(sel)
+    return selections
+
+
+def constraint_node_colors(args, md):
+    """Resolve ``--highlight-constraint`` names to a node-colour mapping.
+
+    Looks each requested name up in the model's ``CONSTRAINT DEFINITIONS``
+    tables and collects the joints assigned to it in ``JOINT CONSTRAINT
+    ASSIGNMENTS`` (``md.constraint_assignments``).  The lookup is
+    type-agnostic, so ``BODY`` rigid bodies, ``DIAPHRAGM``, ``EQUAL``,
+    ``WELD``, … groups all work.
+
+    Args:
+        args: Parsed CLI namespace (uses ``highlight_constraint``).
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
+
+    Returns:
+        ``{joint_id: color}`` for :func:`plot_mesh`'s ``node_colors``
+        argument — empty when the option is unused or matched nothing.
+    """
+    if not args.highlight_constraint:
+        return {}
+
+    wanted = list(dict.fromkeys(args.highlight_constraint))
+    definitions = getattr(md, "constraints", {}) or {}
+    assignments = getattr(md, "constraint_assignments", {}) or {}
+    nodes = getattr(md, "nodes", {}) or {}
+
+    missing = [name for name in wanted if name not in definitions]
+    if missing:
+        print(f"Warning: constraint(s) not defined in the model: {missing}")
+
+    colors = {}
+    for name in wanted:
+        if name not in definitions:
+            continue
+        ctype = getattr(definitions[name], "constraint_type", "?") or "?"
+        assigned = [jid for jid, cname in assignments.items() if cname == name]
+        present = [jid for jid in assigned if jid in nodes]
+        print(
+            f"Highlighting constraint '{name}' ({ctype}): "
+            f"{len(present)} of {len(assigned)} assigned joint(s) present in the model."
+        )
+        for jid in present:
+            colors[jid] = "#ff2d2d"
+
+    if not colors:
+        print("Warning: --highlight-constraint matched no joints; ignoring.")
+    return colors
 
 
 def _npz_section_names(data):
@@ -279,8 +482,25 @@ def show_interactive(builder, md):
 def show_npz(path, args):
     """Display a saved .npz archive directly (no solver run)."""
     data = np.load(path, allow_pickle=True)
-    if args.result in ("static", "modal") and (args.zlim or args.labels or args.highlight_section):
-        print("Note: --zlim / --labels / --highlight-section apply to --result mesh only.")
+    if args.result in ("static", "modal") and (
+        args.zlim or args.labels or args.node_labels or args.highlight_section
+    ):
+        print(
+            "Note: --zlim / --labels / --node-labels / --highlight-section "
+            "apply to --result mesh only."
+        )
+    if args.highlight_constraint:
+        print(
+            "Note: --highlight-constraint needs a .s2k model — NPZ archives "
+            "carry geometry and results, but not CONSTRAINT DEFINITIONS / "
+            "JOINT CONSTRAINT ASSIGNMENTS."
+        )
+    if args.select:
+        print(
+            "Note: --select needs a .s2k model — a Selection is resolved "
+            "against section / material / group / elevation data that an NPZ "
+            "archive does not carry."
+        )
     if args.result == "static":
         plot_force_diagram(str(path), quantity=args.quantity, dimension=args.dimension)
     elif args.result == "modal":
@@ -321,14 +541,30 @@ def run_s2k(md, args):
     )
     print(f"Load patterns: {list(md.load_patterns.keys())}")
 
-    if args.result != "mesh" and (args.zlim or args.labels or args.highlight_section):
-        print("Note: --zlim / --labels / --highlight-section apply to --result mesh only.")
+    mesh_only = (
+        args.zlim
+        or args.labels
+        or args.node_labels
+        or args.highlight_section
+        or args.highlight_constraint
+        or args.select
+    )
+    if args.result != "mesh" and mesh_only:
+        print(
+            "Note: --zlim / --labels / --node-labels / --highlight-section / "
+            "--highlight-constraint / --select apply to --result mesh only."
+        )
 
     if args.result == "mesh":
+        kwargs = mesh_view_kwargs(args, set(md.sections))
+        node_colors = constraint_node_colors(args, md)
+        if node_colors:
+            kwargs["node_colors"] = node_colors
         plot_mesh(
             md,
             collapse_to_parents=True,
-            **mesh_view_kwargs(args, set(md.sections)),
+            highlight_selection=selection_highlights(args),
+            **kwargs,
         )
         return
 
@@ -365,6 +601,10 @@ def main():
             "  %(prog)s model.s2k -r mesh --labels                 # mesh view, frame IDs\n"
             "  %(prog)s model.s2k -r mesh --zlim 3.4 4.5 \\\n"
             "      --highlight-section 2xR3 2xR4                   # highlight braces in a band\n"
+            "  %(prog)s model.s2k -r mesh \\\n"
+            "      --highlight-constraint Fix --node-labels        # SAP constraint joints\n"
+            "  %(prog)s model.s2k -r mesh \\\n"
+            "      --select \"type=Frame; section=2xR3\"            # Selection overlay\n"
             "  %(prog)s results.npz -r static --quantity Mz        # saved archive\n"
             "  %(prog)s --sample -r modal --mode 1                 # built-in sample\n"
         ),
@@ -432,6 +672,42 @@ def main():
         "--labels",
         action="store_true",
         help="Mesh view: label frame (element) IDs.",
+    )
+    parser.add_argument(
+        "--node-labels",
+        action="store_true",
+        help=(
+            "Mesh view: label nodes.  Joints highlighted with "
+            "--highlight-constraint are labelled with their SAP joint label, "
+            "other nodes with their OpenSees tag."
+        ),
+    )
+    parser.add_argument(
+        "--highlight-constraint",
+        nargs="+",
+        metavar="NAME",
+        default=None,
+        help=(
+            "Mesh view: draw the joints assigned to these SAP2000 constraint "
+            "group(s) in red (any type — BODY, DIAPHRAGM, EQUAL, ...), e.g. "
+            "--highlight-constraint Fix.  Needs a .s2k model; NPZ archives do "
+            "not carry the constraint tables."
+        ),
+    )
+    parser.add_argument(
+        "--select",
+        action="append",
+        metavar="EXPR",
+        default=None,
+        help=(
+            "Mesh view: overdraw the elements matched by a Selection in "
+            "yellow — wide half-opaque lines over frames, large dots over "
+            "nodes.  EXPR is 'KEY=VALUE[,VALUE ...][; KEY=VALUE ...]' with "
+            "keys " + SELECT_KEYS_HELP + ", e.g. --select 'type=Frame; "
+            "section=2xR3,2xR4', --select 'id=10,11,12' or --select "
+            "'z=3.4:4.5'.  Repeat --select to overlay several selections.  "
+            "Needs a .s2k model."
+        ),
     )
     parser.add_argument(
         "--highlight-section",

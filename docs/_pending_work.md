@@ -5,11 +5,11 @@ status: "draft"
 tags: [planning, work-log, internal]
 category: [planning]
 ---
-# Pending work — fea_toolkit (2026-09-13)
+# Pending work — fea_toolkit (2026-09-17)
 
 ## PENDING (active — not yet done)
 
-> Priority-ordered register (maintained 2026-09-13).  Every pending item
+> Priority-ordered register (maintained 2026-09-17).  Every pending item
 > below is cross-referenced to its source document.  **Sequencing notes:**
 > Tier 1 (P1 force-diagram unification, P2 large-file splits) landed
 > 2026-08-24 — see the DONE register.  The Tier 2 physics items (P3 solver
@@ -453,10 +453,175 @@ the change in the DONE register below.
 `python -m fea_toolkit.io.table_registry model.s2k`) reports tables the toolkit
 does not consume, and the review report includes the same section.
 
+#### P17 — Bilinearizer negative-ordinate contract (revisit)
+Source: `docs/csm_bilinearization.md` § *Edge Cases*;
+`tests/test_csm.py::TestBilinearization::test_noisy_curve_with_negative_sa`.
+
+**What.** The four bilinearizers document `S_a_arr` as **non-negative**
+(`Args` in `model/csm.py`) and do not screen negatives themselves.  The only
+production caller, `compute_performance_point()`, folds a -X/-Y push with
+`np.abs()` and masks ordinates below `-1e-12` before dispatch, so **live CSM
+results are unaffected** — the open question is whether the *methods* should
+tolerate negative ordinates, or whether the non-negative input stays a
+documented caller obligation.
+
+**Evidence (measured 2026-09-17).** Bilinear+hardening curve
+(`S_d = linspace(0, 0.08, 41)`, knee at 0.02) carrying one sentinel negative
+ordinate `S_a[3] = -5.0` at `S_d = 0.006`, passed **raw**:
+1. `bilinearize_stiffness_change` → `(0.006, -5.0)`: the negative sample wins
+   criterion A (secant `-833 < 0.5 * K_init`) and is adopted **verbatim as the
+   yield point**, i.e. a negative yield acceleration.
+2. `bilinearize_composite` → `(0.008, 40.0)` — positive only because the 10 %
+   clamp re-interpolates just past the negative sample.
+3. `bilinearize_equal_energy` → `(0.08, 130.0)` and `bilinearize_rc` →
+   `(0.0195, 97.4)` — positive, but their area integrals silently include the
+   negative ordinate (slightly biased `A_cap`).
+
+So a raw negative ordinate yields *inconsistent* results across the four
+methods rather than a clean error.
+
+**Options.** (a) **Keep the contract caller-side** (current state): the `Args`
+precondition stands and docs/test describe it — wording already updated in
+`docs/csm_bilinearization.md` and the test docstring.  (b) **Make the methods
+negative-tolerant**: skip `S_a <= 0` samples in the stiffness-change
+criterion A/B scan and mask negatives before the area integrals, which makes
+the former docs claim ("negative values skipped") true and lets the test feed
+`S_a` unfiltered.
+
+**Next step.** Decide (a) vs (b).  If (b): add the skip/mask in
+`src/fea_toolkit/model/csm.py`, flip `test_noisy_curve_with_negative_sa` to
+pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
+
 #### Closed items (README reconciliation, 2026-08-25)
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
+
+## DONE (2026-09-17 — `view_model` / `plot_mesh`: overdraw a `Selection` in yellow)
+
+**What.** ``examples/view_model.py`` could highlight *sections* and *constraint
+groups*, but there was no way to pick elements/nodes with the toolkit's own
+:class:`~fea_toolkit.model.selection.Selection` criteria (sections, materials,
+groups, IDs, elevation band) and see them in the 3D view.
+
+- **Plotting.** ``plot_mesh()`` (and ``compare_meshes()``, per source) gains
+  ``highlight_selection`` — a ``Selection``, a sequence of them, or an explicit
+  ``{"frames": [...], "nodes": [...], "areas": [...]}`` mapping for a
+  model-less NPZ dict.  Matches are **overdrawn**, never removed: wide
+  (``line_width=10``) half-opaque (``0.5``) lines over frame elements, large
+  (``point_size=18``) translucent dots over nodes, translucent faces over
+  areas — so frame-only, node-only and combined selections all work.  Colour is
+  overridable via ``selection_color`` (default ``"yellow"``).
+  ``plotting/viz_model.py``: new ``_selection_id_sets`` (resolve, model-backed
+  or explicit IDs), ``_draw_selection_overlay``, ``_unique_nodes`` (extracted
+  tag-dedup, shared with the ``node_colors`` path), ``_source_model`` and
+  ``_expand_split_frames``.
+- **Split-element IDs.** A parent ID reaches its children and a child ID its
+  parent + siblings, so an ID selection works whichever space it names — and
+  keeps working under ``collapse_to_parents=True``, where the children the
+  selection resolves to are drawn as their parent.
+- **Failure modes are loud.** A ``Selection`` on a data-dict source raises
+  ``ValueError`` ("pass explicit IDs instead"); a non-``Selection`` entry raises
+  ``TypeError``; the ``story`` criterion raises (it needs storey data this
+  resolver is not given — use ``elevation_range``); a selection that matches
+  nothing *rendered* warns instead of silently doing nothing.  Node matching
+  uses the mapping key only — no OpenSees-tag fallback, since tags and SAP
+  joint labels are different numbering spaces (a tag fallback would colour a
+  wrong joint).
+- **CLI.** ``examples/view_model.py``: new repeatable
+  ``--select "KEY=VALUE[,VALUE ...][; KEY=VALUE ...]"`` (mesh view) with keys
+  ``type`` / ``section`` / ``material`` / ``group`` / ``id`` / ``z``.
+  ``type`` values are canonicalised (``frame`` → ``Frame``); clauses may be
+  space- or semicolon-separated and values may contain spaces
+  (``section=Slab 200mm``); bad keys/values exit with the list of valid keys.
+  A Node-only selection with ``section`` / ``material`` / ``z`` warns that
+  those criteria are ignored (``Selection`` matches nodes on type/id/group
+  only).  NPZ archives say that ``--select`` needs a ``.s2k``.
+
+**Tests.** ``tests/test_viz_model.py``: ``TestSelectionOverlay`` (frame lines,
+node dots, combined, group-based node selection, area faces, colour override,
+empty-selection warning, NPZ raises, explicit IDs, ``story`` rejected,
+non-``Selection`` rejected), ``TestSplitElementSelectionExpansion``
+(parent↔child expansion, resolved ID sets) and
+``TestViewModelSelectionExpression`` (grammar, aliases, case-insensitivity,
+space-separated clauses, error messages, node-only criterion warning).
+
+**Validation.** Full suite ``1662 passed, 2 skipped, 2 xfailed``; ruff clean.
+End-to-end off-screen render of the BPPS pipe-rack `.s2k`:
+`--select "type=Frame; section=2xR3"` → ``Selection overlay (yellow): 40 frame(s),
+0 node(s), 0 area(s).``; `--select "id=298"` → ``40 frame(s), 1 node(s)``
+(frame 298 is 2xR3; joint 298 is a separate label space).
+
+## DONE (2026-09-17 — `view_model`: highlight the joints of a SAP2000 constraint group)
+
+**What.** `examples/view_model.py` could highlight *sections*
+(`--highlight-section`), but had no way to show which joints belong to a
+SAP2000 constraint group — the gap that made the BPPS pipe-rack `Fix` BODY
+constraint (65 upper-deck joints tied as one rigid body) invisible in the
+toolkit's own viewer.
+
+- **Plotting.** `plotting/viz_model.py`: `plot_mesh()` /
+  `_render_scene()` gain `node_colors` — an optional ``{node_id: color}``
+  mapping drawn as a second, larger point cloud on top of the plain black
+  markers.  It mirrors the existing `section_colors` API, but matches the
+  **mapping key** (SAP joint label for an `SAPModelData` / NPZ source)
+  rather than a tag, so no informal numeric fallback can colour the wrong
+  node.  With `show_node_labels`, a highlighted node is labelled with that
+  key and the others keep their OpenSees tag — the tag is a different
+  number from the joint label a `.s2k` constraint table lists.  The
+  tag-deduplication loop now keeps the mapping key alongside each unique
+  node (`unique_keys`) to make the match possible.
+- **CLI.** `examples/view_model.py`: new `--highlight-constraint NAME [NAME
+  ...]` (mesh view) resolves each name against `md.constraints` and paints
+  every joint in `md.constraint_assignments` for it red, reporting
+  `Name (TYPE): n of m assigned joint(s) present in the model`.  The
+  resolution is deliberately **type-agnostic** — `BODY`, `DIAPHRAGM`,
+  `EQUAL`, `WELD`, … all read the same assignment table.  `--node-labels`
+  was added at the same time (there was previously no way to label nodes
+  from the CLI).  NPZ archives carry no constraint tables, so the option
+  says so instead of silently doing nothing.
+
+**Tests.** `tests/test_viz_model.py`: `TestNodeHighlighting` (spy on
+`pv.Plotter.add_mesh` / `add_point_labels` — asserts the plain/coloured
+split, that keys are node IDs not tags, and that a highlighted node is
+labelled with its key) and `TestViewModelConstraintHighlight` (unused
+option, BODY group resolution, multi-group union, unknown name, joints
+absent from the model).
+
+**Validation.** `tests/test_viz_model.py` 53 passed;
+`tests/test_plotting.py` + `tests/test_main.py` +
+`tests/test_renderers_pyvista.py` 52 passed.  End-to-end off-screen render
+of `BPPS_Pipe_Rack_SAP2000_v25_1_0_Pipe Dead Load Update.s2k` with
+`--result mesh --highlight-constraint Fix --node-labels`:
+`Highlighting constraint 'Fix' (BODY): 65 of 65 assigned joint(s) present
+in the model.`
+
+## DONE (2026-09-17 — `model`: `remove_floating_nodes` drops the removed joints' own loads)
+
+Review of `tests/test_sap_data.py` (the three floating-node tests) surfaced a
+producer leak, not a test-only problem:
+
+- **Bug.** `remove_floating_nodes()` appended the transferred `JointLoad`
+  copies on the nearest connected node but left the floating node's *own*
+  entries in `md.joint_loads` after deleting the node.  Load **application**
+  skips unknown node ids (`opensees/_loads.py` → `if node is None: continue`),
+  so the domain was correct, but `_mass_from_joint_loads()` keys by node id,
+  so the same physical load was counted twice — once on the neighbour and once
+  on the phantom id — inflating the reported seismic mass.  Measured with one
+  -100 kN `DEAD` joint load on a floating node and `g = 9.81`: total
+  20.39 → 10.19 model mass units after the fix.
+- **Fix.** `model/geometry_mesh.py`: filter `md.joint_loads` for the removed
+  node ids after the removal loop; docstring step 5 + `Modifies` line updated.
+- **Tests.** `test_remove_floating_nodes_transfers_joint_loads_per_pattern`
+  now asserts the exact final load list (nothing references the removed node)
+  instead of filtering the stale entries out of the assertion; the same test's
+  docstring records the deletion contract.  Opportunistic weakenings fixed
+  alongside: `TestTrapezoidalForceSplit.test_split_at_midpoint` dropped a
+  vacuous `or` (both segment ends are 10, so the OR was always true), and
+  `test_concrete_rect_no_rebar` now asserts the exact patch count (5) rather
+  than `>= 3`.
+- **Validation.** `tests/test_sap_data.py` 109 passed; full suite 1626 passed,
+  2 skipped, 2 xfailed.
 
 ## DONE (2026-09-16 — SAP2000 table-coverage detection: registry + drift guards)
 

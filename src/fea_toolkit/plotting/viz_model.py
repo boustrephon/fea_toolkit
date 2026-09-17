@@ -663,6 +663,268 @@ def _resolve_shell_node(nodes, ref):
     return None
 
 
+def _unique_nodes(nodes):
+    """Return ``(keys, entries)`` for *nodes*, deduplicated by tag.
+
+    NPZ nodes may be dual-keyed (SAP ID + int tag), so the same physical node
+    appears twice in the mapping; the first key that produced each tag wins
+    (for NPZ data that is the SAP ID).  ``keys`` runs parallel to ``entries``
+    and is what ``node_colors`` and the selection overlay match on.
+    """
+    seen = set()
+    keys = []
+    entries = []
+    for nid, n in nodes.items():
+        tag = n.get("tag")
+        if tag is not None and tag not in seen:
+            seen.add(tag)
+            keys.append(nid)
+            entries.append(n)
+    return keys, entries
+
+
+def _source_model(source):
+    """Return the model object behind *source*, or ``None`` for a data dict.
+
+    Mirrors the source dispatch in :func:`_resolve_mesh_data`: an
+    ``SAPModelData`` is its own model, a builder exposes one through ``model``
+    / ``mesh_model``, a ``MeshModel`` is already a model, and a loaded NPZ /
+    HDF5 dict has none (a ``Selection`` cannot be resolved against it).
+    """
+    if isinstance(source, _NPZ_TYPES):
+        return None
+    if isinstance(source, SAPModelData):
+        return source
+    if hasattr(source, "model"):
+        return source.model
+    if hasattr(source, "mesh_model"):
+        return source.mesh_model
+    return source
+
+
+def _expand_split_frames(model, frame_ids):
+    """Expand split-element IDs onto the IDs that are actually drawn.
+
+    A split parent's ID stands for all of its children (and a child's ID for
+    its parent), so an ID-based selection works whichever space it was written
+    in — including ``plot_mesh(..., collapse_to_parents=True)``, where the
+    children a ``Selection`` resolves to are drawn as their parent.
+    """
+    children_of: dict[str, list[str]] = {}
+    for eid, elem in getattr(model, "frame_elements", {}).items():
+        parent = getattr(elem, "parent_id", None)
+        if parent:
+            children_of.setdefault(parent, []).append(eid)
+
+    out = set(frame_ids)
+    for fid in list(out):
+        elem = model.frame_elements.get(fid)
+        parent = getattr(elem, "parent_id", None)
+        if parent:
+            out.add(parent)
+    for fid in list(out):
+        out.update(children_of.get(fid, ()))
+    return out
+
+
+def _selection_id_sets(source, selection):
+    """Resolve *selection* to the frame / node / area IDs to overdraw.
+
+    Args:
+        source: The plot source — an ``SAPModelData``, a builder /
+            ``AnalysisBuilder``, a ``MeshModel``, or a loaded NPZ data dict.
+        selection: A :class:`~fea_toolkit.model.selection.Selection`, a
+            sequence of them, or an explicit
+            ``{"frames": [...], "nodes": [...], "areas": [...]}`` mapping.
+            The mapping form needs no model, so it is the only form that works
+            for a data-dict source.
+
+    Returns:
+        ``(frame_ids, node_ids, area_ids)`` — three sets of ID strings.
+
+    Raises:
+        TypeError: If an entry is neither a ``Selection`` nor an ID mapping.
+        ValueError: If a ``Selection`` is passed for a data-dict source (there
+            is no model to resolve section / group / elevation criteria
+            against), or if it carries the ``story`` criterion, which needs
+            storey data this resolver is not given.
+    """
+    if selection is None:
+        return set(), set(), set()
+
+    from ..model.selection import Selection
+
+    # One selection or a sequence of them; a bare mapping is one entry too.
+    entries = [selection] if isinstance(selection, (Selection, dict)) else list(selection)
+
+    model = _source_model(source)
+    frame_ids: set[str] = set()
+    node_ids: set[str] = set()
+    area_ids: set[str] = set()
+
+    for entry in entries:
+        if isinstance(entry, dict):
+            # Explicit ID sets — source-agnostic (NPZ / HDF5 archives).
+            frame_ids.update(str(i) for i in entry.get("frames", ()))
+            node_ids.update(str(i) for i in entry.get("nodes", ()))
+            area_ids.update(str(i) for i in entry.get("areas", ()))
+            continue
+        if not isinstance(entry, Selection):
+            raise TypeError(
+                "selection entries must be Selection objects or "
+                "{'frames': ..., 'nodes': ..., 'areas': ...} mappings; got "
+                f"{type(entry).__name__}"
+            )
+        if model is None:
+            raise ValueError(
+                "a Selection needs a model to resolve against, but this source is a "
+                "data dict (NPZ/HDF5) — pass explicit IDs instead, e.g. "
+                "selection={'frames': ['1', '2'], 'nodes': ['5']}"
+            )
+        if entry.story is not None:
+            raise ValueError(
+                "the 'story' criterion needs storey data, which plot_mesh does not "
+                "resolve — use elevation_range (--select 'z=LO:HI') or resolve the "
+                "story filter yourself with Selection.resolve_to_mesh_sets()"
+            )
+        frame_ids.update(entry.get_frame_ids(model))
+        node_ids.update(entry.get_node_ids(model))
+        area_ids.update(entry.get_area_ids(model))
+
+    if model is not None and frame_ids:
+        frame_ids = _expand_split_frames(model, frame_ids)
+    return frame_ids, node_ids, area_ids
+
+
+def _draw_selection_overlay(
+    plotter, data, nodes, selection_ids, in_limits, shrink=0.0, color="yellow"
+):
+    """Overdraw the selected elements with wide, half-opaque *color* marks.
+
+    Frames become thick translucent lines and nodes large translucent dots, so
+    a ``Selection`` of frames and/or nodes is visible without hiding the mesh
+    underneath.  Selected areas get translucent faces — the criterion is most
+    often frame-based, but an area-only selection must not be a silent no-op.
+
+    Prints a one-line summary, and warns when the selection matched nothing
+    that is actually drawn.
+
+    Args:
+        plotter: The PyVista plotter to draw into.
+        data: Mesh data dict from :func:`_resolve_mesh_data`.
+        nodes: The ``data["nodes"]`` mapping (dual-keyed for NPZ sources).
+        selection_ids: ``(frame_ids, node_ids, area_ids)`` from
+            :func:`_selection_id_sets`.
+        in_limits: Predicate testing a point against the active bounding box.
+        shrink: Fraction to shrink lines / faces toward their midpoint.
+        color: Overlay colour (default ``"yellow"``).
+
+    Returns:
+        ``(n_frames, n_nodes, n_areas)`` — the counts actually drawn.
+    """
+    import warnings
+
+    import pyvista as pv
+
+    sel_frames, sel_nodes, sel_areas = selection_ids
+    n_frames = 0
+    n_nodes = 0
+    n_areas = 0
+
+    # ── Frames — wide, half-opaque lines ────────────────────────
+    lines = []
+    for fr in data["frames"]:
+        if str(fr.get("id")) not in sel_frames:
+            continue
+        ni = _resolve_frame_node(nodes, fr, "i")
+        nj = _resolve_frame_node(nodes, fr, "j")
+        if ni is None or nj is None:
+            continue
+        mid = [(ni["x"] + nj["x"]) / 2, (ni["y"] + nj["y"]) / 2, (ni["z"] + nj["z"]) / 2]
+        if not in_limits(mid):
+            continue
+        p1 = np.array([ni["x"], ni["y"], ni["z"]])
+        p2 = np.array([nj["x"], nj["y"], nj["z"]])
+        if shrink:
+            m = (p1 + p2) / 2
+            p1 = p1 + (m - p1) * shrink
+            p2 = p2 + (m - p2) * shrink
+        lines.append(pv.lines_from_points(np.array([p1, p2])))
+        n_frames += 1
+    if lines:
+        merged = lines[0] if len(lines) == 1 else lines[0].merge(lines[1:])
+        plotter.add_mesh(merged, color=color, line_width=10, opacity=0.5)
+
+    # ── Nodes — large, half-opaque dots ─────────────────────────
+    # Matched on the mapping key (the source's node ID / SAP joint label).
+    # There is deliberately no tag fallback: OpenSees tags and SAP labels are
+    # different numbering spaces, so a tag match would colour a wrong joint.
+    node_keys, node_entries = _unique_nodes(nodes)
+    node_pts = []
+    for key, n in zip(node_keys, node_entries):
+        if key not in sel_nodes:
+            continue
+        pt = [n["x"], n["y"], n["z"]]
+        if not in_limits(pt):
+            continue
+        node_pts.append(pt)
+        n_nodes += 1
+    if node_pts:
+        plotter.add_mesh(
+            pv.PolyData(np.array(node_pts)),
+            color=color,
+            point_size=18,
+            opacity=0.5,
+            render_points_as_spheres=True,
+        )
+
+    # ── Areas — translucent faces ───────────────────────────────
+    area_pts = []
+    faces = []
+    for sh in data["shells"]:
+        if str(sh.get("id")) not in sel_areas:
+            continue
+        refs = sh.get("node_ids") or sh.get("node_tags") or []
+        quad = []
+        for ref in refs:
+            nd = nodes.get(ref)
+            if nd is None:
+                break
+            quad.append([nd["x"], nd["y"], nd["z"]])
+        if len(quad) < 3:
+            continue
+        if not in_limits(np.mean(quad, axis=0)):
+            continue
+        while len(quad) < 4:
+            quad.append(quad[-1])
+        base = len(area_pts)
+        area_pts.extend(quad)
+        faces.extend([4, base, base + 1, base + 2, base + 3])
+        n_areas += 1
+    if area_pts:
+        plotter.add_mesh(
+            pv.PolyData(np.array(area_pts), faces=np.array(faces)),
+            color=color,
+            opacity=0.35,
+            show_edges=True,
+            edge_color=color,
+            line_width=3,
+        )
+
+    if n_frames or n_nodes or n_areas:
+        print(
+            f"Selection overlay ({color}): {n_frames} frame(s), "
+            f"{n_nodes} node(s), {n_areas} area(s)."
+        )
+    else:
+        warnings.warn(
+            "highlight_selection matched nothing in the rendered mesh — nothing overlaid.",
+            UserWarning,
+            stacklevel=3,
+        )
+    return n_frames, n_nodes, n_areas
+
+
 def _render_scene(
     plotter,
     data,
@@ -683,6 +945,9 @@ def _render_scene(
     node_label_offset=0.4,
     tag_font=16,
     section_colors=None,
+    node_colors=None,
+    selection_ids=None,
+    selection_color="yellow",
 ):
     """Render mesh geometry from resolved data into a PyVista plotter.
 
@@ -704,6 +969,20 @@ def _render_scene(
         Draw edge constraint lines.
     show_frame_labels, show_node_labels, show_area_labels : bool
         Toggle text labels.
+    section_colors : dict or None
+        ``{section_name: color}`` overrides for frames / shells.
+    node_colors : dict or None
+        ``{node_id: color}`` overrides for the node markers.  Nodes present
+        in the mapping are drawn on top of the plain markers, larger and in
+        the given colour; the remaining nodes stay black.  Keys are the node
+        IDs of *data* (SAP joint labels for an ``SAPModelData`` source).
+    selection_ids : tuple or None
+        Resolved ``(frame_ids, node_ids, area_ids)`` from
+        :func:`_selection_id_sets`.  Those elements are overdrawn with wide,
+        half-opaque *selection_color* marks — lines for frames, dots for
+        nodes, translucent faces for areas.
+    selection_color : str
+        Colour of the selection overlay (default ``"yellow"``).
     """
     import numpy as np
     import pyvista as pv
@@ -738,6 +1017,8 @@ def _render_scene(
     ]
     if section_colors is None:
         section_colors = {}
+    if node_colors is None:
+        node_colors = {}
 
     # ── Frames ──────────────────────────────────────────────────
     if show_frames:
@@ -825,22 +1106,37 @@ def _render_scene(
     # ── Nodes ───────────────────────────────────────────────────
     # Deduplicate by tag: NPZ nodes may be dual-keyed (SAP ID + int tag).
     # Built once before the marker and label blocks so node labels work
-    # even when show_nodes is False.
-    seen_tags = set()
-    unique_nodes = []
-    for n in nodes.values():
-        tag = n.get("tag")
-        if tag is not None and tag not in seen_tags:
-            seen_tags.add(tag)
-            unique_nodes.append(n)
+    # even when show_nodes is False.  ``unique_keys`` keeps the mapping key
+    # that produced each entry, so ``node_colors`` (keyed by node ID / SAP
+    # joint label) can be matched without a tag-based lookup.
+    unique_keys, unique_nodes = _unique_nodes(nodes)
 
     if show_nodes:
-        npts = np.array(
-            [[n["x"], n["y"], n["z"]] for n in unique_nodes if _in_limits([n["x"], n["y"], n["z"]])]
-        )
-        if len(npts):
+        plain_pts = []
+        highlighted = {}
+        for key, n in zip(unique_keys, unique_nodes):
+            if not _in_limits([n["x"], n["y"], n["z"]]):
+                continue
+            pt = [n["x"], n["y"], n["z"]]
+            color = node_colors.get(key)
+            if color is None:
+                plain_pts.append(pt)
+            else:
+                highlighted.setdefault(color, []).append(pt)
+        if plain_pts:
             plotter.add_mesh(
-                pv.PolyData(npts), color="black", point_size=6, render_points_as_spheres=True
+                pv.PolyData(np.array(plain_pts)),
+                color="black",
+                point_size=6,
+                render_points_as_spheres=True,
+            )
+        # Highlighted nodes drawn last and larger, so they sit on top.
+        for color, pts in highlighted.items():
+            plotter.add_mesh(
+                pv.PolyData(np.array(pts)),
+                color=color,
+                point_size=14,
+                render_points_as_spheres=True,
             )
 
     # ── Orphan nodes ────────────────────────────────────────────
@@ -911,13 +1207,29 @@ def _render_scene(
                 pv.PolyData(pts, lines=conn), color="yellow", opacity=0.25, line_width=12
             )
 
+    # ── Selection overlay ───────────────────────────────────────
+    # Drawn after the geometry (so it sits on top) and before the labels
+    # (so labels stay readable above it).
+    if selection_ids is not None:
+        _draw_selection_overlay(
+            plotter,
+            data,
+            nodes,
+            selection_ids,
+            _in_limits,
+            shrink=shrink,
+            color=selection_color,
+        )
+
     # ── Labels ──────────────────────────────────────────────────
     if show_node_labels:
-        # Use the same tag-deduplicated unique_nodes collection as markers
+        # Use the same tag-deduplicated unique_nodes collection as markers.
+        # Highlighted nodes are labelled with their mapping key (the SAP
+        # joint label), which is what the SAP2000 constraint tables use.
         pts, tags = [], []
-        for n in unique_nodes:
+        for key, n in zip(unique_keys, unique_nodes):
             if _in_limits([n["x"], n["y"], n["z"]]):
-                tag_val = n.get("tag", "")
+                tag_val = key if key in node_colors else n.get("tag", "")
                 pts.append([n["x"] + node_label_offset, n["y"] + node_label_offset, n["z"]])
                 tags.append(f"N{tag_val}")
         if pts:
@@ -987,6 +1299,9 @@ def plot_mesh(
     show_frame_labels=False,
     show_area_labels=False,
     section_colors=None,
+    node_colors=None,
+    highlight_selection=None,
+    selection_color="yellow",
     notebook=False,
     **kwargs,
 ):
@@ -1020,6 +1335,27 @@ def plot_mesh(
         section_colors: Optional ``{section_name: color}`` overrides.  Sections
             absent from the mapping fall back to the default palette (frames)
             or the next palette colour (shells).
+        node_colors: Optional ``{node_id: color}`` overrides for the node
+            markers — nodes present in the mapping are drawn larger, on top
+            of the plain markers, in the given colour; the rest stay black.
+            Keys are the node IDs of the source (SAP joint labels for a
+            ``SAPModelData``); highlighted nodes are labelled with that key
+            when ``show_node_labels`` is set.
+        highlight_selection: A
+            :class:`~fea_toolkit.model.selection.Selection` (or a sequence of
+            them) whose matches are **overdrawn** with wide, half-opaque
+            ``selection_color`` marks — thick lines over frame elements and
+            large dots over nodes, so frame-only, node-only and combined
+            selections all work.  Selected areas get translucent faces.
+            Unlike the ``selection`` argument of
+            :func:`plot_deformed_displacement_3d`, this never *removes*
+            anything from the view.  Requires a model-backed source
+            (``SAPModelData`` / builder / ``MeshModel``); for a data-dict
+            source pass explicit IDs instead, e.g.
+            ``highlight_selection={"frames": ["1", "2"], "nodes": ["5"]}``
+            (IDs in the source's own space — SAP element / joint labels).
+        selection_color: Colour of the selection overlay (default
+            ``"yellow"``).
         notebook: Return plotter for Jupyter embedding.
         **kwargs: Passed to ``pyvista.Plotter()``.
 
@@ -1031,6 +1367,11 @@ def plot_mesh(
     data = _resolve_mesh_data(source, collapse_to_parents=collapse_to_parents)
     pv.set_plot_theme("document")
     plotter = pv.Plotter(notebook=notebook, **kwargs)
+    # Resolve the overlay before rendering; ``None`` means "no overlay" and
+    # must stay distinct from an empty selection (which is warned about).
+    selection_ids = None
+    if highlight_selection is not None:
+        selection_ids = _selection_id_sets(source, highlight_selection)
     _render_scene(
         plotter,
         data,
@@ -1048,6 +1389,9 @@ def plot_mesh(
         show_frame_labels=show_frame_labels,
         show_area_labels=show_area_labels,
         section_colors=section_colors,
+        node_colors=node_colors,
+        selection_ids=selection_ids,
+        selection_color=selection_color,
     )
     _set_isometric_view(plotter)
     if notebook:
@@ -1062,6 +1406,8 @@ def compare_meshes(
     *,
     collapse_to_parents=False,
     labels=("Model A", "Model B"),
+    highlight_selection=None,
+    selection_color="yellow",
     notebook=False,
     **kwargs,
 ):
@@ -1074,6 +1420,12 @@ def compare_meshes(
         source_b: Second model (builder or NPZ dict).
         collapse_to_parents: Show unsplit parent elements (default ``False``).
         labels: Pair of titles for the subplots.
+        highlight_selection: A
+            :class:`~fea_toolkit.model.selection.Selection` (or a sequence of
+            them) resolved **per source** and overdrawn in *selection_color*;
+            see :func:`plot_mesh`.
+        selection_color: Colour of the selection overlay (default
+            ``"yellow"``).
         notebook: Return plotter for Jupyter embedding (default ``False``).
         **kwargs: Passed to :func:`_render_scene` (show_*, shrink, xlim, etc.).
 
@@ -1093,7 +1445,18 @@ def compare_meshes(
         data = _resolve_mesh_data(src, collapse_to_parents=collapse_to_parents)
         plotter.subplot(0, i)
         plotter.add_text(label, position="upper_edge", font_size=28)
-        _render_scene(plotter, data, **kwargs)
+        # Each source resolves its own selection (the two models need not
+        # share element IDs).
+        selection_ids = None
+        if highlight_selection is not None:
+            selection_ids = _selection_id_sets(src, highlight_selection)
+        _render_scene(
+            plotter,
+            data,
+            selection_ids=selection_ids,
+            selection_color=selection_color,
+            **kwargs,
+        )
         _set_isometric_view(plotter)
 
     if notebook:

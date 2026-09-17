@@ -1048,6 +1048,394 @@ class TestModalParticipationAnnotation:
 
 
 # ============================================================================
+# Node highlighting (node_colors)
+# ============================================================================
+
+
+@pytest.mark.needs_pyvista
+class TestNodeHighlighting:
+    """``plot_mesh(node_colors=...)`` splits plain and highlighted markers.
+
+    Highlighted nodes are drawn as a second, larger point cloud on top of the
+    plain black ones — the mechanism ``examples/view_model.py`` uses to draw
+    the joints of a SAP2000 constraint group.
+    """
+
+    @staticmethod
+    def _capture(data, **kwargs):
+        """Render *data* and return ``[(n_points, color, point_size), ...]``.
+
+        Only node markers are captured: they are the meshes drawn with a
+        ``point_size`` keyword (frames use ``line_width``, shells face cells).
+        """
+        from unittest.mock import patch
+
+        import pyvista as pv
+
+        from fea_toolkit.plotting import plot_mesh
+
+        captured = []
+        real = pv.Plotter.add_mesh
+
+        def _spy(self, mesh, *args, **kw):
+            if "point_size" in kw and mesh.n_points:
+                captured.append((mesh.n_points, kw.get("color"), kw.get("point_size")))
+            return real(self, mesh, *args, **kw)
+
+        with patch.object(pv.Plotter, "add_mesh", _spy):
+            pl = plot_mesh(
+                data,
+                show_frames=False,
+                show_shells=False,
+                notebook=True,
+                **kwargs,
+            )
+        pl.close()
+        return captured
+
+    def test_plain_nodes_are_one_black_cloud(self, sample_npz_data):
+        """Without ``node_colors`` every node is a single black marker mesh."""
+        assert self._capture(sample_npz_data) == [(3, "black", 6)]
+
+    def test_highlighted_nodes_split_off(self, sample_npz_data):
+        """A node-colour entry moves that node into its own coloured cloud."""
+        captured = self._capture(sample_npz_data, node_colors={"2": "#ff2d2d"})
+
+        assert (2, "black", 6) in captured
+        assert (1, "#ff2d2d", 14) in captured
+
+    def test_keys_are_source_node_ids_not_tags(self, sample_npz_data):
+        """A key matching no node ID leaves every node plain.
+
+        ``node_colors`` is keyed by the source's node IDs (SAP joint labels for
+        an ``SAPModelData`` / NPZ source), so unlike ``section_colors`` there is
+        no informal tag fallback.
+        """
+        captured = self._capture(sample_npz_data, node_colors={"not-a-node": "#ff2d2d"})
+
+        assert captured == [(3, "black", 6)]
+
+    def test_highlighted_label_uses_node_id_key(self):
+        """Highlighted nodes are labelled with the key, plain ones by tag.
+
+        The SAP joint label is what the ``JOINT CONSTRAINT ASSIGNMENTS`` table
+        lists, so a highlighted joint must not be labelled with its OpenSees
+        tag (which is a different number for a parsed model).
+        """
+        from unittest.mock import patch
+
+        import pyvista as pv
+
+        from fea_toolkit.plotting import plot_mesh
+
+        # SAP IDs deliberately differ from the tags to tell the two apart.
+        data = {
+            "node_tag": np.array([101, 102, 103]),
+            "node_sap_id": np.array(["J1", "J2", "J3"]),
+            "node_x": np.array([0.0, 4.0, 4.0]),
+            "node_y": np.array([0.0, 0.0, 0.0]),
+            "node_z": np.array([0.0, 0.0, 3.0]),
+        }
+
+        captured = []
+        real = pv.Plotter.add_point_labels
+
+        def _spy(self, points, labels, *args, **kw):
+            captured.extend(str(lbl) for lbl in labels)
+            return real(self, points, labels, *args, **kw)
+
+        with patch.object(pv.Plotter, "add_point_labels", _spy):
+            pl = plot_mesh(
+                data,
+                show_frames=False,
+                show_shells=False,
+                show_node_labels=True,
+                node_colors={"J2": "#ff2d2d"},
+                notebook=True,
+            )
+        pl.close()
+
+        assert sorted(captured) == sorted(["N101", "NJ2", "N103"])
+
+
+# ============================================================================
+# Selection overlay (highlight_selection)
+# ============================================================================
+
+
+def _selection_model():
+    """Return a small ``SAPModelData`` with sections, a group and 4 nodes.
+
+    4 nodes / 2 frames / 1 area is enough to tell a frame selection from a
+    node selection and to exercise section- and group-based criteria.
+    """
+    from fea_toolkit.model.sap_data import (
+        AreaElement,
+        FrameElement,
+        Group,
+        ISection,
+        Node,
+        SAPModelData,
+    )
+
+    def _isection(name):
+        return ISection(
+            name=name,
+            shape="W16x31",
+            material="Steel",
+            A=0.4,
+            I33=0.02,
+            I22=0.02,
+            J=0.0,
+            depth=0.4,
+            bf=0.2,
+            tf=0.01,
+            tw=0.01,
+        )
+
+    return SAPModelData(
+        nodes={
+            "N1": Node("N1", 1, 0.0, 0.0, 0.0),
+            "N2": Node("N2", 2, 4.0, 0.0, 0.0),
+            "N3": Node("N3", 3, 4.0, 0.0, 3.0),
+            "N4": Node("N4", 4, 0.0, 4.0, 0.0),
+        },
+        restraints={},
+        materials={},
+        sections={"COL": _isection("COL"), "BEAM": _isection("BEAM")},
+        frame_elements={
+            "F1": FrameElement("F1", 10, "N1", "N3"),
+            "F2": FrameElement("F2", 20, "N2", "N3"),
+        },
+        area_elements={"A1": AreaElement("A1", 30, ["N1", "N2", "N3", "N4"])},
+        frame_assignments={"F1": "COL", "F2": "BEAM"},
+        area_assignments={"A1": "SLAB"},
+        groups={"Cols": Group(name="Cols", color="", objects=["Frame:F1", "Joint:N1"])},
+        frame_auto_mesh={},
+    )
+
+
+@pytest.mark.needs_pyvista
+class TestSelectionOverlay:
+    """A ``Selection`` handed to ``plot_mesh`` is overdrawn in yellow."""
+
+    @staticmethod
+    def _capture(source, selection, color="yellow", **kwargs):
+        """Render and return the overlay meshes added to the plotter.
+
+        Returns ``[(n_points, n_cells, color, kwargs), ...]`` for every mesh
+        drawn in the overlay *color* with an ``opacity`` — the base geometry
+        uses the section palette, so it is excluded.
+        """
+        from unittest.mock import patch
+
+        import pyvista as pv
+
+        from fea_toolkit.plotting import plot_mesh
+
+        captured = []
+        real = pv.Plotter.add_mesh
+
+        def _spy(self, mesh, *args, **kw):
+            if kw.get("color") == color and "opacity" in kw:
+                captured.append((mesh.n_points, mesh.n_cells, kw.get("color"), kw))
+            return real(self, mesh, *args, **kw)
+
+        with patch.object(pv.Plotter, "add_mesh", _spy):
+            pl = plot_mesh(source, highlight_selection=selection, notebook=True, **kwargs)
+        pl.close()
+        return captured
+
+    def test_frame_selection_draws_wide_translucent_lines(self):
+        """A section selection overdraws exactly the matching frames."""
+        from fea_toolkit.model.selection import Selection
+
+        md = _selection_model()
+        sel = Selection(element_types=["Frame"], sections=["COL"])
+
+        captured = self._capture(md, sel, show_shells=False)
+
+        assert len(captured) == 1, captured
+        _n_points, n_cells, color, kw = captured[0]
+        assert color == "yellow"
+        assert kw.get("line_width") == 10
+        assert kw.get("opacity") == 0.5
+        # One straight segment per matched frame (a single 2-point polyline).
+        assert n_cells == 1, captured
+
+    def test_node_selection_draws_translucent_dots(self):
+        """A node selection draws large, half-opaque dots — no lines."""
+        from fea_toolkit.model.selection import Selection
+
+        md = _selection_model()
+        sel = Selection(element_types=["Node"], element_ids=["N1", "N3"])
+
+        captured = self._capture(md, sel, show_frames=False, show_shells=False)
+
+        assert len(captured) == 1, captured
+        n_points, _n_cells, color, kw = captured[0]
+        assert (n_points, color, kw.get("point_size"), kw.get("opacity")) == (
+            2,
+            "yellow",
+            18,
+            0.5,
+        )
+
+    def test_frames_and_nodes_in_one_selection(self):
+        """``element_types=['Frame', 'Node']`` overlays both kinds of mark."""
+        from fea_toolkit.model.selection import Selection
+
+        md = _selection_model()
+        sel = Selection(element_types=["Frame", "Node"], element_ids=["F2", "N4"])
+
+        captured = self._capture(md, sel, show_shells=False)
+
+        styles = sorted((c[0], c[3].get("line_width"), c[3].get("point_size")) for c in captured)
+        assert styles == [(1, None, 18), (2, 10, None)], captured
+
+    def test_group_selection_selects_nodes(self):
+        """Group membership resolves in the ``Joint:<id>`` reference space."""
+        from fea_toolkit.model.selection import Selection
+
+        md = _selection_model()
+        sel = Selection(element_types=["Node"], groups=["Cols"])
+
+        captured = self._capture(md, sel, show_frames=False, show_shells=False)
+
+        assert [c[0] for c in captured] == [1]
+
+    def test_area_selection_draws_translucent_faces(self):
+        """An area-only selection is not a silent no-op."""
+        from fea_toolkit.model.selection import Selection
+
+        md = _selection_model()
+        sel = Selection(element_types=["Area"])
+
+        captured = self._capture(md, sel, show_frames=False, show_nodes=False)
+
+        assert len(captured) == 1, captured
+        n_points, n_cells, color, kw = captured[0]
+        assert (n_points, n_cells, color) == (4, 1, "yellow")
+        assert kw.get("opacity") == 0.35
+
+    def test_selection_colour_is_overridable(self):
+        from fea_toolkit.model.selection import Selection
+
+        captured = self._capture(
+            _selection_model(),
+            Selection(element_types=["Area"]),
+            color="#00ff00",
+            selection_color="#00ff00",
+        )
+
+        assert [c[2] for c in captured] == ["#00ff00"]
+
+    def test_empty_selection_warns(self):
+        """A selection that matches nothing warns instead of doing nothing."""
+        from fea_toolkit.model.selection import Selection
+
+        sel = Selection(element_types=["Frame"], sections=["NOPE"])
+
+        with pytest.warns(UserWarning, match="matched nothing"):
+            self._capture(_selection_model(), sel)
+
+    def test_selection_on_data_dict_raises(self, sample_npz_data):
+        """A Selection cannot resolve against a model-less NPZ dict."""
+        from fea_toolkit.model.selection import Selection
+        from fea_toolkit.plotting import plot_mesh
+
+        with pytest.raises(ValueError, match="data dict"):
+            plot_mesh(
+                sample_npz_data,
+                highlight_selection=Selection(element_types=["Frame"]),
+                notebook=True,
+            )
+
+    def test_explicit_ids_work_on_data_dict(self, sample_npz_data):
+        """Explicit ID sets are the model-less path for NPZ data."""
+        captured = self._capture(
+            sample_npz_data,
+            {"frames": ["2"], "nodes": ["3"]},
+            show_frames=True,
+            show_nodes=True,
+        )
+
+        styles = {(c[1], c[3].get("line_width"), c[3].get("point_size")) for c in captured}
+        assert styles == {(1, 10, None), (1, None, 18)}, captured
+
+    def test_story_criterion_is_rejected(self):
+        """``story`` needs storey data — fail loudly, not by matching nothing."""
+        from fea_toolkit.model.selection import Selection
+        from fea_toolkit.plotting import plot_mesh
+
+        with pytest.raises(ValueError, match="storey data"):
+            plot_mesh(
+                _selection_model(),
+                highlight_selection=Selection(element_types=["Frame"], story=["Level 2"]),
+                notebook=True,
+            )
+
+    def test_non_selection_entry_is_rejected(self):
+        from fea_toolkit.plotting import plot_mesh
+
+        with pytest.raises(TypeError, match="must be Selection objects"):
+            plot_mesh(_selection_model(), highlight_selection=["F1"], notebook=True)
+
+
+class TestSplitElementSelectionExpansion:
+    """An ID selection reaches split children and their parent."""
+
+    @staticmethod
+    def _mesh_model():
+        from fea_toolkit.model.mesh_model import MeshModel
+        from fea_toolkit.model.sap_data import FrameElement, Node
+
+        return MeshModel(
+            nodes={
+                "N1": Node("N1", 1, 0.0, 0.0, 0.0),
+                "N2": Node("N2", 2, 2.0, 0.0, 0.0),
+                "N3": Node("N3", 3, 4.0, 0.0, 0.0),
+            },
+            frame_elements={
+                "P1": FrameElement("P1", 10, "N1", "N3", inactive=True),
+                "P1-1": FrameElement("P1-1", 11, "N1", "N2", parent_id="P1"),
+                "P1-2": FrameElement("P1-2", 12, "N2", "N3", parent_id="P1"),
+                "P2": FrameElement("P2", 20, "N1", "N3"),
+            },
+            frame_assignments={"P1-1": "BEAM", "P1-2": "BEAM", "P2": "BEAM"},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+            sections={},
+            groups={},
+        )
+
+    def test_expand_split_frames(self):
+        from fea_toolkit.plotting.viz_model import _expand_split_frames
+
+        model = self._mesh_model()
+
+        # A child ID reaches the parent and all its siblings …
+        assert _expand_split_frames(model, {"P1-1"}) == {"P1", "P1-1", "P1-2"}
+        # … and a parent ID reaches all of its children.
+        assert _expand_split_frames(model, {"P1"}) == {"P1", "P1-1", "P1-2"}
+        # Unsplittable elements are untouched.
+        assert _expand_split_frames(model, {"P2"}) == {"P2"}
+
+    def test_selection_id_sets_expand_children(self):
+        from fea_toolkit.model.selection import Selection
+        from fea_toolkit.plotting.viz_model import _selection_id_sets
+
+        frames, nodes, areas = _selection_id_sets(
+            self._mesh_model(), Selection(element_types=["Frame"], element_ids=["P1-2"])
+        )
+
+        assert frames == {"P1", "P1-1", "P1-2"}
+        assert nodes == set()
+        assert areas == set()
+
+
+# ============================================================================
 # Model-viewer mode index
 # ============================================================================
 
@@ -1073,3 +1461,197 @@ class TestViewModelModeIndex:
         for bad in (0, -1):
             with pytest.raises(SystemExit):
                 mode_index(self._args(bad))
+
+
+# ============================================================================
+# Model-viewer constraint highlighting
+# ============================================================================
+
+
+class TestViewModelConstraintHighlight:
+    """``--highlight-constraint`` resolves SAP2000 constraint groups to joints.
+
+    The resolution is type-agnostic (it reads the assignment table, not the
+    definition type), so ``BODY`` rigid bodies, ``DIAPHRAGM`` groups and the
+    other constraint types all work.
+    """
+
+    @staticmethod
+    def _args(names):
+        from argparse import Namespace
+
+        return Namespace(highlight_constraint=names)
+
+    @staticmethod
+    def _md():
+        from types import SimpleNamespace
+
+        from fea_toolkit.model.sap_data import Constraint, Node
+
+        return SimpleNamespace(
+            constraints={
+                "Fix": Constraint("Fix", "BODY"),
+                "D1": Constraint("D1", "DIAPHRAGM"),
+            },
+            constraint_assignments={"1": "Fix", "2": "Fix", "10": "D1"},
+            nodes={
+                "1": Node("1", 1, 0.0, 0.0, 0.0),
+                "2": Node("2", 2, 1.0, 0.0, 0.0),
+                "10": Node("10", 10, 0.0, 0.0, 3.0),
+            },
+        )
+
+    def test_unused_option_returns_empty(self):
+        from examples.view_model import constraint_node_colors
+
+        assert constraint_node_colors(self._args(None), self._md()) == {}
+        assert constraint_node_colors(self._args([]), self._md()) == {}
+
+    def test_resolves_body_group(self, capsys):
+        from examples.view_model import constraint_node_colors
+
+        colors = constraint_node_colors(self._args(["Fix"]), self._md())
+
+        assert set(colors) == {"1", "2"}
+        assert set(colors.values()) == {"#ff2d2d"}
+        assert "Highlighting constraint 'Fix' (BODY): 2 of 2" in capsys.readouterr().out
+
+    def test_multiple_groups_are_unioned(self):
+        from examples.view_model import constraint_node_colors
+
+        colors = constraint_node_colors(self._args(["Fix", "D1"]), self._md())
+
+        assert set(colors) == {"1", "2", "10"}
+
+    def test_unknown_name_is_reported_and_ignored(self, capsys):
+        from examples.view_model import constraint_node_colors
+
+        assert constraint_node_colors(self._args(["Nope"]), self._md()) == {}
+        assert "not defined in the model" in capsys.readouterr().out
+
+    def test_joints_missing_from_the_model_are_skipped(self, capsys):
+        """A joint removed by the importer must not colour a different node."""
+        from examples.view_model import constraint_node_colors
+
+        md = self._md()
+        md.constraint_assignments = {**md.constraint_assignments, "99": "Fix"}
+
+        colors = constraint_node_colors(self._args(["Fix"]), md)
+
+        assert set(colors) == {"1", "2"}
+        assert "2 of 3 assigned joint(s) present" in capsys.readouterr().out
+
+
+# ============================================================================
+# Model-viewer selection expressions (--select)
+# ============================================================================
+
+
+class TestViewModelSelectionExpression:
+    """``--select`` expressions build :class:`Selection` objects."""
+
+    @staticmethod
+    def _args(exprs):
+        from argparse import Namespace
+
+        return Namespace(select=exprs)
+
+    def test_section_and_type(self):
+        from examples.view_model import parse_selection
+
+        sel = parse_selection("type=Frame; section=2xR3,2xR4")
+
+        assert sel.element_types == ["Frame"]
+        assert sel.sections == ["2xR3", "2xR4"]
+        assert sel.element_ids is None
+
+    def test_element_ids_need_no_type(self):
+        from examples.view_model import parse_selection
+
+        sel = parse_selection("id=10, 11,12")
+
+        assert sel.element_ids == ["10", "11", "12"]
+        assert sel.element_types is None
+
+    def test_elevation_range_from_colon_or_comma(self):
+        from examples.view_model import parse_selection
+
+        assert parse_selection("z=3.4:4.5").elevation_range == (3.4, 4.5)
+        assert parse_selection("elevation=3.4,4.5").elevation_range == (3.4, 4.5)
+
+    def test_element_type_is_case_insensitive(self):
+        from examples.view_model import parse_selection
+
+        assert parse_selection("type=frame").element_types == ["Frame"]
+        assert parse_selection("type=node").element_types == ["Node"]
+
+    def test_unknown_key_raises(self):
+        from examples.view_model import parse_selection
+
+        with pytest.raises(ValueError, match="unknown selection key"):
+            parse_selection("storey=Roof")
+
+    def test_missing_value_raises(self):
+        from examples.view_model import parse_selection
+
+        with pytest.raises(ValueError, match="expected KEY=VALUE"):
+            parse_selection("Frame")
+
+    def test_bad_elevation_range_raises(self):
+        from examples.view_model import parse_selection
+
+        with pytest.raises(ValueError, match="exactly two numbers"):
+            parse_selection("z=3.4")
+
+    def test_unused_option_returns_none(self):
+        from examples.view_model import selection_highlights
+
+        assert selection_highlights(self._args(None)) is None
+        assert selection_highlights(self._args([])) is None
+
+    def test_multiple_expressions_become_multiple_selections(self):
+        from examples.view_model import selection_highlights
+
+        sels = selection_highlights(self._args(["type=Frame; section=2xR3", "id=1,2"]))
+
+        assert [s.sections for s in sels] == [["2xR3"], None]
+        assert [s.element_ids for s in sels] == [None, ["1", "2"]]
+
+    def test_bad_expression_exits_with_message(self):
+        from examples.view_model import selection_highlights
+
+        with pytest.raises(SystemExit) as exc:
+            selection_highlights(self._args(["bogus=1"]))
+
+        assert "unknown selection key" in str(exc.value)
+
+    def test_clauses_may_be_space_separated(self):
+        """A missing ``;`` is tolerated, and values may contain spaces."""
+        from examples.view_model import parse_selection
+
+        sel = parse_selection("type=Frame section=Slab 200mm")
+
+        assert sel.element_types == ["Frame"]
+        assert sel.sections == ["Slab 200mm"]
+
+    def test_bare_value_is_rejected(self, capsys):
+        from examples.view_model import parse_selection
+
+        with pytest.raises(ValueError, match="expected KEY=VALUE"):
+            parse_selection("Frame,Beam")
+
+    def test_node_only_selection_warns_about_ignored_criteria(self, capsys):
+        """Nodes are matched by type / id / group — say so for section / z."""
+        from examples.view_model import selection_highlights
+
+        sels = selection_highlights(self._args(["type=Node; z=0:3.4"]))
+
+        assert len(sels) == 1
+        assert "Node-only Selection" in capsys.readouterr().out
+
+    def test_frames_with_elevation_do_not_warn(self, capsys):
+        from examples.view_model import selection_highlights
+
+        selection_highlights(self._args(["type=Frame; z=0:3.4"]))
+
+        assert capsys.readouterr().out == ""
