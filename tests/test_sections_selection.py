@@ -896,7 +896,7 @@ class TestConstraintSelection:
                 "3": Node(node_id="3", node_tag=3, x=4, y=0, z=3),
                 "4": Node(node_id="4", node_tag=4, x=0, y=4, z=0),
             },
-            restraints={},
+            restraints={"1": Restraint([1, 1, 1, 1, 1, 1])},
             materials={},
             sections={},
             frame_elements={
@@ -913,6 +913,7 @@ class TestConstraintSelection:
                 "D1": Constraint(name="D1", constraint_type="DIAPHRAGM"),
             },
             constraint_assignments={"1": "Fix", "2": "Fix", "3": "D1"},
+            joint_loads=[JointLoad(pattern="DEAD", node_id="1", fz=-100.0)],
         )
 
     @staticmethod
@@ -982,6 +983,47 @@ class TestConstraintSelection:
     def test_filter_nodes_returns_the_subset(self):
         md = self._model()
         assert set(Selection(constraints=["D1"]).filter_nodes(md)) == {"3"}
+
+    # ── filter_model: node-scoped subsets ──
+
+    def test_filter_model_keeps_the_selected_joints(self):
+        """A constraint selection yields a joint-only subset, not an
+        empty model."""
+        md = self._model()
+        sub = Selection(constraints=["Fix"]).filter_model(md)
+        assert set(sub.nodes) == {"1", "2"}
+        assert sub.frame_elements == {}
+        assert sub.area_elements == {}
+
+    def test_filter_model_keeps_restraints_and_joint_loads(self):
+        md = self._model()
+        sub = Selection(constraints=["Fix"]).filter_model(md)
+        assert set(sub.restraints) == {"1"}
+        assert [jl.node_id for jl in sub.joint_loads] == ["1"]
+
+    def test_filter_model_prunes_constraint_data(self):
+        """Assignments follow the selected joints; definitions follow the
+        assignments."""
+        md = self._model()
+        sub = Selection(constraints=["Fix"]).filter_model(md)
+        assert sub.constraint_assignments == {"1": "Fix", "2": "Fix"}
+        assert set(sub.constraints) == {"Fix"}
+        assert sub.constraints["Fix"].constraint_type == "BODY"
+
+    def test_constraint_still_resolves_on_the_subset(self):
+        """The viewer workflow: highlight a constraint inside a subset."""
+        md = self._model()
+        sub = Selection(constraints=["Fix"]).filter_model(md)
+        assert set(Selection(constraints=["Fix"]).get_node_ids(sub)) == {"1", "2"}
+        # D1 was not selected, so neither its definition nor its assignment
+        # survives into the subset.
+        assert Selection(constraints=["D1"]).get_node_ids(sub) == []
+
+    def test_filter_model_node_scoped_by_element_type(self):
+        md = self._model()
+        sub = Selection(element_types=["Node"], element_ids=["1", "4"]).filter_model(md)
+        assert set(sub.nodes) == {"1", "4"}
+        assert sub.frame_elements == {}
 
 
 # ============================================================================
@@ -1213,6 +1255,13 @@ class TestSelectionFilterModel:
         assert len(sub.frame_elements) == 0
         assert len(sub.nodes) == 0
         assert len(sub.sections) == 0
+
+    def test_element_criteria_do_not_drag_in_every_node(self, full_model):
+        """Nodes enter as element endpoints unless the selection is
+        node-scoped, so a section filter must not pull in every joint."""
+        sub = Selection(sections=["UB100"]).filter_model(full_model)
+        assert set(sub.nodes) == {"1", "2", "3", "4"}
+        assert len(sub.nodes) < len(full_model.nodes)
 
     # ── Immutability ──
 

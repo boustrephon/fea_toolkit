@@ -246,6 +246,21 @@ class Selection:
             return True
         return eid in self.element_ids
 
+    def _selects_nodes_explicitly(self) -> bool:
+        """Whether the node criterion selects joints in its own right,
+        rather than nodes merely being *eligible*.
+
+        True when nodes are opted into (:attr:`element_types` names
+        ``Node``) or when a joint-only criterion is set
+        (:attr:`constraints`).  With ``element_types`` unset, a section /
+        material / elevation criterion would match every node trivially
+        (nodes ignore those criteria), which would drag the whole node set
+        into :meth:`filter_model` subsets.
+        """
+        if self.element_types is not None and "Node" in self.element_types:
+            return True
+        return self.constraints is not None
+
     def _frame_matches(
         self,
         model: Union["SAPModelData", "MeshModel"],
@@ -429,9 +444,21 @@ class Selection:
         * **Export** — create a clean subset for exchange or debugging.
         * **Verification** — confirm the selection is self-consistent.
 
-        Only **Frame** and **Area** selections are currently supported.
-        A pure **Node** selection (no Frame or Area types) will return an
-        empty model.
+        **Node-scoped selections** are supported too.  A selection is
+        node-scoped when it opts into nodes (``element_types`` names
+        ``Node``) or sets a joint-only criterion (:attr:`constraints`,
+        which no frame or area can satisfy); the subset then holds those
+        joints with their restraints, joint loads and constraint
+        assignments — the joints are the payload, not just element
+        endpoints.  When nodes are merely *eligible* (``element_types`` is
+        ``None`` and only element criteria are set) they enter the subset
+        as the endpoints of the selected frames / areas, as before.
+
+        The subset keeps :attr:`SAPModelData.constraint_assignments`
+        (pruned to the selected joints) and the constraint definitions they
+        reference, so a constraint-based selection still resolves on it —
+        ``plot_mesh(subset, highlight_selection=sel)`` highlights the same
+        joints in the context of that subset.
 
         Returns:
             A new ``SAPModelData`` instance containing only the entities
@@ -443,8 +470,12 @@ class Selection:
         frame_ids = set(self.get_frame_ids(model))
         area_ids = set(self.get_area_ids(model))
 
-        # 2. Collect referenced node IDs
+        # 2. Collect referenced node IDs — every joint the selection names
+        #    in its own right (a node-scoped selection) plus the endpoints
+        #    of the selected frames / areas.
         node_ids: set[str] = set()
+        if self._selects_nodes_explicitly():
+            node_ids.update(self.get_node_ids(model))
         for fid in frame_ids:
             fe = model.frame_elements.get(fid)
             if fe is not None:
@@ -473,7 +504,20 @@ class Selection:
             if sec is not None:
                 mat_names.add(sec.material)
 
-        # 5. Build filtered dicts
+        # 5. Constraint data — assignments on the selected joints and the
+        #    selected areas (edge constraints), plus the definitions they
+        #    reference, so the subset stays self-contained.
+        assignments_in = getattr(model, "constraint_assignments", None) or {}
+        constraint_assignments = {
+            nid: cname for nid, cname in assignments_in.items() if nid in node_ids
+        }
+        definitions_in = getattr(model, "constraints", None) or {}
+        referenced = set(constraint_assignments.values())
+        constraints = {name: con for name, con in definitions_in.items() if name in referenced}
+        edge_in = getattr(model, "area_edge_constraints", None) or {}
+        area_edge_constraints = {aid: edge_in[aid] for aid in area_ids if aid in edge_in}
+
+        # 6. Build filtered dicts
         subset = SAPModelData(
             # Nodes
             nodes={nid: model.nodes[nid] for nid in node_ids if nid in model.nodes},
@@ -520,6 +564,10 @@ class Selection:
             ],
             area_uniform_loads=self.filter_area_uniform_loads(model),
             area_gravity_loads=self.filter_area_gravity_loads(model),
+            # Joint constraints on the selected nodes / areas
+            constraints=constraints,
+            constraint_assignments=constraint_assignments,
+            area_edge_constraints=area_edge_constraints,
             # Units
             units=dict(model.units),
         )

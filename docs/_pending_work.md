@@ -516,6 +516,41 @@ backward-incompatible array-layout change.  Keep the *model* marker
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-17 — `Selection.filter_model`: node-scoped subsets + constraint data)
+
+**What.** Reviewing the constraint-selection work surfaced two gaps in
+`filter_model`:
+
+1. **Node-only selections returned an empty model** (a documented
+   limitation).  Because `constraints` is inherently joint-only, that
+   limitation became a silent trap: `Selection(constraints=['Fix'])`
+   `.get_node_ids(md)` returned the joints while `.filter_model(md)`
+   returned nothing.
+2. **Constraint data was dropped from the subset**, so the "self-contained
+   subset" was not self-contained: a subset exported to Rhino lost its
+   `SAP_Constraint` user strings, and re-selecting by constraint on the
+   subset found nothing.
+
+- **Node-scoped selections.** `filter_model` now includes the joints the
+  selection names in its own right — `element_types` naming `Node`, or a
+  joint-only criterion (`constraints`).  Nodes merely *eligible*
+  (`element_types is None` with only element criteria) still enter as the
+  endpoints of the selected frames / areas, so a section filter cannot drag
+  in every node (`_selects_nodes_explicitly()`).
+- **Constraint data carried.** The subset keeps `constraint_assignments`
+  pruned to the selected joints, the `constraints` definitions they
+  reference, and `area_edge_constraints` for the selected areas.
+- **Workflow.** `plot_mesh(subset, highlight_selection=Selection(
+  constraints=[...]))` now highlights the same joints inside a subset —
+  verified on the BPPS pipe-rack: a 12-frame subset around the `Fix` group
+  highlights 11 of its joints, and the node-only subset (65 joints, 0
+  frames) round-trips.
+
+**Tests.** `TestConstraintSelection`: joint-only subset, restraints /
+joint loads carried, constraint data pruned, re-selection on the subset,
+node-scoping by element type.  `TestSelectionFilterModel`: element criteria
+do not drag in every node.  Full suite 1700 passed, 2 skipped, 2 xfailed.
+
 ## DONE (2026-09-17 — codec payload is stamped with a schema-version marker)
 
 **What.** The model-codec JSON was identifiable only by its `__type__` key and
