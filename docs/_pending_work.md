@@ -516,6 +516,27 @@ backward-incompatible array-layout change.  Keep the *model* marker
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-17 — split the `examples/view_model.py` tests into their own file)
+
+**What.** `tests/test_viz_model.py` had grown past 1700 lines and hosted tests
+for `examples/view_model.py` (mode index, constraint highlighting, `--select`
+warnings, input policy) alongside tests for `plotting/viz_model.py` — the test
+file no longer mirrored the source it was named after (`.clinerules` §1.4).
+
+- `TestViewModelModeIndex`, `TestViewModelConstraintHighlight`,
+  `TestViewModelSelectionExpression` and `TestViewModelInputPolicy` moved to
+  the new `tests/test_view_model_cli.py`, which mirrors
+  `examples/view_model.py`.  `tests/test_viz_model.py` again covers only the
+  plotting layer.  Both files' docstrings now state the split and cross-
+  reference `tests/test_model_loader.py` for model-file dispatch.
+- The moved file carries its own local `_selection_model()` scenario builder
+  (scenario data stays with the test that owns it) and drops the `pathlib`
+  import the pre-split file needed only for its fixtures path.
+
+**Validation.** `tests/test_view_model_cli.py` 19 passed and
+`tests/test_viz_model.py` 61 passed; full suite 1707 passed, 2 skipped,
+2 xfailed; ruff clean.  Pure move — no behaviour change.
+
 ## DONE (2026-09-17 — one constraint resolution path + the source-coverage policy)
 
 **What.** Two follow-ups from the architecture review of the constraint work.
