@@ -963,9 +963,10 @@ class TestTrapezoidalForceSplit:
         f_data = ((0.0, 10.0), (1.0, 10.0))
         result = trapezoidal_force_split(f_data, [0.5])
         assert len(result) == 2
-        # Both halves should still have force=10
+        # Both halves should still have force=10 at both ends
         for seg in result:
-            assert abs(seg[0][1] - 10.0) < 1e-9 or abs(seg[1][1] - 10.0) < 1e-9
+            assert seg[0][1] == pytest.approx(10.0)
+            assert seg[1][1] == pytest.approx(10.0)
 
     def test_example_from_docstring(self):
         f_data = ((0.2, 1.2), (0.8, 5.1))
@@ -1136,7 +1137,7 @@ class TestConcreteRectangularSectionFiberPatches:
         patches = sec.to_fiber_patches(mat_tag=1)
         for p in patches:
             assert p[0] == "rect"
-        assert len(patches) >= 3  # core + 2 covers
+        assert len(patches) == 5  # 1 confined core + 4 unconfined covers
 
 
 class TestConcreteCircularSectionFiberPatches:
@@ -1312,14 +1313,19 @@ class TestSAPModelDataMethods:
         assert "3" not in md.nodes
 
     def test_remove_floating_nodes_with_restraint(self):
-        """Floating node with restraint transfers it to nearest neighbour."""
+        """Floating node with restraint transfers it to nearest neighbour.
+
+        Node ``3`` sits at x = 4, so it is strictly nearer to node ``2``
+        (2 units) than to node ``1`` (4 units) — the destination is
+        unambiguous, with no distance tie to break.
+        """
         from fea_toolkit.model.geometry import remove_floating_nodes
 
         md = SAPModelData(
             nodes={
                 "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
                 "2": Node(node_id="2", node_tag=2, x=6, y=0, z=0),
-                "3": Node(node_id="3", node_tag=3, x=3, y=0, z=0),  # floating
+                "3": Node(node_id="3", node_tag=3, x=4, y=0, z=0),  # floating
             },
             restraints={"3": Restraint([1, 1, 1, 1, 1, 1])},
             materials={},
@@ -1336,8 +1342,12 @@ class TestSAPModelDataMethods:
         rows = remove_floating_nodes(md)
         assert len(rows) == 1
         assert rows[0]["restrained"] is True
-        # Restraint should have transferred
-        assert "1" in md.restraints or "2" in md.restraints
+        assert rows[0]["nearest_node"] == "2"
+        assert rows[0]["distance"] == pytest.approx(2.0)
+        # Restraint transferred to the nearest connected node; the
+        # floating node's own entry is dropped.
+        assert set(md.restraints) == {"2"}
+        assert md.restraints["2"].dofs == [1, 1, 1, 1, 1, 1]
 
     def test_remove_floating_nodes_transfers_joint_loads_per_pattern(self):
         """Floating node's joint loads transfer per source pattern.
@@ -1347,6 +1357,11 @@ class TestSAPModelDataMethods:
         load's ``pattern`` — the previous patternless
         ``JointLoad(node=...)`` construction raised ``TypeError`` and
         aggregated every pattern into one anonymous entry.
+
+        Node ``3`` sits at x = 4, strictly nearer to node ``2`` (2 units)
+        than to node ``1`` (4 units), so every transferred load must land
+        on node ``2`` — and the removed node's own entries must be gone, so
+        nothing references a node that no longer exists.
         """
         from fea_toolkit.model.geometry import remove_floating_nodes
 
@@ -1354,7 +1369,7 @@ class TestSAPModelDataMethods:
             nodes={
                 "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
                 "2": Node(node_id="2", node_tag=2, x=6, y=0, z=0),
-                "3": Node(node_id="3", node_tag=3, x=3, y=0, z=0),  # floating
+                "3": Node(node_id="3", node_tag=3, x=4, y=0, z=0),  # floating
             },
             restraints={},
             materials={},
@@ -1374,13 +1389,16 @@ class TestSAPModelDataMethods:
         )
         rows = remove_floating_nodes(md)
         assert len(rows) == 1
-        transferred = [jl for jl in md.joint_loads if jl.node_id != "3"]
-        # Both patterns transferred independently, keeping their own
-        # pattern names and the nearest connected node's id.
+        assert rows[0]["nearest_node"] == "2"
+        transferred = list(md.joint_loads)
+        # The originals on the removed node are deleted, so the list holds
+        # exactly the two transferred entries — nothing still points at the
+        # phantom node "3".
         assert len(transferred) == 2
+        assert {jl.node_id for jl in transferred} == {"2"}
+        # Both patterns transferred independently, keeping their own
+        # pattern names and landing on the nearest connected node.
         by_pattern = {jl.pattern: jl for jl in transferred}
         assert set(by_pattern) == {"DEAD", "LIVE"}
-        for jl in transferred:
-            assert jl.node_id in ("1", "2")
         assert by_pattern["DEAD"].fz == pytest.approx(-100.0)
         assert by_pattern["LIVE"].fz == pytest.approx(-50.0)

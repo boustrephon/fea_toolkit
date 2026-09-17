@@ -2045,9 +2045,12 @@ def remove_floating_nodes(
       2. Find the nearest connected node at the same elevation band.
       3. Add mass/loads to that node.
       4. Remove the floating node from ``md.nodes``.
+      5. Delete the floating node's own joint-load entries, so no load
+         references a node that no longer exists.
 
     Modifies *md* in‑place (removes nodes, transfers restraints and
-    joint loads to the nearest connected neighbour).
+    joint loads to the nearest connected neighbour, and drops the
+    removed nodes' own load entries).
 
     Args:
         md: Model data to scan and clean.
@@ -2185,5 +2188,20 @@ def remove_floating_nodes(
     for nid in removed_nodes:
         md.nodes.pop(nid, None)
         restraints.pop(nid, None)
+
+    # Drop the removed nodes' own joint loads.  The transfers above added
+    # copies on the surviving neighbours, while these originals still point
+    # at nodes that no longer exist: load *application* skips unknown node
+    # ids, but every consumer that keys loads by node id (e.g.
+    # ``_mass_from_joint_loads``) would count the same physical load twice
+    # — once on the neighbour and once on the phantom id — inflating the
+    # reported seismic mass.
+    if removed_nodes:
+        removed_set = set(removed_nodes)
+        md.joint_loads = [
+            jl
+            for jl in (getattr(md, "joint_loads", None) or [])
+            if (getattr(jl, "node_id", "") or getattr(jl, "node", "")) not in removed_set
+        ]
 
     return rows
