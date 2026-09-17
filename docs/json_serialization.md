@@ -90,6 +90,23 @@ clone = json_to_model(payload, cls=SAPModelData)     # field-for-field equal
   reports any `SAPModelData` / `MeshModel` field whose type has no codec
   rule, and the corresponding test asserts the list is empty.
 
+## Reading a model back — `fea_toolkit.io.load_model_data`
+
+```python
+from fea_toolkit.io import load_model_data
+
+md = load_model_data("model.s2k")      # SAP2000 text export
+md = load_model_data("tables.json")    # either JSON form, auto-detected
+```
+
+`load_model_data()` dispatches on the suffix and, for JSON, on the payload's
+top-level markers: a model-codec snapshot is recognised by `__type__` /
+`__schema_version__`, anything else is read as a raw-table cache.  An
+unrecognised or malformed payload raises `ValueError` — parsing a raw-table
+cache as *text* would silently yield an empty model, so that trap is closed
+here rather than left to the caller.  `examples/view_model.py` and
+`python -m fea_toolkit.model.review` are the CLI consumers.
+
 ## Which one do I want?
 
 | Need | Use | Serialises |

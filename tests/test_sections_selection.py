@@ -1027,6 +1027,74 @@ class TestConstraintSelection:
 
 
 # ============================================================================
+# Selection.from_string — the KEY=VALUE expression form
+# ============================================================================
+
+
+class TestSelectionFromString:
+    """Grammar of ``Selection.from_string`` (clauses, aliases, errors)."""
+
+    def test_section_and_type(self):
+        sel = Selection.from_string("type=Frame; section=2xR3,2xR4")
+        assert sel.element_types == ["Frame"]
+        assert sel.sections == ["2xR3", "2xR4"]
+        assert sel.element_ids is None
+
+    def test_element_ids_need_no_type(self):
+        sel = Selection.from_string("id=10, 11,12")
+        assert sel.element_ids == ["10", "11", "12"]
+        assert sel.element_types is None
+
+    def test_constraint_key_and_alias(self):
+        assert Selection.from_string("constraint=Fix,D1").constraints == ["Fix", "D1"]
+        assert Selection.from_string("constraints=Fix").constraints == ["Fix"]
+
+    def test_elevation_range_from_colon_or_comma(self):
+        assert Selection.from_string("z=3.4:4.5").elevation_range == (3.4, 4.5)
+        assert Selection.from_string("elevation=3.4,4.5").elevation_range == (3.4, 4.5)
+
+    def test_element_type_is_case_insensitive(self):
+        assert Selection.from_string("type=frame").element_types == ["Frame"]
+        assert Selection.from_string("type=node").element_types == ["Node"]
+
+    def test_clauses_may_be_space_separated(self):
+        """A missing ``;`` is tolerated, and values may contain spaces."""
+        sel = Selection.from_string("type=Frame section=Slab 200mm")
+        assert sel.element_types == ["Frame"]
+        assert sel.sections == ["Slab 200mm"]
+
+    def test_unknown_key_raises(self):
+        with pytest.raises(ValueError, match="unknown selection key"):
+            Selection.from_string("storey=Roof")
+
+    def test_missing_value_raises(self):
+        with pytest.raises(ValueError, match="expected KEY=VALUE"):
+            Selection.from_string("Frame")
+
+    def test_bare_comma_list_is_rejected(self):
+        with pytest.raises(ValueError, match="expected KEY=VALUE"):
+            Selection.from_string("Frame,Beam")
+
+    def test_bad_elevation_range_raises(self):
+        with pytest.raises(ValueError, match="exactly two numbers"):
+            Selection.from_string("z=3.4")
+
+    def test_non_numeric_elevation_range_raises(self):
+        with pytest.raises(ValueError, match="takes two numbers"):
+            Selection.from_string("z=3.4:abc")
+
+    def test_unknown_element_type_raises(self):
+        """A typo in ``type=`` is an error, not a selection that matches
+        nothing."""
+        with pytest.raises(ValueError, match="unknown element type"):
+            Selection.from_string("type=bogus")
+
+    def test_empty_value_raises(self):
+        with pytest.raises(ValueError, match="has no values"):
+            Selection.from_string("section=")
+
+
+# ============================================================================
 # Selection filter_model tests
 # ============================================================================
 

@@ -159,6 +159,8 @@ see `.clinerules` §3.11.
 "Export 3D scene to HTML"           → ModelViewer(...).export_html(path)
 "Compare two meshes"                → compare_meshes(mesh1, mesh2)
 "Plot model from NPZ"               → from fea_toolkit.io import npz_to_pyvista_frame_mesh
+"Load a model (s2k / parsed JSON)"  → from fea_toolkit.io import load_model_data
+"Selection from a string"           → Selection.from_string("type=Frame; section=2xR3")
 "NPZ force diagram"                 → from fea_toolkit.plotting import plot_force_diagram
 "Highlight a Selection (yellow)"    → plot_mesh(builder, highlight_selection=Selection(sections=['2xR3']))
 "Select joints of a constraint group" → Selection(constraints=['Fix']).get_node_ids(md)

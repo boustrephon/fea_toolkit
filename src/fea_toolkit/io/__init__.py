@@ -25,6 +25,7 @@ from .ground_motion import (
     scale_to_pga,
     scale_to_target_sa,
 )
+from .model_loader import load_model_data
 from .npz_reader import (
     GEOMETRY_ARRAY_KEYS,
     describe_results_npz,
@@ -131,6 +132,7 @@ __all__ = [
     "flatten_stage",
     "format_linear_table",
     "get_schema_version",
+    "load_model_data",
     "load_pattern_totals",
     "make_static_key",
     "material_summary",

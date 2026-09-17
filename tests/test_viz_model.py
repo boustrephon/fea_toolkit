@@ -6,8 +6,6 @@ shrink-parameter override, and modal mass-participation annotation.
 Uses synthetic NPZ-like data dicts — no OpenSees.
 """
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
@@ -1590,60 +1588,14 @@ class TestViewModelConstraintHighlight:
 
 
 class TestViewModelSelectionExpression:
-    """``--select`` expressions build :class:`Selection` objects."""
+    """CLI behaviour of ``--select``: parsing delegates to
+    :meth:`Selection.from_string`, the CLI adds warnings and exits."""
 
     @staticmethod
     def _args(exprs):
         from argparse import Namespace
 
         return Namespace(select=exprs)
-
-    def test_section_and_type(self):
-        from examples.view_model import parse_selection
-
-        sel = parse_selection("type=Frame; section=2xR3,2xR4")
-
-        assert sel.element_types == ["Frame"]
-        assert sel.sections == ["2xR3", "2xR4"]
-        assert sel.element_ids is None
-
-    def test_element_ids_need_no_type(self):
-        from examples.view_model import parse_selection
-
-        sel = parse_selection("id=10, 11,12")
-
-        assert sel.element_ids == ["10", "11", "12"]
-        assert sel.element_types is None
-
-    def test_elevation_range_from_colon_or_comma(self):
-        from examples.view_model import parse_selection
-
-        assert parse_selection("z=3.4:4.5").elevation_range == (3.4, 4.5)
-        assert parse_selection("elevation=3.4,4.5").elevation_range == (3.4, 4.5)
-
-    def test_element_type_is_case_insensitive(self):
-        from examples.view_model import parse_selection
-
-        assert parse_selection("type=frame").element_types == ["Frame"]
-        assert parse_selection("type=node").element_types == ["Node"]
-
-    def test_unknown_key_raises(self):
-        from examples.view_model import parse_selection
-
-        with pytest.raises(ValueError, match="unknown selection key"):
-            parse_selection("storey=Roof")
-
-    def test_missing_value_raises(self):
-        from examples.view_model import parse_selection
-
-        with pytest.raises(ValueError, match="expected KEY=VALUE"):
-            parse_selection("Frame")
-
-    def test_bad_elevation_range_raises(self):
-        from examples.view_model import parse_selection
-
-        with pytest.raises(ValueError, match="exactly two numbers"):
-            parse_selection("z=3.4")
 
     def test_unused_option_returns_none(self):
         from examples.view_model import selection_highlights
@@ -1667,21 +1619,6 @@ class TestViewModelSelectionExpression:
 
         assert "unknown selection key" in str(exc.value)
 
-    def test_clauses_may_be_space_separated(self):
-        """A missing ``;`` is tolerated, and values may contain spaces."""
-        from examples.view_model import parse_selection
-
-        sel = parse_selection("type=Frame section=Slab 200mm")
-
-        assert sel.element_types == ["Frame"]
-        assert sel.sections == ["Slab 200mm"]
-
-    def test_bare_value_is_rejected(self, capsys):
-        from examples.view_model import parse_selection
-
-        with pytest.raises(ValueError, match="expected KEY=VALUE"):
-            parse_selection("Frame,Beam")
-
     def test_node_only_selection_warns_about_ignored_criteria(self, capsys):
         """Nodes are matched by type / id / group — say so for section / z."""
         from examples.view_model import selection_highlights
@@ -1697,20 +1634,6 @@ class TestViewModelSelectionExpression:
         selection_highlights(self._args(["type=Frame; z=0:3.4"]))
 
         assert capsys.readouterr().out == ""
-
-    def test_constraint_key(self):
-        """``constraint=`` maps onto the Selection's constraints field."""
-        from examples.view_model import parse_selection
-
-        sel = parse_selection("constraint=Fix,D1")
-
-        assert sel.constraints == ["Fix", "D1"]
-        assert sel.element_types is None
-
-    def test_constraint_key_alias(self):
-        from examples.view_model import parse_selection
-
-        assert parse_selection("constraints=Fix").constraints == ["Fix"]
 
     def test_constraint_only_does_not_warn(self, capsys):
         from examples.view_model import selection_highlights
@@ -1740,10 +1663,8 @@ class TestViewModelSelectionExpression:
 # ============================================================================
 
 
-class TestViewModelJsonInput:
-    """``view_model.load_model()`` accepts pre-parsed JSON besides ``.s2k``."""
-
-    FIXTURES = Path(__file__).parent / "fixtures"
+class TestViewModelInputPolicy:
+    """CLI policy for what a loaded model can be asked to do."""
 
     @staticmethod
     def _mesh_snapshot():
@@ -1760,65 +1681,6 @@ class TestViewModelJsonInput:
             frame_dist_loads=[],
         )
 
-    def test_raw_table_json_rebuilds_the_model(self):
-        """A ``SAP2000Parser.to_json()`` cache loads as a full SAPModelData."""
-        from examples.view_model import load_model
-        from fea_toolkit.model.sap_data import SAPModelData
-
-        model = load_model(self.FIXTURES / "sample.json")
-
-        assert isinstance(model, SAPModelData)
-        assert model.nodes and model.frame_elements
-
-    def test_codec_json_round_trips_an_sap_model(self, tmp_path):
-        """A ``model_to_json(SAPModelData)`` snapshot loads back equal."""
-        from examples.view_model import load_model
-        from fea_toolkit.io.model_codec import model_to_json
-        from fea_toolkit.model.sap_data import SAPModelData
-
-        original = _selection_model()
-        path = tmp_path / "model.json"
-        path.write_text(model_to_json(original), encoding="utf-8")
-
-        model = load_model(path)
-
-        assert isinstance(model, SAPModelData)
-        assert model == original
-
-    def test_codec_json_of_a_mesh_model(self, tmp_path):
-        """A MeshModel snapshot loads as a MeshModel — already meshed."""
-        from examples.view_model import load_model
-        from fea_toolkit.io.model_codec import model_to_json
-        from fea_toolkit.model.mesh_model import MeshModel
-
-        path = tmp_path / "mesh.json"
-        path.write_text(model_to_json(self._mesh_snapshot()), encoding="utf-8")
-
-        assert isinstance(load_model(path), MeshModel)
-
-    def test_unrecognised_json_exits(self, tmp_path):
-        """A JSON dict that is neither snapshot nor tables fails loudly."""
-        from examples.view_model import load_model
-
-        path = tmp_path / "bad.json"
-        path.write_text('{"a": 1}', encoding="utf-8")
-
-        with pytest.raises(SystemExit) as exc:
-            load_model(path)
-
-        assert "neither a model snapshot" in str(exc.value)
-
-    def test_malformed_json_exits(self, tmp_path):
-        from examples.view_model import load_model
-
-        path = tmp_path / "broken.json"
-        path.write_text("{not json", encoding="utf-8")
-
-        with pytest.raises(SystemExit) as exc:
-            load_model(path)
-
-        assert "could not read" in str(exc.value)
-
     def test_mesh_snapshot_only_supports_the_mesh_view(self):
         """An already-meshed snapshot has no input for an analysis."""
         from examples.view_model import check_result_supported
@@ -1834,15 +1696,6 @@ class TestViewModelJsonInput:
         from examples.view_model import check_result_supported
 
         check_result_supported(_selection_model(), "static")  # no raise
-
-    def test_codec_json_carries_schema_header(self, tmp_path):
-        """A model_codec snapshot is stamped with __schema_version__."""
-        import json as _json
-
-        from fea_toolkit.io.model_codec import MODEL_SCHEMA_VERSION, SCHEMA_KEY, model_to_json
-
-        data = _json.loads(model_to_json(_selection_model()))
-        assert data[SCHEMA_KEY] == MODEL_SCHEMA_VERSION
 
     def test_newer_schema_version_is_rejected(self, tmp_path):
         """A snapshot from a newer build is refused, not mis-decoded."""

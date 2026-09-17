@@ -1,5 +1,6 @@
 """Flexible selection/filter criteria for SAP2000 model elements."""
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Union
 
@@ -15,6 +16,54 @@ if TYPE_CHECKING:
         SAPModelData,
     )
     from .stories import StoryLevel
+
+
+#: ``KEY=VALUE`` aliases accepted by :meth:`Selection.from_string`.
+SELECT_KEYS: dict[str, str] = {
+    "type": "element_types",
+    "types": "element_types",
+    "element_types": "element_types",
+    "section": "sections",
+    "sections": "sections",
+    "material": "materials",
+    "materials": "materials",
+    "group": "groups",
+    "groups": "groups",
+    "constraint": "constraints",
+    "constraints": "constraints",
+    "id": "element_ids",
+    "ids": "element_ids",
+    "element_ids": "element_ids",
+    "z": "elevation_range",
+    "elevation": "elevation_range",
+    "elevation_range": "elevation_range",
+}
+
+#: Human-readable key list, for CLI help and error messages.
+SELECT_KEYS_HELP = "type, section, material, group, constraint, id, z"
+
+#: One ``KEY=VALUE`` clause.  The value runs until the next ``KEY=`` (which
+#: may be separated by whitespace or a semicolon) or the end of the
+#: expression, so values may contain spaces (``section=Slab 200mm``).
+_SELECT_CLAUSE_RE = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)(?=\s+[A-Za-z_][A-Za-z0-9_]*\s*=|\s*;|$)",
+    re.DOTALL,
+)
+
+
+def _canonical_element_type(value: str) -> str:
+    """Return the canonical element-type name for *value*.
+
+    ``Selection`` matches ``Frame`` / ``Area`` / ``Node`` exactly, so the
+    expression form accepts any casing and normalises here.
+
+    Raises:
+        ValueError: If *value* is not one of those three types.
+    """
+    for known in ("Frame", "Area", "Node"):
+        if value.lower() == known.lower():
+            return known
+    raise ValueError(f"unknown element type {value!r} (expected Frame, Area or Node)")
 
 
 @dataclass
@@ -171,6 +220,82 @@ class Selection:
                 f"Invalid elevation_range {self.elevation_range}: "
                 f"lower bound must not exceed upper bound"
             )
+
+    # ── Constructors ─────────────────────────────────────────────────────────
+
+    @classmethod
+    def from_string(cls, expr: str) -> "Selection":
+        """Build a ``Selection`` from a ``KEY=VALUE`` expression.
+
+        Grammar — clauses are separated by a semicolon **or whitespace**,
+        values within a clause by commas::
+
+            KEY=VALUE[,VALUE ...][; KEY=VALUE ...]
+
+        Recognised keys (case-insensitive; the plural and the
+        :class:`Selection` field name are accepted aliases):
+
+        ==================  ====================================================
+        ``type``            ``element_types`` — ``Frame`` / ``Area`` / ``Node``
+        ``section``         ``sections``
+        ``material``        ``materials``
+        ``group``           ``groups``
+        ``constraint``      ``constraints`` — SAP2000 joint constraints
+        ``id``              ``element_ids``
+        ``z``               ``elevation_range`` — ``LO:HI``
+        ==================  ====================================================
+
+        Examples:
+
+            >>> Selection.from_string("type=Frame; section=2xR3,2xR4")
+            >>> Selection.from_string("constraint=Fix")
+            >>> Selection.from_string("z=3.4:4.5")
+
+        Args:
+            expr: The expression to parse.
+
+        Returns:
+            The corresponding ``Selection``.
+
+        Raises:
+            ValueError: If a clause has no ``=``, names an unknown key, gives a
+                ``z`` value that is not a pair of numbers, or names an unknown
+                element type.
+        """
+        kwargs: dict = {}
+        clauses = list(_SELECT_CLAUSE_RE.finditer(expr))
+        # Anything the clause pattern did not consume is malformed input — most
+        # often a bare value with no ``KEY=``.
+        leftovers = _SELECT_CLAUSE_RE.sub("", expr).strip().strip(";").strip()
+        if leftovers:
+            raise ValueError(f"expected KEY=VALUE in {leftovers!r} (keys: {SELECT_KEYS_HELP})")
+
+        for clause in clauses:
+            key, value = clause.group(1), clause.group(2).strip()
+            field = SELECT_KEYS.get(key.lower())
+            if field is None:
+                raise ValueError(f"unknown selection key {key!r} (keys: {SELECT_KEYS_HELP})")
+            if field == "elevation_range":
+                bounds = [b for b in re.split(r"[:,]", value) if b.strip()]
+                if len(bounds) != 2:
+                    raise ValueError(
+                        "selection key 'z' takes exactly two numbers, e.g. "
+                        f"z=3.4:4.5 — got {value!r}"
+                    )
+                try:
+                    kwargs[field] = (float(bounds[0]), float(bounds[1]))
+                except ValueError as exc:
+                    raise ValueError(
+                        f"selection key 'z' takes two numbers — got {value!r}"
+                    ) from exc
+            else:
+                values = [v.strip() for v in value.split(",") if v.strip()]
+                if not values:
+                    raise ValueError(f"selection key {key!r} has no values")
+                if field == "element_types":
+                    values = [_canonical_element_type(v) for v in values]
+                kwargs[field] = values
+        return cls(**kwargs)
 
     # ── helpers ──────────────────────────────────────────────────────────────
 

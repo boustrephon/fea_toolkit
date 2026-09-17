@@ -516,6 +516,41 @@ backward-incompatible array-layout change.  Keep the *model* marker
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-17 — promote the reusable viewer pieces into the package)
+
+**What.** Reviewing the constraint-selection work flagged that reusable logic
+had accumulated in `examples/view_model.py` (an 878-line script), where no
+other entry point could use it — `model/review.py` still accepted only `.s2k`.
+
+- **`io/model_loader.py`** (new): `load_model_data(path)` dispatches
+  `.s2k` / `.$2k` text, raw-table JSON (`SAP2000Parser.to_json`) and
+  model-codec JSON (`model_codec.model_to_json`).  It *raises*
+  (`ValueError` / `FileNotFoundError`) instead of exiting, and rejects an
+  unsupported suffix rather than falling through to a text parse that would
+  silently yield an empty model.  Exported from `fea_toolkit.io`.
+- **`Selection.from_string(expr)`** (new classmethod): the `KEY=VALUE`
+  grammar (clauses separated by `;` or whitespace, values by commas; `type`
+  values case-insensitive; `z=LO:HI`) now lives with the class it builds,
+  along with `SELECT_KEYS` / `SELECT_KEYS_HELP`.  An unknown `type=` value is
+  now an error instead of a warning plus a selection that matches nothing.
+- **`examples/view_model.py`** shrank accordingly: `parse_selection`,
+  `_canonical_element_type`, the key tables and the JSON dispatch are gone;
+  `load_model` is a thin wrapper turning loader exceptions into `sys.exit`.
+  Its only remaining policy helper is `check_result_supported`.
+
+**Tests.** New `tests/test_model_loader.py` (text, raw-table JSON, codec
+`SAPModelData` / `MeshModel`, newer schema, malformed / unrecognised JSON,
+unsupported suffix, missing file) mirrors the new module;
+`TestSelectionFromString` in `tests/test_sections_selection.py` takes over the
+grammar tests, leaving `TestViewModelSelectionExpression` with the CLI
+warnings / exit behaviour only.
+
+**Validation.** Full suite 1706 passed, 2 skipped, 2 xfailed; ruff clean.
+CLI verified on the BPPS
+pipe-rack: `.s2k`, raw-table JSON and codec JSON all resolve
+`--select "constraint=Fix"` to 65 joints; `--select "type=bogus"` and an
+unsupported suffix both exit with a clear message.
+
 ## DONE (2026-09-17 — `Selection.filter_model`: node-scoped subsets + constraint data)
 
 **What.** Reviewing the constraint-selection work surfaced two gaps in

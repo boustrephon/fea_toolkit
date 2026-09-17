@@ -58,8 +58,6 @@ Usage::
 """
 
 import argparse
-import json
-import re
 import sys
 from pathlib import Path
 
@@ -70,8 +68,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from fea_toolkit import __version__, ops_version
-from fea_toolkit.io.s2k_parser import SAP2000Parser
+from fea_toolkit.io.model_loader import load_model_data
 from fea_toolkit.model.mesh_model import MeshModel
+from fea_toolkit.model.selection import SELECT_KEYS_HELP, Selection
 from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
 from fea_toolkit.opensees.preprocessor import preprocess_model
 from fea_toolkit.plotting import (
@@ -146,119 +145,6 @@ def mesh_view_kwargs(args, section_names):
     return kwargs
 
 
-SELECT_KEYS = {
-    "type": "element_types",
-    "types": "element_types",
-    "element_types": "element_types",
-    "section": "sections",
-    "sections": "sections",
-    "material": "materials",
-    "materials": "materials",
-    "group": "groups",
-    "groups": "groups",
-    "constraint": "constraints",
-    "constraints": "constraints",
-    "id": "element_ids",
-    "ids": "element_ids",
-    "element_ids": "element_ids",
-    "z": "elevation_range",
-    "elevation": "elevation_range",
-    "elevation_range": "elevation_range",
-}
-
-SELECT_KEYS_HELP = "type, section, material, group, constraint, id, z"
-
-# One ``KEY=VALUE`` clause: the value runs until the next ``KEY=`` (which may
-# be separated by whitespace or a semicolon) or the end of the expression, so
-# values may contain spaces and commas (``section=Slab 200mm``).
-_SELECT_CLAUSE_RE = re.compile(
-    r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)(?=\s+[A-Za-z_][A-Za-z0-9_]*\s*=|\s*;|$)",
-    re.DOTALL,
-)
-
-
-def parse_selection(expr):
-    """Parse a ``--select`` expression into a :class:`Selection`.
-
-    Grammar (clauses are separated by a semicolon **or whitespace**; within a
-    clause, values are separated by commas)::
-
-        KEY=VALUE[,VALUE ...][; KEY=VALUE ...]
-
-    Recognised keys (case-insensitive) — the plural and the
-    :class:`Selection` field name are accepted aliases:
-
-    ==================  =========================================
-    ``type``            ``element_types`` — ``Frame``, ``Area``, ``Node``
-    ``section``         ``sections``
-    ``material``        ``materials``
-    ``group``           ``groups``
-    ``constraint``      ``constraints`` — SAP2000 joint constraints (nodes only)
-    ``id``              ``element_ids``
-    ``z``               ``elevation_range`` — ``LO:HI``
-    ==================  =========================================
-
-    Examples::
-
-        --select "type=Frame; section=2xR3,2xR4"
-        --select "id=10,11,12"
-        --select "type=Node; group=Deck"
-        --select "constraint=Fix"            # joints of a BODY/DIAPHRAGM/… group
-        --select "z=3.4:4.5"
-
-    Args:
-        expr: The raw expression string (one ``--select`` occurrence).
-
-    Returns:
-        The corresponding :class:`~fea_toolkit.model.selection.Selection`.
-
-    Raises:
-        ValueError: If a clause has no ``=``, names an unknown key, or gives a
-            ``z`` value that is not a pair of numbers.
-    """
-    from fea_toolkit.model.selection import Selection
-
-    kwargs = {}
-    clauses = list(_SELECT_CLAUSE_RE.finditer(expr))
-    # Anything the clause pattern did not consume is malformed input — most
-    # often a bare value with no ``KEY=``.
-    leftovers = _SELECT_CLAUSE_RE.sub("", expr).strip().strip(";").strip()
-    if leftovers:
-        raise ValueError(f"expected KEY=VALUE in {leftovers!r} (keys: {SELECT_KEYS_HELP})")
-
-    for clause in clauses:
-        key, value = clause.group(1), clause.group(2).strip()
-        field = SELECT_KEYS.get(key.lower())
-        if field is None:
-            raise ValueError(f"unknown selection key {key!r} (keys: {SELECT_KEYS_HELP})")
-        if field == "elevation_range":
-            bounds = [b for b in re.split(r"[:,]", value) if b.strip()]
-            if len(bounds) != 2:
-                raise ValueError(
-                    f"selection key 'z' takes exactly two numbers, e.g. z=3.4:4.5 — got {value!r}"
-                )
-            kwargs[field] = (float(bounds[0]), float(bounds[1]))
-        else:
-            values = [v.strip() for v in value.split(",") if v.strip()]
-            if not values:
-                raise ValueError(f"selection key {key!r} has no values")
-            if field == "element_types":
-                # Selection matches these case-sensitively against
-                # 'Frame' / 'Area' / 'Node' — canonicalise so 'frame' works.
-                values = [_canonical_element_type(v) for v in values]
-            kwargs[field] = values
-    return Selection(**kwargs)
-
-
-def _canonical_element_type(value):
-    """Title-case a ``type=`` value against ``Frame`` / ``Area`` / ``Node``."""
-    for known in ("Frame", "Area", "Node"):
-        if value.lower() == known.lower():
-            return known
-    print(f"Warning: --select: unknown element type {value!r} (expected Frame, Area or Node).")
-    return value
-
-
 def selection_highlights(args):
     """Build the ``--select`` :class:`Selection` objects for the mesh view.
 
@@ -274,7 +160,7 @@ def selection_highlights(args):
     selections = []
     for expr in args.select:
         try:
-            sel = parse_selection(expr)
+            sel = Selection.from_string(expr)
         except ValueError as exc:
             sys.exit(f"Error: --select {expr!r}: {exc}")
         if (
@@ -565,68 +451,24 @@ def show_npz(path, args):
 def load_model(path):
     """Load a model from a ``.s2k``, raw-table JSON or model-codec JSON file.
 
-    Three inputs are recognised, all producing the same
-    :class:`~fea_toolkit.model.sap_data.SAPModelData` that a ``.s2k`` parse
-    would (so every viewer option — including ``--select`` and
-    ``--highlight-constraint`` — behaves identically):
-
-    * **``.s2k`` / ``.$2k``** — the SAP2000 text export, parsed directly.
-    * **Raw-table JSON** — as written by
-      :meth:`~fea_toolkit.io.s2k_parser.SAP2000Parser.to_json`: the parsed
-      tables are restored and the model rebuilt exactly as from text.
-    * **Model-codec JSON** — as written by
-      :func:`~fea_toolkit.io.model_codec.model_to_json`: a snapshot of a
-      built dataclass model, tagged with a top-level ``__type__`` key and
-      stamped with ``__schema_version__`` (validated on read).
+    Thin CLI wrapper over :func:`fea_toolkit.io.load_model_data` that turns the
+    loader's exceptions into a message + exit code.
 
     Args:
         path: Path to the model file.
 
     Returns:
-        A ``SAPModelData``, or — for a codec snapshot of a post-preprocessing
-        model — the ``MeshModel`` itself (mesh view only; see
+        A ``SAPModelData``, or the ``MeshModel`` itself for a codec snapshot of
+        a post-preprocessing model (mesh view only; see
         :func:`check_result_supported`).
 
     Raises:
         SystemExit: If the file cannot be read, or is not a recognised model.
     """
-    if path.suffix.lower() == ".json":
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            sys.exit(f"Error: could not read {path}: {exc}")
-
-        if isinstance(payload, dict) and (
-            "__schema_version__" in payload or "__type__" in payload
-        ):
-            # Model-codec snapshot — the __type__ discriminator selects the
-            # class (SAPModelData or MeshModel), so no cls= is needed.
-            from fea_toolkit.io.model_codec import json_to_model
-
-            try:
-                return json_to_model(json.dumps(payload))
-            except (ValueError, KeyError, TypeError) as exc:
-                sys.exit(f"Error: {path} is not a decodable model snapshot: {exc}")
-
-        # Raw-table cache: ``{table_name: [row, ...]}``.  Parsing such a file
-        # as *text* silently yields an empty model, so validate the shape.
-        looks_like_tables = (
-            isinstance(payload, dict)
-            and bool(payload)
-            and all(isinstance(rows, list) for rows in payload.values())
-        )
-        if not looks_like_tables:
-            sys.exit(
-                f"Error: {path} holds neither a model snapshot "
-                "(no '__type__' / '__schema_version__') nor "
-                "SAP2000 tables — was it written by SAP2000Parser.to_json() or "
-                "model_codec.model_to_json()?"
-            )
-        return SAP2000Parser.from_json(path).get_model_data()
-
-    parser = SAP2000Parser(path)
-    parser.parse()
-    return parser.get_model_data()
+    try:
+        return load_model_data(path)
+    except (OSError, ValueError) as exc:
+        sys.exit(f"Error: {exc}")
 
 
 def check_result_supported(model, result):
