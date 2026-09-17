@@ -573,7 +573,7 @@ def main():
             "  %(prog)s model.s2k -r mesh \\\n"
             "      --highlight-constraint Fix --node-labels        # SAP constraint joints\n"
             "  %(prog)s model.s2k -r mesh \\\n"
-            "      --select \"type=Frame; section=2xR3\"            # Selection overlay\n"
+            '      --select "type=Frame; section=2xR3"            # Selection overlay\n'
             "  %(prog)s results.npz -r static --quantity Mz        # saved archive\n"
             "  %(prog)s --sample -r modal --mode 1                 # built-in sample\n"
         ),
