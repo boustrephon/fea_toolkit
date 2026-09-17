@@ -703,6 +703,13 @@ class TestUnifiedWriterSchemaCoverage:
         )
         # An unreadable marker degrades to legacy rather than raising.
         assert get_schema_version({"schema_version": np.array(["bad"])}) == SCHEMA_VERSION_LEGACY
+        # A ragged marker raises inside ``np.asarray``; the normalisation lives
+        # in the ``try`` block, so it also degrades to legacy.
+        assert get_schema_version({"schema_version": [[1, 2], [3]]}) == SCHEMA_VERSION_LEGACY
+        # A non-finite marker cannot be cast to int — ``inf`` raises
+        # OverflowError, ``nan`` raises ValueError — so both degrade to legacy.
+        assert get_schema_version({"schema_version": np.array([np.inf])}) == SCHEMA_VERSION_LEGACY
+        assert get_schema_version({"schema_version": np.array([np.nan])}) == SCHEMA_VERSION_LEGACY
         # A 0-d marker is normalised before the emptiness check — ``len()``
         # on a 0-d array raises ``TypeError`` ("len() of unsized object").
         assert get_schema_version({"schema_version": np.array(2)}) == 2

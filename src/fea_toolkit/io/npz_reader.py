@@ -79,14 +79,18 @@ def get_schema_version(data: dict[str, Any]) -> int:
     arr = data.get("schema_version")
     if arr is None:
         return SCHEMA_VERSION_LEGACY
-    # Normalise scalars / 0-d arrays to 1-D before the emptiness check:
-    # ``len(np.array(2))`` raises TypeError ("len() of unsized object").
-    arr = np.asarray(arr).reshape(-1)
-    if arr.size == 0:
-        return SCHEMA_VERSION_LEGACY
     try:
+        # Normalise scalars / 0-d arrays to 1-D before the emptiness check:
+        # ``len(np.array(2))`` raises TypeError ("len() of unsized object").
+        # The normalisation stays inside ``try`` so a ragged marker (which
+        # ``np.asarray`` rejects with ``ValueError``) also degrades to legacy.
+        arr = np.asarray(arr).reshape(-1)
+        if arr.size == 0:
+            return SCHEMA_VERSION_LEGACY
+        # A non-finite marker cannot be cast to int — ``inf`` raises
+        # OverflowError, ``nan`` raises ValueError.
         return int(arr[0])
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return SCHEMA_VERSION_LEGACY
 
 
