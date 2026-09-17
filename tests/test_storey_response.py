@@ -10,6 +10,7 @@ resultants averaged over parent/row-band sections), :func:`rigid_body_fit`
 import math
 
 import numpy as np
+import pandas as pd  # optional [report] extra — the suite runs with it; see docs/dev_notes.md
 import pytest
 
 from fea_toolkit.model.storey_response import group_shell_forces_by_section
@@ -175,7 +176,6 @@ class TestRigidBodyFit:
         """Pure translation (Ux=0.01, Uy=-0.005, Rz=0) recovers exactly."""
         from fea_toolkit.model.storey_response import rigid_body_fit
 
-        np = __import__("numpy")
         x = np.array([0.0, 5.0, 5.0, 0.0])
         y = np.array([0.0, 0.0, 4.0, 4.0])
         x_cm, y_cm = 2.5, 2.0
@@ -194,7 +194,6 @@ class TestRigidBodyFit:
         """Combined translation + rotation recovers exactly."""
         from fea_toolkit.model.storey_response import rigid_body_fit
 
-        np = __import__("numpy")
         x = np.array([0.0, 6.0, 6.0, 0.0])
         y = np.array([0.0, 0.0, 5.0, 5.0])
         x_cm, y_cm = 3.0, 2.5
@@ -213,7 +212,6 @@ class TestRigidBodyFit:
         """One synthetic outlier is rejected; fit matches remaining nodes."""
         from fea_toolkit.model.storey_response import rigid_body_fit
 
-        np = __import__("numpy")
         # 5 nodes in a cross pattern — all follow the same rigid-body field
         x = np.array([0.0, 6.0, 3.0, 3.0, 3.0])
         y = np.array([0.0, 0.0, -3.0, 3.0, 0.0])
@@ -280,8 +278,6 @@ class TestCQC:
         """
         from fea_toolkit.model.storey_response import _cqc_coeff
 
-        np = __import__("numpy")
-
         rho_12 = _cqc_coeff(3.0, 5.0, zeta=0.05)
         rho = np.array([[1.0, rho_12], [rho_12, 1.0]])
         di = np.array([[0.010, 0.005]])  # shape (1 gap, 2 modes)
@@ -300,9 +296,6 @@ class TestStoreyDrifts:
         """Two storeys with known Ux difference gives expected drift."""
         from fea_toolkit.model.storey_response import storey_drifts
         from fea_toolkit.model.stories import StoryLevel
-
-        __import__("numpy")
-        pd = __import__("pandas")
 
         stories = [
             StoryLevel("Base", 0.0),
