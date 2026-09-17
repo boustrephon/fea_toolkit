@@ -161,7 +161,8 @@ see `.clinerules` §3.11.
 "Plot model from NPZ"               → from fea_toolkit.io import npz_to_pyvista_frame_mesh
 "NPZ force diagram"                 → from fea_toolkit.plotting import plot_force_diagram
 "Highlight a Selection (yellow)"    → plot_mesh(builder, highlight_selection=Selection(sections=['2xR3']))
-"Highlight a constraint group"      → plot_mesh(builder, node_colors={jid: '#ff2d2d'})  # jids ← md.constraint_assignments
+"Select joints of a constraint group" → Selection(constraints=['Fix']).get_node_ids(md)
+"Highlight a constraint group (red)"  → plot_mesh(builder, node_colors={jid: '#ff2d2d'})  # jids ← md.constraint_assignments
 ```
 
 ### Export

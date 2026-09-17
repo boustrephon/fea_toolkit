@@ -45,7 +45,14 @@ class Selection:
       (:attr:`SAPModelData.frame_assignments` /
       :attr:`SAPModelData.area_assignments`).
     - **Node** elements ignore ``section`` and ``material`` (they have
-      none).  Only ``element_types``, ``groups``, and ``element_ids`` apply.
+      none).  They match on ``element_types``, ``groups``, ``element_ids``,
+      and ``constraints``.
+    - **Joint constraints** (:attr:`constraints`) apply to **Node**
+      elements only — a joint either carries one of the named constraint
+      assignments or it does not.  A frame or area can never carry a
+      *joint* constraint, so setting this criterion **excludes** them
+      (ignoring it instead would select the whole model whenever the
+      constraint set is the only criterion).
     - **Group** membership is tested against :class:`Group` objects, which
       store references like ``"Frame:123"``, ``"Area:456"``, ``"Joint:1"``.
     - When ``element_types`` is ``None`` (default), **all** element types
@@ -67,6 +74,16 @@ class Selection:
     groups:
         Filter by group name(s).  An element matches if it belongs to at
         least one of the named groups.  ``None`` means all.
+    constraints:
+        Filter by SAP2000 joint-constraint name(s) — e.g. ``["Fix"]``.  A
+        **Node** matches when :attr:`SAPModelData.constraint_assignments`
+        maps it to one of these names, so ``BODY`` rigid bodies,
+        ``DIAPHRAGM``, ``EQUAL``, ``WELD``, … are all selectable without
+        knowing the constraint type.  Applies to Node elements only —
+        frames and areas are excluded when it is set.  Resolution needs
+        ``constraint_assignments``, which ``SAPModelData`` carries but
+        ``MeshModel`` / NPZ archives do not — those sources match no nodes.
+        ``None`` means all.
     element_ids:
         Filter by specific element ID(s).  ``None`` means all.
     elevation_range:
@@ -88,6 +105,11 @@ class Selection:
 
         >>> sel = Selection(element_types=['Frame'], groups=['Moment Frame'])
         >>> frame_ids = sel.get_frame_ids(model)
+
+    Select the joints of a SAP2000 constraint group (any constraint type):
+
+        >>> sel = Selection(constraints=['Fix'])
+        >>> joint_ids = sel.get_node_ids(model)
 
     Select all areas made of a specific material:
 
@@ -137,6 +159,7 @@ class Selection:
     sections: Optional[list[str]] = None
     materials: Optional[list[str]] = None
     groups: Optional[list[str]] = None
+    constraints: Optional[list[str]] = None
     element_ids: Optional[list[str]] = None
     elevation_range: Optional[tuple[float, float]] = None
     story: Optional[list[str]] = None
@@ -205,6 +228,19 @@ class Selection:
                 return True
         return False
 
+    def _match_constraints(self, model: Union["SAPModelData", "MeshModel"], eid: str) -> bool:
+        """Check the joint-constraint criterion against either model type.
+
+        ``constraint_assignments`` maps a *joint* ID to its constraint name
+        and is carried by :class:`SAPModelData` (and the resolved-source
+        wrapper) but not by :class:`MeshModel` or an NPZ archive — a source
+        without the mapping therefore matches no joint.
+        """
+        if self.constraints is None:
+            return True
+        assignments = getattr(model, "constraint_assignments", None) or {}
+        return assignments.get(eid) in self.constraints
+
     def _match_id(self, eid: str) -> bool:
         if self.element_ids is None:
             return True
@@ -225,6 +261,12 @@ class Selection:
         using the frame's mid-height Z.
         """
         if not self._match_element_type("Frame"):
+            return False
+        if self.constraints is not None:
+            # Joint constraints attach to joints only — no frame can carry
+            # one, so this criterion *excludes* every frame.  Ignoring it
+            # instead would select the whole model when the constraint set
+            # is the only criterion.
             return False
         if not self._match_id(eid):
             return False
@@ -258,6 +300,9 @@ class Selection:
         """
         if not self._match_element_type("Area"):
             return False
+        if self.constraints is not None:
+            # See _frame_matches — a joint constraint excludes every area.
+            return False
         if not self._match_id(eid):
             return False
         sec_name = model.area_assignments.get(eid)
@@ -284,7 +329,9 @@ class Selection:
         if not self._match_id(eid):
             return False
         # Nodes have no section/material, so those criteria are skipped
-        return self._match_groups(model, "Joint", eid)
+        if not self._match_groups(model, "Joint", eid):
+            return False
+        return self._match_constraints(model, eid)
 
     # ── Public query methods ─────────────────────────────────────────────────
 

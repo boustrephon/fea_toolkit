@@ -27,6 +27,11 @@ Usage::
     python examples/view_model.py /path/to/model.s2k --result mesh \
         --select "type=Node; group=Deck" --select "id=10,11,12"
 
+    # Mesh view: select the joints of a SAP2000 constraint group (any type —
+    # BODY, DIAPHRAGM, EQUAL, ...) through the same Selection mechanism
+    python examples/view_model.py /path/to/model.s2k --result mesh \
+        --select "constraint=Fix"
+
     # Static analysis - deformed shape, then a force diagram
     python examples/view_model.py /path/to/model.s2k --result static --quantity Mz
 
@@ -144,6 +149,8 @@ SELECT_KEYS = {
     "materials": "materials",
     "group": "groups",
     "groups": "groups",
+    "constraint": "constraints",
+    "constraints": "constraints",
     "id": "element_ids",
     "ids": "element_ids",
     "element_ids": "element_ids",
@@ -152,7 +159,7 @@ SELECT_KEYS = {
     "elevation_range": "elevation_range",
 }
 
-SELECT_KEYS_HELP = "type, section, material, group, id, z"
+SELECT_KEYS_HELP = "type, section, material, group, constraint, id, z"
 
 # One ``KEY=VALUE`` clause: the value runs until the next ``KEY=`` (which may
 # be separated by whitespace or a semicolon) or the end of the expression, so
@@ -179,6 +186,7 @@ def parse_selection(expr):
     ``section``         ``sections``
     ``material``        ``materials``
     ``group``           ``groups``
+    ``constraint``      ``constraints`` — SAP2000 joint constraints (nodes only)
     ``id``              ``element_ids``
     ``z``               ``elevation_range`` — ``LO:HI``
     ==================  =========================================
@@ -188,6 +196,7 @@ def parse_selection(expr):
         --select "type=Frame; section=2xR3,2xR4"
         --select "id=10,11,12"
         --select "type=Node; group=Deck"
+        --select "constraint=Fix"            # joints of a BODY/DIAPHRAGM/… group
         --select "z=3.4:4.5"
 
     Args:
@@ -261,14 +270,27 @@ def selection_highlights(args):
             sel = parse_selection(expr)
         except ValueError as exc:
             sys.exit(f"Error: --select {expr!r}: {exc}")
-        if sel.element_types == ["Node"] and (
+        if (
+            sel.constraints is not None
+            and sel.element_types is not None
+            and "Node" not in sel.element_types
+        ):
+            print(
+                "Warning: --select: constraint= selects joints only, but the "
+                f"element type(s) given ({', '.join(sel.element_types)}) exclude "
+                "Node — the selection matches nothing."
+            )
+        # A Node-only Selection (explicit Node type, or a constraint criterion,
+        # which only joints can satisfy) ignores the element-only criteria.
+        if (sel.element_types == ["Node"] or sel.constraints is not None) and (
             sel.sections or sel.materials or sel.elevation_range
         ):
-            # Selection matches nodes on type / id / group only, so a node-only
-            # selection silently ignores every other criterion.
+            # Selection matches nodes on type / id / group / constraint only, so
+            # a node-only selection silently ignores every other criterion.
             print(
-                "Warning: --select: a Node-only Selection is matched by type, "
-                "id and group — its section / material / z criteria are ignored."
+                "Warning: --select: a Node-only Selection (Node type / constraint=) "
+                "is matched by type, id, group and constraint — its section / "
+                "material / z criteria are ignored."
             )
         selections.append(sel)
     return selections
@@ -704,9 +726,10 @@ def main():
             "yellow — wide half-opaque lines over frames, large dots over "
             "nodes.  EXPR is 'KEY=VALUE[,VALUE ...][; KEY=VALUE ...]' with "
             "keys " + SELECT_KEYS_HELP + ", e.g. --select 'type=Frame; "
-            "section=2xR3,2xR4', --select 'id=10,11,12' or --select "
-            "'z=3.4:4.5'.  Repeat --select to overlay several selections.  "
-            "Needs a .s2k model."
+            "section=2xR3,2xR4', --select 'id=10,11,12', --select "
+            "'constraint=Fix' (joints of a SAP2000 constraint group) or "
+            "--select 'z=3.4:4.5'.  Repeat --select to overlay several "
+            "selections.  Needs a .s2k model."
         ),
     )
     parser.add_argument(

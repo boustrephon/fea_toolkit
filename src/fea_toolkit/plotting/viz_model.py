@@ -746,8 +746,10 @@ def _selection_id_sets(source, selection):
         TypeError: If an entry is neither a ``Selection`` nor an ID mapping.
         ValueError: If a ``Selection`` is passed for a data-dict source (there
             is no model to resolve section / group / elevation criteria
-            against), or if it carries the ``story`` criterion, which needs
-            storey data this resolver is not given.
+            against), if it carries the ``story`` criterion (which needs
+            storey data this resolver is not given), or if it carries
+            ``constraints`` while the source has no ``constraint_assignments``
+            (only ``SAPModelData`` and the resolved-source wrapper carry them).
     """
     if selection is None:
         return set(), set(), set()
@@ -786,6 +788,16 @@ def _selection_id_sets(source, selection):
                 "the 'story' criterion needs storey data, which plot_mesh does not "
                 "resolve — use elevation_range (--select 'z=LO:HI') or resolve the "
                 "story filter yourself with Selection.resolve_to_mesh_sets()"
+            )
+        if entry.constraints is not None and not hasattr(model, "constraint_assignments"):
+            # Constraints are joint assignments; only SAPModelData-backed
+            # sources carry the attribute at all (a MeshModel / builder does
+            # not, so the criterion could never match).
+            raise ValueError(
+                "the 'constraints' criterion needs the source's constraint_assignments "
+                "(carried by SAPModelData), but this source does not have them — view "
+                "a .s2k model, or pass explicit node IDs "
+                "(selection={'nodes': ['1', '2']})"
             )
         frame_ids.update(entry.get_frame_ids(model))
         node_ids.update(entry.get_node_ids(model))
@@ -1354,6 +1366,9 @@ def plot_mesh(
             source pass explicit IDs instead, e.g.
             ``highlight_selection={"frames": ["1", "2"], "nodes": ["5"]}``
             (IDs in the source's own space — SAP element / joint labels).
+            The ``constraints`` criterion additionally needs
+            ``constraint_assignments``, which only ``SAPModelData``-backed
+            sources carry.
         selection_color: Colour of the selection overlay (default
             ``"yellow"``).
         notebook: Return plotter for Jupyter embedding.

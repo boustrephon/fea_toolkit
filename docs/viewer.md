@@ -279,7 +279,12 @@ plot_mesh(
 lines over frames, large dots over nodes, translucent faces over areas.  Pass
 a single ``Selection``, a list of them, or explicit IDs
 (``highlight_selection={"frames": ["1"], "nodes": ["5"]}``) for a model-less
-NPZ source.  See also ``--select`` in ``examples/view_model.py``.
+NPZ source.  The ``constraints`` criterion — e.g.
+``Selection(constraints=["Fix"])`` — selects the joints assigned to a SAP2000
+constraint group (BODY / DIAPHRAGM / EQUAL / WELD alike); it needs a
+``.s2k``-backed source, since only ``SAPModelData`` carries
+``constraint_assignments``.  See also ``--select`` in
+``examples/view_model.py``.
 
 ### 2b. Deformed shape (unified)
 

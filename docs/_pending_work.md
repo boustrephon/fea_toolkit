@@ -497,7 +497,58 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
-## DONE (2026-09-17 — `view_model` / `plot_mesh`: overdraw a `Selection` in yellow)
+## DONE (2026-09-17 — `Selection(constraints=[...])`: select by SAP2000 joint constraint)
+
+**What.** Constraint groups were viewable only through the bespoke
+`--highlight-constraint` (red), not through the toolkit's general query
+language — so a constraint could not be *selected* the way sections, materials,
+groups and elevation bands can.  This adds `constraints` to
+:class:`~fea_toolkit.model.selection.Selection`, which makes constraint
+membership a first-class criterion for the viewer **and** for every other
+`Selection` consumer (analysis filtering, reporting).
+
+- **Query.** `model/selection.py`: new `constraints: Optional[list[str]]`
+  field, matched by `_match_constraints()` against
+  `model.constraint_assignments` (joint id → constraint name), so `BODY`
+  rigid bodies, `DIAPHRAGM`, `EQUAL` and `WELD` groups all resolve through
+  the same table and the constraint type never needs to be known.
+- **Semantics.** A *joint* constraint is a Node-only attribute, so setting
+  the criterion **excludes every frame and area** (`_frame_matches` /
+  `_area_matches` return `False`).  This matters: ignoring it for
+  elements — the treatment `section` / `material` get on nodes — would make
+  `Selection(constraints=['Fix'])` select the *whole* model whenever the
+  constraint set was the only criterion.  AND/OR composition is unchanged
+  (multiple names are alternatives; other criteria narrow further).
+- **Source dependence.** Resolution needs `constraint_assignments`, which
+  `SAPModelData` (and `ResolvedSource`) carries but `MeshModel`, a builder
+  and NPZ archives do not.  `get_node_ids()` on such a source simply matches
+  nothing, while the viewer's `_selection_id_sets()` **raises** a clear
+  `ValueError` rather than overlaying nothing — the same contract the
+  `story` criterion already uses.  All three input forms that build an
+  `SAPModelData` (`.s2k`, raw-table JSON via `from_json()`, model-codec JSON
+  via `json_to_model()`) therefore support it unchanged.
+- **CLI.** `examples/view_model.py`: `--select` gains the `constraint` /
+  `constraints` keys, e.g. `--select "constraint=Fix"`.  Two honesty
+  warnings: `constraint=` combined with `type=` excluding `Node` ("matches
+  nothing"), and `constraint=` combined with `section` / `material` / `z`
+  (ignored for a node-only selection).  `--highlight-constraint` is
+  unchanged and remains the red-ink convenience for the same joints.
+
+**Tests.** `tests/test_sections_selection.py::TestConstraintSelection`
+(resolution by name, type-agnostic DIAPHRAGM, OR across names, AND with
+element ids / groups, unassigned + unknown names, frames/areas excluded,
+MeshModel matches no joints, `filter_nodes`).  `tests/test_viz_model.py`:
+overlay of the assigned joints as yellow dots, the resolver `ValueError` on a
+MeshModel source, and the CLI key / alias / warnings.
+
+**Validation.** `tests/test_sections_selection.py` 77 passed;
+`tests/test_viz_model.py` 87 passed; ruff clean.  End-to-end off-screen render
+of the BPPS pipe-rack `.s2k`:
+`--result mesh --select "constraint=Fix" --node-labels` →
+`Selection overlay (yellow): 0 frame(s), 65 node(s), 0 area(s).` — the same 65
+joints `--highlight-constraint Fix` reports, now through the general
+Selection path.
+
 
 **What.** ``examples/view_model.py`` could highlight *sections* and *constraint
 groups*, but there was no way to pick elements/nodes with the toolkit's own

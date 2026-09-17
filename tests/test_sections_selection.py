@@ -872,6 +872,119 @@ class TestSelectionMeshModel:
 
 
 # ============================================================================
+# Joint-constraint Selection tests
+# ============================================================================
+
+
+class TestConstraintSelection:
+    """``Selection(constraints=[...])`` selects the joints of SAP2000
+    constraint groups — type-agnostic (BODY / DIAPHRAGM / EQUAL / WELD)."""
+
+    @staticmethod
+    def _model():
+        """Model with two constraint groups over four joints.
+
+        ``Fix`` (BODY) ties joints 1 and 2, ``D1`` (DIAPHRAGM) holds joint 3,
+        and joint 4 carries no constraint.  ``Deck`` groups joints 1 and 3.
+        """
+        from fea_toolkit.model.sap_data import Constraint
+
+        return SAPModelData(
+            nodes={
+                "1": Node(node_id="1", node_tag=1, x=0, y=0, z=0),
+                "2": Node(node_id="2", node_tag=2, x=4, y=0, z=0),
+                "3": Node(node_id="3", node_tag=3, x=4, y=0, z=3),
+                "4": Node(node_id="4", node_tag=4, x=0, y=4, z=0),
+            },
+            restraints={},
+            materials={},
+            sections={},
+            frame_elements={
+                "10": FrameElement(elem_id="10", elem_tag=10, node_i="1", node_j="2"),
+                "20": FrameElement(elem_id="20", elem_tag=20, node_i="2", node_j="3"),
+            },
+            area_elements={},
+            frame_assignments={},
+            area_assignments={},
+            groups={"Deck": Group(name="Deck", objects=["Joint:1", "Joint:3"])},
+            frame_auto_mesh={},
+            constraints={
+                "Fix": Constraint(name="Fix", constraint_type="BODY"),
+                "D1": Constraint(name="D1", constraint_type="DIAPHRAGM"),
+            },
+            constraint_assignments={"1": "Fix", "2": "Fix", "3": "D1"},
+        )
+
+    @staticmethod
+    def _mesh_model():
+        """MeshModel of the same geometry — carries no constraint data."""
+        return MeshModel(
+            nodes={"1": Node(node_id="1", node_tag=1, x=0, y=0, z=0)},
+            frame_elements={"10": FrameElement(elem_id="10", elem_tag=10, node_i="1", node_j="1")},
+            frame_assignments={},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+        )
+
+    def test_selects_assigned_joints(self):
+        """Only joints assigned to the named constraint are returned."""
+        md = self._model()
+        assert set(Selection(constraints=["Fix"]).get_node_ids(md)) == {"1", "2"}
+
+    def test_constraint_type_is_irrelevant(self):
+        """A DIAPHRAGM name resolves through the same assignment table."""
+        md = self._model()
+        assert Selection(constraints=["D1"]).get_node_ids(md) == ["3"]
+
+    def test_or_within_constraint_list(self):
+        """Multiple constraint names are alternatives (OR within a field)."""
+        md = self._model()
+        assert set(Selection(constraints=["Fix", "D1"]).get_node_ids(md)) == {"1", "2", "3"}
+
+    def test_and_with_element_ids(self):
+        """constraints AND element_ids = the intersection."""
+        md = self._model()
+        sel = Selection(constraints=["Fix"], element_ids=["1", "4"])
+        assert set(sel.get_node_ids(md)) == {"1"}
+
+    def test_and_with_group(self):
+        """constraints AND groups = joints satisfying both."""
+        md = self._model()
+        sel = Selection(constraints=["Fix"], groups=["Deck"])
+        assert set(sel.get_node_ids(md)) == {"1"}
+
+    def test_unassigned_joint_is_excluded(self):
+        md = self._model()
+        assert "4" not in Selection(constraints=["Fix"]).get_node_ids(md)
+
+    def test_unknown_constraint_matches_nothing(self):
+        md = self._model()
+        assert Selection(constraints=["Nope"]).get_node_ids(md) == []
+
+    def test_no_criterion_selects_every_joint(self):
+        md = self._model()
+        assert set(Selection(element_types=["Node"]).get_node_ids(md)) == {"1", "2", "3", "4"}
+
+    def test_frames_and_areas_are_excluded(self):
+        """A joint constraint excludes every frame / area — it can never
+        satisfy one, and ignoring it would select the whole model."""
+        md = self._model()
+        sel = Selection(constraints=["Fix"])
+        assert sel.get_frame_ids(md) == []
+        assert sel.get_area_ids(md) == []
+
+    def test_mesh_model_matches_no_joints(self):
+        """A MeshModel carries no constraint_assignments → no match."""
+        mm = self._mesh_model()
+        assert Selection(constraints=["Fix"]).get_node_ids(mm) == []
+
+    def test_filter_nodes_returns_the_subset(self):
+        md = self._model()
+        assert set(Selection(constraints=["D1"]).filter_nodes(md)) == {"3"}
+
+
+# ============================================================================
 # Selection filter_model tests
 # ============================================================================
 

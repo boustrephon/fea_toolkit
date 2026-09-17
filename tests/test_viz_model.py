@@ -1171,6 +1171,7 @@ def _selection_model():
     """
     from fea_toolkit.model.sap_data import (
         AreaElement,
+        Constraint,
         FrameElement,
         Group,
         ISection,
@@ -1212,6 +1213,8 @@ def _selection_model():
         area_assignments={"A1": "SLAB"},
         groups={"Cols": Group(name="Cols", color="", objects=["Frame:F1", "Joint:N1"])},
         frame_auto_mesh={},
+        constraints={"Fix": Constraint(name="Fix", constraint_type="BODY")},
+        constraint_assignments={"N1": "Fix", "N2": "Fix", "N4": "Fix"},
     )
 
 
@@ -1380,6 +1383,43 @@ class TestSelectionOverlay:
 
         with pytest.raises(TypeError, match="must be Selection objects"):
             plot_mesh(_selection_model(), highlight_selection=["F1"], notebook=True)
+
+    def test_constraint_selection_draws_joint_dots(self):
+        """A constraint criterion selects the joints assigned to that group."""
+        from fea_toolkit.model.selection import Selection
+
+        md = _selection_model()
+        sel = Selection(constraints=["Fix"])
+
+        captured = self._capture(md, sel, show_frames=False, show_shells=False)
+
+        assert len(captured) == 1, captured
+        n_points, _n_cells, color, kw = captured[0]
+        assert n_points == 3, captured  # the three joints assigned to "Fix"
+        assert (color, kw.get("point_size")) == ("yellow", 18)
+
+    def test_constraint_criterion_on_mesh_source_raises(self):
+        """A MeshModel/builder source carries no constraint_assignments."""
+        from fea_toolkit.model.mesh_model import MeshModel
+        from fea_toolkit.model.sap_data import FrameElement, Node
+        from fea_toolkit.model.selection import Selection
+        from fea_toolkit.plotting import plot_mesh
+
+        mesh = MeshModel(
+            nodes={"1": Node("1", 1, 0.0, 0.0, 0.0)},
+            frame_elements={"1": FrameElement("1", 1, "1", "1")},
+            frame_assignments={},
+            area_elements={},
+            area_assignments={},
+            frame_dist_loads=[],
+        )
+
+        with pytest.raises(ValueError, match="constraint_assignments"):
+            plot_mesh(
+                mesh,
+                highlight_selection=Selection(constraints=["Fix"]),
+                notebook=True,
+            )
 
 
 class TestSplitElementSelectionExpansion:
@@ -1655,3 +1695,39 @@ class TestViewModelSelectionExpression:
         selection_highlights(self._args(["type=Frame; z=0:3.4"]))
 
         assert capsys.readouterr().out == ""
+
+    def test_constraint_key(self):
+        """``constraint=`` maps onto the Selection's constraints field."""
+        from examples.view_model import parse_selection
+
+        sel = parse_selection("constraint=Fix,D1")
+
+        assert sel.constraints == ["Fix", "D1"]
+        assert sel.element_types is None
+
+    def test_constraint_key_alias(self):
+        from examples.view_model import parse_selection
+
+        assert parse_selection("constraints=Fix").constraints == ["Fix"]
+
+    def test_constraint_only_does_not_warn(self, capsys):
+        from examples.view_model import selection_highlights
+
+        selection_highlights(self._args(["constraint=Fix"]))
+
+        assert capsys.readouterr().out == ""
+
+    def test_constraint_with_element_type_warns(self, capsys):
+        """constraint= selects joints, so type=Frame cannot match anything."""
+        from examples.view_model import selection_highlights
+
+        selection_highlights(self._args(["constraint=Fix; type=Frame"]))
+
+        assert "matches nothing" in capsys.readouterr().out
+
+    def test_constraint_with_section_warns_about_ignored_criteria(self, capsys):
+        from examples.view_model import selection_highlights
+
+        selection_highlights(self._args(["constraint=Fix; section=2xR3"]))
+
+        assert "Node-only Selection" in capsys.readouterr().out
