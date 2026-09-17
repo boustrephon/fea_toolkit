@@ -1563,6 +1563,17 @@ class TestViewModelConstraintHighlight:
 
         assert set(colors) == {"1", "2", "10"}
 
+    def test_red_and_yellow_paths_agree(self):
+        """The red set is resolved through Selection.constraints, so it
+        equals what --select would highlight."""
+        from examples.view_model import constraint_node_colors
+        from fea_toolkit.model.selection import Selection
+
+        md = self._md()
+        colors = constraint_node_colors(self._args(["Fix", "D1"]), md)
+
+        assert set(colors) == set(Selection(constraints=["Fix", "D1"]).get_node_ids(md))
+
     def test_unknown_name_is_reported_and_ignored(self, capsys):
         from examples.view_model import constraint_node_colors
 

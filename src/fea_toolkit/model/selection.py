@@ -108,6 +108,35 @@ class Selection:
       are eligible — use this to filter by section / material / group alone
       regardless of type.
 
+    *Source coverage*
+
+    Not every model representation carries every attribute, so which source a
+    criterion can resolve against varies:
+
+    ========================  ==============================================
+    criterion                 resolvable against
+    ========================  ==============================================
+    ``element_types``,        ``SAPModelData``, ``MeshModel``, resolved
+    ``element_ids``, groups   sources
+    ``sections``, materials   ``SAPModelData``, ``MeshModel``
+    ``elevation_range``       ``SAPModelData``, ``MeshModel`` (node geometry)
+    ``constraints``           ``SAPModelData`` / ``ResolvedSource`` only — a
+                              ``MeshModel`` and an NPZ archive carry no
+                              ``constraint_assignments``
+    ``story``                 needs ``storey_data`` passed to
+                              :meth:`resolve_to_mesh_sets`
+    ========================  ==============================================
+
+    *Failure policy*
+
+    The query methods here are **permissive**: a criterion the source cannot
+    resolve simply matches nothing — ``get_node_ids()`` on a ``MeshModel``
+    with :attr:`constraints` set returns ``[]`` rather than raising, matching
+    the existing ``story`` behaviour.  Consumers that *act* on the result are
+    **strict**: the viewer raises a ``ValueError`` for a criterion the source
+    cannot resolve, so nothing is silently swallowed where it would have
+    produced a misleading picture.
+
     Parameters
     ----------
     element_types:

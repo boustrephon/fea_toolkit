@@ -196,7 +196,14 @@ def constraint_node_colors(args, md):
     tables and collects the joints assigned to it in ``JOINT CONSTRAINT
     ASSIGNMENTS`` (``md.constraint_assignments``).  The lookup is
     type-agnostic, so ``BODY`` rigid bodies, ``DIAPHRAGM``, ``EQUAL``,
-    ``WELD``, … groups all work.
+    ``WELD``, ... groups all work.
+
+    The highlighted joint set is resolved through
+    :attr:`~fea_toolkit.model.selection.Selection.constraints` -- the same
+    criterion ``--select`` uses -- so the red and yellow paths can never
+    disagree about which joints belong to a group.  The per-name report below
+    still reads the assignment table directly, because it counts *assigned*
+    joints (including any the model dropped) rather than selected ones.
 
     Args:
         args: Parsed CLI namespace (uses ``highlight_constraint``).
@@ -204,7 +211,7 @@ def constraint_node_colors(args, md):
 
     Returns:
         ``{joint_id: color}`` for :func:`plot_mesh`'s ``node_colors``
-        argument — empty when the option is unused or matched nothing.
+        argument -- empty when the option is unused or matched nothing.
     """
     if not args.highlight_constraint:
         return {}
@@ -218,10 +225,14 @@ def constraint_node_colors(args, md):
     if missing:
         print(f"Warning: constraint(s) not defined in the model: {missing}")
 
+    known = [name for name in wanted if name in definitions]
     colors = {}
-    for name in wanted:
-        if name not in definitions:
-            continue
+    if known:
+        # Single source of truth for *which* joints belong to each group.
+        for jid in Selection(constraints=known).get_node_ids(md):
+            colors[jid] = "#ff2d2d"
+
+    for name in known:
         ctype = getattr(definitions[name], "constraint_type", "?") or "?"
         assigned = [jid for jid, cname in assignments.items() if cname == name]
         present = [jid for jid in assigned if jid in nodes]
@@ -229,8 +240,6 @@ def constraint_node_colors(args, md):
             f"Highlighting constraint '{name}' ({ctype}): "
             f"{len(present)} of {len(assigned)} assigned joint(s) present in the model."
         )
-        for jid in present:
-            colors[jid] = "#ff2d2d"
 
     if not colors:
         print("Warning: --highlight-constraint matched no joints; ignoring.")
@@ -657,8 +666,10 @@ def main():
         help=(
             "Mesh view: draw the joints assigned to these SAP2000 constraint "
             "group(s) in red (any type — BODY, DIAPHRAGM, EQUAL, ...), e.g. "
-            "--highlight-constraint Fix.  Needs a .s2k model; NPZ archives do "
-            "not carry the constraint tables."
+            "--highlight-constraint Fix.  The same joints are selectable "
+            "through --select 'constraint=Fix' (drawn yellow); this flag "
+            "is the red-ink convenience.  Needs a .s2k model; NPZ archives "
+            "do not carry the constraint tables."
         ),
     )
     parser.add_argument(

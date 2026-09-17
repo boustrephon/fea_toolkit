@@ -516,6 +516,33 @@ backward-incompatible array-layout change.  Keep the *model* marker
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-17 — one constraint resolution path + the source-coverage policy)
+
+**What.** Two follow-ups from the architecture review of the constraint work.
+
+- **One resolution path.** `--highlight-constraint` (red) and `--select
+  "constraint=..."` (yellow) resolved constraint names to joints independently.
+  `constraint_node_colors` now resolves the highlighted set through
+  `Selection(constraints=[...]).get_node_ids(md)`, so the two paths cannot
+  drift; its per-name report still reads `constraint_assignments` directly,
+  because it counts *assigned* joints (including any the model dropped), not
+  selected ones.  The `--highlight-constraint` help points at the Selection
+  equivalent.
+- **Policy documented.** The `Selection` docstring gains a *Source coverage*
+  table (which criteria resolve against which representations — `constraints`
+  is `SAPModelData` / `ResolvedSource` only, `story` needs `storey_data`,
+  sections / materials / elevation work on `MeshModel`) and a *Failure policy*
+  paragraph making the permissive-vs-strict split explicit: the query layer
+  matches nothing for a criterion the source cannot resolve, while consumers
+  that *act* on the result (the viewer) raise.
+
+**Tests.** `TestViewModelConstraintHighlight::test_red_and_yellow_paths_agree`
+pins the two paths together.
+
+**Validation.** Full suite 1707 passed, 2 skipped, 2 xfailed; ruff clean.
+CLI on the BPPS pipe-rack: `--highlight-constraint Fix` still reports
+`65 of 65 assigned joint(s) present in the model`.
+
 ## DONE (2026-09-17 — promote the reusable viewer pieces into the package)
 
 **What.** Reviewing the constraint-selection work flagged that reusable logic
