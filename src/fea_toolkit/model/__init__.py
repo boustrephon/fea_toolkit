@@ -68,6 +68,20 @@ from .geometry import (
     trapezoidal_force_split,
     warn_frame_overlaps,
 )
+from .load_combinations import (
+    ComboTree,
+    ComboTreeNode,
+    CompositeLoadCase,
+    apply_composite_load_case,
+    build_combo_tree,
+    build_combo_tree_dict,
+    calculate_aggregate_factors,
+    classify_combination_refs,
+    expand_linear_combination,
+    generate_combination_results,
+    generate_composite_results,
+    to_e2k_combo_dict,
+)
 from .mesh_model import MeshModel
 from .sap_data import (
     AngleSection,
@@ -97,6 +111,7 @@ from .sap_data import (
     LayeredShellSection,
     LoadCase,
     LoadCombination,
+    LoadCombinationEntry,
     LoadPattern,
     MassSource,
     Material,
@@ -200,6 +215,9 @@ __all__ = [
     "BoxSection",
     "ChannelSection",
     "CircularSection",
+    "ComboTree",
+    "ComboTreeNode",
+    "CompositeLoadCase",
     "ConcreteCircularSection",
     "ConcreteRectangularSection",
     "ConfinementData",
@@ -221,6 +239,7 @@ __all__ = [
     # Loads
     "LoadCase",
     "LoadCombination",
+    "LoadCombinationEntry",
     "LoadPattern",
     "MassSource",
     # Materials & shells
@@ -249,6 +268,7 @@ __all__ = [
     "StoreyRigidBody",
     "StoryLevel",
     "TeeSection",
+    "apply_composite_load_case",
     "apply_frame_end_offsets",
     "beam_load_to_nodal_loads",
     "bilinearize_composite",
@@ -256,11 +276,15 @@ __all__ = [
     "bilinearize_rc",
     "bilinearize_stiffness_change",
     "brace_buckling_check",
+    "build_combo_tree",
+    "build_combo_tree_dict",
     "build_storey_table",
+    "calculate_aggregate_factors",
     "check_brace_buckling",
     # Checks
     "check_model_connectivity",
     "check_self_weight_consistency",
+    "classify_combination_refs",
     # Tree utils
     "collect_descendants",
     "compute_asce41_hinge_length",
@@ -269,11 +293,14 @@ __all__ = [
     "compute_performance_point",
     "convert_area_loads_to_edge_loads",
     "convert_mesh_units",
+    "expand_linear_combination",
     "find_constraint_edges",
     "find_wall_nodes_inside_slabs",
     "format_review_markdown",
     "format_review_report",
     "frame_split_summary",
+    "generate_combination_results",
+    "generate_composite_results",
     "get_SAP_vecxz",
     "get_bilinearize_method",
     "get_element_chain",
@@ -310,6 +337,7 @@ __all__ = [
     "storey_shears",
     "stories_dataframe",
     "subdivide_elements",
+    "to_e2k_combo_dict",
     "trapezoidal_force_split",
     # Units
     "unit_multipliers",

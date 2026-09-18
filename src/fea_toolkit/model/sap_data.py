@@ -1611,12 +1611,59 @@ class LoadPattern:
 
 
 @dataclass
-class LoadCombination:
-    """SAP2000 load combination."""
+class LoadCombinationEntry:
+    """One reference inside a load combination.
+
+    A ``COMBINATION DEFINITIONS`` row names either a load case or another
+    combination; the ``.s2k`` table carries no type flag (unlike ETABS's
+    ``.e2k``, where each line has a ``LOAD`` / ``LOADCASE`` / ``SPEC`` /
+    ``COMBO`` token), so ``kind`` is classified after parsing by resolving
+    ``name`` against the model's load cases and combinations.
+
+    Attributes:
+        name: Load-case name (leaf) or combination name (branch).
+        factor: Scale factor applied to the referenced result.
+        kind: ``"case"`` (leaf — static, response-spectrum or modal load
+            case), ``"combo"`` (branch — another combination), or
+            ``"unknown"`` (the name resolves to neither, e.g. a partially
+            exported model).
+        mode: SAP ``Mode`` column value for a modal-case reference, else
+            ``None``.
+    """
 
     name: str
-    combo_type: str  # 'DEAD', 'LIVE', 'SUPERDEAD', 'WIND', 'QUAKE', etc.
-    cases: dict[str, float] = field(default_factory=dict)
+    factor: float
+    kind: str = "case"
+    mode: Optional[int] = None
+
+
+@dataclass
+class LoadCombination:
+    """SAP2000 load combination.
+
+    Built by :meth:`~fea_toolkit.io.s2k_parser.SAP2000Parser._get_load_combinations`
+    from the ``COMBINATION DEFINITIONS`` table.
+
+    The parsed collection is a **flat dictionary** keyed by combination name
+    (``SAPModelData.load_combinations``); combinations reference each other by
+    name through :attr:`entries` rather than nesting their definitions.
+
+    Attributes:
+        name: Combination name (``ComboName``).
+        combo_type: Combination operator — ``"Linear Add"``, ``"Envelope"``,
+            ``"Absolute Add"``, ``"SRSS"``, ``"Range Add"``, etc.
+        entries: Order-preserving, duplicate-preserving list of references —
+            one per ``CaseName`` / ``ScaleFactor`` row.  SAP2000 permits the
+            same case or combination to appear more than once in a
+            combination, and both the ordering and the repeats are kept.
+        design: Non-empty design-type overrides from the combination's
+            first row, keyed by SAP column (``SteelDesign``,
+            ``ConcDesign``, ``AlumDesign``, ``ColdDesign``).
+    """
+
+    name: str
+    combo_type: str
+    entries: list[LoadCombinationEntry] = field(default_factory=list)
     design: dict[str, str] = field(default_factory=dict)
 
 
@@ -1840,6 +1887,9 @@ class SAPModelData:
     # Loads (to be expanded later)
     load_cases: dict[str, LoadCase] = field(default_factory=dict)
     load_patterns: dict[str, LoadPattern] = field(default_factory=dict)
+    # Named load combinations ("COMBINATION DEFINITIONS" table), keyed by
+    # combination name.
+    load_combinations: dict[str, LoadCombination] = field(default_factory=dict)
     joint_loads: list[JointLoad] = field(default_factory=list)
     frame_dist_loads: list[FrameDistributedLoad] = field(default_factory=list)
     area_uniform_loads: list[AreaUniformLoad] = field(default_factory=list)

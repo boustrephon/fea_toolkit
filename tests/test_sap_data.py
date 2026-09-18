@@ -41,6 +41,7 @@ from fea_toolkit.model.sap_data import (
     JointLoad,
     LoadCase,
     LoadCombination,
+    LoadCombinationEntry,
     LoadPattern,
     MassSource,
     Material,
@@ -363,14 +364,35 @@ class TestLoadCase:
 
 
 class TestLoadCombination:
-    def test_with_cases(self):
+    def test_with_entries(self):
         lc = LoadCombination(
             name="1.2DL+1.6LL",
-            combo_type="Strength",
-            cases={"DEAD": 1.2, "LIVE": 1.6},
+            combo_type="Linear Add",
+            entries=[
+                LoadCombinationEntry("DEAD", 1.2),
+                LoadCombinationEntry("LIVE", 1.6),
+            ],
         )
-        assert lc.cases["DEAD"] == 1.2
-        assert lc.cases["LIVE"] == 1.6
+        assert [e.name for e in lc.entries] == ["DEAD", "LIVE"]
+        assert [e.factor for e in lc.entries] == [1.2, 1.6]
+        assert all(e.kind == "case" for e in lc.entries)
+
+    def test_entries_preserve_order_and_repeats(self):
+        """``entries`` is a list — order and repeats are never collapsed."""
+        lc = LoadCombination(
+            name="ENV",
+            combo_type="Envelope",
+            entries=[
+                LoadCombinationEntry("DEAD", 1.0),
+                LoadCombinationEntry("DEAD", -0.9),
+            ],
+        )
+        assert [(e.name, e.factor) for e in lc.entries] == [("DEAD", 1.0), ("DEAD", -0.9)]
+
+    def test_defaults(self):
+        lc = LoadCombination(name="C", combo_type="Linear Add")
+        assert lc.entries == []
+        assert lc.design == {}
 
 
 class TestGroup:
