@@ -120,6 +120,11 @@ for automated cross-referencing.
   Tags: `elements`, `splitting`, `meshing`, `load-redistribution`
   Related: [Element Classification](element_classification.md) · [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Analysis Workflow](workflow.md)
 
+- [Load Combinations](load_combinations.md) — ⚠️ Partial
+  > Parsing, tree building and composite generation for SAP2000/ETABS load combinations, including the five CSI combination operators.
+  Tags: `loads`, `combination`, `model`, `results`, `composite`
+  Related: [Analysis Helpers](analysis.md) · [Builder Reference — Two-stage Pipeline](builder_reference.md) · [Unified Results Schema](results_schema.md) · [Force-Diagram Unification (Phase B)](force_diagram_unification.md)
+
 - [Mander Confinement Model Validation](mander_confinement_validation.md) — ✅ Complete
   > Formula-by-formula conformance of the Mander confinement engine to Mander et al. (1988), documented simplifications, and comparison against NZSEE C5, OpenSees Concrete07, and TSC2018.
   Tags: `mander`, `confinement`, `validation`, `theory`, `reference`
@@ -260,6 +265,23 @@ for automated cross-referencing.
   Related: [Custom OpenSeesPy local build — swap recipe](openseespy_local_build.md) · [Rhino 3-D Export](rhino_export.md) · [Analysis Workflow](workflow.md)
 
 
+## 📦 Uncategorised
+
+- [Etabs Checklist](ETABS_checklist.md)
+
+- [Etabs Checklist Gb](ETABS_checklist_gb.md)
+
+- [Etabs Checklist Hk](ETABS_checklist_hk.md)
+
+- [Etabs Checklist Is](ETABS_checklist_is.md)
+
+- [Etabs Checklist Src](ETABS_checklist_src.md)
+
+- [Sap2000 Checklist Gb](SAP2000_checklist_gb.md)
+
+- [Sap2000 Checklist Hk](SAP2000_checklist_hk.md)
+
+
 ## 📦 Io
 
 - [Model Stage File](model_stage_file.md) — ✅ Complete
@@ -307,6 +329,8 @@ Tags across all documentation files:
 - **`cli`** — [model_review.md](model_review.md)
 - **`codes`** — [capacity.md](capacity.md)
 - **`columns`** — [element_classification.md](element_classification.md)
+- **`combination`** — [load_combinations.md](load_combinations.md)
+- **`composite`** — [load_combinations.md](load_combinations.md)
 - **`config`** — [element_properties_config.md](element_properties_config.md)
 - **`confinement`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`connections`** — [member_releases.md](member_releases.md)
@@ -369,6 +393,7 @@ Tags across all documentation files:
 - **`linting`** — [linting_fix_plan.md](linting_fix_plan.md)
 - **`llm`** — [llm_guide.md](llm_guide.md)
 - **`load-redistribution`** — [element_splitting.md](element_splitting.md)
+- **`loads`** — [load_combinations.md](load_combinations.md)
 - **`macos`** — [openseespy_local_build.md](openseespy_local_build.md)
 - **`mander`** — [mander_confinement_validation.md](mander_confinement_validation.md), [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`mcft`** — [shear_failure_modelling.md](shear_failure_modelling.md)
@@ -377,6 +402,7 @@ Tags across all documentation files:
 - **`metadata`** — [rhino_attributes.md](rhino_attributes.md)
 - **`migration`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md)
 - **`modal`** — [modal_analysis.md](modal_analysis.md)
+- **`model`** — [load_combinations.md](load_combinations.md)
 - **`model-codec`** — [json_serialization.md](json_serialization.md)
 - **`modifiers`** — [stiffness_factors.md](stiffness_factors.md)
 - **`mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
@@ -405,7 +431,7 @@ Tags across all documentation files:
 - **`reporter`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
 - **`response-spectrum`** — [model_review.md](model_review.md)
-- **`results`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
+- **`results`** — [load_combinations.md](load_combinations.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [results_schema.md](results_schema.md)
 - **`review`** — [model_review.md](model_review.md)
 - **`rhino`** — [model_stage_file.md](model_stage_file.md), [rhino_attributes.md](rhino_attributes.md), [rhino_export.md](rhino_export.md)
 - **`rigid-end-offset`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)

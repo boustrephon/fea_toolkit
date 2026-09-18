@@ -369,18 +369,91 @@ layers (Phases 1–4) are stable.
 #### P12 — LoadCombination table parsing (README §3 reconciliation)
 Source: repo-root `README.md` §3 "Load Combinations and Analysis Types";
 `LoadCombination` dataclass + `TestLoadCombination` in `model/sap_data.py` /
-`tests/test_model.py`.
+`tests/test_sap_data.py`.
 
-**What.** The `LoadCombination` dataclass exists and is tested, but
-`io/s2k_parser.py` reads **nothing** from the `LOAD COMBINATIONS` table —
-load cases (`CASE - STATIC` / `CASE - MODAL` / `CASE - RESPONSE SPECTRUM`)
-are parsed, but combinations are not.  The `AnalysisBuilder` step to run a
-named combination with factors (e.g. `1.2 DL + 1.6 LL`) also remains open.
+**What.** Steps 1–2 are **done**, and the model is now lossless and
+tree-driven:
 
-**Outline steps.** 1) Parse `LOAD COMBINATIONS` rows into `LoadCombination`
-instances (combo type + case/factor pairs); 2) expose
-`SAPModelData.load_combinations`; 3) builder support to run a named
-combination with combination factors.
+- `io/s2k_parser.py::_get_load_combinations()` parses the
+  `COMBINATION DEFINITIONS` table into `LoadCombination` instances —
+  `combo_type` and design overrides from the first row, plus an ordered,
+  **duplicate-preserving** `entries` list of `LoadCombinationEntry`
+  (name, factor, `kind`, optional `Mode`).  Exposed as
+  `SAPModelData.load_combinations`; the table is registered as *handled* in
+  `io/table_registry.py`.
+- Because the `.s2k` rows carry no reference-type flag,
+  `model.load_combinations.classify_combination_refs()` resolves each
+  reference name against the load cases and combinations, labelling it
+  `"case" | "combo" | "unknown"`.
+- `model/load_combinations.py` adds the tree layer (`build_combo_tree` /
+  `build_combo_tree_dict` / `calculate_aggregate_factors`), the linear
+  aggregator (`expand_linear_combination`) and composite generation
+  (`generate_combination_results`).  A response-spectrum case — or an SRSS
+  result — mixed with gravity forks into `+`/`−` composites (2ⁿ for n
+  independent spectrum terms); an `Envelope` yields a max/min pair
+  (`envelope_mode="maxmin"`) or one composite per branch (`"per_path"`), with
+  the max envelope using the `+` magnitude and the min the `−`.
+  `apply_composite_load_case()` / `generate_composite_results()` evaluate
+  composites into NPZ-ready `static/{composite}/...` arrays, so a combination
+  visualises exactly like a load case.
+- `to_e2k_combo_dict()` projects the flat mapping onto the ETABS `E2K`
+  dictionary shape (`TYPE` / `LOADCOMBO` / `LOADCASE` / `OTHER`) for parity
+  with `E2K_utilities`.
+
+**Step 3 — done.**  `analysis.combinations.build_combination_results()` expands
+the model's combinations against the per-case result payloads and returns
+composite payloads in the same shape, and
+`AnalysisBuilder.export_results(..., model=md, expand_combinations=True)`
+merges them into ``static_results`` in one call, so the composites land in the
+NPZ as ordinary ``static/{composite}/...`` cases.  Only the load cases the
+combinations reference need to have been run; a missing case raises a clear
+``KeyError``.  `Envelope` handling is selected by ``envelope_mode``.  See
+`docs/load_combinations.md` for the full operator reference and the sign-fork
+rules.
+
+**Remaining.**
+
+- **Bulk run driver** — run exactly the load cases a requested set of
+  combinations references (ergonomic, not structural).
+- **`Absolute Add` operator** — per quantity ``max = Σ|factor·xᵢ|``,
+  ``min = −max`` (a magnitude, so it forks `±` when mixed with signed loads).
+  **Not implemented** — `generate_combination_results()` currently raises it as
+  unsupported.  Drop-in: no new result representation required.
+- **`Range Add` operator** — per quantity ``max = Σ max(0, xᵢ⁺)``,
+  ``min = Σ min(0, xᵢ⁻)``; emits **two** composites like `Envelope`.  **Not
+  implemented.**  Its CSI definition assumes each contributing case carries its
+  own maximum and minimum (a range — what a moving-load / pattern-load case
+  produces), which the single-valued result model does not yet represent, so a
+  per-case min/max range concept is needed first.  See
+  `docs/load_combinations.md`.
+
+**Nested combinations — verified, not hypothetical (checked 2026-09-18).**  A
+combination may itself contain other combinations.  CSI's `cCombo` interface
+documents this explicitly: `SetCaseList` / `GetCaseList` / `DeleteCase` each
+take an `eCNameType` argument (`LoadCase = 0`, `LoadCombo = 1`) which
+"indicates whether the `CName` item is an analysis case (LoadCase) or a load
+combination (LoadCombo)"; the Load Combination Data form adds "more than one
+instance of the same load case (or combination) can be used in a load
+combination".  (Retrieved from CSI's API help files, which are published for
+ETABS 2015/2016; SAP2000 exposes the same `cCombo` class through
+`SapModel.RespCombo`.  A SAP2000-specific page was not retrieved, so treat the
+SAP2000 *wording* as strongly indicated rather than directly quoted.  The
+SAP2000 *Input File Format Manual* also documents a separate `COMBO` data
+block, which has not been inspected.)
+
+Consequences — all now handled:
+
+- Reference kind is resolved **by name** (`classify_combination_refs`)
+  rather than from a column, since names are unique across load cases and
+  combinations.
+- Both tree building and generation carry a **cycle guard** (`ValueError`).
+- Linear factor expansion is offered only where the result really is linear
+  (`expand_linear_combination` raises otherwise); `Envelope` and `SRSS` are
+  handled as operators by `generate_combination_results`, while
+  `Absolute Add` / `Range Add` raise as unsupported (a future extension).
+- `entries` is an ordered list, so repeated references — legal per the quote
+  above — are preserved; the ETABS-side `combo_func` stores the same
+  `(name, factor)` shape.
 
 #### P13 — Joint Level 3 elements (Joint2D / beamColumnJoint)
 Source: repo-root `README.md` §5 "Joint Modeling";

@@ -722,8 +722,9 @@ all other area loads are ignored.
 3. **Load Combinations and Analysis Types**  
    - ~~`MassSource`~~ ✅ Parsed by `_get_mass_sources()` and stored in `SAPModelData.mass_sources`.  
    - ~~`LoadCase`~~ ✅ Parsed by `get_load_cases()` — `LOAD CASE DEFINITIONS`, `CASE - RESPONSE SPECTRUM` (general + load assignments), `CASE - MODAL`, `CASE - STATIC` (see the "Key Components Implemented" table above).  \
-   - `LoadCombination` dataclass defined in `sap_data.py` — parsing of the `LOAD COMBINATIONS` table still needed (tracked as **P12** in `docs/_pending_work.md`).  
-   - In `AnalysisBuilder`, allow the user to select which load cases/combinations to run with combination factors (e.g., `1.2 DL + 1.6 LL`).
+   - ~~`LoadCombination`~~ ✅ Parsed by `_get_load_combinations()` from the `COMBINATION DEFINITIONS` table and stored in `SAPModelData.load_combinations` — combo type, design overrides, and a **lossless, order- and duplicate-preserving** `entries` list of `LoadCombinationEntry` (name, factor, `kind` = case/combo/unknown, optional modal `Mode`).  
+   - ~~Load-combination trees & composite results~~ ✅ `model.load_combinations` materialises the reference graph (`build_combo_tree`), aggregates linear factors (`expand_linear_combination`) and generates **composite load cases** (`generate_combination_results`): a response-spectrum or SRSS term mixed with gravity forks into `+`/`−` composites, and `Envelope` yields a max/min pair or one composite per branch.  `generate_composite_results()` turns them into NPZ-ready result sets, so a combination can be visualised exactly like a load case.  See [`docs/load_combinations.md`](docs/load_combinations.md) (⚠️ `Absolute Add` and `Range Add` not yet implemented).  \
+   - ~~Combination results export~~ ✅ `analysis.combinations.build_combination_results()` expands the model's combinations against the run load-case payloads, and `AnalysisBuilder.export_results(..., model=md, expand_combinations=True)` writes the composites into the NPZ as `static/{composite}/...` cases — ready for the force-diagram and viewer tools (tracked as **P12** in `docs/_pending_work.md`).
 
 4. **Advanced Analyses**  
    - ~~Modal Analysis~~ ✅ `run_modal_analysis()` implemented — eigenvalue extraction with modal properties table.  
