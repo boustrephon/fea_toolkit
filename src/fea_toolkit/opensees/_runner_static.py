@@ -8,7 +8,7 @@ import numpy as np
 import openseespy.opensees as ops
 
 from ..model.geometry import polygon_area_3d
-from ..model.sap_data import FrameElement
+from ..model.sap_data import FrameElement, SAPModelData
 from ..model.tree_utils import collect_descendants
 from ..utils import g_from_units
 
@@ -1054,6 +1054,9 @@ class StaticRunnerMixin:
         rs_element_forces: Optional[dict[str, Any]] = None,
         rs_nodal_displacements: Optional[dict[int, tuple]] = None,
         fmt: str = "npz",
+        model: Optional[SAPModelData] = None,
+        expand_combinations: bool = False,
+        envelope_mode: str = "maxmin",
     ) -> str:
         """Export model geometry and analysis results to a unified file.
 
@@ -1070,11 +1073,38 @@ class StaticRunnerMixin:
             rs_nodal_displacements: Dict from
                 :meth:`compute_rs_nodal_displacements`.
             fmt: ``"npz"`` (default) or ``"h5"``.
+            model: Parsed ``SAPModelData`` — required when
+                *expand_combinations* is set, because the load combinations
+                live on the model, not on the ``MeshModel`` the builder holds.
+            expand_combinations: When ``True``, expand *model*'s load
+                combinations into composite result sets (via
+                :func:`~fea_toolkit.analysis.combinations.build_combination_results`)
+                and add them to *static_results* alongside the load cases.
+                Only the load cases the combinations reference need to be
+                present.
+            envelope_mode: Envelope strategy used when expanding —
+                ``"maxmin"`` or ``"per_path"``.
 
         Returns:
             Absolute path to the written file.
+
+        Raises:
+            ValueError: If *expand_combinations* is set without *model*.
         """
         from ..io.unified_writer import write_results
+
+        if expand_combinations:
+            if model is None:
+                raise ValueError(
+                    "expand_combinations=True requires model=SAPModelData — the "
+                    "load combinations live on the model, not on the MeshModel."
+                )
+            from ..analysis.combinations import build_combination_results
+
+            combined = build_combination_results(
+                static_results or {}, model=model, envelope_mode=envelope_mode
+            )
+            static_results = {**(static_results or {}), **combined}
 
         return write_results(
             path=filepath,

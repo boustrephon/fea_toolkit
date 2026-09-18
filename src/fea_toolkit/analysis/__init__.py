@@ -31,6 +31,7 @@ from .base import (
     AnalysisCaseSpec,
     AnalysisResult,
 )
+from .combinations import build_combination_results
 from .linear import (
     run_linear_cases,
     static_load_verification,
@@ -64,6 +65,7 @@ __all__ = [
     "ShearCapacityResult",
     "ShearFailureReport",
     "axial_capacity_surface",
+    "build_combination_results",
     "elwood_axial_deg_slope",
     "elwood_axial_drift_at_failure",
     "elwood_column_geometry",
