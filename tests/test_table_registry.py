@@ -378,6 +378,7 @@ def test_handled_tables_are_upper_case():
     [
         "JOINT COORDINATES",
         "FRAME SECTION PROPERTIES 01 - GENERAL",
+        "COMBINATION DEFINITIONS",
         "MATERIAL PROPERTIES 03A - STEEL DATA",  # prefix family
         "CONSTRAINT DEFINITIONS - DIAPHRAGM",  # prefix family
         "AREA LOADS - GRAVITY",  # prefix family
@@ -392,7 +393,7 @@ def test_classify_handled(name):
 
 def test_classify_known_gap():
     """Recognised-but-unparsed tables classify as known-gap."""
-    assert classify("COMBINATION DEFINITIONS") == "known-gap"
+    assert classify("JOINT PATTERN DEFINITIONS") == "known-gap"
     assert classify("SECTION DESIGNER PROPERTIES 16 - SHAPE POLYGON") == "known-gap"
 
 
@@ -417,7 +418,7 @@ def _raw_tables():
     return {
         "JOINT COORDINATES": [{"Joint": 1}, {"Joint": 2}],
         "METADATA": [{"FileName": "x"}],
-        "COMBINATION DEFINITIONS": [{"Name": "C1"}],
+        "SOLID PROPERTY DEFINITIONS": [{"Name": "C1"}],
         "SOMETHING NEW": [{}, {}, {}],
     }
 
@@ -427,7 +428,7 @@ def test_table_coverage_buckets():
     cov = table_coverage(_raw_tables())
     assert cov.handled == {"JOINT COORDINATES": 2}
     assert cov.ignored == {"METADATA": 1}
-    assert cov.known_gaps == {"COMBINATION DEFINITIONS": 1}
+    assert cov.known_gaps == {"SOLID PROPERTY DEFINITIONS": 1}
     assert cov.unhandled == {"SOMETHING NEW": 3}
 
 
@@ -440,7 +441,7 @@ def test_coverage_clean_and_gaps():
     """``clean`` tracks unhandled only; ``gaps`` merges known + unhandled."""
     cov = table_coverage(_raw_tables())
     assert cov.clean is False
-    assert cov.gaps == {"COMBINATION DEFINITIONS": 1, "SOMETHING NEW": 3}
+    assert cov.gaps == {"SOLID PROPERTY DEFINITIONS": 1, "SOMETHING NEW": 3}
 
     clean = table_coverage({"JOINT COORDINATES": [{"Joint": 1}]})
     assert clean.clean is True
@@ -452,8 +453,8 @@ def test_to_dict_shape():
     d = table_coverage(_raw_tables()).to_dict()
     assert d["clean"] is False
     assert d["counts"] == {"handled": 1, "known_gaps": 1, "ignored": 1, "unhandled": 1}
-    assert d["known_gaps"]["COMBINATION DEFINITIONS"]["rows"] == 1
-    assert d["known_gaps"]["COMBINATION DEFINITIONS"]["reason"]
+    assert d["known_gaps"]["SOLID PROPERTY DEFINITIONS"]["rows"] == 1
+    assert d["known_gaps"]["SOLID PROPERTY DEFINITIONS"]["reason"]
     json.dumps(d)  # must not raise
 
 
@@ -467,7 +468,7 @@ def test_format_table_coverage_lists_unhandled():
     """Unrecognised tables are named in the rendered text."""
     text = format_table_coverage(table_coverage(_raw_tables()))
     assert "SOMETHING NEW" in text
-    assert "COMBINATION DEFINITIONS" in text
+    assert "SOLID PROPERTY DEFINITIONS" in text
     assert "METADATA" not in text  # ignored hidden by default
 
     with_ignored = format_table_coverage(table_coverage(_raw_tables()), show_ignored=True)

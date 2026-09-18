@@ -10,6 +10,7 @@ from typing import Any, Optional, Union
 
 import numpy as np  # noqa: F401
 
+from ..model.load_combinations import classify_combination_refs
 from ..model.sap_data import (
     AreaEdgeConstraint,
     AreaElement,
@@ -26,6 +27,8 @@ from ..model.sap_data import (
     Group,
     JointLoad,
     LoadCase,
+    LoadCombination,
+    LoadCombinationEntry,
     LoadPattern,
     MassSource,
     Material,
@@ -353,6 +356,7 @@ class SAP2000Parser:
         frame_gravity_loads = self._get_frame_gravity_loads()
         area_uniform_loads, area_gravity_loads = self._get_area_loads()
         load_cases = self.get_load_cases()
+        load_combinations = self._get_load_combinations(load_cases)
 
         # ── Populate area element thickness from assigned sections ──
         for aid, a_elem in area_elements.items():
@@ -416,6 +420,7 @@ class SAP2000Parser:
             area_uniform_loads=area_uniform_loads,
             area_gravity_loads=area_gravity_loads,
             load_cases=load_cases,
+            load_combinations=load_combinations,
             units=model_units,
         )
 
@@ -1917,6 +1922,79 @@ class SAP2000Parser:
                     }
 
         return loadcases
+
+    def _get_load_combinations(self, load_cases: dict[str, LoadCase]) -> dict[str, LoadCombination]:
+        """Build load combinations from the COMBINATION DEFINITIONS table.
+
+        SAP2000 writes one row per case/factor assignment, with only the first
+        row of each combination carrying ``ComboType`` and the design-type
+        columns::
+
+            ComboName=COMB1  ComboType="Linear Add"  ...  CaseName=DEAD  ScaleFactor=1.3
+            ComboName=COMB1                               CaseName=LIVE  ScaleFactor=1.6
+
+        Rows are grouped by ``ComboName`` and accumulated in file order into
+        :attr:`LoadCombination.entries` — order and repeats are preserved
+        (SAP2000 permits the same case or combination to appear more than
+        once).  Design-type overrides (``SteelDesign`` / ``ConcDesign`` /
+        ``AlumDesign`` / ``ColdDesign``) are read from the first row, and only
+        when set — an unset column parses as ``None`` and is omitted.
+
+        Because the table carries no reference-type flag, each entry's
+        ``kind`` is classified after parsing by resolving its name against the
+        combination names and *load_cases* (SAP2000 guarantees names are
+        unique across both): ``"combo"``, ``"case"``, or ``"unknown"`` for a
+        dangling reference.
+
+        Args:
+            load_cases: Parsed load cases, used to classify references.
+
+        Returns:
+            Mapping of combination name to :class:`LoadCombination`.  Empty
+            when the model has no ``COMBINATION DEFINITIONS`` table.
+        """
+        combinations: dict[str, LoadCombination] = {}
+        raw = self._raw_tables.get("COMBINATION DEFINITIONS", [])
+        if not raw:
+            return combinations
+
+        # Group rows by ComboName (first-seen order preserved).
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for rec in raw:
+            key = rec.get("ComboName", "")
+            if not key:
+                continue
+            groups.setdefault(str(key), []).append(rec)
+
+        design_columns = ("SteelDesign", "ConcDesign", "AlumDesign", "ColdDesign")
+        for name, rows in groups.items():
+            first = rows[0]
+            combo = LoadCombination(
+                name=name,
+                combo_type=str(first.get("ComboType", "")),
+            )
+            for rec in rows:
+                case = rec.get("CaseName", "")
+                if not case:
+                    continue
+                mode = rec.get("Mode")
+                combo.entries.append(
+                    LoadCombinationEntry(
+                        name=str(case),
+                        factor=float(rec.get("ScaleFactor", 0.0)),
+                        mode=int(mode) if isinstance(mode, (int, float)) else None,
+                    )
+                )
+            for column in design_columns:
+                value = first.get(column)
+                if value is not None:
+                    combo.design[column] = str(value)
+            combinations[name] = combo
+
+        # Classify references by name resolution.
+        classify_combination_refs(combinations, load_cases)
+
+        return combinations
 
     @staticmethod
     def _is_intentionally_ignored(table_name: str) -> bool:

@@ -2332,3 +2332,184 @@ class TestMassSourceParser:
         assert ms.elements is True
         assert ms.masses is True
         assert ms.loads is False
+
+
+# ============================================================================
+# Load-combination parsing
+# ============================================================================
+
+
+@pytest.fixture(scope="module")
+def combos():
+    """Parsed combinations from the ``sample_2.s2k`` fixture."""
+    s2k_file = FIXTURES / "sample_2.s2k"
+    if not s2k_file.exists():
+        pytest.skip("sample_2.s2k not available")
+    md = SAP2000Parser(s2k_file).parse().get_model_data()
+    return md.load_combinations
+
+
+class TestLoadCombinationParser:
+    """``COMBINATION DEFINITIONS`` → ``SAPModelData.load_combinations``."""
+
+    def test_all_combinations_parsed(self, combos):
+        """Every ComboName becomes one LoadCombination, keyed by name."""
+        assert set(combos) == {
+            "Equake_X&Wind_X",
+            "Equake_X&Wind_Y",
+            "COMB1_Wind-X",
+            "Foundation Check",
+            "Tilting Check: 1.0G+1.0EQ+0.2W",
+        }
+        for name, combo in combos.items():
+            assert combo.name == name
+
+    def test_combo_type_and_entries(self, combos):
+        """The first row's ComboType and every case/factor row are captured."""
+        combo = combos["Equake_X&Wind_X"]
+        assert combo.combo_type == "Linear Add"
+        assert [(e.name, e.factor) for e in combo.entries] == [
+            ("DEAD_P_Delta", 1.3),
+            ("SUPERDEAD", 1.3),
+            ("RSX", 1.4),
+            ("WIND_X", 0.3),
+            ("RSZ", 0.5),
+        ]
+        assert all(e.kind == "case" for e in combo.entries)
+
+    def test_negative_factor_preserved(self, combos):
+        """A negative ScaleFactor (wind reversal) survives parsing."""
+        factors = {e.name: e.factor for e in combos["COMB1_Wind-X"].entries}
+        assert factors["WIND_X"] == -0.3
+
+    def test_quoted_names_preserved(self, combos):
+        """Combo names containing spaces / colons survive quoted cells."""
+        foundation = {e.name: e.factor for e in combos["Foundation Check"].entries}
+        tilting = {e.name: e.factor for e in combos["Tilting Check: 1.0G+1.0EQ+0.2W"].entries}
+        assert foundation["DEAD_P_Delta"] == 1.0
+        assert tilting["WIND_X"] == 0.2
+
+    def test_design_overrides_empty_when_unset(self, combos):
+        """Design columns that parse as ``None`` are omitted from ``design``."""
+        assert combos["Equake_X&Wind_X"].design == {}
+
+    def test_design_overrides_parsed(self, tmp_path):
+        """A set design-type column is captured on the combination."""
+        data = {
+            "COMBINATION DEFINITIONS": [
+                {
+                    "ComboName": "COMB1",
+                    "ComboType": "Linear Add",
+                    "CaseName": "DEAD",
+                    "ScaleFactor": 1.3,
+                    "SteelDesign": "Concrete",
+                },
+                {"ComboName": "COMB1", "CaseName": "LIVE", "ScaleFactor": 1.6},
+            ]
+        }
+        json_path = tmp_path / "combos.json"
+        with open(json_path, "w") as f:
+            json.dump(data, f)
+        md = SAP2000Parser.from_json(json_path).get_model_data()
+        combo = md.load_combinations["COMB1"]
+        assert combo.combo_type == "Linear Add"
+        assert [(e.name, e.factor) for e in combo.entries] == [("DEAD", 1.3), ("LIVE", 1.6)]
+        assert combo.design == {"SteelDesign": "Concrete"}
+
+    def test_no_table_yields_empty_dict(self, tmp_path):
+        """A model without the table exposes an empty mapping."""
+        json_path = tmp_path / "no_combos.json"
+        with open(json_path, "w") as f:
+            json.dump({}, f)
+        md = SAP2000Parser.from_json(json_path).get_model_data()
+        assert md.load_combinations == {}
+
+    def test_sample_without_table(self):
+        """``sample.s2k`` has no combinations — the field stays empty."""
+        if not SAMPLE_S2K.exists():
+            pytest.skip("sample.s2k not available")
+        md = SAP2000Parser(SAMPLE_S2K).parse().get_model_data()
+        assert md.load_combinations == {}
+
+    def test_nested_combo_reference_classified(self, tmp_path):
+        """A reference to another combination is captured and classified.
+
+        SAP2000 permits a combination to contain another combination (CSI's
+        ``cCombo`` API distinguishes the two reference kinds through
+        ``eCNameType.LoadCombo``).  The ``COMBINATION DEFINITIONS`` rows carry
+        no type flag, so the parser resolves each name against the model's
+        load cases and combinations.
+        """
+        data = {
+            "LOAD CASE DEFINITIONS": [{"Case": "DEAD", "Type": "Linear Static"}],
+            "COMBINATION DEFINITIONS": [
+                {
+                    "ComboName": "GRAV",
+                    "ComboType": "Linear Add",
+                    "CaseName": "DEAD",
+                    "ScaleFactor": 1.2,
+                },
+                {
+                    "ComboName": "GRAV_SEISM",
+                    "ComboType": "Linear Add",
+                    "CaseName": "GRAV",
+                    "ScaleFactor": 1.5,
+                },
+            ],
+        }
+        json_path = tmp_path / "nested.json"
+        with open(json_path, "w") as f:
+            json.dump(data, f)
+        md = SAP2000Parser.from_json(json_path).get_model_data()
+
+        nested = md.load_combinations["GRAV_SEISM"]
+        assert [(e.name, e.factor, e.kind) for e in nested.entries] == [("GRAV", 1.5, "combo")]
+        # A reference to a load case is classified as such.
+        assert [(e.name, e.kind) for e in md.load_combinations["GRAV"].entries] == [
+            ("DEAD", "case")
+        ]
+
+    def test_unknown_reference_classified(self, tmp_path):
+        """A reference resolving to neither a case nor a combo is ``unknown``."""
+        data = {
+            "COMBINATION DEFINITIONS": [
+                {
+                    "ComboName": "COMB1",
+                    "ComboType": "Linear Add",
+                    "CaseName": "NOT_DEFINED_ANYWHERE",
+                    "ScaleFactor": 1.0,
+                },
+            ],
+        }
+        json_path = tmp_path / "dangling.json"
+        with open(json_path, "w") as f:
+            json.dump(data, f)
+        md = SAP2000Parser.from_json(json_path).get_model_data()
+        assert md.load_combinations["COMB1"].entries[0].kind == "unknown"
+
+    def test_repeated_reference_is_preserved(self, tmp_path):
+        """A repeated reference is kept, in order — nothing is collapsed.
+
+        CSI's Load Combination Data form states that "more than one instance
+        of the same load case (or combination) can be used in a load
+        combination"; ``entries`` is an ordered, duplicate-preserving list.
+        """
+        data = {
+            "COMBINATION DEFINITIONS": [
+                {
+                    "ComboName": "ENV",
+                    "ComboType": "Envelope",
+                    "CaseName": "DEAD",
+                    "ScaleFactor": 1.0,
+                },
+                {"ComboName": "ENV", "CaseName": "DEAD", "ScaleFactor": -0.9},
+            ],
+        }
+        json_path = tmp_path / "repeated.json"
+        with open(json_path, "w") as f:
+            json.dump(data, f)
+        md = SAP2000Parser.from_json(json_path).get_model_data()
+        assert [(e.name, e.factor) for e in md.load_combinations["ENV"].entries] == [
+            ("DEAD", 1.0),
+            ("DEAD", -0.9),
+        ]

@@ -118,6 +118,7 @@ HANDLED_TABLES: frozenset[str] = frozenset(
         # ── loads ──
         "LOAD PATTERN DEFINITIONS",
         "LOAD CASE DEFINITIONS",
+        "COMBINATION DEFINITIONS",
         "JOINT LOADS - FORCE",
         "FRAME LOADS - DISTRIBUTED",
         "FRAME LOADS - GRAVITY",
@@ -196,7 +197,6 @@ IGNORED_PREFIXES: tuple[tuple[str, str], ...] = (
 #: consumed, mapped to a short reason.  These are *known* holes — tracked work,
 #: not surprises.
 KNOWN_GAP_TABLES: dict[str, str] = {
-    "COMBINATION DEFINITIONS": "load combinations not parsed — see _pending_work.md P12",
     "SOLID PROPERTY DEFINITIONS": "solid (brick) elements not supported",
     "JOINT PATTERN DEFINITIONS": "joint patterns (thickness / offset overwrites) not consumed",
 }
@@ -220,7 +220,7 @@ def classify(table_name: str) -> str:
 
     Args:
         table_name: Table name as it appears in the ``.s2k`` / ``.json`` file
-            (e.g. ``"COMBINATION DEFINITIONS"``).
+            (e.g. ``"JOINT COORDINATES"``).
 
     Returns:
         One of ``"handled"``, ``"known-gap"``, ``"ignored"`` or

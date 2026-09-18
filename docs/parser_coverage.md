@@ -104,7 +104,7 @@ python -m fea_toolkit.io.table_registry model.s2k --json   # machine-readable
 
 *Generated from `src/fea_toolkit/io/table_registry.py` — do not edit by hand.  Regenerate with `python docs/_generate_parser_tables.py`.*
 
-### Handled (46 exact names)
+### Handled (47 exact names)
 
 - `AREA AUTO MESH ASSIGNMENTS`
 - `AREA EDGE CONSTRAINT ASSIGNMENTS`
@@ -118,6 +118,7 @@ python -m fea_toolkit.io.table_registry model.s2k --json   # machine-readable
 - `AUTO SEISMIC - LOAD PATTERN`
 - `AUTO WIND - CHINESE 2010`
 - `AUTO WIND EXPOSURE FOR HORIZONTAL DIAPHRAGMS`
+- `COMBINATION DEFINITIONS`
 - `CONNECTIVITY - AREA`
 - `CONNECTIVITY - FRAME`
 - `FRAME AUTO MESH ASSIGNMENTS`
@@ -159,9 +160,8 @@ python -m fea_toolkit.io.table_registry model.s2k --json   # machine-readable
 - `CONSTRAINT DEFINITIONS - *`
 - `CASE -*`
 
-### Known gaps (3 exact names)
+### Known gaps (2 exact names)
 
-- `COMBINATION DEFINITIONS` — load combinations not parsed — see _pending_work.md P12
 - `JOINT PATTERN DEFINITIONS` — joint patterns (thickness / offset overwrites) not consumed
 - `SOLID PROPERTY DEFINITIONS` — solid (brick) elements not supported
 
