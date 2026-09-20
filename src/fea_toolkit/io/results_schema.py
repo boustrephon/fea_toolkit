@@ -237,6 +237,76 @@ def make_static_key(case_name: str, array_name: str) -> str:
     return f"static/{case_name}/{array_name}"
 
 
+#: Optional per-case metadata fields and the top-level arrays they populate.
+#: ``group`` names the combination a case was generated from — every variant of
+#: that combination carries the same value; ``kind`` is the magnitude-sense
+#: marker (``"+QE"`` / ``"-QE"``) for a **single**-sense forked
+#: response-spectrum combination; ``family`` distinguishes a fork from an
+#: envelope pair (``"single"`` / ``"fork"`` / ``"envelope"`` / ``"path"`` /
+#: ``"srss"``); ``coords`` is the variant's coordinate tuple joined with ``"|"``
+#: (``"+RSX|-RSY"``, ``"max"``, ``"min"``) — the stable identity a multi-fork
+#: renderer groups and labels by.  A field is written **only** when a caller
+#: supplies it, so an archive annotating just ``group``/``kind`` stays
+#: byte-identical to one written before the richer fields existed.
+CASE_META_KEYS: dict[str, str] = {
+    "group": "static_case_group",
+    "kind": "static_case_kind",
+    "family": "static_case_family",
+    "coords": "static_case_coords",
+}
+
+
+def case_meta_arrays(
+    case_labels: t.Sequence[str], case_meta: t.Optional[t.Mapping[str, t.Mapping[str, str]]]
+) -> dict[str, np.ndarray]:
+    """Build the optional per-case metadata arrays (``static_case_*``).
+
+    A combination that mixes a response-spectrum **magnitude** with signed
+    gravity/wind terms is emitted twice — the two senses the earthquake can act
+    in — and both variants are needed to read the result.  Recording which cases
+    came from the same combination (:attr:`CASE_META_KEYS` ``group``, plus the
+    ``family`` / ``coords`` that say whether the group is a ±fork or a max/min
+    envelope pair) lets a reader pair them from data instead of parsing the
+    ``"<combo> #1"`` / ``"<combo> #2"`` label convention that
+    :func:`~fea_toolkit.model.load_combinations.generate_combination_results`
+    happens to emit.
+
+    Args:
+        case_labels: Case names, in the order written to ``static_case_labels``.
+        case_meta: ``{case: {field: str}}`` where *field* is one of
+            :attr:`CASE_META_KEYS`, or ``None``.  A case absent from the
+            mapping, or a key absent from its entry, yields ``""`` for the
+            fields that *are* written.  A field no entry mentions is not
+            written at all — so an unannotated archive, or one annotating only
+            ``group``/``kind``, is byte-identical to one written before the
+            richer fields existed.
+
+    Returns:
+        ``{array_key: ndarray}`` for the fields present in *case_meta*, aligned
+        to *case_labels* — or ``{}`` when *case_meta* is empty, so callers can
+        ``arrays.update(...)`` unconditionally.
+
+    See Also:
+        :func:`~fea_toolkit.model.load_combinations.combination_case_meta` for
+        the package-side producer,
+        ``docs/force_diagram_unification.md`` → *Two-sided (envelope) results*.
+    """
+    if not case_meta:
+        return {}
+    provided = {
+        field for entry in case_meta.values() if isinstance(entry, t.Mapping) for field in entry
+    }
+    out: dict[str, np.ndarray] = {}
+    for field, array_key in CASE_META_KEYS.items():
+        if field not in provided:
+            continue
+        out[array_key] = np.array(
+            [str((case_meta.get(case) or {}).get(field, "")) for case in case_labels],
+            dtype=str,
+        )
+    return out
+
+
 def make_pushover_key(direction: str, template: str) -> str:
     """Build the NPZ key for a pushover result array, e.g. ``pushover/+X/step``.
 

@@ -17,6 +17,7 @@ helper — File-chooser dialogs (tkinter / macOS native).
 """
 
 from ._serial import collect_geometry_arrays
+from .combination_set import read_combination_set, write_combination_set
 from .ground_motion import (
     baseline_correct,
     read_peer_record,
@@ -146,6 +147,7 @@ __all__ = [
     "npz_to_pyvista_modal_mesh",
     "npz_to_pyvista_shell_mesh",
     "npz_to_rhino_colour_data",
+    "read_combination_set",
     "read_dictionary_arrays",
     "read_metadata",
     "read_model_stages",
@@ -164,6 +166,7 @@ __all__ = [
     "table_coverage",
     "unhandled_tables",
     "validate_npz",
+    "write_combination_set",
     "write_model_stages",
     "write_results",
     "write_results_npz",

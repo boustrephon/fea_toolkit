@@ -23,7 +23,7 @@ import numpy as np
 
 from ..model.sap_data import SAPModelData
 from ..utils import force_unit_label, length_unit_label
-from .results_schema import SCHEMA_VERSION, make_pushover_key, make_static_key
+from .results_schema import SCHEMA_VERSION, case_meta_arrays, make_pushover_key, make_static_key
 
 if TYPE_CHECKING:
     from ..model.mesh_model import MeshModel
@@ -196,7 +196,10 @@ def _collect_geometry(
     return arrays
 
 
-def _collect_static(static_results: dict[str, Any]) -> dict[str, np.ndarray]:
+def _collect_static(
+    static_results: dict[str, Any],
+    case_meta: Optional[dict[str, dict[str, str]]] = None,
+) -> dict[str, np.ndarray]:
     """Extract static analysis arrays.
 
     Each static case is a dict whose entries are serialized as flat
@@ -213,6 +216,15 @@ def _collect_static(static_results: dict[str, Any]) -> dict[str, np.ndarray]:
       arrays.  This is how performance-point scalars (e.g.
       ``static/pp/+X/D_roof`` and the numpy ``converged`` flag) survive
       serialization; without it they are silently dropped.
+
+    Args:
+        static_results: Case-keyed static results.
+        case_meta: Optional ``{case: {"group": str, "kind": str}}`` per-case
+            metadata, written as the optional ``static_case_group`` /
+            ``static_case_kind`` arrays so a two-sided response-spectrum
+            combination can be paired from data rather than from the
+            ``"#1"`` / ``"#2"`` label convention.  ``None`` omits them — see
+            :func:`fea_toolkit.io.results_schema.case_meta_arrays`.
     """
     arrays: dict[str, np.ndarray] = {}
     case_labels = list(static_results.keys())
@@ -283,6 +295,7 @@ def _collect_static(static_results: dict[str, Any]) -> dict[str, np.ndarray]:
                     "(int, float, str, bool) or a {'value': scalar} wrapper."
                 )
 
+    arrays.update(case_meta_arrays(case_labels, case_meta))
     return arrays
 
 
@@ -374,6 +387,7 @@ def write_results_npz(
     length_unit: Optional[str] = None,
     forces_coordinate_system: str = "local",
     mesh_model: Optional["MeshModel"] = None,
+    case_meta: Optional[dict[str, dict[str, str]]] = None,
 ) -> str:
     """Write a unified NPZ file with model geometry + analysis results.
 
@@ -401,6 +415,13 @@ def write_results_npz(
             correct split/meshed topology for visualisation.
             Pass the same ``MeshModel`` that was passed to the
             ``AnalysisBuilder``.
+        case_meta: Optional ``{case: {"group": str, "kind": str}}`` per-case
+            metadata.  ``group`` names the load combination each case came from
+            and ``kind`` its magnitude sense (``"+QE"`` / ``"-QE"``) where the
+            combination forks — written as the optional
+            ``static_case_group`` / ``static_case_kind`` arrays so a plotter can
+            pair a two-sided response-spectrum combination from data instead of
+            from the ``"#1"`` / ``"#2"`` label convention.  ``None`` omits them.
 
     Returns:
         Absolute path to the saved file.
@@ -423,7 +444,7 @@ def write_results_npz(
     analysis_types = []
     if static_results:
         analysis_types.append("static")
-        arrays.update(_collect_static(static_results))
+        arrays.update(_collect_static(static_results, case_meta))
     if modal_result:
         analysis_types.append("modal")
         arrays.update(_collect_modal(modal_result, mode_shapes))

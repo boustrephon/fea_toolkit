@@ -28,14 +28,17 @@ import numpy as np
 from ..model.mesh_model import MeshModel
 from ..utils import force_unit_label, length_unit_label
 from ._serial import _write_h5, _write_npz, collect_geometry_arrays
-from .results_schema import SCHEMA_VERSION, make_static_key
+from .results_schema import SCHEMA_VERSION, case_meta_arrays, make_static_key
 
 # ═══════════════════════════════════════════════════════════════════
 # Results collection
 # ═══════════════════════════════════════════════════════════════════
 
 
-def collect_static_arrays(static_results: dict[str, Any]) -> dict[str, np.ndarray]:
+def collect_static_arrays(
+    static_results: dict[str, Any],
+    case_meta: Optional[dict[str, dict[str, str]]] = None,
+) -> dict[str, np.ndarray]:
     """Extract static analysis arrays.
 
     Accepts both formats:
@@ -44,6 +47,15 @@ def collect_static_arrays(static_results: dict[str, Any]) -> dict[str, np.ndarra
       "element_forces": ...}}``
     * **Flat** (AnalysisBuilder): ``{"nodal_displacements": ...,
       "reactions": ...}`` (stored under case ``"1"``)
+
+    Args:
+        static_results: Case-keyed (or flat) static results.
+        case_meta: Optional ``{case: {"group": str, "kind": str}}`` describing
+            each case's load combination and, for a forked response-spectrum
+            combination, its magnitude sense.  Written as the optional
+            ``static_case_group`` / ``static_case_kind`` arrays so a reader can
+            pair the two variants from data; ``None`` omits them.  See
+            :func:`fea_toolkit.io.results_schema.case_meta_arrays`.
     """
     arrays: dict[str, np.ndarray] = {}
 
@@ -62,9 +74,11 @@ def collect_static_arrays(static_results: dict[str, Any]) -> dict[str, np.ndarra
             _collect_case_displacements(arrays, case, data)
     else:
         # Flat format — treat as single unnamed case
-        arrays["static_case_labels"] = np.array(["1"], dtype=str)
+        case_labels = ["1"]
+        arrays["static_case_labels"] = np.array(case_labels, dtype=str)
         _collect_case_forces(arrays, "1", static_results)
         _collect_case_displacements(arrays, "1", static_results)
+    arrays.update(case_meta_arrays(case_labels, case_meta))
 
     return arrays
 
@@ -416,6 +430,7 @@ def write_results(
     force_unit: Optional[str] = None,
     length_unit: Optional[str] = None,
     forces_coordinate_system: str = "local",
+    case_meta: Optional[dict[str, dict[str, str]]] = None,
 ) -> str:
     """Write model geometry + analysis results to a unified output file.
 
@@ -446,6 +461,13 @@ def write_results(
         forces_coordinate_system: Coordinate system of the recorded frame
             end-force arrays (``"local"`` or ``"global"``).  Defaults to
             ``"local"`` — the OpenSees ``localForces`` recorder convention.
+        case_meta: Optional ``{case: {"group": str, "kind": str}}`` per-case
+            metadata.  ``group`` names the load combination each case came from
+            and ``kind`` its magnitude sense (``"+QE"`` / ``"-QE"``) where the
+            combination forks — written as the optional
+            ``static_case_group`` / ``static_case_kind`` arrays so a plotter can
+            pair a two-sided response-spectrum combination from data instead of
+            from the ``"#1"`` / ``"#2"`` label convention.  ``None`` omits them.
 
     Returns:
         Absolute path to the written file.
@@ -481,7 +503,7 @@ def write_results(
 
     # Static results
     if static_results:
-        arrays.update(collect_static_arrays(static_results))
+        arrays.update(collect_static_arrays(static_results, case_meta))
 
     # Modal results
     if modal_result:
