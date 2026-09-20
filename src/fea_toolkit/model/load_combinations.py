@@ -31,6 +31,7 @@ only.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Optional, Union
 
@@ -43,13 +44,18 @@ __all__ = [
     "ComboTreeNode",
     "CompositeLoadCase",
     "apply_composite_load_case",
+    "as_combination_mapping",
     "build_combo_tree",
     "build_combo_tree_dict",
     "calculate_aggregate_factors",
     "classify_combination_refs",
+    "combination_case_meta",
+    "combination_set_from_dict",
+    "combination_set_to_dict",
     "expand_linear_combination",
     "generate_combination_results",
     "generate_composite_results",
+    "merge_combination_sets",
     "to_e2k_combo_dict",
 ]
 
@@ -109,6 +115,17 @@ class CompositeLoadCase:
             the alternatives that get reduced.  Each element is
             ``(factor, composite)``.
         source: Name of the combination this composite was generated from.
+        family: The collection the composite belongs to — ``"single"`` (one
+            composite, no fork), ``"fork"`` (2ⁿ signed senses of a magnitude),
+            ``"envelope"`` (a ``max`` / ``min`` pair), ``"path"`` (one
+            composite per envelope branch) or ``"srss"``.  Empty when the
+            composite was built by hand rather than by
+            :func:`generate_combination_results`.
+        coords: The composite's coordinate inside its family — the signed
+            magnitude references of a fork (``("+RSX", "-RSY")``), the reduced
+            extreme (``("max",)`` / ``("min",)``), the branch name of a
+            ``per_path`` variant, else ``()``.  This is the stable identity of
+            a variant; display names are derived from it, never the reverse.
     """
 
     name: str
@@ -116,6 +133,8 @@ class CompositeLoadCase:
     cases: dict[str, float] = field(default_factory=dict)
     children: list[tuple[float, CompositeLoadCase]] = field(default_factory=list)
     source: str = ""
+    family: str = ""
+    coords: tuple = ()
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -359,6 +378,245 @@ def to_e2k_combo_dict(load_combinations: dict[str, LoadCombination]) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# External definition sets (typed, serialisable)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# A **combination set** is the same flat ``{name: definition}`` mapping the
+# parser produces — but authored by hand, so it can live in JSON, a report
+# config or a script and be merged onto a model's own combinations.  Each
+# definition is::
+#
+#     {
+#         "type": "Linear Add",            # any of the five CSI operators
+#         "entries": [                     # ordered; duplicates preserved
+#             {"ref": "DEAD", "factor": 1.3},
+#             {"ref": "RSX",  "factor": 1.4},   # optional "mode": 5
+#         ],
+#         "design": {},                    # optional SAP design overrides
+#     }
+#
+# ``type`` is the field the ``.s2k`` ``COMBINATION DEFINITIONS`` table carries
+# but a bare ``{name: [(case, factor), ...]}`` shorthand cannot — without it
+# every hand-authored set would silently collapse to Linear Add.  ``ref``
+# names either a load case or another combination in the set, so nesting is
+# expressed by reference exactly as in :class:`LoadCombination`.  An entry may
+# also carry ``"magnitude": true`` to declare that its reference is a
+# response-spectrum (or SRSS-style) result — the one thing a definition cannot
+# infer without the model's ``load_cases``, and what decides the ± fork.
+
+#: Shorthand spellings accepted in a definition's ``"type"`` field, mapped onto
+#: the canonical CSI operator name :func:`_operator_of` recognises.
+_COMBO_TYPE_ALIASES: dict[str, str] = {
+    "": "Linear Add",
+    "linear": "Linear Add",
+    "linear add": "Linear Add",
+    "add": "Linear Add",
+    "envelope": "Envelope",
+    "env": "Envelope",
+    "srss": "SRSS",
+    "absolute": "Absolute Add",
+    "absolute add": "Absolute Add",
+    "range": "Range Add",
+    "range add": "Range Add",
+}
+
+
+def _entry_from_spec(spec) -> LoadCombinationEntry:
+    """Build a :class:`LoadCombinationEntry` from one definition entry.
+
+    Args:
+        spec: A :class:`LoadCombinationEntry` (passed through), a mapping
+            ``{"ref"/"name"/"case", "factor"?, "mode"?}``, a ``(ref, factor)``
+            pair, or a bare reference string (factor ``1.0``).
+
+    Returns:
+        The entry, with ``kind`` left at its default ``"case"``.
+
+    Raises:
+        TypeError: If *spec* is not one of the accepted shapes.
+        ValueError: If a mapping names no reference.
+    """
+    if isinstance(spec, LoadCombinationEntry):
+        return spec
+    if isinstance(spec, str):
+        return LoadCombinationEntry(name=spec, factor=1.0)
+    if isinstance(spec, Mapping):
+        name = spec.get("ref") or spec.get("name") or spec.get("case")
+        if not name:
+            raise ValueError(f"Combination entry {spec!r} names no case or combination")
+        mode = spec.get("mode")
+        return LoadCombinationEntry(
+            name=str(name),
+            factor=float(spec.get("factor", 1.0)),
+            mode=None if mode is None else int(mode),
+            magnitude=bool(spec.get("magnitude", False)),
+        )
+    if isinstance(spec, (list, tuple)):
+        if not spec:
+            raise ValueError("Empty combination entry — expected (ref, factor)")
+        return LoadCombinationEntry(
+            name=str(spec[0]),
+            factor=float(spec[1]) if len(spec) > 1 else 1.0,
+        )
+    raise TypeError(f"Unsupported combination entry {spec!r}")
+
+
+def combination_set_from_dict(data: Mapping) -> dict[str, LoadCombination]:
+    """Build :class:`LoadCombination` objects from a canonical definition set.
+
+    Args:
+        data: ``{name: definition}``.  A definition is a mapping carrying
+            ``"type"`` (aliases accepted — ``"linear"``, ``"envelope"``,
+            ``"srss"``, ``"Absolute Add"``, ``"Range Add"``), ``"entries"``
+            and an optional ``"design"``.  Shorthand: a bare
+            ``[(ref, factor), ...]`` list is taken as a Linear Add, and a
+            :class:`LoadCombination` value is passed straight through.
+
+    Returns:
+        ``{name: LoadCombination}``.  Every entry's
+        :attr:`~LoadCombinationEntry.kind` stays ``"case"`` until
+        :func:`classify_combination_refs` resolves it against a model's load
+        cases and combinations.
+
+    Raises:
+        TypeError: If a definition or entry is not a supported shape.
+        ValueError: If an entry names no reference.
+
+    See Also:
+        :func:`fea_toolkit.io.combination_set.read_combination_set` for the
+        file-level loader.
+    """
+    if not data:
+        return {}
+    out: dict[str, LoadCombination] = {}
+    for raw_name, raw in data.items():
+        name = str(raw_name)
+        if isinstance(raw, LoadCombination):
+            out[name] = raw
+            continue
+        if isinstance(raw, (list, tuple)):
+            spec = {"type": "Linear Add", "entries": list(raw)}
+        else:
+            spec = raw
+        if not isinstance(spec, Mapping):
+            raise TypeError(f"Combination definition {name!r} must be a mapping, got {raw!r}")
+        raw_type = spec.get("type") or spec.get("combo_type") or ""
+        combo_type = _COMBO_TYPE_ALIASES.get(str(raw_type).strip().lower(), str(raw_type))
+        out[name] = LoadCombination(
+            name=name,
+            combo_type=combo_type,
+            entries=[_entry_from_spec(e) for e in spec.get("entries") or ()],
+            design={str(k): str(v) for k, v in (spec.get("design") or {}).items()},
+        )
+    return out
+
+
+def combination_set_to_dict(load_combinations: dict[str, LoadCombination]) -> dict:
+    """Serialise a flat combination mapping to the canonical definition shape.
+
+    The inverse of :func:`combination_set_from_dict` — every authored field
+    round-trips (``kind`` is derived by :func:`classify_combination_refs` and
+    therefore never written).
+
+    Args:
+        load_combinations: Flat ``{name: LoadCombination}`` mapping — or an
+            already-canonical definition dict, which is normalised first so a
+            hand-written set can be re-serialised without being built by hand.
+
+    Returns:
+        ``{name: {"type": str, "entries": [{"ref", "factor", "mode"?}],
+        "design"?}}`` — ``"design"`` is omitted when empty.
+
+    See Also:
+        :func:`to_e2k_combo_dict` for the ETABS-side projection; this is the
+        canonical export.
+    """
+    out: dict[str, dict] = {}
+    for name, combo in as_combination_mapping(load_combinations).items():
+        entries: list[dict] = []
+        for entry in combo.entries:
+            spec: dict = {"ref": entry.name, "factor": entry.factor}
+            if entry.mode is not None:
+                spec["mode"] = entry.mode
+            if entry.magnitude:
+                spec["magnitude"] = True
+            entries.append(spec)
+        definition: dict = {"type": combo.combo_type, "entries": entries}
+        if combo.design:
+            definition["design"] = dict(combo.design)
+        out[name] = definition
+    return out
+
+
+def as_combination_mapping(definitions) -> dict[str, LoadCombination]:
+    """Normalise any accepted definition input to ``{name: LoadCombination}``.
+
+    Args:
+        definitions: ``None``, a mapping of :class:`LoadCombination` objects
+            (already built, e.g. ``SAPModelData.load_combinations``), or a
+            canonical definition dict for :func:`combination_set_from_dict`.
+
+    Returns:
+        A ``{name: LoadCombination}`` mapping (``{}`` for ``None``).
+    """
+    if definitions is None:
+        return {}
+    if isinstance(definitions, Mapping) and all(
+        isinstance(v, LoadCombination) for v in definitions.values()
+    ):
+        return dict(definitions)
+    return combination_set_from_dict(definitions)
+
+
+def merge_combination_sets(
+    *sets,
+    load_cases: Optional[dict[str, LoadCase]] = None,
+) -> dict[str, LoadCombination]:
+    """Merge combination sets left-to-right; a later definition wins.
+
+    Layers a hand-authored external set onto the combinations a model was
+    parsed with (or vice versa)::
+
+        combos = merge_combination_sets(md.load_combinations, external,
+                                        load_cases=md.load_cases)
+
+    An external set may therefore *extend* the model's combinations, *override*
+    one by re-using its name, or stand alone — the caller picks the argument
+    order.
+
+    Args:
+        *sets: Mappings to merge.  Each is a canonical definition dict, an
+            already-built ``{name: LoadCombination}`` mapping, or ``None``
+            (skipped).  A set may reference a name defined by an earlier set.
+        load_cases: When given, every merged entry's
+            :attr:`~LoadCombinationEntry.kind` is re-resolved against the
+            merged combination names and these load cases, so a reference
+            introduced by the external set classifies correctly.
+
+    Returns:
+        A fresh merged ``{name: LoadCombination}`` mapping.  The inputs are
+        not mutated.
+    """
+    merged: dict[str, LoadCombination] = {}
+    for layer in sets:
+        if layer is None:
+            continue
+        merged.update(as_combination_mapping(layer))
+    if load_cases is not None:
+        classify_combination_refs(merged, load_cases)
+    else:
+        # Nested combination references always resolve from the merged mapping
+        # alone; a case reference keeps whatever ``kind`` its entry carried
+        # (``"case"`` for a freshly built definition).
+        combo_names = set(merged)
+        for combo in merged.values():
+            for entry in combo.entries:
+                if entry.name in combo_names:
+                    entry.kind = "combo"
+    return merged
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Composite generation
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -393,7 +651,16 @@ def _is_magnitude_entry(
     load_combinations: dict[str, LoadCombination],
     _seen: frozenset = frozenset(),
 ) -> bool:
-    """Whether *entry* refers to a magnitude result (spectrum case / SRSS)."""
+    """Whether *entry* refers to a magnitude result (spectrum case / SRSS).
+
+    An explicit :attr:`~LoadCombinationEntry.magnitude` hint wins, so an
+    external definition can declare the fork semantics without the caller
+    having to supply the model's ``load_cases``; otherwise a ``"combo"``
+    reference is resolved recursively and a ``"case"`` reference is classed by
+    its load-case type.
+    """
+    if entry.magnitude:
+        return True
     if entry.kind == "combo":
         sub = load_combinations.get(entry.name)
         return sub is not None and _is_magnitude_combo(sub, load_cases, load_combinations, _seen)
@@ -416,7 +683,8 @@ def _scaled(composite: CompositeLoadCase, factor: float) -> CompositeLoadCase:
 
     A plain linear composite has its case factors scaled in place; anything
     else (max/min/srss, or a linear composite with children) is wrapped in a
-    linear composite carrying a signed child term.
+    linear composite carrying a signed child term.  The child's coordinates
+    travel with it either way.
     """
     if composite.operator == "linear" and not composite.children:
         return replace(composite, cases={k: v * factor for k, v in composite.cases.items()})
@@ -425,7 +693,25 @@ def _scaled(composite: CompositeLoadCase, factor: float) -> CompositeLoadCase:
         operator="linear",
         children=[(factor, composite)],
         source=composite.source,
+        coords=composite.coords,
     )
+
+
+def _tag_coord(composite: CompositeLoadCase, tag: str) -> CompositeLoadCase:
+    """Return *composite* relabelled with *tag* as its single coordinate.
+
+    **Sets** rather than appends: at a fork point the tagged composite is one
+    *term* of the parent combination, and the dimension being forked is that
+    term's sign.  A sub-composite's own coordinates describe its internal
+    family and must not leak in as extra dimensions — concatenating is what
+    :func:`_merge_linear` does when it brings sibling terms together.
+
+    Recording the coordinate here (where the dimension being forked is known
+    exactly) is why it need not be re-derived later from the signed factors: a
+    ``.s2k`` spectrum case can be recognised by its load-case type, but an
+    external definition's magnitude reference only by its own hint.
+    """
+    return replace(composite, coords=(tag,))
 
 
 def _merge_linear(a: CompositeLoadCase, b: CompositeLoadCase) -> CompositeLoadCase:
@@ -439,6 +725,7 @@ def _merge_linear(a: CompositeLoadCase, b: CompositeLoadCase) -> CompositeLoadCa
         cases=cases,
         children=[*a.children, *b.children],
         source=a.source or b.source,
+        coords=(*a.coords, *b.coords),
     )
 
 
@@ -482,7 +769,10 @@ def _entry_variants(
             and _is_magnitude_combo(sub, load_cases, load_combinations)
             and _has_non_magnitude_terms(parent, load_cases, load_combinations)
         ):
-            variants += [_scaled(c, -entry.factor) for c in sub_results]
+            variants = [_tag_coord(c, f"+{entry.name}") for c in variants]
+            variants += [
+                _tag_coord(_scaled(c, -entry.factor), f"-{entry.name}") for c in sub_results
+            ]
         return variants
 
     variants = [
@@ -495,15 +785,17 @@ def _entry_variants(
     ]
     if (
         fork_magnitudes
-        and _is_spectrum_case(load_cases.get(entry.name))
+        and _is_magnitude_entry(entry, load_cases, load_combinations)
         and _has_non_magnitude_terms(parent, load_cases, load_combinations)
     ):
+        variants[0].coords = (f"+{entry.name}",)
         variants.append(
             CompositeLoadCase(
                 name=entry.name,
                 operator="linear",
                 cases={entry.name: -entry.factor},
                 source=entry.name,
+                coords=(f"-{entry.name}",),
             )
         )
     return variants
@@ -523,7 +815,11 @@ def _generate_linear(
             entry, combo, load_cases, load_combinations, envelope_mode, active
         )
         cartesian = [_merge_linear(base, v) for base in cartesian for v in variants]
-    return _name_variants(combo.name, cartesian)
+    variants = _name_variants(combo.name, cartesian)
+    family = "single" if len(variants) == 1 else "fork"
+    for variant in variants:
+        variant.family = family
+    return variants
 
 
 def _generate_envelope(
@@ -548,6 +844,9 @@ def _generate_envelope(
             )
             for variant in variants:
                 variant.name = f"{combo.name} [{entry.name}]"
+                variant.source = combo.name
+                variant.family = "path"
+                variant.coords = (entry.name,)
                 out.append(variant)
         return out
 
@@ -573,12 +872,16 @@ def _generate_envelope(
             operator="max",
             children=max_children,
             source=combo.name,
+            family="envelope",
+            coords=("max",),
         ),
         CompositeLoadCase(
             name=f"{combo.name} [min]",
             operator="min",
             children=min_children,
             source=combo.name,
+            family="envelope",
+            coords=("min",),
         ),
     ]
 
@@ -604,7 +907,14 @@ def _generate_srss(
         ):
             children.append((1.0, variant))
     return [
-        CompositeLoadCase(name=combo.name, operator="srss", children=children, source=combo.name)
+        CompositeLoadCase(
+            name=combo.name,
+            operator="srss",
+            children=children,
+            source=combo.name,
+            family="srss",
+            coords=("srss",),
+        )
     ]
 
 
@@ -679,6 +989,130 @@ def expand_linear_combination(
             f"{sorted({r.operator for r in results})})"
         )
     return dict(results[0].cases)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Variant metadata — the single owner of the sense rule
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _is_magnitude_shape(
+    composite: CompositeLoadCase,
+    load_cases: dict[str, LoadCase],
+    load_combinations: dict[str, LoadCombination],
+    _seen: frozenset = frozenset(),
+) -> bool:
+    """Whether *composite* evaluates to a magnitude rather than a signed field.
+
+    True for an ``srss`` / ``max`` / ``min`` composite, and for a linear one
+    whose every term is a magnitude — e.g. the wrapper :func:`_scaled` builds
+    around an SRSS result, or the single-sense variant of a forked spectrum
+    case.
+    """
+    if composite.operator in ("srss", "max", "min"):
+        return True
+    if composite.operator != "linear" or id(composite) in _seen:
+        return False
+    seen = _seen | {id(composite)}
+    if not all(
+        _is_magnitude_shape(child, load_cases, load_combinations, seen)
+        for _, child in composite.children
+    ):
+        return False
+    return all(_is_spectrum_case(load_cases.get(case)) for case in composite.cases)
+
+
+def fork_coords(
+    composite: CompositeLoadCase,
+    load_cases: Optional[dict[str, LoadCase]] = None,
+    load_combinations: Optional[dict[str, LoadCombination]] = None,
+) -> tuple:
+    """Return the signed coordinate tuple identifying *composite* in its family.
+
+    The coordinates are the composite's stable identity: a reader groups
+    variants by them and derives any display label from them, never the
+    reverse (``generate_combination_results`` names forks ``"<combo> #n"``,
+    which carries no sign information at all).
+
+    Args:
+        composite: A composite from :func:`generate_combination_results`.
+        load_cases: Flat ``{name: LoadCase}`` mapping — needed to tell a
+            response-spectrum **magnitude** reference from a signed one.
+        load_combinations: Flat ``{name: LoadCombination}`` mapping — needed
+            for the same determination when the reference is a nested
+            combination.
+
+    Returns:
+        * ``("max",)`` / ``("min",)`` for an Envelope reduction,
+        * ``("srss",)`` for an SRSS magnitude,
+        * the signed magnitude references of a fork, in generation order —
+          ``("+RSX",)`` / ``("-RSX",)``, or the four ``("±RSX", "±RSY")``
+          corners of two independent magnitudes,
+        * ``()`` when the composite has no forked dimension.
+    """
+    load_cases = load_cases or {}
+    load_combinations = load_combinations or {}
+    if composite.operator in ("max", "min", "srss"):
+        return (composite.operator,)
+    coords: list[str] = []
+    for case, factor in composite.cases.items():
+        if _is_spectrum_case(load_cases.get(case)):
+            coords.append(("+" if factor >= 0 else "-") + case)
+    for factor, child in composite.children:
+        if _is_magnitude_shape(child, load_cases, load_combinations):
+            coords.append(("+" if factor >= 0 else "-") + (child.source or child.name))
+    return tuple(coords)
+
+
+def combination_case_meta(
+    composites: list[CompositeLoadCase],
+    load_cases: Optional[dict[str, LoadCase]] = None,
+    load_combinations: Optional[dict[str, LoadCombination]] = None,
+) -> dict[str, dict[str, str]]:
+    """Describe *composites* as per-case metadata for the NPZ writers.
+
+    This is the **single owner** of the sign rule: the ``"+QE"`` / ``"-QE"``
+    marker a plotter pairs on, the ``family`` it groups by and the ``coords``
+    it labels with are all derived here from a composite's own signed factors,
+    so no consumer needs to re-derive them (or scan for an ``"RS…"`` key).
+
+    Args:
+        composites: Composites from :func:`generate_combination_results`.
+        load_cases: Flat ``{name: LoadCase}`` mapping.
+        load_combinations: Flat ``{name: LoadCombination}`` mapping.
+
+    Returns:
+        ``{composite_name: {"group", "kind", "family", "coords"}}`` — ready to
+        hand to ``write_results(..., case_meta=...)``.  ``group`` is the
+        combination the variant came from; ``kind`` is ``"+QE"`` / ``"-QE"``
+        for a **single**-sense fork and ``""`` otherwise (a multi-fork's sense
+        lives in ``coords``); ``family`` is ``"single"`` / ``"fork"`` /
+        ``"envelope"`` / ``"path"`` / ``"srss"``; ``coords`` is the
+        :func:`fork_coords` tuple joined with ``"|"`` so it fits one string
+        array.
+
+    See Also:
+        ``docs/force_diagram_unification.md`` → *Two-sided (envelope) results*.
+    """
+    meta: dict[str, dict[str, str]] = {}
+    for composite in composites:
+        # Coordinates are recorded at the fork point; the geometric extraction
+        # is a fallback for hand-built composites.
+        coords = composite.coords or fork_coords(composite, load_cases, load_combinations)
+        family = composite.family or ("fork" if len(coords) > 1 else "single")
+        if family == "single":
+            # No fork dimension — a pure magnitude sum has no coordinate.
+            coords = ()
+        kind = ""
+        if family == "fork" and len(coords) == 1 and coords[0][:1] in ("+", "-"):
+            kind = "+QE" if coords[0][0] == "+" else "-QE"
+        meta[composite.name] = {
+            "group": composite.source or composite.name,
+            "kind": kind,
+            "family": family,
+            "coords": "|".join(coords),
+        }
+    return meta
 
 
 # ═══════════════════════════════════════════════════════════════════════

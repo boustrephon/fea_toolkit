@@ -1629,12 +1629,20 @@ class LoadCombinationEntry:
             exported model).
         mode: SAP ``Mode`` column value for a modal-case reference, else
             ``None``.
+        magnitude: Author-supplied hint that this reference's result is a
+            **magnitude** (a response-spectrum or SRSS-style quantity) rather
+            than a signed field.  The ``.s2k`` parser leaves it ``False`` —
+            :func:`~fea_toolkit.model.load_combinations._is_magnitude_entry`
+            infers it from the load case's type instead.  It exists so an
+            *external* combination definition can declare the fork semantics
+            without the caller also having to supply the model's ``load_cases``.
     """
 
     name: str
     factor: float
     kind: str = "case"
     mode: Optional[int] = None
+    magnitude: bool = False
 
 
 @dataclass

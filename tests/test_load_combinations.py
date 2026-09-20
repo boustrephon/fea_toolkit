@@ -11,13 +11,19 @@ import pytest
 from fea_toolkit.model.load_combinations import (
     CompositeLoadCase,
     apply_composite_load_case,
+    as_combination_mapping,
     build_combo_tree,
     build_combo_tree_dict,
     calculate_aggregate_factors,
     classify_combination_refs,
+    combination_case_meta,
+    combination_set_from_dict,
+    combination_set_to_dict,
     expand_linear_combination,
+    fork_coords,
     generate_combination_results,
     generate_composite_results,
+    merge_combination_sets,
     to_e2k_combo_dict,
 )
 from fea_toolkit.model.sap_data import LoadCase, LoadCombination, LoadCombinationEntry
@@ -358,3 +364,219 @@ def test_generate_composite_results(model):
     assert set(out) == {"SEISM #1", "SEISM #2"}
     assert out["SEISM #1"]["fx"] == pytest.approx([14.0])
     assert out["SEISM #2"]["fx"] == pytest.approx([6.0])
+
+
+# ── External definition sets ───────────────────────────────────────────
+
+
+def test_combination_set_from_dict_types_aliases_and_shorthand():
+    combos = combination_set_from_dict(
+        {
+            "SEISM": {
+                "type": "linear",
+                "entries": [{"ref": "DEAD", "factor": 1.0}, {"ref": "RSX", "factor": 1.4}],
+            },
+            "ENV": {"type": "envelope", "entries": [["DEAD", 1.0], ["RSX", 1.0]]},
+            "SRSS": {"type": "srss", "entries": [("RSX", 1.0)]},
+            "SHORT": [["DEAD", 1.2], ["RSX", 1.0]],
+            "BARE": {"type": "Linear Add", "entries": ["DEAD"]},
+        }
+    )
+    # Shorthand spellings normalise to the canonical CSI operator names.
+    assert combos["SEISM"].combo_type == "Linear Add"
+    assert combos["ENV"].combo_type == "Envelope"
+    assert combos["SRSS"].combo_type == "SRSS"
+    # A bare entry list is implicitly Linear Add.
+    assert combos["SHORT"].combo_type == "Linear Add"
+    assert [(e.name, e.factor) for e in combos["SHORT"].entries] == [("DEAD", 1.2), ("RSX", 1.0)]
+    # A bare reference string defaults to factor 1.0.
+    assert [(e.name, e.factor) for e in combos["BARE"].entries] == [("DEAD", 1.0)]
+
+
+def test_combination_set_rejects_bad_shapes():
+    with pytest.raises(TypeError, match="must be a mapping"):
+        combination_set_from_dict({"X": 3})
+    with pytest.raises(ValueError, match="names no case"):
+        combination_set_from_dict({"X": {"type": "Envelope", "entries": [{"factor": 1.0}]}})
+    with pytest.raises(TypeError, match="Unsupported combination entry"):
+        combination_set_from_dict({"X": {"type": "Envelope", "entries": [3.5]}})
+
+
+def test_combination_set_round_trips_every_authored_field():
+    combos = combination_set_from_dict(
+        {
+            "C": {
+                "type": "Linear Add",
+                "entries": [{"ref": "RSX", "factor": 1.4, "mode": 3, "magnitude": True}],
+                "design": {"SteelDesign": "None"},
+            }
+        }
+    )
+    again = combination_set_from_dict(combination_set_to_dict(combos))
+    entry = again["C"].entries[0]
+    assert again["C"].combo_type == "Linear Add"
+    assert again["C"].design == {"SteelDesign": "None"}
+    assert (entry.name, entry.factor, entry.mode, entry.magnitude) == ("RSX", 1.4, 3, True)
+
+
+def test_merge_combination_sets_extends_overrides_and_classifies(model):
+    cases, combos = model
+    external = {"EXTRA": {"type": "Envelope", "entries": [["GRAV", 1.0], ["DEAD", 1.0]]}}
+    merged = merge_combination_sets(combos, external, load_cases=cases)
+    assert "GRAV" in merged and "EXTRA" in merged
+    # An external reference to a model combination classifies as a branch.
+    assert merged["EXTRA"].entries[0].kind == "combo"
+    # A later layer overrides by name without mutating its input.
+    override = merge_combination_sets(
+        combos, {"GRAV": {"type": "SRSS", "entries": [["DEAD", 1.0]]}}
+    )
+    assert override["GRAV"].combo_type == "SRSS"
+    assert combos["GRAV"].combo_type == "Linear Add"
+
+
+def test_merge_resolves_nested_combos_without_load_cases():
+    """A reference to a set member classifies as a branch even with no model."""
+    merged = merge_combination_sets(
+        {
+            "INNER": {"type": "SRSS", "entries": [["RSX", 1.0]]},
+            "OUTER": {"type": "Linear Add", "entries": [["INNER", 1.0], ["DEAD", 1.0]]},
+        }
+    )
+    assert merged["OUTER"].entries[0].kind == "combo"
+    assert merged["OUTER"].entries[1].kind == "case"
+
+
+def test_as_combination_mapping_normalises_every_accepted_input(model):
+    _cases, combos = model
+    assert as_combination_mapping(None) == {}
+    assert as_combination_mapping({}) == {}
+    # A LoadCombination mapping is copied, not returned as-is.
+    copied = as_combination_mapping(combos)
+    assert copied is not combos and set(copied) == set(combos)
+    assert as_combination_mapping({"X": {"type": "SRSS", "entries": []}})["X"].combo_type == "SRSS"
+
+
+# ── Family, coordinates and per-case metadata ──────────────────────────
+
+
+def _meta_for(model, name):
+    """``combination_case_meta`` for one combination of the *model* fixture."""
+    cases, combos = model
+    composites = generate_combination_results(combos[name], cases, combos)
+    return combination_case_meta(composites, cases, combos)
+
+
+def test_family_single_and_fork(model):
+    cases, combos = model
+    single = generate_combination_results(combos["GRAV"], cases, combos)
+    assert [c.family for c in single] == ["single"]
+    assert single[0].coords == ()
+    forked = generate_combination_results(combos["SEISM"], cases, combos)
+    assert [c.family for c in forked] == ["fork", "fork"]
+
+
+def test_two_spectra_give_four_corner_coords(model):
+    """A flat ``DEAD + RSX + RSY`` is a 2² sign space, not a ± pair."""
+    cases, combos = model
+    combos["FLAT4"] = _combo("FLAT4", "Linear Add", [("DEAD", 1.0), ("RSX", 1.0), ("RSY", 1.0)])
+    classify_combination_refs(combos, cases)
+    composites = generate_combination_results(combos["FLAT4"], cases, combos)
+    assert [c.family for c in composites] == ["fork"] * 4
+    assert [c.coords for c in composites] == [
+        ("+RSX", "+RSY"),
+        ("+RSX", "-RSY"),
+        ("-RSX", "+RSY"),
+        ("-RSX", "-RSY"),
+    ]
+
+
+def test_nested_spectrum_sum_is_one_magnitude(model):
+    """``TWO_SPEC`` is all-magnitude, so it is a single composite, not a fork."""
+    cases, combos = model
+    composites = generate_combination_results(combos["TWO_SPEC"], cases, combos)
+    assert len(composites) == 1
+    assert composites[0].family == "single"
+    # The raw geometric extraction still lists both signed terms; it is
+    # combination_case_meta that clears them for a non-forking family.
+    assert fork_coords(composites[0], cases, combos) == ("+RSX", "+RSY")
+    assert combination_case_meta(composites, cases, combos)["TWO_SPEC"]["coords"] == ""
+
+
+def test_envelope_and_path_families(model):
+    cases, combos = model
+    maxmin = generate_combination_results(combos["ENV"], cases, combos)
+    assert [(c.name, c.family, c.coords) for c in maxmin] == [
+        ("ENV [max]", "envelope", ("max",)),
+        ("ENV [min]", "envelope", ("min",)),
+    ]
+    per_path = generate_combination_results(combos["ENV"], cases, combos, envelope_mode="per_path")
+    assert [c.family for c in per_path] == ["path", "path"]
+    assert [c.coords for c in per_path] == [("GRAV",), ("WINDX",)]
+
+
+def test_srss_and_mixed_srss_meta(model):
+    cases, combos = model
+    srss = combination_case_meta(
+        generate_combination_results(combos["SRSS_C"], cases, combos), cases, combos
+    )
+    assert srss["SRSS_C"] == {
+        "group": "SRSS_C",
+        "kind": "",
+        "family": "srss",
+        "coords": "srss",
+    }
+    mix = _meta_for(model, "MIX_SRSS")
+    assert mix["MIX_SRSS #1"]["kind"] == "+QE"
+    assert mix["MIX_SRSS #2"]["kind"] == "-QE"
+    assert mix["MIX_SRSS #1"]["family"] == "fork"
+    # A nested magnitude is labelled by the sub-combination it came from.
+    assert mix["MIX_SRSS #1"]["coords"] == "+SRSS_C"
+    assert mix["MIX_SRSS #2"]["coords"] == "-SRSS_C"
+
+
+def test_seism_meta_carries_group_kind_family_and_coords(model):
+    meta = _meta_for(model, "SEISM")
+    assert meta["SEISM #1"] == {
+        "group": "SEISM",
+        "kind": "+QE",
+        "family": "fork",
+        "coords": "+RSX",
+    }
+    assert meta["SEISM #2"]["coords"] == "-RSX"
+
+
+def test_magnitude_hint_forks_without_load_cases():
+    """An external definition can declare the fork without the model's cases."""
+    combos = combination_set_from_dict(
+        {
+            "M": {
+                "type": "Linear Add",
+                "entries": [
+                    {"ref": "DEAD", "factor": 1.0},
+                    {"ref": "SPECIAL", "factor": 1.0, "magnitude": True},
+                ],
+            }
+        }
+    )
+    composites = generate_combination_results(combos["M"], {}, combos)
+    assert [c.name for c in composites] == ["M #1", "M #2"]
+    meta = combination_case_meta(composites, {}, combos)
+    assert meta["M #1"]["kind"] == "+QE"
+    assert meta["M #2"]["kind"] == "-QE"
+    assert meta["M #1"]["coords"] == "+SPECIAL"
+
+
+def test_flat4_meta_has_no_single_sense_kind(model):
+    """A multi-fork has no one sign, so ``kind`` stays empty and coords carry it."""
+    cases, combos = model
+    combos["FLAT4"] = _combo("FLAT4", "Linear Add", [("DEAD", 1.0), ("RSX", 1.0), ("RSY", 1.0)])
+    classify_combination_refs(combos, cases)
+    meta = _meta_for(model, "FLAT4")
+    assert {info["kind"] for info in meta.values()} == {""}
+    assert {info["family"] for info in meta.values()} == {"fork"}
+    assert {info["coords"] for info in meta.values()} == {
+        "+RSX|+RSY",
+        "+RSX|-RSY",
+        "-RSX|+RSY",
+        "-RSX|-RSY",
+    }
