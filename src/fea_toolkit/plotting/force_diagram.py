@@ -766,6 +766,7 @@ def _resolve_source(
     quantity=None,
     cm_method: str = "bbox",
     storey_mode: str = "cut",
+    by_storey: bool = True,
     both_sides: bool = True,
     combinations=None,
     load_cases=None,
@@ -784,11 +785,17 @@ def _resolve_source(
         storey_mode: 2D storey summation rule — ``'cut'`` (default) or
             ``'end'``; see
             :func:`~fea_toolkit.model.storey_response.sum_storey_forces`.
+        by_storey: Whether the caller will draw the 2D storey profile.  The
+            grouped extras only make sense as storey profiles, so when
+            ``False`` (per-element segments) they are not built at all.
+            Default ``True``.
         both_sides: When the resolved case belongs to a combination group
             (a spectrum fork, a multi-fork or an envelope pair), also sum every
             other member of that group and attach them as
             :attr:`ForceDiagramData.storey_extras`, so the 2D profile shows all
-            the signs rather than one.  Default ``True``.
+            the signs rather than one.  Default ``True``.  Only built when
+            *by_storey* is also ``True``; a member whose group sum is empty is
+            omitted.
         combinations: Optional external combination definition set used to
             resolve the grouping (see :func:`_case_pairs`); when omitted the
             archive's ``static_case_*`` arrays are used, then the ``#1`` /
@@ -896,19 +903,23 @@ def _resolve_source(
         series = _build_series_from_force_map(force_map, geometry["frames"], geometry["nodes"])
         # A spectrum combination is two-sided: sum every other member of the
         # same group too, so the 2D profile draws all the signs rather than one.
+        # The extras are storey profiles, so they are only built for the storey
+        # view — a per-element caller would discard them anyway.
         extras: list = []
-        if both_sides:
+        if both_sides and by_storey:
             for member in _group_members(source, case_name, combinations, load_cases):
                 if member == case_name:
                     continue
                 member_map = _extract_npz_frame_forces(
                     source, f"static/{member}/", geometry["frames"]
                 )
+                member_series = _build_storey_series(
+                    geometry, member_map, source, cm_method, storey_mode
+                )
+                if not member_series:
+                    continue
                 extras.append(
-                    (
-                        _build_storey_series(geometry, member_map, source, cm_method, storey_mode),
-                        _fork_legend(source, member, combinations, load_cases),
-                    )
+                    (member_series, _fork_legend(source, member, combinations, load_cases))
                 )
         return ForceDiagramData(
             kind="static",
@@ -1260,13 +1271,19 @@ def plot_force_diagram(
 
             * ``'2d'`` (Matplotlib) — a **chart**, not a picture of the
               structure.  Quantity on the horizontal axis, elevation ``z``
-              on the vertical axis, each frame element a line segment from
-              ``(v_i, z_i)`` to ``(v_j, z_j)``.  A uniform axial force reads
-              as a vertical line; a sign change along the member reads as a
-              crossing of the zero axis, where the triangular fill switches
-              side.  The RS path plots one point per element at ``z_mid``
-              (``both_ends=True`` draws a horizontal ``[v_i, v_j]`` segment
-              instead).  Always available — Matplotlib is a core dependency.
+              on the vertical axis.  By default (``by_storey=True``) it draws
+              the **storey profile** — one line through the value summed at
+              each distinct elevation over the elevation-changing members
+              (see :func:`_build_storey_series`) — so a result set reads as a
+              single curve rather than one segment per element.  Pass
+              ``by_storey=False`` for the legacy per-element form, where each
+              frame element is a line segment from ``(v_i, z_i)`` to
+              ``(v_j, z_j)``.  A uniform axial force reads as a vertical line;
+              a sign change along the member reads as a crossing of the zero
+              axis, where the triangular fill switches side.  The RS path
+              plots one point per element at ``z_mid`` (``both_ends=True``
+              draws a horizontal ``[v_i, v_j]`` segment instead).  Always
+              available — Matplotlib is a core dependency.
             * ``'3d'`` (PyVista) — a **spatial model**: the member
               centrelines in 3D, each carrying its quantity as a ribbon
               offset perpendicular to it (``mode="flag"``) or as a tube whose
@@ -1357,6 +1374,7 @@ def plot_force_diagram(
         q,
         cm_method,
         storey_mode,
+        by_storey,
         both_sides,
         combinations,
         load_cases,
