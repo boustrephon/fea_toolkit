@@ -1114,11 +1114,15 @@ def sum_storey_forces(
         span = p_hi[2] - p_lo[2]
         if f_lo is None:
             continue
+        # Normalised clustering band: a level whose elevation lies within the
+        # level-clustering band of the member's lower end is that end, not an
+        # interior cut.  ``t_tol`` is the numerical-coincidence floor.
+        t_band = max(band / span, t_tol)
         for level in acc:
             t = (level["elevation"] - p_lo[2]) / span
-            if t < -t_tol or t >= 1.0 - t_tol:
+            if t < -t_band or t >= 1.0 - t_tol:
                 continue
-            if t <= t_tol:
+            if t <= t_band:
                 _credit(level, p_lo, f_lo, False)
                 continue
             # Interior cut: carry the lower end force along the member.  The
