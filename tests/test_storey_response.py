@@ -13,7 +13,11 @@ import numpy as np
 import pandas as pd  # optional [report] extra — the suite runs with it; see docs/dev_notes.md
 import pytest
 
-from fea_toolkit.model.storey_response import group_shell_forces_by_section
+from fea_toolkit.model.storey_response import (
+    group_shell_forces_by_section,
+    storey_levels_from_z,
+    sum_storey_forces,
+)
 
 
 def _ids_and_parents():
@@ -325,3 +329,197 @@ class TestStoreyDrifts:
         expected_peak = 0.005 + (0.001 / 3.0) * 5.0  # ≈ 0.006667
         assert abs(row["Drift_peak"] - expected_peak) < 5e-5
         assert abs(row["h (m)"] - 3.0) < 1e-8
+
+
+class TestSumStoreyForces:
+    """Per-level global force summation with lever-arm moments."""
+
+    @staticmethod
+    def _frame():
+        """Four columns on a 4x4 plan between z=0 and z=3 (model units)."""
+        return {
+            1: (0.0, 0.0, 0.0),
+            2: (4.0, 0.0, 0.0),
+            3: (0.0, 4.0, 0.0),
+            4: (4.0, 4.0, 0.0),
+            5: (0.0, 0.0, 3.0),
+            6: (4.0, 0.0, 3.0),
+            7: (0.0, 4.0, 3.0),
+            8: (4.0, 4.0, 3.0),
+        }
+
+    @staticmethod
+    def _column(ni, nj, shear):
+        """A vertical member carrying +shear at the top, -shear at the base."""
+        return {
+            "node_i": ni,
+            "node_j": nj,
+            "f_i": [-shear, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "f_j": [shear, 0.0, 0.0, 0.0, 0.0, 0.0],
+        }
+
+    def test_levels_are_clustered_and_ordered(self):
+        assert [z for z, _ in storey_levels_from_z([0.0, 0.0, 3.0, 3.0], 0.5)] == [0.0, 3.0]
+        # 0.3 sits inside the 0.5 band of 0.0, so only two levels remain.
+        assert len(storey_levels_from_z([0.0, 0.3, 6.0], 0.5)) == 2
+
+    def test_shear_sums_by_level(self):
+        """``mode="end"``: member-end forces per level (the load path)."""
+        nodes = self._frame()
+        members = [self._column(ni, nj, 10.0) for ni, nj in ((1, 5), (2, 6), (3, 7), (4, 8))]
+        res = sum_storey_forces(nodes, members, mode="end")
+        assert [r["elevation"] for r in res] == [0.0, 3.0]
+        assert res[0]["Fx"] == pytest.approx(-40.0)
+        assert res[1]["Fx"] == pytest.approx(40.0)
+        assert res[0]["n_ends"] == 4
+        assert res[1]["n_ends"] == 4
+        # Perfectly symmetric loading carries no torsion.
+        assert res[0]["Mz"] == pytest.approx(0.0)
+        assert res[1]["Mz"] == pytest.approx(0.0)
+
+    def test_cut_mode_takes_the_lower_side_only(self):
+        """``mode="cut"``: the force transmitted across the plane above a level.
+
+        Each column spans 0 -> 3, so it contributes its lower-end force at the
+        base and nothing at the roof — no storey sits above the roof.  A member
+        is therefore credited once per level, never twice: crediting the upper
+        end as well would add a delivered end force *and* a transmitted
+        internal force for the same member, and the two are opposite in sign.
+        """
+        nodes = self._frame()
+        members = [self._column(ni, nj, 10.0) for ni, nj in ((1, 5), (2, 6), (3, 7), (4, 8))]
+        res = sum_storey_forces(nodes, members)  # cut is the default
+        assert [r["elevation"] for r in res] == [0.0, 3.0]
+        assert res[0]["Fx"] == pytest.approx(-40.0)  # four -10 kN lower ends
+        assert res[0]["n_ends"] == 4
+        assert res[1]["Fx"] == pytest.approx(0.0)  # roof: no storey above it
+        assert res[1]["n_ends"] == 0
+
+    def test_cut_mode_counts_a_member_crossing_a_level_without_a_node(self):
+        """A member spanning a level with no node there still contributes.
+
+        Node 3 sits at z=1.5 with no member framing into it, while the column
+        runs z=0 -> 3 straight through.  ``mode="end"`` credits that column only
+        at 0 and 3, so the intermediate level loses it entirely; ``mode="cut"``
+        credits it at 0 and 1.5, where the level is crossed and the force is
+        still transmitted.
+        """
+        nodes = {1: (0.0, 0.0, 0.0), 2: (0.0, 0.0, 3.0), 3: (0.0, 0.0, 1.5)}
+        members = [self._column(1, 2, 10.0)]
+        end = sum_storey_forces(nodes, members, mode="end")
+        assert [r["elevation"] for r in end] == [0.0, 1.5, 3.0]
+        assert [r["n_ends"] for r in end] == [1, 0, 1]
+        cut = sum_storey_forces(nodes, members)
+        assert [r["n_ends"] for r in cut] == [1, 1, 0]
+        assert cut[1]["n_crossing"] == 1  # the interior cut
+        assert cut[1]["Fx"] == pytest.approx(-10.0)  # force is unchanged
+        # Moment is carried too: r x F = (0, 1.5, 0) x (-10, 0, 0) = (0, -15, 0).
+        assert cut[1]["My"] == pytest.approx(-15.0)
+        assert cut[2]["Fx"] == pytest.approx(0.0)  # roof
+
+    def test_end_mode_base_reads_the_reaction(self):
+        """The base shows the full reaction — the load *leaving*, not arriving.
+
+        ``"end"`` is nodal equilibrium, so a restrained level reads the support
+        reaction rather than the (near-zero) load arriving there: four columns
+        delivering 100 kN each to the base give 400 kN *of reaction* at the
+        base, not ~0, while the roof receives nothing.
+        """
+        nodes = self._frame()
+        members = [
+            {
+                "node_i": ni,
+                "node_j": nj,
+                "f_i": [0.0, 0.0, -100.0, 0.0, 0.0, 0.0],
+                "f_j": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            }
+            for ni, nj in ((1, 5), (2, 6), (3, 7), (4, 8))
+        ]
+        base, top = sum_storey_forces(nodes, members, mode="end")
+        assert base["Fz"] == pytest.approx(-400.0)
+        assert top["Fz"] == pytest.approx(0.0)
+
+    def test_end_mode_totals_to_zero_and_cut_mode_totals_to_the_base(self):
+        """The two modes are a load path and an accumulation.
+
+        ``"end"`` credits **both** ends of every member, so summing its levels
+        gives ``sum(f_i + f_j) == 0`` for span-load-free members.  ``"cut"``
+        credits only the lower end, so its levels sum to the base value — the
+        reaction.
+        """
+        nodes = self._frame()
+        members = [self._column(ni, nj, 10.0) for ni, nj in ((1, 5), (2, 6), (3, 7), (4, 8))]
+        end = sum_storey_forces(nodes, members, mode="end")
+        assert sum(r["Fx"] for r in end) == pytest.approx(0.0)
+        cut = sum_storey_forces(nodes, members)
+        assert sum(r["Fx"] for r in cut) == pytest.approx(-40.0)
+
+    def test_torsion_from_shear_offsets(self):
+        """A one-sided +X shear pair produces Mz = force x lever arm."""
+        nodes = self._frame()
+        members = [self._column(1, 5, 10.0), self._column(2, 6, 10.0)]
+        top = sum_storey_forces(nodes, members, mode="end")[1]
+        assert top["Fx"] == pytest.approx(20.0)
+        # Two 10 kN forces, each 2 m off cy=2 -> 40 kN-m of torsion.
+        assert top["Mz"] == pytest.approx(40.0)
+
+    def test_overturning_from_axial_offsets(self):
+        """An off-centre axial force drives Mx / My by the lever arm."""
+        nodes = self._frame()
+        members = [
+            {
+                "node_i": 1,
+                "node_j": 5,
+                "f_i": [0.0, 0.0, -100.0, 0.0, 0.0, 0.0],
+                "f_j": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            }
+        ]
+        base = sum_storey_forces(nodes, members, mode="end")[0]
+        # dx = -2, dy = -2  ->  Mx = fz*dy = +200,  My = -fz*dx = -200
+        assert base["Mx"] == pytest.approx(200.0)
+        assert base["My"] == pytest.approx(-200.0)
+        assert base["Mz"] == pytest.approx(0.0)
+
+    def test_horizontal_members_are_excluded(self):
+        """Both ends share one elevation, so a beam contributes nothing."""
+        nodes = self._frame()
+        beam = {
+            "node_i": 5,
+            "node_j": 6,
+            "f_i": [5.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "f_j": [-5.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        }
+        res = sum_storey_forces(nodes, [beam])
+        assert all(r["n_ends"] == 0 for r in res)
+        assert all(r["Fx"] == pytest.approx(0.0) for r in res)
+
+    def test_cm_method_bbox_is_default(self):
+        res = sum_storey_forces(self._frame(), [])
+        assert res[0]["cx"] == pytest.approx(2.0)
+        assert res[0]["cy"] == pytest.approx(2.0)
+
+    def test_cm_method_mass(self):
+        nodes = self._frame()
+        masses = {1: 3.0, 2: 1.0, 3: 1.0, 4: 1.0, 5: 3.0, 6: 1.0, 7: 1.0, 8: 1.0}
+        res = sum_storey_forces(nodes, [], cm_method="mass", node_masses=masses)
+        # (3*0 + 1*4 + 1*0 + 1*4) / 6 = 8/6
+        assert res[0]["cx"] == pytest.approx(8.0 / 6.0)
+
+    def test_cm_method_mass_requires_masses(self):
+        with pytest.raises(ValueError, match="node_masses"):
+            sum_storey_forces(self._frame(), [], cm_method="mass")
+
+    def test_unknown_cm_method_raises(self):
+        with pytest.raises(ValueError, match="cm_method"):
+            sum_storey_forces(self._frame(), [], cm_method="nope")
+
+    def test_unknown_mode_raises(self):
+        with pytest.raises(ValueError, match="mode"):
+            sum_storey_forces(self._frame(), [], mode="nope")
+
+    def test_explicit_levels_override_clustering(self):
+        res = sum_storey_forces(self._frame(), [], levels=[0.0, 1.5, 3.0])
+        assert [r["elevation"] for r in res] == [0.0, 1.5, 3.0]
+
+    def test_empty_nodes_returns_empty(self):
+        assert sum_storey_forces({}, []) == []

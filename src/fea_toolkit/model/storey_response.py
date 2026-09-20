@@ -821,6 +821,324 @@ def storey_shears(
 
 
 # ========================================================================
+# Storey-level force summation (NPZ-friendly, global coordinates)
+# ========================================================================
+
+#: Centre-of-magnitude identification methods for :func:`sum_storey_forces`.
+#:
+#: * ``"bbox"`` (default) — bounding-box midpoint ``((min+max)/2)`` of the
+#:   nodes at the level.  Purely geometric, always available, and the same
+#:   reference :func:`fea_toolkit._cqc.sum_reactions_with_overturning` uses
+#:   at the base, so storey moments and base overturning share one origin.
+#: * ``"mass"`` — mass-weighted centre of mass of the nodes at the level.
+#:   Physically the right reference for seismic torsion, but it needs
+#:   ``node_masses`` and is only as good as the mass idealisation.
+CM_METHODS = ("bbox", "mass")
+
+
+def storey_levels_from_z(z_values, z_tolerance: float = 0.5):
+    """Cluster Z coordinates into storey levels.
+
+    Reuses the greedy fixed-anchor 1-D clustering from
+    :mod:`fea_toolkit.model.stories`, so level detection here matches
+    :func:`~fea_toolkit.model.stories.identify_stories`' node-clustering
+    strategy rather than inventing a second convention.
+
+    Args:
+        z_values: Iterable of node Z coordinates.
+        z_tolerance: Clustering band, in the same units as the coordinates.
+
+    Returns:
+        ``[(elevation, [index, ...]), ...]`` ascending by elevation, where
+        each index is a position into *z_values*.
+    """
+    from .stories import _cluster_1d
+
+    vals = np.asarray(list(z_values), dtype=float)
+    if vals.size == 0:
+        return []
+    return sorted(_cluster_1d(vals, z_tolerance), key=lambda c: c[0])
+
+
+def _level_centroid(xs, ys, masses=None, cm_method: str = "bbox"):
+    """Return the ``(cx, cy)`` reference for one level's node coordinates.
+
+    Args:
+        xs, ys: Node X / Y coordinates at the level.
+        masses: Node masses (required for ``cm_method="mass"``).
+        cm_method: ``"bbox"`` (bounding-box midpoint, default) or ``"mass"``.
+
+    Returns:
+        ``(cx, cy)`` tuple.
+
+    Raises:
+        ValueError: On an unknown *cm_method*, a missing/zero mass total, or
+            ``cm_method="mass"`` without *masses*.
+    """
+    if not xs:
+        return 0.0, 0.0
+    if cm_method == "mass":
+        if masses is None:
+            raise ValueError("cm_method='mass' requires node_masses")
+        w = np.asarray(masses, dtype=float)
+        total = float(w.sum())
+        if total <= 0.0:
+            raise ValueError("cm_method='mass' requires a positive total mass")
+        return (
+            float((w * np.asarray(xs, dtype=float)).sum() / total),
+            float((w * np.asarray(ys, dtype=float)).sum() / total),
+        )
+    if cm_method != "bbox":
+        raise ValueError(f"cm_method must be one of {CM_METHODS}, got {cm_method!r}")
+    return (min(xs) + max(xs)) * 0.5, (min(ys) + max(ys)) * 0.5
+
+
+def sum_storey_forces(
+    node_xyz,
+    members,
+    *,
+    z_tolerance: float = 1e-6,
+    levels=None,
+    cm_method: str = "bbox",
+    node_masses=None,
+    horizontal_tol: float = 1e-9,
+    mode: str = "cut",
+):
+    """Sum member forces at each storey level, in global coordinates.
+
+    A storey profile needs **global** components and **elevation-changing**
+    members:
+
+    * only members with ``|z_j − z_i| > horizontal_tol`` contribute.  A
+      horizontal member's two ends share one elevation, so it adds nothing
+      to a level profile.
+    * the end forces must already be in the **global** system.  Callers
+      rotating from the NPZ's stored local forces do so with
+      :func:`~fea_toolkit.model.geometry.get_local_axes`.
+
+    The moment at each level is the member-end moment **plus** the
+    force × lever-arm term about the level's reference point — the same
+    transformation :func:`fea_toolkit._cqc.sum_reactions_with_overturning`
+    applies at the base, so axial offsets drive ``Mx``/``My`` (overturning)
+    while shear offsets drive ``Mz`` (torsion).
+
+    *mode* chooses which members contribute at a level:
+
+    * ``"cut"`` (default) — the force transmitted across the horizontal plane
+      just above the level, i.e. the **storey shear / overturning of the storey
+      above**.  Every member contributes at each level its span contains from
+      below-to-above (``z_lo <= z_c < z_hi``): its lower end force at the level
+      that end sits on, and its internal force at the cut for any level it
+      passes through with no node there — the latter obtained by transporting
+      the lower end force along the member (force constant, moment linear).
+      That transport is exact for a member carrying no span load; for a loaded
+      member the resultant applied between its end and the cut is not
+      represented in the archive and is therefore omitted.  Only the lower side
+      is used deliberately, so a member is never counted twice at one level
+      once as a delivered end force and once as a transmitted internal force.
+    * ``"end"`` — only member **ends**, each credited to the level of the node
+      it frames into.  By nodal equilibrium this is the level's member-end
+      force residual, ``sum(end forces) = -(applied nodal load)
+      - (support reaction)`` — the **load path**, not the storey shear.  It is
+      *not* "the load arriving at the level": away from the supports it is
+      minus the applied **nodal** load, and at a **support level it is the
+      reaction**, so a restrained base reads the full accumulated reaction
+      (measured: ``DEAD`` reads 1200 kN at the base — the whole gravity
+      reaction) rather than ~0.  For a self-equilibrated case every
+      *unrestrained* component sums to zero at every level, while a
+      *restrained* one sums to the reaction.  It is also blind to a member that
+      spans a level without a node there.
+
+    Args:
+        node_xyz: ``{node_tag: (x, y, z)}`` node coordinates (model units).
+        members: Iterable of ``{"node_i", "node_j", "f_i", "f_j"}``, where
+            each force vector is a 6-component **global**
+            ``[Fx, Fy, Fz, Mx, My, Mz]`` at the I- and J-end.
+        z_tolerance: Elevations within this distance are treated as one level.
+            The default (a numerical coincidence tolerance) makes **every**
+            distinct node elevation its own level, so no member is lost; pass
+            a coarser band (e.g. ``0.5``, the ``identify_stories`` default) to
+            group sub-level nodes into storeys.
+        levels: Optional explicit level elevations.  When ``None`` the levels
+            are derived by clustering the node Z coordinates.
+        cm_method: Reference-point rule — ``"bbox"`` (default, bounding-box
+            midpoint) or ``"mass"`` (mass-weighted centre of mass).
+        node_masses: ``{node_tag: mass}`` — required for ``cm_method="mass"``.
+        horizontal_tol: Elevation difference at or below which a member is
+            treated as horizontal and skipped.
+        mode: Which members contribute at a level — ``"cut"`` (default) or
+            ``"end"``; see above.
+
+    Returns:
+        List of per-level dicts, ascending by elevation, each with
+        ``elevation``, ``cx``, ``cy``, ``Fx`` … ``Mz``, ``n_ends`` (the number
+        of contributions summed into the level) and ``n_crossing`` (how many
+        of them came from a member crossing the level with no node there).
+
+    Raises:
+        ValueError: On an unknown *cm_method* or *mode*, or a missing mass
+            input for ``cm_method="mass"``.
+    """
+    from .._cqc import lever_arm_moment
+
+    node_xyz = {tag: tuple(xyz) for tag, xyz in node_xyz.items()}
+    node_tags = list(node_xyz)
+    if not node_tags:
+        return []
+
+    # ── Levels ────────────────────────────────────────────────────────
+    if levels is None:
+        level_elevs = [
+            c[0] for c in storey_levels_from_z((node_xyz[t][2] for t in node_tags), z_tolerance)
+        ]
+    else:
+        level_elevs = sorted(float(z) for z in levels)
+    if not level_elevs:
+        return []
+
+    if mode not in ("cut", "end"):
+        raise ValueError(f"mode must be 'cut' or 'end', got {mode!r}")
+
+    # ── Reference point per level ─────────────────────────────────────
+    # Nodes within the clustering band of the level set its centroid.  A
+    # user-supplied level with no node on it falls back to the nearest node
+    # elevation(s) so the level still has a reference point and is never
+    # silently empty.
+    band = max(float(z_tolerance), 1e-12)
+    acc: list[dict] = []
+    for elev in level_elevs:
+        tags = [t for t in node_tags if abs(node_xyz[t][2] - elev) <= band]
+        if not tags:
+            dmin = min(abs(node_xyz[t][2] - elev) for t in node_tags)
+            tags = [t for t in node_tags if abs(abs(node_xyz[t][2] - elev) - dmin) <= band]
+        masses = None
+        if cm_method == "mass" and node_masses is not None:
+            masses = [float(node_masses.get(t, 0.0)) for t in tags]
+        cx, cy = _level_centroid(
+            [node_xyz[t][0] for t in tags],
+            [node_xyz[t][1] for t in tags],
+            masses,
+            cm_method,
+        )
+        acc.append(
+            {
+                "elevation": float(elev),
+                "cx": cx,
+                "cy": cy,
+                "Fx": 0.0,
+                "Fy": 0.0,
+                "Fz": 0.0,
+                "Mx": 0.0,
+                "My": 0.0,
+                "Mz": 0.0,
+                "n_ends": 0,
+                "n_crossing": 0,
+            }
+        )
+
+    def _transport(force, dx, dy, dz):
+        """Move a global ``[Fx, Fy, Fz, Mx, My, Mz]`` triple by an offset.
+
+        The force triple is unchanged — no span load is represented — while the
+        moment gains the ``r × F`` term of the offset, the inverse of the
+        lever-arm term :func:`_credit` adds about a level reference point.
+        """
+        fx, fy, fz = force[0], force[1], force[2]
+        dmx, dmy, dmz = lever_arm_moment(fx, fy, fz, dx, dy, dz)
+        return (fx, fy, fz, force[3] + dmx, force[4] + dmy, force[5] + dmz)
+
+    def _credit(level, point, force, crossing):
+        """Add *force*, acting at *point*, about the level's reference point."""
+        fx, fy, fz = force[0], force[1], force[2]
+        dmx, dmy, dmz = lever_arm_moment(
+            fx,
+            fy,
+            fz,
+            point[0] - level["cx"],
+            point[1] - level["cy"],
+            point[2] - level["elevation"],
+        )
+        level["Fx"] += fx
+        level["Fy"] += fy
+        level["Fz"] += fz
+        level["Mx"] += force[3] + dmx
+        level["My"] += force[4] + dmy
+        level["Mz"] += force[5] + dmz
+        level["n_ends"] += 1
+        if crossing:
+            level["n_crossing"] += 1
+
+    def _nearest_level(z):
+        """Index of the level closest to elevation *z*."""
+        best, best_dist = 0, float("inf")
+        for i, elev in enumerate(level_elevs):
+            if abs(z - elev) < best_dist:
+                best, best_dist = i, abs(z - elev)
+        return best
+
+    # ── Sum each member at every level it reaches ─────────────────────
+    t_tol = 1e-9
+    for member in members:
+        ni = member.get("node_i")
+        nj = member.get("node_j")
+        if ni not in node_xyz or nj not in node_xyz:
+            continue
+        p_i, p_j = node_xyz[ni], node_xyz[nj]
+        dz_member = p_j[2] - p_i[2]
+        if abs(dz_member) <= horizontal_tol:
+            continue  # horizontal member — cannot contribute to a level profile
+        f_i = member.get("f_i")
+        f_j = member.get("f_j")
+        if f_i is None and f_j is None:
+            continue
+
+        if mode == "end":
+            li, lj = _nearest_level(p_i[2]), _nearest_level(p_j[2])
+            if li == lj:
+                continue
+            for idx, point, force in ((li, p_i, f_i), (lj, p_j, f_j)):
+                if force is not None:
+                    _credit(acc[idx], point, force, False)
+            continue
+
+        # mode == "cut": the storey above each level.  A member contributes at
+        # exactly the levels its span contains from below-to-above
+        # (``z_lo <= z_c < z_hi``) — the level its lower end sits on, plus any
+        # level it passes through with no node there.  Using only the *lower*
+        # side matters: crediting a member's upper end as well would add a
+        # delivered end force and a transmitted internal force for the same
+        # member at the same level, and the two have opposite signs (they sum
+        # to the level's applied load, which is zero for a self-equilibrated
+        # case — the ``"end"`` mode's value).
+        f_lo, p_lo, p_hi = (f_i, p_i, p_j) if p_i[2] <= p_j[2] else (f_j, p_j, p_i)
+        span = p_hi[2] - p_lo[2]
+        if f_lo is None:
+            continue
+        for level in acc:
+            t = (level["elevation"] - p_lo[2]) / span
+            if t < -t_tol or t >= 1.0 - t_tol:
+                continue
+            if t <= t_tol:
+                _credit(level, p_lo, f_lo, False)
+                continue
+            # Interior cut: carry the lower end force along the member.  The
+            # force is unchanged; the moment gains r x F.
+            point = (
+                p_lo[0] + t * (p_hi[0] - p_lo[0]),
+                p_lo[1] + t * (p_hi[1] - p_lo[1]),
+                level["elevation"],
+            )
+            _credit(
+                level,
+                point,
+                _transport(f_lo, point[0] - p_lo[0], point[1] - p_lo[1], point[2] - p_lo[2]),
+                True,
+            )
+
+    return acc
+
+
+# ========================================================================
 # Storey response helpers — extracted from project_a reports
 # ========================================================================
 

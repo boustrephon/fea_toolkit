@@ -171,6 +171,36 @@ def srss_combine_matrix(values: np.ndarray) -> np.ndarray:
     return np.sqrt(np.sum(values * values, axis=-1))
 
 
+def lever_arm_moment(
+    fx: float, fy: float, fz: float, dx: float, dy: float, dz: float
+) -> tuple[float, float, float]:
+    """Return the moment of a force about a reference point.
+
+    A force ``(fx, fy, fz)`` acting at a point offset ``(dx, dy, dz)`` from
+    the moment reference produces::
+
+        mx = fz·dy − fy·dz
+        my = fx·dz − fz·dx
+        mz = fy·dx − fx·dy
+
+    This is the single implementation of the lever-arm transformation used
+    by :func:`sum_reactions_with_overturning` (base overturning) and by the
+    per-storey force summation
+    (:func:`~fea_toolkit.model.storey_response.sum_storey_forces`), so the
+    base and storey-level moments share one convention.
+
+    Args:
+        fx, fy, fz: Force components in global coordinates.
+        dx, dy, dz: Offsets from the moment reference to the point of
+            application, in global coordinates.
+
+    Returns:
+        ``(mx, my, mz)`` — the moment contribution of the force, in the
+        same units as ``force × length``.
+    """
+    return (fz * dy - fy * dz, fx * dz - fz * dx, fy * dx - fx * dy)
+
+
 def sum_reactions_with_overturning(
     reactions: dict,
     nodes: dict,
@@ -277,10 +307,11 @@ def sum_reactions_with_overturning(
         dx = node.x - cx
         dy = node.y - cy
         dz = node.z - z_base
+        dmx, dmy, dmz = lever_arm_moment(fx, fy, fz, dx, dy, dz)
         summed["fx"] += fx
         summed["fy"] += fy
         summed["fz"] += fz
-        summed["mx"] += mx + fz * dy - fy * dz
-        summed["my"] += my + fx * dz - fz * dx
-        summed["mz"] += mz + fy * dx - fx * dy
+        summed["mx"] += mx + dmx
+        summed["my"] += my + dmy
+        summed["mz"] += mz + dmz
     return summed
