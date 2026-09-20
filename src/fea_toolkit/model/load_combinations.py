@@ -602,6 +602,17 @@ def merge_combination_sets(
         if layer is None:
             continue
         merged.update(as_combination_mapping(layer))
+    # Deep-copy every combination before classification: ``classify_combination_refs``
+    # and the combo-name resolution below mutate entries in place, which must
+    # never touch the caller's own combinations or entries.
+    merged = {
+        name: replace(
+            combo,
+            entries=[replace(entry) for entry in combo.entries],
+            design=dict(combo.design),
+        )
+        for name, combo in merged.items()
+    }
     if load_cases is not None:
         classify_combination_refs(merged, load_cases)
     else:
@@ -697,6 +708,17 @@ def _scaled(composite: CompositeLoadCase, factor: float) -> CompositeLoadCase:
     )
 
 
+def _coord_tag(name: str, factor: float) -> str:
+    """Return *name* prefixed with the sign of *factor*.
+
+    The signed coordinate name for one forked magnitude reference — ``"+"``
+    for a non-negative factor, ``"-"`` for a negative one — so a negative
+    ``entry.factor`` yields its first sense with the matching sign instead of a
+    hard-coded ``"+"``.
+    """
+    return ("+" if factor >= 0 else "-") + name
+
+
 def _tag_coord(composite: CompositeLoadCase, tag: str) -> CompositeLoadCase:
     """Return *composite* relabelled with *tag* as its single coordinate.
 
@@ -769,9 +791,10 @@ def _entry_variants(
             and _is_magnitude_combo(sub, load_cases, load_combinations)
             and _has_non_magnitude_terms(parent, load_cases, load_combinations)
         ):
-            variants = [_tag_coord(c, f"+{entry.name}") for c in variants]
+            variants = [_tag_coord(c, _coord_tag(entry.name, entry.factor)) for c in variants]
             variants += [
-                _tag_coord(_scaled(c, -entry.factor), f"-{entry.name}") for c in sub_results
+                _tag_coord(_scaled(c, -entry.factor), _coord_tag(entry.name, -entry.factor))
+                for c in sub_results
             ]
         return variants
 
@@ -788,14 +811,14 @@ def _entry_variants(
         and _is_magnitude_entry(entry, load_cases, load_combinations)
         and _has_non_magnitude_terms(parent, load_cases, load_combinations)
     ):
-        variants[0].coords = (f"+{entry.name}",)
+        variants[0].coords = (_coord_tag(entry.name, entry.factor),)
         variants.append(
             CompositeLoadCase(
                 name=entry.name,
                 operator="linear",
                 cases={entry.name: -entry.factor},
                 source=entry.name,
-                coords=(f"-{entry.name}",),
+                coords=(_coord_tag(entry.name, -entry.factor),),
             )
         )
     return variants
@@ -1099,7 +1122,16 @@ def combination_case_meta(
         # Coordinates are recorded at the fork point; the geometric extraction
         # is a fallback for hand-built composites.
         coords = composite.coords or fork_coords(composite, load_cases, load_combinations)
-        family = composite.family or ("fork" if len(coords) > 1 else "single")
+        family = composite.family
+        if not family:
+            if composite.operator in ("max", "min"):
+                family = "envelope"
+            elif composite.operator == "srss":
+                family = "srss"
+            elif any(coord[:1] in ("+", "-") for coord in coords):
+                family = "fork"
+            else:
+                family = "single"
         if family == "single":
             # No fork dimension — a pure magnitude sum has no coordinate.
             coords = ()
