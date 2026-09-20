@@ -928,9 +928,12 @@ def sum_storey_forces(
       just above the level, i.e. the **storey shear / overturning of the storey
       above**.  Every member contributes at each level its span contains from
       below-to-above (``z_lo <= z_c < z_hi``): its lower end force at the level
-      that end sits on, and its internal force at the cut for any level it
-      passes through with no node there — the latter obtained by transporting
-      the lower end force along the member (force constant, moment linear).
+      that end sits on (a level within the clustering band of that end counts
+      as the end, so a node clustered into a level is credited as an end force
+      rather than an interior cut), and its internal force at the cut for any
+      level it passes through with no node there — the latter obtained by
+      transporting the lower end force along the member (force constant, moment
+      linear).
       That transport is exact for a member carrying no span load; for a loaded
       member the resultant applied between its end and the cut is not
       represented in the archive and is therefore omitted.  Only the lower side

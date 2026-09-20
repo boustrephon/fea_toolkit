@@ -413,7 +413,9 @@ and is `""` otherwise; the coordinates carry the detail.
   "range" display and a 2² fork reads as its four corners.  `both_sides=False`
   draws one curve.  Scope: the **storey profile** (the 2D default); the legacy
   per-element `by_storey=False` path is left single-curve, since overlaid
-  per-element diagrams are unreadable.
+  per-element diagrams are unreadable.  The group sums are not even built for
+  it, and a group member whose level sum is empty is omitted rather than drawn
+  as a blank curve.
 
   *Grouping.*  Not guessed from the plot — resolved by `_group_members()` /
   `_case_pairs()`, in priority order:

@@ -155,6 +155,11 @@ treated as signed.
 The sign applies to the whole sub-combination: `RS1` is negated in one piece,
 not its individual spectrum constituents.
 
+The prefix of each coordinate comes from the **reference's own factor**, not
+from a fixed `+`: a term written `−1.4·QE` forks with `−QE` first (the sense it
+actually carries) and `+QE` as its scaled opposite, so the label always matches
+the sign applied.
+
 ## External definition sets
 
 Combinations do not have to come from the `.s2k` table. A **combination set**
@@ -211,7 +216,7 @@ the reference counts as signed and no fork is produced.
 |---|---|
 | `combination_set_from_dict()` | Canonical dict → `{name: LoadCombination}`. |
 | `combination_set_to_dict()` | The inverse. Supersedes `to_e2k_combo_dict()`, which remains the ETABS-side projection. |
-| `merge_combination_sets(*sets, load_cases=…)` | Layer sets left-to-right, later winning; re-resolves every reference's `kind`. |
+| `merge_combination_sets(*sets, load_cases=…)` | Layer sets left-to-right, later winning; re-resolves every reference's `kind` on a deep copy, so the inputs are never mutated. |
 | `io.combination_set.read_combination_set()` / `write_combination_set()` | JSON file round-trip. |
 
 Both consumers read the same definition:
@@ -256,6 +261,11 @@ corners are `("+RSX", "+RSY")`, `("+RSX", "-RSY")`, `("-RSX", "+RSY")` and
 `static_case_coords` — the single owner of the sign rule. `kind` is `"+QE"` /
 `"-QE"` only for a **single**-sense fork; a 2ⁿ fork has no one sign, so its
 corners are identified by `coords`.
+
+A composite built **by hand** (rather than by `generate_combination_results`)
+carries no `family`, so `combination_case_meta()` derives one from its
+operator — `"max"` / `"min"` → `"envelope"`, `"srss"` → `"srss"`, a signed
+coordinate → `"fork"`, else `"single"`.
 
 ## References
 
