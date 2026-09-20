@@ -37,8 +37,10 @@ from typing import Any, Optional
 import numpy as np
 
 from ..model.load_combinations import (
+    combination_case_meta,
     generate_combination_results,
     generate_composite_results,
+    merge_combination_sets,
 )
 from ..model.sap_data import SAPModelData
 
@@ -99,9 +101,11 @@ def build_combination_results(
     model: Optional[SAPModelData] = None,
     load_cases: Optional[dict] = None,
     load_combinations: Optional[dict] = None,
+    definitions=None,
     combinations: Optional[list[str]] = None,
     envelope_mode: str = "maxmin",
-) -> dict[str, dict[str, Any]]:
+    return_meta: bool = False,
+):
     """Expand load combinations into composite result payloads.
 
     Args:
@@ -114,19 +118,35 @@ def build_combination_results(
         load_cases: Explicit ``{name: LoadCase}`` (overrides ``model``).
         load_combinations: Explicit ``{name: LoadCombination}`` (overrides
             ``model``).
+        definitions: An **external** combination set — the canonical
+            ``{name: {"type", "entries", ...}}`` dict
+            :func:`~fea_toolkit.model.load_combinations.combination_set_from_dict`
+            builds, a ready ``{name: LoadCombination}`` mapping, or an
+            equivalent JSON load.  Merged *over* ``load_combinations`` (and
+            ``model.load_combinations``), so it may add combinations, redefine
+            one by name, or stand alone.  Supplying it is enough to satisfy
+            the *model*-or-*load_combinations* requirement.
         combinations: Combination names to expand.  Defaults to every
             combination in *load_combinations*.
         envelope_mode: Envelope strategy — ``"maxmin"`` (per-quantity
             maximum/minimum) or ``"per_path"`` (one composite per branch).
+        return_meta: When ``True``, also return the per-case metadata
+            (``group`` / ``kind`` / ``family`` / ``coords`` from
+            :func:`~fea_toolkit.model.load_combinations.combination_case_meta`)
+            so a caller can hand it straight to
+            ``write_results(..., case_meta=...)``.  The input load cases are
+            seeded as their own group with an empty ``kind``, matching the
+            standalone extraction scripts.
 
     Returns:
         ``{composite_name: payload}`` in the same shape as *case_results*, so
-        it can be merged straight into ``static_results``.
+        it can be merged straight into ``static_results`` — or the
+        ``(payloads, case_meta)`` pair when *return_meta* is set.
 
     Raises:
-        ValueError: If neither *model* nor *load_combinations* is supplied, or
-            a combination is unsupported / cyclic / carries a bad
-            *envelope_mode*.
+        ValueError: If neither *model*, *load_combinations* nor *definitions*
+            is supplied, or a combination is unsupported / cyclic / carries a
+            bad *envelope_mode*.
         KeyError: If a requested combination is unknown, or a combination
             references a load case missing from *case_results*.
     """
@@ -135,13 +155,20 @@ def build_combination_results(
             load_cases = model.load_cases
         if load_combinations is None:
             load_combinations = model.load_combinations
+    if definitions is not None:
+        load_combinations = merge_combination_sets(
+            load_combinations, definitions, load_cases=load_cases or None
+        )
     if load_combinations is None:
-        raise ValueError("build_combination_results() needs model= or load_combinations=")
+        raise ValueError(
+            "build_combination_results() needs model=, load_combinations= or definitions="
+        )
     load_cases = load_cases if load_cases is not None else {}
 
     case_arrays = {name: _flatten(payload) for name, payload in case_results.items()}
     names = list(combinations) if combinations is not None else list(load_combinations)
 
+    meta: dict[str, dict[str, str]] = {name: {"group": name, "kind": ""} for name in case_results}
     out: dict[str, dict[str, Any]] = {}
     for name in names:
         combo = load_combinations.get(name)
@@ -150,7 +177,11 @@ def build_combination_results(
         composites = generate_combination_results(
             combo, load_cases, load_combinations, envelope_mode=envelope_mode
         )
+        if return_meta:
+            meta.update(combination_case_meta(composites, load_cases, load_combinations))
         evaluated = generate_composite_results(composites, case_arrays)
         for composite_name, arrays in evaluated.items():
             out[composite_name] = _unflatten(arrays)
+    if return_meta:
+        return out, meta
     return out

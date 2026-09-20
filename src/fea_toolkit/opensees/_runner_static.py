@@ -1056,6 +1056,7 @@ class StaticRunnerMixin:
         fmt: str = "npz",
         model: Optional[SAPModelData] = None,
         expand_combinations: bool = False,
+        combinations=None,
         envelope_mode: str = "maxmin",
     ) -> str:
         """Export model geometry and analysis results to a unified file.
@@ -1082,6 +1083,13 @@ class StaticRunnerMixin:
                 and add them to *static_results* alongside the load cases.
                 Only the load cases the combinations reference need to be
                 present.
+            combinations: An **external** combination set to expand instead of
+                (or on top of) the model's own — a canonical
+                ``{name: {"type", "entries", ...}}`` dict or a ready
+                ``{name: LoadCombination}`` mapping.  Merged over
+                ``model.load_combinations``, so it may add combinations,
+                redefine one by name, or stand alone.  Supplying it satisfies
+                the *model* requirement of *expand_combinations*.
             envelope_mode: Envelope strategy used when expanding —
                 ``"maxmin"`` or ``"per_path"``.
 
@@ -1089,20 +1097,27 @@ class StaticRunnerMixin:
             Absolute path to the written file.
 
         Raises:
-            ValueError: If *expand_combinations* is set without *model*.
+            ValueError: If *expand_combinations* is set without *model* or
+                *combinations*.
         """
         from ..io.unified_writer import write_results
 
+        case_meta = None
         if expand_combinations:
-            if model is None:
+            if model is None and combinations is None:
                 raise ValueError(
-                    "expand_combinations=True requires model=SAPModelData — the "
-                    "load combinations live on the model, not on the MeshModel."
+                    "expand_combinations=True requires model=SAPModelData or "
+                    "combinations=<external definition set> — the load combinations "
+                    "live on the model, not on the MeshModel."
                 )
             from ..analysis.combinations import build_combination_results
 
-            combined = build_combination_results(
-                static_results or {}, model=model, envelope_mode=envelope_mode
+            combined, case_meta = build_combination_results(
+                static_results or {},
+                model=model,
+                definitions=combinations,
+                envelope_mode=envelope_mode,
+                return_meta=True,
             )
             static_results = {**(static_results or {}), **combined}
 
@@ -1117,6 +1132,7 @@ class StaticRunnerMixin:
             rs_nodal_displacements=rs_nodal_displacements,
             fmt=fmt,
             config=self.config,
+            case_meta=case_meta,
         )
 
     def export_static_results(

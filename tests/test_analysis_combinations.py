@@ -187,6 +187,44 @@ def test_export_results_expands_combinations(monkeypatch, tmp_path):
     assert {"DEAD", "SDL", "RSX"} <= set(merged)
     assert {"GRAV", "SEISM #1", "SEISM #2", "ENV [max]", "ENV [min]"} <= set(merged)
     assert merged["GRAV"]["element_forces"]["fx_i"] == pytest.approx([13.5, 27.0])
+    # P21: the pairing metadata is handed to the writer in the same call.
+    assert captured["case_meta"]["SEISM #1"]["kind"] == "+QE"
+    assert captured["case_meta"]["SEISM #2"]["kind"] == "-QE"
+    assert captured["case_meta"]["SEISM #1"]["group"] == "SEISM"
+    assert captured["case_meta"]["SEISM #1"]["family"] == "fork"
+    assert captured["case_meta"]["ENV [max]"]["coords"] == "max"
+
+
+def test_export_results_expands_external_definitions(monkeypatch, tmp_path):
+    """``combinations=`` satisfies the expansion source requirement on its own."""
+    captured = {}
+
+    def fake_write_results(**kwargs):
+        captured.update(kwargs)
+        return str(tmp_path / "out.npz")
+
+    monkeypatch.setattr("fea_toolkit.io.unified_writer.write_results", fake_write_results)
+
+    definitions = {
+        "EXT": {
+            "type": "Linear Add",
+            "entries": [
+                {"ref": "DEAD", "factor": 1.0},
+                {"ref": "RSX", "factor": 1.0, "magnitude": True},
+            ],
+        }
+    }
+    _StubBuilder().export_results(
+        str(tmp_path / "out.npz"),
+        static_results=_results(),
+        combinations=definitions,
+        expand_combinations=True,
+    )
+
+    merged = captured["static_results"]
+    assert {"EXT #1", "EXT #2"} <= set(merged)
+    assert captured["case_meta"]["EXT #1"]["kind"] == "+QE"
+    assert captured["case_meta"]["EXT #2"]["coords"] == "-RSX"
 
 
 def test_export_results_without_expansion_is_unchanged(monkeypatch, tmp_path):
@@ -202,3 +240,55 @@ def test_export_results_without_expansion_is_unchanged(monkeypatch, tmp_path):
     _StubBuilder().export_results(str(tmp_path / "out.npz"), static_results=cases)
     assert captured["static_results"] is cases
     assert "GRAV" not in captured["static_results"]
+    # No expansion -> no metadata, so an unannotated archive is unchanged.
+    assert captured["case_meta"] is None
+
+
+# ── External definitions & returned metadata ───────────────────────────
+
+
+def test_definitions_expand_without_a_model():
+    """An external set satisfies the source requirement on its own."""
+    definitions = {
+        "EXT": {
+            "type": "Linear Add",
+            "entries": [
+                {"ref": "DEAD", "factor": 2.0},
+                {"ref": "RSX", "factor": 1.0, "magnitude": True},
+            ],
+        }
+    }
+    out = build_combination_results(_results(), definitions=definitions)
+    assert set(out) == {"EXT #1", "EXT #2"}
+    assert out["EXT #1"]["element_forces"]["fx_i"] == pytest.approx([25.0, 45.0])
+    # The −QE sense subtracts the magnitude again: 2·DEAD − RSX.
+    assert out["EXT #2"]["element_forces"]["fx_i"] == pytest.approx([15.0, 35.0])
+
+
+def test_definitions_merge_over_the_model():
+    definitions = {"GRAV": {"type": "Linear Add", "entries": [["DEAD", 3.0]]}}
+    out = build_combination_results(_results(), model=_model(), definitions=definitions)
+    assert out["GRAV"]["element_forces"]["fx_i"] == pytest.approx([30.0, 60.0])
+
+
+def test_return_meta_describes_every_case():
+    out, meta = build_combination_results(_results(), model=_model(), return_meta=True)
+    # Input load cases are seeded as their own group.
+    assert meta["DEAD"] == {"group": "DEAD", "kind": ""}
+    assert meta["SEISM #1"] == {
+        "group": "SEISM",
+        "kind": "+QE",
+        "family": "fork",
+        "coords": "+RSX",
+    }
+    assert meta["SEISM #2"]["kind"] == "-QE"
+    assert meta["ENV [max]"]["coords"] == "max"
+    assert meta["ENV [min]"]["coords"] == "min"
+    # Every produced payload is described, so a writer can annotate them all.
+    assert set(out) <= set(meta)
+
+
+def test_return_meta_is_opt_in():
+    result = build_combination_results(_results(), model=_model(), combinations=["GRAV"])
+    assert isinstance(result, dict)
+    assert set(result) == {"GRAV"}
