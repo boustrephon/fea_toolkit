@@ -306,6 +306,69 @@ export + Xara/OpenSeesRT path**.  A **Python-native** transient integration
 Tcl/Xara path on the same record; cover the runner-failure metadata path
 (`converged_steps=0` + `metadata["error"]`).
 
+#### P19 — Member-interior force stations (storey profiles are end-force only)
+
+Source: `docs/force_diagram_unification.md` → *Storey profile (2D default)*;
+`local/CLP_BSDG_Latest_Models/Piperack/member_force_extraction.md`.
+
+**What.** Every element-force archive stores **two samples per member** — the
+I- and J-end local forces (`eleResponse(tag, "localForces")`, 12 components) —
+and **no span-load arrays**.  Two consequences, both measured on the piperack
+model:
+
+1. The 2D storey profile's cut transport assumes force constant / moment linear
+   along the member.  For the **2832 frame distributed loads** in that model
+   (pipe dead/live, wind, pipe lateral) the internal force varies *between* the
+   ends, so the reconstructed interior value is wrong mid-span.
+2. "Where does the vertical load enter the structure" is not answerable at all:
+   the load is distributed along members, so it has no level of entry — only the
+   two integrated end values are visible.  (The `"end"` storey mode's base value
+   is the support *reaction*, not arriving load; see the design note.)
+
+The interpolation is exact for an unloaded member and approximate for a loaded
+one, with the largest error exactly where the model is most interesting — the
+long-span beams carrying pipe load.
+
+**Outline steps.**
+
+1. **Option A (recommended first) — exact reconstruction from end forces +
+   span loads.**
+   * Store the per-element span loads in the NPZ.  They exist as
+     `FrameDistributedLoad` on the mesh model; the archive currently omits them,
+     so this is a schema addition + version bump (P18's marker).
+   * Add `member_force_at_t(end_forces, span_loads, t)` in `model/` — the
+     closed-form internal force/moment at parametric `t` (constant shear + linear
+     moment with no load; linear shear + parabolic moment for a uniform load).
+     This is the same superposition the element performs internally, so it is
+     exact for linear-static and needs no extra OpenSees calls.
+   * Point `sum_storey_forces(mode="cut")` and the 2D per-member diagram at it,
+     replacing the "force constant, moment linear" transport.
+2. **Option B (later, for nonlinear runs) — sample section forces in OpenSees.**
+   `eleResponse(tag, "section", secTag, "force")` at `K` Gauss–Lobatto stations,
+   stored as `force_stations (n_elements, K, 12)`.  Works for *any* analysis
+   (including post-yield), but bloats the archive and is still only as fine as
+   `K`.
+
+**Validation.** Simply-supported beam under a uniform load → midspan
+`M = wL²/8`; cantilever with a tip load → linear moment; a column under
+self-weight → linear axial.  Piperack re-check: the `DEAD` cut profile must stay
+monotonic to 0 at the roof (the current invariant), and `COMB1` interior values
+must move toward the beam's true mid-span moment.
+
+**Constraints.** Keep the archive standalone (plotting must not require a model
+object); a missing span-load array must degrade to today's
+constant-force/linear-moment behaviour rather than raise.
+
+#### P21 — Persist the fork pairing on the package combination path (P20 follow-up)
+
+**DONE (2026-09-20)** — see *DONE (2026-09-20 — external combination sets +
+typed variant metadata)* below.  All three outline steps landed:
+`combination_case_meta()` is the single sense-rule owner,
+`build_combination_results(..., return_meta=True)` returns the mapping,
+`export_results()` hands it to `write_results(..., case_meta=...)`, and the
+metadata grew `family` / `coords` so a 2ⁿ fork or an envelope pair is described
+as precisely as a ± pair (a `+QE` / `-QE` marker cannot express either).
+
 ### Tier 4 — Deferred / low-priority
 
 #### P8 — Tcl-exporter merge (deferred)
@@ -584,6 +647,109 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
+
+## DONE (2026-09-20 — external combination sets + typed variant metadata)
+
+**What.** Two related deliverables, one architecture: **the combination
+definition is now the single source of truth both combination tools consume**,
+and the variant identity it implies is persisted with the results.
+
+1. **Typed external definition sets.** `model/load_combinations` gained
+   `combination_set_from_dict()` / `combination_set_to_dict()` (canonical
+   `{name: {"type", "entries", "design"?}}` ↔ `LoadCombination`),
+   `merge_combination_sets()` (layer left-to-right, later wins, re-resolve every
+   reference `kind`) and `as_combination_mapping()` (normalise any accepted
+   input).  `io/combination_set.read_combination_set()` /
+   `write_combination_set()` add the JSON file layer.  The gap this closes: the
+   only prior external shape was `to_e2k_combo_dict()`, a *projection* — it
+   carries `TYPE` but is not an input, so a hand-authored set collapsed to
+   Linear Add.  `"type"` is now first-class, and an entry may carry
+   `"magnitude": true` to declare a response-spectrum reference — the one thing
+   a definition cannot infer without the model's `load_cases`, and what decides
+   the ± fork.
+
+2. **P21 — variant metadata is produced, returned and written.**
+   `CompositeLoadCase` gained `family` / `coords`, populated **at the fork
+   point** (`_entry_variants` / `_tag_coord`) rather than re-derived from the
+   signed factors — a re-derivation cannot see an external definition's
+   magnitude hint.  `combination_case_meta()` is the single owner of the sign
+   rule; `build_combination_results(..., definitions=..., return_meta=True)`
+   accepts an external set and returns `{case: {group, kind, family, coords}}`;
+   `export_results(..., combinations=..., expand_combinations=True)` hands it to
+   `write_results(..., case_meta=...)`.  `case_meta_arrays()` generalised to
+   `CASE_META_KEYS` = `group` / `kind` / `family` / `coords` and now writes
+   **only the fields a caller supplies**, so an archive annotating just
+   `group` / `kind` stays byte-identical.
+
+3. **Both tools, symmetric.** `build_combination_results(definitions=)` and
+   `export_results(combinations=)` generate the NPZ;
+   `plot_force_diagram(..., combinations=, load_cases=)` renders it.  On the
+   read side `_definition_pairs()` resolves grouping from the definition
+   (filtered to the names the archive actually holds), `_case_pairs()` gained
+   the definition as a first-priority source *and* now honours a non-empty
+   `static_case_group` even when `kind` is `""` — previously a multi-fork's
+   group was silently dropped.  `_group_members()` replaced the
+   single-companion rule, so the 2D storey profile draws **every** group member
+   (`storey_extras`; blue circles then an orange-square / green-triangle cycle)
+   instead of refusing a group with more than two members.
+
+**Validation.** 1855 passed, 2 skipped, 2 xfailed; `ruff check` / `ruff format`
+clean.  New coverage: `tests/test_combination_set.py` (JSON round-trip, and both
+tools driven from one file), the definition/family/coords tests in
+`tests/test_load_combinations.py`, `definitions=` without a model plus the
+`case_meta` hand-off in `tests/test_analysis_combinations.py`, and
+`TestMultiMemberGrouping` in `tests/test_force_diagram.py` (4-corner grouping,
+coordinate legends, one curve per member).
+
+**Note.** `plot_force_diagram(..., combinations=)` needs `load_cases=` (or a
+`"magnitude": true` hint) to reproduce fork *names*; grouping, family and labels
+come from the definition either way.  An archive whose variants were renamed
+still relies on the persisted metadata — which is why the metadata exists.
+
+**Docs.** `docs/load_combinations.md` → *External definition sets* (format,
+`magnitude` hint, API, variant-metadata table);
+`docs/results_schema.md` → the two new optional arrays.
+
+## DONE (2026-09-20 — P20: the spectrum fork pairing is persisted, not inferred)
+
+**What.** `case_meta` (`{case: {"group": str, "kind": str}}`) is now accepted by
+`unified_writer.write_results()`, `npz_writer.write_results_npz()` and their
+collectors (`collect_static_arrays()` / `_collect_static()`), and written as the
+optional `static_case_group` / `static_case_kind` arrays aligned to
+`static_case_labels`.  Both writers call one shared implementation,
+`results_schema.case_meta_arrays()`, so they cannot drift — the failure mode
+that once silently dropped the rotational participating-mass ratios from one
+path (`docs/dev_notes.md`, "*one constraint resolution path*").
+
+`extract_member_forces.py` builds `case_meta` from each composite's
+`CompositeLoadCase.source` (the combination both variants came from) plus the
+existing `_qe_sign()` sense, and passes it to both the master and the
+per-combination writes; pure load cases are annotated with their own name and an
+empty `kind`.
+
+**Read side** (landed with the two-sided 2D overlay):
+`plotting/force_diagram._companion_case()` prefers the metadata, falls back to
+the `"... #1"` / `"... #2"` label convention, and refuses to pair a group that
+has more than one candidate for the opposite sense.
+
+**Validation.**
+1. `TestForkMetadataRoundTrip` (6 tests in `tests/test_force_diagram.py`):
+   array alignment and `""` defaults, nested and flat collection, a real
+   `np.savez` → `read_results` round-trip, the no-metadata path still pairing by
+   label, and `npz_writer` sharing the same collection.
+2. End-to-end on the piperack archive (regenerated): the arrays are present, and
+   — the decisive check — renaming the forks to `ZZZ alpha` / `ZZZ omega`
+   (names the label convention cannot pair) still gives
+   `companion(ZZZ alpha) == ZZZ omega`, so the archive is genuinely
+   self-describing rather than label-dependent.
+3. The two-sided identity `profile(#1) - profile(#2) == 2 × 1.4 × profile(RS)`
+   still holds on the regenerated archive for `Fx` / `My` / `Mz` in both the X
+   and Y directions (residual ≤ 1.5e-11).
+
+**Design notes.** Optional arrays only — the reader treats absence as "pair by
+label", so no schema-version bump was needed and every pre-existing archive
+still works.  The sense is never re-derived from the `#n` suffix at write time;
+it comes from the composite's sign.
 
 ## DONE (2026-09-17 — docs: enable strikethrough so `~~done~~` markers render)
 

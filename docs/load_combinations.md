@@ -25,8 +25,10 @@ like a load case.
 | **Parse** | `io/s2k_parser.py::_get_load_combinations()` — groups `COMBINATION DEFINITIONS` rows by `ComboName`, keeping every `CaseName` / `ScaleFactor` row in file order as a `LoadCombinationEntry(name, factor, kind, mode)`. Order and repeats are preserved. |
 | **Classify** | `model.load_combinations.classify_combination_refs()` — resolves each reference by name (`"case"` / `"combo"` / `"unknown"`), because the `.s2k` table carries no reference-type flag. |
 | **Tree / aggregate** | `build_combo_tree()`, `build_combo_tree_dict()`, `calculate_aggregate_factors()`, and the linear convenience `expand_linear_combination()`. Cycle-guarded. |
-| **Generate** | `generate_combination_results()` — produces one or more `CompositeLoadCase` objects (operator table below). |
+| **Generate** | `generate_combination_results()` — produces one or more `CompositeLoadCase` objects (operator table below), each tagged with its `family` and `coords`. |
 | **Evaluate / export** | `analysis.combinations.build_combination_results()` evaluates composites against the run load cases; `AnalysisBuilder.export_results(..., model=md, expand_combinations=True)` merges them into the results NPZ. |
+| **External set** | `combination_set_from_dict()` / `merge_combination_sets()` — a hand-authored typed definition layered onto the model's (`io.combination_set` for JSON). See *External definition sets* below. |
+| **Senses / grouping** | `combination_case_meta()` — `{group, kind, family, coords}` per variant, the single owner of the sign rule; persisted by the NPZ writers as the `static_case_*` arrays. |
 
 Only numeric result fields are combined (force series, nodal-displacement
 vectors, numeric scalars); non-numeric leaves such as `converged` flags are
@@ -152,6 +154,108 @@ treated as signed.
 
 The sign applies to the whole sub-combination: `RS1` is negated in one piece,
 not its individual spectrum constituents.
+
+## External definition sets
+
+Combinations do not have to come from the `.s2k` table. A **combination set**
+is the same flat `{name: definition}` mapping the parser produces, but authored
+by hand — so it can live in JSON, a report config or a script and be layered
+onto a model's own combinations:
+
+```json
+{
+  "SEISM": {
+    "type": "Linear Add",
+    "entries": [
+      {"ref": "DEAD", "factor": 1.3},
+      {"ref": "RSX",  "factor": 1.4, "magnitude": true}
+    ]
+  },
+  "ENV":  {"type": "Envelope", "entries": [["SEISM", 1.0], ["WINDX", 1.0]]},
+  "GRAV": [["DEAD", 1.2], ["SDL", 1.5]]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `type` | The combination operator. Shorthand spellings normalise to the canonical names — `"linear"` / `"add"` / omitted → `"Linear Add"`, `"env"` → `"Envelope"`, `"srss"` → `"SRSS"`, `"absolute"` → `"Absolute Add"`, `"range"` → `"Range Add"`. An unrecognised type raises a clear `ValueError` at expansion rather than silently becoming Linear Add. |
+| `entries` | Ordered, duplicate-preserving references. Each is `{"ref", "factor"?, "mode"?, "magnitude"?}`, a `(ref, factor)` pair, or a bare reference string (factor `1.0`). |
+| `design` | Optional SAP design-type overrides, keyed by SAP column. |
+| *shorthand* | A bare `[[ref, factor], ...]` list is taken as Linear Add. |
+
+`ref` names a load case **or** another combination in the set, so nesting is by
+reference exactly as in `LoadCombination`. A set may therefore extend the model's
+combinations, override one by re-using its name, or stand alone.
+
+### `"magnitude": true`
+
+A definition cannot tell whether a referenced case is a response spectrum — the
+parser learns that from the load case's `CASE - RESPONSE SPECTRUM` definition,
+which an external set has no access to. The per-entry hint declares it, and it is
+what decides the ± fork (see *Sign forking* above):
+
+```json
+"SEISM": {"type": "Linear Add",
+          "entries": [{"ref": "DEAD", "factor": 1.3},
+                      {"ref": "RSX",  "factor": 1.4, "magnitude": true}]}
+```
+
+Without the hint, supply the model's `load_cases` (`definitions=` +
+`load_cases=` on the expansion API, or `combinations=` + `load_cases=` when
+rendering) and a spectrum case is recognised by its type instead. With neither,
+the reference counts as signed and no fork is produced.
+
+### API
+
+| API | Purpose |
+|---|---|
+| `combination_set_from_dict()` | Canonical dict → `{name: LoadCombination}`. |
+| `combination_set_to_dict()` | The inverse. Supersedes `to_e2k_combo_dict()`, which remains the ETABS-side projection. |
+| `merge_combination_sets(*sets, load_cases=…)` | Layer sets left-to-right, later winning; re-resolves every reference's `kind`. |
+| `io.combination_set.read_combination_set()` / `write_combination_set()` | JSON file round-trip. |
+
+Both consumers read the same definition:
+
+* **expansion** — `build_combination_results(..., definitions=set)` or
+  `AnalysisBuilder.export_results(..., combinations=set, expand_combinations=True)`
+  writes the composites into a results NPZ, and
+* **rendering** — `plot_force_diagram(..., combinations=set)` groups and labels
+  the cases from the definition that generated them.
+
+```python
+from fea_toolkit.io.combination_set import read_combination_set
+
+combos = read_combination_set("combos.json")
+builder.export_results("out.npz", static_results=cases, combinations=combos,
+                       expand_combinations=True)
+plot_force_diagram("out.npz", combo="SEISM", dimension="2d", combinations=combos)
+```
+
+### Variant metadata
+
+Every generated composite carries a `family` and a `coords` tuple — the **stable
+identity** of a variant, from which display names are derived (never the
+reverse: `generate_combination_results` names forks `"<combo> #1"`, which
+carries no sign at all).
+
+| `family` | `coords` | Members |
+|---|---|---|
+| `"single"` | `()` | 1 — no fork |
+| `"fork"` | `(±ref, …)` | 2ⁿ — one signed coordinate per independent magnitude |
+| `"envelope"` | `("max",)` / `("min",)` | 2 — the per-quantity extremes |
+| `"path"` | `(branch,)` | one per referenced branch (`envelope_mode="per_path"`) |
+| `"srss"` | `("srss",)` | 1 — a magnitude |
+
+For example `DEAD + RSX + RSY` (two independent spectra) is a 2² fork whose four
+corners are `("+RSX", "+RSY")`, `("+RSX", "-RSY")`, `("-RSX", "+RSY")` and
+`("-RSX", "-RSY")` — not a ± pair.
+
+`combination_case_meta()` turns those into the per-case
+`{group, kind, family, coords}` mapping the NPZ writers persist as
+`static_case_group` / `static_case_kind` / `static_case_family` /
+`static_case_coords` — the single owner of the sign rule. `kind` is `"+QE"` /
+`"-QE"` only for a **single**-sense fork; a 2ⁿ fork has no one sign, so its
+corners are identified by `coords`.
 
 ## References
 
