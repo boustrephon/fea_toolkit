@@ -376,6 +376,10 @@ consolidation in commit `test: dissolve extracted grab-bag …`).
 - **Never commit client or proprietary model data.** `.s2k` fixtures must be
   synthetic, or scrubbed of company/client/project names, job numbers and
   machine paths. `local/` and `data/` are private for the same reason.
+- **The local-only checkpoint refs carry the same risk.** `refs/cline/checkpoints/*`
+  snapshot the whole working tree (including `local/`/`data/`) locally; the only
+  way they reach the public repo is an accidental `--mirror` / wildcard push or
+  sharing `.git` — hence the hard ban in §6.4.
 - `.vscode/settings.json` is gitignored and must stay **untracked** — it holds
   user-specific interpreter paths and command approvals.
 
@@ -399,6 +403,28 @@ consolidation in commit `test: dissolve extracted grab-bag …`).
 
 ### 6.3 Branching
 - `origin: https://github.com/boustrephon/fea_toolkit.git`.
+
+### 6.4 Publishing — branches only (never `--mirror`)
+
+The repository is **public on GitHub**.  Cline's checkpointing writes full
+working-tree snapshots — including gitignored `local/`, `data/`, `output/`
+and `.vscode/settings.json` — into local-only refs under
+`refs/cline/checkpoints/*`.  Those snapshots contain client/proprietary data
+and must **never be published**:
+
+- **Push branches only** — `git push origin main` / feature branches.
+  `git push --all` (branches) and `git push --tags` are also safe.
+- **Never** `git push --mirror`, `git push origin 'refs/*'`, or any wildcard
+  refspec — these publish `refs/cline/*`.
+- **Never** `git bundle --all`, and never share or archive the repo folder
+  *including `.git`* — both carry the checkpoint refs.
+- **Keep checkpointing enabled** — it is the intentional, per-step undo for
+  LLM edits.  Do not disable it or prune `refs/cline/*` unless the user
+  explicitly asks.
+- **Verify nothing slipped**: `git ls-remote origin | grep -Ei 'cline|checkpoint'`
+  must print nothing.
+
+Rationale: §5.8.
 
 
 ## 7. Documentation Rules
@@ -505,6 +531,10 @@ cleared between attempts.
     `view_model` CLI tests were edited in `tests/test_viz_model.py` and moved
     to `tests/test_view_model_cli.py` one commit later; doing the split first
     would have made the second commit a pure move with no follow-on edits.
+16. **Do not** run `git push --mirror`, `git push origin 'refs/*'`, any wildcard
+    refspec, `git bundle --all`, or share/archive the repo folder including `.git`
+    — these publish the local-only `refs/cline/checkpoints/*` snapshots, which
+    contain client data (see §6.4).
 
 ## 10. Tool-Call Hygiene (prevent malformed tool-call XML)
 

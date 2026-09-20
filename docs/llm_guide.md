@@ -388,6 +388,10 @@ subset = sel.filter_model(model)
 | Use PEP 585 built-in generics (`dict`, `list`, `tuple`, `set`) in annotations; import only `Optional`/`Union`/`Any`/`ClassVar`/`NamedTuple`/`TYPE_CHECKING` from `typing` | Python 3.9 floor already supports PEP 585; ruff `UP006`/`UP035` flag `typing.Dict`/`List`/`Tuple`/`Set` |
 | Never add `ndm`/`ndf` dispatch to the main workflow | Analysis is 3D-only (`ndm=3`, `ndf=6`); 2D OpenSees is test-only (`.clinerules` §3.11) |
 | Always catch `RuntimeError` from `AnalysisBuilder.run_static_analysis()` when non-convergence is acceptable | Raises on non-convergence (since commit `ba891f50`); never returns empty dicts on failure — see §7 |
+| Never `git push --mirror`, a wildcard refspec, `git bundle --all`, or share the repo folder including `.git` | Publishes the local-only `refs/cline/checkpoints/*`, which snapshot client data from `local/`/`data/`; the repo is public — see `.clinerules` §6.4 |
+| Don't disable or prune Cline's checkpointing unprompted | It is the per-step undo for LLM edits |
+
+> Push branches only.  Sanity check: `git ls-remote origin | grep -Ei 'cline|checkpoint'` must be empty.
 
 ---
 
