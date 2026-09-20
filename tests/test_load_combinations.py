@@ -185,6 +185,27 @@ def test_spectrum_forks_signs(model):
     assert all(r.cases["DEAD"] == 1.0 for r in results)
 
 
+def test_negative_magnitude_factor_tags_its_own_sign(model):
+    """A negative magnitude reference forks with the sense it actually has.
+
+    The coordinate prefix comes from the entry's own factor (``_coord_tag``),
+    so ``-1.4 RSX`` emits ``-RSX`` first — its own sense — and ``+RSX`` as the
+    scaled opposite, rather than a hard-coded ``+`` on the first variant.
+    """
+    cases, combos = model
+    combos["NEG"] = _combo("NEG", "Linear Add", [("DEAD", 1.0), ("RSX", -1.4)])
+    classify_combination_refs(combos, cases)
+    results = generate_combination_results(combos["NEG"], cases, combos)
+    assert [r.cases["RSX"] for r in results] == [-1.4, 1.4]
+    assert [r.coords for r in results] == [("-RSX",), ("+RSX",)]
+    meta = combination_case_meta(results, cases, combos)
+    assert meta["NEG #1"]["family"] == "fork"
+    assert meta["NEG #1"]["kind"] == "-QE"
+    assert meta["NEG #1"]["coords"] == "-RSX"
+    assert meta["NEG #2"]["kind"] == "+QE"
+    assert meta["NEG #2"]["coords"] == "+RSX"
+
+
 def test_pure_spectrum_does_not_fork(model):
     """A combination of only spectrum cases is already a magnitude."""
     cases, combos = model
@@ -446,6 +467,38 @@ def test_merge_resolves_nested_combos_without_load_cases():
     assert merged["OUTER"].entries[1].kind == "case"
 
 
+def test_merge_does_not_mutate_the_caller_entries_or_design():
+    """Classification runs on a deep copy, so the caller's objects are intact.
+
+    ``as_combination_mapping`` is a shallow ``dict()`` copy, so without the
+    deep-copy step ``classify_combination_refs`` / the combo-name loop would
+    rewrite ``kind`` on the caller's own entries.
+    """
+    original = combination_set_from_dict(
+        {
+            "GRAV": {"type": "Linear Add", "entries": [["DEAD", 1.0]]},
+            "C": {
+                "type": "Linear Add",
+                "entries": [["DEAD", 1.0], ["GRAV", 1.0]],
+                "design": {"SteelDesign": "None"},
+            },
+        }
+    )
+    before = tuple(e.kind for e in original["C"].entries)
+    assert before == ("case", "case")  # freshly built, unclassified
+
+    merged = merge_combination_sets(original, load_cases={"DEAD": _case("DEAD")})
+
+    # The returned copy is classified ...
+    assert [e.kind for e in merged["C"].entries] == ["case", "combo"]
+    # ... while the caller's entries and design are untouched.
+    assert tuple(e.kind for e in original["C"].entries) == before
+    assert original["C"].design == {"SteelDesign": "None"}
+    assert merged["C"].design is not original["C"].design
+    assert merged["C"].entries[0] is not original["C"].entries[0]
+    assert merged["GRAV"] is not original["GRAV"]
+
+
 def test_as_combination_mapping_normalises_every_accepted_input(model):
     _cases, combos = model
     assert as_combination_mapping(None) == {}
@@ -532,6 +585,44 @@ def test_srss_and_mixed_srss_meta(model):
     # A nested magnitude is labelled by the sub-combination it came from.
     assert mix["MIX_SRSS #1"]["coords"] == "+SRSS_C"
     assert mix["MIX_SRSS #2"]["coords"] == "-SRSS_C"
+
+
+def test_case_meta_derives_family_for_hand_built_composites():
+    """A hand-built composite carries no family, so it is derived from it.
+
+    ``generate_combination_results`` tags its output at the fork point; a
+    ``CompositeLoadCase`` built by hand has ``family == ""``, so
+    ``combination_case_meta`` falls back to the operator and the signed coords.
+    """
+    composites = [
+        CompositeLoadCase(
+            name="ENV [max]", operator="max", cases={"GRAV": 1.0}, source="ENV", coords=("max",)
+        ),
+        CompositeLoadCase(
+            name="SRSS_C", operator="srss", cases={"RSX": 1.0}, source="SRSS_C", coords=("srss",)
+        ),
+        CompositeLoadCase(
+            name="FLAT4 #1",
+            operator="linear",
+            cases={"DEAD": 1.0},
+            source="FLAT4",
+            coords=("+RSX", "+RSY"),
+        ),
+        CompositeLoadCase(name="GRAV", operator="linear", cases={"DEAD": 1.2}, source="GRAV"),
+    ]
+    meta = combination_case_meta(composites)
+    assert meta["ENV [max]"]["family"] == "envelope"
+    assert meta["ENV [max]"]["coords"] == "max"
+    assert meta["SRSS_C"]["family"] == "srss"
+    assert meta["SRSS_C"]["coords"] == "srss"
+    assert meta["FLAT4 #1"]["family"] == "fork"
+    assert meta["FLAT4 #1"]["coords"] == "+RSX|+RSY"
+    # Two signed coords are a multi-fork, so no single-sense kind.
+    assert meta["FLAT4 #1"]["kind"] == ""
+    # No coords and no forking operator: a plain single with no coordinate.
+    assert meta["GRAV"]["family"] == "single"
+    assert meta["GRAV"]["coords"] == ""
+    assert meta["GRAV"]["kind"] == ""
 
 
 def test_seism_meta_carries_group_kind_family_and_coords(model):

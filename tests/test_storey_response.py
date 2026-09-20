@@ -417,6 +417,26 @@ class TestSumStoreyForces:
         assert cut[1]["My"] == pytest.approx(-15.0)
         assert cut[2]["Fx"] == pytest.approx(0.0)  # roof
 
+    def test_cut_mode_credits_a_node_clustered_into_the_level(self):
+        """A lower end inside the level band counts as that level's end.
+
+        The column starts at z=0.3 (node 2), which ``z_tolerance=0.5`` clusters
+        into the z=0.0 level seeded by the unattached node 1.  The level then
+        sits *below* the member's lower end, so a bare numerical-coincidence
+        test would skip the member there and the base would read 0; the
+        clustering band credits it with its lower-end force — the load-path
+        value — as an end, not as an interior cut.
+        """
+        nodes = {1: (0.0, 0.0, 0.0), 2: (0.0, 0.0, 0.3), 3: (0.0, 0.0, 3.0)}
+        members = [self._column(2, 3, 10.0)]
+        res = sum_storey_forces(nodes, members, z_tolerance=0.5)
+        # The z=0.0 and z=0.3 nodes form one level at their mean elevation.
+        assert [r["elevation"] for r in res] == pytest.approx([0.15, 3.0])
+        assert res[0]["Fx"] == pytest.approx(-10.0)
+        assert res[0]["n_ends"] == 1
+        assert res[0]["n_crossing"] == 0  # the lower end, not an interior cut
+        assert res[1]["Fx"] == pytest.approx(0.0)  # roof: no storey above
+
     def test_end_mode_base_reads_the_reaction(self):
         """The base shows the full reaction — the load *leaving*, not arriving.
 

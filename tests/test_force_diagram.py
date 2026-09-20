@@ -437,6 +437,31 @@ class TestForkPairing:
 
         plt.close(fig)
 
+    def test_by_storey_false_skips_the_group_extras(self):
+        """The extras are storey profiles, so the per-element view has none."""
+        from fea_toolkit.plotting.force_diagram import _resolve_source
+
+        data = _forked_npz_dict()
+        assert len(_resolve_source(data, combo=f"{self.BASE} #1", quantity="My").storey_extras) == 1
+        per_element = _resolve_source(data, combo=f"{self.BASE} #1", quantity="My", by_storey=False)
+        # The primary profile is still resolved (the caller ignores it) ...
+        assert per_element.storey_series
+        # ... but the other group members are not summed at all.
+        assert per_element.storey_extras == []
+
+    def test_group_member_without_a_profile_is_not_appended(self):
+        """An empty group sum is omitted rather than drawn as a blank curve."""
+        from fea_toolkit.plotting.force_diagram import _resolve_source
+
+        data = _forked_npz_dict()
+        # Strip the opposite fork's forces: it is still a case (the labels are
+        # intact, so it is still grouped) but has no profile to sum.
+        for key in [k for k in data if k.startswith(f"static/{self.BASE} #2/")]:
+            del data[key]
+        resolved = _resolve_source(data, combo=f"{self.BASE} #1", quantity="My")
+        assert resolved.storey_series
+        assert resolved.storey_extras == []
+
 
 # ============================================================================
 # Persisting the fork pairing (P20) — writer side + archive round-trip
