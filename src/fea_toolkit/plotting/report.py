@@ -12,6 +12,8 @@ tables) or :mod:`fea_toolkit.report` (report orchestration) — this module
 produces figures only.
 """
 
+from __future__ import annotations
+
 import math
 from typing import Any, Optional
 

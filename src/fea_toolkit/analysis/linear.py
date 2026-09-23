@@ -8,6 +8,8 @@ The pandas *summary* helpers they depend on (``bounding_box``,
 ``load_pattern_totals``) remain in :mod:`fea_toolkit.io.report`.
 """
 
+from __future__ import annotations
+
 import math
 from typing import Optional
 

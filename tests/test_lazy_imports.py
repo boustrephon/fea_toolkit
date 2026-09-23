@@ -94,3 +94,33 @@ class TestLazyImports:
             pass
         else:  # pragma: no cover
             raise AssertionError("expected AttributeError")
+
+
+class TestOptionalPandasImports:
+    """Modules that guard pandas must import cleanly when it is absent.
+
+    ``sys.modules['pandas'] = None`` makes ``import pandas`` raise, which
+    exercises the ``_MissingPandas`` fallback; their module-level ``pd.*``
+    annotations must therefore not be evaluated at import time.
+    """
+
+    MODULES = (
+        "fea_toolkit.plotting",
+        "fea_toolkit.plotting.report",
+        "fea_toolkit.analysis.linear",
+        "fea_toolkit.report",
+        "fea_toolkit.gui.main_window",
+    )
+
+    def test_guarded_modules_import_without_pandas(self):
+        for module in self.MODULES:
+            code = (
+                f"import sys; sys.path.insert(0, {SRC!r}); "
+                "sys.modules['pandas'] = None; "
+                f"import {module}; "
+                "print('clean')"
+            )
+            out = subprocess.run(
+                [sys.executable, "-c", code], capture_output=True, text=True, check=False
+            )
+            assert out.returncode == 0, f"{module} failed to import: {out.stderr}"

@@ -26,6 +26,8 @@ Typical usage::
     })
 """
 
+from __future__ import annotations
+
 import copy
 import pickle
 from pathlib import Path
