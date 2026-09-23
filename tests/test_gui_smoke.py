@@ -1,16 +1,13 @@
 """Milestone-1 smoke test: the Qt viewport embeds and renders a model.
 
 The Qt-dependent test is gated by the ``needs_gui`` marker (registered in
-``pyproject.toml``); ``tests/conftest.py`` skips it when the optional ``[gui]``
-extra (PySide6 / pyvistaqt / qtpy) is not installed.
+``pyproject.toml``).  ``tests/conftest.py`` owns the head-less Qt policy: it
+probes the optional ``[gui]`` extra (PySide6 / pyvistaqt / qtpy), skips the
+marker when it is absent, and forces ``QT_QPA_PLATFORM=offscreen`` before any
+``QApplication`` is created -- so no per-file override is needed here.
 """
 
-import os
-
 import pytest
-
-# Belt-and-braces: tests/conftest.py already forces this before any QApplication.
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 def test_demo_model_is_valid():
