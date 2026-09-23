@@ -177,6 +177,37 @@ class ModelTreeModel(QAbstractItemModel):
         self._children[group.key] = rows
         self.endInsertRows()
 
+    # ── Lookup ──────────────────────────────────────────────────────
+
+    def index_for(self, group_key: str, label: str) -> Optional[QModelIndex]:
+        """Row of the entity labelled *label* inside the group *group_key*.
+
+        Materialises the group's rows if the user never expanded it -- the tree
+        is lazy, and a viewport pick can name an entity nobody has browsed to.
+
+        Args:
+            group_key: Group key, e.g. ``"frame_elements"``.
+            label: The entity's SAP label, as the row displays it.
+
+        Returns:
+            The child index, or ``None`` when the group or label is unknown.
+        """
+        group_row = next(
+            (row for row, group in enumerate(self._groups) if group.key == group_key),
+            None,
+        )
+        if group_row is None:
+            return None
+        parent = self.index(group_row, 0)
+        # ``fetchMore`` is itself a no-op once the group is loaded.
+        self.fetchMore(parent)
+        for child_row, (child_label, _entity, _node_id) in enumerate(
+            self._children.get(group_key, ())
+        ):
+            if str(child_label) == str(label):
+                return self.index(child_row, 0, parent)
+        return None
+
     # ── Helpers ─────────────────────────────────────────────────────
 
     def _is_group(self, index: QModelIndex) -> bool:

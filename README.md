@@ -1078,6 +1078,10 @@ fea-gui                    # launch with a built-in demo frame
 fea-gui path/to/model.s2k  # or open a SAP2000 model
 ```
 
+* **Selecting.**  Click a row in the Model Tree to highlight that entity in the
+  3-D view; **right-click** an element in the viewport to select it in the tree
+  (the group is expanded and scrolled to).  Both directions share one Qt-free
+  identity index (`gui/controllers/selection.py`), so they cannot drift apart.
 * The window is titled **FEA Toolkit** (`gui/app.py` → `APP_NAME`, applied
   through `configure_application()` before the `QApplication` exists), and on
   macOS the Application menu's **`About` / `Hide` / `Quit` items are retitled

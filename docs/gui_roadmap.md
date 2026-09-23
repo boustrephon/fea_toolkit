@@ -8,7 +8,7 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: 🚧 In progress — Milestones 1–3 landed (viewport spike, chrome, model tree + inspector); Milestone 4 started (tree→viewport selection sync + display toggles), 2026-09-23
+## Status: 🚧 In progress — Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection sync + display toggles), 2026-09-23
 
 This document records the **framework decision** and the **proposed
 architecture** for a native desktop GUI that wraps the workflow already
@@ -333,26 +333,29 @@ The GUI must respect the existing architectural contracts:
    only on demand.  **Never `QTreeWidget`**, and never populate every node: a
    large model would produce hundreds of thousands of items and the UI would
    crawl.
-7. **Bidirectional selection sync.**  The highest-value UX feature, designed in
-   from the start rather than retrofitted: a **tree** selection highlights the
-   matching region in the 3-D view, and a **viewport pick** (PyVista's
-   `enable_mesh_picking` / `enable_point_picking`) selects and scrolls to the
-   matching tree node.  `controllers/selection.py` owns this, and both
-   directions ride on **one stable mapping** built when the viewport batches
-   its geometry (§3.4):
+7. **Bidirectional selection sync.**  ✅ **Implemented.**  A **tree** selection
+   highlights the entity in the 3-D view, and a **viewport right-click** selects
+   and scrolls to the matching tree row.  `controllers/selection.py` owns the
+   forward index (Qt-free) and `main_window.py` does the wiring:
 
-   * **forward** — render identity → SAP label: `cell_id -> SAP frame/shell
-     label` (the value PyVista's `enable_mesh_picking` callback supplies) and
-     `point_id -> SAP node id` (from `enable_point_picking`);
-   * **reverse** — SAP label → render identity: `SAP label -> [cell_id, …]`,
-     for highlighting.
+   * **forward** — render identity → SAP label: the picked **actor** identifies
+     the batch (`PyVistaRenderer.category_of_actor`) and the **cell index** from
+     the scene picker identifies the element within it.  *Correction
+     (2026-09-23):* this rule originally claimed the callback supplies a cell
+     id — it does not (verified against pyvista 0.48.1; see `docs/dev_notes.md`
+     → *PyVista picking contract*).  `enable_mesh_picking` installs the picker
+     (`plotter.iren.picker`), so the index is read from there.  Node ids come
+     from that same cell picker — a node cloud's vertex cells index straight
+     into the node list — so no second, mutually-exclusive picker is needed.
+   * **reverse** — SAP label → geometry: **no map is required**, because
+     `ModelViewer.highlight_elements` / `highlight_nodes` resolve the SAP label
+     against the same extracted geometry the display was built from.
 
-   The viewport pick callback resolves the picked cell/point id through the
-   **forward** map to a SAP label and selects + scrolls to that tree node; the
-   tree-selection callback resolves the tree node's SAP label through the
-   **reverse** map to the cell ids and highlights exactly those cells.  The
+   A pick resolves the label, expands the (lazy) group, selects the row and
+   scrolls to it, which then drives the inspector and the viewport highlight
+   through the ordinary tree wiring — one click refreshes all three views.  The
    index is rebuilt whenever the geometry is re-batched, so pick ids never
-   drift from the displayed `MultiBlock`.
+   drift from what is displayed.
 8. **GPU-friendly viewport updates.**  Batch geometry into a `MultiBlock` and
    render once (see §3.4); never `add_mesh` in a loop with rendering left on.
 9. **Persistent layout.**  Save window geometry and dock state with
@@ -577,7 +580,7 @@ class QtRenderBackend(RenderBackend):
 | 1 | Binding + viewport spike | `PySide6 6.10` × `pyvistaqt 0.13.1` import under 3.10+; `fea-gui` launches a bare `QMainWindow` with a `QtInteractor`; `ModelViewer` renders a sample model into it |
 | 2 | ✅ Chrome | menubar, toolbars, dock layout, message log, status bar (units + coords live; elem/progress wired later), axes triad + view cube.  Domain actions present but greyed, each naming its milestone |
 | 3 | ✅ Trees + inspector | lazy Model Tree over `SAPModelData`/`MeshModel` (`ModelTreeModel` + the Qt-free `model_index`); the Inspector shows the selected dataclass's fields.  The Property Tree is still pending; the actor-category display toggles landed with Milestone 4 (nodes / shells — element *labels* have no renderer yet, so that toggle stays greyed) |
-| 4 | 🚧 Selection sync | **landed: tree→viewport highlight**, replacing the previous highlight on every click (`ModelViewer.highlight_elements` / `highlight_nodes` resolve SAP label → geometry from the same extraction the display was built from, so this direction needs no cell-id map).  **Pending: viewport→tree select + scroll**, which needs the forward `cell_id ↔ SAP label` / `point_id ↔ node id` map rebuilt whenever the geometry is re-batched |
+| 4 | ✅ Selection sync | both directions work.  **Tree→viewport**: `ModelViewer.highlight_elements` / `highlight_nodes`, redrawn (replacing the old highlight) on every click.  **Viewport→tree**: a right-click resolves the picked batch + cell index through the Qt-free `SelectionIndex`, expands the lazy group, selects the row and scrolls to it — which then drives the inspector and the highlight through the ordinary tree wiring.  Verified end-to-end against real pyvista picks (`tests/test_picking.py`, `tests/test_gui_pick.py`) |
 | 5 | Import + analysis | Open runs `SAP2000Parser` on a worker; Run executes `run_static_analysis()` (then modal/spectrum/pushover) with progress + log; Stop cancels cooperatively |
 | 6 | Load rendering | `render_loads()` + `extract_load_glyphs()` draw joint/line/area/gravity glyphs scaled to model units |
 | 7 | Results + export | deformed/force/storey/pushover plots + `write_results_npz` wired to menus |

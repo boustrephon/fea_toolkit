@@ -473,6 +473,19 @@ class ModelViewer:
                 self._model_diag = float(np.linalg.norm(spread))
         return self._model_diag
 
+    def geometry(self) -> "tuple[list[FrameGeom], list[ShellGeom], list[NodeGeom]]":
+        """The extracted geometry that is actually being rendered.
+
+        Returned **in render order**: a backend batches these lists into meshes
+        in this order, so an index into a rendered cell maps straight back to
+        an entity (see :class:`fea_toolkit.gui.controllers.selection.SelectionIndex`).
+
+        Returns:
+            ``(frames, shells, nodes)``, extracting them on first call.
+        """
+        self._extract_geometry()
+        return self._frames, self._shells, self._nodes
+
     def highlight_radius(self) -> float:
         """Tube radius used for element highlights on this model.
 

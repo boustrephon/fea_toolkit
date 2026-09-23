@@ -16,7 +16,7 @@ the viewport, plus the node / shell display toggles.
 import contextlib
 from typing import Any, Optional
 
-from qtpy.QtCore import Qt, QTimer, QUrl
+from qtpy.QtCore import QItemSelectionModel, Qt, QTimer, QUrl
 from qtpy.QtGui import QAction, QDesktopServices, QKeySequence
 from qtpy.QtWidgets import (
     QDockWidget,
@@ -33,6 +33,7 @@ from qtpy.QtWidgets import (
 )
 
 from .app import APP_NAME
+from .controllers.selection import SelectionIndex
 from .models.tree_model import ModelTreeModel
 from .render_backend import QtRenderBackend
 from .views.message_log import MessageLog
@@ -76,6 +77,7 @@ class MainWindow(QMainWindow):
         self._viewer: Any = None
         self._interactor: Any = None
         self._backend: Any = None
+        self._selection_index: Any = None
         self._cursor_timer: Optional[QTimer] = None
         self._interaction_enabled = False
         self._actions: dict = {}
@@ -87,7 +89,7 @@ class MainWindow(QMainWindow):
         self._build_docks()
         self._build_status_bar()
         self._decorate_view()
-        self.log("Ready.")
+        self.log("Ready.  Right-click an element in the viewport to select it.")
 
         if model is not None:
             self.show_model(model)
@@ -108,6 +110,82 @@ class MainWindow(QMainWindow):
         self._interactor = QtInteractor(self._viewport_container)
         self._viewport_layout.addWidget(self._interactor)
         self._backend = QtRenderBackend(self._interactor)
+        self._enable_picking()
+
+    # ── Picking (viewport -> tree) ───────────────────────────────────
+
+    def _enable_picking(self) -> None:
+        """Let a viewport pick select the entity under the cursor.
+
+        PyVista binds picking to the **right** button by default, so the left
+        button keeps rotating and rubber-band zooming; ``show=False`` suppresses
+        its own highlight, since the selection already highlights through
+        :class:`~fea_toolkit.plotting.viewer.ModelViewer`.
+        """
+        try:
+            self._interactor.enable_mesh_picking(
+                callback=self._on_viewport_pick,
+                use_actor=True,
+                show=False,
+            )
+        except Exception as exc:  # pragma: no cover - host without a render window
+            self.log(f"Viewport picking unavailable: {exc}", "warn")
+
+    def _on_viewport_pick(self, actor: Any) -> None:
+        """Select, in the tree, whatever was picked in the viewport.
+
+        Args:
+            actor: The picked actor, as PyVista's mesh-picking callback
+                delivers it (``use_actor=True``).
+        """
+        if self._viewer is None or self._selection_index is None:
+            return
+        category = self._backend.category_of_actor(actor)
+        if category is None:
+            return  # an overlay was hit (highlight, annotation, force flag)
+        label = self._selection_index.label(category, self._picked_cell_id())
+        if label is None:
+            return
+        group_key = self._selection_index.group_key(category)
+        if self._select_entity_in_tree(group_key, label):
+            self.log(f"Selected {label} in the tree from the viewport.")
+
+    def _picked_cell_id(self) -> int:
+        """Cell index of the most recent viewport pick (``-1`` when unknown).
+
+        PyVista's callback carries only the actor, so the index is read from
+        the scene picker that ``enable_mesh_picking`` installs
+        (``plotter.iren.picker``) -- verified against pyvista 0.48.1, see
+        ``docs/dev_notes.md``.
+        """
+        picker = getattr(getattr(self._interactor, "iren", None), "picker", None)
+        try:
+            return int(picker.GetCellId())
+        except Exception:
+            return -1
+
+    def _select_entity_in_tree(self, group_key: str, label: str) -> bool:
+        """Expand *group_key*, select the row for *label* and scroll to it.
+
+        Selecting the row drives the inspector and the viewport highlight
+        through the ordinary tree wiring, so a pick refreshes all three views.
+
+        Args:
+            group_key: Group key, e.g. ``"frame_elements"``.
+            label: The entity's SAP label.
+
+        Returns:
+            ``True`` when the row existed and was selected.
+        """
+        index = self._tree_model.index_for(group_key, label)
+        if index is None:
+            return False
+        self._tree_view.expand(index.parent())
+        self._tree_view.selectionModel().setCurrentIndex(
+            index, QItemSelectionModel.SelectionFlag.ClearAndSelect
+        )
+        self._tree_view.scrollTo(index)
+        return True
 
     # ── Actions ─────────────────────────────────────────────────────
 
@@ -472,6 +550,7 @@ class MainWindow(QMainWindow):
         viewer.show_model(show_nodes=True, color_by_section=color_by_section)
         self._viewer = viewer
         self._model = model
+        self._selection_index = SelectionIndex.from_viewer(viewer)
         self._tree_model.set_model(model)
         self._reset_display_toggles()
         self._interactor.reset_camera()

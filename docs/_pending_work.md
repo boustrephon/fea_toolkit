@@ -242,37 +242,27 @@ implemented, config-gated **off by default** (existing models unchanged):
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 
-#### P23 — GUI Milestone 4 remainder: viewport→tree pick, element labels, macOS application name
+#### P23 — GUI Milestone 4 remainder: element labels, macOS application name
 Source: `docs/gui_roadmap.md` milestone rows 3–4 and design rule 7;
-`docs/dev_notes.md` ("macOS application-menu label", "PySide6 item models").
+`docs/dev_notes.md` ("macOS application-menu label", "PyVista picking contract").
 
-**What.** Milestone 4 landed its tree→viewport half (selection highlight plus
-the node/shell display toggles).  Three pieces remain:
+**What.** ✅ **Milestone 4 landed in both directions** — tree→viewport highlight,
+viewport→tree select-and-scroll (`SelectionIndex` + the scene picker's cell
+index) and the node/shell display toggles.  Two follow-ups remain:
 
-1. **viewport→tree select + scroll** — the *forward* identity map:
-   `cell_id → SAP frame/shell label` (what `enable_mesh_picking`'s callback
-   delivers) and `point_id → SAP node id` (from `enable_point_picking`),
-   rebuilt whenever the geometry is re-batched.  The renderer currently
-   batches **one merged `PolyData` per category**, so the map has to be built
-   from the same element order that mesh used.  Also needs
-   `ModelTreeModel.index_for(label)` so the view can `setCurrentIndex()` and
-   `scrollTo()`.
-2. **element-label display toggle** — `view.show_labels` is still greyed
+1. **element-label display toggle** — `view.show_labels` is still greyed
    because nothing renders node/element labels; it needs a `labels` category
    in `PyVistaRenderer` before the toggle can exist.
-3. **macOS application name** — the Application menu's `About` / `Hide` /
+2. **macOS application name** — the Application menu's `About` / `Hide` /
    `Quit` *items* are retitled at launch through AppKit
    (`app.rename_macos_application_menu`, now a declared macOS dependency), but
    the **bold menu-bar / Dock name stays `Python`**: it comes from the
    framework bundle the interpreter is built into, and survives Qt's names,
    AppKit retitles, `NSProcessInfo.processName` and two flavours of generated
-   `.app` bundle (probes in `docs/dev_notes.md`).  Only a py2app/PyInstaller
-   -style build — a compiled launcher embedding `libpython` — would change it,
-   and a self-contained bundle is ruled out by the OpenSeesPy licence (§5.8).
-   Closed as a documented platform limitation; a self-contained bundle would
-   fix it, and P22 records that route (bundle without OpenSees code, calling a
-   separately-installed OpenSees).  `python -m fea_toolkit.gui` was added as
-   the script-friendly entry point in the meantime.
+   `.app` bundle (probes in `docs/dev_notes.md`).  A self-contained bundle that
+   ships no OpenSees code is the route — recorded as the future option in
+   **P22** — and `python -m fea_toolkit.gui` was added as the script-friendly
+   entry point in the meantime.
 
 #### P6 — Section fiber patches (P6a done — Channel/Angle/DoubleAngle/Tee; P6b deferred)
 Source: repo-root `README.md` §5 "Section Types and Properties" table.

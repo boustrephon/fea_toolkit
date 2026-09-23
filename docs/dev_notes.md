@@ -438,8 +438,45 @@ window is shown, a quiet no-op elsewhere) buys the visible part —
 `About` / `Hide` / `Quit` read *FEA Toolkit* — while the bold menu-bar label,
 the Dock entry and the Cmd-Tab name say `Python`, and will keep saying it.
 
-**Lesson.** Same shape as the PySide6 `internalPointer()` finding below: a
+**Lesson.** Same shape as the PySide6 `internalPointer()` finding above: a
 platform-owned string that *looks* settable through a Qt API which is not on
 the path that actually produces it.  Probe the whole chain before writing the
 fix into a docstring.
+
+## PyVista picking contract (`enable_mesh_picking`) — verified
+
+**Verified 2026-09-23 against pyvista 0.48.1**, by reading the installed source
+(`pyvista/plotting/picking.py`) *and* by picking a real off-screen render
+(`tests/test_picking.py`).  Viewport→tree selection rests on three facts, none
+of which is visible in the method signature:
+
+| Fact | Detail |
+|---|---|
+| The callback receives **one** argument | `enable_mesh_picking` wraps it as `_poked_context_callback(plotter, callback, component._picked_actor)` with `use_actor=True` (`..._picked_mesh` otherwise).  **No cell id is passed.** |
+| The cell index lives on the scene picker | `enable_mesh_picking` does `self._plotter.iren.picker = picker` (a `vtkCellPicker`, tolerance 0.025); read it via `plotter.iren.picker.GetCellId()`. |
+| The picked actor is identity-comparable | `picker.GetActor()` is the object `add_mesh` returned, so `PyVistaRenderer.category_of_actor()` resolves the batch with `is`.  Measured: a member's midpoint gives `cell=0` for the first frame; a joint position resolves to either the member's line cell or the node cloud's vertex cell. |
+
+Consequences:
+
+- `MainWindow._picked_cell_id()` **must** read `iren.picker` — the callback
+  cannot say *which* element was hit.  Both halves are asserted in
+  `tests/test_picking.py`, so a pyvista upgrade that changes either one fails
+  there instead of leaving selection quietly dead.
+- `PickerType` is **not** exported from the `pyvista` namespace (it lives in
+  `pyvista.plotting.opts`), so the GUI relies on the default cell picker rather
+  than naming the enum.
+- Picking binds to the **right** button by default (`left_clicking=False` →
+  observer on `RightButtonPressEvent`; `True` → `LeftButtonPressEvent`), which is
+  why the GUI leaves `left_clicking` alone and keeps left-drag for rotate.
+- Only **one** picker may be enabled at a time — `_validate_picker_not_in_use`
+  raises `PyVistaPickingError` — so nodes are picked by the *same* cell picker
+  (vertex cells) rather than by adding `enable_point_picking`.
+- An embedded `QtInteractor` cannot pick under the `offscreen` Qt platform (no
+  GL context → `iren is None`), so any real-pick test must use a plain
+  `pv.Plotter(off_screen=True)`.
+
+**Roadmap correction.**  Design rule 7 previously said the forward map comes
+from "the value PyVista's `enable_mesh_picking` callback supplies".  There is no
+such value; the map is built from the scene picker plus the actor, and the rule
+now says so.
 

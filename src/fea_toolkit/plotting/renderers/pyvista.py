@@ -189,6 +189,25 @@ class PyVistaRenderer(RenderBackend):
             with contextlib.suppress(Exception):
                 self._plotter.render()
 
+    def category_of_actor(self, actor: Any) -> Optional[str]:
+        """Which render category *actor* belongs to, or ``None``.
+
+        A viewport pick hands back the picked actor; this is the reverse
+        lookup into the batch bookkeeping, so a pick knows whether it hit
+        ``"frames"``, ``"shells"``, ``"nodes"`` (or an overlay).
+
+        Args:
+            actor: An actor previously returned by ``plotter.add_mesh``.
+
+        Returns:
+            The category name, or ``None`` when the actor is unknown.
+        """
+        for category, actors in self._categories.items():
+            for candidate in actors:
+                if candidate is actor:
+                    return category
+        return None
+
     def clear_highlights(self) -> None:
         """Remove the actors drawn by :meth:`render_highlights`."""
         self.clear_category("highlights")

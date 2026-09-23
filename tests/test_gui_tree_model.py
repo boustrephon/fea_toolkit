@@ -66,3 +66,21 @@ def test_setting_none_empties_the_tree(model):
     model.set_model(None)
     assert model.rowCount() == 0
     assert not model.hasChildren()
+
+
+def test_index_for_reaches_into_an_unexpanded_group(model):
+    """A viewport pick must find an entity in a group nobody opened."""
+    from qtpy.QtCore import Qt
+
+    index = model.index_for("frame_elements", "1")
+
+    assert index.isValid()
+    assert model.data(index, Qt.ItemDataRole.UserRole).elem_id == "1"
+    assert model.data(model.parent(index)) == "Frame Elements"
+
+
+def test_index_for_reports_unknown_groups_and_labels(model):
+    """A missing row is ``None``, not an invalid index -- the caller logs it."""
+    assert model.index_for("no_such_group", "1") is None
+    assert model.index_for("frame_elements", "999") is None
+    assert model.index_for("nodes", "2").isValid()
