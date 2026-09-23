@@ -19,8 +19,10 @@ from typing import Optional
 #: macOS labels its Application menu from the *process bundle*, not from Qt:
 #: for a plain interpreter that is the Python framework's ``CFBundleName``
 #: ("Python"), so Qt's own items read "About Python" / "Quit Python".
-#: :func:`rename_macos_application_menu` retitles them through AppKit -- the
-#: only lever short of a ``.app`` bundle.  Probe evidence: ``docs/dev_notes.md``.
+#: :func:`rename_macos_application_menu` retitles those *items* through AppKit
+#: (PyObjC); the bold menu-bar label does **not** follow -- macOS paints it
+#: from the framework bundle, which no runtime call can change.  Probe
+#: evidence, and the attempts that failed: ``docs/dev_notes.md``.
 APP_NAME = "FEA Toolkit"
 
 #: Internal organisation name; only used for ``QSettings`` paths (Milestone 8).
@@ -49,9 +51,10 @@ def rename_macos_application_menu(name: str = APP_NAME) -> bool:
     ``Hide …`` / ``Quit …`` items -- from ``qt_mac_applicationName()``, which
     resolves through the process bundle; a plain interpreter therefore reads
     "About Python" / "Quit Python".  Qt's API cannot change it, so the native
-    ``NSMenu`` items are retitled directly.  The item titles are updated by
-    this call (verified); whether macOS *renders* the retitled bold menu label
-    is AppKit's business.
+    ``NSMenu`` items are retitled directly.  Verified: the item titles change.
+    The *bold* menu label does **not** follow -- macOS paints that from the
+    interpreter's framework bundle, which is out of any caller's reach
+    (``docs/dev_notes.md``).
 
     PyObjC is optional and this is cosmetic: when it is missing, when not on
     macOS, or when no native menu exists yet, the Qt-provided titles stay.

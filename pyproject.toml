@@ -45,6 +45,7 @@ gui = [
     "PySide6>=6.10",      # Qt 6 application shell
     "pyvistaqt>=0.13.1",  # QtInteractor viewport bridge (requires Python >=3.10)
     "qtpy",               # binding-agnostic Qt import layer (PySide6 today)
+    "pyobjc-framework-Cocoa; sys_platform == 'darwin'",  # retitle the macOS Application menu (~2 MB)
     ]
 docs = [
     "mkdocs==1.6.1",

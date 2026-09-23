@@ -130,6 +130,18 @@ def test_window_title_is_the_product_name(window):
     assert window.windowTitle() == "FEA Toolkit"
 
 
+def test_module_entry_point_matches_the_console_script():
+    """``python -m fea_toolkit.gui`` runs the same entry point as ``fea-gui``.
+
+    Importing the module is safe: its ``__main__`` guard only fires under
+    ``-m`` (where ``__name__`` is ``"__main__"``), so no event loop starts.
+    """
+    from fea_toolkit.gui import __main__ as module_entry
+    from fea_toolkit.gui.app import main
+
+    assert module_entry.main is main
+
+
 def test_macos_menu_roles_are_set(window):
     """About / Quit / Preferences carry their macOS Application-menu roles.
 

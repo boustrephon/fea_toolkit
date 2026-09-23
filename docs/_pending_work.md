@@ -260,14 +260,18 @@ the node/shell display toggles).  Three pieces remain:
 2. **element-label display toggle** — `view.show_labels` is still greyed
    because nothing renders node/element labels; it needs a `labels` category
    in `PyVistaRenderer` before the toggle can exist.
-3. **macOS `.app` bundle** — the Application menu's `About` / `Hide` / `Quit`
-   items and the menu title are now retitled at launch through AppKit
-   (`app.rename_macos_application_menu`, optional PyObjC), but the **bold
-   menu-bar label** still derives from the process bundle's `CFBundleName`
-   (`Python`) and may not follow.  A generated bundle
-   (`CFBundleName = FEA Toolkit`, launcher execing
-   `python -m fea_toolkit.gui`) is both the complete fix and the only way to
-   settle whether the retitle alone is enough.  See the dev note for probes.
+3. **macOS application name** — the Application menu's `About` / `Hide` /
+   `Quit` *items* are retitled at launch through AppKit
+   (`app.rename_macos_application_menu`, now a declared macOS dependency), but
+   the **bold menu-bar / Dock name stays `Python`**: it comes from the
+   framework bundle the interpreter is built into, and survives Qt's names,
+   AppKit retitles, `NSProcessInfo.processName` and two flavours of generated
+   `.app` bundle (probes in `docs/dev_notes.md`).  Only a py2app/PyInstaller
+   -style build — a compiled launcher embedding `libpython` — would change it,
+   and a self-contained bundle is ruled out by the OpenSeesPy licence (§5.8).
+   Closed as a documented platform limitation unless the user wants that build
+   tooling; `python -m fea_toolkit.gui` was added as the script-friendly entry
+   point in the meantime.
 
 #### P6 — Section fiber patches (P6a done — Channel/Angle/DoubleAngle/Tee; P6b deferred)
 Source: repo-root `README.md` §5 "Section Types and Properties" table.

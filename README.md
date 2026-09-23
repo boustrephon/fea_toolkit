@@ -1064,7 +1064,7 @@ pip install -e ".[report]"       # add [mesh-remesh] for Gmsh remeshing
 |---|---|---|
 | `[report]` | pandas / imageio / tabulate -- report tables and figures | >= 3.9 |
 | `[mesh-remesh]` | gmsh -- constrained quadrilateral remeshing | >= 3.9 |
-| `[gui]` | PySide6 + pyvistaqt + qtpy -- the desktop GUI | **>= 3.10** |
+| `[gui]` | PySide6 + pyvistaqt + qtpy -- the desktop GUI (plus pyobjc on macOS, for the Application-menu item titles) | **>= 3.10** |
 | `[docs]` | the mkdocs toolchain | >= 3.9 |
 
 #### Desktop GUI (optional)
@@ -1079,12 +1079,18 @@ fea-gui path/to/model.s2k  # or open a SAP2000 model
 ```
 
 * The window is titled **FEA Toolkit** (`gui/app.py` → `APP_NAME`, applied
-  through `configure_application()` before the `QApplication` exists).  On
+  through `configure_application()` before the `QApplication` exists), and on
   macOS the Application menu's **`About` / `Hide` / `Quit` items are retitled
   away from Qt's bundle-derived `… Python` names at launch** — AppKit through
-  optional PyObjC, cosmetic, a quiet no-op elsewhere.  Whether macOS also
-  repaints the *bold* menu-bar label is up to AppKit; a generated `.app`
-  bundle remains the complete fix.  Probe by probe:
+  `pyobjc-framework-Cocoa`, which the `[gui]` extra installs on macOS (cosmetic,
+  a quiet no-op elsewhere).
+* The **bold menu-bar / Dock name stays `Python`** and cannot be changed.
+  macOS paints it from the interpreter's framework bundle, not from Qt:
+  verified against Qt's names, AppKit retitles, `NSProcessInfo.processName`,
+  and a generated `.app` bundle both with a script launcher *and* with the
+  interpreter inside it.  Only a py2app/PyInstaller-style build (compiled
+  launcher embedding `libpython`) changes that — and a self-contained bundle is
+  ruled out by the OpenSeesPy licence anyway.  Probes:
   [`docs/dev_notes.md`](docs/dev_notes.md).
 * **Requires Python 3.10 or newer.**  `pyvistaqt` (the Qt viewport bridge)
   declares `requires-python >= 3.10`.  The **core toolkit stays on Python 3.9**

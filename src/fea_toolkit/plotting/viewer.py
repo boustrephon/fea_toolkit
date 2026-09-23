@@ -108,8 +108,9 @@ def _end_force_values(entry: dict, quantity: str, use_local: bool) -> Optional[t
 #: Element highlights are drawn as tubes whose radius is a fraction of the
 #: geometry's bounding-box diagonal (floored, so tiny models still show one).
 #: A single fraction then works for a metre-scale building and a
-#: millimetre-scale detail alike.
-_HIGHLIGHT_RADIUS_FRACTION = 0.015
+#: millimetre-scale detail alike.  Tuned by eye: 1.5 % read as an oversized
+#: sleeve, so the default is now 0.75 %.
+_HIGHLIGHT_RADIUS_FRACTION = 0.0075
 _HIGHLIGHT_RADIUS_MIN = 0.01
 
 
