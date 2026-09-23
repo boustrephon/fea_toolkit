@@ -41,6 +41,7 @@ this codebase.  For a full reference, see [docs/llm_guide.md](docs/llm_guide.md)
 
 ```python
 from fea_toolkit import SAP2000Parser, preprocess_model, AnalysisBuilder
+
 md = SAP2000Parser("model.s2k").parse().get_model_data()
 mesh = preprocess_model(md, {"element_type": "elasticBeamColumn"})
 builder = AnalysisBuilder(mesh, {}).build_domain()
@@ -442,8 +443,7 @@ constraints = {}
 for fid, fe in model.frame_elements.items():
     for aid, ae in model.area_elements.items():
         if fe.node_i in ae.node_ids and fe.node_j in ae.node_ids:
-            remesh.constrain_line(aid, fid, fe.node_i, fe.node_j,
-                                  model.nodes, constraints)
+            remesh.constrain_line(aid, fid, fe.node_i, fe.node_j, model.nodes, constraints)
 
 # Remesh via Gmsh (replaces built-in structured subdivision)
 areas, assign, nodes, ntag = remesh.remesh_areas(...)
@@ -690,8 +690,8 @@ get converted to equivalent frame edge loads during model building.
 from fea_toolkit.model.selection import Selection
 
 sel = Selection(
-    element_types=['Area'],
-    sections=['Slab 200mm', 'Roof 150mm'],
+    element_types=["Area"],
+    sections=["Slab 200mm", "Roof 150mm"],
 )
 builder.build(selection=sel)
 ```
