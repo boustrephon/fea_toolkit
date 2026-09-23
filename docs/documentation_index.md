@@ -261,6 +261,11 @@ for automated cross-referencing.
   Tags: `pushover`, `results`, `storage`, `visualization`, `npz`, `planning`
   Related: [Unified Results Schema](results_schema.md) · [Pushover (Non-linear Static) Analysis](pushover_analysis.md) · [Visualisation Toolkit](viewer.md)
 
+- [Versioning & Release Plan](versioning.md) — ✅ Complete
+  > How fea_toolkit is versioned (setuptools-scm, tag-driven), what major/minor/patch mean for this project, and the planned release path through the GUI work and toward 1.0.
+  Tags: `versioning`, `release`, `semver`, `planning`, `packaging`
+  Related: [Desktop GUI Roadmap](gui_roadmap.md) · [_pending_work.md](_pending_work.md) · [Development Notes](dev_notes.md)
+
 
 ## 📜 Licence & Legal
 
@@ -419,11 +424,12 @@ Tags across all documentation files:
 - **`openseespy`** — [licence.md](licence.md), [openseespy_local_build.md](openseespy_local_build.md)
 - **`openseesrt`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`orchestration`** — [analysis.md](analysis.md)
+- **`packaging`** — [versioning.md](versioning.md)
 - **`parser`** — [json_serialization.md](json_serialization.md), [parser_coverage.md](parser_coverage.md)
 - **`partial-fixity`** — [member_releases.md](member_releases.md)
 - **`phase-b`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`pipeline`** — [workflow.md](workflow.md)
-- **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [force_diagram_unification.md](force_diagram_unification.md), [gui_roadmap.md](gui_roadmap.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
+- **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [force_diagram_unification.md](force_diagram_unification.md), [gui_roadmap.md](gui_roadmap.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [versioning.md](versioning.md)
 - **`plotting`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`post-processing`** — [storey_response.md](storey_response.md)
 - **`preprocessor`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
@@ -436,6 +442,7 @@ Tags across all documentation files:
 - **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`refactor`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`reference`** — [builder_reference.md](builder_reference.md), [mander_confinement_validation.md](mander_confinement_validation.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
+- **`release`** — [versioning.md](versioning.md)
 - **`releases`** — [member_releases.md](member_releases.md)
 - **`reporter`** — [shear_failure_modelling.md](shear_failure_modelling.md)
 - **`reporting`** — [report_generation.md](report_generation.md)
@@ -454,6 +461,7 @@ Tags across all documentation files:
 - **`scripting`** — [tcl_export.md](tcl_export.md)
 - **`sections`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
 - **`self-weight`** — [model_review.md](model_review.md)
+- **`semver`** — [versioning.md](versioning.md)
 - **`serialisation`** — [model_stage_file.md](model_stage_file.md)
 - **`serialization`** — [json_serialization.md](json_serialization.md)
 - **`sfi-mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
@@ -477,6 +485,7 @@ Tags across all documentation files:
 - **`usage`** — [llm_guide.md](llm_guide.md)
 - **`userstrings`** — [rhino_attributes.md](rhino_attributes.md)
 - **`validation`** — [mander_confinement_validation.md](mander_confinement_validation.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
+- **`versioning`** — [versioning.md](versioning.md)
 - **`viewer`** — [viewer.md](viewer.md)
 - **`visualisation`** — [rhino_export.md](rhino_export.md), [viewer.md](viewer.md)
 - **`visualization`** — [pushover_results_storage_viz.md](pushover_results_storage_viz.md)

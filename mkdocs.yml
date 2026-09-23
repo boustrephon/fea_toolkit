@@ -141,6 +141,7 @@ nav:
       - Deprecation Plan: deprecation_plan.md
       - Development Notes: dev_notes.md
       - Desktop GUI Roadmap: gui_roadmap.md
+      - Versioning & Release Plan: versioning.md
   - API Reference:
       - model: api/model.md
       - io: api/io.md
