@@ -130,12 +130,38 @@ def test_window_title_is_the_product_name(window):
     assert window.windowTitle() == "FEA Toolkit"
 
 
+def test_macos_menu_roles_are_set(window):
+    """About / Quit / Preferences carry their macOS Application-menu roles.
+
+    Qt's own Application-menu items are labelled from the process bundle and
+    read "About Python" / "Quit Python"; a role-carrying action lets Qt place
+    and label ours instead (the role is inert off macOS).
+    """
+    from qtpy.QtGui import QAction
+
+    roles = QAction.MenuRole
+    assert window._actions["help.about"].menuRole() == roles.AboutRole
+    assert window._actions["file.quit"].menuRole() == roles.QuitRole
+    assert window._actions["edit.preferences"].menuRole() == roles.PreferencesRole
+
+
+def test_macos_menu_renaming_never_raises(qapp):
+    """The AppKit retitle is cosmetic: it reports a result and never raises.
+
+    Under the offscreen test platform there is no native menu, and off macOS
+    there is no AppKit -- both must be quiet no-ops.
+    """
+    from fea_toolkit.gui.app import rename_macos_application_menu
+
+    assert rename_macos_application_menu("FEA Toolkit") in (True, False)
+
+
 def test_configure_application_sets_the_qt_identity(qapp):
     """Qt's application / display / organisation names are set from constants.
 
-    The macOS application **menu** label is deliberately not asserted: it comes
-    from the process bundle, not from Qt, so only launching from a ``.app``
-    bundle changes it -- see ``docs/dev_notes.md``.
+    The native macOS Application-menu titles are not asserted here: they are
+    derived from the process bundle and retitled through AppKit at launch,
+    which needs a real Cocoa session -- see ``docs/dev_notes.md``.
     """
     from qtpy.QtCore import QCoreApplication
     from qtpy.QtGui import QGuiApplication

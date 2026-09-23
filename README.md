@@ -1078,11 +1078,13 @@ fea-gui                    # launch with a built-in demo frame
 fea-gui path/to/model.s2k  # or open a SAP2000 model
 ```
 
-* The window is titled **FEA Toolkit** (`gui/app.py` → `APP_NAME`; set through
-  `configure_application()` before the `QApplication` exists).  On macOS the
-  **menu-bar** label nonetheless reads `Python`: it comes from the process's
-  bundle (`CFBundleName`), which no runtime Qt or Python call can change — a
-  generated `.app` bundle is the only fix.  Verified, see
+* The window is titled **FEA Toolkit** (`gui/app.py` → `APP_NAME`, applied
+  through `configure_application()` before the `QApplication` exists).  On
+  macOS the Application menu's **`About` / `Hide` / `Quit` items are retitled
+  away from Qt's bundle-derived `… Python` names at launch** — AppKit through
+  optional PyObjC, cosmetic, a quiet no-op elsewhere.  Whether macOS also
+  repaints the *bold* menu-bar label is up to AppKit; a generated `.app`
+  bundle remains the complete fix.  Probe by probe:
   [`docs/dev_notes.md`](docs/dev_notes.md).
 * **Requires Python 3.10 or newer.**  `pyvistaqt` (the Qt viewport bridge)
   declares `requires-python >= 3.10`.  The **core toolkit stays on Python 3.9**

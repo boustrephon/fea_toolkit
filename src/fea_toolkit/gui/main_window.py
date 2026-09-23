@@ -166,12 +166,21 @@ class MainWindow(QMainWindow):
         a["help.docs"] = self._real_action("Documentation", self._on_docs)
         a["help.about"] = self._real_action(f"About {APP_NAME}", self._on_about)
 
+        # ── macOS application-menu roles ──
+        # On macOS Qt places a role-carrying action in the Application menu and
+        # labels the item from the action text; elsewhere the role is inert.
+        # Qt's own items would read "About Python" / "Quit Python" -- the
+        # process bundle names them (docs/dev_notes.md).
+        a["file.quit"].setMenuRole(QAction.MenuRole.QuitRole)
+        a["help.about"].setMenuRole(QAction.MenuRole.AboutRole)
+
         # ── Greyed placeholders (each names its milestone) ──
         a["file.save_results"] = self._placeholder("Save results", "Milestone 7")
         a["file.export_tcl"] = self._placeholder("Export Tcl", "Milestone 7")
         a["file.export_image"] = self._placeholder("Export screenshot", "Milestone 7")
         a["edit.copy"] = self._placeholder("Copy", "Milestone 3")
         a["edit.preferences"] = self._placeholder("Preferences", "Milestone 8")
+        a["edit.preferences"].setMenuRole(QAction.MenuRole.PreferencesRole)
         a["view.show_nodes"] = self._toggle_action(
             "Show nodes", self._on_show_nodes, tip="Show or hide node markers"
         )

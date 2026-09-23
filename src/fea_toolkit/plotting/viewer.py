@@ -105,6 +105,14 @@ def _end_force_values(entry: dict, quantity: str, use_local: bool) -> Optional[t
     return None
 
 
+#: Element highlights are drawn as tubes whose radius is a fraction of the
+#: geometry's bounding-box diagonal (floored, so tiny models still show one).
+#: A single fraction then works for a metre-scale building and a
+#: millimetre-scale detail alike.
+_HIGHLIGHT_RADIUS_FRACTION = 0.015
+_HIGHLIGHT_RADIUS_MIN = 0.01
+
+
 class ModelViewer:
     """Backend-agnostic 3D viewer for structural models and results.
 
@@ -164,6 +172,7 @@ class ModelViewer:
         self._nodes: list[NodeGeom] = []
         self._section_colors: dict[str, tuple[float, float, float]] = {}
         self._geom_extracted = False
+        self._model_diag: Optional[float] = None
 
     # ── Geometry extraction ──────────────────────────────────────────
 
@@ -445,6 +454,37 @@ class ModelViewer:
 
     # ── Highlighting ─────────────────────────────────────────────────
 
+    def _model_diagonal(self) -> float:
+        """Bounding-box diagonal of the extracted geometry (``0.0`` when empty).
+
+        Cached: the geometry only changes when a new model is displayed.
+        """
+        if self._model_diag is None:
+            self._extract_geometry()
+            pts: list = [f.start for f in self._frames] + [f.end for f in self._frames]
+            pts += [n.position for n in self._nodes]
+            for shell in self._shells:
+                pts.extend(shell.vertices)
+            if not pts:
+                self._model_diag = 0.0
+            else:
+                spread = np.ptp(np.asarray(pts, dtype=float), axis=0)
+                self._model_diag = float(np.linalg.norm(spread))
+        return self._model_diag
+
+    def highlight_radius(self) -> float:
+        """Tube radius used for element highlights on this model.
+
+        A fixed radius cannot suit every unit system -- ``0.03`` is a hairline
+        on a metre-scale building and a fat tube on a millimetre-scale detail --
+        so the default scales with the geometry.
+
+        Returns:
+            ``_HIGHLIGHT_RADIUS_FRACTION`` of the model's bounding-box diagonal,
+            floored at ``_HIGHLIGHT_RADIUS_MIN``.
+        """
+        return max(_HIGHLIGHT_RADIUS_FRACTION * self._model_diagonal(), _HIGHLIGHT_RADIUS_MIN)
+
     def highlight_elements(
         self,
         frame_ids: Optional[list[str]] = None,
@@ -460,13 +500,16 @@ class ModelViewer:
             area_ids: Area element IDs to highlight.
             color: Highlight colour (RGB 0..1).
             label: Optional text label near the highlighted group.
-            radius: Tube radius for frame highlights.
+            radius: Tube radius for frame highlights.  Defaults to
+                :meth:`highlight_radius` -- a model-scaled width.
 
         Returns:
             ``self`` for chaining.
         """
         self._extract_geometry()
 
+        if radius is None:
+            radius = self.highlight_radius()
         id_set = set(frame_ids or [])
         matched_frames = [f for f in self._frames if f.elem_id in id_set]
         matched_shells = [s for s in self._shells if s.area_id in (area_ids or [])]

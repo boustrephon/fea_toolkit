@@ -5,22 +5,22 @@ Usage::
     fea-gui                    # opens a small built-in demo frame
     fea-gui path/to/model.s2k  # opens a SAP2000 model file
 
-Milestone 1 scope is launch-and-render: the window embeds a PyVista viewport
-and shows geometry.  Menus, docks, trees, selection sync and analysis actions
-arrive in later milestones -- see ``docs/gui_roadmap.md`` section 9.6.
+Milestone 1 scope was launch-and-render: the window embeds a PyVista viewport
+and shows geometry.  The window itself (chrome, lazy Model Tree, inspector,
+selection sync) now lives in :mod:`fea_toolkit.gui.main_window`; this module
+owns the ``QApplication`` bootstrap and the application's identity, including
+the macOS Application-menu naming workaround.  Milestone plan:
+``docs/gui_roadmap.md`` section 9.6.
 """
 
 import sys
 from typing import Optional
 
-#: User-visible application name -- window title, About box and Qt's own
-#: naming (window titles, ``QSettings`` paths).
-#:
-#: It deliberately does **not** reach the macOS application menu, whose bold
-#: label comes from the process's bundle (``CFBundleName`` -> the Python
-#: framework, hence ``Python``); no runtime Qt or Python call changes it.
-#: Only launching from a ``.app`` bundle does -- verified on macOS 15 /
-#: PySide6 6.11, written up in ``docs/dev_notes.md``.
+#: macOS labels its Application menu from the *process bundle*, not from Qt:
+#: for a plain interpreter that is the Python framework's ``CFBundleName``
+#: ("Python"), so Qt's own items read "About Python" / "Quit Python".
+#: :func:`rename_macos_application_menu` retitles them through AppKit -- the
+#: only lever short of a ``.app`` bundle.  Probe evidence: ``docs/dev_notes.md``.
 APP_NAME = "FEA Toolkit"
 
 #: Internal organisation name; only used for ``QSettings`` paths (Milestone 8).
@@ -40,6 +40,55 @@ def configure_application() -> None:
     QCoreApplication.setApplicationName(APP_NAME)
     QCoreApplication.setOrganizationName(ORG_NAME)
     QGuiApplication.setApplicationDisplayName(APP_NAME)
+
+
+def rename_macos_application_menu(name: str = APP_NAME) -> bool:
+    """Retitle the macOS Application menu for *name* (best effort).
+
+    Qt titles the Application menu -- its bold label and its ``About …`` /
+    ``Hide …`` / ``Quit …`` items -- from ``qt_mac_applicationName()``, which
+    resolves through the process bundle; a plain interpreter therefore reads
+    "About Python" / "Quit Python".  Qt's API cannot change it, so the native
+    ``NSMenu`` items are retitled directly.  The item titles are updated by
+    this call (verified); whether macOS *renders* the retitled bold menu label
+    is AppKit's business.
+
+    PyObjC is optional and this is cosmetic: when it is missing, when not on
+    macOS, or when no native menu exists yet, the Qt-provided titles stay.
+
+    Args:
+        name: Title to apply.
+
+    Returns:
+        ``True`` if the Application menu was found and retitled, else ``False``.
+    """
+    if sys.platform != "darwin":
+        return False
+    try:
+        from AppKit import NSApp
+
+        menu = NSApp.mainMenu() if NSApp is not None else None
+    except Exception:
+        return False  # PyObjC absent -- Qt's own titles remain
+    if menu is None or menu.numberOfItems() == 0:
+        return False
+
+    app_item = menu.itemAtIndex_(0)
+    submenu = app_item.submenu()
+    if submenu is None:
+        return False
+
+    # The interpreter's own name (e.g. "Python") is what Qt stamped on the
+    # items; it is also the submenu's current title, so read it before renaming.
+    previous = submenu.title() or ""
+    app_item.setTitle_(name)
+    submenu.setTitle_(name)
+    if previous:
+        for item in submenu.itemArray():
+            title = item.title()
+            if title and previous in title:
+                item.setTitle_(title.replace(previous, name))
+    return True
 
 
 def _demo_model():
@@ -144,6 +193,10 @@ def main(argv: Optional[list] = None) -> int:
     window = MainWindow(model=model)
     window.resize(1200, 800)
     window.show()
+    # Cosmetic and macOS-only: Qt labels the Application menu from the process
+    # bundle ("About Python" / "Quit Python"), so retitle it once the native
+    # menu exists.  A quiet no-op everywhere else.
+    rename_macos_application_menu()
     return app.exec()
 
 

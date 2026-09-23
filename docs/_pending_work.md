@@ -260,11 +260,14 @@ the node/shell display toggles).  Three pieces remain:
 2. **element-label display toggle** — `view.show_labels` is still greyed
    because nothing renders node/element labels; it needs a `labels` category
    in `PyVistaRenderer` before the toggle can exist.
-3. **macOS `.app` bundle** — the application-menu label is the process
-   bundle's `CFBundleName` (hence `Python`) and is not settable at runtime;
-   a generated bundle (`CFBundleName = FEA Toolkit`, launcher execing
-   `python -m fea_toolkit.gui`) is the only fix.  See the dev note for the
-   probe evidence.
+3. **macOS `.app` bundle** — the Application menu's `About` / `Hide` / `Quit`
+   items and the menu title are now retitled at launch through AppKit
+   (`app.rename_macos_application_menu`, optional PyObjC), but the **bold
+   menu-bar label** still derives from the process bundle's `CFBundleName`
+   (`Python`) and may not follow.  A generated bundle
+   (`CFBundleName = FEA Toolkit`, launcher execing
+   `python -m fea_toolkit.gui`) is both the complete fix and the only way to
+   settle whether the retitle alone is enough.  See the dev note for probes.
 
 #### P6 — Section fiber patches (P6a done — Channel/Angle/DoubleAngle/Tee; P6b deferred)
 Source: repo-root `README.md` §5 "Section Types and Properties" table.

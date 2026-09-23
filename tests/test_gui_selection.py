@@ -114,6 +114,28 @@ def test_node_display_toggle_hides_and_shows_the_markers(window):
     assert node_actor.GetVisibility()
 
 
+def test_highlight_radius_scales_with_the_model(window):
+    """The highlight tube is sized from the geometry, not a fixed 0.03.
+
+    A fixed radius is a hairline on a metre-scale model -- which is what made
+    the first selection highlight hard to see.
+    """
+    viewer = window._viewer
+    diagonal = viewer._model_diagonal()
+    assert diagonal > 0.0
+    assert viewer.highlight_radius() == pytest.approx(0.015 * diagonal)
+    assert viewer.highlight_radius() > 0.03
+
+
+def test_highlight_radius_has_a_floor_for_degenerate_models(window):
+    """Empty or point-like geometry must not collapse the tube to nothing."""
+    from fea_toolkit.plotting.viewer import _HIGHLIGHT_RADIUS_MIN
+
+    viewer = window._viewer
+    viewer._model_diag = 0.0  # what an empty / point-like model caches
+    assert viewer.highlight_radius() == _HIGHLIGHT_RADIUS_MIN
+
+
 def test_displaying_a_second_model_replaces_the_scene(window):
     """Opening another model must not leave the first one's geometry behind."""
     from examples.sample_model import make_sample_model

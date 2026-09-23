@@ -337,7 +337,7 @@ class PyVistaRenderer(RenderBackend):
                 actor = p.add_mesh(
                     tube,
                     color=h.color,
-                    opacity=0.85,
+                    opacity=1.0,  # a selection cue must read over any section colour
                     show_scalar_bar=False,
                 )
                 self._add_actor(actor, "highlights")

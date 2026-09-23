@@ -389,7 +389,7 @@ were each probed in a fresh process (window + `QMainWindow.menuBar()` shown,
 then `NSApp.mainMenu()` read back).
 
 `fea-gui`'s bold application menu showed **“Python”**.  Nothing reachable from
-Qt or Python changes it:
+**Qt** changes it (AppKit, driven directly, does — see the update below):
 
 | Probe | Result |
 |---|---|
@@ -406,13 +406,29 @@ helper resolves through the **process bundle** — here the Python framework's
 `CFBundleName` — which no runtime call can change.
 
 **Consequence.** `fea_toolkit.gui.app.APP_NAME` (`"FEA Toolkit"`) drives the
-window title, the About box and Qt's own naming — everything we control, set
-by `configure_application()` *before* `QApplication` exists.  The menu-bar
-label needs a **`.app` bundle** with `CFBundleName = FEA Toolkit` and a
-launcher that execs the interpreter (`Contents/MacOS/FEA-Toolkit` →
-`exec <python> -m fea_toolkit.gui`).  Not shipped yet — it is a recorded
-follow-up.  (The Cmd-Tab / Dock name is expected to follow the same bundle
-name; that was **not** separately verified.)
+window title, the About box and Qt's own naming — everything Qt controls, set
+by `configure_application()` *before* `QApplication` exists.
+
+**Update — the native items *can* be retitled; the bold label is AppKit's
+call.**  A second probe (and then the real `MainWindow`) drove AppKit directly:
+
+| Action | Result |
+|---|---|
+| `NSMenuItem.setTitle_(…)` on the Application-menu item and its submenu | persists — `'Python'` → `'FEA Toolkit'` |
+| the same on every item still containing the old name | `About Python` → `About FEA Toolkit`, `Hide Python` → `Hide FEA Toolkit`, `Quit Python` → `Quit FEA Toolkit` |
+| `QAction.setMenuRole(AboutRole / QuitRole)` on the menubar, window shown | **no merge in a non-frontmost process** — the Application menu kept Qt's items and the File/Help menus kept ours |
+| `NSBundle.mainBundle()` | `CFBundleName = Python`, bundle `…/Python.framework/Versions/3.12/Resources/Python.app` |
+
+So `fea_toolkit.gui.app.rename_macos_application_menu()` — called from `main()`
+once the window is shown, PyObjC optional, cosmetic, a quiet no-op elsewhere —
+fixes the menu *title* and every `About` / `Hide` / `Quit` item, and
+`MainWindow` gives About / Quit / Preferences their Qt menu roles as well.
+Whether macOS **repaints the bold menu-bar label** from the retitled submenu is
+unverified (it may keep painting the bundle name), which is why a `.app`
+bundle with `CFBundleName = FEA Toolkit` — launcher execing
+`python -m fea_toolkit.gui` — remains the complete fix.  (The Cmd-Tab / Dock
+name is expected to follow the same bundle name; that is **not** separately
+verified either.)
 
 **Lesson.** Same shape as the PySide6 `internalPointer()` finding below: a
 platform-owned string that *looks* settable through a Qt API which is not on
