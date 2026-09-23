@@ -71,6 +71,18 @@ def test_real_actions_enabled_placeholders_disabled(window):
     assert "Milestone 5" in run.toolTip()
 
 
+def test_show_is_graceful_without_an_interactive_viewport(window):
+    """Showing the window never raises, even when the viewport is off-screen.
+
+    ``enable_terrain_style`` and ``track_mouse_position`` are best-effort
+    extras that require a live interactor; this asserts the window still
+    opens and stays visible when they are unavailable.
+    """
+    window.show()
+    assert window.isVisible()
+    window.hide()
+
+
 def test_camera_actions_change_the_view(window):
     """A camera action reorients the embedded viewport."""
     before = window._interactor.camera_position

@@ -55,7 +55,7 @@ class MainWindow(QMainWindow):
         self._interactor: Any = None
         self._backend: Any = None
         self._cursor_timer: Optional[QTimer] = None
-        self._cursor_tracking = False
+        self._interaction_enabled = False
         self._actions: dict = {}
 
         self._create_viewport()
@@ -327,10 +327,12 @@ class MainWindow(QMainWindow):
         """Add the orientation (view) cube and prepare the cursor readout.
 
         PyVista's ``add_camera_orientation_widget`` provides the interactive
-        view cube.  The cursor readout needs an *interactive* viewport, so its
-        timer is created here but started from :meth:`showEvent`: pyvista's
-        ``track_mouse_position`` raises ``RuntimeError`` on a non-interactive
-        (offscreen / never-shown) plotter.
+        view cube.  The *interaction* extras -- ``enable_terrain_style`` (which
+        keeps the model's Z axis vertical while orbiting) and
+        ``track_mouse_position`` (which feeds the status-bar coordinates) --
+        both need a live interactor, so they are installed from
+        :meth:`showEvent`: pyvista raises ``RuntimeError`` for an off-screen or
+        never-shown plotter.
         """
         self._interactor.add_camera_orientation_widget()
         self._cursor_timer = QTimer(self)
@@ -338,17 +340,26 @@ class MainWindow(QMainWindow):
         self._cursor_timer.timeout.connect(self._update_cursor_position)
 
     def showEvent(self, event):
-        """Enable the live cursor readout once the viewport is interactive."""
+        """Install the interactive extras once the viewport is live.
+
+        ``enable_terrain_style`` keeps the viewport's Z axis vertical (terrain
+        interaction); ``track_mouse_position`` feeds the status-bar cursor
+        coordinates.  Both require an interactive viewport, so they are
+        best-effort: an off-screen or never-shown plotter logs a warning and
+        the window still opens (off-screen rendering is a legitimate use).
+        """
         super().showEvent(event)
-        if self._cursor_tracking:
+        if self._interaction_enabled:
             return
-        self._cursor_tracking = True
+        self._interaction_enabled = True
         try:
+            self._interactor.enable_terrain_style()
             self._interactor.track_mouse_position()
         except RuntimeError:
-            # Offscreen viewports are not interactive, so pyvista refuses to
-            # install the mouse observer.  The readout is cosmetic -- log it.
-            self.log("Cursor readout unavailable (non-interactive viewport).", "warn")
+            self.log(
+                "Interactive view controls unavailable (non-interactive viewport).",
+                "warn",
+            )
             return
         self._cursor_timer.start()
 
