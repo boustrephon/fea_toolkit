@@ -437,6 +437,26 @@ class TestSumStoreyForces:
         assert res[0]["n_crossing"] == 0  # the lower end, not an interior cut
         assert res[1]["Fx"] == pytest.approx(0.0)  # roof: no storey above
 
+    def test_cut_mode_upper_node_clustered_into_level_is_not_an_interior_cut(self):
+        """A level inside the band of the member's upper end is the roof.
+
+        The column runs z=0 -> 3 (node 2 is its upper end) while node 3 sits at
+        z=2.7; ``z_tolerance=0.5`` clusters 2.7 with 3.0 into one level at
+        z=2.85, which lies inside the clustering band of the member's **upper**
+        end.  That level is therefore the end (the roof — no storey above it),
+        not an interior crossing, mirroring the lower-end band.
+        """
+        nodes = {1: (0.0, 0.0, 0.0), 2: (0.0, 0.0, 3.0), 3: (0.0, 0.0, 2.7)}
+        members = [self._column(1, 2, 10.0)]
+        res = sum_storey_forces(nodes, members, z_tolerance=0.5)
+        assert [r["elevation"] for r in res] == pytest.approx([0.0, 2.85])
+        assert res[0]["Fx"] == pytest.approx(-10.0)  # base: the lower end
+        assert res[0]["n_crossing"] == 0
+        # Roof: the clustered upper end, not an interior cut.
+        assert res[1]["Fx"] == pytest.approx(0.0)
+        assert res[1]["n_ends"] == 0
+        assert res[1]["n_crossing"] == 0
+
     def test_end_mode_base_reads_the_reaction(self):
         """The base shows the full reaction — the load *leaving*, not arriving.
 

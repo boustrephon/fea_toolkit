@@ -1123,7 +1123,7 @@ def sum_storey_forces(
         t_band = max(band / span, t_tol)
         for level in acc:
             t = (level["elevation"] - p_lo[2]) / span
-            if t < -t_band or t >= 1.0 - t_tol:
+            if t < -t_band or t >= 1.0 - t_band:
                 continue
             if t <= t_band:
                 _credit(level, p_lo, f_lo, False)
