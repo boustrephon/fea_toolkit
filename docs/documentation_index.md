@@ -247,6 +247,11 @@ for automated cross-referencing.
   > Detailed design for unifying the four force-diagram plotting entry points into one unit-aware API.
   Tags: `planning`, `refactor`, `plotting`, `phase-b`
 
+- [Desktop GUI Roadmap](gui_roadmap.md) — 🚧 Draft
+  > Framework decision and architecture for a Qt/PySide6 desktop application wrapping the import → view → query → analyse → results workflow.
+  Tags: `gui`, `qt`, `pyside6`, `pyvistaqt`, `architecture`, `planning`, `roadmap`
+  Related: [Visualisation Toolkit](viewer.md) · [Analysis Workflow](workflow.md) · [Unified Results Schema](results_schema.md) · [Rhino 3-D Export](rhino_export.md) · [Report Generation — Design Proposal](report_generation.md)
+
 - [Linting Fix Plan](linting_fix_plan.md) — 🚧 Draft
   > Pyright error baseline and phased fix strategy for src/fea_toolkit (reference for cleanup work).
   Tags: `planning`, `linting`, `pyright`, `cleanup`
@@ -309,7 +314,7 @@ Tags across all documentation files:
 - **`analysis-builder`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`analysis-type`** — [modal_analysis.md](modal_analysis.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md), [pushover_analysis.md](pushover_analysis.md), [storey_response.md](storey_response.md)
 - **`api-reference`** — [llm_guide.md](llm_guide.md)
-- **`architecture`** — [analysis.md](analysis.md), [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md)
+- **`architecture`** — [analysis.md](analysis.md), [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [builder_reference.md](builder_reference.md), [dev_notes.md](dev_notes.md), [gui_roadmap.md](gui_roadmap.md), [layered_analysis_workflow.md](layered_analysis_workflow.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md), [workflow.md](workflow.md)
 - **`area-elements`** — [shell_support.md](shell_support.md)
 - **`asce41`** — [capacity.md](capacity.md)
 - **`attributes`** — [rhino_attributes.md](rhino_attributes.md)
@@ -374,6 +379,7 @@ Tags across all documentation files:
 - **`gpl`** — [licence.md](licence.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`ground-motion`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
+- **`gui`** — [gui_roadmap.md](gui_roadmap.md)
 - **`guide`** — [llm_guide.md](llm_guide.md)
 - **`hdf5`** — [model_stage_file.md](model_stage_file.md), [report_generation.md](report_generation.md)
 - **`hinges`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md)
@@ -417,13 +423,16 @@ Tags across all documentation files:
 - **`partial-fixity`** — [member_releases.md](member_releases.md)
 - **`phase-b`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`pipeline`** — [workflow.md](workflow.md)
-- **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [force_diagram_unification.md](force_diagram_unification.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
+- **`planning`** — [analysis_builder_migration_plan.md](analysis_builder_migration_plan.md), [csm_test_model_plan.md](csm_test_model_plan.md), [deprecation_plan.md](deprecation_plan.md), [force_diagram_unification.md](force_diagram_unification.md), [gui_roadmap.md](gui_roadmap.md), [linting_fix_plan.md](linting_fix_plan.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md)
 - **`plotting`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`post-processing`** — [storey_response.md](storey_response.md)
 - **`preprocessor`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [pushover_analysis.md](pushover_analysis.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`pyright`** — [linting_fix_plan.md](linting_fix_plan.md)
+- **`pyside6`** — [gui_roadmap.md](gui_roadmap.md)
 - **`pyvista`** — [viewer.md](viewer.md)
+- **`pyvistaqt`** — [gui_roadmap.md](gui_roadmap.md)
+- **`qt`** — [gui_roadmap.md](gui_roadmap.md)
 - **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`refactor`** — [force_diagram_unification.md](force_diagram_unification.md)
 - **`reference`** — [builder_reference.md](builder_reference.md), [mander_confinement_validation.md](mander_confinement_validation.md), [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
@@ -436,6 +445,7 @@ Tags across all documentation files:
 - **`rhino`** — [model_stage_file.md](model_stage_file.md), [rhino_attributes.md](rhino_attributes.md), [rhino_export.md](rhino_export.md)
 - **`rigid-end-offset`** — [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`rigidDiaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
+- **`roadmap`** — [gui_roadmap.md](gui_roadmap.md)
 - **`round-trip`** — [model_stage_file.md](model_stage_file.md)
 - **`runtime`** — [xara_tcl_runtime_guide.md](xara_tcl_runtime_guide.md)
 - **`s2k`** — [model_review.md](model_review.md)

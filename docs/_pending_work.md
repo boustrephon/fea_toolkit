@@ -369,6 +369,70 @@ typed variant metadata)* below.  All three outline steps landed:
 metadata grew `family` / `coords` so a 2ⁿ fork or an envelope pair is described
 as precisely as a ± pair (a `+QE` / `-QE` marker cannot express either).
 
+#### P22 — Desktop GUI (Qt/PySide6) design & roadmap
+Source: `docs/gui_roadmap.md`.
+
+**Status: design agreed, not implemented.**
+
+**What.** A native, document-centric desktop application wrapping the
+package's existing workflow (import `*.s2k` → display geometry and loading →
+query objects → run analyses → view results), built around a central 3-D
+visualisation screen with the classic CAE chrome — menubar, top toolbar,
+right-edge view toolbar, Model Tree, Property Tree, Property Inspector, a
+bottom Message Log dock, and a status bar (ASCII layout in
+`docs/gui_roadmap.md` §1.1).
+
+**Decision.** Build on **Qt for Python** — **PySide6** as the binding
+(accessed via `qtpy`) plus **`pyvistaqt`** to embed the existing PyVista
+renderer as a `QtInteractor` central widget, shipped as a new optional
+`[gui]` extra (Python 3.10+, driven by `pyvistaqt`; the core stays at 3.9).
+PySide6 is the application shell and `pyvistaqt` is the viewport bridge —
+complementary layers, not alternatives.  Qt is the only candidate giving
+native docking, tree/property widgets and PyVista's official Qt integration;
+Tkinter, wxPython, Dear PyGui and PyVista's in-window widgets were rejected
+(see `docs/gui_roadmap.md` §3).
+
+**Scope note.** All five workflow steps already have package entry points
+(`SAP2000Parser`, `ModelViewer`, the `plot_interactive_viewer` pick callback,
+`AnalysisBuilder.run_*()`, the unified `plot_*` / `write_results_npz`).
+The **only net-new visualisation capability** is **load rendering** —
+`RenderBackend` has no `render_loads()` yet, so a model-layer load-glyph
+extractor and a `render_loads()` backend method are required
+(`docs/gui_roadmap.md` §4.1).  Three first-class UX requirements are designed
+in from the start rather than retrofitted: **lazy tree population**
+(`QTreeView` + `QAbstractItemModel`, never `QTreeWidget`), **bidirectional
+tree ↔ viewport selection sync**, and **persistent dock layout** (`QSettings`).
+Two stack caveats are recorded in `docs/gui_roadmap.md`: verify the
+`PySide6` × `pyvistaqt` version pair at scaffold time (§3.3), and batch
+viewport geometry into a `MultiBlock` with render-once (§3.4).
+
+**Outline steps.**
+1. Scaffold the `[gui]` extra (`PySide6`, `pyvistaqt`, `qtpy`), verify the
+   version pair, + lazy-import stub `src/fea_toolkit/gui/__init__.py`.
+2. Viewport spike: refactor `PyVistaRenderer` to accept an injected plotter,
+   add `QtRenderBackend` (batched `MultiBlock`, render-once), give
+   `setCentralWidget` a `QWidget` container (quad-view ready), embed
+   `ModelViewer` in a bare `QMainWindow`.
+3. Main-window chrome: menubar, top toolbar, right-edge vertical view toolbar,
+   the dock layout (left: tabbed trees over inspector; bottom: message log),
+   status bar, in-render axes triad + view cube.
+4. Model Tree (lazy) / Property Tree / Property Inspector driven from
+   `SAPModelData`, the inspector populating from the selection's dataclass.
+5. Bidirectional tree ↔ viewport selection sync (`controllers/selection.py`),
+   reusing the existing pick data.
+6. Import + analysis `QAction`s on a worker thread (`QThread`), with progress
+   and results marshalled to the status bar and message log.
+7. `render_loads()` on `RenderBackend` + model-layer glyph extractor.
+8. Results + export menus reusing the `plot_*` / `write_results_npz` surface.
+9. Persistence (`QSettings` geometry + dock state).
+10. Headless tests (`QT_QPA_PLATFORM=offscreen`, `ops.wipe()` hygiene, a
+    `needs_gui` marker alongside `needs_pyvista`).
+
+**Open decisions.** Most are now resolved — native Qt, PySide6 (via `qtpy`),
+all three left-dock panels (Option A), the message log included, and the
+3.10+ GUI floor.  Remaining: the exact `PySide6` × `pyvistaqt` version pin and
+the first-milestone scope — see `docs/gui_roadmap.md` §8.
+
 ### Tier 4 — Deferred / low-priority
 
 #### P8 — Tcl-exporter merge (deferred)

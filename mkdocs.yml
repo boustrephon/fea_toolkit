@@ -140,6 +140,7 @@ nav:
       - Migration Plan: analysis_builder_migration_plan.md
       - Deprecation Plan: deprecation_plan.md
       - Development Notes: dev_notes.md
+      - Desktop GUI Roadmap: gui_roadmap.md
   - API Reference:
       - model: api/model.md
       - io: api/io.md
