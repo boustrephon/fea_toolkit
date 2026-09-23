@@ -161,4 +161,16 @@ jobs:
         # xvfb-run supplies a virtual X display; tests/conftest.py only forces
         # the ``offscreen`` Qt platform when DISPLAY is absent, so Qt selects
         # ``xcb`` here and the embedded viewport gets a GL context.
-        run: xvfb-run -a pytest -q tests/test_gui_*.py -m "not slow" -p no:cacheprovider
+        #
+        # On failure the pytest tail is republished as a check annotation:
+        # job logs need repository admin rights, so an annotation is the only
+        # channel the maintainers' tooling can read back.
+        run: |
+          set +e
+          xvfb-run -a pytest -q tests/test_gui_*.py -m "not slow" -p no:cacheprovider 2>&1 | tee /tmp/gui.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            MSG=$(tail -c 3000 /tmp/gui.log | sed -e 's/%/%25/g' | sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/%0A/g')
+            echo "::error title=GUI test output::$MSG"
+          fi
+          exit "$rc"
