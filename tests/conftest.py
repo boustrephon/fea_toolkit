@@ -46,10 +46,16 @@ else:
     # Suite-wide head-less policy: no test should pop a render window.
     _pyvista.OFF_SCREEN = True
 
-# Force the head-less Qt platform plugin at conftest import time -- *before*
-# any ``QApplication`` is created -- so GUI tests never open a window.  Qt is
-# optional (the ``[gui]`` extra), so this is harmless when it is absent.
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Default to the head-less Qt platform plugin at conftest import time --
+# *before* any ``QApplication`` is created -- so GUI tests never open a window.
+# Qt is optional (the ``[gui]`` extra), so this is harmless when it is absent.
+#
+# Only when there is **no** display: under Xvfb (how the GUI CI job runs) a
+# ``DISPLAY`` exists and Qt must be left to choose ``xcb``.  The ``offscreen``
+# platform has no GL surface, so the embedded viewport cannot create a GL
+# context with it on Linux.
+if not os.environ.get("DISPLAY"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 # The optional ``[gui]`` extra: pyvistaqt + qtpy + a Qt binding.  Probed
 # cheaply with ``find_spec`` (no heavy import) so the ``needs_gui`` marker
