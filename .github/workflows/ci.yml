@@ -110,17 +110,27 @@ jobs:
         # platform has no GL surface, so on Linux the embedded
         # QVTKRenderWindowInteractor cannot create a GL context with it; under
         # Xvfb the ``xcb`` platform uses Mesa's software rasteriser instead.
-        # The remaining packages are the GLU/EGL/xkb stack Qt6Gui and VTK link
-        # against on ubuntu-latest.
+        #
+        # Qt >= 6.5 aborts (SIGABRT) if the xcb plugin's xcb-cursor dependency
+        # is missing, so the full xcb set is installed -- plus the GLU/EGL/GLX
+        # and xkb stack Qt6Gui and VTK link against on ubuntu-latest.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             xvfb \
+            libxcb-cursor0 \
+            libxcb-xinerama0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxkbcommon-x11-0 \
             libglu1-mesa \
             libegl1 \
             libgl1-mesa-dri \
             libglx-mesa0 \
-            libxkbcommon0 \
             libfontconfig1 \
             libdbus-1-3
 
@@ -140,6 +150,12 @@ jobs:
           test -d "$OSLIB"
           echo "OpenSeesPy bundled libraries: $OSLIB"
           echo "LD_LIBRARY_PATH=$OSLIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+
+      - name: Check the Qt platform plugin
+        # Emits the loaded platform name as a check annotation, so a plugin
+        # failure is diagnosable without the auth-gated job log.
+        run: |
+          xvfb-run -a python -c "from qtpy.QtWidgets import QApplication; app = QApplication([]); print('::notice title=Qt platform::' + app.platformName())"
 
       - name: Test (GUI, under Xvfb)
         # xvfb-run supplies a virtual X display; tests/conftest.py only forces
