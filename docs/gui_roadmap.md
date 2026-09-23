@@ -155,10 +155,15 @@ The binding and `pyvistaqt` versions must be pinned **as a verified pair**, not
 assumed compatible.  A historical incompatibility — `pyvistaqt` against
 **PySide 6.7**, where `QtPrintSupport` was missing `QDragEnterEvent` — is the
 precedent: the resolution was to pin the binding to an older release until
-`pyvistaqt` caught up.  The current `pyvistaqt` (0.13.1) post-dates that issue,
-but milestone 1 must confirm the exact `PySide6` × `pyvistaqt` combination
-before any UI code is written (the project rule is to verify third-party APIs,
-never to guess a version pairing).
+`pyvistaqt` caught up.  **Verified against PyPI on 2026-09-23**: the current
+releases are `pyvistaqt 0.13.1` (`requires-python >=3.10`; depends on `pyvista`
++ `qtpy`, with the Qt binding installed separately) and `PySide6 6.10.1`
+(`requires-python <3.14, >=3.9`).  The recommended starting pin is therefore
+**`PySide6>=6.10` + `pyvistaqt>=0.13.1` + `qtpy`** — the `qtpy` abstraction
+keeps a PyQt6 switch possible.  Because the 6.7 regression was a *pairing*
+incompatibility, milestone 1 still smoke-tests this exact pair in-process before
+any UI code is written (the project rule is to verify third-party APIs, never
+to guess a version pairing).
 
 ### 3.4 Performance characteristics of the chosen stack
 
@@ -402,9 +407,185 @@ The GUI must respect the existing architectural contracts:
 - **Python floor** — the `[gui]` extra requires **3.10+** (driven by
   `pyvistaqt`); the core stays at 3.9.
 
-### Still open
+### Resolved (implementation-plan follow-up, 2026-09-23)
 
-1. **Version pinning.**  Confirm the exact `PySide6` × `pyvistaqt` pair in
-   milestone 1 (§3.3) before any UI code is written.
-2. **First milestone scope.**  Start with the viewport-embedding spike +
-   main-window chrome (lowest risk), or go straight for the full scaffold?
+1. **Version pinning** — verified against PyPI: `PySide6 6.10.1` ×
+   `pyvistaqt 0.13.1` × `qtpy` (§3.3).  Smoke-test the pair in milestone 1.
+2. **First milestone scope** — start with the viewport-embedding spike plus the
+   main-window chrome (lowest risk; proves the whole stack before any
+   orchestration is built).
+
+---
+
+## 9. Implementation plan (concrete)
+
+This section converts §7's milestones into concrete artefacts — the packaging
+changes, the file layout, the key classes, the threading model, the
+per-milestone acceptance criteria and the testing strategy.
+
+### 9.1 Packaging changes
+
+- **New optional extra** in `pyproject.toml`:
+
+  ```toml
+  [project.optional-dependencies]
+  gui = [
+      "PySide6>=6.10",
+      "pyvistaqt>=0.13.1",
+      "qtpy",
+  ]
+  ```
+
+  `pyvista` is already a core dependency.  The `[gui]` extra requires
+  **Python 3.10+** (driven by `pyvistaqt`), while the core stays at 3.9; this
+  is documented rather than enforced by a per-extra `python_version` marker.
+
+- **New console script** alongside `fea-review` / `fea-tables`:
+
+  ```toml
+  [project.scripts]
+  fea-gui = "fea_toolkit.gui.app:main"
+  ```
+
+- **New subpackage** `src/fea_toolkit/gui/` (§9.2).  No `PySide6` /
+  `pyvistaqt` import may appear at package import time (design rule 5).
+
+### 9.2 File layout
+
+```
+src/fea_toolkit/gui/
+  __init__.py          # exposes launch_gui(); lazy import guard
+  app.py               # QApplication bootstrap, high-DPI, main()
+  main_window.py       # QMainWindow: menus, toolbars, docks, status bar
+  render_backend.py    # QtRenderBackend(RenderBackend) wrapping pyvistaqt.QtInteractor
+  controllers/
+    __init__.py
+    app_controller.py  # SAPModelData → MeshModel → AnalysisBuilder → results state
+    selection.py       # bidirectional tree ↔ viewport selection + identity maps
+    analysis.py        # worker threads for run_static/modal/spectrum/pushover
+  models/
+    __init__.py
+    tree_model.py      # ModelTreeModel(QAbstractItemModel), lazy
+    results_model.py   # load-combination / result-set enumeration
+  views/
+    __init__.py
+    model_tree.py      # QTreeView wrapper over ModelTreeModel
+    property_inspector.py  # selected dataclass → read-only form
+    message_log.py     # QPlainTextEdit + info/warn/error levels
+    viewport.py        # central QWidget container (quad-view ready) + QtInteractor
+  widgets/
+    __init__.py
+    view_cube.py       # in-render axes triad / orientation cube
+    progress.py        # progress bar + dialog wiring
+```
+
+The only change *outside* `gui/` is the `RenderBackend` refactor plus the
+load-glyph additions (§9.4).
+
+### 9.3 Key classes and signatures
+
+```python
+# gui/controllers/app_controller.py
+class AppController(QObject):
+    model_loaded = Signal(object)          # SAPModelData
+    mesh_ready = Signal(object)            # MeshModel
+    analysis_started = Signal(str)
+    analysis_finished = Signal(str, object)  # kind, results
+    progress = Signal(int, str)            # percent, message
+    log = Signal(str, str)                 # level, message
+
+    def open_model(self, path: str) -> None: ...
+    def preprocess(self, config: dict) -> None: ...
+    def run_analysis(self, kind: str, config: dict) -> None: ...
+    def export_results(self, path: str) -> None: ...
+```
+
+```python
+# gui/models/tree_model.py
+class ModelTreeModel(QAbstractItemModel):
+    def canFetchMore(self, parent) -> bool: ...
+    def fetchMore(self, parent) -> None: ...   # populate a group on expand
+```
+
+```python
+# gui/controllers/selection.py
+class SelectionController(QObject):
+    # owns cell_id ↔ SAP label and point_id ↔ node id maps (rebuilt per re-batch)
+    def on_tree_selection(self, rows) -> None: ...
+    def on_viewport_pick(self, cell_id: Optional[int]) -> None: ...
+```
+
+```python
+# gui/render_backend.py
+class QtRenderBackend(RenderBackend):
+    def __init__(self, plotter: "pyvistaqt.QtInteractor") -> None: ...
+    def render_loads(self, loads: list[LoadGeom], scale: float = 1.0) -> None: ...
+    def show(self) -> None: ...   # no-op — the Qt event loop owns rendering
+```
+
+`ModelViewer` (core) is reused unchanged, but its `__init__` gains an optional
+`backend: Optional[RenderBackend] = None` so the GUI can inject a
+`QtRenderBackend` instead of `ModelViewer._resolve_backend()` building one.
+
+### 9.4 The load-rendering gap (§4.1, concrete)
+
+1. **`LoadGeom`** dataclass in `plotting/renderers/base.py` (mirrors
+   `FrameGeom` / `ShellGeom`): `kind` (`"joint" | "line" | "area" |
+   "gravity"`), `anchor: np.ndarray`, `direction: np.ndarray`,
+   `magnitude: float`, `label: str`.
+2. **`extract_load_glyphs(source) -> list[LoadGeom]`** in `model/`
+   (OpenSees-free), accepting `SAPModelData` or `MeshModel` and resolving
+   `JointLoad`, `FrameDistributedLoad`, area loads and gravity into glyphs.
+   Magnitudes are read **in model units** and scaled only for display; gravity
+   is implied through `g_from_units(units)` — no physical-constant hardcoding.
+3. **`RenderBackend.render_loads(loads, scale=1.0)`** abstract method, plus
+   PyVista and Qt implementations (arrows/glyphs via `pv.Arrow` / `glyph`).
+
+### 9.5 Threading model
+
+- The **GUI thread never calls `ops.*`**.  Parsing, preprocessing and every
+  `run_*()` run on workers.
+- Analysis runs on a dedicated `QThread`; progress and completion cross back via
+  `Signal`s.  Cancellation is cooperative (`threading.Event`, checked between
+  `analyze()` steps and stages); the worker always ends with `ops.wipe()` in a
+  `finally`.  A single atomic `analyze()` is not interruptible mid-call — Stop
+  is disabled then and re-enabled at step boundaries.  One analysis at a time.
+
+### 9.6 Milestones with acceptance criteria
+
+| # | Milestone | Acceptance criteria |
+|---|---|---|
+| 1 | Binding + viewport spike | `PySide6 6.10` × `pyvistaqt 0.13.1` import under 3.10+; `fea-gui` launches a bare `QMainWindow` with a `QtInteractor`; `ModelViewer` renders a sample model into it |
+| 2 | Chrome | menubar, toolbars, dock layout, message log, status bar (coords/elem/progress), axes triad + view cube |
+| 3 | Trees + inspector | lazy Model Tree + Property Tree over `SAPModelData`; inspector shows `Section`/`Material`/load/case fields |
+| 4 | Selection sync | tree→viewport highlight and viewport→tree select+scroll both work via one stable identity map |
+| 5 | Import + analysis | Open runs `SAP2000Parser` on a worker; Run executes `run_static_analysis()` (then modal/spectrum/pushover) with progress + log; Stop cancels cooperatively |
+| 6 | Load rendering | `render_loads()` + `extract_load_glyphs()` draw joint/line/area/gravity glyphs scaled to model units |
+| 7 | Results + export | deformed/force/storey/pushover plots + `write_results_npz` wired to menus |
+| 8 | Persistence | geometry + dock state round-trip through `QSettings` |
+| 9 | Tests | headless `QT_QPA_PLATFORM=offscreen` suite green; `needs_gui` marker; `ops.wipe()` hygiene |
+| 10 | Quad-view + polish | central `QWidget` container hosts iso/front/top/side `QtInteractor`s with shared camera toggles |
+
+### 9.7 Testing strategy
+
+- **New `needs_gui` marker** (registered in `pyproject.toml` markers, like
+  `needs_pyvista`) — skipped when Qt/`pyvistaqt` is unavailable or there is no
+  display; conftest sets `QT_QPA_PLATFORM=offscreen` for headless runs.
+- **No-Qt unit tests** for the pure logic: `ModelTreeModel` row/column math,
+  `SelectionController` identity maps, `extract_load_glyphs` (all Qt-free).
+- **Qt smoke tests (offscreen)**: launch `MainWindow`, load
+  `make_sample_model()`, assert the tree/inspector populate, run one static
+  analysis, quit.
+- `pytest-qt` is **optional** — a dev/test dependency to agree before adding
+  (§5.2); raw `QApplication` suffices for smoke tests.
+
+### 9.8 Risks and mitigations
+
+| Risk | Mitigation |
+|---|---|
+| VTK/Qt object lifetime leaks | `closeEvent` → `render_window.Finalize()`; `deleteLater()` on dock/view widgets |
+| OpenSeesPy global state | `ops.wipe()` in worker `finally`; single-analysis-at-a-time |
+| `PySide6`×`pyvistaqt` pairing regression (6.7 precedent) | verified pair (§9.1); smoke-test in M1 |
+| Accidental `pyvistaqt` import in core | it lives only under `gui/`; lazy import guard; conftest asserts core import does not touch Qt |
+| Long analysis freezes UI | worker thread + progress + cooperative Stop |
+| `[gui]` extra on Rhino 8 embedded interpreter | documented as unavailable there (same as `needs_pyvista`) |
