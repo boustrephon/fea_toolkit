@@ -19,7 +19,26 @@ SCHEMA_VERSION_LEGACY = 1
 #: :func:`fea_toolkit.io.stage_writer.write_model_stages`,
 #: :func:`fea_toolkit.io.npz_writer.write_results_npz` and
 #: :func:`fea_toolkit.io.unified_writer.write_results`.
-SCHEMA_VERSION = 2
+#:
+#: What each version means to a consumer:
+#:
+#: * ``1`` (:data:`SCHEMA_VERSION_LEGACY`) — written before the marker
+#:   existed; infer the layout from the arrays that are present.
+#: * ``2`` — the self-describing unified layout: one array dictionary for the
+#:   model-stage file and the plain results archives, with the optional
+#:   per-case combination metadata (:data:`CASE_META_KEYS`).
+#: * ``3`` — the case metadata is **identity, not label**.  The
+#:   ``static_case_kind`` array is no longer written (it only restated
+#:   ``family`` plus one signed coordinate), case names are display labels
+#:   derived from ``coords`` (``"<combo> [+RSX]"``, not ``"<combo> #1"``), and
+#:   a reader groups from metadata only.  A ``2`` archive still reads — its
+#:   cases group by ``group`` / ``coords`` where those arrays are present —
+#:   but an archive carrying no ``static_case_*`` arrays at all now reads as
+#:   one group per case instead of being paired by the ``#1`` / ``#2`` name
+#:   convention, which is the incompatibility this version marks.  The
+#:   stage-file array layout is unchanged; the marker is shared with it by
+#:   design (see ``docs/model_stage_file.md``).
+SCHEMA_VERSION = 3
 
 # ── Required array names per result type ──────────────────────────────────
 

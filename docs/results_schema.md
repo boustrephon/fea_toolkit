@@ -441,11 +441,21 @@ declared array against the **correct** dimension: nodal arrays (`node_*`,
 
 | Array | Shape | dtype | Description |
 |---|---|---|---|
-| `schema_version` | `()` | `int` | File-level results-layout version (`results_schema.SCHEMA_VERSION`, currently 2).  Absent in legacy files — read as `SCHEMA_VERSION_LEGACY` (1) via `fea_toolkit.io.get_schema_version()`. |
+| `schema_version` | `()` | `int` | File-level results-layout version (`results_schema.SCHEMA_VERSION`, currently 3).  Absent in legacy files — read as `SCHEMA_VERSION_LEGACY` (1) via `fea_toolkit.io.get_schema_version()`. |
 | `force_unit` | `()` | `str` | e.g. ``"kN"``, ``"N"`` |
 | `length_unit` | `()` | `str` | e.g. ``"m"``, ``"mm"`` |
 | `created` | `()` | `str` | ISO‑8601 timestamp |
 | `analysis_types` | `(N_analysis,)` | `str` | e.g. ``["static", "modal", "rs"]`` |
+
+> **Version 3 — the case metadata is identity, not label.**  The
+> `static_case_kind` array is no longer written (it restated `family` plus one
+> signed coordinate), case names are display labels derived from `coords`
+> (`"<combo> [+RSX]"`, not `"<combo> #1"`), and a reader groups from metadata
+> only.  An archive carrying no `static_case_*` arrays now reads as one group
+> per case instead of being paired by the `#1` / `#2` name convention.  The
+> marker is shared with the model-stage file by design, so
+> `write_model_stages()` stamps 3 as well although the stage-file array layout
+> did not change ([model stage file](model_stage_file.md)).
 
 ## File naming
 

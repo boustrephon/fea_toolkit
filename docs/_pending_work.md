@@ -713,6 +713,51 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-23 — results schema version 3: the case metadata is identity, not label)
+
+**What.** `results_schema.SCHEMA_VERSION` is bumped **2 → 3**, and the version
+history is recorded on the constant itself so a consumer can see what it has to
+cope with (the docstring previously said only "bump on a backward-incompatible
+change").
+
+**Why.** P18 set the rule — *bump only on a backward-incompatible array-layout
+change* — and the 2026-09-23 variant-identity work is the first results-archive
+change since the marker was introduced that is **not** additive:
+
+1. `static_case_kind` is no longer written.  It restated `family` plus one
+   signed coordinate, and existed only to feed the `"+QE"` / `"-QE"` label.
+2. Case names are display labels derived from `coords` (`"<combo> [+RSX]"`),
+   replacing the positional `"<combo> #1"` / `"<combo> #2"` convention.
+3. The reader groups from metadata only: an archive carrying no
+   `static_case_*` arrays — a v2 archive written before the metadata existed —
+   now reads as **one group per case** instead of being paired by the `#1` /
+   `#2` label convention.
+
+Item 3 is the incompatibility the version marks.  A v2 archive *with* the
+metadata arrays still groups correctly (its stored `#n` names are simply not
+used — the label is derived from `coords`); only the label-based fallback is
+gone.
+
+**Scope.** The marker is deliberately shared by the model-stage file and the
+plain results archives (P18), so `write_model_stages()` stamps 3 as well even
+though the stage-file array layout is unchanged — stated in
+`docs/model_stage_file.md` and in the constant's docstring.  Nothing in `src/`
+branches on the value yet, so the bump has no behavioural effect in-repo: it is
+the forward-facing signal for an external consumer.
+
+**Files.** `src/fea_toolkit/io/results_schema.py` (constant + history),
+`docs/results_schema.md` (the `schema_version` row, plus a version-3 note under
+the metadata table), `docs/model_stage_file.md` (the `get_schema_version` row),
+and the 2026-09-20 metadata entry below, whose "no bump needed / pair by label"
+rationale had become stale.
+
+**Validation.** Full suite 1869 passed / 2 skipped / 2 xfailed — the write/read
+tests assert against the constant, so they follow it without edits (the literal
+`2` in `tests/test_rhino_results.py` is an *input* fixture standing in for an
+existing archive, not an assertion).  `ruff check` + `ruff format --check`
+clean, `mkdocs build --strict` exit 0.
+
+
 ## DONE (2026-09-23 — variant identity by cause, names derived from it, metadata-only reader)
 
 **What.** The P20/P21 design (*metadata is the single source of truth*; the
@@ -874,10 +919,15 @@ variant identity by cause …)*.
    still holds on the regenerated archive for `Fx` / `My` / `Mz` in both the X
    and Y directions (residual ≤ 1.5e-11).
 
-**Design notes.** Optional arrays only — the reader treats absence as "pair by
-label", so no schema-version bump was needed and every pre-existing archive
-still works.  The sense is never re-derived from the `#n` suffix at write time;
-it comes from the composite's sign.
+**Design notes.** Optional arrays only, so every archive written *before* the
+metadata existed still reads.  At the time the reader fell back to pairing by
+the `#1` / `#2` label convention, which is what made a schema-version bump
+unnecessary — **that fallback was deleted on 2026-09-23** (see *DONE (2026-09-23
+— variant identity by cause, names derived from it, metadata-only reader)*), so
+an archive with no `static_case_*` arrays now reads as one group per case and
+`SCHEMA_VERSION` was bumped 2 → 3 for it (see the *results schema version 3*
+entry).  The sense is never re-derived from the `#n` suffix at write time; it
+comes from the composite's sign.
 
 ## DONE (2026-09-17 — docs: enable strikethrough so `~~done~~` markers render)
 
@@ -997,7 +1047,9 @@ optional arrays.
   (`model_codec.MODEL_SCHEMA_VERSION` / `__schema_version__`) stays distinct
   from the *file-level* marker (`results_schema.SCHEMA_VERSION` /
   `schema_version`).  `SCHEMA_VERSION` was **not** bumped — the change is
-  additive; bump only on a backward-incompatible array-layout change.
+  additive; bump only on a backward-incompatible array-layout change.  (It was
+  bumped to 3 later, by the 2026-09-23 variant-identity change, which *was*
+  non-additive — see the *results schema version 3* entry above.)
 
 **Tests.** `tests/test_stage_file.py::TestUnifiedWriterSchemaCoverage`:
 the marker is stamped and read back for all three writers, `validate_npz`
