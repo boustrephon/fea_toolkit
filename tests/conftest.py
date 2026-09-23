@@ -25,6 +25,7 @@ PyVista
     ``scipy``, ``rhino3dm`` and friends elsewhere in the suite.
 """
 
+import importlib.util
 import os
 
 import pytest
@@ -45,6 +46,23 @@ else:
     # Suite-wide head-less policy: no test should pop a render window.
     _pyvista.OFF_SCREEN = True
 
+# Force the head-less Qt platform plugin at conftest import time -- *before*
+# any ``QApplication`` is created -- so GUI tests never open a window.  Qt is
+# optional (the ``[gui]`` extra), so this is harmless when it is absent.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+# The optional ``[gui]`` extra: pyvistaqt + qtpy + a Qt binding.  Probed
+# cheaply with ``find_spec`` (no heavy import) so the ``needs_gui`` marker
+# can skip cleanly when the extra is missing.
+_HAVE_GUI = (
+    importlib.util.find_spec("pyvistaqt") is not None
+    and importlib.util.find_spec("qtpy") is not None
+    and (
+        importlib.util.find_spec("PySide6") is not None
+        or importlib.util.find_spec("PyQt6") is not None
+    )
+)
+
 
 @pytest.fixture(autouse=True, scope="module")
 def _matplotlib_agg():
@@ -63,10 +81,14 @@ def _matplotlib_agg():
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip every ``needs_pyvista`` test when PyVista is not importable."""
-    if _HAVE_PYVISTA:
-        return
-    skip = pytest.mark.skip(reason="pyvista not installed")
-    for item in items:
-        if "needs_pyvista" in item.keywords:
-            item.add_marker(skip)
+    """Skip marker-gated tests when their optional backend is missing."""
+    if not _HAVE_PYVISTA:
+        skip_pv = pytest.mark.skip(reason="pyvista not installed")
+        for item in items:
+            if "needs_pyvista" in item.keywords:
+                item.add_marker(skip_pv)
+    if not _HAVE_GUI:
+        skip_gui = pytest.mark.skip(reason="[gui] extra not installed (PySide6/pyvistaqt)")
+        for item in items:
+            if "needs_gui" in item.keywords:
+                item.add_marker(skip_gui)

@@ -30,6 +30,7 @@ dependencies = [
 [project.scripts]
 fea-review = "fea_toolkit.model.review:main"
 fea-tables = "fea_toolkit.io.table_registry:main"
+fea-gui = "fea_toolkit.gui.app:main"
 
 [project.optional-dependencies]
 mesh-remesh = [
@@ -39,6 +40,11 @@ report = [
     "pandas>=1.5",
     "imageio>=2.36",   # animated GIF export (report figures / examples)
     "tabulate>=0.9",   # gridded/pipe tables in model.review (optional)
+    ]
+gui = [
+    "PySide6>=6.10",      # Qt 6 application shell
+    "pyvistaqt>=0.13.1",  # QtInteractor viewport bridge (requires Python >=3.10)
+    "qtpy",               # binding-agnostic Qt import layer (PySide6 today)
     ]
 docs = [
     "mkdocs==1.6.1",
@@ -64,6 +70,7 @@ addopts = "-v --tb=short"
 markers = [
     "slow: long-running multi-pushover benchmark; exclude with `-m 'not slow'`",
     "needs_pyvista: skip when pyvista is unavailable (e.g. Rhino 8 embedded interpreter)",
+    "needs_gui: skip when the [gui] extra (PySide6/pyvistaqt) is unavailable",
 ]
 filterwarnings = [
     "ignore::UserWarning:pyvista.jupyter.notebook",
