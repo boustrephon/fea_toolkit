@@ -136,10 +136,21 @@ jobs:
           echo "LD_LIBRARY_PATH=$OSLIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
       - name: Check the Qt platform plugin
-        # Emits the loaded platform name as a check annotation, so a plugin
-        # failure is diagnosable without the auth-gated job log.
+        # Runs outside pytest, so tests/conftest.py does not apply -- set the
+        # platform explicitly.  Publishes the outcome as a check annotation,
+        # since job logs need repository admin rights.
         run: |
-          python -c "from qtpy.QtWidgets import QApplication; app = QApplication([]); print('::notice title=Qt platform::' + app.platformName())"
+          set +e
+          QT_QPA_PLATFORM=offscreen python -c "from qtpy.QtWidgets import QApplication; app = QApplication([]); print('PLATFORM=' + app.platformName())" > /tmp/q.log 2>&1
+          rc=$?
+          cat /tmp/q.log
+          MSG=$(tail -c 2000 /tmp/q.log | sed -e 's/%/%25/g' | sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/%0A/g')
+          if [ "$rc" -eq 0 ]; then
+            echo "::notice title=Qt platform::$MSG"
+          else
+            echo "::error title=Qt platform check failed::$MSG"
+          fi
+          exit "$rc"
 
       - name: Test (GUI, head-less)
         # tests/conftest.py forces QT_QPA_PLATFORM=offscreen when DISPLAY is
