@@ -169,7 +169,7 @@ Do not re-derive these from the docs; they were pinned empirically.
 
 `-binary` is tempting — 2.4 MB and **0.029 s** to write (20× faster than
 ASCII) — but it is **broken under `responseSpectrumAnalysis`**.  Verified on
-the pipe rack (4 modes × 1263 elements, `[time, data]` per row, sizes exactly
+the benchmark model (4 modes × 1263 elements, `[time, data]` per row, sizes exactly
 `n × (12·n_elems + 1)`):
 
 * **mode 1: bit-exact** (0 differing entries);

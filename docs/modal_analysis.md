@@ -163,7 +163,7 @@ So to see the full six-DOF annotation for a model whose archive predates
 the rotational keys, view the model file instead of the archive:
 
 ```bash
-python examples/view_model.py BPPS_Pipe_Rack.s2k --result modal --mode 1
+python examples/view_model.py model.s2k --result modal --mode 1
 ```
 
 Add ``--num-modes N`` when the mode number you want exceeds the default of 12.
@@ -204,7 +204,7 @@ essential.  ``ops.nodeEigenvector`` returns *mass-normalised* eigenvectors
 the magnitude depends on the modal mass, and a local mode with a small modal
 mass has far larger components than a global sway mode.  Scaling the raw
 components by a fixed factor therefore looks reasonable for the global modes
-and explodes for the local ones.  On the BPPS pipe-rack model, for example,
+and explodes for the local ones.  On the benchmark model, for example,
 the peak component is 0.23 for modes 1–3 but 4.50 for mode 4 — a ~20× spread —
 so a fixed factor of 30 displayed a **135 m** peak displacement on a 78 m
 model.  After normalisation every mode shows the same peak (5% of span

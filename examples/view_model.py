@@ -63,7 +63,7 @@ model or archive each one belongs to.  ``--title TITLE`` replaces that
 caption outright::
 
     python examples/view_model.py /path/to/model.s2k -r mesh \
-        --highlight-constraint Fix --title "Pipe rack - Fix body"
+        --highlight-constraint Fix --title "Benchmark model - Fix body"
 """
 
 import argparse

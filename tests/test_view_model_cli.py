@@ -218,10 +218,10 @@ class TestViewModelWindowTitle:
 
         from examples.view_model import window_title
 
-        path = Path("/deep/path/to/260917 BPPS_Aux. Structure Update.s2k")
+        path = Path("/deep/path/to/benchmark_model.s2k")
 
-        assert window_title(path) == "PyVista - 260917 BPPS_Aux. Structure Update.s2k"
-        assert window_title(str(path)) == "PyVista - 260917 BPPS_Aux. Structure Update.s2k"
+        assert window_title(path) == "PyVista - benchmark_model.s2k"
+        assert window_title(str(path)) == "PyVista - benchmark_model.s2k"
 
     def test_no_input_file_falls_back_to_sample(self):
         from examples.view_model import window_title
@@ -232,8 +232,8 @@ class TestViewModelWindowTitle:
     def test_override_replaces_the_file_title(self):
         from examples.view_model import window_title
 
-        assert window_title("/deep/path/tower.s2k", "Pipe rack - Fix body") == (
-            "Pipe rack - Fix body"
+        assert window_title("/deep/path/tower.s2k", "Benchmark model - Fix body") == (
+            "Benchmark model - Fix body"
         )
         assert window_title(None, "Just this") == "Just this"
 

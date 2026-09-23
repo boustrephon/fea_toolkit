@@ -584,7 +584,7 @@ class TestResolveMeshData:
 
         ``ops.nodeEigenvector`` returns *mass-normalised* eigenvectors
         (``phiᵀM phi = 1``), so a local mode with a small modal mass has far
-        larger components than a global sway mode — ~20x on the pipe-rack
+        larger components than a global sway mode — ~20x on the benchmark
         model.  Two shapes differing only by a constant factor must therefore
         render identically, which is what normalising to unit peak achieves.
         """

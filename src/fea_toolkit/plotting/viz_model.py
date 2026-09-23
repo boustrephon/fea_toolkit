@@ -1977,7 +1977,7 @@ def plot_mode_animation(
     # (phiᵀM phi = 1), so their components are not displacements and their
     # magnitude depends on the modal mass.  A local mode (tiny modal mass)
     # therefore has far larger components than a global sway mode: on the
-    # pipe-rack model the peak component is ~0.23 for modes 1-3 but ~4.5 for
+    # benchmark model the peak component is ~0.23 for modes 1-3 but ~4.5 for
     # mode 4 — a ~20x spread.  Multiplying those raw values by a fixed factor
     # made the global modes look right and the local modes explode.
     #
