@@ -219,12 +219,12 @@ def _collect_static(
 
     Args:
         static_results: Case-keyed static results.
-        case_meta: Optional ``{case: {"group": str, "kind": str}}`` per-case
+        case_meta: Optional ``{case: {"group": str, "family": str, "coords": str}}`` per-case
             metadata, written as the optional ``static_case_group`` /
-            ``static_case_kind`` arrays so a two-sided response-spectrum
-            combination can be paired from data rather than from the
-            ``"#1"`` / ``"#2"`` label convention.  ``None`` omits them — see
-            :func:`fea_toolkit.io.results_schema.case_meta_arrays`.
+            ``static_case_family`` / ``static_case_coords`` arrays so a
+            two-sided response-spectrum combination can be grouped and labelled
+            from data rather than from its case names.  ``None`` omits them —
+            see :func:`fea_toolkit.io.results_schema.case_meta_arrays`.
     """
     arrays: dict[str, np.ndarray] = {}
     case_labels = list(static_results.keys())
@@ -415,11 +415,11 @@ def write_results_npz(
             correct split/meshed topology for visualisation.
             Pass the same ``MeshModel`` that was passed to the
             ``AnalysisBuilder``.
-        case_meta: Optional ``{case: {"group": str, "kind": str}}`` per-case
+        case_meta: Optional ``{case: {"group": str, "family": str, "coords": str}}`` per-case
             metadata.  ``group`` names the load combination each case came from
             and ``kind`` its magnitude sense (``"+QE"`` / ``"-QE"``) where the
             combination forks — written as the optional
-            ``static_case_group`` / ``static_case_kind`` arrays so a plotter can
+            ``static_case_group`` / ``static_case_family`` / ``static_case_coords`` arrays so a plotter can
             pair a two-sided response-spectrum combination from data instead of
             from the ``"#1"`` / ``"#2"`` label convention.  ``None`` omits them.
 

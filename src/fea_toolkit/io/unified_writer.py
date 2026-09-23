@@ -50,10 +50,10 @@ def collect_static_arrays(
 
     Args:
         static_results: Case-keyed (or flat) static results.
-        case_meta: Optional ``{case: {"group": str, "kind": str}}`` describing
+        case_meta: Optional ``{case: {"group": str, "family": str, "coords": str}}`` describing
             each case's load combination and, for a forked response-spectrum
             combination, its magnitude sense.  Written as the optional
-            ``static_case_group`` / ``static_case_kind`` arrays so a reader can
+            ``static_case_group`` / ``static_case_family`` / ``static_case_coords`` arrays so a reader can
             pair the two variants from data; ``None`` omits them.  See
             :func:`fea_toolkit.io.results_schema.case_meta_arrays`.
     """
@@ -461,11 +461,11 @@ def write_results(
         forces_coordinate_system: Coordinate system of the recorded frame
             end-force arrays (``"local"`` or ``"global"``).  Defaults to
             ``"local"`` — the OpenSees ``localForces`` recorder convention.
-        case_meta: Optional ``{case: {"group": str, "kind": str}}`` per-case
+        case_meta: Optional ``{case: {"group": str, "family": str, "coords": str}}`` per-case
             metadata.  ``group`` names the load combination each case came from
             and ``kind`` its magnitude sense (``"+QE"`` / ``"-QE"``) where the
             combination forks — written as the optional
-            ``static_case_group`` / ``static_case_kind`` arrays so a plotter can
+            ``static_case_group`` / ``static_case_family`` / ``static_case_coords`` arrays so a plotter can
             pair a two-sided response-spectrum combination from data instead of
             from the ``"#1"`` / ``"#2"`` label convention.  ``None`` omits them.
 

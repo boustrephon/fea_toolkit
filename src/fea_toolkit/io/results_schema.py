@@ -239,18 +239,14 @@ def make_static_key(case_name: str, array_name: str) -> str:
 
 #: Optional per-case metadata fields and the top-level arrays they populate.
 #: ``group`` names the combination a case was generated from — every variant of
-#: that combination carries the same value; ``kind`` is the magnitude-sense
-#: marker (``"+QE"`` / ``"-QE"``) for a **single**-sense forked
-#: response-spectrum combination; ``family`` distinguishes a fork from an
-#: envelope pair (``"single"`` / ``"fork"`` / ``"envelope"`` / ``"path"`` /
-#: ``"srss"``); ``coords`` is the variant's coordinate tuple joined with ``"|"``
-#: (``"+RSX|-RSY"``, ``"max"``, ``"min"``) — the stable identity a multi-fork
-#: renderer groups and labels by.  A field is written **only** when a caller
-#: supplies it, so an archive annotating just ``group``/``kind`` stays
-#: byte-identical to one written before the richer fields existed.
+#: that combination carries the same value; ``family`` says what the variants of
+#: that group vary along (``"single"`` / ``"fork"`` / ``"envelope"`` / ``"path"``
+#: / ``"srss"``) and ``coords`` is a variant's position on that axis, joined with
+#: ``"|"`` (``"+RSX|-RSY"``, ``"max"``, ``"SUB|DEAD"``) — the stable identity a
+#: renderer groups and labels by, and the name is derived from it.  A field is
+#: written **only** when a caller supplies it.
 CASE_META_KEYS: dict[str, str] = {
     "group": "static_case_group",
-    "kind": "static_case_kind",
     "family": "static_case_family",
     "coords": "static_case_coords",
 }
@@ -265,11 +261,10 @@ def case_meta_arrays(
     gravity/wind terms is emitted twice — the two senses the earthquake can act
     in — and both variants are needed to read the result.  Recording which cases
     came from the same combination (:attr:`CASE_META_KEYS` ``group``, plus the
-    ``family`` / ``coords`` that say whether the group is a ±fork or a max/min
-    envelope pair) lets a reader pair them from data instead of parsing the
-    ``"<combo> #1"`` / ``"<combo> #2"`` label convention that
-    :func:`~fea_toolkit.model.load_combinations.generate_combination_results`
-    happens to emit.
+    ``family`` / ``coords`` that say what the variants of that group vary along)
+    lets a reader group and label them from data instead of parsing the case
+    names, which are display labels derived from that same identity and nothing
+    more.
 
     Args:
         case_labels: Case names, in the order written to ``static_case_labels``.
@@ -277,9 +272,7 @@ def case_meta_arrays(
             :attr:`CASE_META_KEYS`, or ``None``.  A case absent from the
             mapping, or a key absent from its entry, yields ``""`` for the
             fields that *are* written.  A field no entry mentions is not
-            written at all — so an unannotated archive, or one annotating only
-            ``group``/``kind``, is byte-identical to one written before the
-            richer fields existed.
+            written at all.
 
     Returns:
         ``{array_key: ndarray}`` for the fields present in *case_meta*, aligned

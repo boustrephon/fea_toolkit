@@ -168,7 +168,9 @@ def build_combination_results(
     case_arrays = {name: _flatten(payload) for name, payload in case_results.items()}
     names = list(combinations) if combinations is not None else list(load_combinations)
 
-    meta: dict[str, dict[str, str]] = {name: {"group": name, "kind": ""} for name in case_results}
+    meta: dict[str, dict[str, str]] = {
+        name: {"group": name, "family": "single", "coords": ""} for name in case_results
+    }
     out: dict[str, dict[str, Any]] = {}
     for name in names:
         combo = load_combinations.get(name)

@@ -339,16 +339,17 @@ class TestForceDiagramUnified:
 # ============================================================================
 
 
-def _forked_npz_dict(*, with_meta: bool = False) -> dict:
-    """Minimal archive holding one two-sided combination as ``#1`` / ``#2``.
+def _forked_npz_dict(*, with_meta: bool = True) -> dict:
+    """Minimal archive holding one two-sided combination as its two senses.
 
-    ``#2`` is ``#1`` with the spectrum term negated, so the pair differs by
-    twice the magnitude on every component.  With *with_meta* the explicit
-    ``static_case_group`` / ``static_case_kind`` pairing arrays are written too.
+    The second variant is the first with the spectrum term negated, so the pair
+    differs by twice the magnitude on every component.  *with_meta* writes the
+    ``static_case_group`` / ``static_case_family`` / ``static_case_coords``
+    arrays the writer emits; without them the archive carries no grouping at all.
     """
     data = _minimal_npz_dict()
     base = "COMB1_ULS 1.3GE+1.4QE(X)+0.3W(X)"
-    names = ["DEAD", f"{base} #1", f"{base} #2"]
+    names = ["DEAD", f"{base} [+RSX]", f"{base} [-RSX]"]
     data["static_case_labels"] = np.array(names)
     for name, my_i in (
         (names[0], [10.0, -5.0]),
@@ -359,7 +360,8 @@ def _forked_npz_dict(*, with_meta: bool = False) -> dict:
         data[f"static/{name}/my_j"] = np.array([-v for v in my_i])
     if with_meta:
         data["static_case_group"] = np.array([names[0], base, base])
-        data["static_case_kind"] = np.array(["", "+QE", "-QE"])
+        data["static_case_family"] = np.array(["single", "fork", "fork"])
+        data["static_case_coords"] = np.array(["", "+RSX", "-RSX"])
     return data
 
 
@@ -368,40 +370,40 @@ class TestForkPairing:
 
     BASE = "COMB1_ULS 1.3GE+1.4QE(X)+0.3W(X)"
 
-    def test_companion_resolved_from_the_label_convention(self):
-        """``"<combo> #1"`` / ``"#2"`` pair with no metadata present."""
-        from fea_toolkit.plotting.force_diagram import _companion_case
+    def test_metadata_groups_variants_whose_names_say_nothing(self):
+        """``static_case_group`` groups cases by data, not by their names."""
+        from fea_toolkit.plotting.force_diagram import _fork_legend, _group_members
 
         data = _forked_npz_dict()
-        assert _companion_case(data, f"{self.BASE} #1") == f"{self.BASE} #2"
-        assert _companion_case(data, f"{self.BASE} #2") == f"{self.BASE} #1"
-
-    def test_metadata_pairing_without_a_fork_label(self):
-        """``static_case_group`` / ``static_case_kind`` pair renamed cases."""
-        from fea_toolkit.plotting.force_diagram import _companion_case, _fork_legend
-
-        data = _forked_npz_dict(with_meta=True)
-        # Names the label convention cannot pair — only the metadata can.
+        # Renamed so the label carries no hint at all — only metadata can group.
         data["static_case_labels"] = np.array(["DEAD", "CQ", "CQ rev"])
-        assert _companion_case(data, "CQ") == "CQ rev"
-        assert _companion_case(data, "CQ rev") == "CQ"
-        assert _fork_legend(data, "CQ").endswith("[+QE]")
-        assert _fork_legend(data, "CQ rev").endswith("[-QE]")
+        assert _group_members(data, "CQ") == ["CQ", "CQ rev"]
+        assert _fork_legend(data, "CQ") == f"{self.BASE} [+RSX]"
+        assert _fork_legend(data, "CQ rev") == f"{self.BASE} [-RSX]"
 
-    def test_plain_case_has_no_companion(self):
-        from fea_toolkit.plotting.force_diagram import _companion_case, _fork_legend
+    def test_plain_case_is_its_own_group(self):
+        from fea_toolkit.plotting.force_diagram import _fork_legend, _group_members
 
         data = _forked_npz_dict()
-        assert _companion_case(data, "DEAD") is None
+        assert _group_members(data, "DEAD") == ["DEAD"]
         assert _fork_legend(data, "DEAD") == "DEAD"
 
-    def test_ambiguous_group_is_left_unpaired(self):
-        """Three variants of one group are not guessed at."""
-        from fea_toolkit.plotting.force_diagram import _companion_case
+    def test_no_metadata_means_no_pairing(self):
+        """Without metadata a case is its own group — nothing is parsed."""
+        from fea_toolkit.plotting.force_diagram import _fork_legend, _resolve_case_info
 
-        data = _forked_npz_dict()
-        data["static_case_labels"] = np.array([f"{self.BASE} #{n}" for n in (1, 2, 3)])
-        assert _companion_case(data, f"{self.BASE} #1") is None
+        data = _forked_npz_dict(with_meta=False)
+        info = _resolve_case_info(data)
+        assert info[f"{self.BASE} [+RSX]"] == {
+            "group": f"{self.BASE} [+RSX]",
+            "coords": "",
+        }
+        assert info[f"{self.BASE} [-RSX]"] == {
+            "group": f"{self.BASE} [-RSX]",
+            "coords": "",
+        }
+        # The name is the legend; no sign sense is invented for it.
+        assert _fork_legend(data, f"{self.BASE} [+RSX]") == f"{self.BASE} [+RSX]"
 
     def test_both_sides_draws_two_curves(self):
         from fea_toolkit.plotting import plot_force_diagram
@@ -409,12 +411,12 @@ class TestForkPairing:
         data = _forked_npz_dict()
         # Local MY on a vertical member rotates to a global MX, so the summed
         # profile lives in MX — the values are the two ends of the pair.
-        fig = plot_force_diagram(data, quantity="Mx", combo=f"{self.BASE} #1", dimension="2d")
+        fig = plot_force_diagram(data, quantity="Mx", combo=f"{self.BASE} [+RSX]", dimension="2d")
         assert fig is not None
         curves = [ln for ln in fig.axes[0].lines if not ln.get_label().startswith("_")]
         assert len(curves) == 2
-        assert curves[0].get_label().endswith("[+QE]")
-        assert curves[1].get_label().endswith("[-QE]")
+        assert curves[0].get_label().endswith("[+RSX]")
+        assert curves[1].get_label().endswith("[-RSX]")
         # Both forks are drawn, and they are genuinely different data.
         assert list(curves[0].get_xdata()) == [15.0, 0.0]
         assert list(curves[1].get_xdata()) == [-35.0, 0.0]
@@ -427,7 +429,11 @@ class TestForkPairing:
 
         data = _forked_npz_dict()
         fig = plot_force_diagram(
-            data, quantity="Mx", combo=f"{self.BASE} #1", dimension="2d", both_sides=False
+            data,
+            quantity="Mx",
+            combo=f"{self.BASE} [+RSX]",
+            dimension="2d",
+            both_sides=False,
         )
         assert fig is not None
         curves = [ln for ln in fig.axes[0].lines if not ln.get_label().startswith("_")]
@@ -442,8 +448,9 @@ class TestForkPairing:
         from fea_toolkit.plotting.force_diagram import _resolve_source
 
         data = _forked_npz_dict()
-        assert len(_resolve_source(data, combo=f"{self.BASE} #1", quantity="My").storey_extras) == 1
-        per_element = _resolve_source(data, combo=f"{self.BASE} #1", quantity="My", by_storey=False)
+        primary = f"{self.BASE} [+RSX]"
+        assert len(_resolve_source(data, combo=primary, quantity="My").storey_extras) == 1
+        per_element = _resolve_source(data, combo=primary, quantity="My", by_storey=False)
         # The primary profile is still resolved (the caller ignores it) ...
         assert per_element.storey_series
         # ... but the other group members are not summed at all.
@@ -454,13 +461,39 @@ class TestForkPairing:
         from fea_toolkit.plotting.force_diagram import _resolve_source
 
         data = _forked_npz_dict()
-        # Strip the opposite fork's forces: it is still a case (the labels are
+        # Strip the opposite fork's forces: it is still a case (the metadata is
         # intact, so it is still grouped) but has no profile to sum.
-        for key in [k for k in data if k.startswith(f"static/{self.BASE} #2/")]:
+        for key in [k for k in data if k.startswith(f"static/{self.BASE} [-RSX]/")]:
             del data[key]
-        resolved = _resolve_source(data, combo=f"{self.BASE} #1", quantity="My")
+        resolved = _resolve_source(data, combo=f"{self.BASE} [+RSX]", quantity="My")
         assert resolved.storey_series
         assert resolved.storey_extras == []
+
+    def test_resolution_expands_the_definitions_once(self):
+        """Members and legends share one grouping resolution, not one each."""
+        from unittest.mock import patch
+
+        from fea_toolkit.plotting import force_diagram as fd
+
+        data = _forked_npz_dict()
+        definition = {
+            self.BASE: {
+                "type": "Linear Add",
+                "entries": [
+                    {"ref": "DEAD", "factor": 1.3},
+                    {"ref": "RSX", "factor": 1.4, "magnitude": True},
+                ],
+            }
+        }
+        with patch.object(fd, "_definition_pairs", wraps=fd._definition_pairs) as pairs_spy:
+            resolved = fd._resolve_source(
+                data, combo=f"{self.BASE} [+RSX]", quantity="My", combinations=definition
+            )
+        # Several lookups happen — the group has a second member and both it
+        # and the primary curve need a legend — but the definition is only
+        # expanded once for all of them.
+        assert len(resolved.storey_extras) == 1
+        assert pairs_spy.call_count == 1
 
 
 # ============================================================================
@@ -478,11 +511,11 @@ def _nested_static_results() -> dict:
 
 
 def _case_meta() -> dict:
-    """``case_meta`` for :func:`_nested_static_results` — note the names do not fork."""
+    """``case_meta`` for :func:`_nested_static_results` — the names say nothing."""
     return {
-        "DEAD": {"group": "DEAD", "kind": ""},
-        "CQ": {"group": "COMB9", "kind": "+QE"},
-        "CQ rev": {"group": "COMB9", "kind": "-QE"},
+        "DEAD": {"group": "DEAD", "family": "single", "coords": ""},
+        "CQ": {"group": "COMB9", "family": "fork", "coords": "+RSX"},
+        "CQ rev": {"group": "COMB9", "family": "fork", "coords": "-RSX"},
     }
 
 
@@ -492,34 +525,36 @@ class TestForkMetadataRoundTrip:
     def test_case_meta_arrays_align_and_default(self):
         from fea_toolkit.io.results_schema import case_meta_arrays
 
-        # No metadata at all -> no arrays, so writers can update unconditionally
-        # and an unannotated archive is identical to one written before P20.
+        # No metadata at all -> no arrays, so writers can update unconditionally.
         assert case_meta_arrays(["A"], None) == {}
         assert case_meta_arrays(["A"], {}) == {}
-        out = case_meta_arrays(["A", "B", "C"], {"B": {"group": "G", "kind": "+QE"}})
+        out = case_meta_arrays(
+            ["A", "B", "C"], {"B": {"group": "G", "family": "fork", "coords": "+RSX"}}
+        )
         assert list(out["static_case_group"]) == ["", "G", ""]
-        assert list(out["static_case_kind"]) == ["", "+QE", ""]
+        assert list(out["static_case_family"]) == ["", "fork", ""]
+        assert list(out["static_case_coords"]) == ["", "+RSX", ""]
 
-    def test_writer_metadata_pairs_renamed_cases(self):
+    def test_writer_metadata_groups_renamed_cases(self):
         from fea_toolkit.io.unified_writer import collect_static_arrays
-        from fea_toolkit.plotting.force_diagram import _case_pairs, _companion_case
+        from fea_toolkit.plotting.force_diagram import _fork_legend, _group_members
 
         arrays = collect_static_arrays(_nested_static_results(), _case_meta())
         assert list(arrays["static_case_labels"]) == ["DEAD", "CQ", "CQ rev"]
         assert list(arrays["static_case_group"]) == ["DEAD", "COMB9", "COMB9"]
-        assert list(arrays["static_case_kind"]) == ["", "+QE", "-QE"]
-        # The names do not fork, so only the metadata can pair them.
-        assert _case_pairs(arrays)["CQ"] == ("COMB9", 1)
-        assert _companion_case(arrays, "CQ") == "CQ rev"
-        assert _companion_case(arrays, "CQ rev") == "CQ"
+        assert list(arrays["static_case_coords"]) == ["", "+RSX", "-RSX"]
+        # The names say nothing, so only the metadata can group them.
+        assert _group_members(arrays, "CQ") == ["CQ", "CQ rev"]
+        assert _fork_legend(arrays, "CQ") == "COMB9 [+RSX]"
+        assert _fork_legend(arrays, "CQ rev") == "COMB9 [-RSX]"
 
-    def test_archive_round_trip_pairs_from_metadata(self):
+    def test_archive_round_trip_groups_from_metadata(self):
         import os
         import tempfile
 
         from fea_toolkit.io.npz_reader import read_results
         from fea_toolkit.io.unified_writer import collect_static_arrays
-        from fea_toolkit.plotting.force_diagram import _companion_case
+        from fea_toolkit.plotting.force_diagram import _group_members
 
         arrays = collect_static_arrays(_nested_static_results(), _case_meta())
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as fh:
@@ -528,29 +563,38 @@ class TestForkMetadataRoundTrip:
         try:
             data = read_results(path)
             assert "static_case_group" in data
-            assert list(data["static_case_kind"]) == ["", "+QE", "-QE"]
-            assert _companion_case(data, "CQ") == "CQ rev"
+            assert list(data["static_case_coords"]) == ["", "+RSX", "-RSX"]
+            assert _group_members(data, "CQ") == ["CQ", "CQ rev"]
         finally:
             os.remove(path)
 
-    def test_archive_without_metadata_pairs_by_label(self):
+    def test_archive_without_metadata_carries_no_grouping(self):
+        """No ``case_meta`` -> no arrays, and therefore no groups."""
         from fea_toolkit.io.unified_writer import collect_static_arrays
-        from fea_toolkit.plotting.force_diagram import _companion_case
+        from fea_toolkit.plotting.force_diagram import _group_members, _resolve_case_info
 
         nested = {
             "DEAD": {"element_forces": {"my_i": [10.0]}},
-            "COMB9 #1": {"element_forces": {"my_i": [30.0]}},
-            "COMB9 #2": {"element_forces": {"my_i": [-10.0]}},
+            "CQ": {"element_forces": {"my_i": [30.0]}},
+            "CQ rev": {"element_forces": {"my_i": [-10.0]}},
         }
         arrays = collect_static_arrays(nested)  # no case_meta
         assert "static_case_group" not in arrays
-        assert "static_case_kind" not in arrays
-        assert _companion_case(arrays, "COMB9 #1") == "COMB9 #2"
+        assert "static_case_coords" not in arrays
+        # Each case is its own group — the names are not parsed for a hint.
+        assert _resolve_case_info(arrays) == {
+            "DEAD": {"group": "DEAD", "coords": ""},
+            "CQ": {"group": "CQ", "coords": ""},
+            "CQ rev": {"group": "CQ rev", "coords": ""},
+        }
+        assert _group_members(arrays, "CQ") == ["CQ"]
 
     def test_flat_results_get_metadata_for_the_unnamed_case(self):
         from fea_toolkit.io.unified_writer import collect_static_arrays
 
-        arrays = collect_static_arrays({"fx_i": [1.0]}, {"1": {"group": "CASE1", "kind": ""}})
+        arrays = collect_static_arrays(
+            {"fx_i": [1.0]}, {"1": {"group": "CASE1", "family": "single", "coords": ""}}
+        )
         assert list(arrays["static_case_labels"]) == ["1"]
         assert list(arrays["static_case_group"]) == ["CASE1"]
 
@@ -560,9 +604,78 @@ class TestForkMetadataRoundTrip:
 
         arrays = _collect_static(_nested_static_results(), _case_meta())
         assert list(arrays["static_case_group"]) == ["DEAD", "COMB9", "COMB9"]
-        assert list(arrays["static_case_kind"]) == ["", "+QE", "-QE"]
+        assert list(arrays["static_case_coords"]) == ["", "+RSX", "-RSX"]
         # Without metadata the arrays are simply absent.
         assert "static_case_group" not in _collect_static(_nested_static_results())
+
+
+class TestLinearAddOverEnvelopeRoundTrip:
+    """A nested Envelope reaches the archive as an envelope pair, not a fork."""
+
+    def test_archive_reads_back_as_an_envelope_pair(self):
+        """A Linear Add's *inherited* family survives the archive.
+
+        ``LINEAR_OF_ENV = DEAD + ENV`` inherits the Envelope's ``max`` / ``min``
+        pair, so the archive records ``family="envelope"`` and coordinates
+        ``max`` / ``min``.  The reader then labels the two extremes ``[max]`` /
+        ``[min]`` — never ``[+QE]`` / ``[-QE]``, which a count-based ``"fork"``
+        would have implied.
+        """
+        import os
+        import tempfile
+
+        from fea_toolkit.io.npz_reader import read_results
+        from fea_toolkit.io.unified_writer import collect_static_arrays
+        from fea_toolkit.model.load_combinations import (
+            classify_combination_refs,
+            combination_case_meta,
+            generate_combination_results,
+        )
+        from fea_toolkit.model.sap_data import LoadCase, LoadCombination, LoadCombinationEntry
+        from fea_toolkit.plotting.force_diagram import (
+            _fork_legend,
+            _group_members,
+            _resolve_case_info,
+        )
+
+        def _case(name):
+            return LoadCase(name, "LinStatic", "Prog Det", "Dead", "Prog Det", "Non-Composite")
+
+        def _combo(name, combo_type, refs):
+            return LoadCombination(name, combo_type, [LoadCombinationEntry(n, f) for n, f in refs])
+
+        cases = {name: _case(name) for name in ("DEAD", "WIND")}
+        combos = {
+            "ENV": _combo("ENV", "Envelope", [("DEAD", 1.0), ("WIND", 1.0)]),
+            "LINEAR_OF_ENV": _combo("LINEAR_OF_ENV", "Linear Add", [("DEAD", 1.0), ("ENV", 1.0)]),
+        }
+        classify_combination_refs(combos, cases)
+        composites = generate_combination_results(combos["LINEAR_OF_ENV"], cases, combos)
+        names = [c.name for c in composites]
+        assert names == ["LINEAR_OF_ENV [max]", "LINEAR_OF_ENV [min]"]
+        assert [c.family for c in composites] == ["envelope", "envelope"]
+        meta = combination_case_meta(composites, cases, combos)
+
+        payloads = {
+            c.name: {"element_forces": {"my_i": [float(i + 1)], "my_j": [-float(i + 1)]}}
+            for i, c in enumerate(composites)
+        }
+        payloads["DEAD"] = {"element_forces": {"my_i": [1.0]}}
+        payloads["WIND"] = {"element_forces": {"my_i": [2.0]}}
+
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as fh:
+            path = fh.name
+        np.savez(path, **collect_static_arrays(payloads, meta))
+        try:
+            data = read_results(path)
+            assert list(data["static_case_family"])[: len(names)] == ["envelope"] * len(names)
+            assert list(data["static_case_coords"])[: len(names)] == ["max", "min"]
+            info = _resolve_case_info(data)
+            assert info[names[0]] == {"group": "LINEAR_OF_ENV", "coords": "max"}
+            assert [_fork_legend(data, name, info=info) for name in names] == names
+            assert _group_members(data, names[0], info=info) == names
+        finally:
+            os.remove(path)
 
 
 # ============================================================================
@@ -574,25 +687,25 @@ def _multi_fork_results() -> dict:
     """A 2² fork — ``DEAD + RSX + RSY`` with all four sign corners present."""
     return {
         "DEAD": {"element_forces": {"my_i": [10.0]}},
-        "COMB9 #1": {"element_forces": {"my_i": [110.0]}},
-        "COMB9 #2": {"element_forces": {"my_i": [90.0]}},
-        "COMB9 #3": {"element_forces": {"my_i": [-10.0]}},
-        "COMB9 #4": {"element_forces": {"my_i": [-30.0]}},
+        "COMB9 [+RSX, +RSY]": {"element_forces": {"my_i": [110.0]}},
+        "COMB9 [+RSX, -RSY]": {"element_forces": {"my_i": [90.0]}},
+        "COMB9 [-RSX, +RSY]": {"element_forces": {"my_i": [-10.0]}},
+        "COMB9 [-RSX, -RSY]": {"element_forces": {"my_i": [-30.0]}},
     }
 
 
 def _multi_fork_meta() -> dict:
-    """``case_meta`` for :func:`_multi_fork_results` — coordinates, no ``kind``."""
+    """``case_meta`` for :func:`_multi_fork_results` — group, family, coords."""
     coords = {
-        "COMB9 #1": "+RSX|+RSY",
-        "COMB9 #2": "+RSX|-RSY",
-        "COMB9 #3": "-RSX|+RSY",
-        "COMB9 #4": "-RSX|-RSY",
+        "COMB9 [+RSX, +RSY]": "+RSX|+RSY",
+        "COMB9 [+RSX, -RSY]": "+RSX|-RSY",
+        "COMB9 [-RSX, +RSY]": "-RSX|+RSY",
+        "COMB9 [-RSX, -RSY]": "-RSX|-RSY",
     }
-    meta = {"DEAD": {"group": "DEAD", "kind": "", "family": "single", "coords": ""}}
+    meta = {"DEAD": {"group": "DEAD", "family": "single", "coords": ""}}
     meta.update(
         {
-            name: {"group": "COMB9", "kind": "", "family": "fork", "coords": coord}
+            name: {"group": "COMB9", "family": "fork", "coords": coord}
             for name, coord in coords.items()
         }
     )
@@ -626,57 +739,115 @@ class TestMultiMemberGrouping:
     def test_fields_absent_from_the_metadata_are_not_written(self):
         from fea_toolkit.io.results_schema import case_meta_arrays
 
-        # group/kind only — byte-identical to a pre-P21 archive.
-        out = case_meta_arrays(["A"], {"A": {"group": "G", "kind": "+QE"}})
-        assert set(out) == {"static_case_group", "static_case_kind"}
+        # ``group`` only — a caller supplying nothing else writes nothing else.
+        out = case_meta_arrays(["A"], {"A": {"group": "G"}})
+        assert set(out) == {"static_case_group"}
 
     def test_group_members_lists_every_corner(self):
         from fea_toolkit.io.unified_writer import collect_static_arrays
-        from fea_toolkit.plotting.force_diagram import _companion_case, _group_members
+        from fea_toolkit.plotting.force_diagram import _group_members
 
         arrays = collect_static_arrays(_multi_fork_results(), _multi_fork_meta())
-        assert _group_members(arrays, "COMB9 #1") == [
-            "COMB9 #1",
-            "COMB9 #2",
-            "COMB9 #3",
-            "COMB9 #4",
+        assert _group_members(arrays, "COMB9 [+RSX, +RSY]") == [
+            "COMB9 [+RSX, +RSY]",
+            "COMB9 [+RSX, -RSY]",
+            "COMB9 [-RSX, +RSY]",
+            "COMB9 [-RSX, -RSY]",
         ]
         assert _group_members(arrays, "DEAD") == ["DEAD"]
-        # Sense pairing still refuses an ambiguous group; grouping does not.
-        assert _companion_case(arrays, "COMB9 #1") is None
 
     def test_legend_uses_the_coordinates(self):
         from fea_toolkit.io.unified_writer import collect_static_arrays
         from fea_toolkit.plotting.force_diagram import _fork_legend
 
         arrays = collect_static_arrays(_multi_fork_results(), _multi_fork_meta())
-        assert _fork_legend(arrays, "COMB9 #3") == "COMB9 [-RSX, +RSY]"
+        # The legend is the case's own name, rebuilt from the metadata.
+        assert _fork_legend(arrays, "COMB9 [-RSX, +RSY]") == "COMB9 [-RSX, +RSY]"
         assert _fork_legend(arrays, "DEAD") == "DEAD"
 
-    def test_definition_supplies_grouping_without_archive_metadata(self):
-        from fea_toolkit.plotting.force_diagram import _case_pairs, _group_members
+    def test_helpers_reuse_a_supplied_info_record(self):
+        """A supplied record is used as given, so the grouping is not re-resolved."""
+        from fea_toolkit.io.unified_writer import collect_static_arrays
+        from fea_toolkit.plotting.force_diagram import _fork_legend, _group_members
 
-        archive = {"static_case_labels": np.array(["COMB9 #1", "COMB9 #2"])}
+        arrays = collect_static_arrays(_multi_fork_results(), _multi_fork_meta())
+        # Deliberately contradicts the archive: an internal lookup would group
+        # all four corners as COMB9 and label the legend "COMB9 [...]".
+        supplied = {
+            "COMB9 [+RSX, +RSY]": {"group": "X", "coords": "+RSX"},
+            "COMB9 [+RSX, -RSY]": {"group": "X", "coords": "-RSX"},
+        }
+        assert _group_members(arrays, "COMB9 [+RSX, +RSY]", info=supplied) == [
+            "COMB9 [+RSX, +RSY]",
+            "COMB9 [+RSX, -RSY]",
+        ]
+        assert _fork_legend(arrays, "COMB9 [+RSX, -RSY]", info=supplied) == "X [-RSX]"
+
+    def test_definition_supplies_grouping_without_archive_metadata(self):
+        from fea_toolkit.plotting.force_diagram import _group_members, _resolve_case_info
+
+        archive = {"static_case_labels": np.array(["COMB9 [+SPECIAL]", "COMB9 [-SPECIAL]"])}
         assert "static_case_group" not in archive
         definitions = _single_fork_definition()
-        assert _case_pairs(archive, definitions) == {
-            "COMB9 #1": ("COMB9", 1),
-            "COMB9 #2": ("COMB9", -1),
+        assert _resolve_case_info(archive, definitions) == {
+            "COMB9 [+SPECIAL]": {"group": "COMB9", "coords": "+SPECIAL"},
+            "COMB9 [-SPECIAL]": {"group": "COMB9", "coords": "-SPECIAL"},
         }
-        assert _group_members(archive, "COMB9 #1", definitions) == ["COMB9 #1", "COMB9 #2"]
+        assert _group_members(archive, "COMB9 [+SPECIAL]", definitions) == [
+            "COMB9 [+SPECIAL]",
+            "COMB9 [-SPECIAL]",
+        ]
 
     def test_definition_pairs_read_the_magnitude_hint(self):
         from fea_toolkit.plotting.force_diagram import _definition_pairs
 
         assert _definition_pairs(_single_fork_definition()) == {
-            "COMB9 #1": ("COMB9", 1),
-            "COMB9 #2": ("COMB9", -1),
+            "COMB9 [+SPECIAL]": ("COMB9", "+SPECIAL"),
+            "COMB9 [-SPECIAL]": ("COMB9", "-SPECIAL"),
         }
         # Without the hint and without load_cases there is no magnitude, so the
-        # definition contributes a single (unforked) variant.
+        # definition contributes a single (unforked) variant with no coordinate.
         assert _definition_pairs(
             {"G": {"type": "Linear Add", "entries": [["DEAD", 1.0], ["SPECIAL", 1.0]]}}
-        ) == {"G": ("G", 0)}
+        ) == {"G": ("G", "")}
+
+    def test_nested_combination_resolves_through_the_definition(self):
+        """A nested reference is classified before the outer combo expands.
+
+        ``OUTER`` references ``SEISM`` (itself a combination).  Resolving the
+        definition must mark ``SEISM`` as a branch, so ``OUTER`` forks on the
+        spectrum magnitude ``SEISM`` brings in; treating the reference as a
+        leaf would collapse ``OUTER`` to one unforked variant.
+        """
+        from fea_toolkit.model.sap_data import LoadCase
+        from fea_toolkit.plotting.force_diagram import _definition_pairs, _resolve_case_info
+
+        definitions = {
+            "SEISM": {"type": "Linear Add", "entries": [{"ref": "RSX", "factor": 1.0}]},
+            "OUTER": {
+                "type": "Linear Add",
+                "entries": [
+                    {"ref": "SEISM", "factor": 1.0},
+                    {"ref": "GRAV", "factor": 1.0},
+                ],
+            },
+        }
+        load_cases = {
+            "RSX": LoadCase("RSX", "LinRespSpec", "Prog Det", "QUAKE", "Prog Det", ""),
+            "GRAV": LoadCase("GRAV", "LinStatic", "Prog Det", "DEAD", "Prog Det", ""),
+        }
+        # SEISM itself is an unforked variant of the definition; OUTER forks on
+        # the magnitude SEISM contributes.
+        assert _definition_pairs(definitions, load_cases) == {
+            "SEISM": ("SEISM", ""),
+            "OUTER [+SEISM]": ("OUTER", "+SEISM"),
+            "OUTER [-SEISM]": ("OUTER", "-SEISM"),
+        }
+        archive = {"static_case_labels": np.array(["OUTER [+SEISM]", "OUTER [-SEISM]"])}
+        assert _resolve_case_info(archive, definitions, load_cases) == {
+            "OUTER [+SEISM]": {"group": "OUTER", "coords": "+SEISM"},
+            "OUTER [-SEISM]": {"group": "OUTER", "coords": "-SEISM"},
+        }
 
     def test_render_static_2d_draws_one_curve_per_group_member(self):
         import matplotlib.pyplot as plt

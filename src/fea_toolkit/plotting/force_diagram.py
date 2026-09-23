@@ -63,7 +63,6 @@ keys such as ``My_i`` / ``My_j`` (CQC-combined).  ``plot_force_diagram``
 normalises both the ``'My_i'`` and ``'My'`` key styles internally.
 """
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -529,12 +528,6 @@ def _npz_unit(source: dict, key: str, default: str = "?") -> str:
 
 # ── Two-sided (fork) pairing ─────────────────────────────────────────
 
-#: ``static_case_kind`` markers for the two signed senses of a magnitude.  A
-#: combination that mixes a spectrum magnitude with signed terms is emitted
-#: twice by
-#: :func:`~fea_toolkit.model.load_combinations.generate_combination_results`.
-_FORK_KINDS = {"+QE": 1, "-QE": -1}
-
 #: Colour / marker cycle for the extra curves of a combination group — the
 #: primary curve is drawn in blue with circles, so these start at orange with
 #: squares.  A 2ⁿ fork of three magnitudes needs seven.
@@ -549,10 +542,6 @@ _GROUP_COLOURS = (
 )
 _GROUP_MARKERS = ("s", "^", "D", "v", "P", "X", "<")
 
-#: Fallback for archives written before ``static_case_kind`` existed:
-#: ``_name_variants`` names the forks ``"<combo> #1"`` / ``"<combo> #2"``.
-_FORK_LABEL_RE = re.compile(r"^(?P<base>.*?)\s*#(?P<n>\d+)$")
-
 
 def _str_array(source, key) -> list:
     """Read a 1-D string array from NPZ data; ``[]`` when absent or empty."""
@@ -562,98 +551,77 @@ def _str_array(source, key) -> list:
     return [str(v) for v in np.asarray(arr).ravel()]
 
 
-def _case_pairs(source, combinations=None, load_cases=None) -> dict:
-    """Map each static case to ``(group, sense)`` for spectrum-fork pairing.
+def _resolve_case_info(source, combinations=None, load_cases=None) -> dict:
+    """Resolve the group and coordinates of every static case **once**.
 
-    A combination that superposes a spectrum magnitude forks into the two
-    senses the earthquake can act in, and **both** are needed to read the
-    result.  The pairing is resolved from data where possible:
+    A combination that superposes a spectrum magnitude is emitted once per sign
+    it can act in, and every variant of the group is needed to read the result.
+    The identity is resolved from metadata only, in priority order:
 
     1. an explicit *combinations* definition — see :func:`_definition_pairs` —
-       else
-    2. the ``static_case_group`` / ``static_case_kind`` arrays — ``kind`` is
-       ``"+QE"`` / ``"-QE"`` for a single-sense fork and ``group`` is the
-       combination every variant was generated from, else
-    3. the ``"<combo> #1"`` / ``"<combo> #2"`` label convention that
-       :func:`~fea_toolkit.model.load_combinations._name_variants` emits, so
-       archives predating the metadata still pair.
+       which supplies the names, groups and coordinates of its own variants even
+       for an archive that carries no metadata;
+    2. the archive's ``static_case_group`` / ``static_case_coords`` arrays.
+
+    A case in neither is its **own group** with no coordinate: a case name is a
+    display label, never a source of grouping, so nothing is ever parsed out of
+    it.  This is the read side's single resolution — one call yields everything
+    :func:`_group_members` and :func:`_fork_legend` need, so the combination
+    definitions are expanded once per archive rather than once per curve.
 
     Args:
         source: NPZ data dict or ``NpzFile``.
         combinations: Optional external definition set
             (``{name: {"type", "entries", ...}}`` or
-            ``{name: LoadCombination}``).  Its variants outrank the archive's
-            own annotations for the names it generates.
+            ``{name: LoadCombination}``).  Its variants take precedence for the
+            names it generates.
         load_cases: Optional ``{name: LoadCase}`` mapping, used only to expand
             *combinations* faithfully (a response-spectrum reference forks).
 
     Returns:
-        ``{case_name: (group, sense)}`` — *sense* is ``+1`` / ``-1`` for a
-        **single-sense** forked magnitude combination and ``0`` for an ordinary
-        case or a multi-member group (a 2ⁿ fork's sense lives in its
-        coordinates, not in one sign).
+        ``{case_name: {"group", "coords"}}`` — *group* is the combination the
+        case was generated from (``static_case_group``, or the definition), and
+        *coords* is its coordinate inside that group (``"+RSX"``,
+        ``"+RSX|-RSY"``, ``"max"``, ``"SUB|DEAD"``, or ``""`` for a group with a
+        single member).  Rendered, they are exactly the case's own name.
     """
     from ..io.npz_reader import _get_static_cases
 
     names = list(_get_static_cases(source))
     groups = _str_array(source, "static_case_group")
-    kinds = _str_array(source, "static_case_kind")
+    coords_by_case = _case_coords(source)
 
-    pairs: dict = {}
+    definition_info: dict = {}
     if combinations is not None:
         # Only the definition's variants this archive actually holds, so a set
         # covering combinations that were never exported cannot pollute the
         # grouping of the ones that were.
         available = set(names)
-        pairs.update(
-            {
-                name: pair
-                for name, pair in _definition_pairs(combinations, load_cases).items()
-                if name in available
-            }
-        )
+        definition_info = {
+            name: pair
+            for name, pair in _definition_pairs(combinations, load_cases).items()
+            if name in available
+        }
 
-    # Label-derived bases, counted BEFORE assigning a sense.  The ``#1`` /
-    # ``#2`` convention is only trustworthy when a base appears exactly twice:
-    # two forked spectrum entries give four cartesian variants, where ``#1``
-    # and ``#2`` are *not* the two senses of one magnitude.  A longer group is
-    # therefore left unpaired rather than mismatched.
-    numbered: dict = {}
-    for name in names:
-        match = _FORK_LABEL_RE.match(name)
-        if match and int(match.group("n")) in (1, 2):
-            numbered.setdefault(match.group("base"), []).append(name)
-
+    info: dict = {}
     for i, name in enumerate(names):
-        if name in pairs:
-            continue
-        group = groups[i] if i < len(groups) else ""
-        kind = kinds[i] if i < len(kinds) else ""
-        if kind in _FORK_KINDS:
-            pairs[name] = (group or name, _FORK_KINDS[kind])
-            continue
-        if group:
-            # Annotated (P20 / P21) but not a single-sense fork: the archive
-            # says which combination generated it, so group it and let the
-            # coordinates distinguish the members.
-            pairs[name] = (group, 0)
-            continue
-        # No metadata — fall back to the label convention.
-        match = _FORK_LABEL_RE.match(name)
-        base = match.group("base") if match else name
-        if match and len(numbered.get(base, [])) == 2:
-            pairs[name] = (base, 1 if int(match.group("n")) == 1 else -1)
+        if name in definition_info:
+            group, coords = definition_info[name]
         else:
-            pairs[name] = (name, 0)
-    return pairs
+            # No metadata for this case: it is its own group, with no
+            # coordinate — never a guess parsed out of the name.
+            group = groups[i] if i < len(groups) and groups[i] else name
+            coords = coords_by_case.get(name, "")
+        info[name] = {"group": group, "coords": coords}
+    return info
 
 
 def _definition_pairs(combinations, load_cases=None) -> dict:
-    """``{variant_name: (group, sense)}`` for a definition's own variants.
+    """``{variant_name: (group, coords)}`` for a definition's own variants.
 
     Expands *combinations* through the same code path that generated the
-    archive, so the resolved names are the archive's case names and the
-    pairing comes from the definition rather than from the ``"#n"`` label.
+    archive, so the resolved names are the archive's case names and the identity
+    comes from the definition rather than from the archive's own arrays.
 
     Args:
         combinations: Canonical definition dict or ``{name: LoadCombination}``.
@@ -663,18 +631,24 @@ def _definition_pairs(combinations, load_cases=None) -> dict:
             response spectra.
 
     Returns:
-        ``{case_name: (group, sense)}``.  A definition that cannot be expanded
-        (it references cases the archive never ran) contributes nothing, so
-        the caller falls back to the archive's own annotations.
+        ``{case_name: (group, coords)}``.  A definition that cannot be expanded
+        (it references cases the archive never ran) contributes nothing, so the
+        caller falls back to the archive's own metadata.
     """
     from ..model.load_combinations import (
-        as_combination_mapping,
         combination_case_meta,
         generate_combination_results,
+        merge_combination_sets,
     )
 
     try:
-        combos = as_combination_mapping(combinations)
+        # ``merge_combination_sets`` classifies every reference (combo vs case)
+        # against the merged mapping — and, when *load_cases* is given, against
+        # the model's cases — so a nested combination reference is resolved as a
+        # branch *before* ``generate_combination_results`` expands it.  A bare
+        # ``as_combination_mapping`` leaves every entry ``kind="case"``, which
+        # makes the outer combination treat a nested combo as a leaf.
+        combos = merge_combination_sets(combinations, load_cases=load_cases)
     except (TypeError, ValueError):
         return {}
     pairs: dict = {}
@@ -683,9 +657,8 @@ def _definition_pairs(combinations, load_cases=None) -> dict:
             composites = generate_combination_results(combo, load_cases or {}, combos)
         except (KeyError, ValueError):
             continue
-        meta = combination_case_meta(composites, load_cases or {}, combos)
-        for name, info in meta.items():
-            pairs[name] = (info.get("group") or name, _FORK_KINDS.get(info.get("kind", ""), 0))
+        for name, info in combination_case_meta(composites, load_cases or {}, combos).items():
+            pairs[name] = (info["group"] or name, info["coords"])
     return pairs
 
 
@@ -700,53 +673,69 @@ def _case_coords(source) -> dict:
     }
 
 
-def _group_members(source, case_name, combinations=None, load_cases=None) -> list:
+def _group_members(source, case_name, combinations=None, load_cases=None, info=None) -> list:
     """Every static case generated from the same combination as *case_name*.
 
     Includes *case_name* itself, in archive order.  A case with no group (an
-    ordinary load case) is its own only member.
+    ordinary load case, or an archive carrying no metadata) is its own only
+    member.
+
+    Args:
+        source: NPZ data dict or ``NpzFile``.
+        case_name: Static case to group.
+        combinations: Optional external combination definition set — see
+            :func:`_resolve_case_info`.
+        load_cases: Optional ``{name: LoadCase}`` mapping — see
+            :func:`_resolve_case_info`.
+        info: A pre-resolved :func:`_resolve_case_info` record to reuse, or
+            ``None`` to resolve on demand.  Pass it when several members and
+            legends come from the same archive so the grouping — and the
+            combination-definition expansion behind it — happens **once**.
+
+    Returns:
+        The group's case names in archive order; ``[]`` for an empty
+        *case_name*.
     """
     if not case_name:
         return []
-    pairs = _case_pairs(source, combinations, load_cases)
-    group = pairs.get(case_name, (case_name, 0))[0]
-    return [name for name, (grp, _) in pairs.items() if grp == group]
+    if info is None:
+        info = _resolve_case_info(source, combinations, load_cases)
+    group = info.get(case_name, {"group": case_name})["group"]
+    return [name for name, item in info.items() if item["group"] == group]
 
 
-def _companion_case(source, case_name, combinations=None, load_cases=None) -> Optional[str]:
-    """Name of the opposite spectrum fork of *case_name*, else ``None``.
+def _fork_legend(source, case_name, combinations=None, load_cases=None, info=None) -> str:
+    """Legend text for *case_name* — its group plus its coordinates.
 
-    Returns ``None`` unless **exactly one** other case shares the group with
-    the opposite sense, so a combination with more than two variants is left
-    unpaired rather than mismatched.  For a multi-member group use
-    :func:`_group_members`, which needs no such restriction.
-    """
-    if not case_name:
-        return None
-    pairs = _case_pairs(source, combinations, load_cases)
-    group, sense = pairs.get(case_name, (case_name, 0))
-    if sense == 0:
-        return None
-    matches = [n for n, (g, s) in pairs.items() if g == group and s == -sense]
-    return matches[0] if len(matches) == 1 else None
+    ``"SEISM [+RSX]"`` for a fork, ``"ENV [max]"`` for an envelope extreme,
+    ``"OUTER [SUB, DEAD]"`` for a ``per_path`` branch, and the plain group name
+    for a single case.  This reconstructs the case's own name from the metadata
+    rather than reading it off the label, so a renamed case still gets the right
+    legend.
 
+    Args:
+        source: NPZ data dict or ``NpzFile``.
+        case_name: Static case to label.
+        combinations: Optional external combination definition set — see
+            :func:`_resolve_case_info`.
+        load_cases: Optional ``{name: LoadCase}`` mapping — see
+            :func:`_resolve_case_info`.
+        info: A pre-resolved :func:`_resolve_case_info` record to reuse — it
+            already carries the case's coordinate string, so a group of *n*
+            curves costs one lookup rather than *n* array reads.
 
-def _fork_legend(source, case_name, combinations=None, load_cases=None) -> str:
-    """Legend text for *case_name* — its group plus its sense or coordinates.
-
-    ``"COMB1 [+QE]"`` for a single-sense fork, ``"FLAT4 [+RSX, -RSY]"`` for a
-    multi-fork coordinate, ``"ENV [max]"`` for an envelope extreme, else the
-    group name.
+    Returns:
+        The legend string, or ``""`` for an empty *case_name*.
     """
     if not case_name:
         return ""
-    group, sense = _case_pairs(source, combinations, load_cases).get(case_name, (case_name, 0))
-    if sense:
-        return f"{group} [{'+QE' if sense > 0 else '-QE'}]"
-    coords = _case_coords(source).get(case_name, "")
+    if info is None:
+        info = _resolve_case_info(source, combinations, load_cases)
+    entry = info.get(case_name, {"group": case_name, "coords": ""})
+    coords = entry.get("coords", "")
     if coords:
-        return f"{group} [{coords.replace('|', ', ')}]"
-    return group
+        return f"{entry['group']} [{coords.replace('|', ', ')}]"
+    return entry["group"]
 
 
 def _storey_xy(storey_series, q_upper) -> tuple:
@@ -797,7 +786,7 @@ def _resolve_source(
             *by_storey* is also ``True``; a member whose group sum is empty is
             omitted.
         combinations: Optional external combination definition set used to
-            resolve the grouping (see :func:`_case_pairs`); when omitted the
+            resolve the grouping (see :func:`_resolve_case_info`); when omitted the
             archive's ``static_case_*`` arrays are used, then the ``#1`` /
             ``#2`` label convention.
         load_cases: Optional ``{name: LoadCase}`` mapping used only to expand
@@ -899,6 +888,12 @@ def _resolve_source(
         geometry = _resolve_mesh_data(source, collapse_to_parents=collapse_to_parents)
         case_prefix = _resolve_npz_static_case(source, combo)
         case_name = case_prefix[len("static/") : -1]
+        # Resolve the grouping, sense and coordinates **once** and hand the
+        # record to every consumer below: ``_resolve_case_info`` expands the
+        # combination definitions (``_definition_pairs``) when one is supplied,
+        # so re-deriving it per group member and per legend would repeat that
+        # expansion for every curve of a fork.
+        info = _resolve_case_info(source, combinations, load_cases)
         force_map = _extract_npz_frame_forces(source, case_prefix, geometry["frames"])
         series = _build_series_from_force_map(force_map, geometry["frames"], geometry["nodes"])
         # A spectrum combination is two-sided: sum every other member of the
@@ -907,7 +902,7 @@ def _resolve_source(
         # view — a per-element caller would discard them anyway.
         extras: list = []
         if both_sides and by_storey:
-            for member in _group_members(source, case_name, combinations, load_cases):
+            for member in _group_members(source, case_name, combinations, load_cases, info=info):
                 if member == case_name:
                     continue
                 member_map = _extract_npz_frame_forces(
@@ -919,7 +914,10 @@ def _resolve_source(
                 if not member_series:
                     continue
                 extras.append(
-                    (member_series, _fork_legend(source, member, combinations, load_cases))
+                    (
+                        member_series,
+                        _fork_legend(source, member, combinations, load_cases, info=info),
+                    )
                 )
         return ForceDiagramData(
             kind="static",
@@ -934,7 +932,7 @@ def _resolve_source(
             storey_cm=cm_method,
             storey_mode=storey_mode,
             storey_extras=extras,
-            storey_label=_fork_legend(source, case_name, combinations, load_cases),
+            storey_label=_fork_legend(source, case_name, combinations, load_cases, info=info),
         )
 
     # ── Builder / model + force_data ──────────────────────────────────
@@ -1333,9 +1331,9 @@ def plot_force_diagram(
             the result; a 2ⁿ fork (two independent spectra) has four corners and
             an envelope pair has two extremes — all are drawn.  Grouping comes
             from *combinations* (when given), else the archive's
-            ``static_case_group`` / ``static_case_kind`` / ``static_case_coords``
-            arrays, else the ``#1`` / ``#2`` label convention.  Default ``True``;
-            pass ``False`` for a single curve.
+            ``static_case_group`` / ``static_case_coords`` arrays; a case in
+            neither is its own group.  Default ``True``; pass ``False`` for a
+            single curve.
         combinations: An **external combination definition set** — the canonical
             ``{name: {"type", "entries", ...}}`` dict (see
             :func:`fea_toolkit.io.combination_set.read_combination_set`) or a

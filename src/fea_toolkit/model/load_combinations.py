@@ -118,14 +118,20 @@ class CompositeLoadCase:
         family: The collection the composite belongs to — ``"single"`` (one
             composite, no fork), ``"fork"`` (2ⁿ signed senses of a magnitude),
             ``"envelope"`` (a ``max`` / ``min`` pair), ``"path"`` (one
-            composite per envelope branch) or ``"srss"``.  Empty when the
-            composite was built by hand rather than by
+            composite per envelope branch) or ``"srss"``.  Assigned where the
+            variants are produced, then propagated through a parent Linear Add
+            (a Linear Add over an Envelope is an envelope pair, not a fork), so
+            it describes the **variant axis** rather than the operator that
+            happened to produce the multiplicity.  Empty when the composite was
+            built by hand rather than by
             :func:`generate_combination_results`.
         coords: The composite's coordinate inside its family — the signed
             magnitude references of a fork (``("+RSX", "-RSY")``), the reduced
             extreme (``("max",)`` / ``("min",)``), the branch name of a
-            ``per_path`` variant, else ``()``.  This is the stable identity of
-            a variant; display names are derived from it, never the reverse.
+            ``per_path`` variant, else ``()``.  Empty whenever the family has a
+            single member: there is no axis position to sit on.  This is the
+            stable identity of a variant, and the display name is derived from
+            it, never the reverse.
     """
 
     name: str
@@ -695,7 +701,8 @@ def _scaled(composite: CompositeLoadCase, factor: float) -> CompositeLoadCase:
     A plain linear composite has its case factors scaled in place; anything
     else (max/min/srss, or a linear composite with children) is wrapped in a
     linear composite carrying a signed child term.  The child's coordinates
-    travel with it either way.
+    **and** its family travel with it either way, so a parent Linear Add can
+    propagate a referenced term's identity (see :func:`_linear_family`).
     """
     if composite.operator == "linear" and not composite.children:
         return replace(composite, cases={k: v * factor for k, v in composite.cases.items()})
@@ -704,6 +711,7 @@ def _scaled(composite: CompositeLoadCase, factor: float) -> CompositeLoadCase:
         operator="linear",
         children=[(factor, composite)],
         source=composite.source,
+        family=composite.family,
         coords=composite.coords,
     )
 
@@ -732,8 +740,12 @@ def _tag_coord(composite: CompositeLoadCase, tag: str) -> CompositeLoadCase:
     exactly) is why it need not be re-derived later from the signed factors: a
     ``.s2k`` spectrum case can be recognised by its load-case type, but an
     external definition's magnitude reference only by its own hint.
+
+    The composite is also marked ``family="fork"``: the tagged dimension *is* a
+    sign fork, so a parent Linear Add can propagate a truthful family instead of
+    inferring one from the number of variants it happens to have.
     """
-    return replace(composite, coords=(tag,))
+    return replace(composite, coords=(tag,), family="fork")
 
 
 def _merge_linear(a: CompositeLoadCase, b: CompositeLoadCase) -> CompositeLoadCase:
@@ -752,12 +764,30 @@ def _merge_linear(a: CompositeLoadCase, b: CompositeLoadCase) -> CompositeLoadCa
 
 
 def _name_variants(combo_name: str, composites: list[CompositeLoadCase]) -> list[CompositeLoadCase]:
-    """Assign unique names to the variants of one combination."""
-    if len(composites) == 1:
+    """Name every variant from its coordinates — never from its position.
+
+    ``coords`` is the variant's identity (see :class:`CompositeLoadCase`), so
+    deriving the display name from that same identity keeps the two in agreement
+    **by construction**: a fork reads ``COMBO [+RSX]``, an envelope extreme
+    ``COMBO [max]``, a ``per_path`` branch ``COMBO [SUB, DEAD]``, and a 2ⁿ fork
+    joins its axes with ``", "``.  A single variant with no coordinate keeps the
+    plain combination name.
+
+    Names are **display only** — a reader groups and labels from the persisted
+    metadata — so the one requirement left is uniqueness: a coordinate shared by
+    two variants (the same branch referenced twice) is numbered to keep them
+    apart.
+    """
+    if len(composites) == 1 and not composites[0].coords:
         composites[0].name = combo_name
-    else:
-        for i, composite in enumerate(composites):
-            composite.name = f"{combo_name} #{i + 1}"
+        return composites
+    used: dict[str, int] = {}
+    for composite in composites:
+        tag = ", ".join(str(coord) for coord in composite.coords)
+        base = f"{combo_name} [{tag}]" if tag else combo_name
+        seen = used.get(base, 0) + 1
+        used[base] = seen
+        composite.name = base if seen == 1 else f"{base} #{seen}"
     return composites
 
 
@@ -812,16 +842,51 @@ def _entry_variants(
         and _has_non_magnitude_terms(parent, load_cases, load_combinations)
     ):
         variants[0].coords = (_coord_tag(entry.name, entry.factor),)
+        variants[0].family = "fork"
         variants.append(
             CompositeLoadCase(
                 name=entry.name,
                 operator="linear",
                 cases={entry.name: -entry.factor},
                 source=entry.name,
+                family="fork",
                 coords=(_coord_tag(entry.name, -entry.factor),),
             )
         )
     return variants
+
+
+def _linear_family(inherited: list[str], count: int) -> str:
+    """``family`` for a Linear-Add expansion — decided by *cause*, not by count.
+
+    A Linear Add multiplies its terms (cartesian product) and forks ``±`` only
+    where a magnitude term meets a signed one, so ``count > 1`` is **not**
+    synonymous with a fork: a term that references a ``max`` / ``min`` Envelope
+    or a ``per_path`` branch set brings that family's multiplicity with it.
+    Each term's family is recorded where it was produced (see
+    :func:`_entry_variants`) and propagated here, so ``DEAD + ENV`` reads as an
+    **envelope** pair rather than a fork, and only a genuine signed fork is
+    labelled ``"fork"``.
+
+    Args:
+        inherited: The families of every expanded reference, in generation order.
+        count: The number of variants the expansion produced.
+
+    Returns:
+        ``"single"`` for one variant; ``"fork"`` when a signed forked magnitude
+        is among the terms; else the referenced term's own family
+        (``"envelope"`` / ``"path"`` / ``"srss"``); ``"fork"`` as a defensive
+        fallback for a multiplicity with no recorded cause, which preserves the
+        pre-propagation behaviour.
+    """
+    if count == 1:
+        return "single"
+    if "fork" in inherited:
+        return "fork"
+    for family in inherited:
+        if family != "single":
+            return family
+    return "fork"
 
 
 def _generate_linear(
@@ -833,13 +898,18 @@ def _generate_linear(
 ) -> list[CompositeLoadCase]:
     """Expand a Linear-Add combination into its composite variants."""
     cartesian = [CompositeLoadCase(name="", operator="linear", source=combo.name)]
+    # ``_merge_linear`` sums terms and therefore cannot carry their identity, so
+    # the families the references bring with them are collected here and applied
+    # to the merged variants below.
+    inherited: list[str] = []
     for entry in combo.entries:
         variants = _entry_variants(
             entry, combo, load_cases, load_combinations, envelope_mode, active
         )
+        inherited.extend(v.family for v in variants if v.family)
         cartesian = [_merge_linear(base, v) for base in cartesian for v in variants]
     variants = _name_variants(combo.name, cartesian)
-    family = "single" if len(variants) == 1 else "fork"
+    family = _linear_family(inherited, len(variants))
     for variant in variants:
         variant.family = family
     return variants
@@ -856,7 +926,7 @@ def _generate_envelope(
     if envelope_mode == "per_path":
         out: list[CompositeLoadCase] = []
         for entry in combo.entries:
-            variants = _entry_variants(
+            for variant in _entry_variants(
                 entry,
                 combo,
                 load_cases,
@@ -864,14 +934,16 @@ def _generate_envelope(
                 envelope_mode,
                 active,
                 fork_magnitudes=False,
-            )
-            for variant in variants:
-                variant.name = f"{combo.name} [{entry.name}]"
+            ):
                 variant.source = combo.name
                 variant.family = "path"
-                variant.coords = (entry.name,)
+                # Branch name first, then any coordinates the branch's own
+                # expansion produced, so a branch that forks (or is itself an
+                # envelope) keeps its child-fork identity instead of collapsing
+                # under the branch name.
+                variant.coords = (entry.name, *variant.coords)
                 out.append(variant)
-        return out
+        return _name_variants(combo.name, out)
 
     max_children: list[tuple[float, CompositeLoadCase]] = []
     min_children: list[tuple[float, CompositeLoadCase]] = []
@@ -889,24 +961,27 @@ def _generate_envelope(
         for variant in variants:
             max_children.append((1.0, variant))
             min_children.append((-1.0, variant) if magnitude else (1.0, variant))
-    return [
-        CompositeLoadCase(
-            name=f"{combo.name} [max]",
-            operator="max",
-            children=max_children,
-            source=combo.name,
-            family="envelope",
-            coords=("max",),
-        ),
-        CompositeLoadCase(
-            name=f"{combo.name} [min]",
-            operator="min",
-            children=min_children,
-            source=combo.name,
-            family="envelope",
-            coords=("min",),
-        ),
-    ]
+    return _name_variants(
+        combo.name,
+        [
+            CompositeLoadCase(
+                name="",
+                operator="max",
+                children=max_children,
+                source=combo.name,
+                family="envelope",
+                coords=("max",),
+            ),
+            CompositeLoadCase(
+                name="",
+                operator="min",
+                children=min_children,
+                source=combo.name,
+                family="envelope",
+                coords=("min",),
+            ),
+        ],
+    )
 
 
 def _generate_srss(
@@ -929,16 +1004,19 @@ def _generate_srss(
             fork_magnitudes=False,
         ):
             children.append((1.0, variant))
-    return [
-        CompositeLoadCase(
-            name=combo.name,
-            operator="srss",
-            children=children,
-            source=combo.name,
-            family="srss",
-            coords=("srss",),
-        )
-    ]
+    return _name_variants(
+        combo.name,
+        [
+            CompositeLoadCase(
+                name="",
+                operator="srss",
+                children=children,
+                source=combo.name,
+                family="srss",
+                coords=(),
+            )
+        ],
+    )
 
 
 def generate_combination_results(
@@ -1052,10 +1130,11 @@ def fork_coords(
 ) -> tuple:
     """Return the signed coordinate tuple identifying *composite* in its family.
 
-    The coordinates are the composite's stable identity: a reader groups
-    variants by them and derives any display label from them, never the
-    reverse (``generate_combination_results`` names forks ``"<combo> #n"``,
-    which carries no sign information at all).
+    The coordinates are the composite's **stable identity**: a reader groups
+    variants by them and derives any display label from them, never the reverse
+    (``generate_combination_results`` derives each variant's name from its
+    coordinates for exactly that reason).  A family with a single member has no
+    coordinate at all — there is no axis to sit on.
 
     Args:
         composite: A composite from :func:`generate_combination_results`.
@@ -1067,15 +1146,15 @@ def fork_coords(
 
     Returns:
         * ``("max",)`` / ``("min",)`` for an Envelope reduction,
-        * ``("srss",)`` for an SRSS magnitude,
         * the signed magnitude references of a fork, in generation order —
           ``("+RSX",)`` / ``("-RSX",)``, or the four ``("±RSX", "±RSY")``
           corners of two independent magnitudes,
-        * ``()`` when the composite has no forked dimension.
+        * ``()`` for anything with a single member (an SRSS magnitude, a plain
+          sum) or no forked dimension.
     """
     load_cases = load_cases or {}
     load_combinations = load_combinations or {}
-    if composite.operator in ("max", "min", "srss"):
+    if composite.operator in ("max", "min"):
         return (composite.operator,)
     coords: list[str] = []
     for case, factor in composite.cases.items():
@@ -1094,10 +1173,10 @@ def combination_case_meta(
 ) -> dict[str, dict[str, str]]:
     """Describe *composites* as per-case metadata for the NPZ writers.
 
-    This is the **single owner** of the sign rule: the ``"+QE"`` / ``"-QE"``
-    marker a plotter pairs on, the ``family`` it groups by and the ``coords``
-    it labels with are all derived here from a composite's own signed factors,
-    so no consumer needs to re-derive them (or scan for an ``"RS…"`` key).
+    This is the **single owner** of the variant identity: the ``group`` a plotter
+    pairs on, the ``family`` that classifies the axis and the ``coords`` it
+    labels with are all derived here from a composite's own signed factors, so no
+    consumer needs to re-derive them (or scan for an ``"RS…"`` key).
 
     Args:
         composites: Composites from :func:`generate_combination_results`.
@@ -1105,14 +1184,13 @@ def combination_case_meta(
         load_combinations: Flat ``{name: LoadCombination}`` mapping.
 
     Returns:
-        ``{composite_name: {"group", "kind", "family", "coords"}}`` — ready to
-        hand to ``write_results(..., case_meta=...)``.  ``group`` is the
-        combination the variant came from; ``kind`` is ``"+QE"`` / ``"-QE"``
-        for a **single**-sense fork and ``""`` otherwise (a multi-fork's sense
-        lives in ``coords``); ``family`` is ``"single"`` / ``"fork"`` /
+        ``{composite_name: {"group", "family", "coords"}}`` — ready to hand to
+        ``write_results(..., case_meta=...)``.  ``group`` is the combination the
+        variant came from; ``family`` is ``"single"`` / ``"fork"`` /
         ``"envelope"`` / ``"path"`` / ``"srss"``; ``coords`` is the
         :func:`fork_coords` tuple joined with ``"|"`` so it fits one string
-        array.
+        array, and is ``""`` for a family with a single member (there is no axis
+        position to record — see :func:`fork_coords`).
 
     See Also:
         ``docs/force_diagram_unification.md`` → *Two-sided (envelope) results*.
@@ -1132,15 +1210,12 @@ def combination_case_meta(
                 family = "fork"
             else:
                 family = "single"
-        if family == "single":
-            # No fork dimension — a pure magnitude sum has no coordinate.
+        if family in ("single", "srss"):
+            # A one-member family has no axis position to record — a pure
+            # magnitude sum has no coordinate either.
             coords = ()
-        kind = ""
-        if family == "fork" and len(coords) == 1 and coords[0][:1] in ("+", "-"):
-            kind = "+QE" if coords[0][0] == "+" else "-QE"
         meta[composite.name] = {
             "group": composite.source or composite.name,
-            "kind": kind,
             "family": family,
             "coords": "|".join(coords),
         }

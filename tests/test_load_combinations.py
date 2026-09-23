@@ -198,12 +198,11 @@ def test_negative_magnitude_factor_tags_its_own_sign(model):
     results = generate_combination_results(combos["NEG"], cases, combos)
     assert [r.cases["RSX"] for r in results] == [-1.4, 1.4]
     assert [r.coords for r in results] == [("-RSX",), ("+RSX",)]
+    assert [r.name for r in results] == ["NEG [-RSX]", "NEG [+RSX]"]
     meta = combination_case_meta(results, cases, combos)
-    assert meta["NEG #1"]["family"] == "fork"
-    assert meta["NEG #1"]["kind"] == "-QE"
-    assert meta["NEG #1"]["coords"] == "-RSX"
-    assert meta["NEG #2"]["kind"] == "+QE"
-    assert meta["NEG #2"]["coords"] == "+RSX"
+    assert meta["NEG [-RSX]"]["family"] == "fork"
+    assert meta["NEG [-RSX]"]["coords"] == "-RSX"
+    assert meta["NEG [+RSX]"]["coords"] == "+RSX"
 
 
 def test_pure_spectrum_does_not_fork(model):
@@ -276,6 +275,43 @@ def test_envelope_per_path(model):
     results = generate_combination_results(combos["ENV"], cases, combos, envelope_mode="per_path")
     assert [r.name for r in results] == ["ENV [GRAV]", "ENV [WINDX]"]
     assert all(r.operator == "linear" for r in results)
+
+
+def test_envelope_per_path_preserves_a_branch_child_fork(model):
+    """A ``per_path`` branch that expands to several variants keeps them apart.
+
+    ``OUTER`` (Envelope) references ``SUB`` — itself an Envelope — so the
+    ``SUB`` branch expands to one variant per inner branch.  Each variant keeps
+    its branch name *plus* its own coordinates, both in ``coords`` and in the
+    name derived from it, so :func:`combination_case_meta` (keyed by name)
+    cannot overwrite one variant with another under a shared name.
+    """
+    cases, combos = model
+    combos["SUB"] = _combo("SUB", "Envelope", [("DEAD", 1.0), ("WIND", 1.0)])
+    combos["OUTER"] = _combo("OUTER", "Envelope", [("SUB", 1.0), ("GRAV", 1.0)])
+    classify_combination_refs(combos, cases)
+    results = generate_combination_results(combos["OUTER"], cases, combos, envelope_mode="per_path")
+    assert [r.coords for r in results] == [("SUB", "DEAD"), ("SUB", "WIND"), ("GRAV",)]
+    assert [r.name for r in results] == ["OUTER [SUB, DEAD]", "OUTER [SUB, WIND]", "OUTER [GRAV]"]
+    # Distinct names mean every variant survives the name-keyed metadata map.
+    meta = combination_case_meta(results, cases, combos)
+    assert set(meta) == {"OUTER [SUB, DEAD]", "OUTER [SUB, WIND]", "OUTER [GRAV]"}
+
+
+def test_per_path_duplicate_branch_names_stay_unique(model):
+    """The same branch referenced twice must not give two variants one name.
+
+    ``combination_case_meta`` is keyed by name, so a shared name silently drops
+    a variant from the metadata map — and with it the archive's pairing.
+    """
+    cases, combos = model
+    combos["DUP"] = _combo("DUP", "Envelope", [("DEAD", 1.0), ("GRAV", 1.0), ("DEAD", 0.5)])
+    classify_combination_refs(combos, cases)
+    results = generate_combination_results(combos["DUP"], cases, combos, envelope_mode="per_path")
+    names = [r.name for r in results]
+    assert names == ["DUP [DEAD]", "DUP [GRAV]", "DUP [DEAD] #2"]
+    assert len(set(names)) == len(names)
+    assert set(combination_case_meta(results, cases, combos)) == set(names)
 
 
 def test_bad_envelope_mode(model):
@@ -382,9 +418,9 @@ def test_generate_composite_results(model):
         "RSX": {"fx": np.array([4.0])},
     }
     out = generate_composite_results(composites, case_results)
-    assert set(out) == {"SEISM #1", "SEISM #2"}
-    assert out["SEISM #1"]["fx"] == pytest.approx([14.0])
-    assert out["SEISM #2"]["fx"] == pytest.approx([6.0])
+    assert set(out) == {"SEISM [+RSX]", "SEISM [-RSX]"}
+    assert out["SEISM [+RSX]"]["fx"] == pytest.approx([14.0])
+    assert out["SEISM [-RSX]"]["fx"] == pytest.approx([6.0])
 
 
 # ── External definition sets ───────────────────────────────────────────
@@ -567,24 +603,55 @@ def test_envelope_and_path_families(model):
     assert [c.coords for c in per_path] == [("GRAV",), ("WINDX",)]
 
 
+def test_linear_add_over_an_envelope_keeps_the_envelope_family(model):
+    """A Linear Add's ``family`` describes the variant axis, not its own operator.
+
+    ``DEAD + ENV`` inherits the Envelope's ``max``/``min`` pair, so calling it a
+    ``"fork"`` (the old count-based rule: *more than one variant ⇒ fork*) would
+    misdescribe it — and the name derived from the coordinates would then read
+    as a signed fork.
+    """
+    cases, combos = model
+    combos["LINEAR_OF_ENV"] = _combo("LINEAR_OF_ENV", "Linear Add", [("DEAD", 1.0), ("ENV", 1.0)])
+    classify_combination_refs(combos, cases)
+    composites = generate_combination_results(combos["LINEAR_OF_ENV"], cases, combos)
+    assert [(c.name, c.family, c.coords) for c in composites] == [
+        ("LINEAR_OF_ENV [max]", "envelope", ("max",)),
+        ("LINEAR_OF_ENV [min]", "envelope", ("min",)),
+    ]
+    assert combination_case_meta(composites, cases, combos) == {
+        "LINEAR_OF_ENV [max]": {
+            "group": "LINEAR_OF_ENV",
+            "family": "envelope",
+            "coords": "max",
+        },
+        "LINEAR_OF_ENV [min]": {
+            "group": "LINEAR_OF_ENV",
+            "family": "envelope",
+            "coords": "min",
+        },
+    }
+    # A genuine sign fork still outranks an inherited family.
+    combos["FORK_AND_ENV"] = _combo("FORK_AND_ENV", "Linear Add", [("RSX", 1.0), ("ENV", 1.0)])
+    classify_combination_refs(combos, cases)
+    mixed = generate_combination_results(combos["FORK_AND_ENV"], cases, combos)
+    assert len(mixed) == 4
+    assert {c.family for c in mixed} == {"fork"}
+
+
 def test_srss_and_mixed_srss_meta(model):
     cases, combos = model
     srss = combination_case_meta(
         generate_combination_results(combos["SRSS_C"], cases, combos), cases, combos
     )
-    assert srss["SRSS_C"] == {
-        "group": "SRSS_C",
-        "kind": "",
-        "family": "srss",
-        "coords": "srss",
-    }
+    # A one-member family has no coordinate to record.
+    assert srss["SRSS_C"] == {"group": "SRSS_C", "family": "srss", "coords": ""}
     mix = _meta_for(model, "MIX_SRSS")
-    assert mix["MIX_SRSS #1"]["kind"] == "+QE"
-    assert mix["MIX_SRSS #2"]["kind"] == "-QE"
-    assert mix["MIX_SRSS #1"]["family"] == "fork"
-    # A nested magnitude is labelled by the sub-combination it came from.
-    assert mix["MIX_SRSS #1"]["coords"] == "+SRSS_C"
-    assert mix["MIX_SRSS #2"]["coords"] == "-SRSS_C"
+    assert set(mix) == {"MIX_SRSS [+SRSS_C]", "MIX_SRSS [-SRSS_C]"}
+    assert mix["MIX_SRSS [+SRSS_C]"]["family"] == "fork"
+    # A nested magnitude is named for the sub-combination it came from.
+    assert mix["MIX_SRSS [+SRSS_C]"]["coords"] == "+SRSS_C"
+    assert mix["MIX_SRSS [-SRSS_C]"]["coords"] == "-SRSS_C"
 
 
 def test_case_meta_derives_family_for_hand_built_composites():
@@ -602,7 +669,7 @@ def test_case_meta_derives_family_for_hand_built_composites():
             name="SRSS_C", operator="srss", cases={"RSX": 1.0}, source="SRSS_C", coords=("srss",)
         ),
         CompositeLoadCase(
-            name="FLAT4 #1",
+            name="FLAT4 [+RSX, +RSY]",
             operator="linear",
             cases={"DEAD": 1.0},
             source="FLAT4",
@@ -614,26 +681,21 @@ def test_case_meta_derives_family_for_hand_built_composites():
     assert meta["ENV [max]"]["family"] == "envelope"
     assert meta["ENV [max]"]["coords"] == "max"
     assert meta["SRSS_C"]["family"] == "srss"
-    assert meta["SRSS_C"]["coords"] == "srss"
-    assert meta["FLAT4 #1"]["family"] == "fork"
-    assert meta["FLAT4 #1"]["coords"] == "+RSX|+RSY"
-    # Two signed coords are a multi-fork, so no single-sense kind.
-    assert meta["FLAT4 #1"]["kind"] == ""
+    # A one-member family has no coordinate, however it was hand-declared.
+    assert meta["SRSS_C"]["coords"] == ""
+    assert meta["FLAT4 [+RSX, +RSY]"]["family"] == "fork"
+    assert meta["FLAT4 [+RSX, +RSY]"]["coords"] == "+RSX|+RSY"
     # No coords and no forking operator: a plain single with no coordinate.
     assert meta["GRAV"]["family"] == "single"
     assert meta["GRAV"]["coords"] == ""
-    assert meta["GRAV"]["kind"] == ""
 
 
-def test_seism_meta_carries_group_kind_family_and_coords(model):
+def test_seism_meta_carries_group_family_and_coords(model):
     meta = _meta_for(model, "SEISM")
-    assert meta["SEISM #1"] == {
-        "group": "SEISM",
-        "kind": "+QE",
-        "family": "fork",
-        "coords": "+RSX",
+    assert meta == {
+        "SEISM [+RSX]": {"group": "SEISM", "family": "fork", "coords": "+RSX"},
+        "SEISM [-RSX]": {"group": "SEISM", "family": "fork", "coords": "-RSX"},
     }
-    assert meta["SEISM #2"]["coords"] == "-RSX"
 
 
 def test_magnitude_hint_forks_without_load_cases():
@@ -649,21 +711,83 @@ def test_magnitude_hint_forks_without_load_cases():
             }
         }
     )
+    # ``load_cases={}`` throughout: the hint is the whole definition.
     composites = generate_combination_results(combos["M"], {}, combos)
-    assert [c.name for c in composites] == ["M #1", "M #2"]
+    assert [c.name for c in composites] == ["M [+SPECIAL]", "M [-SPECIAL]"]
     meta = combination_case_meta(composites, {}, combos)
-    assert meta["M #1"]["kind"] == "+QE"
-    assert meta["M #2"]["kind"] == "-QE"
-    assert meta["M #1"]["coords"] == "+SPECIAL"
+    assert meta["M [+SPECIAL]"]["coords"] == "+SPECIAL"
+    assert meta["M [-SPECIAL]"]["coords"] == "-SPECIAL"
 
 
-def test_flat4_meta_has_no_single_sense_kind(model):
-    """A multi-fork has no one sign, so ``kind`` stays empty and coords carry it."""
+def test_names_derive_from_coordinates_without_load_cases():
+    """Every variant is named for its coordinates, from a definition alone.
+
+    The ``magnitude`` hint is the one thing a definition cannot infer without
+    the model's load cases, so a set that declares it drives the whole
+    expansion — grouping, naming and metadata — with ``load_cases={}``.  The
+    name is a faithful projection of the variant identity, so nothing ever has
+    to parse it back.
+    """
+    definitions = combination_set_from_dict(
+        {
+            "SEISM": {
+                "type": "Linear Add",
+                "entries": [
+                    {"ref": "DEAD", "factor": 1.0},
+                    {"ref": "RSX", "factor": 1.0, "magnitude": True},
+                ],
+            },
+            "FLAT4": {
+                "type": "Linear Add",
+                "entries": [
+                    {"ref": "DEAD", "factor": 1.0},
+                    {"ref": "RSX", "factor": 1.0, "magnitude": True},
+                    {"ref": "RSY", "factor": 1.0, "magnitude": True},
+                ],
+            },
+            "SRSS_C": {"type": "SRSS", "entries": [["RSX", 1.0], ["RSY", 0.3]]},
+            "GRAV": {"type": "Linear Add", "entries": [["DEAD", 1.2], ["SDL", 1.5]]},
+            "SUB": {"type": "Envelope", "entries": [["DEAD", 1.0], ["WIND", 1.0]]},
+            "ENV": {"type": "Envelope", "entries": [["DEAD", 1.0], ["WIND", 1.0]]},
+            "OUTER": {"type": "Envelope", "entries": [["SUB", 1.0], ["GRAV", 1.0]]},
+            "LINEAR_OF_ENV": {"type": "Linear Add", "entries": [["DEAD", 1.0], ["ENV", 1.0]]},
+        }
+    )
+    classify_combination_refs(definitions, {})
+    expected = {
+        ("SEISM", "maxmin"): ["SEISM [+RSX]", "SEISM [-RSX]"],
+        ("FLAT4", "maxmin"): [
+            "FLAT4 [+RSX, +RSY]",
+            "FLAT4 [+RSX, -RSY]",
+            "FLAT4 [-RSX, +RSY]",
+            "FLAT4 [-RSX, -RSY]",
+        ],
+        ("SRSS_C", "maxmin"): ["SRSS_C"],
+        ("GRAV", "maxmin"): ["GRAV"],
+        ("ENV", "maxmin"): ["ENV [max]", "ENV [min]"],
+        ("ENV", "per_path"): ["ENV [DEAD]", "ENV [WIND]"],
+        ("OUTER", "per_path"): ["OUTER [SUB, DEAD]", "OUTER [SUB, WIND]", "OUTER [GRAV]"],
+        ("LINEAR_OF_ENV", "maxmin"): ["LINEAR_OF_ENV [max]", "LINEAR_OF_ENV [min]"],
+    }
+    for (name, envelope_mode), names in expected.items():
+        composites = generate_combination_results(
+            definitions[name], {}, definitions, envelope_mode=envelope_mode
+        )
+        assert [c.name for c in composites] == names, name
+        meta = combination_case_meta(composites, {}, definitions)
+        for composite in composites:
+            info = meta[composite.name]
+            # The name is the metadata's group + coordinates, rendered.
+            tag = f" [{info['coords'].replace('|', ', ')}]" if info["coords"] else ""
+            assert composite.name == f"{info['group']}{tag}", composite.name
+
+
+def test_flat4_meta_carries_four_corner_coords(model):
+    """A multi-fork's four corners are identified by their coordinates."""
     cases, combos = model
     combos["FLAT4"] = _combo("FLAT4", "Linear Add", [("DEAD", 1.0), ("RSX", 1.0), ("RSY", 1.0)])
     classify_combination_refs(combos, cases)
     meta = _meta_for(model, "FLAT4")
-    assert {info["kind"] for info in meta.values()} == {""}
     assert {info["family"] for info in meta.values()} == {"fork"}
     assert {info["coords"] for info in meta.values()} == {
         "+RSX|+RSY",

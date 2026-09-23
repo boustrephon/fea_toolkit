@@ -62,7 +62,7 @@ def test_read_rejects_a_non_object(tmp_path):
 def test_definition_drives_expansion_and_rendering_grouping(tmp_path):
     """One file feeds both tools: expansion metadata and the renderer's grouping."""
     from fea_toolkit.analysis.combinations import build_combination_results
-    from fea_toolkit.plotting.force_diagram import _case_pairs
+    from fea_toolkit.plotting.force_diagram import _resolve_case_info
 
     path = tmp_path / "combos.json"
     write_combination_set(path, combination_set_from_dict(_sample()))
@@ -82,14 +82,14 @@ def test_definition_drives_expansion_and_rendering_grouping(tmp_path):
         combinations=["SEISM"],
         return_meta=True,
     )
-    assert set(out) == {"SEISM #1", "SEISM #2"}
-    assert meta["SEISM #1"]["coords"] == "+RSX"
-    assert out["SEISM #1"]["element_forces"]["fx_i"] == pytest.approx([20.0])
+    assert set(out) == {"SEISM [+RSX]", "SEISM [-RSX]"}
+    assert meta["SEISM [+RSX]"]["coords"] == "+RSX"
+    assert out["SEISM [+RSX]"]["element_forces"]["fx_i"] == pytest.approx([20.0])
 
     # The renderer resolves the same grouping from the definition alone — the
     # archive needs no ``static_case_*`` arrays at all.
-    archive = {"static_case_labels": np.array(["SEISM #1", "SEISM #2"])}
-    assert _case_pairs(archive, definitions) == {
-        "SEISM #1": ("SEISM", 1),
-        "SEISM #2": ("SEISM", -1),
+    archive = {"static_case_labels": np.array(["SEISM [+RSX]", "SEISM [-RSX]"])}
+    assert _resolve_case_info(archive, definitions) == {
+        "SEISM [+RSX]": {"group": "SEISM", "coords": "+RSX"},
+        "SEISM [-RSX]": {"group": "SEISM", "coords": "-RSX"},
     }
