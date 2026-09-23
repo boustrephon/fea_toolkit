@@ -791,7 +791,10 @@ cross‑reference section.
 #### Low Priority
 
 11. **Parallel Processing** – Not planned (large-model splitting/analysis parallelisation).
-12. **Graphical User Interface** – Not planned.
+12. **Graphical User Interface** – 🚧 In progress: native Qt (PySide6)
+    desktop app, shipped as an optional `[gui]` extra.  See
+    [`docs/gui_roadmap.md`](docs/gui_roadmap.md) and **P22** in
+    [`docs/_pending_work.md`](docs/_pending_work.md).
 13. **Other FEA Formats** – Abaqus `.inp`, Ansys `.cdb` – not planned.
 
 ---
@@ -1054,6 +1057,37 @@ git clone https://github.com/boustrephon/fea_toolkit.git
 cd fea_toolkit
 pip install -e ".[report]"       # add [mesh-remesh] for Gmsh remeshing
 ```
+
+### Optional extras
+
+| Extra | Adds | Python |
+|---|---|---|
+| `[report]` | pandas / imageio / tabulate -- report tables and figures | >= 3.9 |
+| `[mesh-remesh]` | gmsh -- constrained quadrilateral remeshing | >= 3.9 |
+| `[gui]` | PySide6 + pyvistaqt + qtpy -- the desktop GUI | **>= 3.10** |
+| `[docs]` | the mkdocs toolchain | >= 3.9 |
+
+#### Desktop GUI (optional)
+
+The Qt desktop GUI (see [`docs/gui_roadmap.md`](docs/gui_roadmap.md)) is an
+**opt-in extra** -- a plain `pip install -e .` does **not** install it:
+
+```bash
+pip install -e ".[gui]"    # PySide6 + pyvistaqt + qtpy
+fea-gui                    # launch with a built-in demo frame
+fea-gui path/to/model.s2k  # or open a SAP2000 model
+```
+
+* **Requires Python 3.10 or newer.**  `pyvistaqt` (the Qt viewport bridge)
+  declares `requires-python >= 3.10`.  The **core toolkit stays on Python 3.9**
+  -- the Rhino 8 embedded-interpreter floor -- and never imports the `gui`
+  subpackage, so the extra and the newer interpreter are needed **only** to
+  run the GUI.
+* On Python 3.9, `pip install -e ".[gui]"` fails to resolve `pyvistaqt`; that
+  is expected and affects nothing else -- every other workflow (parse,
+  preprocess, analyse, report, Rhino) runs on 3.9.
+* `PySide6` is a large download (hundreds of MB); anyone who only parses or
+  analyses models never pays for it.
 
 It is **not published on PyPI** — `pip install fea_toolkit` will not find it,
 and there is no released wheel to install.  Because distribution is

@@ -157,13 +157,15 @@ assumed compatible.  A historical incompatibility — `pyvistaqt` against
 precedent: the resolution was to pin the binding to an older release until
 `pyvistaqt` caught up.  **Verified against PyPI on 2026-09-23**: the current
 releases are `pyvistaqt 0.13.1` (`requires-python >=3.10`; depends on `pyvista`
-+ `qtpy`, with the Qt binding installed separately) and `PySide6 6.10.1`
-(`requires-python <3.14, >=3.9`).  The recommended starting pin is therefore
++ `qtpy`, with the Qt binding installed separately) and `PySide6` (latest at that date `6.11.2`)
+(`requires-python <3.14, >=3.9`).  The pin is therefore
 **`PySide6>=6.10` + `pyvistaqt>=0.13.1` + `qtpy`** — the `qtpy` abstraction
 keeps a PyQt6 switch possible.  Because the 6.7 regression was a *pairing*
-incompatibility, milestone 1 still smoke-tests this exact pair in-process before
-any UI code is written (the project rule is to verify third-party APIs, never
-to guess a version pairing).
+incompatibility, the pair is smoke-tested in-process (the project rule is to
+verify third-party APIs, never to guess a version pairing).  **Milestone 1
+validated the pair** (2026-09-23): `PySide6 6.11.2` x `pyvistaqt 0.13.1` x
+`qtpy 2.4.3` on Python 3.12 -- a `MainWindow` embeds a `QtInteractor` and
+renders a sample model head-less (`QT_QPA_PLATFORM=offscreen`).
 
 ### 3.4 Performance characteristics of the chosen stack
 
