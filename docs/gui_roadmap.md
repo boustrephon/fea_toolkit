@@ -8,12 +8,12 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: 🚧 Design proposal — not yet implemented
+## Status: 🚧 In progress — Milestone 1 (viewport spike) landed 2026-09-23
 
 This document records the **framework decision** and the **proposed
 architecture** for a native desktop GUI that wraps the workflow already
-implemented in the package.  Nothing here is built yet; it is the agreed
-starting point for the work tracked as **P22** in
+implemented in the package.  Milestone 1 (the viewport spike) has landed;
+the remaining milestones are tracked as **P22** in
 [Pending Work Register](_pending_work.md).
 
 ---
