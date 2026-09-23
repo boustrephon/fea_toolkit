@@ -75,7 +75,12 @@ Two composites are emitted. The strategy is chosen by `envelope_mode`:
   minimum composite. For a magnitude constituent the maximum uses the `+`
   value and the minimum the `−` value.
 * `"per_path"` — one composite per referenced constituent, each expanded as
-  its own linear combination (the ETABS `build_combo_tree_dict` behaviour).
+  its own linear combination (the ETABS `build_combo_tree_dict` behaviour).  A
+  constituent that itself expands to several variants (a nested Envelope, or a
+  Linear Add forking on a magnitude) yields one composite **per variant**,
+  named `"<combo> [<branch>] #n"` — the plain `"<combo> [<branch>]"` when the
+  branch has only one, so a shared name can never collapse two variants in the
+  name-keyed per-case metadata.
 
 ### Absolute Add
 
@@ -155,10 +160,10 @@ treated as signed.
 The sign applies to the whole sub-combination: `RS1` is negated in one piece,
 not its individual spectrum constituents.
 
-The prefix of each coordinate comes from the **reference's own factor**, not
-from a fixed `+`: a term written `−1.4·QE` forks with `−QE` first (the sense it
-actually carries) and `+QE` as its scaled opposite, so the label always matches
-the sign applied.
+The prefix of each coordinate comes from the **reference's own factor**, not from
+a fixed `+`: a term written `−1.4·QE` forks with `−QE` first (the sense it
+actually carries) and `+QE` as its scaled opposite, so the name derived from the
+coordinate always matches the sign applied.
 
 ## External definition sets
 
@@ -239,28 +244,32 @@ plot_force_diagram("out.npz", combo="SEISM", dimension="2d", combinations=combos
 ### Variant metadata
 
 Every generated composite carries a `family` and a `coords` tuple — the **stable
-identity** of a variant, from which display names are derived (never the
-reverse: `generate_combination_results` names forks `"<combo> #1"`, which
-carries no sign at all).
+identity** of a variant.  The display **name is derived from that identity**
+(`"<combo> [<coords>]"`), so the two can never disagree and nothing ever has to
+parse a name back:
 
 | `family` | `coords` | Members |
 |---|---|---|
-| `"single"` | `()` | 1 — no fork |
+| `"single"` | `()` | 1 — nothing varies |
 | `"fork"` | `(±ref, …)` | 2ⁿ — one signed coordinate per independent magnitude |
 | `"envelope"` | `("max",)` / `("min",)` | 2 — the per-quantity extremes |
-| `"path"` | `(branch,)` | one per referenced branch (`envelope_mode="per_path"`) |
-| `"srss"` | `("srss",)` | 1 — a magnitude |
+| `"path"` | `(branch, ±ref, …)` | one per referenced branch (`envelope_mode="per_path"`); a branch that itself forks adds one signed coordinate per variant |
+| `"srss"` | `()` | 1 — a magnitude |
+
+`coords` is empty for a family with a single member: there is no axis position to
+record.  `family` records the **variant axis**, not the operator that produced
+it — a `Linear Add` that references an `Envelope` propagates that family, so
+`DEAD + ENV` is an `envelope` pair (`max` / `min`), not a fork, while a genuine
+± fork alongside an inherited family still reports `"fork"`.
 
 For example `DEAD + RSX + RSY` (two independent spectra) is a 2² fork whose four
 corners are `("+RSX", "+RSY")`, `("+RSX", "-RSY")`, `("-RSX", "+RSY")` and
-`("-RSX", "-RSY")` — not a ± pair.
+`("-RSX", "-RSY")` — not a ± pair; the same four are named
+`FLAT4 [+RSX, +RSY]` … `FLAT4 [-RSX, -RSY]`.
 
-`combination_case_meta()` turns those into the per-case
-`{group, kind, family, coords}` mapping the NPZ writers persist as
-`static_case_group` / `static_case_kind` / `static_case_family` /
-`static_case_coords` — the single owner of the sign rule. `kind` is `"+QE"` /
-`"-QE"` only for a **single**-sense fork; a 2ⁿ fork has no one sign, so its
-corners are identified by `coords`.
+`combination_case_meta()` turns those into the per-case `{group, family, coords}`
+mapping the NPZ writers persist as `static_case_group` / `static_case_family` /
+`static_case_coords` — the single owner of the variant identity.
 
 A composite built **by hand** (rather than by `generate_combination_results`)
 carries no `family`, so `combination_case_meta()` derives one from its

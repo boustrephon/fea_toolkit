@@ -300,7 +300,7 @@ failure is easy to mistake for a rendering bug.  The stored values are
 **magnitudes**: the modal responses are combined with SRSS/CQC
 (`srss_combine_matrix` / `cqc_combine_matrix`, both `sqrt(sum of squares)`), so
 the sign of a component — and with it the equilibrium relation
-`F_j = -F_i` — is destroyed.  Measured on the piperack archive:
+`F_j = -F_i` — is destroyed.  Measured on the benchmark archive:
 
 | case | `fx_i` negatives | `fx_i + fx_j` |
 |---|---|---|
@@ -314,7 +314,8 @@ direction from the other 479.  The level sum then flips sign from level to level
 — which is exactly the "switching sides" pattern an RS storey profile shows.
 
 Correct treatments, in order of preference: plot the RS case as **two signed
-diagrams** (`#1` / `#2`, the ±fork a design combination already stores), or as a
+diagrams** (the two senses a magnitude combination stores, e.g. `SEISM [+RSX]` /
+`SEISM [-RSX]`), or as a
 **symmetric ±M envelope**; or derive a sign from the dominant mode's
 participation before summing.  Never draw a single signed sum of magnitudes.
 The RS-specific path (`kind == "rs"`) plots one point per element at `z_mid`
@@ -332,7 +333,7 @@ differ by the level's own applied load.  This is *not* a detail:
 | `"cut"` (default) | every member whose span contains the level **from below to above** (`z_lo <= z_c < z_hi`), once, from its lower end | the force **transmitted across the plane just above the level** — the storey shear / axial above, i.e. what a storey-shear or overturning diagram reports | monotonic 1199.9 kN → **0.0** at the roof |
 | `"end"` | every member **end**, credited to its own node's level | the **load path**: minus the applied nodal load, and the support **reaction** at a restrained level | oscillates about **0** — except the base, which reads the whole reaction |
 
-Both were measured on the piperack model; `cut` reproduces the cumulative weight
+Both were measured on the benchmark model; `cut` reproduces the cumulative weight
 above at every level.  Neither is wrong — they answer different questions — but
 only `cut` is a storey profile in the structural-engineering sense.
 
@@ -344,7 +345,7 @@ Two things follow that are easy to get wrong:
   silently collapses toward the `"end"` value (measured: 63 kN of spurious
   lateral force on a gravity-only case that must be exactly zero).
 * **A member that spans a level with no node there must still contribute.**  On
-  the piperack model, 20 levels exist and **17 of them are crossed by members
+  the benchmark model, 20 levels exist and **17 of them are crossed by members
   with no node there** — 521 (level, member) crossings in total, worst case 104
   members at z = 3.65 m.  Only the **lower** end of such a member carries a node,
   so an end-based sum loses its force entirely at every level in between.  `cut`
@@ -379,8 +380,8 @@ member-interior station sampling that would.
 ### Two-sided / multi-fork results — 2D implemented, 3D design note
 
 A response-spectrum result is a *magnitude*, and a combination that mixes one
-with signed gravity/wind is two-sided **and asymmetric** (its `+QE` and `-QE`
-composites differ).  Such a result is drawn as **separate signed diagrams**,
+with signed gravity/wind is two-sided **and asymmetric** (its `[+RSX]` and
+`[-RSX]` variants differ).  Such a result is drawn as **separate signed diagrams**,
 never as one filled band: collapsing the curves into a `(lo, hi)` band loses the
 zero crossings that give a force diagram its triangles, and is only honest in
 the symmetric case (`lo == -hi`) — i.e. a bare RS magnitude.
@@ -398,12 +399,20 @@ point in `generate_combination_results()` and persisted per case by
 | `"single"` | `()` | 1 |
 | `"fork"` | `(±ref, …)` | 2ⁿ |
 | `"envelope"` | `("max",)` / `("min",)` | 2 |
-| `"path"` | `(branch,)` | one per branch |
-| `"srss"` | `("srss",)` | 1 |
+| `"path"` | `(branch, ±ref, …)` | one per branch *variant* |
+| `"srss"` | `()` | 1 |
 
-A `+QE` / `-QE` marker alone cannot express a 2ⁿ corner or an envelope extreme,
-so `static_case_kind` stays `"+QE"` / `"-QE"` only for a **single**-sense fork
-and is `""` otherwise; the coordinates carry the detail.
+`family` describes the **variant axis**, not the operator that produced the
+multiplicity: a `Linear Add` that references a `max`/`min` `Envelope` (or a
+`per_path` branch set) **propagates** that family, so `DEAD + ENV` is an
+`envelope` pair (`coords` `max` / `min`), not a fork.  A genuine ± fork
+alongside it still wins — `RSX + ENV` is a four-corner `fork`.
+
+The **name is derived from that identity** — `"<combo> [<coords>]"`, e.g.
+`SEISM [+RSX]`, `ENV [max]`, `OUTER [SUB, DEAD]` — so no marker has to be
+invented for a 2ⁿ corner or an envelope extreme, and nothing ever parses a name
+back.  A single-member family (a plain case, an `SRSS` magnitude) has no
+coordinate and is named for its combination alone.
 
 * **2D — implemented.**  `plot_force_diagram(..., dimension="2d")` draws
   **every** member of the requested case's group on one set of axes — the
@@ -417,35 +426,28 @@ and is `""` otherwise; the coordinates carry the detail.
   it, and a group member whose level sum is empty is omitted rather than drawn
   as a blank curve.
 
-  *Grouping.*  Not guessed from the plot — resolved by `_group_members()` /
-  `_case_pairs()`, in priority order:
+  *Grouping.*  Not guessed from the plot — resolved **once** per archive by
+  `_resolve_case_info()`, from metadata only, in priority order:
 
   1. an explicit `combinations=` definition
      (`plot_force_diagram(..., combinations=…, load_cases=…)`), expanded through
-     the same code path that generated the archive so its variants resolve to
-     the archive's case names — filtered to the names the archive actually
+     the same code path that generated the archive, so its variants resolve to
+     the archive's case names — and to their `group` / `coords` — even for an
+     archive carrying no metadata; filtered to the names the archive actually
      holds,
-  2. the archive's `static_case_group` (with `static_case_kind` /
-     `static_case_family` / `static_case_coords`), else
-  3. the `"<combo> #1"` / `"<combo> #2"` label convention that
-     `load_combinations._name_variants()` emits.
+  2. the archive's `static_case_group` / `static_case_coords` arrays.
 
-  The label fallback is trusted **only when a base appears exactly twice**: two
-  forked spectrum entries give four cartesian variants in which `#1` and `#2`
-  are *not* the two senses of one magnitude.  A longer group is therefore left
-  unpaired by the **sense** helper `_companion_case()` — which returns a single
-  opposite-sense companion — while `_group_members()` groups it correctly from
-  the metadata.  Metadata therefore outranks labels for grouping, and a
-  definition outranks both.
+  A case in neither is its **own group** with no coordinate: a case name is a
+  display label, never a source of grouping.  A renamed case therefore still
+  groups correctly, and an archive written without `case_meta` shows one curve
+  per case rather than guessing a pairing from `#1` / `#2`.  `_group_members()`
+  and `_fork_legend()` consume that single record — grouping from `group`, each
+  legend from `group` + `coords`.
 
-  A consequence worth stating: a variant whose *case name* does not follow the
-  generation convention can still be grouped, because `group` and `coords` are
-  recorded rather than parsed.
-
-  Verified on the piperack archive as `profile(#1) - profile(#2) == 2 × 1.4 ×
-  profile(RS)` for `Fx`, `My` and `Mz`, in both the X and Y spectrum
+  Verified on the benchmark archive as `profile([+RSX]) - profile([-RSX]) ==
+  2 × 1.4 × profile(RS)` for `Fx`, `My` and `Mz`, in both the X and Y spectrum
   directions (residual ≤ 2e-11 kN·m) — which pins the sibling *and* the sign
-  convention (`#1` = `+QE`), not merely that two curves were drawn.
+  convention, not merely that two curves were drawn.
 * **3D — one case at a time.**  The 3D paths render the *selected* case's force
   map; `combinations=` is accepted (and resolves the grouping/legend the same
   way) but the multi-member overlay is a design note, not implemented.  Two
@@ -481,9 +483,9 @@ not encode data.
   `plot_npz_force_diagram`, `plot_npz_moment_3d`) were removed in the
   2026-08-24 cleanup — no legacy call patterns remain.
 - **Multi-member grouping** (`TestMultiMemberGrouping`): a 2² fork's four
-  corners group and label from `static_case_coords` — `_group_members()`
-  returns all four while `_companion_case()` still refuses the ambiguous sense
-  pair; a definition with a `"magnitude": true` hint supplies the same grouping
+  corners group and label from `static_case_coords` — `_group_members()` returns
+  all four; a definition with a `"magnitude": true` hint supplies the same
+  grouping
   for an archive carrying **no** `static_case_*` arrays; and `_render_static_2d`
   draws one curve per member (legend texts asserted) with no legend for a
   single curve.

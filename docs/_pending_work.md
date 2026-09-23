@@ -309,11 +309,11 @@ Tcl/Xara path on the same record; cover the runner-failure metadata path
 #### P19 — Member-interior force stations (storey profiles are end-force only)
 
 Source: `docs/force_diagram_unification.md` → *Storey profile (2D default)*;
-`local/CLP_BSDG_Latest_Models/Piperack/member_force_extraction.md`.
+internal benchmark notes.
 
 **What.** Every element-force archive stores **two samples per member** — the
 I- and J-end local forces (`eleResponse(tag, "localForces")`, 12 components) —
-and **no span-load arrays**.  Two consequences, both measured on the piperack
+and **no span-load arrays**.  Two consequences, both measured on the benchmark
 model:
 
 1. The 2D storey profile's cut transport assumes force constant / moment linear
@@ -351,7 +351,7 @@ long-span beams carrying pipe load.
 
 **Validation.** Simply-supported beam under a uniform load → midspan
 `M = wL²/8`; cantilever with a tip load → linear moment; a column under
-self-weight → linear axial.  Piperack re-check: the `DEAD` cut profile must stay
+self-weight → linear axial.  Benchmark re-check: the `DEAD` cut profile must stay
 monotonic to 0 at the roof (the current invariant), and `COMB1` interior values
 must move toward the beam's true mid-span moment.
 
@@ -518,7 +518,8 @@ tree-driven:
   (`generate_combination_results`).  A response-spectrum case — or an SRSS
   result — mixed with gravity forks into `+`/`−` composites (2ⁿ for n
   independent spectrum terms); an `Envelope` yields a max/min pair
-  (`envelope_mode="maxmin"`) or one composite per branch (`"per_path"`), with
+  (`envelope_mode="maxmin"`) or one composite per branch *variant*
+  (`"per_path"` — a branch that itself forks contributes one per variant), with
   the max envelope using the `+` magnitude and the min the `−`.
   `apply_composite_load_case()` / `generate_composite_results()` evaluate
   composites into NPZ-ready `static/{composite}/...` arrays, so a combination
@@ -712,6 +713,66 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-23 — variant identity by cause, names derived from it, metadata-only reader)
+
+**What.** The P20/P21 design (*metadata is the single source of truth*; the
+variant identity is assigned where the variants are produced) is now true end to
+end, and the pieces that existed only to guess around it are gone.
+
+1. **`family` is decided by cause, not by count.** `_generate_linear()` stamped
+   `family = "single" if len(variants) == 1 else "fork"`, so a Linear Add whose
+   multiplicity came from a **referenced** Envelope (`DEAD + ENV`) was labelled
+   `fork` although its coordinates were `max` / `min` — a documented field that
+   lied.  The fork points now record what they produce (`_entry_variants` /
+   `_tag_coord` / `_scaled`), and `_linear_family()` propagates it: `DEAD + ENV`
+   is an `envelope` pair, a genuine ± fork alongside an inherited family still
+   reports `"fork"` (`RSX + ENV` → four corners), and `_scaled()` no longer drops
+   a referenced term's family when it wraps it.
+2. **Names are derived from the identity.** `_name_variants()` is the single
+   namer for every generator (linear, envelope max-min, `per_path`, SRSS) and
+   builds each name as `"<combo> [<coords>]"` — `SEISM [+RSX]`, `ENV [max]`,
+   `OUTER [SUB, DEAD]`, `FLAT4 [+RSX, -RSY]` — with the plain combination name
+   for a single-member family.  The positional `#1` / `#2` convention is gone,
+   and with it the possibility of a name disagreeing with `coords`.
+3. **`kind` is dropped.** The `"+QE"` / `"-QE"` marker was a one-to-one
+   projection of `family == "fork"` + a single signed coordinate, used only for
+   that label and for reading pre-`coords` archives.  `CASE_META_KEYS` is now
+   `group` / `family` / `coords`, and `static_case_kind` is neither written nor
+   read.  `coords` is also empty for a **single-member** family (`single`,
+   `srss`): there is no axis position to record.
+4. **One read-side resolution, from metadata only.** `_resolve_case_info()`
+   resolves `{case: {group, coords}}` once per archive — the `combinations=`
+   definition (which supplies names, groups and coordinates for an archive
+   without metadata) else `static_case_group` / `static_case_coords` — and
+   `_group_members()` / `_fork_legend()` consume that record.  The `#1` / `#2`
+   label fallback, `_case_pairs()` and `_companion_case()` are **deleted**: a
+   case with no metadata is its own group, so nothing is ever parsed out of a
+   name.
+
+**Also fixed.** A `per_path` Envelope referencing the same branch twice gave both
+variants one name, so the name-keyed `combination_case_meta()` map silently
+dropped one; names are now deduplicated (`DUP [DEAD]`, `DUP [GRAV]`,
+`DUP [DEAD] #2`).
+
+**Docs.** `docs/load_combinations.md` → *Variant metadata* (the table, the
+empty-coords rule, name-from-identity); `docs/results_schema.md` → the
+`static_case_labels` / `group` / `family` / `coords` rows and the *why the
+identity is recorded* note (`static_case_kind` removed);
+`docs/force_diagram_unification.md` → the grouping priority (metadata only) and
+the naming rule.
+
+**Validation.** 1869 passed, 2 skipped, 2 xfailed; `ruff check` /
+`ruff format --check` clean; `mkdocs build --strict` exit 0.  New coverage:
+`test_names_derive_from_coordinates_without_load_cases` (every family named from
+a `magnitude`-hint definition with `load_cases={}`),
+`test_linear_add_over_an_envelope_keeps_the_envelope_family`,
+`test_per_path_duplicate_branch_names_stay_unique` (load combinations);
+`TestLinearAddOverEnvelopeRoundTrip::test_archive_reads_back_as_an_envelope_pair`,
+`TestForkPairing::test_metadata_groups_variants_whose_names_say_nothing`,
+`test_no_metadata_means_no_pairing`,
+`TestForkMetadataRoundTrip::test_archive_without_metadata_carries_no_grouping`
+and the `info=`-record helper test (force diagram).
+
 ## DONE (2026-09-20 — external combination sets + typed variant metadata)
 
 **What.** Two related deliverables, one architecture: **the combination
@@ -748,11 +809,10 @@ and the variant identity it implies is persisted with the results.
 3. **Both tools, symmetric.** `build_combination_results(definitions=)` and
    `export_results(combinations=)` generate the NPZ;
    `plot_force_diagram(..., combinations=, load_cases=)` renders it.  On the
-   read side `_definition_pairs()` resolves grouping from the definition
-   (filtered to the names the archive actually holds), `_case_pairs()` gained
-   the definition as a first-priority source *and* now honours a non-empty
-   `static_case_group` even when `kind` is `""` — previously a multi-fork's
-   group was silently dropped.  `_group_members()` replaced the
+   read side `_definition_pairs()` resolves grouping — and each variant's own
+   coordinates — from the definition (filtered to the names the archive
+   actually holds), so it is a first-priority source for an archive that carries
+   no metadata at all.  `_group_members()` replaced the
    single-companion rule, so the 2D storey profile draws **every** group member
    (`storey_extras`; blue circles then an orange-square / green-triangle cycle)
    instead of refusing a group with more than two members.
@@ -779,7 +839,7 @@ still relies on the persisted metadata — which is why the metadata exists.
 **What.** `case_meta` (`{case: {"group": str, "kind": str}}`) is now accepted by
 `unified_writer.write_results()`, `npz_writer.write_results_npz()` and their
 collectors (`collect_static_arrays()` / `_collect_static()`), and written as the
-optional `static_case_group` / `static_case_kind` arrays aligned to
+optional `static_case_group` / `static_case_family` / `static_case_coords` arrays aligned to
 `static_case_labels`.  Both writers call one shared implementation,
 `results_schema.case_meta_arrays()`, so they cannot drift — the failure mode
 that once silently dropped the rotational participating-mass ratios from one
@@ -791,22 +851,26 @@ existing `_qe_sign()` sense, and passes it to both the master and the
 per-combination writes; pure load cases are annotated with their own name and an
 empty `kind`.
 
-**Read side** (landed with the two-sided 2D overlay):
-`plotting/force_diagram._companion_case()` prefers the metadata, falls back to
-the `"... #1"` / `"... #2"` label convention, and refuses to pair a group that
-has more than one candidate for the opposite sense.
+**Read side** (landed with the two-sided 2D overlay): the *original* helper was
+`plotting/force_diagram._companion_case()` — it preferred the metadata, fell back
+to the `"... #1"` / `"... #2"` label convention, and refused to pair a group with
+more than one candidate for the opposite sense.  **Superseded** by
+`_group_members()` (see *DONE (2026-09-20 — external combination sets + typed
+variant metadata)*), which groups every member of a 2ⁿ fork or an envelope pair,
+and later **deleted** with the label fallback itself — see *DONE (2026-09-23 —
+variant identity by cause …)*.
 
 **Validation.**
 1. `TestForkMetadataRoundTrip` (6 tests in `tests/test_force_diagram.py`):
    array alignment and `""` defaults, nested and flat collection, a real
    `np.savez` → `read_results` round-trip, the no-metadata path still pairing by
    label, and `npz_writer` sharing the same collection.
-2. End-to-end on the piperack archive (regenerated): the arrays are present, and
+2. End-to-end on the benchmark archive (regenerated): the arrays are present, and
    — the decisive check — renaming the forks to `ZZZ alpha` / `ZZZ omega`
    (names the label convention cannot pair) still gives
    `companion(ZZZ alpha) == ZZZ omega`, so the archive is genuinely
    self-describing rather than label-dependent.
-3. The two-sided identity `profile(#1) - profile(#2) == 2 × 1.4 × profile(RS)`
+3. The two-sided identity `profile([+RSX]) - profile([-RSX]) == 2 × 1.4 × profile(RS)`
    still holds on the regenerated archive for `Fx` / `My` / `Mz` in both the X
    and Y directions (residual ≤ 1.5e-11).
 
@@ -869,7 +933,7 @@ verified tracked via `git ls-files` and byte-identical to `HEAD`.
 
 **What.** A screen with several PyVista windows open gave no clue which model or
 archive each one belonged to — every window carried PyVista's default `PyVista`
-title, so a `--highlight-constraint` view of one pipe-rack `.s2k` was
+title, so a `--highlight-constraint` view of one benchmark `.s2k` was
 indistinguishable from another's.
 
 - **CLI.** `examples/view_model.py`: new `window_title(path, override)` →
@@ -904,10 +968,10 @@ is honoured / `main()` wiring for both a model file and `--sample` via
 `sys.argv` / the NPZ path honours it and defaults to the archive name);
 `tests/test_force_diagram.py` gains two tests spying on `pv.Plotter.__init__`
 to assert *which* keyword is passed (`window_title` → `title=`, `title` stays
-in-plot) and that the default is `None`.  End-to-end with the real
-`260917 BPPS_Pipe_Rack_SAP2000_v25_1_0_Aux. Structure Update.s2k`, the captured
+in-plot) and that the default is `None`.  End-to-end with a benchmark
+`.s2k` named `benchmark_model.s2k`, the captured
 `pv.Plotter` title is exactly
-`PyVista - 260917 BPPS_Pipe_Rack_SAP2000_v25_1_0_Aux. Structure Update.s2k`,
+`PyVista - benchmark_model.s2k`,
 and the mesh view still reports `Fix (BODY): 65 of 65 assigned joint(s)`.
 
 
@@ -987,7 +1051,7 @@ file no longer mirrored the source it was named after (`.clinerules` §1.4).
 pins the two paths together.
 
 **Validation.** Full suite 1707 passed, 2 skipped, 2 xfailed; ruff clean.
-CLI on the BPPS pipe-rack: `--highlight-constraint Fix` still reports
+CLI on the benchmark model: `--highlight-constraint Fix` still reports
 `65 of 65 assigned joint(s) present in the model`.
 
 ## DONE (2026-09-17 — promote the reusable viewer pieces into the package)
@@ -1020,8 +1084,8 @@ grammar tests, leaving `TestViewModelSelectionExpression` with the CLI
 warnings / exit behaviour only.
 
 **Validation.** Full suite 1706 passed, 2 skipped, 2 xfailed; ruff clean.
-CLI verified on the BPPS
-pipe-rack: `.s2k`, raw-table JSON and codec JSON all resolve
+CLI verified on the benchmark
+model: `.s2k`, raw-table JSON and codec JSON all resolve
 `--select "constraint=Fix"` to 65 joints; `--select "type=bogus"` and an
 unsupported suffix both exit with a clear message.
 
@@ -1051,7 +1115,7 @@ unsupported suffix both exit with a clear message.
   reference, and `area_edge_constraints` for the selected areas.
 - **Workflow.** `plot_mesh(subset, highlight_selection=Selection(
   constraints=[...]))` now highlights the same joints inside a subset —
-  verified on the BPPS pipe-rack: a 12-frame subset around the `Fix` group
+  verified on the benchmark model: a 12-frame subset around the `Fix` group
   highlights 11 of its joints, and the node-only subset (65 joints, 0
   frames) round-trips.
 
@@ -1121,7 +1185,7 @@ refusal: it fell through the text path, found no `TABLE:` lines and produced an
 JSON, and the mesh-only restriction.
 
 **Validation.** Full suite 1687 passed, 2 skipped, 2 xfailed; ruff clean.
-End-to-end off-screen on the BPPS pipe-rack: the raw-table JSON, the
+End-to-end off-screen on the benchmark model: the raw-table JSON, the
 `SAPModelData` snapshot and the `.s2k` all report
 `Selection overlay (yellow): 0 frame(s), 65 node(s), 0 area(s).` for
 `--select "constraint=Fix"`; the `MeshModel` snapshot renders the 1261-element
@@ -1172,7 +1236,7 @@ MeshModel source, and the CLI key / alias / warnings.
 
 **Validation.** `tests/test_sections_selection.py` 77 passed;
 `tests/test_viz_model.py` 87 passed; ruff clean.  End-to-end off-screen render
-of the BPPS pipe-rack `.s2k`:
+of the benchmark `.s2k`:
 `--result mesh --select "constraint=Fix" --node-labels` →
 `Selection overlay (yellow): 0 frame(s), 65 node(s), 0 area(s).` — the same 65
 joints `--highlight-constraint Fix` reports, now through the general
@@ -1227,7 +1291,7 @@ non-``Selection`` rejected), ``TestSplitElementSelectionExpansion``
 space-separated clauses, error messages, node-only criterion warning).
 
 **Validation.** Full suite ``1662 passed, 2 skipped, 2 xfailed``; ruff clean.
-End-to-end off-screen render of the BPPS pipe-rack `.s2k`:
+End-to-end off-screen render of the benchmark `.s2k`:
 `--select "type=Frame; section=2xR3"` → ``Selection overlay (yellow): 40 frame(s),
 0 node(s), 0 area(s).``; `--select "id=298"` → ``40 frame(s), 1 node(s)``
 (frame 298 is 2xR3; joint 298 is a separate label space).
@@ -1236,7 +1300,7 @@ End-to-end off-screen render of the BPPS pipe-rack `.s2k`:
 
 **What.** `examples/view_model.py` could highlight *sections*
 (`--highlight-section`), but had no way to show which joints belong to a
-SAP2000 constraint group — the gap that made the BPPS pipe-rack `Fix` BODY
+SAP2000 constraint group — the gap that made the benchmark `Fix` BODY
 constraint (65 upper-deck joints tied as one rigid body) invisible in the
 toolkit's own viewer.
 
@@ -1271,7 +1335,7 @@ absent from the model).
 **Validation.** `tests/test_viz_model.py` 53 passed;
 `tests/test_plotting.py` + `tests/test_main.py` +
 `tests/test_renderers_pyvista.py` 52 passed.  End-to-end off-screen render
-of `BPPS_Pipe_Rack_SAP2000_v25_1_0_Pipe Dead Load Update.s2k` with
+of `benchmark_model.s2k` with
 `--result mesh --highlight-constraint Fix --node-labels`:
 `Highlighting constraint 'Fix' (BODY): 65 of 65 assigned joint(s) present
 in the model.`
@@ -1363,7 +1427,7 @@ Implemented as ``extract_element_rs_forces(..., extraction="per_mode"|"recorder"
 also selectable through the builder config key ``element_extraction`` and the CLI
 flag ``--rs-element-extraction``.  **``per_mode`` remains the default.**
 
-**Measured** (pipe rack, 1263 active frame elements × 20 modes):
+**Measured** (benchmark model, 1263 active frame elements × 20 modes):
 
 | Strategy | Time | Notes |
 |---|---|---|
@@ -1414,7 +1478,7 @@ physics bug, not a cosmetic one.
 **NPZ archives now carry all six ratios — but the mapping was duplicated.**
 The `modal/*` block was produced by **two near-verbatim copies** of the same
 collector: `unified_writer.collect_modal_arrays` (reached by `write_results`,
-i.e. the model-review export that wrote the pipe-rack archive) and
+i.e. the model-review export that wrote the benchmark archive) and
 `npz_writer._collect_modal` (reached by `write_results_npz` and
 `stage_writer`).  Both mapped only `partiMassRatiosMX/MY/MZ`.  OpenSees had
 always returned the rotational trio as well, so the omission was in the
@@ -1435,7 +1499,7 @@ at the CLI boundary and rejects `--mode 0`; the Python API stays 0-based.
 
 **Validation.**  Full suite `1519 passed, 1 skipped, 4 xfailed`; `ruff check` +
 `ruff format --check` clean; `mkdocs build --strict` exit 0.  Verified against
-the real pipe-rack archive: `--mode 1` → `Mode 1  T = 0.3552 s` with
+the real benchmark archive: `--mode 1` → `Mode 1  T = 0.3552 s` with
 `X 0.03% / Y 25.30% / Z 0.00%`; `--mode 5` → `T = 0.2272 s`.
 
 ## DONE (2026-09-14 — mode-shape amplitude + frozen animation fix, PyVista API audit)
@@ -1446,7 +1510,7 @@ when the user clicked or dragged.
 
 **Amplitude** (`f1f092f`).  `plot_mode_animation`'s `scale` is a percentage of
 the model's largest bounding-box dimension; the default moves **10 → 5 %**
-(3.9 m peak on the 78 m pipe rack, previously 7.8 m).  `--mode-scale`,
+(3.9 m peak on the 78 m benchmark model, previously 7.8 m).  `--mode-scale`,
 `show_modal` and `show_rs` follow.  Verified exactly: the default gives a
 0.200 peak on the 4-unit test span (5.00 %) versus 0.400 (10.00 %) before.
 

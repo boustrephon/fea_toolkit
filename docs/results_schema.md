@@ -177,28 +177,26 @@ the ``forces_coordinate_system`` metadata do not write them, and visualisers
 
 | Array | Shape | dtype | Description |
 |---|---|---|---|
-| `static_case_labels` | `(N_case,)` | `str` | e.g. ``["DEAD", "SL_X", "LL"]`` |
-| `static_case_group` | `(N_case,)` | `str` | **Optional.** The load combination each case was generated from. Every variant of one combination shares the value, so a forked response-spectrum combination can be reassembled from data. Pure load cases carry their own name. Absent in archives written before the array existed. |
-| `static_case_kind` | `(N_case,)` | `str` | **Optional.** The magnitude sense of a two-sided case — `"+QE"` or `"-QE"` — and `""` for a case that is not a **single**-sense forked magnitude combination. |
-| `static_case_family` | `(N_case,)` | `str` | **Optional.** Which collection the case belongs to: `"single"`, `"fork"` (2ⁿ signed senses), `"envelope"` (a max/min pair), `"path"` (one composite per envelope branch) or `"srss"`. Lets a reader tell a ±fork from a max/min envelope pair without guessing from the labels. |
-| `static_case_coords` | `(N_case,)` | `str` | **Optional.** The variant's coordinate inside its family, joined with `"|"` — `"+RSX"`, `"+RSX|-RSY"` for a 2² fork corner, `"max"` / `"min"` for an envelope extreme, `"srss"`. This is the stable identity of a variant and the key a multi-fork renderer groups and labels by; `""` when the case has no coordinate. |
+| `static_case_labels` | `(N_case,)` | `str` | e.g. `["DEAD", "SL_X", "LL"]`. A **display label**, derived from the case's group and coordinates (`"SEISM [+RSX]"`, `"ENV [max]"`) — never parsed back for grouping. |
+| `static_case_group` | `(N_case,)` | `str` | **Optional.** The load combination each case was generated from. Every variant of one combination shares the value, so a forked response-spectrum combination can be reassembled from data. Pure load cases carry their own name. A case with no grouping at all is simply its own group. |
+| `static_case_family` | `(N_case,)` | `str` | **Optional.** What the variants of the group vary along: `"single"`, `"fork"` (2ⁿ signed senses), `"envelope"` (a max/min pair), `"path"` (one composite per envelope branch) or `"srss"`. A `Linear Add` propagates the family of what it references, so a combination that references an Envelope stays `"envelope"` (its variants are `max` / `min`, not a ± pair). |
+| `static_case_coords` | `(N_case,)` | `str` | **Optional.** The variant's position on its family's axis, joined with `"|"` — `"+RSX"`, `"+RSX|-RSY"` for a 2² fork corner, `"max"` / `"min"` for an envelope extreme, `"SUB|DEAD"` for an envelope `"path"` branch (the branch name first, then the branch's own coordinates). The stable identity a renderer groups and labels by; `""` when the family has a single member, which has no axis position. |
 
-> **Why the pairing is recorded.** A combination that mixes a response-spectrum
+> **Why the identity is recorded.** A combination that mixes a response-spectrum
 > *magnitude* with signed gravity/wind terms is emitted once per sign it can act
 > in — twice for one spectrum, 2ⁿ for n independent spectra — and **all** the
 > variants are needed to read the result. `static_case_group` plus
-> `static_case_kind` / `static_case_family` / `static_case_coords` make that
-> pairing and grouping explicit; without them a consumer can only infer it from
-> the ``"<combo> #1"`` / ``"<combo> #2"`` label convention, which is ambiguous as
-> soon as a group has more than two members.  Written by passing `case_meta` to
+> `static_case_family` / `static_case_coords` record that identity explicitly, so
+> a consumer groups and labels from data.  The case **name** is derived from the
+> same identity and is display-only: nothing parses it back, so a renamed case
+> still groups correctly.  Written by passing `case_meta` to
 > :func:`~fea_toolkit.io.unified_writer.write_results` /
 > :func:`~fea_toolkit.io.npz_writer.write_results_npz` — produced by
 > :func:`~fea_toolkit.model.load_combinations.combination_case_meta()` and
 > returned by ``build_combination_results(..., return_meta=True)``; read by
-> `fea_toolkit.plotting.force_diagram._case_pairs()` /
-> `_group_members()`.  A field no caller supplies is not written, so an archive
-> annotating only `group` / `kind` stays byte-identical to one written before the
-> richer fields existed.  See `docs/force_diagram_unification.md` → *Two-sided
+> `fea_toolkit.plotting.force_diagram._resolve_case_info()`.  A field no caller
+> supplies is not written, and an archive carrying no metadata at all degrades to
+> one group per case — see `docs/force_diagram_unification.md` → *Two-sided
 > (envelope) results*.
 
 **Scalar entries (incl. pushover performance-point scalars):**
