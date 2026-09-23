@@ -102,3 +102,24 @@ def test_open_path_reports_failure_without_a_dialog(window):
     missing = str(_FIXTURE.with_name("does_not_exist.s2k"))
     assert window.open_path(missing) is False
     assert "Failed to open" in window._message_log.toPlainText()
+
+
+def test_model_tree_is_populated(window):
+    """The left dock's Model Tree is driven by the real tree model."""
+    assert window._tree_view.model() is window._tree_model
+    assert window._tree_model.rowCount() > 0
+
+
+def test_selecting_a_node_fills_the_inspector(window):
+    """Tree selection drives the inspector through the real signal wiring."""
+    from qtpy.QtCore import QItemSelectionModel
+
+    tree = window._tree_model
+    group = tree.index(0, 0)  # Nodes
+    tree.fetchMore(group)
+    child = tree.index(0, 0, group)
+    window._tree_view.selectionModel().setCurrentIndex(
+        child, QItemSelectionModel.SelectionFlag.ClearAndSelect
+    )
+    assert "Node" in window._inspector._title.text()
+    assert window._inspector._table.rowCount() > 0

@@ -26,12 +26,15 @@ from qtpy.QtWidgets import (
     QProgressBar,
     QTabWidget,
     QToolBar,
+    QTreeView,
     QVBoxLayout,
     QWidget,
 )
 
+from .models.tree_model import ModelTreeModel
 from .render_backend import QtRenderBackend
 from .views.message_log import MessageLog
+from .views.property_inspector import PropertyInspector
 
 _PROJECT_URL = "https://github.com/boustrephon/fea_toolkit"
 _CURSOR_POLL_MS = 60
@@ -282,18 +285,31 @@ class MainWindow(QMainWindow):
         return label
 
     def _build_docks(self) -> None:
+        """Left: the Model Tree over the Inspector; bottom: the Message Log."""
+        self._tree_model = ModelTreeModel(parent=self)
+        self._tree_view = QTreeView(self)
+        self._tree_view.setObjectName("tree_model")
+        self._tree_view.setModel(self._tree_model)
+        # Rows are materialised only when a group is expanded (see
+        # ModelTreeModel), so a large model stays responsive.
+        self._tree_view.setUniformRowHeights(True)
+        self._tree_view.setAlternatingRowColors(True)
+        self._tree_view.setColumnWidth(0, 200)
+        self._tree_view.selectionModel().currentChanged.connect(self._on_tree_selection)
+
         trees = QTabWidget(self)
         trees.setObjectName("tabs_trees")
-        trees.addTab(self._placeholder_panel("Model tree", "Milestone 3"), "Model Tree")
-        trees.addTab(self._placeholder_panel("Property tree", "Milestone 3"), "Property Tree")
+        trees.addTab(self._tree_view, "Model Tree")
+        trees.addTab(self._placeholder_panel("Property tree", "Milestone 4"), "Property Tree")
         self._tree_dock = QDockWidget("Model", self)
         self._tree_dock.setObjectName("dock_trees")
         self._tree_dock.setWidget(trees)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._tree_dock)
 
+        self._inspector = PropertyInspector(self)
         self._inspector_dock = QDockWidget("Inspector", self)
         self._inspector_dock.setObjectName("dock_inspector")
-        self._inspector_dock.setWidget(self._placeholder_panel("Property inspector", "Milestone 3"))
+        self._inspector_dock.setWidget(self._inspector)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._inspector_dock)
         self.splitDockWidget(self._tree_dock, self._inspector_dock, Qt.Orientation.Vertical)
 
@@ -403,6 +419,7 @@ class MainWindow(QMainWindow):
         viewer.show_model(show_nodes=True, color_by_section=color_by_section)
         self._viewer = viewer
         self._model = model
+        self._tree_model.set_model(model)
         self._interactor.reset_camera()
         self._update_units_label()
         self.log("Displayed model geometry.")
@@ -425,6 +442,11 @@ class MainWindow(QMainWindow):
         log_widget = getattr(self, "_message_log", None)
         if log_widget is not None:
             log_widget.log(message, level)
+
+    def _on_tree_selection(self, current, _previous=None) -> None:
+        """Show the selected entity in the inspector."""
+        entity = current.data(Qt.ItemDataRole.UserRole) if current.isValid() else None
+        self._inspector.show_object(entity)
 
     # ── Handlers ────────────────────────────────────────────────────
 
