@@ -13,6 +13,34 @@ arrive in later milestones -- see ``docs/gui_roadmap.md`` section 9.6.
 import sys
 from typing import Optional
 
+#: User-visible application name -- window title, About box and Qt's own
+#: naming (window titles, ``QSettings`` paths).
+#:
+#: It deliberately does **not** reach the macOS application menu, whose bold
+#: label comes from the process's bundle (``CFBundleName`` -> the Python
+#: framework, hence ``Python``); no runtime Qt or Python call changes it.
+#: Only launching from a ``.app`` bundle does -- verified on macOS 15 /
+#: PySide6 6.11, written up in ``docs/dev_notes.md``.
+APP_NAME = "FEA Toolkit"
+
+#: Internal organisation name; only used for ``QSettings`` paths (Milestone 8).
+ORG_NAME = "fea_toolkit"
+
+
+def configure_application() -> None:
+    """Set the application identity on the ``QCoreApplication`` statics.
+
+    Called *before* the ``QApplication`` exists, because Qt reads several of
+    these once, when the platform plugin initialises; calling it afterwards
+    too is harmless.
+    """
+    from qtpy.QtCore import QCoreApplication
+    from qtpy.QtGui import QGuiApplication
+
+    QCoreApplication.setApplicationName(APP_NAME)
+    QCoreApplication.setOrganizationName(ORG_NAME)
+    QGuiApplication.setApplicationDisplayName(APP_NAME)
+
 
 def _demo_model():
     """Build a small built-in portal frame so ``fea-gui`` needs no input file.
@@ -103,11 +131,11 @@ def main(argv: Optional[list] = None) -> int:
     argv = list(sys.argv if argv is None else argv)
     model_path = argv[1] if len(argv) > 1 else None
 
+    configure_application()
+
     app = QApplication.instance()
     if app is None:
         app = QApplication([argv[0] if argv else "fea-gui"])
-    app.setApplicationName("fea_toolkit")
-    app.setOrganizationName("fea_toolkit")
 
     model = _load_model(model_path) if model_path else _demo_model()
 

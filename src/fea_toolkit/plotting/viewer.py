@@ -513,6 +513,18 @@ class ModelViewer:
         self._backend.render_highlights([h])
         return self
 
+    def clear_highlights(self) -> "ModelViewer":
+        """Remove highlights added by :meth:`highlight_elements` / :meth:`highlight_nodes`.
+
+        Selection highlighting is re-issued on every change, so this is what
+        keeps successive selections from stacking up in the scene.
+
+        Returns:
+            ``self`` for chaining.
+        """
+        self._backend.clear_highlights()
+        return self
+
     # ── Annotation ───────────────────────────────────────────────────
 
     def annotate(

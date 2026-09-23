@@ -8,7 +8,7 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: 🚧 In progress — Milestones 1–3 landed (viewport spike, chrome, model tree + inspector), 2026-09-23
+## Status: 🚧 In progress — Milestones 1–3 landed (viewport spike, chrome, model tree + inspector); Milestone 4 started (tree→viewport selection sync + display toggles), 2026-09-23
 
 This document records the **framework decision** and the **proposed
 architecture** for a native desktop GUI that wraps the workflow already
@@ -559,8 +559,8 @@ class QtRenderBackend(RenderBackend):
 |---|---|---|
 | 1 | Binding + viewport spike | `PySide6 6.10` × `pyvistaqt 0.13.1` import under 3.10+; `fea-gui` launches a bare `QMainWindow` with a `QtInteractor`; `ModelViewer` renders a sample model into it |
 | 2 | ✅ Chrome | menubar, toolbars, dock layout, message log, status bar (units + coords live; elem/progress wired later), axes triad + view cube.  Domain actions present but greyed, each naming its milestone |
-| 3 | ✅ Trees + inspector | lazy Model Tree over `SAPModelData`/`MeshModel` (`ModelTreeModel` + the Qt-free `model_index`); the Inspector shows the selected dataclass's fields.  Property Tree and the actor-category display toggles are still pending |
-| 4 | Selection sync | tree→viewport highlight and viewport→tree select+scroll both work via one stable identity map |
+| 3 | ✅ Trees + inspector | lazy Model Tree over `SAPModelData`/`MeshModel` (`ModelTreeModel` + the Qt-free `model_index`); the Inspector shows the selected dataclass's fields.  The Property Tree is still pending; the actor-category display toggles landed with Milestone 4 (nodes / shells — element *labels* have no renderer yet, so that toggle stays greyed) |
+| 4 | 🚧 Selection sync | **landed: tree→viewport highlight**, replacing the previous highlight on every click (`ModelViewer.highlight_elements` / `highlight_nodes` resolve SAP label → geometry from the same extraction the display was built from, so this direction needs no cell-id map).  **Pending: viewport→tree select + scroll**, which needs the forward `cell_id ↔ SAP label` / `point_id ↔ node id` map rebuilt whenever the geometry is re-batched |
 | 5 | Import + analysis | Open runs `SAP2000Parser` on a worker; Run executes `run_static_analysis()` (then modal/spectrum/pushover) with progress + log; Stop cancels cooperatively |
 | 6 | Load rendering | `render_loads()` + `extract_load_glyphs()` draw joint/line/area/gravity glyphs scaled to model units |
 | 7 | Results + export | deformed/force/storey/pushover plots + `write_results_npz` wired to menus |

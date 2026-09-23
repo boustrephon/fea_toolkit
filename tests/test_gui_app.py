@@ -123,3 +123,27 @@ def test_selecting_a_node_fills_the_inspector(window):
     )
     assert "Node" in window._inspector._title.text()
     assert window._inspector._table.rowCount() > 0
+
+
+def test_window_title_is_the_product_name(window):
+    """The chrome is titled for users, not after the Python interpreter."""
+    assert window.windowTitle() == "FEA Toolkit"
+
+
+def test_configure_application_sets_the_qt_identity(qapp):
+    """Qt's application / display / organisation names are set from constants.
+
+    The macOS application **menu** label is deliberately not asserted: it comes
+    from the process bundle, not from Qt, so only launching from a ``.app``
+    bundle changes it -- see ``docs/dev_notes.md``.
+    """
+    from qtpy.QtCore import QCoreApplication
+    from qtpy.QtGui import QGuiApplication
+
+    from fea_toolkit.gui.app import APP_NAME, ORG_NAME, configure_application
+
+    configure_application()
+    assert (APP_NAME, ORG_NAME) == ("FEA Toolkit", "fea_toolkit")
+    assert QCoreApplication.applicationName() == APP_NAME
+    assert QCoreApplication.organizationName() == ORG_NAME
+    assert QGuiApplication.applicationDisplayName() == APP_NAME

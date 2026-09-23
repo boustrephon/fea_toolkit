@@ -99,6 +99,11 @@ class PyVistaRenderer(RenderBackend):
         self._notebook = notebook
         # Keep track of all actors so ``clear()`` can remove them
         self._actors: list = []
+        # ... and of the actors of each *category* (frames, shells, nodes,
+        # highlights, ...) so one overlay can be removed or hidden without
+        # rebuilding the whole scene -- repeated selection highlighting and
+        # the GUI's display toggles both need this.
+        self._categories: dict = {}
         if plotter is not None:
             # An injected plotter -- e.g. a ``pyvistaqt.QtInteractor`` that
             # embeds the viewport in a Qt app.  Use it directly and
@@ -135,6 +140,59 @@ class PyVistaRenderer(RenderBackend):
                 ticks="both",
             )
 
+    # ── Actor bookkeeping ────────────────────────────────────────────
+
+    def _add_actor(self, actor: Any, category: str) -> None:
+        """Track *actor* globally and under *category*.
+
+        Args:
+            actor: The actor returned by ``plotter.add_mesh``.
+            category: Logical group -- ``"frames"``, ``"shells"``, ``"nodes"``,
+                ``"highlights"``, ``"annotations"``, ``"deformed"`` or
+                ``"force_flags"``.
+        """
+        self._actors.append(actor)
+        self._categories.setdefault(category, []).append(actor)
+
+    def clear_category(self, category: str) -> None:
+        """Remove every actor of *category* from the scene.
+
+        Used to redraw one overlay -- e.g. the selection highlight -- without
+        rebuilding the rest of the scene.
+
+        Args:
+            category: Category name, as passed to :meth:`_add_actor`.
+        """
+        actors = self._categories.pop(category, [])
+        if not actors:
+            return
+        p = self._plotter
+        if p is not None:
+            for actor in actors:
+                with contextlib.suppress(Exception):
+                    p.remove_actor(actor)
+        for actor in actors:
+            with contextlib.suppress(ValueError):
+                self._actors.remove(actor)
+
+    def set_category_visible(self, category: str, visible: bool) -> None:
+        """Show or hide every actor of *category*.
+
+        Args:
+            category: Category name, as passed to :meth:`_add_actor`.
+            visible: New visibility.
+        """
+        for actor in self._categories.get(category, []):
+            with contextlib.suppress(Exception):
+                actor.SetVisibility(bool(visible))
+        if self._plotter is not None:
+            with contextlib.suppress(Exception):
+                self._plotter.render()
+
+    def clear_highlights(self) -> None:
+        """Remove the actors drawn by :meth:`render_highlights`."""
+        self.clear_category("highlights")
+
     # ── Frame elements ───────────────────────────────────────────────
 
     def render_frames(
@@ -170,7 +228,7 @@ class PyVistaRenderer(RenderBackend):
             line_width=2,
             show_scalar_bar=False,
         )
-        self._actors.append(actor)
+        self._add_actor(actor, "frames")
 
     # ── Shell elements ───────────────────────────────────────────────
 
@@ -225,7 +283,7 @@ class PyVistaRenderer(RenderBackend):
                 lighting=True,
                 show_scalar_bar=False,
             )
-            self._actors.append(actor)
+            self._add_actor(actor, "shells")
 
     # ── Nodes ────────────────────────────────────────────────────────
 
@@ -250,7 +308,7 @@ class PyVistaRenderer(RenderBackend):
             render_points_as_spheres=True,
             show_scalar_bar=False,
         )
-        self._actors.append(actor)
+        self._add_actor(actor, "nodes")
 
     # ── Highlights ───────────────────────────────────────────────────
 
@@ -282,7 +340,7 @@ class PyVistaRenderer(RenderBackend):
                     opacity=0.85,
                     show_scalar_bar=False,
                 )
-                self._actors.append(actor)
+                self._add_actor(actor, "highlights")
 
             # ── Highlighted nodes ──
             if h.nodes:
@@ -296,7 +354,7 @@ class PyVistaRenderer(RenderBackend):
                     render_points_as_spheres=True,
                     show_scalar_bar=False,
                 )
-                self._actors.append(actor)
+                self._add_actor(actor, "highlights")
 
             # ── Highlighted shells ──
             if h.shells:
@@ -332,7 +390,7 @@ class PyVistaRenderer(RenderBackend):
                         lighting=True,
                         show_scalar_bar=False,
                     )
-                    self._actors.append(actor)
+                    self._add_actor(actor, "highlights")
 
             # ── Label ──
             if h.label:
@@ -364,7 +422,7 @@ class PyVistaRenderer(RenderBackend):
                     point_size=8,
                     shape="rounded_rect",
                 )
-                self._actors.append(lbl)
+                self._add_actor(lbl, "highlights")
 
     # ── Annotations ──────────────────────────────────────────────────
 
@@ -385,7 +443,7 @@ class PyVistaRenderer(RenderBackend):
                 point_size=4,
                 shape="rounded_rect",
             )
-            self._actors.append(actor)
+            self._add_actor(actor, "annotations")
 
     # ── Deformed shape ───────────────────────────────────────────────
 
@@ -419,7 +477,7 @@ class PyVistaRenderer(RenderBackend):
             line_width=2,
             show_scalar_bar=False,
         )
-        self._actors.append(actor)
+        self._add_actor(actor, "deformed")
 
     # ── Force flags ──────────────────────────────────────────────────
 
@@ -493,7 +551,7 @@ class PyVistaRenderer(RenderBackend):
             lighting=False,
             show_scalar_bar=False,
         )
-        self._actors.append(actor)
+        self._add_actor(actor, "force_flags")
 
     # ── Scene management ─────────────────────────────────────────────
 
@@ -504,6 +562,7 @@ class PyVistaRenderer(RenderBackend):
                 with contextlib.suppress(Exception):
                     p.remove_actor(actor)
         self._actors = []
+        self._categories = {}
 
     def show(self) -> None:
         p = self.plotter

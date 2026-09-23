@@ -1,15 +1,16 @@
 """Main application window for the fea_toolkit desktop GUI.
 
-Milestone 2 builds the application *chrome*: the menubar, toolbars, dock
-layout, message log and status bar around the central 3-D viewport that
-Milestone 1 embedded.  The window is deliberately **read-only**, and most
-domain actions are present but disabled, each labelled with the milestone that
+Milestone 2 built the application *chrome* (menubar, toolbars, docks, message
+log, status bar) around the central 3-D viewport that Milestone 1 embedded, and
+Milestone 3 added the lazy Model Tree and the property inspector.  Most domain
+actions are still present but disabled, each labelled with the milestone that
 will wire it (``docs/gui_roadmap.md`` §9.6) -- a menu that appears later is
 more jarring than a greyed-out one.
 
-Live in M2: opening a model (``Open`` / :meth:`MainWindow.open_path`), the
-camera view buttons, the orientation (view) cube, the message log, the units
-readout and the cursor-coordinate readout.
+Live: opening a model (``Open`` / :meth:`MainWindow.open_path`), the camera
+buttons, the message log, the units and cursor readouts, tree selection driving
+the inspector and -- since Milestone 4 -- highlighting the selected entity in
+the viewport, plus the node / shell display toggles.
 """
 
 import contextlib
@@ -31,6 +32,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from .app import APP_NAME
 from .models.tree_model import ModelTreeModel
 from .render_backend import QtRenderBackend
 from .views.message_log import MessageLog
@@ -38,6 +40,23 @@ from .views.property_inspector import PropertyInspector
 
 _PROJECT_URL = "https://github.com/boustrephon/fea_toolkit"
 _CURSOR_POLL_MS = 60
+_SELECT_COLOR = (1.0, 0.45, 0.0)  # selected frame / area element
+_SELECT_NODE_COLOR = (0.15, 0.55, 1.0)  # selected node
+
+
+def _entity_identity(entity: Any) -> tuple[Optional[str], Optional[str]]:
+    """Locate *entity* in the viewport as ``(attribute_name, value)``.
+
+    Frame elements, area elements and nodes each carry their SAP2000 label in
+    a differently-named attribute; everything else in the tree (materials,
+    sections, load definitions) has no geometry of its own, so it returns
+    ``(None, None)`` and is not highlighted.
+    """
+    for attr in ("elem_id", "area_id", "node_id"):
+        value = getattr(entity, attr, None)
+        if value:
+            return attr, str(value)
+    return None, None
 
 
 class MainWindow(QMainWindow):
@@ -51,7 +70,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, model: Optional[Any] = None, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setWindowTitle("fea_toolkit")
+        self.setWindowTitle(APP_NAME)
 
         self._model: Any = None
         self._viewer: Any = None
@@ -119,6 +138,17 @@ class MainWindow(QMainWindow):
         act.setEnabled(False)
         return act
 
+    def _toggle_action(self, text: str, slot: Any, *, tip: Optional[str] = None) -> QAction:
+        """Build a checkable, initially-checked action (a display toggle)."""
+        act = QAction(text, self)
+        act.setCheckable(True)
+        act.setChecked(True)
+        act.setStatusTip(tip or text)
+        if tip:
+            act.setToolTip(tip)
+        act.toggled.connect(slot)
+        return act
+
     def _create_actions(self) -> None:
         """Create every action once so menus and toolbars can share them."""
         a = self._actions
@@ -134,7 +164,7 @@ class MainWindow(QMainWindow):
         a["view.xz"] = self._real_action("Front (XZ)", self._view_xz, tip="Look along the Y axis")
         a["view.yz"] = self._real_action("Side (YZ)", self._view_yz, tip="Look along the X axis")
         a["help.docs"] = self._real_action("Documentation", self._on_docs)
-        a["help.about"] = self._real_action("About fea_toolkit", self._on_about)
+        a["help.about"] = self._real_action(f"About {APP_NAME}", self._on_about)
 
         # ── Greyed placeholders (each names its milestone) ──
         a["file.save_results"] = self._placeholder("Save results", "Milestone 7")
@@ -142,11 +172,18 @@ class MainWindow(QMainWindow):
         a["file.export_image"] = self._placeholder("Export screenshot", "Milestone 7")
         a["edit.copy"] = self._placeholder("Copy", "Milestone 3")
         a["edit.preferences"] = self._placeholder("Preferences", "Milestone 8")
-        a["view.show_nodes"] = self._placeholder("Show nodes", "Milestone 3")
-        a["view.show_shells"] = self._placeholder("Show shells", "Milestone 3")
-        a["view.show_labels"] = self._placeholder("Show element labels", "Milestone 3")
+        a["view.show_nodes"] = self._toggle_action(
+            "Show nodes", self._on_show_nodes, tip="Show or hide node markers"
+        )
+        a["view.show_shells"] = self._toggle_action(
+            "Show shells", self._on_show_shells, tip="Show or hide area elements"
+        )
+        a["view.show_labels"] = self._placeholder("Show element labels", "Milestone 6")
         a["view.show_loads"] = self._placeholder("Show loads", "Milestone 6")
         a["view.show_forces"] = self._placeholder("Show force diagrams", "Milestone 7")
+        a["view.clear_highlights"] = self._real_action(
+            "Clear highlights", self._on_clear_highlights, tip="Drop the selection highlight"
+        )
         a["view.reset_layout"] = self._placeholder("Reset layout", "Milestone 8")
         a["model.mesh"] = self._placeholder("Mesh", "Milestone 3")
         a["model.split"] = self._placeholder("Split elements", "Milestone 3")
@@ -198,6 +235,8 @@ class MainWindow(QMainWindow):
             "view.show_forces",
         ):
             display.addAction(a[key])
+        display.addSeparator()
+        display.addAction(a["view.clear_highlights"])
         m.addSeparator()
         m.addAction(a["view.reset_layout"])
 
@@ -409,6 +448,11 @@ class MainWindow(QMainWindow):
         from ..model.sap_data import SAPModelData
         from ..plotting.viewer import ModelViewer
 
+        # A new model replaces the previous scene outright -- the backend
+        # *appends* actors, so without this the old geometry would linger
+        # behind the new one.
+        self._backend.clear()
+
         if isinstance(model, MeshModel):
             viewer = ModelViewer(mesh_model=model, backend=self._backend)
         elif isinstance(model, SAPModelData):
@@ -420,9 +464,23 @@ class MainWindow(QMainWindow):
         self._viewer = viewer
         self._model = model
         self._tree_model.set_model(model)
+        self._reset_display_toggles()
         self._interactor.reset_camera()
         self._update_units_label()
         self.log("Displayed model geometry.")
+
+    def _reset_display_toggles(self) -> None:
+        """Re-check the display toggles to match freshly rendered geometry.
+
+        Every overlay is drawn again by :meth:`show_model`, so a toggle left
+        unchecked by the previous model would otherwise contradict what is on
+        screen.  Signals are blocked: there is nothing to re-render yet.
+        """
+        for key in ("view.show_nodes", "view.show_shells"):
+            action = self._actions[key]
+            action.blockSignals(True)
+            action.setChecked(True)
+            action.blockSignals(False)
 
     def _update_units_label(self) -> None:
         """Show the model's unit system in the status bar."""
@@ -444,9 +502,49 @@ class MainWindow(QMainWindow):
             log_widget.log(message, level)
 
     def _on_tree_selection(self, current, _previous=None) -> None:
-        """Show the selected entity in the inspector."""
+        """Show the selected entity in the inspector and highlight it below.
+
+        The viewport half rides on ``ModelViewer.highlight_elements`` /
+        ``highlight_nodes``, which resolve SAP labels back to geometry from
+        the *same* extracted geometry the display was built from -- so the
+        reverse (tree -> viewport) direction needs no cell-id map, only the
+        pick direction does (``docs/gui_roadmap.md`` design rule 7).
+        """
         entity = current.data(Qt.ItemDataRole.UserRole) if current.isValid() else None
         self._inspector.show_object(entity)
+        self._highlight_entity(entity)
+
+    def _highlight_entity(self, entity: Any) -> None:
+        """Highlight *entity* in the viewport, replacing the previous highlight.
+
+        Entities with no geometry of their own (materials, sections, load
+        definitions) simply clear the highlight.
+        """
+        if self._viewer is None:
+            return
+        self._viewer.clear_highlights()
+        attr, value = _entity_identity(entity)
+        if attr is None:
+            return
+        if attr == "node_id":
+            self._viewer.highlight_nodes([value], color=_SELECT_NODE_COLOR)
+        elif attr == "area_id":
+            self._viewer.highlight_elements(area_ids=[value], color=_SELECT_COLOR)
+        else:
+            self._viewer.highlight_elements(frame_ids=[value], color=_SELECT_COLOR)
+
+    def _on_clear_highlights(self) -> None:
+        """Drop the current selection highlight from the viewport."""
+        if self._viewer is not None:
+            self._viewer.clear_highlights()
+
+    def _on_show_nodes(self, checked: bool) -> None:
+        """Show or hide the node-marker overlay."""
+        self._backend.set_category_visible("nodes", checked)
+
+    def _on_show_shells(self, checked: bool) -> None:
+        """Show or hide the area-element overlay."""
+        self._backend.set_category_visible("shells", checked)
 
     # ── Handlers ────────────────────────────────────────────────────
 
@@ -501,10 +599,10 @@ class MainWindow(QMainWindow):
 
         QMessageBox.about(
             self,
-            "About fea_toolkit",
-            f"<b>fea_toolkit</b> {version}<br><br>"
+            f"About {APP_NAME}",
+            f"<b>{APP_NAME}</b> {version}<br><br>"
             "A FEA to OpenSees/Rhino conversion toolkit.<br>"
-            "GUI: Milestone 2 (application chrome).",
+            "GUI: Milestone 4 (selection sync).",
         )
 
     # ── Teardown ────────────────────────────────────────────────────

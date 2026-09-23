@@ -242,6 +242,30 @@ implemented, config-gated **off by default** (existing models unchanged):
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 
+#### P21 — GUI Milestone 4 remainder: viewport→tree pick, element labels, macOS bundle name
+Source: `docs/gui_roadmap.md` milestone rows 3–4 and design rule 7;
+`docs/dev_notes.md` ("macOS application-menu label", "PySide6 item models").
+
+**What.** Milestone 4 landed its tree→viewport half (selection highlight plus
+the node/shell display toggles).  Three pieces remain:
+
+1. **viewport→tree select + scroll** — the *forward* identity map:
+   `cell_id → SAP frame/shell label` (what `enable_mesh_picking`'s callback
+   delivers) and `point_id → SAP node id` (from `enable_point_picking`),
+   rebuilt whenever the geometry is re-batched.  The renderer currently
+   batches **one merged `PolyData` per category**, so the map has to be built
+   from the same element order that mesh used.  Also needs
+   `ModelTreeModel.index_for(label)` so the view can `setCurrentIndex()` and
+   `scrollTo()`.
+2. **element-label display toggle** — `view.show_labels` is still greyed
+   because nothing renders node/element labels; it needs a `labels` category
+   in `PyVistaRenderer` before the toggle can exist.
+3. **macOS `.app` bundle** — the application-menu label is the process
+   bundle's `CFBundleName` (hence `Python`) and is not settable at runtime;
+   a generated bundle (`CFBundleName = FEA Toolkit`, launcher execing
+   `python -m fea_toolkit.gui`) is the only fix.  See the dev note for the
+   probe evidence.
+
 #### P6 — Section fiber patches (P6a done — Channel/Angle/DoubleAngle/Tee; P6b deferred)
 Source: repo-root `README.md` §5 "Section Types and Properties" table.
 
@@ -717,6 +741,43 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
+
+## DONE (2026-09-23 — GUI Milestone 4, part 1: tree→viewport selection, display toggles, app identity)
+
+**What.** Three pieces landed together:
+
+1. **Actor categories in the renderer.**  `PyVistaRenderer` registers every
+   actor under a category (`frames` / `shells` / `nodes` / `highlights` /
+   `annotations` / `deformed` / `force_flags`) via `_add_actor()`, and gains
+   `clear_category()` / `set_category_visible()` to drop or hide one overlay
+   without rebuilding the scene.  `_actors` stays the complete ledger, so
+   `clear()` still removes everything.
+2. **Selection sync, tree → viewport.**  `RenderBackend.clear_highlights()`
+   (concrete no-op default, overridden by `PyVistaRenderer`),
+   `ModelViewer.clear_highlights()` and `MainWindow._highlight_entity()` wire
+   tree clicks to a highlight that *replaces* the previous one; entities with
+   no geometry of their own (materials, sections, loads) simply clear it.
+   The View menu gains "Clear highlights", and "Show nodes" / "Show shells"
+   became live checkable toggles (re-checked whenever a model is displayed).
+   The reverse direction, viewport→tree, needs the forward cell-id map and
+   is registered as P21.
+3. **App identity.**  `gui/app.py` owns `APP_NAME = "FEA Toolkit"` and
+   `ORG_NAME`, applied by `configure_application()` *before* `QApplication`
+   exists; the window title and the About box follow it.  The macOS
+   **menu-bar** label proved unbudgeable at runtime — probed across five Qt
+   variants, `NSProcessInfo.processName` and a symlinked interpreter, then
+   written up in `docs/dev_notes.md` (a `.app` bundle is the only fix).
+
+**Also fixed.**  `MainWindow.show_model()` now clears the backend first: the
+renderer *appends* actors, so opening a second model previously drew it on
+top of the first.
+
+**Tests.**  New `tests/test_gui_selection.py` (8 tests): highlight per entity
+type, replacement rather than accumulation, geometry-less entities, the clear
+action, the `_actors`-ledger invariant, the node display toggle, and scene
+replacement.  `tests/test_gui_app.py` gains the window-title and
+`configure_application()` assertions.  GUI suite: 33 passed; renderer suite:
+18 passed; plotting/viz suites: 91 passed.
 
 ## DONE (2026-09-23 — results schema version 3: the case metadata is identity, not label)
 

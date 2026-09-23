@@ -380,3 +380,42 @@ Model Tree:
 Consequence for this codebase: custom `QAbstractItemModel`s pass an **int id**
 to `createIndex` and resolve it through a registry, reading it back with
 `internalId()`.  See `src/fea_toolkit/gui/models/tree_model.py`.
+
+## macOS application-menu label — not settable at runtime
+
+**Verified 2026-09-23 on macOS 15 / PySide6 6.11.2 / PyObjC present** — five
+Qt-name variants, `NSProcessInfo.processName`, and a symlinked interpreter
+were each probed in a fresh process (window + `QMainWindow.menuBar()` shown,
+then `NSApp.mainMenu()` read back).
+
+`fea-gui`'s bold application menu showed **“Python”**.  Nothing reachable from
+Qt or Python changes it:
+
+| Probe | Result |
+|---|---|
+| `QCoreApplication.setApplicationName("FEA Toolkit")` — before *and* after `QApplication` construction | `applicationName()` returns the new value; menu label unchanged |
+| `QGuiApplication.setApplicationDisplayName("FEA Toolkit")` | unchanged |
+| `NSProcessInfo.processInfo().setProcessName_("FEA Toolkit")` | `processName` changes; menu label unchanged |
+| launched through a symlink named `FEA Toolkit` | unchanged — `sys.executable` resolves to the framework binary |
+| `NSApp.mainMenu()` after each variant | item 0 is the app menu; its **submenu title stayed `Python` in every variant** |
+
+Qt *does* build that menu from `qt_mac_applicationName()`
+(`qtbase/src/plugins/platforms/cocoa/qcocoamenuloader.mm`: `appItem.title =
+appName`, and `About …` / `Hide …` / `Quit …` all interpolate it), but the
+helper resolves through the **process bundle** — here the Python framework's
+`CFBundleName` — which no runtime call can change.
+
+**Consequence.** `fea_toolkit.gui.app.APP_NAME` (`"FEA Toolkit"`) drives the
+window title, the About box and Qt's own naming — everything we control, set
+by `configure_application()` *before* `QApplication` exists.  The menu-bar
+label needs a **`.app` bundle** with `CFBundleName = FEA Toolkit` and a
+launcher that execs the interpreter (`Contents/MacOS/FEA-Toolkit` →
+`exec <python> -m fea_toolkit.gui`).  Not shipped yet — it is a recorded
+follow-up.  (The Cmd-Tab / Dock name is expected to follow the same bundle
+name; that was **not** separately verified.)
+
+**Lesson.** Same shape as the PySide6 `internalPointer()` finding below: a
+platform-owned string that *looks* settable through a Qt API which is not on
+the path that actually produces it.  Probe the whole chain before writing the
+fix into a docstring.
+

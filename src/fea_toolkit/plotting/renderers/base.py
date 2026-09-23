@@ -198,6 +198,18 @@ class RenderBackend(ABC):
         """Remove all rendered geometry from the scene."""
         ...
 
+    def clear_highlights(self) -> None:
+        """Remove the highlights drawn by :meth:`render_highlights`.
+
+        Selection highlighting is redrawn on every tree click, so a backend
+        that appends highlight actors must be able to drop the previous set
+        without rebuilding the scene.  Backends whose highlights are
+        transient overlays -- removed with :meth:`clear` and never
+        accumulated -- inherit this no-op; :class:`PyVistaRenderer` overrides
+        it and removes the actors it added.
+        """
+        return None
+
     @abstractmethod
     def show(self) -> None:
         """Display the interactive view."""

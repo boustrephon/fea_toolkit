@@ -1078,6 +1078,12 @@ fea-gui                    # launch with a built-in demo frame
 fea-gui path/to/model.s2k  # or open a SAP2000 model
 ```
 
+* The window is titled **FEA Toolkit** (`gui/app.py` → `APP_NAME`; set through
+  `configure_application()` before the `QApplication` exists).  On macOS the
+  **menu-bar** label nonetheless reads `Python`: it comes from the process's
+  bundle (`CFBundleName`), which no runtime Qt or Python call can change — a
+  generated `.app` bundle is the only fix.  Verified, see
+  [`docs/dev_notes.md`](docs/dev_notes.md).
 * **Requires Python 3.10 or newer.**  `pyvistaqt` (the Qt viewport bridge)
   declares `requires-python >= 3.10`.  The **core toolkit stays on Python 3.9**
   -- the Rhino 8 embedded-interpreter floor -- and never imports the `gui`
