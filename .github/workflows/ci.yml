@@ -106,31 +106,15 @@ jobs:
           cache: pip
 
       - name: Install system libraries
-        # Xvfb gives Qt a real (virtual) X display.  The ``offscreen`` Qt
-        # platform has no GL surface, so on Linux the embedded
-        # QVTKRenderWindowInteractor cannot create a GL context with it; under
-        # Xvfb the ``xcb`` platform uses Mesa's software rasteriser instead.
-        #
-        # Qt >= 6.5 aborts (SIGABRT) if the xcb plugin's xcb-cursor dependency
-        # is missing, so the full xcb set is installed -- plus the GLU/EGL/GLX
-        # and xkb stack Qt6Gui and VTK link against on ubuntu-latest.
+        # The viewport is a QVTKRenderWindowInteractor, so Qt needs the system
+        # GL stack even head-less: libEGL for VTK's off-screen path, plus the
+        # GLU/xkb/font/dbus libraries Qt6Gui links against on ubuntu-latest.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            xvfb \
-            libxcb-cursor0 \
-            libxcb-xinerama0 \
-            libxcb-icccm4 \
-            libxcb-image0 \
-            libxcb-keysyms1 \
-            libxcb-randr0 \
-            libxcb-render-util0 \
-            libxcb-shape0 \
-            libxkbcommon-x11-0 \
             libglu1-mesa \
             libegl1 \
-            libgl1-mesa-dri \
-            libglx-mesa0 \
+            libxkbcommon0 \
             libfontconfig1 \
             libdbus-1-3
 
@@ -155,19 +139,17 @@ jobs:
         # Emits the loaded platform name as a check annotation, so a plugin
         # failure is diagnosable without the auth-gated job log.
         run: |
-          xvfb-run -a python -c "from qtpy.QtWidgets import QApplication; app = QApplication([]); print('::notice title=Qt platform::' + app.platformName())"
+          python -c "from qtpy.QtWidgets import QApplication; app = QApplication([]); print('::notice title=Qt platform::' + app.platformName())"
 
-      - name: Test (GUI, under Xvfb)
-        # xvfb-run supplies a virtual X display; tests/conftest.py only forces
-        # the ``offscreen`` Qt platform when DISPLAY is absent, so Qt selects
-        # ``xcb`` here and the embedded viewport gets a GL context.
-        #
-        # On failure the pytest tail is republished as a check annotation:
-        # job logs need repository admin rights, so an annotation is the only
-        # channel the maintainers' tooling can read back.
+      - name: Test (GUI, head-less)
+        # tests/conftest.py forces QT_QPA_PLATFORM=offscreen when DISPLAY is
+        # absent, so no X server is required.  On failure the pytest tail is
+        # republished as a check annotation: job logs need repository admin
+        # rights, so an annotation is the only channel the maintainers'
+        # tooling can read back.
         run: |
           set +e
-          xvfb-run -a pytest -q tests/test_gui_*.py -m "not slow" -p no:cacheprovider 2>&1 | tee /tmp/gui.log
+          pytest -q tests/test_gui_*.py -m "not slow" -p no:cacheprovider 2>&1 | tee /tmp/gui.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then
             MSG=$(tail -c 3000 /tmp/gui.log | sed -e 's/%/%25/g' | sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/%0A/g')
