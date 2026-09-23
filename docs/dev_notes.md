@@ -362,3 +362,21 @@ collection rather than at the first test that touches pandas.  If pandas-free
 collection is ever needed, switch the module to `pytest.importorskip("pandas")`
 (the second sanctioned form) — do not reinstate `__import__`.
 
+
+## PySide6 item models - never call `internalPointer()`
+
+Verified against PySide6 / Qt 6.11 on 2026-09-23, while building the GUI's
+Model Tree:
+
+* `QAbstractItemModel.createIndex(row, column, value)` stores `value` as the
+  index's **internal id**; read it back with `QModelIndex.internalId()`.
+* `QModelIndex.internalPointer()` **segfaults** for an index created from an
+  integer (PySide6 resolves the integer as an address), and returns a
+  **half-constructed instance** when `createIndex` was handed an arbitrary
+  Python object - touching that instance's attributes crashes the interpreter.
+  In practice this surfaced as `Fatal Python error: Segmentation fault` inside
+  *pytest's traceback formatter*, which hid the real exception.
+
+Consequence for this codebase: custom `QAbstractItemModel`s pass an **int id**
+to `createIndex` and resolve it through a registry, reading it back with
+`internalId()`.  See `src/fea_toolkit/gui/models/tree_model.py`.

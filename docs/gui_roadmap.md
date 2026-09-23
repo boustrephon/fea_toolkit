@@ -8,7 +8,7 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: 🚧 In progress — Milestones 1–2 landed (viewport spike + application chrome), 2026-09-23
+## Status: 🚧 In progress — Milestones 1–3 landed (viewport spike, chrome, model tree + inspector), 2026-09-23
 
 This document records the **framework decision** and the **proposed
 architecture** for a native desktop GUI that wraps the workflow already
@@ -559,7 +559,7 @@ class QtRenderBackend(RenderBackend):
 |---|---|---|
 | 1 | Binding + viewport spike | `PySide6 6.10` × `pyvistaqt 0.13.1` import under 3.10+; `fea-gui` launches a bare `QMainWindow` with a `QtInteractor`; `ModelViewer` renders a sample model into it |
 | 2 | ✅ Chrome | menubar, toolbars, dock layout, message log, status bar (units + coords live; elem/progress wired later), axes triad + view cube.  Domain actions present but greyed, each naming its milestone |
-| 3 | Trees + inspector | lazy Model Tree + Property Tree over `SAPModelData`; inspector shows `Section`/`Material`/load/case fields |
+| 3 | ✅ Trees + inspector | lazy Model Tree over `SAPModelData`/`MeshModel` (`ModelTreeModel` + the Qt-free `model_index`); the Inspector shows the selected dataclass's fields.  Property Tree and the actor-category display toggles are still pending |
 | 4 | Selection sync | tree→viewport highlight and viewport→tree select+scroll both work via one stable identity map |
 | 5 | Import + analysis | Open runs `SAP2000Parser` on a worker; Run executes `run_static_analysis()` (then modal/spectrum/pushover) with progress + log; Stop cancels cooperatively |
 | 6 | Load rendering | `render_loads()` + `extract_load_glyphs()` draw joint/line/area/gravity glyphs scaled to model units |
