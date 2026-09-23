@@ -372,7 +372,7 @@ as precisely as a ± pair (a `+QE` / `-QE` marker cannot express either).
 #### P22 — Desktop GUI (Qt/PySide6) design & roadmap
 Source: `docs/gui_roadmap.md`.
 
-**Status: Milestone 1 landed — the viewport spike and a headless smoke test were implemented 2026-09-23; the full application is not yet built.**
+**Status: Milestones 1–2 landed (viewport spike + application chrome), 2026-09-23 — the domain milestones (trees, selection, analysis, results) are not yet built.**
 
 **What.** A native, document-centric desktop application wrapping the
 package's existing workflow (import `*.s2k` → display geometry and loading →
@@ -413,9 +413,10 @@ viewport geometry into a `MultiBlock` with render-once (§3.4).
    add `QtRenderBackend`, give `setCentralWidget` a `QWidget` container
    (quad-view ready), embed `ModelViewer` in a bare `QMainWindow` (batched
    `MultiBlock` render-once deferred to the chrome milestone).
-3. Main-window chrome: menubar, top toolbar, right-edge vertical view toolbar,
+3. ✅ Main-window chrome: menubar, top toolbar, right-edge vertical view toolbar,
    the dock layout (left: tabbed trees over inspector; bottom: message log),
-   status bar, in-render axes triad + view cube.
+   status bar, axes triad + view cube.  Domain actions are greyed placeholders
+   naming their milestone; ``Open`` is wired.
 4. Model Tree (lazy) / Property Tree / Property Inspector driven from
    `SAPModelData`, the inspector populating from the selection's dataclass.
 5. Bidirectional tree ↔ viewport selection sync (`controllers/selection.py`),
