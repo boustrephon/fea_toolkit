@@ -573,6 +573,18 @@ class QtRenderBackend(RenderBackend):
 - **New `needs_gui` marker** (registered in `pyproject.toml` markers, like
   `needs_pyvista`) — skipped when Qt/`pyvistaqt` is unavailable or there is no
   display; conftest sets `QT_QPA_PLATFORM=offscreen` for headless runs.
+- **Where the tests live** -- a flat `tests/` directory of `test_*.py` files
+  (the project convention, guardrails §1.4).  GUI tests use a `test_gui_*`
+  prefix (`test_gui_smoke.py` today; `test_gui_tree_model.py`,
+  `test_gui_selection.py`, `test_gui_render_backend.py`,
+  `test_gui_analysis_worker.py` … as the milestones land).  The one Qt-free
+  piece -- the load-glyph extractor -- is a **model-layer** function, so its
+  test follows the model naming (`test_loads_glyphs.py`) and carries no
+  marker.  Shared Qt policy lives **only** in `tests/conftest.py`.
+- **CI** -- a dedicated `gui-test` job installs the `[gui]` extra on one
+  Python version (3.12) and runs `tests/test_gui_*.py` head-less; the main
+  `lint-and-test` matrix keeps `[report,mesh-remesh]` and skips the GUI
+  tests.  This keeps the ~430 MB Qt install off every matrix leg.
 - **No-Qt unit tests** for the pure logic: `ModelTreeModel` row/column math,
   `SelectionController` identity maps, `extract_load_glyphs` (all Qt-free).
 - **Qt smoke tests (offscreen)**: launch `MainWindow`, load
