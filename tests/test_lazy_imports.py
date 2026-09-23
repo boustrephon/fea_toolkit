@@ -109,8 +109,12 @@ class TestOptionalPandasImports:
         "fea_toolkit.plotting.report",
         "fea_toolkit.analysis.linear",
         "fea_toolkit.report",
-        "fea_toolkit.gui.main_window",
     )
+
+    # ``fea_toolkit.gui.*`` is deliberately absent: it belongs to the
+    # optional ``[gui]`` extra, so importing it needs Qt, not just the
+    # absence of pandas.  The GUI import path is covered by the gui-test
+    # CI job, which installs that extra.
 
     def test_guarded_modules_import_without_pandas(self):
         for module in self.MODULES:
