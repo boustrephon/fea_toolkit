@@ -281,6 +281,22 @@ The GUI must respect the existing architectural contracts:
    event loop if run on the main thread.  Analyses run on a
    `QThread` / `ThreadPoolExecutor`; progress and completion are marshalled
    back to the UI via Qt signals (status bar + optional progress dialog).
+
+   **Stop / cancellation.**  The toolbar's **Stop** action requests
+   cancellation *cooperatively* — it sets a `threading.Event` (or a
+   `QAtomicInt` flag) owned by the worker; it never kills the thread.  The
+   worker checks the flag between OpenSees `analyze()` steps (the pushover
+   loop is step-wise and therefore interruptible) and between analysis
+   stages.  On seeing the request it stops issuing further `analyze()` calls,
+   calls `ops.wipe()` to release the OpenSees domain, emits
+   `finished(cancelled=True)`, and re-enables the run action, leaving the
+   status bar and message log to record the cancellation.  A single atomic
+   solve (a one-shot `analyze()` for static/modal) is **not** interruptible
+   mid-call: there Stop takes effect only at the next step/stage boundary, so
+   the GUI disables the Stop control during an atomic solve and re-enables it
+   once a step-wise loop is reached.  A forced thread kill is deliberately
+   avoided — it would leave OpenSees global state inconsistent and break the
+   `ops.wipe()` hygiene the rest of the toolkit relies on.
 4. **Flexible input pattern.**  The viewport accepts `SAPModelData`,
    `MeshModel`, `AnalysisBuilder`, **or** an NPZ path — exactly as the
    existing plot functions already do.
@@ -297,7 +313,22 @@ The GUI must respect the existing architectural contracts:
    from the start rather than retrofitted: a **tree** selection highlights the
    matching region in the 3-D view, and a **viewport pick** (PyVista's
    `enable_mesh_picking` / `enable_point_picking`) selects and scrolls to the
-   matching tree node.  `controllers/selection.py` owns this.
+   matching tree node.  `controllers/selection.py` owns this, and both
+   directions ride on **one stable mapping** built when the viewport batches
+   its geometry (§3.4):
+
+   * **forward** — render identity → SAP label: `cell_id -> SAP frame/shell
+     label` (the value PyVista's `enable_mesh_picking` callback supplies) and
+     `point_id -> SAP node id` (from `enable_point_picking`);
+   * **reverse** — SAP label → render identity: `SAP label -> [cell_id, …]`,
+     for highlighting.
+
+   The viewport pick callback resolves the picked cell/point id through the
+   **forward** map to a SAP label and selects + scrolls to that tree node; the
+   tree-selection callback resolves the tree node's SAP label through the
+   **reverse** map to the cell ids and highlights exactly those cells.  The
+   index is rebuilt whenever the geometry is re-batched, so pick ids never
+   drift from the displayed `MultiBlock`.
 8. **GPU-friendly viewport updates.**  Batch geometry into a `MultiBlock` and
    render once (see §3.4); never `add_mesh` in a loop with rendering left on.
 9. **Persistent layout.**  Save window geometry and dock state with
