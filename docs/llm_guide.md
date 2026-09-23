@@ -391,7 +391,7 @@ subset = sel.filter_model(model)
 | Never `git push --mirror`, a wildcard refspec, `git bundle --all`, or share the repo folder including `.git` | Publishes the local-only `refs/cline/checkpoints/*`, which snapshot client data from `local/`/`data/`; the repo is public — see `.clinerules` §6.4 |
 | Don't disable or prune Cline's checkpointing unprompted | It is the per-step undo for LLM edits |
 
-> Push branches only.  Sanity check: `git ls-remote origin | grep -Ei 'cline|checkpoint'` must be empty.
+> Push branches and release tags only.  Sanity check: `git ls-remote origin | grep -F 'refs/cline/checkpoints/'` must be empty, and a `git ls-remote` that errors means verification failed — never read a broken query's empty output as clean.
 
 ---
 

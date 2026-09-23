@@ -22,7 +22,8 @@ The version is **derived from git — it is never hand-edited**:
 - `src/fea_toolkit/_version.py` is **auto-generated** — do not edit it
   (guardrails §5.4).
 - The reported version is `<latest tag>` plus a distance/dev suffix, e.g.
-  `git describe --tags` → `v0.3.0-314-ge4627f9` (314 commits past `v0.3.0`).
+  `git describe --tags` → `v0.4.0` at the tag, or `v0.4.0-3-g<hash>` three
+  commits past `v0.4.0`.
 
 Three consequences that matter operationally:
 
@@ -56,8 +57,8 @@ not as a side effect of adding a feature.
 
 | Version | Contents | Status |
 |---|---|---|
-| `v0.3.0` | last tagged release | ✅ released |
-| `v0.4.0` | the backlog of backward-compatible features accumulated since `v0.3.0` (load combinations, force-diagram unification, per-storey forces, …) | ✅ tagged 2026-09-23 |
+| `v0.3.0` | previous release | ✅ released |
+| `v0.4.0` | the backlog of backward-compatible features accumulated since `v0.3.0` (load combinations, force-diagram unification, per-storey forces, …) — the current (last tagged) release | ✅ tagged 2026-09-23 |
 | `v0.5.0` | the **desktop GUI** — the `[gui]` extra (see [Desktop GUI Roadmap](gui_roadmap.md), P22) | 🚧 planned |
 | `v1.0.0` | public-API freeze / stability milestone | 🚧 not scheduled |
 
