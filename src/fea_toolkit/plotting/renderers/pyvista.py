@@ -1,7 +1,7 @@
 """PyVista render backend for ModelViewer."""
 
 import contextlib
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -88,12 +88,23 @@ class PyVistaRenderer(RenderBackend):
     Requires ``pyvista`` — install via ``pip install pyvista``.
     """
 
-    def __init__(self, off_screen: bool = False, notebook: bool = False):
+    def __init__(
+        self,
+        off_screen: bool = False,
+        notebook: bool = False,
+        plotter: Optional[Any] = None,
+    ):
         self._plotter = None
         self._off_screen = off_screen
         self._notebook = notebook
         # Keep track of all actors so ``clear()`` can remove them
         self._actors: list = []
+        if plotter is not None:
+            # An injected plotter -- e.g. a ``pyvistaqt.QtInteractor`` that
+            # embeds the viewport in a Qt app.  Use it directly and
+            # decorate it the same way a lazily-created plotter would be.
+            self._plotter = plotter
+            self._decorate_plotter()
 
     # ── Plotter initialisation ───────────────────────────────────────
 
@@ -110,15 +121,19 @@ class PyVistaRenderer(RenderBackend):
             if self._off_screen:
                 kwargs["window_size"] = [1920, 1080]
             self._plotter = pv.Plotter(**kwargs)
-            self._plotter.show_axes()
-            # Show grid on the ground plane
-            with contextlib.suppress(Exception):
-                self._plotter.show_grid(
-                    grid="back",
-                    location="outer",
-                    ticks="both",
-                )
+            self._decorate_plotter()
         return self._plotter
+
+    def _decorate_plotter(self) -> None:
+        """Add the standard axes triad and ground grid to the plotter."""
+        self._plotter.show_axes()
+        # Show grid on the ground plane
+        with contextlib.suppress(Exception):
+            self._plotter.show_grid(
+                grid="back",
+                location="outer",
+                ticks="both",
+            )
 
     # ── Frame elements ───────────────────────────────────────────────
 

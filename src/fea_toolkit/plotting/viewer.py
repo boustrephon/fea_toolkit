@@ -24,7 +24,7 @@ Usage::
 """
 
 import warnings
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import numpy as np
 
@@ -135,7 +135,7 @@ class ModelViewer:
         model_data: Any = None,
         mesh_model: Any = None,
         collapse_to_parents: bool = False,
-        backend: str = "pyvista",
+        backend: Union[str, RenderBackend] = "pyvista",
         **kwargs,
     ):
         if builder is not None:
@@ -151,7 +151,12 @@ class ModelViewer:
             raise ValueError("Provide one of 'builder', 'model_data', or 'mesh_model'.")
 
         self._collapse_to_parents = collapse_to_parents
-        self._backend: RenderBackend = _resolve_backend(backend, **kwargs)
+        if isinstance(backend, RenderBackend):
+            # An explicit backend instance was injected -- e.g. the Qt GUI's
+            # QtRenderBackend wrapping an embedded QtInteractor.
+            self._backend: RenderBackend = backend
+        else:
+            self._backend = _resolve_backend(backend, **kwargs)
 
         # Extracted geometry (populated lazily)
         self._frames: list[FrameGeom] = []
