@@ -584,7 +584,7 @@ class QtRenderBackend(RenderBackend):
 - **CI** -- a dedicated `gui-test` job installs the `[gui]` extra on one
   Python version (3.12) and runs `tests/test_gui_*.py` head-less; the main
   `lint-and-test` matrix keeps `[report,mesh-remesh]` and skips the GUI
-  tests.  This keeps the ~430 MB Qt install off every matrix leg.
+  tests.  This keeps the ~430 MB Qt install off every matrix leg.  The GUI job runs under **Xvfb** (`xvfb-run`): the `offscreen` Qt platform has no GL surface, so the embedded viewport needs a real (virtual) X display.
 - **No-Qt unit tests** for the pure logic: `ModelTreeModel` row/column math,
   `SelectionController` identity maps, `extract_load_glyphs` (all Qt-free).
 - **Qt smoke tests (offscreen)**: launch `MainWindow`, load
