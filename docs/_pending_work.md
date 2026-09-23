@@ -242,7 +242,7 @@ implemented, config-gated **off by default** (existing models unchanged):
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 
-#### P21 — GUI Milestone 4 remainder: viewport→tree pick, element labels, macOS bundle name
+#### P23 — GUI Milestone 4 remainder: viewport→tree pick, element labels, macOS application name
 Source: `docs/gui_roadmap.md` milestone rows 3–4 and design rule 7;
 `docs/dev_notes.md` ("macOS application-menu label", "PySide6 item models").
 
@@ -269,9 +269,10 @@ the node/shell display toggles).  Three pieces remain:
    `.app` bundle (probes in `docs/dev_notes.md`).  Only a py2app/PyInstaller
    -style build — a compiled launcher embedding `libpython` — would change it,
    and a self-contained bundle is ruled out by the OpenSeesPy licence (§5.8).
-   Closed as a documented platform limitation unless the user wants that build
-   tooling; `python -m fea_toolkit.gui` was added as the script-friendly entry
-   point in the meantime.
+   Closed as a documented platform limitation; a self-contained bundle would
+   fix it, and P22 records that route (bundle without OpenSees code, calling a
+   separately-installed OpenSees).  `python -m fea_toolkit.gui` was added as
+   the script-friendly entry point in the meantime.
 
 #### P6 — Section fiber patches (P6a done — Channel/Angle/DoubleAngle/Tee; P6b deferred)
 Source: repo-root `README.md` §5 "Section Types and Properties" table.
@@ -468,6 +469,32 @@ left-dock panels (Option A), the message log included, the 3.10+ GUI floor,
 the `PySide6` × `pyvistaqt` version pin (validated: `PySide6 6.11.2` ×
 `pyvistaqt 0.13.1` × `qtpy 2.4.3`) and the first-milestone scope — see
 `docs/gui_roadmap.md` §3.3 and §8.
+
+**Future option (unscheduled) — a self-contained bundle that drives OpenSees
+externally.**  The caveat in `docs/gui_roadmap.md` §5 — a *distributed*
+application that imports OpenSeesPy needs OSU's commercial licence — applies
+to **shipping** the software, not to invoking a copy the user installed.  A
+py2app / PyInstaller bundle containing **no OpenSees code**, calling a
+separately-installed OpenSees interpreter as an external program, is therefore
+a viable route; it is also the only way to fix the macOS application name
+(`docs/dev_notes.md` → *macOS application-menu label*).  Sketch:
+
+1. an analysis-case Tcl writer for static / modal / spectrum / pushover --
+   today `opensees/builder.py` exports the model deck and pushover only;
+2. a subprocess runner that locates the external `OpenSees` executable,
+   streams its stdout to the message log and the progress bar, and cancels by
+   stopping the child process;
+3. a recorder-output → NPZ importer, so the viewers, reports and
+   `write_results_npz` consumers work unchanged (the GUI already reads NPZ);
+4. a capability matrix: model features the Tcl deck cannot express need an
+   explicit list, with the existing Tcl material/section export as the parity
+   baseline;
+5. packaging compliance for what *is* bundled -- Qt's LGPL-3.0 notices and the
+   relink obligation, plus signing / notarisation for distribution.
+
+The GUI's analysis actions would pick the external runner when OpenSeesPy is
+absent, or by user choice.  Deferred until a packaged app is actually wanted;
+the licensing position is recorded in `docs/licence.md`.
 
 ### Tier 4 — Deferred / low-priority
 
@@ -767,7 +794,7 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
    The View menu gains "Clear highlights", and "Show nodes" / "Show shells"
    became live checkable toggles (re-checked whenever a model is displayed).
    The reverse direction, viewport→tree, needs the forward cell-id map and
-   is registered as P21.
+   is registered as P23.
 3. **App identity.**  `gui/app.py` owns `APP_NAME = "FEA Toolkit"` and
    `ORG_NAME`, applied by `configure_application()` *before* `QApplication`
    exists; the window title and the About box follow it.  The macOS

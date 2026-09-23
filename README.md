@@ -1089,9 +1089,11 @@ fea-gui path/to/model.s2k  # or open a SAP2000 model
   verified against Qt's names, AppKit retitles, `NSProcessInfo.processName`,
   and a generated `.app` bundle both with a script launcher *and* with the
   interpreter inside it.  Only a py2app/PyInstaller-style build (compiled
-  launcher embedding `libpython`) changes that — and a self-contained bundle is
-  ruled out by the OpenSeesPy licence anyway.  Probes:
-  [`docs/dev_notes.md`](docs/dev_notes.md).
+  launcher embedding `libpython`) changes that — and such a self-contained
+  bundle is compatible with the OpenSeesPy licence provided it ships no
+  OpenSees code and drives a separately-installed OpenSees instead: the future
+  option sketched in [`docs/gui_roadmap.md`](docs/gui_roadmap.md) §5 (**P22**).
+  Probes: [`docs/dev_notes.md`](docs/dev_notes.md).
 * **Requires Python 3.10 or newer.**  `pyvistaqt` (the Qt viewport bridge)
   declares `requires-python >= 3.10`.  The **core toolkit stays on Python 3.9**
   -- the Rhino 8 embedded-interpreter floor -- and never imports the `gui`

@@ -426,9 +426,12 @@ interpreter is built into** — `CFBundleGetMainBundle` resolves the framework's
 `Resources/Python.app` — and it survives every runtime lever.  Only a
 py2app/PyInstaller-style build (a compiled launcher that embeds or `dlopen`s
 `libpython`, so the process image is the app's own binary) changes it.  That is
-deliberately **not** implemented: it is real build tooling, and §5.8
-(OpenSeesPy is not redistributable commercially) rules out shipping a
-self-contained bundle anyway.
+deliberately **not** implemented here: it is real build tooling, and §5.8
+(OpenSeesPy is not redistributable commercially) rules out bundling OpenSeesPy
+itself.  A bundle that ships **no** OpenSees code and drives a
+separately-installed OpenSees as an external program is a different case and is
+recorded as a future option — **P22** in `docs/_pending_work.md`, sketched in
+`docs/gui_roadmap.md` §5, licence position in `docs/licence.md`.
 
 So `rename_macos_application_menu()` (PyObjC, called from `main()` once the
 window is shown, a quiet no-op elsewhere) buys the visible part —

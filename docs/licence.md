@@ -117,6 +117,15 @@ In practical terms:
   **additional to** `fea_toolkit`'s own GPL-3.0 terms — choosing a permissive
   licence for this project would not remove it.
 
+- **Invoking a separately-installed OpenSees is a different case.**  Nothing
+  above restricts an application that contains **no OpenSees code** and drives
+  an `OpenSees` interpreter the *user* installed and licensed: the clause bites
+  on shipping the software, not on calling it.  That is the basis of the
+  future packaged-GUI option in [`docs/gui_roadmap.md`](gui_roadmap.md) §5 and
+  P22 of [`docs/_pending_work.md`](_pending_work.md) — a bundle that ships no
+  OpenSees binary or module and shells out to whatever OpenSees the user has.
+  Whatever build the user installs carries its own terms.
+
 If you intend to distribute a product or run a service built on this toolkit,
 confirm your OpenSeesPy licensing position with Oregon State University before
 release.

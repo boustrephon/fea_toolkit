@@ -242,6 +242,23 @@ everything else is wiring against existing APIs.
   shipped application that imports OpenSeesPy requires OSU's commercial
   licence for commercial use.  A status-bar / About disclaimer is
   appropriate.
+- **Future option — a self-contained bundle that does *not* import
+  OpenSeesPy.**  The caveat above governs *shipping* software that imports
+  OpenSeesPy; it does not govern an application that ships none of it and instead
+  drives a **separately-installed OpenSees interpreter as an external
+  program**.  Such a bundle (py2app / PyInstaller) would also be the only way
+  to fix the macOS application name (`docs/dev_notes.md` → *macOS
+  application-menu label*).  The groundwork exists — `opensees/builder.py`
+  writes Tcl (`export_model_to_tcl`, `pushover_tcl`,
+  `tcl_materials_and_sections`) — and the remaining work is well defined:
+  analysis-case Tcl for static / modal / spectrum / pushover, a subprocess
+  runner with stdout streaming and cancellation, a recorder-output → NPZ
+  importer so the existing viewers and reports work unchanged, a capability
+  matrix for anything the Tcl deck cannot express, and packaging compliance
+  for what *is* bundled (Qt's LGPL-3.0 notices and relink obligation, plus
+  signing / notarisation).  Not scheduled — recorded as the future option in
+  **P22** of `docs/_pending_work.md`, with the licence position in
+  `docs/licence.md`.
 
 ---
 
