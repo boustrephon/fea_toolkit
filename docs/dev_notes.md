@@ -461,16 +461,16 @@ Consequences — and why ``enable_mesh_picking`` was replaced:
 - Reading ``iren.picker`` worked, but the *gesture* could not be expressed: the
   pick fires on the raw press, so "a click selects, a drag orbits" is
   impossible, and a trackpad tap mid-orbit selects.  ``ViewportInteraction``
-  (`gui/views/interactor.py`) now installs its own press/move/release observers
-  over *its own* ``vtkCellPicker`` / ``vtkPointPicker`` — which also sidesteps
-  pyvista's one-picker-at-a-time rule (``_validate_picker_not_in_use``) that made
-  ``enable_point_picking`` unusable next to mesh picking.
+  (`gui/views/interactor.py`) now owns the picking, driven by a **Qt event
+  filter** (`gui/views/qt_mouse.py`) rather than by VTK observers — see the
+  "Mouse interaction" section below for why, and for the logical-versus-device
+  pixel trap that comes with it.
 - **The picking region was fat.**  ``vtkPicker``'s default tolerance is 0.025 of
   the viewport diagonal: measured on the off-screen render, a click **8 px** to
   the side of a member still selected it, and the region was fat enough to
   shadow every joint (the member is hit before the node marker).  The policy's
-  ``pick_tolerance`` (default 0.003) misses at that offset — both directions are
-  asserted in ``tests/test_picking.py``.
+  calibrated default (0.010) selects at 6 px and misses at 30 px — asserted in
+  ``tests/test_picking.py``.
 - **Nodes win at joints** by picking the node cloud *first*, with a
   ``vtkPointPicker`` restricted by ``AddPickList`` / ``PickFromListOn`` and a
   slightly larger ``node_snap_tolerance``.  ``GetPointId()`` is the node index,
@@ -507,12 +507,45 @@ makes it **configuration, not code**:
 | `PRESETS` (`click_drag`, `right_click`) | same module | data, so a new habit is a new entry |
 | `ClickGesture` (press → move → release) | same module | Qt/VTK-free state machine |
 | settings loader (`load_policy`) | same module | JSON, never fatal |
-| `ViewportInteraction` (observers, pickers) | `gui/views/interactor.py` | the thin VTK adapter |
+| `ViewportInteraction` (gesture + pickers) | `gui/views/interactor.py` | Qt-free: pure logic plus the VTK pickers |
+| `QtMouseFilter` (the event hook) | `gui/views/qt_mouse.py` | Qt event filter; logical → device conversion |
+
+**Where the events come from — Qt, not VTK.**  Measured on macOS (pyvistaqt
+0.13.1 / pyvista 0.48.1) against the real widget: a click reaches the widget's
+`mousePressEvent` **and** the interactor's `LeftButtonPressEvent`, but
+`mouseReleaseEvent` never delivers `LeftButtonReleaseEvent` to the interactor.
+A release-driven gesture written as a VTK observer therefore **never fires** —
+which is exactly what "clicking does nothing" looked like, and why the first
+version of this feature was dead on arrival.  An event filter on the widget sees
+press, move and release reliably, so the gesture lives there instead.
+
+**Logical versus device pixels.**  Qt reports *logical* pixels from the top left;
+VTK's pickers take *device* pixels from the **bottom** left.  On a Retina display
+(2x here) the two differ by the device pixel ratio, so the filter converts
+(`x * dpr`, `height_device - y * dpr`) and the gesture's `drag_threshold_px` is
+deliberately in *logical* pixels — that is the distance a person judges.  A
+calibration that mixed the two missed by exactly the ratio.
+
+**Calibrated tolerance.**  `pick_tolerance` is a fraction of the viewport
+diagonal.  Measured on a 1026x860 render window (device pixels; offsets to the
+side of a member's midpoint, clicked through Qt):
+
+| tolerance | ≈ device px | selects at |
+|---|---|---|
+| 0.003 | 4 | 0, 3 px |
+| 0.006 | 8 | 0, 3, 6 px |
+| **0.010** (default) | 13 | 0, 3, 6, 10 px |
+| 0.015 | 20 | up to 16 px |
+| VTK's default 0.025 | 33 | — (fat enough to shadow the joints) |
+
+0.010 leaves a comfortable click while staying 2.5x tighter than VTK's default;
+0.003 turned out to be unclickable in practice, which is what sent the first
+release of this feature back to the drawing board.
 
 Settings file: `$FEA_TOOLKIT_GUI_CONFIG`, else `~/.config/fea_toolkit/gui.json`:
 
 ```json
-{"preset": "click_drag", "drag_threshold_px": 4, "pick_tolerance": 0.002}
+{"preset": "click_drag", "drag_threshold_px": 4, "pick_tolerance": 0.004}
 ```
 
 Unknown keys, an unreadable file or an out-of-range value leave the defaults in

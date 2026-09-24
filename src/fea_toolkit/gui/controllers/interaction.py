@@ -66,8 +66,10 @@ class InteractionPolicy:
             ``0`` means "no movement at all".
         pick_tolerance: ``vtkCellPicker`` tolerance as a fraction of the
             viewport diagonal -- the size of the invisible picking region around
-            an element.  The VTK default (0.025) is fat enough to shadow the
-            joints, hence the small default here.
+            an element.  VTK's default (0.025) is fat enough to shadow the
+            joints; calibrated on macOS/Retina (1026x860 device px), 0.010 is
+            about 13 device px, which a person can actually hit, while 0.003
+            (4 px) turned out to be too tight to click at all.
         node_priority: Try the node cloud first, so a click at a joint selects
             the node instead of the member passing through it.
         node_snap_tolerance: Tolerance for that node-first pick.
@@ -76,7 +78,7 @@ class InteractionPolicy:
     preset: str = DEFAULT_PRESET
     pick_button: str = "left"
     drag_threshold_px: float = 5.0
-    pick_tolerance: float = 0.003
+    pick_tolerance: float = 0.010
     node_priority: bool = True
     node_snap_tolerance: float = 0.012
 

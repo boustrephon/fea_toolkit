@@ -40,24 +40,17 @@ def window(qapp, monkeypatch, tmp_path):
     win.close()
 
 
-class _Event:
-    """Stand-in for the VTK event object the handlers read a position from."""
-
-    def __init__(self, x, y):
-        self._xy = (float(x), float(y))
-
-    def GetEventPosition(self):
-        """Display coordinates, as VTK would report them."""
-        return self._xy
-
-
 def _click(window, xy=(100.0, 100.0), *, drag_to=None):
-    """Drive the real press/move/release handlers at display coordinates."""
+    """Drive the real gesture handlers (logical pixels, as Qt reports them).
+
+    ``device_xy`` is irrelevant here because ``pick_at`` is stubbed; the real
+    conversion is covered by the Qt-filter tests and ``test_picking.py``.
+    """
     interaction = window._interaction
-    interaction._on_press(_Event(*xy), None)
+    interaction.begin_gesture(xy)
     if drag_to is not None:
-        interaction._on_move(_Event(*drag_to), None)
-    interaction._on_release(_Event(*(drag_to or xy)), None)
+        interaction.update_gesture(drag_to)
+    interaction.end_gesture(drag_to or xy, drag_to or xy)
 
 
 def _stub_pick(result):
@@ -222,3 +215,99 @@ def test_a_typo_in_the_settings_file_is_reported(qapp, monkeypatch, tmp_path):
 def test_selecting_an_unknown_label_reports_failure(window):
     assert window._select_entity_in_tree("frame_elements", "no-such-element") is False
     assert window._select_entity_in_tree("no_such_group", "1") is False
+
+
+# ── The Qt event filter (the path a real click actually takes) ──────
+
+
+def _qt_mouse_event(event_type, xy, button=None):
+    """Build a Qt mouse event of *event_type* at logical *xy*."""
+    from qtpy.QtCore import QPointF, Qt
+    from qtpy.QtGui import QMouseEvent
+
+    if button is None:
+        button = Qt.MouseButton.LeftButton
+    position = QPointF(*xy)
+    return QMouseEvent(
+        event_type,
+        position,
+        position,
+        button,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+
+def test_the_qt_filter_drives_the_gesture_in_device_pixels(window, monkeypatch):
+    """A real Qt click reaches the adapter, converted to device pixels.
+
+    VTK pickers take *device* pixels with a bottom-left origin while Qt reports
+    logical pixels from the top left; mixing the two is what made an early
+    calibration miss by the device pixel ratio.
+    """
+    from qtpy.QtCore import QEvent
+
+    from fea_toolkit.gui.views.interactor import PickResult
+
+    seen = []
+
+    def _record(x, y):
+        seen.append((x, y))
+        return PickResult()
+
+    monkeypatch.setattr(window._interaction, "pick_at", _record)
+
+    widget = window._interactor
+    ratio = float(widget.devicePixelRatioF())
+    height = float(widget.render_window.GetSize()[1])
+    logical = (120.0, 80.0)
+
+    window._mouse_filter.eventFilter(widget, _qt_mouse_event(QEvent.Type.MouseButtonPress, logical))
+    window._mouse_filter.eventFilter(
+        widget, _qt_mouse_event(QEvent.Type.MouseButtonRelease, logical)
+    )
+
+    assert seen == [(120.0 * ratio, height - 80.0 * ratio)]
+
+
+def test_the_qt_filter_ignores_a_drag(window, monkeypatch):
+    """Press, move past the threshold, release: the camera keeps that gesture."""
+
+    def _forbidden(*_args, **_kwargs):
+        raise AssertionError("a drag must not pick")
+
+    monkeypatch.setattr(window._interaction, "pick_at", _forbidden)
+
+    from qtpy.QtCore import QEvent
+
+    widget = window._interactor
+    window._mouse_filter.eventFilter(
+        widget, _qt_mouse_event(QEvent.Type.MouseButtonPress, (10.0, 10.0))
+    )
+    window._mouse_filter.eventFilter(widget, _qt_mouse_event(QEvent.Type.MouseMove, (80.0, 70.0)))
+    window._mouse_filter.eventFilter(
+        widget, _qt_mouse_event(QEvent.Type.MouseButtonRelease, (80.0, 70.0))
+    )
+
+
+def test_the_qt_filter_ignores_the_other_button(window, monkeypatch):
+    """With the default policy the right button is not a selecting gesture."""
+    from qtpy.QtCore import QEvent, Qt
+
+    from fea_toolkit.gui.views.interactor import PickResult
+
+    seen = []
+    monkeypatch.setattr(
+        window._interaction, "pick_at", lambda x, y: (seen.append((x, y)), PickResult())[1]
+    )
+
+    widget = window._interactor
+    other = Qt.MouseButton.RightButton
+    window._mouse_filter.eventFilter(
+        widget, _qt_mouse_event(QEvent.Type.MouseButtonPress, (5.0, 5.0), other)
+    )
+    window._mouse_filter.eventFilter(
+        widget, _qt_mouse_event(QEvent.Type.MouseButtonRelease, (5.0, 5.0), other)
+    )
+
+    assert seen == []

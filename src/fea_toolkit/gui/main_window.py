@@ -40,6 +40,7 @@ from .render_backend import QtRenderBackend
 from .views.interactor import PickResult, ViewportInteraction
 from .views.message_log import MessageLog
 from .views.property_inspector import PropertyInspector
+from .views.qt_mouse import install_mouse_filter
 
 _PROJECT_URL = "https://github.com/boustrephon/fea_toolkit"
 _CURSOR_POLL_MS = 60
@@ -81,6 +82,7 @@ class MainWindow(QMainWindow):
         self._backend: Any = None
         self._selection_index: Any = None
         self._interaction: Any = None
+        self._mouse_filter: Any = None
         self._policy, self._policy_notes = load_policy()
         self._cursor_timer: Optional[QTimer] = None
         self._interaction_enabled = False
@@ -124,11 +126,10 @@ class MainWindow(QMainWindow):
     def _create_interaction(self) -> None:
         """Wire viewport gestures to selection, per the interaction policy.
 
-        PyVista's ``enable_mesh_picking`` picks on the raw *press* with a fat
-        default tolerance, so it cannot express "a click selects, a drag
-        orbits"; :class:`~fea_toolkit.gui.views.interactor.ViewportInteraction`
-        installs its own observers instead, driven by the policy loaded from
-        the settings file.
+        The gesture comes from a **Qt event filter** (`views/qt_mouse.py`), not
+        from VTK observers: measured on macOS, the widget forwards a press to
+        the interactor but never the matching release, so a release-driven
+        gesture as a VTK observer can never complete (`docs/dev_notes.md`).
         """
         self._interaction = ViewportInteraction(
             self._interactor,
@@ -136,8 +137,7 @@ class MainWindow(QMainWindow):
             on_pick=self._on_viewport_pick,
             node_actors=lambda: self._backend.actors("nodes"),
         )
-        if not self._interaction.install():
-            self.log("Viewport picking is unavailable in this host.", "warn")
+        self._mouse_filter = install_mouse_filter(self._interactor, self._interaction, self)
 
     def _on_viewport_pick(self, result: PickResult) -> None:
         """Select whatever a click found; a click on nothing clears the selection.
@@ -698,11 +698,12 @@ class MainWindow(QMainWindow):
     # ── Teardown ────────────────────────────────────────────────────
 
     def closeEvent(self, event):
-        """Stop the cursor timer, detach picking and release the render window."""
+        """Stop the cursor timer, detach the mouse filter and release the render window."""
         if self._cursor_timer is not None:
             self._cursor_timer.stop()
-        if self._interaction is not None:
-            self._interaction.uninstall()
+        if self._mouse_filter is not None:
+            self._interactor.removeEventFilter(self._mouse_filter)
+            self._mouse_filter = None
         if self._interactor is not None:
             with contextlib.suppress(Exception):
                 self._interactor.close()

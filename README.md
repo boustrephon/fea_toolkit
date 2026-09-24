@@ -1088,7 +1088,7 @@ fea-gui path/to/model.s2k  # or open a SAP2000 model
 * **Mouse habits are configurable.**  If you would rather select with the right
   button (or tune the click distance, the picking region, or node-versus-member
   priority), write `~/.config/fea_toolkit/gui.json` — e.g.
-  `{"preset": "right_click"}` or `{"pick_tolerance": 0.002}`.  Anything
+  `{"preset": "right_click"}` or `{"pick_tolerance": 0.004}`.  Anything
   unrecognised is reported in the message log.  See `docs/dev_notes.md`
   → *Mouse interaction: one policy, many mouse habits*.
 * The window is titled **FEA Toolkit** (`gui/app.py` → `APP_NAME`, applied

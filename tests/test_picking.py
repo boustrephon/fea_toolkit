@@ -135,6 +135,24 @@ def test_a_tighter_tolerance_shrinks_the_picking_region(viewer):
     assert tight.pick_at(x + 8, y).hit is False
 
 
+def test_the_default_tolerance_is_clickable_but_not_fat(viewer):
+    """The default region is a calibrated compromise, not a guess.
+
+    Measured on macOS with a 1026x860 render window (device pixels): the policy
+    default (0.010 -> ~13 px) selects a click 6 px to the side of the member,
+    while 30 px away -- well inside VTK's 0.025 default -- no longer does.
+    """
+    frame = viewer.geometry()[0][0]
+    renderer = viewer._backend.plotter.renderer
+    midpoint = (np.asarray(frame.start) + np.asarray(frame.end)) / 2.0
+    x, y = _display_coords(renderer, midpoint)
+
+    default = _interaction(viewer, node_priority=False)
+
+    assert default.pick_at(x + 6, y).hit is True
+    assert default.pick_at(x + 30, y).hit is False
+
+
 def test_node_priority_wins_at_a_joint(viewer):
     """A joint is a node *and* the end of a member: the policy prefers the node."""
     nodes = viewer.geometry()[2]

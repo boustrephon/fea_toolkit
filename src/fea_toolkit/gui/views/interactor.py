@@ -1,20 +1,30 @@
-"""Turn viewport mouse events into picks, honouring an ``InteractionPolicy``.
+"""Turn viewport mouse gestures into picks, honouring an ``InteractionPolicy``.
 
 PyVista's ``enable_mesh_picking`` cannot express "a click selects, a drag
 orbits": it picks on the raw *press*, and with the picker's default tolerance
-(0.025 of the viewport diagonal) the picking region is fat enough to shadow
-every joint.  This adapter installs its own VTK observers instead, so the policy
-from :mod:`fea_toolkit.gui.controllers.interaction` is what decides:
+(0.025 of the viewport diagonal) the picking region is fat enough to shadow every
+joint.  This module owns the picking instead: the policy comes from
+:mod:`fea_toolkit.gui.controllers.interaction`, the gesture from
+:class:`~fea_toolkit.gui.controllers.interaction.ClickGesture`, and the pickers
+are our own ``vtkCellPicker`` / ``vtkPointPicker``.
 
-* a **press** of the policy's button starts a ``ClickGesture``;
-* **movement** beyond ``drag_threshold_px`` marks the gesture a drag, leaving it
-  to the camera;
-* a **release** of a clean click runs the pick -- the node cloud first when
-  ``node_priority`` is on (restricted with ``AddPickList``), then the element
-  batches with ``pick_tolerance``.
+**Events come from Qt, not from VTK observers.**  Measured on macOS with
+pyvistaqt 0.13.1 (pyvista 0.48.1): a click reaches the widget's
+``mousePressEvent`` and the interactor's ``LeftButtonPressEvent``, but
+``mouseReleaseEvent`` never delivers ``LeftButtonReleaseEvent`` to the
+interactor -- so a release-driven gesture installed as a VTK observer simply
+never completes.  The Qt side is reliable, so
+:mod:`fea_toolkit.gui.views.qt_mouse` feeds this object instead.
 
-The event logic is deliberately thin: the decisions live in the Qt-free policy
-and gesture classes, which are unit-tested without a render window.
+**Coordinates.**  Qt reports *logical* pixels; VTK pickers take *device* pixels
+with the origin at the **bottom** left (what ``GetEventPosition`` returns and
+what ``vtkCellPicker.Pick`` expects).  The gesture works in logical pixels --
+that is what a user-facing ``drag_threshold_px`` should mean on any display --
+while ``pick_at`` is handed device pixels.  Keep the two apart: mixing them was
+what made an early calibration miss by a factor of the device pixel ratio.
+
+The module is deliberately **Qt-free** (the GUI adapter supplies the events), so
+it is unit-tested without Qt -- including in the CI matrix that has no Qt.
 """
 
 from dataclasses import dataclass
@@ -25,10 +35,6 @@ import numpy as np
 from ..controllers.interaction import ClickGesture, InteractionPolicy
 
 __all__ = ["PickResult", "ViewportInteraction"]
-
-#: VTK event name per mouse button.
-_PRESS_EVENT = {"left": "LeftButtonPressEvent", "right": "RightButtonPressEvent"}
-_RELEASE_EVENT = {"left": "LeftButtonReleaseEvent", "right": "RightButtonReleaseEvent"}
 
 
 @dataclass
@@ -82,7 +88,6 @@ class ViewportInteraction:
         self._gesture = ClickGesture(policy)
         self._cell_picker: Any = None
         self._point_picker: Any = None
-        self._observers: list = []
 
     # ── Policy ───────────────────────────────────────────────────────
 
@@ -106,58 +111,44 @@ class ViewportInteraction:
             if picker is not None:
                 picker.SetTolerance(tolerance)
 
-    # ── Setup ────────────────────────────────────────────────────────
+    # ── Gesture (fed by the Qt adapter) ──────────────────────────────
 
-    def install(self) -> bool:
-        """Attach the observers for the policy's button.
+    @property
+    def pick_button(self) -> str:
+        """The button this policy selects with (``"left"`` or ``"right"``)."""
+        return self._policy.pick_button
 
-        Returns:
-            ``False`` when the viewport has no interactor -- a headless host,
-            or the ``offscreen`` Qt platform, which cannot create a GL context.
+    def begin_gesture(self, logical_xy: tuple) -> None:
+        """Start tracking a gesture.
+
+        Args:
+            logical_xy: Press position as Qt reports it (logical pixels).
         """
-        iren = getattr(self._plotter, "iren", None)
-        if iren is None:
-            return False
-        button = self._policy.pick_button
-        self._observers = [
-            iren.add_observer(_PRESS_EVENT[button], self._on_press),
-            iren.add_observer("MouseMoveEvent", self._on_move),
-            iren.add_observer(_RELEASE_EVENT[button], self._on_release),
-        ]
-        return True
+        self._gesture.press(logical_xy)
 
-    def uninstall(self) -> None:
-        """Detach the observers (idempotent)."""
-        iren = getattr(self._plotter, "iren", None)
-        if iren is not None:
-            for observer in self._observers:
-                iren.remove_observer(observer)
-        self._observers = []
+    def update_gesture(self, logical_xy: tuple) -> None:
+        """Note pointer movement, so a drag is never mistaken for a click.
 
-    # ── Events ───────────────────────────────────────────────────────
+        Args:
+            logical_xy: Current position as Qt reports it.
+        """
+        self._gesture.move(logical_xy)
 
-    def _on_press(self, obj: Any, _event: Any) -> None:
-        """Begin tracking a gesture at the press position."""
-        self._gesture.press(self._event_position(obj))
+    def end_gesture(self, logical_xy: tuple, device_xy: tuple) -> None:
+        """Finish a gesture; pick when it was a clean click.
 
-    def _on_move(self, obj: Any, _event: Any) -> None:
-        """Note movement, so a drag is never mistaken for a click."""
-        self._gesture.move(self._event_position(obj))
+        Args:
+            logical_xy: Release position as Qt reports it -- the space the drag
+                threshold is measured in.
+            device_xy: The same point in VTK *device* pixels, bottom-left
+                origin, which is what the pickers expect.
+        """
+        if self._gesture.release(logical_xy):
+            self._on_pick(self.pick_at(*device_xy))
 
-    def _on_release(self, obj: Any, _event: Any) -> None:
-        """Pick when the gesture was a clean click."""
-        position = self._event_position(obj)
-        if self._gesture.release(position):
-            self._on_pick(self.pick_at(*position))
-
-    @staticmethod
-    def _event_position(obj: Any) -> tuple:
-        """Display coordinates carried by a VTK event (``(0, 0)`` if absent)."""
-        try:
-            x, y = obj.GetEventPosition()
-            return (float(x), float(y))
-        except Exception:
-            return (0.0, 0.0)
+    def cancel_gesture(self) -> None:
+        """Forget any in-flight gesture (after a model or policy change)."""
+        self._gesture.reset()
 
     # ── Picking ──────────────────────────────────────────────────────
 

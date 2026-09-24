@@ -26,6 +26,28 @@ class TestLazyImports:
         assert out.returncode == 0, out.stderr
         assert "clean" in out.stdout
 
+    def test_import_the_picking_adapter_without_qt(self):
+        """``gui.views.interactor`` must stay Qt-free.
+
+        The Qt-less CI matrix is what tests the picking adapter, and the ``gui``
+        packages expose their Qt widgets lazily for exactly this reason -- an
+        eager re-export in ``gui/views/__init__.py`` broke the 3.10/3.12 matrix
+        once (``ModuleNotFoundError: No module named 'qtpy'``).
+        """
+        code = (
+            f"import sys; sys.path.insert(0, {SRC!r}); "
+            "import fea_toolkit.gui.views.interactor as m; "
+            "loaded = sorted(k for k in sys.modules if 'qtpy' in k or k.startswith('PySide6')); "
+            "assert not loaded, 'Qt got imported: ' + repr(loaded); "
+            "assert m.ViewportInteraction is not None; "
+            "print('clean')"
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, check=False
+        )
+        assert out.returncode == 0, out.stderr
+        assert "clean" in out.stdout
+
     def test_import_opensees_package_without_solver(self):
         """`import fea_toolkit.opensees` must not load openseespy either."""
         code = (
