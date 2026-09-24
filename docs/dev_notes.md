@@ -456,27 +456,77 @@ of which is visible in the method signature:
 | The cell index lives on the scene picker | `enable_mesh_picking` does `self._plotter.iren.picker = picker` (a `vtkCellPicker`, tolerance 0.025); read it via `plotter.iren.picker.GetCellId()`. |
 | The picked actor is identity-comparable | `picker.GetActor()` is the object `add_mesh` returned, so `PyVistaRenderer.category_of_actor()` resolves the batch with `is`.  Measured: a member's midpoint gives `cell=0` for the first frame; a joint position resolves to either the member's line cell or the node cloud's vertex cell. |
 
-Consequences:
+Consequences — and why ``enable_mesh_picking`` was replaced:
 
-- `MainWindow._picked_cell_id()` **must** read `iren.picker` — the callback
-  cannot say *which* element was hit.  Both halves are asserted in
-  `tests/test_picking.py`, so a pyvista upgrade that changes either one fails
-  there instead of leaving selection quietly dead.
-- `PickerType` is **not** exported from the `pyvista` namespace (it lives in
-  `pyvista.plotting.opts`), so the GUI relies on the default cell picker rather
-  than naming the enum.
-- Picking binds to the **right** button by default (`left_clicking=False` →
-  observer on `RightButtonPressEvent`; `True` → `LeftButtonPressEvent`), which is
-  why the GUI leaves `left_clicking` alone and keeps left-drag for rotate.
-- Only **one** picker may be enabled at a time — `_validate_picker_not_in_use`
-  raises `PyVistaPickingError` — so nodes are picked by the *same* cell picker
-  (vertex cells) rather than by adding `enable_point_picking`.
-- An embedded `QtInteractor` cannot pick under the `offscreen` Qt platform (no
-  GL context → `iren is None`), so any real-pick test must use a plain
-  `pv.Plotter(off_screen=True)`.
+- Reading ``iren.picker`` worked, but the *gesture* could not be expressed: the
+  pick fires on the raw press, so "a click selects, a drag orbits" is
+  impossible, and a trackpad tap mid-orbit selects.  ``ViewportInteraction``
+  (`gui/views/interactor.py`) now installs its own press/move/release observers
+  over *its own* ``vtkCellPicker`` / ``vtkPointPicker`` — which also sidesteps
+  pyvista's one-picker-at-a-time rule (``_validate_picker_not_in_use``) that made
+  ``enable_point_picking`` unusable next to mesh picking.
+- **The picking region was fat.**  ``vtkPicker``'s default tolerance is 0.025 of
+  the viewport diagonal: measured on the off-screen render, a click **8 px** to
+  the side of a member still selected it, and the region was fat enough to
+  shadow every joint (the member is hit before the node marker).  The policy's
+  ``pick_tolerance`` (default 0.003) misses at that offset — both directions are
+  asserted in ``tests/test_picking.py``.
+- **Nodes win at joints** by picking the node cloud *first*, with a
+  ``vtkPointPicker`` restricted by ``AddPickList`` / ``PickFromListOn`` and a
+  slightly larger ``node_snap_tolerance``.  ``GetPointId()`` is the node index,
+  because a point cloud's vertex cells index exactly like the node list.
+- **Overlays must not be pickable.**  A highlight tube is drawn *over* its
+  element, so a pickable overlay stole the click aimed at the element beneath;
+  ``PyVistaRenderer._add_overlay`` sets ``SetPickable(False)`` on every
+  decoration (highlight, label, deformed shape, force flag).
+- **Node markers were sub-pixel.**  ``render_nodes`` used
+  ``point_size=radius * 20`` → **0.4 px** at the default ``node_size=0.02``:
+  invisible on screen and effectively unclickable.  ``node_point_size()`` now
+  scales to pixels with a 6 px floor.
+- ``PickerType`` is not exported from the ``pyvista`` namespace (it lives in
+  ``pyvista.plotting.opts``), so nothing here names the enum.
+- An embedded ``QtInteractor`` cannot pick under the ``offscreen`` Qt platform
+  at all (no GL context → ``iren is None``), so real-pick tests use a plain
+  ``pv.Plotter(off_screen=True)``.
 
 **Roadmap correction.**  Design rule 7 previously said the forward map comes
 from "the value PyVista's `enable_mesh_picking` callback supplies".  There is no
 such value; the map is built from the scene picker plus the actor, and the rule
 now says so.
+
+## Mouse interaction: one policy, many mouse habits
+
+**Added 2026-09-23.**  Whether a click means "select" and a drag means "orbit"
+depends on the program someone came from (SAP2000 and ETABS use explicit modes,
+Blender and Fusion use click-versus-drag, others use the right button).  That
+makes it **configuration, not code**:
+
+| Piece | Where | Nature |
+|---|---|---|
+| `InteractionPolicy` (the knobs) | `gui/controllers/interaction.py` | frozen dataclass, validates itself |
+| `PRESETS` (`click_drag`, `right_click`) | same module | data, so a new habit is a new entry |
+| `ClickGesture` (press → move → release) | same module | Qt/VTK-free state machine |
+| settings loader (`load_policy`) | same module | JSON, never fatal |
+| `ViewportInteraction` (observers, pickers) | `gui/views/interactor.py` | the thin VTK adapter |
+
+Settings file: `$FEA_TOOLKIT_GUI_CONFIG`, else `~/.config/fea_toolkit/gui.json`:
+
+```json
+{"preset": "click_drag", "drag_threshold_px": 4, "pick_tolerance": 0.002}
+```
+
+Unknown keys, an unreadable file or an out-of-range value leave the defaults in
+place and are **reported in the message log** — a typo in a config file is a
+silent failure otherwise.
+
+The default preset is `click_drag`: a clean left click selects (a press that
+travels further than `drag_threshold_px` before release is a drag and never
+picks), left-drag keeps rotating, and a click that meets nothing clears the
+selection.
+
+**Explicit Select / Orbit modes** (the SAP2000 arrangement) are deliberately not
+in the policy yet: a mode has to be able to *disable* rotation, which means
+switching the VTK interactor style, so it is a larger change than a knob.  The
+preset table and the adapter are the places for it — recorded in
+`docs/_pending_work.md` P23.
 

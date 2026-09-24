@@ -8,7 +8,7 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: 🚧 In progress — Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection sync + display toggles), 2026-09-23
+## Status: 🚧 In progress — Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection sync + display toggles) and the mouse-interaction policy is configurable, 2026-09-23
 
 This document records the **framework decision** and the **proposed
 architecture** for a native desktop GUI that wraps the workflow already

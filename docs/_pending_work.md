@@ -242,18 +242,46 @@ implemented, config-gated **off by default** (existing models unchanged):
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 
-#### P23 — GUI Milestone 4 remainder: element labels, macOS application name
+#### P24 — GUI: run the Preprocessor (split / mesh) and show parent-child topology
+Source: user observation (2026-09-23) that the Model Tree lists only the parsed
+members, with no split children and no `parent_id` / `child_ids` / `inactive`;
+`docs/gui_roadmap.md` milestone row 5.
+
+**What.** The GUI renders the *parsed* `SAPModelData` and never runs the
+Preprocessor, so there are no split sub-elements to show — `Model ▸ Mesh` and
+`Model ▸ Split elements` are still greyed placeholders.  That is why the tree
+lacks children and the inspector lacks the parent/child fields.  Work:
+
+1. a Model-menu action that runs the Preprocessor (splitting at joints, and
+   optional meshing) on a worker thread, with progress in the status bar;
+2. swap the displayed model over to the resulting `MeshModel` (the viewer and
+   `SelectionIndex` already accept one) and rebuild the tree;
+3. a display toggle mapped to `ModelViewer(collapse_to_parents=...)`, so
+   "original members" and "split sub-elements" are both viewable;
+4. the tree/inspector then surface `parent_id` / `child_ids` / `inactive` for
+   free — the inspector prints every dataclass field, so children appear as
+   soon as they exist.
+
+#### P23 — GUI Milestone 4 remainder: interaction modes, element labels, macOS name
 Source: `docs/gui_roadmap.md` milestone rows 3–4 and design rule 7;
-`docs/dev_notes.md` ("macOS application-menu label", "PyVista picking contract").
+`docs/dev_notes.md` ("macOS application-menu label", "PyVista picking contract",
+"Mouse interaction: one policy, many mouse habits").
 
 **What.** ✅ **Milestone 4 landed in both directions** — tree→viewport highlight,
-viewport→tree select-and-scroll (`SelectionIndex` + the scene picker's cell
-index) and the node/shell display toggles.  Two follow-ups remain:
+viewport→tree select-and-scroll (`SelectionIndex` + the cell index) — and mouse
+interaction became configurable: an `InteractionPolicy` (presets over knobs), the
+click-versus-drag gesture, a tighter picking region, node priority and the
+settings file.  Three follow-ups remain:
 
-1. **element-label display toggle** — `view.show_labels` is still greyed
+1. **explicit Select / Orbit modes** (the SAP2000 arrangement — approaches A/D
+   of the interaction discussion).  A mode has to be able to *disable* rotation,
+   so this needs the VTK interactor style switched plus a toolbar/shortcut
+   toggle, with the mode remembered in `QSettings` (M8).  The policy table and
+   `ViewportInteraction` are where it lands.
+2. **element-label display toggle** — `view.show_labels` is still greyed
    because nothing renders node/element labels; it needs a `labels` category
    in `PyVistaRenderer` before the toggle can exist.
-2. **macOS application name** — the Application menu's `About` / `Hide` /
+3. **macOS application name** — the Application menu's `About` / `Hide` /
    `Quit` *items* are retitled at launch through AppKit
    (`app.rename_macos_application_menu`, now a declared macOS dependency), but
    the **bold menu-bar / Dock name stays `Python`**: it comes from the

@@ -1079,9 +1079,18 @@ fea-gui path/to/model.s2k  # or open a SAP2000 model
 ```
 
 * **Selecting.**  Click a row in the Model Tree to highlight that entity in the
-  3-D view; **right-click** an element in the viewport to select it in the tree
-  (the group is expanded and scrolled to).  Both directions share one Qt-free
-  identity index (`gui/controllers/selection.py`), so they cannot drift apart.
+  3-D view; **left-click** an element in the viewport to select it in the tree
+  (the group is expanded and scrolled to, and a click on empty space clears the
+  selection).  A left-*drag* orbits as it always did — a press that travels more
+  than a few pixels is never treated as a click.  Both directions share one
+  Qt-free identity index (`gui/controllers/selection.py`), so they cannot drift
+  apart.
+* **Mouse habits are configurable.**  If you would rather select with the right
+  button (or tune the click distance, the picking region, or node-versus-member
+  priority), write `~/.config/fea_toolkit/gui.json` — e.g.
+  `{"preset": "right_click"}` or `{"pick_tolerance": 0.002}`.  Anything
+  unrecognised is reported in the message log.  See `docs/dev_notes.md`
+  → *Mouse interaction: one policy, many mouse habits*.
 * The window is titled **FEA Toolkit** (`gui/app.py` → `APP_NAME`, applied
   through `configure_application()` before the `QApplication` exists), and on
   macOS the Application menu's **`About` / `Hide` / `Quit` items are retitled

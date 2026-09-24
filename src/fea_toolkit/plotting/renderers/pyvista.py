@@ -69,6 +69,27 @@ def _flag_direction(
     return np.array(direction, dtype=float).copy()
 
 
+#: Node markers are sized in **pixels**: a model-unit radius cannot be converted
+#: without the camera.  ``radius * 20`` previously drew sub-pixel markers (0.4 px
+#: at the default 0.02) -- invisible, and almost impossible to click -- hence a
+#: scale that keeps ``radius`` meaningful plus a floor that keeps them visible.
+_NODE_POINT_SCALE = 600.0
+_MIN_NODE_POINT_SIZE = 6.0
+
+
+def node_point_size(radius: float) -> float:
+    """Marker size in pixels for a model-relative *radius*.
+
+    Args:
+        radius: Model-relative marker size (``ModelViewer.show_model``'s
+            ``node_size``).
+
+    Returns:
+        Pixel size, floored so small markers stay visible and clickable.
+    """
+    return max(_MIN_NODE_POINT_SIZE, float(radius) * _NODE_POINT_SCALE)
+
+
 def _flag_rgb(col_val: float, max_abs: float) -> tuple[float, float, float]:
     """Map a signed flag value to a diverging RGB colour in ``0..1``.
 
@@ -154,6 +175,18 @@ class PyVistaRenderer(RenderBackend):
         self._actors.append(actor)
         self._categories.setdefault(category, []).append(actor)
 
+    def _add_overlay(self, actor: Any, category: str) -> None:
+        """Track decoration: a highlight, label, deformed shape or force flag.
+
+        Overlays are drawn *over* the elements, so they must not be pickable --
+        otherwise a pickable overlay steals the click that was aimed at the
+        element underneath it (``docs/dev_notes.md``, *PyVista picking
+        contract*).
+        """
+        with contextlib.suppress(Exception):
+            actor.SetPickable(False)
+        self._add_actor(actor, category)
+
     def clear_category(self, category: str) -> None:
         """Remove every actor of *category* from the scene.
 
@@ -188,6 +221,18 @@ class PyVistaRenderer(RenderBackend):
         if self._plotter is not None:
             with contextlib.suppress(Exception):
                 self._plotter.render()
+
+    def actors(self, category: str) -> list:
+        """Actors registered under *category*, in creation order.
+
+        Args:
+            category: ``"frames"``, ``"shells"``, ``"nodes"``, ``"highlights"``,
+                ``"annotations"``, ``"deformed"`` or ``"force_flags"``.
+
+        Returns:
+            The actors, empty when the category has none.
+        """
+        return list(self._categories.get(category, ()))
 
     def category_of_actor(self, actor: Any) -> Optional[str]:
         """Which render category *actor* belongs to, or ``None``.
@@ -322,7 +367,7 @@ class PyVistaRenderer(RenderBackend):
         actor = p.add_mesh(
             cloud,
             color=color,
-            point_size=radius * 20,
+            point_size=node_point_size(radius),
             style="points",
             render_points_as_spheres=True,
             show_scalar_bar=False,
@@ -359,7 +404,7 @@ class PyVistaRenderer(RenderBackend):
                     opacity=1.0,  # a selection cue must read over any section colour
                     show_scalar_bar=False,
                 )
-                self._add_actor(actor, "highlights")
+                self._add_overlay(actor, "highlights")
 
             # ── Highlighted nodes ──
             if h.nodes:
@@ -373,7 +418,7 @@ class PyVistaRenderer(RenderBackend):
                     render_points_as_spheres=True,
                     show_scalar_bar=False,
                 )
-                self._add_actor(actor, "highlights")
+                self._add_overlay(actor, "highlights")
 
             # ── Highlighted shells ──
             if h.shells:
@@ -409,7 +454,7 @@ class PyVistaRenderer(RenderBackend):
                         lighting=True,
                         show_scalar_bar=False,
                     )
-                    self._add_actor(actor, "highlights")
+                    self._add_overlay(actor, "highlights")
 
             # ── Label ──
             if h.label:
@@ -441,7 +486,7 @@ class PyVistaRenderer(RenderBackend):
                     point_size=8,
                     shape="rounded_rect",
                 )
-                self._add_actor(lbl, "highlights")
+                self._add_overlay(lbl, "highlights")
 
     # ── Annotations ──────────────────────────────────────────────────
 
@@ -462,7 +507,7 @@ class PyVistaRenderer(RenderBackend):
                 point_size=4,
                 shape="rounded_rect",
             )
-            self._add_actor(actor, "annotations")
+            self._add_overlay(actor, "annotations")
 
     # ── Deformed shape ───────────────────────────────────────────────
 
@@ -496,7 +541,7 @@ class PyVistaRenderer(RenderBackend):
             line_width=2,
             show_scalar_bar=False,
         )
-        self._add_actor(actor, "deformed")
+        self._add_overlay(actor, "deformed")
 
     # ── Force flags ──────────────────────────────────────────────────
 
@@ -570,7 +615,7 @@ class PyVistaRenderer(RenderBackend):
             lighting=False,
             show_scalar_bar=False,
         )
-        self._add_actor(actor, "force_flags")
+        self._add_overlay(actor, "force_flags")
 
     # ── Scene management ─────────────────────────────────────────────
 

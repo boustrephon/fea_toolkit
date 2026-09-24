@@ -33,9 +33,11 @@ from qtpy.QtWidgets import (
 )
 
 from .app import APP_NAME
+from .controllers.interaction import load_policy
 from .controllers.selection import SelectionIndex
 from .models.tree_model import ModelTreeModel
 from .render_backend import QtRenderBackend
+from .views.interactor import PickResult, ViewportInteraction
 from .views.message_log import MessageLog
 from .views.property_inspector import PropertyInspector
 
@@ -78,6 +80,8 @@ class MainWindow(QMainWindow):
         self._interactor: Any = None
         self._backend: Any = None
         self._selection_index: Any = None
+        self._interaction: Any = None
+        self._policy, self._policy_notes = load_policy()
         self._cursor_timer: Optional[QTimer] = None
         self._interaction_enabled = False
         self._actions: dict = {}
@@ -89,7 +93,10 @@ class MainWindow(QMainWindow):
         self._build_docks()
         self._build_status_bar()
         self._decorate_view()
-        self.log("Ready.  Right-click an element in the viewport to select it.")
+        for note in self._policy_notes:
+            self.log(note, "warn")
+        button = "Left-click" if self._policy.pick_button == "left" else "Right-click"
+        self.log(f"Ready.  {button} an element to select it; drag to orbit.")
 
         if model is not None:
             self.show_model(model)
@@ -110,59 +117,54 @@ class MainWindow(QMainWindow):
         self._interactor = QtInteractor(self._viewport_container)
         self._viewport_layout.addWidget(self._interactor)
         self._backend = QtRenderBackend(self._interactor)
-        self._enable_picking()
+        self._create_interaction()
 
     # ── Picking (viewport -> tree) ───────────────────────────────────
 
-    def _enable_picking(self) -> None:
-        """Let a viewport pick select the entity under the cursor.
+    def _create_interaction(self) -> None:
+        """Wire viewport gestures to selection, per the interaction policy.
 
-        PyVista binds picking to the **right** button by default, so the left
-        button keeps rotating and rubber-band zooming; ``show=False`` suppresses
-        its own highlight, since the selection already highlights through
-        :class:`~fea_toolkit.plotting.viewer.ModelViewer`.
+        PyVista's ``enable_mesh_picking`` picks on the raw *press* with a fat
+        default tolerance, so it cannot express "a click selects, a drag
+        orbits"; :class:`~fea_toolkit.gui.views.interactor.ViewportInteraction`
+        installs its own observers instead, driven by the policy loaded from
+        the settings file.
         """
-        try:
-            self._interactor.enable_mesh_picking(
-                callback=self._on_viewport_pick,
-                use_actor=True,
-                show=False,
-            )
-        except Exception as exc:  # pragma: no cover - host without a render window
-            self.log(f"Viewport picking unavailable: {exc}", "warn")
+        self._interaction = ViewportInteraction(
+            self._interactor,
+            policy=self._policy,
+            on_pick=self._on_viewport_pick,
+            node_actors=lambda: self._backend.actors("nodes"),
+        )
+        if not self._interaction.install():
+            self.log("Viewport picking is unavailable in this host.", "warn")
 
-    def _on_viewport_pick(self, actor: Any) -> None:
-        """Select, in the tree, whatever was picked in the viewport.
+    def _on_viewport_pick(self, result: PickResult) -> None:
+        """Select whatever a click found; a click on nothing clears the selection.
 
         Args:
-            actor: The picked actor, as PyVista's mesh-picking callback
-                delivers it (``use_actor=True``).
+            result: The pick from the interaction adapter (``hit`` is ``False``
+                when the click met no geometry).
         """
         if self._viewer is None or self._selection_index is None:
             return
-        category = self._backend.category_of_actor(actor)
-        if category is None:
-            return  # an overlay was hit (highlight, annotation, force flag)
-        label = self._selection_index.label(category, self._picked_cell_id())
+        category = self._backend.category_of_actor(result.actor) if result.hit else None
+        label = self._selection_index.label(category, result.index) if category else None
         if label is None:
+            self._clear_selection()
             return
         group_key = self._selection_index.group_key(category)
         if self._select_entity_in_tree(group_key, label):
             self.log(f"Selected {label} in the tree from the viewport.")
 
-    def _picked_cell_id(self) -> int:
-        """Cell index of the most recent viewport pick (``-1`` when unknown).
-
-        PyVista's callback carries only the actor, so the index is read from
-        the scene picker that ``enable_mesh_picking`` installs
-        (``plotter.iren.picker``) -- verified against pyvista 0.48.1, see
-        ``docs/dev_notes.md``.
-        """
-        picker = getattr(getattr(self._interactor, "iren", None), "picker", None)
-        try:
-            return int(picker.GetCellId())
-        except Exception:
-            return -1
+    def _clear_selection(self) -> None:
+        """Empty the inspector, the tree selection and the viewport highlight."""
+        self._inspector.show_object(None)
+        if self._viewer is not None:
+            self._viewer.clear_highlights()
+        selection = self._tree_view.selectionModel()
+        if selection is not None:
+            selection.clear()
 
     def _select_entity_in_tree(self, group_key: str, label: str) -> bool:
         """Expand *group_key*, select the row for *label* and scroll to it.
@@ -696,9 +698,11 @@ class MainWindow(QMainWindow):
     # ── Teardown ────────────────────────────────────────────────────
 
     def closeEvent(self, event):
-        """Stop the cursor timer and release the VTK render window."""
+        """Stop the cursor timer, detach picking and release the render window."""
         if self._cursor_timer is not None:
             self._cursor_timer.stop()
+        if self._interaction is not None:
+            self._interaction.uninstall()
         if self._interactor is not None:
             with contextlib.suppress(Exception):
                 self._interactor.close()
