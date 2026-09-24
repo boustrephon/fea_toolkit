@@ -130,6 +130,22 @@ def test_window_title_is_the_product_name(window):
     assert window.windowTitle() == "FEA Toolkit"
 
 
+def test_placeholder_tips_never_name_a_finished_milestone(window):
+    """A greyed item must not promise a milestone that has already landed.
+
+    Milestones 1-4 shipped, so the remaining placeholders name the backlog item
+    or the milestone that will actually wire them (the Model menu points at P24,
+    element labels at P23) instead of a stale "Milestone 3".
+    """
+    finished = ("Milestone 1", "Milestone 2", "Milestone 3", "Milestone 4")
+    stale = [
+        key
+        for key, action in window._actions.items()
+        if not action.isEnabled() and any(done in action.toolTip() for done in finished)
+    ]
+    assert stale == []
+
+
 def test_module_entry_point_matches_the_console_script():
     """``python -m fea_toolkit.gui`` runs the same entry point as ``fea-gui``.
 

@@ -542,7 +542,8 @@ side of a member's midpoint, clicked through Qt):
 0.003 turned out to be unclickable in practice, which is what sent the first
 release of this feature back to the drawing board.
 
-Settings file: `$FEA_TOOLKIT_GUI_CONFIG`, else `~/.config/fea_toolkit/gui.json`:
+Settings file: `$FEA_TOOLKIT_GUI_CONFIG`, else `~/.config/fea_toolkit/gui.json`
+(the user-facing version of this section lives in [`gui.md`](gui.md)):
 
 ```json
 {"preset": "click_drag", "drag_threshold_px": 4, "pick_tolerance": 0.004}

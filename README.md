@@ -1069,8 +1069,9 @@ pip install -e ".[report]"       # add [mesh-remesh] for Gmsh remeshing
 
 #### Desktop GUI (optional)
 
-The Qt desktop GUI (see [`docs/gui_roadmap.md`](docs/gui_roadmap.md)) is an
-**opt-in extra** -- a plain `pip install -e .` does **not** install it:
+The Qt desktop GUI is an **opt-in extra** -- a plain `pip install -e .` does
+**not** install it.  **User guide: [`docs/gui.md`](docs/gui.md)**; design and
+milestones: [`docs/gui_roadmap.md`](docs/gui_roadmap.md).
 
 ```bash
 pip install -e ".[gui]"    # PySide6 + pyvistaqt + qtpy

@@ -168,6 +168,11 @@ for automated cross-referencing.
 
 ## 🎨 Export & Visualisation
 
+- [Desktop GUI](gui.md) — ⚠️ Partial
+  > User guide to the fea_toolkit desktop GUI: launching it, the panels and menus, selection in both directions, camera controls, display toggles, and the mouse-interaction settings file.
+  Tags: `gui`, `pyside6`, `pyvistaqt`, `desktop`, `selection`, `interaction`, `settings`
+  Related: [Desktop GUI Roadmap](gui_roadmap.md) · [Development Notes](dev_notes.md) · [Visualisation Toolkit](viewer.md) · [_pending_work.md](_pending_work.md)
+
 - [JSON Serialization: Raw Tables vs Model Codec](json_serialization.md) — ✅ Complete
   > The two independent JSON representations in fea_toolkit — the parser raw-table cache and the dataclass model codec — and when to use each.
   Tags: `json`, `io`, `serialization`, `parser`, `model-codec`
@@ -354,6 +359,7 @@ Tags across all documentation files:
 - **`deprecation`** — [deprecation_plan.md](deprecation_plan.md)
 - **`design`** — [capacity.md](capacity.md)
 - **`design-proposal`** — [report_generation.md](report_generation.md)
+- **`desktop`** — [gui.md](gui.md)
 - **`development`** — [dev_notes.md](dev_notes.md)
 - **`diagnostics`** — [model_review.md](model_review.md)
 - **`diaphragm`** — [diaphragm_constraints.md](diaphragm_constraints.md)
@@ -384,13 +390,14 @@ Tags across all documentation files:
 - **`gpl`** — [licence.md](licence.md)
 - **`gravity`** — [xara_gravity_and_solver.md](xara_gravity_and_solver.md)
 - **`ground-motion`** — [nonlinear_dynamic_analysis.md](nonlinear_dynamic_analysis.md)
-- **`gui`** — [gui_roadmap.md](gui_roadmap.md)
+- **`gui`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md)
 - **`guide`** — [llm_guide.md](llm_guide.md)
 - **`hdf5`** — [model_stage_file.md](model_stage_file.md), [report_generation.md](report_generation.md)
 - **`hinges`** — [element_properties_config.md](element_properties_config.md), [pushover_analysis.md](pushover_analysis.md)
 - **`html-export`** — [viewer.md](viewer.md)
 - **`identifiers`** — [sap_ids_vs_tags.md](sap_ids_vs_tags.md)
 - **`integrity`** — [model_review.md](model_review.md)
+- **`interaction`** — [gui.md](gui.md)
 - **`interactive`** — [viewer.md](viewer.md)
 - **`internal`** — [parser_coverage.md](parser_coverage.md)
 - **`io`** — [json_serialization.md](json_serialization.md), [model_stage_file.md](model_stage_file.md), [results_schema.md](results_schema.md)
@@ -435,9 +442,9 @@ Tags across all documentation files:
 - **`preprocessor`** — [builder_reference.md](builder_reference.md), [layered_analysis_workflow.md](layered_analysis_workflow.md)
 - **`pushover`** — [csm_bilinearization.md](csm_bilinearization.md), [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [pushover_analysis.md](pushover_analysis.md), [pushover_results_storage_viz.md](pushover_results_storage_viz.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md), [xara_pushover_workflow.md](xara_pushover_workflow.md)
 - **`pyright`** — [linting_fix_plan.md](linting_fix_plan.md)
-- **`pyside6`** — [gui_roadmap.md](gui_roadmap.md)
+- **`pyside6`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md)
 - **`pyvista`** — [viewer.md](viewer.md)
-- **`pyvistaqt`** — [gui_roadmap.md](gui_roadmap.md)
+- **`pyvistaqt`** — [gui.md](gui.md), [gui_roadmap.md](gui_roadmap.md)
 - **`qt`** — [gui_roadmap.md](gui_roadmap.md)
 - **`rc`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`refactor`** — [force_diagram_unification.md](force_diagram_unification.md)
@@ -460,10 +467,12 @@ Tags across all documentation files:
 - **`schema`** — [results_schema.md](results_schema.md)
 - **`scripting`** — [tcl_export.md](tcl_export.md)
 - **`sections`** — [rc_rectangular_section_workflow.md](rc_rectangular_section_workflow.md)
+- **`selection`** — [gui.md](gui.md)
 - **`self-weight`** — [model_review.md](model_review.md)
 - **`semver`** — [versioning.md](versioning.md)
 - **`serialisation`** — [model_stage_file.md](model_stage_file.md)
 - **`serialization`** — [json_serialization.md](json_serialization.md)
+- **`settings`** — [gui.md](gui.md)
 - **`sfi-mvlem`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md)
 - **`shear`** — [mvlem_wall_analysis.md](mvlem_wall_analysis.md), [shear_failure_modelling.md](shear_failure_modelling.md), [storey_response.md](storey_response.md), [vecchio_emara_benchmark.md](vecchio_emara_benchmark.md)
 - **`shell`** — [constraint_detection.md](constraint_detection.md), [element_properties_config.md](element_properties_config.md), [shell_support.md](shell_support.md)

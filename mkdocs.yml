@@ -125,6 +125,7 @@ nav:
       - Rhino Attributes Reference: rhino_attributes.md
       - Tcl Export: tcl_export.md
       - Visualisation Toolkit: viewer.md
+      - Desktop GUI: gui.md
       - Results Schema: results_schema.md
       - Pushover Results Storage & Viz: pushover_results_storage_viz.md
       - Force-Diagram Unification: force_diagram_unification.md

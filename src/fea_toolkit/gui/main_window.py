@@ -258,7 +258,7 @@ class MainWindow(QMainWindow):
         a["file.save_results"] = self._placeholder("Save results", "Milestone 7")
         a["file.export_tcl"] = self._placeholder("Export Tcl", "Milestone 7")
         a["file.export_image"] = self._placeholder("Export screenshot", "Milestone 7")
-        a["edit.copy"] = self._placeholder("Copy", "Milestone 3")
+        a["edit.copy"] = self._placeholder("Copy", "a future release")
         a["edit.preferences"] = self._placeholder("Preferences", "Milestone 8")
         a["edit.preferences"].setMenuRole(QAction.MenuRole.PreferencesRole)
         a["view.show_nodes"] = self._toggle_action(
@@ -267,17 +267,17 @@ class MainWindow(QMainWindow):
         a["view.show_shells"] = self._toggle_action(
             "Show shells", self._on_show_shells, tip="Show or hide area elements"
         )
-        a["view.show_labels"] = self._placeholder("Show element labels", "Milestone 6")
+        a["view.show_labels"] = self._placeholder("Show element labels", "P23")
         a["view.show_loads"] = self._placeholder("Show loads", "Milestone 6")
         a["view.show_forces"] = self._placeholder("Show force diagrams", "Milestone 7")
         a["view.clear_highlights"] = self._real_action(
             "Clear highlights", self._on_clear_highlights, tip="Drop the selection highlight"
         )
         a["view.reset_layout"] = self._placeholder("Reset layout", "Milestone 8")
-        a["model.mesh"] = self._placeholder("Mesh", "Milestone 3")
-        a["model.split"] = self._placeholder("Split elements", "Milestone 3")
-        a["model.selections"] = self._placeholder("Selections", "Milestone 3")
-        a["model.units"] = self._placeholder("Units", "Milestone 3")
+        a["model.mesh"] = self._placeholder("Mesh", "P24")
+        a["model.split"] = self._placeholder("Split elements", "P24")
+        a["model.selections"] = self._placeholder("Selections", "a future release")
+        a["model.units"] = self._placeholder("Units", "a future release")
         a["analysis.run"] = self._placeholder("Run", "Milestone 5")
         a["analysis.static"] = self._placeholder("Static analysis", "Milestone 5")
         a["analysis.modal"] = self._placeholder("Modal analysis", "Milestone 5")
@@ -428,7 +428,7 @@ class MainWindow(QMainWindow):
         trees = QTabWidget(self)
         trees.setObjectName("tabs_trees")
         trees.addTab(self._tree_view, "Model Tree")
-        trees.addTab(self._placeholder_panel("Property tree", "Milestone 4"), "Property Tree")
+        trees.addTab(self._placeholder_panel("Property tree", "a future release"), "Property Tree")
         self._tree_dock = QDockWidget("Model", self)
         self._tree_dock.setObjectName("dock_trees")
         self._tree_dock.setWidget(trees)
