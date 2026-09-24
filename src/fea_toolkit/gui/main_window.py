@@ -35,6 +35,7 @@ from qtpy.QtWidgets import (
 from .app import APP_NAME
 from .controllers.interaction import load_policy
 from .controllers.selection import SelectionIndex
+from .controllers.worker import TaskWorker
 from .models.tree_model import ModelTreeModel
 from .render_backend import QtRenderBackend
 from .views.interactor import PickResult, ViewportInteraction
@@ -77,12 +78,14 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_NAME)
 
         self._model: Any = None
+        self._source_model: Any = None
         self._viewer: Any = None
         self._interactor: Any = None
         self._backend: Any = None
         self._selection_index: Any = None
         self._interaction: Any = None
         self._mouse_filter: Any = None
+        self._worker: Any = None
         self._policy, self._policy_notes = load_policy()
         self._cursor_timer: Optional[QTimer] = None
         self._interaction_enabled = False
@@ -94,6 +97,7 @@ class MainWindow(QMainWindow):
         self._build_toolbars()
         self._build_docks()
         self._build_status_bar()
+        self._set_model_actions_enabled(False)
         self._decorate_view()
         for note in self._policy_notes:
             self.log(note, "warn")
@@ -101,7 +105,24 @@ class MainWindow(QMainWindow):
         self.log(f"Ready.  {button} an element to select it; drag to orbit.")
 
         if model is not None:
+            self._remember_source_model(model)
             self.show_model(model)
+
+    def _remember_source_model(self, model: Any) -> None:
+        """Keep the parsed ``SAPModelData`` the Preprocessor can be re-run on.
+
+        The Preprocessor consumes a ``SAPModelData`` and returns a ``MeshModel``,
+        and so does preprocess a *copy* — so re-running from the parsed source is
+        always safe, while re-running on a ``MeshModel`` would not be.  Handed a
+        ``MeshModel`` or ``AnalysisBuilder`` directly (tests, scripts), there is
+        no source to preprocess and the Model-menu actions stay disabled.
+
+        Args:
+            model: The model about to be displayed.
+        """
+        from ..model.sap_data import SAPModelData
+
+        self._source_model = model if isinstance(model, SAPModelData) else None
 
     # ── Viewport ────────────────────────────────────────────────────
 
@@ -267,6 +288,16 @@ class MainWindow(QMainWindow):
         a["view.show_shells"] = self._toggle_action(
             "Show shells", self._on_show_shells, tip="Show or hide area elements"
         )
+        a["view.show_parents"] = self._toggle_action(
+            "Show original members",
+            self._on_show_parents,
+            tip="Show the unsplit members instead of their split sub-elements",
+        )
+        # Off by default: a preprocessed model displays its active sub-elements.
+        show_parents = a["view.show_parents"]
+        show_parents.blockSignals(True)
+        show_parents.setChecked(False)
+        show_parents.blockSignals(False)
         a["view.show_labels"] = self._placeholder("Show element labels", "P23")
         a["view.show_loads"] = self._placeholder("Show loads", "Milestone 6")
         a["view.show_forces"] = self._placeholder("Show force diagrams", "Milestone 7")
@@ -274,8 +305,16 @@ class MainWindow(QMainWindow):
             "Clear highlights", self._on_clear_highlights, tip="Drop the selection highlight"
         )
         a["view.reset_layout"] = self._placeholder("Reset layout", "Milestone 8")
-        a["model.mesh"] = self._placeholder("Mesh", "P24")
-        a["model.split"] = self._placeholder("Split elements", "P24")
+        a["model.split"] = self._real_action(
+            "Split elements",
+            self._on_split_elements,
+            tip="Preprocess: split frames at interior joints (runs on a worker)",
+        )
+        a["model.mesh"] = self._real_action(
+            "Mesh areas",
+            self._on_mesh_areas,
+            tip="Preprocess: split frames and create shell elements for areas",
+        )
         a["model.selections"] = self._placeholder("Selections", "a future release")
         a["model.units"] = self._placeholder("Units", "a future release")
         a["analysis.run"] = self._placeholder("Run", "Milestone 5")
@@ -319,6 +358,7 @@ class MainWindow(QMainWindow):
         for key in (
             "view.show_nodes",
             "view.show_shells",
+            "view.show_parents",
             "view.show_labels",
             "view.show_loads",
             "view.show_forces",
@@ -330,7 +370,7 @@ class MainWindow(QMainWindow):
         m.addAction(a["view.reset_layout"])
 
         m = bar.addMenu("&Model")
-        for key in ("model.mesh", "model.split", "model.selections", "model.units"):
+        for key in ("model.split", "model.mesh", "model.selections", "model.units"):
             m.addAction(a[key])
 
         m = bar.addMenu("&Analysis")
@@ -369,6 +409,7 @@ class MainWindow(QMainWindow):
             "analysis.run",
             "analysis.stop",
             None,
+            "model.split",
             "model.mesh",
             "results.deformed",
             "results.forces",
@@ -526,16 +567,40 @@ class MainWindow(QMainWindow):
 
     # ── Model display ───────────────────────────────────────────────
 
-    def show_model(self, model: Any, color_by_section: bool = True) -> None:
+    def show_model(
+        self,
+        model: Any,
+        color_by_section: bool = True,
+        *,
+        collapse_to_parents: Optional[bool] = None,
+        reset_view: bool = True,
+        rebuild_tree: bool = True,
+    ) -> None:
         """Render *model* into the embedded viewport.
 
         Args:
             model: A ``SAPModelData``, a ``MeshModel`` or an ``AnalysisBuilder``.
             color_by_section: Colour elements by section name.
+            collapse_to_parents: Draw the unsplit members rather than their
+                split sub-elements.  ``None`` (the default) uses the
+                **View ▸ Display ▸ Show original members** toggle.
+            reset_view: Reset the camera first.  ``False`` keeps the current
+                view, which is what the display toggles want.
+            rebuild_tree: Rebuild the Model Tree for *model*.  ``False`` for a
+                pure display change — the same model, so rebuilding would only
+                throw away the user's selection and expansion.
         """
         from ..model.mesh_model import MeshModel
         from ..model.sap_data import SAPModelData
         from ..plotting.viewer import ModelViewer
+
+        if collapse_to_parents is None:
+            collapse_to_parents = self._actions["view.show_parents"].isChecked()
+
+        camera = None
+        if not reset_view:
+            with contextlib.suppress(Exception):
+                camera = self._interactor.camera_position
 
         # A new model replaces the previous scene outright -- the backend
         # *appends* actors, so without this the old geometry would linger
@@ -543,20 +608,37 @@ class MainWindow(QMainWindow):
         self._backend.clear()
 
         if isinstance(model, MeshModel):
-            viewer = ModelViewer(mesh_model=model, backend=self._backend)
+            viewer = ModelViewer(
+                mesh_model=model,
+                backend=self._backend,
+                collapse_to_parents=collapse_to_parents,
+            )
         elif isinstance(model, SAPModelData):
-            viewer = ModelViewer(model_data=model, backend=self._backend)
+            viewer = ModelViewer(
+                model_data=model,
+                backend=self._backend,
+                collapse_to_parents=collapse_to_parents,
+            )
         else:
-            viewer = ModelViewer(builder=model, backend=self._backend)
+            viewer = ModelViewer(
+                builder=model,
+                backend=self._backend,
+                collapse_to_parents=collapse_to_parents,
+            )
 
         viewer.show_model(show_nodes=True, color_by_section=color_by_section)
         self._viewer = viewer
         self._model = model
         self._selection_index = SelectionIndex.from_viewer(viewer)
-        self._tree_model.set_model(model)
+        if rebuild_tree:
+            self._tree_model.set_model(model)
         self._reset_display_toggles()
-        self._interactor.reset_camera()
+        if camera is None:
+            self._interactor.reset_camera()
+        else:
+            self._interactor.camera_position = camera
         self._update_units_label()
+        self._set_model_actions_enabled(self._source_model is not None)
         self.log("Displayed model geometry.")
 
     def _reset_display_toggles(self) -> None:
@@ -636,6 +718,113 @@ class MainWindow(QMainWindow):
         """Show or hide the area-element overlay."""
         self._backend.set_category_visible("shells", checked)
 
+    def _on_show_parents(self, checked: bool) -> None:
+        """Draw the unsplit members instead of their split sub-elements.
+
+        A pure display change: the model, the tree and the selection are the
+        same, so only the scene is redrawn (the cell→entity index is rebuilt,
+        because the rendered geometry is what a pick lands on).
+        """
+        if self._model is None:
+            return
+        self.show_model(
+            self._model,
+            collapse_to_parents=checked,
+            reset_view=False,
+            rebuild_tree=False,
+        )
+
+    # ── Preprocessing (Model menu) ───────────────────────────────────
+
+    def _on_split_elements(self) -> None:
+        """**Model ▸ Split elements**: preprocess, splitting frames at joints."""
+        self._start_preprocess({"split_elements": True}, "Splitting elements at joints")
+
+    def _on_mesh_areas(self) -> None:
+        """**Model ▸ Mesh areas**: preprocess with shells (area meshing)."""
+        self._start_preprocess(
+            {"split_elements": True, "create_shells": True},
+            "Splitting elements at joints and meshing areas",
+        )
+
+    def _start_preprocess(self, config: dict, label: str) -> None:
+        """Run the Preprocessor on a worker and display the result.
+
+        The Preprocessor is pure topology — it never calls OpenSees — but it
+        still runs off the GUI thread: splitting and area meshing a large model
+        is not instant (``docs/gui_roadmap.md`` → *Threading model*).
+
+        Args:
+            config: Preprocessor configuration, e.g. ``{"split_elements": True}``.
+            label: What is happening, for the message log.
+        """
+        if self._source_model is None:
+            self.log("Open a SAP2000 model before preprocessing.", "warn")
+            return
+        if self._worker is not None and self._worker.isRunning():
+            self.log("Preprocessing is already running.", "warn")
+            return
+
+        from ..opensees.preprocessor import preprocess_model
+
+        source = self._source_model
+        settings = dict(config)
+        self._set_model_actions_enabled(False)
+        self._progress.setRange(0, 0)  # busy: the preprocessor reports no progress
+        self._progress.setVisible(True)
+        self.log(f"{label} \u2026")
+
+        worker = TaskWorker(lambda _should_cancel: preprocess_model(source, settings), parent=self)
+        worker.succeeded.connect(self._preprocess_finished)
+        worker.failed.connect(self._preprocess_failed)
+        worker.finished.connect(self._preprocess_ended)
+        self._worker = worker
+        worker.start()
+
+    def _preprocess_finished(self, mesh_model: Any) -> None:
+        """Display a preprocessed model, reporting what changed.
+
+        Splitting is *opt-in per element* in the model itself (SAP2000's
+        auto-mesh flags: ``AtJoints`` / ``AtFrames``), so a model that asks for
+        nothing is legitimately unchanged — say so rather than implying a
+        failure.
+
+        Args:
+            mesh_model: The ``MeshModel`` produced on the worker.
+        """
+        elements = mesh_model.frame_elements.values()
+        children = sum(1 for elem in elements if getattr(elem, "parent_id", None))
+        parents = sum(1 for elem in elements if getattr(elem, "inactive", False))
+        if children or parents:
+            detail = f"{children} split sub-elements, {parents} superseded parents"
+        else:
+            detail = "no element requested splitting"
+        self.log(
+            f"Preprocessed: {len(mesh_model.frame_elements)} frame elements ({detail}), "
+            f"{len(mesh_model.area_elements)} area elements."
+        )
+        self.show_model(mesh_model, reset_view=False)
+
+    def _preprocess_failed(self, message: str) -> None:
+        """Report a preprocessing failure, leaving the display alone."""
+        self.log(f"Preprocessing failed: {message}", "error")
+
+    def _preprocess_ended(self) -> None:
+        """Restore the UI once the worker has stopped, successfully or not."""
+        self._worker = None
+        self._progress.setVisible(False)
+        self._progress.setRange(0, 100)
+        self._set_model_actions_enabled(self._source_model is not None)
+
+    def _set_model_actions_enabled(self, enabled: bool) -> None:
+        """Enable the preprocessing actions — they need a parsed source model.
+
+        Args:
+            enabled: Whether a ``SAPModelData`` is loaded and can be preprocessed.
+        """
+        for key in ("model.split", "model.mesh"):
+            self._actions[key].setEnabled(enabled)
+
     # ── Handlers ────────────────────────────────────────────────────
 
     def _on_open(self) -> None:
@@ -663,6 +852,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.log(f"Failed to open {path}: {exc}", "error")
             return False
+        self._remember_source_model(model)
         self.show_model(model)
         return True
 
@@ -704,6 +894,11 @@ class MainWindow(QMainWindow):
         if self._mouse_filter is not None:
             self._interactor.removeEventFilter(self._mouse_filter)
             self._mouse_filter = None
+        if self._worker is not None and self._worker.isRunning():
+            # Preprocessing is atomic, so this only gives it a grace period
+            # rather than interrupting it mid-call.
+            self._worker.cancel()
+            self._worker.wait(3000)
         if self._interactor is not None:
             with contextlib.suppress(Exception):
                 self._interactor.close()
