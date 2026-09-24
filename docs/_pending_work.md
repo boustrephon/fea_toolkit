@@ -242,26 +242,6 @@ implemented, config-gated **off by default** (existing models unchanged):
 
 ### Tier 3 — Feature gaps (placeholders / partial)
 
-#### P24 — GUI: run the Preprocessor (split / mesh) and show parent-child topology
-Source: user observation (2026-09-23) that the Model Tree lists only the parsed
-members, with no split children and no `parent_id` / `child_ids` / `inactive`;
-`docs/gui_roadmap.md` milestone row 5.
-
-**What.** The GUI renders the *parsed* `SAPModelData` and never runs the
-Preprocessor, so there are no split sub-elements to show — `Model ▸ Mesh` and
-`Model ▸ Split elements` are still greyed placeholders.  That is why the tree
-lacks children and the inspector lacks the parent/child fields.  Work:
-
-1. a Model-menu action that runs the Preprocessor (splitting at joints, and
-   optional meshing) on a worker thread, with progress in the status bar;
-2. swap the displayed model over to the resulting `MeshModel` (the viewer and
-   `SelectionIndex` already accept one) and rebuild the tree;
-3. a display toggle mapped to `ModelViewer(collapse_to_parents=...)`, so
-   "original members" and "split sub-elements" are both viewable;
-4. the tree/inspector then surface `parent_id` / `child_ids` / `inactive` for
-   free — the inspector prints every dataclass field, so children appear as
-   soon as they exist.
-
 #### P23 — GUI Milestone 4 remainder: interaction modes, element labels, macOS name
 Source: `docs/gui_roadmap.md` milestone rows 3–4 and design rule 7;
 `docs/dev_notes.md` ("macOS application-menu label", "PyVista picking contract",
@@ -793,6 +773,35 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
 - **Deeper opstool result-post-processing integration** — closed as **no
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
+
+## DONE (2026-09-24 — GUI P24: the Model menu runs the Preprocessor (split / mesh))
+
+The GUI rendered only the *parsed* `SAPModelData`, so the Model Tree listed the
+members as drawn and the Inspector had no `parent_id` / `child_ids` / `inactive`
+to show — the two Model-menu items were greyed placeholders.  Now:
+
+- **`Model ▸ Split elements`** runs `preprocess_model(md, {"split_elements":
+  True})`; **`Model ▸ Mesh areas`** adds `create_shells: True` for area meshing.
+  Both run on a `QThread` — `gui/controllers/worker.py::TaskWorker`, the first
+  piece of the roadmap's threading model, reused by milestone 5.
+- The display is swapped for the resulting `MeshModel`, so the tree, Inspector
+  and `SelectionIndex` pick up split children and superseded parents for free,
+  and the camera is preserved.
+- **`View ▸ Display ▸ Show original members`** maps to
+  `ModelViewer(collapse_to_parents=...)`: unsplit members and split
+  sub-elements are both viewable without reloading.
+- The actions are enabled only with a **parsed** model loaded (`_source_model`):
+  the Preprocessor consumes a `SAPModelData` and returns a `MeshModel`, so
+  re-running from the file's own model is always safe.
+- Splitting is **opt-in per element** in the model (SAP2000 auto-mesh flags
+  `AtJoints` / `AtFrames`), so a model that requests nothing is unchanged and the
+  log says *"no element requested splitting"* rather than looking broken —
+  discovered while writing the tests, and now stated in `docs/gui.md`.
+
+Tests: `tests/test_gui_worker.py` (worker contract: result, failure, cooperative
+cancellation) and `tests/test_gui_preprocess.py` (a T-junction model: split
+counts, log summary, tree rows, inspector parent/child fields, display toggle,
+camera preservation).
 
 ## DONE (2026-09-23 — GUI Milestone 4, part 1: tree→viewport selection, display toggles, app identity)
 

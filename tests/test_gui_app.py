@@ -133,9 +133,9 @@ def test_window_title_is_the_product_name(window):
 def test_placeholder_tips_never_name_a_finished_milestone(window):
     """A greyed item must not promise a milestone that has already landed.
 
-    Milestones 1-4 shipped, so the remaining placeholders name the backlog item
-    or the milestone that will actually wire them (the Model menu points at P24,
-    element labels at P23) instead of a stale "Milestone 3".
+    Milestones 1-4 shipped and the Model menu is live, so the remaining
+    placeholders name the backlog item or the milestone that will actually wire
+    them (element labels point at P23) instead of a stale "Milestone 3".
     """
     finished = ("Milestone 1", "Milestone 2", "Milestone 3", "Milestone 4")
     stale = [

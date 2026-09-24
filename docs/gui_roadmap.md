@@ -8,7 +8,7 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: 🚧 In progress — Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection sync + display toggles) and the mouse-interaction policy is configurable, 2026-09-23
+## Status: 🚧 In progress — Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection sync + display toggles), the mouse-interaction policy is configurable and the Model menu runs the Preprocessor (split / mesh), 2026-09-24
 
 > **User-facing guide:** [`docs/gui.md`](gui.md) — what the application does
 > today, how to select, the camera and display controls, and the settings file.

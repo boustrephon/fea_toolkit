@@ -31,10 +31,10 @@ fea-gui path/to/model.s2k    # or open a SAP2000 model / JSON export
 python -m fea_toolkit.gui    # same entry point, for launchers and scripts
 ```
 
-`File ▸ Open` (`Ctrl+O`) parses a `.s2k` or JSON file and displays it.  The
-GUI renders the **parsed** model — the preprocessing steps (splitting at joints,
-meshing) are not wired up yet, so split sub-elements and their parent/child
-links do not appear ([P24](_pending_work.md)).
+`File ▸ Open` (`Ctrl+O`) parses a `.s2k` or JSON file and displays it.  What you
+see first is the **parsed** model, as drawn in SAP2000; `Model ▸ Split elements`
+and `Model ▸ Mesh areas` then run the Preprocessor and replace the display with
+the prepared topology (see [Preprocessing](#preprocessing-split-and-mesh)).
 
 ## The window
 
@@ -44,8 +44,8 @@ links do not appear ([P24](_pending_work.md)).
 | **Model** dock (left, top) | Tabs: **Model Tree** (live) and **Property Tree** (not yet implemented) |
 | **Inspector** dock (left, bottom) | Every field of the selected object, read-only |
 | **Messages** dock (bottom) | Log of what the application did, including any settings-file problems |
-| Status bar | Unit system, cursor coordinates, and read-outs reserved for the analysis milestone |
-| Toolbars | Top: Open, Save/Export, Run, Mesh, results.  Right edge: camera views and display toggles |
+| Status bar | Unit system, cursor coordinates, a busy indicator while preprocessing runs, and read-outs reserved for the analysis milestone |
+| Toolbars | Top: Open, Save/Export, Run, Split, Mesh, results.  Right edge: camera views and display toggles |
 
 The Model Tree is **lazy**: groups (Nodes, Frame Elements, Materials, …) list
 their entities only when expanded, so a model with hundreds of thousands of
@@ -130,6 +130,7 @@ switched.  It is recorded as [P23](_pending_work.md).
 |---|---|
 | **View ▸ Display ▸ Show nodes** | Live — show or hide the node markers |
 | **View ▸ Display ▸ Show shells** | Live — show or hide area elements |
+| **View ▸ Display ▸ Show original members** | Live — show the unsplit members instead of their split sub-elements |
 | **View ▸ Display ▸ Clear highlights** | Live — drop the selection highlight |
 | **View ▸ Display ▸ Show element labels** | Not yet — nothing draws labels, so the toggle waits for that renderer ([P23](_pending_work.md)) |
 | **View ▸ Display ▸ Show loads** | Pending the load-rendering milestone (6) |
@@ -137,6 +138,40 @@ switched.  It is recorded as [P23](_pending_work.md).
 
 The toggles are re-checked whenever a model is displayed, so what the menu says
 always matches what is on screen.
+
+## Preprocessing (split and mesh)
+
+Opening a file shows the model as it was drawn.  Two Model-menu actions run the
+package's Preprocessor over it and swap the display for the prepared topology:
+
+| Action | What it does |
+|---|---|
+| **Model ▸ Split elements** | Splits members at the joints lying on them (`split_elements`) |
+| **Model ▸ Mesh areas** | The above, plus creating shell elements for area elements (`create_shells`) |
+
+Both run on a **worker thread**, so the window keeps repainting, and the Message
+Log reports the outcome:
+
+```
+Preprocessed: 4 frame elements (2 split sub-elements, 1 superseded parents), 0 area elements.
+```
+
+Splitting is **opt-in per element in the model itself**: it happens where the
+SAP2000 auto-mesh flags (`AtJoints`, `AtFrames`) ask for it.  A model that asks
+for nothing is reported as *"no element requested splitting"* — that is a
+result, not a failure.
+
+Whenever a member is split, the original is kept (flagged `inactive`, carrying
+its `child_ids`) and each sub-element records its `parent_id`, so the whole
+hierarchy is browsable: the sub-elements are rows of their own in the Model Tree
+and the Inspector shows the parent/child fields.  Once something is split,
+**View ▸ Display ▸ Show original members** toggles between the split
+sub-elements and the unsplit members.  Neither preprocessing nor the toggle
+moves the camera, so the view does not jump.
+
+The actions are enabled only while a **parsed** model is loaded.  The
+Preprocessor consumes a `SAPModelData` and returns a `MeshModel`, so every run
+starts again from the file's own model rather than from an already-split one.
 
 ## Menus at a glance
 
@@ -148,8 +183,8 @@ jarring than a greyed-out one.
 |---|---|---|
 | **File** | Open (`Ctrl+O`), Quit | Save results, Export Tcl, Export screenshot |
 | **Edit** | — | Copy, Preferences |
-| **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show shells, Clear highlights) | Show element labels, Show loads, Show force diagrams, Reset layout |
-| **Model** | — | Mesh, Split elements, Selections, Units |
+| **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show shells, Show original members, Clear highlights) | Show element labels, Show loads, Show force diagrams, Reset layout |
+| **Model** | Split elements, Mesh areas (enabled while a parsed model is open) | Selections, Units |
 | **Analysis** | — | Run, Static, Modal, Response spectrum, Pushover, Stop |
 | **Results** | — | Deformed shape, Force diagrams, Storey response, Pushover curve, Clear results |
 | **Help** | Documentation, About | — |
@@ -172,7 +207,6 @@ drives a *separately installed* OpenSees is the recorded route
 
 | Missing | Effect today |
 |---|---|
-| Preprocessing — split at joints, meshing ([P24](_pending_work.md)) | The tree lists the members as drawn: no split children, no `parent_id` / `child_ids` fields |
 | Analysis actions (milestone 5) | `Analysis ▸ …` is greyed; analyse from a script or notebook instead |
 | Load, deformed-shape and force overlays (milestones 6–7) | Use the [Visualisation Toolkit](viewer.md) and the `plot_*` functions for results |
 | Element labels, the Property Tree tab, explicit interaction modes ([P23](_pending_work.md)) | The corresponding menu item and tab are greyed |
@@ -197,8 +231,15 @@ settings file moves selection to the other button.
 and malformed JSON are reported in the Message Log together with the file path
 — look there first.
 
-**The model shows fewer elements than expected.**  The GUI displays the parsed
-model, without splitting or meshing ([P24](_pending_work.md)).
+**The model shows fewer elements than expected.**  Members that were split are
+displayed as their sub-elements; untick **View ▸ Display ▸ Show original
+members** if you are looking at the collapsed view.  A model that was never
+preprocessed shows exactly the members as drawn.
+
+**Preprocessing reports no change.**  Splitting happens only where the model asks
+for it — the SAP2000 auto-mesh flags (`AtJoints`, `AtFrames`) — and meshing needs
+area elements.  The Message Log says *"no element requested splitting"* when the
+model asks for none.
 
 ## For contributors
 
@@ -206,6 +247,10 @@ model, without splitting or meshing ([P24](_pending_work.md)).
   import time: `gui/views/__init__.py` and `gui/models/__init__.py` re-export
   their Qt classes through PEP 562 `__getattr__` for exactly this reason, and
   `tests/test_lazy_imports.py` pins it.
+* Nothing expensive runs on the GUI thread: `gui/controllers/worker.py`
+  (`TaskWorker`) is the one worker, and cancellation is **cooperative** — an
+  atomic `preprocess_model` call cannot be interrupted mid-call, so a cancel only
+  takes effect at the next task boundary.
 * Qt tests carry the `needs_gui` marker (skipped without the `[gui]` extra) and
   run head-less under `QT_QPA_PLATFORM=offscreen`.  Picking itself cannot run
   there — the offscreen platform has no GL context — so its tests use a plain
