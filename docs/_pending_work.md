@@ -951,11 +951,50 @@ worked; both failures were real, and neither was in the new code:
    displacement by node **id** (``run_static_analysis``) or by integer **tag**
    (hand-built payloads), so both now resolve.
 
-**Acceptance.**  `Admin_0.7E_short term unfixed.s2k` → `fix_base_restraints`
-(the project's own prep, `local/…/admin_report.py`) → `preprocess_model` with
-`split_elements` + `create_shells` → `run_case_set` on the custom `DEAD` case:
-**converged**, 1028 nodes carrying displacement, 849 frames and 1009 shells in
+**Acceptance.**  `Admin_0.7E_short term unfixed.s2k` → `preprocess_model`
+(`split_elements` + `create_shells`) → `run_case_set` on the model's own
+**`Self weight`** case: it converges with **no base-restraint patching** — the
+`.s2k` already pins all 90 base nodes as `(1,1,1,0,0,0)` — with real
+displacements (max |dz| ≈ 6.3 mm over 1028 nodes), 849 frames and 1009 shells in
 the archive, served through `NpzResultsRepository` — and **no NPZ written**.
+
+Three corrections to the first write-up of this entry, kept visible because each
+was easy to get wrong:
+
+* **The local `admin_report.py` applies `fix_base_restraints(md)` before
+  preprocessing — it is not needed.**  It adds no restraint; it only upgrades 17
+  *shell-only* base nodes from pinned `(1,1,1,0,0,0)` to rotationally fixed
+  `(1,1,1,1,1,1)`.  The run converges with them pinned.  The GUI deliberately
+  does **not** mutate the model this way, and does not need to.
+* **`admin_report.py` runs `pattern_scales={"DEAD": 1.0}`, but in *this* model
+  `DEAD` is an empty pattern.**  The raw table is
+  `LoadPat=DEAD … SelfWtMult=0` with no loads assigned to it; the gravity load
+  lives in the pattern named `Self weight` (`SelfWtMult=1`).  A `DEAD` run
+  therefore converges on **zero** load (summed base reaction `Fz = 0.000`, max
+  |dz| = 0) — a trivial solve, not the gravity case.  The figures above come
+  from a real `Self weight` run.
+* **Self-weight is applied per pattern from its own `SelfWtMult`, as
+  volume × unit weight — verified numerically.**  An independent sum over the
+  model gives frames `Σ A·ρ·L = 21 339.7` + shells `Σ polygon_area_3d·t·ρ =
+  30 478.8` = **51 818.459**, which is *exactly* the `Self weight` base reaction
+  the solve reports.  `_loads.py` gates it on `abs(self_weight_factor) > 1e-12`
+  (line ~533), with no name-based fallback — a pattern called `DEAD` gets no
+  self-weight unless its `SelfWtMult` is non-zero, which is what SAP2000 does
+  and what this model's raw table says.
+* **"Unfixed" in the file names refers to the `brick` material, not to
+  restraints** — `Admin_0.7E_short term unfixed.s2k` has `brick`
+  (`Type=Other`); the "fixed" variant adds `engbrick`.  Nothing to do with base
+  constraints.
+
+**A separate defect found while verifying the above (not fixed here).**
+`model/checks.py::check_self_weight_consistency` computes the *expected* shell
+self-weight with an **XY shoelace** area, so a vertical wall projects to
+approximately nothing: it reports `40 568.8` for this model where the correct
+total is `51 818.5` — a **−21.7 % false "inconsistency"** on a model that is
+actually consistent.  The *application* path (`_loads.py`) uses
+`polygon_area_3d` and is right, as the exact match above shows.  The fix is to
+use `polygon_area_3d` in the check too; until then the check is unusable on any
+model with vertical shells.  (Worth promoting to a P-item in this register.)
 
 **Tests.**  Qt-free: `tests/test_case_listing.py` (listing + `run_static_cases`)
 and `tests/test_run_case_set.py` (the in-memory archive, combination reduction,
