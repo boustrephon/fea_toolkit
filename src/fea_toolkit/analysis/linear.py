@@ -11,7 +11,7 @@ The pandas *summary* helpers they depend on (``bounding_box``,
 from __future__ import annotations
 
 import math
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 
@@ -38,7 +38,8 @@ except ImportError:  # pragma: no cover — pandas is optional (Rhino 8 CPython)
     pd = _MissingPandas()  # type: ignore[assignment]
 
 from ..io.report import bounding_box
-from ..model.sap_data import SAPModelData, patterns_from_case
+from ..model.sap_data import SAPModelData
+from .case_listing import list_static_cases
 
 
 def wind_sanity_data(
@@ -278,91 +279,67 @@ def static_load_verification(md, mesh_model, config: Optional[dict] = None):
     return pd.DataFrame(rows)
 
 
-def run_linear_cases(
-    md: SAPModelData,
+def run_static_cases(
     mesh_model,
-    spec_cfg: Optional[dict] = None,
-    linear_cfg: Optional[dict] = None,
+    cases: dict[str, dict[str, float]],
+    *,
+    config: Optional[dict] = None,
     raw_out: Optional[dict] = None,
-) -> pd.DataFrame:
-    """Run linear analysis cases and return a summary table.
+    should_cancel: Optional[Callable[[], bool]] = None,
+    on_progress: Optional[Callable[[int, str, int], None]] = None,
+) -> list[dict]:
+    """Run each ``{case: {pattern: factor}}`` entry as one static solve.
 
-    The Preprocessor work is done once (via *mesh_model*).  Each
-    analysis case creates a lightweight ``AnalysisBuilder``.
+    This is the static half of :func:`run_linear_cases`, lifted out so a caller
+    can run *only* static cases — no response-spectrum or modal pass — and can
+    watch and stop it: *should_cancel* is polled **between** cases (a single
+    ``run_static_analysis`` call is atomic and cannot be interrupted), and
+    *on_progress* is told which case is starting.
 
-    Auto-detects static load cases from the SAP2000 model, or uses
-    the ``linear_cfg["cases"]`` list.
+    Each case is one solve of its factored patterns
+    (``AnalysisBuilder.run_static_analysis(pattern_scales=...)``), so the factors
+    are **load** multipliers, not a post-hoc scaling of results — scaling results
+    is the load-combination layer's job
+    (``docs/load_cases_and_combinations.md``).
 
     Args:
-        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
-        mesh_model: Pre-processed :class:`~fea_toolkit.model.mesh_model.MeshModel`.
-        spec_cfg: Spectrum config passed through to the RS pass.
-        linear_cfg: Linear config (``cases``, ``n_modes``).
-        raw_out: Optional dict filled with the raw per-case results as
-            ``raw_out[case_name] = {"nodal_displacements": ...,
-            "element_forces": {...}}`` — the shape accepted by
-            :func:`fea_toolkit.io.stage_writer.write_model_stages` /
-            :func:`fea_toolkit.io.unified_writer.write_results` (static
-            results).  Element forces are extracted in the element
-            **local** coordinate system and stored under the plain
-            ``fx_i`` … ``mz_j`` keys (aligned with the geometry arrays).
+        mesh_model: Preprocessed :class:`~fea_toolkit.model.mesh_model.MeshModel`.
+        cases: ``{case_name: {pattern: factor}}`` — the cases to solve, in run
+            order.  :func:`~fea_toolkit.analysis.case_listing.list_static_cases`
+            produces this for the model's own cases.
+        config: Optional ``AnalysisBuilder`` config (solver settings).
+        raw_out: Optional dict filled with each case's raw results —
+            ``raw_out[case] = {"nodal_displacements": ..., "element_forces": {...}}``
+            — the shape :func:`~fea_toolkit.io.npz_writer.results_arrays` accepts
+            as ``static_results``.  A case that **fails** contributes no entry,
+            so ``set(cases) - set(raw_out)`` is the set that did not converge.
+        should_cancel: Optional zero-argument callable polled between cases; when
+            it returns ``True`` the run stops and the rows collected so far are
+            returned.
+        on_progress: Optional ``(index, case_name, total)`` callback, called
+            **before** each case is solved (``index`` is 1-based) — the hook a
+            GUI worker turns into a progress signal.
 
     Returns:
-        Summary table (DataFrame) — one row per analysis case.
+        One summary row per solved case, in :func:`dict` form — the rows
+        :func:`run_linear_cases` appends to its table, in the same column order.
     """
-    rows = []
-    config = {"element_type": "elasticBeamColumn", "verbose": False}
-
     from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
-
-    # ── Static cases: auto-detect LinStatic, then merge user overrides ──
-    # Always auto-detect all LinStatic cases from the model
-    static_cases: dict[str, dict[str, float]] = {}
-    for cname, lc in md.load_cases.items():
-        if lc.case_type != "LinStatic":
-            continue
-        pats = patterns_from_case(lc)
-        if pats:
-            static_cases[cname] = pats
-
-    # User-specified cases override or supplement auto-detected ones
-    if linear_cfg and "cases" in linear_cfg:
-        for entry in linear_cfg["cases"]:
-            if isinstance(entry, str):
-                lc = md.load_cases.get(entry)
-                if lc is None:
-                    print(f"  Warning: load case '{entry}' not found, skipping")
-                    continue
-                pats = patterns_from_case(lc)
-                if pats:
-                    static_cases[entry] = pats
-            elif isinstance(entry, dict):
-                for cname, pat_dict in entry.items():
-                    static_cases[cname] = pat_dict
-
-    # ── Filter out cases whose constituent patterns have zero loads ──
-    def _pattern_has_loads(pname: str) -> bool:
-        lp = md.load_patterns.get(pname)
-        if lp is not None and lp.self_weight_factor > 0:
-            return True
-        return (
-            any(ld.pattern == pname for ld in md.frame_dist_loads)
-            or any(ld.pattern == pname for ld in md.joint_loads)
-            or any(ld.pattern == pname for ld in md.area_gravity_loads)
-            or any(ld.pattern == pname for ld in md.area_uniform_loads)
-            or any(ld.pattern == pname for ld in mesh_model.edge_loads_from_areas)
-        )
-
-    static_cases = {
-        cname: pats
-        for cname, pats in static_cases.items()
-        if any(_pattern_has_loads(p) for p in pats)
-    }
-
     from fea_toolkit.utils import sum_reactions_with_overturning
 
-    for case_name, patterns in static_cases.items():
-        ab = AnalysisBuilder(mesh_model, config)
+    ab_config = {"element_type": "elasticBeamColumn", "verbose": False}
+    if config:
+        ab_config.update(config)
+
+    rows: list[dict] = []
+    total = len(cases)
+    for index, (case_name, patterns) in enumerate(cases.items(), start=1):
+        if should_cancel is not None and should_cancel():
+            break
+        if on_progress is not None:
+            on_progress(index, case_name, total)
+
+        ab = AnalysisBuilder(mesh_model, ab_config)
         try:
             results = ab.run_static_analysis(pattern_scales=patterns, extract_reactions=True)
             # Use centralized overturning-moment computation (v1 match)
@@ -414,6 +391,52 @@ def run_linear_cases(
                 "Roof disp": max_roof_disp if "Wind" in case_name else None,
             }
         )
+
+    return rows
+
+
+def run_linear_cases(
+    md: SAPModelData,
+    mesh_model,
+    spec_cfg: Optional[dict] = None,
+    linear_cfg: Optional[dict] = None,
+    raw_out: Optional[dict] = None,
+) -> pd.DataFrame:
+    """Run linear analysis cases and return a summary table.
+
+    The Preprocessor work is done once (via *mesh_model*).  Each
+    analysis case creates a lightweight ``AnalysisBuilder``.
+
+    Auto-detects static load cases from the SAP2000 model, or uses
+    the ``linear_cfg["cases"]`` list.
+
+    Args:
+        md: Parsed :class:`~fea_toolkit.model.sap_data.SAPModelData`.
+        mesh_model: Pre-processed :class:`~fea_toolkit.model.mesh_model.MeshModel`.
+        spec_cfg: Spectrum config passed through to the RS pass.
+        linear_cfg: Linear config (``cases``, ``n_modes``).
+        raw_out: Optional dict filled with the raw per-case results as
+            ``raw_out[case_name] = {"nodal_displacements": ...,
+            "element_forces": {...}}`` — the shape accepted by
+            :func:`fea_toolkit.io.stage_writer.write_model_stages` /
+            :func:`fea_toolkit.io.unified_writer.write_results` (static
+            results).  Element forces are extracted in the element
+            **local** coordinate system and stored under the plain
+            ``fx_i`` … ``mz_j`` keys (aligned with the geometry arrays).
+
+    Returns:
+        Summary table (DataFrame) — one row per analysis case.
+    """
+    rows = []
+    config = {"element_type": "elasticBeamColumn", "verbose": False}
+
+    from fea_toolkit.opensees.analysis_builder import AnalysisBuilder
+
+    # ── Static cases: auto-detect LinStatic, merge overrides, drop empty ──
+    # The listing lives in analysis/case_listing.py so the GUI's Analysis ▸ Run
+    # dialog offers exactly the cases this runner would solve.
+    static_cases = list_static_cases(md, mesh_model, config_cases=(linear_cfg or {}).get("cases"))
+    rows.extend(run_static_cases(mesh_model, static_cases, config=config, raw_out=raw_out))
 
     # ── Response spectrum cases ─────────────────────────────────
     n_modes = 12

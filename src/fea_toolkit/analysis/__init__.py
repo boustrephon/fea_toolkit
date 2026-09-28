@@ -31,9 +31,16 @@ from .base import (
     AnalysisCaseSpec,
     AnalysisResult,
 )
+from .case_listing import (
+    CombinationSpec,
+    list_combinations,
+    list_patterns,
+    list_static_cases,
+)
 from .combinations import build_combination_results
 from .linear import (
     run_linear_cases,
+    run_static_cases,
     static_load_verification,
     wind_sanity_check,
     wind_sanity_data,
@@ -60,6 +67,7 @@ def __getattr__(name):
 __all__ = [
     "AnalysisCaseSpec",
     "AnalysisResult",
+    "CombinationSpec",
     "ElwoodColumnGeometry",
     "ElwoodColumnParameters",
     "ShearCapacityResult",
@@ -74,6 +82,9 @@ __all__ = [
     "elwood_shear_drift_at_failure",
     "elwood_shear_limit_force",
     "elwood_spring_slopes",
+    "list_combinations",
+    "list_patterns",
+    "list_static_cases",
     "member_shear_capacity",
     "report_shear_failure",
     "run_linear_cases",
@@ -82,6 +93,7 @@ __all__ = [
     "run_pushover_analysis",
     "run_response_spectrum_analysis",
     "run_static_analysis",
+    "run_static_cases",
     "shear_backbone",
     "static_load_verification",
     "three_point_axial_surface",
