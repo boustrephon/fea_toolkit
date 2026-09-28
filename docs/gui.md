@@ -79,6 +79,34 @@ n_frames         96
 n_frames_active  90
 ```
 
+### Derived views
+
+**Edit ▸ Duplicate view** copies the active view and asks for a **selection
+expression** — the same language the command line and scripts use:
+
+```
+section=Roof slab z=3:6     # a section, between two elevations
+type=Node id=12             # a joint
+material=C30                # by material
+group=Walls                 # by group
+```
+
+The duplicate shares its parent's geometry — no second copy of the model — so a
+dozen refinements cost one model between them, and **Edit ▸ Edit view
+selection…** re-filters it later.  An empty expression means "everything the
+parent shows", and the view is labelled `… · unfiltered`.
+
+The Inspector lists a derived view's `parent` and `selection` beside its counts,
+and those counts are the **filtered** ones — what you are actually looking at,
+not the parent's totals.
+
+A selection that names **joints** shows the members framing into them, as FEA
+preprocessors do: select joint `12` and you see that joint and the members
+attached to it (one hop), not a lone marker.  A selection that names only
+elements shows those elements and their joints.  Those two readings are
+deliberately different — the reasoning is in
+[Development Notes](dev_notes.md) → *Selection: two resolutions*.
+
 A view is a **lens, not a copy**: every view shares the one model in memory, and
 re-running `Split` refreshes the `Processed` view rather than piling up
 duplicates.  Results views (deformed shapes and force diagrams per load case)

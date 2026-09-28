@@ -423,6 +423,35 @@ retires the exception.
   million Python dataclasses; that is a *materialisation* problem, fixed by the
   store plus lazy loading, not by a different array format.
 
+## Selection: two resolutions, deliberately different
+
+`Selection` answers two different questions, and conflating them would be a bug:
+
+| Method | Question | Used by |
+|---|---|---|
+| `get_frame_ids` / `get_area_ids` / `get_node_ids` | *which entities match this criterion, exactly* | analysis — `resolve_to_mesh_sets` (pushover recording), `filter_model` (subset builds), `from_brace_sections` |
+| `resolve_connected` | *what should a view draw* | the GUI's views, via `ModelViewer(selection=...)` |
+
+`resolve_connected` differs in two ways, both deliberate:
+
+- A criterion that opts into nodes (`element_types` names ``Node``, or
+  `constraints` is set) **expands one hop**: the members framing into the
+  selected joints join the result, and their far ends join the node set so an
+  attached member draws complete rather than as a dangling stub.  A joint on a
+  three-member chain shows that joint and the one member incident on it, never
+  the chain.
+- The node set is otherwise the **joints of the shown elements**, not every node
+  the element criteria ignore — nodes match a `section=` criterion trivially, so
+  the element-resolution node set would drag the whole cloud in.
+
+The expansion tests against a **frozen seed set**, which is what keeps it one hop
+whatever order the elements happen to be stored in: testing membership against
+the growing set would silently walk the whole structure, order-dependently.
+
+`Selection.to_string()` is the exact inverse of `from_string()`, which is what
+lets the Edit-view dialog pre-fill an expression and re-parse it losslessly (the
+`story=` key was added so the expression grammar covers every field).
+
 ## PySide6 item models - never call `internalPointer()`
 
 Verified against PySide6 / Qt 6.11 on 2026-09-23, while building the GUI's

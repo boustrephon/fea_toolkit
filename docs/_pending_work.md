@@ -774,6 +774,36 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-24 — GUI Slice B: derived views and a node selection that means something)
+
+A view could be switched but not narrowed.  Now the active view can be
+**duplicated and filtered**, and the filter is the toolkit's own `Selection`:
+
+- **Edit ▸ Duplicate view** registers a *lens on a lens*: it shares the parent's
+  geometry object (no second model) and adds a `Selection`, whose expression the
+  dialog collects straight away.  **Edit ▸ Edit view selection…** re-filters the
+  same view; the Inspector shows its `parent` and `selection` for free, and its
+  counts are the **filtered** ones — what the view actually shows.
+- `gui/views/selection_dialog.py` — one field, validated as you type against
+  `Selection.from_string`, OK gated on the parse, pre-filled from the current
+  selection via the new `Selection.to_string()` (its exact inverse; `story=` was
+  added to the expression grammar so every field round-trips).
+- `Selection.resolve_connected(model)` — a **display** resolution, deliberately
+  different from the exact-match one the analysis callers use: a criterion that
+  opts into nodes expands **one hop** (a joint brings the members framing into
+  it, plus their far ends so they draw complete), and the node set is otherwise
+  the joints of the shown elements rather than every node the element criteria
+  ignore.  The expansion tests against a frozen seed set, so it cannot walk the
+  chain order-dependently.  Rationale: `docs/dev_notes.md` → *Selection: two
+  resolutions*.
+- `ModelViewer(selection=...)` applies the lens during geometry extraction, so
+  the model is never copied — and picking follows the displayed cells.
+
+Tests: `tests/test_view_selection.py` (Qt-free: expression round-trip, one-hop
+expansion, element filters, the viewer's filtered geometry, derived-view
+registry) and `tests/test_gui_view_selection.py` (dialog validation; duplicate /
+edit / cancel, with the dialog stubbed so nothing blocks).
+
 ## DONE (2026-09-24 — GUI Views: named geometry views, and the storage seam)
 
 The GUI showed one scene at a time, chosen by a hidden default plus a toggle: a
