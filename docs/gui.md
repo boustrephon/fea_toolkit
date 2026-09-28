@@ -41,7 +41,7 @@ the prepared topology (see [Preprocessing](#preprocessing-split-and-mesh)).
 | Area | What it is |
 |---|---|
 | Central viewport | Embedded PyVista view; the model is coloured by section |
-| **Model** dock (left, top) | Tabs: **Model Tree** (live) and **Property Tree** (not yet implemented) |
+| **Model** dock (left, top) | Tabs: **Model Tree** (live — a **Views** group, then the model's own groups) and **Property Tree** (not yet implemented) |
 | **Inspector** dock (left, bottom) | Every field of the selected object, read-only |
 | **Messages** dock (bottom) | Log of what the application did, including any settings-file problems |
 | Status bar | Unit system, cursor coordinates, a busy indicator while preprocessing runs, and read-outs reserved for the analysis milestone |
@@ -50,6 +50,39 @@ the prepared topology (see [Preprocessing](#preprocessing-split-and-mesh)).
 The Model Tree is **lazy**: groups (Nodes, Frame Elements, Materials, …) list
 their entities only when expanded, so a model with hundreds of thousands of
 elements stays responsive.
+
+## Views
+
+The Model Tree opens with a **Views** group: named lenses over the model, one
+row per view, added as you work.
+
+| View | Added by | Shows |
+|---|---|---|
+| **Unprocessed** | opening a file | the members exactly as drawn in SAP2000 |
+| **Processed** | `Model ▸ Split elements` | the split sub-elements an analysis would build |
+| **Meshed** | `Model ▸ Mesh areas` | the above, plus the shell elements for areas |
+
+Selecting a view redraws the scene with that view's geometry and **keeps the
+camera**, so comparing the drawn model with the prepared one does not move your
+viewpoint.  The Inspector reports the selected view's **counts**, never its
+geometry: nodes, frame elements (the total, including superseded split parents,
+and the analysis-ready count), area elements, materials and sections — plus what
+produced it.
+
+```
+name             Processed
+kind             geometry
+source           Preprocessor: split_elements
+units            N · m · T
+n_nodes          128
+n_frames         96
+n_frames_active  90
+```
+
+A view is a **lens, not a copy**: every view shares the one model in memory, and
+re-running `Split` refreshes the `Processed` view rather than piling up
+duplicates.  Results views (deformed shapes and force diagrams per load case)
+will join the same group when analysis lands.
 
 ## Camera controls
 
@@ -130,7 +163,6 @@ switched.  It is recorded as [P23](_pending_work.md).
 |---|---|
 | **View ▸ Display ▸ Show nodes** | Live — show or hide the node markers |
 | **View ▸ Display ▸ Show shells** | Live — show or hide area elements |
-| **View ▸ Display ▸ Show original members** | Live — show the unsplit members instead of their split sub-elements |
 | **View ▸ Display ▸ Clear highlights** | Live — drop the selection highlight |
 | **View ▸ Display ▸ Show element labels** | Not yet — nothing draws labels, so the toggle waits for that renderer ([P23](_pending_work.md)) |
 | **View ▸ Display ▸ Show loads** | Pending the load-rendering milestone (6) |
@@ -164,10 +196,10 @@ result, not a failure.
 Whenever a member is split, the original is kept (flagged `inactive`, carrying
 its `child_ids`) and each sub-element records its `parent_id`, so the whole
 hierarchy is browsable: the sub-elements are rows of their own in the Model Tree
-and the Inspector shows the parent/child fields.  Once something is split,
-**View ▸ Display ▸ Show original members** toggles between the split
-sub-elements and the unsplit members.  Neither preprocessing nor the toggle
-moves the camera, so the view does not jump.
+and the Inspector shows the parent/child fields.  Each run also registers its
+result as a **view** ([Views](#views)), so the members as drawn and the
+analysis-ready sub-elements are one click apart.  Preprocessing does not move the
+camera.
 
 The actions are enabled only while a **parsed** model is loaded.  The
 Preprocessor consumes a `SAPModelData` and returns a `MeshModel`, so every run
@@ -183,7 +215,7 @@ jarring than a greyed-out one.
 |---|---|---|
 | **File** | Open (`Ctrl+O`), Quit | Save results, Export Tcl, Export screenshot |
 | **Edit** | — | Copy, Preferences |
-| **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show shells, Show original members, Clear highlights) | Show element labels, Show loads, Show force diagrams, Reset layout |
+| **View** | Zoom to fit, Camera (Isometric / Top / Front / Side), Display (Show nodes, Show shells, Clear highlights) | Show element labels, Show loads, Show force diagrams, Reset layout |
 | **Model** | Split elements, Mesh areas (enabled while a parsed model is open) | Selections, Units |
 | **Analysis** | — | Run, Static, Modal, Response spectrum, Pushover, Stop |
 | **Results** | — | Deformed shape, Force diagrams, Storey response, Pushover curve, Clear results |
@@ -210,6 +242,7 @@ drives a *separately installed* OpenSees is the recorded route
 | Analysis actions (milestone 5) | `Analysis ▸ …` is greyed; analyse from a script or notebook instead |
 | Load, deformed-shape and force overlays (milestones 6–7) | Use the [Visualisation Toolkit](viewer.md) and the `plot_*` functions for results |
 | Element labels, the Property Tree tab, explicit interaction modes ([P23](_pending_work.md)) | The corresponding menu item and tab are greyed |
+| Refining a view with a `Selection`, and per-load-case result views (roadmap slices B–C) | Views cover the geometry stages today; filtering and result overlays are still to come |
 | Window-layout persistence (milestone 8) | Docks and window geometry are not remembered between sessions |
 | Quad view (milestone 10) | A single viewport; use the Camera menu and the view cube |
 

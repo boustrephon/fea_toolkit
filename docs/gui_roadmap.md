@@ -8,7 +8,7 @@ related: [viewer.md, workflow.md, results_schema.md, rhino_export.md, report_gen
 ---
 # Desktop GUI Roadmap
 
-## Status: 🚧 In progress — Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection sync + display toggles), the mouse-interaction policy is configurable and the Model menu runs the Preprocessor (split / mesh), 2026-09-24
+## Status: 🚧 In progress — Milestones 1–4 landed (viewport spike, chrome, model tree + inspector, bidirectional selection + display toggles), the mouse-interaction policy is configurable, and the Model menu runs the Preprocessor into a **Views** group (geometry views over the storage seam), 2026-09-24
 
 > **User-facing guide:** [`docs/gui.md`](gui.md) — what the application does
 > today, how to select, the camera and display controls, and the settings file.
@@ -370,6 +370,21 @@ The GUI must respect the existing architectural contracts:
     from day one, even though it currently holds a single viewport, so a grid
     of `QtInteractor`s (iso / front / top / side) can be added later with no
     refactor.
+11. **A view is a lens, and the storage seam stays NumPy-typed.**  ✅
+    **Implemented for geometry views.**  The Model Tree's **Views** group holds
+    named lenses — `Unprocessed` / `Processed` / `Meshed` today — each a small
+    display-safe record (name, provenance, counts) while the geometry lives
+    **once**, in `gui/controllers/view_registry.py`.  A view never carries or
+    copies a model: switching one rebuilds the scene (and the pick index) from
+    the shared object, keeps the camera, and deliberately does *not* rebuild the
+    tree.  Counts come from `io/model_store.py::model_header`, so adding a view
+    is metadata work — never a graph walk.  Model topology and results reach the
+    GUI only through the two seams (`ModelStore`, `ResultsRepository`), whose
+    contract is that data crosses as NumPy arrays and case metadata as explicit
+    columns; the four rules and their enforcement live in
+    `docs/dev_notes.md` → *Results repository and the NumPy-typed seam*.  Derived
+    views (parent reference plus a `Selection`) and HDF5-backed lazy
+    materialisation are the recorded follow-on slices.
 
 ---
 

@@ -363,6 +363,66 @@ collection is ever needed, switch the module to `pytest.importorskip("pandas")`
 (the second sanctioned form) — do not reinstate `__import__`.
 
 
+## Results repository and the NumPy-typed seam
+
+The GUI, the plotting layer and the Rhino export all consume results as a
+**`dict[str, numpy.ndarray]`**.  That habit is now a contract, because it is the
+one boundary that keeps a columnar future open without committing to it today:
+
+- NumPy is the right backbone for the *compute* tier — OpenSeesPy, PyVista and
+  Matplotlib all speak `np.ndarray`, and results are dense float blocks, which is
+  NumPy's home turf.
+- Arrow and the tools built on it (pyarrow, Polars, DuckDB) live one tier up: a
+  columnar data model for tabular/analytical work plus zero-copy interchange.
+  They are **not** NumPy replacements, and they all hand back NumPy arrays
+  cheaply — so a NumPy-typed boundary is what lets a Parquet/DuckDB backend drop
+  in later, rather than what prevents it.
+
+The seam is two small interfaces, both Qt-free, OpenSees-free and unit-tested
+without extras:
+
+| Object | Module | Role |
+|---|---|---|
+| `ModelHeader`, `model_header()`, `ModelStore`, `InMemoryModelStore` | `io/model_store.py` | model topology plus a counts-only header, so a view never walks (or copies) a graph |
+| `ResultsRepository`, `NpzResultsRepository` | `io/results_repository.py` | cases, per-case metadata and per-case arrays, whatever the backing format |
+
+### The four rules
+
+1. **Results are read through the seam** — `io/npz_reader.py` or
+   `io/results_repository.py`, never `np.load` in a consumer.
+2. **One dtype policy for dense blocks.**  The writer emits `float64`
+   (`dtype=float` throughout `unified_writer.py`).  Moving to `float32` is a
+   *schema-level* decision (version bump plus round-trip tests), not a local
+   optimisation — and never mix dtypes ad hoc.
+3. **Case metadata is explicit columns** — `CASE_META_KEYS`
+   (`static_case_group` / `_family` / `_coords`), not structure encoded into
+   array names.  A columnar format maps onto columns, not onto `static/DEAD/fx_i`.
+4. **Backends stay optional and lazy.**  The interfaces import `numpy` only;
+   pyarrow / Polars / DuckDB / h5py come in *behind* them, inside a method,
+   behind a `_Missing…`-style guard — exactly as pandas and h5py are handled
+   today (see *Optional dependencies in tests* above).
+
+`tests/test_storage_seam.py` enforces 1 and 4 by parsing `src/` with `ast` (so a
+docstring that merely mentions `np.load()` does not count): `np.load` may appear
+only in the readers, `np.savez*` only in the writers, and neither interface may
+import anything heavier than `numpy`.
+
+**Recorded exception.**  `rhino/colour_from_npz.py` calls
+`np.load(..., allow_pickle=True)` to *sniff* whether a path is a unified archive
+or a legacy file before delegating.  It is allow-listed with that reason; moving
+the sniff into the reader (e.g. `is_results_archive(path)`) is the follow-up that
+retires the exception.
+
+### What this buys — and what it does not
+
+- It buys, as drop-ins with no consumer edits: an HDF5-backed `ModelStore` (lazy
+  materialisation, header counts from array shapes, eviction on view switch), and
+  a Parquet/Feather/DuckDB `ResultsRepository` for cross-case analytics (today
+  pandas, in `analysis/linear.py`).
+- It does **not** solve model-topology memory.  A million-element model is a
+  million Python dataclasses; that is a *materialisation* problem, fixed by the
+  store plus lazy loading, not by a different array format.
+
 ## PySide6 item models - never call `internalPointer()`
 
 Verified against PySide6 / Qt 6.11 on 2026-09-23, while building the GUI's

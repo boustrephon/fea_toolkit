@@ -774,6 +774,52 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-24 — GUI Views: named geometry views, and the storage seam)
+
+The GUI showed one scene at a time, chosen by a hidden default plus a toggle: a
+preprocessed model drew its active sub-elements, and `View ▸ Display ▸ Show
+original members` reached the drawn members.  That is now an explicit, extensible
+concept:
+
+- **The Model Tree leads with a *Views* group** — `Unprocessed` (added when a
+  file is opened), `Processed` (`Model ▸ Split elements`) and `Meshed`
+  (`Model ▸ Mesh areas`).  Selecting a view redraws the scene from that view's
+  geometry, keeps the camera, and does **not** rebuild the tree (a rebuild would
+  invalidate the very row being handled and clear the Inspector).
+- **A view is a lens, not a copy.**  `gui/controllers/view_registry.py` holds the
+  geometry once, keyed by view; the `View` dataclass carries only display-safe
+  metadata (name, kind, provenance, counts).  Re-running `Split` refreshes the
+  `Processed` view rather than piling up duplicates, and several views of one
+  model cost no extra model memory.
+- **The Inspector reports a view's counts** (nodes, frames total vs
+  analysis-ready, shells, materials, sections, units, provenance) — computed by
+  `io/model_store.py::model_header` from dictionary sizes, so nothing walks or
+  copies a graph.  `_source_model` became `_store` (a `ModelStore` handle), and
+  the two Model-menu actions now call `store.mesh(...)` inside the worker.
+- The P24 toggle is **folded in**: `collapse_to_parents` stays on `ModelViewer`
+  for direct callers, but the GUI reaches the drawn members through the
+  `Unprocessed` view.
+
+**The storage seam** (as agreed, to keep a columnar future open):
+
+- `io/model_store.py` — `ModelHeader` / `model_header()` / `ModelStore` /
+  `InMemoryModelStore`; the HDF5 backend is the recorded Slice D drop-in.
+- `io/results_repository.py` — `ResultsRepository` / `NpzResultsRepository`
+  (cases, per-case metadata, per-case arrays, display geometry, named columns),
+  the drafted interface for the GUI's future results views.
+- **Four rules, documented and enforced**: results read only through the seam;
+  one dtype policy for dense blocks (`float64` today — moving to `float32` is a
+  schema-version decision, *not* a local optimisation); case metadata as explicit
+  columns (`CASE_META_KEYS`); backends optional and lazily imported.  Written up
+  in `docs/dev_notes.md` → *Results repository and the NumPy-typed seam*, with
+  `tests/test_storage_seam.py` parsing `src/` to hold them.  One recorded
+  exception: `rhino/colour_from_npz.py` sniffs an archive before delegating.
+
+Tests: `tests/test_model_store.py`, `tests/test_view_registry.py`,
+`tests/test_results_repository.py`, `tests/test_storage_seam.py` (all Qt-free),
+plus `tests/test_gui_views.py` (Views group, scene swap, counts, camera and
+selection preservation).
+
 ## DONE (2026-09-24 — GUI P24: the Model menu runs the Preprocessor (split / mesh))
 
 The GUI rendered only the *parsed* `SAPModelData`, so the Model Tree listed the
@@ -787,9 +833,10 @@ to show — the two Model-menu items were greyed placeholders.  Now:
 - The display is swapped for the resulting `MeshModel`, so the tree, Inspector
   and `SelectionIndex` pick up split children and superseded parents for free,
   and the camera is preserved.
-- **`View ▸ Display ▸ Show original members`** maps to
-  `ModelViewer(collapse_to_parents=...)`: unsplit members and split
-  sub-elements are both viewable without reloading.
+- **`View ▸ Display ▸ Show original members`** mapped to
+  `ModelViewer(collapse_to_parents=...)`, so unsplit members and split
+  sub-elements were both viewable without reloading.  *(Superseded the same day
+  by the **Views** group above — the toggle became the `Unprocessed` view.)*
 - The actions are enabled only with a **parsed** model loaded (`_source_model`):
   the Preprocessor consumes a `SAPModelData` and returns a `MeshModel`, so
   re-running from the file's own model is always safe.

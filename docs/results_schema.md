@@ -457,6 +457,42 @@ declared array against the **correct** dimension: nodal arrays (`node_*`,
 > `write_model_stages()` stamps 3 as well although the stage-file array layout
 > did not change ([model stage file](model_stage_file.md)).
 
+## Data contract and storage seam
+
+Results cross every boundary as a **`dict[str, numpy.ndarray]`**, and this file
+defines what may appear in it.  Two properties matter for readers:
+
+- **Case metadata is columns, not names.**  A case's `group` / `family` /
+  `coords` travel in the :data:`CASE_META_KEYS` arrays, parallel to
+  `static_case_labels`.  Per-case result blocks are keyed
+  `static/<case>/<array>` (`make_static_key`) — a *lookup* convention, not a
+  place to encode new metadata.  A columnar backend maps columns 1:1; it cannot
+  map `static/DEAD/fx_i`.
+- **One dtype policy.**  Dense result blocks are written `float64` today
+  (`dtype=float`).  Moving to `float32` is a schema-version decision (bump the
+  version, keep the round-trip tests green), never a local choice.
+
+Readers must not open archives directly.  Use the seam:
+
+```python
+from fea_toolkit.io.results_repository import NpzResultsRepository
+
+repo = NpzResultsRepository("results.npz")
+case = repo.cases()[0]
+repo.case_meta(case)      # {"group": ..., "family": ..., "coords": ...}
+repo.arrays_for(case)     # {"fx_i": ..., "node_dx": ...}
+repo.display_geometry()   # node coords + frame/shell connectivity
+```
+
+`display_geometry()` is worth knowing about: an archive carries enough geometry
+(node coordinates, element connectivity, section names, parent/child ids) to
+draw and colour a model **without** the `.s2k`.  That is what the standalone NPZ
+plotting path — and the GUI's future results views — rely on.
+
+The rationale, the four enforced rules and the one recorded exception are in
+[docs/dev_notes.md](dev_notes.md) → *Results repository and the NumPy-typed
+seam*.
+
 ## File naming
 
 ```
