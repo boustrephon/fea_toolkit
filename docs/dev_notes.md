@@ -407,11 +407,12 @@ docstring that merely mentions `np.load()` does not count): `np.load` may appear
 only in the readers, `np.savez*` only in the writers, and neither interface may
 import anything heavier than `numpy`.
 
-**Recorded exception.**  `rhino/colour_from_npz.py` calls
-`np.load(..., allow_pickle=True)` to *sniff* whether a path is a unified archive
-or a legacy file before delegating.  It is allow-listed with that reason; moving
-the sniff into the reader (e.g. `is_results_archive(path)`) is the follow-up that
-retires the exception.
+**Retired exception (2026-09-24, Slice C).**  `rhino/colour_from_npz.py` used to
+call ``np.load(..., allow_pickle=True)`` to sniff whether a path was a unified
+archive before delegating.  That decision now lives in
+``npz_reader.is_results_archive(path)`` — a **header** test that reads the key
+list and never an array — so the allow-list above is down to the two readers and
+nothing else.
 
 ### What this buys — and what it does not
 

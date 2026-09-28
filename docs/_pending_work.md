@@ -774,6 +774,28 @@ pass raw `S_a` and drop its out-of-contract guard, then re-run the CSM suite.
   current demand** (`docs/report_generation.md`); NPZ ↔ opstool ODB
   converter deferred until demand exists.
 
+## DONE (2026-09-24 — GUI Slice C, part 1: the results foundation)
+
+The first half of the results views, with nothing half-wired in the interface:
+
+- **`npz_reader.is_results_archive(path)`** — the format decision moved out of
+  `rhino/colour_from_npz.py` and into the reader, as a *header* test (the key
+  list, never an array).  That **retires the storage seam's one recorded
+  exception**: the `np.load` allow-list in `tests/test_storage_seam.py` is now
+  the two readers and nothing else.
+- **`ResultsRepository.geometry_counts()`** — `n_nodes` / `n_frames` /
+  `n_shells` from the archive's array shapes, so a results view can report what
+  an archive holds without converting a thing.
+- **`ViewRegistry.add_results(key, name, repository, source)`** — registers a
+  `kind="results"` view with those counts, needing neither a `ModelStore` nor an
+  open model; the repository is kept as the view's payload (`registry.results(key)`)
+  for the renderer that follows.
+
+Still to come in Slice C: the `File ▸ Open results…` action, one view per case,
+and drawing from the archive's own geometry (mapped onto the open model by tag,
+or self-contained) — the deformed-shape and force overlays that milestones 6–7
+schedule.
+
 ## DONE (2026-09-24 — GUI Slice B: derived views and a node selection that means something)
 
 A view could be switched but not narrowed.  Now the active view can be
